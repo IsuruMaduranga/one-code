@@ -28,6 +28,18 @@ export interface BannerInput {
 	mode: string;
 }
 
+/**
+ * Pixel mascot in the spirit of Claude Code's: ears, a solid head with two
+ * eyes, and little feet. Half-block characters pack two pixel rows per text
+ * row, so the whole figure fits the banner's three lines. All lines are the
+ * same width so the text column beside it stays aligned.
+ */
+export const LOGO_LINES = [
+	"▄██▄▄▄▄██▄",
+	"██▀████▀██",
+	" ▄ ▄  ▄ ▄ ",
+];
+
 /** Kept pure so the layout is unit-testable without a terminal. */
 export function bannerLines(input: BannerInput, paint: (color: string, text: string) => string): string[] {
 	const title = `${paint("accent", NAME)} ${paint("dim", `v${input.version}`)}`;
@@ -49,7 +61,8 @@ export function bannerLines(input: BannerInput, paint: (color: string, text: str
 		.filter(Boolean)
 		.join(paint("muted", " · "));
 
-	return [`${title}  ${subtitle}`, hints, context];
+	const text = [`${title}  ${subtitle}`, hints, context];
+	return LOGO_LINES.map((art, i) => `${paint("accent", art)}  ${text[i] ?? ""}`);
 }
 
 export default function brandingExtension(pi: ExtensionAPI) {

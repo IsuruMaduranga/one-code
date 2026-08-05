@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bannerLines } from "../../extensions/branding/index.ts";
+import { LOGO_LINES, bannerLines } from "../../extensions/branding/index.ts";
 
 // Identity paint keeps assertions about layout free of colour codes.
 const plain = (_color: string, text: string) => text;
@@ -37,5 +37,15 @@ describe("bannerLines", () => {
 	it("applies the paint function it is given", () => {
 		const [title] = bannerLines({ version: "0.1.0", cwd: "/p", mode: "default" }, (c, t) => `<${c}>${t}</${c}>`);
 		expect(title).toContain("<accent>pi-claude-code</accent>");
+	});
+
+	it("puts one equal-width logo row before each text line, so the text column aligns", () => {
+		const lines = bannerLines({ version: "0.1.0", cwd: "/p", mode: "default" }, plain);
+		expect(lines).toHaveLength(LOGO_LINES.length);
+		const widths = new Set(LOGO_LINES.map((art) => [...art].length));
+		expect(widths.size).toBe(1);
+		for (const [i, line] of lines.entries()) {
+			expect(line.startsWith(`${LOGO_LINES[i]}  `)).toBe(true);
+		}
 	});
 });
