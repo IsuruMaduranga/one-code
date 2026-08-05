@@ -35,12 +35,37 @@ function collectMarkdownFiles(dir: string, out: string[] = []): string[] {
 	return out;
 }
 
+/**
+ * Frontmatter in the wild is not always valid YAML: real Claude Code plugin
+ * agents contain unquoted descriptions with `: ` in them, which pi's parser
+ * rejects ("Nested mappings are not allowed in compact mappings"). Falling back
+ * to line-wise extraction keeps those definitions usable instead of dropping
+ * them silently.
+ */
+function parseFrontmatterLoosely(content: string): { frontmatter: Record<string, unknown>; body: string } {
+	try {
+		const parsed = parseFrontmatter(content) as { frontmatter?: Record<string, unknown>; body: string };
+		return { frontmatter: parsed.frontmatter ?? {}, body: parsed.body };
+	} catch {
+		// Fall through to the lenient path.
+	}
+
+	const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+	if (!match) return { frontmatter: {}, body: content };
+
+	const frontmatter: Record<string, unknown> = {};
+	for (const line of match[1].split(/\r?\n/)) {
+		const keyValue = line.match(/^([A-Za-z_][A-Za-z0-9_-]*):\s*(.*)$/);
+		if (!keyValue) continue;
+		const value = keyValue[2].trim().replace(/^["']|["']$/g, "");
+		if (value) frontmatter[keyValue[1]] = value;
+	}
+	return { frontmatter, body: match[2] };
+}
+
 export function parseAgentFile(path: string, content: string): AgentDefinition | undefined {
-	const { frontmatter, body } = parseFrontmatter(content) as {
-		frontmatter?: Record<string, unknown>;
-		body: string;
-	};
-	const fm = frontmatter ?? {};
+	const { frontmatter, body } = parseFrontmatterLoosely(content);
+	const fm = frontmatter;
 	const name = typeof fm.name === "string" && fm.name.trim() ? fm.name.trim() : basename(path, ".md");
 	if (!body.trim()) return undefined;
 
@@ -59,7 +84,8 @@ export function parseAgentFile(path: string, content: string): AgentDefinition |
 		name,
 		description: typeof fm.description === "string" ? fm.description : "",
 		tools: tools && tools.length > 0 ? tools : undefined,
-		model: typeof fm.model === "string" ? fm.model : undefined,
+		// "inherit" is Claude Code's way of saying "use the session model".
+		model: typeof fm.model === "string" && fm.model !== "inherit" ? fm.model : undefined,
 		systemPrompt: body.trim(),
 		source: path,
 	};
@@ -74,14 +100,23 @@ export function agentDirs(cwd: string, home: string, bundled?: string): string[]
 	return [...(bundled ? [bundled] : []), join(home, ".claude", "agents"), join(cwd, ".claude", "agents")];
 }
 
-/** Later directories override earlier ones on name collisions. */
-export function discoverAgents(dirs: string[]): AgentDefinition[] {
+/** A directory whose agents are exposed as `<namespace>:<name>` (plugins). */
+export interface AgentSource {
+	dir: string;
+	namespace?: string;
+}
+
+/** Later sources override earlier ones on name collisions. */
+export function discoverAgents(sources: Array<string | AgentSource>): AgentDefinition[] {
 	const byName = new Map<string, AgentDefinition>();
-	for (const dir of dirs) {
+	for (const source of sources) {
+		const { dir, namespace } = typeof source === "string" ? { dir: source, namespace: undefined } : source;
 		for (const file of collectMarkdownFiles(dir)) {
 			try {
 				const agent = parseAgentFile(file, readFileSync(file, "utf-8"));
-				if (agent) byName.set(agent.name, agent);
+				if (!agent) continue;
+				const name = namespace ? `${namespace}:${agent.name}` : agent.name;
+				byName.set(name, { ...agent, name });
 			} catch {
 				// Unreadable or malformed definition: skip it rather than failing discovery.
 			}

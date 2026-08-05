@@ -20,7 +20,8 @@ import { fileURLToPath } from "node:url";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { type AgentDefinition, agentDirs, discoverAgents } from "./agents.ts";
+import { type AgentDefinition, type AgentSource, agentDirs, discoverAgents } from "./agents.ts";
+import { discoverPlugins } from "../lib/plugins.ts";
 import { cleanupWorktree, createWorktree, isGitRepo, type Worktree } from "./worktree.ts";
 
 const MAX_PARALLEL = 4;
@@ -216,7 +217,16 @@ async function runPool<T, R>(items: T[], limit: number, fn: (item: T) => Promise
 export const FORK_AGENT = "fork";
 
 export default function subagentsExtension(pi: ExtensionAPI) {
-	const loadAgents = (cwd: string) => discoverAgents(agentDirs(cwd, os.homedir(), BUNDLED_AGENTS_DIR));
+	const loadAgents = (cwd: string) => {
+		// Plugin agents sit between bundled and user definitions, and are exposed
+		// namespaced (`<plugin>:<agent>`) so two plugins can ship the same name.
+		const sources: Array<string | AgentSource> = [
+			BUNDLED_AGENTS_DIR,
+			...discoverPlugins(join(os.homedir(), ".claude")).agentDirs,
+			...agentDirs(cwd, os.homedir()),
+		];
+		return discoverAgents(sources);
+	};
 
 	const describeAgents = (cwd: string) => {
 		const agents = loadAgents(cwd);

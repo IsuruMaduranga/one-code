@@ -18,6 +18,8 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { callTool, close, type Connection, connect, type FailedConnection, readResource } from "./client.ts";
+import { join } from "node:path";
+import { discoverPlugins } from "../lib/plugins.ts";
 import { loadServers, type McpServer } from "./config.ts";
 import {
 	describeContent,
@@ -84,7 +86,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 	};
 
 	const connectAll = async (ctx: ExtensionContext) => {
-		servers = loadServers(ctx.cwd, os.homedir());
+		servers = loadServers(ctx.cwd, os.homedir(), process.env, discoverPlugins(join(os.homedir(), ".claude")).mcpConfigs);
 		if (servers.length === 0) return;
 
 		const results = await Promise.all(

@@ -42,10 +42,10 @@ interface RawServer {
 	disabled?: unknown;
 }
 
-function readJson(path: string): { mcpServers?: Record<string, RawServer> } | undefined {
+function readJson(path: string): Record<string, unknown> | undefined {
 	if (!existsSync(path)) return undefined;
 	try {
-		return JSON.parse(readFileSync(path, "utf-8")) as { mcpServers?: Record<string, RawServer> };
+		return JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown>;
 	} catch {
 		return undefined;
 	}
@@ -126,16 +126,35 @@ export function configPaths(cwd: string, home: string): string[] {
 	return [join(home, ".claude.json"), ...findProjectConfigs(cwd), join(cwd, ".claude", "settings.local.json")];
 }
 
+/**
+ * A plugin's `.mcp.json` is a **bare** server map with no `mcpServers` wrapper,
+ * unlike a project's. Accept either shape.
+ */
+function serverMapOf(file: Record<string, unknown> | undefined): Record<string, RawServer> | undefined {
+	if (!file || typeof file !== "object") return undefined;
+	const wrapped = (file as { mcpServers?: unknown }).mcpServers;
+	if (wrapped && typeof wrapped === "object" && !Array.isArray(wrapped)) {
+		return wrapped as Record<string, RawServer>;
+	}
+	const looksLikeServerMap = Object.values(file).every(
+		(value) => value && typeof value === "object" && !Array.isArray(value),
+	);
+	return looksLikeServerMap ? (file as Record<string, RawServer>) : undefined;
+}
+
 export function loadServers(
 	cwd: string,
 	home: string,
 	env: Record<string, string | undefined> = process.env,
+	extraPaths: string[] = [],
 ): McpServer[] {
 	const byName = new Map<string, McpServer>();
-	for (const path of configPaths(cwd, home)) {
-		const file = readJson(path);
-		if (!file?.mcpServers || typeof file.mcpServers !== "object") continue;
-		for (const [name, raw] of Object.entries(file.mcpServers)) {
+	// Plugin configs come first so project and user files can override them.
+	for (const path of [...extraPaths, ...configPaths(cwd, home)]) {
+		const file = readJson(path) as Record<string, unknown> | undefined;
+		const servers = serverMapOf(file);
+		if (!servers) continue;
+		for (const [name, raw] of Object.entries(servers)) {
 			const server = parseServer(name, raw ?? {}, path, env);
 			if (server) byName.set(name, server);
 			else byName.delete(name); // an explicit `disabled` entry removes an inherited one

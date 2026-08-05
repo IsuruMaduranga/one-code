@@ -151,11 +151,24 @@ export function toolTier(toolName: string): ToolTier {
 	return "custom";
 }
 
-/** Extension tools that are always safe to run without asking (session-internal state). */
+/**
+ * Tools that never need approval: they change no state outside the session and
+ * touch no network or filesystem the user hasn't already opted into.
+ *
+ * `tool_search` and `skill` matter more than they look — gating them breaks
+ * deferred tool loading and skill invocation entirely in non-interactive runs,
+ * since a blocked loader means the model can never reach the tools behind it.
+ */
 export const AUTO_ALLOWED_TOOLS = new Set<string>([
 	"todo_write",
 	"ask_user_question",
 	"ask_user",
+	// Loads tool schemas and packaged instructions; no side effects.
+	"tool_search",
+	"skill",
+	// Read-only inspection.
+	"lsp_diagnostics",
+	"list_mcp_resources",
 	// Subagent orchestration is safe to launch; each child enforces its own
 	// tool permissions (inheriting this session's mode via env).
 	"subagent",

@@ -149,4 +149,21 @@ describe("decide", () => {
 		expect(decide({ ...base, toolName: "mystery_tool" }).decision).toBe("ask");
 		expect(decide({ ...base, toolName: "todo_write" }).decision).toBe("allow");
 	});
+
+	it("never gates the loaders that other tools sit behind", () => {
+		// Blocking these would make deferred tools and skills unreachable.
+		for (const tool of ["tool_search", "skill", "lsp_diagnostics", "list_mcp_resources"]) {
+			expect(decide({ ...base, toolName: tool }).decision, tool).toBe("allow");
+		}
+	});
+
+	it("still gates network egress and MCP calls", () => {
+		expect(decide({ ...base, toolName: "web_fetch", subject: "https://x" }).decision).toBe("ask");
+		expect(decide({ ...base, toolName: "mcp__server__do_thing" }).decision).toBe("ask");
+	});
+
+	it("keeps auto-allowed tools working in plan mode", () => {
+		expect(decide({ ...base, mode: "plan", toolName: "tool_search" }).decision).toBe("allow");
+		expect(decide({ ...base, mode: "plan", toolName: "skill" }).decision).toBe("allow");
+	});
 });

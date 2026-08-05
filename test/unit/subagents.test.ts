@@ -95,3 +95,45 @@ describe("discoverAgents", () => {
 		expect(discoverAgents([join(root, "bundled"), join(root, "does-not-exist")])).toEqual([]);
 	});
 });
+
+describe("resilient frontmatter parsing", () => {
+	it("still loads a definition whose YAML is invalid (real plugin agents do this)", () => {
+		// An unquoted description containing ": " makes pi's YAML parser throw
+		// "Nested mappings are not allowed in compact mappings".
+		const agent = parseAgentFile(
+			"/x/silent-failure-hunter.md",
+			`---
+name: silent-failure-hunter
+description: Use this when reviewing code. Examples: <example>Context: a PR</example>
+model: inherit
+color: yellow
+---
+You audit error handling.`,
+		);
+		expect(agent).toBeDefined();
+		expect(agent?.name).toBe("silent-failure-hunter");
+		expect(agent?.description).toContain("Examples");
+		expect(agent?.systemPrompt).toBe("You audit error handling.");
+	});
+
+	it("treats model: inherit as no override", () => {
+		const agent = parseAgentFile("/x/a.md", "---\nname: a\nmodel: inherit\n---\nbody");
+		expect(agent?.model).toBeUndefined();
+	});
+
+	it("keeps a real model id", () => {
+		const agent = parseAgentFile("/x/a.md", "---\nname: a\nmodel: anthropic/claude-sonnet-5\n---\nbody");
+		expect(agent?.model).toBe("anthropic/claude-sonnet-5");
+	});
+});
+
+describe("namespaced discovery", () => {
+	it("prefixes agents from a namespaced source", () => {
+		const dir = mkdtempSync(join(tmpdir(), "cc-ns-"));
+		mkdirSync(join(dir, "agents"), { recursive: true });
+		writeFileSync(join(dir, "agents", "reviewer.md"), "---\nname: reviewer\n---\nreview things");
+		const agents = discoverAgents([{ dir: join(dir, "agents"), namespace: "my-plugin" }]);
+		expect(agents.map((a) => a.name)).toEqual(["my-plugin:reviewer"]);
+		rmSync(dir, { recursive: true, force: true });
+	});
+});
