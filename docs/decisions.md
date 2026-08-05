@@ -70,22 +70,68 @@ provider credential configured).
 
 ## Web tools
 
-- `web_search` comes from **`pi-web-search`**: it calls the *current model
-  provider's own* search API (OpenAI/Codex, Anthropic, Gemini), so there is no
-  extra API key and no scraping. This is as close to Claude Code's server-side
-  search as an extension can get.
-- `fetch_content` comes from **`pi-web-access`** (URL → markdown, GitHub repos,
-  PDFs, YouTube, images).
-- Both packages register a tool named `web_search`. `extensions/web/index.ts`
-  loads pi-web-access **first** so pi-web-search's zero-config provider-native
-  version wins the name, while `fetch_content` is retained. Reordering those two
-  lines silently switches you to the key-requiring implementation.
-- All three tools (`web_search`, `fetch_content`, `url_context`) are deferred
-  behind `tool_search`.
-- pi-web-search also drives `setActiveTools` (to hide Gemini-only
-  `url_context`). It composes with our deferral because `tool-search` loads
-  earlier, so its session_start deactivation runs first and pi-web-search
-  snapshots the already-reduced set.
+**Search — kept as a dependency.** `web_search` comes from **`pi-web-search`**:
+it calls the *current model provider's own* search API (OpenAI/Codex, Anthropic,
+Gemini), so no extra API key and no scraping. At 1,610 lines with **zero runtime
+dependencies**, what it encodes is knowledge — three providers' search API shapes
+— rather than machinery, and tracking those ourselves would be a worse trade.
+It also registers Gemini-only `url_context`. Both tools are deferred.
+
+One coupling to preserve: pi-web-search drives `setActiveTools` to hide
+`url_context` on non-Gemini models. That composes with our deferral **only
+because `tool-search` loads first**, so deferred tools are already deactivated
+when pi-web-search snapshots the active set.
+
+**Fetch — replaced with our own.** `extensions/web-fetch/` (~250 lines) replaces
+`pi-web-access`, which was the heaviest thing in the tree: 21,719 lines, 7.5 MB,
+seven runtime dependencies, and **114 of our then-208 installed packages** — to
+supply one tool we used. Its other three tools were unused, its `web_search` was
+deliberately overridden, and it spawned processes for GitHub cloning, video
+extraction, and reading the browser's cookie store. That is a lot of unreviewed
+surface and startup weight for an HTTP GET.
+
+Ours keeps three focused dependencies (`@mozilla/readability`, `linkedom`,
+`turndown`) because HTML-to-markdown quality genuinely affects what the model
+reads; a regex stripper produces poor input on real documentation. Total install
+went from 208 packages to 109.
+
+Claude Code parity notes for `web_fetch`: http is upgraded to https,
+non-web schemes are refused, responses are cached 15 minutes, and cross-host
+redirects are reported rather than followed (so a redirect cannot quietly take
+the agent elsewhere; same-host ones are followed).
+
+**Deliberate deviation:** Claude Code answers a `prompt` against the page using a
+small fast model. pi exposes no clean in-process completion helper, and a
+summarisation call that fails silently would degrade quality invisibly — the
+exact failure shape we have been removing. Instead the tool returns extracted
+markdown windowed to 30k characters and reports `nextOffset`, so the model reads
+the page itself and can page through a long one.
+
+## AskUserQuestion — our own
+
+`extensions/ask-user/` replaces the community `pi-ask-user`. That package worked
+and had a nicer overlay UI, but it carried two problems:
+
+1. It pulled **`@sinclair/typebox@0.34`** — a second, different schema library,
+   since pi itself uses `typebox@1.x` — and built its tool schema with it. It
+   worked, but two schema implementations in one process is a silent-divergence
+   risk, not a visible one.
+2. It asked **one question per call**, while Claude Code's AskUserQuestion takes
+   up to four questions, each with `header`, optional `multiSelect`, and 2–4
+   labelled options with descriptions.
+
+Ours matches Claude Code's schema and drops the duplicate dependency, at the cost
+of a plainer presentation: pi has no native multi-question widget, so questions
+are asked one dialog at a time via `ctx.ui.select`, with a `✓` marker
+accumulating multi-select choices, a "Done selecting" entry, and an automatic
+"Other (type your own answer)" escape hatch routed to `ctx.ui.input`. Cancelling
+any question cancels the batch, since later answers are meaningless without the
+earlier ones. Non-interactive sessions get an instruction to ask in the reply
+instead.
+
+Verified over RPC: a two-question call produced three dialogs — single-select,
+then multi-select showing `✓ Caching` on the second pass — and returned both
+answers in one structured result.
 
 ## LSP: our own client, not a package
 
