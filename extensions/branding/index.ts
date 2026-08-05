@@ -53,7 +53,9 @@ export const LOGO_LINES = [
  */
 const HINT_LINES: [key: string, what: string][][] = [
 	[
-		["shift+tab", "thinking"],
+		// pi calls this dial "thinking" and reserves shift+tab for it; we present
+		// it as Claude Code's "effort" so the key and /effort agree on the name.
+		["shift+tab", "cycle effort"],
 		["/effort", "effort + ultracode"],
 		["ctrl+l", "model"],
 		["ctrl+p", "cycle model"],

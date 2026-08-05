@@ -1,12 +1,20 @@
 /**
  * effort extension — Claude Code's `/effort`, including the `ultracode` stop.
  *
- * Reasoning effort is pi's thinking level, which shift+tab already cycles; what
- * this adds is Claude Code's framing, where the track runs past `max` to
- * `ultracode` — xhigh reasoning *plus* standing multi-agent orchestration. The
- * keyword in a message arms one turn (see `extensions/workflow`); this mode arms
- * every turn until it is switched off, via an `every-turn` reminder keyed so it
- * can be withdrawn, the same shape the permissions extension uses for plan mode.
+ * Reasoning effort is pi's thinking level under another name, and shift+tab
+ * already cycles it. pi reserves that key (`app.thinking.cycle` is on its
+ * RESERVED_KEYBINDINGS_FOR_EXTENSION_CONFLICTS list, so `registerShortcut` on
+ * shift+tab is skipped with a warning), which settles the design: we cannot
+ * retarget or disable it, so the slider covers the same ladder it cycles rather
+ * than a different one, and both are presented as "effort" — pi's own wording
+ * for the dial stays visible in its footer, but nothing we write calls it
+ * "thinking".
+ *
+ * What the slider adds is the stop past the top: `ultracode`, the top reasoning
+ * level *plus* standing multi-agent orchestration. The keyword in a message arms
+ * one turn (see `extensions/workflow`); this mode arms every turn until it is
+ * switched off, via an `every-turn` reminder keyed so it can be withdrawn — the
+ * same shape the permissions extension uses for plan mode.
  */
 
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
@@ -23,6 +31,7 @@ import {
 	renderEffortSlider,
 	thinkingLevelFor,
 	ULTRACODE,
+	ULTRACODE_LEVEL,
 } from "./slider.ts";
 
 const REMINDER_KEY = "ultracode-mode";
@@ -88,14 +97,6 @@ export default function effortExtension(pi: ExtensionAPI) {
 		}
 	};
 
-	const applyPlainLevel = (level: ThinkingLevel, ctx: ExtensionContext) => {
-		pi.setThinkingLevel(level);
-		const actual = pi.getThinkingLevel();
-		setUltracode(false);
-		applyStatus(ctx);
-		ctx.ui.notify(`Effort: ${actual}${actual !== level ? ` (this model caps reasoning at ${actual})` : ""}`, "info");
-	};
-
 	const showSlider = async (ctx: ExtensionContext): Promise<void> => {
 		let index = EFFORT_CHOICES.indexOf(choiceForState(pi.getThinkingLevel(), ultracodeActive));
 		if (index < 0) index = 0;
@@ -133,7 +134,7 @@ export default function effortExtension(pi: ExtensionAPI) {
 	};
 
 	pi.registerCommand("effort", {
-		description: `Set reasoning effort: /effort [${EFFORT_CHOICES.join("|")}] — ultracode is xhigh + workflows`,
+		description: `Set reasoning effort (shift+tab cycles the plain levels): /effort [${EFFORT_CHOICES.join("|")}] — ultracode is ${ULTRACODE_LEVEL} + workflows`,
 		getArgumentCompletions: (prefix) => {
 			const matches = acceptedEffortArgs().filter((value) => value.startsWith(prefix.trim().toLowerCase()));
 			return matches.length ? matches.map((value) => ({ value, label: value })) : null;
@@ -146,11 +147,7 @@ export default function effortExtension(pi: ExtensionAPI) {
 					ctx.ui.notify(`Unknown effort "${typed}". Use one of: ${acceptedEffortArgs().join(", ")}`, "error");
 					return;
 				}
-				if (parsed === ULTRACODE || (EFFORT_CHOICES as readonly string[]).includes(parsed)) {
-					applyChoice(parsed as EffortChoice, ctx);
-				} else {
-					applyPlainLevel(parsed as ThinkingLevel, ctx);
-				}
+				applyChoice(parsed, ctx);
 				return;
 			}
 

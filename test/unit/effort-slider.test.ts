@@ -8,8 +8,10 @@ import {
 	moveIndex,
 	parseEffortArg,
 	renderEffortSlider,
+	THINKING_LEVELS,
 	thinkingLevelFor,
 	ULTRACODE,
+	ULTRACODE_LEVEL,
 } from "../../extensions/effort/slider.ts";
 
 // Identity paint keeps layout assertions free of colour codes.
@@ -18,21 +20,30 @@ const render = (index: number, width = 120) => renderEffortSlider({ index, width
 
 describe("choices", () => {
 	it("runs Faster→Smarter and ends at ultracode", () => {
-		expect([...EFFORT_CHOICES]).toEqual(["low", "medium", "high", "xhigh", "max", "ultracode"]);
+		expect([...EFFORT_CHOICES]).toEqual(["off", "minimal", "low", "medium", "high", "xhigh", "max", "ultracode"]);
 		expect(EFFORT_CHOICES[EFFORT_CHOICES.length - 1]).toBe(ULTRACODE);
 	});
 
-	it("maps ultracode to xhigh, everything else to itself", () => {
-		expect(thinkingLevelFor(ULTRACODE)).toBe("xhigh");
-		expect(thinkingLevelFor("high")).toBe("high");
-		expect(thinkingLevelFor("max")).toBe("max");
+	/**
+	 * The whole point of the alignment: shift+tab is pi's and cycles the full
+	 * thinking ladder, so the slider must offer exactly those stops plus
+	 * ultracode — otherwise the two dials disagree about the same number.
+	 */
+	it("covers every level shift+tab can reach, plus ultracode", () => {
+		expect([...EFFORT_CHOICES]).toEqual([...THINKING_LEVELS, ULTRACODE]);
+		for (const level of THINKING_LEVELS) expect(isEffortChoice(level)).toBe(true);
 	});
 
-	it("accepts off/minimal as typed args though the track omits them", () => {
-		expect(parseEffortArg("off")).toBe("off");
-		expect(parseEffortArg("minimal")).toBe("minimal");
-		expect(isEffortChoice("off")).toBe(false);
-		expect(acceptedEffortArgs()).toContain("off");
+	it("maps ultracode to the top level, everything else to itself", () => {
+		expect(thinkingLevelFor(ULTRACODE)).toBe(ULTRACODE_LEVEL);
+		expect(thinkingLevelFor("high")).toBe("high");
+		expect(thinkingLevelFor("max")).toBe("max");
+		expect(thinkingLevelFor("off")).toBe("off");
+	});
+
+	it("accepts every stop as a typed arg", () => {
+		for (const choice of EFFORT_CHOICES) expect(parseEffortArg(choice)).toBe(choice);
+		expect(acceptedEffortArgs()).toEqual([...EFFORT_CHOICES]);
 	});
 
 	it("parses case-insensitively and rejects junk", () => {
@@ -52,12 +63,12 @@ describe("choiceForState", () => {
 	it("preselects the matching stop otherwise", () => {
 		expect(choiceForState("medium", false)).toBe("medium");
 		expect(choiceForState("max", false)).toBe("max");
+		expect(choiceForState("off", false)).toBe("off");
+		expect(choiceForState("minimal", false)).toBe("minimal");
 	});
 
-	it("lands on a real stop for levels the track omits", () => {
-		expect(choiceForState("off", false)).toBe("low");
-		expect(choiceForState("minimal", false)).toBe("low");
-		expect(choiceForState(undefined, false)).toBe("high");
+	it("falls back to a mid stop when the level is unknown", () => {
+		expect(choiceForState(undefined, false)).toBe("medium");
 	});
 });
 
@@ -83,21 +94,23 @@ describe("decodeKey", () => {
 });
 
 describe("moveIndex", () => {
+	const n = EFFORT_CHOICES.length;
+
 	it("clamps at both ends instead of wrapping", () => {
-		expect(moveIndex(0, "left", 6)).toBe(0);
-		expect(moveIndex(5, "right", 6)).toBe(5);
-		expect(moveIndex(2, "right", 6)).toBe(3);
-		expect(moveIndex(2, "left", 6)).toBe(1);
+		expect(moveIndex(0, "left", n)).toBe(0);
+		expect(moveIndex(n - 1, "right", n)).toBe(n - 1);
+		expect(moveIndex(2, "right", n)).toBe(3);
+		expect(moveIndex(2, "left", n)).toBe(1);
 	});
 
 	it("jumps to either end", () => {
-		expect(moveIndex(3, "first", 6)).toBe(0);
-		expect(moveIndex(3, "last", 6)).toBe(5);
+		expect(moveIndex(3, "first", n)).toBe(0);
+		expect(moveIndex(3, "last", n)).toBe(n - 1);
 	});
 
 	it("leaves the index alone for confirm/cancel", () => {
-		expect(moveIndex(3, "confirm", 6)).toBe(3);
-		expect(moveIndex(3, "cancel", 6)).toBe(3);
+		expect(moveIndex(3, "confirm", n)).toBe(3);
+		expect(moveIndex(3, "cancel", n)).toBe(3);
 	});
 });
 
@@ -108,7 +121,11 @@ describe("renderEffortSlider", () => {
 		expect(out).toContain("Faster");
 		expect(out).toContain("Smarter");
 		for (const choice of EFFORT_CHOICES) expect(out).toContain(choice);
-		expect(out).toContain("←/→ to adjust · Enter to confirm · Esc to cancel");
+		expect(out).toContain("←/→ adjust");
+		expect(out).toContain("Enter confirm");
+		expect(out).toContain("Esc cancel");
+		// Says which key does the same job, so the two dials don't look unrelated.
+		expect(out).toContain("shift+tab");
 	});
 
 	it("puts the marker under the selected label", () => {
@@ -130,19 +147,29 @@ describe("renderEffortSlider", () => {
 	});
 
 	it("explains ultracode only while ultracode is selected", () => {
-		expect(render(EFFORT_CHOICES.indexOf(ULTRACODE)).join("\n")).toContain("xhigh + workflows");
-		expect(render(EFFORT_CHOICES.indexOf("high")).join("\n")).not.toContain("xhigh + workflows");
+		const subtitle = `${ULTRACODE_LEVEL} + workflows`;
+		expect(render(EFFORT_CHOICES.indexOf(ULTRACODE)).join("\n")).toContain(subtitle);
+		expect(render(EFFORT_CHOICES.indexOf("high")).join("\n")).not.toContain(subtitle);
 	});
 
 	it("degrades to a single line rather than wrapping in a narrow pane", () => {
 		const lines = render(2, 20);
 		expect(lines.length).toBeLessThan(6);
 		expect(lines.join("\n")).toContain("Effort");
-		for (const line of lines) expect([...line].length).toBeLessThanOrEqual(80);
+	});
+
+	it("keeps every line within the width it is given, at any width", () => {
+		for (const width of [200, 120, 100, 80, 60, 40, 20, 10]) {
+			for (const index of [0, 3, EFFORT_CHOICES.length - 1]) {
+				for (const line of render(index, width)) {
+					expect([...line].length, `index ${index} at width ${width}`).toBeLessThanOrEqual(width);
+				}
+			}
+		}
 	});
 
 	it("applies the paint function it is given", () => {
-		const lines = renderEffortSlider({ index: 5, width: 120 }, (c, t) => `<${c}>${t}</${c}>`);
+		const lines = renderEffortSlider({ index: EFFORT_CHOICES.length - 1, width: 140 }, (c, t) => `<${c}>${t}</${c}>`);
 		expect(lines.join("\n")).toContain("<accent>ultracode</accent>");
 	});
 });

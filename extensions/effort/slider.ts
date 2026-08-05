@@ -2,57 +2,60 @@
  * The `/effort` slider (pure): choices, key decoding, and layout.
  *
  * Claude Code presents reasoning effort as a Faster→Smarter track with
- * `ultracode` sitting past `max`, separated by a divider because it is not
- * simply "more thinking" — it is xhigh plus standing workflow orchestration.
- * Rendering and key handling live here so the layout is unit-testable without
- * a terminal; `index.ts` only wires it to pi.
+ * `ultracode` sitting past the top, separated by a divider because it is not
+ * simply "more thinking" — it is the top reasoning level plus standing workflow
+ * orchestration.
+ *
+ * The plain stops are pi's own thinking ladder, deliberately *all* of it: pi
+ * reserves shift+tab for `app.thinking.cycle` and refuses to let an extension
+ * rebind it, so that key keeps cycling the full ladder no matter what we do.
+ * A slider offering a different set would mean two dials disagreeing about the
+ * same number, so this one covers the same stops and adds ultracode. Everything
+ * user-facing calls it "effort"; "thinking level" is pi's internal name for it.
+ *
+ * Rendering and key handling live here so the layout is unit-testable without a
+ * terminal; `index.ts` only wires it to pi.
  */
 
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 
-/** The final stop on the track: xhigh reasoning + workflows armed every turn. */
+/** The final stop on the track: top reasoning + workflows armed every turn. */
 export const ULTRACODE = "ultracode";
 
-/** Track stops, in Faster→Smarter order. Mirrors Claude Code's own slider. */
-export const EFFORT_CHOICES = ["low", "medium", "high", "xhigh", "max", ULTRACODE] as const;
-export type EffortChoice = (typeof EFFORT_CHOICES)[number];
+/** The reasoning level ultracode pins, when the model can reach it. */
+export const ULTRACODE_LEVEL: ThinkingLevel = "xhigh";
 
-/**
- * Levels the slider omits but a typed `/effort off` should still accept — pi
- * supports them and shift+tab cycles through them, so refusing them here would
- * make the command less capable than the harness it fronts.
- */
-const EXTRA_LEVELS = ["off", "minimal"] as const;
+/** pi's thinking ladder, Faster→Smarter — the same stops shift+tab cycles. */
+export const THINKING_LEVELS: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/** Track stops: pi's ladder, then ultracode past the divider. */
+export const EFFORT_CHOICES = [...THINKING_LEVELS, ULTRACODE] as const;
+export type EffortChoice = (typeof EFFORT_CHOICES)[number];
 
 export function isEffortChoice(value: string): value is EffortChoice {
 	return (EFFORT_CHOICES as readonly string[]).includes(value);
 }
 
 /** Parse a typed argument (`/effort xhigh`). Returns undefined if unrecognised. */
-export function parseEffortArg(arg: string): EffortChoice | ThinkingLevel | undefined {
+export function parseEffortArg(arg: string): EffortChoice | undefined {
 	const value = arg.trim().toLowerCase();
-	if (!value) return undefined;
-	if (isEffortChoice(value)) return value;
-	if ((EXTRA_LEVELS as readonly string[]).includes(value)) return value as ThinkingLevel;
-	return undefined;
+	return value && isEffortChoice(value) ? value : undefined;
 }
 
 export function acceptedEffortArgs(): string[] {
-	return [...EFFORT_CHOICES, ...EXTRA_LEVELS];
+	return [...EFFORT_CHOICES];
 }
 
-/** The thinking level a choice maps to; ultracode is xhigh plus a standing mode. */
+/** The thinking level a choice maps to; ultracode pins the top plus a mode. */
 export function thinkingLevelFor(choice: EffortChoice): ThinkingLevel {
-	return choice === ULTRACODE ? "xhigh" : (choice as ThinkingLevel);
+	return choice === ULTRACODE ? ULTRACODE_LEVEL : (choice as ThinkingLevel);
 }
 
 /** Which choice a current thinking level should preselect on the track. */
 export function choiceForState(level: ThinkingLevel | undefined, ultracodeActive: boolean): EffortChoice {
 	if (ultracodeActive) return ULTRACODE;
 	if (level && isEffortChoice(level)) return level;
-	// off/minimal sit below the track's first stop; xhigh-only models may report
-	// something else entirely. Land on the nearest sensible stop either way.
-	return level === "off" || level === "minimal" ? "low" : "high";
+	return "medium";
 }
 
 export type SliderKey = "left" | "right" | "first" | "last" | "confirm" | "cancel";
@@ -113,8 +116,9 @@ export interface SliderView {
 }
 
 const TITLE = "Effort";
-const HINTS = "←/→ to adjust · Enter to confirm · Esc to cancel";
-const ULTRACODE_SUBTITLE = "xhigh + workflows";
+const HINTS = "←/→ adjust · Enter confirm · Esc cancel · shift+tab cycles the plain levels";
+const SHORT_HINTS = "←/→ · Enter · Esc";
+const ULTRACODE_SUBTITLE = `${ULTRACODE_LEVEL} + workflows`;
 
 /**
  * One label cell per stop, padded so the marker row lines up under the label
@@ -166,25 +170,30 @@ export function renderEffortSlider(view: SliderView, paint: Paint): string[] {
 			? `${" ".repeat(Math.max(0, positions[stops.length - 1]))}${paint("dim", ULTRACODE_SUBTITLE)}`
 			: "";
 
-	const lines = [
-		paint("accent", TITLE),
-		"",
-		endsRow,
-		paint("muted", trackRow.join("")),
-		markerRow,
-		styledLabels,
+	// Rows are (plain content, styled content) pairs: nothing wraps for us, and a
+	// wrapped line would shift the marker out from under its label, so widths are
+	// measured on the unstyled text — escape codes would inflate the count.
+	const rows: [plain: string, styled: string][] = [
+		[TITLE, paint("accent", TITLE)],
+		["", ""],
+		[`Faster${" ".repeat(Math.max(1, plainWidth - 13))}Smarter`, endsRow],
+		[trackRow.join(""), paint("muted", trackRow.join(""))],
+		[`${" ".repeat(markerColumn)}▲`, markerRow],
+		[labels, styledLabels],
 	];
-	if (subtitleRow) lines.push(subtitleRow);
-	lines.push("", paint("dim", HINTS));
+	if (subtitleRow) rows.push([`${" ".repeat(Math.max(0, positions[stops.length - 1]))}${ULTRACODE_SUBTITLE}`, subtitleRow]);
+	rows.push(["", ""], [HINTS, paint("dim", HINTS)]);
 
-	// A pane narrower than the track would wrap and break the alignment the
-	// marker row depends on; fall back to a plain list of stops.
-	if (plainWidth > view.width) {
-		return [
-			paint("accent", TITLE),
-			paint("muted", stops.map((s, i) => (i === view.index ? paint("accent", s.label) : s.label)).join(" · ")),
-			paint("dim", HINTS),
-		];
-	}
-	return lines;
+	const fits = rows.every(([plainRow]) => [...plainRow].length <= view.width);
+	if (fits) return rows.map(([, styled]) => styled);
+
+	// Too narrow for the track (or for the hint line): drop to one stop list and
+	// the shortest usable hint, both clipped, rather than let anything wrap.
+	const clip = (text: string) => [...text].slice(0, view.width).join("");
+	const list = stops.map((s) => s.label);
+	return [
+		paint("accent", clip(TITLE)),
+		clip(list.join(" · ")).replace(list[view.index], (m) => paint("accent", m)),
+		paint("dim", clip(SHORT_HINTS)),
+	];
 }

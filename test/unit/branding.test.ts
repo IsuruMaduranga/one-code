@@ -15,7 +15,8 @@ describe("bannerLines", () => {
 	it("lists the key shortcuts across the hint lines", () => {
 		const hints = bannerLines({ version: "0.1.0", cwd: "/p", mode: "default" }, plain).join("\n");
 		for (const key of [
-			"shift+tab thinking",
+			"shift+tab cycle effort",
+			"/effort effort + ultracode",
 			"ctrl+l model",
 			"ctrl+p cycle model",
 			"/permission-mode mode",

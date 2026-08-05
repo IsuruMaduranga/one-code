@@ -791,3 +791,28 @@ keys moved the marker, `ultracode` revealed its subtitle, Enter applied it with
 the clamp reported honestly, `✦ ultracode` appeared in the footer, and a
 `CC_E2E_LOG` capture confirmed the standing reminder in **both** subsequent
 turns' payloads rather than just the first.
+
+### Aligning `/effort` with shift+tab
+
+The first cut left two dials disagreeing: shift+tab cycled pi's seven thinking
+levels and called it "thinking", while `/effort` showed Claude Code's five plus
+ultracode and called it "effort". Same underlying number, two names, two sets.
+
+Taking over the key is not available: `app.thinking.cycle` is on pi's
+`RESERVED_KEYBINDINGS_FOR_EXTENSION_CONFLICTS` list, so `registerShortcut` on
+shift+tab is skipped with a warning rather than honoured, and no extension API
+unbinds or retargets a reserved key (only the user's own keybindings config can).
+Disabling it was therefore off the table too, which settles the direction:
+conform to the key rather than compete with it. The slider now offers exactly the
+stops shift+tab walks through — `off` through `max` — and adds `ultracode` past
+the divider, and everything we write calls the dial "effort" (banner hint
+included; pi's own footer still says what it says). The slider footer names
+shift+tab as the shortcut for the plain stops, so the two read as one control
+with two entry points rather than two competing settings.
+
+Widening the track from six stops to eight is what exposed a latent bug: the
+layout only checked whether the *track* fit the pane, so the longer hint line
+overflowed at 80 columns. Width is now measured on the unstyled text of every row
+(escape codes would inflate the count), and anything that does not fit collapses
+to a clipped one-line stop list — verified by a test that walks every stop at
+widths from 200 down to 10.

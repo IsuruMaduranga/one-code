@@ -100,18 +100,19 @@ the last stop on the slider:
 ```
 Effort
 
-Faster                            Smarter
-──────────────────────────────│──────────
-                                    ▲
-low  medium  high  xhigh  max │ ultracode
-                                xhigh + workflows
+Faster                                          Smarter
+────────────────────────────────────────────│──────────
+                                                  ▲
+off  minimal  low  medium  high  xhigh  max │ ultracode
+                                              xhigh + workflows
 ```
 
-`ultracode` is xhigh reasoning *plus* orchestration armed on every turn, which
-is why it sits past `max` behind a divider. `/effort <level>` sets one directly
-(`off` and `minimal` work too, though the slider omits them), and a footer
-`✦ ultracode` shows while the mode is on. Cycling thinking with shift+tab turns
-it back off. Here is what a script looks like:
+`ultracode` is xhigh reasoning *plus* orchestration armed on every turn, which is
+why it sits past `max` behind a divider. The plain stops are the same ones
+shift+tab cycles — pincer calls that dial "effort" throughout, since it is one
+dial with two ways to reach it — and `/effort <level>` sets any of them directly.
+A footer `✦ ultracode` shows while the mode is on, and cycling with shift+tab
+turns it back off. Here is what a script looks like:
 
 ```js
 export const meta = { name: 'audit', description: 'find routes missing auth', phases: [{ title: 'Scan' }, { title: 'Audit' }] }
