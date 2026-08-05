@@ -40,19 +40,44 @@ export const LOGO_LINES = [
 	" ▄ ▄  ▄ ▄ ",
 ];
 
-/** Kept pure so the layout is unit-testable without a terminal. */
-export function bannerLines(input: BannerInput, paint: (color: string, text: string) => string): string[] {
-	const title = `${paint("accent", NAME)} ${paint("dim", `v${input.version}`)}`;
-	const subtitle = paint("dim", "Claude Code on the pi harness");
-	const hints = [
+/**
+ * pi's default keybindings (core/keybindings.ts) plus our own input prefixes
+ * and commands, grouped one line each: session control, then everything that
+ * changes what the model sees or does, then editor/clipboard conveniences.
+ */
+const HINT_LINES: [key: string, what: string][][] = [
+	[
+		["shift+tab", "thinking"],
+		["ctrl+l", "model"],
+		["ctrl+p", "cycle model"],
+		["/permission-mode", "mode"],
+		["ctrl+t", "thinking blocks"],
+		["ctrl+o", "tool output"],
+	],
+	[
+		["ctrl+g", "external editor"],
+		["ctrl+v", "paste image"],
+		["ctrl+x", "copy"],
+		["alt+enter", "follow-up"],
+		["ctrl+z", "suspend"],
+	],
+	[
 		["escape", "interrupt"],
 		["ctrl+c/ctrl+d", "clear/exit"],
 		["/", "commands"],
 		["!", "bash"],
-		["ctrl+o", "more"],
-	]
-		.map(([key, what]) => `${paint("accent", key)} ${paint("muted", what)}`)
-		.join(paint("muted", " · "));
+	],
+];
+
+/** Kept pure so the layout is unit-testable without a terminal. */
+export function bannerLines(input: BannerInput, paint: (color: string, text: string) => string): string[] {
+	const title = `${paint("accent", NAME)} ${paint("dim", `v${input.version}`)}`;
+	const subtitle = paint("dim", "Claude Code on the pi harness");
+	const hints = HINT_LINES.map((line) =>
+		line
+			.map(([key, what]) => `${paint("accent", key)} ${paint("muted", what)}`)
+			.join(paint("muted", " · ")),
+	);
 
 	const context = [
 		input.model ? `${paint("muted", "model")} ${input.model}` : undefined,
@@ -61,8 +86,10 @@ export function bannerLines(input: BannerInput, paint: (color: string, text: str
 		.filter(Boolean)
 		.join(paint("muted", " · "));
 
-	const text = [`${title}  ${subtitle}`, hints, context];
-	return LOGO_LINES.map((art, i) => `${paint("accent", art)}  ${text[i] ?? ""}`);
+	const text = [`${title}  ${subtitle}`, ...hints, context];
+	const logoWidth = Math.max(...LOGO_LINES.map((art) => [...art].length));
+	const blankArt = " ".repeat(logoWidth);
+	return text.map((line, i) => `${paint("accent", LOGO_LINES[i] ?? blankArt)}  ${line}`);
 }
 
 export default function brandingExtension(pi: ExtensionAPI) {
