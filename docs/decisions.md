@@ -626,3 +626,21 @@ nominative use (truthfully naming the thing we are compatible with), which
 trademark law and the guidelines themselves permit. The fidelity references in
 `tools/` and `payload.json` are captured artifacts, not branding, and are
 untouched.
+
+## Startup listing: quietStartup + banner sections
+
+pi's startup resource listing has no per-section switch, and its [Extensions]
+section names all twenty of this package's internal modules — noise to an end
+user of the packaged product. The only lever pi offers is `quietStartup: true`
+(global setting), which hides the entire listing but leaves a `setHeader`
+banner alone (verified in tmux). `resourceLoader` is not exposed to
+extensions, so the useful sections cannot be read back; instead the banner
+re-derives compact `context` / `skills` / `themes` lines (the blessed
+re-derive pattern): context files via the git-root walk, skills from the
+Claude Code dirs — `existsSync` on `<dir>/<name>/SKILL.md` rather than
+`isDirectory()`, because skill directories can be symlinks — plus namespaced
+plugin skills from `discoverPlugins` (which pi's own listing misses, since the
+plugins extension exposes those only through the `skill` tool), and themes
+from the package's own directory. The sections render only when
+`quietStartupEnabled()` reads true from pi's settings, so pi's listing and
+ours never both appear.

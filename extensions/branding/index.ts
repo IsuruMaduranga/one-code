@@ -13,7 +13,11 @@
  * Set `CC_NO_BANNER=1` to keep pi's original header.
  */
 
+import os from "node:os";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { collectStartupSections, quietStartupEnabled, type StartupSection } from "./startup.ts";
 
 const NAME = "pincer";
 
@@ -26,6 +30,8 @@ export interface BannerInput {
 	model?: string;
 	cwd: string;
 	mode: string;
+	/** Compact resource sections, shown when pi's own listing is silenced. */
+	sections?: StartupSection[];
 }
 
 /**
@@ -86,7 +92,11 @@ export function bannerLines(input: BannerInput, paint: (color: string, text: str
 		.filter(Boolean)
 		.join(paint("muted", " · "));
 
-	const text = [`${title}  ${subtitle}`, ...hints, context];
+	const sections = (input.sections ?? []).map(
+		(s) => `${paint("accent", s.label)} ${paint("dim", s.items.join(", "))}`,
+	);
+
+	const text = [`${title}  ${subtitle}`, ...hints, context, ...sections];
 	const logoWidth = Math.max(...LOGO_LINES.map((art) => [...art].length));
 	const blankArt = " ".repeat(logoWidth);
 	return text.map((line, i) => `${paint("accent", LOGO_LINES[i] ?? blankArt)}  ${line}`);
@@ -102,6 +112,13 @@ export default function brandingExtension(pi: ExtensionAPI) {
 		const version = process.env.CC_VERSION ?? "0.1.0";
 		const model = ctx.model ? `${ctx.model.id}` : undefined;
 
+		// With pi's own listing silenced, the banner carries compact sections
+		// instead (minus the internal [Extensions] noise).
+		const home = os.homedir();
+		const sections = quietStartupEnabled(join(home, ".pi", "agent", "settings.json"))
+			? collectStartupSections(ctx.cwd, home, join(dirname(fileURLToPath(import.meta.url)), "..", "..", "themes"))
+			: undefined;
+
 		ctx.ui.setTitle(NAME);
 		ctx.ui.setHeader((_tui: unknown, theme: unknown) => {
 			const paint = (color: string, text: string) => {
@@ -112,7 +129,7 @@ export default function brandingExtension(pi: ExtensionAPI) {
 					return text;
 				}
 			};
-			const lines = bannerLines({ version, model, cwd: ctx.cwd, mode: "default" }, paint);
+			const lines = bannerLines({ version, model, cwd: ctx.cwd, mode: "default", sections }, paint);
 			return {
 				render: () => ["", ...lines, ""],
 				// Nothing is cached, so there is nothing to invalidate.

@@ -159,6 +159,7 @@ Tools appear as `mcp__<server>__<tool>` and are deferred behind `tool_search`.
 
   in `~/.pi/agent/settings.json`. pi hot-reloads a theme file while it is active, so you can tweak `themes/pincer.json` and watch it change.
 - **The startup banner** is replaced with this package's own. `CC_NO_BANNER=1` restores pi's.
+- **Hide pi's startup resource listing** (whose `[Extensions]` section lists this package's twenty internal modules) by setting `"quietStartup": true` in `~/.pi/agent/settings.json`. The banner detects this and shows compact `context` / `skills` / `themes` lines instead — same information, no extension noise.
 - **Long-session context trimming on Anthropic**: on by default for first-party Anthropic — the API is asked to drop old thinking blocks, as Claude Code does. See the `CC_CLEAR_THINKING` row in Configuration and `docs/decisions.md`.
 
 ## Known limitations
