@@ -14,7 +14,7 @@ import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import { basename, join } from "node:path";
 import type { AgentDefinition } from "./agents.ts";
-import { RpcTurnTracker } from "./rpc-turns.ts";
+import { RpcTurnTracker, toMainMessage } from "./rpc-turns.ts";
 import { addUsage, emptyUsage, type UsageTotals } from "./usage.ts";
 
 export const OUTPUT_CAP = 50_000;
@@ -45,6 +45,8 @@ export interface ChildOptions {
 	thinking?: string;
 	signal?: AbortSignal;
 	onProgress: (toolCalls: number, lastText: string, usage: UsageTotals) => void;
+	/** The child called send_message {to: "main"} — relay it to the main conversation. */
+	onMessageToMain?: (message: string, summary?: string) => void;
 }
 
 /** Session/agent/model flags shared by print and rpc children. */
@@ -119,7 +121,10 @@ export function startChild(options: ChildOptions): ChildHandle {
 		} catch {
 			return;
 		}
-		if (event.type === "tool_execution_start") {
+		if (event.type === "tool_execution_end") {
+			const toMain = toMainMessage(event);
+			if (toMain) options.onMessageToMain?.(toMain.message, toMain.summary);
+		} else if (event.type === "tool_execution_start") {
 			toolCalls++;
 			onProgress(toolCalls, finalText, usage);
 		} else if (event.type === "message_end" && event.message?.role === "assistant") {
@@ -254,6 +259,8 @@ export function startRpcChild(options: RpcChildOptions): RpcChildHandle {
 				earlySteers = [];
 			} else if (action.kind === "progress") {
 				options.onProgress(tracker.toolCalls, tracker.turnText, tracker.usage);
+			} else if (action.kind === "message_to_main") {
+				options.onMessageToMain?.(action.message, action.summary);
 			} else if (action.kind === "turn_end") {
 				options.onTurnEnd(turnOutcome());
 			}

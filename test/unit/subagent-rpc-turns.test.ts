@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { RpcTurnTracker } from "../../extensions/subagents/rpc-turns.ts";
+import { RpcTurnTracker, toMainMessage } from "../../extensions/subagents/rpc-turns.ts";
 
 const assistantEnd = (text: string, usage?: Record<string, unknown>) =>
 	JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text }], usage } });
@@ -47,6 +47,21 @@ describe("RpcTurnTracker", () => {
 		const tracker = new RpcTurnTracker();
 		const action = tracker.process(JSON.stringify({ type: "extension_ui_request", id: "ui-1", method: "select" }));
 		expect(action).toEqual({ kind: "ui_request", id: "ui-1" });
+	});
+
+	it("extracts a child's send_message {to: main} from its tool_execution_end", () => {
+		const event = {
+			type: "tool_execution_end",
+			toolName: "send_message",
+			result: { details: { toMain: true, message: "halfway there", summary: "progress" } },
+		};
+		expect(toMainMessage(event)).toEqual({ message: "halfway there", summary: "progress" });
+		const tracker = new RpcTurnTracker();
+		expect(tracker.process(JSON.stringify(event))).toEqual({ kind: "message_to_main", message: "halfway there", summary: "progress" });
+
+		// A normal send_message between agents (no toMain) is not relayed.
+		expect(toMainMessage({ type: "tool_execution_end", toolName: "send_message", result: { details: { message: "x" } } })).toBeUndefined();
+		expect(toMainMessage({ type: "tool_execution_end", toolName: "bash", result: { details: { toMain: true, message: "x" } } })).toBeUndefined();
 	});
 
 	it("ignores responses, blank lines, garbage, and non-assistant messages", () => {

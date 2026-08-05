@@ -12,7 +12,25 @@ export type RpcAction =
 	| { kind: "ui_request"; id: string }
 	| { kind: "stream_start" }
 	| { kind: "turn_end" }
-	| { kind: "progress" };
+	| { kind: "progress" }
+	| { kind: "message_to_main"; message: string; summary?: string };
+
+/**
+ * A child's send_message {to: "main"} call needs no IPC of its own: the tool
+ * returns the message in its details, and the parent already reads every
+ * tool_execution_end in the child's event stream. This extracts it.
+ */
+export function toMainMessage(event: unknown): { message: string; summary?: string } | undefined {
+	const e = event as {
+		type?: string;
+		toolName?: string;
+		result?: { details?: { toMain?: boolean; message?: unknown; summary?: unknown } };
+	};
+	if (e?.type !== "tool_execution_end" || e.toolName !== "send_message") return undefined;
+	const details = e.result?.details;
+	if (!details?.toMain || typeof details.message !== "string") return undefined;
+	return { message: details.message, summary: typeof details.summary === "string" ? details.summary : undefined };
+}
 
 export class RpcTurnTracker {
 	toolCalls = 0;
@@ -67,6 +85,10 @@ export class RpcTurnTracker {
 					.join("");
 				if (text.trim()) this.turnText = text;
 				return { kind: "progress" };
+			}
+			case "tool_execution_end": {
+				const toMain = toMainMessage(event);
+				return toMain ? { kind: "message_to_main", ...toMain } : undefined;
 			}
 			case "agent_end":
 				this.busy = false;

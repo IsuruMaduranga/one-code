@@ -168,6 +168,14 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		);
 	};
 
+	/** Relay a child's send_message {to: "main"} into this conversation. */
+	const notifyAgentMessage = (name: string, message: string, summary?: string) =>
+		notify(
+			"subagent-message",
+			`SYSTEM NOTIFICATION — NOT USER INPUT\nMessage from agent ${name}${summary ? ` (${summary})` : ""}:\n\n${message}`,
+			{ name, summary },
+		);
+
 	/** Session dir for a run's persisted child session; undefined → child runs --no-session. */
 	const runSessionDir = (ctx: ExtensionContext, taskId: string): string | undefined => {
 		try {
@@ -226,6 +234,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			thinking: request.thinking,
 			signal,
 			onProgress,
+			onMessageToMain: (message, summary) => notifyAgentMessage(request.name, message, summary),
 		});
 		liveChildren.add(handle);
 		onStarted?.(handle, worktree);
@@ -403,6 +412,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						onProgress: (_toolCalls, text) => {
 							if (logPath && text) writeFileSync(logPath, text);
 						},
+						onMessageToMain: (message, summary) => notifyAgentMessage(p.record.name, message, summary),
 						onTurnEnd: (outcome) => {
 							registry.sessionFileFor(p.record);
 							if (logPath) writeFileSync(logPath, resident.handle.snapshot().text || outcome.output);
@@ -500,17 +510,39 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		},
 	});
 
+	const isSubagentChild = process.env.PI_SUBAGENT_CHILD === "1";
 	pi.registerTool({
 		name: "send_message",
 		label: "Send Message",
 		description:
-			"Send a message to a previously spawned subagent, addressed by the name from its spawn result (or task id). A resident background agent is reached live: mid-turn the message is steered into its current work; when idle it starts a new turn and the reply arrives as a system notification. A finished, non-resident agent is resumed from its session file with full context.",
+			'Send a message to another agent. From the main conversation: address a previously spawned subagent by the name from its spawn result (or task id) — a resident background agent is reached live (mid-turn the message is steered into its current work; when idle it starts a new turn), a finished agent is resumed from its session file with full context; replies arrive as system notifications. From inside a subagent: use to: "main" to report progress, findings, or questions to the main conversation mid-run — your plain text output is NOT visible to it until you finish.',
+		// A background child's model must know it can report back; the parent keeps
+		// the tool deferred instead (see the DEFER emit below).
+		promptSnippet: isSubagentChild
+			? 'send_message - report progress or findings to the main conversation (to: "main")'
+			: undefined,
 		parameters: Type.Object({
-			to: Type.String({ description: "Agent name (or task id) from a previous subagent run" }),
+			to: Type.String({ description: 'Agent name (or task id) from a previous subagent run — or "main" from inside a subagent' }),
 			message: Type.String({ description: "Plain text message for the agent" }),
 			summary: Type.Optional(Type.String({ description: "5-10 word preview shown in the UI" })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			if (params.to === "main") {
+				if (!isSubagentChild) {
+					return {
+						content: [{ type: "text", text: 'You are the main conversation — "main" is only a valid recipient from inside a subagent.' }],
+						details: {},
+						isError: true,
+					};
+				}
+				// No IPC needed: the parent reads this tool result off the child's
+				// event stream (toMainMessage in rpc-turns.ts) and relays it.
+				return {
+					content: [{ type: "text", text: "Message delivered to the main conversation." }],
+					details: { toMain: true, message: params.message, summary: params.summary },
+				};
+			}
+
 			const record = registry.resolve(params.to);
 			if (!record) {
 				const known = registry.names().join(", ") || "(none)";
@@ -610,6 +642,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				model: record.model,
 				thinking: record.thinking,
 				onProgress: () => {},
+				onMessageToMain: (message, summary) => notifyAgentMessage(record.name, message, summary),
 			});
 			liveChildren.add(handle);
 
@@ -650,7 +683,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			};
 		},
 	});
-	pi.events.emit(DEFER_CHANNEL, { name: "send_message", keywords: ["message", "agent", "resume", "continue", "teammate"] });
+	if (!isSubagentChild) {
+		pi.events.emit(DEFER_CHANNEL, { name: "send_message", keywords: ["message", "agent", "resume", "continue", "teammate"] });
+	}
 
 	pi.registerCommand("agents", {
 		description: "List available subagents",
