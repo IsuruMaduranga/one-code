@@ -27,6 +27,12 @@ export interface BackgroundTask {
 	stop(): void;
 	/** Settles when the task reaches a terminal status; never rejects. */
 	finished: Promise<void>;
+	/**
+	 * True while the underlying process outlives the task (a background agent
+	 * stays resident after its run so it can be messaged). Lets task_stop
+	 * terminate it even though the task itself already completed.
+	 */
+	resident?: () => boolean;
 }
 
 export function generateTaskId(): string {

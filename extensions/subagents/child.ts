@@ -14,6 +14,7 @@ import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import { basename, join } from "node:path";
 import type { AgentDefinition } from "./agents.ts";
+import { RpcTurnTracker } from "./rpc-turns.ts";
 import { addUsage, emptyUsage, type UsageTotals } from "./usage.ts";
 
 export const OUTPUT_CAP = 50_000;
@@ -46,22 +47,10 @@ export interface ChildOptions {
 	onProgress: (toolCalls: number, lastText: string, usage: UsageTotals) => void;
 }
 
-export interface ChildOutcome {
-	output: string;
-	toolCalls: number;
-	usage: UsageTotals;
-	failed?: boolean;
-}
-
-export interface ChildHandle {
-	result: Promise<ChildOutcome>;
-	kill(): void;
-	snapshot(): { toolCalls: number; text: string; usage: UsageTotals };
-}
-
-export function startChild(options: ChildOptions): ChildHandle {
-	const { agent, task, cwd, forkFrom, sessionFile, sessionDir, signal, onProgress } = options;
-	const args = ["--mode", "json", "-p"];
+/** Session/agent/model flags shared by print and rpc children. */
+function buildChildFlags(options: Omit<ChildOptions, "task" | "signal" | "onProgress">): string[] {
+	const { agent, forkFrom, sessionFile, sessionDir } = options;
+	const args: string[] = [];
 
 	if (sessionFile) {
 		args.push("--session", sessionFile);
@@ -85,7 +74,25 @@ export function startChild(options: ChildOptions): ChildHandle {
 	if (model) args.push("--model", model);
 	if (options.thinking) args.push("--thinking", options.thinking);
 	if (agent?.tools && !forkFrom && !sessionFile) args.push("--tools", agent.tools.join(","));
-	args.push(task);
+	return args;
+}
+
+export interface ChildOutcome {
+	output: string;
+	toolCalls: number;
+	usage: UsageTotals;
+	failed?: boolean;
+}
+
+export interface ChildHandle {
+	result: Promise<ChildOutcome>;
+	kill(): void;
+	snapshot(): { toolCalls: number; text: string; usage: UsageTotals };
+}
+
+export function startChild(options: ChildOptions): ChildHandle {
+	const { task, cwd, signal, onProgress } = options;
+	const args = ["--mode", "json", "-p", ...buildChildFlags(options), task];
 
 	const invocation = piInvocation(args);
 	const child = spawn(invocation.command, invocation.args, {
@@ -168,5 +175,146 @@ export function startChild(options: ChildOptions): ChildHandle {
 		result,
 		kill: () => child.kill("SIGTERM"),
 		snapshot: () => ({ toolCalls, text: finalText, usage }),
+	};
+}
+
+export interface RpcChildOptions extends Omit<ChildOptions, "task" | "signal" | "onProgress"> {
+	onProgress: (toolCalls: number, lastText: string, usage: UsageTotals) => void;
+	/** Fires at the end of EVERY turn (initial task and later messages alike). */
+	onTurnEnd: (outcome: ChildOutcome) => void;
+	onExit?: () => void;
+}
+
+export interface RpcChildHandle {
+	/**
+	 * Deliver a message. "started" = the child was idle and this began a new
+	 * turn (onTurnEnd will fire for it); "steered" = the child was mid-turn and
+	 * the message joined it (covered by that turn's onTurnEnd).
+	 */
+	send(message: string): "started" | "steered";
+	busy(): boolean;
+	exited(): boolean;
+	kill(): void;
+	snapshot(): { toolCalls: number; text: string; usage: UsageTotals };
+}
+
+/**
+ * Resident child over `pi --mode rpc`: same event stream as json mode, plus a
+ * stdin command channel — which is what makes messaging a *running* agent
+ * possible (`streamingBehavior: "steer"` queues into the current turn; when
+ * idle the same command starts a new turn, so there is no idle/busy race).
+ * RPC children have hasUI=true, so extension_ui_request dialogs must be
+ * answered: every one is cancelled, which reproduces print-mode's
+ * non-interactive fallback (gated tools deny instead of deadlocking).
+ */
+export function startRpcChild(options: RpcChildOptions): RpcChildHandle {
+	const args = ["--mode", "rpc", ...buildChildFlags(options)];
+	const invocation = piInvocation(args);
+	const child = spawn(invocation.command, invocation.args, {
+		cwd: options.cwd,
+		shell: false,
+		stdio: ["pipe", "pipe", "pipe"],
+		env: { ...process.env, PI_SUBAGENT_CHILD: "1" },
+	});
+
+	const tracker = new RpcTurnTracker();
+	let buffer = "";
+	let stderr = "";
+	let exited = false;
+	/**
+	 * Messages accepted while a prompt was sent but the child's agent loop had
+	 * not started yet (it boots for a few seconds) — a steer written in that
+	 * window would run as its own turn instead of joining the pending one.
+	 * Flushed as steers the moment the child reports agent_start.
+	 */
+	let earlySteers: string[] = [];
+
+	const send = (command: Record<string, unknown>) => {
+		try {
+			child.stdin.write(`${JSON.stringify(command)}\n`);
+		} catch {
+			// A dead pipe surfaces via the close handler.
+		}
+	};
+
+	child.stdout.on("data", (chunk: Buffer) => {
+		buffer += chunk.toString();
+		let idx: number;
+		while ((idx = buffer.indexOf("\n")) !== -1) {
+			const line = buffer.slice(0, idx);
+			buffer = buffer.slice(idx + 1);
+			const action = tracker.process(line);
+			if (!action) continue;
+			if (action.kind === "ui_request") {
+				send({ type: "extension_ui_response", id: action.id, cancelled: true });
+			} else if (action.kind === "stream_start") {
+				for (const message of earlySteers) {
+					send({ type: "prompt", message, streamingBehavior: "steer" });
+				}
+				earlySteers = [];
+			} else if (action.kind === "progress") {
+				options.onProgress(tracker.toolCalls, tracker.turnText, tracker.usage);
+			} else if (action.kind === "turn_end") {
+				options.onTurnEnd(turnOutcome());
+			}
+		}
+	});
+	child.stderr.on("data", (chunk: Buffer) => {
+		stderr += chunk.toString();
+	});
+
+	const turnOutcome = (): ChildOutcome => {
+		const output = tracker.turnText.slice(0, OUTPUT_CAP);
+		if (output.trim()) return { output, toolCalls: tracker.toolCalls, usage: tracker.usage };
+		const detail = stderr.trim().split("\n").slice(-5).join("\n");
+		return {
+			output: `Subagent produced no output.${detail ? `\n${detail}` : ""}`,
+			toolCalls: tracker.toolCalls,
+			usage: tracker.usage,
+			failed: true,
+		};
+	};
+
+	const onClose = () => {
+		if (exited) return;
+		exited = true;
+		if (tracker.busy) {
+			tracker.busy = false;
+			const detail = stderr.trim().split("\n").slice(-5).join("\n");
+			options.onTurnEnd({
+				output: `Subagent exited mid-turn.${detail ? `\n${detail}` : ""}`,
+				toolCalls: tracker.toolCalls,
+				usage: tracker.usage,
+				failed: true,
+			});
+		}
+		options.onExit?.();
+	};
+	child.on("close", onClose);
+	child.on("error", onClose);
+
+	return {
+		send(message: string): "started" | "steered" {
+			if (exited) throw new Error("subagent process has exited");
+			if (!tracker.busy) {
+				tracker.beginTurn();
+				send({ type: "prompt", message, streamingBehavior: "steer" });
+				return "started";
+			}
+			if (tracker.streaming) {
+				send({ type: "prompt", message, streamingBehavior: "steer" });
+			} else {
+				earlySteers.push(message);
+			}
+			return "steered";
+		},
+		busy: () => tracker.busy,
+		exited: () => exited,
+		kill: () => child.kill("SIGTERM"),
+		snapshot: () => ({
+			toolCalls: tracker.toolCalls,
+			text: tracker.busy && tracker.turnText ? `${tracker.transcript ? `${tracker.transcript}\n\n---\n\n` : ""}${tracker.turnText}` : tracker.transcript,
+			usage: tracker.usage,
+		}),
 	};
 }

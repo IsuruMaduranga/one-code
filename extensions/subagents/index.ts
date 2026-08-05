@@ -25,7 +25,14 @@ import { type AgentDefinition, type AgentSource, agentDirs, discoverAgents } fro
 import { discoverPlugins } from "../lib/plugins.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { type BackgroundTask, generateTaskId, TASK_REGISTER_CHANNEL } from "../background/registry.ts";
-import { type ChildHandle, type ChildOutcome, OUTPUT_CAP, startChild } from "./child.ts";
+import {
+	type ChildHandle,
+	type ChildOutcome,
+	OUTPUT_CAP,
+	type RpcChildHandle,
+	startChild,
+	startRpcChild,
+} from "./child.ts";
 import { type AgentRunRecord, nextRunName, RunRegistry } from "./runs.ts";
 import { emptyUsage, formatUsage, type UsageTotals } from "./usage.ts";
 import { cleanupWorktree, createWorktree, isGitRepo, type Worktree } from "./worktree.ts";
@@ -107,11 +114,19 @@ async function runPool<T, R>(items: T[], limit: number, fn: (item: T) => Promise
 
 export const FORK_AGENT = "fork";
 
+/** A background agent's process, kept alive after its run so it can be messaged. */
+interface Resident {
+	handle: RpcChildHandle;
+	/** FIFO — the head entry handles the next turn_end (initial task, then one per idle-time message). */
+	turnHandlers: Array<(outcome: ChildOutcome) => void>;
+}
+
 export default function subagentsExtension(pi: ExtensionAPI) {
 	const registry = new RunRegistry();
-	/** Names with a child currently running (send_message must wait for these). */
+	/** Names with a foreground/respawned child currently running (send_message must wait for these). */
 	const runningNames = new Set<string>();
-	const liveChildren = new Set<ChildHandle>();
+	const liveChildren = new Set<{ kill(): void }>();
+	const residents = new Map<string, Resident>();
 
 	const loadAgents = (cwd: string) => {
 		// Plugin agents sit between bundled and user definitions, and are exposed
@@ -340,16 +355,80 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			for (const p of prepared) registry.add(p.record);
 			const records = prepared.map((p) => p.record);
 
-			// --- Background: start everything, return task ids, notify on completion.
+			// --- Background: RPC children that stay resident after their run, so
+			// send_message can reach them live (steer mid-turn, prompt when idle).
 			if (params.run_in_background) {
 				const lines: string[] = [];
 				for (const p of prepared) {
+					let worktree: Worktree | undefined;
+					if (p.request.worktree) {
+						try {
+							worktree = await createWorktree(ctx.cwd, p.request.name);
+							p.record.cwd = worktree.path;
+						} catch (error) {
+							lines.push(`✗ ${p.record.name}: could not create a worktree: ${(error as Error).message}`);
+							continue;
+						}
+					}
+
 					const logPath = p.record.sessionSearchDir ? join(p.record.sessionSearchDir, "output.log") : undefined;
 					let finish!: () => void;
 					const finished = new Promise<void>((resolve) => {
 						finish = resolve;
 					});
-					let childHandle: ChildHandle | undefined;
+
+					const resident: Resident = { handle: undefined as never, turnHandlers: [] };
+					const worktreeNote = worktree
+						? `\n\n(Running in worktree ${worktree.path} — kept while the agent stays resident.)`
+						: "";
+					resident.turnHandlers.push((outcome) => {
+						task.status = outcome.failed ? "failed" : "completed";
+						task.finishedAt = Date.now();
+						finish();
+						const stats = [`${outcome.toolCalls} tools`, formatUsage(outcome.usage)].filter(Boolean).join(" · ");
+						notify(
+							"subagent-result",
+							`SYSTEM NOTIFICATION — NOT USER INPUT\nBackground agent ${p.record.name} (${p.record.taskId}) ${outcome.failed ? "failed" : "completed"} (${stats}). It stays resident — message it with send_message.\n\n${outcome.output.slice(0, OUTPUT_CAP)}${worktreeNote}`,
+							{ taskId: p.record.taskId, name: p.record.name, failed: outcome.failed ?? false },
+						);
+					});
+
+					const handle = startRpcChild({
+						agent: p.agentDef,
+						cwd: p.record.cwd,
+						forkFrom: p.request.fork ? (sessionFile ?? undefined) : undefined,
+						sessionDir: p.record.sessionSearchDir || undefined,
+						model: p.request.model,
+						thinking: p.request.thinking,
+						onProgress: (_toolCalls, text) => {
+							if (logPath && text) writeFileSync(logPath, text);
+						},
+						onTurnEnd: (outcome) => {
+							registry.sessionFileFor(p.record);
+							if (logPath) writeFileSync(logPath, resident.handle.snapshot().text || outcome.output);
+							const handler = resident.turnHandlers.shift();
+							if (handler) {
+								handler(outcome);
+							} else {
+								// A turn nobody is waiting on (e.g. a steer that raced past its
+								// target turn and ran on its own) must still surface.
+								notify(
+									"subagent-result",
+									`SYSTEM NOTIFICATION — NOT USER INPUT\nUpdate from ${p.record.name}:\n\n${outcome.output.slice(0, OUTPUT_CAP)}`,
+									{ name: p.record.name, failed: outcome.failed ?? false },
+								);
+							}
+						},
+						onExit: () => {
+							liveChildren.delete(handle);
+							if (residents.get(p.record.name) === resident) residents.delete(p.record.name);
+							if (worktree) void cleanupWorktree(ctx.cwd, worktree);
+						},
+					});
+					resident.handle = handle;
+					residents.set(p.record.name, resident);
+					liveChildren.add(handle);
+
 					const task: BackgroundTask = {
 						id: p.record.taskId,
 						kind: "subagent",
@@ -357,37 +436,13 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						status: "running",
 						startedAt: Date.now(),
 						logPath,
-						output: () => childHandle?.snapshot().text ?? "",
-						stop: () => childHandle?.kill(),
+						output: () => handle.snapshot().text,
+						stop: () => handle.kill(),
+						resident: () => !handle.exited(),
 						finished,
 					};
-
-					const resultPromise = executeRun(
-						p,
-						ctx,
-						sessionFile ?? undefined,
-						undefined,
-						(_toolCalls, text) => {
-							if (logPath && text) writeFileSync(logPath, text);
-						},
-						(handle) => {
-							childHandle = handle;
-						},
-					);
 					pi.events.emit(TASK_REGISTER_CHANNEL, task);
-
-					void resultPromise.then((result) => {
-						task.status = result.failed ? "failed" : "completed";
-						task.finishedAt = Date.now();
-						if (logPath) writeFileSync(logPath, result.output);
-						finish();
-						const stats = [`${result.toolCalls} tools`, formatUsage(result.usage)].filter(Boolean).join(" · ");
-						notify(
-							"subagent-result",
-							`SYSTEM NOTIFICATION — NOT USER INPUT\nBackground agent ${result.name} (${result.taskId}) ${result.failed ? "failed" : "completed"} (${stats}).\n\n${result.output.slice(0, OUTPUT_CAP)}${result.worktreePath ? `\n\n(Changes left in worktree ${result.worktreePath} — review or merge them.)` : ""}`,
-							{ taskId: result.taskId, name: result.name, failed: result.failed ?? false },
-						);
-					});
+					handle.send(p.request.task);
 
 					lines.push(
 						`⏳ ${p.record.name} (task ${p.record.taskId}) running in background${logPath ? ` — output log: ${logPath}` : ""}`,
@@ -397,7 +452,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					content: [
 						{
 							type: "text",
-							text: `${lines.join("\n")}\n\nCompletion will arrive as a system notification. Inspect with task_output, stop with task_stop, continue later with send_message.`,
+							text: `${lines.join("\n")}\n\nCompletion will arrive as a system notification. Inspect with task_output, stop with task_stop — and send_message reaches the agent even while it runs (the message is steered into its current turn).`,
 						},
 					],
 					details: { agentRuns: records, background: true },
@@ -449,7 +504,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		name: "send_message",
 		label: "Send Message",
 		description:
-			"Send a message to a previously run subagent, resuming it with its full context intact. Address it by the name from its spawn result (or task id). The agent must have finished its current run; the reply arrives as a system notification.",
+			"Send a message to a previously spawned subagent, addressed by the name from its spawn result (or task id). A resident background agent is reached live: mid-turn the message is steered into its current work; when idle it starts a new turn and the reply arrives as a system notification. A finished, non-resident agent is resumed from its session file with full context.",
 		parameters: Type.Object({
 			to: Type.String({ description: "Agent name (or task id) from a previous subagent run" }),
 			message: Type.String({ description: "Plain text message for the agent" }),
@@ -465,6 +520,62 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					isError: true,
 				};
 			}
+			// Resident background agent: reach it live over its RPC channel.
+			const resident = residents.get(record.name);
+			if (resident && !resident.handle.exited()) {
+				if (resident.handle.busy()) {
+					resident.handle.send(params.message);
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Message steered into ${record.name}'s running turn — it will be taken into account before the turn completes, and the turn's completion notification will reflect it.`,
+							},
+						],
+						details: { agentRuns: [record], steered: true },
+					};
+				}
+
+				const taskId = generateTaskId();
+				let finish!: () => void;
+				const finished = new Promise<void>((resolve) => {
+					finish = resolve;
+				});
+				const task: BackgroundTask = {
+					id: taskId,
+					kind: "subagent",
+					description: `message to ${record.name}${params.summary ? `: ${params.summary}` : ""}`,
+					status: "running",
+					startedAt: Date.now(),
+					output: () => resident.handle.snapshot().text,
+					stop: () => resident.handle.kill(),
+					resident: () => !resident.handle.exited(),
+					finished,
+				};
+				resident.turnHandlers.push((outcome) => {
+					task.status = outcome.failed ? "failed" : "completed";
+					task.finishedAt = Date.now();
+					finish();
+					const stats = [`${outcome.toolCalls} tools`, formatUsage(outcome.usage)].filter(Boolean).join(" · ");
+					notify(
+						"subagent-result",
+						`SYSTEM NOTIFICATION — NOT USER INPUT\nReply from ${record.name} (${stats}):\n\n${outcome.output.slice(0, OUTPUT_CAP)}`,
+						{ taskId, name: record.name, failed: outcome.failed ?? false },
+					);
+				});
+				pi.events.emit(TASK_REGISTER_CHANNEL, task);
+				resident.handle.send(params.message);
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Message sent to resident agent ${record.name} (task ${taskId}). The reply will arrive as a system notification; inspect with task_output.`,
+						},
+					],
+					details: { agentRuns: [record], taskId },
+				};
+			}
+
 			if (runningNames.has(record.name)) {
 				return {
 					content: [

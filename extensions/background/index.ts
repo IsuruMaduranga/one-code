@@ -273,12 +273,23 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 					isError: true,
 				};
 			}
-			if (task.status !== "running") {
+			if (task.status !== "running" && !task.resident?.()) {
 				return { content: [{ type: "text", text: `Task ${task.id} is already ${task.status}.` }], details: { taskId: task.id } };
 			}
+			const wasResident = task.status !== "running";
 			task.stop();
 			updateWidget();
-			return { content: [{ type: "text", text: `Stop requested for ${task.id} (${task.description}).` }], details: { taskId: task.id } };
+			return {
+				content: [
+					{
+						type: "text",
+						text: wasResident
+							? `Terminated the resident agent behind ${task.id} (${task.description}); it can no longer be messaged live (send_message will resume it from its session file).`
+							: `Stop requested for ${task.id} (${task.description}).`,
+					},
+				],
+				details: { taskId: task.id },
+			};
 		},
 	});
 
