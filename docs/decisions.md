@@ -47,6 +47,27 @@ Per project directive, prefer ecosystem packages over new code.
   event stream, return the child's final text. Worth re-evaluating the package
   on a future release.
 
+## Deferred tools (ToolSearch)
+
+`extensions/lib/deferred.ts` holds a registry; any extension defers its own
+tools by emitting `pi-claude-code:defer-tool` on the event bus. `tool-search`
+deactivates them at session start, announces the names in an every-turn
+`<system-reminder>` (as Claude Code does), and activates matches additively so
+pi can use native deferred loading.
+
+**Load order is load-bearing:** `tool-search` must appear before any extension
+that defers a tool, because those emit during extension loading and pi's event
+bus only delivers to already-registered listeners. Deferred tools also omit
+`promptSnippet`/`promptGuidelines` — activating a tool that has them rebuilds
+the system prompt and invalidates the cached prefix, defeating the purpose.
+
+Verified on OpenAI (gpt-5.5): after `tool_search`, pi injected native
+`tool_search_call` / `tool_search_output` items at the load point rather than
+appending the schema to the request's tool array, and the model then called the
+tool successfully. The Anthropic `defer_loading` path and the non-native
+fallback are pi-owned code paths that could not be exercised here (no second
+provider credential configured).
+
 ## Permission modes and subagents
 
 Permission mode lives in the permissions extension and is exported to child

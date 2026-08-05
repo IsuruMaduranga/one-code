@@ -8,11 +8,13 @@
     "extensions": [
       "extensions/claude-compat/index.ts",
       "extensions/system-reminder/index.ts",
+      "extensions/tool-search/index.ts",
       "extensions/permissions/index.ts",
       "extensions/ask-user/index.ts",
       "extensions/subagents/index.ts",
       "extensions/todo/index.ts",
       "extensions/plan-mode/index.ts",
+      "extensions/notebook/index.ts",
       "extensions/system-prompt/index.ts"
     ],
     "skills": [
