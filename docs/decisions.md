@@ -188,6 +188,69 @@ exited in 16s, no language-server processes leaked, the deferred tool loaded and
 answered on demand, and a TypeScript 7 project returned the preflight
 explanation.
 
+## Harness discipline (divergences found by self-comparison)
+
+Comparing our implementation against the real Claude Code harness *as observed
+from inside a session* surfaced behaviours that reading a request payload would
+never reveal, because they are enforcement, not prompting.
+
+**File freshness — `extensions/file-tracker/`.** Claude Code refuses to edit a
+file the model has not read, refuses to write over an unread existing file,
+rejects an edit when the file changed after the read, and reports out-of-band
+changes with a line-numbered excerpt. This exists to prevent lost updates, and it
+is why Claude Code can tell the model "do not re-read a file you just edited — the
+harness tracks file state for you". We now do the same.
+
+Tracking is **by content, not by tool call**, which is the load-bearing detail:
+it catches writes made through bash that no tool hook can see. (In the session
+that prompted this, the reminders I received were triggered by my own `python3`
+edits.)
+
+One conflict worth recording, because the first implementation had it backwards:
+announcing an external change must **not** mark the file as read. If the pre-turn
+scan records the new content, the file becomes "fresh" and the stale-edit guard
+stops firing — so the harness would helpfully report the change and then permit
+the clobbering edit. Notifications are tracked separately from reads, purely to
+suppress repeat warnings.
+
+**Denial feedback carries the user's words.** The prompt option says "No, tell the
+agent what to do differently", so it now actually asks, and the typed reason is
+appended to the block reason (`The user said: …`). Previously the option promised
+something the code did not deliver.
+
+**State-driven nudges.** Claude Code injects a reminder when the task tools have
+gone unused. `todo_write` now does the same after eight quiet turns, and also
+flags a list with no `in_progress` item or several of them. A todo tool nobody
+remembers to call is decoration.
+
+**CLAUDE.md framing.** Context files are now introduced with Claude Code's own
+wording — "IMPORTANT: These instructions OVERRIDE any default behavior and you
+MUST follow them exactly as written" — rather than a neutral "project-specific
+instructions" header. Placement still differs deliberately: ours sits in the
+system prompt (via pi), Claude Code's arrives in a first-user-message reminder.
+Ours caches better.
+
+**Opt-in `context_management`.** Claude Code sends
+`clear_thinking_20251015` on every request so long sessions stop carrying old
+reasoning blocks. `extensions/context-management/` does this via
+`before_provider_request`, but **off by default** behind `CC_CLEAR_THINKING=1`:
+the Anthropic API rejects unknown top-level parameters, there is no Anthropic
+credential here to verify against, and a rejected parameter would fail *every*
+request. Enable it once confirmed on your account.
+
+Verified end-to-end: an unread-file edit was blocked and the file left untouched;
+after an external edit the stale guard blocked the edit and the change reminder
+reached the model (both visible in the request payload); a declined write
+delivered `The user said: Use append mode instead…`; and the todo nudge appeared
+after ten quiet turns.
+
+**Deliberately not copied:** OS sandboxing and the LLM safety classifier that
+gates bash (pi's stance is to containerize, and a classifier needs a model call
+per command); harness-level command shaping such as blocking foreground `sleep`;
+background agents with task notifications (still Phase 8); and mid-conversation
+`role: "system"` messages, which pi's message types cannot express — our
+user-message reminders are the closest equivalent.
+
 ## Skills and plugins
 
 **The `skill` tool.** pi's own skill mechanism lists skills in the system prompt

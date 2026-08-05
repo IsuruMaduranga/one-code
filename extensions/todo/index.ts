@@ -10,6 +10,7 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 
 interface TodoItem {
 	content: string;
@@ -38,8 +39,16 @@ function formatTodos(todos: TodoItem[]): string {
 	return todos.map((t) => `[${mark(t)}] ${t.content}`).join("\n");
 }
 
+/**
+ * Claude Code nudges the model when the task tools have gone unused for a while.
+ * A todo tool nobody remembers to call is decoration, so we do the same — quietly
+ * and rarely, based on session state.
+ */
+const NUDGE_AFTER_TURNS = 8;
+
 export default function todoExtension(pi: ExtensionAPI) {
 	let todos: TodoItem[] = [];
+	let turnsSinceTodoUse = 0;
 
 	const updateWidget = (ctx: ExtensionContext) => {
 		if (!ctx.hasUI) return;
@@ -68,6 +77,31 @@ export default function todoExtension(pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => reconstructState(ctx));
 	pi.on("session_tree", (_event, ctx) => reconstructState(ctx));
 
+	pi.on("turn_end", () => {
+		turnsSinceTodoUse++;
+		if (turnsSinceTodoUse < NUDGE_AFTER_TURNS) return;
+		turnsSinceTodoUse = 0;
+
+		if (todos.length === 0) {
+			pi.events.emit(REMINDER_CHANNEL, {
+				text: "The todo tool has not been used recently. If the current work has several steps, track it with todo_write so progress is visible; skip this if the task is simple.",
+			});
+			return;
+		}
+
+		const active = todos.filter((t) => t.status === "in_progress");
+		const done = todos.filter((t) => t.status === "completed").length;
+		if (active.length === 0 && done < todos.length) {
+			pi.events.emit(REMINDER_CHANNEL, {
+				text: `The todo list has ${todos.length - done} unfinished item(s) and none marked in_progress. Update it with todo_write to reflect what you are actually doing, or clear it if it is stale.`,
+			});
+		} else if (active.length > 1) {
+			pi.events.emit(REMINDER_CHANNEL, {
+				text: `${active.length} todo items are marked in_progress. Exactly one should be in progress at a time — update the list with todo_write.`,
+			});
+		}
+	});
+
 	pi.registerTool({
 		name: "todo_write",
 		label: "Todos",
@@ -80,6 +114,7 @@ export default function todoExtension(pi: ExtensionAPI) {
 		parameters: TodoWriteParams,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			todos = params.todos as TodoItem[];
+			turnsSinceTodoUse = 0;
 			updateWidget(ctx);
 			return {
 				content: [{ type: "text", text: formatTodos(todos) }],

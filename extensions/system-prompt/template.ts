@@ -101,7 +101,9 @@ export function buildClaudeCodeSystemPrompt(options: BuildSystemPromptOptions, e
 	const contextFiles = options.contextFiles ?? [];
 	if (contextFiles.length > 0) {
 		prompt += "\n\n<project_context>\n\n";
-		prompt += "Project-specific instructions and guidelines:\n\n";
+		// Claude Code frames context files as overriding defaults; without that the
+		// model treats CLAUDE.md as background reading rather than instructions.
+		prompt += "Codebase and user instructions are shown below. Be sure to adhere to these instructions. IMPORTANT: These instructions OVERRIDE any default behavior and you MUST follow them exactly as written.\n\n";
 		for (const { path: filePath, content } of contextFiles) {
 			prompt += `<project_instructions path="${filePath}">\n${content}\n</project_instructions>\n\n`;
 		}

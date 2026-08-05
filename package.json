@@ -10,6 +10,7 @@
       "extensions/system-reminder/index.ts",
       "extensions/tool-search/index.ts",
       "extensions/plugins/index.ts",
+      "extensions/file-tracker/index.ts",
       "extensions/permissions/index.ts",
       "extensions/ask-user/index.ts",
       "extensions/skill/index.ts",
@@ -21,6 +22,7 @@
       "extensions/web-fetch/index.ts",
       "extensions/lsp/index.ts",
       "extensions/mcp/index.ts",
+      "extensions/context-management/index.ts",
       "extensions/system-prompt/index.ts"
     ]
   },

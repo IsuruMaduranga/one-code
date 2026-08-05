@@ -142,7 +142,14 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			if (rule) sessionAllows.push(rule);
 			return undefined;
 		}
-		return { block: true, reason: DENIED_BY_USER };
+
+		// The "tell the agent what to do differently" option has to actually carry
+		// the user's words, or the model is left guessing why it was stopped.
+		const feedback = await ctx.ui.input("What should the agent do instead?", "Optional — press Esc to skip");
+		return {
+			block: true,
+			reason: feedback?.trim() ? `${DENIED_BY_USER}\n\nThe user said: ${feedback.trim()}` : DENIED_BY_USER,
+		};
 	});
 
 	pi.registerCommand("permission-mode", {
