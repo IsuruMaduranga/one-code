@@ -1,7 +1,7 @@
 {
   "name": "pincer-agent",
   "version": "0.1.0",
-  "description": "pincer \u2014 the Claude Code experience on the pi harness: ported system prompt, Claude-Code-format permissions, .claude/ compatibility, ToolSearch-style deferred tools, and system-reminder steering",
+  "description": "pincer — the Claude Code experience on the pi harness: ported system prompt, Claude-Code-format permissions, .claude/ compatibility, ToolSearch-style deferred tools, and system-reminder steering",
   "keywords": [
     "pi",
     "pi-package",
@@ -37,6 +37,7 @@
       "extensions/ask-user/index.ts",
       "extensions/skill/index.ts",
       "extensions/subagents/index.ts",
+      "extensions/workflow/index.ts",
       "extensions/todo/index.ts",
       "extensions/plan-mode/index.ts",
       "extensions/notebook/index.ts",
@@ -67,6 +68,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@mozilla/readability": "^0.6.0",
+    "acorn": "^8.18.0",
     "linkedom": "^0.18.13",
     "pi-web-search": "^1.3.1",
     "turndown": "^7.2.4",

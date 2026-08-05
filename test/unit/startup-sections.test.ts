@@ -8,6 +8,7 @@ import {
 	quietStartupEnabled,
 	skillNames,
 	themeNames,
+	workflowNames,
 } from "../../extensions/branding/startup.ts";
 
 const tmp: string[] = [];
@@ -62,6 +63,20 @@ describe("themeNames", () => {
 		writeFileSync(join(dir, "pincer-light.json"), "{}");
 		writeFileSync(join(dir, "README.md"), "not a theme");
 		expect(themeNames(dir)).toEqual(["pincer", "pincer-light"]);
+	});
+});
+
+describe("workflowNames", () => {
+	it("lists .js/.mjs workflow scripts from project and user dirs, deduped and sorted", () => {
+		const cwd = scratch();
+		const home = scratch();
+		mkdirSync(join(cwd, ".claude", "workflows"), { recursive: true });
+		mkdirSync(join(home, ".claude", "workflows"), { recursive: true });
+		writeFileSync(join(cwd, ".claude", "workflows", "review.js"), "");
+		writeFileSync(join(home, ".claude", "workflows", "audit.mjs"), "");
+		writeFileSync(join(home, ".claude", "workflows", "review.js"), "");
+		writeFileSync(join(home, ".claude", "workflows", "notes.txt"), "");
+		expect(workflowNames(cwd, home)).toEqual(["audit", "review"]);
 	});
 });
 

@@ -36,6 +36,7 @@ const CC_TOOL_NAMES: Record<string, string> = {
 	skill: "skill",
 	askuserquestion: "ask_user_question",
 	ask_user_question: "ask_user_question",
+	workflow: "workflow",
 };
 
 export function normalizeToolName(name: string): string {
@@ -173,6 +174,10 @@ export const AUTO_ALLOWED_TOOLS = new Set<string>([
 	// tool permissions (inheriting this session's mode via env).
 	"subagent",
 	"subagent_wait",
+	// Same reasoning for workflow: the script itself cannot touch the
+	// filesystem, network, or shell — only spawn agents, and every one of those
+	// runs behind the workflow permission gate.
+	"workflow",
 	// Plan-mode transitions must work inside plan mode itself.
 	"enter_plan_mode",
 	"exit_plan_mode",

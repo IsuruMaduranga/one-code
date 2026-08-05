@@ -2,7 +2,7 @@
 
 The Claude Code experience, as a package for the [pi coding agent](https://github.com/earendil-works/pi) — so the same workflow runs on **any model provider**, and upstream pi improvements arrive as a version bump.
 
-It brings across the parts of Claude Code that live in the harness rather than the model: a ported system prompt, a permission system that reads your existing `.claude/settings.json`, `<system-reminder>` steering, read-before-write guards, subagents, todos, plan mode, skills, MCP, and ToolSearch-style deferred tool loading.
+It brings across the parts of Claude Code that live in the harness rather than the model: a ported system prompt, a permission system that reads your existing `.claude/settings.json`, `<system-reminder>` steering, read-before-write guards, subagents, ultracode workflows, todos, plan mode, skills, MCP, and ToolSearch-style deferred tool loading.
 
 Your existing Claude Code setup works unchanged — `CLAUDE.md`, `.claude/commands`, `.claude/skills`, `.claude/agents`, `.mcp.json`, and installed plugins are all picked up.
 
@@ -67,7 +67,7 @@ pi --model ollama/qwen3-coder      # any provider in ~/.pi/agent/models.json
 
 ## What you get
 
-**Always available:** pi's file and shell tools (`read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`) plus `subagent`, `todo_write`, `skill`, `ask_user_question`, `enter_plan_mode`, `exit_plan_mode`, and `tool_search`.
+**Always available:** pi's file and shell tools (`read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`) plus `subagent`, `workflow`, `todo_write`, `skill`, `ask_user_question`, `enter_plan_mode`, `exit_plan_mode`, and `tool_search`.
 
 **Loaded on demand** via `tool_search`, so their schemas stay out of the prompt until needed: `web_search`, `web_fetch`, `url_context`, `notebook_edit`, `lsp_diagnostics`, `list_mcp_resources`, `read_mcp_resource`, and every MCP tool. On Anthropic and recent OpenAI models this uses the provider's native deferred-tool mechanism, so loading a tool doesn't invalidate the cached prompt prefix.
 
@@ -79,10 +79,48 @@ pi --model ollama/qwen3-coder      # any provider in ~/.pi/agent/models.json
 | `/permission-mode <mode>` | Switch mode: `default`, `acceptEdits`, `plan`, `bypassPermissions` |
 | `/allow <rule>` | Persist an allow rule, e.g. `/allow Bash(npm test:*)` (add `global` for user scope) |
 | `/agents`, `/skills`, `/todos` | List available agents, skills, current todos |
+| `/workflows` | Workflow runs and saved workflows; `stop <runId>` / `log <runId>` |
 | `/plugins`, `/mcp`, `/lsp` | Status of plugins, MCP servers, language servers |
 | `/tools-deferred` | Which tools are deferred vs loaded |
 
 Plugin commands appear namespaced, e.g. `/commit-commands:commit`.
+
+### Workflows (ultracode)
+
+For work that is worth spreading across many agents — a broad audit, a
+migration, a review that should be independently double-checked — say
+**`ultracode`** in your message, or just ask for a workflow. The model then
+writes a short JavaScript orchestration script and runs it through the
+`workflow` tool:
+
+```js
+export const meta = { name: 'audit', description: 'find routes missing auth', phases: [{ title: 'Scan' }, { title: 'Audit' }] }
+phase('Scan')
+const files = await agent('List every route file under src/routes/.')
+phase('Audit')
+return await pipeline(
+  files.split('\n').filter(Boolean),
+  file => agent(`Audit ${file} for missing auth checks.`, { label: file }),
+)
+```
+
+Each `agent()` call is a subagent with its own context window, so only what the
+script keeps comes back. `parallel()` fans out with a barrier, `pipeline()`
+without one; pass a JSON Schema as `schema` to get a validated object instead of
+text, and `isolation: 'worktree'` when parallel agents will edit files.
+Concurrency is capped at 16.
+
+Runs go to the background: you get a run id immediately, a live progress panel,
+and the result as a follow-up message. `/workflows` lists runs and saved
+workflows, `/workflows stop <runId>` ends one. Every run journals its completed
+agent calls, so re-running with `resumeFromRunId` replays the unchanged prefix
+from cache instead of paying for it twice — edit the script and only what
+changed re-runs. Drop a script in `.claude/workflows/` (project) or
+`~/.claude/workflows/` (personal) to invoke it by name.
+
+Workflow agents obey your permission rules: `deny` rules always win, edits are
+allowed as Claude Code does for subagents, and anything that would normally
+prompt is refused, since there is nobody to ask mid-run.
 
 ## Configuration
 
@@ -159,13 +197,14 @@ Tools appear as `mcp__<server>__<tool>` and are deferred behind `tool_search`.
 
   in `~/.pi/agent/settings.json`. pi hot-reloads a theme file while it is active, so you can tweak `themes/pincer.json` and watch it change.
 - **The startup banner** is replaced with this package's own. `CC_NO_BANNER=1` restores pi's.
-- **Hide pi's startup resource listing** (whose `[Extensions]` section lists this package's twenty internal modules) by setting `"quietStartup": true` in `~/.pi/agent/settings.json`. The banner detects this and shows compact `context` / `skills` / `themes` lines instead — same information, no extension noise.
+- **Hide pi's startup resource listing** (whose `[Extensions]` section lists this package's twenty-odd internal modules) by setting `"quietStartup": true` in `~/.pi/agent/settings.json`. The banner detects this and shows compact `context` / `skills` / `workflows` / `themes` lines instead — same information, no extension noise.
 - **Long-session context trimming on Anthropic**: on by default for first-party Anthropic — the API is asked to drop old thinking blocks, as Claude Code does. See the `CC_CLEAR_THINKING` row in Configuration and `docs/decisions.md`.
 
 ## Known limitations
 
 - **No sandbox.** pi runs shell commands with your privileges; the permission system decides *whether* a command runs, not what it can reach. For a hard boundary, run pi in a container or add a sandbox extension — see pi's `docs/containerization.md`.
-- **Subagents run in the foreground.** No detached runs, so no `TaskOutput`/`TaskStop` equivalents yet.
+- **Subagents run in the foreground.** No detached runs, so no `TaskOutput`/`TaskStop` equivalents yet. (Workflows *do* run in the background, with `/workflows stop`.)
+- **Background workflow runs end with the session.** They do not survive `/reload` or switching sessions; resume one with its run id and the journaled prefix replays for free.
 - **`web_fetch` returns extracted markdown** (windowed, with pagination) rather than summarising the page with a small model.
 - Verified end-to-end on OpenAI/Codex and Anthropic models, including Anthropic's native deferred-tool loading, the pre-5.4 fallback, and `context_management` trimming. Bedrock/Vertex/proxy endpoints are not yet exercised — context trimming stays off there by default.
 

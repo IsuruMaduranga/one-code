@@ -68,6 +68,22 @@ export function skillNames(cwd: string, home: string): string[] {
 	return [...names].sort((a, b) => a.localeCompare(b));
 }
 
+/** Saved workflow names from the Claude Code layout dirs (project shadows user). */
+export function workflowNames(cwd: string, home: string): string[] {
+	const names = new Set<string>();
+	for (const dir of [join(cwd, ".claude", "workflows"), join(home, ".claude", "workflows")]) {
+		if (!existsSync(dir)) continue;
+		try {
+			for (const entry of readdirSync(dir)) {
+				if (entry.endsWith(".js") || entry.endsWith(".mjs")) names.add(entry.replace(/\.(js|mjs)$/, ""));
+			}
+		} catch {
+			// Unreadable dir: skip, same as pi would.
+		}
+	}
+	return [...names].sort((a, b) => a.localeCompare(b));
+}
+
 /** Theme names bundled with this package. */
 export function themeNames(packageThemesDir: string): string[] {
 	try {
@@ -94,6 +110,7 @@ export function collectStartupSections(cwd: string, home: string, packageThemesD
 	const sections: StartupSection[] = [
 		{ label: "context", items: contextFileNames(cwd) },
 		{ label: "skills", items: skillNames(cwd, home) },
+		{ label: "workflows", items: workflowNames(cwd, home) },
 		{ label: "themes", items: themeNames(packageThemesDir) },
 	];
 	return sections.filter((s) => s.items.length > 0);

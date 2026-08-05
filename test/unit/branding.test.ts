@@ -28,6 +28,7 @@ describe("bannerLines", () => {
 			"ctrl+c/ctrl+d clear/exit",
 			"/ commands",
 			"! bash",
+			"ultracode multi-agent workflow",
 		]) {
 			expect(hints).toContain(key);
 		}

@@ -72,6 +72,9 @@ const HINT_LINES: [key: string, what: string][][] = [
 		["ctrl+c/ctrl+d", "clear/exit"],
 		["/", "commands"],
 		["!", "bash"],
+		// A keyword rather than a binding, but this is the line for "type this,
+		// get that" — and an opt-in feature nobody knows the word for is invisible.
+		["ultracode", "multi-agent workflow"],
 	],
 ];
 
