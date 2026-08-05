@@ -65,8 +65,13 @@ export function parseAgentFile(path: string, content: string): AgentDefinition |
 	};
 }
 
-export function agentDirs(cwd: string, home: string): string[] {
-	return [join(home, ".claude", "agents"), join(cwd, ".claude", "agents")];
+/**
+ * Lowest to highest precedence: the catalog bundled with this package, then the
+ * user's `~/.claude/agents`, then the project's `.claude/agents`. A user or
+ * project definition with the same name replaces a bundled one.
+ */
+export function agentDirs(cwd: string, home: string, bundled?: string): string[] {
+	return [...(bundled ? [bundled] : []), join(home, ".claude", "agents"), join(cwd, ".claude", "agents")];
 }
 
 /** Later directories override earlier ones on name collisions. */

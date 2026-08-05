@@ -1,0 +1,97 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { agentDirs, discoverAgents, parseAgentFile } from "../../extensions/subagents/agents.ts";
+
+describe("parseAgentFile", () => {
+	it("reads name, description, tools and model from frontmatter", () => {
+		const agent = parseAgentFile(
+			"/x/reviewer.md",
+			`---
+name: reviewer
+description: Reviews code
+tools: read, grep
+model: anthropic/claude-sonnet-5
+---
+You review code.`,
+		);
+		expect(agent).toMatchObject({
+			name: "reviewer",
+			description: "Reviews code",
+			tools: ["read", "grep"],
+			model: "anthropic/claude-sonnet-5",
+			systemPrompt: "You review code.",
+		});
+	});
+
+	it("accepts a yaml list for tools and omits an empty list", () => {
+		expect(parseAgentFile("/x/a.md", "---\ntools:\n  - read\n  - ls\n---\nbody")?.tools).toEqual(["read", "ls"]);
+		expect(parseAgentFile("/x/b.md", "---\ntools:\n---\nbody")?.tools).toBeUndefined();
+	});
+
+	it("falls back to the filename when no name is given", () => {
+		expect(parseAgentFile("/x/scout.md", "---\ndescription: d\n---\nbody")?.name).toBe("scout");
+	});
+
+	it("rejects a definition with no system prompt", () => {
+		expect(parseAgentFile("/x/empty.md", "---\nname: empty\n---\n\n   ")).toBeUndefined();
+	});
+});
+
+describe("agentDirs", () => {
+	it("orders bundled, then user, then project", () => {
+		expect(agentDirs("/proj", "/home/u", "/pkg/agents")).toEqual([
+			"/pkg/agents",
+			"/home/u/.claude/agents",
+			"/proj/.claude/agents",
+		]);
+	});
+
+	it("omits the bundled directory when not supplied", () => {
+		expect(agentDirs("/proj", "/home/u")).toEqual(["/home/u/.claude/agents", "/proj/.claude/agents"]);
+	});
+});
+
+describe("discoverAgents", () => {
+	let root: string;
+
+	const writeAgent = (dir: string, name: string, body: string, description = "d") => {
+		mkdirSync(dir, { recursive: true });
+		writeFileSync(join(dir, `${name}.md`), `---\nname: ${name}\ndescription: ${description}\n---\n${body}`);
+	};
+
+	beforeEach(() => {
+		root = mkdtempSync(join(tmpdir(), "cc-agents-"));
+	});
+	afterEach(() => {
+		rmSync(root, { recursive: true, force: true });
+	});
+
+	it("collects definitions from every directory, sorted by name", () => {
+		writeAgent(join(root, "bundled"), "plan", "bundled plan");
+		writeAgent(join(root, "user"), "custom", "user custom");
+		const agents = discoverAgents([join(root, "bundled"), join(root, "user")]);
+		expect(agents.map((a) => a.name)).toEqual(["custom", "plan"]);
+	});
+
+	it("lets a later directory override an earlier one by name", () => {
+		writeAgent(join(root, "bundled"), "plan", "bundled version");
+		writeAgent(join(root, "project"), "plan", "project version");
+		const agents = discoverAgents([join(root, "bundled"), join(root, "project")]);
+		expect(agents).toHaveLength(1);
+		expect(agents[0].systemPrompt).toBe("project version");
+	});
+
+	it("searches subdirectories recursively", () => {
+		writeAgent(join(root, "bundled", "nested", "deep"), "buried", "found me");
+		expect(discoverAgents([join(root, "bundled")]).map((a) => a.name)).toEqual(["buried"]);
+	});
+
+	it("ignores non-markdown files, missing directories, and malformed definitions", () => {
+		mkdirSync(join(root, "bundled"), { recursive: true });
+		writeFileSync(join(root, "bundled", "notes.txt"), "not an agent");
+		writeFileSync(join(root, "bundled", "empty.md"), "---\nname: empty\n---\n");
+		expect(discoverAgents([join(root, "bundled"), join(root, "does-not-exist")])).toEqual([]);
+	});
+});

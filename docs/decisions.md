@@ -188,6 +188,45 @@ exited in 16s, no language-server processes leaked, the deferred tool loaded and
 answered on demand, and a TypeScript 7 project returned the preflight
 explanation.
 
+## Subagents: what matches Claude Code and what does not
+
+`extensions/subagents/` is our own (see the rejection of `pi-subagents` above).
+Agent definitions use Claude Code's markdown-plus-frontmatter format (`name`,
+`description`, `tools`, `model`), discovered lowest-to-highest precedence from
+the catalog bundled in this package (`agents/`), then `~/.claude/agents`, then
+`<project>/.claude/agents` — so an existing Claude Code agent file overrides a
+bundled one of the same name.
+
+**Bundled catalog.** Three definitions mirroring Claude Code's built-ins:
+`general-purpose` (full tool set), `explore` (read-only fan-out search),
+and `plan` (read-only architect). Claude Code's other built-ins are
+Anthropic-product specific (`claude-code-guide`, `statusline-setup`) and are not
+reproduced.
+
+**Implemented, verified live:**
+
+- Parallel runs, four concurrent.
+- Per-call `model` and `thinking` overrides (the agent file's frontmatter is the
+  default). Verified a child running as `gpt-5.4` while the session ran 5.5.
+- **`agent: "fork"`** — a child that inherits the caller's full conversation.
+  This is a flag, not an implementation: pi's `--fork <session file>` clones a
+  session, and `ctx.sessionManager.getSessionFile()` gives us the path. Verified
+  by planting a codeword in the parent transcript and having the forked child
+  recite it. Requires a persisted session; `--no-session` returns a clear error.
+- **`isolation: "worktree"`** — `git worktree add` at HEAD on a throwaway branch,
+  the child runs with that as cwd, and the worktree is removed afterwards *only
+  if the agent changed nothing*; otherwise it is kept and its path reported so
+  the work can be reviewed or merged. Verified: an agent's edit landed in the
+  worktree, the main tree stayed clean, the dirty worktree survived, and a
+  read-only run's worktree was cleaned up.
+
+**Not implemented:** background/detached runs, and therefore no `TaskOutput` or
+`TaskStop` equivalents; no `SendMessage` to resume a live agent. That is the
+remaining Phase 8 work and it is genuinely more than a flag — it needs a run
+registry, output spooling, and completion delivery (pi's `sendMessage` with
+`deliverAs: "followUp"` is the likely mechanism). Also absent: `isolation:
+"remote"`, which has no local equivalent.
+
 ## Permission modes and subagents
 
 Permission mode lives in the permissions extension and is exported to child

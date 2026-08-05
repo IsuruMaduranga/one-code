@@ -43,5 +43,12 @@
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.83.0"
-  }
+  },
+  "files": [
+    "extensions/**/*.ts",
+    "agents/*.md",
+    "types/*.d.ts",
+    "README.md",
+    "docs/decisions.md"
+  ]
 }
