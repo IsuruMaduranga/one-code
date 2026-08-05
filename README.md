@@ -9,6 +9,12 @@ Your existing Claude Code setup works unchanged — `CLAUDE.md`, `.claude/comman
 ## Requirements
 
 - **Node 22.19 or newer** (pi's requirement; check with `node --version`)
+
+  If you manage Node with nvm and your default is older, `pi` will be missing from
+  new terminals — it lives in the bin directory of whichever version you installed
+  it under. Either make that version your default (`nvm alias default 22`), or drop
+  a small shim on your `PATH` that pins pi to a suitable version, which leaves the
+  default alone.
 - **pi** — `npm install -g @earendil-works/pi-coding-agent`
 - Credentials for at least one model provider (`pi` will prompt, or use `/login`)
 
