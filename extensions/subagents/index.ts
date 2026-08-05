@@ -22,6 +22,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { type AgentDefinition, type AgentSource, agentDirs, discoverAgents } from "./agents.ts";
 import { discoverPlugins } from "../lib/plugins.ts";
+import { addUsage, emptyUsage, formatUsage, type UsageTotals } from "./usage.ts";
 import { cleanupWorktree, createWorktree, isGitRepo, type Worktree } from "./worktree.ts";
 
 const MAX_PARALLEL = 4;
@@ -45,6 +46,7 @@ interface TaskResult {
 	task: string;
 	output: string;
 	toolCalls: number;
+	usage: UsageTotals;
 	failed?: boolean;
 	worktreePath?: string;
 	worktreeKept?: boolean;
@@ -71,7 +73,7 @@ interface ChildOptions {
 	model?: string;
 	thinking?: string;
 	signal: AbortSignal;
-	onProgress: (toolCalls: number, lastText: string) => void;
+	onProgress: (toolCalls: number, lastText: string, usage: UsageTotals) => void;
 }
 
 function runChild(options: ChildOptions): Promise<Omit<TaskResult, "agent" | "task">> {
@@ -112,13 +114,14 @@ function runChild(options: ChildOptions): Promise<Omit<TaskResult, "agent" | "ta
 		let finalText = "";
 		let toolCalls = 0;
 		let stderr = "";
+		const usage = emptyUsage();
 
 		const onAbort = () => child.kill("SIGTERM");
 		signal.addEventListener("abort", onAbort, { once: true });
 
 		const processLine = (line: string) => {
 			if (!line.trim()) return;
-			let event: { type?: string; message?: { role?: string; content?: unknown } };
+			let event: { type?: string; message?: { role?: string; content?: unknown; usage?: unknown } };
 			try {
 				event = JSON.parse(line);
 			} catch {
@@ -126,17 +129,16 @@ function runChild(options: ChildOptions): Promise<Omit<TaskResult, "agent" | "ta
 			}
 			if (event.type === "tool_execution_start") {
 				toolCalls++;
-				onProgress(toolCalls, finalText);
+				onProgress(toolCalls, finalText, usage);
 			} else if (event.type === "message_end" && event.message?.role === "assistant") {
+				addUsage(usage, event.message.usage);
 				const blocks = Array.isArray(event.message.content) ? event.message.content : [];
 				const text = blocks
 					.filter((b): b is { type: string; text: string } => (b as { type?: string }).type === "text")
 					.map((b) => b.text)
 					.join("");
-				if (text.trim()) {
-					finalText = text;
-					onProgress(toolCalls, finalText);
-				}
+				if (text.trim()) finalText = text;
+				onProgress(toolCalls, finalText, usage);
 			}
 		};
 
@@ -154,7 +156,7 @@ function runChild(options: ChildOptions): Promise<Omit<TaskResult, "agent" | "ta
 
 		child.on("error", (error) => {
 			signal.removeEventListener("abort", onAbort);
-			resolve({ output: `Failed to start subagent: ${error.message}`, toolCalls, failed: true });
+			resolve({ output: `Failed to start subagent: ${error.message}`, toolCalls, usage, failed: true });
 		});
 
 		child.on("close", (code, closeSignal) => {
@@ -162,7 +164,7 @@ function runChild(options: ChildOptions): Promise<Omit<TaskResult, "agent" | "ta
 			if (buffer.trim()) processLine(buffer);
 			const output = finalText.slice(0, OUTPUT_CAP);
 			if (output.trim()) {
-				resolve({ output, toolCalls });
+				resolve({ output, toolCalls, usage });
 				return;
 			}
 			const why = closeSignal ? `terminated by ${closeSignal}` : `exit code ${code}`;
@@ -170,6 +172,7 @@ function runChild(options: ChildOptions): Promise<Omit<TaskResult, "agent" | "ta
 			resolve({
 				output: `Subagent produced no output (${why}).${detail ? `\n${detail}` : ""}`,
 				toolCalls,
+				usage,
 				failed: true,
 			});
 		});
@@ -301,11 +304,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				};
 			}
 
-			const progress = requested.map((r) => ({ agent: r.agent, toolCalls: 0, text: "" }));
+			const progress = requested.map((r) => ({ agent: r.agent, toolCalls: 0, text: "", usage: emptyUsage() }));
 			const report = () => {
-				const lines = progress.map(
-					(p) => `${p.text ? "✓" : "⏳"} ${p.agent} (${p.toolCalls} tools)${p.text ? "" : " running…"}`,
-				);
+				const lines = progress.map((p) => {
+					const stats = [`${p.toolCalls} tools`, formatUsage(p.usage)].filter(Boolean).join(", ");
+					return `${p.text ? "✓" : "⏳"} ${p.agent} (${stats})${p.text ? "" : " running…"}`;
+				});
 				onUpdate?.({ content: [{ type: "text", text: lines.join("\n") }], details: {} });
 			};
 			report();
@@ -328,6 +332,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 								task: request.task,
 								output: `Could not create a worktree: ${(error as Error).message}`,
 								toolCalls: 0,
+								usage: emptyUsage(),
 								failed: true,
 							};
 						}
@@ -342,8 +347,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 							model: request.model,
 							thinking: request.thinking,
 							signal: abortSignal,
-							onProgress: (toolCalls, text) => {
-								progress[index] = { agent: request.agent, toolCalls, text };
+							onProgress: (toolCalls, text, usage) => {
+								progress[index] = { agent: request.agent, toolCalls, text, usage };
 								report();
 							},
 						});
@@ -365,6 +370,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 							task: request.task,
 							output: `Subagent failed: ${(error as Error).message}`,
 							toolCalls: 0,
+							usage: emptyUsage(),
 							failed: true,
 						};
 					}
@@ -373,12 +379,13 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
 			const text = results
 				.map((r) => {
+					const stats = [`${r.toolCalls} tools`, formatUsage(r.usage)].filter(Boolean).join(" · ");
 					const worktreeNote = r.worktreePath
 						? `\n\n(Changes left in worktree ${r.worktreePath} — review or merge them.)`
 						: "";
 					return results.length > 1
-						? `## ${r.agent}${r.failed ? " (failed)" : ""}\nTask: ${r.task}\n\n${r.output}${worktreeNote}`
-						: `${r.output}${worktreeNote}`;
+						? `## ${r.agent}${r.failed ? " (failed)" : ""} (${stats})\nTask: ${r.task}\n\n${r.output}${worktreeNote}`
+						: `${r.output}${worktreeNote}\n\n(${stats})`;
 				})
 				.join("\n\n---\n\n");
 
