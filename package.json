@@ -17,11 +17,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/isuruWij/pi-claude-code.git"
+    "url": "git+https://github.com/IsuruMaduranga/pi-claude-code.git"
   },
-  "homepage": "https://github.com/isuruWij/pi-claude-code#readme",
+  "homepage": "https://github.com/IsuruMaduranga/pi-claude-code#readme",
   "bugs": {
-    "url": "https://github.com/isuruWij/pi-claude-code/issues"
+    "url": "https://github.com/IsuruMaduranga/pi-claude-code/issues"
   },
   "type": "module",
   "pi": {

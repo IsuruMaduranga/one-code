@@ -27,7 +27,7 @@ pi install npm:pi-claude-code
 From a local checkout instead — note the `npm install`, because a path install does **not** fetch dependencies and the extensions will fail to load without them:
 
 ```bash
-git clone https://github.com/isuruWij/pi-claude-code
+git clone https://github.com/IsuruMaduranga/pi-claude-code
 cd pi-claude-code && npm install && cd ..
 pi install ./pi-claude-code
 ```
