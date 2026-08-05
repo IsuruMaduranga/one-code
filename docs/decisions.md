@@ -456,3 +456,25 @@ really a missing token.
 an explanatory message** rather than connected with an empty credential:
 `MCP server "github" failed: not started — GITHUB_PERSONAL_ACCESS_TOKEN not set in
 the environment`.
+
+## Themes: authored, not adopted
+
+The ecosystem has no Claude Code *theme*. What it has are Claude Code-flavoured UI
+**extensions** (`pi-cc-extensions`, `pi-claude-code-tui`, `pi-cc-header`) — code,
+with the dependency risk already declined in the Phase 7 notes.
+
+A pi theme, by contrast, is a JSON file of 51 colour tokens: data, and squarely in
+the "cheaper to own than to depend on" half of the checklist. So `themes/` ships
+two of our own, `claude-code` and `claude-code-light`, declared through
+`pi.themes` in the manifest. The palette is a warm clay accent (`#d97757` dark,
+`#c05f38` light) over neutral surfaces — an approximation of Claude Code's
+terminal look, not values extracted from it.
+
+`test/unit/themes.test.ts` validates every bundled theme: all 51 required tokens
+present, no unknown tokens beyond the two optional ones, every `vars` reference
+resolvable, and colours well-formed. pi rejects an incomplete theme at load time
+without saying which token is missing, so this catches typos before a user does.
+
+Not verified here: whether pi picks the themes up from the package manifest, and
+how they actually look — this environment has no TTY, so the TUI cannot render.
+Both need a check in a real terminal.

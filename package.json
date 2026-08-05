@@ -45,11 +45,15 @@
       "extensions/mcp/index.ts",
       "extensions/context-management/index.ts",
       "extensions/system-prompt/index.ts"
+    ],
+    "themes": [
+      "./themes"
     ]
   },
   "files": [
     "extensions/",
     "agents/",
+    "themes/",
     "types/",
     "README.md",
     "LICENSE",
