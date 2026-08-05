@@ -68,6 +68,53 @@ tool successfully. The Anthropic `defer_loading` path and the non-native
 fallback are pi-owned code paths that could not be exercised here (no second
 provider credential configured).
 
+## Web tools
+
+- `web_search` comes from **`pi-web-search`**: it calls the *current model
+  provider's own* search API (OpenAI/Codex, Anthropic, Gemini), so there is no
+  extra API key and no scraping. This is as close to Claude Code's server-side
+  search as an extension can get.
+- `fetch_content` comes from **`pi-web-access`** (URL → markdown, GitHub repos,
+  PDFs, YouTube, images).
+- Both packages register a tool named `web_search`. `extensions/web/index.ts`
+  loads pi-web-access **first** so pi-web-search's zero-config provider-native
+  version wins the name, while `fetch_content` is retained. Reordering those two
+  lines silently switches you to the key-requiring implementation.
+- All three tools (`web_search`, `fetch_content`, `url_context`) are deferred
+  behind `tool_search`.
+- pi-web-search also drives `setActiveTools` (to hide Gemini-only
+  `url_context`). It composes with our deferral because `tool-search` loads
+  earlier, so its session_start deactivation runs first and pi-web-search
+  snapshots the already-reduced set.
+
+## LSP
+
+From **`pi-lsp-extension`** (wildcard peer ranges, unlike `lsp-pi` which pins
+`pi-ai ^0.74`). Its twelve query tools are deferred; the Claude-Code-like
+behavior — a `tool_result` hook that appends error diagnostics to `write`/`edit`
+results — needs no tool and stays active. That hook is why diagnostics are *not*
+routed through our system-reminder queue as originally planned: the package
+already delivers them at a better position (in the tool result), and duplicating
+the delivery would just spend tokens twice.
+
+Three environment findings worth knowing:
+
+1. **Gated to non-one-shot runs.** In `-p` / `--mode json` runs the language
+   servers keep the process alive after the final turn (it never exits) and a
+   cold server has no diagnostics for a single edit anyway. `isOneShotInvocation`
+   inspects argv, because tools must be registered before any event exposes
+   `ctx.mode`. RPC and TUI still get LSP; subagent children never do.
+2. **Requires TypeScript 5.x for TS projects.** `typescript-language-server`
+   needs `typescript/lib/tsserver.js`, which TypeScript 7's native compiler no
+   longer ships — the status line reads "typescript failed" and diagnostics
+   silently fall back to tree-sitter syntax checks.
+3. **The auto-append hook only fires when a server is already running**, and the
+   server starts lazily on the first file *read*. A read-then-edit sequence gets
+   diagnostics; an edit as the very first action in a session does not.
+   Verified end-to-end: an edit introducing a type error produced
+   `src/index.ts:5:30 error: Argument of type 'number' is not assignable to
+   parameter of type 'string'. (2345)`, matching `tsc`.
+
 ## Permission modes and subagents
 
 Permission mode lives in the permissions extension and is exported to child

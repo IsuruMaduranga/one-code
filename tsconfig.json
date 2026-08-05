@@ -1,17 +1,36 @@
 {
   "compilerOptions": {
     "target": "ES2023",
-    "lib": ["ES2023"],
+    "lib": [
+      "ES2023"
+    ],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
     "allowImportingTsExtensions": true,
-    "types": ["node"],
+    "types": [
+      "node"
+    ],
     "paths": {
-      "pi-ask-user/index.ts": ["./types/community-packages.d.ts"]
+      "pi-ask-user/index.ts": [
+        "./types/community-packages.d.ts"
+      ],
+      "pi-web-access/index.ts": [
+        "./types/community-packages.d.ts"
+      ],
+      "pi-web-search/src/index.ts": [
+        "./types/community-packages.d.ts"
+      ],
+      "pi-lsp-extension/src/index.ts": [
+        "./types/community-packages.d.ts"
+      ]
     }
   },
-  "include": ["extensions/**/*.ts", "test/**/*.ts", "types/**/*.d.ts"]
+  "include": [
+    "extensions/**/*.ts",
+    "test/**/*.ts",
+    "types/**/*.d.ts"
+  ]
 }

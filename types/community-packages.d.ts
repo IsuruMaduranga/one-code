@@ -10,3 +10,21 @@ declare module "pi-ask-user/index.ts" {
 	const factory: (pi: ExtensionAPI) => unknown;
 	export default factory;
 }
+
+declare module "pi-web-access/index.ts" {
+	import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+	const factory: (pi: ExtensionAPI) => unknown;
+	export default factory;
+}
+
+declare module "pi-web-search/src/index.ts" {
+	import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+	const factory: (pi: ExtensionAPI) => unknown;
+	export default factory;
+}
+
+declare module "pi-lsp-extension/src/index.ts" {
+	import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+	const factory: (pi: ExtensionAPI) => unknown;
+	export default factory;
+}
