@@ -9,7 +9,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-export const MODE_CHANNEL = "pi-claude-code:set-permission-mode";
+export const MODE_CHANNEL = "pincer:set-permission-mode";
 
 export default function planModeExtension(pi: ExtensionAPI) {
 	pi.registerTool({

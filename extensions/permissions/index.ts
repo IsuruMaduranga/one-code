@@ -99,7 +99,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	});
 
 	// Mode-change requests from other extensions (e.g. plan-mode tools).
-	pi.events.on("pi-claude-code:set-permission-mode", (data) => {
+	pi.events.on("pincer:set-permission-mode", (data) => {
 		const requested = (data as { mode?: unknown })?.mode;
 		if (isPermissionMode(requested)) setMode(requested);
 	});

@@ -1,5 +1,5 @@
 /**
- * Claude Code system prompt, adapted for pi-claude-code.
+ * Claude Code system prompt, adapted for pincer.
  *
  * Sections that are provider- and host-agnostic are kept close to Claude
  * Code's wording; those tied to Anthropic-hosted features (artifacts,
@@ -14,7 +14,7 @@ import { formatSkillsForPrompt, type BuildSystemPromptOptions } from "@earendil-
 import { memoryPromptSection } from "../lib/memory.ts";
 import type { EnvironmentInfo } from "./environment.ts";
 
-const IDENTITY = `You are pi-claude-code, an interactive agent that helps users with software engineering tasks, running on the pi agent harness.
+const IDENTITY = `You are pincer, an interactive agent that helps users with software engineering tasks, running on the pi agent harness.
 
 IMPORTANT: Assist with authorized security testing, defensive security, CTF challenges, and educational contexts. Refuse requests for destructive techniques, DoS attacks, mass targeting, supply chain compromise, or detection evasion for malicious purposes. Dual-use security tools (C2 frameworks, credential testing, exploit development) require clear authorization context: pentesting engagements, CTF competitions, security research, or defensive use cases.`;
 

@@ -5,11 +5,11 @@ import { LOGO_LINES, bannerLines } from "../../extensions/branding/index.ts";
 const plain = (_color: string, text: string) => text;
 
 describe("bannerLines", () => {
-	it("leads with the package name and version", () => {
+	it("leads with the brand name and version", () => {
 		const [title] = bannerLines({ version: "0.1.0", cwd: "/p", mode: "default" }, plain);
-		expect(title).toContain("pi-claude-code");
+		expect(title).toContain("pincer");
 		expect(title).toContain("v0.1.0");
-		expect(title).toContain("Claude Code on the pi harness");
+		expect(title).toContain("the Claude Code experience, on the pi harness");
 	});
 
 	it("lists the key shortcuts across the hint lines", () => {
@@ -49,7 +49,7 @@ describe("bannerLines", () => {
 
 	it("applies the paint function it is given", () => {
 		const [title] = bannerLines({ version: "0.1.0", cwd: "/p", mode: "default" }, (c, t) => `<${c}>${t}</${c}>`);
-		expect(title).toContain("<accent>pi-claude-code</accent>");
+		expect(title).toContain("<accent>pincer</accent>");
 	});
 
 	it("puts one equal-width logo row (or padding) before each text line, so the text column aligns", () => {

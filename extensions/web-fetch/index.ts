@@ -19,7 +19,7 @@ import { htmlToMarkdown, isSameHost, normalizeUrl, paginate } from "./extract.ts
 const DEFAULT_MAX_CHARS = 30_000;
 const CACHE_TTL_MS = 15 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 30_000;
-const USER_AGENT = "pi-claude-code/0.1 (+https://github.com/earendil-works/pi)";
+const USER_AGENT = "pincer/0.1 (+https://github.com/earendil-works/pi)";
 
 /**
  * Declared up front because pi infers a tool's `details` generic from the first

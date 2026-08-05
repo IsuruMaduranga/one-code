@@ -600,3 +600,29 @@ Stamping was verified end-to-end with a real model run through the permission
 gate (allow rules, no bypass flag): the model wrote plain frontmatter and the
 file landed with `node_type`/`originSessionId`/`modified` in Claude Code's
 field order, while MEMORY.md stayed unstamped.
+
+## Rebrand: pincer
+
+Anthropic's branding guidelines (published on the Claude Agent SDK docs, seen
+2026-08) prohibit "Claude Code" product names, Claude Code-mimicking ASCII
+art/visual elements, and products that appear to be Claude Code. They formally
+address SDK partners — which this project is not — but the substance is
+ordinary trademark hygiene and applies to anything published.
+
+What changed (2026-08-05): package `pi-claude-code` → **`pincer-agent`**
+(brand "pincer" — contains *pi*, means *claw*; plain `pincer` is taken on npm
+by an old static file server). Banner `NAME`, system-prompt identity ("You are
+pincer"), MCP client name, and web_fetch User-Agent follow. The banner mascot
+— previously a deliberate homage to Claude Code's — is redrawn as a pixel π,
+which is ours outright. Themes renamed `claude-code`/`claude-code-light` →
+`pincer`/`pincer-light` (users with `"theme": "claude-code"` in pi settings
+must re-select). Event channels renamed `pi-claude-code:*` → `pincer:*` —
+done now, pre-publish, because the channel names are a documented third-party
+contract that would be painful to change later.
+
+What deliberately stays: every *descriptive* reference — "the Claude Code
+experience on the pi harness", "reads your Claude Code settings.json" — is
+nominative use (truthfully naming the thing we are compatible with), which
+trademark law and the guidelines themselves permit. The fidelity references in
+`tools/` and `payload.json` are captured artifacts, not branding, and are
+untouched.

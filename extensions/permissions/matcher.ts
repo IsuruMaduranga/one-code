@@ -13,7 +13,7 @@ import { isAbsolute, relative, resolve } from "node:path";
 export type PermissionMode = "default" | "acceptEdits" | "plan" | "bypassPermissions";
 export type PermissionDecision = "allow" | "deny" | "ask";
 
-/** Claude Code tool name (lowercased) → pi-claude-code tool name. */
+/** Claude Code tool name (lowercased) → pincer tool name. */
 const CC_TOOL_NAMES: Record<string, string> = {
 	bash: "bash",
 	read: "read",

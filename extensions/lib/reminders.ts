@@ -1,10 +1,10 @@
 /**
- * System-reminder queue — the steering mechanism shared by all pi-claude-code
+ * System-reminder queue — the steering mechanism shared by all pincer
  * extensions. Reminders are injected transiently into the outgoing request via
  * pi's `context` event; they are never written to the session file.
  *
  * Cross-extension contract: emit on the event bus channel
- * `pi-claude-code:system-reminder` with `{ text, scope? }` to enqueue from any
+ * `pincer:system-reminder` with `{ text, scope? }` to enqueue from any
  * extension (including third-party ones). Extensions in this package can also
  * import `reminderQueue` directly.
  */
@@ -12,7 +12,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 
-export const REMINDER_CHANNEL = "pi-claude-code:system-reminder";
+export const REMINDER_CHANNEL = "pincer:system-reminder";
 
 /** "next-turn" fires once on the next LLM call; "every-turn" fires on every call until removed. */
 export type ReminderScope = "next-turn" | "every-turn";

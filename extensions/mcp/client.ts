@@ -54,7 +54,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<
 }
 
 export async function connect(server: McpServer): Promise<Connection> {
-	const client = new Client({ name: "pi-claude-code", version: "0.1.0" }, { capabilities: {} });
+	const client = new Client({ name: "pincer", version: "0.1.0" }, { capabilities: {} });
 
 	const transport =
 		server.kind === "stdio"

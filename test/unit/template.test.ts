@@ -18,7 +18,7 @@ const baseOptions = { cwd: "/tmp/project" };
 describe("buildClaudeCodeSystemPrompt", () => {
 	it("contains the adapted identity and core sections", () => {
 		const prompt = buildClaudeCodeSystemPrompt(baseOptions, env);
-		expect(prompt).toContain("You are pi-claude-code");
+		expect(prompt).toContain("You are pincer");
 		expect(prompt).toContain("# Harness");
 		expect(prompt).toContain("<system-reminder>");
 		expect(prompt).toContain("# Delivering work");

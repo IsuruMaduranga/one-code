@@ -1,4 +1,4 @@
-# pi-claude-code
+# pincer
 
 The Claude Code experience, as a package for the [pi coding agent](https://github.com/earendil-works/pi) — so the same workflow runs on **any model provider**, and upstream pi improvements arrive as a version bump.
 
@@ -21,15 +21,15 @@ Your existing Claude Code setup works unchanged — `CLAUDE.md`, `.claude/comman
 ## Install
 
 ```bash
-pi install npm:pi-claude-code
+pi install npm:pincer-agent
 ```
 
 From a local checkout instead — note the `npm install`, because a path install does **not** fetch dependencies and the extensions will fail to load without them:
 
 ```bash
-git clone https://github.com/IsuruMaduranga/pi-claude-code
-cd pi-claude-code && npm install && cd ..
-pi install ./pi-claude-code
+git clone https://github.com/IsuruMaduranga/pincer-agent
+cd pincer-agent && npm install && cd ..
+pi install ./pincer-agent
 ```
 
 Confirm it registered:
@@ -151,13 +151,13 @@ Tools appear as `mcp__<server>__<tool>` and are deferred behind `tool_search`.
 
 - **Web search** uses your current model provider's own search API (OpenAI/Codex, Anthropic, Gemini) — no extra key, but it needs a provider that offers one.
 - **LSP diagnostics** after edits need the language server on your `PATH`: `npm i -g typescript-language-server typescript` for TypeScript, or `pyright`, `gopls`, `rust-analyzer`. TypeScript projects need **typescript 5.x** — version 7's native compiler no longer ships the `tsserver.js` that `typescript-language-server` requires.
-- **Themes.** Two ship with the package: `claude-code` (dark) and `claude-code-light` — a warm clay accent with neutral surfaces, in the spirit of Claude Code's terminal. Select one with `/settings`, or set it directly:
+- **Themes.** Two ship with the package: `pincer` (dark) and `pincer-light` — a warm clay accent with neutral surfaces, in the spirit of Claude Code's terminal. Select one with `/settings`, or set it directly:
 
   ```json
-  { "theme": "claude-code" }
+  { "theme": "pincer" }
   ```
 
-  in `~/.pi/agent/settings.json`. pi hot-reloads a theme file while it is active, so you can tweak `themes/claude-code.json` and watch it change.
+  in `~/.pi/agent/settings.json`. pi hot-reloads a theme file while it is active, so you can tweak `themes/pincer.json` and watch it change.
 - **The startup banner** is replaced with this package's own. `CC_NO_BANNER=1` restores pi's.
 - **Long-session context trimming on Anthropic**: on by default for first-party Anthropic — the API is asked to drop old thinking blocks, as Claude Code does. See the `CC_CLEAR_THINKING` row in Configuration and `docs/decisions.md`.
 
@@ -176,7 +176,7 @@ Register the repo once as a pi package; after that every `pi` session anywhere o
 the machine loads your working copy, so there is nothing to rebuild:
 
 ```bash
-cd pi-claude-code
+cd pincer-agent
 npm install                     # required — a path install does not fetch deps
 pi install .                    # register this checkout
 pi list                         # confirm it is listed

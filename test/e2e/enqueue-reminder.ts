@@ -7,7 +7,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export default function enqueueReminder(pi: ExtensionAPI) {
 	pi.on("session_start", () => {
-		pi.events.emit("pi-claude-code:system-reminder", {
+		pi.events.emit("pincer:system-reminder", {
 			text: "E2E_REMINDER_MARKER: this is a steering test. Ignore it.",
 		});
 	});

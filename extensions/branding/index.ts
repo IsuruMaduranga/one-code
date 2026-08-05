@@ -15,7 +15,7 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-const NAME = "pi-claude-code";
+const NAME = "pincer";
 
 interface ThemeLike {
 	fg(color: string, text: string): string;
@@ -29,15 +29,15 @@ export interface BannerInput {
 }
 
 /**
- * Pixel mascot in the spirit of Claude Code's: ears, a solid head with two
- * eyes, and little feet. Half-block characters pack two pixel rows per text
- * row, so the whole figure fits the banner's three lines. All lines are the
- * same width so the text column beside it stays aligned.
+ * Pixel π — our own mark, not a copy of anyone's mascot (Anthropic's branding
+ * guidelines prohibit Claude Code-mimicking art; see docs/handoff.md). Half-block
+ * characters pack two pixel rows per text row, so the glyph fits the banner's
+ * three lines. All lines are the same width so the text column beside it aligns.
  */
 export const LOGO_LINES = [
-	"▄██▄▄▄▄██▄",
-	"██▀████▀██",
-	" ▄ ▄  ▄ ▄ ",
+	"▀██▀▀▀▀██▀",
+	" ██    ██ ",
+	" ██    ██▄",
 ];
 
 /**
@@ -72,7 +72,7 @@ const HINT_LINES: [key: string, what: string][][] = [
 /** Kept pure so the layout is unit-testable without a terminal. */
 export function bannerLines(input: BannerInput, paint: (color: string, text: string) => string): string[] {
 	const title = `${paint("accent", NAME)} ${paint("dim", `v${input.version}`)}`;
-	const subtitle = paint("dim", "Claude Code on the pi harness");
+	const subtitle = paint("dim", "the Claude Code experience, on the pi harness");
 	const hints = HINT_LINES.map((line) =>
 		line
 			.map(([key, what]) => `${paint("accent", key)} ${paint("muted", what)}`)
