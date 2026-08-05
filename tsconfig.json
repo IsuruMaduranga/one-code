@@ -22,9 +22,6 @@
       ],
       "pi-web-search/src/index.ts": [
         "./types/community-packages.d.ts"
-      ],
-      "pi-lsp-extension/src/index.ts": [
-        "./types/community-packages.d.ts"
       ]
     }
   },

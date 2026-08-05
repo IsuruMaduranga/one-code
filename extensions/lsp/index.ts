@@ -1,61 +1,168 @@
 /**
- * lsp extension — language-server intelligence, from the community
- * `pi-lsp-extension` package: diagnostics, hover, definition, references,
- * symbols, rename, code actions, completions, plus tree-sitter code overview
- * and search.
+ * lsp extension — Claude Code's post-edit diagnostics.
  *
- * Its most Claude-Code-like behavior needs no tool at all: a `tool_result`
- * hook appends error diagnostics to `write`/`edit` results, so the model sees
- * compile errors it just introduced. That stays active.
+ * Two behaviors, no more:
+ *  1. After a successful `edit` or `write`, error diagnostics for that file are
+ *     appended to the tool result, so the model immediately sees what it broke.
+ *  2. An `lsp_diagnostics` tool (deferred behind `tool_search`) for asking about
+ *     a file on demand.
  *
- * The query tools themselves are deferred behind `tool_search` — eleven extra
- * schemas would dominate the prompt, and most turns never need them.
+ * Claude Code has no other LSP tools; navigation goes through grep/find. Adding
+ * hover or definition later is a small `client.request(...)` call each, if the
+ * need appears.
  */
 
+import { relative } from "node:path";
+import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import lspExtension from "pi-lsp-extension/src/index.ts";
+import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
+import { LspClient } from "./client.ts";
+import { filterDiagnostics, formatDiagnostics, type SeverityFilter } from "./format.ts";
+import { findProjectRoot, serverForPath, typescriptPreflight } from "./servers.ts";
 
-const DEFERRED: Array<{ name: string; keywords: string[] }> = [
-	{ name: "lsp_diagnostics", keywords: ["diagnostics", "errors", "warnings", "compile", "typecheck", "lint"] },
-	{ name: "lsp_hover", keywords: ["hover", "type", "signature", "docs", "what is"] },
-	{ name: "lsp_definition", keywords: ["definition", "declaration", "go to", "jump"] },
-	{ name: "lsp_references", keywords: ["references", "usages", "callers", "who calls"] },
-	{ name: "lsp_symbols", keywords: ["symbols", "outline", "structure"] },
-	{ name: "lsp_rename", keywords: ["rename", "refactor", "symbol rename"] },
-	{ name: "lsp_code_actions", keywords: ["code action", "quick fix", "autofix"] },
-	{ name: "lsp_completions", keywords: ["completion", "autocomplete", "suggest"] },
-	{ name: "code_overview", keywords: ["overview", "outline", "map", "structure", "summarize file"] },
-	{ name: "code_search", keywords: ["ast search", "structural search", "code search"] },
-	{ name: "ast_search", keywords: ["ast", "structural search", "tree-sitter"] },
-	{ name: "code_rewrite", keywords: ["structural rewrite", "codemod", "ast rewrite"] },
-];
+/** Only errors are pushed unasked; warnings would be noise on every edit. */
+const AUTO_APPEND_LIMIT = 10;
 
-const ONE_SHOT_MODES = new Set(["json", "print"]);
+export default function lspExtension(pi: ExtensionAPI) {
+	const clients = new Map<string, LspClient>();
+	const startFailures = new Map<string, string>();
+	const warned = new Set<string>();
 
-/**
- * Detects a one-shot run (`-p`, `--mode json`) from argv, because tools must be
- * registered while the extension loads — before any event hands us `ctx.mode`.
- * RPC counts as interactive: the session is long-lived and shuts down cleanly.
- */
-export function isOneShotInvocation(argv: string[]): boolean {
-	for (let i = 0; i < argv.length; i++) {
-		const arg = argv[i];
-		if (arg === "-p" || arg === "--print") return true;
-		if (arg === "--mode") return ONE_SHOT_MODES.has(argv[i + 1] ?? "");
-		if (arg.startsWith("--mode=")) return ONE_SHOT_MODES.has(arg.slice("--mode=".length));
-	}
-	return false;
-}
+	const clientFor = async (path: string, cwd: string): Promise<LspClient | undefined> => {
+		const match = serverForPath(path);
+		if (!match) return undefined;
 
-export default function lspWrapper(pi: ExtensionAPI) {
-	// Skipped in one-shot runs: language servers only warm up usefully across a
-	// session, they keep the process alive past the final turn, and a cold
-	// server has no diagnostics to report for a single edit anyway.
-	if (isOneShotInvocation(process.argv) || process.env.PI_SUBAGENT_CHILD === "1") return;
+		const root = findProjectRoot(path, match.config.rootMarkers, cwd);
+		const key = `${match.languageId}:${root}`;
 
-	lspExtension(pi);
-	for (const entry of DEFERRED) {
-		pi.events.emit(DEFER_CHANNEL, entry);
-	}
+		const failure = startFailures.get(key);
+		if (failure) return undefined;
+
+		const existing = clients.get(key);
+		if (existing?.isRunning) return existing;
+		if (existing) return undefined; // crashed; don't respawn in a loop
+
+		if (match.languageId.startsWith("typescript") || match.languageId.startsWith("javascript")) {
+			const problem = typescriptPreflight(root);
+			if (problem) {
+				startFailures.set(key, problem);
+				return undefined;
+			}
+		}
+
+		const client = new LspClient(match.languageId, match.config, root);
+		clients.set(key, client);
+		try {
+			await client.start();
+			return client;
+		} catch (error) {
+			startFailures.set(key, client.error ?? (error as Error).message);
+			return undefined;
+		}
+	};
+
+	/** One-time notice per root so a missing server doesn't degrade silently. */
+	const reportFailureOnce = (path: string, cwd: string, notify: (message: string) => void) => {
+		const match = serverForPath(path);
+		if (!match) return;
+		const root = findProjectRoot(path, match.config.rootMarkers, cwd);
+		const key = `${match.languageId}:${root}`;
+		const failure = startFailures.get(key);
+		if (failure && !warned.has(key)) {
+			warned.add(key);
+			notify(`LSP unavailable for ${match.languageId}: ${failure}`);
+		}
+	};
+
+	pi.on("tool_result", async (event, ctx) => {
+		if (event.isError) return;
+		if (event.toolName !== "edit" && event.toolName !== "write") return;
+
+		const path = (event.input as { path?: unknown }).path;
+		if (typeof path !== "string") return;
+
+		const client = await clientFor(path, ctx.cwd);
+		if (!client) {
+			reportFailureOnce(path, ctx.cwd, (message) => {
+				if (ctx.hasUI) ctx.ui.notify(message, "warning");
+			});
+			return;
+		}
+
+		const errors = filterDiagnostics(await client.getDiagnostics(path), "error");
+		if (errors.length === 0) return;
+
+		const relPath = relative(ctx.cwd, path) || path;
+		const summary = formatDiagnostics(relPath, errors, AUTO_APPEND_LIMIT);
+		const existing = event.content ?? [];
+		return {
+			content: [...existing, { type: "text", text: `\n<diagnostics>\n${summary}\n</diagnostics>` }],
+		};
+	});
+
+	pi.registerTool({
+		name: "lsp_diagnostics",
+		label: "Diagnostics",
+		description:
+			"Ask the language server for diagnostics (type errors, warnings) on a file. Reflects the file's current contents. Supported: TypeScript/JavaScript, Python, Go, Rust, Java — when that language's server is installed.",
+		parameters: Type.Object({
+			path: Type.String({ description: "File to analyse (absolute or workspace-relative)" }),
+			severity: Type.Optional(
+				StringEnum(["error", "warning", "all"] as const, { description: "Minimum severity (default: all)" }),
+			),
+		}),
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			const path = params.path.startsWith("/") ? params.path : `${ctx.cwd}/${params.path}`;
+			const client = await clientFor(path, ctx.cwd);
+			if (!client) {
+				const match = serverForPath(path);
+				const root = match ? findProjectRoot(path, match.config.rootMarkers, ctx.cwd) : ctx.cwd;
+				const failure = match ? startFailures.get(`${match.languageId}:${root}`) : undefined;
+				return {
+					content: [
+						{
+							type: "text",
+							text:
+								failure ??
+								(match
+									? `No language server available for ${match.languageId}. Install ${match.config.command}.`
+									: `No language server is configured for this file type.`),
+						},
+					],
+					details: { available: false },
+					isError: false,
+				};
+			}
+
+			const all = await client.getDiagnostics(path);
+			const filtered = filterDiagnostics(all, (params.severity ?? "all") as SeverityFilter);
+			const relPath = relative(ctx.cwd, path) || path;
+			return {
+				content: [{ type: "text", text: formatDiagnostics(relPath, filtered) }],
+				details: { count: filtered.length, languageId: client.languageId },
+			};
+		},
+	});
+
+	pi.registerCommand("lsp", {
+		description: "Show language server status",
+		handler: async (_args, ctx) => {
+			const lines = [...clients.entries()].map(
+				([key, client]) => `${client.isRunning ? "running" : "stopped"} ${key} (${client.diagnosticsCount} diagnostics)`,
+			);
+			for (const [key, failure] of startFailures) lines.push(`failed  ${key}: ${failure}`);
+			ctx.ui.notify(lines.length ? lines.join("\n") : "No language servers started.", "info");
+		},
+	});
+
+	pi.on("session_shutdown", async () => {
+		await Promise.all([...clients.values()].map((client) => client.stop()));
+		clients.clear();
+	});
+
+	pi.events.emit(DEFER_CHANNEL, {
+		name: "lsp_diagnostics",
+		keywords: ["diagnostics", "errors", "type error", "typecheck", "compile", "lint", "lsp"],
+	});
 }
