@@ -37,6 +37,20 @@ const CC_TOOL_NAMES: Record<string, string> = {
 	askuserquestion: "ask_user_question",
 	ask_user_question: "ask_user_question",
 	workflow: "workflow",
+	taskcreate: "task_create",
+	taskget: "task_get",
+	tasklist: "task_list",
+	taskupdate: "task_update",
+	taskoutput: "task_output",
+	taskstop: "task_stop",
+	monitor: "monitor",
+	schedulewakeup: "schedule_wakeup",
+	sendmessage: "send_message",
+	enterworktree: "enter_worktree",
+	exitworktree: "exit_worktree",
+	listmcpresourcestool: "list_mcp_resources",
+	readmcpresourcetool: "read_mcp_resource",
+	readmcpresourcedirtool: "read_mcp_resource_dir",
 };
 
 export function normalizeToolName(name: string): string {
@@ -181,6 +195,20 @@ export const AUTO_ALLOWED_TOOLS = new Set<string>([
 	// Plan-mode transitions must work inside plan mode itself.
 	"enter_plan_mode",
 	"exit_plan_mode",
+	// Session-state bookkeeping, like todo_write.
+	"task_create",
+	"task_get",
+	"task_list",
+	"task_update",
+	// Inspecting/stopping background work this session already started.
+	"task_output",
+	"task_stop",
+	// A timer that replays a prompt; no side effects outside the session.
+	"schedule_wakeup",
+	// Resumes a subagent — same reasoning as subagent: the child enforces its
+	// own tool permissions. (monitor and enter/exit_worktree stay gated: they
+	// run arbitrary shell commands / mutate the filesystem.)
+	"send_message",
 ]);
 
 export interface DecideInput {

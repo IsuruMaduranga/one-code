@@ -17,7 +17,7 @@ import os from "node:os";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
-import { callTool, close, type Connection, connect, type FailedConnection, readResource } from "./client.ts";
+import { callTool, close, type Connection, connect, type FailedConnection, readResource, readResourceDir } from "./client.ts";
 import { join } from "node:path";
 import { discoverPlugins } from "../lib/plugins.ts";
 import { loadServers, type McpServer } from "./config.ts";
@@ -196,8 +196,44 @@ export default function mcpExtension(pi: ExtensionAPI) {
 			},
 		});
 
-		for (const name of ["list_mcp_resources", "read_mcp_resource"]) {
-			pi.events.emit(DEFER_CHANNEL, { name, keywords: ["mcp", "resource", "document", "uri"] });
+		pi.registerTool({
+			name: "read_mcp_resource_dir",
+			label: "List MCP Resource Directory",
+			description:
+				'List the direct children of a directory resource on an MCP server (resources/directory/read). Not recursive: each entry carries its own uri, and subdirectories appear with mimeType "inode/directory" — call again on a subdirectory uri to descend. Only servers that support directory listing accept this; others return an error.',
+			parameters: Type.Object({
+				server: Type.String({ description: "Server name that owns the directory" }),
+				uri: Type.String({ description: "The directory resource uri to list" }),
+			}),
+			async execute(_toolCallId, params) {
+				const connection = connections.get(params.server);
+				if (!connection) {
+					return {
+						content: [{ type: "text", text: `No connected MCP server named "${params.server}".` }],
+						details: {} as { server?: string; uri?: string },
+						isError: true,
+					};
+				}
+				try {
+					const result = await readResourceDir(connection, params.uri);
+					const entries = (result.resources ?? result.entries ?? []) as Array<{ uri?: string; name?: string; mimeType?: string }>;
+					const lines = entries.map((e) => `${e.uri ?? "(no uri)"}${e.name ? ` — ${e.name}` : ""}${e.mimeType ? ` (${e.mimeType})` : ""}`);
+					return {
+						content: [{ type: "text", text: lines.length ? lines.join("\n") : "(empty directory)" }],
+						details: { server: params.server, uri: params.uri },
+					};
+				} catch (error) {
+					return {
+						content: [{ type: "text", text: `Could not list ${params.uri}: ${(error as Error).message}` }],
+						details: { server: params.server, uri: params.uri },
+						isError: true,
+					};
+				}
+			},
+		});
+
+		for (const name of ["list_mcp_resources", "read_mcp_resource", "read_mcp_resource_dir"]) {
+			pi.events.emit(DEFER_CHANNEL, { name, keywords: ["mcp", "resource", "document", "uri", "directory"] });
 		}
 	};
 

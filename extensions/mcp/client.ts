@@ -115,6 +115,21 @@ export async function readResource(connection: Connection, uri: string): Promise
 	)) as { contents?: unknown[] };
 }
 
+/**
+ * `resources/directory/read` — directory listing for resources. Not in the SDK's
+ * typed surface (servers opt in), so it goes through the generic request path.
+ * The SDK only calls `safeParse` on the result schema, and the response shape is
+ * server-defined, so a passthrough schema beats pinning one the spec hasn't settled.
+ */
+export async function readResourceDir(connection: Connection, uri: string): Promise<Record<string, unknown>> {
+	const passthrough = { safeParse: (data: unknown) => ({ success: true as const, data }) };
+	return (await withTimeout(
+		connection.client.request({ method: "resources/directory/read", params: { uri } }, passthrough as never),
+		CALL_TIMEOUT_MS,
+		`listing directory "${uri}"`,
+	)) as Record<string, unknown>;
+}
+
 export async function close(connection: Connection): Promise<void> {
 	try {
 		await withTimeout(connection.client.close(), 3000, "closing connection");
