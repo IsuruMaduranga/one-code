@@ -89,8 +89,19 @@ export default function mcpExtension(pi: ExtensionAPI) {
 		servers = loadServers(ctx.cwd, os.homedir(), process.env, discoverPlugins(join(os.homedir(), ".claude")).mcpConfigs);
 		if (servers.length === 0) return;
 
+		// A server whose credentials are unset would connect with an empty token and
+		// fail with a confusing protocol error; skip it and say why instead.
+		for (const server of servers.filter((s) => s.missingEnv?.length)) {
+			failures.push({
+				server,
+				error: `not started — ${server.missingEnv?.join(", ")} not set in the environment`,
+			});
+		}
+
 		const results = await Promise.all(
-			servers.map(async (server) => {
+			servers
+				.filter((server) => !server.missingEnv?.length)
+				.map(async (server) => {
 				try {
 					return { connection: await connect(server) };
 				} catch (error) {

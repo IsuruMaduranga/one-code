@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { expandEnv, loadServers, parseServer } from "../../extensions/mcp/config.ts";
+import { expandEnv, loadServers, missingEnvVars, parseServer } from "../../extensions/mcp/config.ts";
 import {
 	describeContent,
 	describeResourceContents,
@@ -196,5 +196,33 @@ describe("describeResourceContents", () => {
 	it("handles missing or empty contents", () => {
 		expect(describeResourceContents(undefined)).toBe("");
 		expect(describeResourceContents([{ uri: "x://empty" }])).toBe("");
+	});
+});
+
+describe("missing environment variables", () => {
+	it("reports variables a value references but that are not set", () => {
+		expect(missingEnvVars("Bearer ${TOKEN}", {})).toEqual(["TOKEN"]);
+		expect(missingEnvVars("$A/$B", { A: "set" })).toEqual(["B"]);
+		expect(missingEnvVars("nothing here", {})).toEqual([]);
+		expect(missingEnvVars("${T} and ${T}", {})).toEqual(["T"]);
+	});
+
+	it("flags an http server whose auth token is unset instead of sending an empty bearer", () => {
+		const server = parseServer(
+			"github",
+			{ type: "http", url: "https://api.example.com/mcp", headers: { Authorization: "Bearer ${GH_TOKEN}" } },
+			"plugin/.mcp.json",
+			{},
+		);
+		expect(server?.missingEnv).toEqual(["GH_TOKEN"]);
+	});
+
+	it("flags a stdio server with an unset variable in args or env", () => {
+		expect(parseServer("x", { command: "npx", args: ["--key", "$KEY"] }, "s", {})?.missingEnv).toEqual(["KEY"]);
+		expect(parseServer("y", { command: "srv", env: { TOKEN: "${SECRET}" } }, "s", {})?.missingEnv).toEqual(["SECRET"]);
+	});
+
+	it("leaves missingEnv undefined when everything resolves", () => {
+		expect(parseServer("z", { command: "npx", args: ["$A"] }, "s", { A: "ok" })?.missingEnv).toBeUndefined();
 	});
 });

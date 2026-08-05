@@ -20,6 +20,8 @@ export interface StdioServer {
 	args: string[];
 	env?: Record<string, string>;
 	source: string;
+	/** Config referenced these environment variables and they are not set. */
+	missingEnv?: string[];
 }
 
 export interface HttpServer {
@@ -28,6 +30,8 @@ export interface HttpServer {
 	url: string;
 	headers?: Record<string, string>;
 	source: string;
+	/** Config referenced these environment variables and they are not set. */
+	missingEnv?: string[];
 }
 
 export type McpServer = StdioServer | HttpServer;
@@ -67,6 +71,24 @@ export function expandEnv(value: string, env: Record<string, string | undefined>
 	});
 }
 
+/**
+ * Variables a value references that are not set. Expanding them to "" produces
+ * configuration that looks valid and fails confusingly at the server — a real
+ * example being `Authorization: "Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}"`
+ * becoming `"Bearer "`, which the endpoint rejects as a badly formatted header.
+ */
+export function missingEnvVars(value: string, env: Record<string, string | undefined>): string[] {
+	const missing: string[] = [];
+	const pattern = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g;
+	let match = pattern.exec(value);
+	while (match) {
+		const name = match[1] ?? match[2];
+		if (!env[name]) missing.push(name);
+		match = pattern.exec(value);
+	}
+	return [...new Set(missing)];
+}
+
 export function parseServer(
 	name: string,
 	raw: RawServer,
@@ -77,6 +99,10 @@ export function parseServer(
 
 	if (typeof raw.url === "string" && raw.url.trim()) {
 		const headers = asStringRecord(raw.headers);
+		const missing = [
+			...missingEnvVars(raw.url, env),
+			...Object.values(headers ?? {}).flatMap((value) => missingEnvVars(value, env)),
+		];
 		return {
 			kind: "http",
 			name,
@@ -85,6 +111,7 @@ export function parseServer(
 				? Object.fromEntries(Object.entries(headers).map(([k, v]) => [k, expandEnv(v, env)]))
 				: undefined,
 			source,
+			missingEnv: missing.length > 0 ? [...new Set(missing)] : undefined,
 		};
 	}
 
@@ -93,6 +120,13 @@ export function parseServer(
 			? raw.args.filter((a): a is string => typeof a === "string").map((a) => expandEnv(a, env))
 			: [];
 		const rawEnv = asStringRecord(raw.env);
+		const missing = [
+			...missingEnvVars(raw.command, env),
+			...(Array.isArray(raw.args) ? raw.args : [])
+				.filter((a): a is string => typeof a === "string")
+				.flatMap((a) => missingEnvVars(a, env)),
+			...Object.values(rawEnv ?? {}).flatMap((value) => missingEnvVars(value, env)),
+		];
 		return {
 			kind: "stdio",
 			name,
@@ -100,6 +134,7 @@ export function parseServer(
 			args,
 			env: rawEnv ? Object.fromEntries(Object.entries(rawEnv).map(([k, v]) => [k, expandEnv(v, env)])) : undefined,
 			source,
+			missingEnv: missing.length > 0 ? [...new Set(missing)] : undefined,
 		};
 	}
 

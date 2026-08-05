@@ -424,3 +424,35 @@ and the non-native fallback remain unexercised for lack of a credential.
 **Declined:** the CC-style UI packages (`pi-cc-header`, `pi-cc-extensions`). They
 are cosmetic and would add a dependency for appearance only, which fails our own
 adopt-vs-build checklist.
+
+## Branding without a fork
+
+pi's startup banner ("pi v0.83.0 … Ask it how to use or extend Pi") is built from
+its `piConfig`, which resolves from pi's own installed `package.json` — a
+dependent package cannot change it, as recorded above. But `ctx.ui.setHeader()`
+replaces the header component outright, which reaches the same result:
+`extensions/branding/` renders the package name, version, key hints and current
+model/mode instead, and sets the terminal title. `CC_NO_BANNER=1` restores pi's.
+
+Implementation note: a pi-tui `Component` is just `render(width)` plus
+`invalidate()`, so the header is an inline object literal — no dependency on
+pi-tui needed. It only applies when `ctx.mode === "tui"`; print and rpc modes have
+no chrome to replace.
+
+This is the cosmetic half of what a fork would buy. The other half — the `.pi`
+config directory name — stays as it is; see the integration-shapes section in
+`pi-notes.md` for when that would justify forking.
+
+## MCP servers with unset credentials
+
+Found from a real run: the `github` plugin's config is
+`Authorization: "Bearer ${GITHUB_PERSONAL_ACCESS_TOKEN}"`, and with the variable
+unset our expansion produced the literal `"Bearer "`. The server then failed with
+"Authorization header is badly formatted" — a confusing protocol error for what is
+really a missing token.
+
+`missingEnvVars()` now reports variables a config references but that are not set
+(across command, args, env, url and headers), and such servers are **skipped with
+an explanatory message** rather than connected with an empty credential:
+`MCP server "github" failed: not started — GITHUB_PERSONAL_ACCESS_TOKEN not set in
+the environment`.
