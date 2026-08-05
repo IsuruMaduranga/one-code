@@ -10,7 +10,13 @@
       "extensions/system-reminder/index.ts",
       "extensions/permissions/index.ts",
       "extensions/ask-user/index.ts",
+      "extensions/subagents/index.ts",
+      "extensions/todo/index.ts",
+      "extensions/plan-mode/index.ts",
       "extensions/system-prompt/index.ts"
+    ],
+    "skills": [
+      "./node_modules/pi-ask-user/skills"
     ]
   },
   "scripts": {

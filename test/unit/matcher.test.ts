@@ -18,7 +18,7 @@ describe("normalizeToolName", () => {
 		expect(normalizeToolName("Glob")).toBe("find");
 		expect(normalizeToolName("NotebookEdit")).toBe("notebook_edit");
 		expect(normalizeToolName("WebFetch")).toBe("web_fetch");
-		expect(normalizeToolName("Task")).toBe("agent");
+		expect(normalizeToolName("Task")).toBe("subagent");
 	});
 
 	it("leaves mcp__ names verbatim and lowercases unknowns", () => {

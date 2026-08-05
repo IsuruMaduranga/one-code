@@ -42,6 +42,14 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		type: "boolean",
 	});
 
+	/**
+	 * Subagent children (pi subprocesses spawned by pi-subagents) inherit the
+	 * parent session's permission mode, Claude Code-style: the parent exports
+	 * it via env, the child's copy of this extension reads it back.
+	 */
+	const MODE_ENV = "CC_PERMISSION_MODE";
+	const isSubagentChild = process.env.PI_SUBAGENT_CHILD === "1";
+
 	let mode: PermissionMode = "default";
 	let deny: PermissionRule[] = [];
 	let ask: PermissionRule[] = [];
@@ -50,6 +58,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 
 	const setMode = (next: PermissionMode) => {
 		mode = next;
+		process.env[MODE_ENV] = next;
 		if (mode === "plan") {
 			pi.events.emit(REMINDER_CHANNEL, {
 				text: "Plan mode is active. You may only inspect the codebase with read-only tools. Do NOT make any edits or run state-changing commands; research and present a plan to the user instead.",
@@ -71,18 +80,28 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		allow = parseRules(settings.allow);
 
 		const flagMode = pi.getFlag("permission-mode");
+		const inheritedMode = isSubagentChild ? process.env[MODE_ENV] : undefined;
 		if (pi.getFlag("dangerously-skip-permissions") === true) {
 			mode = "bypassPermissions";
 		} else if (isPermissionMode(flagMode)) {
 			mode = flagMode;
+		} else if (isPermissionMode(inheritedMode)) {
+			mode = inheritedMode;
 		} else if (settings.defaultMode) {
 			mode = settings.defaultMode;
 		}
 		if (mode === "plan") setMode("plan");
+		process.env[MODE_ENV] = mode;
 	};
 
 	pi.on("session_start", (_event, ctx) => {
 		reloadSettings(ctx);
+	});
+
+	// Mode-change requests from other extensions (e.g. plan-mode tools).
+	pi.events.on("pi-claude-code:set-permission-mode", (data) => {
+		const requested = (data as { mode?: unknown })?.mode;
+		if (isPermissionMode(requested)) setMode(requested);
 	});
 
 	pi.on("tool_call", async (event, ctx) => {

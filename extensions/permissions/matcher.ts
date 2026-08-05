@@ -29,8 +29,8 @@ const CC_TOOL_NAMES: Record<string, string> = {
 	web_fetch: "web_fetch",
 	websearch: "web_search",
 	web_search: "web_search",
-	task: "agent",
-	agent: "agent",
+	task: "subagent",
+	agent: "subagent",
 	todowrite: "todo_write",
 	todo_write: "todo_write",
 	skill: "skill",
@@ -152,7 +152,18 @@ export function toolTier(toolName: string): ToolTier {
 }
 
 /** Extension tools that are always safe to run without asking (session-internal state). */
-export const AUTO_ALLOWED_TOOLS = new Set<string>(["todo_write", "ask_user_question", "ask_user"]);
+export const AUTO_ALLOWED_TOOLS = new Set<string>([
+	"todo_write",
+	"ask_user_question",
+	"ask_user",
+	// Subagent orchestration is safe to launch; each child enforces its own
+	// tool permissions (inheriting this session's mode via env).
+	"subagent",
+	"subagent_wait",
+	// Plan-mode transitions must work inside plan mode itself.
+	"enter_plan_mode",
+	"exit_plan_mode",
+]);
 
 export interface DecideInput {
 	toolName: string;
