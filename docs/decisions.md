@@ -237,10 +237,32 @@ instructions" header. Placement still differs deliberately: ours sits in the
 system prompt (via pi), Claude Code's arrives in a first-user-message reminder.
 Ours caches better.
 
-**Opt-in `context_management`.** Claude Code sends
-`clear_thinking_20251015` on every request so long sessions stop carrying old
-reasoning blocks. `extensions/context-management/` does this via
-`before_provider_request`, **off by default** behind `CC_CLEAR_THINKING=1`.
+**`context_management` — on by default for first-party Anthropic only.**
+Claude Code sends `clear_thinking_20251015` on every request so long sessions
+stop carrying old reasoning blocks. `extensions/context-management/` does this
+via `before_provider_request`. Default: enabled when the model's provider is
+`anthropic` on `api.anthropic.com` (verified there, and it is what Claude Code
+does); disabled for every other `anthropic-messages` endpoint.
+`CC_CLEAR_THINKING=0` forces it off; `=1` forces it on for an endpoint you
+have confirmed accepts it.
+
+**Enabling for other providers later** — the default is scoped narrowly only
+because these are untested, not because they can't work. What each needs
+before flipping it on:
+
+- **Bedrock**: takes beta flags as `anthropic_beta` (array) *in the request
+  body*, not the `anthropic-beta` header — needs its own request shaping plus
+  a live check that it accepts `context_management` at all.
+- **Vertex**: `anthropic_version` in the body; same question about
+  `context_management` support.
+- **Proxies/gateways (LiteLLM etc.)**: pass-through varies per deployment;
+  users can already opt in per-endpoint with `CC_CLEAR_THINKING=1` once they
+  have confirmed theirs forwards the header and body param.
+
+To extend: broaden `clearThinkingEnabled()` per provider and add the
+endpoint's beta representation next to `anthropicBetas()`; verify with a live
+run using `debug-capture.ts` (remember it logs pre-mutation payloads — confirm
+via absence of the 400, not via the capture).
 
 Verified against the live API (2026-08-05, API key) — the body param alone is
 not enough, found via a curl A/B:

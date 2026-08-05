@@ -138,6 +138,15 @@ Tools appear as `mcp__<server>__<tool>` and are deferred behind `tool_search`.
 
 **Plugins** — anything installed in `~/.claude/plugins` contributes its agents, skills, commands, and MCP servers, namespaced `<plugin>:<name>`.
 
+**Environment variables** — the package's own switches, all optional:
+
+| Variable | Effect |
+|---|---|
+| `CC_NO_BANNER=1` | Keep pi's original startup header instead of this package's mascot banner. |
+| `CC_CLEAR_THINKING=0` / `=1` | Long-session context trimming (Anthropic `context_management` / `clear_thinking`). Default: **on** for first-party Anthropic (api.anthropic.com), **off** for Bedrock/Vertex/proxies. `0` forces it off anywhere; `1` forces it on for an anthropic-messages endpoint you have confirmed accepts it. |
+| `CC_VERSION` | Version string shown in the banner (defaults to the package version; useful for wrappers that pin their own). |
+| `CC_E2E_LOG=<path>` | Development only, with `test/e2e/debug-capture.ts` loaded via `-e`: append every raw provider request to `<path>` as JSONL. Note it logs payloads *before* this package's extensions mutate them. |
+
 ## Optional extras
 
 - **Web search** uses your current model provider's own search API (OpenAI/Codex, Anthropic, Gemini) — no extra key, but it needs a provider that offers one.
@@ -150,14 +159,14 @@ Tools appear as `mcp__<server>__<tool>` and are deferred behind `tool_search`.
 
   in `~/.pi/agent/settings.json`. pi hot-reloads a theme file while it is active, so you can tweak `themes/claude-code.json` and watch it change.
 - **The startup banner** is replaced with this package's own. `CC_NO_BANNER=1` restores pi's.
-- **Long-session context trimming on Anthropic**: set `CC_CLEAR_THINKING=1` to ask the API to drop old thinking blocks. Off by default because it is unverified — see `docs/decisions.md`.
+- **Long-session context trimming on Anthropic**: on by default for first-party Anthropic — the API is asked to drop old thinking blocks, as Claude Code does. See the `CC_CLEAR_THINKING` row in Configuration and `docs/decisions.md`.
 
 ## Known limitations
 
 - **No sandbox.** pi runs shell commands with your privileges; the permission system decides *whether* a command runs, not what it can reach. For a hard boundary, run pi in a container or add a sandbox extension — see pi's `docs/containerization.md`.
 - **Subagents run in the foreground.** No detached runs, so no `TaskOutput`/`TaskStop` equivalents yet.
 - **`web_fetch` returns extracted markdown** (windowed, with pagination) rather than summarising the page with a small model.
-- Verified end-to-end on OpenAI/Codex models; the Anthropic-specific fast paths are implemented but not yet exercised against a live Anthropic key.
+- Verified end-to-end on OpenAI/Codex and Anthropic models, including Anthropic's native deferred-tool loading, the pre-5.4 fallback, and `context_management` trimming. Bedrock/Vertex/proxy endpoints are not yet exercised — context trimming stays off there by default.
 
 ## Development
 

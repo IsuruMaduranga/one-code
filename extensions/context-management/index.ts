@@ -22,8 +22,12 @@
  *   "`clear_thinking_20251015` strategy requires `thinking` to be enabled or
  *   adaptive". The payload hook checks before attaching the edit.
  *
- * OFF BY DEFAULT, opt in with `CC_CLEAR_THINKING=1`: a rejected parameter fails
- * every request, so this stays behind a flag until confirmed on your account.
+ * ON BY DEFAULT for first-party Anthropic (provider `anthropic`,
+ * api.anthropic.com) — verified there, and Claude Code sends it on every
+ * request. OFF everywhere else: Bedrock takes `anthropic_beta` in the body,
+ * not the header, and proxies may strip unknown params — a rejected parameter
+ * fails every request. `CC_CLEAR_THINKING=0` forces it off; `=1` forces it on
+ * for an anthropic-messages endpoint you have confirmed accepts it.
  */
 
 import { readFileSync } from "node:fs";
@@ -95,21 +99,36 @@ function isAnthropicOAuth(): boolean {
 
 interface AnthropicishModel {
 	api?: string;
+	provider?: string;
+	baseUrl?: string;
 	compat?: AnthropicModelCompat;
 }
 
+/**
+ * Default-on only where verified: first-party Anthropic. The env var overrides
+ * both ways so a proxy user can opt in and anyone can opt out. Checked per
+ * request because the model can change mid-session.
+ */
+export function clearThinkingEnabled(flag: string | undefined, model: AnthropicishModel | undefined): boolean {
+	if (model?.api !== "anthropic-messages") return false;
+	if (flag === "0") return false;
+	if (flag === "1") return true;
+	return model.provider === "anthropic" && (model.baseUrl ?? "").includes("api.anthropic.com");
+}
+
 export default function contextManagementExtension(pi: ExtensionAPI) {
-	if (process.env.CC_CLEAR_THINKING !== "1") return;
+	const flag = () => process.env.CC_CLEAR_THINKING;
 
 	pi.on("before_provider_headers", (event, ctx) => {
 		const model = ctx.model as AnthropicishModel | undefined;
-		if (model?.api !== "anthropic-messages") return;
-		event.headers["anthropic-beta"] = anthropicBetas(isAnthropicOAuth(), model.compat);
+		if (!clearThinkingEnabled(flag(), model)) return;
+		event.headers["anthropic-beta"] = anthropicBetas(isAnthropicOAuth(), model?.compat);
 	});
 
 	pi.on("before_provider_request", (event, ctx) => {
-		if (!looksLikeAnthropicRequest(event.payload)) return undefined;
 		const model = ctx.model as AnthropicishModel | undefined;
+		if (!clearThinkingEnabled(flag(), model)) return undefined;
+		if (!looksLikeAnthropicRequest(event.payload)) return undefined;
 		const payload = event.payload as Record<string, unknown>;
 		if (!clearThinkingApplies(payload, model?.compat?.forceAdaptiveThinking === true)) return undefined;
 		return withClearThinking(payload);
