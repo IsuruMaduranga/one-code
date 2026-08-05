@@ -147,12 +147,36 @@ Tools appear as `mcp__<server>__<tool>` and are deferred behind `tool_search`.
 
 ## Development
 
+### Running the checkout you are working on
+
+Register the repo once as a pi package; after that every `pi` session anywhere on
+the machine loads your working copy, so there is nothing to rebuild:
+
 ```bash
-npm install
+cd pi-claude-code
+npm install                     # required — a path install does not fetch deps
+pi install .                    # register this checkout
+pi list                         # confirm it is listed
+
+cd ~/some-project && pi         # your working copy is live here
+```
+
+Editing an extension takes effect on the next session — **restart `pi`** (or try
+`/reload`, which re-reads auto-discovered extensions). Useful while iterating:
+
+```bash
+pi -ne                                       # start with NO extensions (bisect a break)
+pi -e ./extensions/<name>/index.ts -p "…"    # load one extension in isolation
+pi --no-session -p "…"                       # one-shot, leaves no session behind
+```
+
+`pi remove .` unregisters it again.
+
+### Checks
+
+```bash
 npx tsc --noEmit     # typecheck
 npx vitest run       # unit tests
-
-pi -e ./extensions/<name>/index.ts -p "…"   # try one extension in isolation
 ```
 
 Logic lives in pure modules with no pi imports (unit-tested); each `index.ts` is thin wiring (verified end to end). Interactive behaviour — permission prompts, plan approval, questions — can only be driven through `pi --mode rpc`; see `test/e2e/rpc-permission-test.mjs`. To inspect what actually reaches the model, load `test/e2e/debug-capture.ts` with `-e` and set `CC_E2E_LOG=/path/log.jsonl`.
