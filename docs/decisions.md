@@ -64,9 +64,16 @@ the system prompt and invalidates the cached prefix, defeating the purpose.
 Verified on OpenAI (gpt-5.5): after `tool_search`, pi injected native
 `tool_search_call` / `tool_search_output` items at the load point rather than
 appending the schema to the request's tool array, and the model then called the
-tool successfully. The Anthropic `defer_loading` path and the non-native
-fallback are pi-owned code paths that could not be exercised here (no second
-provider credential configured).
+tool successfully.
+
+Verified on Anthropic (2026-08-05, API key): both pi-owned paths, with
+request-payload capture. Native (`claude-sonnet-5`, and any
+`supportsToolReferences` model — first-party opus/sonnet/fable ≥5.4-ish, never
+haiku): before activation the deactivated tools are simply absent from
+`tools`; after `tool_search` activates `web_fetch`, the next request carries it
+in `tools` with `defer_loading: true`. Fallback (`claude-haiku-4-5`): the
+activated tool is appended as a full definition, complete `input_schema`, no
+`defer_loading` flag. Both runs completed normally.
 
 ## Web tools
 
@@ -233,10 +240,26 @@ Ours caches better.
 **Opt-in `context_management`.** Claude Code sends
 `clear_thinking_20251015` on every request so long sessions stop carrying old
 reasoning blocks. `extensions/context-management/` does this via
-`before_provider_request`, but **off by default** behind `CC_CLEAR_THINKING=1`:
-the Anthropic API rejects unknown top-level parameters, there is no Anthropic
-credential here to verify against, and a rejected parameter would fail *every*
-request. Enable it once confirmed on your account.
+`before_provider_request`, **off by default** behind `CC_CLEAR_THINKING=1`.
+
+Verified against the live API (2026-08-05, API key) — the body param alone is
+not enough, found via a curl A/B:
+
+- It requires `anthropic-beta: context-management-2025-06-27`, else 400
+  "context_management: Extra inputs are not permitted".
+- The edit requires thinking enabled or an adaptive-thinking model, else 400
+  "`clear_thinking_20251015` strategy requires `thinking` to be enabled or
+  adaptive" — so the payload hook gates on `payload.thinking` /
+  `compat.forceAdaptiveThinking`.
+- **Header clobber hazard**: an extension's `before_provider_headers` value
+  merges *after* pi's computed headers, replacing pi's own `anthropic-beta`
+  (OAuth identity betas, interleaved thinking for non-adaptive models,
+  fine-grained tool streaming). `anthropicBetas()` therefore rebuilds pi's
+  list (pinned v0.83 logic) and appends ours; OAuth is detected from
+  `~/.pi/agent/auth.json` entry `type`. Re-check on pi upgrades.
+
+Confirmed working end-to-end on `claude-haiku-4-5` (non-adaptive, thinking
+gated) and `claude-sonnet-5` (adaptive): no API errors, normal completions.
 
 Verified end-to-end: an unread-file edit was blocked and the file left untouched;
 after an external edit the stale guard blocked the edit and the change reminder
