@@ -439,6 +439,14 @@ Implementation note: a pi-tui `Component` is just `render(width)` plus
 pi-tui needed. It only applies when `ctx.mode === "tui"`; print and rpc modes have
 no chrome to replace.
 
+Verified rendering with `test/e2e/tui-capture.sh`:
+
+```
+pi-claude-code v0.1.0  Claude Code on the pi harness
+escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more
+model claude-sonnet-5 · mode default
+```
+
 This is the cosmetic half of what a fork would buy. The other half — the `.pi`
 config directory name — stays as it is; see the integration-shapes section in
 `pi-notes.md` for when that would justify forking.
@@ -475,6 +483,8 @@ present, no unknown tokens beyond the two optional ones, every `vars` reference
 resolvable, and colours well-formed. pi rejects an incomplete theme at load time
 without saying which token is missing, so this catches typos before a user does.
 
-Not verified here: whether pi picks the themes up from the package manifest, and
-how they actually look — this environment has no TTY, so the TUI cannot render.
-Both need a check in a real terminal.
+Both were then verified with `test/e2e/tui-capture.sh`, which runs pi inside tmux
+to get a real pty: the startup screen lists `[Themes] claude-code,
+claude-code-light` (so `pi.themes` discovery works for an installed package), and
+with the theme selected the clay accent appears as a 24-bit escape in the rendered
+output.
