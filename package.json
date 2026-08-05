@@ -2,8 +2,28 @@
   "name": "pi-claude-code",
   "version": "0.1.0",
   "description": "Claude Code experience for the pi coding agent: ported system prompt, Claude-Code-format permissions, .claude/ compatibility, ToolSearch-style deferred tools, and system-reminder steering",
-  "type": "module",
+  "keywords": [
+    "pi",
+    "pi-package",
+    "pi-extension",
+    "claude-code",
+    "coding-agent",
+    "mcp",
+    "agent"
+  ],
   "license": "MIT",
+  "engines": {
+    "node": ">=22.19"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/isuruWij/pi-claude-code.git"
+  },
+  "homepage": "https://github.com/isuruWij/pi-claude-code#readme",
+  "bugs": {
+    "url": "https://github.com/isuruWij/pi-claude-code/issues"
+  },
+  "type": "module",
   "pi": {
     "extensions": [
       "extensions/claude-compat/index.ts",
@@ -26,6 +46,14 @@
       "extensions/system-prompt/index.ts"
     ]
   },
+  "files": [
+    "extensions/",
+    "agents/",
+    "types/",
+    "README.md",
+    "LICENSE",
+    "docs/decisions.md"
+  ],
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
@@ -49,12 +77,5 @@
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.83.0"
-  },
-  "files": [
-    "extensions/**/*.ts",
-    "agents/*.md",
-    "types/*.d.ts",
-    "README.md",
-    "docs/decisions.md"
-  ]
+  }
 }
