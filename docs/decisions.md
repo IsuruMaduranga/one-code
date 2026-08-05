@@ -488,3 +488,70 @@ to get a real pty: the startup screen lists `[Themes] claude-code,
 claude-code-light` (so `pi.themes` discovery works for an installed package), and
 with the theme selected the clay accent appears as a 24-bit escape in the rendered
 output.
+
+## Memory: own file-based implementation
+
+The original plan scoped memory out as "Anthropic-hosted", but the memory
+system Claude Code actually runs on is machine-local plain files the model
+manages itself with ordinary file tools: one fact per markdown file under
+`~/.claude/projects/<slug>/memory/`, a `MEMORY.md` index, a `# Memory` system
+prompt section describing the format, and the index injected into the first
+turn. All of that is local, so we implement it (`extensions/lib/memory.ts` +
+`extensions/memory/`) rather than depend on `pi-memory`, whose model differs
+(its own tools and storage format) and would not read or write Claude Code's
+existing memory directories.
+
+Fidelity details confirmed against the official memory doc
+(<https://code.claude.com/docs/en/memory>), `payload.json`, and a live Claude
+Code context:
+
+- **Slug is keyed by git root, not cwd** — all worktrees and subdirectories of
+  a repo share one memory directory; outside a repo the cwd is used. We resolve
+  with `findGitRoot` (now in `lib/git.ts`).
+- **Only the first 200 lines or 25KB of MEMORY.md load**; `truncateIndex`
+  mirrors that. Topic files are never startup-loaded — the model reads them on
+  demand.
+- **Placement**: Claude Code nests the index inside the first-turn claudeMd
+  `<system-reminder>` ("Contents of … (user's auto-memory, persists across
+  conversations):"). We reuse that exact framing but emit a standalone
+  reminder, because our CLAUDE.md equivalent travels through pi's
+  `contextFiles` into the system prompt instead of a first-turn reminder.
+- **Write-time frontmatter stamping** (found by diffing a real session
+  transcript's Write inputs against the files on disk): Claude Code enriches a
+  memory file's `metadata:` at write time with `node_type: memory`,
+  `originSessionId`, and a `modified` ISO timestamp — and never adds
+  frontmatter to a file that has none, which keeps MEMORY.md unstamped. We
+  stamp by mutating the `write` tool's input in `tool_call`, *before*
+  execution, so the file lands stamped and file-tracker observes the same
+  bytes that hit disk (stamping after its `tool_result` observation would make
+  every memory write look externally modified).
+- **Write-time index limit guard**: after a write/edit of MEMORY.md, Claude
+  Code measures the loadable content against the 200-line/25KB limits —
+  near-limit it reminds the model to shorten the index; over-limit the write
+  succeeds but the result is an error telling the model to rewrite. Replicated
+  via the reminder queue and pi's rewritable `tool_result`.
+
+Not replicated: relevance-based mid-session recall of individual memory files.
+Its selection mechanism is undocumented client internals (the frontmatter
+`description` is "used to decide relevance during recall", and the UI shows
+"Recalled N memories"), and no recalled-memory block appears in either
+captured context we have — including a long live session working on this very
+project with a relevant memory on file. There is nothing observable to copy;
+the injected index is the entry point and the model follows links from there.
+
+Split follows the house pattern: pure helpers (slug, paths, truncation,
+prompt/reminder text) in `lib/memory.ts`; the `memory` extension does mkdir +
+first-turn reminder over the queue; `system-prompt` re-derives the directory
+for its section (no shared module state — jiti). Using Claude Code's exact
+slug and layout means memories written by real Claude Code sessions are picked
+up unchanged, and vice versa.
+
+Verified live via tmux + `debug-capture.ts` (the sandboxed shell can't run pi
+directly): the `# Memory` section lands just before `# Environment`, the
+directory is created with the expected slug on session start (from a
+subdirectory of a git repo it resolves to the repo root), and a planted
+`MEMORY.md` arrives as a `<system-reminder>` on the first user message.
+Stamping was verified end-to-end with a real model run through the permission
+gate (allow rules, no bypass flag): the model wrote plain frontmatter and the
+file landed with `node_type`/`originSessionId`/`modified` in Claude Code's
+field order, while MEMORY.md stayed unstamped.

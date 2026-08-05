@@ -10,6 +10,7 @@ const env: EnvironmentInfo = {
 	shell: "zsh",
 	date: "2026-08-05",
 	modelLine: "claude-opus-5 (anthropic)",
+	memoryDir: "/home/u/.claude/projects/-tmp-project/memory",
 };
 
 const baseOptions = { cwd: "/tmp/project" };
@@ -30,6 +31,13 @@ describe("buildClaudeCodeSystemPrompt", () => {
 		expect(prompt).toContain("Working directory: /tmp/project");
 		expect(prompt).toContain("Is a git repository: yes");
 		expect(prompt).toContain("Model: claude-opus-5 (anthropic)");
+	});
+
+	it("includes the memory section just before the environment block", () => {
+		const prompt = buildClaudeCodeSystemPrompt(baseOptions, env);
+		expect(prompt).toContain("# Memory");
+		expect(prompt).toContain("/home/u/.claude/projects/-tmp-project/memory/");
+		expect(prompt.indexOf("# Memory")).toBeLessThan(prompt.indexOf("# Environment"));
 	});
 
 	it("lists tools that have snippets and appends guidelines", () => {

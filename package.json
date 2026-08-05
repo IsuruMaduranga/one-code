@@ -32,6 +32,7 @@
       "extensions/tool-search/index.ts",
       "extensions/plugins/index.ts",
       "extensions/file-tracker/index.ts",
+      "extensions/memory/index.ts",
       "extensions/permissions/index.ts",
       "extensions/ask-user/index.ts",
       "extensions/skill/index.ts",

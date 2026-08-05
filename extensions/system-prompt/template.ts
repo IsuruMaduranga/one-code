@@ -2,15 +2,16 @@
  * Claude Code system prompt, adapted for pi-claude-code.
  *
  * Sections that are provider- and host-agnostic are kept close to Claude
- * Code's wording; those tied to Anthropic-hosted features (artifacts, the
- * memory backend, workflows) are dropped, and the environment block is
- * generated dynamically.
+ * Code's wording; those tied to Anthropic-hosted features (artifacts,
+ * workflows) are dropped, and the environment block is generated dynamically.
+ * Memory is file-based (see extensions/lib/memory.ts) and included.
  *
  * This function must be pure and deterministic: same inputs, byte-identical
  * output (prompt-cache stability).
  */
 
 import { formatSkillsForPrompt, type BuildSystemPromptOptions } from "@earendil-works/pi-coding-agent";
+import { memoryPromptSection } from "../lib/memory.ts";
 import type { EnvironmentInfo } from "./environment.ts";
 
 const IDENTITY = `You are pi-claude-code, an interactive agent that helps users with software engineering tasks, running on the pi agent harness.
@@ -84,6 +85,8 @@ export function buildClaudeCodeSystemPrompt(options: BuildSystemPromptOptions, e
 		HARNESS,
 		STYLE,
 		buildToolsSection(options),
+		// Claude Code orders Memory just before Environment.
+		memoryPromptSection(env.memoryDir),
 		buildEnvironmentSection(env),
 		CONTEXT_MANAGEMENT,
 		DELIVERING_WORK,
