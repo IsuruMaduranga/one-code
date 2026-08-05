@@ -741,3 +741,53 @@ replayed the whole prefix in 11ms with zero live calls and an identical
 result. Gate integration: with `deny: ["Bash(touch:*)"]`, a subagent told to
 run `touch pwned.txt` reported "Denied by permission rules (rule:
 Bash(touch:*))", `echo done` succeeded, and no file was created.
+
+## `/effort`, and ultracode as a standing mode
+
+Claude Code exposes reasoning effort as a Faster→Smarter slider whose last stop,
+past `max` and behind a divider, is `ultracode` — subtitled "xhigh + workflows".
+The divider is the whole point: every other stop buys more thinking, while that
+one also changes *how the model works*, arming multi-agent orchestration on every
+turn instead of the single turn the keyword arms. pincer now has the same
+command, and the same two-tier opt-in: the keyword in a message for one turn
+(`extensions/workflow`), `/effort ultracode` for a standing mode that persists
+until switched off.
+
+The mode is implemented the way the permissions extension implements plan mode —
+an `every-turn` reminder on `pincer:system-reminder` under a key, withdrawn with
+`{remove: true}` when leaving — plus `ctx.ui.setStatus` for a `✦ ultracode`
+footer indicator. Its standing text is deliberately stronger than the keyword's
+one-turn nudge: orchestrate substantive work *by default* and verify
+adversarially, with trivial and conversational turns carved out so the mode does
+not spawn a fleet to rename a variable.
+
+The slider itself is a hand-rolled `Component` passed to `ctx.ui.custom()`,
+following branding's precedent of implementing pi-tui's interface inline. That is
+not stylistic: `@earendil-works/pi-tui` is a regular dependency of
+pi-coding-agent rather than a peer, so it is unhoisted and unresolvable from this
+package — pi's own thinking picker is a vertical `SelectList`, which we cannot
+import and which is the wrong shape anyway. The cost is decoding keys from raw
+bytes (`handleInput` hands over terminal data, not key names) and owning the
+layout, so the marker row, labels, and track are laid out against measured
+column positions and collapse to a single line rather than wrapping when the pane
+is too narrow.
+
+One live finding shaped the design. `setThinkingLevel` **clamps to model
+capability silently** — no throw, no warning, and `thinking_level_select` fires
+after the fact without a veto — so asking for xhigh on haiku-4-5 quietly yields
+`high`. Rather than report a level the model never accepted, the command sets,
+reads back, and says so: "Effort: ultracode — high reasoning, workflows armed
+every turn (this model caps reasoning at high)". That also fixed a subtler bug:
+the shift+tab hygiene (drop the mode when the user cycles thinking away, so the
+footer cannot lie) originally compared against xhigh, which on a clamping model
+would have made ultracode cancel itself the moment anything re-announced the
+clamped level. It compares against the level the mode actually settled on.
+
+Verified: 19 unit tests over the pure slider (choice/level mapping, both arrow
+encodings, clamped movement, marker alignment under the selected label, the
+ultracode subtitle appearing only when selected, narrow-pane degradation) and a
+live tmux TUI run — the slider opened preselected at the current level, arrow
+keys moved the marker, `ultracode` revealed its subtitle, Enter applied it with
+the clamp reported honestly, `✦ ultracode` appeared in the footer, and a
+`CC_E2E_LOG` capture confirmed the standing reminder in **both** subsequent
+turns' payloads rather than just the first.

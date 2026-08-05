@@ -79,6 +79,7 @@ pi --model ollama/qwen3-coder      # any provider in ~/.pi/agent/models.json
 | `/permission-mode <mode>` | Switch mode: `default`, `acceptEdits`, `plan`, `bypassPermissions` |
 | `/allow <rule>` | Persist an allow rule, e.g. `/allow Bash(npm test:*)` (add `global` for user scope) |
 | `/agents`, `/skills`, `/todos` | List available agents, skills, current todos |
+| `/effort` | Reasoning effort slider, including `ultracode` (xhigh + workflows) |
 | `/workflows` | Workflow runs and saved workflows; `stop <runId>` / `log <runId>` |
 | `/plugins`, `/mcp`, `/lsp` | Status of plugins, MCP servers, language servers |
 | `/tools-deferred` | Which tools are deferred vs loaded |
@@ -91,7 +92,26 @@ For work that is worth spreading across many agents — a broad audit, a
 migration, a review that should be independently double-checked — say
 **`ultracode`** in your message, or just ask for a workflow. The model then
 writes a short JavaScript orchestration script and runs it through the
-`workflow` tool:
+`workflow` tool.
+
+To leave it on rather than saying the word each time, run **`/effort`** and pick
+the last stop on the slider:
+
+```
+Effort
+
+Faster                            Smarter
+──────────────────────────────│──────────
+                                    ▲
+low  medium  high  xhigh  max │ ultracode
+                                xhigh + workflows
+```
+
+`ultracode` is xhigh reasoning *plus* orchestration armed on every turn, which
+is why it sits past `max` behind a divider. `/effort <level>` sets one directly
+(`off` and `minimal` work too, though the slider omits them), and a footer
+`✦ ultracode` shows while the mode is on. Cycling thinking with shift+tab turns
+it back off. Here is what a script looks like:
 
 ```js
 export const meta = { name: 'audit', description: 'find routes missing auth', phases: [{ title: 'Scan' }, { title: 'Audit' }] }

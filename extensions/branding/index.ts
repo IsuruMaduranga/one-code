@@ -54,6 +54,7 @@ export const LOGO_LINES = [
 const HINT_LINES: [key: string, what: string][][] = [
 	[
 		["shift+tab", "thinking"],
+		["/effort", "effort + ultracode"],
 		["ctrl+l", "model"],
 		["ctrl+p", "cycle model"],
 		["/permission-mode", "mode"],

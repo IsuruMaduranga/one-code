@@ -38,6 +38,7 @@
       "extensions/skill/index.ts",
       "extensions/subagents/index.ts",
       "extensions/workflow/index.ts",
+      "extensions/effort/index.ts",
       "extensions/todo/index.ts",
       "extensions/plan-mode/index.ts",
       "extensions/notebook/index.ts",
