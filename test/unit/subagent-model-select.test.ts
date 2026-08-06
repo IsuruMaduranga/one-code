@@ -52,7 +52,7 @@ describe("resolveSubagentModel: aliases", () => {
 		expect(resolution.notices[0]).toContain('No "sonnet" model');
 	});
 
-	it("stays with the session's upstream vendor on a gateway", () => {
+	it("stays with the session's model-creator namespace on a gateway", () => {
 		const catalog = [
 			model("openrouter", "openai/gpt-5.1", 1.25),
 			model("openrouter", "openai/gpt-5-mini", 0.25),
@@ -130,10 +130,64 @@ describe("resolveSubagentModel: precedence and exact references", () => {
 		expect(resolution.source).toBe("default");
 	});
 
-	it("uses the session model when nothing is requested", () => {
+	it("automatically chooses a smaller role-profile model when nothing is requested", () => {
 		const resolution = resolveSubagentModel({ sessionModel: anthropic[1], available: anthropic });
-		expect(resolution.model?.id).toBe("claude-sonnet-5");
+		expect(resolution.model?.id).toBe("claude-haiku-4-5");
+		expect(resolution.source).toBe("automatic");
+	});
+
+	it("uses Luna automatically for a Sol session", () => {
+		const catalog = [
+			model("openai-codex", "gpt-5.6-sol", 5),
+			model("openai-codex", "gpt-5.6-luna", 0.2),
+			model("openai-codex", "gpt-5.4-mini", 0.75),
+		];
+		const resolution = resolveSubagentModel({ sessionModel: catalog[0], available: catalog });
+		expect(resolution.model?.id).toBe("gpt-5.6-luna");
+		expect(resolution.source).toBe("automatic");
+	});
+
+	it("never selects automatically without price evidence on both sides", () => {
+		// An unpriced catalog gives no proof of saving, and the anthropic profile
+		// starts at sonnet-class — trusting its order would silently *upgrade*
+		// a haiku session. Automatic selection is a cost optimisation only.
+		const unpriced = [model("anthropic", "claude-haiku-4-5"), model("anthropic", "claude-sonnet-5")];
+		const fromHaiku = resolveSubagentModel({ sessionModel: unpriced[0], available: unpriced });
+		expect(fromHaiku.model?.id).toBe("claude-haiku-4-5");
+		expect(fromHaiku.source).toBe("session");
+
+		const mixed = [model("anthropic", "claude-haiku-4-5", 1), model("anthropic", "claude-sonnet-5")];
+		const unpricedCandidate = resolveSubagentModel({ sessionModel: mixed[0], available: mixed });
+		expect(unpricedCandidate.source).toBe("session");
+	});
+
+	it("requires a small-model name in the price-ranked fallback and ranks tiers over price", () => {
+		// Profile misses everything here (a stale-profile future family). Raw
+		// cheapest would pick the unknown $0.05 model or the nano as the default
+		// coding worker; the hint floor excludes the former and tier rank puts
+		// mini-class ahead of the cheaper nano.
+		const catalog = [
+			model("openai", "gpt-6", 10),
+			model("openai", "gpt-6-mini", 1),
+			model("openai", "gpt-6-nano", 0.1),
+			model("openai", "gpt-6-zz", 0.05),
+		];
+		const resolution = resolveSubagentModel({ sessionModel: catalog[0], available: catalog });
+		expect(resolution.model?.id).toBe("gpt-6-mini");
+		expect(resolution.source).toBe("automatic");
+	});
+
+	it("does not get creative after an explicit agent-frontmatter choice fails", () => {
+		// The agent author asked for a specific model; substituting an automatic
+		// cheaper pick is a model nobody described. The session model serves.
+		const resolution = resolveSubagentModel({
+			agentModel: "some/withdrawn-model",
+			sessionModel: anthropic[0],
+			available: anthropic,
+		});
+		expect(resolution.model?.id).toBe("claude-opus-4-8");
 		expect(resolution.source).toBe("session");
+		expect(resolution.notices[0]).toContain("falling back");
 	});
 });
 
@@ -283,6 +337,13 @@ describe("subagentStatusModel", () => {
 		expect(subagentStatusModel(setting, { model: openai[0], source: "session" })).toEqual({
 			model: "openai/gpt-5.1",
 			via: "session",
+		});
+	});
+
+	it("labels an automatic role-profile default distinctly", () => {
+		expect(subagentStatusModel(undefined, { model: openai[1], source: "automatic" })).toEqual({
+			model: "openai/gpt-5-mini",
+			via: "auto",
 		});
 	});
 

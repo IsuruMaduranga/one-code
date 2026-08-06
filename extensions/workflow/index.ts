@@ -21,6 +21,7 @@ import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
+import { applicableSubagentDefault, loadSubagentDefault } from "../subagents/default-model.ts";
 import { discoverSavedWorkflows, findSavedWorkflow } from "./saved-workflows.ts";
 import { buildRunReport, WorkflowRunManager } from "./run-manager.ts";
 import { WorkflowScriptError } from "./types.ts";
@@ -81,7 +82,7 @@ Every script must begin with \`export const meta = {...}\`:
 The \`meta\` object must be a PURE LITERAL — no variables, function calls, spreads, or template interpolation. Required fields: \`name\`, \`description\`. Optional: \`whenToUse\`, \`phases\`. Use the SAME phase titles in meta.phases as in phase() calls.
 
 Script body hooks:
-- agent(prompt: string, opts?: {label?, phase?, schema?, model?, effort?, isolation?: 'worktree', agentType?}): Promise<any> — spawn a subagent. Without schema, returns its final text as a string. With schema (a JSON Schema object), the subagent is forced to call a structured_output tool and agent() returns the validated object — no parsing needed. Returns null if the subagent fails (filter with .filter(Boolean)). opts.label overrides the display label. opts.phase explicitly assigns this agent to a progress group (use this inside pipeline()/parallel() stages to avoid races on the global phase() state). opts.model overrides the model — default to omitting it, the agent inherits the session model. opts.effort overrides reasoning effort ('off' | 'minimal' | 'low' | 'medium' | 'high'). opts.isolation: 'worktree' runs the agent in a fresh git worktree — use ONLY when agents mutate files in parallel and would otherwise conflict. opts.agentType uses a named agent from .claude/agents/.
+- agent(prompt: string, opts?: {label?, phase?, schema?, model?, effort?, isolation?: 'worktree', agentType?}): Promise<any> — spawn a subagent. Without schema, returns its final text as a string. With schema (a JSON Schema object), the subagent is forced to call a structured_output tool and agent() returns the validated object — no parsing needed. Returns null if the subagent fails (filter with .filter(Boolean)). opts.label overrides the display label. opts.phase explicitly assigns this agent to a progress group (use this inside pipeline()/parallel() stages to avoid races on the global phase() state). opts.model overrides the model — default to omitting it, the agent uses the effective /subagent default (configured, automatic smaller profile, then session fallback). opts.effort overrides reasoning effort ('off' | 'minimal' | 'low' | 'medium' | 'high'). opts.isolation: 'worktree' runs the agent in a fresh git worktree — use ONLY when agents mutate files in parallel and would otherwise conflict. opts.agentType uses a named agent from .claude/agents/.
 - parallel(thunks: Array<() => Promise<any>>): Promise<any[]> — run tasks concurrently. This is a BARRIER: awaits all thunks before returning. A thunk that throws resolves to \`null\` — the call itself never rejects, so \`.filter(Boolean)\` before using the results. Use ONLY when you genuinely need all results together.
 - pipeline(items, stage1, stage2, ...): Promise<any[]> — run each item through all stages independently, NO barrier between stages. Item A can be in stage 3 while item B is still in stage 1. This is the DEFAULT for multi-stage work. Wall-clock = slowest single-item chain, not sum-of-slowest-per-stage. Every stage callback receives (prevResult, originalItem, index). A stage that throws drops that item to \`null\` and skips its remaining stages.
 - log(message: string): void — emit a progress message to the user.
@@ -229,6 +230,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 					throw new WorkflowScriptError("Pass one of: script, scriptPath, name, or resumeFromRunId");
 				}
 
+				const configuredDefault = applicableSubagentDefault(loadSubagentDefault(os.homedir()), ctx.model);
 				const handle = manager.start({
 					script,
 					args: params.args,
@@ -237,6 +239,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 					cwd: ctx.cwd,
 					sessionDir,
 					defaultModel: ctx.model,
+					configuredDefaultModel: configuredDefault?.spec,
 					defaultEffort: ctx.thinkingLevel,
 				});
 				widget.attach(handle);

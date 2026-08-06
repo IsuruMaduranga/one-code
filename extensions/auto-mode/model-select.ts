@@ -27,167 +27,21 @@
  */
 
 import type { Api, Model } from "@earendil-works/pi-ai";
+import {
+	findConfigured,
+	findRoleProfileModel,
+	hintRank,
+	modelIdentity,
+	modelsContainedToSession,
+	pricedInput,
+} from "../lib/model-policy.ts";
 
-/**
- * Providers that are *routers*: the pi provider is the gateway, and the model id
- * carries the upstream vendor that actually receives the request
- * (`anthropic/claude-haiku-4.5` on OpenRouter is served by Anthropic).
- *
- * This distinction is why staying on the same pi provider is not enough. A
- * session on `openai/gpt-5.1` through OpenRouter screened by
- * `anthropic/claude-haiku-4.5` keeps one set of credentials but sends the user's
- * messages and CLAUDE.md to Anthropic — a vendor they did not pick. Same class of
- * leak as the original cross-provider bug, one level down.
- *
- * Groq, Bedrock and GitHub Copilot also carry vendor-ish prefixes
- * (`meta-llama/…`, `anthropic.claude-…`) but *host* those weights themselves, so
- * the data goes to them regardless and no vendor matching is needed.
- */
-const GATEWAY_PROVIDERS = new Set(["openrouter", "vercel-ai-gateway", "cloudflare-ai-gateway"]);
-
-/**
- * Known-good cheap classifiers per vendor, in preference order. Prefixes, so a
- * dated variant (`claude-haiku-4-5-20251001`) satisfies `claude-haiku-4-5`.
- *
- * These sit at the small-but-capable tier — mini/haiku/flash — rather than the
- * absolute cheapest tier (nano, flash-lite). A classifier is a security boundary,
- * and Claude Code runs its own on a Sonnet-class model; dropping to the very
- * bottom to save a fraction of a cent trades away the judgement the gate exists
- * for. Anyone who wants that trade can name it in `autoMode.classifierModel`.
- *
- * Flagship models are deliberately absent (bar Anthropic's Sonnet, which is what
- * Claude Code itself uses): an entry matching the session's own model would make
- * the table "choose" the very model it exists to find something cheaper than.
- */
-export const VENDOR_CLASSIFIERS: Record<string, string[]> = {
-	anthropic: ["claude-haiku-4.5", "claude-haiku-4-5", "claude-3-5-haiku", "claude-sonnet-5"],
-	openai: ["gpt-5-mini", "gpt-5.1-mini", "gpt-4.1-mini", "gpt-4o-mini"],
-	google: ["gemini-2.5-flash", "gemini-2.0-flash"],
-	"meta-llama": ["llama-3.3-70b", "llama-4-scout"],
-	mistralai: ["mistral-small", "mistral-medium"],
-	deepseek: ["deepseek-chat"],
-	qwen: ["qwen3-30b", "qwen-plus"],
-	"z-ai": ["glm-4.5-air", "glm-4-flash"],
-	"x-ai": ["grok-3-mini", "grok-4.3"],
-	moonshotai: ["kimi-k2"],
-};
-
-/**
- * Same table keyed by pi provider, for direct providers where the provider *is*
- * the vendor. Kept separate because a few provider names differ from the vendor
- * name, and a few providers host other vendors' weights themselves.
- */
-export const PROVIDER_DEFAULT_CLASSIFIERS: Record<string, string[]> = {
-	anthropic: VENDOR_CLASSIFIERS.anthropic,
-	openai: VENDOR_CLASSIFIERS.openai,
-	"openai-codex": ["gpt-5-mini", "gpt-5.1-codex-mini", "gpt-5.5-codex"],
-	google: VENDOR_CLASSIFIERS.google,
-	"google-vertex": VENDOR_CLASSIFIERS.google,
-	groq: ["llama-3.3-70b-versatile", "openai/gpt-oss-20b"],
-	xai: VENDOR_CLASSIFIERS["x-ai"],
-	deepseek: VENDOR_CLASSIFIERS.deepseek,
-	mistral: VENDOR_CLASSIFIERS.mistralai,
-	"amazon-bedrock": ["anthropic.claude-haiku", "us.anthropic.claude-haiku"],
-	"github-copilot": ["gpt-5-mini", "claude-haiku-4.5"],
-};
-
-/** The upstream vendor a model id names, for gateway providers only. */
-export function vendorOf(model: Model<Api>): string | undefined {
-	if (!GATEWAY_PROVIDERS.has(model.provider)) return undefined;
-	const slash = model.id.indexOf("/");
-	return slash > 0 ? model.id.slice(0, slash) : undefined;
-}
-
-/**
- * Names of the known small-but-capable model families. Too weak to *choose* by —
- * Groq and xAI carry none of them — but strong enough to corroborate a choice
- * price alone suggested. See the cheapest-in-provider ordering below.
- */
-const NAME_HINTS = [/haiku/i, /flash/i, /mini/i, /nano/i, /small/i, /lite/i, /instant/i, /sonnet/i];
-
-/**
- * Model-id suffixes that cannot serve as a synchronous per-call gate, and which
- * are *systematically cheaper*, so a cost-ranked search actively prefers them:
- *
- * - `:batch` is an asynchronous endpoint — a blocking classifier call would wait
- *   out its timeout and then block the tool call. OpenRouter lists
- *   `anthropic/claude-haiku-4.5:batch` at half the price of the plain model.
- * - `:free` is rate-limited hard enough that a gate on it fails intermittently,
- *   and an intermittently-failing gate blocks real work.
- * - `:online` bolts web search onto every call; `:thinking` forces reasoning we
- *   deliberately disable. Both are the wrong shape and cost more.
- *
- * Only automatic selection is filtered. An explicit `autoMode.classifierModel`
- * still wins, because naming a model is choosing it.
- */
-const UNSUITABLE_VARIANT = /:(batch|free|online|thinking)$/i;
-
-/** Also used by subagent model selection — the same variants cannot serve there. */
-export function isSelectableVariant(model: Model<Api>): boolean {
-	return !UNSUITABLE_VARIANT.test(model.id);
-}
-
-/**
- * A usable price. Non-positive costs are not "free", they are unpriced: pi carries
- * `-1000000` for OpenRouter's router pseudo-models and `0` for free-tier entries,
- * and both would win a cheapest-first sort while telling us nothing about
- * suitability.
- */
-export function pricedInput(model: Model<Api>): number | undefined {
-	const input = model.cost?.input;
-	return typeof input === "number" && input > 0 ? input : undefined;
-}
-
-function hintRank(model: Model<Api>): number {
-	const index = NAME_HINTS.findIndex((pattern) => pattern.test(model.id));
-	return index === -1 ? NAME_HINTS.length : index;
-}
+export { findConfigured } from "../lib/model-policy.ts";
 
 export interface Candidate {
 	model: Model<Api>;
 	/** How this candidate was arrived at, for the notice shown to the user. */
-	source: "configured" | "provider-default" | "cheapest-in-provider" | "session";
-}
-
-/**
- * First model matching one of `prefixes` in order, optionally constrained.
- * Walking the whole list rather than stopping at the first *prefix* is what lets
- * a table entry be skipped when it fails the constraint — a dearer default falls
- * through to the next entry instead of being used anyway.
- */
-function findByPrefix(
-	models: Model<Api>[],
-	prefixes: string[],
-	accept: (model: Model<Api>) => boolean = () => true,
-): Model<Api> | undefined {
-	for (const prefix of prefixes) {
-		const candidates = models.filter((model) => model.id === prefix || model.id.startsWith(prefix));
-		const exact = candidates.find((model) => model.id === prefix && accept(model));
-		if (exact) return exact;
-		const prefixed = candidates.find(accept);
-		if (prefixed) return prefixed;
-	}
-	return undefined;
-}
-
-/** Resolve an explicit `provider/model-id`, a bare id, or undefined. */
-export function findConfigured(available: Model<Api>[], configured: string): Model<Api> | undefined {
-	const wanted = configured.trim();
-	if (!wanted) return undefined;
-	const qualified = available.find((model) => `${model.provider}/${model.id}` === wanted);
-	if (qualified) return qualified;
-	const byId = available.find((model) => model.id === wanted);
-	if (byId) return byId;
-	// `provider/prefix` — accept a dated or suffixed variant of what was named.
-	const slash = wanted.indexOf("/");
-	if (slash > 0) {
-		const provider = wanted.slice(0, slash);
-		const idPrefix = wanted.slice(slash + 1);
-		const inProvider = available.filter((model) => model.provider === provider);
-		const match = findByPrefix(inProvider, [idPrefix]);
-		if (match) return match;
-	}
-	return available.find((model) => model.id.startsWith(wanted));
+	source: "configured" | "role-profile" | "cheapest-in-provider" | "session";
 }
 
 export interface SelectInput {
@@ -218,23 +72,12 @@ export function classifierCandidates({ available, sessionModel, configured }: Se
 	// 1. What the user asked for, wherever it lives. Naming a provider is choosing it.
 	if (configured) push(findConfigured(available, configured), "configured");
 
-	const provider = sessionModel?.provider;
 	/**
-	 * On a gateway, "same provider" is not containment — the upstream vendor in the
-	 * model id is who actually receives the prompt — so candidacy is narrowed to
-	 * the session's own vendor as well. When that vendor offers nothing cheaper,
-	 * the session model screens the calls rather than the prompt going to a
-	 * different vendor to save a fraction of a cent.
+	 * Containment is shared with subagents. For a direct provider it is the
+	 * provider itself; gateways additionally preserve a reliable route/family;
+	 * opaque routers expose only the session model.
 	 */
-	const vendor = sessionModel ? vendorOf(sessionModel) : undefined;
-	const inProvider = provider
-		? available.filter(
-				(model) =>
-					model.provider === provider &&
-					isSelectableVariant(model) &&
-					(vendor === undefined || vendorOf(model) === vendor),
-			)
-		: [];
+	const inProvider = sessionModel ? modelsContainedToSession(available, sessionModel) : [];
 
 	/**
 	 * No candidate may cost more per token than the model doing the actual work.
@@ -250,15 +93,11 @@ export function classifierCandidates({ available, sessionModel, configured }: Se
 		return price === undefined || price <= sessionPrice;
 	};
 
-	// 2. A known-good cheap model for this vendor, for catalogs where price alone
-	//    picks badly. Entries are tried in order, so one that busts the budget
-	//    falls through to the next rather than being used anyway.
-	if (provider) {
-		// On a gateway the table is keyed by vendor and the ids carry the prefix.
-		const families = vendor
-			? (VENDOR_CLASSIFIERS[vendor] ?? []).map((family) => `${vendor}/${family}`)
-			: (PROVIDER_DEFAULT_CLASSIFIERS[provider] ?? []);
-		push(findByPrefix(inProvider, families, withinBudget), "provider-default");
+	// 2. A reviewed small-but-capable model for this provider/family. The
+	//    profile is short and applied to the live catalog; price alone never
+	//    promotes a model into the classifier role.
+	if (sessionModel) {
+		push(findRoleProfileModel(available, sessionModel, "classifier", withinBudget), "role-profile");
 	}
 
 	// 3. The cheapest genuinely-priced model in the provider.
@@ -322,15 +161,17 @@ export function describeCandidate(candidate: Candidate): string {
 	switch (candidate.source) {
 		case "configured":
 			return `${name} (from autoMode.classifierModel)`;
-		case "provider-default":
-			return `${name} (default for this provider)`;
+		case "role-profile": {
+			const where = modelIdentity(candidate.model).profile ?? candidate.model.provider;
+			return `${name} (classifier profile for ${where})`;
+		}
 		case "cheapest-in-provider": {
-			const where = vendorOf(candidate.model) ?? candidate.model.provider;
-			return `${name} (cheapest available from ${where})`;
+			const where = modelIdentity(candidate.model).profile ?? candidate.model.provider;
+			return `${name} (cheapest available within ${where})`;
 		}
 		case "session": {
-			const where = vendorOf(candidate.model) ?? candidate.model.provider;
-			return `${name} (this session's model — nothing cheaper from ${where})`;
+			const where = modelIdentity(candidate.model).profile ?? candidate.model.provider;
+			return `${name} (this session's model — no vetted smaller model within ${where})`;
 		}
 	}
 }

@@ -79,6 +79,7 @@ pi --model ollama/qwen3-coder      # any provider in ~/.pi/agent/models.json
 | `/auto-mode [defaults\|config\|model]` | Classifier rules, and an interactive picker for the classifier model |
 | `/allow <rule>` | Persist an allow rule, e.g. `/allow Bash(npm test:*)` (add `global` for user scope) |
 | `/agents`, `/skills`, `/todos` | List available agents, skills, current todos |
+| `/subagent [model\|status\|clear]` | Pick the default model shared by subagents and workflow agents |
 | `/effort` | Reasoning effort slider, including `ultracode` (xhigh + workflows) |
 | `/workflows` | Workflow runs and saved workflows; `stop <runId>` / `log <runId>` |
 | `/plugins`, `/mcp`, `/lsp` | Status of plugins, MCP servers, language servers |
@@ -271,15 +272,19 @@ choice to your user settings; `/auto-mode model claude-haiku-4-5` names one
 directly, and `/auto-mode model clear` returns to automatic selection. The same
 knob is `autoMode.classifierModel` in settings — it may name any provider,
 because naming it is choosing it. Left unset,
-pincer stays on the provider your session already uses: a known-good cheap model
-for that provider if there is one, else your session model itself — no
+pincer stays within the provider/route your session already uses: a model from
+its reviewed classifier profile if one is available, else your session model
+itself — no
 candidate ever costs more per token than the model doing the real work, and a
 model chosen only for being cheap never leads (nor do `:batch`, `:free`,
 `:online` or `:thinking` variants, which cannot serve as a synchronous gate). It never crosses
 to another provider on its own, because the classifier reads your prompts and
-your CLAUDE.md, and that is not a decision to make silently. On a gateway like OpenRouter it also stays with your session's *upstream* vendor —
-an `openai/…` session is screened by an `openai/…` model, not by whichever vendor
-happens to be cheapest — since the gateway is not who receives your prompt. The
+your CLAUDE.md, and that is not a decision to make silently. On a gateway like
+OpenRouter it also stays with your session's model-creator namespace — an
+`openai/…` session is screened by an `openai/…` model, not by whichever family
+happens to be cheapest. OpenRouter can route one logical model through multiple
+inference providers; pi does not expose that route metadata, so pincer does not
+claim the creator prefix proves the final processor. The
 chosen model is named in the startup banner (`mode auto · classifier haiku-4-5` —
 marked `(planned)` until the first call pins it), in the footer beside
 `auto mode on`, and in `/auto-mode config`; if it turns
@@ -312,17 +317,24 @@ Three are bundled: `general-purpose`, `explore` (read-only search), `plan` (read
 **Which model a subagent runs on.** `model:` in the agent file (or per call) takes
 Claude Code's aliases — `sonnet`, `opus`, `haiku`, `fable`, `inherit` — or an
 exact `provider/model-id`. Aliases resolve **within your session's provider**
-(on a gateway, within its upstream vendor); an alias that names nothing there
+(on a gateway, within its contained route/model-family namespace); an alias that names nothing there
 falls back to the session model, and pincer says so. An exact id from another
 provider is honored — naming it is choosing it — but announced, since a fork
 child carries your whole conversation. The default when nothing is named is
 `CLAUDE_CODE_SUBAGENT_MODEL` (the env var, or the `env` block of your *user*
-settings — never project settings) or a `subagentModel` setting, else the
-session model. The main model sees a short menu of same-provider options with
-prices in a standing reminder, kept in sync when you switch models mid-session;
-when the default differs from the session model, the startup banner shows it as
-`subagents <model>`. A configured default that stops being available degrades
-to the session model with a notice instead of failing runs.
+settings — never project settings) or a `subagentModel` setting. With neither,
+pincer chooses an economical coding-capable model from the same reviewed
+provider/family profile, then a cheaper same-containment model where that
+provider's routing is known, and finally the session model. `inherit` explicitly
+chooses the session model instead. The same default applies to workflow
+`agent()` calls that omit `model`. The main model sees a short menu of contained
+options with prices in a standing reminder, kept in sync when you switch models
+mid-session; the startup banner always names the effective default and labels it
+`(auto)`, `(setting)`, `(env)`, or `(session)`. A configured default that stops
+being available degrades to the session model with a notice instead of failing
+runs. Opaque routers such as Radius, Hugging Face Inference Providers, OpenCode
+Zen, and OpenCode Go stay on the session model automatically because their
+catalog row does not reliably identify the serving route.
 
 **Skills** — standard [Agent Skills](https://agentskills.io) directories: `.claude/skills/`, `~/.claude/skills/`. Invoked by the model through the `skill` tool.
 

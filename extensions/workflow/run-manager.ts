@@ -36,6 +36,7 @@ export interface StartRunOptions {
 	cwd: string;
 	sessionDir: string;
 	defaultModel: unknown;
+	configuredDefaultModel?: string;
 	defaultEffort?: string;
 }
 
@@ -194,6 +195,7 @@ export class WorkflowRunManager {
 			runner = await AgentRunner.create({
 				cwd: options.cwd,
 				defaultModel: options.defaultModel,
+				configuredDefaultModel: options.configuredDefaultModel,
 				defaultEffort: options.defaultEffort as never,
 				onNotice: (message) => handle.record({ type: "log", text: `⚠ ${message}` }),
 			});

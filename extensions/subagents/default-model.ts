@@ -17,7 +17,8 @@
  * The env var additionally applies only to Claude-family sessions (see
  * `applicableSubagentDefault`): it is Claude Code's knob, and its typical
  * values ("sonnet") were written for Anthropic models. On any other provider
- * the session model serves, unless the user overrides with `subagentModel`.
+ * it is ignored; pincer's automatic same-provider role profile then chooses the
+ * default unless the user overrides it with `subagentModel`.
  *
  * The value is a spec, not a model: "sonnet", "inherit", or "provider/id" all
  * pass through to resolveSubagentModel, which owns the semantics.

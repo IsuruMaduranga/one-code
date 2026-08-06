@@ -36,8 +36,10 @@ const OUTPUT_CAP = 50_000;
 
 export interface AgentRunnerOptions {
 	cwd: string;
-	/** Session default model, used when a call has no model override. */
+	/** Session model, retained as the final fallback. */
 	defaultModel: unknown;
+	/** `/subagent` user/managed default; automatic role selection follows it. */
+	configuredDefaultModel?: string;
 	defaultEffort?: AgentEffort | string;
 	/** Surface model-resolution notices (fallbacks, provider crossings) in the run log. */
 	onNotice?: (message: string) => void;
@@ -48,6 +50,61 @@ export interface AgentRunnerOptions {
  * the run ends.
  */
 const THINKING_SUFFIX = /^(off|minimal|low|medium|high|xhigh|max)$/i;
+
+export interface WorkflowModelInput {
+	opts: AgentCallOptions;
+	agentModel?: string;
+	configuredDefaultModel?: string;
+	sessionModel?: Model<Api>;
+	available: Model<Api>[];
+	defaultEffort?: string;
+}
+
+/** Pure workflow-facing wrapper around the shared subagent resolver. */
+export function resolveWorkflowAgentModel(input: WorkflowModelInput): {
+	model?: Model<Api>;
+	thinkingLevel: string | undefined;
+	notices: string[];
+} {
+	let requested = input.opts.model;
+	let suffixLevel: string | undefined;
+	if (requested) {
+		const colon = requested.lastIndexOf(":");
+		if (colon > 0 && THINKING_SUFFIX.test(requested.slice(colon + 1))) {
+			suffixLevel = requested.slice(colon + 1).toLowerCase();
+			requested = requested.slice(0, colon);
+		}
+	}
+
+	const resolution = resolveSubagentModel({
+		requested,
+		agentModel: input.agentModel,
+		configuredDefault: input.configuredDefaultModel,
+		sessionModel: input.sessionModel,
+		available: input.available,
+	});
+	if (resolution.unresolved) {
+		const fallback = resolveSubagentModel({
+			configuredDefault: input.configuredDefaultModel,
+			sessionModel: input.sessionModel,
+			available: input.available,
+		});
+		const menu = subagentModelMenu({
+			available: input.available,
+			sessionModel: input.sessionModel,
+			defaultModel: fallback.model,
+			defaultSource: fallback.source,
+		});
+		throw new WorkflowScriptError(
+			`agent() model "${resolution.unresolved}" is not available.\n${menu.join("\n")}\nAny exact provider/model-id also resolves.`,
+		);
+	}
+	return {
+		model: resolution.model,
+		thinkingLevel: input.opts.effort ?? suffixLevel ?? input.defaultEffort,
+		notices: resolution.notices,
+	};
+}
 
 export class AgentRunner {
 	private readonly options: AgentRunnerOptions;
@@ -96,36 +153,16 @@ export class AgentRunner {
 	 * (pi's `--model sonnet:high` convention) is honoured before resolving.
 	 */
 	private resolveModel(opts: AgentCallOptions, agentModel?: string): { model: unknown; thinkingLevel: string | undefined } {
-		const defaultLevel = opts.effort ?? (this.options.defaultEffort as string | undefined);
-		if (!opts.model && !agentModel) {
-			return { model: this.options.defaultModel, thinkingLevel: defaultLevel };
-		}
-
-		let requested = opts.model;
-		let suffixLevel: string | undefined;
-		if (requested) {
-			const colon = requested.lastIndexOf(":");
-			if (colon > 0 && THINKING_SUFFIX.test(requested.slice(colon + 1))) {
-				suffixLevel = requested.slice(colon + 1).toLowerCase();
-				requested = requested.slice(0, colon);
-			}
-		}
-
-		const sessionModel = this.options.defaultModel as Model<Api> | undefined;
-		const resolution = resolveSubagentModel({
-			requested,
+		const resolution = resolveWorkflowAgentModel({
+			opts,
 			agentModel,
-			sessionModel,
+			configuredDefaultModel: this.options.configuredDefaultModel,
+			sessionModel: this.options.defaultModel as Model<Api> | undefined,
 			available: this.availableModels,
+			defaultEffort: this.options.defaultEffort as string | undefined,
 		});
-		if (resolution.unresolved) {
-			const menu = subagentModelMenu({ available: this.availableModels, sessionModel, defaultModel: sessionModel });
-			throw new WorkflowScriptError(
-				`agent() model "${resolution.unresolved}" is not available.\n${menu.join("\n")}\nAny exact provider/model-id also resolves.`,
-			);
-		}
 		for (const notice of resolution.notices) this.options.onNotice?.(notice);
-		return { model: resolution.model ?? this.options.defaultModel, thinkingLevel: opts.effort ?? suffixLevel ?? defaultLevel };
+		return { model: resolution.model ?? this.options.defaultModel, thinkingLevel: resolution.thinkingLevel };
 	}
 
 	async run(prompt: string, opts: AgentCallOptions, signal: AbortSignal): Promise<AgentCallResult> {

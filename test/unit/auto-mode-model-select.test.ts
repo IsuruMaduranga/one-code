@@ -1,13 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
 	classifierCandidates,
-	VENDOR_CLASSIFIERS,
-	vendorOf,
 	describeCandidate,
 	findConfigured,
 	isModelUnavailableError,
-	PROVIDER_DEFAULT_CLASSIFIERS,
 } from "../../extensions/auto-mode/model-select.ts";
+import { BUILTIN_PROVIDER_POLICIES, modelIdentity, ROLE_PROFILES } from "../../extensions/lib/model-policy.ts";
 
 /** Minimal structural stand-in; only provider/id/cost are consulted. */
 const model = (provider: string, id: string, input?: number) =>
@@ -17,6 +15,16 @@ const pick = (available: any[], sessionModel: any, configured?: string) =>
 	classifierCandidates({ available, sessionModel, configured });
 
 describe("classifierCandidates: provider containment", () => {
+	it("selects Luna from the OpenAI Codex role profile for a Sol session", () => {
+		const available = [
+			model("openai-codex", "gpt-5.6-sol", 5),
+			model("openai-codex", "gpt-5.6-luna", 0.2),
+			model("openai-codex", "gpt-5.4-mini", 0.75),
+		];
+		const chain = pick(available, available[0]);
+		expect(chain[0]).toMatchObject({ model: available[1], source: "role-profile" });
+	});
+
 	it("never leaves the session's provider on its own initiative", () => {
 		// The bug this exists to prevent: an openai-codex session with an Anthropic
 		// key also configured used to send the user's prompts, CLAUDE.md, and command
@@ -43,8 +51,8 @@ describe("classifierCandidates: provider containment", () => {
 	});
 });
 
-describe("classifierCandidates: gateway vendor containment", () => {
-	it("stays with the session's upstream vendor on a gateway", () => {
+describe("classifierCandidates: gateway family containment", () => {
+	it("stays with the session's model-creator namespace on a gateway", () => {
 		// Same pi provider is not containment on a router: an openai/* session
 		// screened by anthropic/* keeps one API key but sends the user's prompts
 		// and CLAUDE.md to a vendor they did not pick.
@@ -94,12 +102,12 @@ describe("classifierCandidates: gateway vendor containment", () => {
 		];
 		const chain = pick(available, model("groq", "llama-3.3-70b-versatile", 0.6));
 		expect(chain.length).toBeGreaterThan(1);
-		expect(vendorOf(model("groq", "openai/gpt-oss-20b", 0.075))).toBeUndefined();
+		expect(modelIdentity(model("groq", "openai/gpt-oss-20b", 0.075)).containment).toBe("groq");
 	});
 
-	it("reports the upstream vendor only for gateways", () => {
-		expect(vendorOf(model("openrouter", "anthropic/claude-haiku-4.5", 1))).toBe("anthropic");
-		expect(vendorOf(model("anthropic", "claude-haiku-4-5", 1))).toBeUndefined();
+	it("normalizes a gateway creator and a direct-provider family", () => {
+		expect(modelIdentity(model("openrouter", "anthropic/claude-haiku-4.5", 1)).profile).toBe("anthropic");
+		expect(modelIdentity(model("anthropic", "claude-haiku-4-5", 1)).profile).toBe("anthropic");
 	});
 });
 
@@ -115,30 +123,28 @@ describe("classifierCandidates: cost", () => {
 		];
 		const chain = pick(available, model("openai", "gpt-5.5", 10));
 		expect(chain[0].model.id).toBe("gpt-4o-mini");
-		expect(chain[0].source).toBe("provider-default");
+		expect(chain[0].source).toBe("role-profile");
 	});
 
-	it("never leads with a model chosen on price alone", () => {
-		// On OpenRouter the cheapest model in the catalog is an obscure $0.01 one,
-		// and it carries "flash" in its name — so neither price nor the name is
-		// evidence of suitability. On an unvetted provider the session model screens.
+	it("never selects by price on an unknown provider", () => {
+		// A custom provider has no reviewed routing semantics. Unknown models stay
+		// opaque rather than a cheap neighbor silently becoming the security gate.
 		for (const cheapId of ["zzz-obscure", "ling-2.6-flash", "mini-thing"]) {
 			const available = [model("acme", "big-model", 20), model("acme", cheapId, 0.01)];
 			const chain = pick(available, model("acme", "big-model", 20));
+			expect(chain).toHaveLength(1);
 			expect(chain[0].source, cheapId).toBe("session");
 			expect(chain[0].model.id, cheapId).toBe("big-model");
-			// Still reachable as a last resort rather than dropped.
-			expect(chain[chain.length - 1].model.id, cheapId).toBe(cheapId);
 		}
 	});
 
-	it("still sorts the last-resort slot by cost", () => {
+	it("still sorts the last-resort slot by cost for a known direct provider", () => {
 		const available = [
-			model("acme", "big-model", 20),
-			model("acme", "medium-model", 3),
-			model("acme", "small-model", 0.2),
+			model("openai", "big-model", 20),
+			model("openai", "medium-model", 3),
+			model("openai", "small-model", 0.2),
 		];
-		const chain = pick(available, model("acme", "big-model", 20));
+		const chain = pick(available, model("openai", "big-model", 20));
 		expect(chain[chain.length - 1].model.id).toBe("small-model");
 	});
 
@@ -260,7 +266,7 @@ describe("classifierCandidates: provider defaults", () => {
 			model("openrouter", "anthropic/claude-fable-5", 15),
 		];
 		const chain = pick(available, model("openrouter", "anthropic/claude-fable-5", 15));
-		expect(chain[0].source).toBe("provider-default");
+		expect(chain[0].source).toBe("role-profile");
 		expect(chain[0].model.id).toBe("anthropic/claude-haiku-4.5");
 		// The cheap unknown is still in the chain as a later fallback.
 		expect(chain.some((c) => c.model.id === "anthropic/claude-cheap-unknown")).toBe(true);
@@ -275,18 +281,18 @@ describe("classifierCandidates: provider defaults", () => {
 	it("skips a provider default that is not actually available", () => {
 		const available = [model("anthropic", "claude-fable-5", 15)];
 		const chain = pick(available, model("anthropic", "claude-fable-5", 15));
-		expect(chain.every((c) => c.source !== "provider-default")).toBe(true);
+		expect(chain.every((c) => c.source !== "role-profile")).toBe(true);
 	});
 
 	it("covers the providers whose catalogs name-matching cannot handle", () => {
 		// Groq's models contain none of the usual "cheap model" substrings, and
 		// neither do xAI's — cost or a default table is the only way to choose.
 		for (const provider of ["groq", "xai", "openai", "google", "anthropic"]) {
-			expect(PROVIDER_DEFAULT_CLASSIFIERS[provider], provider).toBeDefined();
+			expect(BUILTIN_PROVIDER_POLICIES[provider], provider).toBeDefined();
 		}
-		// Gateways are keyed by upstream vendor instead.
-		for (const vendor of ["anthropic", "openai", "google", "z-ai", "x-ai"]) {
-			expect(VENDOR_CLASSIFIERS[vendor], vendor).toBeDefined();
+		// Gateways reuse short canonical family profiles instead of catalogs.
+		for (const vendor of ["anthropic", "openai", "google", "zai", "xai"]) {
+			expect(ROLE_PROFILES[vendor], vendor).toBeDefined();
 		}
 	});
 
@@ -297,7 +303,7 @@ describe("classifierCandidates: provider defaults", () => {
 		];
 		const chain = pick(available, model("groq", "llama-3.3-70b-versatile", 0.6));
 		expect(chain[0].model.id).toBe("llama-3.3-70b-versatile");
-		expect(chain[0].source).toBe("provider-default");
+		expect(chain[0].source).toBe("role-profile");
 	});
 });
 
@@ -345,11 +351,11 @@ describe("describeCandidate", () => {
 			"autoMode.classifierModel",
 		);
 		expect(describeCandidate({ model: model("groq", "llama-3.3-70b-versatile", 0.6), source: "session" })).toContain(
-			"nothing cheaper from",
+			"no vetted smaller model within",
 		);
-		// On a gateway the description names the upstream vendor, not the gateway.
+		// On a gateway the description names the canonical family, not the gateway.
 		expect(
 			describeCandidate({ model: model("openrouter", "openai/gpt-5-mini", 0.25), source: "cheapest-in-provider" }),
-		).toContain("from openai");
+		).toContain("within openai");
 	});
 });

@@ -37,7 +37,7 @@ export interface BannerInput {
 	model?: string;
 	cwd: string;
 	mode: string;
-	/** Default subagent model, shown only when it differs from the session model. */
+	/** Effective subagent/workflow default with its selection source. */
 	subagents?: string;
 	/** Compact resource sections, shown when pi's own listing is silenced. */
 	sections?: StartupSection[];

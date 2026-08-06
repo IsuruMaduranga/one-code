@@ -193,7 +193,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		const resolution = resolveSubagentModel({ configuredDefault: configured?.spec, sessionModel, available });
 		for (const notice of resolution.notices) notifyModelOnce(ctx, notice);
 		pi.events.emit(REMINDER_CHANNEL, {
-			text: subagentModelsReminder({ available, sessionModel, defaultModel: resolution.model }),
+			text: subagentModelsReminder({
+				available,
+				sessionModel,
+				defaultModel: resolution.model,
+				defaultSource: resolution.source,
+			}),
 			scope: "every-turn",
 			key: "subagent-models",
 		});
@@ -430,18 +435,23 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				});
 				if (resolution.unresolved) {
 					// The main model chose this string; the menu lets it retry.
-					const fallbackDefault = resolveSubagentModel({
+					const fallback = resolveSubagentModel({
 						configuredDefault: configuredDefault?.spec,
 						sessionModel: ctx.model,
 						available,
-					}).model;
+					});
 					return {
 						content: [
 							{
 								type: "text",
 								text:
 									`Unknown model "${resolution.unresolved}" — no available model matches it.\n\n` +
-									subagentModelsReminder({ available, sessionModel: ctx.model, defaultModel: fallbackDefault }),
+									subagentModelsReminder({
+										available,
+										sessionModel: ctx.model,
+										defaultModel: fallback.model,
+										defaultSource: fallback.source,
+									}),
 							},
 						],
 						details: {},
@@ -810,7 +820,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					? `subagentModel: ${configured.spec} (from the ${configured.source})` +
 						(applicable ? "" : " — not applied: CLAUDE_CODE_SUBAGENT_MODEL is Claude Code's knob, and this session is not on a Claude model")
 					: "subagentModel: (not set)",
-				`effective: ${resolution.model ? `${resolution.model.provider}/${resolution.model.id}` : "none"}`,
+				`effective: ${resolution.model ? `${resolution.model.provider}/${resolution.model.id}` : "none"} (${resolution.source})`,
 				...(resolution.notices.length ? [resolution.notices.join("\n")] : []),
 				"Set it with /subagent <provider/model-id|sonnet|opus|haiku|fable|inherit>, or clear with /subagent clear.",
 			].join("\n"),
@@ -841,14 +851,19 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		const available = ctx.modelRegistry.getAvailable();
 		const resolution = resolveSubagentModel({ requested: spec, sessionModel: ctx.model, available });
 		if (resolution.unresolved) {
-			const fallbackDefault = resolveSubagentModel({
+			const fallback = resolveSubagentModel({
 				configuredDefault: applicableSubagentDefault(loadSubagentDefault(os.homedir()), ctx.model)?.spec,
 				sessionModel: ctx.model,
 				available,
-			}).model;
+			});
 			ctx.ui.notify(
 				`No available model matches "${spec}".\n\n` +
-					subagentModelsReminder({ available, sessionModel: ctx.model, defaultModel: fallbackDefault }),
+					subagentModelsReminder({
+						available,
+						sessionModel: ctx.model,
+						defaultModel: fallback.model,
+						defaultSource: fallback.source,
+					}),
 				"error",
 			);
 			return;
@@ -888,7 +903,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				}
 				emitModelStatus(ctx);
 				ctx.ui.notify(
-					"subagentModel cleared — the default is whatever CLAUDE_CODE_SUBAGENT_MODEL or managed settings say (else the session model).",
+					"subagentModel cleared — the default is CLAUDE_CODE_SUBAGENT_MODEL or managed settings when applicable, else pincer's automatic same-provider profile.",
 					"info",
 				);
 				return;
