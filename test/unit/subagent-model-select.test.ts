@@ -241,6 +241,36 @@ describe("subagentModelMenu", () => {
 		expect(reminder).toContain("not a whitelist");
 		expect(reminder).toContain("sonnet|opus|haiku|fable");
 	});
+
+	it("warns when the configured default costs more than the session model", () => {
+		// haiku session, opus default — a deliberate cheap-driver/strong-worker
+		// setup, so the line informs; it does not tell the model to override.
+		const reminder = subagentModelsReminder({
+			available: anthropic,
+			sessionModel: anthropic[2],
+			defaultModel: anthropic[0],
+			defaultSource: "default",
+		});
+		expect(reminder).toContain("costs more per input token");
+		expect(reminder).toContain("($5/M in)");
+	});
+
+	it("does not warn when the default is cheaper, equal, or unpriced", () => {
+		const cheaper = subagentModelsReminder({
+			available: anthropic,
+			sessionModel: anthropic[0],
+			defaultModel: anthropic[2],
+			defaultSource: "default",
+		});
+		expect(cheaper).not.toContain("costs more");
+		const unpriced = subagentModelsReminder({
+			available: anthropic,
+			sessionModel: anthropic[0],
+			defaultModel: model("anthropic", "claude-mystery"),
+			defaultSource: "default",
+		});
+		expect(unpriced).not.toContain("costs more");
+	});
 });
 
 describe("loadSubagentDefault", () => {

@@ -286,12 +286,32 @@ export function subagentModelMenu({ available, sessionModel, defaultModel, defau
 	return lines;
 }
 
+/**
+ * One informational line when the default subagent model costs more per input
+ * token than the session model itself. Automatic selection can never pick a
+ * pricier model, so this only ever describes a *configured* default — which can
+ * be deliberate (cheap driver, strong workers), so the line informs the main
+ * model rather than instructing it to override the user's knob.
+ */
+export function defaultCostsMoreWarning({ sessionModel, defaultModel }: MenuOptions): string | undefined {
+	if (!sessionModel || !defaultModel) return undefined;
+	const sessionPrice = pricedInput(sessionModel);
+	const defaultPrice = pricedInput(defaultModel);
+	if (sessionPrice === undefined || defaultPrice === undefined || defaultPrice <= sessionPrice) return undefined;
+	return (
+		`Note: the default subagent model${price(defaultModel)} costs more per input token than this session's model${price(sessionModel)}. ` +
+		"That may be deliberate, but for routine or mechanical tasks consider passing a cheaper listed model in the `model` field."
+	);
+}
+
 /** The every-turn reminder body. Kept short: its tokens are paid on every call. */
 export function subagentModelsReminder(options: MenuOptions): string {
 	const menu = subagentModelMenu(options);
+	const warning = defaultCostsMoreWarning(options);
 	return [
 		"Models for the subagent/workflow `model` field (omit it to use the default; set the default with /subagent):",
 		...menu,
+		...(warning ? [warning] : []),
 		'Aliases sonnet|opus|haiku|fable resolve within this session\'s provider; "inherit" means the session model. ' +
 			"Any exact provider/model-id the user asked for also works, even from another provider (that is announced to the user) or unlisted here — this is a menu, not a whitelist.",
 	].join("\n");
