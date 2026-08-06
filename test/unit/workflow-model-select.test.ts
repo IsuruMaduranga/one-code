@@ -70,4 +70,28 @@ describe("workflow model defaults", () => {
 	it("fails an unavailable explicit model with the curated menu", () => {
 		expect(() => resolve({ opts: { model: "openai-codex/not-real" } })).toThrow(/not available/);
 	});
+
+	it("rejects a per-call model pricier than the session unless allowExpensive", () => {
+		// Session on luna ($0.2); the script asks for sol ($5).
+		expect(() =>
+			resolveWorkflowAgentModel({
+				opts: { model: "openai-codex/gpt-5.6-sol" },
+				sessionModel: catalog[3],
+				available: catalog,
+			}),
+		).toThrow(/allowExpensive/);
+		expect(
+			resolveWorkflowAgentModel({
+				opts: { model: "openai-codex/gpt-5.6-sol", allowExpensive: true },
+				sessionModel: catalog[3],
+				available: catalog,
+			}).model?.id,
+		).toBe("gpt-5.6-sol");
+	});
+
+	it("does not gate the configured default or the automatic pick", () => {
+		expect(resolve({ configuredDefaultModel: "openai-codex/gpt-5.6-terra", sessionModel: catalog[3] }).model?.id).toBe(
+			"gpt-5.6-terra",
+		);
+	});
 });

@@ -336,6 +336,15 @@ runs. Opaque routers such as Radius, Hugging Face Inference Providers, OpenCode
 Zen, and OpenCode Go stay on the session model automatically because their
 catalog row does not reliably identify the serving route.
 
+Cost flows the other way too: if the effective default costs more per token
+than your session model, the standing reminder says so (it may be deliberate —
+cheap driver, strong workers — so it informs rather than overrides), and a
+*per-call* `model` that outprices the session model is rejected with both
+prices unless the call sets `allow_expensive: true` (`allowExpensive` in
+workflow `agent()`), which the main model is told to use only when you asked
+for that model. Your own knobs — `subagentModel`, the env var, agent files —
+are never gated: naming a model is choosing it.
+
 **Skills** — standard [Agent Skills](https://agentskills.io) directories: `.claude/skills/`, `~/.claude/skills/`. Invoked by the model through the `skill` tool.
 
 **MCP servers** — `.mcp.json` in the project (walked up to the repo root), or `~/.claude.json`:

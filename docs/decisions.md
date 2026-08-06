@@ -1673,3 +1673,28 @@ on the same low-cost path. Luna's classifier was exercised in both directions
 without `--dangerously-skip-permissions`: an exact user-named `/tmp` write was
 allowed by verified intent, while a delegated outside-project backup path was
 blocked under S5. Typecheck and all 682 unit tests passed.
+
+## Upward cost pressure: an informational warning and a per-call gate
+
+Automatic selection only ever moves cost *down*, but two paths still let a
+subagent run on something pricier than the session model: a configured default
+(deliberate cheap-driver/strong-worker setups exist) and the per-call `model`
+field (chosen by the main model itself). Those get different treatment because
+their authors differ:
+
+- **Configured default pricier than the session model** → one informational
+  line in the every-turn reminder, with both prices. It suggests a cheaper
+  listed model for routine tasks but does not tell the model to override the
+  user's knob — the user set it, and second-guessing a user setting from the
+  reminder would invert authority.
+- **Per-call `model` pricier than the session model** → the subagent tool
+  errors with both prices and the menu, and workflow `agent()` throws, unless
+  the call sets `allow_expensive: true` (`allowExpensive` in agent() opts). The
+  schema tells the model to set it only when the user explicitly asked for that
+  model. Only `source: "call"` resolutions are gated: `subagentModel`, the env
+  var, agent-file frontmatter, and `inherit` are user-installed choices, and
+  the codebase rule is that naming a model is choosing it.
+
+The gate opens when either price is unknown — a cost gate that fails closed on
+an unpriced catalog blocks the feature outright, the same failure shape as
+gating a tool other tools sit behind.

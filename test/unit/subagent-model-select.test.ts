@@ -9,6 +9,7 @@ import {
 } from "../../extensions/subagents/default-model.ts";
 import {
 	crossesProvider,
+	expensiveModelGate,
 	resolveSubagentModel,
 	subagentModelMenu,
 	subagentModelsReminder,
@@ -188,6 +189,48 @@ describe("resolveSubagentModel: precedence and exact references", () => {
 		expect(resolution.model?.id).toBe("claude-opus-4-8");
 		expect(resolution.source).toBe("session");
 		expect(resolution.notices[0]).toContain("falling back");
+	});
+});
+
+describe("expensiveModelGate", () => {
+	const session = anthropic[2]; // haiku, $1/M
+	const resolveCall = (requested: string) =>
+		resolveSubagentModel({ requested, sessionModel: session, available: anthropic });
+
+	it("gates a per-call model that outprices the session model", () => {
+		const gate = expensiveModelGate(resolveCall("anthropic/claude-opus-4-8"), session, undefined);
+		expect(gate).toContain("costs more per input token");
+		expect(gate).toContain("claude-opus-4-8 ($5/M in)");
+	});
+
+	it("opens for allow_expensive, equal or cheaper prices, and unpriced models", () => {
+		expect(expensiveModelGate(resolveCall("anthropic/claude-opus-4-8"), session, true)).toBeUndefined();
+		expect(expensiveModelGate(resolveCall("anthropic/claude-haiku-4-5"), session, undefined)).toBeUndefined();
+		const unpriced = [model("anthropic", "claude-haiku-4-5", 1), model("anthropic", "claude-mystery")];
+		const resolution = resolveSubagentModel({
+			requested: "anthropic/claude-mystery",
+			sessionModel: unpriced[0],
+			available: unpriced,
+		});
+		// A gate that fails closed on an unpriced catalog blocks the feature.
+		expect(expensiveModelGate(resolution, unpriced[0], undefined)).toBeUndefined();
+	});
+
+	it("never gates user knobs — only the per-call field is model-chosen", () => {
+		const configured = resolveSubagentModel({
+			configuredDefault: "anthropic/claude-opus-4-8",
+			sessionModel: session,
+			available: anthropic,
+		});
+		expect(configured.source).toBe("default");
+		expect(expensiveModelGate(configured, session, undefined)).toBeUndefined();
+		const fromAgent = resolveSubagentModel({
+			agentModel: "anthropic/claude-opus-4-8",
+			sessionModel: session,
+			available: anthropic,
+		});
+		expect(fromAgent.source).toBe("agent");
+		expect(expensiveModelGate(fromAgent, session, undefined)).toBeUndefined();
 	});
 });
 

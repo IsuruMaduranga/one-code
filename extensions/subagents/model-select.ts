@@ -223,6 +223,34 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 	return { model: available[0], source: "session", notices };
 }
 
+/**
+ * The per-call expensive-model gate. Only a `source: "call"` resolution is ever
+ * gated: the per-call `model` field is the one input the main model chooses for
+ * itself. User knobs (setting, env var, agent files the user installed,
+ * "inherit") are never gated — naming a model is choosing it — and the
+ * automatic default can only ever pick cheaper. With either price unknown the
+ * gate stays open: a gate that fails closed on an unpriced catalog blocks the
+ * feature outright.
+ *
+ * Returns the factual comparison; the caller appends its own override hint
+ * (the subagent tool and workflow agent() spell the field differently).
+ */
+export function expensiveModelGate(
+	resolution: Pick<SubagentModelResolution, "model" | "source">,
+	sessionModel: Model<Api> | undefined,
+	allowExpensive: boolean | undefined,
+): string | undefined {
+	if (allowExpensive) return undefined;
+	if (resolution.source !== "call" || !resolution.model || !sessionModel) return undefined;
+	const sessionPrice = pricedInput(sessionModel);
+	const requestedPrice = pricedInput(resolution.model);
+	if (sessionPrice === undefined || requestedPrice === undefined || requestedPrice <= sessionPrice) return undefined;
+	return (
+		`Requested model ${spec(resolution.model)}${price(resolution.model)} costs more per input token ` +
+		`than this session's model ${spec(sessionModel)}${price(sessionModel)}.`
+	);
+}
+
 export interface MenuOptions {
 	available: Model<Api>[];
 	sessionModel?: Model<Api>;

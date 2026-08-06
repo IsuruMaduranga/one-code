@@ -25,7 +25,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { agentDirs, type AgentDefinition, discoverAgents } from "../subagents/agents.ts";
-import { resolveSubagentModel, subagentModelMenu } from "../subagents/model-select.ts";
+import { expensiveModelGate, resolveSubagentModel, subagentModelMenu } from "../subagents/model-select.ts";
 import { cleanupWorktree, createWorktree, isGitRepo, type Worktree } from "../subagents/worktree.ts";
 import { permissionGateFactory } from "./permission-gate.ts";
 import type { AgentCallOptions, AgentCallResult, AgentEffort } from "./types.ts";
@@ -97,6 +97,12 @@ export function resolveWorkflowAgentModel(input: WorkflowModelInput): {
 		});
 		throw new WorkflowScriptError(
 			`agent() model "${resolution.unresolved}" is not available.\n${menu.join("\n")}\nAny exact provider/model-id also resolves.`,
+		);
+	}
+	const gate = expensiveModelGate(resolution, input.sessionModel, input.opts.allowExpensive);
+	if (gate) {
+		throw new WorkflowScriptError(
+			`${gate}\nIf the user explicitly asked for this model, pass allowExpensive: true; otherwise pick a cheaper model or omit opts.model.`,
 		);
 	}
 	return {

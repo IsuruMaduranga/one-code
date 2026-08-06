@@ -25,6 +25,7 @@ import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../auto-m
 import { type AgentDefinition, type AgentSource, agentDirs, discoverAgents } from "./agents.ts";
 import { applicableSubagentDefault, loadSubagentDefault, persistSubagentModel } from "./default-model.ts";
 import {
+	expensiveModelGate,
 	resolveSubagentModel,
 	SUBAGENT_STATUS_CHANNEL,
 	subagentModelsReminder,
@@ -96,6 +97,12 @@ const SubagentParams = Type.Object({
 		Type.String({
 			description:
 				'Override the agent\'s model for this call: "sonnet"/"opus"/"haiku"/"fable" (resolved within this session\'s provider), "inherit", or an exact provider/model-id — see the subagent-models reminder for what is available',
+		}),
+	),
+	allow_expensive: Type.Optional(
+		Type.Boolean({
+			description:
+				"Confirm a per-call `model` that costs more per token than this session's model. Set it only when the user explicitly asked for that model",
 		}),
 	),
 	thinking: Type.Optional(
@@ -446,6 +453,33 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 								type: "text",
 								text:
 									`Unknown model "${resolution.unresolved}" — no available model matches it.\n\n` +
+									subagentModelsReminder({
+										available,
+										sessionModel: ctx.model,
+										defaultModel: fallback.model,
+										defaultSource: fallback.source,
+									}),
+							},
+						],
+						details: {},
+						isError: true,
+					};
+				}
+				const gate = expensiveModelGate(resolution, ctx.model, params.allow_expensive);
+				if (gate) {
+					const fallback = resolveSubagentModel({
+						configuredDefault: configuredDefault?.spec,
+						sessionModel: ctx.model,
+						available,
+					});
+					return {
+						content: [
+							{
+								type: "text",
+								text:
+									`${gate}\n` +
+									"If the user explicitly asked for this model, retry with allow_expensive: true; " +
+									"otherwise pick a cheaper model or omit the field.\n\n" +
 									subagentModelsReminder({
 										available,
 										sessionModel: ctx.model,

@@ -28,6 +28,8 @@ export interface AgentCallOptions {
 	/** JSON Schema (top-level object) forcing structured output. */
 	schema?: Record<string, unknown>;
 	model?: string;
+	/** Confirms a `model` that costs more per token than the session model. */
+	allowExpensive?: boolean;
 	effort?: AgentEffort;
 	isolation?: "worktree";
 	agentType?: string;
