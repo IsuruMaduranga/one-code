@@ -301,9 +301,16 @@ export function classifierCandidates({ available, sessionModel, configured }: Se
  * Whether an error means "this model is not usable on this account" — in which
  * case stepping to the next candidate is right — as opposed to a transient
  * failure, where switching models would hide a problem that is about to clear.
+ *
+ * "Quota" is deliberately matched only in its billing forms (`insufficient_quota`,
+ * "exceeded your current quota"): a bare match also caught per-minute rate-limit
+ * messages ("quota exceeded, retry in 60s"), permanently rejecting a healthy
+ * model for the whole session over a blip. Misreading billing as transient
+ * merely retries and blocks noisily; misreading a blip as permanent bricks the
+ * candidate — so uncertainty goes to transient.
  */
 export function isModelUnavailableError(message: string): boolean {
-	return /\b(401|403|404)\b|not_found|not found|does not exist|(no|have|lacks?)\s+access|unauthoriz|forbidden|invalid[_ -]?model|model[_ -]?not|unsupported[_ -]?model|no such model|entitl|quota|insufficient[_ -]?quota/i.test(
+	return /\b(401|403|404)\b|not_found|not found|does not exist|(no|have|lacks?)\s+access|unauthoriz|forbidden|invalid[_ -]?model|model[_ -]?not|unsupported[_ -]?model|no such model|entitl|insufficient[_ -]?quota|exceeded your current quota|billing/i.test(
 		message,
 	);
 }

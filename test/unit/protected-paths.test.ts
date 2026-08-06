@@ -107,6 +107,25 @@ describe("decide: protected paths", () => {
 		expect(decide({ ...base, mode: "bypassPermissions", toolName: "edit", subject: ".npmrc" }).decision).toBe("allow");
 	});
 
+	it("checks the resolved subject too, so a symlinked spelling is as protected as the real one", () => {
+		// `ln -s .git/hooks build` then writing build/pre-commit: the literal
+		// subject looks innocent; the resolved one is what the write lands on.
+		const d = decide({
+			...base,
+			mode: "acceptEdits",
+			toolName: "write",
+			subject: "build/pre-commit",
+			resolvedSubject: "/repo/.git/hooks/pre-commit",
+		});
+		expect(d.decision).toBe("ask");
+		expect(d.cause).toBe("protected-path");
+		// And an unresolvable or ordinary resolved subject changes nothing.
+		expect(
+			decide({ ...base, mode: "acceptEdits", toolName: "write", subject: "src/a.ts", resolvedSubject: "/repo/src/a.ts" })
+				.decision,
+		).toBe("allow");
+	});
+
 	it("still lets deny rules and ask rules take precedence", () => {
 		expect(
 			decide({ ...base, mode: "default", toolName: "edit", subject: ".npmrc", deny: parseRules(["Edit"]) }).decision,

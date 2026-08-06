@@ -17,6 +17,11 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+	PERMISSION_STATUS_CHANNEL,
+	permissionModeDisplay,
+	type PermissionStatus,
+} from "../permissions/modes.ts";
 import { collectStartupSections, quietStartupEnabled, type StartupSection } from "./startup.ts";
 
 const NAME = "pincer";
@@ -83,8 +88,51 @@ const HINT_LINES: [key: string, what: string][][] = [
 	],
 ];
 
+/**
+ * Cut a painted line to `width` visible columns without splitting ANSI escape
+ * sequences, ending with an ellipsis and a reset so truncation cannot leak a
+ * colour into the next line. pi-tui *crashes* the whole app on an overwide
+ * line ("Rendered line exceeds terminal width"), and only validates a
+ * component when its output changes — so the overflow hid in the static
+ * banner until the mode line became live and re-renders began.
+ */
+export function truncateLine(line: string, width: number): string {
+	if (width <= 0) return "";
+	const ANSI = /^\x1b\[[0-9;]*m/;
+	let visible = 0;
+	for (let i = 0; i < line.length; ) {
+		const escape = line.slice(i).match(ANSI);
+		if (escape) {
+			i += escape[0].length;
+			continue;
+		}
+		visible++;
+		i++;
+	}
+	if (visible <= width) return line;
+
+	let out = "";
+	let used = 0;
+	for (let i = 0; i < line.length && used < width - 1; ) {
+		const escape = line.slice(i).match(ANSI);
+		if (escape) {
+			out += escape[0];
+			i += escape[0].length;
+			continue;
+		}
+		out += line[i];
+		used++;
+		i++;
+	}
+	return `${out}\x1b[0m…`;
+}
+
 /** Kept pure so the layout is unit-testable without a terminal. */
-export function bannerLines(input: BannerInput, paint: (color: string, text: string) => string): string[] {
+export function bannerLines(
+	input: BannerInput,
+	paint: (color: string, text: string) => string,
+	width?: number,
+): string[] {
 	const title = `${paint("accent", NAME)} ${paint("dim", `v${input.version}`)}`;
 	const subtitle = paint("dim", "the Claude Code experience, on the pi harness");
 	const hints = HINT_LINES.map((line) =>
@@ -107,11 +155,26 @@ export function bannerLines(input: BannerInput, paint: (color: string, text: str
 	const text = [`${title}  ${subtitle}`, ...hints, context, ...sections];
 	const logoWidth = Math.max(...LOGO_LINES.map((art) => [...art].length));
 	const blankArt = " ".repeat(logoWidth);
-	return text.map((line, i) => `${paint("accent", LOGO_LINES[i] ?? blankArt)}  ${line}`);
+	const assembled = text.map((line, i) => `${paint("accent", LOGO_LINES[i] ?? blankArt)}  ${line}`);
+	return width === undefined ? assembled : assembled.map((line) => truncateLine(line, width));
 }
 
 export default function brandingExtension(pi: ExtensionAPI) {
 	if (process.env.CC_NO_BANNER === "1") return;
+
+	/**
+	 * Mode and classifier arrive over the bus from the permissions extension
+	 * (jiti isolates module state, so this cannot be a shared variable). The
+	 * banner re-renders on every update, so cycling modes or the classifier
+	 * pinning mid-session keeps the header truthful instead of frozen at
+	 * whatever was true at startup.
+	 */
+	let permissionStatus: PermissionStatus | undefined;
+	let requestHeaderRender: (() => void) | undefined;
+	pi.events.on(PERMISSION_STATUS_CHANNEL, (data) => {
+		permissionStatus = data as PermissionStatus;
+		requestHeaderRender?.();
+	});
 
 	pi.on("session_start", (_event, ctx) => {
 		// Only the TUI has a header to replace; rpc/print modes have no chrome.
@@ -128,7 +191,7 @@ export default function brandingExtension(pi: ExtensionAPI) {
 			: undefined;
 
 		ctx.ui.setTitle(NAME);
-		ctx.ui.setHeader((_tui: unknown, theme: unknown) => {
+		ctx.ui.setHeader((tui: unknown, theme: unknown) => {
 			const paint = (color: string, text: string) => {
 				const themed = theme as ThemeLike | undefined;
 				try {
@@ -137,9 +200,27 @@ export default function brandingExtension(pi: ExtensionAPI) {
 					return text;
 				}
 			};
-			const lines = bannerLines({ version, model, cwd: ctx.cwd, mode: "default", sections }, paint);
+			requestHeaderRender = () => {
+				(tui as { requestRender?: () => void } | undefined)?.requestRender?.();
+			};
 			return {
-				render: () => ["", ...lines, ""],
+				// Rendered per paint rather than precomputed, so the mode line
+				// follows ctrl+q cycles and the classifier pinning.
+				render: (width: number) => [
+					"",
+					...bannerLines(
+						{
+							version,
+							model,
+							cwd: ctx.cwd,
+							mode: permissionModeDisplay(permissionStatus ?? { mode: "default", paused: false }),
+							sections,
+						},
+						paint,
+						width,
+					),
+					"",
+				],
 				// Nothing is cached, so there is nothing to invalidate.
 				invalidate: () => {},
 			};

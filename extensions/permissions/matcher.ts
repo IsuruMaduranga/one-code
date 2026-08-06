@@ -223,6 +223,14 @@ export interface DecideInput {
 	allow: PermissionRule[];
 	/** Auto mode: route every shell command through the classifier, ignoring narrow Bash allow rules. */
 	classifyAllShell?: boolean;
+	/**
+	 * The subject with symlinks resolved (see auto-mode/paths.ts), when the
+	 * caller could resolve it. The protected-path check consults it as well as
+	 * the literal spelling, so writing through `ln -s .git/hooks build` is as
+	 * protected as writing `.git/hooks` directly. Kept a separate input so this
+	 * module stays pure — resolution touches the filesystem.
+	 */
+	resolvedSubject?: string;
 }
 
 export interface Decision {
@@ -316,7 +324,9 @@ export function decide(params: DecideInput): Decision {
 	// `Edit(.claude/**)` entry cannot pre-approve reconfiguring the agent's own
 	// permissions or planting a git hook. In auto mode they go to the classifier.
 	const tool = normalizeToolName(toolName);
-	if (isWritingTool(tool) && subject && isProtectedPath(subject, cwd)) {
+	const protectedTarget = () =>
+		isProtectedPath(subject, cwd) || (params.resolvedSubject ? isProtectedPath(params.resolvedSubject, cwd) : false);
+	if (isWritingTool(tool) && subject && protectedTarget()) {
 		if (mode === "dontAsk") return { decision: "deny", cause: "protected-path" };
 		if (mode === "auto") return { decision: "classify", cause: "protected-path" };
 		return { decision: "ask", cause: "protected-path" };

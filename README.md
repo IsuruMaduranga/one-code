@@ -76,7 +76,7 @@ pi --model ollama/qwen3-coder      # any provider in ~/.pi/agent/models.json
 | Command | What it does |
 |---|---|
 | `/permissions` | Show the current mode, loaded rules, and recent auto-mode denials |
-| `/auto-mode [defaults\|config]` | Built-in vs effective classifier rules |
+| `/auto-mode [defaults\|config\|model]` | Classifier rules, and an interactive picker for the classifier model |
 | `/allow <rule>` | Persist an allow rule, e.g. `/allow Bash(npm test:*)` (add `global` for user scope) |
 | `/agents`, `/skills`, `/todos` | List available agents, skills, current todos |
 | `/effort` | Reasoning effort slider, including `ultracode` (xhigh + workflows) |
@@ -188,6 +188,14 @@ rules — an `Edit(.claude/**)` rule cannot pre-approve rewriting this agent's o
 permissions. In auto mode they route to the classifier; in manual and accept-edits
 they prompt.
 
+The files the gate itself is made of — `~/.claude/settings.json`, managed
+settings, `~/.claude.json`, any `.claude/settings(.local).json` — get one step
+more: in auto mode a write to them (including through a shell redirect or a
+symlink) never reaches the classifier at all. It always prompts you, and blocks
+outright in a headless run. A classifier rule against self-reconfiguration is
+only as strong as the classifier; this floor holds even if the model screening
+calls is having a bad day.
+
 Subagents are checked at three points in auto mode: the delegated task before the
 child starts, each of the child's own actions (it inherits the mode), and the
 child's action list when it returns — that last one catches a sequence whose
@@ -209,7 +217,8 @@ Configure it in `~/.claude/settings.json`, using Claude Code's `autoMode` schema
     "allow": ["$defaults", "Deploying to the staging namespace is allowed"],
     "soft_deny": ["$defaults", "Never run migrations outside the migrations CLI"],
     "hard_deny": ["$defaults"],
-    "classifyAllShell": false
+    "classifyAllShell": false,
+    "logDecisions": false
   }
 }
 ```
@@ -219,10 +228,19 @@ Rules are prose, not patterns — the classifier reads them as instructions.
 replaces that list entirely. `classifyAllShell: true` sends every shell command
 to the classifier, ignoring narrow `Bash(...)` allow rules (broad ones like
 `Bash(*)` are always suspended in auto mode). `/auto-mode defaults` prints the
-built-in rules and `/auto-mode config` prints what is actually in effect.
+built-in rules and `/auto-mode config` prints what is actually in effect —
+including any problems found in your settings (invalid JSON, mistyped fields, a
+list that silently replaced the built-ins). `logDecisions: true` appends every
+gate decision — who decided (pre-gate, classifier, floor, you at a prompt), the
+outcome, and the rule cited — to `auto-mode-decisions.jsonl` next to your
+session files, which is the only complete record of what was *allowed*.
 
-**Which model screens your calls.** `autoMode.classifierModel` picks one
-explicitly, and may name any provider — naming it is choosing it. Left unset,
+**Which model screens your calls.** `/auto-mode model` opens a picker over the
+models you are authenticated for (type to filter, prices shown) and saves the
+choice to your user settings; `/auto-mode model claude-haiku-4-5` names one
+directly, and `/auto-mode model clear` returns to automatic selection. The same
+knob is `autoMode.classifierModel` in settings — it may name any provider,
+because naming it is choosing it. Left unset,
 pincer stays on the provider your session already uses: a known-good cheap model
 for that provider if there is one, else your session model itself — no
 candidate ever costs more per token than the model doing the real work, and a
@@ -232,10 +250,12 @@ to another provider on its own, because the classifier reads your prompts and
 your CLAUDE.md, and that is not a decision to make silently. On a gateway like OpenRouter it also stays with your session's *upstream* vendor —
 an `openai/…` session is screened by an `openai/…` model, not by whichever vendor
 happens to be cheapest — since the gateway is not who receives your prompt. The
-chosen model is named in the footer beside `auto mode on` and in
-`/auto-mode config`; if it turns
+chosen model is named in the startup banner (`mode auto · classifier haiku-4-5` —
+marked `(planned)` until the first call pins it), in the footer beside
+`auto mode on`, and in `/auto-mode config`; if it turns
 out to be unusable on your account, pincer says so, tells you which setting to
-change, and falls back rather than blocking every call.
+change, and falls back rather than blocking every call — including releasing a
+model that dies mid-session instead of retrying it forever.
 
 `autoMode` is read from user and managed settings only, never from the project's
 `.claude/settings.json` — otherwise a checked-in file could grant itself allow

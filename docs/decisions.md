@@ -1263,3 +1263,120 @@ had **every tool call blocked**, and it was invisible because Haiku accepts it.
 option which reads as harmless failed closed on a provider we were not testing
 (thinking budget, macOS symlink containment, now temperature): a gate spanning 38
 providers should send the minimum set of options it actually needs.
+
+## Auto mode hardening: the pi-automode review, and what came of it
+
+A review of [czottmann/pi-automode](https://github.com/czottmann/pi-automode)
+(cloned at cff6d42, 2026-08-03) — an independent auto-mode implementation for
+pi — against this one produced four adoptions, three rejections, and exposed
+three real bugs in our own classifier fallback path. Per the community-work
+convention, the outcome is recorded here.
+
+**Adopted: an interactive classifier picker (`/auto-mode model`).** Their
+strongest idea. Our automatic selection took three commits of fault-fixing
+against real catalogs, and when it picks badly the only recourse was hand-editing
+settings.json with a model id the user has to guess. The picker (filter by
+prefix/substring/subsequence, prices shown, auth validated via
+`getApiKeyAndHeaders` *before* persisting — theirs validates too) writes
+`autoMode.classifierModel` to **user scope only** and releases the session pin so
+the choice takes effect on the next call. `/auto-mode model clear` removes it.
+This changes the failure economics of selection heuristics: any future fault
+degrades to "pick it yourself" instead of "auto mode is broken". The picker's
+header says plainly that the model reads your prompts and CLAUDE.md, because
+choosing another provider is exactly the privacy decision model-select.ts refuses
+to make automatically.
+
+**Adopted: a deterministic deny floor for safety-control writes**
+(`auto-mode/safety-floor.ts`). Their `deterministicHardDeny` guards its own
+config deterministically; ours relied on the classifier's H-rules, which are only
+as strong as the model enforcing them — a weak or talked-around classifier could
+approve the one write that disables every check after it. Now a write/edit/bash
+redirect landing on `~/.claude/settings.json`, managed settings, `~/.claude.json`,
+or any `.claude/settings(.local).json` never reaches the classifier: interactive
+sessions always prompt, headless runs block. Two deliberate asymmetries: the
+shell pre-gate may only say "safe" (a gap costs a classifier call), the floor may
+only say "stop" (a gap falls through to the classifier) — neither list needs to
+be complete to be sound. And the floor matches exact files, not directories:
+`~/.claude` also holds memory and skills the agent writes routinely, and a floor
+that fires on routine work teaches the user to approve blind. Unlike their
+unconditional hard-deny (which cannot be overridden even by a user who wants the
+edit — and hard-denies `rm -rf` under `/private/tmp` on macOS), ours prompts:
+editing your own settings is legitimate, it just isn't the classifier's to allow.
+Floor targets are symlink-resolved with `resolveForContainment`, so
+`ln -s ~/.claude/settings.json innocent.json` does not slip past. Verified live:
+a headless auto-mode session asked to write `~/.claude/settings.json` was blocked
+without a classifier call, both on the `write` tool and the bash retry.
+
+**Adopted: config diagnostics.** Their `validateSettingsFile` inspired the same
+for `autoMode`: invalid JSON (previously swallowed — the user believes rules are
+in force that were never loaded), unknown keys, mistyped fields, and a list that
+omits `$defaults` (so it *replaces* the built-ins) all surface in
+`/auto-mode config`, which now also re-reads disk. Loading stays lenient; only
+the report is new.
+
+**Adopted: a decision log** (`auto-mode/decision-log.ts`,
+`autoMode.logDecisions: true`). Theirs logs ccusage-compatible usage; ours logs
+what we actually needed twice already: one JSONL line per gate decision — layer
+(pre-gate / classifier / floor / user-at-prompt / subagent review), outcome,
+tier, rule id, the classifier's raw commentary, and which model decided — in
+`auto-mode-decisions.jsonl` next to the session files. Both prior regressions
+were caught by reading raw verdicts under `CC_AUTO_MODE_DEBUG`, which only helps
+when set *before* the session; and allows are invisible in the UI by design, so
+the log is the only complete record of the permissive direction. Failures are
+swallowed: a gate that blocks calls because its diary is unwritable has its
+priorities backwards.
+
+**Rejected: their model selection** (configured model or session model, nothing
+else). It is admirably simple and trivially private, but it is our chain's
+degraded case: an Opus session would screen every call with Opus at ~3k input
+tokens each. The tables stay; the picker is the pressure valve that makes further
+selection cleverness unnecessary. **Rejected: the two-stage fast/detailed
+classifier** (one-digit gate, then JSON review). It saves output tokens, but our
+deterministic pre-gate already removes the classifier from the hot path for free,
+single-digit contracts are fragile on reasoning models (they budget 512 tokens
+just for hidden reasoning before the digit), and a one-token "0" is an ungrounded
+allow. **Rejected (and worth reporting upstream): project-local autoMode
+config.** Their `.pi/automode.local.json` gets full `autoMode` authority from the
+repo directory; nothing stops a malicious repo from committing one with
+`{"enabled": false}` or a replaced hard-deny list (omitting `$defaults` only
+warns). Their shared `.pi/automode.json` is correctly restricted to
+`permissions.*` — the local variant defeats the same containment their own doc
+comment claims. Ours reads user + managed scope only, unchanged. Their read-only
+fast path also lets the `read` tool fetch `~/.ssh/id_rsa` unclassified while
+`cat ~/.ssh/id_rsa` is their canonical hard-deny example.
+
+**Three bugs found in our fallback path while comparing.** (1) A pinned
+classifier that died mid-session was never unpinned: `rejected` grew but
+`pinned` stayed, so every later call retried the dead model and auto mode
+blocked everything until restart. Rejection now releases the pin, and the chain
+rides behind the pinned attempt so the *same call* steps onward. (2) The
+"everything rejected" retry took `all.slice(-1)` — the cost-ranked pick, the one
+candidate the chain is designed never to lead with — while the comment claimed it
+retried the session model. It now does what the comment says. (3)
+`isModelUnavailableError` matched bare "quota", so a per-minute rate-limit blip
+("quota exceeded, retry in 60s") permanently rejected a healthy model; only
+billing forms (`insufficient_quota`, "exceeded your current quota") count now —
+misreading billing as transient merely retries noisily, misreading a blip as
+permanent bricks the candidate, so uncertainty drains toward transient. All three
+are covered by `auto-mode-classifier-fallback.test.ts`, which mocks
+`completeSimple` — the first tests of the fallback *sequence* rather than single
+verdicts.
+
+**Also: mode and classifier in the banner.** The banner's `mode` line was
+hardcoded to "default". It now renders live — `mode auto · classifier haiku-4-5
+(planned)` before the first call pins, the pinned model after, `(paused)` when
+paused — fed by a `pincer:permission-status` event from the permissions
+extension (jiti isolates module state, so this goes over the bus). The
+protected-path check also gained the floor's symlink resolution: `decide()` takes
+an optional `resolvedSubject`, so writing `.git/hooks` through a symlinked
+spelling is as protected as writing it directly.
+
+**A pi-tui trap this exposed** (now also in pi-notes): pi-tui **crashes the whole
+app** on a rendered line wider than the terminal ("Rendered line exceeds terminal
+width"), but only validates a component whose output *changed*. The banner's
+skills line had been over-wide at 160 columns since quietStartup sections landed
+— harmless while the banner was static, fatal the moment the mode line made it
+re-render (ctrl+q killed pi outright). `bannerLines` now truncates every line to
+the render width with an ANSI-aware helper that never splits an escape sequence
+and resets colour before the ellipsis. Any `ctx.ui.custom`/`setHeader` component
+must do the same.

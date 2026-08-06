@@ -52,6 +52,34 @@ export function modeBadge(mode: PermissionMode, opts?: { paused?: boolean; class
 }
 
 /**
+ * Cross-extension channel carrying the current mode and classifier, so the
+ * startup banner can show them live. jiti gives each extension its own module
+ * instance, so this goes over `pi.events` rather than shared state.
+ */
+export const PERMISSION_STATUS_CHANNEL = "pincer:permission-status";
+
+export interface PermissionStatus {
+	mode: string;
+	paused: boolean;
+	/** `provider/id` of the classifier screening calls (or about to). */
+	classifier?: string;
+	/** Whether `classifier` is pinned by a real call, or still the planned first candidate. */
+	pinned?: boolean;
+}
+
+/**
+ * The banner's mode line. In auto mode it names the classifier — that model
+ * reads the user's prompts and CLAUDE.md, so which one it is belongs on screen
+ * — and says when the name is still the plan rather than the settled fact.
+ */
+export function permissionModeDisplay(status: PermissionStatus): string {
+	if (status.mode !== "auto") return status.mode;
+	const name = status.classifier ? shortModelName(status.classifier) : "no model available";
+	if (status.paused) return `auto (paused) · classifier ${name}`;
+	return `auto · classifier ${name}${status.pinned ? "" : " (planned)"}`;
+}
+
+/**
  * The mode the cycle shortcut lands on next. A mode outside the cycle
  * (dontAsk, or bypass in a session that didn't start with it) exits to the
  * cycle's start rather than being unreachable-from.

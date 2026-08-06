@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { PermissionMode } from "../../extensions/permissions/matcher.ts";
-import { MODE_BADGES, modeBadge, nextMode, shortModelName } from "../../extensions/permissions/modes.ts";
+import {
+	MODE_BADGES,
+	modeBadge,
+	nextMode,
+	permissionModeDisplay,
+	shortModelName,
+} from "../../extensions/permissions/modes.ts";
 import { normalizePermissionMode } from "../../extensions/permissions/settings.ts";
 
 describe("nextMode", () => {
@@ -102,5 +108,33 @@ describe("normalizePermissionMode", () => {
 		expect(normalizePermissionMode("")).toBeUndefined();
 		expect(normalizePermissionMode("turbo")).toBeUndefined();
 		expect(normalizePermissionMode(42)).toBeUndefined();
+	});
+});
+
+describe("permissionModeDisplay", () => {
+	it("shows plain modes as their name", () => {
+		expect(permissionModeDisplay({ mode: "default", paused: false })).toBe("default");
+		expect(permissionModeDisplay({ mode: "plan", paused: false })).toBe("plan");
+	});
+
+	it("names the classifier in auto mode — that model reads the user's prompts", () => {
+		expect(
+			permissionModeDisplay({ mode: "auto", paused: false, classifier: "openai/gpt-5-mini", pinned: true }),
+		).toBe("auto · classifier 5-mini");
+	});
+
+	it("marks a classifier that is still the plan rather than the settled fact", () => {
+		expect(
+			permissionModeDisplay({ mode: "auto", paused: false, classifier: "anthropic/claude-haiku-4-5", pinned: false }),
+		).toBe("auto · classifier haiku-4-5 (planned)");
+	});
+
+	it("shows the paused state and the missing-model state", () => {
+		expect(permissionModeDisplay({ mode: "auto", paused: true, classifier: "openai/gpt-5-mini", pinned: true })).toBe(
+			"auto (paused) · classifier 5-mini",
+		);
+		expect(permissionModeDisplay({ mode: "auto", paused: false })).toBe(
+			"auto · classifier no model available (planned)",
+		);
 	});
 });

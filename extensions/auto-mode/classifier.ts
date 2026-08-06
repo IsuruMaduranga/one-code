@@ -62,9 +62,13 @@ function remainingCandidates(deps: ClassifierDeps): Candidate[] {
 		configured: deps.config.classifierModel,
 	});
 	const usable = all.filter((entry) => !deps.state.rejected.has(`${entry.model.provider}/${entry.model.id}`));
+	if (usable.length > 0) return usable;
 	// If everything has been rejected, the session model is still worth one more
-	// attempt: a gate that stops asking has stopped gating.
-	return usable.length > 0 ? usable : all.slice(-1);
+	// attempt: a gate that stops asking has stopped gating. It has to be the
+	// session model specifically — the *last* chain entry is the cost-ranked
+	// pick, which nothing price-chosen should lead, let alone be the sole retry.
+	const session = all.filter((entry) => entry.source === "session");
+	return session.length > 0 ? session : all.slice(-1);
 }
 
 function notifyOnce(deps: ClassifierDeps, key: string, message: string, level: "info" | "warning") {
@@ -100,11 +104,27 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 	const index = indexRules(deps.config);
 	const { system, user } = buildClassifierPrompt(request, deps.config, index);
 
-	// A model already pinned this session is used as-is; otherwise walk the chain,
-	// stepping over anything that turns out to be unusable on this account.
-	const attempts = deps.state.pinned
-		? [{ model: deps.state.pinned, source: "session" as const }]
+	// A model already pinned this session is tried first, so the classifier does
+	// not change under the session while the pin is healthy. The rest of the
+	// chain stays behind it: a pinned model can be withdrawn mid-session, and
+	// the same call must then step onward rather than fail every call forever.
+	const pinned = deps.state.pinned;
+	const attempts = pinned
+		? [
+				{ model: pinned, source: "session" as const },
+				...candidates.filter((entry) => entry.model.provider !== pinned.provider || entry.model.id !== pinned.id),
+			]
 		: candidates;
+
+	// Rejecting a model releases its pin: without that, a model withdrawn
+	// mid-session would stay pinned, be the only candidate tried on every later
+	// call, and turn the gate into a permanent block until restart.
+	const reject = (key: string) => {
+		deps.state.rejected.add(key);
+		if (deps.state.pinned && `${deps.state.pinned.provider}/${deps.state.pinned.id}` === key) {
+			deps.state.pinned = undefined;
+		}
+	};
 
 	let lastError = "";
 	for (const candidate of attempts) {
@@ -113,7 +133,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 
 		const auth = await deps.registry.getApiKeyAndHeaders(model);
 		if (!auth.ok) {
-			deps.state.rejected.add(key);
+			reject(key);
 			lastError = auth.error;
 			continue;
 		}
@@ -221,7 +241,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 			};
 		}
 
-		deps.state.rejected.add(key);
+		reject(key);
 		const isConfigured = candidate.source === "configured";
 		notifyOnce(
 			deps,

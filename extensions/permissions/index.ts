@@ -18,6 +18,7 @@
  */
 
 import os from "node:os";
+import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
 	type ChildAction,
@@ -26,11 +27,27 @@ import {
 	type SubagentActionsPayload,
 } from "../auto-mode/actions.ts";
 import { classify, createClassifierState } from "../auto-mode/classifier.ts";
-import { type AutoModeConfig, autoModeSettingsPaths, loadAutoModeConfig } from "../auto-mode/config.ts";
+import {
+	type AutoModeConfig,
+	autoModeSettingsPaths,
+	loadAutoModeConfig,
+	loadAutoModeConfigWithDiagnostics,
+	persistClassifierModel,
+} from "../auto-mode/config.ts";
+import {
+	decodePickerKey,
+	filterEntries,
+	type PickerEntry,
+	pickerSpec,
+	renderModelPicker,
+} from "../auto-mode/model-picker.ts";
 import { DEFAULT_ALLOW, DEFAULT_ENVIRONMENT, DEFAULT_HARD_DENY, DEFAULT_SOFT_DENY } from "../auto-mode/defaults.ts";
+import { appendDecision, type DecisionEntry, decisionEntry } from "../auto-mode/decision-log.ts";
 import { loadProjectInstructions } from "../auto-mode/instructions.ts";
-import { classifierCandidates, describeCandidate } from "../auto-mode/model-select.ts";
+import { classifierCandidates, describeCandidate, findConfigured } from "../auto-mode/model-select.ts";
+import { resolveForContainment, toAbsolute } from "../auto-mode/paths.ts";
 import { PauseTracker } from "../auto-mode/pause.ts";
+import { safetyControlWrite } from "../auto-mode/safety-floor.ts";
 import { analyzeShellCommand, type ShellEvidence } from "../auto-mode/shell-analysis.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import {
@@ -42,7 +59,8 @@ import {
 	type PermissionMode,
 	type PermissionRule,
 } from "./matcher.ts";
-import { MODE_BADGES, modeBadge, nextMode } from "./modes.ts";
+import { MODE_BADGES, modeBadge, nextMode, PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "./modes.ts";
+import { isWritingTool } from "./protected-paths.ts";
 import { loadPermissionSettings, normalizePermissionMode, persistAllowRule, settingsPaths } from "./settings.ts";
 
 const DENIED_BY_USER =
@@ -57,6 +75,8 @@ const DENIED_PROTECTED_PATH =
 	"That path is protected: it configures the user's tooling or this agent itself, so writes to it are never auto-approved and allow rules do not cover them. Achieve the goal another way, or ask the user to make the change.";
 const DENIED_BY_CLASSIFIER = (reason: string) =>
 	`Blocked by the auto-mode approval classifier: ${reason}\n\nDo not retry the same call and do not try to work around the block. If you believe the action is what the user asked for, say so and let them decide.`;
+const DENIED_SAFETY_FLOOR = (reason: string) =>
+	`Auto mode blocked this call without consulting the classifier: ${reason}. Writes to the gate's own configuration are never auto-approved. Do not retry or route around this; ask the user to make the change themselves.`;
 /**
  * Why a delegation call reaches the classifier. Auto mode judges the task before
  * the child starts, so the thing to weigh is the instruction being handed over,
@@ -113,6 +133,27 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	 * refreshes it, which also covers reloads replacing the session.
 	 */
 	let badgeCtx: ExtensionContext | undefined;
+
+	/**
+	 * The classifier the banner and badge should name: the pinned one once a
+	 * call has settled it, otherwise the chain's first candidate — the thing
+	 * that *will* screen the next call, worth showing before it happens.
+	 */
+	const classifierForDisplay = (): { classifier?: string; pinned: boolean } => {
+		if (classifierState.pinned) {
+			return { classifier: `${classifierState.pinned.provider}/${classifierState.pinned.id}`, pinned: true };
+		}
+		if (!badgeCtx) return { pinned: false };
+		autoConfig ??= loadAutoModeConfig(os.homedir());
+		const chain = classifierCandidates({
+			available: badgeCtx.modelRegistry.getAvailable(),
+			sessionModel: badgeCtx.model,
+			configured: autoConfig.classifierModel,
+		}).filter((entry) => !classifierState.rejected.has(`${entry.model.provider}/${entry.model.id}`));
+		const first = chain[0];
+		return { classifier: first ? `${first.model.provider}/${first.model.id}` : undefined, pinned: false };
+	};
+
 	const applyBadge = () => {
 		// setStatus is a no-op outside the TUI, so this is safe unconditionally.
 		badgeCtx?.ui.setStatus(
@@ -122,6 +163,15 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				classifierModel: classifierState.pinned?.id,
 			}),
 		);
+		// The banner shows mode and classifier live; it listens on the bus
+		// because jiti isolates module state between extensions.
+		const display = mode === "auto" ? classifierForDisplay() : { pinned: false };
+		pi.events.emit(PERMISSION_STATUS_CHANNEL, {
+			mode,
+			paused: pauseTracker.isPaused(),
+			classifier: display.classifier,
+			pinned: display.pinned,
+		} satisfies PermissionStatus);
 	};
 
 	/** Auto-mode state. Loaded lazily: most sessions never enter auto mode. */
@@ -135,6 +185,21 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	 * to be unusable is not retried on every tool call.
 	 */
 	const classifierState = createClassifierState();
+
+	/**
+	 * One JSONL line per gate decision when `autoMode.logDecisions` is set. The
+	 * permissive direction is the reason this exists: allows are invisible in
+	 * the UI by design, so the log is the only complete record of them.
+	 */
+	const logDecision = (ctx: ExtensionContext, entry: Omit<DecisionEntry, "ts">) => {
+		if (!autoConfig?.logDecisions) return;
+		try {
+			const file = join(ctx.sessionManager.getSessionDir(), "auto-mode-decisions.jsonl");
+			appendDecision(file, decisionEntry({ sessionId: ctx.sessionManager.getSessionId?.(), ...entry }));
+		} catch {
+			// Logging must never break the gate.
+		}
+	};
 
 	/** What would be tried, in order, before anything has been pinned. */
 	const describeChain = (ctx: ExtensionContext): string => {
@@ -182,10 +247,13 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		let evidence: ShellEvidence | undefined;
 		if (normalizeToolName(toolName) === "bash" && subject) {
 			evidence = analyzeShellCommand({ command: subject, cwd: ctx.cwd, home: os.homedir() });
-			if (evidence.verdict === "safe") return { decision: "allow" as const, reason: "", tier: undefined };
+			if (evidence.verdict === "safe") {
+				logDecision(ctx, { tool: toolName, subject, outcome: "allow", source: "pre-gate" });
+				return { decision: "allow" as const, reason: "", tier: undefined };
+			}
 		}
 
-		return classify(
+		const verdict = await classify(
 			{ toolName, input, cwd: ctx.cwd, userMessages: [...userMessages], evidence, projectInstructions, routedBecause },
 			{
 				registry: ctx.modelRegistry,
@@ -202,6 +270,18 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				},
 			},
 		);
+		logDecision(ctx, {
+			tool: toolName,
+			subject,
+			outcome: verdict.decision,
+			source: "classifier",
+			tier: verdict.tier,
+			ruleId: verdict.ruleId,
+			reason: verdict.reason || undefined,
+			raw: verdict.raw,
+			model: classifierState.pinned ? `${classifierState.pinned.provider}/${classifierState.pinned.id}` : undefined,
+		});
+		return verdict;
 	};
 
 	const setMode = (next: PermissionMode) => {
@@ -288,7 +368,15 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("tool_call", async (event, ctx) => {
-		const subject = extractSubject(normalizeToolName(event.toolName), event.input as Record<string, unknown>);
+		const normalizedTool = normalizeToolName(event.toolName);
+		const subject = extractSubject(normalizedTool, event.input as Record<string, unknown>);
+		// Resolved through symlinks so the protected-path check sees where a
+		// write actually lands, not how the path is spelled. Only for writing
+		// tools: a bash subject is a command line, not a path.
+		const resolvedSubject =
+			isWritingTool(normalizedTool) && subject
+				? resolveForContainment(toAbsolute(ctx.cwd, subject, os.homedir()))
+				: undefined;
 		const result = decide({
 			toolName: event.toolName,
 			subject,
@@ -298,9 +386,29 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			ask,
 			allow: [...allow, ...sessionAllows],
 			classifyAllShell: autoConfig?.classifyAllShell,
+			resolvedSubject,
 		});
 
-		if (result.decision === "allow") return undefined;
+		/**
+		 * Auto mode's deterministic floor: a write to the files the gate is made
+		 * of (permission settings, autoMode config) is never auto-approved — not
+		 * by an allow rule, not by the classifier, whose hard-deny rules are only
+		 * as strong as the model enforcing them. Interactive sessions always
+		 * prompt; non-interactive runs block. Runs even when a rule would allow,
+		 * because a session allow rule ("write", approved once) must not cover
+		 * the write that disables every check after it.
+		 */
+		const floorReason =
+			mode === "auto"
+				? safetyControlWrite({
+						toolName: normalizeToolName(event.toolName),
+						input: event.input as Record<string, unknown>,
+						cwd: ctx.cwd,
+						home: os.homedir(),
+					})
+				: undefined;
+
+		if (result.decision === "allow" && !floorReason) return undefined;
 
 		if (result.decision === "deny") {
 			if (result.cause === "plan-mode") return { block: true, reason: DENIED_PLAN_MODE };
@@ -311,7 +419,16 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		}
 
 		let classifierBlock: string | undefined;
-		if (result.decision === "classify") {
+		if (floorReason) {
+			// Never reaches the classifier: fall through to the prompt below, or
+			// block outright where there is no one to ask.
+			autoConfig ??= loadAutoModeConfig(os.homedir());
+			if (!ctx.hasUI) {
+				logDecision(ctx, { tool: event.toolName, subject, outcome: "block", source: "floor", reason: floorReason });
+				return { block: true, reason: DENIED_SAFETY_FLOOR(floorReason) };
+			}
+			logDecision(ctx, { tool: event.toolName, subject, outcome: "prompt", source: "floor", reason: floorReason });
+		} else if (result.decision === "classify") {
 			// Auto mode pauses after repeated blocks and prompts instead, so a model
 			// looping against the classifier reaches the user rather than grinding.
 			if (!pauseTracker.isPaused()) {
@@ -366,15 +483,29 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		}
 
 		const preview = subject.length > 200 ? `${subject.slice(0, 200)}…` : subject;
-		const title = classifierBlock
-			? `Auto mode blocked this — allow it anyway?\n\n  ${preview || "(no arguments)"}\n\n  Classifier: ${classifierBlock}`
-			: result.cause === "protected-path"
+		const title = floorReason
+			? `Auto mode never auto-approves this — ${event.toolName} ${floorReason}.\n\n  ${preview}\n\n  Allow it this once?`
+			: classifierBlock
+				? `Auto mode blocked this — allow it anyway?\n\n  ${preview || "(no arguments)"}\n\n  Classifier: ${classifierBlock}`
+				: result.cause === "protected-path"
 				? `Allow ${event.toolName} to write a protected path?\n\n  ${preview}\n\n  This path configures your tooling or this agent, so allow rules do not pre-approve it.`
 				: `Allow ${event.toolName}?\n\n  ${preview || "(no arguments)"}`;
 		const YES = "Yes";
 		const YES_SESSION = "Yes, don't ask again this session";
 		const NO = "No, tell the agent what to do differently";
 		const choice = await ctx.ui.select(title, [YES, YES_SESSION, NO]);
+
+		// The user's answer is itself a gate decision worth recording — it is the
+		// ground truth a drifting classifier gets calibrated against.
+		if (mode === "auto" && (floorReason || classifierBlock)) {
+			logDecision(ctx, {
+				tool: event.toolName,
+				subject,
+				outcome: choice === YES || choice === YES_SESSION ? "allow" : "block",
+				source: "user",
+				reason: floorReason ?? classifierBlock,
+			});
+		}
 
 		// Approving a prompted call is what resumes a paused auto mode.
 		if (choice === YES || choice === YES_SESSION) {
@@ -477,6 +608,15 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				onNotice: (message, level) => ctx.ui.notify(message, level),
 			},
 		);
+		logDecision(ctx, {
+			tool: "subagent",
+			subject: "completed run review",
+			outcome: verdict.decision,
+			source: "review",
+			tier: verdict.tier,
+			ruleId: verdict.ruleId,
+			reason: verdict.reason || undefined,
+		});
 		if (verdict.decision === "allow") return undefined;
 
 		pauseTracker.recordBlock({
@@ -494,30 +634,160 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		return { content: [warning, ...event.content] };
 	});
 
+	/**
+	 * Apply a chosen classifier model: validate auth first (a persisted model
+	 * with no credentials would fail every call), persist to user scope, and
+	 * release the session pin so the choice takes effect on the next call
+	 * rather than after a restart.
+	 */
+	const applyClassifierChoice = async (spec: string, ctx: ExtensionContext): Promise<void> => {
+		const model = findConfigured(ctx.modelRegistry.getAvailable(), spec);
+		if (!model) {
+			ctx.ui.notify(`No available model matches "${spec}" — check /auto-mode config for the catalog name.`, "error");
+			return;
+		}
+		const resolved = `${model.provider}/${model.id}`;
+		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+		if (!auth.ok) {
+			ctx.ui.notify(`Cannot use ${resolved}: ${auth.error}. Not saved.`, "error");
+			return;
+		}
+		try {
+			persistClassifierModel(resolved, os.homedir());
+		} catch (error) {
+			ctx.ui.notify(`Could not save classifier model: ${error instanceof Error ? error.message : String(error)}`, "error");
+			return;
+		}
+		autoConfig = undefined; // reloaded lazily, now carrying the new model
+		classifierState.pinned = undefined;
+		classifierState.rejected.clear();
+		classifierState.notified.clear();
+		applyBadge();
+		ctx.ui.notify(`Auto-mode classifier set to ${resolved} (saved to ~/.claude/settings.json).`, "info");
+	};
+
+	/** `/auto-mode model` — show the picker, or apply a named model / `clear`. */
+	const handleModelSubcommand = async (remainder: string, ctx: ExtensionContext): Promise<void> => {
+		if (remainder === "clear") {
+			try {
+				persistClassifierModel(undefined, os.homedir());
+			} catch (error) {
+				ctx.ui.notify(`Could not update settings: ${error instanceof Error ? error.message : String(error)}`, "error");
+				return;
+			}
+			autoConfig = undefined;
+			classifierState.pinned = undefined;
+			classifierState.rejected.clear();
+			classifierState.notified.clear();
+			applyBadge();
+			ctx.ui.notify(`autoMode.classifierModel cleared. Auto mode will choose: ${describeChain(ctx)}`, "info");
+			return;
+		}
+		if (remainder) {
+			await applyClassifierChoice(remainder, ctx);
+			return;
+		}
+
+		const available = ctx.modelRegistry.getAvailable();
+		if (available.length === 0) {
+			ctx.ui.notify("No models are available — authenticate a provider first.", "warning");
+			return;
+		}
+		// The picker needs focus and a terminal; elsewhere say what to type.
+		if (!ctx.hasUI || ctx.mode !== "tui") {
+			autoConfig ??= loadAutoModeConfig(os.homedir());
+			ctx.ui.notify(
+				`classifierModel: ${autoConfig.classifierModel ?? "(not set)"}. Set one with /auto-mode model <provider/model-id>, or clear it with /auto-mode model clear.`,
+				"info",
+			);
+			return;
+		}
+
+		autoConfig ??= loadAutoModeConfig(os.homedir());
+		const current = autoConfig.classifierModel;
+		const entries: PickerEntry[] = available
+			.map((model) => ({
+				provider: model.provider,
+				id: model.id,
+				inputPrice: typeof model.cost?.input === "number" && model.cost.input > 0 ? model.cost.input : undefined,
+			}))
+			.sort((a, b) => pickerSpec(a).localeCompare(pickerSpec(b)));
+
+		const chosen = await ctx.ui.custom<PickerEntry | null>((tui, theme, _keybindings, done) => {
+			const paint = (color: string, text: string) => {
+				const themed = theme as { fg?(c: string, t: string): string } | undefined;
+				try {
+					return themed?.fg ? themed.fg(color, text) : text;
+				} catch {
+					return text;
+				}
+			};
+			let query = "";
+			let index = 0;
+			let filtered = entries;
+			return {
+				render: () => [
+					"",
+					...renderModelPicker({ entries: filtered, index, query, total: entries.length, current }, paint),
+					"",
+				],
+				handleInput: (data: string) => {
+					const key = decodePickerKey(data);
+					if (!key) return;
+					if (key.kind === "cancel") return done(null);
+					if (key.kind === "confirm") return done(filtered[index] ?? null);
+					if (key.kind === "up") index = Math.max(0, index - 1);
+					else if (key.kind === "down") index = Math.min(filtered.length - 1, index + 1);
+					else {
+						query = key.kind === "backspace" ? query.slice(0, -1) : query + key.text;
+						filtered = filterEntries(entries, query);
+						index = 0;
+					}
+					tui.requestRender();
+				},
+				invalidate: () => {},
+			};
+		});
+
+		if (chosen) await applyClassifierChoice(pickerSpec(chosen), ctx);
+	};
+
 	pi.registerCommand("auto-mode", {
-		description: "Auto-mode classifier rules: /auto-mode [defaults|config]",
+		description: "Auto-mode classifier: /auto-mode [defaults|config|model [provider/model-id|clear]]",
 		getArgumentCompletions: () =>
-			["defaults", "config"].map((value) => ({ value, label: value === "config" ? "effective rules" : "built-in rules" })),
+			[
+				{ value: "config", label: "effective rules" },
+				{ value: "defaults", label: "built-in rules" },
+				{ value: "model", label: "choose the classifier model" },
+			],
 		handler: async (args, ctx) => {
-			const which = args.trim() || "config";
+			const [sub, ...rest] = args.trim().split(/\s+/).filter(Boolean);
+			if (sub === "model") {
+				await handleModelSubcommand(rest.join(" ").trim(), ctx);
+				return;
+			}
+			const which = sub ?? "config";
 			if (which !== "defaults" && which !== "config") {
-				ctx.ui.notify(`Unknown subcommand "${which}". Use: /auto-mode defaults | /auto-mode config`, "warning");
+				ctx.ui.notify(
+					`Unknown subcommand "${which}". Use: /auto-mode defaults | config | model [provider/model-id|clear]`,
+					"warning",
+				);
 				return;
 			}
 			// "defaults" prints the built-in lists; "config" prints what the
-			// classifier actually uses, with $defaults already spliced in.
-			const shown =
-				which === "defaults"
-					? {
-							environment: DEFAULT_ENVIRONMENT,
-							allow: DEFAULT_ALLOW,
-							soft_deny: DEFAULT_SOFT_DENY,
-							hard_deny: DEFAULT_HARD_DENY,
-						}
-					: (() => {
-							autoConfig ??= loadAutoModeConfig(os.homedir());
-							return autoConfig;
-						})();
+			// classifier actually uses, with $defaults already spliced in. The
+			// config view re-reads disk so it shows the file as it is now, and
+			// refreshes the gate's cached copy while it is at it.
+			const loaded = which === "config" ? loadAutoModeConfigWithDiagnostics(os.homedir()) : undefined;
+			if (loaded) autoConfig = loaded.config;
+			const shown = loaded
+				? loaded.config
+				: {
+						environment: DEFAULT_ENVIRONMENT,
+						allow: DEFAULT_ALLOW,
+						soft_deny: DEFAULT_SOFT_DENY,
+						hard_deny: DEFAULT_HARD_DENY,
+					};
 			const section = (title: string, entries: string[]) =>
 				`${title} (${entries.length}):\n${entries.map((entry) => `  - ${entry}`).join("\n")}`;
 			ctx.ui.notify(
@@ -532,7 +802,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 					...(which === "config" && "classifyAllShell" in shown
 						? [
 								`classifyAllShell: ${shown.classifyAllShell}`,
-								`classifierModel: ${shown.classifierModel ?? "(not set)"}`,
+								`logDecisions: ${shown.logDecisions} (auto-mode-decisions.jsonl next to the session files)`,
+								`classifierModel: ${shown.classifierModel ?? "(not set — /auto-mode model chooses one)"}`,
 								// Which model actually screens calls, and why — this reads the
 								// user's prompts, so it should not take knowing the code to find out.
 								`classifier in use: ${
@@ -545,8 +816,11 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 									: []),
 							]
 						: []),
+					...(loaded && loaded.diagnostics.length > 0
+						? [`settings problems:\n${loaded.diagnostics.map((line) => `  ! ${line}`).join("\n")}`]
+						: []),
 				].join("\n\n"),
-				"info",
+				loaded && loaded.diagnostics.length > 0 ? "warning" : "info",
 			);
 		},
 	});

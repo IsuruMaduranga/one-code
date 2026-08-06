@@ -2,7 +2,12 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { autoModeSettingsPaths, loadAutoModeConfig, spliceDefaults } from "../../extensions/auto-mode/config.ts";
+import {
+	autoModeSettingsPaths,
+	loadAutoModeConfig,
+	loadAutoModeConfigWithDiagnostics,
+	spliceDefaults,
+} from "../../extensions/auto-mode/config.ts";
 import { DEFAULT_HARD_DENY, DEFAULT_SOFT_DENY } from "../../extensions/auto-mode/defaults.ts";
 
 let home: string;
@@ -75,6 +80,46 @@ describe("loadAutoModeConfig", () => {
 	it("drops non-string entries", () => {
 		writeUserSettings({ autoMode: { hard_deny: ["real rule", 42, null, "  "] } });
 		expect(loadAutoModeConfig(home).hard_deny).toEqual(["real rule"]);
+	});
+
+	it("reports a skipped malformed file instead of staying silent about it", () => {
+		// The file is still skipped (the gate must not die on a typo), but a user
+		// whose rules were silently never loaded believes protections are in force.
+		writeFileSync(join(home, ".claude", "settings.json"), "{not json");
+		const { diagnostics } = loadAutoModeConfigWithDiagnostics(home);
+		expect(diagnostics.some((line) => line.includes("invalid JSON"))).toBe(true);
+	});
+
+	it("reports unknown and mistyped autoMode keys", () => {
+		writeUserSettings({
+			autoMode: { clasifierModel: "typo/model", classifyAllShell: "yes", hard_deny: "not an array" },
+		});
+		const { config, diagnostics } = loadAutoModeConfigWithDiagnostics(home);
+		expect(diagnostics.some((line) => line.includes('unknown autoMode key "clasifierModel"'))).toBe(true);
+		expect(diagnostics.some((line) => line.includes("classifyAllShell must be a boolean"))).toBe(true);
+		expect(diagnostics.some((line) => line.includes("hard_deny must be an array"))).toBe(true);
+		// Lenient loading: the mistyped fields fall back rather than failing.
+		expect(config.classifyAllShell).toBe(false);
+		expect(config.hard_deny).toEqual(DEFAULT_HARD_DENY);
+	});
+
+	it("warns when a list omits $defaults and so replaces the built-ins", () => {
+		writeUserSettings({ autoMode: { soft_deny: ["only my rule"] } });
+		const { config, diagnostics } = loadAutoModeConfigWithDiagnostics(home);
+		expect(diagnostics.some((line) => line.includes("REPLACES the built-in soft_deny"))).toBe(true);
+		// Still applied — replacement is documented and occasionally intended.
+		expect(config.soft_deny).toEqual(["only my rule"]);
+	});
+
+	it("reports dropped non-string entries", () => {
+		writeUserSettings({ autoMode: { hard_deny: ["$defaults", 42] } });
+		const { diagnostics } = loadAutoModeConfigWithDiagnostics(home);
+		expect(diagnostics.some((line) => line.includes("hard_deny[1]"))).toBe(true);
+	});
+
+	it("stays quiet on a clean configuration", () => {
+		writeUserSettings({ autoMode: { soft_deny: ["$defaults", "extra rule"], classifyAllShell: true } });
+		expect(loadAutoModeConfigWithDiagnostics(home).diagnostics).toEqual([]);
 	});
 
 	it("never reads autoMode from project settings", () => {
