@@ -391,7 +391,7 @@ Tools appear as `mcp__<server>__<tool>` and are deferred behind `tool_search`.
 - **No sandbox.** pi runs shell commands with your privileges; the permission system decides *whether* a command runs, not what it can reach. For a hard boundary, run pi in a container or add a sandbox extension — see pi's `docs/containerization.md`.
 - **Subagents run in the foreground.** No detached runs, so no `TaskOutput`/`TaskStop` equivalents yet. (Workflows *do* run in the background, with `/workflows stop`.)
 - **Background workflow runs end with the session.** They do not survive `/reload` or switching sessions; resume one with its run id and the journaled prefix replays for free.
-- **`web_fetch` returns extracted markdown** (windowed, with pagination) rather than summarising the page with a small model.
+- **`web_fetch` answers a `prompt` with a small model**, Claude Code-style: a vetted smaller same-provider model (the classifier profile, same containment and cost ceiling) reads the *full* page and returns just the answer, so long pages stay out of the conversation. Without `prompt` it returns extracted markdown, windowed with pagination; a reader failure falls back to that with a note rather than failing the fetch.
 - Verified end-to-end on OpenAI/Codex and Anthropic models, including Anthropic's native deferred-tool loading, the pre-5.4 fallback, and `context_management` trimming. Bedrock/Vertex/proxy endpoints are not yet exercised — context trimming stays off there by default.
 
 ## Development

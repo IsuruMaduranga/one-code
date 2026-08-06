@@ -1698,3 +1698,34 @@ their authors differ:
 The gate opens when either price is unknown — a cost gate that fails closed on
 an unpriced catalog blocks the feature outright, the same failure shape as
 gating a tool other tools sit behind.
+
+## web_fetch answers a `prompt` with a reader model
+
+The original deviation ("no clean in-process completion helper; a summariser
+that fails silently degrades quality invisibly") went stale on both halves: the
+auto-mode classifier has been making exactly this call via pi-ai's
+`completeSimple` for months, and the silent-failure objection argues for a
+*loud fallback*, not for omitting the feature. So `web_fetch` now takes Claude
+Code's optional `prompt`, and a reader model answers it against up to 120k
+chars of the page — four times the window the main model would get — returning
+just the answer with a header naming the reader.
+
+The reader reuses the **classifier role profile** rather than adding a third
+curated inventory: summarisation wants the same small-but-capable floor, and
+two lists drifting apart helps nobody. Same containment (the page and the
+query go to the reader, so it never leaves the session's provider/family) and
+the same cost ceiling (never pricier than the session model); with no vetted
+smaller model the session model reads the page itself, which still wins by
+keeping the full page out of the conversation. `reasoning` and `temperature`
+are not sent, for the same fail-closed reasons recorded for the classifier.
+Any reader failure returns the raw windowed markdown with a note naming the
+error — the fetch is never wasted and the degradation is never silent. Page
+content rides in the user message tagged as untrusted data, and the system
+prompt pins the reader to extraction.
+
+Verified live on an OpenAI Codex Sol session (one-shot `--mode json` run with
+`--dangerously-skip-permissions`; the tool's permission surface is unchanged by
+this feature): the reader resolved to `openai-codex/gpt-5.6-luna` via the
+classifier profile, and the tool result read "Answered by
+openai-codex/gpt-5.6-luna from the full page" with a correct answer for the
+fetched page. Typecheck and all 698 unit tests pass.

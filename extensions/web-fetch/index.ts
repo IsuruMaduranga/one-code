@@ -2,23 +2,28 @@
  * web-fetch extension — Claude Code's WebFetch.
  *
  * Fetches a URL, extracts the readable content, and returns markdown. Deferred
- * behind `tool_search`.
- *
- * Deviation from Claude Code, deliberate: CC answers a `prompt` against the page
- * using a small fast model. pi exposes no clean in-process completion helper, and
- * a summarisation call that silently fails would degrade quality invisibly — so
- * this returns the extracted markdown (windowed) and lets the main model read it.
- * Long pages are paginated via `offset` rather than summarised.
+ * behind `tool_search`. With a `prompt`, a small same-containment reader model
+ * (chosen in summarize.ts, same one-shot `completeSimple` shape as the
+ * auto-mode classifier) answers it against the *full* page, keeping long pages
+ * out of the main conversation. A reader failure falls back to the raw
+ * windowed markdown with a note saying so — the original reason this feature
+ * was deferred was that a summariser failing *silently* degrades quality
+ * invisibly, so the fallback is loud, never silent.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { Api, Model } from "@earendil-works/pi-ai";
+import { completeSimple } from "@earendil-works/pi-ai/compat";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { htmlToMarkdown, isSameHost, normalizeUrl, paginate } from "./extract.ts";
+import { pickReaderModel, READER_MAX_TOKENS, readerMessages } from "./summarize.ts";
 
 const DEFAULT_MAX_CHARS = 30_000;
 const CACHE_TTL_MS = 15 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 30_000;
+/** Longer than the classifier's cap: the reader ingests whole pages. */
+const READER_TIMEOUT_MS = 60_000;
 const USER_AGENT = "pincer/0.1 (+https://github.com/earendil-works/pi)";
 
 /**
@@ -30,6 +35,8 @@ interface FetchDetails {
 	totalChars?: number;
 	truncated?: boolean;
 	nextOffset?: number;
+	/** `provider/id` of the model that answered `prompt`, when one did. */
+	reader?: string;
 }
 
 interface CacheEntry {
@@ -37,6 +44,57 @@ interface CacheEntry {
 	title?: string;
 	fetchedAt: number;
 	note?: string;
+}
+
+/**
+ * One-shot reader call, the same shape as the auto-mode classifier: no tools,
+ * no session, no history — the page and the question in, an answer out.
+ * `reasoning` and `temperature` are deliberately not sent; both fail *closed*
+ * on providers that reject them (see the classifier notes), and a reader that
+ * errors turns into the raw-content fallback, wasting the fetch.
+ */
+async function answerFromPage(
+	ctx: ExtensionContext,
+	prompt: string,
+	entry: { markdown: string; title?: string },
+	url: string,
+	signal: AbortSignal | undefined,
+): Promise<{ answer?: string; reader?: string; truncated?: boolean; error?: string }> {
+	const choice = pickReaderModel(ctx.modelRegistry.getAvailable(), ctx.model);
+	if (!choice) return { error: "no model available to read the page" };
+	const reader = `${choice.model.provider}/${choice.model.id}`;
+
+	try {
+		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(choice.model);
+		if (!auth.ok) return { error: `${reader}: ${auth.error}` };
+		const baseUrl = (auth as { baseUrl?: string }).baseUrl;
+
+		const messages = readerMessages({ prompt, markdown: entry.markdown, url, title: entry.title });
+		const timeout = AbortSignal.timeout(READER_TIMEOUT_MS);
+		const result = await completeSimple(
+			baseUrl ? ({ ...choice.model, baseUrl } as Model<Api>) : choice.model,
+			{
+				systemPrompt: messages.system,
+				messages: [{ role: "user", content: messages.user, timestamp: Date.now() }],
+			},
+			{
+				apiKey: auth.apiKey,
+				headers: auth.headers,
+				env: auth.env,
+				signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+				maxTokens: READER_MAX_TOKENS,
+			},
+		);
+		const answer = result.content
+			.filter((block): block is { type: "text"; text: string } => block.type === "text")
+			.map((block) => block.text)
+			.join("\n")
+			.trim();
+		if (!answer) return { error: `${reader} returned no text` };
+		return { answer, reader, truncated: messages.truncated };
+	} catch (error) {
+		return { error: `${reader}: ${(error as Error).message}` };
+	}
 }
 
 export default function webFetchExtension(pi: ExtensionAPI) {
@@ -108,9 +166,15 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 		name: "web_fetch",
 		label: "Web Fetch",
 		description:
-			"Fetch a URL and return its readable content as markdown. Navigation and boilerplate are stripped. Long pages are windowed — pass `offset` to continue reading. Responses are cached for 15 minutes. Cross-host redirects are reported instead of followed; call again with the new URL to follow one.",
+			"Fetch a URL and return its readable content as markdown. Navigation and boilerplate are stripped. Pass `prompt` to have a small fast model answer it from the full page instead of returning the page itself — prefer that for long pages. Without `prompt`, long pages are windowed; pass `offset` to continue reading. Responses are cached for 15 minutes. Cross-host redirects are reported instead of followed; call again with the new URL to follow one.",
 		parameters: Type.Object({
 			url: Type.String({ description: "URL to fetch (http is upgraded to https)" }),
+			prompt: Type.Optional(
+				Type.String({
+					description:
+						"Question to answer from the page. A small same-provider model reads the whole page and returns just the answer, keeping long pages out of context. Omit to get the raw page markdown",
+				}),
+			),
 			offset: Type.Optional(
 				Type.Integer({ minimum: 0, description: "Character offset to resume from for a long page" }),
 			),
@@ -118,7 +182,7 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 				Type.Integer({ minimum: 1000, maximum: 100_000, description: `Characters to return (default ${DEFAULT_MAX_CHARS})` }),
 			),
 		}),
-		async execute(_toolCallId, params, signal) {
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			let target: string;
 			let normalizeNote: string | undefined;
 			try {
@@ -135,6 +199,31 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 
 			try {
 				const entry = await load(target, signal);
+
+				// Reader failures degrade to the raw page below — loudly, via
+				// readerNote, never silently.
+				let readerNote: string | undefined;
+				if (params.prompt) {
+					const answered = await answerFromPage(ctx, params.prompt, entry, target, signal);
+					if (answered.answer !== undefined) {
+						const header = [
+							entry.title ? `# ${entry.title}` : undefined,
+							`Source: ${target}`,
+							normalizeNote,
+							entry.note,
+							answered.truncated ? "(The page exceeded the reader's window; its tail was not read.)" : undefined,
+							`Answered by ${answered.reader} from the full page (${entry.markdown.length} chars). Refetch without \`prompt\` for the raw content.`,
+						]
+							.filter(Boolean)
+							.join("\n");
+						return {
+							content: [{ type: "text", text: `${header}\n\n${answered.answer}` }],
+							details: { url: target, totalChars: entry.markdown.length, reader: answered.reader },
+						};
+					}
+					readerNote = `Could not answer \`prompt\` (${answered.error}); returning the raw page content instead.`;
+				}
+
 				const page = paginate(entry.markdown, params.offset ?? 0, params.max_chars ?? DEFAULT_MAX_CHARS);
 
 				const header = [
@@ -142,6 +231,7 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 					`Source: ${target}`,
 					normalizeNote,
 					entry.note,
+					readerNote,
 					page.truncated
 						? `Showing characters ${params.offset ?? 0}–${(params.offset ?? 0) + page.text.length} of ${page.totalChars}. Continue with offset ${page.nextOffset}.`
 						: undefined,
