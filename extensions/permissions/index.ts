@@ -126,6 +126,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	let ask: PermissionRule[] = [];
 	let allow: PermissionRule[] = [];
 	const sessionAllows: PermissionRule[] = [];
+	/** Plan mode's one writable file, announced by the plan-mode extension. */
+	let planFilePath: string | undefined;
 
 	/**
 	 * Mode changes arrive over the event bus too (plan-mode tools), where no ctx
@@ -288,13 +290,13 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		mode = next;
 		process.env[MODE_ENV] = next;
 		applyBadge();
-		if (mode === "plan") {
-			pi.events.emit(REMINDER_CHANNEL, {
-				text: "Plan mode is active. You may only inspect the codebase with read-only tools. Do NOT make any edits or run state-changing commands; research and present a plan to the user instead.",
-				scope: "every-turn",
-				key: "permission-mode",
-			});
-		} else if (mode === "auto") {
+		// No plan branch: the plan-mode extension owns the "permission-mode"
+		// reminder while planning (it knows the plan file) and re-emits it every
+		// turn, so plan mode takes the generic path below — the announce is
+		// wanted, and the key removal is undone before the next request goes out.
+		// applyBadge above notifies that extension synchronously over the status
+		// channel.
+		if (mode === "auto") {
 			pi.events.emit(REMINDER_CHANNEL, {
 				text:
 					"Auto mode is active: your tool calls run without per-action prompts, but each one is screened by an approval classifier that blocks anything irreversible, destructive, or aimed outside this environment. " +
@@ -355,6 +357,13 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		if (requested) setMode(requested);
 	});
 
+	// The plan-mode extension announces the plan file (see PLAN_FILE_CHANNEL
+	// there); decide() then allows writes to that one path in plan mode.
+	pi.events.on("pincer:plan-file-path", (data) => {
+		const path = (data as { path?: unknown })?.path;
+		if (typeof path === "string" && path) planFilePath = path;
+	});
+
 	// Claude Code cycles permission modes with shift+tab; pi reserves that key
 	// for the thinking dial. ctrl+q is the one ctrl+letter pi leaves unbound
 	// that terminals don't already own (ctrl+m *is* Enter's byte, alt needs
@@ -387,6 +396,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			allow: [...allow, ...sessionAllows],
 			classifyAllShell: autoConfig?.classifyAllShell,
 			resolvedSubject,
+			planFilePath,
 		});
 
 		/**

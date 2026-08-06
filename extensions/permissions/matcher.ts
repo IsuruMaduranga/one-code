@@ -146,6 +146,16 @@ export function extractSubject(toolName: string, input: Record<string, unknown>)
 	return typeof path === "string" ? path : "";
 }
 
+/** Whether `candidate` names plan mode's one writable file, after ~-expansion and cwd resolution of both sides. */
+export function isPlanFilePath(candidate: string, planFilePath: string, cwd: string): boolean {
+	const home = homedir();
+	const toAbsolute = (p: string) => {
+		const expanded = p.startsWith("~/") ? `${home}/${p.slice(2)}` : p;
+		return resolve(cwd, expanded);
+	};
+	return toAbsolute(candidate) === toAbsolute(planFilePath);
+}
+
 export function ruleMatches(rule: PermissionRule, toolName: string, subject: string, cwd: string): boolean {
 	if (rule.tool !== normalizeToolName(toolName)) return false;
 	if (!rule.pattern) return true;
@@ -231,6 +241,12 @@ export interface DecideInput {
 	 * module stays pure — resolution touches the filesystem.
 	 */
 	resolvedSubject?: string;
+	/**
+	 * Plan mode's one writable file (see extensions/plan-mode). Absolute or
+	 * ~-prefixed; writes whose subject resolves to it are allowed even in plan
+	 * mode.
+	 */
+	planFilePath?: string;
 }
 
 export interface Decision {
@@ -238,7 +254,7 @@ export interface Decision {
 	/** Rule that determined the outcome, when one did. */
 	rule?: PermissionRule;
 	/** Why, for deny/ask decisions surfaced to the model or user. */
-	cause: "rule" | "plan-mode" | "mode" | "tier" | "protected-path";
+	cause: "rule" | "plan-mode" | "plan-file" | "mode" | "tier" | "protected-path";
 }
 
 /**
@@ -312,6 +328,16 @@ export function decide(params: DecideInput): Decision {
 
 	const tier = toolTier(toolName);
 	if (mode === "plan" && tier !== "safe" && !AUTO_ALLOWED_TOOLS.has(normalizeToolName(toolName))) {
+		// Plan mode's one writable file. This returns before the protected-path
+		// check, so the file being under ~/.claude works here; once plan mode is
+		// left the same write is an ordinary .claude-protected ask again.
+		const planFile = params.planFilePath;
+		if (planFile && isWritingTool(normalizeToolName(toolName)) && subject) {
+			const planTarget =
+				isPlanFilePath(subject, planFile, cwd) ||
+				(params.resolvedSubject ? isPlanFilePath(params.resolvedSubject, planFile, cwd) : false);
+			if (planTarget) return { decision: "allow", cause: "plan-file" };
+		}
 		return { decision: "deny", cause: "plan-mode" };
 	}
 

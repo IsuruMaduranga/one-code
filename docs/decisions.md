@@ -1443,3 +1443,46 @@ Verified live: the banner shows `subagents sonnet-5` from this machine's
 the reminder appears in the captured provider request with the resolved default
 and prices; and a real `subagent` run spawned its child on
 `anthropic/claude-sonnet-5`, resolved from the alias in the parent.
+
+## Plan mode is file-based, like current Claude Code
+
+Claude Code moved plan mode from "pass the plan as an ExitPlanMode parameter"
+to a **plan file**: entering plan mode allocates `~/.claude/plans/<slug>.md`,
+a per-turn system message names it as the one writable path and prescribes an
+explore→design→review→write→approve workflow, and ExitPlanMode takes no
+parameters — it reads the file. Observed live (the injected message was
+captured from a real Claude Code plan-mode session) and mirrored here: the plan
+survives compaction, the user can open/edit it, and long plans stop bloating
+tool calls and `ui.select` titles.
+
+**Who owns what.** Mode stays with `permissions`; the file belongs to
+`plan-mode`. Allocation happens in `before_agent_start` — the one hook that
+covers all three entry points (tool, ctrl+q, `defaultMode: "plan"`) and runs
+after every extension's `session_start`, so restoring the branch's previous
+path (a `plan-mode-file` custom entry, read via `getBranch()` like tasks/todo)
+can never race a fresh allocation. The path crosses to the matcher over a new
+`pincer:plan-file-path` channel, mirroring `pincer:set-permission-mode` in the
+other direction; `plan-mode` learns the mode from the existing
+`pincer:permission-status` channel rather than a shared module (jiti).
+
+**The reminder key moved.** `setMode` no longer emits plan mode's reminder;
+`plan-mode` re-emits under the same `"permission-mode"` key every turn, with
+`existsSync` flipping "create it at …" to "continue building …" the turn after
+the file appears. Every-turn re-emits replace by key, so nothing accumulates.
+
+**The carve-out allows outright.** In plan mode a write whose subject (or
+symlink-resolved subject) is the plan file returns `allow` before the
+protected-path check — `.claude/plans` would otherwise prompt — and everything
+else keeps denying. Outside plan mode the file has no special status, matching
+Claude Code. Deny rules still beat the carve-out.
+
+**Slug fidelity note.** Claude Code's real slugs start with the user's opening
+words plus two random words (`we-are-going-to-async-turtle.md`); pincer uses
+three random words. Deriving from the prompt was skipped — the slug is
+allocated before any user text is guaranteed to exist (ctrl+q, defaultMode).
+
+Verified live: an RPC run (no `--dangerously-skip-permissions`) showed a
+blocked ordinary write and an unprompted plan-file write in plan mode; a tmux
+TUI run exercised the scrollable approval viewer (scroll, choice switch,
+reject→stay-planning, Enter→approve→manual mode) and ctrl+q entry reusing the
+session's existing file.

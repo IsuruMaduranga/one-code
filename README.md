@@ -171,6 +171,16 @@ cycle only when the session was started with it; `dontAsk` (deny instead of
 prompting) is available via `--permission-mode dontAsk` or `defaultMode`.
 `manual` is accepted as an alias for `default` everywhere a mode is named.
 
+Plan mode is file-based, matching current Claude Code: entering it (tool,
+ctrl+q, or `defaultMode: "plan"`) assigns a plan file at
+`~/.claude/plans/<three-word-slug>.md` — the one path the model may write while
+everything else stays read-only — and an every-turn reminder carries that path
+plus the planning workflow. `exit_plan_mode` takes no parameters: it reads the
+plan file and shows it in a scrollable approval dialog (approve with manual
+approvals, approve with auto-accepted edits, or keep planning). The plan
+survives context compaction, and you can open or edit the file yourself while
+the model plans.
+
 **Auto mode** removes routine prompts without removing the boundary: instead of
 asking you, each tool call is screened by a classifier. `deny` rules are applied
 before it and `ask` rules always prompt, so those stay authoritative. Reads and
