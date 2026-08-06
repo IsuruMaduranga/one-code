@@ -38,6 +38,8 @@ export interface PluginResources {
 	commandsDir?: string;
 	skillsDir?: string;
 	mcpConfig?: string;
+	/** <plugin>/hooks/hooks.json when present — consumed by extensions/hooks. */
+	hooksConfig?: string;
 }
 
 interface InstalledEntry {
@@ -94,11 +96,13 @@ export function pluginResources(plugin: Plugin): PluginResources {
 		return existsSync(path) && statSync(path).isDirectory() ? path : undefined;
 	};
 	const mcpConfig = join(plugin.path, ".mcp.json");
+	const hooksConfig = join(plugin.path, "hooks", "hooks.json");
 	return {
 		agentsDir: dirIfExists("agents"),
 		commandsDir: dirIfExists("commands"),
 		skillsDir: dirIfExists("skills"),
 		mcpConfig: existsSync(mcpConfig) ? mcpConfig : undefined,
+		hooksConfig: existsSync(hooksConfig) ? hooksConfig : undefined,
 	};
 }
 

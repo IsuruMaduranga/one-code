@@ -29,6 +29,7 @@
       "extensions/branding/index.ts",
       "extensions/claude-compat/index.ts",
       "extensions/system-reminder/index.ts",
+      "extensions/hooks/index.ts",
       "extensions/tool-search/index.ts",
       "extensions/plugins/index.ts",
       "extensions/worktree/index.ts",

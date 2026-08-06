@@ -61,6 +61,18 @@ export function normalizeToolName(name: string): string {
 	return CC_TOOL_NAMES[lower] ?? lower;
 }
 
+/**
+ * Every Claude Code-style spelling that maps to this pincer tool name — the
+ * inverse of CC_TOOL_NAMES, used by extensions/hooks to test CC hook matchers
+ * ("Glob", "Task", …) against pincer tool names. Extending CC_TOOL_NAMES for
+ * a new tool keeps hook matching current automatically.
+ */
+export function ccAliasesForTool(pincerName: string): string[] {
+	return Object.entries(CC_TOOL_NAMES)
+		.filter(([, mapped]) => mapped === pincerName)
+		.map(([alias]) => alias);
+}
+
 export interface PermissionRule {
 	raw: string;
 	tool: string;

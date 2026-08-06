@@ -181,6 +181,26 @@ approvals, approve with auto-accepted edits, or keep planning). The plan
 survives context compaction, and you can open or edit the file yourself while
 the model plans.
 
+### Hooks
+
+Claude Code command hooks work unchanged: `PreToolUse`, `PostToolUse`,
+`UserPromptSubmit`, `SessionStart`, `Stop`, `SessionEnd`, `PreCompact`, and
+`PostCompact` hooks are read from your `~/.claude/settings.json`, from project
+`.claude/settings.json` / `.claude/settings.local.json`, and from plugins'
+`hooks/hooks.json`, with the same stdin JSON, exit-code semantics (exit 2
+blocks with stderr as the reason), and `hookSpecificOutput` envelope
+(`permissionDecision`, `updatedInput`, `additionalContext`). Matchers accept
+Claude Code tool names (`Bash`, `Edit|Write`, `Glob`, `Task`, …).
+
+Because project hooks are arbitrary code execution, they run only after a
+one-time consent prompt, remembered per project until the hook config changes
+(user-level and managed hooks always run; installing a plugin counts as
+consent for its hooks). A hook's `deny`/`ask` blocks the call, but `allow` is
+informational only — pincer's permission gate, protected paths, and auto-mode
+classifier still apply. `http`/`prompt`/`agent` hook types and the
+`Notification` event are not supported. `CC_HOOKS_DEBUG=1` traces every hook
+decision (`=2` also appends JSONL under `~/.pincer/hooks/`).
+
 **Auto mode** removes routine prompts without removing the boundary: instead of
 asking you, each tool call is screened by a classifier. `deny` rules are applied
 before it and `ask` rules always prompt, so those stay authoritative. Reads and
