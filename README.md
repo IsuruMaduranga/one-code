@@ -173,7 +173,7 @@ prompting) is available via `--permission-mode dontAsk` or `defaultMode`.
 
 Plan mode is file-based, matching current Claude Code: entering it (tool,
 ctrl+q, or `defaultMode: "plan"`) assigns a plan file at
-`~/.claude/plans/<three-word-slug>.md` — the one path the model may write while
+`~/.pincer/plans/<three-word-slug>.md` — the one path the model may write while
 everything else stays read-only — and an every-turn reminder carries that path
 plus the planning workflow. `exit_plan_mode` takes no parameters: it reads the
 plan file and shows it in a scrollable approval dialog (approve with manual

@@ -1,6 +1,6 @@
 /**
  * plan-mode extension — Claude Code's EnterPlanMode / ExitPlanMode tools,
- * file-based: the plan lives at ~/.claude/plans/<slug>.md, the one path plan
+ * file-based: the plan lives at ~/.pincer/plans/<slug>.md, the one path plan
  * mode may write. The path is announced to the model in an every-turn reminder
  * and to the permissions extension over the event bus, and exit_plan_mode
  * reads the file rather than taking the plan as a parameter.
@@ -15,10 +15,10 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { pincerStateDir } from "../lib/paths.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../permissions/modes.ts";
 import { buildPlanModeReminder } from "./reminder.ts";
@@ -31,7 +31,7 @@ export const PLAN_FILE_CHANNEL = "pincer:plan-file-path";
 /** Session entry type persisting the allocated path across resume/branch. */
 const PLAN_FILE_ENTRY = "plan-mode-file";
 
-const PLANS_DIR = () => join(homedir(), ".claude", "plans");
+const PLANS_DIR = () => join(pincerStateDir(), "plans");
 
 export default function planModeExtension(pi: ExtensionAPI) {
 	let currentMode = "default";

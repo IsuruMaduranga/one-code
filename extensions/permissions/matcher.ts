@@ -328,9 +328,8 @@ export function decide(params: DecideInput): Decision {
 
 	const tier = toolTier(toolName);
 	if (mode === "plan" && tier !== "safe" && !AUTO_ALLOWED_TOOLS.has(normalizeToolName(toolName))) {
-		// Plan mode's one writable file. This returns before the protected-path
-		// check, so the file being under ~/.claude works here; once plan mode is
-		// left the same write is an ordinary .claude-protected ask again.
+		// Plan mode's one writable file (~/.pincer/plans/<slug>.md, which
+		// protected-paths already excepts as working space).
 		const planFile = params.planFilePath;
 		if (planFile && isWritingTool(normalizeToolName(toolName)) && subject) {
 			const planTarget =

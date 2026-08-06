@@ -26,13 +26,18 @@ const PROTECTED_DIRS = [
 	".yarn",
 	".mvn",
 	".claude",
+	// pincer's own state dir — the deny-direction twin of protecting `.claude`:
+	// as generated state moves here, a write that reconfigures the gate must
+	// stay just as guarded in its new home.
+	".pincer",
 ];
 
 /**
- * `.claude/worktrees` is where the agent keeps its own git worktrees, so it is
- * ordinary working space rather than configuration.
+ * `.claude/worktrees` is where the agent keeps its own git worktrees, and
+ * `.pincer/plans` holds plan-mode documents (rendered to the user, never
+ * executed) — ordinary working space rather than configuration.
  */
-const PROTECTED_DIR_EXCEPTIONS = [".claude/worktrees"];
+const PROTECTED_DIR_EXCEPTIONS = [".claude/worktrees", ".pincer/plans"];
 
 const PROTECTED_FILES = new Set([
 	".gitconfig",

@@ -1447,7 +1447,7 @@ and prices; and a real `subagent` run spawned its child on
 ## Plan mode is file-based, like current Claude Code
 
 Claude Code moved plan mode from "pass the plan as an ExitPlanMode parameter"
-to a **plan file**: entering plan mode allocates `~/.claude/plans/<slug>.md`,
+to a **plan file**: entering plan mode allocates `~/.pincer/plans/<slug>.md`,
 a per-turn system message names it as the one writable path and prescribes an
 explore→design→review→write→approve workflow, and ExitPlanMode takes no
 parameters — it reads the file. Observed live (the injected message was
@@ -1471,10 +1471,11 @@ other direction; `plan-mode` learns the mode from the existing
 the file appears. Every-turn re-emits replace by key, so nothing accumulates.
 
 **The carve-out allows outright.** In plan mode a write whose subject (or
-symlink-resolved subject) is the plan file returns `allow` before the
-protected-path check — `.claude/plans` would otherwise prompt — and everything
+symlink-resolved subject) is the plan file returns `allow`, and everything
 else keeps denying. Outside plan mode the file has no special status, matching
-Claude Code. Deny rules still beat the carve-out.
+Claude Code. Deny rules still beat the carve-out. (`.pincer` itself is a
+protected dir like `.claude`; `.pincer/plans` is excepted as working space —
+plan documents are rendered to the user, never executed.)
 
 **Slug fidelity note.** Claude Code's real slugs start with the user's opening
 words plus two random words (`we-are-going-to-async-turtle.md`); pincer uses
@@ -1486,3 +1487,30 @@ blocked ordinary write and an unprompted plan-file write in plan mode; a tmux
 TUI run exercised the scrollable approval viewer (scroll, choice switch,
 reject→stay-planning, Enter→approve→manual mode) and ctrl+q entry reusing the
 session's existing file.
+
+## Own state, borrowed config: `.claude` is read-only, pincer writes to `~/.pincer`
+
+pincer sat in a three-way namespace muddle: pi owns `~/.pi` (sessions,
+models.json — harness plumbing, invisible, and untouchable without forking),
+`.claude` is Claude Code's directory, and pincer had started *generating*
+state into the latter (plan files at first; memory was already there at
+`~/.claude/projects/<slug>/memory`). Reading `.claude` deeply is the product —
+"your Claude Code setup works on any model" is the pitch, so settings, skills,
+commands, agents, plugins, and CLAUDE.md stay read-from-`.claude` forever. But
+*writing* into a namespace another product owns invites collisions: Claude
+Code also writes under `~/.claude/projects/<slug>/` and evolves that layout
+without notice, and a user auditing "what did Claude Code do" finds artifacts
+it didn't make.
+
+The policy, in one line: **`.claude` is a read-only compat surface; everything
+pincer generates goes to `~/.pincer`.** `extensions/lib/paths.ts` centralises
+both roots — `claudeConfigDir()` (honouring `CLAUDE_CONFIG_DIR`, which Claude
+Code itself supports and pincer previously ignored) and `pincerStateDir()`
+(honouring `PINCER_STATE_DIR`). Plan files moved to `~/.pincer/plans`
+immediately, while the feature was a day old. `.pincer` joined the protected
+dirs (the gate's own namespace must be as guarded in its new home as in the
+old), with `.pincer/plans` excepted as working space. Deliberately *not* done:
+a pincer-native settings schema (no demand yet — compat reads suffice), and
+the memory-dir migration, which has a real tradeoff (sharing memory with
+Claude Code on the same repo is arguably a feature) and waits on its own
+decision.

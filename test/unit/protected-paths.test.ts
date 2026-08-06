@@ -53,6 +53,11 @@ describe("isProtectedPath", () => {
 		expect(isProtectedPath(".claude/settings.local.json")).toBe(true);
 	});
 
+	it("protects .pincer like .claude, excepting only plan documents", () => {
+		expect(isProtectedPath("/home/u/.pincer/settings.json")).toBe(true);
+		expect(isProtectedPath("/home/u/.pincer/plans/brisk-otter-map.md")).toBe(false);
+	});
+
 	it("treats the directory itself as not-yet-a-write-target", () => {
 		// A protected match only counts when something lives under the directory.
 		expect(isProtectedPath(".git")).toBe(false);
