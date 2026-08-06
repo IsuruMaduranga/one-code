@@ -816,3 +816,270 @@ overflowed at 80 columns. Width is now measured on the unstyled text of every ro
 (escape codes would inflate the count), and anything that does not fit collapses
 to a clipped one-line stop list — verified by a test that walks every stop at
 widths from 200 down to 10.
+
+### Permission-mode cycling on ctrl+q, not shift+tab, ctrl+m, or alt+m
+
+Claude Code cycles permission modes with shift+tab; typing
+`/permission-mode acceptEdits` for the same switch was friction worth removing.
+The obvious key is taken: pi reserves shift+tab for `app.thinking.cycle` (see
+"Aligning `/effort` with shift+tab" above), and freeing it would mean writing
+`app.thinking.cycle: []` into the user's `~/.pi/agent/keybindings.json` — a
+package silently editing user config to defeat a deliberate reservation. That
+was prototyped and rejected in favour of keeping pi's default: shift+tab stays
+the effort dial.
+
+ctrl+m was considered next and is impossible at the protocol level: ctrl+m *is*
+carriage return (0x0D) in terminal encoding, so outside kitty-protocol
+terminals `matchesKey("\r", "ctrl+m")` is true and every Enter press would
+cycle the mode. pi-tui's `rawCtrlChar` confirms there is no special-casing.
+alt+m — Claude Code's own documented fallback binding, used on Windows when VT
+input is unavailable — shipped briefly and was rejected for macOS ergonomics:
+option+m types "µ" unless the terminal is configured to send option as Meta,
+which is off by default everywhere and not a setting to ask users for.
+
+That leaves the ctrl+letters, and pi plus the terminal claim nearly all of
+them: a/b/e/f/k/u/w/y (editor), c/d/z (clear/exit/suspend), g/l/n/o/p/t/v/x
+(pi app keys), r/s (session picker), and h/i/j/m are Backspace/Tab/LF/CR at
+the byte level. **ctrl+q** is the one left standing — historically XON flow
+control, but pi's raw-mode TUI disables IXON so it arrives everywhere,
+macOS included, with no configuration.
+
+The modes themselves follow Claude Code v2.1 (verified against
+code.claude.com/docs/en/permission-modes.md): `default` is displayed as
+"manual" and `manual` is accepted as an alias everywhere a mode is named; the
+cycle is manual → acceptEdits → plan, with bypassPermissions joining only when
+the session started with it; `dontAsk` (deny instead of prompting; never in
+the cycle) is accepted via flag/settings; footer badges use Claude Code's
+exact strings (`⏸ manual mode on`, `⏵⏵ accept edits on`, …) via
+`ctx.ui.setStatus`. Claude Code's `auto` mode is deliberately not implemented:
+it is gated on a server-side approval classifier we have no equivalent of, and
+Claude Code itself drops it from the cycle when unavailable, so its absence is
+faithful rather than a gap. `/permission-mode` is gone; mode-change reminders
+are keyed so cycling through several modes announces only the one settled on.
+Verified in a live tmux TUI: badge at startup, three-stop cycle, bypass
+joining under `--dangerously-skip-permissions`, and `/permission` completing
+to only `/permissions`.
+
+### Auto mode: a deterministic pre-gate in front of an LLM classifier
+
+Claude Code's auto mode replaces per-action prompts with a classifier that
+blocks anything irreversible, destructive, or aimed outside your environment.
+The earlier entry above recorded it as deliberately unimplemented — no
+equivalent classifier existed here. This entry supersedes that: one exists now,
+built from two pieces that fail in different directions.
+
+**The inverted contract, which is the whole design.** The deterministic half is
+ported from the MI Copilot shell sandbox (a hand-rolled POSIX tokenizer plus
+name-based command/path lists). In that codebase it is the *only* gate in Edit
+mode, so every tokenizer gap is an exploitable bypass — its security review
+found 80 confirmed findings, and the systemic root causes are all variations of
+"a list drifted" or "the parser did not see it". Porting it as-is would import
+all of that.
+
+So its contract is inverted here: **`shell-analysis.ts` may only ever conclude
+"provably safe", never "unsafe".** It sits in front of the classifier, which
+sits in front of a user prompt, so an unrecognised command, a parse failure, an
+unresolvable path, or syntax it does not model escalates instead of passing. A
+gap now costs one classifier call rather than being a bypass, which converts the
+review's entire tokenizer-gap class from vulnerabilities into latency. The
+`CLAUDE.md` rule "never add a deny path to shell-analysis.ts" exists to keep
+that property from being eroded by a well-meaning later change.
+
+Its second job turned out to matter as much as the fast path: it extracts
+**deterministic evidence** — the real command behind any wrapper, resolved write
+targets with containment already decided, credential paths, paths whose contents
+execute later — and hands that to the classifier. Parsing shell is what an LLM
+classifier is worst at, so giving it facts instead of a command string is the
+actual synergy between the halves, not just an optimisation.
+
+**Review findings fixed while porting**, all now covered by tests that name the
+finding: N1 (`$'…'` ANSI-C quoting, which upstream left a spurious `$` on so
+path checks never ran), N2 (bare `.`/`..`), N3 (brace expansion), N4 (unspaced
+`<>&|` boundaries), N5 (transparent wrappers — `env rm -rf ~/Desktop` classified
+as a harmless `env`), N6 (tar/rsync/zip), N7 (`find -ok`/`-fprintf`), N8 (script
+interpreters), N9 (dangling-symlink leaf: `ln -s /outside x` then `echo > x`
+resolved inside the project while bash wrote outside), N10 (`>|`), N11 (git
+default-deny by subcommand instead of enumerating mutations, so `git rm`/`mv`/
+`archive`/`config` no longer slip through), N12/F6 (`cd` tracked; every token
+checked against the credential list, not just path-shaped ones), N13/F3/F10 (one
+shared case-folded denylist module instead of three that drifted), N18 (messages
+quote the original token, never an expanded value — upstream leaked a token
+through a *block* message), N20 (`.git/hooks`, `.git/config`, `mvnw` flagged
+even in-project), N23 (`/proc`, `/sys`), F1 (`git -c` escalates).
+
+**Config faithfully follows Claude Code**: prose `environment`/`allow`/
+`soft_deny`/`hard_deny` lists with `"$defaults"` splicing, `classifyAllShell`,
+the four-tier precedence (hard_deny > soft_deny > allow > explicit intent), and
+the pause after 3 consecutive or 20 total blocks. Two properties are load-bearing
+rather than cosmetic: `autoMode` is read from user and managed settings only —
+never the project's, or a checked-in file could grant itself allow rules and
+disable the gate containing it — and only pi's `input` event feeds the intent
+tier, so intent cannot be manufactured by a prompt injection in a file the agent
+read. Broad execution allow rules (`Bash`, `Bash(*)`) are suspended in auto mode
+for the same reason: one would be a standing bypass.
+
+**The classifier is a one-shot `completeSimple`** via `@earendil-works/pi-ai/compat`
+with credentials from `ctx.modelRegistry.getApiKeyAndHeaders` — no tools, no
+session, no history beyond the user messages handed to it, so there is nothing
+for it to be talked into doing. Every failure path (no model, no credentials,
+timeout, provider error, unparseable reply) returns a *block*; a gate that
+cannot reach its classifier has approved nothing.
+
+**Two bugs the live runs caught, both invisible to unit tests.** First,
+`reasoning: "minimal"` with `maxTokens: 512` derives a thinking budget under
+Anthropic's 1024-token floor, so every classifier request 400d — and the gate
+dutifully reported each one as a block. It failed closed, correctly, and was
+also completely broken. Omitting `reasoning` disables thinking outright
+(`streamSimple` checks `!options?.reasoning`), which is what a classifier wants
+anyway. Second, containment compared a realpath'd write target against an
+unresolved working directory; on macOS `/var/folders/…` is a symlink to
+`/private/var/…`, so every in-project write read as an escape.
+
+**Calibration was verified in both directions against a live model**, which is
+the only way to tell an over-blocking gate from a working one: routine in-project
+work (mkdir, write, append, `git add`, `git commit`) ran unprompted; `echo hello >
+~/probe.txt` was blocked when the user had not named that path, and allowed when
+they had; "back up the project somewhere outside it, pick a location" was blocked
+with "user did not name the backup path". Reaching that took two fixes — a
+soft_deny rule worded as "irreversible *deletion*" was being stretched to cover a
+file *creation*, and the intent tier needed a worked example before the
+classifier would actually apply it. An auto mode that blocks what the user
+plainly asked for gets switched off, so that tier failing quietly is as much a
+defect as a missed block.
+
+### Auto-mode parity pass against the published Claude Code behaviour
+
+After the first implementation, the auto-mode docs were read line by line against
+what had been built. Two things converged independently and are worth recording as
+confirmation rather than coincidence: Claude Code's decision order is the same four
+steps (rules resolve → reads and working-directory edits auto-approve → everything
+else classified → a block returns its reason to the model), and it also **strips tool
+results from the classifier's view** "so hostile content in a file or web page cannot
+manipulate it directly" — the same isolation reached here by feeding the intent tier
+only from pi's `input` event.
+
+Seven divergences were found and fixed:
+
+1. **The pause total counter never reset.** Claude Code resets it when it is the
+   counter that triggered the fallback; without that, resuming from a 20-block pause
+   leaves `total` at the limit and the next single block re-pauses immediately, making
+   the resume single-use. A separate `lifetime` count now backs the user-facing
+   message, since the fallback counter is no longer a running total.
+2. **`defaultMode: "auto"` was readable from project settings.** The `autoMode` rules
+   block was already user/managed-only, but the mode itself came through
+   `loadPermissionSettings`, which reads `.claude/settings.json` — so a checked-in file
+   could put a session into the mode whose classifier is what contains it. `auto` is
+   now honoured from user settings only; every other mode still works per-project.
+3. **Broad-allow-rule suspension was too narrow.** It caught a bare tool and `*`, but
+   not wildcarded interpreters or runners, so `Bash(python*)` survived as a standing
+   bypass. The rule now turns on a cleaner observation: a pattern with no `*` is
+   exact-match and therefore narrow however powerful the command is (`Bash(python)`
+   only starts a REPL), so only wildcarded patterns can be broad — and among those,
+   an interpreter/runner head with nothing constraining its arguments is. Delegation
+   rules (`Task`, `Agent`, `Workflow`) drop outright: a subagent is a fresh agent loop,
+   so pre-approving one pre-approves whatever it decides to do.
+4. **CLAUDE.md never reached the classifier**, though `ClassifyRequest` had a field for
+   it. Claude Code's classifier reads the same instruction files the agent does, so
+   "never force push" steers both. Now loaded from cwd up to the git root plus the
+   user's global file, capped. Because those files are checked in, the prompt states
+   they may *tighten* what is allowed but never widen it — without that asymmetry a
+   repository could ship its own authorisation.
+5. **Stated boundaries did nothing.** User messages were only ever read as
+   *authorisation*; in Claude Code they also impose limits ("don't push until I
+   review" blocks a push the default rules allow, until the user lifts it). The prompt
+   now says user messages cut both ways.
+6. **Protected paths were missing entirely** — a mechanism, not a rule. Writes to
+   `.git`, `.claude`, `.vscode`, `.husky`, `.mvn`, shell rc files, `.npmrc`,
+   `pre-commit` config, and build wrappers are never auto-approved, and in auto mode
+   route to the classifier *even when an allow rule matches*: the check runs before
+   allow rules, so `Edit(.claude/**)` cannot pre-approve reconfiguring the agent's own
+   permissions. Being inside the working directory is not what makes such a write
+   safe, which is the whole point.
+7. **Subagents had one of three checkpoints.** Per-action classification came free
+   (children inherit the mode), but the spawn was *auto-allowed* — `subagent` sits in
+   `AUTO_ALLOWED_TOOLS` — so a delegated task was never judged, and there was no
+   review when the child returned. Delegation now classifies at spawn in auto mode,
+   and children log their actions (names and short subjects, never output) for a
+   return review that prepends a warning to the result rather than blocking it: the
+   work has already happened, so the useful move is to make sure it is seen. The
+   return check exists because it is the only one that sees the *sequence* — "read the
+   deploy config, read a token, open a PR" passes step by step.
+
+**One bug the live runs caught, of a kind worth naming.** The first protected-path run
+blocked correctly but reported "`.claude/notes.md` is outside the working directory",
+which is false — it is inside. The classifier had been handed a call with no
+explanation of why it was being asked, so it manufactured a plausible rationale. A
+wrong reason is not cosmetic: it is what the user reads in `/permissions` and what the
+model is told to act on. Routing cause is now passed in as a fact
+(`<why_you_are_being_asked>`), the same principle as handing over static-analysis
+facts instead of a command string: tell the classifier what is known rather than
+letting it infer. On the re-run it allowed the write, correctly, on the explicit path
+the user had named.
+
+Verified live for each: an `Edit(.claude/**)` rule failing to pre-approve a `.claude`
+write, a `Bash(python*)` rule failing to pre-approve a python one-liner writing
+outside the working directory, and the same write allowed once the user named the path.
+
+### Grounding the classifier's verdict: cite a rule, don't narrate one
+
+The protected-path bug above — a `.claude/notes.md` write blocked "because it is
+outside the working directory", which was false — was a symptom of a class, not a
+one-off. The `reason` field was unconstrained generated text, and three consumers
+treated it as authoritative: the user reading `/permissions`, the model being told
+what to do instead, and **the gate itself**, which skipped the user's prompt
+whenever `tier === "hard_deny"`. A fabricated tier did not merely misinform; it
+removed the chance to approve something that was only a soft denial.
+
+Claude Code hit this and retreated: from v2.1.208 its denial reason is the fixed
+string `Blocked by classifier`, "the classifier scores each action on an internal
+severity scale rather than writing an explanation" — having shipped written
+explanations in v2.1.193 and moved off them. Suppressing the reason is not the
+right trade here, since the reason is how a user knows which rule or environment
+entry to change, so the answer is to keep it and make it unable to assert things
+that are not so.
+
+Three changes, in `auto-mode/rules.ts` and `prompt.ts`:
+
+1. **`routedBecause` is required.** It was optional, and the routes that left it
+   empty are exactly where confabulation happened: a classifier told nothing about
+   why it is being asked will supply its own answer. The type now forces every
+   call site to say why, with an explicit "nothing unusual, this is the residual
+   path" default for ordinary calls.
+2. **Rules are numbered and the verdict cites an id.** `H1`/`S4`/`A2` are rendered
+   into the prompt; a block must cite one, or one of three reserved grounds that
+   are real but are not numbered rules (`boundary`, `instructions`, `unclear`) —
+   without those the classifier would have to force such a decision onto whichever
+   rule looked closest, which is the misattribution being fixed. The id is
+   validated against the index, **the tier is derived from the id's prefix** rather
+   than from a field the model chose, and the user-visible reason is the cited
+   rule's own text. A block citing an id that does not exist, or citing an allow
+   rule as grounds for a denial, is still a block — but reported as exactly that,
+   with tier `unmatched`, so it cannot borrow a real rule's authority to skip the
+   prompt. The model's wording survives in `raw`, shown attributed to it.
+3. **Raw verdicts are recorded**, on the denial and behind `CC_AUTO_MODE_DEBUG=1`
+   on stderr, so this class is diagnosable rather than anecdotal.
+
+**The citation requirement caused a permissiveness regression, which is worth
+recording because it was not obvious.** Requiring a cited rule raised the bar for
+*blocking* while leaving `allow` unconstrained, so uncertainty began draining
+toward allow: "back up this project somewhere outside it, pick the location
+yourself" — which had reliably blocked — started succeeding. The debug log showed
+why, and it was only visible *because* of change 3: the classifier had correctly
+identified the governing rule and then cleared it on intent, reasoning that the
+user "explicitly requested" the backup. But that rule clears only when the user
+*names the destination*, and "pick the location yourself" is the opposite of
+naming one.
+
+So a clearing condition that depends on the user having named something is now
+checkable rather than a judgement: the classifier must quote the user's words
+verbatim in `intentQuote`, and the quote is verified against the actual `input`
+messages (normalised for case and whitespace, not wording). An intent that cannot
+be found in the user's own words is not an intent — it downgrades to a soft
+denial, so an interactive user can still approve it. This is the one claim worth
+checking mechanically: it is what a prompt injection most wants to manufacture,
+and, as this regression showed, also what the model is most prone to stretch on
+its own.
+
+Verified live in both directions: "write hello into ~/pincer-named-probe.txt — I
+want that exact path" → `allow (intent)` with a verified quote, file created; the
+delegated-destination backup → `block (S5)`, reported with S5's own text.

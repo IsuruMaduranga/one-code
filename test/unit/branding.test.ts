@@ -19,7 +19,7 @@ describe("bannerLines", () => {
 			"/effort effort + ultracode",
 			"ctrl+l model",
 			"ctrl+p cycle model",
-			"/permission-mode mode",
+			"ctrl+q permission mode",
 			"ctrl+t thinking blocks",
 			"ctrl+o tool output",
 			"ctrl+g external editor",

@@ -9,9 +9,11 @@
 
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
+import { isProtectedPath, isWritingTool } from "./protected-paths.ts";
 
-export type PermissionMode = "default" | "acceptEdits" | "plan" | "bypassPermissions";
-export type PermissionDecision = "allow" | "deny" | "ask";
+export type PermissionMode = "default" | "acceptEdits" | "plan" | "bypassPermissions" | "dontAsk" | "auto";
+/** "classify" is auto mode's outcome: hand the call to the approval classifier. */
+export type PermissionDecision = "allow" | "deny" | "ask" | "classify";
 
 /** Claude Code tool name (lowercased) → pincer tool name. */
 const CC_TOOL_NAMES: Record<string, string> = {
@@ -219,6 +221,8 @@ export interface DecideInput {
 	deny: PermissionRule[];
 	ask: PermissionRule[];
 	allow: PermissionRule[];
+	/** Auto mode: route every shell command through the classifier, ignoring narrow Bash allow rules. */
+	classifyAllShell?: boolean;
 }
 
 export interface Decision {
@@ -226,11 +230,72 @@ export interface Decision {
 	/** Rule that determined the outcome, when one did. */
 	rule?: PermissionRule;
 	/** Why, for deny/ask decisions surfaced to the model or user. */
-	cause: "rule" | "plan-mode" | "mode" | "tier";
+	cause: "rule" | "plan-mode" | "mode" | "tier" | "protected-path";
+}
+
+/**
+ * Tools that launch a fresh agent loop. In auto mode these are classified
+ * rather than auto-allowed, so the delegated task is judged before the child
+ * starts — a child cannot be trusted to refuse a task its parent should not have
+ * handed it, and Claude Code evaluates the task description at spawn time for
+ * the same reason. Outside auto mode they stay auto-allowed: each child enforces
+ * its own permissions by inheriting the mode.
+ */
+const DELEGATION_TOOLS = new Set(["subagent", "workflow"]);
+
+/**
+ * Interpreters and runners whose arguments are code, so a wildcarded rule over
+ * them (`Bash(python*)`, `Bash(npm run *)`) grants arbitrary execution just as
+ * surely as `Bash(*)` does.
+ */
+const INTERPRETERS_AND_RUNNERS =
+	/^(python[0-9.]*|python3|node|deno|bun|ruby|perl|php|osascript|bash|sh|zsh|fish|pwsh|powershell|eval|exec|env|xargs|nohup|setsid|timeout|make|npx|pnpx|yarn|npm|pnpm|bunx|uv|uvx|pip[0-9]*|poetry|cargo|go|dotnet|java|mvn|gradle|docker|kubectl|ssh)\b/;
+
+/**
+ * An allow rule broad enough to grant arbitrary code execution. Auto mode
+ * suspends these — a blanket `Bash` or a wildcarded interpreter would otherwise
+ * hand the model a standing way past the classifier, which is the one thing auto
+ * mode exists to prevent. Narrow rules (`Bash(npm test:*)`) still resolve before
+ * the classifier unless `classifyAllShell` is set.
+ *
+ * Matches Claude Code's list: blanket `Bash(*)`/`PowerShell(*)`, wildcarded
+ * interpreters, package-manager run commands, and `Agent`/`Task` rules.
+ */
+export function isBroadExecutionRule(rule: PermissionRule): boolean {
+	// Delegation rules are dropped outright: a subagent is a fresh agent loop, so
+	// pre-approving one pre-approves whatever that loop decides to do.
+	if (rule.tool === "subagent" || rule.tool === "workflow") return true;
+	if (rule.tool !== "bash") return false;
+
+	if (!rule.pattern) return true;
+	const pattern = rule.pattern.trim().toLowerCase();
+	// Without a wildcard the rule matches one exact command, which is narrow by
+	// construction however powerful that command is — `Bash(python)` only ever
+	// starts a bare REPL.
+	if (!pattern.includes("*")) return false;
+	if (/^(\*|:\*|\*\*)$/.test(pattern)) return true;
+
+	const head = pattern.split(/[\s*]/)[0] ?? "";
+	if (!INTERPRETERS_AND_RUNNERS.test(head)) return false;
+
+	const rest = pattern.slice(head.length).trim();
+	// Nothing constrains the arguments: `python*`, `node *`, `npm *`.
+	if (/^[:\s]*\*+$/.test(rest)) return true;
+	// The runner's own escape hatch takes arbitrary code: `npm run *`, `npx *`.
+	if (/^(run|exec|x)[:\s]*\*+$/.test(rest)) return true;
+	// `npm test:*` names the script, so it stays narrow.
+	return false;
 }
 
 export function decide(params: DecideInput): Decision {
 	const { toolName, subject, cwd, mode, deny, ask, allow } = params;
+
+	// In dontAsk mode anything that would prompt is denied instead — including
+	// explicit ask rules: there is no user to put the question to.
+	const askOrDeny = (rule?: PermissionRule): Decision => {
+		if (mode === "dontAsk") return { decision: "deny", rule, cause: "mode" };
+		return { decision: "ask", rule, cause: rule ? "rule" : "tier" };
+	};
 
 	const denyRule = deny.find((r) => ruleMatches(r, toolName, subject, cwd));
 	if (denyRule) return { decision: "deny", rule: denyRule, cause: "rule" };
@@ -242,16 +307,44 @@ export function decide(params: DecideInput): Decision {
 		return { decision: "deny", cause: "plan-mode" };
 	}
 
+	// An explicit ask rule is the user's stated intent to be prompted, so it wins
+	// over auto mode too: the classifier never gets to auto-approve a match.
 	const askRule = ask.find((r) => ruleMatches(r, toolName, subject, cwd));
-	if (askRule) return { decision: "ask", rule: askRule, cause: "rule" };
+	if (askRule) return askOrDeny(askRule);
 
-	const allowRule = allow.find((r) => ruleMatches(r, toolName, subject, cwd));
+	// Protected-path writes are checked *before* allow rules, so an
+	// `Edit(.claude/**)` entry cannot pre-approve reconfiguring the agent's own
+	// permissions or planting a git hook. In auto mode they go to the classifier.
+	const tool = normalizeToolName(toolName);
+	if (isWritingTool(tool) && subject && isProtectedPath(subject, cwd)) {
+		if (mode === "dontAsk") return { decision: "deny", cause: "protected-path" };
+		if (mode === "auto") return { decision: "classify", cause: "protected-path" };
+		return { decision: "ask", cause: "protected-path" };
+	}
+
+	const usableAllow =
+		mode === "auto"
+			? allow.filter((rule) => {
+					if (isBroadExecutionRule(rule)) return false;
+					if (params.classifyAllShell && rule.tool === "bash") return false;
+					return true;
+				})
+			: allow;
+	const allowRule = usableAllow.find((r) => ruleMatches(r, toolName, subject, cwd));
 	if (allowRule) return { decision: "allow", rule: allowRule, cause: "rule" };
 
-	if (tier === "safe" || AUTO_ALLOWED_TOOLS.has(normalizeToolName(toolName))) {
+	if (mode === "auto" && DELEGATION_TOOLS.has(tool)) {
+		return { decision: "classify", cause: "mode" };
+	}
+
+	if (tier === "safe" || AUTO_ALLOWED_TOOLS.has(tool)) {
 		return { decision: "allow", cause: "tier" };
 	}
 	if (tier === "edit" && mode === "acceptEdits") return { decision: "allow", cause: "mode" };
 
-	return { decision: "ask", cause: "tier" };
+	// Everything left over goes to the classifier in auto mode, and to the user
+	// in every other mode.
+	if (mode === "auto") return { decision: "classify", cause: "mode" };
+
+	return askOrDeny();
 }

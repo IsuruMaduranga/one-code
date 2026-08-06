@@ -13,6 +13,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import { basename, join } from "node:path";
+import { type ChildAction, recordAction } from "../auto-mode/actions.ts";
 import type { AgentDefinition } from "./agents.ts";
 import { RpcTurnTracker, toMainMessage } from "./rpc-turns.ts";
 import { addUsage, emptyUsage, type UsageTotals } from "./usage.ts";
@@ -84,6 +85,12 @@ export interface ChildOutcome {
 	toolCalls: number;
 	usage: UsageTotals;
 	failed?: boolean;
+	/**
+	 * What the child actually did, names and short subjects only. Auto mode
+	 * reviews this when the child returns, to catch a sequence whose individual
+	 * steps each passed. Never carries tool output — see auto-mode/actions.ts.
+	 */
+	actions: ChildAction[];
 }
 
 export interface ChildHandle {
@@ -107,6 +114,7 @@ export function startChild(options: ChildOptions): ChildHandle {
 	let buffer = "";
 	let finalText = "";
 	let toolCalls = 0;
+	const actions: ChildAction[] = [];
 	let stderr = "";
 	const usage = emptyUsage();
 
@@ -126,6 +134,8 @@ export function startChild(options: ChildOptions): ChildHandle {
 			if (toMain) options.onMessageToMain?.(toMain.message, toMain.summary);
 		} else if (event.type === "tool_execution_start") {
 			toolCalls++;
+			const start = event as { toolName?: string; args?: unknown };
+			if (start.toolName) recordAction(actions, start.toolName, start.args);
 			onProgress(toolCalls, finalText, usage);
 		} else if (event.type === "message_end" && event.message?.role === "assistant") {
 			addUsage(usage, event.message.usage);
@@ -154,7 +164,7 @@ export function startChild(options: ChildOptions): ChildHandle {
 
 		child.on("error", (error) => {
 			signal?.removeEventListener("abort", onAbort);
-			resolve({ output: `Failed to start subagent: ${error.message}`, toolCalls, usage, failed: true });
+			resolve({ output: `Failed to start subagent: ${error.message}`, toolCalls, usage, actions, failed: true });
 		});
 
 		child.on("close", (code, closeSignal) => {
@@ -162,7 +172,7 @@ export function startChild(options: ChildOptions): ChildHandle {
 			if (buffer.trim()) processLine(buffer);
 			const output = finalText.slice(0, OUTPUT_CAP);
 			if (output.trim()) {
-				resolve({ output, toolCalls, usage });
+				resolve({ output, toolCalls, usage, actions });
 				return;
 			}
 			const why = closeSignal ? `terminated by ${closeSignal}` : `exit code ${code}`;
@@ -171,6 +181,7 @@ export function startChild(options: ChildOptions): ChildHandle {
 				output: `Subagent produced no output (${why}).${detail ? `\n${detail}` : ""}`,
 				toolCalls,
 				usage,
+				actions,
 				failed: true,
 			});
 		});
@@ -272,12 +283,13 @@ export function startRpcChild(options: RpcChildOptions): RpcChildHandle {
 
 	const turnOutcome = (): ChildOutcome => {
 		const output = tracker.turnText.slice(0, OUTPUT_CAP);
-		if (output.trim()) return { output, toolCalls: tracker.toolCalls, usage: tracker.usage };
+		if (output.trim()) return { output, toolCalls: tracker.toolCalls, usage: tracker.usage, actions: tracker.actions };
 		const detail = stderr.trim().split("\n").slice(-5).join("\n");
 		return {
 			output: `Subagent produced no output.${detail ? `\n${detail}` : ""}`,
 			toolCalls: tracker.toolCalls,
 			usage: tracker.usage,
+			actions: tracker.actions,
 			failed: true,
 		};
 	};
@@ -292,6 +304,7 @@ export function startRpcChild(options: RpcChildOptions): RpcChildHandle {
 				output: `Subagent exited mid-turn.${detail ? `\n${detail}` : ""}`,
 				toolCalls: tracker.toolCalls,
 				usage: tracker.usage,
+				actions: tracker.actions,
 				failed: true,
 			});
 		}

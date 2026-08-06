@@ -41,6 +41,44 @@ describe("loadPermissionSettings", () => {
 		expect(s.defaultMode).toBe("acceptEdits");
 	});
 
+	it("accepts Claude Code's manual alias and dontAsk for defaultMode", () => {
+		write(join(cwd, ".claude", "settings.json"), { permissions: { defaultMode: "manual" } });
+		expect(loadPermissionSettings(cwd, home).defaultMode).toBe("default");
+		write(join(cwd, ".claude", "settings.json"), { permissions: { defaultMode: "dontAsk" } });
+		expect(loadPermissionSettings(cwd, home).defaultMode).toBe("dontAsk");
+	});
+
+	it("accepts auto as a defaultMode from user settings", () => {
+		write(join(home, ".claude", "settings.json"), { permissions: { defaultMode: "auto" } });
+		expect(loadPermissionSettings(cwd, home).defaultMode).toBe("auto");
+	});
+
+	it("ignores defaultMode auto from project and local settings", () => {
+		// Both files live in the repo, so honouring `auto` there would let a
+		// checked-in file put the session into the mode whose classifier contains it.
+		for (const file of ["settings.json", "settings.local.json"]) {
+			write(join(cwd, ".claude", file), { permissions: { defaultMode: "auto" } });
+			expect(loadPermissionSettings(cwd, home).defaultMode, file).toBeUndefined();
+			rmSync(join(cwd, ".claude", file));
+		}
+	});
+
+	it("still honours other modes from project settings", () => {
+		write(join(cwd, ".claude", "settings.json"), { permissions: { defaultMode: "plan" } });
+		expect(loadPermissionSettings(cwd, home).defaultMode).toBe("plan");
+	});
+
+	it("does not let a project file downgrade user-set auto to nothing", () => {
+		write(join(home, ".claude", "settings.json"), { permissions: { defaultMode: "auto" } });
+		write(join(cwd, ".claude", "settings.json"), { permissions: { allow: ["Read"] } });
+		expect(loadPermissionSettings(cwd, home).defaultMode).toBe("auto");
+	});
+
+	it("ignores unknown defaultMode values", () => {
+		write(join(cwd, ".claude", "settings.json"), { permissions: { defaultMode: "turbo" } });
+		expect(loadPermissionSettings(cwd, home).defaultMode).toBeUndefined();
+	});
+
 	it("tolerates missing and malformed files", () => {
 		writeFileSync(join(cwd, ".claude", "settings.json"), "{not json");
 		const s = loadPermissionSettings(cwd, home);

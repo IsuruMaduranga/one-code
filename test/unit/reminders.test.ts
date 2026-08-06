@@ -32,6 +32,14 @@ describe("ReminderQueue", () => {
 		expect(q.drain()).toEqual(["v2"]);
 	});
 
+	it("replaces keyed next-turn reminders, keeping the latest in queue order", () => {
+		const q = new ReminderQueue();
+		q.enqueue("mode is acceptEdits", { key: "mode" });
+		q.enqueue("unrelated");
+		q.enqueue("mode is plan", { key: "mode" });
+		expect(q.drain()).toEqual(["unrelated", "mode is plan"]);
+	});
+
 	it("ignores empty text", () => {
 		const q = new ReminderQueue();
 		q.enqueue("  ");

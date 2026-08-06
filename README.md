@@ -75,8 +75,8 @@ pi --model ollama/qwen3-coder      # any provider in ~/.pi/agent/models.json
 
 | Command | What it does |
 |---|---|
-| `/permissions` | Show the current mode and loaded rules |
-| `/permission-mode <mode>` | Switch mode: `default`, `acceptEdits`, `plan`, `bypassPermissions` |
+| `/permissions` | Show the current mode, loaded rules, and recent auto-mode denials |
+| `/auto-mode [defaults\|config]` | Built-in vs effective classifier rules |
 | `/allow <rule>` | Persist an allow rule, e.g. `/allow Bash(npm test:*)` (add `global` for user scope) |
 | `/agents`, `/skills`, `/todos` | List available agents, skills, current todos |
 | `/effort` | Reasoning effort slider, including `ultracode` (xhigh + workflows) |
@@ -161,6 +161,69 @@ Everything is read from Claude Code's locations, so there is nothing new to lear
 ```
 
 Claude Code's PascalCase tool names are mapped automatically (`Bash`, `Glob`, `WebFetch`, `Task`, …), so rules you already have keep working. `deny` beats everything, including `bypassPermissions`.
+
+**ctrl+q** cycles the permission mode — manual → accept edits → plan → auto —
+with a footer badge showing where you are (`⏸ manual mode on`, `⏵⏵ accept edits
+on`, `⏸ plan mode on`, `⏵⏵ auto mode on`). Claude Code puts this cycle on
+shift+tab, but pi reserves that key for the thinking dial, so pincer uses the
+one ctrl+letter both pi and terminals leave free. `bypassPermissions` joins the
+cycle only when the session was started with it; `dontAsk` (deny instead of
+prompting) is available via `--permission-mode dontAsk` or `defaultMode`.
+`manual` is accepted as an alias for `default` everywhere a mode is named.
+
+**Auto mode** removes routine prompts without removing the boundary: instead of
+asking you, each tool call is screened by a classifier. `deny` rules are applied
+before it and `ask` rules always prompt, so those stay authoritative. Reads and
+in-project work go through untouched; writes outside the working directory,
+credential paths, force pushes, production deploys, and `curl | bash` get
+stopped — unless your own message named the operation and its target, which
+clears the rules marked as clearable. After 3 consecutive or 20 total blocks
+auto mode pauses and prompts instead; approving a prompt resumes it.
+
+Some paths are never auto-approved in any mode but `bypassPermissions`, however
+your rules are written: `.git`, `.claude`, `.vscode`, `.husky`, `.mvn`, shell rc
+files, `.npmrc`, pre-commit config, and build wrappers like `mvnw`. Writes there
+take effect later without further approval, so the check runs *before* allow
+rules — an `Edit(.claude/**)` rule cannot pre-approve rewriting this agent's own
+permissions. In auto mode they route to the classifier; in manual and accept-edits
+they prompt.
+
+Subagents are checked at three points in auto mode: the delegated task before the
+child starts, each of the child's own actions (it inherits the mode), and the
+child's action list when it returns — that last one catches a sequence whose
+individual steps each passed, and prepends a warning to the result rather than
+blocking work that has already happened.
+
+Shell commands hit a deterministic pre-gate first. It can only ever conclude
+"provably safe" — never "unsafe" — so plainly read-only commands skip the
+classifier entirely, and anything it cannot clear goes to the classifier with
+the facts it extracted (resolved write targets, whether they escape the working
+directory, credential paths, the real command behind any wrapper).
+
+Configure it in `~/.claude/settings.json`, using Claude Code's `autoMode` schema:
+
+```json
+{
+  "autoMode": {
+    "environment": ["$defaults", "Source control: github.example.com/acme-corp"],
+    "allow": ["$defaults", "Deploying to the staging namespace is allowed"],
+    "soft_deny": ["$defaults", "Never run migrations outside the migrations CLI"],
+    "hard_deny": ["$defaults"],
+    "classifyAllShell": false
+  }
+}
+```
+
+Rules are prose, not patterns — the classifier reads them as instructions.
+`"$defaults"` splices the built-in rules in at that position; omitting it
+replaces that list entirely. `classifyAllShell: true` sends every shell command
+to the classifier, ignoring narrow `Bash(...)` allow rules (broad ones like
+`Bash(*)` are always suspended in auto mode). `/auto-mode defaults` prints the
+built-in rules and `/auto-mode config` prints what is actually in effect.
+
+`autoMode` is read from user and managed settings only, never from the project's
+`.claude/settings.json` — otherwise a checked-in file could grant itself allow
+rules and switch off the gate meant to contain it.
 
 **Project instructions** — `CLAUDE.md` (or `AGENTS.md`), discovered from the working directory upward.
 

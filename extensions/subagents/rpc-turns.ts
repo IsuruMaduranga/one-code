@@ -6,6 +6,7 @@
  * caller when it must act (answer a UI request, settle a pending turn).
  */
 
+import { type ChildAction, recordAction } from "../auto-mode/actions.ts";
 import { addUsage, emptyUsage, type UsageTotals } from "./usage.ts";
 
 export type RpcAction =
@@ -34,6 +35,8 @@ export function toMainMessage(event: unknown): { message: string; summary?: stri
 
 export class RpcTurnTracker {
 	toolCalls = 0;
+	/** What the child did this turn, for auto mode's return review. */
+	actions: ChildAction[] = [];
 	readonly usage: UsageTotals = emptyUsage();
 	/** Final assistant text of the turn in progress (or the last finished one). */
 	turnText = "";
@@ -51,6 +54,9 @@ export class RpcTurnTracker {
 	beginTurn(): void {
 		this.busy = true;
 		this.turnText = "";
+		// Per turn, not per session: the review that reads this judges the work of
+		// the turn that just finished.
+		this.actions = [];
 	}
 
 	process(line: string): RpcAction | undefined {
@@ -72,9 +78,12 @@ export class RpcTurnTracker {
 			case "agent_start":
 				this.streaming = true;
 				return { kind: "stream_start" };
-			case "tool_execution_start":
+			case "tool_execution_start": {
 				this.toolCalls++;
+				const start = event as { toolName?: string; args?: unknown };
+				if (start.toolName) recordAction(this.actions, start.toolName, start.args);
 				return { kind: "progress" };
+			}
 			case "message_end": {
 				if (event.message?.role !== "assistant") return undefined;
 				addUsage(this.usage, event.message.usage);

@@ -59,7 +59,9 @@ const HINT_LINES: [key: string, what: string][][] = [
 		["/effort", "effort + ultracode"],
 		["ctrl+l", "model"],
 		["ctrl+p", "cycle model"],
-		["/permission-mode", "mode"],
+		// Claude Code cycles permission modes on shift+tab; pi owns that key, and
+		// ctrl+q is the one ctrl+letter both pi and terminals leave free.
+		["ctrl+q", "permission mode"],
 		["ctrl+t", "thinking blocks"],
 		["ctrl+o", "tool output"],
 	],

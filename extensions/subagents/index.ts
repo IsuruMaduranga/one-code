@@ -21,10 +21,12 @@ import { fileURLToPath } from "node:url";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../auto-mode/actions.ts";
 import { type AgentDefinition, type AgentSource, agentDirs, discoverAgents } from "./agents.ts";
 import { discoverPlugins } from "../lib/plugins.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { type BackgroundTask, generateTaskId, TASK_REGISTER_CHANNEL } from "../background/registry.ts";
+import { type ChildAction } from "../auto-mode/actions.ts";
 import {
 	type ChildHandle,
 	type ChildOutcome,
@@ -64,6 +66,8 @@ interface TaskResult {
 	failed?: boolean;
 	worktreePath?: string;
 	worktreeKept?: boolean;
+	/** What the child did, for auto mode's return review. */
+	actions?: ChildAction[];
 }
 
 const TaskShape = Type.Object({
@@ -280,7 +284,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			"Delegate a task to a specialist agent that runs in its own context window and reports back. Use it for well-scoped work whose intermediate output you don't need — broad codebase searches, focused reviews, independent research. Give a complete, self-contained task: the agent cannot ask follow-up questions. Pass `tasks` to run several in parallel, `agent: \"fork\"` for a child that inherits this conversation, `isolation: \"worktree\"` when parallel agents will edit files, or `run_in_background: true` to keep working while it runs (completion arrives as a notification; manage with task_output/task_stop). Each run gets a name — continue a finished agent later with send_message. Use action:'list' to see available agents.",
 		promptSnippet: "subagent - delegate scoped work to a specialist agent in its own context",
 		parameters: SubagentParams,
-		async execute(_toolCallId, params, signal, onUpdate, ctx) {
+		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			const agents = loadAgents(ctx.cwd);
 
 			if (params.action === "list" || (!params.agent && !params.tasks)) {
@@ -501,6 +505,14 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						: `${r.output}${worktreeNote}\n\n(${stats})`;
 				})
 				.join("\n\n---\n\n");
+
+			// Auto mode reviews what a child actually did once it returns, catching a
+			// sequence whose individual steps each passed. Emitted rather than
+			// checked here: the permission gate owns the classifier.
+			pi.events.emit(SUBAGENT_ACTIONS_CHANNEL, {
+				toolCallId,
+				actions: results.flatMap((r) => r.actions ?? []),
+			} satisfies SubagentActionsPayload);
 
 			return {
 				content: [{ type: "text", text }],

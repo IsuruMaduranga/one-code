@@ -20,14 +20,14 @@ export type ReminderScope = "next-turn" | "every-turn";
 export interface ReminderPayload {
 	text?: string;
 	scope?: ReminderScope;
-	/** Key for every-turn reminders so they can be replaced/removed. */
+	/** Key so a reminder can be replaced (next-turn) or replaced/removed (every-turn). */
 	key?: string;
 	/** Remove the every-turn reminder registered under `key` instead of enqueueing. */
 	remove?: boolean;
 }
 
 export class ReminderQueue {
-	private nextTurn: string[] = [];
+	private nextTurn: { key?: string; text: string }[] = [];
 	private everyTurn = new Map<string, string>();
 
 	enqueue(text: string, opts?: { scope?: ReminderScope; key?: string }): void {
@@ -35,7 +35,11 @@ export class ReminderQueue {
 		if (opts?.scope === "every-turn") {
 			this.everyTurn.set(opts.key ?? text, text);
 		} else {
-			this.nextTurn.push(text);
+			// A keyed next-turn reminder replaces its predecessor, so a rapidly
+			// re-emitted state change (cycling permission modes) announces only
+			// where it settled.
+			if (opts?.key) this.nextTurn = this.nextTurn.filter((r) => r.key !== opts.key);
+			this.nextTurn.push({ key: opts?.key, text });
 		}
 	}
 
@@ -45,7 +49,7 @@ export class ReminderQueue {
 
 	/** Returns pending reminders. Clears next-turn reminders; every-turn ones persist. */
 	drain(): string[] {
-		const drained = [...this.everyTurn.values(), ...this.nextTurn];
+		const drained = [...this.everyTurn.values(), ...this.nextTurn.map((r) => r.text)];
 		this.nextTurn = [];
 		return drained;
 	}
