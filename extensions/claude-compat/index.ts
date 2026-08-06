@@ -3,6 +3,8 @@
  * directory layout:
  *
  *   ~/.claude/skills, <project>/.claude/skills     → skills (same Agent Skills standard)
+ *   ~/.agents/skills, <project>/.agents/skills     → skills (the cross-tool Agent Skills
+ *                                                    directory, which Claude Code also reads)
  *   ~/.claude/commands, <project>/.claude/commands → slash commands (prompt templates;
  *                                                    Claude Code's $ARGUMENTS works as-is)
  *
@@ -16,7 +18,12 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export function claudeResourcePaths(cwd: string, home: string): { skillPaths: string[]; promptPaths: string[] } {
 	const candidates = {
-		skillPaths: [join(home, ".claude", "skills"), join(cwd, ".claude", "skills")],
+		skillPaths: [
+			join(home, ".claude", "skills"),
+			join(home, ".agents", "skills"),
+			join(cwd, ".claude", "skills"),
+			join(cwd, ".agents", "skills"),
+		],
 		promptPaths: [join(home, ".claude", "commands"), join(cwd, ".claude", "commands")],
 	};
 	return {
