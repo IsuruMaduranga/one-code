@@ -1195,3 +1195,71 @@ The general lesson is the one that keeps recurring in this feature: a table of
 model ids and prices reads as fine and behaves differently against a real
 catalog spanning three orders of magnitude in price. Verify selection logic by
 running it over the actual registry, not by inspecting the table.
+
+### Prompt caching, input size, and vendor containment on gateways
+
+Three requests at once, and they turned out to interact.
+
+**Gateway vendor containment.** The provider constraint was enforced at the wrong
+granularity. On OpenRouter, a session on `openai/gpt-5.1` was being screened by
+`anthropic/claude-haiku-4.5`: same pi provider, same API key — and the user's
+messages and CLAUDE.md going to Anthropic, a vendor they had not picked. The pi
+provider is the *gateway*; the vendor that actually receives the request is the
+prefix in the model id. Candidacy on a gateway (`openrouter`,
+`vercel-ai-gateway`, `cloudflare-ai-gateway`) is now narrowed to the session
+model's own vendor, so `openai/gpt-5.1` gets `openai/gpt-5-mini` and a `z-ai/`
+session with no cheaper `z-ai/` model is screened by the session model rather
+than by another vendor. Groq, Bedrock and Copilot carry vendor-ish prefixes but
+host those weights themselves, so they are deliberately not split.
+
+The tables are keyed by vendor now, and flagship models were removed from them:
+an entry matching the session's own model makes the table "choose" the very model
+it exists to find something cheaper than. They also stop at the mini/haiku/flash
+tier rather than nano/flash-lite — Claude Code runs its classifier on a
+Sonnet-class model, and dropping to the bottom tier to save a fraction of a cent
+trades away the judgement the gate exists for. `classifierModel` is there for
+anyone who wants that trade.
+
+**Caching: requested, and silently refused.** pi already puts an Anthropic
+`cache_control` breakpoint on the system prompt, which a payload dump confirmed
+(`cache_control: {type: "ephemeral"}` on a 9,777-character block). It never took
+effect because the cacheable prefix was too short: the rules lived in the *user*
+message, leaving ~1,270 tokens of instructions in the system prompt. Moving the
+rule lists into the system prompt — they are instructions, not per-call data —
+brings the stable prefix to ~2,570 tokens and makes it byte-identical across
+calls in a session, which is a test now.
+
+That is still not enough. **Claude Haiku 4.5's minimum cacheable prompt is 4,096
+tokens** (2,048 is Haiku *3.5*), and Anthropic's documented behaviour is that a
+shorter prompt "will be processed without caching, and no error is returned" —
+exactly the silent no-op measured. So on Haiku, caching would require *growing*
+the prompt ~60%, which is the opposite of the other request. It is left requested
+(`cacheRetention: "long"`, harmless where unavailable) because the same prefix
+does clear the 1,024-token floor on Sonnet-class models, where it will engage for
+anyone who sets `classifierModel` accordingly.
+
+`projectInstructions` deliberately stays out of the system prompt despite being
+equally stable: CLAUDE.md is checked-in content this gate does not trust, and
+promoting untrusted text into the system role to gain cache tokens would launder
+its authority. Prefix caching does not care what follows the system block.
+
+**Input size.** Instructions were compressed without dropping a rule or a worked
+example (the intent examples are load-bearing — removing them regressed
+calibration once already), and the nine `environment` entries that only said
+"none configured" collapse to one line saying the same thing. Measured: input
+3,233 → 2,934 tokens (-9%), output ~220 → ~140 (-36%, the tighter schema
+description shortens `analysis`), cost $0.0043 → $0.0035 per classification
+(-19%). Calibration re-verified in both directions afterwards: a named path still
+clears on intent, an unnamed backup destination still blocks citing S5.
+
+**A latent bug the caching experiment exposed.** Testing a Sonnet-class
+classifier produced `400 temperature is deprecated for this model`. The classifier
+was passing `temperature: 0` — which looks free, since a classifier wants
+determinism — but it is deprecated on Sonnet 5, unsupported on Opus 4.7+, and
+rejected by several OpenAI reasoning models, while pi's compat data still
+advertises support. Any user whose classifier resolved to such a model would have
+had **every tool call blocked**, and it was invisible because Haiku accepts it.
+`temperature` is no longer sent. This is the third time in this feature that an
+option which reads as harmless failed closed on a provider we were not testing
+(thinking budget, macOS symlink containment, now temperature): a gate spanning 38
+providers should send the minimum set of options it actually needs.

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
 	classifierCandidates,
+	VENDOR_CLASSIFIERS,
+	vendorOf,
 	describeCandidate,
 	findConfigured,
 	isModelUnavailableError,
@@ -41,18 +43,79 @@ describe("classifierCandidates: provider containment", () => {
 	});
 });
 
+describe("classifierCandidates: gateway vendor containment", () => {
+	it("stays with the session's upstream vendor on a gateway", () => {
+		// Same pi provider is not containment on a router: an openai/* session
+		// screened by anthropic/* keeps one API key but sends the user's prompts
+		// and CLAUDE.md to a vendor they did not pick.
+		const available = [
+			model("openrouter", "openai/gpt-5.1", 1.25),
+			model("openrouter", "openai/gpt-5-mini", 0.25),
+			model("openrouter", "anthropic/claude-haiku-4.5", 1),
+		];
+		const chain = pick(available, model("openrouter", "openai/gpt-5.1", 1.25));
+		expect(chain[0].model.id).toBe("openai/gpt-5-mini");
+		for (const candidate of chain) {
+			expect(candidate.model.id.startsWith("openai/"), candidate.model.id).toBe(true);
+		}
+	});
+
+	it("screens with the session model when its vendor offers nothing cheaper", () => {
+		const available = [
+			model("openrouter", "z-ai/glm-4.6", 0.5),
+			model("openrouter", "openai/gpt-5-mini", 0.25),
+			model("openrouter", "anthropic/claude-haiku-4.5", 1),
+		];
+		const chain = pick(available, model("openrouter", "z-ai/glm-4.6", 0.5));
+		expect(chain).toHaveLength(1);
+		expect(chain[0].model.id).toBe("z-ai/glm-4.6");
+		expect(chain[0].source).toBe("session");
+	});
+
+	it("uses a cheaper model from the session's own vendor when there is one", () => {
+		const available = [model("openrouter", "z-ai/glm-4.6", 0.5), model("openrouter", "z-ai/glm-4.5-air", 0.1)];
+		const chain = pick(available, model("openrouter", "z-ai/glm-4.6", 0.5));
+		expect(chain[0].model.id).toBe("z-ai/glm-4.5-air");
+	});
+
+	it("crosses vendors only on an explicit override", () => {
+		const available = [model("openrouter", "z-ai/glm-4.6", 0.5), model("openrouter", "openai/gpt-5-mini", 0.25)];
+		const chain = pick(available, model("openrouter", "z-ai/glm-4.6", 0.5), "openrouter/openai/gpt-5-mini");
+		expect(chain[0].model.id).toBe("openai/gpt-5-mini");
+		expect(chain[0].source).toBe("configured");
+	});
+
+	it("does not vendor-split a direct provider that hosts other vendors' weights", () => {
+		// Groq serves meta-llama and openai-named open models itself, so the data
+		// goes to Groq either way and the prefix implies nothing about routing.
+		const available = [
+			model("groq", "llama-3.3-70b-versatile", 0.6),
+			model("groq", "openai/gpt-oss-20b", 0.075),
+		];
+		const chain = pick(available, model("groq", "llama-3.3-70b-versatile", 0.6));
+		expect(chain.length).toBeGreaterThan(1);
+		expect(vendorOf(model("groq", "openai/gpt-oss-20b", 0.075))).toBeUndefined();
+	});
+
+	it("reports the upstream vendor only for gateways", () => {
+		expect(vendorOf(model("openrouter", "anthropic/claude-haiku-4.5", 1))).toBe("anthropic");
+		expect(vendorOf(model("anthropic", "claude-haiku-4-5", 1))).toBeUndefined();
+	});
+});
+
 describe("classifierCandidates: cost", () => {
-	it("prefers the cheapest genuinely-priced model in the provider", () => {
-		// gpt-5-nano is both the cheapest here and a provider default, so it wins
-		// either way; the point is that the expensive session model is not reused.
+	it("prefers a mini-tier model over the absolute cheapest", () => {
+		// gpt-5-nano is cheaper, but the tables stop at the mini/haiku/flash tier:
+		// the classifier is a security boundary, so the bottom tier is opt-in via
+		// classifierModel rather than the default.
 		const available = [
 			model("openai", "gpt-5.5", 10),
 			model("openai", "gpt-4o-mini", 0.15),
 			model("openai", "gpt-5-nano", 0.05),
 		];
-		// Which label it arrives under does not matter; which model does.
 		const chain = pick(available, model("openai", "gpt-5.5", 10));
-		expect(chain[0].model.id).toBe("gpt-5-nano");
+		expect(chain[0].model.id).toBe("gpt-4o-mini");
+		expect(chain[0].source).toBe("provider-default");
 	});
 
 	it("never leads with a model chosen on price alone", () => {
@@ -115,25 +178,22 @@ describe("classifierCandidates: cost", () => {
 
 describe("classifierCandidates: never dearer than the session model", () => {
 	it("skips a table entry that costs more than the session model", () => {
-		// A real OpenRouter case: a $0.50 session was being screened by a $1 model,
-		// because the budget ceiling was only applied to the cost-ranked branch.
+		// A real case: a $0.50 session was being screened by a $1 model, because the
+		// budget ceiling was only applied to the cost-ranked branch.
 		const available = [
-			model("openrouter", "anthropic/claude-haiku-4.5", 1),
-			model("openrouter", "openai/gpt-5-mini", 0.25),
-			model("openrouter", "z-ai/glm-4.6", 0.5),
+			model("anthropic", "claude-sonnet-5", 2),
+			model("anthropic", "claude-haiku-4-5", 1),
+			model("anthropic", "claude-cheap", 0.4),
 		];
-		const chain = pick(available, model("openrouter", "z-ai/glm-4.6", 0.5));
-		expect(chain[0].model.id).toBe("openai/gpt-5-mini");
+		const chain = pick(available, model("anthropic", "claude-cheap", 0.4));
 		for (const candidate of chain) {
-			const price = candidate.model.cost?.input ?? 0;
-			expect(price, candidate.model.id).toBeLessThanOrEqual(0.5);
+			expect(candidate.model.cost?.input ?? 0, candidate.model.id).toBeLessThanOrEqual(0.4);
 		}
 	});
 
 	it("uses the table's first entry when the budget allows it", () => {
 		const available = [
 			model("openrouter", "anthropic/claude-haiku-4.5", 1),
-			model("openrouter", "openai/gpt-5-mini", 0.25),
 			model("openrouter", "anthropic/claude-sonnet-4.5", 3),
 		];
 		const chain = pick(available, model("openrouter", "anthropic/claude-sonnet-4.5", 3));
@@ -195,7 +255,7 @@ describe("classifierCandidates: unsuitable variants", () => {
 describe("classifierCandidates: provider defaults", () => {
 	it("uses the known-good default for a messy catalog before cost sorting", () => {
 		const available = [
-			model("openrouter", "zzz/cheapest-but-unknown", 0.01),
+			model("openrouter", "anthropic/claude-cheap-unknown", 0.01),
 			model("openrouter", "anthropic/claude-haiku-4.5", 1),
 			model("openrouter", "anthropic/claude-fable-5", 15),
 		];
@@ -203,7 +263,7 @@ describe("classifierCandidates: provider defaults", () => {
 		expect(chain[0].source).toBe("provider-default");
 		expect(chain[0].model.id).toBe("anthropic/claude-haiku-4.5");
 		// The cheap unknown is still in the chain as a later fallback.
-		expect(chain.some((c) => c.model.id === "zzz/cheapest-but-unknown")).toBe(true);
+		expect(chain.some((c) => c.model.id === "anthropic/claude-cheap-unknown")).toBe(true);
 	});
 
 	it("accepts a dated variant of a default", () => {
@@ -221,8 +281,12 @@ describe("classifierCandidates: provider defaults", () => {
 	it("covers the providers whose catalogs name-matching cannot handle", () => {
 		// Groq's models contain none of the usual "cheap model" substrings, and
 		// neither do xAI's — cost or a default table is the only way to choose.
-		for (const provider of ["groq", "xai", "openrouter", "openai", "google"]) {
+		for (const provider of ["groq", "xai", "openai", "google", "anthropic"]) {
 			expect(PROVIDER_DEFAULT_CLASSIFIERS[provider], provider).toBeDefined();
+		}
+		// Gateways are keyed by upstream vendor instead.
+		for (const vendor of ["anthropic", "openai", "google", "z-ai", "x-ai"]) {
+			expect(VENDOR_CLASSIFIERS[vendor], vendor).toBeDefined();
 		}
 	});
 
@@ -281,7 +345,11 @@ describe("describeCandidate", () => {
 			"autoMode.classifierModel",
 		);
 		expect(describeCandidate({ model: model("groq", "llama-3.3-70b-versatile", 0.6), source: "session" })).toContain(
-			"no cheaper one found",
+			"nothing cheaper from",
 		);
+		// On a gateway the description names the upstream vendor, not the gateway.
+		expect(
+			describeCandidate({ model: model("openrouter", "openai/gpt-5-mini", 0.25), source: "cheapest-in-provider" }),
+		).toContain("from openai");
 	});
 });

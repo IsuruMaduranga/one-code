@@ -229,8 +229,11 @@ candidate ever costs more per token than the model doing the real work, and a
 model chosen only for being cheap never leads (nor do `:batch`, `:free`,
 `:online` or `:thinking` variants, which cannot serve as a synchronous gate). It never crosses
 to another provider on its own, because the classifier reads your prompts and
-your CLAUDE.md, and that is not a decision to make silently. The chosen model is
-named in the footer beside `auto mode on` and in `/auto-mode config`; if it turns
+your CLAUDE.md, and that is not a decision to make silently. On a gateway like OpenRouter it also stays with your session's *upstream* vendor —
+an `openai/…` session is screened by an `openai/…` model, not by whichever vendor
+happens to be cheapest — since the gateway is not who receives your prompt. The
+chosen model is named in the footer beside `auto mode on` and in
+`/auto-mode config`; if it turns
 out to be unusable on your account, pincer says so, tells you which setting to
 change, and falls back rather than blocking every call.
 

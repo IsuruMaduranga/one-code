@@ -181,26 +181,56 @@ describe("buildClassifierPrompt", () => {
 		routedBecause: "no rule covered this call",
 	};
 
-	it("includes all four rule tiers and the working directory", () => {
+	it("puts the rule tiers in the system prompt, where they can be cached", () => {
+		// Haiku will not cache a prefix under 2048 tokens, so the stable half has to
+		// be big enough — and rules are instructions, not per-call data.
 		const { system, user } = buildClassifierPrompt(base, config);
-		for (const tag of ["hard_deny", "soft_deny", "allow", "environment", "user_messages", "tool_call"]) {
-			expect(user, tag).toContain(`<${tag}>`);
+		for (const tag of ["hard_deny", "soft_deny", "allow", "environment"]) {
+			expect(system, tag).toContain(`<${tag}>`);
+			expect(user, tag).not.toContain(`<${tag}>`);
 		}
-		expect(user).toContain("/repo");
 		expect(system).toContain("HARD DENY");
 	});
 
+	it("keeps the per-call parts in the user message", () => {
+		const { system, user } = buildClassifierPrompt(base, config);
+		for (const tag of ["user_messages", "tool_call", "working_directory"]) {
+			expect(user, tag).toContain(`<${tag}`);
+		}
+		expect(user).toContain("/repo");
+		// The stable half must not vary with the call, or the cache never hits.
+		const other = buildClassifierPrompt(
+			{ ...base, input: { command: "something else" }, userMessages: ["different"] },
+			config,
+		);
+		expect(other.system).toBe(system);
+	});
+
+	it("keeps untrusted project instructions out of the system prompt", () => {
+		// Promoting checked-in content into the system role to gain cache tokens
+		// would launder its authority.
+		const { system, user } = buildClassifierPrompt({ ...base, projectInstructions: "MARKER-XYZ" }, config);
+		expect(user).toContain("MARKER-XYZ");
+		expect(system).not.toContain("MARKER-XYZ");
+	});
+
+	it("collapses unconfigured environment slots instead of listing each", () => {
+		const { system } = buildClassifierPrompt(base, config);
+		expect(system).toContain("trust slot(s) are unconfigured");
+		expect((system.match(/none configured/g) ?? []).length).toBe(0);
+	});
+
 	it("numbers every rule so the classifier can cite one", () => {
-		const { user, system } = buildClassifierPrompt(base, config);
-		expect(user).toContain(`${firstHardDeny.id}. ${firstHardDeny.text}`);
-		expect(user).toContain(`${firstSoftDeny.id}. ${firstSoftDeny.text}`);
+		const { system } = buildClassifierPrompt(base, config);
+		expect(system).toContain(`${firstHardDeny.id}. ${firstHardDeny.text}`);
+		expect(system).toContain(`${firstSoftDeny.id}. ${firstSoftDeny.text}`);
 		expect(system).toContain("A block must cite the id");
 	});
 
 	it("tells the classifier not to assert facts beyond what it was given", () => {
 		// This is the confabulation the grounding exists to prevent.
 		const { system } = buildClassifierPrompt(base, config);
-		expect(system).toContain("do not assert facts");
+		expect(system).toContain("Do not assert facts");
 		expect(system).toContain("attributed to you");
 	});
 
@@ -215,7 +245,7 @@ describe("buildClassifierPrompt", () => {
 	it("states the tier precedence and that intent cannot clear a hard denial", () => {
 		const { system } = buildClassifierPrompt(base, config);
 		expect(system).toContain("EXPLICIT USER INTENT");
-		expect(system).toContain("Intent never clears a hard denial");
+		expect(system).toContain("Never clears a hard denial");
 	});
 
 	it("tells the classifier that only user messages carry intent", () => {
@@ -244,9 +274,9 @@ describe("buildClassifierPrompt", () => {
 	});
 
 	it("clips oversized arguments so they cannot crowd out the rules", () => {
-		const { user } = buildClassifierPrompt({ ...base, input: { command: "x".repeat(50_000) } }, config);
+		const { system, user } = buildClassifierPrompt({ ...base, input: { command: "x".repeat(50_000) } }, config);
 		expect(user).toContain("truncated");
-		expect(user).toContain("<hard_deny>");
+		expect(system).toContain("<hard_deny>");
 		expect(user.length).toBeLessThan(30_000);
 	});
 

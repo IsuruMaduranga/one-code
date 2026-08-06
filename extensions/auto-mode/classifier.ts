@@ -134,6 +134,19 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 					headers: auth.headers,
 					env: auth.env,
 					signal,
+					...(process.env.CC_AUTO_MODE_DEBUG === "2"
+						? {
+								onPayload: (payload: unknown) => {
+									const body = payload as { system?: Array<Record<string, unknown>> };
+									const blocks = (body.system ?? []).map(
+										(b) =>
+											`{keys=${Object.keys(b).join(",")} textLen=${String((b as { text?: string }).text ?? "").length} cache=${JSON.stringify((b as { cache_control?: unknown }).cache_control)}}`,
+									);
+									process.stderr.write(`[auto-mode payload] systemBlocks=${blocks.join(" ")}\n`);
+									return undefined;
+								},
+							}
+						: {}),
 					// A verdict is one JSON object, so the cap stays small.
 					maxTokens: 512,
 					// `reasoning` is deliberately omitted: pi turns thinking off entirely
@@ -142,7 +155,15 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 					// resulting budget is derived from maxTokens — at 512 that lands under
 					// Anthropic's 1024-token floor and every request 400s, which the gate
 					// then correctly but uselessly reports as a block.
-					temperature: 0,
+					//
+					// `temperature` is likewise NOT passed. It looks free — a classifier
+					// wants determinism — but it is deprecated on Claude Sonnet 5 and
+					// unsupported on Opus 4.7+, and pi's compat data still advertises it,
+					// so the request 400s and the gate blocks every single call. Several
+					// OpenAI reasoning models reject it too. A gate that must work across
+					// 38 providers cannot afford an option that fails closed on some of
+					// them for a property it does not need.
+					cacheRetention: "long",
 				},
 			);
 			if (reply.stopReason === "error" || reply.stopReason === "aborted") {
@@ -164,7 +185,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 				// Allows carry no reason, so without this the permissive direction is
 				// invisible — which is the harder one to notice and the more costly one
 				// to get wrong. `CC_AUTO_MODE_DEBUG=1` puts the raw reply on stderr.
-				if (process.env.CC_AUTO_MODE_DEBUG === "1") {
+				if (process.env.CC_AUTO_MODE_DEBUG) {
 					const u = reply.usage as
 						| { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; cost?: unknown }
 						| undefined;

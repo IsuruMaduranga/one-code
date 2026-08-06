@@ -29,29 +29,74 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 
 /**
- * Known-good cheap classifiers per provider, for catalogs where cost alone picks
- * badly. OpenRouter is the motivating case: sorting its 303 models by price puts
- * `openrouter/auto` first at a *negative* sentinel price, and Google's free-tier
- * entries sit at `$0`, so "cheapest" is not a usable answer there.
+ * Providers that are *routers*: the pi provider is the gateway, and the model id
+ * carries the upstream vendor that actually receives the request
+ * (`anthropic/claude-haiku-4.5` on OpenRouter is served by Anthropic).
  *
- * Matched as a prefix against the model id, so a dated variant
- * (`claude-haiku-4-5-20251001`) satisfies `claude-haiku-4-5`.
+ * This distinction is why staying on the same pi provider is not enough. A
+ * session on `openai/gpt-5.1` through OpenRouter screened by
+ * `anthropic/claude-haiku-4.5` keeps one set of credentials but sends the user's
+ * messages and CLAUDE.md to Anthropic — a vendor they did not pick. Same class of
+ * leak as the original cross-provider bug, one level down.
+ *
+ * Groq, Bedrock and GitHub Copilot also carry vendor-ish prefixes
+ * (`meta-llama/…`, `anthropic.claude-…`) but *host* those weights themselves, so
+ * the data goes to them regardless and no vendor matching is needed.
+ */
+const GATEWAY_PROVIDERS = new Set(["openrouter", "vercel-ai-gateway", "cloudflare-ai-gateway"]);
+
+/**
+ * Known-good cheap classifiers per vendor, in preference order. Prefixes, so a
+ * dated variant (`claude-haiku-4-5-20251001`) satisfies `claude-haiku-4-5`.
+ *
+ * These sit at the small-but-capable tier — mini/haiku/flash — rather than the
+ * absolute cheapest tier (nano, flash-lite). A classifier is a security boundary,
+ * and Claude Code runs its own on a Sonnet-class model; dropping to the very
+ * bottom to save a fraction of a cent trades away the judgement the gate exists
+ * for. Anyone who wants that trade can name it in `autoMode.classifierModel`.
+ *
+ * Flagship models are deliberately absent (bar Anthropic's Sonnet, which is what
+ * Claude Code itself uses): an entry matching the session's own model would make
+ * the table "choose" the very model it exists to find something cheaper than.
+ */
+export const VENDOR_CLASSIFIERS: Record<string, string[]> = {
+	anthropic: ["claude-haiku-4.5", "claude-haiku-4-5", "claude-3-5-haiku", "claude-sonnet-5"],
+	openai: ["gpt-5-mini", "gpt-5.1-mini", "gpt-4.1-mini", "gpt-4o-mini"],
+	google: ["gemini-2.5-flash", "gemini-2.0-flash"],
+	"meta-llama": ["llama-3.3-70b", "llama-4-scout"],
+	mistralai: ["mistral-small", "mistral-medium"],
+	deepseek: ["deepseek-chat"],
+	qwen: ["qwen3-30b", "qwen-plus"],
+	"z-ai": ["glm-4.5-air", "glm-4-flash"],
+	"x-ai": ["grok-3-mini", "grok-4.3"],
+	moonshotai: ["kimi-k2"],
+};
+
+/**
+ * Same table keyed by pi provider, for direct providers where the provider *is*
+ * the vendor. Kept separate because a few provider names differ from the vendor
+ * name, and a few providers host other vendors' weights themselves.
  */
 export const PROVIDER_DEFAULT_CLASSIFIERS: Record<string, string[]> = {
-	anthropic: ["claude-haiku-4-5", "claude-sonnet-5"],
-	openrouter: ["anthropic/claude-haiku-4.5", "openai/gpt-5-mini", "google/gemini-2.5-flash"],
-	openai: ["gpt-5-mini", "gpt-5-nano", "gpt-4.1-mini"],
-	"openai-codex": ["gpt-5-mini", "gpt-5.5-codex"],
-	google: ["gemini-2.5-flash", "gemini-2.0-flash"],
-	"google-vertex": ["gemini-2.5-flash", "gemini-2.0-flash"],
+	anthropic: VENDOR_CLASSIFIERS.anthropic,
+	openai: VENDOR_CLASSIFIERS.openai,
+	"openai-codex": ["gpt-5-mini", "gpt-5.1-codex-mini", "gpt-5.5-codex"],
+	google: VENDOR_CLASSIFIERS.google,
+	"google-vertex": VENDOR_CLASSIFIERS.google,
 	groq: ["llama-3.3-70b-versatile", "openai/gpt-oss-20b"],
-	xai: ["grok-4.3"],
-	deepseek: ["deepseek-chat"],
-	mistral: ["mistral-small-latest"],
+	xai: VENDOR_CLASSIFIERS["x-ai"],
+	deepseek: VENDOR_CLASSIFIERS.deepseek,
+	mistral: VENDOR_CLASSIFIERS.mistralai,
 	"amazon-bedrock": ["anthropic.claude-haiku", "us.anthropic.claude-haiku"],
-	"vercel-ai-gateway": ["anthropic/claude-haiku-4.5", "openai/gpt-5-mini"],
 	"github-copilot": ["gpt-5-mini", "claude-haiku-4.5"],
 };
+
+/** The upstream vendor a model id names, for gateway providers only. */
+export function vendorOf(model: Model<Api>): string | undefined {
+	if (!GATEWAY_PROVIDERS.has(model.provider)) return undefined;
+	const slash = model.id.indexOf("/");
+	return slash > 0 ? model.id.slice(0, slash) : undefined;
+}
 
 /**
  * Names of the known small-but-capable model families. Too weak to *choose* by —
@@ -173,8 +218,21 @@ export function classifierCandidates({ available, sessionModel, configured }: Se
 	if (configured) push(findConfigured(available, configured), "configured");
 
 	const provider = sessionModel?.provider;
+	/**
+	 * On a gateway, "same provider" is not containment — the upstream vendor in the
+	 * model id is who actually receives the prompt — so candidacy is narrowed to
+	 * the session's own vendor as well. When that vendor offers nothing cheaper,
+	 * the session model screens the calls rather than the prompt going to a
+	 * different vendor to save a fraction of a cent.
+	 */
+	const vendor = sessionModel ? vendorOf(sessionModel) : undefined;
 	const inProvider = provider
-		? available.filter((model) => model.provider === provider && isSelectableVariant(model))
+		? available.filter(
+				(model) =>
+					model.provider === provider &&
+					isSelectableVariant(model) &&
+					(vendor === undefined || vendorOf(model) === vendor),
+			)
 		: [];
 
 	/**
@@ -191,11 +249,15 @@ export function classifierCandidates({ available, sessionModel, configured }: Se
 		return price === undefined || price <= sessionPrice;
 	};
 
-	// 2. A known-good cheap model for this provider, for catalogs where price
-	//    alone picks badly. Entries are tried in order, so one that busts the
-	//    budget falls through to the next rather than being used anyway.
+	// 2. A known-good cheap model for this vendor, for catalogs where price alone
+	//    picks badly. Entries are tried in order, so one that busts the budget
+	//    falls through to the next rather than being used anyway.
 	if (provider) {
-		push(findByPrefix(inProvider, PROVIDER_DEFAULT_CLASSIFIERS[provider] ?? [], withinBudget), "provider-default");
+		// On a gateway the table is keyed by vendor and the ids carry the prefix.
+		const families = vendor
+			? (VENDOR_CLASSIFIERS[vendor] ?? []).map((family) => `${vendor}/${family}`)
+			: (PROVIDER_DEFAULT_CLASSIFIERS[provider] ?? []);
+		push(findByPrefix(inProvider, families, withinBudget), "provider-default");
 	}
 
 	// 3. The cheapest genuinely-priced model in the provider.
@@ -254,9 +316,13 @@ export function describeCandidate(candidate: Candidate): string {
 			return `${name} (from autoMode.classifierModel)`;
 		case "provider-default":
 			return `${name} (default for this provider)`;
-		case "cheapest-in-provider":
-			return `${name} (cheapest available on ${candidate.model.provider})`;
-		case "session":
-			return `${name} (this session's model — no cheaper one found on ${candidate.model.provider})`;
+		case "cheapest-in-provider": {
+			const where = vendorOf(candidate.model) ?? candidate.model.provider;
+			return `${name} (cheapest available from ${where})`;
+		}
+		case "session": {
+			const where = vendorOf(candidate.model) ?? candidate.model.provider;
+			return `${name} (this session's model — nothing cheaper from ${where})`;
+		}
 	}
 }
