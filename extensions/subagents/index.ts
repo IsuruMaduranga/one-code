@@ -197,9 +197,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			scope: "every-turn",
 			key: "subagent-models",
 		});
-		pi.events.emit(SUBAGENT_STATUS_CHANNEL, {
-			model: subagentStatusModel(configured?.spec, resolution.model),
-		});
+		pi.events.emit(SUBAGENT_STATUS_CHANNEL, subagentStatusModel(configured, resolution));
 	};
 
 	pi.on("session_start", (_event, ctx) => {

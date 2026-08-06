@@ -231,7 +231,9 @@ export default function brandingExtension(pi: ExtensionAPI) {
 							model: currentModelId,
 							cwd: ctx.cwd,
 							mode: permissionModeDisplay(permissionStatus ?? { mode: "default", paused: false }),
-							subagents: subagentStatus?.model ? shortModelName(subagentStatus.model) : undefined,
+							subagents: subagentStatus?.model
+								? `${shortModelName(subagentStatus.model)}${subagentStatus.via ? ` (${subagentStatus.via})` : ""}`
+								: undefined,
 							sections,
 						},
 						paint,

@@ -47,20 +47,32 @@ import {
 export const SUBAGENT_STATUS_CHANNEL = "pincer:subagent-status";
 
 export interface SubagentStatus {
-	/** `provider/id`, set whenever a subagent default is explicitly configured. */
+	/** `provider/id` subagents will run on. Unset only when nothing resolves at all. */
 	model?: string;
+	/** Where that came from: pincer's own setting, Claude Code's env var, or the session. */
+	via?: "setting" | "env" | "session";
 }
 
 /**
- * What the banner's `subagents` slot shows: the resolved default whenever one
- * is explicitly configured — even when it equals the session model, because a
- * user who just ran `/subagent` must see their choice land. Unset and
- * `inherit` both mean "the session model", which the banner already shows.
+ * What the banner's `subagents` slot shows: the model subagents will actually
+ * run on, always, tagged with how it was set — a user who just ran `/subagent`
+ * must see their choice land, and after `/subagent clear` the slot going blank
+ * read as breakage rather than "back to the session model". The tag comes from
+ * the *resolution*, not the configuration: a configured default that degraded
+ * (off-family alias, unavailable model) honestly reads "session".
  */
-export function subagentStatusModel(configuredSpec: string | undefined, resolved: Model<Api> | undefined): string | undefined {
-	const wanted = configuredSpec?.trim().toLowerCase();
-	if (!wanted || wanted === "inherit" || !resolved) return undefined;
-	return spec(resolved);
+export function subagentStatusModel(
+	configured: { source: "subagentModel setting" | "CLAUDE_CODE_SUBAGENT_MODEL" } | undefined,
+	resolution: Pick<SubagentModelResolution, "model" | "source">,
+): SubagentStatus {
+	if (!resolution.model) return {};
+	const via =
+		resolution.source === "default" && configured
+			? configured.source === "subagentModel setting"
+				? "setting"
+				: "env"
+			: "session";
+	return { model: spec(resolution.model), via };
 }
 
 /** Claude Code's Agent-tool aliases, resolved as name matches within the session's provider. */

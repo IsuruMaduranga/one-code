@@ -256,21 +256,38 @@ describe("applicableSubagentDefault", () => {
 });
 
 describe("subagentStatusModel", () => {
-	it("shows the resolved default even when it equals the session model", () => {
+	const setting = { source: "subagentModel setting" } as const;
+	const envVar = { source: "CLAUDE_CODE_SUBAGENT_MODEL" } as const;
+
+	it("shows a configured default with its knob, even when it equals the session model", () => {
 		// A user who just ran /subagent must see their choice land in the banner;
 		// hiding it because it happens to match the session reads as "not saved".
-		expect(subagentStatusModel("anthropic/claude-sonnet-5", anthropic[1])).toBe("anthropic/claude-sonnet-5");
+		expect(subagentStatusModel(setting, { model: anthropic[1], source: "default" })).toEqual({
+			model: "anthropic/claude-sonnet-5",
+			via: "setting",
+		});
+		expect(subagentStatusModel(envVar, { model: anthropic[2], source: "default" })).toEqual({
+			model: "anthropic/claude-haiku-4-5",
+			via: "env",
+		});
 	});
 
-	it("shows what actually runs when the configured spec degraded to another model", () => {
-		expect(subagentStatusModel("sonnet", openai[0])).toBe("openai/gpt-5.1");
+	it("shows the session model as such for unset, inherit, and degraded defaults", () => {
+		// After /subagent clear the slot going blank read as breakage; and the
+		// tag follows the resolution, so a default that could not resolve reads
+		// "session" — what actually runs — not the knob that failed.
+		expect(subagentStatusModel(undefined, { model: openai[0], source: "session" })).toEqual({
+			model: "openai/gpt-5.1",
+			via: "session",
+		});
+		expect(subagentStatusModel(setting, { model: openai[0], source: "session" })).toEqual({
+			model: "openai/gpt-5.1",
+			via: "session",
+		});
 	});
 
-	it("hides for inherit, unset, and unresolvable defaults", () => {
-		expect(subagentStatusModel("inherit", anthropic[0])).toBeUndefined();
-		expect(subagentStatusModel(" Inherit ", anthropic[0])).toBeUndefined();
-		expect(subagentStatusModel(undefined, anthropic[0])).toBeUndefined();
-		expect(subagentStatusModel("anthropic/claude-sonnet-5", undefined)).toBeUndefined();
+	it("shows nothing only when nothing resolves at all", () => {
+		expect(subagentStatusModel(setting, { model: undefined, source: "session" })).toEqual({});
 	});
 });
 
