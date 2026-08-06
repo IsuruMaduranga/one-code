@@ -25,10 +25,11 @@ import {
 	SUBAGENT_ACTIONS_CHANNEL,
 	type SubagentActionsPayload,
 } from "../auto-mode/actions.ts";
-import { classify } from "../auto-mode/classifier.ts";
+import { classify, createClassifierState } from "../auto-mode/classifier.ts";
 import { type AutoModeConfig, autoModeSettingsPaths, loadAutoModeConfig } from "../auto-mode/config.ts";
 import { DEFAULT_ALLOW, DEFAULT_ENVIRONMENT, DEFAULT_HARD_DENY, DEFAULT_SOFT_DENY } from "../auto-mode/defaults.ts";
 import { loadProjectInstructions } from "../auto-mode/instructions.ts";
+import { classifierCandidates, describeCandidate } from "../auto-mode/model-select.ts";
 import { PauseTracker } from "../auto-mode/pause.ts";
 import { analyzeShellCommand, type ShellEvidence } from "../auto-mode/shell-analysis.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
@@ -41,7 +42,7 @@ import {
 	type PermissionMode,
 	type PermissionRule,
 } from "./matcher.ts";
-import { MODE_BADGES, nextMode } from "./modes.ts";
+import { MODE_BADGES, modeBadge, nextMode } from "./modes.ts";
 import { loadPermissionSettings, normalizePermissionMode, persistAllowRule, settingsPaths } from "./settings.ts";
 
 const DENIED_BY_USER =
@@ -114,8 +115,13 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	let badgeCtx: ExtensionContext | undefined;
 	const applyBadge = () => {
 		// setStatus is a no-op outside the TUI, so this is safe unconditionally.
-		const paused = mode === "auto" && pauseTracker.isPaused();
-		badgeCtx?.ui.setStatus("permission-mode", paused ? "⏸ auto mode paused" : MODE_BADGES[mode]);
+		badgeCtx?.ui.setStatus(
+			"permission-mode",
+			modeBadge(mode, {
+				paused: pauseTracker.isPaused(),
+				classifierModel: classifierState.pinned?.id,
+			}),
+		);
 	};
 
 	/** Auto-mode state. Loaded lazily: most sessions never enter auto mode. */
@@ -123,6 +129,22 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	let projectInstructions: string | undefined;
 	let instructionsLoaded = false;
 	const pauseTracker = new PauseTracker();
+	/**
+	 * Which model the classifier settled on. Held here so the choice is pinned for
+	 * the session rather than re-resolved per call, and so a model that turns out
+	 * to be unusable is not retried on every tool call.
+	 */
+	const classifierState = createClassifierState();
+
+	/** What would be tried, in order, before anything has been pinned. */
+	const describeChain = (ctx: ExtensionContext): string => {
+		const chain = classifierCandidates({
+			available: ctx.modelRegistry.getAvailable(),
+			sessionModel: ctx.model,
+			configured: autoConfig?.classifierModel,
+		});
+		return chain.length > 0 ? chain.map(describeCandidate).join(" → ") : "(no model available)";
+	};
 
 	/**
 	 * The user's own messages, and only those — the classifier's "explicit intent"
@@ -170,6 +192,14 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				sessionModel: ctx.model,
 				config: autoConfig,
 				signal: ctx.signal,
+				state: classifierState,
+				onNotice: (message, level) => {
+					ctx.ui.notify(message, level);
+					// The badge names the classifier, so it has to repaint when the first
+					// call settles which model that is.
+					badgeCtx ??= ctx;
+					applyBadge();
+				},
 			},
 		);
 	};
@@ -438,7 +468,14 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				routedBecause:
 					"This subagent has already finished; you are reviewing what it did, as a whole, rather than approving anything. Its individual actions were each checked as it ran. Judge whether the sequence together amounts to something the rules forbid — a series of individually unremarkable steps can add up to one.",
 			},
-			{ registry: ctx.modelRegistry, sessionModel: ctx.model, config: autoConfig, signal: ctx.signal },
+			{
+				registry: ctx.modelRegistry,
+				sessionModel: ctx.model,
+				config: autoConfig,
+				signal: ctx.signal,
+				state: classifierState,
+				onNotice: (message, level) => ctx.ui.notify(message, level),
+			},
 		);
 		if (verdict.decision === "allow") return undefined;
 
@@ -493,7 +530,20 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 					section("allow", shown.allow),
 					section("environment", shown.environment),
 					...(which === "config" && "classifyAllShell" in shown
-						? [`classifyAllShell: ${shown.classifyAllShell}`, `classifierModel: ${shown.classifierModel ?? "(auto)"}`]
+						? [
+								`classifyAllShell: ${shown.classifyAllShell}`,
+								`classifierModel: ${shown.classifierModel ?? "(not set)"}`,
+								// Which model actually screens calls, and why — this reads the
+								// user's prompts, so it should not take knowing the code to find out.
+								`classifier in use: ${
+									classifierState.pinned
+										? `${classifierState.pinned.provider}/${classifierState.pinned.id} (pinned for this session)`
+										: describeChain(ctx)
+								}`,
+								...(classifierState.rejected.size > 0
+									? [`unusable this session: ${[...classifierState.rejected].join(", ")}`]
+									: []),
+							]
 						: []),
 				].join("\n\n"),
 				"info",

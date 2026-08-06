@@ -15,45 +15,33 @@ import { completeSimple } from "@earendil-works/pi-ai/compat";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import type { AutoModeConfig } from "./config.ts";
 import { buildClassifierPrompt, type ClassifyRequest, type ClassifyVerdict, parseVerdict } from "./prompt.ts";
+import {
+	type Candidate,
+	classifierCandidates,
+	describeCandidate,
+	isModelUnavailableError,
+} from "./model-select.ts";
 import { indexRules } from "./rules.ts";
 
 /** A slow classifier stalls every tool call, so the wait is capped. */
 export const CLASSIFIER_TIMEOUT_MS = 30_000;
 
 /**
- * Preference order for an unconfigured classifier model: cheap and fast first,
- * since this runs on every non-fast-pathed tool call.
+ * Which model the classifier settled on, and which candidates turned out to be
+ * unusable. Owned by the caller so this module stays stateless, and so the
+ * choice is *pinned*: re-resolving per call would let a registry refresh swap
+ * classifiers mid-session, and would re-try a model already known to be dead.
  */
-const MODEL_PREFERENCES = [/haiku/i, /sonnet/i, /flash/i, /mini/i, /small/i];
+export interface ClassifierState {
+	pinned?: Model<Api>;
+	/** `provider/id` of candidates that failed as unusable. */
+	rejected: Set<string>;
+	/** Notices already delivered, so a per-call warning is not repeated per call. */
+	notified: Set<string>;
+}
 
-export function pickClassifierModel(
-	registry: ModelRegistry,
-	sessionModel: Model<Api> | undefined,
-	configured: string | undefined,
-): Model<Api> | undefined {
-	const available = registry.getAvailable();
-
-	if (configured) {
-		const [provider, ...rest] = configured.split("/");
-		const modelId = rest.join("/");
-		const exact = modelId ? registry.find(provider, modelId) : undefined;
-		if (exact) return exact;
-		// Also accept a bare model id, matching however the user wrote it.
-		const byId = available.find((model) => model.id === configured || `${model.provider}/${model.id}` === configured);
-		if (byId) return byId;
-	}
-
-	// Prefer a fast model from the session's own provider, so auto mode uses
-	// credentials that are already working.
-	const sameProvider = sessionModel ? available.filter((model) => model.provider === sessionModel.provider) : [];
-	for (const candidates of [sameProvider, available]) {
-		for (const pattern of MODEL_PREFERENCES) {
-			const match = candidates.find((model) => pattern.test(model.id));
-			if (match) return match;
-		}
-	}
-
-	return sessionModel ?? available[0];
+export function createClassifierState(): ClassifierState {
+	return { rejected: new Set(), notified: new Set() };
 }
 
 export interface ClassifierDeps {
@@ -61,6 +49,28 @@ export interface ClassifierDeps {
 	sessionModel: Model<Api> | undefined;
 	config: AutoModeConfig;
 	signal?: AbortSignal;
+	state: ClassifierState;
+	/** Tell the user something once — which model is in use, or that theirs is dead. */
+	onNotice?: (message: string, level: "info" | "warning") => void;
+}
+
+/** The candidate chain, minus anything already found unusable this session. */
+function remainingCandidates(deps: ClassifierDeps): Candidate[] {
+	const all = classifierCandidates({
+		available: deps.registry.getAvailable(),
+		sessionModel: deps.sessionModel,
+		configured: deps.config.classifierModel,
+	});
+	const usable = all.filter((entry) => !deps.state.rejected.has(`${entry.model.provider}/${entry.model.id}`));
+	// If everything has been rejected, the session model is still worth one more
+	// attempt: a gate that stops asking has stopped gating.
+	return usable.length > 0 ? usable : all.slice(-1);
+}
+
+function notifyOnce(deps: ClassifierDeps, key: string, message: string, level: "info" | "warning") {
+	if (deps.state.notified.has(key)) return;
+	deps.state.notified.add(key);
+	deps.onNotice?.(message, level);
 }
 
 /**
@@ -69,70 +79,131 @@ export interface ClassifierDeps {
  * An approval gate that cannot reach its classifier has not approved anything.
  */
 export async function classify(request: ClassifyRequest, deps: ClassifierDeps): Promise<ClassifyVerdict> {
-	const model = pickClassifierModel(deps.registry, deps.sessionModel, deps.config.classifierModel);
-	if (!model) {
+	const candidates = remainingCandidates(deps);
+	if (candidates.length === 0) {
 		return { decision: "block", reason: "No model is available to run the auto-mode classifier.", tier: "unmatched" };
 	}
 
-	const auth = await deps.registry.getApiKeyAndHeaders(model);
-	if (!auth.ok) {
-		return { decision: "block", reason: `Auto-mode classifier has no credentials for ${model.provider}.`, tier: "unmatched" };
+	// A configured model that matches nothing available would otherwise fall
+	// through in silence, leaving the user believing their setting is in force
+	// while something else screens their calls.
+	const configured = deps.config.classifierModel;
+	if (configured && !candidates.some((entry) => entry.source === "configured")) {
+		notifyOnce(
+			deps,
+			`unresolved:${configured}`,
+			`autoMode.classifierModel is set to "${configured}", which is not an available model — check the name and that its provider is authenticated. Auto mode is using ${describeCandidate(candidates[0])} instead.`,
+			"warning",
+		);
 	}
 
 	const index = indexRules(deps.config);
 	const { system, user } = buildClassifierPrompt(request, deps.config, index);
-	const timeout = AbortSignal.timeout(CLASSIFIER_TIMEOUT_MS);
-	const signal = deps.signal ? AbortSignal.any([deps.signal, timeout]) : timeout;
 
-	// Some pi builds resolve a per-provider baseUrl alongside the key; it is not
-	// in every published version of the auth type, so it is read defensively.
-	const baseUrl = (auth as { baseUrl?: string }).baseUrl;
+	// A model already pinned this session is used as-is; otherwise walk the chain,
+	// stepping over anything that turns out to be unusable on this account.
+	const attempts = deps.state.pinned
+		? [{ model: deps.state.pinned, source: "session" as const }]
+		: candidates;
 
-	try {
-		const reply = await completeSimple(
-			baseUrl ? ({ ...model, baseUrl } as Model<Api>) : model,
-			{ systemPrompt: system, messages: [{ role: "user", content: user, timestamp: Date.now() }] },
-			{
-				apiKey: auth.apiKey,
-				headers: auth.headers,
-				env: auth.env,
-				signal,
-				// A verdict is one JSON object, so the cap stays small.
-				maxTokens: 512,
-				// `reasoning` is deliberately omitted: pi turns thinking off entirely
-				// when it is absent, which is what a classifier wants (fast, cheap,
-				// deterministic). Passing even "minimal" enables thinking, and the
-				// resulting budget is derived from maxTokens — at 512 that lands under
-				// Anthropic's 1024-token floor and every request 400s, which the gate
-				// then correctly but uselessly reports as a block.
-				temperature: 0,
-			},
-		);
+	let lastError = "";
+	for (const candidate of attempts) {
+		const model = candidate.model;
+		const key = `${model.provider}/${model.id}`;
 
-		if (reply.stopReason === "error" || reply.stopReason === "aborted") {
+		const auth = await deps.registry.getApiKeyAndHeaders(model);
+		if (!auth.ok) {
+			deps.state.rejected.add(key);
+			lastError = auth.error;
+			continue;
+		}
+
+		const timeout = AbortSignal.timeout(CLASSIFIER_TIMEOUT_MS);
+		const signal = deps.signal ? AbortSignal.any([deps.signal, timeout]) : timeout;
+		// Some pi builds resolve a per-provider baseUrl alongside the key; it is not
+		// in every published version of the auth type, so it is read defensively.
+		const baseUrl = (auth as { baseUrl?: string }).baseUrl;
+
+		let failure: string | undefined;
+		try {
+			const reply = await completeSimple(
+				baseUrl ? ({ ...model, baseUrl } as Model<Api>) : model,
+				{ systemPrompt: system, messages: [{ role: "user", content: user, timestamp: Date.now() }] },
+				{
+					apiKey: auth.apiKey,
+					headers: auth.headers,
+					env: auth.env,
+					signal,
+					// A verdict is one JSON object, so the cap stays small.
+					maxTokens: 512,
+					// `reasoning` is deliberately omitted: pi turns thinking off entirely
+					// when it is absent, which is what a classifier wants (fast, cheap,
+					// deterministic). Passing even "minimal" enables thinking, and the
+					// resulting budget is derived from maxTokens — at 512 that lands under
+					// Anthropic's 1024-token floor and every request 400s, which the gate
+					// then correctly but uselessly reports as a block.
+					temperature: 0,
+				},
+			);
+			if (reply.stopReason === "error" || reply.stopReason === "aborted") {
+				failure = reply.errorMessage ?? reply.stopReason;
+			} else {
+				const text = reply.content
+					.filter((block): block is { type: "text"; text: string } => block.type === "text")
+					.map((block) => block.text)
+					.join("");
+				const verdict = parseVerdict(text, index, request.userMessages);
+
+				// Pin on the first success, so the classifier cannot change under the
+				// session and a working model is not re-litigated per call.
+				if (!deps.state.pinned) {
+					deps.state.pinned = model;
+					notifyOnce(deps, `using:${key}`, `Auto mode is screening calls with ${describeCandidate(candidate)}.`, "info");
+				}
+
+				// Allows carry no reason, so without this the permissive direction is
+				// invisible — which is the harder one to notice and the more costly one
+				// to get wrong. `CC_AUTO_MODE_DEBUG=1` puts the raw reply on stderr.
+				if (process.env.CC_AUTO_MODE_DEBUG === "1") {
+					process.stderr.write(
+						`[auto-mode] ${key} ${request.toolName} → ${verdict.decision}${verdict.ruleId ? ` (${verdict.ruleId})` : ""}\n  raw: ${text.replace(/\s+/g, " ").slice(0, 600)}\n`,
+					);
+				}
+				return verdict;
+			}
+		} catch (error) {
+			failure = error instanceof Error ? error.message : String(error);
+		}
+
+		lastError = failure ?? "unknown error";
+		// A model that is simply not usable here is worth stepping over. A transient
+		// failure is not: switching models would paper over something about to clear,
+		// so that surfaces as a block and the same model is tried again next call.
+		if (!isModelUnavailableError(lastError)) {
 			return {
 				decision: "block",
-				reason: `Auto-mode classifier could not be reached (${reply.errorMessage ?? reply.stopReason}).`,
+				reason: `Auto-mode classifier could not be reached (${lastError}).`,
 				tier: "unmatched",
 			};
 		}
 
-		const text = reply.content
-			.filter((block): block is { type: "text"; text: string } => block.type === "text")
-			.map((block) => block.text)
-			.join("");
-		const verdict = parseVerdict(text, index, request.userMessages);
-		// Allows carry no reason, so without this the permissive direction is
-		// invisible — which is the harder one to notice and the more costly one to
-		// get wrong. `CC_AUTO_MODE_DEBUG=1` puts the raw reply on stderr.
-		if (process.env.CC_AUTO_MODE_DEBUG === "1") {
-			process.stderr.write(
-				`[auto-mode] ${request.toolName} → ${verdict.decision}${verdict.ruleId ? ` (${verdict.ruleId})` : ""}\n  raw: ${text.replace(/\s+/g, " ").slice(0, 600)}\n`,
-			);
-		}
-		return verdict;
-	} catch (error) {
-		const message = error instanceof Error ? error.message : String(error);
-		return { decision: "block", reason: `Auto-mode classifier failed: ${message}`, tier: "unmatched" };
+		deps.state.rejected.add(key);
+		const isConfigured = candidate.source === "configured";
+		notifyOnce(
+			deps,
+			`rejected:${key}`,
+			isConfigured
+				? `Auto mode cannot use ${key} from autoMode.classifierModel (${lastError}). Set a different model in ~/.claude/settings.json.`
+				: `Auto mode cannot use ${key} as its classifier (${lastError}); trying another model. Set autoMode.classifierModel in ~/.claude/settings.json to choose one.`,
+			"warning",
+		);
 	}
+
+	// Every candidate was unusable — say which knob fixes it rather than leaving
+	// the user with a gate that blocks everything for no stated reason.
+	return {
+		decision: "block",
+		reason: `No usable auto-mode classifier model (last error: ${lastError}). Set autoMode.classifierModel in ~/.claude/settings.json.`,
+		tier: "unmatched",
+	};
 }

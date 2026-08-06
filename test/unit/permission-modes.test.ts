@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PermissionMode } from "../../extensions/permissions/matcher.ts";
-import { MODE_BADGES, nextMode } from "../../extensions/permissions/modes.ts";
+import { MODE_BADGES, modeBadge, nextMode, shortModelName } from "../../extensions/permissions/modes.ts";
 import { normalizePermissionMode } from "../../extensions/permissions/settings.ts";
 
 describe("nextMode", () => {
@@ -47,6 +47,43 @@ describe("MODE_BADGES", () => {
 		expect(MODE_BADGES.acceptEdits).toBe("⏵⏵ accept edits on");
 		expect(MODE_BADGES.plan).toBe("⏸ plan mode on");
 		expect(MODE_BADGES.auto).toBe("⏵⏵ auto mode on");
+	});
+});
+
+describe("modeBadge", () => {
+	it("leaves non-auto modes as their plain badge", () => {
+		expect(modeBadge("plan", { paused: false })).toBe(MODE_BADGES.plan);
+		expect(modeBadge("acceptEdits", {})).toBe(MODE_BADGES.acceptEdits);
+	});
+
+	it("names the classifier model beside auto mode", () => {
+		// The model reads the user's prompts and CLAUDE.md, so which one it is
+		// belongs on screen rather than buried in a command.
+		expect(modeBadge("auto", { classifierModel: "claude-haiku-4-5" })).toBe("⏵⏵ auto mode on · haiku-4-5");
+	});
+
+	it("says nothing about the model before one is settled", () => {
+		expect(modeBadge("auto", {})).toBe(MODE_BADGES.auto);
+	});
+
+	it("keeps the model visible while paused", () => {
+		expect(modeBadge("auto", { paused: true, classifierModel: "gpt-5-mini" })).toBe("⏸ auto mode paused · 5-mini");
+	});
+
+	it("only shows paused for auto mode", () => {
+		expect(modeBadge("default", { paused: true })).toBe(MODE_BADGES.default);
+	});
+});
+
+describe("shortModelName", () => {
+	it("drops a vendor prefix and a date stamp", () => {
+		expect(shortModelName("anthropic/claude-haiku-4-5-20251001")).toBe("haiku-4-5");
+		expect(shortModelName("google/gemini-2.5-flash")).toBe("2.5-flash");
+	});
+
+	it("leaves an already-short id recognisable", () => {
+		expect(shortModelName("llama-3.3-70b-versatile")).toBe("3.3-70b-versatile");
+		expect(shortModelName("qwen3-coder")).toBe("qwen3-coder");
 	});
 });
 

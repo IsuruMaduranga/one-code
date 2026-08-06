@@ -1083,3 +1083,69 @@ its own.
 Verified live in both directions: "write hello into ~/pincer-named-probe.txt — I
 want that exact path" → `allow (intent)` with a verified quote, file created; the
 delegated-destination backup → `block (S5)`, reported with S5's own text.
+
+### Choosing the classifier model without leaking the session to another provider
+
+The first cut searched the whole registry for a model whose id contained
+`haiku`/`sonnet`/`flash`/`mini`/`small`. Checked against the real catalog (1153
+models, 22 available on this machine), that is wrong in three separate ways.
+
+**It crossed providers, which is the serious one.** On a session running
+`openai-codex/gpt-5.5-codex` with an Anthropic key also configured, it selected
+`anthropic/claude-haiku-4-5` — verified, not theoretical. The classifier receives
+the user's own messages, their CLAUDE.md, and the text of the command being
+judged, so this shipped that content to a vendor the user had not chosen for the
+session, through a component with no UI at all. The invariant now: **never leave
+the session's provider unless `autoMode.classifierModel` says to**, because naming
+a provider is choosing it.
+
+**Name matching does not survive real catalogs.** Of Groq's 7 models and xAI's 3,
+*none* contain any of those substrings, so those providers fell through to the
+session model. OpenRouter has 303 models and 79 substring hits, so "first match"
+was arbitrary. On OpenAI it picked whichever `*mini*` came first in registry order
+rather than `gpt-5-nano` at a fifth the price.
+
+**Cost is the portable signal, but not naively.** Sorting cheapest-first puts
+`openrouter/auto` first at `-1000000` — a sentinel, not a price — and Google's
+free-tier entries at `$0`. Non-positive costs are therefore treated as *unpriced*
+rather than cheap. A per-provider default table covers the catalogs where price
+alone still picks badly, which is what makes OpenRouter tractable.
+
+The resolution order follows the shape pi's own subagent config uses
+(`subagents.defaultModel`, `agentOverrides.<name>.model`, `fallbackModels`,
+session default), and for the same stated reason — pi's docs justify defaulting
+to the session model as keeping "new installs from depending on a provider you
+may not have configured", which is exactly the failure above:
+
+1. `autoMode.classifierModel`, any provider.
+2. A known-good cheap model for the session's provider.
+3. The cheapest genuinely-priced model in that provider, no dearer than the
+   session model — there is no point paying more to screen a call than to make it.
+4. The session's own model: always correct, just not cheap.
+
+More than one candidate is returned on purpose, mirroring `fallbackModels`: a
+model that is unusable *on this account* (401/403/404, quota, not entitled) is
+stepped over and recorded, so it is not retried on every call. A **transient**
+failure is deliberately not stepped over — switching models there would paper over
+something about to clear — so it surfaces as a block and the same model is tried
+again next call. The choice is pinned on first success, so a registry refresh
+cannot swap classifiers mid-session; Claude Code pins the same way.
+
+Two things are now visible that were not. The footer names the model beside
+`auto mode on` (`⏵⏵ auto mode on · haiku-4-5`), and it says nothing until the
+first call settles which model that is, rather than guessing. `/auto-mode config`
+shows the pinned model, the full candidate chain with the reason for each, and
+anything found unusable. A `classifierModel` naming something unavailable used to
+fall through in silence, leaving the user believing their setting was in force;
+it now warns, names the setting, and says what is being used instead.
+
+Verified live: badge empty before the first call and `· haiku-4-5` after, the
+notice naming `anthropic/claude-haiku-4-5 (default for this provider)`, and a
+deliberately bogus `classifierModel` producing the warning plus a working
+fallback rather than a broken gate.
+
+**Still open:** there is no capability floor. Claude Code gates auto mode's
+availability on model tier because a weak classifier is a weak boundary; pincer
+gates only on "a model exists", so a small local model can end up as the gate.
+Refusing auto mode there would remove the feature exactly where self-hosted users
+want it, so a warning on entry is the likelier answer.
