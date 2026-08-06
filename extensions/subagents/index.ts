@@ -23,12 +23,14 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../auto-mode/actions.ts";
 import { type AgentDefinition, type AgentSource, agentDirs, discoverAgents } from "./agents.ts";
-import { loadSubagentDefault } from "./default-model.ts";
+import { applicableSubagentDefault, loadSubagentDefault, persistSubagentModel } from "./default-model.ts";
 import {
 	resolveSubagentModel,
 	SUBAGENT_STATUS_CHANNEL,
 	subagentModelsReminder,
+	subagentStatusModel,
 } from "./model-select.ts";
+import { modelPickerComponent, pickerSpec, toPickerEntries, type PickerEntry } from "../auto-mode/model-picker.ts";
 import { discoverPlugins } from "../lib/plugins.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
@@ -187,7 +189,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	 */
 	const emitModelStatus = (ctx: ExtensionContext, sessionModel = ctx.model) => {
 		const available = ctx.modelRegistry.getAvailable();
-		const configured = loadSubagentDefault(os.homedir());
+		const configured = applicableSubagentDefault(loadSubagentDefault(os.homedir()), sessionModel);
 		const resolution = resolveSubagentModel({ configuredDefault: configured?.spec, sessionModel, available });
 		for (const notice of resolution.notices) notifyModelOnce(ctx, notice);
 		pi.events.emit(REMINDER_CHANNEL, {
@@ -195,12 +197,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			scope: "every-turn",
 			key: "subagent-models",
 		});
-		const differs =
-			resolution.model && sessionModel
-				? `${resolution.model.provider}/${resolution.model.id}` !== `${sessionModel.provider}/${sessionModel.id}`
-				: false;
 		pi.events.emit(SUBAGENT_STATUS_CHANNEL, {
-			model: differs && resolution.model ? `${resolution.model.provider}/${resolution.model.id}` : undefined,
+			model: subagentStatusModel(configured?.spec, resolution.model),
 		});
 	};
 
@@ -423,7 +421,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			 * is said out loud rather than happening silently.
 			 */
 			const available = ctx.modelRegistry.getAvailable();
-			const configuredDefault = loadSubagentDefault(os.homedir());
+			const configuredDefault = applicableSubagentDefault(loadSubagentDefault(os.homedir()), ctx.model);
 			for (const p of prepared) {
 				const resolution = resolveSubagentModel({
 					requested: p.request.model,
@@ -796,6 +794,150 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		description: "List available subagents",
 		handler: async (_args, ctx) => {
 			ctx.ui.notify(`Available agents:\n${describeAgents(ctx.cwd)}`, "info");
+		},
+	});
+
+	const showSubagentModelStatus = (ctx: ExtensionContext) => {
+		const configured = loadSubagentDefault(os.homedir());
+		const applicable = applicableSubagentDefault(configured, ctx.model);
+		const available = ctx.modelRegistry.getAvailable();
+		const resolution = resolveSubagentModel({
+			configuredDefault: applicable?.spec,
+			sessionModel: ctx.model,
+			available,
+		});
+		ctx.ui.notify(
+			[
+				configured
+					? `subagentModel: ${configured.spec} (from the ${configured.source})` +
+						(applicable ? "" : " — not applied: CLAUDE_CODE_SUBAGENT_MODEL is Claude Code's knob, and this session is not on a Claude model")
+					: "subagentModel: (not set)",
+				`effective: ${resolution.model ? `${resolution.model.provider}/${resolution.model.id}` : "none"}`,
+				...(resolution.notices.length ? [resolution.notices.join("\n")] : []),
+				"Set it with /subagent <provider/model-id|sonnet|opus|haiku|fable|inherit>, or clear with /subagent clear.",
+			].join("\n"),
+			"info",
+		);
+	};
+
+	/**
+	 * Persist a chosen subagent default. `inherit` is literal (session model,
+	 * no auth needed); any other spec is validated against the registry and its
+	 * auth checked before saving — a default with no credentials would fail
+	 * every subagent spawn. The value is saved as the literal spec, so an alias
+	 * like `sonnet` keeps per-session alias semantics (see model-select.ts).
+	 */
+	const applySubagentModelChoice = async (spec: string, ctx: ExtensionContext): Promise<void> => {
+		if (spec === "inherit") {
+			try {
+				persistSubagentModel("inherit", os.homedir());
+			} catch (error) {
+				ctx.ui.notify("Could not save subagent model: " + (error as Error).message, "error");
+				return;
+			}
+			emitModelStatus(ctx);
+			ctx.ui.notify('Subagent default set to the session model ("inherit", saved to ~/.claude/settings.json).', "info");
+			return;
+		}
+
+		const available = ctx.modelRegistry.getAvailable();
+		const resolution = resolveSubagentModel({ requested: spec, sessionModel: ctx.model, available });
+		if (resolution.unresolved) {
+			const fallbackDefault = resolveSubagentModel({
+				configuredDefault: applicableSubagentDefault(loadSubagentDefault(os.homedir()), ctx.model)?.spec,
+				sessionModel: ctx.model,
+				available,
+			}).model;
+			ctx.ui.notify(
+				`No available model matches "${spec}".\n\n` +
+					subagentModelsReminder({ available, sessionModel: ctx.model, defaultModel: fallbackDefault }),
+				"error",
+			);
+			return;
+		}
+		const resolved = resolution.model;
+		if (resolved) {
+			const auth = await ctx.modelRegistry.getApiKeyAndHeaders(resolved);
+			if (!auth.ok) {
+				ctx.ui.notify(`Cannot use ${resolved.provider}/${resolved.id}: ${auth.error}. Not saved.`, "error");
+				return;
+			}
+		}
+		try {
+			persistSubagentModel(spec, os.homedir());
+		} catch (error) {
+			ctx.ui.notify("Could not save subagent model: " + (error as Error).message, "error");
+			return;
+		}
+		emitModelStatus(ctx);
+		ctx.ui.notify(`Subagent default set to "${spec}" (saved to ~/.claude/settings.json).`, "info");
+	};
+
+	pi.registerCommand("subagent", {
+		description: "Set the default model for subagent/workflow runs: /subagent [provider/model-id|inherit|status|clear]",
+		getArgumentCompletions: (prefix) =>
+			["inherit", "status", "clear"]
+				.filter((value) => value.startsWith(prefix.trim().toLowerCase()))
+				.map((value) => ({ value, label: value })),
+		handler: async (args, ctx) => {
+			const typed = args.trim();
+			if (typed === "clear") {
+				try {
+					persistSubagentModel(undefined, os.homedir());
+				} catch (error) {
+					ctx.ui.notify("Could not update settings: " + (error as Error).message, "error");
+					return;
+				}
+				emitModelStatus(ctx);
+				ctx.ui.notify(
+					"subagentModel cleared — the default is whatever CLAUDE_CODE_SUBAGENT_MODEL or managed settings say (else the session model).",
+					"info",
+				);
+				return;
+			}
+			if (typed === "inherit") {
+				await applySubagentModelChoice("inherit", ctx);
+				return;
+			}
+			if (typed === "status") {
+				showSubagentModelStatus(ctx);
+				return;
+			}
+			if (typed) {
+				await applySubagentModelChoice(typed, ctx);
+				return;
+			}
+
+			// The picker needs focus and a terminal; elsewhere show status.
+			if (!ctx.hasUI || ctx.mode !== "tui") {
+				showSubagentModelStatus(ctx);
+				return;
+			}
+			const available = ctx.modelRegistry.getAvailable();
+			if (available.length === 0) {
+				ctx.ui.notify("No models are available — authenticate a provider first.", "warning");
+				return;
+			}
+			const configured = loadSubagentDefault(os.homedir());
+			const current = configured && configured.spec.includes("/") ? configured.spec : undefined;
+			const entries = toPickerEntries(available);
+
+			const chosen = await ctx.ui.custom<PickerEntry | null>((tui, theme, _keybindings, done) =>
+				modelPickerComponent(
+					{
+						entries,
+						current,
+						title: "Select the default subagent model",
+						subtitle:
+							"Default for subagent/workflow runs unless overridden · type to filter · ↑/↓ · enter · esc",
+					},
+					tui,
+					theme,
+					done,
+				),
+			);
+
+			if (chosen) await applySubagentModelChoice(pickerSpec(chosen), ctx);
 		},
 	});
 }

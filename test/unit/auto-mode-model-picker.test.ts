@@ -91,6 +91,16 @@ describe("renderModelPicker", () => {
 		expect(lines).toContain("reads your prompts");
 	});
 
+	it("uses a caller-provided title and subtitle in place of the classifier copy", () => {
+		const lines = renderModelPicker(
+			{ entries, index: 0, query: "", total: entries.length, title: "Select the default subagent model", subtitle: "Sets which model subagent runs use." },
+			plain,
+		).join("\n");
+		expect(lines).toContain("Select the default subagent model");
+		expect(lines).toContain("Sets which model subagent runs use.");
+		expect(lines).not.toContain("reads your prompts");
+	});
+
 	it("says so when nothing matches", () => {
 		const lines = renderModelPicker({ entries: [], index: 0, query: "zzz", total: 4 }, plain).join("\n");
 		expect(lines).toContain("no available model matches");

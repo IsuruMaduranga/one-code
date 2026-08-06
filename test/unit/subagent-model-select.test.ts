@@ -1,13 +1,18 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { loadSubagentDefault } from "../../extensions/subagents/default-model.ts";
+import {
+	applicableSubagentDefault,
+	loadSubagentDefault,
+	persistSubagentModel,
+} from "../../extensions/subagents/default-model.ts";
 import {
 	crossesProvider,
 	resolveSubagentModel,
 	subagentModelMenu,
 	subagentModelsReminder,
+	subagentStatusModel,
 } from "../../extensions/subagents/model-select.ts";
 
 /** Minimal structural stand-in; only provider/id/cost are consulted. */
@@ -224,5 +229,102 @@ describe("loadSubagentDefault", () => {
 
 	it("returns undefined when nothing is configured", () => {
 		expect(loadSubagentDefault(home, {})).toBeUndefined();
+	});
+});
+
+describe("applicableSubagentDefault", () => {
+	const setting = { spec: "openai/gpt-5-mini", source: "subagentModel setting" } as const;
+	const envVar = { spec: "sonnet", source: "CLAUDE_CODE_SUBAGENT_MODEL" } as const;
+
+	it("applies pincer's own setting on any provider", () => {
+		expect(applicableSubagentDefault(setting, openai[0])).toBe(setting);
+		expect(applicableSubagentDefault(setting, anthropic[0])).toBe(setting);
+	});
+
+	it("applies the Claude Code env var only to Claude-family sessions", () => {
+		expect(applicableSubagentDefault(envVar, anthropic[0])).toBe(envVar);
+		// A Claude model on another provider still speaks the alias vocabulary.
+		expect(applicableSubagentDefault(envVar, model("opencode", "claude-sonnet-5", 3))).toBe(envVar);
+		// Claude Code's knob must not move an openai session's subagents.
+		expect(applicableSubagentDefault(envVar, openai[0])).toBeUndefined();
+	});
+
+	it("passes through when nothing is configured or there is no session model", () => {
+		expect(applicableSubagentDefault(undefined, openai[0])).toBeUndefined();
+		expect(applicableSubagentDefault(envVar, undefined)).toBe(envVar);
+	});
+});
+
+describe("subagentStatusModel", () => {
+	it("shows the resolved default even when it equals the session model", () => {
+		// A user who just ran /subagent must see their choice land in the banner;
+		// hiding it because it happens to match the session reads as "not saved".
+		expect(subagentStatusModel("anthropic/claude-sonnet-5", anthropic[1])).toBe("anthropic/claude-sonnet-5");
+	});
+
+	it("shows what actually runs when the configured spec degraded to another model", () => {
+		expect(subagentStatusModel("sonnet", openai[0])).toBe("openai/gpt-5.1");
+	});
+
+	it("hides for inherit, unset, and unresolvable defaults", () => {
+		expect(subagentStatusModel("inherit", anthropic[0])).toBeUndefined();
+		expect(subagentStatusModel(" Inherit ", anthropic[0])).toBeUndefined();
+		expect(subagentStatusModel(undefined, anthropic[0])).toBeUndefined();
+		expect(subagentStatusModel("anthropic/claude-sonnet-5", undefined)).toBeUndefined();
+	});
+});
+
+describe("persistSubagentModel", () => {
+	let home: string;
+
+	beforeEach(() => {
+		home = mkdtempSync(join(tmpdir(), "cc-subagent-persist-"));
+		mkdirSync(join(home, ".claude"), { recursive: true });
+	});
+
+	afterEach(() => {
+		rmSync(home, { recursive: true, force: true });
+	});
+
+	const settingsPath = () => join(home, ".claude", "settings.json");
+	const readSettings = () => JSON.parse(readFileSync(settingsPath(), "utf-8"));
+
+	it("creates the settings file when there is none", () => {
+		rmSync(join(home, ".claude"), { recursive: true, force: true });
+		persistSubagentModel("openai/gpt-5-mini", home);
+		expect(readSettings()).toEqual({ subagentModel: "openai/gpt-5-mini" });
+	});
+
+	it("preserves unrelated keys", () => {
+		writeFileSync(
+			settingsPath(),
+			JSON.stringify({ env: { CLAUDE_CODE_SUBAGENT_MODEL: "sonnet" }, permissions: { allow: ["Bash(npm test:*)"] } }),
+		);
+		persistSubagentModel("anthropic/claude-haiku-4-5", home);
+		expect(readSettings()).toEqual({
+			env: { CLAUDE_CODE_SUBAGENT_MODEL: "sonnet" },
+			permissions: { allow: ["Bash(npm test:*)"] },
+			subagentModel: "anthropic/claude-haiku-4-5",
+		});
+	});
+
+	it("wins over the env var once saved, and round-trips through the loader", () => {
+		writeFileSync(settingsPath(), JSON.stringify({ env: { CLAUDE_CODE_SUBAGENT_MODEL: "sonnet" } }));
+		persistSubagentModel("inherit", home);
+		expect(loadSubagentDefault(home, {})).toEqual({ spec: "inherit", source: "subagentModel setting" });
+	});
+
+	it("removes the setting on clear", () => {
+		writeFileSync(settingsPath(), JSON.stringify({ subagentModel: "openai/gpt-5-mini" }));
+		persistSubagentModel(undefined, home);
+		expect(readSettings()).toEqual({});
+	});
+
+	it("refuses to clobber a malformed settings file", () => {
+		// A lenient read merely skips a setting; a lenient write would replace
+		// the user's whole settings file with only ours.
+		writeFileSync(settingsPath(), "{not json");
+		expect(() => persistSubagentModel("openai/gpt-5-mini", home)).toThrow();
+		expect(readFileSync(settingsPath(), "utf-8")).toBe("{not json");
 	});
 });

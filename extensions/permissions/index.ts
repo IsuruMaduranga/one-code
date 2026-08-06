@@ -34,13 +34,7 @@ import {
 	loadAutoModeConfigWithDiagnostics,
 	persistClassifierModel,
 } from "../auto-mode/config.ts";
-import {
-	decodePickerKey,
-	filterEntries,
-	type PickerEntry,
-	pickerSpec,
-	renderModelPicker,
-} from "../auto-mode/model-picker.ts";
+import { modelPickerComponent, type PickerEntry, pickerSpec, toPickerEntries } from "../auto-mode/model-picker.ts";
 import { DEFAULT_ALLOW, DEFAULT_ENVIRONMENT, DEFAULT_HARD_DENY, DEFAULT_SOFT_DENY } from "../auto-mode/defaults.ts";
 import { appendDecision, type DecisionEntry, decisionEntry } from "../auto-mode/decision-log.ts";
 import { loadProjectInstructions } from "../auto-mode/instructions.ts";
@@ -715,49 +709,11 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 
 		autoConfig ??= loadAutoModeConfig(os.homedir());
 		const current = autoConfig.classifierModel;
-		const entries: PickerEntry[] = available
-			.map((model) => ({
-				provider: model.provider,
-				id: model.id,
-				inputPrice: typeof model.cost?.input === "number" && model.cost.input > 0 ? model.cost.input : undefined,
-			}))
-			.sort((a, b) => pickerSpec(a).localeCompare(pickerSpec(b)));
+		const entries = toPickerEntries(available);
 
-		const chosen = await ctx.ui.custom<PickerEntry | null>((tui, theme, _keybindings, done) => {
-			const paint = (color: string, text: string) => {
-				const themed = theme as { fg?(c: string, t: string): string } | undefined;
-				try {
-					return themed?.fg ? themed.fg(color, text) : text;
-				} catch {
-					return text;
-				}
-			};
-			let query = "";
-			let index = 0;
-			let filtered = entries;
-			return {
-				render: () => [
-					"",
-					...renderModelPicker({ entries: filtered, index, query, total: entries.length, current }, paint),
-					"",
-				],
-				handleInput: (data: string) => {
-					const key = decodePickerKey(data);
-					if (!key) return;
-					if (key.kind === "cancel") return done(null);
-					if (key.kind === "confirm") return done(filtered[index] ?? null);
-					if (key.kind === "up") index = Math.max(0, index - 1);
-					else if (key.kind === "down") index = Math.min(filtered.length - 1, index + 1);
-					else {
-						query = key.kind === "backspace" ? query.slice(0, -1) : query + key.text;
-						filtered = filterEntries(entries, query);
-						index = 0;
-					}
-					tui.requestRender();
-				},
-				invalidate: () => {},
-			};
-		});
+		const chosen = await ctx.ui.custom<PickerEntry | null>((tui, theme, _keybindings, done) =>
+			modelPickerComponent({ entries, current }, tui, theme, done),
+		);
 
 		if (chosen) await applyClassifierChoice(pickerSpec(chosen), ctx);
 	};

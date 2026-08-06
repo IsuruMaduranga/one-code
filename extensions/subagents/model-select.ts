@@ -47,8 +47,20 @@ import {
 export const SUBAGENT_STATUS_CHANNEL = "pincer:subagent-status";
 
 export interface SubagentStatus {
-	/** `provider/id`, set only when the default differs from the session model. */
+	/** `provider/id`, set whenever a subagent default is explicitly configured. */
 	model?: string;
+}
+
+/**
+ * What the banner's `subagents` slot shows: the resolved default whenever one
+ * is explicitly configured — even when it equals the session model, because a
+ * user who just ran `/subagent` must see their choice land. Unset and
+ * `inherit` both mean "the session model", which the banner already shows.
+ */
+export function subagentStatusModel(configuredSpec: string | undefined, resolved: Model<Api> | undefined): string | undefined {
+	const wanted = configuredSpec?.trim().toLowerCase();
+	if (!wanted || wanted === "inherit" || !resolved) return undefined;
+	return spec(resolved);
 }
 
 /** Claude Code's Agent-tool aliases, resolved as name matches within the session's provider. */
@@ -231,7 +243,7 @@ export function subagentModelMenu({ available, sessionModel, defaultModel, maxCh
 export function subagentModelsReminder(options: MenuOptions): string {
 	const menu = subagentModelMenu(options);
 	return [
-		"Models for the subagent/workflow `model` field (omit it to use the default):",
+		"Models for the subagent/workflow `model` field (omit it to use the default; set the default with /subagent):",
 		...menu,
 		'Aliases sonnet|opus|haiku|fable resolve within this session\'s provider; "inherit" means the session model. ' +
 			"Any exact provider/model-id the user asked for also works, even from another provider (that is announced to the user) or unlisted here — this is a menu, not a whitelist.",

@@ -14,11 +14,17 @@
  *   `autoMode.classifierModel`. Wins over the env var when both are set,
  *   because it is the more specific statement of intent.
  *
+ * The env var additionally applies only to Claude-family sessions (see
+ * `applicableSubagentDefault`): it is Claude Code's knob, and its typical
+ * values ("sonnet") were written for Anthropic models. On any other provider
+ * the session model serves, unless the user overrides with `subagentModel`.
+ *
  * The value is a spec, not a model: "sonnet", "inherit", or "provider/id" all
  * pass through to resolveSubagentModel, which owns the semantics.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { autoModeSettingsPaths } from "../auto-mode/config.ts";
 
 export interface SubagentDefault {
@@ -65,4 +71,51 @@ export function loadSubagentDefault(home: string, env: NodeJS.ProcessEnv = proce
 	if (settingsEnv) return { spec: settingsEnv, source: "CLAUDE_CODE_SUBAGENT_MODEL" };
 
 	return undefined;
+}
+
+/**
+ * The configured default that actually applies to this session.
+ *
+ * `subagentModel` is pincer's own setting — the user told *this* harness what
+ * subagents run on, so it applies on any provider. `CLAUDE_CODE_SUBAGENT_MODEL`
+ * was written for Claude Code, almost always as an Anthropic alias ("sonnet"),
+ * so it applies only when the session is already on a Claude model — borrowing
+ * it elsewhere silently moved subagent work off the provider the user chose
+ * for this session (observed live: an opencode deepseek session's subagents
+ * landing on claude-sonnet-5 because a settings `env` block said "sonnet").
+ */
+export function applicableSubagentDefault(
+	configured: SubagentDefault | undefined,
+	sessionModel: { provider: string; id: string } | undefined,
+): SubagentDefault | undefined {
+	if (!configured || configured.source === "subagentModel setting") return configured;
+	if (!sessionModel) return configured;
+	const claudeFamily = sessionModel.provider === "anthropic" || /claude/i.test(sessionModel.id);
+	return claudeFamily ? configured : undefined;
+}
+
+/**
+ * Persist `subagentModel` in the *user* settings file, preserving every other
+ * key. `undefined` removes the setting. Always user scope, like the loader:
+ * the default may move subagent work to another provider, so it lives where
+ * only the user writes — never in a project file (see the module comment).
+ *
+ * Unlike loading, this throws on a malformed file: a lenient read merely
+ * skips a setting, but a lenient write would replace the user's whole
+ * settings file with only ours.
+ */
+export function persistSubagentModel(spec: string | undefined, home: string): void {
+	const path = join(home, ".claude", "settings.json");
+	let file: Record<string, unknown> = {};
+	if (existsSync(path)) {
+		const parsed = JSON.parse(readFileSync(path, "utf-8")) as unknown;
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+			throw new Error(`${path}: root must be a JSON object`);
+		}
+		file = parsed as Record<string, unknown>;
+	}
+	if (spec === undefined) delete file.subagentModel;
+	else file.subagentModel = spec;
+	mkdirSync(dirname(path), { recursive: true });
+	writeFileSync(path, `${JSON.stringify(file, null, 2)}\n`);
 }

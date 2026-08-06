@@ -107,18 +107,98 @@ export interface PickerView {
 	/** The currently configured spec, marked in the listing. */
 	current?: string;
 	maxVisible?: number;
+	/** Picker header; defaults to the auto-mode classifier copy. */
+	title?: string;
+	subtitle?: string;
 }
 
 const formatPrice = (price?: number): string => (price === undefined ? "" : `$${price}/M in`);
 
+/** Picker entries from a model catalog, sorted by spec, non-positive prices treated as unpriced. */
+export function toPickerEntries(models: { provider: string; id: string; cost?: { input?: number } }[]): PickerEntry[] {
+	return models
+		.map((model) => ({
+			provider: model.provider,
+			id: model.id,
+			inputPrice: typeof model.cost?.input === "number" && model.cost.input > 0 ? model.cost.input : undefined,
+		}))
+		.sort((a, b) => pickerSpec(a).localeCompare(pickerSpec(b)));
+}
+
+export interface PickerComponentOptions {
+	entries: PickerEntry[];
+	current?: string;
+	title?: string;
+	subtitle?: string;
+}
+
+/**
+ * The `ctx.ui.custom` component behind `/auto-mode model` and `/subagent`:
+ * filter-as-you-type over the entries, enter confirms, esc cancels. Kept here
+ * (structurally typed, no pi imports) so both commands share one keyboard
+ * loop instead of drifting copies.
+ */
+export function modelPickerComponent(
+	options: PickerComponentOptions,
+	tui: { requestRender(): void },
+	theme: unknown,
+	done: (choice: PickerEntry | null) => void,
+): { render(): string[]; handleInput(data: string): void; invalidate(): void } {
+	const paint: Paint = (color, text) => {
+		const themed = theme as { fg?(c: string, t: string): string } | undefined;
+		try {
+			return themed?.fg ? themed.fg(color, text) : text;
+		} catch {
+			return text;
+		}
+	};
+	let query = "";
+	let index = 0;
+	let filtered = options.entries;
+	return {
+		render: () => [
+			"",
+			...renderModelPicker(
+				{
+					entries: filtered,
+					index,
+					query,
+					total: options.entries.length,
+					current: options.current,
+					title: options.title,
+					subtitle: options.subtitle,
+				},
+				paint,
+			),
+			"",
+		],
+		handleInput: (data: string) => {
+			const key = decodePickerKey(data);
+			if (!key) return;
+			if (key.kind === "cancel") return done(null);
+			if (key.kind === "confirm") return done(filtered[index] ?? null);
+			if (key.kind === "up") index = Math.max(0, index - 1);
+			else if (key.kind === "down") index = Math.min(filtered.length - 1, index + 1);
+			else {
+				query = key.kind === "backspace" ? query.slice(0, -1) : query + key.text;
+				filtered = filterEntries(options.entries, query);
+				index = 0;
+			}
+			tui.requestRender();
+		},
+		invalidate: () => {},
+	};
+}
+
 export function renderModelPicker(view: PickerView, paint: Paint): string[] {
 	const maxVisible = view.maxVisible ?? 10;
 	const lines: string[] = [];
-	lines.push(paint("accent", "Select the auto-mode classifier model"));
+	lines.push(paint("accent", view.title ?? "Select the auto-mode classifier model"));
 	lines.push(
 		paint(
 			"dim",
-			"It reads your prompts and CLAUDE.md — picking another provider sends them there. type to filter · ↑/↓ · enter · esc",
+			view.subtitle ??
+				"It reads your prompts and CLAUDE.md — picking another provider sends them there. type to filter · ↑/↓ · enter · esc",
 		),
 	);
 	lines.push(`  filter: ${view.query}${paint("dim", "▏")}`);
