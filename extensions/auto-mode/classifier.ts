@@ -165,8 +165,21 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 				// invisible — which is the harder one to notice and the more costly one
 				// to get wrong. `CC_AUTO_MODE_DEBUG=1` puts the raw reply on stderr.
 				if (process.env.CC_AUTO_MODE_DEBUG === "1") {
+					const u = reply.usage as
+						| { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; cost?: unknown }
+						| undefined;
+					const cost = u?.cost;
+					const spend =
+						cost && typeof cost === "object"
+							? Object.entries(cost as Record<string, unknown>)
+									.filter(([, value]) => typeof value === "number" && value > 0)
+									.map(([name, value]) => `${name}=$${(value as number).toFixed(6)}`)
+									.join(" ")
+							: "";
 					process.stderr.write(
-						`[auto-mode] ${key} ${request.toolName} → ${verdict.decision}${verdict.ruleId ? ` (${verdict.ruleId})` : ""}\n  raw: ${text.replace(/\s+/g, " ").slice(0, 600)}\n`,
+						`[auto-mode] ${key} ${request.toolName} → ${verdict.decision}${verdict.ruleId ? ` (${verdict.ruleId})` : ""}\n` +
+							`  usage: in=${u?.input ?? "?"} out=${u?.output ?? "?"} cacheRead=${u?.cacheRead ?? 0} cacheWrite=${u?.cacheWrite ?? 0} ${spend}\n` +
+							`  raw: ${text.replace(/\s+/g, " ").slice(0, 400)}\n`,
 					);
 				}
 				return verdict;
