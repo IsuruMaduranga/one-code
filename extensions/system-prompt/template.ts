@@ -12,6 +12,7 @@
 
 import { formatSkillsForPrompt, type BuildSystemPromptOptions } from "@earendil-works/pi-coding-agent";
 import { memoryPromptSection } from "../lib/memory.ts";
+import { scratchpadPromptSection } from "../lib/scratchpad.ts";
 import type { EnvironmentInfo } from "./environment.ts";
 
 const IDENTITY = `You are pincer, an interactive agent that helps users with software engineering tasks, running on the pi agent harness.
@@ -79,7 +80,16 @@ function buildEnvironmentSection(env: EnvironmentInfo): string {
  - Model: ${env.modelLine}`;
 }
 
-export function buildClaudeCodeSystemPrompt(options: BuildSystemPromptOptions, env: EnvironmentInfo): string {
+export function buildClaudeCodeSystemPrompt(
+	options: BuildSystemPromptOptions,
+	env: EnvironmentInfo,
+	/**
+	 * Per-session (it embeds the session id), so it rides outside the
+	 * (cwd, model)-cached EnvironmentInfo — constant within a session, which is
+	 * all provider prompt caching needs.
+	 */
+	scratchpadDir?: string,
+): string {
 	const sections = [
 		IDENTITY,
 		HARNESS,
@@ -88,6 +98,8 @@ export function buildClaudeCodeSystemPrompt(options: BuildSystemPromptOptions, e
 		// Claude Code orders Memory just before Environment.
 		memoryPromptSection(env.memoryDir),
 		buildEnvironmentSection(env),
+		// Claude Code orders Scratchpad between Environment and Context management.
+		...(scratchpadDir ? [scratchpadPromptSection(scratchpadDir)] : []),
 		CONTEXT_MANAGEMENT,
 		DELIVERING_WORK,
 		CORRECTIONS,

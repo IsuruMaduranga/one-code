@@ -1766,3 +1766,39 @@ the protected-path check:
   nothing on macOS, and every memory write silently fell through to the
   protected-path check — visible only because the live run was checked before
   committing.
+
+## Session scratchpad, Claude Code-style
+
+Claude Code gives every session a scratchpad
+(`<tmp>/claude-<uid>/<project-slug>/<session-id>/scratchpad`) via a system
+prompt section and lets it be used "generally without permission prompts";
+pincer had nothing, so temp files landed in `/tmp` or the project — and in
+auto mode, `/tmp` writes are exactly the out-of-project pattern the classifier
+flags. Same failure family as the memory-dir block, fixed with the same
+mechanism:
+
+- `lib/scratchpad.ts` derives the path (pure core + `sessionScratchpadDir`
+  re-derived by every consumer, per the jiti module-isolation rule) and
+  carries the prompt section verbatim from `payload.json`. `/tmp` is resolved
+  through its symlink up front so the prompt, the permission comparison, and
+  the case-folded resolved subject all name one real location.
+- The system-prompt extension mkdirs it at `session_start` and renders the
+  section. The path embeds the session id, so it deliberately lives *outside*
+  the (cwd, model)-cached environment block — constant within a session, which
+  is all provider prompt caching needs. An unwritable tmp drops the section
+  rather than promising a directory writes will error on.
+- `decide()` grew a `scratchpadDirPath` beside `memoryDirPath` — one shared
+  `isInsideDir` check (resolved subject, case-folded, traversal-safe), deny
+  and ask rules still winning, other sessions' scratchpads and bare `/tmp`
+  not cleared. The workflow gate derives the *child's* scratchpad lazily from
+  its first tool call, since the child session id does not exist when the
+  gate is constructed.
+- The write tools get the deterministic allow; bash into the scratchpad still
+  goes to the classifier, so the outside-cwd default rule now names the
+  harness's designated directories (scratchpad, auto-memory) as clearing it.
+
+Verified live without `--dangerously-skip-permissions`: a plain `-p` session
+was asked for "a temporary file in the right place per your instructions",
+wrote `notes.txt` into its own session scratchpad path, and the file was on
+disk — no prompt, correct slug and session id. Typecheck and 711 unit tests
+pass.

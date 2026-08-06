@@ -45,6 +45,7 @@ import { safetyControlWrite } from "../auto-mode/safety-floor.ts";
 import { analyzeShellCommand, type ShellEvidence } from "../auto-mode/shell-analysis.ts";
 import { findGitRoot } from "../lib/git.ts";
 import { memoryDir } from "../lib/memory.ts";
+import { sessionScratchpadDir } from "../lib/scratchpad.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import {
 	decide,
@@ -125,11 +126,12 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	/** Plan mode's one writable file, announced by the plan-mode extension. */
 	let planFilePath: string | undefined;
 	/**
-	 * The session's auto-memory dir, re-derived rather than shared with the
-	 * memory extension (jiti isolates module state); decide() allows writes
-	 * landing inside it.
+	 * The session's auto-memory and scratchpad dirs, re-derived rather than
+	 * shared with the extensions that own them (jiti isolates module state);
+	 * decide() allows writes landing inside them.
 	 */
 	let memoryDirPath: string | undefined;
+	let scratchpadDirPath: string | undefined;
 
 	/**
 	 * Mode changes arrive over the event bus too (plan-mode tools), where no ctx
@@ -350,6 +352,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
 		badgeCtx = ctx;
 		memoryDirPath = memoryDir(os.homedir(), findGitRoot(ctx.cwd) ?? ctx.cwd);
+		scratchpadDirPath = sessionScratchpadDir(ctx.cwd, ctx.sessionManager.getSessionId());
 		reloadSettings(ctx);
 		applyBadge();
 	});
@@ -401,6 +404,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			resolvedSubject,
 			planFilePath,
 			memoryDirPath,
+			scratchpadDirPath,
 		});
 
 		/**

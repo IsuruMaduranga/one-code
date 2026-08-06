@@ -395,4 +395,37 @@ describe("decide", () => {
 			expect(decide({ ...base, mode: "auto", toolName: "write", subject: memoryFile }).decision).toBe("classify");
 		});
 	});
+
+	describe("scratchpad dir", () => {
+		// Same machinery as the memory dir (isInsideDir); these pin the wiring.
+		const scratchpadDirPath = "/private/tmp/claude-501/-home-user-project/abc-123/scratchpad";
+		const withScratchpad = { ...base, scratchpadDirPath };
+
+		it("allows writes into the session scratchpad, in auto mode too", () => {
+			for (const mode of ["default", "auto"] as const) {
+				const d = decide({ ...withScratchpad, mode, toolName: "write", subject: `${scratchpadDirPath}/notes.md` });
+				expect(d.decision, mode).toBe("allow");
+				expect(d.cause, mode).toBe("scratchpad-dir");
+			}
+		});
+
+		it("does not clear other sessions' scratchpads or bare /tmp", () => {
+			const other = "/private/tmp/claude-501/-home-user-project/other-session/scratchpad/x.md";
+			expect(decide({ ...withScratchpad, mode: "auto", toolName: "write", subject: other }).decision).toBe("classify");
+			expect(decide({ ...withScratchpad, mode: "auto", toolName: "write", subject: "/tmp/x.md" }).decision).toBe(
+				"classify",
+			);
+		});
+
+		it("deny rules still win over the scratchpad", () => {
+			expect(
+				decide({
+					...withScratchpad,
+					toolName: "write",
+					subject: `${scratchpadDirPath}/x.md`,
+					deny: rules(["Write(/private/tmp/**)"]),
+				}).decision,
+			).toBe("deny");
+		});
+	});
 });

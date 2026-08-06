@@ -174,18 +174,19 @@ export function isPlanFilePath(candidate: string, planFilePath: string, cwd: str
 }
 
 /**
- * Whether `candidate` lands *inside* the session's auto-memory directory.
- * `resolve()` normalizes `..` segments first, so a traversal spelled through
- * the memory dir does not clear. Compared case-folded, like isProtectedPath:
- * the resolved subject arrives case-folded from `resolveForContainment`.
+ * Whether `candidate` lands *inside* `dir` (a harness-designated session
+ * directory: the auto-memory dir, the scratchpad). `resolve()` normalizes
+ * `..` segments first, so a traversal spelled through the dir does not clear.
+ * Compared case-folded, like isProtectedPath: the resolved subject arrives
+ * case-folded from `resolveForContainment`.
  */
-export function isInMemoryDir(candidate: string, memoryDirPath: string, cwd: string): boolean {
+export function isInsideDir(candidate: string, dir: string, cwd: string): boolean {
 	const home = homedir();
 	const toAbsolute = (p: string) => {
 		const expanded = p.startsWith("~/") ? `${home}/${p.slice(2)}` : p;
 		return resolve(cwd, expanded).toLowerCase();
 	};
-	return toAbsolute(candidate).startsWith(toAbsolute(memoryDirPath) + sep);
+	return toAbsolute(candidate).startsWith(toAbsolute(dir) + sep);
 }
 
 export function ruleMatches(rule: PermissionRule, toolName: string, subject: string, cwd: string): boolean {
@@ -285,6 +286,12 @@ export interface DecideInput {
 	 * itself instructs them — though deny and ask rules still win.
 	 */
 	memoryDirPath?: string;
+	/**
+	 * The session's scratchpad directory (see extensions/lib/scratchpad); the
+	 * system prompt directs all temp files there, with the same treatment as
+	 * the memory dir.
+	 */
+	scratchpadDirPath?: string;
 }
 
 export interface Decision {
@@ -292,7 +299,7 @@ export interface Decision {
 	/** Rule that determined the outcome, when one did. */
 	rule?: PermissionRule;
 	/** Why, for deny/ask decisions surfaced to the model or user. */
-	cause: "rule" | "plan-mode" | "plan-file" | "memory-dir" | "mode" | "tier" | "protected-path";
+	cause: "rule" | "plan-mode" | "plan-file" | "memory-dir" | "scratchpad-dir" | "mode" | "tier" | "protected-path";
 }
 
 /**
@@ -384,22 +391,26 @@ export function decide(params: DecideInput): Decision {
 	if (askRule) return askOrDeny(askRule);
 
 	/**
-	 * The session's own auto-memory directory is harness-designated working
-	 * space, like plan mode's plan file: the system prompt instructs the model
-	 * to write memories there, so gating those writes (outside-cwd, and under
-	 * the protected `.claude` dir) makes the harness block its own feature —
-	 * auto mode's classifier was correctly flagging them as out-of-project
-	 * writes. This clears *only* the exact per-project dir passed in; any other
-	 * path under `.claude`, including another project's memory dir, still hits
-	 * the protected-path check below.
+	 * The session's own auto-memory and scratchpad directories are
+	 * harness-designated working space, like plan mode's plan file: the system
+	 * prompt instructs the model to write memories and temp files there, so
+	 * gating those writes (outside-cwd, and for memory under the protected
+	 * `.claude` dir) makes the harness block its own feature — auto mode's
+	 * classifier was correctly flagging them as out-of-project writes. This
+	 * clears *only* the exact per-session dirs passed in; any other path under
+	 * `.claude` or `/tmp` gets no special treatment. The resolved form is
+	 * where the write actually lands, so it is the one judged — a symlink
+	 * planted inside a session dir must not turn this into an allow for
+	 * wherever it points.
 	 */
-	const memoryDir = params.memoryDirPath;
-	if (memoryDir && isWritingTool(normalizeToolName(toolName)) && subject) {
-		// The resolved form is where the write actually lands, so it is the one
-		// that must be inside the dir — a symlink planted in the memory dir must
-		// not turn this into an allow for wherever it points.
-		const memoryTarget = isInMemoryDir(params.resolvedSubject ?? subject, memoryDir, cwd);
-		if (memoryTarget) return { decision: "allow", cause: "memory-dir" };
+	if (isWritingTool(normalizeToolName(toolName)) && subject) {
+		const target = params.resolvedSubject ?? subject;
+		for (const { dir, cause } of [
+			{ dir: params.memoryDirPath, cause: "memory-dir" as const },
+			{ dir: params.scratchpadDirPath, cause: "scratchpad-dir" as const },
+		]) {
+			if (dir && isInsideDir(target, dir, cwd)) return { decision: "allow", cause };
+		}
 	}
 
 	// Protected-path writes are checked *before* allow rules, so an

@@ -33,6 +33,16 @@ describe("buildClaudeCodeSystemPrompt", () => {
 		expect(prompt).toContain("Model: claude-opus-5 (anthropic)");
 	});
 
+	it("includes the scratchpad section after the environment block, only when a dir exists", () => {
+		const scratchpad = "/private/tmp/claude-501/-tmp-project/abc-123/scratchpad";
+		const prompt = buildClaudeCodeSystemPrompt(baseOptions, env, scratchpad);
+		expect(prompt).toContain("# Scratchpad Directory");
+		expect(prompt).toContain(scratchpad);
+		expect(prompt.indexOf("# Environment")).toBeLessThan(prompt.indexOf("# Scratchpad Directory"));
+		// An unwritable /tmp drops the section rather than promising a dead dir.
+		expect(buildClaudeCodeSystemPrompt(baseOptions, env)).not.toContain("# Scratchpad Directory");
+	});
+
 	it("includes the memory section just before the environment block", () => {
 		const prompt = buildClaudeCodeSystemPrompt(baseOptions, env);
 		expect(prompt).toContain("# Memory");

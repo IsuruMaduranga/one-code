@@ -16,6 +16,7 @@
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 import { findGitRoot } from "../lib/git.ts";
 import { memoryDir } from "../lib/memory.ts";
+import { sessionScratchpadDir } from "../lib/scratchpad.ts";
 import { decide, extractSubject, normalizeToolName, parseRules } from "../permissions/matcher.ts";
 import { loadPermissionSettings } from "../permissions/settings.ts";
 
@@ -36,10 +37,25 @@ export function permissionGateFactory(cwd: string, home: string): InlineExtensio
 		name: "workflow-permission-gate",
 		hidden: true,
 		factory: (pi) => {
-			pi.on("tool_call", (event) => {
+			// The scratchpad embeds the *child's* session id, which does not exist
+			// until the session runs — derived on first tool call, then pinned.
+			let scratchpadDirPath: string | undefined;
+			pi.on("tool_call", (event, ctx) => {
 				if (WORKFLOW_INTERNAL_TOOLS.has(event.toolName)) return undefined;
+				const sessionId = ctx?.sessionManager?.getSessionId?.();
+				if (!scratchpadDirPath && sessionId) scratchpadDirPath = sessionScratchpadDir(cwd, sessionId);
 				const subject = extractSubject(normalizeToolName(event.toolName), event.input as Record<string, unknown>);
-				const result = decide({ toolName: event.toolName, subject, cwd, mode, deny, ask: [], allow, memoryDirPath });
+				const result = decide({
+					toolName: event.toolName,
+					subject,
+					cwd,
+					mode,
+					deny,
+					ask: [],
+					allow,
+					memoryDirPath,
+					scratchpadDirPath,
+				});
 				if (result.decision === "allow") return undefined;
 				const ruleNote = result.rule ? ` (rule: ${result.rule.raw})` : "";
 				return {
