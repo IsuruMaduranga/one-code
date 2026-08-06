@@ -17,6 +17,7 @@ import os from "node:os";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
+import { persistIfLarge } from "../lib/persisted-output.ts";
 import { callTool, close, type Connection, connect, type FailedConnection, readResource, readResourceDir } from "./client.ts";
 import { join } from "node:path";
 import { discoverPlugins } from "../lib/plugins.ts";
@@ -36,6 +37,21 @@ export default function mcpExtension(pi: ExtensionAPI) {
 	const registered = new Set<string>();
 	let servers: McpServer[] = [];
 
+	/**
+	 * Where oversized results are persisted — the session dir, matching Claude
+	 * Code's `<session-dir>/tool-results/<id>.txt`. A session-less run (`--no-session`)
+	 * has no such dir, so a temp folder serves; the model gets the path either way.
+	 */
+	const resultsDir = (ctx: ExtensionContext | undefined): string => {
+		try {
+			const dir = ctx?.sessionManager.getSessionDir();
+			if (dir) return dir;
+		} catch {
+			// fall through to the temp folder
+		}
+		return join(os.tmpdir(), "pincer");
+	};
+
 	const registerToolsFor = (connection: Connection) => {
 		for (const tool of connection.tools) {
 			const name = namespacedToolName(connection.server.name, tool.name);
@@ -47,7 +63,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 				label: `${connection.server.name}: ${tool.name}`,
 				description: tool.description ?? `MCP tool "${tool.name}" from server "${connection.server.name}".`,
 				parameters: jsonSchemaToTypeBox(tool.inputSchema),
-				async execute(_toolCallId, params) {
+				async execute(toolCallId, params, _signal, _onUpdate, ctx) {
 					const live = connections.get(connection.server.name);
 					if (!live) {
 						return {
@@ -61,7 +77,10 @@ export default function mcpExtension(pi: ExtensionAPI) {
 						const { text, images } = describeContent(result.content as McpContentBlock[] | undefined);
 						return {
 							content: [
-								{ type: "text", text: text || "(no output)" },
+								{
+									type: "text",
+									text: text ? persistIfLarge(text, { dir: resultsDir(ctx), id: toolCallId }) : "(no output)",
+								},
 								...images.map((image) => ({ type: "image" as const, data: image.data, mimeType: image.mimeType })),
 							],
 							details: { server: connection.server.name, tool: tool.name } as Record<string, unknown>,
@@ -170,7 +189,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 				server: Type.String({ description: "Server name that owns the resource" }),
 				uri: Type.String({ description: "Resource uri" }),
 			}),
-			async execute(_toolCallId, params) {
+			async execute(toolCallId, params, _signal, _onUpdate, ctx) {
 				const connection = connections.get(params.server);
 				if (!connection) {
 					return {
@@ -183,7 +202,12 @@ export default function mcpExtension(pi: ExtensionAPI) {
 					const result = await readResource(connection, params.uri);
 					const text = describeResourceContents(result.contents as McpResourceContents[] | undefined);
 					return {
-						content: [{ type: "text", text: text || "(empty resource)" }],
+						content: [
+							{
+								type: "text",
+								text: text ? persistIfLarge(text, { dir: resultsDir(ctx), id: toolCallId }) : "(empty resource)",
+							},
+						],
 						details: { server: params.server, uri: params.uri },
 					};
 				} catch (error) {
