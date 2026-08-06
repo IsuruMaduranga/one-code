@@ -138,22 +138,20 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 			continue;
 		}
 
-		const timeout = AbortSignal.timeout(CLASSIFIER_TIMEOUT_MS);
-		const signal = deps.signal ? AbortSignal.any([deps.signal, timeout]) : timeout;
 		// Some pi builds resolve a per-provider baseUrl alongside the key; it is not
 		// in every published version of the auth type, so it is read defensively.
 		const baseUrl = (auth as { baseUrl?: string }).baseUrl;
 
-		let failure: string | undefined;
-		try {
-			const reply = await completeSimple(
+		const attempt = (maxTokens: number) => {
+			const timeout = AbortSignal.timeout(CLASSIFIER_TIMEOUT_MS);
+			return completeSimple(
 				baseUrl ? ({ ...model, baseUrl } as Model<Api>) : model,
 				{ systemPrompt: system, messages: [{ role: "user", content: user, timestamp: Date.now() }] },
 				{
 					apiKey: auth.apiKey,
 					headers: auth.headers,
 					env: auth.env,
-					signal,
+					signal: deps.signal ? AbortSignal.any([deps.signal, timeout]) : timeout,
 					...(process.env.CC_AUTO_MODE_DEBUG === "2"
 						? {
 								onPayload: (payload: unknown) => {
@@ -167,8 +165,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 								},
 							}
 						: {}),
-					// A verdict is one JSON object, so the cap stays small.
-					maxTokens: 512,
+					maxTokens,
 					// `reasoning` is deliberately omitted: pi turns thinking off entirely
 					// when it is absent, which is what a classifier wants (fast, cheap,
 					// deterministic). Passing even "minimal" enables thinking, and the
@@ -186,8 +183,40 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 					cacheRetention: "long",
 				},
 			);
+		};
+
+		let failure: string | undefined;
+		try {
+			// A verdict is one JSON object, but the cap needs headroom over "one
+			// JSON object": models that reasoning cannot be disabled on (deepseek
+			// via opencode, observed live) burn output budget on deliberation —
+			// most on exactly the risky calls that deserve it — and a truncated
+			// reply voids the verdict. So a cut-off reply gets one retry with real
+			// headroom and a fresh timeout; the cap bounds runaway output, not
+			// typical cost, since replies still stop at the closing brace.
+			let reply = await attempt(1024);
+			if (reply.stopReason === "length") reply = await attempt(4096);
+
 			if (reply.stopReason === "error" || reply.stopReason === "aborted") {
 				failure = reply.errorMessage ?? reply.stopReason;
+			} else if (reply.stopReason === "length") {
+				// Still cut off at 4096 — same treatment as an unparseable reply (a
+				// verdict that cannot be read approved nothing), but named, because
+				// "unreadable response" sent a live debugging session hunting for
+				// JSON bugs when the real cause was the output budget.
+				if (process.env.CC_AUTO_MODE_DEBUG) {
+					const u = reply.usage as { input?: number; output?: number; reasoning?: number } | undefined;
+					process.stderr.write(
+						`[auto-mode] ${key} ${request.toolName} → verdict truncated at maxTokens ` +
+							`(in=${u?.input ?? "?"} out=${u?.output ?? "?"} reasoning=${u?.reasoning ?? 0})\n`,
+					);
+				}
+				return {
+					decision: "block",
+					reason:
+						"The approval classifier's reply was cut off by its output limit before the verdict completed — its analysis ran too long. If this keeps happening, pin a stronger classifier model with /auto-mode model.",
+					tier: "unmatched",
+				};
 			} else {
 				const text = reply.content
 					.filter((block): block is { type: "text"; text: string } => block.type === "text")
@@ -207,7 +236,14 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 				// to get wrong. `CC_AUTO_MODE_DEBUG=1` puts the raw reply on stderr.
 				if (process.env.CC_AUTO_MODE_DEBUG) {
 					const u = reply.usage as
-						| { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; cost?: unknown }
+						| {
+								input?: number;
+								output?: number;
+								reasoning?: number;
+								cacheRead?: number;
+								cacheWrite?: number;
+								cost?: unknown;
+						  }
 						| undefined;
 					const cost = u?.cost;
 					const spend =
@@ -219,7 +255,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 							: "";
 					process.stderr.write(
 						`[auto-mode] ${key} ${request.toolName} → ${verdict.decision}${verdict.ruleId ? ` (${verdict.ruleId})` : ""}\n` +
-							`  usage: in=${u?.input ?? "?"} out=${u?.output ?? "?"} cacheRead=${u?.cacheRead ?? 0} cacheWrite=${u?.cacheWrite ?? 0} ${spend}\n` +
+							`  usage: in=${u?.input ?? "?"} out=${u?.output ?? "?"} reasoning=${u?.reasoning ?? 0} cacheRead=${u?.cacheRead ?? 0} cacheWrite=${u?.cacheWrite ?? 0} ${spend}\n` +
 							`  raw: ${text.replace(/\s+/g, " ").slice(0, 400)}\n`,
 					);
 				}

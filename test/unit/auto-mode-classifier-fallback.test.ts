@@ -107,6 +107,42 @@ describe("classify: pinning and fallback", () => {
 		expect(deps.state.rejected.size).toBe(0);
 	});
 
+	const truncatedReply = () =>
+		({
+			stopReason: "length",
+			content: [{ type: "text", text: '{"analysis":"This call only inspects' }],
+			usage: {},
+		}) as any;
+
+	it("retries a truncated verdict once with more headroom", async () => {
+		// Observed live: a model whose reasoning cannot be disabled burned the
+		// output budget deliberating and the JSON was cut mid-string. One retry
+		// with a larger cap turns that into a verdict instead of a false block.
+		completeMock.mockResolvedValueOnce(truncatedReply()).mockResolvedValueOnce(allowReply());
+		const { deps } = makeDeps();
+		const verdict = await classify(request, deps);
+		expect(verdict.decision).toBe("allow");
+		expect(completeMock).toHaveBeenCalledTimes(2);
+		expect((completeMock.mock.calls[0]?.[2] as any).maxTokens).toBe(1024);
+		expect((completeMock.mock.calls[1]?.[2] as any).maxTokens).toBe(4096);
+	});
+
+	it("blocks with the output limit named when the retry is also truncated, keeping the model", async () => {
+		// The generic "unreadable response" pointed a debugging session at the
+		// parser when the real cause was the budget. Truncation is per-reply,
+		// not a dead model, so nothing is rejected or unpinned.
+		completeMock.mockResolvedValueOnce(allowReply());
+		const { deps } = makeDeps();
+		await classify(request, deps);
+
+		completeMock.mockResolvedValueOnce(truncatedReply()).mockResolvedValueOnce(truncatedReply());
+		const verdict = await classify(request, deps);
+		expect(verdict.decision).toBe("block");
+		expect(verdict.reason).toContain("output limit");
+		expect(deps.state.pinned?.id).toBe("gpt-5-mini");
+		expect(deps.state.rejected.size).toBe(0);
+	});
+
 	it("retries the session model when every candidate has been rejected — never the cost-ranked pick", async () => {
 		const { deps } = makeDeps();
 		deps.state.rejected.add("openai/gpt-5-mini");

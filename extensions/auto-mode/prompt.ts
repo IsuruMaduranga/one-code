@@ -96,7 +96,9 @@ Do not assert facts about paths, hosts, or the repository beyond what STATIC ANA
 
 Reply with JSON only:
 {"analysis":"<brief reasoning, shown to no one>","decision":"allow","clearedBy":"<A-id | intent | none>","intentQuote":"<required when clearedBy is intent>"}
-{"analysis":"...","decision":"block","rule":"<H-id | S-id | boundary | instructions | unclear>","note":"<optional, under 20 words: the specific target or missing detail>"}`;
+{"analysis":"...","decision":"block","rule":"<H-id | S-id | boundary | instructions | unclear>","note":"<optional, under 20 words: the specific target or missing detail>"}
+
+Keep "analysis" under 40 words. It is read by no one, and a reply cut off by the output limit voids the verdict.`;
 
 function section(title: string, entries: string[]): string {
 	if (entries.length === 0) return "";
