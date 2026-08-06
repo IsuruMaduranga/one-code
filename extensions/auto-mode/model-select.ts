@@ -122,7 +122,8 @@ const NAME_HINTS = [/haiku/i, /flash/i, /mini/i, /nano/i, /small/i, /lite/i, /in
  */
 const UNSUITABLE_VARIANT = /:(batch|free|online|thinking)$/i;
 
-function isSelectableVariant(model: Model<Api>): boolean {
+/** Also used by subagent model selection — the same variants cannot serve there. */
+export function isSelectableVariant(model: Model<Api>): boolean {
 	return !UNSUITABLE_VARIANT.test(model.id);
 }
 
@@ -132,7 +133,7 @@ function isSelectableVariant(model: Model<Api>): boolean {
  * and both would win a cheapest-first sort while telling us nothing about
  * suitability.
  */
-function pricedInput(model: Model<Api>): number | undefined {
+export function pricedInput(model: Model<Api>): number | undefined {
 	const input = model.cost?.input;
 	return typeof input === "number" && input > 0 ? input : undefined;
 }

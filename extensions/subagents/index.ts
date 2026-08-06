@@ -23,8 +23,15 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../auto-mode/actions.ts";
 import { type AgentDefinition, type AgentSource, agentDirs, discoverAgents } from "./agents.ts";
+import { loadSubagentDefault } from "./default-model.ts";
+import {
+	resolveSubagentModel,
+	SUBAGENT_STATUS_CHANNEL,
+	subagentModelsReminder,
+} from "./model-select.ts";
 import { discoverPlugins } from "../lib/plugins.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
+import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { type BackgroundTask, generateTaskId, TASK_REGISTER_CHANNEL } from "../background/registry.ts";
 import { type ChildAction } from "../auto-mode/actions.ts";
 import {
@@ -83,7 +90,12 @@ const SubagentParams = Type.Object({
 	tasks: Type.Optional(
 		Type.Array(TaskShape, { description: `Run several agents in parallel (max ${MAX_PARALLEL} at a time)` }),
 	),
-	model: Type.Optional(Type.String({ description: "Override the agent's model for this call" })),
+	model: Type.Optional(
+		Type.String({
+			description:
+				'Override the agent\'s model for this call: "sonnet"/"opus"/"haiku"/"fable" (resolved within this session\'s provider), "inherit", or an exact provider/model-id — see the subagent-models reminder for what is available',
+		}),
+	),
 	thinking: Type.Optional(
 		StringEnum(["off", "minimal", "low", "medium", "high"] as const, {
 			description: "Override the reasoning effort for this call",
@@ -159,7 +171,44 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			for (const record of records ?? []) registry.add(record);
 		}
 	};
-	pi.on("session_start", (_event, ctx) => reconstructRuns(ctx));
+	/** Notices about model fallbacks/crossings, shown once per distinct message. */
+	const noticedModels = new Set<string>();
+	const notifyModelOnce = (ctx: ExtensionContext, message: string) => {
+		if (noticedModels.has(message)) return;
+		noticedModels.add(message);
+		ctx.ui.notify(message, "warning");
+	};
+
+	/**
+	 * The every-turn menu reminder and the banner's subagent-default status.
+	 * Every-turn because reminders are transient per-request injections — that
+	 * scope survives compaction by construction — and keyed so a model change
+	 * replaces it: the very next LLM call, even mid-turn, carries the update.
+	 */
+	const emitModelStatus = (ctx: ExtensionContext, sessionModel = ctx.model) => {
+		const available = ctx.modelRegistry.getAvailable();
+		const configured = loadSubagentDefault(os.homedir());
+		const resolution = resolveSubagentModel({ configuredDefault: configured?.spec, sessionModel, available });
+		for (const notice of resolution.notices) notifyModelOnce(ctx, notice);
+		pi.events.emit(REMINDER_CHANNEL, {
+			text: subagentModelsReminder({ available, sessionModel, defaultModel: resolution.model }),
+			scope: "every-turn",
+			key: "subagent-models",
+		});
+		const differs =
+			resolution.model && sessionModel
+				? `${resolution.model.provider}/${resolution.model.id}` !== `${sessionModel.provider}/${sessionModel.id}`
+				: false;
+		pi.events.emit(SUBAGENT_STATUS_CHANNEL, {
+			model: differs && resolution.model ? `${resolution.model.provider}/${resolution.model.id}` : undefined,
+		});
+	};
+
+	pi.on("session_start", (_event, ctx) => {
+		reconstructRuns(ctx);
+		emitModelStatus(ctx);
+	});
+	pi.on("model_select", (event, ctx) => emitModelStatus(ctx, event.model));
 	pi.on("session_tree", (_event, ctx) => reconstructRuns(ctx));
 	pi.on("session_shutdown", () => {
 		for (const child of liveChildren) child.kill();
@@ -365,6 +414,50 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					},
 				};
 			});
+
+			/**
+			 * Model resolution happens here, in the parent, against the real
+			 * registry — never in the child, whose `--model` fuzzy-matches across
+			 * every configured provider. The child is spawned with a concrete
+			 * `provider/id`; anything surprising (a fallback, a provider crossing)
+			 * is said out loud rather than happening silently.
+			 */
+			const available = ctx.modelRegistry.getAvailable();
+			const configuredDefault = loadSubagentDefault(os.homedir());
+			for (const p of prepared) {
+				const resolution = resolveSubagentModel({
+					requested: p.request.model,
+					agentModel: p.agentDef?.model,
+					configuredDefault: configuredDefault?.spec,
+					sessionModel: ctx.model,
+					available,
+				});
+				if (resolution.unresolved) {
+					// The main model chose this string; the menu lets it retry.
+					const fallbackDefault = resolveSubagentModel({
+						configuredDefault: configuredDefault?.spec,
+						sessionModel: ctx.model,
+						available,
+					}).model;
+					return {
+						content: [
+							{
+								type: "text",
+								text:
+									`Unknown model "${resolution.unresolved}" — no available model matches it.\n\n` +
+									subagentModelsReminder({ available, sessionModel: ctx.model, defaultModel: fallbackDefault }),
+							},
+						],
+						details: {},
+						isError: true,
+					};
+				}
+				for (const notice of resolution.notices) notifyModelOnce(ctx, notice);
+				const resolved = resolution.model ? `${resolution.model.provider}/${resolution.model.id}` : undefined;
+				p.request.model = resolved;
+				p.record.model = resolved;
+			}
+
 			for (const p of prepared) registry.add(p.record);
 			const records = prepared.map((p) => p.record);
 

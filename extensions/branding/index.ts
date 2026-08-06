@@ -21,7 +21,9 @@ import {
 	PERMISSION_STATUS_CHANNEL,
 	permissionModeDisplay,
 	type PermissionStatus,
+	shortModelName,
 } from "../permissions/modes.ts";
+import { SUBAGENT_STATUS_CHANNEL, type SubagentStatus } from "../subagents/model-select.ts";
 import { collectStartupSections, quietStartupEnabled, type StartupSection } from "./startup.ts";
 
 const NAME = "pincer";
@@ -35,6 +37,8 @@ export interface BannerInput {
 	model?: string;
 	cwd: string;
 	mode: string;
+	/** Default subagent model, shown only when it differs from the session model. */
+	subagents?: string;
 	/** Compact resource sections, shown when pi's own listing is silenced. */
 	sections?: StartupSection[];
 }
@@ -144,6 +148,7 @@ export function bannerLines(
 	const context = [
 		input.model ? `${paint("muted", "model")} ${input.model}` : undefined,
 		`${paint("muted", "mode")} ${input.mode}`,
+		input.subagents ? `${paint("muted", "subagents")} ${input.subagents}` : undefined,
 	]
 		.filter(Boolean)
 		.join(paint("muted", " · "));
@@ -170,9 +175,21 @@ export default function brandingExtension(pi: ExtensionAPI) {
 	 * whatever was true at startup.
 	 */
 	let permissionStatus: PermissionStatus | undefined;
+	let subagentStatus: SubagentStatus | undefined;
+	let currentModelId: string | undefined;
 	let requestHeaderRender: (() => void) | undefined;
+	// The model line goes stale the same way the mode line did once the header
+	// re-renders live, so it follows ctrl+p / /model changes too.
+	pi.on("model_select", (event) => {
+		currentModelId = event.model?.id ?? currentModelId;
+		requestHeaderRender?.();
+	});
 	pi.events.on(PERMISSION_STATUS_CHANNEL, (data) => {
 		permissionStatus = data as PermissionStatus;
+		requestHeaderRender?.();
+	});
+	pi.events.on(SUBAGENT_STATUS_CHANNEL, (data) => {
+		subagentStatus = data as SubagentStatus;
 		requestHeaderRender?.();
 	});
 
@@ -181,7 +198,7 @@ export default function brandingExtension(pi: ExtensionAPI) {
 		if (!ctx.hasUI || ctx.mode !== "tui") return;
 
 		const version = process.env.CC_VERSION ?? "0.1.0";
-		const model = ctx.model ? `${ctx.model.id}` : undefined;
+		currentModelId = ctx.model ? `${ctx.model.id}` : currentModelId;
 
 		// With pi's own listing silenced, the banner carries compact sections
 		// instead (minus the internal [Extensions] noise).
@@ -211,9 +228,10 @@ export default function brandingExtension(pi: ExtensionAPI) {
 					...bannerLines(
 						{
 							version,
-							model,
+							model: currentModelId,
 							cwd: ctx.cwd,
 							mode: permissionModeDisplay(permissionStatus ?? { mode: "default", paused: false }),
+							subagents: subagentStatus?.model ? shortModelName(subagentStatus.model) : undefined,
 							sections,
 						},
 						paint,

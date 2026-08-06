@@ -195,6 +195,7 @@ export class WorkflowRunManager {
 				cwd: options.cwd,
 				defaultModel: options.defaultModel,
 				defaultEffort: options.defaultEffort as never,
+				onNotice: (message) => handle.record({ type: "log", text: `⚠ ${message}` }),
 			});
 
 			const { globals, state } = createScriptGlobals({

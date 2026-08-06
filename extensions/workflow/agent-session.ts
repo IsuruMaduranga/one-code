@@ -18,13 +18,14 @@ import {
 	DefaultResourceLoader,
 	getAgentDir,
 	ModelRuntime,
-	resolveCliModel,
 	SessionManager,
 	type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { agentDirs, type AgentDefinition, discoverAgents } from "../subagents/agents.ts";
+import { resolveSubagentModel, subagentModelMenu } from "../subagents/model-select.ts";
 import { cleanupWorktree, createWorktree, isGitRepo, type Worktree } from "../subagents/worktree.ts";
 import { permissionGateFactory } from "./permission-gate.ts";
 import type { AgentCallOptions, AgentCallResult, AgentEffort } from "./types.ts";
@@ -38,28 +39,35 @@ export interface AgentRunnerOptions {
 	/** Session default model, used when a call has no model override. */
 	defaultModel: unknown;
 	defaultEffort?: AgentEffort | string;
+	/** Surface model-resolution notices (fallbacks, provider crossings) in the run log. */
+	onNotice?: (message: string) => void;
 }
 
 /**
  * Shared per-run spawn state. Create once per workflow run, `dispose()` when
  * the run ends.
  */
+const THINKING_SUFFIX = /^(off|minimal|low|medium|high|xhigh|max)$/i;
+
 export class AgentRunner {
 	private readonly options: AgentRunnerOptions;
 	private readonly modelRuntime: ModelRuntime;
 	private readonly loader: DefaultResourceLoader;
 	private readonly agentCatalog: AgentDefinition[];
+	private readonly availableModels: Model<Api>[];
 
 	private constructor(
 		options: AgentRunnerOptions,
 		modelRuntime: ModelRuntime,
 		loader: DefaultResourceLoader,
 		agentCatalog: AgentDefinition[],
+		availableModels: Model<Api>[],
 	) {
 		this.options = options;
 		this.modelRuntime = modelRuntime;
 		this.loader = loader;
 		this.agentCatalog = agentCatalog;
+		this.availableModels = availableModels;
 	}
 
 	static async create(options: AgentRunnerOptions): Promise<AgentRunner> {
@@ -76,18 +84,48 @@ export class AgentRunner {
 		});
 		await loader.reload();
 		const agentCatalog = discoverAgents(agentDirs(options.cwd, os.homedir()));
-		return new AgentRunner(options, modelRuntime, loader, agentCatalog);
+		const availableModels = [...(await modelRuntime.getAvailable())];
+		return new AgentRunner(options, modelRuntime, loader, agentCatalog, availableModels);
 	}
 
-	private resolveModel(opts: AgentCallOptions): { model: unknown; thinkingLevel: string | undefined } {
-		if (opts.model) {
-			const resolved = resolveCliModel({ cliModel: opts.model, modelRuntime: this.modelRuntime });
-			if (resolved.error || !resolved.model) {
-				throw new WorkflowScriptError(`agent() model "${opts.model}" not available: ${resolved.error ?? "no match"}`);
-			}
-			return { model: resolved.model, thinkingLevel: opts.effort ?? resolved.thinkingLevel };
+	/**
+	 * Same resolution the subagent tool uses (see subagents/model-select.ts):
+	 * aliases stay within the session's provider/vendor, exact references
+	 * resolve anywhere but a provider crossing is logged, and pi's cross-provider
+	 * fuzzy matcher is never consulted. A trailing ":level" effort suffix
+	 * (pi's `--model sonnet:high` convention) is honoured before resolving.
+	 */
+	private resolveModel(opts: AgentCallOptions, agentModel?: string): { model: unknown; thinkingLevel: string | undefined } {
+		const defaultLevel = opts.effort ?? (this.options.defaultEffort as string | undefined);
+		if (!opts.model && !agentModel) {
+			return { model: this.options.defaultModel, thinkingLevel: defaultLevel };
 		}
-		return { model: this.options.defaultModel, thinkingLevel: opts.effort ?? (this.options.defaultEffort as string | undefined) };
+
+		let requested = opts.model;
+		let suffixLevel: string | undefined;
+		if (requested) {
+			const colon = requested.lastIndexOf(":");
+			if (colon > 0 && THINKING_SUFFIX.test(requested.slice(colon + 1))) {
+				suffixLevel = requested.slice(colon + 1).toLowerCase();
+				requested = requested.slice(0, colon);
+			}
+		}
+
+		const sessionModel = this.options.defaultModel as Model<Api> | undefined;
+		const resolution = resolveSubagentModel({
+			requested,
+			agentModel,
+			sessionModel,
+			available: this.availableModels,
+		});
+		if (resolution.unresolved) {
+			const menu = subagentModelMenu({ available: this.availableModels, sessionModel, defaultModel: sessionModel });
+			throw new WorkflowScriptError(
+				`agent() model "${resolution.unresolved}" is not available.\n${menu.join("\n")}\nAny exact provider/model-id also resolves.`,
+			);
+		}
+		for (const notice of resolution.notices) this.options.onNotice?.(notice);
+		return { model: resolution.model ?? this.options.defaultModel, thinkingLevel: opts.effort ?? suffixLevel ?? defaultLevel };
 	}
 
 	async run(prompt: string, opts: AgentCallOptions, signal: AbortSignal): Promise<AgentCallResult> {
@@ -100,7 +138,7 @@ export class AgentRunner {
 			}
 		}
 
-		const modelSpec = agentDef?.model && !opts.model ? this.resolveModel({ ...opts, model: agentDef.model }) : this.resolveModel(opts);
+		const modelSpec = this.resolveModel(opts, agentDef?.model);
 
 		let worktree: Worktree | undefined;
 		let cwd = this.options.cwd;

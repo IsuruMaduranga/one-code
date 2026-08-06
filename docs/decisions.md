@@ -1380,3 +1380,66 @@ re-render (ctrl+q killed pi outright). `bannerLines` now truncates every line to
 the render width with an ANSI-aware helper that never splits an escape sequence
 and resets colour before the ellipsis. Any `ctx.ui.custom`/`setHeader` component
 must do the same.
+
+## Subagent model selection: resolved in the parent, advertised by reminder
+
+The subagent tool had the same model-selection faults the classifier was just
+cured of, with higher stakes: the `model` field (per-call, or `.claude/agents`
+frontmatter) was passed as a raw string to the child's `pi --model`, whose fuzzy
+matcher substring-matches across **every configured provider** — so
+`model: "sonnet"`, which is what real agent files and `CLAUDE_CODE_SUBAGENT_MODEL`
+say, resolved to an effectively arbitrary provider. A fork child inherits the
+parent's whole transcript, so the silent crossing ships the entire conversation.
+There was also no default knob (Claude Code's `CLAUDE_CODE_SUBAGENT_MODEL` was
+ignored, including from the settings `env` block) and no fallback (an
+unavailable model just failed the run in the child, its warning invisible).
+
+Resolution now happens in the parent (`subagents/model-select.ts`), against the
+real registry, and the child is spawned with a concrete `provider/id`:
+
+- **Aliases stay contained.** `sonnet|opus|haiku|fable` resolve by name within
+  the session's provider (and upstream vendor on gateways), preferring undated
+  ids; off-family ("sonnet" on Groq) the session model serves and the parent
+  says so. `inherit` is the session model.
+- **Exact references resolve anywhere, never silently.** Naming a model is
+  choosing it — but a provider crossing is announced, because the user
+  configuring a key for a provider is not the user choosing to send this
+  conversation there.
+- **Precedence:** per-call `model` > agent frontmatter > `subagentModel`
+  setting > `CLAUDE_CODE_SUBAGENT_MODEL` (real env, then user/managed settings
+  `env` block — project scope deliberately unread, same containment as
+  `autoMode`) > session model. A bad *configured* value degrades to the session
+  model with a notice naming the knob; only a bad *per-call* value errors,
+  because the model that wrote it gets the menu and can retry.
+- **Passing the session model explicitly is itself a fix**: a child spawned with
+  no `--model` picks pi's saved default, not the parent's current model, so a
+  mid-session ctrl+p switch silently desynced children before.
+
+**The menu.** The main model needs to know what values are valid — Claude Code
+solves this with a static enum, possible only because it is single-provider. A
+tool-schema listing was rejected: the menu depends on the session model, which
+changes mid-session, and a schema rebuild throws away the whole cached prefix. A
+static schema line names the alias vocabulary; the catalog itself rides in a
+**keyed every-turn reminder** (`subagent-models`), which survives compaction by
+construction (reminders are transient per-request injections, never in the
+session file) and is replaced on `model_select`, so the next LLM call — even
+mid-turn — carries the update. Gateway catalogs (OpenRouter: 300+) are curated,
+not dumped: vendor-contained, `:batch`/`:free`/unpriced filtered, dated
+duplicates collapsed, capped at a handful of lines — safe because the menu is
+advertising, not a whitelist; resolution accepts unlisted models, and the
+reminder says so. The "nothing price-picked may lead" rule deliberately does
+not apply here: a cheap classifier fails open, a cheap subagent just does
+mediocre reviewed work, so price-ranked suggestions with prices shown are fine.
+
+Workflow's `agent()` shares the resolver (it used pi's `resolveCliModel` —
+same cross-provider fuzzy matching, in-process), keeping its `":high"` effort
+suffix and surfacing notices as run-log events. The banner shows
+`subagents <model>` when the resolved default differs from the session model
+(when it doesn't, the model line already says it); the banner's own model line
+also follows `model_select` now instead of freezing at startup.
+
+Verified live: the banner shows `subagents sonnet-5` from this machine's
+`CLAUDE_CODE_SUBAGENT_MODEL: "sonnet"` settings-env entry (previously ignored);
+the reminder appears in the captured provider request with the resolved default
+and prices; and a real `subagent` run spawned its child on
+`anthropic/claude-sonnet-5`, resolved from the alias in the parent.

@@ -279,6 +279,21 @@ explanation each.
 
 Three are bundled: `general-purpose`, `explore` (read-only search), `plan` (read-only architect). A definition of yours with the same name wins. `agent: "fork"` runs a child that inherits the current conversation, and `isolation: "worktree"` gives a child its own git worktree.
 
+**Which model a subagent runs on.** `model:` in the agent file (or per call) takes
+Claude Code's aliases — `sonnet`, `opus`, `haiku`, `fable`, `inherit` — or an
+exact `provider/model-id`. Aliases resolve **within your session's provider**
+(on a gateway, within its upstream vendor); an alias that names nothing there
+falls back to the session model, and pincer says so. An exact id from another
+provider is honored — naming it is choosing it — but announced, since a fork
+child carries your whole conversation. The default when nothing is named is
+`CLAUDE_CODE_SUBAGENT_MODEL` (the env var, or the `env` block of your *user*
+settings — never project settings) or a `subagentModel` setting, else the
+session model. The main model sees a short menu of same-provider options with
+prices in a standing reminder, kept in sync when you switch models mid-session;
+when the default differs from the session model, the startup banner shows it as
+`subagents <model>`. A configured default that stops being available degrades
+to the session model with a notice instead of failing runs.
+
 **Skills** — standard [Agent Skills](https://agentskills.io) directories: `.claude/skills/`, `~/.claude/skills/`. Invoked by the model through the `skill` tool.
 
 **MCP servers** — `.mcp.json` in the project (walked up to the repo root), or `~/.claude.json`:
