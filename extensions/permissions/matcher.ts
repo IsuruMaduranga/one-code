@@ -8,7 +8,7 @@
  */
 
 import { homedir } from "node:os";
-import { isAbsolute, relative, resolve } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { isProtectedPath, isWritingTool } from "./protected-paths.ts";
 
 export type PermissionMode = "default" | "acceptEdits" | "plan" | "bypassPermissions" | "dontAsk" | "auto";
@@ -158,14 +158,34 @@ export function extractSubject(toolName: string, input: Record<string, unknown>)
 	return typeof path === "string" ? path : "";
 }
 
-/** Whether `candidate` names plan mode's one writable file, after ~-expansion and cwd resolution of both sides. */
+/**
+ * Whether `candidate` names plan mode's one writable file, after ~-expansion
+ * and cwd resolution of both sides. Compared case-folded: the resolved subject
+ * arrives case-folded from `resolveForContainment`, and without folding that
+ * branch of the check could never match on macOS.
+ */
 export function isPlanFilePath(candidate: string, planFilePath: string, cwd: string): boolean {
 	const home = homedir();
 	const toAbsolute = (p: string) => {
 		const expanded = p.startsWith("~/") ? `${home}/${p.slice(2)}` : p;
-		return resolve(cwd, expanded);
+		return resolve(cwd, expanded).toLowerCase();
 	};
 	return toAbsolute(candidate) === toAbsolute(planFilePath);
+}
+
+/**
+ * Whether `candidate` lands *inside* the session's auto-memory directory.
+ * `resolve()` normalizes `..` segments first, so a traversal spelled through
+ * the memory dir does not clear. Compared case-folded, like isProtectedPath:
+ * the resolved subject arrives case-folded from `resolveForContainment`.
+ */
+export function isInMemoryDir(candidate: string, memoryDirPath: string, cwd: string): boolean {
+	const home = homedir();
+	const toAbsolute = (p: string) => {
+		const expanded = p.startsWith("~/") ? `${home}/${p.slice(2)}` : p;
+		return resolve(cwd, expanded).toLowerCase();
+	};
+	return toAbsolute(candidate).startsWith(toAbsolute(memoryDirPath) + sep);
 }
 
 export function ruleMatches(rule: PermissionRule, toolName: string, subject: string, cwd: string): boolean {
@@ -259,6 +279,12 @@ export interface DecideInput {
 	 * mode.
 	 */
 	planFilePath?: string;
+	/**
+	 * The session's auto-memory directory (see extensions/memory). Absolute or
+	 * ~-prefixed; writes landing inside it are allowed — the system prompt
+	 * itself instructs them — though deny and ask rules still win.
+	 */
+	memoryDirPath?: string;
 }
 
 export interface Decision {
@@ -266,7 +292,7 @@ export interface Decision {
 	/** Rule that determined the outcome, when one did. */
 	rule?: PermissionRule;
 	/** Why, for deny/ask decisions surfaced to the model or user. */
-	cause: "rule" | "plan-mode" | "plan-file" | "mode" | "tier" | "protected-path";
+	cause: "rule" | "plan-mode" | "plan-file" | "memory-dir" | "mode" | "tier" | "protected-path";
 }
 
 /**
@@ -356,6 +382,25 @@ export function decide(params: DecideInput): Decision {
 	// over auto mode too: the classifier never gets to auto-approve a match.
 	const askRule = ask.find((r) => ruleMatches(r, toolName, subject, cwd));
 	if (askRule) return askOrDeny(askRule);
+
+	/**
+	 * The session's own auto-memory directory is harness-designated working
+	 * space, like plan mode's plan file: the system prompt instructs the model
+	 * to write memories there, so gating those writes (outside-cwd, and under
+	 * the protected `.claude` dir) makes the harness block its own feature —
+	 * auto mode's classifier was correctly flagging them as out-of-project
+	 * writes. This clears *only* the exact per-project dir passed in; any other
+	 * path under `.claude`, including another project's memory dir, still hits
+	 * the protected-path check below.
+	 */
+	const memoryDir = params.memoryDirPath;
+	if (memoryDir && isWritingTool(normalizeToolName(toolName)) && subject) {
+		// The resolved form is where the write actually lands, so it is the one
+		// that must be inside the dir — a symlink planted in the memory dir must
+		// not turn this into an allow for wherever it points.
+		const memoryTarget = isInMemoryDir(params.resolvedSubject ?? subject, memoryDir, cwd);
+		if (memoryTarget) return { decision: "allow", cause: "memory-dir" };
+	}
 
 	// Protected-path writes are checked *before* allow rules, so an
 	// `Edit(.claude/**)` entry cannot pre-approve reconfiguring the agent's own

@@ -307,4 +307,92 @@ describe("decide", () => {
 				.decision,
 		).toBe("allow");
 	});
+
+	describe("memory dir", () => {
+		const memoryDirPath = "/home/user/.claude/projects/-home-user-project/memory";
+		const withMemory = { ...base, memoryDirPath };
+		const memoryFile = `${memoryDirPath}/MEMORY.md`;
+
+		it("allows writes into the session's memory dir in every gated mode", () => {
+			// The system prompt itself instructs these writes; auto mode's
+			// classifier used to (correctly) flag them as out-of-project.
+			for (const mode of ["default", "auto", "dontAsk", "acceptEdits"] as const) {
+				const d = decide({ ...withMemory, mode, toolName: "write", subject: memoryFile });
+				expect(d.decision, mode).toBe("allow");
+				expect(d.cause, mode).toBe("memory-dir");
+			}
+			expect(decide({ ...withMemory, toolName: "edit", subject: memoryFile }).decision).toBe("allow");
+		});
+
+		it("only clears the exact per-project dir — other .claude paths stay protected", () => {
+			// Another project's memory dir, and .claude config, still hit the
+			// protected-path check (classify in auto, ask elsewhere).
+			const other = "/home/user/.claude/projects/-home-user-other/memory/MEMORY.md";
+			expect(decide({ ...withMemory, mode: "auto", toolName: "write", subject: other })).toMatchObject({
+				decision: "classify",
+				cause: "protected-path",
+			});
+			expect(
+				decide({ ...withMemory, mode: "auto", toolName: "write", subject: "/home/user/.claude/settings.json" })
+					.decision,
+			).toBe("classify");
+		});
+
+		it("matches the case-folded resolved subject resolveForContainment produces", () => {
+			// resolveForContainment case-folds (macOS); the first live run of this
+			// feature missed the allow because the comparison was case-sensitive.
+			const d = decide({
+				...withMemory,
+				cwd: "/home/User/project",
+				memoryDirPath: "/home/User/.claude/projects/-home-User-project/memory",
+				toolName: "write",
+				subject: "/home/User/.claude/projects/-home-User-project/memory/fact.md",
+				resolvedSubject: "/home/user/.claude/projects/-home-user-project/memory/fact.md",
+			});
+			expect(d).toMatchObject({ decision: "allow", cause: "memory-dir" });
+		});
+
+		it("does not clear traversals out of the dir, and judges the resolved landing spot", () => {
+			expect(
+				decide({ ...withMemory, toolName: "write", subject: `${memoryDirPath}/../../../../.zshrc` }).decision,
+			).toBe("ask");
+			// A symlink inside the memory dir pointing elsewhere: the resolved
+			// subject is where the write lands, so the allow must not fire.
+			expect(
+				decide({
+					...withMemory,
+					toolName: "write",
+					subject: memoryFile,
+					resolvedSubject: "/home/user/.zshrc",
+				}).decision,
+			).toBe("ask");
+		});
+
+		it("deny and ask rules still win over the memory dir", () => {
+			expect(
+				decide({
+					...withMemory,
+					toolName: "write",
+					subject: memoryFile,
+					deny: rules(["Write(**/.claude/**)"]),
+				}).decision,
+			).toBe("deny");
+			expect(
+				decide({
+					...withMemory,
+					mode: "auto",
+					toolName: "write",
+					subject: memoryFile,
+					ask: rules(["Write(**/.claude/**)"]),
+				}).decision,
+			).toBe("ask");
+		});
+
+		it("never applies to non-writing tools or without a configured dir", () => {
+			expect(decide({ ...withMemory, mode: "auto", toolName: "bash", subject: `touch ${memoryFile}` }).decision).toBe(
+				"classify",
+			);
+			expect(decide({ ...base, mode: "auto", toolName: "write", subject: memoryFile }).decision).toBe("classify");
+		});
+	});
 });

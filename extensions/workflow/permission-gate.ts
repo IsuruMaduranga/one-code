@@ -14,6 +14,8 @@
  */
 
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
+import { findGitRoot } from "../lib/git.ts";
+import { memoryDir } from "../lib/memory.ts";
 import { decide, extractSubject, normalizeToolName, parseRules } from "../permissions/matcher.ts";
 import { loadPermissionSettings } from "../permissions/settings.ts";
 
@@ -25,6 +27,10 @@ export function permissionGateFactory(cwd: string, home: string): InlineExtensio
 	const deny = parseRules(settings.deny);
 	const allow = parseRules(settings.allow);
 	const mode = settings.defaultMode === "bypassPermissions" ? "bypassPermissions" : "acceptEdits";
+	// Memory writes work inside agent() calls too — otherwise the protected
+	// `.claude` check turns them into "needs interactive approval" and the
+	// harness blocks its own feature (same rationale as in decide()).
+	const memoryDirPath = memoryDir(home, findGitRoot(cwd) ?? cwd);
 
 	return {
 		name: "workflow-permission-gate",
@@ -33,7 +39,7 @@ export function permissionGateFactory(cwd: string, home: string): InlineExtensio
 			pi.on("tool_call", (event) => {
 				if (WORKFLOW_INTERNAL_TOOLS.has(event.toolName)) return undefined;
 				const subject = extractSubject(normalizeToolName(event.toolName), event.input as Record<string, unknown>);
-				const result = decide({ toolName: event.toolName, subject, cwd, mode, deny, ask: [], allow });
+				const result = decide({ toolName: event.toolName, subject, cwd, mode, deny, ask: [], allow, memoryDirPath });
 				if (result.decision === "allow") return undefined;
 				const ruleNote = result.rule ? ` (rule: ${result.rule.raw})` : "";
 				return {

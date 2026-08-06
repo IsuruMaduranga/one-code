@@ -1729,3 +1729,40 @@ this feature): the reader resolved to `openai-codex/gpt-5.6-luna` via the
 classifier profile, and the tool result read "Answered by
 openai-codex/gpt-5.6-luna from the full page" with a correct answer for the
 fetched page. Typecheck and all 698 unit tests pass.
+
+## The memory dir is harness-designated working space, like the plan file
+
+Auto mode blocked the auto-memory feature it ships next to: the system prompt
+instructs the model to write memories into `~/.claude/projects/<slug>/memory`,
+which is both outside the working directory and under the protected `.claude`
+dir, so every memory write went to the classifier and its out-of-project rule
+(correctly, per its own text) blocked it. The harness was flagging its own
+instruction.
+
+The fix follows the plan-file precedent exactly: `decide()` takes a
+`memoryDirPath` and deterministically allows *writing-tool* calls that land
+inside it, with cause `memory-dir`. Scope notes, since this punches through
+the protected-path check:
+
+- Deny rules and explicit ask rules still win — an ask rule is the user's
+  stated intent to be prompted, and the check sits after both.
+- Only the exact per-project dir clears. Another project's memory dir, and
+  everything else under `.claude`, still hits the protected-path check.
+- The check judges `resolvedSubject` when available — where the write actually
+  *lands* — so a symlink planted inside the memory dir cannot convert the
+  allow into a write elsewhere; `resolve()` normalises `..` traversals for the
+  same reason. Bash writes into the dir are not cleared, only the write tools.
+- The permissions extension re-derives the dir (`memoryDir` + `findGitRoot`)
+  rather than sharing state with the memory extension, per the jiti
+  module-isolation rule. The workflow permission gate does the same, since
+  memory writes inside `agent()` calls previously died on "needs interactive
+  approval".
+- Plan mode still denies memory writes (unchanged); the auto-mode safety floor
+  is unaffected — it deliberately targets exact settings files and already
+  documents that `~/.claude` holds memory the agent writes routinely.
+- Trap, caught live: `resolveForContainment` returns a *case-folded* path, so
+  any prefix/equality check against it must case-fold both sides (as
+  `isProtectedPath` does). The first cut compared case-sensitively, matched
+  nothing on macOS, and every memory write silently fell through to the
+  protected-path check — visible only because the live run was checked before
+  committing.
