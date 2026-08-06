@@ -377,6 +377,33 @@ export function findRoleProfileModel(
 	return undefined;
 }
 
+export interface EconomicalModelChoice {
+	model: Model<Api>;
+	via: "profile" | "session";
+}
+
+/**
+ * A vetted small-but-capable same-containment model within the session's
+ * price ceiling, else the session model itself. Used for low-stakes one-shot
+ * jobs over untrusted content (the web_fetch reader) — the content goes to
+ * the model, so containment applies. Not used for compaction, which runs on
+ * the session model to reuse the provider prompt cache.
+ */
+export function pickEconomicalContainedModel(
+	available: Model<Api>[],
+	sessionModel: Model<Api> | undefined,
+): EconomicalModelChoice | undefined {
+	if (!sessionModel) return undefined;
+	const sessionPrice = pricedInput(sessionModel);
+	const withinBudget = (model: Model<Api>) => {
+		if (sessionPrice === undefined) return true;
+		const price = pricedInput(model);
+		return price === undefined || price <= sessionPrice;
+	};
+	const profiled = findRoleProfileModel(available, sessionModel, "classifier", withinBudget);
+	return profiled ? { model: profiled, via: "profile" } : { model: sessionModel, via: "session" };
+}
+
 /** Whether price ranking is an acceptable subagent fallback for this session. */
 export function allowsDynamicSubagentSelection(sessionModel: Model<Api>): boolean {
 	const policy = providerPolicy(sessionModel.provider);

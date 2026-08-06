@@ -51,6 +51,7 @@
       "extensions/lsp/index.ts",
       "extensions/mcp/index.ts",
       "extensions/context-management/index.ts",
+      "extensions/compaction/index.ts",
       "extensions/system-prompt/index.ts"
     ],
     "themes": [

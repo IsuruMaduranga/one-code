@@ -14,7 +14,7 @@
  */
 
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { findRoleProfileModel, pricedInput } from "../lib/model-policy.ts";
+import { type EconomicalModelChoice, pickEconomicalContainedModel } from "../lib/model-policy.ts";
 
 /**
  * How much of the page the reader sees. Far past the 30k-char window the main
@@ -26,25 +26,14 @@ export const READER_MAX_CHARS = 120_000;
 /** Answer budget: WebFetch answers are extracts, not essays. */
 export const READER_MAX_TOKENS = 4_000;
 
-export interface ReaderChoice {
-	model: Model<Api>;
-	via: "profile" | "session";
-}
+export type ReaderChoice = EconomicalModelChoice;
 
-/** The model that reads the page: vetted smaller same-containment, else the session model. */
+/** The model that reads the page — the shared economical same-containment pick. */
 export function pickReaderModel(
 	available: Model<Api>[],
 	sessionModel: Model<Api> | undefined,
 ): ReaderChoice | undefined {
-	if (!sessionModel) return undefined;
-	const sessionPrice = pricedInput(sessionModel);
-	const withinBudget = (model: Model<Api>) => {
-		if (sessionPrice === undefined) return true;
-		const price = pricedInput(model);
-		return price === undefined || price <= sessionPrice;
-	};
-	const profiled = findRoleProfileModel(available, sessionModel, "classifier", withinBudget);
-	return profiled ? { model: profiled, via: "profile" } : { model: sessionModel, via: "session" };
+	return pickEconomicalContainedModel(available, sessionModel);
 }
 
 export interface ReaderMessages {

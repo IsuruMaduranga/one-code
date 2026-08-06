@@ -579,8 +579,8 @@ Code context:
 Not replicated: relevance-based mid-session recall of individual memory files.
 Its selection mechanism is undocumented client internals (the frontmatter
 `description` is "used to decide relevance during recall", and the UI shows
-"Recalled N memories"), and no recalled-memory block appears in either
-captured context we have — including a long live session working on this very
+"Recalled N memories"), and no recalled-memory block has been
+observed in practice — including in a long live session working on this very
 project with a relevant memory on file. There is nothing observable to copy;
 the injected index is the entry point and the model follows links from there.
 
@@ -624,8 +624,8 @@ What deliberately stays: every *descriptive* reference — "the Claude Code
 experience on the pi harness", "reads your Claude Code settings.json" — is
 nominative use (truthfully naming the thing we are compatible with), which
 trademark law and the guidelines themselves permit. The fidelity references in
-`tools/` and `payload.json` are captured artifacts, not branding, and are
-untouched.
+`tools/` and `payload.json` are technical reference data, not branding, and
+are untouched.
 
 ## Startup listing: quietStartup + banner sections
 
@@ -1450,8 +1450,7 @@ Claude Code moved plan mode from "pass the plan as an ExitPlanMode parameter"
 to a **plan file**: entering plan mode allocates `~/.pincer/plans/<slug>.md`,
 a per-turn system message names it as the one writable path and prescribes an
 explore→design→review→write→approve workflow, and ExitPlanMode takes no
-parameters — it reads the file. Observed live (the injected message was
-captured from a real Claude Code plan-mode session) and mirrored here: the plan
+parameters — it reads the file. Observed live in Claude Code and mirrored here: the plan
 survives compaction, the user can open/edit it, and long plans stop bloating
 tool calls and `ui.select` titles.
 
@@ -1802,3 +1801,73 @@ was asked for "a temporary file in the right place per your instructions",
 wrote `notes.txt` into its own session scratchpad path, and the file was on
 disk — no prompt, correct slug and session id. Typecheck and 711 unit tests
 pass.
+
+## Compaction runs Claude Code's prompt, via session_before_compact
+
+pi hardcodes its own summarization prompt (settings only expose
+enabled/reserveTokens/keepRecentTokens), but `session_before_compact` lets an
+extension supply the whole `CompactionResult` — so pincer now compacts the
+way Claude Code does. Three design points:
+
+- **The prompt**: appended as user text after the conversation; the model
+  answers `<analysis>` + `<summary>`, and only the `<summary>` content
+  survives. `extractSummary` matches tags at *line starts* and spans to the
+  last closing tag; an untagged reply is used whole minus any analysis block —
+  losing a compaction to a formatting slip is worse than untidy text. Empty
+  means failure. Trap, caught live: the first run's analysis said "wrapped in
+  `<analysis>` and `<summary>` tags", a loose regex anchored on that inline
+  mention, and the stored summary began with the tail of the analysis — prose
+  *about* the format is indistinguishable from the format unless tags are
+  line-anchored.
+- **The model — the session model, for the cache**: Claude Code keeps the
+  session's system prompt, tool definitions, and message prefix intact,
+  appends the instruction, and runs the call on the session's own model. That
+  is not thrift on the model choice — it is thrift on the *tokens*: the
+  summarization call replays the
+  already-cached prefix, so it is mostly cache reads. The extension does the
+  same: session model, `ctx.getSystemPrompt()`, the active tool definitions in
+  active order (a mismatch there costs cache hits, never correctness), and the
+  doomed messages natively via pi's `convertToLlm`, with the instruction as a
+  final user message: one `<system-reminder>` holding the trigger notice
+  ("the user has triggered a /compact command" vs "the conversation context
+  window is running out") directly above the verbatim instruction, preceded by
+  any `/compact <instructions>` as a "## Compact Instructions" reminder. The
+  stored summary gets a continuation preamble baked in ("This session is being
+  continued from a previous conversation that ran out of context…") plus a
+  pointer to the session JSONL with a NEVER-read-it-whole warning — details
+  the summary lost stay grepable instead of gone, and `read`/`grep` are
+  safe-tier tools, so following the pointer never prompts, auto mode included.
+  All inside pi's own hardcoded `<summary>` frame. A previous compaction's summary lives
+  in the *live* context but is excluded from `messagesToSummarize`
+  (prepareCompaction starts after that entry, handing the text over
+  separately) — it is reattached as the leading `compactionSummary` message,
+  the exact shape the live context carries, so convertToLlm renders the same
+  bytes the cached prefix holds and re-compactions stay cache reads too.
+- **Known fidelity gap, deliberate**: Claude Code runs the call with
+  extended thinking; `reasoning` is not sent because it fails closed on
+  providers pi's compat data mispredicts (the classifier's documented trade).
+
+All three reasons (manual, threshold, overflow) take this path; any failure —
+no auth, timeout, empty summary — returns nothing and pi's own compaction
+serves: a different summary style, never a broken compaction. `CC_COMPACTION=0`
+opts out entirely.
+
+Verified live on a Luna session with the final shape: two /compact runs in one
+session (48,356 then 30,838 tokens) both stored fromHook entries — preamble
+first, transcript pointer with the warning, all nine sections, no tag bleed
+(inline backtick *mentions* of the tags in the second summary are content, and
+line-anchored extraction correctly ignored them). One honest gap: both calls
+measured `cacheRead: 0` on openai-codex even though the session itself sat at
+~78% cache hits. Passing `options.sessionId` (pi's prompt_cache_key /
+session-affinity carrier, which completeSimple otherwise omits) was necessary
+but not sufficient — a rerun with it still read 0. The replay diverges from
+the cached prefix at the *first message*: per-request system-reminder
+injections (the memory index, every-turn reminders) are added at request time
+and never become session entries, so reconstruction from entries cannot
+reproduce them, and thinking-item serialization differs beyond that. Also
+measured: without cache hits the native shape sends 13k–34k input tokens
+where the serialized form sent 5.6k–7.8k (its tool-result truncation is
+aggressive) — the native shape is kept for summary quality and Claude Code
+parity, but the cost argument currently runs the other way. The honest fix is
+capture-based replay — remember the session's actual last outgoing request
+(before_provider_request) and extend *that* — recorded here as future work.
