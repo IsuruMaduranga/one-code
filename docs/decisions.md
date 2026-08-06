@@ -1149,3 +1149,49 @@ availability on model tier because a weak classifier is a weak boundary; pincer
 gates only on "a model exists", so a small local model can end up as the gate.
 Refusing auto mode there would remove the feature exactly where self-hosted users
 want it, so a warning on entry is the likelier answer.
+
+### Three defects the real OpenRouter catalog exposed
+
+Asking "so which model does OpenRouter actually use?" and running the selector
+against pi's real 303-model OpenRouter catalog — rather than re-reading the table
+— found three faults in the code committed an hour earlier. The answer itself was
+right (`anthropic/claude-haiku-4.5`, which does exist there exactly), but:
+
+**The provider-default branch ignored the budget ceiling.** A session on
+`z-ai/glm-4.6` ($0.50/M) was screened by `anthropic/claude-haiku-4.5` ($1/M) —
+twice the price of the work being screened, directly against this file's own
+stated rule. The ceiling had only ever been applied to the cost-ranked branch.
+Table entries are now tried in order against it, so a dearer default falls through
+to the next entry: that session now gets `openai/gpt-5-mini` ($0.25).
+
+**`:batch` and friends were selectable.** OpenRouter lists
+`anthropic/claude-haiku-4.5:batch` at half price, `openai/gpt-5-nano:batch` at
+$0.025. Batch endpoints are asynchronous, so a blocking gate would wait out its
+timeout and then block the call — and because they are systematically cheaper,
+cost ranking actively *prefers* them. Worse, `startsWith` matching meant a
+`:batch` id could satisfy a plain table prefix. `:batch`, `:free` (rate-limited
+hard enough that the gate fails intermittently), `:online` and `:thinking` are
+excluded from automatic selection; an explicit `classifierModel` still wins,
+since naming a model is choosing it.
+
+**A model picked purely on price was leading the chain.** The cheapest OpenRouter
+model is `inclusionai/ling-2.6-flash` at $0.01, and it ranked *above* the session
+model — so had the default been unavailable, the security boundary would silently
+have become an obscure model whose only qualification was being cheap.
+
+The first attempt at that third fix is worth recording because it failed on the
+same example. The idea was to let a cost-ranked pick lead only when its *name*
+also placed it in a known small-model family, on the theory that two weak signals
+agreeing beat either alone. `ling-2.6-flash` contains "flash", so it passed. The
+word means "someone called this small", not "this family is known good", and any
+vendor can put it in a name. The heuristic was deleted rather than patched:
+**nothing chosen on price alone leads.** Vetted providers get their saving from
+the table (which covers OpenRouter and every mainstream provider); anywhere else
+the model the user already trusted for the real work screens the calls — correct,
+merely not cheap — and the cost-ranked pick stays last, for when even that cannot
+serve.
+
+The general lesson is the one that keeps recurring in this feature: a table of
+model ids and prices reads as fine and behaves differently against a real
+catalog spanning three orders of magnitude in price. Verify selection logic by
+running it over the actual registry, not by inspecting the table.

@@ -224,8 +224,10 @@ built-in rules and `/auto-mode config` prints what is actually in effect.
 **Which model screens your calls.** `autoMode.classifierModel` picks one
 explicitly, and may name any provider — naming it is choosing it. Left unset,
 pincer stays on the provider your session already uses: a known-good cheap model
-for that provider if there is one, else the cheapest genuinely-priced model no
-dearer than your session model, else your session model itself. It never crosses
+for that provider if there is one, else your session model itself — no
+candidate ever costs more per token than the model doing the real work, and a
+model chosen only for being cheap never leads (nor do `:batch`, `:free`,
+`:online` or `:thinking` variants, which cannot serve as a synchronous gate). It never crosses
 to another provider on its own, because the classifier reads your prompts and
 your CLAUDE.md, and that is not a decision to make silently. The chosen model is
 named in the footer beside `auto mode on` and in `/auto-mode config`; if it turns

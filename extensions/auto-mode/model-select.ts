@@ -53,8 +53,33 @@ export const PROVIDER_DEFAULT_CLASSIFIERS: Record<string, string[]> = {
 	"github-copilot": ["gpt-5-mini", "claude-haiku-4.5"],
 };
 
-/** Weak hints, used only to break ties between equally-priced candidates. */
+/**
+ * Names of the known small-but-capable model families. Too weak to *choose* by —
+ * Groq and xAI carry none of them — but strong enough to corroborate a choice
+ * price alone suggested. See the cheapest-in-provider ordering below.
+ */
 const NAME_HINTS = [/haiku/i, /flash/i, /mini/i, /nano/i, /small/i, /lite/i, /instant/i, /sonnet/i];
+
+/**
+ * Model-id suffixes that cannot serve as a synchronous per-call gate, and which
+ * are *systematically cheaper*, so a cost-ranked search actively prefers them:
+ *
+ * - `:batch` is an asynchronous endpoint — a blocking classifier call would wait
+ *   out its timeout and then block the tool call. OpenRouter lists
+ *   `anthropic/claude-haiku-4.5:batch` at half the price of the plain model.
+ * - `:free` is rate-limited hard enough that a gate on it fails intermittently,
+ *   and an intermittently-failing gate blocks real work.
+ * - `:online` bolts web search onto every call; `:thinking` forces reasoning we
+ *   deliberately disable. Both are the wrong shape and cost more.
+ *
+ * Only automatic selection is filtered. An explicit `autoMode.classifierModel`
+ * still wins, because naming a model is choosing it.
+ */
+const UNSUITABLE_VARIANT = /:(batch|free|online|thinking)$/i;
+
+function isSelectableVariant(model: Model<Api>): boolean {
+	return !UNSUITABLE_VARIANT.test(model.id);
+}
 
 /**
  * A usable price. Non-positive costs are not "free", they are unpriced: pi carries
@@ -78,11 +103,22 @@ export interface Candidate {
 	source: "configured" | "provider-default" | "cheapest-in-provider" | "session";
 }
 
-function findByPrefix(models: Model<Api>[], prefixes: string[]): Model<Api> | undefined {
+/**
+ * First model matching one of `prefixes` in order, optionally constrained.
+ * Walking the whole list rather than stopping at the first *prefix* is what lets
+ * a table entry be skipped when it fails the constraint — a dearer default falls
+ * through to the next entry instead of being used anyway.
+ */
+function findByPrefix(
+	models: Model<Api>[],
+	prefixes: string[],
+	accept: (model: Model<Api>) => boolean = () => true,
+): Model<Api> | undefined {
 	for (const prefix of prefixes) {
-		const exact = models.find((model) => model.id === prefix);
+		const candidates = models.filter((model) => model.id === prefix || model.id.startsWith(prefix));
+		const exact = candidates.find((model) => model.id === prefix && accept(model));
 		if (exact) return exact;
-		const prefixed = models.find((model) => model.id.startsWith(prefix));
+		const prefixed = candidates.find(accept);
 		if (prefixed) return prefixed;
 	}
 	return undefined;
@@ -137,25 +173,60 @@ export function classifierCandidates({ available, sessionModel, configured }: Se
 	if (configured) push(findConfigured(available, configured), "configured");
 
 	const provider = sessionModel?.provider;
-	const inProvider = provider ? available.filter((model) => model.provider === provider) : [];
+	const inProvider = provider
+		? available.filter((model) => model.provider === provider && isSelectableVariant(model))
+		: [];
+
+	/**
+	 * No candidate may cost more per token than the model doing the actual work.
+	 * Screening a call more expensively than making it is indefensible, and it
+	 * happened: on an OpenRouter session at `z-ai/glm-4.6` ($0.50/M) the table's
+	 * `anthropic/claude-haiku-4.5` ($1/M) was selected, because this ceiling was
+	 * originally applied only to the cost-ranked branch and not to the table.
+	 */
+	const sessionPrice = sessionModel ? pricedInput(sessionModel) : undefined;
+	const withinBudget = (model: Model<Api>) => {
+		if (sessionPrice === undefined) return true;
+		const price = pricedInput(model);
+		return price === undefined || price <= sessionPrice;
+	};
 
 	// 2. A known-good cheap model for this provider, for catalogs where price
-	//    alone picks badly.
-	if (provider) push(findByPrefix(inProvider, PROVIDER_DEFAULT_CLASSIFIERS[provider] ?? []), "provider-default");
+	//    alone picks badly. Entries are tried in order, so one that busts the
+	//    budget falls through to the next rather than being used anyway.
+	if (provider) {
+		push(findByPrefix(inProvider, PROVIDER_DEFAULT_CLASSIFIERS[provider] ?? [], withinBudget), "provider-default");
+	}
 
-	// 3. The cheapest genuinely-priced model in the same provider that is no more
-	//    expensive than the session's own model — there is no point paying more to
-	//    screen a call than to make it.
-	const sessionPrice = sessionModel ? pricedInput(sessionModel) : undefined;
+	// 3. The cheapest genuinely-priced model in the provider.
 	const cheaper = inProvider
 		.map((model) => ({ model, price: pricedInput(model) }))
 		.filter((entry): entry is { model: Model<Api>; price: number } => entry.price !== undefined)
-		.filter((entry) => sessionPrice === undefined || entry.price <= sessionPrice)
+		.filter((entry) => withinBudget(entry.model))
 		.sort((a, b) => a.price - b.price || hintRank(a.model) - hintRank(b.model));
-	push(cheaper[0]?.model, "cheapest-in-provider");
+	const cheapest = cheaper[0]?.model;
 
-	// 4. The session's own model: always correct, just not cheap.
+	/**
+	 * 4. The session's own model, ahead of the cost-ranked pick.
+	 *
+	 * Price is not evidence of suitability, and a name is barely better. On
+	 * OpenRouter the cheapest model in the catalog is `inclusionai/ling-2.6-flash`
+	 * at $0.01/M, which would otherwise become the security boundary for being
+	 * cheap. An attempt to gate that on the name carrying a known small-model word
+	 * failed on the same example — "flash" is in the name, because any vendor may
+	 * put it there; the word means "someone called this small", not "this family is
+	 * known good".
+	 *
+	 * So nothing chosen on price alone leads. Providers that *are* vetted get their
+	 * saving from the table above (which covers OpenRouter and every mainstream
+	 * provider); anywhere else the model the user already trusted for the real work
+	 * screens the calls — correct, merely not cheap — and `classifierModel` is
+	 * there for someone who wants otherwise.
+	 */
 	push(sessionModel, "session");
+
+	// 5. Last resort, for when even the session model cannot serve.
+	push(cheapest, "cheapest-in-provider");
 
 	// Nothing configured and no session model (a headless run with a bare
 	// registry) — take anything available rather than refusing outright.

@@ -55,15 +55,28 @@ describe("classifierCandidates: cost", () => {
 		expect(chain[0].model.id).toBe("gpt-5-nano");
 	});
 
-	it("sorts by cost when no provider default matches", () => {
+	it("never leads with a model chosen on price alone", () => {
+		// On OpenRouter the cheapest model in the catalog is an obscure $0.01 one,
+		// and it carries "flash" in its name — so neither price nor the name is
+		// evidence of suitability. On an unvetted provider the session model screens.
+		for (const cheapId of ["zzz-obscure", "ling-2.6-flash", "mini-thing"]) {
+			const available = [model("acme", "big-model", 20), model("acme", cheapId, 0.01)];
+			const chain = pick(available, model("acme", "big-model", 20));
+			expect(chain[0].source, cheapId).toBe("session");
+			expect(chain[0].model.id, cheapId).toBe("big-model");
+			// Still reachable as a last resort rather than dropped.
+			expect(chain[chain.length - 1].model.id, cheapId).toBe(cheapId);
+		}
+	});
+
+	it("still sorts the last-resort slot by cost", () => {
 		const available = [
 			model("acme", "big-model", 20),
 			model("acme", "medium-model", 3),
-			model("acme", "tiny-model", 0.2),
+			model("acme", "small-model", 0.2),
 		];
 		const chain = pick(available, model("acme", "big-model", 20));
-		expect(chain[0].source).toBe("cheapest-in-provider");
-		expect(chain[0].model.id).toBe("tiny-model");
+		expect(chain[chain.length - 1].model.id).toBe("small-model");
 	});
 
 	it("treats sentinel and zero prices as unpriced, not as cheap", () => {
@@ -97,6 +110,85 @@ describe("classifierCandidates: cost", () => {
 		expect(chain).toHaveLength(1);
 		expect(chain[0].source).toBe("session");
 		expect(chain[0].model.id).toBe("qwen3-coder");
+	});
+});
+
+describe("classifierCandidates: never dearer than the session model", () => {
+	it("skips a table entry that costs more than the session model", () => {
+		// A real OpenRouter case: a $0.50 session was being screened by a $1 model,
+		// because the budget ceiling was only applied to the cost-ranked branch.
+		const available = [
+			model("openrouter", "anthropic/claude-haiku-4.5", 1),
+			model("openrouter", "openai/gpt-5-mini", 0.25),
+			model("openrouter", "z-ai/glm-4.6", 0.5),
+		];
+		const chain = pick(available, model("openrouter", "z-ai/glm-4.6", 0.5));
+		expect(chain[0].model.id).toBe("openai/gpt-5-mini");
+		for (const candidate of chain) {
+			const price = candidate.model.cost?.input ?? 0;
+			expect(price, candidate.model.id).toBeLessThanOrEqual(0.5);
+		}
+	});
+
+	it("uses the table's first entry when the budget allows it", () => {
+		const available = [
+			model("openrouter", "anthropic/claude-haiku-4.5", 1),
+			model("openrouter", "openai/gpt-5-mini", 0.25),
+			model("openrouter", "anthropic/claude-sonnet-4.5", 3),
+		];
+		const chain = pick(available, model("openrouter", "anthropic/claude-sonnet-4.5", 3));
+		expect(chain[0].model.id).toBe("anthropic/claude-haiku-4.5");
+	});
+
+	it("imposes no ceiling when the session model is unpriced", () => {
+		const available = [model("ollama", "qwen3-coder"), model("ollama", "qwen3-mini", 0)];
+		const chain = pick(available, model("ollama", "qwen3-coder"));
+		expect(chain.length).toBeGreaterThan(0);
+	});
+});
+
+describe("classifierCandidates: unsuitable variants", () => {
+	it("never auto-selects a :batch model, however cheap", () => {
+		// Batch endpoints are asynchronous — a blocking gate would wait out its
+		// timeout — and they are systematically cheaper, so cost ranking prefers them.
+		const available = [
+			model("openrouter", "anthropic/claude-haiku-4.5:batch", 0.5),
+			model("openrouter", "anthropic/claude-haiku-4.5", 1),
+			model("openrouter", "anthropic/claude-sonnet-4.5", 3),
+		];
+		const chain = pick(available, model("openrouter", "anthropic/claude-sonnet-4.5", 3));
+		for (const candidate of chain) {
+			expect(candidate.model.id, candidate.model.id).not.toContain(":batch");
+		}
+		expect(chain[0].model.id).toBe("anthropic/claude-haiku-4.5");
+	});
+
+	it("also skips :free, :online and :thinking variants", () => {
+		for (const suffix of [":free", ":online", ":thinking"]) {
+			const available = [
+				model("openrouter", `openai/gpt-5-mini${suffix}`, 0.01),
+				model("openrouter", "openai/gpt-5-mini", 0.25),
+				model("openrouter", "big/model", 5),
+			];
+			const chain = pick(available, model("openrouter", "big/model", 5));
+			for (const candidate of chain) {
+				expect(candidate.model.id, `${suffix}: ${candidate.model.id}`).not.toContain(suffix);
+			}
+		}
+	});
+
+	it("honours an explicitly configured variant — naming it is choosing it", () => {
+		const available = [model("openrouter", "anthropic/claude-haiku-4.5:batch", 0.5), model("openrouter", "big/model", 5)];
+		const chain = pick(available, model("openrouter", "big/model", 5), "openrouter/anthropic/claude-haiku-4.5:batch");
+		expect(chain[0].source).toBe("configured");
+		expect(chain[0].model.id).toBe("anthropic/claude-haiku-4.5:batch");
+	});
+
+	it("does not let a :batch id satisfy a plain table prefix", () => {
+		// startsWith would otherwise accept `...haiku-4.5:batch` for `...haiku-4.5`.
+		const available = [model("openrouter", "anthropic/claude-haiku-4.5:batch", 0.5), model("openrouter", "big/model", 5)];
+		const chain = pick(available, model("openrouter", "big/model", 5));
+		expect(chain.every((c) => !c.model.id.includes(":batch"))).toBe(true);
 	});
 });
 
