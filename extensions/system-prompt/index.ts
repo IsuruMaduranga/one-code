@@ -10,6 +10,7 @@
 
 import { mkdirSync } from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { resolveModelTier } from "../lib/model-tier.ts";
 import { sessionScratchpadDir } from "../lib/scratchpad.ts";
 import { collectEnvironment, type EnvironmentInfo } from "./environment.ts";
 import { buildClaudeCodeSystemPrompt } from "./template.ts";
@@ -35,12 +36,14 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 	pi.on("before_agent_start", (event, ctx) => {
 		const model = ctx.model;
 		const modelLine = model ? `${model.id} (${model.provider})` : "unknown";
-		const key = `${ctx.cwd}|${modelLine}`;
+		// Re-resolved every turn: the model (and so the tier) can change mid-session.
+		const tier = resolveModelTier(model);
+		const key = `${ctx.cwd}|${modelLine}|${tier}`;
 		if (!cachedEnv || cachedKey !== key) {
 			cachedEnv = collectEnvironment(ctx.cwd, modelLine);
 			cachedKey = key;
 		}
 
-		return { systemPrompt: buildClaudeCodeSystemPrompt(event.systemPromptOptions, cachedEnv, scratchpad) };
+		return { systemPrompt: buildClaudeCodeSystemPrompt(event.systemPromptOptions, cachedEnv, tier, scratchpad) };
 	});
 }

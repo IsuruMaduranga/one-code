@@ -34,9 +34,21 @@ describe("memoryPromptSection", () => {
 		expect(section).toContain("type: user | feedback | project | reference");
 	});
 
-	it("is deterministic for a given directory", () => {
+	it("is deterministic for a given directory (both variants)", () => {
 		const dir = "/Users/u/.claude/projects/-p/memory";
 		expect(memoryPromptSection(dir)).toBe(memoryPromptSection(dir));
+		expect(memoryPromptSection(dir, true)).toBe(memoryPromptSection(dir, true));
+	});
+
+	it("verbose mode adds the long weak-model spec and differs from compact", () => {
+		const dir = "/Users/u/.claude/projects/-p/memory";
+		const verbose = memoryPromptSection(dir, true);
+		expect(verbose).toContain("# Memory");
+		expect(verbose).toContain(`${dir}/`);
+		expect(verbose).toContain("## Types of memory");
+		expect(verbose).toContain("## What NOT to save");
+		expect(verbose).toContain("MEMORY.md");
+		expect(verbose).not.toBe(memoryPromptSection(dir, false));
 	});
 });
 

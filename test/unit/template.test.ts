@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { PromptTier } from "../../extensions/lib/model-tier.ts";
 import type { EnvironmentInfo } from "../../extensions/system-prompt/environment.ts";
 import { buildClaudeCodeSystemPrompt } from "../../extensions/system-prompt/template.ts";
 
@@ -14,10 +15,11 @@ const env: EnvironmentInfo = {
 };
 
 const baseOptions = { cwd: "/tmp/project" };
+const TIERS: PromptTier[] = ["frontier", "mid", "low"];
 
 describe("buildClaudeCodeSystemPrompt", () => {
 	it("contains the adapted identity and core sections", () => {
-		const prompt = buildClaudeCodeSystemPrompt(baseOptions, env);
+		const prompt = buildClaudeCodeSystemPrompt(baseOptions, env, "frontier");
 		expect(prompt).toContain("You are pincer");
 		expect(prompt).toContain("# Harness");
 		expect(prompt).toContain("<system-reminder>");
@@ -27,7 +29,7 @@ describe("buildClaudeCodeSystemPrompt", () => {
 	});
 
 	it("renders the environment block", () => {
-		const prompt = buildClaudeCodeSystemPrompt(baseOptions, env);
+		const prompt = buildClaudeCodeSystemPrompt(baseOptions, env, "frontier");
 		expect(prompt).toContain("Working directory: /tmp/project");
 		expect(prompt).toContain("Is a git repository: yes");
 		expect(prompt).toContain("Model: claude-opus-5 (anthropic)");
@@ -35,16 +37,16 @@ describe("buildClaudeCodeSystemPrompt", () => {
 
 	it("includes the scratchpad section after the environment block, only when a dir exists", () => {
 		const scratchpad = "/private/tmp/claude-501/-tmp-project/abc-123/scratchpad";
-		const prompt = buildClaudeCodeSystemPrompt(baseOptions, env, scratchpad);
+		const prompt = buildClaudeCodeSystemPrompt(baseOptions, env, "frontier", scratchpad);
 		expect(prompt).toContain("# Scratchpad Directory");
 		expect(prompt).toContain(scratchpad);
 		expect(prompt.indexOf("# Environment")).toBeLessThan(prompt.indexOf("# Scratchpad Directory"));
 		// An unwritable /tmp drops the section rather than promising a dead dir.
-		expect(buildClaudeCodeSystemPrompt(baseOptions, env)).not.toContain("# Scratchpad Directory");
+		expect(buildClaudeCodeSystemPrompt(baseOptions, env, "frontier")).not.toContain("# Scratchpad Directory");
 	});
 
 	it("includes the memory section just before the environment block", () => {
-		const prompt = buildClaudeCodeSystemPrompt(baseOptions, env);
+		const prompt = buildClaudeCodeSystemPrompt(baseOptions, env, "frontier");
 		expect(prompt).toContain("# Memory");
 		expect(prompt).toContain("/home/u/.claude/projects/-tmp-project/memory/");
 		expect(prompt.indexOf("# Memory")).toBeLessThan(prompt.indexOf("# Environment"));
@@ -59,6 +61,7 @@ describe("buildClaudeCodeSystemPrompt", () => {
 				promptGuidelines: ["Use read before edit", "Use read before edit", "  "],
 			},
 			env,
+			"frontier",
 		);
 		expect(prompt).toContain("- read: Read files");
 		expect(prompt).toContain("- bash: Run commands");
@@ -71,14 +74,58 @@ describe("buildClaudeCodeSystemPrompt", () => {
 		const prompt = buildClaudeCodeSystemPrompt(
 			{ ...baseOptions, contextFiles: [{ path: "/tmp/project/CLAUDE.md", content: "Always use tabs." }] },
 			env,
+			"frontier",
 		);
 		expect(prompt).toContain('<project_instructions path="/tmp/project/CLAUDE.md">');
 		expect(prompt).toContain("Always use tabs.");
 	});
 
-	it("is byte-stable across calls with identical inputs", () => {
-		const a = buildClaudeCodeSystemPrompt(baseOptions, env);
-		const b = buildClaudeCodeSystemPrompt({ ...baseOptions }, { ...env });
-		expect(a).toBe(b);
+	it("keeps the frontier prompt lean (no verbose scaffolding, compact memory)", () => {
+		const prompt = buildClaudeCodeSystemPrompt(baseOptions, env, "frontier");
+		expect(prompt).toContain("<system-reminder>"); // core explanation stays in all tiers
+		expect(prompt).not.toContain("# Doing tasks");
+		expect(prompt).not.toContain("# Text output");
+		expect(prompt).not.toContain("## Types of memory");
+		expect(prompt).not.toContain("bear no direct relation"); // caveat is mid/low only
+	});
+
+	it("gives mid the verbose register and the long memory spec", () => {
+		const prompt = buildClaudeCodeSystemPrompt(baseOptions, env, "mid");
+		expect(prompt).toContain("# Doing tasks");
+		expect(prompt).toContain("# Executing actions with care");
+		expect(prompt).toContain("# Tone and style");
+		expect(prompt).toContain("## Types of memory"); // verbose memory
+		expect(prompt).toContain("bear no direct relation"); // fuller system-reminder caveat
+	});
+
+	it("gives low the bespoke weak-model scaffolding, including an explicit skill nudge", () => {
+		const prompt = buildClaudeCodeSystemPrompt(baseOptions, env, "low");
+		expect(prompt).toContain("# Make changes with tools, not prose");
+		expect(prompt).toContain("# Answer or act");
+		expect(prompt).toContain("# Playbooks");
+		expect(prompt).toContain("skill tool"); // the skills nudge that motivated tiering
+	});
+
+	it("is byte-stable across calls with identical inputs, for each tier", () => {
+		for (const tier of TIERS) {
+			const a = buildClaudeCodeSystemPrompt(baseOptions, env, tier);
+			const b = buildClaudeCodeSystemPrompt({ ...baseOptions }, { ...env }, tier);
+			expect(a).toBe(b);
+		}
+	});
+
+	it("produces a distinct prompt for each tier", () => {
+		const outputs = TIERS.map((tier) => buildClaudeCodeSystemPrompt(baseOptions, env, tier));
+		expect(new Set(outputs).size).toBe(TIERS.length);
+	});
+
+	it("varying only the model line within a tier changes only the Model line", () => {
+		const strip = (s: string) => s.replace(/- Model: .*/, "- Model:");
+		for (const tier of TIERS) {
+			const a = buildClaudeCodeSystemPrompt(baseOptions, env, tier);
+			const b = buildClaudeCodeSystemPrompt(baseOptions, { ...env, modelLine: "gpt-5 (openai)" }, tier);
+			expect(a).not.toBe(b);
+			expect(strip(a)).toBe(strip(b));
+		}
 	});
 });
