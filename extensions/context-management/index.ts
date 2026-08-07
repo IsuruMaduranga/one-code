@@ -87,7 +87,7 @@ export function withClearThinking(payload: Record<string, unknown>): Record<stri
 }
 
 /** OAuth logins need pi's identity betas kept in the header we overwrite. */
-function isAnthropicOAuth(): boolean {
+export function isAnthropicOAuth(): boolean {
 	try {
 		const auth = JSON.parse(readFileSync(join(os.homedir(), ".pi", "agent", "auth.json"), "utf8"));
 		const entry = auth?.anthropic;
