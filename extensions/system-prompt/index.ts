@@ -34,6 +34,11 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("before_agent_start", (event, ctx) => {
+		// A named agent (or a `--system-prompt` launch) supplies its own prompt via
+		// customPrompt. Return nothing so pi's own builder uses it verbatim, rather
+		// than clobbering it with the tiered pincer prompt.
+		if (event.systemPromptOptions.customPrompt) return;
+
 		const model = ctx.model;
 		const modelLine = model ? `${model.id} (${model.provider})` : "unknown";
 		// Re-resolved every turn: the model (and so the tier) can change mid-session.
