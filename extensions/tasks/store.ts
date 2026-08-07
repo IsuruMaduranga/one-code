@@ -99,16 +99,23 @@ export class TaskStore {
 			}
 		}
 
+		// Separate a self-reference from a genuinely unknown id: link() rejects
+		// both, so folding them together reported a valid, existing id as "Unknown
+		// task id" — sending the model to hunt a typo that isn't there.
 		const unknown: string[] = [];
+		let selfRef = false;
 		for (const other of input.addBlocks ?? []) {
-			if (!this.link(id, other)) unknown.push(other);
+			if (other === id) selfRef = true;
+			else if (!this.link(id, other)) unknown.push(other);
 		}
 		for (const other of input.addBlockedBy ?? []) {
-			if (!this.link(other, id)) unknown.push(other);
+			if (other === id) selfRef = true;
+			else if (!this.link(other, id)) unknown.push(other);
 		}
-		if (unknown.length > 0) {
-			return { task, error: `Unknown task id(s) in dependency list: ${unknown.join(", ")}` };
-		}
+		const errors: string[] = [];
+		if (selfRef) errors.push(`Task #${id} cannot block or be blocked by itself`);
+		if (unknown.length > 0) errors.push(`Unknown task id(s) in dependency list: ${unknown.join(", ")}`);
+		if (errors.length > 0) return { task, error: errors.join(". ") };
 		return { task };
 	}
 

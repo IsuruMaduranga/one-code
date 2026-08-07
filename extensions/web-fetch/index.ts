@@ -249,8 +249,32 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 					},
 				};
 			} catch (error) {
+				// Node's fetch() reports "fetch failed" / "This operation was aborted"
+				// for DNS, connection, and timeout errors alike — the real cause hides
+				// in error.cause, and a timeout is indistinguishable from a cancel by
+				// name alone. Unpack all three so the model sees what actually failed
+				// and what to try next.
+				const err = error as Error & { cause?: unknown };
+				const aborted = err.name === "AbortError" || err.name === "TimeoutError";
+				if (aborted && signal?.aborted) {
+					return {
+						content: [{ type: "text", text: `Fetch of ${target} was cancelled.` }],
+						details: { url: target },
+						isError: true,
+					};
+				}
+				const reason = aborted
+					? `timed out after ${FETCH_TIMEOUT_MS / 1000}s — the site may be slow, unreachable, or blocking automated requests`
+					: err.cause instanceof Error
+						? `${err.message}: ${err.cause.message}`
+						: err.message;
 				return {
-					content: [{ type: "text", text: `Could not fetch ${target}: ${(error as Error).message}` }],
+					content: [
+						{
+							type: "text",
+							text: `Could not fetch ${target}: ${reason}. Verify the URL and host, retry, or use web_search instead.`,
+						},
+					],
 					details: { url: target },
 					isError: true,
 				};

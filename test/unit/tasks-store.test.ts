@@ -60,6 +60,18 @@ describe("TaskStore", () => {
 		expect(store.update(a.id, { addBlocks: ["7"] }).error).toContain("7");
 	});
 
+	it("distinguishes a self-reference from an unknown dependency id", () => {
+		const store = new TaskStore();
+		const a = store.create({ subject: "A", description: "" });
+		const selfError = store.update(a.id, { addBlocks: [a.id] }).error ?? "";
+		expect(selfError).toContain("itself");
+		expect(selfError).not.toContain("Unknown");
+		// A valid self-reference alongside a genuinely unknown id reports both.
+		const bothError = store.update(a.id, { addBlockedBy: [a.id, "7"] }).error ?? "";
+		expect(bothError).toContain("itself");
+		expect(bothError).toContain("7");
+	});
+
 	it("round-trips through snapshot/restore preserving the id counter", () => {
 		const store = new TaskStore();
 		store.create({ subject: "A", description: "" });

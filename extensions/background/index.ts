@@ -306,20 +306,32 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			lastCtx = ctx;
-			if (wakeup) {
-				clearTimeout(wakeup.timer);
-				wakeup = undefined;
-			}
+			const clearPending = () => {
+				if (wakeup) {
+					clearTimeout(wakeup.timer);
+					wakeup = undefined;
+				}
+			};
 			if (params.stop) {
+				clearPending();
 				return { content: [{ type: "text", text: "Wakeup loop stopped; no further wakeups will fire." }], details: {} };
 			}
+			// Validate BEFORE touching the pending wakeup: clearing it up front meant
+			// a malformed reschedule silently killed a running /loop with no signal.
 			if (params.delaySeconds === undefined || !params.prompt || !params.reason) {
 				return {
-					content: [{ type: "text", text: "delaySeconds, prompt, and reason are all required unless stop is true." }],
+					content: [
+						{
+							type: "text",
+							text: `delaySeconds, prompt, and reason are all required unless stop is true.${wakeup ? " Your previous wakeup is still pending — this call was rejected and left it untouched." : ""}`,
+						},
+					],
 					details: {},
 					isError: true,
 				};
 			}
+			// Valid reschedule — now it is safe to replace any pending wakeup.
+			clearPending();
 
 			const request = { delaySeconds: params.delaySeconds, prompt: params.prompt, reason: params.reason };
 			const delayMs = clampDelaySeconds(params.delaySeconds) * 1000;

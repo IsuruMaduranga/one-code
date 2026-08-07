@@ -104,6 +104,12 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 			const fail = (text: string) => ({ content: [{ type: "text" as const, text }], details: {} as WorktreeDetails, isError: true });
 
 			if (params.name && params.path) return fail("Pass either `name` or `path`, not both.");
+			// An empty `path` string is falsy, so without this it would fall through
+			// to *creating* a new worktree instead of reporting the bad argument —
+			// the mirror of the empty-`name` case, which is already rejected below.
+			if (params.path !== undefined && params.path.length === 0) {
+				return fail("`path` was empty — pass an existing worktree path from `git worktree list`, or omit `path` to create a new worktree.");
+			}
 
 			let repoRoot: string;
 			try {
@@ -124,8 +130,11 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 				};
 			}
 
-			if (state?.createdByUs) {
-				return fail(`Already in a worktree session (${state.path}). exit_worktree first, or switch with \`path\`.`);
+			// Any active worktree session blocks creating another — not just ones we
+			// created. A session entered via `path` has createdByUs:false, and
+			// without gating on `state` alone a create-new call silently abandoned it.
+			if (state) {
+				return fail(`Already in a worktree session (${state.path}). exit_worktree first, or switch with \`path\` to another worktree.`);
 			}
 
 			const name = params.name ?? `wt-${randomBytes(3).toString("hex")}`;

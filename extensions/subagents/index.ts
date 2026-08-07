@@ -344,10 +344,38 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			const agents = loadAgents(ctx.cwd);
 
-			if (params.action === "list" || (!params.agent && !params.tasks)) {
+			// A call carrying run options (a task, a name, run_in_background, a
+			// model/thinking/isolation override, or action:"run") but no `agent`
+			// or `tasks` is a run that forgot to name its agent. Fail loudly with a
+			// diagnostic rather than silently returning the catalog: a weaker model
+			// reads the catalog as a non-sequitur and invents wrong reasons for it,
+			// instead of learning it omitted `agent`.
+			const wantsRun =
+				params.action === "run" ||
+				params.task != null ||
+				params.name != null ||
+				params.run_in_background != null ||
+				params.model != null ||
+				params.isolation != null ||
+				params.thinking != null;
+
+			if (params.action === "list" || (!params.agent && !params.tasks && !wantsRun)) {
 				return {
 					content: [{ type: "text", text: `Available agents:\n${describeAgents(ctx.cwd)}` }],
 					details: { agents: agents.map((a) => a.name) },
+				};
+			}
+
+			if (!params.agent && !params.tasks) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `No \`agent\` given, but you passed run options — this looks like a run that forgot to name its agent. Set \`agent\` to one of the names below (or "fork" to clone this conversation), or pass \`tasks\` to run several. To only browse the catalog, call with action:"list".\n\nAvailable agents:\n${describeAgents(ctx.cwd)}`,
+						},
+					],
+					details: {},
+					isError: true,
 				};
 			}
 
@@ -692,7 +720,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			if (!record) {
 				const known = registry.names().join(", ") || "(none)";
 				return {
-					content: [{ type: "text", text: `No agent named "${params.to}". Known agents: ${known}` }],
+					content: [
+						{
+							type: "text",
+							text: `No run named "${params.to}". send_message only reaches subagent runs already started this session — address them by their run name or task id, not by a catalog agent name. Start one with the subagent tool first if you haven't. Known runs: ${known}.`,
+						},
+					],
 					details: {},
 					isError: true,
 				};

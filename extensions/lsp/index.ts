@@ -41,7 +41,14 @@ export default function lspExtension(pi: ExtensionAPI) {
 
 		const existing = clients.get(key);
 		if (existing?.isRunning) return existing;
-		if (existing) return undefined; // crashed; don't respawn in a loop
+		if (existing) {
+			// Crashed mid-session. Record why so downstream reports the real cause
+			// (a server that was running and died) instead of falling through to
+			// "install <command>" advice for an already-installed server — and so
+			// the one-time post-edit warning still fires. Don't respawn in a loop.
+			startFailures.set(key, existing.error ?? "language server stopped unexpectedly");
+			return undefined;
+		}
 
 		if (match.languageId.startsWith("typescript") || match.languageId.startsWith("javascript")) {
 			const problem = typescriptPreflight(root);
@@ -131,7 +138,10 @@ export default function lspExtension(pi: ExtensionAPI) {
 						},
 					],
 					details: { available: false },
-					isError: false,
+					// A language was recognised but its server is unavailable/failed —
+					// that is an error, not a clean "no diagnostics". Only a genuinely
+					// unsupported filetype (no match) is a non-error outcome.
+					isError: Boolean(match),
 				};
 			}
 

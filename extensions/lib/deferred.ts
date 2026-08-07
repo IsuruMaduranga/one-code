@@ -54,6 +54,21 @@ export interface SearchMatch {
 }
 
 /**
+ * The exact names a `select:` query asks for (lowercased), or undefined when the
+ * query is not a select: query. Lets tool_search report which requested names
+ * matched nothing instead of silently dropping them.
+ */
+export function selectedNames(query: string): string[] | undefined {
+	const trimmed = query.trim();
+	if (!trimmed.toLowerCase().startsWith("select:")) return undefined;
+	return trimmed
+		.slice("select:".length)
+		.split(",")
+		.map((n) => n.trim().toLowerCase())
+		.filter(Boolean);
+}
+
+/**
  * Claude Code's ToolSearch query syntax:
  *   "select:Read,Edit"  — exact names, no scoring
  *   "+slack send"       — require "slack" in the tool name, rank by the rest
@@ -62,14 +77,10 @@ export interface SearchMatch {
 export function searchTools(query: string, tools: SearchableTool[], maxResults = 5): SearchMatch[] {
 	const trimmed = query.trim();
 
-	if (trimmed.toLowerCase().startsWith("select:")) {
-		const requested = trimmed
-			.slice("select:".length)
-			.split(",")
-			.map((n) => n.trim().toLowerCase())
-			.filter(Boolean);
+	const selected = selectedNames(query);
+	if (selected) {
 		return tools
-			.filter((t) => requested.includes(t.name.toLowerCase()))
+			.filter((t) => selected.includes(t.name.toLowerCase()))
 			.map((t) => ({ name: t.name, score: Number.POSITIVE_INFINITY }));
 	}
 

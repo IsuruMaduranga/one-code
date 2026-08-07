@@ -143,6 +143,12 @@ export function createScriptGlobals(options: ScriptGlobalsOptions): { globals: S
 				return result.value;
 			} catch (error) {
 				throwIfAborted();
+				// A script-authoring mistake (bad agentType/model, worktree without a
+				// git repo, malformed schema) must unwind the script, not vanish into
+				// a null the way a genuine agent failure does — same rule parallel()
+				// and pipeline() already apply. Otherwise a completed run reports a
+				// null hole with the real cause nowhere in the final report.
+				if (error instanceof WorkflowScriptError) throw error;
 				// A failed agent resolves to null (Claude Code semantics); the
 				// failure is surfaced as a progress event, not an exception.
 				options.onEvent({ type: "agentEnd", callIndex, label, phase, text: `failed: ${(error as Error).message}` });

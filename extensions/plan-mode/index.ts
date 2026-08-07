@@ -111,6 +111,22 @@ export default function planModeExtension(pi: ExtensionAPI) {
 		promptSnippet: "exit_plan_mode - present your plan file for user approval",
 		parameters: Type.Object({}),
 		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+			// Guard the out-of-sequence call: without this, a cold exit_plan_mode
+			// (never entered plan mode) allocates a fresh empty plan file and blames
+			// "the plan file is empty" — a plausible but wrong cause a weak model
+			// then chases. The real fix is to enter plan mode first.
+			if (currentMode !== "plan") {
+				return {
+					content: [
+						{
+							type: "text",
+							text: "Not in plan mode, so there is no plan to approve. Call enter_plan_mode first, build the plan in the file it names, then call exit_plan_mode.",
+						},
+					],
+					details: {},
+					isError: true,
+				};
+			}
 			const path = ensurePlanFile(ctx);
 			const plan = existsSync(path) ? readFileSync(path, "utf8") : "";
 			if (!plan.trim()) {

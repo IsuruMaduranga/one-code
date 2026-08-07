@@ -72,10 +72,27 @@ export default function skillExtension(pi: ExtensionAPI) {
 			list: Type.Optional(Type.Boolean({ description: "List available skills instead of invoking one" })),
 		}),
 		async execute(_toolCallId, params) {
-			if (params.list || !params.skill) {
+			// `list`, or a bare call with no invoke signal, browses the catalog. A
+			// call that passed `args` but no `skill` is an invocation that forgot to
+			// name the skill — fail loudly rather than silently returning the
+			// catalog, which a weak model reads as a non-sequitur (same archetype as
+			// the subagent tool; see docs/decisions/subagents-workflows.md).
+			if (params.list || (!params.skill && params.args == null)) {
 				return {
 					content: [{ type: "text", text: `Available skills:\n${describe()}` }],
 					details: { skills: index().map((s) => s.name) } as Record<string, unknown>,
+				};
+			}
+			if (!params.skill) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `No \`skill\` given, but you passed \`args\` — this looks like an invocation that forgot to name the skill. Set \`skill\` to one of the names below, or call with \`list: true\` to just browse.\n\nAvailable skills:\n${describe()}`,
+						},
+					],
+					details: {} as Record<string, unknown>,
+					isError: true,
 				};
 			}
 

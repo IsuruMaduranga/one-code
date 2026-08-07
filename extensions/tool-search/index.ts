@@ -12,7 +12,7 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { DEFER_CHANNEL, deferredRegistry, type DeferRequest, searchTools } from "../lib/deferred.ts";
+import { DEFER_CHANNEL, deferredRegistry, type DeferRequest, searchTools, selectedNames } from "../lib/deferred.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 
 export default function toolSearchExtension(pi: ExtensionAPI) {
@@ -67,13 +67,27 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 			const available = searchableTools();
 			const matches = searchTools(params.query, available, params.max_results ?? 5);
 
+			// For an exact `select:` query, a requested name that matched nothing was
+			// silently dropped before — the model was told the rest "Loaded" and only
+			// discovered the miss later as an opaque InputValidationError. Always
+			// surface the unmatched names.
+			const requested = selectedNames(params.query);
+			const notFound = requested
+				? requested.filter((n) => !matches.some((m) => m.name.toLowerCase() === n))
+				: [];
+			const notFoundNote =
+				notFound.length > 0
+					? ` Not found (not deferred tool names — check spelling, or search by keyword instead of \`select:\`): ${notFound.join(", ")}.`
+					: "";
+
 			if (matches.length === 0) {
 				const names = available.map((t) => t.name).join(", ") || "(none)";
 				return {
 					content: [
-						{ type: "text", text: `No tools matched "${params.query}". Tools that can be loaded: ${names}` },
+						{ type: "text", text: `No tools matched "${params.query}".${notFoundNote} Tools that can be loaded: ${names}` },
 					],
-					details: { matches: [] as string[], added: [] as string[] },
+					details: { matches: [] as string[], added: [] as string[], notFound },
+					isError: true,
 				};
 			}
 
@@ -89,12 +103,12 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 					{
 						type: "text",
 						text:
-							added.length > 0
+							(added.length > 0
 								? `Loaded ${added.join(", ")}. These tools are now callable.`
-								: `Already loaded: ${loaded.join(", ")}.`,
+								: `Already loaded: ${loaded.join(", ")}.`) + notFoundNote,
 					},
 				],
-				details: { matches: loaded, added },
+				details: { matches: loaded, added, notFound },
 			};
 		},
 	});

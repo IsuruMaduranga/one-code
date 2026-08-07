@@ -165,6 +165,21 @@ export default function mcpExtension(pi: ExtensionAPI) {
 				server: Type.Optional(Type.String({ description: "Limit to one server by name" })),
 			}),
 			async execute(_toolCallId, params) {
+				// A bad `server` name must not read back as "this server has zero
+				// resources" — validate it like read_mcp_resource does, else a typo
+				// looks like an empty (but real) server.
+				if (params.server && !connections.has(params.server)) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `No connected MCP server named "${params.server}". Connected servers: ${[...connections.keys()].join(", ") || "none"}.`,
+							},
+						],
+						details: { count: 0 },
+						isError: true,
+					};
+				}
 				const lines: string[] = [];
 				for (const connection of connections.values()) {
 					if (params.server && connection.server.name !== params.server) continue;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DeferredRegistry, searchTools, type SearchableTool } from "../../extensions/lib/deferred.ts";
+import { DeferredRegistry, searchTools, type SearchableTool, selectedNames } from "../../extensions/lib/deferred.ts";
 
 const tools: SearchableTool[] = [
 	{ name: "notebook_edit", description: "Edit a Jupyter notebook cell", keywords: ["ipynb", "jupyter"] },
@@ -62,5 +62,25 @@ describe("searchTools", () => {
 
 	it("respects max_results", () => {
 		expect(searchTools("search message web notebook", tools, 2)).toHaveLength(2);
+	});
+});
+
+describe("selectedNames", () => {
+	it("returns lowercased requested names for a select: query", () => {
+		expect(selectedNames("select:NoteBook_Edit, web_search")).toEqual(["notebook_edit", "web_search"]);
+	});
+
+	it("returns undefined for a non-select query", () => {
+		expect(selectedNames("jupyter notebook")).toBeUndefined();
+		expect(selectedNames("+slack search")).toBeUndefined();
+	});
+
+	it("drops empty entries so the caller can flag unmatched names", () => {
+		expect(selectedNames("select:web_search,,")).toEqual(["web_search"]);
+		// A typo'd name is present in the request but absent from searchTools results,
+		// which is exactly what lets tool_search report it as not-found.
+		const requested = selectedNames("select:web_search,does_not_exist") ?? [];
+		const found = searchTools("select:web_search,does_not_exist", tools).map((m) => m.name.toLowerCase());
+		expect(requested.filter((n) => !found.includes(n))).toEqual(["does_not_exist"]);
 	});
 });
