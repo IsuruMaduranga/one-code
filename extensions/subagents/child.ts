@@ -109,6 +109,59 @@ export interface ChildOutcome {
 	actions: ChildAction[];
 }
 
+/**
+ * A provider failure in a child (auth, billing, rate limit) surfaces ONLY as
+ * an assistant message with stopReason "error" in the event stream — stderr
+ * stays empty and the process exits normally. Without capturing it, the
+ * parent gets "Subagent produced no output (exit code 0)", the exact
+ * ambiguous result a weak model confabulates a cause for. The error is
+ * cleared by any later successful assistant message, so pi's internal
+ * retries don't leave a stale failure.
+ */
+export function providerErrorFrom(message: { stopReason?: string; errorMessage?: string } | undefined): string | undefined {
+	if (!message) return undefined;
+	if (message.stopReason !== "error") return undefined;
+	return message.errorMessage || "unknown provider error";
+}
+
+/** The outcome a finished child resolves to, given everything its stream said. */
+export function closeOutcome(args: {
+	finalText: string;
+	providerError?: string;
+	code: number | null;
+	closeSignal: NodeJS.Signals | null;
+	stderr: string;
+	toolCalls: number;
+	usage: UsageTotals;
+	actions: ChildAction[];
+}): ChildOutcome {
+	const { finalText, providerError, code, closeSignal, stderr, toolCalls, usage, actions } = args;
+	const output = finalText.slice(0, OUTPUT_CAP);
+	if (providerError) {
+		return {
+			output: output.trim()
+				? `${output}\n\n[The subagent's last request ended with a provider error: ${providerError}]`
+				: `Subagent failed with a provider error (its model could not be called — an auth/billing/rate-limit problem, not a task failure): ${providerError}`,
+			toolCalls,
+			usage,
+			actions,
+			failed: true,
+		};
+	}
+	if (output.trim()) {
+		return { output, toolCalls, usage, actions };
+	}
+	const why = closeSignal ? `terminated by ${closeSignal}` : `exit code ${code}`;
+	const detail = stderr.trim().split("\n").slice(-5).join("\n");
+	return {
+		output: `Subagent produced no output (${why}).${detail ? `\n${detail}` : ""}`,
+		toolCalls,
+		usage,
+		actions,
+		failed: true,
+	};
+}
+
 export interface ChildHandle {
 	result: Promise<ChildOutcome>;
 	kill(): void;
@@ -133,6 +186,7 @@ export function startChild(options: ChildOptions): ChildHandle {
 	let toolCalls = 0;
 	const actions: ChildAction[] = [];
 	let stderr = "";
+	let providerError: string | undefined;
 	const usage = emptyUsage();
 
 	const onAbort = () => child.kill("SIGTERM");
@@ -140,7 +194,10 @@ export function startChild(options: ChildOptions): ChildHandle {
 
 	const processLine = (line: string) => {
 		if (!line.trim()) return;
-		let event: { type?: string; message?: { role?: string; content?: unknown; usage?: unknown } };
+		let event: {
+			type?: string;
+			message?: { role?: string; content?: unknown; usage?: unknown; stopReason?: string; errorMessage?: string };
+		};
 		try {
 			event = JSON.parse(line);
 		} catch {
@@ -156,6 +213,7 @@ export function startChild(options: ChildOptions): ChildHandle {
 			onProgress(toolCalls, finalText, usage);
 		} else if (event.type === "message_end" && event.message?.role === "assistant") {
 			addUsage(usage, event.message.usage);
+			providerError = providerErrorFrom(event.message);
 			const blocks = Array.isArray(event.message.content) ? event.message.content : [];
 			const text = blocks
 				.filter((b): b is { type: string; text: string } => (b as { type?: string }).type === "text")
@@ -187,20 +245,7 @@ export function startChild(options: ChildOptions): ChildHandle {
 		child.on("close", (code, closeSignal) => {
 			signal?.removeEventListener("abort", onAbort);
 			if (buffer.trim()) processLine(buffer);
-			const output = finalText.slice(0, OUTPUT_CAP);
-			if (output.trim()) {
-				resolve({ output, toolCalls, usage, actions });
-				return;
-			}
-			const why = closeSignal ? `terminated by ${closeSignal}` : `exit code ${code}`;
-			const detail = stderr.trim().split("\n").slice(-5).join("\n");
-			resolve({
-				output: `Subagent produced no output (${why}).${detail ? `\n${detail}` : ""}`,
-				toolCalls,
-				usage,
-				actions,
-				failed: true,
-			});
+			resolve(closeOutcome({ finalText, providerError, code, closeSignal, stderr, toolCalls, usage, actions }));
 		});
 	});
 
@@ -300,6 +345,17 @@ export function startRpcChild(options: RpcChildOptions): RpcChildHandle {
 
 	const turnOutcome = (): ChildOutcome => {
 		const output = tracker.turnText.slice(0, OUTPUT_CAP);
+		if (tracker.providerError) {
+			return {
+				output: output.trim()
+					? `${output}\n\n[The subagent's last request ended with a provider error: ${tracker.providerError}]`
+					: `Subagent failed with a provider error (its model could not be called — an auth/billing/rate-limit problem, not a task failure): ${tracker.providerError}`,
+				toolCalls: tracker.toolCalls,
+				usage: tracker.usage,
+				actions: tracker.actions,
+				failed: true,
+			};
+		}
 		if (output.trim()) return { output, toolCalls: tracker.toolCalls, usage: tracker.usage, actions: tracker.actions };
 		const detail = stderr.trim().split("\n").slice(-5).join("\n");
 		return {
@@ -317,8 +373,9 @@ export function startRpcChild(options: RpcChildOptions): RpcChildHandle {
 		if (tracker.busy) {
 			tracker.busy = false;
 			const detail = stderr.trim().split("\n").slice(-5).join("\n");
+			const provider = tracker.providerError ? `\nLast provider error: ${tracker.providerError}` : "";
 			options.onTurnEnd({
-				output: `Subagent exited mid-turn.${detail ? `\n${detail}` : ""}`,
+				output: `Subagent exited mid-turn.${provider}${detail ? `\n${detail}` : ""}`,
 				toolCalls: tracker.toolCalls,
 				usage: tracker.usage,
 				actions: tracker.actions,

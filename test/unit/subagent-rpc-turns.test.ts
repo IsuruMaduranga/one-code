@@ -72,3 +72,38 @@ describe("RpcTurnTracker", () => {
 		expect(tracker.process(JSON.stringify({ type: "message_end", message: { role: "toolResult" } }))).toBeUndefined();
 	});
 });
+
+describe("provider errors in the event stream", () => {
+	const errorEnd = JSON.stringify({
+		type: "message_end",
+		message: { role: "assistant", content: [], stopReason: "error", errorMessage: "OpenAI API error (401): CreditsError" },
+	});
+	const okEnd = JSON.stringify({
+		type: "message_end",
+		message: { role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop" },
+	});
+
+	it("captures the error from an assistant message with stopReason error", () => {
+		const tracker = new RpcTurnTracker();
+		tracker.beginTurn();
+		tracker.process(errorEnd);
+		expect(tracker.providerError).toBe("OpenAI API error (401): CreditsError");
+	});
+
+	it("clears the error when a later assistant message succeeds (pi retried)", () => {
+		const tracker = new RpcTurnTracker();
+		tracker.beginTurn();
+		tracker.process(errorEnd);
+		tracker.process(okEnd);
+		expect(tracker.providerError).toBeUndefined();
+		expect(tracker.turnText).toBe("done");
+	});
+
+	it("resets the error on a new turn", () => {
+		const tracker = new RpcTurnTracker();
+		tracker.beginTurn();
+		tracker.process(errorEnd);
+		tracker.beginTurn();
+		expect(tracker.providerError).toBeUndefined();
+	});
+});

@@ -40,6 +40,13 @@ export class RpcTurnTracker {
 	readonly usage: UsageTotals = emptyUsage();
 	/** Final assistant text of the turn in progress (or the last finished one). */
 	turnText = "";
+	/**
+	 * Set when the turn's LAST assistant message ended with stopReason "error"
+	 * (provider failure: auth, billing, rate limit) — the only place such a
+	 * failure surfaces; stderr stays empty. A later successful assistant
+	 * message (pi retried) clears it.
+	 */
+	providerError: string | undefined;
 	/** Every turn's final text, for task_output on a resident agent. */
 	transcript = "";
 	/** A prompt has been sent and its agent_end not yet seen. */
@@ -54,6 +61,7 @@ export class RpcTurnTracker {
 	beginTurn(): void {
 		this.busy = true;
 		this.turnText = "";
+		this.providerError = undefined;
 		// Per turn, not per session: the review that reads this judges the work of
 		// the turn that just finished.
 		this.actions = [];
@@ -64,7 +72,7 @@ export class RpcTurnTracker {
 		let event: {
 			type?: string;
 			id?: string;
-			message?: { role?: string; content?: unknown; usage?: unknown };
+			message?: { role?: string; content?: unknown; usage?: unknown; stopReason?: string; errorMessage?: string };
 		};
 		try {
 			event = JSON.parse(line);
@@ -87,6 +95,8 @@ export class RpcTurnTracker {
 			case "message_end": {
 				if (event.message?.role !== "assistant") return undefined;
 				addUsage(this.usage, event.message.usage);
+				this.providerError =
+					event.message.stopReason === "error" ? event.message.errorMessage || "unknown provider error" : undefined;
 				const blocks = Array.isArray(event.message.content) ? event.message.content : [];
 				const text = blocks
 					.filter((b): b is { type: string; text: string } => (b as { type?: string }).type === "text")
