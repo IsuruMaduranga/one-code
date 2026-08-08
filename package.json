@@ -31,6 +31,7 @@
       "extensions/system-reminder/index.ts",
       "extensions/hooks/index.ts",
       "extensions/tool-search/index.ts",
+      "extensions/search-tools/index.ts",
       "extensions/plugins/index.ts",
       "extensions/worktree/index.ts",
       "extensions/file-tracker/index.ts",
@@ -65,7 +66,8 @@
     "types/",
     "README.md",
     "LICENSE",
-    "docs/decisions.md"
+    "docs/decisions.md",
+    "docs/decisions/"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
