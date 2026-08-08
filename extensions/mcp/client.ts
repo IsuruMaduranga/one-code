@@ -29,6 +29,8 @@ export interface Connection {
 	client: Client;
 	tools: McpTool[];
 	resources: McpResource[];
+	/** The server's own usage instructions from its initialize result, if any. */
+	instructions?: string;
 	/** Non-fatal problems after a successful connect (e.g. listTools failed). */
 	warnings: string[];
 }
@@ -103,7 +105,35 @@ export async function connect(server: McpServer): Promise<Connection> {
 		}
 	}
 
-	return { server, client, tools, resources, warnings };
+	const instructions = client.getInstructions()?.trim() || undefined;
+
+	return { server, client, tools, resources, instructions, warnings };
+}
+
+const INSTRUCTIONS_CAP = 3000;
+
+/**
+ * The reminder carrying servers' own usage instructions, formatted the way
+ * Claude Code injects them (findings §14). Servers without instructions are
+ * skipped; returns undefined when none have any.
+ */
+export function mcpInstructionsReminder(
+	connections: Array<{ server: { name: string }; instructions?: string }>,
+): string | undefined {
+	const withInstructions = connections.filter((c) => c.instructions);
+	if (withInstructions.length === 0) return undefined;
+	const sections = withInstructions.map((c) => {
+		const text =
+			c.instructions!.length > INSTRUCTIONS_CAP ? `${c.instructions!.slice(0, INSTRUCTIONS_CAP)}… [truncated]` : c.instructions!;
+		return `## ${c.server.name}\n${text}`;
+	});
+	return [
+		"# MCP Server Instructions",
+		"",
+		"The following MCP servers have provided instructions for how to use their tools and resources:",
+		"",
+		sections.join("\n\n"),
+	].join("\n");
 }
 
 export async function callTool(

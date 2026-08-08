@@ -226,3 +226,24 @@ describe("missing environment variables", () => {
 		expect(parseServer("z", { command: "npx", args: ["$A"] }, "s", { A: "ok" })?.missingEnv).toBeUndefined();
 	});
 });
+
+describe("mcpInstructionsReminder", () => {
+	it("formats per-server sections and skips servers without instructions", async () => {
+		const { mcpInstructionsReminder } = await import("../../extensions/mcp/client.ts");
+		const text = mcpInstructionsReminder([
+			{ server: { name: "deepwiki" }, instructions: "Ask questions about repos." },
+			{ server: { name: "silent" } },
+		]);
+		expect(text).toContain("# MCP Server Instructions");
+		expect(text).toContain("## deepwiki\nAsk questions about repos.");
+		expect(text).not.toContain("silent");
+	});
+
+	it("returns undefined when no server has instructions, truncates long ones", async () => {
+		const { mcpInstructionsReminder } = await import("../../extensions/mcp/client.ts");
+		expect(mcpInstructionsReminder([{ server: { name: "s" } }])).toBeUndefined();
+		const long = mcpInstructionsReminder([{ server: { name: "s" }, instructions: "x".repeat(5000) }]);
+		expect(long).toContain("… [truncated]");
+		expect(long!.length).toBeLessThan(4000);
+	});
+});

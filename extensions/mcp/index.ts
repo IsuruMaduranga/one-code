@@ -18,7 +18,17 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { persistIfLarge } from "../lib/persisted-output.ts";
-import { callTool, close, type Connection, connect, type FailedConnection, readResource, readResourceDir } from "./client.ts";
+import {
+	callTool,
+	close,
+	type Connection,
+	connect,
+	type FailedConnection,
+	mcpInstructionsReminder,
+	readResource,
+	readResourceDir,
+} from "./client.ts";
+import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { join } from "node:path";
 import { discoverPlugins } from "../lib/plugins.ts";
 import { loadServers, type McpServer } from "./config.ts";
@@ -151,6 +161,14 @@ export default function mcpExtension(pi: ExtensionAPI) {
 		const resourceCount = [...connections.values()].reduce((n, c) => n + c.resources.length, 0);
 		if (resourceCount > 0) {
 			registerResourceTools();
+		}
+
+		// Servers' own usage instructions (initialize result) ride an every-turn
+		// reminder, as Claude Code injects them (findings §14) — without this the
+		// field is silently dropped and servers can't teach the model their tools.
+		const instructions = mcpInstructionsReminder([...connections.values()]);
+		if (instructions) {
+			pi.events.emit(REMINDER_CHANNEL, { scope: "every-turn", key: "mcp-instructions", text: instructions });
 		}
 	};
 
