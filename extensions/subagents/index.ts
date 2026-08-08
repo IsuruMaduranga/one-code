@@ -805,13 +805,18 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				const finished = new Promise<void>((resolve) => {
 					finish = resolve;
 				});
+				// This task is ONE turn of the resident agent. Its output must be that
+				// turn's reply — the same text the reply notification carries — not the
+				// resident's whole multi-turn transcript, or task_output and the
+				// notification disagree (superset), which weak models conflate.
+				let replyOutput = "";
 				const task: BackgroundTask = {
 					id: taskId,
 					kind: "subagent",
 					description: `message to ${record.name}${params.summary ? `: ${params.summary}` : ""}`,
 					status: "running",
 					startedAt: Date.now(),
-					output: () => resident.handle.snapshot().text,
+					output: () => replyOutput || resident.handle.snapshot().text,
 					stop: () => resident.handle.kill(),
 					resident: () => !resident.handle.exited(),
 					finished,
@@ -819,6 +824,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				resident.turnHandlers.push((outcome) => {
 					task.status = outcome.failed ? "failed" : "completed";
 					task.finishedAt = Date.now();
+					replyOutput = outcome.output;
 					finish();
 					const stats = [`${outcome.toolCalls} tools`, formatUsage(outcome.usage)].filter(Boolean).join(" · ");
 					notify(
