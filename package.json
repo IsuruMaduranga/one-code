@@ -40,6 +40,7 @@
       "extensions/ask-user/index.ts",
       "extensions/skill/index.ts",
       "extensions/background/index.ts",
+      "extensions/bash/index.ts",
       "extensions/subagents/index.ts",
       "extensions/workflow/index.ts",
       "extensions/effort/index.ts",

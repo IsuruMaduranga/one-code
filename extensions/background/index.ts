@@ -226,7 +226,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		name: "task_output",
 		label: "Task Output",
 		description:
-			"Retrieve output from a running or finished background task (monitor or background subagent) by task id. block=true (default) waits up to `timeout` ms for completion; block=false returns the current status immediately.",
+			"Retrieve output from a running or finished background task (monitor, background subagent, or background bash) by task id. block=true (default) waits up to `timeout` ms for completion; block=false returns the current status immediately.",
 		parameters: Type.Object({
 			task_id: Type.String({ description: "The task id to get output from" }),
 			block: Type.Optional(Type.Boolean({ description: "Wait for completion (default true)" })),
@@ -272,7 +272,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "task_stop",
 		label: "Stop Task",
-		description: "Stop a running background task (monitor or background subagent) by task id.",
+		description: "Stop a running background task (monitor, background subagent, or background bash) by task id.",
 		parameters: Type.Object({
 			task_id: Type.String({ description: "The id of the background task to stop" }),
 		}),
