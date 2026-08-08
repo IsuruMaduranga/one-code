@@ -146,9 +146,77 @@ export function bulletColor(isPartial: boolean, isError: boolean): string {
 	return isError ? "error" : "success";
 }
 
-/** `● Label(summary)` — the call line. */
-export function callLine(theme: ThemeLike, label: string, summary: string, isPartial: boolean, isError: boolean): string {
-	const bullet = theme.fg(bulletColor(isPartial, isError), "●");
+/**
+ * Theme tokens the running-call bullet breathes through, giving the ● a pulse
+ * while the tool is in flight: a clay flash rises out of the greys once per
+ * cycle, reading as a heartbeat. Ends on the static success/error bullet.
+ */
+export const SPINNER_COLORS = ["dim", "muted", "accent", "muted"] as const;
+/** Bullet pulse tick; ~600ms per full breath, calmer than pi's 80ms spinner. */
+export const SPINNER_INTERVAL_MS = 150;
+
+/** Persistent per-tool-row spinner state, stored on `context.state`. */
+interface SpinnerState {
+	frame: number;
+	timer: ReturnType<typeof setInterval> | undefined;
+}
+
+/** The subset of a tool render context the bullet pulse needs. */
+export interface SpinnerContext {
+	isPartial: boolean;
+	/** Wired to `ui.requestRender()` in the live TUI; absent in unit stubs. */
+	invalidate?: () => void;
+	/** Persistent per-row store; absent in unit stubs. */
+	state?: { ccSpinner?: SpinnerState };
+}
+
+/**
+ * Bullet colour for the call line, driving the running-call pulse. pi re-invokes
+ * `renderCall` on every `invalidate()` with a fresh context, and `context.state`
+ * is the same object across a tool row's lifetime — so the frame counter and the
+ * interval handle live there. While `isPartial`, a lone interval advances the
+ * frame and calls `context.invalidate()` to repaint; it self-terminates the moment
+ * `isPartial` flips false, because `renderCall` components get no dispose hook
+ * (findings §3). Returns `undefined` when idle so `callLine` uses its static
+ * success/error bullet. Call once per `renderCall`, not per `render(width)`.
+ */
+export function spinnerBulletColor(context: SpinnerContext): string | undefined {
+	// No persistent state (or no way to repaint) → no animation; fall back to the
+	// static bullet. tool-execution.ts always supplies both in the live TUI.
+	const state = context.state;
+	const invalidate = context.invalidate;
+	if (!state || typeof invalidate !== "function") return undefined;
+	if (!context.isPartial) {
+		if (state.ccSpinner?.timer) {
+			clearInterval(state.ccSpinner.timer);
+			state.ccSpinner.timer = undefined;
+		}
+		return undefined;
+	}
+	const spinner = (state.ccSpinner ??= { frame: 0, timer: undefined });
+	if (!spinner.timer) {
+		spinner.timer = setInterval(() => {
+			spinner.frame = (spinner.frame + 1) % SPINNER_COLORS.length;
+			invalidate();
+		}, SPINNER_INTERVAL_MS);
+	}
+	return SPINNER_COLORS[spinner.frame];
+}
+
+/**
+ * `● Label(summary)` — the call line. `bulletColorOverride` (from
+ * `spinnerBulletColor`) paints the running-call pulse; omit it for the static
+ * status colour.
+ */
+export function callLine(
+	theme: ThemeLike,
+	label: string,
+	summary: string,
+	isPartial: boolean,
+	isError: boolean,
+	bulletColorOverride?: string,
+): string {
+	const bullet = theme.fg(bulletColorOverride ?? bulletColor(isPartial, isError), "●");
 	const name = theme.bold(label);
 	return summary ? `${bullet} ${name}(${theme.fg("muted", summary)})` : `${bullet} ${name}`;
 }
@@ -218,8 +286,9 @@ export function ccToolRenderers<TArgs = any, TDetails = any>(
 
 	return {
 		renderShell: "self",
-		renderCall(args: TArgs, theme: ThemeLike, context: { isPartial: boolean; isError: boolean }) {
-			return linesComponent(() => [callLine(theme, label, titleOf(args), context.isPartial, context.isError)]);
+		renderCall(args: TArgs, theme: ThemeLike, context: { isPartial: boolean; isError: boolean } & SpinnerContext) {
+			const bulletOverride = spinnerBulletColor(context);
+			return linesComponent(() => [callLine(theme, label, titleOf(args), context.isPartial, context.isError, bulletOverride)]);
 		},
 		renderResult(
 			result: { content: Array<{ type: string; text?: string }>; details?: TDetails },
@@ -310,7 +379,8 @@ export function ccWrapBuiltinRenderers<TArgs = any>(
 	return {
 		renderShell: "self",
 		renderCall(args: TArgs, theme: ThemeLike, context: any) {
-			const head = () => callLine(theme, label, titleOf(args), context.isPartial, context.isError);
+			const bulletOverride = spinnerBulletColor(context);
+			const head = () => callLine(theme, label, titleOf(args), context.isPartial, context.isError, bulletOverride);
 			if (!opts.keepBaseCall || !base.renderCall) {
 				return linesComponent(() => [head()]);
 			}

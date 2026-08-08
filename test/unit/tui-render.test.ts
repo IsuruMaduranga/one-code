@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	bulletColor,
 	callLine,
@@ -8,6 +8,9 @@ import {
 	notificationBody,
 	notificationComponent,
 	resultLines,
+	SPINNER_COLORS,
+	SPINNER_INTERVAL_MS,
+	spinnerBulletColor,
 	summarizeArgs,
 	textContent,
 	truncateLine,
@@ -77,6 +80,47 @@ describe("callLine / resultLines", () => {
 
 	it("uses the error color for failed results", () => {
 		expect(resultLines(theme, "boom", false, true)[0]).toBe("  ⎿  <error>boom</>");
+	});
+
+	it("paints the bullet with the override color when given one", () => {
+		expect(callLine(theme, "Bash", "ls", true, false, "accent")).toBe("<accent>●</> <b>Bash</b>(<muted>ls</>)");
+	});
+});
+
+describe("spinnerBulletColor (running-call pulse)", () => {
+	beforeEach(() => vi.useFakeTimers());
+	afterEach(() => vi.useRealTimers());
+
+	it("pulses through the frames and repaints while the call is in flight", () => {
+		const invalidate = vi.fn();
+		const context = { isPartial: true, invalidate, state: {} };
+
+		expect(spinnerBulletColor(context)).toBe(SPINNER_COLORS[0]);
+		// A single interval drives the pulse; subsequent calls don't stack timers.
+		expect(spinnerBulletColor(context)).toBe(SPINNER_COLORS[0]);
+
+		vi.advanceTimersByTime(SPINNER_INTERVAL_MS);
+		expect(invalidate).toHaveBeenCalledTimes(1);
+		expect(spinnerBulletColor(context)).toBe(SPINNER_COLORS[1]);
+
+		vi.advanceTimersByTime(SPINNER_INTERVAL_MS * SPINNER_COLORS.length);
+		expect(spinnerBulletColor(context)).toBe(SPINNER_COLORS[1]); // wrapped full cycle
+	});
+
+	it("stops the timer and drops to the static bullet once the call ends", () => {
+		const invalidate = vi.fn();
+		const state: { ccSpinner?: { frame: number; timer: ReturnType<typeof setInterval> | undefined } } = {};
+		expect(spinnerBulletColor({ isPartial: true, invalidate, state })).toBe(SPINNER_COLORS[0]);
+
+		expect(spinnerBulletColor({ isPartial: false, invalidate, state })).toBeUndefined();
+		invalidate.mockClear();
+		vi.advanceTimersByTime(SPINNER_INTERVAL_MS * 3);
+		expect(invalidate).not.toHaveBeenCalled(); // interval was cleared
+	});
+
+	it("degrades to no animation without persistent state or a repaint hook", () => {
+		expect(spinnerBulletColor({ isPartial: true, invalidate: () => {}, state: undefined })).toBeUndefined();
+		expect(spinnerBulletColor({ isPartial: true, state: {} })).toBeUndefined();
 	});
 });
 
