@@ -64,7 +64,7 @@ export default function askUserExtension(pi: ExtensionAPI) {
 		label: "Ask User",
 		description:
 			"Ask the user to choose between options when you are blocked on a decision that is genuinely theirs — one you cannot resolve from the request, the code, or a sensible default. Ask up to four questions in one call; each gets a free-text 'Other' choice automatically. Do not use it for choices with an obvious default or for facts you can verify yourself.",
-		promptSnippet: "ask_user_question - ask the user to decide between options when genuinely blocked",
+		promptSnippet: "Ask the user to decide between options when genuinely blocked",
 		parameters: Type.Object({
 			questions: Type.Array(
 				Type.Object({

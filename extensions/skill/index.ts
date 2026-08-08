@@ -65,7 +65,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 		label: "Skill",
 		description:
 			"Invoke a skill: a packaged set of instructions for a particular kind of task. Call this when the task at hand matches an available skill, or when the user asks for one by name (including `/<name>`). Returns the skill's instructions to follow. Plugin skills are named `<plugin>:<skill>`. Use `list` to see what is available.",
-		promptSnippet: "skill - load packaged instructions for a task (see the skills listing)",
+		promptSnippet: "Load packaged instructions for a task (see the skills listing)",
 		parameters: Type.Object({
 			skill: Type.Optional(Type.String({ description: "Exact skill name, no leading slash" })),
 			args: Type.Optional(Type.String({ description: "Arguments to pass through to the skill" })),

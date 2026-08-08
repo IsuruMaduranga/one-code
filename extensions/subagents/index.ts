@@ -369,7 +369,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		label: "Subagent",
 		description:
 			"Delegate a task to a specialist agent that runs in its own context window and reports back. Use it for well-scoped work whose intermediate output you don't need — broad codebase searches, focused reviews, independent research. Give a complete, self-contained task: the agent cannot ask follow-up questions. The available agents are listed in the \"Available agents\" system reminder. Pass `tasks` to run several in parallel, `agent: \"fork\"` for a child that inherits this conversation (a fork always runs on this conversation's model and reasoning settings; if you are the fork, execute your assigned task directly — don't re-delegate), `isolation: \"worktree\"` when parallel agents will edit files, or `run_in_background: true` to keep working while it runs (completion arrives as a notification; manage with task_output/task_stop). Each run gets a name — continue a finished agent later with send_message. action:'list' re-prints the agent catalog.",
-		promptSnippet: "subagent - delegate scoped work to a specialist agent in its own context",
+		promptSnippet: "Delegate scoped work to a specialist agent in its own context",
 		parameters: SubagentParams,
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			const agents = loadAgents(ctx.cwd);
@@ -746,7 +746,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		// A background child's model must know it can report back; the parent keeps
 		// the tool deferred instead (see the DEFER emit below).
 		promptSnippet: isSubagentChild
-			? 'send_message - report progress or findings to the main conversation (to: "main")'
+			? 'Report progress or findings to the main conversation (to: "main")'
 			: undefined,
 		parameters: Type.Object({
 			to: Type.String({ description: 'Agent name (or task id) from a previous subagent run — or "main" from inside a subagent' }),

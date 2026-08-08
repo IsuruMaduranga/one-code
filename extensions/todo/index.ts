@@ -107,7 +107,7 @@ export default function todoExtension(pi: ExtensionAPI) {
 		label: "Todos",
 		description:
 			"Create and manage a structured task list for the current session. Each call REPLACES the entire list. Use for multi-step tasks (3+ steps): mark exactly one item in_progress before starting it, mark it completed immediately when done, and keep the list current rather than batching updates.",
-		promptSnippet: "todo_write - track multi-step task progress with a todo list",
+		promptSnippet: "Track multi-step task progress with a todo list",
 		promptGuidelines: [
 			"For tasks with 3+ steps, track progress with todo_write; keep exactly one item in_progress",
 		],

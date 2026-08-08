@@ -76,7 +76,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		label: "Tool Search",
 		description:
 			"Load the schemas of tools that are available but not yet callable. Query forms: `select:<name>[,<name>]` to load exact tools by name, `+<term> <words>` to require a term in the tool name, or plain keywords to search. Returns the tools that are now callable.",
-		promptSnippet: "tool_search - load additional tool schemas on demand",
+		promptSnippet: "Load additional tool schemas on demand",
 		parameters: Type.Object({
 			query: Type.String({ description: "Tool names (`select:a,b`) or keywords describing the capability needed" }),
 			max_results: Type.Optional(

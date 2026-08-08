@@ -82,7 +82,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
 		label: "Enter plan mode",
 		description:
 			"Enter plan mode for tasks that need investigation and design before changing anything. In plan mode only read-only tools are available, plus one writable file: the plan file whose path you are told, where you build the plan incrementally. Use for non-trivial multi-file work; skip it for simple direct changes.",
-		promptSnippet: "enter_plan_mode - switch to read-only planning before non-trivial changes",
+		promptSnippet: "Switch to read-only planning before non-trivial changes",
 		parameters: Type.Object({}),
 		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
 			pi.events.emit(MODE_CHANNEL, { mode: "plan" });
@@ -108,7 +108,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
 		label: "Exit plan mode",
 		description:
 			"Signal that planning is complete and ask the user to approve the plan. Takes no parameters: the plan is read from the plan file named in the plan-mode reminder, which you must have written before calling this. The user reviews that file's contents.",
-		promptSnippet: "exit_plan_mode - present your plan file for user approval",
+		promptSnippet: "Present your plan file for user approval",
 		parameters: Type.Object({}),
 		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
 			// Guard the out-of-sequence call: without this, a cold exit_plan_mode

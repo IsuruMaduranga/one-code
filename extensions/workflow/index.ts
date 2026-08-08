@@ -197,7 +197,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 		name: "workflow",
 		label: "Workflow",
 		description: WORKFLOW_TOOL_DESCRIPTION,
-		promptSnippet: "workflow - run a script that orchestrates many subagents (opt-in ultracode mode)",
+		promptSnippet: "Run a script that orchestrates many subagents (opt-in ultracode mode)",
 		parameters: WorkflowParams,
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
 			lastCtx = ctx;
