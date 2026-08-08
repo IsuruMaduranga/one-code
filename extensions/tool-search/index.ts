@@ -12,13 +12,18 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { DEFER_CHANNEL, deferredRegistry, type DeferRequest, searchTools, selectedNames } from "../lib/deferred.ts";
+import {
+	DEFER_CHANNEL,
+	deferredRegistry,
+	deferredReminderText,
+	type DeferRequest,
+	searchTools,
+	selectedNames,
+} from "../lib/deferred.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 
 export default function toolSearchExtension(pi: ExtensionAPI) {
-	pi.events.on(DEFER_CHANNEL, (data) => {
-		deferredRegistry.add(data as DeferRequest);
-	});
+	let sessionStarted = false;
 
 	const searchableTools = () =>
 		pi
@@ -30,25 +35,40 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 				keywords: deferredRegistry.keywordsFor(tool.name),
 			}));
 
-	pi.on("session_start", () => {
-		const deferred = new Set(deferredRegistry.names);
-		if (deferred.size === 0) return;
-
-		const active = pi.getActiveTools().filter((name) => !deferred.has(name));
-		pi.setActiveTools(active);
-
+	const announceDeferred = () => {
 		const available = searchableTools();
 		if (available.length === 0) return;
 		pi.events.emit(REMINDER_CHANNEL, {
 			scope: "every-turn",
 			key: "deferred-tools",
-			text: [
-				"The following tools are available but their schemas are NOT loaded, so they cannot be called yet:",
-				...available.map((t) => `- ${t.name}: ${t.description.split("\n")[0]}`),
-				"",
-				'Load one with tool_search before using it — `select:<name>[,<name>]` for exact names, or keywords to search. Once a schema is loaded it stays callable for the rest of the session.',
-			].join("\n"),
+			text: deferredReminderText(available),
 		});
+	};
+
+	pi.events.on(DEFER_CHANNEL, (data) => {
+		const request = data as DeferRequest;
+		deferredRegistry.add(request);
+		// A defer arriving after the session_start deactivation pass (MCP servers
+		// connect asynchronously and register their tools then) would otherwise
+		// leave the tool eager AND unlisted in the reminder. Deactivate it here
+		// and refresh the keyed reminder so it becomes discoverable.
+		if (sessionStarted && request?.name) {
+			const active = pi.getActiveTools();
+			if (active.includes(request.name)) {
+				pi.setActiveTools(active.filter((name) => name !== request.name));
+			}
+			announceDeferred();
+		}
+	});
+
+	pi.on("session_start", () => {
+		sessionStarted = true;
+		const deferred = new Set(deferredRegistry.names);
+		if (deferred.size === 0) return;
+
+		const active = pi.getActiveTools().filter((name) => !deferred.has(name));
+		pi.setActiveTools(active);
+		announceDeferred();
 	});
 
 	pi.registerTool({

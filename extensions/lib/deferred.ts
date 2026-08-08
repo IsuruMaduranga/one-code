@@ -48,6 +48,20 @@ export class DeferredRegistry {
 
 export const deferredRegistry = new DeferredRegistry();
 
+/**
+ * The every-turn reminder telling the model which tools exist but are not
+ * loaded. One line per tool (first description line only), like Claude Code's
+ * deferred-tools listing.
+ */
+export function deferredReminderText(tools: Array<Pick<SearchableTool, "name" | "description">>): string {
+	return [
+		"The following tools are available but their schemas are NOT loaded, so they cannot be called yet:",
+		...tools.map((t) => `- ${t.name}: ${t.description.split("\n")[0]}`),
+		"",
+		"Load one with tool_search before using it — `select:<name>[,<name>]` for exact names, or keywords to search. Once a schema is loaded it stays callable for the rest of the session.",
+	].join("\n");
+}
+
 export interface SearchMatch {
 	name: string;
 	score: number;

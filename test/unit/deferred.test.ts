@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { DeferredRegistry, searchTools, type SearchableTool, selectedNames } from "../../extensions/lib/deferred.ts";
+import {
+	DeferredRegistry,
+	deferredReminderText,
+	searchTools,
+	type SearchableTool,
+	selectedNames,
+} from "../../extensions/lib/deferred.ts";
 
 const tools: SearchableTool[] = [
 	{ name: "notebook_edit", description: "Edit a Jupyter notebook cell", keywords: ["ipynb", "jupyter"] },
@@ -82,5 +88,18 @@ describe("selectedNames", () => {
 		const requested = selectedNames("select:web_search,does_not_exist") ?? [];
 		const found = searchTools("select:web_search,does_not_exist", tools).map((m) => m.name.toLowerCase());
 		expect(requested.filter((n) => !found.includes(n))).toEqual(["does_not_exist"]);
+	});
+});
+
+describe("deferredReminderText", () => {
+	it("lists each tool with only the first line of its description", () => {
+		const text = deferredReminderText([
+			{ name: "web_fetch", description: "Fetch a URL.\nSecond line detail." },
+			{ name: "monitor", description: "Watch a command." },
+		]);
+		expect(text).toContain("- web_fetch: Fetch a URL.");
+		expect(text).not.toContain("Second line");
+		expect(text).toContain("- monitor: Watch a command.");
+		expect(text).toContain("tool_search");
 	});
 });
