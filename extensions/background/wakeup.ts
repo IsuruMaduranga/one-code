@@ -2,6 +2,8 @@
  * schedule_wakeup helpers (pure) — Claude Code's self-paced /loop timer.
  */
 
+import { systemNotification } from "../lib/notifications.ts";
+
 export const MIN_DELAY_SECONDS = 60;
 export const MAX_DELAY_SECONDS = 3600;
 
@@ -18,13 +20,14 @@ export interface WakeupRequest {
 
 /** The follow-up message a fired wakeup delivers. Framed so it never reads as user input. */
 export function buildWakeupMessage(request: WakeupRequest): string {
-	return [
-		"SYSTEM NOTIFICATION — NOT USER INPUT",
-		`Scheduled wake-up fired (reason given when scheduled: ${request.reason}).`,
-		"Continue the task below; when done, either schedule the next wake-up with schedule_wakeup or end the loop with schedule_wakeup {stop: true}.",
-		"",
-		request.prompt,
-	].join("\n");
+	return systemNotification(
+		[
+			`Scheduled wake-up fired (reason given when scheduled: ${request.reason}).`,
+			"Continue the task below; when done, either schedule the next wake-up with schedule_wakeup or end the loop with schedule_wakeup {stop: true}.",
+			"",
+			request.prompt,
+		].join("\n"),
+	);
 }
 
 export function describeSchedule(request: WakeupRequest): string {

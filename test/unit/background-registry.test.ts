@@ -72,3 +72,14 @@ describe("schedule_wakeup helpers", () => {
 		expect(describeSchedule({ delaySeconds: 600, prompt: "p", reason: "r" })).not.toContain("adjusted");
 	});
 });
+
+describe("systemNotification framing", () => {
+	it("carries the anti-confabulation preamble before the body", async () => {
+		const { systemNotification } = await import("../../extensions/lib/notifications.ts");
+		const text = systemNotification("Background bash b1 completed.");
+		expect(text.startsWith("SYSTEM NOTIFICATION — NOT USER INPUT")).toBe(true);
+		expect(text).toContain("not a message from the user");
+		expect(text).toContain("acknowledgement, confirmation, or approval");
+		expect(text.endsWith("Background bash b1 completed.")).toBe(true);
+	});
+});

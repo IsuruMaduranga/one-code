@@ -21,6 +21,7 @@ import {
 	TASK_REGISTER_CHANNEL,
 } from "./registry.ts";
 import { buildWakeupMessage, clampDelaySeconds, describeSchedule } from "./wakeup.ts";
+import { systemNotification } from "../lib/notifications.ts";
 
 const OUTPUT_CAP = 30_000;
 const STORED_OUTPUT_CAP = 200_000;
@@ -103,7 +104,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				pending = [];
 				notify(
 					"task-notification",
-					`SYSTEM NOTIFICATION — NOT USER INPUT\nMonitor ${id} (${params.description}) emitted ${batch.length} event(s):\n${batch.join("\n")}`,
+					systemNotification(`Monitor ${id} (${params.description}) emitted ${batch.length} event(s):\n${batch.join("\n")}`),
 					{ taskId: id, events: batch.length },
 				);
 			};
@@ -126,7 +127,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				updateWidget();
 				notify(
 					"task-notification",
-					`SYSTEM NOTIFICATION — NOT USER INPUT\nMonitor ${id} (${params.description}) ${finalStatus}${note ? ` — ${note}` : ""} after ${eventCount} event(s).`,
+					systemNotification(`Monitor ${id} (${params.description}) ${finalStatus}${note ? ` — ${note}` : ""} after ${eventCount} event(s).`),
 					{ taskId: id, status: finalStatus },
 				);
 			};

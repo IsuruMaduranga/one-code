@@ -49,6 +49,7 @@ import {
 import { type AgentRunRecord, nextRunName, RunRegistry } from "./runs.ts";
 import { emptyUsage, formatUsage, type UsageTotals } from "./usage.ts";
 import { cleanupWorktree, createWorktree, isGitRepo, type Worktree } from "./worktree.ts";
+import { systemNotification } from "../lib/notifications.ts";
 
 const MAX_PARALLEL = 4;
 
@@ -263,7 +264,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	const notifyAgentMessage = (name: string, message: string, summary?: string) =>
 		notify(
 			"subagent-message",
-			`SYSTEM NOTIFICATION — NOT USER INPUT\nMessage from agent ${name}${summary ? ` (${summary})` : ""}:\n\n${message}`,
+			systemNotification(`Message from agent ${name}${summary ? ` (${summary})` : ""}:\n\n${message}`),
 			{ name, summary },
 		);
 
@@ -615,7 +616,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						const stats = [`${outcome.toolCalls} tools`, formatUsage(outcome.usage)].filter(Boolean).join(" · ");
 						notify(
 							"subagent-result",
-							`SYSTEM NOTIFICATION — NOT USER INPUT\nBackground agent ${p.record.name} (${p.record.taskId}) ${outcome.failed ? "failed" : "completed"} (${stats}). It stays resident — message it with send_message.\n\n${outcome.output.slice(0, OUTPUT_CAP)}${worktreeNote}`,
+							systemNotification(`Background agent ${p.record.name} (${p.record.taskId}) ${outcome.failed ? "failed" : "completed"} (${stats}). It stays resident — message it with send_message.\n\n${outcome.output.slice(0, OUTPUT_CAP)}${worktreeNote}`),
 							{ taskId: p.record.taskId, name: p.record.name, failed: outcome.failed ?? false },
 						);
 					});
@@ -643,7 +644,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 								// target turn and ran on its own) must still surface.
 								notify(
 									"subagent-result",
-									`SYSTEM NOTIFICATION — NOT USER INPUT\nUpdate from ${p.record.name}:\n\n${outcome.output.slice(0, OUTPUT_CAP)}`,
+									systemNotification(`Update from ${p.record.name}:\n\n${outcome.output.slice(0, OUTPUT_CAP)}`),
 									{ name: p.record.name, failed: outcome.failed ?? false },
 								);
 							}
@@ -829,7 +830,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					const stats = [`${outcome.toolCalls} tools`, formatUsage(outcome.usage)].filter(Boolean).join(" · ");
 					notify(
 						"subagent-result",
-						`SYSTEM NOTIFICATION — NOT USER INPUT\nReply from ${record.name} (${stats}):\n\n${outcome.output.slice(0, OUTPUT_CAP)}`,
+						systemNotification(`Reply from ${record.name} (${stats}):\n\n${outcome.output.slice(0, OUTPUT_CAP)}`),
 						{ taskId, name: record.name, failed: outcome.failed ?? false },
 					);
 				});
@@ -905,7 +906,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				const stats = [`${outcome.toolCalls} tools`, formatUsage(outcome.usage)].filter(Boolean).join(" · ");
 				notify(
 					"subagent-result",
-					`SYSTEM NOTIFICATION — NOT USER INPUT\nReply from ${record.name} (${stats}):\n\n${outcome.output.slice(0, OUTPUT_CAP)}`,
+					systemNotification(`Reply from ${record.name} (${stats}):\n\n${outcome.output.slice(0, OUTPUT_CAP)}`),
 					{ taskId, name: record.name, failed: outcome.failed ?? false },
 				);
 			});

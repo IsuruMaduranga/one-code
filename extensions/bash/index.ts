@@ -24,6 +24,7 @@ import { createBashToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { generateTaskId, TASK_REGISTER_CHANNEL } from "../background/registry.ts";
 import { type BashFinishSummary, startBackgroundBash, tailCap } from "./background.ts";
+import { systemNotification } from "../lib/notifications.ts";
 
 const NOTIFY_OUTPUT_CAP = 30_000;
 
@@ -115,7 +116,7 @@ export default function bashExtension(pi: ExtensionAPI) {
 				logPath,
 				onFinished: (finishedTask, summary) => {
 					notify(
-						`SYSTEM NOTIFICATION — NOT USER INPUT\nBackground bash ${id} (${description}) ${finishLine(summary, params.timeout)}.\n\n${tailCap(summary.output, NOTIFY_OUTPUT_CAP)}`,
+						systemNotification(`Background bash ${id} (${description}) ${finishLine(summary, params.timeout)}.\n\n${tailCap(summary.output, NOTIFY_OUTPUT_CAP)}`),
 						{ taskId: id, status: finishedTask.status, exitCode: summary.exitCode, logPath },
 					);
 				},
