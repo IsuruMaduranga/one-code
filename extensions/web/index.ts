@@ -21,6 +21,17 @@ import { DEFER_CHANNEL } from "../lib/deferred.ts";
 export default function webExtension(pi: ExtensionAPI) {
 	webSearch(pi);
 
+	// pi-web-search reports failures ("Failed: …" text, details.error set)
+	// without isError, so a weak model can read a failure as a successful
+	// search with odd content. Stamp isError here rather than patching the
+	// vendor package.
+	pi.on("tool_result", (event) => {
+		if (event.toolName !== "web_search" && event.toolName !== "url_context") return;
+		if (event.isError) return;
+		const details = event.details as { error?: unknown } | undefined;
+		if (details?.error) return { isError: true };
+	});
+
 	pi.events.emit(DEFER_CHANNEL, {
 		name: "web_search",
 		keywords: ["web", "search", "internet", "google", "news", "lookup", "online", "current"],

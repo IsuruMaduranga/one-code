@@ -24,6 +24,16 @@ describe("RunRegistry", () => {
 		expect(registry.resolve("b222")?.taskId).toBe("b2222222");
 		expect(registry.resolve("missing")).toBeUndefined();
 	});
+
+	it("refuses an empty or too-short prefix instead of matching whatever exists", () => {
+		const registry = new RunRegistry();
+		registry.add(record("explore-1", "b1111111"));
+		// "".startsWith("") is true — an empty ref used to deliver to the only run.
+		expect(registry.resolve("")).toBeUndefined();
+		expect(registry.resolve("b")).toBeUndefined();
+		expect(registry.resolve("b1")).toBeUndefined();
+		expect(registry.resolve("b11")?.taskId).toBe("b1111111");
+	});
 });
 
 describe("findSessionFile", () => {

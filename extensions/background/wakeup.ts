@@ -30,5 +30,9 @@ export function buildWakeupMessage(request: WakeupRequest): string {
 export function describeSchedule(request: WakeupRequest): string {
 	const clamped = clampDelaySeconds(request.delaySeconds);
 	const minutes = Math.round((clamped / 60) * 10) / 10;
-	return `Wake-up scheduled in ${clamped}s (~${minutes}min): ${request.reason}`;
+	const adjusted =
+		clamped !== request.delaySeconds
+			? ` (adjusted from ${request.delaySeconds}s — the allowed range is ${MIN_DELAY_SECONDS}-${MAX_DELAY_SECONDS}s)`
+			: "";
+	return `Wake-up scheduled in ${clamped}s (~${minutes}min)${adjusted}: ${request.reason}`;
 }

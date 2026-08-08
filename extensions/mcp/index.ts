@@ -133,6 +133,9 @@ export default function mcpExtension(pi: ExtensionAPI) {
 			if (result.connection) {
 				connections.set(result.connection.server.name, result.connection);
 				registerToolsFor(result.connection);
+				for (const warning of result.connection.warnings) {
+					failures.push({ server: result.connection.server, error: warning });
+				}
 			} else if (result.failure) {
 				failures.push(result.failure);
 			}
@@ -295,7 +298,8 @@ export default function mcpExtension(pi: ExtensionAPI) {
 			const lines = servers.map((server) => {
 				const connection = connections.get(server.name);
 				if (connection) {
-					return `connected ${server.name} — ${connection.tools.length} tools, ${connection.resources.length} resources (${server.source})`;
+					const warning = connection.warnings.length ? ` — WARNING: ${connection.warnings.join("; ")}` : "";
+					return `connected ${server.name} — ${connection.tools.length} tools, ${connection.resources.length} resources (${server.source})${warning}`;
 				}
 				const failure = failures.find((f) => f.server.name === server.name);
 				return `failed    ${server.name} — ${failure?.error ?? "not connected"} (${server.source})`;

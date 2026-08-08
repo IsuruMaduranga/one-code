@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { BackgroundRegistry, type BackgroundTask, generateTaskId } from "../../extensions/background/registry.ts";
-import { buildWakeupMessage, clampDelaySeconds } from "../../extensions/background/wakeup.ts";
+import { buildWakeupMessage, clampDelaySeconds, describeSchedule } from "../../extensions/background/wakeup.ts";
 
 function makeTask(id: string, status: BackgroundTask["status"] = "running"): BackgroundTask & { stopped: boolean } {
 	const task = {
@@ -64,5 +64,11 @@ describe("schedule_wakeup helpers", () => {
 		expect(message).toContain("SYSTEM NOTIFICATION — NOT USER INPUT");
 		expect(message).toContain("check the deploy");
 		expect(message).toContain("deploy takes ~2min");
+	});
+
+	it("says so when the requested delay was clamped", () => {
+		expect(describeSchedule({ delaySeconds: 5, prompt: "p", reason: "r" })).toContain("adjusted from 5s");
+		expect(describeSchedule({ delaySeconds: 999999, prompt: "p", reason: "r" })).toContain("adjusted from 999999s");
+		expect(describeSchedule({ delaySeconds: 600, prompt: "p", reason: "r" })).not.toContain("adjusted");
 	});
 });

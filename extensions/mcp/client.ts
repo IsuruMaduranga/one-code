@@ -29,6 +29,8 @@ export interface Connection {
 	client: Client;
 	tools: McpTool[];
 	resources: McpResource[];
+	/** Non-fatal problems after a successful connect (e.g. listTools failed). */
+	warnings: string[];
 }
 
 export interface FailedConnection {
@@ -70,12 +72,17 @@ export async function connect(server: McpServer): Promise<Connection> {
 
 	await withTimeout(client.connect(transport), CONNECT_TIMEOUT_MS, `connecting to "${server.name}"`);
 
+	const warnings: string[] = [];
+
 	let tools: McpTool[] = [];
 	try {
 		const listed = await withTimeout(client.listTools(), CONNECT_TIMEOUT_MS, `listing tools of "${server.name}"`);
 		tools = (listed.tools ?? []) as McpTool[];
-	} catch {
+	} catch (error) {
+		// A server that connects but fails listTools would otherwise register
+		// zero tools with no signal anywhere — surface it as a warning.
 		tools = [];
+		warnings.push(`connected, but listing tools failed: ${(error as Error).message}`);
 	}
 
 	let resources: McpResource[] = [];
@@ -86,12 +93,17 @@ export async function connect(server: McpServer): Promise<Connection> {
 			`listing resources of "${server.name}"`,
 		);
 		resources = (listed.resources ?? []) as McpResource[];
-	} catch {
-		// Resources are optional in MCP; a server without them is normal.
+	} catch (error) {
+		// Resources are optional in MCP; "method not found" is normal. Anything
+		// else (a timeout, a protocol error) is worth a warning.
 		resources = [];
+		const message = (error as Error).message;
+		if (!/method not found|-32601/i.test(message)) {
+			warnings.push(`connected, but listing resources failed: ${message}`);
+		}
 	}
 
-	return { server, client, tools, resources };
+	return { server, client, tools, resources, warnings };
 }
 
 export async function callTool(

@@ -74,10 +74,13 @@ export class RunRegistry {
 		return [...this.byName.keys()];
 	}
 
-	/** Resolve by name, exact task id, or unique task-id prefix. */
+	/** Resolve by name, exact task id, or unique task-id prefix (3+ chars). */
 	resolve(ref: string): AgentRunRecord | undefined {
 		const named = this.byName.get(ref) ?? this.byId.get(ref);
 		if (named) return named;
+		// An empty or near-empty ref would prefix-match whatever run happens to
+		// exist ("".startsWith("") is true) and deliver to the wrong target.
+		if (ref.length < 3) return undefined;
 		const matches = [...this.byId.values()].filter((r) => r.taskId.startsWith(ref));
 		return matches.length === 1 ? matches[0] : undefined;
 	}

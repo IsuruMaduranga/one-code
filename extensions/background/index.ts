@@ -163,7 +163,21 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 					child.kill("SIGTERM");
 				};
 			} else {
-				const ws = new WebSocket(params.ws!.url, params.ws!.protocols);
+				let ws: WebSocket;
+				try {
+					ws = new WebSocket(params.ws!.url, params.ws!.protocols);
+				} catch (error) {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Could not open the WebSocket — check \`ws.url\` ("${params.ws!.url}"): ${(error as Error).message}`,
+							},
+						],
+						details: {},
+						isError: true,
+					};
+				}
 				ws.addEventListener("message", (event) => {
 					onEvent(typeof event.data === "string" ? event.data : "[binary frame]");
 				});

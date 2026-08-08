@@ -55,8 +55,15 @@ export default function notebookExtension(pi: ExtensionAPI) {
 					details: { path, cellCount: updated.cells.length },
 				};
 			} catch (error) {
+				const code = (error as NodeJS.ErrnoException).code;
+				const hint =
+					code === "ENOENT"
+						? " — no such file; check the path points to an existing .ipynb"
+						: error instanceof SyntaxError
+							? " — the file is not valid notebook JSON"
+							: "";
 				return {
-					content: [{ type: "text", text: `Notebook edit failed: ${(error as Error).message}` }],
+					content: [{ type: "text", text: `Notebook edit failed: ${(error as Error).message}${hint}` }],
 					details: {},
 					isError: true,
 				};
