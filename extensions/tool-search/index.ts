@@ -5,6 +5,12 @@
  * tells the model which names exist (a system reminder, as Claude Code does),
  * and activates matches additively when the model calls `tool_search`.
  *
+ * Deferral is FRONTIER-ONLY, matching Claude Code (findings §14: a Haiku
+ * session gets all 38 tools eagerly, no ToolSearch) — weaker models are bad at
+ * the load-then-call indirection, so mid/low tiers get every tool eagerly and
+ * no deferred-tools reminder. The registry is still maintained on all tiers,
+ * so a mid-session model change flips the surface in either direction.
+ *
  * Load order matters: this extension must come BEFORE any extension that defers
  * a tool, because those emit their defer request while extensions are loading
  * and pi's event bus only delivers to listeners already registered.
@@ -20,10 +26,13 @@ import {
 	searchTools,
 	selectedNames,
 } from "../lib/deferred.ts";
+import { resolveModelTier } from "../lib/model-tier.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 
 export default function toolSearchExtension(pi: ExtensionAPI) {
 	let sessionStarted = false;
+	/** Current tier defers (frontier) vs eager-loads everything (mid/low). */
+	let defer = true;
 
 	const searchableTools = () =>
 		pi
@@ -45,14 +54,31 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		});
 	};
 
+	/** Align the active tool set and the reminder with the model's tier. */
+	const applyTier = (model: Parameters<typeof resolveModelTier>[0]) => {
+		defer = resolveModelTier(model) === "frontier";
+		const deferred = new Set(deferredRegistry.names);
+		if (deferred.size === 0) return;
+		const active = pi.getActiveTools();
+		if (defer) {
+			const next = active.filter((name) => !deferred.has(name));
+			if (next.length !== active.length) pi.setActiveTools(next);
+			announceDeferred();
+		} else {
+			const missing = deferredRegistry.names.filter((name) => !active.includes(name));
+			if (missing.length > 0) pi.setActiveTools([...active, ...missing]);
+			pi.events.emit(REMINDER_CHANNEL, { key: "deferred-tools", remove: true });
+		}
+	};
+
 	pi.events.on(DEFER_CHANNEL, (data) => {
 		const request = data as DeferRequest;
 		deferredRegistry.add(request);
-		// A defer arriving after the session_start deactivation pass (MCP servers
-		// connect asynchronously and register their tools then) would otherwise
-		// leave the tool eager AND unlisted in the reminder. Deactivate it here
-		// and refresh the keyed reminder so it becomes discoverable.
-		if (sessionStarted && request?.name) {
+		// A defer arriving after the session_start pass (MCP servers connect
+		// asynchronously and register their tools then) would otherwise leave the
+		// tool eager AND unlisted in the reminder. On a deferring tier, deactivate
+		// it and refresh the keyed reminder; on an eager tier it stays active.
+		if (sessionStarted && defer && request?.name) {
 			const active = pi.getActiveTools();
 			if (active.includes(request.name)) {
 				pi.setActiveTools(active.filter((name) => name !== request.name));
@@ -61,15 +87,11 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		}
 	});
 
-	pi.on("session_start", () => {
+	pi.on("session_start", (_event, ctx) => {
 		sessionStarted = true;
-		const deferred = new Set(deferredRegistry.names);
-		if (deferred.size === 0) return;
-
-		const active = pi.getActiveTools().filter((name) => !deferred.has(name));
-		pi.setActiveTools(active);
-		announceDeferred();
+		applyTier(ctx.model);
 	});
+	pi.on("model_select", (event) => applyTier(event.model));
 
 	pi.registerTool({
 		name: "tool_search",
