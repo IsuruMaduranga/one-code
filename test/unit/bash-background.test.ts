@@ -67,7 +67,7 @@ describe("startBackgroundBash", () => {
 	});
 
 	it("kills the run when the timeout elapses and says it timed out", async () => {
-		const { task, summary } = start("sleep 30", { timeoutSeconds: 0.2 });
+		const { task, summary } = start("sleep 30", { timeoutSeconds: 0.5 });
 		await task.finished;
 		expect(task.status).toBe("failed");
 		expect(summary()?.timedOut).toBe(true);
