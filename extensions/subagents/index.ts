@@ -674,14 +674,14 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					handle.send(p.request.fork ? forkTaskMessage(p.request.task) : p.request.task);
 
 					lines.push(
-						`⏳ ${p.record.name} (task ${p.record.taskId}) running in background${logPath ? ` — output log: ${logPath}` : ""}`,
+						`⏳ ${p.record.name} (task ${p.record.taskId}) running in background${logPath ? ` — interim output readable at ${logPath}` : ""}`,
 					);
 				}
 				return {
 					content: [
 						{
 							type: "text",
-							text: `${lines.join("\n")}\n\nCompletion will arrive as a system notification. Inspect with task_output, stop with task_stop — and send_message reaches the agent even while it runs (the message is steered into its current turn).`,
+							text: `${lines.join("\n")}\n\nCompletion (with the agent's report) will arrive as a system notification on its own — you do not need to wait for it or poll; keep working. Call task_output only if your next step cannot proceed without the result (block=true waits). Stop with task_stop; send_message reaches the agent even while it runs (the message is steered into its current turn).`,
 						},
 					],
 					details: { agentRuns: records, background: true },

@@ -126,7 +126,7 @@ export default function bashExtension(pi: ExtensionAPI) {
 				content: [
 					{
 						type: "text",
-						text: `⏳ Bash task ${id} running in background (${description})${logPath ? ` — output log: ${logPath}` : ""}.\n\nCompletion will arrive as a system notification. Inspect with task_output, stop with task_stop.`,
+						text: `⏳ Bash task ${id} running in background (${description}).\n\nCompletion (with output) will arrive as a system notification on its own — you do not need to wait for it or poll; keep working.${logPath ? ` To check interim output, read ${logPath}.` : ""} If your next step cannot proceed without the result, task_output with block=true waits for it. Stop with task_stop.`,
 					},
 				],
 				details: { taskId: id, logPath },

@@ -226,7 +226,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		name: "task_output",
 		label: "Task Output",
 		description:
-			"Retrieve output from a running or finished background task (monitor, background subagent, or background bash) by task id. block=true (default) waits up to `timeout` ms for completion; block=false returns the current status immediately.",
+			"Retrieve output from a running or finished background task (monitor, background subagent, or background bash) by task id. block=true (default) waits up to `timeout` ms for completion; block=false returns the current status immediately. You never need this just to learn that a task finished — completion always arrives as a system notification carrying the output; call this only when your next step needs the result now, or for a mid-run peek.",
 		parameters: Type.Object({
 			task_id: Type.String({ description: "The task id to get output from" }),
 			block: Type.Optional(Type.Boolean({ description: "Wait for completion (default true)" })),
