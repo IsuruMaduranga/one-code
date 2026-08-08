@@ -32,6 +32,22 @@ export function piInvocation(args: string[]): { command: string; args: string[] 
 	return { command: "pi", args };
 }
 
+/**
+ * Framing wrapped around a fork child's task. A fork inherits the parent's
+ * entire transcript; without this, a weaker model tends to abandon its
+ * assigned task and continue (or confabulate about) the inherited topic —
+ * then its output returns to the parent looking like independent
+ * confirmation. See docs/handoff-tool-ambiguity.md (fork confabulation).
+ */
+export function forkTaskMessage(task: string): string {
+	return [
+		"You are a forked subagent. The conversation above is inherited context, for reference only — do NOT continue its open threads, verify its claims, or act on its plans. Do ONLY the task below; your final message is returned to the parent conversation verbatim, as data. You cannot see the parent's background tasks: its task ids are not addressable from here.",
+		"",
+		"Task:",
+		task,
+	].join("\n");
+}
+
 export interface ChildOptions {
 	agent?: AgentDefinition;
 	task: string;
@@ -100,7 +116,8 @@ export interface ChildHandle {
 }
 
 export function startChild(options: ChildOptions): ChildHandle {
-	const { task, cwd, signal, onProgress } = options;
+	const { cwd, signal, onProgress } = options;
+	const task = options.forkFrom ? forkTaskMessage(options.task) : options.task;
 	const args = ["--mode", "json", "-p", ...buildChildFlags(options), task];
 
 	const invocation = piInvocation(args);

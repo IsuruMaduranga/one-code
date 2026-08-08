@@ -137,3 +137,15 @@ describe("namespaced discovery", () => {
 		rmSync(dir, { recursive: true, force: true });
 	});
 });
+
+describe("forkTaskMessage", () => {
+	it("frames the task with do-only-this and not-the-inherited-topic instructions", async () => {
+		const { forkTaskMessage } = await import("../../extensions/subagents/child.ts");
+		const framed = forkTaskMessage("report exactly: DONE");
+		expect(framed).toContain("forked subagent");
+		expect(framed).toContain("inherited context");
+		expect(framed).toContain("Do ONLY the task below");
+		expect(framed).toContain("cannot see the parent's background tasks");
+		expect(framed.endsWith("Task:\nreport exactly: DONE")).toBe(true);
+	});
+});

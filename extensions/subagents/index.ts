@@ -40,6 +40,7 @@ import { type ChildAction } from "../auto-mode/actions.ts";
 import {
 	type ChildHandle,
 	type ChildOutcome,
+	forkTaskMessage,
 	OUTPUT_CAP,
 	type RpcChildHandle,
 	startChild,
@@ -81,14 +82,23 @@ interface TaskResult {
 }
 
 const TaskShape = Type.Object({
-	agent: Type.String({ description: 'Agent name, or "fork" to clone this conversation' }),
+	agent: Type.String({
+		description: 'Agent name from the "Available agents" system reminder, or "fork" to clone this conversation',
+	}),
 	task: Type.String({ description: "Complete, self-contained instruction — the agent cannot ask follow-ups" }),
 	name: Type.Optional(Type.String({ description: "Name for this run, usable later with send_message (default: <agent>-<n>)" })),
 });
 
 const SubagentParams = Type.Object({
-	agent: Type.Optional(Type.String({ description: 'Agent for a single run, or "fork" to clone this conversation' })),
-	task: Type.Optional(Type.String({ description: "Task for a single run" })),
+	agent: Type.Optional(
+		Type.String({
+			description:
+				'Agent for a single run — a name from the "Available agents" system reminder, or "fork" to clone this conversation. Required unless passing `tasks` or action:"list"',
+		}),
+	),
+	task: Type.Optional(
+		Type.String({ description: 'Task for a single run — required with `agent` (only action:"list" needs neither)' }),
+	),
 	name: Type.Optional(Type.String({ description: "Name for a single run, usable later with send_message" })),
 	tasks: Type.Optional(
 		Type.Array(TaskShape, { description: `Run several agents in parallel (max ${MAX_PARALLEL} at a time)` }),
@@ -96,7 +106,7 @@ const SubagentParams = Type.Object({
 	model: Type.Optional(
 		Type.String({
 			description:
-				'Override the agent\'s model for this call: "sonnet"/"opus"/"haiku"/"fable" (resolved within this session\'s provider), "inherit", or an exact provider/model-id — see the subagent-models reminder for what is available',
+				'Override the agent\'s model for this call: "sonnet"/"opus"/"haiku"/"fable" (resolved within this session\'s provider), "inherit", or an exact provider/model-id — see the subagent-models reminder for what is available. Rejected for fork runs (a fork keeps this conversation\'s model)',
 		}),
 	),
 	allow_expensive: Type.Optional(
@@ -107,7 +117,8 @@ const SubagentParams = Type.Object({
 	),
 	thinking: Type.Optional(
 		StringEnum(["off", "minimal", "low", "medium", "high"] as const, {
-			description: "Override the reasoning effort for this call",
+			description:
+				"Override the reasoning effort for this call. Rejected for fork runs (a fork keeps this conversation's settings)",
 		}),
 	),
 	isolation: Type.Optional(
@@ -121,7 +132,11 @@ const SubagentParams = Type.Object({
 				"Return immediately with a task id instead of waiting. Completion arrives as a system notification; inspect with task_output, stop with task_stop",
 		}),
 	),
-	action: Type.Optional(StringEnum(["run", "list"] as const)),
+	action: Type.Optional(
+		StringEnum(["run", "list"] as const, {
+			description: '"run" (the default) executes; "list" only browses the agent catalog and ignores run options',
+		}),
+	),
 });
 
 async function runPool<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
@@ -212,9 +227,24 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		pi.events.emit(SUBAGENT_STATUS_CHANNEL, subagentStatusModel(configured, resolution));
 	};
 
+	/**
+	 * The agent catalog as an every-turn reminder, as Claude Code does ("Available
+	 * agent types are listed in <system-reminder> messages") — without it the
+	 * model has to guess names or make a discovery call first. Keyed and
+	 * byte-stable within a session, so it costs nothing in prompt-cache terms.
+	 */
+	const emitAgentCatalog = (ctx: ExtensionContext) => {
+		pi.events.emit(REMINDER_CHANNEL, {
+			scope: "every-turn",
+			key: "subagent-agents",
+			text: `Available agents for the subagent tool (\`agent\` field):\n${describeAgents(ctx.cwd)}`,
+		});
+	};
+
 	pi.on("session_start", (_event, ctx) => {
 		reconstructRuns(ctx);
 		emitModelStatus(ctx);
+		emitAgentCatalog(ctx);
 	});
 	pi.on("model_select", (event, ctx) => emitModelStatus(ctx, event.model));
 	pi.on("session_tree", (_event, ctx) => reconstructRuns(ctx));
@@ -338,7 +368,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		name: "subagent",
 		label: "Subagent",
 		description:
-			"Delegate a task to a specialist agent that runs in its own context window and reports back. Use it for well-scoped work whose intermediate output you don't need — broad codebase searches, focused reviews, independent research. Give a complete, self-contained task: the agent cannot ask follow-up questions. Pass `tasks` to run several in parallel, `agent: \"fork\"` for a child that inherits this conversation, `isolation: \"worktree\"` when parallel agents will edit files, or `run_in_background: true` to keep working while it runs (completion arrives as a notification; manage with task_output/task_stop). Each run gets a name — continue a finished agent later with send_message. Use action:'list' to see available agents.",
+			"Delegate a task to a specialist agent that runs in its own context window and reports back. Use it for well-scoped work whose intermediate output you don't need — broad codebase searches, focused reviews, independent research. Give a complete, self-contained task: the agent cannot ask follow-up questions. The available agents are listed in the \"Available agents\" system reminder. Pass `tasks` to run several in parallel, `agent: \"fork\"` for a child that inherits this conversation (a fork always runs on this conversation's model and reasoning settings; if you are the fork, execute your assigned task directly — don't re-delegate), `isolation: \"worktree\"` when parallel agents will edit files, or `run_in_background: true` to keep working while it runs (completion arrives as a notification; manage with task_output/task_stop). Each run gets a name — continue a finished agent later with send_message. action:'list' re-prints the agent catalog.",
 		promptSnippet: "subagent - delegate scoped work to a specialist agent in its own context",
 		parameters: SubagentParams,
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
@@ -397,6 +427,23 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					worktree: params.isolation === "worktree",
 				};
 			});
+
+			// A fork continues this conversation; running it on a different model or
+			// reasoning effort is how the fork-confabulation incident happened (a
+			// minimal-thinking fork resumed the inherited topic instead of its task).
+			// Claude Code silently ignores `model` for forks; we fail loud instead.
+			if (requested.some((r) => r.fork) && (params.model || params.thinking)) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: '`model`/`thinking` overrides are not applied to fork runs — a fork continues this conversation and keeps its exact model and reasoning settings. Drop the override, or use a named agent (e.g. "general-purpose") to run the task with different settings.',
+						},
+					],
+					details: {},
+					isError: true,
+				};
+			}
 
 			const sessionFile = ctx.sessionManager.getSessionFile();
 			if (requested.some((r) => r.fork) && !sessionFile) {
@@ -551,6 +598,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						finish = resolve;
 					});
 
+					// The child's final output. task.output() falls back to this
+					// because handle.snapshot().text can be blank at a turn boundary —
+					// the same reason the log write below uses `|| outcome.output`.
+					// Keeps task_output consistent with the log and the completion
+					// notification rather than showing an empty body in that case.
+					let lastOutput = "";
 					const resident: Resident = { handle: undefined as never, turnHandlers: [] };
 					const worktreeNote = worktree
 						? `\n\n(Running in worktree ${worktree.path} — kept while the agent stays resident.)`
@@ -580,7 +633,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						onMessageToMain: (message, summary) => notifyAgentMessage(p.record.name, message, summary),
 						onTurnEnd: (outcome) => {
 							registry.sessionFileFor(p.record);
-							if (logPath) writeFileSync(logPath, resident.handle.snapshot().text || outcome.output);
+							lastOutput = resident.handle.snapshot().text || outcome.output;
+							if (logPath) writeFileSync(logPath, lastOutput);
 							const handler = resident.turnHandlers.shift();
 							if (handler) {
 								handler(outcome);
@@ -611,13 +665,13 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						status: "running",
 						startedAt: Date.now(),
 						logPath,
-						output: () => handle.snapshot().text,
+						output: () => handle.snapshot().text || lastOutput,
 						stop: () => handle.kill(),
 						resident: () => !handle.exited(),
 						finished,
 					};
 					pi.events.emit(TASK_REGISTER_CHANNEL, task);
-					handle.send(p.request.task);
+					handle.send(p.request.fork ? forkTaskMessage(p.request.task) : p.request.task);
 
 					lines.push(
 						`⏳ ${p.record.name} (task ${p.record.taskId}) running in background${logPath ? ` — output log: ${logPath}` : ""}`,
