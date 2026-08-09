@@ -34,7 +34,7 @@ import {
 import { modelPickerComponent, pickerSpec, toPickerEntries, type PickerEntry } from "../auto-mode/model-picker.ts";
 import { discoverPlugins } from "../lib/plugins.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
-import { REMINDER_CHANNEL } from "../lib/reminders.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { type BackgroundTask, generateTaskId, TASK_REGISTER_CHANNEL } from "../background/registry.ts";
 import { type ChildAction } from "../auto-mode/actions.ts";
 import {
@@ -225,6 +225,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			}),
 			scope: "every-turn",
 			key: "subagent-models",
+			placement: "first-prepend",
+			order: CONTEXT_ORDER.subagentModels,
 		});
 		pi.events.emit(SUBAGENT_STATUS_CHANNEL, subagentStatusModel(configured, resolution));
 	};
@@ -240,6 +242,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			scope: "every-turn",
 			key: "subagent-agents",
 			text: `Available agents for the subagent tool (\`agent\` field):\n${describeAgents(ctx.cwd)}`,
+			placement: "first-prepend",
+			order: CONTEXT_ORDER.agents,
 		});
 	};
 

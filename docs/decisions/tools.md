@@ -353,41 +353,55 @@ gate fires before anything detaches (verified live).
 A separate tool name would diverge from Claude Code's single-Bash shape and
 lose the existing `bash` permission rules for free.
 
-## Deferral is frontier-only; steering follows CC's channels (unreviewed)
+## Deferral runs on all tiers; steering follows CC's channels (2026-08-10)
 
-**Decision.** Three changes from the live CC-vs-One Code capture comparison
-(findings §14): (a) tool deferral (ToolSearch) applies only on the frontier
-tier — mid/low get every tool eagerly and no deferred-tools reminder, with a
-mid-session model change flipping the surface both ways; (b) every
-harness-injected notification shares `lib/notifications.ts`'s
-anti-confabulation preamble (no new human input received; not
-acknowledgement/confirmation/approval), adapted from CC's; (c) MCP servers'
-`instructions` (initialize result) are injected as an every-turn reminder in
-CC's format instead of being dropped.
+**Decision.** (a) Tool deferral (ToolSearch) applies on **every** tier, not just
+frontier — the deferred-registry tools are deactivated and listed in the
+deferred-tools reminder regardless of model; core tools (read/edit/write/bash/…)
+never register as deferrable and stay eager. (b) Every harness-injected
+notification shares `lib/notifications.ts`'s anti-confabulation preamble
+(adapted from CC's). (c) MCP servers' `instructions` are injected as an
+every-turn reminder in CC's format instead of being dropped.
 
-**Why.** CC on Haiku ships all 38 tools eagerly — the load-then-call
-indirection is a frontier optimization, and weak models are the least
-equipped for it. The notification preamble matters because a pending
-question plus an arriving automated event reads as an answer (the
-fork-confabulation family). The instructions field is how servers teach the
-model their tools; dropping it made that impossible.
+**Why (a) reversed.** The original "frontier-only" was justified by a false
+premise — findings §14 wrongly claimed CC ships Haiku all tools eagerly. The raw
+captures (`haiku-4-6.json`, `latest-haiku.json`) show CC defers the long tail on
+Haiku too. And it costs nothing to do everywhere: `pi.setActiveTools` edits
+`agent.state.tools`, which *is* the request tool list, so deactivation omits a
+tool from the wire on **any** provider (OpenRouter/deepseek included) — verified
+live, 35→15 tools on `deepseek-v4-flash-free`. Provider-native deferral
+(Anthropic `defer_loading`, OpenAI `tool_search_call`) is only a cache
+optimization on top; without it, loading a tool mid-session invalidates the
+prompt cache from the tools block down — an accepted tradeoff for cheap models.
 
-**Rejected.** Deferring for all tiers with better reminder wording (the
-indirection itself is the cost); a One Code-specific notification format
-(CC's wording is field-tested against exactly this hazard).
+**Rejected.** Keeping frontier-only as a deliberate divergence (weak models
+fumble the indirection) — the user chose CC fidelity; the risk is documented and
+revisitable. A One Code-specific notification format (CC's wording is
+field-tested against exactly this hazard).
 
-## Skills and CLAUDE.md stay in the system prompt (unreviewed)
+## CLAUDE.md, memory, and skills injected as the CC reminder stack (2026-08-10)
 
-**Decision.** CC injects the skills listing and CLAUDE.md contents as
-first-user-message reminders, keeping its system prompt project-independent;
-One Code keeps them in the system prompt (pi's builder composes them there)
-and this stays as is.
+**Decision.** CLAUDE.md contents, the `MEMORY.md` index, and the skills listing
+are no longer in the system prompt. They ride the first-user-message
+`<system-reminder>` stack, prepended before the user's text in CC's fixed order
+(deferred tools → subagent-models → agents → MCP → skills → `# claudeMd`), via
+placement/order/suffix on the shared reminder queue (`lib/reminders.ts`,
+`CONTEXT_ORDER`). CLAUDE.md + memory + `# userEmail` + `# currentDate` are bundled
+into ONE byte-identical `# claudeMd` block (`extensions/claude-context` +
+`lib/claude-context.ts`); discovery mirrors CC (global + project ancestors, not
+pi's AGENTS.md-first loader). Tier-independent: the block is identical across
+models — only the `# Memory` *spec* in the system prompt varies by tier (already
+handled by `lib/memory.ts`).
 
-**Why.** The cache argument doesn't apply: provider prompt caches key on the
-per-conversation prefix, and One Code's system prompt is already byte-stable
-within a session — cross-session variation costs nothing. Relocation would
-touch the prompt composer for parity with no measurable benefit; CC's
-placement likely serves their multi-surface infra, not model steering.
+**Why (reversed from "stay in the system prompt").** The goal is byte-identity
+with CC's payload, which the user made explicit. CC puts this content in the user
+turn (trust boundary: project/user-authored content isn't in the system role),
+and the diff was visible and real. Injection is transient (pi's `context` event
+runs on a `structuredClone`; the session keeps the clean user message), so
+re-injecting every turn is safe on resume. The claudeMd block reproduces CC's
+exact bytes including the trailing `\n\n` (findings §14).
 
-**Rejected.** Moving both to reminders (churn without benefit); moving only
-skills (worst of both — two places to look).
+**Rejected.** Keeping it in the system prompt (the earlier call — abandoned once
+byte-identity became the requirement); a first-message idempotent-prepend without
+the shared queue (the queue already models transient per-turn injection and
+placement generalizes to all five reminders).

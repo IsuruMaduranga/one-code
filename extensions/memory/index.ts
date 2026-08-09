@@ -25,9 +25,7 @@ import {
 	INDEX_OVER_LIMIT_ERROR,
 	indexLimitStatus,
 	memoryDir,
-	memoryIndexReminder,
 	stampFrontmatter,
-	truncateIndex,
 } from "../lib/memory.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 
@@ -53,16 +51,10 @@ export default function memoryExtension(pi: ExtensionAPI) {
 		}
 		dir = candidate;
 
-		const indexPath = join(dir, "MEMORY.md");
-		let index = "";
-		try {
-			index = readFileSync(indexPath, "utf8");
-		} catch {
-			// No index yet — nothing to recall.
-		}
-		if (index.trim()) {
-			pi.events.emit(REMINDER_CHANNEL, { text: memoryIndexReminder(indexPath, truncateIndex(index)) });
-		}
+		// The MEMORY.md index is injected by the claude-context extension, folded
+		// into the `# claudeMd` block exactly as Claude Code does — not as a
+		// separate reminder here. This extension owns the directory and the
+		// write-time stamping / limit checks below.
 	});
 
 	pi.on("tool_call", (event, ctx) => {

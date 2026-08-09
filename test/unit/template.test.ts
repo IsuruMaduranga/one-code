@@ -70,14 +70,17 @@ describe("buildClaudeCodeSystemPrompt", () => {
 		expect(prompt.match(/Use read before edit/g)).toHaveLength(1);
 	});
 
-	it("appends project context files", () => {
+	it("does NOT put project context files in the system prompt", () => {
+		// Claude Code injects CLAUDE.md as the `# claudeMd` <system-reminder> on the
+		// first user message (extensions/claude-context), never in the system prompt.
 		const prompt = buildClaudeCodeSystemPrompt(
 			{ ...baseOptions, contextFiles: [{ path: "/tmp/project/CLAUDE.md", content: "Always use tabs." }] },
 			env,
 			"frontier",
 		);
-		expect(prompt).toContain('<project_instructions path="/tmp/project/CLAUDE.md">');
-		expect(prompt).toContain("Always use tabs.");
+		expect(prompt).not.toContain("<project_instructions");
+		expect(prompt).not.toContain("<project_context");
+		expect(prompt).not.toContain("Always use tabs.");
 	});
 
 	it("keeps the frontier prompt lean (no verbose scaffolding, compact memory)", () => {

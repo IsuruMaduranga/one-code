@@ -18,6 +18,7 @@ import { Type } from "typebox";
 import os from "node:os";
 import { join } from "node:path";
 import { discoverPlugins } from "../lib/plugins.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 
 interface IndexedSkill {
@@ -42,6 +43,18 @@ export default function skillExtension(pi: ExtensionAPI) {
 				source: "project" as const,
 			};
 		});
+		// Claude Code lists skills as a <system-reminder> on the first user message
+		// (its block 3), framed for the Skill tool — not in the system prompt.
+		const listing = describe();
+		if (listing !== "(no skills available)") {
+			pi.events.emit(REMINDER_CHANNEL, {
+				text: `The following skills are available for use with the Skill tool:\n\n${listing}`,
+				scope: "every-turn",
+				key: "skills",
+				placement: "first-prepend",
+				order: CONTEXT_ORDER.skills,
+			});
+		}
 	});
 
 	const index = (): IndexedSkill[] => [

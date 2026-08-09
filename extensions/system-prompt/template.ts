@@ -12,7 +12,7 @@
  * the pre-tiering prompt exactly.
  */
 
-import { formatSkillsForPrompt, type BuildSystemPromptOptions } from "@earendil-works/pi-coding-agent";
+import type { BuildSystemPromptOptions } from "@earendil-works/pi-coding-agent";
 import { memoryPromptSection } from "../lib/memory.ts";
 import type { PromptTier } from "../lib/model-tier.ts";
 import { scratchpadPromptSection } from "../lib/scratchpad.ts";
@@ -84,29 +84,18 @@ export function buildClaudeCodeSystemPrompt(
 
 	let prompt = sections.join("\n\n");
 
-	// Mirror pi's own custom-prompt assembly: append text, project context
-	// files (CLAUDE.md / AGENTS.md), skills, and the trailing cwd line.
+	// Mirror pi's own custom-prompt assembly: append text, skills, and the
+	// trailing cwd line. CLAUDE.md / AGENTS.md context files are NOT put here —
+	// Claude Code injects them as the `# claudeMd` <system-reminder> on the first
+	// user message (extensions/claude-context), not in the system prompt.
 	if (options.appendSystemPrompt) {
 		prompt += `\n\n${options.appendSystemPrompt}`;
 	}
 
-	const contextFiles = options.contextFiles ?? [];
-	if (contextFiles.length > 0) {
-		prompt += "\n\n<project_context>\n\n";
-		// Claude Code frames context files as overriding defaults; without that the
-		// model treats CLAUDE.md as background reading rather than instructions.
-		prompt += "Codebase and user instructions are shown below. Be sure to adhere to these instructions. IMPORTANT: These instructions OVERRIDE any default behavior and you MUST follow them exactly as written.\n\n";
-		for (const { path: filePath, content } of contextFiles) {
-			prompt += `<project_instructions path="${filePath}">\n${content}\n</project_instructions>\n\n`;
-		}
-		prompt += "</project_context>\n";
-	}
-
-	const skills = options.skills ?? [];
-	const hasRead = !options.selectedTools || options.selectedTools.includes("read");
-	if (hasRead && skills.length > 0) {
-		prompt += formatSkillsForPrompt(skills);
-	}
+	// Skills are NOT listed here — the skill extension emits them as the
+	// "available for use with the Skill tool" <system-reminder> on the first user
+	// message (Claude Code's block 3), framed for the `skill` tool rather than pi's
+	// read-the-file convention.
 
 	prompt += `\nCurrent working directory: ${env.cwd.replace(/\\/g, "/")}`;
 

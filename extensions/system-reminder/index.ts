@@ -14,7 +14,13 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 		if (payload.remove && payload.key) {
 			reminderQueue.remove(payload.key);
 		} else if (typeof payload.text === "string") {
-			reminderQueue.enqueue(payload.text, { scope: payload.scope, key: payload.key });
+			reminderQueue.enqueue(payload.text, {
+				scope: payload.scope,
+				key: payload.key,
+				placement: payload.placement,
+				order: payload.order,
+				suffix: payload.suffix,
+			});
 		}
 	});
 

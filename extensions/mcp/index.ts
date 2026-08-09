@@ -29,7 +29,7 @@ import {
 	readResource,
 	readResourceDir,
 } from "./client.ts";
-import { REMINDER_CHANNEL } from "../lib/reminders.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { join } from "node:path";
 import { discoverPlugins } from "../lib/plugins.ts";
 import { loadServers, type McpServer } from "./config.ts";
@@ -170,7 +170,13 @@ export default function mcpExtension(pi: ExtensionAPI) {
 		// field is silently dropped and servers can't teach the model their tools.
 		const instructions = mcpInstructionsReminder([...connections.values()]);
 		if (instructions) {
-			pi.events.emit(REMINDER_CHANNEL, { scope: "every-turn", key: "mcp-instructions", text: instructions });
+			pi.events.emit(REMINDER_CHANNEL, {
+				scope: "every-turn",
+				key: "mcp-instructions",
+				text: instructions,
+				placement: "first-prepend",
+				order: CONTEXT_ORDER.mcp,
+			});
 		}
 	};
 
