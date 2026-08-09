@@ -128,6 +128,7 @@ Full context: [`decisions/tui.md`](decisions/tui.md).
 - **[Compact tool rendering — the Claude Code transcript look](decisions/tui.md#compact-tool-rendering-the-claude-code-transcript-look-unreviewed)** *(unreviewed)* — `●`/`⎿` call+result lines with ctrl+o collapse for every One Code tool, compact `✳` notification headlines, boxless theme, dimmer thinking text.
 - **[Thinking collapsed by default, expandable with ctrl+t](decisions/tui.md#thinking-collapsed-by-default-expandable-with-ctrlt-unreviewed)** *(unreviewed)* — pi's own `hideThinkingBlock` defaulted on (only when the user never chose), `✻ Thinking…` label via `setHiddenThinkingLabel`; the write lands next session (settings cached at startup).
 - **[Built-in tools joined the ● language; banner cut to four lines](decisions/tui.md#built-in-tools-joined-the--language-banner-cut-to-four-lines-unreviewed)** *(unreviewed)* — `tool-style` wraps pi's read/write/edit/grep/find/ls renderers (`● Label(arg)` + base result under a `⎿` elbow, edit's diff preview kept); one curated hint line, sections as counts, warnings point at /lsp & /mcp.
+- **[Fullscreen (alt-screen) for Claude Code's clean exit — a setting, not extension code](decisions/tui.md#fullscreen-alt-screen-for-claude-codes-clean-exit-a-setting-not-extension-code-unreviewed)** *(unreviewed)* — CC's clean exit is the terminal alt-screen buffer; pi has it as `tuiMode: "fullscreen"`, but the renderer is a pi-core startup choice with no extension hook, so One Code recommends the setting rather than owning it.
 
 ## Hooks
 

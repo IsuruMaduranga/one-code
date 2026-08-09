@@ -117,3 +117,47 @@ text and back, choice persists.
 `✳ Background bash … completed. (+2 lines, ctrl+o to expand)` notification,
 ctrl+o expanding/collapsing both, thinking at `38;5;240` italic, no crash at
 170 cols; 789 unit tests green.
+
+## Fullscreen (alt-screen) for Claude Code's clean exit — a setting, not extension code (unreviewed)
+
+Claude Code runs its whole session in the terminal's **alternate screen
+buffer** (`ESC[?1049h` on start, `ESC[?1049l` on exit), so quitting restores
+the terminal to whatever preceded it and CC prints only a one-line resume hint.
+One Code's default looked different: pi's `TuiMainScreen` (inline, main buffer)
+leaves the banner and whole conversation in scrollback after exit.
+
+pi already has the machinery — `TuiAltScreen` (mode `"fullscreen"`), whose
+`.stop()` writes `ESC[?1049l` and then pi prints `To resume this session:
+pi --resume …` (`interactive-mode.ts`). It is gated behind the `tuiMode`
+setting (`"regular"` default vs `"fullscreen"`), marked *experimental* by pi.
+
+**Decision: recommend `tuiMode: "fullscreen"` as the One Code experience, but
+deliver it as a documented user/global setting — not extension code.** The
+renderer is a pi-core startup choice: it is built once from
+`--tui-mode <mode>` (CLI) or `settingsManager.getUiMode()` (settings.json), and
+the live switch (`switchUiMode`) is **private** to pi's `InteractiveMode` with
+no extension-facing hook. A One Code extension therefore cannot set or flip it.
+
+- **Rejected — flip it from an extension:** impossible; no API reaches the
+  renderer, and it is read before/independent of which package loads.
+- **Rejected — One Code writes the user's global settings on load:** invasive
+  (mutating user config the package doesn't own) and it would change plain `pi`
+  everywhere, not just One Code sessions — the setting cannot be scoped to
+  "this package is active."
+- **Chosen — document the toggle.** Set `"tuiMode": "fullscreen"` in
+  `~/.pi/agent/settings.json` (global, per-user; right for a user who always
+  runs One Code), or a project's `.pi/settings.json` (project settings override
+  global — `deepMergeSettings`), or `pi --tui-mode fullscreen` ad-hoc. `/settings
+  → Interface layout → regular` reverts.
+
+**Trade-off (accepted):** alt-screen means the conversation does not persist in
+terminal scrollback after quit — that is the whole point of the clean exit, and
+`pi --resume` covers re-entry.
+
+**Trap this surfaced (finding §10.16):** the setting key was `uiMode` in the
+pinned reference clone (v0.83.0) but was renamed `tuiMode` in installed pi
+(v0.84.1); a `uiMode` key is silently ignored on 0.84.1. Clone re-pinned to
+`v0.84.1` to match.
+
+Set in `~/.pi/agent/settings.json` on 2026-08-10; live clean-exit behavior to be
+confirmed by the user.

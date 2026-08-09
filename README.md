@@ -5,8 +5,8 @@
 One Code gives you Claude Code's whole workflow: subagents, ultracode workflows,
 skills, MCP, plan mode, hooks, a real permission system, project memory — but
 runs it on **any provider**. Anthropic, OpenAI, Gemini, a local Ollama model, or
-a gateway like OpenRouter. Same tools, same `.claude/` config, your choice of
-brain behind it.
+a gateway like OpenRouter. The **same tool surface**, the same `.claude/` config,
+your choice of brain behind it.
 
 Free and open source (MIT). No lock-in, no subscription, no fork of anything —
 One Code is a package for the [pi coding agent](https://github.com/earendil-works/pi),
@@ -41,10 +41,10 @@ cd your-project && pi                              # go
 ### 🤖 Subagents
 Delegate work to child agents that each get their own context window, so only
 the answer comes back — not the noise. Define them as markdown in
-`.claude/agents/`, pick their model per agent, `fork` one that inherits your
-conversation, or isolate one in its own git worktree. Run them in the background
-and message them while they work. Three ship in the box: `general-purpose`,
-`explore`, and `plan`.
+`.claude/agents/`, pick their model per agent, or `fork` one that inherits your
+conversation. Run them in the background and message them while they work, or
+isolate each in its own git worktree (below). Three ship in the box:
+`general-purpose`, `explore`, and `plan`.
 
 ### ⚡ Ultracode workflows
 For big jobs — a broad audit, a migration, a review worth double-checking — say
@@ -68,6 +68,13 @@ plan file. Review the finished plan in an approval dialog before a single line o
 code changes. The plan survives context compaction, and you can edit the file
 yourself while it works.
 
+### 🌿 Git worktrees
+Send the whole session into an isolated git worktree with `enter_worktree` —
+branched from your current HEAD under `.claude/worktrees/`, so every command and
+relative path runs there and your working tree stays untouched until you
+`exit_worktree`. Subagents can each take their own worktree too, so a fan-out
+that edits files runs in parallel without ever colliding.
+
 ### 🧩 Skills, plugins & MCP
 Standard [Agent Skills](https://agentskills.io) from `.claude/skills/`, whole
 Claude Code **plugins** (their agents, skills, commands, and MCP servers, all
@@ -86,7 +93,7 @@ and Claude Code's own compaction prompt so long conversations shrink cleanly
 instead of falling off a cliff. On Anthropic, old thinking is trimmed
 automatically to keep sessions cheap.
 
-### 🛠️ The full tool set
+### 🛠️ The same tool surface as Claude Code
 `read`, `write`, `edit`, `bash` (with background runs), `grep`, `find`, `ls`,
 `todo_write`, `notebook_edit`, `web_search`, `web_fetch`, `lsp_diagnostics`
 (live language-server diagnostics after edits), `ask_user_question`, task
@@ -94,6 +101,12 @@ tracking, background monitors, scheduled wake-ups — and `tool_search`, which
 keeps rarely-used schemas out of the prompt until they're needed. On Anthropic
 and recent OpenAI models this uses the provider's native deferred-tool
 mechanism, so loading a tool never invalidates your cached prompt.
+
+Every Claude Code tool has a counterpart here, so muscle memory and rules carry
+over: Claude Code's own PascalCase names — `Read`, `Bash`, `Edit`, `Task`,
+`WebFetch`, `TodoWrite`, `EnterWorktree`, and the rest — are accepted verbatim in
+your `.claude/settings.json` permission rules and hook matchers, mapped to the
+matching tool automatically.
 
 ### 🎚️ Reasoning effort & 🎨 themes
 An `/effort` slider from `minimal` to `max` (and `ultracode` past the end), on
@@ -136,8 +149,9 @@ pi inside a container — the permission gate and the container compose.
   Gemini), so it needs a provider that offers one.
 - **LSP diagnostics** need the language server on your `PATH` (e.g.
   `npm i -g typescript-language-server typescript`).
-- Verified end-to-end on OpenAI and Anthropic models; other providers work but
-  are less exercised.
+- Verified end-to-end on Anthropic and OpenAI models, and through **OpenRouter**
+  (which brokers many open models — DeepSeek, Llama, Qwen, and more); other
+  providers work but are less exercised.
 
 ## License
 
