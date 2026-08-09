@@ -46,6 +46,7 @@
 			"extensions/subagents/index.ts",
 			"extensions/workflow/index.ts",
 			"extensions/effort/index.ts",
+			"extensions/exit/index.ts",
 			"extensions/todo/index.ts",
 			"extensions/tasks/index.ts",
 			"extensions/plan-mode/index.ts",
