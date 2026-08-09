@@ -6,7 +6,7 @@ Part of [Decisions](../decisions.md).
 
 pi hardcodes its own summarization prompt (settings only expose
 enabled/reserveTokens/keepRecentTokens), but `session_before_compact` lets an
-extension supply the whole `CompactionResult` — so pincer now compacts the
+extension supply the whole `CompactionResult` — so One Code now compacts the
 way Claude Code does. Three design points:
 
 - **The prompt**: appended as user text after the conversation; the model

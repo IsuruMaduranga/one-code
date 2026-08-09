@@ -224,7 +224,7 @@ checking mechanically: it is what a prompt injection most wants to manufacture,
 and, as this regression showed, also what the model is most prone to stretch on
 its own.
 
-Verified live in both directions: "write hello into ~/pincer-named-probe.txt — I
+Verified live in both directions: "write hello into ~/One Code-named-probe.txt — I
 want that exact path" → `allow (intent)` with a verified quote, file created; the
 delegated-destination backup → `block (S5)`, reported with S5's own text.
 
@@ -289,7 +289,7 @@ deliberately bogus `classifierModel` producing the warning plus a working
 fallback rather than a broken gate.
 
 **Still open:** there is no capability floor. Claude Code gates auto mode's
-availability on model tier because a weak classifier is a weak boundary; pincer
+availability on model tier because a weak classifier is a weak boundary; One Code
 gates only on "a model exists", so a small local model can end up as the gate.
 Refusing auto mode there would remove the feature exactly where self-hosted users
 want it, so a warning on entry is the likelier answer.
@@ -509,7 +509,7 @@ verdicts.
 **Also: mode and classifier in the banner.** The banner's `mode` line was
 hardcoded to "default". It now renders live — `mode auto · classifier haiku-4-5
 (planned)` before the first call pins, the pinned model after, `(paused)` when
-paused — fed by a `pincer:permission-status` event from the permissions
+paused — fed by a `one-code:permission-status` event from the permissions
 extension (jiti isolates module state, so this goes over the bus). The
 protected-path check also gained the floor's symlink resolution: `decide()` takes
 an optional `resolvedSubject`, so writing `.git/hooks` through a symlinked

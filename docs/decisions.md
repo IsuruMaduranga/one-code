@@ -20,8 +20,9 @@ Full context: [`decisions/distribution.md`](decisions/distribution.md).
 Full context: [`decisions/branding.md`](decisions/branding.md).
 
 - **[Branding without a fork](decisions/branding.md#branding-without-a-fork)** — the π banner, shortcut hints, and resource sections are extension output, not a patched pi; `CC_NO_BANNER=1` restores pi's header.
-- **[Themes: authored, not adopted](decisions/branding.md#themes-authored-not-adopted)** — `pincer`/`pincer-light` are hand-authored 51-token themes; no community theme fit.
-- **[Rebrand: pincer](decisions/branding.md#rebrand-pincer)** — why the product is "pincer" / npm `pincer-agent`, and Claude Code stays descriptive ("compatible with…") never titular.
+- **[Themes: authored, not adopted](decisions/branding.md#themes-authored-not-adopted)** — `one-code`/`one-code-light` are hand-authored 51-token themes; no community theme fit.
+- **[Rebrand: pincer](decisions/branding.md#rebrand-pincer)** — (history) why the product was "pincer" / npm `pincer-agent`, and Claude Code stays descriptive ("compatible with…") never titular.
+- **[Rebrand: One Code](decisions/branding.md#rebrand-one-code)** — pincer → **One Code** / npm `one-code`: the stacked wordmark, the full rename surface (state dir, env, channels, repo), and what stays as history.
 - **[Startup listing: quietStartup + banner sections](decisions/branding.md#startup-listing-quietstartup-banner-sections)** — when pi's `quietStartup` is on, compact context/skills/workflows/themes sections replace pi's noisy resource listing.
 
 ## System prompt
@@ -46,7 +47,7 @@ Full context: [`decisions/tools.md`](decisions/tools.md).
 - **[Subagent steering: injected catalog, fork hardening (unreviewed)](decisions/tools.md#subagent-steering-injected-catalog-fork-hardening-unreviewed)** — the agent catalog rides an every-turn reminder; a fork's task gets a do-only-this preamble; `model`/`thinking` on a fork fail loud.
 - **[Background bash: override the built-in, gate before detaching (unreviewed)](decisions/tools.md#background-bash-override-the-built-in-gate-before-detaching-unreviewed)** — `run_in_background` on a pi-executor-delegating `bash` override; task_output/task_stop work unchanged; never auto-allowed.
 - **[Deferral is frontier-only; steering follows CC's channels (unreviewed)](decisions/tools.md#deferral-is-frontier-only-steering-follows-ccs-channels-unreviewed)** — mid/low tiers get every tool eagerly (CC does the same for Haiku); notifications carry CC's anti-confabulation preamble; MCP server `instructions` are injected, not dropped.
-- **[Skills and CLAUDE.md stay in the system prompt (unreviewed)](decisions/tools.md#skills-and-claudemd-stay-in-the-system-prompt-unreviewed)** — CC moves them to reminders; the cache argument doesn't apply to pincer, so no relocation.
+- **[Skills and CLAUDE.md stay in the system prompt (unreviewed)](decisions/tools.md#skills-and-claudemd-stay-in-the-system-prompt-unreviewed)** — CC moves them to reminders; the cache argument doesn't apply to One Code, so no relocation.
 
 ## Auto mode
 
@@ -67,7 +68,7 @@ Full context: [`decisions/modes.md`](decisions/modes.md).
 - **[`/effort`, and ultracode as a standing mode](decisions/modes.md#effort-and-ultracode-as-a-standing-mode)** — one "effort" dial; its last stop is `ultracode` = xhigh plus workflows armed every turn.
 - **[Aligning `/effort` with shift+tab](decisions/modes.md#aligning-effort-with-shifttab)** — why the slider shares the stops that shift+tab cycles (pi reserves that key).
 - **[Permission-mode cycling on ctrl+q](decisions/modes.md#permission-mode-cycling-on-ctrlq-not-shifttab-ctrlm-or-altm)** — why the mode cycle is ctrl+q, not shift+tab / ctrl+m / alt+m.
-- **[Plan mode is file-based, like current Claude Code](decisions/modes.md#plan-mode-is-file-based-like-current-claude-code)** — plan mode writes a plan file under `~/.pincer/plans`; the matcher allows writes to that one file.
+- **[Plan mode is file-based, like current Claude Code](decisions/modes.md#plan-mode-is-file-based-like-current-claude-code)** — plan mode writes a plan file under `~/.one-code/plans`; the matcher allows writes to that one file.
 
 ## Subagents & workflows
 
@@ -92,7 +93,7 @@ Full context: [`decisions/memory-state.md`](decisions/memory-state.md).
 - **[Memory: own file-based implementation](decisions/memory-state.md#memory-own-file-based-implementation)** — Claude Code's `~/.claude/projects/<slug>/memory/` layout keyed by git root; relevance-based mid-session recall is unreplicable client internals.
 - **[The memory dir is harness-designated working space](decisions/memory-state.md#the-memory-dir-is-harness-designated-working-space-like-the-plan-file)** — why writes there need no permission prompt, like the plan file.
 - **[Session scratchpad, Claude Code-style](decisions/memory-state.md#session-scratchpad-claude-code-style)** — a per-session temp dir: prompt section plus the allowed-writes rule.
-- **[Own state, borrowed config](decisions/memory-state.md#own-state-borrowed-config-claude-is-read-only-pincer-writes-to-pincer)** — `.claude` is read-only; pincer writes its own state to `~/.pincer` so the two never clobber each other.
+- **[Own state, borrowed config](decisions/memory-state.md#own-state-borrowed-config-claude-is-read-only-one-code-writes-to-one-code)** — `.claude` is read-only; One Code writes its own state to `~/.one-code` so the two never clobber each other.
 
 ## Compaction
 
@@ -124,7 +125,7 @@ Full context: [`decisions/skills-plugins.md`](decisions/skills-plugins.md).
 
 Full context: [`decisions/tui.md`](decisions/tui.md).
 
-- **[Compact tool rendering — the Claude Code transcript look](decisions/tui.md#compact-tool-rendering-the-claude-code-transcript-look-unreviewed)** *(unreviewed)* — `●`/`⎿` call+result lines with ctrl+o collapse for every pincer tool, compact `✳` notification headlines, boxless theme, dimmer thinking text.
+- **[Compact tool rendering — the Claude Code transcript look](decisions/tui.md#compact-tool-rendering-the-claude-code-transcript-look-unreviewed)** *(unreviewed)* — `●`/`⎿` call+result lines with ctrl+o collapse for every One Code tool, compact `✳` notification headlines, boxless theme, dimmer thinking text.
 - **[Thinking collapsed by default, expandable with ctrl+t](decisions/tui.md#thinking-collapsed-by-default-expandable-with-ctrlt-unreviewed)** *(unreviewed)* — pi's own `hideThinkingBlock` defaulted on (only when the user never chose), `✻ Thinking…` label via `setHiddenThinkingLabel`; the write lands next session (settings cached at startup).
 - **[Built-in tools joined the ● language; banner cut to four lines](decisions/tui.md#built-in-tools-joined-the--language-banner-cut-to-four-lines-unreviewed)** *(unreviewed)* — `tool-style` wraps pi's read/write/edit/grep/find/ls renderers (`● Label(arg)` + base result under a `⎿` elbow, edit's diff preview kept); one curated hint line, sections as counts, warnings point at /lsp & /mcp.
 

@@ -1051,7 +1051,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				}
 				emitModelStatus(ctx);
 				ctx.ui.notify(
-					"subagentModel cleared — the default is CLAUDE_CODE_SUBAGENT_MODEL or managed settings when applicable, else pincer's automatic same-provider profile.",
+					"subagentModel cleared — the default is CLAUDE_CODE_SUBAGENT_MODEL or managed settings when applicable, else One Code's automatic same-provider profile.",
 					"info",
 				);
 				return;

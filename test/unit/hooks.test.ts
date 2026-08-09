@@ -84,14 +84,14 @@ describe("protocol: interpretHookResult", () => {
 });
 
 describe("matcher", () => {
-	it("maps pincer names to canonical CC names", () => {
+	it("maps native names to canonical CC names", () => {
 		expect(ccToolName("find")).toBe("Glob");
 		expect(ccToolName("subagent")).toBe("Task");
 		expect(ccToolName("mcp__srv__do")).toBe("mcp__srv__do");
 		expect(ccToolName("some_custom")).toBe("some_custom");
 	});
 
-	it("matches CC spellings against pincer tools", () => {
+	it("matches CC spellings against One Code tools", () => {
 		expect(matcherApplies("Bash", toolMatchCandidates("bash"))).toBe(true);
 		expect(matcherApplies("Edit|Write", toolMatchCandidates("write"))).toBe(true);
 		expect(matcherApplies("Glob", toolMatchCandidates("find"))).toBe(true);

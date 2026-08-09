@@ -31,7 +31,9 @@ import { truncateLine } from "../lib/tui-render.ts";
 
 export { truncateLine };
 
-const NAME = "pincer";
+const NAME = "One Code";
+/** Tagline under the wordmark — the "any model" positioning, matching the README. */
+const SUBTITLE = "the Claude Code experience, on any model";
 
 interface ThemeLike {
 	fg(color: string, text: string): string;
@@ -49,16 +51,23 @@ export interface BannerInput {
 }
 
 /**
- * Pixel π — our own mark, not a copy of anyone's mascot (Anthropic's branding
- * guidelines prohibit Claude Code-mimicking art; see docs/handoff.md). Half-block
- * characters pack two pixel rows per text row, so the glyph fits the banner's
- * three lines. All lines are the same width so the text column beside it aligns.
+ * "ONE CODE" wordmark (figlet "ANSI Shadow"), ONE and CODE on a single line.
+ * Rendered as its own block above the text column. Rows are normalised to a
+ * single width at load, so a trailing-space trim in the source can never
+ * misalign the block. Below WORDMARK_WIDTH a compact "One Code" title replaces
+ * it, so a narrow pane never shows sheared glyphs.
  */
-export const LOGO_LINES = [
-	"▀██▀▀▀▀██▀",
-	" ██    ██ ",
-	" ██    ██▄",
+const WORDMARK_RAW = [
+	" ██████╗ ███╗   ██╗███████╗   ██████╗ ██████╗ ██████╗ ███████╗",
+	"██╔═══██╗████╗  ██║██╔════╝  ██╔════╝██╔═══██╗██╔══██╗██╔════╝",
+	"██║   ██║██╔██╗ ██║█████╗    ██║     ██║   ██║██║  ██║█████╗",
+	"██║   ██║██║╚██╗██║██╔══╝    ██║     ██║   ██║██║  ██║██╔══╝",
+	"╚██████╔╝██║ ╚████║███████╗  ╚██████╗╚██████╔╝██████╔╝███████╗",
+	" ╚═════╝ ╚═╝  ╚═══╝╚══════╝   ╚═════╝ ╚═════╝ ╚═════╝ ╚══════╝",
 ];
+/** Display width every wordmark row is padded to (the widest raw row). */
+export const WORDMARK_WIDTH = Math.max(...WORDMARK_RAW.map((r) => [...r].length));
+export const WORDMARK = WORDMARK_RAW.map((r) => r + " ".repeat(WORDMARK_WIDTH - [...r].length));
 
 /**
  * One curated hint line, not a keymap dump: only the controls someone cannot
@@ -119,21 +128,22 @@ export function sectionSummary(sections: StartupSection[], paint: (color: string
 		.join(paint("muted", " · "));
 }
 
-/** Kept pure so the layout is unit-testable without a terminal. */
+/**
+ * Banner layout: the wordmark block, then a one-space-indented text column
+ * (tagline + version, context, hints, sections). Kept pure so the layout is
+ * unit-testable without a terminal. Below WORDMARK_WIDTH the wordmark is
+ * replaced by a compact "One Code" title, so a narrow pane never shows sheared
+ * fragments of the art.
+ */
 export function bannerLines(
 	input: BannerInput,
 	paint: (color: string, text: string) => string,
 	width?: number,
 ): string[] {
-	const logoWidth = Math.max(...LOGO_LINES.map((art) => [...art].length));
-	const title = `${paint("accent", NAME)} ${paint("dim", `v${input.version}`)}`;
-	const subtitle = paint("dim", "the Claude Code experience, on the pi harness");
-	// Narrow terminals drop whole trailing hints (the /hotkeys pointer is
-	// first, so it always survives) instead of cutting one mid-word.
-	const hints = fitItems(HINTS, ([key, what]) => key.length + 1 + what.length, width === undefined ? undefined : width - logoWidth - 2)
-		.map(([key, what]) => `${paint("accent", key)} ${paint("muted", what)}`)
-		.join(paint("muted", " · "));
+	const indent = " ";
+	const budget = width === undefined ? undefined : width - indent.length;
 
+	const subtitle = `${paint("dim", SUBTITLE)}${paint("muted", " · ")}${paint("dim", `v${input.version}`)}`;
 	const context = [
 		input.model ? `${paint("muted", "model")} ${input.model}` : undefined,
 		`${paint("muted", "mode")} ${input.mode}`,
@@ -141,12 +151,21 @@ export function bannerLines(
 	]
 		.filter(Boolean)
 		.join(paint("muted", " · "));
-
+	// Narrow terminals drop whole trailing hints (the /hotkeys pointer is
+	// first, so it always survives) instead of cutting one mid-word.
+	const hints = fitItems(HINTS, ([key, what]) => key.length + 1 + what.length, budget)
+		.map(([key, what]) => `${paint("accent", key)} ${paint("muted", what)}`)
+		.join(paint("muted", " · "));
 	const sections = sectionSummary(input.sections ?? [], paint);
 
-	const text = [`${title}  ${subtitle}`, context, hints, ...(sections ? [sections] : [])];
-	const blankArt = " ".repeat(logoWidth);
-	const assembled = text.map((line, i) => `${paint("accent", LOGO_LINES[i] ?? blankArt)}  ${line}`);
+	const textColumn = [subtitle, context, hints, ...(sections ? [sections] : [])].map((line) => `${indent}${line}`);
+
+	// The wordmark is a fixed-width block; if it cannot fit, show a text title
+	// rather than let truncateLine shear the glyphs mid-row.
+	const head =
+		width !== undefined && width < WORDMARK_WIDTH ? [paint("accent", NAME)] : WORDMARK.map((row) => paint("accent", row));
+
+	const assembled = [...head, ...textColumn];
 	return width === undefined ? assembled : assembled.map((line) => truncateLine(line, width));
 }
 

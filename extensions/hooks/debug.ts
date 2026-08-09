@@ -8,7 +8,7 @@
 
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { pincerStateDir } from "../lib/paths.ts";
+import { oneCodeStateDir } from "../lib/paths.ts";
 
 export interface HookLogEntry {
 	ts: string;
@@ -40,7 +40,7 @@ export function formatDebugLine(entry: Omit<HookLogEntry, "ts" | "sessionId">): 
 }
 
 export function hooksLogPath(): string {
-	return join(pincerStateDir(), "hooks", "hooks-decisions.jsonl");
+	return join(oneCodeStateDir(), "hooks", "hooks-decisions.jsonl");
 }
 
 export function appendHookLog(entry: HookLogEntry, file = hooksLogPath()): void {

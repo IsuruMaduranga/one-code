@@ -80,7 +80,7 @@ child.stdout.on("data", (chunk) => {
 			send({ type: "extension_ui_response", id: event.id, value: undefined });
 		}
 
-		const match = line.match(/[/\\][^"\\ ]*\.pincer[/\\]plans[/\\][a-z]+-[a-z]+-[a-z]+\.md/);
+		const match = line.match(/[/\\][^"\\ ]*\.one-code[/\\]plans[/\\][a-z]+-[a-z]+-[a-z]+\.md/);
 		if (match && !planFilePath) planFilePath = match[0];
 
 		if (event.type === "agent_end") finish();

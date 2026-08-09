@@ -92,7 +92,7 @@ export default function bashExtension(pi: ExtensionAPI) {
 		promptGuidelines: base.promptGuidelines,
 		executionMode: base.executionMode,
 		...(() => {
-			// `● Bash(cmd)` / elbow-indented output, like every other pincer tool.
+			// `● Bash(cmd)` / elbow-indented output, like every other One Code tool.
 			// Not passing base.renderCall also drops its timer state, so the
 			// misleading "Took Ns" that counted permission-prompt wait disappears.
 			const wrapped = ccWrapBuiltinRenderers<{ command?: string }>("Bash", base, { title: (a) => a?.command });

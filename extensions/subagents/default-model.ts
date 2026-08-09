@@ -5,19 +5,19 @@
  *
  * - `CLAUDE_CODE_SUBAGENT_MODEL` — Claude Code's env var. Honored from the real
  *   environment, and from the `env` block of *user and managed* settings files
- *   (Claude Code applies settings `env` to the process; pincer does not, so this
+ *   (Claude Code applies settings `env` to the process; One Code does not, so this
  *   reads the one variable it needs). Project-scope settings are deliberately
  *   not read: both project files live in the repository, and a checked-in `env`
  *   block must not get to pick which provider receives subagent tasks — the
  *   same containment rule as `autoMode` config.
- * - `subagentModel` — pincer's own top-level setting, same shape as
+ * - `subagentModel` — One Code's own top-level setting, same shape as
  *   `autoMode.classifierModel`. Wins over the env var when both are set,
  *   because it is the more specific statement of intent.
  *
  * The env var additionally applies only to Claude-family sessions (see
  * `applicableSubagentDefault`): it is Claude Code's knob, and its typical
  * values ("sonnet") were written for Anthropic models. On any other provider
- * it is ignored; pincer's automatic same-provider role profile then chooses the
+ * it is ignored; One Code's automatic same-provider role profile then chooses the
  * default unless the user overrides it with `subagentModel`.
  *
  * The value is a spec, not a model: "sonnet", "inherit", or "provider/id" all
@@ -77,7 +77,7 @@ export function loadSubagentDefault(home: string, env: NodeJS.ProcessEnv = proce
 /**
  * The configured default that actually applies to this session.
  *
- * `subagentModel` is pincer's own setting — the user told *this* harness what
+ * `subagentModel` is One Code's own setting — the user told *this* harness what
  * subagents run on, so it applies on any provider. `CLAUDE_CODE_SUBAGENT_MODEL`
  * was written for Claude Code, almost always as an Anthropic alias ("sonnet"),
  * so it applies only when the session is already on a Claude model — borrowing

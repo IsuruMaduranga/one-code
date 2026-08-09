@@ -290,12 +290,12 @@ per command, is now built — see [`auto-mode.md`](auto-mode.md).)
 ## Tier-aware tool surface: search built-ins for mid/low only (unreviewed)
 
 **Decision.** pi registers `grep`/`find`/`ls` but never activates them (only
-`read`/`bash`/`edit`/`write` are active by default — findings §2). pincer
+`read`/`bash`/`edit`/`write` are active by default — findings §2). One Code
 activates the three search tools at session start (and on model change) for
 the **mid/low** prompt tiers only; **frontier keeps pi's lean default**
 (`extensions/search-tools/`).
 
-**Why.** Every captured pincer payload carried no search tools while the
+**Why.** Every captured One Code payload carried no search tools while the
 mid/low tier prompts explicitly steer to "the search tools" — instructions
 pointing at tools that did not exist in the request, a weak-model trap.
 Frontier is deliberately different: Claude Code v2.1.81 ships no
@@ -355,7 +355,7 @@ lose the existing `bash` permission rules for free.
 
 ## Deferral is frontier-only; steering follows CC's channels (unreviewed)
 
-**Decision.** Three changes from the live CC-vs-pincer capture comparison
+**Decision.** Three changes from the live CC-vs-One Code capture comparison
 (findings §14): (a) tool deferral (ToolSearch) applies only on the frontier
 tier — mid/low get every tool eagerly and no deferred-tools reminder, with a
 mid-session model change flipping the surface both ways; (b) every
@@ -373,18 +373,18 @@ fork-confabulation family). The instructions field is how servers teach the
 model their tools; dropping it made that impossible.
 
 **Rejected.** Deferring for all tiers with better reminder wording (the
-indirection itself is the cost); a pincer-specific notification format
+indirection itself is the cost); a One Code-specific notification format
 (CC's wording is field-tested against exactly this hazard).
 
 ## Skills and CLAUDE.md stay in the system prompt (unreviewed)
 
 **Decision.** CC injects the skills listing and CLAUDE.md contents as
 first-user-message reminders, keeping its system prompt project-independent;
-pincer keeps them in the system prompt (pi's builder composes them there)
+One Code keeps them in the system prompt (pi's builder composes them there)
 and this stays as is.
 
 **Why.** The cache argument doesn't apply: provider prompt caches key on the
-per-conversation prefix, and pincer's system prompt is already byte-stable
+per-conversation prefix, and One Code's system prompt is already byte-stable
 within a session — cross-session variation costs nothing. Relocation would
 touch the prompt composer for parity with no measurable benefit; CC's
 placement likely serves their multi-surface infra, not model steering.

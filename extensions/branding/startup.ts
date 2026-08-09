@@ -97,7 +97,7 @@ export function themeNames(packageThemesDir: string): string[] {
 }
 
 /**
- * Whether pincer should default thinking blocks to collapsed (the Claude Code
+ * Whether One Code should default thinking blocks to collapsed (the Claude Code
  * look: a one-line label, expanded on demand). Only when the user has never
  * chosen: a `hideThinkingBlock` key in pi's global settings — written by
  * ctrl+t, /settings, or a previous run of this default — is their decision and

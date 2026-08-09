@@ -1,7 +1,7 @@
 {
-	"name": "pincer-agent",
+	"name": "one-code",
 	"version": "0.1.0",
-	"description": "pincer \u2014 the Claude Code experience on the pi harness: ported system prompt, Claude-Code-format permissions, .claude/ compatibility, ToolSearch-style deferred tools, and system-reminder steering",
+	"description": "One Code \u2014 the Claude Code experience on the pi harness: ported system prompt, Claude-Code-format permissions, .claude/ compatibility, ToolSearch-style deferred tools, and system-reminder steering",
 	"keywords": [
 		"pi",
 		"pi-package",
@@ -17,11 +17,11 @@
 	},
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/IsuruMaduranga/pincer-agent.git"
+		"url": "git+https://github.com/IsuruMaduranga/one-code.git"
 	},
-	"homepage": "https://github.com/IsuruMaduranga/pincer-agent#readme",
+	"homepage": "https://github.com/IsuruMaduranga/one-code#readme",
 	"bugs": {
-		"url": "https://github.com/IsuruMaduranga/pincer-agent/issues"
+		"url": "https://github.com/IsuruMaduranga/one-code/issues"
 	},
 	"type": "module",
 	"pi": {

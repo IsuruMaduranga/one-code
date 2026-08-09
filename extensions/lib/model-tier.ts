@@ -2,7 +2,7 @@
  * Which system-prompt register the active model gets. Claude Code ships a
  * capability-tiered prompt — a terse one for frontier models, a much longer,
  * more explicit one for smaller models (Anthropic removed 80%+ of the prompt for
- * Claude-5-gen models with no measured loss). pincer serves every provider, so
+ * Claude-5-gen models with no measured loss). One Code serves every provider, so
  * its non-frontier audience is dominated by models weaker than Haiku; a single
  * lean prompt under-instructs them. This module maps a model to one of three
  * registers; `extensions/system-prompt` picks the prompt text from the result.

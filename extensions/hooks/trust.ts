@@ -2,7 +2,7 @@
  * Project-hook consent. Hooks in a repo's `.claude/settings.json` are
  * arbitrary code execution the moment the repo is opened, so they run only
  * after the user approves them — once per configuration: approval is keyed to
- * a hash of the project+local hook config and persisted under `~/.pincer`, so
+ * a hash of the project+local hook config and persisted under `~/.one-code`, so
  * it survives restarts but any change to the hooks re-prompts (Claude Code's
  * own hooks-review behaviour). User, managed, and plugin hooks never prompt
  * (installing a plugin was the consent).
@@ -18,7 +18,7 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { pincerStateDir } from "../lib/paths.ts";
+import { oneCodeStateDir } from "../lib/paths.ts";
 import type { HooksSource } from "./settings.ts";
 
 interface ApprovalStore {
@@ -27,7 +27,7 @@ interface ApprovalStore {
 }
 
 export function approvalStorePath(): string {
-	return join(pincerStateDir(), "hooks", "project-approvals.json");
+	return join(oneCodeStateDir(), "hooks", "project-approvals.json");
 }
 
 /** Key order must not change the hash — two spellings of one config are one consent. */

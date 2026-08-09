@@ -10,7 +10,7 @@
  * `{ name, keywords? }` while extensions are loading (before session_start).
  */
 
-export const DEFER_CHANNEL = "pincer:defer-tool";
+export const DEFER_CHANNEL = "one-code:defer-tool";
 
 export interface DeferRequest {
 	name: string;

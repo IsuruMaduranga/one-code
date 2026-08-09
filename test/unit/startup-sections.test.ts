@@ -13,7 +13,7 @@ import {
 
 const tmp: string[] = [];
 function scratch(): string {
-	const dir = mkdtempSync(join(os.tmpdir(), "pincer-startup-"));
+	const dir = mkdtempSync(join(os.tmpdir(), "one-code-startup-"));
 	tmp.push(dir);
 	return dir;
 }
@@ -59,10 +59,10 @@ describe("skillNames", () => {
 describe("themeNames", () => {
 	it("lists bundled theme json names", () => {
 		const dir = scratch();
-		writeFileSync(join(dir, "pincer.json"), "{}");
-		writeFileSync(join(dir, "pincer-light.json"), "{}");
+		writeFileSync(join(dir, "one-code.json"), "{}");
+		writeFileSync(join(dir, "one-code-light.json"), "{}");
 		writeFileSync(join(dir, "README.md"), "not a theme");
-		expect(themeNames(dir)).toEqual(["pincer", "pincer-light"]);
+		expect(themeNames(dir)).toEqual(["one-code", "one-code-light"]);
 	});
 });
 
@@ -97,7 +97,7 @@ describe("collectStartupSections", () => {
 		const cwd = scratch();
 		const home = scratch();
 		const themes = scratch();
-		writeFileSync(join(themes, "pincer.json"), "{}");
-		expect(collectStartupSections(cwd, home, themes)).toEqual([{ label: "themes", items: ["pincer"] }]);
+		writeFileSync(join(themes, "one-code.json"), "{}");
+		expect(collectStartupSections(cwd, home, themes)).toEqual([{ label: "themes", items: ["one-code"] }]);
 	});
 });

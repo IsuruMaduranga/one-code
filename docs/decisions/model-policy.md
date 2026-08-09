@@ -69,7 +69,7 @@ Gateways require more care:
 
 - OpenRouter's `creator/model` prefix identifies a model namespace, **not the
   serving inference provider**; automatic switching stays in that namespace and
-  reuses its direct-family profile, but pincer cannot claim processor
+  reuses its direct-family profile, but One Code cannot claim processor
   containment because pi exposes none of OpenRouter's provider-routing options
   ([official routing semantics](https://openrouter.ai/docs/guides/routing/provider-selection)).
 - Vercel likewise separates creator IDs from serving providers; profile reuse

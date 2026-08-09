@@ -7,7 +7,7 @@
  *
  * The shared loader uses `noExtensions: true`, which structurally blocks
  * recursive orchestration (no workflow tool inside subagents) — and would
- * also drop pincer's permission gate, so `permissionGateFactory` is passed
+ * also drop One Code's permission gate, so `permissionGateFactory` is passed
  * via `extensionFactories`, which DefaultResourceLoader always loads.
  */
 

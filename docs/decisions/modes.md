@@ -8,13 +8,13 @@ Claude Code exposes reasoning effort as a Faster→Smarter slider whose last sto
 past `max` and behind a divider, is `ultracode` — subtitled "xhigh + workflows".
 The divider is the whole point: every other stop buys more thinking, while that
 one also changes *how the model works*, arming multi-agent orchestration on every
-turn instead of the single turn the keyword arms. pincer now has the same
+turn instead of the single turn the keyword arms. One Code now has the same
 command, and the same two-tier opt-in: the keyword in a message for one turn
 (`extensions/workflow`), `/effort ultracode` for a standing mode that persists
 until switched off.
 
 The mode is implemented the way the permissions extension implements plan mode —
-an `every-turn` reminder on `pincer:system-reminder` under a key, withdrawn with
+an `every-turn` reminder on `one-code:system-reminder` under a key, withdrawn with
 `{remove: true}` when leaving — plus `ctx.ui.setStatus` for a `✦ ultracode`
 footer indicator. Its standing text is deliberately stronger than the keyword's
 one-turn nudge: orchestrate substantive work *by default* and verify
@@ -123,7 +123,7 @@ to only `/permissions`.
 ## Plan mode is file-based, like current Claude Code
 
 Claude Code moved plan mode from "pass the plan as an ExitPlanMode parameter"
-to a **plan file**: entering plan mode allocates `~/.pincer/plans/<slug>.md`,
+to a **plan file**: entering plan mode allocates `~/.one-code/plans/<slug>.md`,
 a per-turn system message names it as the one writable path and prescribes an
 explore→design→review→write→approve workflow, and ExitPlanMode takes no
 parameters — it reads the file. Observed live in Claude Code and mirrored here: the plan
@@ -136,9 +136,9 @@ covers all three entry points (tool, ctrl+q, `defaultMode: "plan"`) and runs
 after every extension's `session_start`, so restoring the branch's previous
 path (a `plan-mode-file` custom entry, read via `getBranch()` like tasks/todo)
 can never race a fresh allocation. The path crosses to the matcher over a new
-`pincer:plan-file-path` channel, mirroring `pincer:set-permission-mode` in the
+`one-code:plan-file-path` channel, mirroring `one-code:set-permission-mode` in the
 other direction; `plan-mode` learns the mode from the existing
-`pincer:permission-status` channel rather than a shared module (jiti).
+`one-code:permission-status` channel rather than a shared module (jiti).
 
 **The reminder key moved.** `setMode` no longer emits plan mode's reminder;
 `plan-mode` re-emits under the same `"permission-mode"` key every turn, with
@@ -148,12 +148,12 @@ the file appears. Every-turn re-emits replace by key, so nothing accumulates.
 **The carve-out allows outright.** In plan mode a write whose subject (or
 symlink-resolved subject) is the plan file returns `allow`, and everything
 else keeps denying. Outside plan mode the file has no special status, matching
-Claude Code. Deny rules still beat the carve-out. (`.pincer` itself is a
-protected dir like `.claude`; `.pincer/plans` is excepted as working space —
+Claude Code. Deny rules still beat the carve-out. (`.one-code` itself is a
+protected dir like `.claude`; `.one-code/plans` is excepted as working space —
 plan documents are rendered to the user, never executed.)
 
 **Slug fidelity note.** Claude Code's real slugs start with the user's opening
-words plus two random words (`we-are-going-to-async-turtle.md`); pincer uses
+words plus two random words (`we-are-going-to-async-turtle.md`); One Code uses
 three random words. Deriving from the prompt was skipped — the slug is
 allocated before any user text is guaranteed to exist (ctrl+q, defaultMode).
 

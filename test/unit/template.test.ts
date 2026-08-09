@@ -20,7 +20,7 @@ const TIERS: PromptTier[] = ["frontier", "mid", "low"];
 describe("buildClaudeCodeSystemPrompt", () => {
 	it("contains the adapted identity and core sections", () => {
 		const prompt = buildClaudeCodeSystemPrompt(baseOptions, env, "frontier");
-		expect(prompt).toContain("You are pincer");
+		expect(prompt).toContain("You are One Code");
 		expect(prompt).toContain("# Harness");
 		expect(prompt).toContain("<system-reminder>");
 		expect(prompt).toContain("# Delivering work");

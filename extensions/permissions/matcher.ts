@@ -15,7 +15,7 @@ export type PermissionMode = "default" | "acceptEdits" | "plan" | "bypassPermiss
 /** "classify" is auto mode's outcome: hand the call to the approval classifier. */
 export type PermissionDecision = "allow" | "deny" | "ask" | "classify";
 
-/** Claude Code tool name (lowercased) → pincer tool name. */
+/** Claude Code tool name (lowercased) → One Code tool name. */
 const CC_TOOL_NAMES: Record<string, string> = {
 	bash: "bash",
 	read: "read",
@@ -62,14 +62,14 @@ export function normalizeToolName(name: string): string {
 }
 
 /**
- * Every Claude Code-style spelling that maps to this pincer tool name — the
+ * Every Claude Code-style spelling that maps to this One Code tool name — the
  * inverse of CC_TOOL_NAMES, used by extensions/hooks to test CC hook matchers
- * ("Glob", "Task", …) against pincer tool names. Extending CC_TOOL_NAMES for
+ * ("Glob", "Task", …) against One Code tool names. Extending CC_TOOL_NAMES for
  * a new tool keeps hook matching current automatically.
  */
-export function ccAliasesForTool(pincerName: string): string[] {
+export function ccAliasesForTool(nativeName: string): string[] {
 	return Object.entries(CC_TOOL_NAMES)
-		.filter(([, mapped]) => mapped === pincerName)
+		.filter(([, mapped]) => mapped === nativeName)
 		.map(([alias]) => alias);
 }
 
@@ -373,7 +373,7 @@ export function decide(params: DecideInput): Decision {
 
 	const tier = toolTier(toolName);
 	if (mode === "plan" && tier !== "safe" && !AUTO_ALLOWED_TOOLS.has(normalizeToolName(toolName))) {
-		// Plan mode's one writable file (~/.pincer/plans/<slug>.md, which
+		// Plan mode's one writable file (~/.one-code/plans/<slug>.md, which
 		// protected-paths already excepts as working space).
 		const planFile = params.planFilePath;
 		if (planFile && isWritingTool(normalizeToolName(toolName)) && subject) {

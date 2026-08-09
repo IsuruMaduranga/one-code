@@ -363,7 +363,7 @@ describe("applicableSubagentDefault", () => {
 	const setting = { spec: "openai/gpt-5-mini", source: "subagentModel setting" } as const;
 	const envVar = { spec: "sonnet", source: "CLAUDE_CODE_SUBAGENT_MODEL" } as const;
 
-	it("applies pincer's own setting on any provider", () => {
+	it("applies One Code's own setting on any provider", () => {
 		expect(applicableSubagentDefault(setting, openai[0])).toBe(setting);
 		expect(applicableSubagentDefault(setting, anthropic[0])).toBe(setting);
 	});

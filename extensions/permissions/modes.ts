@@ -40,12 +40,26 @@ export function shortModelName(id: string): string {
 }
 
 /**
+ * The key that cycles permission modes. Claude Code cycles on shift+tab and
+ * says so in this footer; pi reserves shift+tab for the effort dial, so One Code
+ * cycles on ctrl+q (see docs/decisions/modes.md) and the hint names that key.
+ */
+export const CYCLE_KEY_HINT = "ctrl+q to cycle";
+
+/**
  * The footer badge, with auto mode naming the model screening the calls. That
  * model reads the user's prompts and their CLAUDE.md, so which one it is belongs
  * on screen rather than buried in a command — and before the first call settles
- * it, saying nothing is more honest than guessing.
+ * it, saying nothing is more honest than guessing. Ends with the cycle-key hint,
+ * the way Claude Code's footer does, so the shortcut sits next to the state it
+ * changes.
  */
 export function modeBadge(mode: PermissionMode, opts?: { paused?: boolean; classifierModel?: string }): string {
+	const base = badgeBase(mode, opts);
+	return `${base} (${CYCLE_KEY_HINT})`;
+}
+
+function badgeBase(mode: PermissionMode, opts?: { paused?: boolean; classifierModel?: string }): string {
 	if (mode !== "auto") return MODE_BADGES[mode];
 	const suffix = opts?.classifierModel ? ` · ${shortModelName(opts.classifierModel)}` : "";
 	return opts?.paused ? `⏸ auto mode paused${suffix}` : `${MODE_BADGES.auto}${suffix}`;
@@ -56,7 +70,7 @@ export function modeBadge(mode: PermissionMode, opts?: { paused?: boolean; class
  * startup banner can show them live. jiti gives each extension its own module
  * instance, so this goes over `pi.events` rather than shared state.
  */
-export const PERMISSION_STATUS_CHANNEL = "pincer:permission-status";
+export const PERMISSION_STATUS_CHANNEL = "one-code:permission-status";
 
 export interface PermissionStatus {
 	mode: string;

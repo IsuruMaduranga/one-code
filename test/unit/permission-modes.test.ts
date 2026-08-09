@@ -57,27 +57,30 @@ describe("MODE_BADGES", () => {
 });
 
 describe("modeBadge", () => {
-	it("leaves non-auto modes as their plain badge", () => {
-		expect(modeBadge("plan", { paused: false })).toBe(MODE_BADGES.plan);
-		expect(modeBadge("acceptEdits", {})).toBe(MODE_BADGES.acceptEdits);
+	const HINT = " (ctrl+q to cycle)";
+
+	it("ends every badge with the cycle-key hint", () => {
+		expect(modeBadge("default", {})).toBe(`${MODE_BADGES.default}${HINT}`);
+		expect(modeBadge("plan", { paused: false })).toBe(`${MODE_BADGES.plan}${HINT}`);
+		expect(modeBadge("acceptEdits", {})).toBe(`${MODE_BADGES.acceptEdits}${HINT}`);
 	});
 
 	it("names the classifier model beside auto mode", () => {
 		// The model reads the user's prompts and CLAUDE.md, so which one it is
 		// belongs on screen rather than buried in a command.
-		expect(modeBadge("auto", { classifierModel: "claude-haiku-4-5" })).toBe("⏵⏵ auto mode on · haiku-4-5");
+		expect(modeBadge("auto", { classifierModel: "claude-haiku-4-5" })).toBe(`⏵⏵ auto mode on · haiku-4-5${HINT}`);
 	});
 
 	it("says nothing about the model before one is settled", () => {
-		expect(modeBadge("auto", {})).toBe(MODE_BADGES.auto);
+		expect(modeBadge("auto", {})).toBe(`${MODE_BADGES.auto}${HINT}`);
 	});
 
 	it("keeps the model visible while paused", () => {
-		expect(modeBadge("auto", { paused: true, classifierModel: "gpt-5-mini" })).toBe("⏸ auto mode paused · 5-mini");
+		expect(modeBadge("auto", { paused: true, classifierModel: "gpt-5-mini" })).toBe(`⏸ auto mode paused · 5-mini${HINT}`);
 	});
 
 	it("only shows paused for auto mode", () => {
-		expect(modeBadge("default", { paused: true })).toBe(MODE_BADGES.default);
+		expect(modeBadge("default", { paused: true })).toBe(`${MODE_BADGES.default}${HINT}`);
 	});
 });
 

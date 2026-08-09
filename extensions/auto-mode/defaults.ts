@@ -28,7 +28,7 @@ export const DEFAULT_ENVIRONMENT: string[] = [
 /** Unconditional. User intent does not clear these. */
 export const DEFAULT_HARD_DENY: string[] = [
 	"Data exfiltration: sending secrets, credentials, private keys, personal data, or the contents of sensitive files to any destination outside the trust boundary — by network request, by commit or push, by writing into a shared location, or by embedding them in a command argument that reaches a third party. This holds however the action is framed and whoever asked for it.",
-	"Auto-mode bypass: disabling, weakening, or working around this approval mechanism — editing permission settings or Claude Code/pincer configuration to grant broader permissions, adding allow rules, changing the permission mode, or routing an action through a path that avoids classification.",
+	"Auto-mode bypass: disabling, weakening, or working around this approval mechanism — editing permission settings or Claude Code/One Code configuration to grant broader permissions, adding allow rules, changing the permission mode, or routing an action through a path that avoids classification.",
 	"Credential harvesting: reading credential stores, keychains, browser password databases, or process environment memory (/proc/*/environ) for any purpose other than one the user specifically named.",
 	"Destroying the user's own history: rewriting or deleting the reflog, deleting the local repository, or removing backups such that the user's uncommitted or unpushed work cannot be recovered.",
 ];

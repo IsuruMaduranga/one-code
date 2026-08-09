@@ -2,7 +2,7 @@
  * Mid tier — other Anthropic models (Haiku, Sonnet < 5, Opus 4.1–4.7) and
  * non-Anthropic capable-but-not-small models. The verbose register, adapted from
  * Claude Code's Haiku prompt: the behavioural guidance that frontier models infer
- * is spelled out explicitly. pincer-branded; Anthropic-hosted specifics (/help,
+ * is spelled out explicitly. One Code-branded; Anthropic-hosted specifics (/help,
  * feedback URL, artifacts) dropped. Uses the long memory spec.
  */
 

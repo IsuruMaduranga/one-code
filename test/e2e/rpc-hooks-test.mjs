@@ -50,7 +50,7 @@ function runScenario({ name, workdir, approve, stateDir }) {
 		const child = spawn("pi", ["--mode", "rpc", "--no-session"], {
 			cwd: workdir,
 			stdio: ["pipe", "pipe", "inherit"],
-			env: { ...process.env, PINCER_STATE_DIR: stateDir },
+			env: { ...process.env, ONE_CODE_STATE_DIR: stateDir },
 		});
 		const send = (obj) => child.stdin.write(`${JSON.stringify(obj)}\n`);
 

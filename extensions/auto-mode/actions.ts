@@ -17,7 +17,7 @@
  * path auto mode exists to close.
  */
 
-export const SUBAGENT_ACTIONS_CHANNEL = "pincer:subagent-actions";
+export const SUBAGENT_ACTIONS_CHANNEL = "one-code:subagent-actions";
 
 export interface ChildAction {
 	toolName: string;

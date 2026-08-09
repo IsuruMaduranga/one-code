@@ -80,6 +80,34 @@ trademark law and the guidelines themselves permit. The fidelity references in
 `tools/` and `payload.json` are technical reference data, not branding, and
 are untouched.
 
+## Rebrand: One Code
+
+What changed (2026-08-09): brand **pincer** → **One Code**; npm package
+`pincer-agent` → **`one-code`**. Reason: plainer, more memorable name. Rejected
+alternatives: `pi-code` (taken on npm), `onecode` (taken); `one-code` was free
+and mirrors `claude-code`'s hyphenated npm style. The banner wordmark was
+redrawn as a stacked ANSI-Shadow "ONE" over "CODE" (narrower than the previous
+mark, so it never shears on standard-width terminals — verified live via
+`test/e2e/tui-capture.sh`).
+
+Followed the same surface as the pincer rebrand: banner `NAME`/title/wordmark,
+system-prompt identity ("You are One Code"), MCP client name, `web_fetch`
+User-Agent, themes (`pincer`/`pincer-light` → `one-code`/`one-code-light` —
+users with the old theme selected must re-select), and event channels
+(`pincer:*` → `one-code:*`, locked pre-publish since the channel names are a
+third-party contract). This pass went further than the pincer one and also
+renamed the state directory `~/.pincer` → `~/.one-code`, the env var
+`PINCER_STATE_DIR` → `ONE_CODE_STATE_DIR`, and the internal `pincerStateDir()`
+helper → `oneCodeStateDir()`; existing users lose in-flight plans and hook
+approvals under the old dir, acceptable pre-publish. The GitHub repo was
+renamed `pincer-agent` → `one-code` to match (GitHub keeps a redirect from the
+old path).
+
+What deliberately stays: every *descriptive* "the Claude Code experience"
+reference (nominative use), and the historical records above (the plan
+snapshot, the `pi-claude-code → pincer` history) — rewriting them would falsify
+the record.
+
 ## Startup listing: quietStartup + banner sections
 
 pi's startup resource listing has no per-section switch, and its [Extensions]

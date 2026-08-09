@@ -163,7 +163,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 
 	/** Hidden custom message the model sees as context, CC's additionalContext. */
 	const injectContext = (text: string, midLoop: boolean) => {
-		const message = { customType: "pincer:hook-context", content: `<hook-additional-context>\n${text}\n</hook-additional-context>`, display: false };
+		const message = { customType: "one-code:hook-context", content: `<hook-additional-context>\n${text}\n</hook-additional-context>`, display: false };
 		try {
 			if (midLoop) pi.sendMessage(message, { deliverAs: "steer" });
 			else pi.sendMessage(message);
@@ -276,7 +276,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		try {
 			pi.sendMessage(
 				{
-					customType: "pincer:hook-stop",
+					customType: "one-code:hook-stop",
 					content: `Stop hook blocked stopping: ${outcome.block.reason}`,
 					display: false,
 				},

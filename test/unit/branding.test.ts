@@ -1,16 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { LOGO_LINES, bannerLines, sectionSummary, truncateLine } from "../../extensions/branding/index.ts";
+import { WORDMARK, WORDMARK_WIDTH, bannerLines, sectionSummary, truncateLine } from "../../extensions/branding/index.ts";
 import { shouldDefaultHideThinking } from "../../extensions/branding/startup.ts";
 
 // Identity paint keeps assertions about layout free of colour codes.
 const plain = (_color: string, text: string) => text;
+// The context line is the one carrying the mode; find it rather than hard-code
+// its index, which now shifts with the wordmark block height.
+const contextLine = (lines: string[]) => lines.find((l) => l.includes("mode ")) ?? "";
 
 describe("bannerLines", () => {
-	it("leads with the brand name and version", () => {
-		const [title] = bannerLines({ version: "0.1.0", cwd: "/p", mode: "default" }, plain);
-		expect(title).toContain("pincer");
-		expect(title).toContain("v0.1.0");
-		expect(title).toContain("the Claude Code experience, on the pi harness");
+	it("stacks the wordmark block above the tagline and version", () => {
+		const lines = bannerLines({ version: "0.1.0", cwd: "/p", mode: "default" }, plain);
+		expect(lines.slice(0, WORDMARK.length)).toEqual(WORDMARK);
+		const tagline = lines[WORDMARK.length];
+		expect(tagline).toContain("the Claude Code experience, on any model");
+		expect(tagline).toContain("v0.1.0");
+	});
+
+	it("all wordmark rows share one width, so the block is a clean rectangle", () => {
+		const widths = new Set(WORDMARK.map((row) => [...row].length));
+		expect(widths).toEqual(new Set([WORDMARK_WIDTH]));
 	});
 
 	it("keeps the hints to one curated line pointing at /hotkeys for the rest", () => {
@@ -33,16 +42,23 @@ describe("bannerLines", () => {
 
 	it("shows the model when known and always the mode", () => {
 		const lines = bannerLines({ version: "0.1.0", model: "gpt-5.5", cwd: "/p", mode: "acceptEdits" }, plain);
-		const context = lines[1];
+		const context = contextLine(lines);
 		expect(context).toContain("model gpt-5.5");
 		expect(context).toContain("mode acceptEdits");
 	});
 
 	it("omits the model line content when no model is resolved", () => {
 		const lines = bannerLines({ version: "0.1.0", cwd: "/p", mode: "default" }, plain);
-		const context = lines[1];
+		const context = contextLine(lines);
 		expect(context).not.toContain("model");
 		expect(context).toContain("default");
+	});
+
+	it("falls back to a text title below the wordmark width", () => {
+		const narrow = bannerLines({ version: "0.1.0", cwd: "/p", mode: "default" }, plain, WORDMARK_WIDTH - 1);
+		// No wordmark row survives; the head is the plain brand name.
+		expect(narrow.some((l) => WORDMARK.includes(l))).toBe(false);
+		expect(narrow[0]).toContain("One Code");
 	});
 
 	it("summarizes long sections to counts and keeps short ones by name", () => {
@@ -51,27 +67,16 @@ describe("bannerLines", () => {
 				{ label: "context", items: ["CLAUDE.md"] },
 				{ label: "skills", items: Array.from({ length: 12 }, (_v, i) => `skill-${i}`) },
 				{ label: "workflows", items: [] },
-				{ label: "themes", items: ["pincer", "pincer-light"] },
+				{ label: "themes", items: ["one-code", "one-code-light"] },
 			],
 			plain,
 		);
-		expect(summary).toBe("context CLAUDE.md · skills 12 · themes pincer, pincer-light");
+		expect(summary).toBe("context CLAUDE.md · skills 12 · themes one-code, one-code-light");
 	});
 
 	it("applies the paint function it is given", () => {
-		const [title] = bannerLines({ version: "0.1.0", cwd: "/p", mode: "default" }, (c, t) => `<${c}>${t}</${c}>`);
-		expect(title).toContain("<accent>pincer</accent>");
-	});
-
-	it("puts one equal-width logo row (or padding) before each text line, so the text column aligns", () => {
-		const lines = bannerLines({ version: "0.1.0", cwd: "/p", mode: "default" }, plain);
-		expect(lines.length).toBeGreaterThanOrEqual(LOGO_LINES.length);
-		const widths = new Set(LOGO_LINES.map((art) => [...art].length));
-		expect(widths.size).toBe(1);
-		const logoWidth = [...LOGO_LINES[0]].length;
-		for (const [i, line] of lines.entries()) {
-			expect(line.startsWith(`${LOGO_LINES[i] ?? " ".repeat(logoWidth)}  `)).toBe(true);
-		}
+		const [firstRow] = bannerLines({ version: "0.1.0", cwd: "/p", mode: "default" }, (c, t) => `<${c}>${t}</${c}>`);
+		expect(firstRow).toBe(`<accent>${WORDMARK[0]}</accent>`);
 	});
 });
 

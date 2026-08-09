@@ -49,7 +49,7 @@ import {
  * banner can show it when it differs from the session model (jiti isolates
  * module state, so this goes over `pi.events`).
  */
-export const SUBAGENT_STATUS_CHANNEL = "pincer:subagent-status";
+export const SUBAGENT_STATUS_CHANNEL = "one-code:subagent-status";
 
 export interface SubagentStatus {
 	/** `provider/id` subagents will run on. Unset only when nothing resolves at all. */

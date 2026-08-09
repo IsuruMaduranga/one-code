@@ -40,7 +40,7 @@ Decisions that shaped the wiring:
   PreToolUse/UserPromptSubmit only.
 - **Trust**: project/local hooks are arbitrary code execution, so they run
   after a once-per-config consent (sha256 of the canonicalised project hook
-  config, persisted in `~/.pincer/hooks/project-approvals.json`; a decline
+  config, persisted in `~/.one-code/hooks/project-approvals.json`; a decline
   sticks for the session only). pi's own project-trust store was deliberately
   not reused — it never triggers for repos that have only `.claude/*` files.
   Plugin hooks are user scope: installing the plugin was the consent.

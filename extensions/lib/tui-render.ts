@@ -1,5 +1,5 @@
 /**
- * Compact tool rendering shared by every pincer tool — the Claude Code look:
+ * Compact tool rendering shared by every One Code tool — the Claude Code look:
  *
  *   ● Label(one-line arg summary)
  *     ⎿  first lines of the result

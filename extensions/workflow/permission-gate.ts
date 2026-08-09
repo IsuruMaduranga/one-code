@@ -1,7 +1,7 @@
 /**
  * Permission gate for workflow subagents (pure).
  *
- * Workflow subagent sessions are built with `noExtensions: true`, so pincer's
+ * Workflow subagent sessions are built with `noExtensions: true`, so One Code's
  * own permissions extension never loads inside them — without this gate every
  * subagent bash/edit/write would run unchecked. `DefaultResourceLoader` always
  * loads explicitly passed `extensionFactories` (even under noExtensions),

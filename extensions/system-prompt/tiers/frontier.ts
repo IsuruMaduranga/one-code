@@ -1,6 +1,6 @@
 /**
  * Frontier tier — Anthropic Opus/Fable ≥ 4.8 and Sonnet ≥ 5. The lean register:
- * the same sections pincer shipped before tiering, so the built prompt is
+ * the same sections One Code shipped before tiering, so the built prompt is
  * byte-identical to the pre-tiering output for these models (regression guard in
  * `test/unit/template.test.ts`). Splitting `IDENTITY`/`SECURITY` into two
  * sections joins back to the old combined constant since sections join on "\n\n".

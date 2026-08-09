@@ -154,7 +154,7 @@ plus JSONL re-parsing is pure waste when the SDK hands back typed events and
 (`noExtensions: true`) are built per run and shared across every agent —
 building the loader per agent re-runs every installed extension factory, and
 `noExtensions` also structurally blocks recursive orchestration. The sharp
-edge found during design: `noExtensions` drops pincer's permissions extension
+edge found during design: `noExtensions` drops One Code's permissions extension
 inside subagents too, so every bash/edit would run ungated. The fix relies on
 `DefaultResourceLoader` always loading explicitly passed `extensionFactories`
 even under `noExtensions`: `permission-gate.ts` reattaches a fail-closed inline
@@ -181,7 +181,7 @@ awaiting precisely so those indexes are deterministic under concurrency.
 
 Opt-in works the way Claude Code's does, which is a system-reminder and not
 model intuition: `pi.on("input")` matches `\bultracode\b` and emits a
-next-turn reminder on `pincer:system-reminder` ("The user included the keyword
+next-turn reminder on `one-code:system-reminder` ("The user included the keyword
 … use the workflow tool"), while the tool description carries the standing
 gate ("ONLY call when the user has explicitly opted in… a task that would
 merely benefit from a workflow does not count"). The description itself is

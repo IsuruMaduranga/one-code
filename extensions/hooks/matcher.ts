@@ -1,15 +1,15 @@
 /**
  * Hook matcher evaluation (pure). Claude Code matchers are anchored,
  * case-insensitive regexes over CC tool names ("Bash", "Edit|Write",
- * "mcp__server__.*"); pincer tools are snake_case, so every candidate
- * spelling of a tool — pincer name, canonical CC name, and the alias table
+ * "mcp__server__.*"); One Code tools are snake_case, so every candidate
+ * spelling of a tool — native name, canonical CC name, and the alias table
  * from permissions/matcher.ts — is tested.
  */
 
 import { ccAliasesForTool } from "../permissions/matcher.ts";
 
 /**
- * Canonical Claude Code PascalCase name per pincer tool, for hook matchers
+ * Canonical Claude Code PascalCase name per One Code tool, for hook matchers
  * and the `tool_name` stdin field (CC hook scripts compare exact strings like
  * "Bash"). Tools with no CC counterpart pass through unchanged.
  */
@@ -44,14 +44,14 @@ const CC_CANONICAL: Record<string, string> = {
 	workflow: "Workflow",
 };
 
-export function ccToolName(pincerName: string): string {
-	if (pincerName.startsWith("mcp__")) return pincerName;
-	return CC_CANONICAL[pincerName] ?? pincerName;
+export function ccToolName(nativeName: string): string {
+	if (nativeName.startsWith("mcp__")) return nativeName;
+	return CC_CANONICAL[nativeName] ?? nativeName;
 }
 
 /** Every spelling a matcher may reasonably target for this tool. */
-export function toolMatchCandidates(pincerName: string): string[] {
-	return [...new Set([pincerName, ccToolName(pincerName), ...ccAliasesForTool(pincerName)])];
+export function toolMatchCandidates(nativeName: string): string[] {
+	return [...new Set([nativeName, ccToolName(nativeName), ...ccAliasesForTool(nativeName)])];
 }
 
 /**

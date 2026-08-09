@@ -25,7 +25,7 @@ const CACHE_TTL_MS = 15 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 30_000;
 /** Longer than the classifier's cap: the reader ingests whole pages. */
 const READER_TIMEOUT_MS = 60_000;
-const USER_AGENT = "pincer/0.1 (+https://github.com/earendil-works/pi)";
+const USER_AGENT = "one-code/0.1 (+https://github.com/IsuruMaduranga/one-code)";
 
 /**
  * Declared up front because pi infers a tool's `details` generic from the first

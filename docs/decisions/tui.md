@@ -21,7 +21,7 @@ model-facing boilerplate.
   (muted → success/error), a primary-arg heuristic for the call line
   (per-tool `title`/`result` overrides where the heuristic is wrong), and
   ANSI-aware width truncation on every line (pi-tui crashes on overwide
-  lines — findings §3). Every pincer-registered tool spreads it in; pi's
+  lines — findings §3). Every One Code-registered tool spreads it in; pi's
   built-ins (read/bash/edit/…) keep their own upstream renderers.
 - **Notifications render compact.** `task-notification`, `wakeup`,
   `subagent-message`, `subagent-result`, `workflow-result` get
@@ -93,7 +93,7 @@ thinking still read as answer narration. pi already has the exact mechanism
 Claude Code uses — `hideThinkingBlock` (persisted global setting, toggled by
 ctrl+t and /settings) collapses each thinking run to a one-line label, and
 `ctx.ui.setHiddenThinkingLabel()` is a public extension API for the label
-text — so pincer adopts it instead of building rendering of its own (assistant
+text — so One Code adopts it instead of building rendering of its own (assistant
 message rendering is not extension-replaceable anyway).
 
 - **`branding` defaults `hideThinkingBlock: true` exactly once**: only when

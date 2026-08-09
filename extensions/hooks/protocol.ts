@@ -1,8 +1,8 @@
 /**
  * Claude Code hook protocol (pure): the stdin payload shape, the stdout JSON
- * envelope, and the mapping from a finished hook run to what pincer should do
+ * envelope, and the mapping from a finished hook run to what One Code should do
  * about it. Envelope semantics follow Claude Code's hooks reference; the
- * fail-closed choices are pincer's own (see docs/decisions.md).
+ * fail-closed choices are One Code's own (see docs/decisions.md).
  */
 
 export type CcHookEvent =
@@ -72,7 +72,7 @@ export function parseEnvelope(stdout: string): HookEnvelope | undefined {
 	}
 }
 
-/** What one finished hook run asks pincer to do. */
+/** What one finished hook run asks One Code to do. */
 export interface HookOutcome {
 	block?: { reason: string };
 	updatedInput?: Record<string, unknown>;
@@ -139,7 +139,7 @@ export function interpretHookResult(event: CcHookEvent, run: FinishedRun): HookO
 		outcome.block ??= { reason: envelope.reason?.trim() || "Hook blocked the action" };
 	}
 	// "allow" is deliberately not handled: a hook cannot pre-approve anything —
-	// pincer's permission gate, safety floor, and classifier still run.
+	// One Code's permission gate, safety floor, and classifier still run.
 
 	if (specific?.updatedInput && typeof specific.updatedInput === "object") {
 		outcome.updatedInput = specific.updatedInput;

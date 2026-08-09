@@ -358,14 +358,14 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	});
 
 	// Mode-change requests from other extensions (e.g. plan-mode tools).
-	pi.events.on("pincer:set-permission-mode", (data) => {
+	pi.events.on("one-code:set-permission-mode", (data) => {
 		const requested = normalizePermissionMode((data as { mode?: unknown })?.mode);
 		if (requested) setMode(requested);
 	});
 
 	// The plan-mode extension announces the plan file (see PLAN_FILE_CHANNEL
 	// there); decide() then allows writes to that one path in plan mode.
-	pi.events.on("pincer:plan-file-path", (data) => {
+	pi.events.on("one-code:plan-file-path", (data) => {
 		const path = (data as { path?: unknown })?.path;
 		if (typeof path === "string" && path) planFilePath = path;
 	});

@@ -13,7 +13,7 @@ byte-identical across turns and provider prompt caching still pays off.
 
 ## System prompt tiered by model capability (2026-08-07)
 
-pincer shipped one system prompt to every model, written in the lean register.
+One Code shipped one system prompt to every model, written in the lean register.
 That register is a *frontier optimization*, not a neutral default: captured Claude
 Code payloads show CC tiers the prompt by model — Haiku gets ~29k chars of system
 prompt (a 51-line identity block, an explicit `# Doing tasks`, a `# Text output`
@@ -24,7 +24,7 @@ of CC's prompt for Claude-5-gen models with no measured loss. Opus 4.8 and Opus 
 prompts are near-identical, so the axis is **capability tier, not version**.
 
 For a package whose whole point is "runs on any provider," a single lean prompt is
-the wrong default: pincer's non-frontier audience is the long tail of local/cheap
+the wrong default: One Code's non-frontier audience is the long tail of local/cheap
 models *weaker than Haiku*, and the lean prompt under-instructs them (skills go
 unused — the exact concern that prompted this — no todo discipline, over/under-
 action). So the prompt is selected by a 3-way tier, resolved in
@@ -79,7 +79,7 @@ byte-stable per model across turns.
 
 **opencode was studied and its mechanism rejected.** It solves the same problem
 with per-model prompt files (`session/system.ts::provider()`) selected by raw
-`model.api.id` substring matching — the exact anti-pattern pincer avoids. We took
+`model.api.id` substring matching — the exact anti-pattern One Code avoids. We took
 its *content* (the low-tier scaffolding above is lifted from `default.txt`/
 `kimi.txt`) and its insight that decoding params are a separate per-model dial,
 not its selection logic.
@@ -94,5 +94,5 @@ keep this change prompt-only.
 **Related: a named agent keeps its own prompt.** `before_agent_start` returns
 early when `systemPromptOptions.customPrompt` is set, so a named
 `.claude/agents/*.md` agent (or a `--system-prompt` launch) keeps its own prompt
-instead of having it clobbered by the tiered pincer prompt — pi's own builder
+instead of having it clobbered by the tiered One Code prompt — pi's own builder
 already honours `customPrompt` verbatim.

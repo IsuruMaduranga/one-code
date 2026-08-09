@@ -1,5 +1,5 @@
 /**
- * Claude Code system prompt, adapted for pincer, selected by model tier.
+ * Claude Code system prompt, adapted for One Code, selected by model tier.
  *
  * The tier-specific section text lives in `tiers/` (one bundle per tier);
  * this module is the tier-agnostic composer — it places the dynamic blocks

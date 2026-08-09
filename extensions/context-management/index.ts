@@ -3,7 +3,7 @@
  *
  * Claude Code sends `context_management: { edits: [{ type: "clear_thinking_20251015",
  * keep: "all" }] }` on every request, which keeps long sessions from carrying
- * every past reasoning block. pi does not, so a long pincer session
+ * every past reasoning block. pi does not, so a long One Code session
  * accumulates more context than Claude Code would.
  *
  * Two things the parameter needs, both found empirically against the live API

@@ -111,7 +111,7 @@ the protected-path check:
 Claude Code gives every session a scratchpad
 (`<tmp>/claude-<uid>/<project-slug>/<session-id>/scratchpad`) via a system
 prompt section and lets it be used "generally without permission prompts";
-pincer had nothing, so temp files landed in `/tmp` or the project — and in
+One Code had nothing, so temp files landed in `/tmp` or the project — and in
 auto mode, `/tmp` writes are exactly the out-of-project pattern the classifier
 flags. Same failure family as the memory-dir block, fixed with the same
 mechanism:
@@ -142,11 +142,11 @@ wrote `notes.txt` into its own session scratchpad path, and the file was on
 disk — no prompt, correct slug and session id. Typecheck and 711 unit tests
 pass.
 
-## Own state, borrowed config: `.claude` is read-only, pincer writes to `~/.pincer`
+## Own state, borrowed config: `.claude` is read-only, One Code writes to `~/.one-code`
 
-pincer sat in a three-way namespace muddle: pi owns `~/.pi` (sessions,
+One Code sat in a three-way namespace muddle: pi owns `~/.pi` (sessions,
 models.json — harness plumbing, invisible, and untouchable without forking),
-`.claude` is Claude Code's directory, and pincer had started *generating*
+`.claude` is Claude Code's directory, and One Code had started *generating*
 state into the latter (plan files at first; memory was already there at
 `~/.claude/projects/<slug>/memory`). Reading `.claude` deeply is the product —
 "your Claude Code setup works on any model" is the pitch, so settings, skills,
@@ -157,14 +157,14 @@ without notice, and a user auditing "what did Claude Code do" finds artifacts
 it didn't make.
 
 The policy, in one line: **`.claude` is a read-only compat surface; everything
-pincer generates goes to `~/.pincer`.** `extensions/lib/paths.ts` centralises
+One Code generates goes to `~/.one-code`.** `extensions/lib/paths.ts` centralises
 both roots — `claudeConfigDir()` (honouring `CLAUDE_CONFIG_DIR`, which Claude
-Code itself supports and pincer previously ignored) and `pincerStateDir()`
-(honouring `PINCER_STATE_DIR`). Plan files moved to `~/.pincer/plans`
-immediately, while the feature was a day old. `.pincer` joined the protected
+Code itself supports and One Code previously ignored) and `oneCodeStateDir()`
+(honouring `ONE_CODE_STATE_DIR`). Plan files moved to `~/.one-code/plans`
+immediately, while the feature was a day old. `.one-code` joined the protected
 dirs (the gate's own namespace must be as guarded in its new home as in the
-old), with `.pincer/plans` excepted as working space. Deliberately *not* done:
-a pincer-native settings schema (no demand yet — compat reads suffice), and
+old), with `.one-code/plans` excepted as working space. Deliberately *not* done:
+a One Code-native settings schema (no demand yet — compat reads suffice), and
 the memory-dir migration, which has a real tradeoff (sharing memory with
 Claude Code on the same repo is arguably a feature) and waits on its own
 decision.

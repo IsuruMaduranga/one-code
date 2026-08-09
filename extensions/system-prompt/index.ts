@@ -36,7 +36,7 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 	pi.on("before_agent_start", (event, ctx) => {
 		// A named agent (or a `--system-prompt` launch) supplies its own prompt via
 		// customPrompt. Return nothing so pi's own builder uses it verbatim, rather
-		// than clobbering it with the tiered pincer prompt.
+		// than clobbering it with the tiered One Code prompt.
 		if (event.systemPromptOptions.customPrompt) return;
 
 		const model = ctx.model;

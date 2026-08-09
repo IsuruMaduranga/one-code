@@ -60,7 +60,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 		} catch {
 			// fall through to the temp folder
 		}
-		return join(os.tmpdir(), "pincer");
+		return join(os.tmpdir(), "one-code");
 	};
 
 	const registerToolsFor = (connection: Connection) => {

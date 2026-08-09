@@ -52,7 +52,7 @@ describe("buildPlanModeReminder", () => {
 		expect(after).not.toContain("No plan file exists yet");
 	});
 
-	it("names the pincer tools the workflow relies on", () => {
+	it("names the One Code tools the workflow relies on", () => {
 		const text = buildPlanModeReminder({ filePath: path, fileExists: false });
 		for (const needle of ['`agent: "explore"`', '`agent: "plan"`', "`ask_user_question`", "`exit_plan_mode`"]) {
 			expect(text).toContain(needle);

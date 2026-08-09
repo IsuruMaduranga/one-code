@@ -9,7 +9,7 @@
 import { randomBytes } from "node:crypto";
 
 /** Runtime event-bus channel other extensions use to register their tasks. */
-export const TASK_REGISTER_CHANNEL = "pincer:background-task";
+export const TASK_REGISTER_CHANNEL = "one-code:background-task";
 
 export type BackgroundStatus = "running" | "completed" | "failed" | "stopped";
 
