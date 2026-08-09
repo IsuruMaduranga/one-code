@@ -28,6 +28,7 @@ import {
 import { SUBAGENT_STATUS_CHANNEL, type SubagentStatus } from "../subagents/model-select.ts";
 import { collectStartupSections, quietStartupEnabled, shouldDefaultHideThinking, type StartupSection } from "./startup.ts";
 import { truncateLine } from "../lib/tui-render.ts";
+import { PROMPT_PADDING, PromptEditor } from "./prompt-editor.ts";
 
 export { truncateLine };
 
@@ -172,6 +173,43 @@ export function bannerLines(
 /** Collapsed-thinking placeholder — pi paints it in thinkingText + italic. */
 const THINKING_LABEL = "✻ Thinking… (ctrl+t to expand)";
 
+/** Claude Code-style input marker, painted in the editor's left gutter. A heavy
+ * chevron (U+276F), one column wide so the two-column gutter still aligns. */
+const PROMPT_GLYPH = "❯";
+
+/** The slice of the UI context the prompt marker needs (older pi may lack the hook). */
+interface BrandingEditorUI {
+	setEditorComponent?: (factory: (tui: unknown, theme: unknown, keybindings: unknown) => unknown) => void;
+	theme?: unknown;
+}
+
+/**
+ * Replace the core input editor with one that paints a "›" prompt marker, the
+ * way Claude Code does. TUI-only (print/rpc have no editor), skipped when pi is
+ * too old to expose the hook, and disableable with CC_NO_INPUT_MARKER=1 in case
+ * a pi-tui render change ever makes the marker misplace (cosmetic only — typing
+ * is never affected; see prompt-marker.ts).
+ */
+function installPromptMarker(ctx: { hasUI: boolean; mode: string; ui: BrandingEditorUI }): void {
+	if (process.env.CC_NO_INPUT_MARKER === "1") return;
+	if (!ctx.hasUI || ctx.mode !== "tui") return;
+	const ui = ctx.ui;
+	if (typeof ui.setEditorComponent !== "function") return;
+	// The marker follows live theme changes because it is re-read per render.
+	const renderMarker = () => {
+		const theme = ui.theme as ThemeLike | undefined;
+		let chevron = PROMPT_GLYPH;
+		try {
+			if (theme?.fg) chevron = theme.fg("accent", PROMPT_GLYPH);
+		} catch {
+			// Presentation-only — fall back to the plain glyph.
+		}
+		// Bold makes the chevron read heavier than the input text beside it.
+		return `\x1b[1m${chevron}\x1b[0m${" ".repeat(PROMPT_PADDING - 1)}`;
+	};
+	ui.setEditorComponent((tui: unknown, theme: unknown, keybindings: unknown) => new PromptEditor(tui as never, theme as never, keybindings as never, renderMarker));
+}
+
 /**
  * Default thinking blocks to collapsed, once, respecting any user choice.
  * pi caches settings in memory at startup, so a write here lands from the
@@ -193,9 +231,11 @@ function applyThinkingDefault(): void {
 
 export default function brandingExtension(pi: ExtensionAPI) {
 	applyThinkingDefault();
-	// The label applies in every session; CC_NO_BANNER only disables the header.
+	// The label and prompt marker apply in every session; CC_NO_BANNER only
+	// disables the header.
 	pi.on("session_start", (_event, ctx) => {
 		ctx.ui.setHiddenThinkingLabel(THINKING_LABEL);
+		installPromptMarker(ctx as unknown as { hasUI: boolean; mode: string; ui: BrandingEditorUI });
 	});
 
 	if (process.env.CC_NO_BANNER === "1") return;
