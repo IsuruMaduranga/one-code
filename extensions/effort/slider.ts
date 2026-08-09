@@ -92,27 +92,74 @@ export function decodeKey(data: string): SliderKey | undefined {
 	}
 }
 
-export function moveIndex(index: number, key: SliderKey, length: number): number {
+/**
+ * Step the marker to the next *enabled* stop in a direction, skipping levels the
+ * current model can't reach so the marker can only ever land on a selectable
+ * stop. `first`/`last` jump to the first/last enabled stop.
+ */
+export function moveIndex(index: number, key: SliderKey, enabled: boolean[]): number {
 	switch (key) {
 		case "left":
-			return Math.max(0, index - 1);
+			for (let i = index - 1; i >= 0; i--) if (enabled[i]) return i;
+			return index;
 		case "right":
-			return Math.min(length - 1, index + 1);
-		case "first":
-			return 0;
-		case "last":
-			return length - 1;
+			for (let i = index + 1; i < enabled.length; i++) if (enabled[i]) return i;
+			return index;
+		case "first": {
+			const first = enabled.indexOf(true);
+			return first >= 0 ? first : index;
+		}
+		case "last": {
+			const last = enabled.lastIndexOf(true);
+			return last >= 0 ? last : index;
+		}
 		default:
 			return index;
 	}
+}
+
+/**
+ * Which track stops the active model can reach, aligned to `EFFORT_CHOICES`. A
+ * plain level is enabled when the model lists it as supported; `ultracode` is
+ * enabled whenever the model can reason at all (its pinned level clamps to the
+ * model's ceiling). Unsupported stops stay on the track — dimmed and skipped by
+ * navigation — rather than being hidden: shift+tab (pi's own dial, which we
+ * can't rebind) still cycles the supported plain levels, so a slider that
+ * dropped stops would just disagree with it. We show the whole ladder and grey
+ * out what this model can't do.
+ */
+export function enabledStops(supported: readonly ThinkingLevel[]): boolean[] {
+	const set = new Set(supported);
+	const canReason = supported.some((level) => level !== "off");
+	return EFFORT_CHOICES.map((choice) => (choice === ULTRACODE ? canReason : set.has(choice as ThinkingLevel)));
+}
+
+/** Snap an index onto the nearest enabled stop, preferring the higher side on a tie. */
+export function nearestEnabled(index: number, enabled: boolean[]): number {
+	if (enabled[index]) return index;
+	for (let d = 1; d < enabled.length; d++) {
+		if (index + d < enabled.length && enabled[index + d]) return index + d;
+		if (index - d >= 0 && enabled[index - d]) return index - d;
+	}
+	const first = enabled.indexOf(true);
+	return first >= 0 ? first : index;
+}
+
+/** Rank of a plain level on the ladder (off=0 … max), or -1 if not a plain level. */
+export function levelRank(level: ThinkingLevel): number {
+	return THINKING_LEVELS.indexOf(level);
 }
 
 export type Paint = (color: string, text: string) => string;
 
 export interface SliderView {
 	index: number;
+	/** Which stops the active model can reach, aligned to `EFFORT_CHOICES`. */
+	enabled: boolean[];
 	/** Terminal width, so a narrow pane degrades instead of wrapping. */
 	width: number;
+	/** Model name for the "unsupported" note; omitted falls back to "this model". */
+	modelLabel?: string;
 }
 
 const TITLE = "Effort";
@@ -158,8 +205,10 @@ export function renderEffortSlider(view: SliderView, paint: Paint): string[] {
 
 	const styledLabels = stops
 		.map((stop, i) => {
-			const text = i === view.index ? paint("accent", stop.label) : paint("muted", stop.label);
-			return { text, divider: stop.divider };
+			// Disabled stops are dimmed even when unselected, so an unsupported level
+			// reads as greyed-out rather than merely inactive.
+			const color = i === view.index ? "accent" : view.enabled[i] ? "muted" : "dim";
+			return { text: paint(color, stop.label), divider: stop.divider };
 		})
 		.reduce((acc, cur, i) => acc + (i > 0 ? (cur.divider ? paint("dim", divider) : " ".repeat(gap)) : "") + cur.text, "");
 
@@ -182,6 +231,11 @@ export function renderEffortSlider(view: SliderView, paint: Paint): string[] {
 		[labels, styledLabels],
 	];
 	if (subtitleRow) rows.push([`${" ".repeat(Math.max(0, positions[stops.length - 1]))}${ULTRACODE_SUBTITLE}`, subtitleRow]);
+	// When the model can't reach every stop, say so — the dimming alone doesn't
+	// explain itself, and it points at shift+tab for the ones we grey out.
+	const anyDisabled = stops.some((_, i) => !view.enabled[i]);
+	const note = anyDisabled ? `dimmed = unsupported by ${view.modelLabel ?? "this model"}` : "";
+	if (note) rows.push([note, paint("dim", note)]);
 	rows.push(["", ""], [HINTS, paint("dim", HINTS)]);
 
 	const fits = rows.every(([plainRow]) => [...plainRow].length <= view.width);

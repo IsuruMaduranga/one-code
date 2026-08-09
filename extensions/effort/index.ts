@@ -18,6 +18,7 @@
  */
 
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import {
@@ -26,13 +27,27 @@ import {
 	decodeKey,
 	type EffortChoice,
 	EFFORT_CHOICES,
+	enabledStops,
+	levelRank,
 	moveIndex,
+	nearestEnabled,
 	parseEffortArg,
 	renderEffortSlider,
+	THINKING_LEVELS,
 	thinkingLevelFor,
 	ULTRACODE,
 	ULTRACODE_LEVEL,
 } from "./slider.ts";
+
+/** The levels pi says the active model can reach; the full ladder when unknown. */
+function supportedLevels(ctx: ExtensionContext): ThinkingLevel[] {
+	return ctx.model ? (getSupportedThinkingLevels(ctx.model) as ThinkingLevel[]) : [...THINKING_LEVELS];
+}
+
+/** A short name for the model, for messages that name what does/doesn't support a level. */
+function modelLabel(ctx: ExtensionContext): string {
+	return ctx.model?.name ?? ctx.model?.id ?? "this model";
+}
 
 const REMINDER_KEY = "ultracode-mode";
 const STATUS_KEY = "ultracode";
@@ -87,20 +102,35 @@ export default function effortExtension(pi: ExtensionAPI) {
 		setUltracode(choice === ULTRACODE, actual);
 		applyStatus(ctx);
 
-		// setThinkingLevel clamps to model capability silently, so compare rather
-		// than claiming a level the model never accepted.
-		const clamped = actual !== wanted ? ` (this model caps reasoning at ${actual})` : "";
+		// setThinkingLevel clamps to model capability silently. Only flag a genuine
+		// downward clamp (the model can't reach the requested level); an upward clamp
+		// toward the model's floor isn't a "cap" and saying so reads as a bug.
+		const wr = levelRank(wanted);
+		const ar = levelRank(actual);
+		const cappedDown = ar >= 0 && wr >= 0 && ar < wr;
+		const note = cappedDown ? ` (${modelLabel(ctx)} tops out at ${actual})` : "";
 		if (choice === ULTRACODE) {
-			ctx.ui.notify(`Effort: ultracode — ${actual} reasoning, workflows armed every turn${clamped}`, "info");
+			ctx.ui.notify(`Effort: ultracode — ${actual} reasoning, workflows armed every turn${note}`, "info");
 		} else {
-			ctx.ui.notify(`Effort: ${actual}${clamped}`, "info");
+			ctx.ui.notify(`Effort: ${actual}${note}`, "info");
 		}
 	};
 
 	const showSlider = async (ctx: ExtensionContext): Promise<void> => {
+		const supported = supportedLevels(ctx);
+		if (!supported.some((level) => level !== "off")) {
+			ctx.ui.notify(`${modelLabel(ctx)} doesn't support reasoning effort.`, "info");
+			return;
+		}
+		const enabled = enabledStops(supported);
+
+		// Start on the current stop, snapped onto a stop this model can actually
+		// reach so the marker never opens on a dimmed, unselectable level.
 		let index = EFFORT_CHOICES.indexOf(choiceForState(pi.getThinkingLevel(), ultracodeActive));
 		if (index < 0) index = 0;
+		index = nearestEnabled(index, enabled);
 
+		const label = modelLabel(ctx);
 		const chosen = await ctx.ui.custom<EffortChoice | null>((tui, theme, _keybindings, done) => {
 			const paint = (color: string, text: string) => {
 				const themed = theme as { fg?(c: string, t: string): string } | undefined;
@@ -111,7 +141,7 @@ export default function effortExtension(pi: ExtensionAPI) {
 				}
 			};
 			return {
-				render: (width: number) => ["", ...renderEffortSlider({ index, width }, paint), ""],
+				render: (width: number) => ["", ...renderEffortSlider({ index, enabled, width, modelLabel: label }, paint), ""],
 				handleInput: (data: string) => {
 					const key = decodeKey(data);
 					if (!key) return;
@@ -123,7 +153,7 @@ export default function effortExtension(pi: ExtensionAPI) {
 						done(EFFORT_CHOICES[index]);
 						return;
 					}
-					index = moveIndex(index, key, EFFORT_CHOICES.length);
+					index = moveIndex(index, key, enabled);
 					tui.requestRender();
 				},
 				invalidate: () => {},
@@ -146,6 +176,18 @@ export default function effortExtension(pi: ExtensionAPI) {
 				if (!parsed) {
 					ctx.ui.notify(`Unknown effort "${typed}". Use one of: ${acceptedEffortArgs().join(", ")}`, "error");
 					return;
+				}
+				// A plain level the model can't reach would silently clamp to something
+				// else; refuse it and name what this model does support instead.
+				if (parsed !== ULTRACODE) {
+					const supported = supportedLevels(ctx);
+					if (!supported.includes(parsed as ThinkingLevel)) {
+						ctx.ui.notify(
+							`Effort "${parsed}" isn't supported by ${modelLabel(ctx)} — it supports ${supported.join(", ")} (shift+tab cycles these).`,
+							"error",
+						);
+						return;
+					}
 				}
 				applyChoice(parsed, ctx);
 				return;

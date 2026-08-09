@@ -63,12 +63,26 @@ Taking over the key is not available: `app.thinking.cycle` is on pi's
 shift+tab is skipped with a warning rather than honoured, and no extension API
 unbinds or retargets a reserved key (only the user's own keybindings config can).
 Disabling it was therefore off the table too, which settles the direction:
-conform to the key rather than compete with it. The slider now offers exactly the
-stops shift+tab walks through — `off` through `max` — and adds `ultracode` past
-the divider, and everything we write calls the dial "effort" (banner hint
-included; pi's own footer still says what it says). The slider footer names
-shift+tab as the shortcut for the plain stops, so the two read as one control
-with two entry points rather than two competing settings.
+conform to the key rather than compete with it. The slider shows the full `off`→
+`max` ladder plus `ultracode` past the divider, but **enables only the stops the
+active model can reach**: pi filters shift+tab's own cycle through
+`getSupportedThinkingLevels(model)` (a per-model set derived from the model's
+`thinkingLevelMap`, see findings §3), so a fixed seven-stop ladder disagreed with
+shift+tab on every model that doesn't support all of them. Unsupported stops stay
+on the track dimmed and are skipped by navigation, with a `dimmed = unsupported by
+<model>` note; everything we write calls the dial "effort" (banner hint included;
+pi's own footer still says what it says), and the footer names shift+tab as the
+shortcut for the plain stops, so the two read as one control with two entry points
+rather than two competing settings.
+
+Building the slider from the fixed ladder rather than the model's set was a live
+bug: on `deepseek-v4-flash` (supported levels `{high, max}`) picking `low` made
+pi's `clampThinkingLevel` snap *upward* to `high`, which the old code mislabelled
+"caps reasoning at high". A downward clamp (the model genuinely can't reach the
+requested level) is now the only thing flagged — "tops out at" — and the typed
+path (`/effort low`) refuses an unreachable level, naming what the model does
+support, instead of silently rerouting it. Verified live against
+`deepseek-v4-flash`.
 
 Widening the track from six stops to eight is what exposed a latent bug: the
 layout only checked whether the *track* fit the pane, so the longer hint line

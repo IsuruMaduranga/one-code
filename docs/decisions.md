@@ -66,7 +66,7 @@ Full context: [`decisions/auto-mode.md`](decisions/auto-mode.md).
 Full context: [`decisions/modes.md`](decisions/modes.md).
 
 - **[`/effort`, and ultracode as a standing mode](decisions/modes.md#effort-and-ultracode-as-a-standing-mode)** — one "effort" dial; its last stop is `ultracode` = xhigh plus workflows armed every turn.
-- **[Aligning `/effort` with shift+tab](decisions/modes.md#aligning-effort-with-shifttab)** — why the slider shares the stops that shift+tab cycles (pi reserves that key).
+- **[Aligning `/effort` with shift+tab](decisions/modes.md#aligning-effort-with-shifttab)** — why the slider mirrors shift+tab's model-filtered stops and dims the rest (pi reserves that key).
 - **[Permission-mode cycling on ctrl+q](decisions/modes.md#permission-mode-cycling-on-ctrlq-not-shifttab-ctrlm-or-altm)** — why the mode cycle is ctrl+q, not shift+tab / ctrl+m / alt+m.
 - **[Plan mode is file-based, like current Claude Code](decisions/modes.md#plan-mode-is-file-based-like-current-claude-code)** — plan mode writes a plan file under `~/.one-code/plans`; the matcher allows writes to that one file.
 
