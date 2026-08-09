@@ -72,6 +72,8 @@ const DENIED_PROTECTED_PATH =
 	"That path is protected: it configures the user's tooling or this agent itself, so writes to it are never auto-approved and allow rules do not cover them. Achieve the goal another way, or ask the user to make the change.";
 const DENIED_BY_CLASSIFIER = (reason: string) =>
 	`Blocked by the auto-mode approval classifier: ${reason}\n\nDo not retry the same call and do not try to work around the block. If you believe the action is what the user asked for, say so and let them decide.`;
+const BLOCKED_BY_TIMEOUT = (reason: string) =>
+	`${reason}\n\nThis was not a judgement that the call is unsafe — the classifier could not respond in time. Tell the user what you were about to do so they can re-run interactively or pin a faster classifier; do not try to route around the gate.`;
 const DENIED_SAFETY_FLOOR = (reason: string) =>
 	`Auto mode blocked this call without consulting the classifier: ${reason}. Writes to the gate's own configuration are never auto-approved. Do not retry or route around this; ask the user to make the change themselves.`;
 /**
@@ -466,31 +468,39 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 					return undefined;
 				}
 
-				const tripped = pauseTracker.recordBlock({
-					toolName: event.toolName,
-					subject,
-					reason: outcome.reason,
-					tier: outcome.tier,
-					ruleId: outcome.ruleId,
-					raw: outcome.raw,
-				});
-				if (tripped) {
-					const { lifetime } = pauseTracker.stats();
-					ctx.ui.notify(
-						`Auto mode paused after ${lifetime} blocked call${lifetime === 1 ? "" : "s"} — approving a prompt resumes it.`,
-						"warning",
-					);
-					applyBadge();
+				// A timeout is not a block the model earned by looping against the
+				// gate, so it does not count toward the auto-pause — and it is always
+				// the user's to approve, so it never takes the hard-deny path.
+				if (outcome.tier === "timeout") {
+					if (!ctx.hasUI) return { block: true, reason: BLOCKED_BY_TIMEOUT(outcome.reason) };
+					classifierBlock = outcome.reason;
+				} else {
+					const tripped = pauseTracker.recordBlock({
+						toolName: event.toolName,
+						subject,
+						reason: outcome.reason,
+						tier: outcome.tier,
+						ruleId: outcome.ruleId,
+						raw: outcome.raw,
+					});
+					if (tripped) {
+						const { lifetime } = pauseTracker.stats();
+						ctx.ui.notify(
+							`Auto mode paused after ${lifetime} blocked call${lifetime === 1 ? "" : "s"} — approving a prompt resumes it.`,
+							"warning",
+						);
+						applyBadge();
+					}
+					// A hard-deny verdict is not the user's to override: prompting would
+					// hand back exactly what the tier exists to refuse.
+					if (outcome.tier === "hard_deny") {
+						return { block: true, reason: DENIED_BY_CLASSIFIER(outcome.reason) };
+					}
+					// Non-interactively there is no one to ask, so the classifier's own
+					// reason is more useful to the model than a generic refusal.
+					if (!ctx.hasUI) return { block: true, reason: DENIED_BY_CLASSIFIER(outcome.reason) };
+					classifierBlock = outcome.reason;
 				}
-				// A hard-deny verdict is not the user's to override: prompting would
-				// hand back exactly what the tier exists to refuse.
-				if (outcome.tier === "hard_deny") {
-					return { block: true, reason: DENIED_BY_CLASSIFIER(outcome.reason) };
-				}
-				// Non-interactively there is no one to ask, so the classifier's own
-				// reason is more useful to the model than a generic refusal.
-				if (!ctx.hasUI) return { block: true, reason: DENIED_BY_CLASSIFIER(outcome.reason) };
-				classifierBlock = outcome.reason;
 			}
 			// Paused, or a soft block worth asking about: fall through and prompt.
 		}

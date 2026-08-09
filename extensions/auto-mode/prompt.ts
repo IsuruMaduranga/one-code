@@ -41,7 +41,7 @@ export interface ClassifyVerdict {
 	 */
 	reason: string;
 	/** Derived from the cited rule id, not from a field the model chose freely. */
-	tier?: "hard_deny" | "soft_deny" | "allow" | "intent" | "unmatched";
+	tier?: "hard_deny" | "soft_deny" | "allow" | "intent" | "unmatched" | "timeout";
 	/** The validated rule id behind the verdict (`S4`, `H1`, `unclear`, …). */
 	ruleId?: string;
 	/**

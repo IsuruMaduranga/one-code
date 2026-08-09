@@ -56,7 +56,7 @@ export const DEFAULT_ALLOW: string[] = [
 	"Reading anything inside the working directory, and reading system and tool configuration that is not on the sensitive-data list.",
 	"Installing dependencies already declared in the project's manifest (package.json, pyproject.toml, go.mod, pom.xml, Cargo.toml) from the ecosystem's default registry.",
 	"Running the project's own build, test, lint, format, and type-check commands, including ones that write to build directories.",
-	"Read-only network requests: HTTP GET/HEAD to public documentation, package metadata, and API endpoints that carry no credentials of the user's.",
+	"Read-only information lookups that retrieve only public data and send none of the user's own: HTTP GET/HEAD to public documentation, package metadata, and credential-free API endpoints; and public registry or DNS queries such as whois, dig, nslookup, and host, including ones that name the registry or DNS server to query.",
 	"Git operations that do not rewrite published history: status, diff, log, add, commit, branch, checkout, merge, rebase of unpushed local work, stash, and pushing to any branch of the trusted repo.",
 	"Creating and updating pull requests on the trusted repo, and reading issues and CI results.",
 	"Starting, stopping, and querying local development servers and containers bound to loopback.",

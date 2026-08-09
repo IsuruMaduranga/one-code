@@ -15,7 +15,12 @@ vi.mock("@earendil-works/pi-ai/compat", () => ({
 }));
 
 import { completeSimple } from "@earendil-works/pi-ai/compat";
-import { classify, createClassifierState } from "../../extensions/auto-mode/classifier.ts";
+import {
+	classify,
+	createClassifierState,
+	isClassifierTimeout,
+	ROTATE_AFTER_TIMEOUTS,
+} from "../../extensions/auto-mode/classifier.ts";
 import { loadAutoModeConfig } from "../../extensions/auto-mode/config.ts";
 import { isModelUnavailableError } from "../../extensions/auto-mode/model-select.ts";
 
@@ -169,6 +174,74 @@ describe("classify: pinning and fallback", () => {
 		expect(verdict.decision).toBe("allow");
 		expect(deps.state.rejected.has("openai/gpt-5-mini")).toBe(true);
 		expect(deps.state.pinned?.id).toBe("gpt-5.1");
+	});
+});
+
+const abortedReply = () => ({ stopReason: "aborted", errorMessage: "Request aborted", content: [] }) as any;
+
+describe("classify: timeout handling", () => {
+	it("retries the same model once on a timeout, then takes the verdict", async () => {
+		// A stall under load usually clears on a second try — one retry turns it
+		// into a verdict instead of a false block.
+		completeMock.mockResolvedValueOnce(abortedReply()).mockResolvedValueOnce(allowReply());
+		const { deps } = makeDeps();
+		const verdict = await classify(request, deps);
+		expect(verdict.decision).toBe("allow");
+		expect(completeMock).toHaveBeenCalledTimes(2);
+		expect((completeMock.mock.calls[0]?.[0] as any).id).toBe((completeMock.mock.calls[1]?.[0] as any).id);
+	});
+
+	it("surfaces an all-timeout as its own tier, and rejects nothing (timeouts are transient)", async () => {
+		completeMock.mockResolvedValue(abortedReply());
+		const { deps } = makeDeps();
+		const verdict = await classify(request, deps);
+		expect(verdict.decision).toBe("block");
+		expect(verdict.tier).toBe("timeout");
+		expect(verdict.reason).toContain("in time");
+		// A timeout must never look like a substantive "could not be reached" error.
+		expect(verdict.reason).not.toContain("could not be reached");
+		expect(deps.state.rejected.size).toBe(0);
+	});
+
+	it(`unpins a model after ${ROTATE_AFTER_TIMEOUTS} consecutive timeouts, so the session re-picks`, async () => {
+		completeMock.mockResolvedValueOnce(allowReply());
+		const { deps } = makeDeps();
+		await classify(request, deps);
+		expect(deps.state.pinned?.id).toBe("gpt-5-mini");
+
+		completeMock.mockResolvedValue(abortedReply());
+		for (let i = 0; i < ROTATE_AFTER_TIMEOUTS; i++) {
+			const verdict = await classify(request, deps);
+			expect(verdict.tier).toBe("timeout");
+		}
+		expect(deps.state.pinned).toBeUndefined();
+		expect(deps.state.rejected.size).toBe(0);
+	});
+
+	it("treats a user cancel as a cancel, not a timeout — no retry, no rotation", async () => {
+		completeMock.mockResolvedValue(abortedReply());
+		const { deps } = makeDeps({ signal: AbortSignal.abort() });
+		const verdict = await classify(request, deps);
+		expect(verdict.decision).toBe("block");
+		expect(verdict.reason).toContain("cancelled");
+		// One attempt, no retry: the user asked to stop.
+		expect(completeMock).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("isClassifierTimeout", () => {
+	it('matches abort/timeout wording — including "aborted" (the observed message)', () => {
+		// Regression: a trailing \b made /\babort\b/ miss "aborted", so real
+		// timeouts fell through to the generic-error path with the wrong tier.
+		for (const message of ["Request aborted", "Request was aborted", "aborting", "timed out", "timeout", "ETIMEDOUT", "deadline exceeded"]) {
+			expect(isClassifierTimeout(message)).toBe(true);
+		}
+	});
+
+	it("does not match substantive provider errors", () => {
+		for (const message of ["500 internal server error", "invalid_model", "no such model", "429 rate limit"]) {
+			expect(isClassifierTimeout(message)).toBe(false);
+		}
 	});
 });
 

@@ -27,6 +27,27 @@ import { indexRules } from "./rules.ts";
 export const CLASSIFIER_TIMEOUT_MS = 30_000;
 
 /**
+ * A pinned model that times out this many calls in a row is unpinned, so a model
+ * that was fast when first chosen but has since fallen behind demand does not
+ * stay the session's classifier forever. The next call re-runs selection.
+ */
+export const ROTATE_AFTER_TIMEOUTS = 2;
+
+/**
+ * Whether a failure is our own classifier timeout (or an equivalent abort/stall)
+ * rather than a substantive provider error. A timeout is transient — worth a
+ * retry and worth stepping to another candidate — where a 500 or a bad request
+ * is not. A *user* cancel also aborts, so callers must rule that out first
+ * (`deps.signal?.aborted`) before treating an abort as a timeout.
+ */
+export function isClassifierTimeout(message: string): boolean {
+	// `\babort` (no trailing boundary) so "abort", "aborted", and "aborting" all
+	// match — the observed message is "Request aborted", which a trailing \b
+	// would miss. The others are whole words.
+	return /\babort|\btimed?\s*out\b|\btimeout\b|\betimedout\b|\bdeadline\b/i.test(message);
+}
+
+/**
  * Which model the classifier settled on, and which candidates turned out to be
  * unusable. Owned by the caller so this module stays stateless, and so the
  * choice is *pinned*: re-resolving per call would let a registry refresh swap
@@ -38,10 +59,16 @@ export interface ClassifierState {
 	rejected: Set<string>;
 	/** Notices already delivered, so a per-call warning is not repeated per call. */
 	notified: Set<string>;
+	/**
+	 * Consecutive calls the pinned model has timed out on. Reset by any success;
+	 * at ROTATE_AFTER_TIMEOUTS the pin is released so the session re-picks rather
+	 * than staying bound to a model that has fallen behind demand.
+	 */
+	timeoutStreak: number;
 }
 
 export function createClassifierState(): ClassifierState {
-	return { rejected: new Set(), notified: new Set() };
+	return { rejected: new Set(), notified: new Set(), timeoutStreak: 0 };
 }
 
 export interface ClassifierDeps {
@@ -127,6 +154,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 	};
 
 	let lastError = "";
+	let sawTimeout = false;
 	for (const candidate of attempts) {
 		const model = candidate.model;
 		const key = `${model.provider}/${model.id}`;
@@ -197,6 +225,20 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 			let reply = await attempt(1024);
 			if (reply.stopReason === "length") reply = await attempt(4096);
 
+			// One retry on a timeout, before giving up on this model. A stall under
+			// load usually clears on a second try; a model that is simply too slow
+			// times out again, and the loop then steps to the next candidate (or, if
+			// none remains, the call falls through to a user prompt). A *user* cancel
+			// also aborts — that is not a timeout and must not be retried.
+			if (
+				(reply.stopReason === "aborted" || reply.stopReason === "error") &&
+				!deps.signal?.aborted &&
+				isClassifierTimeout(reply.errorMessage ?? reply.stopReason ?? "")
+			) {
+				reply = await attempt(1024);
+				if (reply.stopReason === "length") reply = await attempt(4096);
+			}
+
 			if (reply.stopReason === "error" || reply.stopReason === "aborted") {
 				failure = reply.errorMessage ?? reply.stopReason;
 			} else if (reply.stopReason === "length") {
@@ -223,6 +265,10 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 					.map((block) => block.text)
 					.join("");
 				const verdict = parseVerdict(text, index, request.userMessages);
+
+				// A verdict came back, so the timeout streak that might have been
+				// building is over.
+				deps.state.timeoutStreak = 0;
 
 				// Pin on the first success, so the classifier cannot change under the
 				// session and a working model is not re-litigated per call.
@@ -266,9 +312,31 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 		}
 
 		lastError = failure ?? "unknown error";
-		// A model that is simply not usable here is worth stepping over. A transient
-		// failure is not: switching models would paper over something about to clear,
-		// so that surfaces as a block and the same model is tried again next call.
+
+		// A user cancel aborts the same way a timeout does. It is not a failure to
+		// route around — the user asked to stop, so stop.
+		if (deps.signal?.aborted) {
+			return { decision: "block", reason: "Auto-mode classification was cancelled.", tier: "unmatched" };
+		}
+
+		// A timeout (after the one retry above) is transient, so the model is NOT
+		// rejected — it may be fine on the next call. Instead we step to the next
+		// candidate, which is a different model of the *same or cheaper* price in
+		// the same provider (the chain is privacy- and budget-contained upstream).
+		// A pinned model that keeps timing out is unpinned so the session re-picks.
+		if (isClassifierTimeout(lastError)) {
+			sawTimeout = true;
+			if (deps.state.pinned && `${deps.state.pinned.provider}/${deps.state.pinned.id}` === key) {
+				deps.state.timeoutStreak += 1;
+				if (deps.state.timeoutStreak >= ROTATE_AFTER_TIMEOUTS) deps.state.pinned = undefined;
+			}
+			continue;
+		}
+
+		// A model that is simply not usable here is worth stepping over. Any other
+		// transient failure is not: switching models would paper over something
+		// about to clear, so that surfaces as a block and the same model is tried
+		// again next call.
 		if (!isModelUnavailableError(lastError)) {
 			return {
 				decision: "block",
@@ -287,6 +355,21 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 				: `Auto mode cannot use ${key} as its classifier (${lastError}); trying another model. Set autoMode.classifierModel in ~/.claude/settings.json to choose one.`,
 			"warning",
 		);
+	}
+
+	// Every candidate timed out (with a retry each) and none was reachable in
+	// time. This is NOT a judgement that the call is unsafe — it was never
+	// screened — so it is surfaced as its own tier. The gate turns a `timeout`
+	// into a user prompt where it can (there is someone to ask), and only blocks
+	// outright when running non-interactively.
+	if (sawTimeout) {
+		return {
+			decision: "block",
+			tier: "timeout",
+			reason:
+				"Auto mode could not screen this call in time — the approval classifier timed out, so the call was not judged either way. " +
+				"Approve it if you recognise it as safe, or pin a faster classifier with /auto-mode model.",
+		};
 	}
 
 	// Every candidate was unusable — say which knob fixes it rather than leaving
