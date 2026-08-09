@@ -152,8 +152,8 @@ export function bulletColor(isPartial: boolean, isError: boolean): string {
  * cycle, reading as a heartbeat. Ends on the static success/error bullet.
  */
 export const SPINNER_COLORS = ["dim", "muted", "accent", "muted"] as const;
-/** Bullet pulse tick; ~600ms per full breath, calmer than pi's 80ms spinner. */
-export const SPINNER_INTERVAL_MS = 150;
+/** Bullet pulse tick; ~1.2s per full breath (4 frames), a calm heartbeat well clear of pi's 80ms spinner. */
+export const SPINNER_INTERVAL_MS = 300;
 
 /** Persistent per-tool-row spinner state, stored on `context.state`. */
 interface SpinnerState {
