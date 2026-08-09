@@ -26,8 +26,15 @@ import {
 	shortModelName,
 } from "../permissions/modes.ts";
 import { SUBAGENT_STATUS_CHANNEL, type SubagentStatus } from "../subagents/model-select.ts";
-import { collectStartupSections, quietStartupEnabled, shouldDefaultHideThinking, type StartupSection } from "./startup.ts";
+import {
+	collectStartupSections,
+	quietStartupEnabled,
+	shouldDefaultFlushOutputPad,
+	shouldDefaultHideThinking,
+	type StartupSection,
+} from "./startup.ts";
 import { truncateLine } from "../lib/tui-render.ts";
+import { markAssistantMarkdown } from "./assistant-marker.ts";
 import { PROMPT_PADDING, PromptEditor } from "./prompt-editor.ts";
 
 export { truncateLine };
@@ -177,6 +184,20 @@ const THINKING_LABEL = "✻ Thinking… (ctrl+t to expand)";
  * chevron (U+276F), one column wide so the two-column gutter still aligns. */
 const PROMPT_GLYPH = "❯";
 
+/**
+ * `pi.registerMarkdownTransformer` typed locally: the runtime (pi ≥ 0.84) exposes
+ * it, but the pinned 0.83 type declarations do not, so we cast and feature-detect
+ * — the same "older pi may lack the hook" handling as the prompt marker.
+ */
+interface MarkdownTransformerHost {
+	registerMarkdownTransformer?: (
+		transformer: (
+			markdown: string,
+			context: { messageType: "user" | "assistant" | "assistant-thinking"; isStreaming: boolean; availableWidth: number },
+		) => string,
+	) => void;
+}
+
 /** The slice of the UI context the prompt marker needs (older pi may lack the hook). */
 interface BrandingEditorUI {
 	setEditorComponent?: (factory: (tui: unknown, theme: unknown, keybindings: unknown) => unknown) => void;
@@ -229,8 +250,41 @@ function applyThinkingDefault(): void {
 	}
 }
 
+/**
+ * Default pi's output padding to 0 so the assistant "●" marker sits flush at
+ * column 0, aligned with the tool bullets (which render there). Only when the
+ * user hasn't set `outputPad` themselves; like the thinking default, pi caches
+ * settings at startup, so this lands from the *next* session (the current one
+ * keeps whatever pad it launched with). Skipped when the marker is disabled, so
+ * the two travel together.
+ */
+function applyOutputPadDefault(): void {
+	if (process.env.CC_NO_ASSISTANT_MARKER === "1") return;
+	try {
+		const agentDir = getAgentDir();
+		const settingsPath = join(agentDir, "settings.json");
+		const raw = existsSync(settingsPath) ? readFileSync(settingsPath, "utf8") : undefined;
+		if (shouldDefaultFlushOutputPad(raw)) {
+			SettingsManager.create(process.cwd(), agentDir).setOutputPad(0);
+		}
+	} catch {
+		// Presentation-only default — never let a settings hiccup break startup.
+	}
+}
+
 export default function brandingExtension(pi: ExtensionAPI) {
 	applyThinkingDefault();
+	applyOutputPadDefault();
+	// Mark each block of assistant prose with Claude Code's "●" bullet. Only
+	// assistant text is transformed (not thinking or user turns); the transformer
+	// runs in markdown rendering, so print/rpc output is untouched.
+	// CC_NO_ASSISTANT_MARKER=1 opts out, mirroring CC_NO_INPUT_MARKER.
+	const transformerHost = pi as unknown as MarkdownTransformerHost;
+	if (process.env.CC_NO_ASSISTANT_MARKER !== "1" && typeof transformerHost.registerMarkdownTransformer === "function") {
+		transformerHost.registerMarkdownTransformer((markdown, context) =>
+			context.messageType === "assistant" ? markAssistantMarkdown(markdown) : markdown,
+		);
+	}
 	// The label and prompt marker apply in every session; CC_NO_BANNER only
 	// disables the header.
 	pi.on("session_start", (_event, ctx) => {

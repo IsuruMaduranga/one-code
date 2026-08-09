@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { WORDMARK, WORDMARK_WIDTH, bannerLines, sectionSummary, truncateLine } from "../../extensions/branding/index.ts";
-import { shouldDefaultHideThinking } from "../../extensions/branding/startup.ts";
+import { shouldDefaultFlushOutputPad, shouldDefaultHideThinking } from "../../extensions/branding/startup.ts";
 
 // Identity paint keeps assertions about layout free of colour codes.
 const plain = (_color: string, text: string) => text;
@@ -141,5 +141,25 @@ describe("shouldDefaultHideThinking", () => {
 
 	it("does not touch a settings file it cannot parse", () => {
 		expect(shouldDefaultHideThinking("{broken")).toBe(false);
+	});
+});
+
+describe("shouldDefaultFlushOutputPad", () => {
+	it("defaults to flush when settings do not exist yet", () => {
+		expect(shouldDefaultFlushOutputPad(undefined)).toBe(true);
+	});
+
+	it("defaults to flush when the key was never set", () => {
+		expect(shouldDefaultFlushOutputPad("{}")).toBe(true);
+		expect(shouldDefaultFlushOutputPad('{"hideThinkingBlock": true}')).toBe(true);
+	});
+
+	it("never overrides a user's own outputPad", () => {
+		expect(shouldDefaultFlushOutputPad('{"outputPad": 0}')).toBe(false);
+		expect(shouldDefaultFlushOutputPad('{"outputPad": 1}')).toBe(false);
+	});
+
+	it("does not touch a settings file it cannot parse", () => {
+		expect(shouldDefaultFlushOutputPad("{broken")).toBe(false);
 	});
 });

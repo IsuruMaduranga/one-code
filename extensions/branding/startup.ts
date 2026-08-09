@@ -113,6 +113,23 @@ export function shouldDefaultHideThinking(settingsRaw: string | undefined): bool
 	}
 }
 
+/**
+ * Whether One Code should default pi's output padding to 0 — flush-left — so the
+ * assistant "●" marker (see `assistant-marker.ts`) lines up with the tool "●"
+ * bullets, which render at column 0. Same rule as the thinking default: only when
+ * the user has never set `outputPad` themselves (via `/settings` or a previous
+ * run of this default). An unreadable settings file means "don't touch it".
+ */
+export function shouldDefaultFlushOutputPad(settingsRaw: string | undefined): boolean {
+	if (settingsRaw === undefined) return true;
+	try {
+		const settings = JSON.parse(settingsRaw);
+		return !(settings && typeof settings === "object" && "outputPad" in settings);
+	} catch {
+		return false;
+	}
+}
+
 /** True when pi's own startup listing is silenced, so ours should render instead. */
 export function quietStartupEnabled(piSettingsPath: string): boolean {
 	try {
