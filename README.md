@@ -152,6 +152,12 @@ pi inside a container — the permission gate and the container compose.
 - Verified end-to-end on Anthropic and OpenAI models, and through **OpenRouter**
   (which brokers many open models — DeepSeek, Llama, Qwen, and more); other
   providers work but are less exercised.
+- **Platforms:** developed and verified on **macOS and Linux**; **WSL** works
+  the same way (it *is* Linux). Native Windows is **untested best-effort** for
+  now: pi itself requires a bash there (Git Bash — see pi's Windows docs), and
+  One Code has known gaps on native Windows (hooks and background shells assume
+  `/bin/sh`). Don't rely on it until a Windows smoke test lands in a future
+  release.
 
 ## License
 
