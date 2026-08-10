@@ -2,9 +2,10 @@
 
 Part of [Decisions](../decisions.md).
 
-## Two artifacts from one codebase: the app and the package (2026-08-10, unreviewed)
+## Two artifacts from one codebase: the app and the package (2026-08-10)
 
-One Code ships two npm packages built from this single repo:
+One Code ships two npm packages built from this single repo — **both live on
+npm since 2026-08-10 at 0.1.2** (GitHub release `v0.1.2`):
 
 | npm name | What it is | pi relationship |
 |---|---|---|
@@ -21,7 +22,11 @@ blocks every punctuation variant — discovered only at publish time; a 404 on
 `npm view` does not mean a name is claimable). The *command* the app installs
 is still `one-code`; the extension package stays unscoped so
 `pi install npm:one-code-extension` reads clean, and is attached to the org
-via team access rather than a scope. A Homebrew tap (`brew install IsuruMaduranga/one-code/one-code`)
+via team access rather than a scope. The npm org (`one-ai`) and the planned
+GitHub org (`oneai-hq` — `one-ai` was taken on GitHub) deliberately differ:
+registry namespaces are independent, install commands only ever cite the npm
+scope, and `repository` fields point at URLs, so the mismatch costs nothing
+beyond a profile cross-link. A Homebrew tap (`brew install IsuruMaduranga/one-code/one-code`)
 delivers the same app and solves the Node ≥22.19 requirement via
 `depends_on "node"`; a single compiled binary is not viable (pi-tui ships
 per-platform native modules).
@@ -82,7 +87,14 @@ mistake. Adopted at 0.1.2 (the app skipped 0.1.1 to converge); the cost is an
 occasional republish of an unchanged package. The Homebrew tap is
 `IsuruMaduranga/homebrew-one-ai` — named for the brand umbrella so future
 tools join the same tap — giving `brew install isurumaduranga/one-ai/one-code`
-(two-segment installs are not brew grammar; verified empirically).
+(two-segment installs are not brew grammar; verified empirically). Two
+release-process facts learned shipping 0.1.2: the formula's `url` + `sha256`
+must be bumped by hand each release until a release workflow automates it,
+and Homebrew's `std_npm_args` passes npm's supply-chain guard
+`--min-release-age=1`, so **the brew install of a release only works ~24h
+after its npm publish** — day-one users get "No matching version found …
+with a date before <now−1d>"; either schedule the formula bump a day after
+the npm publish or accept the gap.
 
 Registering the package also seeds first-run settings (`theme: "one-code"`,
 `quietStartup: true`), which doubles as skipping pi's stock first-time theme
@@ -123,6 +135,10 @@ Per project directive, prefer ecosystem packages over new code.
   on a future release.
 
 ## Publish readiness (Phase 7)
+
+*(Historical — the release shipped 2026-08-10 as described in the two-artifact
+entry above. The tarball/install checks below were the single-package-era
+method and remain the template for pre-publish verification.)*
 
 `npm pack` produces a 69 kB / 47-file tarball: `extensions/`, `agents/`, `types/`,
 README, LICENSE and `docs/decisions.md`. Every path in the `pi.extensions`
