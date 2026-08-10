@@ -154,6 +154,21 @@ no extension-facing hook. A One Code extension therefore cannot set or flip it.
 terminal scrollback after quit — that is the whole point of the clean exit, and
 `pi --resume` covers re-entry.
 
+**Correction (2026-08-10, found live):** the setting alone does NOT give the
+clean exit on pi 0.84.1. The alt screen engages (verified via tmux
+`alternate_on`), but pi's quit path *deliberately* transfers the transcript to
+the main buffer: `stopInteractiveTui()` switches back to the regular renderer
+and repaints everything (`switchTuiMode("regular")` + `renderNow()`) before
+stopping — `TuiAltScreen`'s `preserveScreen` clean exit exists but is
+unreachable from settings. The bundled app therefore overrides
+`InteractiveMode.prototype.stopInteractiveTui` in `app/bin.mjs` (exact-pinned
+pi makes the touched internals stable; falls back to stock behaviour on any
+surprise) to stop the alt screen with `preserveScreen: true` — verified live:
+exit leaves only the resume hint, like Claude Code. Package-variant users
+still get the transcript-dump exit until the upstream exit-preserve option
+lands (upstream_prs #8). The mid-session `/settings` renderer switch is
+untouched.
+
 **Trap this surfaced (finding §10.16):** the setting key was `uiMode` in the
 pinned reference clone (v0.83.0) but was renamed `tuiMode` in installed pi
 (v0.84.1); a `uiMode` key is silently ignored on 0.84.1. Clone re-pinned to

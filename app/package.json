@@ -1,6 +1,6 @@
 {
 	"name": "@one-ai/one-code",
-	"version": "0.1.3",
+	"version": "0.1.4",
 	"publishConfig": {
 		"access": "public"
 	},
@@ -38,6 +38,6 @@
 	],
 	"dependencies": {
 		"@earendil-works/pi-coding-agent": "0.84.1",
-		"one-code-extension": "0.1.3"
+		"one-code-extension": "0.1.4"
 	}
 }

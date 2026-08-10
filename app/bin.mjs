@@ -131,7 +131,35 @@ process.stdout.write = (chunk, ...rest) => {
 };
 
 // --- 4. Launch pi with One Code's update check ----------------------------
-const { main } = await import("@earendil-works/pi-coding-agent");
+const { InteractiveMode, main } = await import("@earendil-works/pi-coding-agent");
+
+// Clean fullscreen exit. pi 0.84.1's quit path deliberately switches from the
+// alt screen back to the main-screen renderer and repaints the whole
+// transcript into scrollback (stopInteractiveTui → switchTuiMode("regular") +
+// renderNow). One Code wants the Claude Code exit: restore the terminal,
+// print only the resume hint. Overriding this one method keeps the mid-session
+// /settings renderer switch untouched. Exact-pinned pi makes the private
+// internals (renderer, hasOverlayEntries, ui) stable; re-verify on every pin
+// bump. Upstream proposal queued (an exit-preserve setting).
+try {
+	const original = InteractiveMode.prototype.stopInteractiveTui;
+	if (typeof original === "function") {
+		InteractiveMode.prototype.stopInteractiveTui = function stopInteractiveTuiPreserving() {
+			try {
+				if (this.renderer?.mode === "fullscreen") {
+					while (this.renderer.hasOverlayEntries) this.renderer.hideOverlay();
+					this.ui.stop({ preserveScreen: true });
+					return;
+				}
+			} catch {
+				// Any surprise in pi's internals: fall through to stock behavior.
+			}
+			return original.call(this);
+		};
+	}
+} catch {
+	// InteractiveMode not patchable (unexpected pi build): stock exit behavior.
+}
 const { createUpdateCheck } = await import("./update-check.mjs");
 const brewPrefixes = ["/opt/homebrew/", "/usr/local/Cellar/", "/home/linuxbrew/"];
 let installedViaBrew = false;
