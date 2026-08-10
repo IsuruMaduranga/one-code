@@ -6,7 +6,8 @@ This is the bundled One Code app: one install, batteries included. It ships
 its own pinned copy of the [pi coding agent](https://github.com/earendil-works/pi)
 and the full One Code extension set, keeps all of its state isolated under
 `~/.one-code`, and coexists cleanly with any `pi` you already have — separate
-command, separate config, separate sessions.
+command, separate config, separate sessions. You don't need to know anything
+about pi to use it.
 
 ```bash
 npm install -g one-code
@@ -16,11 +17,34 @@ cd your-project && one-code
 Or via Homebrew (installs Node for you too):
 
 ```bash
-brew install IsuruMaduranga/one-code/one-code
+brew install isuruwijesiri/one-code/one-code
 ```
 
-Needs **Node 22.19+** on the npm route. Credentials for at least one model
-provider are asked for on first run (or use `/login`).
+The npm route needs **Node 22.19+**.
+
+## Two-minute quickstart — free, no card
+
+You need one model-provider key. Two providers hand out **free models** today,
+so you can try everything for nothing:
+
+- **OpenCode Zen** ([opencode.ai/zen](https://opencode.ai/zen)) — sign up,
+  copy your API key. Free model: `deepseek-v4-flash-free`.
+- **OpenRouter** ([openrouter.ai](https://openrouter.ai)) — sign up and create
+  a key, or just OAuth from inside One Code (`/login` → "Sign in with
+  OpenRouter"). Free models carry a `:free` suffix —
+  `nvidia/nemotron-3-ultra-550b-a55b:free` is genuinely good.
+
+Then:
+
+```bash
+cd your-project
+one-code            # first run asks for a provider — pick one, paste the key
+```
+
+Inside the session: `/login` connects more providers, `/model` switches
+models mid-session. Env vars work too: `OPENCODE_API_KEY`,
+`OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and friends are
+picked up automatically.
 
 ## What you get
 
@@ -34,16 +58,13 @@ Every pi command works as `one-code <command>`: `one-code -p "…"` one-shots,
 `one-code -c` continues, `one-code --mode json` for scripts, `one-code
 --session <id>` resumes.
 
-## Already running pi?
+## The two One Code packages
 
-If you'd rather add One Code to your **own** pi install (shared config, your
-pi version), use the pi package instead:
+| npm package | What it is |
+|---|---|
+| **`one-code`** (this one) | The app. Bundles a pinned, tested pi; isolated state; zero pi knowledge required. **Most people want this.** |
+| [`one-code-extension`](https://www.npmjs.com/package/one-code-extension) | Just the extensions, for people already running pi: `pi install npm:one-code-extension`. Rides your pi version. |
 
-```bash
-pi install npm:one-code-extension
-```
-
-The app and the package are the same code; the app just pins a tested pi and
-isolates its state.
+Same code either way; the app just pins a tested pi and isolates its state.
 
 MIT © Isuru Wijesiri

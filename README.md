@@ -12,8 +12,14 @@ Free and open source (MIT). No lock-in, no subscription, no fork of anything —
 One Code is a package for the [pi coding agent](https://github.com/earendil-works/pi),
 so upstream improvements land as a version bump.
 
-**Recommended — the bundled app** (ships its own pinned pi, state isolated in
-`~/.one-code`, coexists with any existing `pi`):
+## Install
+
+One project, two npm packages — pick the one that fits you:
+
+| You | Install | Package |
+|---|---|---|
+| **Most people** (new to pi included) | `npm install -g one-code` | [`one-code`](https://www.npmjs.com/package/one-code) — the app: its own `one-code` command, a pinned pi bundled inside, state isolated in `~/.one-code`, coexists with any existing `pi` |
+| Already running pi, want it on your own install | `pi install npm:one-code-extension` | [`one-code-extension`](https://www.npmjs.com/package/one-code-extension) — just the extensions; rides your pi (tested against pi 0.83–0.84, warns outside that range) |
 
 ```bash
 npm install -g one-code
@@ -23,22 +29,35 @@ cd your-project && one-code
 Or via Homebrew (also installs Node for you):
 
 ```bash
-brew install IsuruMaduranga/one-code/one-code
+brew install isuruwijesiri/one-code/one-code
 ```
 
-**Or as a pi package**, if you already run pi and want One Code on your own
-install (tested against pi 0.83–0.84; a startup notice warns outside that
-range):
+> The npm route needs **Node 22.19+**.
+
+## Two-minute quickstart — free, no card
+
+You need one model-provider key. Two providers hand out **free frontier-adjacent
+models** today, so you can try the whole thing for nothing:
+
+- **OpenCode Zen** ([opencode.ai/zen](https://opencode.ai/zen)) — sign up, copy
+  your API key. Free model: `deepseek-v4-flash-free`.
+- **OpenRouter** ([openrouter.ai](https://openrouter.ai)) — sign up, create a
+  key (or just OAuth from inside One Code). Free models carry a `:free` suffix —
+  `nvidia/nemotron-3-ultra-550b-a55b:free` is genuinely good.
+
+Then:
 
 ```bash
-npm install -g @earendil-works/pi-coding-agent   # the pi harness
-pi install npm:one-code-extension                 # add One Code
-cd your-project && pi                              # go
+cd your-project
+one-code            # first run asks for a provider — pick one, paste the key
 ```
 
-> Needs **Node 22.19+** (the Homebrew route handles this for you) and
-> credentials for at least one model provider (prompts on first run, or use
-> `/login`).
+Inside the session: `/login` connects more providers (OpenRouter supports
+"Sign in with OpenRouter", no key-copying needed), `/model` switches models.
+Env vars work too: `OPENCODE_API_KEY`, `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`,
+`OPENAI_API_KEY`, and friends are picked up automatically.
+
+*(On the pi-package install, the same applies with `pi` as the command.)*
 
 ---
 
