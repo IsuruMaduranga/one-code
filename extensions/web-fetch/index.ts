@@ -142,7 +142,7 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 
 			let entry: CacheEntry;
 			if (contentType.includes("html")) {
-				const extracted = htmlToMarkdown(body, url);
+				const extracted = await htmlToMarkdown(body, url);
 				entry = {
 					markdown: extracted.markdown,
 					title: extracted.title,

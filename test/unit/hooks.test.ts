@@ -229,4 +229,23 @@ describe("plugin hooks", () => {
 		);
 		expect(loadPluginHooks(claudeDir, []).at(0)?.config.PreToolUse).toBeDefined();
 	});
+
+	it("caches by mtime: same mtime serves the cached parse, a bump re-reads", () => {
+		const hooksPath = join(installPath, "hooks", "hooks.json");
+		const config = (command: string) => JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ type: "command", command }] }] } });
+		writeFileSync(hooksPath, config("first"));
+		const t = new Date("2026-01-01T00:00:00Z");
+		utimesSync(hooksPath, t, t);
+		expect(loadPluginHooks(claudeDir, []).at(0)?.config.PreToolUse?.[0]?.hooks[0]?.command).toBe("first");
+
+		// Rewrite with the mtime pinned back: the cache must still serve the old parse.
+		writeFileSync(hooksPath, config("second"));
+		utimesSync(hooksPath, t, t);
+		expect(loadPluginHooks(claudeDir, []).at(0)?.config.PreToolUse?.[0]?.hooks[0]?.command).toBe("first");
+
+		// A real mtime bump invalidates.
+		const later = new Date("2026-01-01T00:00:01Z");
+		utimesSync(hooksPath, later, later);
+		expect(loadPluginHooks(claudeDir, []).at(0)?.config.PreToolUse?.[0]?.hooks[0]?.command).toBe("second");
+	});
 });

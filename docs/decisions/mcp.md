@@ -63,3 +63,42 @@ really a missing token.
 an explanatory message** rather than connected with an empty credential:
 `MCP server "github" failed: not started — GITHUB_PERSONAL_ACCESS_TOKEN not set in
 the environment`.
+
+## Background connect: session_start no longer blocks the prompt (2026-08-10)
+
+The connect ran as an awaited `session_start` handler — and pi awaits every
+extension's `session_start` serially before the interactive input loop opens
+(findings §15). With two remote HTTP servers configured (user-level deepwiki
+plus the context7 plugin), that made the MCP handshake **the entire perceived
+startup**: 4.9s to a usable prompt measured with `PI_STARTUP_BENCHMARK`, of
+which everything-but-mcp was 0.24s.
+
+**Decision:** in the interactive main session, `connectAll` runs in the
+background — `session_start` kicks it off and returns. Tools register as each
+server answers (late registration is what `tool-search` was already built to
+handle for exactly this producer), `/mcp` reports `still connecting` until the
+connect settles, and per-server failures surface through the existing
+notify-on-failure path. Measured after: 501ms to a usable prompt; both remote
+servers connected and registered their tools a few seconds later while the
+session was already live.
+
+Two paths deliberately still **await** the connect:
+
+- **Print-mode one-shots** (`!ctx.hasUI`): the single turn starts immediately
+  and would race past tools that are not registered yet.
+- **Subagent RPC children** (`PI_SUBAGENT_CHILD=1` — they have `hasUI: true`,
+  so the env var is the discriminator): same race, and a child is often
+  spawned specifically to use an MCP tool.
+
+Hardening that came with the change: the background promise is caught (an
+unhandled rejection would crash Node; per-server failures were already
+collected, so the catch only guards setup bugs and surfaces them loud via
+notify), and a connection that lands after `session_shutdown` is closed
+immediately instead of leaking its transport. The MCP SDK import also moved
+into the first `connect()` call — ~70-80ms off every startup, and a session
+with zero configured servers never loads it.
+
+Accepted trade-off: the first turn(s) of an interactive session may run before
+MCP `instructions` reminders and tool registrations exist. The tools are
+deferred behind `tool_search` anyway, so the model discovers them on first
+search after registration.

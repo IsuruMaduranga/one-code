@@ -5,6 +5,7 @@ import {
 	ccToolRenderers,
 	collapseLines,
 	customMessageText,
+	linesComponent,
 	notificationBody,
 	notificationComponent,
 	resultLines,
@@ -218,6 +219,36 @@ describe("truncateLine", () => {
 		let visible = 0;
 		for (const chunk of cut.split(/\x1b\[[0-9;]*m/)) visible += chunk.length;
 		expect(visible).toBeLessThanOrEqual(20);
+	});
+
+	it("keeps a painted line whose raw length exceeds the width but visible width fits", () => {
+		// 20 visible chars + escapes that push raw length past width 25.
+		const painted = `\x1b[31m\x1b[1m${"x".repeat(20)}\x1b[0m`;
+		expect(painted.length).toBeGreaterThan(25);
+		expect(truncateLine(painted, 25)).toBe(painted);
+	});
+});
+
+describe("linesComponent memoization", () => {
+	it("builds once per width and serves repeat frames from cache", () => {
+		const build = vi.fn((width: number) => [`w${width}`]);
+		const component = linesComponent(build);
+		expect(component.render(80)).toEqual(["w80"]);
+		expect(component.render(80)).toEqual(["w80"]);
+		expect(component.render(80)).toEqual(["w80"]);
+		expect(build).toHaveBeenCalledTimes(1);
+		component.render(120);
+		component.render(80);
+		expect(build).toHaveBeenCalledTimes(2); // new width builds; old width still cached
+	});
+
+	it("invalidate clears the cache so a theme swap repaints", () => {
+		const build = vi.fn((width: number) => [`w${width}`]);
+		const component = linesComponent(build);
+		component.render(80);
+		component.invalidate?.();
+		component.render(80);
+		expect(build).toHaveBeenCalledTimes(2);
 	});
 });
 

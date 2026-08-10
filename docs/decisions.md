@@ -108,6 +108,7 @@ Full context: [`decisions/mcp.md`](decisions/mcp.md).
 
 - **[MCP — our own client on the official SDK](decisions/mcp.md#mcp-our-own-client-on-the-official-sdk)** — `.mcp.json` discovery, `mcp__server__tool` naming, resources.
 - **[MCP servers with unset credentials](decisions/mcp.md#mcp-servers-with-unset-credentials)** — how a server with missing credentials is handled rather than crashing discovery.
+- **[Background connect: session_start no longer blocks the prompt](decisions/mcp.md#background-connect-session_start-no-longer-blocks-the-prompt-2026-08-10)** — the awaited MCP handshake *was* the 4.9s startup (findings §15); now fire-and-forget in the interactive session (501ms measured), still awaited in one-shots and subagent children; SDK import lazified.
 
 ## LSP
 
@@ -129,6 +130,7 @@ Full context: [`decisions/tui.md`](decisions/tui.md).
 - **[Thinking collapsed by default, expandable with ctrl+t](decisions/tui.md#thinking-collapsed-by-default-expandable-with-ctrlt-unreviewed)** *(unreviewed)* — pi's own `hideThinkingBlock` defaulted on (only when the user never chose), `✻ Thinking…` label via `setHiddenThinkingLabel`; the write lands next session (settings cached at startup).
 - **[Built-in tools joined the ● language; banner cut to four lines](decisions/tui.md#built-in-tools-joined-the--language-banner-cut-to-four-lines-unreviewed)** *(unreviewed)* — `tool-style` wraps pi's read/write/edit/grep/find/ls renderers (`● Label(arg)` + base result under a `⎿` elbow, edit's diff preview kept); one curated hint line, sections as counts, warnings point at /lsp & /mcp.
 - **[Fullscreen (alt-screen) for Claude Code's clean exit — a setting, not extension code](decisions/tui.md#fullscreen-alt-screen-for-claude-codes-clean-exit-a-setting-not-extension-code-unreviewed)** *(unreviewed)* — CC's clean exit is the terminal alt-screen buffer; pi has it as `tuiMode: "fullscreen"`, but the renderer is a pi-core startup choice with no extension hook, so One Code recommends the setting rather than owning it.
+- **[Render memoization: components cache by width](decisions/tui.md#render-memoization-components-cache-by-width-2026-08-10)** — pi-tui renders every mounted component every frame (findings §15), so `linesComponent` memoizes by width (safe: state changes mint fresh components; `invalidate()` clears); `truncateLine` got a raw-length fast path. Rule: every custom renderer component must memoize `render(width)`.
 
 ## Hooks
 

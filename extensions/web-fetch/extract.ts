@@ -2,9 +2,34 @@
  * URL handling and HTML → markdown extraction (pure).
  */
 
-import { Readability } from "@mozilla/readability";
-import { parseHTML } from "linkedom";
-import TurndownService from "turndown";
+import type TurndownService from "turndown";
+
+/**
+ * linkedom + turndown + readability cost ~90ms to load (findings §15), so they
+ * are imported on the first fetch rather than at startup. The promise is
+ * cached: concurrent fetches share one load.
+ */
+let libsPromise:
+	| Promise<{
+			Readability: typeof import("@mozilla/readability").Readability;
+			parseHTML: typeof import("linkedom").parseHTML;
+			Turndown: typeof TurndownService;
+	  }>
+	| undefined;
+
+function loadLibs() {
+	libsPromise ??= Promise.all([import("@mozilla/readability"), import("linkedom"), import("turndown")]).then(
+		([readability, linkedom, turndown]) => ({
+			Readability: readability.Readability,
+			parseHTML: linkedom.parseHTML,
+			// turndown is CJS (`export =`): the class arrives as `default` under
+			// Node's ESM interop, or as the module itself under require-style loaders.
+			Turndown:
+				(turndown as { default?: typeof TurndownService }).default ?? (turndown as unknown as typeof TurndownService),
+		}),
+	);
+	return libsPromise;
+}
 
 export interface NormalizedUrl {
 	url: string;
@@ -40,8 +65,8 @@ export function isSameHost(a: string, b: string): boolean {
 	}
 }
 
-function createTurndown(): TurndownService {
-	const turndown = new TurndownService({
+function createTurndown(Turndown: typeof TurndownService): TurndownService {
+	const turndown = new Turndown({
 		headingStyle: "atx",
 		codeBlockStyle: "fenced",
 		bulletListMarker: "-",
@@ -63,9 +88,10 @@ export interface ExtractResult {
  * first (it strips navigation and boilerplate); if it finds no article — common
  * for API references and landing pages — the whole body is converted instead.
  */
-export function htmlToMarkdown(html: string, url: string): ExtractResult {
+export async function htmlToMarkdown(html: string, _url: string): Promise<ExtractResult> {
+	const { Readability, parseHTML, Turndown } = await loadLibs();
 	const { document } = parseHTML(html);
-	const turndown = createTurndown();
+	const turndown = createTurndown(Turndown);
 
 	// linkedom's Document is structurally compatible with what Readability needs
 	// but is not the DOM lib's Document type, hence the cast.

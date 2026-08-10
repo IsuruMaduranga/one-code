@@ -36,12 +36,17 @@ export interface ThemeLike {
  * component when its output changes — so an overflow can hide in static
  * content for weeks, then kill pi the moment something makes it re-render.
  */
+const ANSI_AT = /\x1b\[[0-9;]*m/y;
+
 export function truncateLine(line: string, width: number): string {
 	if (width <= 0) return "";
-	const ANSI = /^\x1b\[[0-9;]*m/;
+	// Raw length bounds visible width (escapes only ever add), so a line whose
+	// raw length fits needs no scan — the hot path for nearly every line.
+	if (line.length <= width) return line;
 	let visible = 0;
 	for (let i = 0; i < line.length; ) {
-		const escape = line.slice(i).match(ANSI);
+		ANSI_AT.lastIndex = i;
+		const escape = ANSI_AT.exec(line);
 		if (escape) {
 			i += escape[0].length;
 			continue;
@@ -54,7 +59,8 @@ export function truncateLine(line: string, width: number): string {
 	let out = "";
 	let used = 0;
 	for (let i = 0; i < line.length && used < width - 1; ) {
-		const escape = line.slice(i).match(ANSI);
+		ANSI_AT.lastIndex = i;
+		const escape = ANSI_AT.exec(line);
 		if (escape) {
 			out += escape[0];
 			i += escape[0].length;
@@ -67,13 +73,29 @@ export function truncateLine(line: string, width: number): string {
 	return `${out}\x1b[0m…`;
 }
 
-/** Wrap a line-producing function as a component; lines are width-truncated. */
+/**
+ * Wrap a line-producing function as a component; lines are width-truncated.
+ *
+ * The result is memoized by width: pi-tui calls every mounted component's
+ * `render(width)` on every frame (findings §15), while any state change makes
+ * pi re-invoke the renderer factory and mint a fresh component — so within one
+ * component's lifetime `build` is pure and the cache can only go stale through
+ * `invalidate()` (theme swap), which clears it.
+ */
 export function linesComponent(build: (width: number) => string[]): TuiComponent {
+	const cache = new Map<number, string[]>();
 	return {
 		render(width: number): string[] {
-			return build(width).map((line) => truncateLine(line, width));
+			const hit = cache.get(width);
+			if (hit) return hit;
+			const lines = build(width).map((line) => truncateLine(line, width));
+			if (cache.size >= 4) cache.clear(); // resizes produce a few widths, never many
+			cache.set(width, lines);
+			return lines;
 		},
-		invalidate() {},
+		invalidate() {
+			cache.clear();
+		},
 	};
 }
 
@@ -391,17 +413,26 @@ export function ccWrapBuiltinRenderers<TArgs = any>(
 			} catch {
 				return linesComponent(() => [head()]);
 			}
+			// Memoized by width for settled calls (same contract as linesComponent);
+			// a partial call streams through its base component, so it stays live.
+			const cache = new Map<number, string[]>();
 			return {
 				render(width: number): string[] {
+					const hit = !context.isPartial && cache.get(width);
+					if (hit) return hit;
 					// The base component is a padded Box: skip its blank padding
 					// (painted lines — ANSI-aware test), then its header line —
 					// ours replaces it.
 					const lines: string[] = [...(inner.render(width) ?? [])];
 					while (lines.length > 0 && isBlankLine(lines[0])) lines.shift();
 					lines.shift();
-					return [head(), ...lines].map((line) => truncateLine(line, width));
+					const out = [head(), ...lines].map((line) => truncateLine(line, width));
+					if (cache.size >= 4) cache.clear();
+					cache.set(width, out);
+					return out;
 				},
 				invalidate() {
+					cache.clear();
 					inner.invalidate?.();
 				},
 			};
@@ -419,13 +450,22 @@ export function ccWrapBuiltinRenderers<TArgs = any>(
 				if (!text) return linesComponent(() => []);
 				return linesComponent(() => resultLines(theme, text, options.expanded, context.isError));
 			}
+			// Same memoization as the call wrapper: settled results are static.
+			const cache = new Map<number, string[]>();
 			return {
 				render(width: number): string[] {
+					const hit = !options.isPartial && cache.get(width);
+					if (hit) return hit;
 					const innerLines: string[] = inner.render(Math.max(10, width - 5)) ?? [];
-					if (innerLines.every((line) => line.trim() === "")) return [];
-					return elbowIndent(innerLines).map((line) => truncateLine(line, width));
+					const out = innerLines.every((line) => line.trim() === "")
+						? []
+						: elbowIndent(innerLines).map((line) => truncateLine(line, width));
+					if (cache.size >= 4) cache.clear();
+					cache.set(width, out);
+					return out;
 				},
 				invalidate() {
+					cache.clear();
 					inner.invalidate?.();
 				},
 			};

@@ -3,10 +3,34 @@
  * lifecycle, timeouts, and failure reporting.
  */
 
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { McpServer } from "./config.ts";
+
+/**
+ * The MCP SDK costs ~70-80ms to load (findings §15), so it is imported on the
+ * first connect rather than at startup — a session with no configured servers
+ * never pays for it. The promise is cached: concurrent connects share one load.
+ */
+let sdkPromise:
+	| Promise<{
+			Client: typeof import("@modelcontextprotocol/sdk/client/index.js").Client;
+			StdioClientTransport: typeof import("@modelcontextprotocol/sdk/client/stdio.js").StdioClientTransport;
+			StreamableHTTPClientTransport: typeof import("@modelcontextprotocol/sdk/client/streamableHttp.js").StreamableHTTPClientTransport;
+	  }>
+	| undefined;
+
+function loadSdk() {
+	sdkPromise ??= Promise.all([
+		import("@modelcontextprotocol/sdk/client/index.js"),
+		import("@modelcontextprotocol/sdk/client/stdio.js"),
+		import("@modelcontextprotocol/sdk/client/streamableHttp.js"),
+	]).then(([client, stdio, http]) => ({
+		Client: client.Client,
+		StdioClientTransport: stdio.StdioClientTransport,
+		StreamableHTTPClientTransport: http.StreamableHTTPClientTransport,
+	}));
+	return sdkPromise;
+}
 
 const CONNECT_TIMEOUT_MS = 20_000;
 const CALL_TIMEOUT_MS = 120_000;
@@ -58,6 +82,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<
 }
 
 export async function connect(server: McpServer): Promise<Connection> {
+	const { Client, StdioClientTransport, StreamableHTTPClientTransport } = await loadSdk();
 	const client = new Client({ name: "one-code", version: "0.1.0" }, { capabilities: {} });
 
 	const transport =

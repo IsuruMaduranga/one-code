@@ -30,7 +30,7 @@
  * for an anthropic-messages endpoint you have confirmed accepts it.
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -86,13 +86,23 @@ export function withClearThinking(payload: Record<string, unknown>): Record<stri
 	};
 }
 
+/** mtime cache: this runs on every provider request, the hottest path there is. */
+let authCache: { mtimeMs: number; oauth: boolean } | undefined;
+
 /** OAuth logins need pi's identity betas kept in the header we overwrite. */
 export function isAnthropicOAuth(): boolean {
+	const path = join(os.homedir(), ".pi", "agent", "auth.json");
 	try {
-		const auth = JSON.parse(readFileSync(join(os.homedir(), ".pi", "agent", "auth.json"), "utf8"));
+		const mtimeMs = statSync(path).mtimeMs;
+		const cached = authCache;
+		if (cached && cached.mtimeMs === mtimeMs) return cached.oauth;
+		const auth = JSON.parse(readFileSync(path, "utf8"));
 		const entry = auth?.anthropic;
-		return entry?.type === "oauth" || typeof entry?.refresh === "string";
+		const oauth = entry?.type === "oauth" || typeof entry?.refresh === "string";
+		authCache = { mtimeMs, oauth };
+		return oauth;
 	} catch {
+		authCache = undefined;
 		return false;
 	}
 }

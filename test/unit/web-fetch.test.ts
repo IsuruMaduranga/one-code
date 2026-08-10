@@ -45,8 +45,8 @@ describe("htmlToMarkdown", () => {
 		</article>
 	</body></html>`;
 
-	it("extracts readable content as markdown", () => {
-		const result = htmlToMarkdown(article, "https://example.com/guide");
+	it("extracts readable content as markdown", async () => {
+		const result = await htmlToMarkdown(article, "https://example.com/guide");
 		expect(result.markdown).toContain("Install");
 		expect(result.markdown).toContain("`setup`");
 		// turndown indents list items as "-   item"
@@ -55,24 +55,24 @@ describe("htmlToMarkdown", () => {
 		expect(result.fallback).toBe(false);
 	});
 
-	it("keeps the document title", () => {
-		expect(htmlToMarkdown(article, "https://example.com/guide").title).toBe("Guide");
+	it("keeps the document title", async () => {
+		expect((await htmlToMarkdown(article, "https://example.com/guide")).title).toBe("Guide");
 	});
 
-	it("strips navigation chrome from an article", () => {
-		expect(htmlToMarkdown(article, "https://example.com/guide").markdown).not.toContain("Navigation");
+	it("strips navigation chrome from an article", async () => {
+		expect((await htmlToMarkdown(article, "https://example.com/guide")).markdown).not.toContain("Navigation");
 	});
 
-	it("flags the fallback path when there is no extractable article", () => {
-		const result = htmlToMarkdown("<html><head><title>E</title></head><body></body></html>", "https://example.com/");
+	it("flags the fallback path when there is no extractable article", async () => {
+		const result = await htmlToMarkdown("<html><head><title>E</title></head><body></body></html>", "https://example.com/");
 		expect(result.fallback).toBe(true);
 		expect(result.title).toBe("E");
 	});
 
-	it("drops script and style content", () => {
+	it("drops script and style content", async () => {
 		const withScript =
 			"<html><body><script>alert('x')</script><style>.a{color:red}</style><p>visible text here</p></body></html>";
-		const markdown = htmlToMarkdown(withScript, "https://example.com/").markdown;
+		const markdown = (await htmlToMarkdown(withScript, "https://example.com/")).markdown;
 		expect(markdown).toContain("visible text here");
 		expect(markdown).not.toContain("alert");
 		expect(markdown).not.toContain("color:red");

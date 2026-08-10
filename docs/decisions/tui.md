@@ -161,3 +161,42 @@ pinned reference clone (v0.83.0) but was renamed `tuiMode` in installed pi
 
 Set in `~/.pi/agent/settings.json` on 2026-08-10; live clean-exit behavior to be
 confirmed by the user.
+
+## Render memoization: components cache by width (2026-08-10)
+
+pi-tui calls `render(width)` on **every mounted component on every frame**
+(~60fps during streaming, every keystroke; fullscreen mode additionally
+re-measures the full unclipped scrollback to compute scroll height) — findings
+§15. Our `linesComponent` recomputed `build(width)` plus `truncateLine`'s
+per-character ANSI scan on every call, so every historical `●`/`⎿` row taxed
+every frame for the life of the session. Profiled on a 750-entry thread:
+`lib/tui-render.ts` was the largest app-level CPU consumer during typing
+(~0.5s self time per 10s, plus ~1s induced in pi-tui width/wrap utils).
+
+**Decision:** memoize by width inside the component, and rely on the
+factory-per-state-change contract for correctness:
+
+- Any state change (spinner tick, args streaming in, result arriving, expand
+  toggle) makes pi re-invoke `renderCall`/`renderResult`, minting a **fresh
+  component with a fresh cache** — so within one component's lifetime `build`
+  is pure and a `Map<width, lines>` (capped at 4 entries) cannot go stale.
+- `invalidate()` clears the cache — that is the path pi-tui uses for theme
+  swaps and resizes.
+- The `ccWrapBuiltinRenderers` wrappers cache only when the call/result is
+  settled (`!isPartial`): a live base component may stream internally without
+  a factory re-run, so in-flight rows stay uncached.
+- `truncateLine` gained the structural fast path: raw length bounds visible
+  width (escapes only add), so `line.length <= width` returns immediately —
+  the hot path for nearly every line; the scan itself now uses a sticky
+  module-level regex instead of per-character `slice().match()` allocations.
+
+Verified: same typing/scrolling profile after the change — `truncateLine` and
+`tui-render.ts` no longer appear in the top-30 functions at all; remaining
+per-frame cost is pi-tui's own (upstream candidates: `docs/upstream_prs.md`
+#2-#4). Unit tests pin the contract (build-once-per-width, invalidate clears).
+
+**Rule for future renderers:** a component returned from
+`renderCall`/`renderResult`/`registerMessageRenderer` must memoize its
+`render(width)` (use `linesComponent`, or replicate its cache) — an uncached
+component re-renders 60×/s for as long as it is mounted, and the cost
+compounds linearly with thread length.

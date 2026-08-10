@@ -10,7 +10,9 @@
  * what `tool_search` exists to avoid.
  *
  * Servers are connected once per session (their tool lists are needed to
- * register anything) and closed on `session_shutdown`.
+ * register anything) and closed on `session_shutdown`. In the interactive main
+ * session the connect runs in the background so remote servers cannot delay
+ * the prompt; one-shots and subagent children await it (findings §15).
  */
 
 import os from "node:os";
@@ -116,6 +118,11 @@ export default function mcpExtension(pi: ExtensionAPI) {
 		}
 	};
 
+	/** Resolves when every configured server has connected or failed. */
+	let connecting: Promise<void> | undefined;
+	let connectSettled = false;
+	let shuttingDown = false;
+
 	const connectAll = async (ctx: ExtensionContext) => {
 		servers = loadServers(ctx.cwd, os.homedir(), process.env, discoverPlugins(join(os.homedir(), ".claude")).mcpConfigs);
 		if (servers.length === 0) return;
@@ -140,6 +147,13 @@ export default function mcpExtension(pi: ExtensionAPI) {
 				}
 			}),
 		);
+
+		// The session may have shut down while a slow server was still answering;
+		// a connection landing now would leak its transport, so close it instead.
+		if (shuttingDown) {
+			await Promise.all(results.map((result) => (result.connection ? close(result.connection) : undefined)));
+			return;
+		}
 
 		for (const result of results) {
 			if (result.connection) {
@@ -309,10 +323,30 @@ export default function mcpExtension(pi: ExtensionAPI) {
 	};
 
 	pi.on("session_start", async (_event, ctx) => {
-		await connectAll(ctx);
+		// pi awaits session_start handlers serially before the prompt opens, and
+		// remote servers take seconds to answer — awaiting here was the entire
+		// "slow startup" (4.9s → 0.24s measured, findings §15). In the interactive
+		// main session the connect runs in the background: tools register as each
+		// server answers (tool_search handles late defers), and /mcp shows
+		// "connecting" until it settles. Print-mode one-shots and subagent RPC
+		// children still await — their single turn starts immediately and would
+		// race past tools that are not registered yet.
+		connecting = connectAll(ctx).catch((error) => {
+			// A rejection here would otherwise be an unhandled-promise crash in
+			// the background path; per-server failures are already collected in
+			// `failures`, so this only catches setup bugs — surface them loud.
+			if (ctx.hasUI) ctx.ui.notify(`MCP startup failed: ${(error as Error).message}`, "error");
+		});
+		connecting.finally(() => {
+			connectSettled = true;
+		});
+		if (!ctx.hasUI || process.env.PI_SUBAGENT_CHILD) {
+			await connecting;
+		}
 	});
 
 	pi.on("session_shutdown", async () => {
+		shuttingDown = true;
 		await Promise.all([...connections.values()].map((connection) => close(connection)));
 		connections.clear();
 	});
@@ -331,7 +365,10 @@ export default function mcpExtension(pi: ExtensionAPI) {
 					return `connected ${server.name} — ${connection.tools.length} tools, ${connection.resources.length} resources (${server.source})${warning}`;
 				}
 				const failure = failures.find((f) => f.server.name === server.name);
-				return `failed    ${server.name} — ${failure?.error ?? "not connected"} (${server.source})`;
+				if (failure) return `failed    ${server.name} — ${failure.error} (${server.source})`;
+				return connectSettled
+					? `failed    ${server.name} — not connected (${server.source})`
+					: `…         ${server.name} — still connecting (${server.source})`;
 			});
 			ctx.ui.notify(lines.join("\n"), "info");
 		},
