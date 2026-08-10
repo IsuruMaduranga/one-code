@@ -83,7 +83,10 @@ try {
 		firstRun = true;
 		// Seeding settings also skips pi's first-time setup, which would offer
 		// pi's stock themes; One Code's own theme is the branded first-run.
-		settings = { theme: "one-code", quietStartup: true };
+		// Fullscreen (alt-screen) is the One Code look — the TUI owns the
+		// screen and exits clean. Seeded only here, so users who switch back
+		// to regular mode keep their choice.
+		settings = { theme: "one-code", quietStartup: true, tuiMode: "fullscreen" };
 	}
 	const packages = Array.isArray(settings.packages) ? settings.packages : [];
 	const sourceOf = (entry) => (typeof entry === "string" ? entry : entry?.source);

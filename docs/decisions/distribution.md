@@ -97,8 +97,11 @@ with a date before <now−1d>"; either schedule the formula bump a day after
 the npm publish or accept the gap.
 
 Registering the package also seeds first-run settings (`theme: "one-code"`,
-`quietStartup: true`), which doubles as skipping pi's stock first-time theme
-picker — the branded first run. Three hardcoded `~/.pi` paths found during
+`quietStartup: true`, and — from 0.1.3 — `tuiMode: "fullscreen"`, the
+alt-screen One Code look per the fullscreen decision in `tui.md`), which
+doubles as skipping pi's stock first-time theme picker — the branded first
+run. Seeded only when no settings file exists, so a user's later changes
+stick. Three hardcoded `~/.pi` paths found during
 this work (quiet-startup detection, the skills listing, the Anthropic-OAuth
 check) now resolve through pi's `getAgentDir()`, which honours the isolation
 env var.
