@@ -74,6 +74,16 @@ app. `one-code --version` reports the app version with the pinned pi in
 parentheses. Both paths live-verified (drift warning and update notice each
 fired against a real TUI).
 
+**Versioning is lockstep.** Both packages share one version per release, even
+when only one changed, and the app pins the extension at exactly its own
+version — so one git tag (`vX.Y.Z`) names the whole release, GitHub Releases
+map one-to-one, and a pin/version mismatch is an instantly visible release
+mistake. Adopted at 0.1.2 (the app skipped 0.1.1 to converge); the cost is an
+occasional republish of an unchanged package. The Homebrew tap is
+`IsuruMaduranga/homebrew-one-ai` — named for the brand umbrella so future
+tools join the same tap — giving `brew install isurumaduranga/one-ai/one-code`
+(two-segment installs are not brew grammar; verified empirically).
+
 Registering the package also seeds first-run settings (`theme: "one-code"`,
 `quietStartup: true`), which doubles as skipping pi's stock first-time theme
 picker — the branded first run. Three hardcoded `~/.pi` paths found during

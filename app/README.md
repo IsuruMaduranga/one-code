@@ -14,7 +14,13 @@ npm install -g @one-ai/one-code
 cd your-project && one-code
 ```
 
-Needs **Node 22.19+**. (A Homebrew tap is coming soon.)
+Or via Homebrew (installs Node for you too):
+
+```bash
+brew install isurumaduranga/one-ai/one-code
+```
+
+The npm route needs **Node 22.19+**.
 
 ## Two-minute quickstart — free, no card
 
