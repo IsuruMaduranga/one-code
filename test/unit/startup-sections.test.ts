@@ -52,7 +52,7 @@ describe("skillNames", () => {
 			writeFileSync(join(base, name, "SKILL.md"), "s");
 		}
 		mkdirSync(join(home, ".claude", "skills", "not-a-skill"), { recursive: true });
-		expect(skillNames(cwd, home)).toEqual(["alpha", "beta"]);
+		expect(skillNames(cwd, home, join(home, ".pi", "agent"))).toEqual(["alpha", "beta"]);
 	});
 });
 
@@ -98,6 +98,6 @@ describe("collectStartupSections", () => {
 		const home = scratch();
 		const themes = scratch();
 		writeFileSync(join(themes, "one-code.json"), "{}");
-		expect(collectStartupSections(cwd, home, themes)).toEqual([{ label: "themes", items: ["one-code"] }]);
+		expect(collectStartupSections(cwd, home, themes, join(home, ".pi", "agent"))).toEqual([{ label: "themes", items: ["one-code"] }]);
 	});
 });

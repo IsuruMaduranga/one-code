@@ -7,8 +7,9 @@
  * own compact versions of the sections that ARE useful. pi's resourceLoader
  * is not exposed to extensions, so these are re-derived the same way our
  * other extensions derive them (claude-compat's skill dirs, pi's git-root
- * context walk); pi-only extras such as ~/.pi/agent/skills are included for
- * parity.
+ * context walk); pi-only extras such as the agent dir's skills/ are included
+ * for parity (the caller passes the live agent dir, which honours
+ * PI_CODING_AGENT_DIR isolation).
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -45,11 +46,11 @@ export function contextFileNames(cwd: string): string[] {
  * when <dir>/<name>/SKILL.md exists — existsSync follows symlinked skill
  * directories, which readdir's isDirectory() would miss.
  */
-export function skillNames(cwd: string, home: string): string[] {
+export function skillNames(cwd: string, home: string, agentDir: string): string[] {
 	const dirs = [
 		join(cwd, ".claude", "skills"),
 		join(home, ".claude", "skills"),
-		join(home, ".pi", "agent", "skills"),
+		join(agentDir, "skills"),
 	];
 	const names = new Set<string>();
 	for (const dir of dirs) {
@@ -140,10 +141,10 @@ export function quietStartupEnabled(piSettingsPath: string): boolean {
 	}
 }
 
-export function collectStartupSections(cwd: string, home: string, packageThemesDir: string): StartupSection[] {
+export function collectStartupSections(cwd: string, home: string, packageThemesDir: string, agentDir: string): StartupSection[] {
 	const sections: StartupSection[] = [
 		{ label: "context", items: contextFileNames(cwd) },
-		{ label: "skills", items: skillNames(cwd, home) },
+		{ label: "skills", items: skillNames(cwd, home, agentDir) },
 		{ label: "workflows", items: workflowNames(cwd, home) },
 		{ label: "themes", items: themeNames(packageThemesDir) },
 	];

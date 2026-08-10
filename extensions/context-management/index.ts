@@ -31,9 +31,8 @@
  */
 
 import { readFileSync, statSync } from "node:fs";
-import os from "node:os";
 import { join } from "node:path";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, getAgentDir } from "@earendil-works/pi-coding-agent";
 
 const CLEAR_THINKING_EDIT = { type: "clear_thinking_20251015", keep: "all" };
 const CONTEXT_MANAGEMENT_BETA = "context-management-2025-06-27";
@@ -91,7 +90,9 @@ let authCache: { mtimeMs: number; oauth: boolean } | undefined;
 
 /** OAuth logins need pi's identity betas kept in the header we overwrite. */
 export function isAnthropicOAuth(): boolean {
-	const path = join(os.homedir(), ".pi", "agent", "auth.json");
+	// getAgentDir() honours PI_CODING_AGENT_DIR, so an isolated one-code app
+	// reads its own auth.json rather than ~/.pi's.
+	const path = join(getAgentDir(), "auth.json");
 	try {
 		const mtimeMs = statSync(path).mtimeMs;
 		const cached = authCache;

@@ -11,7 +11,8 @@ entry. (Companion docs: [`findings.md`](findings.md) for how pi behaves,
 
 Full context: [`decisions/distribution.md`](decisions/distribution.md).
 
-- **[Distribution: pi package, not a wrapper binary](decisions/distribution.md#distribution-pi-package-not-a-wrapper-binary)** — ship as an installable pi package because pi's rebranding resolves from pi's own `package.json`; a dependent can't rebrand it, and a package keeps upstream upgrades a version bump away.
+- **[Two artifacts from one codebase: the app and the package](decisions/distribution.md#two-artifacts-from-one-codebase-the-app-and-the-package-2026-08-10-unreviewed)** *(unreviewed)* — npm `one-code` (bundled app: pinned pi, `~/.one-code` isolation via `PI_CODING_AGENT_DIR`, package-registration load shape, stdout rebranding, own update check) + npm `one-code-extension` (peer-dep pi package with a runtime tested-range warning); Homebrew tap delivers the app.
+- **[Distribution: pi package, not a wrapper binary](decisions/distribution.md#distribution-pi-package-not-a-wrapper-binary)** — *(partially superseded by the two-artifact model)* ship as an installable pi package because pi's rebranding resolves from pi's own `package.json`; a dependent can't rebrand it, and a package keeps upstream upgrades a version bump away.
 - **[Community packages: adopted where they work](decisions/distribution.md#community-packages-adopted-where-they-work)** — prefer ecosystem packages, but trial first: only `pi-ask-user` survived; `pi-subagents` was rejected (children SIGKILLed ~29 ms after spawn here).
 - **[Publish readiness (Phase 7)](decisions/distribution.md#publish-readiness-phase-7)** — what's done and what remains before `npm publish` (metadata, tarball, install-path verification).
 

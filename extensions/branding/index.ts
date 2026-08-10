@@ -18,7 +18,8 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, SettingsManager, VERSION as PI_VERSION } from "@earendil-works/pi-coding-agent";
+import { piVersionWarning } from "../lib/pi-version.ts";
 import {
 	PERMISSION_STATUS_CHANNEL,
 	permissionModeDisplay,
@@ -279,6 +280,10 @@ export default function brandingExtension(pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
 		ctx.ui.setHiddenThinkingLabel(THINKING_LABEL);
 		installPromptMarker(ctx as unknown as { hasUI: boolean; mode: string; ui: BrandingEditorUI });
+		// Soft drift guard: warn once at startup when the hosting pi is outside
+		// the range this release was tested against (see lib/pi-version.ts).
+		const versionWarning = piVersionWarning(PI_VERSION);
+		if (versionWarning) ctx.ui.notify(versionWarning, "warning");
 	});
 
 	if (process.env.CC_NO_BANNER === "1") return;
@@ -319,8 +324,11 @@ export default function brandingExtension(pi: ExtensionAPI) {
 		// With pi's own listing silenced, the banner carries compact sections
 		// instead (minus the internal [Extensions] noise).
 		const home = os.homedir();
-		const sections = quietStartupEnabled(join(home, ".pi", "agent", "settings.json"))
-			? collectStartupSections(ctx.cwd, home, join(dirname(fileURLToPath(import.meta.url)), "..", "..", "themes"))
+		// Resolve pi's live agent dir (honours PI_CODING_AGENT_DIR) so an
+		// isolated one-code app reads its own settings/skills, never ~/.pi.
+		const agentDir = getAgentDir();
+		const sections = quietStartupEnabled(join(agentDir, "settings.json"))
+			? collectStartupSections(ctx.cwd, home, join(dirname(fileURLToPath(import.meta.url)), "..", "..", "themes"), agentDir)
 			: undefined;
 
 		ctx.ui.setTitle(NAME);

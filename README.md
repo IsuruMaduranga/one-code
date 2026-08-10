@@ -12,14 +12,33 @@ Free and open source (MIT). No lock-in, no subscription, no fork of anything —
 One Code is a package for the [pi coding agent](https://github.com/earendil-works/pi),
 so upstream improvements land as a version bump.
 
+**Recommended — the bundled app** (ships its own pinned pi, state isolated in
+`~/.one-code`, coexists with any existing `pi`):
+
+```bash
+npm install -g one-code
+cd your-project && one-code
+```
+
+Or via Homebrew (also installs Node for you):
+
+```bash
+brew install IsuruMaduranga/one-code/one-code
+```
+
+**Or as a pi package**, if you already run pi and want One Code on your own
+install (tested against pi 0.83–0.84; a startup notice warns outside that
+range):
+
 ```bash
 npm install -g @earendil-works/pi-coding-agent   # the pi harness
-pi install npm:one-code                           # add One Code
+pi install npm:one-code-extension                 # add One Code
 cd your-project && pi                              # go
 ```
 
-> Needs **Node 22.19+** and credentials for at least one model provider (`pi`
-> prompts on first run, or use `/login`).
+> Needs **Node 22.19+** (the Homebrew route handles this for you) and
+> credentials for at least one model provider (prompts on first run, or use
+> `/login`).
 
 ---
 

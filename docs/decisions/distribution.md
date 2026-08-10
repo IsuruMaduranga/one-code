@@ -2,7 +2,84 @@
 
 Part of [Decisions](../decisions.md).
 
+## Two artifacts from one codebase: the app and the package (2026-08-10, unreviewed)
+
+One Code ships two npm packages built from this single repo:
+
+| npm name | What it is | pi relationship |
+|---|---|---|
+| **`one-code`** (`app/`) | the bundled app — a `one-code` bin | **exact-pins** pi (`0.84.1`) as a dependency |
+| **`one-code-extension`** (repo root) | the pi package | **peerDependency** range; runs on the user's own pi |
+
+The split exists because the two installs need opposite dependency stances
+(reproducible pin vs. ride-the-user's-pi), and nothing else: the app is a thin
+launcher over the same extension set. `one-code-extension` was chosen over
+`one-code-pi`, which reads as "one-code *with* pi bundled" — the opposite of
+what it is. A Homebrew tap (`brew install IsuruMaduranga/one-code/one-code`)
+delivers the same app and solves the Node ≥22.19 requirement via
+`depends_on "node"`; a single compiled binary is not viable (pi-tui ships
+per-platform native modules).
+
+**How the app loads the extensions — package registration, not
+`extensionFactories`.** The bin sets `PI_CODING_AGENT_DIR=~/.one-code/agent`
+(pi's env override for its config dir) and idempotently registers the
+`one-code-extension` directory from its own `node_modules` as a local-path
+package in the isolated `settings.json`, then calls pi's public `main(argv)`.
+pi resolves local-path package sources **in place** (no copying), so the
+manifest drives everything exactly as a `pi install` would: extensions in
+their load-bearing order, `pi.themes`, and the bundled agents (which resolve
+relative to the extension files). The alternative — passing our factories via
+`main(argv, { extensionFactories })` — was prototyped and rejected: it loads
+no themes without extra plumbing, and our extensions are TypeScript that only
+pi's jiti loader handles; a plain Node bin cannot import them. Verified live
+from packed tarballs: themes, agents, permission prompts, session resume, and
+full state isolation (`~/.one-code` created, `~/.pi` untouched, and a stale
+`packages` entry in a user's pi settings cannot double-load us because the
+isolated dir never reads them).
+
+**Version drift is guarded at runtime, not by the peer range.** pi renames
+settings/flags between minors (0.83→0.84: `uiMode`→`tuiMode`, and 0.84 rejects
+the old flag), so the package variant warns at startup when the running pi is
+outside the tested range (`extensions/lib/pi-version.ts`, wired in branding's
+`session_start`; fail-silent on unparseable versions). The app never warns —
+its pin is inside the range by construction. The peer range stays loose
+(`>=0.83.0`); a hard range would make `pi install` fail instead of warn.
+
+**Branding: a surgical stdout rewrite in the bin.** pi prints its own command
+name from `APP_NAME` (fork-gated, resolved from pi's *own* package.json) in
+two plain-stdout places: the post-TUI resume hint and `--help`. Under
+isolation the resume hint `pi --session <id>` is not just mis-branded but
+broken (stock pi cannot see `~/.one-code` sessions), so the bin rewrites
+` pi --session ` → ` one-code --session ` on that line (matched on the label,
+which carries ANSI dim codes) and standalone-word `pi` in help output only.
+Nothing else is touched — TUI escape streams pass through byte-identical.
+Verified: the rewritten resume command actually resumes the session. The real
+fix is an upstream `PI_APP_NAME` env override PR; the rewrite shrinks then.
+
+**Updates: pi's check suppressed, ours added.** The bin sets
+`PI_SKIP_VERSION_CHECK=1` (pi's endpoint is hardcoded to its own registry) and
+injects one inline JS extension (`app/update-check.mjs`) via
+`extensionFactories`: a non-blocking, fail-silent fetch of
+`registry.npmjs.org/one-code/latest` on session start, notifying with an
+install-aware hint (`brew upgrade one-code` when the bin resolves under a
+Homebrew prefix, else `npm i -g one-code`). pi's semver helpers are not
+exported from the package root, so the dotted-numeric compare lives in the
+app. `one-code --version` reports the app version with the pinned pi in
+parentheses. Both paths live-verified (drift warning and update notice each
+fired against a real TUI).
+
+Registering the package also seeds first-run settings (`theme: "one-code"`,
+`quietStartup: true`), which doubles as skipping pi's stock first-time theme
+picker — the branded first run. Three hardcoded `~/.pi` paths found during
+this work (quiet-startup detection, the skills listing, the Anthropic-OAuth
+check) now resolve through pi's `getAgentDir()`, which honours the isolation
+env var.
+
 ## Distribution: pi package, not a wrapper binary
+
+*(Partially superseded 2026-08-10 by the two-artifact model above: a wrapper
+**app** now exists alongside the package. What still stands: never fork, and
+the package variant remains first-class.)*
 
 pi's `piConfig` rebranding (app name, config dir) resolves from pi's *own*
 installed `package.json`, so a dependent package cannot rebrand it. Shipping as
