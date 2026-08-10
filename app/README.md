@@ -10,7 +10,7 @@ command, separate config, separate sessions. You don't need to know anything
 about pi to use it.
 
 ```bash
-npm install -g one-code
+npm install -g @one-ai/one-code
 cd your-project && one-code
 ```
 
@@ -62,7 +62,7 @@ Every pi command works as `one-code <command>`: `one-code -p "…"` one-shots,
 
 | npm package | What it is |
 |---|---|
-| **`one-code`** (this one) | The app. Bundles a pinned, tested pi; isolated state; zero pi knowledge required. **Most people want this.** |
+| **`@one-ai/one-code`** (this one) | The app. Bundles a pinned, tested pi; isolated state; zero pi knowledge required. The command it installs is `one-code`. **Most people want this.** |
 | [`one-code-extension`](https://www.npmjs.com/package/one-code-extension) | Just the extensions, for people already running pi: `pi install npm:one-code-extension`. Rides your pi version. |
 
 Same code either way; the app just pins a tested pi and isolates its state.

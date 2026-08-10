@@ -9,7 +9,8 @@
  * exported from the package root, so the dotted-numeric compare lives here.
  */
 
-const REGISTRY_URL = "https://registry.npmjs.org/one-code/latest";
+// Scoped package: the slash must be percent-encoded in registry GETs.
+const REGISTRY_URL = "https://registry.npmjs.org/@one-ai%2Fone-code/latest";
 const TIMEOUT_MS = 3000;
 
 /** True when `candidate` is a strictly newer x.y.z than `current`. */

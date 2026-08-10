@@ -144,7 +144,7 @@ await main(argv, {
 			name: "one-code-update-check",
 			factory: createUpdateCheck({
 				currentVersion: appVersion,
-				upgradeHint: installedViaBrew ? "brew upgrade one-code" : "npm install -g one-code",
+				upgradeHint: installedViaBrew ? "brew upgrade one-code" : "npm install -g @one-ai/one-code",
 			}),
 		},
 	],

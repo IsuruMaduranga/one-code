@@ -8,14 +8,20 @@ One Code ships two npm packages built from this single repo:
 
 | npm name | What it is | pi relationship |
 |---|---|---|
-| **`one-code`** (`app/`) | the bundled app — a `one-code` bin | **exact-pins** pi (`0.84.1`) as a dependency |
+| **`@one-ai/one-code`** (`app/`) | the bundled app — a `one-code` bin | **exact-pins** pi (`0.84.1`) as a dependency |
 | **`one-code-extension`** (repo root) | the pi package | **peerDependency** range; runs on the user's own pi |
 
 The split exists because the two installs need opposite dependency stances
 (reproducible pin vs. ride-the-user's-pi), and nothing else: the app is a thin
 launcher over the same extension set. `one-code-extension` was chosen over
 `one-code-pi`, which reads as "one-code *with* pi bundled" — the opposite of
-what it is. A Homebrew tap (`brew install IsuruMaduranga/one-code/one-code`)
+what it is. The app is scoped under the **`one-ai`** npm org because npm's
+typosquat guard rejects unscoped `one-code` (an existing `onecode` package
+blocks every punctuation variant — discovered only at publish time; a 404 on
+`npm view` does not mean a name is claimable). The *command* the app installs
+is still `one-code`; the extension package stays unscoped so
+`pi install npm:one-code-extension` reads clean, and is attached to the org
+via team access rather than a scope. A Homebrew tap (`brew install IsuruMaduranga/one-code/one-code`)
 delivers the same app and solves the Node ≥22.19 requirement via
 `depends_on "node"`; a single compiled binary is not viable (pi-tui ships
 per-platform native modules).
@@ -62,7 +68,7 @@ injects one inline JS extension (`app/update-check.mjs`) via
 `extensionFactories`: a non-blocking, fail-silent fetch of
 `registry.npmjs.org/one-code/latest` on session start, notifying with an
 install-aware hint (`brew upgrade one-code` when the bin resolves under a
-Homebrew prefix, else `npm i -g one-code`). pi's semver helpers are not
+Homebrew prefix, else `npm i -g @one-ai/one-code`). pi's semver helpers are not
 exported from the package root, so the dotted-numeric compare lives in the
 app. `one-code --version` reports the app version with the pinned pi in
 parentheses. Both paths live-verified (drift warning and update notice each

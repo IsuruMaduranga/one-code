@@ -18,11 +18,11 @@ One project, two npm packages — pick the one that fits you:
 
 | You | Install | Package |
 |---|---|---|
-| **Most people** (new to pi included) | `npm install -g one-code` | [`one-code`](https://www.npmjs.com/package/one-code) — the app: its own `one-code` command, a pinned pi bundled inside, state isolated in `~/.one-code`, coexists with any existing `pi` |
+| **Most people** (new to pi included) | `npm install -g @one-ai/one-code` | [`@one-ai/one-code`](https://www.npmjs.com/package/@one-ai/one-code) — the app: its own `one-code` command, a pinned pi bundled inside, state isolated in `~/.one-code`, coexists with any existing `pi` |
 | Already running pi, want it on your own install | `pi install npm:one-code-extension` | [`one-code-extension`](https://www.npmjs.com/package/one-code-extension) — just the extensions; rides your pi (tested against pi 0.83–0.84, warns outside that range) |
 
 ```bash
-npm install -g one-code
+npm install -g @one-ai/one-code
 cd your-project && one-code
 ```
 

@@ -1,6 +1,9 @@
 {
-	"name": "one-code",
+	"name": "@one-ai/one-code",
 	"version": "0.1.0",
+	"publishConfig": {
+		"access": "public"
+	},
 	"description": "One Code — the Claude Code experience on any model, batteries included: ships its own pinned pi harness, keeps all state isolated in ~/.one-code, and coexists with any existing pi install",
 	"keywords": [
 		"claude-code",
@@ -25,7 +28,7 @@
 	},
 	"type": "module",
 	"bin": {
-		"one-code": "./bin.mjs"
+		"one-code": "bin.mjs"
 	},
 	"files": [
 		"bin.mjs",
@@ -35,6 +38,6 @@
 	],
 	"dependencies": {
 		"@earendil-works/pi-coding-agent": "0.84.1",
-		"one-code-extension": "0.1.0"
+		"one-code-extension": "0.1.1"
 	}
 }
