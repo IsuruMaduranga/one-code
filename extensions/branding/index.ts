@@ -33,7 +33,7 @@ import {
 	shouldDefaultHideThinking,
 	type StartupSection,
 } from "./startup.ts";
-import { truncateLine } from "../lib/tui-render.ts";
+import { safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import { markAssistantMarkdown } from "./assistant-marker.ts";
 import { PROMPT_PADDING, PromptEditor } from "./prompt-editor.ts";
 
@@ -42,10 +42,6 @@ export { truncateLine };
 const NAME = "One Code";
 /** Tagline under the wordmark — the "any model" positioning, matching the README. */
 const SUBTITLE = "the Claude Code experience, on any model";
-
-interface ThemeLike {
-	fg(color: string, text: string): string;
-}
 
 export interface BannerInput {
 	version: string;
@@ -218,15 +214,8 @@ function installPromptMarker(ctx: { hasUI: boolean; mode: string; ui: BrandingEd
 	if (typeof ui.setEditorComponent !== "function") return;
 	// The marker follows live theme changes because it is re-read per render.
 	const renderMarker = () => {
-		const theme = ui.theme as ThemeLike | undefined;
-		let chevron = PROMPT_GLYPH;
-		try {
-			if (theme?.fg) chevron = theme.fg("accent", PROMPT_GLYPH);
-		} catch {
-			// Presentation-only — fall back to the plain glyph.
-		}
 		// Bold makes the chevron read heavier than the input text beside it.
-		return `\x1b[1m${chevron}\x1b[0m${" ".repeat(PROMPT_PADDING - 1)}`;
+		return `\x1b[1m${safeThemePaint(ui.theme)("accent", PROMPT_GLYPH)}\x1b[0m${" ".repeat(PROMPT_PADDING - 1)}`;
 	};
 	ui.setEditorComponent((tui: unknown, theme: unknown, keybindings: unknown) => new PromptEditor(tui as never, theme as never, keybindings as never, renderMarker));
 }
@@ -336,14 +325,7 @@ export default function brandingExtension(pi: ExtensionAPI) {
 
 		ctx.ui.setTitle(NAME);
 		ctx.ui.setHeader((tui: unknown, theme: unknown) => {
-			const paint = (color: string, text: string) => {
-				const themed = theme as ThemeLike | undefined;
-				try {
-					return themed?.fg ? themed.fg(color, text) : text;
-				} catch {
-					return text;
-				}
-			};
+			const paint = safeThemePaint(theme);
 			requestHeaderRender = () => {
 				(tui as { requestRender?: () => void } | undefined)?.requestRender?.();
 			};

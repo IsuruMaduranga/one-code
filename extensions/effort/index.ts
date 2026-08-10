@@ -21,6 +21,7 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
+import { safeThemePaint } from "../lib/tui-render.ts";
 import {
 	acceptedEffortArgs,
 	choiceForState,
@@ -132,14 +133,7 @@ export default function effortExtension(pi: ExtensionAPI) {
 
 		const label = modelLabel(ctx);
 		const chosen = await ctx.ui.custom<EffortChoice | null>((tui, theme, _keybindings, done) => {
-			const paint = (color: string, text: string) => {
-				const themed = theme as { fg?(c: string, t: string): string } | undefined;
-				try {
-					return themed?.fg ? themed.fg(color, text) : text;
-				} catch {
-					return text;
-				}
-			};
+			const paint = safeThemePaint(theme);
 			return {
 				render: (width: number) => ["", ...renderEffortSlider({ index, enabled, width, modelLabel: label }, paint), ""],
 				handleInput: (data: string) => {

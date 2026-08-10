@@ -55,10 +55,21 @@ export function splitPluginKey(key: string): { name: string; marketplace?: strin
 	return { name: key.slice(0, at), marketplace: key.slice(at + 1) };
 }
 
+/** Read a file's raw contents, or `undefined` if it doesn't exist or can't be read. */
+export function tryReadFile(path: string): string | undefined {
+	try {
+		return readFileSync(path, "utf-8");
+	} catch {
+		return undefined;
+	}
+}
+
 function readJsonFile<T>(path: string): T | undefined {
 	if (!existsSync(path)) return undefined;
+	const raw = tryReadFile(path);
+	if (raw === undefined) return undefined;
 	try {
-		return JSON.parse(readFileSync(path, "utf-8")) as T;
+		return JSON.parse(raw) as T;
 	} catch {
 		return undefined;
 	}

@@ -11,7 +11,7 @@
  * them safe; without it, a repository could ship its own authorisation.
  */
 
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 const FILE_NAMES = ["CLAUDE.md", "CLAUDE.local.md", "AGENTS.md"];
@@ -22,11 +22,9 @@ const TOTAL_LIMIT = 12_000;
 
 function readCapped(path: string): string | undefined {
 	try {
-		if (statSync(path).size > PER_FILE_LIMIT * 4) {
-			// Read only the head of an oversized file rather than pulling in megabytes.
-			const handle = readFileSync(path, "utf-8");
-			return handle.slice(0, PER_FILE_LIMIT);
-		}
+		// readFileSync loads the whole file regardless, so the cap is applied to the
+		// decoded string. (A prior statSync branch claimed to bound the read but did
+		// the same full read either way.)
 		return readFileSync(path, "utf-8").slice(0, PER_FILE_LIMIT);
 	} catch {
 		return undefined;

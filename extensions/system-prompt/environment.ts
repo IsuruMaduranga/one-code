@@ -6,7 +6,7 @@
 
 import os from "node:os";
 import { findGitRoot } from "../lib/git.ts";
-import { memoryDir } from "../lib/memory.ts";
+import { projectMemoryDir } from "../lib/memory.ts";
 
 export interface EnvironmentInfo {
 	cwd: string;
@@ -30,6 +30,6 @@ export function collectEnvironment(cwd: string, modelLine: string): EnvironmentI
 		shell: process.env.SHELL ? (process.env.SHELL.split("/").pop() ?? "unknown") : "unknown",
 		date: new Date().toISOString().slice(0, 10),
 		modelLine,
-		memoryDir: memoryDir(os.homedir(), gitRoot ?? cwd),
+		memoryDir: projectMemoryDir(cwd, os.homedir()),
 	};
 }

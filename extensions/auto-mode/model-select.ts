@@ -97,7 +97,8 @@ export function classifierCandidates({ available, sessionModel, configured }: Se
 	//    profile is short and applied to the live catalog; price alone never
 	//    promotes a model into the classifier role.
 	if (sessionModel) {
-		push(findRoleProfileModel(available, sessionModel, "classifier", withinBudget), "role-profile");
+		// Reuse the containment set computed above instead of recomputing it inside.
+		push(findRoleProfileModel(available, sessionModel, "classifier", withinBudget, inProvider), "role-profile");
 	}
 
 	// 3. The cheapest genuinely-priced model in the provider.

@@ -62,12 +62,4 @@ describe("ReplayCursor", () => {
 		expect(cursor.match(1, "bbb")).toBeUndefined();
 		expect(cursor.match(2, "ccc")).toBeUndefined();
 	});
-
-	it("sums totals for counter carry-forward", () => {
-		expect(ReplayCursor.totals([entry(0, "a", 100), entry(1, "b", 250)])).toEqual({
-			agentCount: 2,
-			outputTokens: 350,
-			cost: 0.02,
-		});
-	});
 });

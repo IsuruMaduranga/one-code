@@ -213,6 +213,14 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 			);
 		};
 
+		// A cut-off reply (stopReason "length") voids the verdict, so retry once with
+		// real headroom. Used for both the initial call and the post-timeout retry.
+		const attemptWithLengthRetry = async () => {
+			let reply = await attempt(1024);
+			if (reply.stopReason === "length") reply = await attempt(4096);
+			return reply;
+		};
+
 		let failure: string | undefined;
 		try {
 			// A verdict is one JSON object, but the cap needs headroom over "one
@@ -222,8 +230,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 			// reply voids the verdict. So a cut-off reply gets one retry with real
 			// headroom and a fresh timeout; the cap bounds runaway output, not
 			// typical cost, since replies still stop at the closing brace.
-			let reply = await attempt(1024);
-			if (reply.stopReason === "length") reply = await attempt(4096);
+			let reply = await attemptWithLengthRetry();
 
 			// One retry on a timeout, before giving up on this model. A stall under
 			// load usually clears on a second try; a model that is simply too slow
@@ -235,8 +242,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 				!deps.signal?.aborted &&
 				isClassifierTimeout(reply.errorMessage ?? reply.stopReason ?? "")
 			) {
-				reply = await attempt(1024);
-				if (reply.stopReason === "length") reply = await attempt(4096);
+				reply = await attemptWithLengthRetry();
 			}
 
 			if (reply.stopReason === "error" || reply.stopReason === "aborted") {

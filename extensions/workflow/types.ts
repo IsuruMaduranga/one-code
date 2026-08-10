@@ -51,19 +51,8 @@ export interface AgentCallResult {
 	worktreePath?: string;
 }
 
-/** Extra call metadata the runtime passes alongside the script's own options. */
-export interface AgentCallMeta {
-	callIndex: number;
-	label: string;
-	phase?: string;
-}
-
 /** The one injection point globals.ts needs: something that runs a real agent. */
-export type AgentCallFn = (
-	prompt: string,
-	opts: AgentCallOptions,
-	meta: AgentCallMeta,
-) => Promise<AgentCallResult>;
+export type AgentCallFn = (prompt: string, opts: AgentCallOptions) => Promise<AgentCallResult>;
 
 /** One line of journal.jsonl. */
 export interface JournalEntry {
@@ -84,7 +73,7 @@ export type RunStatus = "running" | "completed" | "failed" | "aborted";
 
 /** Progress events a run emits (consumed by the widget, /workflows, onUpdate). */
 export interface RunProgressEvent {
-	type: "log" | "phase" | "agentStart" | "agentEnd" | "tokenUsage";
+	type: "log" | "phase" | "agentStart" | "agentEnd";
 	text?: string;
 	phase?: string;
 	label?: string;

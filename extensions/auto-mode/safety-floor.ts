@@ -25,9 +25,7 @@
 import { join } from "node:path";
 import { analyzeShellCommand } from "./shell-analysis.ts";
 import { autoModeSettingsPaths } from "./config.ts";
-import { resolveForContainment, toAbsolute } from "./paths.ts";
-
-const WRITING_TOOLS = new Set(["edit", "write", "notebook_edit"]);
+import { isWritingTool, resolveForContainment, toAbsolute } from "./paths.ts";
 
 /** Case-fold the same way resolveForContainment's output is folded. */
 function fold(path: string): string {
@@ -82,7 +80,7 @@ const REASON = (token: string) =>
  * does not slip past.
  */
 export function safetyControlWrite({ toolName, input, cwd, home }: FloorInput): string | undefined {
-	if (WRITING_TOOLS.has(toolName)) {
+	if (isWritingTool(toolName)) {
 		const raw = input.path ?? input.file_path ?? input.notebook_path;
 		if (typeof raw !== "string" || raw.length === 0) return undefined;
 		const resolved = resolveForContainment(toAbsolute(cwd, raw, home));

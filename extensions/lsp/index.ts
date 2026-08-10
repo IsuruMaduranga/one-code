@@ -25,17 +25,27 @@ import { findProjectRoot, serverForPath, typescriptPreflight } from "./servers.t
 /** Only errors are pushed unasked; warnings would be noise on every edit. */
 const AUTO_APPEND_LIMIT = 10;
 
+/** The (match, project root, client-map key) triple every entry point needs; undefined when the path has no configured server. */
+function resolveServer(
+	path: string,
+	cwd: string,
+): { match: NonNullable<ReturnType<typeof serverForPath>>; root: string; key: string } | undefined {
+	const match = serverForPath(path);
+	if (!match) return undefined;
+	const root = findProjectRoot(path, match.config.rootMarkers, cwd);
+	const key = `${match.languageId}:${root}`;
+	return { match, root, key };
+}
+
 export default function lspExtension(pi: ExtensionAPI) {
 	const clients = new Map<string, LspClient>();
 	const startFailures = new Map<string, string>();
 	const warned = new Set<string>();
 
 	const clientFor = async (path: string, cwd: string): Promise<LspClient | undefined> => {
-		const match = serverForPath(path);
-		if (!match) return undefined;
-
-		const root = findProjectRoot(path, match.config.rootMarkers, cwd);
-		const key = `${match.languageId}:${root}`;
+		const resolved = resolveServer(path, cwd);
+		if (!resolved) return undefined;
+		const { match, root, key } = resolved;
 
 		const failure = startFailures.get(key);
 		if (failure) return undefined;
@@ -72,10 +82,9 @@ export default function lspExtension(pi: ExtensionAPI) {
 
 	/** One-time notice per root so a missing server doesn't degrade silently. */
 	const reportFailureOnce = (path: string, cwd: string, notify: (message: string) => void) => {
-		const match = serverForPath(path);
-		if (!match) return;
-		const root = findProjectRoot(path, match.config.rootMarkers, cwd);
-		const key = `${match.languageId}:${root}`;
+		const resolved = resolveServer(path, cwd);
+		if (!resolved) return;
+		const { match, key } = resolved;
 		const failure = startFailures.get(key);
 		if (failure && !warned.has(key)) {
 			warned.add(key);
@@ -129,9 +138,9 @@ export default function lspExtension(pi: ExtensionAPI) {
 			const path = params.path.startsWith("/") ? params.path : `${ctx.cwd}/${params.path}`;
 			const client = await clientFor(path, ctx.cwd);
 			if (!client) {
-				const match = serverForPath(path);
-				const root = match ? findProjectRoot(path, match.config.rootMarkers, ctx.cwd) : ctx.cwd;
-				const failure = match ? startFailures.get(`${match.languageId}:${root}`) : undefined;
+				const resolved = resolveServer(path, ctx.cwd);
+				const match = resolved?.match;
+				const failure = resolved ? startFailures.get(resolved.key) : undefined;
 				return {
 					content: [
 						{

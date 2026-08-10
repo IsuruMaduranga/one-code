@@ -118,6 +118,9 @@ export class AgentRunner {
 	private readonly loader: DefaultResourceLoader;
 	private readonly agentCatalog: AgentDefinition[];
 	private readonly availableModels: Model<Api>[];
+	/** Per-agentType loader cache — building one re-runs every extension factory, so each
+	 * agentType's loader is built once (lazily, on first use) and reused for the rest of the run. */
+	private readonly loadersByAgentType = new Map<string, Promise<DefaultResourceLoader>>();
 
 	private constructor(
 		options: AgentRunnerOptions,
@@ -196,9 +199,7 @@ export class AgentRunner {
 		const capture: { called: boolean; value: unknown } = { called: false, value: undefined };
 		const customTools: ToolDefinition[] = opts.schema ? [buildStructuredOutputTool(opts.schema, capture)] : [];
 
-		const loader = agentDef
-			? await this.loaderWithSystemPrompt(agentDef.systemPrompt)
-			: this.loader;
+		const loader = agentDef ? await this.loaderForAgentType(agentDef) : this.loader;
 
 		const { session } = await createAgentSession({
 			cwd,
@@ -274,7 +275,19 @@ export class AgentRunner {
 		throw new Error("subagent never produced structured output");
 	}
 
-	private async loaderWithSystemPrompt(systemPrompt: string): Promise<DefaultResourceLoader> {
+	/** Builds (once) and reuses the loader for this agentType, keyed by agent name. */
+	private loaderForAgentType(agentDef: AgentDefinition): Promise<DefaultResourceLoader> {
+		let pending = this.loadersByAgentType.get(agentDef.name);
+		if (!pending) {
+			pending = this.buildLoaderWithSystemPrompt(agentDef.systemPrompt);
+			// A failed build must not poison the cache — let the next call retry.
+			pending.catch(() => this.loadersByAgentType.delete(agentDef.name));
+			this.loadersByAgentType.set(agentDef.name, pending);
+		}
+		return pending;
+	}
+
+	private async buildLoaderWithSystemPrompt(systemPrompt: string): Promise<DefaultResourceLoader> {
 		const loader = new DefaultResourceLoader({
 			cwd: this.options.cwd,
 			agentDir: getAgentDir(),
@@ -287,8 +300,10 @@ export class AgentRunner {
 	}
 
 	dispose(): void {
-		// ModelRuntime/loader hold no OS resources that need explicit teardown today;
-		// this hook exists so run-manager can stay correct if that changes.
+		// ModelRuntime/loader(s) hold no OS resources that need explicit teardown today;
+		// this hook exists so run-manager can stay correct if that changes. The
+		// per-agentType cache is dropped alongside the base loader.
+		this.loadersByAgentType.clear();
 	}
 }
 

@@ -20,7 +20,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import { oneCodeStateDir } from "../lib/paths.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
-import { ccToolRenderers } from "../lib/tui-render.ts";
+import { ccToolRenderers, safeThemePaint } from "../lib/tui-render.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../permissions/modes.ts";
 import { buildPlanModeReminder } from "./reminder.ts";
 import { randomSlug } from "./slug.ts";
@@ -156,14 +156,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
 			}
 
 			const choice = await ctx.ui.custom<PlanChoice | null>((tui, theme, _keybindings, done) => {
-				const paint = (color: string, text: string) => {
-					const themed = theme as { fg?(c: string, t: string): string } | undefined;
-					try {
-						return themed?.fg ? themed.fg(color, text) : text;
-					} catch {
-						return text;
-					}
-				};
+				const paint = safeThemePaint(theme);
 				const maxVisible = 12;
 				let offset = 0;
 				let selected: PlanChoice = 0;

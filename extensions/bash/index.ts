@@ -25,6 +25,7 @@ import { Type } from "typebox";
 import { generateTaskId, TASK_REGISTER_CHANNEL } from "../background/registry.ts";
 import { type BashFinishSummary, startBackgroundBash, tailCap } from "./background.ts";
 import { systemNotification } from "../lib/notifications.ts";
+import { perCwd } from "../lib/per-cwd.ts";
 import { ccWrapBuiltinRenderers, linesComponent, resultLines } from "../lib/tui-render.ts";
 
 const NOTIFY_OUTPUT_CAP = 30_000;
@@ -50,15 +51,7 @@ export default function bashExtension(pi: ExtensionAPI) {
 	// is re-created per working directory because it closes over cwd (worktree
 	// switches change ctx.cwd mid-session).
 	const base = createBashToolDefinition(process.cwd());
-	const foregroundDefs = new Map<string, ReturnType<typeof createBashToolDefinition>>();
-	const foreground = (cwd: string) => {
-		let def = foregroundDefs.get(cwd);
-		if (!def) {
-			def = createBashToolDefinition(cwd);
-			foregroundDefs.set(cwd, def);
-		}
-		return def;
-	};
+	const foreground = perCwd(createBashToolDefinition);
 
 	const notify = (text: string, details: Record<string, unknown>) => {
 		pi.sendMessage(

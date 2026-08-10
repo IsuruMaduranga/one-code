@@ -10,6 +10,7 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { restoreLatestDetails } from "../lib/branch-restore.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 
@@ -46,6 +47,7 @@ function formatTodos(todos: TodoItem[]): string {
  * and rarely, based on session state.
  */
 const NUDGE_AFTER_TURNS = 8;
+const TODO_TOOLS = new Set(["todo_write"]);
 
 export default function todoExtension(pi: ExtensionAPI) {
 	let todos: TodoItem[] = [];
@@ -64,14 +66,8 @@ export default function todoExtension(pi: ExtensionAPI) {
 	};
 
 	const reconstructState = (ctx: ExtensionContext) => {
-		todos = [];
-		for (const entry of ctx.sessionManager.getBranch()) {
-			if (entry.type !== "message") continue;
-			const msg = entry.message;
-			if (msg.role !== "toolResult" || msg.toolName !== "todo_write") continue;
-			const details = msg.details as TodoDetails | undefined;
-			if (details?.todos) todos = details.todos;
-		}
+		const details = restoreLatestDetails<TodoDetails>(ctx.sessionManager.getBranch(), TODO_TOOLS, (d) => Boolean(d?.todos));
+		todos = details?.todos ?? [];
 		updateWidget(ctx);
 	};
 

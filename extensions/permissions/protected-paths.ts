@@ -79,12 +79,10 @@ const PROTECTED_FILES = new Set([
 	".claude.json",
 ]);
 
-/** Tools whose calls write to a path, and so are subject to this check. */
-const WRITING_TOOLS = new Set(["edit", "write", "notebook_edit"]);
-
-export function isWritingTool(toolName: string): boolean {
-	return WRITING_TOOLS.has(toolName);
-}
+// `isWritingTool` / `WRITING_TOOLS` live in auto-mode/paths.ts (the shared lower
+// layer) so the safety floor and this gate share one source of truth; re-exported
+// here for the existing importers (matcher.ts, permissions/index.ts).
+export { isWritingTool } from "../auto-mode/paths.ts";
 
 /**
  * Whether a path is protected. Matched on path *segments* so the check works

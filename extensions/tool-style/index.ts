@@ -28,6 +28,7 @@ import {
 	createReadToolDefinition,
 	createWriteToolDefinition,
 } from "@earendil-works/pi-coding-agent";
+import { perCwd } from "../lib/per-cwd.ts";
 import { ccWrapBuiltinRenderers } from "../lib/tui-render.ts";
 
 // The concrete definitions are each strongly typed to their own schema; this
@@ -62,15 +63,7 @@ const BUILTINS: BuiltinSpec[] = [
 export default function toolStyleExtension(pi: ExtensionAPI) {
 	for (const spec of BUILTINS) {
 		const base = spec.create(process.cwd());
-		const perCwd = new Map<string, BuiltinDefinition>();
-		const forCwd = (cwd: string): BuiltinDefinition => {
-			let def = perCwd.get(cwd);
-			if (!def) {
-				def = spec.create(cwd);
-				perCwd.set(cwd, def);
-			}
-			return def;
-		};
+		const forCwd = perCwd(spec.create);
 
 		pi.registerTool({
 			name: base.name,

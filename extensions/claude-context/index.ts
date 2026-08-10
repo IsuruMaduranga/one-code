@@ -22,8 +22,8 @@ import os from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { buildClaudeMdBlock, discoverContextFiles } from "../lib/claude-context.ts";
-import { findGitRoot } from "../lib/git.ts";
-import { memoryDir, truncateIndex } from "../lib/memory.ts";
+import { projectMemoryDir, truncateIndex } from "../lib/memory.ts";
+import { claudeConfigDir } from "../lib/paths.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
 
 const REMINDER_KEY = "claude-context";
@@ -40,7 +40,7 @@ function resolveEmail(cwd: string): string | null {
 }
 
 function readMemoryIndex(cwd: string): { path: string; content: string } | null {
-	const dir = memoryDir(os.homedir(), findGitRoot(cwd) ?? cwd);
+	const dir = projectMemoryDir(cwd, os.homedir());
 	const path = join(dir, "MEMORY.md");
 	try {
 		const raw = readFileSync(path, "utf8");
@@ -56,7 +56,7 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		const inner = buildClaudeMdBlock({
 			contextFiles: discoverContextFiles({
 				cwd: ctx.cwd,
-				homeClaudeDir: join(os.homedir(), ".claude"),
+				homeClaudeDir: claudeConfigDir(),
 			}),
 			memoryIndex: readMemoryIndex(ctx.cwd),
 			email: resolveEmail(ctx.cwd),

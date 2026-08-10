@@ -16,15 +16,13 @@
  */
 
 import { mkdirSync, readFileSync } from "node:fs";
-import os from "node:os";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { findGitRoot } from "../lib/git.ts";
 import {
 	INDEX_NEAR_LIMIT_REMINDER,
 	INDEX_OVER_LIMIT_ERROR,
 	indexLimitStatus,
-	memoryDir,
+	projectMemoryDir,
 	stampFrontmatter,
 } from "../lib/memory.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
@@ -41,7 +39,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
 		// Like Claude Code: one memory dir per git repo (shared by worktrees and
 		// subdirectories); outside a repo, per cwd.
-		const candidate = memoryDir(os.homedir(), findGitRoot(ctx.cwd) ?? ctx.cwd);
+		const candidate = projectMemoryDir(ctx.cwd);
 		try {
 			mkdirSync(candidate, { recursive: true });
 		} catch {

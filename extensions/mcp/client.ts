@@ -101,30 +101,29 @@ export async function connect(server: McpServer): Promise<Connection> {
 
 	const warnings: string[] = [];
 
+	// Each list call can take up to CONNECT_TIMEOUT_MS on a slow server; run
+	// them concurrently instead of stacking their worst-case latencies.
+	const [toolsResult, resourcesResult] = await Promise.allSettled([
+		withTimeout(client.listTools(), CONNECT_TIMEOUT_MS, `listing tools of "${server.name}"`),
+		withTimeout(client.listResources(), CONNECT_TIMEOUT_MS, `listing resources of "${server.name}"`),
+	]);
+
 	let tools: McpTool[] = [];
-	try {
-		const listed = await withTimeout(client.listTools(), CONNECT_TIMEOUT_MS, `listing tools of "${server.name}"`);
-		tools = (listed.tools ?? []) as McpTool[];
-	} catch (error) {
+	if (toolsResult.status === "fulfilled") {
+		tools = (toolsResult.value.tools ?? []) as McpTool[];
+	} else {
 		// A server that connects but fails listTools would otherwise register
 		// zero tools with no signal anywhere — surface it as a warning.
-		tools = [];
-		warnings.push(`connected, but listing tools failed: ${(error as Error).message}`);
+		warnings.push(`connected, but listing tools failed: ${(toolsResult.reason as Error).message}`);
 	}
 
 	let resources: McpResource[] = [];
-	try {
-		const listed = await withTimeout(
-			client.listResources(),
-			CONNECT_TIMEOUT_MS,
-			`listing resources of "${server.name}"`,
-		);
-		resources = (listed.resources ?? []) as McpResource[];
-	} catch (error) {
+	if (resourcesResult.status === "fulfilled") {
+		resources = (resourcesResult.value.resources ?? []) as McpResource[];
+	} else {
 		// Resources are optional in MCP; "method not found" is normal. Anything
 		// else (a timeout, a protocol error) is worth a warning.
-		resources = [];
-		const message = (error as Error).message;
+		const message = (resourcesResult.reason as Error).message;
 		if (!/method not found|-32601/i.test(message)) {
 			warnings.push(`connected, but listing resources failed: ${message}`);
 		}

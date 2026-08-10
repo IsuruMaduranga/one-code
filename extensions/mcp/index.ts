@@ -44,6 +44,15 @@ import {
 	namespacedToolName,
 } from "./schema.ts";
 
+/** Shared "server name not found" tool result for the resource read/list-dir tools. */
+function unknownServerError(name: string) {
+	return {
+		content: [{ type: "text" as const, text: `No connected MCP server named "${name}".` }],
+		details: {} as { server?: string; uri?: string },
+		isError: true,
+	};
+}
+
 export default function mcpExtension(pi: ExtensionAPI) {
 	const connections = new Map<string, Connection>();
 	const failures: FailedConnection[] = [];
@@ -251,13 +260,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 			}),
 			async execute(toolCallId, params, _signal, _onUpdate, ctx) {
 				const connection = connections.get(params.server);
-				if (!connection) {
-					return {
-						content: [{ type: "text", text: `No connected MCP server named "${params.server}".` }],
-						details: {} as { server?: string; uri?: string },
-						isError: true,
-					};
-				}
+				if (!connection) return unknownServerError(params.server);
 				try {
 					const result = await readResource(connection, params.uri);
 					const text = describeResourceContents(result.contents as McpResourceContents[] | undefined);
@@ -292,13 +295,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 			}),
 			async execute(_toolCallId, params) {
 				const connection = connections.get(params.server);
-				if (!connection) {
-					return {
-						content: [{ type: "text", text: `No connected MCP server named "${params.server}".` }],
-						details: {} as { server?: string; uri?: string },
-						isError: true,
-					};
-				}
+				if (!connection) return unknownServerError(params.server);
 				try {
 					const result = await readResourceDir(connection, params.uri);
 					const entries = (result.resources ?? result.entries ?? []) as Array<{ uri?: string; name?: string; mimeType?: string }>;

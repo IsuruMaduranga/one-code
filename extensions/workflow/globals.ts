@@ -135,7 +135,7 @@ export function createScriptGlobals(options: ScriptGlobalsOptions): { globals: S
 			throwIfAborted();
 			options.onEvent({ type: "agentStart", callIndex, label, phase });
 			try {
-				const result = await options.agentCall(prompt, opts, { callIndex, label, phase });
+				const result = await options.agentCall(prompt, opts);
 				outputTokens += result.tokens.output;
 				cost += result.cost;
 				options.onJournal?.({ callIndex, hash, result, timestamp: now() });

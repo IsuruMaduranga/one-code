@@ -132,18 +132,17 @@ describe("parallel()", () => {
 	});
 
 	it("assigns callIndexes in array order regardless of completion order", async () => {
-		const delays = [30, 5];
-		const seen: Array<{ prompt: string; callIndex: number }> = [];
-		const { globals } = makeGlobals({
-			agentCall: async (prompt, _opts, meta) => {
-				await new Promise((r) => setTimeout(r, delays[meta.callIndex]));
-				seen.push({ prompt, callIndex: meta.callIndex });
+		// "slow" is enqueued first but finishes last; its callIndex must still be 0.
+		const delays: Record<string, number> = { slow: 30, fast: 5 };
+		const { globals, journal } = makeGlobals({
+			agentCall: async (prompt) => {
+				await new Promise((r) => setTimeout(r, delays[prompt as string] ?? 0));
 				return { value: prompt, tokens: { input: 0, output: 1, total: 1 }, cost: 0 };
 			},
 		});
 		await globals.parallel([() => globals.agent("slow"), () => globals.agent("fast")]);
-		expect(seen.find((s) => s.prompt === "slow")?.callIndex).toBe(0);
-		expect(seen.find((s) => s.prompt === "fast")?.callIndex).toBe(1);
+		expect(journal.find((e) => e.hash === hashAgentCall("slow", {}))?.callIndex).toBe(0);
+		expect(journal.find((e) => e.hash === hashAgentCall("fast", {}))?.callIndex).toBe(1);
 	});
 
 	it("rejects oversized batches", async () => {

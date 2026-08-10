@@ -18,6 +18,17 @@
 import { lstatSync, readlinkSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
+/**
+ * Tools whose calls write to a path. Lives here — the lowest shared layer both
+ * the shell safety floor and the permission gate import — so the two write-gates
+ * share one source of truth for "which tools write" (was duplicated).
+ */
+export const WRITING_TOOLS = new Set(["edit", "write", "notebook_edit"]);
+
+export function isWritingTool(toolName: string): boolean {
+	return WRITING_TOOLS.has(toolName);
+}
+
 /** Case-folded on darwin/win32, where the filesystem is case-insensitive. */
 function normalize(target: string): string {
 	const normalized = resolve(target).replace(/\\/g, "/").replace(/\/+$/, "");

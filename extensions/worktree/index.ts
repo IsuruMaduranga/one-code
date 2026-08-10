@@ -17,6 +17,7 @@ import { promisify } from "node:util";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { restoreLatestDetails } from "../lib/branch-restore.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { rewriteToolInput, validateWorktreeName } from "./rewrite.ts";
@@ -24,6 +25,7 @@ import { ccToolRenderers } from "../lib/tui-render.ts";
 
 const run = promisify(execFile);
 const REMINDER_KEY = "cc-worktree-session";
+const WORKTREE_TOOLS = new Set(["enter_worktree", "exit_worktree"]);
 
 interface WorktreeState {
 	path: string;
@@ -69,14 +71,8 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 	};
 
 	const reconstructState = (ctx: ExtensionContext) => {
-		let restored: WorktreeState | undefined;
-		for (const entry of ctx.sessionManager.getBranch()) {
-			if (entry.type !== "message") continue;
-			const msg = entry.message;
-			if (msg.role !== "toolResult" || !["enter_worktree", "exit_worktree"].includes(msg.toolName ?? "")) continue;
-			const details = msg.details as WorktreeDetails | undefined;
-			if (details?.worktreeState !== undefined) restored = details.worktreeState ?? undefined;
-		}
+		const details = restoreLatestDetails<WorktreeDetails>(ctx.sessionManager.getBranch(), WORKTREE_TOOLS, (d) => d?.worktreeState !== undefined);
+		let restored = details?.worktreeState ?? undefined;
 		if (restored && !existsSync(restored.path)) restored = undefined;
 		applyState(restored);
 	};

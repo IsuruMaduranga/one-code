@@ -19,8 +19,9 @@
  * file-tracker integration; absent from every turn-1 capture we have).
  */
 
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { tryReadFile } from "./plugins.ts";
 
 /** One CLAUDE.md-family file as it appears in the block. `content` is raw (untrimmed). */
 export interface ContextFile {
@@ -47,10 +48,11 @@ const TRAILER =
 function readFileIfPresent(path: string): string | null {
 	try {
 		if (!existsSync(path) || !statSync(path).isFile()) return null;
-		return readFileSync(path, "utf8");
 	} catch {
 		return null;
 	}
+	const content = tryReadFile(path);
+	return content === undefined ? null : content;
 }
 
 /**

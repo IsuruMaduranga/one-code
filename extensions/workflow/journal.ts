@@ -72,15 +72,4 @@ export class ReplayCursor {
 		}
 		return entry.result;
 	}
-
-	/** Totals across all journaled entries, for seeding budget/agent counters. */
-	static totals(entries: JournalEntry[]): { agentCount: number; outputTokens: number; cost: number } {
-		let outputTokens = 0;
-		let cost = 0;
-		for (const entry of entries) {
-			outputTokens += entry.result.tokens?.output ?? 0;
-			cost += entry.result.cost ?? 0;
-		}
-		return { agentCount: entries.length, outputTokens, cost };
-	}
 }

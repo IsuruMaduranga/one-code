@@ -360,11 +360,14 @@ export function findRoleProfileModel(
 	sessionModel: Model<Api>,
 	role: ModelRole,
 	accept: (model: Model<Api>) => boolean = () => true,
+	// A caller that already computed the containment set can pass it to avoid the
+	// O(catalog) recompute (classifierCandidates does, on a per-tool-call hot path).
+	precomputedContained?: Model<Api>[],
 ): Model<Api> | undefined {
 	const identity = modelIdentity(sessionModel);
 	if (!identity.profile) return undefined;
 	const prefixes = ROLE_PROFILES[identity.profile]?.[role] ?? [];
-	const contained = modelsContainedToSession(available, sessionModel);
+	const contained = precomputedContained ?? modelsContainedToSession(available, sessionModel);
 	for (const prefix of prefixes) {
 		const wanted = comparableId(prefix);
 		const exact = contained.find(

@@ -12,6 +12,7 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { restoreLatestDetails } from "../lib/branch-restore.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 import { formatTaskDetails, formatTaskLine, formatTaskList, type TaskSnapshot, TaskStore } from "./store.ts";
@@ -20,7 +21,7 @@ interface TaskDetails {
 	taskSnapshot: TaskSnapshot;
 }
 
-const TASK_TOOLS = ["task_create", "task_get", "task_list", "task_update"];
+const TASK_TOOLS = new Set(["task_create", "task_get", "task_list", "task_update"]);
 
 export default function tasksExtension(pi: ExtensionAPI) {
 	const store = new TaskStore();
@@ -38,15 +39,8 @@ export default function tasksExtension(pi: ExtensionAPI) {
 	};
 
 	const reconstructState = (ctx: ExtensionContext) => {
-		let snapshot: TaskSnapshot | undefined;
-		for (const entry of ctx.sessionManager.getBranch()) {
-			if (entry.type !== "message") continue;
-			const msg = entry.message;
-			if (msg.role !== "toolResult" || !TASK_TOOLS.includes(msg.toolName ?? "")) continue;
-			const details = msg.details as TaskDetails | undefined;
-			if (details?.taskSnapshot) snapshot = details.taskSnapshot;
-		}
-		store.restore(snapshot);
+		const details = restoreLatestDetails<TaskDetails>(ctx.sessionManager.getBranch(), TASK_TOOLS, (d) => Boolean(d?.taskSnapshot));
+		store.restore(details?.taskSnapshot);
 		updateWidget(ctx);
 	};
 

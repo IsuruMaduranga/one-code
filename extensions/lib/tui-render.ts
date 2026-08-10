@@ -15,6 +15,8 @@
  * every line goes through `truncateLine` — never skip it.
  */
 
+import { NOTIFICATION_HEADER, NOTIFICATION_PREFIX } from "./notifications.ts";
+
 /** The structural subset of pi-tui's Component that pi's renderers require. */
 export interface TuiComponent {
 	render(width: number): string[];
@@ -26,6 +28,22 @@ export interface ThemeLike {
 	fg(color: string, text: string): string;
 	bold(text: string): string;
 	italic(text: string): string;
+}
+
+/**
+ * A `paint(color, text)` closure that degrades to the plain text whenever the
+ * theme is missing, lacks `fg`, or `fg` throws — the guard every `ctx.ui.custom`
+ * renderer needs, since the theme object handed in there is loosely typed.
+ */
+export function safeThemePaint(theme: unknown): (color: string, text: string) => string {
+	return (color: string, text: string) => {
+		const themed = theme as { fg?(c: string, t: string): string } | undefined;
+		try {
+			return themed?.fg ? themed.fg(color, text) : text;
+		} catch {
+			return text;
+		}
+	};
 }
 
 /**
@@ -337,9 +355,9 @@ export function ccToolRenderers<TArgs = any, TDetails = any>(
  */
 export function notificationBody(text: string): string {
 	const lines = text.split("\n");
-	if (lines[0]?.startsWith("SYSTEM NOTIFICATION")) {
+	if (lines[0]?.startsWith(NOTIFICATION_HEADER)) {
 		let i = 1;
-		while (i < lines.length && (lines[i].trim() === "" || lines[i].startsWith("This is an automated event"))) i++;
+		while (i < lines.length && (lines[i].trim() === "" || lines[i].startsWith(NOTIFICATION_PREFIX))) i++;
 		return lines.slice(i).join("\n").trim();
 	}
 	return text.trim();

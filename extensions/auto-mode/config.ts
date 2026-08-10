@@ -173,7 +173,7 @@ export function loadAutoModeConfigWithDiagnostics(home: string): AutoModeConfigL
 		}
 		if (!block) continue;
 		validateAutoModeBlock(block as Record<string, unknown>, path, diagnostics);
-		for (const key of ["environment", "allow", "soft_deny", "hard_deny"] as const) {
+		for (const key of RULE_LIST_KEYS) {
 			const parsed = stringArray(block[key]);
 			// Additive across scopes: a later scope extends rather than replaces,
 			// so managed entries cannot be dropped by a user file.
