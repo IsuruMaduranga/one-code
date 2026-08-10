@@ -16,7 +16,9 @@
  * we have — the index is the entry point; the model follows links from there.
  */
 
+import os from "node:os";
 import { join } from "node:path";
+import { findGitRoot } from "./git.ts";
 
 /** Claude Code's project-directory slug: every char outside [A-Za-z0-9-] becomes "-". */
 export function projectSlug(projectRoot: string): string {
@@ -30,6 +32,15 @@ export function projectSlug(projectRoot: string): string {
  */
 export function memoryDir(home: string, projectRoot: string): string {
 	return join(home, ".claude", "projects", projectSlug(projectRoot), "memory");
+}
+
+/**
+ * `memoryDir` composed with the actual project-root resolution every caller
+ * needs: the git repository root when there is one (shared by worktrees and
+ * subdirectories), else `cwd` itself. `home` defaults to `os.homedir()`.
+ */
+export function projectMemoryDir(cwd: string, home: string = os.homedir()): string {
+	return memoryDir(home, findGitRoot(cwd) ?? cwd);
 }
 
 /**

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { rewriteToolInput, shellQuote, validateWorktreeName } from "../../extensions/worktree/rewrite.ts";
+import { ORIGINAL_COMMAND_KEY, rewriteToolInput, shellQuote, validateWorktreeName } from "../../extensions/worktree/rewrite.ts";
 
 const WT = "/repo/.claude/worktrees/fix";
 
@@ -8,6 +8,14 @@ describe("rewriteToolInput", () => {
 		const input: Record<string, unknown> = { command: "npm test" };
 		rewriteToolInput("bash", input, WT);
 		expect(input.command).toBe(`cd '${WT}' && (npm test\n)`);
+	});
+
+	it("preserves the original bash command so permission rules still match it", () => {
+		// Without this, the cd-wrapper defeats every configured Bash allow/ask/deny
+		// rule for the duration of the worktree session.
+		const input: Record<string, unknown> = { command: "npm run test:unit" };
+		rewriteToolInput("bash", input, WT);
+		expect(input[ORIGINAL_COMMAND_KEY]).toBe("npm run test:unit");
 	});
 
 	it("resolves relative paths against the worktree and leaves absolute ones alone", () => {

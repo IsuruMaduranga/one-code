@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	decide,
 	extractSubject,
+	isBroadExecutionRule,
 	matchesBashPattern,
 	matchesPathPattern,
 	normalizeToolName,
@@ -42,6 +43,30 @@ describe("parseRule", () => {
 		expect(parseRule("")).toBeUndefined();
 		expect(parseRule("Bash(unclosed")).toBeUndefined();
 		expect(parseRules(["Bash", "", "Read(~/x)"])).toHaveLength(2);
+	});
+});
+
+describe("isBroadExecutionRule", () => {
+	const broad = (raw: string) => isBroadExecutionRule(parseRule(raw)!);
+
+	it("suspends wildcarded interpreters and runner escape hatches", () => {
+		for (const raw of ["Bash(*)", "Bash(python*)", "Bash(node *)", "Bash(npm *)", "Bash(npm run *)", "Bash(npx *)"]) {
+			expect(broad(raw), raw).toBe(true);
+		}
+	});
+
+	it("suspends interpreter inline-code flags, which take arbitrary code", () => {
+		// A `Bash(sh -c *)` / `Bash(python -c *)` allow rule otherwise handed the
+		// model a standing bypass of the classifier.
+		for (const raw of ["Bash(sh -c *)", "Bash(bash -c *)", "Bash(python -c *)", "Bash(node -e *)", "Bash(ruby -e *)"]) {
+			expect(broad(raw), raw).toBe(true);
+		}
+	});
+
+	it("leaves narrow rules that name a concrete script or subcommand", () => {
+		for (const raw of ["Bash(npm test:*)", "Bash(git status)", "Bash(python)"]) {
+			expect(broad(raw), raw).toBe(false);
+		}
 	});
 });
 

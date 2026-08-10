@@ -47,7 +47,7 @@ import {
 	startRpcChild,
 } from "./child.ts";
 import { type AgentRunRecord, nextRunName, RunRegistry } from "./runs.ts";
-import { emptyUsage, formatUsage, type UsageTotals } from "./usage.ts";
+import { emptyUsage, formatStats, type UsageTotals } from "./usage.ts";
 import { cleanupWorktree, createWorktree, isGitRepo, type Worktree } from "./worktree.ts";
 import { systemNotification } from "../lib/notifications.ts";
 import { ccToolRenderers, customMessageText, notificationComponent } from "../lib/tui-render.ts";
@@ -634,7 +634,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						task.status = outcome.failed ? "failed" : "completed";
 						task.finishedAt = Date.now();
 						finish();
-						const stats = [`${outcome.toolCalls} tools`, formatUsage(outcome.usage)].filter(Boolean).join(" · ");
+						const stats = formatStats(outcome.toolCalls, outcome.usage);
 						notify(
 							"subagent-result",
 							systemNotification(`Background agent ${p.record.name} (${p.record.taskId}) ${outcome.failed ? "failed" : "completed"} (${stats}). It stays resident — message it with send_message.\n\n${outcome.output.slice(0, OUTPUT_CAP)}${worktreeNote}`),
@@ -657,6 +657,17 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 							registry.sessionFileFor(p.record);
 							lastOutput = resident.handle.snapshot().text || outcome.output;
 							if (logPath) writeFileSync(logPath, lastOutput);
+							// Auto mode reviews a background/resident turn's action sequence as a
+							// whole, like the foreground path (line ~758). There is no tool_result
+							// to attach to here, so the gate reviews on receipt and notifies.
+							if (outcome.actions?.length) {
+								pi.events.emit(SUBAGENT_ACTIONS_CHANNEL, {
+									toolCallId: p.record.taskId,
+									actions: outcome.actions,
+									background: true,
+									agentName: p.record.name,
+								} satisfies SubagentActionsPayload);
+							}
 							const handler = resident.turnHandlers.shift();
 							if (handler) {
 								handler(outcome);
@@ -714,7 +725,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			const progress = requested.map((r) => ({ name: r.name, toolCalls: 0, text: "", usage: emptyUsage() }));
 			const report = () => {
 				const lines = progress.map((p) => {
-					const stats = [`${p.toolCalls} tools`, formatUsage(p.usage)].filter(Boolean).join(", ");
+					const stats = formatStats(p.toolCalls, p.usage);
 					return `${p.text ? "✓" : "⏳"} ${p.name} (${stats})${p.text ? "" : " running…"}`;
 				});
 				onUpdate?.({ content: [{ type: "text", text: lines.join("\n") }], details: {} });
@@ -733,7 +744,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
 			const text = results
 				.map((r) => {
-					const stats = [`${r.toolCalls} tools`, formatUsage(r.usage)].filter(Boolean).join(" · ");
+					const stats = formatStats(r.toolCalls, r.usage);
 					const worktreeNote = r.worktreePath
 						? `\n\n(Changes left in worktree ${r.worktreePath} — review or merge them.)`
 						: "";
@@ -851,7 +862,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					task.finishedAt = Date.now();
 					replyOutput = outcome.output;
 					finish();
-					const stats = [`${outcome.toolCalls} tools`, formatUsage(outcome.usage)].filter(Boolean).join(" · ");
+					const stats = formatStats(outcome.toolCalls, outcome.usage);
 					notify(
 						"subagent-result",
 						systemNotification(`Reply from ${record.name} (${stats}):\n\n${outcome.output.slice(0, OUTPUT_CAP)}`),
@@ -927,7 +938,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				task.status = outcome.failed ? "failed" : "completed";
 				task.finishedAt = Date.now();
 				finish();
-				const stats = [`${outcome.toolCalls} tools`, formatUsage(outcome.usage)].filter(Boolean).join(" · ");
+				const stats = formatStats(outcome.toolCalls, outcome.usage);
 				notify(
 					"subagent-result",
 					systemNotification(`Reply from ${record.name} (${stats}):\n\n${outcome.output.slice(0, OUTPUT_CAP)}`),

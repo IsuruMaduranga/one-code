@@ -164,13 +164,15 @@ export function extractSubject(toolName: string, input: Record<string, unknown>)
  * arrives case-folded from `resolveForContainment`, and without folding that
  * branch of the check could never match on macOS.
  */
+/** Expand a leading `~/`, resolve against cwd, and case-fold — the same shape
+ * `resolveForContainment` folds its output to, so a subject compared here matches. */
+function toAbsoluteFolded(p: string, cwd: string): string {
+	const expanded = p.startsWith("~/") ? `${homedir()}/${p.slice(2)}` : p;
+	return resolve(cwd, expanded).toLowerCase();
+}
+
 export function isPlanFilePath(candidate: string, planFilePath: string, cwd: string): boolean {
-	const home = homedir();
-	const toAbsolute = (p: string) => {
-		const expanded = p.startsWith("~/") ? `${home}/${p.slice(2)}` : p;
-		return resolve(cwd, expanded).toLowerCase();
-	};
-	return toAbsolute(candidate) === toAbsolute(planFilePath);
+	return toAbsoluteFolded(candidate, cwd) === toAbsoluteFolded(planFilePath, cwd);
 }
 
 /**
@@ -181,12 +183,7 @@ export function isPlanFilePath(candidate: string, planFilePath: string, cwd: str
  * case-folded from `resolveForContainment`.
  */
 export function isInsideDir(candidate: string, dir: string, cwd: string): boolean {
-	const home = homedir();
-	const toAbsolute = (p: string) => {
-		const expanded = p.startsWith("~/") ? `${home}/${p.slice(2)}` : p;
-		return resolve(cwd, expanded).toLowerCase();
-	};
-	return toAbsolute(candidate).startsWith(toAbsolute(dir) + sep);
+	return toAbsoluteFolded(candidate, cwd).startsWith(toAbsoluteFolded(dir, cwd) + sep);
 }
 
 export function ruleMatches(rule: PermissionRule, toolName: string, subject: string, cwd: string): boolean {
@@ -352,6 +349,11 @@ export function isBroadExecutionRule(rule: PermissionRule): boolean {
 	if (/^[:\s]*\*+$/.test(rest)) return true;
 	// The runner's own escape hatch takes arbitrary code: `npm run *`, `npx *`.
 	if (/^(run|exec|x)[:\s]*\*+$/.test(rest)) return true;
+	// Interpreter inline-code flags take arbitrary code: `python -c *`, `node -e *`,
+	// `sh -c *`, `bash -c *`, `ruby -e *`. Without this, such a rule granted a
+	// standing bypass of the classifier (over-flagging a runner's `-c` here only
+	// costs a classifier call, which is the safe direction).
+	if (/^-(c|e)[:\s=]*\*+$/.test(rest)) return true;
 	// `npm test:*` names the script, so it stays narrow.
 	return false;
 }

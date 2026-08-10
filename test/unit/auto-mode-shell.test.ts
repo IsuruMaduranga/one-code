@@ -205,3 +205,40 @@ describe("analyzeShellCommand escalation (the review's bypasses)", () => {
 		expect(evidence.commands).toContain("frobnicate");
 	});
 });
+
+describe("analyzeShellCommand write-target gaps (whole-codebase review)", () => {
+	it("escalates a bare redirect with no command word", () => {
+		// `> /etc/hosts` truncates the file with no command at all; the loop used to
+		// `continue` past the redirect check whenever there was no command name.
+		for (const command of ["> /etc/hosts", "> ../outside.txt"]) {
+			expect(analyze(command).verdict, command).toBe("escalate");
+		}
+	});
+
+	it("checks a redirect target even for a read-only command", () => {
+		// `git log > file` writes the file; git's read-only fast path used to
+		// `continue` before the redirect was ever inspected.
+		expect(analyze("git log > ../escapes.txt").verdict).toBe("escalate");
+	});
+
+	it("validates the target of git -C, not just the subcommand", () => {
+		const evidence = analyze("git -C /etc status");
+		expect(evidence.verdict).toBe("escalate");
+		expect(evidence.notes.some((note) => note.includes("outside the working directory"))).toBe(true);
+	});
+
+	it("still fast-paths git -C into an in-project subdirectory", () => {
+		mkdirSync(join(cwd, "pkg"), { recursive: true });
+		expect(analyze("git -C pkg status").verdict).toBe("safe");
+	});
+
+	it("escalates sort -o, which writes despite being read-only", () => {
+		for (const command of ["sort -o /tmp/x input.txt", "sort --output=/tmp/x input.txt", "sort -o/tmp/x input.txt"]) {
+			expect(analyze(command).verdict, command).toBe("escalate");
+		}
+	});
+
+	it("still fast-paths plain sort", () => {
+		expect(analyze("sort input.txt").verdict).toBe("safe");
+	});
+});

@@ -61,6 +61,14 @@ Full context: [`decisions/auto-mode.md`](decisions/auto-mode.md).
 - **[Prompt caching, input size, and vendor containment on gateways](decisions/auto-mode.md#prompt-caching-input-size-and-vendor-containment-on-gateways)** — the stable prefix lives in the system prompt to cache; untrusted CLAUDE.md stays in the user message; sizing for Haiku's 4096-token prefix.
 - **[Hardening: the pi-automode review, and what came of it](decisions/auto-mode.md#auto-mode-hardening-the-pi-automode-review-and-what-came-of-it)** — the fail-closed posture: candidate chain, released pin on mid-session model death, deterministic floor for writes to the gate's own config.
 
+## Code review
+
+Full context: [`decisions/code-review-remediation.md`](decisions/code-review-remediation.md).
+
+- **[Auto-mode gate hardening: four false "safe" verdicts closed](decisions/code-review-remediation.md#auto-mode-gate-hardening-four-false-safe-verdicts-closed-2026-08-10)** — bare redirects, read-only-command redirects, `git -C <outside>`, `sort -o`, and `Bash(sh -c *)` rules all reached "safe"/allow without their real effect being weighed; every fix converts a false "safe" into an escalation, keeping the pre-gate's never-deny contract.
+- **[Worktree vs. permission rules — preserve-original, not reorder](decisions/code-review-remediation.md#worktree-vs-permission-rules--preserve-original-not-reorder-2026-08-10)** — worktree's `cd`-wrapper defeated every Bash rule; the original command is preserved for rule-matching while the classifier keeps seeing the wrapped command. Reordering permissions ahead of worktree was rejected (it would move containment to the wrong dir).
+- **[Background subagents now get the holistic review](decisions/code-review-remediation.md#background-subagents-now-get-the-holistic-review-2026-08-10)** — the end-of-run "review the whole action sequence" checkpoint now fires for background/resident runs, delivered as a follow-up since there is no `tool_result` to attach to.
+
 ## Modes & keybindings
 
 Full context: [`decisions/modes.md`](decisions/modes.md).

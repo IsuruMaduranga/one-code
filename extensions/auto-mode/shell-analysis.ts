@@ -477,11 +477,22 @@ function findHasAction(args: Token[]): boolean {
 	);
 }
 
+/** The file named by a `-o FILE` / `-oFILE` / `--output=FILE` flag, if present. */
+function outputFlagTarget(args: Token[]): string | undefined {
+	for (let i = 0; i < args.length; i++) {
+		const value = args[i].value;
+		if (value === "-o" || value === "--output") return args[i + 1]?.value;
+		if (value.startsWith("--output=")) return value.slice("--output=".length);
+		if (value.startsWith("-o") && value.length > 2) return value.slice(2);
+	}
+	return undefined;
+}
+
 /**
  * Decide git: only an explicitly read-only subcommand with no flags we cannot
  * account for is safe. Returns undefined when safe, else the reason to escalate.
  */
-function gitEscalationReason(args: Token[]): string | undefined {
+function gitEscalationReason(args: Token[], isDirOutsideCwd: (dir: string) => boolean): string | undefined {
 	let index = 0;
 	while (index < args.length) {
 		const token = args[index].value;
@@ -491,6 +502,14 @@ function gitEscalationReason(args: Token[]): string | undefined {
 			return "passes git -c/--config-env, which can turn a read into code execution";
 		}
 		if (GIT_GLOBAL_VALUE_FLAGS.has(token)) {
+			const value = args[index + 1]?.value;
+			// `-C`/`--git-dir`/`--work-tree` retarget git at another directory. If that
+			// directory escapes the working directory the operation is no longer
+			// provably in-project, so escalate rather than skipping the flag blindly
+			// (was review gap: `git -C /etc status` classified safe).
+			if ((token === "-C" || token === "--git-dir" || token === "--work-tree") && value && isDirOutsideCwd(value)) {
+				return `runs git ${token} ${value}, which points outside the working directory`;
+			}
 			index += 2;
 			continue;
 		}
@@ -550,7 +569,41 @@ export function analyzeShellCommand({ command, cwd, home }: AnalyzeInput): Shell
 	/** `cd` changes what later relative paths mean; the original never tracked it (F6/N12). */
 	let effectiveCwd = cwd;
 
+	/**
+	 * Resolve a write-target token, record it as evidence, and escalate on any
+	 * target that cannot be resolved, escapes the working directory, or names a
+	 * credential / execution-primitive path. Shared by redirections, mutating
+	 * command positionals, and output-flag targets so all writes get one check.
+	 */
+	const checkWriteTarget = (token: string) => {
+		if (token === "/dev/null") return;
+		const absolute = toAbsolute(effectiveCwd, token, home);
+		const resolved = resolveForContainment(absolute);
+		const outsideCwd = resolved === undefined || !isWithin(containmentRoot, resolved);
+		evidence.writes.push({ token, resolved, outsideCwd });
+		if (resolved === undefined) {
+			escalate(`writes to ${token}, which could not be resolved to a real path`);
+		} else if (outsideCwd) {
+			escalate(`writes to ${token}, which is outside the working directory`);
+		}
+		if (isSensitivePath(absolute) && !evidence.sensitivePaths.includes(token)) {
+			evidence.sensitivePaths.push(token);
+			escalate(`writes to ${token}, a credential or secret path`);
+		}
+		if (isExecutionPrimitivePath(absolute) && !evidence.executionPrimitives.includes(token)) {
+			evidence.executionPrimitives.push(token);
+			escalate(`writes to ${token}, whose contents execute later without further approval`);
+		}
+	};
+
 	for (const segment of segments) {
+		// Redirection targets are writes regardless of the command word: a bare
+		// `> file` truncates/creates it with no command at all, and `git log > file`
+		// writes it too. Check them first so the command-specific `continue`s below
+		// (cd/git) can never skip a redirect (was review gap: bare-redirect writes and
+		// read-only-command redirects were fast-pathed to "safe").
+		for (const token of segment.redirects) checkWriteTarget(token);
+
 		const { command: name, args, peeled } = resolvePayload(segment.tokens);
 		if (!name) continue;
 		evidence.commands.push(name);
@@ -590,7 +643,10 @@ export function analyzeShellCommand({ command, cwd, home }: AnalyzeInput): Shell
 		}
 
 		if (name === "git") {
-			const reason = gitEscalationReason(args);
+			const reason = gitEscalationReason(args, (dir) => {
+				const resolved = resolveForContainment(toAbsolute(effectiveCwd, dir, home));
+				return resolved === undefined || !isWithin(containmentRoot, resolved);
+			});
 			if (reason) escalate(reason);
 			continue;
 		}
@@ -610,9 +666,9 @@ export function analyzeShellCommand({ command, cwd, home }: AnalyzeInput): Shell
 			escalate(`runs ${name}, which is not on the read-only allowlist`);
 		}
 
-		// Redirection targets and the positional destinations of writing commands
-		// are the paths that actually get written.
-		const writeTokens = [...segment.redirects];
+		// The positional destinations of writing commands are the paths that get
+		// written. (Redirections were already handled at the top of the loop.)
+		const writeTokens: string[] = [];
 		if (isMutation) {
 			const positionals = args.filter((token) => !token.value.startsWith("-") && looksLikePath(token.value));
 			// For cp/mv/rsync/ln the destination is last; for the rest every
@@ -628,26 +684,18 @@ export function analyzeShellCommand({ command, cwd, home }: AnalyzeInput): Shell
 			}
 		}
 
-		for (const token of writeTokens) {
-			if (token === "/dev/null") continue;
-			const absolute = toAbsolute(effectiveCwd, token, home);
-			const resolved = resolveForContainment(absolute);
-			const outsideCwd = resolved === undefined || !isWithin(containmentRoot, resolved);
-			evidence.writes.push({ token, resolved, outsideCwd });
-			if (resolved === undefined) {
-				escalate(`writes to ${token}, which could not be resolved to a real path`);
-			} else if (outsideCwd) {
-				escalate(`writes to ${token}, which is outside the working directory`);
-			}
-			if (isSensitivePath(absolute) && !evidence.sensitivePaths.includes(token)) {
-				evidence.sensitivePaths.push(token);
-				escalate(`writes to ${token}, a credential or secret path`);
-			}
-			if (isExecutionPrimitivePath(absolute) && !evidence.executionPrimitives.includes(token)) {
-				evidence.executionPrimitives.push(token);
-				escalate(`writes to ${token}, whose contents execute later without further approval`);
+		// A few otherwise-read-only commands write when handed an output flag.
+		// `sort -o FILE` / `sort --output=FILE` truncates/creates FILE, so it must
+		// not be fast-pathed as a pure read (was review gap: `sort -o` classified safe).
+		if (name === "sort") {
+			const outTarget = outputFlagTarget(args);
+			if (outTarget !== undefined) {
+				escalate("runs sort with -o/--output, which writes a file");
+				writeTokens.push(outTarget);
 			}
 		}
+
+		for (const token of writeTokens) checkWriteTarget(token);
 	}
 
 	return evidence;

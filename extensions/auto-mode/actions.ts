@@ -26,9 +26,17 @@ export interface ChildAction {
 }
 
 export interface SubagentActionsPayload {
-	/** The parent's tool call id, so the review attaches to the right result. */
+	/** The parent's tool call id, so a foreground review attaches to the right result. */
 	toolCallId: string;
 	actions: ChildAction[];
+	/**
+	 * True for a background/resident run: the spawning call has already returned, so
+	 * there is no pending tool_result to attach the holistic review to. The gate
+	 * reviews on receipt and surfaces any concern as its own notification instead.
+	 */
+	background?: boolean;
+	/** Agent name, used to label a background review. */
+	agentName?: string;
 }
 
 /** Per-action and total caps: a long-running child must not blow up the prompt. */

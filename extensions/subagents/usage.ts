@@ -46,3 +46,8 @@ export function formatUsage(totals: UsageTotals): string {
 	if (totals.cost > 0) parts.push(`$${totals.cost.toFixed(4)}`);
 	return parts.join(" · ");
 }
+
+/** A run's "N tools · <usage>" line; the usage suffix is dropped when empty. */
+export function formatStats(toolCalls: number, totals: UsageTotals): string {
+	return [`${toolCalls} tools`, formatUsage(totals)].filter(Boolean).join(" · ");
+}

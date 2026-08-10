@@ -26,6 +26,11 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 
 	pi.on("context", (event) => {
 		if (reminderQueue.size === 0) return;
+		// injectReminders is a no-op when there is no user message to attach to, and
+		// drain() would clear the next-turn queue as a side effect — dropping those
+		// reminders for good. Only consume the queue once there is somewhere to put
+		// them, so they survive to the next eligible turn.
+		if (!event.messages.some((m) => m.role === "user")) return;
 		const reminders = reminderQueue.drain();
 		return { messages: injectReminders(event.messages, reminders) };
 	});
