@@ -35,6 +35,11 @@ brew install isurumaduranga/one-ai/one-code
 
 > The npm route needs **Node 22.19+**.
 
+> Tip: the app opens in a **full-screen TUI** (alt-screen, restores your
+> terminal on exit) by default. On your own pi that's opt-in — set
+> `"tuiMode": "fullscreen"` in `~/.pi/agent/settings.json`, or launch with
+> `pi --tui-mode fullscreen`.
+
 ## Two-minute quickstart — free, no card
 
 You need one model-provider key. Two providers hand out **free frontier-adjacent
