@@ -60,17 +60,38 @@ function readFileIfPresent(path: string): string | null {
  * first, then project files from the farthest ancestor down to the cwd. Within a
  * directory, `CLAUDE.md` then `CLAUDE.local.md`. `homeClaudeDir` is `~/.claude`.
  */
-export function discoverContextFiles(opts: {
+function isPresentFile(path: string): boolean {
+	try {
+		return existsSync(path) && statSync(path).isFile();
+	} catch {
+		return false;
+	}
+}
+
+/** A discovered CLAUDE.md-family path and its descriptor, without file content. */
+export interface ContextFilePath {
+	path: string;
+	descriptor: string;
+}
+
+/**
+ * The ordered CLAUDE.md-family paths that exist, WITHOUT reading their contents:
+ * global `~/.claude/CLAUDE.md` first, then project `CLAUDE.md`/`CLAUDE.local.md`
+ * from the farthest ancestor down to cwd (`CLAUDE.md` before `CLAUDE.local.md`
+ * within a directory). `discoverContextFiles` reads content on top of this;
+ * callers that only need paths/descriptors (e.g. `/memory`'s picker) use it
+ * directly to avoid loading files they will discard.
+ */
+export function discoverContextFilePaths(opts: {
 	cwd: string;
 	homeClaudeDir: string;
-}): ContextFile[] {
-	const files: ContextFile[] = [];
+}): ContextFilePath[] {
+	const paths: ContextFilePath[] = [];
 	const seen = new Set<string>();
 
 	const globalPath = join(opts.homeClaudeDir, "CLAUDE.md");
-	const globalContent = readFileIfPresent(globalPath);
-	if (globalContent !== null) {
-		files.push({ path: globalPath, content: globalContent, descriptor: GLOBAL_DESCRIPTOR });
+	if (isPresentFile(globalPath)) {
+		paths.push({ path: globalPath, descriptor: GLOBAL_DESCRIPTOR });
 		seen.add(globalPath);
 	}
 
@@ -91,14 +112,28 @@ export function discoverContextFiles(opts: {
 		] as const) {
 			const p = join(d, name);
 			if (seen.has(p)) continue;
-			const content = readFileIfPresent(p);
-			if (content !== null) {
-				files.push({ path: p, content, descriptor });
+			if (isPresentFile(p)) {
+				paths.push({ path: p, descriptor });
 				seen.add(p);
 			}
 		}
 	}
 
+	return paths;
+}
+
+export function discoverContextFiles(opts: {
+	cwd: string;
+	homeClaudeDir: string;
+}): ContextFile[] {
+	const files: ContextFile[] = [];
+	for (const { path, descriptor } of discoverContextFilePaths(opts)) {
+		// Re-check the read: a file present at enumeration but unreadable now is
+		// omitted, exactly as before (the block must never carry empty entries).
+		const content = readFileIfPresent(path);
+		if (content === null) continue;
+		files.push({ path, content, descriptor });
+	}
 	return files;
 }
 

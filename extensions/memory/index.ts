@@ -15,8 +15,8 @@
  *   (the write itself succeeded — the message says so), matching Claude Code.
  */
 
-import { mkdirSync, readFileSync } from "node:fs";
-import { isAbsolute, join, resolve, sep } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
 	INDEX_NEAR_LIMIT_REMINDER,
@@ -25,7 +25,10 @@ import {
 	projectMemoryDir,
 	stampFrontmatter,
 } from "../lib/memory.ts";
+import { claudeConfigDir } from "../lib/paths.ts";
+import { tryReadFile } from "../lib/plugins.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
+import { listMemoryFiles, prepareMemorySave } from "./files.ts";
 
 function inputPath(input: unknown, cwd: string): string | undefined {
 	const raw = (input as { path?: unknown })?.path;
@@ -86,5 +89,49 @@ export default function memoryExtension(pi: ExtensionAPI) {
 			};
 		}
 		return undefined;
+	});
+
+	// ---- /memory: view or edit CLAUDE.md + memory files ---------------------
+	// Claude Code's `/memory`: pick a memory-related file and edit it. Interactive
+	// only — driven through pi's select + editor dialogs; a create-on-save target
+	// (a not-yet-existing CLAUDE.md) is written when the user saves non-empty text.
+	pi.registerCommand("memory", {
+		description: "View or edit CLAUDE.md and memory files",
+		handler: async (_args, ctx) => {
+			if (!ctx.hasUI) {
+				ctx.ui.notify("/memory needs an interactive terminal to pick and edit a file.", "warning");
+				return;
+			}
+			const files = listMemoryFiles({ cwd: ctx.cwd, homeClaudeDir: claudeConfigDir() });
+			// Key the picker by its rendered label so the selection maps straight
+			// back to an entry — no parallel array / indexOf to keep in sync.
+			const byLabel = new Map(files.map((f) => [f.displayLabel, f]));
+			const picked = await ctx.ui.select("Edit memory / CLAUDE.md", [...byLabel.keys()]);
+			if (picked === undefined) return;
+			const entry = byLabel.get(picked);
+			if (!entry) return;
+
+			const current = tryReadFile(entry.path) ?? "";
+			const edited = await ctx.ui.editor(`Editing ${entry.path}`, current);
+			if (edited === undefined || edited === current) return;
+
+			// Route through the same treatment a model write to the memory dir gets:
+			// frontmatter stamping + the MEMORY.md load-limit warning (files.ts).
+			const plan = prepareMemorySave({
+				path: entry.path,
+				content: edited,
+				cwd: ctx.cwd,
+				sessionId: ctx.sessionManager.getSessionId(),
+				nowIso: new Date().toISOString(),
+			});
+			try {
+				mkdirSync(dirname(entry.path), { recursive: true });
+				writeFileSync(entry.path, plan.content);
+				ctx.ui.notify(`Saved ${entry.path}`, "info");
+				if (plan.warning) ctx.ui.notify(plan.warning, "warning");
+			} catch (error) {
+				ctx.ui.notify(`Could not save ${entry.path}: ${error instanceof Error ? error.message : error}`, "error");
+			}
+		},
 	});
 }

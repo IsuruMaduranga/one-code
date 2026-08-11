@@ -176,3 +176,29 @@ blocked ordinary write and an unprompted plan-file write in plan mode; a tmux
 TUI run exercised the scrollable approval viewer (scroll, choice switch,
 reject→stay-planning, Enter→approve→manual mode) and ctrl+q entry reusing the
 session's existing file.
+
+## `bypassPermissions` bypasses everything, including protected paths (2026-08-11)
+
+Claude Code keeps its protected-path (1g) and content-specific-ask (1f) checks
+**bypass-immune**: even under `--dangerously-skip-permissions` a write to
+`.git/`, `.claude/`, `.vscode/`, or a shell rc still prompts (§16, the CC source
+map). One Code deliberately does **not** — `matcher.ts` `decide()` returns
+`allow` for `bypassPermissions` before those checks run, so bypass means bypass.
+
+Chosen after weighing both (the reconstructed CC source surfaced the divergence
+during the CC-adoption audit — `docs/plan/cc-adoption.md` A1 #3):
+
+- `bypassPermissions` only engages when the user *explicitly* launched with
+  `--dangerously-skip-permissions` (it is not even a shift-cycle stop unless the
+  session started in it). That is an informed, per-session opt-out of the whole
+  gate; carving exceptions back in contradicts what the user asked for.
+- The protections that matter for the *unattended* path — auto mode — are intact:
+  `decide()` routes protected-path writes to the classifier there, and the
+  deterministic safety floor still blocks writes to the gate's own config. Auto
+  mode is where an unsupervised model runs; bypass is where a human took the
+  wheel. Rejected: adopting CC's bypass-immune 1f/1g (it would make our loudest
+  "I know what I'm doing" mode quietly not mean that).
+
+If this is revisited, the change is localized (a protected-path/ask check ahead
+of the `bypassPermissions` early-return in `decide()`) and must be live-tested in
+both directions per the auto-mode rules.

@@ -20,10 +20,27 @@ describe("runHookCommand", () => {
 		expect(result.timedOut).toBe(false);
 	});
 
-	it("delivers the JSON payload on stdin", async () => {
+	it("delivers the JSON payload on stdin, newline-terminated", async () => {
 		const result = await runHookCommand("cat", '{"tool_name":"Bash"}', { cwd: dir });
-		expect(result.stdout).toBe('{"tool_name":"Bash"}');
+		// The executor appends a trailing "\n" (see below); cat echoes it back.
+		expect(result.stdout).toBe('{"tool_name":"Bash"}\n');
 		expect(result.exitCode).toBe(0);
+	});
+
+	// Regression: a hook reading its payload with `read -r` must succeed. Without
+	// a trailing newline, `read` hits EOF-before-delimiter, exits 1, and the
+	// `if read -r line; then …` branch is skipped even though $line was set
+	// (Claude Code bug CC-161). The hook here exits 7 only if the read succeeded.
+	it("terminates stdin so `read -r` in a hook succeeds", async () => {
+		const result = await runHookCommand('if read -r line; then exit 7; else exit 1; fi', '{"a":1}', {
+			cwd: dir,
+		});
+		expect(result.exitCode).toBe(7);
+	});
+
+	it("does not double up a newline the payload already ends with", async () => {
+		const result = await runHookCommand("cat", '{"x":1}\n', { cwd: dir });
+		expect(result.stdout).toBe('{"x":1}\n');
 	});
 
 	it("survives a hook that exits without reading stdin", async () => {

@@ -18,6 +18,10 @@
  * - output capped at 1MB per stream
  * - stdin errors ignored (a hook that exits without reading stdin — `exit 2`
  *   — would otherwise EPIPE-crash the write)
+ * - stdin JSON is newline-terminated: without a trailing "\n" a hook doing
+ *   `read -r line` sees EOF-before-delimiter and `read` exits 1, so the
+ *   `if read -r line; then …` branch is silently skipped even though the
+ *   variable was populated (Claude Code carries the same fix — bug CC-161)
  * - timeout clamped under Node's 2^31-1 ms timer overflow, timer unref'd so a
  *   pending hook can't keep a one-shot `pi -p` process alive
  */
@@ -126,7 +130,7 @@ export function runHookCommand(command: string, stdinJson: string, opts: HookRun
 		// A hook that never reads stdin (e.g. plain `exit 2`) closes the pipe
 		// early; the resulting EPIPE must not take the extension down.
 		child.stdin?.on("error", () => {});
-		child.stdin?.write(stdinJson);
+		child.stdin?.write(stdinJson.endsWith("\n") ? stdinJson : `${stdinJson}\n`);
 		child.stdin?.end();
 	});
 }
