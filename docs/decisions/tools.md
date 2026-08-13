@@ -405,3 +405,21 @@ exact bytes including the trailing `\n\n` (findings §14).
 byte-identity became the requirement); a first-message idempotent-prepend without
 the shared queue (the queue already models transient per-turn injection and
 placement generalizes to all five reminders).
+
+## Foreground `sleep` is blocked; wait via background / monitor (2026-08-14)
+
+Claude Code blocks a foreground bash command whose only job is to wait — a
+top-level `sleep`, alone or leading a `sleep N && poll` / `sleep N; check`
+chain — because it stalls the whole session for nothing, and steers the model to
+the mechanisms built for waiting. One Code now mirrors it: the bash extension's
+foreground path returns `isError: true` with guidance toward `run_in_background:
+true` (completion arrives as a notification, no polling), the monitor tool (watch
+a condition), or `schedule_wakeup`. The check (`bash/wait-guard.ts`, pure,
+unit-tested) reuses the shell pre-gate's `parseCommand` and fires only when the
+**first** top-level command is `sleep`: a brief `sleep` inside a larger command
+(`build && sleep 2 && smoke`) is a legitimate pause and is left alone, a `sleep`
+inside a script file is invisible anyway, and `run_in_background: true` with a
+sleep is the sanctioned path and is never blocked (the guard is foreground-only).
+Blocking (not warning) is deliberate — parity with CC, and chaining shorter
+sleeps to poll is exactly the anti-pattern the guard exists to stop. It applies
+in every mode, since it is a tool-shape rule, not an auto-mode safety check.

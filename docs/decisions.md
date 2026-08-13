@@ -49,6 +49,7 @@ Full context: [`decisions/tools.md`](decisions/tools.md).
 - **[Background bash: override the built-in, gate before detaching (unreviewed)](decisions/tools.md#background-bash-override-the-built-in-gate-before-detaching-unreviewed)** — `run_in_background` on a pi-executor-delegating `bash` override; task_output/task_stop work unchanged; never auto-allowed.
 - **[Deferral runs on all tiers; steering follows CC's channels](decisions/tools.md#deferral-runs-on-all-tiers-steering-follows-ccs-channels-2026-08-10)** — deferral applies on every tier (capture-confirmed CC defers on Haiku too; verified 35→15 tools on deepseek); notifications carry CC's anti-confabulation preamble; MCP server `instructions` are injected, not dropped.
 - **[CLAUDE.md, memory, and skills injected as the CC reminder stack](decisions/tools.md#claudemd-memory-and-skills-injected-as-the-cc-reminder-stack-2026-08-10)** — moved out of the system prompt into the byte-identical first-user-message `<system-reminder>` stack (`claude-context` + `lib/claude-context.ts`, placement/order/suffix on the reminder queue).
+- **[Foreground `sleep` is blocked; wait via background / monitor](decisions/tools.md#foreground-sleep-is-blocked-wait-via-background--monitor-2026-08-14)** — a foreground command that leads with `sleep` returns `isError` and steers to `run_in_background`/monitor/`schedule_wakeup` (CC parity, `bash/wait-guard.ts`); a mid-command pause and backgrounded sleeps are left alone.
 
 ## Auto mode
 
