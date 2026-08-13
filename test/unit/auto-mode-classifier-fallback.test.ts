@@ -30,18 +30,23 @@ const completeMock = vi.mocked(completeSimple);
 const model = (provider: string, id: string, input?: number) =>
 	({ provider, id, name: id, cost: input === undefined ? undefined : { input, output: input * 4 } }) as any;
 
+// A stage-1 severity below the threshold ⇒ allow with no stage 2, so an allow is
+// a single provider call — which keeps the fallback call-count assertions clean.
 const allowReply = () =>
-	({ stopReason: "stop", content: [{ type: "text", text: '{"decision":"allow"}' }], usage: {} }) as any;
+	({ stopReason: "stop", content: [{ type: "text", text: "<severity>5</severity>" }], usage: {} }) as any;
 const errorReply = (errorMessage: string) => ({ stopReason: "error", errorMessage, content: [] }) as any;
 
 const config = loadAutoModeConfig("/nonexistent-home-for-tests");
 
 const request = {
 	toolName: "bash",
-	input: { command: "npm test" },
-	cwd: "/repo",
+	transcript: [
+		{ kind: "user" as const, text: "run the tests" },
+		{ kind: "tool" as const, tool: "bash", input: { command: "npm test" } },
+	],
 	userMessages: ["run the tests"],
-	routedBecause: "no rule covered this call",
+	username: "tester",
+	environment: config.environment,
 };
 
 /** An openai session where the chain is: gpt-5-mini (provider default) → session. */
@@ -128,8 +133,9 @@ describe("classify: pinning and fallback", () => {
 		const verdict = await classify(request, deps);
 		expect(verdict.decision).toBe("allow");
 		expect(completeMock).toHaveBeenCalledTimes(2);
-		expect((completeMock.mock.calls[0]?.[2] as any).maxTokens).toBe(1024);
-		expect((completeMock.mock.calls[1]?.[2] as any).maxTokens).toBe(4096);
+		// Stage 1's cap is 64 (like CC); a truncated reply retries with headroom.
+		expect((completeMock.mock.calls[0]?.[2] as any).maxTokens).toBe(64);
+		expect((completeMock.mock.calls[1]?.[2] as any).maxTokens).toBe(1024);
 	});
 
 	it("blocks with the output limit named when the retry is also truncated, keeping the model", async () => {
@@ -198,6 +204,10 @@ describe("classify: timeout handling", () => {
 		expect(verdict.decision).toBe("block");
 		expect(verdict.tier).toBe("timeout");
 		expect(verdict.reason).toContain("in time");
+		// Names the tool under review and the model that timed out (CC-aligned copy),
+		// so the model knows what was blocked and that it can wait/retry.
+		expect(verdict.reason).toContain("bash");
+		expect(verdict.reason).toContain("temporarily unavailable");
 		// A timeout must never look like a substantive "could not be reached" error.
 		expect(verdict.reason).not.toContain("could not be reached");
 		expect(deps.state.rejected.size).toBe(0);

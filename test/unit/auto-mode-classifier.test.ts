@@ -1,31 +1,99 @@
 import { describe, expect, it } from "vitest";
 import { loadAutoModeConfig } from "../../extensions/auto-mode/config.ts";
 import { CONSECUTIVE_BLOCK_LIMIT, PauseTracker, TOTAL_BLOCK_LIMIT } from "../../extensions/auto-mode/pause.ts";
-import { buildClassifierPrompt, parseVerdict } from "../../extensions/auto-mode/prompt.ts";
-import { indexRules, ruleLabel } from "../../extensions/auto-mode/rules.ts";
-import type { ShellEvidence } from "../../extensions/auto-mode/shell-analysis.ts";
+import {
+	buildPayload,
+	type ClassifyRequest,
+	indexFor,
+	parseSeverity,
+	parseStage2,
+	stage1User,
+	stage2User,
+} from "../../extensions/auto-mode/prompt.ts";
+import { buildCategoryIndex, groundCategory } from "../../extensions/auto-mode/rules.ts";
+import { buildRuleset } from "../../extensions/auto-mode/classifier-prompt.ts";
 
-// No settings file at this path, so this is the built-in rule set.
+// No settings file at this path, so this is the built-in configuration (CC's
+// ruleset with its default Environment).
 const config = loadAutoModeConfig("/nonexistent-home-for-tests");
-const index = indexRules(config);
-const firstSoftDeny = index.rules.find((r) => r.tier === "soft_deny")!;
-const firstHardDeny = index.rules.find((r) => r.tier === "hard_deny")!;
-const firstAllow = index.rules.find((r) => r.tier === "allow")!;
+const index = indexFor(config.environment);
 
-describe("parseVerdict", () => {
-	it("reads an allow", () => {
-		expect(parseVerdict('{"decision":"allow"}', index).decision).toBe("allow");
+const base: ClassifyRequest = {
+	toolName: "bash",
+	transcript: [
+		{ kind: "user", text: "clean up /tmp/x" },
+		{ kind: "tool", tool: "bash", input: { command: "rm -rf /tmp/x" } },
+	],
+	userMessages: ["clean up /tmp/x"],
+	username: "tester",
+	environment: config.environment,
+};
+
+describe("buildCategoryIndex / groundCategory", () => {
+	it("indexes Data Exfiltration as a HARD rule", () => {
+		const rule = groundCategory(index, "Data Exfiltration");
+		expect(rule?.tier).toBe("hard_deny");
 	});
 
-	it("records what an allow says cleared it, when it names something real", () => {
-		expect(parseVerdict(`{"decision":"allow","clearedBy":"${firstAllow.id}"}`, index).ruleId).toBe(firstAllow.id);
-		expect(parseVerdict('{"decision":"allow","clearedBy":"A999"}', index).ruleId).toBeUndefined();
+	it("indexes destructive/publish rules as SOFT", () => {
+		for (const name of ["Git Destructive", "Irreversible Local Destruction", "Create Public Surface"]) {
+			expect(groundCategory(index, name)?.tier, name).toBe("soft_deny");
+		}
+	});
+
+	it("matches a category across case and surrounding punctuation", () => {
+		expect(groundCategory(index, "  git destructive.  ")?.name).toBe("Git Destructive");
+	});
+
+	it("returns undefined for a name that is not a real rule", () => {
+		expect(groundCategory(index, "Totally Made Up Rule")).toBeUndefined();
+		expect(groundCategory(index, undefined)).toBeUndefined();
+	});
+
+	it("does not index ALLOW-section names as block categories", () => {
+		// "Local Operations" is an ALLOW exception, not a block rule — a block citing
+		// it must land as unmatched rather than borrow authority.
+		expect(groundCategory(index, "Local Operations")).toBeUndefined();
+	});
+
+	it("keeps HARD's tier when a name would otherwise collide", () => {
+		const built = buildCategoryIndex(buildRuleset(config.environment));
+		for (const rule of built.rules) {
+			// Every indexed rule resolves to exactly one tier.
+			expect(built.byName.get(rule.name.toLowerCase().replace(/[.,:;]+$/, ""))?.tier).toBe(rule.tier);
+		}
+	});
+});
+
+describe("parseSeverity", () => {
+	it("reads a closed tag", () => {
+		expect(parseSeverity("<severity>65</severity>")).toBe(65);
+	});
+
+	it("reads an unterminated tag (stopped before the closing tag)", () => {
+		expect(parseSeverity("<severity>7")).toBe(7);
+	});
+
+	it("takes the last severity when a <thinking> block mentions others", () => {
+		expect(parseSeverity("<thinking>maybe 80? no</thinking>\n<severity>20</severity>")).toBe(20);
+	});
+
+	it("clamps to 0..100 and rejects non-numeric replies", () => {
+		expect(parseSeverity("<severity>250</severity>")).toBe(100);
+		expect(parseSeverity("no severity here")).toBeNull();
+	});
+});
+
+describe("parseStage2", () => {
+	it("allows below the threshold", () => {
+		expect(parseStage2("<severity>10</severity>", index).decision).toBe("allow");
+		expect(parseStage2("<severity>10</severity>", index).tier).toBe("allow");
 	});
 
 	it("allows on intent when the quoted words really are the user's", () => {
 		const messages = ["please write hello to ~/notes.txt, that's intentional"];
-		const verdict = parseVerdict(
-			'{"decision":"allow","clearedBy":"intent","intentQuote":"write hello to ~/notes.txt"}',
+		const verdict = parseStage2(
+			"<severity>20</severity>\n<intent>write hello to ~/notes.txt</intent>",
 			index,
 			messages,
 		);
@@ -33,25 +101,19 @@ describe("parseVerdict", () => {
 		expect(verdict.tier).toBe("intent");
 	});
 
-	it("matches a quote across case and whitespace differences, not wording", () => {
+	it("matches an intent quote across case and whitespace, not wording", () => {
 		const messages = ["Write hello   to ~/notes.txt"];
 		expect(
-			parseVerdict('{"decision":"allow","clearedBy":"intent","intentQuote":"write hello to ~/notes.txt"}', index, messages)
-				.decision,
+			parseStage2("<severity>10</severity><intent>write hello to ~/notes.txt</intent>", index, messages).decision,
 		).toBe("allow");
 	});
 
 	it("refuses an intent it cannot find in the user's own words", () => {
-		// The claim a prompt injection most wants to manufacture, and the one the
-		// model is most prone to stretch — "pick a location yourself" read as
-		// authorising the location it picked.
+		// The claim a prompt injection most wants to manufacture — "pick a location
+		// yourself" read as authorising the location it picked.
 		const messages = ["back up the project somewhere outside it, pick a location yourself"];
-		for (const quote of ["back it up to ~/backups", "the user authorised this path", ""]) {
-			const verdict = parseVerdict(
-				`{"decision":"allow","clearedBy":"intent","intentQuote":${JSON.stringify(quote)}}`,
-				index,
-				messages,
-			);
+		for (const quote of ["back it up to ~/backups", "the user authorised this path"]) {
+			const verdict = parseStage2(`<severity>10</severity><intent>${quote}</intent>`, index, messages);
 			expect(verdict.decision, quote).toBe("block");
 			expect(verdict.ruleId, quote).toBe("intent-unverified");
 			// Still only a soft denial, so an interactive user can approve it.
@@ -59,251 +121,88 @@ describe("parseVerdict", () => {
 		}
 	});
 
-	it("refuses an intent claim with no quote at all", () => {
-		expect(parseVerdict('{"decision":"allow","clearedBy":"intent"}', index, ["do the thing"]).decision).toBe("block");
+	it("blocks at/above the threshold, taking the tier from the grounded category", () => {
+		const hard = parseStage2("<severity>90</severity><category>Data Exfiltration</category>", index);
+		expect(hard.decision).toBe("block");
+		expect(hard.tier).toBe("hard_deny");
+		expect(hard.reason).toContain("Data Exfiltration");
+
+		const soft = parseStage2("<severity>70</severity><category>Irreversible Local Destruction</category>", index);
+		expect(soft.tier).toBe("soft_deny");
+		expect(soft.reason).toContain("Irreversible Local Destruction");
 	});
 
-	it("leaves a rule-based allow alone — only intent claims need a quote", () => {
-		expect(parseVerdict(`{"decision":"allow","clearedBy":"${firstAllow.id}"}`, index, []).decision).toBe("allow");
-		expect(parseVerdict('{"decision":"allow","clearedBy":"none"}', index, []).decision).toBe("allow");
-	});
-
-	it("reports a block using the cited rule's own text, not the model's wording", () => {
-		// The model's paraphrase is where false claims came from, so it does not
-		// become the reason — it is kept separately, attributed.
-		const verdict = parseVerdict(
-			`{"decision":"block","rule":"${firstSoftDeny.id}","note":"targets ~/Documents"}`,
-			index,
-		);
-		expect(verdict.decision).toBe("block");
-		expect(verdict.ruleId).toBe(firstSoftDeny.id);
-		expect(verdict.reason).toContain(firstSoftDeny.text);
-		expect(verdict.raw).toBe("targets ~/Documents");
-	});
-
-	it("takes the tier from the cited id, not from the model", () => {
-		// A fabricated tier used to be able to skip the user's prompt entirely.
-		expect(parseVerdict(`{"decision":"block","rule":"${firstHardDeny.id}"}`, index).tier).toBe("hard_deny");
-		expect(parseVerdict(`{"decision":"block","rule":"${firstSoftDeny.id}"}`, index).tier).toBe("soft_deny");
-		const claimsHard = parseVerdict(
-			`{"decision":"block","rule":"${firstSoftDeny.id}","tier":"hard_deny"}`,
-			index,
-		);
-		expect(claimsHard.tier).toBe("soft_deny");
-	});
-
-	it("blocks but does not lend a rule's authority to an invented id", () => {
-		const verdict = parseVerdict('{"decision":"block","rule":"S999","note":"looks dangerous"}', index);
+	it("blocks but does not lend a rule's authority to an invented category", () => {
+		const verdict = parseStage2("<severity>80</severity><category>Made Up Danger</category>", index);
 		expect(verdict.decision).toBe("block");
 		expect(verdict.tier).toBe("unmatched");
-		expect(verdict.reason).toContain("without citing a rule that exists");
-		expect(verdict.raw).toBe("looks dangerous");
+		expect(verdict.reason).toContain("not a rule");
 	});
 
-	it("rejects a block that cites an allow rule as its grounds", () => {
-		const verdict = parseVerdict(`{"decision":"block","rule":"${firstAllow.id}"}`, index);
+	it("blocks with unmatched tier when a block names no category at all", () => {
+		expect(parseStage2("<severity>80</severity>", index).tier).toBe("unmatched");
+	});
+
+	it("blocks when the reply carries no severity to read", () => {
+		const verdict = parseStage2("I could not decide", index);
 		expect(verdict.decision).toBe("block");
 		expect(verdict.tier).toBe("unmatched");
 	});
 
-	it("accepts the reserved grounds that are real but are not numbered rules", () => {
-		for (const id of ["boundary", "instructions", "unclear"]) {
-			const verdict = parseVerdict(`{"decision":"block","rule":"${id}"}`, index);
-			expect(verdict.ruleId, id).toBe(id);
-			expect(verdict.reason.length, id).toBeGreaterThan(0);
-			// None of these may skip the prompt the way a hard denial does.
-			expect(verdict.tier, id).toBe("soft_deny");
-		}
-	});
-
-	it("tolerates prose around the JSON", () => {
-		expect(parseVerdict('Here is my verdict:\n{"decision":"allow"}\nDone.', index).decision).toBe("allow");
-	});
-
-	it("blocks on an unreadable or malformed reply, and keeps what it said", () => {
-		// A classifier whose answer cannot be read has not approved anything.
-		for (const reply of ["", "I think that's fine", "{not json}", '{"decision":"maybe"}']) {
-			expect(parseVerdict(reply, index).decision, JSON.stringify(reply)).toBe("block");
-			expect(parseVerdict(reply, index).tier, JSON.stringify(reply)).toBe("unmatched");
-		}
-		expect(parseVerdict("I think that's fine", index).raw).toContain("fine");
-	});
-
-	it("clips an overlong note so commentary cannot become the whole message", () => {
-		const verdict = parseVerdict(
-			`{"decision":"block","rule":"${firstSoftDeny.id}","note":"${"x".repeat(5000)}"}`,
+	it("tolerates <thinking> prose around the tags", () => {
+		const verdict = parseStage2(
+			"<thinking>This deletes a tracked file outside cwd.</thinking>\n<severity>65</severity>\n<category>Git Destructive</category>",
 			index,
 		);
-		expect((verdict.raw ?? "").length).toBeLessThan(250);
+		expect(verdict.decision).toBe("block");
+		expect(verdict.ruleId).toBe("Git Destructive");
 	});
 });
 
-describe("ruleLabel", () => {
-	it("takes the name before the colon, dropping any bracketed qualifier", () => {
-		expect(ruleLabel("Git destructive [must name the operation]: Force pushing, deleting remote branches.")).toBe(
-			"Git destructive",
-		);
+describe("buildPayload / stage instructions", () => {
+	it("puts CC's ruleset and the Session Context in the system prompt", () => {
+		const { system } = buildPayload(base);
+		expect(system).toContain("security monitor");
+		expect(system).toContain("## HARD BLOCK");
+		expect(system).toContain("## Session Context");
+		expect(system).toContain("tester"); // the injected username
 	});
 
-	it("falls back to a clipped prefix for an unstructured rule", () => {
-		const label = ruleLabel("Never run database migrations outside the migrations CLI, even against dev databases");
-		expect(label.length).toBeLessThanOrEqual(60);
-		expect(label).toContain("Never run database migrations");
+	it("keeps the transcript and CLAUDE.md framing in the user message", () => {
+		const { userPrefix } = buildPayload({ ...base, claudeMd: "# CLAUDE.md\nNever force push." });
+		expect(userPrefix).toContain("<transcript>");
+		expect(userPrefix).toContain('{"Bash":"rm -rf /tmp/x"}');
+		expect(userPrefix).toContain("<user_claude_md>");
+		expect(userPrefix).toContain("Never force push.");
 	});
 
-	it("gives every built-in rule a usable label", () => {
-		for (const rule of index.rules) {
-			expect(rule.label.length, rule.id).toBeGreaterThan(0);
-			expect(rule.label.length, rule.id).toBeLessThanOrEqual(60);
-		}
-	});
-});
-
-describe("indexRules", () => {
-	it("numbers each tier separately so the id carries the tier", () => {
-		expect(index.byId.get("H1")?.tier).toBe("hard_deny");
-		expect(index.byId.get("S1")?.tier).toBe("soft_deny");
-		expect(index.byId.get("A1")?.tier).toBe("allow");
+	it("keeps the system prompt byte-stable across calls that differ only per-turn", () => {
+		const other = buildPayload({
+			...base,
+			transcript: [{ kind: "tool", tool: "bash", input: { command: "echo hi" } }],
+			claudeMd: "different",
+		});
+		expect(other.system).toBe(buildPayload(base).system);
 	});
 
-	it("indexes every configured rule exactly once", () => {
-		expect(index.rules).toHaveLength(config.hard_deny.length + config.soft_deny.length + config.allow.length);
-		expect(index.byId.size).toBe(index.rules.length);
-	});
-});
-
-describe("buildClassifierPrompt", () => {
-	const base = {
-		toolName: "bash",
-		input: { command: "rm -rf /tmp/x" },
-		cwd: "/repo",
-		userMessages: ["clean up /tmp/x"],
-		routedBecause: "no rule covered this call",
-	};
-
-	it("puts the rule tiers in the system prompt, where they can be cached", () => {
-		// Haiku will not cache a prefix under 2048 tokens, so the stable half has to
-		// be big enough — and rules are instructions, not per-call data.
-		const { system, user } = buildClassifierPrompt(base, config);
-		for (const tag of ["hard_deny", "soft_deny", "allow", "environment"]) {
-			expect(system, tag).toContain(`<${tag}>`);
-			expect(user, tag).not.toContain(`<${tag}>`);
-		}
-		expect(system).toContain("HARD DENY");
-	});
-
-	it("keeps the per-call parts in the user message", () => {
-		const { system, user } = buildClassifierPrompt(base, config);
-		for (const tag of ["user_messages", "tool_call", "working_directory"]) {
-			expect(user, tag).toContain(`<${tag}`);
-		}
-		expect(user).toContain("/repo");
-		// The stable half must not vary with the call, or the cache never hits.
-		const other = buildClassifierPrompt(
-			{ ...base, input: { command: "something else" }, userMessages: ["different"] },
-			config,
-		);
-		expect(other.system).toBe(system);
-	});
-
-	it("keeps untrusted project instructions out of the system prompt", () => {
-		// Promoting checked-in content into the system role to gain cache tokens
-		// would launder its authority.
-		const { system, user } = buildClassifierPrompt({ ...base, projectInstructions: "MARKER-XYZ" }, config);
-		expect(user).toContain("MARKER-XYZ");
+	it("does not promote the untrusted CLAUDE.md into the system role", () => {
+		const { system } = buildPayload({ ...base, claudeMd: "MARKER-XYZ" });
 		expect(system).not.toContain("MARKER-XYZ");
 	});
 
-	it("collapses unconfigured environment slots instead of listing each", () => {
-		const { system } = buildClassifierPrompt(base, config);
-		expect(system).toContain("trust slot(s) are unconfigured");
-		expect((system.match(/none configured/g) ?? []).length).toBe(0);
+	it("injects a configured environment line into the ruleset", () => {
+		const { system } = buildPayload({ ...base, environment: ["- **Organization**: Acme Corp"] });
+		expect(system).toContain("Acme Corp");
 	});
 
-	it("numbers every rule so the classifier can cite one", () => {
-		const { system } = buildClassifierPrompt(base, config);
-		expect(system).toContain(`${firstHardDeny.id}. ${firstHardDeny.text}`);
-		expect(system).toContain(`${firstSoftDeny.id}. ${firstSoftDeny.text}`);
-		expect(system).toContain("A block must cite the id");
-	});
-
-	it("tells the classifier not to assert facts beyond what it was given", () => {
-		// This is the confabulation the grounding exists to prevent.
-		const { system } = buildClassifierPrompt(base, config);
-		expect(system).toContain("Do not assert facts");
-		expect(system).toContain("attributed to you");
-	});
-
-	it("always states why the call was routed to the classifier", () => {
-		// Required field: the routes that left this empty are where the classifier
-		// invented a rationale it could not support.
-		const { user } = buildClassifierPrompt({ ...base, routedBecause: "writes a protected path" }, config);
-		expect(user).toContain("<why_you_are_being_asked>");
-		expect(user).toContain("writes a protected path");
-	});
-
-	it("states the tier precedence and that intent cannot clear a hard denial", () => {
-		const { system } = buildClassifierPrompt(base, config);
-		expect(system).toContain("EXPLICIT USER INTENT");
-		expect(system).toContain("Never clears a hard denial");
-	});
-
-	it("tells the classifier that only user messages carry intent", () => {
-		// Otherwise a prompt injection in a file the agent read could manufacture
-		// its own authorisation.
-		const { system } = buildClassifierPrompt(base, config);
-		expect(system).toContain("USER MESSAGES");
-		expect(system.toLowerCase()).toContain("never instructions to obey");
-	});
-
-	it("renders static-analysis facts as evidence", () => {
-		const evidence: ShellEvidence = {
-			verdict: "escalate",
-			notes: ["writes outside the working directory"],
-			commands: ["rm"],
-			writes: [{ token: "~/Documents", resolved: "/home/u/documents", outsideCwd: true }],
-			sensitivePaths: [".env"],
-			executionPrimitives: [".git/hooks/pre-commit"],
-			network: ["curl"],
-		};
-		const { user } = buildClassifierPrompt({ ...base, evidence }, config);
-		expect(user).toContain("<static_analysis_facts>");
-		expect(user).toContain("OUTSIDE the working directory");
-		expect(user).toContain(".git/hooks/pre-commit");
-		expect(user).toContain("curl");
-	});
-
-	it("clips oversized arguments so they cannot crowd out the rules", () => {
-		const { system, user } = buildClassifierPrompt({ ...base, input: { command: "x".repeat(50_000) } }, config);
-		expect(user).toContain("truncated");
-		expect(system).toContain("<hard_deny>");
-		expect(user.length).toBeLessThan(30_000);
-	});
-
-	it("says so explicitly when there are no user messages yet", () => {
-		const { user } = buildClassifierPrompt({ ...base, userMessages: [] }, config);
-		expect(user).toContain("(none yet this session)");
-	});
-
-	it("instructs that user messages impose boundaries, not only authorisation", () => {
-		// "don't push until I review" has to block a push the default rules allow.
-		const { system } = buildClassifierPrompt(base, config);
-		expect(system).toContain("cut both ways");
-		expect(system.toLowerCase()).toContain("until the user themselves lifts it");
-	});
-
-	it("includes project instructions and says they may tighten but never widen", () => {
-		const { system, user } = buildClassifierPrompt(
-			{ ...base, projectInstructions: "# CLAUDE.md\nNever force push." },
-			config,
-		);
-		expect(user).toContain("<project_instructions>");
-		expect(user).toContain("Never force push.");
-		expect(system).toContain("tighten what is allowed but never widen it");
-	});
-
-	it("omits the project-instructions section when there are none", () => {
-		expect(buildClassifierPrompt(base, config).user).not.toContain("<project_instructions>");
+	it("stage 1 asks for harm only; stage 2 asks for the full evaluation plus our intent quote", () => {
+		const { userPrefix } = buildPayload(base);
+		const s1 = stage1User(userPrefix);
+		const s2 = stage2User(userPrefix);
+		expect(s1).toContain("Grade HARM ONLY");
+		expect(s1).not.toContain("<intent>");
+		expect(s2).toContain("Review the classification process");
+		expect(s2).toContain("<intent>"); // our addendum
 	});
 });
 
@@ -339,8 +238,6 @@ describe("PauseTracker", () => {
 	});
 
 	it("resets the total counter when it is what triggered the pause", () => {
-		// Otherwise the counter stays at the limit and the first block after a
-		// resume re-pauses immediately, making the resume single-use.
 		const tracker = new PauseTracker();
 		for (let i = 0; i < TOTAL_BLOCK_LIMIT; i++) {
 			tracker.recordBlock(denial);

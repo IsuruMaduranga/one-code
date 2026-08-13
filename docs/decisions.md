@@ -62,6 +62,7 @@ Full context: [`decisions/auto-mode.md`](decisions/auto-mode.md).
 - **[Three defects the real OpenRouter catalog exposed](decisions/auto-mode.md#three-defects-the-real-openrouter-catalog-exposed)** — what a live gateway catalog broke in model selection, and the fixes.
 - **[Prompt caching, input size, and vendor containment on gateways](decisions/auto-mode.md#prompt-caching-input-size-and-vendor-containment-on-gateways)** — the stable prefix lives in the system prompt to cache; untrusted CLAUDE.md stays in the user message; sizing for Haiku's 4096-token prefix.
 - **[Hardening: the pi-automode review, and what came of it](decisions/auto-mode.md#auto-mode-hardening-the-pi-automode-review-and-what-came-of-it)** — the fail-closed posture: candidate chain, released pin on mid-session model death, deterministic floor for writes to the gate's own config.
+- **[Aligning the auto-mode classifier with Claude Code's two-stage formula](decisions/auto-mode.md#aligning-the-auto-mode-classifier-with-claude-codes-two-stage-formula)** — the pivot from our own classifier design to matching Claude Code's: the full ruleset embedded as generated output, the harm-only→full-eval two-stage flow, rule lists retired for the Environment-only surface, and the measured capability floor.
 
 ## Code review
 

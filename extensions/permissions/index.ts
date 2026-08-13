@@ -20,12 +20,7 @@
 import os from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import {
-	type ChildAction,
-	renderActions,
-	SUBAGENT_ACTIONS_CHANNEL,
-	type SubagentActionsPayload,
-} from "../auto-mode/actions.ts";
+import { type ChildAction, SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../auto-mode/actions.ts";
 import { classify, createClassifierState } from "../auto-mode/classifier.ts";
 import {
 	type AutoModeConfig,
@@ -35,13 +30,16 @@ import {
 	persistClassifierModel,
 } from "../auto-mode/config.ts";
 import { modelPickerComponent, type PickerEntry, pickerSpec, toPickerEntries } from "../auto-mode/model-picker.ts";
-import { DEFAULT_ALLOW, DEFAULT_ENVIRONMENT, DEFAULT_HARD_DENY, DEFAULT_SOFT_DENY } from "../auto-mode/defaults.ts";
+import { DEFAULT_ENVIRONMENT } from "../auto-mode/defaults.ts";
+import type { TranscriptEntry } from "../auto-mode/transcript.ts";
 import { appendDecision, type DecisionEntry, decisionEntry } from "../auto-mode/decision-log.ts";
 import { loadProjectInstructions } from "../auto-mode/instructions.ts";
 import { classifierCandidates, describeCandidate, findConfigured } from "../auto-mode/model-select.ts";
-import { resolveForContainment, toAbsolute } from "../auto-mode/paths.ts";
+import { isWithin, resolveForContainment, toAbsolute } from "../auto-mode/paths.ts";
 import { PauseTracker } from "../auto-mode/pause.ts";
+import { checkRecoverability } from "../auto-mode/recoverability.ts";
 import { safetyControlWrite } from "../auto-mode/safety-floor.ts";
+import { isExecutionPrimitivePath, isSensitivePath } from "../auto-mode/sensitive.ts";
 import { analyzeShellCommand, type ShellEvidence } from "../auto-mode/shell-analysis.ts";
 import { projectMemoryDir } from "../lib/memory.ts";
 import { sessionScratchpadDir } from "../lib/scratchpad.ts";
@@ -70,30 +68,19 @@ const DENIED_DONT_ASK =
 	"Permission mode is dontAsk: anything that would normally prompt the user is denied instead. Only pre-approved tools can run; work within those, or tell the user which allow rule would unblock you.";
 const DENIED_PROTECTED_PATH =
 	"That path is protected: it configures the user's tooling or this agent itself, so writes to it are never auto-approved and allow rules do not cover them. Achieve the goal another way, or ask the user to make the change.";
+// Returned to the MODEL, not the user: auto mode exists to run unattended, so a
+// block is handed back so the model can accomplish the goal a safe way — mirrors
+// Claude Code's own auto-mode denial message rather than halting for a prompt.
 const DENIED_BY_CLASSIFIER = (reason: string) =>
-	`Blocked by the auto-mode approval classifier: ${reason}\n\nDo not retry the same call and do not try to work around the block. If you believe the action is what the user asked for, say so and let them decide.`;
+	`Permission for this action was denied by the auto-mode approval classifier. Reason: ${reason}\n\n` +
+	"If you have other tasks that don't depend on this action, continue with those. You *may* try to accomplish the goal a different, safe way (e.g. a less destructive command, or committing first so a change is recoverable), but do *not* try to work around or defeat this denial. If you believe this capability is essential, STOP and explain to the user what you were trying to do and why, and let them decide.";
 const BLOCKED_BY_TIMEOUT = (reason: string) =>
-	`${reason}\n\nThis was not a judgement that the call is unsafe — the classifier could not respond in time. Tell the user what you were about to do so they can re-run interactively or pin a faster classifier; do not try to route around the gate.`;
+	`${reason}\n\nThis was not a judgement that the call is unsafe. Wait a moment and try this action again. ` +
+	"If it keeps failing, continue with other tasks that do not require this action and come back to it later — " +
+	"reading files, searching code, and other read-only operations do not require the classifier and can still be used. " +
+	"Do not try to route around the gate; if this specific action is essential, tell the user what you were about to do so they can re-run interactively or pin a faster classifier with /auto-mode model.";
 const DENIED_SAFETY_FLOOR = (reason: string) =>
 	`Auto mode blocked this call without consulting the classifier: ${reason}. Writes to the gate's own configuration are never auto-approved. Do not retry or route around this; ask the user to make the change themselves.`;
-/**
- * Why a delegation call reaches the classifier. Auto mode judges the task before
- * the child starts, so the thing to weigh is the instruction being handed over,
- * not the tool call's mechanics.
- */
-const DELEGATION_ROUTE_REASONS: Record<string, string | undefined> = {
-	subagent:
-		"This spawns a subagent: a fresh agent loop that will act on the task text below with the same permissions as this session. Judge the delegated task itself — whether carrying it out would require anything the rules forbid — because the child will not refuse a task its parent should not have handed it.",
-	workflow:
-		"This launches a multi-agent workflow whose script fans work out to subagents. Judge what the script sets out to do, since its agents inherit this session's permissions.",
-};
-/**
- * The default: nothing more specific than "no rule pre-approved this". Stated
- * explicitly rather than left blank, because a classifier told nothing about why
- * it is being asked will supply its own answer.
- */
-const RESIDUAL_ROUTE_REASON =
-	"No permission rule covered this call and it is not a read or a working-directory edit, which is why it reaches you. There is nothing unusual about it beyond that — judge it on the rules and the user's request.";
 const DENIED_BY_RULE = (rule: string) =>
 	`This tool call is denied by the permission rule "${rule}" in the user's settings. Do not retry it; choose a different approach.`;
 
@@ -229,18 +216,45 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		return chain.length > 0 ? chain.map(describeCandidate).join(" → ") : "(no model available)";
 	};
 
+	// Session identity for the classifier's Session Context block (CC system[2]).
+	const classifierUsername = (() => {
+		try {
+			return os.userInfo().username;
+		} catch {
+			return "user";
+		}
+	})();
+
+	/**
+	 * The classifier's `<transcript>`: user messages and tool inputs, in order,
+	 * results stripped (transcript.ts renders it). The last entry is always the
+	 * action under review — the tool_call handler appends the call being judged.
+	 */
+	const transcript: TranscriptEntry[] = [];
+	const capTranscript = () => {
+		// Bound memory on a long unattended run; the renderer also caps by chars,
+		// and intent verification reads userMessages, not this, so trimming old
+		// lines here never weakens that check. Trim down to a lower watermark so the
+		// O(n) splice is amortized over the next ~100 pushes on the tool_call path.
+		if (transcript.length > 500) transcript.splice(0, transcript.length - 400);
+	};
+
 	/**
 	 * The user's own messages, and only those — the classifier's "explicit intent"
-	 * tier must not be reachable from file contents or command output, or a
-	 * prompt injection could manufacture its own authorisation. pi's `input`
-	 * event fires for real user input, which is exactly that boundary.
+	 * tier must not be reachable from file contents or command output, or a prompt
+	 * injection could manufacture its own authorisation. pi's `input` event fires
+	 * for real user input, which is exactly that boundary. Carried in FULL (not a
+	 * rolling window): in a long unattended run the authorizing setup message must
+	 * still clear a later action (decision 2 in docs/decisions/auto-mode.md).
 	 */
 	const userMessages: string[] = [];
 	pi.on("input", (event) => {
 		const text = event.text?.trim();
 		if (!text) return;
 		userMessages.push(text);
-		if (userMessages.length > 12) userMessages.shift();
+		if (userMessages.length > 1000) userMessages.shift();
+		transcript.push({ kind: "user", text });
+		capTranscript();
 	});
 
 	/**
@@ -254,7 +268,12 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		input: Record<string, unknown>,
 		subject: string,
 		ctx: ExtensionContext,
-		routedBecause: string,
+		/**
+		 * Whether the deterministic containment fast-path may clear this call
+		 * without the classifier. False for protected paths and for completed-run
+		 * subagent reviews — those must always be judged.
+		 */
+		containmentEligible = false,
 	) => {
 		autoConfig ??= loadAutoModeConfig(os.homedir());
 		if (!instructionsLoaded) {
@@ -262,17 +281,66 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			instructionsLoaded = true;
 		}
 
+		const home = os.homedir();
+		const allow = () => ({ decision: "allow" as const, reason: "", tier: undefined });
+
 		let evidence: ShellEvidence | undefined;
 		if (normalizeToolName(toolName) === "bash" && subject) {
-			evidence = analyzeShellCommand({ command: subject, cwd: ctx.cwd, home: os.homedir() });
+			evidence = analyzeShellCommand({ command: subject, cwd: ctx.cwd, home });
 			if (evidence.verdict === "safe") {
 				logDecision(ctx, { tool: toolName, subject, outcome: "allow", source: "pre-gate" });
-				return { decision: "allow" as const, reason: "", tier: undefined };
+				return allow();
+			}
+			// The command's only risk is an in-project delete or whole-tree reset.
+			// Auto mode trusts the project as the agent's sandbox — but, unlike Claude
+			// Code, only when git can put the bytes back. A recoverable destruction
+			// runs unattended with no classifier call; an unrecoverable one (untracked,
+			// dirty, not a repo) still reaches the classifier.
+			if (containmentEligible && evidence.containedNonNetwork) {
+				const targets = evidence.writes.filter((w) => !w.outsideCwd && w.resolved).map((w) => w.resolved as string);
+				const rec = checkRecoverability(ctx.cwd, { targets, wholeTree: evidence.wholeTree });
+				if (rec.verdict === "recoverable") {
+					logDecision(ctx, { tool: toolName, subject, outcome: "allow", source: "pre-gate", reason: rec.reason });
+					return allow();
+				}
+				evidence.notes.push(`git recoverability: ${rec.reason}`);
+			}
+		} else if (containmentEligible && isWritingTool(normalizeToolName(toolName))) {
+			// A write/edit whose target is inside the project and not a credential
+			// path is ordinary sandbox work — Claude Code auto-approves it, and so do
+			// we (protected paths never reach here: decide() routes them with
+			// containmentEligible=false). Overwrites are not recoverability-gated the
+			// way deletes are: the file still exists, and edit-then-iterate is the
+			// core of unattended coding autonomy. Execution-primitive paths (build
+			// wrappers, CI workflows, editor auto-run config) are excluded exactly as
+			// the bash pre-gate excludes them — being in-project does not make a file
+			// that runs later without further approval safe to write unclassified.
+			const raw = input.file_path ?? input.path;
+			const target = typeof raw === "string" ? raw : undefined;
+			if (target) {
+				const absolute = toAbsolute(ctx.cwd, target, home);
+				const resolved = resolveForContainment(absolute);
+				const root = resolveForContainment(ctx.cwd) ?? ctx.cwd;
+				if (resolved && isWithin(root, resolved) && !isSensitivePath(absolute) && !isExecutionPrimitivePath(absolute)) {
+					logDecision(ctx, { tool: toolName, subject, outcome: "allow", source: "pre-gate" });
+					return allow();
+				}
 			}
 		}
 
+		// The current call was pushed onto `transcript` by the tool_call handler, so
+		// it is already the last entry — the action under review. `evidence` is used
+		// only for the containment fast-path above; CC's payload carries no separate
+		// static-analysis block, so it is not sent to the classifier.
 		const verdict = await classify(
-			{ toolName, input, cwd: ctx.cwd, userMessages: [...userMessages], evidence, projectInstructions, routedBecause },
+			{
+				toolName,
+				transcript: [...transcript],
+				userMessages: [...userMessages],
+				claudeMd: projectInstructions,
+				username: classifierUsername,
+				environment: autoConfig.environment,
+			},
 			{
 				registry: ctx.modelRegistry,
 				sessionModel: ctx.model,
@@ -416,6 +484,20 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// keep reading event.input (the wrapped command that actually runs).
 		const original = (event.input as Record<string, unknown>)[ORIGINAL_COMMAND_KEY];
 		const matchSubject = normalizedTool === "bash" && typeof original === "string" ? original : subject;
+
+		// Record every tool call into the classifier transcript (inputs only). In
+		// auto mode this is the running <transcript> the classifier reads, and this
+		// call is now its last entry — the action under review. For bash, record the
+		// model's original command, not the worktree cd-wrapper that actually runs.
+		if (mode === "auto") {
+			const recordedInput =
+				normalizedTool === "bash" && typeof original === "string"
+					? { command: original }
+					: (event.input as Record<string, unknown>);
+			transcript.push({ kind: "tool", tool: normalizedTool, input: recordedInput });
+			capTranscript();
+		}
+
 		const result = decide({
 			toolName: event.toolName,
 			subject: matchSubject,
@@ -460,71 +542,69 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			return { block: true, reason: DENIED_BY_RULE(result.rule?.raw ?? "deny") };
 		}
 
-		let classifierBlock: string | undefined;
 		if (floorReason) {
-			// Never reaches the classifier: fall through to the prompt below, or
-			// block outright where there is no one to ask.
+			// The floor never reaches the classifier. Auto mode is unattended, so a
+			// block goes back to the model rather than a per-action prompt (a prompt
+			// would hang the session); a non-auto interactive session still prompts,
+			// since editing your own settings by hand is legitimate.
 			autoConfig ??= loadAutoModeConfig(os.homedir());
-			if (!ctx.hasUI) {
+			if (mode === "auto" || !ctx.hasUI) {
 				logDecision(ctx, { tool: event.toolName, subject, outcome: "block", source: "floor", reason: floorReason });
 				return { block: true, reason: DENIED_SAFETY_FLOOR(floorReason) };
 			}
 			logDecision(ctx, { tool: event.toolName, subject, outcome: "prompt", source: "floor", reason: floorReason });
 		} else if (result.decision === "classify") {
-			// Auto mode pauses after repeated blocks and prompts instead, so a model
-			// looping against the classifier reaches the user rather than grinding.
+			// Auto mode is for unattended runs: a block is returned to the MODEL so it
+			// can try a safe alternative — it is never raised as a per-action user
+			// prompt. The one exception is the loop-breaker: after repeated blocks the
+			// gate pauses and the next call falls through to a resume prompt, so a
+			// model grinding against the classifier reaches the user instead of
+			// burning the night.
 			if (!pauseTracker.isPaused()) {
-				const routedBecause =
-					result.cause === "protected-path"
-						? `This call writes ${subject}, which is a protected path: it configures the user's tooling or this agent itself (git hooks and config, editor and container settings, shell rc files, package-manager config, this agent's own permission settings). It is inside the working directory — that is not what makes it risky. Writes here take effect later without any further approval, and permission allow rules deliberately do not cover them, which is why you are being asked rather than the rules deciding. Judge whether the user asked for this specific change.`
-						: (DELEGATION_ROUTE_REASONS[normalizeToolName(event.toolName)] ?? RESIDUAL_ROUTE_REASON);
 				const outcome = await runClassifier(
 					event.toolName,
 					event.input as Record<string, unknown>,
 					subject,
 					ctx,
-					routedBecause,
+					// Protected paths must always be judged; everything else may be cleared
+					// by the deterministic containment fast-path.
+					result.cause !== "protected-path",
 				);
 				if (outcome.decision === "allow") {
 					pauseTracker.recordAllow();
 					return undefined;
 				}
 
-				// A timeout is not a block the model earned by looping against the
-				// gate, so it does not count toward the auto-pause — and it is always
-				// the user's to approve, so it never takes the hard-deny path.
+				// A timeout was not earned by looping against the gate, so it does not
+				// count toward the auto-pause. It is returned to the model as retryable
+				// (the call was never judged) rather than prompting — a prompt would
+				// hang an unattended session waiting on a classifier that was slow.
 				if (outcome.tier === "timeout") {
-					if (!ctx.hasUI) return { block: true, reason: BLOCKED_BY_TIMEOUT(outcome.reason) };
-					classifierBlock = outcome.reason;
-				} else {
-					const tripped = pauseTracker.recordBlock({
-						toolName: event.toolName,
-						subject,
-						reason: outcome.reason,
-						tier: outcome.tier,
-						ruleId: outcome.ruleId,
-						raw: outcome.raw,
-					});
-					if (tripped) {
-						const { lifetime } = pauseTracker.stats();
-						ctx.ui.notify(
-							`Auto mode paused after ${lifetime} blocked call${lifetime === 1 ? "" : "s"} — approving a prompt resumes it.`,
-							"warning",
-						);
-						applyBadge();
-					}
-					// A hard-deny verdict is not the user's to override: prompting would
-					// hand back exactly what the tier exists to refuse.
-					if (outcome.tier === "hard_deny") {
-						return { block: true, reason: DENIED_BY_CLASSIFIER(outcome.reason) };
-					}
-					// Non-interactively there is no one to ask, so the classifier's own
-					// reason is more useful to the model than a generic refusal.
-					if (!ctx.hasUI) return { block: true, reason: DENIED_BY_CLASSIFIER(outcome.reason) };
-					classifierBlock = outcome.reason;
+					return { block: true, reason: BLOCKED_BY_TIMEOUT(outcome.reason) };
 				}
+
+				const tripped = pauseTracker.recordBlock({
+					toolName: event.toolName,
+					subject,
+					reason: outcome.reason,
+					tier: outcome.tier,
+					ruleId: outcome.ruleId,
+					raw: outcome.raw,
+				});
+				if (tripped) {
+					const { lifetime } = pauseTracker.stats();
+					ctx.ui.notify(
+						`Auto mode paused after ${lifetime} blocked call${lifetime === 1 ? "" : "s"} — approving a prompt resumes it.`,
+						"warning",
+					);
+					applyBadge();
+				}
+				// Every classifier block (hard or soft) goes back to the model with the
+				// classifier's own reason, so it can find a safe alternative. Auto mode
+				// does not hand a soft block to the user as a per-action prompt.
+				return { block: true, reason: DENIED_BY_CLASSIFIER(outcome.reason) };
 			}
-			// Paused, or a soft block worth asking about: fall through and prompt.
+			// Paused: fall through to the resume prompt below.
 		}
 
 		// ask
@@ -533,10 +613,13 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		}
 
 		const preview = subject.length > 200 ? `${subject.slice(0, 200)}…` : subject;
+		// Reaching a prompt from the classify branch only happens when auto mode is
+		// paused — this is the resume prompt, not a per-action approval.
+		const pausedResume = mode === "auto" && result.decision === "classify";
 		const title = floorReason
 			? `Auto mode never auto-approves this — ${event.toolName} ${floorReason}.\n\n  ${preview}\n\n  Allow it this once?`
-			: classifierBlock
-				? `Auto mode blocked this — allow it anyway?\n\n  ${preview || "(no arguments)"}\n\n  Classifier: ${classifierBlock}`
+			: pausedResume
+				? `Auto mode is paused after repeated blocks — approve to resume.\n\n  ${event.toolName}: ${preview || "(no arguments)"}`
 				: result.cause === "protected-path"
 				? `Allow ${event.toolName} to write a protected path?\n\n  ${preview}\n\n  This path configures your tooling or this agent, so allow rules do not pre-approve it.`
 				: `Allow ${event.toolName}?\n\n  ${preview || "(no arguments)"}`;
@@ -547,13 +630,13 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 
 		// The user's answer is itself a gate decision worth recording — it is the
 		// ground truth a drifting classifier gets calibrated against.
-		if (mode === "auto" && (floorReason || classifierBlock)) {
+		if (mode === "auto" && (floorReason || pausedResume)) {
 			logDecision(ctx, {
 				tool: event.toolName,
 				subject,
 				outcome: choice === YES || choice === YES_SESSION ? "allow" : "block",
 				source: "user",
-				reason: floorReason ?? classifierBlock,
+				reason: floorReason ?? "resume after pause",
 			});
 		}
 
@@ -637,15 +720,22 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		signal: AbortSignal | undefined,
 	): Promise<string | undefined> => {
 		autoConfig ??= loadAutoModeConfig(os.homedir());
+		// Present the child's actions as tool entries appended to the session
+		// transcript, so the reviewer judges the sequence with the parent's context
+		// in view (SESSION LINKING). reviewOnly runs a single stage-2 full-eval —
+		// there is no harm floor to short-circuit for a run that already happened.
+		const childEntries: TranscriptEntry[] = actions.map((action) => {
+			const tool = normalizeToolName(action.toolName);
+			return { kind: "tool", tool, input: tool === "bash" ? { command: action.subject } : { subject: action.subject } };
+		});
 		const verdict = await classify(
 			{
-				toolName: "subagent (completed run — review the actions below as a whole)",
-				input: { actions: renderActions(actions) },
-				cwd: ctx.cwd,
+				toolName: "subagent-review",
+				transcript: [...transcript, ...childEntries],
 				userMessages: [...userMessages],
-				projectInstructions,
-				routedBecause:
-					"This subagent has already finished; you are reviewing what it did, as a whole, rather than approving anything. Its individual actions were each checked as it ran. Judge whether the sequence together amounts to something the rules forbid — a series of individually unremarkable steps can add up to one.",
+				claudeMd: projectInstructions,
+				username: classifierUsername,
+				environment: autoConfig.environment,
 			},
 			{
 				registry: ctx.modelRegistry,
@@ -654,6 +744,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				signal,
 				state: classifierState,
 				onNotice: (message, level) => ctx.ui.notify(message, level),
+				reviewOnly: true,
 			},
 		);
 		logDecision(ctx, {
@@ -787,8 +878,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		description: "Auto-mode classifier: /auto-mode [defaults|config|model [provider/model-id|clear]]",
 		getArgumentCompletions: () =>
 			[
-				{ value: "config", label: "effective rules" },
-				{ value: "defaults", label: "built-in rules" },
+				{ value: "config", label: "effective environment" },
+				{ value: "defaults", label: "built-in environment" },
 				{ value: "model", label: "choose the classifier model" },
 			],
 		handler: async (args, ctx) => {
@@ -805,30 +896,22 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				);
 				return;
 			}
-			// "defaults" prints the built-in lists; "config" prints what the
-			// classifier actually uses, with $defaults already spliced in. The
-			// config view re-reads disk so it shows the file as it is now, and
-			// refreshes the gate's cached copy while it is at it.
+			// "defaults" prints the built-in Environment; "config" prints what the
+			// classifier actually uses, with $defaults already spliced in. The rule
+			// set itself is Claude Code's fixed monolith and is not shown here — the
+			// only rule customization is the Environment. The config view re-reads
+			// disk so it shows the file as it is now, and refreshes the cached copy.
 			const loaded = which === "config" ? loadAutoModeConfigWithDiagnostics(os.homedir()) : undefined;
 			if (loaded) autoConfig = loaded.config;
-			const shown = loaded
-				? loaded.config
-				: {
-						environment: DEFAULT_ENVIRONMENT,
-						allow: DEFAULT_ALLOW,
-						soft_deny: DEFAULT_SOFT_DENY,
-						hard_deny: DEFAULT_HARD_DENY,
-					};
+			const shown = loaded ? loaded.config : { environment: DEFAULT_ENVIRONMENT };
 			const section = (title: string, entries: string[]) =>
 				`${title} (${entries.length}):\n${entries.map((entry) => `  - ${entry}`).join("\n")}`;
 			ctx.ui.notify(
 				[
 					which === "config"
-						? `read from: ${autoModeSettingsPaths(os.homedir()).join(", ")}\n(project settings are deliberately not read — a repo could otherwise grant itself allow rules)`
-						: "built-in rules; add \"$defaults\" to a list in settings to keep them",
-					section("hard_deny", shown.hard_deny),
-					section("soft_deny", shown.soft_deny),
-					section("allow", shown.allow),
+						? `read from: ${autoModeSettingsPaths(os.homedir()).join(", ")}\n(project settings are deliberately not read — a repo could otherwise grant itself permissions)`
+						: 'built-in environment; add "$defaults" to autoMode.environment in settings to keep it while adding your own',
+					"The ruleset is Claude Code's fixed classifier ruleset (not shown); customize via the environment below.",
 					section("environment", shown.environment),
 					...(which === "config" && "classifyAllShell" in shown
 						? [

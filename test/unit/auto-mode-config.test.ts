@@ -8,7 +8,7 @@ import {
 	loadAutoModeConfigWithDiagnostics,
 	spliceDefaults,
 } from "../../extensions/auto-mode/config.ts";
-import { DEFAULT_HARD_DENY, DEFAULT_SOFT_DENY } from "../../extensions/auto-mode/defaults.ts";
+import { DEFAULT_ENVIRONMENT } from "../../extensions/auto-mode/defaults.ts";
 
 let home: string;
 
@@ -21,17 +21,11 @@ afterEach(() => {
 	rmSync(home, { recursive: true, force: true });
 });
 
-const writeUserSettings = (data: unknown) =>
-	writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify(data));
+const writeUserSettings = (data: unknown) => writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify(data));
 
 describe("spliceDefaults", () => {
 	it("substitutes $defaults in place, preserving surrounding order", () => {
-		expect(spliceDefaults(["before", "$defaults", "after"], ["d1", "d2"])).toEqual([
-			"before",
-			"d1",
-			"d2",
-			"after",
-		]);
+		expect(spliceDefaults(["before", "$defaults", "after"], ["d1", "d2"])).toEqual(["before", "d1", "d2", "after"]);
 	});
 
 	it("returns the defaults when nothing is configured", () => {
@@ -45,24 +39,19 @@ describe("spliceDefaults", () => {
 });
 
 describe("loadAutoModeConfig", () => {
-	it("returns the built-in rules with no settings present", () => {
+	it("returns the built-in environment with no settings present", () => {
 		const config = loadAutoModeConfig(home);
-		expect(config.hard_deny).toEqual(DEFAULT_HARD_DENY);
-		expect(config.soft_deny).toEqual(DEFAULT_SOFT_DENY);
+		expect(config.environment).toEqual(DEFAULT_ENVIRONMENT);
 		expect(config.classifyAllShell).toBe(false);
 	});
 
-	it("splices user entries around the defaults", () => {
+	it("splices user entries around the environment defaults", () => {
 		writeUserSettings({
-			autoMode: {
-				environment: ["$defaults", "Source control: github.example.com/acme"],
-				allow: ["$defaults", "Deploying to staging is allowed"],
-			},
+			autoMode: { environment: ["$defaults", "Source control: github.example.com/acme"] },
 		});
 		const config = loadAutoModeConfig(home);
 		expect(config.environment).toContain("Source control: github.example.com/acme");
-		expect(config.environment.length).toBeGreaterThan(1);
-		expect(config.allow).toContain("Deploying to staging is allowed");
+		expect(config.environment.length).toBe(DEFAULT_ENVIRONMENT.length + 1);
 	});
 
 	it("reads classifyAllShell and classifierModel", () => {
@@ -74,63 +63,74 @@ describe("loadAutoModeConfig", () => {
 
 	it("ignores malformed files rather than failing open", () => {
 		writeFileSync(join(home, ".claude", "settings.json"), "{not json");
-		expect(loadAutoModeConfig(home).hard_deny).toEqual(DEFAULT_HARD_DENY);
+		expect(loadAutoModeConfig(home).environment).toEqual(DEFAULT_ENVIRONMENT);
 	});
 
-	it("drops non-string entries", () => {
-		writeUserSettings({ autoMode: { hard_deny: ["real rule", 42, null, "  "] } });
-		expect(loadAutoModeConfig(home).hard_deny).toEqual(["real rule"]);
+	it("drops non-string environment entries", () => {
+		writeUserSettings({ autoMode: { environment: ["real rule", 42, null, "  "] } });
+		expect(loadAutoModeConfig(home).environment).toEqual(["real rule"]);
 	});
 
 	it("reports a skipped malformed file instead of staying silent about it", () => {
-		// The file is still skipped (the gate must not die on a typo), but a user
-		// whose rules were silently never loaded believes protections are in force.
 		writeFileSync(join(home, ".claude", "settings.json"), "{not json");
 		const { diagnostics } = loadAutoModeConfigWithDiagnostics(home);
 		expect(diagnostics.some((line) => line.includes("invalid JSON"))).toBe(true);
 	});
 
+	it("warns that the retired rule-list keys are no longer used", () => {
+		// The ruleset is now CC's fixed monolith; a user who still has these keys
+		// must be told they are ignored rather than silently believing they apply.
+		writeUserSettings({ autoMode: { hard_deny: ["x"], soft_deny: ["y"], allow: ["z"] } });
+		const { config, diagnostics } = loadAutoModeConfigWithDiagnostics(home);
+		for (const key of ["hard_deny", "soft_deny", "allow"]) {
+			expect(diagnostics.some((line) => line.includes(`autoMode.${key} is no longer used`))).toBe(true);
+		}
+		// They are not "unknown key" diagnostics — retired, and specifically named.
+		expect(diagnostics.some((line) => line.includes('unknown autoMode key "hard_deny"'))).toBe(false);
+		// The rest of the config still loads.
+		expect(config.environment).toEqual(DEFAULT_ENVIRONMENT);
+	});
+
 	it("reports unknown and mistyped autoMode keys", () => {
 		writeUserSettings({
-			autoMode: { clasifierModel: "typo/model", classifyAllShell: "yes", hard_deny: "not an array" },
+			autoMode: { clasifierModel: "typo/model", classifyAllShell: "yes", environment: "not an array" },
 		});
 		const { config, diagnostics } = loadAutoModeConfigWithDiagnostics(home);
 		expect(diagnostics.some((line) => line.includes('unknown autoMode key "clasifierModel"'))).toBe(true);
 		expect(diagnostics.some((line) => line.includes("classifyAllShell must be a boolean"))).toBe(true);
-		expect(diagnostics.some((line) => line.includes("hard_deny must be an array"))).toBe(true);
+		expect(diagnostics.some((line) => line.includes("environment must be an array"))).toBe(true);
 		// Lenient loading: the mistyped fields fall back rather than failing.
 		expect(config.classifyAllShell).toBe(false);
-		expect(config.hard_deny).toEqual(DEFAULT_HARD_DENY);
+		expect(config.environment).toEqual(DEFAULT_ENVIRONMENT);
 	});
 
-	it("warns when a list omits $defaults and so replaces the built-ins", () => {
-		writeUserSettings({ autoMode: { soft_deny: ["only my rule"] } });
+	it("warns when environment omits $defaults and so replaces the built-ins", () => {
+		writeUserSettings({ autoMode: { environment: ["only my slot"] } });
 		const { config, diagnostics } = loadAutoModeConfigWithDiagnostics(home);
-		expect(diagnostics.some((line) => line.includes("REPLACES the built-in soft_deny"))).toBe(true);
-		// Still applied — replacement is documented and occasionally intended.
-		expect(config.soft_deny).toEqual(["only my rule"]);
+		expect(diagnostics.some((line) => line.includes("REPLACES the built-in environment"))).toBe(true);
+		expect(config.environment).toEqual(["only my slot"]);
 	});
 
-	it("reports dropped non-string entries", () => {
-		writeUserSettings({ autoMode: { hard_deny: ["$defaults", 42] } });
+	it("reports dropped non-string environment entries", () => {
+		writeUserSettings({ autoMode: { environment: ["$defaults", 42] } });
 		const { diagnostics } = loadAutoModeConfigWithDiagnostics(home);
-		expect(diagnostics.some((line) => line.includes("hard_deny[1]"))).toBe(true);
+		expect(diagnostics.some((line) => line.includes("environment[1]"))).toBe(true);
 	});
 
 	it("stays quiet on a clean configuration", () => {
-		writeUserSettings({ autoMode: { soft_deny: ["$defaults", "extra rule"], classifyAllShell: true } });
+		writeUserSettings({ autoMode: { environment: ["$defaults", "extra slot"], classifyAllShell: true } });
 		expect(loadAutoModeConfigWithDiagnostics(home).diagnostics).toEqual([]);
 	});
 
 	it("never reads autoMode from project settings", () => {
-		// A repo that could grant itself classifier allow rules could switch off the
+		// A repo that could grant itself classifier permissions could switch off the
 		// gate meant to contain it, so project files are not a configuration source.
 		const paths = autoModeSettingsPaths(home);
 		expect(paths.some((path) => path.includes("settings.local.json"))).toBe(false);
 		for (const path of paths) {
-			expect(path.startsWith(home) || path.startsWith("/etc") || path.startsWith("/Library") || path.startsWith("C:\\")).toBe(
-				true,
-			);
+			expect(
+				path.startsWith(home) || path.startsWith("/etc") || path.startsWith("/Library") || path.startsWith("C:\\"),
+			).toBe(true);
 		}
 	});
 });

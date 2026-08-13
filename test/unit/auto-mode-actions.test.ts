@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type ChildAction, recordAction, renderActions } from "../../extensions/auto-mode/actions.ts";
+import { type ChildAction, recordAction } from "../../extensions/auto-mode/actions.ts";
 
 describe("recordAction", () => {
 	it("records the tool name and its subject", () => {
@@ -36,36 +36,5 @@ describe("recordAction", () => {
 		const log: ChildAction[] = [];
 		recordAction(log, "todo_write", { todos: [] });
 		expect(log[0]).toEqual({ toolName: "todo_write", subject: "" });
-	});
-});
-
-describe("renderActions", () => {
-	it("lists actions one per line", () => {
-		expect(renderActions([{ toolName: "bash", subject: "ls" }, { toolName: "read", subject: "a.ts" }])).toBe(
-			"bash: ls\nread: a.ts",
-		);
-	});
-
-	it("collapses consecutive repeats so 40 identical reads read as one line", () => {
-		const actions = Array.from({ length: 40 }, () => ({ toolName: "read", subject: "a.ts" }));
-		expect(renderActions(actions)).toBe("read: a.ts (×40)");
-	});
-
-	it("keeps distinct runs separate", () => {
-		const actions = [
-			{ toolName: "read", subject: "a.ts" },
-			{ toolName: "read", subject: "a.ts" },
-			{ toolName: "bash", subject: "npm test" },
-			{ toolName: "read", subject: "a.ts" },
-		];
-		expect(renderActions(actions)).toBe("read: a.ts (×2)\nbash: npm test\nread: a.ts");
-	});
-
-	it("omits an empty subject", () => {
-		expect(renderActions([{ toolName: "todo_write", subject: "" }])).toBe("todo_write");
-	});
-
-	it("returns empty for no actions", () => {
-		expect(renderActions([])).toBe("");
 	});
 });

@@ -50,29 +50,3 @@ export function recordAction(log: ChildAction[], toolName: string, input: unknow
 	const subject = typeof raw === "string" ? raw : JSON.stringify(raw);
 	log.push({ toolName, subject: subject.slice(0, SUBJECT_LIMIT) });
 }
-
-/** Render the log for the classifier, collapsing repeats so 40 reads read as one line. */
-export function renderActions(actions: ChildAction[]): string {
-	const lines: string[] = [];
-	let previous: string | undefined;
-	let repeats = 0;
-
-	const flush = () => {
-		if (previous === undefined) return;
-		lines.push(repeats > 1 ? `${previous} (×${repeats})` : previous);
-	};
-
-	for (const action of actions) {
-		const line = action.subject ? `${action.toolName}: ${action.subject}` : action.toolName;
-		if (line === previous) {
-			repeats++;
-			continue;
-		}
-		flush();
-		previous = line;
-		repeats = 1;
-	}
-	flush();
-
-	return lines.join("\n");
-}

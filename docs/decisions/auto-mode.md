@@ -524,3 +524,111 @@ re-render (ctrl+q killed pi outright). `bannerLines` now truncates every line to
 the render width with an ANSI-aware helper that never splits an escape sequence
 and resets colour before the ellipsis. Any `ctx.ui.custom`/`setHeader` component
 must do the same.
+
+## Aligning the auto-mode classifier with Claude Code's two-stage formula
+
+Everything above was built against a classifier of our own design — our own
+compact rule lists, our own single JSON verdict. This entry records the pivot to
+matching Claude Code's classifier instead, which replaced that design wholesale.
+
+**How Claude Code's gate works.** A containment pre-gate auto-approves anything
+fully inside the project cwd with no network — no classifier call, in-project
+`rm` and `git reset --hard` included. Only actions that reach outside cwd or the
+network hit the classifier, which runs in **two stages** sharing one large system
+prompt and transcript byte-for-byte (so stage 2 is a near-total prompt-cache hit
+off stage 1): stage 1 grades **harm only** (`max_tokens:64`,
+`<severity>N</severity>`, thinking off) and clears at `severity < 50`; stage 2
+applies user intent and ALLOW exceptions (`max_tokens:8192`, `<thinking>` CoT)
+and returns `<severity>` plus `<category>Exact BLOCK Rule Name</category>`. The
+threshold is exactly 50. The classifier runs on a Sonnet-class model for both an
+Opus- and a Sonnet-main session, i.e. `min(main, sonnet)`.
+
+**The decision: match the prompt, and align the payload.** The entire
+Claude Code-compatible ruleset — Context, Threat Model, User Intent Rule,
+Evaluation Rules, Environment, Definitions, HARD/SOFT BLOCK, ALLOW, Classification
+Process, Output Format — is embedded as generated tooling output in
+`auto-mode/classifier-prompt.ts` (do not hand-edit the large literals). Only two
+seams are re-templatized: the `## Environment` slot lines (from
+`AutoModeConfig.environment`) and Session Context's username. Our emitted payload
+therefore differs from Claude Code's only in Environment, Session Context,
+transcript content, and our own stage-final block.
+
+**The rule lists were retired; Environment is now the only rule-customization
+surface.** Our earlier design exposed configurable `hard_deny`/`soft_deny`/`allow`
+prose lists (numbered `H1`/`S4`/`A2` for grounding). Matching Claude Code's fixed
+ruleset made them dead weight — a compressed, strictly-worse paraphrase of rules
+the full ruleset already states far more precisely — so they were removed as
+config keys. The deciding reason is not tidiness: **Claude Code deliberately does
+not let a settings file edit the ruleset**, because the ruleset *is* the security
+boundary, and the whole point of `config.ts`'s user/managed-only scoping is to
+stop a checked-in file weakening the gate that contains it. Re-exposing editable
+rule lists would re-open exactly that surface. The customization surface is the
+*Environment* — trusted domains, registries, prod namespaces — which is where
+real customization belongs, and that stays (`$defaults` still splices). Two
+alternatives were rejected: appending user-supplied rules as extra marked
+sections (kept the default ruleset unchanged but re-added the
+settings-can-weaken-the-gate surface) and splicing user entries into the ruleset's
+own lists in place (changed the default ruleset). Retired keys now emit a
+deprecation diagnostic in `/auto-mode config` rather than being silently ignored —
+a user who still has them must be told they no longer apply. Pre-release, so no
+migration shim.
+
+**Grounding and intent verification carry across, re-expressed against the new
+scheme.** The verified-not-trusted posture from the grounding entry above is
+preserved: a stage-2 block cites `<category>`, which is validated against a
+name→tier index parsed from the embedded HARD/SOFT sections (`rules.ts`); a
+category that is not a real rule still blocks but is tagged `unmatched`, so a
+hallucinated name cannot borrow a HARD rule's authority to skip the loop-breaker
+pause. The intent check is likewise kept, as the **one deliberate divergence from
+Claude Code's payload**: our stage-2 final block (the only block that is ours to
+author) additionally asks for `<intent>the user's verbatim words</intent>`
+whenever the model clears a soft block on user intent, and that quote is verified
+as a substring of the user's real messages — against the **full** transcript, not
+a rolling window, so an authorizing setup message still clears a much later action
+in a long unattended run. The property is strictly one-directional: it can only
+turn a questionable allow into a block, never the reverse, so it can never be more
+permissive than Claude Code.
+
+**Two seams of divergence from Claude Code's payload, all intentional.** We do not
+send Claude Code's `{"meta":{…}}` gitStatus/repoVisibility ground-truth lines nor
+its `{"outcome":…}` lines that annotate a completed call's result (`ok`,
+`rejected-by-user`, `automode-blocked`, `interrupted`, …), so the ruleset's
+outcome-dependent clauses — User Intent Rule 6's retry-after-block handling and
+EVALUATE ON OWN MERITS's "interrupted or rejected earlier → BLOCK" — have no
+transcript evidence to act on, and a call retried after a block currently looks
+like a fresh call rather than a retry (a known limitation; the transcript pipeline
+is built to allow adding both line kinds later). We also dropped our earlier
+classifier's `<why_you_are_being_asked>` / `<static_analysis_facts>` blocks — the
+matched ruleset has its own Evaluation Rules for shell parsing and protected-path
+reasoning, so those additions were redundant against it. `ShellEvidence` is still
+computed, but only to drive the deterministic git-recoverability containment
+fast-path (our safer-than-Claude-Code edge), not to pad the classifier payload.
+
+**Verified live, both mechanics and model.** Driving the working tree in auto mode
+against a real key (no `--dangerously-skip-permissions`): the emitted stage-1
+payload had the expected shape (the security-monitor opening line, Session Context
+with the live username, `<user_claude_md>` + `<transcript>` + "Grade HARM ONLY",
+none of the retired blocks); stage 1 short-circuited a low-harm out-of-cwd write
+and it executed with no user prompt; and a recursive out-of-cwd `rm -rf` the user
+named graded **stage-1 62 → stage 2 → 15 → allow**, exercising escalation and the
+intent clear end to end. The classifier resolved to **`claude-sonnet-5`** — the
+same Sonnet-class model Claude Code uses — confirming the Sonnet-first role
+profile plus vendor containment.
+
+**The capability floor, made concrete.** The same recursive `rm -rf` graded
+stage-1 **~22 on `claude-haiku-4-5`** — below 50, so stage 2 never fires and the
+gate is materially more permissive than the Sonnet-class one. This is the
+"capability floor" left open in the model-selection entry above, now measured
+rather than hypothesised: a weak classifier is a weak boundary. The tables and
+role profile already steer toward a Sonnet-class model where one is available;
+what remains open is what to do when only a weak model exists (refuse auto mode,
+or warn on entry).
+
+**Timeout guidance aligned to Claude Code.** When the classifier times out, the
+block returned to the model mirrors Claude Code's wording: it names the tool under
+review and the timed-out model, says the call was *not* judged unsafe, and tells
+the model to wait and retry or do other work and come back — and, the useful
+part, that **read-only operations do not require the classifier and can still be
+used** (true here: `read`/`grep`/`find`/`ls` and read-only bash are auto-allowed
+before the classify branch). It still refuses to let the model route around the
+gate and points at `/auto-mode model` for a faster classifier.

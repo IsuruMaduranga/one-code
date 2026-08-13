@@ -6,25 +6,31 @@
  * User settings (`~/.claude/settings.json`) and managed settings only — **never
  * the project's `.claude/settings.json` or `.claude/settings.local.json`**. Both
  * live in the repository, so a checked-in file or a build step that writes one
- * could otherwise hand itself classifier allow rules and switch off the gate
- * that is meant to contain it. Claude Code made the same exclusion (it dropped
+ * could otherwise hand itself classifier permissions and switch off the gate that
+ * is meant to contain it. Claude Code made the same exclusion (it dropped
  * `settings.local.json` in v2.1.207); this is that property, not an omission.
  *
- * `"$defaults"` in any list splices the built-in rules in at that position, so
- * users keep inheriting updates. Omitting it replaces the list wholesale, which
- * is a real and occasionally correct choice — `/auto-mode config` shows the
- * result either way.
+ * ## The one customization surface
+ *
+ * The ruleset is CC's fixed monolith (classifier-prompt.ts); it is not
+ * user-editable, by design — the ruleset *is* the security boundary, and letting
+ * a settings file rewrite it is the surface config-scoping exists to close. The
+ * only thing a user configures is the `## Environment` section, via
+ * `autoMode.environment`. `"$defaults"` in that list splices in CC's default slot
+ * lines at that position, so a user can extend rather than replace.
+ *
+ * The old `hard_deny`/`soft_deny`/`allow` rule lists are retired. They are read
+ * only to warn (a user who still has them would otherwise believe rules are in
+ * force that no longer exist); their values are ignored.
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { DEFAULT_ALLOW, DEFAULT_ENVIRONMENT, DEFAULT_HARD_DENY, DEFAULT_SOFT_DENY } from "./defaults.ts";
+import { DEFAULT_ENVIRONMENT } from "./defaults.ts";
 
 export interface AutoModeConfig {
+	/** Environment slot lines spliced into CC's ruleset. */
 	environment: string[];
-	allow: string[];
-	soft_deny: string[];
-	hard_deny: string[];
 	/** Suspend narrow Bash allow rules so every shell command reaches the classifier. */
 	classifyAllShell: boolean;
 	/** `provider/model-id` override for the classifier model. */
@@ -36,12 +42,10 @@ export interface AutoModeConfig {
 interface AutoModeSettingsFile {
 	autoMode?: {
 		environment?: unknown;
-		allow?: unknown;
-		soft_deny?: unknown;
-		hard_deny?: unknown;
 		classifyAllShell?: unknown;
 		classifierModel?: unknown;
 		logDecisions?: unknown;
+		[key: string]: unknown;
 	};
 	[key: string]: unknown;
 }
@@ -73,45 +77,43 @@ function readFile(path: string, diagnostics: string[]): AutoModeSettingsFile | u
 	}
 }
 
-const KNOWN_AUTO_MODE_KEYS = new Set([
-	"environment",
-	"allow",
-	"soft_deny",
-	"hard_deny",
-	"classifyAllShell",
-	"classifierModel",
-	"logDecisions",
-]);
+const KNOWN_AUTO_MODE_KEYS = new Set(["environment", "classifyAllShell", "classifierModel", "logDecisions"]);
 
-const RULE_LIST_KEYS = ["environment", "allow", "soft_deny", "hard_deny"] as const;
+/** Rule-list keys retired when CC's monolithic ruleset was adopted. */
+const RETIRED_RULE_KEYS = ["hard_deny", "soft_deny", "allow"] as const;
 
 /**
  * Shape problems in one file's `autoMode` block, as human-readable lines.
  * Purely advisory: loading stays lenient (a wrong-typed field is skipped, not
- * fatal), but skipped-because-mistyped must be visible in `/auto-mode config`
- * or it reads as the gate ignoring the user's settings.
+ * fatal), but skipped-because-mistyped must be visible in `/auto-mode config` or
+ * it reads as the gate ignoring the user's settings.
  */
 function validateAutoModeBlock(block: Record<string, unknown>, path: string, diagnostics: string[]): void {
 	for (const key of Object.keys(block)) {
-		if (!KNOWN_AUTO_MODE_KEYS.has(key)) diagnostics.push(`${path}: unknown autoMode key "${key}" is ignored`);
-	}
-	for (const key of RULE_LIST_KEYS) {
-		const value = block[key];
-		if (value === undefined) continue;
-		if (!Array.isArray(value)) {
-			diagnostics.push(`${path}: autoMode.${key} must be an array of strings — ignored`);
-			continue;
-		}
-		for (const [position, entry] of value.entries()) {
-			if (typeof entry !== "string" || entry.trim().length === 0) {
-				diagnostics.push(`${path}: autoMode.${key}[${position}] is not a non-empty string — dropped`);
-			}
-		}
-		const strings = value.filter((entry): entry is string => typeof entry === "string");
-		if (strings.length > 0 && !strings.some((entry) => entry.trim() === DEFAULTS_TOKEN)) {
+		if ((RETIRED_RULE_KEYS as readonly string[]).includes(key)) {
 			diagnostics.push(
-				`${path}: autoMode.${key} omits "${DEFAULTS_TOKEN}", so it REPLACES the built-in ${key} list rather than extending it`,
+				`${path}: autoMode.${key} is no longer used — the ruleset is now fixed (Claude Code's), and the only rule customization is autoMode.environment. This setting is ignored.`,
 			);
+		} else if (!KNOWN_AUTO_MODE_KEYS.has(key)) {
+			diagnostics.push(`${path}: unknown autoMode key "${key}" is ignored`);
+		}
+	}
+	const environment = block.environment;
+	if (environment !== undefined) {
+		if (!Array.isArray(environment)) {
+			diagnostics.push(`${path}: autoMode.environment must be an array of strings — ignored`);
+		} else {
+			for (const [position, entry] of environment.entries()) {
+				if (typeof entry !== "string" || entry.trim().length === 0) {
+					diagnostics.push(`${path}: autoMode.environment[${position}] is not a non-empty string — dropped`);
+				}
+			}
+			const strings = environment.filter((entry): entry is string => typeof entry === "string");
+			if (strings.length > 0 && !strings.some((entry) => entry.trim() === DEFAULTS_TOKEN)) {
+				diagnostics.push(
+					`${path}: autoMode.environment omits "${DEFAULTS_TOKEN}", so it REPLACES the built-in environment rather than extending it`,
+				);
+			}
 		}
 	}
 	for (const key of ["classifyAllShell", "logDecisions"] as const) {
@@ -133,8 +135,8 @@ function stringArray(value: unknown): string[] | undefined {
 }
 
 /**
- * Splice `$defaults` into a user list. Entries from separate scopes are
- * additive: a developer can extend a managed list but not remove from it.
+ * Splice `$defaults` into a user list. Entries from separate scopes are additive:
+ * a developer can extend a managed list but not remove from it.
  */
 export function spliceDefaults(entries: string[] | undefined, defaults: string[]): string[] {
 	if (!entries) return [...defaults];
@@ -156,9 +158,6 @@ export function loadAutoModeConfigWithDiagnostics(home: string): AutoModeConfigL
 	const diagnostics: string[] = [];
 	const collected: {
 		environment?: string[];
-		allow?: string[];
-		soft_deny?: string[];
-		hard_deny?: string[];
 		classifyAllShell?: boolean;
 		classifierModel?: string;
 		logDecisions?: boolean;
@@ -173,12 +172,10 @@ export function loadAutoModeConfigWithDiagnostics(home: string): AutoModeConfigL
 		}
 		if (!block) continue;
 		validateAutoModeBlock(block as Record<string, unknown>, path, diagnostics);
-		for (const key of RULE_LIST_KEYS) {
-			const parsed = stringArray(block[key]);
-			// Additive across scopes: a later scope extends rather than replaces,
-			// so managed entries cannot be dropped by a user file.
-			if (parsed) collected[key] = [...(collected[key] ?? []), ...parsed];
-		}
+		const parsed = stringArray(block.environment);
+		// Additive across scopes: a later scope extends rather than replaces, so
+		// managed entries cannot be dropped by a user file.
+		if (parsed) collected.environment = [...(collected.environment ?? []), ...parsed];
 		if (typeof block.classifyAllShell === "boolean") collected.classifyAllShell = block.classifyAllShell;
 		if (typeof block.logDecisions === "boolean") collected.logDecisions = block.logDecisions;
 		if (typeof block.classifierModel === "string" && block.classifierModel.trim()) {
@@ -189,9 +186,6 @@ export function loadAutoModeConfigWithDiagnostics(home: string): AutoModeConfigL
 	return {
 		config: {
 			environment: spliceDefaults(collected.environment, DEFAULT_ENVIRONMENT),
-			allow: spliceDefaults(collected.allow, DEFAULT_ALLOW),
-			soft_deny: spliceDefaults(collected.soft_deny, DEFAULT_SOFT_DENY),
-			hard_deny: spliceDefaults(collected.hard_deny, DEFAULT_HARD_DENY),
 			classifyAllShell: collected.classifyAllShell ?? false,
 			classifierModel: collected.classifierModel,
 			logDecisions: collected.logDecisions ?? false,

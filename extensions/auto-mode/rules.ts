@@ -1,96 +1,103 @@
 /**
- * Rule indexing and verdict grounding (pure).
+ * Grounding the stage-2 verdict against CC's rule names (pure).
  *
- * The classifier used to return a free-text reason, and a model required to
- * justify a decision it has no grounds for produces the most plausible-sounding
- * justification instead of a true one: a `.claude/notes.md` write came back
- * blocked "because it is outside the working directory", which was false. That
- * reason is what the user reads in `/permissions`, what the model is told to act
- * on, and — via the tier — what decides whether the user even gets a prompt.
+ * Claude Code's stage-2 classifier emits `<category>Exact BLOCK Rule Name</category>`
+ * when an action matches a BLOCK rule. CC itself discards that and shows a fixed
+ * "Blocked by classifier"; we instead validate the category against an index of
+ * the rule names actually present in the embedded ruleset, and derive the tier
+ * (hard vs soft) from which section the name was found in — never from a field
+ * the model chose freely.
  *
- * So rules are numbered here, the classifier cites an id, and the id is
- * validated against this index. What the user sees is the *rule's own text*, not
- * the model's paraphrase of it, and the tier comes from the cited id's prefix
- * rather than from a field the model was free to invent. The model's own wording
- * is kept, but as commentary that is never mistaken for fact.
- *
- * Claude Code went further and stopped showing a reason at all (v2.1.208 shows a
- * fixed "Blocked by classifier"), having shipped written explanations first and
- * moved off them. Keeping the explanation is worth it — it is how a user knows
- * which rule or environment entry to change — but only if it cannot assert
- * things that are not so.
+ * A block citing a category that does not exist is still a block, but tagged
+ * `unmatched`, so a hallucinated name cannot borrow a real HARD rule's authority.
+ * The rule's own name is what the user sees; the model's wording is kept as
+ * commentary that is never mistaken for fact. This is decision 1 in
+ * docs/decisions/auto-mode.md, re-expressed against CC's category scheme in
+ * place of our old H1/S4/A2 ids.
  */
 
-import type { AutoModeConfig } from "./config.ts";
-
-export type RuleTier = "hard_deny" | "soft_deny" | "allow";
+export type BlockTier = "hard_deny" | "soft_deny";
 
 export interface IndexedRule {
-	/** `H1`, `S4`, `A2` — what the classifier cites. */
-	id: string;
-	tier: RuleTier;
-	/** The rule's full text, as configured. */
-	text: string;
-	/** Short human-readable name, for a one-line denial listing. */
-	label: string;
-}
-
-const TIER_PREFIX: Record<RuleTier, string> = { hard_deny: "H", soft_deny: "S", allow: "A" };
-
-/**
- * Grounds for a block that are real but are not numbered rules. Without these
- * the classifier would have to force such a decision onto whichever rule looked
- * closest, which is the misattribution this module exists to stop.
- */
-export const RESERVED_BLOCK_IDS: Record<string, { reason: string; tier: "soft_deny" }> = {
-	boundary: {
-		reason: "The user stated a boundary in this conversation that this action would cross.",
-		tier: "soft_deny",
-	},
-	instructions: {
-		reason: "The project's own instruction file forbids this.",
-		tier: "soft_deny",
-	},
-	unclear: {
-		reason: "What this action would do could not be determined from the call, so it was not allowed.",
-		tier: "soft_deny",
-	},
-};
-
-/**
- * A rule's display name: the part before the first colon, with any
- * `[must name …]` qualifier stripped. Falls back to a clipped prefix for a
- * user-written rule with no such structure.
- */
-export function ruleLabel(text: string): string {
-	const head = text.split(":")[0] ?? text;
-	const stripped = head.replace(/\[[^\]]*\]/g, "").trim();
-	const candidate = stripped || head.trim();
-	if (candidate.length > 0 && candidate.length <= 60 && candidate.length < text.length) return candidate;
-	return `${text.slice(0, 57).trim()}…`;
+	/** The rule's exact name as it appears in the ruleset (e.g. "Git Destructive"). */
+	name: string;
+	tier: BlockTier;
 }
 
 export interface RuleIndex {
 	rules: IndexedRule[];
-	byId: Map<string, IndexedRule>;
+	/** Keyed by normalized name, for case/whitespace-insensitive lookup. */
+	byName: Map<string, IndexedRule>;
 }
 
-/** Number every rule so a verdict can point at one. */
-export function indexRules(config: AutoModeConfig): RuleIndex {
-	const rules: IndexedRule[] = [];
-	const tiers: RuleTier[] = ["hard_deny", "soft_deny", "allow"];
-	for (const tier of tiers) {
-		const entries = config[tier];
-		for (const [position, text] of entries.entries()) {
-			rules.push({ id: `${TIER_PREFIX[tier]}${position + 1}`, tier, text, label: ruleLabel(text) });
-		}
+/** Section headings in CC's ruleset that bound the block-rule lists. */
+const HARD_HEADING = "## HARD BLOCK";
+const SOFT_HEADING = "## SOFT BLOCK";
+const ALLOW_HEADING = "## ALLOW (exceptions)";
+
+/** Compare names ignoring case, surrounding punctuation, and whitespace runs. */
+export function normalizeName(value: string): string {
+	return value
+		.trim()
+		.toLowerCase()
+		.replace(/\s+/g, " ")
+		.replace(/[.,:;]+$/, "");
+}
+
+/**
+ * The rule name at the head of a top-level bullet line, or undefined if the line
+ * is not a rule entry. A rule line looks like `- Name [named+specifics …]: text`
+ * or `- Name: text`; the name is what precedes the first ` [` qualifier or `:`.
+ * Indented lines (sub-bullets) and non-bullet prose are ignored.
+ */
+function ruleNameFromLine(line: string): string | undefined {
+	if (!line.startsWith("- ")) return undefined; // top-level bullets only
+	const body = line.slice(2);
+	// Cut at the first " [" (the [named+specifics …] qualifier) or the first ":".
+	const bracket = body.indexOf(" [");
+	const colon = body.indexOf(":");
+	let end = body.length;
+	if (bracket >= 0) end = Math.min(end, bracket);
+	if (colon >= 0) end = Math.min(end, colon);
+	const name = body.slice(0, end).replace(/\*/g, "").trim();
+	return name.length > 0 ? name : undefined;
+}
+
+/** The text between two markers (exclusive), or "" if the bounds are missing. */
+function sliceSection(text: string, from: string, to: string): string {
+	const start = text.indexOf(from);
+	if (start < 0) return "";
+	const end = text.indexOf(to, start + from.length);
+	return text.slice(start + from.length, end < 0 ? text.length : end);
+}
+
+function collectNames(section: string, tier: BlockTier, out: IndexedRule[], seen: Set<string>): void {
+	for (const line of section.split("\n")) {
+		const name = ruleNameFromLine(line);
+		if (!name) continue;
+		const key = normalizeName(name);
+		if (seen.has(key)) continue; // a name appearing in two sections keeps its first (HARD) tier
+		seen.add(key);
+		out.push({ name, tier });
 	}
-	return { rules, byId: new Map(rules.map((rule) => [rule.id, rule])) };
 }
 
-/** Render one tier for the prompt, with ids the classifier can cite. */
-export function renderTier(index: RuleIndex, tier: RuleTier): string {
-	const entries = index.rules.filter((rule) => rule.tier === tier);
-	if (entries.length === 0) return "";
-	return `<${tier}>\n${entries.map((rule) => `${rule.id}. ${rule.text}`).join("\n")}\n</${tier}>`;
+/**
+ * Parse the block-rule names out of the embedded ruleset. HARD BLOCK names win a
+ * tie over SOFT (a HARD rule must never be downgraded by a same-named soft one).
+ */
+export function buildCategoryIndex(ruleset: string): RuleIndex {
+	const rules: IndexedRule[] = [];
+	const seen = new Set<string>();
+	collectNames(sliceSection(ruleset, HARD_HEADING, SOFT_HEADING), "hard_deny", rules, seen);
+	collectNames(sliceSection(ruleset, SOFT_HEADING, ALLOW_HEADING), "soft_deny", rules, seen);
+	// ALLOW names are not block categories; they are intentionally not indexed, so
+	// a block citing an allow name lands as `unmatched` rather than a real block.
+	return { rules, byName: new Map(rules.map((rule) => [normalizeName(rule.name), rule])) };
+}
+
+/** Look up a category the classifier emitted. undefined ⇒ not a known BLOCK rule. */
+export function groundCategory(index: RuleIndex, category: string | undefined): IndexedRule | undefined {
+	if (!category) return undefined;
+	return index.byName.get(normalizeName(category));
 }
