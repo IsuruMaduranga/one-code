@@ -145,7 +145,11 @@ describe("model identity and containment", () => {
 			"bedrock-converse-stream",
 		);
 		expect(modelIdentity(session)).toMatchObject({ profile: "anthropic", normalizedId: "claude-sonnet-5" });
-		expect(findRoleProfileModel([session, euHaiku, haiku], session, "classifier")?.id).toBe(haiku.id);
+		// Sonnet-class leads the classifier profile now, so a pool without a Sonnet
+		// falls through to Haiku — which still exercises the US-region normalization
+		// this test guards (the US-qualified id matches the `claude-haiku-4-5` family,
+		// the EU-qualified one does not).
+		expect(findRoleProfileModel([euHaiku, haiku], session, "classifier")?.id).toBe(haiku.id);
 	});
 
 	it("fails unknown custom providers closed", () => {

@@ -4,7 +4,16 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 export type ModelRole = "classifier" | "subagent";
 
 export interface RoleProfile {
-	/** Vetted, small-but-capable models. Price alone never adds to this list. */
+	/**
+	 * Classifier candidates in preference order, strongest first. Selection takes
+	 * the first entry that fits the budget cap (never dearer than the session
+	 * model), so a mid-tier model leads and the cheaper fallbacks only win when the
+	 * session model is itself that cheap. This mirrors Claude Code, which screens
+	 * with a Sonnet-class model regardless of whether the main model is Opus or
+	 * Sonnet, and only drops to Haiku when the main model is Haiku — the auto-mode
+	 * classifier is a security boundary, and a bottom-tier model is a weak one.
+	 * Price alone never adds a model to this list.
+	 */
 	classifier: readonly string[];
 	/** Economical models suitable for delegated coding/reasoning work. */
 	subagent: readonly string[];
@@ -17,7 +26,9 @@ export interface RoleProfile {
  */
 export const ROLE_PROFILES: Readonly<Record<string, RoleProfile>> = {
 	anthropic: {
-		classifier: ["claude-haiku-4-5", "claude-sonnet-5", "claude-sonnet-4-6"],
+		// Sonnet-class first (Claude Code's own classifier tier): Opus→Sonnet,
+		// Sonnet→Sonnet, and Haiku→Haiku via the budget cap filtering Sonnet out.
+		classifier: ["claude-sonnet-5", "claude-sonnet-4-6", "claude-haiku-4-5"],
 		subagent: ["claude-sonnet-5", "claude-haiku-4-5", "claude-sonnet-4-6"],
 	},
 	openai: {

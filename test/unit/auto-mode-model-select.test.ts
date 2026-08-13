@@ -359,3 +359,23 @@ describe("describeCandidate", () => {
 		).toContain("within openai");
 	});
 });
+
+describe("classifierCandidates: Sonnet-class tier policy (min(main, sonnet))", () => {
+	const anthropic = [
+		model("anthropic", "claude-opus-4-8", 15),
+		model("anthropic", "claude-sonnet-5", 3),
+		model("anthropic", "claude-haiku-4-5", 1),
+	];
+	it("screens an Opus session with Sonnet (one tier below, Claude Code parity)", () => {
+		const chain = pick(anthropic, anthropic[0]);
+		expect(chain[0]).toMatchObject({ model: anthropic[1], source: "role-profile" });
+	});
+	it("screens a Sonnet session with Sonnet itself (equal tier)", () => {
+		const chain = pick(anthropic, anthropic[1]);
+		expect(chain[0].model).toMatchObject({ id: "claude-sonnet-5" });
+	});
+	it("drops to Haiku only when the main model is Haiku (budget cap filters Sonnet out)", () => {
+		const chain = pick(anthropic, anthropic[2]);
+		expect(chain[0].model).toMatchObject({ id: "claude-haiku-4-5" });
+	});
+});
