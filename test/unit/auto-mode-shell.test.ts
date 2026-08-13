@@ -242,3 +242,75 @@ describe("analyzeShellCommand write-target gaps (whole-codebase review)", () => 
 		expect(analyze("sort input.txt").verdict).toBe("safe");
 	});
 });
+
+describe("containment signal for the recoverability gate (Phase 2)", () => {
+	it("marks an in-project rm of a bare-name file as contained, capturing the target", () => {
+		const ev = analyze("rm notes.txt");
+		expect(ev.verdict).toBe("escalate");
+		expect(ev.containedNonNetwork).toBe(true);
+		expect(ev.wholeTree).toBe(false);
+		expect(ev.writes.some((w) => w.token === "notes.txt" && !w.outsideCwd)).toBe(true);
+	});
+
+	it("marks git reset --hard as a contained whole-tree op", () => {
+		const ev = analyze("git reset --hard HEAD");
+		expect(ev.verdict).toBe("escalate");
+		expect(ev.containedNonNetwork).toBe(true);
+		expect(ev.wholeTree).toBe(true);
+	});
+
+	it("does NOT mark an rm outside the project as contained", () => {
+		const ev = analyze("rm ~/secret.txt");
+		expect(ev.containedNonNetwork).toBe(false);
+	});
+
+	it("does NOT mark a glob rm as contained (cannot enumerate targets)", () => {
+		const ev = analyze("rm build/*.log");
+		expect(ev.containedNonNetwork).toBe(false);
+	});
+
+	it("does NOT mark rm piped from xargs as contained (targets from stdin)", () => {
+		const ev = analyze("find . -name '*.tmp' | xargs rm");
+		expect(ev.containedNonNetwork).toBe(false);
+	});
+
+	it("does NOT mark a non-delete mutation (cp) as contained", () => {
+		const ev = analyze("cp a.txt b.txt");
+		expect(ev.verdict).toBe("escalate");
+		expect(ev.containedNonNetwork).toBe(false);
+	});
+
+	it("does NOT mark rm as contained when the command also reaches the network", () => {
+		const ev = analyze("curl http://x/ && rm notes.txt");
+		expect(ev.containedNonNetwork).toBe(false);
+	});
+
+	it("does NOT mark rm of a credential path as contained", () => {
+		const ev = analyze("rm .env");
+		expect(ev.containedNonNetwork).toBe(false);
+	});
+
+	it("leaves containedNonNetwork false for a provably-safe (non-escalating) command", () => {
+		const ev = analyze("cat notes.txt");
+		expect(ev.verdict).toBe("safe");
+		expect(ev.containedNonNetwork).toBe(false);
+	});
+
+	it("still marks a bare git reset --hard (no ref) as whole-tree contained", () => {
+		const ev = analyze("git reset --hard");
+		expect(ev.containedNonNetwork).toBe(true);
+		expect(ev.wholeTree).toBe(true);
+	});
+
+	// A delete target the classifier's fast path cannot enumerate must never be
+	// treated as a concrete in-project literal — otherwise `rm -rf "$VAR"` would
+	// resolve to a nonexistent `cwd/$VAR`, the recoverability check would find
+	// nothing to lose, and it would auto-approve while $VAR expands to anything at
+	// runtime. These must stay uncontained so the classifier judges them.
+	it("does NOT mark rm of a dynamic/unenumerable target as contained", () => {
+		for (const command of ['rm -rf "$VAR"', "rm -rf ${DIR:-fallback}", "rm -rf $HOME/x", "rm -rf {a,b}.txt"]) {
+			const ev = analyze(command);
+			expect(ev.containedNonNetwork, command).toBe(false);
+		}
+	});
+});

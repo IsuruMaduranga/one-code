@@ -49,6 +49,22 @@ export interface ShellEvidence {
 	executionPrimitives: string[];
 	/** Network-capable commands present (curl, ssh, …) — an egress signal for the classifier. */
 	network: string[];
+	/**
+	 * True when the ONLY reason this escalated is an in-project filesystem
+	 * mutation/deletion — every path is inside the working directory and resolved,
+	 * nothing touches the network, no credential/execution-primitive path, no
+	 * unknown command, interpreter, glob, xargs, `cd`, or unmodelled syntax. The
+	 * containment gate uses this to decide whether a git-recoverability check may
+	 * clear the command (see auto-mode/recoverability.ts). Never true when the
+	 * verdict is "safe" (nothing escalated) — it only qualifies an escalation.
+	 */
+	containedNonNetwork: boolean;
+	/**
+	 * True for a whole-working-tree destructive git op (`git reset --hard`), whose
+	 * recoverability is judged against the whole tree's cleanliness rather than
+	 * named paths.
+	 */
+	wholeTree: boolean;
 }
 
 /** Commands that read and do not write, and are safe to fast-path. */
@@ -159,6 +175,30 @@ const MUTATION_COMMANDS = new Set([
 	"unzip",
 	"zip",
 ]);
+
+/**
+ * The delete/truncate commands whose blast radius is exactly their (in-project,
+ * resolved, concrete) path arguments, so an in-project use may be cleared by the
+ * containment + git-recoverability gate rather than always reaching the
+ * classifier. This is an *allowlist* for the "provably contained" conclusion —
+ * omission is safe (the command still escalates to the classifier via the generic
+ * mutation path). Overwrite/copy tools (cp, mv, dd, tee) are deliberately left
+ * out for now: their destination semantics are subtler, so they keep classifying.
+ * Membership here does not clear anything on its own: every target must resolve
+ * inside the working directory and the recoverability check must pass.
+ */
+const DELETE_COMMANDS = new Set(["rm", "rmdir", "shred", "truncate"]);
+
+/** Glob/other shell metacharacters we cannot enumerate, so a target carrying one is not "concrete". */
+function hasGlob(token: string): boolean {
+	return /[*?\[\]]/.test(token);
+}
+
+/** `git reset --hard [ref]` — a whole-working-tree discard of uncommitted changes. */
+function isWholeTreeGitReset(args: Token[]): boolean {
+	const positionals = args.filter((token) => !token.value.startsWith("-"));
+	return positionals[0]?.value === "reset" && args.some((token) => token.value === "--hard");
+}
 
 /**
  * Interpreters whose *scripts* can write files the token-level pass never sees
@@ -539,9 +579,19 @@ export function analyzeShellCommand({ command, cwd, home }: AnalyzeInput): Shell
 		sensitivePaths: [],
 		executionPrimitives: [],
 		network: [],
+		containedNonNetwork: false,
+		wholeTree: false,
 	};
-	const escalate = (note: string) => {
+	/**
+	 * Set by any escalation reason that is NOT a bare in-project mutation — i.e.
+	 * anything meaning the command reaches outside the project or cannot be fully
+	 * accounted for. When it stays false through an escalation, the only blocker
+	 * was in-project mutation, and the containment gate may consult recoverability.
+	 */
+	let uncontained = false;
+	const escalate = (note: string, opts?: { contained?: boolean }) => {
 		evidence.verdict = "escalate";
+		if (!opts?.contained) uncontained = true;
 		if (!evidence.notes.includes(note)) evidence.notes.push(note);
 	};
 
@@ -608,7 +658,12 @@ export function analyzeShellCommand({ command, cwd, home }: AnalyzeInput): Shell
 		if (!name) continue;
 		evidence.commands.push(name);
 		if (peeled.length > 0) {
-			escalate(`wraps the real command in ${peeled.join(" → ")}, so ${name} is what actually runs`);
+			// A transparent wrapper (timeout, env, nice) leaves the payload's own
+			// arguments visible, so an in-project payload stays contained; xargs is
+			// the exception — its targets come from stdin, unknown to this check.
+			escalate(`wraps the real command in ${peeled.join(" → ")}, so ${name} is what actually runs`, {
+				contained: !peeled.includes("xargs"),
+			});
 		}
 
 		if (NETWORK_COMMANDS.has(name)) {
@@ -643,6 +698,16 @@ export function analyzeShellCommand({ command, cwd, home }: AnalyzeInput): Shell
 		}
 
 		if (name === "git") {
+			// `git reset --hard` is an in-project whole-tree discard: escalate, but
+			// mark it contained so the recoverability gate can clear it when the tree
+			// is clean. Any other non-read-only git subcommand is uncontained.
+			if (isWholeTreeGitReset(args)) {
+				evidence.wholeTree = true;
+				escalate("runs git reset --hard, which discards uncommitted changes in the working tree", {
+					contained: true,
+				});
+				continue;
+			}
 			const reason = gitEscalationReason(args, (dir) => {
 				const resolved = resolveForContainment(toAbsolute(effectiveCwd, dir, home));
 				return resolved === undefined || !isWithin(containmentRoot, resolved);
@@ -660,7 +725,11 @@ export function analyzeShellCommand({ command, cwd, home }: AnalyzeInput): Shell
 		}
 
 		const isMutation = MUTATION_COMMANDS.has(name);
-		if (isMutation) escalate(`runs ${name}, which modifies the filesystem`);
+		const isDelete = DELETE_COMMANDS.has(name);
+		// A delete confined to in-project paths is what the containment gate exists
+		// to clear (subject to recoverability); any other mutation (cp/mv/tar/…)
+		// stays uncontained and reaches the classifier as before.
+		if (isMutation) escalate(`runs ${name}, which modifies the filesystem`, { contained: isDelete });
 
 		if (!isMutation && !READ_ONLY_COMMANDS.has(name) && !PATTERN_FIRST_COMMANDS.has(name) && name !== "find") {
 			escalate(`runs ${name}, which is not on the read-only allowlist`);
@@ -669,7 +738,20 @@ export function analyzeShellCommand({ command, cwd, home }: AnalyzeInput): Shell
 		// The positional destinations of writing commands are the paths that get
 		// written. (Redirections were already handled at the top of the loop.)
 		const writeTokens: string[] = [];
-		if (isMutation) {
+		if (isDelete) {
+			// A delete's targets are every non-flag positional, bare names included
+			// (`rm notes.txt` has no slash but is still a real target the
+			// recoverability gate must see). A glob target cannot be enumerated, so
+			// it drops out of containment — the command then reaches the classifier.
+			for (const token of args) {
+				if (token.value.startsWith("-")) continue;
+				if (hasGlob(token.value)) {
+					escalate(`targets ${token.value}, a glob whose expansion cannot be checked`);
+					continue;
+				}
+				writeTokens.push(token.value);
+			}
+		} else if (isMutation) {
 			const positionals = args.filter((token) => !token.value.startsWith("-") && looksLikePath(token.value));
 			// For cp/mv/rsync/ln the destination is last; for the rest every
 			// positional is a candidate target.
@@ -697,6 +779,11 @@ export function analyzeShellCommand({ command, cwd, home }: AnalyzeInput): Shell
 
 		for (const token of writeTokens) checkWriteTarget(token);
 	}
+
+	// The command escalated, but every reason was an in-project delete/whole-tree
+	// reset — nothing reached outside the project, the network, or the unknown. The
+	// containment gate may now consult git-recoverability (auto-mode/recoverability).
+	evidence.containedNonNetwork = evidence.verdict === "escalate" && !uncontained;
 
 	return evidence;
 }
