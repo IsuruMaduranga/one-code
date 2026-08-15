@@ -235,3 +235,41 @@ per-frame cost is pi-tui's own (upstream candidates: `docs/upstream_prs.md`
 `render(width)` (use `linesComponent`, or replicate its cache) — an uncached
 component re-renders 60×/s for as long as it is mounted, and the cost
 compounds linearly with thread length.
+
+## Live-activity chrome: verb spinner, token counter, effort note (2026-08-16, unreviewed)
+
+*(written while the user was away; review welcome)*
+
+A frame capture of CC 2.1.233 showed three pieces of prompt-area chrome One
+Code lacked; all three landed in one batch (`173b012`), matched to the
+observed frames rather than the reconstructed source where they disagree
+(the source gates spinner stats behind 30s/verbose; the frames show the
+timer at 1s and tokens as soon as anything streams — we follow the frames).
+
+- **The spinner** (`extensions/spinner/`): pi's `setWorkingIndicator` gets
+  CC's asterisk cycle (`·✢✳✶✻✽` mirrored, 120ms, accent-painted — pi renders
+  custom frames uncolored) and `setWorkingMessage` gets
+  `"Verb… (elapsed · ↓ N tokens)"` on a 1s ticker. The verb is random per
+  turn from CC's 187-entry SPINNER_VERBS verbatim; tokens are CC's estimate
+  (streamed chars/4 via `message_update`, compact-formatted like CC's
+  formatNumber). **Not replicated**: the glimmer/shimmer animation (pi
+  renders the message as plain text) and the rotating tip lines (CC's tip
+  registry carries frequency/relevance machinery; low value for the cost).
+- **The context token counter**: CC shows a right-aligned `58197 tokens`
+  directly above the input (raw number, no separator — per the frames).
+  Ours is an above-editor component widget fed by `ctx.getContextUsage()`,
+  refreshed on message_end/agent_end/session_start. Constantly re-setting
+  it also keeps it *last* in the above-editor widget stack (setWidget order
+  is last-write order), i.e. adjacent to the input like CC.
+- **`· esc to interrupt`** appends to the permission-mode line only while
+  the model streams (`agent_start`/`agent_end` toggle a flag into
+  `modeBadge`) — CC's mode line does the same.
+- **The effort note** (`effort/`): CC flashes `● high · /effort`
+  right-aligned above the input after an effort change; ours shows for 5s
+  on `thinking_level_select` or `/effort`, using CC's symbols (○ low,
+  ◐ medium, ● high, ◉ max — pi's extra rungs map to the nearest) and
+  keeping ultracode's ✦ badge.
+
+`formatDuration` (humane elapsed: 45s / 1m 7s / 2h 5m) and `alignRight`
+graduated to `lib/tui-render.ts`; the workflow viewer re-exports
+formatDuration so its import surface is unchanged.
