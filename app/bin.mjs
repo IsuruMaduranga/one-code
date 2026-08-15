@@ -133,21 +133,47 @@ process.stdout.write = (chunk, ...rest) => {
 // --- 4. Launch pi with One Code's update check ----------------------------
 const { InteractiveMode, main } = await import("@earendil-works/pi-coding-agent");
 
-// Clean fullscreen exit. pi 0.84.1's quit path deliberately switches from the
-// alt screen back to the main-screen renderer and repaints the whole
-// transcript into scrollback (stopInteractiveTui → switchTuiMode("regular") +
-// renderNow). One Code wants the Claude Code exit: restore the terminal,
-// print only the resume hint. Overriding this one method keeps the mid-session
-// /settings renderer switch untouched. Exact-pinned pi makes the private
-// internals (renderer, hasOverlayEntries, ui) stable; re-verify on every pin
+// Clean exit. pi 0.84.1's quit path leaves the rendered UI behind in both TUI
+// modes: fullscreen deliberately switches from the alt screen back to the
+// main-screen renderer and repaints the whole transcript into scrollback
+// (stopInteractiveTui → switchTuiMode("regular") + renderNow); regular mode
+// just parks the cursor below the rendered lines. One Code wants the Claude
+// Code exit: restore the terminal, print only the resume hint. Overriding this
+// one method keeps the mid-session /settings renderer switch untouched.
+// Exact-pinned pi makes the private internals (renderer, hasOverlayEntries,
+// ui, and the main-screen render bookkeeping) stable; re-verify on every pin
 // bump. Upstream proposal queued (an exit-preserve setting).
 try {
 	const original = InteractiveMode.prototype.stopInteractiveTui;
 	if (typeof original === "function") {
 		InteractiveMode.prototype.stopInteractiveTui = function stopInteractiveTuiPreserving() {
 			try {
-				if (this.renderer?.mode === "fullscreen") {
-					while (this.renderer.hasOverlayEntries) this.renderer.hideOverlay();
+				const renderer = this.renderer;
+				if (renderer?.mode === "fullscreen") {
+					while (renderer.hasOverlayEntries) renderer.hideOverlay();
+					this.ui.stop({ preserveScreen: true });
+					return;
+				}
+				// Regular (main-screen) mode: erase the on-screen part of the
+				// working area, then stop without the stock cursor-park. Only
+				// the viewport can be erased — lines already scrolled into
+				// scrollback stay (clearing scrollback would take ESC[3J,
+				// which also destroys the user's own shell history).
+				if (
+					renderer?.mode === "regular" &&
+					Array.isArray(renderer.previousLines) &&
+					renderer.previousLines.length > 0 &&
+					Number.isInteger(renderer.hardwareCursorRow) &&
+					Number.isInteger(renderer.previousViewportTop)
+				) {
+					let buffer = "";
+					if (renderer.previousKittyImageIds && typeof renderer.deleteKittyImages === "function") {
+						buffer += renderer.deleteKittyImages(renderer.previousKittyImageIds);
+					}
+					const rowsUp = Math.max(0, renderer.hardwareCursorRow - renderer.previousViewportTop);
+					if (rowsUp > 0) buffer += `\x1b[${rowsUp}A`;
+					buffer += "\r\x1b[0J";
+					renderer.terminal.write(buffer);
 					this.ui.stop({ preserveScreen: true });
 					return;
 				}

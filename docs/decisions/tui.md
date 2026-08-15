@@ -169,6 +169,26 @@ still get the transcript-dump exit until the upstream exit-preserve option
 lands (upstream_prs #8). The mid-session `/settings` renderer switch is
 untouched.
 
+**Extension (2026-08-14, unreviewed): regular mode gets the clean exit too.**
+A user report (screenshot) showed `/quit` in terminal (`regular`) mode leaving
+the whole UI — banner, editor, footer — in scrollback. That was stock pi
+behavior by design (`TuiMainScreen.beforeTerminalStop` just parks the cursor
+below `previousLines` and newlines), and the bin override only handled
+fullscreen. The override now also covers `renderer.mode === "regular"`: it
+erases the on-screen part of the working area (cursor up
+`hardwareCursorRow - previousViewportTop` rows, then `CR` + `ESC[0J`, plus
+best-effort kitty-image deletes) and stops with `preserveScreen: true` to skip
+the stock cursor-park. **Physical limit:** only the viewport is erasable —
+lines already scrolled into terminal scrollback stay there (clearing them
+takes `ESC[3J`, which would also destroy the user's own shell history). So a
+short session exits fully clean; a long one keeps its older transcript in
+scrollback, CC-like. Live-verified in tmux (short session → only the shell
+prompt remains; 120-line expanded output → viewport cleared, prompt at top,
+older lines retained in scrollback; fullscreen exit unchanged). Same caveat as
+before: this lives in `app/bin.mjs`, so **plain `pi` runs (the package
+variant) still get the stock leave-everything exit** — no extension API
+reaches `InteractiveMode` — until upstream_prs #8 lands.
+
 **Trap this surfaced (finding §10.16):** the setting key was `uiMode` in the
 pinned reference clone (v0.83.0) but was renamed `tuiMode` in installed pi
 (v0.84.1); a `uiMode` key is silently ignored on 0.84.1. Clone re-pinned to
