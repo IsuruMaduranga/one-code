@@ -66,6 +66,7 @@ export class AgentRecordStore {
 				if (event.model) record.model = event.model;
 				if (event.tool) {
 					record.activity.push(event.tool);
+					record.toolCalls++;
 					if (record.activity.length > ACTIVITY_CAP) record.activity.shift();
 				}
 				break;
@@ -103,6 +104,7 @@ export class AgentRecordStore {
 				phase: event.phase,
 				status: "running",
 				activity: [],
+				toolCalls: 0,
 			};
 			this.byKey.set(key, created);
 			this.order.push(key);

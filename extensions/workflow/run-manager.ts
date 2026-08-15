@@ -135,6 +135,7 @@ export function snapshotRun(handle: RunHandle): ViewerRunSnapshot {
 		finishedAt: handle.finishedAt,
 		errorMessage: handle.errorMessage,
 		agents: handle.agents.list(),
+		declaredPhases: handle.meta.phases?.map((phase) => phase.title),
 	};
 }
 

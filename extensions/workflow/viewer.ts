@@ -1,9 +1,10 @@
 /**
- * Workflow run viewer (pure): key decoding, tree building, two-pane layout,
- * and rendering for the interactive /workflows screen — Claude Code's
- * workflow UI. The thin ctx.ui.custom component in index.ts owns nothing but
- * mutable state, event subscriptions, and repaint calls (same split as
- * plan-mode's viewer).
+ * Workflow run viewer (pure): key decoding, phase grouping, the two-level
+ * drill-down layout (Phases → agents of a phase → agent detail), and the
+ * below-editor status strip — Claude Code's workflow UI, aligned to a frame
+ * capture of CC 2.1.233. The thin ctx.ui.custom component in index.ts owns
+ * nothing but mutable state, event subscriptions, and repaint calls (same
+ * split as plan-mode's viewer).
  *
  * Every rendered line must stay within the width given: pi-tui crashes the
  * whole app on an overwide line. All cells are cut/padded as PLAIN text
@@ -30,13 +31,20 @@ export interface ViewerRunSnapshot {
 	finishedAt?: number;
 	errorMessage?: string;
 	agents: AgentRecord[];
+	/** Phase titles declared in the script's meta, in declared order. */
+	declaredPhases?: string[];
 }
 
 /** Mutable viewer state owned by the wiring component. */
 export interface ViewerState {
 	runIndex: number;
-	cursor: number;
+	/** Drill level: the phase list, or the agents of the selected phase. */
+	level: "phases" | "agents";
+	phaseCursor: number;
+	/** Cursor within the selected phase's agents (agents level only). */
+	agentCursor: number;
 	detailScroll: number;
+	promptExpanded: boolean;
 	/** Set after `s` hit an existing, different saved file — next `s` overwrites. */
 	confirmOverwrite: boolean;
 	/** Transient footer message (save confirmation etc.). */
@@ -44,7 +52,15 @@ export interface ViewerState {
 }
 
 export function initialViewerState(runIndex = 0): ViewerState {
-	return { runIndex, cursor: 0, detailScroll: 0, confirmOverwrite: false };
+	return {
+		runIndex,
+		level: "phases",
+		phaseCursor: 0,
+		agentCursor: 0,
+		detailScroll: 0,
+		promptExpanded: false,
+		confirmOverwrite: false,
+	};
 }
 
 export type ViewerKey =
@@ -53,6 +69,9 @@ export type ViewerKey =
 	| { kind: "pageUp" }
 	| { kind: "pageDown" }
 	| { kind: "nextRun" }
+	| { kind: "enter" }
+	| { kind: "back" }
+	| { kind: "stop" }
 	| { kind: "save" }
 	| { kind: "close" };
 
@@ -70,12 +89,19 @@ export function decodeViewerKey(data: string): ViewerKey | undefined {
 			return { kind: "pageDown" };
 		case "\t":
 			return { kind: "nextRun" };
+		case "\r":
+		case "\n":
+			return { kind: "enter" };
+		case "\x1b":
+			return { kind: "back" };
+		case "x":
+		case "X":
+			return { kind: "stop" };
 		case "s":
 		case "S":
 			return { kind: "save" };
-		case "\x1b":
-		case "\x03": // ctrl+c — same intent as escape while the viewer is focused
 		case "q":
+		case "\x03": // ctrl+c — close from anywhere, like q
 			return { kind: "close" };
 		default:
 			return undefined;
@@ -111,14 +137,6 @@ export function decodeStatusKey(data: string): StatusKey | undefined {
 	}
 }
 
-/** Clamp state against the current snapshot (agents appear while live). */
-export function clampViewerState(state: ViewerState, runs: ViewerRunSnapshot[]): void {
-	state.runIndex = runs.length ? Math.min(state.runIndex, runs.length - 1) : 0;
-	const agents = runs[state.runIndex]?.agents.length ?? 0;
-	state.cursor = agents ? Math.min(Math.max(0, state.cursor), agents - 1) : 0;
-	if (state.detailScroll < 0) state.detailScroll = 0;
-}
-
 /** What pressing `s` should do, given what's on disk. Wiring does the fs. */
 export function planSave(input: {
 	name: string;
@@ -133,59 +151,68 @@ export function planSave(input: {
 }
 
 // ---------------------------------------------------------------------------
-// Tree
+// Phase grouping
 // ---------------------------------------------------------------------------
 
-export interface TreeRow {
-	kind: "phase" | "agent";
-	text: string;
-	/** Index into the run's agents array (agent rows only). */
-	agentIndex?: number;
-	status?: AgentRecord["status"];
+export interface PhaseGroup {
+	title: string;
+	/** Whether any agent has run (declared-only phases render dim, countless). */
+	started: boolean;
+	agents: { record: AgentRecord; agentIndex: number }[];
+	done: number;
 }
 
-const STATUS_MARK: Record<AgentRecord["status"], string> = {
-	running: "⏳",
-	done: "✔",
-	failed: "✗",
-	replayed: "↻",
-};
-
-/** Group agents by phase in first-appearance order. */
-export function buildTree(agents: AgentRecord[]): TreeRow[] {
-	const rows: TreeRow[] = [];
-	const phaseAt = new Map<string, number>(); // phase → index of its header row
-	const counts = new Map<string, number>();
-	for (const [agentIndex, record] of agents.entries()) {
-		const phase = record.phase ?? "agents";
-		if (!phaseAt.has(phase)) {
-			phaseAt.set(phase, rows.length);
-			rows.push({ kind: "phase", text: phase });
+/**
+ * Declared phases (script meta) first in declared order, then any phase seen
+ * in the event stream that was not declared (child workflows' `▸ name` groups,
+ * ad-hoc phase() titles), then a default "agents" group for phaseless agents.
+ */
+export function buildPhases(run: ViewerRunSnapshot): PhaseGroup[] {
+	const groups: PhaseGroup[] = [];
+	const byTitle = new Map<string, PhaseGroup>();
+	const add = (title: string): PhaseGroup => {
+		let group = byTitle.get(title);
+		if (!group) {
+			group = { title, started: false, agents: [], done: 0 };
+			byTitle.set(title, group);
+			groups.push(group);
 		}
-		counts.set(phase, (counts.get(phase) ?? 0) + 1);
-		rows.push({
-			kind: "agent",
-			text: record.label,
-			agentIndex,
-			status: record.status,
-		});
+		return group;
+	};
+	for (const title of run.declaredPhases ?? []) add(title);
+	for (const [agentIndex, record] of run.agents.entries()) {
+		const group = add(record.phase ?? "agents");
+		group.started = true;
+		group.agents.push({ record, agentIndex });
+		if (record.status !== "running") group.done++;
 	}
-	// Stamp each phase header with its agent count now that groups are complete.
-	for (const [phase, rowIndex] of phaseAt) {
-		const count = counts.get(phase) ?? 0;
-		rows[rowIndex].text = `${phase} · ${count} agent${count === 1 ? "" : "s"}`;
-	}
-	return rows;
+	return groups;
+}
+
+/** Clamp state against the current snapshot (agents appear while live). */
+export function clampViewerState(state: ViewerState, runs: ViewerRunSnapshot[]): void {
+	state.runIndex = runs.length ? Math.min(state.runIndex, runs.length - 1) : 0;
+	const run = runs[state.runIndex];
+	const phases = run ? buildPhases(run) : [];
+	state.phaseCursor = phases.length ? Math.min(Math.max(0, state.phaseCursor), phases.length - 1) : 0;
+	const agents = phases[state.phaseCursor]?.agents.length ?? 0;
+	state.agentCursor = agents ? Math.min(Math.max(0, state.agentCursor), agents - 1) : 0;
+	if (agents === 0 && state.level === "agents") state.level = "phases";
+	if (state.detailScroll < 0) state.detailScroll = 0;
 }
 
 // ---------------------------------------------------------------------------
 // Formatting helpers (all plain text; painting happens at the very end)
 // ---------------------------------------------------------------------------
 
-function formatDuration(startedAt?: number, finishedAt?: number, now?: number): string {
+/** Humane elapsed time, Claude Code style: 45s, 1m 7s, 2h 5m. */
+export function formatDuration(startedAt?: number, finishedAt?: number, now?: number): string {
 	if (startedAt === undefined) return "";
 	const end = finishedAt ?? now ?? startedAt;
-	return `${Math.max(0, Math.round((end - startedAt) / 1000))}s`;
+	const total = Math.max(0, Math.round((end - startedAt) / 1000));
+	if (total < 60) return `${total}s`;
+	if (total < 3600) return `${Math.floor(total / 60)}m ${total % 60}s`;
+	return `${Math.floor(total / 3600)}h ${Math.floor((total % 3600) / 60)}m`;
 }
 
 /** Cut then pad plain text to exactly `width` columns. */
@@ -194,52 +221,163 @@ function cell(text: string, width: number): string {
 	return shortened + " ".repeat(Math.max(0, width - [...shortened].length));
 }
 
+/** Left text with a right-aligned annotation, both plain, exactly `width` wide. */
+function splitCell(left: string, right: string, width: number): string {
+	const rightWidth = [...right].length;
+	if (rightWidth === 0) return cell(left, width);
+	const leftWidth = width - rightWidth - 1;
+	if (leftWidth < 6) return cell(`${left} ${right}`, width);
+	return `${cell(left, leftWidth)} ${right}`;
+}
+
+const STATUS_MARK: Record<AgentRecord["status"], string> = {
+	running: "●",
+	done: "✔",
+	failed: "✗",
+	replayed: "↻",
+};
+
 // ---------------------------------------------------------------------------
-// Detail pane
+// Boxed panes
 // ---------------------------------------------------------------------------
 
-interface DetailLine {
+interface PaneLine {
 	text: string;
 	style?: "accent" | "dim" | "error" | "bold";
 }
 
+/**
+ * A bordered pane with a title in the top border, Claude Code style:
+ * ┌ Title ────┐ / │ content │ rows / └────┘. `height` includes both borders;
+ * content is cut/padded to the inner width before painting.
+ */
+function boxPane(title: string, lines: PaneLine[], width: number, height: number, paint: ViewerPaint): string[] {
+	const innerWidth = Math.max(1, width - 4);
+	const contentRows = Math.max(0, height - 2);
+	const titleCut = cut(title, Math.max(0, width - 4));
+	const dashes = "─".repeat(Math.max(0, width - [...titleCut].length - 4));
+	const out: string[] = [paint.fg("dim", "┌ ") + paint.bold(titleCut) + paint.fg("dim", ` ${dashes}┐`)];
+	for (let i = 0; i < contentRows; i++) {
+		const line = lines[i];
+		const plain = cell(line?.text ?? "", innerWidth);
+		const painted = !line?.style ? plain : line.style === "bold" ? paint.bold(plain) : paint.fg(line.style, plain);
+		out.push(`${paint.fg("dim", "│")} ${painted} ${paint.fg("dim", "│")}`);
+	}
+	out.push(paint.fg("dim", `└${"─".repeat(Math.max(0, width - 2))}┘`));
+	return out;
+}
+
+/** Slice rows so the cursor stays visible in a `visible`-row window. */
+function scrollWindow<T>(rows: T[], cursor: number, visible: number): T[] {
+	let offset = 0;
+	if (cursor >= visible) offset = cursor - visible + 1;
+	if (rows.length > visible) offset = Math.min(offset, rows.length - visible);
+	return rows.slice(offset, offset + visible);
+}
+
+// ---------------------------------------------------------------------------
+// Pane content builders
+// ---------------------------------------------------------------------------
+
+/** Left pane, phases level: `✔ Survey  1/1` / `2 Analyze  0/5` / `3 Synthesize`. */
+function phaseRows(phases: PhaseGroup[], cursor: number, innerWidth: number): PaneLine[] {
+	return phases.map((phase, index) => {
+		const selected = index === cursor;
+		const allDone = phase.started && phase.done === phase.agents.length;
+		const mark = selected ? "❯" : allDone ? "✔" : String(index + 1);
+		const count = phase.started ? `${phase.done}/${phase.agents.length}` : "";
+		const text = splitCell(`${mark} ${phase.title}`, count, innerWidth);
+		if (selected) return { text, style: "accent" as const };
+		return { text, style: phase.started ? undefined : ("dim" as const) };
+	});
+}
+
+/** Agent rows: `mark label  Model · 31.6k tok` with a right-aligned duration. */
+function agentRows(
+	agents: PhaseGroup["agents"],
+	cursor: number | undefined,
+	innerWidth: number,
+	now: number,
+): PaneLine[] {
+	if (!agents.length) return [{ text: "No agents yet — waiting for the first agent() call…", style: "dim" }];
+	const labelWidth = Math.min(24, Math.max(10, Math.floor(innerWidth * 0.4)));
+	return agents.map(({ record }, index) => {
+		const selected = cursor === index;
+		const mark = selected ? "❯" : " ";
+		const meta = [record.model, record.tokens ? `${formatTokenCount(record.tokens.output)} tok` : ""]
+			.filter(Boolean)
+			.join(" · ");
+		const left = `${mark} ${STATUS_MARK[record.status]} ${cell(record.label, labelWidth)} ${meta}`;
+		const text = splitCell(left, formatDuration(record.startedAt, record.finishedAt, now), innerWidth);
+		if (selected) return { text, style: "accent" as const };
+		return { text, style: record.status === "failed" ? ("error" as const) : undefined };
+	});
+}
+
 const STATUS_TITLE: Record<AgentRecord["status"], string> = {
-	running: "⏳ Running",
+	running: "● Running",
 	done: "✔ Completed",
 	failed: "✗ Failed",
 	replayed: "↻ Replayed (cached)",
 };
 
-export function buildDetail(record: AgentRecord | undefined, width: number, now: number): DetailLine[] {
+/** How many wrapped prompt lines show before `⏎ expand` kicks in. */
+export const PROMPT_PREVIEW_LINES = 3;
+/** How many trailing tool calls the Activity section shows. */
+export const ACTIVITY_TAIL = 3;
+
+/** Right pane, agents level: the full agent detail. */
+export function buildDetail(
+	record: AgentRecord | undefined,
+	width: number,
+	now: number,
+	promptExpanded: boolean,
+): PaneLine[] {
 	if (!record) return [{ text: "No agents yet — waiting for the first agent() call…", style: "dim" }];
-	const lines: DetailLine[] = [];
+	const lines: PaneLine[] = [];
 	const title = STATUS_TITLE[record.status] + (record.model ? ` · ${record.model}` : "");
 	lines.push({ text: title, style: record.status === "failed" ? "error" : "accent" });
+	const toolCalls = record.toolCalls ?? record.activity.length;
 	const stats: string[] = [];
-	if (record.tokens) stats.push(`${formatTokenCount(record.tokens.output)} out-tok`);
+	if (record.tokens) stats.push(`${formatTokenCount(record.tokens.output)} tok`);
+	stats.push(`${toolCalls} tool call${toolCalls === 1 ? "" : "s"}`);
 	const duration = formatDuration(record.startedAt, record.finishedAt, now);
 	if (duration) stats.push(duration);
 	if (record.cost) stats.push(`$${record.cost.toFixed(4)}`);
-	if (stats.length) lines.push({ text: stats.join(" · "), style: "dim" });
+	lines.push({ text: stats.join(" · "), style: "dim" });
 
-	const section = (header: string, body: string[], bodyStyle?: DetailLine["style"]) => {
+	const section = (header: string, body: string[], bodyStyle?: PaneLine["style"]) => {
 		lines.push({ text: "" });
 		lines.push({ text: header, style: "bold" });
 		for (const text of body) lines.push({ text: `  ${text}`, style: bodyStyle });
 	};
 
-	section("Prompt", record.prompt ? wrapPlainText(record.prompt, width - 2) : ["(not recorded)"]);
+	const promptLines = record.prompt ? wrapPlainText(record.prompt, width - 2) : ["(not recorded)"];
+	if (promptLines.length > PROMPT_PREVIEW_LINES && !promptExpanded) {
+		const hidden = promptLines.length - PROMPT_PREVIEW_LINES;
+		section("Prompt", [
+			...promptLines.slice(0, PROMPT_PREVIEW_LINES),
+			`… +${hidden} more line${hidden === 1 ? "" : "s"} (⏎ to expand)`,
+		]);
+	} else {
+		section("Prompt", promptLines);
+	}
+
+	const tail = record.activity.slice(-ACTIVITY_TAIL);
+	const activityHeader =
+		toolCalls > tail.length ? `Activity · last ${tail.length} of ${toolCalls} tool calls` : "Activity";
 	section(
-		"Activity",
-		record.activity.length
-			? record.activity.map((tool) => cut(`${tool.name}(${tool.argsSummary ?? ""})`, width - 2))
+		activityHeader,
+		tail.length
+			? tail.map((tool) => cut(`${tool.name}(${tool.argsSummary ?? ""})`, width - 2))
 			: [record.status === "replayed" ? "(replayed — activity not recorded)" : "No tool calls."],
-		record.activity.length ? undefined : "dim",
+		tail.length ? undefined : "dim",
 	);
+
 	if (record.status === "failed") {
 		section("Error", wrapPlainText(record.error ?? "unknown", width - 2), "error");
 	} else {
-		section("Outcome", record.outcome ? wrapPlainText(record.outcome, width - 2) : ["(pending)"]);
+		section("Outcome", record.outcome ? wrapPlainText(record.outcome, width - 2) : ["Still running…"], record.outcome ? undefined : "dim");
 	}
 	return lines;
 }
@@ -265,14 +403,14 @@ export function renderViewer(input: ViewerInput, paint: ViewerPaint): string[] {
 		return [
 			"",
 			paint.fg("accent", cut("No workflow runs this session.", width)),
-			paint.fg("dim", cut("Start one with the workflow tool (or say \"ultracode\"). esc close", width)),
+			paint.fg("dim", cut('Start one with the workflow tool (or say "ultracode"). esc close', width)),
 			"",
 		];
 	}
 	clampViewerState(state, runs);
 	const run = runs[state.runIndex];
-	const tree = buildTree(run.agents);
-	const cursorRecord = run.agents[state.cursor];
+	const phases = buildPhases(run);
+	const phase = phases[state.phaseCursor];
 
 	const out: string[] = [];
 
@@ -281,12 +419,10 @@ export function renderViewer(input: ViewerInput, paint: ViewerPaint): string[] {
 	const stats = [
 		`${doneCount}/${run.agents.length} agents`,
 		formatDuration(run.startedAt, run.finishedAt, input.now),
-		run.status,
+		run.status === "running" ? "" : run.status,
 	]
 		.filter(Boolean)
 		.join(" · ");
-	// Left text + right-aligned annotation, degrading to left-only when the
-	// annotation would squeeze the text below readability.
 	const headerLine = (left: string, leftColor: string, right: string): string => {
 		const leftWidth = width - [...right].length - 2;
 		if (leftWidth < 8) return paint.fg(leftColor, cut(`${left}  ${right}`, width));
@@ -299,59 +435,109 @@ export function renderViewer(input: ViewerInput, paint: ViewerPaint): string[] {
 		out.push(paint.fg("error", cut(`⚠ ${run.errorMessage}`, width)));
 	}
 
-	// Body: tree + detail, side by side or stacked.
+	// Body: two boxed panes, side by side (or stacked when narrow).
 	const footerRows = 1;
 	const bodyHeight = Math.max(6, input.height - out.length - footerRows);
-	const paintTreeRow = (row: TreeRow, selected: boolean, paneWidth: number): string => {
-		if (row.kind === "phase") return paint.fg("dim", cell(`─ ${row.text}`, paneWidth));
-		const mark = row.status ? STATUS_MARK[row.status] : " ";
-		const plain = cell(`${selected ? "❯" : " "} ${mark} ${row.text}`, paneWidth);
-		if (selected) return paint.fg("accent", plain);
-		return row.status === "failed" ? paint.fg("error", plain) : plain;
-	};
+	const atAgents = state.level === "agents" && phase && phase.agents.length > 0;
 
-	if (width >= MIN_TWO_PANE_WIDTH) {
-		const treeWidth = Math.min(32, Math.max(20, Math.floor(width * 0.3)));
-		const detailWidth = width - treeWidth - 3; // " │ " separator
-		const treeLines = paneLines(tree, state, bodyHeight, treeWidth, paintTreeRow);
-		const detail = buildDetail(cursorRecord, detailWidth, input.now);
-		const detailLines = detailPane(detail, state, bodyHeight, detailWidth, paint);
-		for (let i = 0; i < bodyHeight; i++) {
-			const left = treeLines[i] ?? " ".repeat(treeWidth);
-			const right = detailLines[i] ?? "";
-			out.push(`${left} ${paint.fg("dim", "│")} ${right}`);
-		}
+	let leftTitle: string;
+	let leftLines: PaneLine[];
+	let rightTitle: string;
+	let rightLines: PaneLine[];
+	let leftWidthWanted: number;
+
+	if (!atAgents) {
+		leftTitle = "Phases";
+		leftLines = phaseRows(phases, state.phaseCursor, 0); // inner width fixed below
+		rightTitle = phase ? `${phase.title} · ${phase.agents.length} agent${phase.agents.length === 1 ? "" : "s"}` : "agents";
+		rightLines = phase ? agentRows(phase.agents, undefined, 0, input.now) : [];
+		leftWidthWanted = 26;
 	} else {
-		const treeHeight = Math.max(3, Math.min(tree.length, Math.floor(bodyHeight / 2)));
-		const detailHeight = bodyHeight - treeHeight - 1;
-		out.push(...paneLines(tree, state, treeHeight, width, paintTreeRow));
-		out.push(paint.fg("dim", "─".repeat(Math.min(width, 72))));
-		const detail = buildDetail(cursorRecord, width, input.now);
-		out.push(...detailPane(detail, state, Math.max(3, detailHeight), width, paint));
+		leftTitle = `${phase.title} · ${phase.agents.length} agent${phase.agents.length === 1 ? "" : "s"}`;
+		leftLines = agentLabelRows(phase.agents, state.agentCursor);
+		const selected = phase.agents[state.agentCursor];
+		rightTitle = selected?.record.label ?? "agent";
+		rightLines = [];
+		leftWidthWanted = 32;
 	}
 
-	// Footer: key hints, replaced by a transient notice when set.
-	const hints = "↑↓ agent · pgup/pgdn scroll · " + (runs.length > 1 ? "tab run · " : "") + "s save · esc close";
+	if (width >= MIN_TWO_PANE_WIDTH) {
+		const leftWidth = Math.min(leftWidthWanted, Math.max(18, Math.floor(width * 0.25)));
+		const rightWidth = width - leftWidth - 1;
+		const leftInner = leftWidth - 4;
+		const rightInner = rightWidth - 4;
+		const visible = bodyHeight - 2;
+
+		// Rebuild content at the real inner widths.
+		if (!atAgents) {
+			leftLines = scrollWindow(phaseRows(phases, state.phaseCursor, leftInner), state.phaseCursor, visible);
+			rightLines = phase ? agentRows(phase.agents, undefined, rightInner, input.now).slice(0, visible) : [];
+		} else {
+			leftLines = scrollWindow(agentLabelRows(phase.agents, state.agentCursor), state.agentCursor, visible);
+			rightLines = detailWindow(
+				buildDetail(phase.agents[state.agentCursor]?.record, rightInner, input.now, state.promptExpanded),
+				state,
+				visible,
+				rightInner,
+			);
+		}
+		const left = boxPane(leftTitle, leftLines, leftWidth, bodyHeight, paint);
+		const right = boxPane(rightTitle, rightLines, rightWidth, bodyHeight, paint);
+		for (let i = 0; i < bodyHeight; i++) out.push(`${left[i]} ${right[i]}`);
+	} else {
+		// Narrow: stack the two panes.
+		const leftHeight = Math.max(4, Math.min(leftLines.length + 2, Math.floor(bodyHeight / 2)));
+		const rightHeight = bodyHeight - leftHeight;
+		const inner = width - 4;
+		const leftVisible = leftHeight - 2;
+		if (!atAgents) {
+			leftLines = scrollWindow(phaseRows(phases, state.phaseCursor, inner), state.phaseCursor, leftVisible);
+			rightLines = phase ? agentRows(phase.agents, undefined, inner, input.now).slice(0, rightHeight - 2) : [];
+		} else {
+			leftLines = scrollWindow(agentLabelRows(phase.agents, state.agentCursor), state.agentCursor, leftVisible);
+			rightLines = detailWindow(
+				buildDetail(phase.agents[state.agentCursor]?.record, inner, input.now, state.promptExpanded),
+				state,
+				rightHeight - 2,
+				inner,
+			);
+		}
+		out.push(...boxPane(leftTitle, leftLines, width, leftHeight, paint));
+		out.push(...boxPane(rightTitle, rightLines, width, rightHeight, paint));
+	}
+
+	// Footer: per-level key hints, replaced by a transient notice when set.
+	const stopHint = run.status === "running" ? "x stop workflow · " : "";
+	const hints = !atAgents
+		? `↑↓ select · ⏎ open · ${runs.length > 1 ? "tab run · " : ""}${stopHint}s save · esc close`
+		: `↑↓ agent · ⏎ prompt · pgup/pgdn scroll · ${stopHint}s save · esc back`;
 	out.push(paint.fg("dim", cut(state.notice ?? hints, width)));
 	return out;
 }
 
-/** Slice the tree so the cursor's row stays visible; pad to `height` lines. */
-function paneLines(
-	tree: TreeRow[],
-	state: ViewerState,
-	height: number,
-	paneWidth: number,
-	paintRow: (row: TreeRow, selected: boolean, paneWidth: number) => string,
-): string[] {
-	const cursorRow = tree.findIndex((row) => row.agentIndex === state.cursor);
-	let offset = 0;
-	if (cursorRow >= 0 && cursorRow >= height) offset = cursorRow - height + 1;
-	if (tree.length > height) offset = Math.min(offset, tree.length - height);
-	const visible = tree.slice(offset, offset + height);
-	const lines = visible.map((row) => paintRow(row, row.agentIndex === state.cursor, paneWidth));
-	while (lines.length < height) lines.push(" ".repeat(paneWidth));
-	return lines;
+/** Left pane, agents level: mark + label rows with the ❯ cursor. */
+function agentLabelRows(agents: PhaseGroup["agents"], cursor: number): PaneLine[] {
+	return agents.map(({ record }, index) => {
+		const selected = index === cursor;
+		const text = `${selected ? "❯" : " "} ${STATUS_MARK[record.status]} ${record.label}`;
+		if (selected) return { text, style: "accent" as const };
+		return { text, style: record.status === "failed" ? ("error" as const) : undefined };
+	});
+}
+
+/** Apply detailScroll with clamping and a `lines X–Y of N` trailer when cut. */
+function detailWindow(detail: PaneLine[], state: ViewerState, visible: number, innerWidth: number): PaneLine[] {
+	state.detailScroll = Math.max(0, Math.min(state.detailScroll, Math.max(0, detail.length - visible)));
+	const window = detail.slice(state.detailScroll, state.detailScroll + visible);
+	if (detail.length > visible) {
+		const last = Math.min(detail.length, state.detailScroll + visible);
+		if (window.length === visible) window.pop();
+		window.push({
+			text: cut(`lines ${state.detailScroll + 1}–${last} of ${detail.length}`, innerWidth),
+			style: "dim",
+		});
+	}
+	return window;
 }
 
 // ---------------------------------------------------------------------------
@@ -416,26 +602,4 @@ export function renderStatusRows(input: StatusRowsInput, paint: ViewerPaint): st
 		out.push(paint.fg("dim", cut(`  +${input.runs.length - shown.length} more — /workflows`, width)));
 	}
 	return out;
-}
-
-function detailPane(
-	detail: DetailLine[],
-	state: ViewerState,
-	height: number,
-	paneWidth: number,
-	paint: ViewerPaint,
-): string[] {
-	state.detailScroll = Math.max(0, Math.min(state.detailScroll, Math.max(0, detail.length - height)));
-	const visible = detail.slice(state.detailScroll, state.detailScroll + height);
-	const lines = visible.map((line) => {
-		const plain = cut(line.text, paneWidth);
-		if (!line.style) return plain;
-		return line.style === "bold" ? paint.bold(plain) : paint.fg(line.style, plain);
-	});
-	if (detail.length > height) {
-		const last = Math.min(detail.length, state.detailScroll + height);
-		if (lines.length === height) lines.pop();
-		lines.push(paint.fg("dim", cut(`lines ${state.detailScroll + 1}–${last} of ${detail.length}`, paneWidth)));
-	}
-	return lines;
 }

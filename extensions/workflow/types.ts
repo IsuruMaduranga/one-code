@@ -139,8 +139,10 @@ export interface AgentRecord {
 	cost?: number;
 	startedAt?: number;
 	finishedAt?: number;
-	/** Tool calls made, oldest first, capped. */
+	/** Tool calls made, oldest first, capped at ACTIVITY_CAP. */
 	activity: ToolActivity[];
+	/** Total tool calls made, uncapped (activity keeps only the tail). */
+	toolCalls: number;
 	/** Truncated preview of the agent's returned value. */
 	outcome?: string;
 	/** Failure message when status === "failed". */

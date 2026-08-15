@@ -549,21 +549,46 @@ async function openWorkflowViewer(
 			handleInput: (data: string) => {
 				const key = decodeViewerKey(data);
 				if (!key) return;
-				if (key.kind === "close") {
+				const close = () => {
 					clearInterval(ticker);
-					return done(null);
-				}
+					done(null);
+				};
+				if (key.kind === "close") return close();
 				if (key.kind !== "save") {
 					state.notice = undefined;
 					state.confirmOverwrite = false;
 				}
 				switch (key.kind) {
 					case "up":
-					case "down":
-						state.cursor += key.kind === "up" ? -1 : 1;
+					case "down": {
+						const delta = key.kind === "up" ? -1 : 1;
+						if (state.level === "phases") state.phaseCursor += delta;
+						else state.agentCursor += delta;
 						clampViewerState(state, snapshots());
 						state.detailScroll = 0;
+						state.promptExpanded = false;
 						break;
+					}
+					case "enter":
+						// Phases level drills into the phase; agents level toggles the prompt.
+						if (state.level === "phases") {
+							state.level = "agents";
+							state.agentCursor = 0;
+							state.detailScroll = 0;
+							state.promptExpanded = false;
+							clampViewerState(state, snapshots()); // falls back if the phase has no agents
+						} else {
+							state.promptExpanded = !state.promptExpanded;
+						}
+						break;
+					case "back":
+						if (state.level === "agents") {
+							state.level = "phases";
+							state.detailScroll = 0;
+							state.promptExpanded = false;
+							break;
+						}
+						return close();
 					case "pageUp":
 					case "pageDown":
 						// Clamped against the detail's real length at render time.
@@ -572,8 +597,17 @@ async function openWorkflowViewer(
 					case "nextRun": {
 						const count = manager.list().length;
 						state.runIndex = count ? (state.runIndex + 1) % count : 0;
-						state.cursor = 0;
+						state.level = "phases";
+						state.phaseCursor = 0;
+						state.agentCursor = 0;
 						state.detailScroll = 0;
+						state.promptExpanded = false;
+						break;
+					}
+					case "stop": {
+						const run = snapshots()[state.runIndex];
+						const stopped = run && manager.abort(run.runId, "stopped from viewer");
+						state.notice = stopped ? `stopping ${run.runId}…` : "workflow is not running";
 						break;
 					}
 					case "save":
