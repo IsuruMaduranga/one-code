@@ -46,6 +46,42 @@ export function safeThemePaint(theme: unknown): (color: string, text: string) =>
 	};
 }
 
+/** The `bold(text)` counterpart to safeThemePaint, with the same degrade-to-plain guard. */
+export function safeThemeBold(theme: unknown): (text: string) => string {
+	return (text: string) => {
+		const themed = theme as { bold?(t: string): string } | undefined;
+		try {
+			return themed?.bold ? themed.bold(text) : text;
+		} catch {
+			return text;
+		}
+	};
+}
+
+/** Cut plain (unpainted) text to `width` columns by code point, with an ellipsis. */
+export function cutPlainText(text: string, width: number): string {
+	if (width <= 0) return "";
+	const chars = [...text];
+	return chars.length > width ? `${chars.slice(0, Math.max(0, width - 1)).join("")}…` : text;
+}
+
+/** Hard-wrap plain text to `width` columns by code point, preserving blank lines. */
+export function wrapPlainText(text: string, width: number): string[] {
+	const columns = Math.max(1, width);
+	const out: string[] = [];
+	for (const raw of text.replace(/\r\n/g, "\n").split("\n")) {
+		const chars = [...raw];
+		if (chars.length === 0) {
+			out.push("");
+			continue;
+		}
+		for (let i = 0; i < chars.length; i += columns) {
+			out.push(chars.slice(i, i + columns).join(""));
+		}
+	}
+	return out;
+}
+
 /**
  * Cut a painted line to `width` visible columns without splitting ANSI escape
  * sequences, ending with an ellipsis and a reset so truncation cannot leak a

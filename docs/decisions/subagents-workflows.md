@@ -259,3 +259,58 @@ relaying it as a `subagent-message` notification; in children
 knows it can report, while the parent keeps it deferred. Not covered:
 agent↔agent routing by name (the agent-teams design in the project roadmap)
 and `isolation: "remote"`.
+
+## The /workflows viewer (interactive run UI)
+
+*(2026-08-15, unreviewed — written while the user was away; review welcome.)*
+
+`/workflows` with no arguments in TUI mode opens an interactive full-screen
+viewer (Claude Code's workflow UI): phase-grouped agent tree + per-agent
+detail pane (model, tokens, duration, Prompt, Activity = live tool calls,
+Outcome/Error), ↑/↓ navigation, tab run-cycling, `s` save-to-
+`.claude/workflows/`, esc close. Non-TUI keeps the text listing (`custom()`
+is a no-op there); `stop`/`log`/`list` subcommands stay textual.
+
+Choices and reasons:
+
+- **Pure module + thin component** (`viewer.ts` / `openWorkflowViewer` in
+  `index.ts`), the same split plan-mode's approval dialog uses — all layout,
+  key-decoding, and save-decision logic is unit-testable without pi, and the
+  tests enforce the **width invariant** (no rendered line exceeds the given
+  width — pi-tui crashes the whole app otherwise). All cells are cut/padded
+  as plain text *before* painting so ANSI never enters the width math.
+- **Liveness via a 500ms invalidate+repaint ticker, not per-RunHandle
+  subscriptions.** The ticker also picks up runs that *start while the viewer
+  is open* (the manager has no "run added" event), keeps the elapsed clock
+  moving, and the width-memoized render keeps per-frame cost at a map lookup.
+  Rejected: subscribing to each handle's `progress` — sub-second latency
+  isn't worth the subscription lifecycle for a monitoring screen.
+- **Per-agent data is folded at the source** (`AgentRecordStore` on
+  `RunHandle`, fed by `record()`), not scraped from `recentEvents`:
+  `RunProgressEvent` became a **discriminated union** (post-review — the
+  optional-field bag let producers and consumers drift silently), gaining
+  `prompt`/`preview` and an `agentUpdate` variant. `agent-session.ts` forwards
+  each child `tool_execution_start` **structured** (`{name, argsSummary}` via
+  `summarizeArgs`) through an optional `onUpdate` observer threaded via
+  `AgentCallFn`; the `name(args)` join happens in the viewer, next to every
+  other presentation decision. Replay has no tool calls in the journal, so
+  replayed agents show "(replayed — activity not recorded)".
+- **Records key on `(source, callIndex)`, not `callIndex` alone** — a nested
+  `workflow()` child restarts its own callIndex at 0 while forwarding events
+  into the parent's store; keying by index alone silently merged a child agent
+  into the parent agent with the same index (caught by `/code-review`,
+  regression-tested). `runChild` stamps `source: meta.name` on every forwarded
+  event; the `▸ name` phase prefix stays as the visible grouping.
+- **Save is two-step only when destructive**: `s` writes
+  `.claude/workflows/<sanitized-name>.js` immediately when the target is
+  absent or byte-identical; a differing existing file requires a second `s`
+  (transient footer notice explains). Rejected: silent overwrite (clobbers a
+  hand-edited saved workflow) and a modal confirm (heavier than the footer).
+- **The renderer takes a `ViewerPaint` (`{fg, bold}`)**, not a single
+  `paint(color, text)` with a "bold" pseudo-color (the first draft's approach,
+  reversed by `/simplify`: the magic string was a two-file convention the type
+  couldn't enforce). The wiring builds it from `safeThemePaint` +
+  `safeThemeBold` (the bold guard now lives in `lib/tui-render.ts` beside its
+  fg twin). The component also returns `dispose()` clearing its repaint ticker
+  — the only teardown hook that fires when the overlay is dismissed by
+  anything other than the user's own esc.

@@ -10,6 +10,11 @@
  * painting so ANSI escapes never confuse the width accounting.
  */
 
+import { cutPlainText } from "../lib/tui-render.ts";
+
+/** Hard-wrap plain text to `width` columns, preserving blank lines. */
+export { wrapPlainText as wrapPlanText } from "../lib/tui-render.ts";
+
 export const PLAN_CHOICES = ["Approve — manual approvals", "Approve — auto-accept edits", "Keep planning"] as const;
 
 /** What the dialog resolves to; index into PLAN_CHOICES, or null for cancel. */
@@ -57,23 +62,6 @@ export function decodeViewerKey(data: string, page: number): ViewerKey | undefin
 	}
 }
 
-/** Hard-wrap plain text to `width` columns, preserving blank lines. */
-export function wrapPlanText(text: string, width: number): string[] {
-	const columns = Math.max(1, width);
-	const out: string[] = [];
-	for (const raw of text.replace(/\r\n/g, "\n").split("\n")) {
-		const chars = [...raw];
-		if (chars.length === 0) {
-			out.push("");
-			continue;
-		}
-		for (let i = 0; i < chars.length; i += columns) {
-			out.push(chars.slice(i, i + columns).join(""));
-		}
-	}
-	return out;
-}
-
 export function clampOffset(offset: number, total: number, visible: number): number {
 	return Math.max(0, Math.min(offset, Math.max(0, total - visible)));
 }
@@ -91,10 +79,7 @@ export interface PlanViewerView {
 export function renderPlanViewer(view: PlanViewerView, paint: Paint, width: number): string[] {
 	const maxVisible = view.maxVisible ?? 12;
 	// Cut plain text before painting so escapes never enter the width math.
-	const cut = (line: string) => {
-		const chars = [...line];
-		return chars.length > width ? `${chars.slice(0, Math.max(0, width - 1)).join("")}…` : line;
-	};
+	const cut = (line: string) => cutPlainText(line, width);
 	const rule = paint("dim", "─".repeat(Math.max(0, Math.min(width, 72))));
 
 	const out: string[] = [];

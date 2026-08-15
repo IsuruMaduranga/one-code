@@ -24,11 +24,12 @@ import {
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
+import { summarizeArgs } from "../lib/tui-render.ts";
 import { agentDirs, type AgentDefinition, discoverAgents } from "../subagents/agents.ts";
 import { expensiveModelGate, resolveSubagentModel, subagentModelMenu } from "../subagents/model-select.ts";
 import { cleanupWorktree, createWorktree, isGitRepo, type Worktree } from "../subagents/worktree.ts";
 import { permissionGateFactory } from "./permission-gate.ts";
-import type { AgentCallOptions, AgentCallResult, AgentEffort } from "./types.ts";
+import type { AgentCallOptions, AgentCallResult, AgentEffort, AgentRunUpdate } from "./types.ts";
 import { WorkflowScriptError } from "./types.ts";
 
 const MAX_SCHEMA_RETRIES = 2;
@@ -174,7 +175,12 @@ export class AgentRunner {
 		return { model: resolution.model ?? this.options.defaultModel, thinkingLevel: resolution.thinkingLevel };
 	}
 
-	async run(prompt: string, opts: AgentCallOptions, signal: AbortSignal): Promise<AgentCallResult> {
+	async run(
+		prompt: string,
+		opts: AgentCallOptions,
+		signal: AbortSignal,
+		onUpdate?: (update: AgentRunUpdate) => void,
+	): Promise<AgentCallResult> {
 		let agentDef: AgentDefinition | undefined;
 		if (opts.agentType) {
 			agentDef = this.agentCatalog.find((a) => a.name === opts.agentType);
@@ -185,6 +191,8 @@ export class AgentRunner {
 		}
 
 		const modelSpec = this.resolveModel(opts, agentDef?.model);
+		const resolvedModel = modelSpec.model as Model<Api> | undefined;
+		if (resolvedModel?.id) onUpdate?.({ model: resolvedModel.id });
 
 		let worktree: Worktree | undefined;
 		let cwd = this.options.cwd;
@@ -215,6 +223,19 @@ export class AgentRunner {
 
 		const onAbort = () => void session.abort();
 		signal.addEventListener("abort", onAbort, { once: true });
+		// Forward tool calls for the viewer's Activity pane; never let a bad
+		// args shape in the summary kill the agent.
+		const unsubscribe = onUpdate
+			? session.subscribe((event) => {
+					if (event.type !== "tool_execution_start") return;
+					try {
+						const argsSummary = summarizeArgs((event as { args?: unknown }).args);
+						onUpdate({ tool: { name: event.toolName, argsSummary } });
+					} catch {
+						onUpdate({ tool: { name: event.toolName } });
+					}
+				})
+			: undefined;
 		try {
 			await session.prompt(this.buildPrompt(prompt, Boolean(opts.schema)));
 			if (signal.aborted) throw new WorkflowScriptError("aborted");
@@ -245,6 +266,7 @@ export class AgentRunner {
 				worktreePath,
 			};
 		} finally {
+			unsubscribe?.();
 			signal.removeEventListener("abort", onAbort);
 			session.dispose();
 			if (worktree) await cleanupWorktree(this.options.cwd, worktree);

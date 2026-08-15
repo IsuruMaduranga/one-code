@@ -15,17 +15,32 @@
  * system reminder.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { applicableSubagentDefault, loadSubagentDefault } from "../subagents/default-model.ts";
-import { discoverSavedWorkflows, findSavedWorkflow } from "./saved-workflows.ts";
+import { discoverSavedWorkflows, findSavedWorkflow, workflowDirs } from "./saved-workflows.ts";
 import { buildRunReport, WorkflowRunManager } from "./run-manager.ts";
-import { ccToolRenderers, customMessageText, notificationComponent } from "../lib/tui-render.ts";
+import {
+	ccToolRenderers,
+	customMessageText,
+	notificationComponent,
+	safeThemeBold,
+	safeThemePaint,
+	truncateLine,
+} from "../lib/tui-render.ts";
 import { WorkflowScriptError } from "./types.ts";
+import {
+	clampViewerState,
+	decodeViewerKey,
+	initialViewerState,
+	planSave,
+	renderViewer,
+	type ViewerRunSnapshot,
+} from "./viewer.ts";
 import { WorkflowWidget } from "./widget.ts";
 
 /**
@@ -302,14 +317,18 @@ export default function workflowExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("workflows", {
-		description: "List workflow runs and saved workflows; stop or inspect runs",
+		description: "Open the workflow viewer; list, stop, or inspect runs",
 		getArgumentCompletions: (prefix) => {
-			const items = ["stop ", "log "].filter((c) => c.startsWith(prefix));
+			const items = ["stop ", "log ", "list"].filter((c) => c.startsWith(prefix));
 			return items.length ? items.map((c) => ({ value: c, label: c.trim() })) : null;
 		},
 		handler: async (args, ctx) => {
 			lastCtx = ctx;
 			const [action, runId] = args.trim().split(/\s+/);
+			if (!action && ctx.hasUI) {
+				await openWorkflowViewer(ctx, manager);
+				return;
+			}
 			if (action === "stop" && runId) {
 				const stopped = manager.abort(runId, "stopped via /workflows");
 				ctx.ui.notify(stopped ? `Stopping ${runId}…` : `No running workflow ${runId}`, stopped ? "info" : "error");
@@ -360,5 +379,129 @@ export default function workflowExtension(pi: ExtensionAPI) {
 
 	pi.on("session_shutdown", () => {
 		manager.abortAll("session ended");
+	});
+}
+
+/**
+ * The interactive workflow viewer (Claude Code's /workflows screen). All
+ * layout/key logic is pure in viewer.ts; this component owns only mutable
+ * state, the repaint ticker, and the save-to-.claude/workflows fs work.
+ *
+ * Liveness comes from a 500ms ticker (invalidate + requestRender) instead of
+ * per-RunHandle subscriptions — it also picks up runs that start while the
+ * viewer is open, and the memoized render keeps the per-frame cost at a map
+ * lookup (findings §15).
+ */
+async function openWorkflowViewer(ctx: ExtensionContext, manager: WorkflowRunManager): Promise<void> {
+	await ctx.ui.custom<null>((tui, theme, _keybindings, done) => {
+		const paint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme) };
+
+		// Newest run first, so the viewer opens on the latest.
+		const snapshots = (): ViewerRunSnapshot[] =>
+			manager
+				.list()
+				.map((handle) => ({
+					runId: handle.runId,
+					name: handle.meta.name,
+					description: handle.meta.description,
+					status: handle.status,
+					startedAt: handle.startedAt,
+					finishedAt: handle.finishedAt,
+					errorMessage: handle.errorMessage,
+					agents: handle.agents.list(),
+				}))
+				.reverse();
+
+		const state = initialViewerState();
+		let cache: { width: number; lines: string[] } | undefined;
+		const repaint = () => {
+			cache = undefined;
+			tui.requestRender();
+		};
+		const ticker = setInterval(repaint, 500);
+		ticker.unref?.();
+
+		const save = (runs: ViewerRunSnapshot[]) => {
+			const run = runs[state.runIndex];
+			const handle = run && manager.get(run.runId);
+			if (!handle) return;
+			try {
+				const source = readFileSync(handle.scriptPath, "utf8");
+				const dir = workflowDirs(ctx.cwd, os.homedir()).project;
+				const safeName = run.name.replace(/[^A-Za-z0-9._-]/g, "-");
+				const target = join(dir, `${safeName}.js`);
+				const exists = existsSync(target);
+				const sameContent = exists && readFileSync(target, "utf8") === source;
+				const plan = planSave({ name: safeName, exists, sameContent, confirmed: state.confirmOverwrite });
+				if (plan.action === "write") {
+					mkdirSync(dir, { recursive: true });
+					writeFileSync(target, source, "utf8");
+					state.confirmOverwrite = false;
+				} else if (plan.action === "confirm") {
+					state.confirmOverwrite = true;
+				}
+				state.notice = plan.notice;
+			} catch (error) {
+				state.notice = `save failed: ${(error as Error).message}`;
+				state.confirmOverwrite = false;
+			}
+		};
+
+		return {
+			render: (width: number) => {
+				if (cache?.width === width) return cache.lines;
+				const height = Math.max(12, Math.min(tui.terminal.rows - 6, 40));
+				const lines = renderViewer({ runs: snapshots(), state, width, height, now: Date.now() }, paint).map(
+					(line) => truncateLine(line, width),
+				);
+				cache = { width, lines };
+				return lines;
+			},
+			handleInput: (data: string) => {
+				const key = decodeViewerKey(data);
+				if (!key) return;
+				if (key.kind === "close") {
+					clearInterval(ticker);
+					return done(null);
+				}
+				if (key.kind !== "save") {
+					state.notice = undefined;
+					state.confirmOverwrite = false;
+				}
+				switch (key.kind) {
+					case "up":
+					case "down":
+						state.cursor += key.kind === "up" ? -1 : 1;
+						clampViewerState(state, snapshots());
+						state.detailScroll = 0;
+						break;
+					case "pageUp":
+					case "pageDown":
+						// Clamped against the detail's real length at render time.
+						state.detailScroll = Math.max(0, state.detailScroll + (key.kind === "pageUp" ? -8 : 8));
+						break;
+					case "nextRun": {
+						const count = manager.list().length;
+						state.runIndex = count ? (state.runIndex + 1) % count : 0;
+						state.cursor = 0;
+						state.detailScroll = 0;
+						break;
+					}
+					case "save":
+						save(snapshots());
+						break;
+				}
+				repaint();
+			},
+			invalidate: () => {
+				cache = undefined;
+			},
+			// Covers every dismissal path that isn't the user pressing esc while
+			// focused (session end, another overlay taking over) — without it the
+			// ticker outlives the component.
+			dispose: () => {
+				clearInterval(ticker);
+			},
+		};
 	});
 }

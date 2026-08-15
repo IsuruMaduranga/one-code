@@ -18,6 +18,7 @@ import { join } from "node:path";
 import { AgentRunner } from "./agent-session.ts";
 import { createScriptGlobals, MAX_CONCURRENCY, MAX_AGENTS_PER_RUN, type ScriptRunState } from "./globals.ts";
 import { appendJournal, readJournal, ReplayCursor } from "./journal.ts";
+import { AgentRecordStore, previewValue } from "./records.ts";
 import { findSavedWorkflow } from "./saved-workflows.ts";
 import { parseWorkflowScript } from "./script-source.ts";
 import { runWorkflowScript } from "./vm-runtime.ts";
@@ -47,6 +48,8 @@ export class RunHandle extends EventEmitter {
 	readonly startedAt = Date.now();
 	finishedAt?: number;
 	readonly recentEvents: string[] = [];
+	/** Per-agent records folded from the event stream (the viewer's data). */
+	readonly agents = new AgentRecordStore();
 	state?: ScriptRunState;
 	/** Settles when the run reaches a terminal status (never rejects). */
 	finished!: Promise<RunHandle>;
@@ -76,6 +79,7 @@ export class RunHandle extends EventEmitter {
 	}
 
 	record(event: RunProgressEvent): void {
+		this.agents.apply(event);
 		const line = formatEvent(event);
 		if (line) {
 			this.recentEvents.push(line);
@@ -201,7 +205,7 @@ export class WorkflowRunManager {
 			});
 
 			const { globals, state } = createScriptGlobals({
-				agentCall: (prompt, opts) => runner!.run(prompt, opts, handle.signal),
+				agentCall: (prompt, opts, onUpdate) => runner!.run(prompt, opts, handle.signal, onUpdate),
 				args: options.args,
 				budgetTotal: options.tokenBudget,
 				concurrency: defaultConcurrency(),
@@ -260,13 +264,20 @@ export class WorkflowRunManager {
 		// Child calls are not journaled in v1: resume replays the parent's own
 		// agent() prefix only. Progress is forwarded under a "▸ name" phase.
 		const { globals } = createScriptGlobals({
-			agentCall: (prompt, opts) => runner.run(prompt, opts, parent.signal),
+			agentCall: (prompt, opts, onUpdate) => runner.run(prompt, opts, parent.signal, onUpdate),
 			args: childArgs,
 			budgetTotal: remainingBudget,
 			concurrency: defaultConcurrency(),
 			maxAgents: remainingAgents,
 			signal: parent.signal,
-			onEvent: (event) => parent.record({ ...event, phase: `▸ ${meta.name}${event.phase ? ` · ${event.phase}` : ""}` }),
+			onEvent: (event) =>
+				parent.record({
+					...event,
+					// source keeps child records distinct (a child restarts callIndex at
+					// 0); the phase prefix is the visible grouping in widget and viewer.
+					source: meta.name,
+					phase: `▸ ${meta.name}${event.phase ? ` · ${event.phase}` : ""}`,
+				}),
 		});
 		return runWorkflowScript(body, globals, `${label}.js`);
 	}
@@ -285,19 +296,10 @@ export function buildRunReport(handle: RunHandle): string {
 		: `${duration}s`;
 
 	if (handle.status === "completed") {
-		let resultText: string;
-		if (typeof handle.result === "string") {
-			resultText = handle.result;
-		} else if (handle.result === undefined) {
-			resultText = "(script returned no value)";
-		} else {
-			try {
-				resultText = JSON.stringify(handle.result, null, 2);
-			} catch {
-				resultText = String(handle.result);
-			}
-		}
-		if (resultText.length > RESULT_CAP) resultText = `${resultText.slice(0, RESULT_CAP)}\n… (truncated)`;
+		const resultText =
+			handle.result === undefined
+				? "(script returned no value)"
+				: previewValue(handle.result, RESULT_CAP, "\n… (truncated)");
 		return `Workflow **${handle.meta.name}** (${handle.runId}) completed — ${statsLine}.\n\nResult:\n${resultText}`;
 	}
 

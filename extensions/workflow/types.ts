@@ -51,8 +51,26 @@ export interface AgentCallResult {
 	worktreePath?: string;
 }
 
+/** One tool call an agent made, kept structured so the viewer owns the formatting. */
+export interface ToolActivity {
+	name: string;
+	/** One-line argument summary (summarizeArgs output); absent when unavailable. */
+	argsSummary?: string;
+}
+
+/** Mid-run facts an executing agent reports back (resolved model, tool calls). */
+export interface AgentRunUpdate {
+	/** Resolved model id, known once per run. */
+	model?: string;
+	tool?: ToolActivity;
+}
+
 /** The one injection point globals.ts needs: something that runs a real agent. */
-export type AgentCallFn = (prompt: string, opts: AgentCallOptions) => Promise<AgentCallResult>;
+export type AgentCallFn = (
+	prompt: string,
+	opts: AgentCallOptions,
+	onUpdate?: (update: AgentRunUpdate) => void,
+) => Promise<AgentCallResult>;
 
 /** One line of journal.jsonl. */
 export interface JournalEntry {
@@ -71,16 +89,62 @@ export interface BudgetSnapshot {
 
 export type RunStatus = "running" | "completed" | "failed" | "aborted";
 
-/** Progress events a run emits (consumed by the widget, /workflows, onUpdate). */
-export interface RunProgressEvent {
-	type: "log" | "phase" | "agentStart" | "agentEnd";
-	text?: string;
+/** Fields shared by every per-agent progress event. */
+export interface AgentEventBase {
+	callIndex: number;
+	label: string;
 	phase?: string;
-	label?: string;
-	callIndex?: number;
+}
+
+/**
+ * Progress events a run emits (consumed by the widget, /workflows, onUpdate).
+ * A discriminated union so producers (globals.ts) and consumers (records.ts,
+ * run-manager's formatEvent) agree on which fields each event carries.
+ *
+ * `source` marks nested-workflow provenance (the child workflow's name,
+ * stamped by run-manager's runChild). A child restarts callIndex at 0, so
+ * records must key on (source, callIndex), never callIndex alone.
+ */
+export type RunProgressEvent = (
+	| { type: "log"; text: string; phase?: string }
+	| { type: "phase"; phase: string }
+	| ({ type: "agentStart"; prompt: string } & AgentEventBase)
+	/** Mid-run update; a bare one may lack the label (records tolerates that). */
+	| ({ type: "agentUpdate"; callIndex: number; label?: string; phase?: string } & AgentRunUpdate)
+	| ({
+			type: "agentEnd";
+			tokens?: AgentTokens;
+			cost?: number;
+			replayed?: boolean;
+			/** Replayed ends carry the prompt (there was no agentStart). */
+			prompt?: string;
+			/** Truncated preview of the produced value. */
+			preview?: string;
+			/** Failure message; presence means the agent failed. */
+			text?: string;
+	  } & AgentEventBase)
+) & { source?: string };
+
+/** Per-agent state folded from RunProgressEvents (viewer's detail source). */
+export interface AgentRecord {
+	callIndex: number;
+	/** Nested workflow() provenance: the child workflow's name, if any. */
+	source?: string;
+	label: string;
+	phase?: string;
+	prompt?: string;
+	model?: string;
+	status: "running" | "done" | "failed" | "replayed";
 	tokens?: AgentTokens;
 	cost?: number;
-	replayed?: boolean;
+	startedAt?: number;
+	finishedAt?: number;
+	/** Tool calls made, oldest first, capped. */
+	activity: ToolActivity[];
+	/** Truncated preview of the agent's returned value. */
+	outcome?: string;
+	/** Failure message when status === "failed". */
+	error?: string;
 }
 
 /** A saved workflow discovered in .claude/workflows/ or ~/.claude/workflows/. */

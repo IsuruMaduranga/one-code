@@ -16,7 +16,15 @@
  */
 
 import { hashAgentCall } from "./journal.ts";
-import type { AgentCallFn, AgentCallOptions, BudgetSnapshot, JournalEntry, RunProgressEvent } from "./types.ts";
+import { previewValue } from "./records.ts";
+import type {
+	AgentCallFn,
+	AgentCallOptions,
+	AgentRunUpdate,
+	BudgetSnapshot,
+	JournalEntry,
+	RunProgressEvent,
+} from "./types.ts";
 import { WorkflowScriptError } from "./types.ts";
 import type { ReplayCursor } from "./journal.ts";
 
@@ -127,19 +135,38 @@ export function createScriptGlobals(options: ScriptGlobalsOptions): { globals: S
 		if (replayed !== undefined) {
 			outputTokens += replayed.tokens?.output ?? 0;
 			cost += replayed.cost ?? 0;
-			options.onEvent({ type: "agentEnd", callIndex, label, phase, tokens: replayed.tokens, replayed: true });
+			options.onEvent({
+				type: "agentEnd",
+				callIndex,
+				label,
+				phase,
+				tokens: replayed.tokens,
+				replayed: true,
+				prompt,
+				preview: previewValue(replayed.value),
+			});
 			return replayed.value;
 		}
 
 		return limiter(async () => {
 			throwIfAborted();
-			options.onEvent({ type: "agentStart", callIndex, label, phase });
+			options.onEvent({ type: "agentStart", callIndex, label, phase, prompt });
 			try {
-				const result = await options.agentCall(prompt, opts);
+				const onUpdate = (update: AgentRunUpdate) =>
+					options.onEvent({ type: "agentUpdate", callIndex, label, phase, ...update });
+				const result = await options.agentCall(prompt, opts, onUpdate);
 				outputTokens += result.tokens.output;
 				cost += result.cost;
 				options.onJournal?.({ callIndex, hash, result, timestamp: now() });
-				options.onEvent({ type: "agentEnd", callIndex, label, phase, tokens: result.tokens, cost: result.cost });
+				options.onEvent({
+					type: "agentEnd",
+					callIndex,
+					label,
+					phase,
+					tokens: result.tokens,
+					cost: result.cost,
+					preview: previewValue(result.value),
+				});
 				return result.value;
 			} catch (error) {
 				throwIfAborted();
