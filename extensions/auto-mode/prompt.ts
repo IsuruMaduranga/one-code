@@ -15,6 +15,7 @@ import {
 	buildRuleset,
 	claudeMdFraming,
 	renderSessionContext,
+	type RuleExtras,
 	STAGE1_FINAL,
 	STAGE2_FINAL,
 	STAGE2_INTENT_ADDENDUM,
@@ -42,6 +43,8 @@ export interface ClassifyRequest {
 	username: string;
 	/** Environment slot lines (AutoModeConfig.environment) spliced into the ruleset. */
 	environment: string[];
+	/** User rule extras (AutoModeConfig hard_deny/soft_deny/allow) appended at CC's injection points. */
+	ruleExtras?: RuleExtras;
 	/** Native tool name of the action under review — for logging/debug only. */
 	toolName: string;
 }
@@ -67,7 +70,7 @@ export interface ClassifyVerdict {
  * instruction is appended per stage by the caller (stage1User / stage2User).
  */
 export function buildPayload(request: ClassifyRequest): { system: string; userPrefix: string; index: RuleIndex } {
-	const ruleset = buildRuleset(request.environment);
+	const ruleset = buildRuleset(request.environment, request.ruleExtras);
 	const system = ruleset + renderSessionContext(request.username);
 	const framing = claudeMdFraming(request.claudeMd);
 	const transcript = renderTranscript(request.transcript);
@@ -186,6 +189,6 @@ export function parseStage2(text: string, index: RuleIndex, userMessages: string
 }
 
 /** Convenience for callers that hold the ruleset text rather than a prebuilt index. */
-export function indexFor(environment: string[]): RuleIndex {
-	return buildCategoryIndex(buildRuleset(environment));
+export function indexFor(environment: string[], extras?: RuleExtras): RuleIndex {
+	return buildCategoryIndex(buildRuleset(environment, extras));
 }

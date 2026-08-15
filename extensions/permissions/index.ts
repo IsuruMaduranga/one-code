@@ -27,8 +27,12 @@ import {
 	autoModeSettingsPaths,
 	loadAutoModeConfig,
 	loadAutoModeConfigWithDiagnostics,
+	persistAutoModeSetup,
 	persistClassifierModel,
+	removeUserPermissionAllow,
 } from "../auto-mode/config.ts";
+import { auditPermissionAllow, renderProposal, settingsPatch } from "../auto-mode/setup.ts";
+import { draftSetup, gatherFacts } from "../auto-mode/setup-run.ts";
 import { modelPickerComponent, type PickerEntry, pickerSpec, toPickerEntries } from "../auto-mode/model-picker.ts";
 import { DEFAULT_ENVIRONMENT } from "../auto-mode/defaults.ts";
 import type { TranscriptEntry } from "../auto-mode/transcript.ts";
@@ -340,6 +344,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				claudeMd: projectInstructions,
 				username: classifierUsername,
 				environment: autoConfig.environment,
+				// AutoModeConfig is structurally a RuleExtras (hardDeny/softDeny/allow).
+				ruleExtras: autoConfig,
 			},
 			{
 				registry: ctx.modelRegistry,
@@ -736,6 +742,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				claudeMd: projectInstructions,
 				username: classifierUsername,
 				environment: autoConfig.environment,
+				// AutoModeConfig is structurally a RuleExtras (hardDeny/softDeny/allow).
+				ruleExtras: autoConfig,
 			},
 			{
 				registry: ctx.modelRegistry,
@@ -874,10 +882,101 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		if (chosen) await applyClassifierChoice(pickerSpec(chosen), ctx);
 	};
 
+	/**
+	 * `/auto-mode setup` — Claude Code's setup-wizard flow: ask how this
+	 * environment is used, gather facts (git/gh/CLAUDE.md, opt-in shell
+	 * history), have a capable model draft the Environment slots and rule
+	 * extras, review, persist to user settings, then audit permissions.allow
+	 * for rules that skip the classifier entirely.
+	 */
+	const handleSetupSubcommand = async (ctx: ExtensionContext): Promise<void> => {
+		if (!ctx.hasUI) {
+			ctx.ui.notify("/auto-mode setup is interactive — run it in a live session.", "warning");
+			return;
+		}
+		const usage = await ctx.ui.select("How do you use One Code in this environment?", [
+			"Software development in this repo",
+			"Mixed — coding and general tasks",
+			"Mostly questions and analysis",
+		]);
+		if (!usage) return;
+		const history = await ctx.ui.select("Also scan recent shell history? (stays local except the drafting call; secrets are redacted)", [
+			"Yes",
+			"No",
+		]);
+		if (!history) return;
+
+		ctx.ui.notify("Gathering environment facts (git, gh, CLAUDE.md)…", "info");
+		const facts = await gatherFacts({
+			cwd: ctx.cwd,
+			home: os.homedir(),
+			username: classifierUsername,
+			usage,
+			includeShellHistory: history === "Yes",
+		});
+		ctx.ui.notify("Drafting the auto-mode setup — this can take a minute…", "info");
+		let draft: Awaited<ReturnType<typeof draftSetup>>;
+		try {
+			draft = await draftSetup(facts, {
+				registry: ctx.modelRegistry,
+				sessionModel: ctx.model,
+				config: autoConfig ?? loadAutoModeConfig(os.homedir()),
+				defaultEnvironment: DEFAULT_ENVIRONMENT,
+				signal: ctx.signal,
+			});
+		} catch (error) {
+			ctx.ui.notify(`Auto-mode setup failed: ${(error as Error).message}. Nothing was written.`, "warning");
+			return;
+		}
+
+		ctx.ui.notify(`Proposed auto-mode setup\n\n${renderProposal(draft)}`, "info");
+		const decision = await ctx.ui.select("Save this auto-mode setup to ~/.claude/settings.json?", [
+			"Looks good — save it",
+			"Discard",
+		]);
+		if (decision === "Looks good — save it") {
+			try {
+				persistAutoModeSetup(settingsPatch(draft), os.homedir());
+			} catch (error) {
+				ctx.ui.notify(`Could not write user settings: ${(error as Error).message}`, "warning");
+				return;
+			}
+			autoConfig = loadAutoModeConfig(os.homedir());
+			ctx.ui.notify("Saved. /auto-mode config shows the effective setup.", "info");
+		} else {
+			ctx.ui.notify("Discarded — nothing was written.", "info");
+		}
+
+		// CC's "rules that skip checks": broad permissions.allow entries bypass the
+		// classifier whether or not the setup above was saved, so the audit runs
+		// either way.
+		const flagged = auditPermissionAllow(facts.permissionsAllow);
+		if (flagged.length === 0) return;
+		ctx.ui.notify(
+			"These permissions.allow entries in your user settings are broad enough that matching commands never reach auto mode's checks:\n" +
+				flagged.map((entry) => `  · ${entry.rule} — ${entry.why}`).join("\n") +
+				"\nRemoved entries can be restored by re-adding them verbatim.",
+			"warning",
+		);
+		const act = await ctx.ui.select("Remove them from user settings?", ["Remove them all", "Leave them"]);
+		if (act === "Remove them all") {
+			try {
+				const removed = removeUserPermissionAllow(
+					flagged.map((entry) => entry.rule),
+					os.homedir(),
+				);
+				ctx.ui.notify(`Removed ${removed} allow ${removed === 1 ? "entry" : "entries"} from user settings.`, "info");
+			} catch (error) {
+				ctx.ui.notify(`Could not update user settings: ${(error as Error).message}`, "warning");
+			}
+		}
+	};
+
 	pi.registerCommand("auto-mode", {
-		description: "Auto-mode classifier: /auto-mode [defaults|config|model [provider/model-id|clear]]",
+		description: "Auto-mode classifier: /auto-mode [setup|defaults|config|model [provider/model-id|clear]]",
 		getArgumentCompletions: () =>
 			[
+				{ value: "setup", label: "analyze this environment and draft the config" },
 				{ value: "config", label: "effective environment" },
 				{ value: "defaults", label: "built-in environment" },
 				{ value: "model", label: "choose the classifier model" },
@@ -888,31 +987,51 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				await handleModelSubcommand(rest.join(" ").trim(), ctx);
 				return;
 			}
+			if (sub === "setup") {
+				await handleSetupSubcommand(ctx);
+				return;
+			}
 			const which = sub ?? "config";
 			if (which !== "defaults" && which !== "config") {
 				ctx.ui.notify(
-					`Unknown subcommand "${which}". Use: /auto-mode defaults | config | model [provider/model-id|clear]`,
+					`Unknown subcommand "${which}". Use: /auto-mode setup | defaults | config | model [provider/model-id|clear]`,
 					"warning",
 				);
 				return;
 			}
 			// "defaults" prints the built-in Environment; "config" prints what the
 			// classifier actually uses, with $defaults already spliced in. The rule
-			// set itself is Claude Code's fixed monolith and is not shown here — the
-			// only rule customization is the Environment. The config view re-reads
-			// disk so it shows the file as it is now, and refreshes the cached copy.
+			// set's prose is Claude Code's fixed monolith and is not shown here — the
+			// customization surface is the Environment plus the append-only
+			// hard_deny/soft_deny/allow rule extras (the same schema Claude Code's
+			// /auto-mode-setup writes; those settings work here unchanged). The
+			// config view re-reads disk so it shows the file as it is now, and
+			// refreshes the cached copy.
 			const loaded = which === "config" ? loadAutoModeConfigWithDiagnostics(os.homedir()) : undefined;
 			if (loaded) autoConfig = loaded.config;
 			const shown = loaded ? loaded.config : { environment: DEFAULT_ENVIRONMENT };
 			const section = (title: string, entries: string[]) =>
 				`${title} (${entries.length}):\n${entries.map((entry) => `  - ${entry}`).join("\n")}`;
+			const ruleSections =
+				loaded && "hardDeny" in shown
+					? (
+							[
+								["extra hard_deny rules", shown.hardDeny],
+								["extra soft_deny rules", shown.softDeny],
+								["extra allow rules", shown.allow],
+							] as const
+						)
+							.filter(([, entries]) => entries.length > 0)
+							.map(([title, entries]) => section(title, entries))
+					: [];
 			ctx.ui.notify(
 				[
 					which === "config"
 						? `read from: ${autoModeSettingsPaths(os.homedir()).join(", ")}\n(project settings are deliberately not read — a repo could otherwise grant itself permissions)`
 						: 'built-in environment; add "$defaults" to autoMode.environment in settings to keep it while adding your own',
-					"The ruleset is Claude Code's fixed classifier ruleset (not shown); customize via the environment below.",
+					"The built-in ruleset is Claude Code's fixed classifier ruleset (not shown); customize via the environment and the append-only hard_deny/soft_deny/allow extras.",
 					section("environment", shown.environment),
+					...ruleSections,
 					...(which === "config" && "classifyAllShell" in shown
 						? [
 								`classifyAllShell: ${shown.classifyAllShell}`,

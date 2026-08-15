@@ -26,7 +26,7 @@
  * match" is arbitrary. Cost is the one signal every provider carries.
  */
 
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
 import {
 	findConfigured,
 	findRoleProfileModel,
@@ -175,4 +175,22 @@ export function describeCandidate(candidate: Candidate): string {
 			return `${name} (this session's model — no vetted smaller model within ${where})`;
 		}
 	}
+}
+
+/** Concatenated text blocks of a one-shot reply (classifier verdicts, setup drafts). */
+export function replyText(reply: AssistantMessage): string {
+	return reply.content
+		.filter((block): block is { type: "text"; text: string } => block.type === "text")
+		.map((block) => block.text)
+		.join("");
+}
+
+/**
+ * Some pi builds resolve a per-provider baseUrl alongside the API key; it is
+ * not in every published version of the auth type, so it is read defensively
+ * and, when present, carried onto the model for the call.
+ */
+export function withAuthBaseUrl(model: Model<Api>, auth: unknown): Model<Api> {
+	const baseUrl = (auth as { baseUrl?: string }).baseUrl;
+	return baseUrl ? ({ ...model, baseUrl } as Model<Api>) : model;
 }

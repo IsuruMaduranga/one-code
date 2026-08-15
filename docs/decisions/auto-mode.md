@@ -632,3 +632,72 @@ part, that **read-only operations do not require the classifier and can still be
 used** (true here: `read`/`grep`/`find`/`ls` and read-only bash are auto-allowed
 before the classify branch). It still refuses to let the model route around the
 gate and points at `/auto-mode model` for a faster classifier.
+
+## The rule lists return — they were CC's schema all along (2026-08-15)
+
+Claude Code 2.1.233 made auto mode its **default permission mode** and shipped
+an `/auto-mode-setup` wizard that writes an `autoMode` object to user settings —
+`environment`, `allow`, `soft_deny` lists with a `$defaults` sentinel: the exact
+schema this package retired three days earlier on the premise "Claude Code never
+exposed rule-list editing". The way Claude Code applies that config:
+`environment` **replaces** the ruleset's `## Environment` slot lines (entries
+are prefix-less; the prompt renders the `- ` bullet); rule extras **append** as
+the last bullets of their matching list (hard before `## SOFT BLOCK`, soft
+before `## ALLOW`, allow before the closing `</cc_automode_permissions>` tag);
+scope phrases like "in ~/ml/pincer-agent" are classifier-interpreted text,
+present from every cwd. We adopted the same schema and the same injection
+points, with two guarantees made explicit:
+
+- **Append-only by construction.** No code path removes or reorders a built-in
+  rule; `$defaults` in a rule list is stripped, not expanded (the built-ins are
+  already in the ruleset and always apply). Omitting the token from a rule list
+  only earns a diagnostic saying so. For `environment` — where omission really
+  does mean replacement — the warning fires only when built-in *slot names*
+  actually go missing: a full slot restatement is the wizard's normal output
+  (Claude Code's too) and is not a "settings problem".
+- **Custom rules are grounded like built-ins.** `buildCategoryIndex` scans the
+  spliced ruleset, so appended rules become stage-2 `<category>` candidates by
+  the same mechanism; every rule line (built-in or extra) is additionally keyed
+  by its full text, since custom rules have no short `Name:` head. Extra
+  `allow` entries are never block categories.
+
+Testing settled the scoping question: Claude Code reads `autoMode` from **user
+settings only** — rules planted in a test project's `.claude/settings.json` and
+`.claude/settings.local.json` never took effect — so our never-from-project
+rule is parity, not a divergence. Because our loader already read
+`~/.claude/settings.json`, a Claude Code `/auto-mode-setup` result works in One
+Code with no import step, and our own wizard writes the same file (the
+precedent `persistClassifierModel` set): read-through, no copy to go stale.
+
+**The wizard** (`/auto-mode setup`, `setup.ts` pure + `setup-run.ts` impure +
+UI in `permissions/index.ts`) mirrors Claude Code's flow: usage question,
+opt-in shell-history scan (secrets redacted before anything leaves the
+machine), git/gh/CLAUDE.md gathering with every failed probe named in
+`gatherNotes`, drafting under an explicit evidence discipline (uncorroborated
+facts keep their conservative defaults; unverified provenance may tighten,
+never authorize), review, persist. Drafting runs on the **session model first**
+(capability, not containment — it is an explicit user command, unlike the
+per-call classifier), falling back down the classifier chain. A draft is
+rejected outright if it drops built-in environment slots or is otherwise
+malformed — nothing half-parsed persists. The audit half ("rules that skip
+checks") reuses the gate's own `isBroadExecutionRule`, so the audit can never
+flag differently than the gate behaves; writing it exposed that quote-wrapped
+inline-code rules (`Bash(python3 -c '*)` — present in real settings) slipped
+past that predicate at decision time, now fixed (the widened match only sends
+more calls to the classifier, the safe direction). Deliberate v1 deviations
+from Claude Code's wizard: no sibling-repos/recent-sessions scan (named in the
+proposal's Notes), audit removal is all-or-leave, and drafting uses the
+session's own provider.
+
+**Verification.** The embedded ruleset was regenerated to match Claude Code
+2.1.233 (new `Third-Party Attack` HARD rule, `remote-devices` Chrome-MCP
+prefixes, restructured default Environment; both stage instructions, Session
+Context, framing, and transcript format unchanged from 2.1.222), with
+byte-stability locked by tests on the reference machine — both the defaults
+and, separately, the injection points: splicing a real `/auto-mode-setup`
+settings object must reproduce the ruleset such a session emits, byte for
+byte. Live-verified from the working tree both before and after the
+regeneration (the emitted payload carries the user config at the documented
+positions; the gate allows and executes), and the wizard end-to-end over RPC
+(`test/e2e/rpc-setup-test.mjs`; evidence discipline held on a remote-less
+scratch repo, Discard wrote nothing). 953 unit tests green.

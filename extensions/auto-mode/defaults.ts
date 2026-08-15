@@ -11,3 +11,12 @@
  */
 
 export { DEFAULT_ENVIRONMENT } from "./classifier-prompt.ts";
+
+/**
+ * The `**Name**:` head of an Environment slot line, or undefined for header
+ * ("### Org-wide") and prose entries. Used to tell a full slot replacement
+ * (the wizard's normal output) from a partial one that silently drops slots.
+ */
+export function slotName(line: string): string | undefined {
+	return line.match(/^\*\*(.+?)\*\*:/)?.[1];
+}

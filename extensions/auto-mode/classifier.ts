@@ -34,6 +34,8 @@ import {
 	classifierCandidates,
 	describeCandidate,
 	isModelUnavailableError,
+	replyText,
+	withAuthBaseUrl,
 } from "./model-select.ts";
 
 /** A slow classifier stalls every tool call, so the wait is capped per stage. */
@@ -130,13 +132,6 @@ function notifyOnce(deps: ClassifierDeps, key: string, message: string, level: "
 	deps.onNotice?.(message, level);
 }
 
-function replyText(reply: AssistantMessage): string {
-	return reply.content
-		.filter((block): block is { type: "text"; text: string } => block.type === "text")
-		.map((block) => block.text)
-		.join("");
-}
-
 /**
  * Ask the classifier about one tool call (or, with `reviewOnly`, one finished
  * subagent run). See the module comment for the two-stage flow.
@@ -200,10 +195,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 			lastError = auth.error;
 			continue;
 		}
-		// Some pi builds resolve a per-provider baseUrl alongside the key; it is not
-		// in every published version of the auth type, so it is read defensively.
-		const baseUrl = (auth as { baseUrl?: string }).baseUrl;
-		const resolvedModel = baseUrl ? ({ ...model, baseUrl } as Model<Api>) : model;
+		const resolvedModel = withAuthBaseUrl(model, auth);
 
 		// One provider call. `reasoning`/`temperature` are deliberately omitted: pi
 		// turns thinking off entirely when `reasoning` is absent (what a classifier

@@ -350,10 +350,12 @@ export function isBroadExecutionRule(rule: PermissionRule): boolean {
 	// The runner's own escape hatch takes arbitrary code: `npm run *`, `npx *`.
 	if (/^(run|exec|x)[:\s]*\*+$/.test(rest)) return true;
 	// Interpreter inline-code flags take arbitrary code: `python -c *`, `node -e *`,
-	// `sh -c *`, `bash -c *`, `ruby -e *`. Without this, such a rule granted a
-	// standing bypass of the classifier (over-flagging a runner's `-c` here only
-	// costs a classifier call, which is the safe direction).
-	if (/^-(c|e)[:\s=]*\*+$/.test(rest)) return true;
+	// `sh -c *`, `bash -c *`, `ruby -e *`. Quote-wrapped spellings count too —
+	// `python3 -c '*` / `-c ' *` (as real settings write them) hand over exactly
+	// the same arbitrary code slot. Without this, such a rule granted a standing
+	// bypass of the classifier (over-flagging a runner's `-c` here only costs a
+	// classifier call, which is the safe direction).
+	if (/^-(c|e)[\s:='"]*\*+['"]*$/.test(rest)) return true;
 	// `npm test:*` names the script, so it stays narrow.
 	return false;
 }

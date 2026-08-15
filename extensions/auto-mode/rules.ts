@@ -71,29 +71,39 @@ function sliceSection(text: string, from: string, to: string): string {
 	return text.slice(start + from.length, end < 0 ? text.length : end);
 }
 
-function collectNames(section: string, tier: BlockTier, out: IndexedRule[], seen: Set<string>): void {
+function collectRules(section: string, tier: BlockTier, out: IndexedRule[], byName: Map<string, IndexedRule>): void {
 	for (const line of section.split("\n")) {
 		const name = ruleNameFromLine(line);
 		if (!name) continue;
-		const key = normalizeName(name);
-		if (seen.has(key)) continue; // a name appearing in two sections keeps its first (HARD) tier
-		seen.add(key);
-		out.push({ name, tier });
+		const nameKey = normalizeName(name);
+		if (byName.has(nameKey)) continue; // a name appearing in two sections keeps its first (HARD) tier
+		const rule: IndexedRule = { name, tier };
+		out.push(rule);
+		byName.set(nameKey, rule);
+		// Also key the FULL line text (when it differs), so a verdict quoting the
+		// whole rule line still grounds. Built-in and user-appended lines get this
+		// uniformly — user extras especially need it, since they have no short
+		// `Name:` head and may contain `*`s that the derived name strips.
+		const fullKey = normalizeName(line.slice(2));
+		if (fullKey && fullKey !== nameKey && !byName.has(fullKey)) byName.set(fullKey, rule);
 	}
 }
 
 /**
- * Parse the block-rule names out of the embedded ruleset. HARD BLOCK names win a
- * tie over SOFT (a HARD rule must never be downgraded by a same-named soft one).
+ * Parse the block-rule names out of the embedded ruleset (user rule extras
+ * included — buildRuleset has already appended them into these sections, so
+ * they are indexed by the same scan as the built-ins). HARD BLOCK names win a
+ * tie over SOFT (a HARD rule must never be downgraded by a same-named soft
+ * one). ALLOW names are not block categories; they are intentionally not
+ * indexed, so a block citing an allow name lands as `unmatched` rather than a
+ * real block.
  */
 export function buildCategoryIndex(ruleset: string): RuleIndex {
 	const rules: IndexedRule[] = [];
-	const seen = new Set<string>();
-	collectNames(sliceSection(ruleset, HARD_HEADING, SOFT_HEADING), "hard_deny", rules, seen);
-	collectNames(sliceSection(ruleset, SOFT_HEADING, ALLOW_HEADING), "soft_deny", rules, seen);
-	// ALLOW names are not block categories; they are intentionally not indexed, so
-	// a block citing an allow name lands as `unmatched` rather than a real block.
-	return { rules, byName: new Map(rules.map((rule) => [normalizeName(rule.name), rule])) };
+	const byName = new Map<string, IndexedRule>();
+	collectRules(sliceSection(ruleset, HARD_HEADING, SOFT_HEADING), "hard_deny", rules, byName);
+	collectRules(sliceSection(ruleset, SOFT_HEADING, ALLOW_HEADING), "soft_deny", rules, byName);
+	return { rules, byName };
 }
 
 /** Look up a category the classifier emitted. undefined ⇒ not a known BLOCK rule. */

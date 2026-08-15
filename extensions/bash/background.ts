@@ -5,7 +5,7 @@
  * A background command spawns detached in its own process group, spools
  * stdout+stderr to memory (tail-capped) and to a log file when one is given,
  * and satisfies the BackgroundTask contract so task_output/task_stop work
- * unchanged. Robustness rules from docs/plan/background-bash.md: `output()`
+ * unchanged. Robustness rules from docs/features/background-bash.md: `output()`
  * never returns an empty body for a finished task (an explicitly-marked
  * "(no output)" beats an ambiguous blank a weak model reads as failure), and
  * the completion callback receives exactly what `output()` returns, so the

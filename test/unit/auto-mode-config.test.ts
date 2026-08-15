@@ -77,18 +77,41 @@ describe("loadAutoModeConfig", () => {
 		expect(diagnostics.some((line) => line.includes("invalid JSON"))).toBe(true);
 	});
 
-	it("warns that the retired rule-list keys are no longer used", () => {
-		// The ruleset is now CC's fixed monolith; a user who still has these keys
-		// must be told they are ignored rather than silently believing they apply.
-		writeUserSettings({ autoMode: { hard_deny: ["x"], soft_deny: ["y"], allow: ["z"] } });
+	it("loads the rule-list extras with $defaults stripped (CC 2.1.233 wizard schema)", () => {
+		// The exact shape CC's /auto-mode-setup writes: $defaults first, extras after.
+		writeUserSettings({
+			autoMode: {
+				allow: ["$defaults", "Bash(git-internal add:*) in ~/ml/repo", "Bash(git-internal commit:*) in ~/ml/repo"],
+				soft_deny: ["$defaults", "Bash(git add *) when staging internal-only paths"],
+				hard_deny: ["$defaults"],
+			},
+		});
 		const { config, diagnostics } = loadAutoModeConfigWithDiagnostics(home);
-		for (const key of ["hard_deny", "soft_deny", "allow"]) {
-			expect(diagnostics.some((line) => line.includes(`autoMode.${key} is no longer used`))).toBe(true);
-		}
-		// They are not "unknown key" diagnostics — retired, and specifically named.
-		expect(diagnostics.some((line) => line.includes('unknown autoMode key "hard_deny"'))).toBe(false);
-		// The rest of the config still loads.
-		expect(config.environment).toEqual(DEFAULT_ENVIRONMENT);
+		expect(config.allow).toEqual([
+			"Bash(git-internal add:*) in ~/ml/repo",
+			"Bash(git-internal commit:*) in ~/ml/repo",
+		]);
+		expect(config.softDeny).toEqual(["Bash(git add *) when staging internal-only paths"]);
+		expect(config.hardDeny).toEqual([]);
+		// Known keys again — no unknown-key or retirement diagnostics.
+		expect(diagnostics.some((line) => line.includes("hard_deny"))).toBe(false);
+	});
+
+	it("notes that rule lists omitting $defaults still only append", () => {
+		// A user must never believe leaving out "$defaults" disabled the built-ins:
+		// the lists are append-only, the embedded ruleset always applies.
+		writeUserSettings({ autoMode: { soft_deny: ["mine only"] } });
+		const { config, diagnostics } = loadAutoModeConfigWithDiagnostics(home);
+		expect(config.softDeny).toEqual(["mine only"]);
+		expect(diagnostics.some((line) => line.includes("soft_deny") && line.includes("only append"))).toBe(true);
+	});
+
+	it("drops non-string rule-list entries and reports mistyped lists", () => {
+		writeUserSettings({ autoMode: { allow: ["real", 7, "  "], hard_deny: "not a list" } });
+		const { config, diagnostics } = loadAutoModeConfigWithDiagnostics(home);
+		expect(config.allow).toEqual(["real"]);
+		expect(config.hardDeny).toEqual([]);
+		expect(diagnostics.some((line) => line.includes("hard_deny must be an array"))).toBe(true);
 	});
 
 	it("reports unknown and mistyped autoMode keys", () => {
@@ -104,11 +127,19 @@ describe("loadAutoModeConfig", () => {
 		expect(config.environment).toEqual(DEFAULT_ENVIRONMENT);
 	});
 
-	it("warns when environment omits $defaults and so replaces the built-ins", () => {
+	it("warns when environment omits $defaults AND drops built-in slots", () => {
 		writeUserSettings({ autoMode: { environment: ["only my slot"] } });
 		const { config, diagnostics } = loadAutoModeConfigWithDiagnostics(home);
 		expect(diagnostics.some((line) => line.includes("REPLACES the built-in environment"))).toBe(true);
 		expect(config.environment).toEqual(["only my slot"]);
+	});
+
+	it("does not warn on a full slot replacement — the wizard's normal output", () => {
+		// Every built-in slot restated (values edited or not), no "$defaults":
+		// exactly what /auto-mode setup and CC's own wizard write.
+		writeUserSettings({ autoMode: { environment: [...DEFAULT_ENVIRONMENT, "**Extra slot**: added"] } });
+		const { diagnostics } = loadAutoModeConfigWithDiagnostics(home);
+		expect(diagnostics).toEqual([]);
 	});
 
 	it("reports dropped non-string environment entries", () => {

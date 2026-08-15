@@ -56,6 +56,20 @@ describe("buildCategoryIndex / groundCategory", () => {
 		expect(groundCategory(index, "Local Operations")).toBeUndefined();
 	});
 
+	it("grounds user rule extras by their full text and derived prefix", () => {
+		const extras = {
+			softDeny: ["Bash(git add *) in ~/ml/repo when staging internal-only paths — never these"],
+			hardDeny: ["Uploading anything to pastebin-like services"],
+		};
+		const withExtras = indexFor(config.environment, extras);
+		// Full text grounds at the right tier…
+		expect(groundCategory(withExtras, extras.softDeny[0])?.tier).toBe("soft_deny");
+		expect(groundCategory(withExtras, extras.hardDeny[0])?.tier).toBe("hard_deny");
+		// …and extra ALLOW entries are still not block categories.
+		const allowExtras = indexFor(config.environment, { allow: ["Bash(git-internal add:*) in ~/ml/repo"] });
+		expect(groundCategory(allowExtras, "Bash(git-internal add:*) in ~/ml/repo")).toBeUndefined();
+	});
+
 	it("keeps HARD's tier when a name would otherwise collide", () => {
 		const built = buildCategoryIndex(buildRuleset(config.environment));
 		for (const rule of built.rules) {
@@ -279,5 +293,37 @@ describe("PauseTracker", () => {
 		tracker.recordBlock({ ...denial, reason: "first" });
 		tracker.recordBlock({ ...denial, reason: "second" });
 		expect(tracker.recentDenials().map((d) => d.reason)).toEqual(["second", "first"]);
+	});
+});
+
+describe("buildRuleset rule-extra injection (CC 2.1.233 injection points)", () => {
+	const extras = {
+		hardDeny: ["My hard extra rule"],
+		softDeny: ["My soft extra rule"],
+		allow: ["My allow extra rule"],
+	};
+	const built = buildRuleset(config.environment, extras);
+
+	it("appends each list's extras as its last bullet lines", () => {
+		// Each list's extras are its final content lines before the next boundary.
+		const beforeSoft = built.slice(0, built.indexOf("\n## SOFT BLOCK"));
+		expect(beforeSoft.trimEnd().endsWith("- My hard extra rule")).toBe(true);
+		const beforeAllow = built.slice(0, built.indexOf("\n## ALLOW (exceptions)"));
+		expect(beforeAllow.trimEnd().endsWith("- My soft extra rule")).toBe(true);
+		const beforeClose = built.slice(0, built.indexOf("</cc_automode_permissions>"));
+		expect(beforeClose.trimEnd().endsWith("- My allow extra rule")).toBe(true);
+	});
+
+	it("is byte-identical to the no-extras ruleset once the extra lines are removed", () => {
+		const stripped = built
+			.split("\n")
+			.filter((line) => !line.startsWith("- My "))
+			.join("\n");
+		expect(stripped).toBe(buildRuleset(config.environment));
+	});
+
+	it("injects nothing for empty or missing lists", () => {
+		expect(buildRuleset(config.environment, {})).toBe(buildRuleset(config.environment));
+		expect(buildRuleset(config.environment, { allow: [] })).toBe(buildRuleset(config.environment));
 	});
 });

@@ -10,27 +10,40 @@
  * is meant to contain it. Claude Code made the same exclusion (it dropped
  * `settings.local.json` in v2.1.207); this is that property, not an omission.
  *
- * ## The one customization surface
+ * ## The customization surface (CC 2.1.233's own)
  *
- * The ruleset is CC's fixed monolith (classifier-prompt.ts); it is not
- * user-editable, by design — the ruleset *is* the security boundary, and letting
- * a settings file rewrite it is the surface config-scoping exists to close. The
- * only thing a user configures is the `## Environment` section, via
- * `autoMode.environment`. `"$defaults"` in that list splices in CC's default slot
- * lines at that position, so a user can extend rather than replace.
+ * The ruleset is CC's fixed monolith (classifier-prompt.ts); its prose is not
+ * user-editable, by design — the ruleset *is* the security boundary. What CC's
+ * `/auto-mode-setup` exposes (and we mirror exactly) is:
  *
- * The old `hard_deny`/`soft_deny`/`allow` rule lists are retired. They are read
- * only to warn (a user who still has them would otherwise believe rules are in
- * force that no longer exist); their values are ignored.
+ * - `environment` — replaces the `## Environment` slot lines. `"$defaults"`
+ *   splices CC's default slots at that position, so a user can extend rather
+ *   than replace.
+ * - `hard_deny` / `soft_deny` / `allow` — extra rules **appended** to the end of
+ *   the matching embedded list, verbatim, exactly where CC injects them. These
+ *   are append-only: `"$defaults"` is accepted (CC's wizard always writes it)
+ *   but carries no meaning — the built-in rules always apply and cannot be
+ *   removed or reordered from settings, so an extra rule can tighten or carve
+ *   out, never rewrite the boundary.
+ *
+ * (The rule lists were briefly retired between the ruleset adoption and CC
+ * 2.1.233 shipping `/auto-mode-setup`, which writes this exact schema — see
+ * docs/decisions/auto-mode.md.)
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { DEFAULT_ENVIRONMENT } from "./defaults.ts";
+import { DEFAULT_ENVIRONMENT, slotName } from "./defaults.ts";
 
 export interface AutoModeConfig {
-	/** Environment slot lines spliced into CC's ruleset. */
+	/** Environment slot lines spliced into CC's ruleset (prefix-less, CC's settings format). */
 	environment: string[];
+	/** Extra HARD BLOCK rules appended to the embedded list (`$defaults` already stripped). */
+	hardDeny: string[];
+	/** Extra SOFT BLOCK rules appended to the embedded list (`$defaults` already stripped). */
+	softDeny: string[];
+	/** Extra ALLOW rules appended to the embedded list (`$defaults` already stripped). */
+	allow: string[];
 	/** Suspend narrow Bash allow rules so every shell command reaches the classifier. */
 	classifyAllShell: boolean;
 	/** `provider/model-id` override for the classifier model. */
@@ -42,6 +55,9 @@ export interface AutoModeConfig {
 interface AutoModeSettingsFile {
 	autoMode?: {
 		environment?: unknown;
+		hard_deny?: unknown;
+		soft_deny?: unknown;
+		allow?: unknown;
 		classifyAllShell?: unknown;
 		classifierModel?: unknown;
 		logDecisions?: unknown;
@@ -77,10 +93,18 @@ function readFile(path: string, diagnostics: string[]): AutoModeSettingsFile | u
 	}
 }
 
-const KNOWN_AUTO_MODE_KEYS = new Set(["environment", "classifyAllShell", "classifierModel", "logDecisions"]);
+const KNOWN_AUTO_MODE_KEYS = new Set([
+	"environment",
+	"hard_deny",
+	"soft_deny",
+	"allow",
+	"classifyAllShell",
+	"classifierModel",
+	"logDecisions",
+]);
 
-/** Rule-list keys retired when CC's monolithic ruleset was adopted. */
-const RETIRED_RULE_KEYS = ["hard_deny", "soft_deny", "allow"] as const;
+/** Rule-extra keys, CC's spelling; appended to the matching embedded list. */
+const RULE_LIST_KEYS = ["hard_deny", "soft_deny", "allow"] as const;
 
 /**
  * Shape problems in one file's `autoMode` block, as human-readable lines.
@@ -88,33 +112,74 @@ const RETIRED_RULE_KEYS = ["hard_deny", "soft_deny", "allow"] as const;
  * fatal), but skipped-because-mistyped must be visible in `/auto-mode config` or
  * it reads as the gate ignoring the user's settings.
  */
+/**
+ * Validate one array-of-strings autoMode key. `omitDefaultsNote`, when given,
+ * is the warning pushed if "$defaults" is missing. Purely advisory: loading
+ * stays lenient either way.
+ */
+function validateStringListKey(
+	block: Record<string, unknown>,
+	key: string,
+	path: string,
+	diagnostics: string[],
+	omitDefaultsNote?: string,
+): void {
+	const list = block[key];
+	if (list === undefined) return;
+	if (!Array.isArray(list)) {
+		diagnostics.push(`${path}: autoMode.${key} must be an array of strings — ignored`);
+		return;
+	}
+	for (const [position, entry] of list.entries()) {
+		if (typeof entry !== "string" || entry.trim().length === 0) {
+			diagnostics.push(`${path}: autoMode.${key}[${position}] is not a non-empty string — dropped`);
+		}
+	}
+	if (!omitDefaultsNote) return;
+	const strings = list.filter((entry): entry is string => typeof entry === "string");
+	if (strings.length > 0 && !strings.some((entry) => entry.trim() === DEFAULTS_TOKEN)) {
+		diagnostics.push(`${path}: autoMode.${key} ${omitDefaultsNote}`);
+	}
+}
+
 function validateAutoModeBlock(block: Record<string, unknown>, path: string, diagnostics: string[]): void {
 	for (const key of Object.keys(block)) {
-		if ((RETIRED_RULE_KEYS as readonly string[]).includes(key)) {
-			diagnostics.push(
-				`${path}: autoMode.${key} is no longer used — the ruleset is now fixed (Claude Code's), and the only rule customization is autoMode.environment. This setting is ignored.`,
-			);
-		} else if (!KNOWN_AUTO_MODE_KEYS.has(key)) {
+		if (!KNOWN_AUTO_MODE_KEYS.has(key)) {
 			diagnostics.push(`${path}: unknown autoMode key "${key}" is ignored`);
 		}
 	}
+	validateStringListKey(block, "environment", path, diagnostics);
+	// A FULL environment replacement (every built-in slot re-stated, edited or
+	// not) is the standard shape — CC's wizard and ours both write it — so it
+	// earns no warning. What does: a replacement that silently DROPS built-in
+	// slots because "$defaults" is absent — usually a hand-written list whose
+	// author believed they were adding, not replacing.
 	const environment = block.environment;
-	if (environment !== undefined) {
-		if (!Array.isArray(environment)) {
-			diagnostics.push(`${path}: autoMode.environment must be an array of strings — ignored`);
-		} else {
-			for (const [position, entry] of environment.entries()) {
-				if (typeof entry !== "string" || entry.trim().length === 0) {
-					diagnostics.push(`${path}: autoMode.environment[${position}] is not a non-empty string — dropped`);
-				}
-			}
-			const strings = environment.filter((entry): entry is string => typeof entry === "string");
-			if (strings.length > 0 && !strings.some((entry) => entry.trim() === DEFAULTS_TOKEN)) {
+	if (Array.isArray(environment)) {
+		const strings = environment.filter((entry): entry is string => typeof entry === "string");
+		if (strings.length > 0 && !strings.some((entry) => entry.trim() === DEFAULTS_TOKEN)) {
+			const present = new Set(strings.map(slotName).filter(Boolean));
+			const missing = DEFAULT_ENVIRONMENT.map(slotName).filter((name): name is string => !!name && !present.has(name));
+			if (missing.length > 0) {
+				const shown = missing.slice(0, 3).join(", ") + (missing.length > 3 ? ", …" : "");
 				diagnostics.push(
-					`${path}: autoMode.environment omits "${DEFAULTS_TOKEN}", so it REPLACES the built-in environment rather than extending it`,
+					`${path}: autoMode.environment omits "${DEFAULTS_TOKEN}", so it REPLACES the built-in environment rather than extending it — built-in slot(s) now missing: ${shown}`,
 				);
 			}
 		}
+	}
+	// Unlike environment, the rule lists are append-only: the built-in rules
+	// always apply whether or not "$defaults" is present (a settings file must be
+	// able to add rules, never to remove the boundary), and nobody should believe
+	// omitting the token disabled them.
+	for (const key of RULE_LIST_KEYS) {
+		validateStringListKey(
+			block,
+			key,
+			path,
+			diagnostics,
+			`omits "${DEFAULTS_TOKEN}" — note the built-in rules still apply; these lists only append, never replace`,
+		);
 	}
 	for (const key of ["classifyAllShell", "logDecisions"] as const) {
 		if (block[key] !== undefined && typeof block[key] !== "boolean") {
@@ -158,6 +223,9 @@ export function loadAutoModeConfigWithDiagnostics(home: string): AutoModeConfigL
 	const diagnostics: string[] = [];
 	const collected: {
 		environment?: string[];
+		hard_deny?: string[];
+		soft_deny?: string[];
+		allow?: string[];
 		classifyAllShell?: boolean;
 		classifierModel?: string;
 		logDecisions?: boolean;
@@ -172,10 +240,14 @@ export function loadAutoModeConfigWithDiagnostics(home: string): AutoModeConfigL
 		}
 		if (!block) continue;
 		validateAutoModeBlock(block as Record<string, unknown>, path, diagnostics);
-		const parsed = stringArray(block.environment);
 		// Additive across scopes: a later scope extends rather than replaces, so
 		// managed entries cannot be dropped by a user file.
+		const parsed = stringArray(block.environment);
 		if (parsed) collected.environment = [...(collected.environment ?? []), ...parsed];
+		for (const key of RULE_LIST_KEYS) {
+			const list = stringArray(block[key]);
+			if (list) collected[key] = [...(collected[key] ?? []), ...list];
+		}
 		if (typeof block.classifyAllShell === "boolean") collected.classifyAllShell = block.classifyAllShell;
 		if (typeof block.logDecisions === "boolean") collected.logDecisions = block.logDecisions;
 		if (typeof block.classifierModel === "string" && block.classifierModel.trim()) {
@@ -183,9 +255,18 @@ export function loadAutoModeConfigWithDiagnostics(home: string): AutoModeConfigL
 		}
 	}
 
+	// Rule lists are extras appended to the embedded built-ins, so "$defaults" is
+	// stripped rather than expanded — the built-ins are already in the ruleset and
+	// must apply regardless of what settings say (append-only, by construction).
+	const ruleExtras = (entries: string[] | undefined): string[] =>
+		(entries ?? []).filter((entry) => entry.trim() !== DEFAULTS_TOKEN);
+
 	return {
 		config: {
 			environment: spliceDefaults(collected.environment, DEFAULT_ENVIRONMENT),
+			hardDeny: ruleExtras(collected.hard_deny),
+			softDeny: ruleExtras(collected.soft_deny),
+			allow: ruleExtras(collected.allow),
 			classifyAllShell: collected.classifyAllShell ?? false,
 			classifierModel: collected.classifierModel,
 			logDecisions: collected.logDecisions ?? false,
@@ -209,6 +290,30 @@ export function loadAutoModeConfig(home: string): AutoModeConfig {
  * only ours.
  */
 export function persistClassifierModel(spec: string | undefined, home: string): void {
+	const { path, file } = readUserSettingsForWrite(home);
+	const block = asRecord(file.autoMode) ?? {};
+	if (spec === undefined) delete block.classifierModel;
+	else block.classifierModel = spec;
+	if (Object.keys(block).length === 0) delete file.autoMode;
+	else file.autoMode = block;
+	mkdirSync(dirname(path), { recursive: true });
+	writeFileSync(path, `${JSON.stringify(file, null, 2)}\n`);
+}
+
+/** value as a plain object, or undefined — the repeated sub-block guard. */
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+	return typeof value === "object" && value !== null && !Array.isArray(value)
+		? (value as Record<string, unknown>)
+		: undefined;
+}
+
+/**
+ * Read the user settings file as an object for a read-modify-write. Unlike
+ * loading, this throws on a malformed file: a lenient read merely skips rules,
+ * but a lenient write would replace the user's whole settings file with only
+ * ours.
+ */
+function readUserSettingsForWrite(home: string): { path: string; file: Record<string, unknown> } {
 	const path = join(home, ".claude", "settings.json");
 	let file: Record<string, unknown> = {};
 	if (existsSync(path)) {
@@ -218,14 +323,48 @@ export function persistClassifierModel(spec: string | undefined, home: string): 
 		}
 		file = parsed as Record<string, unknown>;
 	}
-	const block =
-		typeof file.autoMode === "object" && file.autoMode !== null && !Array.isArray(file.autoMode)
-			? (file.autoMode as Record<string, unknown>)
-			: {};
-	if (spec === undefined) delete block.classifierModel;
-	else block.classifierModel = spec;
+	return { path, file };
+}
+
+/**
+ * Persist a `/auto-mode setup` result: replace the wizard-owned keys
+ * (environment + the three rule lists — an undefined list removes stale
+ * values, last-writer like CC's own wizard) while preserving every other
+ * settings key and the non-wizard autoMode keys (classifierModel, …). User
+ * scope only, same rationale as persistClassifierModel; throws on a malformed
+ * file rather than replacing the user's settings with only ours.
+ */
+export function persistAutoModeSetup(patch: Record<string, string[] | undefined>, home: string): void {
+	const { path, file } = readUserSettingsForWrite(home);
+	const block = asRecord(file.autoMode) ?? {};
+	for (const key of ["environment", ...RULE_LIST_KEYS] as const) {
+		const value = patch[key];
+		if (value === undefined) delete block[key];
+		else block[key] = value;
+	}
 	if (Object.keys(block).length === 0) delete file.autoMode;
 	else file.autoMode = block;
 	mkdirSync(dirname(path), { recursive: true });
 	writeFileSync(path, `${JSON.stringify(file, null, 2)}\n`);
+}
+
+/**
+ * Remove specific `permissions.allow` entries from the user settings file (the
+ * setup audit's "remove them" choice). Exact-match only, everything else
+ * preserved; throws on a malformed file for the same reason as the writers
+ * above. Returns how many entries were actually removed.
+ */
+export function removeUserPermissionAllow(entries: string[], home: string): number {
+	const { path, file } = readUserSettingsForWrite(home);
+	const permissions = asRecord(file.permissions);
+	const allowList = permissions?.allow;
+	if (!permissions || !Array.isArray(allowList)) return 0;
+	const doomed = new Set(entries);
+	const kept = allowList.filter((entry) => typeof entry !== "string" || !doomed.has(entry));
+	const removed = allowList.length - kept.length;
+	if (removed > 0) {
+		permissions.allow = kept;
+		writeFileSync(path, `${JSON.stringify(file, null, 2)}\n`);
+	}
+	return removed;
 }
