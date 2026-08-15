@@ -360,3 +360,38 @@ Choices and reasons:
 - **Finished runs stay in the strip** (CC keeps its entry too); rows cap at 3
   with a dim `+N more — /workflows` line. The strip only clears when the
   session has no runs at all.
+
+## The viewer's drill-down layout (aligned to a CC frame capture)
+
+*(2026-08-16, unreviewed — written while the user was away; review welcome.)*
+
+The v1 viewer used a flat phase-grouped tree beside an always-on detail pane.
+A frame-by-frame ffmpeg extraction of a real CC 2.1.233 screen recording
+(104s, one frame/second) showed CC's actual structure is a **two-level
+drill-down in bordered, titled panes**: Phases (✔/numbered, done/total
+counts, declared-but-unstarted phases listed from meta) → agents of the
+selected phase → full agent detail (`✔ Completed · model`, `tokens · N tool
+calls`, 3-line Prompt preview with ⏎ expand, `Activity · last 3 of N tool
+calls`, Outcome `Still running…`). v2 of the viewer replicates that. Choices:
+
+- **Declared phases come from `meta.phases`, event phases merge after.**
+  CC lists Synthesize before any of its agents exist; records alone can't
+  do that, so run snapshots carry the meta-declared titles and
+  `buildPhases` seeds groups from them (dim, countless until started).
+  Child-workflow `▸ name` phases and ad-hoc `phase()` titles append.
+- **`toolCalls` is counted uncapped on AgentRecord** — `Activity · last 3
+  of 7 tool calls` needs the true total while `activity` keeps only a
+  capped tail.
+- **Durations are humane everywhere** (`45s`, `1m 7s`, `2h 5m`) — CC's
+  strip showed `1m 7s` where ours showed raw seconds.
+- **Esc backs out one level and closes at the top; q/ctrl+c close from
+  anywhere.** Enter drills in at phases level and toggles the prompt at
+  agents level (CC's `⏎ prompt`). `x` stops the run (CC also has restart/
+  pause/filter — we don't have per-agent restart or pause semantics, so
+  those are omitted rather than faked).
+- **Mouse clicks were investigated and rejected for now**: pi never routes
+  mouse events to extensions (main-screen mode has no mouse tracking;
+  alt-screen mode's viewport listener registers first and consumes every
+  mouse sequence). The workable-but-hacky path — overlay positioning +
+  self-enabled SGR tracking, main-screen only — was parked in favor of a
+  future upstream pi change. Keyboard covers the same selection.
