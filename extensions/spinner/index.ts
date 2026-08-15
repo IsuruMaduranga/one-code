@@ -14,7 +14,7 @@
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { alignRight, linesComponent, safeThemePaint } from "../lib/tui-render.ts";
+import { dimRightAlignedWidget, safeThemePaint } from "../lib/tui-render.ts";
 import { composeWorkingMessage, contextTokensText, messageChars, spinnerFrames } from "./line.ts";
 import { pickVerb } from "./verbs.ts";
 
@@ -51,14 +51,7 @@ export default function spinnerExtension(pi: ExtensionAPI) {
 	const updateCounter = (ctx: ExtensionContext) => {
 		if (!ctx.hasUI) return;
 		const text = contextTokensText(ctx.getContextUsage()?.tokens);
-		ctx.ui.setWidget(
-			COUNTER_KEY,
-			(_tui, theme) => {
-				const paint = safeThemePaint(theme);
-				return linesComponent((width) => [paint("dim", alignRight(text, Math.max(1, width - 1)))]);
-			},
-			{ placement: "aboveEditor" },
-		);
+		ctx.ui.setWidget(COUNTER_KEY, dimRightAlignedWidget(text), { placement: "aboveEditor" });
 	};
 
 	pi.on("session_start", (_event, ctx) => {

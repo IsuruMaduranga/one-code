@@ -75,6 +75,18 @@ export function alignRight(text: string, width: number): string {
 	return " ".repeat(width - length) + text;
 }
 
+/**
+ * setWidget factory for a one-line, dim, right-aligned note (Claude Code's
+ * above-input chrome: the context token counter, the effort-changed note).
+ * The one-column right margin matches the paddingX pi gives string widgets.
+ */
+export function dimRightAlignedWidget(text: string): (tui: unknown, theme: unknown) => TuiComponent {
+	return (_tui, theme) => {
+		const paint = safeThemePaint(theme);
+		return linesComponent((width) => [paint("dim", alignRight(text, Math.max(1, width - 1)))]);
+	};
+}
+
 /** Cut plain (unpainted) text to `width` columns by code point, with an ellipsis. */
 export function cutPlainText(text: string, width: number): string {
 	if (width <= 0) return "";

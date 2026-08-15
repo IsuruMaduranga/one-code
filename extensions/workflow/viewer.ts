@@ -12,8 +12,6 @@
  */
 
 import { cutPlainText as cut, formatDuration, wrapPlainText } from "../lib/tui-render.ts";
-
-export { formatDuration } from "../lib/tui-render.ts";
 import { formatTokenCount } from "../subagents/usage.ts";
 import type { AgentRecord, RunStatus } from "./types.ts";
 
@@ -118,25 +116,18 @@ export function decodeViewerKey(data: string): ViewerKey | undefined {
  */
 export type StatusKey = "up" | "down" | "open" | "leave" | "stop";
 
+/** The strip understands a subset of the viewer's keys, renamed to its intents. */
+const STATUS_KEY_FROM_VIEWER: Partial<Record<ViewerKey["kind"], StatusKey>> = {
+	up: "up",
+	down: "down",
+	enter: "open",
+	back: "leave",
+	stop: "stop",
+};
+
 export function decodeStatusKey(data: string): StatusKey | undefined {
-	switch (data) {
-		case "\x1b[A":
-		case "\x1bOA":
-			return "up";
-		case "\x1b[B":
-		case "\x1bOB":
-			return "down";
-		case "\r":
-		case "\n":
-			return "open";
-		case "\x1b":
-			return "leave";
-		case "x":
-		case "X":
-			return "stop";
-		default:
-			return undefined;
-	}
+	const key = decodeViewerKey(data);
+	return key && STATUS_KEY_FROM_VIEWER[key.kind];
 }
 
 /** What pressing `s` should do, given what's on disk. Wiring does the fs. */
@@ -213,13 +204,22 @@ function cell(text: string, width: number): string {
 	return shortened + " ".repeat(Math.max(0, width - [...shortened].length));
 }
 
-/** Left text with a right-aligned annotation, both plain, exactly `width` wide. */
+/**
+ * Split a row into a left half padded against a right-aligned annotation
+ * (two-space gap), fusing into one cut line when the left share would drop
+ * below readability. The single home of this layout rule — the header, the
+ * pane rows, and the status strip all build on it.
+ */
+function splitRow(left: string, right: string, width: number): { fused: string } | { left: string; right: string } {
+	const leftWidth = width - [...right].length - 2;
+	if ([...right].length === 0 || leftWidth < 8) return { fused: cut(`${left}  ${right}`.trimEnd(), width) };
+	return { left: cell(left, leftWidth), right };
+}
+
+/** splitRow flattened to one plain string, exactly `width` wide. */
 function splitCell(left: string, right: string, width: number): string {
-	const rightWidth = [...right].length;
-	if (rightWidth === 0) return cell(left, width);
-	const leftWidth = width - rightWidth - 1;
-	if (leftWidth < 6) return cell(`${left} ${right}`, width);
-	return `${cell(left, leftWidth)} ${right}`;
+	const row = splitRow(left, right, width);
+	return "fused" in row ? cell(row.fused, width) : `${row.left}  ${row.right}`;
 }
 
 const STATUS_MARK: Record<AgentRecord["status"], string> = {
@@ -284,24 +284,20 @@ function phaseRows(phases: PhaseGroup[], cursor: number, innerWidth: number): Pa
 	});
 }
 
-/** Agent rows: `mark label  Model · 31.6k tok` with a right-aligned duration. */
-function agentRows(
-	agents: PhaseGroup["agents"],
-	cursor: number | undefined,
-	innerWidth: number,
-	now: number,
-): PaneLine[] {
+/**
+ * Agent rows: `mark label  Model · 31.6k tok` with a right-aligned duration —
+ * the non-interactive preview beside the Phases pane (the selectable list at
+ * the agents level is agentLabelRows).
+ */
+function agentRows(agents: PhaseGroup["agents"], innerWidth: number, now: number): PaneLine[] {
 	if (!agents.length) return [{ text: "No agents yet — waiting for the first agent() call…", style: "dim" }];
 	const labelWidth = Math.min(24, Math.max(10, Math.floor(innerWidth * 0.4)));
-	return agents.map(({ record }, index) => {
-		const selected = cursor === index;
-		const mark = selected ? "❯" : " ";
+	return agents.map(({ record }) => {
 		const meta = [record.model, record.tokens ? `${formatTokenCount(record.tokens.output)} tok` : ""]
 			.filter(Boolean)
 			.join(" · ");
-		const left = `${mark} ${STATUS_MARK[record.status]} ${cell(record.label, labelWidth)} ${meta}`;
+		const left = `  ${STATUS_MARK[record.status]} ${cell(record.label, labelWidth)} ${meta}`;
 		const text = splitCell(left, formatDuration(record.startedAt, record.finishedAt, now), innerWidth);
-		if (selected) return { text, style: "accent" as const };
 		return { text, style: record.status === "failed" ? ("error" as const) : undefined };
 	});
 }
@@ -416,9 +412,9 @@ export function renderViewer(input: ViewerInput, paint: ViewerPaint): string[] {
 		.filter(Boolean)
 		.join(" · ");
 	const headerLine = (left: string, leftColor: string, right: string): string => {
-		const leftWidth = width - [...right].length - 2;
-		if (leftWidth < 8) return paint.fg(leftColor, cut(`${left}  ${right}`, width));
-		return paint.fg(leftColor, cell(left, leftWidth)) + "  " + paint.fg("dim", right);
+		const row = splitRow(left, right, width);
+		if ("fused" in row) return paint.fg(leftColor, row.fused);
+		return paint.fg(leftColor, row.left) + "  " + paint.fg("dim", row.right);
 	};
 	out.push(headerLine(run.name, "accent", stats));
 	const runHint = runs.length > 1 ? `run ${state.runIndex + 1}/${runs.length} (tab)` : run.runId;
@@ -432,70 +428,49 @@ export function renderViewer(input: ViewerInput, paint: ViewerPaint): string[] {
 	const bodyHeight = Math.max(6, input.height - out.length - footerRows);
 	const atAgents = state.level === "agents" && phase && phase.agents.length > 0;
 
-	let leftTitle: string;
-	let leftLines: PaneLine[];
-	let rightTitle: string;
-	let rightLines: PaneLine[];
-	let leftWidthWanted: number;
+	const agentCountTitle = phase
+		? `${phase.title} · ${phase.agents.length} agent${phase.agents.length === 1 ? "" : "s"}`
+		: "agents";
+	const leftTitle = atAgents ? agentCountTitle : "Phases";
+	const rightTitle = atAgents ? (phase.agents[state.agentCursor]?.record.label ?? "agent") : agentCountTitle;
+	const leftWidthWanted = atAgents ? 32 : 26;
+	const leftRowCount = atAgents ? phase.agents.length : phases.length;
 
-	if (!atAgents) {
-		leftTitle = "Phases";
-		leftLines = phaseRows(phases, state.phaseCursor, 0); // inner width fixed below
-		rightTitle = phase ? `${phase.title} · ${phase.agents.length} agent${phase.agents.length === 1 ? "" : "s"}` : "agents";
-		rightLines = phase ? agentRows(phase.agents, undefined, 0, input.now) : [];
-		leftWidthWanted = 26;
-	} else {
-		leftTitle = `${phase.title} · ${phase.agents.length} agent${phase.agents.length === 1 ? "" : "s"}`;
-		leftLines = agentLabelRows(phase.agents, state.agentCursor);
-		const selected = phase.agents[state.agentCursor];
-		rightTitle = selected?.record.label ?? "agent";
-		rightLines = [];
-		leftWidthWanted = 32;
-	}
+	// Pane content is built once, at the real inner widths of whichever layout runs.
+	const buildPanes = (leftInner: number, rightInner: number, leftVisible: number, rightVisible: number) => {
+		if (!atAgents) {
+			return {
+				left: scrollWindow(phaseRows(phases, state.phaseCursor, leftInner), state.phaseCursor, leftVisible),
+				right: phase ? agentRows(phase.agents, rightInner, input.now).slice(0, rightVisible) : [],
+			};
+		}
+		return {
+			left: scrollWindow(agentLabelRows(phase.agents, state.agentCursor), state.agentCursor, leftVisible),
+			right: detailWindow(
+				buildDetail(phase.agents[state.agentCursor]?.record, rightInner, input.now, state.promptExpanded),
+				state,
+				rightVisible,
+				rightInner,
+			),
+		};
+	};
 
 	if (width >= MIN_TWO_PANE_WIDTH) {
 		const leftWidth = Math.min(leftWidthWanted, Math.max(18, Math.floor(width * 0.25)));
 		const rightWidth = width - leftWidth - 1;
-		const leftInner = leftWidth - 4;
-		const rightInner = rightWidth - 4;
 		const visible = bodyHeight - 2;
-
-		// Rebuild content at the real inner widths.
-		if (!atAgents) {
-			leftLines = scrollWindow(phaseRows(phases, state.phaseCursor, leftInner), state.phaseCursor, visible);
-			rightLines = phase ? agentRows(phase.agents, undefined, rightInner, input.now).slice(0, visible) : [];
-		} else {
-			leftLines = scrollWindow(agentLabelRows(phase.agents, state.agentCursor), state.agentCursor, visible);
-			rightLines = detailWindow(
-				buildDetail(phase.agents[state.agentCursor]?.record, rightInner, input.now, state.promptExpanded),
-				state,
-				visible,
-				rightInner,
-			);
-		}
-		const left = boxPane(leftTitle, leftLines, leftWidth, bodyHeight, paint);
-		const right = boxPane(rightTitle, rightLines, rightWidth, bodyHeight, paint);
+		const panes = buildPanes(leftWidth - 4, rightWidth - 4, visible, visible);
+		const left = boxPane(leftTitle, panes.left, leftWidth, bodyHeight, paint);
+		const right = boxPane(rightTitle, panes.right, rightWidth, bodyHeight, paint);
 		for (let i = 0; i < bodyHeight; i++) out.push(`${left[i]} ${right[i]}`);
 	} else {
 		// Narrow: stack the two panes.
-		const leftHeight = Math.max(4, Math.min(leftLines.length + 2, Math.floor(bodyHeight / 2)));
+		const leftHeight = Math.max(4, Math.min(leftRowCount + 2, Math.floor(bodyHeight / 2)));
 		const rightHeight = bodyHeight - leftHeight;
 		const inner = width - 4;
-		const leftVisible = leftHeight - 2;
-		if (!atAgents) {
-			leftLines = scrollWindow(phaseRows(phases, state.phaseCursor, inner), state.phaseCursor, leftVisible);
-			rightLines = phase ? agentRows(phase.agents, undefined, inner, input.now).slice(0, rightHeight - 2) : [];
-		} else {
-			leftLines = scrollWindow(agentLabelRows(phase.agents, state.agentCursor), state.agentCursor, leftVisible);
-			rightLines = detailWindow(
-				buildDetail(phase.agents[state.agentCursor]?.record, inner, input.now, state.promptExpanded),
-				state,
-				rightHeight - 2,
-				inner,
-			);
-		}
-		out.push(...boxPane(leftTitle, leftLines, width, leftHeight, paint));
-		out.push(...boxPane(rightTitle, rightLines, width, rightHeight, paint));
+		const panes = buildPanes(inner, inner, leftHeight - 2, rightHeight - 2);
+		out.push(...boxPane(leftTitle, panes.left, width, leftHeight, paint));
+		out.push(...boxPane(rightTitle, panes.right, width, rightHeight, paint));
 	}
 
 	// Footer: per-level key hints, replaced by a transient notice when set.
@@ -537,7 +512,10 @@ function detailWindow(detail: PaneLine[], state: ViewerState, visible: number, i
 // ---------------------------------------------------------------------------
 
 export interface StatusRowsInput {
+	/** The runs that can appear (newest first) — callers may pass just the visible slice. */
 	runs: ViewerRunSnapshot[];
+	/** Session-wide run count behind the "+N more" line; defaults to runs.length. */
+	totalRuns?: number;
 	/** Index into `runs` of the soft-focused row; undefined when unfocused. */
 	selected?: number;
 	width: number;
@@ -578,20 +556,19 @@ export function renderStatusRows(input: StatusRowsInput, paint: ViewerPaint): st
 			.join(" · ");
 		const mark = selected ? "❯" : STATUS_ROW_MARK[run.status];
 		const left = `${mark} ${run.name}  ${run.description ?? ""}`.trimEnd();
-		const leftWidth = width - [...stats].length - 2;
+		const row = splitRow(left, stats, width);
 		if (selected) {
-			const plain = leftWidth < 8 ? cut(`${left}  ${stats}`, width) : `${cell(left, leftWidth)}  ${stats}`;
-			out.push(paint.fg("accent", plain));
-		} else if (leftWidth < 8) {
-			const color = run.status === "failed" ? "error" : "dim";
-			out.push(paint.fg(color, cut(`${left}  ${stats}`, width)));
+			out.push(paint.fg("accent", "fused" in row ? row.fused : `${row.left}  ${row.right}`));
+		} else if ("fused" in row) {
+			out.push(paint.fg(run.status === "failed" ? "error" : "dim", row.fused));
 		} else {
-			const leftPart = run.status === "failed" ? paint.fg("error", cell(left, leftWidth)) : cell(left, leftWidth);
-			out.push(`${leftPart}  ${paint.fg("dim", stats)}`);
+			const leftPart = run.status === "failed" ? paint.fg("error", row.left) : row.left;
+			out.push(`${leftPart}  ${paint.fg("dim", row.right)}`);
 		}
 	}
-	if (input.runs.length > shown.length) {
-		out.push(paint.fg("dim", cut(`  +${input.runs.length - shown.length} more — /workflows`, width)));
+	const total = input.totalRuns ?? input.runs.length;
+	if (total > shown.length) {
+		out.push(paint.fg("dim", cut(`  +${total - shown.length} more — /workflows`, width)));
 	}
 	return out;
 }

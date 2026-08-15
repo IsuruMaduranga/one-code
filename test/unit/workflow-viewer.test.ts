@@ -5,7 +5,6 @@ import {
 	clampViewerState,
 	decodeStatusKey,
 	decodeViewerKey,
-	formatDuration,
 	initialViewerState,
 	MAX_STATUS_ROWS,
 	planSave,
@@ -14,7 +13,7 @@ import {
 	renderViewer,
 	type ViewerRunSnapshot,
 } from "../../extensions/workflow/viewer.ts";
-import { wrapPlainText } from "../../extensions/lib/tui-render.ts";
+import { formatDuration, wrapPlainText } from "../../extensions/lib/tui-render.ts";
 import type { AgentRecord } from "../../extensions/workflow/types.ts";
 
 /** Paint that tags styled text so tests can strip/inspect it. */
@@ -197,6 +196,9 @@ describe("renderStatusRows", () => {
 		const rows = renderStatusRows({ runs, width: 100, now: 0 }, paint);
 		expect(rows).toHaveLength(MAX_STATUS_ROWS + 1);
 		expect(strip(rows[MAX_STATUS_ROWS])).toContain("+2 more — /workflows");
+		// Callers may pass only the visible slice with the session total alongside.
+		const sliced = renderStatusRows({ runs: runs.slice(0, MAX_STATUS_ROWS), totalRuns: runs.length, width: 100, now: 0 }, paint);
+		expect(sliced).toEqual(rows);
 	});
 
 	it("returns no rows without runs and degrades to one cut line when narrow", () => {

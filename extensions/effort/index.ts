@@ -21,7 +21,7 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
-import { alignRight, linesComponent, safeThemePaint } from "../lib/tui-render.ts";
+import { dimRightAlignedWidget, safeThemePaint } from "../lib/tui-render.ts";
 import {
 	acceptedEffortArgs,
 	choiceForState,
@@ -90,15 +90,9 @@ export default function effortExtension(pi: ExtensionAPI) {
 	let noteTimer: ReturnType<typeof setTimeout> | undefined;
 	const showEffortNote = (ctx: ExtensionContext, level: ThinkingLevel) => {
 		if (!ctx.hasUI) return;
-		const text = effortNoteText(level, ultracodeActive);
-		ctx.ui.setWidget(
-			NOTE_KEY,
-			(_tui, theme) => {
-				const paint = safeThemePaint(theme);
-				return linesComponent((width) => [paint("dim", alignRight(text, Math.max(1, width - 1)))]);
-			},
-			{ placement: "aboveEditor" },
-		);
+		ctx.ui.setWidget(NOTE_KEY, dimRightAlignedWidget(effortNoteText(level, ultracodeActive)), {
+			placement: "aboveEditor",
+		});
 		if (noteTimer) clearTimeout(noteTimer);
 		noteTimer = setTimeout(() => ctx.ui.setWidget(NOTE_KEY, undefined), NOTE_MS);
 		noteTimer.unref?.();

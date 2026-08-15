@@ -13,7 +13,7 @@
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { linesComponent, safeThemeBold, safeThemePaint } from "../lib/tui-render.ts";
-import type { RunHandle, WorkflowRunManager } from "./run-manager.ts";
+import { snapshotRun, type RunHandle, type WorkflowRunManager } from "./run-manager.ts";
 import { MAX_STATUS_ROWS, renderStatusRows, type ViewerRunSnapshot } from "./viewer.ts";
 
 const WIDGET_KEY = "workflow";
@@ -22,7 +22,6 @@ const DEBOUNCE_MS = 250;
 /** The slice of pi-tui's TUI the strip needs (structurally typed, no dep). */
 interface TuiLike {
 	getFocusedComponent?(): unknown;
-	requestRender(): void;
 }
 
 export class WorkflowWidget {
@@ -67,7 +66,15 @@ export class WorkflowWidget {
 
 	selectedRun(): ViewerRunSnapshot | undefined {
 		if (this.focusIndex === undefined) return undefined;
-		return this.manager.snapshots()[this.focusIndex];
+		return this.visibleSnapshots()[this.focusIndex];
+	}
+
+	/**
+	 * Only the runs the strip can display (newest first) — a per-tick render
+	 * must not pay to copy every run and agent record of the session.
+	 */
+	private visibleSnapshots(): ViewerRunSnapshot[] {
+		return this.manager.list().slice(-MAX_STATUS_ROWS).map(snapshotRun).reverse();
 	}
 
 	setFocus(index: number | undefined): void {
@@ -109,7 +116,8 @@ export class WorkflowWidget {
 	private render(): void {
 		const ctx = this.getCtx();
 		if (!ctx?.hasUI) return;
-		const runs = this.manager.snapshots();
+		const totalRuns = this.manager.list().length;
+		const runs = this.visibleSnapshots();
 		this.syncTicker(runs);
 		if (!runs.length) {
 			ctx.ui.setWidget(WIDGET_KEY, undefined);
@@ -132,7 +140,7 @@ export class WorkflowWidget {
 				// One-space indent to align with string-array widgets (pi's Text
 				// wraps those with paddingX=1 — the permission-mode badge above).
 				return linesComponent((width) =>
-					renderStatusRows({ runs, selected, width: width - 1, now }, paint).map((line) => ` ${line}`),
+					renderStatusRows({ runs, totalRuns, selected, width: width - 1, now }, paint).map((line) => ` ${line}`),
 				);
 			},
 			{ placement: "belowEditor" },
