@@ -223,3 +223,39 @@ replayed the whole prefix in 11ms with zero live calls and an identical
 result. Gate integration: with `deny: ["Bash(touch:*)"]`, a subagent told to
 run `touch pwned.txt` reported "Denied by permission rules (rule:
 Bash(touch:*))", `echo done` succeeded, and no file was created.
+
+## send_message delivery, resident children, and default-model selection
+
+(Graduated from the global handoff, 2026-08-15 — behavior notes and traps that
+had no other home.)
+
+`send_message` reaches background agents *live*: they run as resident
+`--mode rpc` children (stdin command channel), so a mid-turn message is
+steered into the running turn and an idle resident gets a new turn. Two traps
+encoded in `child.ts`: a steer sent while the child is still booting (before
+its `agent_start`) would run as its own turn — such messages queue locally and
+flush at `agent_start`; and RPC children have `hasUI: true`, so every
+`extension_ui_request` must be answered (`cancelled: true`), reproducing
+print-mode's deny fallback. Foreground (non-background) agents still finish
+before send_message can address them, and only their session files can be
+resumed.
+
+With no explicit default, subagents choose a smaller coding-capable model from
+a shared same-provider/family role profile (for example an OpenAI Codex Sol
+session uses Luna); the same resolver backs workflow `agent()` defaults too.
+Opaque routers stay on the session model. The subagent default model remains
+user-configurable via `/subagent` — an interactive picker in the TUI, or
+typed: `/subagent provider/model-id|sonnet|opus|haiku|fable|inherit`,
+`/subagent status`, `/subagent clear`. It persists the `subagentModel` setting
+to user scope (auth-checked before saving, aliases kept literal so they keep
+per-session resolution) and re-emits model status so the reminder/banner
+update immediately.
+
+Children message `main` back with their own send_message `{to: "main"}` — no
+extra IPC: the tool returns the message in its result details and the parent
+lifts it off the child's event stream (`toMainMessage` in rpc-turns.ts),
+relaying it as a `subagent-message` notification; in children
+(`PI_SUBAGENT_CHILD=1`) the tool is eager with a promptSnippet so the model
+knows it can report, while the parent keeps it deferred. Not covered:
+agent↔agent routing by name (the agent-teams design in the project roadmap)
+and `isolation: "remote"`.

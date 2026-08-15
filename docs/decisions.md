@@ -89,6 +89,7 @@ Full context: [`decisions/subagents-workflows.md`](decisions/subagents-workflows
 
 - **[Subagents: what matches Claude Code and what does not](decisions/subagents-workflows.md#subagents-what-matches-claude-code-and-what-does-not)** — the parity map for the subagent tool (fork, worktree isolation, background runs, two-way messaging).
 - **[Permission modes and subagents](decisions/subagents-workflows.md#permission-modes-and-subagents)** — how permission mode propagates into subagent sessions.
+- **[send_message delivery, resident children, and default-model selection](decisions/subagents-workflows.md#send_message-delivery-resident-children-and-default-model-selection)** — live steering of resident RPC children (boot-queue and hasUI traps), the role-profile default model + `/subagent` override, and child→main reporting.
 - **[Subagent model selection, resolved in the parent](decisions/subagents-workflows.md#subagent-model-selection-resolved-in-the-parent-advertised-by-reminder)** — aliases stay in-provider, crossings are announced, defaults come from `CLAUDE_CODE_SUBAGENT_MODEL`/`subagentModel`, menu re-advertised every turn.
 - **[Workflow tool (ultracode orchestration)](decisions/subagents-workflows.md#workflow-tool-ultracode-orchestration)** — vm-sandboxed JS scripts fanning out to in-process subagents; background runs, journal resume, saved workflows.
 
