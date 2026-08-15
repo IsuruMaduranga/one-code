@@ -24,7 +24,7 @@ Full context: [`decisions/branding.md`](decisions/branding.md).
 - **[Themes: authored, not adopted](decisions/branding.md#themes-authored-not-adopted)** — `one-code`/`one-code-light` are hand-authored 51-token themes; no community theme fit.
 - **[Rebrand: pincer](decisions/branding.md#rebrand-pincer)** — (history) why the product was "pincer" / npm `pincer-agent`, and Claude Code stays descriptive ("compatible with…") never titular.
 - **[Rebrand: One Code](decisions/branding.md#rebrand-one-code)** — pincer → **One Code** / npm `one-code`: the stacked wordmark, the full rename surface (state dir, env, channels, repo), and what stays as history.
-- **[Startup listing: quietStartup + banner sections](decisions/branding.md#startup-listing-quietstartup-banner-sections)** — when pi's `quietStartup` is on, compact context/skills/workflows/themes sections replace pi's noisy resource listing.
+- **[Startup listing: quietStartup + banner sections](decisions/branding.md#startup-listing-quietstartup--banner-sections)** — when pi's `quietStartup` is on, compact context/skills/workflows/themes sections replace pi's noisy resource listing.
 
 ## System prompt
 
@@ -40,7 +40,7 @@ Full context: [`decisions/tools.md`](decisions/tools.md).
 - **[Tool names stay pi-idiomatic (snake_case)](decisions/tools.md#tool-names-stay-pi-idiomatic-snake_case)** — register `todo_write`/`subagent`-style names; `matcher.ts` maps users' Claude Code PascalCase permission rules onto them.
 - **[Deferred tools (ToolSearch)](decisions/tools.md#deferred-tools-toolsearch)** — how tool schemas are kept out of the prompt until asked for, using the provider's native mechanism where available.
 - **[Web tools](decisions/tools.md#web-tools)** — `web_search` wraps the one community dep (`pi-web-search`); the rest is our own.
-- **[AskUserQuestion — our own](decisions/tools.md#askuserquestion-our-own)** — the multi-question schema, option lists, multi-select, and headless fallback.
+- **[AskUserQuestion — our own](decisions/tools.md#askuserquestion--our-own)** — the multi-question schema, option lists, multi-select, and headless fallback.
 - **[web_fetch answers a `prompt` with a reader model](decisions/tools.md#web_fetch-answers-a-prompt-with-a-reader-model)** — fetch → readability → markdown, and an optional `prompt` answered by a small reader model with a loud raw-content fallback.
 - **[Tool errors fail loud, never soft-fallback](decisions/tools.md#tool-errors-fail-loud-never-soft-fallback)** — a malformed/ambiguous call returns `isError:true` with the fix named, never a plausible-but-wrong success (the `subagent`-catalog archetype); audit + the 13 fixes across 12 tools.
 - **[Harness discipline (divergences found by self-comparison)](decisions/tools.md#harness-discipline-divergences-found-by-self-comparison)** — Claude-Code-compatible behaviours found by self-comparison that aren't obvious from any single tool.
@@ -119,7 +119,7 @@ Full context: [`decisions/compaction.md`](decisions/compaction.md).
 
 Full context: [`decisions/mcp.md`](decisions/mcp.md).
 
-- **[MCP — our own client on the official SDK](decisions/mcp.md#mcp-our-own-client-on-the-official-sdk)** — `.mcp.json` discovery, `mcp__server__tool` naming, resources.
+- **[MCP — our own client on the official SDK](decisions/mcp.md#mcp--our-own-client-on-the-official-sdk)** — `.mcp.json` discovery, `mcp__server__tool` naming, resources.
 - **[MCP servers with unset credentials](decisions/mcp.md#mcp-servers-with-unset-credentials)** — how a server with missing credentials is handled rather than crashing discovery.
 - **[Background connect: session_start no longer blocks the prompt](decisions/mcp.md#background-connect-session_start-no-longer-blocks-the-prompt-2026-08-10)** — the awaited MCP handshake *was* the 4.9s startup (findings §15); now fire-and-forget in the interactive session (501ms measured), still awaited in one-shots and subagent children; SDK import lazified.
 
@@ -139,10 +139,10 @@ Full context: [`decisions/skills-plugins.md`](decisions/skills-plugins.md).
 
 Full context: [`decisions/tui.md`](decisions/tui.md).
 
-- **[Compact tool rendering — the Claude Code transcript look](decisions/tui.md#compact-tool-rendering-the-claude-code-transcript-look-unreviewed)** *(unreviewed)* — `●`/`⎿` call+result lines with ctrl+o collapse for every One Code tool, compact `✳` notification headlines, boxless theme, dimmer thinking text.
+- **[Compact tool rendering — the Claude Code transcript look](decisions/tui.md#compact-tool-rendering--the-claude-code-transcript-look-unreviewed)** *(unreviewed)* — `●`/`⎿` call+result lines with ctrl+o collapse for every One Code tool, compact `✳` notification headlines, boxless theme, dimmer thinking text.
 - **[Thinking collapsed by default, expandable with ctrl+t](decisions/tui.md#thinking-collapsed-by-default-expandable-with-ctrlt-unreviewed)** *(unreviewed)* — pi's own `hideThinkingBlock` defaulted on (only when the user never chose), `✻ Thinking…` label via `setHiddenThinkingLabel`; the write lands next session (settings cached at startup).
 - **[Built-in tools joined the ● language; banner cut to four lines](decisions/tui.md#built-in-tools-joined-the--language-banner-cut-to-four-lines-unreviewed)** *(unreviewed)* — `tool-style` wraps pi's read/write/edit/grep/find/ls renderers (`● Label(arg)` + base result under a `⎿` elbow, edit's diff preview kept); one curated hint line, sections as counts, warnings point at /lsp & /mcp.
-- **[Fullscreen (alt-screen) for Claude Code's clean exit — a setting, not extension code](decisions/tui.md#fullscreen-alt-screen-for-claude-codes-clean-exit-a-setting-not-extension-code-unreviewed)** *(unreviewed)* — CC's clean exit is the terminal alt-screen buffer; pi has it as `tuiMode: "fullscreen"`, but the renderer is a pi-core startup choice with no extension hook, so One Code recommends the setting rather than owning it.
+- **[Fullscreen (alt-screen) for Claude Code's clean exit — a setting, not extension code](decisions/tui.md#fullscreen-alt-screen-for-claude-codes-clean-exit--a-setting-not-extension-code-unreviewed)** *(unreviewed)* — CC's clean exit is the terminal alt-screen buffer; pi has it as `tuiMode: "fullscreen"`, but the renderer is a pi-core startup choice with no extension hook, so One Code recommends the setting rather than owning it.
 - **[Render memoization: components cache by width](decisions/tui.md#render-memoization-components-cache-by-width-2026-08-10)** — pi-tui renders every mounted component every frame (findings §15), so `linesComponent` memoizes by width (safe: state changes mint fresh components; `invalidate()` clears); `truncateLine` got a raw-length fast path. Rule: every custom renderer component must memoize `render(width)`.
 
 ## Hooks

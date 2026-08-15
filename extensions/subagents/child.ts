@@ -37,7 +37,7 @@ export function piInvocation(args: string[]): { command: string; args: string[] 
  * entire transcript; without this, a weaker model tends to abandon its
  * assigned task and continue (or confabulate about) the inherited topic —
  * then its output returns to the parent looking like independent
- * confirmation. See docs/features/tool-ambiguity-hardening.md (fork confabulation).
+ * confirmation. See docs/features/tools/records/tool-ambiguity-hardening.md (fork confabulation).
  */
 export function forkTaskMessage(task: string): string {
 	return [

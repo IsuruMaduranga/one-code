@@ -322,7 +322,7 @@ error.
 **Why.** A captured weak-model payload showed the model had no way to know
 agent names without a discovery call (Claude Code injects the agent-type
 list in a system reminder). The fork preamble and override rejection close
-the fork-confabulation incident (docs/features/tool-ambiguity-hardening.md): a fork on
+the fork-confabulation incident (docs/features/tools/records/tool-ambiguity-hardening.md): a fork on
 `thinking:"minimal"` abandoned its task and continued the inherited topic,
 and the parent read the returned text as independent confirmation. Claude
 Code silently *ignores* `model` for forks; rejection was chosen over silent
@@ -349,7 +349,7 @@ gate fires before anything detaches (verified live).
 
 **Why / rejected.** Full rationale and the rejected shapes (separate
 `bash_background` tool; generalising `monitor`) in
-[`../features/background-bash.md`](../features/background-bash.md), now implemented.
+[`../features/tools/records/background-bash.md`](../features/tools/records/background-bash.md), now implemented.
 A separate tool name would diverge from Claude Code's single-Bash shape and
 lose the existing `bash` permission rules for free.
 
