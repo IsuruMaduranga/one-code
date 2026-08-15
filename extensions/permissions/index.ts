@@ -133,6 +133,9 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	 */
 	let badgeCtx: ExtensionContext | undefined;
 
+	/** True while the model is streaming — the badge carries the interrupt hint. */
+	let streaming = false;
+
 	/**
 	 * The classifier the banner and badge should name: the pinned one once a
 	 * call has settled it, otherwise the chain's first candidate — the thing
@@ -165,6 +168,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				modeBadge(mode, {
 					paused: pauseTracker.isPaused(),
 					classifierModel: classifierState.pinned?.id,
+					streaming,
 				}),
 			],
 			{ placement: "belowEditor" },
@@ -447,6 +451,18 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		memoryDirPath = projectMemoryDir(ctx.cwd);
 		scratchpadDirPath = sessionScratchpadDir(ctx.cwd, ctx.sessionManager.getSessionId());
 		reloadSettings(ctx);
+		applyBadge();
+	});
+
+	// The badge carries "· esc to interrupt" only while the model works (CC's
+	// mode line does the same).
+	pi.on("agent_start", (_event, ctx) => {
+		badgeCtx = ctx;
+		streaming = true;
+		applyBadge();
+	});
+	pi.on("agent_end", () => {
+		streaming = false;
 		applyBadge();
 	});
 

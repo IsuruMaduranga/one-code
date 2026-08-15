@@ -251,3 +251,16 @@ export function renderEffortSlider(view: SliderView, paint: Paint): string[] {
 		paint("dim", clip(SHORT_HINTS)),
 	];
 }
+
+/**
+ * Claude Code's effort-changed note ("● high · /effort"), shown transiently
+ * right-aligned above the input after the level changes. Symbols are CC's
+ * (constants/figures.ts: ○ low, ◐ medium, ● high, ◉ max); pi's extra rungs
+ * map onto the nearest CC level, and ultracode keeps its own ✦ badge.
+ */
+export function effortNoteText(level: ThinkingLevel, ultracode: boolean): string {
+	if (ultracode) return "✦ ultracode · /effort";
+	const symbol =
+		level === "medium" ? "◐" : level === "high" ? "●" : level === "xhigh" || level === "max" ? "◉" : "○";
+	return `${symbol} ${level} · /effort`;
+}

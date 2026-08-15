@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	effortNoteText,
 	acceptedEffortArgs,
 	choiceForState,
 	decodeKey,
@@ -257,5 +258,20 @@ describe("renderEffortSlider", () => {
 
 	it("omits the unsupported note when the model reaches every stop", () => {
 		expect(render(2).join("\n")).not.toContain("unsupported");
+	});
+});
+
+describe("effortNoteText", () => {
+	it("maps levels onto Claude Code's effort symbols", () => {
+		expect(effortNoteText("low", false)).toBe("○ low · /effort");
+		expect(effortNoteText("medium", false)).toBe("◐ medium · /effort");
+		expect(effortNoteText("high", false)).toBe("● high · /effort");
+		expect(effortNoteText("xhigh", false)).toBe("◉ xhigh · /effort");
+		expect(effortNoteText("max", false)).toBe("◉ max · /effort");
+		expect(effortNoteText("off", false)).toBe("○ off · /effort");
+	});
+
+	it("keeps ultracode's own badge", () => {
+		expect(effortNoteText("xhigh", true)).toBe("✦ ultracode · /effort");
 	});
 });

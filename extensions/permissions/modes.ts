@@ -54,9 +54,13 @@ export const CYCLE_KEY_HINT = "ctrl+q to cycle";
  * the way Claude Code's footer does, so the shortcut sits next to the state it
  * changes.
  */
-export function modeBadge(mode: PermissionMode, opts?: { paused?: boolean; classifierModel?: string }): string {
+export function modeBadge(
+	mode: PermissionMode,
+	opts?: { paused?: boolean; classifierModel?: string; streaming?: boolean },
+): string {
 	const base = badgeBase(mode, opts);
-	return `${base} (${CYCLE_KEY_HINT})`;
+	// Claude Code appends the interrupt hint to this line while the model works.
+	return `${base} (${CYCLE_KEY_HINT})${opts?.streaming ? " · esc to interrupt" : ""}`;
 }
 
 function badgeBase(mode: PermissionMode, opts?: { paused?: boolean; classifierModel?: string }): string {

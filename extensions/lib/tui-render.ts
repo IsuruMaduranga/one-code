@@ -58,6 +58,23 @@ export function safeThemeBold(theme: unknown): (text: string) => string {
 	};
 }
 
+/** Humane elapsed time, Claude Code style: 45s, 1m 7s, 2h 5m. */
+export function formatDuration(startedAt?: number, finishedAt?: number, now?: number): string {
+	if (startedAt === undefined) return "";
+	const end = finishedAt ?? now ?? startedAt;
+	const total = Math.max(0, Math.round((end - startedAt) / 1000));
+	if (total < 60) return `${total}s`;
+	if (total < 3600) return `${Math.floor(total / 60)}m ${total % 60}s`;
+	return `${Math.floor(total / 3600)}h ${Math.floor((total % 3600) / 60)}m`;
+}
+
+/** Right-align plain text within `width` columns. */
+export function alignRight(text: string, width: number): string {
+	const length = [...text].length;
+	if (length >= width) return text.slice(0, Math.max(0, width));
+	return " ".repeat(width - length) + text;
+}
+
 /** Cut plain (unpainted) text to `width` columns by code point, with an ellipsis. */
 export function cutPlainText(text: string, width: number): string {
 	if (width <= 0) return "";

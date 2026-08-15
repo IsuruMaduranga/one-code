@@ -46,6 +46,7 @@
 			"extensions/subagents/index.ts",
 			"extensions/workflow/index.ts",
 			"extensions/effort/index.ts",
+			"extensions/spinner/index.ts",
 			"extensions/exit/index.ts",
 			"extensions/init/index.ts",
 			"extensions/clear/index.ts",

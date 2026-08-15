@@ -21,13 +21,14 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
-import { safeThemePaint } from "../lib/tui-render.ts";
+import { alignRight, linesComponent, safeThemePaint } from "../lib/tui-render.ts";
 import {
 	acceptedEffortArgs,
 	choiceForState,
 	decodeKey,
 	type EffortChoice,
 	EFFORT_CHOICES,
+	effortNoteText,
 	enabledStops,
 	levelRank,
 	moveIndex,
@@ -52,6 +53,8 @@ function modelLabel(ctx: ExtensionContext): string {
 
 const REMINDER_KEY = "ultracode-mode";
 const STATUS_KEY = "ultracode";
+const NOTE_KEY = "effort-note";
+const NOTE_MS = 5000;
 
 /**
  * The standing instruction for ultracode mode. Deliberately stronger than the
@@ -80,6 +83,27 @@ export default function effortExtension(pi: ExtensionAPI) {
 		ctx.ui.setStatus(STATUS_KEY, ultracodeActive ? "✦ ultracode" : undefined);
 	};
 
+	/**
+	 * Claude Code's effort-changed note: "● high · /effort", right-aligned above
+	 * the input for a few seconds after the level changes.
+	 */
+	let noteTimer: ReturnType<typeof setTimeout> | undefined;
+	const showEffortNote = (ctx: ExtensionContext, level: ThinkingLevel) => {
+		if (!ctx.hasUI) return;
+		const text = effortNoteText(level, ultracodeActive);
+		ctx.ui.setWidget(
+			NOTE_KEY,
+			(_tui, theme) => {
+				const paint = safeThemePaint(theme);
+				return linesComponent((width) => [paint("dim", alignRight(text, Math.max(1, width - 1)))]);
+			},
+			{ placement: "aboveEditor" },
+		);
+		if (noteTimer) clearTimeout(noteTimer);
+		noteTimer = setTimeout(() => ctx.ui.setWidget(NOTE_KEY, undefined), NOTE_MS);
+		noteTimer.unref?.();
+	};
+
 	const setUltracode = (on: boolean, level?: ThinkingLevel) => {
 		ultracodeActive = on;
 		ultracodeLevel = on ? level : undefined;
@@ -102,6 +126,7 @@ export default function effortExtension(pi: ExtensionAPI) {
 
 		setUltracode(choice === ULTRACODE, actual);
 		applyStatus(ctx);
+		showEffortNote(ctx, actual);
 
 		// setThinkingLevel clamps to model capability silently. Only flag a genuine
 		// downward clamp (the model can't reach the requested level); an upward clamp
@@ -208,6 +233,7 @@ export default function effortExtension(pi: ExtensionAPI) {
 			applyStatus(ctx);
 			ctx.ui.notify(`Ultracode off — reasoning is now ${event.level}`, "info");
 		}
+		showEffortNote(ctx, event.level);
 	});
 
 	pi.on("session_start", (_event, ctx) => {

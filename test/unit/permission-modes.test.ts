@@ -79,6 +79,11 @@ describe("modeBadge", () => {
 		expect(modeBadge("auto", { paused: true, classifierModel: "gpt-5-mini" })).toBe(`⏸ auto mode paused · 5-mini${HINT}`);
 	});
 
+	it("appends the interrupt hint only while streaming (CC's mode line)", () => {
+		expect(modeBadge("default", { streaming: true })).toBe(`${MODE_BADGES.default}${HINT} · esc to interrupt`);
+		expect(modeBadge("default", { streaming: false })).toBe(`${MODE_BADGES.default}${HINT}`);
+	});
+
 	it("only shows paused for auto mode", () => {
 		expect(modeBadge("default", { paused: true })).toBe(`${MODE_BADGES.default}${HINT}`);
 	});

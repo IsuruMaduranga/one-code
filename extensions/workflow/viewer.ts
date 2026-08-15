@@ -11,7 +11,9 @@
  * before painting so ANSI escapes never enter the width accounting.
  */
 
-import { cutPlainText as cut, wrapPlainText } from "../lib/tui-render.ts";
+import { cutPlainText as cut, formatDuration, wrapPlainText } from "../lib/tui-render.ts";
+
+export { formatDuration } from "../lib/tui-render.ts";
 import { formatTokenCount } from "../subagents/usage.ts";
 import type { AgentRecord, RunStatus } from "./types.ts";
 
@@ -204,16 +206,6 @@ export function clampViewerState(state: ViewerState, runs: ViewerRunSnapshot[]):
 // ---------------------------------------------------------------------------
 // Formatting helpers (all plain text; painting happens at the very end)
 // ---------------------------------------------------------------------------
-
-/** Humane elapsed time, Claude Code style: 45s, 1m 7s, 2h 5m. */
-export function formatDuration(startedAt?: number, finishedAt?: number, now?: number): string {
-	if (startedAt === undefined) return "";
-	const end = finishedAt ?? now ?? startedAt;
-	const total = Math.max(0, Math.round((end - startedAt) / 1000));
-	if (total < 60) return `${total}s`;
-	if (total < 3600) return `${Math.floor(total / 60)}m ${total % 60}s`;
-	return `${Math.floor(total / 3600)}h ${Math.floor((total % 3600) / 60)}m`;
-}
 
 /** Cut then pad plain text to exactly `width` columns. */
 function cell(text: string, width: number): string {
