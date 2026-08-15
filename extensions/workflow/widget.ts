@@ -51,6 +51,15 @@ export class WorkflowWidget {
 		this.schedule();
 	}
 
+	/**
+	 * Re-set the widget so it re-inserts below rows other extensions just set
+	 * (setWidget order is last-write order); the permission-mode badge triggers
+	 * this over the status channel to keep the strip beneath the mode line.
+	 */
+	refresh(): void {
+		this.schedule();
+	}
+
 	/** Rows currently selectable (capped like the render). */
 	rowCount(): number {
 		return Math.min(this.manager.list().length, MAX_STATUS_ROWS);
@@ -120,7 +129,11 @@ export class WorkflowWidget {
 					this.editorBaseline = focused;
 				}
 				const paint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme) };
-				return linesComponent((width) => renderStatusRows({ runs, selected, width, now }, paint));
+				// One-space indent to align with string-array widgets (pi's Text
+				// wraps those with paddingX=1 — the permission-mode badge above).
+				return linesComponent((width) =>
+					renderStatusRows({ runs, selected, width: width - 1, now }, paint).map((line) => ` ${line}`),
+				);
 			},
 			{ placement: "belowEditor" },
 		);

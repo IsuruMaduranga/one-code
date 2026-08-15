@@ -154,13 +154,20 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	};
 
 	const applyBadge = () => {
-		// setStatus is a no-op outside the TUI, so this is safe unconditionally.
-		badgeCtx?.ui.setStatus(
+		// A below-editor widget, not a footer status: Claude Code renders the
+		// mode line directly under the input box, and the workflow status strip
+		// sorts itself below this line by re-setting on the status channel
+		// (setWidget re-inserts on update, so widget order is last-write order).
+		// setWidget is a no-op outside the TUI, so this is safe unconditionally.
+		badgeCtx?.ui.setWidget(
 			"permission-mode",
-			modeBadge(mode, {
-				paused: pauseTracker.isPaused(),
-				classifierModel: classifierState.pinned?.id,
-			}),
+			[
+				modeBadge(mode, {
+					paused: pauseTracker.isPaused(),
+					classifierModel: classifierState.pinned?.id,
+				}),
+			],
+			{ placement: "belowEditor" },
 		);
 		// The banner shows mode and classifier live; it listens on the bus
 		// because jiti isolates module state between extensions.

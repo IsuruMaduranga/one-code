@@ -21,6 +21,7 @@ import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
+import { PERMISSION_STATUS_CHANNEL } from "../permissions/modes.ts";
 import { applicableSubagentDefault, loadSubagentDefault } from "../subagents/default-model.ts";
 import { discoverSavedWorkflows, findSavedWorkflow, workflowDirs } from "./saved-workflows.ts";
 import { buildRunReport, WorkflowRunManager } from "./run-manager.ts";
@@ -462,6 +463,11 @@ export default function workflowExtension(pi: ExtensionAPI) {
 		lastCtx = ctx;
 		registerInputHook(ctx);
 	});
+
+	// The permission-mode badge is a below-editor widget too, re-set on every
+	// mode change; setWidget order is last-write order, so re-set the strip
+	// whenever the badge changes to keep it beneath the mode line (CC's order).
+	pi.events.on(PERMISSION_STATUS_CHANNEL, () => widget.refresh());
 
 	pi.on("session_shutdown", () => {
 		manager.abortAll("session ended");
