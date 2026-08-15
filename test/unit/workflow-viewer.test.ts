@@ -365,6 +365,14 @@ describe("renderViewer", () => {
 		expect(lines.some((l) => l.startsWith("┌ Phases"))).toBe(true);
 	});
 
+	it("shows the waiting line before the first agent of an undeclared-phase run", () => {
+		const lines = renderViewer(
+			{ runs: [run([], { status: "running", finishedAt: undefined })], state: initialViewerState(), width: 100, height: 16, now: 0 },
+			paint,
+		).map(strip);
+		expect(lines.some((l) => l.includes("No agents yet"))).toBe(true);
+	});
+
 	it("renders the empty state without runs", () => {
 		const lines = renderViewer({ runs: [], state: initialViewerState(), width: 80, height: 10, now: 0 }, paint).map(
 			strip,

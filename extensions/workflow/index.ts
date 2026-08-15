@@ -404,12 +404,15 @@ export default function workflowExtension(pi: ExtensionAPI) {
 	// against the captured baseline) to never steal keys from dialogs.
 	let inputHookRegistered = false;
 	const DOWN_KEYS = new Set(["\x1b[B", "\x1bOB"]);
-	const registerInputHook = (ctx: ExtensionContext) => {
-		if (inputHookRegistered || !ctx.hasUI) return;
+	const registerInputHook = (registerCtx: ExtensionContext) => {
+		if (inputHookRegistered || !registerCtx.hasUI) return;
 		inputHookRegistered = true;
 		const leave = () => widget.setFocus(undefined);
 		try {
-			ctx.ui.onTerminalInput((data) => {
+			registerCtx.ui.onTerminalInput((data) => {
+				// Session switches replace the ExtensionContext; the hook registers
+				// once, so it must act through the freshest ctx, not its closure.
+				const ctx = lastCtx ?? registerCtx;
 				if (viewerOpen || !widget.rowCount()) {
 					if (widget.focusIndex !== undefined) leave();
 					return undefined;
@@ -440,7 +443,9 @@ export default function workflowExtension(pi: ExtensionAPI) {
 						return { consume: true };
 					case "leave":
 						leave();
-						return { consume: true };
+						// While the model streams, esc must still interrupt it — drop the
+						// soft focus and let the byte through; consumed only when idle.
+						return ctx.isIdle() ? { consume: true } : undefined;
 					case "stop": {
 						const run = widget.selectedRun();
 						if (run) manager.abort(run.runId, "stopped from status strip");

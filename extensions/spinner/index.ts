@@ -26,9 +26,14 @@ export default function spinnerExtension(pi: ExtensionAPI) {
 	let lastCtx: ExtensionContext | undefined;
 	let verb = pickVerb();
 	let turnStartedAt = 0;
-	/** Characters from finished assistant messages this turn + the streaming one. */
+	/** Characters from finished assistant messages this turn. */
 	let settledChars = 0;
-	let streamingChars = 0;
+	/**
+	 * The streaming message, summed lazily on the 1s ticker — message_update
+	 * fires per token carrying the whole message-so-far, so counting there
+	 * would be O(n²) over a long response.
+	 */
+	let streamingMessage: unknown;
 	let ticker: ReturnType<typeof setInterval> | undefined;
 
 	const updateWorkingMessage = () => {
@@ -38,7 +43,7 @@ export default function spinnerExtension(pi: ExtensionAPI) {
 			composeWorkingMessage({
 				verb,
 				elapsedMs: Date.now() - turnStartedAt,
-				responseChars: settledChars + streamingChars,
+				responseChars: settledChars + messageChars(streamingMessage),
 			}),
 		);
 	};
@@ -70,7 +75,7 @@ export default function spinnerExtension(pi: ExtensionAPI) {
 		verb = pickVerb();
 		turnStartedAt = Date.now();
 		settledChars = 0;
-		streamingChars = 0;
+		streamingMessage = undefined;
 		updateWorkingMessage();
 		stopTicker();
 		ticker = setInterval(updateWorkingMessage, TICK_MS);
@@ -79,13 +84,13 @@ export default function spinnerExtension(pi: ExtensionAPI) {
 
 	pi.on("message_update", (event) => {
 		if (event.message.role !== "assistant") return;
-		streamingChars = messageChars(event.message);
+		streamingMessage = event.message;
 	});
 
 	pi.on("message_end", (event, ctx) => {
 		if (event.message.role === "assistant") {
 			settledChars += messageChars(event.message);
-			streamingChars = 0;
+			streamingMessage = undefined;
 		}
 		// Usage (and so context size) lands with each finished message.
 		updateCounter(ctx);

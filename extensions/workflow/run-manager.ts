@@ -146,9 +146,14 @@ export class WorkflowRunManager {
 		return [...this.runs.values()];
 	}
 
-	/** All runs as viewer snapshots, newest first (the display order). */
-	snapshots(): ViewerRunSnapshot[] {
-		return this.list().map(snapshotRun).reverse();
+	/**
+	 * Runs as viewer snapshots, newest first (the display order). `limit`
+	 * keeps per-tick consumers (the status strip) from copying every run and
+	 * agent record of the session for a handful of display rows.
+	 */
+	snapshots(limit?: number): ViewerRunSnapshot[] {
+		const handles = limit !== undefined ? this.list().slice(-limit) : this.list();
+		return handles.map(snapshotRun).reverse();
 	}
 
 	get(runId: string): RunHandle | undefined {

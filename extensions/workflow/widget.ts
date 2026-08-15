@@ -13,7 +13,7 @@
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { linesComponent, safeThemeBold, safeThemePaint } from "../lib/tui-render.ts";
-import { snapshotRun, type RunHandle, type WorkflowRunManager } from "./run-manager.ts";
+import type { RunHandle, WorkflowRunManager } from "./run-manager.ts";
 import { MAX_STATUS_ROWS, renderStatusRows, type ViewerRunSnapshot } from "./viewer.ts";
 
 const WIDGET_KEY = "workflow";
@@ -66,15 +66,7 @@ export class WorkflowWidget {
 
 	selectedRun(): ViewerRunSnapshot | undefined {
 		if (this.focusIndex === undefined) return undefined;
-		return this.visibleSnapshots()[this.focusIndex];
-	}
-
-	/**
-	 * Only the runs the strip can display (newest first) — a per-tick render
-	 * must not pay to copy every run and agent record of the session.
-	 */
-	private visibleSnapshots(): ViewerRunSnapshot[] {
-		return this.manager.list().slice(-MAX_STATUS_ROWS).map(snapshotRun).reverse();
+		return this.manager.snapshots(MAX_STATUS_ROWS)[this.focusIndex];
 	}
 
 	setFocus(index: number | undefined): void {
@@ -84,8 +76,7 @@ export class WorkflowWidget {
 
 	/** True when the core editor is focused and empty — safe to take the down key. */
 	editorFocusedAndIdle(ctx: ExtensionContext): boolean {
-		if (!this.tui || !this.editorBaseline) return false;
-		if (this.tui.getFocusedComponent?.() !== this.editorBaseline) return false;
+		if (!this.editorFocused()) return false;
 		try {
 			return ctx.ui.getEditorText().trim() === "";
 		} catch {
@@ -117,7 +108,7 @@ export class WorkflowWidget {
 		const ctx = this.getCtx();
 		if (!ctx?.hasUI) return;
 		const totalRuns = this.manager.list().length;
-		const runs = this.visibleSnapshots();
+		const runs = this.manager.snapshots(MAX_STATUS_ROWS);
 		this.syncTicker(runs);
 		if (!runs.length) {
 			ctx.ui.setWidget(WIDGET_KEY, undefined);

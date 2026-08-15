@@ -325,7 +325,7 @@ export function buildDetail(
 	const lines: PaneLine[] = [];
 	const title = STATUS_TITLE[record.status] + (record.model ? ` · ${record.model}` : "");
 	lines.push({ text: title, style: record.status === "failed" ? "error" : "accent" });
-	const toolCalls = record.toolCalls ?? record.activity.length;
+	const toolCalls = record.toolCalls;
 	const stats: string[] = [];
 	if (record.tokens) stats.push(`${formatTokenCount(record.tokens.output)} tok`);
 	stats.push(`${toolCalls} tool call${toolCalls === 1 ? "" : "s"}`);
@@ -441,7 +441,9 @@ export function renderViewer(input: ViewerInput, paint: ViewerPaint): string[] {
 		if (!atAgents) {
 			return {
 				left: scrollWindow(phaseRows(phases, state.phaseCursor, leftInner), state.phaseCursor, leftVisible),
-				right: phase ? agentRows(phase.agents, rightInner, input.now).slice(0, rightVisible) : [],
+				// No phase groups yet (no declared phases, first agent() pending) still
+				// gets agentRows' "No agents yet…" waiting line, not a blank pane.
+				right: agentRows(phase?.agents ?? [], rightInner, input.now).slice(0, rightVisible),
 			};
 		}
 		return {
@@ -550,6 +552,9 @@ export function renderStatusRows(input: StatusRowsInput, paint: ViewerPaint): st
 			`${done}/${run.agents.length} agents done`,
 			formatDuration(run.startedAt, run.finishedAt, input.now),
 			outTokens ? `↓ ${formatTokenCount(outTokens)} tokens` : "",
+			// Unlike the viewer header, "completed" stays silent here — the strip's
+			// "n/n agents done" already says it (CC's strip does the same); only
+			// abnormal ends (failed/aborted) earn a word.
 			run.status === "running" || run.status === "completed" ? "" : run.status,
 		]
 			.filter(Boolean)
