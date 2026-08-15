@@ -43,8 +43,8 @@ export interface ViewerState {
 	notice?: string;
 }
 
-export function initialViewerState(): ViewerState {
-	return { runIndex: 0, cursor: 0, detailScroll: 0, confirmOverwrite: false };
+export function initialViewerState(runIndex = 0): ViewerState {
+	return { runIndex, cursor: 0, detailScroll: 0, confirmOverwrite: false };
 }
 
 export type ViewerKey =
@@ -77,6 +77,35 @@ export function decodeViewerKey(data: string): ViewerKey | undefined {
 		case "\x03": // ctrl+c — same intent as escape while the viewer is focused
 		case "q":
 			return { kind: "close" };
+		default:
+			return undefined;
+	}
+}
+
+/**
+ * Keys the below-editor status strip responds to while it holds soft focus
+ * (Claude Code's down-arrow-to-the-workflow-entry flow). Anything it does not
+ * recognize means the user started typing — the wiring drops focus and lets
+ * the byte through to the editor.
+ */
+export type StatusKey = "up" | "down" | "open" | "leave" | "stop";
+
+export function decodeStatusKey(data: string): StatusKey | undefined {
+	switch (data) {
+		case "\x1b[A":
+		case "\x1bOA":
+			return "up";
+		case "\x1b[B":
+		case "\x1bOB":
+			return "down";
+		case "\r":
+		case "\n":
+			return "open";
+		case "\x1b":
+			return "leave";
+		case "x":
+		case "X":
+			return "stop";
 		default:
 			return undefined;
 	}
@@ -323,6 +352,70 @@ function paneLines(
 	const lines = visible.map((row) => paintRow(row, row.agentIndex === state.cursor, paneWidth));
 	while (lines.length < height) lines.push(" ".repeat(paneWidth));
 	return lines;
+}
+
+// ---------------------------------------------------------------------------
+// Status strip (the persistent below-editor rows, Claude Code's bottom entry)
+// ---------------------------------------------------------------------------
+
+export interface StatusRowsInput {
+	runs: ViewerRunSnapshot[];
+	/** Index into `runs` of the soft-focused row; undefined when unfocused. */
+	selected?: number;
+	width: number;
+	now: number;
+}
+
+/** Rows shown before collapsing the rest into a "+N more" line. */
+export const MAX_STATUS_ROWS = 3;
+
+const STATUS_ROW_MARK: Record<RunStatus, string> = {
+	running: "○",
+	completed: "●",
+	failed: "✗",
+	aborted: "◼",
+};
+
+/**
+ * One line per run: marker + name + description on the left, right-aligned
+ * `done/total agents done · elapsed · ↓ tokens` stats. The soft-focused row
+ * swaps its marker for ❯ and is painted accent by the caller's palette.
+ */
+export function renderStatusRows(input: StatusRowsInput, paint: ViewerPaint): string[] {
+	const width = Math.max(20, input.width);
+	if (!input.runs.length) return [];
+	const out: string[] = [];
+	const shown = input.runs.slice(0, MAX_STATUS_ROWS);
+	for (const [index, run] of shown.entries()) {
+		const selected = input.selected === index;
+		const done = run.agents.filter((a) => a.status !== "running").length;
+		const outTokens = run.agents.reduce((sum, a) => sum + (a.tokens?.output ?? 0), 0);
+		const stats = [
+			`${done}/${run.agents.length} agents done`,
+			formatDuration(run.startedAt, run.finishedAt, input.now),
+			outTokens ? `↓ ${formatTokenCount(outTokens)} tokens` : "",
+			run.status === "running" || run.status === "completed" ? "" : run.status,
+		]
+			.filter(Boolean)
+			.join(" · ");
+		const mark = selected ? "❯" : STATUS_ROW_MARK[run.status];
+		const left = `${mark} ${run.name}  ${run.description ?? ""}`.trimEnd();
+		const leftWidth = width - [...stats].length - 2;
+		if (selected) {
+			const plain = leftWidth < 8 ? cut(`${left}  ${stats}`, width) : `${cell(left, leftWidth)}  ${stats}`;
+			out.push(paint.fg("accent", plain));
+		} else if (leftWidth < 8) {
+			const color = run.status === "failed" ? "error" : "dim";
+			out.push(paint.fg(color, cut(`${left}  ${stats}`, width)));
+		} else {
+			const leftPart = run.status === "failed" ? paint.fg("error", cell(left, leftWidth)) : cell(left, leftWidth);
+			out.push(`${leftPart}  ${paint.fg("dim", stats)}`);
+		}
+	}
+	if (input.runs.length > shown.length) {
+		out.push(paint.fg("dim", cut(`  +${input.runs.length - shown.length} more — /workflows`, width)));
+	}
+	return out;
 }
 
 function detailPane(

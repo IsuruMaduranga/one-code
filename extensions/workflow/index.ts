@@ -35,6 +35,7 @@ import {
 import { WorkflowScriptError } from "./types.ts";
 import {
 	clampViewerState,
+	decodeStatusKey,
 	decodeViewerKey,
 	initialViewerState,
 	planSave,
@@ -193,6 +194,17 @@ export default function workflowExtension(pi: ExtensionAPI) {
 	let lastCtx: ExtensionContext | undefined;
 	const widget = new WorkflowWidget(manager, () => lastCtx);
 	const deliveredRuns = new Set<string>();
+	let viewerOpen = false;
+
+	const openViewer = async (ctx: ExtensionContext, opts?: { height?: "full" | "half"; runIndex?: number }) => {
+		if (viewerOpen) return;
+		viewerOpen = true;
+		try {
+			await openWorkflowViewer(ctx, manager, opts);
+		} finally {
+			viewerOpen = false;
+		}
+	};
 
 	const deliverResult = (runId: string) => {
 		const handle = manager.get(runId);
@@ -216,8 +228,17 @@ export default function workflowExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "workflow",
 		label: "Workflow",
-		...ccToolRenderers<{ name?: string; scriptPath?: string; script?: string; resumeFromRunId?: string }>("Workflow", {
+		...ccToolRenderers<
+			{ name?: string; scriptPath?: string; script?: string; resumeFromRunId?: string },
+			{ runId?: string; background?: boolean }
+		>("Workflow", {
 			title: (a) => a?.name ?? a?.scriptPath ?? (a?.resumeFromRunId ? `resume ${a.resumeFromRunId}` : a?.script ? "inline script" : undefined),
+			// The model-facing start text is instructions, not information — show
+			// the user Claude Code's hint line instead.
+			result: (result, _args, isError) =>
+				!isError && result.details?.background
+					? `Running in background · /workflows to monitor and save · ${result.details.runId ?? ""}`.trimEnd()
+					: undefined,
 		}),
 		description: WORKFLOW_TOOL_DESCRIPTION,
 		promptSnippet: "Run a script that orchestrates many subagents (opt-in ultracode mode)",
@@ -326,7 +347,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 			lastCtx = ctx;
 			const [action, runId] = args.trim().split(/\s+/);
 			if (!action && ctx.hasUI) {
-				await openWorkflowViewer(ctx, manager);
+				await openViewer(ctx, { height: "full" });
 				return;
 			}
 			if (action === "stop" && runId) {
@@ -373,12 +394,78 @@ export default function workflowExtension(pi: ExtensionAPI) {
 		return undefined;
 	});
 
+	// Down-arrow soft focus for the below-editor status strip (Claude Code's
+	// bottom workflow entry): with the editor focused and empty, ↓ highlights
+	// the newest run's row; ↑/↓ move, enter opens the half-screen viewer, x
+	// stops the run, esc — or typing anything — returns to the editor. The
+	// listener runs before the focused component sees the byte, so every
+	// consume is guarded by "the core editor really has focus" (identity
+	// against the captured baseline) to never steal keys from dialogs.
+	let inputHookRegistered = false;
+	const DOWN_KEYS = new Set(["\x1b[B", "\x1bOB"]);
+	const registerInputHook = (ctx: ExtensionContext) => {
+		if (inputHookRegistered || !ctx.hasUI) return;
+		inputHookRegistered = true;
+		const leave = () => widget.setFocus(undefined);
+		try {
+			ctx.ui.onTerminalInput((data) => {
+				if (viewerOpen || !widget.rowCount()) {
+					if (widget.focusIndex !== undefined) leave();
+					return undefined;
+				}
+				if (widget.focusIndex === undefined) {
+					if (!DOWN_KEYS.has(data) || !widget.editorFocusedAndIdle(ctx)) return undefined;
+					widget.setFocus(0);
+					return { consume: true };
+				}
+				// Focus moved to a dialog/overlay since the strip took soft focus —
+				// drop it and let the dialog have the key.
+				if (!widget.editorFocused()) {
+					leave();
+					return undefined;
+				}
+				const key = decodeStatusKey(data);
+				if (!key) {
+					leave();
+					return undefined; // typing resumes in the editor, byte included
+				}
+				switch (key) {
+					case "up":
+						if (widget.focusIndex === 0) leave();
+						else widget.setFocus(widget.focusIndex - 1);
+						return { consume: true };
+					case "down":
+						widget.setFocus(Math.min(widget.rowCount() - 1, widget.focusIndex + 1));
+						return { consume: true };
+					case "leave":
+						leave();
+						return { consume: true };
+					case "stop": {
+						const run = widget.selectedRun();
+						if (run) manager.abort(run.runId, "stopped from status strip");
+						return { consume: true };
+					}
+					case "open": {
+						const runIndex = widget.focusIndex;
+						leave();
+						void openViewer(ctx, { height: "half", runIndex });
+						return { consume: true };
+					}
+				}
+			});
+		} catch {
+			// Mode without raw terminal input (print/RPC) — the strip is view-only.
+		}
+	};
+
 	pi.on("session_start", (_event, ctx) => {
 		lastCtx = ctx;
+		registerInputHook(ctx);
 	});
 
 	pi.on("session_shutdown", () => {
 		manager.abortAll("session ended");
+		widget.dispose();
 	});
 }
 
@@ -392,27 +479,23 @@ export default function workflowExtension(pi: ExtensionAPI) {
  * viewer is open, and the memoized render keeps the per-frame cost at a map
  * lookup (findings §15).
  */
-async function openWorkflowViewer(ctx: ExtensionContext, manager: WorkflowRunManager): Promise<void> {
+async function openWorkflowViewer(
+	ctx: ExtensionContext,
+	manager: WorkflowRunManager,
+	opts?: { height?: "full" | "half"; runIndex?: number },
+): Promise<void> {
 	await ctx.ui.custom<null>((tui, theme, _keybindings, done) => {
 		const paint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme) };
 
 		// Newest run first, so the viewer opens on the latest.
-		const snapshots = (): ViewerRunSnapshot[] =>
-			manager
-				.list()
-				.map((handle) => ({
-					runId: handle.runId,
-					name: handle.meta.name,
-					description: handle.meta.description,
-					status: handle.status,
-					startedAt: handle.startedAt,
-					finishedAt: handle.finishedAt,
-					errorMessage: handle.errorMessage,
-					agents: handle.agents.list(),
-				}))
-				.reverse();
+		const snapshots = (): ViewerRunSnapshot[] => manager.snapshots();
 
-		const state = initialViewerState();
+		// Full (the /workflows tab) fills the terminal; half (opened from the
+		// status strip) leaves the transcript visible above, like Claude Code.
+		const viewerHeight = (rows: number): number =>
+			opts?.height === "half" ? Math.max(12, Math.min(Math.floor(rows / 2), 30)) : Math.max(12, rows - 2);
+
+		const state = initialViewerState(opts?.runIndex ?? 0);
 		let cache: { width: number; lines: string[] } | undefined;
 		const repaint = () => {
 			cache = undefined;
@@ -450,7 +533,7 @@ async function openWorkflowViewer(ctx: ExtensionContext, manager: WorkflowRunMan
 		return {
 			render: (width: number) => {
 				if (cache?.width === width) return cache.lines;
-				const height = Math.max(12, Math.min(tui.terminal.rows - 6, 40));
+				const height = viewerHeight(tui.terminal.rows);
 				const lines = renderViewer({ runs: snapshots(), state, width, height, now: Date.now() }, paint).map(
 					(line) => truncateLine(line, width),
 				);

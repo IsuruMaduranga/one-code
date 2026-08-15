@@ -93,6 +93,7 @@ Full context: [`decisions/subagents-workflows.md`](decisions/subagents-workflows
 - **[Subagent model selection, resolved in the parent](decisions/subagents-workflows.md#subagent-model-selection-resolved-in-the-parent-advertised-by-reminder)** — aliases stay in-provider, crossings are announced, defaults come from `CLAUDE_CODE_SUBAGENT_MODEL`/`subagentModel`, menu re-advertised every turn.
 - **[Workflow tool (ultracode orchestration)](decisions/subagents-workflows.md#workflow-tool-ultracode-orchestration)** — vm-sandboxed JS scripts fanning out to in-process subagents; background runs, journal resume, saved workflows.
 - **[The /workflows viewer (interactive run UI)](decisions/subagents-workflows.md#the-workflows-viewer-interactive-run-ui)** — CC-parity full-screen run viewer: pure module + thin `ctx.ui.custom` component, 500ms repaint ticker over per-handle subscriptions, per-agent records folded at the source, two-step overwrite on save.
+- **[The workflow status strip (below-editor entry + soft focus)](decisions/subagents-workflows.md#the-workflow-status-strip-below-editor-entry--soft-focus)** — CC's ambient workflow UI: below-editor run rows, ↓-to-focus + enter → half-screen viewer (full-screen via /workflows), background-hint tool result; key stealing gated on editor-identity + empty text.
 
 ## Model policy
 

@@ -24,6 +24,7 @@ import { parseWorkflowScript } from "./script-source.ts";
 import { runWorkflowScript } from "./vm-runtime.ts";
 import type { RunProgressEvent, RunStatus, WorkflowMeta } from "./types.ts";
 import { WorkflowScriptError } from "./types.ts";
+import type { ViewerRunSnapshot } from "./viewer.ts";
 
 const WALL_CLOCK_CAP_MS = 30 * 60 * 1000;
 const RECENT_EVENTS_CAP = 200;
@@ -123,11 +124,30 @@ function formatEvent(event: RunProgressEvent): string | undefined {
 	}
 }
 
+/** Immutable view of a run for the pure renderers (viewer + status strip). */
+export function snapshotRun(handle: RunHandle): ViewerRunSnapshot {
+	return {
+		runId: handle.runId,
+		name: handle.meta.name,
+		description: handle.meta.description,
+		status: handle.status,
+		startedAt: handle.startedAt,
+		finishedAt: handle.finishedAt,
+		errorMessage: handle.errorMessage,
+		agents: handle.agents.list(),
+	};
+}
+
 export class WorkflowRunManager {
 	private runs = new Map<string, RunHandle>();
 
 	list(): RunHandle[] {
 		return [...this.runs.values()];
+	}
+
+	/** All runs as viewer snapshots, newest first (the display order). */
+	snapshots(): ViewerRunSnapshot[] {
+		return this.list().map(snapshotRun).reverse();
 	}
 
 	get(runId: string): RunHandle | undefined {

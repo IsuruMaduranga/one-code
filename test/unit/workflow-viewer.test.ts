@@ -3,9 +3,12 @@ import {
 	buildDetail,
 	buildTree,
 	clampViewerState,
+	decodeStatusKey,
 	decodeViewerKey,
 	initialViewerState,
+	MAX_STATUS_ROWS,
 	planSave,
+	renderStatusRows,
 	renderViewer,
 	type ViewerRunSnapshot,
 } from "../../extensions/workflow/viewer.ts";
@@ -54,6 +57,91 @@ describe("decodeViewerKey", () => {
 		expect(decodeViewerKey("\x1b")).toEqual({ kind: "close" });
 		expect(decodeViewerKey("\x03")).toEqual({ kind: "close" });
 		expect(decodeViewerKey("x")).toBeUndefined();
+	});
+});
+
+describe("decodeStatusKey", () => {
+	it("decodes strip navigation, open, leave, and stop", () => {
+		expect(decodeStatusKey("\x1b[A")).toBe("up");
+		expect(decodeStatusKey("\x1bOB")).toBe("down");
+		expect(decodeStatusKey("\r")).toBe("open");
+		expect(decodeStatusKey("\n")).toBe("open");
+		expect(decodeStatusKey("\x1b")).toBe("leave");
+		expect(decodeStatusKey("x")).toBe("stop");
+		expect(decodeStatusKey("X")).toBe("stop");
+	});
+
+	it("returns undefined for anything else so typing falls through", () => {
+		expect(decodeStatusKey("a")).toBeUndefined();
+		expect(decodeStatusKey("\t")).toBeUndefined();
+		expect(decodeStatusKey("\x03")).toBeUndefined();
+	});
+});
+
+describe("initialViewerState", () => {
+	it("starts on the requested run", () => {
+		expect(initialViewerState().runIndex).toBe(0);
+		expect(initialViewerState(2).runIndex).toBe(2);
+	});
+});
+
+describe("renderStatusRows", () => {
+	it("renders one row per run with name, description, and right-aligned stats", () => {
+		const rows = renderStatusRows(
+			{ runs: [run([agent({ callIndex: 0 }), agent({ callIndex: 1, status: "running" })])], width: 100, now: 11_000 },
+			paint,
+		);
+		expect(rows).toHaveLength(1);
+		const text = strip(rows[0]);
+		expect(text).toContain("demo-workflow");
+		expect(text).toContain("Tiny demo workflow to show the UI");
+		expect(text).toContain("1/2 agents done");
+		expect(text).toContain("20s"); // finishedAt - startedAt
+		expect(text).toContain("↓ 59.4k tokens"); // both agents' output summed
+	});
+
+	it("marks the selected row with ❯ and paints it accent", () => {
+		const runs = [run([agent({ callIndex: 0 })]), run([agent({ callIndex: 0 })], { runId: "wf_def456", name: "second" })];
+		const rows = renderStatusRows({ runs, selected: 1, width: 100, now: 0 }, paint);
+		expect(strip(rows[0])).toMatch(/^●/);
+		expect(strip(rows[1])).toMatch(/^❯ second/);
+		expect(rows[1]).toContain(`\x1b[${"accent".length}m`);
+	});
+
+	it("shows run markers by status and appends non-terminal statuses to stats", () => {
+		const rows = renderStatusRows(
+			{
+				runs: [
+					run([agent({ callIndex: 0 })], { status: "running", finishedAt: undefined }),
+					run([agent({ callIndex: 0, status: "failed" })], { status: "failed" }),
+					run([agent({ callIndex: 0 })], { status: "aborted" }),
+				],
+				width: 100,
+				now: 5_000,
+			},
+			paint,
+		);
+		expect(strip(rows[0])).toMatch(/^○/);
+		expect(strip(rows[1])).toMatch(/^✗/);
+		expect(strip(rows[1])).toContain("failed");
+		expect(strip(rows[2])).toMatch(/^◼/);
+		expect(strip(rows[2])).toContain("aborted");
+	});
+
+	it("caps rows and collapses the rest into a +N more line", () => {
+		const runs = Array.from({ length: MAX_STATUS_ROWS + 2 }, (_, i) =>
+			run([agent({ callIndex: 0 })], { runId: `wf_run${i}`, name: `run-${i}` }),
+		);
+		const rows = renderStatusRows({ runs, width: 100, now: 0 }, paint);
+		expect(rows).toHaveLength(MAX_STATUS_ROWS + 1);
+		expect(strip(rows[MAX_STATUS_ROWS])).toContain("+2 more — /workflows");
+	});
+
+	it("returns no rows without runs and degrades to one cut line when narrow", () => {
+		expect(renderStatusRows({ runs: [], width: 100, now: 0 }, paint)).toEqual([]);
+		const rows = renderStatusRows({ runs: [run([agent({ callIndex: 0 })])], width: 24, now: 0 }, paint);
+		expect(rows).toHaveLength(1);
+		expect([...strip(rows[0])].length).toBeLessThanOrEqual(24);
 	});
 });
 

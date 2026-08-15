@@ -314,3 +314,49 @@ Choices and reasons:
   fg twin). The component also returns `dispose()` clearing its repaint ticker
   — the only teardown hook that fires when the overlay is dismissed by
   anything other than the user's own esc.
+
+## The workflow status strip (below-editor entry + soft focus)
+
+*(2026-08-16, unreviewed — written while the user was away; review welcome.)*
+
+Claude Code's ambient workflow UI around the viewer: a persistent one-row-per-
+run strip under the input box (`○/●/✗/◼ name description … n/m agents done ·
+elapsed · ↓ tokens`), a `Running in background · /workflows to monitor and
+save · <runId>` hint as the tool-result line, ↓ from an empty editor
+soft-focuses the strip (↑/↓ rows, enter opens the viewer **half-screen** on
+that run, `x` stops it, esc or typing returns to the editor), and plain
+`/workflows` now fills the terminal (full-screen). Verified live in tmux
+(160×45): focus in/out, half vs full height, enter-on-second-row opening
+run 2/2, typing fall-through, the background hint line, and the strip
+updating 0/3→3/3 with elapsed time.
+
+Choices and reasons:
+
+- **`setWidget(…, {placement: "belowEditor"})`, not `setFooter`.** pi's dock
+  order is editor → below-widgets → footer, so the strip sits one line above
+  where Claude Code puts it (CC renders below its mode line). Exact parity
+  would mean replacing pi's whole footer with a reimplementation — a heavy,
+  conflict-prone takeover for a one-line cosmetic difference. Rejected.
+- **Soft focus via `ctx.ui.onTerminalInput`, guarded by editor identity.**
+  Extension input listeners run before the focused component sees the byte
+  and may consume it. Every consume requires (a) the captured **editor
+  baseline** — the focused component duck-typed on `getText` at widget-factory
+  time — to still be the real focused component (identity compare), and
+  (b) for the initial ↓, `getEditorText()` empty. So the strip can never
+  steal keys from permission dialogs, selectors, pop-up editors, or the
+  viewer itself; and pi's ↑-history stays intact because recalled history
+  makes the editor non-empty before ↓ ever matters. Any un-decoded key drops
+  focus and falls through, so typing "just works" from the focused state.
+- **The strip re-mints its widget component per change** (debounced 250ms +
+  a 1s elapsed ticker while any run is live) with a width-memoized
+  `linesComponent` inside — per-frame cost stays a map lookup (findings §15);
+  `now` frozen per mint is fine at 1s granularity.
+- **Half vs full viewer is a wiring-level height choice**
+  (`min(rows/2, 30)` vs `rows − 2`) on the same component — pi's non-overlay
+  `custom()` replaces the editor in the dock and leaves the transcript above,
+  so "half-screen with the conversation visible" (CC's enter-from-entry view)
+  and "full-screen tab" (CC's /workflows) are the same render at different
+  heights, no second code path.
+- **Finished runs stay in the strip** (CC keeps its entry too); rows cap at 3
+  with a dim `+N more — /workflows` line. The strip only clears when the
+  session has no runs at all.
