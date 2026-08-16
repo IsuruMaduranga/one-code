@@ -25,11 +25,22 @@
  *   that ends with `wait` reaps its own children and passes.
  */
 
-import { gitSubcommand, leadTokens, parseCommand, resolvePayload, type Segment } from "../auto-mode/shell-analysis.ts";
+import {
+	gitSubcommand,
+	leadTokens,
+	parseCommand,
+	resolvePayload,
+	type Segment,
+	type Token,
+} from "../auto-mode/shell-analysis.ts";
 
 const clip = (text: string, max = 200): string => (text.length > max ? `${text.slice(0, max)}…` : text);
 
 export function bashGuardReason(command: string, opts: { background: boolean }): string | undefined {
+	// A heredoc body is data, but parseCommand tokenizes it as live shell —
+	// every guard here would misfire on body text (a literal `vim` or
+	// `while … sleep` inside a document). Pass instead (positive-parse only).
+	if (/<</.test(command)) return undefined;
 	const { segments, parseFailed } = parseCommand(command);
 	if (parseFailed || segments.length === 0) return undefined;
 	const interactive = interactiveReason(segments);
@@ -40,30 +51,44 @@ export function bashGuardReason(command: string, opts: { background: boolean }):
 // ---------------------------------------------------------------------------
 // Wait guard
 
-/** Seconds a `sleep` argument provably represents, or undefined if not literal. */
-function sleepSeconds(value: string | undefined): number | undefined {
-	if (!value) return undefined;
-	const match = /^(\d+(?:\.\d+)?)([smhd]?)$/.exec(value);
-	if (!match) return undefined;
-	const mult = { "": 1, s: 1, m: 60, h: 3600, d: 86400 }[match[2]];
-	return Number(match[1]) * (mult ?? 1);
+/**
+ * Seconds a `sleep` invocation provably lasts (GNU sleep sums multiple
+ * duration arguments), or undefined when any argument is not a literal.
+ */
+function sleepSeconds(args: Token[]): number | undefined {
+	if (args.length === 0) return undefined;
+	let total = 0;
+	for (const arg of args) {
+		const match = /^(\d+(?:\.\d+)?|\.\d+)([smhd]?)$/.exec(arg.value);
+		if (!match) return undefined;
+		total += Number(match[1]) * ({ "": 1, s: 1, m: 60, h: 3600, d: 86400 }[match[2]] ?? 1);
+	}
+	return total;
 }
 
+// A segment's raw slice can keep half of the operator that ended the previous
+// one (`a && b` → second raw is `& b`) — strip it for a clean echo.
+const cleanRaw = (seg: Segment): string => seg.raw.replace(/^[;&|]+\s*/, "");
+
 function waitReason(segments: Segment[]): string | undefined {
-	const { command: cmd, args } = resolvePayload(leadTokens(segments[0]));
-	if (cmd !== "sleep") return undefined;
-	// A provably short sleep is legitimate pacing; an unprovable one (`sleep
-	// "$DELAY"`) is treated as a wait — the model controls the literal.
-	const seconds = sleepSeconds(args[0]?.value);
-	if (seconds !== undefined && seconds < 2) return undefined;
-	// A segment's raw slice can keep half of the operator that ended the previous
-	// one (`a && b` → second raw is `& b`) — strip it for a clean echo.
-	const rest = segments
-		.slice(1)
-		.map((s) => s.raw.replace(/^[;&|]+\s*/, ""))
-		.filter(Boolean)
-		.join("; ");
-	const echo = rest ? `\`${segments[0].raw}\` followed by: ${clip(rest)}` : `standalone \`${segments[0].raw}\``;
+	// Measure the run of LEADING sleep segments: `sleep 1 && sleep 1 && …` is
+	// one wait spelled as a chain, so the pacing exemption applies only to a
+	// single provably-short sleep. Unprovable durations (`sleep "$DELAY"`)
+	// count as long — the model controls the literal.
+	let leadSleeps = 0;
+	let total: number | undefined = 0;
+	for (const seg of segments) {
+		const { command: cmd, args } = resolvePayload(leadTokens(seg));
+		if (cmd !== "sleep") break;
+		leadSleeps++;
+		const seconds = sleepSeconds(args);
+		total = total === undefined || seconds === undefined ? undefined : total + seconds;
+	}
+	if (leadSleeps === 0) return undefined;
+	if (leadSleeps === 1 && total !== undefined && total < 2) return undefined;
+	const rest = segments.slice(leadSleeps).map(cleanRaw).filter(Boolean).join("; ");
+	const shown = segments.slice(0, leadSleeps).map(cleanRaw).join(" && ");
+	const echo = rest ? `\`${shown}\` followed by: ${clip(rest)}` : `standalone \`${shown}\``;
 	return (
 		`Blocked: ${echo}. A foreground sleep stalls the whole session while it runs. ` +
 		"To wait for a command you started, run it with run_in_background: true — its completion arrives as a system notification on its own, so you never need to poll. " +
@@ -100,11 +125,21 @@ function pollLoopReason(command: string, segments: Segment[]): string | undefine
 export function hasBackgroundAmp(command: string): boolean {
 	let inSingle = false;
 	let inDouble = false;
+	let inAnsiC = false; // $'…' honors backslash-escaped quotes, unlike '…'
 	let escape = false;
 	for (let i = 0; i < command.length; i++) {
 		const ch = command[i];
 		if (escape) {
 			escape = false;
+			continue;
+		}
+		if (inAnsiC) {
+			if (ch === "\\") escape = true;
+			else if (ch === "'") inAnsiC = false;
+			continue;
+		}
+		if (ch === "'" && !inSingle && !inDouble && command[i - 1] === "$") {
+			inAnsiC = true;
 			continue;
 		}
 		if (ch === "\\" && !inSingle) {
@@ -139,17 +174,15 @@ function orphanReason(command: string, segments: Segment[]): string | undefined 
 		"Run it with run_in_background: true instead: it returns a task id immediately, completion arrives as a system notification, output stays readable with task_output, and it can be stopped with task_stop. " +
 		"If you need shell-level parallelism inside one command, end it with `wait` so the children are reaped.";
 
-	let sawWait = false;
 	for (const seg of segments) {
-		const { command: cmd, peeled } = resolvePayload(leadTokens(seg));
+		const { peeled } = resolvePayload(leadTokens(seg));
 		const detacher = peeled.find((p) => p === "nohup" || p === "setsid");
 		if (detacher) return message(`\`${detacher}\``);
-		if (cmd === "wait") sawWait = true;
 	}
-	// A heredoc body may contain literal `&`s the scanner cannot tell from a
-	// top-level one — pass rather than misfire (contract: positive parse only).
-	if (/<</.test(command)) return undefined;
-	if (hasBackgroundAmp(command) && !sawWait) return message("`&`");
+	// Only a `wait` that comes LAST reaps the children — `wait; job &` still
+	// orphans the job it precedes.
+	const lastCmd = resolvePayload(leadTokens(segments[segments.length - 1])).command;
+	if (hasBackgroundAmp(command) && lastCmd !== "wait") return message("`&`");
 	return undefined;
 }
 

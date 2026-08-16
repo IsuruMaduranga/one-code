@@ -46,6 +46,29 @@ describe("worktree git-isolation guard", () => {
 		expect(guard("cd $BUILD_DIR && git status")).toContain("unverifiable");
 	});
 
+	it("sees a -C that follows --config-env", () => {
+		expect(guard("git --config-env foo=BAR -C /repo status")).toContain("targets /repo");
+	});
+
+	it("sees through cd options to the real destination", () => {
+		expect(guard("cd -P /repo && git status")).toBeDefined();
+		expect(guard("cd -P src && git status")).toBeUndefined();
+	});
+
+	it("re-anchors on a later absolute cd after an unknown one", () => {
+		expect(guard(`cd $X && ls; cd ${WT} && git status`)).toBeUndefined();
+		expect(guard("cd $X && ls; cd /repo && git status")).toBeDefined();
+	});
+
+	it("scopes a subshell cd to the subshell", () => {
+		expect(guard('(cd /repo && cat package.json); git commit -am "done"')).toBeUndefined();
+		expect(guard("(cd /repo && git status)")).toBeDefined();
+	});
+
+	it("keeps a parenthesised argument value intact", () => {
+		expect(guard("git -C '(weird)' status")).toBeUndefined();
+	});
+
 	it("refuses an unparseable command only when it involves git", () => {
 		expect(guard('git commit -m "unterminated')).toContain("too complex to verify");
 		expect(guard('echo "unterminated')).toBeUndefined();
@@ -69,10 +92,15 @@ describe("worktree shared-stash guard", () => {
 
 	it("allows the tagged, apply-by-ref workflow", () => {
 		expect(guard('git stash push -u -m "wt1-wip"')).toBeUndefined();
+		expect(guard("git stash push -um wt1-wip")).toBeUndefined();
 		expect(guard("git stash list --format='%H %gs'")).toBeUndefined();
 		expect(guard("git stash apply abc1234")).toBeUndefined();
 		expect(guard("git stash drop stash@{2}")).toBeUndefined();
 		expect(guard("git stash show -p")).toBeUndefined();
+	});
+
+	it("catches a subshell-wrapped stash", () => {
+		expect(guard("(git stash)")).toContain("untagged");
 	});
 
 	it("gives the full recipe in the refusal", () => {

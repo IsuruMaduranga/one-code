@@ -22,8 +22,14 @@ describe("wait guard", () => {
 
 	it("lets a provably short sleep through as pacing", () => {
 		expect(fg("sleep 0.5")).toBeUndefined();
+		expect(fg("sleep .5")).toBeUndefined();
 		expect(fg("sleep 1")).toBeUndefined();
 		expect(fg("sleep 1 && curl localhost/health")).toBeUndefined();
+	});
+
+	it("blocks a chain of short sleeps and summed multi-arg sleeps", () => {
+		expect(fg("sleep 1 && sleep 1 && sleep 1")).toContain("Blocked");
+		expect(fg("sleep 1 600")).toBeDefined();
 	});
 
 	it("blocks a sleep whose duration cannot be verified", () => {
@@ -108,10 +114,24 @@ describe("orphan guard", () => {
 		expect(fg("job1 & job2 & wait")).toBeUndefined();
 	});
 
+	it("only exempts a wait that comes last", () => {
+		expect(fg("wait; ./server --port 8080 &")).toBeDefined();
+	});
+
 	it("ignores & inside quotes and heredocs", () => {
 		expect(fg("echo 'a & b'")).toBeUndefined();
 		expect(fg('grep "&" file.xml')).toBeUndefined();
 		expect(fg("cat <<EOF > s.sh\n./run &\nEOF")).toBeUndefined();
+	});
+
+	it("tracks ANSI-C quoting when scanning for &", () => {
+		expect(fg("echo $'a & b' & sleep 999")).toBeDefined();
+		expect(fg("echo $'a & b'")).toBeUndefined();
+		// Backslash-escaped quote inside $'…' — parseCommand itself fails on
+		// this form (unparseable → guard passes), but the scanner must still
+		// track it correctly for inputs that do parse.
+		expect(hasBackgroundAmp("echo $'it\\'s fine' & sleep 999")).toBe(true);
+		expect(hasBackgroundAmp("echo $'it\\'s & fine'")).toBe(false);
 	});
 
 	it("never fires on a background run", () => {
@@ -136,6 +156,13 @@ describe("interactive guard", () => {
 		expect(fg("vim notes.txt")).toContain("no TTY");
 		expect(fg("git log | vi -")).toBeDefined();
 		expect(bg("nvim config.lua")).toBeDefined();
+		expect(fg("(vim)")).toBeDefined();
+		expect(fg("(git add -p)")).toBeDefined();
+	});
+
+	it("does not misfire on heredoc body text", () => {
+		expect(fg("cat <<EOF > notes.txt\nwhile true; do sleep 2; done\nEOF")).toBeUndefined();
+		expect(fg("cat <<EOF > notes.txt\nvim is my editor\nEOF")).toBeUndefined();
 	});
 
 	it("allows batch emacs", () => {

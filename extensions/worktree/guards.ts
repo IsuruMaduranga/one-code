@@ -56,7 +56,10 @@ function stashMessage(form: string, hazard: string): string {
 function stashReason(rest: Token[]): string | undefined {
 	const words = rest.map((t) => t.value);
 	const sub = words.find((w) => !w.startsWith("-"));
-	const tagged = words.some((w) => w === "-m" || w === "--message" || w.startsWith("--message="));
+	// `-m` may ride in a short-flag bundle (`git stash push -um wip`).
+	const tagged = words.some(
+		(w) => (/^-[a-zA-Z]+$/.test(w) && w.includes("m")) || w === "--message" || w.startsWith("--message="),
+	);
 	if (sub === undefined || sub === "push" || sub === "save") {
 		if (tagged) return undefined;
 		return stashMessage(
@@ -92,22 +95,33 @@ export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: W
 
 	/** Directory later segments run in; undefined = not statically known. */
 	let dir: string | undefined = worktreePath;
+	/** Subshell nesting: a `cd` inside `(...)` must not leak past the `)`. */
+	let depth = 0;
+	let dirBeforeSubshell: { dir: string | undefined } | undefined;
 
-	for (const seg of segments) {
+	const checkSegment = (seg: (typeof segments)[number]): string | undefined => {
 		const tokens = leadTokens(seg);
 		const rawLead = tokens[0]?.value;
-		if (!rawLead) continue;
+		if (!rawLead) return undefined;
 
 		if (rawLead === "cd") {
-			const target = tokens[1]?.value;
+			// Skip cd's own options (-P/-L/-e/-@); `--` ends them; a lone `-`
+			// means the previous directory, which is not statically known.
+			let j = 1;
+			while (j < tokens.length && tokens[j].value.startsWith("-") && !["-", "--"].includes(tokens[j].value)) j++;
+			if (tokens[j]?.value === "--") j++;
+			const target = tokens[j]?.value;
 			if (!target) dir = homedir();
 			else if (hasExpansion(target) || target === "-") dir = undefined;
+			// An absolute (or ~) destination re-anchors the tracked directory
+			// even when it was unknown — later git commands become checkable again.
+			else if (target.startsWith("/") || target === "~" || target.startsWith("~/")) dir = toAbsolute("/", target, homedir());
 			else if (dir !== undefined) dir = toAbsolute(dir, target, homedir());
-			continue;
+			return undefined;
 		}
 		if (rawLead === "pushd" || rawLead === "popd") {
 			dir = undefined;
-			continue;
+			return undefined;
 		}
 
 		const { command: cmd, args, peeled } = resolvePayload(tokens);
@@ -140,7 +154,7 @@ export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: W
 			);
 		}
 
-		if (cmd !== "git") continue;
+		if (cmd !== "git") return undefined;
 
 		if (dir === undefined) {
 			return isolated(
@@ -174,7 +188,7 @@ export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: W
 				i += inlined ? 1 : 2;
 				continue;
 			}
-			i += value === "-c" || value === "--namespace" || value === "--exec-path" ? 2 : 1;
+			i += ["-c", "--namespace", "--exec-path", "--config-env"].includes(value) ? 2 : 1;
 		}
 
 		const targets = [effective, ...extraTargets];
@@ -198,6 +212,30 @@ export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: W
 			if (sub === "stash") {
 				const reason = stashReason(rest);
 				if (reason) return reason;
+			}
+		}
+		return undefined;
+	};
+
+	for (const seg of segments) {
+		// Subshell bookkeeping reads the RAW tokens — leadTokens strips the very
+		// parens being counted. A `cd` between `(` and `)` is scoped: the tracked
+		// directory is restored when the subshell closes.
+		const first = seg.tokens[0]?.value ?? "";
+		const opens = (/^\(+/.exec(first)?.[0] ?? "").length;
+		if (opens > 0 && depth === 0) dirBeforeSubshell = { dir };
+		depth += opens;
+
+		const reason = checkSegment(seg);
+		if (reason) return reason;
+
+		const last = seg.tokens[seg.tokens.length - 1]?.value ?? "";
+		const closes = (/\)+$/.exec(last)?.[0] ?? "").length;
+		if (closes > 0 && depth > 0) {
+			depth = Math.max(0, depth - closes);
+			if (depth === 0 && dirBeforeSubshell) {
+				dir = dirBeforeSubshell.dir;
+				dirBeforeSubshell = undefined;
 			}
 		}
 	}

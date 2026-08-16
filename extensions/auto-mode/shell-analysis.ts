@@ -491,16 +491,46 @@ export function resolvePayload(tokens: Token[]): { command: string; args: Token[
 
 /**
  * A segment's tokens normalised for command-position checks: subshell parens
- * stripped (`(cd` → `cd`) and leading `do`/`then`/`else` keywords skipped, so
- * the command inside a loop body or subshell is still seen as the lead.
+ * stripped from the head token only (`(cd` → `cd` — a later argument may
+ * legitimately begin with `(`), leading `do`/`then`/`else` keywords skipped,
+ * and as many trailing `)`s stripped off the last token as `(`s were opened at
+ * the head, so `(git stash)` still matches subcommand `stash`. A subshell
+ * whose closing paren lands in a *different* segment (`(a && git stash)`) is
+ * a known limitation — the closer is only balanced within one segment.
  * Used by the bash/worktree guard pipelines, not by the escalation analyzer.
  */
 export function leadTokens(seg: Segment): Token[] {
-	const tokens = seg.tokens
-		.map((t) => ({ ...t, value: t.value.replace(/^[({]+/, "") }))
-		.filter((t) => t.value.length > 0);
+	const tokens = [...seg.tokens];
 	let i = 0;
-	while (i < tokens.length && ["do", "then", "else"].includes(tokens[i].value)) i++;
+	let opened = 0;
+	for (;;) {
+		while (i < tokens.length) {
+			const value = tokens[i].value;
+			const lead = /^[({]+/.exec(value)?.[0] ?? "";
+			if (lead.length === 0) break;
+			opened += (lead.match(/\(/g) ?? []).length;
+			const stripped = value.slice(lead.length);
+			if (stripped.length === 0) {
+				i++;
+				continue;
+			}
+			tokens[i] = { ...tokens[i], value: stripped };
+			break;
+		}
+		if (i < tokens.length && ["do", "then", "else"].includes(tokens[i].value)) {
+			i++;
+			continue;
+		}
+		break;
+	}
+	if (opened > 0 && tokens.length > i) {
+		const last = tokens.length - 1;
+		const trailing = /\)+$/.exec(tokens[last].value)?.[0];
+		if (trailing) {
+			const strip = Math.min(trailing.length, opened);
+			tokens[last] = { ...tokens[last], value: tokens[last].value.slice(0, tokens[last].value.length - strip) };
+		}
+	}
 	return tokens.slice(i);
 }
 
