@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatTaskDetails, formatTaskList, formatTaskWidget, TaskStore } from "../../extensions/tasks/store.ts";
+import { formatTaskDetails, formatTaskList, formatTaskWidget, nudgeMessage, TaskStore } from "../../extensions/tasks/store.ts";
 
 describe("TaskStore", () => {
 	it("creates tasks with incrementing ids and pending status", () => {
@@ -105,6 +105,24 @@ describe("TaskStore", () => {
 		const lines = formatTaskWidget(store, 3);
 		expect(lines).toHaveLength(5); // summary + 3 tasks + overflow
 		expect(lines.at(-1)).toBe("  … +2 more");
+	});
+
+	it("picks the nudge warranted by the list state", () => {
+		const store = new TaskStore();
+		expect(nudgeMessage(store.list())).toContain("task_create");
+		const a = store.create({ subject: "A", description: "" });
+		const b = store.create({ subject: "B", description: "" });
+		// Unfinished work with nothing in_progress → stale-list nudge.
+		expect(nudgeMessage(store.list())).toContain("none marked in_progress");
+		store.update(a.id, { status: "in_progress" });
+		// Exactly one in_progress → healthy, no nudge.
+		expect(nudgeMessage(store.list())).toBeUndefined();
+		store.update(b.id, { status: "in_progress" });
+		expect(nudgeMessage(store.list())).toContain("Exactly one");
+		store.update(a.id, { status: "completed" });
+		store.update(b.id, { status: "completed" });
+		// All done → nothing to correct.
+		expect(nudgeMessage(store.list())).toBeUndefined();
 	});
 
 	it("formats list and details", () => {

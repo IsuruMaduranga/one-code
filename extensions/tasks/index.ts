@@ -19,9 +19,9 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import { restoreLatestDetails } from "../lib/branch-restore.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
-import { ccToolRenderers } from "../lib/tui-render.ts";
+import { ccToolRenderers, linesComponent } from "../lib/tui-render.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
-import { formatTaskDetails, formatTaskLine, formatTaskList, formatTaskWidget, type TaskSnapshot, TaskStore } from "./store.ts";
+import { formatTaskDetails, formatTaskLine, formatTaskList, formatTaskWidget, nudgeMessage, type TaskSnapshot, TaskStore } from "./store.ts";
 
 interface TaskDetails {
 	taskSnapshot: TaskSnapshot;
@@ -36,7 +36,9 @@ export default function tasksExtension(pi: ExtensionAPI) {
 	const updateWidget = (ctx: ExtensionContext) => {
 		if (!ctx.hasUI) return;
 		const lines = widgetHidden ? [] : formatTaskWidget(store);
-		ctx.ui.setWidget("cc-tasks", lines.length > 0 ? lines : undefined);
+		// Component form so every line passes truncateLine — subjects are
+		// unbounded model text, and pi-tui crashes on an over-wide line.
+		ctx.ui.setWidget("cc-tasks", lines.length > 0 ? () => linesComponent(() => lines) : undefined);
 	};
 
 	const reconstructState = (ctx: ExtensionContext) => {
@@ -58,30 +60,17 @@ export default function tasksExtension(pi: ExtensionAPI) {
 		turnsSinceTaskUse++;
 		if (turnsSinceTaskUse < NUDGE_AFTER_TURNS) return;
 		turnsSinceTaskUse = 0;
-
-		const tasks = store.list();
-		if (tasks.length === 0) {
-			pi.events.emit(REMINDER_CHANNEL, {
-				text: "The task tools have not been used recently. If the current work has several steps, track it with task_create (load the task tools via tool_search) so progress is visible; skip this if the task is simple.",
-			});
-			return;
-		}
-
-		const active = tasks.filter((t) => t.status === "in_progress");
-		const done = tasks.filter((t) => t.status === "completed").length;
-		if (active.length === 0 && done < tasks.length) {
-			pi.events.emit(REMINDER_CHANNEL, {
-				text: `The task list has ${tasks.length - done} unfinished task(s) and none marked in_progress. Update it with task_update to reflect what you are actually doing, or delete stale tasks.`,
-			});
-		} else if (active.length > 1) {
-			pi.events.emit(REMINDER_CHANNEL, {
-				text: `${active.length} tasks are marked in_progress. Exactly one should be in progress at a time — update them with task_update.`,
-			});
-		}
+		const text = nudgeMessage(store.list());
+		if (text) pi.events.emit(REMINDER_CHANNEL, { text });
 	});
 
-	const result = (text: string, ctx: ExtensionContext, isError = false) => {
+	// Only the mutating tools count as "using" the tracker — a read must not
+	// suppress the nudge, or polling task_list defeats it.
+	const markUsed = () => {
 		turnsSinceTaskUse = 0;
+	};
+
+	const result = (text: string, ctx: ExtensionContext, isError = false) => {
 		updateWidget(ctx);
 		return {
 			content: [{ type: "text" as const, text }],
@@ -103,6 +92,7 @@ export default function tasksExtension(pi: ExtensionAPI) {
 			metadata: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: "Arbitrary metadata to attach to the task" })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			markUsed();
 			const task = store.create(params);
 			return result(`Created task #${task.id}: ${task.subject}`, ctx);
 		},
@@ -152,6 +142,7 @@ export default function tasksExtension(pi: ExtensionAPI) {
 			addBlockedBy: Type.Optional(Type.Array(Type.String(), { description: "Task ids that must complete before this one" })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			markUsed();
 			const { taskId, ...input } = params;
 			const outcome = store.update(taskId, input as Parameters<TaskStore["update"]>[1]);
 			if (outcome.deleted) return result(`Deleted task #${taskId}.`, ctx);

@@ -158,6 +158,8 @@ export function formatTaskList(store: TaskStore): string {
 	return tasks.map((t) => formatTaskLine(store, t)).join("\n");
 }
 
+// TUI counterpart of STATUS_MARK above (the model-facing ASCII in tool
+// results) — a new status needs a glyph in both tables.
 const WIDGET_MARK: Record<TaskStatus, string> = { pending: "◻", in_progress: "◼", completed: "✔" };
 
 /**
@@ -176,6 +178,26 @@ export function formatTaskWidget(store: TaskStore, maxTasks = 12): string[] {
 	for (const t of tasks.slice(0, maxTasks)) lines.push(`  ${WIDGET_MARK[t.status]} ${t.subject}`);
 	if (tasks.length > maxTasks) lines.push(`  … +${tasks.length - maxTasks} more`);
 	return lines;
+}
+
+/**
+ * The state-driven nudge fired when the task tools have gone unused for a
+ * while (Claude Code parity): the reminder text warranted by the current
+ * list, or undefined when the list needs no correction.
+ */
+export function nudgeMessage(tasks: TaskItem[]): string | undefined {
+	if (tasks.length === 0) {
+		return "The task tools have not been used recently. If the current work has several steps, track it with task_create (load the task tools via tool_search) so progress is visible; skip this if the task is simple.";
+	}
+	const active = tasks.filter((t) => t.status === "in_progress").length;
+	const done = tasks.filter((t) => t.status === "completed").length;
+	if (active === 0 && done < tasks.length) {
+		return `The task list has ${tasks.length - done} unfinished task(s) and none marked in_progress. Update it with task_update to reflect what you are actually doing, or delete stale tasks.`;
+	}
+	if (active > 1) {
+		return `${active} tasks are marked in_progress. Exactly one should be in progress at a time — update them with task_update.`;
+	}
+	return undefined;
 }
 
 export function formatTaskDetails(store: TaskStore, task: TaskItem): string {
