@@ -24,7 +24,8 @@ import { createBashToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { generateTaskId, TASK_REGISTER_CHANNEL } from "../background/registry.ts";
 import { type BashFinishSummary, startBackgroundBash, tailCap } from "./background.ts";
-import { foregroundWaitReason } from "./wait-guard.ts";
+import { bashGuardReason } from "./guards.ts";
+import { ORIGINAL_COMMAND_KEY } from "../worktree/rewrite.ts";
 import { systemNotification } from "../lib/notifications.ts";
 import { perCwd } from "../lib/per-cwd.ts";
 import { ccWrapBuiltinRenderers, linesComponent, resultLines } from "../lib/tui-render.ts";
@@ -81,7 +82,7 @@ export default function bashExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "bash",
 		label: base.label,
-		description: `${base.description} Pass run_in_background: true for long-running commands (builds, servers, watches): it returns a task id immediately so you can keep working, completion arrives as a system notification, and the output is retrievable with task_output / stoppable with task_stop.`,
+		description: `${base.description} Pass run_in_background: true for long-running commands (builds, servers, watches): it returns a task id immediately so you can keep working, completion arrives as a system notification, and the output is retrievable with task_output / stoppable with task_stop. Foreground \`sleep\` is blocked; use the monitor tool with an until-loop to wait on a condition.`,
 		promptSnippet: base.promptSnippet,
 		promptGuidelines: base.promptGuidelines,
 		executionMode: base.executionMode,
@@ -107,13 +108,14 @@ export default function bashExtension(pi: ExtensionAPI) {
 		})(),
 		parameters: BashParams,
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
+			// Guards check the model's original command — a worktree session rewrites
+			// input.command to `cd '<wt>' && (…)`, which would hide the real lead.
+			const originalCommand =
+				((params as Record<string, unknown>)[ORIGINAL_COMMAND_KEY] as string | undefined) ?? params.command;
+			const guardReason = bashGuardReason(originalCommand, { background: params.run_in_background === true });
+			if (guardReason) return { content: [{ type: "text" as const, text: guardReason }], isError: true, details: {} };
+
 			if (!params.run_in_background) {
-				// Block a foreground command that only waits (leads with `sleep`) — it
-				// stalls the session; steer to run_in_background / monitor instead
-				// (Claude Code parity). A backgrounded sleep is the sanctioned path and
-				// is never blocked (this branch is foreground-only).
-				const waitReason = foregroundWaitReason(params.command);
-				if (waitReason) return { content: [{ type: "text" as const, text: waitReason }], isError: true, details: {} };
 				return foreground(ctx.cwd).execute(
 					toolCallId,
 					{ command: params.command, timeout: params.timeout },

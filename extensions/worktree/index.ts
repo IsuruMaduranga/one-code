@@ -20,6 +20,7 @@ import { Type } from "typebox";
 import { restoreLatestDetails } from "../lib/branch-restore.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
+import { worktreeBashGuardReason } from "./guards.ts";
 import { rewriteToolInput, validateWorktreeName } from "./rewrite.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 
@@ -80,9 +81,28 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => reconstructState(ctx));
 	pi.on("session_tree", (_event, ctx) => reconstructState(ctx));
 
+	// The shared checkout this worktree belongs to — our worktrees live under
+	// <root>/.claude/worktrees/<name>; a worktree entered by `path` from
+	// elsewhere falls back to the directory the session started in.
+	const sharedRootOf = (s: WorktreeState): string => {
+		const marker = "/.claude/worktrees/";
+		const idx = s.path.indexOf(marker);
+		return idx > 0 ? s.path.slice(0, idx) : s.originalCwd;
+	};
+
 	pi.on("tool_call", (event) => {
 		if (!state) return;
 		if (["enter_worktree", "exit_worktree", "subagent", "send_message", "workflow"].includes(event.toolName)) return;
+		if (event.toolName === "bash") {
+			// Guard before rewriting (and before the permission prompt — this
+			// extension loads ahead of permissions): git must verifiably target
+			// this worktree, and shared-stash footguns are refused with the recipe.
+			const command = (event.input as Record<string, unknown>).command;
+			if (typeof command === "string") {
+				const reason = worktreeBashGuardReason({ command, worktreePath: state.path, sharedRoot: sharedRootOf(state) });
+				if (reason) return { block: true, reason };
+			}
+		}
 		rewriteToolInput(event.toolName, event.input as Record<string, unknown>, state.path);
 	});
 

@@ -276,14 +276,14 @@ const GIT_READ_ONLY_SUBCOMMANDS = new Set([
  */
 const GIT_GLOBAL_VALUE_FLAGS = new Set(["-C", "--git-dir", "--work-tree", "--namespace", "--exec-path"]);
 
-interface Token {
+export interface Token {
 	/** The token with quotes removed and `$'…'` decoded. */
 	value: string;
 	/** True when the token was written with any quoting or expansion syntax. */
 	hadExpansion: boolean;
 }
 
-interface Segment {
+export interface Segment {
 	tokens: Token[];
 	/** Redirection targets found in this segment, in written order. */
 	redirects: string[];
@@ -462,7 +462,7 @@ export function parseCommand(command: string): { segments: Segment[]; parseFaile
 }
 
 /** Peel wrappers to the command that actually runs (review finding N5). */
-function resolvePayload(tokens: Token[]): { command: string; args: Token[]; peeled: string[] } {
+export function resolvePayload(tokens: Token[]): { command: string; args: Token[]; peeled: string[] } {
 	const peeled: string[] = [];
 	let index = 0;
 
