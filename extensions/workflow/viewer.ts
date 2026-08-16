@@ -11,7 +11,7 @@
  * before painting so ANSI escapes never enter the width accounting.
  */
 
-import { cutPlainText as cut, formatDuration, wrapPlainText } from "../lib/tui-render.ts";
+import { cutPlainText as cut, formatDuration, padPlainText, wrapPlainText } from "../lib/tui-render.ts";
 import { formatTokenCount } from "../subagents/usage.ts";
 import type { AgentRecord, RunStatus } from "./types.ts";
 
@@ -199,10 +199,7 @@ export function clampViewerState(state: ViewerState, runs: ViewerRunSnapshot[]):
 // ---------------------------------------------------------------------------
 
 /** Cut then pad plain text to exactly `width` columns. */
-function cell(text: string, width: number): string {
-	const shortened = cut(text, width);
-	return shortened + " ".repeat(Math.max(0, width - [...shortened].length));
-}
+const cell = padPlainText;
 
 /**
  * Split a row into a left half padded against a right-aligned annotation

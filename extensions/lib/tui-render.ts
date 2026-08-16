@@ -46,6 +46,18 @@ export function safeThemePaint(theme: unknown): (color: string, text: string) =>
 	};
 }
 
+/** The `inverse(text)` counterpart to safeThemePaint, with the same degrade-to-plain guard. */
+export function safeThemeInverse(theme: unknown): (text: string) => string {
+	return (text: string) => {
+		const themed = theme as { inverse?(t: string): string } | undefined;
+		try {
+			return themed?.inverse ? themed.inverse(text) : text;
+		} catch {
+			return text;
+		}
+	};
+}
+
 /** The `bold(text)` counterpart to safeThemePaint, with the same degrade-to-plain guard. */
 export function safeThemeBold(theme: unknown): (text: string) => string {
 	return (text: string) => {
@@ -97,6 +109,12 @@ export function cutPlainText(text: string, width: number): string {
 	if (width <= 0) return "";
 	const chars = [...text];
 	return chars.length > width ? `${chars.slice(0, Math.max(0, width - 1)).join("")}…` : text;
+}
+
+/** Cut then pad plain (unpainted) text to exactly `width` columns, by code point. */
+export function padPlainText(text: string, width: number): string {
+	const shortened = cutPlainText(text, width);
+	return shortened + " ".repeat(Math.max(0, width - [...shortened].length));
 }
 
 /** Hard-wrap plain text to `width` columns by code point, preserving blank lines. */

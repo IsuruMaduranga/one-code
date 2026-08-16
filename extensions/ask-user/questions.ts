@@ -5,6 +5,8 @@
 export interface QuestionOption {
 	label: string;
 	description?: string;
+	/** Rendered beside the options while this option is focused (single-select only). */
+	preview?: string;
 }
 
 export interface Question {
@@ -20,33 +22,8 @@ export interface Answer {
 	selected: string[];
 	/** True when the user typed their own answer instead of picking. */
 	freeform: boolean;
-}
-
-export const OTHER_LABEL = "Other (type your own answer)";
-export const DONE_LABEL = "Done selecting";
-
-/** `label — description`, so the description is visible in a plain select list. */
-export function formatOptionLabel(option: QuestionOption): string {
-	return option.description ? `${option.label} — ${option.description}` : option.label;
-}
-
-/** Maps a chosen display string back to the option label it came from. */
-export function resolveSelection(display: string, options: QuestionOption[]): string | undefined {
-	return options.find((option) => formatOptionLabel(option) === display)?.label;
-}
-
-export function buildChoices(question: Question, alreadySelected: string[] = []): string[] {
-	const marked = question.options.map((option) => {
-		const label = formatOptionLabel(option);
-		return question.multiSelect && alreadySelected.includes(option.label) ? `✓ ${label}` : label;
-	});
-	const extras = question.multiSelect ? [DONE_LABEL, OTHER_LABEL] : [OTHER_LABEL];
-	return [...marked, ...extras];
-}
-
-/** Strips the multi-select tick so the choice can be matched against options. */
-export function stripMark(display: string): string {
-	return display.startsWith("✓ ") ? display.slice(2) : display;
+	/** Free-text notes the user attached to this answer. */
+	notes?: string;
 }
 
 export function formatAnswers(answers: Answer[]): string {
@@ -54,7 +31,17 @@ export function formatAnswers(answers: Answer[]): string {
 	return answers
 		.map((answer) => {
 			const value = answer.selected.length > 0 ? answer.selected.join(", ") : "(no answer)";
-			return `${answer.question}\n→ ${value}${answer.freeform ? " (typed by the user)" : ""}`;
+			const typed = answer.freeform ? " (typed by the user)" : "";
+			const notes = answer.notes ? `\n→ notes: ${answer.notes}` : "";
+			return `${answer.question}\n→ ${value}${typed}${notes}`;
 		})
 		.join("\n\n");
+}
+
+/** Tool result when the user picks "Chat about this" instead of answering. */
+export function formatDecline(questions: Question[]): string {
+	const list = questions
+		.map((q) => `· ${q.question} (${q.options.map((o) => o.label).join(" / ")})`)
+		.join("\n");
+	return `The user declined to answer and wants to chat about these questions instead:\n\n${list}\n\nAsk them in your reply what they'd like to clarify; don't call ask_user_question again until the discussion resolves it.`;
 }

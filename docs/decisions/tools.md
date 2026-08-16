@@ -91,18 +91,45 @@ and had a nicer overlay UI, but it carried two problems:
    up to four questions, each with `header`, optional `multiSelect`, and 2–4
    labelled options with descriptions.
 
-Ours matches Claude Code's schema and drops the duplicate dependency, at the cost
-of a plainer presentation: pi has no native multi-question widget, so questions
-are asked one dialog at a time via `ctx.ui.select`, with a `✓` marker
-accumulating multi-select choices, a "Done selecting" entry, and an automatic
-"Other (type your own answer)" escape hatch routed to `ctx.ui.input`. Cancelling
-any question cancels the batch, since later answers are meaningless without the
-earlier ones. Non-interactive sessions get an instruction to ask in the reply
+Ours matches Claude Code's schema and drops the duplicate dependency.
+
+The presentation started as one `ctx.ui.select` dialog per question (pi has no
+native multi-question widget), then was rebuilt as **CC's full tabbed dialog in
+one `ctx.ui.custom` component** (`ask-user/widget.ts`, pure state machine +
+renderer; `index.ts` stays thin wiring) after screen recordings of CC 2.1.233
+showed how much the plain dialogs were missing:
+
+- **Tabs** — `← ⊡ Layout ⊡ Languages ✔ Submit →`; Tab/←/→ switch questions in
+  any order, glyphs fill (⊠) as questions are answered, Submit shows a
+  question→answer summary. Single-select auto-advances to the next unanswered
+  question, CC-style.
+- **Option previews** — the schema gains CC's `options[].preview` (ASCII
+  mockup / code snippet), rendered in a bordered box beside the options,
+  swapping with the focused option. Single-select only, per CC's guidance.
+- **Notes** — "press n to add notes" on preview questions; returned as
+  `Answer.notes` (CC's `annotations`). Capture-verified against
+  `tools/eager-tools.json`; one deliberate divergence: CC writes answers back
+  into the tool *input* ("collected by the permission component") — we keep
+  them in the tool result, pi's natural channel; the model sees them either way.
+- **Preview questions get no free-text row** (notes are their free-text
+  channel) — matches the recordings; other questions keep an inline
+  "Type something." row, and multi-select adds checkboxes plus an unnumbered
+  "Next" to commit. Digit keys jump rows, and `rowNumbers` is the single
+  source for display numbers *and* digit targets, so a digit can only activate
+  a row whose number is visible.
+- **"Chat about this"** — last row of every question; declines the whole batch
+  with a result that lists the questions and tells the model to continue in
+  chat (in CC's recordings the model then asks what to clarify — live-verified
+  ours does the same).
+
+Esc still cancels the batch (later answers are meaningless without the earlier
+ones), and non-interactive sessions get an instruction to ask in the reply
 instead.
 
-Verified over RPC: a two-question call produced three dialogs — single-select,
-then multi-select showing `✓ Caching` on the second pass — and returned both
-answers in one structured result.
+Verified live in tmux against gpt-5.6-terra: full keyboard walkthrough (preview
+swap on arrow-down, notes entry, checkbox toggling, digit jumps, typed
+free-text answer, Submit summary) returned CC-style results, and the
+chat-decline path produced the same conversational follow-up as CC's recording.
 
 ## web_fetch answers a `prompt` with a reader model
 
