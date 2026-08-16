@@ -210,7 +210,7 @@ export function linesComponent(build: (width: number) => string[]): TuiComponent
  * "※ recap: …") — the shared shape behind the turn-duration and recap
  * display-only entries. Width-memoized via linesComponent.
  */
-export function dimMarkedLine(theme: ThemeLike, mark: string, text: string): TuiComponent {
+export function dimMarkedLine(theme: unknown, mark: string, text: string): TuiComponent {
 	const paint = safeThemePaint(theme);
 	return linesComponent(() => [`${paint("dim", mark)} ${paint("dim", text)}`]);
 }

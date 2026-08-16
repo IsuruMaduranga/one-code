@@ -172,7 +172,11 @@ export default function recapExtension(pi: ExtensionAPI) {
 
 	pi.on("agent_end", (_event, ctx) => {
 		lastCtx = ctx;
-		if (!ctx.hasUI) return;
+		// Unconditional: turnEnded() both clears turn state and arms the idle
+		// timer, so gating it on hasUI could leave turnRunning stuck true (and
+		// block all future re-arming) if a turn ever ends without UI. Arming
+		// without UI is harmless — generate() bails on !hasUI and the timer is
+		// unref'd, so a one-shot -p process exits before it can fire.
 		scheduler.turnEnded();
 	});
 

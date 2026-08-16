@@ -24,15 +24,15 @@ describe("recapLine", () => {
 describe("recentForRecap", () => {
 	const msg = (role: string, id: string) => ({ role, id });
 
-	it("trims a window that begins mid-exchange to the first user turn (no orphan tool_result)", () => {
+	it("drops a leading orphan tool-result, starting at the first turn boundary", () => {
 		const window = [
-			msg("tool", "orphan-result"), // matching tool_use fell outside the window
+			msg("toolResult", "orphan"), // matching tool_use fell outside the window
 			msg("assistant", "a1"),
 			msg("user", "u1"),
 			msg("assistant", "a2"),
-			msg("tool", "t2"),
+			msg("toolResult", "t2"), // paired with a2 — kept
 		];
-		expect(recentForRecap(window, 5).map((m) => m.id)).toEqual(["u1", "a2", "t2"]);
+		expect(recentForRecap(window, 5).map((m) => m.id)).toEqual(["a1", "u1", "a2", "t2"]);
 	});
 
 	it("keeps the whole slice when it already starts at a user turn", () => {
@@ -40,15 +40,22 @@ describe("recentForRecap", () => {
 		expect(recentForRecap(window, 5).map((m) => m.id)).toEqual(["u1", "a1"]);
 	});
 
-	it("keeps the whole slice when no user message is present (best effort)", () => {
-		const window = [msg("assistant", "a1"), msg("tool", "t1")];
+	it("keeps an assistant start (its tool results follow in-window)", () => {
+		const window = [msg("assistant", "a1"), msg("toolResult", "t1")];
 		expect(recentForRecap(window, 5).map((m) => m.id)).toEqual(["a1", "t1"]);
 	});
 
+	it("returns empty when the window is one long tool-only stretch (no safe boundary)", () => {
+		// A single user turn with 30+ tool calls fills the window with no user/assistant
+		// message; nothing is safe to send, so the recap runs on the instruction alone.
+		const window = [msg("toolResult", "t1"), msg("toolResult", "t2"), msg("toolResult", "t3")];
+		expect(recentForRecap(window, 5)).toEqual([]);
+	});
+
 	it("slices to the last `window` messages before trimming", () => {
-		const all = Array.from({ length: 40 }, (_, i) => msg(i === 12 ? "user" : "assistant", `m${i}`));
+		const all = Array.from({ length: 40 }, (_, i) => msg(i === 12 ? "user" : "toolResult", `m${i}`));
 		const result = recentForRecap(all, 30);
-		// window = m10..m39; first user in it is m12, so it starts there.
+		// window = m10..m39; first user/assistant in it is m12, so it starts there.
 		expect(result[0].id).toBe("m12");
 		expect(result.at(-1)?.id).toBe("m39");
 	});

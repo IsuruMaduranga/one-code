@@ -27,15 +27,18 @@ export function recapLine(content: string): string {
 
 /**
  * The recent-message window for the recap: the last `window` messages, trimmed
- * forward to start at a user turn. A raw slice can begin mid-exchange, with a
- * leading tool_result whose matching assistant tool_use fell outside the
- * window — strict providers (e.g. Anthropic) reject that orphan, and the recap
- * would silently fail. Starting at a user message keeps every tool_use/
- * tool_result pair intact. Generic over `{ role }` so it is testable with plain
- * objects; when no user message is in the window the whole slice is kept.
+ * forward to the first clean turn boundary — a `user` prompt or an `assistant`
+ * reply. A raw slice can begin mid-exchange with a leading tool-result message
+ * whose matching assistant tool_use fell outside the window; convertToLlm would
+ * then emit an orphan tool_result block that strict providers (e.g. Anthropic)
+ * reject, silently failing the recap. An assistant start is safe — its own tool
+ * results follow within the window. When the window holds no user/assistant
+ * message at all (e.g. one long tool-only stretch), nothing is safe to send, so
+ * it returns empty and the recap runs on the instruction alone. Generic over
+ * `{ role }` so it is testable with plain objects.
  */
 export function recentForRecap<T extends { role: string }>(messages: readonly T[], window = RECENT_MESSAGE_WINDOW): T[] {
 	const tail = messages.slice(-window);
-	const firstUser = tail.findIndex((message) => message.role === "user");
-	return firstUser > 0 ? tail.slice(firstUser) : tail;
+	const start = tail.findIndex((message) => message.role === "user" || message.role === "assistant");
+	return start === -1 ? [] : tail.slice(start);
 }
