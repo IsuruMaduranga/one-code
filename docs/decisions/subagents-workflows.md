@@ -98,8 +98,11 @@ real registry, and the child is spawned with a concrete `provider/id`:
   skips it with a notice), so the automatic same-provider profile serves. A
   same-provider agent-file model or an in-provider alias still works everywhere.
 - **The `subagentModel` setting is stamped, and a stale one is overridden
-  (2026-08-17).** `/subagent` records the session provider it was set on
-  (`subagentModelSetFor`). On resolve, a cross-provider setting is honored +
+  (2026-08-17).** `/subagent` records the *containment identity* of the session
+  it was set on (`subagentModelSetFor` = `modelIdentity().containment` — the
+  plain provider for direct vendors, `provider:route:vendor` on a gateway, the
+  same granularity `crossesProvider` uses, so a cross-*vendor* choice on
+  openrouter is caught too). On resolve, a cross-provider setting is honored +
   announced *only* when the stamp matches this session (you deliberately chose
   it here); a stamp for a provider you have since left — or none at all (a
   hand-edited `settings.json`) — makes it **stale**, so a same-provider model

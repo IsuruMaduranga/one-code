@@ -23,6 +23,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../auto-mode/actions.ts";
 import { type AgentDefinition, type AgentSource, agentDirs, discoverAgents } from "./agents.ts";
+import { modelIdentity } from "../lib/model-policy.ts";
 import { applicableSubagentDefault, loadSubagentDefault, persistSubagentModel } from "./default-model.ts";
 import {
 	expensiveModelGate,
@@ -1041,10 +1042,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			}
 		}
 		try {
-			// Stamp the session provider so a later session on another provider can
-			// treat this cross-provider choice as stale (a deliberate choice made here
-			// stays honored; see resolveSubagentModel).
-			persistSubagentModel(spec, os.homedir(), ctx.model?.provider);
+			// Stamp the session's containment identity (provider for direct vendors,
+			// provider:route:vendor on gateways) so a later session on a different
+			// provider/vendor can treat this cross-provider choice as stale (a
+			// deliberate choice made here stays honored; see resolveSubagentModel).
+			persistSubagentModel(spec, os.homedir(), ctx.model ? modelIdentity(ctx.model).containment : undefined);
 		} catch (error) {
 			ctx.ui.notify("Could not save subagent model: " + (error as Error).message, "error");
 			return;

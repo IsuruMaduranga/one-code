@@ -34,13 +34,16 @@ export interface SubagentDefault {
 	/** Which knob set it, for notices. */
 	source: "subagentModel setting" | "CLAUDE_CODE_SUBAGENT_MODEL";
 	/**
-	 * For the `subagentModel` setting only: the session provider it was stamped
-	 * for when set via `/subagent`. When the current session runs on a different
-	 * provider, the setting is treated as stale (set for a provider since left)
-	 * and a same-provider model runs instead — see `resolveSubagentModel`.
-	 * Undefined for a hand-edited setting (no stamp) and for the env var.
+	 * For the `subagentModel` setting only: the *containment identity* of the
+	 * session it was stamped for when set via `/subagent` — `modelIdentity().containment`,
+	 * i.e. the plain provider for direct vendors but `provider:route:vendor` on a
+	 * gateway (openrouter etc.), matching the granularity `crossesProvider` uses.
+	 * When it differs from the current session's containment, a cross-provider
+	 * setting is treated as stale (set for a session since left) and a
+	 * same-provider model runs instead — see `resolveSubagentModel`. Undefined for
+	 * a hand-edited setting (no stamp) and for the env var.
 	 */
-	setForProvider?: string;
+	setForContainment?: string;
 }
 
 interface SettingsFile {
@@ -82,7 +85,7 @@ export function loadSubagentDefault(home: string, env: NodeJS.ProcessEnv = proce
 		}
 	}
 
-	if (setting) return { spec: setting, source: "subagentModel setting", setForProvider: settingSetFor };
+	if (setting) return { spec: setting, source: "subagentModel setting", setForContainment: settingSetFor };
 
 	const fromEnv = env.CLAUDE_CODE_SUBAGENT_MODEL?.trim();
 	if (fromEnv) return { spec: fromEnv, source: "CLAUDE_CODE_SUBAGENT_MODEL" };
@@ -121,12 +124,12 @@ export function applicableSubagentDefault(
  * skips a setting, but a lenient write would replace the user's whole
  * settings file with only ours.
  *
- * `setForProvider` stamps the session provider the model was chosen on, so a
- * later session on a different provider can treat the setting as stale. Pass it
- * for a concrete model; it is cleared for `inherit` (never cross-provider) and
- * on removal.
+ * `setForContainment` stamps the containment identity of the session the model
+ * was chosen on (modelIdentity().containment), so a later session on a different
+ * provider/vendor can treat the setting as stale. Pass it for a concrete model;
+ * it is cleared for `inherit` (never cross-provider) and on removal.
  */
-export function persistSubagentModel(spec: string | undefined, home: string, setForProvider?: string): void {
+export function persistSubagentModel(spec: string | undefined, home: string, setForContainment?: string): void {
 	const path = join(home, ".claude", "settings.json");
 	let file: Record<string, unknown> = {};
 	if (existsSync(path)) {
@@ -141,7 +144,7 @@ export function persistSubagentModel(spec: string | undefined, home: string, set
 		delete file.subagentModelSetFor;
 	} else {
 		file.subagentModel = spec;
-		if (setForProvider && spec !== "inherit") file.subagentModelSetFor = setForProvider;
+		if (setForContainment && spec !== "inherit") file.subagentModelSetFor = setForContainment;
 		else delete file.subagentModelSetFor;
 	}
 	mkdirSync(dirname(path), { recursive: true });

@@ -21,11 +21,11 @@ import {
 const model = (provider: string, id: string, input?: number) =>
 	({ provider, id, name: id, cost: input === undefined ? undefined : { input, output: input * 4 } }) as any;
 
-/** A `subagentModel`-setting default, optionally stamped for the provider it was set on. */
-const setting = (spec: string, setForProvider?: string): SubagentDefault => ({
+/** A `subagentModel`-setting default, optionally stamped for the containment it was set on. */
+const setting = (spec: string, setForContainment?: string): SubagentDefault => ({
 	spec,
 	source: "subagentModel setting",
-	...(setForProvider ? { setForProvider } : {}),
+	...(setForContainment ? { setForContainment } : {}),
 });
 
 const anthropic = [
@@ -276,6 +276,26 @@ describe("resolveSubagentModel: agent-file provider containment", () => {
 		expect(resolution.model?.id).toBe("gpt-5-mini");
 		expect(resolution.source).toBe("default");
 		expect(resolution.notices).toEqual([]);
+	});
+
+	it("detects a cross-vendor gateway setting as stale by containment, not just provider", () => {
+		// On openrouter, two models share provider "openrouter" but differ by vendor
+		// route — crossesProvider treats that as a crossing. A setting stamped on the
+		// openai route (containment openrouter:author:openai) must read as stale on the
+		// z-ai route, even though the plain provider string matches on both.
+		const gateway = [
+			model("openrouter", "openai/gpt-5-mini", 0.25),
+			model("openrouter", "anthropic/claude-haiku-4.5", 1),
+			model("openrouter", "z-ai/glm-4.6", 0.5),
+		];
+		const resolution = resolveSubagentModel({
+			configuredDefault: setting("openrouter/anthropic/claude-haiku-4.5", "openrouter:author:openai"),
+			sessionModel: gateway[2], // z-ai route
+			available: gateway,
+		});
+		expect(resolution.model?.id).toBe("z-ai/glm-4.6"); // same-vendor, not the anthropic setting
+		expect(resolution.source).not.toBe("default");
+		expect(resolution.notices[0]).toContain("was set for a different provider");
 	});
 });
 
@@ -607,7 +627,7 @@ describe("persistSubagentModel", () => {
 		expect(loadSubagentDefault(home, {})).toEqual({ spec: "inherit", source: "subagentModel setting" });
 	});
 
-	it("stamps the session provider and round-trips it as setForProvider", () => {
+	it("stamps the session containment and round-trips it as setForContainment", () => {
 		persistSubagentModel("opencode/deepseek-v4-flash-free", home, "openai-codex");
 		expect(readSettings()).toEqual({
 			subagentModel: "opencode/deepseek-v4-flash-free",
@@ -616,7 +636,7 @@ describe("persistSubagentModel", () => {
 		expect(loadSubagentDefault(home, {})).toEqual({
 			spec: "opencode/deepseek-v4-flash-free",
 			source: "subagentModel setting",
-			setForProvider: "openai-codex",
+			setForContainment: "openai-codex",
 		});
 	});
 

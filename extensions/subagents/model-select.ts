@@ -169,7 +169,7 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 	// choice made on this provider (stamp matches) is still honored + announced.
 	const settingIsStale =
 		input.configuredDefault?.source === "subagentModel setting" &&
-		input.configuredDefault.setForProvider !== sessionModel?.provider;
+		input.configuredDefault.setForContainment !== (sessionModel ? modelIdentity(sessionModel).containment : undefined);
 
 	for (const entry of chain) {
 		const wanted = entry.value.trim();
