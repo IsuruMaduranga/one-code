@@ -452,3 +452,61 @@ sleep is the sanctioned path and is never blocked (the guard is foreground-only)
 Blocking (not warning) is deliberate — parity with CC, and chaining shorter
 sleeps to poll is exactly the anti-pattern the guard exists to stop. It applies
 in every mode, since it is a tool-shape rule, not an auto-mode safety check.
+
+## Deterministic bash guards: a pipeline of instructive refusals (2026-08-17)
+
+*(Supersedes and absorbs "Foreground `sleep` is blocked" above — the wait
+guard is now one member of a family.)* Bash anti-patterns are refused
+**pre-execution by deterministic parsing**, not left to prompt guidance: a
+guard pipeline in `bash/guards.ts` (wait, poll-loop, orphan, interactive) and
+worktree-session guards in `worktree/guards.ts` (git isolation, shared stash).
+Modeled on the feedback family current Claude Code applies to Bash (observed
+live in CC sessions; the sleep guard's ≥ 2s threshold and float/sub-2s pacing
+exemption match CC's own implementation). Every message follows one shape:
+**echo what tripped it, say why it's a problem, name the sanctioned
+alternative, close the obvious workaround** ("Do not chain shorter sleeps to
+work around this block"). New guards drop in as one pure function each.
+
+**The guards.** Wait: a command *leading* with `sleep` ≥ 2s (provably shorter
+passes as pacing; unprovable durations block — the model controls the
+literal). Poll-loop: a foreground `while`/`until`/`for` that sleeps in command
+position is the same stall spelled as a loop → monitor. Orphan:
+`nohup`/`setsid`/top-level `&` lose output and exit status →
+`run_in_background: true`; a `… & wait` pattern reaps its children and passes.
+Interactive: TTY-requiring commands hang until the timeout (`vim`,
+`git rebase -i`) or silently no-op (`git add -p` reads EOF and stages
+nothing) → non-interactive equivalents named. Worktree git-isolation (active
+worktree session only, blocking via `tool_call {block, reason}` **before the
+permission prompt** — the worktree extension loads ahead of permissions): git
+whose repository is decided at runtime (`xargs`/`parallel`/`find -exec`,
+expanded `-C "$DIR"`, unresolvable `cd`) or that resolves into the shared
+checkout / a sibling worktree is refused; git against unrelated repos passes.
+Shared-stash: untagged `stash push`, `pop`, `clear`, ref-less `drop` are
+refused with the tagged-push + apply-by-SHA recipe (the stash stack is
+per-repo, shared across all worktrees and parallel sessions).
+
+**Contract.** Positive-parse only: an unparseable command always passes (the
+permission gate and auto-mode still apply) — with ONE deliberate fail-closed
+exception: an unparseable command that visibly involves git inside a worktree
+session is refused as "too complex to verify". Guards are steering, not
+security; auto-mode remains the safety layer.
+
+**The bug this fixed.** The original wait-guard was **silently disabled in
+worktree sessions**: the `cd '<wt>' && (…)` input rewrite made `cd` the lead
+command. Guards now read the model's original command via the rewrite's
+preserved `ORIGINAL_COMMAND_KEY` (same fix shape as the permission matcher's).
+
+**Rejected.** (1) CC's blanket fail-closed for worktree sessions — live CC
+refused *every* command it deemed complex (even a git-less `for` loop) once
+isolation was active, and bricked two of our own subagents mid-task; we scope
+fail-closed to git, which is the actual invariant. (2) Blocking pagers
+(`less`, `top`) — without a TTY they degrade to `cat` or fail fast on their
+own; only genuinely hanging/no-op commands are guarded. (3) Guarding in
+`execute()` for the worktree rules — blocking in the `tool_call` hook avoids
+prompting the user for a command that would be refused anyway.
+
+**Verified** by 46 unit tests over the pure modules plus live pi runs (json
+mode, real model): the foreground-sleep, `git stash pop`, and `xargs git`
+blocks all fired verbatim inside a real `enter_worktree` session — and an
+unforced run showed the model choosing `run_in_background: true` on its own
+from the updated tool description (steering working before any guard fires).
