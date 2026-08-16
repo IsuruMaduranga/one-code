@@ -27,7 +27,7 @@ import { Type } from "typebox";
 import { summarizeArgs } from "../lib/tui-render.ts";
 import { agentDirs, type AgentDefinition, discoverAgents } from "../subagents/agents.ts";
 import type { SubagentDefault } from "../subagents/default-model.ts";
-import { configuredDefaultResolveArgs, expensiveModelGate, resolveSubagentModel, subagentModelMenu } from "../subagents/model-select.ts";
+import { expensiveModelGate, resolveSubagentModel, subagentModelMenu } from "../subagents/model-select.ts";
 import { cleanupWorktree, createWorktree, isGitRepo, type Worktree } from "../subagents/worktree.ts";
 import { permissionGateFactory } from "./permission-gate.ts";
 import type { AgentCallOptions, AgentCallResult, AgentEffort, AgentRunUpdate } from "./types.ts";
@@ -81,13 +81,13 @@ export function resolveWorkflowAgentModel(input: WorkflowModelInput): {
 	const resolution = resolveSubagentModel({
 		requested,
 		agentModel: input.agentModel,
-		...configuredDefaultResolveArgs(input.configuredDefault),
+		configuredDefault: input.configuredDefault,
 		sessionModel: input.sessionModel,
 		available: input.available,
 	});
 	if (resolution.unresolved) {
 		const fallback = resolveSubagentModel({
-			...configuredDefaultResolveArgs(input.configuredDefault),
+			configuredDefault: input.configuredDefault,
 			sessionModel: input.sessionModel,
 			available: input.available,
 		});

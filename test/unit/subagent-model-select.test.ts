@@ -6,6 +6,7 @@ import {
 	applicableSubagentDefault,
 	loadSubagentDefault,
 	persistSubagentModel,
+	type SubagentDefault,
 } from "../../extensions/subagents/default-model.ts";
 import {
 	crossesProvider,
@@ -19,6 +20,13 @@ import {
 /** Minimal structural stand-in; only provider/id/cost are consulted. */
 const model = (provider: string, id: string, input?: number) =>
 	({ provider, id, name: id, cost: input === undefined ? undefined : { input, output: input * 4 } }) as any;
+
+/** A `subagentModel`-setting default, optionally stamped for the provider it was set on. */
+const setting = (spec: string, setForProvider?: string): SubagentDefault => ({
+	spec,
+	source: "subagentModel setting",
+	...(setForProvider ? { setForProvider } : {}),
+});
 
 const anthropic = [
 	model("anthropic", "claude-opus-4-8", 5),
@@ -80,12 +88,12 @@ describe("resolveSubagentModel: precedence and exact references", () => {
 	it("prefers per-call over agent frontmatter over the configured default", () => {
 		const input = { sessionModel: anthropic[0], available: [...anthropic, ...openai] };
 		expect(
-			resolveSubagentModel({ ...input, requested: "haiku", agentModel: "sonnet", configuredDefault: "opus" }).model?.id,
+			resolveSubagentModel({ ...input, requested: "haiku", agentModel: "sonnet", configuredDefault: setting("opus") }).model?.id,
 		).toBe("claude-haiku-4-5");
-		expect(resolveSubagentModel({ ...input, agentModel: "sonnet", configuredDefault: "opus" }).model?.id).toBe(
+		expect(resolveSubagentModel({ ...input, agentModel: "sonnet", configuredDefault: setting("opus") }).model?.id).toBe(
 			"claude-sonnet-5",
 		);
-		expect(resolveSubagentModel({ ...input, configuredDefault: "opus" }).model?.id).toBe("claude-opus-4-8");
+		expect(resolveSubagentModel({ ...input, configuredDefault: setting("opus") }).model?.id).toBe("claude-opus-4-8");
 	});
 
 	it("honors an exact cross-provider reference, with a notice — naming it is choosing it", () => {
@@ -111,7 +119,7 @@ describe("resolveSubagentModel: precedence and exact references", () => {
 	it("degrades a bad configured default to the session model with a notice", () => {
 		// A default the user set months ago must not fail every subagent run.
 		const resolution = resolveSubagentModel({
-			configuredDefault: "some/withdrawn-model",
+			configuredDefault: setting("some/withdrawn-model"),
 			sessionModel: anthropic[0],
 			available: anthropic,
 		});
@@ -123,7 +131,7 @@ describe("resolveSubagentModel: precedence and exact references", () => {
 	it("falls through a bad agent-frontmatter model to the configured default", () => {
 		const resolution = resolveSubagentModel({
 			agentModel: "some/withdrawn-model",
-			configuredDefault: "haiku",
+			configuredDefault: setting("haiku"),
 			sessionModel: anthropic[0],
 			available: anthropic,
 		});
@@ -227,9 +235,7 @@ describe("resolveSubagentModel: agent-file provider containment", () => {
 	it("honors a cross-provider setting deliberately set on this session (stamp matches)", () => {
 		// Stamped for the current provider = the user chose it while here: honored + announced.
 		const resolution = resolveSubagentModel({
-			configuredDefault: "anthropic/claude-haiku-4-5",
-			configuredDefaultSource: "subagentModel setting",
-			configuredDefaultSetForProvider: "openai", // == session provider
+			configuredDefault: setting("anthropic/claude-haiku-4-5", "openai"), // stamp == session provider
 			sessionModel: openaiCatalog[0],
 			available: [...openaiCatalog, ...anthropic],
 		});
@@ -241,9 +247,7 @@ describe("resolveSubagentModel: agent-file provider containment", () => {
 
 	it("overrides a stale cross-provider setting (stamped for a provider since left)", () => {
 		const resolution = resolveSubagentModel({
-			configuredDefault: "anthropic/claude-haiku-4-5",
-			configuredDefaultSource: "subagentModel setting",
-			configuredDefaultSetForProvider: "anthropic", // set on a previous, different-provider session
+			configuredDefault: setting("anthropic/claude-haiku-4-5", "anthropic"), // stamped for a provider since left
 			sessionModel: openaiCatalog[0],
 			available: [...openaiCatalog, ...anthropic],
 		});
@@ -254,9 +258,7 @@ describe("resolveSubagentModel: agent-file provider containment", () => {
 
 	it("treats a hand-edited (unstamped) cross-provider setting as stale", () => {
 		const resolution = resolveSubagentModel({
-			configuredDefault: "anthropic/claude-haiku-4-5",
-			configuredDefaultSource: "subagentModel setting",
-			// no configuredDefaultSetForProvider — hand-edited settings.json
+			configuredDefault: setting("anthropic/claude-haiku-4-5"), // unstamped, hand-edited settings.json
 			sessionModel: openaiCatalog[0],
 			available: [...openaiCatalog, ...anthropic],
 		});
@@ -267,9 +269,7 @@ describe("resolveSubagentModel: agent-file provider containment", () => {
 
 	it("honors a same-provider setting regardless of stamp (no crossing to override)", () => {
 		const resolution = resolveSubagentModel({
-			configuredDefault: "openai/gpt-5-mini",
-			configuredDefaultSource: "subagentModel setting",
-			// unstamped, but same provider as the session → not stale-relevant
+			configuredDefault: setting("openai/gpt-5-mini"), // unstamped, but same provider → not stale-relevant
 			sessionModel: openaiCatalog[0],
 			available: openaiCatalog,
 		});
@@ -360,7 +360,7 @@ describe("expensiveModelGate", () => {
 
 	it("never gates user knobs — only the per-call field is model-chosen", () => {
 		const configured = resolveSubagentModel({
-			configuredDefault: "anthropic/claude-opus-4-8",
+			configuredDefault: setting("anthropic/claude-opus-4-8"),
 			sessionModel: session,
 			available: anthropic,
 		});

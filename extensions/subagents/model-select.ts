@@ -99,31 +99,16 @@ export interface ResolveInput {
 	requested?: string;
 	/** The agent definition's frontmatter `model`. */
 	agentModel?: string;
-	/** CLAUDE_CODE_SUBAGENT_MODEL / `subagentModel` setting, user or managed scope. */
-	configuredDefault?: string;
-	/** Which knob `configuredDefault` came from — gates the stale-setting override below. */
-	configuredDefaultSource?: SubagentDefault["source"];
 	/**
-	 * For the `subagentModel` setting: the session provider it was stamped for.
-	 * When it differs from the current session's provider, a cross-provider
-	 * setting is treated as stale (set for a provider since left) and skipped so
-	 * a same-provider model runs. Undefined (hand-edited, no stamp) also counts
-	 * as stale on a provider crossing.
+	 * The `subagentModel` setting / `CLAUDE_CODE_SUBAGENT_MODEL`, with its knob
+	 * (`source`) and, for the setting, the session provider it was stamped for
+	 * (`setForProvider`). A cross-provider setting stamped for a provider since
+	 * left — or unstamped (hand-edited) — is stale and skipped so a same-provider
+	 * model runs; see the resolve loop.
 	 */
-	configuredDefaultSetForProvider?: string;
+	configuredDefault?: SubagentDefault;
 	sessionModel?: Model<Api>;
 	available: Model<Api>[];
-}
-
-/** Map a configured default (setting/env) to the resolve inputs describing it, including its staleness stamp. */
-export function configuredDefaultResolveArgs(
-	configured: SubagentDefault | undefined,
-): Pick<ResolveInput, "configuredDefault" | "configuredDefaultSource" | "configuredDefaultSetForProvider"> {
-	return {
-		configuredDefault: configured?.spec,
-		configuredDefaultSource: configured?.source,
-		configuredDefaultSetForProvider: configured?.setForProvider,
-	};
 }
 
 export interface SubagentModelResolution {
@@ -171,7 +156,7 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 	if (input.requested) chain.push({ value: input.requested, source: "call", knob: "the model field" });
 	if (input.agentModel) chain.push({ value: input.agentModel, source: "agent", knob: "the agent file's model" });
 	if (input.configuredDefault) {
-		chain.push({ value: input.configuredDefault, source: "default", knob: "the configured subagent default" });
+		chain.push({ value: input.configuredDefault.spec, source: "default", knob: "the configured subagent default" });
 	}
 
 	const contained = sessionModel ? modelsContainedToSession(available, sessionModel) : [];
@@ -183,8 +168,8 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 	// value is not honored and a same-provider model runs instead. A deliberate
 	// choice made on this provider (stamp matches) is still honored + announced.
 	const settingIsStale =
-		input.configuredDefaultSource === "subagentModel setting" &&
-		input.configuredDefaultSetForProvider !== sessionModel?.provider;
+		input.configuredDefault?.source === "subagentModel setting" &&
+		input.configuredDefault.setForProvider !== sessionModel?.provider;
 
 	for (const entry of chain) {
 		const wanted = entry.value.trim();
