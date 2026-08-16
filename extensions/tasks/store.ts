@@ -158,25 +158,55 @@ export function formatTaskList(store: TaskStore): string {
 	return tasks.map((t) => formatTaskLine(store, t)).join("\n");
 }
 
+/**
+ * Presentation hooks for the widget, injected by the TUI wiring so this
+ * module stays pure. The identity default renders plain text (what the unit
+ * tests assert against, and what a themeless UI falls back to).
+ */
+export interface WidgetStyle {
+	paint(color: string, text: string): string;
+	bold(text: string): string;
+	strike(text: string): string;
+}
+
+const PLAIN_STYLE: WidgetStyle = { paint: (_color, text) => text, bold: (text) => text, strike: (text) => text };
+
 // TUI counterpart of STATUS_MARK above (the model-facing ASCII in tool
-// results) — a new status needs a glyph in both tables.
-const WIDGET_MARK: Record<TaskStatus, string> = { pending: "◻", in_progress: "◼", completed: "✔" };
+// results) — a new status needs a row style in both places. Colors match the
+// ANSI-captured Claude Code widget: green struck-through dim completed rows,
+// accent-glyph bold in-progress rows, plain pending rows.
+function taskRow(task: TaskItem, { paint, bold, strike }: WidgetStyle): string {
+	switch (task.status) {
+		case "completed":
+			return `${paint("success", "✔")} ${strike(paint("dim", task.subject))}`;
+		case "in_progress":
+			return `${paint("accent", "◼")} ${bold(task.subject)}`;
+		default:
+			return `◻ ${task.subject}`;
+	}
+}
 
 /**
- * The pinned task widget, rendered like Claude Code's: a summary line
- * ("4 tasks (1 done, 1 in progress, 2 open)") followed by one glyph-prefixed
- * line per task in creation order. Long lists collapse past `maxTasks` so the
- * widget cannot swallow the screen (Claude Code's cutoff is unverified).
+ * The pinned task widget, rendered like Claude Code's: a dim summary line
+ * with bold counts ("4 tasks (1 done, 1 in progress, 2 open)") followed by
+ * one glyph-prefixed line per task in creation order. Long lists collapse
+ * past `maxTasks` so the widget cannot swallow the screen (Claude Code's
+ * cutoff is unverified).
  */
-export function formatTaskWidget(store: TaskStore, maxTasks = 12): string[] {
+export function formatTaskWidget(store: TaskStore, maxTasks = 12, style: WidgetStyle = PLAIN_STYLE): string[] {
+	const { paint, bold } = style;
 	const tasks = store.list();
 	if (tasks.length === 0) return [];
 	const done = tasks.filter((t) => t.status === "completed").length;
 	const inProgress = tasks.filter((t) => t.status === "in_progress").length;
 	const open = tasks.length - done - inProgress;
-	const lines = [`  ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"} (${done} done, ${inProgress} in progress, ${open} open)`];
-	for (const t of tasks.slice(0, maxTasks)) lines.push(`  ${WIDGET_MARK[t.status]} ${t.subject}`);
-	if (tasks.length > maxTasks) lines.push(`  … +${tasks.length - maxTasks} more`);
+	const dim = (text: string) => paint("dim", text);
+	const count = (n: number) => bold(dim(String(n)));
+	const lines = [
+		`  ${count(tasks.length)}${dim(` ${tasks.length === 1 ? "task" : "tasks"} (`)}${count(done)}${dim(" done, ")}${count(inProgress)}${dim(" in progress, ")}${count(open)}${dim(" open)")}`,
+	];
+	for (const t of tasks.slice(0, maxTasks)) lines.push(`  ${taskRow(t, style)}`);
+	if (tasks.length > maxTasks) lines.push(`  ${dim(`… +${tasks.length - maxTasks} more`)}`);
 	return lines;
 }
 

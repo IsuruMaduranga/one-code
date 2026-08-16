@@ -87,6 +87,11 @@ export function dimRightAlignedWidget(text: string): (tui: unknown, theme: unkno
 	};
 }
 
+/** Strikethrough via raw SGR 9/29 — pi themes have no strike paint. */
+export function strike(text: string): string {
+	return `\x1b[9m${text}\x1b[29m`;
+}
+
 /** Cut plain (unpainted) text to `width` columns by code point, with an ellipsis. */
 export function cutPlainText(text: string, width: number): string {
 	if (width <= 0) return "";

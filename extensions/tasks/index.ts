@@ -19,7 +19,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import { restoreLatestDetails } from "../lib/branch-restore.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
-import { ccToolRenderers, linesComponent } from "../lib/tui-render.ts";
+import { ccToolRenderers, linesComponent, safeThemeBold, safeThemePaint, strike } from "../lib/tui-render.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { formatTaskDetails, formatTaskLine, formatTaskList, formatTaskWidget, nudgeMessage, type TaskSnapshot, TaskStore } from "./store.ts";
 
@@ -35,10 +35,16 @@ export default function tasksExtension(pi: ExtensionAPI) {
 
 	const updateWidget = (ctx: ExtensionContext) => {
 		if (!ctx.hasUI) return;
-		const lines = widgetHidden ? [] : formatTaskWidget(store);
+		if (widgetHidden || store.list().length === 0) {
+			ctx.ui.setWidget("cc-tasks", undefined);
+			return;
+		}
 		// Component form so every line passes truncateLine — subjects are
 		// unbounded model text, and pi-tui crashes on an over-wide line.
-		ctx.ui.setWidget("cc-tasks", lines.length > 0 ? () => linesComponent(() => lines) : undefined);
+		ctx.ui.setWidget("cc-tasks", (_tui, theme) => {
+			const style = { paint: safeThemePaint(theme), bold: safeThemeBold(theme), strike };
+			return linesComponent(() => formatTaskWidget(store, 12, style));
+		});
 	};
 
 	const reconstructState = (ctx: ExtensionContext) => {
@@ -142,11 +148,16 @@ export default function tasksExtension(pi: ExtensionAPI) {
 			addBlockedBy: Type.Optional(Type.Array(Type.String(), { description: "Task ids that must complete before this one" })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			markUsed();
 			const { taskId, ...input } = params;
 			const outcome = store.update(taskId, input as Parameters<TaskStore["update"]>[1]);
-			if (outcome.deleted) return result(`Deleted task #${taskId}.`, ctx);
+			if (outcome.deleted) {
+				markUsed();
+				return result(`Deleted task #${taskId}.`, ctx);
+			}
+			// A failed update (unknown id) is not "using" the tracker — a model
+			// looping on a hallucinated id must not suppress the nudge.
 			if (outcome.error && !outcome.task) return result(outcome.error, ctx, true);
+			markUsed();
 			const line = formatTaskLine(store, outcome.task!);
 			return result(outcome.error ? `${line}\n${outcome.error}` : line, ctx, Boolean(outcome.error));
 		},
