@@ -119,9 +119,16 @@ export function startBackgroundBash(options: StartBackgroundBashOptions): Backgr
 		if (timer) clearTimeout(timer);
 		task.status = status;
 		task.finishedAt = Date.now();
-		log?.end();
-		finish();
-		options.onFinished(task, { exitCode, signal, stopped: stopRequested, timedOut, output: task.output() });
+		const complete = () => {
+			finish();
+			options.onFinished(task, { exitCode, signal, stopped: stopRequested, timedOut, output: task.output() });
+		};
+		// end() flushes asynchronously; `finished` must not resolve while the
+		// log file is still short of what output() returns, or a reader sent to
+		// logPath by the completion notification can see a truncated file. The
+		// callback also fires if the stream errors, so this cannot hang.
+		if (log) log.end(complete);
+		else complete();
 	};
 
 	child.on("error", (error) => {
