@@ -489,6 +489,39 @@ export function resolvePayload(tokens: Token[]): { command: string; args: Token[
 	}
 }
 
+/**
+ * A segment's tokens normalised for command-position checks: subshell parens
+ * stripped (`(cd` → `cd`) and leading `do`/`then`/`else` keywords skipped, so
+ * the command inside a loop body or subshell is still seen as the lead.
+ * Used by the bash/worktree guard pipelines, not by the escalation analyzer.
+ */
+export function leadTokens(seg: Segment): Token[] {
+	const tokens = seg.tokens
+		.map((t) => ({ ...t, value: t.value.replace(/^[({]+/, "") }))
+		.filter((t) => t.value.length > 0);
+	let i = 0;
+	while (i < tokens.length && ["do", "then", "else"].includes(tokens[i].value)) i++;
+	return tokens.slice(i);
+}
+
+/**
+ * Superset of GIT_GLOBAL_VALUE_FLAGS for *locating* the subcommand, not for
+ * judging safety: `-c`/`--config-env` are included here because they do take a
+ * value, while the escalation analyzer above deliberately refuses to skip them.
+ */
+const GIT_LOCATOR_VALUE_FLAGS = new Set([...GIT_GLOBAL_VALUE_FLAGS, "-c", "--config-env"]);
+
+/** The git subcommand and the tokens after it, global flags skipped. */
+export function gitSubcommand(args: Token[]): { sub?: string; rest: Token[] } {
+	let i = 0;
+	while (i < args.length) {
+		const value = args[i].value;
+		if (!value.startsWith("-")) return { sub: value, rest: args.slice(i + 1) };
+		i += GIT_LOCATOR_VALUE_FLAGS.has(value) ? 2 : 1;
+	}
+	return { rest: [] };
+}
+
 /** Basename of a command token, `.exe` stripped, lowercased. */
 function commandName(token: string): string {
 	const withForwardSlashes = token.trim().toLowerCase().replace(/\\/g, "/");

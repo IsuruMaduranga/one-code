@@ -25,30 +25,16 @@
  *   that ends with `wait` reaps its own children and passes.
  */
 
-import { parseCommand, resolvePayload, type Segment, type Token } from "../auto-mode/shell-analysis.ts";
-
-/**
- * A segment's tokens normalised for command-position checks: subshell parens
- * stripped (`(cd` → `cd`) and leading `do`/`then`/`else`/`{` keywords skipped,
- * so the command inside a loop body or subshell is still seen as the lead.
- */
-export function leadTokens(seg: Segment): Token[] {
-	const tokens = seg.tokens
-		.map((t) => ({ ...t, value: t.value.replace(/^[({]+/, "") }))
-		.filter((t) => t.value.length > 0);
-	let i = 0;
-	while (i < tokens.length && ["do", "then", "else", "{"].includes(tokens[i].value)) i++;
-	return tokens.slice(i);
-}
+import { gitSubcommand, leadTokens, parseCommand, resolvePayload, type Segment } from "../auto-mode/shell-analysis.ts";
 
 const clip = (text: string, max = 200): string => (text.length > max ? `${text.slice(0, max)}…` : text);
 
 export function bashGuardReason(command: string, opts: { background: boolean }): string | undefined {
 	const { segments, parseFailed } = parseCommand(command);
 	if (parseFailed || segments.length === 0) return undefined;
-	const foregroundOnly = () =>
-		waitReason(segments) ?? pollLoopReason(command, segments) ?? orphanReason(command, segments);
-	return interactiveReason(segments) ?? (opts.background ? undefined : foregroundOnly());
+	const interactive = interactiveReason(segments);
+	if (interactive || opts.background) return interactive;
+	return waitReason(segments) ?? pollLoopReason(command, segments) ?? orphanReason(command, segments);
 }
 
 // ---------------------------------------------------------------------------
@@ -153,17 +139,17 @@ function orphanReason(command: string, segments: Segment[]): string | undefined 
 		"Run it with run_in_background: true instead: it returns a task id immediately, completion arrives as a system notification, output stays readable with task_output, and it can be stopped with task_stop. " +
 		"If you need shell-level parallelism inside one command, end it with `wait` so the children are reaped.";
 
+	let sawWait = false;
 	for (const seg of segments) {
-		const { peeled } = resolvePayload(leadTokens(seg));
+		const { command: cmd, peeled } = resolvePayload(leadTokens(seg));
 		const detacher = peeled.find((p) => p === "nohup" || p === "setsid");
 		if (detacher) return message(`\`${detacher}\``);
+		if (cmd === "wait") sawWait = true;
 	}
 	// A heredoc body may contain literal `&`s the scanner cannot tell from a
 	// top-level one — pass rather than misfire (contract: positive parse only).
 	if (/<</.test(command)) return undefined;
-	if (hasBackgroundAmp(command) && !segments.some((s) => leadTokens(s)[0]?.value === "wait")) {
-		return message("`&`");
-	}
+	if (hasBackgroundAmp(command) && !sawWait) return message("`&`");
 	return undefined;
 }
 
@@ -171,19 +157,6 @@ function orphanReason(command: string, segments: Segment[]): string | undefined 
 // Interactive guard
 
 const EDITORS = new Set(["vi", "vim", "nvim", "view", "vimdiff", "nano", "pico", "emacs"]);
-/** Git global flags that consume the following token as a value. */
-const GIT_VALUE_FLAGS = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path"]);
-
-/** The git subcommand and the tokens after it, global flags skipped. */
-export function gitSubcommand(args: Token[]): { sub?: string; rest: Token[] } {
-	let i = 0;
-	while (i < args.length) {
-		const value = args[i].value;
-		if (!value.startsWith("-")) return { sub: value, rest: args.slice(i + 1) };
-		i += GIT_VALUE_FLAGS.has(value) ? 2 : 1;
-	}
-	return { rest: [] };
-}
 
 function interactiveReason(segments: Segment[]): string | undefined {
 	for (const seg of segments) {

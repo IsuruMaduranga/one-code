@@ -34,6 +34,8 @@ interface WorktreeState {
 	baseCommit?: string;
 	createdByUs: boolean;
 	originalCwd: string;
+	/** Root of the shared checkout (`git rev-parse --show-toplevel` at entry). */
+	sharedRoot: string;
 }
 
 interface WorktreeDetails {
@@ -75,20 +77,13 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 		const details = restoreLatestDetails<WorktreeDetails>(ctx.sessionManager.getBranch(), WORKTREE_TOOLS, (d) => d?.worktreeState !== undefined);
 		let restored = details?.worktreeState ?? undefined;
 		if (restored && !existsSync(restored.path)) restored = undefined;
+		// Sessions persisted before sharedRoot existed: originalCwd is the best guess.
+		if (restored && !restored.sharedRoot) restored = { ...restored, sharedRoot: restored.originalCwd };
 		applyState(restored);
 	};
 
 	pi.on("session_start", (_event, ctx) => reconstructState(ctx));
 	pi.on("session_tree", (_event, ctx) => reconstructState(ctx));
-
-	// The shared checkout this worktree belongs to — our worktrees live under
-	// <root>/.claude/worktrees/<name>; a worktree entered by `path` from
-	// elsewhere falls back to the directory the session started in.
-	const sharedRootOf = (s: WorktreeState): string => {
-		const marker = "/.claude/worktrees/";
-		const idx = s.path.indexOf(marker);
-		return idx > 0 ? s.path.slice(0, idx) : s.originalCwd;
-	};
 
 	pi.on("tool_call", (event) => {
 		if (!state) return;
@@ -99,7 +94,7 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 			// this worktree, and shared-stash footguns are refused with the recipe.
 			const command = (event.input as Record<string, unknown>).command;
 			if (typeof command === "string") {
-				const reason = worktreeBashGuardReason({ command, worktreePath: state.path, sharedRoot: sharedRootOf(state) });
+				const reason = worktreeBashGuardReason({ command, worktreePath: state.path, sharedRoot: state.sharedRoot });
 				if (reason) return { block: true, reason };
 			}
 		}
@@ -140,7 +135,7 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 				const known = await listWorktreePaths(ctx.cwd);
 				const target = known.find((p) => p === params.path);
 				if (!target) return fail(`${params.path} is not a worktree of this repository. Known worktrees:\n${known.join("\n")}`);
-				const next: WorktreeState = { path: target, createdByUs: false, originalCwd: ctx.cwd };
+				const next: WorktreeState = { path: target, createdByUs: false, originalCwd: ctx.cwd, sharedRoot: repoRoot };
 				applyState(next);
 				return {
 					content: [{ type: "text", text: `Switched into existing worktree ${target}. All work now happens there; exit_worktree returns to ${ctx.cwd}.` }],
@@ -177,7 +172,7 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 				return fail(`Could not create worktree: ${(error as Error).message}`);
 			}
 
-			const next: WorktreeState = { path, branch, baseCommit, createdByUs: true, originalCwd: ctx.cwd };
+			const next: WorktreeState = { path, branch, baseCommit, createdByUs: true, originalCwd: ctx.cwd, sharedRoot: repoRoot };
 			applyState(next);
 			return {
 				content: [

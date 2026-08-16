@@ -25,11 +25,9 @@
  * invariant, fail open on everything else).
  */
 
-import { resolve } from "node:path";
 import { homedir } from "node:os";
-import { isWithin } from "../auto-mode/paths.ts";
-import { parseCommand, resolvePayload, type Token } from "../auto-mode/shell-analysis.ts";
-import { gitSubcommand, leadTokens } from "../bash/guards.ts";
+import { isWithin, toAbsolute } from "../auto-mode/paths.ts";
+import { gitSubcommand, leadTokens, parseCommand, resolvePayload, type Token } from "../auto-mode/shell-analysis.ts";
 
 export interface WorktreeGuardContext {
 	command: string;
@@ -104,7 +102,7 @@ export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: W
 			const target = tokens[1]?.value;
 			if (!target) dir = homedir();
 			else if (hasExpansion(target) || target === "-") dir = undefined;
-			else if (dir !== undefined) dir = resolve(dir, target.replace(/^~(?=\/|$)/, homedir()));
+			else if (dir !== undefined) dir = toAbsolute(dir, target, homedir());
 			continue;
 		}
 		if (rawLead === "pushd" || rawLead === "popd") {
@@ -170,7 +168,7 @@ export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: W
 						`Use literal paths inside ${worktreePath} instead.`,
 					);
 				}
-				const resolved = resolve(effective, raw.replace(/^~(?=\/|$)/, homedir()));
+				const resolved = toAbsolute(effective, raw, homedir());
 				if (value === "-C") effective = resolved;
 				else extraTargets.push(resolved);
 				i += inlined ? 1 : 2;
@@ -192,8 +190,10 @@ export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: W
 			// An unrelated repository elsewhere on disk — not this guard's concern.
 		}
 
-		// The stash stack is per-repository and shared across its worktrees.
-		if (targets.some((t) => isWithin(worktreePath, t) || isWithin(sharedRoot, t))) {
+		// The stash stack is per-repository and shared across its worktrees. Any
+		// shared-root target that is NOT inside the worktree already returned
+		// above, so only worktree-contained targets can reach this check.
+		if (targets.some((t) => isWithin(worktreePath, t))) {
 			const { sub, rest } = gitSubcommand(args);
 			if (sub === "stash") {
 				const reason = stashReason(rest);
