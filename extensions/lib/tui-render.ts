@@ -206,6 +206,16 @@ export function linesComponent(build: (width: number) => string[]): TuiComponent
 }
 
 /**
+ * A single dim transcript line led by a dim mark ("✻ Cooked for 5m 12s",
+ * "※ recap: …") — the shared shape behind the turn-duration and recap
+ * display-only entries. Width-memoized via linesComponent.
+ */
+export function dimMarkedLine(theme: ThemeLike, mark: string, text: string): TuiComponent {
+	const paint = safeThemePaint(theme);
+	return linesComponent(() => [`${paint("dim", mark)} ${paint("dim", text)}`]);
+}
+
+/**
  * Params commonly carrying the human-meaningful part of a tool call, in
  * priority order. Used when a tool does not supply its own `title`.
  */

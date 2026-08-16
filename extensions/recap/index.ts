@@ -28,8 +28,9 @@ import type { Api, Model, Tool } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { convertToLlm, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { pickEconomicalContainedModel } from "../lib/model-policy.ts";
-import { linesComponent, safeThemePaint } from "../lib/tui-render.ts";
-import { RECAP_PROMPT, RECENT_MESSAGE_WINDOW, recapLine, REFERENCE_MARK } from "./prompt.ts";
+import { dimMarkedLine } from "../lib/tui-render.ts";
+import { RECAP_PROMPT, recapLine, recentForRecap, REFERENCE_MARK } from "./prompt.ts";
+import { RecapScheduler } from "./scheduler.ts";
 
 const ENTRY_TYPE = "one-code:recap";
 const DEFAULT_IDLE_MS = 5 * 60_000; // CC's BLUR_DELAY_MS
@@ -50,9 +51,7 @@ export default function recapExtension(pi: ExtensionAPI) {
 	pi.registerEntryRenderer<RecapData>(ENTRY_TYPE, (entry, _options, theme) => {
 		const content = entry.data?.content;
 		if (!content) return undefined;
-		const paint = safeThemePaint(theme);
-		const line = `${paint("dim", REFERENCE_MARK)} ${paint("dim", recapLine(content))}`;
-		return linesComponent(() => [line]);
+		return dimMarkedLine(theme, REFERENCE_MARK, recapLine(content));
 	});
 
 	// The exact request messages the session last sent (after every extension's
@@ -63,30 +62,32 @@ export default function recapExtension(pi: ExtensionAPI) {
 	});
 
 	let lastCtx: ExtensionContext | undefined;
-	let turnRunning = false;
-	let firedSinceTurn = false;
-	let timer: ReturnType<typeof setTimeout> | undefined;
 	let inFlight: AbortController | undefined;
+	let inputHookRegistered = false;
 
-	const clearTimer = () => {
-		if (timer) clearTimeout(timer);
-		timer = undefined;
-	};
 	const abortInFlight = () => {
 		inFlight?.abort();
 		inFlight = undefined;
 	};
-	const arm = () => {
-		clearTimer();
-		if (turnRunning || firedSinceTurn || process.env.CC_RECAP === "0") return;
-		timer = setTimeout(() => void generate(), idleMs());
-		timer.unref?.();
-	};
+
+	const scheduler = new RecapScheduler(
+		{
+			set: (cb, ms) => {
+				const handle = setTimeout(cb, ms);
+				handle.unref?.();
+				return handle;
+			},
+			clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+		},
+		idleMs,
+		() => process.env.CC_RECAP !== "0",
+		() => void generate(),
+	);
 
 	async function generate() {
 		const ctx = lastCtx;
 		const messages = capturedMessages;
-		if (!ctx?.hasUI || !messages?.length || firedSinceTurn) return;
+		if (!ctx?.hasUI || !messages?.length || scheduler.hasFiredSinceTurn) return;
 		abortInFlight();
 		const controller = new AbortController();
 		inFlight = controller;
@@ -108,7 +109,7 @@ export default function recapExtension(pi: ExtensionAPI) {
 				.filter((tool) => tool !== undefined)
 				.map(({ name, description, parameters }) => ({ name, description, parameters }) as Tool);
 
-			const recent = messages.slice(-RECENT_MESSAGE_WINDOW);
+			const recent = recentForRecap(messages);
 			const timeout = AbortSignal.timeout(RECAP_TIMEOUT_MS);
 			const result = await completeSimple(
 				baseUrl ? ({ ...choice.model, baseUrl } as Model<Api>) : choice.model,
@@ -132,7 +133,7 @@ export default function recapExtension(pi: ExtensionAPI) {
 				.join("\n")
 				.trim();
 			if (!content) return;
-			firedSinceTurn = true;
+			scheduler.markFired();
 			pi.appendEntry<RecapData>(ENTRY_TYPE, { content });
 		} catch {
 			// Best-effort: a failed/aborted recap call simply shows nothing.
@@ -143,33 +144,40 @@ export default function recapExtension(pi: ExtensionAPI) {
 
 	pi.on("session_start", (_event, ctx) => {
 		lastCtx = ctx;
+		// A new session (including after /clear): drop any timer armed by the
+		// previous session and its captured messages, so a stale recap can never
+		// surface against the fresh conversation.
+		scheduler.reset();
+		abortInFlight();
+		capturedMessages = undefined;
 		if (!ctx.hasUI) return;
 		// Reset the idle clock on any keystroke — the closest signal to CC's
-		// terminal-blur trigger pi exposes. Registered once; acts through the
-		// freshest ctx via lastCtx (session switches replace the context).
+		// terminal-blur trigger pi exposes. Registered ONCE (session_start fires
+		// again on every /clear and session switch, so an unguarded registration
+		// would leak a growing stack of listeners); the handler drives the
+		// scheduler, which reads only its own state.
+		if (inputHookRegistered) return;
+		inputHookRegistered = true;
 		ctx.ui.onTerminalInput(() => {
-			if (!turnRunning) arm();
+			scheduler.interacted();
 			return undefined; // observe only; never consume the keystroke
 		});
 	});
 
 	pi.on("agent_start", (_event, ctx) => {
 		lastCtx = ctx;
-		turnRunning = true;
-		firedSinceTurn = false;
-		clearTimer();
+		scheduler.turnStarted();
 		abortInFlight();
 	});
 
 	pi.on("agent_end", (_event, ctx) => {
 		lastCtx = ctx;
-		turnRunning = false;
 		if (!ctx.hasUI) return;
-		arm();
+		scheduler.turnEnded();
 	});
 
 	pi.on("session_shutdown", () => {
-		clearTimer();
+		scheduler.reset();
 		abortInFlight();
 	});
 }

@@ -24,3 +24,18 @@ export const RECAP_PROMPT =
 export function recapLine(content: string): string {
 	return `recap: ${content.trim()}`;
 }
+
+/**
+ * The recent-message window for the recap: the last `window` messages, trimmed
+ * forward to start at a user turn. A raw slice can begin mid-exchange, with a
+ * leading tool_result whose matching assistant tool_use fell outside the
+ * window — strict providers (e.g. Anthropic) reject that orphan, and the recap
+ * would silently fail. Starting at a user message keeps every tool_use/
+ * tool_result pair intact. Generic over `{ role }` so it is testable with plain
+ * objects; when no user message is in the window the whole slice is kept.
+ */
+export function recentForRecap<T extends { role: string }>(messages: readonly T[], window = RECENT_MESSAGE_WINDOW): T[] {
+	const tail = messages.slice(-window);
+	const firstUser = tail.findIndex((message) => message.role === "user");
+	return firstUser > 0 ? tail.slice(firstUser) : tail;
+}

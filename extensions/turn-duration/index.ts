@@ -11,7 +11,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { linesComponent, safeThemePaint } from "../lib/tui-render.ts";
+import { dimMarkedLine } from "../lib/tui-render.ts";
 import { TURN_MARK, turnDurationText } from "./line.ts";
 import { pickCompletionVerb } from "./verbs.ts";
 
@@ -26,9 +26,7 @@ export default function turnDurationExtension(pi: ExtensionAPI) {
 	pi.registerEntryRenderer<TurnDurationData>(ENTRY_TYPE, (entry, _options, theme) => {
 		const data = entry.data;
 		if (!data) return undefined;
-		const paint = safeThemePaint(theme);
-		const line = `${paint("dim", TURN_MARK)} ${paint("dim", turnDurationText(data.verb, data.durationMs))}`;
-		return linesComponent(() => [line]);
+		return dimMarkedLine(theme, TURN_MARK, turnDurationText(data.verb, data.durationMs));
 	});
 
 	let turnStartedAt = 0;
