@@ -273,3 +273,49 @@ timer at 1s and tokens as soon as anything streams — we follow the frames).
 `formatDuration` (humane elapsed: 45s / 1m 7s / 2h 5m) and `alignRight`
 graduated to `lib/tui-render.ts`; the workflow viewer re-exports
 formatDuration so its import surface is unchanged.
+
+## Turn-duration line and the "away" recap (2026-08-16, unreviewed)
+
+Two CC prompt-area features that share a display mechanism — a display-only
+session entry (`appendEntry` + `registerEntryRenderer`), which pi keeps out
+of the LLM context, so neither line ever becomes something the model reads
+back. Both matched to CC's reconstructed source, then verified live in tmux.
+
+- **`turn-duration/`** — CC's `✻ Cooked for 5m 12s`, appended after every
+  turn (`agent_start`→`agent_end` elapsed). The verb is random per turn from
+  CC's 8-entry TURN_COMPLETION_VERBS (past-tense, distinct from the spinner's
+  gerund list); `✻` is CC's TEARDROP_ASTERISK; dim; no minimum-duration
+  threshold; defaults on like CC's `showTurnDuration` (`CC_TURN_DURATION=0`
+  off). CC's optional token-budget suffix is its separate `/budget` feature
+  and is skipped.
+
+- **`recap/`** — CC's `※ recap:` "while you were away" summary. Generation
+  mirrors CC's `services/awaySummary.ts`: a cheap **same-containment** model
+  (`pickEconomicalContainedModel`, the `getSmallFastModel` analog — the
+  session transcript goes to the model, so containment applies exactly as for
+  the web_fetch reader), CC's **verbatim** prompt, only the last 30 captured
+  messages, `※` = REFERENCE_MARK, dim, display-only. It **does not** reuse
+  the session prompt cache the way compaction does — the initial hypothesis
+  was that it would, but the source shows CC makes a small standalone call
+  here (`skipCacheWrite`, empty system prompt). Best-effort throughout: any
+  failure shows nothing.
+
+**Deviations from CC (deliberate):**
+1. **Trigger is an idle timer, not 5-min terminal blur.** pi exposes no
+   focus/blur event (checked the `ctx.ui` surface — `notify`, `setWidget`,
+   `onTerminalInput`, no DECSET-1004). Closest faithful substitute: a timer
+   armed at turn end, reset on any keystroke (`onTerminalInput`), cleared
+   while a turn runs, at most one recap per user turn (CC's
+   `hasSummarySinceLastUserTurn` guard). Default 5 min (CC's `BLUR_DELAY_MS`);
+   `CC_RECAP_IDLE_MS` overrides, `CC_RECAP=0` off.
+2. **Sends the active tool definitions, not CC's `tools:[]`.** A history
+   carrying `tool_use` blocks is rejected by some providers when no tools are
+   declared; the small token budget + "write 1-3 sentences" instruction keep
+   the model answering in text rather than calling one.
+3. **Session-memory block omitted** from the prompt (CC prepends it) — keeps
+   the extension decoupled from One Code's memory extension. The recent
+   messages carry enough "where we left off."
+
+Default-on is a divergence from CC, which growthbook-gates the away summary
+off for third parties (`tengu_sedge_lantern`, 3P default false); shipped on
+here because the feature was explicitly requested.
