@@ -139,16 +139,17 @@ automatically to keep sessions cheap.
 
 ### 🛠️ The same tool surface as Claude Code
 `read`, `write`, `edit`, `bash` (with background runs), `grep`, `find`, `ls`,
-`todo_write`, `notebook_edit`, `web_search`, `web_fetch`, `lsp_diagnostics`
-(live language-server diagnostics after edits), `ask_user_question`, task
-tracking, background monitors, scheduled wake-ups — and `tool_search`, which
+`notebook_edit`, `web_search`, `web_fetch`, `lsp_diagnostics`
+(live language-server diagnostics after edits), `ask_user_question`, stateful
+task tracking with a pinned progress widget, background monitors, scheduled
+wake-ups — and `tool_search`, which
 keeps rarely-used schemas out of the prompt until they're needed. On Anthropic
 and recent OpenAI models this uses the provider's native deferred-tool
 mechanism, so loading a tool never invalidates your cached prompt.
 
 Every Claude Code tool has a counterpart here, so muscle memory and rules carry
 over: Claude Code's own PascalCase names — `Read`, `Bash`, `Edit`, `Task`,
-`WebFetch`, `TodoWrite`, `EnterWorktree`, and the rest — are accepted verbatim in
+`WebFetch`, `TaskCreate`, `EnterWorktree`, and the rest — are accepted verbatim in
 your `.claude/settings.json` permission rules and hook matchers, mapped to the
 matching tool automatically.
 

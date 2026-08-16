@@ -25,7 +25,6 @@ const CC_CANONICAL: Record<string, string> = {
 	web_fetch: "WebFetch",
 	web_search: "WebSearch",
 	subagent: "Task",
-	todo_write: "TodoWrite",
 	skill: "Skill",
 	ask_user_question: "AskUserQuestion",
 	enter_plan_mode: "EnterPlanMode",

@@ -96,7 +96,7 @@ describe("matcher", () => {
 		expect(matcherApplies("Edit|Write", toolMatchCandidates("write"))).toBe(true);
 		expect(matcherApplies("Glob", toolMatchCandidates("find"))).toBe(true);
 		expect(matcherApplies("Task", toolMatchCandidates("subagent"))).toBe(true);
-		expect(matcherApplies("TodoWrite", toolMatchCandidates("todo_write"))).toBe(true);
+		expect(matcherApplies("TaskCreate", toolMatchCandidates("task_create"))).toBe(true);
 		expect(matcherApplies("Bash", toolMatchCandidates("write"))).toBe(false);
 	});
 

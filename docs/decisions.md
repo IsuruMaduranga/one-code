@@ -37,7 +37,7 @@ Full context: [`decisions/system-prompt.md`](decisions/system-prompt.md).
 
 Full context: [`decisions/tools.md`](decisions/tools.md).
 
-- **[Tool names stay pi-idiomatic (snake_case)](decisions/tools.md#tool-names-stay-pi-idiomatic-snake_case)** — register `todo_write`/`subagent`-style names; `matcher.ts` maps users' Claude Code PascalCase permission rules onto them.
+- **[Tool names stay pi-idiomatic (snake_case)](decisions/tools.md#tool-names-stay-pi-idiomatic-snake_case)** — register `task_create`/`subagent`-style names; `matcher.ts` maps users' Claude Code PascalCase permission rules onto them.
 - **[Deferred tools (ToolSearch)](decisions/tools.md#deferred-tools-toolsearch)** — how tool schemas are kept out of the prompt until asked for, using the provider's native mechanism where available.
 - **[Web tools](decisions/tools.md#web-tools)** — `web_search` wraps the one community dep (`pi-web-search`); the rest is our own.
 - **[AskUserQuestion — our own](decisions/tools.md#askuserquestion--our-own)** — the multi-question schema, option lists, multi-select, and headless fallback.

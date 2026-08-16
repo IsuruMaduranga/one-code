@@ -34,7 +34,7 @@ describe("recordAction", () => {
 
 	it("tolerates a call with no recognisable subject", () => {
 		const log: ChildAction[] = [];
-		recordAction(log, "todo_write", { todos: [] });
-		expect(log[0]).toEqual({ toolName: "todo_write", subject: "" });
+		recordAction(log, "task_list", {});
+		expect(log[0]).toEqual({ toolName: "task_list", subject: "" });
 	});
 });

@@ -6,7 +6,7 @@ Part of [Decisions](../decisions.md).
 
 pi keys its built-in overrides and typed `tool_call` events on `read`, `bash`,
 `edit`, `write`, `grep`, `find`, `ls`. We register custom tools in the same
-style (`todo_write`, `enter_plan_mode`, `subagent`). Users' Claude Code
+style (`task_create`, `enter_plan_mode`, `subagent`). Users' Claude Code
 permission rules still work: `matcher.ts` maps `Bash`, `Glob`, `WebFetch`,
 `Task`, … onto our names. pi's Anthropic OAuth mode separately renames tools to
 Claude Code's casing on the wire, so nothing is lost there either.
@@ -216,9 +216,11 @@ appended to the block reason (`The user said: …`). Previously the option promi
 something the code did not deliver.
 
 **State-driven nudges.** Claude Code injects a reminder when the task tools have
-gone unused. `todo_write` now does the same after eight quiet turns, and also
-flags a list with no `in_progress` item or several of them. A todo tool nobody
-remembers to call is decoration.
+gone unused. The task tools now do the same after eight quiet turns, and also
+flag a list with no `in_progress` task or several of them. A task list nobody
+remembers to update is decoration. (The nudge originally lived on `todo_write`,
+which was removed when Claude Code 2.1.233 dropped TodoWrite in favor of the
+TaskCreate family.)
 
 **CLAUDE.md framing.** Context files are now introduced with Claude Code's own
 wording — "IMPORTANT: These instructions OVERRIDE any default behavior and you

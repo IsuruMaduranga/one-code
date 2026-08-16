@@ -224,7 +224,7 @@ describe("decide", () => {
 
 	it("asks for unknown custom tools by default, allows safe-listed ones", () => {
 		expect(decide({ ...base, toolName: "mystery_tool" }).decision).toBe("ask");
-		expect(decide({ ...base, toolName: "todo_write" }).decision).toBe("allow");
+		expect(decide({ ...base, toolName: "task_create" }).decision).toBe("allow");
 	});
 
 	it("never gates the loaders that other tools sit behind", () => {

@@ -33,8 +33,6 @@ const CC_TOOL_NAMES: Record<string, string> = {
 	web_search: "web_search",
 	task: "subagent",
 	agent: "subagent",
-	todowrite: "todo_write",
-	todo_write: "todo_write",
 	skill: "skill",
 	askuserquestion: "ask_user_question",
 	ask_user_question: "ask_user_question",
@@ -217,7 +215,6 @@ export function toolTier(toolName: string): ToolTier {
  * since a blocked loader means the model can never reach the tools behind it.
  */
 export const AUTO_ALLOWED_TOOLS = new Set<string>([
-	"todo_write",
 	"ask_user_question",
 	"ask_user",
 	// Loads tool schemas and packaged instructions; no side effects.
@@ -237,7 +234,7 @@ export const AUTO_ALLOWED_TOOLS = new Set<string>([
 	// Plan-mode transitions must work inside plan mode itself.
 	"enter_plan_mode",
 	"exit_plan_mode",
-	// Session-state bookkeeping, like todo_write.
+	// Session-state bookkeeping.
 	"task_create",
 	"task_get",
 	"task_list",

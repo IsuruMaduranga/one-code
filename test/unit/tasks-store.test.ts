@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatTaskDetails, formatTaskList, TaskStore } from "../../extensions/tasks/store.ts";
+import { formatTaskDetails, formatTaskList, formatTaskWidget, TaskStore } from "../../extensions/tasks/store.ts";
 
 describe("TaskStore", () => {
 	it("creates tasks with incrementing ids and pending status", () => {
@@ -80,6 +80,31 @@ describe("TaskStore", () => {
 		restored.restore(snapshot);
 		expect(restored.create({ subject: "B", description: "" }).id).toBe("2");
 		expect(restored.get("1")!.subject).toBe("A");
+	});
+
+	it("formats the widget like Claude Code's pinned task list", () => {
+		const store = new TaskStore();
+		expect(formatTaskWidget(store)).toEqual([]);
+		const a = store.create({ subject: "Set up project", description: "" });
+		expect(formatTaskWidget(store)[0]).toBe("  1 task (0 done, 0 in progress, 1 open)");
+		const b = store.create({ subject: "Build endpoints", description: "" });
+		store.create({ subject: "Add tests", description: "" });
+		store.update(a.id, { status: "completed" });
+		store.update(b.id, { status: "in_progress" });
+		expect(formatTaskWidget(store)).toEqual([
+			"  3 tasks (1 done, 1 in progress, 1 open)",
+			"  ✔ Set up project",
+			"  ◼ Build endpoints",
+			"  ◻ Add tests",
+		]);
+	});
+
+	it("collapses the widget past maxTasks", () => {
+		const store = new TaskStore();
+		for (let i = 1; i <= 5; i++) store.create({ subject: `T${i}`, description: "" });
+		const lines = formatTaskWidget(store, 3);
+		expect(lines).toHaveLength(5); // summary + 3 tasks + overflow
+		expect(lines.at(-1)).toBe("  … +2 more");
 	});
 
 	it("formats list and details", () => {

@@ -50,7 +50,6 @@
 			"extensions/exit/index.ts",
 			"extensions/init/index.ts",
 			"extensions/clear/index.ts",
-			"extensions/todo/index.ts",
 			"extensions/tasks/index.ts",
 			"extensions/plan-mode/index.ts",
 			"extensions/notebook/index.ts",

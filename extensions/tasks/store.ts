@@ -1,9 +1,9 @@
 /**
  * Stateful task list (pure) — Claude Code's TaskCreate/TaskGet/TaskList/TaskUpdate.
  *
- * Unlike todo_write's whole-list replacement, tasks are individually addressable
- * by id and carry owners, arbitrary metadata, and dependency links. `blocks` and
- * `blockedBy` are kept reciprocal: adding one side always records the other.
+ * Tasks are individually addressable by id and carry owners, arbitrary
+ * metadata, and dependency links. `blocks` and `blockedBy` are kept
+ * reciprocal: adding one side always records the other.
  */
 
 export type TaskStatus = "pending" | "in_progress" | "completed";
@@ -156,6 +156,26 @@ export function formatTaskList(store: TaskStore): string {
 	const tasks = store.list();
 	if (tasks.length === 0) return "No tasks.";
 	return tasks.map((t) => formatTaskLine(store, t)).join("\n");
+}
+
+const WIDGET_MARK: Record<TaskStatus, string> = { pending: "◻", in_progress: "◼", completed: "✔" };
+
+/**
+ * The pinned task widget, rendered like Claude Code's: a summary line
+ * ("4 tasks (1 done, 1 in progress, 2 open)") followed by one glyph-prefixed
+ * line per task in creation order. Long lists collapse past `maxTasks` so the
+ * widget cannot swallow the screen (Claude Code's cutoff is unverified).
+ */
+export function formatTaskWidget(store: TaskStore, maxTasks = 12): string[] {
+	const tasks = store.list();
+	if (tasks.length === 0) return [];
+	const done = tasks.filter((t) => t.status === "completed").length;
+	const inProgress = tasks.filter((t) => t.status === "in_progress").length;
+	const open = tasks.length - done - inProgress;
+	const lines = [`  ${tasks.length} ${tasks.length === 1 ? "task" : "tasks"} (${done} done, ${inProgress} in progress, ${open} open)`];
+	for (const t of tasks.slice(0, maxTasks)) lines.push(`  ${WIDGET_MARK[t.status]} ${t.subject}`);
+	if (tasks.length > maxTasks) lines.push(`  … +${tasks.length - maxTasks} more`);
+	return lines;
 }
 
 export function formatTaskDetails(store: TaskStore, task: TaskItem): string {
