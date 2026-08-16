@@ -192,6 +192,95 @@ describe("resolveSubagentModel: precedence and exact references", () => {
 	});
 });
 
+describe("resolveSubagentModel: agent-file provider containment", () => {
+	const openaiCatalog = [model("openai", "gpt-5.1", 1.25), model("openai", "gpt-5-mini", 0.25)];
+
+	it("does not honor a cross-provider agent-file model on a non-Claude session", () => {
+		// A .claude/agents file naming an Anthropic model on an OpenAI session:
+		// the fork inherits the transcript, so it stays on-provider. Automatic
+		// same-provider selection serves instead.
+		const resolution = resolveSubagentModel({
+			agentModel: "anthropic/claude-haiku-4-5",
+			sessionModel: openaiCatalog[0],
+			available: [...openaiCatalog, ...anthropic],
+		});
+		expect(resolution.model?.provider).toBe("openai");
+		expect(resolution.model?.id).toBe("gpt-5-mini");
+		expect(resolution.source).toBe("automatic");
+		expect(resolution.notices[0]).toContain("stay on this provider");
+	});
+
+	it("honors a cross-provider agent-file model on a Claude session", () => {
+		// On a Claude-family session, .claude/agents conventions are respected;
+		// crossing providers is announced, not blocked.
+		const resolution = resolveSubagentModel({
+			agentModel: "openai/gpt-5-mini",
+			sessionModel: anthropic[0],
+			available: [...anthropic, ...openaiCatalog],
+		});
+		expect(resolution.model?.provider).toBe("openai");
+		expect(resolution.source).toBe("agent");
+		expect(resolution.notices[0]).toContain("different provider/family");
+		expect(resolution.notices[0]).toContain("honored");
+	});
+
+	it("still honors the user's cross-provider subagentModel setting on a non-Claude session", () => {
+		// The setting is the user's explicit per-harness override — respected on
+		// any provider (the reminder informs the model separately).
+		const resolution = resolveSubagentModel({
+			configuredDefault: "anthropic/claude-haiku-4-5",
+			sessionModel: openaiCatalog[0],
+			available: [...openaiCatalog, ...anthropic],
+		});
+		expect(resolution.model?.provider).toBe("anthropic");
+		expect(resolution.source).toBe("default");
+		expect(resolution.notices[0]).toContain("different provider/family");
+		expect(resolution.notices[0]).toContain("honored");
+	});
+});
+
+describe("subagentModelsReminder: setting override notice", () => {
+	const openaiCatalog = [model("openai", "gpt-5.1", 1.25), model("openai", "gpt-5-mini", 0.25)];
+
+	it("informs the model when the user pinned a cross-provider default via the setting", () => {
+		const reminder = subagentModelsReminder({
+			available: [...openaiCatalog, ...anthropic],
+			sessionModel: openaiCatalog[0],
+			defaultModel: anthropic[2], // claude-haiku-4-5
+			defaultSource: "default",
+			configured: { spec: "anthropic/claude-haiku-4-5", source: "subagentModel setting" },
+		});
+		expect(reminder).toContain("pinned the subagent default to anthropic/claude-haiku-4-5");
+		expect(reminder).toContain("different provider than this session");
+		expect(reminder).toContain("same-provider model to keep it here");
+	});
+
+	it("informs without a cross-provider note when the pinned default is same-provider", () => {
+		const reminder = subagentModelsReminder({
+			available: openaiCatalog,
+			sessionModel: openaiCatalog[0],
+			defaultModel: openaiCatalog[1], // gpt-5-mini
+			defaultSource: "default",
+			configured: { spec: "openai/gpt-5-mini", source: "subagentModel setting" },
+		});
+		expect(reminder).toContain("pinned the subagent default to openai/gpt-5-mini");
+		expect(reminder).not.toContain("different provider than this session");
+	});
+
+	it("stays silent for the env var and for the automatic default", () => {
+		const base = {
+			available: [...openaiCatalog, ...anthropic],
+			sessionModel: anthropic[0],
+			defaultModel: anthropic[2],
+			defaultSource: "default" as const,
+		};
+		expect(
+			subagentModelsReminder({ ...base, configured: { spec: "sonnet", source: "CLAUDE_CODE_SUBAGENT_MODEL" } }),
+		).not.toContain("pinned the subagent default");
+		expect(subagentModelsReminder(base)).not.toContain("pinned the subagent default");
+	});
+});
+
 describe("expensiveModelGate", () => {
 	const session = anthropic[2]; // haiku, $1/M
 	const resolveCall = (requested: string) =>

@@ -84,16 +84,33 @@ real registry, and the child is spawned with a concrete `provider/id`:
   the session's provider (and upstream vendor on gateways), preferring undated
   ids; off-family ("sonnet" on Groq) the session model serves and the parent
   says so. `inherit` is the session model.
-- **Exact references resolve anywhere, never silently.** Naming a model is
-  choosing it — but a provider crossing is announced, because the user
+- **Explicit choices resolve anywhere, never silently.** The main model's
+  per-call `model` field and the user's own `subagentModel` setting name a model
+  and mean it — a provider crossing is honored but announced, because the user
   configuring a key for a provider is not the user choosing to send this
   conversation there.
+- **Claude Code conventions stay on Claude sessions (2026-08-17).** A
+  `.claude/agents` frontmatter `model:` and `CLAUDE_CODE_SUBAGENT_MODEL` are
+  Claude Code's own knobs, whose usual values ("sonnet") were written for
+  Anthropic. On a Claude-family session they are respected as before. On any
+  other provider they do not get to move a subagent — which inherits the parent
+  transcript — off-provider: the env var is dropped (`applicableSubagentDefault`),
+  and a cross-provider agent-file model is *not* honored (`resolveSubagentModel`
+  skips it with a notice), so the automatic same-provider profile serves. A
+  same-provider agent-file model or an in-provider alias still works everywhere.
+- **The setting is the universal override, and the model is told.** Because the
+  `subagentModel` setting is honored across providers, when it is set the
+  every-turn reminder gains a line naming the pinned model and — if it is a
+  different provider — noting that a subagent's inherited transcript goes there,
+  so the main model can pass a listed same-provider model per call to keep it on
+  this provider.
 - **Precedence:** per-call `model` > agent frontmatter > `subagentModel`
   setting > `CLAUDE_CODE_SUBAGENT_MODEL` (real env, then user/managed settings
   `env` block — project scope deliberately unread, same containment as
-  `autoMode`) > session model. A bad *configured* value degrades to the session
-  model with a notice naming the knob; only a bad *per-call* value errors,
-  because the model that wrote it gets the menu and can retry.
+  `autoMode`) > automatic same-provider profile > session model. A bad
+  *configured* value degrades to the session model with a notice naming the knob;
+  only a bad *per-call* value errors, because the model that wrote it gets the
+  menu and can retry.
 - **Passing the session model explicitly is itself a fix**: a child spawned with
   no `--model` picks pi's saved default, not the parent's current model, so a
   mid-session ctrl+p switch silently desynced children before.
@@ -126,6 +143,14 @@ Verified live: the banner shows `subagents sonnet-5` from this machine's
 the reminder appears in the captured provider request with the resolved default
 and prices; and a real `subagent` run spawned its child on
 `anthropic/claude-sonnet-5`, resolved from the alias in the parent.
+
+The provider-containment refinement (2026-08-17) was verified against a captured
+provider request on an `openai-codex/gpt-5.6-terra` session with
+`subagentModel: opencode/deepseek-v4-flash-free`: the cross-provider setting is
+still honored (the user's explicit override), and the reminder now carries the
+informing line — "…pinned the subagent default to opencode/deepseek-v4-flash-free
+… it is a different provider than this session … pass a listed same-provider
+model to keep it here."
 
 ## Workflow tool (ultracode orchestration)
 

@@ -26,6 +26,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { isClaudeFamilyModel } from "../lib/model-policy.ts";
 import { autoModeSettingsPaths } from "../auto-mode/config.ts";
 
 export interface SubagentDefault {
@@ -91,8 +92,7 @@ export function applicableSubagentDefault(
 ): SubagentDefault | undefined {
 	if (!configured || configured.source === "subagentModel setting") return configured;
 	if (!sessionModel) return configured;
-	const claudeFamily = sessionModel.provider === "anthropic" || /claude/i.test(sessionModel.id);
-	return claudeFamily ? configured : undefined;
+	return isClaudeFamilyModel(sessionModel) ? configured : undefined;
 }
 
 /**

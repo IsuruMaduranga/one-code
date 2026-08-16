@@ -18,9 +18,14 @@
  * - Claude Code aliases (`sonnet`/`opus`/`haiku`/`fable`) resolve **within the
  *   session's provider** (and contained route/model family on gateways); where the name
  *   matches nothing, the session model serves and the parent says so.
- * - An exact model reference resolves anywhere — the user (or an agent file the
- *   user installed) naming a model is choosing it — but crossing providers is
- *   announced, never silent.
+ * - An exact per-call reference (the main model's `model` field) or the user's
+ *   own `subagentModel` setting resolves anywhere — naming a model is choosing
+ *   it — but crossing providers is announced, never silent.
+ * - An `.claude/agents` model field is a Claude Code convention: honored on a
+ *   Claude-family session, but on any other provider a cross-provider one is
+ *   *not* honored (a fork inherits the parent transcript, so subagents stay on
+ *   the session's provider) — the configured default or the automatic
+ *   same-provider profile serves instead.
  * - A configured default that cannot resolve degrades to the session model with
  *   a notice naming the knob; without one, a reviewed same-provider role profile
  *   chooses an economical default before the session fallback. Only a bad
@@ -39,6 +44,7 @@ import {
 	findRoleProfileModel,
 	hasSmallModelName,
 	hintRank,
+	isClaudeFamilyModel,
 	modelIdentity,
 	modelsContainedToSession,
 	pricedInput,
@@ -170,6 +176,19 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 		const resolved = findConfigured(available, wanted);
 		if (resolved) {
 			if (sessionModel && crossesProvider(resolved, sessionModel)) {
+				// An `.claude/agents` model is a Claude Code convention; on a
+				// non-Claude session it does not get to move a subagent (which
+				// inherits the parent transcript) onto another provider. Skip it and
+				// let the configured default or the automatic same-provider profile
+				// serve. Per-call `model` and the user's own `subagentModel` setting
+				// are explicit choices, so their crossings are still honored + announced.
+				if (entry.source === "agent" && !isClaudeFamilyModel(sessionModel)) {
+					notices.push(
+						`The agent file's model ${spec(resolved)} is a different provider than this session (${spec(sessionModel)}); ` +
+							"on a non-Claude session subagents stay on this provider, so a same-provider model runs this subagent instead.",
+					);
+					continue;
+				}
 				notices.push(
 					`Subagent model ${spec(resolved)} is a different provider/family than this session (${spec(sessionModel)}) — it was named via ${entry.knob}, so it is honored.`,
 				);
@@ -259,6 +278,13 @@ export interface MenuOptions {
 	defaultSource?: SubagentModelSource;
 	/** How many cheaper-option lines to include. */
 	maxCheaper?: number;
+	/**
+	 * The configured default and which knob set it, so the reminder can tell the
+	 * main model when the user has *manually* pinned the subagent model via the
+	 * `subagentModel` setting (as opposed to Claude Code's env var or automatic
+	 * selection). Only the setting triggers the notice.
+	 */
+	configured?: { spec: string; source: "subagentModel setting" | "CLAUDE_CODE_SUBAGENT_MODEL" };
 }
 
 const price = (model: Model<Api>): string => {
@@ -332,13 +358,35 @@ export function defaultCostsMoreWarning({ sessionModel, defaultModel }: MenuOpti
 	);
 }
 
+/**
+ * One line informing the main model when the user has manually pinned the
+ * subagent default via the `subagentModel` setting — so the model knows what
+ * subagents run on, and (when that model is a different provider than the
+ * session) that it can keep a subagent's inherited transcript on this provider
+ * by passing a listed same-provider model. Silent for the automatic default and
+ * for Claude Code's env var, which are not the user's manual per-harness choice.
+ */
+export function settingOverrideNotice({ sessionModel, defaultModel, configured }: MenuOptions): string | undefined {
+	if (configured?.source !== "subagentModel setting" || !defaultModel) return undefined;
+	const cross = sessionModel && crossesProvider(defaultModel, sessionModel);
+	return (
+		`The user pinned the subagent default to ${spec(defaultModel)} via the subagentModel setting; ` +
+		"subagents run on it unless you pass a different model in the `model` field" +
+		(cross
+			? ` — it is a different provider than this session (${spec(sessionModel as Model<Api>)}), so a subagent's inherited transcript goes to that provider; pass a listed same-provider model to keep it here.`
+			: ".")
+	);
+}
+
 /** The every-turn reminder body. Kept short: its tokens are paid on every call. */
 export function subagentModelsReminder(options: MenuOptions): string {
 	const menu = subagentModelMenu(options);
+	const setting = settingOverrideNotice(options);
 	const warning = defaultCostsMoreWarning(options);
 	return [
 		"Models for the subagent/workflow `model` field (omit it to use the default; set the default with /subagent):",
 		...menu,
+		...(setting ? [setting] : []),
 		...(warning ? [warning] : []),
 		'Aliases sonnet|opus|haiku|fable resolve within this session\'s provider; "inherit" means the session model. ' +
 			"Any exact provider/model-id the user asked for also works, even from another provider (that is announced to the user) or unlisted here — this is a menu, not a whitelist.",

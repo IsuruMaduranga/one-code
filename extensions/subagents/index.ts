@@ -222,6 +222,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				sessionModel,
 				defaultModel: resolution.model,
 				defaultSource: resolution.source,
+				configured,
 			}),
 			scope: "every-turn",
 			key: "subagent-models",
