@@ -33,10 +33,19 @@ export interface SubagentDefault {
 	spec: string;
 	/** Which knob set it, for notices. */
 	source: "subagentModel setting" | "CLAUDE_CODE_SUBAGENT_MODEL";
+	/**
+	 * For the `subagentModel` setting only: the session provider it was stamped
+	 * for when set via `/subagent`. When the current session runs on a different
+	 * provider, the setting is treated as stale (set for a provider since left)
+	 * and a same-provider model runs instead — see `resolveSubagentModel`.
+	 * Undefined for a hand-edited setting (no stamp) and for the env var.
+	 */
+	setForProvider?: string;
 }
 
 interface SettingsFile {
 	subagentModel?: unknown;
+	subagentModelSetFor?: unknown;
 	env?: Record<string, unknown>;
 }
 
@@ -51,6 +60,7 @@ function readSettings(path: string): SettingsFile | undefined {
 
 export function loadSubagentDefault(home: string, env: NodeJS.ProcessEnv = process.env): SubagentDefault | undefined {
 	let setting: string | undefined;
+	let settingSetFor: string | undefined;
 	let settingsEnv: string | undefined;
 
 	// Lowest precedence first, so managed settings override user settings.
@@ -59,6 +69,12 @@ export function loadSubagentDefault(home: string, env: NodeJS.ProcessEnv = proce
 		if (!file) continue;
 		if (typeof file.subagentModel === "string" && file.subagentModel.trim()) {
 			setting = file.subagentModel.trim();
+			// The stamp travels with the model from the same file (a lower-precedence
+			// stamp must not attach to a higher-precedence model).
+			settingSetFor =
+				typeof file.subagentModelSetFor === "string" && file.subagentModelSetFor.trim()
+					? file.subagentModelSetFor.trim()
+					: undefined;
 		}
 		const fromEnvBlock = file.env?.CLAUDE_CODE_SUBAGENT_MODEL;
 		if (typeof fromEnvBlock === "string" && fromEnvBlock.trim()) {
@@ -66,7 +82,7 @@ export function loadSubagentDefault(home: string, env: NodeJS.ProcessEnv = proce
 		}
 	}
 
-	if (setting) return { spec: setting, source: "subagentModel setting" };
+	if (setting) return { spec: setting, source: "subagentModel setting", setForProvider: settingSetFor };
 
 	const fromEnv = env.CLAUDE_CODE_SUBAGENT_MODEL?.trim();
 	if (fromEnv) return { spec: fromEnv, source: "CLAUDE_CODE_SUBAGENT_MODEL" };
@@ -104,8 +120,13 @@ export function applicableSubagentDefault(
  * Unlike loading, this throws on a malformed file: a lenient read merely
  * skips a setting, but a lenient write would replace the user's whole
  * settings file with only ours.
+ *
+ * `setForProvider` stamps the session provider the model was chosen on, so a
+ * later session on a different provider can treat the setting as stale. Pass it
+ * for a concrete model; it is cleared for `inherit` (never cross-provider) and
+ * on removal.
  */
-export function persistSubagentModel(spec: string | undefined, home: string): void {
+export function persistSubagentModel(spec: string | undefined, home: string, setForProvider?: string): void {
 	const path = join(home, ".claude", "settings.json");
 	let file: Record<string, unknown> = {};
 	if (existsSync(path)) {
@@ -115,8 +136,14 @@ export function persistSubagentModel(spec: string | undefined, home: string): vo
 		}
 		file = parsed as Record<string, unknown>;
 	}
-	if (spec === undefined) delete file.subagentModel;
-	else file.subagentModel = spec;
+	if (spec === undefined) {
+		delete file.subagentModel;
+		delete file.subagentModelSetFor;
+	} else {
+		file.subagentModel = spec;
+		if (setForProvider && spec !== "inherit") file.subagentModelSetFor = setForProvider;
+		else delete file.subagentModelSetFor;
+	}
 	mkdirSync(dirname(path), { recursive: true });
 	writeFileSync(path, `${JSON.stringify(file, null, 2)}\n`);
 }

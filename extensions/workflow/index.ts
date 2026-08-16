@@ -284,7 +284,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 					cwd: ctx.cwd,
 					sessionDir,
 					defaultModel: ctx.model,
-					configuredDefaultModel: configuredDefault?.spec,
+					configuredDefault,
 					defaultEffort: ctx.thinkingLevel,
 				});
 				widget.attach(handle);

@@ -25,6 +25,7 @@ import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../auto-m
 import { type AgentDefinition, type AgentSource, agentDirs, discoverAgents } from "./agents.ts";
 import { applicableSubagentDefault, loadSubagentDefault, persistSubagentModel } from "./default-model.ts";
 import {
+	configuredDefaultResolveArgs,
 	expensiveModelGate,
 	resolveSubagentModel,
 	SUBAGENT_STATUS_CHANNEL,
@@ -214,7 +215,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	const emitModelStatus = (ctx: ExtensionContext, sessionModel = ctx.model) => {
 		const available = ctx.modelRegistry.getAvailable();
 		const configured = applicableSubagentDefault(loadSubagentDefault(os.homedir()), sessionModel);
-		const resolution = resolveSubagentModel({ configuredDefault: configured?.spec, sessionModel, available });
+		const resolution = resolveSubagentModel({ ...configuredDefaultResolveArgs(configured), sessionModel, available });
 		for (const notice of resolution.notices) notifyModelOnce(ctx, notice);
 		pi.events.emit(REMINDER_CHANNEL, {
 			text: subagentModelsReminder({
@@ -534,14 +535,14 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				const resolution = resolveSubagentModel({
 					requested: p.request.model,
 					agentModel: p.agentDef?.model,
-					configuredDefault: configuredDefault?.spec,
+					...configuredDefaultResolveArgs(configuredDefault),
 					sessionModel: ctx.model,
 					available,
 				});
 				if (resolution.unresolved) {
 					// The main model chose this string; the menu lets it retry.
 					const fallback = resolveSubagentModel({
-						configuredDefault: configuredDefault?.spec,
+						...configuredDefaultResolveArgs(configuredDefault),
 						sessionModel: ctx.model,
 						available,
 					});
@@ -566,7 +567,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				const gate = expensiveModelGate(resolution, ctx.model, params.allow_expensive);
 				if (gate) {
 					const fallback = resolveSubagentModel({
-						configuredDefault: configuredDefault?.spec,
+						...configuredDefaultResolveArgs(configuredDefault),
 						sessionModel: ctx.model,
 						available,
 					});
@@ -974,7 +975,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		const applicable = applicableSubagentDefault(configured, ctx.model);
 		const available = ctx.modelRegistry.getAvailable();
 		const resolution = resolveSubagentModel({
-			configuredDefault: applicable?.spec,
+			...configuredDefaultResolveArgs(applicable),
 			sessionModel: ctx.model,
 			available,
 		});
@@ -1016,7 +1017,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		const resolution = resolveSubagentModel({ requested: spec, sessionModel: ctx.model, available });
 		if (resolution.unresolved) {
 			const fallback = resolveSubagentModel({
-				configuredDefault: applicableSubagentDefault(loadSubagentDefault(os.homedir()), ctx.model)?.spec,
+				...configuredDefaultResolveArgs(applicableSubagentDefault(loadSubagentDefault(os.homedir()), ctx.model)),
 				sessionModel: ctx.model,
 				available,
 			});
@@ -1041,7 +1042,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			}
 		}
 		try {
-			persistSubagentModel(spec, os.homedir());
+			// Stamp the session provider so a later session on another provider can
+			// treat this cross-provider choice as stale (a deliberate choice made here
+			// stays honored; see resolveSubagentModel).
+			persistSubagentModel(spec, os.homedir(), ctx.model?.provider);
 		} catch (error) {
 			ctx.ui.notify("Could not save subagent model: " + (error as Error).message, "error");
 			return;

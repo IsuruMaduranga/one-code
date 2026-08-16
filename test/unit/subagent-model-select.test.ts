@@ -224,11 +224,12 @@ describe("resolveSubagentModel: agent-file provider containment", () => {
 		expect(resolution.notices[0]).toContain("honored");
 	});
 
-	it("still honors the user's cross-provider subagentModel setting on a non-Claude session", () => {
-		// The setting is the user's explicit per-harness override — respected on
-		// any provider (the reminder informs the model separately).
+	it("honors a cross-provider setting deliberately set on this session (stamp matches)", () => {
+		// Stamped for the current provider = the user chose it while here: honored + announced.
 		const resolution = resolveSubagentModel({
 			configuredDefault: "anthropic/claude-haiku-4-5",
+			configuredDefaultSource: "subagentModel setting",
+			configuredDefaultSetForProvider: "openai", // == session provider
 			sessionModel: openaiCatalog[0],
 			available: [...openaiCatalog, ...anthropic],
 		});
@@ -236,6 +237,45 @@ describe("resolveSubagentModel: agent-file provider containment", () => {
 		expect(resolution.source).toBe("default");
 		expect(resolution.notices[0]).toContain("different provider/family");
 		expect(resolution.notices[0]).toContain("honored");
+	});
+
+	it("overrides a stale cross-provider setting (stamped for a provider since left)", () => {
+		const resolution = resolveSubagentModel({
+			configuredDefault: "anthropic/claude-haiku-4-5",
+			configuredDefaultSource: "subagentModel setting",
+			configuredDefaultSetForProvider: "anthropic", // set on a previous, different-provider session
+			sessionModel: openaiCatalog[0],
+			available: [...openaiCatalog, ...anthropic],
+		});
+		expect(resolution.model?.provider).toBe("openai");
+		expect(resolution.source).toBe("automatic");
+		expect(resolution.notices[0]).toContain("was set for a different provider");
+	});
+
+	it("treats a hand-edited (unstamped) cross-provider setting as stale", () => {
+		const resolution = resolveSubagentModel({
+			configuredDefault: "anthropic/claude-haiku-4-5",
+			configuredDefaultSource: "subagentModel setting",
+			// no configuredDefaultSetForProvider — hand-edited settings.json
+			sessionModel: openaiCatalog[0],
+			available: [...openaiCatalog, ...anthropic],
+		});
+		expect(resolution.model?.provider).toBe("openai");
+		expect(resolution.source).toBe("automatic");
+		expect(resolution.notices[0]).toContain("was set for a different provider");
+	});
+
+	it("honors a same-provider setting regardless of stamp (no crossing to override)", () => {
+		const resolution = resolveSubagentModel({
+			configuredDefault: "openai/gpt-5-mini",
+			configuredDefaultSource: "subagentModel setting",
+			// unstamped, but same provider as the session → not stale-relevant
+			sessionModel: openaiCatalog[0],
+			available: openaiCatalog,
+		});
+		expect(resolution.model?.id).toBe("gpt-5-mini");
+		expect(resolution.source).toBe("default");
+		expect(resolution.notices).toEqual([]);
 	});
 });
 
@@ -265,6 +305,19 @@ describe("subagentModelsReminder: setting override notice", () => {
 		});
 		expect(reminder).toContain("pinned the subagent default to openai/gpt-5-mini");
 		expect(reminder).not.toContain("different provider than this session");
+	});
+
+	it("stays silent when a stale setting was overridden (default is not the setting)", () => {
+		// Overridden → defaultSource is automatic/session, not "default"; the
+		// user-facing 'set for a different provider' warning covers it instead.
+		const reminder = subagentModelsReminder({
+			available: [...openaiCatalog, ...anthropic],
+			sessionModel: openaiCatalog[0],
+			defaultModel: openaiCatalog[1], // same-provider automatic pick
+			defaultSource: "automatic",
+			configured: { spec: "anthropic/claude-haiku-4-5", source: "subagentModel setting" },
+		});
+		expect(reminder).not.toContain("pinned the subagent default");
 	});
 
 	it("stays silent for the env var and for the automatic default", () => {
@@ -552,6 +605,27 @@ describe("persistSubagentModel", () => {
 		writeFileSync(settingsPath(), JSON.stringify({ env: { CLAUDE_CODE_SUBAGENT_MODEL: "sonnet" } }));
 		persistSubagentModel("inherit", home);
 		expect(loadSubagentDefault(home, {})).toEqual({ spec: "inherit", source: "subagentModel setting" });
+	});
+
+	it("stamps the session provider and round-trips it as setForProvider", () => {
+		persistSubagentModel("opencode/deepseek-v4-flash-free", home, "openai-codex");
+		expect(readSettings()).toEqual({
+			subagentModel: "opencode/deepseek-v4-flash-free",
+			subagentModelSetFor: "openai-codex",
+		});
+		expect(loadSubagentDefault(home, {})).toEqual({
+			spec: "opencode/deepseek-v4-flash-free",
+			source: "subagentModel setting",
+			setForProvider: "openai-codex",
+		});
+	});
+
+	it("does not stamp inherit, and clears a prior stamp on clear", () => {
+		persistSubagentModel("inherit", home, "openai-codex");
+		expect(readSettings()).toEqual({ subagentModel: "inherit" });
+		persistSubagentModel("anthropic/claude-haiku-4-5", home, "anthropic");
+		persistSubagentModel(undefined, home);
+		expect(readSettings()).toEqual({});
 	});
 
 	it("removes the setting on clear", () => {

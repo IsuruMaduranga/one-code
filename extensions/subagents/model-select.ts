@@ -38,6 +38,7 @@
  */
 
 import type { Api, Model } from "@earendil-works/pi-ai";
+import type { SubagentDefault } from "./default-model.ts";
 import {
 	allowsDynamicSubagentSelection,
 	findConfigured,
@@ -100,8 +101,29 @@ export interface ResolveInput {
 	agentModel?: string;
 	/** CLAUDE_CODE_SUBAGENT_MODEL / `subagentModel` setting, user or managed scope. */
 	configuredDefault?: string;
+	/** Which knob `configuredDefault` came from — gates the stale-setting override below. */
+	configuredDefaultSource?: SubagentDefault["source"];
+	/**
+	 * For the `subagentModel` setting: the session provider it was stamped for.
+	 * When it differs from the current session's provider, a cross-provider
+	 * setting is treated as stale (set for a provider since left) and skipped so
+	 * a same-provider model runs. Undefined (hand-edited, no stamp) also counts
+	 * as stale on a provider crossing.
+	 */
+	configuredDefaultSetForProvider?: string;
 	sessionModel?: Model<Api>;
 	available: Model<Api>[];
+}
+
+/** Map a configured default (setting/env) to the resolve inputs describing it, including its staleness stamp. */
+export function configuredDefaultResolveArgs(
+	configured: SubagentDefault | undefined,
+): Pick<ResolveInput, "configuredDefault" | "configuredDefaultSource" | "configuredDefaultSetForProvider"> {
+	return {
+		configuredDefault: configured?.spec,
+		configuredDefaultSource: configured?.source,
+		configuredDefaultSetForProvider: configured?.setForProvider,
+	};
 }
 
 export interface SubagentModelResolution {
@@ -155,6 +177,15 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 	const contained = sessionModel ? modelsContainedToSession(available, sessionModel) : [];
 	let suppressAutomatic = false;
 
+	// The `subagentModel` setting is stale when it was stamped for a different
+	// provider than this session (or never stamped — a hand-edited setting): the
+	// user switched the session's provider since setting it, so a cross-provider
+	// value is not honored and a same-provider model runs instead. A deliberate
+	// choice made on this provider (stamp matches) is still honored + announced.
+	const settingIsStale =
+		input.configuredDefaultSource === "subagentModel setting" &&
+		input.configuredDefaultSetForProvider !== sessionModel?.provider;
+
 	for (const entry of chain) {
 		const wanted = entry.value.trim();
 		if (!wanted || wanted.toLowerCase() === "inherit") {
@@ -186,6 +217,13 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 					notices.push(
 						`The agent file's model ${spec(resolved)} is a different provider than this session (${spec(sessionModel)}); ` +
 							"on a non-Claude session subagents stay on this provider, so a same-provider model runs this subagent instead.",
+					);
+					continue;
+				}
+				if (entry.source === "default" && settingIsStale) {
+					notices.push(
+						`The configured subagent default ${spec(resolved)} was set for a different provider than this session (${spec(sessionModel)}); ` +
+							"a same-provider model runs this subagent instead. Re-set it with /subagent on this session to use it here.",
 					);
 					continue;
 				}
@@ -284,7 +322,7 @@ export interface MenuOptions {
 	 * `subagentModel` setting (as opposed to Claude Code's env var or automatic
 	 * selection). Only the setting triggers the notice.
 	 */
-	configured?: { spec: string; source: "subagentModel setting" | "CLAUDE_CODE_SUBAGENT_MODEL" };
+	configured?: SubagentDefault;
 }
 
 const price = (model: Model<Api>): string => {
@@ -366,8 +404,12 @@ export function defaultCostsMoreWarning({ sessionModel, defaultModel }: MenuOpti
  * by passing a listed same-provider model. Silent for the automatic default and
  * for Claude Code's env var, which are not the user's manual per-harness choice.
  */
-export function settingOverrideNotice({ sessionModel, defaultModel, configured }: MenuOptions): string | undefined {
-	if (configured?.source !== "subagentModel setting" || !defaultModel) return undefined;
+export function settingOverrideNotice({ sessionModel, defaultModel, defaultSource, configured }: MenuOptions): string | undefined {
+	// Only when the setting is actually in effect: a stale cross-provider setting
+	// that was overridden resolves to an automatic/session model (defaultSource
+	// != "default"), and its user-facing "set for a different provider" warning
+	// already explains the override — no "runs on it" line for the model then.
+	if (configured?.source !== "subagentModel setting" || defaultSource !== "default" || !defaultModel) return undefined;
 	const cross = sessionModel && crossesProvider(defaultModel, sessionModel);
 	return (
 		`The user pinned the subagent default to ${spec(defaultModel)} via the subagentModel setting; ` +

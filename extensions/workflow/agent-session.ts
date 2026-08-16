@@ -26,7 +26,8 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { summarizeArgs } from "../lib/tui-render.ts";
 import { agentDirs, type AgentDefinition, discoverAgents } from "../subagents/agents.ts";
-import { expensiveModelGate, resolveSubagentModel, subagentModelMenu } from "../subagents/model-select.ts";
+import type { SubagentDefault } from "../subagents/default-model.ts";
+import { configuredDefaultResolveArgs, expensiveModelGate, resolveSubagentModel, subagentModelMenu } from "../subagents/model-select.ts";
 import { cleanupWorktree, createWorktree, isGitRepo, type Worktree } from "../subagents/worktree.ts";
 import { permissionGateFactory } from "./permission-gate.ts";
 import type { AgentCallOptions, AgentCallResult, AgentEffort, AgentRunUpdate } from "./types.ts";
@@ -39,8 +40,8 @@ export interface AgentRunnerOptions {
 	cwd: string;
 	/** Session model, retained as the final fallback. */
 	defaultModel: unknown;
-	/** `/subagent` user/managed default; automatic role selection follows it. */
-	configuredDefaultModel?: string;
+	/** `/subagent` user/managed default (with its staleness stamp); automatic role selection follows it. */
+	configuredDefault?: SubagentDefault;
 	defaultEffort?: AgentEffort | string;
 	/** Surface model-resolution notices (fallbacks, provider crossings) in the run log. */
 	onNotice?: (message: string) => void;
@@ -55,7 +56,7 @@ const THINKING_SUFFIX = /^(off|minimal|low|medium|high|xhigh|max)$/i;
 export interface WorkflowModelInput {
 	opts: AgentCallOptions;
 	agentModel?: string;
-	configuredDefaultModel?: string;
+	configuredDefault?: SubagentDefault;
 	sessionModel?: Model<Api>;
 	available: Model<Api>[];
 	defaultEffort?: string;
@@ -80,13 +81,13 @@ export function resolveWorkflowAgentModel(input: WorkflowModelInput): {
 	const resolution = resolveSubagentModel({
 		requested,
 		agentModel: input.agentModel,
-		configuredDefault: input.configuredDefaultModel,
+		...configuredDefaultResolveArgs(input.configuredDefault),
 		sessionModel: input.sessionModel,
 		available: input.available,
 	});
 	if (resolution.unresolved) {
 		const fallback = resolveSubagentModel({
-			configuredDefault: input.configuredDefaultModel,
+			...configuredDefaultResolveArgs(input.configuredDefault),
 			sessionModel: input.sessionModel,
 			available: input.available,
 		});
@@ -166,7 +167,7 @@ export class AgentRunner {
 		const resolution = resolveWorkflowAgentModel({
 			opts,
 			agentModel,
-			configuredDefaultModel: this.options.configuredDefaultModel,
+			configuredDefault: this.options.configuredDefault,
 			sessionModel: this.options.defaultModel as Model<Api> | undefined,
 			available: this.availableModels,
 			defaultEffort: this.options.defaultEffort as string | undefined,

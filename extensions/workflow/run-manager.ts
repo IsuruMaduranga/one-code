@@ -15,6 +15,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
+import type { SubagentDefault } from "../subagents/default-model.ts";
 import { AgentRunner } from "./agent-session.ts";
 import { createScriptGlobals, MAX_CONCURRENCY, MAX_AGENTS_PER_RUN, type ScriptRunState } from "./globals.ts";
 import { appendJournal, readJournal, ReplayCursor } from "./journal.ts";
@@ -38,7 +39,7 @@ export interface StartRunOptions {
 	cwd: string;
 	sessionDir: string;
 	defaultModel: unknown;
-	configuredDefaultModel?: string;
+	configuredDefault?: SubagentDefault;
 	defaultEffort?: string;
 }
 
@@ -225,7 +226,7 @@ export class WorkflowRunManager {
 			runner = await AgentRunner.create({
 				cwd: options.cwd,
 				defaultModel: options.defaultModel,
-				configuredDefaultModel: options.configuredDefaultModel,
+				configuredDefault: options.configuredDefault,
 				defaultEffort: options.defaultEffort as never,
 				onNotice: (message) => handle.record({ type: "log", text: `⚠ ${message}` }),
 			});

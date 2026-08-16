@@ -39,7 +39,7 @@ describe("workflow model defaults", () => {
 	});
 
 	it("honors /subagent over the automatic profile", () => {
-		expect(resolve({ configuredDefaultModel: "openai-codex/gpt-5.4-mini" }).model?.id).toBe("gpt-5.4-mini");
+		expect(resolve({ configuredDefault: { spec: "openai-codex/gpt-5.4-mini", source: "subagentModel setting" } }).model?.id).toBe("gpt-5.4-mini");
 	});
 
 	it("keeps per-call and agent-frontmatter precedence", () => {
@@ -47,17 +47,17 @@ describe("workflow model defaults", () => {
 			resolve({
 				opts: { model: "openai-codex/gpt-5.6-terra" },
 				agentModel: "openai-codex/gpt-5.4-mini",
-				configuredDefaultModel: "openai-codex/gpt-5.6-luna",
+				configuredDefault: { spec: "openai-codex/gpt-5.6-luna", source: "subagentModel setting" },
 			}).model?.id,
 		).toBe("gpt-5.6-terra");
 		expect(
-			resolve({ agentModel: "openai-codex/gpt-5.4-mini", configuredDefaultModel: "openai-codex/gpt-5.6-luna" })
+			resolve({ agentModel: "openai-codex/gpt-5.4-mini", configuredDefault: { spec: "openai-codex/gpt-5.6-luna", source: "subagentModel setting" } })
 				.model?.id,
 		).toBe("gpt-5.4-mini");
 	});
 
 	it('treats configured "inherit" as an explicit session-model choice', () => {
-		expect(resolve({ configuredDefaultModel: "inherit" }).model?.id).toBe("gpt-5.6-sol");
+		expect(resolve({ configuredDefault: { spec: "inherit", source: "subagentModel setting" } }).model?.id).toBe("gpt-5.6-sol");
 	});
 
 	it("preserves effort precedence and suffix parsing", () => {
@@ -90,7 +90,7 @@ describe("workflow model defaults", () => {
 	});
 
 	it("does not gate the configured default or the automatic pick", () => {
-		expect(resolve({ configuredDefaultModel: "openai-codex/gpt-5.6-terra", sessionModel: catalog[3] }).model?.id).toBe(
+		expect(resolve({ configuredDefault: { spec: "openai-codex/gpt-5.6-terra", source: "subagentModel setting" }, sessionModel: catalog[3] }).model?.id).toBe(
 			"gpt-5.6-terra",
 		);
 	});

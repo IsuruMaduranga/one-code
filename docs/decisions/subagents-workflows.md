@@ -84,11 +84,10 @@ real registry, and the child is spawned with a concrete `provider/id`:
   the session's provider (and upstream vendor on gateways), preferring undated
   ids; off-family ("sonnet" on Groq) the session model serves and the parent
   says so. `inherit` is the session model.
-- **Explicit choices resolve anywhere, never silently.** The main model's
-  per-call `model` field and the user's own `subagentModel` setting name a model
-  and mean it — a provider crossing is honored but announced, because the user
-  configuring a key for a provider is not the user choosing to send this
-  conversation there.
+- **The per-call field resolves anywhere, never silently.** The main model's
+  per-call `model` field names a model and means it — a provider crossing is
+  honored but announced, because the user configuring a key for a provider is
+  not the user choosing to send this conversation there.
 - **Claude Code conventions stay on Claude sessions (2026-08-17).** A
   `.claude/agents` frontmatter `model:` and `CLAUDE_CODE_SUBAGENT_MODEL` are
   Claude Code's own knobs, whose usual values ("sonnet") were written for
@@ -98,16 +97,25 @@ real registry, and the child is spawned with a concrete `provider/id`:
   and a cross-provider agent-file model is *not* honored (`resolveSubagentModel`
   skips it with a notice), so the automatic same-provider profile serves. A
   same-provider agent-file model or an in-provider alias still works everywhere.
-- **The setting is the universal override, and the model is told.** Because the
-  `subagentModel` setting is honored across providers, when it is set the
-  every-turn reminder gains a line naming the pinned model and — if it is a
-  different provider — noting that a subagent's inherited transcript goes there,
-  so the main model can pass a listed same-provider model per call to keep it on
-  this provider.
+- **The `subagentModel` setting is stamped, and a stale one is overridden
+  (2026-08-17).** `/subagent` records the session provider it was set on
+  (`subagentModelSetFor`). On resolve, a cross-provider setting is honored +
+  announced *only* when the stamp matches this session (you deliberately chose
+  it here); a stamp for a provider you have since left — or none at all (a
+  hand-edited `settings.json`) — makes it **stale**, so a same-provider model
+  runs instead with a notice telling you to re-set it here to use it. This keeps
+  a global cheap-subagent default from silently shipping the transcript to
+  another provider after you switch the session's model, while still letting a
+  deliberate cross-provider choice stand. When a setting *is* in effect, the
+  every-turn reminder names it for the main model (and, if cross-provider, notes
+  the transcript goes there so it can pass a same-provider model per call).
 - **Precedence:** per-call `model` > agent frontmatter > `subagentModel`
   setting > `CLAUDE_CODE_SUBAGENT_MODEL` (real env, then user/managed settings
   `env` block — project scope deliberately unread, same containment as
-  `autoMode`) > automatic same-provider profile > session model. A bad
+  `autoMode`) > automatic same-provider profile > session model. A knob that is
+  contained away at this altitude — a cross-provider agent-file model off Claude,
+  a stale cross-provider setting — is skipped like an unavailable one, falling to
+  the automatic same-provider profile. A bad
   *configured* value degrades to the session model with a notice naming the knob;
   only a bad *per-call* value errors, because the model that wrote it gets the
   menu and can retry.
@@ -144,13 +152,15 @@ the reminder appears in the captured provider request with the resolved default
 and prices; and a real `subagent` run spawned its child on
 `anthropic/claude-sonnet-5`, resolved from the alias in the parent.
 
-The provider-containment refinement (2026-08-17) was verified against a captured
-provider request on an `openai-codex/gpt-5.6-terra` session with
-`subagentModel: opencode/deepseek-v4-flash-free`: the cross-provider setting is
-still honored (the user's explicit override), and the reminder now carries the
-informing line — "…pinned the subagent default to opencode/deepseek-v4-flash-free
-… it is a different provider than this session … pass a listed same-provider
-model to keep it here."
+The provider-containment refinement (2026-08-17) was verified live on an
+`openai-codex/gpt-5.6-terra` session carrying a hand-edited (unstamped)
+`subagentModel: opencode/deepseek-v4-flash-free`: `/subagent status` and the
+banner show it overridden to the same-provider automatic pick (`subagents
+5.6-luna (auto)`), with the warning "…was set for a different provider than this
+session … a same-provider model runs this subagent instead. Re-set it with
+/subagent on this session to use it here." A model set via `/subagent` on the
+session is stamped for that provider and stays honored + announced when it
+crosses (with the reminder's informing line to the main model).
 
 ## Workflow tool (ultracode orchestration)
 
