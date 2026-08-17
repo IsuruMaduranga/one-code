@@ -16,6 +16,52 @@ export interface WakeupRequest {
 	delaySeconds: number;
 	prompt: string;
 	reason: string;
+	/** Nothing changed this tick (matches CC's /loop noop flag). Recorded for callers; no effect on scheduling. */
+	noop?: boolean;
+}
+
+export interface ParsedLoop {
+	/** undefined = dynamic (model self-paces via schedule_wakeup); set = fixed interval. */
+	intervalSeconds?: number;
+	task: string;
+}
+
+/**
+ * Parse `/loop` arguments: a leading duration token (`5m`, `30s`, `2h`) selects
+ * fixed-interval mode and the rest is the task; no duration selects dynamic
+ * (self-paced) mode. `stop` / `status` are handled by the caller, not here.
+ */
+export function parseLoopArgs(raw: string): ParsedLoop {
+	const m = raw.trim().match(/^(\d+)\s*(s|m|h)\b\s*([\s\S]*)$/i);
+	if (m) {
+		const n = Number(m[1]);
+		const unit = m[2].toLowerCase();
+		const seconds = unit === "h" ? n * 3600 : unit === "m" ? n * 60 : n;
+		return { intervalSeconds: seconds, task: m[3].trim() };
+	}
+	return { task: raw.trim() };
+}
+
+/** The follow-up a fixed-interval `/loop` tick delivers (framed as a system notification). */
+export function buildLoopMessage(task: string): string {
+	return systemNotification(
+		[
+			"Loop tick — run the task below now. This repeats automatically on the interval and keeps firing until the user runs `/loop stop`.",
+			"",
+			task,
+		].join("\n"),
+	);
+}
+
+/** The opening message for a dynamic (self-paced) `/loop` — instructs the model to drive schedule_wakeup. */
+export function buildDynamicLoopPrompt(task: string): string {
+	return systemNotification(
+		[
+			"Self-paced loop started. Work the task below now. When this iteration is done, call schedule_wakeup to schedule the next one — choose delaySeconds by what you're waiting for, and pass the same task back as `prompt`. End the loop with schedule_wakeup {stop: true} when the task is complete or the user says to stop.",
+			"",
+			task,
+		].join("\n"),
+	);
 }
 
 /** The follow-up message a fired wakeup delivers. Framed so it never reads as user input. */

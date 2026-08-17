@@ -21,7 +21,16 @@ import {
 	generateTaskId,
 	TASK_REGISTER_CHANNEL,
 } from "./registry.ts";
-import { buildWakeupMessage, clampDelaySeconds, describeSchedule } from "./wakeup.ts";
+import {
+	buildDynamicLoopPrompt,
+	buildLoopMessage,
+	buildWakeupMessage,
+	clampDelaySeconds,
+	describeSchedule,
+	MAX_DELAY_SECONDS,
+	MIN_DELAY_SECONDS,
+	parseLoopArgs,
+} from "./wakeup.ts";
 import { systemNotification } from "../lib/notifications.ts";
 
 const OUTPUT_CAP = 30_000;
@@ -39,6 +48,9 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	const registry = new BackgroundRegistry();
 	let lastCtx: ExtensionContext | undefined;
 	let wakeup: { timer: NodeJS.Timeout; prompt: string; reason: string } | undefined;
+	// Fixed-interval /loop (harness-driven, auto-re-arming — distinct from the
+	// model-driven `wakeup` used by dynamic /loop). One at a time, like wakeup.
+	let loop: { timer: NodeJS.Timeout; intervalSeconds: number; task: string } | undefined;
 
 	pi.events.on(TASK_REGISTER_CHANNEL, (task) => registry.register(task as BackgroundTask));
 
@@ -51,7 +63,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	// Harness-injected notifications carry anti-confabulation framing for the
 	// model; the transcript shows a compact headline instead (ctrl+o expands).
 	// One registration covers every emitter of the type (bash uses it too).
-	for (const customType of ["task-notification", "wakeup"]) {
+	for (const customType of ["task-notification", "wakeup", "loop"]) {
 		pi.registerMessageRenderer(customType, (message, { expanded }, theme) =>
 			notificationComponent(theme, customMessageText(message.content), expanded),
 		);
@@ -328,11 +340,12 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 			title: (a) => (a?.stop ? "stop" : a?.delaySeconds !== undefined ? `${a.delaySeconds}s` : undefined),
 		}),
 		description:
-			"Schedule when to resume work on a self-paced recurring task: after `delaySeconds` (clamped to [60, 3600]) the given prompt is delivered as a system notification and a new turn starts. One wakeup is pending at a time — scheduling again replaces it; {stop: true} cancels the loop. Do not use this to poll background tasks you started here — their completion already notifies you.",
+			"Schedule when to resume work on a self-paced recurring task — the dynamic mode of the /loop command. After `delaySeconds` (clamped to [60, 3600]) the given prompt is delivered as a system notification and a new turn starts. One wakeup is pending at a time — scheduling again replaces it; {stop: true} ends the loop and cancels any pending wakeup.\n\nPass the same task back via `prompt` each turn so the next firing repeats it. Set `noop: true` when nothing changed this tick (you checked and there's nothing to report); `noop: false` when something happened worth keeping. Pick `delaySeconds` from what you're actually waiting for: poll external state (a CI run, a deploy) at the rate it changes; for a quiet idle heartbeat prefer a long delay (1200s+). Do NOT schedule a short wakeup just to poll background work you started here — its completion already notifies you.",
 		parameters: Type.Object({
 			delaySeconds: Type.Optional(Type.Number({ description: "Seconds from now to wake up, clamped to [60, 3600]. Required unless stop is true" })),
 			prompt: Type.Optional(Type.String({ description: "The task to continue when the wakeup fires. Required unless stop is true" })),
 			reason: Type.Optional(Type.String({ description: "One short sentence explaining the chosen delay; shown to the user. Required unless stop is true" })),
+			noop: Type.Optional(Type.Boolean({ description: "true when nothing changed this tick (quiet hold); false when something happened worth keeping" })),
 			stop: Type.Optional(Type.Boolean({ description: "End the loop: cancel any pending wakeup and schedule nothing" })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -364,15 +377,15 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 			// Valid reschedule — now it is safe to replace any pending wakeup.
 			clearPending();
 
-			const request = { delaySeconds: params.delaySeconds, prompt: params.prompt, reason: params.reason };
+			const request = { delaySeconds: params.delaySeconds, prompt: params.prompt, reason: params.reason, noop: params.noop };
 			const delayMs = clampDelaySeconds(params.delaySeconds) * 1000;
 			const timer = setTimeout(() => {
 				wakeup = undefined;
-				notify("wakeup", buildWakeupMessage(request), { reason: request.reason });
+				notify("wakeup", buildWakeupMessage(request), { reason: request.reason, noop: request.noop ?? false });
 			}, delayMs);
 			timer.unref?.();
 			wakeup = { timer, prompt: params.prompt, reason: params.reason };
-			return { content: [{ type: "text", text: describeSchedule(request) }], details: { delayMs } };
+			return { content: [{ type: "text", text: describeSchedule(request) }], details: { delayMs, noop: params.noop ?? false } };
 		},
 	});
 
@@ -393,13 +406,85 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		},
 	});
 
+	const clearLoop = () => {
+		if (loop) {
+			clearInterval(loop.timer);
+			loop = undefined;
+		}
+	};
+	const clearWakeup = () => {
+		if (wakeup) {
+			clearTimeout(wakeup.timer);
+			wakeup = undefined;
+		}
+	};
+
+	pi.registerCommand("loop", {
+		description: "Repeat a task on a loop: `/loop 5m <task>` (fixed interval) or `/loop <task>` (self-paced). `/loop stop` ends it.",
+		handler: async (args, ctx) => {
+			lastCtx = ctx;
+			const raw = (args ?? "").trim();
+
+			if (raw === "stop") {
+				const had = Boolean(loop || wakeup);
+				clearLoop();
+				clearWakeup();
+				ctx.ui.notify(had ? "Loop stopped; no further iterations will fire." : "No loop was running.", "info");
+				return;
+			}
+			if (raw === "" || raw === "status") {
+				const parts: string[] = [];
+				if (loop) parts.push(`fixed interval every ${loop.intervalSeconds}s — ${loop.task}`);
+				if (wakeup) parts.push(`self-paced wakeup pending — ${wakeup.reason}`);
+				ctx.ui.notify(
+					parts.length
+						? `Running:\n- ${parts.join("\n- ")}\nStop with /loop stop.`
+						: "No loop running. Start with `/loop [interval] <task>`, e.g. `/loop 5m check the build`.",
+					"info",
+				);
+				return;
+			}
+
+			const parsed = parseLoopArgs(raw);
+			if (!parsed.task) {
+				ctx.ui.notify("Give a task to loop, e.g. `/loop 10m check for new PRs` or `/loop watch the deploy`.", "info");
+				return;
+			}
+
+			// One loop at a time — replace any existing interval loop or pending wakeup.
+			clearLoop();
+			clearWakeup();
+
+			if (parsed.intervalSeconds !== undefined) {
+				// Fixed interval, harness-driven: re-arm automatically and fire the first tick now.
+				const seconds = clampDelaySeconds(parsed.intervalSeconds);
+				const adjusted =
+					seconds !== parsed.intervalSeconds
+						? ` (adjusted from ${parsed.intervalSeconds}s; allowed range ${MIN_DELAY_SECONDS}-${MAX_DELAY_SECONDS}s)`
+						: "";
+				const timer = setInterval(() => notify("loop", buildLoopMessage(parsed.task), { intervalSeconds: seconds }), seconds * 1000);
+				timer.unref?.();
+				loop = { timer, intervalSeconds: seconds, task: parsed.task };
+				ctx.ui.notify(`Looping every ${seconds}s${adjusted}: ${parsed.task}. Stop with /loop stop.`, "info");
+				notify("loop", buildLoopMessage(parsed.task), { intervalSeconds: seconds });
+				return;
+			}
+
+			// Dynamic (self-paced): the model drives schedule_wakeup, so make sure it is active.
+			const active = pi.getActiveTools();
+			if (!active.includes("schedule_wakeup")) pi.setActiveTools([...active, "schedule_wakeup"]);
+			ctx.ui.notify(`Self-paced loop started: ${parsed.task}. Stop with /loop stop.`, "info");
+			notify("loop", buildDynamicLoopPrompt(parsed.task), {});
+		},
+	});
+
 	pi.on("session_start", (_event, ctx) => {
 		lastCtx = ctx;
 	});
 
 	pi.on("session_shutdown", () => {
 		registry.stopAll();
-		if (wakeup) clearTimeout(wakeup.timer);
-		wakeup = undefined;
+		clearWakeup();
+		clearLoop();
 	});
 }
