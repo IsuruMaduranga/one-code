@@ -22,10 +22,20 @@ import { frontierBundle } from "./tiers/frontier.ts";
 import { lowBundle } from "./tiers/low.ts";
 import { midBundle } from "./tiers/mid.ts";
 
+/**
+ * Four tiers, three register texts. `workhorse` and `cheap` share the verbose
+ * `midBundle`: CC's own Sonnet and Haiku system prompts differ only in
+ * boilerplate + a single planning-steer line the verbose register already
+ * carries, so splitting the text would invent a distinction CC doesn't make. The
+ * tiers stay separate for tool-surface (search tools at `tiny` only) and model
+ * routing, and can diverge later without reclassifying models. `tiny` = the
+ * max-scaffolding `lowBundle`. See `docs/decisions/model-tiers.md`.
+ */
 const BUNDLES: Record<PromptTier, PromptBundle> = {
 	frontier: frontierBundle,
-	mid: midBundle,
-	low: lowBundle,
+	workhorse: midBundle,
+	cheap: midBundle,
+	tiny: lowBundle,
 };
 
 function buildToolsSection(options: BuildSystemPromptOptions): string {
@@ -74,7 +84,7 @@ export function buildClaudeCodeSystemPrompt(
 	const sections = [
 		...bundle.lead,
 		buildToolsSection(options),
-		// Claude Code orders Memory just before Environment; mid/low use the long spec.
+		// Claude Code orders Memory just before Environment; workhorse/cheap/tiny use the long spec.
 		memoryPromptSection(env.memoryDir, bundle.verboseMemory),
 		buildEnvironmentSection(env),
 		// Claude Code orders Scratchpad between Environment and the tail sections.

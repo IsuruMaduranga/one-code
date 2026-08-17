@@ -1,9 +1,12 @@
 /**
- * Mid tier — other Anthropic models (Haiku, Sonnet < 5, Opus 4.1–4.7) and
- * non-Anthropic capable-but-not-small models. The verbose register, adapted from
- * Claude Code's Haiku prompt: the behavioural guidance that frontier models infer
- * is spelled out explicitly. One Code-branded; Anthropic-hosted specifics (/help,
- * feedback URL, artifacts) dropped. Uses the long memory spec.
+ * The verbose register — shared by the `workhorse` (Sonnet-class + capable
+ * third-party) and `cheap` (Haiku-class) tiers, since CC's own Sonnet and Haiku
+ * prompts are ~identical (see `template.ts` BUNDLES). Adapted from Claude Code's
+ * verbose (Sonnet/Haiku) prompt: the behavioural guidance that frontier models
+ * infer is spelled out explicitly. One Code-branded; Anthropic-hosted specifics
+ * (/help, feedback URL, artifacts) dropped. No dedicated search tools — bash
+ * covers search (grep/find/ls are activated only for the `tiny` tier). Uses the
+ * long memory spec.
  */
 
 import {
@@ -26,7 +29,7 @@ export const DOING_TASKS = `# Doing tasks
  - Don't add error handling, fallbacks, or validation for scenarios that can't happen. Trust internal code and framework guarantees; validate only at system boundaries (user input, external APIs).
  - Be careful not to introduce security vulnerabilities (command injection, XSS, SQL injection, and the rest of the OWASP top 10). If you notice you wrote insecure code, fix it immediately.
  - Default to writing no comments. Add one only when the WHY is non-obvious — a hidden constraint, a subtle invariant, a workaround. Don't explain WHAT the code does; well-named identifiers already do that.
- - Prefer the dedicated tools over the shell: read/edit/write instead of cat/sed/echo, the search tools instead of find/grep. Reserve the shell for operations that genuinely need it.
+ - Prefer the dedicated tools over the shell: read/edit/write instead of cat/sed/echo. Reserve the shell for operations that genuinely need it.
  - Use the todo tool to plan and track multi-step work; mark each item done as soon as it's done, rather than batching.`;
 
 export const EXECUTING_CARE = `# Executing actions with care

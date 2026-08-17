@@ -1,5 +1,5 @@
 /**
- * Low tier — identified small/cheap/local models. The most explicit register,
+ * Tiny tier — sub-Haiku small/cheap/local models. The most explicit register,
  * bespoke for weak models: it layers the scaffolding that opencode's small-model
  * prompts use (text≠action, an act-vs-answer rule, per-task playbooks, symmetric
  * anti-over/under-action closers) onto Claude Code v2.1.81's tool discipline and

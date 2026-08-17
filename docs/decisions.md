@@ -98,6 +98,16 @@ Full context: [`decisions/subagents-workflows.md`](decisions/subagents-workflows
 - **[The workflow status strip (below-editor entry + soft focus)](decisions/subagents-workflows.md#the-workflow-status-strip-below-editor-entry--soft-focus)** — CC's ambient workflow UI: below-editor run rows, ↓-to-focus + enter → half-screen viewer (full-screen via /workflows), background-hint tool result; key stealing gated on editor-identity + empty text.
 - **[The viewer's drill-down layout (aligned to a CC frame capture)](decisions/subagents-workflows.md#the-viewers-drill-down-layout-aligned-to-a-cc-frame-capture)** — v2 viewer: Phases → agents → detail drill-down in bordered panes, meta-declared phases, uncapped toolCalls, humane durations; mouse clicks rejected (pi routes no mouse events to extensions).
 
+## Model tiering
+
+Full context: [`decisions/model-tiers.md`](decisions/model-tiers.md). Feature:
+[`features/tiering/`](features/tiering/README.md).
+
+- **[Four capability tiers, not three](decisions/model-tiers.md#four-capability-tiers-not-three-2026-08-17)** — frontier/workhorse/cheap/tiny, each mapped to a real CC capture; adds a `tiny` register below CC's Haiku for sub-Haiku models.
+- **[Frontier is a version-gated Opus/Fable allowlist](decisions/model-tiers.md#frontier-is-a-version-gated-opusfable-allowlist-not-a-score-cutoff-2026-08-17)** — only Opus ≥ 4.7 / Fable / Opus-5 get the terse register; Sonnet and strong third-party models are at most workhorse.
+- **[Name-class + curated map; AA index offline-only](decisions/model-tiers.md#tiering-by-name-class--curated-map-aa-index-is-offline-only-2026-08-17)** — the Intelligence Index ranks max-effort benchmark score, not harness reliability, so it curates a static map offline rather than classifying at runtime.
+- **[grep/find/ls in `tiny` only](decisions/model-tiers.md#grepfindls-belong-to-tiny-only-2026-08-17)** — `cheap` matches CC-Haiku (no search tools); the crutch is reserved for models weaker than CC ever ships to.
+
 ## Model policy
 
 Full context: [`decisions/model-policy.md`](decisions/model-policy.md).

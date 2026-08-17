@@ -4,30 +4,28 @@ import { SEARCH_TOOLS, withSearchTools } from "../../extensions/search-tools/too
 const BASE = ["read", "bash", "edit", "write"];
 
 describe("withSearchTools", () => {
-	it("adds grep/find/ls for the low tier", () => {
-		expect(withSearchTools(BASE, "low")).toEqual([...BASE, "grep", "find", "ls"]);
+	it("adds grep/find/ls for the tiny tier only", () => {
+		expect(withSearchTools(BASE, "tiny")).toEqual([...BASE, "grep", "find", "ls"]);
 	});
 
-	it("adds grep/find/ls for the mid tier", () => {
-		expect(withSearchTools(BASE, "mid")).toEqual([...BASE, "grep", "find", "ls"]);
-	});
-
-	it("keeps the frontier surface lean", () => {
-		expect(withSearchTools(BASE, "frontier")).toEqual(BASE);
+	it("keeps the surface lean for cheap/workhorse/frontier (matches CC — bash covers search)", () => {
+		for (const tier of ["cheap", "workhorse", "frontier"] as const) {
+			expect(withSearchTools(BASE, tier)).toEqual(BASE);
+		}
 	});
 
 	it("does not duplicate already-active search tools", () => {
 		const active = [...BASE, "grep"];
-		expect(withSearchTools(active, "low")).toEqual([...BASE, "grep", "find", "ls"]);
+		expect(withSearchTools(active, "tiny")).toEqual([...BASE, "grep", "find", "ls"]);
 	});
 
-	it("removes search tools when the tier moves to frontier", () => {
+	it("removes search tools when the tier moves off tiny", () => {
 		const active = [...BASE, ...SEARCH_TOOLS, "subagent"];
-		expect(withSearchTools(active, "frontier")).toEqual([...BASE, "subagent"]);
+		expect(withSearchTools(active, "cheap")).toEqual([...BASE, "subagent"]);
 	});
 
 	it("preserves the order of unrelated names (prompt byte-stability)", () => {
 		const active = ["subagent", ...BASE];
-		expect(withSearchTools(active, "mid").slice(0, 5)).toEqual(["subagent", ...BASE]);
+		expect(withSearchTools(active, "tiny").slice(0, 5)).toEqual(["subagent", ...BASE]);
 	});
 });

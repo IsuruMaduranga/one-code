@@ -136,7 +136,7 @@ export function stampFrontmatter(content: string, sessionId: string, modifiedIso
  * tier), so the prompt stays byte-stable across turns for a given cwd.
  *
  * `verbose` selects the long, explicit spec (Claude Code's Haiku memory prompt,
- * adapted) for the mid/low tiers; frontier gets the compact version.
+ * adapted) for the workhorse/cheap/tiny tiers; frontier gets the compact version.
  */
 export function memoryPromptSection(dir: string, verbose = false): string {
 	return verbose ? verboseMemorySection(dir) : compactMemorySection(dir);

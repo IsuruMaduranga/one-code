@@ -15,7 +15,7 @@ const env: EnvironmentInfo = {
 };
 
 const baseOptions = { cwd: "/tmp/project" };
-const TIERS: PromptTier[] = ["frontier", "mid", "low"];
+const TIERS: PromptTier[] = ["frontier", "workhorse", "cheap", "tiny"];
 
 describe("buildClaudeCodeSystemPrompt", () => {
 	it("contains the adapted identity and core sections", () => {
@@ -89,24 +89,32 @@ describe("buildClaudeCodeSystemPrompt", () => {
 		expect(prompt).not.toContain("# Doing tasks");
 		expect(prompt).not.toContain("# Text output");
 		expect(prompt).not.toContain("## Types of memory");
-		expect(prompt).not.toContain("bear no direct relation"); // caveat is mid/low only
+		expect(prompt).not.toContain("bear no direct relation"); // caveat is workhorse/cheap/tiny only
 	});
 
-	it("gives mid the verbose register and the long memory spec", () => {
-		const prompt = buildClaudeCodeSystemPrompt(baseOptions, env, "mid");
+	it("gives workhorse the verbose register and the long memory spec", () => {
+		const prompt = buildClaudeCodeSystemPrompt(baseOptions, env, "workhorse");
 		expect(prompt).toContain("# Doing tasks");
 		expect(prompt).toContain("# Executing actions with care");
 		expect(prompt).toContain("# Tone and style");
 		expect(prompt).toContain("## Types of memory"); // verbose memory
 		expect(prompt).toContain("bear no direct relation"); // fuller system-reminder caveat
+		expect(prompt).not.toContain("the search tools"); // no dedicated search tools above tiny
 	});
 
-	it("gives low the bespoke weak-model scaffolding, including an explicit skill nudge", () => {
-		const prompt = buildClaudeCodeSystemPrompt(baseOptions, env, "low");
+	it("shares the verbose register between workhorse and cheap (CC's Sonnet≈Haiku)", () => {
+		const workhorse = buildClaudeCodeSystemPrompt(baseOptions, env, "workhorse");
+		const cheap = buildClaudeCodeSystemPrompt(baseOptions, env, "cheap");
+		expect(cheap).toBe(workhorse);
+	});
+
+	it("gives tiny the bespoke weak-model scaffolding, including an explicit skill nudge", () => {
+		const prompt = buildClaudeCodeSystemPrompt(baseOptions, env, "tiny");
 		expect(prompt).toContain("# Make changes with tools, not prose");
 		expect(prompt).toContain("# Answer or act");
 		expect(prompt).toContain("# Playbooks");
 		expect(prompt).toContain("skill tool"); // the skills nudge that motivated tiering
+		expect(prompt).toContain("the search tools"); // tiny keeps the grep/find/ls steer
 	});
 
 	it("is byte-stable across calls with identical inputs, for each tier", () => {
@@ -117,9 +125,9 @@ describe("buildClaudeCodeSystemPrompt", () => {
 		}
 	});
 
-	it("produces a distinct prompt for each tier", () => {
+	it("produces three distinct registers (frontier, verbose, tiny); workhorse and cheap share one", () => {
 		const outputs = TIERS.map((tier) => buildClaudeCodeSystemPrompt(baseOptions, env, tier));
-		expect(new Set(outputs).size).toBe(TIERS.length);
+		expect(new Set(outputs).size).toBe(3);
 	});
 
 	it("varying only the model line within a tier changes only the Model line", () => {
