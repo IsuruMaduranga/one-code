@@ -434,7 +434,7 @@ calls`, Outcome `Still running…`). v2 of the viewer replicates that. Choices:
   self-enabled SGR tracking, main-screen only — was parked in favor of a
   future upstream pi change. Keyboard covers the same selection.
 
-## Subagents run in-process, aligned to Claude Code's Agent/SendMessage (2026-08-17) (unreviewed)
+## Subagents run in-process, aligned to Claude Code's Agent/SendMessage (2026-08-17)
 
 **Decision.** The subagent tool no longer spawns a `pi` process per run. Every
 path — foreground, `fork`, resume, and background/resident — now runs in the
@@ -479,14 +479,27 @@ mcp extension publishes its live tool definitions on `MCP_TOOLS_CHANNEL`
 the parent's open connections (a no-op when no servers are configured).
 
 **Deliberate tradeoffs / gaps (deviations from the pre-existing spawn behavior).**
-- **Auto-mode classifier is NOT re-run inside a child.** The spawned child loaded
-  the whole package including the real classifier; in-process the child uses the
-  fail-closed deny/allow permission gate, and the parent still runs the holistic
-  return review (`SUBAGENT_ACTIONS_CHANNEL`). Net effect is stricter, not looser —
-  but it is a real behavior change to a safety-critical path.
+- **A child's tool calls go through the parent's REAL permission gate** (the
+  permission bridge; see the dedicated decision below). This supersedes the
+  interim fail-closed gate — a child inherits the parent's mode, is screened by
+  the auto-mode classifier, and can raise a prompt that bubbles to the user, all
+  matching Claude Code (findings §17.1). The fail-closed gate remains only as the
+  fallback for a child with no parent bridge/UI (the workflow runner, headless
+  runs). The parent-side return review (`SUBAGENT_ACTIONS_CHANNEL`) still runs on
+  top, exactly as CC also classifies the hand-back (findings §17.2).
 - **Injected MCP tools are active, not deferred** (customTools have no defer
-  hook); acceptable for the typical small server count. LSP diagnostics inside a
-  child are not wired (same closure-private shape as MCP — a follow-up).
+  hook); acceptable for the typical small server count.
+- **LSP diagnostics are NOT wired into children** — matching CC (findings §17.3).
+  This was briefly tried (adding `lsp` to `CHILD_EXTENSIONS`) and reverted the same
+  day: a child session is disposed via the raw `AgentSession.dispose()`, which never
+  emits `session_shutdown` (verified in the SDK), so `lsp`'s cleanup never runs and
+  any language server a subagent started leaked for the rest of the parent session
+  (worsened by the shared loader cache — one un-reaped instance per language+root).
+  There is no public API to fire the child's teardown. Since the main agent does the
+  bulk of file editing and CC gives subagents no LSP anyway, this stays reverted.
+  A **shared** language server (one per language+root, owned by the main session and
+  reused by children) would sidestep the leak but hits the concurrency/worktree
+  state problem CC cites — parked idea, see plan.md.
 - **Crash isolation is reduced** (accepted, as CC accepts it): a hung run is
   bounded by a 30-min wall-clock `abort()`; a true OOM still takes the process.
 - **Naming reversal.** This reverses [Tool names stay pi-idiomatic
@@ -496,12 +509,85 @@ the parent's open connections (a no-op when no servers are configured).
   stale (CC 2.1.75, no `Agent`/`SendMessage`), Anthropic-only, and never touches
   params — so the tools are registered under the CC names directly.
 
-**Verified.** Live (`pi --mode json`, real Anthropic Haiku): foreground run
-(correct output, persisted session, no nested process), child tool use +
-curated extensions (read tool works, no load errors), and `subagent_type:"fork"`
-(inherited-context reply). tsc + full unit suite green.
+**Verified.** Live end-to-end via `test/e2e/rpc-subagent-test.mjs` (a persisted
+`--mode rpc` main session, real Anthropic Haiku), all seven assertions green:
+foreground `Agent`, `subagent_type:"fork"` (inherited-context reply),
+`isolation:"worktree"`, `run_in_background` + resident completion, and
+`SendMessage` to the resident child. Two architectural claims are asserted
+out-of-band by sampling the main pi's descendant tree throughout the run:
+**no nested `pi` process ever spawns** (the descendant tree stays pi-free — the
+whole point of the rewrite), and **the parent's MCP connections are reused**
+(with two servers configured, the MCP-server descendant count stayed at its
+baseline of 2 — a reconnecting child would have spawned its own). tsc + full
+unit suite green.
 
-**Not yet verified live** (flagged for a follow-up e2e): background/resident +
-`SendMessage` steering (needs the `--mode rpc` multi-turn harness), and shared
-MCP injection (no MCP server was configured in the test environment; the code is
-a no-op without one).
+This closes the earlier "not yet verified live" gap: background/resident +
+`SendMessage` steering and shared-MCP injection were only code-complete before;
+both now pass live.
+
+## Subagent permission bridge: a child's tool calls run through the parent's real gate (2026-08-17)
+
+**Decision.** An in-process subagent's tool calls are gated by the parent
+`permissions` extension's real decision pipeline, not the interim fail-closed
+shim. A child inherits the parent's current permission mode, is screened by the
+auto-mode classifier in `auto`, and — for a call that needs approval — raises a
+prompt that renders on the parent's terminal. This replaces the earlier stance
+("classifier not re-run in a child; net stricter") after we verified against real
+Claude Code that this is exactly what CC does.
+
+**Why.** Verified live in real `claude` 2.1.233 (findings §17.1): a subagent
+inherits the parent's mode, and its tool calls hit the same gate — the classifier
+in auto mode, and in manual mode a prompt that **bubbles to the user** (the
+approval never enters the main agent's transcript, which is why an
+orchestrator-only view sees the child's calls "just succeed"). Our fail-closed
+shim (hardcoded `acceptEdits`, deny anything that would prompt) diverged from CC
+and, worse, made a subagent unable to do ordinary gated work a user would happily
+approve. CC parity here is both more faithful and more useful.
+
+**Architecture (Approach B — a callback bridge, not loading the permissions
+extension into the child).** Each child session has its own `EventBus`, so
+`pi.events` does not cross the parent/child boundary; the only transport is a
+plain closure threaded through our own call chain (the same shape as
+`onMessageToMain`).
+- `permissions/index.ts` publishes a decision closure on `SUBAGENT_GATE_CHANNEL`
+  (`permissions/subagent-gate.ts`) at `session_start`. The closure —
+  `evaluateChildToolCall` — mirrors the main `tool_call` handler's flow (rules,
+  safety floor, classifier, ask) but is a **separate** function so the parent's
+  own safety-critical handler is left byte-for-byte intact (its orchestration has
+  no unit coverage; the pure helpers it calls do). Differences, all deliberate: it
+  never mutates the parent's live `transcript` (the child action is appended to a
+  copy for the classifier), it uses the child's own cwd, it uses a fresh
+  `AbortController` signal (the parent's last `ctx.signal` may be from a settled
+  turn), and it does not touch the parent's `pauseTracker` (a child is bounded by
+  its wall-clock cap and the hand-back return review). It renders any prompt on
+  the parent's live ctx (`lastReviewCtx`, now also refreshed at
+  `session_start`/`agent_start`), through a shared promise-chain **mutex**
+  (`serializePrompt`, applied to the parent's own prompts too) so a
+  background/resident child and the main turn never drive `ctx.ui.select`
+  concurrently.
+- `subagents/index.ts` captures the closure and threads it into `SubagentRuntime`
+  (a `getPermissionBridge` getter, read lazily) → `buildAgentLoader` →
+  `permissionGateFactory`.
+- `permission-gate.ts` calls the bridge for every child tool call (skipping the
+  runtime-injected `neverGate` tools) and returns its decision; **any bridge error
+  fails CLOSED** (deny). When no bridge is present — the workflow runner, or a
+  headless run with no UI — it keeps the original fail-closed local rules.
+
+**Verified live (both directions, per the auto-mode discipline).**
+- Auto mode: a child running `echo` is **allowed** (the old fail-closed gate would
+  have denied a non-edit bash), proving mode inheritance + the bridge; a dangerous
+  *delegation* is **blocked at spawn** ("Unauthorized Persistence"), proving the
+  parent classifier path is intact.
+- Manual mode (`test/e2e/rpc-subagent-permission-test.mjs`): a child's bash call
+  raised **"Allow a subagent's bash?"** on the *main* rpc session, answerable over
+  rpc, and approval let the command run — the prompt bubbling CC does and the old
+  design could not. tsc + full unit suite green (incl. new bridge tests in
+  `workflow-permission-gate.test.ts`: delegation, fail-closed-on-throw, and
+  never-gate).
+
+**Open follow-up.** The `serializePrompt` mutex serializes prompts we control, but
+whether pi's underlying `ctx.ui.select` itself tolerates truly concurrent callers
+was not separately stress-tested; the mutex makes that moot for our paths. Shared
+parent auto-mode state (mode/rules/classifier) is intentionally shared with child
+calls for fidelity; child calls deliberately stay out of the parent's transcript
+and pauseTracker.

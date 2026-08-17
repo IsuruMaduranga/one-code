@@ -58,6 +58,7 @@ import {
 	type PermissionRule,
 } from "./matcher.ts";
 import { modeBadge, nextMode, PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "./modes.ts";
+import { type ChildToolCall, type ChildGateDecision, SUBAGENT_GATE_CHANNEL } from "./subagent-gate.ts";
 import { ORIGINAL_COMMAND_KEY } from "../worktree/rewrite.ts";
 import { isWritingTool } from "./protected-paths.ts";
 import { loadPermissionSettings, normalizePermissionMode, persistAllowRule, settingsPaths } from "./settings.ts";
@@ -87,6 +88,24 @@ const DENIED_SAFETY_FLOOR = (reason: string) =>
 	`Auto mode blocked this call without consulting the classifier: ${reason}. Writes to the gate's own configuration are never auto-approved. Do not retry or route around this; ask the user to make the change themselves.`;
 const DENIED_BY_RULE = (rule: string) =>
 	`This tool call is denied by the permission rule "${rule}" in the user's settings. Do not retry it; choose a different approach.`;
+
+/** Truncate a subject for a permission prompt — shared by the main gate and the subagent bridge. */
+const previewSubject = (subject: string) => (subject.length > 200 ? `${subject.slice(0, 200)}…` : subject);
+
+/** Map a `decide()` deny result to its model-facing reason — shared by both gate paths. */
+const denyReason = (result: { cause?: string; rule?: { raw?: string } }): string =>
+	result.cause === "plan-mode"
+		? DENIED_PLAN_MODE
+		: result.cause === "protected-path"
+			? DENIED_PROTECTED_PATH
+			: result.cause === "mode"
+				? DENIED_DONT_ASK
+				: DENIED_BY_RULE(result.rule?.raw ?? "deny");
+
+/** Ask-prompt option labels — shared by both gate paths. */
+const YES = "Yes";
+const YES_SESSION = "Yes, don't ask again this session";
+const NO = "No, tell the agent what to do differently";
 
 export default function permissionsExtension(pi: ExtensionAPI) {
 	pi.registerFlag("permission-mode", {
@@ -289,10 +308,20 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		 * subagent reviews — those must always be judged.
 		 */
 		containmentEligible = false,
+		/**
+		 * Overrides for a bridged subagent call: its own cwd (a worktree, if
+		 * isolated), the child action appended to a COPY of the transcript (the
+		 * parent's live transcript is never mutated for a child), and a fresh signal
+		 * (the parent's last ctx.signal may be from a settled turn and already
+		 * aborted). All default to the parent's own values, so the main path is
+		 * unchanged.
+		 */
+		opts?: { cwd?: string; appendEntry?: TranscriptEntry; signal?: AbortSignal },
 	) => {
+		const cwd = opts?.cwd ?? ctx.cwd;
 		autoConfig ??= loadAutoModeConfig(os.homedir());
 		if (!instructionsLoaded) {
-			projectInstructions = loadProjectInstructions(ctx.cwd, os.homedir());
+			projectInstructions = loadProjectInstructions(cwd, os.homedir());
 			instructionsLoaded = true;
 		}
 
@@ -301,7 +330,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 
 		let evidence: ShellEvidence | undefined;
 		if (normalizeToolName(toolName) === "bash" && subject) {
-			evidence = analyzeShellCommand({ command: subject, cwd: ctx.cwd, home });
+			evidence = analyzeShellCommand({ command: subject, cwd, home });
 			if (evidence.verdict === "safe") {
 				logDecision(ctx, { tool: toolName, subject, outcome: "allow", source: "pre-gate" });
 				return allow();
@@ -333,9 +362,9 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			const raw = input.file_path ?? input.path;
 			const target = typeof raw === "string" ? raw : undefined;
 			if (target) {
-				const absolute = toAbsolute(ctx.cwd, target, home);
+				const absolute = toAbsolute(cwd, target, home);
 				const resolved = resolveForContainment(absolute);
-				const root = resolveForContainment(ctx.cwd) ?? ctx.cwd;
+				const root = resolveForContainment(cwd) ?? cwd;
 				if (resolved && isWithin(root, resolved) && !isSensitivePath(absolute) && !isExecutionPrimitivePath(absolute)) {
 					logDecision(ctx, { tool: toolName, subject, outcome: "allow", source: "pre-gate" });
 					return allow();
@@ -350,7 +379,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		const verdict = await classify(
 			{
 				toolName,
-				transcript: [...transcript],
+				transcript: opts?.appendEntry ? [...transcript, opts.appendEntry] : [...transcript],
 				userMessages: [...userMessages],
 				claudeMd: projectInstructions,
 				username: classifierUsername,
@@ -362,7 +391,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				registry: ctx.modelRegistry,
 				sessionModel: ctx.model,
 				config: autoConfig,
-				signal: ctx.signal,
+				signal: opts?.signal ?? ctx.signal,
 				state: classifierState,
 				onNotice: (message, level) => {
 					ctx.ui.notify(message, level);
@@ -448,16 +477,22 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 
 	pi.on("session_start", (_event, ctx) => {
 		badgeCtx = ctx;
+		lastReviewCtx = ctx;
 		memoryDirPath = projectMemoryDir(ctx.cwd);
 		scratchpadDirPath = sessionScratchpadDir(ctx.cwd, ctx.sessionManager.getSessionId());
 		reloadSettings(ctx);
 		applyBadge();
+		// Publish the subagent permission bridge (see subagent-gate.ts). The closure
+		// reads live parent state on each call, so emitting once at session start is
+		// enough; subagents captures it and threads it into child sessions.
+		pi.events.emit(SUBAGENT_GATE_CHANNEL, { decide: evaluateChildToolCall });
 	});
 
 	// The badge carries "· esc to interrupt" only while the model works (CC's
 	// mode line does the same).
 	pi.on("agent_start", (_event, ctx) => {
 		badgeCtx = ctx;
+		lastReviewCtx = ctx;
 		streaming = true;
 		applyBadge();
 	});
@@ -491,9 +526,23 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	// The most recent turn's context, reused by background subagent reviews, which
-	// fire off a channel event and so have no live ctx of their own.
+	// The most recent turn's context, reused by background subagent reviews (which
+	// fire off a channel event and so have no live ctx of their own) and by the
+	// subagent permission bridge (a child prompt renders on this parent ctx's UI).
 	let lastReviewCtx: ExtensionContext | undefined;
+
+	// Serialize interactive prompts: a background/resident subagent can hit an "ask"
+	// while the main turn (or another child) is already awaiting one, and driving
+	// ctx.ui.select concurrently on one terminal is unverified. This chains them.
+	let promptChain: Promise<unknown> = Promise.resolve();
+	const serializePrompt = <T>(fn: () => Promise<T>): Promise<T> => {
+		const run = promptChain.then(fn, fn);
+		promptChain = run.then(
+			() => {},
+			() => {},
+		);
+		return run;
+	};
 
 	pi.on("tool_call", async (event, ctx) => {
 		lastReviewCtx = ctx;
@@ -563,13 +612,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 
 		if (result.decision === "allow" && !floorReason) return undefined;
 
-		if (result.decision === "deny") {
-			if (result.cause === "plan-mode") return { block: true, reason: DENIED_PLAN_MODE };
-			if (result.cause === "protected-path") return { block: true, reason: DENIED_PROTECTED_PATH };
-			// The only mode that denies (rather than allows) unmatched calls is dontAsk.
-			if (result.cause === "mode") return { block: true, reason: DENIED_DONT_ASK };
-			return { block: true, reason: DENIED_BY_RULE(result.rule?.raw ?? "deny") };
-		}
+		// (dontAsk is the only mode that denies rather than allows unmatched calls.)
+		if (result.decision === "deny") return { block: true, reason: denyReason(result) };
 
 		if (floorReason) {
 			// The floor never reaches the classifier. Auto mode is unattended, so a
@@ -641,7 +685,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			return { block: true, reason: DENIED_NON_INTERACTIVE };
 		}
 
-		const preview = subject.length > 200 ? `${subject.slice(0, 200)}…` : subject;
+		const preview = previewSubject(subject);
 		// Reaching a prompt from the classify branch only happens when auto mode is
 		// paused — this is the resume prompt, not a per-action approval.
 		const pausedResume = mode === "auto" && result.decision === "classify";
@@ -652,10 +696,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				: result.cause === "protected-path"
 				? `Allow ${event.toolName} to write a protected path?\n\n  ${preview}\n\n  This path configures your tooling or this agent, so allow rules do not pre-approve it.`
 				: `Allow ${event.toolName}?\n\n  ${preview || "(no arguments)"}`;
-		const YES = "Yes";
-		const YES_SESSION = "Yes, don't ask again this session";
-		const NO = "No, tell the agent what to do differently";
-		const choice = await ctx.ui.select(title, [YES, YES_SESSION, NO]);
+		const choice = await serializePrompt(() => ctx.ui.select(title, [YES, YES_SESSION, NO]));
 
 		// The user's answer is itself a gate decision worth recording — it is the
 		// ground truth a drifting classifier gets calibrated against.
@@ -688,12 +729,113 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 
 		// The "tell the agent what to do differently" option has to actually carry
 		// the user's words, or the model is left guessing why it was stopped.
-		const feedback = await ctx.ui.input("What should the agent do instead?", "Optional — press Esc to skip");
+		const feedback = await serializePrompt(() => ctx.ui.input("What should the agent do instead?", "Optional — press Esc to skip"));
 		return {
 			block: true,
 			reason: feedback?.trim() ? `${DENIED_BY_USER}\n\nThe user said: ${feedback.trim()}` : DENIED_BY_USER,
 		};
 	});
+
+	/**
+	 * Evaluate ONE subagent tool call against the parent's live gate — the bridge
+	 * published on SUBAGENT_GATE_CHANNEL. Mirrors the main tool_call handler's
+	 * decision flow (mode, rules, safety floor, auto-mode classifier, and an
+	 * interactive ask), so a child inherits the parent's mode and hits the real gate
+	 * (findings §17.1). Differences from the main path, all deliberate: it never
+	 * mutates the parent's live transcript (the child action is appended to a copy
+	 * for the classifier) and uses the child's own cwd; it does not touch the
+	 * parent's pauseTracker (a child is bounded by its wall-clock cap and the
+	 * hand-back return review instead); and an ask prompt renders on the parent's
+	 * terminal via lastReviewCtx, serialized. No parent UI reachable → fail closed.
+	 */
+	const evaluateChildToolCall = async (call: ChildToolCall): Promise<ChildGateDecision> => {
+		const ctx = lastReviewCtx;
+		const { toolName, input, cwd } = call;
+		const normalizedTool = normalizeToolName(toolName);
+		const subject = extractSubject(normalizedTool, input);
+		const resolvedSubject =
+			isWritingTool(normalizedTool) && subject
+				? resolveForContainment(toAbsolute(cwd, subject, os.homedir()))
+				: undefined;
+
+		const result = decide({
+			toolName,
+			subject,
+			cwd,
+			mode,
+			deny,
+			ask,
+			allow: [...allow, ...sessionAllows],
+			classifyAllShell: autoConfig?.classifyAllShell,
+			resolvedSubject,
+			planFilePath,
+			memoryDirPath,
+			scratchpadDirPath,
+		});
+
+		const floorReason =
+			mode === "auto"
+				? safetyControlWrite({ toolName: normalizedTool, input, cwd, home: os.homedir() })
+				: undefined;
+
+		if (result.decision === "allow" && !floorReason) return undefined;
+
+		if (result.decision === "deny") return { block: true, reason: denyReason(result) };
+
+		// Auto mode: the classifier screens the child's call, exactly as it screens
+		// the main agent's. A block is returned to the child (never a per-action
+		// prompt), so it can find a safe alternative — auto mode runs unattended.
+		if (!floorReason && result.decision === "classify") {
+			if (!ctx) return { block: true, reason: DENIED_NON_INTERACTIVE };
+			const appendEntry: TranscriptEntry = {
+				kind: "tool",
+				tool: normalizedTool,
+				input: normalizedTool === "bash" ? { command: subject } : input,
+			};
+			const outcome = await runClassifier(toolName, input, subject, ctx, result.cause !== "protected-path", {
+				cwd,
+				appendEntry,
+				// The child's own turn signal, so an aborted child turn cancels the
+				// classifier call; a fresh (never-aborted) signal only if the child
+				// didn't supply one, so classify() still gets the signal it expects.
+				signal: call.signal ?? new AbortController().signal,
+			});
+			if (outcome.decision === "allow") return undefined;
+			if (outcome.tier === "timeout") return { block: true, reason: BLOCKED_BY_TIMEOUT(outcome.reason) };
+			return { block: true, reason: DENIED_BY_CLASSIFIER(outcome.reason) };
+		}
+
+		// Safety floor: a write to the gate's own config is NEVER auto-approved and
+		// never prompted — in auto mode it is returned to the model, exactly as the
+		// main handler does (floorReason is only ever set in auto mode). Prompting it
+		// would let an inattentive "Yes" — or a prompt-injected child — defeat the one
+		// control the classifier itself can't be trusted to enforce.
+		if (floorReason) {
+			if (ctx) logDecision(ctx, { tool: toolName, subject, outcome: "block", source: "floor", reason: floorReason });
+			return { block: true, reason: DENIED_SAFETY_FLOOR(floorReason) };
+		}
+
+		// ask: needs the user. Bubble it to the parent's terminal; no UI → fail closed.
+		if (!ctx || !ctx.hasUI) return { block: true, reason: DENIED_NON_INTERACTIVE };
+		const preview = previewSubject(subject);
+		const title =
+			result.cause === "protected-path"
+				? `Allow a subagent's ${toolName} to write a protected path?\n\n  ${preview}\n\n  This path configures your tooling or this agent, so allow rules do not pre-approve it.`
+				: `Allow a subagent's ${toolName}?\n\n  ${preview || "(no arguments)"}`;
+		const choice = await serializePrompt(() => ctx.ui.select(title, [YES, YES_SESSION, NO]));
+
+		if (choice === YES) return undefined;
+		if (choice === YES_SESSION) {
+			const rule = normalizedTool === "bash" && subject ? parseRule(`bash(${subject})`) : parseRule(normalizedTool);
+			if (rule) sessionAllows.push(rule);
+			return undefined;
+		}
+		const feedback = await serializePrompt(() => ctx.ui.input("What should the agent do instead?", "Optional — press Esc to skip"));
+		return {
+			block: true,
+			reason: feedback?.trim() ? `${DENIED_BY_USER}\n\nThe user said: ${feedback.trim()}` : DENIED_BY_USER,
+		};
+	};
 
 	pi.registerCommand("permissions", {
 		description: "Show permission mode and loaded rules",

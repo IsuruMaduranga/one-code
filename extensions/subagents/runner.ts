@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import { createAgentSession, getAgentDir, SessionManager, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { buildAgentLoader, createSharedModelRuntime } from "../lib/agent-loader.ts";
+import type { PermissionBridge } from "../permissions/subagent-gate.ts";
 import { findConfigured } from "../lib/model-policy.ts";
 import type { AgentDefinition } from "./agents.ts";
 import { type ChildHandle, type ChildOutcome, forkTaskMessage, type RpcChildHandle } from "./outcome.ts";
@@ -32,12 +33,18 @@ const NEVER_GATE = new Set(["structured_output", "SendMessage"]);
 
 /**
  * The curated extensions loaded into a subagent session (via additionalExtensionPaths,
- * which the loader loads even under noExtensions). Matches Claude Code's model — a
+ * which the loader loads even under noExtensions). Broadly Claude Code's model — a
  * subagent gets project context + freshness + a working toolset, but NOT the frontier
- * chrome (banner/spinner/recap), orchestration (Agent/workflow — no recursion), the
- * real auto-mode classifier (the deny/allow gate + parent-side return review cover
- * it), or MCP/LSP (MCP tools are shared in from the parent as customTools instead).
- * Order mirrors the package's load order: reminder/deferral sinks first.
+ * chrome (banner/spinner/recap) or orchestration (Agent/workflow — no recursion).
+ *
+ * `lsp` is deliberately NOT here (matching CC, findings §17.3): a child session is torn
+ * down with the raw AgentSession.dispose(), which never fires session_shutdown, so lsp's
+ * cleanup would never run and any language server it started would leak for the life of
+ * the parent session (worsened by the shared loader cache). MCP is also not listed: its
+ * tools are shared in from the parent as customTools (getMcpTools), not reconnected.
+ *
+ * Order mirrors the package's load order: reminder/deferral sinks (system-reminder,
+ * tool-search) first, before anything emitting on their channels (the bus does not replay).
  */
 const EXTENSIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
 const CHILD_EXTENSIONS = ["system-reminder", "tool-search", "claude-context", "file-tracker", "search-tools", "skill", "web", "web-fetch", "notebook"];
@@ -84,6 +91,8 @@ export class SubagentRuntime {
 	private readonly baseCwd: string;
 	/** Live MCP tools shared in from the parent session (empty when no MCP servers). */
 	private readonly getMcpTools: () => ToolDefinition[];
+	/** The parent's permission decision closure (undefined until permissions publishes it). */
+	private readonly getPermissionBridge: () => PermissionBridge | undefined;
 	/**
 	 * Loader cache keyed by system-prompt identity ("base", `agent:<name>`,
 	 * `fork:<prompt>`). Building one re-runs every curated extension factory plus
@@ -97,17 +106,23 @@ export class SubagentRuntime {
 		availableModels: Model<Api>[],
 		baseCwd: string,
 		getMcpTools: () => ToolDefinition[],
+		getPermissionBridge: () => PermissionBridge | undefined,
 	) {
 		this.modelRuntime = modelRuntime;
 		this.availableModels = availableModels;
 		this.baseCwd = baseCwd;
 		this.getMcpTools = getMcpTools;
+		this.getPermissionBridge = getPermissionBridge;
 	}
 
-	static async create(cwd: string, getMcpTools: () => ToolDefinition[] = () => []): Promise<SubagentRuntime> {
+	static async create(
+		cwd: string,
+		getMcpTools: () => ToolDefinition[] = () => [],
+		getPermissionBridge: () => PermissionBridge | undefined = () => undefined,
+	): Promise<SubagentRuntime> {
 		const modelRuntime = await createSharedModelRuntime(getAgentDir());
 		const availableModels = [...(await modelRuntime.getAvailable())];
-		return new SubagentRuntime(modelRuntime, availableModels, cwd, getMcpTools);
+		return new SubagentRuntime(modelRuntime, availableModels, cwd, getMcpTools, getPermissionBridge);
 	}
 
 	private buildChildLoader(systemPrompt?: string): Promise<Loader> {
@@ -117,6 +132,7 @@ export class SubagentRuntime {
 			systemPrompt,
 			neverGate: NEVER_GATE,
 			extraExtensionPaths: CHILD_EXTENSION_PATHS,
+			getPermissionBridge: this.getPermissionBridge,
 		});
 	}
 

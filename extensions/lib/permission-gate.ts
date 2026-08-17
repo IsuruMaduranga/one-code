@@ -23,11 +23,25 @@ import { memoryDir } from "./memory.ts";
 import { sessionScratchpadDir } from "./scratchpad.ts";
 import { decide, extractSubject, normalizeToolName, parseRules } from "../permissions/matcher.ts";
 import { loadPermissionSettings } from "../permissions/settings.ts";
+import type { PermissionBridge } from "../permissions/subagent-gate.ts";
 
 /** Tools the runtime itself injects; never gate them. */
 const DEFAULT_INTERNAL_TOOLS = new Set(["structured_output"]);
 
-export function permissionGateFactory(cwd: string, home: string, neverGate: Set<string> = DEFAULT_INTERNAL_TOOLS): InlineExtension {
+export function permissionGateFactory(
+	cwd: string,
+	home: string,
+	neverGate: Set<string> = DEFAULT_INTERNAL_TOOLS,
+	/**
+	 * The parent permissions extension's decision closure. When present, a child's
+	 * tool calls are gated through the REAL parent pipeline (mode inheritance,
+	 * auto-mode classifier, prompts bubbled to the user — Claude Code parity,
+	 * findings §17.1) rather than the fail-closed local rules below. A getter so it
+	 * can be read at call time (the bridge may be published after the loader builds);
+	 * absent for the workflow runner and headless runs, which keep the local gate.
+	 */
+	getBridge?: () => PermissionBridge | undefined,
+): InlineExtension {
 	const settings = loadPermissionSettings(cwd, home);
 	const deny = parseRules(settings.deny);
 	const allow = parseRules(settings.allow);
@@ -44,12 +58,25 @@ export function permissionGateFactory(cwd: string, home: string, neverGate: Set<
 			// The scratchpad embeds the *child's* session id, which does not exist
 			// until the session runs — derived on first tool call, then pinned.
 			let scratchpadDirPath: string | undefined;
-			pi.on("tool_call", (event, ctx) => {
+			pi.on("tool_call", async (event, ctx) => {
 				if (neverGate.has(event.toolName)) return undefined;
-				// Resolve against the running session's cwd, not the build-time cwd:
-				// a worktree-isolated run executes under the worktree path, and its
-				// path/scratchpad checks must match that, not the original project dir.
 				const runCwd = ctx?.cwd ?? cwd;
+
+				// Preferred path: route the call through the parent's real permission
+				// pipeline. Everything here — resolving the bridge AND invoking it — fails
+				// CLOSED (deny); a broken bridge or getter must never silently open the gate.
+				// The child's own signal rides along so an aborted child turn cancels any
+				// classifier call the bridge makes.
+				try {
+					const bridge = getBridge?.();
+					if (bridge) {
+						const input = (event.input ?? {}) as Record<string, unknown>;
+						return await bridge({ toolName: event.toolName, input, cwd: runCwd, signal: ctx?.signal });
+					}
+				} catch (error) {
+					return { block: true, reason: `Permission bridge failed (${(error as Error).message}); denied to fail safe.` };
+				}
+
 				const sessionId = ctx?.sessionManager?.getSessionId?.();
 				if (!scratchpadDirPath && sessionId) scratchpadDirPath = sessionScratchpadDir(runCwd, sessionId);
 				const subject = extractSubject(normalizeToolName(event.toolName), event.input as Record<string, unknown>);

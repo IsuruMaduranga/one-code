@@ -18,6 +18,7 @@ import os from "node:os";
 import { join } from "node:path";
 import { DefaultResourceLoader, type InlineExtension, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { PermissionBridge } from "../permissions/subagent-gate.ts";
 import { permissionGateFactory } from "./permission-gate.ts";
 
 /** The last assistant message's text (the value an agent run returns). */
@@ -57,6 +58,14 @@ export interface AgentLoaderOptions {
 	extraExtensionPaths?: string[];
 	/** Tool names the permission gate must never gate (runtime-injected tools). */
 	neverGate?: Set<string>;
+	/**
+	 * The parent permissions extension's decision closure. When present, the child's
+	 * permission gate routes every tool call through it (mode inheritance, classifier,
+	 * prompts bubbled to the user); when absent (workflow runner, headless), the gate
+	 * uses its fail-closed local fallback. A getter so it can be read lazily — the
+	 * bridge may not be published yet when the loader is built.
+	 */
+	getPermissionBridge?: () => PermissionBridge | undefined;
 }
 
 /** Build and `reload()` a resource loader for an in-process agent session. */
@@ -65,7 +74,10 @@ export async function buildAgentLoader(options: AgentLoaderOptions): Promise<Def
 		cwd: options.cwd,
 		agentDir: options.agentDir,
 		noExtensions: true,
-		extensionFactories: [permissionGateFactory(options.cwd, os.homedir(), options.neverGate), ...(options.extraFactories ?? [])],
+		extensionFactories: [
+			permissionGateFactory(options.cwd, os.homedir(), options.neverGate, options.getPermissionBridge),
+			...(options.extraFactories ?? []),
+		],
 		...(options.systemPrompt !== undefined ? { systemPrompt: options.systemPrompt } : {}),
 		...(options.extraExtensionPaths ? { additionalExtensionPaths: options.extraExtensionPaths } : {}),
 	});
