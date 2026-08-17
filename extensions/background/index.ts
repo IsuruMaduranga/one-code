@@ -51,6 +51,12 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	// Fixed-interval /loop (harness-driven, auto-re-arming — distinct from the
 	// model-driven `wakeup` used by dynamic /loop). One at a time, like wakeup.
 	let loop: { timer: NodeJS.Timeout; intervalSeconds: number; task: string } | undefined;
+	// True between agent_start and agent_end, so a fixed-interval tick can skip
+	// (not queue) while the previous tick's turn is still running — no backlog.
+	let agentBusy = false;
+	// Set when a dynamic /loop force-activated schedule_wakeup, so /loop stop can
+	// restore the lean tool surface it changed.
+	let activatedWakeupTool = false;
 
 	pi.events.on(TASK_REGISTER_CHANNEL, (task) => registry.register(task as BackgroundTask));
 
@@ -424,15 +430,21 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		handler: async (args, ctx) => {
 			lastCtx = ctx;
 			const raw = (args ?? "").trim();
+			const keyword = raw.toLowerCase();
 
-			if (raw === "stop") {
+			if (keyword === "stop") {
 				const had = Boolean(loop || wakeup);
 				clearLoop();
 				clearWakeup();
+				if (activatedWakeupTool) {
+					const active = pi.getActiveTools();
+					if (active.includes("schedule_wakeup")) pi.setActiveTools(active.filter((t) => t !== "schedule_wakeup"));
+					activatedWakeupTool = false;
+				}
 				ctx.ui.notify(had ? "Loop stopped; no further iterations will fire." : "No loop was running.", "info");
 				return;
 			}
-			if (raw === "" || raw === "status") {
+			if (raw === "" || keyword === "status") {
 				const parts: string[] = [];
 				if (loop) parts.push(`fixed interval every ${loop.intervalSeconds}s — ${loop.task}`);
 				if (wakeup) parts.push(`self-paced wakeup pending — ${wakeup.reason}`);
@@ -462,7 +474,12 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 					seconds !== parsed.intervalSeconds
 						? ` (adjusted from ${parsed.intervalSeconds}s; allowed range ${MIN_DELAY_SECONDS}-${MAX_DELAY_SECONDS}s)`
 						: "";
-				const tick = () => notify("loop", buildLoopMessage(parsed.task), { intervalSeconds: seconds });
+				// Skip (don't queue) a tick while the previous tick's turn is still
+				// running, so a slow task can't build a backlog of stale iterations.
+				const tick = () => {
+					if (agentBusy) return;
+					notify("loop", buildLoopMessage(parsed.task), { intervalSeconds: seconds });
+				};
 				const timer = setInterval(tick, seconds * 1000);
 				timer.unref?.();
 				loop = { timer, intervalSeconds: seconds, task: parsed.task };
@@ -471,9 +488,13 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				return;
 			}
 
-			// Dynamic (self-paced): the model drives schedule_wakeup, so make sure it is active.
+			// Dynamic (self-paced): the model drives schedule_wakeup, so make sure it is
+			// active — remembering we did, so /loop stop can restore the lean surface.
 			const active = pi.getActiveTools();
-			if (!active.includes("schedule_wakeup")) pi.setActiveTools([...active, "schedule_wakeup"]);
+			if (!active.includes("schedule_wakeup")) {
+				pi.setActiveTools([...active, "schedule_wakeup"]);
+				activatedWakeupTool = true;
+			}
 			ctx.ui.notify(`Self-paced loop started: ${parsed.task}. Stop with /loop stop.`, "info");
 			notify("loop", buildDynamicLoopPrompt(parsed.task), {});
 		},
@@ -481,6 +502,12 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 
 	pi.on("session_start", (_event, ctx) => {
 		lastCtx = ctx;
+	});
+	pi.on("agent_start", () => {
+		agentBusy = true;
+	});
+	pi.on("agent_end", () => {
+		agentBusy = false;
 	});
 
 	pi.on("session_shutdown", () => {

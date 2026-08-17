@@ -107,8 +107,8 @@ function anchorTier(id: string): PromptTier | undefined {
  * Gemini model to cheap. `\d+b` catches size tags (8b, 70b) as the strongest
  * (tiny) signal. Returns the ceiling tier the name justifies.
  */
-const TINY_NAME_HINT = /(?:^|[-/.])(?:nano|lite|tiny|distill|\d+b)(?:[-/.]|$)/i;
-const CHEAP_NAME_HINT = /(?:^|[-/.])(?:flash|mini|small|air|instant)(?:[-/.]|$)/i;
+const TINY_NAME_HINT = /(?:^|[-/.])(?:nano|lite|tiny|distill|instant|\d+b)(?:[-/.]|$)/i;
+const CHEAP_NAME_HINT = /(?:^|[-/.])(?:flash|mini|small|air)(?:[-/.]|$)/i;
 function nameClassCap(id: string): PromptTier {
 	if (TINY_NAME_HINT.test(id)) return "tiny";
 	if (CHEAP_NAME_HINT.test(id)) return "cheap";
@@ -129,7 +129,7 @@ const CHEAP_MIN_INPUT_COST = 0.5;
 
 /** Price/containment floor for an unanchored third-party model, biased low. */
 function priceFloorTier(model: Model<Api>): PromptTier {
-	if (modelIdentity(model).confidence === "opaque") return "tiny"; // local/self-hosted
+	if (modelIdentity(model).confidence === "opaque") return "tiny"; // local/self-hosted → max scaffolding
 	const price = pricedInput(model);
 	if (price === undefined) return "tiny"; // unpriced/unknown → maximum scaffolding
 	if (price >= WORKHORSE_MIN_INPUT_COST) return "workhorse";
@@ -151,10 +151,15 @@ export function resolveModelTier(
 		return model.id.includes("haiku") ? "cheap" : "workhorse";
 	}
 
-	// Third-party: a curated anchor is authoritative; otherwise the price floor
-	// (raised to workhorse by a "pro"-class name) combined with the name-class cap.
-	const anchor = anchorTier(model.id);
-	if (anchor) return anchor;
+	// A curated anchor is authoritative — but only for a verifiable provider. A
+	// local/self-hosted (opaque) provider's id could be anything, so it must NOT
+	// reach the anchor map (a model aliased "claude-sonnet-5" on ollama is not the
+	// real thing); it falls through to the generic price/name heuristics, where
+	// priceFloorTier's opaque check biases it to maximum scaffolding.
+	if (modelIdentity(model).confidence !== "opaque") {
+		const anchor = anchorTier(model.id);
+		if (anchor) return anchor;
+	}
 
 	const cap = nameClassCap(model.id);
 	// A "pro"/"max"-class name keeps a cheap/unpriced flagship at workhorse; a lean

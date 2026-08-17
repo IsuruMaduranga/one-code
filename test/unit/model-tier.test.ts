@@ -61,6 +61,17 @@ describe("resolveModelTier", () => {
 		expect(resolveModelTier(undefined, noEnv)).toBe("tiny");
 	});
 
+	it("does not let an opaque/local model reach the anchor map via an aliased id", () => {
+		// A local model aliased to a flagship name must NOT inherit its tier — opaque
+		// providers are unverifiable, so max scaffolding wins over the anchor.
+		expect(resolveModelTier(model("claude-sonnet-5", "ollama"), noEnv)).toBe("tiny");
+		expect(resolveModelTier(model("gpt-5", "ollama"), noEnv)).toBe("tiny");
+	});
+
+	it("treats an 'instant'-class name as tiny, not cheap", () => {
+		expect(resolveModelTier(model("acme-instant", "acme", 2), noEnv)).toBe("tiny"); // instant cap beats workhorse price
+	});
+
 	it("keeps a cheap or unpriced 'pro'/'max'-class flagship in workhorse", () => {
 		expect(resolveModelTier(model("deepseek-v4-pro", "deepseek", 0.435), noEnv)).toBe("workhorse");
 		expect(resolveModelTier(model("qwen3.8-max", "alibaba", 0.4), noEnv)).toBe("workhorse");
