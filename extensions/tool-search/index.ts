@@ -28,11 +28,14 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import {
 	DEFER_CHANNEL,
+	deferredMissReminderText,
 	deferredRegistry,
 	deferredReminderText,
 	type DeferRequest,
+	resultText,
 	searchTools,
 	selectedNames,
+	toolNotFoundName,
 } from "../lib/deferred.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
@@ -91,6 +94,24 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	pi.on("session_start", () => {
 		sessionStarted = true;
 		deferAll();
+	});
+
+	// The every-turn deferred-tools list tells the model to load via tool_search,
+	// but if it calls a deferred tool directly anyway, pi's core dispatcher fails
+	// the call with a bare "Tool <name> not found" — which fires here as an error
+	// tool_execution_end. (This path skips beforeToolCall/afterToolCall, so the
+	// tool_call/tool_result hooks never see it.) The call can't be salvaged
+	// mid-turn, but we steer the model straight back to tool_search on its next
+	// step with a one-shot reminder, far more pointed than the standing list.
+	pi.on("tool_execution_end", (event) => {
+		if (!event.isError) return;
+		const name = toolNotFoundName(resultText(event.result));
+		if (!name || !deferredRegistry.has(name)) return;
+		pi.events.emit(REMINDER_CHANNEL, {
+			scope: "next-turn",
+			key: `deferred-miss-${name}`,
+			text: deferredMissReminderText(name),
+		});
 	});
 
 	pi.registerTool({

@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+	deferredMissReminderText,
 	DeferredRegistry,
 	deferredReminderText,
+	resultText,
 	searchTools,
 	type SearchableTool,
 	selectedNames,
+	toolNotFoundName,
 } from "../../extensions/lib/deferred.ts";
 
 const tools: SearchableTool[] = [
@@ -88,6 +91,49 @@ describe("selectedNames", () => {
 		const requested = selectedNames("select:web_search,does_not_exist") ?? [];
 		const found = searchTools("select:web_search,does_not_exist", tools).map((m) => m.name.toLowerCase());
 		expect(requested.filter((n) => !found.includes(n))).toEqual(["does_not_exist"]);
+	});
+});
+
+describe("toolNotFoundName", () => {
+	it("recovers the tool name from pi's bare not-found error", () => {
+		expect(toolNotFoundName("Tool web_fetch not found")).toBe("web_fetch");
+		expect(toolNotFoundName("  Tool monitor not found  ")).toBe("monitor");
+	});
+
+	it("returns undefined for any other error text", () => {
+		expect(toolNotFoundName("Operation aborted")).toBeUndefined();
+		expect(toolNotFoundName("Tool web_fetch failed to run")).toBeUndefined();
+		expect(toolNotFoundName("")).toBeUndefined();
+	});
+});
+
+describe("resultText", () => {
+	it("flattens content blocks, matching pi's createErrorToolResult shape", () => {
+		expect(resultText({ content: [{ type: "text", text: "Tool web_fetch not found" }] })).toBe(
+			"Tool web_fetch not found",
+		);
+		expect(resultText({ content: [{ type: "text", text: "a" }, { type: "text", text: "b" }] })).toBe("ab");
+	});
+
+	it("handles string content and missing/odd shapes without throwing", () => {
+		expect(resultText({ content: "plain" })).toBe("plain");
+		expect(resultText({})).toBe("");
+		expect(resultText(undefined)).toBe("");
+		expect(resultText({ content: [null, { type: "image" }] })).toBe("");
+	});
+
+	it("round-trips a real not-found result to the recovered name", () => {
+		const result = { content: [{ type: "text", text: "Tool web_fetch not found" }] };
+		expect(toolNotFoundName(resultText(result))).toBe("web_fetch");
+	});
+});
+
+describe("deferredMissReminderText", () => {
+	it("names the tool and the exact select: query to load it", () => {
+		const text = deferredMissReminderText("web_fetch");
+		expect(text).toContain("web_fetch");
+		expect(text).toContain("tool_search");
+		expect(text).toContain("select:web_fetch");
 	});
 });
 

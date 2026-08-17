@@ -62,6 +62,39 @@ export function deferredReminderText(tools: Array<Pick<SearchableTool, "name" | 
 	].join("\n");
 }
 
+/**
+ * The bare error pi's core dispatcher returns when the model calls a tool whose
+ * schema isn't in the active set — including every deferred tool before
+ * `tool_search` loads it (pi-agent-core `prepareToolCall`). The message is
+ * `Tool <name> not found`; this recovers `<name>` so a deferred miss can be
+ * steered back to `tool_search`. Returns undefined for any other error text.
+ */
+export function toolNotFoundName(text: string): string | undefined {
+	return /^Tool (\S+) not found$/.exec(text.trim())?.[1];
+}
+
+/** Flatten a tool result's content blocks to plain text (results are untyped over the bus). */
+export function resultText(result: unknown): string {
+	const content = (result as { content?: unknown })?.content;
+	if (typeof content === "string") return content;
+	if (!Array.isArray(content)) return "";
+	return content
+		.map((block) => (block && typeof block === "object" && "text" in block ? String((block as { text: unknown }).text) : ""))
+		.join("");
+}
+
+/**
+ * The one-shot correction that rides in right after a deferred tool's
+ * "not found" failure, pointing the model at `tool_search` instead of leaving it
+ * to recover from the bare error on its own.
+ */
+export function deferredMissReminderText(name: string): string {
+	return [
+		`\`${name}\` is a deferred tool — its schema is not loaded, so that call failed with "Tool ${name} not found".`,
+		`Load it first with tool_search (\`select:${name}\`), then reissue the call. It stays callable for the rest of the session once loaded.`,
+	].join(" ");
+}
+
 export interface SearchMatch {
 	name: string;
 	score: number;
