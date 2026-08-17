@@ -83,7 +83,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 			result: (_r, a, isError) => (isError ? undefined : a?.skill ? `Loaded ${a.skill}` : undefined),
 		}),
 		description:
-			"Invoke a skill: a packaged set of instructions for a particular kind of task. Call this when the task at hand matches an available skill, or when the user asks for one by name (including `/<name>`). Returns the skill's instructions to follow. Plugin skills are named `<plugin>:<skill>`. Use `list` to see what is available.",
+			"Invoke a skill.\n\nA skill is a packaged set of instructions the user or project has set up for a particular kind of task (deploy steps, a review checklist, a repo-specific workflow). Available skills appear in a system-reminder listing with one-line descriptions. When the task at hand is one a listed skill covers, call this tool first — the skill's instructions load into the turn for you to follow in place of your default approach. Users may also ask for one by name (`/<name>`, or \"slash command\"); that's a request to invoke it.\n\n- `skill`: exact name from the listing, no leading slash. Plugin skills are named `<plugin>:<skill>`.\n- `args`: optional arguments to pass through.\n\nOnly names from the listing (or that the user typed explicitly) are valid. Built-in CLI commands (`/help`, `/clear`, …) aren't skills. Use `list` to see what is available.",
 		promptSnippet: "Load packaged instructions for a task (see the skills listing)",
 		parameters: Type.Object({
 			skill: Type.Optional(Type.String({ description: "Exact skill name, no leading slash" })),
