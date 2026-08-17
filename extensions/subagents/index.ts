@@ -914,6 +914,33 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	});
 	pi.events.emit(DEFER_CHANNEL, { name: "SendMessage", keywords: ["message", "agent", "resume", "continue", "teammate"] });
 
+	const agentStatus = (name: string) =>
+		runningNames.has(name) ? "running" : residents.has(name) ? "resident (idle, reachable live)" : "finished (resume with SendMessage)";
+
+	pi.registerTool({
+		name: "list_agents",
+		label: "List Agents",
+		...ccToolRenderers("List Agents"),
+		description:
+			"List the agents spawned in this session — their names, types, and current status — so you know which ones SendMessage can reach. `running` is executing now; `resident` is idle but reachable live; `finished` is resumable from its session. This lists running/spawned instances, not the agent catalog (use Agent action:'list' for that).",
+		parameters: Type.Object({}),
+		async execute() {
+			const runs = registry.list();
+			if (runs.length === 0) {
+				return {
+					content: [{ type: "text", text: "No agents have been spawned in this session yet. Start one with the Agent tool." }],
+					details: { agents: [] as unknown[] },
+				};
+			}
+			const lines = runs.map((r) => `- ${r.name} [${r.agent}] — ${agentStatus(r.name)} (task ${r.taskId})`);
+			return {
+				content: [{ type: "text", text: `Agents spawned this session:\n${lines.join("\n")}` }],
+				details: { agents: runs.map((r) => ({ name: r.name, agent: r.agent, taskId: r.taskId, status: agentStatus(r.name) })) },
+			};
+		},
+	});
+	pi.events.emit(DEFER_CHANNEL, { name: "list_agents", keywords: ["agents", "list", "running", "spawned", "subagents", "who"] });
+
 	pi.registerCommand("agents", {
 		description: "List available subagents",
 		handler: async (_args, ctx) => {

@@ -74,6 +74,11 @@ export class RunRegistry {
 		return [...this.byName.keys()];
 	}
 
+	/** Every spawned run, latest-per-name (what list_agents enumerates). */
+	list(): AgentRunRecord[] {
+		return [...this.byName.values()];
+	}
+
 	/** Resolve by name, exact task id, or unique task-id prefix (3+ chars). */
 	resolve(ref: string): AgentRunRecord | undefined {
 		const named = this.byName.get(ref) ?? this.byId.get(ref);

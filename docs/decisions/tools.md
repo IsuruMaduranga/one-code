@@ -323,7 +323,15 @@ user-message reminders are the closest equivalent. (The LLM safety classifier
 that gates bash, once listed here as not copied because it needs a model call
 per command, is now built — see [`auto-mode.md`](auto-mode.md).)
 
-## Tier-aware tool surface: search built-ins for mid/low only (unreviewed)
+## Tier-aware tool surface: search built-ins for the tiny tier only
+
+**Superseded 2026-08-17** (was "mid/low only"): with the 4-tier redesign,
+grep/find/ls activate only for `tiny` — `cheap` now matches CC's Haiku surface
+(no dedicated search tools; bash covers search). See
+[`model-tiers.md`](model-tiers.md#grepfindls-belong-to-tiny-only-2026-08-17).
+The original rationale below stands (pi registers but doesn't activate the
+built-ins); only the tier boundary moved.
+
 
 **Decision.** pi registers `grep`/`find`/`ls` but never activates them (only
 `read`/`bash`/`edit`/`write` are active by default — findings §2). One Code
@@ -522,3 +530,29 @@ mode, real model): the foreground-sleep, `git stash pop`, and `xargs git`
 blocks all fired verbatim inside a real `enter_worktree` session — and an
 unforced run showed the model choosing `run_in_background: true` on its own
 from the updated tool description (steering working before any guard fires).
+
+## CC tools: list_agents adopted, harness-specific ones diverged (2026-08-17)
+
+Phase 4 of the CC-alignment initiative
+([`features/cc-alignment/`](../features/cc-alignment/README.md)) triaged the
+tools a live CC session exposes that One Code lacked.
+
+**Adopted — `list_agents`** (CC's `ListAgents`): a deferred, read-only tool that
+enumerates the agents *spawned this session* (name, type, and status —
+running / resident / finished-resumable) so the model knows which ones
+`SendMessage` can reach. Distinct from `Agent action:"list"`, which re-prints the
+agent *catalog*. Auto-allowed (read-only) and mapped in `matcher.ts`
+(`ListAgents`→`list_agents`).
+
+**Diverged — deliberately absent** (CC-harness / Anthropic-platform features with
+no place in a provider-neutral pi package; the user confirmed the Artifact class
+is fine to skip):
+
+- **`Artifact`** — publishes HTML/Markdown to claude.ai-hosted pages. Platform-specific.
+- **`ReportFindings`** — structured code-review findings for CC's review UI. No One Code surface consumes it.
+- **`ShareOnboardingGuide`** — uploads an ONBOARDING.md to an org guide service.
+- **`PushNotification` / `RemoteTrigger` / `DesignSync`** — remote/desktop/design integrations of the CC app.
+- **`CronCreate` / `CronList` / `CronDelete`** — scheduled *cloud* sessions. One Code's `schedule_wakeup` + `/loop` are intra-session only; a local cron would be a separate feature, not a CC-parity obligation. (This is why `/loop`'s autonomous-sentinel mode stays deferred — it needs `Cron*`.)
+
+If any of these later gain a One Code equivalent, add the tool under its
+snake_case name and revisit this list.

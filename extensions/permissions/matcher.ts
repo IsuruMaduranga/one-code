@@ -48,6 +48,8 @@ const CC_TOOL_NAMES: Record<string, string> = {
 	schedulewakeup: "schedule_wakeup",
 	sendmessage: "SendMessage",
 	send_message: "SendMessage", // pre-rename internal name
+	listagents: "list_agents",
+	list_agents: "list_agents",
 	enterworktree: "enter_worktree",
 	exitworktree: "exit_worktree",
 	listmcpresourcestool: "list_mcp_resources",
@@ -225,6 +227,7 @@ export const AUTO_ALLOWED_TOOLS = new Set<string>([
 	// Read-only inspection.
 	"lsp_diagnostics",
 	"list_mcp_resources",
+	"list_agents",
 	// Subagent orchestration is safe to launch; each child enforces its own
 	// tool permissions via the in-process permission gate.
 	"Agent",
