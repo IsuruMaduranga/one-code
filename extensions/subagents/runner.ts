@@ -24,6 +24,33 @@ import { type ChildHandle, type ChildOutcome, forkTaskMessage, type RpcChildHand
 import { sendToMainTool } from "./send-to-main-tool.ts";
 import { SessionTurnTracker } from "./session-turns.ts";
 import type { UsageTotals } from "./usage.ts";
+import type { TranscriptBlock } from "./live-runs.ts";
+import { summarizeArgs, textContent } from "../lib/tui-render.ts";
+
+/**
+ * Optional live sink for the subagent panel: a one-line activity string from
+ * the latest tool call, and transcript blocks (assistant text, tool calls,
+ * tool results) as they stream. Purely observational — never affects the run.
+ */
+export interface LiveSink {
+	onActivity?(toolName: string | undefined, args: unknown, lastText: string): void;
+	onBlock?(block: TranscriptBlock): void;
+}
+
+/** First non-empty line of a possibly-multiline string, trimmed to `max`. */
+function firstLine(text: string, max = 200): string {
+	const line = text.split("\n").map((l) => l.trimEnd()).find((l) => l.trim()) ?? "";
+	return line.length > max ? `${line.slice(0, max - 1)}…` : line;
+}
+
+/** The assistant text of a message_end event, if any (mirrors SessionTurnTracker). */
+function assistantText(message: { content?: unknown } | undefined): string {
+	const blocks = Array.isArray(message?.content) ? message.content : [];
+	return blocks
+		.filter((b): b is { type: string; text: string } => (b as { type?: string }).type === "text")
+		.map((b) => b.text)
+		.join("");
+}
 
 /** Wall-clock cap on a single run/turn — a hung session shares the main event loop. */
 const WALL_CLOCK_CAP_MS = 30 * 60 * 1000;
@@ -76,6 +103,8 @@ export interface SubagentRunOptions extends ChildSessionSpec {
 	task: string;
 	signal?: AbortSignal;
 	onProgress: (toolCalls: number, lastText: string, usage: UsageTotals) => void;
+	/** Optional live sink for the subagent panel (activity + transcript blocks). */
+	sink?: LiveSink;
 }
 
 export interface ResidentRunOptions extends Omit<ChildSessionSpec, "sessionFile"> {
@@ -83,6 +112,8 @@ export interface ResidentRunOptions extends Omit<ChildSessionSpec, "sessionFile"
 	/** Fires at the end of EVERY turn (initial task and later messages alike). */
 	onTurnEnd: (outcome: ChildOutcome) => void;
 	onExit?: () => void;
+	/** Optional live sink for the subagent panel (activity + transcript blocks). */
+	sink?: LiveSink;
 }
 
 export class SubagentRuntime {
@@ -158,10 +189,25 @@ export class SubagentRuntime {
 		tracker: SessionTurnTracker,
 		onProgress: (toolCalls: number, lastText: string, usage: UsageTotals) => void,
 		onSettled?: () => void,
+		sink?: LiveSink,
 	): () => void {
 		return session.subscribe((event) => {
 			try {
 				const settled = tracker.process(event as never);
+				const e = event as { type?: string; toolName?: string; args?: unknown; isError?: boolean; result?: unknown; message?: { role?: string; content?: unknown } };
+				if (e.type === "tool_execution_start") {
+					sink?.onBlock?.({ kind: "call", tool: e.toolName ?? "tool", text: summarizeArgs(e.args) });
+					sink?.onActivity?.(e.toolName, e.args, tracker.turnText);
+				} else if (e.type === "tool_execution_end") {
+					const text = firstLine(textContent(e.result as { content?: Array<{ type: string; text?: string }> }));
+					sink?.onBlock?.({ kind: "result", tool: e.toolName ?? "tool", text: text || (e.isError ? "error" : "done"), isError: e.isError });
+				} else if (e.type === "message_end" && e.message?.role === "assistant") {
+					const text = assistantText(e.message).trim();
+					if (text) {
+						sink?.onBlock?.({ kind: "text", text });
+						sink?.onActivity?.(undefined, undefined, text);
+					}
+				}
 				if (event.type === "tool_execution_start" || event.type === "message_end") {
 					onProgress(tracker.toolCalls, tracker.turnText, tracker.usage);
 				}
@@ -208,7 +254,7 @@ export class SubagentRuntime {
 
 		const result: Promise<ChildOutcome> = (async () => {
 			session = await this.buildChildSession(options);
-			const unsubscribe = this.wireTracker(session, tracker, options.onProgress);
+			const unsubscribe = this.wireTracker(session, tracker, options.onProgress, undefined, options.sink);
 
 			const onAbort = () => void session?.abort();
 			options.signal?.addEventListener("abort", onAbort, { once: true });
@@ -262,7 +308,7 @@ export class SubagentRuntime {
 			options.onTurnEnd(outcome);
 		};
 
-		this.wireTracker(session, tracker, options.onProgress, () => finishTurn(tracker.turnOutcome()));
+		this.wireTracker(session, tracker, options.onProgress, () => finishTurn(tracker.turnOutcome()), options.sink);
 
 		return {
 			send(message: string): "started" | "steered" {

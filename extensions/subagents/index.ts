@@ -1,8 +1,9 @@
 /**
  * subagents extension — Claude Code's Agent/Task tool, plus send_message.
  *
- * Delegates a task to a specialist agent running in a separate pi process with
- * its own context window. Agent definitions come from `.claude/agents/*.md`
+ * Delegates a task to a specialist agent running in-process (its own
+ * AgentSession, see runner.ts) with its own context window. Agent definitions
+ * come from `.claude/agents/*.md`
  * (project), `~/.claude/agents/*.md` (user), and the catalog bundled with this
  * package — the same markdown + frontmatter format Claude Code uses.
  *
@@ -46,7 +47,12 @@ import { SubagentRuntime } from "./runner.ts";
 import { emptyUsage, formatStats, type UsageTotals } from "./usage.ts";
 import { cleanupWorktree, createWorktree, isGitRepo, type Worktree } from "./worktree.ts";
 import { systemNotification } from "../lib/notifications.ts";
-import { ccToolRenderers, customMessageText, notificationComponent } from "../lib/tui-render.ts";
+import { ccToolRenderers, customMessageText, notificationComponent, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
+import { deriveActivity, LiveRunRegistry } from "./live-runs.ts";
+import type { LiveSink } from "./runner.ts";
+import { SubagentWidget } from "./panel-widget.ts";
+import { renderTranscript } from "./panel-render.ts";
+import { decodeStripKey, decodeViewerKey } from "./panel-keys.ts";
 
 /** The catalog shipped in this package: <package>/agents. */
 const BUNDLED_AGENTS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "agents");
@@ -139,6 +145,44 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	const runningNames = new Set<string>();
 	const liveChildren = new Set<{ kill(): void }>();
 	const residents = new Map<string, Resident>();
+
+	// The live subagent panel (Claude Code's below-editor agent tree): a registry
+	// of every in-process child fed by the runner's live sink, a below-editor
+	// strip, and taskId→kill handles for the viewer's stop/stop-all.
+	const liveRuns = new LiveRunRegistry();
+	const liveHandles = new Map<string, { kill(): void }>();
+	let lastCtx: ExtensionContext | undefined;
+	const panel = new SubagentWidget(liveRuns, () => lastCtx);
+
+	/**
+	 * Register a child in the live panel and return the wiring the spawn sites
+	 * need: a runner `sink` (activity + transcript blocks), a `progress` hook to
+	 * fold into the existing onProgress, and settle/finish terminal marks.
+	 */
+	const trackLiveRun = (record: AgentRunRecord, request: RunRequest) => {
+		liveRuns.register({
+			taskId: record.taskId,
+			name: record.name,
+			agentType: request.agent,
+			model: request.model,
+			thinking: request.thinking,
+			task: request.task,
+			startedAt: Date.now(),
+		});
+		const sink: LiveSink = {
+			onActivity: (tool, args, text) => liveRuns.setActivity(record.taskId, deriveActivity(tool, args, text)),
+			onBlock: (block) => liveRuns.block(record.taskId, block),
+		};
+		return {
+			sink,
+			progress: (toolCalls: number, usage: UsageTotals) => liveRuns.stats(record.taskId, toolCalls, usage),
+			settle: () => liveRuns.settle(record.taskId),
+			finish: (failed: boolean) => {
+				liveRuns.finish(record.taskId, failed);
+				liveHandles.delete(record.taskId);
+			},
+		};
+	};
 
 	// Live MCP tool definitions published by the mcp extension; injected into
 	// child sessions so subagents share the parent's open connections (no reconnect).
@@ -247,15 +291,183 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	};
 
 	pi.on("session_start", (_event, ctx) => {
+		lastCtx = ctx;
 		reconstructRuns(ctx);
 		emitModelStatus(ctx);
 		emitAgentCatalog(ctx);
+		registerPanelInputHook(ctx);
 	});
 	pi.on("model_select", (event, ctx) => emitModelStatus(ctx, event.model));
 	pi.on("session_tree", (_event, ctx) => reconstructRuns(ctx));
 	pi.on("session_shutdown", () => {
 		for (const child of liveChildren) child.kill();
+		panel.dispose();
 	});
+
+	// --- The subagent panel: below-editor strip soft focus + Enter-to-view -----
+
+	/** True while the transcript viewer owns the screen (strip yields all keys). */
+	let viewerOpen = false;
+
+	/** Stop one live agent by task id (foreground handle or background task). */
+	const stopAgent = (taskId: string) => liveHandles.get(taskId)?.kill();
+	const stopAllAgents = () => {
+		for (const [, handle] of liveHandles) handle.kill();
+	};
+
+	let panelHookRegistered = false;
+	const registerPanelInputHook = (registerCtx: ExtensionContext) => {
+		if (panelHookRegistered || !registerCtx.hasUI) return;
+		panelHookRegistered = true;
+		const leave = () => panel.setFocus(undefined);
+		const DOWN_KEYS = new Set(["\x1b[B", "\x1bOB"]);
+		try {
+			registerCtx.ui.onTerminalInput((data) => {
+				const ctx = lastCtx ?? registerCtx;
+				if (viewerOpen || panel.rowCount() <= 1) {
+					if (panel.focusIndex !== undefined) leave();
+					return undefined;
+				}
+				// Enter focus: down-arrow while the editor holds real focus. Unlike the
+				// workflow strip we do NOT require the editor to be idle — the whole
+				// point is inspecting agents that run while the main turn is in flight.
+				if (panel.focusIndex === undefined) {
+					if (!DOWN_KEYS.has(data) || !panel.editorFocused()) return undefined;
+					panel.setFocus(0);
+					return { consume: true };
+				}
+				// Focus moved to a dialog/overlay — drop soft focus, let it have the key.
+				if (!panel.editorFocused()) {
+					leave();
+					return undefined;
+				}
+				const key = decodeStripKey(data);
+				if (!key) {
+					leave();
+					return undefined; // typing resumes in the editor, byte included
+				}
+				switch (key) {
+					case "up":
+						if (panel.focusIndex === 0) leave();
+						else panel.setFocus(panel.focusIndex - 1);
+						return { consume: true };
+					case "down":
+						panel.setFocus(Math.min(panel.rowCount() - 1, panel.focusIndex + 1));
+						return { consume: true };
+					case "leave":
+						leave();
+						// While the model streams, esc must still interrupt it — consume only when idle.
+						return ctx.isIdle() ? { consume: true } : undefined;
+					case "open": {
+						const run = panel.selectedRun();
+						leave();
+						// The `main` row has no child to view — Enter just returns to it.
+						if (run) void openAgentViewer(ctx, run.taskId);
+						return { consume: true };
+					}
+				}
+			});
+		} catch {
+			// Mode without raw terminal input (print/RPC) — the strip is view-only.
+		}
+	};
+
+	/**
+	 * Claude Code's Enter-to-view: a full-screen live transcript of one child —
+	 * synthesized header, streaming ● call / ⎿ result blocks, a live spinner — and
+	 * the stop / stop-all / next-agent keys. Liveness comes from a 400ms ticker
+	 * (findings §15: the memoized render keeps per-frame cost at a map lookup).
+	 */
+	async function openAgentViewer(ctx: ExtensionContext, taskId: string): Promise<void> {
+		viewerOpen = true;
+		let currentId = taskId;
+		let scroll = 0;
+		let chordArmed = false;
+		try {
+			await ctx.ui.custom<null>((tui, theme, _keybindings, done) => {
+				const paint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme) };
+				let cache: { width: number; lines: string[] } | undefined;
+				const repaint = () => {
+					cache = undefined;
+					tui.requestRender();
+				};
+				const ticker = setInterval(repaint, 400);
+				ticker.unref?.();
+				// Leave room for the editor, the strip, and the status line below the
+				// overlay so the transcript's footer hint stays on-screen.
+				const height = () => Math.max(12, tui.terminal.rows - 8);
+				return {
+					render: (width: number) => {
+						if (cache?.width === width) return cache.lines;
+						const run = liveRuns.get(currentId);
+						const lines = run
+							? renderTranscript({ run, width, height: height(), scroll, now: Date.now() }, paint)
+							: [paint.fg("dim", "agent gone")];
+						cache = { width, lines: lines.map((line) => truncateLine(line, width)) };
+						return cache.lines;
+					},
+					handleInput: (data: string) => {
+						const decoded = decodeViewerKey(data, chordArmed);
+						chordArmed = decoded.chordArmed;
+						if (!decoded.key) return;
+						const close = () => {
+							clearInterval(ticker);
+							done(null);
+						};
+						const runs = liveRuns.list();
+						const idx = runs.findIndex((r) => r.taskId === currentId);
+						switch (decoded.key) {
+							case "up":
+								scroll = Math.max(0, scroll - 1);
+								repaint();
+								return;
+							case "down":
+								scroll += 1;
+								repaint();
+								return;
+							case "pageUp":
+								scroll = Math.max(0, scroll - 10);
+								repaint();
+								return;
+							case "pageDown":
+								scroll += 10;
+								repaint();
+								return;
+							case "nextAgent":
+							case "prevAgent": {
+								if (!runs.length) return;
+								const delta = decoded.key === "nextAgent" ? 1 : -1;
+								const next = (idx + delta + runs.length) % runs.length;
+								currentId = runs[next].taskId;
+								scroll = 0;
+								repaint();
+								return;
+							}
+							case "stop":
+								stopAgent(currentId);
+								repaint();
+								return;
+							case "stopAll":
+								stopAllAgents();
+								repaint();
+								return;
+							case "close":
+								return close();
+						}
+					},
+					invalidate: () => {
+						cache = undefined;
+					},
+					dispose: () => {
+						clearInterval(ticker);
+					},
+				};
+			});
+		} finally {
+			viewerOpen = false;
+			panel.refresh();
+		}
+	}
 
 	// Compact transcript rendering for the notifications this extension injects
 	// (full body on ctrl+o); the verbose framing stays model-only.
@@ -328,6 +540,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		}
 
 		runningNames.add(request.name);
+		const live = trackLiveRun(record, request);
 		const runtime = await getRuntime(ctx);
 		const handle = runtime.run({
 			agent: agentDef,
@@ -339,15 +552,21 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			model: request.model,
 			thinking: request.thinking,
 			signal,
-			onProgress,
+			onProgress: (toolCalls, text, usage) => {
+				live.progress(toolCalls, usage);
+				onProgress(toolCalls, text, usage);
+			},
+			sink: live.sink,
 			onMessageToMain: (message, summary) => notifyAgentMessage(request.name, message, summary),
 		});
 		liveChildren.add(handle);
+		liveHandles.set(record.taskId, handle);
 		onStarted?.(handle, worktree);
 
 		try {
 			const outcome: ChildOutcome = await handle.result;
 			registry.sessionFileFor(record); // resolve now that the child has written it
+			live.finish(Boolean(outcome.failed));
 			let worktreeKept: boolean | undefined;
 			if (worktree) {
 				worktreeKept = !(await cleanupWorktree(ctx.cwd, worktree));
@@ -362,6 +581,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				worktreeKept,
 			};
 		} catch (error) {
+			live.finish(true);
 			if (worktree) await cleanupWorktree(ctx.cwd, worktree);
 			return {
 				agent: request.agent,
@@ -619,6 +839,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					// Keeps task_output consistent with the log and the completion
 					// notification rather than showing an empty body in that case.
 					let lastOutput = "";
+					const live = trackLiveRun(p.record, p.request);
 					const resident: Resident = { handle: undefined as never, turnHandlers: [] };
 					const worktreeNote = worktree
 						? `\n\n(Running in worktree ${worktree.path} — kept while the agent stays resident.)`
@@ -643,12 +864,15 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						sessionDir: p.record.sessionSearchDir || undefined,
 						model: p.request.model,
 						thinking: p.request.thinking,
-						onProgress: (_toolCalls, text) => {
+						onProgress: (toolCalls, text, usage) => {
+							live.progress(toolCalls, usage);
 							if (logPath && text) writeFileSync(logPath, text);
 						},
+						sink: live.sink,
 						onMessageToMain: (message, summary) => notifyAgentMessage(p.record.name, message, summary),
 						onTurnEnd: (outcome) => {
 							registry.sessionFileFor(p.record);
+							live.settle();
 							lastOutput = resident.handle.snapshot().text || outcome.output;
 							if (logPath) writeFileSync(logPath, lastOutput);
 							// Auto mode reviews a background/resident turn's action sequence as a
@@ -676,6 +900,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 							}
 						},
 						onExit: () => {
+							live.finish(false);
 							liveChildren.delete(handle);
 							if (residents.get(p.record.name) === resident) residents.delete(p.record.name);
 							if (worktree) void cleanupWorktree(ctx.cwd, worktree);
@@ -684,6 +909,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					resident.handle = handle;
 					residents.set(p.record.name, resident);
 					liveChildren.add(handle);
+					liveHandles.set(p.record.taskId, handle);
 
 					const task: BackgroundTask = {
 						id: p.record.taskId,
@@ -965,8 +1191,16 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	pi.events.emit(DEFER_CHANNEL, { name: "list_agents", keywords: ["agents", "list", "running", "spawned", "subagents", "who"] });
 
 	pi.registerCommand("agents", {
-		description: "List available subagents",
+		description: "Open the live subagent panel, or list available agents",
 		handler: async (_args, ctx) => {
+			// With live children, open the transcript viewer (Claude Code's agent
+			// panel) on the newest; otherwise there is nothing running, so list the
+			// catalog the way the tool's action:"list" does.
+			const runs = ctx.hasUI ? liveRuns.list() : [];
+			if (runs.length) {
+				await openAgentViewer(ctx, runs[0].taskId);
+				return;
+			}
 			ctx.ui.notify(`Available agents:\n${describeAgents(ctx.cwd)}`, "info");
 		},
 	});
