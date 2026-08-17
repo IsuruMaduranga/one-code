@@ -462,11 +462,12 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 					seconds !== parsed.intervalSeconds
 						? ` (adjusted from ${parsed.intervalSeconds}s; allowed range ${MIN_DELAY_SECONDS}-${MAX_DELAY_SECONDS}s)`
 						: "";
-				const timer = setInterval(() => notify("loop", buildLoopMessage(parsed.task), { intervalSeconds: seconds }), seconds * 1000);
+				const tick = () => notify("loop", buildLoopMessage(parsed.task), { intervalSeconds: seconds });
+				const timer = setInterval(tick, seconds * 1000);
 				timer.unref?.();
 				loop = { timer, intervalSeconds: seconds, task: parsed.task };
 				ctx.ui.notify(`Looping every ${seconds}s${adjusted}: ${parsed.task}. Stop with /loop stop.`, "info");
-				notify("loop", buildLoopMessage(parsed.task), { intervalSeconds: seconds });
+				tick(); // fire the first iteration now
 				return;
 			}
 

@@ -914,8 +914,15 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	});
 	pi.events.emit(DEFER_CHANNEL, { name: "SendMessage", keywords: ["message", "agent", "resume", "continue", "teammate"] });
 
-	const agentStatus = (name: string) =>
-		runningNames.has(name) ? "running" : residents.has(name) ? "resident (idle, reachable live)" : "finished (resume with SendMessage)";
+	// Same precedence as SendMessage's own dispatch (a live resident is reachable
+	// even while a foreground run of the same name is in flight): resident-live
+	// first, then running, then a finished run resumable from its session.
+	const agentStatus = (name: string) => {
+		const resident = residents.get(name);
+		if (resident && !resident.handle.exited()) return "resident (reachable live)";
+		if (runningNames.has(name)) return "running";
+		return "finished (resume with SendMessage)";
+	};
 
 	pi.registerTool({
 		name: "list_agents",
@@ -932,10 +939,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					details: { agents: [] as unknown[] },
 				};
 			}
-			const lines = runs.map((r) => `- ${r.name} [${r.agent}] — ${agentStatus(r.name)} (task ${r.taskId})`);
+			const agents = runs.map((r) => ({ name: r.name, agent: r.agent, taskId: r.taskId, status: agentStatus(r.name) }));
+			const lines = agents.map((a) => `- ${a.name} [${a.agent}] — ${a.status} (task ${a.taskId})`);
 			return {
 				content: [{ type: "text", text: `Agents spawned this session:\n${lines.join("\n")}` }],
-				details: { agents: runs.map((r) => ({ name: r.name, agent: r.agent, taskId: r.taskId, status: agentStatus(r.name) })) },
+				details: { agents },
 			};
 		},
 	});

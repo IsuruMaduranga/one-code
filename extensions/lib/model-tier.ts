@@ -157,7 +157,8 @@ export function resolveModelTier(
 	if (anchor) return anchor;
 
 	const cap = nameClassCap(model.id);
-	let base = priceFloorTier(model);
-	if (cap === "workhorse" && CAPABLE_NAME_HINT.test(model.id)) base = "workhorse";
+	// A "pro"/"max"-class name keeps a cheap/unpriced flagship at workhorse; a lean
+	// name (cap below workhorse) always wins, so only consult it when cap allows.
+	const base = cap === "workhorse" && CAPABLE_NAME_HINT.test(model.id) ? "workhorse" : priceFloorTier(model);
 	return moreScaffolded(base, cap);
 }

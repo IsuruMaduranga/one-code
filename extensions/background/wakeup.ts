@@ -42,25 +42,24 @@ export function parseLoopArgs(raw: string): ParsedLoop {
 	return { task: raw.trim() };
 }
 
-/** The follow-up a fixed-interval `/loop` tick delivers (framed as a system notification). */
+/** A loop follow-up: an instruction line, a blank, then the task — system-framed. */
+function framedLoop(lead: string, task: string): string {
+	return systemNotification([lead, "", task].join("\n"));
+}
+
+/** The follow-up a fixed-interval `/loop` tick delivers. */
 export function buildLoopMessage(task: string): string {
-	return systemNotification(
-		[
-			"Loop tick — run the task below now. This repeats automatically on the interval and keeps firing until the user runs `/loop stop`.",
-			"",
-			task,
-		].join("\n"),
+	return framedLoop(
+		"Loop tick — run the task below now. This repeats automatically on the interval and keeps firing until the user runs `/loop stop`.",
+		task,
 	);
 }
 
 /** The opening message for a dynamic (self-paced) `/loop` — instructs the model to drive schedule_wakeup. */
 export function buildDynamicLoopPrompt(task: string): string {
-	return systemNotification(
-		[
-			"Self-paced loop started. Work the task below now. When this iteration is done, call schedule_wakeup to schedule the next one — choose delaySeconds by what you're waiting for, and pass the same task back as `prompt`. End the loop with schedule_wakeup {stop: true} when the task is complete or the user says to stop.",
-			"",
-			task,
-		].join("\n"),
+	return framedLoop(
+		"Self-paced loop started. Work the task below now. When this iteration is done, call schedule_wakeup to schedule the next one — choose delaySeconds by what you're waiting for, and pass the same task back as `prompt`. End the loop with schedule_wakeup {stop: true} when the task is complete or the user says to stop.",
+		task,
 	);
 }
 
