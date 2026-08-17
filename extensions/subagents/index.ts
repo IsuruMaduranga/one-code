@@ -19,7 +19,7 @@ import os from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StringEnum } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../auto-mode/actions.ts";
 import { type AgentDefinition, type AgentSource, agentDirs, discoverAgents } from "./agents.ts";
@@ -35,25 +35,17 @@ import {
 import { modelPickerComponent, pickerSpec, toPickerEntries, type PickerEntry } from "../auto-mode/model-picker.ts";
 import { discoverPlugins } from "../lib/plugins.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
+import { MCP_TOOLS_CHANNEL, type McpToolsPayload } from "../lib/mcp-share.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { type BackgroundTask, generateTaskId, TASK_REGISTER_CHANNEL } from "../background/registry.ts";
 import { type ChildAction } from "../auto-mode/actions.ts";
-import {
-	type ChildHandle,
-	type ChildOutcome,
-	forkTaskMessage,
-	OUTPUT_CAP,
-	type RpcChildHandle,
-	startChild,
-	startRpcChild,
-} from "./child.ts";
+import { type ChildHandle, type ChildOutcome, forkTaskMessage, OUTPUT_CAP, type RpcChildHandle } from "./outcome.ts";
 import { type AgentRunRecord, nextRunName, RunRegistry } from "./runs.ts";
+import { SubagentRuntime } from "./runner.ts";
 import { emptyUsage, formatStats, type UsageTotals } from "./usage.ts";
 import { cleanupWorktree, createWorktree, isGitRepo, type Worktree } from "./worktree.ts";
 import { systemNotification } from "../lib/notifications.ts";
 import { ccToolRenderers, customMessageText, notificationComponent } from "../lib/tui-render.ts";
-
-const MAX_PARALLEL = 4;
 
 /** The catalog shipped in this package: <package>/agents. */
 const BUNDLED_AGENTS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "agents");
@@ -84,28 +76,17 @@ interface TaskResult {
 	actions?: ChildAction[];
 }
 
-const TaskShape = Type.Object({
-	agent: Type.String({
-		description: 'Agent name from the "Available agents" system reminder, or "fork" to clone this conversation',
-	}),
-	task: Type.String({ description: "Complete, self-contained instruction — the agent cannot ask follow-ups" }),
-	name: Type.Optional(Type.String({ description: "Name for this run, usable later with send_message (default: <agent>-<n>)" })),
-});
-
 const SubagentParams = Type.Object({
-	agent: Type.Optional(
+	subagent_type: Type.Optional(
 		Type.String({
 			description:
-				'Agent for a single run — a name from the "Available agents" system reminder, or "fork" to clone this conversation. Required unless passing `tasks` or action:"list"',
+				'The agent to run — a name from the "Available agents" system reminder, or "fork" to clone this conversation. Required unless action:"list". To run several in parallel, issue multiple Agent tool calls in one turn.',
 		}),
 	),
 	task: Type.Optional(
-		Type.String({ description: 'Task for a single run — required with `agent` (only action:"list" needs neither)' }),
+		Type.String({ description: "The task — a complete, self-contained instruction (the agent cannot ask follow-ups). Required with subagent_type." }),
 	),
-	name: Type.Optional(Type.String({ description: "Name for a single run, usable later with send_message" })),
-	tasks: Type.Optional(
-		Type.Array(TaskShape, { description: `Run several agents in parallel (max ${MAX_PARALLEL} at a time)` }),
-	),
+	name: Type.Optional(Type.String({ description: "Name for this run, usable later with SendMessage (default: <agent>-<n>)" })),
 	model: Type.Optional(
 		Type.String({
 			description:
@@ -126,7 +107,7 @@ const SubagentParams = Type.Object({
 	),
 	isolation: Type.Optional(
 		StringEnum(["worktree"] as const, {
-			description: "Run each agent in its own git worktree so parallel file edits cannot collide",
+			description: "Run the agent in its own git worktree so its file edits are isolated from the main checkout",
 		}),
 	),
 	run_in_background: Type.Optional(
@@ -141,19 +122,6 @@ const SubagentParams = Type.Object({
 		}),
 	),
 });
-
-async function runPool<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
-	const results: R[] = new Array(items.length);
-	let next = 0;
-	const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-		while (next < items.length) {
-			const index = next++;
-			results[index] = await fn(items[index]);
-		}
-	});
-	await Promise.all(workers);
-	return results;
-}
 
 export const FORK_AGENT = "fork";
 
@@ -170,6 +138,18 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	const runningNames = new Set<string>();
 	const liveChildren = new Set<{ kill(): void }>();
 	const residents = new Map<string, Resident>();
+
+	// Live MCP tool definitions published by the mcp extension; injected into
+	// child sessions so subagents share the parent's open connections (no reconnect).
+	// Empty when no MCP servers are configured, so this is a no-op for most sessions.
+	let mcpTools: ToolDefinition[] = [];
+	pi.events.on(MCP_TOOLS_CHANNEL, (data) => {
+		mcpTools = (data as McpToolsPayload | undefined)?.tools ?? [];
+	});
+
+	/** The in-process runner, built lazily on first run and shared across all runs. */
+	let runtimePromise: Promise<SubagentRuntime> | undefined;
+	const getRuntime = (ctx: ExtensionContext) => (runtimePromise ??= SubagentRuntime.create(ctx.cwd, () => mcpTools));
 
 	const loadAgents = (cwd: string) => {
 		// Plugin agents sit between bundled and user definitions, and are exposed
@@ -193,7 +173,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		for (const entry of ctx.sessionManager.getBranch()) {
 			if (entry.type !== "message") continue;
 			const msg = entry.message;
-			if (msg.role !== "toolResult" || !["subagent", "send_message"].includes(msg.toolName ?? "")) continue;
+			// Both the current names and the pre-rename ones, so runs recorded before the
+			// Agent/SendMessage rename still reconstruct on resume.
+			if (msg.role !== "toolResult" || !["Agent", "SendMessage", "subagent", "send_message"].includes(msg.toolName ?? "")) continue;
 			const records = (msg.details as { agentRuns?: AgentRunRecord[] } | undefined)?.agentRuns;
 			for (const record of records ?? []) registry.add(record);
 		}
@@ -243,7 +225,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		pi.events.emit(REMINDER_CHANNEL, {
 			scope: "every-turn",
 			key: "subagent-agents",
-			text: `Available agents for the subagent tool (\`agent\` field):\n${describeAgents(ctx.cwd)}`,
+			text: `Available agents for the Agent tool (\`subagent_type\` field):\n${describeAgents(ctx.cwd)}`,
 			placement: "first-prepend",
 			order: CONTEXT_ORDER.agents,
 		});
@@ -331,11 +313,13 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		}
 
 		runningNames.add(request.name);
-		const handle = startChild({
+		const runtime = await getRuntime(ctx);
+		const handle = runtime.run({
 			agent: agentDef,
 			task: request.task,
 			cwd: record.cwd,
 			forkFrom: request.fork ? forkFrom : undefined,
+			parentSystemPrompt: request.fork ? ctx.getSystemPrompt() : undefined,
 			sessionDir: record.sessionSearchDir || undefined,
 			model: request.model,
 			thinking: request.thinking,
@@ -381,29 +365,24 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	};
 
 	pi.registerTool({
-		name: "subagent",
-		label: "Subagent",
-		...ccToolRenderers<{ agent?: string; task?: string; tasks?: unknown[]; action?: string }>("Subagent", {
-			title: (a) =>
-				a?.tasks?.length
-					? `${a.agent ?? "agents"} × ${a.tasks.length}`
-					: a
-						? [a.agent, a.task ?? a.action].filter(Boolean).join(": ")
-						: undefined,
+		name: "Agent",
+		label: "Agent",
+		...ccToolRenderers<{ subagent_type?: string; task?: string; action?: string }>("Agent", {
+			title: (a) => (a ? [a.subagent_type, a.task ?? a.action].filter(Boolean).join(": ") || undefined : undefined),
 		}),
 		description:
-			"Delegate a task to a specialist agent that runs in its own context window and reports back. Use it for well-scoped work whose intermediate output you don't need — broad codebase searches, focused reviews, independent research. Give a complete, self-contained task: the agent cannot ask follow-up questions. The available agents are listed in the \"Available agents\" system reminder. Pass `tasks` to run several in parallel, `agent: \"fork\"` for a child that inherits this conversation (a fork always runs on this conversation's model and reasoning settings; if you are the fork, execute your assigned task directly — don't re-delegate), `isolation: \"worktree\"` when parallel agents will edit files, or `run_in_background: true` to keep working while it runs (completion arrives as a notification; manage with task_output/task_stop). Each run gets a name — continue a finished agent later with send_message. action:'list' re-prints the agent catalog.",
+			"Delegate a task to a specialist agent that runs in its own context window and reports back. Use it for well-scoped work whose intermediate output you don't need — broad codebase searches, focused reviews, independent research. Give a complete, self-contained task: the agent cannot ask follow-up questions. The available agents are listed in the \"Available agents\" system reminder. Use `subagent_type: \"fork\"` for a child that inherits this conversation (a fork always runs on this conversation's model and reasoning settings; if you are the fork, execute your assigned task directly — don't re-delegate), `isolation: \"worktree\"` when the agent will edit files, or `run_in_background: true` to keep working while it runs (completion arrives as a notification; manage with task_output/task_stop). To run several agents in parallel, issue multiple Agent calls in one turn. Each run gets a name — continue a finished agent later with SendMessage. action:'list' re-prints the agent catalog.",
 		promptSnippet: "Delegate scoped work to a specialist agent in its own context",
 		parameters: SubagentParams,
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			const agents = loadAgents(ctx.cwd);
 
 			// A call carrying run options (a task, a name, run_in_background, a
-			// model/thinking/isolation override, or action:"run") but no `agent`
-			// or `tasks` is a run that forgot to name its agent. Fail loudly with a
-			// diagnostic rather than silently returning the catalog: a weaker model
-			// reads the catalog as a non-sequitur and invents wrong reasons for it,
-			// instead of learning it omitted `agent`.
+			// model/thinking/isolation override, or action:"run") but no `subagent_type`
+			// is a run that forgot to name its agent. Fail loudly with a diagnostic
+			// rather than silently returning the catalog: a weaker model reads the
+			// catalog as a non-sequitur and invents wrong reasons for it, instead of
+			// learning it omitted `subagent_type`.
 			const wantsRun =
 				params.action === "run" ||
 				params.task != null ||
@@ -413,19 +392,19 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				params.isolation != null ||
 				params.thinking != null;
 
-			if (params.action === "list" || (!params.agent && !params.tasks && !wantsRun)) {
+			if (params.action === "list" || (!params.subagent_type && !wantsRun)) {
 				return {
 					content: [{ type: "text", text: `Available agents:\n${describeAgents(ctx.cwd)}` }],
 					details: { agents: agents.map((a) => a.name) },
 				};
 			}
 
-			if (!params.agent && !params.tasks) {
+			if (!params.subagent_type) {
 				return {
 					content: [
 						{
 							type: "text",
-							text: `No \`agent\` given, but you passed run options — this looks like a run that forgot to name its agent. Set \`agent\` to one of the names below (or "fork" to clone this conversation), or pass \`tasks\` to run several. To only browse the catalog, call with action:"list".\n\nAvailable agents:\n${describeAgents(ctx.cwd)}`,
+							text: `No \`subagent_type\` given, but you passed run options — this looks like a run that forgot to name its agent. Set \`subagent_type\` to one of the names below (or "fork" to clone this conversation). To only browse the catalog, call with action:"list".\n\nAvailable agents:\n${describeAgents(ctx.cwd)}`,
 						},
 					],
 					details: {},
@@ -434,11 +413,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			}
 
 			const taken = new Set(registry.names());
-			const requested: RunRequest[] = (
-				params.tasks?.length
-					? params.tasks
-					: [{ agent: params.agent ?? "", task: params.task ?? "", name: params.name }]
-			).map((entry) => {
+			const requested: RunRequest[] = [{ agent: params.subagent_type, task: params.task ?? "", name: params.name }].map((entry) => {
 				const name = entry.name || nextRunName(taken, entry.agent);
 				taken.add(name);
 				return {
@@ -604,6 +579,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			// send_message can reach them live (steer mid-turn, prompt when idle).
 			if (params.run_in_background) {
 				const lines: string[] = [];
+				const runtime = await getRuntime(ctx);
 				for (const p of prepared) {
 					let worktree: Worktree | undefined;
 					if (p.request.worktree) {
@@ -644,10 +620,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						);
 					});
 
-					const handle = startRpcChild({
+					const handle = await runtime.runResident({
 						agent: p.agentDef,
 						cwd: p.record.cwd,
 						forkFrom: p.request.fork ? (sessionFile ?? undefined) : undefined,
+						parentSystemPrompt: p.request.fork ? ctx.getSystemPrompt() : undefined,
 						sessionDir: p.record.sessionSearchDir || undefined,
 						model: p.request.model,
 						thinking: p.request.thinking,
@@ -723,88 +700,62 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				};
 			}
 
-			// --- Foreground: bounded pool, live progress, blocking result.
-			const progress = requested.map((r) => ({ name: r.name, toolCalls: 0, text: "", usage: emptyUsage() }));
+			// --- Foreground: live progress, blocking result (one run per call).
+			const prep = prepared[0];
+			let progress = { toolCalls: 0, text: "", usage: emptyUsage() };
 			const report = () => {
-				const lines = progress.map((p) => {
-					const stats = formatStats(p.toolCalls, p.usage);
-					return `${p.text ? "✓" : "⏳"} ${p.name} (${stats})${p.text ? "" : " running…"}`;
-				});
-				onUpdate?.({ content: [{ type: "text", text: lines.join("\n") }], details: {} });
+				const stats = formatStats(progress.toolCalls, progress.usage);
+				const line = `${progress.text ? "✓" : "⏳"} ${prep.request.name} (${stats})${progress.text ? "" : " running…"}`;
+				onUpdate?.({ content: [{ type: "text", text: line }], details: {} });
 			};
 			report();
 
-			const results = await runPool(
-				prepared.map((p, index) => ({ p, index })),
-				MAX_PARALLEL,
-				({ p, index }) =>
-					executeRun(p, ctx, sessionFile ?? undefined, signal, (toolCalls, text, usage) => {
-						progress[index] = { name: p.request.name, toolCalls, text, usage };
-						report();
-					}),
-			);
+			const result = await executeRun(prep, ctx, sessionFile ?? undefined, signal, (toolCalls, text, usage) => {
+				progress = { toolCalls, text, usage };
+				report();
+			});
 
-			const text = results
-				.map((r) => {
-					const stats = formatStats(r.toolCalls, r.usage);
-					const worktreeNote = r.worktreePath
-						? `\n\n(Changes left in worktree ${r.worktreePath} — review or merge them.)`
-						: "";
-					return results.length > 1
-						? `## ${r.name}${r.failed ? " (failed)" : ""} (${stats})\nTask: ${r.task}\n\n${r.output}${worktreeNote}`
-						: `${r.output}${worktreeNote}\n\n(${stats})`;
-				})
-				.join("\n\n---\n\n");
+			const stats = formatStats(result.toolCalls, result.usage);
+			const worktreeNote = result.worktreePath ? `\n\n(Changes left in worktree ${result.worktreePath} — review or merge them.)` : "";
+			const text = `${result.output}${worktreeNote}\n\n(${stats})`;
 
 			// Auto mode reviews what a child actually did once it returns, catching a
 			// sequence whose individual steps each passed. Emitted rather than
 			// checked here: the permission gate owns the classifier.
 			pi.events.emit(SUBAGENT_ACTIONS_CHANNEL, {
 				toolCallId,
-				actions: results.flatMap((r) => r.actions ?? []),
+				actions: result.actions ?? [],
 			} satisfies SubagentActionsPayload);
 
 			return {
 				content: [{ type: "text", text }],
-				details: { results, agentRuns: records },
-				isError: results.every((r) => r.failed),
+				details: { results: [result], agentRuns: records },
+				isError: result.failed ?? false,
 			};
 		},
 	});
 
-	const isSubagentChild = process.env.PI_SUBAGENT_CHILD === "1";
 	pi.registerTool({
-		name: "send_message",
+		name: "SendMessage",
 		label: "Send Message",
 		...ccToolRenderers<{ to?: string; summary?: string; message?: string }>("Send Message", {
 			title: (a) => (a?.to ? `to ${a.to}${a.summary ? `: ${a.summary}` : ""}` : undefined),
 		}),
 		description:
-			'Send a message to another agent. From the main conversation: address a previously spawned subagent by the name from its spawn result (or task id) — a resident background agent is reached live (mid-turn the message is steered into its current work; when idle it starts a new turn), a finished agent is resumed from its session file with full context; replies arrive as system notifications. From inside a subagent: use to: "main" to report progress, findings, or questions to the main conversation mid-run — your plain text output is NOT visible to it until you finish.',
-		// A background child's model must know it can report back; the parent keeps
-		// the tool deferred instead (see the DEFER emit below).
-		promptSnippet: isSubagentChild
-			? 'Report progress or findings to the main conversation (to: "main")'
-			: undefined,
+			'Send a message to a previously spawned agent, addressed by the name from its spawn result (or its task id). A resident background agent is reached live (mid-turn the message is steered into its current work; when idle it starts a new turn); a finished agent is resumed from its session with full context. Replies arrive as system notifications. (A subagent reporting back to the main conversation uses its own SendMessage with to: "main".)',
 		parameters: Type.Object({
-			to: Type.String({ description: 'Agent name (or task id) from a previous subagent run — or "main" from inside a subagent' }),
+			to: Type.String({ description: "Agent name (or task id) from a previous Agent run" }),
 			message: Type.String({ description: "Plain text message for the agent" }),
 			summary: Type.Optional(Type.String({ description: "5-10 word preview shown in the UI" })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			if (params.to === "main") {
-				if (!isSubagentChild) {
-					return {
-						content: [{ type: "text", text: 'You are the main conversation — "main" is only a valid recipient from inside a subagent.' }],
-						details: {},
-						isError: true,
-					};
-				}
-				// No IPC needed: the parent reads this tool result off the child's
-				// event stream (toMainMessage in rpc-turns.ts) and relays it.
+				// The main conversation's SendMessage only addresses spawned agents; the
+				// "main" recipient exists only on a subagent's own injected SendMessage.
 				return {
-					content: [{ type: "text", text: "Message delivered to the main conversation." }],
-					details: { toMain: true, message: params.message, summary: params.summary },
+					content: [{ type: "text", text: 'You are the main conversation — "main" is only a valid recipient from inside a subagent.' }],
+					details: {},
+					isError: true,
 				};
 			}
 
@@ -815,7 +766,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					content: [
 						{
 							type: "text",
-							text: `No run named "${params.to}". send_message only reaches subagent runs already started this session — address them by their run name or task id, not by a catalog agent name. Start one with the subagent tool first if you haven't. Known runs: ${known}.`,
+							text: `No run named "${params.to}". SendMessage only reaches agent runs already started this session — address them by their run name or task id, not by a catalog agent name. Start one with the Agent tool first if you haven't. Known runs: ${known}.`,
 						},
 					],
 					details: {},
@@ -911,7 +862,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			});
 
 			runningNames.add(record.name);
-			const handle = startChild({
+			const runtime = await getRuntime(ctx);
+			const handle = runtime.run({
+				agent: loadAgents(ctx.cwd).find((a) => a.name === record.agent),
 				task: params.message,
 				cwd: record.cwd,
 				sessionFile,
@@ -959,9 +912,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			};
 		},
 	});
-	if (!isSubagentChild) {
-		pi.events.emit(DEFER_CHANNEL, { name: "send_message", keywords: ["message", "agent", "resume", "continue", "teammate"] });
-	}
+	pi.events.emit(DEFER_CHANNEL, { name: "SendMessage", keywords: ["message", "agent", "resume", "continue", "teammate"] });
 
 	pi.registerCommand("agents", {
 		description: "List available subagents",

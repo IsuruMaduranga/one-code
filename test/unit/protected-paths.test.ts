@@ -205,11 +205,11 @@ describe("decide: delegation in auto mode", () => {
 	it("classifies a subagent spawn instead of auto-allowing it", () => {
 		// The delegated task is judged before the child starts; a child cannot be
 		// relied on to refuse a task its parent should not have handed it.
-		expect(decide({ ...base, mode: "auto", toolName: "subagent" }).decision).toBe("classify");
+		expect(decide({ ...base, mode: "auto", toolName: "Agent" }).decision).toBe("classify");
 		expect(decide({ ...base, mode: "auto", toolName: "workflow" }).decision).toBe("classify");
 	});
 
 	it("still auto-allows delegation outside auto mode", () => {
-		expect(decide({ ...base, mode: "default", toolName: "subagent" }).decision).toBe("allow");
+		expect(decide({ ...base, mode: "default", toolName: "Agent" }).decision).toBe("allow");
 	});
 });

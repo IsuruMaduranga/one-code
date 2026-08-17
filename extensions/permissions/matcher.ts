@@ -31,8 +31,9 @@ const CC_TOOL_NAMES: Record<string, string> = {
 	web_fetch: "web_fetch",
 	websearch: "web_search",
 	web_search: "web_search",
-	task: "subagent",
-	agent: "subagent",
+	task: "Agent",
+	agent: "Agent",
+	subagent: "Agent", // pre-rename internal name, so old permission rules still match
 	skill: "skill",
 	askuserquestion: "ask_user_question",
 	ask_user_question: "ask_user_question",
@@ -45,7 +46,8 @@ const CC_TOOL_NAMES: Record<string, string> = {
 	taskstop: "task_stop",
 	monitor: "monitor",
 	schedulewakeup: "schedule_wakeup",
-	sendmessage: "send_message",
+	sendmessage: "SendMessage",
+	send_message: "SendMessage", // pre-rename internal name
 	enterworktree: "enter_worktree",
 	exitworktree: "exit_worktree",
 	listmcpresourcestool: "list_mcp_resources",
@@ -224,9 +226,8 @@ export const AUTO_ALLOWED_TOOLS = new Set<string>([
 	"lsp_diagnostics",
 	"list_mcp_resources",
 	// Subagent orchestration is safe to launch; each child enforces its own
-	// tool permissions (inheriting this session's mode via env).
-	"subagent",
-	"subagent_wait",
+	// tool permissions via the in-process permission gate.
+	"Agent",
 	// Same reasoning for workflow: the script itself cannot touch the
 	// filesystem, network, or shell — only spawn agents, and every one of those
 	// runs behind the workflow permission gate.
@@ -244,10 +245,10 @@ export const AUTO_ALLOWED_TOOLS = new Set<string>([
 	"task_stop",
 	// A timer that replays a prompt; no side effects outside the session.
 	"schedule_wakeup",
-	// Resumes a subagent — same reasoning as subagent: the child enforces its
+	// Resumes/messages an agent — same reasoning as Agent: the child enforces its
 	// own tool permissions. (monitor and enter/exit_worktree stay gated: they
 	// run arbitrary shell commands / mutate the filesystem.)
-	"send_message",
+	"SendMessage",
 ]);
 
 export interface DecideInput {
@@ -304,7 +305,7 @@ export interface Decision {
  * the same reason. Outside auto mode they stay auto-allowed: each child enforces
  * its own permissions by inheriting the mode.
  */
-const DELEGATION_TOOLS = new Set(["subagent", "workflow"]);
+const DELEGATION_TOOLS = new Set(["Agent", "workflow"]);
 
 /**
  * Interpreters and runners whose arguments are code, so a wildcarded rule over
@@ -327,7 +328,7 @@ const INTERPRETERS_AND_RUNNERS =
 export function isBroadExecutionRule(rule: PermissionRule): boolean {
 	// Delegation rules are dropped outright: a subagent is a fresh agent loop, so
 	// pre-approving one pre-approves whatever that loop decides to do.
-	if (rule.tool === "subagent" || rule.tool === "workflow") return true;
+	if (rule.tool === "Agent" || rule.tool === "workflow") return true;
 	if (rule.tool !== "bash") return false;
 
 	if (!rule.pattern) return true;

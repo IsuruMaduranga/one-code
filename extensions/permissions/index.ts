@@ -779,7 +779,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			},
 		);
 		logDecision(ctx, {
-			tool: "subagent",
+			tool: "Agent",
 			subject,
 			outcome: verdict.decision,
 			source: "review",
@@ -789,7 +789,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		});
 		if (verdict.decision === "allow") return undefined;
 		pauseTracker.recordBlock({
-			toolName: "subagent",
+			toolName: "Agent",
 			subject,
 			reason: verdict.reason,
 			tier: verdict.tier,

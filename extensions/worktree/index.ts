@@ -87,7 +87,7 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 
 	pi.on("tool_call", (event) => {
 		if (!state) return;
-		if (["enter_worktree", "exit_worktree", "subagent", "send_message", "workflow"].includes(event.toolName)) return;
+		if (["enter_worktree", "exit_worktree", "Agent", "SendMessage", "workflow"].includes(event.toolName)) return;
 		if (event.toolName === "bash") {
 			// Guard before rewriting (and before the permission prompt — this
 			// extension loads ahead of permissions): git must verifiably target

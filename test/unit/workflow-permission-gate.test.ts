@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { permissionGateFactory } from "../../extensions/workflow/permission-gate.ts";
+import { permissionGateFactory } from "../../extensions/lib/permission-gate.ts";
 
 type ToolCallHandler = (event: { toolName: string; input: Record<string, unknown> }) => { block?: boolean; reason?: string } | undefined;
 

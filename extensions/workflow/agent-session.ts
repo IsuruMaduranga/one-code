@@ -12,24 +12,23 @@
  */
 
 import os from "node:os";
-import { join } from "node:path";
 import {
 	createAgentSession,
-	DefaultResourceLoader,
+	type DefaultResourceLoader,
 	getAgentDir,
-	ModelRuntime,
+	type ModelRuntime,
 	SessionManager,
 	type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
+import { buildAgentLoader, createSharedModelRuntime, finalAssistantText } from "../lib/agent-loader.ts";
 import { summarizeArgs } from "../lib/tui-render.ts";
 import { agentDirs, type AgentDefinition, discoverAgents } from "../subagents/agents.ts";
 import type { SubagentDefault } from "../subagents/default-model.ts";
 import { expensiveModelGate, resolveSubagentModel, subagentModelMenu } from "../subagents/model-select.ts";
 import { cleanupWorktree, createWorktree, isGitRepo, type Worktree } from "../subagents/worktree.ts";
-import { permissionGateFactory } from "./permission-gate.ts";
 import type { AgentCallOptions, AgentCallResult, AgentEffort, AgentRunUpdate } from "./types.ts";
 import { WorkflowScriptError } from "./types.ts";
 
@@ -140,17 +139,8 @@ export class AgentRunner {
 
 	static async create(options: AgentRunnerOptions): Promise<AgentRunner> {
 		const agentDir = getAgentDir();
-		const modelRuntime = await ModelRuntime.create({
-			authPath: join(agentDir, "auth.json"),
-			modelsPath: join(agentDir, "models.json"),
-		});
-		const loader = new DefaultResourceLoader({
-			cwd: options.cwd,
-			agentDir,
-			noExtensions: true,
-			extensionFactories: [permissionGateFactory(options.cwd, os.homedir())],
-		});
-		await loader.reload();
+		const modelRuntime = await createSharedModelRuntime(agentDir);
+		const loader = await buildAgentLoader({ cwd: options.cwd, agentDir });
 		const agentCatalog = discoverAgents(agentDirs(options.cwd, os.homedir()));
 		const availableModels = [...(await modelRuntime.getAvailable())];
 		return new AgentRunner(options, modelRuntime, loader, agentCatalog, availableModels);
@@ -310,16 +300,8 @@ export class AgentRunner {
 		return pending;
 	}
 
-	private async buildLoaderWithSystemPrompt(systemPrompt: string): Promise<DefaultResourceLoader> {
-		const loader = new DefaultResourceLoader({
-			cwd: this.options.cwd,
-			agentDir: getAgentDir(),
-			noExtensions: true,
-			extensionFactories: [permissionGateFactory(this.options.cwd, os.homedir())],
-			systemPrompt,
-		});
-		await loader.reload();
-		return loader;
+	private buildLoaderWithSystemPrompt(systemPrompt: string): Promise<DefaultResourceLoader> {
+		return buildAgentLoader({ cwd: this.options.cwd, agentDir: getAgentDir(), systemPrompt });
 	}
 
 	dispose(): void {
@@ -350,23 +332,6 @@ function buildStructuredOutputTool(schema: Record<string, unknown>, capture: { c
 			};
 		},
 	} as ToolDefinition;
-}
-
-export function finalAssistantText(messages: AgentMessage[]): string {
-	for (let i = messages.length - 1; i >= 0; i--) {
-		const message = messages[i];
-		if (message.role !== "assistant") continue;
-		const content = (message as { content: unknown }).content;
-		if (typeof content === "string") return content;
-		if (Array.isArray(content)) {
-			const text = content
-				.filter((b): b is { type: "text"; text: string } => (b as { type?: string }).type === "text")
-				.map((b) => b.text)
-				.join("");
-			if (text.trim()) return text;
-		}
-	}
-	return "";
 }
 
 /** Pull the first parseable JSON object/array out of free text (```json fences first). */

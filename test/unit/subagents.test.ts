@@ -140,7 +140,7 @@ describe("namespaced discovery", () => {
 
 describe("forkTaskMessage", () => {
 	it("frames the task with do-only-this and not-the-inherited-topic instructions", async () => {
-		const { forkTaskMessage } = await import("../../extensions/subagents/child.ts");
+		const { forkTaskMessage } = await import("../../extensions/subagents/outcome.ts");
 		const framed = forkTaskMessage("report exactly: DONE");
 		expect(framed).toContain("forked subagent");
 		expect(framed).toContain("inherited context");
@@ -150,20 +150,11 @@ describe("forkTaskMessage", () => {
 	});
 });
 
-describe("closeOutcome", () => {
+describe("finishOutcome", () => {
 	it("surfaces a provider error instead of 'produced no output'", async () => {
-		const { closeOutcome } = await import("../../extensions/subagents/child.ts");
+		const { finishOutcome } = await import("../../extensions/subagents/session-turns.ts");
 		const { emptyUsage } = await import("../../extensions/subagents/usage.ts");
-		const outcome = closeOutcome({
-			finalText: "",
-			providerError: "OpenAI API error (401): CreditsError",
-			code: 0,
-			closeSignal: null,
-			stderr: "",
-			toolCalls: 0,
-			usage: emptyUsage(),
-			actions: [],
-		});
+		const outcome = finishOutcome("", "OpenAI API error (401): CreditsError", 0, emptyUsage(), []);
 		expect(outcome.failed).toBe(true);
 		expect(outcome.output).toContain("provider error");
 		expect(outcome.output).toContain("CreditsError");
@@ -171,18 +162,17 @@ describe("closeOutcome", () => {
 	});
 
 	it("appends the error when partial text exists, and stays clean without one", async () => {
-		const { closeOutcome } = await import("../../extensions/subagents/child.ts");
+		const { finishOutcome } = await import("../../extensions/subagents/session-turns.ts");
 		const { emptyUsage } = await import("../../extensions/subagents/usage.ts");
-		const base = { code: 0, closeSignal: null, stderr: "", toolCalls: 2, usage: emptyUsage(), actions: [] };
-		const partial = closeOutcome({ ...base, finalText: "halfway report", providerError: "rate limited" });
+		const partial = finishOutcome("halfway report", "rate limited", 2, emptyUsage(), []);
 		expect(partial.failed).toBe(true);
 		expect(partial.output).toContain("halfway report");
 		expect(partial.output).toContain("rate limited");
-		const ok = closeOutcome({ ...base, finalText: "all done", providerError: undefined });
+		const ok = finishOutcome("all done", undefined, 2, emptyUsage(), []);
 		expect(ok.failed).toBeUndefined();
 		expect(ok.output).toBe("all done");
-		const empty = closeOutcome({ ...base, finalText: "", providerError: undefined });
+		const empty = finishOutcome("", undefined, 2, emptyUsage(), []);
 		expect(empty.failed).toBe(true);
-		expect(empty.output).toContain("Subagent produced no output (exit code 0)");
+		expect(empty.output).toContain("Subagent produced no output.");
 	});
 });

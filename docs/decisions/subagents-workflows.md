@@ -433,3 +433,75 @@ calls`, Outcome `Still running…`). v2 of the viewer replicates that. Choices:
   mouse sequence). The workable-but-hacky path — overlay positioning +
   self-enabled SGR tracking, main-screen only — was parked in favor of a
   future upstream pi change. Keyboard covers the same selection.
+
+## Subagents run in-process, aligned to Claude Code's Agent/SendMessage (2026-08-17) (unreviewed)
+
+**Decision.** The subagent tool no longer spawns a `pi` process per run. Every
+path — foreground, `fork`, resume, and background/resident — now runs in the
+main process via pi's SDK (`createAgentSession`), the way Claude Code's own
+subagents do. The tools are also renamed to Claude Code's surface: `subagent` →
+**`Agent`** (param `agent` → **`subagent_type`**, with `"fork"` a value),
+`send_message` → **`SendMessage`**; the `tasks[]` batch parameter is **dropped**
+(parallelism is multiple `Agent` calls in one turn, CC's own model).
+
+**Why.** A spawned child was a whole second `pi` (~250 MB). On a memory-pressured
+machine the OS SIGKILLed the newcomer ("Subagent produced no output (terminated
+by SIGKILL)") — never seen in Claude Code precisely because CC runs subagents
+in-process, sharing the parent's already-initialized services. In-process removes
+the per-subagent footprint, matches CC's architecture, and reuses the proven
+workflow-runner pattern.
+
+**Architecture.**
+- `extensions/lib/agent-loader.ts` (shared with the workflow runner) builds the
+  `ModelRuntime` + a `noExtensions:true` `DefaultResourceLoader`; the shared
+  `extensions/lib/permission-gate.ts` (moved out of `workflow/`) reattaches
+  permission enforcement.
+- `extensions/subagents/runner.ts` (`SubagentRuntime`) is built lazily once per
+  session and shared across runs (one `ModelRuntime`, a per-agentType loader
+  cache). Foreground/fork/resume use `SessionManager.create`/`.forkFrom`/`.open`;
+  background/resident keep a live `AgentSession` and use its native
+  `steer()`/reentrant `prompt()` for live messaging (the RPC stdin channel and
+  its boot-lag buffering are gone). `session-turns.ts` tracks turns off
+  `subscribe` events, settling on `agent_settled` (not `agent_end`, which can
+  precede an internal retry/continue). `send-to-main-tool.ts` injects the child's
+  `SendMessage`→main tool, which calls a parent callback directly (no
+  event-stream parsing). `child.ts` and `rpc-turns.ts` were deleted; the
+  surviving contracts live in `outcome.ts`.
+
+**Fidelity (match CC by sharing the parent's live services).** A child gets a
+curated extension set via `additionalExtensionPaths` — `claude-context`,
+`file-tracker`, `system-reminder`, `tool-search`, `search-tools`, `skill`,
+`web`, `web-fetch`, `notebook` — plus its agent's own system prompt and toolset,
+but NOT the frontier chrome (banner/spinner/recap) or orchestration
+(`Agent`/`workflow`, so no recursion). MCP is **shared, not reconnected**: the
+mcp extension publishes its live tool definitions on `MCP_TOOLS_CHANNEL`
+(`lib/mcp-share.ts`) and the runner injects them as `customTools` closing over
+the parent's open connections (a no-op when no servers are configured).
+
+**Deliberate tradeoffs / gaps (deviations from the pre-existing spawn behavior).**
+- **Auto-mode classifier is NOT re-run inside a child.** The spawned child loaded
+  the whole package including the real classifier; in-process the child uses the
+  fail-closed deny/allow permission gate, and the parent still runs the holistic
+  return review (`SUBAGENT_ACTIONS_CHANNEL`). Net effect is stricter, not looser —
+  but it is a real behavior change to a safety-critical path.
+- **Injected MCP tools are active, not deferred** (customTools have no defer
+  hook); acceptable for the typical small server count. LSP diagnostics inside a
+  child are not wired (same closure-private shape as MCP — a follow-up).
+- **Crash isolation is reduced** (accepted, as CC accepts it): a hung run is
+  bounded by a 30-min wall-clock `abort()`; a true OOM still takes the process.
+- **Naming reversal.** This reverses [Tool names stay pi-idiomatic
+  (snake_case)](tools.md#tool-names-stay-pi-idiomatic-snake_case) for these two
+  tools only (a wider PascalCase migration is a separate question). pi's Anthropic
+  "stealth" wire-rename could not deliver the names — its allowlist is fixed,
+  stale (CC 2.1.75, no `Agent`/`SendMessage`), Anthropic-only, and never touches
+  params — so the tools are registered under the CC names directly.
+
+**Verified.** Live (`pi --mode json`, real Anthropic Haiku): foreground run
+(correct output, persisted session, no nested process), child tool use +
+curated extensions (read tool works, no load errors), and `subagent_type:"fork"`
+(inherited-context reply). tsc + full unit suite green.
+
+**Not yet verified live** (flagged for a follow-up e2e): background/resident +
+`SendMessage` steering (needs the `--mode rpc` multi-turn harness), and shared
+MCP injection (no MCP server was configured in the test environment; the code is
+a no-op without one).

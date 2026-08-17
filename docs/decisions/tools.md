@@ -11,6 +11,13 @@ permission rules still work: `matcher.ts` maps `Bash`, `Glob`, `WebFetch`,
 `Task`, … onto our names. pi's Anthropic OAuth mode separately renames tools to
 Claude Code's casing on the wire, so nothing is lost there either.
 
+**Exception (2026-08-17):** the subagent tools were renamed to CC's exact
+surface — `Agent` (param `subagent_type`) and `SendMessage` — since the wire
+rename can't reach custom tools (its allowlist is fixed/stale/Anthropic-only and
+never touches params). See [Subagents run
+in-process](subagents-workflows.md#subagents-run-in-process-aligned-to-claude-codes-agentsendmessage-2026-08-17-unreviewed).
+The rest of the surface stays snake_case.
+
 ## Deferred tools (ToolSearch)
 
 `extensions/lib/deferred.ts` holds a registry; any extension defers its own
@@ -360,6 +367,11 @@ ignoring per the fail-loud convention.
 **Rejected.** Renaming `agent` to CC's `subagent_type` (the tool is named
 `subagent`, byte-parity is unreachable, and the pi-idiomatic naming decision
 stands); silently coercing fork overrides (hides the caller's mistake).
+
+**Reversed 2026-08-17.** The rename was later adopted: the tool is now `Agent`
+with param `subagent_type`, and `send_message` is `SendMessage` — see
+[Subagents run in-process](subagents-workflows.md#subagents-run-in-process-aligned-to-claude-codes-agentsendmessage-2026-08-17-unreviewed).
+The fork override rejection and the injected catalog still stand.
 
 ## Background bash: override the built-in, gate before detaching (unreviewed)
 

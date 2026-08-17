@@ -16,9 +16,10 @@
  */
 
 import os from "node:os";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
+import { MCP_TOOLS_CHANNEL } from "../lib/mcp-share.ts";
 import { persistIfLarge } from "../lib/persisted-output.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 import {
@@ -58,6 +59,9 @@ export default function mcpExtension(pi: ExtensionAPI) {
 	const failures: FailedConnection[] = [];
 	const registered = new Set<string>();
 	let servers: McpServer[] = [];
+	// Live tool definitions, shared with in-process subagents so they reach MCP
+	// through these same open connections instead of connecting their own.
+	const sharedTools: ToolDefinition[] = [];
 
 	/**
 	 * Where oversized results are persisted — the session dir, matching Claude
@@ -80,7 +84,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 			if (registered.has(name)) continue;
 			registered.add(name);
 
-			pi.registerTool({
+			const def: ToolDefinition = {
 				name,
 				label: `${connection.server.name}: ${tool.name}`,
 				...ccToolRenderers(`${connection.server.name}: ${tool.name}`),
@@ -117,7 +121,9 @@ export default function mcpExtension(pi: ExtensionAPI) {
 						};
 					}
 				},
-			});
+			};
+			pi.registerTool(def);
+			sharedTools.push(def);
 
 			// Deferred: the model discovers these through tool_search.
 			pi.events.emit(DEFER_CHANNEL, {
@@ -125,6 +131,8 @@ export default function mcpExtension(pi: ExtensionAPI) {
 				keywords: [connection.server.name, tool.name.replace(/[_-]/g, " "), "mcp"],
 			});
 		}
+		// Publish the live set so in-process subagents can share these connections.
+		if (sharedTools.length > 0) pi.events.emit(MCP_TOOLS_CHANNEL, { tools: [...sharedTools] });
 	};
 
 	/** Resolves when every configured server has connected or failed. */
