@@ -344,6 +344,10 @@ export default function mcpExtension(pi: ExtensionAPI) {
 		});
 		connecting.finally(() => {
 			connectSettled = true;
+			// Final publish, marked settled — emitted even with zero servers/tools so
+			// a consumer that spawns children early (subagents) can stop waiting for
+			// late-connecting servers instead of snapshotting an empty set forever.
+			pi.events.emit(MCP_TOOLS_CHANNEL, { tools: [...sharedTools], settled: true });
 		});
 		if (!ctx.hasUI || process.env.PI_SUBAGENT_CHILD) {
 			await connecting;

@@ -15,4 +15,11 @@ export const MCP_TOOLS_CHANNEL = "one-code:mcp-tools";
 export interface McpToolsPayload {
 	/** Every MCP tool currently registered on the parent session (re-published as servers connect). */
 	tools: ToolDefinition[];
+	/**
+	 * True on the final publish, when every configured server has connected or
+	 * failed (also emitted with zero tools when no servers are configured).
+	 * Consumers spawning children early can wait for this instead of snapshotting
+	 * a still-connecting set.
+	 */
+	settled?: boolean;
 }

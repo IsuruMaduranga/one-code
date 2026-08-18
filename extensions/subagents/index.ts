@@ -225,10 +225,36 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	// Live MCP tool definitions published by the mcp extension; injected into
 	// child sessions so subagents share the parent's open connections (no reconnect).
 	// Empty when no MCP servers are configured, so this is a no-op for most sessions.
+	// The parent's MCP connect runs in the background, so a spawn in the first
+	// seconds of a session waits for the settled publish (capped, so a hung server
+	// can't stall spawns) instead of baking in a still-connecting snapshot.
+	const MCP_SETTLE_CAP_MS = 10_000;
 	let mcpTools: ToolDefinition[] = [];
-	pi.events.on(MCP_TOOLS_CHANNEL, (data) => {
-		mcpTools = (data as McpToolsPayload | undefined)?.tools ?? [];
+	let mcpSettled = false;
+	let resolveMcpSettled: (() => void) | undefined;
+	const mcpSettledPromise = new Promise<void>((resolve) => {
+		resolveMcpSettled = resolve;
 	});
+	pi.events.on(MCP_TOOLS_CHANNEL, (data) => {
+		const payload = data as McpToolsPayload | undefined;
+		mcpTools = payload?.tools ?? [];
+		if (payload?.settled) {
+			mcpSettled = true;
+			resolveMcpSettled?.();
+		}
+	});
+	const awaitMcpTools = async (): Promise<ToolDefinition[]> => {
+		if (!mcpSettled) {
+			await Promise.race([
+				mcpSettledPromise,
+				new Promise<void>((resolve) => {
+					const timer = setTimeout(resolve, MCP_SETTLE_CAP_MS);
+					timer.unref?.();
+				}),
+			]);
+		}
+		return mcpTools;
+	};
 
 	// The parent permissions extension's decision closure, used to gate a child's
 	// tool calls through the real pipeline (mode inheritance, classifier, prompts
@@ -241,7 +267,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	const getRuntime = (ctx: ExtensionContext) =>
 		(runtimePromise ??= SubagentRuntime.create(
 			ctx.cwd,
-			() => mcpTools,
+			awaitMcpTools,
 			getPermissionBridge,
 		));
 
@@ -750,7 +776,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				const err = (text: string) => ({ content: [{ type: "text" as const, text }], details: {}, isError: true });
 				if (!ctx) return err("The host session is not ready to spawn agents — retry shortly.");
 				if (agentName === FORK_AGENT) return err('"fork" is only available to the main conversation — pick a named agent instead.');
-				const agents = loadAgents(ctx.cwd);
+				const agents = loadAgents(parentRecord.cwd);
 				const agentDef = agents.find((a) => a.name === agentName);
 				if (!agentDef) {
 					const catalog = agents.map((a) => `- ${a.name}: ${a.description || "(no description)"}`).join("\n");
@@ -780,7 +806,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					agent: agentName,
 					taskId,
 					sessionSearchDir: runSessionDir(ctx, taskId) ?? "",
-					cwd: ctx.cwd,
+					// The SPAWNING agent's cwd, not the top-level session's: a worktree-
+					// isolated parent's nested spawns must work in the same worktree.
+					cwd: parentRecord.cwd,
 					model: resolved,
 					thinking: undefined,
 					depth: parentDepth + 1,

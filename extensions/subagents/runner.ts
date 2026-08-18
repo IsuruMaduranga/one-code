@@ -132,8 +132,13 @@ export class SubagentRuntime {
 	private readonly modelRuntime: Awaited<ReturnType<typeof createSharedModelRuntime>>;
 	private readonly availableModels: Model<Api>[];
 	private readonly baseCwd: string;
-	/** Live MCP tools shared in from the parent session (empty when no MCP servers). */
-	private readonly getMcpTools: () => ToolDefinition[];
+	/**
+	 * Live MCP tools shared in from the parent session (empty when no MCP
+	 * servers). May be async: the parent's MCP connect runs in the background, so
+	 * an early spawn awaits the settled set instead of snapshotting a
+	 * still-connecting (possibly empty) one.
+	 */
+	private readonly getMcpTools: () => ToolDefinition[] | Promise<ToolDefinition[]>;
 	/** The parent's permission decision closure (undefined until permissions publishes it). */
 	private readonly getPermissionBridge: () => PermissionBridge | undefined;
 	/**
@@ -148,7 +153,7 @@ export class SubagentRuntime {
 		modelRuntime: SubagentRuntime["modelRuntime"],
 		availableModels: Model<Api>[],
 		baseCwd: string,
-		getMcpTools: () => ToolDefinition[],
+		getMcpTools: () => ToolDefinition[] | Promise<ToolDefinition[]>,
 		getPermissionBridge: () => PermissionBridge | undefined,
 	) {
 		this.modelRuntime = modelRuntime;
@@ -160,7 +165,7 @@ export class SubagentRuntime {
 
 	static async create(
 		cwd: string,
-		getMcpTools: () => ToolDefinition[] = () => [],
+		getMcpTools: () => ToolDefinition[] | Promise<ToolDefinition[]> = () => [],
 		getPermissionBridge: () => PermissionBridge | undefined = () => undefined,
 	): Promise<SubagentRuntime> {
 		const modelRuntime = await createSharedModelRuntime(getAgentDir());
@@ -250,7 +255,7 @@ export class SubagentRuntime {
 	 * fresh named run gets the agent's own prompt and toolset.
 	 */
 	private async buildChildSession(spec: ChildSessionSpec): Promise<{ session: Session; note?: string }> {
-		const loader = await this.loaderFor(spec);
+		const [loader, mcpTools] = await Promise.all([this.loaderFor(spec), this.getMcpTools()]);
 		const newSessionManager = () =>
 			spec.sessionFile
 				? SessionManager.open(spec.sessionFile)
@@ -267,7 +272,7 @@ export class SubagentRuntime {
 				model: (model ? findConfigured(this.availableModels, model) : undefined) as never,
 				thinkingLevel: spec.thinking as never,
 				tools: spec.forkFrom ? undefined : spec.agent?.tools,
-				customTools: [sendToMainTool((m, s) => spec.onMessageToMain?.(m, s)), ...(spec.extraTools ?? []), ...this.getMcpTools()],
+				customTools: [sendToMainTool((m, s) => spec.onMessageToMain?.(m, s)), ...(spec.extraTools ?? []), ...mcpTools],
 				resourceLoader: loader,
 				sessionManager: newSessionManager(),
 			});
@@ -368,11 +373,27 @@ export class SubagentRuntime {
 
 		return {
 			send(message: string): "started" | "steered" {
-				if (session.isIdle) {
+				// Gate on our own synchronous turnActive flag, not session.isIdle alone:
+				// isIdle only flips deep inside prompt() after real awaits, so two rapid
+				// sends could both see an idle session and issue concurrent prompts.
+				if (!turnActive && session.isIdle) {
 					tracker.beginTurn();
 					turnActive = true;
 					clearTurnCap();
-					turnTimer = setTimeout(() => void session.abort(), WALL_CLOCK_CAP_MS);
+					turnTimer = setTimeout(() => {
+						// Same rationale as kill(): the abort settles through the normal
+						// turn path, which would report the capped turn as a completion.
+						finishTurn({
+							output: tracker.turnText
+								? `${tracker.turnText}\n\n[terminated: turn hit the wall-clock cap]`
+								: "Subagent terminated: turn hit the wall-clock cap.",
+							toolCalls: tracker.toolCalls,
+							usage: tracker.usage,
+							actions: tracker.actions,
+							failed: true,
+						});
+						void session.abort();
+					}, WALL_CLOCK_CAP_MS);
 					turnTimer.unref?.();
 					// A prompt that can't even start (no API key, bad model) rejects; surface
 					// it as a failed turn instead of leaving the caller waiting forever.
@@ -390,12 +411,23 @@ export class SubagentRuntime {
 				void session.steer(message).catch(() => {});
 				return "steered";
 			},
-			busy: () => !session.isIdle,
+			busy: () => turnActive || !session.isIdle,
 			exited: () => exited,
 			kill: () => {
 				if (exited) return;
 				exited = true;
-				clearTurnCap();
+				// Report an in-flight turn as terminated, not as a normal completion:
+				// the settle path can't tell an abort's partial text from success, so
+				// without this a killed run notifies as if it finished cleanly.
+				finishTurn({
+					output: tracker.turnText
+						? `${tracker.turnText}\n\n[terminated before the turn finished]`
+						: "Subagent terminated before the turn finished.",
+					toolCalls: tracker.toolCalls,
+					usage: tracker.usage,
+					actions: tracker.actions,
+					failed: true,
+				});
 				// onExit only after the abort settles: it triggers worktree cleanup,
 				// which must not race an aborting session still writing files.
 				void session.abort().finally(() => {
