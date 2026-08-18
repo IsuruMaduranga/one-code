@@ -117,10 +117,13 @@ const STATUS_COLOR: Record<string, string> = { running: "accent", failed: "error
 export function renderShellSection(input: ShellSectionInput, paint: ShellPaint): string[] {
 	const width = Math.max(20, input.width);
 	const focus = input.focus;
-	if (!focus) return [paint.fg("dim", cut(`${countNoun(input.runningCount, "shell")} · ↓ to manage`, width))];
+	// The label counts ROWS (running + lingering finished), matching what the
+	// panel actually shows — visibility keys on rows too, so a finished shell's
+	// chip must not read "0 shells" while it is still openable.
+	if (!focus) return [paint.fg("dim", cut(`${countNoun(input.rows.length, "shell")} · ↓ to manage`, width))];
 	if (focus.stage === "chip") {
 		// Cut the plain parts BEFORE painting — cutting painted text breaks escapes.
-		const label = cut(` ${countNoun(input.runningCount, "shell")} `, width);
+		const label = cut(` ${countNoun(input.rows.length, "shell")} `, width);
 		const hint = cut("· Enter to view tasks", Math.max(0, width - label.length - 1));
 		return [`${paint.inverse(label)}${hint ? ` ${paint.fg("dim", hint)}` : ""}`];
 	}

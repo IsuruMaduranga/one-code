@@ -332,6 +332,12 @@ describe("renderTranscript", () => {
 		reg.setStreaming(id, undefined);
 	});
 
+	it("returns exactly `height` lines, even below the header's natural size", () => {
+		for (const height of [5, 8, 12, 20]) {
+			expect(renderTranscript({ run: reg.get(id)!, width: 80, height, scroll: 0, now: 4000 }, paint).lines).toHaveLength(height);
+		}
+	});
+
 	it("anchors the window to the tail and reports maxScroll for clamping", () => {
 		const tail = new LiveRunRegistry();
 		const tid = register(tail, { task: "" });

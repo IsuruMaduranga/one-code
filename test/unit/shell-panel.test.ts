@@ -133,10 +133,16 @@ describe("shellSectionVisible", () => {
 describe("renderShellSection", () => {
 	const base = { rows: [task()], runningCount: 1, width: 80, now: NOW };
 
-	it("chip unfocused: a dim one-liner with the manage hint", () => {
-		const lines = renderShellSection({ ...base, runningCount: 2, focus: undefined }, paint);
+	it("chip unfocused: a dim one-liner counting the panel's rows, with the manage hint", () => {
+		const lines = renderShellSection({ ...base, rows: [task({ id: "a" }), task({ id: "b" })], runningCount: 2, focus: undefined }, paint);
 		expect(lines).toHaveLength(1);
 		expect(strip(lines[0])).toBe("2 shells · ↓ to manage");
+	});
+
+	it("chip counts a lingering finished shell, never '0 shells' while the panel is openable", () => {
+		const rows = [task({ id: "a", status: "completed", finishedAt: NOW - 1 })];
+		const lines = renderShellSection({ ...base, rows, runningCount: 0, focus: undefined }, paint);
+		expect(strip(lines[0])).toBe("1 shell · ↓ to manage");
 	});
 
 	it("chip focused: inverse-video count plus the Enter hint, singular form", () => {

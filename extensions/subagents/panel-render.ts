@@ -243,7 +243,7 @@ export function renderTranscript(input: TranscriptInput, paint: Paint): Transcri
 	// Body: settled blocks then the in-flight assistant text, all wrapped, then
 	// windowed ANCHORED TO THE TAIL — scroll counts lines back from the end, so
 	// the default view follows streaming like Claude Code.
-	const bodyRows = Math.max(3, input.height - out.length - 1);
+	const bodyRows = Math.max(0, input.height - out.length - 1);
 	const blockLines = run.blocks.flatMap((block) => blockToLines(block, width, paint, prose));
 	const partial = streamingText(run.streaming).trimEnd();
 	if (partial) for (const line of prose(`stream:${run.taskId}`, partial, width)) blockLines.push(line);
@@ -252,7 +252,7 @@ export function renderTranscript(input: TranscriptInput, paint: Paint): Transcri
 	const start = maxScroll - Math.max(0, Math.min(input.scroll, maxScroll));
 	const window = blockLines.slice(start, start + bodyRows);
 	for (const line of window) out.push(line);
-	while (out.length < bodyRows + 4) out.push(""); // fill so the status sits at the bottom edge
+	while (out.length < input.height - 1) out.push(""); // fill so the status sits at the bottom edge
 
 	// Bottom row: spinner while running, a terminal line otherwise.
 	if (run.status === "running") {
@@ -266,7 +266,10 @@ export function renderTranscript(input: TranscriptInput, paint: Paint): Transcri
 			run.status === "failed" ? paint.fg("error", "✗ Failed") : run.status === "idle" ? paint.fg("dim", "Idle — resident") : paint.fg("dim", "✔ Completed");
 		out.push(cut(done, width));
 	}
-	return { lines: out, maxScroll };
+	// The header alone exceeds a very small height; trim so the "exactly
+	// `height` painted lines" contract holds for every caller, not just the
+	// one that clamps height to ≥ 8.
+	return { lines: out.slice(0, Math.max(1, input.height)), maxScroll };
 }
 
 /**
