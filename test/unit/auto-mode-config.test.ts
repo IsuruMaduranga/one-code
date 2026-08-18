@@ -6,6 +6,7 @@ import {
 	autoModeSettingsPaths,
 	loadAutoModeConfig,
 	loadAutoModeConfigWithDiagnostics,
+	persistClassifierModel,
 	spliceDefaults,
 } from "../../extensions/auto-mode/config.ts";
 import { DEFAULT_ENVIRONMENT } from "../../extensions/auto-mode/defaults.ts";
@@ -59,6 +60,26 @@ describe("loadAutoModeConfig", () => {
 		const config = loadAutoModeConfig(home);
 		expect(config.classifyAllShell).toBe(true);
 		expect(config.classifierModel).toBe("anthropic/claude-haiku-4-5");
+	});
+
+	it("round-trips classifierModel with its containment stamp", () => {
+		persistClassifierModel("anthropic/claude-haiku-4-5", home, "anthropic");
+		const config = loadAutoModeConfig(home);
+		expect(config.classifierModel).toBe("anthropic/claude-haiku-4-5");
+		expect(config.classifierModelSetFor).toBe("anthropic");
+	});
+
+	it("clears the stamp when set without one, and both on removal", () => {
+		persistClassifierModel("anthropic/claude-haiku-4-5", home, "anthropic");
+		persistClassifierModel("openai/gpt-5-mini", home); // no stamp (hand-edited-equivalent)
+		let config = loadAutoModeConfig(home);
+		expect(config.classifierModel).toBe("openai/gpt-5-mini");
+		expect(config.classifierModelSetFor).toBeUndefined();
+
+		persistClassifierModel(undefined, home);
+		config = loadAutoModeConfig(home);
+		expect(config.classifierModel).toBeUndefined();
+		expect(config.classifierModelSetFor).toBeUndefined();
 	});
 
 	it("ignores malformed files rather than failing open", () => {

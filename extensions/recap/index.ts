@@ -27,7 +27,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Model, Tool } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { convertToLlm, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { pickEconomicalContainedModel } from "../lib/model-policy.ts";
+import { pickEconomicalContainedModel } from "../lib/model-tier.ts";
 import { dimMarkedLine } from "../lib/tui-render.ts";
 import { RECAP_PROMPT, recapLine, recentForRecap, REFERENCE_MARK } from "./prompt.ts";
 import { RecapScheduler } from "./scheduler.ts";

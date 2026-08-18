@@ -28,20 +28,20 @@
 
 import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
 import {
+	crossesProvider,
 	findConfigured,
-	findRoleProfileModel,
-	hintRank,
+	isStaleContainmentStamp,
 	modelIdentity,
-	modelsContainedToSession,
-	pricedInput,
+	modelSpec as spec,
 } from "../lib/model-policy.ts";
+import { cheaperContainedCandidates } from "../lib/model-tier.ts";
 
 export { findConfigured } from "../lib/model-policy.ts";
 
 export interface Candidate {
 	model: Model<Api>;
 	/** How this candidate was arrived at, for the notice shown to the user. */
-	source: "configured" | "role-profile" | "cheapest-in-provider" | "session";
+	source: "configured" | "economical" | "session";
 }
 
 export interface SelectInput {
@@ -50,92 +50,115 @@ export interface SelectInput {
 	sessionModel: Model<Api> | undefined;
 	/** `autoMode.classifierModel`, if set. May name any provider. */
 	configured?: string;
+	/**
+	 * The containment identity (`modelIdentity().containment`) the `classifierModel`
+	 * setting was stamped for when set via `/auto-mode model`. When it differs from
+	 * the current session's containment, a cross-provider setting is treated as
+	 * stale (set for a session since left) and overridden with a warning — the same
+	 * shape as the subagent `subagentModelSetFor` stamp. Undefined for a hand-edited
+	 * setting.
+	 */
+	configuredSetForContainment?: string;
+}
+
+/** A user-facing selection notice, tagged so an informational one is not shown as a warning. */
+export interface ClassifierNotice {
+	level: "info" | "warning";
+	text: string;
 }
 
 /**
- * The ordered candidate chain. More than one is returned so a candidate that
- * turns out to be unusable at call time (not entitled on this account, withdrawn
- * by the provider) can be stepped over instead of failing every tool call — the
- * same shape as pi's subagent `fallbackModels`.
+ * The ordered candidate chain plus any user-facing notices. More than one
+ * candidate is returned so one that turns out to be unusable at call time (not
+ * entitled on this account, withdrawn by the provider) can be stepped over
+ * instead of failing every tool call — the same shape as pi's subagent
+ * `fallbackModels`.
  *
  * The chain always ends at the session model when there is one, so auto mode
  * degrades to "correct but not cheap" rather than to "broken".
+ *
+ * The automatic pick is the SAME tier selector subagents use — the cheapest
+ * *capable* same-provider model (cheap → workhorse → frontier, never `tiny`),
+ * so a session screens and delegates on one economical model. That closes the
+ * capability floor `docs/decisions/auto-mode.md` recorded as still-missing: a
+ * sub-Haiku model is a weak security boundary, so automatic selection never
+ * lands there.
  */
-export function classifierCandidates({ available, sessionModel, configured }: SelectInput): Candidate[] {
+export function classifierCandidates({
+	available,
+	sessionModel,
+	configured,
+	configuredSetForContainment,
+}: SelectInput): { candidates: Candidate[]; notices: ClassifierNotice[] } {
 	const candidates: Candidate[] = [];
+	const notices: ClassifierNotice[] = [];
 	const push = (model: Model<Api> | undefined, source: Candidate["source"]) => {
 		if (!model) return;
 		if (candidates.some((entry) => entry.model.provider === model.provider && entry.model.id === model.id)) return;
 		candidates.push({ model, source });
 	};
 
-	// 1. What the user asked for, wherever it lives. Naming a provider is choosing it.
-	if (configured) push(findConfigured(available, configured), "configured");
-
-	/**
-	 * Containment is shared with subagents. For a direct provider it is the
-	 * provider itself; gateways additionally preserve a reliable route/family;
-	 * opaque routers expose only the session model.
-	 */
-	const inProvider = sessionModel ? modelsContainedToSession(available, sessionModel) : [];
-
-	/**
-	 * No candidate may cost more per token than the model doing the actual work.
-	 * Screening a call more expensively than making it is indefensible, and it
-	 * happened: on an OpenRouter session at `z-ai/glm-4.6` ($0.50/M) the table's
-	 * `anthropic/claude-haiku-4.5` ($1/M) was selected, because this ceiling was
-	 * originally applied only to the cost-ranked branch and not to the table.
-	 */
-	const sessionPrice = sessionModel ? pricedInput(sessionModel) : undefined;
-	const withinBudget = (model: Model<Api>) => {
-		if (sessionPrice === undefined) return true;
-		const price = pricedInput(model);
-		return price === undefined || price <= sessionPrice;
-	};
-
-	// 2. A reviewed small-but-capable model for this provider/family. The
-	//    profile is short and applied to the live catalog; price alone never
-	//    promotes a model into the classifier role.
-	if (sessionModel) {
-		// Reuse the containment set computed above instead of recomputing it inside.
-		push(findRoleProfileModel(available, sessionModel, "classifier", withinBudget, inProvider), "role-profile");
+	// 1. What the user asked for. Naming a provider is choosing it — but a setting
+	//    stamped for a provider this session has since left is stale and overridden
+	//    with a warning (parity with the subagent setting); a genuine cross-provider
+	//    choice made for THIS session is honored with an announcement, because the
+	//    classifier reads the user's prompts and CLAUDE.md.
+	const resolved = configured ? findConfigured(available, configured) : undefined;
+	if (resolved) {
+		if (sessionModel && crossesProvider(resolved, sessionModel)) {
+			if (isStaleContainmentStamp(configuredSetForContainment, sessionModel)) {
+				notices.push({
+					level: "warning",
+					text:
+						`autoMode.classifierModel ${spec(resolved)} was set for a different provider than this session (${spec(sessionModel)}); ` +
+						"a same-provider model screens calls instead. Re-set it with /auto-mode model on this session to use it here.",
+				});
+			} else {
+				// Informational, not a warning: the user deliberately set this for this
+				// session, so it is doing exactly what they asked.
+				notices.push({
+					level: "info",
+					text:
+						`autoMode.classifierModel ${spec(resolved)} is a different provider than this session (${spec(sessionModel)}) — ` +
+						"it reads your prompts and CLAUDE.md, so those go to that provider. It was set for this session, so it is honored.",
+				});
+				push(resolved, "configured");
+			}
+		} else {
+			push(resolved, "configured");
+		}
 	}
 
-	// 3. The cheapest genuinely-priced model in the provider.
-	const cheaper = inProvider
-		.map((model) => ({ model, price: pricedInput(model) }))
-		.filter((entry): entry is { model: Model<Api>; price: number } => entry.price !== undefined)
-		.filter((entry) => withinBudget(entry.model))
-		.sort((a, b) => a.price - b.price || hintRank(a.model) - hintRank(b.model));
-	const cheapest = cheaper[0]?.model;
+	// 2. The cheapest capable same-provider model, no dearer than the work being
+	//    screened — screening a call more expensively than making it is
+	//    indefensible. The shared gate excludes `tiny`, unpriced/opaque rows, and
+	//    the session model itself, so an unpriced provider yields nothing here and
+	//    the session model (step 3) screens the calls.
+	if (sessionModel) {
+		for (const model of cheaperContainedCandidates(available, sessionModel)) push(model, "economical");
+	}
 
-	/**
-	 * 4. The session's own model, ahead of the cost-ranked pick.
-	 *
-	 * Price is not evidence of suitability, and a name is barely better. On
-	 * OpenRouter the cheapest model in the catalog is `inclusionai/ling-2.6-flash`
-	 * at $0.01/M, which would otherwise become the security boundary for being
-	 * cheap. An attempt to gate that on the name carrying a known small-model word
-	 * failed on the same example — "flash" is in the name, because any vendor may
-	 * put it there; the word means "someone called this small", not "this family is
-	 * known good".
-	 *
-	 * So nothing chosen on price alone leads. Providers that *are* vetted get their
-	 * saving from the table above (which covers OpenRouter and every mainstream
-	 * provider); anywhere else the model the user already trusted for the real work
-	 * screens the calls — correct, merely not cheap — and `classifierModel` is
-	 * there for someone who wants otherwise.
-	 */
+	// 3. The session's own model: always correct, just not cheap. Terminal fallback,
+	//    so the gate degrades to screening on it rather than to broken.
 	push(sessionModel, "session");
-
-	// 5. Last resort, for when even the session model cannot serve.
-	push(cheapest, "cheapest-in-provider");
 
 	// Nothing configured and no session model (a headless run with a bare
 	// registry) — take anything available rather than refusing outright.
 	if (candidates.length === 0) push(available[0], "session");
 
-	return candidates;
+	// A configured spec that matched nothing available would otherwise fall through
+	// in silence, leaving the user believing their setting is in force.
+	if (configured && !resolved) {
+		const instead = candidates[0];
+		notices.push({
+			level: "warning",
+			text:
+				`autoMode.classifierModel is set to "${configured}", which is not an available model — check the name and that its provider is authenticated.` +
+				(instead ? ` Auto mode is using ${describeCandidate(instead)} instead.` : ""),
+		});
+	}
+
+	return { candidates, notices };
 }
 
 /**
@@ -158,22 +181,15 @@ export function isModelUnavailableError(message: string): boolean {
 
 /** One-line description for the notice and `/auto-mode config`. */
 export function describeCandidate(candidate: Candidate): string {
-	const name = `${candidate.model.provider}/${candidate.model.id}`;
+	const name = spec(candidate.model);
+	const where = modelIdentity(candidate.model).profile ?? candidate.model.provider;
 	switch (candidate.source) {
 		case "configured":
 			return `${name} (from autoMode.classifierModel)`;
-		case "role-profile": {
-			const where = modelIdentity(candidate.model).profile ?? candidate.model.provider;
-			return `${name} (classifier profile for ${where})`;
-		}
-		case "cheapest-in-provider": {
-			const where = modelIdentity(candidate.model).profile ?? candidate.model.provider;
-			return `${name} (cheapest available within ${where})`;
-		}
-		case "session": {
-			const where = modelIdentity(candidate.model).profile ?? candidate.model.provider;
-			return `${name} (this session's model — no vetted smaller model within ${where})`;
-		}
+		case "economical":
+			return `${name} (cheapest capable model within ${where})`;
+		case "session":
+			return `${name} (this session's model — no cheaper capable model within ${where})`;
 	}
 }
 

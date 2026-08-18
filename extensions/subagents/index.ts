@@ -24,11 +24,12 @@ import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-w
 import { Type } from "typebox";
 import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../auto-mode/actions.ts";
 import { type AgentDefinition, type AgentSource, agentDirs, discoverAgents } from "./agents.ts";
-import { modelIdentity } from "../lib/model-policy.ts";
+import { modelIdentity, modelSpec } from "../lib/model-policy.ts";
 import { applicableSubagentDefault, loadSubagentDefault, persistSubagentModel } from "./default-model.ts";
 import {
 	expensiveModelGate,
 	resolveSubagentModel,
+	type SubagentModelResolution,
 	SUBAGENT_STATUS_CHANNEL,
 	subagentModelsReminder,
 	subagentStatusModel,
@@ -65,8 +66,32 @@ interface RunRequest {
 	/** Inherit the caller's conversation instead of starting from an agent prompt. */
 	fork?: boolean;
 	model?: string;
+	/**
+	 * Session model to fall back to if `model` (a non-per-call automatic/default
+	 * pick) cannot spawn. Unset for a per-call model, which surfaces its error to
+	 * the main model to retry rather than being silently swapped. See the runner's
+	 * buildChildSession.
+	 */
+	fallbackModel?: string;
 	thinking?: string;
 	worktree?: boolean;
+}
+
+/**
+ * The session model a broken *automatic* pick should fall back to at spawn.
+ * Undefined for a per-call model (source "call") — that surfaces its error to
+ * the main model to retry rather than being silently swapped — and when the
+ * pick already IS the session model. `resolvedSpec` is the caller's already-
+ * computed `provider/id` for the resolved model.
+ */
+function spawnFallbackModel(
+	resolvedSpec: string | undefined,
+	source: SubagentModelResolution["source"],
+	sessionModel: { provider: string; id: string } | undefined,
+): string | undefined {
+	if (!sessionModel || source === "call" || !resolvedSpec) return undefined;
+	const sessionSpec = modelSpec(sessionModel);
+	return resolvedSpec !== sessionSpec ? sessionSpec : undefined;
 }
 
 interface TaskResult {
@@ -655,7 +680,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					available,
 				});
 				for (const notice of resolution.notices) notifyModelOnce(ctx, notice);
-				const resolved = resolution.model ? `${resolution.model.provider}/${resolution.model.id}` : undefined;
+				const resolved = resolution.model ? modelSpec(resolution.model) : undefined;
 
 				const taskId = generateTaskId();
 				const record: AgentRunRecord = {
@@ -671,7 +696,17 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				registry.add(record); // SendMessage from main can reach the nested run too
 
 				const result = await executeRun(
-					{ request: { agent: agentName, task, name, model: resolved }, record, agentDef },
+					{
+						request: {
+							agent: agentName,
+							task,
+							name,
+							model: resolved,
+							fallbackModel: spawnFallbackModel(resolved, resolution.source, ctx.model),
+						},
+						record,
+						agentDef,
+					},
 					ctx,
 					undefined,
 					signal, // the spawning child aborting (stop/esc) kills the nested run
@@ -744,6 +779,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			parentSystemPrompt: request.fork ? ctx.getSystemPrompt() : undefined,
 			sessionDir: record.sessionSearchDir || undefined,
 			model: request.model,
+			fallbackModel: request.fallbackModel,
 			thinking: request.thinking,
 			signal,
 			onProgress: (toolCalls, text, usage) => {
@@ -936,6 +972,13 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			const available = ctx.modelRegistry.getAvailable();
 			const configuredDefault = applicableSubagentDefault(loadSubagentDefault(os.homedir()), ctx.model);
 			for (const p of prepared) {
+				// A fork inherits the parent transcript, so it must continue on THIS
+				// conversation's exact model — never a configured default or the
+				// automatic same-provider pick, which would move the inherited context
+				// onto a different (often weaker) model. Leaving model undefined makes
+				// the forked session restore its own model. (Per-call `model` on a fork
+				// is already rejected above.)
+				if (p.request.fork) continue;
 				const resolution = resolveSubagentModel({
 					requested: p.request.model,
 					agentModel: p.agentDef?.model,
@@ -996,8 +1039,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					};
 				}
 				for (const notice of resolution.notices) notifyModelOnce(ctx, notice);
-				const resolved = resolution.model ? `${resolution.model.provider}/${resolution.model.id}` : undefined;
+				const resolved = resolution.model ? modelSpec(resolution.model) : undefined;
 				p.request.model = resolved;
+				p.request.fallbackModel = spawnFallbackModel(resolved, resolution.source, ctx.model);
 				p.record.model = resolved;
 			}
 
@@ -1057,6 +1101,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						parentSystemPrompt: p.request.fork ? ctx.getSystemPrompt() : undefined,
 						sessionDir: p.record.sessionSearchDir || undefined,
 						model: p.request.model,
+						fallbackModel: p.request.fallbackModel,
 						thinking: p.request.thinking,
 						onProgress: (toolCalls, text, usage) => {
 							live.progress(toolCalls, usage);
@@ -1312,6 +1357,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				cwd: record.cwd,
 				sessionFile,
 				model: record.model,
+				// Resume degrades to the session model if the recorded model has become
+				// unavailable since the original run, rather than failing the resume
+				// outright (the note surfaces the swap). Undefined for a fork (record.model
+				// unset — it inherits) or when the record already is the session model.
+				fallbackModel:
+					record.model && ctx.model && record.model !== modelSpec(ctx.model) ? modelSpec(ctx.model) : undefined,
 				thinking: record.thinking,
 				onProgress: (toolCalls, _text, usage) => live.progress(toolCalls, usage),
 				sink: live.sink,

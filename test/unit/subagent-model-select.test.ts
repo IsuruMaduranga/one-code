@@ -8,8 +8,8 @@ import {
 	persistSubagentModel,
 	type SubagentDefault,
 } from "../../extensions/subagents/default-model.ts";
+import { crossesProvider } from "../../extensions/lib/model-policy.ts";
 import {
-	crossesProvider,
 	expensiveModelGate,
 	resolveSubagentModel,
 	subagentModelMenu,

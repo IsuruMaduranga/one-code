@@ -31,6 +31,7 @@ import {
 } from "./prompt.ts";
 import {
 	type Candidate,
+	type ClassifierNotice,
 	classifierCandidates,
 	describeCandidate,
 	isModelUnavailableError,
@@ -109,21 +110,22 @@ class StepError extends Error {
 	}
 }
 
-/** The candidate chain, minus anything already found unusable this session. */
-function remainingCandidates(deps: ClassifierDeps): Candidate[] {
-	const all = classifierCandidates({
+/** The candidate chain (minus anything already unusable this session) and its notices. */
+function remainingCandidates(deps: ClassifierDeps): { candidates: Candidate[]; notices: ClassifierNotice[] } {
+	const { candidates: all, notices } = classifierCandidates({
 		available: deps.registry.getAvailable(),
 		sessionModel: deps.sessionModel,
 		configured: deps.config.classifierModel,
+		configuredSetForContainment: deps.config.classifierModelSetFor,
 	});
 	const usable = all.filter((entry) => !deps.state.rejected.has(`${entry.model.provider}/${entry.model.id}`));
-	if (usable.length > 0) return usable;
+	if (usable.length > 0) return { candidates: usable, notices };
 	// If everything has been rejected, the session model is still worth one more
 	// attempt: a gate that stops asking has stopped gating. It has to be the
 	// session model specifically — the *last* chain entry is the cost-ranked pick,
 	// which nothing price-chosen should lead, let alone be the sole retry.
 	const session = all.filter((entry) => entry.source === "session");
-	return session.length > 0 ? session : all.slice(-1);
+	return { candidates: session.length > 0 ? session : all.slice(-1), notices };
 }
 
 function notifyOnce(deps: ClassifierDeps, key: string, message: string, level: "info" | "warning") {
@@ -137,22 +139,15 @@ function notifyOnce(deps: ClassifierDeps, key: string, message: string, level: "
  * subagent run). See the module comment for the two-stage flow.
  */
 export async function classify(request: ClassifyRequest, deps: ClassifierDeps): Promise<ClassifyVerdict> {
-	const candidates = remainingCandidates(deps);
+	const { candidates, notices } = remainingCandidates(deps);
 	if (candidates.length === 0) {
 		return { decision: "block", reason: "No model is available to run the auto-mode classifier.", tier: "unmatched" };
 	}
 
-	// A configured model that matches nothing available would otherwise fall
-	// through in silence, leaving the user believing their setting is in force.
-	const configured = deps.config.classifierModel;
-	if (configured && !candidates.some((entry) => entry.source === "configured")) {
-		notifyOnce(
-			deps,
-			`unresolved:${configured}`,
-			`autoMode.classifierModel is set to "${configured}", which is not an available model — check the name and that its provider is authenticated. Auto mode is using ${describeCandidate(candidates[0])} instead.`,
-			"warning",
-		);
-	}
+	// Selection notices (a configured model unavailable or overridden as stale, a
+	// cross-provider setting honored) — surfaced once each at their own level, keyed
+	// by their text so an informational "honored" line is not shown as a warning.
+	for (const notice of notices) notifyOnce(deps, notice.text, notice.text, notice.level);
 
 	// buildPayload builds the ~110KB ruleset once and returns the grounding index
 	// derived from it, so the ruleset is not rebuilt/re-parsed a second time here.

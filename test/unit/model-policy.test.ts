@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
 	BUILTIN_PROVIDER_POLICIES,
-	findRoleProfileModel,
+	crossesProvider,
 	modelIdentity,
 	modelsContainedToSession,
-	ROLE_PROFILES,
 } from "../../extensions/lib/model-policy.ts";
 
 const model = (provider: string, id: string, input = 1, api = "openai-responses") =>
@@ -69,16 +68,9 @@ describe("built-in provider policies", () => {
 		expect(BUILTIN_PROVIDERS).toHaveLength(39);
 	});
 
-	it("keeps every reviewed role profile short", () => {
-		for (const [key, profile] of Object.entries(ROLE_PROFILES)) {
-			expect(profile.classifier.length, `${key}:classifier`).toBeLessThanOrEqual(5);
-			expect(profile.subagent.length, `${key}:subagent`).toBeLessThanOrEqual(5);
-		}
-	});
-
 	it("marks opaque routers as session-only", () => {
 		for (const provider of ["radius", "huggingface", "opencode", "opencode-go"]) {
-			expect(BUILTIN_PROVIDER_POLICIES[provider]).toMatchObject({ kind: "opaque", dynamicSubagents: false });
+			expect(BUILTIN_PROVIDER_POLICIES[provider]).toMatchObject({ kind: "opaque" });
 		}
 	});
 });
@@ -89,14 +81,10 @@ describe("model identity and containment", () => {
 		const luna = model("openrouter", "openai/gpt-5.6-luna", 0.2);
 		const haiku = model("openrouter", "anthropic/claude-haiku-4.5", 1);
 		expect(modelIdentity(session)).toMatchObject({ profile: "openai", normalizedId: "gpt-5.6-sol" });
+		// A different author (anthropic) is not contained to an openai-author session.
 		expect(modelsContainedToSession([session, luna, haiku], session)).toEqual([session, luna]);
-		expect(findRoleProfileModel([session, luna, haiku], session, "classifier")?.id).toBe("openai/gpt-5.6-luna");
-	});
-
-	it("normalizes dot and hyphen family spellings without a gateway catalog", () => {
-		const session = model("openrouter", "anthropic/claude-fable-5", 10);
-		const haiku = model("openrouter", "anthropic/claude-haiku-4.5", 1);
-		expect(findRoleProfileModel([session, haiku], session, "classifier")?.id).toBe(haiku.id);
+		expect(crossesProvider(haiku, session)).toBe(true);
+		expect(crossesProvider(luna, session)).toBe(false);
 	});
 
 	it("reuses canonical profiles within a Vercel creator namespace", () => {
@@ -105,7 +93,7 @@ describe("model identity and containment", () => {
 		const other = model("vercel-ai-gateway", "zai/glm-5-turbo", 0.2);
 		expect(modelIdentity(session).profile).toBe("xai");
 		expect(modelsContainedToSession([session, worker, other], session)).toEqual([session, worker]);
-		expect(findRoleProfileModel([session, worker, other], session, "classifier")?.id).toBe(worker.id);
+		expect(crossesProvider(other, session)).toBe(true);
 	});
 
 	it("treats publisher prefixes as model names on a stable hosted provider", () => {
@@ -120,7 +108,6 @@ describe("model identity and containment", () => {
 		const session = model("huggingface", "Qwen/Qwen3-Coder-Next", 0.2);
 		const other = model("huggingface", "openai/gpt-oss-20b", 0.05);
 		expect(modelsContainedToSession([session, other], session)).toEqual([session]);
-		expect(findRoleProfileModel([session, other], session, "subagent")).toBeUndefined();
 	});
 
 	it("separates Cloudflare gateway routes after pi strips source prefixes", () => {
@@ -145,11 +132,10 @@ describe("model identity and containment", () => {
 			"bedrock-converse-stream",
 		);
 		expect(modelIdentity(session)).toMatchObject({ profile: "anthropic", normalizedId: "claude-sonnet-5" });
-		// Sonnet-class leads the classifier profile now, so a pool without a Sonnet
-		// falls through to Haiku — which still exercises the US-region normalization
-		// this test guards (the US-qualified id matches the `claude-haiku-4-5` family,
-		// the EU-qualified one does not).
-		expect(findRoleProfileModel([euHaiku, haiku], session, "classifier")?.id).toBe(haiku.id);
+		// Region normalization: the US-qualified Haiku shares the US session's
+		// containment; the EU-qualified one is a different geography and does not.
+		expect(modelIdentity(haiku).normalizedId).toBe("claude-haiku-4-5-20251001");
+		expect(modelsContainedToSession([session, haiku, euHaiku], session)).toEqual([session, haiku]);
 	});
 
 	it("fails unknown custom providers closed", () => {

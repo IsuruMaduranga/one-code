@@ -14,7 +14,7 @@
  */
 
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { type EconomicalModelChoice, pickEconomicalContainedModel } from "../lib/model-policy.ts";
+import { type EconomicalModelChoice, pickEconomicalContainedModel } from "../lib/model-tier.ts";
 
 /**
  * How much of the page the reader sees. Far past the 30k-char window the main

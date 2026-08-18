@@ -174,7 +174,8 @@ export async function draftSetup(facts: SetupFacts, deps: DraftDeps): Promise<Se
 		available: deps.registry.getAvailable(),
 		sessionModel: deps.sessionModel,
 		configured: deps.config.classifierModel,
-	}).map((entry) => entry.model);
+		configuredSetForContainment: deps.config.classifierModelSetFor,
+	}).candidates.map((entry) => entry.model);
 	const models: Model<Api>[] = [];
 	for (const model of deps.sessionModel ? [deps.sessionModel, ...chain] : chain) {
 		if (!models.some((seen) => seen.provider === model.provider && seen.id === model.id)) models.push(model);

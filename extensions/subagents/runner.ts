@@ -19,6 +19,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import { buildAgentLoader, createSharedModelRuntime } from "../lib/agent-loader.ts";
 import type { PermissionBridge } from "../permissions/subagent-gate.ts";
 import { findConfigured } from "../lib/model-policy.ts";
+import { isModelUnavailableError } from "../auto-mode/model-select.ts";
 import type { AgentDefinition } from "./agents.ts";
 import { type ChildHandle, type ChildOutcome, forkTaskMessage, type RpcChildHandle } from "./outcome.ts";
 import { sendToMainTool } from "./send-to-main-tool.ts";
@@ -92,6 +93,12 @@ interface ChildSessionSpec {
 	sessionDir?: string;
 	/** Resolved concrete model as `provider/id` (undefined for a fork — restored from the session). */
 	model?: string;
+	/**
+	 * Session model to fall back to when `model` (an automatic pick) cannot spawn.
+	 * Set only for non-per-call picks: a per-call model surfaces its error instead
+	 * of being silently swapped. See buildChildSession.
+	 */
+	fallbackModel?: string;
 	thinking?: string;
 	/** The child called SendMessage {to: "main"} — relay it to the main conversation. */
 	onMessageToMain?: (message: string, summary?: string) => void;
@@ -114,6 +121,11 @@ export interface ResidentRunOptions extends Omit<ChildSessionSpec, "sessionFile"
 	onExit?: () => void;
 	/** Optional live sink for the subagent panel (activity + transcript blocks). */
 	sink?: LiveSink;
+}
+
+/** Prepend a one-time spawn note (e.g. a model fallback) to an outcome's output. */
+function withNote(outcome: ChildOutcome, note: string | undefined): ChildOutcome {
+	return note ? { ...outcome, output: `${note}\n\n${outcome.output}` } : outcome;
 }
 
 export class SubagentRuntime {
@@ -222,31 +234,57 @@ export class SubagentRuntime {
 	}
 
 	/**
-	 * Build the child AgentSession: resume reopens a finished session; fork inherits
-	 * the parent transcript + system prompt; a fresh named run gets the agent's own
-	 * prompt and toolset. Shared by the foreground and resident entry points.
+	 * Build the child session, falling back to the session model when an
+	 * *automatically chosen* model cannot spawn (not entitled, withdrawn). The
+	 * automatic pick is a cost optimisation we made, not a model the user or the
+	 * main model named, so a broken pick must degrade to the always-working
+	 * session model rather than fail the whole subagent (CC parity). A per-call
+	 * model carries no `fallbackModel`, so it surfaces its error to the main model
+	 * to retry — never a silent swap of a model it chose. The returned `note` is
+	 * surfaced to the user/main model so the fallback is never silent.
+	 *
+	 * The resource loader is built once and reused across the fallback attempt, but
+	 * the session manager is created fresh per attempt: reusing one after a failed
+	 * `createAgentSession` could inherit a half-initialized manager. Resume reopens
+	 * a finished session; fork inherits the parent transcript + system prompt; a
+	 * fresh named run gets the agent's own prompt and toolset.
 	 */
-	private async buildChildSession(spec: ChildSessionSpec): Promise<Session> {
-		const sessionManager = spec.sessionFile
-			? SessionManager.open(spec.sessionFile)
-			: spec.forkFrom
-				? SessionManager.forkFrom(spec.forkFrom, spec.cwd, spec.sessionDir)
-				: spec.sessionDir
-					? SessionManager.create(spec.cwd, spec.sessionDir)
-					: SessionManager.inMemory(spec.cwd);
+	private async buildChildSession(spec: ChildSessionSpec): Promise<{ session: Session; note?: string }> {
 		const loader = await this.loaderFor(spec);
-		const { session } = await createAgentSession({
-			cwd: spec.cwd,
-			agentDir: getAgentDir(),
-			modelRuntime: this.modelRuntime,
-			model: (spec.model ? findConfigured(this.availableModels, spec.model) : undefined) as never,
-			thinkingLevel: spec.thinking as never,
-			tools: spec.forkFrom ? undefined : spec.agent?.tools,
-			customTools: [sendToMainTool((m, s) => spec.onMessageToMain?.(m, s)), ...(spec.extraTools ?? []), ...this.getMcpTools()],
-			resourceLoader: loader,
-			sessionManager,
-		});
-		return session;
+		const newSessionManager = () =>
+			spec.sessionFile
+				? SessionManager.open(spec.sessionFile)
+				: spec.forkFrom
+					? SessionManager.forkFrom(spec.forkFrom, spec.cwd, spec.sessionDir)
+					: spec.sessionDir
+						? SessionManager.create(spec.cwd, spec.sessionDir)
+						: SessionManager.inMemory(spec.cwd);
+		const make = async (model: string | undefined): Promise<Session> => {
+			const { session } = await createAgentSession({
+				cwd: spec.cwd,
+				agentDir: getAgentDir(),
+				modelRuntime: this.modelRuntime,
+				model: (model ? findConfigured(this.availableModels, model) : undefined) as never,
+				thinkingLevel: spec.thinking as never,
+				tools: spec.forkFrom ? undefined : spec.agent?.tools,
+				customTools: [sendToMainTool((m, s) => spec.onMessageToMain?.(m, s)), ...(spec.extraTools ?? []), ...this.getMcpTools()],
+				resourceLoader: loader,
+				sessionManager: newSessionManager(),
+			});
+			return session;
+		};
+		try {
+			return { session: await make(spec.model) };
+		} catch (error) {
+			const message = (error as Error).message;
+			if (spec.fallbackModel && spec.fallbackModel !== spec.model && isModelUnavailableError(message)) {
+				return {
+					session: await make(spec.fallbackModel),
+					note: `Subagent model ${spec.model} was unavailable (${message}); ran on the session model ${spec.fallbackModel} instead.`,
+				};
+			}
+			throw error;
+		}
 	}
 
 	/** A foreground run: one prompt, awaited, then disposed. */
@@ -257,6 +295,7 @@ export class SubagentRuntime {
 
 		const result: Promise<ChildOutcome> = (async () => {
 			let unsubscribe: (() => void) | undefined;
+			let spawnNote: string | undefined;
 			const onAbort = () => void session?.abort();
 			options.signal?.addEventListener("abort", onAbort, { once: true });
 			const wallClock = setTimeout(() => void session?.abort(), WALL_CLOCK_CAP_MS);
@@ -267,12 +306,18 @@ export class SubagentRuntime {
 				// corrupt session file, loader error) must resolve to a failed
 				// outcome, never reject handle.result — call sites like the
 				// SendMessage resume path consume it with a bare .then().
-				session = await this.buildChildSession(options);
+				const built = await this.buildChildSession(options);
+				session = built.session;
+				spawnNote = built.note;
 				unsubscribe = this.wireTracker(session, tracker, options.onProgress, undefined, options.sink);
 				await session.prompt(task);
-				return tracker.turnOutcome();
+				return withNote(tracker.turnOutcome(), spawnNote);
 			} catch (error) {
-				return { output: `Subagent failed: ${(error as Error).message}`, toolCalls: tracker.toolCalls, usage: tracker.usage, actions: tracker.actions, failed: true };
+				// Keep the fallback note if the model was swapped before the turn failed.
+				return withNote(
+					{ output: `Subagent failed: ${(error as Error).message}`, toolCalls: tracker.toolCalls, usage: tracker.usage, actions: tracker.actions, failed: true },
+					spawnNote,
+				);
 			} finally {
 				clearTimeout(wallClock);
 				options.signal?.removeEventListener("abort", onAbort);
@@ -298,7 +343,9 @@ export class SubagentRuntime {
 	 * while an idle resident lives until task_stop / session shutdown.
 	 */
 	async runResident(options: ResidentRunOptions): Promise<RpcChildHandle> {
-		const session = await this.buildChildSession(options);
+		const built = await this.buildChildSession(options);
+		const session = built.session;
+		let spawnNote = built.note;
 		const tracker = new SessionTurnTracker();
 		let exited = false;
 		let turnActive = false;
@@ -312,7 +359,9 @@ export class SubagentRuntime {
 			if (!turnActive) return;
 			turnActive = false;
 			clearTurnCap();
-			options.onTurnEnd(outcome);
+			// Surface a one-time model-fallback note on the first turn that reports.
+			options.onTurnEnd(withNote(outcome, spawnNote));
+			spawnNote = undefined;
 		};
 
 		this.wireTracker(session, tracker, options.onProgress, () => finishTurn(tracker.turnOutcome()), options.sink);

@@ -115,8 +115,9 @@ Full context: [`decisions/model-tiers.md`](decisions/model-tiers.md). Feature:
 
 Full context: [`decisions/model-policy.md`](decisions/model-policy.md).
 
-- **[Shared role profiles](decisions/model-policy.md#shared-role-profiles-smaller-classifiers-and-delegated-workers-by-default)** — one same-provider/family table gives classifiers, delegated workers, and reader models a smaller default.
+- **[Shared role profiles](decisions/model-policy.md#shared-role-profiles-smaller-classifiers-and-delegated-workers-by-default)** — one same-provider/family table gives classifiers, delegated workers, and reader models a smaller default. *(superseded 2026-08-18 — see below)*
 - **[Upward cost pressure](decisions/model-policy.md#upward-cost-pressure-an-informational-warning-and-a-per-call-gate)** — an informational warning plus a per-call gate when a delegated model costs more than the session's.
+- **[Tier-based selection replaces the role-profile tables](decisions/model-policy.md#tier-based-selection-replaces-the-role-profile-tables-2026-08-18)** — one shared tier selector (cheapest capable same-provider model, never `tiny`) drives classifier + subagent + reader; `ROLE_PROFILES` removed, the auto-mode capability floor closed, `CC_PROMPT_TIER` never leaks into selection, forks stay on the session model.
 
 ## Memory & session state
 

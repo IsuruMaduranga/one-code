@@ -1,124 +1,5 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 
-/** The two automatic model-selection jobs have different capability floors. */
-export type ModelRole = "classifier" | "subagent";
-
-export interface RoleProfile {
-	/**
-	 * Classifier candidates in preference order, strongest first. Selection takes
-	 * the first entry that fits the budget cap (never dearer than the session
-	 * model), so a mid-tier model leads and the cheaper fallbacks only win when the
-	 * session model is itself that cheap. This mirrors Claude Code, which screens
-	 * with a Sonnet-class model regardless of whether the main model is Opus or
-	 * Sonnet, and only drops to Haiku when the main model is Haiku — the auto-mode
-	 * classifier is a security boundary, and a bottom-tier model is a weak one.
-	 * Price alone never adds a model to this list.
-	 */
-	classifier: readonly string[];
-	/** Economical models suitable for delegated coding/reasoning work. */
-	subagent: readonly string[];
-}
-
-/**
- * Short family lists, not catalogs. Broad gateways apply these to their live
- * authenticated catalog after containment; they never get an OpenRouter-sized
- * hardcoded list. Reviewed against official provider docs on 2026-08-06.
- */
-export const ROLE_PROFILES: Readonly<Record<string, RoleProfile>> = {
-	anthropic: {
-		// Sonnet-class first (Claude Code's own classifier tier): Opus→Sonnet,
-		// Sonnet→Sonnet, and Haiku→Haiku via the budget cap filtering Sonnet out.
-		classifier: ["claude-sonnet-5", "claude-sonnet-4-6", "claude-haiku-4-5"],
-		subagent: ["claude-sonnet-5", "claude-haiku-4-5", "claude-sonnet-4-6"],
-	},
-	openai: {
-		classifier: ["gpt-5.6-luna", "gpt-5.4-mini", "gpt-5-mini", "gpt-4.1-mini", "gpt-4o-mini"],
-		subagent: ["gpt-5.6-luna", "gpt-5.4-mini", "gpt-5.3-codex-spark", "gpt-5.6-terra"],
-	},
-	google: {
-		classifier: ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3-flash-preview", "gemini-2.5-flash"],
-		subagent: ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3-flash-preview", "gemini-2.5-flash"],
-	},
-	xai: {
-		classifier: ["grok-4.3", "grok-4.5"],
-		subagent: ["grok-build-0.1", "grok-4.3", "grok-4.5"],
-	},
-	mistral: {
-		classifier: ["mistral-small-2603", "mistral-small-latest", "mistral-medium-3.5"],
-		subagent: ["mistral-small-2603", "mistral-medium-3.5", "codestral-latest"],
-	},
-	deepseek: {
-		classifier: ["deepseek-v4-flash", "deepseek-v4-pro"],
-		subagent: ["deepseek-v4-flash", "deepseek-v4-pro"],
-	},
-	zai: {
-		classifier: ["glm-5-turbo", "glm-4.7", "glm-5.2", "glm-4.5-air", "glm-4-flash"],
-		subagent: ["glm-5-turbo", "glm-4.7", "glm-5.2", "glm-4.5-air"],
-	},
-	moonshot: {
-		classifier: ["kimi-k2.6", "kimi-k2.5"],
-		subagent: ["kimi-k2.7-code", "kimi-k2.6", "kimi-k3"],
-	},
-	minimax: {
-		classifier: ["MiniMax-M2.7", "MiniMax-M3"],
-		subagent: ["MiniMax-M2.7", "MiniMax-M3"],
-	},
-	xiaomi: {
-		classifier: ["mimo-v2.5", "mimo-v2-pro"],
-		subagent: ["mimo-v2.5", "mimo-v2.5-pro", "mimo-v2-pro"],
-	},
-	"ant-ling": {
-		// The current pi catalog predates Ling 3.0. Flash remains opt-in: it has
-		// not been calibrated as the approval boundary.
-		classifier: ["Ling-2.6-1T", "Ring-2.6-1T"],
-		subagent: ["Ling-2.6-1T", "Ring-2.6-1T", "Ling-2.6-flash"],
-	},
-	meta: {
-		classifier: ["llama-3.3-70b", "llama-4-scout"],
-		subagent: ["llama-4-scout", "llama-3.3-70b"],
-	},
-	amazon: {
-		classifier: ["nova-2-lite", "nova-lite"],
-		subagent: ["nova-2-lite", "nova-lite", "nova-pro"],
-	},
-	"host:nvidia": {
-		classifier: ["nvidia/nvidia-nemotron-nano-9b-v2", "openai/gpt-oss-20b", "meta/llama-3.3-70b-instruct"],
-		subagent: ["poolside/laguna-xs-2.1", "nvidia/nemotron-3-super-120b-a12b", "openai/gpt-oss-20b"],
-	},
-	"host:groq": {
-		classifier: ["openai/gpt-oss-20b", "llama-3.3-70b-versatile"],
-		subagent: ["openai/gpt-oss-20b", "openai/gpt-oss-120b", "llama-3.3-70b-versatile"],
-	},
-	"host:cerebras": {
-		classifier: ["gpt-oss-120b", "zai-glm-4.7"],
-		subagent: ["gpt-oss-120b", "zai-glm-4.7"],
-	},
-	"host:fireworks": {
-		classifier: ["accounts/fireworks/models/deepseek-v4-flash", "accounts/fireworks/models/gpt-oss-20b"],
-		subagent: ["accounts/fireworks/models/kimi-k2p7-code", "accounts/fireworks/models/gpt-oss-20b"],
-	},
-	"host:together": {
-		classifier: ["Qwen/Qwen3.5-9B", "openai/gpt-oss-20b"],
-		subagent: ["openai/gpt-oss-20b", "moonshotai/Kimi-K2.7-Code", "Qwen/Qwen3.5-9B"],
-	},
-	"host:baseten": {
-		classifier: ["openai/gpt-oss-120b", "deepseek-ai/DeepSeek-V4-Flash"],
-		subagent: ["openai/gpt-oss-120b", "zai-org/GLM-5.2", "moonshotai/Kimi-K2.7-Code"],
-	},
-	"host:cloudflare-workers": {
-		classifier: ["@cf/openai/gpt-oss-20b", "@cf/zai-org/glm-4.7-flash"],
-		subagent: ["@cf/moonshotai/kimi-k2.7-code", "@cf/openai/gpt-oss-20b"],
-	},
-	"host:qwen-plan": {
-		classifier: ["qwen3.6-flash", "deepseek-v4-flash", "qwen3.6-plus"],
-		subagent: ["kimi-k2.7-code", "deepseek-v4-flash", "qwen3.7-plus", "qwen3.6-plus"],
-	},
-	"host:kimi-coding": {
-		classifier: ["kimi-for-coding", "k3"],
-		subagent: ["kimi-for-coding", "k3"],
-	},
-};
-
 /**
  * Whether a session runs on a Claude-family model. Claude Code's own subagent
  * conventions (`CLAUDE_CODE_SUBAGENT_MODEL`, `.claude/agents` model fields) are
@@ -136,14 +17,12 @@ export interface ProviderPolicy {
 	kind: ProviderPolicyKind;
 	/** Fixed profile for direct vendors and stable hosted catalogs. */
 	profile?: string;
-	/** Whether a price-ranked subagent may follow the vetted profile. */
-	dynamicSubagents: boolean;
 }
 
-const direct = (profile: string): ProviderPolicy => ({ kind: "direct", profile, dynamicSubagents: true });
-const hosted = (profile?: string): ProviderPolicy => ({ kind: "hosted", profile, dynamicSubagents: true });
-const gateway = (): ProviderPolicy => ({ kind: "gateway", dynamicSubagents: true });
-const opaque = (): ProviderPolicy => ({ kind: "opaque", dynamicSubagents: false });
+const direct = (profile: string): ProviderPolicy => ({ kind: "direct", profile });
+const hosted = (profile?: string): ProviderPolicy => ({ kind: "hosted", profile });
+const gateway = (): ProviderPolicy => ({ kind: "gateway" });
+const opaque = (): ProviderPolicy => ({ kind: "opaque" });
 
 /**
  * Every built-in language-model provider in pi 0.84.0. Unknown/custom providers
@@ -323,25 +202,6 @@ export function modelIdentity(model: Model<Api>): ModelIdentity {
 	};
 }
 
-/**
- * Names of the known small-but-capable model families, best tier first. Too weak
- * to *choose* by — Groq and xAI carry none of them — but strong enough to
- * corroborate a choice price alone suggested, and to order tiers when several
- * cheap models qualify (mini-class ahead of nano/lite-class).
- */
-const NAME_HINTS = [/haiku/i, /flash/i, /mini/i, /nano/i, /small/i, /lite/i, /instant/i, /sonnet/i];
-
-/** Index into NAME_HINTS; NAME_HINTS.length means "no known small-model name". */
-export function hintRank(model: Model<Api>): number {
-	const index = NAME_HINTS.findIndex((pattern) => pattern.test(model.id));
-	return index === -1 ? NAME_HINTS.length : index;
-}
-
-/** Whether the model's name carries one of the known small-model family words. */
-export function hasSmallModelName(model: Model<Api>): boolean {
-	return hintRank(model) < NAME_HINTS.length;
-}
-
 const UNSUITABLE_VARIANT = /:(batch|free|online|thinking)$/i;
 
 /** Automatic selection excludes endpoint variants with the wrong execution shape. */
@@ -355,6 +215,25 @@ export function pricedInput(model: Model<Api>): number | undefined {
 	return typeof input === "number" && input > 0 ? input : undefined;
 }
 
+/** The canonical `provider/id` spec — one source of truth for the string form. */
+export function modelSpec(model: { provider: string; id: string }): string {
+	return `${model.provider}/${model.id}`;
+}
+
+/** Whether a stamped-default setting was set for a provider this session has since left. */
+export function isStaleContainmentStamp(
+	setForContainment: string | undefined,
+	sessionModel: { provider: string; id: string } | undefined,
+): boolean {
+	return setForContainment !== (sessionModel ? modelIdentity(sessionModel as Model<Api>).containment : undefined);
+}
+
+/** Whether an explicit model leaves the session's provider/route/family boundary. */
+export function crossesProvider(model: Model<Api>, sessionModel: Model<Api>): boolean {
+	if (model.provider !== sessionModel.provider) return true;
+	return modelIdentity(model).containment !== modelIdentity(sessionModel).containment;
+}
+
 /** Models that automatic selection may consider without changing containment. */
 export function modelsContainedToSession(available: Model<Api>[], sessionModel: Model<Api>): Model<Api>[] {
 	const sessionIdentity = modelIdentity(sessionModel);
@@ -364,76 +243,6 @@ export function modelsContainedToSession(available: Model<Api>[], sessionModel: 
 			isSelectableVariant(model) &&
 			modelIdentity(model).containment === sessionIdentity.containment,
 	);
-}
-
-function comparableId(value: string): string {
-	return value.toLowerCase().replaceAll(".", "-").replaceAll("_", "-");
-}
-
-function matchesPrefix(model: Model<Api>, prefix: string): boolean {
-	const id = comparableId(modelIdentity(model).normalizedId);
-	const wanted = comparableId(prefix);
-	return id === wanted || id.startsWith(wanted);
-}
-
-/** First live model matching a role's reviewed family order. */
-export function findRoleProfileModel(
-	available: Model<Api>[],
-	sessionModel: Model<Api>,
-	role: ModelRole,
-	accept: (model: Model<Api>) => boolean = () => true,
-	// A caller that already computed the containment set can pass it to avoid the
-	// O(catalog) recompute (classifierCandidates does, on a per-tool-call hot path).
-	precomputedContained?: Model<Api>[],
-): Model<Api> | undefined {
-	const identity = modelIdentity(sessionModel);
-	if (!identity.profile) return undefined;
-	const prefixes = ROLE_PROFILES[identity.profile]?.[role] ?? [];
-	const contained = precomputedContained ?? modelsContainedToSession(available, sessionModel);
-	for (const prefix of prefixes) {
-		const wanted = comparableId(prefix);
-		const exact = contained.find(
-			(model) => comparableId(modelIdentity(model).normalizedId) === wanted && accept(model),
-		);
-		if (exact) return exact;
-		const prefixed = contained.find((model) => matchesPrefix(model, prefix) && accept(model));
-		if (prefixed) return prefixed;
-	}
-	return undefined;
-}
-
-export interface EconomicalModelChoice {
-	model: Model<Api>;
-	via: "profile" | "session";
-}
-
-/**
- * A vetted small-but-capable same-containment model within the session's
- * price ceiling, else the session model itself. Used for low-stakes one-shot
- * jobs over untrusted content (the web_fetch reader) — the content goes to
- * the model, so containment applies. Not used for compaction, which runs on
- * the session model to reuse the provider prompt cache.
- */
-export function pickEconomicalContainedModel(
-	available: Model<Api>[],
-	sessionModel: Model<Api> | undefined,
-): EconomicalModelChoice | undefined {
-	if (!sessionModel) return undefined;
-	const sessionPrice = pricedInput(sessionModel);
-	const withinBudget = (model: Model<Api>) => {
-		if (sessionPrice === undefined) return true;
-		const price = pricedInput(model);
-		return price === undefined || price <= sessionPrice;
-	};
-	const profiled = findRoleProfileModel(available, sessionModel, "classifier", withinBudget);
-	return profiled ? { model: profiled, via: "profile" } : { model: sessionModel, via: "session" };
-}
-
-/** Whether price ranking is an acceptable subagent fallback for this session. */
-export function allowsDynamicSubagentSelection(sessionModel: Model<Api>): boolean {
-	const policy = providerPolicy(sessionModel.provider);
-	if (!policy.dynamicSubagents) return false;
-	return modelIdentity(sessionModel).confidence !== "opaque";
 }
 
 /** Resolve an explicit provider/id, bare id, or prefix. Explicit choices are not contained. */

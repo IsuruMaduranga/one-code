@@ -13,13 +13,14 @@ describe("pickReaderModel", () => {
 			model("openai", "gpt-5-mini", 0.25),
 		];
 		const choice = pickReaderModel(catalog, catalog[0]);
-		expect(choice).toMatchObject({ via: "profile" });
+		expect(choice).toMatchObject({ via: "tier" });
 		// Never crosses providers: the page and the query go to the reader.
 		expect(choice?.model.id).toBe("claude-haiku-4-5");
 	});
 
 	it("never picks a reader pricier than the session model", () => {
-		// A haiku session gets haiku itself (it is in the profile), never sonnet.
+		// A haiku session has nothing cheaper and capable, so it reads on itself —
+		// never the pricier sonnet.
 		const catalog = [model("anthropic", "claude-haiku-4-5", 1), model("anthropic", "claude-sonnet-5", 3)];
 		expect(pickReaderModel(catalog, catalog[0])?.model.id).toBe("claude-haiku-4-5");
 	});

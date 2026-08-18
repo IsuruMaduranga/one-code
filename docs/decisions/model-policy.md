@@ -124,3 +124,62 @@ their authors differ:
 The gate opens when either price is unknown — a cost gate that fails closed on
 an unpriced catalog blocks the feature outright, the same failure shape as
 gating a tool other tools sit behind.
+
+## Tier-based selection replaces the role-profile tables (2026-08-18)
+
+**Choice:** the per-provider `ROLE_PROFILES` tables (and `findRoleProfileModel`,
+`hasSmallModelName`/`hintRank`, `allowsDynamicSubagentSelection`) are gone.
+Automatic selection for both the classifier and subagents now runs through one
+shared tier selector, `economicalContainedCandidates` /
+`cheaperContainedCandidates` in `extensions/lib/model-tier.ts`: the cheapest
+*capable* same-provider model, ranked cheap → workhorse → frontier, never
+`tiny`, never dearer than the session model. The classifier appends the session
+model as the terminal fallback; the subagent uses `strict: true` (never upgrade
+a cheap session). The reader (`pickEconomicalContainedModel`, web_fetch/recap)
+shares the same gate. Supersedes the "Shared role profiles" section above.
+
+**Why:** the reviewed tables were a dated maintenance burden (each new model
+generation needed a hand-edit, stamped "reviewed on <date>"), and the tier
+classifier already encodes "how capable is this model" from price + a curated
+anchor map — the same judgment the tables hand-wrote per provider. One mechanism
+now answers both "which prompt register" and "which secondary model". This also
+**closes the capability floor** the auto-mode entry recorded as still-open: a
+sub-Haiku (`tiny`) model can no longer become the security-gate classifier,
+because selection excludes that tier and steps *up* (never down) when a provider
+has no `cheap` model. On the classifier this is the deliberate, user-ratified
+divergence from Claude Code (which keeps a Sonnet-class screener on an Opus
+session): One Code screens on the cheapest capable model for cost, and the
+`autoMode.classifierModel` knob is there for anyone who wants otherwise.
+
+**Consequences and the load-bearing rules that survived:**
+
+- **Selection never honors `CC_PROMPT_TIER`.** That env var forces the
+  *session's* prompt-scaffolding register; feeding it to the selector would
+  collapse every candidate to one tier and let a `tiny` model past the floor.
+  `economicalContainedCandidates` classifies with a frozen empty env, so
+  selection always judges each model on its intrinsic tier. (Regression-tested.)
+- **Unpriced / opaque providers degrade to the session model.** The tier
+  selector needs price to rank and treats unpriced/opaque rows as `tiny`, so a
+  self-hosted or exotic provider yields no cheaper pick and screens/delegates on
+  the session model — correct, merely not cheap. This is the price paid for
+  deleting the curated tables; it was judged acceptable because the mainstream
+  priced providers (anthropic, openai, google, xai, deepseek, …) are exactly the
+  ones the tables covered well.
+- **A fork never gets an automatic or default model.** A fork inherits the
+  parent transcript, so it must continue on this conversation's exact model; the
+  resolution loop skips forks entirely (they already reject per-call `model`).
+- **The classifier stamp mirrors the subagent's.** `classifierModelSetFor`
+  records the containment a `/auto-mode model` choice was made on; a
+  cross-provider setting whose stamp no longer matches the session is treated as
+  stale and overridden with a warning — `isStaleContainmentStamp` is the one
+  shared predicate. A same-session cross-provider choice is honored with an
+  *informational* notice (not a warning — the user asked for it).
+- **Subagents fall back to the session model at spawn.** An automatically
+  chosen model that can't spawn (withdrawn/not entitled) degrades to the session
+  model with a surfaced note rather than failing the whole subagent; a per-call
+  model (source `call`) is never swapped — it surfaces its error so the main
+  model retries. The resume path carries the same fallback.
+
+**Rejected:** keeping `ROLE_PROFILES` as an unpriced-provider fallback — it
+reintroduces the two-mechanism split the change set out to remove, and the
+session-model degradation is a safe, already-documented outcome.

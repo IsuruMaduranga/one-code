@@ -40,16 +40,15 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { SubagentDefault } from "./default-model.ts";
 import {
-	allowsDynamicSubagentSelection,
+	crossesProvider,
 	findConfigured,
-	findRoleProfileModel,
-	hasSmallModelName,
-	hintRank,
 	isClaudeFamilyModel,
-	modelIdentity,
+	isStaleContainmentStamp,
 	modelsContainedToSession,
+	modelSpec as spec,
 	pricedInput,
 } from "../lib/model-policy.ts";
+import { cheaperContainedCandidates } from "../lib/model-tier.ts";
 
 /**
  * Cross-extension channel carrying the resolved default subagent model, so the
@@ -124,8 +123,6 @@ export interface SubagentModelResolution {
 	notices: string[];
 }
 
-const spec = (model: Model<Api>): string => `${model.provider}/${model.id}`;
-
 const isDated = (id: string): boolean => /-20\d{6}$/.test(id);
 
 /**
@@ -142,11 +139,6 @@ function resolveAlias(alias: string, contained: Model<Api>[]): Model<Api> | unde
 	return pool.sort((a, b) => b.id.localeCompare(a.id))[0];
 }
 
-/** Whether an explicit model leaves the session's provider/route/family boundary. */
-export function crossesProvider(model: Model<Api>, sessionModel: Model<Api>): boolean {
-	if (model.provider !== sessionModel.provider) return true;
-	return modelIdentity(model).containment !== modelIdentity(sessionModel).containment;
-}
 
 export function resolveSubagentModel(input: ResolveInput): SubagentModelResolution {
 	const { available, sessionModel } = input;
@@ -169,7 +161,7 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 	// choice made on this provider (stamp matches) is still honored + announced.
 	const settingIsStale =
 		input.configuredDefault?.source === "subagentModel setting" &&
-		input.configuredDefault.setForContainment !== (sessionModel ? modelIdentity(sessionModel).containment : undefined);
+		isStaleContainmentStamp(input.configuredDefault.setForContainment, sessionModel);
 
 	for (const entry of chain) {
 		const wanted = entry.value.trim();
@@ -234,31 +226,19 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 	}
 
 	// Automatic selection is a cost optimisation, so it needs price evidence:
-	// with either price unknown there is no demonstrable saving, and the profile
-	// order alone could silently *upgrade* a cheap session (haiku → sonnet).
-	const sessionPrice = sessionModel ? pricedInput(sessionModel) : undefined;
-	if (sessionModel && sessionPrice !== undefined && !suppressAutomatic) {
-		const isDifferentAndCheaper = (model: Model<Api>) => {
-			if (spec(model) === spec(sessionModel)) return false;
-			const candidatePrice = pricedInput(model);
-			return candidatePrice !== undefined && candidatePrice < sessionPrice;
-		};
-		const profiled = findRoleProfileModel(available, sessionModel, "subagent", isDifferentAndCheaper);
-		if (profiled) return { model: profiled, source: "automatic", notices };
-
-		// Price-ranked fallback for a stale profile. A name hint is required and
-		// ranks first: raw cheapest would pick nano/lite-tier (or wholly unknown)
-		// models as the default *coding* worker, so mini-class wins over a cheaper
-		// nano, and a model nobody labelled small never wins at all.
-		if (allowsDynamicSubagentSelection(sessionModel)) {
-			const cheaper = contained
-				.map((model) => ({ model, price: pricedInput(model), rank: hintRank(model) }))
-				.filter((entry): entry is { model: Model<Api>; price: number; rank: number } => entry.price !== undefined)
-				.filter((entry) => spec(entry.model) !== spec(sessionModel))
-				.filter((entry) => entry.price < sessionPrice && hasSmallModelName(entry.model))
-				.sort((a, b) => a.rank - b.rank || a.price - b.price)[0]?.model;
-			if (cheaper) return { model: cheaper, source: "automatic", notices };
-		}
+	// with the session price unknown there is no demonstrable saving, and picking
+	// a cheap-tier model could silently *upgrade* an (unpriced) cheap session. The
+	// tier selector — cheapest capable same-provider model, never `tiny`, cheap →
+	// workhorse → frontier — is the SAME mechanism the auto-mode classifier uses,
+	// so a session screens and delegates on one economical model. It excludes
+	// unpriced/opaque providers by construction, which subsumes the old
+	// dynamic-selection gate; those degrade to the session model below.
+	if (sessionModel && !suppressAutomatic) {
+		// `strict` requires a genuinely cheaper model and yields nothing when the
+		// session price is unknown, so a cheap-tier pick never silently upgrades an
+		// unpriced session. Reuse the `contained` set computed above for the hot path.
+		const cheaper = cheaperContainedCandidates(available, sessionModel, { strict: true, contained })[0];
+		if (cheaper) return { model: cheaper, source: "automatic", notices };
 	}
 
 	if (sessionModel) return { model: sessionModel, source: "session", notices };

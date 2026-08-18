@@ -288,11 +288,16 @@ notice naming `anthropic/claude-haiku-4-5 (default for this provider)`, and a
 deliberately bogus `classifierModel` producing the warning plus a working
 fallback rather than a broken gate.
 
-**Still open:** there is no capability floor. Claude Code gates auto mode's
-availability on model tier because a weak classifier is a weak boundary; One Code
-gates only on "a model exists", so a small local model can end up as the gate.
-Refusing auto mode there would remove the feature exactly where self-hosted users
-want it, so a warning on entry is the likelier answer.
+**Capability floor (closed 2026-08-18).** This entry originally noted there was
+none — automatic selection gated only on "a model exists", so a sub-Haiku local
+model could become the gate. The tier-based selection rewrite closes it: the
+shared selector excludes the `tiny` tier and steps *up* (cheap → workhorse →
+frontier), never down, so a weak model is never auto-chosen as the classifier.
+An unpriced/opaque provider (which the tier classifier also treats as `tiny`)
+degrades to the session model rather than a weak neighbour. See
+[`model-policy.md`](model-policy.md#tier-based-selection-replaces-the-role-profile-tables-2026-08-18).
+A self-hosted user who *wants* a small local classifier still names it via
+`autoMode.classifierModel` (naming it is choosing it).
 
 ## Three defects the real OpenRouter catalog exposed
 

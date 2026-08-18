@@ -48,6 +48,13 @@ export interface AutoModeConfig {
 	classifyAllShell: boolean;
 	/** `provider/model-id` override for the classifier model. */
 	classifierModel?: string;
+	/**
+	 * Containment identity (`modelIdentity().containment`) the `classifierModel`
+	 * was stamped for when set via `/auto-mode model`. A cross-provider setting
+	 * whose stamp no longer matches the session is treated as stale and overridden
+	 * — see `classifierCandidates`. Undefined for a hand-edited setting.
+	 */
+	classifierModelSetFor?: string;
 	/** Append every gate decision to auto-mode-decisions.jsonl next to the session files. */
 	logDecisions: boolean;
 }
@@ -60,6 +67,7 @@ interface AutoModeSettingsFile {
 		allow?: unknown;
 		classifyAllShell?: unknown;
 		classifierModel?: unknown;
+		classifierModelSetFor?: unknown;
 		logDecisions?: unknown;
 		[key: string]: unknown;
 	};
@@ -100,6 +108,7 @@ const KNOWN_AUTO_MODE_KEYS = new Set([
 	"allow",
 	"classifyAllShell",
 	"classifierModel",
+	"classifierModelSetFor",
 	"logDecisions",
 ]);
 
@@ -228,6 +237,7 @@ export function loadAutoModeConfigWithDiagnostics(home: string): AutoModeConfigL
 		allow?: string[];
 		classifyAllShell?: boolean;
 		classifierModel?: string;
+		classifierModelSetFor?: string;
 		logDecisions?: boolean;
 	} = {};
 
@@ -252,6 +262,12 @@ export function loadAutoModeConfigWithDiagnostics(home: string): AutoModeConfigL
 		if (typeof block.logDecisions === "boolean") collected.logDecisions = block.logDecisions;
 		if (typeof block.classifierModel === "string" && block.classifierModel.trim()) {
 			collected.classifierModel = block.classifierModel.trim();
+			// The stamp travels with the model from the same file, so a lower-precedence
+			// stamp cannot attach to a higher-precedence model.
+			collected.classifierModelSetFor =
+				typeof block.classifierModelSetFor === "string" && block.classifierModelSetFor.trim()
+					? block.classifierModelSetFor.trim()
+					: undefined;
 		}
 	}
 
@@ -269,6 +285,7 @@ export function loadAutoModeConfigWithDiagnostics(home: string): AutoModeConfigL
 			allow: ruleExtras(collected.allow),
 			classifyAllShell: collected.classifyAllShell ?? false,
 			classifierModel: collected.classifierModel,
+			classifierModelSetFor: collected.classifierModelSetFor,
 			logDecisions: collected.logDecisions ?? false,
 		},
 		diagnostics,
@@ -289,11 +306,20 @@ export function loadAutoModeConfig(home: string): AutoModeConfig {
  * rules, but a lenient write would replace the user's whole settings file with
  * only ours.
  */
-export function persistClassifierModel(spec: string | undefined, home: string): void {
+export function persistClassifierModel(spec: string | undefined, home: string, setForContainment?: string): void {
 	const { path, file } = readUserSettingsForWrite(home);
 	const block = asRecord(file.autoMode) ?? {};
-	if (spec === undefined) delete block.classifierModel;
-	else block.classifierModel = spec;
+	if (spec === undefined) {
+		delete block.classifierModel;
+		delete block.classifierModelSetFor;
+	} else {
+		block.classifierModel = spec;
+		// Stamp the containment the model was chosen on, so a later session on a
+		// different provider treats a cross-provider setting as stale (parity with
+		// subagentModelSetFor). No stamp for a hand-edited setting.
+		if (setForContainment) block.classifierModelSetFor = setForContainment;
+		else delete block.classifierModelSetFor;
+	}
 	if (Object.keys(block).length === 0) delete file.autoMode;
 	else file.autoMode = block;
 	mkdirSync(dirname(path), { recursive: true });

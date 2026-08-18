@@ -5,24 +5,28 @@ import {
 	findConfigured,
 	isModelUnavailableError,
 } from "../../extensions/auto-mode/model-select.ts";
-import { BUILTIN_PROVIDER_POLICIES, modelIdentity, ROLE_PROFILES } from "../../extensions/lib/model-policy.ts";
+import { modelIdentity } from "../../extensions/lib/model-policy.ts";
 
 /** Minimal structural stand-in; only provider/id/cost are consulted. */
 const model = (provider: string, id: string, input?: number) =>
 	({ provider, id, name: id, cost: input === undefined ? undefined : { input, output: input * 4 } }) as any;
 
-const pick = (available: any[], sessionModel: any, configured?: string) =>
-	classifierCandidates({ available, sessionModel, configured });
+const pick = (available: any[], sessionModel: any, configured?: string, configuredSetForContainment?: string) =>
+	classifierCandidates({ available, sessionModel, configured, configuredSetForContainment }).candidates;
+
+const pickFull = (available: any[], sessionModel: any, configured?: string, configuredSetForContainment?: string) =>
+	classifierCandidates({ available, sessionModel, configured, configuredSetForContainment });
 
 describe("classifierCandidates: provider containment", () => {
-	it("selects Luna from the OpenAI Codex role profile for a Sol session", () => {
+	it("screens with the cheapest capable same-provider model", () => {
+		// mini is the cheap tier; nano is tiny (excluded); gpt-5.5 is the session.
 		const available = [
-			model("openai-codex", "gpt-5.6-sol", 5),
-			model("openai-codex", "gpt-5.6-luna", 0.2),
-			model("openai-codex", "gpt-5.4-mini", 0.75),
+			model("openai", "gpt-5.5", 10),
+			model("openai", "gpt-5-mini", 0.25),
+			model("openai", "gpt-5-nano", 0.05),
 		];
 		const chain = pick(available, available[0]);
-		expect(chain[0]).toMatchObject({ model: available[1], source: "role-profile" });
+		expect(chain[0]).toMatchObject({ model: available[1], source: "economical" });
 	});
 
 	it("never leaves the session's provider on its own initiative", () => {
@@ -37,16 +41,35 @@ describe("classifierCandidates: provider containment", () => {
 		}
 	});
 
-	it("crosses providers only when the user names one explicitly", () => {
-		const available = [model("ollama", "qwen3-coder"), model("anthropic", "claude-haiku-4-5", 1)];
-		const chain = pick(available, model("ollama", "qwen3-coder"), "anthropic/claude-haiku-4-5");
-		expect(chain[0].model.provider).toBe("anthropic");
-		expect(chain[0].source).toBe("configured");
+	it("crosses providers only when the user names one for THIS session", () => {
+		// A cross-provider classifierModel is honored when it carries a stamp for the
+		// current session (set via /auto-mode model) — naming a provider is choosing it.
+		const session = model("ollama", "qwen3-coder");
+		const available = [session, model("anthropic", "claude-haiku-4-5", 1)];
+		const stamp = modelIdentity(session).containment;
+		const result = pickFull(available, session, "anthropic/claude-haiku-4-5", stamp);
+		expect(result.candidates[0].model.provider).toBe("anthropic");
+		expect(result.candidates[0].source).toBe("configured");
+		expect(result.notices.map((n) => n.text).join(" ")).toContain("honored");
+	});
+
+	it("overrides a stale cross-provider setting with a warning (subagent parity)", () => {
+		// A hand-edited (unstamped) cross-provider classifierModel, or one stamped for
+		// a since-left provider, is treated as stale: a same-provider model screens the
+		// calls instead, and the user is told how to re-set it.
+		const session = model("ollama", "qwen3-coder");
+		const available = [session, model("anthropic", "claude-haiku-4-5", 1)];
+		const result = pickFull(available, session, "anthropic/claude-haiku-4-5"); // no stamp
+		expect(result.candidates.every((c) => c.source !== "configured")).toBe(true);
+		expect(result.candidates[0].model.provider).toBe("ollama");
+		expect(result.notices.map((n) => n.text).join(" ")).toContain("set for a different provider");
 	});
 
 	it("still ends the chain at the session model, so an explicit model failing is survivable", () => {
-		const available = [model("ollama", "qwen3-coder"), model("anthropic", "claude-haiku-4-5", 1)];
-		const chain = pick(available, model("ollama", "qwen3-coder"), "anthropic/claude-haiku-4-5");
+		const session = model("ollama", "qwen3-coder");
+		const available = [session, model("anthropic", "claude-haiku-4-5", 1)];
+		const stamp = modelIdentity(session).containment;
+		const chain = pick(available, session, "anthropic/claude-haiku-4-5", stamp);
 		expect(chain[chain.length - 1].model.provider).toBe("ollama");
 	});
 });
@@ -68,84 +91,91 @@ describe("classifierCandidates: gateway family containment", () => {
 		}
 	});
 
-	it("screens with the session model when its vendor offers nothing cheaper", () => {
+	it("screens with the session model when its vendor offers nothing cheaper and capable", () => {
 		const available = [
-			model("openrouter", "z-ai/glm-4.6", 0.5),
-			model("openrouter", "openai/gpt-5-mini", 0.25),
+			model("openrouter", "openai/gpt-5.1", 1.25),
 			model("openrouter", "anthropic/claude-haiku-4.5", 1),
 		];
-		const chain = pick(available, model("openrouter", "z-ai/glm-4.6", 0.5));
+		const chain = pick(available, model("openrouter", "openai/gpt-5.1", 1.25));
 		expect(chain).toHaveLength(1);
-		expect(chain[0].model.id).toBe("z-ai/glm-4.6");
+		expect(chain[0].model.id).toBe("openai/gpt-5.1");
 		expect(chain[0].source).toBe("session");
 	});
 
-	it("uses a cheaper model from the session's own vendor when there is one", () => {
-		const available = [model("openrouter", "z-ai/glm-4.6", 0.5), model("openrouter", "z-ai/glm-4.5-air", 0.1)];
-		const chain = pick(available, model("openrouter", "z-ai/glm-4.6", 0.5));
-		expect(chain[0].model.id).toBe("z-ai/glm-4.5-air");
-	});
-
-	it("crosses vendors only on an explicit override", () => {
-		const available = [model("openrouter", "z-ai/glm-4.6", 0.5), model("openrouter", "openai/gpt-5-mini", 0.25)];
-		const chain = pick(available, model("openrouter", "z-ai/glm-4.6", 0.5), "openrouter/openai/gpt-5-mini");
+	it("crosses vendors only on an explicit, stamped override", () => {
+		const session = model("openrouter", "z-ai/glm-4.6", 0.5);
+		const available = [session, model("openrouter", "openai/gpt-5-mini", 0.25)];
+		const stamp = modelIdentity(session).containment;
+		const chain = pick(available, session, "openrouter/openai/gpt-5-mini", stamp);
 		expect(chain[0].model.id).toBe("openai/gpt-5-mini");
 		expect(chain[0].source).toBe("configured");
 	});
+});
 
-	it("does not vendor-split a direct provider that hosts other vendors' weights", () => {
-		// Groq serves meta-llama and openai-named open models itself, so the data
-		// goes to Groq either way and the prefix implies nothing about routing.
-		const available = [
-			model("groq", "llama-3.3-70b-versatile", 0.6),
-			model("groq", "openai/gpt-oss-20b", 0.075),
-		];
-		const chain = pick(available, model("groq", "llama-3.3-70b-versatile", 0.6));
-		expect(chain.length).toBeGreaterThan(1);
-		expect(modelIdentity(model("groq", "openai/gpt-oss-20b", 0.075)).containment).toBe("groq");
+describe("classifierCandidates: tier preference (cheap → workhorse → frontier, never tiny)", () => {
+	const anthropic = [
+		model("anthropic", "claude-opus-4-8", 15), // frontier
+		model("anthropic", "claude-sonnet-5", 3), // workhorse
+		model("anthropic", "claude-haiku-4-5", 1), // cheap
+	];
+
+	it("screens an Opus session with Haiku (cheapest capable tier)", () => {
+		const chain = pick(anthropic, anthropic[0]);
+		expect(chain[0]).toMatchObject({ model: anthropic[2], source: "economical" });
 	});
 
-	it("normalizes a gateway creator and a direct-provider family", () => {
-		expect(modelIdentity(model("openrouter", "anthropic/claude-haiku-4.5", 1)).profile).toBe("anthropic");
-		expect(modelIdentity(model("anthropic", "claude-haiku-4-5", 1)).profile).toBe("anthropic");
+	it("screens a Sonnet session with Haiku too (cheap beats the session's own tier)", () => {
+		const chain = pick(anthropic, anthropic[1]);
+		expect(chain[0].model).toMatchObject({ id: "claude-haiku-4-5" });
+	});
+
+	it("screens a Haiku session with itself (nothing cheaper and capable)", () => {
+		const chain = pick(anthropic, anthropic[2]);
+		expect(chain[0].model).toMatchObject({ id: "claude-haiku-4-5" });
+		expect(chain[0].source).toBe("session");
+	});
+
+	it("steps UP to workhorse when the provider has no cheap-tier model", () => {
+		// Opus session, only a workhorse Sonnet is cheaper — no cheap tier available.
+		const available = [model("anthropic", "claude-opus-4-8", 15), model("anthropic", "claude-sonnet-5", 3)];
+		const chain = pick(available, available[0]);
+		expect(chain[0]).toMatchObject({ model: available[1], source: "economical" });
+	});
+
+	it("never auto-selects a tiny-tier model — screens on the session model instead", () => {
+		// nano is the only thing cheaper than the session, and it is tiny: too weak a
+		// security boundary, so the session model screens rather than the tiny model.
+		const available = [model("openai", "gpt-5.5", 10), model("openai", "gpt-5-nano", 0.05)];
+		const chain = pick(available, available[0]);
+		expect(chain).toHaveLength(1);
+		expect(chain[0].source).toBe("session");
+		expect(chain.every((c) => c.model.id !== "gpt-5-nano")).toBe(true);
+	});
+
+	it("prefers a cheap-tier model over a cheaper tiny one", () => {
+		const available = [
+			model("openai", "gpt-5.5", 10),
+			model("openai", "gpt-5-mini", 0.25), // cheap
+			model("openai", "gpt-5-nano", 0.05), // tiny, cheaper
+		];
+		const chain = pick(available, available[0]);
+		expect(chain[0].model.id).toBe("gpt-5-mini");
+		expect(chain.every((c) => c.model.id !== "gpt-5-nano")).toBe(true);
 	});
 });
 
 describe("classifierCandidates: cost", () => {
-	it("prefers a mini-tier model over the absolute cheapest", () => {
-		// gpt-5-nano is cheaper, but the tables stop at the mini/haiku/flash tier:
-		// the classifier is a security boundary, so the bottom tier is opt-in via
-		// classifierModel rather than the default.
+	it("never selects a model more expensive than the session's own", () => {
 		const available = [
-			model("openai", "gpt-5.5", 10),
-			model("openai", "gpt-4o-mini", 0.15),
-			model("openai", "gpt-5-nano", 0.05),
+			model("anthropic", "claude-haiku-4-5", 1),
+			model("anthropic", "claude-fable-5", 15),
+			model("anthropic", "claude-opus-5", 30),
 		];
-		const chain = pick(available, model("openai", "gpt-5.5", 10));
-		expect(chain[0].model.id).toBe("gpt-4o-mini");
-		expect(chain[0].source).toBe("role-profile");
-	});
-
-	it("never selects by price on an unknown provider", () => {
-		// A custom provider has no reviewed routing semantics. Unknown models stay
-		// opaque rather than a cheap neighbor silently becoming the security gate.
-		for (const cheapId of ["zzz-obscure", "ling-2.6-flash", "mini-thing"]) {
-			const available = [model("acme", "big-model", 20), model("acme", cheapId, 0.01)];
-			const chain = pick(available, model("acme", "big-model", 20));
-			expect(chain).toHaveLength(1);
-			expect(chain[0].source, cheapId).toBe("session");
-			expect(chain[0].model.id, cheapId).toBe("big-model");
+		const chain = pick(available, model("anthropic", "claude-fable-5", 15));
+		for (const candidate of chain) {
+			expect(candidate.model.cost?.input ?? 0, candidate.model.id).toBeLessThanOrEqual(15);
 		}
-	});
-
-	it("still sorts the last-resort slot by cost for a known direct provider", () => {
-		const available = [
-			model("openai", "big-model", 20),
-			model("openai", "medium-model", 3),
-			model("openai", "small-model", 0.2),
-		];
-		const chain = pick(available, model("openai", "big-model", 20));
-		expect(chain[chain.length - 1].model.id).toBe("small-model");
+		expect(chain[0].model.id).toBe("claude-haiku-4-5");
 	});
 
 	it("treats sentinel and zero prices as unpriced, not as cheap", () => {
@@ -153,63 +183,24 @@ describe("classifierCandidates: cost", () => {
 		// free-tier entries; both would win a naive cheapest-first sort.
 		const available = [
 			model("openrouter", "openrouter/auto", -1000000),
-			model("openrouter", "free/thing", 0),
+			model("openrouter", "anthropic/free-thing", 0),
 			model("openrouter", "anthropic/claude-haiku-4.5", 1),
 			model("openrouter", "anthropic/claude-fable-5", 15),
 		];
 		const chain = pick(available, model("openrouter", "anthropic/claude-fable-5", 15));
 		for (const candidate of chain) {
 			expect(candidate.model.id, candidate.model.id).not.toBe("openrouter/auto");
-			expect(candidate.model.id, candidate.model.id).not.toBe("free/thing");
-		}
-	});
-
-	it("never picks a model more expensive than the session's own", () => {
-		const available = [model("anthropic", "claude-fable-5", 15), model("anthropic", "claude-opus-5", 30)];
-		const chain = pick(available, model("anthropic", "claude-fable-5", 15));
-		for (const candidate of chain) {
-			expect(candidate.model.id, candidate.model.id).not.toBe("claude-opus-5");
+			expect(candidate.model.id, candidate.model.id).not.toBe("anthropic/free-thing");
 		}
 	});
 
 	it("falls back to the session model when nothing in the provider is priced", () => {
-		// A local setup: no cost data anywhere, and no name hints either.
+		// A local setup: no cost data anywhere.
 		const available = [model("ollama", "qwen3-coder"), model("ollama", "llama3")];
 		const chain = pick(available, model("ollama", "qwen3-coder"));
 		expect(chain).toHaveLength(1);
 		expect(chain[0].source).toBe("session");
 		expect(chain[0].model.id).toBe("qwen3-coder");
-	});
-});
-
-describe("classifierCandidates: never dearer than the session model", () => {
-	it("skips a table entry that costs more than the session model", () => {
-		// A real case: a $0.50 session was being screened by a $1 model, because the
-		// budget ceiling was only applied to the cost-ranked branch.
-		const available = [
-			model("anthropic", "claude-sonnet-5", 2),
-			model("anthropic", "claude-haiku-4-5", 1),
-			model("anthropic", "claude-cheap", 0.4),
-		];
-		const chain = pick(available, model("anthropic", "claude-cheap", 0.4));
-		for (const candidate of chain) {
-			expect(candidate.model.cost?.input ?? 0, candidate.model.id).toBeLessThanOrEqual(0.4);
-		}
-	});
-
-	it("uses the table's first entry when the budget allows it", () => {
-		const available = [
-			model("openrouter", "anthropic/claude-haiku-4.5", 1),
-			model("openrouter", "anthropic/claude-sonnet-4.5", 3),
-		];
-		const chain = pick(available, model("openrouter", "anthropic/claude-sonnet-4.5", 3));
-		expect(chain[0].model.id).toBe("anthropic/claude-haiku-4.5");
-	});
-
-	it("imposes no ceiling when the session model is unpriced", () => {
-		const available = [model("ollama", "qwen3-coder"), model("ollama", "qwen3-mini", 0)];
-		const chain = pick(available, model("ollama", "qwen3-coder"));
-		expect(chain.length).toBeGreaterThan(0);
 	});
 });
 
@@ -220,9 +211,9 @@ describe("classifierCandidates: unsuitable variants", () => {
 		const available = [
 			model("openrouter", "anthropic/claude-haiku-4.5:batch", 0.5),
 			model("openrouter", "anthropic/claude-haiku-4.5", 1),
-			model("openrouter", "anthropic/claude-sonnet-4.5", 3),
+			model("openrouter", "anthropic/claude-fable-5", 3),
 		];
-		const chain = pick(available, model("openrouter", "anthropic/claude-sonnet-4.5", 3));
+		const chain = pick(available, model("openrouter", "anthropic/claude-fable-5", 3));
 		for (const candidate of chain) {
 			expect(candidate.model.id, candidate.model.id).not.toContain(":batch");
 		}
@@ -234,9 +225,9 @@ describe("classifierCandidates: unsuitable variants", () => {
 			const available = [
 				model("openrouter", `openai/gpt-5-mini${suffix}`, 0.01),
 				model("openrouter", "openai/gpt-5-mini", 0.25),
-				model("openrouter", "big/model", 5),
+				model("openrouter", "openai/gpt-5.1", 5),
 			];
-			const chain = pick(available, model("openrouter", "big/model", 5));
+			const chain = pick(available, model("openrouter", "openai/gpt-5.1", 5));
 			for (const candidate of chain) {
 				expect(candidate.model.id, `${suffix}: ${candidate.model.id}`).not.toContain(suffix);
 			}
@@ -244,66 +235,29 @@ describe("classifierCandidates: unsuitable variants", () => {
 	});
 
 	it("honours an explicitly configured variant — naming it is choosing it", () => {
-		const available = [model("openrouter", "anthropic/claude-haiku-4.5:batch", 0.5), model("openrouter", "big/model", 5)];
-		const chain = pick(available, model("openrouter", "big/model", 5), "openrouter/anthropic/claude-haiku-4.5:batch");
+		const session = model("openrouter", "anthropic/claude-fable-5", 5);
+		const available = [model("openrouter", "anthropic/claude-haiku-4.5:batch", 0.5), session];
+		const stamp = modelIdentity(session).containment;
+		const chain = pick(available, session, "openrouter/anthropic/claude-haiku-4.5:batch", stamp);
 		expect(chain[0].source).toBe("configured");
 		expect(chain[0].model.id).toBe("anthropic/claude-haiku-4.5:batch");
 	});
-
-	it("does not let a :batch id satisfy a plain table prefix", () => {
-		// startsWith would otherwise accept `...haiku-4.5:batch` for `...haiku-4.5`.
-		const available = [model("openrouter", "anthropic/claude-haiku-4.5:batch", 0.5), model("openrouter", "big/model", 5)];
-		const chain = pick(available, model("openrouter", "big/model", 5));
-		expect(chain.every((c) => !c.model.id.includes(":batch"))).toBe(true);
-	});
 });
 
-describe("classifierCandidates: provider defaults", () => {
-	it("uses the known-good default for a messy catalog before cost sorting", () => {
-		const available = [
-			model("openrouter", "anthropic/claude-cheap-unknown", 0.01),
-			model("openrouter", "anthropic/claude-haiku-4.5", 1),
-			model("openrouter", "anthropic/claude-fable-5", 15),
-		];
-		const chain = pick(available, model("openrouter", "anthropic/claude-fable-5", 15));
-		expect(chain[0].source).toBe("role-profile");
-		expect(chain[0].model.id).toBe("anthropic/claude-haiku-4.5");
-		// The cheap unknown is still in the chain as a later fallback.
-		expect(chain.some((c) => c.model.id === "anthropic/claude-cheap-unknown")).toBe(true);
+describe("classifierCandidates: configured-model diagnostics", () => {
+	it("warns and falls back when the configured model is not available", () => {
+		const available = [model("anthropic", "claude-fable-5", 15), model("anthropic", "claude-haiku-4-5", 1)];
+		const result = pickFull(available, model("anthropic", "claude-fable-5", 15), "anthropic/claude-opus-5");
+		expect(result.candidates.every((c) => c.source !== "configured")).toBe(true);
+		expect(result.notices.map((n) => n.text).join(" ")).toContain("not an available model");
 	});
 
-	it("accepts a dated variant of a default", () => {
-		const available = [model("anthropic", "claude-haiku-4-5-20251001", 1), model("anthropic", "claude-fable-5", 15)];
-		const chain = pick(available, model("anthropic", "claude-fable-5", 15));
-		expect(chain[0].model.id).toBe("claude-haiku-4-5-20251001");
-	});
-
-	it("skips a provider default that is not actually available", () => {
-		const available = [model("anthropic", "claude-fable-5", 15)];
-		const chain = pick(available, model("anthropic", "claude-fable-5", 15));
-		expect(chain.every((c) => c.source !== "role-profile")).toBe(true);
-	});
-
-	it("covers the providers whose catalogs name-matching cannot handle", () => {
-		// Groq's models contain none of the usual "cheap model" substrings, and
-		// neither do xAI's — cost or a default table is the only way to choose.
-		for (const provider of ["groq", "xai", "openai", "google", "anthropic"]) {
-			expect(BUILTIN_PROVIDER_POLICIES[provider], provider).toBeDefined();
-		}
-		// Gateways reuse short canonical family profiles instead of catalogs.
-		for (const vendor of ["anthropic", "openai", "google", "zai", "xai"]) {
-			expect(ROLE_PROFILES[vendor], vendor).toBeDefined();
-		}
-	});
-
-	it("picks a groq classifier despite no name hints existing there", () => {
-		const available = [
-			model("groq", "llama-3.1-8b-instant", 0.05),
-			model("groq", "llama-3.3-70b-versatile", 0.6),
-		];
-		const chain = pick(available, model("groq", "llama-3.3-70b-versatile", 0.6));
-		expect(chain[0].model.id).toBe("llama-3.3-70b-versatile");
-		expect(chain[0].source).toBe("role-profile");
+	it("honours a same-provider configured model with no cross-provider warning", () => {
+		const available = [model("anthropic", "claude-fable-5", 15), model("anthropic", "claude-haiku-4-5", 1)];
+		const result = pickFull(available, model("anthropic", "claude-fable-5", 15), "anthropic/claude-haiku-4-5");
+		expect(result.candidates[0].source).toBe("configured");
+		expect(result.candidates[0].model.id).toBe("claude-haiku-4-5");
+		expect(result.notices).toHaveLength(0);
 	});
 });
 
@@ -351,31 +305,10 @@ describe("describeCandidate", () => {
 			"autoMode.classifierModel",
 		);
 		expect(describeCandidate({ model: model("groq", "llama-3.3-70b-versatile", 0.6), source: "session" })).toContain(
-			"no vetted smaller model within",
+			"no cheaper capable model within",
 		);
-		// On a gateway the description names the canonical family, not the gateway.
-		expect(
-			describeCandidate({ model: model("openrouter", "openai/gpt-5-mini", 0.25), source: "cheapest-in-provider" }),
-		).toContain("within openai");
-	});
-});
-
-describe("classifierCandidates: Sonnet-class tier policy (min(main, sonnet))", () => {
-	const anthropic = [
-		model("anthropic", "claude-opus-4-8", 15),
-		model("anthropic", "claude-sonnet-5", 3),
-		model("anthropic", "claude-haiku-4-5", 1),
-	];
-	it("screens an Opus session with Sonnet (one tier below, Claude Code parity)", () => {
-		const chain = pick(anthropic, anthropic[0]);
-		expect(chain[0]).toMatchObject({ model: anthropic[1], source: "role-profile" });
-	});
-	it("screens a Sonnet session with Sonnet itself (equal tier)", () => {
-		const chain = pick(anthropic, anthropic[1]);
-		expect(chain[0].model).toMatchObject({ id: "claude-sonnet-5" });
-	});
-	it("drops to Haiku only when the main model is Haiku (budget cap filters Sonnet out)", () => {
-		const chain = pick(anthropic, anthropic[2]);
-		expect(chain[0].model).toMatchObject({ id: "claude-haiku-4-5" });
+		expect(describeCandidate({ model: model("openai", "gpt-5-mini", 0.25), source: "economical" })).toContain(
+			"cheapest capable model within",
+		);
 	});
 });

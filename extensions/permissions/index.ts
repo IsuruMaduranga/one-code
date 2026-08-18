@@ -39,6 +39,7 @@ import type { TranscriptEntry } from "../auto-mode/transcript.ts";
 import { appendDecision, type DecisionEntry, decisionEntry } from "../auto-mode/decision-log.ts";
 import { loadProjectInstructions } from "../auto-mode/instructions.ts";
 import { classifierCandidates, describeCandidate, findConfigured } from "../auto-mode/model-select.ts";
+import { modelIdentity } from "../lib/model-policy.ts";
 import { isWithin, resolveForContainment, toAbsolute } from "../auto-mode/paths.ts";
 import { PauseTracker } from "../auto-mode/pause.ts";
 import { checkRecoverability } from "../auto-mode/recoverability.ts";
@@ -170,7 +171,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			available: badgeCtx.modelRegistry.getAvailable(),
 			sessionModel: badgeCtx.model,
 			configured: autoConfig.classifierModel,
-		}).filter((entry) => !classifierState.rejected.has(`${entry.model.provider}/${entry.model.id}`));
+			configuredSetForContainment: autoConfig.classifierModelSetFor,
+		}).candidates.filter((entry) => !classifierState.rejected.has(`${entry.model.provider}/${entry.model.id}`));
 		const first = chain[0];
 		return { classifier: first ? `${first.model.provider}/${first.model.id}` : undefined, pinned: false };
 	};
@@ -242,12 +244,13 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 
 	/** What would be tried, in order, before anything has been pinned. */
 	const describeChain = (ctx: ExtensionContext): string => {
-		const chain = classifierCandidates({
+		const { candidates } = classifierCandidates({
 			available: ctx.modelRegistry.getAvailable(),
 			sessionModel: ctx.model,
 			configured: autoConfig?.classifierModel,
+			configuredSetForContainment: autoConfig?.classifierModelSetFor,
 		});
-		return chain.length > 0 ? chain.map(describeCandidate).join(" → ") : "(no model available)";
+		return candidates.length > 0 ? candidates.map(describeCandidate).join(" → ") : "(no model available)";
 	};
 
 	// Session identity for the classifier's Session Context block (CC system[2]).
@@ -996,7 +999,9 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			return;
 		}
 		try {
-			persistClassifierModel(resolved, os.homedir());
+			// Stamp the session's containment so a later session on another provider
+			// treats this cross-provider setting as stale (parity with /subagent).
+			persistClassifierModel(resolved, os.homedir(), ctx.model ? modelIdentity(ctx.model).containment : undefined);
 		} catch (error) {
 			ctx.ui.notify(`Could not save classifier model: ${error instanceof Error ? error.message : String(error)}`, "error");
 			return;
