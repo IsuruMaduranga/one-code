@@ -591,3 +591,61 @@ was not separately stress-tested; the mutex makes that moot for our paths. Share
 parent auto-mode state (mode/rules/classifier) is intentionally shared with child
 calls for fidelity; child calls deliberately stay out of the parent's transcript
 and pauseTracker.
+
+## The live subagent panel: CC's select+Enter transcript swap (2026-08-18)
+
+**What was built.** Claude Code's below-editor agent tree, feel-complete: a strip
+of live children (activity · elapsed · ↓ tokens), down-arrow soft focus, and —
+the load-bearing part — **Enter swaps the visible transcript region to the
+selected child's live session** (streaming text, markdown, tool blocks, spinner),
+exactly like CC. Arrows only move the selection; Enter on `main`, esc, or typing
+restores the main transcript; switching agents is select+Enter again (no in-view
+tab/←→ — user-confirmed CC behavior). `x` / `ctrl+x ctrl+k` stop from the strip;
+PgUp/PgDn scroll an open view.
+
+**The transcript swap is a full-width NON-CAPTURING overlay, not a repaint.**
+The long-held belief "pi extensions cannot repaint the host transcript region"
+is true only of `ctx.ui.custom`'s default mode (it swaps the editor container).
+Overlay mode (`{overlay: true, overlayOptions}`) composites screen-relative over
+the visible viewport (pi-tui `compositeOverlays`), so `row:0, col:0, width:"100%"`
+with a bottom reserve for the editor+strip covers the transcript region and
+per-frame compositing restores it untouched on close. `nonCapturing: true` keeps
+keyboard focus in the editor, so one `onTerminalInput` hook drives everything.
+Rejected alternatives: the editor-container mode (reads as "attached below
+main", not "switched into" — the v1/v2 design this replaced), and a modal
+full-screen viewer with in-view agent switching (built, then deleted: not CC's
+model). Wart accepted: `done()` → `hideOverlay()` pops the top of the overlay
+stack, not ours by identity — so the panel keeps at most ONE overlay alive.
+
+**Live data is an event-tap (`LiveSink`), not disk-JSONL.** The in-process
+runner's `session.subscribe` already sees every child event; the sink forwards
+tool start/end, settled assistant text, and — for streaming — the
+`message_update` **message reference only** (the cumulative message arrives per
+provider delta; text is extracted lazily at paint time, spinner-style, keeping
+the hot path O(1) per delta). Rejected: tailing the child's session JSONL
+(second source of truth, fs polling, no streaming granularity).
+
+**Rendering matches the main transcript because it IS the main renderer.**
+Assistant prose goes through pi-tui's real `Markdown` component with
+pi-coding-agent's `getMarkdownTheme()`; instances are cached per settled block
+(WeakMap) and reused via `setText` for the streaming tail. pi-tui cannot be
+`require.resolve`d (pi-coding-agent's exports map is import-condition-only, no
+`./package.json` subpath — findings §15), so `prose.ts#resolvePiTuiEntry()`
+walks the node_modules candidates (nested under pi-coding-agent, then hoisted
+sibling) and imports the entry by file URL; on failure the view warns once and
+falls back to plain word-wrap. The view window is **tail-anchored** (scroll
+counts back from the end; 0 follows the stream) and fills to exactly its height
+— an overlay row not painted lets the main transcript bleed through.
+
+**The strip tracks live work only (linger).** A run that finishes — including
+an idle resident whose turn settled — stays in the strip for a 5s final beat
+(`STRIP_LINGER_MS`, clock frozen at the turn duration), then drops; when new
+work arrives (steer/resume) it wakes and rejoins. Runs stay in the registry
+forever: the view, `/agents`, and `SendMessage` still reach them. This matches
+CC (its tree drops finished agents) and was a user-reported divergence.
+
+**Verified live** (tmux, Haiku): per-delta streaming inside the view (captures
+2s apart show text advancing mid-code-block), markdown headings/bullets/fences
+rendered, selection-without-swap, Enter-swap/switch/close, typing-exit with the
+byte landing in the editor, PgUp scrollback, resume re-tracking ("Resuming…"),
+and the 5s linger-then-drop. Full unit suite green.

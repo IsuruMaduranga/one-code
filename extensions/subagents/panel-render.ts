@@ -6,9 +6,9 @@
  * index.ts; this file owns layout only, mirroring workflow/viewer.ts.
  */
 
-import { cutPlainText as cut, formatDuration, padPlainText } from "../lib/tui-render.ts";
+import { cutPlainText as cut, formatDuration, splitCell, splitRow } from "../lib/tui-render.ts";
 import { formatTokenCount } from "./usage.ts";
-import type { LiveRun, LiveStatus, TranscriptBlock } from "./live-runs.ts";
+import { type LiveRun, type LiveStatus, streamingText, type TranscriptBlock } from "./live-runs.ts";
 
 export interface Paint {
 	fg(color: string, text: string): string;
@@ -27,33 +27,38 @@ export interface PanelRow {
 	tokens: number;
 }
 
-/** Build the row list: `main` first, then newest-first children. `mainBusy` drives main's dot. */
-export function buildRows(runs: LiveRun[], mainBusy: boolean): PanelRow[] {
+/**
+ * A finished run stays in the strip this long (its "Completed"/"Failed" beat),
+ * then drops out — Claude Code's tree only tracks live work. The run itself
+ * stays in the registry: the viewer, /agents, and SendMessage still reach it.
+ */
+export const STRIP_LINGER_MS = 5000;
+
+/**
+ * Build the row list: `main` first, then newest-first children. `mainBusy`
+ * drives main's dot. Running children always show; settled ones — done,
+ * failed, or an idle resident whose turn ended — only within STRIP_LINGER_MS
+ * of finishing (finishedAt is stamped by finish() AND settle()).
+ */
+export function buildRows(runs: LiveRun[], mainBusy: boolean, now: number): PanelRow[] {
 	const main: PanelRow = {
 		label: "main",
 		activity: "",
 		status: mainBusy ? "running" : "idle",
 		tokens: 0,
 	};
-	const children = runs.map((run) => ({
-		run,
-		label: run.agentType,
-		activity: run.activity,
-		status: run.status,
-		startedAt: run.startedAt,
-		finishedAt: run.finishedAt,
-		tokens: run.tokens.output,
-	}));
+	const children = runs
+		.filter((run) => run.status === "running" || (run.finishedAt ?? now) > now - STRIP_LINGER_MS)
+		.map((run) => ({
+			run,
+			label: run.agentType,
+			activity: run.activity,
+			status: run.status,
+			startedAt: run.startedAt,
+			finishedAt: run.finishedAt,
+			tokens: run.tokens.output,
+		}));
 	return [main, ...children];
-}
-
-const cell = padPlainText;
-
-/** Left half padded against a right-aligned annotation, fusing when the left share is too small. */
-function splitCell(left: string, right: string, width: number): string {
-	const leftWidth = width - [...right].length - 2;
-	if ([...right].length === 0 || leftWidth < 8) return cell(`${left}  ${right}`.trimEnd(), width);
-	return `${cell(left, leftWidth)}  ${right}`;
 }
 
 const STATUS_ROW_STYLE: Partial<Record<LiveStatus, string>> = { failed: "error" };
@@ -81,7 +86,7 @@ export function renderStrip(input: StripInput, paint: Paint): string[] {
 	const width = Math.max(20, input.width);
 	const out: string[] = [];
 	if (input.selected !== undefined) {
-		out.push(paint.fg("dim", cut("↑/↓ to select · ⏎ view · esc back", width)));
+		out.push(paint.fg("dim", cut("↑/↓ select · ⏎ view · x stop · ctrl+x ctrl+k stop all · esc back", width)));
 	}
 	const shown = input.rows.slice(0, MAX_STRIP_ROWS);
 	for (const [index, row] of shown.entries()) {
@@ -117,24 +122,82 @@ export function spinnerVerb(startedAt: number, now: number): string {
 	return SPINNER_VERBS[Math.floor(seconds / 3) % SPINNER_VERBS.length];
 }
 
-const BLOCK_MARK: Record<TranscriptBlock["kind"], string> = { text: "", call: "●", result: "⎿" };
+/**
+ * Word-aware wrap for prose (task text, assistant text): breaks at spaces,
+ * hard-breaking only words longer than the width; preserves blank lines. Plain
+ * text in, plain lines out — painting happens after, per line.
+ */
+export function wrapProse(text: string, width: number): string[] {
+	const columns = Math.max(1, width);
+	const out: string[] = [];
+	for (const raw of text.replace(/\r\n/g, "\n").split("\n")) {
+		if (raw.trim() === "") {
+			out.push("");
+			continue;
+		}
+		let line = "";
+		for (const word of raw.split(" ")) {
+			const chars = [...word];
+			if (chars.length > columns) {
+				// A word wider than the screen (path, hash): flush, then hard-break it.
+				if (line) out.push(line);
+				let i = 0;
+				for (; i + columns < chars.length; i += columns) out.push(chars.slice(i, i + columns).join(""));
+				line = chars.slice(i).join("");
+				continue;
+			}
+			const candidate = line ? `${line} ${word}` : word;
+			if ([...candidate].length > columns) {
+				out.push(line);
+				line = word;
+			} else {
+				line = candidate;
+			}
+		}
+		out.push(line);
+	}
+	return out;
+}
+
+/**
+ * Renders one prose unit (assistant text) to painted lines at width. `ref`
+ * identifies the unit across frames so implementations can cache: a settled
+ * block passes the block object, the streaming tail passes a per-run string
+ * key. The default is plain `wrapProse`; index.ts injects a pi-tui Markdown
+ * renderer (prose.ts) so the child's text matches the main transcript.
+ */
+export type ProseRenderer = (ref: object | string, text: string, width: number) => string[];
+
+const plainProse: ProseRenderer = (_ref, text, width) => wrapProse(text, width);
 
 export interface TranscriptInput {
 	run: LiveRun;
 	width: number;
 	height: number;
+	/** Lines scrolled BACK from the tail; 0 follows the stream (Claude Code style). */
 	scroll: number;
 	now: number;
+	prose?: ProseRenderer;
+}
+
+export interface TranscriptOutput {
+	lines: string[];
+	/** Largest useful `scroll` for the current width/height — the caller's clamp. */
+	maxScroll: number;
 }
 
 /**
- * The full child session, Claude Code's Enter-to-view: a synthesized identity
- * header, the transcript blocks (scrollable), and a live spinner while running.
- * Returns painted lines already cut to width.
+ * The full child session view: a synthesized identity header, the transcript
+ * (wrapped, scrollable, tail-anchored so streamed text flows in like the main
+ * session), and a live spinner (or terminal status) as the bottom row — key
+ * hints live in the strip, like Claude Code's agent tree. Exactly `height`
+ * painted lines, blank-filled between body and status — as an overlay every
+ * row must paint, or the main transcript bleeds through the gap.
  */
-export function renderTranscript(input: TranscriptInput, paint: Paint): string[] {
+export function renderTranscript(input: TranscriptInput, paint: Paint): TranscriptOutput {
 	const { run } = input;
 	const width = Math.max(20, input.width);
+	const prose = input.prose ?? plainProse;
 	const out: string[] = [];
 
 	// Header: name + label chip, then identity, then a stats line.
@@ -151,17 +214,21 @@ export function renderTranscript(input: TranscriptInput, paint: Paint): string[]
 	out.push(paint.fg("dim", cut(stats, width)));
 	out.push("");
 
-	// Body: the transcript blocks, scrolled to a window that leaves room for the
-	// header already emitted plus the spinner + footer below. Text blocks are
-	// plain; call/result carry their mark. No fill-padding — the footer must stay
-	// on-screen even when the overlay is short.
-	const bodyRows = Math.max(3, input.height - out.length - 2);
-	const blockLines = run.blocks.map((block) => paintBlock(block, width, paint));
-	const start = Math.max(0, Math.min(input.scroll, Math.max(0, blockLines.length - bodyRows)));
+	// Body: settled blocks then the in-flight assistant text, all wrapped, then
+	// windowed ANCHORED TO THE TAIL — scroll counts lines back from the end, so
+	// the default view follows streaming like Claude Code.
+	const bodyRows = Math.max(3, input.height - out.length - 1);
+	const blockLines = run.blocks.flatMap((block) => blockToLines(block, width, paint, prose));
+	const partial = streamingText(run.streaming).trimEnd();
+	if (partial) for (const line of prose(`stream:${run.taskId}`, partial, width)) blockLines.push(line);
+	while (blockLines.length && blockLines.at(-1) === "") blockLines.pop();
+	const maxScroll = Math.max(0, blockLines.length - bodyRows);
+	const start = maxScroll - Math.max(0, Math.min(input.scroll, maxScroll));
 	const window = blockLines.slice(start, start + bodyRows);
 	for (const line of window) out.push(line);
+	while (out.length < bodyRows + 4) out.push(""); // fill so the status sits at the bottom edge
 
-	// Spinner (running) or a terminal line, then the footer hint.
+	// Bottom row: spinner while running, a terminal line otherwise.
 	if (run.status === "running") {
 		const verb = spinnerVerb(run.startedAt, input.now);
 		const spin = `${verb}… (${formatDuration(run.startedAt, undefined, input.now)}${
@@ -173,16 +240,21 @@ export function renderTranscript(input: TranscriptInput, paint: Paint): string[]
 			run.status === "failed" ? paint.fg("error", "✗ Failed") : run.status === "idle" ? paint.fg("dim", "Idle — resident") : paint.fg("dim", "✔ Completed");
 		out.push(cut(done, width));
 	}
-	out.push(paint.fg("dim", cut("↑/↓ scroll · tab next agent · x stop · ctrl+x ctrl+k stop all · esc back", width)));
-	return out;
+	return { lines: out, maxScroll };
 }
 
-function paintBlock(block: TranscriptBlock, width: number, paint: Paint): string {
-	const mark = BLOCK_MARK[block.kind];
-	if (block.kind === "text") return cut(block.text, width);
-	if (block.kind === "call") return `${paint.fg("accent", mark)} ${cut(`${block.tool}(${block.text})`, width - 2)}`;
-	const body = cut(block.text, width - 2);
-	return `  ${paint.fg("dim", mark)} ${block.isError ? paint.fg("error", body) : body}`;
+/**
+ * A block's painted lines: assistant text goes through the prose renderer,
+ * the task prompt stays plain-dim (it is input, not markdown output); both get
+ * a trailing blank for paragraph spacing. Call/result stay one line each, a
+ * blank after the result so tool groups read like the main transcript.
+ */
+function blockToLines(block: TranscriptBlock, width: number, paint: Paint, prose: ProseRenderer): string[] {
+	if (block.kind === "task") return [...wrapProse(block.text, width).map((l) => paint.fg("dim", l)), ""];
+	if (block.kind === "text") return [...prose(block, block.text, width), ""];
+	if (block.kind === "call") return [`${paint.fg("accent", "●")} ${cut(`${block.tool}(${block.text})`, width - 2)}`];
+	const body = cut(block.text, width - 4);
+	return [`  ${paint.fg("dim", "⎿")} ${block.isError ? paint.fg("error", body) : body}`, ""];
 }
 
 /** A small inverse-video chip for the label, degrading to `[label]` when narrow. */
@@ -190,7 +262,7 @@ function chip(label: string): string {
 	return label ? ` ${label} ` : "";
 }
 
-/** Header row: left name + right-aligned chip, painted, fused when narrow. */
+/** Header row: splitRow's layout, painted — left name (dropping the chip when fused/narrow). */
 function splitPaint(
 	paint: Paint,
 	leftColor: string,
@@ -199,11 +271,8 @@ function splitPaint(
 	width: number,
 	boldLeft?: (t: string) => string,
 ): string {
-	const leftWidth = width - [...right].length - 2;
-	if ([...right].length === 0 || leftWidth < 8) {
-		const line = cut(left, width);
-		return paint.fg(leftColor, boldLeft ? boldLeft(line) : line);
-	}
-	const l = padPlainText(left, leftWidth);
-	return `${paint.fg(leftColor, boldLeft ? boldLeft(l) : l)}  ${paint.fg("accent", paint.bold(right))}`;
+	const paintLeft = (t: string) => paint.fg(leftColor, boldLeft ? boldLeft(t) : t);
+	const row = splitRow(left, right, width);
+	if ("fused" in row) return paintLeft(cut(left, width));
+	return `${paintLeft(row.left)}  ${paint.fg("accent", paint.bold(row.right))}`;
 }

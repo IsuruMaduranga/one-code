@@ -24,32 +24,21 @@ import { type ChildHandle, type ChildOutcome, forkTaskMessage, type RpcChildHand
 import { sendToMainTool } from "./send-to-main-tool.ts";
 import { SessionTurnTracker } from "./session-turns.ts";
 import type { UsageTotals } from "./usage.ts";
-import type { TranscriptBlock } from "./live-runs.ts";
-import { summarizeArgs, textContent } from "../lib/tui-render.ts";
+import { streamingText, type TranscriptBlock } from "./live-runs.ts";
+import { cutPlainText, firstNonEmptyLine, summarizeArgs, textContent } from "../lib/tui-render.ts";
 
 /**
  * Optional live sink for the subagent panel: a one-line activity string from
- * the latest tool call, and transcript blocks (assistant text, tool calls,
- * tool results) as they stream. Purely observational — never affects the run.
+ * the latest tool call, transcript blocks (assistant text, tool calls, tool
+ * results) as they settle, and the in-flight assistant message per streaming
+ * delta (whole-so-far reference — the consumer extracts text lazily at paint
+ * time, spinner-style, to stay O(1) per delta). Purely observational — never
+ * affects the run.
  */
 export interface LiveSink {
 	onActivity?(toolName: string | undefined, args: unknown, lastText: string): void;
 	onBlock?(block: TranscriptBlock): void;
-}
-
-/** First non-empty line of a possibly-multiline string, trimmed to `max`. */
-function firstLine(text: string, max = 200): string {
-	const line = text.split("\n").map((l) => l.trimEnd()).find((l) => l.trim()) ?? "";
-	return line.length > max ? `${line.slice(0, max - 1)}…` : line;
-}
-
-/** The assistant text of a message_end event, if any (mirrors SessionTurnTracker). */
-function assistantText(message: { content?: unknown } | undefined): string {
-	const blocks = Array.isArray(message?.content) ? message.content : [];
-	return blocks
-		.filter((b): b is { type: string; text: string } => (b as { type?: string }).type === "text")
-		.map((b) => b.text)
-		.join("");
+	onStreaming?(message: { content?: unknown } | undefined): void;
 }
 
 /** Wall-clock cap on a single run/turn — a hung session shares the main event loop. */
@@ -199,10 +188,13 @@ export class SubagentRuntime {
 					sink?.onBlock?.({ kind: "call", tool: e.toolName ?? "tool", text: summarizeArgs(e.args) });
 					sink?.onActivity?.(e.toolName, e.args, tracker.turnText);
 				} else if (e.type === "tool_execution_end") {
-					const text = firstLine(textContent(e.result as { content?: Array<{ type: string; text?: string }> }));
+					const text = cutPlainText(firstNonEmptyLine(textContent(e.result as { content?: Array<{ type: string; text?: string }> })), 200);
 					sink?.onBlock?.({ kind: "result", tool: e.toolName ?? "tool", text: text || (e.isError ? "error" : "done"), isError: e.isError });
+				} else if (e.type === "message_update" && e.message?.role === "assistant") {
+					sink?.onStreaming?.(e.message);
 				} else if (e.type === "message_end" && e.message?.role === "assistant") {
-					const text = assistantText(e.message).trim();
+					sink?.onStreaming?.(undefined);
+					const text = streamingText(e.message).trim();
 					if (text) {
 						sink?.onBlock?.({ kind: "text", text });
 						sink?.onActivity?.(undefined, undefined, text);
@@ -253,15 +245,19 @@ export class SubagentRuntime {
 		let session: Session | undefined;
 
 		const result: Promise<ChildOutcome> = (async () => {
-			session = await this.buildChildSession(options);
-			const unsubscribe = this.wireTracker(session, tracker, options.onProgress, undefined, options.sink);
-
+			let unsubscribe: (() => void) | undefined;
 			const onAbort = () => void session?.abort();
 			options.signal?.addEventListener("abort", onAbort, { once: true });
 			const wallClock = setTimeout(() => void session?.abort(), WALL_CLOCK_CAP_MS);
 			wallClock.unref?.();
 
 			try {
+				// Construction happens INSIDE the try: a failure here (bad model,
+				// corrupt session file, loader error) must resolve to a failed
+				// outcome, never reject handle.result — call sites like the
+				// SendMessage resume path consume it with a bare .then().
+				session = await this.buildChildSession(options);
+				unsubscribe = this.wireTracker(session, tracker, options.onProgress, undefined, options.sink);
 				await session.prompt(task);
 				return tracker.turnOutcome();
 			} catch (error) {
@@ -269,8 +265,8 @@ export class SubagentRuntime {
 			} finally {
 				clearTimeout(wallClock);
 				options.signal?.removeEventListener("abort", onAbort);
-				unsubscribe();
-				session.dispose();
+				unsubscribe?.();
+				session?.dispose();
 			}
 		})();
 
@@ -340,8 +336,12 @@ export class SubagentRuntime {
 				if (exited) return;
 				exited = true;
 				clearTurnCap();
-				void session.abort().finally(() => session.dispose());
-				options.onExit?.();
+				// onExit only after the abort settles: it triggers worktree cleanup,
+				// which must not race an aborting session still writing files.
+				void session.abort().finally(() => {
+					session.dispose();
+					options.onExit?.();
+				});
 			},
 			snapshot: () => {
 				const text =

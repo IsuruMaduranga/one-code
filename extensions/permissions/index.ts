@@ -342,7 +342,9 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			// dirty, not a repo) still reaches the classifier.
 			if (containmentEligible && evidence.containedNonNetwork) {
 				const targets = evidence.writes.filter((w) => !w.outsideCwd && w.resolved).map((w) => w.resolved as string);
-				const rec = checkRecoverability(ctx.cwd, { targets, wholeTree: evidence.wholeTree });
+				// The same cwd the evidence resolved against — for a worktree-isolated
+				// child that is the worktree, not the parent checkout (ctx.cwd).
+				const rec = checkRecoverability(cwd, { targets, wholeTree: evidence.wholeTree });
 				if (rec.verdict === "recoverable") {
 					logDecision(ctx, { tool: toolName, subject, outcome: "allow", source: "pre-gate", reason: rec.reason });
 					return allow();

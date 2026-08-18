@@ -51,8 +51,9 @@ import { ccToolRenderers, customMessageText, notificationComponent, safeThemeBol
 import { deriveActivity, LiveRunRegistry } from "./live-runs.ts";
 import type { LiveSink } from "./runner.ts";
 import { SubagentWidget } from "./panel-widget.ts";
-import { renderTranscript } from "./panel-render.ts";
-import { decodeStripKey, decodeViewerKey } from "./panel-keys.ts";
+import { type ProseRenderer, renderTranscript } from "./panel-render.ts";
+import { decodeStripKey } from "./panel-keys.ts";
+import { createMarkdownProse } from "./prose.ts";
 
 /** The catalog shipped in this package: <package>/agents. */
 const BUNDLED_AGENTS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "agents");
@@ -143,7 +144,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	const registry = new RunRegistry();
 	/** Names with a foreground/respawned child currently running (send_message must wait for these). */
 	const runningNames = new Set<string>();
-	const liveChildren = new Set<{ kill(): void }>();
 	const residents = new Map<string, Resident>();
 
 	// The live subagent panel (Claude Code's below-editor agent tree): a registry
@@ -160,18 +160,23 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	 * fold into the existing onProgress, and settle/finish terminal marks.
 	 */
 	const trackLiveRun = (record: AgentRunRecord, request: RunRequest) => {
-		liveRuns.register({
-			taskId: record.taskId,
-			name: record.name,
-			agentType: request.agent,
-			model: request.model,
-			thinking: request.thinking,
-			task: request.task,
-			startedAt: Date.now(),
-		});
+		// A resumed run (SendMessage to a finished agent) re-enters its existing
+		// panel entry; only a never-seen taskId registers fresh.
+		if (!liveRuns.reactivate(record.taskId, request.task, Date.now())) {
+			liveRuns.register({
+				taskId: record.taskId,
+				name: record.name,
+				agentType: request.agent,
+				model: request.model,
+				thinking: request.thinking,
+				task: request.task,
+				startedAt: Date.now(),
+			});
+		}
 		const sink: LiveSink = {
 			onActivity: (tool, args, text) => liveRuns.setActivity(record.taskId, deriveActivity(tool, args, text)),
 			onBlock: (block) => liveRuns.block(record.taskId, block),
+			onStreaming: (message) => liveRuns.setStreaming(record.taskId, message),
 		};
 		return {
 			sink,
@@ -300,14 +305,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	pi.on("model_select", (event, ctx) => emitModelStatus(ctx, event.model));
 	pi.on("session_tree", (_event, ctx) => reconstructRuns(ctx));
 	pi.on("session_shutdown", () => {
-		for (const child of liveChildren) child.kill();
+		stopAllAgents();
 		panel.dispose();
 	});
 
-	// --- The subagent panel: below-editor strip soft focus + Enter-to-view -----
-
-	/** True while the transcript viewer owns the screen (strip yields all keys). */
-	let viewerOpen = false;
+	// --- The subagent panel: strip soft focus + Enter-to-view transcript swap ---
 
 	/** Stop one live agent by task id (foreground handle or background task). */
 	const stopAgent = (taskId: string) => liveHandles.get(taskId)?.kill();
@@ -315,38 +317,181 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		for (const [, handle] of liveHandles) handle.kill();
 	};
 
+	/**
+	 * Markdown prose for the transcript views — pi-tui's real renderer, loaded
+	 * lazily on first view; falls back to plain wrapped text with one warning.
+	 */
+	let prosePromise: Promise<ProseRenderer | undefined> | undefined;
+	const getProse = (ctx: ExtensionContext): Promise<ProseRenderer | undefined> =>
+		(prosePromise ??= createMarkdownProse().catch((error) => {
+			try {
+				ctx.ui.notify(`Subagent viewer: markdown rendering unavailable (${(error as Error).message}) — using plain text.`, "warning");
+			} catch {
+				// no UI — plain text is fine
+			}
+			return undefined;
+		}));
+
+	/**
+	 * Liveness for the transcript view: change-driven repaints (one registry
+	 * event per provider delta, coalesced to ~80ms) plus a 1s ticker for elapsed
+	 * time. `relevant` filters by the event's taskId so unrelated concurrent
+	 * children's deltas don't invalidate the view's cache.
+	 */
+	const liveRepaint = (tui: { requestRender(): void }, invalidate: () => void, relevant: (taskId?: string) => boolean = () => true) => {
+		let coalesce: ReturnType<typeof setTimeout> | undefined;
+		const repaint = () => {
+			invalidate();
+			tui.requestRender();
+		};
+		const unsubscribe = liveRuns.subscribe((taskId) => {
+			if (!relevant(taskId) || coalesce) return;
+			coalesce = setTimeout(() => {
+				coalesce = undefined;
+				repaint();
+			}, 80);
+			coalesce.unref?.();
+		});
+		const ticker = setInterval(repaint, 1000);
+		ticker.unref?.();
+		return {
+			repaint,
+			cleanup: () => {
+				clearInterval(ticker);
+				if (coalesce) clearTimeout(coalesce);
+				unsubscribe();
+			},
+		};
+	};
+
+	/**
+	 * Claude Code's agent view: arrows only move the strip selection — Enter
+	 * swaps the transcript region to the selected child (a non-capturing
+	 * full-width overlay composited over the main transcript; the editor keeps
+	 * focus, strip keys keep working). Enter on another row switches the view;
+	 * Enter on `main`, esc, or typing closes it and the main transcript is back.
+	 */
+	let view: { retarget(taskId: string): void; scrollBy(delta: number): void; close(): void } | undefined;
+	/** Rows kept clear at the bottom: token counter + editor(3) + mode line + strip hint + strip rows + cwd/status(2) + one spare. */
+	const viewReserve = () => panel.rowCount() + 9;
+
+	const openView = (ctx: ExtensionContext, taskId: string) => {
+		if (view) return view.retarget(taskId);
+		let currentId = taskId;
+		let scroll = 0;
+		let maxScroll = 0;
+		let closed = false;
+		let repaintFn: (() => void) | undefined;
+		let doneFn: ((result: null) => void) | undefined;
+		const entry = {
+			retarget(id: string) {
+				if (currentId === id) return;
+				currentId = id;
+				scroll = 0;
+				repaintFn?.();
+			},
+			scrollBy(delta: number) {
+				scroll = Math.max(0, Math.min(maxScroll, scroll + delta));
+				repaintFn?.();
+			},
+			close() {
+				if (closed) return;
+				closed = true;
+				if (view === entry) view = undefined;
+				doneFn?.(null);
+			},
+		};
+		view = entry;
+		void (async () => {
+			const prose = await getProse(ctx);
+			if (closed) return;
+			await ctx.ui.custom<null>(
+				(tui, theme, _keybindings, done) => {
+					doneFn = done;
+					// close() raced ahead of the factory — dissolve as soon as we exist.
+					if (closed) queueMicrotask(() => done(null));
+					const paint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme) };
+					let cache: { width: number; lines: string[] } | undefined;
+					const live = liveRepaint(
+						tui,
+						() => {
+							cache = undefined;
+						},
+						(taskId) => taskId === undefined || taskId === currentId,
+					);
+					repaintFn = live.repaint;
+					const height = () => Math.max(8, tui.terminal.rows - viewReserve());
+					return {
+						render: (width: number) => {
+							if (cache?.width === width) return cache.lines;
+							const run = liveRuns.get(currentId);
+							let lines: string[];
+							if (run) {
+								const transcript = renderTranscript({ run, width, height: height(), scroll, now: Date.now(), prose }, paint);
+								maxScroll = transcript.maxScroll;
+								lines = transcript.lines;
+							} else {
+								lines = [paint.fg("dim", "agent gone")];
+							}
+							cache = { width, lines: lines.map((line) => truncateLine(line, width)) };
+							return cache.lines;
+						},
+						invalidate: () => {
+							cache = undefined;
+						},
+						dispose: () => live.cleanup(),
+					};
+				},
+				{ overlay: true, overlayOptions: { row: 0, col: 0, width: "100%", nonCapturing: true } },
+			);
+		})().catch(() => {
+			if (view === entry) view = undefined;
+		});
+	};
+	const closeView = () => view?.close();
+
 	let panelHookRegistered = false;
 	const registerPanelInputHook = (registerCtx: ExtensionContext) => {
 		if (panelHookRegistered || !registerCtx.hasUI) return;
 		panelHookRegistered = true;
-		const leave = () => panel.setFocus(undefined);
+		let chordArmed = false;
+		const leave = () => {
+			panel.setFocus(undefined);
+			closeView();
+		};
 		const DOWN_KEYS = new Set(["\x1b[B", "\x1bOB"]);
 		try {
 			registerCtx.ui.onTerminalInput((data) => {
 				const ctx = lastCtx ?? registerCtx;
-				if (viewerOpen || panel.rowCount() <= 1) {
-					if (panel.focusIndex !== undefined) leave();
-					return undefined;
-				}
 				// Enter focus: down-arrow while the editor holds real focus. Unlike the
 				// workflow strip we do NOT require the editor to be idle — the whole
 				// point is inspecting agents that run while the main turn is in flight.
+				// This branch is the per-keystroke hot path — the O(rows) rowCount()
+				// runs only once a Down actually asks to focus, never on plain typing.
 				if (panel.focusIndex === undefined) {
 					if (!DOWN_KEYS.has(data) || !panel.editorFocused()) return undefined;
+					if (panel.rowCount() <= 1) return undefined;
 					panel.setFocus(0);
 					return { consume: true };
+				}
+				// The strip emptied under us (finished rows lingered out) — let go.
+				if (panel.rowCount() <= 1) {
+					leave();
+					return undefined;
 				}
 				// Focus moved to a dialog/overlay — drop soft focus, let it have the key.
 				if (!panel.editorFocused()) {
 					leave();
 					return undefined;
 				}
-				const key = decodeStripKey(data);
-				if (!key) {
+				const decoded = decodeStripKey(data, chordArmed);
+				chordArmed = decoded.chordArmed;
+				if (!decoded.key) {
+					if (chordArmed) return { consume: true }; // ctrl+x armed the stop-all chord
 					leave();
 					return undefined; // typing resumes in the editor, byte included
 				}
-				switch (key) {
+				switch (decoded.key) {
 					case "up":
 						if (panel.focusIndex === 0) leave();
 						else panel.setFocus(panel.focusIndex - 1);
@@ -359,115 +504,34 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						// While the model streams, esc must still interrupt it — consume only when idle.
 						return ctx.isIdle() ? { consume: true } : undefined;
 					case "open": {
+						// Claude Code's model: Enter swaps the view to the selection (and
+						// switches an open view); Enter on `main` restores the main
+						// transcript. Focus stays in the strip for the next switch.
 						const run = panel.selectedRun();
-						leave();
-						// The `main` row has no child to view — Enter just returns to it.
-						if (run) void openAgentViewer(ctx, run.taskId);
+						if (run) openView(ctx, run.taskId);
+						else closeView();
 						return { consume: true };
 					}
+					case "stop": {
+						const run = panel.selectedRun();
+						if (run) stopAgent(run.taskId);
+						return { consume: true };
+					}
+					case "stopAll":
+						stopAllAgents();
+						return { consume: true };
+					case "pageUp":
+						view?.scrollBy(10);
+						return { consume: true };
+					case "pageDown":
+						view?.scrollBy(-10);
+						return { consume: true };
 				}
 			});
 		} catch {
 			// Mode without raw terminal input (print/RPC) — the strip is view-only.
 		}
 	};
-
-	/**
-	 * Claude Code's Enter-to-view: a full-screen live transcript of one child —
-	 * synthesized header, streaming ● call / ⎿ result blocks, a live spinner — and
-	 * the stop / stop-all / next-agent keys. Liveness comes from a 400ms ticker
-	 * (findings §15: the memoized render keeps per-frame cost at a map lookup).
-	 */
-	async function openAgentViewer(ctx: ExtensionContext, taskId: string): Promise<void> {
-		viewerOpen = true;
-		let currentId = taskId;
-		let scroll = 0;
-		let chordArmed = false;
-		try {
-			await ctx.ui.custom<null>((tui, theme, _keybindings, done) => {
-				const paint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme) };
-				let cache: { width: number; lines: string[] } | undefined;
-				const repaint = () => {
-					cache = undefined;
-					tui.requestRender();
-				};
-				const ticker = setInterval(repaint, 400);
-				ticker.unref?.();
-				// Leave room for the editor, the strip, and the status line below the
-				// overlay so the transcript's footer hint stays on-screen.
-				const height = () => Math.max(12, tui.terminal.rows - 8);
-				return {
-					render: (width: number) => {
-						if (cache?.width === width) return cache.lines;
-						const run = liveRuns.get(currentId);
-						const lines = run
-							? renderTranscript({ run, width, height: height(), scroll, now: Date.now() }, paint)
-							: [paint.fg("dim", "agent gone")];
-						cache = { width, lines: lines.map((line) => truncateLine(line, width)) };
-						return cache.lines;
-					},
-					handleInput: (data: string) => {
-						const decoded = decodeViewerKey(data, chordArmed);
-						chordArmed = decoded.chordArmed;
-						if (!decoded.key) return;
-						const close = () => {
-							clearInterval(ticker);
-							done(null);
-						};
-						const runs = liveRuns.list();
-						const idx = runs.findIndex((r) => r.taskId === currentId);
-						switch (decoded.key) {
-							case "up":
-								scroll = Math.max(0, scroll - 1);
-								repaint();
-								return;
-							case "down":
-								scroll += 1;
-								repaint();
-								return;
-							case "pageUp":
-								scroll = Math.max(0, scroll - 10);
-								repaint();
-								return;
-							case "pageDown":
-								scroll += 10;
-								repaint();
-								return;
-							case "nextAgent":
-							case "prevAgent": {
-								if (!runs.length) return;
-								const delta = decoded.key === "nextAgent" ? 1 : -1;
-								const next = (idx + delta + runs.length) % runs.length;
-								currentId = runs[next].taskId;
-								scroll = 0;
-								repaint();
-								return;
-							}
-							case "stop":
-								stopAgent(currentId);
-								repaint();
-								return;
-							case "stopAll":
-								stopAllAgents();
-								repaint();
-								return;
-							case "close":
-								return close();
-						}
-					},
-					invalidate: () => {
-						cache = undefined;
-					},
-					dispose: () => {
-						clearInterval(ticker);
-					},
-				};
-			});
-		} finally {
-			viewerOpen = false;
-			panel.refresh();
-		}
-	}
 
 	// Compact transcript rendering for the notifications this extension injects
 	// (full body on ctrl+o); the verbose framing stays model-only.
@@ -559,7 +623,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			sink: live.sink,
 			onMessageToMain: (message, summary) => notifyAgentMessage(request.name, message, summary),
 		});
-		liveChildren.add(handle);
 		liveHandles.set(record.taskId, handle);
 		onStarted?.(handle, worktree);
 
@@ -594,7 +657,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				failed: true,
 			};
 		} finally {
-			liveChildren.delete(handle);
 			runningNames.delete(request.name);
 		}
 	};
@@ -901,14 +963,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						},
 						onExit: () => {
 							live.finish(false);
-							liveChildren.delete(handle);
 							if (residents.get(p.record.name) === resident) residents.delete(p.record.name);
 							if (worktree) void cleanupWorktree(ctx.cwd, worktree);
 						},
 					});
 					resident.handle = handle;
 					residents.set(p.record.name, resident);
-					liveChildren.add(handle);
 					liveHandles.set(p.record.taskId, handle);
 
 					const task: BackgroundTask = {
@@ -1103,6 +1163,15 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			});
 
 			runningNames.add(record.name);
+			// Re-enter the panel: the finished run's entry flips back to running (or
+			// registers fresh after a session resume) and streams this turn live.
+			const live = trackLiveRun(record, {
+				agent: record.agent,
+				name: record.name,
+				task: params.message,
+				model: record.model,
+				thinking: record.thinking,
+			});
 			const runtime = await getRuntime(ctx);
 			const handle = runtime.run({
 				agent: loadAgents(ctx.cwd).find((a) => a.name === record.agent),
@@ -1111,10 +1180,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				sessionFile,
 				model: record.model,
 				thinking: record.thinking,
-				onProgress: () => {},
+				onProgress: (toolCalls, _text, usage) => live.progress(toolCalls, usage),
+				sink: live.sink,
 				onMessageToMain: (message, summary) => notifyAgentMessage(record.name, message, summary),
 			});
-			liveChildren.add(handle);
+			liveHandles.set(record.taskId, handle);
 
 			const task: BackgroundTask = {
 				id: taskId,
@@ -1129,8 +1199,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			pi.events.emit(TASK_REGISTER_CHANNEL, task);
 
 			void handle.result.then((outcome) => {
-				liveChildren.delete(handle);
 				runningNames.delete(record.name);
+				live.finish(Boolean(outcome.failed));
 				task.status = outcome.failed ? "failed" : "completed";
 				task.finishedAt = Date.now();
 				finish();
@@ -1193,13 +1263,16 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	pi.registerCommand("agents", {
 		description: "Open the live subagent panel, or list available agents",
 		handler: async (_args, ctx) => {
-			// With live children, open the transcript viewer (Claude Code's agent
-			// panel) on the newest; otherwise there is nothing running, so list the
-			// catalog the way the tool's action:"list" does.
-			const runs = ctx.hasUI ? liveRuns.list() : [];
-			if (runs.length) {
-				await openAgentViewer(ctx, runs[0].taskId);
-				return;
+			// With live children, focus the strip on the newest and open its view
+			// (Claude Code's agent panel); otherwise there is nothing running, so
+			// list the catalog the way the tool's action:"list" does.
+			if (ctx.hasUI && panel.rowCount() > 1) {
+				panel.setFocus(1); // row 0 is `main`; 1 is the newest live child
+				const run = panel.selectedRun();
+				if (run) {
+					openView(ctx, run.taskId);
+					return;
+				}
 			}
 			ctx.ui.notify(`Available agents:\n${describeAgents(ctx.cwd)}`, "info");
 		},

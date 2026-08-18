@@ -11,7 +11,7 @@
  * before painting so ANSI escapes never enter the width accounting.
  */
 
-import { cutPlainText as cut, formatDuration, padPlainText, wrapPlainText } from "../lib/tui-render.ts";
+import { cutPlainText as cut, formatDuration, padPlainText, splitCell, splitRow, wrapPlainText } from "../lib/tui-render.ts";
 import { formatTokenCount } from "../subagents/usage.ts";
 import type { AgentRecord, RunStatus } from "./types.ts";
 
@@ -201,23 +201,9 @@ export function clampViewerState(state: ViewerState, runs: ViewerRunSnapshot[]):
 /** Cut then pad plain text to exactly `width` columns. */
 const cell = padPlainText;
 
-/**
- * Split a row into a left half padded against a right-aligned annotation
- * (two-space gap), fusing into one cut line when the left share would drop
- * below readability. The single home of this layout rule — the header, the
- * pane rows, and the status strip all build on it.
- */
-function splitRow(left: string, right: string, width: number): { fused: string } | { left: string; right: string } {
-	const leftWidth = width - [...right].length - 2;
-	if ([...right].length === 0 || leftWidth < 8) return { fused: cut(`${left}  ${right}`.trimEnd(), width) };
-	return { left: cell(left, leftWidth), right };
-}
-
-/** splitRow flattened to one plain string, exactly `width` wide. */
-function splitCell(left: string, right: string, width: number): string {
-	const row = splitRow(left, right, width);
-	return "fused" in row ? cell(row.fused, width) : `${row.left}  ${row.right}`;
-}
+// The splitRow/splitCell layout rule (left half padded against a right-aligned
+// annotation, fused when narrow) is shared from lib/tui-render.ts — the
+// header, the pane rows, and the status strip all build on it.
 
 const STATUS_MARK: Record<AgentRecord["status"], string> = {
 	running: "●",

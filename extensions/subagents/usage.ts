@@ -19,6 +19,18 @@ export function emptyUsage(): UsageTotals {
 	return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0, cost: 0 };
 }
 
+/** Field-wise sum of two totals (pure — neither input is mutated). */
+export function sumUsage(a: UsageTotals, b: UsageTotals): UsageTotals {
+	return {
+		input: a.input + b.input,
+		output: a.output + b.output,
+		cacheRead: a.cacheRead + b.cacheRead,
+		cacheWrite: a.cacheWrite + b.cacheWrite,
+		total: a.total + b.total,
+		cost: a.cost + b.cost,
+	};
+}
+
 /** Add one assistant message's `usage` (untrusted JSONL) into `totals`. */
 export function addUsage(totals: UsageTotals, usage: unknown): void {
 	if (!usage || typeof usage !== "object") return;

@@ -22,6 +22,13 @@ export class SubagentWidget {
 	private timer: ReturnType<typeof setTimeout> | undefined;
 	private ticker: ReturnType<typeof setInterval> | undefined;
 	focusIndex: number | undefined;
+	/**
+	 * The selected row's identity — "main" or a run's taskId. Rows shift as
+	 * runs register (newest-first) and expire (linger), so every read
+	 * re-anchors focusIndex to this id; Enter/x then act on the run the user
+	 * actually selected, never on whatever slid into its slot.
+	 */
+	private focusId: string | undefined;
 	tui: TuiLike | undefined;
 	editorBaseline: unknown;
 
@@ -32,11 +39,6 @@ export class SubagentWidget {
 		registry.subscribe(() => this.schedule());
 	}
 
-	/** Re-set to re-insert below rows other extensions just set (last-write order). */
-	refresh(): void {
-		this.schedule();
-	}
-
 	private rows(): PanelRow[] {
 		const ctx = this.getCtx();
 		let mainBusy = false;
@@ -45,7 +47,7 @@ export class SubagentWidget {
 		} catch {
 			mainBusy = false;
 		}
-		return buildRows(this.registry.list(), mainBusy);
+		return buildRows(this.registry.list(), mainBusy, Date.now());
 	}
 
 	rowCount(): number {
@@ -55,24 +57,28 @@ export class SubagentWidget {
 	/** The focused row's run (undefined for the `main` row or when unfocused). */
 	selectedRun() {
 		if (this.focusIndex === undefined) return undefined;
-		return this.rows()[this.focusIndex]?.run;
-	}
-
-	isMainSelected(): boolean {
-		return this.focusIndex !== undefined && !this.rows()[this.focusIndex]?.run;
+		const rows = this.rows();
+		this.anchor(rows);
+		return this.focusIndex === undefined ? undefined : rows[this.focusIndex]?.run;
 	}
 
 	setFocus(index: number | undefined): void {
 		this.focusIndex = index;
+		this.focusId = index === undefined ? undefined : (this.rows()[index]?.run?.taskId ?? "main");
 		this.render();
 	}
 
-	editorFocusedAndIdle(ctx: ExtensionContext): boolean {
-		if (!this.editorFocused()) return false;
-		try {
-			return ctx.ui.getEditorText().trim() === "";
-		} catch {
-			return false;
+	/** Re-derive focusIndex from focusId against the given rows (see focusId doc). */
+	private anchor(rows: PanelRow[]): void {
+		if (this.focusIndex === undefined || this.focusId === undefined) return;
+		const shown = Math.min(rows.length, MAX_STRIP_ROWS);
+		const idx = this.focusId === "main" ? 0 : rows.findIndex((r) => r.run?.taskId === this.focusId);
+		if (idx >= 0 && idx < shown) {
+			this.focusIndex = idx;
+		} else {
+			// The selected run left the strip — fall back to the nearest row.
+			this.focusIndex = Math.max(0, Math.min(this.focusIndex, shown - 1));
+			this.focusId = rows[this.focusIndex]?.run?.taskId ?? "main";
 		}
 	}
 
@@ -101,16 +107,15 @@ export class SubagentWidget {
 		const ctx = this.getCtx();
 		if (!ctx?.hasUI) return;
 		const rows = this.rows();
-		this.syncTicker();
+		this.syncTicker(rows.length > 1);
 		// Only the synthetic `main` row exists → nothing to show yet.
 		if (rows.length <= 1) {
 			ctx.ui.setWidget(WIDGET_KEY, undefined);
 			this.focusIndex = undefined;
+			this.focusId = undefined;
 			return;
 		}
-		if (this.focusIndex !== undefined && this.focusIndex >= this.rowCount()) {
-			this.focusIndex = Math.max(0, this.rowCount() - 1);
-		}
+		this.anchor(rows);
 		const selected = this.focusIndex;
 		const now = Date.now();
 		ctx.ui.setWidget(
@@ -130,8 +135,12 @@ export class SubagentWidget {
 		);
 	}
 
-	private syncTicker(): void {
-		const active = this.registry.anyRunning();
+	/**
+	 * Tick while any child row is shown — elapsed times move, and a finished
+	 * row expires out of the strip (buildRows' linger window) without needing
+	 * another registry event.
+	 */
+	private syncTicker(active: boolean): void {
 		if (active && !this.ticker) {
 			this.ticker = setInterval(() => this.render(), 1000);
 			this.ticker.unref?.();

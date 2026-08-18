@@ -117,6 +117,29 @@ export function padPlainText(text: string, width: number): string {
 	return shortened + " ".repeat(Math.max(0, width - [...shortened].length));
 }
 
+/** First non-empty line of a possibly-multiline string, trimmed. */
+export function firstNonEmptyLine(text: string): string {
+	return text.split("\n").map((l) => l.trim()).find(Boolean) ?? "";
+}
+
+/**
+ * Split a row into a left half padded against a right-aligned annotation
+ * (two-space gap), fusing into one cut line when the left share would drop
+ * below readability. The single home of this layout rule — strip rows, pane
+ * rows, and transcript headers all build on it.
+ */
+export function splitRow(left: string, right: string, width: number): { fused: string } | { left: string; right: string } {
+	const leftWidth = width - [...right].length - 2;
+	if ([...right].length === 0 || leftWidth < 8) return { fused: cutPlainText(`${left}  ${right}`.trimEnd(), width) };
+	return { left: padPlainText(left, leftWidth), right };
+}
+
+/** splitRow flattened to one plain string, exactly `width` wide. */
+export function splitCell(left: string, right: string, width: number): string {
+	const row = splitRow(left, right, width);
+	return "fused" in row ? padPlainText(row.fused, width) : `${row.left}  ${row.right}`;
+}
+
 /** Hard-wrap plain text to `width` columns by code point, preserving blank lines. */
 export function wrapPlainText(text: string, width: number): string[] {
 	const columns = Math.max(1, width);

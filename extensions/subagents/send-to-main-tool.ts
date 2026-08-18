@@ -26,8 +26,24 @@ export function sendToMainTool(onMessage: (message: string, summary?: string) =>
 			summary: Type.Optional(Type.String({ description: "5-10 word preview shown in the UI" })),
 		}) as never,
 		async execute(_toolCallId: string, params: unknown) {
-			const p = (params ?? {}) as { message?: unknown; summary?: unknown };
-			const message = typeof p.message === "string" ? p.message : "";
+			const p = (params ?? {}) as { to?: unknown; message?: unknown; summary?: unknown };
+			// Fail loud (docs/decisions/tools.md): a wrong recipient or a missing
+			// message returns isError with the fix named, never a silent success.
+			if (p.to !== undefined && p.to !== "main") {
+				return {
+					content: [{ type: "text" as const, text: `From inside a subagent the only recipient is "main" — got ${JSON.stringify(p.to)}. Omit \`to\` or pass "main".` }],
+					details: {},
+					isError: true,
+				};
+			}
+			const message = typeof p.message === "string" ? p.message.trim() : "";
+			if (!message) {
+				return {
+					content: [{ type: "text" as const, text: "`message` is required: pass the plain text to deliver to the main conversation." }],
+					details: {},
+					isError: true,
+				};
+			}
 			const summary = typeof p.summary === "string" ? p.summary : undefined;
 			onMessage(message, summary);
 			return {
