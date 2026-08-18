@@ -610,8 +610,13 @@ run" option for large fan-outs.
 whether pi's underlying `ctx.ui.select` itself tolerates truly concurrent callers
 was not separately stress-tested; the mutex makes that moot for our paths. Shared
 parent auto-mode state (mode/rules/classifier) is intentionally shared with child
-calls for fidelity; child calls deliberately stay out of the parent's transcript
-and pauseTracker.
+calls for fidelity; child calls deliberately stay out of the parent's transcript,
+and child blocks do not count toward the parent's pauseTracker. **Amended
+2026-08-18:** an ACTIVE pause is now honoured — a paused session's child
+classify-eligible calls skip the classifier and fall through to the resume
+prompt on the parent's terminal, exactly like the main handler's paused branch
+(before this, unattended child work could continue through a pause meant as a
+full-session stop awaiting the user).
 
 ## The live subagent panel: CC's select+Enter transcript swap (2026-08-18)
 

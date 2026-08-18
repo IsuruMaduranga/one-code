@@ -217,8 +217,16 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		classifierState.notified.clear();
 		applyBadge();
 	};
-	let projectInstructions: string | undefined;
-	let instructionsLoaded = false;
+	// Keyed by cwd: a worktree-isolated child classifies against ITS checkout's
+	// CLAUDE.md/AGENTS.md, and must not poison the cache the main agent's own
+	// calls (a different cwd) read for the rest of the session.
+	const projectInstructionsByCwd = new Map<string, string | undefined>();
+	const instructionsFor = (cwd: string): string | undefined => {
+		if (!projectInstructionsByCwd.has(cwd)) {
+			projectInstructionsByCwd.set(cwd, loadProjectInstructions(cwd, os.homedir()));
+		}
+		return projectInstructionsByCwd.get(cwd);
+	};
 	const pauseTracker = new PauseTracker();
 	/**
 	 * Which model the classifier settled on. Held here so the choice is pinned for
@@ -323,10 +331,6 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	) => {
 		const cwd = opts?.cwd ?? ctx.cwd;
 		autoConfig ??= loadAutoModeConfig(os.homedir());
-		if (!instructionsLoaded) {
-			projectInstructions = loadProjectInstructions(cwd, os.homedir());
-			instructionsLoaded = true;
-		}
 
 		const home = os.homedir();
 		const allow = () => ({ decision: "allow" as const, reason: "", tier: undefined });
@@ -386,7 +390,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				toolName,
 				transcript: opts?.appendEntry ? [...transcript, opts.appendEntry] : [...transcript],
 				userMessages: [...userMessages],
-				claudeMd: projectInstructions,
+				claudeMd: instructionsFor(cwd),
 				username: classifierUsername,
 				environment: autoConfig.environment,
 				// AutoModeConfig is structurally a RuleExtras (hardDeny/softDeny/allow).
@@ -458,7 +462,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// Dropped so edited autoMode rules and instruction files are picked up on
 		// reload rather than staying cached for the life of the process.
 		autoConfig = undefined;
-		instructionsLoaded = false;
+		projectInstructionsByCwd.clear();
 
 		const flagMode = normalizePermissionMode(pi.getFlag("permission-mode"));
 		const inheritedMode = isSubagentChild ? normalizePermissionMode(process.env[MODE_ENV]) : undefined;
@@ -748,10 +752,12 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	 * interactive ask), so a child inherits the parent's mode and hits the real gate
 	 * (findings §17.1). Differences from the main path, all deliberate: it never
 	 * mutates the parent's live transcript (the child action is appended to a copy
-	 * for the classifier) and uses the child's own cwd; it does not touch the
-	 * parent's pauseTracker (a child is bounded by its wall-clock cap and the
-	 * hand-back return review instead); and an ask prompt renders on the parent's
-	 * terminal via lastReviewCtx, serialized. No parent UI reachable → fail closed.
+	 * for the classifier) and uses the child's own cwd; child blocks do not COUNT
+	 * toward the parent's pauseTracker (a child is bounded by its wall-clock cap
+	 * and the hand-back return review instead) but an active pause IS honoured —
+	 * a paused session's child calls fall through to the resume prompt; and an ask
+	 * prompt renders on the parent's terminal via lastReviewCtx, serialized. No
+	 * parent UI reachable → fail closed.
 	 */
 	const evaluateChildToolCall = async (call: ChildToolCall): Promise<ChildGateDecision> => {
 		const ctx = lastReviewCtx;
@@ -790,7 +796,11 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// Auto mode: the classifier screens the child's call, exactly as it screens
 		// the main agent's. A block is returned to the child (never a per-action
 		// prompt), so it can find a safe alternative — auto mode runs unattended.
-		if (!floorReason && result.decision === "classify") {
+		// While the loop-breaker pause is in effect, the classifier is NOT consulted:
+		// the call falls through to the resume prompt below, exactly as the main
+		// handler's paused branch does — a pause is a full-session stop awaiting the
+		// user, and child work must not continue through it unattended.
+		if (!floorReason && result.decision === "classify" && !pauseTracker.isPaused()) {
 			if (!ctx) return { block: true, reason: DENIED_NON_INTERACTIVE };
 			const appendEntry: TranscriptEntry = {
 				kind: "tool",
@@ -823,11 +833,30 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// ask: needs the user. Bubble it to the parent's terminal; no UI → fail closed.
 		if (!ctx || !ctx.hasUI) return { block: true, reason: DENIED_NON_INTERACTIVE };
 		const preview = previewSubject(subject);
-		const title =
-			result.cause === "protected-path"
+		// Reaching here from the classify branch only happens while auto mode is
+		// paused — this is the resume prompt, not a per-action approval.
+		const pausedResume = mode === "auto" && result.decision === "classify";
+		const title = pausedResume
+			? `Auto mode is paused after repeated blocks — approve to resume.\n\n  subagent's ${toolName}: ${preview || "(no arguments)"}`
+			: result.cause === "protected-path"
 				? `Allow a subagent's ${toolName} to write a protected path?\n\n  ${preview}\n\n  This path configures your tooling or this agent, so allow rules do not pre-approve it.`
 				: `Allow a subagent's ${toolName}?\n\n  ${preview || "(no arguments)"}`;
 		const choice = await serializePrompt(() => ctx.ui.select(title, [YES, YES_SESSION, NO]));
+
+		if (pausedResume) {
+			logDecision(ctx, {
+				tool: toolName,
+				subject,
+				outcome: choice === YES || choice === YES_SESSION ? "allow" : "block",
+				source: "user",
+				reason: "resume after pause",
+			});
+			// Approving a prompted call is what resumes a paused auto mode.
+			if (choice === YES || choice === YES_SESSION) {
+				pauseTracker.resume();
+				applyBadge();
+			}
+		}
 
 		if (choice === YES) return undefined;
 		if (choice === YES_SESSION) {
@@ -909,7 +938,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				toolName: "subagent-review",
 				transcript: [...transcript, ...childEntries],
 				userMessages: [...userMessages],
-				claudeMd: projectInstructions,
+				claudeMd: instructionsFor(ctx.cwd),
 				username: classifierUsername,
 				environment: autoConfig.environment,
 				// AutoModeConfig is structurally a RuleExtras (hardDeny/softDeny/allow).
@@ -1095,6 +1124,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				config: autoConfig ?? loadAutoModeConfig(os.homedir()),
 				defaultEnvironment: DEFAULT_ENVIRONMENT,
 				signal: ctx.signal,
+				onNotice: (message, level) => ctx.ui.notify(message, level),
 			});
 		} catch (error) {
 			ctx.ui.notify(`Auto-mode setup failed: ${(error as Error).message}. Nothing was written.`, "warning");

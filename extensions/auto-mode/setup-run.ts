@@ -161,6 +161,8 @@ export interface DraftDeps {
 	config: AutoModeConfig;
 	defaultEnvironment: string[];
 	signal?: AbortSignal;
+	/** Surfaces candidate-chain warnings (a stale or cross-provider classifierModel) to the user. */
+	onNotice?: (message: string, level: "info" | "warning") => void;
 }
 
 /**
@@ -170,12 +172,17 @@ export interface DraftDeps {
  * persist silently wrong.
  */
 export async function draftSetup(facts: SetupFacts, deps: DraftDeps): Promise<SetupDraft> {
-	const chain = classifierCandidates({
+	const built = classifierCandidates({
 		available: deps.registry.getAvailable(),
 		sessionModel: deps.sessionModel,
 		configured: deps.config.classifierModel,
 		configuredSetForContainment: deps.config.classifierModelSetFor,
-	}).candidates.map((entry) => entry.model);
+	});
+	// The same warnings runClassifier surfaces during real gating (a stale or
+	// cross-provider classifierModel) — setup is exactly where the user can fix
+	// them, so they must not be dropped here.
+	for (const notice of built.notices) deps.onNotice?.(notice.text, notice.level);
+	const chain = built.candidates.map((entry) => entry.model);
 	const models: Model<Api>[] = [];
 	for (const model of deps.sessionModel ? [deps.sessionModel, ...chain] : chain) {
 		if (!models.some((seen) => seen.provider === model.provider && seen.id === model.id)) models.push(model);
