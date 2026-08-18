@@ -39,3 +39,19 @@ export type PermissionBridge = (call: ChildToolCall) => Promise<ChildGateDecisio
 export interface SubagentGatePayload {
 	decide: PermissionBridge;
 }
+
+/**
+ * Subscribe to the gate channel and return a lazy getter for the latest bridge.
+ * Call once from an extension entry point (only they hold a `pi`); the getter is
+ * what gets threaded into child runners, and yields `undefined` until the
+ * permissions extension publishes at session start.
+ */
+export function watchPermissionBridge(pi: {
+	events: { on(channel: string, handler: (data: unknown) => void): void };
+}): () => PermissionBridge | undefined {
+	let bridge: PermissionBridge | undefined;
+	pi.events.on(SUBAGENT_GATE_CHANNEL, (data) => {
+		bridge = (data as SubagentGatePayload | undefined)?.decide;
+	});
+	return () => bridge;
+}

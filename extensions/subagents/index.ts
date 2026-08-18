@@ -39,7 +39,7 @@ import { modelPickerComponent, pickerSpec, toPickerEntries, type PickerEntry } f
 import { discoverPlugins } from "../lib/plugins.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { MCP_TOOLS_CHANNEL, type McpToolsPayload } from "../lib/mcp-share.ts";
-import { type PermissionBridge, SUBAGENT_GATE_CHANNEL, type SubagentGatePayload } from "../permissions/subagent-gate.ts";
+import { watchPermissionBridge } from "../permissions/subagent-gate.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { type BackgroundTask, generateTaskId, TASK_REGISTER_CHANNEL } from "../background/registry.ts";
 import { type ChildAction } from "../auto-mode/actions.ts";
@@ -234,10 +234,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	// tool calls through the real pipeline (mode inheritance, classifier, prompts
 	// bubbled to the user). Undefined until permissions emits it at session start;
 	// a child built before then falls back to the fail-closed local gate.
-	let permissionBridge: PermissionBridge | undefined;
-	pi.events.on(SUBAGENT_GATE_CHANNEL, (data) => {
-		permissionBridge = (data as SubagentGatePayload | undefined)?.decide;
-	});
+	const getPermissionBridge = watchPermissionBridge(pi);
 
 	/** The in-process runner, built lazily on first run and shared across all runs. */
 	let runtimePromise: Promise<SubagentRuntime> | undefined;
@@ -245,7 +242,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		(runtimePromise ??= SubagentRuntime.create(
 			ctx.cwd,
 			() => mcpTools,
-			() => permissionBridge,
+			getPermissionBridge,
 		));
 
 	const loadAgents = (cwd: string) => {

@@ -486,8 +486,9 @@ the parent's open connections (a no-op when no servers are configured).
   interim fail-closed gate — a child inherits the parent's mode, is screened by
   the auto-mode classifier, and can raise a prompt that bubbles to the user, all
   matching Claude Code (findings §17.1). The fail-closed gate remains only as the
-  fallback for a child with no parent bridge/UI (the workflow runner, headless
-  runs). The parent-side return review (`SUBAGENT_ACTIONS_CHANNEL`) still runs on
+  fallback for a child with no parent bridge/UI (headless runs; the workflow
+  runner was bridged too on 2026-08-18 — see the addendum in the bridge
+  decision below). The parent-side return review (`SUBAGENT_ACTIONS_CHANNEL`) still runs on
   top, exactly as CC also classifies the hand-back (findings §17.2).
 - **Injected MCP tools are active, not deferred** (customTools have no defer
   hook); acceptable for the typical small server count.
@@ -572,8 +573,8 @@ plain closure threaded through our own call chain (the same shape as
   `permissionGateFactory`.
 - `permission-gate.ts` calls the bridge for every child tool call (skipping the
   runtime-injected `neverGate` tools) and returns its decision; **any bridge error
-  fails CLOSED** (deny). When no bridge is present — the workflow runner, or a
-  headless run with no UI — it keeps the original fail-closed local rules.
+  fails CLOSED** (deny). When no bridge is present — a headless run with no
+  publishing parent — it keeps the original fail-closed local rules.
 
 **Verified live (both directions, per the auto-mode discipline).**
 - Auto mode: a child running `echo` is **allowed** (the old fail-closed gate would
@@ -586,6 +587,24 @@ plain closure threaded through our own call chain (the same shape as
   design could not. tsc + full unit suite green (incl. new bridge tests in
   `workflow-permission-gate.test.ts`: delegation, fail-closed-on-throw, and
   never-gate).
+
+**Addendum (2026-08-18): the workflow runner is bridged too.** The original
+implementation scoped the bridge to the subagent runner and left workflow agents
+on the fail-closed fallback — which made workflows unusable in a gated (non-auto,
+non-bypass) session: every bash call, even `ls`, was denied with "needs
+interactive approval" and agents could only report their inability (hit live by a
+real run on 2026-08-18). Fixed by threading the same closure through the workflow
+side: `workflow/index.ts` captures `SUBAGENT_GATE_CHANNEL` (same pattern as
+`subagents/index.ts`) → `StartRunOptions.getPermissionBridge` →
+`AgentRunnerOptions` → both `buildAgentLoader` calls (base loader and the
+per-agentType loaders). Prompt concurrency under fan-out is already handled by
+the bridge's `serializePrompt` mutex — many agents prompting at once queue one at
+a time. Verified live in default (manual) mode via
+`test/e2e/rpc-workflow-permission-test.mjs`: a sync one-agent workflow's bash
+call raised "Allow a subagent's bash?" on the main rpc session, approval let it
+run, and the marker output came back in the workflow result. tsc + full unit
+suite green. Possible UX follow-up (not built): an "allow for the rest of this
+run" option for large fan-outs.
 
 **Open follow-up.** The `serializePrompt` mutex serializes prompts we control, but
 whether pi's underlying `ctx.ui.select` itself tolerates truly concurrent callers

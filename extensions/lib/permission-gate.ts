@@ -38,7 +38,7 @@ export function permissionGateFactory(
 	 * auto-mode classifier, prompts bubbled to the user — Claude Code parity,
 	 * findings §17.1) rather than the fail-closed local rules below. A getter so it
 	 * can be read at call time (the bridge may be published after the loader builds);
-	 * absent for the workflow runner and headless runs, which keep the local gate.
+	 * absent only for headless runs with no publishing parent, which keep the local gate.
 	 */
 	getBridge?: () => PermissionBridge | undefined,
 ): InlineExtension {

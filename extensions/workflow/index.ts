@@ -22,6 +22,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../permissions/modes.ts";
+import { watchPermissionBridge } from "../permissions/subagent-gate.ts";
 import { applicableSubagentDefault, loadSubagentDefault } from "../subagents/default-model.ts";
 import { discoverSavedWorkflows, findSavedWorkflow, workflowDirs } from "./saved-workflows.ts";
 import { buildRunReport, WorkflowRunManager } from "./run-manager.ts";
@@ -197,6 +198,10 @@ export default function workflowExtension(pi: ExtensionAPI) {
 	const deliveredRuns = new Set<string>();
 	let viewerOpen = false;
 
+	// Parent permission bridge for workflow agents' gates — same bridge the
+	// subagent runner uses; see AgentRunnerOptions.getPermissionBridge.
+	const getPermissionBridge = watchPermissionBridge(pi);
+
 	const openViewer = async (ctx: ExtensionContext, opts?: { height?: "full" | "half"; runIndex?: number }) => {
 		if (viewerOpen) return;
 		viewerOpen = true;
@@ -286,6 +291,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 					defaultModel: ctx.model,
 					configuredDefault,
 					defaultEffort: ctx.thinkingLevel,
+					getPermissionBridge,
 				});
 				widget.attach(handle);
 

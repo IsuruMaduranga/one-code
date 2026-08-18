@@ -61,9 +61,9 @@ export interface AgentLoaderOptions {
 	/**
 	 * The parent permissions extension's decision closure. When present, the child's
 	 * permission gate routes every tool call through it (mode inheritance, classifier,
-	 * prompts bubbled to the user); when absent (workflow runner, headless), the gate
-	 * uses its fail-closed local fallback. A getter so it can be read lazily — the
-	 * bridge may not be published yet when the loader is built.
+	 * prompts bubbled to the user); when absent (headless runs with no publishing
+	 * parent), the gate uses its fail-closed local fallback. A getter so it can be
+	 * read lazily — the bridge may not be published yet when the loader is built.
 	 */
 	getPermissionBridge?: () => PermissionBridge | undefined;
 }

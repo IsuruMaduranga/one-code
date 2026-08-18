@@ -15,6 +15,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
+import type { PermissionBridge } from "../permissions/subagent-gate.ts";
 import type { SubagentDefault } from "../subagents/default-model.ts";
 import { AgentRunner } from "./agent-session.ts";
 import { createScriptGlobals, MAX_CONCURRENCY, MAX_AGENTS_PER_RUN, type ScriptRunState } from "./globals.ts";
@@ -41,6 +42,8 @@ export interface StartRunOptions {
 	defaultModel: unknown;
 	configuredDefault?: SubagentDefault;
 	defaultEffort?: string;
+	/** Parent permission bridge, threaded into every agent's gate (see AgentRunnerOptions). */
+	getPermissionBridge?: () => PermissionBridge | undefined;
 }
 
 export class RunHandle extends EventEmitter {
@@ -229,6 +232,7 @@ export class WorkflowRunManager {
 				configuredDefault: options.configuredDefault,
 				defaultEffort: options.defaultEffort as never,
 				onNotice: (message) => handle.record({ type: "log", text: `⚠ ${message}` }),
+				getPermissionBridge: options.getPermissionBridge,
 			});
 
 			const { globals, state } = createScriptGlobals({

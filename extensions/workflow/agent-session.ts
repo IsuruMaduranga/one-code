@@ -24,6 +24,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { buildAgentLoader, createSharedModelRuntime, finalAssistantText } from "../lib/agent-loader.ts";
+import type { PermissionBridge } from "../permissions/subagent-gate.ts";
 import { summarizeArgs } from "../lib/tui-render.ts";
 import { agentDirs, type AgentDefinition, discoverAgents } from "../subagents/agents.ts";
 import type { SubagentDefault } from "../subagents/default-model.ts";
@@ -44,6 +45,15 @@ export interface AgentRunnerOptions {
 	defaultEffort?: AgentEffort | string;
 	/** Surface model-resolution notices (fallbacks, provider crossings) in the run log. */
 	onNotice?: (message: string) => void;
+	/**
+	 * The parent permissions extension's decision closure (same bridge the
+	 * subagent runner uses): when present, a workflow agent's tool calls route
+	 * through the parent's real permission pipeline — mode inheritance, the
+	 * auto-mode classifier, prompts bubbled to the user. Without it the child
+	 * gate falls back to fail-closed local rules, which deny every bash call
+	 * that would normally ask — unusable outside auto/bypass modes.
+	 */
+	getPermissionBridge?: () => PermissionBridge | undefined;
 }
 
 /**
@@ -140,7 +150,7 @@ export class AgentRunner {
 	static async create(options: AgentRunnerOptions): Promise<AgentRunner> {
 		const agentDir = getAgentDir();
 		const modelRuntime = await createSharedModelRuntime(agentDir);
-		const loader = await buildAgentLoader({ cwd: options.cwd, agentDir });
+		const loader = await buildAgentLoader({ cwd: options.cwd, agentDir, getPermissionBridge: options.getPermissionBridge });
 		const agentCatalog = discoverAgents(agentDirs(options.cwd, os.homedir()));
 		const availableModels = [...(await modelRuntime.getAvailable())];
 		return new AgentRunner(options, modelRuntime, loader, agentCatalog, availableModels);
@@ -301,7 +311,12 @@ export class AgentRunner {
 	}
 
 	private buildLoaderWithSystemPrompt(systemPrompt: string): Promise<DefaultResourceLoader> {
-		return buildAgentLoader({ cwd: this.options.cwd, agentDir: getAgentDir(), systemPrompt });
+		return buildAgentLoader({
+			cwd: this.options.cwd,
+			agentDir: getAgentDir(),
+			systemPrompt,
+			getPermissionBridge: this.options.getPermissionBridge,
+		});
 	}
 
 	dispose(): void {
