@@ -1,15 +1,27 @@
 /**
- * The persistent subagent strip below the editor (Claude Code's agent tree).
- * Mirrors workflow/widget.ts: a component-overload setWidget so rows can
- * right-align against the real width, debounced re-renders, and a 1s ticker to
- * keep elapsed time moving. Also carries the soft-focus state for the
- * down-arrow flow (wired in index.ts).
+ * The persistent panel below the editor: Claude Code's agent tree PLUS its
+ * background-shell manager (chip → Background list → shell details, rendered
+ * by shell-panel.ts). Mirrors workflow/widget.ts: a component-overload
+ * setWidget so rows can right-align against the real width, debounced
+ * re-renders, and a 1s ticker to keep elapsed time moving. Also carries both
+ * soft-focus states for the down-arrow flow (wired in index.ts): the FIRST ↓
+ * lands on the shells chip when shells run, the next ↓ moves into the agent
+ * rows.
  */
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { linesComponent, safeThemeBold, safeThemePaint } from "../lib/tui-render.ts";
+import type { BackgroundTask } from "../background/registry.ts";
+import type { ShellTaskTracker } from "../lib/shell-tasks.ts";
+import { linesComponent, safeThemeBold, safeThemeInverse, safeThemePaint } from "../lib/tui-render.ts";
 import { buildRows, MAX_STRIP_ROWS, renderStrip, type PanelRow } from "./panel-render.ts";
 import type { LiveRunRegistry } from "./live-runs.ts";
+import {
+	anchorShellFocus,
+	renderShellSection,
+	type ShellFocus,
+	shellRows,
+	shellSectionVisible,
+} from "./shell-panel.ts";
 
 const WIDGET_KEY = "subagents";
 const DEBOUNCE_MS = 200;
@@ -29,14 +41,18 @@ export class SubagentWidget {
 	 * actually selected, never on whatever slid into its slot.
 	 */
 	private focusId: string | undefined;
+	/** The shell-manager side of the panel (chip → list → details). */
+	shellFocus: ShellFocus | undefined;
 	tui: TuiLike | undefined;
 	editorBaseline: unknown;
 
 	constructor(
 		private readonly registry: LiveRunRegistry,
 		private readonly getCtx: () => ExtensionContext | undefined,
+		private readonly shells?: ShellTaskTracker,
 	) {
 		registry.subscribe(() => this.schedule());
+		shells?.subscribe(() => this.schedule());
 	}
 
 	private rows(): PanelRow[] {
@@ -66,6 +82,60 @@ export class SubagentWidget {
 		this.focusIndex = index;
 		this.focusId = index === undefined ? undefined : (this.rows()[index]?.run?.taskId ?? "main");
 		this.render();
+	}
+
+	// --- Shell-manager state (Claude Code's ↓-to-manage flow) ---
+
+	/** Live shell rows for the list/details views. */
+	shellTasks(): BackgroundTask[] {
+		return this.shells ? shellRows(this.shells.list(), Date.now()) : [];
+	}
+
+	shellIds(): string[] {
+		return this.shellTasks().map((t) => t.id);
+	}
+
+	private runningShellCount(): number {
+		return this.shells?.running().length ?? 0;
+	}
+
+	/** Whether ↓ from the editor should land on the chip first — running shells
+	 * or finished ones still inside the linger window. */
+	shellChipAvailable(): boolean {
+		return this.shellTasks().length > 0;
+	}
+
+	/** `ids`, when the caller already derived the row order, skips re-deriving it. */
+	setShellFocus(focus: ShellFocus | undefined, ids?: string[]): void {
+		this.shellFocus = focus && anchorShellFocus(focus, ids ?? this.shellIds());
+		this.render();
+	}
+
+	/** The anchored current focus (the selected shell may have lingered out). */
+	anchoredShellFocus(ids?: string[]): ShellFocus | undefined {
+		if (this.shellFocus) this.shellFocus = anchorShellFocus(this.shellFocus, ids ?? this.shellIds());
+		return this.shellFocus;
+	}
+
+	/** Point lookup — no need for the linger-filtered, sorted row build. */
+	shellTaskById(id: string): BackgroundTask | undefined {
+		return this.shells?.list().find((t) => t.id === id);
+	}
+
+	selectedShellTask(): BackgroundTask | undefined {
+		const focus = this.anchoredShellFocus();
+		if (!focus || focus.stage === "chip") return undefined;
+		return this.shellTaskById(focus.selectedId);
+	}
+
+	private shellVisible(): boolean {
+		return shellSectionVisible(this.shellTasks().length, this.shellFocus);
+	}
+
+	/** Lines the shell section currently occupies (for overlay reserve math) —
+	 * measured off the real renderer so layout changes can never desync it. */
+	shellLineCount(): number {
+		return this.shellVisible() ? this.shellSectionLines(80).length : 0;
 	}
 
 	/** Re-derive focusIndex from focusId against the given rows (see focusId doc). */
@@ -103,20 +173,47 @@ export class SubagentWidget {
 		this.timer.unref?.();
 	}
 
+	/** The shell section's lines; identity paint when only counting. */
+	private shellSectionLines(
+		width: number,
+		paint = { fg: (_c: string, t: string) => t, bold: (t: string) => t, inverse: (t: string) => t },
+	): string[] {
+		return renderShellSection(
+			{
+				rows: this.shellTasks(),
+				runningCount: this.runningShellCount(),
+				focus: this.shellFocus,
+				width,
+				now: Date.now(),
+			},
+			paint,
+		);
+	}
+
 	private render(): void {
 		const ctx = this.getCtx();
 		if (!ctx?.hasUI) return;
 		const rows = this.rows();
-		this.syncTicker(rows.length > 1);
-		// Only the synthetic `main` row exists → nothing to show yet.
-		if (rows.length <= 1) {
+		const shellVisible = this.shellVisible();
+		// The chip is time-invariant while every shell runs (count changes arrive
+		// as tracker events), so the clock is needed only for the list (linger
+		// expiry) and details (runtime, live output) stages — or when finished
+		// shells are lingering, whose expiry is what hides the section.
+		const shellStage = this.shellFocus?.stage;
+		const lingering = shellVisible && this.shellTasks().length > this.runningShellCount();
+		this.syncTicker(rows.length > 1 || shellStage === "list" || shellStage === "details" || lingering);
+		// Only the synthetic `main` row exists and no shells → nothing to show yet.
+		if (rows.length <= 1 && !shellVisible) {
 			ctx.ui.setWidget(WIDGET_KEY, undefined);
 			this.focusIndex = undefined;
 			this.focusId = undefined;
+			this.shellFocus = undefined;
 			return;
 		}
 		this.anchor(rows);
+		if (this.shellFocus) this.shellFocus = anchorShellFocus(this.shellFocus, this.shellIds());
 		const selected = this.focusIndex;
+		const showStrip = rows.length > 1;
 		const now = Date.now();
 		ctx.ui.setWidget(
 			WIDGET_KEY,
@@ -126,19 +223,26 @@ export class SubagentWidget {
 				if (focused && typeof (focused as { getText?: unknown }).getText === "function") {
 					this.editorBaseline = focused;
 				}
-				const paint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme) };
-				return linesComponent((width) =>
-					renderStrip({ rows, selected, width: width - 1, now }, paint).map((line) => ` ${line}`),
-				);
+				const paint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme), inverse: safeThemeInverse(theme) };
+				return linesComponent((width) => {
+					const lines: string[] = [];
+					if (showStrip) lines.push(...renderStrip({ rows, selected, width: width - 1, now }, paint));
+					if (shellVisible) {
+						if (lines.length) lines.push("");
+						lines.push(...this.shellSectionLines(width - 1, paint));
+					}
+					return lines.map((line) => ` ${line}`);
+				});
 			},
 			{ placement: "belowEditor" },
 		);
 	}
 
 	/**
-	 * Tick while any child row is shown — elapsed times move, and a finished
-	 * row expires out of the strip (buildRows' linger window) without needing
-	 * another registry event.
+	 * Tick while any child row is shown or the shell manager is focused —
+	 * elapsed times move, finished rows expire out of the strip/list (linger
+	 * windows), and the details view's output box follows the live spool,
+	 * all without needing another registry event.
 	 */
 	private syncTicker(active: boolean): void {
 		if (active && !this.ticker) {

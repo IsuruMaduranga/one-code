@@ -11,6 +11,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { trackShellTasks } from "../lib/shell-tasks.ts";
 import { dimMarkedLine } from "../lib/tui-render.ts";
 import { TURN_MARK, turnDurationText } from "./line.ts";
 import { pickCompletionVerb } from "./verbs.ts";
@@ -20,13 +21,17 @@ const ENTRY_TYPE = "one-code:turn-duration";
 interface TurnDurationData {
 	verb: string;
 	durationMs: number;
+	/** Background shells still running when the turn ended (CC's `· 2 shells still running`). */
+	runningShells?: number;
 }
 
 export default function turnDurationExtension(pi: ExtensionAPI) {
+	const shellTasks = trackShellTasks(pi);
+
 	pi.registerEntryRenderer<TurnDurationData>(ENTRY_TYPE, (entry, _options, theme) => {
 		const data = entry.data;
 		if (!data) return undefined;
-		return dimMarkedLine(theme, TURN_MARK, turnDurationText(data.verb, data.durationMs));
+		return dimMarkedLine(theme, TURN_MARK, turnDurationText(data.verb, data.durationMs, data.runningShells ?? 0));
 	});
 
 	let turnStartedAt = 0;
@@ -43,6 +48,7 @@ export default function turnDurationExtension(pi: ExtensionAPI) {
 		pi.appendEntry<TurnDurationData>(ENTRY_TYPE, {
 			verb: pickCompletionVerb(),
 			durationMs: Date.now() - startedAt,
+			runningShells: shellTasks.running().length,
 		});
 	});
 }

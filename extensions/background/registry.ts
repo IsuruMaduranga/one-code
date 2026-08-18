@@ -20,6 +20,8 @@ export interface BackgroundTask {
 	status: BackgroundStatus;
 	startedAt: number;
 	finishedAt?: number;
+	/** The raw shell command, when the task wraps one (shown by the shell panel). */
+	command?: string;
 	/** File the task spools its output to, when it has one. */
 	logPath?: string;
 	/** Output accumulated so far (or final output once finished). */

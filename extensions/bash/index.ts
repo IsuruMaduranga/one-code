@@ -99,7 +99,9 @@ export default function bashExtension(pi: ExtensionAPI) {
 					// the transcript needs one line (Claude Code: "Running in the background").
 					const details = result.details as { taskId?: string; logPath?: string } | undefined;
 					if (details?.taskId && !context.isError) {
-						const line = `Running in background (task ${details.taskId}${details.logPath ? ` · log: ${details.logPath}` : ""})`;
+						const line = options.expanded
+							? `Running in the background (task ${details.taskId}${details.logPath ? ` · log: ${details.logPath}` : ""})`
+							: "Running in the background (↓ to manage)";
 						return linesComponent(() => resultLines(theme as any, line, options.expanded, false));
 					}
 					return wrapped.renderResult(result, options, theme, context);

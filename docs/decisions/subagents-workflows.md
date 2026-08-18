@@ -691,3 +691,41 @@ Auto mode's post-hoc whole-run action review is not emitted for nested spawns
 grandchild's live view (model resolved to the configured luna default), 24
 grandchild tool calls ran gated, and the child's relay of the grandchild's
 report arrived in the main completion notification.
+
+## The shell manager joins the subagent panel (2026-08-18)
+
+**What.** Claude Code's background-shell UX (matched to CC 2.1.234's shell
+manager): a backgrounded Bash call renders `⎿ Running in the
+background (↓ to manage)`; a "2 shells" chip sits under the editor; the first
+↓ focuses the chip, Enter opens the Background list (`❯` rows, `↑/↓ to select
+· Enter to view · x to stop · Esc to close`), Enter again opens a details
+view (Status/Runtime/Command + a live bordered output box, `← to go back ·
+Esc/Enter/Space to close · x to stop`); a second ↓ from the chip moves into
+the agent rows, ↑ from agent row 0 comes back; the turn line gains `· 2
+shells still running`. One Code matches all of it (pure layout + reducer in
+`subagents/shell-panel.ts`, task mirroring in `lib/shell-tasks.ts`, 60s
+list linger for finished shells so outcomes stay visible).
+
+**Why it lives in the subagents extension, not `background/`.** Two reasons,
+both structural:
+
+- pi renders below-editor widgets in Map insertion order and **re-inserts a
+  widget on every `setWidget` call** — two extensions ticking in that slot
+  (the agents strip re-renders every second while children run) would reorder
+  each other visibly every second. One widget owner means one stable layout.
+- The ↓ axis is ONE focus flow (editor → shells chip → agent rows and back).
+  As a single state machine in one input hook it is trivial; split across two
+  extensions it needs cross-extension focus-handoff events plus duplicated
+  editor-identity tracking.
+
+No module state crosses extensions for this: the bash extension already emits
+its live `BackgroundTask` objects (now carrying `command`) over
+`TASK_REGISTER_CHANNEL`, so any consumer — the panel, turn-duration — mirrors
+them with its own `trackShellTasks(pi)` instance and reads
+`status`/`output()` live. `background/`'s generic " background tasks: N
+running" line now counts only non-bash kinds (monitors).
+
+**Verified live** (tmux, gated session with real permission prompts): every
+state above, plus typing-passthrough (a typed char drops focus and lands in
+the editor), x flipping a running shell to `(stopped)`, both sections
+coexisting while an agent ran, and the ↓↓/↑ handoff in both directions.

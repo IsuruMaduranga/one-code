@@ -37,6 +37,12 @@ describe("turnDurationText", () => {
 		expect(turnDurationText("Worked", 60 * 60_000 + 6 * 60_000)).toBe("Worked for 1h 6m");
 	});
 
+	it("appends the background-shell tail while shells outlive the turn", () => {
+		expect(turnDurationText("Worked", 7_000, 2)).toBe("Worked for 7s · 2 shells still running");
+		expect(turnDurationText("Worked", 7_000, 1)).toBe("Worked for 7s · 1 shell still running");
+		expect(turnDurationText("Worked", 7_000, 0)).toBe("Worked for 7s");
+	});
+
 	it("rounds sub-second turns to 0s (CC has no minimum threshold)", () => {
 		expect(turnDurationText("Brewed", 400)).toBe("Brewed for 0s");
 	});

@@ -93,6 +93,7 @@ export function startBackgroundBash(options: StartBackgroundBashOptions): Backgr
 		id: options.id,
 		kind: "bash",
 		description: options.description,
+		command: options.command,
 		status: "running",
 		startedAt: Date.now(),
 		logPath: options.logPath,

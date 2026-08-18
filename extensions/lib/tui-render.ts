@@ -80,6 +80,11 @@ export function formatDuration(startedAt?: number, finishedAt?: number, now?: nu
 	return `${Math.floor(total / 3600)}h ${Math.floor((total % 3600) / 60)}m`;
 }
 
+/** `2 shells`, `1 shell` — a count with its (s-pluralized) noun. */
+export function countNoun(count: number, noun: string): string {
+	return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
 /** Right-align plain text within `width` columns. */
 export function alignRight(text: string, width: number): string {
 	const length = [...text].length;

@@ -62,7 +62,11 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 
 	const updateWidget = () => {
 		if (!lastCtx?.hasUI) return;
-		const running = registry.running().length;
+		// Bash shells have their own first-class UI (the subagents panel's shell
+		// manager), so they are excluded here. A bash-only carve-out, not a
+		// general "has its own UI" rule: background subagent runs still count
+		// even though the agent strip also shows them (pre-existing).
+		const running = registry.running().filter((t) => t.kind !== "bash").length;
 		lastCtx.ui.setWidget("cc-background", running > 0 ? [` background tasks: ${running} running`] : undefined);
 	};
 

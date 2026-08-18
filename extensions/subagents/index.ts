@@ -54,7 +54,9 @@ import { deriveActivity, LiveRunRegistry } from "./live-runs.ts";
 import type { LiveSink } from "./runner.ts";
 import { SubagentWidget } from "./panel-widget.ts";
 import { type ProseRenderer, renderTranscript } from "./panel-render.ts";
-import { decodeStripKey } from "./panel-keys.ts";
+import { decodeStripKey, type StripKey } from "./panel-keys.ts";
+import { reduceShellKey } from "./shell-panel.ts";
+import { trackShellTasks } from "../lib/shell-tasks.ts";
 import { createMarkdownProse } from "./prose.ts";
 
 /** The catalog shipped in this package: <package>/agents. */
@@ -174,11 +176,14 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
 	// The live subagent panel (Claude Code's below-editor agent tree): a registry
 	// of every in-process child fed by the runner's live sink, a below-editor
-	// strip, and taskId→kill handles for the viewer's stop/stop-all.
+	// strip, and taskId→kill handles for the viewer's stop/stop-all. The same
+	// widget carries the background-shell manager (chip → list → details), fed
+	// by the bash tasks that cross TASK_REGISTER_CHANNEL.
 	const liveRuns = new LiveRunRegistry();
 	const liveHandles = new Map<string, { kill(): void }>();
 	let lastCtx: ExtensionContext | undefined;
-	const panel = new SubagentWidget(liveRuns, () => lastCtx);
+	const shellTasks = trackShellTasks(pi);
+	const panel = new SubagentWidget(liveRuns, () => lastCtx, shellTasks);
 
 	/**
 	 * Register a child in the live panel and return the wiring the spawn sites
@@ -423,8 +428,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	 * Enter on `main`, esc, or typing closes it and the main transcript is back.
 	 */
 	let view: { retarget(taskId: string): void; scrollBy(delta: number): void; close(): void } | undefined;
-	/** Rows kept clear at the bottom: token counter + editor(3) + mode line + strip hint + strip rows + cwd/status(2) + one spare. */
-	const viewReserve = () => panel.rowCount() + 9;
+	/** Rows kept clear at the bottom: token counter + editor(3) + mode line + strip hint + strip rows + shell section + cwd/status(2) + one spare. */
+	const viewReserve = () => {
+		const shellLines = panel.shellLineCount();
+		return panel.rowCount() + (shellLines ? shellLines + 1 : 0) + 9;
+	};
 
 	const openView = (ctx: ExtensionContext, taskId: string) => {
 		if (view) return view.retarget(taskId);
@@ -511,20 +519,79 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			closeView();
 		};
 		const DOWN_KEYS = new Set(["\x1b[B", "\x1bOB"]);
+		/** Keys the agents branch owns; any other decode (typing, shell-only keys
+		 * like left/space) drops focus and passes through — stated positively so a
+		 * future StripKey addition is foreign here by default. */
+		const AGENT_KEYS = new Set<StripKey>(["up", "down", "open", "leave", "stop", "stopAll", "pageUp", "pageDown"]);
+		/** Row 0 exists only past the synthetic `main` row. */
+		const focusFirstAgentRow = (): boolean => {
+			if (panel.rowCount() <= 1) return false;
+			panel.setFocus(0);
+			return true;
+		};
+		/** The shell-manager stages (chip → list → details); agents keys untouched. */
+		const handleShellKey = (data: string, ctx: ExtensionContext): { consume: boolean } | undefined => {
+			// Focus moved to a dialog/overlay — drop soft focus, let it have the key.
+			if (!panel.editorFocused()) {
+				panel.setShellFocus(undefined);
+				return undefined;
+			}
+			// Derive the row order once per keystroke; every step below reuses it.
+			const ids = panel.shellIds();
+			const focus = panel.anchoredShellFocus(ids);
+			if (!focus) return undefined;
+			const decoded = decodeStripKey(data, false);
+			// ctrl+x (the agents stop-all chord arm) means nothing in the shell
+			// stages — swallow it rather than leaking the raw \x18 into the editor.
+			if (decoded.chordArmed) return { consume: true };
+			const result = reduceShellKey(focus, decoded.key, ids);
+			if (result.effect === "passthrough") {
+				panel.setShellFocus(undefined);
+				return undefined; // typing resumes in the editor, byte included
+			}
+			if (result.effect === "toAgents") {
+				// No agent rows to land on → the byte passes through to the editor,
+				// consistent with the initial-entry branch.
+				panel.setShellFocus(undefined);
+				return focusFirstAgentRow() ? { consume: true } : undefined;
+			}
+			if (result.effect === "stopSelected") {
+				try {
+					panel.selectedShellTask()?.stop();
+				} catch {
+					// A dead process's stop() throwing must not break the panel.
+				}
+				panel.setShellFocus(result.focus, ids);
+				return { consume: true };
+			}
+			panel.setShellFocus(result.focus, ids);
+			// While the model streams, esc must still interrupt it — consume only when idle.
+			if (decoded.key === "leave" && result.focus === undefined) {
+				return ctx.isIdle() ? { consume: true } : undefined;
+			}
+			return { consume: true };
+		};
 		try {
 			registerCtx.ui.onTerminalInput((data) => {
 				const ctx = lastCtx ?? registerCtx;
 				// Enter focus: down-arrow while the editor holds real focus. Unlike the
 				// workflow strip we do NOT require the editor to be idle — the whole
-				// point is inspecting agents that run while the main turn is in flight.
-				// This branch is the per-keystroke hot path — the O(rows) rowCount()
-				// runs only once a Down actually asks to focus, never on plain typing.
-				if (panel.focusIndex === undefined) {
+				// point is inspecting agents (and shells) that run while the main turn
+				// is in flight. This branch is the per-keystroke hot path — the
+				// O(rows) checks run only once a Down actually asks to focus, never on
+				// plain typing. Claude Code's order: the FIRST ↓ lands on the shells
+				// chip when shells are running; the next ↓ moves into the agent rows.
+				if (panel.focusIndex === undefined && panel.shellFocus === undefined) {
 					if (!DOWN_KEYS.has(data) || !panel.editorFocused()) return undefined;
-					if (panel.rowCount() <= 1) return undefined;
-					panel.setFocus(0);
-					return { consume: true };
+					if (panel.shellChipAvailable()) {
+						panel.setShellFocus({ stage: "chip" });
+						return { consume: true };
+					}
+					return focusFirstAgentRow() ? { consume: true } : undefined;
 				}
+				if (panel.shellFocus !== undefined) return handleShellKey(data, ctx);
+				const focusIndex = panel.focusIndex;
+				if (focusIndex === undefined) return undefined; // unreachable: one of the two focuses was set
 				// The strip emptied under us (finished rows lingered out) — let go.
 				if (panel.rowCount() <= 1) {
 					leave();
@@ -537,18 +604,22 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				}
 				const decoded = decodeStripKey(data, chordArmed);
 				chordArmed = decoded.chordArmed;
-				if (!decoded.key) {
+				if (!decoded.key || !AGENT_KEYS.has(decoded.key)) {
 					if (chordArmed) return { consume: true }; // ctrl+x armed the stop-all chord
 					leave();
 					return undefined; // typing resumes in the editor, byte included
 				}
 				switch (decoded.key) {
 					case "up":
-						if (panel.focusIndex === 0) leave();
-						else panel.setFocus(panel.focusIndex - 1);
+						if (focusIndex === 0) {
+							// Back up out of the agent rows: onto the shells chip when
+							// shells are running, otherwise out of the panel entirely.
+							leave();
+							if (panel.shellChipAvailable()) panel.setShellFocus({ stage: "chip" });
+						} else panel.setFocus(focusIndex - 1);
 						return { consume: true };
 					case "down":
-						panel.setFocus(Math.min(panel.rowCount() - 1, panel.focusIndex + 1));
+						panel.setFocus(Math.min(panel.rowCount() - 1, focusIndex + 1));
 						return { consume: true };
 					case "leave":
 						leave();

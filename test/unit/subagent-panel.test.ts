@@ -407,10 +407,13 @@ describe("decodeStripKey", () => {
 		expect(decodeStripKey("\x1b[5~", false).key).toBe("pageUp");
 		expect(decodeStripKey("\x1b[6~", false).key).toBe("pageDown");
 		expect(decodeStripKey("a", false).key).toBeUndefined();
-		// No tab/left/right agent switching — CC switches via select + Enter.
+		// No tab/right agent switching — CC switches via select + Enter. Left and
+		// space decode (the shell stages use them); the agents branch treats both
+		// like typing.
 		expect(decodeStripKey("\t", false).key).toBeUndefined();
 		expect(decodeStripKey("\x1b[C", false).key).toBeUndefined();
-		expect(decodeStripKey("\x1b[D", false).key).toBeUndefined();
+		expect(decodeStripKey("\x1b[D", false).key).toBe("left");
+		expect(decodeStripKey(" ", false).key).toBe("space");
 	});
 
 	it("handles the ctrl+x ctrl+k stop-all chord", () => {
