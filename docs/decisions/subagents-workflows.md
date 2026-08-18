@@ -472,8 +472,10 @@ workflow-runner pattern.
 curated extension set via `additionalExtensionPaths` — `claude-context`,
 `file-tracker`, `system-reminder`, `tool-search`, `search-tools`, `skill`,
 `web`, `web-fetch`, `notebook` — plus its agent's own system prompt and toolset,
-but NOT the frontier chrome (banner/spinner/recap) or orchestration
-(`Agent`/`workflow`, so no recursion). MCP is **shared, not reconnected**: the
+but NOT the frontier chrome (banner/spinner/recap) or the orchestration
+extensions (`Agent`/`workflow`). *(Superseded 2026-08-18 on the recursion
+half: nested spawning is now an injected tool — see "Nested subagents"
+below.)* MCP is **shared, not reconnected**: the
 mcp extension publishes its live tool definitions on `MCP_TOOLS_CHANNEL`
 (`lib/mcp-share.ts`) and the runner injects them as `customTools` closing over
 the parent's open connections (a no-op when no servers are configured).
@@ -649,3 +651,43 @@ CC (its tree drops finished agents) and was a user-reported divergence.
 rendered, selection-without-swap, Enter-swap/switch/close, typing-exit with the
 byte landing in the editor, PgUp scrollback, resume re-tracking ("Resuming…"),
 and the 5s linger-then-drop. Full unit suite green.
+
+## Nested subagents: children spawn agents via an injected tool (2026-08-18)
+
+**What.** CC subagents can spawn subagents of their own (user-verified against
+real CC 2.1.233: a `/code-review` fork fanned out five verifier agents, the
+agent tree showing them nested with `└`). One Code now matches: every depth-0
+child (foreground, background resident, fork, resumed) gets an injected
+`Agent` custom tool; the runs it spawns appear in the panel as `└` rows under
+their parent with live streaming, and are addressable by SendMessage.
+
+**How — a parent-delegating tool, NOT the subagents extension in the child.**
+`childAgentTool` (index.ts) is a custom tool (same mechanism as
+`sendToMainTool`, passed via the runner's new `extraTools`) whose execute
+calls back into the PARENT extension's `executeRun`. One `SubagentRuntime`,
+one `RunRegistry`, one `LiveRunRegistry`, one permission bridge, one shared
+MCP pool — a nested run is a first-class sibling, just linked by
+`parentTaskId`/`depth`. Loading the subagents extension into child sessions
+was rejected: jiti isolation would give each child its own registries and
+runtime — invisible to the panel and the gate, and unboundedly recursive.
+
+**Bounds and shape.** `MAX_SPAWN_DEPTH = 1`: children spawn grandchildren;
+grandchildren get no spawn tool (all children share the main event loop — no
+OS kill boundary). Nested spawns are **foreground-only, no fork/worktree/
+background** (a child has no task_output or notification surface to manage a
+background run with). The spawn call itself is never-gated (`NEVER_GATE` adds
+"Agent", matching the auto-allowed main tool); every tool call the grandchild
+makes still runs through the parent's real permission gate via the bridge.
+Model resolution is the parent-side chain (agent's model → configured default
+→ session model) with no per-call override. Grandchild records join the main
+`RunRegistry` but are NOT reconstructable after a session resume (they live
+in the child's transcript, which reconstructRuns doesn't scan) — accepted.
+Auto mode's post-hoc whole-run action review is not emitted for nested spawns
+(no parent toolCallId in the main transcript); per-call live gating covers it.
+
+**Verified live** (tmux, gpt-5.6-terra session): a background child spawned an
+`explore` grandchild — the strip showed `general-purpose  Running Agent` with
+`└ explore  Searching …` beneath (separate elapsed/↓ tokens), Enter opened the
+grandchild's live view (model resolved to the configured luna default), 24
+grandchild tool calls ran gated, and the child's relay of the grandchild's
+report arrived in the main completion notification.

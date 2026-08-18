@@ -159,7 +159,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	 * need: a runner `sink` (activity + transcript blocks), a `progress` hook to
 	 * fold into the existing onProgress, and settle/finish terminal marks.
 	 */
-	const trackLiveRun = (record: AgentRunRecord, request: RunRequest) => {
+	const trackLiveRun = (record: AgentRunRecord, request: RunRequest, parent?: { taskId: string; depth: number }) => {
 		// A resumed run (SendMessage to a finished agent) re-enters its existing
 		// panel entry; only a never-seen taskId registers fresh.
 		if (!liveRuns.reactivate(record.taskId, request.task, Date.now())) {
@@ -171,6 +171,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				thinking: request.thinking,
 				task: request.task,
 				startedAt: Date.now(),
+				parentTaskId: parent?.taskId,
+				depth: parent ? parent.depth + 1 : 0,
 			});
 		}
 		const sink: LiveSink = {
@@ -573,7 +575,103 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		agentDef?: AgentDefinition;
 	}
 
-	/** Start one child (creating a worktree first if asked) and finalize its record when done. */
+	/**
+	 * How deep Agent-in-Agent nesting goes: a run at depth < MAX_SPAWN_DEPTH
+	 * gets the spawn tool, so main(–) → child(0) → grandchild(1) and no further.
+	 * Matches CC (its subagents/forks spawn their own agents) while bounding
+	 * runaway fan-out — every session shares one in-process event loop.
+	 */
+	const MAX_SPAWN_DEPTH = 1;
+
+	/**
+	 * The Agent tool injected into a child session (CC parity: subagents can
+	 * spawn subagents). It delegates to THIS extension's runtime and registries,
+	 * so a nested run streams into the same panel (as a `└` row under its
+	 * parent), is gated through the parent's real permission pipeline, and is
+	 * addressable by SendMessage like any other run. Foreground-only: the call
+	 * returns when the nested agent finishes — no fork, worktree, or background
+	 * from inside a child.
+	 */
+	const childAgentTool = (parentRecord: AgentRunRecord, parentDepth: number): ToolDefinition =>
+		({
+			name: "Agent",
+			label: "Agent",
+			description:
+				"Delegate a scoped task to a specialist subagent running in its own context window. The call BLOCKS until the agent finishes and returns its report — use it for well-scoped work whose intermediate output you don't need (broad searches, focused verification, independent research). Give a complete, self-contained task: the agent cannot ask follow-ups. Available agents:\n" +
+				`${describeAgents(parentRecord.cwd)}\n` +
+				'(No "fork" here — forking is only available to the main conversation.)',
+			parameters: Type.Object({
+				subagent_type: Type.String({ description: "An agent name from the list in this tool's description" }),
+				task: Type.String({ description: "The task — a complete, self-contained instruction" }),
+				name: Type.Optional(Type.String({ description: "Name for this run (default: <agent>-<n>)" })),
+			}) as never,
+			async execute(_toolCallId: string, params: unknown, signal?: AbortSignal) {
+				const ctx = lastCtx;
+				const p = (params ?? {}) as { subagent_type?: unknown; task?: unknown; name?: unknown };
+				const agentName = typeof p.subagent_type === "string" ? p.subagent_type : "";
+				const task = typeof p.task === "string" ? p.task.trim() : "";
+				const err = (text: string) => ({ content: [{ type: "text" as const, text }], details: {}, isError: true });
+				if (!ctx) return err("The host session is not ready to spawn agents — retry shortly.");
+				if (agentName === FORK_AGENT) return err('"fork" is only available to the main conversation — pick a named agent instead.');
+				const agentDef = loadAgents(ctx.cwd).find((a) => a.name === agentName);
+				if (!agentDef) {
+					return err(
+						`${agentName ? `Unknown agent "${agentName}"` : "`subagent_type` is required"}. Available agents:\n${describeAgents(ctx.cwd)}`,
+					);
+				}
+				if (!task) return err("`task` is required: a complete, self-contained instruction for the agent.");
+
+				const taken = new Set(registry.names());
+				const requestedName = typeof p.name === "string" ? p.name.trim() : "";
+				const name = requestedName && !taken.has(requestedName) ? requestedName : nextRunName(taken, agentName);
+				// Same parent-side model resolution as the main Agent tool, minus
+				// per-call overrides: the agent's own model, else the configured
+				// default, else the session model.
+				const available = ctx.modelRegistry.getAvailable();
+				const resolution = resolveSubagentModel({
+					agentModel: agentDef.model,
+					configuredDefault: applicableSubagentDefault(loadSubagentDefault(os.homedir()), ctx.model),
+					sessionModel: ctx.model,
+					available,
+				});
+				for (const notice of resolution.notices) notifyModelOnce(ctx, notice);
+				const resolved = resolution.model ? `${resolution.model.provider}/${resolution.model.id}` : undefined;
+
+				const taskId = generateTaskId();
+				const record: AgentRunRecord = {
+					name,
+					agent: agentName,
+					taskId,
+					sessionSearchDir: runSessionDir(ctx, taskId) ?? "",
+					cwd: ctx.cwd,
+					model: resolved,
+					thinking: undefined,
+				};
+				registry.add(record); // SendMessage from main can reach the nested run too
+
+				const result = await executeRun(
+					{ request: { agent: agentName, task, name, model: resolved }, record, agentDef },
+					ctx,
+					undefined,
+					signal, // the spawning child aborting (stop/esc) kills the nested run
+					() => {},
+					undefined,
+					{ taskId: parentRecord.taskId, depth: parentDepth },
+				);
+				return {
+					content: [{ type: "text" as const, text: `${result.output}\n\n(${formatStats(result.toolCalls, result.usage)})` }],
+					details: { agentRuns: [record] },
+					isError: result.failed ?? false,
+				};
+			},
+		}) as ToolDefinition;
+
+	/**
+	 * Start one child (creating a worktree first if asked) and finalize its
+	 * record when done. `parent` marks a NESTED spawn — a child's own Agent
+	 * call — which links the run under its parent in the panel tree and, past
+	 * MAX_SPAWN_DEPTH, stops handing out the spawn tool.
+	 */
 	const executeRun = async (
 		prepared: PreparedRun,
 		ctx: ExtensionContext,
@@ -581,8 +679,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		signal: AbortSignal | undefined,
 		onProgress: (toolCalls: number, text: string, usage: UsageTotals) => void,
 		onStarted?: (handle: ChildHandle, worktree?: Worktree) => void,
+		parent?: { taskId: string; depth: number },
 	): Promise<TaskResult> => {
 		const { request, record, agentDef } = prepared;
+		const depth = parent ? parent.depth + 1 : 0;
 
 		let worktree: Worktree | undefined;
 		if (request.worktree) {
@@ -604,7 +704,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		}
 
 		runningNames.add(request.name);
-		const live = trackLiveRun(record, request);
+		const live = trackLiveRun(record, request, parent);
 		const runtime = await getRuntime(ctx);
 		const handle = runtime.run({
 			agent: agentDef,
@@ -622,6 +722,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			},
 			sink: live.sink,
 			onMessageToMain: (message, summary) => notifyAgentMessage(request.name, message, summary),
+			extraTools: depth < MAX_SPAWN_DEPTH ? [childAgentTool(record, depth)] : [],
 		});
 		liveHandles.set(record.taskId, handle);
 		onStarted?.(handle, worktree);
@@ -932,6 +1033,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						},
 						sink: live.sink,
 						onMessageToMain: (message, summary) => notifyAgentMessage(p.record.name, message, summary),
+						extraTools: [childAgentTool(p.record, 0)],
 						onTurnEnd: (outcome) => {
 							registry.sessionFileFor(p.record);
 							live.settle();
@@ -1183,6 +1285,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				onProgress: (toolCalls, _text, usage) => live.progress(toolCalls, usage),
 				sink: live.sink,
 				onMessageToMain: (message, summary) => notifyAgentMessage(record.name, message, summary),
+				extraTools: [childAgentTool(record, 0)],
 			});
 			liveHandles.set(record.taskId, handle);
 

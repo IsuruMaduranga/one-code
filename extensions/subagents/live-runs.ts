@@ -72,6 +72,10 @@ export interface LiveRun {
 	 */
 	baseToolCalls: number;
 	baseTokens: UsageTotals;
+	/** Spawning run for a nested agent (a child's own Agent call); undefined for main's children. */
+	parentTaskId?: string;
+	/** Nesting level: 0 = spawned by main, 1 = spawned by a child (CC's `└` rows). */
+	depth: number;
 }
 
 /** Keep memory bounded for long/chatty children; the viewer scrolls the tail. */
@@ -127,6 +131,8 @@ export interface RegisterInput {
 	thinking?: string;
 	task: string;
 	startedAt: number;
+	parentTaskId?: string;
+	depth?: number;
 }
 
 /**
@@ -170,6 +176,8 @@ export class LiveRunRegistry {
 			blocks: input.task.trim() ? [{ kind: "task", text: input.task }] : [],
 			baseToolCalls: 0,
 			baseTokens: emptyUsage(),
+			parentTaskId: input.parentTaskId,
+			depth: input.depth ?? 0,
 		};
 		this.runs.push(run);
 		this.byId.set(run.taskId, run);

@@ -186,6 +186,35 @@ describe("buildRows", () => {
 		expect(buildRows(reg.list(), false, 5000)[0].status).toBe("idle");
 	});
 
+	it("nests a child-spawned run under its parent in spawn order (CC's tree)", () => {
+		const reg = new LiveRunRegistry();
+		register(reg, { taskId: "parent", name: "parent" });
+		reg.register({ taskId: "kid1", name: "kid1", agentType: "explore", task: "t", startedAt: 2000, parentTaskId: "parent", depth: 1 });
+		reg.register({ taskId: "kid2", name: "kid2", agentType: "explore", task: "t", startedAt: 3000, parentTaskId: "parent", depth: 1 });
+		register(reg, { taskId: "other", name: "other" });
+		const rows = buildRows(reg.list(), false, 5000);
+		expect(rows.map((r) => [r.run?.taskId, r.depth])).toEqual([
+			[undefined, 0], // main
+			["other", 0], // roots newest-first
+			["parent", 0],
+			["kid1", 1], // nested spawns in spawn order
+			["kid2", 1],
+		]);
+	});
+
+	it("surfaces a nested run at root level when its parent left the strip", () => {
+		const reg = new LiveRunRegistry();
+		register(reg, { taskId: "parent", name: "parent" });
+		reg.register({ taskId: "kid", name: "kid", agentType: "explore", task: "t", startedAt: 2000, parentTaskId: "parent", depth: 1 });
+		reg.finish("parent", false);
+		reg.get("parent")!.finishedAt = 1000; // linger long expired
+		const rows = buildRows(reg.list(), false, 1000 + STRIP_LINGER_MS + 1);
+		expect(rows.map((r) => [r.run?.taskId, r.depth])).toEqual([
+			[undefined, 0],
+			["kid", 0], // orphan promoted, not vanished
+		]);
+	});
+
 	it("drops settled runs (done AND idle residents) after the linger window; keeps running ones", () => {
 		const reg = new LiveRunRegistry();
 		register(reg, { taskId: "done1", name: "done1" });
@@ -238,6 +267,15 @@ describe("renderStrip", () => {
 		expect(agentRow).toContain("●");
 		expect(agentRow).toContain("Reading tui-render.ts");
 		expect(agentRow).toContain("58.8k");
+	});
+
+	it("indents nested rows with the └ elbow", () => {
+		const reg = new LiveRunRegistry();
+		register(reg, { taskId: "p", name: "p", agentType: "code-review" });
+		reg.register({ taskId: "k", name: "k", agentType: "general-purpose", task: "verify widget", startedAt: 2000, parentTaskId: "p", depth: 1 });
+		const out = renderStrip({ rows: buildRows(reg.list(), false, 5000), width: 100, now: 5000 }, paint).map(strip);
+		expect(out.find((l) => l.includes("code-review"))).not.toContain("└");
+		expect(out.find((l) => l.includes("general-purpose"))).toContain("└ ○ general-purpose");
 	});
 
 	it("collapses overflow past MAX_STRIP_ROWS", () => {

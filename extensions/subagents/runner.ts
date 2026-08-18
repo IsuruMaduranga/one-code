@@ -44,14 +44,23 @@ export interface LiveSink {
 /** Wall-clock cap on a single run/turn — a hung session shares the main event loop. */
 const WALL_CLOCK_CAP_MS = 30 * 60 * 1000;
 
-/** Tools the runtime injects into a child; the permission gate must never gate them. */
-const NEVER_GATE = new Set(["structured_output", "SendMessage"]);
+/**
+ * Tools the runtime injects into a child; the permission gate must never gate
+ * them. `Agent` is the injected child-spawn tool (index.ts) — the spawn itself
+ * is free (matching the main conversation's auto-allowed Agent tool); every
+ * tool call the spawned grandchild makes still runs through the real gate.
+ */
+const NEVER_GATE = new Set(["structured_output", "SendMessage", "Agent"]);
 
 /**
  * The curated extensions loaded into a subagent session (via additionalExtensionPaths,
  * which the loader loads even under noExtensions). Broadly Claude Code's model — a
  * subagent gets project context + freshness + a working toolset, but NOT the frontier
- * chrome (banner/spinner/recap) or orchestration (Agent/workflow — no recursion).
+ * chrome (banner/spinner/recap) or the orchestration EXTENSIONS. Nested spawning
+ * (CC parity: subagents spawn subagents) is instead an injected `Agent` custom tool
+ * (index.ts childAgentTool, passed via extraTools) that delegates to the PARENT
+ * extension's runtime — one registry, one panel, one permission gate — and is
+ * depth-capped there.
  *
  * `lsp` is deliberately NOT here (matching CC, findings §17.3): a child session is torn
  * down with the raw AgentSession.dispose(), which never fires session_shutdown, so lsp's
@@ -86,6 +95,8 @@ interface ChildSessionSpec {
 	thinking?: string;
 	/** The child called SendMessage {to: "main"} — relay it to the main conversation. */
 	onMessageToMain?: (message: string, summary?: string) => void;
+	/** Extra injected tools (e.g. the child-spawn Agent tool for depth-0 children). */
+	extraTools?: ToolDefinition[];
 }
 
 export interface SubagentRunOptions extends ChildSessionSpec {
@@ -231,7 +242,7 @@ export class SubagentRuntime {
 			model: (spec.model ? findConfigured(this.availableModels, spec.model) : undefined) as never,
 			thinkingLevel: spec.thinking as never,
 			tools: spec.forkFrom ? undefined : spec.agent?.tools,
-			customTools: [sendToMainTool((m, s) => spec.onMessageToMain?.(m, s)), ...this.getMcpTools()],
+			customTools: [sendToMainTool((m, s) => spec.onMessageToMain?.(m, s)), ...(spec.extraTools ?? []), ...this.getMcpTools()],
 			resourceLoader: loader,
 			sessionManager,
 		});

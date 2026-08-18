@@ -15,7 +15,7 @@ export interface Paint {
 	bold(text: string): string;
 }
 
-/** A strip row: main is row 0 (synthetic), then the live children. */
+/** A strip row: main is row 0 (synthetic), then the live children as a tree. */
 export interface PanelRow {
 	/** undefined = the synthetic `main` row. */
 	run?: LiveRun;
@@ -25,6 +25,8 @@ export interface PanelRow {
 	startedAt?: number;
 	finishedAt?: number;
 	tokens: number;
+	/** Tree indent: 0 = spawned by main; 1+ = nested under the row above (CC's `└`). */
+	depth: number;
 }
 
 /**
@@ -35,21 +37,40 @@ export interface PanelRow {
 export const STRIP_LINGER_MS = 5000;
 
 /**
- * Build the row list: `main` first, then newest-first children. `mainBusy`
- * drives main's dot. Running children always show; settled ones — done,
- * failed, or an idle resident whose turn ended — only within STRIP_LINGER_MS
- * of finishing (finishedAt is stamped by finish() AND settle()).
+ * Build the row list: `main` first, then the live children as a TREE — roots
+ * newest-first, each root followed by its nested spawns (a child's own Agent
+ * calls) in spawn order, indented one level (CC's `└` rows). `mainBusy` drives
+ * main's dot. Running children always show; settled ones — done, failed, or an
+ * idle resident whose turn ended — only within STRIP_LINGER_MS of finishing
+ * (finishedAt is stamped by finish() AND settle()). A nested run whose parent
+ * already left the strip surfaces at root level rather than vanishing.
  */
 export function buildRows(runs: LiveRun[], mainBusy: boolean, now: number): PanelRow[] {
-	const main: PanelRow = {
-		label: "main",
-		activity: "",
-		status: mainBusy ? "running" : "idle",
-		tokens: 0,
-	};
-	const children = runs
-		.filter((run) => run.status === "running" || (run.finishedAt ?? now) > now - STRIP_LINGER_MS)
-		.map((run) => ({
+	const rows: PanelRow[] = [
+		{
+			label: "main",
+			activity: "",
+			status: mainBusy ? "running" : "idle",
+			tokens: 0,
+			depth: 0,
+		},
+	];
+	// `runs` arrives newest-first; children under a parent read best in spawn order.
+	const visible = runs.filter((run) => run.status === "running" || (run.finishedAt ?? now) > now - STRIP_LINGER_MS);
+	const visibleIds = new Set(visible.map((run) => run.taskId));
+	const byParent = new Map<string, LiveRun[]>();
+	const roots: LiveRun[] = [];
+	for (const run of visible) {
+		if (run.parentTaskId && visibleIds.has(run.parentTaskId)) {
+			const siblings = byParent.get(run.parentTaskId) ?? [];
+			siblings.unshift(run); // reverse the newest-first order → spawn order
+			byParent.set(run.parentTaskId, siblings);
+		} else {
+			roots.push(run);
+		}
+	}
+	const emit = (run: LiveRun, depth: number) => {
+		rows.push({
 			run,
 			label: run.agentType,
 			activity: run.activity,
@@ -57,8 +78,12 @@ export function buildRows(runs: LiveRun[], mainBusy: boolean, now: number): Pane
 			startedAt: run.startedAt,
 			finishedAt: run.finishedAt,
 			tokens: run.tokens.output,
-		}));
-	return [main, ...children];
+			depth,
+		});
+		for (const child of byParent.get(run.taskId) ?? []) emit(child, depth + 1);
+	};
+	for (const root of roots) emit(root, 0);
+	return rows;
 }
 
 const STATUS_ROW_STYLE: Partial<Record<LiveStatus, string>> = { failed: "error" };
@@ -98,7 +123,8 @@ export function renderStrip(input: StripInput, paint: Paint): string[] {
 		]
 			.filter(Boolean)
 			.join(" · ");
-		const left = `${mark} ${row.label}${row.activity ? `  ${row.activity}` : ""}`;
+		const elbow = row.depth > 0 ? `${"  ".repeat(row.depth - 1)}└ ` : "";
+		const left = `${elbow}${mark} ${row.label}${row.activity ? `  ${row.activity}` : ""}`;
 		const line = splitCell(left, stats, width);
 		if (selected) out.push(paint.fg("accent", paint.bold(line)));
 		else if (STATUS_ROW_STYLE[row.status]) out.push(paint.fg(STATUS_ROW_STYLE[row.status]!, line));
