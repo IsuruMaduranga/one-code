@@ -211,6 +211,65 @@ describe("classify: pinning and fallback", () => {
 	});
 });
 
+describe("classify: reasoning-mandatory fallback", () => {
+	// The test models carry no thinkingLevelMap, so forcedReasoningLevel returns
+	// undefined (the off-request is attempted) and reasoningRetryLevel returns
+	// "minimal" — i.e. these exercise the REACTIVE path (a metadata-gap model that
+	// only reveals it can't disable thinking via the provider's 400).
+	const mandatoryReply = () => errorReply("400 Reasoning is mandatory for this endpoint and cannot be disabled");
+
+	it("retries the SAME candidate at its floor when it rejects thinking-off, then pins and memoizes", async () => {
+		const { deps, notices } = makeDeps();
+		// gpt-5-mini (the provider-default candidate tried first) 400s on the
+		// off-request; the retry with forced thinking succeeds on the same model.
+		completeMock.mockResolvedValueOnce(mandatoryReply()).mockResolvedValue(allowReply());
+		const verdict = await classify(request, deps);
+
+		expect(verdict.decision).toBe("allow");
+		expect(deps.state.pinned?.id).toBe("gpt-5-mini"); // retried in place, not stepped past
+		expect(deps.state.forcedReasoning.get("openai/gpt-5-mini")).toBe("minimal"); // learned + remembered
+		expect(deps.state.rejected.has("openai/gpt-5-mini")).toBe(false); // a forced-reasoning 400 is not "unusable"
+		expect(notices.some((n) => /cannot run with thinking disabled/.test(n))).toBe(true);
+		// First attempt sent no reasoning (off); the retry sent minimal.
+		expect(completeMock.mock.calls[0]?.[2]?.reasoning).toBeUndefined();
+		expect(completeMock.mock.calls[1]?.[2]?.reasoning).toBe("minimal");
+	});
+
+	it("sends the memoized level up front on a later call, with no wasted 400", async () => {
+		const { deps } = makeDeps();
+		deps.state.forcedReasoning.set("openai/gpt-5-mini", "minimal");
+		completeMock.mockResolvedValue(allowReply());
+
+		const verdict = await classify(request, deps);
+		expect(verdict.decision).toBe("allow");
+		expect(completeMock).toHaveBeenCalledTimes(1); // no failed off-attempt
+		expect(completeMock.mock.calls[0]?.[2]?.reasoning).toBe("minimal");
+	});
+
+	it("retries at most once — a second mandatory-thinking 400 is surfaced, not looped", async () => {
+		const { deps } = makeDeps();
+		// The candidate 400s on both the off-attempt and the forced retry. The key
+		// guarantee is that the re-queue does NOT loop forever: after one forced
+		// retry, the persistent error surfaces as a block (the existing
+		// "substantive error → block" contract), so completeSimple runs exactly
+		// twice for that candidate, not endlessly.
+		completeMock.mockImplementation(async (m: any) =>
+			m.id === "gpt-5-mini" ? mandatoryReply() : allowReply(),
+		);
+		const verdict = await classify(request, deps);
+		expect(verdict.decision).toBe("block");
+		expect(completeMock).toHaveBeenCalledTimes(2); // off, then minimal — no third attempt
+	});
+
+	it("does not treat an ordinary provider error as reasoning-mandatory", async () => {
+		const { deps } = makeDeps();
+		completeMock.mockResolvedValue(errorReply("500 internal server error"));
+		const verdict = await classify(request, deps);
+		expect(verdict.decision).toBe("block");
+		expect(deps.state.forcedReasoning.size).toBe(0); // never learned a level
+	});
+});
+
 const abortedReply = () => ({ stopReason: "aborted", errorMessage: "Request aborted", content: [] }) as any;
 
 describe("classify: timeout handling", () => {

@@ -419,25 +419,42 @@ classifier depends on — `400 Reasoning is mandatory for this endpoint and cann
 be disabled` — so a user whose session and classifier both resolved to it had
 **every classify-eligible call blocked** (fail-closed, correct, and completely
 unusable), the mirror image of the temperature case. Omitting `reasoning` is
-still right almost everywhere; the fix keeps that default and adds two layers,
-both in `lib/model-policy.ts` (`forcedReasoningLevel` / `isReasoningMandatoryError`
-/ `reasoningRetryLevel`) and shared by all five one-shot `completeSimple` callers
-(classifier, `/auto-mode setup` drafting, recap, the web-fetch reader,
-compaction): (1) **proactive** — pi's catalog marks such models with
-`thinkingLevelMap.off: null`, so `clampThinkingLevel(model, "off")` returns the
-lowest real level; when it isn't "off" we send that level and the request never
-errors; (2) **reactive** — for a metadata gap (OpenRouter entries carry no map,
-and models newer than the bundled catalog), the provider's mandatory-thinking
-400 is caught, the model's floor learned once (memoized per model in
-`ClassifierState.forcedReasoning`, so the failed round-trip is paid at most
-once), the call retried, and a one-time notice shown. Every model that supports
-off sends a byte-identical request to before. `replyText` still reads only text
-blocks, so native reasoning output never disturbs verdict grounding. Verified
-live on `google/gemini-3.7-flash` in auto mode (both directions): a recoverable
-in-project delete allowed, an SSH-key exfil and a crontab-persistence injection
-both blocked. This is a fourth harmless-looking option failing closed on an
-untested provider — the same lesson, now with a reactive net for the models the
-catalog does not yet describe.
+still right almost everywhere; the fix keeps that default and adds two layers in
+`lib/model-policy.ts`: (1) **proactive** — `forcedReasoningLevel`: pi's catalog
+marks such models with `thinkingLevelMap.off: null`, so `clampThinkingLevel(model,
+"off")` returns the lowest real level; when it isn't "off" we send that level and
+the request never errors; (2) **reactive** — `withReasoningFallback`
+(`isReasoningMandatoryError` + `reasoningRetryLevel`): for a metadata gap
+(OpenRouter entries carry no map, and models newer than the bundled catalog), the
+provider's mandatory-thinking 400 is caught, the model's floor learned once, the
+call retried, and (in the classifier) a one-time notice shown.
+
+**Which layer each caller gets, and why it differs.** The proactive layer is in
+all five one-shot `completeSimple` callers. The reactive layer is in **four** —
+the classifier, `/auto-mode setup` drafting, recap, and the web-fetch reader —
+each of which picks a *separate, possibly-unvalidated* model. Only two memoize
+the learned level: the classifier (in `ClassifierState.forcedReasoning`, the hot
+path) and the web-fetch reader (a per-session map — `answerFromPage` runs per
+`web_fetch`, so without it a mandatory-reasoning reader re-pays the 400 every
+fetch). Setup (a rare one-off) and recap (a 5-min idle timer) deliberately keep
+no memo. **Compaction gets the proactive layer only, by design** — it always runs
+on the session's *own* model at the session's own thinking level, so if that
+model/level pair 400'd on the off-request the session would already be broken from
+turn one, long before compaction fires; a reactive retry there would be
+unreachable. Its `catch` still degrades to pi's own summarizer if a call ever
+errors. The classifier keeps its own reactive path (memoization + `notifyOnce` +
+the multi-candidate queue) rather than composing `withReasoningFallback`, whose
+`(model, call, memo)` shape does not carry the notice or queue/pin interaction.
+
+Every model that supports off sends a byte-identical request to before, and
+`replyText` still reads only text blocks, so native reasoning output never
+disturbs verdict grounding. Verified live on `google/gemini-3.7-flash` (which
+resolves via `openrouter`, an unmarked entry, so it exercises the *reactive*
+path) in auto mode, both directions: a recoverable in-project delete allowed
+(classifier ran, `s1` cleared to stage 2), an SSH-key exfil and a
+crontab-persistence injection both blocked. This is a fourth harmless-looking
+option failing closed on an untested provider — the same lesson, now with a
+reactive net for the models the catalog does not yet describe.
 
 ## Auto mode hardening: the pi-automode review, and what came of it
 
