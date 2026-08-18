@@ -51,8 +51,11 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	// Fixed-interval /loop (harness-driven, auto-re-arming — distinct from the
 	// model-driven `wakeup` used by dynamic /loop). One at a time, like wakeup.
 	let loop: { timer: NodeJS.Timeout; intervalSeconds: number; task: string } | undefined;
-	// True between agent_start and agent_end, so a fixed-interval tick can skip
+	// True between agent_start and agent_settled, so a fixed-interval tick can skip
 	// (not queue) while the previous tick's turn is still running — no backlog.
+	// agent_settled, not agent_end: agent_end can precede an internal retry /
+	// auto-compaction / queued continuation, and a tick landing in that gap would
+	// inject a turn while the prior one is still about to resume.
 	let agentBusy = false;
 	// Set when a dynamic /loop force-activated schedule_wakeup, so /loop stop can
 	// restore the lean tool surface it changed.
@@ -510,7 +513,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	pi.on("agent_start", () => {
 		agentBusy = true;
 	});
-	pi.on("agent_end", () => {
+	pi.on("agent_settled", () => {
 		agentBusy = false;
 	});
 
