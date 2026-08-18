@@ -20,12 +20,13 @@ import os from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StringEnum } from "@earendil-works/pi-ai";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../auto-mode/actions.ts";
 import { type AgentDefinition, type AgentSource, agentDirs, discoverAgents } from "./agents.ts";
 import { modelIdentity, modelSpec } from "../lib/model-policy.ts";
-import { applicableSubagentDefault, loadSubagentDefault, persistSubagentModel } from "./default-model.ts";
+import { applicableSubagentDefault, loadSubagentDefault, persistSubagentModel, type SubagentDefault } from "./default-model.ts";
 import {
 	expensiveModelGate,
 	resolveSubagentModel,
@@ -280,6 +281,29 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	};
 
 	/**
+	 * Session-scoped cache of the AUTOMATIC subagent default (no per-call or agent
+	 * override), so the O(catalog) ranking is not rebuilt on every turn (the
+	 * every-turn reminder/banner) or every no-override spawn. Keyed on the session
+	 * model plus the configured default; catalog churn is deliberately ignored,
+	 * matching the classifier's pin — the session commits to one default worker,
+	 * and /model or /subagent both change the signature and recompute. A per-call
+	 * `model` or an agent's frontmatter model still resolves fresh (they vary).
+	 */
+	let autoDefaultCache: { signature: string; resolution: SubagentModelResolution } | undefined;
+	const resolveAutoDefault = (
+		sessionModel: Model<Api> | undefined,
+		available: Model<Api>[],
+		configured: SubagentDefault | undefined,
+	): SubagentModelResolution => {
+		const session = sessionModel ? modelSpec(sessionModel) : "(none)";
+		const signature = `${session}|${configured?.spec ?? ""}|${configured?.setForContainment ?? ""}|${configured?.source ?? ""}`;
+		if (autoDefaultCache?.signature === signature) return autoDefaultCache.resolution;
+		const resolution = resolveSubagentModel({ configuredDefault: configured, sessionModel, available });
+		autoDefaultCache = { signature, resolution };
+		return resolution;
+	};
+
+	/**
 	 * The every-turn menu reminder and the banner's subagent-default status.
 	 * Every-turn because reminders are transient per-request injections — that
 	 * scope survives compaction by construction — and keyed so a model change
@@ -288,7 +312,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	const emitModelStatus = (ctx: ExtensionContext, sessionModel = ctx.model) => {
 		const available = ctx.modelRegistry.getAvailable();
 		const configured = applicableSubagentDefault(loadSubagentDefault(os.homedir()), sessionModel);
-		const resolution = resolveSubagentModel({ configuredDefault: configured, sessionModel, available });
+		const resolution = resolveAutoDefault(sessionModel, available, configured);
 		for (const notice of resolution.notices) notifyModelOnce(ctx, notice);
 		pi.events.emit(REMINDER_CHANNEL, {
 			text: subagentModelsReminder({
@@ -979,13 +1003,20 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				// the forked session restore its own model. (Per-call `model` on a fork
 				// is already rejected above.)
 				if (p.request.fork) continue;
-				const resolution = resolveSubagentModel({
-					requested: p.request.model,
-					agentModel: p.agentDef?.model,
-					configuredDefault: configuredDefault,
-					sessionModel: ctx.model,
-					available,
-				});
+				// No per-call or agent-frontmatter override → the automatic default,
+				// which is stable for the session, so reuse the cached resolution
+				// instead of re-ranking the catalog per spawn. An override varies per
+				// call and always resolves fresh.
+				const resolution =
+					p.request.model || p.agentDef?.model
+						? resolveSubagentModel({
+								requested: p.request.model,
+								agentModel: p.agentDef?.model,
+								configuredDefault: configuredDefault,
+								sessionModel: ctx.model,
+								available,
+							})
+						: resolveAutoDefault(ctx.model, available, configuredDefault);
 				if (resolution.unresolved) {
 					// The main model chose this string; the menu lets it retry.
 					const fallback = resolveSubagentModel({

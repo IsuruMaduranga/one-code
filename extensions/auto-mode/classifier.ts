@@ -77,6 +77,16 @@ export interface ClassifierState {
 	 * at ROTATE_AFTER_TIMEOUTS the pin is released so the session re-picks.
 	 */
 	timeoutStreak: number;
+	/**
+	 * The candidate chain cached for the current (session model, classifier config)
+	 * signature, so the O(catalog) ranking is not rebuilt on every gated tool call.
+	 * Invalidated only when the session model or the `classifierModel` setting
+	 * changes — catalog churn is deliberately ignored, matching the pin, which
+	 * already commits the session to one classifier. The live `rejected` filter is
+	 * still applied to the cached chain per call, so a model that dies mid-session
+	 * is still stepped over without a rebuild.
+	 */
+	chainCache?: { signature: string; candidates: Candidate[]; notices: ClassifierNotice[] };
 }
 
 export function createClassifierState(): ClassifierState {
@@ -110,14 +120,29 @@ class StepError extends Error {
 	}
 }
 
+/** Signature that must stay equal for the cached chain to be reused (see ClassifierState.chainCache). */
+function selectionSignature(deps: ClassifierDeps): string {
+	const session = deps.sessionModel ? `${deps.sessionModel.provider}/${deps.sessionModel.id}` : "(none)";
+	return `${session}|${deps.config.classifierModel ?? ""}|${deps.config.classifierModelSetFor ?? ""}`;
+}
+
 /** The candidate chain (minus anything already unusable this session) and its notices. */
 function remainingCandidates(deps: ClassifierDeps): { candidates: Candidate[]; notices: ClassifierNotice[] } {
-	const { candidates: all, notices } = classifierCandidates({
-		available: deps.registry.getAvailable(),
-		sessionModel: deps.sessionModel,
-		configured: deps.config.classifierModel,
-		configuredSetForContainment: deps.config.classifierModelSetFor,
-	});
+	const signature = selectionSignature(deps);
+	let cached = deps.state.chainCache;
+	if (!cached || cached.signature !== signature) {
+		const built = classifierCandidates({
+			available: deps.registry.getAvailable(),
+			sessionModel: deps.sessionModel,
+			configured: deps.config.classifierModel,
+			configuredSetForContainment: deps.config.classifierModelSetFor,
+		});
+		cached = { signature, candidates: built.candidates, notices: built.notices };
+		// Don't poison the cache with an empty chain (e.g. a not-yet-populated
+		// registry) — that would permanently block the gate; recompute next call.
+		if (built.candidates.length > 0) deps.state.chainCache = cached;
+	}
+	const { candidates: all, notices } = cached;
 	const usable = all.filter((entry) => !deps.state.rejected.has(`${entry.model.provider}/${entry.model.id}`));
 	if (usable.length > 0) return { candidates: usable, notices };
 	// If everything has been rejected, the session model is still worth one more

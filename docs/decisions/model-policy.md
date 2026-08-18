@@ -183,3 +183,25 @@ session): One Code screens on the cheapest capable model for cost, and the
 **Rejected:** keeping `ROLE_PROFILES` as an unpriced-provider fallback — it
 reintroduces the two-mechanism split the change set out to remove, and the
 session-model degradation is a safe, already-documented outcome.
+
+### Selection is computed once per session and cached (2026-08-18)
+
+The chain build is O(catalog) (`modelIdentity` over the catalog, `resolveModelTier`
+over the contained set), and the classifier runs it on *every gated tool call*
+while the subagent reminder runs it *every turn*. Since the session already
+commits to one model — the classifier pins on first success, the subagent default
+is deterministic — the ranking is cached per **(session model, config)**
+signature: `ClassifierState.chainCache` for the classifier, a closure-scoped
+`autoDefaultCache` for the subagent automatic default. Catalog churn is
+deliberately *not* in the signature (matching the pin, which already ignores it);
+`/model` and `/subagent`/`/auto-mode model` both change the signature and force a
+rebuild. The classifier's live `rejected` filter still applies to the cached
+chain per call, so a model dying mid-session is stepped over without a rebuild,
+and an empty chain (a not-yet-populated registry) is never cached — that would
+permanently block the gate. A per-call `model` or an agent's frontmatter model
+still resolves fresh; only the stable automatic default is cached. The provider
+prompt-cache benefit (stable model + the ~110KB ruleset prefix under
+`cacheRetention: "long"`) was already delivered by the pin; this removes the
+redundant CPU rebuild behind it. Not done in `session_start` (findings §15: never
+await slow work there) — the cache fills lazily on first use, which also validates
+the model actually works before committing.

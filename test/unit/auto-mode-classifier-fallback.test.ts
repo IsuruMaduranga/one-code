@@ -102,6 +102,34 @@ describe("classify: pinning and fallback", () => {
 		expect(notices.some((n) => n.includes("cannot use openai/gpt-5-mini"))).toBe(true);
 	});
 
+	it("caches the candidate chain, rebuilding only when the session model or config changes", async () => {
+		// The chain build is O(catalog); the session commits to one classifier, so it
+		// should be ranked once and reused, not rebuilt on every gated call.
+		completeMock.mockResolvedValue(allowReply());
+		let catalogReads = 0;
+		const registry = {
+			getAvailable: () => {
+				catalogReads++;
+				return [sessionModel, miniModel, tinyModel];
+			},
+			getApiKeyAndHeaders: async () => ({ ok: true as const, apiKey: "key" }),
+		} as any;
+		const deps = { registry, sessionModel, config, state: createClassifierState(), onNotice: () => {} };
+
+		await classify(request, deps);
+		await classify(request, deps);
+		await classify(request, deps);
+		expect(catalogReads).toBe(1); // built once, reused across calls
+
+		// Session-model change → signature changes → rebuild.
+		await classify(request, { ...deps, sessionModel: model("openai", "gpt-5-mini", 0.25) });
+		expect(catalogReads).toBe(2);
+
+		// classifierModel config change → rebuild too.
+		await classify(request, { ...deps, config: { ...config, classifierModel: "openai/gpt-5-mini" } });
+		expect(catalogReads).toBe(3);
+	});
+
 	it("does not reject or unpin on a transient failure", async () => {
 		completeMock.mockResolvedValueOnce(allowReply());
 		const { deps } = makeDeps();
