@@ -1,4 +1,4 @@
-import type { Api, Model } from "@earendil-works/pi-ai";
+import { type Api, clampThinkingLevel, type Model, type ThinkingLevel } from "@earendil-works/pi-ai";
 
 /**
  * Whether a session runs on a Claude-family model. Claude Code's own subagent
@@ -243,6 +243,38 @@ export function modelsContainedToSession(available: Model<Api>[], sessionModel: 
 			isSelectableVariant(model) &&
 			modelIdentity(model).containment === sessionIdentity.containment,
 	);
+}
+
+/**
+ * The thinking level to send on a one-shot `completeSimple` call that would
+ * rather run with thinking OFF (classifier, setup drafting, recap, readers).
+ *
+ * `undefined` = the model supports off — omit `reasoning`, pi disables thinking
+ * explicitly, the request stays exactly as before. A level = the model cannot
+ * disable thinking (catalog `thinkingLevelMap.off: null`, e.g. Gemini 3.6+
+ * Flash); omitting `reasoning` makes the provider 400 ("Reasoning is mandatory
+ * for this endpoint and cannot be disabled"), so send the lowest level the
+ * model supports instead.
+ */
+export function forcedReasoningLevel(model: Model<Api>): ThinkingLevel | undefined {
+	const clamped = clampThinkingLevel(model, "off");
+	return clamped === "off" ? undefined : (clamped as ThinkingLevel);
+}
+
+/**
+ * Provider error saying thinking cannot be disabled — the reactive net for a
+ * model whose catalog entry LACKS the `thinkingLevelMap.off: null` marker
+ * (OpenRouter entries, hand-added models newer than the bundled catalog).
+ * A false positive only costs one retry with minimal thinking.
+ */
+export function isReasoningMandatoryError(message: string): boolean {
+	return /(reasoning|thinking)[^.]*\b(mandatory|cannot be disabled|can't be disabled|must be enabled|is required)\b/i.test(message);
+}
+
+/** The level to retry with after isReasoningMandatoryError: the lowest real level the model supports. */
+export function reasoningRetryLevel(model: Model<Api>): ThinkingLevel {
+	const clamped = clampThinkingLevel(model, "minimal");
+	return clamped === "off" ? "minimal" : (clamped as ThinkingLevel);
 }
 
 /** Resolve an explicit provider/id, bare id, or prefix. Explicit choices are not contained. */

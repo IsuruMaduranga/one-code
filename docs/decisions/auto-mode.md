@@ -413,6 +413,32 @@ option which reads as harmless failed closed on a provider we were not testing
 (thinking budget, macOS symlink containment, now temperature): a gate spanning 38
 providers should send the minimum set of options it actually needs.
 
+**The inverse of the temperature bug: a model that REQUIRES thinking (2026-08-19).**
+`google/gemini-3.7-flash` (and 3.6 Flash) reject the thinking-off request the
+classifier depends on — `400 Reasoning is mandatory for this endpoint and cannot
+be disabled` — so a user whose session and classifier both resolved to it had
+**every classify-eligible call blocked** (fail-closed, correct, and completely
+unusable), the mirror image of the temperature case. Omitting `reasoning` is
+still right almost everywhere; the fix keeps that default and adds two layers,
+both in `lib/model-policy.ts` (`forcedReasoningLevel` / `isReasoningMandatoryError`
+/ `reasoningRetryLevel`) and shared by all five one-shot `completeSimple` callers
+(classifier, `/auto-mode setup` drafting, recap, the web-fetch reader,
+compaction): (1) **proactive** — pi's catalog marks such models with
+`thinkingLevelMap.off: null`, so `clampThinkingLevel(model, "off")` returns the
+lowest real level; when it isn't "off" we send that level and the request never
+errors; (2) **reactive** — for a metadata gap (OpenRouter entries carry no map,
+and models newer than the bundled catalog), the provider's mandatory-thinking
+400 is caught, the model's floor learned once (memoized per model in
+`ClassifierState.forcedReasoning`, so the failed round-trip is paid at most
+once), the call retried, and a one-time notice shown. Every model that supports
+off sends a byte-identical request to before. `replyText` still reads only text
+blocks, so native reasoning output never disturbs verdict grounding. Verified
+live on `google/gemini-3.7-flash` in auto mode (both directions): a recoverable
+in-project delete allowed, an SSH-key exfil and a crontab-persistence injection
+both blocked. This is a fourth harmless-looking option failing closed on an
+untested provider — the same lesson, now with a reactive net for the models the
+catalog does not yet describe.
+
 ## Auto mode hardening: the pi-automode review, and what came of it
 
 A review of [czottmann/pi-automode](https://github.com/czottmann/pi-automode)

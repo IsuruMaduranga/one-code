@@ -49,6 +49,7 @@ import {
 	looksLikeAnthropicRequest,
 	withClearThinking,
 } from "../context-management/index.ts";
+import { forcedReasoningLevel } from "../lib/model-policy.ts";
 import { buildCompactionInstruction, COMPACTION_MAX_TOKENS, continuationSummary, extractSummary } from "./prompt.ts";
 
 /** Compaction reads a whole context window; give it more room than the classifier's 30s. */
@@ -162,8 +163,10 @@ export default function compactionExtension(pi: ExtensionAPI) {
 					// fails closed — this is the session's own model, already proven to
 					// accept this level, and streamSimple clamps an unsupported level
 					// down rather than erroring, so mirroring never fails closed here.
-					// "off" carries no reasoning (matching what such a session sends).
-					reasoning: ctx.thinkingLevel === "off" ? undefined : ctx.thinkingLevel,
+					// "off" carries no reasoning (matching what such a session sends) —
+					// unless the model cannot disable thinking, where an off-request
+					// would 400 (forcedReasoningLevel sends its lowest level instead).
+					reasoning: ctx.thinkingLevel === "off" ? forcedReasoningLevel(model) : ctx.thinkingLevel,
 					// The clear_thinking body edit, matching the session's requests (see
 					// the header note above). Only attached on Anthropic requests that
 					// carry thinking, exactly as the context-management extension gates it.

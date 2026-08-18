@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
 	BUILTIN_PROVIDER_POLICIES,
 	crossesProvider,
+	forcedReasoningLevel,
+	isReasoningMandatoryError,
 	modelIdentity,
 	modelsContainedToSession,
+	reasoningRetryLevel,
 } from "../../extensions/lib/model-policy.ts";
 
 const model = (provider: string, id: string, input = 1, api = "openai-responses") =>
@@ -142,5 +145,48 @@ describe("model identity and containment", () => {
 		const session = model("custom", "flagship", 10);
 		const cheap = model("custom", "cheap", 0.01);
 		expect(modelsContainedToSession([session, cheap], session)).toEqual([session]);
+	});
+});
+
+describe("forcedReasoningLevel / reasoningRetryLevel", () => {
+	const withMap = (map: Record<string, string | null> | undefined, reasoning = true) =>
+		({ ...model("google", "gemini-x"), reasoning, thinkingLevelMap: map }) as never;
+
+	it("omits reasoning for non-reasoning models and models that support off", () => {
+		expect(forcedReasoningLevel(withMap(undefined, false))).toBeUndefined();
+		expect(forcedReasoningLevel(withMap(undefined))).toBeUndefined();
+		expect(forcedReasoningLevel(withMap({ minimal: null }))).toBeUndefined();
+	});
+
+	it("returns the lowest supported level when off is marked unsupported", () => {
+		// pi's catalog marks can't-disable-thinking models with thinkingLevelMap.off: null
+		// (e.g. google/gemini-3.6-flash).
+		expect(forcedReasoningLevel(withMap({ off: null }))).toBe("minimal");
+		expect(forcedReasoningLevel(withMap({ off: null, minimal: null }))).toBe("low");
+	});
+
+	it("retry level is the lowest real level the model supports", () => {
+		expect(reasoningRetryLevel(withMap(undefined))).toBe("minimal");
+		expect(reasoningRetryLevel(withMap({ off: null, minimal: null }))).toBe("low");
+		// Even a metadata-free non-reasoning model gets a real level: the provider
+		// just told us thinking is mandatory, so the metadata is wrong.
+		expect(reasoningRetryLevel(withMap(undefined, false))).toBe("minimal");
+	});
+});
+
+describe("isReasoningMandatoryError", () => {
+	it("matches the provider phrasings for thinking-cannot-be-disabled", () => {
+		// The message Gemini 3.7 Flash actually returns (via 400).
+		expect(isReasoningMandatoryError("400: Reasoning is mandatory for this endpoint and cannot be disabled.")).toBe(true);
+		expect(isReasoningMandatoryError("thinking cannot be disabled for this model")).toBe(true);
+		expect(isReasoningMandatoryError("reasoning must be enabled")).toBe(true);
+		expect(isReasoningMandatoryError("Thinking is required for gemini-3.7-flash")).toBe(true);
+	});
+
+	it("does not match unrelated provider errors", () => {
+		expect(isReasoningMandatoryError("model not found")).toBe(false);
+		expect(isReasoningMandatoryError("invalid api key")).toBe(false);
+		expect(isReasoningMandatoryError("rate limit exceeded")).toBe(false);
+		expect(isReasoningMandatoryError("maximum context length exceeded. Reduce the prompt")).toBe(false);
 	});
 });

@@ -27,6 +27,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Model, Tool } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { convertToLlm, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { forcedReasoningLevel, isReasoningMandatoryError, reasoningRetryLevel } from "../lib/model-policy.ts";
 import { pickEconomicalContainedModel } from "../lib/model-tier.ts";
 import { dimMarkedLine } from "../lib/tui-render.ts";
 import { RECAP_PROMPT, recapLine, recentForRecap, REFERENCE_MARK } from "./prompt.ts";
@@ -110,22 +111,33 @@ export default function recapExtension(pi: ExtensionAPI) {
 				.map(({ name, description, parameters }) => ({ name, description, parameters }) as Tool);
 
 			const recent = recentForRecap(messages);
-			const timeout = AbortSignal.timeout(RECAP_TIMEOUT_MS);
-			const result = await completeSimple(
-				baseUrl ? ({ ...choice.model, baseUrl } as Model<Api>) : choice.model,
-				{
-					systemPrompt: "",
-					messages: [...convertToLlm(recent), { role: "user", content: RECAP_PROMPT, timestamp: Date.now() }],
-					tools,
-				},
-				{
-					apiKey: auth.apiKey,
-					headers: auth.headers,
-					env: auth.env,
-					signal: AbortSignal.any([controller.signal, timeout]),
-					maxTokens: RECAP_MAX_TOKENS,
-				},
-			);
+			// Thinking off unless the model cannot disable it; one retry covers a
+			// model whose catalog entry lacks the marker (see forcedReasoningLevel).
+			let reasoning = forcedReasoningLevel(choice.model);
+			const request = () => {
+				const timeout = AbortSignal.timeout(RECAP_TIMEOUT_MS);
+				return completeSimple(
+					baseUrl ? ({ ...choice.model, baseUrl } as Model<Api>) : choice.model,
+					{
+						systemPrompt: "",
+						messages: [...convertToLlm(recent), { role: "user", content: RECAP_PROMPT, timestamp: Date.now() }],
+						tools,
+					},
+					{
+						apiKey: auth.apiKey,
+						headers: auth.headers,
+						env: auth.env,
+						signal: AbortSignal.any([controller.signal, timeout]),
+						maxTokens: RECAP_MAX_TOKENS,
+						...(reasoning ? { reasoning } : {}),
+					},
+				);
+			};
+			let result = await request();
+			if (result.stopReason === "error" && !reasoning && isReasoningMandatoryError(result.errorMessage ?? "")) {
+				reasoning = reasoningRetryLevel(choice.model);
+				result = await request();
+			}
 			if (controller.signal.aborted) return;
 			const content = result.content
 				.filter((block): block is { type: "text"; text: string } => block.type === "text")

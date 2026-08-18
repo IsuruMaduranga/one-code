@@ -16,6 +16,7 @@ import { completeSimple } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
+import { forcedReasoningLevel, isReasoningMandatoryError, reasoningRetryLevel } from "../lib/model-policy.ts";
 import { htmlToMarkdown, isSameHost, normalizeUrl, paginate } from "./extract.ts";
 import { pickReaderModel, READER_MAX_TOKENS, readerMessages } from "./summarize.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
@@ -71,21 +72,32 @@ async function answerFromPage(
 		const baseUrl = (auth as { baseUrl?: string }).baseUrl;
 
 		const messages = readerMessages({ prompt, markdown: entry.markdown, url, title: entry.title });
-		const timeout = AbortSignal.timeout(READER_TIMEOUT_MS);
-		const result = await completeSimple(
-			baseUrl ? ({ ...choice.model, baseUrl } as Model<Api>) : choice.model,
-			{
-				systemPrompt: messages.system,
-				messages: [{ role: "user", content: messages.user, timestamp: Date.now() }],
-			},
-			{
-				apiKey: auth.apiKey,
-				headers: auth.headers,
-				env: auth.env,
-				signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-				maxTokens: READER_MAX_TOKENS,
-			},
-		);
+		// Thinking off unless the model cannot disable it; one retry covers a
+		// model whose catalog entry lacks the marker (see forcedReasoningLevel).
+		let reasoning = forcedReasoningLevel(choice.model);
+		const request = () => {
+			const timeout = AbortSignal.timeout(READER_TIMEOUT_MS);
+			return completeSimple(
+				baseUrl ? ({ ...choice.model, baseUrl } as Model<Api>) : choice.model,
+				{
+					systemPrompt: messages.system,
+					messages: [{ role: "user", content: messages.user, timestamp: Date.now() }],
+				},
+				{
+					apiKey: auth.apiKey,
+					headers: auth.headers,
+					env: auth.env,
+					signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+					maxTokens: READER_MAX_TOKENS,
+					...(reasoning ? { reasoning } : {}),
+				},
+			);
+		};
+		let result = await request();
+		if (result.stopReason === "error" && !reasoning && isReasoningMandatoryError(result.errorMessage ?? "")) {
+			reasoning = reasoningRetryLevel(choice.model);
+			result = await request();
+		}
 		const answer = result.content
 			.filter((block): block is { type: "text"; text: string } => block.type === "text")
 			.map((block) => block.text)

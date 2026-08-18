@@ -14,9 +14,10 @@
  * has approved nothing.
  */
 
-import type { Model, Api, AssistantMessage } from "@earendil-works/pi-ai";
+import type { Model, Api, AssistantMessage, ThinkingLevel } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { forcedReasoningLevel, isReasoningMandatoryError, reasoningRetryLevel } from "../lib/model-policy.ts";
 import type { AutoModeConfig } from "./config.ts";
 import {
 	buildPayload,
@@ -87,10 +88,19 @@ export interface ClassifierState {
 	 * is still stepped over without a rebuild.
 	 */
 	chainCache?: { signature: string; candidates: Candidate[]; notices: ClassifierNotice[] };
+	/**
+	 * `provider/id` -> the thinking level a model turned out to REQUIRE (its
+	 * provider rejected the thinking-off request with "reasoning is mandatory").
+	 * Learned once per model via a single retry, then sent on every later call so
+	 * the failed round-trip is never paid again. Only needed when the model's
+	 * catalog entry lacks `thinkingLevelMap.off: null` (that case is handled
+	 * proactively, without an error).
+	 */
+	forcedReasoning: Map<string, ThinkingLevel>;
 }
 
 export function createClassifierState(): ClassifierState {
-	return { rejected: new Set(), notified: new Set(), timeoutStreak: 0 };
+	return { rejected: new Set(), notified: new Set(), timeoutStreak: 0, forcedReasoning: new Map() };
 }
 
 export interface ClassifierDeps {
@@ -205,7 +215,9 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 	let lastError = "";
 	let sawTimeout = false;
 	let timedOutKey: string | undefined;
-	for (const candidate of attempts) {
+	const queue = [...attempts];
+	while (queue.length > 0) {
+		const candidate = queue.shift() as (typeof attempts)[number];
 		const model = candidate.model;
 		const key = `${model.provider}/${model.id}`;
 
@@ -220,7 +232,11 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 		// One provider call. `reasoning`/`temperature` are deliberately omitted: pi
 		// turns thinking off entirely when `reasoning` is absent (what a classifier
 		// wants), and `temperature` is deprecated/unsupported on several models and
-		// fails closed. See docs/decisions/auto-mode.md.
+		// fails closed. See docs/decisions/auto-mode.md. The one exception: a model
+		// that CANNOT disable thinking (catalog-marked, or learned via the
+		// reasoning-mandatory retry below) gets its lowest supported level — the
+		// off-request would 400 and the gate would fail closed on every call.
+		const reasoning = deps.state.forcedReasoning.get(key) ?? forcedReasoningLevel(model);
 		const runCall = (userText: string, maxTokens: number, stage: number) => {
 			if (debug === "2") {
 				process.stderr.write(
@@ -239,6 +255,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 					signal: deps.signal ? AbortSignal.any([deps.signal, timeout]) : timeout,
 					maxTokens,
 					cacheRetention: "long",
+					...(reasoning ? { reasoning } : {}),
 				},
 			);
 		};
@@ -344,6 +361,21 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 				};
 			}
 			if (kind === "error") {
+				// The provider refused the thinking-off request outright (metadata gap:
+				// no `thinkingLevelMap.off: null` on this catalog entry). Learn the
+				// model's floor once and retry the same candidate with it.
+				if (!reasoning && isReasoningMandatoryError(lastError)) {
+					const level = reasoningRetryLevel(model);
+					deps.state.forcedReasoning.set(key, level);
+					notifyOnce(
+						deps,
+						`forced-reasoning:${key}`,
+						`${key} cannot run with thinking disabled; the classifier now runs it at ${level} thinking.`,
+						"info",
+					);
+					queue.unshift(candidate);
+					continue;
+				}
 				// A substantive, non-transient failure that is not "model unusable here":
 				// surface it rather than papering over something about to clear.
 				return { decision: "block", reason: `Auto-mode classifier could not be reached (${lastError}).`, tier: "unmatched" };
