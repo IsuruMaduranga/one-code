@@ -172,7 +172,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				task: request.task,
 				startedAt: Date.now(),
 				parentTaskId: parent?.taskId,
-				depth: parent ? parent.depth + 1 : 0,
+				depth: record.depth ?? 0,
 			});
 		}
 		const sink: LiveSink = {
@@ -584,6 +584,26 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	const MAX_SPAWN_DEPTH = 1;
 
 	/**
+	 * Catalog text for the injected spawn tool, cached per cwd: building a
+	 * child's toolset must not re-scan the agent dirs on every spawn — a wide
+	 * fan-out would pay the filesystem walk N times for a description most
+	 * children never use. Fork is not listed (unavailable inside a child).
+	 * Validation in execute() still loads fresh; only this string is pinned,
+	 * which is what tool descriptions are anyway — static for the session.
+	 */
+	const childCatalogCache = new Map<string, string>();
+	const childCatalog = (cwd: string): string => {
+		let text = childCatalogCache.get(cwd);
+		if (text === undefined) {
+			text = loadAgents(cwd)
+				.map((a) => `- ${a.name}: ${a.description || "(no description)"}`)
+				.join("\n");
+			childCatalogCache.set(cwd, text);
+		}
+		return text;
+	};
+
+	/**
 	 * The Agent tool injected into a child session (CC parity: subagents can
 	 * spawn subagents). It delegates to THIS extension's runtime and registries,
 	 * so a nested run streams into the same panel (as a `└` row under its
@@ -598,7 +618,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			label: "Agent",
 			description:
 				"Delegate a scoped task to a specialist subagent running in its own context window. The call BLOCKS until the agent finishes and returns its report — use it for well-scoped work whose intermediate output you don't need (broad searches, focused verification, independent research). Give a complete, self-contained task: the agent cannot ask follow-ups. Available agents:\n" +
-				`${describeAgents(parentRecord.cwd)}\n` +
+				`${childCatalog(parentRecord.cwd)}\n` +
 				'(No "fork" here — forking is only available to the main conversation.)',
 			parameters: Type.Object({
 				subagent_type: Type.String({ description: "An agent name from the list in this tool's description" }),
@@ -613,11 +633,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				const err = (text: string) => ({ content: [{ type: "text" as const, text }], details: {}, isError: true });
 				if (!ctx) return err("The host session is not ready to spawn agents — retry shortly.");
 				if (agentName === FORK_AGENT) return err('"fork" is only available to the main conversation — pick a named agent instead.');
-				const agentDef = loadAgents(ctx.cwd).find((a) => a.name === agentName);
+				const agents = loadAgents(ctx.cwd);
+				const agentDef = agents.find((a) => a.name === agentName);
 				if (!agentDef) {
-					return err(
-						`${agentName ? `Unknown agent "${agentName}"` : "`subagent_type` is required"}. Available agents:\n${describeAgents(ctx.cwd)}`,
-					);
+					const catalog = agents.map((a) => `- ${a.name}: ${a.description || "(no description)"}`).join("\n");
+					return err(`${agentName ? `Unknown agent "${agentName}"` : "`subagent_type` is required"}. Available agents:\n${catalog}`);
 				}
 				if (!task) return err("`task` is required: a complete, self-contained instruction for the agent.");
 
@@ -646,6 +666,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					cwd: ctx.cwd,
 					model: resolved,
 					thinking: undefined,
+					depth: parentDepth + 1,
 				};
 				registry.add(record); // SendMessage from main can reach the nested run too
 
@@ -667,10 +688,20 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		}) as ToolDefinition;
 
 	/**
+	 * The spawn tool a run is entitled to. THE one depth gate: it reads the
+	 * record's own depth (set once at creation), so every handout site —
+	 * fresh spawn, background resident, SendMessage resume — enforces
+	 * MAX_SPAWN_DEPTH identically. A resumed grandchild stays capped.
+	 */
+	const spawnToolsFor = (record: AgentRunRecord): ToolDefinition[] => {
+		const depth = record.depth ?? 0;
+		return depth < MAX_SPAWN_DEPTH ? [childAgentTool(record, depth)] : [];
+	};
+
+	/**
 	 * Start one child (creating a worktree first if asked) and finalize its
 	 * record when done. `parent` marks a NESTED spawn — a child's own Agent
-	 * call — which links the run under its parent in the panel tree and, past
-	 * MAX_SPAWN_DEPTH, stops handing out the spawn tool.
+	 * call — which links the run under its parent in the panel tree.
 	 */
 	const executeRun = async (
 		prepared: PreparedRun,
@@ -682,7 +713,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		parent?: { taskId: string; depth: number },
 	): Promise<TaskResult> => {
 		const { request, record, agentDef } = prepared;
-		const depth = parent ? parent.depth + 1 : 0;
 
 		let worktree: Worktree | undefined;
 		if (request.worktree) {
@@ -722,7 +752,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			},
 			sink: live.sink,
 			onMessageToMain: (message, summary) => notifyAgentMessage(request.name, message, summary),
-			extraTools: depth < MAX_SPAWN_DEPTH ? [childAgentTool(record, depth)] : [],
+			extraTools: spawnToolsFor(record),
 		});
 		liveHandles.set(record.taskId, handle);
 		onStarted?.(handle, worktree);
@@ -891,6 +921,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						cwd: ctx.cwd,
 						model: request.model,
 						thinking: request.thinking,
+						depth: 0,
 					},
 				};
 			});
@@ -1033,7 +1064,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						},
 						sink: live.sink,
 						onMessageToMain: (message, summary) => notifyAgentMessage(p.record.name, message, summary),
-						extraTools: [childAgentTool(p.record, 0)],
+						extraTools: spawnToolsFor(p.record),
 						onTurnEnd: (outcome) => {
 							registry.sessionFileFor(p.record);
 							live.settle();
@@ -1285,7 +1316,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				onProgress: (toolCalls, _text, usage) => live.progress(toolCalls, usage),
 				sink: live.sink,
 				onMessageToMain: (message, summary) => notifyAgentMessage(record.name, message, summary),
-				extraTools: [childAgentTool(record, 0)],
+				extraTools: spawnToolsFor(record),
 			});
 			liveHandles.set(record.taskId, handle);
 

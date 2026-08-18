@@ -21,6 +21,13 @@ export interface AgentRunRecord {
 	cwd: string;
 	model?: string;
 	thinking?: string;
+	/**
+	 * Nesting level: 0 = spawned by main, 1 = spawned by a child's own Agent
+	 * tool. Set once at creation and read by every spawn-tool handout (the
+	 * MAX_SPAWN_DEPTH gate), so a RESUMED grandchild stays capped too. Absent
+	 * on records from before nesting existed (treated as 0).
+	 */
+	depth?: number;
 }
 
 /** `<agent>-<n>` with the lowest n not already taken. */
