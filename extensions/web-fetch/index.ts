@@ -11,12 +11,12 @@
  * invisibly, so the fallback is loud, never silent.
  */
 
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Api, Model, ThinkingLevel } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
-import { forcedReasoningLevel, isReasoningMandatoryError, reasoningRetryLevel } from "../lib/model-policy.ts";
+import { withReasoningFallback } from "../lib/model-policy.ts";
 import { htmlToMarkdown, isSameHost, normalizeUrl, paginate } from "./extract.ts";
 import { pickReaderModel, READER_MAX_TOKENS, readerMessages } from "./summarize.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
@@ -61,6 +61,9 @@ async function answerFromPage(
 	entry: { markdown: string; title?: string },
 	url: string,
 	signal: AbortSignal | undefined,
+	/** Per-session memo of a reader model's required thinking level, so a reader that
+	 * cannot disable thinking pays the mandatory-thinking 400 once, not per fetch. */
+	learnedReasoning: Map<string, ThinkingLevel>,
 ): Promise<{ answer?: string; reader?: string; truncated?: boolean; error?: string }> {
 	const choice = pickReaderModel(ctx.modelRegistry.getAvailable(), ctx.model);
 	if (!choice) return { error: "no model available to read the page" };
@@ -72,32 +75,31 @@ async function answerFromPage(
 		const baseUrl = (auth as { baseUrl?: string }).baseUrl;
 
 		const messages = readerMessages({ prompt, markdown: entry.markdown, url, title: entry.title });
-		// Thinking off unless the model cannot disable it; one retry covers a
-		// model whose catalog entry lacks the marker (see forcedReasoningLevel).
-		let reasoning = forcedReasoningLevel(choice.model);
-		const request = () => {
-			const timeout = AbortSignal.timeout(READER_TIMEOUT_MS);
-			return completeSimple(
-				baseUrl ? ({ ...choice.model, baseUrl } as Model<Api>) : choice.model,
-				{
-					systemPrompt: messages.system,
-					messages: [{ role: "user", content: messages.user, timestamp: Date.now() }],
-				},
-				{
-					apiKey: auth.apiKey,
-					headers: auth.headers,
-					env: auth.env,
-					signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-					maxTokens: READER_MAX_TOKENS,
-					...(reasoning ? { reasoning } : {}),
-				},
-			);
-		};
-		let result = await request();
-		if (result.stopReason === "error" && !reasoning && isReasoningMandatoryError(result.errorMessage ?? "")) {
-			reasoning = reasoningRetryLevel(choice.model);
-			result = await request();
-		}
+		// Thinking off unless the model cannot disable it; withReasoningFallback sends
+		// a level up front for catalog-marked models and retries on the 400 for the
+		// rest, memoizing the result so repeated fetches don't re-pay the failure.
+		const result = await withReasoningFallback(
+			choice.model,
+			(reasoning) => {
+				const timeout = AbortSignal.timeout(READER_TIMEOUT_MS);
+				return completeSimple(
+					baseUrl ? ({ ...choice.model, baseUrl } as Model<Api>) : choice.model,
+					{
+						systemPrompt: messages.system,
+						messages: [{ role: "user", content: messages.user, timestamp: Date.now() }],
+					},
+					{
+						apiKey: auth.apiKey,
+						headers: auth.headers,
+						env: auth.env,
+						signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+						maxTokens: READER_MAX_TOKENS,
+						...(reasoning ? { reasoning } : {}),
+					},
+				);
+			},
+			learnedReasoning,
+		);
 		const answer = result.content
 			.filter((block): block is { type: "text"; text: string } => block.type === "text")
 			.map((block) => block.text)
@@ -114,6 +116,8 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 	// Same 15-minute window Claude Code documents, so repeated reads of one page
 	// during a task don't re-download it.
 	const cache = new Map<string, CacheEntry>();
+	// Per-session: a reader model's learned required thinking level (see answerFromPage).
+	const learnedReasoning = new Map<string, ThinkingLevel>();
 
 	const load = async (url: string, signal: AbortSignal | undefined): Promise<CacheEntry> => {
 		const cached = cache.get(url);
@@ -218,7 +222,7 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 				// readerNote, never silently.
 				let readerNote: string | undefined;
 				if (params.prompt) {
-					const answered = await answerFromPage(ctx, params.prompt, entry, target, signal);
+					const answered = await answerFromPage(ctx, params.prompt, entry, target, signal, learnedReasoning);
 					if (answered.answer !== undefined) {
 						const header = [
 							entry.title ? `# ${entry.title}` : undefined,

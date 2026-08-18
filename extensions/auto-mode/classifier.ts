@@ -215,9 +215,11 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 	let lastError = "";
 	let sawTimeout = false;
 	let timedOutKey: string | undefined;
+	// Walks `attempts` in order; a candidate that turns out to require thinking is
+	// re-queued at the front for exactly one retry (see the reasoning-mandatory
+	// branch below). The `!== undefined` guard narrows `candidate`, so no cast.
 	const queue = [...attempts];
-	while (queue.length > 0) {
-		const candidate = queue.shift() as (typeof attempts)[number];
+	for (let candidate = queue.shift(); candidate !== undefined; candidate = queue.shift()) {
 		const model = candidate.model;
 		const key = `${model.provider}/${model.id}`;
 

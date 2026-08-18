@@ -7,6 +7,7 @@ import {
 	modelIdentity,
 	modelsContainedToSession,
 	reasoningRetryLevel,
+	withReasoningFallback,
 } from "../../extensions/lib/model-policy.ts";
 
 const model = (provider: string, id: string, input = 1, api = "openai-responses") =>
@@ -188,5 +189,77 @@ describe("isReasoningMandatoryError", () => {
 		expect(isReasoningMandatoryError("invalid api key")).toBe(false);
 		expect(isReasoningMandatoryError("rate limit exceeded")).toBe(false);
 		expect(isReasoningMandatoryError("maximum context length exceeded. Reduce the prompt")).toBe(false);
+	});
+});
+
+describe("withReasoningFallback", () => {
+	const offOk = () => model("openai", "gpt-x"); // supports off (no thinkingLevelMap)
+	const mustThink = () => ({ ...model("google", "gemini-x"), thinkingLevelMap: { off: null } }) as never;
+	const ok = (extra: Record<string, unknown> = {}) => ({ stopReason: "stop", ...extra });
+	const mandatory = () => ({ stopReason: "error", errorMessage: "400: Reasoning is mandatory and cannot be disabled." });
+
+	it("sends no reasoning and never retries for a model that supports off", async () => {
+		const seen: (string | undefined)[] = [];
+		const res = await withReasoningFallback(offOk(), (r) => {
+			seen.push(r);
+			return Promise.resolve(ok({ value: 1 }));
+		});
+		expect(seen).toEqual([undefined]);
+		expect(res).toMatchObject({ value: 1 });
+	});
+
+	it("sends the proactive level up front for a catalog-marked can't-disable model", async () => {
+		const seen: (string | undefined)[] = [];
+		await withReasoningFallback(mustThink(), (r) => {
+			seen.push(r);
+			return Promise.resolve(ok());
+		});
+		expect(seen).toEqual(["minimal"]); // no error, no retry — one call at the floor
+	});
+
+	it("retries once at the floor when a metadata-gap model 400s on the off request", async () => {
+		const seen: (string | undefined)[] = [];
+		const res = await withReasoningFallback(offOk(), (r) => {
+			seen.push(r);
+			return Promise.resolve(seen.length === 1 ? mandatory() : ok({ value: 2 }));
+		});
+		expect(seen).toEqual([undefined, "minimal"]); // off first, then retried at the floor
+		expect(res).toMatchObject({ value: 2 });
+	});
+
+	it("does not retry a non-reasoning error", async () => {
+		let calls = 0;
+		const res = await withReasoningFallback(offOk(), () => {
+			calls++;
+			return Promise.resolve({ stopReason: "error", errorMessage: "model not found" });
+		});
+		expect(calls).toBe(1);
+		expect(res.stopReason).toBe("error");
+	});
+
+	it("memoizes the learned level so a later call skips the failed round-trip", async () => {
+		const learned = new Map<string, "minimal" | "low" | "medium" | "high" | "xhigh" | "max">();
+		// First call learns via the 400.
+		const seen1: (string | undefined)[] = [];
+		await withReasoningFallback(
+			offOk(),
+			(r) => {
+				seen1.push(r);
+				return Promise.resolve(seen1.length === 1 ? mandatory() : ok());
+			},
+			learned,
+		);
+		expect(seen1).toEqual([undefined, "minimal"]);
+		// Second call sends the learned level up front — one call, no failed attempt.
+		const seen2: (string | undefined)[] = [];
+		await withReasoningFallback(
+			offOk(),
+			(r) => {
+				seen2.push(r);
+				return Promise.resolve(ok());
+			},
+			learned,
+		);
+		expect(seen2).toEqual(["minimal"]);
 	});
 });

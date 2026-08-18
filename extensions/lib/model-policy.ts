@@ -277,6 +277,34 @@ export function reasoningRetryLevel(model: Model<Api>): ThinkingLevel {
 	return clamped === "off" ? "minimal" : (clamped as ThinkingLevel);
 }
 
+/**
+ * Run a one-shot `completeSimple`-style call that wants thinking OFF, handling
+ * the models that can't. The proactive path ({@link forcedReasoningLevel}) sends
+ * a level up front for catalog-marked models; the reactive path catches a
+ * provider's mandatory-thinking 400 ({@link isReasoningMandatoryError}) for the
+ * metadata gaps and retries ONCE at the model's floor. `call` receives the level
+ * to send (undefined = omit `reasoning`) and is invoked at most twice.
+ *
+ * `learned` optionally memoizes the reactive result per `provider/id` across
+ * calls, so a repeatedly-called site (the web-fetch reader) pays the failed
+ * round-trip once, not every call. Omit it for one-off callers.
+ */
+export async function withReasoningFallback<R extends { stopReason: string; errorMessage?: string }>(
+	model: Model<Api>,
+	call: (reasoning: ThinkingLevel | undefined) => Promise<R>,
+	learned?: Map<string, ThinkingLevel>,
+): Promise<R> {
+	const key = `${model.provider}/${model.id}`;
+	const reasoning = learned?.get(key) ?? forcedReasoningLevel(model);
+	const result = await call(reasoning);
+	if (result.stopReason === "error" && !reasoning && isReasoningMandatoryError(result.errorMessage ?? "")) {
+		const level = reasoningRetryLevel(model);
+		learned?.set(key, level);
+		return call(level);
+	}
+	return result;
+}
+
 /** Resolve an explicit provider/id, bare id, or prefix. Explicit choices are not contained. */
 export function findConfigured(available: Model<Api>[], configured: string): Model<Api> | undefined {
 	const wanted = configured.trim();

@@ -17,7 +17,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
-import { forcedReasoningLevel, isReasoningMandatoryError, reasoningRetryLevel } from "../lib/model-policy.ts";
+import { withReasoningFallback } from "../lib/model-policy.ts";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import type { AutoModeConfig } from "./config.ts";
 import { classifierCandidates, replyText, withAuthBaseUrl } from "./model-select.ts";
@@ -199,11 +199,10 @@ export async function draftSetup(facts: SetupFacts, deps: DraftDeps): Promise<Se
 			continue;
 		}
 		const resolved = withAuthBaseUrl(model, auth);
-		// Thinking stays off unless the model cannot disable it (see
-		// forcedReasoningLevel); the retry below learns that for models whose
-		// catalog entry lacks the marker.
-		let reasoning = forcedReasoningLevel(model);
-		const request = () => {
+		// Thinking stays off unless the model cannot disable it (withReasoningFallback
+		// sends a level up front for catalog-marked models and retries on the 400 for
+		// the rest). A rare one-off, so no cross-run memo.
+		const reply = await withReasoningFallback(model, (reasoning) => {
 			const timeout = AbortSignal.timeout(DRAFT_TIMEOUT_MS);
 			return completeSimple(
 				resolved,
@@ -217,12 +216,7 @@ export async function draftSetup(facts: SetupFacts, deps: DraftDeps): Promise<Se
 					...(reasoning ? { reasoning } : {}),
 				},
 			);
-		};
-		let reply = await request();
-		if (reply.stopReason === "error" && !reasoning && isReasoningMandatoryError(reply.errorMessage ?? "")) {
-			reasoning = reasoningRetryLevel(model);
-			reply = await request();
-		}
+		});
 		if (reply.stopReason === "error" || reply.stopReason === "aborted") {
 			if (deps.signal?.aborted) throw new Error("setup drafting was cancelled");
 			lastError = reply.errorMessage ?? reply.stopReason;
