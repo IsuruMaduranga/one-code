@@ -114,4 +114,53 @@ our Installed grouping heuristic (Favorites → Needs attention → Not used
 recently → Plugins → MCP → Skills) is ours, since CC's usage-recency data
 doesn't exist here. Mutations show a "restart to apply" notice for MCP/
 agents/hooks (their extensions snapshot discovery at startup); slash commands
-and the panel itself update live.
+and the panel itself update live. The Installed "Skills" group lists **only
+plugin-scope** skills — project/user skills belong to `/skills` (see below).
+
+## The /skills panel and 4-state skill availability (2026-08-19)
+
+One Code mirrors Claude Code's `skillOverrides` model: every project/user skill
+has one of four states — `on` (name + description in the model's listing),
+`name-only` (name only, saving context tokens), `user-only` (hidden from the
+model, still runnable by the user via `/skill-name`), `off` (hidden, and the
+Skill tool refuses it). Default is `on`. `/skills` opens a bounded panel
+(`extensions/skill/panel/`: pure `state.ts` + `render.ts` + `keys.ts`, thin
+`ctx.ui.custom` wiring in `index.ts`) that cycles a skill with space/enter,
+searches with `/`, and sorts by name or state with `t`.
+
+**State drives what the model sees.** `extensions/skill/index.ts` builds the
+`<system-reminder>` listing from `skillListingVisibility(state)` — full / name /
+hidden. The Skill tool refuses only `off`; `user-only` stays invocable (the
+model just never sees it, so it won't auto-trigger — the practical equivalent of
+CC's model-block, since pi registers each skill's `/skill-name` command
+independently of the listing). Verified live: with states set, the real
+outgoing request carried `name-only` skills as a bare name, `on` skills with
+their description, and `user-only`/`off` skills absent entirely.
+
+**Store.** `skill-overrides.json` moved from `{key: boolean}` to
+`{key: SkillState}` (legacy booleans coerced: `true`→`on`, `false`→`off`).
+Boolean-facing `isSkillEnabled`/`setSkillOverride` wrappers remain for callers
+that only enable/disable (the plugin-skill filter in `lib/plugins.ts` and the
+`/plugins` panel).
+
+**Scope split.** Plugin skills aren't governed by `skillOverrides` (CC's rule):
+`/skills` shows them locked ("managed via /plugins"), and `/plugins` now lists
+only plugin-scope skills — it previously listed project/user skills too, with a
+2-state toggle that would silently collapse `name-only`/`user-only`.
+
+**The per-turn listing path.** During a turn the listing is built from
+`piSkills` (pi's already-resolved skills, with descriptions) — no disk scan.
+Before the first turn `piSkills` is empty, so `/skills` (and the tool's `list`)
+fall back to a disk scan reading each `SKILL.md`'s frontmatter. That fallback is
+what fixed a fresh session's `/skills` showing only plugin skills.
+
+**Divergences from CC.** One Code persists to its own
+`<pluginRoot>/skill-overrides.json`, never `.claude/settings.local.json` (the
+isolation rule). An `off` skill's `/skill-name` command still appears in pi's
+picker but the tool refuses it, where CC hides it from the picker too.
+
+**Bounded-dock panels.** Both `/skills` and `/plugins` render as a bounded dock
+via `boundedDockHeight` (`lib/tui-render.ts`), leaving the transcript visible
+above rather than taking the whole window. The default `ctx.ui.custom` swaps the
+editor container, so returning fewer lines than the terminal height keeps the
+conversation on screen (findings §15).

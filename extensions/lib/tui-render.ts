@@ -109,6 +109,18 @@ export function strike(text: string): string {
 	return `\x1b[9m${text}\x1b[29m`;
 }
 
+/**
+ * Height for a bounded panel that docks below the transcript (like Claude
+ * Code's /plugins and /skills): capped at `max` so the conversation stays
+ * visible, at least `min` when the terminal has room — but never taller than
+ * the terminal itself, so a short pane (< min+2 rows) shrinks to fit instead of
+ * overflowing.
+ */
+export function boundedDockHeight(terminalRows: number, max: number, min = 12): number {
+	const avail = Math.max(1, terminalRows - 2);
+	return avail <= min ? avail : Math.min(avail, max);
+}
+
 /** Cut plain (unpainted) text to `width` columns by code point, with an ellipsis. */
 export function cutPlainText(text: string, width: number): string {
 	if (width <= 0) return "";

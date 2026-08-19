@@ -35,7 +35,7 @@ import { readJsonFile } from "./atomic-write.ts";
 import { readEnabledPlugins } from "./claude-settings.ts";
 import { readOverrides } from "./plugin-overrides.ts";
 import { pluginRoot } from "./plugin-root.ts";
-import { isSkillEnabled, readSkillOverrides, skillOverrideKey } from "./skill-overrides.ts";
+import { isSkillEnabled, readSkillStates, skillOverrideKey } from "./skill-overrides.ts";
 
 export interface PluginManifest {
 	name?: string;
@@ -292,7 +292,7 @@ export function discoverPlugins(roots: DiscoverRoots): DiscoveredPlugins {
 
 	const ccEnabled = readEnabledPlugins(roots.cwd, roots.home);
 	const overrides = readOverrides(roots.oneCodeRoot);
-	const skillOverrides = readSkillOverrides(roots.oneCodeRoot);
+	const skillOverrides = readSkillStates(roots.oneCodeRoot);
 
 	const claudePlugins: Plugin[] = loadInstalledPlugins(roots.claudePluginsDir).map((p) => ({
 		...p,

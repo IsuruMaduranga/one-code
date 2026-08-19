@@ -125,13 +125,15 @@ describe("installed rows grouping", () => {
 	});
 
 	it("skill rows resolve enabled state from overrides", () => {
+		// The Installed tab only ever sees plugin-scope skills now (project/user
+		// skills live in /skills); the builder itself stays scope-agnostic.
 		const rows = buildInstalledRows({
 			...baseInput,
 			plugins: [],
-			skills: [{ name: "helper", path: "/s/SKILL.md", scope: "user", tokens: 10 }],
-			skillOverrides: { "user:helper": false },
+			skills: [{ name: "demo:helper", path: "/s/SKILL.md", scope: "plugin", tokens: 10 }],
+			skillOverrides: { "plugin:demo:helper": "off" },
 		});
-		expect(rows.find((r) => r.kind === "skill")).toMatchObject({ enabled: false, overrideKey: "user:helper" });
+		expect(rows.find((r) => r.kind === "skill")).toMatchObject({ enabled: false, overrideKey: "plugin:demo:helper" });
 	});
 });
 

@@ -7,7 +7,7 @@ import { readEnabledPlugins } from "../../extensions/lib/claude-settings.ts";
 import { readFavorites, toggleFavorite } from "../../extensions/lib/favorites.ts";
 import { readOverrides, setOverride } from "../../extensions/lib/plugin-overrides.ts";
 import { pluginRoot } from "../../extensions/lib/plugin-root.ts";
-import { isSkillEnabled, readSkillOverrides, setSkillOverride, skillOverrideKey } from "../../extensions/lib/skill-overrides.ts";
+import { isSkillEnabled, readSkillStates, setSkillOverride, skillOverrideKey } from "../../extensions/lib/skill-overrides.ts";
 import { estimateSkillTokens, scanSkills } from "../../extensions/lib/skill-scan.ts";
 import { formatRecency, readUsage, recordUsage } from "../../extensions/lib/usage-tracker.ts";
 
@@ -65,9 +65,9 @@ describe("override stores", () => {
 	it("skill overrides key by scope and default to enabled", () => {
 		const key = skillOverrideKey("plugin", "demo:helper");
 		expect(key).toBe("plugin:demo:helper");
-		expect(isSkillEnabled(readSkillOverrides(root), key)).toBe(true);
+		expect(isSkillEnabled(readSkillStates(root), key)).toBe(true);
 		setSkillOverride(root, key, false);
-		expect(isSkillEnabled(readSkillOverrides(root), key)).toBe(false);
+		expect(isSkillEnabled(readSkillStates(root), key)).toBe(false);
 	});
 });
 

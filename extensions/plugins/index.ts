@@ -6,8 +6,9 @@
  *  1. Wire installed plugins' slash commands in (agents/skills/MCP/LSP/hooks
  *     are consumed by their own extensions via discoverPlugins — module state
  *     is not shared between extension files, so each re-derives).
- *  2. The /plugins panel: a full-screen tabbed manager (Discover / Installed /
- *     Marketplaces / Errors) over the marketplace backend in ./marketplace and
+ *  2. The /plugins panel: a bounded tabbed manager (Discover / Installed /
+ *     Marketplaces / Errors) that docks below the transcript like Claude Code's
+ *     (see PANEL_MAX_HEIGHT), over the marketplace backend in ./marketplace and
  *     ./install. All layout/key logic is pure in ./panel; this file owns
  *     mutable state, async marketplace/install work, and repaints.
  *
@@ -34,9 +35,9 @@ import {
 	type Plugin,
 	pluginResources,
 } from "../lib/plugins.ts";
-import { estimateSkillTokens, scanSkills } from "../lib/skill-scan.ts";
-import { readSkillOverrides, setSkillOverride } from "../lib/skill-overrides.ts";
-import { safeThemeBold, safeThemeInverse, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
+import { estimateSkillTokens } from "../lib/skill-scan.ts";
+import { readSkillStates, setSkillOverride } from "../lib/skill-overrides.ts";
+import { boundedDockHeight, safeThemeBold, safeThemeInverse, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import { readUsage, recordUsage } from "../lib/usage-tracker.ts";
 import { fetchInstallCounts, readCachedCounts } from "./counts.ts";
 import { installPlugin, uninstallPlugin } from "./install/install.ts";
@@ -64,6 +65,12 @@ import { findShellPlaceholders, replaceShellPlaceholders, substituteArguments } 
 
 const run = promisify(execFile);
 const SHELL_TIMEOUT_MS = 30_000;
+
+// The panel is a bounded dock like Claude Code's /plugins, NOT a full-screen
+// takeover: it swaps the editor container and leaves the transcript visible
+// above it. Cap the height so the conversation stays on screen; smaller
+// terminals still shrink to fit. ~6 discover rows show at this cap.
+const PANEL_MAX_HEIGHT = 22;
 
 async function expandTemplate(body: string, args: string, cwd: string): Promise<string> {
 	const withArgs = substituteArguments(body, args);
@@ -218,15 +225,22 @@ export default function pluginsExtension(pi: ExtensionAPI) {
 					const installedIds = new Set(discovered.plugins.map((p) => p.id));
 					const usage = readUsage(oneCodeRoot);
 					const favorites = readFavorites(oneCodeRoot);
-					const skillOverrides = readSkillOverrides(oneCodeRoot);
-					const pluginSkills = discovered.enabledPlugins.flatMap((plugin) => {
-						const dir = pluginResources(plugin).skillsDir;
-						return dir ? findPluginSkills(plugin, dir) : [];
-					});
-					const skills = scanSkills(ctx.cwd, roots.home, getAgentDir(), pluginSkills).map((skill) => ({
-						...skill,
-						tokens: estimateSkillTokens(skill.path),
-					}));
+					const skillOverrides = readSkillStates(oneCodeRoot);
+					// /plugins manages plugin skills only; project/user skills (with their
+					// on/name-only/user-only/off nuance) belong to the /skills panel. Build
+					// the rows straight from the discovered plugin skills — no project/user
+					// dir scan whose results would only be filtered back out.
+					const skills = discovered.enabledPlugins
+						.flatMap((plugin) => {
+							const dir = pluginResources(plugin).skillsDir;
+							return dir ? findPluginSkills(plugin, dir) : [];
+						})
+						.map((skill) => ({
+							name: skill.name,
+							path: skill.path,
+							scope: "plugin" as const,
+							tokens: estimateSkillTokens(skill.path),
+						}));
 					return {
 						discover: buildDiscoverRows({
 							snapshots: [...snapshots.values()],
@@ -389,7 +403,8 @@ export default function pluginsExtension(pi: ExtensionAPI) {
 				return {
 					render: (width: number) => {
 						if (cache?.width === width) return cache.lines;
-						const height = Math.max(12, (tui as { terminal: { rows: number } }).terminal.rows - 2);
+						const rows = (tui as { terminal: { rows: number } }).terminal.rows;
+						const height = boundedDockHeight(rows, PANEL_MAX_HEIGHT);
 						const lines = renderPanel(
 							{
 								state,

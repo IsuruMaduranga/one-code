@@ -13,16 +13,28 @@
 
 import { readFileSync } from "node:fs";
 import os from "node:os";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { pluginRoot } from "../lib/plugin-root.ts";
 import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
-import { isSkillEnabled, readSkillOverrides, skillOverrideKey, type SkillScope } from "../lib/skill-overrides.ts";
-import { scopeForPath } from "../lib/skill-scan.ts";
+import {
+	nextSkillState,
+	readSkillStates,
+	setSkillState,
+	type SkillScope,
+	type SkillState,
+	skillListingVisibility,
+	skillOverrideKey,
+	skillStateFor,
+} from "../lib/skill-overrides.ts";
+import { estimateSkillTokens, scanSkills, scopeForPath } from "../lib/skill-scan.ts";
 import { recordUsage } from "../lib/usage-tracker.ts";
-import { ccToolRenderers } from "../lib/tui-render.ts";
+import { boundedDockHeight, ccToolRenderers, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
+import { decodeSkillsKey } from "./panel/keys.ts";
+import { renderSkillsPanel, type SkillsPaint } from "./panel/render.ts";
+import { applySkillsKey, initialSkillsState, type SkillsRow, visibleRows } from "./panel/state.ts";
 
 interface IndexedSkill {
 	name: string;
@@ -30,8 +42,12 @@ interface IndexedSkill {
 	path: string;
 	source: "project" | "plugin";
 	scope: SkillScope;
-	enabled: boolean;
+	state: SkillState;
+	pluginName?: string;
 }
+
+/** Bounded dock like the /plugins panel — keeps the transcript visible above. */
+const SKILLS_PANEL_MAX_HEIGHT = 24;
 
 export default function skillExtension(pi: ExtensionAPI) {
 	/** pi resolves skills per turn; cache the latest list for the tool to use. */
@@ -51,7 +67,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 				path,
 				source: "project" as const,
 				scope: scopeForPath(path, os.homedir(), getAgentDir()),
-				enabled: true, // resolved per index() call below
+				state: "on" as const, // resolved per index() call below
 			};
 		});
 		// Claude Code lists skills as a <system-reminder> on the first user message
@@ -68,37 +84,75 @@ export default function skillExtension(pi: ExtensionAPI) {
 		}
 	});
 
-	// Per-skill disables come from the /plugins panel's override store. The
-	// listing and the tool both re-read it, so a toggle applies live; disabled
-	// skills stay in the index so an exact-name invocation can say WHY it
-	// refuses instead of claiming the skill doesn't exist.
-	const index = (): IndexedSkill[] => {
-		const overrides = readSkillOverrides(pluginRoot(getAgentDir()));
-		const withEnabled = (skill: IndexedSkill): IndexedSkill => ({
-			...skill,
-			enabled: isSkillEnabled(overrides, skillOverrideKey(skill.scope, skill.name)),
-		});
-		return [
-			...piSkills.filter((skill) => skill.path).map(withEnabled),
-			// Plugin skills from discoverPlugins are already filtered by the same
-			// store, so anything it returns is enabled.
-			...discoverPlugins(defaultDiscoverRoots(getAgentDir(), sessionCwd)).skills.map((skill) => ({
-				name: skill.name,
-				path: skill.path,
-				source: "plugin" as const,
-				scope: "plugin" as const,
-				enabled: true,
-			})),
-		];
+	/** Description first line from a SKILL.md, for skills pi hasn't resolved yet. */
+	const readDescription = (path: string): string | undefined => {
+		try {
+			const { frontmatter } = parseFrontmatter(readFileSync(path, "utf-8")) as {
+				frontmatter?: { description?: unknown };
+			};
+			return typeof frontmatter?.description === "string" ? frontmatter.description : undefined;
+		} catch {
+			return undefined;
+		}
 	};
 
-	const describe = () => {
-		const enabled = index().filter((skill) => skill.enabled);
-		if (enabled.length === 0) return "(no skills available)";
-		return enabled
-			.map((skill) => `- ${skill.name}${skill.description ? `: ${skill.description.split("\n")[0]}` : ""}`)
-			.join("\n");
+	// Per-skill availability comes from the skill-overrides store (the /skills
+	// panel cycles it, the /plugins panel manages plugin skills). The listing
+	// and the tool both re-read it, so a change applies live.
+	//
+	// During a turn, project/user skills come from `piSkills` — pi already
+	// resolved them for this turn (with descriptions), so no disk scan runs on
+	// the per-turn listing path. Before the first turn `piSkills` is empty, so
+	// the /skills command/panel falls back to a disk scan (reading each
+	// SKILL.md's frontmatter for its description) — that's the gap that made a
+	// fresh session's /skills show only plugin skills.
+	const index = (cwd = sessionCwd): IndexedSkill[] => {
+		const agentDir = getAgentDir();
+		const home = os.homedir();
+		const states = readSkillStates(pluginRoot(agentDir));
+		const resolved = piSkills.filter((skill) => skill.path);
+		const base =
+			resolved.length > 0
+				? resolved
+				: scanSkills(cwd ?? process.cwd(), home, agentDir, []).map((skill) => ({
+						name: skill.name,
+						description: readDescription(skill.path),
+						path: skill.path,
+						source: "project" as const,
+						scope: skill.scope,
+						state: "on" as const,
+					}));
+		const project = base.map((skill) => ({
+			...skill,
+			state: skillStateFor(states, skillOverrideKey(skill.scope, skill.name)),
+		}));
+		// Plugin skills from discoverPlugins are already filtered to enabled by
+		// the same store; anything it returns is fully available (plugin skills
+		// aren't governed by skillOverrides — managed via /plugins).
+		const plugin = discoverPlugins(defaultDiscoverRoots(agentDir, cwd, home)).skills.map((skill) => ({
+			name: skill.name,
+			path: skill.path,
+			source: "plugin" as const,
+			scope: "plugin" as const,
+			state: "on" as const,
+			pluginName: skill.plugin,
+		}));
+		return [...project, ...plugin];
 	};
+
+	// The model's listing honors the state: "on" carries name + description,
+	// "name-only" carries just the name (saving context tokens), and "user-only"
+	// / "off" are hidden so the model won't auto-trigger them.
+	const listingText = (skills: IndexedSkill[]): string => {
+		const lines = skills.flatMap((skill) => {
+			const visibility = skillListingVisibility(skill.state);
+			if (visibility === "hidden") return [];
+			if (visibility === "name") return [`- ${skill.name}`];
+			return [`- ${skill.name}${skill.description ? `: ${skill.description.split("\n")[0]}` : ""}`];
+		});
+		return lines.length === 0 ? "(no skills available)" : lines.join("\n");
+	};
+	const describe = () => listingText(index());
 
 	pi.registerTool({
 		name: "skill",
@@ -122,10 +176,11 @@ export default function skillExtension(pi: ExtensionAPI) {
 			// name the skill — fail loudly rather than silently returning the
 			// catalog, which a weak model reads as a non-sequitur (same archetype as
 			// the subagent tool; see docs/decisions/subagents-workflows.md).
+			const all = index();
 			if (params.list || (!params.skill && params.args == null)) {
 				return {
-					content: [{ type: "text", text: `Available skills:\n${describe()}` }],
-					details: { skills: index().map((s) => s.name) } as Record<string, unknown>,
+					content: [{ type: "text", text: `Available skills:\n${listingText(all)}` }],
+					details: { skills: all.map((s) => s.name) } as Record<string, unknown>,
 				};
 			}
 			if (!params.skill) {
@@ -133,7 +188,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 					content: [
 						{
 							type: "text",
-							text: `No \`skill\` given, but you passed \`args\` — this looks like an invocation that forgot to name the skill. Set \`skill\` to one of the names below, or call with \`list: true\` to just browse.\n\nAvailable skills:\n${describe()}`,
+							text: `No \`skill\` given, but you passed \`args\` — this looks like an invocation that forgot to name the skill. Set \`skill\` to one of the names below, or call with \`list: true\` to just browse.\n\nAvailable skills:\n${listingText(all)}`,
 						},
 					],
 					details: {} as Record<string, unknown>,
@@ -142,27 +197,36 @@ export default function skillExtension(pi: ExtensionAPI) {
 			}
 
 			const wanted = params.skill.replace(/^\//, "");
-			const all = index();
+			// A bare name may match a plugin skill (`<plugin>:<name>`), but only
+			// when exactly one plugin ships it — otherwise resolving silently would
+			// run an arbitrary one, so ask which.
+			const bareMatches = all.filter((skill) => skill.name.endsWith(`:${wanted}`));
 			const found =
 				all.find((skill) => skill.name === wanted) ??
 				all.find((skill) => skill.name.toLowerCase() === wanted.toLowerCase()) ??
-				// A bare name matches a plugin skill when it is unambiguous.
-				all.find((skill) => skill.name.endsWith(`:${wanted}`));
+				(bareMatches.length === 1 ? bareMatches[0] : undefined);
 
 			if (!found) {
+				const ambiguous = bareMatches.length > 1;
+				const text = ambiguous
+					? `"${params.skill}" is ambiguous — it matches ${bareMatches.map((s) => s.name).join(", ")}. Use the full \`<plugin>:${wanted}\` name.`
+					: `No skill named "${params.skill}".\n\nAvailable skills:\n${listingText(all)}`;
 				return {
-					content: [{ type: "text", text: `No skill named "${params.skill}".\n\nAvailable skills:\n${describe()}` }],
+					content: [{ type: "text", text }],
 					details: {} as Record<string, unknown>,
 					isError: true,
 				};
 			}
 
-			if (!found.enabled) {
+			// "off" is the only state that refuses invocation (matching Claude Code,
+			// where invoking an off skill by name returns the skillOverrides error).
+			// "user-only" is invocable — it's just hidden from the model's listing,
+			// so the model won't auto-trigger it, but /skill-name still runs it.
+			if (found.state === "off") {
+				const where = found.source === "plugin" ? "/plugins" : "/skills";
 				return {
-					content: [
-						{ type: "text", text: `Skill "${found.name}" is disabled — the user can enable it from /plugins.` },
-					],
-					details: { skill: found.name, disabled: true } as Record<string, unknown>,
+					content: [{ type: "text", text: `Skill "${found.name}" is turned off — the user can re-enable it from ${where}.` }],
+					details: { skill: found.name, state: found.state } as Record<string, unknown>,
 					isError: true,
 				};
 			}
@@ -199,10 +263,99 @@ export default function skillExtension(pi: ExtensionAPI) {
 		},
 	});
 
+	const buildSkillsRows = (cwd: string | undefined): SkillsRow[] =>
+		index(cwd).map((skill) => ({
+			key: skillOverrideKey(skill.scope, skill.name),
+			name: skill.name,
+			scope: skill.scope,
+			tokens: estimateSkillTokens(skill.path),
+			state: skill.state,
+			locked: skill.source === "plugin",
+			pluginName: skill.pluginName,
+		}));
+
+	// The /skills panel: a bounded dock (like /plugins) that cycles each
+	// project/user skill through on / name-only / user-only / off, persisting to
+	// the skill-overrides store live. Plugin skills show locked (managed via
+	// /plugins). Pure state/render live in ./panel; this owns repaint + writes.
+	const openSkillsPanel = async (ctx: ExtensionContext): Promise<void> => {
+		await ctx.ui.custom<null>((tui, theme, _keybindings, done) => {
+			const paint: SkillsPaint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme) };
+			const state = initialSkillsState();
+			let rows = buildSkillsRows(ctx.cwd);
+			let notice: string | undefined;
+			let cache: { width: number; lines: string[] } | undefined;
+			const repaint = () => {
+				cache = undefined;
+				tui.requestRender();
+			};
+			return {
+				render: (width: number) => {
+					if (cache?.width === width) return cache.lines;
+					const termRows = (tui as { terminal: { rows: number } }).terminal.rows;
+					const height = boundedDockHeight(termRows, SKILLS_PANEL_MAX_HEIGHT);
+					const lines = renderSkillsPanel({ state, rows, width, height, notice }, paint).map((line) =>
+						truncateLine(line, width),
+					);
+					cache = { width, lines };
+					return lines;
+				},
+				handleInput: (data: string) => {
+					const key = decodeSkillsKey(data);
+					if (!key) return;
+					const before = visibleRows(rows, state);
+					const anchorKey = before[state.cursor]?.key;
+					const sortBefore = state.sort;
+					const effect = applySkillsKey(state, key, before);
+					notice = undefined;
+					if (effect?.kind === "close") {
+						done(null);
+						return;
+					}
+					if (effect?.kind === "cycle") {
+						// The toggle changes only the state; token/scope/name are stable,
+						// so patch the one row instead of rescanning every skill from disk.
+						const next = nextSkillState(effect.row.state);
+						setSkillState(pluginRoot(getAgentDir()), effect.row.key, next);
+						rows = rows.map((row) => (row.key === effect.row.key ? { ...row, state: next } : row));
+					} else if (effect?.kind === "locked") {
+						notice = `${effect.row.name} is a plugin skill — manage it from /plugins.`;
+					}
+					// A sort toggle reorders the list; keep the same skill selected so a
+					// following Space acts on the row the user was looking at, not the one
+					// that slid into its index.
+					if (state.sort !== sortBefore && anchorKey) {
+						const idx = visibleRows(rows, state).findIndex((row) => row.key === anchorKey);
+						if (idx >= 0) state.cursor = idx;
+					}
+					repaint();
+				},
+				invalidate: () => {
+					cache = undefined;
+				},
+			};
+		});
+	};
+
 	pi.registerCommand("skills", {
-		description: "List available skills",
+		description: "View and manage skills (on / name-only / user-only / off)",
 		handler: async (_args, ctx) => {
-			ctx.ui.notify(`Available skills:\n${describe()}`, "info");
+			if (ctx.hasUI) {
+				await openSkillsPanel(ctx);
+				return;
+			}
+			// Non-interactive fallback: a flat listing with each skill's state.
+			const all = index(ctx.cwd);
+			if (all.length === 0) {
+				ctx.ui.notify("No skills available.", "info");
+				return;
+			}
+			const lines = all.map((skill) => {
+				const label = skill.source === "plugin" ? "plugin" : skill.state;
+				const desc = skill.description ? `: ${skill.description.split("\n")[0]}` : "";
+				return `- ${skill.name} [${label}]${desc}`;
+			});
+			ctx.ui.notify(`Skills:\n${lines.join("\n")}`, "info");
 		},
 	});
 }

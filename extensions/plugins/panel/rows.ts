@@ -11,7 +11,7 @@
 import type { McpServerStatus } from "../../lib/mcp-status.ts";
 import type { Plugin } from "../../lib/plugins.ts";
 import type { ScannedSkill } from "../../lib/skill-scan.ts";
-import { isSkillEnabled, skillOverrideKey } from "../../lib/skill-overrides.ts";
+import { isSkillEnabled, type SkillState, skillOverrideKey } from "../../lib/skill-overrides.ts";
 import { formatRecency, type UsageEntry, usageKey } from "../../lib/usage-tracker.ts";
 import type { Favorites } from "../../lib/favorites.ts";
 import type { MarketplaceSnapshot } from "../marketplace/sync.ts";
@@ -104,7 +104,7 @@ export function buildInstalledRows(input: {
 	mcpServers?: McpServerStatus[];
 	skills: Array<ScannedSkill & { tokens: number }>;
 	usage: Record<string, UsageEntry>;
-	skillOverrides: Record<string, boolean>;
+	skillOverrides: Record<string, SkillState>;
 	favorites: Favorites;
 	busy: Set<string>;
 	search: string;

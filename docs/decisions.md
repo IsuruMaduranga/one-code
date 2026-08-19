@@ -156,7 +156,8 @@ Full context: [`decisions/lsp.md`](decisions/lsp.md).
 Full context: [`decisions/skills-plugins.md`](decisions/skills-plugins.md).
 
 - **[Skills and plugins](decisions/skills-plugins.md#skills-and-plugins)** — `~/.claude` + `.claude` skills/commands discovery, and Claude Code plugins contributing namespaced agents/skills/commands/MCP.
-- **[The plugin root, the marketplace, and the /plugins panel](decisions/skills-plugins.md#the-plugin-root-the-marketplace-and-the-plugins-panel-2026-08-19)** — isolation (all writes under `<agentDir>/plugins`, `~/.claude` read-only + override layer), the phantom-`enabled` fix, the full-screen marketplace panel (Discover/Installed/Marketplaces/Errors), and the v1 scope cuts.
+- **[The plugin root, the marketplace, and the /plugins panel](decisions/skills-plugins.md#the-plugin-root-the-marketplace-and-the-plugins-panel-2026-08-19)** — isolation (all writes under `<agentDir>/plugins`, `~/.claude` read-only + override layer), the phantom-`enabled` fix, the marketplace panel (Discover/Installed/Marketplaces/Errors), and the v1 scope cuts.
+- **[The /skills panel and 4-state skill availability](decisions/skills-plugins.md#the-skills-panel-and-4-state-skill-availability-2026-08-19)** — CC's `skillOverrides` model (on/name-only/user-only/off) driving the model's listing, the store's boolean→state migration, the /plugins↔/skills scope split, the per-turn listing path, and the bounded-dock height (`boundedDockHeight`) shared with /plugins.
 
 ## TUI
 
