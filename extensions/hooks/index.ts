@@ -22,8 +22,9 @@
  * here is wrapped — a throwing hook fails open, never takes the turn down.
  */
 
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { claudeConfigDir } from "../lib/paths.ts";
+import { defaultDiscoverRoots } from "../lib/plugins.ts";
 import { appendHookLog, formatDebugLine, hooksDebugEnabled, hooksLogPath } from "./debug.ts";
 import { runHookCommand } from "./executor.ts";
 import { matcherApplies, ccToolName, toolMatchCandidates } from "./matcher.ts";
@@ -59,7 +60,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	): Promise<MatchedHook[]> => {
 		const claudeDir = claudeConfigDir();
 		const loaded = loadHookSettings(claudeDir, ctx.cwd);
-		const pluginSources = loadPluginHooks(claudeDir, loaded.diagnostics);
+		const pluginSources = loadPluginHooks(defaultDiscoverRoots(getAgentDir(), ctx.cwd), loaded.diagnostics);
 		if (hooksDebugEnabled()) {
 			for (const diagnostic of loaded.diagnostics) process.stderr.write(`[hooks] ${diagnostic}\n`);
 		}

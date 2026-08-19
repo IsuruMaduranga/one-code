@@ -15,7 +15,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
 import { findGitRoot } from "../lib/git.ts";
-import { discoverPlugins } from "../lib/plugins.ts";
+import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
 
 export interface StartupSection {
 	label: string;
@@ -63,7 +63,7 @@ export function skillNames(cwd: string, home: string, agentDir: string): string[
 			// Unreadable dir: skip, same as pi would.
 		}
 	}
-	for (const skill of discoverPlugins(join(home, ".claude")).skills) {
+	for (const skill of discoverPlugins(defaultDiscoverRoots(agentDir, cwd, home)).skills) {
 		names.add(skill.name);
 	}
 	return [...names].sort((a, b) => a.localeCompare(b));

@@ -12,10 +12,20 @@ export interface LspDiagnostic {
 
 export type SeverityFilter = "error" | "warning" | "all";
 
-const SEVERITY_NAMES: Record<number, string> = { 1: "error", 2: "warning", 3: "info", 4: "hint" };
+/** LSP severity metadata (1..4; missing severity is treated as error). */
+export const SEVERITY: Record<number, { name: string; symbol: string }> = {
+	1: { name: "error", symbol: "✘" },
+	2: { name: "warning", symbol: "⚠" },
+	3: { name: "info", symbol: "ℹ" },
+	4: { name: "hint", symbol: "★" },
+};
 
 export function severityName(severity: number | undefined): string {
-	return SEVERITY_NAMES[severity ?? 1] ?? "error";
+	return SEVERITY[severity ?? 1]?.name ?? "error";
+}
+
+export function severitySymbol(severity: number | undefined): string {
+	return SEVERITY[severity ?? 1]?.symbol ?? "✘";
 }
 
 export function filterDiagnostics(diagnostics: LspDiagnostic[], filter: SeverityFilter): LspDiagnostic[] {

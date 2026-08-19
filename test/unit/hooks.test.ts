@@ -205,6 +205,13 @@ describe("plugin hooks", () => {
 	});
 	afterEach(() => rmSync(root, { recursive: true, force: true }));
 
+	const pluginRoots = () => ({
+		claudePluginsDir: join(claudeDir, "plugins"),
+		oneCodeRoot: join(root, "one-code-plugins"),
+		cwd: root,
+		home: root,
+	});
+
 	it("reads hooks.json and expands CLAUDE_PLUGIN_ROOT", () => {
 		writeFileSync(
 			join(installPath, "hooks", "hooks.json"),
@@ -215,7 +222,7 @@ describe("plugin hooks", () => {
 			}),
 		);
 		const diags: string[] = [];
-		const sources = loadPluginHooks(claudeDir, diags);
+		const sources = loadPluginHooks(pluginRoots(), diags);
 		expect(sources).toHaveLength(1);
 		expect(sources[0]).toMatchObject({ scope: "plugin", pluginName: "demo" });
 		expect(sources[0].config.PostToolUse?.[0]?.hooks[0]?.command).toBe(`${installPath}/bin/lint.sh`);
@@ -227,7 +234,7 @@ describe("plugin hooks", () => {
 			join(installPath, "hooks", "hooks.json"),
 			JSON.stringify({ PreToolUse: [{ hooks: [{ type: "command", command: "check" }] }] }),
 		);
-		expect(loadPluginHooks(claudeDir, []).at(0)?.config.PreToolUse).toBeDefined();
+		expect(loadPluginHooks(pluginRoots(), []).at(0)?.config.PreToolUse).toBeDefined();
 	});
 
 	it("caches by mtime: same mtime serves the cached parse, a bump re-reads", () => {
@@ -236,16 +243,16 @@ describe("plugin hooks", () => {
 		writeFileSync(hooksPath, config("first"));
 		const t = new Date("2026-01-01T00:00:00Z");
 		utimesSync(hooksPath, t, t);
-		expect(loadPluginHooks(claudeDir, []).at(0)?.config.PreToolUse?.[0]?.hooks[0]?.command).toBe("first");
+		expect(loadPluginHooks(pluginRoots(), []).at(0)?.config.PreToolUse?.[0]?.hooks[0]?.command).toBe("first");
 
 		// Rewrite with the mtime pinned back: the cache must still serve the old parse.
 		writeFileSync(hooksPath, config("second"));
 		utimesSync(hooksPath, t, t);
-		expect(loadPluginHooks(claudeDir, []).at(0)?.config.PreToolUse?.[0]?.hooks[0]?.command).toBe("first");
+		expect(loadPluginHooks(pluginRoots(), []).at(0)?.config.PreToolUse?.[0]?.hooks[0]?.command).toBe("first");
 
 		// A real mtime bump invalidates.
 		const later = new Date("2026-01-01T00:00:01Z");
 		utimesSync(hooksPath, later, later);
-		expect(loadPluginHooks(claudeDir, []).at(0)?.config.PreToolUse?.[0]?.hooks[0]?.command).toBe("second");
+		expect(loadPluginHooks(pluginRoots(), []).at(0)?.config.PreToolUse?.[0]?.hooks[0]?.command).toBe("second");
 	});
 });

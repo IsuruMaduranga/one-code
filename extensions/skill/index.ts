@@ -12,13 +12,16 @@
  */
 
 import { readFileSync } from "node:fs";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { parseFrontmatter } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
 import os from "node:os";
-import { join } from "node:path";
-import { discoverPlugins } from "../lib/plugins.ts";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
+import { pluginRoot } from "../lib/plugin-root.ts";
+import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
+import { isSkillEnabled, readSkillOverrides, skillOverrideKey, type SkillScope } from "../lib/skill-overrides.ts";
+import { scopeForPath } from "../lib/skill-scan.ts";
+import { recordUsage } from "../lib/usage-tracker.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 
 interface IndexedSkill {
@@ -26,21 +29,29 @@ interface IndexedSkill {
 	description?: string;
 	path: string;
 	source: "project" | "plugin";
+	scope: SkillScope;
+	enabled: boolean;
 }
 
 export default function skillExtension(pi: ExtensionAPI) {
 	/** pi resolves skills per turn; cache the latest list for the tool to use. */
 	let piSkills: IndexedSkill[] = [];
+	/** Session cwd, so project-level enabledPlugins settings apply to plugin skills. */
+	let sessionCwd: string | undefined;
 
-	pi.on("before_agent_start", (event) => {
+	pi.on("before_agent_start", (event, ctx) => {
+		sessionCwd = ctx.cwd;
 		const skills = event.systemPromptOptions.skills ?? [];
 		piSkills = skills.map((skill) => {
 			const record = skill as unknown as { name: string; description?: string; path?: string; filePath?: string };
+			const path = record.path ?? record.filePath ?? "";
 			return {
 				name: record.name,
 				description: record.description,
-				path: record.path ?? record.filePath ?? "",
+				path,
 				source: "project" as const,
+				scope: scopeForPath(path, os.homedir(), getAgentDir()),
+				enabled: true, // resolved per index() call below
 			};
 		});
 		// Claude Code lists skills as a <system-reminder> on the first user message
@@ -57,19 +68,34 @@ export default function skillExtension(pi: ExtensionAPI) {
 		}
 	});
 
-	const index = (): IndexedSkill[] => [
-		...piSkills.filter((skill) => skill.path),
-		...discoverPlugins(join(os.homedir(), ".claude")).skills.map((skill) => ({
-			name: skill.name,
-			path: skill.path,
-			source: "plugin" as const,
-		})),
-	];
+	// Per-skill disables come from the /plugins panel's override store. The
+	// listing and the tool both re-read it, so a toggle applies live; disabled
+	// skills stay in the index so an exact-name invocation can say WHY it
+	// refuses instead of claiming the skill doesn't exist.
+	const index = (): IndexedSkill[] => {
+		const overrides = readSkillOverrides(pluginRoot(getAgentDir()));
+		const withEnabled = (skill: IndexedSkill): IndexedSkill => ({
+			...skill,
+			enabled: isSkillEnabled(overrides, skillOverrideKey(skill.scope, skill.name)),
+		});
+		return [
+			...piSkills.filter((skill) => skill.path).map(withEnabled),
+			// Plugin skills from discoverPlugins are already filtered by the same
+			// store, so anything it returns is enabled.
+			...discoverPlugins(defaultDiscoverRoots(getAgentDir(), sessionCwd)).skills.map((skill) => ({
+				name: skill.name,
+				path: skill.path,
+				source: "plugin" as const,
+				scope: "plugin" as const,
+				enabled: true,
+			})),
+		];
+	};
 
 	const describe = () => {
-		const all = index();
-		if (all.length === 0) return "(no skills available)";
-		return all
+		const enabled = index().filter((skill) => skill.enabled);
+		if (enabled.length === 0) return "(no skills available)";
+		return enabled
 			.map((skill) => `- ${skill.name}${skill.description ? `: ${skill.description.split("\n")[0]}` : ""}`)
 			.join("\n");
 	};
@@ -131,6 +157,16 @@ export default function skillExtension(pi: ExtensionAPI) {
 				};
 			}
 
+			if (!found.enabled) {
+				return {
+					content: [
+						{ type: "text", text: `Skill "${found.name}" is disabled — the user can enable it from /plugins.` },
+					],
+					details: { skill: found.name, disabled: true } as Record<string, unknown>,
+					isError: true,
+				};
+			}
+
 			let body: string;
 			try {
 				const parsed = parseFrontmatter(readFileSync(found.path, "utf-8")) as { body: string };
@@ -142,6 +178,8 @@ export default function skillExtension(pi: ExtensionAPI) {
 					isError: true,
 				};
 			}
+
+			recordUsage(pluginRoot(getAgentDir()), "skill", found.name);
 
 			// Resource paths in a skill are relative to its own directory, so the
 			// model needs to know where it lives to read references/ or scripts/.

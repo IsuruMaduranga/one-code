@@ -54,3 +54,64 @@ Three findings from this work, each of which had been silently wrong:
    and `list_mcp_resources`; network egress and MCP calls still ask. This class of
    bug was invisible because earlier end-to-end tests all ran with
    `--dangerously-skip-permissions`.
+
+## The plugin root, the marketplace, and the /plugins panel (2026-08-19)
+
+**Isolation: One Code never writes `~/.claude`.** All plugin state One Code
+creates lives under `join(getAgentDir(), "plugins")` (`~/.one-code/agent/plugins`
+in the bundled app, `~/.pi/plugins` for plain-pi installs) in Claude Code's own
+file formats — `known_marketplaces.json`, `installed_plugins.json` v2,
+`marketplaces/`, `cache/<mp>/<plugin>/<version>/`, `data/` — so the formats
+stay interoperable even though the location doesn't. `~/.claude/plugins` and
+CC's settings `enabledPlugins` are read-only inputs; CC-installed plugins keep
+working read-through, and toggling one from One Code writes a local override
+(`overrides.json`) applied on top during discovery, labeled "(One Code
+override)" in the panel. A unit test statically enforces the boundary (no
+write module references `.claude`).
+
+**The phantom `enabled` field.** CC's `installed_plugins.json` v2 has NO
+enabled field — enabled state lives in settings `enabledPlugins` (merged
+user→project→local). Our old reader filtered on `entry.enabled`, a field CC
+never writes; `loadInstalledPlugins` is now a dumb format reader and
+`discoverPlugins` applies policy: claude-origin = `override ?? ccSettings ??
+true`, one-code-origin = the entry's own `enabled` (our schema copy, where we
+DO keep it). `discoverPlugins` takes a roots object (both plugin dirs + cwd +
+home), unions the two origins (one-code wins on a duplicate id), and exposes
+`enabledPlugins` for resource wiring — six consumer extensions updated.
+
+**The /plugins panel** (Discover / Installed / Marketplaces / Errors) follows
+the /workflows-viewer architecture: pure state machine + row models + renderer
+(`extensions/plugins/panel/`), thin `ctx.ui.custom` wiring with a 500ms
+ticker. Marketplaces: `add` accepts CC's grammar (owner/repo, git@, https
+.git/marketplace.json, local paths); github/git sources shallow-clone
+non-interactively (BatchMode SSH, GIT_TERMINAL_PROMPT=0, 120s timeout,
+temp+rename so no partial clones), url sources fetch + validate the manifest;
+the official `claude-plugins-official` (Apache-2.0 GitHub repo) registers
+lazily on first panel open and refreshes when >24h stale — no session_start
+network, no background timers, and deliberately NO `downloads.claude.ai` GCS
+mirror (Anthropic service endpoint; GitHub suffices and is clearly licensed).
+Install counts come from the repo's public stats JSON, cached 24h; a fetch
+failure hides counts rather than showing zeros. Installs materialize
+`./relative` sources out of the marketplace clone through a containment check
+(manifests are third-party content) and record `{scope: "user", enabled:
+true}` entries; the Installed tab adds MCP servers with live status (a
+request/reply event pair with the mcp extension — jiti forbids direct state
+sharing), per-skill toggles (`skill-overrides.json`, honored live by the
+skill tool which refuses disabled skills by name), a lightweight usage
+tracker (`usage.json`, skill + plugin-command invocations, "never used" /
+"3× 12d" recency, "Not used recently" grouping), and favorites. Trust is a
+static disclaimer on the detail screen — CC records no acceptance state
+either.
+
+**v1 scope cuts (all fail loudly where a manifest demands them):** npm/pip
+plugin sources, commit-sha pinning, dependency resolution, policy/blocklist,
+zip cache, `${user_config.*}` options flow, output styles, plugin flagging,
+project/local install scopes, CC-root install/uninstall (override-toggle
+only), marketplace rename. Divergences from the CC panel: favoriting lives in
+the detail view so `f` stays typeable in search; Space in a search context is
+reserved for toggling (never typeable — plugin names don't contain spaces);
+our Installed grouping heuristic (Favorites → Needs attention → Not used
+recently → Plugins → MCP → Skills) is ours, since CC's usage-recency data
+doesn't exist here. Mutations show a "restart to apply" notice for MCP/
+agents/hooks (their extensions snapshot discovery at startup); slash commands
+and the panel itself update live.

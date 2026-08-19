@@ -21,7 +21,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, type ExtensionAPI, type ExtensionContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../auto-mode/actions.ts";
 import { type AgentDefinition, type AgentSource, agentDirs, discoverAgents } from "./agents.ts";
@@ -36,7 +36,7 @@ import {
 	subagentStatusModel,
 } from "./model-select.ts";
 import { modelPickerComponent, pickerSpec, toPickerEntries, type PickerEntry } from "../auto-mode/model-picker.ts";
-import { discoverPlugins } from "../lib/plugins.ts";
+import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { MCP_TOOLS_CHANNEL, type McpToolsPayload } from "../lib/mcp-share.ts";
 import { watchPermissionBridge } from "../permissions/subagent-gate.ts";
@@ -276,7 +276,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		// namespaced (`<plugin>:<agent>`) so two plugins can ship the same name.
 		const sources: Array<string | AgentSource> = [
 			BUNDLED_AGENTS_DIR,
-			...discoverPlugins(join(os.homedir(), ".claude")).agentDirs,
+			...discoverPlugins(defaultDiscoverRoots(getAgentDir(), cwd)).agentDirs,
 			...agentDirs(cwd, os.homedir()),
 		];
 		return discoverAgents(sources);

@@ -10,9 +10,12 @@
  * specific source wins. Unknown keys in the files are preserved on write.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+import { readSettingsFile as readClaudeSettingsFile, settingsPaths } from "../lib/claude-settings.ts";
 import type { PermissionMode } from "./matcher.ts";
+
+export { settingsPaths };
 
 export interface PermissionSettings {
 	allow: string[];
@@ -47,20 +50,9 @@ export function normalizePermissionMode(value: unknown): PermissionMode | undefi
 }
 
 function readSettingsFile(path: string): ClaudeSettingsFile | undefined {
-	if (!existsSync(path)) return undefined;
-	try {
-		return JSON.parse(readFileSync(path, "utf-8")) as ClaudeSettingsFile;
-	} catch {
-		return undefined;
-	}
-}
-
-export function settingsPaths(cwd: string, home: string): { user: string; project: string; local: string } {
-	return {
-		user: join(home, ".claude", "settings.json"),
-		project: join(cwd, ".claude", "settings.json"),
-		local: join(cwd, ".claude", "settings.local.json"),
-	};
+	// Shared reader (lib/claude-settings.ts) — this module narrows to the
+	// permissions-relevant shape.
+	return readClaudeSettingsFile(path) as ClaudeSettingsFile | undefined;
 }
 
 export function loadPermissionSettings(cwd: string, home: string): PermissionSettings {

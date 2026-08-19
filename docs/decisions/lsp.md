@@ -56,3 +56,55 @@ parameter of type 'string'. (2345) [typescript]` — matching `tsc` — the run
 exited in 16s, no language-server processes leaked, the deferred tool loaded and
 answered on demand, and a TypeScript 7 project returned the preflight
 explanation.
+
+## Plugin LSP servers + the diagnostics watcher (2026-08-19)
+
+Two changes landed together; findings §18 holds the mechanics both implement
+against.
+
+**Plugin-provided servers layer on top of the built-in table, and win.**
+`extensions/lsp/plugin-servers.ts` (pure) resolves each enabled plugin's
+`.lsp.json` / manifest `lspServers` into `plugin:<plugin>:<server>` entries
+routed by `extensionToLanguage`; an extension claimed by a plugin bypasses the
+built-in table entirely — installing the plugin is explicit user intent, and
+it's the only way to override a built-in server without forking the table.
+Plugin servers root at `workspaceFolder ?? cwd` (the way Claude Code does —
+no root-marker walk); the built-in table keeps root markers, preserving our
+zero-config edge. Collisions between plugins resolve deterministically
+(key-sorted, first wins) and surface in `/lsp` plus a one-time notify.
+Unsupported config (`transport: "socket"`, `shutdownTimeout`,
+`restartOnCrash`, `maxRestarts`, `${user_config.*}`) rejects the server loudly
+with a named reason — never a plausible-but-wrong spawn. Routing is built
+lazily on the first file touched, not at session_start (findings §15).
+
+**`LspClient` refactor.** `languageId` moved from a constructor field to a
+per-document parameter (`syncFile`/`getDiagnostics`) — one plugin server
+process can serve several extensions with different language ids. The client
+gained per-server `options` (`env` merged over process.env,
+`initializationOptions` in `initialize`, `settings` answering
+`workspace/configuration` via the pure `configurationResponse` helper,
+`startupTimeoutMs`). Also fixed in passing: `stop()` nulled `this.child`
+before `send()` read it, so shutdown/exit were never actually sent — the 1s
+SIGKILL race was doing all the work.
+
+**The per-edit `<diagnostics>` append is gone; a session watcher replaced it.**
+Claude Code has no per-edit append — its passive pipeline stores every
+`publishDiagnostics` and injects only the *new* ones (content-hash dedup per
+file, delivered-set cleared when the file is edited again, LRU 500 files,
+caps 10/file + 30 total + 4000 chars with errors surviving truncation) into
+whatever turn comes next, cross-file and all severities. `extensions/lsp/
+watcher.ts` (pure) implements exactly that; delivery is
+`pi.sendMessage({customType: "lsp-new-diagnostics", …}, {deliverAs: "steer",
+triggerTurn: false})` from a `tool_result` hook on ALL tools — pi delivers
+steer messages after the current turn's tool calls, before the next LLM call,
+which is the same mid-turn injection point — plus a `before_agent_start`
+sweep for diagnostics that finished publishing while idle (wakeup turns,
+resume). `triggerTurn` stays false: diagnostics attach to the next turn, they
+never wake an idle agent. One pipeline means the double-reporting question
+never arises; the `lsp_diagnostics` tool marks what it returned as delivered
+so the watcher doesn't repeat it.
+
+**One deliberate divergence:** file headers are cwd-relative, not Claude
+Code's basenames — basenames make two same-named files (two `index.ts:`
+sections in one block) indistinguishable, and a bug-for-bug port of a known
+ambiguity isn't fidelity worth keeping.

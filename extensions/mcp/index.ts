@@ -16,7 +16,7 @@
  */
 
 import os from "node:os";
-import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, type ExtensionAPI, type ExtensionContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { MCP_TOOLS_CHANNEL } from "../lib/mcp-share.ts";
@@ -34,7 +34,13 @@ import {
 } from "./client.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { join } from "node:path";
-import { discoverPlugins } from "../lib/plugins.ts";
+import {
+	MCP_STATUS_CHANNEL,
+	MCP_STATUS_REQUEST_CHANNEL,
+	type McpServerStatus,
+	type McpStatusEvent,
+} from "../lib/mcp-status.ts";
+import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
 import { loadServers, type McpServer } from "./config.ts";
 import {
 	describeContent,
@@ -141,7 +147,12 @@ export default function mcpExtension(pi: ExtensionAPI) {
 	let shuttingDown = false;
 
 	const connectAll = async (ctx: ExtensionContext) => {
-		servers = loadServers(ctx.cwd, os.homedir(), process.env, discoverPlugins(join(os.homedir(), ".claude")).mcpConfigs);
+		servers = loadServers(
+			ctx.cwd,
+			os.homedir(),
+			process.env,
+			discoverPlugins(defaultDiscoverRoots(getAgentDir(), ctx.cwd)).mcpConfigs,
+		);
 		if (servers.length === 0) return;
 
 		// A server whose credentials are unset would connect with an empty token and
@@ -358,6 +369,34 @@ export default function mcpExtension(pi: ExtensionAPI) {
 		shuttingDown = true;
 		await Promise.all([...connections.values()].map((connection) => close(connection)));
 		connections.clear();
+	});
+
+	// The /plugins panel can't import this extension's state (jiti gives every
+	// extension its own module instance), and the bus doesn't replay — so it
+	// asks: a request event answered with a status snapshot.
+	const buildStatusSnapshot = (): McpServerStatus[] =>
+		servers.map((server) => {
+			const connection = connections.get(server.name);
+			if (connection) {
+				return { name: server.name, status: "connected" as const, toolCount: connection.tools.length, source: server.source };
+			}
+			const failure = failures.find((f) => f.server.name === server.name);
+			if (server.missingEnv?.length) {
+				return {
+					name: server.name,
+					status: "authNeeded" as const,
+					detail: failure?.error ?? `${server.missingEnv.join(", ")} not set in the environment`,
+					source: server.source,
+				};
+			}
+			if (failure) return { name: server.name, status: "failed" as const, detail: failure.error, source: server.source };
+			return connectSettled
+				? { name: server.name, status: "failed" as const, detail: "not connected", source: server.source }
+				: { name: server.name, status: "connecting" as const, source: server.source };
+		});
+
+	pi.events.on(MCP_STATUS_REQUEST_CHANNEL, () => {
+		pi.events.emit(MCP_STATUS_CHANNEL, { servers: buildStatusSnapshot(), settled: connectSettled } satisfies McpStatusEvent);
 	});
 
 	pi.registerCommand("mcp", {

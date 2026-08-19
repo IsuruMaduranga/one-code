@@ -9,7 +9,7 @@
  */
 
 import { readFileSync, statSync } from "node:fs";
-import { discoverPlugins, pluginResources } from "../lib/plugins.ts";
+import { discoverPlugins, pluginResources, type DiscoverRoots } from "../lib/plugins.ts";
 import { parseHooksBlock, type HooksSource } from "./settings.ts";
 
 interface CacheEntry {
@@ -67,9 +67,9 @@ function readPluginHooksFile(hooksConfig: string, pluginName: string, pluginPath
 	return source;
 }
 
-export function loadPluginHooks(claudeDir: string, diagnostics: string[]): HooksSource[] {
+export function loadPluginHooks(roots: DiscoverRoots, diagnostics: string[]): HooksSource[] {
 	const sources: HooksSource[] = [];
-	for (const plugin of discoverPlugins(claudeDir).plugins) {
+	for (const plugin of discoverPlugins(roots).enabledPlugins) {
 		const { hooksConfig } = pluginResources(plugin);
 		if (!hooksConfig) continue;
 		const source = readPluginHooksFile(hooksConfig, plugin.name, plugin.path, diagnostics);

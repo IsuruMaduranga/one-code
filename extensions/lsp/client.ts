@@ -20,13 +20,39 @@ import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import type { LspDiagnostic } from "./format.ts";
 import { createReaderState, encodeMessage, type JsonRpcMessage, readMessages } from "./protocol.ts";
-import type { ServerConfig } from "./servers.ts";
 
 const INITIALIZE_TIMEOUT_MS = 15_000;
 const DIAGNOSTICS_TIMEOUT_MS = 6_000;
 
+/** What a client actually needs to spawn — the built-in table's ServerConfig satisfies it. */
+export interface SpawnConfig {
+	command: string;
+	args: string[];
+}
+
+/** Per-server extras a plugin config can carry (built-in servers pass none). */
+export interface LspClientOptions {
+	/** Merged over process.env at spawn. */
+	env?: Record<string, string>;
+	/** Sent in the `initialize` request. */
+	initializationOptions?: unknown;
+	/** Answers the server's workspace/configuration requests. */
+	settings?: unknown;
+	startupTimeoutMs?: number;
+}
+
 export function pathToUri(path: string): string {
 	return pathToFileURL(path).toString();
+}
+
+/**
+ * The reply to a server's workspace/configuration request: one settings object
+ * per requested item (LSP 3.6 shape), `{}` when none are configured.
+ */
+export function configurationResponse(settings: unknown, params: unknown): unknown[] {
+	const items = (params as { items?: unknown[] } | undefined)?.items;
+	const count = Array.isArray(items) && items.length > 0 ? items.length : 1;
+	return Array.from({ length: count }, () => settings ?? {});
 }
 
 function unrefStream(stream: unknown): void {
@@ -48,11 +74,12 @@ export class LspClient {
 	private open = new Map<string, OpenDocument>();
 	private ready = false;
 	private failure?: string;
+	private publishes = 0;
 
 	constructor(
-		readonly languageId: string,
-		private readonly config: ServerConfig,
+		private readonly config: SpawnConfig,
 		private readonly root: string,
+		private readonly options: LspClientOptions = {},
 	) {}
 
 	get isRunning(): boolean {
@@ -75,7 +102,7 @@ export class LspClient {
 		const child = spawn(this.config.command, this.config.args, {
 			cwd: this.root,
 			stdio: ["pipe", "pipe", "pipe"],
-			env: process.env,
+			env: this.options.env ? { ...process.env, ...this.options.env } : process.env,
 		});
 		this.child = child;
 
@@ -113,6 +140,7 @@ export class LspClient {
 				processId: process.pid,
 				rootUri: pathToUri(this.root),
 				workspaceFolders: [{ uri: pathToUri(this.root), name: "workspace" }],
+				initializationOptions: this.options.initializationOptions,
 				capabilities: {
 					textDocument: {
 						synchronization: { dynamicRegistration: false, didSave: false },
@@ -121,7 +149,7 @@ export class LspClient {
 					workspace: { workspaceFolders: true, configuration: true },
 				},
 			},
-			INITIALIZE_TIMEOUT_MS,
+			this.options.startupTimeoutMs ?? INITIALIZE_TIMEOUT_MS,
 		);
 
 		this.notify("initialized", {});
@@ -131,6 +159,7 @@ export class LspClient {
 	private handle(message: JsonRpcMessage): void {
 		if (message.method === "textDocument/publishDiagnostics") {
 			const params = message.params as { uri: string; diagnostics: LspDiagnostic[] };
+			this.publishes++;
 			this.diagnostics.set(params.uri, params.diagnostics ?? []);
 			const waiting = this.waiters.get(params.uri);
 			if (waiting) {
@@ -142,7 +171,10 @@ export class LspClient {
 
 		// Requests from the server: answer the ones that block startup.
 		if (message.id !== undefined && message.method) {
-			const result = message.method === "workspace/configuration" ? [{}] : null;
+			const result =
+				message.method === "workspace/configuration"
+					? configurationResponse(this.options.settings, message.params)
+					: null;
 			this.send({ id: message.id, result });
 			return;
 		}
@@ -193,8 +225,12 @@ export class LspClient {
 		this.waiters.clear();
 	}
 
-	/** Push the file's current on-disk content and return its uri. */
-	syncFile(path: string): string {
+	/**
+	 * Push the file's current on-disk content and return its uri. `languageId`
+	 * is per-document: one plugin server process can map different extensions to
+	 * different language ids.
+	 */
+	syncFile(path: string, languageId: string): string {
 		const uri = pathToUri(path);
 		let text: string;
 		try {
@@ -207,7 +243,7 @@ export class LspClient {
 		if (!existing) {
 			this.open.set(uri, { version: 1, text });
 			this.notify("textDocument/didOpen", {
-				textDocument: { uri, languageId: this.languageId, version: 1, text },
+				textDocument: { uri, languageId, version: 1, text },
 			});
 		} else if (existing.text !== text) {
 			const version = existing.version + 1;
@@ -240,10 +276,10 @@ export class LspClient {
 	 * nothing when a file is unchanged, hence the timeout plus last-known
 	 * fallback.
 	 */
-	async getDiagnostics(path: string, timeoutMs = DIAGNOSTICS_TIMEOUT_MS): Promise<LspDiagnostic[]> {
+	async getDiagnostics(path: string, languageId: string, timeoutMs = DIAGNOSTICS_TIMEOUT_MS): Promise<LspDiagnostic[]> {
 		const uri = pathToUri(path);
 		const hadContent = this.open.get(uri)?.text;
-		const synced = this.syncFile(path);
+		const synced = this.syncFile(path, languageId);
 		const changed = this.open.get(uri)?.text !== hadContent;
 
 		if (changed || !this.diagnostics.has(synced)) {
@@ -252,17 +288,32 @@ export class LspClient {
 		return this.diagnostics.get(synced) ?? [];
 	}
 
+	/** Everything the server has published, per document uri (for the watcher). */
+	allDiagnostics(): Map<string, LspDiagnostic[]> {
+		return new Map(this.diagnostics);
+	}
+
+	/**
+	 * Monotonic count of publishDiagnostics received — the watcher's cheap
+	 * "anything new since last look?" check, so the per-tool-round delta scan
+	 * only runs when a server actually republished.
+	 */
+	get publishCount(): number {
+		return this.publishes;
+	}
+
 	async stop(): Promise<void> {
 		const child = this.child;
 		if (!child) return;
-		this.child = undefined;
 		this.ready = false;
 		try {
+			// Send while this.child is still set — send() writes through it.
 			this.send({ id: this.nextId++, method: "shutdown", params: null });
 			this.notify("exit", null);
 		} catch {
 			// Server may already be gone.
 		}
+		this.child = undefined;
 		await new Promise<void>((resolve) => {
 			const timer = setTimeout(() => {
 				child.kill("SIGKILL");

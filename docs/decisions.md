@@ -149,12 +149,14 @@ Full context: [`decisions/mcp.md`](decisions/mcp.md).
 Full context: [`decisions/lsp.md`](decisions/lsp.md).
 
 - **[LSP: our own client, not a package](decisions/lsp.md#lsp-our-own-client-not-a-package)** — a zero-dep LSP client for post-edit diagnostics and `lsp_diagnostics`.
+- **[Plugin LSP servers + the diagnostics watcher](decisions/lsp.md#plugin-lsp-servers--the-diagnostics-watcher-2026-08-19)** — plugin `.lsp.json`/`lspServers` servers routed by extension, winning over the built-in table; the per-edit `<diagnostics>` append replaced by a CC-parity session watcher (`<new-diagnostics>` steer messages, content-hash dedup, cwd-relative headers as a deliberate divergence).
 
 ## Skills & plugins
 
 Full context: [`decisions/skills-plugins.md`](decisions/skills-plugins.md).
 
 - **[Skills and plugins](decisions/skills-plugins.md#skills-and-plugins)** — `~/.claude` + `.claude` skills/commands discovery, and Claude Code plugins contributing namespaced agents/skills/commands/MCP.
+- **[The plugin root, the marketplace, and the /plugins panel](decisions/skills-plugins.md#the-plugin-root-the-marketplace-and-the-plugins-panel-2026-08-19)** — isolation (all writes under `<agentDir>/plugins`, `~/.claude` read-only + override layer), the phantom-`enabled` fix, the full-screen marketplace panel (Discover/Installed/Marketplaces/Errors), and the v1 scope cuts.
 
 ## TUI
 
