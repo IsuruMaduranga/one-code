@@ -47,6 +47,7 @@
 			"extensions/workflow/index.ts",
 			"extensions/effort/index.ts",
 			"extensions/spinner/index.ts",
+			"extensions/footer/index.ts",
 			"extensions/turn-duration/index.ts",
 			"extensions/recap/index.ts",
 			"extensions/exit/index.ts",

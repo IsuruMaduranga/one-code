@@ -111,6 +111,9 @@ export interface ClassifierDeps {
 	state: ClassifierState;
 	/** Tell the user something once — which model is in use, or that theirs is dead. */
 	onNotice?: (message: string, level: "info" | "warning") => void;
+	/** Report each classifier reply's usage, for the all-in footer cost. Observer
+	 * only — it never affects the payload sent or the verdict parsed. */
+	onUsage?: (usage: unknown) => void;
 	/**
 	 * Completed-run subagent review: evaluate the sequence with a single stage-2
 	 * style full-eval call instead of the two-stage gate (there is no harm floor
@@ -267,6 +270,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 		// at `big` is its own outcome (not a candidate to step past).
 		const call = async (userText: string, base: number, big: number, stage: number): Promise<string> => {
 			const inspect = (reply: AssistantMessage): string | "length" => {
+				deps.onUsage?.(reply.usage);
 				if (deps.signal?.aborted) throw new StepError("cancelled", "cancelled");
 				if (reply.stopReason === "error" || reply.stopReason === "aborted") {
 					const msg = reply.errorMessage ?? reply.stopReason ?? "provider error";

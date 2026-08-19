@@ -1,7 +1,7 @@
 /**
  * Pure pieces of the Claude Code working line ("✳ Hyperspacing… (10s · ↓ 448
- * tokens)") and the context token counter above the input — formats matched
- * to a frame capture of CC 2.1.233 plus its reconstructed Spinner source.
+ * tokens)") — formats matched to a frame capture of CC 2.1.233 plus its
+ * reconstructed Spinner source.
  */
 
 import { formatDuration } from "../lib/tui-render.ts";
@@ -48,13 +48,4 @@ export function messageChars(message: unknown): number {
 		if (typeof b?.thinking === "string") total += b.thinking.length;
 	}
 	return total;
-}
-
-/**
- * The right-aligned `58197 tokens` counter above the input (raw number, no
- * separators — matches the capture). Unknown context (right after
- * compaction) falls back to 0 the way a fresh session reads.
- */
-export function contextTokensText(tokens: number | null | undefined): string {
-	return `${tokens ?? 0} tokens`;
 }

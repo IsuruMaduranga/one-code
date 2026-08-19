@@ -5,20 +5,20 @@
  *   cycle) with a random gerund verb per turn and live stats — "Hyperspacing…
  *   (10s · ↓ 448 tokens)" — updated on a 1s ticker while the model streams.
  *   Tokens are CC's estimate (streamed characters / 4).
- * - The context token counter: a right-aligned dim `58197 tokens` directly
- *   above the input box, refreshed whenever usage becomes known.
  *
- * Both matched to a frame capture of CC 2.1.233. CC's glimmer animation and
+ * Context usage is shown by the footer extension, not here (the two once
+ * duplicated an above-input token counter).
+ *
+ * Matched to a frame capture of CC 2.1.233. CC's glimmer animation and
  * rotating tip lines are deliberately not replicated (pi renders the working
  * message as plain text, and tips carry CC's own frequency machinery).
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { dimRightAlignedWidget, safeThemePaint } from "../lib/tui-render.ts";
-import { composeWorkingMessage, contextTokensText, messageChars, spinnerFrames } from "./line.ts";
+import { safeThemePaint } from "../lib/tui-render.ts";
+import { composeWorkingMessage, messageChars, spinnerFrames } from "./line.ts";
 import { pickVerb } from "./verbs.ts";
 
-const COUNTER_KEY = "cc-context-tokens";
 const FRAME_INTERVAL_MS = 120;
 const TICK_MS = 1000;
 
@@ -53,12 +53,6 @@ export default function spinnerExtension(pi: ExtensionAPI) {
 		ticker = undefined;
 	};
 
-	const updateCounter = (ctx: ExtensionContext) => {
-		if (!ctx.hasUI) return;
-		const text = contextTokensText(ctx.getContextUsage()?.tokens);
-		ctx.ui.setWidget(COUNTER_KEY, dimRightAlignedWidget(text), { placement: "aboveEditor" });
-	};
-
 	pi.on("session_start", (_event, ctx) => {
 		lastCtx = ctx;
 		if (!ctx.hasUI) return;
@@ -67,7 +61,6 @@ export default function spinnerExtension(pi: ExtensionAPI) {
 			frames: spinnerFrames(process.platform, process.env.TERM).map((frame) => paint("accent", frame)),
 			intervalMs: FRAME_INTERVAL_MS,
 		});
-		updateCounter(ctx);
 	});
 
 	pi.on("agent_start", (_event, ctx) => {
@@ -87,20 +80,17 @@ export default function spinnerExtension(pi: ExtensionAPI) {
 		streamingMessage = event.message;
 	});
 
-	pi.on("message_end", (event, ctx) => {
+	pi.on("message_end", (event) => {
 		if (event.message.role === "assistant") {
 			settledChars += messageChars(event.message);
 			streamingMessage = undefined;
 		}
-		// Usage (and so context size) lands with each finished message.
-		updateCounter(ctx);
 	});
 
 	pi.on("agent_end", (_event, ctx) => {
 		stopTicker();
 		turnStartedAt = 0;
 		if (ctx.hasUI) ctx.ui.setWorkingMessage(); // restore pi's default for non-turn work
-		updateCounter(ctx);
 	});
 
 	pi.on("session_shutdown", () => {

@@ -14,6 +14,7 @@
 import type { Api, Model, ThinkingLevel } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { recordUsage } from "../lib/usage-bus.ts";
 import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { withReasoningFallback } from "../lib/model-policy.ts";
@@ -64,6 +65,8 @@ async function answerFromPage(
 	/** Per-session memo of a reader model's required thinking level, so a reader that
 	 * cannot disable thinking pays the mandatory-thinking 400 once, not per fetch. */
 	learnedReasoning: Map<string, ThinkingLevel>,
+	/** Report the reader call's usage for the all-in footer cost. */
+	recordCall: (usage: unknown) => void,
 ): Promise<{ answer?: string; reader?: string; truncated?: boolean; error?: string }> {
 	const choice = pickReaderModel(ctx.modelRegistry.getAvailable(), ctx.model);
 	if (!choice) return { error: "no model available to read the page" };
@@ -99,6 +102,7 @@ async function answerFromPage(
 				);
 			},
 			learnedReasoning,
+			recordCall,
 		);
 		const answer = result.content
 			.filter((block): block is { type: "text"; text: string } => block.type === "text")
@@ -222,7 +226,9 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 				// readerNote, never silently.
 				let readerNote: string | undefined;
 				if (params.prompt) {
-					const answered = await answerFromPage(ctx, params.prompt, entry, target, signal, learnedReasoning);
+					const answered = await answerFromPage(ctx, params.prompt, entry, target, signal, learnedReasoning, (usage) =>
+						recordUsage(pi, "reader", usage),
+					);
 					if (answered.answer !== undefined) {
 						const header = [
 							entry.title ? `# ${entry.title}` : undefined,

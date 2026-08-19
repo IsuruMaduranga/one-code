@@ -22,6 +22,11 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 /** The final stop on the track: top reasoning + workflows armed every turn. */
 export const ULTRACODE = "ultracode";
 
+/** UI status key the effort extension sets while ultracode is armed; the footer
+ * reads it to show "✦ ultracode" in place of the effort level. Shared via this
+ * pure module so both extensions reference one constant, not a bare string. */
+export const ULTRACODE_STATUS_KEY = "ultracode";
+
 /** The reasoning level ultracode pins, when the model can reach it. */
 export const ULTRACODE_LEVEL: ThinkingLevel = "xhigh";
 

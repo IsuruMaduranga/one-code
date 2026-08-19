@@ -40,6 +40,8 @@ export interface LiveSink {
 	onActivity?(toolName: string | undefined, args: unknown, lastText: string): void;
 	onBlock?(block: TranscriptBlock): void;
 	onStreaming?(message: { content?: unknown } | undefined): void;
+	/** One child assistant message's usage, for the all-in footer cost. */
+	onUsage?(usage: unknown): void;
 }
 
 /** Wall-clock cap on a single run/turn — a hung session shares the main event loop. */
@@ -222,6 +224,7 @@ export class SubagentRuntime {
 					sink?.onStreaming?.(e.message);
 				} else if (e.type === "message_end" && e.message?.role === "assistant") {
 					sink?.onStreaming?.(undefined);
+					sink?.onUsage?.((e.message as { usage?: unknown }).usage);
 					const text = streamingText(e.message).trim();
 					if (text) {
 						sink?.onBlock?.({ kind: "text", text });

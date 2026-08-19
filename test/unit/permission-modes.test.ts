@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import type { PermissionMode } from "../../extensions/permissions/matcher.ts";
 import {
+	formatModel,
+	formatModelSpec,
 	MODE_BADGES,
 	modeBadge,
 	nextMode,
@@ -101,6 +103,25 @@ describe("shortModelName", () => {
 	it("leaves an already-short id recognisable", () => {
 		expect(shortModelName("llama-3.3-70b-versatile")).toBe("3.3-70b-versatile");
 		expect(shortModelName("qwen3-coder")).toBe("qwen3-coder");
+	});
+});
+
+describe("formatModel / formatModelSpec", () => {
+	it("shows (provider) and the full vendor-qualified id", () => {
+		expect(formatModel("openrouter", "google/gemini-3.7-flash")).toBe("(openrouter) google/gemini-3.7-flash");
+	});
+	it("trims a trailing date but keeps the rest", () => {
+		expect(formatModel("anthropic", "claude-haiku-4-5-20251001")).toBe("(anthropic) claude-haiku-4-5");
+	});
+	it("omits the parenthesized provider when it is empty", () => {
+		expect(formatModel("", "some-model")).toBe("some-model");
+	});
+	it("splits a combined provider/id spec on the first slash", () => {
+		expect(formatModelSpec("openrouter/google/gemini-3.7-flash")).toBe("(openrouter) google/gemini-3.7-flash");
+		expect(formatModelSpec("anthropic/claude-opus-4-8")).toBe("(anthropic) claude-opus-4-8");
+	});
+	it("handles a spec with no provider segment", () => {
+		expect(formatModelSpec("bare-model")).toBe("bare-model");
 	});
 });
 

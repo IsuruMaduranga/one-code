@@ -28,6 +28,7 @@ import type { Api, Model, Tool } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { convertToLlm, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { withReasoningFallback } from "../lib/model-policy.ts";
+import { recordUsage } from "../lib/usage-bus.ts";
 import { pickEconomicalContainedModel } from "../lib/model-tier.ts";
 import { dimMarkedLine } from "../lib/tui-render.ts";
 import { RECAP_PROMPT, recapLine, recentForRecap, REFERENCE_MARK } from "./prompt.ts";
@@ -129,7 +130,7 @@ export default function recapExtension(pi: ExtensionAPI) {
 						...(reasoning ? { reasoning } : {}),
 					},
 				);
-			});
+			}, undefined, (usage) => recordUsage(pi, "recap", usage));
 			if (controller.signal.aborted) return;
 			const content = result.content
 				.filter((block): block is { type: "text"; text: string } => block.type === "text")

@@ -28,15 +28,42 @@ export interface CycleOptions {
 	autoInCycle: boolean;
 }
 
+/** Strip a trailing release-date stamp (`-20250601`), noise in a model id. */
+function stripDateSuffix(id: string): string {
+	return id.replace(/-20\d{6}$/, "");
+}
+
 /**
- * Shorten a model id for the footer, which has little room. Drops an OpenRouter
- * style `vendor/` prefix and a trailing date stamp, both of which are noise once
- * the family name is visible: `anthropic/claude-haiku-4-5-20251001` → `haiku-4-5`.
+ * Shorten a model id for a compact slot. Drops an OpenRouter style `vendor/`
+ * prefix and a trailing date stamp, both of which are noise once the family name
+ * is visible: `anthropic/claude-haiku-4-5-20251001` → `haiku-4-5`.
  */
 export function shortModelName(id: string): string {
 	const afterSlash = id.slice(id.lastIndexOf("/") + 1);
-	const undated = afterSlash.replace(/-20\d{6}$/, "");
-	return undated.replace(/^(claude|gpt|gemini|llama|grok|mistral|deepseek|qwen)-/, "");
+	return stripDateSuffix(afterSlash).replace(/^(claude|gpt|gemini|llama|grok|mistral|deepseek|qwen)-/, "");
+}
+
+/**
+ * Model as `(provider) id`, e.g. `(openrouter) google/gemini-3.7-flash`. One
+ * Code runs on any provider, so the provider and the full vendor-qualified id
+ * both matter — a bare short name hides which model an aggregator route points
+ * at. Only the noisy trailing date (`-20250601`) is trimmed. Used by the footer
+ * and the startup banner so both name models the same way.
+ */
+export function formatModel(provider: string, id: string): string {
+	const undated = stripDateSuffix(id);
+	return provider ? `(${provider}) ${undated}` : undated;
+}
+
+/**
+ * Same as `formatModel` for a combined `provider/id` spec (what the subagent
+ * status carries): the first path segment is the provider, the rest is the id
+ * (which may itself contain slashes, e.g. `openrouter/google/gemini-3.7-flash`).
+ */
+export function formatModelSpec(spec: string): string {
+	const slash = spec.indexOf("/");
+	if (slash < 0) return formatModel("", spec);
+	return formatModel(spec.slice(0, slash), spec.slice(slash + 1));
 }
 
 /**

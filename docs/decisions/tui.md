@@ -319,3 +319,55 @@ back. Both matched to CC's reconstructed source, then verified live in tmux.
 Default-on is a divergence from CC, which growthbook-gates the away summary
 off for third parties (`tengu_sedge_lantern`, 3P default false); shipped on
 here because the feature was explicitly requested.
+
+## Custom footer: all-in cost, labelled metrics, provider-qualified model (2026-08-19)
+
+*2026-08-19.* pi's built-in footer renders a dense token line
+(`↑1.1M ↓44k R6.9M CH0.0% $0.745 12.0%/1.0M`) whose raw ↑/↓/R/W counters mean
+little to a user, and its cost/cache-hit reflect the **main session only** — the
+in-process subagents, the auto-mode classifier, and the reader-style one-shots
+are all structurally invisible to it (findings §15). We replaced it with One
+Code's own single line via pi's `ctx.ui.setFooter` hook (the same shape as the
+banner's `setHeader`), keeping what a user watches and dropping the rest.
+
+**What was done:**
+
+- **`extensions/footer/`** — `footer-line.ts` (pure: `buildFooterLines`,
+  `computeMainUsage`, `formatCost`, path head-truncation) + `index.ts` (thin
+  wiring calling `setFooter`) + `pr.ts` (a `gh pr view` lookup). The line reads
+  `<path> ⎇ <branch>   usage: <tok>/<win> (<pct>%) · cost: $X · cache-hit: N% ·
+  (provider) id · <effort>`. Labels are muted, values coloured; cache-hit is
+  dim normally and warning/error when low, and **omitted entirely when the
+  provider reports no cache activity** (matches pi — a non-caching provider must
+  not show a permanent `cache-hit: 0%`). `CC_FOOTER=0` restores pi's built-in.
+- **All-in cost via a usage bus** (`extensions/lib/usage-bus.ts`,
+  `one-code:usage-recorded`). The footer sums the main session (from
+  `sessionManager.getEntries()`, exactly as pi computes it) plus every
+  out-of-band LLM call: subagents (per child message via a new `LiveSink.onUsage`),
+  the auto-mode classifier (an observer-only `onUsage` on `ClassifierDeps` — no
+  payload/verdict change), and the reader-style one-shots (web-fetch, recap,
+  auto-mode setup) instrumented **once at their shared `withReasoningFallback`
+  wrapper** rather than per call site. Cross-extension data goes over
+  `pi.events`, per the module-isolation rule.
+- **Performance:** `computeMainUsage` is an O(n) transcript scan, so it runs
+  **only on `message_end`/`agent_end`** (where main entries change) and is
+  cached; usage-bus, model, and effort events just repaint. Render is memoized
+  by width through `linesComponent`.
+- **Long paths** are head-truncated with a leading `…` (keeping the deepest
+  folders) and the branch is kept; metrics are the protected core.
+- **Provider-qualified model** (`formatModel`/`formatModelSpec` in
+  `permissions/modes.ts`, beside `shortModelName`): `(openrouter)
+  google/gemini-3.7-flash`. The banner's `model` and `subagents` lines were
+  switched to the same helper so both surfaces name models identically — a short
+  name alone hides which model an aggregator route points at.
+- **Context counter consolidated:** the spinner's above-input token widget was
+  removed; context now lives only in the footer as `usage:`.
+- The effort/ultracode indicator moved inline after the model (no second line);
+  the footer reads the shared `ULTRACODE_STATUS_KEY` (in `effort/slider.ts`) from
+  `getExtensionStatuses()`.
+
+**Known limitation:** a *background* subagent spawned before a `/clear`
+(`newSession` fires `session_start` but not `session_shutdown`, findings §8) keeps
+reporting after the footer reset, so its late cost lands in the next session's
+total. Rare (only background subagents outlive a turn) and only a display figure,
+so accepted rather than threading session identity through the bus.

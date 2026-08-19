@@ -39,6 +39,7 @@ import {
 	thinkingLevelFor,
 	ULTRACODE,
 	ULTRACODE_LEVEL,
+	ULTRACODE_STATUS_KEY,
 } from "./slider.ts";
 
 /** The levels pi says the active model can reach; the full ladder when unknown. */
@@ -52,7 +53,6 @@ function modelLabel(ctx: ExtensionContext): string {
 }
 
 const REMINDER_KEY = "ultracode-mode";
-const STATUS_KEY = "ultracode";
 const NOTE_KEY = "effort-note";
 const NOTE_MS = 5000;
 
@@ -80,7 +80,7 @@ export default function effortExtension(pi: ExtensionAPI) {
 
 	const applyStatus = (ctx: ExtensionContext) => {
 		// No-op outside the TUI, so this is safe to call unconditionally.
-		ctx.ui.setStatus(STATUS_KEY, ultracodeActive ? "✦ ultracode" : undefined);
+		ctx.ui.setStatus(ULTRACODE_STATUS_KEY, ultracodeActive ? "✦ ultracode" : undefined);
 	};
 
 	/**

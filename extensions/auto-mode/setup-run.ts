@@ -170,6 +170,8 @@ export interface DraftDeps {
 	signal?: AbortSignal;
 	/** Surfaces candidate-chain warnings (a stale or cross-provider classifierModel) to the user. */
 	onNotice?: (message: string, level: "info" | "warning") => void;
+	/** Reports the drafting call's usage to the all-in footer cost. */
+	onUsage?: (usage: unknown) => void;
 }
 
 /**
@@ -222,7 +224,7 @@ export async function draftSetup(facts: SetupFacts, deps: DraftDeps): Promise<Se
 					...(reasoning ? { reasoning } : {}),
 				},
 			);
-		});
+		}, undefined, deps.onUsage);
 		if (reply.stopReason === "error" || reply.stopReason === "aborted") {
 			if (deps.signal?.aborted) throw new Error("setup drafting was cancelled");
 			lastError = reply.errorMessage ?? reply.stopReason;

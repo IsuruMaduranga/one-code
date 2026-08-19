@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { alignRight, formatDuration } from "../../extensions/lib/tui-render.ts";
-import { composeWorkingMessage, contextTokensText, estimateTokens, messageChars, spinnerFrames } from "../../extensions/spinner/line.ts";
+import { composeWorkingMessage, estimateTokens, messageChars, spinnerFrames } from "../../extensions/spinner/line.ts";
 import { pickVerb, SPINNER_VERBS } from "../../extensions/spinner/verbs.ts";
 
 describe("spinnerFrames", () => {
@@ -62,12 +62,7 @@ describe("estimateTokens / messageChars", () => {
 	});
 });
 
-describe("contextTokensText / alignRight", () => {
-	it("renders the raw context count, defaulting unknown to 0", () => {
-		expect(contextTokensText(58197)).toBe("58197 tokens");
-		expect(contextTokensText(null)).toBe("0 tokens");
-	});
-
+describe("alignRight", () => {
 	it("right-aligns within the width and never exceeds it", () => {
 		expect(alignRight("abc", 6)).toBe("   abc");
 		expect(alignRight("abcdef", 4)).toBe("abcd");

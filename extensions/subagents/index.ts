@@ -52,6 +52,7 @@ import { systemNotification } from "../lib/notifications.ts";
 import { ccToolRenderers, customMessageText, notificationComponent, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import { deriveActivity, LiveRunRegistry } from "./live-runs.ts";
 import type { LiveSink } from "./runner.ts";
+import { recordUsage } from "../lib/usage-bus.ts";
 import { SubagentWidget } from "./panel-widget.ts";
 import { type ProseRenderer, renderTranscript } from "./panel-render.ts";
 import { decodeStripKey, type StripKey } from "./panel-keys.ts";
@@ -210,6 +211,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			onActivity: (tool, args, text) => liveRuns.setActivity(record.taskId, deriveActivity(tool, args, text)),
 			onBlock: (block) => liveRuns.block(record.taskId, block),
 			onStreaming: (message) => liveRuns.setStreaming(record.taskId, message),
+			onUsage: (usage) => recordUsage(pi, "subagent", usage),
 		};
 		return {
 			sink,

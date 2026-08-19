@@ -21,10 +21,11 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getAgentDir, SettingsManager, VERSION as PI_VERSION } from "@earendil-works/pi-coding-agent";
 import { piVersionWarning } from "../lib/pi-version.ts";
 import {
+	formatModel,
+	formatModelSpec,
 	PERMISSION_STATUS_CHANNEL,
 	permissionModeDisplay,
 	type PermissionStatus,
-	shortModelName,
 } from "../permissions/modes.ts";
 import { SUBAGENT_STATUS_CHANNEL, type SubagentStatus } from "../subagents/model-select.ts";
 import {
@@ -298,11 +299,13 @@ export default function brandingExtension(pi: ExtensionAPI) {
 	let permissionStatus: PermissionStatus | undefined;
 	let subagentStatus: SubagentStatus | undefined;
 	let currentModelId: string | undefined;
+	let currentModelProvider: string | undefined;
 	let requestHeaderRender: (() => void) | undefined;
 	// The model line goes stale the same way the mode line did once the header
 	// re-renders live, so it follows ctrl+p / /model changes too.
 	pi.on("model_select", (event) => {
 		currentModelId = event.model?.id ?? currentModelId;
+		currentModelProvider = event.model?.provider ?? currentModelProvider;
 		requestHeaderRender?.();
 	});
 	pi.events.on(PERMISSION_STATUS_CHANNEL, (data) => {
@@ -319,7 +322,8 @@ export default function brandingExtension(pi: ExtensionAPI) {
 		if (!ctx.hasUI || ctx.mode !== "tui") return;
 
 		const version = process.env.CC_VERSION ?? "0.1.0";
-		currentModelId = ctx.model ? `${ctx.model.id}` : currentModelId;
+		currentModelId = ctx.model?.id ?? currentModelId;
+		currentModelProvider = ctx.model?.provider ?? currentModelProvider;
 
 		// With pi's own listing silenced, the banner carries compact sections
 		// instead (minus the internal [Extensions] noise).
@@ -345,11 +349,11 @@ export default function brandingExtension(pi: ExtensionAPI) {
 					...bannerLines(
 						{
 							version,
-							model: currentModelId,
+							model: currentModelId ? formatModel(currentModelProvider ?? "", currentModelId) : undefined,
 							cwd: ctx.cwd,
 							mode: permissionModeDisplay(permissionStatus ?? { mode: "default", paused: false }),
 							subagents: subagentStatus?.model
-								? `${shortModelName(subagentStatus.model)}${subagentStatus.via ? ` (${subagentStatus.via})` : ""}`
+								? `${formatModelSpec(subagentStatus.model)}${subagentStatus.via ? ` (${subagentStatus.via})` : ""}`
 								: undefined,
 							sections,
 						},

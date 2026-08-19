@@ -66,6 +66,7 @@ import { ORIGINAL_COMMAND_KEY } from "../worktree/rewrite.ts";
 import { isWritingTool } from "./protected-paths.ts";
 import { loadPermissionSettings, normalizePermissionMode, persistAllowRule } from "./settings.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
+import { recordUsage } from "../lib/usage-bus.ts";
 
 const DENIED_BY_USER =
 	"The user doesn't want to proceed with this tool use. The tool use was rejected. Adjust your approach based on the user's feedback instead of retrying the same call.";
@@ -239,6 +240,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	 * to be unusable is not retried on every tool call.
 	 */
 	const classifierState = createClassifierState();
+	/** Report each classifier reply's usage to the all-in footer cost. */
+	const onClassifierUsage = (usage: unknown) => recordUsage(pi, "classifier", usage);
 
 	/**
 	 * One JSONL line per gate decision when `autoMode.logDecisions` is set. The
@@ -407,6 +410,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				config: autoConfig,
 				signal: opts?.signal ?? ctx.signal,
 				state: classifierState,
+				onUsage: onClassifierUsage,
 				onNotice: (message, level) => {
 					ctx.ui.notify(message, level);
 					// The badge names the classifier, so it has to repaint when the first
@@ -963,6 +967,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				signal,
 				state: classifierState,
 				onNotice: (message, level) => ctx.ui.notify(message, level),
+				onUsage: onClassifierUsage,
 				reviewOnly: true,
 			},
 		);
@@ -1137,6 +1142,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				defaultEnvironment: DEFAULT_ENVIRONMENT,
 				signal: ctx.signal,
 				onNotice: (message, level) => ctx.ui.notify(message, level),
+				onUsage: (usage) => recordUsage(pi, "setup", usage),
 			});
 		} catch (error) {
 			ctx.ui.notify(`Auto-mode setup failed: ${(error as Error).message}. Nothing was written.`, "warning");

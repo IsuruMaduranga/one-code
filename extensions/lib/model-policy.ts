@@ -288,20 +288,27 @@ export function reasoningRetryLevel(model: Model<Api>): ThinkingLevel {
  * `learned` optionally memoizes the reactive result per `provider/id` across
  * calls, so a repeatedly-called site (the web-fetch reader) pays the failed
  * round-trip once, not every call. Omit it for one-off callers.
+ *
+ * `onUsage` receives the final reply's `usage` once per invocation — this is the
+ * single choke point for the reader-style one-shots (web-fetch, recap, setup),
+ * so instrumenting it here reports their cost to the footer without each call
+ * site having to remember to.
  */
-export async function withReasoningFallback<R extends { stopReason: string; errorMessage?: string }>(
+export async function withReasoningFallback<R extends { stopReason: string; errorMessage?: string; usage?: unknown }>(
 	model: Model<Api>,
 	call: (reasoning: ThinkingLevel | undefined) => Promise<R>,
 	learned?: Map<string, ThinkingLevel>,
+	onUsage?: (usage: unknown) => void,
 ): Promise<R> {
 	const key = `${model.provider}/${model.id}`;
 	const reasoning = learned?.get(key) ?? forcedReasoningLevel(model);
-	const result = await call(reasoning);
+	let result = await call(reasoning);
 	if (result.stopReason === "error" && !reasoning && isReasoningMandatoryError(result.errorMessage ?? "")) {
 		const level = reasoningRetryLevel(model);
 		learned?.set(key, level);
-		return call(level);
+		result = await call(level);
 	}
+	onUsage?.(result.usage);
 	return result;
 }
 
