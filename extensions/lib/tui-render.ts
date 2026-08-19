@@ -139,6 +139,40 @@ export function firstNonEmptyLine(text: string): string {
 	return text.split("\n").map((l) => l.trim()).find(Boolean) ?? "";
 }
 
+/**
+ * Full-width rule that separates a docked panel from the transcript above it,
+ * the way Claude Code frames its /skills, /plugins and /mcp menus. Paint takes
+ * a (color, text) painter; the "border" theme token gives a visible-but-calm line.
+ */
+export function panelTopRule(paint: (color: string, text: string) => string, width: number): string {
+	return paint("border", "─".repeat(Math.max(0, width)));
+}
+
+/**
+ * A rounded, bordered single-line search input, Claude Code style. Returns three
+ * lines (top border, the input row, bottom border), already indented one column.
+ * The placeholder shows dim until the user types. `paint` colors the border with
+ * the "border" token; the query text stays in the default foreground.
+ */
+export function searchBoxLines(
+	query: string,
+	placeholder: string,
+	paint: (color: string, text: string) => string,
+	width: number,
+): string[] {
+	const boxWidth = Math.max(12, width - 2); // one column of margin each side
+	const inner = boxWidth - 2; // space between the vertical borders
+	const label = query ? `⌕ ${query}` : `⌕ ${placeholder}`;
+	const cut = cutPlainText(label, inner - 2); // one space padding each side
+	const content = ` ${cut}${" ".repeat(Math.max(0, inner - 2 - [...cut].length))} `;
+	const v = paint("border", "│");
+	return [
+		` ${paint("border", `╭${"─".repeat(inner)}╮`)}`,
+		` ${v}${query ? content : paint("dim", content)}${v}`,
+		` ${paint("border", `╰${"─".repeat(inner)}╯`)}`,
+	];
+}
+
 /** A run of rendered lines that either can (`selectable`) or cannot host the cursor. */
 export interface RenderBlock {
 	lines: string[];

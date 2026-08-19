@@ -12,6 +12,8 @@ import {
 	SPINNER_COLORS,
 	SPINNER_INTERVAL_MS,
 	spinnerBulletColor,
+	panelTopRule,
+	searchBoxLines,
 	summarizeArgs,
 	textContent,
 	truncateLine,
@@ -324,5 +326,41 @@ describe("elbowIndent / ccWrapBuiltinRenderers", () => {
 			.renderResult({ content: [{ type: "text", text: "raw output" }] }, { expanded: false, isPartial: false }, theme, context)
 			.render(120);
 		expect(lines[0]).toBe("  ⎿  <muted>raw output</>");
+	});
+});
+
+describe("panelTopRule", () => {
+	const paint = (color: string, text: string) => `<${color}>${text}</>`;
+	it("is a full-width rule painted with the border token", () => {
+		const rule = panelTopRule(paint, 10);
+		expect(rule).toBe("<border>──────────</>");
+	});
+	it("is empty at zero width", () => {
+		expect(panelTopRule(paint, 0)).toBe("<border></>");
+	});
+});
+
+describe("searchBoxLines", () => {
+	const paint = (color: string, text: string) => `<${color}>${text}</>`;
+	const plain = (s: string) => s.replace(/<\/?[a-z]*>/g, "");
+
+	it("returns three border-aligned lines of equal code-point width", () => {
+		const lines = searchBoxLines("", "Search…", paint, 40);
+		expect(lines).toHaveLength(3);
+		const widths = lines.map((l) => [...plain(l)].length);
+		expect(widths[0]).toBe(widths[1]);
+		expect(widths[1]).toBe(widths[2]);
+	});
+
+	it("shows the placeholder dim and the query in the default foreground", () => {
+		expect(searchBoxLines("", "Search…", paint, 40)[1]).toContain("<dim>");
+		const typed = searchBoxLines("git", "Search…", paint, 40)[1];
+		expect(typed).not.toContain("<dim>");
+		expect(plain(typed)).toContain("⌕ git");
+	});
+
+	it("truncates a long query to fit the box", () => {
+		const line = plain(searchBoxLines("x".repeat(200), "Search…", paint, 30)[1]);
+		expect([...line].length).toBe([...plain(searchBoxLines("", "Search…", paint, 30)[0])].length);
 	});
 });

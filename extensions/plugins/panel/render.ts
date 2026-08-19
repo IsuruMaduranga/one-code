@@ -7,7 +7,7 @@
  */
 
 import { formatInstallCount } from "../counts.ts";
-import { cutPlainText, type RenderBlock as Block, windowBlocks } from "../../lib/tui-render.ts";
+import { cutPlainText, panelTopRule, type RenderBlock as Block, searchBoxLines, windowBlocks } from "../../lib/tui-render.ts";
 import type { DiscoverRow, InstalledRow } from "./rows.ts";
 import { clampPanelState, type PanelState, type PanelView, resolveDetail, selectableRows, TABS, type Tab } from "./state.ts";
 
@@ -52,11 +52,6 @@ function tabBar(state: PanelState, view: PanelView, paint: PanelPaint, width: nu
 		return tab === state.tab ? paint.inverse(` ${title} `) : ` ${title} `;
 	});
 	return ` ${paint.bold("Plugins")} ${chips.join(" ")}`.slice(0, width * 4);
-}
-
-function searchLine(query: string, paint: PanelPaint, width: number): string {
-	const text = query ? `⌕ ${query}` : "⌕ Search…";
-	return `  ${query ? text : paint.fg("dim", text)}`.slice(0, width * 4);
 }
 
 function discoverBlocks(input: PanelRenderInput, paint: PanelPaint): Block[] {
@@ -256,7 +251,7 @@ export function renderPanel(input: PanelRenderInput, paint: PanelPaint): string[
 	const { state, view, width, height } = input;
 	clampPanelState(state, view);
 
-	const out: string[] = [tabBar(state, view, paint, width), ""];
+	const out: string[] = [panelTopRule(paint.fg, width), tabBar(state, view, paint, width), ""];
 	let footer: string;
 
 	if (state.addDialog) {
@@ -273,12 +268,12 @@ export function renderPanel(input: PanelRenderInput, paint: PanelPaint): string[
 				const total = view.discover.length;
 				const position = total === 0 ? 0 : state.cursor.discover + 1;
 				out.push(paint.bold(cutPlainText(` Discover plugins (${position}/${total})`, width - 1)), "");
-				out.push(searchLine(state.search.discover, paint, width), "");
+				out.push(...searchBoxLines(state.search.discover, "Search…", paint.fg, width), "");
 				blocks = discoverBlocks(input, paint);
 				break;
 			}
 			case "installed": {
-				out.push(searchLine(state.search.installed, paint, width));
+				out.push(...searchBoxLines(state.search.installed, "Search…", paint.fg, width));
 				blocks = installedBlocks(input, paint);
 				break;
 			}

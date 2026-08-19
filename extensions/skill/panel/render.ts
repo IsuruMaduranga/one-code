@@ -9,7 +9,7 @@
  * under-measure and risk pi's overwide-line crash.
  */
 
-import { cutPlainText, padPlainText } from "../../lib/tui-render.ts";
+import { cutPlainText, padPlainText, panelTopRule, searchBoxLines } from "../../lib/tui-render.ts";
 import type { SkillState } from "../../lib/skill-overrides.ts";
 import { clampSkillsCursor, type SkillsPanelState, type SkillsRow, visibleRows } from "./state.ts";
 
@@ -61,13 +61,12 @@ export function renderSkillsPanel(input: SkillsRenderInput, paint: SkillsPaint):
 	const visible = visibleRows(rows, state);
 	clampSkillsCursor(state, visible);
 
-	const out: string[] = [];
+	const out: string[] = [panelTopRule(paint.fg, width)];
 	out.push(` ${paint.bold("Skills")}`);
 	const sortNote = state.sort === "state" ? "sorted by state" : "sorted by name";
 	out.push(paint.fg("dim", cutPlainText(` ${rows.length} skill${rows.length === 1 ? "" : "s"} · ${sortNote} · enter/space to cycle, / to search, t to sort, Esc to close`, width - 1)));
 	out.push("");
-	const searchText = state.search ? `⌕ ${state.search}` : "⌕ Search skills…";
-	out.push(state.search ? `  ${searchText}` : `  ${paint.fg("dim", searchText)}`);
+	out.push(...searchBoxLines(state.search, "Search skills…", paint.fg, width));
 	out.push("");
 
 	// Reserve: header(2) + blank + search + blank already pushed = out.length;
