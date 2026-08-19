@@ -41,6 +41,17 @@ function fold(path: string): string {
  */
 const SETTINGS_TAIL = /\/\.claude\/settings(\.local)?\.json$/;
 
+/**
+ * One Code's own settings files — the global `~/.one-code/settings.json` and the
+ * per-repo `~/.one-code/projects/<slug>/settings.json`, wherever `.one-code`
+ * lives. Both now carry `permissions.allow` rules that `loadPermissionSettings`
+ * reads and that bypass the classifier, so a write to either is a gate-control
+ * write and must hit this floor rather than the auto-mode classifier (the global
+ * file is also reached via `autoModeSettingsPaths`; this covers the per-repo one,
+ * which that list never includes, and both under any checkout).
+ */
+const ONE_CODE_SETTINGS_TAIL = /\/\.one-code\/(projects\/[^/]+\/)?settings\.json$/;
+
 function safetyControlFiles(home: string): string[] {
 	return [
 		// autoMode + user permission rules, and the managed-settings paths.
@@ -53,7 +64,7 @@ function safetyControlFiles(home: string): string[] {
 /** Whether a *resolved* path (resolveForContainment output) is a gate control. */
 export function isSafetyControlTarget(resolved: string, home: string): boolean {
 	const target = fold(resolved);
-	if (SETTINGS_TAIL.test(target)) return true;
+	if (SETTINGS_TAIL.test(target) || ONE_CODE_SETTINGS_TAIL.test(target)) return true;
 	// The control files go through the same resolution as the write target, or
 	// the two sides can disagree about the same file (macOS /var → /private/var).
 	return safetyControlFiles(home).some((file) => {

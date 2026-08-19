@@ -86,9 +86,19 @@ describe("isSafetyControlTarget", () => {
 		expect(isSafetyControlTarget("/somewhere/else/.claude/settings.local.json", home)).toBe(true);
 	});
 
+	it("matches One Code's own settings files — global and per-repo — wherever they live", () => {
+		// Both carry permissions.allow that bypasses the classifier, so a write to
+		// either must hit the deterministic floor, not the auto-mode classifier.
+		expect(isSafetyControlTarget("/home/u/.one-code/settings.json", home)).toBe(true);
+		expect(isSafetyControlTarget("/home/u/.one-code/projects/-home-u-repo/settings.json", home)).toBe(true);
+	});
+
 	it("does not match lookalikes", () => {
 		expect(isSafetyControlTarget("/repo/.claude/settings.json.bak", home)).toBe(false);
 		expect(isSafetyControlTarget("/repo/claude/settings.json", home)).toBe(false);
 		expect(isSafetyControlTarget("/repo/.claude/worktrees/x/settings.json", home)).toBe(false);
+		// One Code's plan files and other .one-code contents are not gate controls.
+		expect(isSafetyControlTarget("/home/u/.one-code/plans/p.md", home)).toBe(false);
+		expect(isSafetyControlTarget("/home/u/.one-code/settings.json.bak", home)).toBe(false);
 	});
 });

@@ -130,12 +130,19 @@ export async function gatherFacts(options: GatherOptions): Promise<SetupFacts> {
 	// User-scope permissions.allow — audit input, and evidence for carve-outs. Both
 	// the borrowed `.claude` file (read-only) and One Code's own file are gathered:
 	// a broad rule in either bypasses the classifier, and the audit later splits
-	// them (One Code's are removable; Claude Code's it can only warn about). A
-	// missing or malformed file is skipped; an invalid `.claude` file is reported
-	// by the auto-mode config loader, not re-flagged here.
+	// them (One Code's are removable; Claude Code's it can only warn about).
+	const claudeUserPath = claudeUserSettingsPath(home);
 	const permissionsAllow: string[] = [];
-	for (const path of [claudeUserSettingsPath(home), oneCodeSettingsPath(home)]) {
-		const allow = (readSettingsFile(path) as { permissions?: { allow?: unknown } } | undefined)?.permissions?.allow;
+	for (const path of [claudeUserPath, oneCodeSettingsPath(home)]) {
+		const file = readSettingsFile(path) as { permissions?: { allow?: unknown } } | undefined;
+		// Present-but-unreadable is not the same as absent (readIfPresent's rule):
+		// a malformed `.claude` file must land in notes so the drafting evidence
+		// sees "present but unreadable", not silently "no broad rules here".
+		if (file === undefined && path === claudeUserPath && existsSync(path)) {
+			notes.push("user settings permissions.allow could not be read");
+			continue;
+		}
+		const allow = file?.permissions?.allow;
 		if (Array.isArray(allow)) permissionsAllow.push(...allow.filter((entry): entry is string => typeof entry === "string"));
 	}
 

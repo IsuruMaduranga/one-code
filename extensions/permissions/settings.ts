@@ -15,10 +15,13 @@
  * Unknown keys in the files are preserved on write.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
 import { readSettingsFile as readClaudeSettingsFile, settingsPaths } from "../lib/claude-settings.ts";
-import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
+import {
+	oneCodeProjectSettingsPath,
+	oneCodeSettingsPath,
+	readSettingsForWrite,
+	writeSettings,
+} from "../lib/one-code-settings.ts";
 import type { PermissionMode } from "./matcher.ts";
 
 export { settingsPaths };
@@ -94,12 +97,16 @@ export function loadPermissionSettings(cwd: string, home: string): PermissionSet
 	return merged;
 }
 
-/** Append an allow rule to a settings file, creating it if needed. */
+/**
+ * Append an allow rule to a One Code settings file, creating it if needed.
+ * Strict read + atomic write, like the other `~/.one-code` writers: a malformed
+ * file is not silently clobbered (it may also hold classifierModel/subagentModel),
+ * and a half-written file is never visible to a concurrent reader.
+ */
 export function persistAllowRule(rule: string, filePath: string): void {
-	const file = readSettingsFile(filePath) ?? {};
+	const file = readSettingsForWrite(filePath) as ClaudeSettingsFile;
 	const permissions = (file.permissions ??= {});
 	const allow = (permissions.allow ??= []);
 	if (!allow.includes(rule)) allow.push(rule);
-	mkdirSync(dirname(filePath), { recursive: true });
-	writeFileSync(filePath, `${JSON.stringify(file, null, 2)}\n`);
+	writeSettings(filePath, file as Record<string, unknown>);
 }

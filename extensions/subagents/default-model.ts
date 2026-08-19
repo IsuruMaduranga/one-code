@@ -30,8 +30,7 @@
  * pass through to resolveSubagentModel, which owns the semantics.
  */
 
-import { existsSync, readFileSync } from "node:fs";
-import { claudeUserSettingsPath } from "../lib/claude-settings.ts";
+import { claudeUserSettingsPath, readSettingsFile } from "../lib/claude-settings.ts";
 import { isClaudeFamilyModel } from "../lib/model-policy.ts";
 import { oneCodeSettingsPath, readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
 import { autoModeSettingsPaths } from "../auto-mode/config.ts";
@@ -59,13 +58,9 @@ interface SettingsFile {
 	env?: Record<string, unknown>;
 }
 
+/** The shared lenient reader, narrowed to the subagent-relevant shape. */
 function readSettings(path: string): SettingsFile | undefined {
-	if (!existsSync(path)) return undefined;
-	try {
-		return JSON.parse(readFileSync(path, "utf-8")) as SettingsFile;
-	} catch {
-		return undefined;
-	}
+	return readSettingsFile(path) as SettingsFile | undefined;
 }
 
 export function loadSubagentDefault(home: string, env: NodeJS.ProcessEnv = process.env): SubagentDefault | undefined {

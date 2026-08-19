@@ -396,7 +396,22 @@ export function oneCodePermissionAllow(home: string): string[] {
 	// Lenient read (a missing/malformed file is skipped) — this is a read for
 	// auditing, not a write, so leniency is correct; the writers still refuse to
 	// clobber a malformed file. Diagnostics are discarded here.
-	const list = asRecord(readFile(oneCodeSettingsPath(home), [])?.permissions)?.allow;
+	return permissionAllowIn(oneCodeSettingsPath(home));
+}
+
+/**
+ * The `permissions.allow` entries in Claude Code's *user* settings file — the
+ * borrowed half of the audit. These are One Code's to warn about, never to
+ * delete: an entry here still bypasses the classifier even after its One Code
+ * copy is removed, so the audit must flag it separately.
+ */
+export function claudeUserPermissionAllow(home: string): string[] {
+	return permissionAllowIn(claudeUserSettingsPath(home));
+}
+
+/** Shared lenient read of a settings file's `permissions.allow` string list. */
+function permissionAllowIn(path: string): string[] {
+	const list = asRecord(readFile(path, [])?.permissions)?.allow;
 	return Array.isArray(list) ? list.filter((entry): entry is string => typeof entry === "string") : [];
 }
 

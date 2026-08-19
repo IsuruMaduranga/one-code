@@ -27,6 +27,7 @@ import {
 	type AutoModeConfig,
 	autoModeSettingsPaths,
 	loadAutoModeConfig,
+	claudeUserPermissionAllow,
 	loadAutoModeConfigWithDiagnostics,
 	oneCodePermissionAllow,
 	persistAutoModeSetup,
@@ -1173,19 +1174,24 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// to warn about, never to delete — only One Code's own file is editable here.
 		const flagged = auditPermissionAllow(facts.permissionsAllow);
 		if (flagged.length === 0) return;
+		// Split by the file each rule lives in, not by exclusion — a rule in BOTH
+		// files is removable from One Code's AND still live in Claude Code's, so it
+		// must appear in both lists (removing the One Code copy alone would leave the
+		// exposure and a false "fixed" impression).
 		const oneCodeAllow = new Set(oneCodePermissionAllow(os.homedir()));
+		const claudeAllow = new Set(claudeUserPermissionAllow(os.homedir()));
 		const removable = flagged.filter((entry) => oneCodeAllow.has(entry.rule));
-		const claudeOnly = flagged.filter((entry) => !oneCodeAllow.has(entry.rule));
+		const claudeSide = flagged.filter((entry) => claudeAllow.has(entry.rule));
 
 		ctx.ui.notify(
 			"These permissions.allow entries are broad enough that matching commands never reach auto mode's checks:\n" +
 				flagged.map((entry) => `  · ${entry.rule} — ${entry.why}`).join("\n"),
 			"warning",
 		);
-		if (claudeOnly.length > 0) {
+		if (claudeSide.length > 0) {
 			ctx.ui.notify(
-				"These live in your Claude Code settings (~/.claude). One Code never edits Claude Code's files — remove them there yourself if you want them gated:\n" +
-					claudeOnly.map((entry) => `  · ${entry.rule}`).join("\n"),
+				"These live in your Claude Code settings (~/.claude) and stay in force even after any One Code copy is removed. One Code never edits Claude Code's files — remove them there yourself if you want them gated:\n" +
+					claudeSide.map((entry) => `  · ${entry.rule}`).join("\n"),
 				"warning",
 			);
 		}

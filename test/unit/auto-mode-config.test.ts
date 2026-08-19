@@ -4,8 +4,10 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	autoModeSettingsPaths,
+	claudeUserPermissionAllow,
 	loadAutoModeConfig,
 	loadAutoModeConfigWithDiagnostics,
+	oneCodePermissionAllow,
 	persistClassifierModel,
 	spliceDefaults,
 } from "../../extensions/auto-mode/config.ts";
@@ -185,6 +187,24 @@ describe("loadAutoModeConfig", () => {
 	it("stays quiet on a clean configuration", () => {
 		writeUserSettings({ autoMode: { environment: ["$defaults", "extra slot"], classifyAllShell: true } });
 		expect(loadAutoModeConfigWithDiagnostics(home).diagnostics).toEqual([]);
+	});
+
+	it("reads permissions.allow from each side for the setup audit split", () => {
+		// The audit warns about the .claude side and offers to remove the one-code
+		// side; a rule in BOTH must be seen by both readers so the still-live
+		// .claude copy is never silently left behind.
+		writeUserSettings({ permissions: { allow: ["Bash(git status)", "Bash(*)"] } });
+		writeOneCodeSettings({ permissions: { allow: ["Bash(*)", "Read"] } });
+		expect(claudeUserPermissionAllow(home)).toEqual(["Bash(git status)", "Bash(*)"]);
+		expect(oneCodePermissionAllow(home)).toEqual(["Bash(*)", "Read"]);
+		// "Bash(*)" is in both — it lands in the removable set AND the warn set.
+	});
+
+	it("returns an empty allow list when a settings file is absent or malformed", () => {
+		expect(claudeUserPermissionAllow(home)).toEqual([]);
+		mkdirSync(join(home, ".one-code"), { recursive: true });
+		writeFileSync(join(home, ".one-code", "settings.json"), "{not json");
+		expect(oneCodePermissionAllow(home)).toEqual([]);
 	});
 
 	it("never reads autoMode from project settings", () => {
