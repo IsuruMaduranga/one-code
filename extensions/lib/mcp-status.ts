@@ -13,7 +13,7 @@
 export const MCP_STATUS_REQUEST_CHANNEL = "one-code:mcp-status-request";
 export const MCP_STATUS_CHANNEL = "one-code:mcp-status";
 
-export type McpStatusKind = "connected" | "failed" | "authNeeded" | "connecting";
+export type McpStatusKind = "connected" | "failed" | "authNeeded" | "connecting" | "disabled";
 
 export interface McpServerStatus {
 	name: string;

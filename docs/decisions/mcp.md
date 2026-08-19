@@ -102,3 +102,56 @@ Accepted trade-off: the first turn(s) of an interactive session may run before
 MCP `instructions` reminders and tool registrations exist. The tools are
 deferred behind `tool_search` anyway, so the model discovers them on first
 search after registration.
+
+## The /mcp panel and MCP OAuth (2026-08-20)
+
+`/mcp` is now a Claude Code-style interactive manager instead of a one-shot
+status dump. It docks below the transcript (bounded height, like `/skills` and
+`/plugins`) with two views: a grouped server list ("Manage MCP servers" — User /
+Project / Plugin groups, each carrying its config path) and a per-server detail
+view (Status / Issue / Auth / URL / Config location + a numbered, navigable
+action list). Pure state/render/keys live in `extensions/mcp/panel/`; the wiring
+in `index.ts` owns the live connection state and the async actions. Because the
+panel is imported by the mcp extension (one jiti module graph), it reads that
+state directly — no cross-extension status bus needed (the `MCP_STATUS_*` bus
+stays for `/plugins`). `deriveStatus` is the single source of truth shared by the
+panel entries, the `/plugins` snapshot, and the text fallback.
+
+**Actions.** Reconnect closes and re-runs the connect. Enable/Disable persist
+across sessions through `lib/mcp-overrides.ts` → `~/.one-code` (user scope for a
+server from `~/.claude.json`, else per-repo), never by writing `disabled:true`
+into the user's `~/.claude.json` or a plugin's `.mcp.json` — those are borrowed
+config One Code only reads (memory-state.md). A disabled server is still
+discovered and listed; the mcp extension just skips connecting it.
+
+**Authenticate = real OAuth.** The detail view's Authenticate action runs the MCP
+OAuth 2.1 flow using the SDK's own `authProvider` on
+`StreamableHTTPClientTransport` (v1.30.0 carries discovery, dynamic client
+registration, PKCE, token exchange + refresh). We add only the host pieces:
+`oauth/store.ts` (per-server credentials under `~/.one-code/mcp-auth/`, collision-
+free filenames), `oauth/provider.ts` (the `OAuthClientProvider` over that store),
+`oauth/callback.ts` (an ephemeral loopback catcher for the redirect — RFC 8252
+§7.3 lets loopback use any port), `oauth/browser.ts` (platform browser open, no
+dep), and `oauth/flow.ts` (orchestration → `finishAuth(code)` → silent reconnect).
+
+**Startup never pops a browser.** An http server is connected *with* the provider
+only when a token is already stored; otherwise it connects with *no* provider so
+a 401 throws `UnauthorizedError` (no redirect) and the server is marked
+`authNeeded` (OAuth kind). Two authNeeded kinds are distinguished: `oauth` (401,
+`canAuthenticate` true — Authenticate opens the browser) vs `env` (a referenced
+credential env var is unset, `canAuthenticate` false — the Issue line names the
+variable; Authenticate can't help). Reconnect/Disable are offered instead there.
+
+Verified live (list/detail/Disable-persist/Enable-reconnect) via the onecode-tui
+driver; the OAuth browser round-trip is unit-tested (store/provider/callback) but
+its live end-to-end still needs a real OAuth-backed MCP server driven through tmux.
+
+Hardening (from review): the loopback callback buffers its result so a redirect
+that lands before `waitForCode()` isn't lost (an IdP with a live session redirects
+instantly); panel actions carry an in-flight guard so a double-press can't start
+two concurrent connects (leaking a client) or two OAuth flows (corrupting the
+shared PKCE verifier); disabling/disconnecting the last server carrying MCP
+`instructions` now removes that every-turn reminder instead of leaving it stale;
+the OAuth provider caches the parsed token file (the SDK reads `tokens()` per
+request); and `isUnauthorized` uses `instanceof` the SDK's `UnauthorizedError`
+(which sets no `.name`, so a name/message check was unreliable).

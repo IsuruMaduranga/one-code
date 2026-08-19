@@ -144,6 +144,7 @@ Full context: [`decisions/mcp.md`](decisions/mcp.md).
 - **[MCP — our own client on the official SDK](decisions/mcp.md#mcp--our-own-client-on-the-official-sdk)** — `.mcp.json` discovery, `mcp__server__tool` naming, resources.
 - **[MCP servers with unset credentials](decisions/mcp.md#mcp-servers-with-unset-credentials)** — how a server with missing credentials is handled rather than crashing discovery.
 - **[Background connect: session_start no longer blocks the prompt](decisions/mcp.md#background-connect-session_start-no-longer-blocks-the-prompt-2026-08-10)** — the awaited MCP handshake *was* the 4.9s startup (findings §15); now fire-and-forget in the interactive session (501ms measured), still awaited in one-shots and subagent children; SDK import lazified.
+- **[The /mcp panel and MCP OAuth](decisions/mcp.md#the-mcp-panel-and-mcp-oauth-2026-08-20)** — `/mcp` is a CC-style two-view manager (grouped list + per-server detail with a numbered action list); Reconnect/Enable/Disable persist to `~/.one-code` (never borrowed config); Authenticate runs real OAuth via the SDK's `authProvider` (store + loopback catcher + browser open the only host pieces); startup never pops a browser (no provider without stored tokens → 401 → `authNeeded`); `oauth` vs `env` authNeeded distinguished.
 
 ## LSP
 

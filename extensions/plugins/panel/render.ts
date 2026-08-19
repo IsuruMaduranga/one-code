@@ -7,7 +7,7 @@
  */
 
 import { formatInstallCount } from "../counts.ts";
-import { cutPlainText } from "../../lib/tui-render.ts";
+import { cutPlainText, type RenderBlock as Block, windowBlocks } from "../../lib/tui-render.ts";
 import type { DiscoverRow, InstalledRow } from "./rows.ts";
 import { clampPanelState, type PanelState, type PanelView, resolveDetail, selectableRows, TABS, type Tab } from "./state.ts";
 
@@ -57,30 +57,6 @@ function tabBar(state: PanelState, view: PanelView, paint: PanelPaint, width: nu
 function searchLine(query: string, paint: PanelPaint, width: number): string {
 	const text = query ? `⌕ ${query}` : "⌕ Search…";
 	return `  ${query ? text : paint.fg("dim", text)}`.slice(0, width * 4);
-}
-
-interface Block {
-	lines: string[];
-	selectable: boolean;
-}
-
-/** Window the blocks so the cursor's block is always visible within `budget` lines. */
-function windowBlocks(blocks: Block[], cursor: number, budget: number): { lines: string[]; more: number } {
-	const selectableIndexes = blocks.map((b, i) => (b.selectable ? i : -1)).filter((i) => i >= 0);
-	const cursorBlock = selectableIndexes[cursor] ?? 0;
-
-	let start = 0;
-	const linesBetween = (from: number, to: number) => blocks.slice(from, to + 1).reduce((n, b) => n + b.lines.length, 0);
-	while (start < cursorBlock && linesBetween(start, cursorBlock) > budget) start++;
-
-	const lines: string[] = [];
-	let index = start;
-	for (; index < blocks.length; index++) {
-		if (lines.length + blocks[index].lines.length > budget) break;
-		lines.push(...blocks[index].lines);
-	}
-	const remaining = blocks.length - index;
-	return { lines, more: remaining };
 }
 
 function discoverBlocks(input: PanelRenderInput, paint: PanelPaint): Block[] {

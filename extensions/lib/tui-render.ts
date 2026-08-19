@@ -139,6 +139,34 @@ export function firstNonEmptyLine(text: string): string {
 	return text.split("\n").map((l) => l.trim()).find(Boolean) ?? "";
 }
 
+/** A run of rendered lines that either can (`selectable`) or cannot host the cursor. */
+export interface RenderBlock {
+	lines: string[];
+	selectable: boolean;
+}
+
+/**
+ * Window a list of blocks so the block holding the Nth selectable row (`cursor`)
+ * stays visible within `budget` lines, returning the visible lines and how many
+ * blocks fell off the bottom. Group headers ride along as non-selectable blocks.
+ * The cursor's own block is always shown even when it alone exceeds the budget,
+ * so a tall selected row never scrolls itself off screen.
+ */
+export function windowBlocks(blocks: RenderBlock[], cursor: number, budget: number): { lines: string[]; more: number } {
+	const selectableIndexes = blocks.map((b, i) => (b.selectable ? i : -1)).filter((i) => i >= 0);
+	const cursorBlock = selectableIndexes[cursor] ?? 0;
+	const linesBetween = (from: number, to: number) => blocks.slice(from, to + 1).reduce((n, b) => n + b.lines.length, 0);
+	let start = 0;
+	while (start < cursorBlock && linesBetween(start, cursorBlock) > budget) start++;
+	const lines: string[] = [];
+	let index = start;
+	for (; index < blocks.length; index++) {
+		if (lines.length > 0 && lines.length + blocks[index].lines.length > budget) break;
+		lines.push(...blocks[index].lines);
+	}
+	return { lines, more: blocks.length - index };
+}
+
 /**
  * Split a row into a left half padded against a right-aligned annotation
  * (two-space gap), fusing into one cut line when the left share would drop

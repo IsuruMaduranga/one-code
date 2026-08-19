@@ -4,6 +4,9 @@
  */
 
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import type { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
 import type { McpServer } from "./config.ts";
 
 /**
@@ -16,19 +19,30 @@ let sdkPromise:
 			Client: typeof import("@modelcontextprotocol/sdk/client/index.js").Client;
 			StdioClientTransport: typeof import("@modelcontextprotocol/sdk/client/stdio.js").StdioClientTransport;
 			StreamableHTTPClientTransport: typeof import("@modelcontextprotocol/sdk/client/streamableHttp.js").StreamableHTTPClientTransport;
+			UnauthorizedError: typeof import("@modelcontextprotocol/sdk/client/auth.js").UnauthorizedError;
 	  }>
 	| undefined;
 
-function loadSdk() {
+// Captured from the SDK load so isUnauthorized can do a reliable `instanceof`
+// (the SDK's UnauthorizedError does not set `.name`, so a name/message check is
+// unreliable — a custom-message instance would be missed).
+let unauthorizedClass: typeof import("@modelcontextprotocol/sdk/client/auth.js").UnauthorizedError | undefined;
+
+export function loadSdk() {
 	sdkPromise ??= Promise.all([
 		import("@modelcontextprotocol/sdk/client/index.js"),
 		import("@modelcontextprotocol/sdk/client/stdio.js"),
 		import("@modelcontextprotocol/sdk/client/streamableHttp.js"),
-	]).then(([client, stdio, http]) => ({
-		Client: client.Client,
-		StdioClientTransport: stdio.StdioClientTransport,
-		StreamableHTTPClientTransport: http.StreamableHTTPClientTransport,
-	}));
+		import("@modelcontextprotocol/sdk/client/auth.js"),
+	]).then(([client, stdio, http, auth]) => {
+		unauthorizedClass = auth.UnauthorizedError;
+		return {
+			Client: client.Client,
+			StdioClientTransport: stdio.StdioClientTransport,
+			StreamableHTTPClientTransport: http.StreamableHTTPClientTransport,
+			UnauthorizedError: auth.UnauthorizedError,
+		};
+	});
 	return sdkPromise;
 }
 
@@ -81,24 +95,37 @@ function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<
 	});
 }
 
-export async function connect(server: McpServer): Promise<Connection> {
-	const { Client, StdioClientTransport, StreamableHTTPClientTransport } = await loadSdk();
-	const client = new Client({ name: "one-code", version: "0.1.0" }, { capabilities: {} });
+/** True when the error is the SDK's "authorization required" signal (an HTTP 401). */
+export function isUnauthorized(error: unknown): boolean {
+	// The class is captured on the first loadSdk(); every caller runs after a
+	// connect (which awaits it), so it is set. The message fallback only covers
+	// the impossible pre-load case.
+	if (unauthorizedClass) return error instanceof unauthorizedClass;
+	return error instanceof Error && /\bunauthorized\b/i.test(error.message);
+}
 
-	const transport =
-		server.kind === "stdio"
-			? new StdioClientTransport({
-					command: server.command,
-					args: server.args,
-					env: { ...(process.env as Record<string, string>), ...(server.env ?? {}) },
-					stderr: "pipe",
-				})
-			: new StreamableHTTPClientTransport(new URL(server.url), {
-					requestInit: server.headers ? { headers: server.headers } : undefined,
-				});
+/** Build the transport for a server, wiring an OAuth provider for http servers. */
+function buildTransport(
+	server: McpServer,
+	sdk: Awaited<ReturnType<typeof loadSdk>>,
+	authProvider?: OAuthClientProvider,
+): Transport {
+	if (server.kind === "stdio") {
+		return new sdk.StdioClientTransport({
+			command: server.command,
+			args: server.args,
+			env: { ...(process.env as Record<string, string>), ...(server.env ?? {}) },
+			stderr: "pipe",
+		});
+	}
+	return new sdk.StreamableHTTPClientTransport(new URL(server.url), {
+		authProvider,
+		requestInit: server.headers ? { headers: server.headers } : undefined,
+	});
+}
 
-	await withTimeout(client.connect(transport), CONNECT_TIMEOUT_MS, `connecting to "${server.name}"`);
-
+/** List a connected client's tools and resources into a Connection. */
+async function finalizeConnection(client: Client, server: McpServer): Promise<Connection> {
 	const warnings: string[] = [];
 
 	// Each list call can take up to CONNECT_TIMEOUT_MS on a slow server; run
@@ -132,6 +159,51 @@ export async function connect(server: McpServer): Promise<Connection> {
 	const instructions = client.getInstructions()?.trim() || undefined;
 
 	return { server, client, tools, resources, instructions, warnings };
+}
+
+/**
+ * Connect to a server and list its tools/resources. For an http server, an
+ * `authProvider` supplies OAuth: with stored tokens the connect is silent (and
+ * refreshes as needed). Without a provider, an auth-required server throws an
+ * UnauthorizedError and NO browser opens — the startup path relies on this to
+ * mark a server "needs authentication" without an interactive redirect.
+ */
+/** Load the SDK and build a client + transport pair for a server. */
+async function openClient(server: McpServer, authProvider?: OAuthClientProvider): Promise<{ client: Client; transport: Transport }> {
+	const sdk = await loadSdk();
+	const client = new sdk.Client({ name: "one-code", version: "0.1.0" }, { capabilities: {} });
+	return { client, transport: buildTransport(server, sdk, authProvider) };
+}
+
+export async function connect(server: McpServer, authProvider?: OAuthClientProvider): Promise<Connection> {
+	const { client, transport } = await openClient(server, authProvider);
+	await withTimeout(client.connect(transport), CONNECT_TIMEOUT_MS, `connecting to "${server.name}"`);
+	return finalizeConnection(client, server);
+}
+
+/**
+ * Start an interactive OAuth authorization for an http server. Connecting with a
+ * provider that has no tokens triggers the SDK's discovery + dynamic
+ * registration and calls the provider's `redirectToAuthorization` (opening the
+ * browser), then throws UnauthorizedError. The returned transport carries the
+ * flow state, so the caller finishes it via `transport.finishAuth(code)` once the
+ * loopback catches the redirect. If the connect unexpectedly succeeds (valid
+ * tokens already present), the finished Connection is returned instead.
+ */
+export async function beginInteractiveAuth(
+	server: McpServer,
+	authProvider: OAuthClientProvider,
+): Promise<{ transport: StreamableHTTPClientTransport } | { connection: Connection }> {
+	if (server.kind !== "http") throw new Error(`OAuth is only available for http MCP servers; "${server.name}" is stdio.`);
+	const { client, transport: baseTransport } = await openClient(server, authProvider);
+	const transport = baseTransport as StreamableHTTPClientTransport;
+	try {
+		await withTimeout(client.connect(transport), CONNECT_TIMEOUT_MS, `connecting to "${server.name}"`);
+		return { connection: await finalizeConnection(client, server) };
+	} catch (error) {
+		if (isUnauthorized(error)) return { transport };
+		throw error;
+	}
 }
 
 const INSTRUCTIONS_CAP = 3000;
