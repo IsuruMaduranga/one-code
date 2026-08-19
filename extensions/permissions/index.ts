@@ -28,6 +28,7 @@ import {
 	autoModeSettingsPaths,
 	loadAutoModeConfig,
 	loadAutoModeConfigWithDiagnostics,
+	oneCodePermissionAllow,
 	persistAutoModeSetup,
 	persistClassifierModel,
 	removeUserPermissionAllow,
@@ -63,7 +64,8 @@ import { modeBadge, nextMode, PERMISSION_STATUS_CHANNEL, type PermissionStatus }
 import { type ChildToolCall, type ChildGateDecision, SUBAGENT_GATE_CHANNEL } from "./subagent-gate.ts";
 import { ORIGINAL_COMMAND_KEY } from "../worktree/rewrite.ts";
 import { isWritingTool } from "./protected-paths.ts";
-import { loadPermissionSettings, normalizePermissionMode, persistAllowRule, settingsPaths } from "./settings.ts";
+import { loadPermissionSettings, normalizePermissionMode, persistAllowRule } from "./settings.ts";
+import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 
 const DENIED_BY_USER =
 	"The user doesn't want to proceed with this tool use. The tool use was rejected. Adjust your approach based on the user's feedback instead of retrying the same call.";
@@ -1046,7 +1048,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			return;
 		}
 		resetClassifierChoice();
-		ctx.ui.notify(`Auto-mode classifier set to ${resolved} (saved to ~/.claude/settings.json).`, "info");
+		ctx.ui.notify(`Auto-mode classifier set to ${resolved} (saved to ~/.one-code/settings.json).`, "info");
 	};
 
 	/** `/auto-mode model` — show the picker, or apply a named model / `clear`. */
@@ -1142,7 +1144,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		}
 
 		ctx.ui.notify(`Proposed auto-mode setup\n\n${renderProposal(draft)}`, "info");
-		const decision = await ctx.ui.select("Save this auto-mode setup to ~/.claude/settings.json?", [
+		const decision = await ctx.ui.select("Save this auto-mode setup to ~/.one-code/settings.json?", [
 			"Looks good — save it",
 			"Discard",
 		]);
@@ -1150,7 +1152,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			try {
 				persistAutoModeSetup(settingsPatch(draft), os.homedir());
 			} catch (error) {
-				ctx.ui.notify(`Could not write user settings: ${(error as Error).message}`, "warning");
+				ctx.ui.notify(`Could not write One Code settings: ${(error as Error).message}`, "warning");
 				return;
 			}
 			autoConfig = loadAutoModeConfig(os.homedir());
@@ -1161,25 +1163,43 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 
 		// CC's "rules that skip checks": broad permissions.allow entries bypass the
 		// classifier whether or not the setup above was saved, so the audit runs
-		// either way.
+		// either way. Entries that live in Claude Code's own settings are One Code's
+		// to warn about, never to delete — only One Code's own file is editable here.
 		const flagged = auditPermissionAllow(facts.permissionsAllow);
 		if (flagged.length === 0) return;
+		const oneCodeAllow = new Set(oneCodePermissionAllow(os.homedir()));
+		const removable = flagged.filter((entry) => oneCodeAllow.has(entry.rule));
+		const claudeOnly = flagged.filter((entry) => !oneCodeAllow.has(entry.rule));
+
 		ctx.ui.notify(
-			"These permissions.allow entries in your user settings are broad enough that matching commands never reach auto mode's checks:\n" +
-				flagged.map((entry) => `  · ${entry.rule} — ${entry.why}`).join("\n") +
-				"\nRemoved entries can be restored by re-adding them verbatim.",
+			"These permissions.allow entries are broad enough that matching commands never reach auto mode's checks:\n" +
+				flagged.map((entry) => `  · ${entry.rule} — ${entry.why}`).join("\n"),
 			"warning",
 		);
-		const act = await ctx.ui.select("Remove them from user settings?", ["Remove them all", "Leave them"]);
-		if (act === "Remove them all") {
+		if (claudeOnly.length > 0) {
+			ctx.ui.notify(
+				"These live in your Claude Code settings (~/.claude). One Code never edits Claude Code's files — remove them there yourself if you want them gated:\n" +
+					claudeOnly.map((entry) => `  · ${entry.rule}`).join("\n"),
+				"warning",
+			);
+		}
+		if (removable.length === 0) return;
+		const act = await ctx.ui.select(
+			`Remove ${removable.length} broad ${removable.length === 1 ? "entry" : "entries"} from One Code settings (~/.one-code/settings.json)?`,
+			["Remove them", "Leave them"],
+		);
+		if (act === "Remove them") {
 			try {
 				const removed = removeUserPermissionAllow(
-					flagged.map((entry) => entry.rule),
+					removable.map((entry) => entry.rule),
 					os.homedir(),
 				);
-				ctx.ui.notify(`Removed ${removed} allow ${removed === 1 ? "entry" : "entries"} from user settings.`, "info");
+				ctx.ui.notify(
+					`Removed ${removed} allow ${removed === 1 ? "entry" : "entries"} from One Code settings. Removed entries can be restored by re-adding them verbatim.`,
+					"info",
+				);
 			} catch (error) {
-				ctx.ui.notify(`Could not update user settings: ${(error as Error).message}`, "warning");
+				ctx.ui.notify(`Could not update One Code settings: ${(error as Error).message}`, "warning");
 			}
 		}
 	};
@@ -1280,8 +1300,10 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				ctx.ui.notify(`Could not parse rule: "${raw}". Format: Tool or Tool(pattern)`, "warning");
 				return;
 			}
-			const paths = settingsPaths(ctx.cwd, os.homedir());
-			const target = global ? paths.user : paths.local;
+			// Allow rules are One Code's own state — never written into Claude Code's
+			// files. `global` lands in ~/.one-code/settings.json; a project rule in a
+			// per-repo file under ~/.one-code, keyed by the repo root.
+			const target = global ? oneCodeSettingsPath(os.homedir()) : oneCodeProjectSettingsPath(ctx.cwd, os.homedir());
 			persistAllowRule(raw, target);
 			allow.push(rule);
 			ctx.ui.notify(`Added allow rule ${raw} to ${target}`, "info");

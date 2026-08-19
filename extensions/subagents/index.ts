@@ -1629,7 +1629,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				return;
 			}
 			emitModelStatus(ctx);
-			ctx.ui.notify('Subagent default set to the session model ("inherit", saved to ~/.claude/settings.json).', "info");
+			ctx.ui.notify('Subagent default set to the session model ("inherit", saved to ~/.one-code/settings.json).', "info");
 			return;
 		}
 
@@ -1672,7 +1672,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			return;
 		}
 		emitModelStatus(ctx);
-		ctx.ui.notify(`Subagent default set to "${spec}" (saved to ~/.claude/settings.json).`, "info");
+		ctx.ui.notify(`Subagent default set to "${spec}" (saved to ~/.one-code/settings.json).`, "info");
 	};
 
 	pi.registerCommand("subagent", {

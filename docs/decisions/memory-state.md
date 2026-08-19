@@ -163,8 +163,41 @@ Code itself supports and One Code previously ignored) and `oneCodeStateDir()`
 (honouring `ONE_CODE_STATE_DIR`). Plan files moved to `~/.one-code/plans`
 immediately, while the feature was a day old. `.one-code` joined the protected
 dirs (the gate's own namespace must be as guarded in its new home as in the
-old), with `.one-code/plans` excepted as working space. Deliberately *not* done:
-a One Code-native settings schema (no demand yet — compat reads suffice), and
-the memory-dir migration, which has a real tradeoff (sharing memory with
-Claude Code on the same repo is arguably a feature) and waits on its own
-decision.
+old), with `.one-code/plans` excepted as working space.
+
+### The settings schema followed (the compat reads were not enough)
+
+"No demand yet — compat reads suffice" turned out to be wrong: One Code was not
+only reading `~/.claude/settings.json` but *writing* its own keys into it —
+`subagentModel` / `subagentModelSetFor`, `autoMode.classifierModel` /
+`classifierModelSetFor`, the `/allow` rules, and the `/auto-mode setup` output.
+That both polluted Claude Code's own config and, in the reported case, left a
+value Claude Code cannot act on (a `subagentModel` of `opencode/gemini-3.7-flash`,
+a model Claude Code has no access to) sitting in Claude Code's file.
+
+So the One Code-native settings file now exists: `~/.one-code/settings.json` for
+user scope, plus `~/.one-code/projects/<slug>/settings.json` per git repo (the
+same slug the memory dir uses), both behind `extensions/lib/one-code-settings.ts`
+(state root resolved against an explicit `home` so the settings loaders stay
+hermetic in tests). Every One Code write moved there; no writer touches Claude
+Code's files any more. The loaders read `~/.claude` (borrowed) *then*
+`~/.one-code` (own, higher user-scope precedence, managed still the ceiling).
+The one sharp edge: One Code's *proprietary* keys — the ones Claude Code does
+not define — are read from `~/.one-code` and managed settings **only**, never
+from `~/.claude`, so a stale value an older build left in Claude Code's file
+stops applying (a leftover `autoMode.classifierModel` there is surfaced as a
+`/auto-mode config` diagnostic pointing at the new home). Genuine Claude Code
+keys (`permissions.*`, `autoMode.environment` / rule lists,
+`CLAUDE_CODE_SUBAGENT_MODEL`) are still read from `~/.claude` for compatibility.
+
+Two consequences fall out of "never write `.claude`". The `/auto-mode setup`
+audit can no longer delete broad `permissions.allow` entries from Claude Code's
+file; it removes only entries in One Code's own file and *warns* about the rest.
+And `/allow` writes its rules to `~/.one-code` (global) or the per-repo file,
+which `loadPermissionSettings` reads back alongside the borrowed `.claude`
+ladder (rules only — `defaultMode` stays a `.claude` decision, so no new `auto`
+injection path opens).
+
+Still deferred: the memory-dir migration, which has a real tradeoff (sharing
+memory with Claude Code on the same repo is arguably a feature) and waits on its
+own decision.

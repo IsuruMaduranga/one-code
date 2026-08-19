@@ -18,6 +18,7 @@ import { join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { withReasoningFallback } from "../lib/model-policy.ts";
+import { oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import type { AutoModeConfig } from "./config.ts";
 import { classifierCandidates, replyText, withAuthBaseUrl } from "./model-select.ts";
@@ -125,17 +126,22 @@ export async function gatherFacts(options: GatherOptions): Promise<SetupFacts> {
 		notes.push("shell history scan declined by the user");
 	}
 
-	// User-scope permissions.allow — audit input, and evidence for carve-outs.
+	// User-scope permissions.allow — audit input, and evidence for carve-outs. Both
+	// the borrowed `.claude` file (read-only) and One Code's own file are gathered:
+	// a broad rule in either bypasses the classifier, and the audit later splits
+	// them (One Code's are removable; Claude Code's it can only warn about).
 	let permissionsAllow: string[] = [];
-	try {
-		const settings = JSON.parse(readFileSync(join(home, ".claude", "settings.json"), "utf-8")) as {
-			permissions?: { allow?: unknown };
-		};
-		if (Array.isArray(settings.permissions?.allow)) {
-			permissionsAllow = settings.permissions.allow.filter((entry): entry is string => typeof entry === "string");
+	for (const path of [join(home, ".claude", "settings.json"), oneCodeSettingsPath(home)]) {
+		try {
+			const settings = JSON.parse(readFileSync(path, "utf-8")) as { permissions?: { allow?: unknown } };
+			if (Array.isArray(settings.permissions?.allow)) {
+				permissionsAllow.push(...settings.permissions.allow.filter((entry): entry is string => typeof entry === "string"));
+			}
+		} catch {
+			// A missing file is the common case; a malformed one is skipped. Only the
+			// borrowed file is worth a note (One Code's own is created on demand).
+			if (path.includes(".claude")) notes.push("user settings permissions.allow could not be read");
 		}
-	} catch {
-		notes.push("user settings permissions.allow could not be read");
 	}
 
 	return {

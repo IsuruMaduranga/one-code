@@ -12,7 +12,13 @@
  *   same containment rule as `autoMode` config.
  * - `subagentModel` — One Code's own top-level setting, same shape as
  *   `autoMode.classifierModel`. Wins over the env var when both are set,
- *   because it is the more specific statement of intent.
+ *   because it is the more specific statement of intent. It is One Code's key,
+ *   not Claude Code's: it is written to and read from `~/.one-code/settings.json`
+ *   (+ managed settings), never from `~/.claude`, where an old One Code build may
+ *   have left a stale value the current session cannot reach. Claude Code's own
+ *   `CLAUDE_CODE_SUBAGENT_MODEL` env block is still honoured from `~/.claude`
+ *   (that key *is* Claude Code's). See "Own state, borrowed config" in
+ *   docs/decisions/memory-state.md.
  *
  * The env var additionally applies only to Claude-family sessions (see
  * `applicableSubagentDefault`): it is Claude Code's knob, and its typical
@@ -24,9 +30,10 @@
  * pass through to resolveSubagentModel, which owns the semantics.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { isClaudeFamilyModel } from "../lib/model-policy.ts";
+import { oneCodeSettingsPath, readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
 import { autoModeSettingsPaths } from "../auto-mode/config.ts";
 
 export interface SubagentDefault {
@@ -66,11 +73,16 @@ export function loadSubagentDefault(home: string, env: NodeJS.ProcessEnv = proce
 	let settingSetFor: string | undefined;
 	let settingsEnv: string | undefined;
 
+	// `subagentModel` is One Code's own key — read from `~/.one-code` and managed
+	// settings, never from `~/.claude`, where an old build may have left a stale
+	// value. Claude Code's `CLAUDE_CODE_SUBAGENT_MODEL` env block IS Claude Code's,
+	// so it is still read from every file.
+	const claudeUser = join(home, ".claude", "settings.json");
 	// Lowest precedence first, so managed settings override user settings.
 	for (const path of autoModeSettingsPaths(home)) {
 		const file = readSettings(path);
 		if (!file) continue;
-		if (typeof file.subagentModel === "string" && file.subagentModel.trim()) {
+		if (path !== claudeUser && typeof file.subagentModel === "string" && file.subagentModel.trim()) {
 			setting = file.subagentModel.trim();
 			// The stamp travels with the model from the same file (a lower-precedence
 			// stamp must not attach to a higher-precedence model).
@@ -115,14 +127,15 @@ export function applicableSubagentDefault(
 }
 
 /**
- * Persist `subagentModel` in the *user* settings file, preserving every other
- * key. `undefined` removes the setting. Always user scope, like the loader:
- * the default may move subagent work to another provider, so it lives where
- * only the user writes — never in a project file (see the module comment).
+ * Persist `subagentModel` in One Code's own settings file
+ * (`~/.one-code/settings.json`), preserving every other key. `undefined` removes
+ * the setting. Never touches Claude Code's files: this is One Code's key, and the
+ * default may move subagent work to another provider, so it lives in One Code's
+ * own state (see the module comment).
  *
  * Unlike loading, this throws on a malformed file: a lenient read merely
- * skips a setting, but a lenient write would replace the user's whole
- * settings file with only ours.
+ * skips a setting, but a lenient write would replace the whole settings file
+ * with only ours.
  *
  * `setForContainment` stamps the containment identity of the session the model
  * was chosen on (modelIdentity().containment), so a later session on a different
@@ -130,15 +143,8 @@ export function applicableSubagentDefault(
  * it is cleared for `inherit` (never cross-provider) and on removal.
  */
 export function persistSubagentModel(spec: string | undefined, home: string, setForContainment?: string): void {
-	const path = join(home, ".claude", "settings.json");
-	let file: Record<string, unknown> = {};
-	if (existsSync(path)) {
-		const parsed = JSON.parse(readFileSync(path, "utf-8")) as unknown;
-		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-			throw new Error(`${path}: root must be a JSON object`);
-		}
-		file = parsed as Record<string, unknown>;
-	}
+	const path = oneCodeSettingsPath(home);
+	const file = readSettingsForWrite(path);
 	if (spec === undefined) {
 		delete file.subagentModel;
 		delete file.subagentModelSetFor;
@@ -147,6 +153,5 @@ export function persistSubagentModel(spec: string | undefined, home: string, set
 		if (setForContainment && spec !== "inherit") file.subagentModelSetFor = setForContainment;
 		else delete file.subagentModelSetFor;
 	}
-	mkdirSync(dirname(path), { recursive: true });
-	writeFileSync(path, `${JSON.stringify(file, null, 2)}\n`);
+	writeSettings(path, file);
 }

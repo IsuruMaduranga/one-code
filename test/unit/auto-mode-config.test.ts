@@ -23,6 +23,10 @@ afterEach(() => {
 });
 
 const writeUserSettings = (data: unknown) => writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify(data));
+const writeOneCodeSettings = (data: unknown) => {
+	mkdirSync(join(home, ".one-code"), { recursive: true });
+	writeFileSync(join(home, ".one-code", "settings.json"), JSON.stringify(data));
+};
 
 describe("spliceDefaults", () => {
 	it("substitutes $defaults in place, preserving surrounding order", () => {
@@ -55,11 +59,20 @@ describe("loadAutoModeConfig", () => {
 		expect(config.environment.length).toBe(DEFAULT_ENVIRONMENT.length + 1);
 	});
 
-	it("reads classifyAllShell and classifierModel", () => {
-		writeUserSettings({ autoMode: { classifyAllShell: true, classifierModel: "anthropic/claude-haiku-4-5" } });
+	it("reads classifyAllShell from user settings and classifierModel from One Code settings", () => {
+		// classifierModel is One Code's own key, read from ~/.one-code, not ~/.claude.
+		writeUserSettings({ autoMode: { classifyAllShell: true } });
+		writeOneCodeSettings({ autoMode: { classifierModel: "anthropic/claude-haiku-4-5" } });
 		const config = loadAutoModeConfig(home);
 		expect(config.classifyAllShell).toBe(true);
 		expect(config.classifierModel).toBe("anthropic/claude-haiku-4-5");
+	});
+
+	it("ignores a stale classifierModel left in ~/.claude by an older build, and says why", () => {
+		writeUserSettings({ autoMode: { classifierModel: "opencode/gemini-3.7-flash" } });
+		const { config, diagnostics } = loadAutoModeConfigWithDiagnostics(home);
+		expect(config.classifierModel).toBeUndefined();
+		expect(diagnostics.some((line) => line.includes("classifierModel is ignored"))).toBe(true);
 	});
 
 	it("round-trips classifierModel with its containment stamp", () => {

@@ -17,6 +17,13 @@ import {
 	subagentStatusModel,
 } from "../../extensions/subagents/model-select.ts";
 
+/** One Code's own settings file lives under <home>/.one-code, not ~/.claude. */
+const oneCodePath = (home: string) => join(home, ".one-code", "settings.json");
+const writeOneCodeSettings = (home: string, data: unknown) => {
+	mkdirSync(join(home, ".one-code"), { recursive: true });
+	writeFileSync(oneCodePath(home), JSON.stringify(data));
+};
+
 /** Minimal structural stand-in; only provider/id/cost are consulted. */
 const model = (provider: string, id: string, input?: number) =>
 	({ provider, id, name: id, cost: input === undefined ? undefined : { input, output: input * 4 } }) as any;
@@ -507,13 +514,22 @@ describe("loadSubagentDefault", () => {
 	});
 
 	it("prefers the explicit subagentModel setting over the env var", () => {
+		// subagentModel is One Code's key: written to and read from ~/.one-code, while
+		// the CLAUDE_CODE_SUBAGENT_MODEL env block stays a borrowed ~/.claude read.
+		writeOneCodeSettings(home, { subagentModel: "anthropic/claude-haiku-4-5" });
 		writeFileSync(
 			join(home, ".claude", "settings.json"),
-			JSON.stringify({ subagentModel: "anthropic/claude-haiku-4-5", env: { CLAUDE_CODE_SUBAGENT_MODEL: "sonnet" } }),
+			JSON.stringify({ env: { CLAUDE_CODE_SUBAGENT_MODEL: "sonnet" } }),
 		);
 		const result = loadSubagentDefault(home, {});
 		expect(result?.spec).toBe("anthropic/claude-haiku-4-5");
 		expect(result?.source).toBe("subagentModel setting");
+	});
+
+	it("ignores a stale subagentModel left in ~/.claude by an older build", () => {
+		// One Code used to write here; that value must not keep choosing subagents.
+		writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ subagentModel: "opencode/gemini-3.7-flash" }));
+		expect(loadSubagentDefault(home, {})).toBeUndefined();
 	});
 
 	it("returns undefined when nothing is configured", () => {
@@ -592,18 +608,19 @@ describe("persistSubagentModel", () => {
 
 	beforeEach(() => {
 		home = mkdtempSync(join(tmpdir(), "cc-subagent-persist-"));
-		mkdirSync(join(home, ".claude"), { recursive: true });
+		mkdirSync(join(home, ".one-code"), { recursive: true });
 	});
 
 	afterEach(() => {
 		rmSync(home, { recursive: true, force: true });
 	});
 
-	const settingsPath = () => join(home, ".claude", "settings.json");
+	// persistSubagentModel writes to One Code's own file, never into ~/.claude.
+	const settingsPath = () => oneCodePath(home);
 	const readSettings = () => JSON.parse(readFileSync(settingsPath(), "utf-8"));
 
 	it("creates the settings file when there is none", () => {
-		rmSync(join(home, ".claude"), { recursive: true, force: true });
+		rmSync(join(home, ".one-code"), { recursive: true, force: true });
 		persistSubagentModel("openai/gpt-5-mini", home);
 		expect(readSettings()).toEqual({ subagentModel: "openai/gpt-5-mini" });
 	});

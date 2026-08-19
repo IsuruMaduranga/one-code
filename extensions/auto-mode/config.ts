@@ -3,12 +3,26 @@
  *
  * ## Which files are read, and why that list is short
  *
- * User settings (`~/.claude/settings.json`) and managed settings only — **never
- * the project's `.claude/settings.json` or `.claude/settings.local.json`**. Both
- * live in the repository, so a checked-in file or a build step that writes one
- * could otherwise hand itself classifier permissions and switch off the gate that
- * is meant to contain it. Claude Code made the same exclusion (it dropped
- * `settings.local.json` in v2.1.207); this is that property, not an omission.
+ * User settings (`~/.claude/settings.json`), One Code's own user settings
+ * (`~/.one-code/settings.json`), and managed settings only — **never the
+ * project's `.claude/settings.json` or `.claude/settings.local.json`**. Both
+ * project files live in the repository, so a checked-in file or a build step
+ * that writes one could otherwise hand itself classifier permissions and switch
+ * off the gate that is meant to contain it. Claude Code made the same exclusion
+ * (it dropped `settings.local.json` in v2.1.207); this is that property, not an
+ * omission.
+ *
+ * ## Read vs. write: `.claude` is borrowed, `~/.one-code` is ours
+ *
+ * The CC-schema keys (`environment`, `hard_deny`/`soft_deny`/`allow`) are read
+ * from `~/.claude` too, because Claude Code's own `/auto-mode-setup` writes them
+ * there and reading them is the compatibility promise. But One Code's *own*
+ * keys — `classifierModel` / `classifierModelSetFor`, which Claude Code does not
+ * define — are read from `~/.one-code` and managed settings only, never from
+ * `~/.claude`: One Code used to write them there, and a stale value (a model the
+ * session cannot reach) must not keep biting. Every write goes to
+ * `~/.one-code/settings.json`; One Code never mutates Claude Code's files. See
+ * "Own state, borrowed config" in docs/decisions/memory-state.md.
  *
  * ## The customization surface (CC 2.1.233's own)
  *
@@ -31,8 +45,9 @@
  * docs/decisions/auto-mode.md.)
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { oneCodeSettingsPath, readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
 import { DEFAULT_ENVIRONMENT, slotName } from "./defaults.ts";
 
 export interface AutoModeConfig {
@@ -85,7 +100,17 @@ function managedSettingsPaths(): string[] {
 
 /** The files `autoMode` is read from, lowest precedence first. */
 export function autoModeSettingsPaths(home: string): string[] {
-	return [join(home, ".claude", "settings.json"), ...managedSettingsPaths()];
+	return [join(home, ".claude", "settings.json"), oneCodeSettingsPath(home), ...managedSettingsPaths()];
+}
+
+/**
+ * Claude Code's user settings file. One Code's own auto-mode keys
+ * (`classifierModel`, `classifierModelSetFor`) are deliberately NOT read from
+ * here — Claude Code does not define them, and One Code once wrote them here, so
+ * a stale value must not survive the move to `~/.one-code`.
+ */
+function claudeUserSettingsPath(home: string): string {
+	return join(home, ".claude", "settings.json");
 }
 
 function readFile(path: string, diagnostics: string[]): AutoModeSettingsFile | undefined {
@@ -241,6 +266,7 @@ export function loadAutoModeConfigWithDiagnostics(home: string): AutoModeConfigL
 		logDecisions?: boolean;
 	} = {};
 
+	const claudeUser = claudeUserSettingsPath(home);
 	for (const path of autoModeSettingsPaths(home)) {
 		const file = readFile(path, diagnostics);
 		const block = file?.autoMode;
@@ -260,14 +286,24 @@ export function loadAutoModeConfigWithDiagnostics(home: string): AutoModeConfigL
 		}
 		if (typeof block.classifyAllShell === "boolean") collected.classifyAllShell = block.classifyAllShell;
 		if (typeof block.logDecisions === "boolean") collected.logDecisions = block.logDecisions;
+		// `classifierModel` is One Code's own key, not Claude Code's. It is read from
+		// `~/.one-code` and managed settings only — never from `~/.claude`, where an
+		// old One Code build may have left a stale value. A leftover in `~/.claude` is
+		// surfaced as a diagnostic so the user knows why it stopped applying.
 		if (typeof block.classifierModel === "string" && block.classifierModel.trim()) {
-			collected.classifierModel = block.classifierModel.trim();
-			// The stamp travels with the model from the same file, so a lower-precedence
-			// stamp cannot attach to a higher-precedence model.
-			collected.classifierModelSetFor =
-				typeof block.classifierModelSetFor === "string" && block.classifierModelSetFor.trim()
-					? block.classifierModelSetFor.trim()
-					: undefined;
+			if (path === claudeUser) {
+				diagnostics.push(
+					`${path}: autoMode.classifierModel is ignored here — One Code reads it from ~/.one-code/settings.json (set it with /auto-mode model)`,
+				);
+			} else {
+				collected.classifierModel = block.classifierModel.trim();
+				// The stamp travels with the model from the same file, so a lower-precedence
+				// stamp cannot attach to a higher-precedence model.
+				collected.classifierModelSetFor =
+					typeof block.classifierModelSetFor === "string" && block.classifierModelSetFor.trim()
+						? block.classifierModelSetFor.trim()
+						: undefined;
+			}
 		}
 	}
 
@@ -297,17 +333,18 @@ export function loadAutoModeConfig(home: string): AutoModeConfig {
 }
 
 /**
- * Persist `autoMode.classifierModel` in the *user* settings file, preserving
- * every other key. `undefined` removes the setting. Always user scope: this is
- * the knob that may move the classifier to another provider, so it lives where
- * only the user writes — never in a project file (see the module comment).
+ * Persist `autoMode.classifierModel` in One Code's own settings file
+ * (`~/.one-code/settings.json`), preserving every other key. `undefined` removes
+ * the setting. Never touches Claude Code's files — this is One Code's key, and
+ * the knob that may move the classifier to another provider, so it lives in One
+ * Code's own state (see the module comment).
  *
  * Unlike loading, this throws on a malformed file: a lenient read merely skips
- * rules, but a lenient write would replace the user's whole settings file with
- * only ours.
+ * rules, but a lenient write would replace the whole settings file with only ours.
  */
 export function persistClassifierModel(spec: string | undefined, home: string, setForContainment?: string): void {
-	const { path, file } = readUserSettingsForWrite(home);
+	const path = oneCodeSettingsPath(home);
+	const file = readSettingsForWrite(path);
 	const block = asRecord(file.autoMode) ?? {};
 	if (spec === undefined) {
 		delete block.classifierModel;
@@ -322,8 +359,7 @@ export function persistClassifierModel(spec: string | undefined, home: string, s
 	}
 	if (Object.keys(block).length === 0) delete file.autoMode;
 	else file.autoMode = block;
-	mkdirSync(dirname(path), { recursive: true });
-	writeFileSync(path, `${JSON.stringify(file, null, 2)}\n`);
+	writeSettings(path, file);
 }
 
 /** value as a plain object, or undefined — the repeated sub-block guard. */
@@ -334,34 +370,16 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 }
 
 /**
- * Read the user settings file as an object for a read-modify-write. Unlike
- * loading, this throws on a malformed file: a lenient read merely skips rules,
- * but a lenient write would replace the user's whole settings file with only
- * ours.
- */
-function readUserSettingsForWrite(home: string): { path: string; file: Record<string, unknown> } {
-	const path = join(home, ".claude", "settings.json");
-	let file: Record<string, unknown> = {};
-	if (existsSync(path)) {
-		const parsed = JSON.parse(readFileSync(path, "utf-8")) as unknown;
-		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-			throw new Error(`${path}: root must be a JSON object`);
-		}
-		file = parsed as Record<string, unknown>;
-	}
-	return { path, file };
-}
-
-/**
- * Persist a `/auto-mode setup` result: replace the wizard-owned keys
- * (environment + the three rule lists — an undefined list removes stale
- * values, last-writer like CC's own wizard) while preserving every other
- * settings key and the non-wizard autoMode keys (classifierModel, …). User
- * scope only, same rationale as persistClassifierModel; throws on a malformed
- * file rather than replacing the user's settings with only ours.
+ * Persist a `/auto-mode setup` result to One Code's own settings file: replace
+ * the wizard-owned keys (environment + the three rule lists — an undefined list
+ * removes stale values, last-writer like CC's own wizard) while preserving every
+ * other settings key and the non-wizard autoMode keys (classifierModel, …).
+ * Never touches Claude Code's files; throws on a malformed file rather than
+ * replacing the settings with only ours.
  */
 export function persistAutoModeSetup(patch: Record<string, string[] | undefined>, home: string): void {
-	const { path, file } = readUserSettingsForWrite(home);
+	const path = oneCodeSettingsPath(home);
+	const file = readSettingsForWrite(path);
 	const block = asRecord(file.autoMode) ?? {};
 	for (const key of ["environment", ...RULE_LIST_KEYS] as const) {
 		const value = patch[key];
@@ -370,18 +388,39 @@ export function persistAutoModeSetup(patch: Record<string, string[] | undefined>
 	}
 	if (Object.keys(block).length === 0) delete file.autoMode;
 	else file.autoMode = block;
-	mkdirSync(dirname(path), { recursive: true });
-	writeFileSync(path, `${JSON.stringify(file, null, 2)}\n`);
+	writeSettings(path, file);
 }
 
 /**
- * Remove specific `permissions.allow` entries from the user settings file (the
- * setup audit's "remove them" choice). Exact-match only, everything else
- * preserved; throws on a malformed file for the same reason as the writers
- * above. Returns how many entries were actually removed.
+ * The `permissions.allow` entries in One Code's own settings file — what the
+ * setup audit can actually remove. Broad rules that live in Claude Code's files
+ * are One Code's to warn about, never to delete.
+ */
+export function oneCodePermissionAllow(home: string): string[] {
+	const path = oneCodeSettingsPath(home);
+	if (!existsSync(path)) return [];
+	let file: unknown;
+	try {
+		file = JSON.parse(readFileSync(path, "utf-8"));
+	} catch {
+		// A malformed file is skipped here — this is a read for auditing, not a
+		// write, so leniency is correct (the writers still refuse to clobber it).
+		return [];
+	}
+	const list = asRecord(asRecord(file)?.permissions)?.allow;
+	return Array.isArray(list) ? list.filter((entry): entry is string => typeof entry === "string") : [];
+}
+
+/**
+ * Remove specific `permissions.allow` entries from One Code's own settings file
+ * (the setup audit's "remove them" choice). Only One Code's own file is
+ * touched — never Claude Code's. Exact-match only, everything else preserved;
+ * throws on a malformed file for the same reason as the writers above. Returns
+ * how many entries were actually removed.
  */
 export function removeUserPermissionAllow(entries: string[], home: string): number {
-	const { path, file } = readUserSettingsForWrite(home);
+	const path = oneCodeSettingsPath(home);
+	const file = readSettingsForWrite(path);
 	const permissions = asRecord(file.permissions);
 	const allowList = permissions?.allow;
 	if (!permissions || !Array.isArray(allowList)) return 0;
@@ -390,7 +429,7 @@ export function removeUserPermissionAllow(entries: string[], home: string): numb
 	const removed = allowList.length - kept.length;
 	if (removed > 0) {
 		permissions.allow = kept;
-		writeFileSync(path, `${JSON.stringify(file, null, 2)}\n`);
+		writeSettings(path, file);
 	}
 	return removed;
 }

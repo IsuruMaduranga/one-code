@@ -120,18 +120,19 @@ describe("persistClassifierModel", () => {
 
 	beforeEach(() => {
 		home = mkdtempSync(join(tmpdir(), "cc-picker-"));
-		mkdirSync(join(home, ".claude"), { recursive: true });
+		mkdirSync(join(home, ".one-code"), { recursive: true });
 	});
 
 	afterEach(() => {
 		rmSync(home, { recursive: true, force: true });
 	});
 
-	const settingsPath = () => join(home, ".claude", "settings.json");
+	// classifierModel is One Code's own key: persisted to ~/.one-code, never ~/.claude.
+	const settingsPath = () => join(home, ".one-code", "settings.json");
 	const readSettings = () => JSON.parse(readFileSync(settingsPath(), "utf-8"));
 
 	it("creates the settings file when there is none", () => {
-		rmSync(join(home, ".claude"), { recursive: true, force: true });
+		rmSync(join(home, ".one-code"), { recursive: true, force: true });
 		persistClassifierModel("openai/gpt-5-mini", home);
 		expect(readSettings()).toEqual({ autoMode: { classifierModel: "openai/gpt-5-mini" } });
 	});
