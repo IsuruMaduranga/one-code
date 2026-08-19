@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	loadAutoModeConfig,
 	persistAutoModeSetup,
-	removeUserPermissionAllow,
+	removeOneCodePermissionAllow,
 } from "../../extensions/auto-mode/config.ts";
 import {
 	auditPermissionAllow,
@@ -182,7 +182,7 @@ describe("auditPermissionAllow", () => {
 	});
 });
 
-describe("persistAutoModeSetup / removeUserPermissionAllow", () => {
+describe("persistAutoModeSetup / removeOneCodePermissionAllow", () => {
 	let home: string;
 	// Both writers persist to One Code's own file, never into ~/.claude.
 	const settingsPath = () => join(home, ".one-code", "settings.json");
@@ -229,13 +229,13 @@ describe("persistAutoModeSetup / removeUserPermissionAllow", () => {
 			settingsPath(),
 			JSON.stringify({ permissions: { allow: ["Bash(git status)", "Bash(npx *)", "Bash(pnpm run *)"], deny: ["Bash(rm:*)"] } }),
 		);
-		expect(removeUserPermissionAllow(["Bash(npx *)", "Bash(pnpm run *)", "Bash(never there)"], home)).toBe(2);
+		expect(removeOneCodePermissionAllow(["Bash(npx *)", "Bash(pnpm run *)", "Bash(never there)"], home)).toBe(2);
 		const file = JSON.parse(readFileSync(settingsPath(), "utf-8"));
 		expect(file.permissions.allow).toEqual(["Bash(git status)"]);
 		expect(file.permissions.deny).toEqual(["Bash(rm:*)"]);
 	});
 
 	it("is a no-op with nothing to remove", () => {
-		expect(removeUserPermissionAllow(["Bash(x)"], home)).toBe(0);
+		expect(removeOneCodePermissionAllow(["Bash(x)"], home)).toBe(0);
 	});
 });

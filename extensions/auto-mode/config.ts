@@ -46,7 +46,7 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { claudeUserSettingsPath } from "../lib/claude-settings.ts";
 import { oneCodeSettingsPath, readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
 import { DEFAULT_ENVIRONMENT, slotName } from "./defaults.ts";
 
@@ -98,19 +98,15 @@ function managedSettingsPaths(): string[] {
 	return ["/etc/claude-code/managed-settings.json"];
 }
 
-/** The files `autoMode` is read from, lowest precedence first. */
-export function autoModeSettingsPaths(home: string): string[] {
-	return [join(home, ".claude", "settings.json"), oneCodeSettingsPath(home), ...managedSettingsPaths()];
-}
-
 /**
- * Claude Code's user settings file. One Code's own auto-mode keys
- * (`classifierModel`, `classifierModelSetFor`) are deliberately NOT read from
- * here — Claude Code does not define them, and One Code once wrote them here, so
- * a stale value must not survive the move to `~/.one-code`.
+ * The files `autoMode` is read from, lowest precedence first. One Code's own
+ * auto-mode keys (`classifierModel`, `classifierModelSetFor`) are deliberately
+ * NOT collected from the borrowed `claudeUserSettingsPath` — Claude Code does not
+ * define them, and One Code once wrote them there, so a stale value must not
+ * survive the move to `~/.one-code` (see the read guard in the loader).
  */
-function claudeUserSettingsPath(home: string): string {
-	return join(home, ".claude", "settings.json");
+export function autoModeSettingsPaths(home: string): string[] {
+	return [claudeUserSettingsPath(home), oneCodeSettingsPath(home), ...managedSettingsPaths()];
 }
 
 function readFile(path: string, diagnostics: string[]): AutoModeSettingsFile | undefined {
@@ -397,17 +393,10 @@ export function persistAutoModeSetup(patch: Record<string, string[] | undefined>
  * are One Code's to warn about, never to delete.
  */
 export function oneCodePermissionAllow(home: string): string[] {
-	const path = oneCodeSettingsPath(home);
-	if (!existsSync(path)) return [];
-	let file: unknown;
-	try {
-		file = JSON.parse(readFileSync(path, "utf-8"));
-	} catch {
-		// A malformed file is skipped here — this is a read for auditing, not a
-		// write, so leniency is correct (the writers still refuse to clobber it).
-		return [];
-	}
-	const list = asRecord(asRecord(file)?.permissions)?.allow;
+	// Lenient read (a missing/malformed file is skipped) — this is a read for
+	// auditing, not a write, so leniency is correct; the writers still refuse to
+	// clobber a malformed file. Diagnostics are discarded here.
+	const list = asRecord(readFile(oneCodeSettingsPath(home), [])?.permissions)?.allow;
 	return Array.isArray(list) ? list.filter((entry): entry is string => typeof entry === "string") : [];
 }
 
@@ -418,7 +407,7 @@ export function oneCodePermissionAllow(home: string): string[] {
  * throws on a malformed file for the same reason as the writers above. Returns
  * how many entries were actually removed.
  */
-export function removeUserPermissionAllow(entries: string[], home: string): number {
+export function removeOneCodePermissionAllow(entries: string[], home: string): number {
 	const path = oneCodeSettingsPath(home);
 	const file = readSettingsForWrite(path);
 	const permissions = asRecord(file.permissions);

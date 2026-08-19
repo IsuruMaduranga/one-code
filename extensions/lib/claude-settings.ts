@@ -19,9 +19,18 @@ export interface ClaudeSettingsFile {
 	[key: string]: unknown;
 }
 
+/**
+ * Claude Code's *user* settings file. The one canonical statement of that path,
+ * so the loaders that must recognise "the borrowed `.claude` user file" (to skip
+ * One Code's own keys found there) all compare against the same value.
+ */
+export function claudeUserSettingsPath(home: string): string {
+	return join(home, ".claude", "settings.json");
+}
+
 export function settingsPaths(cwd: string, home: string): { user: string; project: string; local: string } {
 	return {
-		user: join(home, ".claude", "settings.json"),
+		user: claudeUserSettingsPath(home),
 		project: join(cwd, ".claude", "settings.json"),
 		local: join(cwd, ".claude", "settings.local.json"),
 	};

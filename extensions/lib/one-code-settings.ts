@@ -20,18 +20,16 @@
  * `home === os.homedir()`.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { writeJsonAtomic } from "./atomic-write.ts";
 import { findGitRoot } from "./git.ts";
 import { projectSlug } from "./memory.ts";
-
-function stateDir(home: string, env: NodeJS.ProcessEnv = process.env): string {
-	return env.ONE_CODE_STATE_DIR || join(home, ".one-code");
-}
+import { oneCodeStateDir } from "./paths.ts";
 
 /** `~/.one-code/settings.json` — One Code's user-scope settings (writable). */
 export function oneCodeSettingsPath(home: string, env: NodeJS.ProcessEnv = process.env): string {
-	return join(stateDir(home, env), "settings.json");
+	return join(oneCodeStateDir(env, home), "settings.json");
 }
 
 /**
@@ -40,7 +38,7 @@ export function oneCodeSettingsPath(home: string, env: NodeJS.ProcessEnv = proce
  * worktrees and subdirectories), else the cwd — the same slug the memory dir uses.
  */
 export function oneCodeProjectSettingsPath(cwd: string, home: string, env: NodeJS.ProcessEnv = process.env): string {
-	return join(stateDir(home, env), "projects", projectSlug(findGitRoot(cwd) ?? cwd), "settings.json");
+	return join(oneCodeStateDir(env, home), "projects", projectSlug(findGitRoot(cwd) ?? cwd), "settings.json");
 }
 
 /**
@@ -58,8 +56,8 @@ export function readSettingsForWrite(path: string): Record<string, unknown> {
 	return parsed as Record<string, unknown>;
 }
 
-/** Write a settings object, creating parent directories as needed. */
+/** Write a settings object atomically (temp sibling + rename), creating parent
+ * directories as needed — a reader never sees a half-written settings file. */
 export function writeSettings(path: string, file: Record<string, unknown>): void {
-	mkdirSync(dirname(path), { recursive: true });
-	writeFileSync(path, `${JSON.stringify(file, null, 2)}\n`);
+	writeJsonAtomic(path, file);
 }

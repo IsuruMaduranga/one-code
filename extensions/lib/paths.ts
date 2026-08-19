@@ -20,7 +20,12 @@ export function claudeConfigDir(env: Record<string, string | undefined> = proces
 	return env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
 }
 
-/** One Code's own state dir — everything One Code generates goes here. */
-export function oneCodeStateDir(env: Record<string, string | undefined> = process.env): string {
-	return env.ONE_CODE_STATE_DIR || join(homedir(), ".one-code");
+/**
+ * One Code's own state dir — everything One Code generates goes here. `home`
+ * defaults to the real home; callers that already thread a `home` (the settings
+ * loaders, hermetic in tests) pass it so the root stays under that home when
+ * `ONE_CODE_STATE_DIR` is unset.
+ */
+export function oneCodeStateDir(env: Record<string, string | undefined> = process.env, home: string = homedir()): string {
+	return env.ONE_CODE_STATE_DIR || join(home, ".one-code");
 }

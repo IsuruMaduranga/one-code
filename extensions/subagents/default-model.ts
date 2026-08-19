@@ -31,7 +31,7 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { claudeUserSettingsPath } from "../lib/claude-settings.ts";
 import { isClaudeFamilyModel } from "../lib/model-policy.ts";
 import { oneCodeSettingsPath, readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
 import { autoModeSettingsPaths } from "../auto-mode/config.ts";
@@ -77,7 +77,7 @@ export function loadSubagentDefault(home: string, env: NodeJS.ProcessEnv = proce
 	// settings, never from `~/.claude`, where an old build may have left a stale
 	// value. Claude Code's `CLAUDE_CODE_SUBAGENT_MODEL` env block IS Claude Code's,
 	// so it is still read from every file.
-	const claudeUser = join(home, ".claude", "settings.json");
+	const claudeUser = claudeUserSettingsPath(home);
 	// Lowest precedence first, so managed settings override user settings.
 	for (const path of autoModeSettingsPaths(home)) {
 		const file = readSettings(path);

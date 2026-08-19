@@ -31,7 +31,7 @@ import {
 	oneCodePermissionAllow,
 	persistAutoModeSetup,
 	persistClassifierModel,
-	removeUserPermissionAllow,
+	removeOneCodePermissionAllow,
 } from "../auto-mode/config.ts";
 import { auditPermissionAllow, renderProposal, settingsPatch } from "../auto-mode/setup.ts";
 import { draftSetup, gatherFacts } from "../auto-mode/setup-run.ts";
@@ -1196,7 +1196,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		);
 		if (act === "Remove them") {
 			try {
-				const removed = removeUserPermissionAllow(
+				const removed = removeOneCodePermissionAllow(
 					removable.map((entry) => entry.rule),
 					os.homedir(),
 				);
