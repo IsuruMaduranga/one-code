@@ -211,23 +211,24 @@ export function formatTaskWidget(store: TaskStore, maxTasks = 12, style: WidgetS
 }
 
 /**
- * The state-driven nudge fired when the task tools have gone unused for a
- * while (Claude Code parity): the reminder text warranted by the current
- * list, or undefined when the list needs no correction.
+ * The periodic task-tool reminder (Claude Code's `task_reminder`): a single
+ * gentle nudge fired when the task tools have gone unused for a while, with the
+ * current list appended so the model can clean up completed or stale tasks — as
+ * when the user pivots mid-session and the plan no longer matches the work.
+ *
+ * Byte-for-byte Claude Code's text (messages.ts) except the tool names, which
+ * stay our snake_case (docs/decisions/tools.md). We do NOT branch on list state
+ * the way CC's earlier prompt did — one reminder, always the same, and the
+ * appended list is what the model reasons over.
  */
-export function nudgeMessage(tasks: TaskItem[]): string | undefined {
-	if (tasks.length === 0) {
-		return "The task tools have not been used recently. If the current work has several steps, track it with task_create (load the task tools via tool_search) so progress is visible; skip this if the task is simple.";
+export function nudgeMessage(tasks: TaskItem[]): string {
+	let message =
+		"The task tools haven't been used recently. If you're working on tasks that would benefit from tracking progress, consider using task_create to add new tasks and task_update to update task status (set to in_progress when starting, completed when done). Also consider cleaning up the task list if it has become stale. Only use these if relevant to the current work. This is just a gentle reminder - ignore if not applicable. Make sure that you NEVER mention this reminder to the user\n";
+	if (tasks.length > 0) {
+		const items = tasks.map((t) => `#${t.id}. [${t.status}] ${t.subject}`).join("\n");
+		message += `\n\nHere are the existing tasks:\n\n${items}`;
 	}
-	const active = tasks.filter((t) => t.status === "in_progress").length;
-	const done = tasks.filter((t) => t.status === "completed").length;
-	if (active === 0 && done < tasks.length) {
-		return `The task list has ${tasks.length - done} unfinished task(s) and none marked in_progress. Update it with task_update to reflect what you are actually doing, or delete stale tasks.`;
-	}
-	if (active > 1) {
-		return `${active} tasks are marked in_progress. Exactly one should be in progress at a time — update them with task_update.`;
-	}
-	return undefined;
+	return message;
 }
 
 export function formatTaskDetails(store: TaskStore, task: TaskItem): string {

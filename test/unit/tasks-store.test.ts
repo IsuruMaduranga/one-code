@@ -107,22 +107,25 @@ describe("TaskStore", () => {
 		expect(lines.at(-1)).toBe("  … +2 more");
 	});
 
-	it("picks the nudge warranted by the list state", () => {
+	it("emits Claude Code's task_reminder with the current list appended", () => {
 		const store = new TaskStore();
-		expect(nudgeMessage(store.list())).toContain("task_create");
+		// Empty list → the generic nudge, no appended task list.
+		const empty = nudgeMessage(store.list());
+		expect(empty).toContain("The task tools haven't been used recently");
+		expect(empty).toContain("cleaning up the task list if it has become stale");
+		expect(empty).toContain("NEVER mention this reminder to the user");
+		expect(empty).not.toContain("Here are the existing tasks");
+
 		const a = store.create({ subject: "A", description: "" });
 		const b = store.create({ subject: "B", description: "" });
-		// Unfinished work with nothing in_progress → stale-list nudge.
-		expect(nudgeMessage(store.list())).toContain("none marked in_progress");
 		store.update(a.id, { status: "in_progress" });
-		// Exactly one in_progress → healthy, no nudge.
-		expect(nudgeMessage(store.list())).toBeUndefined();
-		store.update(b.id, { status: "in_progress" });
-		expect(nudgeMessage(store.list())).toContain("Exactly one");
-		store.update(a.id, { status: "completed" });
 		store.update(b.id, { status: "completed" });
-		// All done → nothing to correct.
-		expect(nudgeMessage(store.list())).toBeUndefined();
+		// Same text regardless of state — the appended list carries the state.
+		const withTasks = nudgeMessage(store.list());
+		expect(withTasks).toContain("The task tools haven't been used recently");
+		expect(withTasks).toContain("Here are the existing tasks:");
+		expect(withTasks).toContain(`#${a.id}. [in_progress] A`);
+		expect(withTasks).toContain(`#${b.id}. [completed] B`);
 	});
 
 	it("formats list and details", () => {

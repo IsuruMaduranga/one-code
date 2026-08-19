@@ -556,3 +556,43 @@ is fine to skip):
 
 If any of these later gain a One Code equivalent, add the tool under its
 snake_case name and revisit this list.
+
+## Task reminder realigned to Claude Code's `task_reminder` (2026-08-19)
+
+The stateful task list (`extensions/tasks/`) periodically nudges the model when
+the task tools have gone unused, so a plan that no longer matches the work gets
+cleaned up. Our nudge had drifted from Claude Code's into a home-grown one:
+`nudgeMessage` branched on list state and emitted one of three custom strings —
+"start tracking" (empty), "unfinished tasks, none in_progress" (stale), "more
+than one in_progress" — and **returned nothing when every task was completed**.
+That last gap was the visible bug: finish a list and no reminder ever suggested
+clearing it, so the pinned widget lingered with an all-`✔` list until the model
+happened to delete the tasks or the session cleared.
+
+Realigned to CC's actual mechanism (`src/utils/messages.ts` `task_reminder`,
+`src/utils/attachments.ts` `TODO_REMINDER_CONFIG`), because this is a fidelity
+fix rather than a new divergence:
+
+- **One verbatim message, always the same**, byte-for-byte CC's text except the
+  tool names, which stay our snake_case (`task_create`/`task_update`) — see
+  [Tool names stay pi-idiomatic](#tool-names-stay-pi-idiomatic-snake_case). Its
+  operative line is "Also consider cleaning up the task list if it has become
+  stale," which covers both the all-completed case and the mid-session pivot the
+  user hit.
+- **The current list is appended** (`#id. [status] subject`) so the model
+  reasons over real state instead of the reminder guessing it. This is what lets
+  the model notice everything is `completed` and delete it — CC keeps completed
+  tasks pinned too, so the widget only clears once the model acts.
+- **Trigger matches CC**: fire after `TURNS_SINCE_WRITE = 10` turns without a
+  *mutating* task call, no more than once per `TURNS_BETWEEN_REMINDERS = 10`
+  turns. Two independent counters (task use resets one, a fired reminder resets
+  the other), the reminder counter initialized "cooled down" so the first nudge
+  waits only on inactivity. Was a single 8-turn counter with no cooldown.
+
+Dropped the `> 1 in_progress` check as part of going CC-faithful — a genuinely
+useful signal CC lacks, but keeping it would have re-introduced a divergence in
+the one place we were removing one. The widget itself is unchanged and stays
+CC-faithful: pinned until the model deletes the tasks or the user runs
+`/tasks hide`; it does **not** auto-hide on all-completed (CC's `TaskListV2`
+returns null only on an empty list). Display/steering only — no payload-fidelity
+lock, so no capture test to regenerate.

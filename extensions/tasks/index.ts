@@ -56,18 +56,25 @@ export default function tasksExtension(pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => reconstructState(ctx));
 	pi.on("session_tree", (_event, ctx) => reconstructState(ctx));
 
-	// Claude Code nudges the model when the task tools have gone unused for a
-	// while. A task list nobody remembers to update is decoration, so we do the
-	// same — quietly and rarely, based on session state.
-	const NUDGE_AFTER_TURNS = 8;
+	// Claude Code's periodic task_reminder (TODO_REMINDER_CONFIG): a gentle
+	// nudge once the task tools have gone unused for TURNS_SINCE_WRITE turns,
+	// fired no more than once per TURNS_BETWEEN_REMINDERS turns. The two counters
+	// are independent — task use resets the first, a fired reminder resets the
+	// second — so a run of task activity silences the nudge without the cooldown
+	// also suppressing the next legitimate one. The reminder text (nudgeMessage)
+	// carries the current list so the model can clean up completed/stale tasks.
+	const TURNS_SINCE_WRITE = 10;
+	const TURNS_BETWEEN_REMINDERS = 10;
 	let turnsSinceTaskUse = 0;
+	// Start "cooled down" so the first reminder waits only on task inactivity.
+	let turnsSinceReminder = TURNS_BETWEEN_REMINDERS;
 
 	pi.on("turn_end", () => {
 		turnsSinceTaskUse++;
-		if (turnsSinceTaskUse < NUDGE_AFTER_TURNS) return;
-		turnsSinceTaskUse = 0;
-		const text = nudgeMessage(store.list());
-		if (text) pi.events.emit(REMINDER_CHANNEL, { text });
+		turnsSinceReminder++;
+		if (turnsSinceTaskUse < TURNS_SINCE_WRITE || turnsSinceReminder < TURNS_BETWEEN_REMINDERS) return;
+		turnsSinceReminder = 0;
+		pi.events.emit(REMINDER_CHANNEL, { text: nudgeMessage(store.list()) });
 	});
 
 	// Only the mutating tools count as "using" the tracker — a read must not
