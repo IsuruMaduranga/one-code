@@ -19,6 +19,7 @@
 
 import os from "node:os";
 import { join } from "node:path";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { type ChildAction, SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../auto-mode/actions.ts";
 import { classify, createClassifierState } from "../auto-mode/classifier.ts";
@@ -161,7 +162,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	 * call has settled it, otherwise the chain's first candidate — the thing
 	 * that *will* screen the next call, worth showing before it happens.
 	 */
-	const classifierForDisplay = (): { classifier?: string; pinned: boolean } => {
+	const classifierForDisplay = (sessionModel?: Model<Api>): { classifier?: string; pinned: boolean } => {
 		if (classifierState.pinned) {
 			return { classifier: `${classifierState.pinned.provider}/${classifierState.pinned.id}`, pinned: true };
 		}
@@ -169,7 +170,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		autoConfig ??= loadAutoModeConfig(os.homedir());
 		const chain = classifierCandidates({
 			available: badgeCtx.modelRegistry.getAvailable(),
-			sessionModel: badgeCtx.model,
+			sessionModel: sessionModel ?? badgeCtx.model,
 			configured: autoConfig.classifierModel,
 			configuredSetForContainment: autoConfig.classifierModelSetFor,
 		}).candidates.filter((entry) => !classifierState.rejected.has(`${entry.model.provider}/${entry.model.id}`));
@@ -177,7 +178,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		return { classifier: first ? `${first.model.provider}/${first.model.id}` : undefined, pinned: false };
 	};
 
-	const applyBadge = () => {
+	const applyBadge = (sessionModel?: Model<Api>) => {
 		// A below-editor widget, not a footer status: Claude Code renders the
 		// mode line directly under the input box, and the workflow status strip
 		// sorts itself below this line by re-setting on the status channel
@@ -196,7 +197,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		);
 		// The banner shows mode and classifier live; it listens on the bus
 		// because jiti isolates module state between extensions.
-		const display = mode === "auto" ? classifierForDisplay() : { pinned: false };
+		const display = mode === "auto" ? classifierForDisplay(sessionModel) : { pinned: false };
 		pi.events.emit(PERMISSION_STATUS_CHANNEL, {
 			mode,
 			paused: pauseTracker.isPaused(),
@@ -210,12 +211,14 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 
 	// Drop the cached config and classifier selection state, then refresh the badge.
 	// Shared by the "set classifier model" and "clear" paths.
-	const resetClassifierChoice = () => {
+	const resetClassifierChoice = (sessionModel?: Model<Api>) => {
 		autoConfig = undefined; // reloaded lazily, now carrying any new model
 		classifierState.pinned = undefined;
 		classifierState.rejected.clear();
 		classifierState.notified.clear();
-		applyBadge();
+		classifierState.timeoutStreak = 0;
+		classifierState.chainCache = undefined;
+		applyBadge(sessionModel);
 	};
 	// Keyed by cwd: a worktree-isolated child classifies against ITS checkout's
 	// CLAUDE.md/AGENTS.md, and must not poison the cache the main agent's own
@@ -495,6 +498,13 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// reads live parent state on each call, so emitting once at session start is
 		// enough; subagents captures it and threads it into child sessions.
 		pi.events.emit(SUBAGENT_GATE_CHANNEL, { decide: evaluateChildToolCall });
+	});
+
+	pi.on("model_select", (event, ctx) => {
+		badgeCtx = ctx;
+		lastReviewCtx = ctx;
+		autoInCycle = ctx.modelRegistry.getAvailable().length > 0;
+		resetClassifierChoice(event.model);
 	});
 
 	// The badge carries "· esc to interrupt" only while the model works (CC's

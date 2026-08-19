@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
+import permissionsExtension from "../../extensions/permissions/index.ts";
 import type { PermissionMode } from "../../extensions/permissions/matcher.ts";
 import {
 	MODE_BADGES,
 	modeBadge,
 	nextMode,
+	PERMISSION_STATUS_CHANNEL,
 	permissionModeDisplay,
+	type PermissionStatus,
 	shortModelName,
 } from "../../extensions/permissions/modes.ts";
 import { normalizePermissionMode } from "../../extensions/permissions/settings.ts";
@@ -146,3 +149,99 @@ describe("permissionModeDisplay", () => {
 		);
 	});
 });
+
+describe("permissionsExtension model_select updates classifier", () => {
+	function makeModel(provider: string, id: string, input?: number) {
+		return {
+			provider,
+			id,
+			name: id,
+			cost: input === undefined ? undefined : { input, output: input * 4 },
+		} as any;
+	}
+
+	function makeFakePi() {
+		const busHandlers = new Map<string, Array<(data: unknown) => void>>();
+		const lifecycleHandlers = new Map<string, Array<(event: unknown, ctx: unknown) => void>>();
+		const emitted: Record<string, unknown[]> = {};
+
+		const pi = {
+			events: {
+				on(channel: string, handler: (data: unknown) => void) {
+					const list = busHandlers.get(channel) ?? [];
+					list.push(handler);
+					busHandlers.set(channel, list);
+				},
+				emit(channel: string, data: unknown) {
+					(emitted[channel] ??= []).push(data);
+					for (const h of busHandlers.get(channel) ?? []) h(data);
+				},
+			},
+			on(event: string, handler: (event: unknown, ctx: unknown) => void) {
+				const list = lifecycleHandlers.get(event) ?? [];
+				list.push(handler);
+				lifecycleHandlers.set(event, list);
+			},
+			registerCommand: () => {},
+			registerShortcut: () => {},
+			registerFlag: () => {},
+			getFlag: () => undefined,
+		};
+
+		const fire = (event: string, payload: unknown, ctx: unknown) => {
+			for (const h of lifecycleHandlers.get(event) ?? []) h(payload, ctx);
+		};
+
+		return { pi, emitted, fire };
+	}
+
+	it("switches classifier candidates to the new provider when the session model changes", () => {
+		const anthropicSonnet = makeModel("anthropic", "claude-3-7-sonnet", 3);
+		const anthropicHaiku = makeModel("anthropic", "claude-3-5-haiku", 0.8);
+		const openaiGpt5 = makeModel("openai", "gpt-5.5", 10);
+		const openaiMini = makeModel("openai", "gpt-5-mini", 0.25);
+
+		const available = [anthropicSonnet, anthropicHaiku, openaiGpt5, openaiMini];
+		const fake = makeFakePi();
+		permissionsExtension(fake.pi as any);
+
+		// Switch to auto mode via bus
+		fake.pi.events.emit("one-code:set-permission-mode", { mode: "auto" });
+
+		function makeCtx(currentModel: unknown) {
+			return {
+				cwd: "/tmp/project",
+				model: currentModel,
+				modelRegistry: {
+					getAvailable: () => available,
+				},
+				sessionManager: {
+					getSessionId: () => "sess-1",
+					getSessionDir: () => "/tmp/sess",
+				},
+				ui: {
+					setWidget: () => {},
+					notify: () => {},
+				},
+			};
+		}
+
+		// 1. Session start with Anthropic
+		fake.fire("session_start", {}, makeCtx(anthropicSonnet));
+		const statusList = fake.emitted[PERMISSION_STATUS_CHANNEL] as PermissionStatus[];
+		expect(statusList.length).toBeGreaterThan(0);
+		const lastStatus1 = statusList[statusList.length - 1];
+		expect(lastStatus1.mode).toBe("auto");
+		expect(lastStatus1.classifier).toBe("anthropic/claude-3-5-haiku");
+
+		// 2. Main model changes to OpenAI
+		fake.fire("model_select", { model: openaiGpt5 }, makeCtx(openaiGpt5));
+		const lastStatus2 = statusList[statusList.length - 1];
+		expect(lastStatus2.mode).toBe("auto");
+		expect(lastStatus2.classifier).toBe("openai/gpt-5-mini");
+
+		// 3. Banner mode display reflects the updated classifier
+		expect(permissionModeDisplay(lastStatus2)).toBe("auto · classifier 5-mini (planned)");
+	});
+});
+
