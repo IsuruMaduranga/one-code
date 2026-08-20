@@ -246,6 +246,19 @@ export interface ContextFilePath {
 	descriptor: string;
 }
 
+/** The cwd and each ancestor up to the filesystem root, ordered farthest-first. */
+export function ancestorDirs(cwd: string): string[] {
+	const dirs: string[] = [];
+	let dir = cwd;
+	while (true) {
+		dirs.unshift(dir);
+		const parent = dirname(dir);
+		if (parent === dir) break;
+		dir = parent;
+	}
+	return dirs;
+}
+
 /**
  * The ordered CLAUDE.md-family paths that exist, WITHOUT reading their contents:
  * global `~/.claude/CLAUDE.md` first, then project `CLAUDE.md`/`CLAUDE.local.md`
@@ -280,17 +293,7 @@ export function discoverContextFilePaths(opts: {
 		if (globalOneCode) push(globalOneCode, ONECODE_GLOBAL_DESCRIPTOR);
 	}
 
-	// Walk cwd → root collecting directories, then emit farthest-ancestor first.
-	const dirs: string[] = [];
-	let dir = opts.cwd;
-	while (true) {
-		dirs.unshift(dir);
-		const parent = dirname(dir);
-		if (parent === dir) break;
-		dir = parent;
-	}
-
-	for (const d of dirs) {
+	for (const d of ancestorDirs(opts.cwd)) {
 		push(join(d, "CLAUDE.md"), PROJECT_DESCRIPTOR);
 		push(join(d, "CLAUDE.local.md"), LOCAL_DESCRIPTOR);
 		if (includeOneCode) {

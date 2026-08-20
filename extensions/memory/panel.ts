@@ -80,17 +80,17 @@ const DESC_COL = 34;
  * the cursor stays visible.
  */
 export function renderMemoryPanel(
-	input: { state: MemoryPanelState; entries: readonly MemoryEntry[]; width: number; height: number; notice?: string },
+	input: { state: MemoryPanelState; entries: readonly MemoryEntry[]; width: number; height: number },
 	paint: PanelPaint,
 ): string[] {
-	const { state, entries, height, notice } = input;
+	const { state, entries, height } = input;
 
 	const header = [paint.bold("Memory"), "", `  ${paint.fg("muted", "Auto-memory: on")}`, ""];
 	const footer = [
 		"",
 		paint.fg("muted", `Learn more: ${MEMORY_DOCS_URL}`),
 		"",
-		paint.fg("muted", notice ?? "Enter to open · Esc to close"),
+		paint.fg("muted", "Enter to open · Esc to close"),
 	];
 
 	const listCapacity = Math.max(1, height - header.length - footer.length);

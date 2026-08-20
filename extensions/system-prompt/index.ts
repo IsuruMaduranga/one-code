@@ -21,10 +21,12 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 	let cachedKey = "";
 	let scratchpad: string | undefined;
 	// Claude Code's git snapshot is taken once "at the start of the conversation"
-	// and never updated. Compute it here (fast, synchronous git calls) so it is a
-	// true per-session snapshot that resets on /clear (session_start re-fires) and
-	// stays constant across turns, keeping the system prompt cache-stable.
+	// and never updated. It is computed lazily on the first turn (memoized) rather
+	// than in session_start, so its several synchronous git spawns never delay the
+	// prompt opening (findings §15); it resets on /clear (session_start re-fires)
+	// and stays constant across turns, keeping the system prompt cache-stable.
 	let gitStatus: string | null = null;
+	let gitStatusReady = false;
 
 	pi.on("session_start", (_event, ctx) => {
 		// The prompt section promises a usable directory, so the extension that
@@ -38,7 +40,8 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 			scratchpad = undefined;
 		}
 
-		gitStatus = collectGitStatus(ctx.cwd);
+		gitStatus = null;
+		gitStatusReady = false;
 	});
 
 	pi.on("before_agent_start", (event, ctx) => {
@@ -46,6 +49,12 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 		// customPrompt. Return nothing so pi's own builder uses it verbatim, rather
 		// than clobbering it with the tiered One Code prompt.
 		if (event.systemPromptOptions.customPrompt) return;
+
+		if (!gitStatusReady) {
+			// First turn = the conversation start CC snapshots at.
+			gitStatus = collectGitStatus(ctx.cwd);
+			gitStatusReady = true;
+		}
 
 		const model = ctx.model;
 		const modelLine = model ? `${model.id} (${model.provider})` : "unknown";
