@@ -320,6 +320,43 @@ Default-on is a divergence from CC, which growthbook-gates the away summary
 off for third parties (`tengu_sedge_lantern`, 3P default false); shipped on
 here because the feature was explicitly requested.
 
+## Interrupted-turn line, and suppressing pi's "Operation aborted" (2026-08-20, unreviewed)
+
+CC's `InterruptedByUser` line — dim `Interrupted · What should Claude do
+instead?`, rebranded to `… One Code …` — shown when the user aborts a turn
+(Esc). Same display mechanism as the turn-duration/recap lines: a display-only
+`appendEntry` + `registerEntryRenderer`, out of the LLM context so the model
+never reads a note about its own interruption. Verified live in tmux (both the
+plain `pi` shim and the bundled app).
+
+- **`interrupted/`** — on `agent_end`, if the turn's last assistant message
+  carries `stopReason: "aborted"` (pi's mark for an Esc/`ctx.abort()`), append
+  the dim note. Detection is the shared pure `lib/interrupt.ts` `wasInterrupted`
+  (duck-typed over `{role, stopReason}`, keys off the LAST assistant message —
+  matching CC's `ERROR_MESSAGE_USER_ABORT`).
+- **turn-duration suppresses itself on the same signal.** An interrupted turn
+  shows the note *instead of* `✻ Cooked for …` — CC gates its turn-duration
+  render on `!aborted`, so turn-duration now reuses `wasInterrupted(event.messages)`
+  and returns early.
+
+**Deviation: removing pi's red "Operation aborted" needs an app-layer patch,
+not the extension API.** pi's core renders its own red abort line for an aborted,
+tool-call-free assistant message (`AssistantMessageComponent.updateContent`,
+`assistant-message.js`), and it sets `message.errorMessage = "Operation aborted"`
+in the interactive `message_end` handler **after** extension handlers have run —
+so the extension can neither pre-empt the string nor stop the line. Left as-is
+that abort line duplicates our dim note. `AssistantMessageComponent` is exported,
+so `app/bin.mjs` monkeypatches its `updateContent` (same discipline as the
+`stopInteractiveTui` exit patch: guarded try/catch, exact-pinned pi,
+re-verify on every pin bump): for an aborted, tool-call-free message it runs
+the original with `stopReason` briefly coerced to `"stop"` — the only branch
+that reads it for that case — then restores it, so pi skips the red line while
+nothing downstream (the `interrupted` extension's `agent_end` check, session
+persistence) sees a mutated message. Aborted *tool calls* are left alone (pi
+surfaces those on the tool component). **App-only**: package-variant users
+(`pi install one-code-extension` on stock pi) still see pi's red line, since
+the extension layer cannot reach it — same limitation as the exit patch.
+
 ## Custom footer: all-in cost, labelled metrics, provider-qualified model (2026-08-19)
 
 *2026-08-19.* pi's built-in footer renders a dense token line

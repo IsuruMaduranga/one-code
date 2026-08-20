@@ -131,7 +131,7 @@ process.stdout.write = (chunk, ...rest) => {
 };
 
 // --- 4. Launch pi with One Code's update check ----------------------------
-const { InteractiveMode, main } = await import("@earendil-works/pi-coding-agent");
+const { AssistantMessageComponent, InteractiveMode, main } = await import("@earendil-works/pi-coding-agent");
 
 // Clean exit. pi 0.84.1's quit path leaves the rendered UI behind in both TUI
 // modes: fullscreen deliberately switches from the alt screen back to the
@@ -185,6 +185,39 @@ try {
 	}
 } catch {
 	// InteractiveMode not patchable (unexpected pi build): stock exit behavior.
+}
+
+// Suppress pi's red "Operation aborted" line on a user interrupt. The
+// interrupted extension shows Claude Code's dim "Interrupted · What should One
+// Code do instead?" note in its place, so pi's own abort line is a duplicate.
+// pi's AssistantMessageComponent.updateContent (assistant-message.js) appends
+// that line whenever the message stopReason is "aborted" and it carries no tool
+// calls (aborted tool calls surface the error on the tool component instead, so
+// those are left alone). We run the original with the stopReason briefly coerced
+// to "stop" — the only branch that reads it for an aborted, tool-call-free
+// message — then restore it, so nothing downstream (the interrupted extension's
+// agent_end check, session persistence) ever sees a changed message. This is an
+// app-only patch: users on stock pi (`pi install one-code-extension`) still get
+// pi's line. Exact-pinned pi keeps this stable; re-verify on every pin bump.
+try {
+	const original = AssistantMessageComponent.prototype.updateContent;
+	if (typeof original === "function") {
+		AssistantMessageComponent.prototype.updateContent = function updateContentWithoutAbortLine(message, ...rest) {
+			const hasToolCalls = Array.isArray(message?.content) && message.content.some((c) => c?.type === "toolCall");
+			if (message?.stopReason === "aborted" && !hasToolCalls) {
+				const realStopReason = message.stopReason;
+				message.stopReason = "stop";
+				try {
+					return original.call(this, message, ...rest);
+				} finally {
+					message.stopReason = realStopReason;
+				}
+			}
+			return original.call(this, message, ...rest);
+		};
+	}
+} catch {
+	// AssistantMessageComponent not patchable (unexpected pi build): stock behavior.
 }
 const { createUpdateCheck } = await import("./update-check.mjs");
 const brewPrefixes = ["/opt/homebrew/", "/usr/local/Cellar/", "/home/linuxbrew/"];

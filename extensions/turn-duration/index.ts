@@ -11,6 +11,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { wasInterrupted } from "../lib/interrupt.ts";
 import { trackShellTasks } from "../lib/shell-tasks.ts";
 import { dimMarkedLine } from "../lib/tui-render.ts";
 import { TURN_MARK, turnDurationText } from "./line.ts";
@@ -40,11 +41,14 @@ export default function turnDurationExtension(pi: ExtensionAPI) {
 		turnStartedAt = Date.now();
 	});
 
-	pi.on("agent_end", (_event, ctx) => {
+	pi.on("agent_end", (event, ctx) => {
 		const startedAt = turnStartedAt;
 		turnStartedAt = 0;
 		if (process.env.CC_TURN_DURATION === "0") return;
 		if (!startedAt || !ctx.hasUI) return;
+		// An interrupted turn shows the interrupted extension's note instead
+		// (CC gates its turn-duration render on !aborted).
+		if (wasInterrupted(event.messages)) return;
 		pi.appendEntry<TurnDurationData>(ENTRY_TYPE, {
 			verb: pickCompletionVerb(),
 			durationMs: Date.now() - startedAt,
