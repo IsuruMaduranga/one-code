@@ -131,6 +131,7 @@ Full context: [`decisions/memory-state.md`](decisions/memory-state.md).
 - **[The memory dir is harness-designated working space](decisions/memory-state.md#the-memory-dir-is-harness-designated-working-space-like-the-plan-file)** — why writes there need no permission prompt, like the plan file.
 - **[Session scratchpad, Claude Code-style](decisions/memory-state.md#session-scratchpad-claude-code-style)** — a per-session temp dir: prompt section plus the allowed-writes rule.
 - **[Own state, borrowed config](decisions/memory-state.md#own-state-borrowed-config-claude-is-read-only-one-code-writes-to-one-code)** — `.claude` is read-only; One Code writes its own state to `~/.one-code` so the two never clobber each other.
+- **[The `/memory` picker and the CLAUDE.md over-limit warning](decisions/memory-state.md#the-memory-picker-and-the-claudemd-over-limit-warning-2026-08-20)** — CC's startup size warning + Memory panel (external `$EDITOR`); entries are CLAUDE.md family + always-loaded ONECODE.md + AGENTS.md only when `@`-imported (via `collectImportedPaths`); replaced the in-TUI editor / `files.ts`.
 
 ## Compaction
 

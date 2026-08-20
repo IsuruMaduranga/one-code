@@ -155,6 +155,24 @@ export function expandImports(
 	return expandImportsInner(content, baseDir, opts.home, opts.read ?? readFileIfPresent, new Set<string>(), 0);
 }
 
+/**
+ * The absolute paths every `@path` import in `content` resolves to, transitively
+ * (same traversal, resolution, cycle/depth rules as `expandImports`). Used to
+ * tell whether a file — e.g. an `AGENTS.md` — is actually pulled into context,
+ * rather than merely present on disk.
+ */
+export function collectImportedPaths(
+	content: string,
+	baseDir: string,
+	opts: { home: string; read?: (path: string) => string | null },
+): Set<string> {
+	const found = new Set<string>();
+	expandImportsInner(content, baseDir, opts.home, opts.read ?? readFileIfPresent, new Set<string>(), 0, (p) =>
+		found.add(p),
+	);
+	return found;
+}
+
 function expandImportsInner(
 	content: string,
 	baseDir: string,
@@ -162,6 +180,7 @@ function expandImportsInner(
 	read: (path: string) => string | null,
 	stack: Set<string>,
 	depth: number,
+	onResolve?: (path: string) => void,
 ): string {
 	if (depth >= MAX_IMPORT_DEPTH) return content;
 	if (!content.includes("@")) return content;
@@ -183,7 +202,7 @@ function expandImportsInner(
 			out.push(line);
 			continue;
 		}
-		out.push(inFence ? line : expandImportLine(line, baseDir, home, read, stack, depth));
+		out.push(inFence ? line : expandImportLine(line, baseDir, home, read, stack, depth, onResolve));
 	}
 	return out.join("\n");
 }
@@ -195,6 +214,7 @@ function expandImportLine(
 	read: (path: string) => string | null,
 	stack: Set<string>,
 	depth: number,
+	onResolve?: (path: string) => void,
 ): string {
 	if (!line.includes("@")) return line;
 
@@ -210,9 +230,10 @@ function expandImportLine(
 	const replaced = shielded.replace(/(^|\s)@(\S+)/g, (whole, lead: string, ref: string) => {
 		const target = readImportTarget(ref, baseDir, home, read, stack);
 		if (!target) return whole; // unresolved or cycle: leave the literal text
+		onResolve?.(target.resolved);
 		const next = new Set(stack);
 		next.add(target.resolved);
-		const expanded = expandImportsInner(target.content, dirname(target.resolved), home, read, next, depth + 1);
+		const expanded = expandImportsInner(target.content, dirname(target.resolved), home, read, next, depth + 1, onResolve);
 		return `${lead}${expanded}${target.trailing}`;
 	});
 

@@ -201,3 +201,40 @@ injection path opens).
 Still deferred: the memory-dir migration, which has a real tradeoff (sharing
 memory with Claude Code on the same repo is arguably a feature) and waits on its
 own decision.
+
+## The `/memory` picker and the CLAUDE.md over-limit warning (2026-08-20)
+
+Two Claude Code surfaces were missing in a project. Both now exist.
+
+**Startup over-limit warning.** CC warns at startup when a context file passes a
+soft char limit (~40k) — the file is bloating every turn — and points at
+`/memory`. One Code raises the same via `ctx.ui.notify(..., "warning")` at
+`session_start` (pi renders it as `Warning: …`, no ⚠ glyph — the codebase's
+existing startup-warning style, e.g. the pi-version drift warning). The limit and
+message live in `lib/memory.ts` (`CLAUDE_MD_CHAR_LIMIT`, `claudeMdLimitWarning`;
+`N.Nk` rendering matches CC's "over the 40.0k-char limit (55.4k chars)"). It is
+checked per loaded file, so a big AGENTS.md pulled in by `@import` is named on its
+own — distinct from the MEMORY.md *index* load-limit, which is a different file
+and a write-time check.
+
+**The picker.** CC's `/memory` is a Memory panel (status line, numbered files with
+descriptions, "Open auto-memory folder", a learn-more link) that opens the choice
+in the external `$EDITOR`/`$VISUAL`. One Code now matches this with a focused
+overlay (`ctx.ui.custom`) — pure `panel.ts` (state/keys/render) and `entries.ts`
+(the list), opening via `open-external.ts` (`$VISUAL`→`$EDITOR`→OS opener,
+detached; folders use the OS opener; the "$EDITOR" hint is printed on file opens,
+as CC does). This replaced the old in-TUI `ctx.ui.editor` flow and its `files.ts`
+(deleted): manual edits are no longer frontmatter-stamped, which is correct —
+stamping ties to *model* writes, and CC's external-editor edits are unstamped too.
+
+**Entries: what belongs in "our context".** The list is the CLAUDE.md family
+(global + ancestors + cwd, the two primaries always offered/create-on-open),
+`ONECODE.md` (global + per-dir — always shown, since One Code loads it directly),
+and `AGENTS.md` **only when a loaded file `@`-imports it**. A standalone AGENTS.md
+that nothing references is not in One Code's context (CC has no AGENTS.md concept
+at all), so editing or trimming it changes nothing — showing it would mislead.
+Reference detection reuses the import traversal: `collectImportedPaths` in
+`lib/claude-context.ts` returns the transitive set of `@import` targets, and an
+AGENTS.md shows only if its path is in that set. The same filter governs the
+over-limit warning. cwd files render as `./name` (CC's relative form); the
+learn-more link points at the One Code repo, not CC's docs.

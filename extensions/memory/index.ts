@@ -5,6 +5,8 @@
  * - session start: create the per-project memory directory (the system prompt
  *   promises the model "this directory already exists") and inject the
  *   MEMORY.md index — capped like Claude Code caps it — via the reminder queue.
+ *   Also raise Claude Code's startup over-limit warning for any loaded context
+ *   file (CLAUDE.md family, AGENTS.md, ONECODE.md) past the char limit.
  * - write into the memory dir: stamp bookkeeping frontmatter (node_type,
  *   originSessionId, modified) into the tool input *before* execution, so the
  *   file lands stamped and file-tracker observes the same bytes that are on
@@ -13,22 +15,32 @@
  * - write/edit of MEMORY.md: check the load limits afterwards; near-limit
  *   nudges over the reminder queue, over-limit turns the result into an error
  *   (the write itself succeeded — the message says so), matching Claude Code.
+ * - /memory: Claude Code's Memory picker — a panel of the CLAUDE.md-family /
+ *   AGENTS.md / ONECODE.md files plus "Open auto-memory folder"; the selection
+ *   opens in the external $EDITOR/$VISUAL (or the OS opener), as CC does.
  */
 
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve, sep } from "node:path";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { mkdirSync, readFileSync } from "node:fs";
+import os from "node:os";
+import { isAbsolute, join, resolve, sep } from "node:path";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
+	claudeMdLimitWarning,
 	INDEX_NEAR_LIMIT_REMINDER,
 	INDEX_OVER_LIMIT_ERROR,
 	indexLimitStatus,
 	projectMemoryDir,
 	stampFrontmatter,
 } from "../lib/memory.ts";
-import { claudeConfigDir } from "../lib/paths.ts";
+import { claudeConfigDir, oneCodeStateDir } from "../lib/paths.ts";
 import { tryReadFile } from "../lib/plugins.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
-import { listMemoryFiles, prepareMemorySave } from "./files.ts";
+import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
+import { buildMemoryEntries, entryName, type MemoryEntry } from "./entries.ts";
+import { openPath } from "./open-external.ts";
+import { applyMemoryKey, decodeMemoryKey, initialMemoryState, renderMemoryPanel } from "./panel.ts";
+
+const MEMORY_PANEL_MAX_HEIGHT = 20;
 
 function inputPath(input: unknown, cwd: string): string | undefined {
 	const raw = (input as { path?: unknown })?.path;
@@ -36,13 +48,37 @@ function inputPath(input: unknown, cwd: string): string | undefined {
 	return isAbsolute(raw) ? raw : resolve(cwd, raw);
 }
 
+/** All the panel/warning entries for `cwd`, from One Code's real state dirs. */
+function memoryEntriesFor(cwd: string): MemoryEntry[] {
+	return buildMemoryEntries({
+		cwd,
+		home: os.homedir(),
+		homeClaudeDir: claudeConfigDir(),
+		homeOneCodeDir: oneCodeStateDir(),
+		memoryDir: projectMemoryDir(cwd),
+	});
+}
+
 export default function memoryExtension(pi: ExtensionAPI) {
 	let dir: string | undefined;
 
 	pi.on("session_start", (_event, ctx) => {
+		const candidate = projectMemoryDir(ctx.cwd);
+
+		// Claude Code's startup warning: an instruction file over the char limit
+		// bloats every turn's context. Warn once, pointing at /memory to trim it.
+		if (ctx.hasUI) {
+			for (const entry of memoryEntriesFor(ctx.cwd)) {
+				if (entry.kind !== "file" || !entry.exists) continue;
+				const content = tryReadFile(entry.path);
+				if (content == null) continue;
+				const warning = claudeMdLimitWarning(entryName(entry), content.length);
+				if (warning) ctx.ui.notify(warning, "warning");
+			}
+		}
+
 		// Like Claude Code: one memory dir per git repo (shared by worktrees and
 		// subdirectories); outside a repo, per cwd.
-		const candidate = projectMemoryDir(ctx.cwd);
 		try {
 			mkdirSync(candidate, { recursive: true });
 		} catch {
@@ -91,47 +127,67 @@ export default function memoryExtension(pi: ExtensionAPI) {
 		return undefined;
 	});
 
-	// ---- /memory: view or edit CLAUDE.md + memory files ---------------------
-	// Claude Code's `/memory`: pick a memory-related file and edit it. Interactive
-	// only — driven through pi's select + editor dialogs; a create-on-save target
-	// (a not-yet-existing CLAUDE.md) is written when the user saves non-empty text.
+	// ---- /memory: Claude Code's Memory picker --------------------------------
+	// Pick a memory-related file (or the auto-memory folder) and open it in the
+	// external editor, matching CC. Pure panel logic lives in ./panel.ts.
 	pi.registerCommand("memory", {
 		description: "View or edit CLAUDE.md and memory files",
 		handler: async (_args, ctx) => {
+			const entries = memoryEntriesFor(ctx.cwd);
 			if (!ctx.hasUI) {
-				ctx.ui.notify("/memory needs an interactive terminal to pick and edit a file.", "warning");
+				const lines = entries.map(
+					(e, i) => `${i + 1}. ${e.title}${e.description ? ` — ${e.description}` : ""}  [${e.path}]`,
+				);
+				ctx.ui.notify(`Memory / CLAUDE.md files:\n${lines.join("\n")}`, "info");
 				return;
 			}
-			const files = listMemoryFiles({ cwd: ctx.cwd, homeClaudeDir: claudeConfigDir() });
-			// Key the picker by its rendered label so the selection maps straight
-			// back to an entry — no parallel array / indexOf to keep in sync.
-			const byLabel = new Map(files.map((f) => [f.displayLabel, f]));
-			const picked = await ctx.ui.select("Edit memory / CLAUDE.md", [...byLabel.keys()]);
-			if (picked === undefined) return;
-			const entry = byLabel.get(picked);
-			if (!entry) return;
-
-			const current = tryReadFile(entry.path) ?? "";
-			const edited = await ctx.ui.editor(`Editing ${entry.path}`, current);
-			if (edited === undefined || edited === current) return;
-
-			// Route through the same treatment a model write to the memory dir gets:
-			// frontmatter stamping + the MEMORY.md load-limit warning (files.ts).
-			const plan = prepareMemorySave({
-				path: entry.path,
-				content: edited,
-				cwd: ctx.cwd,
-				sessionId: ctx.sessionManager.getSessionId(),
-				nowIso: new Date().toISOString(),
-			});
-			try {
-				mkdirSync(dirname(entry.path), { recursive: true });
-				writeFileSync(entry.path, plan.content);
-				ctx.ui.notify(`Saved ${entry.path}`, "info");
-				if (plan.warning) ctx.ui.notify(plan.warning, "warning");
-			} catch (error) {
-				ctx.ui.notify(`Could not save ${entry.path}: ${error instanceof Error ? error.message : error}`, "error");
-			}
+			const chosen = await openMemoryPanel(ctx, entries);
+			if (!chosen) return;
+			const result = openPath(chosen.path, chosen.kind);
+			ctx.ui.notify(result.message, result.ok ? "info" : "error");
+			if (result.hint) ctx.ui.notify(result.hint, "info");
 		},
+	});
+}
+
+/** Show the Memory panel as a focused overlay; resolve to the chosen entry or null. */
+function openMemoryPanel(ctx: ExtensionContext, entries: MemoryEntry[]): Promise<MemoryEntry | null> {
+	return ctx.ui.custom<MemoryEntry | null>((tui, theme, _keybindings, done) => {
+		const paint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme) };
+		const state = initialMemoryState();
+		let cache: { width: number; lines: string[] } | undefined;
+		const repaint = () => {
+			cache = undefined;
+			tui.requestRender();
+		};
+		return {
+			render: (width: number) => {
+				if (cache?.width === width) return cache.lines;
+				const termRows = (tui as { terminal: { rows: number } }).terminal.rows;
+				const height = boundedDockHeight(termRows, MEMORY_PANEL_MAX_HEIGHT);
+				const lines = renderMemoryPanel({ state, entries, width, height }, paint).map((line) =>
+					truncateLine(line, width),
+				);
+				cache = { width, lines };
+				return lines;
+			},
+			handleInput: (data: string) => {
+				const key = decodeMemoryKey(data);
+				if (!key) return;
+				const effect = applyMemoryKey(state, key, entries);
+				if (effect?.kind === "close") {
+					done(null);
+					return;
+				}
+				if (effect?.kind === "open") {
+					done(effect.entry);
+					return;
+				}
+				repaint();
+			},
+			invalidate: () => {
+				cache = undefined;
+			},
+		};
 	});
 }

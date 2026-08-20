@@ -95,6 +95,25 @@ export const INDEX_NEAR_LIMIT_REMINDER = `MEMORY.md is approaching its load limi
 export const INDEX_OVER_LIMIT_ERROR = `MEMORY.md is over its load limit (${INDEX_MAX_LINES} lines / 25KB): everything past the limit is dropped the next time it is loaded. The write succeeded, but rewrite the index now — one line per entry, move detail into topic files, merge or drop stale entries.`;
 
 /**
+ * Claude Code's soft size limit for a context file (CLAUDE.md/AGENTS.md/ONECODE.md):
+ * over ~40k chars it warns at startup that the file is bloating the context, and
+ * points at `/memory` to trim it. Distinct from the MEMORY.md *index* load limit
+ * above — this is about the instruction files the model reads every turn.
+ */
+export const CLAUDE_MD_CHAR_LIMIT = 40_000;
+
+/**
+ * CC's over-limit warning for a context file, or null when within the limit.
+ * `name` is the file's basename (e.g. `CLAUDE.md`); `chars` is its length. The
+ * `N.Nk` rendering matches CC's "over the 40.0k-char limit (55.4k chars)".
+ */
+export function claudeMdLimitWarning(name: string, chars: number): string | null {
+	if (chars <= CLAUDE_MD_CHAR_LIMIT) return null;
+	const k = (n: number) => `${(n / 1000).toFixed(1)}k`;
+	return `${name} is over the ${k(CLAUDE_MD_CHAR_LIMIT)}-char limit (${k(chars)} chars) · /memory to free up context`;
+}
+
+/**
  * Claude Code stamps bookkeeping fields into a memory file's frontmatter at
  * write time: node_type, the writing session's id, and a modified timestamp
  * (observed in real memory files; `modified` is also documented). A file
