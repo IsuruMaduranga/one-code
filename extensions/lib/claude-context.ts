@@ -14,13 +14,23 @@
  * down to the cwd. (pi's resource-loader prefers AGENTS.md over CLAUDE.md per
  * dir and omits CLAUDE.local.md / MEMORY.md, so it can't produce these bytes.)
  *
+ * Two One Code additions layer on top of that Claude Code base, both no-ops when
+ * unused so the block stays byte-exact for anyone who doesn't reach for them:
+ *   - `@path` imports inside any context file are expanded in place, matching
+ *     Claude Code (recursive, depth-capped, cycle-safe, code-span aware) — so a
+ *     CLAUDE.md that just says `@AGENTS.md` reuses an existing AGENTS.md.
+ *   - `ONECODE.md` / `onecode.md` / `OneCode.md` files (global `~/.one-code` +
+ *     each project directory) carry One Code-specific instructions that Claude
+ *     Code never reads. They sit in this same block, after the directory's
+ *     CLAUDE.md so they take precedence.
+ *
  * What is NOT yet replicated: enterprise-policy files and nested subtree
  * CLAUDE.md loaded on-demand when a file under them is read (a follow-up needing
  * file-tracker integration; absent from every turn-1 capture we have).
  */
 
-import { existsSync, statSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readdirSync, statSync } from "node:fs";
+import { dirname, isAbsolute, join } from "node:path";
 import { tryReadFile } from "./plugins.ts";
 
 /** One CLAUDE.md-family file as it appears in the block. `content` is raw (untrimmed). */
@@ -34,6 +44,15 @@ export const GLOBAL_DESCRIPTOR = "user's private global instructions for all pro
 export const PROJECT_DESCRIPTOR = "project instructions, checked into the codebase";
 export const LOCAL_DESCRIPTOR = "user's private project instructions, not checked in";
 export const MEMORY_DESCRIPTOR = "user's auto-memory, persists across conversations";
+export const ONECODE_DESCRIPTOR = "One Code-specific instructions, not read by Claude Code";
+export const ONECODE_GLOBAL_DESCRIPTOR =
+	"One Code-specific global instructions for all projects, not read by Claude Code";
+
+/** One Code instruction filenames, in preference order (first present per dir wins). */
+const ONECODE_NAMES = ["ONECODE.md", "onecode.md", "OneCode.md"] as const;
+
+/** Max `@import` hops, matching Claude Code. Depth 0 is the importing file itself. */
+const MAX_IMPORT_DEPTH = 5;
 
 const PREAMBLE =
 	"As you answer the user's questions, you can use the following context:\n" +
@@ -68,6 +87,138 @@ function isPresentFile(path: string): boolean {
 	}
 }
 
+/**
+ * The One Code instruction file in `dir`, or null. Prefers an exact candidate
+ * casing, then any case-insensitive match, and returns the file's real on-disk
+ * name so `Contents of {path}` stays accurate on case-insensitive filesystems
+ * (macOS), where `onecode.md` on disk would otherwise be reported as `ONECODE.md`.
+ */
+function firstOneCodeFile(dir: string): string | null {
+	let entries: string[];
+	try {
+		entries = readdirSync(dir);
+	} catch {
+		return null;
+	}
+	const pick = ONECODE_NAMES.find((n) => entries.includes(n)) ?? entries.find((e) => e.toLowerCase() === "onecode.md");
+	if (pick && isPresentFile(join(dir, pick))) return join(dir, pick);
+	return null;
+}
+
+/** Resolve an `@import` reference: `~`/`~/` → home, absolute as-is, else relative to `baseDir`. */
+function resolveImportPath(ref: string, baseDir: string, home: string): string {
+	let p = ref;
+	if (p === "~") p = home;
+	else if (p.startsWith("~/")) p = join(home, p.slice(2));
+	return isAbsolute(p) ? p : join(baseDir, p);
+}
+
+/**
+ * Read a `@import` target, tolerating trailing sentence punctuation (`@a/b.md.`).
+ * Returns the resolved path, its raw content, and any stripped trailing text to
+ * re-append after the inlined content. `null` when nothing readable resolves.
+ */
+function readImportTarget(
+	ref: string,
+	baseDir: string,
+	home: string,
+	read: (path: string) => string | null,
+	stack: Set<string>,
+): { resolved: string; content: string; trailing: string } | null {
+	let candidate = ref;
+	for (;;) {
+		const resolved = resolveImportPath(candidate, baseDir, home);
+		if (!stack.has(resolved)) {
+			const content = read(resolved);
+			if (content !== null) return { resolved, content, trailing: ref.slice(candidate.length) };
+		}
+		// Not a readable file (and not a cycle already on the stack): peel one trailing
+		// punctuation char and retry, so `@docs/x.md.` still resolves `docs/x.md`.
+		if (candidate.length <= 1 || !/[.,;:!?)\]]$/.test(candidate)) return null;
+		candidate = candidate.slice(0, -1);
+	}
+}
+
+/**
+ * Claude Code's `@path` imports: replace each `@path` reference with the
+ * referenced file's (recursively expanded) contents. `@` inside inline-code spans
+ * or fenced code blocks is left alone; a reference that does not resolve to a
+ * readable file is left as literal text; cycles and hops past MAX_IMPORT_DEPTH
+ * stop recursion. `read` defaults to the module's own file reader (injectable for
+ * tests). A file with no importable `@` tokens is returned unchanged.
+ */
+export function expandImports(
+	content: string,
+	baseDir: string,
+	opts: { home: string; read?: (path: string) => string | null },
+): string {
+	return expandImportsInner(content, baseDir, opts.home, opts.read ?? readFileIfPresent, new Set<string>(), 0);
+}
+
+function expandImportsInner(
+	content: string,
+	baseDir: string,
+	home: string,
+	read: (path: string) => string | null,
+	stack: Set<string>,
+	depth: number,
+): string {
+	if (depth >= MAX_IMPORT_DEPTH) return content;
+	if (!content.includes("@")) return content;
+
+	const out: string[] = [];
+	let inFence = false;
+	let fenceMarker = "";
+	for (const line of content.split("\n")) {
+		const fence = line.match(/^\s*(`{3,}|~{3,})/);
+		if (fence) {
+			const marker = fence[1][0];
+			if (!inFence) {
+				inFence = true;
+				fenceMarker = marker;
+			} else if (marker === fenceMarker) {
+				inFence = false;
+				fenceMarker = "";
+			}
+			out.push(line);
+			continue;
+		}
+		out.push(inFence ? line : expandImportLine(line, baseDir, home, read, stack, depth));
+	}
+	return out.join("\n");
+}
+
+function expandImportLine(
+	line: string,
+	baseDir: string,
+	home: string,
+	read: (path: string) => string | null,
+	stack: Set<string>,
+	depth: number,
+): string {
+	if (!line.includes("@")) return line;
+
+	// Shield inline-code spans so `@path` inside backticks is never expanded. NUL
+	// delimiters can't occur in source text, so restoration never mis-fires on a
+	// real number that happens to be surrounded by spaces.
+	const spans: string[] = [];
+	const shielded = line.replace(/(`+)[\s\S]*?\1/g, (m) => {
+		spans.push(m);
+		return `\u0000${spans.length - 1}\u0000`;
+	});
+
+	const replaced = shielded.replace(/(^|\s)@(\S+)/g, (whole, lead: string, ref: string) => {
+		const target = readImportTarget(ref, baseDir, home, read, stack);
+		if (!target) return whole; // unresolved or cycle: leave the literal text
+		const next = new Set(stack);
+		next.add(target.resolved);
+		const expanded = expandImportsInner(target.content, dirname(target.resolved), home, read, next, depth + 1);
+		return `${lead}${expanded}${target.trailing}`;
+	});
+
+	return replaced.replace(/\u0000(\d+)\u0000/g, (_m, i: string) => spans[Number(i)]);
+}
+
 /** A discovered CLAUDE.md-family path and its descriptor, without file content. */
 export interface ContextFilePath {
 	path: string;
@@ -81,18 +232,31 @@ export interface ContextFilePath {
  * within a directory). `discoverContextFiles` reads content on top of this;
  * callers that only need paths/descriptors (e.g. `/memory`'s picker) use it
  * directly to avoid loading files they will discard.
+ *
+ * When `homeOneCodeDir` is given (the model-facing block, never the memory
+ * picker), One Code's own `ONECODE.md` files join the list: the global one from
+ * `~/.one-code` right after the global CLAUDE.md, and each directory's after its
+ * CLAUDE.md/CLAUDE.local.md so nearer, One Code-specific instructions win.
  */
 export function discoverContextFilePaths(opts: {
 	cwd: string;
 	homeClaudeDir: string;
+	homeOneCodeDir?: string;
 }): ContextFilePath[] {
 	const paths: ContextFilePath[] = [];
 	const seen = new Set<string>();
+	const includeOneCode = opts.homeOneCodeDir !== undefined;
 
-	const globalPath = join(opts.homeClaudeDir, "CLAUDE.md");
-	if (isPresentFile(globalPath)) {
-		paths.push({ path: globalPath, descriptor: GLOBAL_DESCRIPTOR });
-		seen.add(globalPath);
+	const push = (path: string, descriptor: string) => {
+		if (seen.has(path) || !isPresentFile(path)) return;
+		paths.push({ path, descriptor });
+		seen.add(path);
+	};
+
+	push(join(opts.homeClaudeDir, "CLAUDE.md"), GLOBAL_DESCRIPTOR);
+	if (includeOneCode && opts.homeOneCodeDir) {
+		const globalOneCode = firstOneCodeFile(opts.homeOneCodeDir);
+		if (globalOneCode) push(globalOneCode, ONECODE_GLOBAL_DESCRIPTOR);
 	}
 
 	// Walk cwd → root collecting directories, then emit farthest-ancestor first.
@@ -106,16 +270,11 @@ export function discoverContextFilePaths(opts: {
 	}
 
 	for (const d of dirs) {
-		for (const [name, descriptor] of [
-			["CLAUDE.md", PROJECT_DESCRIPTOR],
-			["CLAUDE.local.md", LOCAL_DESCRIPTOR],
-		] as const) {
-			const p = join(d, name);
-			if (seen.has(p)) continue;
-			if (isPresentFile(p)) {
-				paths.push({ path: p, descriptor });
-				seen.add(p);
-			}
+		push(join(d, "CLAUDE.md"), PROJECT_DESCRIPTOR);
+		push(join(d, "CLAUDE.local.md"), LOCAL_DESCRIPTOR);
+		if (includeOneCode) {
+			const oneCode = firstOneCodeFile(d);
+			if (oneCode) push(oneCode, ONECODE_DESCRIPTOR);
 		}
 	}
 
@@ -125,6 +284,9 @@ export function discoverContextFilePaths(opts: {
 export function discoverContextFiles(opts: {
 	cwd: string;
 	homeClaudeDir: string;
+	homeOneCodeDir?: string;
+	/** Home directory for resolving `~` in `@path` imports. */
+	home: string;
 }): ContextFile[] {
 	const files: ContextFile[] = [];
 	for (const { path, descriptor } of discoverContextFilePaths(opts)) {
@@ -132,7 +294,7 @@ export function discoverContextFiles(opts: {
 		// omitted, exactly as before (the block must never carry empty entries).
 		const content = readFileIfPresent(path);
 		if (content === null) continue;
-		files.push({ path, content, descriptor });
+		files.push({ path, content: expandImports(content, dirname(path), { home: opts.home }), descriptor });
 	}
 	return files;
 }

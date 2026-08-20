@@ -23,7 +23,7 @@ import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { buildClaudeMdBlock, discoverContextFiles } from "../lib/claude-context.ts";
 import { projectMemoryDir, truncateIndex } from "../lib/memory.ts";
-import { claudeConfigDir } from "../lib/paths.ts";
+import { claudeConfigDir, oneCodeStateDir } from "../lib/paths.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
 
 const REMINDER_KEY = "claude-context";
@@ -57,6 +57,8 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 			contextFiles: discoverContextFiles({
 				cwd: ctx.cwd,
 				homeClaudeDir: claudeConfigDir(),
+				homeOneCodeDir: oneCodeStateDir(),
+				home: os.homedir(),
 			}),
 			memoryIndex: readMemoryIndex(ctx.cwd),
 			email: resolveEmail(ctx.cwd),

@@ -1,7 +1,16 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
-import { buildClaudeMdBlock } from "../../extensions/lib/claude-context.ts";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import {
+	buildClaudeMdBlock,
+	discoverContextFilePaths,
+	discoverContextFiles,
+	expandImports,
+	ONECODE_DESCRIPTOR,
+	ONECODE_GLOBAL_DESCRIPTOR,
+} from "../../extensions/lib/claude-context.ts";
 import { wrapReminder } from "../../extensions/lib/reminders.ts";
 
 describe("buildClaudeMdBlock", () => {
@@ -71,6 +80,139 @@ describe("buildClaudeMdBlock", () => {
 
 	it("returns null when there is nothing to inject", () => {
 		expect(buildClaudeMdBlock({ contextFiles: [], memoryIndex: null, email: null, date: "2026-08-09" })).toBeNull();
+	});
+});
+
+describe("expandImports (@path expansion)", () => {
+	const home = "/home/u";
+	// Virtual filesystem so tests never touch disk.
+	const vfs = (files: Record<string, string>) => (p: string) => (p in files ? files[p] : null);
+
+	it("inlines a referenced file at the @token's position", () => {
+		const read = vfs({ "/p/AGENTS.md": "AGENT RULES\n" });
+		expect(expandImports("before @AGENTS.md after", "/p", { home, read })).toBe("before AGENT RULES\n after");
+	});
+
+	it("leaves the literal @token when nothing resolves", () => {
+		expect(expandImports("see @missing.md here", "/p", { home, read: vfs({}) })).toBe("see @missing.md here");
+	});
+
+	it("does not treat a non-whitespace-anchored @ (an email) as an import", () => {
+		const read = vfs({ "/p/b.com": "OOPS" });
+		expect(expandImports("mail a@b.com now", "/p", { home, read })).toBe("mail a@b.com now");
+	});
+
+	it("expands recursively, resolving relative to each importing file's dir", () => {
+		const read = vfs({ "/p/a.md": "A @b.md", "/p/b.md": "B" });
+		expect(expandImports("@a.md", "/p", { home, read })).toBe("A B");
+	});
+
+	it("stops after the max import depth without inlining deeper hops", () => {
+		const read = vfs({
+			"/p/f1.md": "@f2.md",
+			"/p/f2.md": "@f3.md",
+			"/p/f3.md": "@f4.md",
+			"/p/f4.md": "@f5.md",
+			"/p/f5.md": "@f6.md",
+			"/p/f6.md": "DEEP",
+		});
+		// Six hops deep; the cutoff leaves the deepest reference literal, never DEEP.
+		expect(expandImports("@f1.md", "/p", { home, read })).toBe("@f6.md");
+	});
+
+	it("does not loop on a self-referential import", () => {
+		const read = vfs({ "/p/a.md": "A @a.md Z" });
+		expect(expandImports("@a.md", "/p", { home, read })).toBe("A @a.md Z");
+	});
+
+	it("ignores @tokens inside inline-code spans and fenced code blocks", () => {
+		const read = vfs({ "/p/x.md": "X" });
+		expect(expandImports("use `@x.md` inline", "/p", { home, read })).toBe("use `@x.md` inline");
+		const fenced = "```\n@x.md\n```";
+		expect(expandImports(fenced, "/p", { home, read })).toBe(fenced);
+	});
+
+	it("re-appends trailing sentence punctuation after the inlined content", () => {
+		const read = vfs({ "/p/x.md": "X" });
+		expect(expandImports("see @x.md.", "/p", { home, read })).toBe("see X.");
+	});
+
+	it("resolves ~ to home and absolute paths as-is", () => {
+		const read = vfs({ "/home/u/g.md": "G", "/abs/x.md": "X" });
+		expect(expandImports("@~/g.md and @/abs/x.md", "/p", { home, read })).toBe("G and X");
+	});
+});
+
+describe("ONECODE.md discovery", () => {
+	let root: string;
+	beforeEach(() => {
+		root = mkdtempSync(join(tmpdir(), "onecode-ctx-"));
+	});
+	afterEach(() => {
+		rmSync(root, { recursive: true, force: true });
+	});
+
+	const write = (rel: string, content: string) => {
+		const abs = join(root, rel);
+		mkdirSync(join(abs, ".."), { recursive: true });
+		writeFileSync(abs, content);
+		return abs;
+	};
+
+	it("places global then per-directory ONECODE.md after the matching CLAUDE.md", () => {
+		const homeClaude = join(root, "home-claude");
+		const homeOneCode = join(root, "home-onecode");
+		const gClaude = write("home-claude/CLAUDE.md", "g\n");
+		const gOneCode = write("home-onecode/ONECODE.md", "go\n");
+		const pClaude = write("proj/CLAUDE.md", "p\n");
+		const pOneCode = write("proj/ONECODE.md", "po\n");
+		mkdirSync(join(root, "proj", "sub"), { recursive: true });
+
+		const paths = discoverContextFilePaths({
+			cwd: join(root, "proj", "sub"),
+			homeClaudeDir: homeClaude,
+			homeOneCodeDir: homeOneCode,
+		});
+
+		expect(paths).toEqual([
+			expect.objectContaining({ path: gClaude }),
+			{ path: gOneCode, descriptor: ONECODE_GLOBAL_DESCRIPTOR },
+			expect.objectContaining({ path: pClaude }),
+			{ path: pOneCode, descriptor: ONECODE_DESCRIPTOR },
+		]);
+	});
+
+	it("omits ONECODE.md entirely when homeOneCodeDir is not passed (the memory picker path)", () => {
+		write("home-claude/CLAUDE.md", "g\n");
+		write("proj/ONECODE.md", "po\n");
+		const paths = discoverContextFilePaths({
+			cwd: join(root, "proj"),
+			homeClaudeDir: join(root, "home-claude"),
+		});
+		expect(paths.some((p) => p.path.includes("ONECODE"))).toBe(false);
+	});
+
+	it("accepts lowercase onecode.md as a filename variant", () => {
+		const p = write("proj/onecode.md", "po\n");
+		const paths = discoverContextFilePaths({
+			cwd: join(root, "proj"),
+			homeClaudeDir: join(root, "home-claude"),
+			homeOneCodeDir: join(root, "home-onecode"),
+		});
+		expect(paths).toContainEqual({ path: p, descriptor: ONECODE_DESCRIPTOR });
+	});
+
+	it("expands @imports in a discovered file's content (the @AGENTS.md reuse case)", () => {
+		write("proj/CLAUDE.md", "@AGENTS.md\n");
+		write("proj/AGENTS.md", "AGENT RULES\n");
+		const files = discoverContextFiles({
+			cwd: join(root, "proj"),
+			homeClaudeDir: join(root, "home-claude"),
+			homeOneCodeDir: join(root, "home-onecode"),
+			home: root,
+		});
+		const claudeMd = files.find((f) => f.path.endsWith("CLAUDE.md"));
+		expect(claudeMd?.content).toBe("AGENT RULES\n\n");
 	});
 });
 

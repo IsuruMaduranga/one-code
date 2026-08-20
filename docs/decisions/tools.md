@@ -455,6 +455,49 @@ byte-identity became the requirement); a first-message idempotent-prepend withou
 the shared queue (the queue already models transient per-turn injection and
 placement generalizes to all five reminders).
 
+## `@path` imports and ONECODE.md in the claudeMd block (2026-08-20)
+
+**Decision.** Two additions to the `# claudeMd` block (`lib/claude-context.ts`),
+both no-ops when unused so the block stays byte-identical for anyone who touches
+neither:
+
+1. **`@path` imports.** Every context file's content is run through
+   `expandImports` before it enters the block: each `@path` token is replaced in
+   place with the referenced file's (recursively expanded) contents, matching
+   Claude Code — recursion capped at 5 hops, cycle-safe, `~`/absolute/relative
+   paths resolved against the *importing* file's directory, and `@` inside
+   inline-code spans or fenced code blocks left alone. An unresolved reference is
+   left as literal text. This makes the common `@AGENTS.md` reuse pattern (a
+   one-line CLAUDE.md pointing at an existing AGENTS.md) work. The `MEMORY.md`
+   index is generated, not authored, so it is NOT expanded.
+2. **ONECODE.md family.** `ONECODE.md` / `onecode.md` / `OneCode.md` (first
+   present per dir wins; the real on-disk casing is used so the `Contents of`
+   line stays accurate on case-insensitive filesystems) carry One Code-specific
+   instructions Claude Code never reads. The global one lives in `~/.one-code`
+   (One Code's own state dir, chosen over `~/.claude` which is a read-only compat
+   surface), emitted right after the global CLAUDE.md; each directory's is
+   emitted right after that directory's CLAUDE.md/CLAUDE.local.md so nearer,
+   One Code-specific instructions win. Gated on `homeOneCodeDir` being passed to
+   the discovery functions, so the `/memory` picker (which does not pass it) is
+   unaffected and never offers ONECODE.md as an edit target.
+
+**Why.** `@AGENTS.md` in CLAUDE.md is how people reuse an existing AGENTS.md
+without rewriting it, and CC supports it; we did not, so the token reached the
+model literally. ONECODE.md fills the gap of "instructions for One Code that must
+not go to Claude Code" — because CC only reads CLAUDE.md, an ONECODE.md is
+automatically invisible to it, and users get a clean split without conditionals
+in a shared CLAUDE.md.
+
+**Fidelity.** No capture exists for CC's import-output bytes, so inline
+replacement is a documented best-effort match of CC's behavior, not a
+byte-verified reproduction; ONECODE.md is a deliberate, additive One Code
+divergence that is inert (byte-identical block) when no such file exists.
+
+**Rejected.** Global ONECODE.md in `~/.claude` (that dir is read-only compat) and
+project-only with no global (less flexible); appending ONECODE.md at the very end
+of the block instead of per-directory (loses the nearer-wins precedence that
+mirrors CLAUDE.md ordering).
+
 ## Foreground `sleep` is blocked; wait via background / monitor (2026-08-14)
 
 Claude Code blocks a foreground bash command whose only job is to wait — a
