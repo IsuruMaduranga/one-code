@@ -478,8 +478,9 @@ neither:
    surface), emitted right after the global CLAUDE.md; each directory's is
    emitted right after that directory's CLAUDE.md/CLAUDE.local.md so nearer,
    One Code-specific instructions win. Gated on `homeOneCodeDir` being passed to
-   the discovery functions, so the `/memory` picker (which does not pass it) is
-   unaffected and never offers ONECODE.md as an edit target.
+   the discovery functions. (The `/memory` picker later adopted this too and
+   deliberately offers ONECODE.md as an editable target — see
+   memory-state.md#the-memory-picker-and-the-claudemd-over-limit-warning-2026-08-20.)
 
 **Why.** `@AGENTS.md` in CLAUDE.md is how people reuse an existing AGENTS.md
 without rewriting it, and CC supports it; we did not, so the token reached the

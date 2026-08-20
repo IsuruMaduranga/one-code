@@ -238,3 +238,16 @@ Reference detection reuses the import traversal: `collectImportedPaths` in
 AGENTS.md shows only if its path is in that set. The same filter governs the
 over-limit warning. cwd files render as `./name` (CC's relative form); the
 learn-more link points at the One Code repo, not CC's docs.
+
+**Offering `~/.claude/CLAUDE.md` does not breach "never write `~/.claude`".** The
+global user CLAUDE.md is offered as "User instructions", matching CC's panel — a
+reversal of the old in-TUI picker, which deliberately *excluded* it (the old
+`files.ts` skipped the global CLAUDE.md precisely because that flow had One Code
+`writeFileSync` the edited buffer back, which would have written the read-only
+compat surface). The external-editor flow removes that reason: One Code only
+`spawn`s the user's editor on the path and never writes `~/.claude` itself — the
+user's editor does, on save, which is exactly what CC does. So the "read-only
+compat surface" invariant (about *One Code* not persisting into `~/.claude`) still
+holds. One Code also never programmatically creates a not-yet-existing target
+(that would breach the invariant for the global file); create-on-open relies on
+the editor materialising the file on save, as CC does.

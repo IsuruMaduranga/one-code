@@ -38,6 +38,12 @@ describe("resolveOpen", () => {
 			args: ["-w", "/p/CLAUDE.md"],
 		});
 	});
+	it("honours quotes so a spaced editor path stays one token", () => {
+		expect(resolveOpen("/p/x.md", "file", { EDITOR: '"/Apps/My Editor/bin/ed" -w' })).toEqual({
+			command: "/Apps/My Editor/bin/ed",
+			args: ["-w", "/p/x.md"],
+		});
+	});
 	it("falls back to the OS opener when no editor is set", () => {
 		expect(resolveOpen("/p/x.md", "file", {}, "darwin")).toEqual({ command: "open", args: ["/p/x.md"] });
 		expect(resolveOpen("/p/x.md", "file", {}, "linux")).toEqual({ command: "xdg-open", args: ["/p/x.md"] });

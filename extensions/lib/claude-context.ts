@@ -92,8 +92,14 @@ function isPresentFile(path: string): boolean {
  * casing, then any case-insensitive match, and returns the file's real on-disk
  * name so `Contents of {path}` stays accurate on case-insensitive filesystems
  * (macOS), where `onecode.md` on disk would otherwise be reported as `ONECODE.md`.
+ *
+ * Fast path first: cheap `stat` probes of the candidate names, so the common case
+ * (no One Code file in this directory — true of every ancestor up to the root)
+ * costs a few stats and never lists the directory. Only when a probe hits do we
+ * read the directory once to recover the real casing.
  */
 function firstOneCodeFile(dir: string): string | null {
+	if (!ONECODE_NAMES.some((n) => isPresentFile(join(dir, n)))) return null;
 	let entries: string[];
 	try {
 		entries = readdirSync(dir);
@@ -267,10 +273,11 @@ export function ancestorDirs(cwd: string): string[] {
  * callers that only need paths/descriptors (e.g. `/memory`'s picker) use it
  * directly to avoid loading files they will discard.
  *
- * When `homeOneCodeDir` is given (the model-facing block, never the memory
- * picker), One Code's own `ONECODE.md` files join the list: the global one from
- * `~/.one-code` right after the global CLAUDE.md, and each directory's after its
- * CLAUDE.md/CLAUDE.local.md so nearer, One Code-specific instructions win.
+ * When `homeOneCodeDir` is given, One Code's own `ONECODE.md` files join the
+ * list: the global one from `~/.one-code` right after the global CLAUDE.md, and
+ * each directory's after its CLAUDE.md/CLAUDE.local.md so nearer, One Code-specific
+ * instructions win. Both the model-facing block and the `/memory` picker pass it
+ * (the picker offers ONECODE.md as an editable target, by design).
  */
 export function discoverContextFilePaths(opts: {
 	cwd: string;

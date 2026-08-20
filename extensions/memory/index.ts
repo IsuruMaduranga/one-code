@@ -143,9 +143,9 @@ export default function memoryExtension(pi: ExtensionAPI) {
 			}
 			const chosen = await openMemoryPanel(ctx, entries);
 			if (!chosen) return;
-			const result = openPath(chosen.path, chosen.kind);
+			const result = await openPath(chosen.path, chosen.kind);
 			ctx.ui.notify(result.message, result.ok ? "info" : "error");
-			if (result.hint) ctx.ui.notify(result.hint, "info");
+			if (result.ok && result.hint) ctx.ui.notify(result.hint, "info");
 		},
 	});
 }
