@@ -26,6 +26,7 @@ import { isAbsolute, join, resolve, sep } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
 	claudeMdLimitWarning,
+	combinedLimitWarning,
 	INDEX_NEAR_LIMIT_REMINDER,
 	INDEX_OVER_LIMIT_ERROR,
 	indexLimitStatus,
@@ -67,13 +68,26 @@ export default function memoryExtension(pi: ExtensionAPI) {
 
 		// Claude Code's startup warning: an instruction file over the char limit
 		// bloats every turn's context. Warn once, pointing at /memory to trim it.
+		// Also warn when several files each fit but together blow the budget —
+		// suppressed if a single file already fired, so a lone big file isn't
+		// reported twice.
 		if (ctx.hasUI) {
+			let total = 0;
+			let anyPerFile = false;
 			for (const entry of memoryEntriesFor(ctx.cwd)) {
 				if (entry.kind !== "file" || !entry.exists) continue;
 				const content = tryReadFile(entry.path);
 				if (content == null) continue;
+				total += content.length;
 				const warning = claudeMdLimitWarning(entryName(entry), content.length);
-				if (warning) ctx.ui.notify(warning, "warning");
+				if (warning) {
+					anyPerFile = true;
+					ctx.ui.notify(warning, "warning");
+				}
+			}
+			if (!anyPerFile) {
+				const combined = combinedLimitWarning(total);
+				if (combined) ctx.ui.notify(combined, "warning");
 			}
 		}
 

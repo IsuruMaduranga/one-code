@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { claudeMdLimitWarning } from "../../extensions/lib/memory.ts";
+import { claudeMdLimitWarning, combinedLimitWarning } from "../../extensions/lib/memory.ts";
 import type { MemoryEntry } from "../../extensions/memory/entries.ts";
 import { EDITOR_HINT, resolveOpen } from "../../extensions/memory/open-external.ts";
 import {
@@ -28,6 +28,18 @@ describe("claudeMdLimitWarning", () => {
 	it("is silent at or under the limit", () => {
 		expect(claudeMdLimitWarning("CLAUDE.md", 40_000)).toBeNull();
 		expect(claudeMdLimitWarning("AGENTS.md", 100)).toBeNull();
+	});
+});
+
+describe("combinedLimitWarning", () => {
+	it("warns on the total when several files together exceed the limit", () => {
+		expect(combinedLimitWarning(25_000 + 20_000)).toBe(
+			"Project instructions total 45.0k chars, over the 40.0k-char limit · /memory to free up context",
+		);
+	});
+	it("is silent at or under the limit", () => {
+		expect(combinedLimitWarning(40_000)).toBeNull();
+		expect(combinedLimitWarning(0)).toBeNull();
 	});
 });
 

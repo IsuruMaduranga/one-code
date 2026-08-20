@@ -217,6 +217,12 @@ checked per loaded file, so a big AGENTS.md pulled in by `@import` is named on i
 own — distinct from the MEMORY.md *index* load-limit, which is a different file
 and a write-time check.
 
+Alongside it, a **combined** warning (`combinedLimitWarning`) fires when the
+instruction files each fit but their total exceeds the limit — "Project
+instructions total N.Nk chars, over the …". It is suppressed whenever a single
+file already tripped the per-file warning, so a lone bloated file is named once,
+not reported twice.
+
 **The picker.** CC's `/memory` is a Memory panel (status line, numbered files with
 descriptions, "Open auto-memory folder", a learn-more link) that opens the choice
 in the external `$EDITOR`/`$VISUAL`. One Code now matches this with a focused

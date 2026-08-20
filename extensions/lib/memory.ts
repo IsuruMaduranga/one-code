@@ -114,6 +114,19 @@ export function claudeMdLimitWarning(name: string, chars: number): string | null
 }
 
 /**
+ * The combined-size warning: when several instruction files each fit but together
+ * blow the budget. `totalChars` is the sum across every instruction file One Code
+ * sends (CLAUDE.md family / AGENTS.md fallback / ONECODE.md). Returns null within
+ * the limit. The caller suppresses this when a single file already tripped
+ * `claudeMdLimitWarning`, so a lone bloated file is named once, not twice.
+ */
+export function combinedLimitWarning(totalChars: number): string | null {
+	if (totalChars <= CLAUDE_MD_CHAR_LIMIT) return null;
+	const k = (n: number) => `${(n / 1000).toFixed(1)}k`;
+	return `Project instructions total ${k(totalChars)} chars, over the ${k(CLAUDE_MD_CHAR_LIMIT)}-char limit · /memory to free up context`;
+}
+
+/**
  * Claude Code stamps bookkeeping fields into a memory file's frontmatter at
  * write time: node_type, the writing session's id, and a modified timestamp
  * (observed in real memory files; `modified` is also documented). A file
