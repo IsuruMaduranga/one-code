@@ -624,10 +624,48 @@ full-session stop awaiting the user).
 of live children (activity · elapsed · ↓ tokens), down-arrow soft focus, and —
 the load-bearing part — **Enter swaps the visible transcript region to the
 selected child's live session** (streaming text, markdown, tool blocks, spinner),
-exactly like CC. Arrows only move the selection; Enter on `main`, esc, or typing
-restores the main transcript; switching agents is select+Enter again (no in-view
-tab/←→ — user-confirmed CC behavior). `x` / `ctrl+x ctrl+k` stop from the strip;
-PgUp/PgDn scroll an open view.
+exactly like CC. With NO view open, arrows move the selection and Enter opens the
+selected child; Enter on `main`, esc, or typing restores the main transcript.
+`x` / `ctrl+x ctrl+k` stop from the strip.
+
+**Read mode: an open transcript makes the panel scrollable with the arrow keys
+(2026-08-20).** The view was only ever scrollable via PgUp/PgDn, and users read
+"not scrollable" — pi's main-screen TUI enables no mouse tracking (only the
+alt-screen does), so the wheel scrolls the terminal's own scrollback, never our
+non-capturing overlay, and the natural gesture (↑/↓) was spent on strip selection.
+Now, **while a view is open** the panel is in read mode: ↑/↓ scroll it a line at a
+time, PgUp/PgDn a page, `Tab` retargets to the next agent (the strip highlight
+follows), and Enter/esc close it. Selection-driven switching is unchanged when no
+view is open. This reverses the earlier "no in-view tab" note above: Tab now
+switches, but only in read mode, where it collided with nothing. The strip's focus
+hint is mode-aware, and `renderTranscript` shows a dim "↑/↓ scroll" affordance on
+its bottom row when the body overflows, so scrolling is discoverable. Arrow-key
+scrolling was live-verified; mouse-wheel scrolling is deliberately NOT supported —
+capturing it means enabling mouse reporting on the main screen, which hijacks the
+terminal's native wheel/selection for the whole session (a bad trade vs. CC's
+keyboard-only model). Covered by `decodeStripKey`/`renderStrip`/`nextAgentTaskId`
+unit tests.
+
+**A finished child must not drop out from under an open viewer.** The strip
+lingers a settled run for `STRIP_LINGER_MS` then prunes it (`buildRows`). If that
+run's transcript was open, pruning emptied the strip, and the widget's teardown
+(`rows.length <= 1` → clear focus + remove widget) orphaned the overlay: with
+focus cleared, the shared `onTerminalInput` hook stopped routing keys to read
+mode, so esc/Enter could not close it — stuck. Fix: the widget tracks the open
+transcript's taskId (`viewedId`, kept in lockstep with index.ts's `view` via
+`setView` on open/retarget/close, error path included), `buildRows` takes a
+`pinnedId` that keeps that run visible past its linger window, and the teardown
+guard also checks `viewedId === undefined`. Because pinning guarantees ≥ 2 rows
+while a view is open, the `rowCount() <= 1 → leave()` early-return can no longer
+fire spuriously either. **Read-mode actions anchor to the viewed run, not the
+strip selection**: once the viewed run scrolls past `MAX_STRIP_ROWS`, `anchor()`
+reassigns the windowed `focusId` to another row, so `x`/Tab keyed off
+`selectedRun()` would hit the WRONG agent (found in review — `x` could kill an
+unrelated running child). So read-mode `stop` targets `viewedTaskId()` and Tab
+uses `nextAgentTaskId(fullRows, viewedId)`. Known follow-up (not done here): the
+overlay's keyboard liveness is downstream of the strip's display liveness; the
+cleaner shape is an explicit view-open gate owning the input hook, like
+`workflow/index.ts`'s `viewerOpen` + self-contained viewer.
 
 **The transcript swap is a full-width NON-CAPTURING overlay, not a repaint.**
 The long-held belief "pi extensions cannot repaint the host transcript region"

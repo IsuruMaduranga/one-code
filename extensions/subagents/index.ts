@@ -446,11 +446,13 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	};
 
 	/**
-	 * Claude Code's agent view: arrows only move the strip selection — Enter
-	 * swaps the transcript region to the selected child (a non-capturing
-	 * full-width overlay composited over the main transcript; the editor keeps
-	 * focus, strip keys keep working). Enter on another row switches the view;
-	 * Enter on `main`, esc, or typing closes it and the main transcript is back.
+	 * Claude Code's agent view: with no view open, arrows move the strip
+	 * selection and Enter swaps the transcript region to the selected child (a
+	 * non-capturing full-width overlay composited over the main transcript; the
+	 * editor keeps focus, strip keys keep working). Once a view IS open the panel
+	 * switches to read mode (see the input hook): arrows/page keys scroll it, Tab
+	 * retargets to the next agent, Enter/esc close it and the main transcript is
+	 * back.
 	 */
 	let view: { retarget(taskId: string): void; scrollBy(delta: number): void; close(): void } | undefined;
 	/** Rows kept clear at the bottom: token counter + editor(3) + mode line + strip hint + strip rows + shell section + cwd/status(2) + one spare. */
@@ -472,6 +474,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				if (currentId === id) return;
 				currentId = id;
 				scroll = 0;
+				panel.setView(id);
 				repaintFn?.();
 			},
 			scrollBy(delta: number) {
@@ -482,10 +485,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				if (closed) return;
 				closed = true;
 				if (view === entry) view = undefined;
+				panel.setView(undefined);
 				doneFn?.(null);
 			},
 		};
 		view = entry;
+		panel.setView(currentId);
 		void (async () => {
 			const prose = await getProse(ctx);
 			if (closed) return;
@@ -528,9 +533,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				},
 				{ overlay: true, overlayOptions: { row: 0, col: 0, width: "100%", nonCapturing: true } },
 			);
-		})().catch(() => {
-			if (view === entry) view = undefined;
-		});
+		})().catch(() => entry.close()); // full teardown (clears view + panel.setView) so state can't desync
 	};
 	const closeView = () => view?.close();
 
@@ -542,6 +545,32 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		const leave = () => {
 			panel.setFocus(undefined);
 			closeView();
+		};
+		type KeyResult = { consume: boolean } | undefined;
+		// Actions shared by both key modes (browse and read), declared once so the
+		// two switches below never drift. esc consumes only when idle — a streaming
+		// turn must stay interruptible.
+		const doLeave = (ctx: ExtensionContext): KeyResult => {
+			leave();
+			return ctx.isIdle() ? { consume: true } : undefined;
+		};
+		// `taskId` targets a specific run (read mode stops the VIEWED agent, which
+		// can differ from the windowed strip selection); default is the selection.
+		const doStop = (taskId?: string): KeyResult => {
+			const id = taskId ?? panel.selectedRun()?.taskId;
+			if (id) stopAgent(id);
+			return { consume: true };
+		};
+		const doStopAll = (): KeyResult => {
+			stopAllAgents();
+			return { consume: true };
+		};
+		/** Unrecognized key: ctrl+x keeps the stop-all chord armed, else drop focus
+		 * (closing any open view) and let the byte resume in the editor. */
+		const closeAndPassthrough = (): KeyResult => {
+			if (chordArmed) return { consume: true };
+			leave();
+			return undefined;
 		};
 		const DOWN_KEYS = new Set(["\x1b[B", "\x1bOB"]);
 		/** Keys the agents branch owns; any other decode (typing, shell-only keys
@@ -555,7 +584,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			return true;
 		};
 		/** The shell-manager stages (chip → list → details); agents keys untouched. */
-		const handleShellKey = (data: string, ctx: ExtensionContext): { consume: boolean } | undefined => {
+		const handleShellKey = (data: string, ctx: ExtensionContext): KeyResult => {
 			// Focus moved to a dialog/overlay — drop soft focus, let it have the key.
 			if (!panel.editorFocused()) {
 				panel.setShellFocus(undefined);
@@ -629,11 +658,48 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				}
 				const decoded = decodeStripKey(data, chordArmed);
 				chordArmed = decoded.chordArmed;
-				if (!decoded.key || !AGENT_KEYS.has(decoded.key)) {
-					if (chordArmed) return { consume: true }; // ctrl+x armed the stop-all chord
-					leave();
-					return undefined; // typing resumes in the editor, byte included
+				// Read mode: while a transcript view is open the arrows/page keys
+				// scroll IT (the natural gesture — pi's main screen has no mouse
+				// wheel, so PageUp/PageDown alone were the only path and few reach
+				// for them), Tab retargets to the next agent, Enter/esc close.
+				if (view) {
+					switch (decoded.key) {
+						case "up":
+							view.scrollBy(1);
+							return { consume: true };
+						case "down":
+							view.scrollBy(-1);
+							return { consume: true };
+						case "pageUp":
+							view.scrollBy(10);
+							return { consume: true };
+						case "pageDown":
+							view.scrollBy(-10);
+							return { consume: true };
+						case "switch": {
+							// Retarget to the next agent, anchored to the VIEWED run in the
+							// full row list (not the windowed selection) so it stays correct
+							// once the viewed run scrolls past MAX_STRIP_ROWS; setView then
+							// moves the strip highlight to it when it is in-window.
+							const nextId = panel.nextAgentAfter(panel.viewedTaskId());
+							if (nextId) openView(ctx, nextId);
+							return { consume: true };
+						}
+						case "open": // Enter toggles the view shut, mirroring Enter-to-open.
+							closeView();
+							return { consume: true };
+						case "leave":
+							return doLeave(ctx);
+						case "stop":
+							// Stop the agent whose transcript is open, not the strip selection.
+							return doStop(panel.viewedTaskId());
+						case "stopAll":
+							return doStopAll();
+						default:
+							return closeAndPassthrough(); // typing closes the view and resumes in the editor
+					}
 				}
+				if (!decoded.key || !AGENT_KEYS.has(decoded.key)) return closeAndPassthrough();
 				switch (decoded.key) {
 					case "up":
 						if (focusIndex === 0) {
@@ -647,9 +713,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						panel.setFocus(Math.min(panel.rowCount() - 1, focusIndex + 1));
 						return { consume: true };
 					case "leave":
-						leave();
-						// While the model streams, esc must still interrupt it — consume only when idle.
-						return ctx.isIdle() ? { consume: true } : undefined;
+						return doLeave(ctx);
 					case "open": {
 						// Claude Code's model: Enter swaps the view to the selection (and
 						// switches an open view); Enter on `main` restores the main
@@ -659,19 +723,14 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						else closeView();
 						return { consume: true };
 					}
-					case "stop": {
-						const run = panel.selectedRun();
-						if (run) stopAgent(run.taskId);
-						return { consume: true };
-					}
+					case "stop":
+						return doStop();
 					case "stopAll":
-						stopAllAgents();
-						return { consume: true };
+						return doStopAll();
 					case "pageUp":
-						view?.scrollBy(10);
-						return { consume: true };
 					case "pageDown":
-						view?.scrollBy(-10);
+						// No transcript open → nothing to scroll; swallow so the page
+						// keys never leak into the editor while the strip holds focus.
 						return { consume: true };
 				}
 			});

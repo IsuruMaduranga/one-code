@@ -44,8 +44,13 @@ export const STRIP_LINGER_MS = 5000;
  * idle resident whose turn ended — only within STRIP_LINGER_MS of finishing
  * (finishedAt is stamped by finish() AND settle()). A nested run whose parent
  * already left the strip surfaces at root level rather than vanishing.
+ *
+ * `pinnedId` keeps one settled run in the strip past its linger window — the
+ * run whose transcript is currently open. Without it a finished child drops out
+ * from under an open viewer, the strip empties, and the panel clears focus,
+ * orphaning the overlay (no key then reaches read mode to close it).
  */
-export function buildRows(runs: LiveRun[], mainBusy: boolean, now: number): PanelRow[] {
+export function buildRows(runs: LiveRun[], mainBusy: boolean, now: number, pinnedId?: string): PanelRow[] {
 	const rows: PanelRow[] = [
 		{
 			label: "main",
@@ -56,7 +61,9 @@ export function buildRows(runs: LiveRun[], mainBusy: boolean, now: number): Pane
 		},
 	];
 	// `runs` arrives newest-first; children under a parent read best in spawn order.
-	const visible = runs.filter((run) => run.status === "running" || (run.finishedAt ?? now) > now - STRIP_LINGER_MS);
+	const visible = runs.filter(
+		(run) => run.status === "running" || run.taskId === pinnedId || (run.finishedAt ?? now) > now - STRIP_LINGER_MS,
+	);
 	const visibleIds = new Set(visible.map((run) => run.taskId));
 	const byParent = new Map<string, LiveRun[]>();
 	const roots: LiveRun[] = [];
@@ -86,6 +93,21 @@ export function buildRows(runs: LiveRun[], mainBusy: boolean, now: number): Pane
 	return rows;
 }
 
+/**
+ * The agent taskId after `taskId` in strip order, wrapping to the first and
+ * skipping the synthetic `main` row; undefined when there are no agent rows.
+ * Tab-to-next-agent in read mode uses this against the FULL row list, anchored
+ * to the viewed run — not the windowed strip selection, which `anchor()` can
+ * reassign once the viewed run scrolls past MAX_STRIP_ROWS (else Tab/x would
+ * act on the wrong agent).
+ */
+export function nextAgentTaskId(rows: PanelRow[], taskId: string | undefined): string | undefined {
+	const ids = rows.filter((row) => row.run).map((row) => row.run!.taskId);
+	if (ids.length === 0) return undefined;
+	const at = taskId ? ids.indexOf(taskId) : -1;
+	return ids[(at + 1) % ids.length];
+}
+
 const STATUS_ROW_STYLE: Partial<Record<LiveStatus, string>> = { failed: "error" };
 
 // ---------------------------------------------------------------------------
@@ -98,6 +120,8 @@ export interface StripInput {
 	rows: PanelRow[];
 	/** Soft-focused row index; undefined when the strip is not focused. */
 	selected?: number;
+	/** A transcript view is open → the strip is in "read" mode (scroll hints). */
+	viewOpen?: boolean;
 	width: number;
 	now: number;
 }
@@ -105,13 +129,17 @@ export interface StripInput {
 /**
  * One line per row: `mark  agentType  activity   elapsed · ↓ tokens`. The
  * selected row is bold and `●`; others `○`. A focus hint precedes the list
- * (only while focused). Overflow past MAX_STRIP_ROWS collapses to "+N more".
+ * (only while focused) — its keys reflect the mode: navigating the strip vs.
+ * reading an open transcript. Overflow past MAX_STRIP_ROWS collapses to "+N more".
  */
 export function renderStrip(input: StripInput, paint: Paint): string[] {
 	const width = Math.max(20, input.width);
 	const out: string[] = [];
 	if (input.selected !== undefined) {
-		out.push(paint.fg("dim", cut("↑/↓ select · ⏎ view · x stop · ctrl+x ctrl+k stop all · esc back", width)));
+		const hint = input.viewOpen
+			? "↑/↓ scroll · PgUp/PgDn page · ⇥ next · x stop · esc back"
+			: "↑/↓ select · ⏎ view · x stop · ctrl+x ctrl+k stop all · esc back";
+		out.push(paint.fg("dim", cut(hint, width)));
 	}
 	const shown = input.rows.slice(0, MAX_STRIP_ROWS);
 	for (const [index, row] of shown.entries()) {
@@ -254,17 +282,23 @@ export function renderTranscript(input: TranscriptInput, paint: Paint): Transcri
 	for (const line of window) out.push(line);
 	while (out.length < input.height - 1) out.push(""); // fill so the status sits at the bottom edge
 
-	// Bottom row: spinner while running, a terminal line otherwise.
+	// Bottom row: spinner (or terminal status) on the left; when the body
+	// overflows, a dim "↑/↓ scroll" affordance right-aligned so scrolling is
+	// discoverable right where the reader is looking (key hints otherwise live in
+	// the strip). splitPaint fuses to the left alone when the hint is "" (body
+	// fits) or the row is too narrow.
+	const scrollHint = maxScroll > 0 ? "↑/↓ scroll" : "";
+	const bottomRow = (text: string, color: string): string => splitPaint(paint, color, text, scrollHint, width, undefined, "dim", false);
 	if (run.status === "running") {
 		const verb = spinnerVerb(run.startedAt, input.now);
 		const spin = `${verb}… (${formatDuration(run.startedAt, undefined, input.now)}${
 			run.tokens.output ? ` · ↓ ${formatTokenCount(run.tokens.output)} tokens` : ""
 		}${run.thinking ? ` · thinking with ${run.thinking} effort` : ""})`;
-		out.push(paint.fg("accent", cut(spin, width)));
+		out.push(bottomRow(spin, "accent"));
 	} else {
-		const done =
-			run.status === "failed" ? paint.fg("error", "✗ Failed") : run.status === "idle" ? paint.fg("dim", "Idle — resident") : paint.fg("dim", "✔ Completed");
-		out.push(cut(done, width));
+		const [text, color] =
+			run.status === "failed" ? ["✗ Failed", "error"] : run.status === "idle" ? ["Idle — resident", "dim"] : ["✔ Completed", "dim"];
+		out.push(bottomRow(text, color));
 	}
 	// The header alone exceeds a very small height; trim so the "exactly
 	// `height` painted lines" contract holds for every caller, not just the
@@ -291,7 +325,12 @@ function chip(label: string): string {
 	return label ? ` ${label} ` : "";
 }
 
-/** Header row: splitRow's layout, painted — left name (dropping the chip when fused/narrow). */
+/**
+ * A `splitRow` layout with each half painted, dropping the right half (showing
+ * the left full-width) when the row fuses/narrows. The right half defaults to
+ * accent+bold (the header chip); callers pass `rightColor`/`boldRight` for other
+ * styles (e.g. the dim, unbold scroll hint on the transcript's bottom row).
+ */
 function splitPaint(
 	paint: Paint,
 	leftColor: string,
@@ -299,9 +338,11 @@ function splitPaint(
 	right: string,
 	width: number,
 	boldLeft?: (t: string) => string,
+	rightColor = "accent",
+	boldRight = true,
 ): string {
 	const paintLeft = (t: string) => paint.fg(leftColor, boldLeft ? boldLeft(t) : t);
 	const row = splitRow(left, right, width);
 	if ("fused" in row) return paintLeft(cut(left, width));
-	return `${paintLeft(row.left)}  ${paint.fg("accent", paint.bold(row.right))}`;
+	return `${paintLeft(row.left)}  ${paint.fg(rightColor, boldRight ? paint.bold(row.right) : row.right)}`;
 }

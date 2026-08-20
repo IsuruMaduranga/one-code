@@ -13,7 +13,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { BackgroundTask } from "../background/registry.ts";
 import type { ShellTaskTracker } from "../lib/shell-tasks.ts";
 import { linesComponent, safeThemeBold, safeThemeInverse, safeThemePaint } from "../lib/tui-render.ts";
-import { buildRows, MAX_STRIP_ROWS, renderStrip, type PanelRow } from "./panel-render.ts";
+import { buildRows, MAX_STRIP_ROWS, nextAgentTaskId, renderStrip, type PanelRow } from "./panel-render.ts";
 import type { LiveRunRegistry } from "./live-runs.ts";
 import {
 	anchorShellFocus,
@@ -43,6 +43,12 @@ export class SubagentWidget {
 	private focusId: string | undefined;
 	/** The shell-manager side of the panel (chip → list → details). */
 	shellFocus: ShellFocus | undefined;
+	/**
+	 * The taskId whose transcript is open, or undefined when none is (set by
+	 * index.ts). Drives the strip's scroll hints AND pins that run in the strip
+	 * so a finished child never drops out from under an open viewer.
+	 */
+	private viewedId: string | undefined;
 	tui: TuiLike | undefined;
 	editorBaseline: unknown;
 
@@ -63,7 +69,7 @@ export class SubagentWidget {
 		} catch {
 			mainBusy = false;
 		}
-		return buildRows(this.registry.list(), mainBusy, Date.now());
+		return buildRows(this.registry.list(), mainBusy, Date.now(), this.viewedId);
 	}
 
 	rowCount(): number {
@@ -82,6 +88,37 @@ export class SubagentWidget {
 		this.focusIndex = index;
 		this.focusId = index === undefined ? undefined : (this.rows()[index]?.run?.taskId ?? "main");
 		this.render();
+	}
+
+	/** index.ts sets the open transcript's taskId (or undefined on close) so the
+	 * strip switches to scroll hints and pins that run visible. Also parks the
+	 * strip highlight on the viewed run while it is within the visible window, so
+	 * the ● tracks what is on screen (read-mode actions target the viewed run
+	 * regardless — see selectedRun's window caveat). */
+	setView(taskId: string | undefined): void {
+		if (this.viewedId === taskId) return;
+		this.viewedId = taskId;
+		if (taskId !== undefined) {
+			const rows = this.rows();
+			const idx = rows.findIndex((r) => r.run?.taskId === taskId);
+			if (idx >= 0 && idx < Math.min(rows.length, MAX_STRIP_ROWS)) {
+				this.focusIndex = idx;
+				this.focusId = taskId;
+			}
+		}
+		this.render();
+	}
+
+	/** The taskId whose transcript is open (undefined when none). Read-mode
+	 * actions (stop, next-agent) anchor to this, not the windowed selection. */
+	viewedTaskId(): string | undefined {
+		return this.viewedId;
+	}
+
+	/** The agent to retarget to on Tab, relative to the viewed run in the FULL
+	 * row list (see nextAgentTaskId — avoids the windowed-selection desync). */
+	nextAgentAfter(taskId: string | undefined): string | undefined {
+		return nextAgentTaskId(this.rows(), taskId);
 	}
 
 	// --- Shell-manager state (Claude Code's ↓-to-manage flow) ---
@@ -203,7 +240,9 @@ export class SubagentWidget {
 		const lingering = shellVisible && this.shellTasks().length > this.runningShellCount();
 		this.syncTicker(rows.length > 1 || shellStage === "list" || shellStage === "details" || lingering);
 		// Only the synthetic `main` row exists and no shells → nothing to show yet.
-		if (rows.length <= 1 && !shellVisible) {
+		// Never tear down while a transcript view is open (viewedId set): clearing
+		// focus here would orphan the overlay with no key path to close it.
+		if (rows.length <= 1 && !shellVisible && this.viewedId === undefined) {
 			ctx.ui.setWidget(WIDGET_KEY, undefined);
 			this.focusIndex = undefined;
 			this.focusId = undefined;
@@ -226,7 +265,7 @@ export class SubagentWidget {
 				const paint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme), inverse: safeThemeInverse(theme) };
 				return linesComponent((width) => {
 					const lines: string[] = [];
-					if (showStrip) lines.push(...renderStrip({ rows, selected, width: width - 1, now }, paint));
+					if (showStrip) lines.push(...renderStrip({ rows, selected, viewOpen: this.viewedId !== undefined, width: width - 1, now }, paint));
 					if (shellVisible) {
 						if (lines.length) lines.push("");
 						lines.push(...this.shellSectionLines(width - 1, paint));

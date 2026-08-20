@@ -10,6 +10,7 @@ import {
 import {
 	buildRows,
 	MAX_STRIP_ROWS,
+	nextAgentTaskId,
 	renderStrip,
 	renderTranscript,
 	spinnerVerb,
@@ -246,6 +247,18 @@ describe("buildRows", () => {
 		expect(reg.get("r1")!.status).toBe("running");
 		expect(reg.get("r1")!.finishedAt).toBeUndefined();
 	});
+
+	it("pins the viewed run in the strip past its linger window (open-transcript case)", () => {
+		const reg = new LiveRunRegistry();
+		register(reg, { taskId: "viewed", name: "viewed" });
+		reg.finish("viewed", false);
+		reg.get("viewed")!.finishedAt = 10_000;
+		const now = 10_000 + STRIP_LINGER_MS + 1;
+		// Lingered out normally…
+		expect(buildRows(reg.list(), false, now).map((r) => r.run?.taskId)).toEqual([undefined]);
+		// …but stays while its transcript is the pinned (open) one.
+		expect(buildRows(reg.list(), false, now, "viewed").map((r) => r.run?.taskId)).toEqual([undefined, "viewed"]);
+	});
 });
 
 describe("renderStrip", () => {
@@ -263,6 +276,13 @@ describe("renderStrip", () => {
 		const focused = renderStrip({ rows, selected: 1, width: 80, now: 5000 }, paint).map(strip);
 		expect(focused[0]).toContain("⏎ view");
 		expect(focused[0]).toContain("x stop");
+
+		// With a transcript open the hint switches to read-mode keys (scroll/switch/close).
+		const reading = renderStrip({ rows, selected: 1, viewOpen: true, width: 80, now: 5000 }, paint).map(strip);
+		expect(reading[0]).toContain("↑/↓ scroll");
+		expect(reading[0]).toContain("PgUp/PgDn page");
+		expect(reading[0]).toContain("⇥ next");
+		expect(reading[0]).not.toContain("⏎ view");
 		const agentRow = focused.find((l) => l.includes("general-purpose"))!;
 		expect(agentRow).toContain("●");
 		expect(agentRow).toContain("Reading tui-render.ts");
@@ -351,6 +371,18 @@ describe("renderTranscript", () => {
 		expect(backJoined).not.toContain("Read(f39.ts)");
 	});
 
+	it("surfaces a scroll affordance on the bottom row only when the body overflows", () => {
+		const tall = new LiveRunRegistry();
+		const tid = register(tall, { task: "" });
+		for (let i = 0; i < 40; i++) tall.block(tid, { kind: "call", tool: "Read", text: `f${i}.ts` });
+		// Overflowing body → a "↑/↓ scroll" affordance on the bottom row.
+		const overflowing = renderTranscript({ run: tall.get(tid)!, width: 80, height: 14, scroll: 0, now: 4000 }, paint).lines.map(strip);
+		expect(overflowing.at(-1)).toContain("↑/↓ scroll");
+		// A short transcript that fits shows no scroll affordance.
+		const short = renderTranscript({ run: reg.get(id)!, width: 80, height: 40, scroll: 0, now: 4000 }, paint).lines.map(strip);
+		expect(short.some((l) => l.includes("↑/↓ scroll"))).toBe(false);
+	});
+
 	it("fills to exactly `height` lines with the live status at the bottom edge (overlay must paint every row)", () => {
 		const out = renderTranscript({ run: reg.get(id)!, width: 80, height: 24, scroll: 0, now: 4000 }, paint);
 		expect(out.lines).toHaveLength(24);
@@ -388,6 +420,23 @@ describe("renderTranscript", () => {
 	});
 });
 
+describe("nextAgentTaskId", () => {
+	it("cycles through agent rows (skipping main), wrapping, anchored to the given run", () => {
+		const reg = new LiveRunRegistry();
+		register(reg, { taskId: "a", name: "a" });
+		register(reg, { taskId: "b", name: "b" });
+		register(reg, { taskId: "c", name: "c" });
+		const rows = buildRows(reg.list(), false, 5000); // [main, c, b, a] (newest-first)
+		expect(nextAgentTaskId(rows, "c")).toBe("b");
+		expect(nextAgentTaskId(rows, "a")).toBe("c"); // wraps past the end to the first agent
+		expect(nextAgentTaskId(rows, undefined)).toBe("c"); // no anchor → first agent
+		expect(nextAgentTaskId(rows, "gone")).toBe("c"); // stale id → first agent
+	});
+	it("returns undefined when there are no agent rows", () => {
+		expect(nextAgentTaskId(buildRows([], false, 0), "x")).toBeUndefined();
+	});
+});
+
 describe("spinnerVerb", () => {
 	it("advances over time and is stable within a 3s window", () => {
 		expect(spinnerVerb(0, 0)).toBe(spinnerVerb(0, 2000));
@@ -413,10 +462,11 @@ describe("decodeStripKey", () => {
 		expect(decodeStripKey("\x1b[5~", false).key).toBe("pageUp");
 		expect(decodeStripKey("\x1b[6~", false).key).toBe("pageDown");
 		expect(decodeStripKey("a", false).key).toBeUndefined();
-		// No tab/right agent switching — CC switches via select + Enter. Left and
-		// space decode (the shell stages use them); the agents branch treats both
-		// like typing.
-		expect(decodeStripKey("\t", false).key).toBeUndefined();
+		// Tab is `switch` — index.ts acts on it only while a transcript view is
+		// open (retarget to the next agent); with no view open the agents branch
+		// treats it like typing. Right still decodes to nothing; left and space
+		// decode (the shell stages use them).
+		expect(decodeStripKey("\t", false).key).toBe("switch");
 		expect(decodeStripKey("\x1b[C", false).key).toBeUndefined();
 		expect(decodeStripKey("\x1b[D", false).key).toBe("left");
 		expect(decodeStripKey(" ", false).key).toBe("space");
