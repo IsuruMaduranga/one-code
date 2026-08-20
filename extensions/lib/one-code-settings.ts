@@ -9,14 +9,14 @@
  *
  * Two scopes, mirroring the memory layout so a repo's worktrees and
  * subdirectories share one file:
- *   ~/.one-code/settings.json                          (user, global)
- *   ~/.one-code/projects/<slug>/settings.json          (per git repo, else cwd)
+ *   ~/.onecode/settings.json                          (user, global)
+ *   ~/.onecode/projects/<slug>/settings.json          (per git repo, else cwd)
  *
  * The state root is resolved against an explicit `home` (not `os.homedir()`)
  * so callers that already thread `home` — the auto-mode and subagent settings
- * loaders — stay hermetic under a temp home in tests. `ONE_CODE_STATE_DIR` is
+ * loaders — stay hermetic under a temp home in tests. `ONECODE_STATE_DIR` is
  * honoured exactly as `oneCodeStateDir()` does; when it is unset the root is
- * `<home>/.one-code`, which equals `oneCodeStateDir()` in production where
+ * `<home>/.onecode`, which equals `oneCodeStateDir()` in production where
  * `home === os.homedir()`.
  */
 
@@ -27,13 +27,13 @@ import { findGitRoot } from "./git.ts";
 import { projectSlug } from "./memory.ts";
 import { oneCodeStateDir } from "./paths.ts";
 
-/** `~/.one-code/settings.json` — One Code's user-scope settings (writable). */
+/** `~/.onecode/settings.json` — One Code's user-scope settings (writable). */
 export function oneCodeSettingsPath(home: string, env: NodeJS.ProcessEnv = process.env): string {
 	return join(oneCodeStateDir(env, home), "settings.json");
 }
 
 /**
- * `~/.one-code/projects/<slug>/settings.json` — One Code's per-repo settings
+ * `~/.onecode/projects/<slug>/settings.json` — One Code's per-repo settings
  * (writable). Keyed by the git repository root when there is one (shared by
  * worktrees and subdirectories), else the cwd — the same slug the memory dir uses.
  */

@@ -8,7 +8,7 @@ import { hasStoredTokens, readAuth, updateAuth, writeAuth } from "../../extensio
 import { McpOAuthProvider } from "../../extensions/mcp/oauth/provider.ts";
 
 let home: string;
-const env: NodeJS.ProcessEnv = {}; // no ONE_CODE_STATE_DIR → <home>/.one-code
+const env: NodeJS.ProcessEnv = {}; // no ONECODE_STATE_DIR → <home>/.onecode
 
 beforeEach(() => {
 	home = mkdtempSync(join(tmpdir(), "onecode-mcp-"));

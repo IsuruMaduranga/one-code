@@ -12,7 +12,7 @@ pick a provider and paste a key:
 
 ```bash
 cd your-project
-one-code
+onecode
 ```
 
 Two providers hand out free models you can try at no cost:

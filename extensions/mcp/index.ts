@@ -77,7 +77,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 	// http servers that returned a 401 with no stored tokens — authNeeded via OAuth,
 	// distinct from a missing-env authNeeded (which Authenticate cannot fix).
 	const oauthNeeded = new Set<string>();
-	// Servers the user disabled (persisted in ~/.one-code) — discovered but not connected.
+	// Servers the user disabled (persisted in ~/.onecode) — discovered but not connected.
 	let disabledNames = new Set<string>();
 	// Config file paths contributed by plugins, so the panel can group them.
 	let pluginConfigPaths = new Set<string>();

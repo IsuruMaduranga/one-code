@@ -404,8 +404,8 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 				deps,
 				`rejected:${key}`,
 				isConfigured
-					? `Auto mode cannot use ${key} from autoMode.classifierModel (${lastError}). Set a different model in ~/.one-code/settings.json.`
-					: `Auto mode cannot use ${key} as its classifier (${lastError}); trying another model. Set autoMode.classifierModel in ~/.one-code/settings.json to choose one.`,
+					? `Auto mode cannot use ${key} from autoMode.classifierModel (${lastError}). Set a different model in ~/.onecode/settings.json.`
+					: `Auto mode cannot use ${key} as its classifier (${lastError}); trying another model. Set autoMode.classifierModel in ~/.onecode/settings.json to choose one.`,
 				"warning",
 			);
 		}
@@ -429,7 +429,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 	// Every candidate was unusable — say which knob fixes it.
 	return {
 		decision: "block",
-		reason: `No usable auto-mode classifier model (last error: ${lastError}). Set autoMode.classifierModel in ~/.one-code/settings.json.`,
+		reason: `No usable auto-mode classifier model (last error: ${lastError}). Set autoMode.classifierModel in ~/.onecode/settings.json.`,
 		tier: "unmatched",
 	};
 }

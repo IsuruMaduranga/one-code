@@ -4,7 +4,7 @@
  * ## Which files are read, and why that list is short
  *
  * User settings (`~/.claude/settings.json`), One Code's own user settings
- * (`~/.one-code/settings.json`), and managed settings only — **never the
+ * (`~/.onecode/settings.json`), and managed settings only — **never the
  * project's `.claude/settings.json` or `.claude/settings.local.json`**. Both
  * project files live in the repository, so a checked-in file or a build step
  * that writes one could otherwise hand itself classifier permissions and switch
@@ -12,16 +12,16 @@
  * (it dropped `settings.local.json` in v2.1.207); this is that property, not an
  * omission.
  *
- * ## Read vs. write: `.claude` is borrowed, `~/.one-code` is ours
+ * ## Read vs. write: `.claude` is borrowed, `~/.onecode` is ours
  *
  * The CC-schema keys (`environment`, `hard_deny`/`soft_deny`/`allow`) are read
  * from `~/.claude` too, because Claude Code's own `/auto-mode-setup` writes them
  * there and reading them is the compatibility promise. But One Code's *own*
  * keys — `classifierModel` / `classifierModelSetFor`, which Claude Code does not
- * define — are read from `~/.one-code` and managed settings only, never from
+ * define — are read from `~/.onecode` and managed settings only, never from
  * `~/.claude`: One Code used to write them there, and a stale value (a model the
  * session cannot reach) must not keep biting. Every write goes to
- * `~/.one-code/settings.json`; One Code never mutates Claude Code's files. See
+ * `~/.onecode/settings.json`; One Code never mutates Claude Code's files. See
  * "Own state, borrowed config" in docs/decisions/memory-state.md.
  *
  * ## The customization surface (CC 2.1.233's own)
@@ -103,7 +103,7 @@ function managedSettingsPaths(): string[] {
  * auto-mode keys (`classifierModel`, `classifierModelSetFor`) are deliberately
  * NOT collected from the borrowed `claudeUserSettingsPath` — Claude Code does not
  * define them, and One Code once wrote them there, so a stale value must not
- * survive the move to `~/.one-code` (see the read guard in the loader).
+ * survive the move to `~/.onecode` (see the read guard in the loader).
  */
 export function autoModeSettingsPaths(home: string): string[] {
 	return [claudeUserSettingsPath(home), oneCodeSettingsPath(home), ...managedSettingsPaths()];
@@ -283,13 +283,13 @@ export function loadAutoModeConfigWithDiagnostics(home: string): AutoModeConfigL
 		if (typeof block.classifyAllShell === "boolean") collected.classifyAllShell = block.classifyAllShell;
 		if (typeof block.logDecisions === "boolean") collected.logDecisions = block.logDecisions;
 		// `classifierModel` is One Code's own key, not Claude Code's. It is read from
-		// `~/.one-code` and managed settings only — never from `~/.claude`, where an
+		// `~/.onecode` and managed settings only — never from `~/.claude`, where an
 		// old One Code build may have left a stale value. A leftover in `~/.claude` is
 		// surfaced as a diagnostic so the user knows why it stopped applying.
 		if (typeof block.classifierModel === "string" && block.classifierModel.trim()) {
 			if (path === claudeUser) {
 				diagnostics.push(
-					`${path}: autoMode.classifierModel is ignored here — One Code reads it from ~/.one-code/settings.json (set it with /auto-mode model)`,
+					`${path}: autoMode.classifierModel is ignored here — One Code reads it from ~/.onecode/settings.json (set it with /auto-mode model)`,
 				);
 			} else {
 				collected.classifierModel = block.classifierModel.trim();
@@ -330,7 +330,7 @@ export function loadAutoModeConfig(home: string): AutoModeConfig {
 
 /**
  * Persist `autoMode.classifierModel` in One Code's own settings file
- * (`~/.one-code/settings.json`), preserving every other key. `undefined` removes
+ * (`~/.onecode/settings.json`), preserving every other key. `undefined` removes
  * the setting. Never touches Claude Code's files — this is One Code's key, and
  * the knob that may move the classifier to another provider, so it lives in One
  * Code's own state (see the module comment).

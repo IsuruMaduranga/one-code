@@ -152,7 +152,7 @@ describe("decide", () => {
 	});
 
 	it("plan mode allows writes to the plan file only", () => {
-		const planFilePath = "/home/user/.one-code/plans/brisk-otter-map.md";
+		const planFilePath = "/home/user/.onecode/plans/brisk-otter-map.md";
 		const withPlan = { ...base, mode: "plan" as const, planFilePath };
 		const allowed = decide({ ...withPlan, toolName: "write", subject: planFilePath });
 		expect(allowed.decision).toBe("allow");
@@ -160,7 +160,7 @@ describe("decide", () => {
 		expect(decide({ ...withPlan, toolName: "edit", subject: planFilePath }).decision).toBe("allow");
 		// Anything else stays denied, including a sibling in the same directory.
 		expect(decide({ ...withPlan, toolName: "write", subject: "a.ts" }).decision).toBe("deny");
-		expect(decide({ ...withPlan, toolName: "write", subject: "/home/user/.one-code/plans/other.md" }).decision).toBe(
+		expect(decide({ ...withPlan, toolName: "write", subject: "/home/user/.onecode/plans/other.md" }).decision).toBe(
 			"deny",
 		);
 		// The carve-out is writes only — bash aimed at the plan file is not a write.
@@ -169,9 +169,9 @@ describe("decide", () => {
 
 	it("matches the plan file across ~, relative, and resolved spellings", () => {
 		const home = process.env.HOME ?? "";
-		const planFilePath = "~/.one-code/plans/brisk-otter-map.md";
+		const planFilePath = "~/.onecode/plans/brisk-otter-map.md";
 		const withPlan = { ...base, mode: "plan" as const, planFilePath };
-		expect(decide({ ...withPlan, toolName: "write", subject: `${home}/.one-code/plans/brisk-otter-map.md` }).decision).toBe(
+		expect(decide({ ...withPlan, toolName: "write", subject: `${home}/.onecode/plans/brisk-otter-map.md` }).decision).toBe(
 			"allow",
 		);
 		// A symlink spelling counts when its resolution lands on the plan file.
@@ -179,7 +179,7 @@ describe("decide", () => {
 			...withPlan,
 			toolName: "write",
 			subject: "/tmp/link.md",
-			resolvedSubject: `${home}/.one-code/plans/brisk-otter-map.md`,
+			resolvedSubject: `${home}/.onecode/plans/brisk-otter-map.md`,
 		});
 		expect(viaSymlink.decision).toBe("allow");
 	});
@@ -191,14 +191,14 @@ describe("decide", () => {
 	});
 
 	it("deny rules still beat the plan-file carve-out", () => {
-		const planFilePath = "/home/user/.one-code/plans/brisk-otter-map.md";
+		const planFilePath = "/home/user/.onecode/plans/brisk-otter-map.md";
 		const d = decide({
 			...base,
 			mode: "plan",
 			planFilePath,
 			toolName: "write",
 			subject: planFilePath,
-			deny: rules(["Write(/home/user/.one-code/**)"]),
+			deny: rules(["Write(/home/user/.onecode/**)"]),
 		});
 		expect(d.decision).toBe("deny");
 	});

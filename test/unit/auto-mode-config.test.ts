@@ -26,8 +26,8 @@ afterEach(() => {
 
 const writeUserSettings = (data: unknown) => writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify(data));
 const writeOneCodeSettings = (data: unknown) => {
-	mkdirSync(join(home, ".one-code"), { recursive: true });
-	writeFileSync(join(home, ".one-code", "settings.json"), JSON.stringify(data));
+	mkdirSync(join(home, ".onecode"), { recursive: true });
+	writeFileSync(join(home, ".onecode", "settings.json"), JSON.stringify(data));
 };
 
 describe("spliceDefaults", () => {
@@ -62,7 +62,7 @@ describe("loadAutoModeConfig", () => {
 	});
 
 	it("reads classifyAllShell from user settings and classifierModel from One Code settings", () => {
-		// classifierModel is One Code's own key, read from ~/.one-code, not ~/.claude.
+		// classifierModel is One Code's own key, read from ~/.onecode, not ~/.claude.
 		writeUserSettings({ autoMode: { classifyAllShell: true } });
 		writeOneCodeSettings({ autoMode: { classifierModel: "anthropic/claude-haiku-4-5" } });
 		const config = loadAutoModeConfig(home);
@@ -202,8 +202,8 @@ describe("loadAutoModeConfig", () => {
 
 	it("returns an empty allow list when a settings file is absent or malformed", () => {
 		expect(claudeUserPermissionAllow(home)).toEqual([]);
-		mkdirSync(join(home, ".one-code"), { recursive: true });
-		writeFileSync(join(home, ".one-code", "settings.json"), "{not json");
+		mkdirSync(join(home, ".onecode"), { recursive: true });
+		writeFileSync(join(home, ".onecode", "settings.json"), "{not json");
 		expect(oneCodePermissionAllow(home)).toEqual([]);
 	});
 

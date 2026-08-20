@@ -61,7 +61,7 @@ when it needs it.
 
 Run `/mcp` to open the server manager. It groups servers, shows the status of
 each, and offers per-server actions to reconnect, enable, or disable a server.
-Disabling a server is saved to `~/.one-code`, so it stays disabled across
+Disabling a server is saved to `~/.onecode`, so it stays disabled across
 sessions. Servers that need authorization support an OAuth sign-in flow that
 opens your browser.
 

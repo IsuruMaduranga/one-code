@@ -16,7 +16,7 @@ Rules match tools by name and by argument. Claude Code's PascalCase tool names
 work in these rules, so a setup you wrote for Claude Code applies as it is.
 
 To add a rule during a session, run `/allow`. To review the current rules, run
-`/permissions`. Rules One Code adds for you are saved to `~/.one-code`, not to
+`/permissions`. Rules One Code adds for you are saved to `~/.onecode`, not to
 `~/.claude`.
 
 ## Permission modes
@@ -42,7 +42,7 @@ prompts for the current session.
 
 Plan mode lets the model investigate and write a plan without changing your
 code. In this mode the model can only write to a dedicated plan file under
-`~/.one-code/plans`; every other write is blocked.
+`~/.onecode/plans`; every other write is blocked.
 
 When the model finishes planning, an approval dialog shows the plan. Nothing
 runs until you approve it. The plan file survives context compaction, and you

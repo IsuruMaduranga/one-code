@@ -1,5 +1,5 @@
 /**
- * Persisted "disabled MCP server" overrides (pure-ish — touches only ~/.one-code).
+ * Persisted "disabled MCP server" overrides (pure-ish — touches only ~/.onecode).
  *
  * The /mcp panel's Disable/Enable action persists across sessions here rather
  * than by mutating the user's `~/.claude.json` or a plugin's `.mcp.json`: those

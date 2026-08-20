@@ -185,11 +185,11 @@ describe("auditPermissionAllow", () => {
 describe("persistAutoModeSetup / removeOneCodePermissionAllow", () => {
 	let home: string;
 	// Both writers persist to One Code's own file, never into ~/.claude.
-	const settingsPath = () => join(home, ".one-code", "settings.json");
+	const settingsPath = () => join(home, ".onecode", "settings.json");
 
 	beforeEach(() => {
 		home = mkdtempSync(join(tmpdir(), "cc-automode-setup-"));
-		mkdirSync(join(home, ".one-code"), { recursive: true });
+		mkdirSync(join(home, ".onecode"), { recursive: true });
 	});
 
 	afterEach(() => {

@@ -1054,7 +1054,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			return;
 		}
 		resetClassifierChoice();
-		ctx.ui.notify(`Auto-mode classifier set to ${resolved} (saved to ~/.one-code/settings.json).`, "info");
+		ctx.ui.notify(`Auto-mode classifier set to ${resolved} (saved to ~/.onecode/settings.json).`, "info");
 	};
 
 	/** `/auto-mode model` — show the picker, or apply a named model / `clear`. */
@@ -1151,7 +1151,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		}
 
 		ctx.ui.notify(`Proposed auto-mode setup\n\n${renderProposal(draft)}`, "info");
-		const decision = await ctx.ui.select("Save this auto-mode setup to ~/.one-code/settings.json?", [
+		const decision = await ctx.ui.select("Save this auto-mode setup to ~/.onecode/settings.json?", [
 			"Looks good — save it",
 			"Discard",
 		]);
@@ -1197,7 +1197,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		}
 		if (removable.length === 0) return;
 		const act = await ctx.ui.select(
-			`Remove ${removable.length} broad ${removable.length === 1 ? "entry" : "entries"} from One Code settings (~/.one-code/settings.json)?`,
+			`Remove ${removable.length} broad ${removable.length === 1 ? "entry" : "entries"} from One Code settings (~/.onecode/settings.json)?`,
 			["Remove them", "Leave them"],
 		);
 		if (act === "Remove them") {
@@ -1313,8 +1313,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				return;
 			}
 			// Allow rules are One Code's own state — never written into Claude Code's
-			// files. `global` lands in ~/.one-code/settings.json; a project rule in a
-			// per-repo file under ~/.one-code, keyed by the repo root.
+			// files. `global` lands in ~/.onecode/settings.json; a project rule in a
+			// per-repo file under ~/.onecode, keyed by the repo root.
 			const target = global ? oneCodeSettingsPath(os.homedir()) : oneCodeProjectSettingsPath(ctx.cwd, os.homedir());
 			persistAllowRule(raw, target);
 			allow.push(rule);

@@ -5,7 +5,7 @@
  * directory and One Code treats it as a read-only compatibility surface
  * (settings, skills, agents, plugins, CLAUDE.md); everything One Code
  * *generates* — plan files, and over time the rest of its state — lands in
- * One Code's own `~/.one-code`, so neither product's artifacts mingle with the
+ * One Code's own `~/.onecode`, so neither product's artifacts mingle with the
  * other's. See "Own state, borrowed config" in docs/decisions.md.
  */
 
@@ -24,8 +24,8 @@ export function claudeConfigDir(env: Record<string, string | undefined> = proces
  * One Code's own state dir — everything One Code generates goes here. `home`
  * defaults to the real home; callers that already thread a `home` (the settings
  * loaders, hermetic in tests) pass it so the root stays under that home when
- * `ONE_CODE_STATE_DIR` is unset.
+ * `ONECODE_STATE_DIR` is unset.
  */
 export function oneCodeStateDir(env: Record<string, string | undefined> = process.env, home: string = homedir()): string {
-	return env.ONE_CODE_STATE_DIR || join(home, ".one-code");
+	return env.ONECODE_STATE_DIR || join(home, ".onecode");
 }

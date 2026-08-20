@@ -13,7 +13,7 @@
  * - `subagentModel` — One Code's own top-level setting, same shape as
  *   `autoMode.classifierModel`. Wins over the env var when both are set,
  *   because it is the more specific statement of intent. It is One Code's key,
- *   not Claude Code's: it is written to and read from `~/.one-code/settings.json`
+ *   not Claude Code's: it is written to and read from `~/.onecode/settings.json`
  *   (+ managed settings), never from `~/.claude`, where an old One Code build may
  *   have left a stale value the current session cannot reach. Claude Code's own
  *   `CLAUDE_CODE_SUBAGENT_MODEL` env block is still honoured from `~/.claude`
@@ -68,7 +68,7 @@ export function loadSubagentDefault(home: string, env: NodeJS.ProcessEnv = proce
 	let settingSetFor: string | undefined;
 	let settingsEnv: string | undefined;
 
-	// `subagentModel` is One Code's own key — read from `~/.one-code` and managed
+	// `subagentModel` is One Code's own key — read from `~/.onecode` and managed
 	// settings, never from `~/.claude`, where an old build may have left a stale
 	// value. Claude Code's `CLAUDE_CODE_SUBAGENT_MODEL` env block IS Claude Code's,
 	// so it is still read from every file.
@@ -123,7 +123,7 @@ export function applicableSubagentDefault(
 
 /**
  * Persist `subagentModel` in One Code's own settings file
- * (`~/.one-code/settings.json`), preserving every other key. `undefined` removes
+ * (`~/.onecode/settings.json`), preserving every other key. `undefined` removes
  * the setting. Never touches Claude Code's files: this is One Code's key, and the
  * default may move subagent work to another provider, so it lives in One Code's
  * own state (see the module comment).

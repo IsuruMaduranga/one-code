@@ -1,6 +1,6 @@
 /**
  * plan-mode extension — Claude Code's EnterPlanMode / ExitPlanMode tools,
- * file-based: the plan lives at ~/.one-code/plans/<slug>.md, the one path plan
+ * file-based: the plan lives at ~/.onecode/plans/<slug>.md, the one path plan
  * mode may write. The path is announced to the model in an every-turn reminder
  * and to the permissions extension over the event bus, and exit_plan_mode
  * reads the file rather than taking the plan as a parameter.

@@ -12,11 +12,11 @@ Look through my transcripts' MCP and bash tool calls, and based on those, make a
 
 The format for permissions is: `Bash(foo*)`, `Bash(foo)`, `Bash(foo bar *)`, `mcp__slack__slack_read_thread`, etc. Claude Code's PascalCase tool names are accepted too and mapped automatically.
 
-Then, add these to One Code's per-repo settings at `~/.one-code/projects/<slug>/settings.json` under `permissions.allow`. Never write to `~/.claude` — that is Claude Code's directory and One Code treats it as read-only.
+Then, add these to One Code's per-repo settings at `~/.onecode/projects/<slug>/settings.json` under `permissions.allow`. Never write to `~/.claude` — that is Claude Code's directory and One Code treats it as read-only.
 
 ## Steps
 
-1. **Locate transcripts.** One Code / pi session transcripts live under the agent state dir at `~/.one-code/agent/sessions/<sanitized-cwd>/*.jsonl` (the base honours `PI_CODING_AGENT_DIR`, which the bundled app sets to `~/.one-code/agent`; a stock pi install uses its own agent dir). Each line is a JSON object. Tool calls appear as assistant messages whose content carries tool-call entries: a tool name (e.g. `Bash`, `mcp__slack__slack_read_thread`) and, for a shell tool, the command string in its input.
+1. **Locate transcripts.** One Code / pi session transcripts live under the agent state dir at `~/.onecode/agent/sessions/<sanitized-cwd>/*.jsonl` (the base honours `PI_CODING_AGENT_DIR`, which the bundled app sets to `~/.onecode/agent`; a stock pi install uses its own agent dir). Each line is a JSON object. Tool calls appear as assistant messages whose content carries tool-call entries: a tool name (e.g. `Bash`, `mcp__slack__slack_read_thread`) and, for a shell tool, the command string in its input.
 
    Scan the recent transcripts across the sessions dir — not just the current project — so the allowlist reflects your actual usage. Cap the scan at a reasonable number of recent sessions (e.g. 50 most-recently-modified JSONL files) so this stays fast.
 
@@ -54,7 +54,7 @@ Then, add these to One Code's per-repo settings at `~/.one-code/projects/<slug>/
    | 2 | `Bash(gh pr view *)` | 87 | PR inspection |
    | 3 | `mcp__slack__slack_read_thread` | 54 | Slack thread reads |
 
-8. **Merge into the per-repo settings** at `~/.one-code/projects/<slug>/settings.json` (not `~/.one-code/settings.json`, not anything under `~/.claude`). Create the file if it doesn't exist. Preserve existing keys and existing entries in `permissions.allow`; de-duplicate against what's already there; don't remove anything; don't reorder unrelated fields.
+8. **Merge into the per-repo settings** at `~/.onecode/projects/<slug>/settings.json` (not `~/.onecode/settings.json`, not anything under `~/.claude`). Create the file if it doesn't exist. Preserve existing keys and existing entries in `permissions.allow`; de-duplicate against what's already there; don't remove anything; don't reorder unrelated fields.
 
 9. **Report back.** Tell the user what you added (count + a few examples), what was already in the allowlist, and what you skipped and why (e.g. "dropped `rm` and `git push` — not read-only; dropped `cat`/`ls`/`git status` — already auto-allowed, no rule needed").
 

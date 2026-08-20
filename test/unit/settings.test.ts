@@ -86,12 +86,12 @@ describe("loadPermissionSettings", () => {
 	});
 
 	it("merges One Code's own global and per-repo allow files alongside .claude", () => {
-		// /allow persists to ~/.one-code (global) and a per-repo file under it — those
+		// /allow persists to ~/.onecode (global) and a per-repo file under it — those
 		// rules are read back here, never from a write into Claude Code's files.
 		write(join(home, ".claude", "settings.json"), { permissions: { allow: ["Bash(ls:*)"] } });
-		mkdirSync(join(home, ".one-code"), { recursive: true });
-		write(join(home, ".one-code", "settings.json"), { permissions: { allow: ["Read"] } });
-		const projectDir = join(home, ".one-code", "projects", cwd.replace(/[^A-Za-z0-9-]/g, "-"));
+		mkdirSync(join(home, ".onecode"), { recursive: true });
+		write(join(home, ".onecode", "settings.json"), { permissions: { allow: ["Read"] } });
+		const projectDir = join(home, ".onecode", "projects", cwd.replace(/[^A-Za-z0-9-]/g, "-"));
 		mkdirSync(projectDir, { recursive: true });
 		write(join(projectDir, "settings.json"), { permissions: { allow: ["Bash(npm test:*)"] } });
 
@@ -102,8 +102,8 @@ describe("loadPermissionSettings", () => {
 	it("never takes defaultMode from a One Code file", () => {
 		// One Code writes only rules to its files; a hand-edited defaultMode there
 		// (auto included) must not flip the session — that stays a .claude decision.
-		mkdirSync(join(home, ".one-code"), { recursive: true });
-		write(join(home, ".one-code", "settings.json"), { permissions: { defaultMode: "auto" } });
+		mkdirSync(join(home, ".onecode"), { recursive: true });
+		write(join(home, ".onecode", "settings.json"), { permissions: { defaultMode: "auto" } });
 		expect(loadPermissionSettings(cwd, home).defaultMode).toBeUndefined();
 	});
 });

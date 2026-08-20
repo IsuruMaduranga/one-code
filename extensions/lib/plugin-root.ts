@@ -7,7 +7,7 @@
  * keep working read-through; see lib/plugins.ts).
  *
  * Callers pass `getAgentDir()` so the root follows the distribution mode:
- * `~/.one-code/agent/plugins` under the bundled app (PI_CODING_AGENT_DIR),
+ * `~/.onecode/agent/plugins` under the bundled app (PI_CODING_AGENT_DIR),
  * `~/.pi/plugins` when running as a plain pi extension.
  */
 

@@ -19,7 +19,7 @@
  *   - `@path` imports inside any context file are expanded in place, matching
  *     Claude Code (recursive, depth-capped, cycle-safe, code-span aware) — so a
  *     CLAUDE.md that just says `@AGENTS.md` reuses an existing AGENTS.md.
- *   - `ONECODE.md` / `onecode.md` / `OneCode.md` files (global `~/.one-code` +
+ *   - `ONECODE.md` / `onecode.md` / `One Code.md` files (global `~/.onecode` +
  *     each project directory) carry One Code-specific instructions that Claude
  *     Code never reads. They ride their OWN `# oneCodeMd` block (see
  *     `buildOneCodeBlock` / `discoverOneCodeFiles`), emitted after the `# claudeMd`
@@ -51,7 +51,7 @@ export const ONECODE_GLOBAL_DESCRIPTOR =
 	"One Code-specific global instructions for all projects, not read by Claude Code";
 
 /** One Code instruction filenames, in preference order (first present per dir wins). */
-const ONECODE_NAMES = ["ONECODE.md", "onecode.md", "OneCode.md"] as const;
+const ONECODE_NAMES = ["ONECODE.md", "onecode.md", "One Code.md"] as const;
 
 /** Max `@import` hops, matching Claude Code. Depth 0 is the importing file itself. */
 const MAX_IMPORT_DEPTH = 5;
@@ -276,7 +276,7 @@ export function ancestorDirs(cwd: string): string[] {
  * directly to avoid loading files they will discard.
  *
  * When `homeOneCodeDir` is given, One Code's own `ONECODE.md` files join the
- * list: the global one from `~/.one-code` right after the global CLAUDE.md, and
+ * list: the global one from `~/.onecode` right after the global CLAUDE.md, and
  * each directory's after its CLAUDE.md/CLAUDE.local.md. The `/memory` picker passes
  * it (so ONECODE.md is an editable target); the model-facing `# claudeMd` block
  * does NOT — there ONECODE.md rides its own `# oneCodeMd` block via

@@ -40,7 +40,7 @@ export function contextFileNames(cwd: string): string[] {
 		if (present("CLAUDE.md")) found.push(rel("CLAUDE.md"));
 		else if (present("AGENTS.md")) found.push(rel("AGENTS.md"));
 		if (present("CLAUDE.local.md")) found.push(rel("CLAUDE.local.md"));
-		for (const name of ["ONECODE.md", "onecode.md", "OneCode.md"]) {
+		for (const name of ["ONECODE.md", "onecode.md", "One Code.md"]) {
 			if (present(name)) {
 				found.push(rel(name));
 				break;

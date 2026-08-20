@@ -5,13 +5,13 @@
 This is the bundled One Code app: one install, batteries included. It ships
 its own pinned copy of the [pi coding agent](https://github.com/earendil-works/pi)
 and the full One Code extension set, keeps all of its state isolated under
-`~/.one-code`, and coexists cleanly with any `pi` you already have — separate
+`~/.onecode`, and coexists cleanly with any `pi` you already have — separate
 command, separate config, separate sessions. You don't need to know anything
 about pi to use it.
 
 ```bash
 npm install -g @one-ai/one-code
-cd your-project && one-code
+cd your-project && onecode
 ```
 
 Or via Homebrew (installs Node for you too):
@@ -38,7 +38,7 @@ Then:
 
 ```bash
 cd your-project
-one-code            # first run asks for a provider — pick one, paste the key
+onecode            # first run asks for a provider — pick one, paste the key
 ```
 
 Inside the session: `/login` connects more providers, `/model` switches
@@ -54,15 +54,15 @@ compatibility — on **any provider**: Anthropic, OpenAI, Gemini, a local Ollama
 model, or a gateway like OpenRouter. Full feature tour:
 [github.com/IsuruMaduranga/one-code](https://github.com/IsuruMaduranga/one-code#readme).
 
-Every pi command works as `one-code <command>`: `one-code -p "…"` one-shots,
-`one-code -c` continues, `one-code --mode json` for scripts, `one-code
+Every pi command works as `onecode <command>`: `onecode -p "…"` one-shots,
+`onecode -c` continues, `onecode --mode json` for scripts, `onecode
 --session <id>` resumes.
 
 ## The two One Code packages
 
 | npm package | What it is |
 |---|---|
-| **`@one-ai/one-code`** (this one) | The app. Bundles a pinned, tested pi; isolated state; zero pi knowledge required. The command it installs is `one-code`. **Most people want this.** |
+| **`@one-ai/one-code`** (this one) | The app. Bundles a pinned, tested pi; isolated state; zero pi knowledge required. The command it installs is `onecode`. **Most people want this.** |
 | [`one-code-extension`](https://www.npmjs.com/package/one-code-extension) | Just the extensions, for people already running pi: `pi install npm:one-code-extension`. Rides your pi version. |
 
 Same code either way; the app just pins a tested pi and isolates its state.

@@ -29,15 +29,15 @@ const PROTECTED_DIRS = [
 	// One Code's own state dir — the deny-direction twin of protecting `.claude`:
 	// as generated state moves here, a write that reconfigures the gate must
 	// stay just as guarded in its new home.
-	".one-code",
+	".onecode",
 ];
 
 /**
  * `.claude/worktrees` is where the agent keeps its own git worktrees, and
- * `.one-code/plans` holds plan-mode documents (rendered to the user, never
+ * `.onecode/plans` holds plan-mode documents (rendered to the user, never
  * executed) — ordinary working space rather than configuration.
  */
-const PROTECTED_DIR_EXCEPTIONS = [".claude/worktrees", ".one-code/plans"];
+const PROTECTED_DIR_EXCEPTIONS = [".claude/worktrees", ".onecode/plans"];
 
 const PROTECTED_FILES = new Set([
 	".gitconfig",

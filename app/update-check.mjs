@@ -34,7 +34,7 @@ export function isNewerVersion(candidate, current) {
 export function createUpdateCheck({ currentVersion, upgradeHint }) {
 	return function updateCheckExtension(pi) {
 		pi.on("session_start", (_event, ctx) => {
-			if (process.env.ONE_CODE_NO_UPDATE_CHECK === "1") return;
+			if (process.env.ONECODE_NO_UPDATE_CHECK === "1") return;
 			if (!ctx.hasUI) return; // print/rpc runs stay clean for parsers
 			// Fire-and-forget: session_start handlers run serially before the
 			// prompt opens, so this must never be awaited.

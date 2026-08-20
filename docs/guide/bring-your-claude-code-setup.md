@@ -73,12 +73,12 @@ approve them once.
 
 One Code keeps per-repository memory in the same layout Claude Code uses, keyed
 by the git root. Run `/memory` to view and edit stored memory entries. One Code
-adds its own configuration under `~/.one-code` and never modifies `~/.claude`.
+adds its own configuration under `~/.onecode` and never modifies `~/.claude`.
 
 ## What stays separate
 
-One Code keeps its own state in `~/.one-code` (or your pi agent directory) and
+One Code keeps its own state in `~/.onecode` (or your pi agent directory) and
 treats `~/.claude` as read-only. Your Claude Code settings are read, never
 rewritten. One Code's own settings (such as a chosen subagent model or
-auto-mode options) are stored in `~/.one-code/settings.json` or a per-repository
+auto-mode options) are stored in `~/.onecode/settings.json` or a per-repository
 settings file, not mixed into your Claude Code configuration.

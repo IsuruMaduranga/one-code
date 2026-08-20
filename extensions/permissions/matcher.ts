@@ -378,7 +378,7 @@ export function decide(params: DecideInput): Decision {
 
 	const tier = toolTier(toolName);
 	if (mode === "plan" && tier !== "safe" && !AUTO_ALLOWED_TOOLS.has(normalizeToolName(toolName))) {
-		// Plan mode's one writable file (~/.one-code/plans/<slug>.md, which
+		// Plan mode's one writable file (~/.onecode/plans/<slug>.md, which
 		// protected-paths already excepts as working space).
 		const planFile = params.planFilePath;
 		if (planFile && isWritingTool(normalizeToolName(toolName)) && subject) {

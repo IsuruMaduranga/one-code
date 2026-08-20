@@ -53,9 +53,9 @@ describe("isProtectedPath", () => {
 		expect(isProtectedPath(".claude/settings.local.json")).toBe(true);
 	});
 
-	it("protects .one-code like .claude, excepting only plan documents", () => {
-		expect(isProtectedPath("/home/u/.one-code/settings.json")).toBe(true);
-		expect(isProtectedPath("/home/u/.one-code/plans/brisk-otter-map.md")).toBe(false);
+	it("protects .onecode like .claude, excepting only plan documents", () => {
+		expect(isProtectedPath("/home/u/.onecode/settings.json")).toBe(true);
+		expect(isProtectedPath("/home/u/.onecode/plans/brisk-otter-map.md")).toBe(false);
 	});
 
 	it("treats the directory itself as not-yet-a-write-target", () => {

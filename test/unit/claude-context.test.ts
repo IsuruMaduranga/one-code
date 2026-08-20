@@ -262,17 +262,17 @@ describe("the # oneCodeMd block", () => {
 
 	it("is null when there are no ONECODE.md files (nothing extra rides)", () => {
 		mkdirSync(join(root, "proj"), { recursive: true });
-		const files = discoverOneCodeFiles({ cwd: join(root, "proj"), homeOneCodeDir: join(root, ".one-code"), home: root });
+		const files = discoverOneCodeFiles({ cwd: join(root, "proj"), homeOneCodeDir: join(root, ".onecode"), home: root });
 		expect(buildOneCodeBlock(files)).toBeNull();
 	});
 
 	it("carries the ONECODE files under a precedence-over-CLAUDE.md preamble, nearer last", () => {
-		const globalOne = write(".one-code/ONECODE.md", "global one-code\n");
+		const globalOne = write(".onecode/ONECODE.md", "global one-code\n");
 		mkdirSync(join(root, "proj", "sub"), { recursive: true });
 		const projOne = write("proj/ONECODE.md", "project one-code\n");
 		const files = discoverOneCodeFiles({
 			cwd: join(root, "proj", "sub"),
-			homeOneCodeDir: join(root, ".one-code"),
+			homeOneCodeDir: join(root, ".onecode"),
 			home: root,
 		});
 		const block = buildOneCodeBlock(files);
@@ -289,11 +289,11 @@ describe("the # oneCodeMd block", () => {
 	});
 
 	it("expands @imports inside an ONECODE.md file", () => {
-		write(".one-code/ignore", "x");
+		write(".onecode/ignore", "x");
 		mkdirSync(join(root, "proj"), { recursive: true });
 		write("proj/ONECODE.md", "@snippet.md\n");
 		write("proj/snippet.md", "SNIPPET BODY\n");
-		const files = discoverOneCodeFiles({ cwd: join(root, "proj"), homeOneCodeDir: join(root, ".one-code"), home: root });
+		const files = discoverOneCodeFiles({ cwd: join(root, "proj"), homeOneCodeDir: join(root, ".onecode"), home: root });
 		expect(buildOneCodeBlock(files)).toContain("SNIPPET BODY");
 	});
 });

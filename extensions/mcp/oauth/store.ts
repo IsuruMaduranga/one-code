@@ -1,14 +1,14 @@
 /**
  * On-disk OAuth credential store for MCP servers.
  *
- * One JSON file per server under `~/.one-code/mcp-auth/<slug>.json`, holding the
+ * One JSON file per server under `~/.onecode/mcp-auth/<slug>.json`, holding the
  * dynamically-registered client info, the tokens (access + refresh), the PKCE
  * verifier mid-flow, and the cached discovery state. The MCP SDK's OAuth
  * provider (oauth/provider.ts) reads and writes through this; refresh happens
  * automatically once a refresh token is stored, so a one-time Authenticate keeps
  * the server connected across sessions.
  *
- * Kept in ~/.one-code (never ~/.claude) like all One Code state, and separate
+ * Kept in ~/.onecode (never ~/.claude) like all One Code state, and separate
  * from settings.json because tokens are secrets, not configuration.
  */
 

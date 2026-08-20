@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * one-code — the bundled One Code app.
+ * onecode — the bundled One Code app.
  *
  * A thin launcher around the pinned pi harness in this package's dependency
  * tree. It does four things before handing argv to pi's `main()`:
  *
- * 1. Isolates all state under ~/.one-code (PI_CODING_AGENT_DIR), so an
+ * 1. Isolates all state under ~/.onecode (PI_CODING_AGENT_DIR), so an
  *    existing `pi` install on the same machine is never touched.
  * 2. Registers the one-code-extension package (from our own node_modules)
  *    in the isolated settings, so pi's package manager loads the extensions,
@@ -13,7 +13,7 @@
  * 3. Rewrites the few plain-stdout lines where pi prints its own command
  *    name (the resume hint, --help usage) — under isolation `pi --session
  *    <id>` would not just be mis-branded but broken, since stock pi cannot
- *    see ~/.one-code sessions.
+ *    see ~/.onecode sessions.
  * 4. Suppresses pi's own update check and installs One Code's instead
  *    (update-check.mjs), with an install-method-aware upgrade hint.
  *
@@ -31,7 +31,7 @@ import { fileURLToPath } from "node:url";
 const [major, minor] = process.versions.node.split(".").map(Number);
 if (major < 22 || (major === 22 && minor < 19)) {
 	process.stderr.write(
-		`one-code requires Node >= 22.19 (you are running ${process.versions.node}).\n` +
+		`onecode requires Node >= 22.19 (you are running ${process.versions.node}).\n` +
 			`Older Node crashes inside pi's bundled HTTP client at startup.\n` +
 			`Install a newer Node (https://nodejs.org) and try again.\n`,
 	);
@@ -43,7 +43,7 @@ const appDir = dirname(fileURLToPath(import.meta.url));
 const appVersion = JSON.parse(readFileSync(join(appDir, "package.json"), "utf8")).version;
 
 // --- 1. Isolated state ----------------------------------------------------
-process.env.PI_CODING_AGENT_DIR ||= join(homedir(), ".one-code", "agent");
+process.env.PI_CODING_AGENT_DIR ||= join(homedir(), ".onecode", "agent");
 process.env.PI_SKIP_VERSION_CHECK = "1"; // One Code ships its own update check
 process.env.CC_VERSION ||= appVersion; // the banner shows the app version
 const agentDir = process.env.PI_CODING_AGENT_DIR;
@@ -86,7 +86,7 @@ try {
 		// Fullscreen (alt-screen) is the One Code look — the TUI owns the
 		// screen and exits clean. Seeded only here, so users who switch back
 		// to regular mode keep their choice.
-		settings = { theme: "one-code", quietStartup: true, tuiMode: "fullscreen" };
+		settings = { theme: "onecode", quietStartup: true, tuiMode: "fullscreen" };
 	}
 	const packages = Array.isArray(settings.packages) ? settings.packages : [];
 	const sourceOf = (entry) => (typeof entry === "string" ? entry : entry?.source);
@@ -106,7 +106,7 @@ try {
 } catch (error) {
 	// Fail loud but keep launching: a broken settings file is the user's to
 	// fix, and pi will surface its own diagnostics for it too.
-	process.stderr.write(`one-code: could not register extensions in ${settingsPath}: ${error?.message ?? error}\n`);
+	process.stderr.write(`onecode: could not register extensions in ${settingsPath}: ${error?.message ?? error}\n`);
 }
 
 // --- 3. Surgical stdout rebranding ----------------------------------------
@@ -120,11 +120,11 @@ process.stdout.write = (chunk, ...rest) => {
 		// The label may carry ANSI styling (chalk.dim), so match the command
 		// part: "…To resume this session:</dim> pi --session <id>[ --session-dir …]".
 		if (chunk.includes("To resume this session:")) {
-			chunk = chunk.replaceAll(" pi --session ", " one-code --session ");
+			chunk = chunk.replaceAll(" pi --session ", " onecode --session ");
 		}
 		if (rewriteHelp) {
 			// Standalone word "pi" only; "pi.dev", "pi-coding-agent" etc. survive.
-			chunk = chunk.replace(/(^|[\s"'`])pi(?=$|[\s"'`])/gm, "$1one-code");
+			chunk = chunk.replace(/(^|[\s"'`])pi(?=$|[\s"'`])/gm, "$1onecode");
 		}
 	}
 	return originalWrite(chunk, ...rest);

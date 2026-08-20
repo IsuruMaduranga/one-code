@@ -21,6 +21,10 @@ existing setup. Use it alongside Claude Code:
   extend and customize it with your own pi extensions, themes, and settings.
 - **Free and open source (MIT).** No lock-in, no subscription.
 
+<p align="center">
+  <img src="demo/onecode.gif" alt="One Code switching models and running an agentic task" width="820">
+</p>
+
 New here? The [user guide](docs/guide/README.md) walks through installing,
 connecting a provider, reusing your Claude Code config, and driving every
 feature.
@@ -31,19 +35,19 @@ One project, two npm packages. Pick the one that fits you:
 
 | You | Install | Package |
 |---|---|---|
-| **Most people** (new to pi included) | `npm install -g @one-ai/one-code` | [`@one-ai/one-code`](https://www.npmjs.com/package/@one-ai/one-code): the app, with its own `one-code` command, a pinned pi bundled inside, state isolated in `~/.one-code`, coexisting with any existing `pi` |
+| **Most people** (new to pi included) | `npm install -g @one-ai/one-code` | [`@one-ai/one-code`](https://www.npmjs.com/package/@one-ai/one-code): the app, with its own `onecode` command, a pinned pi bundled inside, state isolated in `~/.onecode`, coexisting with any existing `pi` |
 | Already running pi, want it on your own install | `pi install npm:one-code-extension` | [`one-code-extension`](https://www.npmjs.com/package/one-code-extension): the extensions only; rides your pi (tested against pi 0.83-0.84, warns outside that range) |
 
 ```bash
 npm install -g @one-ai/one-code
-cd your-project && one-code
+cd your-project && onecode
 ```
 
 Or via Homebrew (also installs Node for you):
 
 ```bash
 brew install isurumaduranga/one-ai/one-code
-# or tap once, then run: brew tap isurumaduranga/one-ai && brew install one-code
+# or tap once, then run: brew tap isurumaduranga/one-ai && brew install onecode
 ```
 
 > The npm route needs **Node 22.19+**.
@@ -68,7 +72,7 @@ Then:
 
 ```bash
 cd your-project
-one-code            # first run asks for a provider: pick one, paste the key
+onecode            # first run asks for a provider: pick one, paste the key
 ```
 
 Inside the session: `/login` connects more providers (OpenRouter supports
@@ -194,7 +198,7 @@ matching tool automatically.
 
 ### 🎚️ Reasoning effort and 🎨 themes
 An `/effort` slider from `minimal` to `max` (and `ultracode` past the end), on
-the same dial shift+tab cycles. Two themes ship, `one-code` (dark) and
+the same dial shift+tab cycles. Two themes ship, `onecode` (dark) and
 `one-code-light`, with a warm clay accent in the spirit of Claude Code's
 terminal.
 
@@ -215,7 +219,7 @@ terminal.
 
 ```bash
 git clone https://github.com/IsuruMaduranga/one-code
-cd one-code && npm install && cd ..
+cd onecode && npm install && cd ..
 pi install ./one-code           # a path install still needs `npm install` first for deps
 pi list                        # confirm it registered
 ```

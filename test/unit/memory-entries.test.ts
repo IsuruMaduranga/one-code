@@ -25,7 +25,7 @@ describe("buildMemoryEntries", () => {
 			cwd,
 			home: root,
 			homeClaudeDir: join(root, ".claude"),
-			homeOneCodeDir: join(root, ".one-code"),
+			homeOneCodeDir: join(root, ".onecode"),
 			memoryDir: join(root, "mem"),
 		});
 	}
@@ -85,7 +85,7 @@ describe("buildMemoryEntries", () => {
 	it("includes a global ONECODE.md and ends with the auto-memory folder", () => {
 		const cwd = join(root, "proj");
 		mkdirSync(cwd, { recursive: true });
-		const globalOneCode = write(".one-code/ONECODE.md");
+		const globalOneCode = write(".onecode/ONECODE.md");
 		const entries = build(cwd);
 		expect(entries).toContainEqual(
 			expect.objectContaining({ title: "One Code user instructions", path: globalOneCode }),

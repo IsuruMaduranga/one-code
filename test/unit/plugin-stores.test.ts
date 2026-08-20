@@ -20,7 +20,7 @@ afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 describe("plugin root", () => {
 	it("derives from the agent dir", () => {
-		expect(pluginRoot("/home/u/.one-code/agent")).toBe("/home/u/.one-code/agent/plugins");
+		expect(pluginRoot("/home/u/.onecode/agent")).toBe("/home/u/.onecode/agent/plugins");
 	});
 });
 

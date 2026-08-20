@@ -2,7 +2,7 @@
  * Project-hook consent. Hooks in a repo's `.claude/settings.json` are
  * arbitrary code execution the moment the repo is opened, so they run only
  * after the user approves them — once per configuration: approval is keyed to
- * a hash of the project+local hook config and persisted under `~/.one-code`, so
+ * a hash of the project+local hook config and persisted under `~/.onecode`, so
  * it survives restarts but any change to the hooks re-prompts (Claude Code's
  * own hooks-review behaviour). User, managed, and plugin hooks never prompt
  * (installing a plugin was the consent).

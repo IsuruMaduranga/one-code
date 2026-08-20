@@ -66,12 +66,12 @@ Set these before launching to change behavior:
 
 ## Themes
 
-Two themes ship: `one-code` (dark) and `one-code-light`. Select one through your
+Two themes ship: `onecode` (dark) and `one-code-light`. Select one through your
 pi settings.
 
 ## Other run modes
 
-The `one-code` and `pi` commands accept these flags for non-interactive use:
+The `onecode` and `pi` commands accept these flags for non-interactive use:
 
 | Flag | What it does |
 |---|---|
@@ -81,5 +81,5 @@ The `one-code` and `pi` commands accept these flags for non-interactive use:
 | `--permission-mode plan` | Start in plan mode. |
 | `--model <provider/id>` | Start on a specific model. |
 
-On the pi-extension install, use `pi` in place of `one-code` for all of the
+On the pi-extension install, use `pi` in place of `onecode` for all of the
 preceding.

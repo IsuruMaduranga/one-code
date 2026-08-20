@@ -5,7 +5,7 @@ how you already work.
 
 | You | Install | What you get |
 |---|---|---|
-| New to this, or you want the simplest setup | `npm install -g @one-ai/one-code` | The bundled app: its own `one-code` command, a pinned version of the pi coding agent inside it, and its state kept in `~/.one-code`. It coexists with any `pi` you already have. |
+| New to this, or you want the simplest setup | `npm install -g @one-ai/one-code` | The bundled app: its own `onecode` command, a pinned version of the pi coding agent inside it, and its state kept in `~/.onecode`. It coexists with any `pi` you already have. |
 | Already running [pi](https://github.com/earendil-works/pi) | `pi install npm:one-code-extension` | The extensions only. They run on your existing pi and store state under your pi agent directory. |
 
 ## Requirements
@@ -19,7 +19,7 @@ how you already work.
 ```bash
 npm install -g @one-ai/one-code
 cd your-project
-one-code
+onecode
 ```
 
 The first run asks you to pick a model provider and paste an API key. For a
@@ -37,7 +37,7 @@ To tap once and then install by short name:
 
 ```bash
 brew tap isurumaduranga/one-ai
-brew install one-code
+brew install onecode
 ```
 
 ## Install the extension on your own pi
@@ -55,7 +55,7 @@ outside that range.
 
 ```bash
 git clone https://github.com/IsuruMaduranga/one-code
-cd one-code
+cd onecode
 npm install
 cd ..
 pi install ./one-code
@@ -67,7 +67,7 @@ Run `npm install` before the path install so the dependencies are present.
 
 ## Full-screen mode
 
-The `one-code` app opens in a full-screen terminal interface by default. It uses
+The `onecode` app opens in a full-screen terminal interface by default. It uses
 the alternate screen and restores your terminal when you exit.
 
 On your own pi, full-screen mode is opt-in. Turn it on in one of two ways:

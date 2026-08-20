@@ -3,10 +3,10 @@
  *
  * Sources, lowest to highest precedence:
  *   ~/.claude/settings.json               (user, borrowed — read only)
- *   ~/.one-code/settings.json             (One Code global — read + write)
+ *   ~/.onecode/settings.json             (One Code global — read + write)
  *   <cwd>/.claude/settings.json           (project, checked in — read only)
  *   <cwd>/.claude/settings.local.json     (project, personal — read only)
- *   ~/.one-code/projects/<slug>/settings.json (One Code per repo — read + write)
+ *   ~/.onecode/projects/<slug>/settings.json (One Code per repo — read + write)
  *
  * allow/deny/ask arrays concatenate across sources; defaultMode from the most
  * specific `.claude` source wins (the One Code files contribute rules only).
@@ -99,7 +99,7 @@ export function loadPermissionSettings(cwd: string, home: string): PermissionSet
 
 /**
  * Append an allow rule to a One Code settings file, creating it if needed.
- * Strict read + atomic write, like the other `~/.one-code` writers: a malformed
+ * Strict read + atomic write, like the other `~/.onecode` writers: a malformed
  * file is not silently clobbered (it may also hold classifierModel/subagentModel),
  * and a half-written file is never visible to a concurrent reader.
  */
