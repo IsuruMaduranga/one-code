@@ -123,7 +123,10 @@ that edits files runs in parallel without ever colliding.
 Standard [Agent Skills](https://agentskills.io) from `.claude/skills/`, whole
 Claude Code **plugins** (their agents, skills, commands, and MCP servers, all
 namespaced), and any **MCP server** from `.mcp.json` — every MCP tool is loaded
-on demand so it never bloats the prompt.
+on demand so it never bloats the prompt. A small catalog of Claude Code's own
+built-in skills ships bundled — `simplify`, `code-review`, `security-review`,
+and `fewer-permission-prompts` — so they show up in the skill list and run the
+same way; a skill of the same name in your `.claude/skills/` takes precedence.
 
 ### 🪝 Hooks
 Claude Code command hooks run unchanged — `PreToolUse`, `PostToolUse`,
@@ -197,6 +200,19 @@ pi inside a container — the permission gate and the container compose.
 - Verified end-to-end on Anthropic and OpenAI models, and through **OpenRouter**
   (which brokers many open models — DeepSeek, Llama, Qwen, and more); other
   providers work but are less exercised.
+- **Built-in skills not included:** One Code bundles Claude Code's
+  self-contained review/setup skills (`simplify`, `code-review`,
+  `security-review`, `fewer-permission-prompts`), but not the ones that depend
+  on Claude Code's own hosting or desktop surfaces. Left out: the Artifact and
+  claude.ai/design skills (`design`, `design-sync`, `dataviz`, the
+  `artifact-*` guides, and the dashboard/report/table/explainer/plan/whiteboard
+  publishers); the harness-and-account skills (`update-config`,
+  `keybindings-help`, `claude-in-chrome`, `debug`, `usage`/`explain-usage`,
+  `setup-cowork`, `schedule` cloud routines, `batch`, and `claude-code-guide`);
+  `run`/`run-skill-generator` (One Code uses project-local run skills instead);
+  and `claude-api` (a large reference skill, deferred). `commit`, `pr`, `loop`,
+  and `init` are covered by One Code's own commands and the `commit-commands`
+  plugin.
 - **Platforms:** developed and verified on **macOS and Linux**; **WSL** works
   the same way (it *is* Linux). Native Windows is **untested best-effort** for
   now: pi itself requires a bash there (Git Bash — see pi's Windows docs), and

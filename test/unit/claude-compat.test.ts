@@ -44,4 +44,20 @@ describe("claudeResourcePaths", () => {
 			promptPaths: [join(home, ".claude", "commands")],
 		});
 	});
+
+	it("appends the bundled skills dir last, so a same-named user/project skill wins the collision", () => {
+		// pi keeps the FIRST-loaded skill on a name collision, so the bundled
+		// catalog must come last to be the fallback rather than the override.
+		const bundled = join(cwd, "bundled-skills");
+		mkdirSync(join(home, ".claude", "skills"), { recursive: true });
+		mkdirSync(bundled, { recursive: true });
+		const { skillPaths } = claudeResourcePaths(cwd, home, join(home, ".claude"), bundled);
+		expect(skillPaths).toEqual([join(home, ".claude", "skills"), bundled]);
+		expect(skillPaths[skillPaths.length - 1]).toBe(bundled);
+	});
+
+	it("omits the bundled skills dir when it does not exist", () => {
+		const bundled = join(cwd, "does-not-exist");
+		expect(claudeResourcePaths(cwd, home, join(home, ".claude"), bundled).skillPaths).toEqual([]);
+	});
 });

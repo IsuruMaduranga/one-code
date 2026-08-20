@@ -164,3 +164,47 @@ via `boundedDockHeight` (`lib/tui-render.ts`), leaving the transcript visible
 above rather than taking the whole window. The default `ctx.ui.custom` swaps the
 editor container, so returning fewer lines than the terminal height keeps the
 conversation on screen (findings §15).
+
+## Bundled Claude Code built-in skills (2026-08-20)
+
+**The gap.** One Code discovered only on-disk skills (`~/.claude/skills`,
+`.claude/skills`, plugin skills), so Claude Code's own built-ins — `/simplify`,
+`/code-review`, and the rest — never appeared. They are not files: Claude Code
+compiles its built-in skills and slash commands into its Bun-built binary as
+minified JS, so nothing One Code scans could ever surface them. Confirmed by
+diffing a live One Code request against a Claude Code one (`git-onecode.json`
+vs `git-cc-sonnet.json`): the "following skills are available" block listed 12
+skills for One Code against 34 for Claude Code, and every missing one was a
+built-in with no directory on disk.
+
+**What we ship.** A bundled catalog under `skills/` (repo root, like `agents/`
+and `themes/`) holding the **self-contained, provider-neutral** built-ins:
+`simplify`, `code-review`, `security-review`, `fewer-permission-prompts`. Bodies
+were extracted from the installed Claude Code binary and adapted — the procedure
+and the extractor live in `.claude/skills/extract-cc-skills/` (internal).
+
+**Discovery.** `extensions/claude-compat/index.ts` adds `<package>/skills`
+(resolved via `import.meta.url`) to the `resources_discover` skill paths, listed
+**last**: pi keeps the first-loaded skill on a name collision, so a user or
+project skill of the same name wins and the bundled one is only the fallback.
+`skills/` is added to `package.json` `files`.
+
+**Adaptations (why a raw dump won't ship).** `${Ei}` already resolves to
+`"Agent"`, One Code's subagent tool name. Claude Code's review skills prefer a
+`ReportFindings` tool; One Code has none, so we port Claude Code's own JSON-array
+fallback. `security-review`'s `!`-git prefetch does not run in a Skill-tool body
+(pi expands `!` only for plugin commands), so its Phase 0 tells the model to run
+the git commands itself. `fewer-permission-prompts` writes One Code's
+`~/.one-code/projects/<slug>/settings.json` (via `lib/one-code-settings.ts`),
+never `~/.claude`, and scans transcripts under `~/.one-code/agent/sessions`.
+`code-review` folds Claude Code's per-effort prompt variants onto One Code's
+`/effort` (we port the medium variant and describe the recall/precision shift)
+and its `--comment`/`--fix` flag logic into the body as prose.
+
+**Deliberately NOT ported** (kept in sync with the README "Built-in skills not
+included" note): the Artifact / claude.ai-design skills, the harness/account
+skills (`update-config`, `keybindings-help`, `claude-in-chrome`, `debug`,
+`usage`, `setup-cowork`, `schedule`, `batch`, `claude-code-guide`), `run` /
+`run-skill-generator` (One Code uses project-local run skills), and `claude-api`
+(large reference, deferred). `commit`, `pr`, `loop`, `init` are already covered
+by One Code's own commands and the `commit-commands` plugin.

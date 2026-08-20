@@ -8,14 +8,24 @@
  *   ~/.claude/commands, <project>/.claude/commands → slash commands (prompt templates;
  *                                                    Claude Code's $ARGUMENTS works as-is)
  *
+ * It also points discovery at the catalog of skills bundled with this package
+ * (`<package>/skills`) — Claude Code's self-contained built-in skills, which
+ * ship inside its binary rather than on disk, so nothing else would surface
+ * them. See docs/decisions/skills-plugins.md and docs/findings (the extraction
+ * process is recorded in .claude/skills/extract-cc-skills/).
+ *
  * CLAUDE.md needs no handling — pi discovers it natively alongside AGENTS.md.
  */
 
 import { existsSync } from "node:fs";
 import os from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { claudeConfigDir } from "../lib/paths.ts";
+
+/** The skill catalog shipped in this package: `<package>/skills`. */
+const BUNDLED_SKILLS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "skills");
 
 /**
  * `claudeDir` is Claude Code's config dir (honours CLAUDE_CONFIG_DIR), defaulting
@@ -27,6 +37,7 @@ export function claudeResourcePaths(
 	cwd: string,
 	home: string,
 	claudeDir: string = join(home, ".claude"),
+	bundledSkillsDir?: string,
 ): { skillPaths: string[]; promptPaths: string[] } {
 	const candidates = {
 		skillPaths: [
@@ -34,6 +45,11 @@ export function claudeResourcePaths(
 			join(home, ".agents", "skills"),
 			join(cwd, ".claude", "skills"),
 			join(cwd, ".agents", "skills"),
+			// The bundled catalog is listed LAST so it loses a name collision:
+			// pi keeps the first-loaded skill for a given name, so a user or
+			// project skill of the same name wins and the bundled one is the
+			// fallback (see docs/decisions/skills-plugins.md).
+			...(bundledSkillsDir ? [bundledSkillsDir] : []),
 		],
 		promptPaths: [join(claudeDir, "commands"), join(cwd, ".claude", "commands")],
 	};
@@ -45,6 +61,6 @@ export function claudeResourcePaths(
 
 export default function claudeCompatExtension(pi: ExtensionAPI) {
 	pi.on("resources_discover", (event) => {
-		return claudeResourcePaths(event.cwd, os.homedir(), claudeConfigDir());
+		return claudeResourcePaths(event.cwd, os.homedir(), claudeConfigDir(), BUNDLED_SKILLS_DIR);
 	});
 }

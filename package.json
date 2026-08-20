@@ -71,6 +71,7 @@
 	"files": [
 		"extensions/",
 		"agents/",
+		"skills/",
 		"themes/",
 		"types/",
 		"README.md",
