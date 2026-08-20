@@ -14,6 +14,7 @@
 
 import { basename, dirname, join } from "node:path";
 import {
+	AGENTS_DESCRIPTOR,
 	ancestorDirs,
 	collectImportedPaths,
 	type ContextFilePath,
@@ -68,7 +69,9 @@ export function buildMemoryEntries(opts: {
 	memoryDir: string;
 }): MemoryEntry[] {
 	const { cwd, home, homeClaudeDir, homeOneCodeDir, memoryDir } = opts;
-	const discovered = discoverContextFilePaths({ cwd, homeClaudeDir, homeOneCodeDir });
+	// agentsFallback so a directory's AGENTS.md (when it has no CLAUDE.md) is in the
+	// list, matching what the # claudeMd block sends.
+	const discovered = discoverContextFilePaths({ cwd, homeClaudeDir, homeOneCodeDir, agentsFallback: true });
 	const referenced = referencedImports(discovered, home);
 	// (descriptor, dir) → the discovered path, so per-dir lookups reuse the real
 	// on-disk casing discovery already resolved (no second stat/readdir here).
@@ -125,9 +128,10 @@ export function buildMemoryEntries(opts: {
 			add({ title: disp(local), path: local, kind: "file", exists: true });
 		}
 
-		// AGENTS.md enters context only via an @import; referenced ⇒ readable.
+		// AGENTS.md is editable when it's in context: the CLAUDE.md fallback for this
+		// directory (in `found`), or `@`-imported into a CLAUDE.md/ONECODE.md.
 		const agents = join(d, "AGENTS.md");
-		if (referenced.has(agents)) {
+		if (found.has(`${AGENTS_DESCRIPTOR}\0${d}`) || referenced.has(agents)) {
 			add({
 				title: isCwd ? "Agent instructions" : disp(agents),
 				description: isCwd ? `Checked in at ${disp(agents)}` : undefined,

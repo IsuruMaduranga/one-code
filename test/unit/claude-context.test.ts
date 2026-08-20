@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+	AGENTS_DESCRIPTOR,
 	buildClaudeMdBlock,
 	buildOneCodeBlock,
 	discoverContextFilePaths,
@@ -12,6 +13,7 @@ import {
 	expandImports,
 	ONECODE_DESCRIPTOR,
 	ONECODE_GLOBAL_DESCRIPTOR,
+	PROJECT_DESCRIPTOR,
 } from "../../extensions/lib/claude-context.ts";
 import { wrapReminder } from "../../extensions/lib/reminders.ts";
 
@@ -192,6 +194,31 @@ describe("ONECODE.md discovery", () => {
 			homeClaudeDir: join(root, "home-claude"),
 		});
 		expect(paths.some((p) => p.path.includes("ONECODE"))).toBe(false);
+	});
+
+	it("falls back to AGENTS.md only when a directory has no CLAUDE.md (agentsFallback)", () => {
+		mkdirSync(join(root, "proj", "sub"), { recursive: true });
+		// Ancestor has CLAUDE.md (its AGENTS.md must be ignored); cwd has only AGENTS.md.
+		const ancestorClaude = write("proj/CLAUDE.md", "c\n");
+		write("proj/AGENTS.md", "ignored\n");
+		const cwdAgents = write("proj/sub/AGENTS.md", "used\n");
+		const paths = discoverContextFilePaths({
+			cwd: join(root, "proj", "sub"),
+			homeClaudeDir: join(root, "home-claude"),
+			agentsFallback: true,
+		});
+		const projectPaths = paths.filter((p) => p.path.startsWith(join(root, "proj")));
+		expect(projectPaths).toEqual([
+			{ path: ancestorClaude, descriptor: PROJECT_DESCRIPTOR },
+			{ path: cwdAgents, descriptor: AGENTS_DESCRIPTOR },
+		]);
+	});
+
+	it("never lists AGENTS.md without agentsFallback set", () => {
+		mkdirSync(join(root, "proj"), { recursive: true });
+		write("proj/AGENTS.md", "a\n");
+		const paths = discoverContextFilePaths({ cwd: join(root, "proj"), homeClaudeDir: join(root, "home-claude") });
+		expect(paths.some((p) => p.path.endsWith("AGENTS.md"))).toBe(false);
 	});
 
 	it("accepts lowercase onecode.md as a filename variant", () => {

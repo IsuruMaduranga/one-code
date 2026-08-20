@@ -44,10 +44,12 @@ export const CONTEXT_ORDER = {
 	agents: 21,
 	mcp: 30,
 	skills: 40,
+	// CLAUDE.md-family (with AGENTS.md as a per-directory fallback when a directory
+	// has no CLAUDE.md) — CLAUDE.md > AGENTS.md.
 	claudeMd: 50,
 	// One Code's own instructions ride in their own block AFTER the # claudeMd
 	// block (higher `order` = closer to the user text = higher precedence), so
-	// ONECODE.md takes precedence over CLAUDE.md. Not part of Claude Code.
+	// ONECODE.md takes precedence over CLAUDE.md/AGENTS.md. Not part of CC.
 	oneCodeMd: 60,
 } as const;
 

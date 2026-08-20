@@ -281,20 +281,29 @@ export function ancestorDirs(cwd: string): string[] {
  * it (so ONECODE.md is an editable target); the model-facing `# claudeMd` block
  * does NOT — there ONECODE.md rides its own `# oneCodeMd` block via
  * `discoverOneCodeFiles` instead, so `# claudeMd` stays byte-exact with CC.
+ *
+ * When `agentsFallback` is set, a directory with no `CLAUDE.md` falls back to its
+ * `AGENTS.md` (CLAUDE.md > AGENTS.md — the first-match Codex/opencode do, but
+ * CLAUDE-preferred for our CC-compat audience). A directory that has a CLAUDE.md
+ * ignores its AGENTS.md, so `# claudeMd` stays byte-exact with CC whenever
+ * CLAUDE.md is present.
  */
 export function discoverContextFilePaths(opts: {
 	cwd: string;
 	homeClaudeDir: string;
 	homeOneCodeDir?: string;
+	agentsFallback?: boolean;
 }): ContextFilePath[] {
 	const paths: ContextFilePath[] = [];
 	const seen = new Set<string>();
 	const includeOneCode = opts.homeOneCodeDir !== undefined;
 
-	const push = (path: string, descriptor: string) => {
-		if (seen.has(path) || !isPresentFile(path)) return;
+	/** Adds the path if present; returns whether it was added. */
+	const push = (path: string, descriptor: string): boolean => {
+		if (seen.has(path) || !isPresentFile(path)) return false;
 		paths.push({ path, descriptor });
 		seen.add(path);
+		return true;
 	};
 
 	push(join(opts.homeClaudeDir, "CLAUDE.md"), GLOBAL_DESCRIPTOR);
@@ -304,7 +313,9 @@ export function discoverContextFilePaths(opts: {
 	}
 
 	for (const d of ancestorDirs(opts.cwd)) {
-		push(join(d, "CLAUDE.md"), PROJECT_DESCRIPTOR);
+		const hasClaude = push(join(d, "CLAUDE.md"), PROJECT_DESCRIPTOR);
+		// AGENTS.md stands in for a missing CLAUDE.md in this directory.
+		if (!hasClaude && opts.agentsFallback) push(join(d, "AGENTS.md"), AGENTS_DESCRIPTOR);
 		push(join(d, "CLAUDE.local.md"), LOCAL_DESCRIPTOR);
 		if (includeOneCode) {
 			const oneCode = firstOneCodeFile(d);
@@ -319,6 +330,7 @@ export function discoverContextFiles(opts: {
 	cwd: string;
 	homeClaudeDir: string;
 	homeOneCodeDir?: string;
+	agentsFallback?: boolean;
 	/** Home directory for resolving `~` in `@path` imports. */
 	home: string;
 }): ContextFile[] {
@@ -379,6 +391,8 @@ export function buildOneCodeBlock(files: ContextFile[]): string | null {
 	const sections = files.map((s) => `Contents of ${s.path} (${s.descriptor}):\n\n${s.content}`).join("\n");
 	return `${ONECODE_PREAMBLE}\n\n${sections}`;
 }
+
+export const AGENTS_DESCRIPTOR = "cross-tool agent instructions, AGENTS.md standard";
 
 /**
  * Assemble the block's inner text (the `<system-reminder>` wrapper is added by

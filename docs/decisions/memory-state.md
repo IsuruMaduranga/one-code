@@ -230,14 +230,15 @@ stamping ties to *model* writes, and CC's external-editor edits are unstamped to
 **Entries: what belongs in "our context".** The list is the CLAUDE.md family
 (global + ancestors + cwd, the two primaries always offered/create-on-open),
 `ONECODE.md` (global + per-dir — always shown, since One Code loads it directly),
-and `AGENTS.md` **only when a loaded file `@`-imports it**. A standalone AGENTS.md
-that nothing references is not in One Code's context (CC has no AGENTS.md concept
-at all), so editing or trimming it changes nothing — showing it would mislead.
-Reference detection reuses the import traversal: `collectImportedPaths` in
-`lib/claude-context.ts` returns the transitive set of `@import` targets, and an
-AGENTS.md shows only if its path is in that set. The same filter governs the
-over-limit warning. cwd files render as `./name` (CC's relative form); the
-learn-more link points at the One Code repo, not CC's docs.
+and `AGENTS.md` **when it is in context** — either the CLAUDE.md fallback for a
+directory (that dir has no CLAUDE.md) or `@`-imported into a CLAUDE.md/ONECODE.md.
+A standalone AGENTS.md sitting next to a CLAUDE.md is *not* shown, because CLAUDE.md
+wins and the AGENTS.md is ignored (see the AGENTS.md-fallback decision in
+tools.md#path-imports-and-onecodemd-in-the-claudemd-block-2026-08-20). Reference
+detection reuses `collectImportedPaths` (the transitive `@import` set); the
+fallback comes from `discoverContextFilePaths({ agentsFallback: true })`. cwd files
+render as `./name` (CC's relative form); the learn-more link points at the One Code
+repo, not CC's docs.
 
 **Offering `~/.claude/CLAUDE.md` does not breach "never write `~/.claude`".** The
 global user CLAUDE.md is offered as "User instructions", matching CC's panel — a

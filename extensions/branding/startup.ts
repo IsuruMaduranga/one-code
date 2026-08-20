@@ -22,15 +22,29 @@ export interface StartupSection {
 	items: string[];
 }
 
-/** CLAUDE.md / CLAUDE.local.md / AGENTS.md from cwd up to the git root (or just cwd outside a repo). */
+/**
+ * The project context files One Code actually gathers, from cwd up to the git
+ * root (or just cwd outside a repo), for the startup banner. Mirrors what the
+ * blocks send: a directory's CLAUDE.md, or its AGENTS.md when it has no CLAUDE.md
+ * (CLAUDE.md > AGENTS.md), plus CLAUDE.local.md and ONECODE.md when present — so
+ * AGENTS.md is listed only when it's really in play, not whenever it exists.
+ */
 export function contextFileNames(cwd: string): string[] {
 	const stop = findGitRoot(cwd) ?? cwd;
 	const found: string[] = [];
 	let dir = cwd;
 	while (true) {
-		for (const name of ["CLAUDE.md", "CLAUDE.local.md", "AGENTS.md"]) {
-			const path = join(dir, name);
-			if (existsSync(path)) found.push(relative(cwd, path) || name);
+		const rel = (name: string) => relative(cwd, join(dir, name)) || name;
+		const present = (name: string) => existsSync(join(dir, name));
+		// CLAUDE.md is primary; AGENTS.md stands in only when there is no CLAUDE.md.
+		if (present("CLAUDE.md")) found.push(rel("CLAUDE.md"));
+		else if (present("AGENTS.md")) found.push(rel("AGENTS.md"));
+		if (present("CLAUDE.local.md")) found.push(rel("CLAUDE.local.md"));
+		for (const name of ["ONECODE.md", "onecode.md", "OneCode.md"]) {
+			if (present(name)) {
+				found.push(rel(name));
+				break;
+			}
 		}
 		if (dir === stop) break;
 		const parent = dirname(dir);

@@ -37,6 +37,20 @@ describe("contextFileNames", () => {
 		mkdirSync(join(root, "inner"));
 		expect(contextFileNames(join(root, "inner"))).toEqual([]);
 	});
+
+	it("lists AGENTS.md only as a fallback: CLAUDE.md in a directory hides its AGENTS.md", () => {
+		const root = scratch();
+		writeFileSync(join(root, "CLAUDE.md"), "c");
+		writeFileSync(join(root, "AGENTS.md"), "a");
+		expect(contextFileNames(root)).toEqual(["CLAUDE.md"]);
+	});
+
+	it("lists ONECODE.md alongside the primary", () => {
+		const root = scratch();
+		writeFileSync(join(root, "CLAUDE.md"), "c");
+		writeFileSync(join(root, "ONECODE.md"), "o");
+		expect(contextFileNames(root)).toEqual(["CLAUDE.md", "ONECODE.md"]);
+	});
 });
 
 describe("skillNames", () => {

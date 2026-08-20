@@ -63,13 +63,23 @@ describe("buildMemoryEntries", () => {
 		);
 	});
 
-	it("omits an unreferenced standalone AGENTS.md (not part of our context)", () => {
+	it("omits AGENTS.md when a CLAUDE.md exists and does not import it (CLAUDE.md wins)", () => {
 		const cwd = join(root, "proj");
 		mkdirSync(cwd, { recursive: true });
 		write("proj/CLAUDE.md", "# Project\n"); // no @AGENTS.md import
 		write("proj/AGENTS.md");
 		const entries = build(cwd);
 		expect(entries.some((e) => e.path === join(cwd, "AGENTS.md"))).toBe(false);
+	});
+
+	it("shows AGENTS.md as the fallback when the directory has no CLAUDE.md", () => {
+		const cwd = join(root, "proj");
+		mkdirSync(cwd, { recursive: true });
+		write("proj/AGENTS.md"); // no CLAUDE.md here
+		const entries = build(cwd);
+		expect(entries).toContainEqual(
+			expect.objectContaining({ title: "Agent instructions", path: join(cwd, "AGENTS.md") }),
+		);
 	});
 
 	it("includes a global ONECODE.md and ends with the auto-memory folder", () => {

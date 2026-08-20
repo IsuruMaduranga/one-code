@@ -59,12 +59,16 @@ function readMemoryIndex(cwd: string): { path: string; content: string } | null 
 
 export default function claudeContextExtension(pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
-		// The # claudeMd block stays CLAUDE.md-only (byte-exact with Claude Code) —
-		// ONECODE.md rides its own higher-precedence block below.
+		// The # claudeMd block carries the CLAUDE.md family, falling back to a
+		// directory's AGENTS.md when it has no CLAUDE.md (CLAUDE.md > AGENTS.md). It
+		// stays byte-exact with Claude Code wherever CLAUDE.md is present, since
+		// AGENTS.md only fills in for a missing one. ONECODE.md rides its own
+		// higher-precedence block below.
 		const inner = buildClaudeMdBlock({
 			contextFiles: discoverContextFiles({
 				cwd: ctx.cwd,
 				homeClaudeDir: claudeConfigDir(),
+				agentsFallback: true,
 				home: os.homedir(),
 			}),
 			memoryIndex: readMemoryIndex(ctx.cwd),

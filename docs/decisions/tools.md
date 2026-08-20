@@ -521,6 +521,35 @@ and muddies the trust framing (CC's block downplays itself with "may not be
 relevant", the opposite of what One Code's own authoritative instructions want).
 A distinct block carries its own override framing cleanly.
 
+### Update (2026-08-20): AGENTS.md as a CLAUDE.md fallback (not a third block)
+
+A directory with no `CLAUDE.md` falls back to its `AGENTS.md`, which then fills the
+CLAUDE.md slot in the `# claudeMd` block (`discoverContextFilePaths`'
+`agentsFallback`, set by the claude-context extension). CLAUDE.md > AGENTS.md: a
+directory that has a CLAUDE.md ignores its AGENTS.md, so `# claudeMd` stays
+byte-exact with CC whenever CLAUDE.md is present. Precedence overall is
+**ONECODE.md > CLAUDE.md > AGENTS.md**. The startup banner's context line reflects
+what is actually gathered — it lists AGENTS.md only when it stands in for a missing
+CLAUDE.md, never alongside one (`branding/startup.ts` `contextFileNames`).
+
+**Why fallback, not send-both.** We researched Codex and opencode: both do
+first-match, not both — opencode uses the *first* of `AGENTS.md` → `CLAUDE.md`
+(so CLAUDE.md is only a fallback *for* AGENTS.md there), and Codex reads at most one
+instruction file per directory (`AGENTS.override.md` → `AGENTS.md` → configurable
+fallbacks), not `CLAUDE.md` at all by default. So the ecosystem treats the two as
+alternatives. One Code is CC-first, so it inverts the preference — CLAUDE.md wins,
+AGENTS.md is the fallback — which gives a project that ships only an AGENTS.md
+(previously invisible, since One Code suppresses pi's native AGENTS.md loading)
+its instructions, without ever double-sending a CLAUDE.md that was `cp`'d from
+AGENTS.md. An earlier plan to send AGENTS.md as its own third block (with dedup)
+was dropped as more surface than the fallback needs.
+
+**Still supported:** `@path` imports inside AGENTS.md (it goes through the same
+`expandImports`), and a CLAUDE.md/ONECODE.md that is just `@AGENTS.md` (inlines
+AGENTS.md into that block, as before). The `/memory` picker shows AGENTS.md when
+it is in context — the fallback for a directory, or `@`-imported into a
+CLAUDE.md/ONECODE.md.
+
 ## CC's gitStatus block appended to the system prompt in a repo (2026-08-20)
 
 **Decision.** In a git repo, One Code now reproduces Claude Code's `gitStatus:`
