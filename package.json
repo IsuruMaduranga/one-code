@@ -77,8 +77,7 @@
 		"types/",
 		"README.md",
 		"LICENSE",
-		"docs/decisions.md",
-		"docs/decisions/"
+		"docs/guide/"
 	],
 	"scripts": {
 		"typecheck": "tsc --noEmit",
