@@ -13,12 +13,18 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { resolveModelTier } from "../lib/model-tier.ts";
 import { sessionScratchpadDir } from "../lib/scratchpad.ts";
 import { collectEnvironment, type EnvironmentInfo } from "./environment.ts";
+import { collectGitStatus } from "./git-status.ts";
 import { buildClaudeCodeSystemPrompt } from "./template.ts";
 
 export default function systemPromptExtension(pi: ExtensionAPI) {
 	let cachedEnv: EnvironmentInfo | undefined;
 	let cachedKey = "";
 	let scratchpad: string | undefined;
+	// Claude Code's git snapshot is taken once "at the start of the conversation"
+	// and never updated. Compute it here (fast, synchronous git calls) so it is a
+	// true per-session snapshot that resets on /clear (session_start re-fires) and
+	// stays constant across turns, keeping the system prompt cache-stable.
+	let gitStatus: string | null = null;
 
 	pi.on("session_start", (_event, ctx) => {
 		// The prompt section promises a usable directory, so the extension that
@@ -31,6 +37,8 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 		} catch {
 			scratchpad = undefined;
 		}
+
+		gitStatus = collectGitStatus(ctx.cwd);
 	});
 
 	pi.on("before_agent_start", (event, ctx) => {
@@ -49,6 +57,8 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 			cachedKey = key;
 		}
 
-		return { systemPrompt: buildClaudeCodeSystemPrompt(event.systemPromptOptions, cachedEnv, tier, scratchpad) };
+		return {
+			systemPrompt: buildClaudeCodeSystemPrompt(event.systemPromptOptions, cachedEnv, tier, scratchpad, gitStatus),
+		};
 	});
 }

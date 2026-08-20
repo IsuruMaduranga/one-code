@@ -498,6 +498,43 @@ project-only with no global (less flexible); appending ONECODE.md at the very en
 of the block instead of per-directory (loses the nearer-wins precedence that
 mirrors CLAUDE.md ordering).
 
+## CC's gitStatus block appended to the system prompt in a repo (2026-08-20)
+
+**Decision.** In a git repo, One Code now reproduces Claude Code's `gitStatus:`
+block (`extensions/system-prompt/git-status.ts`) and appends it as the very last
+thing in the system prompt, after the `Current working directory:` line, matching
+CC. Format and commands are byte-exact against `git-cc-sonnet.json` /
+`git-cc-haiku.json` (findings §4): branch (`git branch --show-current`), main
+branch (`origin/HEAD` → strip `origin/`, else a local `main`/`master`, else the
+current branch), `git config user.name`, `git status --porcelain` (whole-output
+trimmed), and `git log -5 --format='%h %s'` (trimmed). `collectGitStatus` takes an
+injectable runner so the git calls are faked in unit tests; `formatGitStatus` is
+pure and locked byte-for-byte against the capture.
+
+**One-time snapshot, computed once.** CC labels the block "the git status at the
+start of the conversation" that "will not update during the conversation", so it
+is collected in `session_start` (fast synchronous git calls) and frozen for the
+session — it re-computes on `/clear` (session_start re-fires) but never mid-turn.
+This also keeps the system prompt byte-stable across turns: the block is a session
+constant, identical across model tiers (CC confirms sonnet == haiku), so it sits
+outside the (cwd, model, tier) EnvironmentInfo cache without breaking provider
+prompt caching.
+
+**Why.** Before this, the model's only git fact was the `Is a git repository:
+yes/no` line — it never saw the branch, working-tree status, or recent commits
+that CC's model sees. The block is high-value grounding (what branch am I on, what
+is uncommitted, what shipped recently) and closes a real fidelity gap.
+
+**Deliberately excluded: PR info.** CC's block carries no PR number and neither
+does ours. The open PR is surfaced only in the TUI footer (`extensions/footer`),
+never in model context — adding it would diverge from CC and put a `gh` network
+call in the prompt path. (Question raised and settled 2026-08-20.)
+
+**Fidelity caveat.** No capture of a *clean* tree exists, so the empty-`Status:`
+rendering is best-effort (the dirty-tree bytes are locked). The whole-output
+`.trim()` on `git status --porcelain` is what flush-lefts a leading-space
+porcelain line when it is first — verified live against a temp repo.
+
 ## Foreground `sleep` is blocked; wait via background / monitor (2026-08-14)
 
 Claude Code blocks a foreground bash command whose only job is to wait — a

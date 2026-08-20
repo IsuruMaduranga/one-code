@@ -79,6 +79,12 @@ export function buildClaudeCodeSystemPrompt(
 	 * is all provider prompt caching needs.
 	 */
 	scratchpadDir?: string,
+	/**
+	 * Claude Code's `gitStatus:` block, when in a git repo — a one-time snapshot
+	 * computed at session start and appended last (after the cwd line), matching
+	 * CC. Session-constant, so it too stays outside the EnvironmentInfo cache.
+	 */
+	gitStatus?: string | null,
 ): string {
 	const bundle = BUNDLES[tier];
 	const sections = [
@@ -108,6 +114,11 @@ export function buildClaudeCodeSystemPrompt(
 	// read-the-file convention.
 
 	prompt += `\nCurrent working directory: ${env.cwd.replace(/\\/g, "/")}`;
+
+	// Claude Code appends the git snapshot last, separated by a blank line.
+	if (gitStatus) {
+		prompt += `\n\n${gitStatus}`;
+	}
 
 	return prompt;
 }
