@@ -5,8 +5,10 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	buildClaudeMdBlock,
+	buildOneCodeBlock,
 	discoverContextFilePaths,
 	discoverContextFiles,
+	discoverOneCodeFiles,
 	expandImports,
 	ONECODE_DESCRIPTOR,
 	ONECODE_GLOBAL_DESCRIPTOR,
@@ -213,6 +215,59 @@ describe("ONECODE.md discovery", () => {
 		});
 		const claudeMd = files.find((f) => f.path.endsWith("CLAUDE.md"));
 		expect(claudeMd?.content).toBe("AGENT RULES\n\n");
+	});
+});
+
+describe("the # oneCodeMd block", () => {
+	let root: string;
+	beforeEach(() => {
+		root = mkdtempSync(join(tmpdir(), "onecode-block-"));
+	});
+	afterEach(() => {
+		rmSync(root, { recursive: true, force: true });
+	});
+	const write = (rel: string, content: string) => {
+		const abs = join(root, rel);
+		mkdirSync(join(abs, ".."), { recursive: true });
+		writeFileSync(abs, content);
+		return abs;
+	};
+
+	it("is null when there are no ONECODE.md files (nothing extra rides)", () => {
+		mkdirSync(join(root, "proj"), { recursive: true });
+		const files = discoverOneCodeFiles({ cwd: join(root, "proj"), homeOneCodeDir: join(root, ".one-code"), home: root });
+		expect(buildOneCodeBlock(files)).toBeNull();
+	});
+
+	it("carries the ONECODE files under a precedence-over-CLAUDE.md preamble, nearer last", () => {
+		const globalOne = write(".one-code/ONECODE.md", "global one-code\n");
+		mkdirSync(join(root, "proj", "sub"), { recursive: true });
+		const projOne = write("proj/ONECODE.md", "project one-code\n");
+		const files = discoverOneCodeFiles({
+			cwd: join(root, "proj", "sub"),
+			homeOneCodeDir: join(root, ".one-code"),
+			home: root,
+		});
+		const block = buildOneCodeBlock(files);
+		expect(block).toBeTruthy();
+		const text = block as string;
+		expect(text).toContain("# oneCodeMd");
+		expect(text).toContain("take precedence over the CLAUDE.md instructions");
+		// Global first, project (nearer) after it.
+		expect(text.indexOf(globalOne)).toBeLessThan(text.indexOf(projOne));
+		expect(text).toContain("global one-code");
+		expect(text).toContain("project one-code");
+		expect(text).toContain(ONECODE_GLOBAL_DESCRIPTOR);
+		expect(text).toContain(ONECODE_DESCRIPTOR);
+	});
+
+	it("expands @imports inside an ONECODE.md file", () => {
+		write(".one-code/ignore", "x");
+		mkdirSync(join(root, "proj"), { recursive: true });
+		write("proj/ONECODE.md", "@snippet.md\n");
+		write("proj/snippet.md", "SNIPPET BODY\n");
+		const files = discoverOneCodeFiles({ cwd: join(root, "proj"), homeOneCodeDir: join(root, ".one-code"), home: root });
+		expect(buildOneCodeBlock(files)).toContain("SNIPPET BODY");
 	});
 });
 

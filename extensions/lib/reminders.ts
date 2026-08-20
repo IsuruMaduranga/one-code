@@ -45,6 +45,10 @@ export const CONTEXT_ORDER = {
 	mcp: 30,
 	skills: 40,
 	claudeMd: 50,
+	// One Code's own instructions ride in their own block AFTER the # claudeMd
+	// block (higher `order` = closer to the user text = higher precedence), so
+	// ONECODE.md takes precedence over CLAUDE.md. Not part of Claude Code.
+	oneCodeMd: 60,
 } as const;
 
 /** A drained reminder with everything the injector needs to place it. */

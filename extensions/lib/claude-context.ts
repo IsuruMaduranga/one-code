@@ -21,8 +21,10 @@
  *     CLAUDE.md that just says `@AGENTS.md` reuses an existing AGENTS.md.
  *   - `ONECODE.md` / `onecode.md` / `OneCode.md` files (global `~/.one-code` +
  *     each project directory) carry One Code-specific instructions that Claude
- *     Code never reads. They sit in this same block, after the directory's
- *     CLAUDE.md so they take precedence.
+ *     Code never reads. They ride their OWN `# oneCodeMd` block (see
+ *     `buildOneCodeBlock` / `discoverOneCodeFiles`), emitted after the `# claudeMd`
+ *     block so they take precedence over CLAUDE.md — keeping `# claudeMd` itself
+ *     byte-exact with Claude Code.
  *
  * What is NOT yet replicated: enterprise-policy files and nested subtree
  * CLAUDE.md loaded on-demand when a file under them is read (a follow-up needing
@@ -275,9 +277,10 @@ export function ancestorDirs(cwd: string): string[] {
  *
  * When `homeOneCodeDir` is given, One Code's own `ONECODE.md` files join the
  * list: the global one from `~/.one-code` right after the global CLAUDE.md, and
- * each directory's after its CLAUDE.md/CLAUDE.local.md so nearer, One Code-specific
- * instructions win. Both the model-facing block and the `/memory` picker pass it
- * (the picker offers ONECODE.md as an editable target, by design).
+ * each directory's after its CLAUDE.md/CLAUDE.local.md. The `/memory` picker passes
+ * it (so ONECODE.md is an editable target); the model-facing `# claudeMd` block
+ * does NOT — there ONECODE.md rides its own `# oneCodeMd` block via
+ * `discoverOneCodeFiles` instead, so `# claudeMd` stays byte-exact with CC.
  */
 export function discoverContextFilePaths(opts: {
 	cwd: string;
@@ -328,6 +331,53 @@ export function discoverContextFiles(opts: {
 		files.push({ path, content: expandImports(content, dirname(path), { home: opts.home }), descriptor });
 	}
 	return files;
+}
+
+/**
+ * The ONECODE.md files that exist, ordered global-first then farthest ancestor
+ * down to cwd (nearer wins). These ride in their own `# oneCodeMd` block, not the
+ * `# claudeMd` block, so the latter stays byte-exact with Claude Code.
+ */
+export function discoverOneCodeFilePaths(opts: { cwd: string; homeOneCodeDir: string }): ContextFilePath[] {
+	const paths: ContextFilePath[] = [];
+	const seen = new Set<string>();
+	const push = (path: string | null, descriptor: string) => {
+		if (!path || seen.has(path)) return;
+		paths.push({ path, descriptor });
+		seen.add(path);
+	};
+	push(firstOneCodeFile(opts.homeOneCodeDir), ONECODE_GLOBAL_DESCRIPTOR);
+	for (const d of ancestorDirs(opts.cwd)) push(firstOneCodeFile(d), ONECODE_DESCRIPTOR);
+	return paths;
+}
+
+/** ONECODE.md files with `@import`s expanded, for the `# oneCodeMd` block. */
+export function discoverOneCodeFiles(opts: { cwd: string; homeOneCodeDir: string; home: string }): ContextFile[] {
+	const files: ContextFile[] = [];
+	for (const { path, descriptor } of discoverOneCodeFilePaths(opts)) {
+		const content = readFileIfPresent(path);
+		if (content === null) continue;
+		files.push({ path, content: expandImports(content, dirname(path), { home: opts.home }), descriptor });
+	}
+	return files;
+}
+
+const ONECODE_PREAMBLE =
+	"# oneCodeMd\n" +
+	"The following are One Code-specific instructions, read only by One Code and not by other tools. " +
+	"IMPORTANT: they take precedence over the CLAUDE.md instructions above and over any default behavior — " +
+	"where they conflict with CLAUDE.md, follow these. Follow them exactly as written.";
+
+/**
+ * Assemble the `# oneCodeMd` block's inner text (wrapper added by lib/reminders.ts):
+ * the precedence preamble, then one `Contents of {path} ({descriptor}):\n\n{content}`
+ * section per file (same raw-content join as the claudeMd block). Returns null when
+ * there are no ONECODE.md files, so nothing extra rides when the feature is unused.
+ */
+export function buildOneCodeBlock(files: ContextFile[]): string | null {
+	if (files.length === 0) return null;
+	const sections = files.map((s) => `Contents of ${s.path} (${s.descriptor}):\n\n${s.content}`).join("\n");
+	return `${ONECODE_PREAMBLE}\n\n${sections}`;
 }
 
 /**

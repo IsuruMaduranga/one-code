@@ -475,11 +475,9 @@ neither:
    line stays accurate on case-insensitive filesystems) carry One Code-specific
    instructions Claude Code never reads. The global one lives in `~/.one-code`
    (One Code's own state dir, chosen over `~/.claude` which is a read-only compat
-   surface), emitted right after the global CLAUDE.md; each directory's is
-   emitted right after that directory's CLAUDE.md/CLAUDE.local.md so nearer,
-   One Code-specific instructions win. Gated on `homeOneCodeDir` being passed to
-   the discovery functions. (The `/memory` picker later adopted this too and
-   deliberately offers ONECODE.md as an editable target — see
+   surface). They ride their **own `# oneCodeMd` block**, not the `# claudeMd`
+   block — see the 2026-08-20 update below. (The `/memory` picker also offers
+   ONECODE.md as an editable target — see
    memory-state.md#the-memory-picker-and-the-claudemd-over-limit-warning-2026-08-20.)
 
 **Why.** `@AGENTS.md` in CLAUDE.md is how people reuse an existing AGENTS.md
@@ -498,6 +496,30 @@ divergence that is inert (byte-identical block) when no such file exists.
 project-only with no global (less flexible); appending ONECODE.md at the very end
 of the block instead of per-directory (loses the nearer-wins precedence that
 mirrors CLAUDE.md ordering).
+
+### Update (2026-08-20): ONECODE.md rides its own block, above CLAUDE.md
+
+ONECODE.md no longer folds into the `# claudeMd` block. It rides a **separate
+`# oneCodeMd` block** (`buildOneCodeBlock` / `discoverOneCodeFiles` in
+`lib/claude-context.ts`), emitted `first-prepend` at `CONTEXT_ORDER.oneCodeMd`
+(60) — after `# claudeMd` (50), so it sits closest to the user text, the
+highest-precedence position in the context stack. Its preamble states the
+instructions "take precedence over the CLAUDE.md instructions above … where they
+conflict with CLAUDE.md, follow these." So ONECODE.md now wins over CLAUDE.md,
+both by position and by explicit framing.
+
+Two payoffs beyond precedence: the `# claudeMd` block goes back to **byte-exact
+with Claude Code** (no One Code section wedged in), and the block is omitted
+entirely when no ONECODE.md exists (nothing extra rides). Discovery for the block
+is `homeOneCodeDir`-independent of `discoverContextFilePaths` — the `/memory`
+picker still passes `homeOneCodeDir` to that function to list ONECODE.md as an
+editable target, but the model-facing `# claudeMd` block no longer does.
+
+**Why separate rather than a higher slot within `# claudeMd`.** The claudeMd block
+is a byte-exact CC reproduction; a One Code section inside it breaks that fidelity
+and muddies the trust framing (CC's block downplays itself with "may not be
+relevant", the opposite of what One Code's own authoritative instructions want).
+A distinct block carries its own override framing cleanly.
 
 ## CC's gitStatus block appended to the system prompt in a repo (2026-08-20)
 
