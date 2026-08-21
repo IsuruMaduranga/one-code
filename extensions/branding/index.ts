@@ -20,6 +20,7 @@ import { dirname, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getAgentDir, SettingsManager, VERSION as PI_VERSION } from "@earendil-works/pi-coding-agent";
 import { piVersionWarning } from "../lib/pi-version.ts";
+import { extensionVersion } from "../lib/package-version.ts";
 import {
 	formatModel,
 	formatModelSpec,
@@ -321,7 +322,7 @@ export default function brandingExtension(pi: ExtensionAPI) {
 		// Only the TUI has a header to replace; rpc/print modes have no chrome.
 		if (!ctx.hasUI || ctx.mode !== "tui") return;
 
-		const version = process.env.CC_VERSION ?? "0.1.0";
+		const version = process.env.CC_VERSION ?? extensionVersion();
 		currentModelId = ctx.model?.id ?? currentModelId;
 		currentModelProvider = ctx.model?.provider ?? currentModelProvider;
 
