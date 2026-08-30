@@ -28,8 +28,11 @@
  *   same-provider profile serves instead.
  * - A configured default that cannot resolve degrades to the session model with
  *   a notice naming the knob; without one, a reviewed same-provider role profile
- *   chooses an economical default before the session fallback. Only a bad
- *   *per-call* request errors, because the model can read the menu and retry.
+ *   chooses an economical default before the session fallback. A bad *per-call*
+ *   request first falls through to the agent's own model and the configured
+ *   default (running the subagent on its intended model, with a notice); only
+ *   when nothing downstream resolves does it error, so the model can read the
+ *   menu and retry.
  *
  * The menu keeps the main model informed without dumping a 300-model gateway
  * catalog into every request: vendor-contained, variant- and unpriced-filtered,
@@ -153,6 +156,9 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 
 	const contained = sessionModel ? modelsContainedToSession(available, sessionModel) : [];
 	let suppressAutomatic = false;
+	// A per-call `model` that did not resolve — deferred, not errored (see the
+	// "per-call request" paragraph in the module doc above).
+	let callFailed: string | undefined;
 
 	// The `subagentModel` setting is stale when it was stamped for a different
 	// provider than this session (or never stamped — a hand-edited setting): the
@@ -174,11 +180,16 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 		if (CLAUDE_CODE_ALIASES.has(alias)) {
 			const resolved = resolveAlias(alias, contained);
 			if (resolved) return { model: resolved, source: entry.source, notices };
+			// An alias that names nothing in-provider keeps walking the chain (the
+			// agent's model / configured default may still resolve), then lands on the
+			// session model — never an automatic pick, and never `unresolved`: unlike a
+			// literal typo, a cross-provider alias is a naming mismatch, not a retryable
+			// mistake, so it degrades quietly (matching the module doc).
 			notices.push(
-				`No "${alias}" model exists within ${sessionModel ? spec(sessionModel) : "this session"} — the session model runs this subagent instead.`,
+				`No "${alias}" model exists within ${sessionModel ? spec(sessionModel) : "this session"} — falling back to the agent's model or the session model.`,
 			);
 			suppressAutomatic = true;
-			break;
+			continue;
 		}
 
 		const resolved = findConfigured(available, wanted);
@@ -212,8 +223,14 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 		}
 
 		if (entry.source === "call") {
-			// The main model chose this string; give it the menu and let it retry.
-			return { source: "call", unresolved: wanted, notices };
+			// Defer to the rest of the chain (see the module doc): record the
+			// failure and keep walking, erroring after the loop only if nothing
+			// downstream resolves.
+			callFailed = wanted;
+			notices.push(
+				`Requested subagent model "${wanted}" is not available — falling back to the agent's configured model or the session default.`,
+			);
+			continue;
 		}
 		// An explicit choice failed; automatic selection would substitute a model
 		// nobody described, so the remaining chain and the session model serve.
@@ -224,6 +241,11 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 				: `Subagent model "${wanted}" (from ${entry.knob}) is not available — the session model runs this subagent instead.`,
 		);
 	}
+
+	// Per-call model failed and nothing downstream resolved: surface it so the
+	// caller shows the menu and the model retries, rather than silently dropping
+	// to the automatic/session pick for a model the main model named.
+	if (callFailed) return { source: "call", unresolved: callFailed, notices };
 
 	// Automatic selection is a cost optimisation, so it needs price evidence:
 	// with the session price unknown there is no demonstrable saving, and picking

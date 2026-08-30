@@ -113,7 +113,9 @@ describe("resolveSubagentModel: precedence and exact references", () => {
 		expect(resolution.notices[0]).toContain("different provider");
 	});
 
-	it("fails a bad per-call request so the model that wrote it can retry", () => {
+	it("fails a bad per-call request with no fallback so the model that wrote it can retry", () => {
+		// No agent model and no configured default → nothing downstream resolves,
+		// so a bad per-call model errors and the model can pick from the menu.
 		const resolution = resolveSubagentModel({
 			requested: "gpt-9000-ultra",
 			sessionModel: anthropic[0],
@@ -121,6 +123,58 @@ describe("resolveSubagentModel: precedence and exact references", () => {
 		});
 		expect(resolution.unresolved).toBe("gpt-9000-ultra");
 		expect(resolution.model).toBeUndefined();
+	});
+
+	it("falls a bad per-call model through to the agent's configured model, not the session model", () => {
+		// The reported bug: a non-existent per-call model must not skip the agent's
+		// own model and land on the session model — the agent runs on its model.
+		const resolution = resolveSubagentModel({
+			requested: "gpt-9000-ultra",
+			agentModel: "claude-haiku-4-5",
+			sessionModel: anthropic[0], // session is opus; agent's haiku must win over it
+			available: anthropic,
+		});
+		expect(resolution.model?.id).toBe("claude-haiku-4-5");
+		expect(resolution.source).toBe("agent");
+		expect(resolution.unresolved).toBeUndefined();
+		expect(resolution.notices.some((n) => n.includes("gpt-9000-ultra"))).toBe(true);
+	});
+
+	it("falls a bad per-call model through to the configured default when there is no agent model", () => {
+		const resolution = resolveSubagentModel({
+			requested: "gpt-9000-ultra",
+			configuredDefault: setting("haiku"),
+			sessionModel: anthropic[0],
+			available: anthropic,
+		});
+		expect(resolution.model?.id).toBe("claude-haiku-4-5");
+		expect(resolution.source).toBe("default");
+		expect(resolution.unresolved).toBeUndefined();
+	});
+
+	it("still errors a bad per-call model when the agent model is also unavailable", () => {
+		const resolution = resolveSubagentModel({
+			requested: "gpt-9000-ultra",
+			agentModel: "also-withdrawn",
+			sessionModel: anthropic[0],
+			available: anthropic,
+		});
+		expect(resolution.unresolved).toBe("gpt-9000-ultra");
+		expect(resolution.model).toBeUndefined();
+	});
+
+	it("falls a per-call alias that names nothing in-provider through to the agent's model", () => {
+		// "opus" on an OpenAI session names nothing there; the agent's own valid
+		// model must still run rather than dropping straight to the session model.
+		const resolution = resolveSubagentModel({
+			requested: "opus",
+			agentModel: "gpt-5-mini",
+			sessionModel: openai[0],
+			available: openai,
+		});
+		expect(resolution.model?.id).toBe("gpt-5-mini");
+		expect(resolution.source).toBe("agent");
+		expect(resolution.unresolved).toBeUndefined();
 	});
 
 	it("degrades a bad configured default to the session model with a notice", () => {
