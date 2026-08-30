@@ -128,23 +128,25 @@ export interface StripInput {
 
 /**
  * One line per row: `mark  agentType  activity   elapsed · ↓ tokens`. The
- * selected row is bold and `●`; others `○`. A focus hint precedes the list
- * (only while focused) — its keys reflect the mode: navigating the strip vs.
- * reading an open transcript. Overflow past MAX_STRIP_ROWS collapses to "+N more".
+ * selected row is bold and marked `❯` (Claude Code's selection caret); others
+ * are unmarked. A focus hint precedes the list (only while focused) — its keys
+ * reflect the mode: navigating the strip vs. reading an open transcript, where
+ * `←` returns to selection so a different agent can be picked. Overflow past
+ * MAX_STRIP_ROWS collapses to "+N more".
  */
 export function renderStrip(input: StripInput, paint: Paint): string[] {
 	const width = Math.max(20, input.width);
 	const out: string[] = [];
 	if (input.selected !== undefined) {
 		const hint = input.viewOpen
-			? "↑/↓ scroll · PgUp/PgDn page · ⇥ next · x stop · esc back"
+			? "↑/↓ scroll · PgUp/PgDn page · ← agents · ⇥ next · x stop · esc back"
 			: "↑/↓ select · ⏎ view · x stop · ctrl+x ctrl+k stop all · esc back";
 		out.push(paint.fg("dim", cut(hint, width)));
 	}
 	const shown = input.rows.slice(0, MAX_STRIP_ROWS);
 	for (const [index, row] of shown.entries()) {
 		const selected = input.selected === index;
-		const mark = selected ? "●" : "○";
+		const mark = selected ? "❯" : " ";
 		const stats = [
 			formatDuration(row.startedAt, row.finishedAt, input.now),
 			row.tokens ? `↓ ${formatTokenCount(row.tokens)} tokens` : "",

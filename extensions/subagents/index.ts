@@ -661,7 +661,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				// Read mode: while a transcript view is open the arrows/page keys
 				// scroll IT (the natural gesture — pi's main screen has no mouse
 				// wheel, so PageUp/PageDown alone were the only path and few reach
-				// for them), Tab retargets to the next agent, Enter/esc close.
+				// for them), Tab retargets to the next agent, Enter/esc close, and
+				// ← closes the transcript but keeps the panel focused on that agent
+				// (setView parked the highlight there) so ↑/↓ can pick a different
+				// agent and Enter reopens — Claude Code's back-to-selection gesture.
 				if (view) {
 					switch (decoded.key) {
 						case "up":
@@ -675,6 +678,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 							return { consume: true };
 						case "pageDown":
 							view.scrollBy(-10);
+							return { consume: true };
+						case "left":
+							closeView();
 							return { consume: true };
 						case "switch": {
 							// Retarget to the next agent, anchored to the VIEWED run in the

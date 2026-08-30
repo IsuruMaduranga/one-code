@@ -268,23 +268,27 @@ describe("renderStrip", () => {
 	reg.stats("a", 2, { input: 0, output: 58800, cacheRead: 0, cacheWrite: 0, total: 0, cost: 0 });
 	const rows = buildRows(reg.list(), false, 5000);
 
-	it("shows a focus hint only when focused, and marks the selection ●", () => {
+	it("shows a focus hint only when focused, and marks the selection ❯", () => {
 		const unfocused = renderStrip({ rows, width: 80, now: 5000 }, paint).map(strip);
 		expect(unfocused.some((l) => l.includes("⏎ view"))).toBe(false);
-		expect(unfocused[0]).toContain("○ main");
+		// Unfocused: no selection caret on any row.
+		expect(unfocused.some((l) => l.includes("❯"))).toBe(false);
+		expect(unfocused[0]).toContain("main");
 
 		const focused = renderStrip({ rows, selected: 1, width: 80, now: 5000 }, paint).map(strip);
 		expect(focused[0]).toContain("⏎ view");
 		expect(focused[0]).toContain("x stop");
 
-		// With a transcript open the hint switches to read-mode keys (scroll/switch/close).
+		// With a transcript open the hint switches to read-mode keys, including ←
+		// back to selection (scroll/agents/switch/close).
 		const reading = renderStrip({ rows, selected: 1, viewOpen: true, width: 80, now: 5000 }, paint).map(strip);
 		expect(reading[0]).toContain("↑/↓ scroll");
 		expect(reading[0]).toContain("PgUp/PgDn page");
+		expect(reading[0]).toContain("← agents");
 		expect(reading[0]).toContain("⇥ next");
 		expect(reading[0]).not.toContain("⏎ view");
 		const agentRow = focused.find((l) => l.includes("general-purpose"))!;
-		expect(agentRow).toContain("●");
+		expect(agentRow).toContain("❯");
 		expect(agentRow).toContain("Reading tui-render.ts");
 		expect(agentRow).toContain("58.8k");
 	});
@@ -295,7 +299,7 @@ describe("renderStrip", () => {
 		reg.register({ taskId: "k", name: "k", agentType: "general-purpose", task: "verify widget", startedAt: 2000, parentTaskId: "p", depth: 1 });
 		const out = renderStrip({ rows: buildRows(reg.list(), false, 5000), width: 100, now: 5000 }, paint).map(strip);
 		expect(out.find((l) => l.includes("code-review"))).not.toContain("└");
-		expect(out.find((l) => l.includes("general-purpose"))).toContain("└ ○ general-purpose");
+		expect(out.find((l) => l.includes("general-purpose"))).toMatch(/└\s+general-purpose/);
 	});
 
 	it("collapses overflow past MAX_STRIP_ROWS", () => {

@@ -4,11 +4,12 @@
  * owns that split): with no view open, arrows select and Enter opens the
  * selected agent's transcript; while a view IS open the panel is in "read"
  * mode, where arrows scroll it a line at a time, PageUp/PageDown scroll a page,
- * `switch` (Tab) retargets to the next agent, and Enter closes it. `x` stops,
- * the `ctrl+x ctrl+k` chord stops all, esc leaves. `left`/`space` exist for the
- * shell-panel stages (back / close) — the agents branch treats them like
- * typing. Raw terminal bytes in, intents out — no side effects, fully
- * unit-testable.
+ * `switch` (Tab) retargets to the next agent, `left` (←) closes the transcript
+ * back to agent selection, and Enter closes it. `x` stops, the `ctrl+x ctrl+k`
+ * chord stops all, esc leaves. `left` also serves the shell-panel stages (back)
+ * and `space` (close); the agents branch uses `left` in read mode (above) and
+ * treats `space` like typing. Raw terminal bytes in, intents out — no side
+ * effects, fully unit-testable.
  */
 
 const UP = new Set(["\x1b[A", "\x1bOA"]);

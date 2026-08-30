@@ -93,7 +93,7 @@ export class SubagentWidget {
 	/** index.ts sets the open transcript's taskId (or undefined on close) so the
 	 * strip switches to scroll hints and pins that run visible. Also parks the
 	 * strip highlight on the viewed run while it is within the visible window, so
-	 * the ● tracks what is on screen (read-mode actions target the viewed run
+	 * the ❯ tracks what is on screen (read-mode actions target the viewed run
 	 * regardless — see selectedRun's window caveat). */
 	setView(taskId: string | undefined): void {
 		if (this.viewedId === taskId) return;
