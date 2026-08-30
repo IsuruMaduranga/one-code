@@ -14,7 +14,7 @@
 import { readFileSync } from "node:fs";
 import os from "node:os";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, parseFrontmatter, stripFrontmatter } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { pluginRoot } from "../lib/plugin-root.ts";
 import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
@@ -32,6 +32,7 @@ import {
 import { estimateSkillTokens, scanSkills, scopeForPath } from "../lib/skill-scan.ts";
 import { recordUsage } from "../lib/usage-tracker.ts";
 import { boundedDockHeight, ccToolRenderers, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
+import { bareSkillMatches, buildSkillBlock, parseSkillCommand, resolveSkill } from "./invoke.ts";
 import { decodeSkillsKey } from "./panel/keys.ts";
 import { renderSkillsPanel, type SkillsPaint } from "./panel/render.ts";
 import { applySkillsKey, initialSkillsState, type SkillsRow, visibleRows } from "./panel/state.ts";
@@ -200,11 +201,8 @@ export default function skillExtension(pi: ExtensionAPI) {
 			// A bare name may match a plugin skill (`<plugin>:<name>`), but only
 			// when exactly one plugin ships it — otherwise resolving silently would
 			// run an arbitrary one, so ask which.
-			const bareMatches = all.filter((skill) => skill.name.endsWith(`:${wanted}`));
-			const found =
-				all.find((skill) => skill.name === wanted) ??
-				all.find((skill) => skill.name.toLowerCase() === wanted.toLowerCase()) ??
-				(bareMatches.length === 1 ? bareMatches[0] : undefined);
+			const bareMatches = bareSkillMatches(all, wanted);
+			const found = resolveSkill(all, wanted);
 
 			if (!found) {
 				const ambiguous = bareMatches.length > 1;
@@ -261,6 +259,48 @@ export default function skillExtension(pi: ExtensionAPI) {
 				details: { skill: found.name, path: found.path } as Record<string, unknown>,
 			};
 		},
+	});
+
+	// A user-typed `/skill:<name>` normally runs pi's own expansion, which submits
+	// the skill's `<skill>` block as a *user message* — so loading a skill shows in
+	// the transcript as a new user turn. Intercept it here, suppress pi's
+	// expansion (return "handled"), and re-deliver the identical block as a hidden
+	// custom message: the model receives the same bytes (convertToLlm maps a custom
+	// message to a user message regardless of `display`), but nothing renders. An
+	// unknown name, an ambiguous plugin match, or an unreadable file falls through
+	// to pi's native handling; an "off" skill is refused here (matching the Skill
+	// tool), because pi's own expansion has no knowledge of the overrides store and
+	// would otherwise run it.
+	pi.on("input", (event, ctx) => {
+		const cmd = parseSkillCommand(event.text);
+		if (!cmd) return { action: "continue" };
+		const found = resolveSkill(index(), cmd.name);
+		if (!found) return { action: "continue" };
+		if (found.state === "off") {
+			// "off" is refused even on explicit invocation (see skill-overrides.ts).
+			// With no UI to say why, fall through rather than silently no-op.
+			if (!ctx.hasUI) return { action: "continue" };
+			const where = found.source === "plugin" ? "/plugins" : "/skills";
+			ctx.ui.notify(`Skill "${found.name}" is turned off — enable it from ${where} to run it.`, "warning");
+			return { action: "handled" };
+		}
+
+		let body: string;
+		try {
+			body = stripFrontmatter(readFileSync(found.path, "utf-8")).trim();
+		} catch {
+			return { action: "continue" };
+		}
+
+		recordUsage(pluginRoot(getAgentDir()), "skill", found.name);
+		const block = buildSkillBlock({ name: found.name, filePath: found.path }, body, cmd.args);
+		// Carry any attached images alongside the block, as pi's native path would.
+		const content = event.images?.length ? [{ type: "text" as const, text: block }, ...event.images] : block;
+		pi.sendMessage(
+			{ customType: "skill-invocation", content, display: false, details: { skill: found.name, args: cmd.args } },
+			{ triggerTurn: true, ...(event.streamingBehavior ? { deliverAs: event.streamingBehavior } : {}) },
+		);
+		return { action: "handled" };
 	});
 
 	const buildSkillsRows = (cwd: string | undefined): SkillsRow[] =>
