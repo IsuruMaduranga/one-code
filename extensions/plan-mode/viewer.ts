@@ -15,10 +15,8 @@ import { cutPlainText } from "../lib/tui-render.ts";
 /** Hard-wrap plain text to `width` columns, preserving blank lines. */
 export { wrapPlainText as wrapPlanText } from "../lib/tui-render.ts";
 
-export const PLAN_CHOICES = ["Approve — manual approvals", "Approve — auto-accept edits", "Keep planning"] as const;
-
-/** What the dialog resolves to; index into PLAN_CHOICES, or null for cancel. */
-export type PlanChoice = 0 | 1 | 2;
+/** What the dialog resolves to; index into the choices list, or null for cancel. */
+export type PlanChoice = number;
 
 export type ViewerKey =
 	| { kind: "scroll"; delta: number }
@@ -27,7 +25,12 @@ export type ViewerKey =
 	| { kind: "confirm" }
 	| { kind: "cancel" };
 
-/** Decode a raw terminal chunk; `page` is the scroll step for PgUp/PgDn. */
+/**
+ * Decode a raw terminal chunk; `page` is the scroll step for PgUp/PgDn. Digit
+ * keys resolve to a raw 0-based `pick` index; the caller clamps it to the number
+ * of choices actually shown (the list is dynamic — auto mode joins only when a
+ * classifier model is reachable).
+ */
 export function decodeViewerKey(data: string, page: number): ViewerKey | undefined {
 	switch (data) {
 		case "\x1b[A":
@@ -53,11 +56,10 @@ export function decodeViewerKey(data: string, page: number): ViewerKey | undefin
 		case "\x1b":
 		case "\x03": // ctrl+c — same intent as escape while the dialog is focused
 			return { kind: "cancel" };
-		case "1":
-		case "2":
-		case "3":
-			return { kind: "pick", index: (Number(data) - 1) as PlanChoice };
 		default:
+			if (data.length === 1 && data >= "1" && data <= "9") {
+				return { kind: "pick", index: Number(data) - 1 };
+			}
 			return undefined;
 	}
 }
@@ -73,6 +75,8 @@ export interface PlanViewerView {
 	lines: string[];
 	offset: number;
 	choice: PlanChoice;
+	/** Labels for the numbered choice list; the last is conventionally "Keep planning". */
+	choices: readonly string[];
 	maxVisible?: number;
 }
 
@@ -81,11 +85,12 @@ export function renderPlanViewer(view: PlanViewerView, paint: Paint, width: numb
 	// Cut plain text before painting so escapes never enter the width math.
 	const cut = (line: string) => cutPlainText(line, width);
 	const rule = paint("dim", "─".repeat(Math.max(0, Math.min(width, 72))));
+	const pickHint = view.choices.length > 1 ? `1-${view.choices.length} pick · ` : "";
 
 	const out: string[] = [];
 	out.push("");
 	out.push(paint("accent", cut("Approve this plan?")));
-	out.push(paint("dim", cut("↑/↓ scroll · ←/→ switch choice · 1-3 pick · enter confirm · esc keep planning")));
+	out.push(paint("dim", cut(`↑/↓ scroll · ←/→ switch choice · ${pickHint}enter confirm · esc keep planning`)));
 	out.push(rule);
 
 	const offset = clampOffset(view.offset, view.lines.length, maxVisible);
@@ -98,7 +103,7 @@ export function renderPlanViewer(view: PlanViewerView, paint: Paint, width: numb
 	}
 	out.push(rule);
 
-	for (const [index, label] of PLAN_CHOICES.entries()) {
+	for (const [index, label] of view.choices.entries()) {
 		const numbered = `${index + 1}. ${label}`;
 		out.push(
 			index === view.choice ? paint("accent", cut(`❯ ${numbered}`)) : cut(`  ${numbered}`),

@@ -3,6 +3,14 @@ import { buildPlanModeReminder } from "../../extensions/plan-mode/reminder.ts";
 import { randomSlug } from "../../extensions/plan-mode/slug.ts";
 import { clampOffset, decodeViewerKey, renderPlanViewer, wrapPlanText } from "../../extensions/plan-mode/viewer.ts";
 
+/** The dialog's default choice list when auto mode is available (auto mode leads). */
+const CHOICES = [
+	"Approve — auto mode",
+	"Approve — auto-accept edits",
+	"Approve — manual approvals",
+	"Keep planning",
+] as const;
+
 describe("randomSlug", () => {
 	it("produces three distinct lowercase words joined by dashes", () => {
 		const slug = randomSlug();
@@ -87,7 +95,7 @@ describe("plan viewer", () => {
 	it("never renders a line wider than the given width", () => {
 		const width = 24;
 		const content = wrapPlanText(`# Plan\n${"word ".repeat(40)}\nshort`, width - 1);
-		const lines = renderPlanViewer({ lines: content, offset: 0, choice: 0 }, plain, width);
+		const lines = renderPlanViewer({ lines: content, offset: 0, choice: 0, choices: CHOICES }, plain, width);
 		for (const line of lines) {
 			expect([...line].length, JSON.stringify(line)).toBeLessThanOrEqual(width);
 		}
@@ -95,11 +103,22 @@ describe("plan viewer", () => {
 
 	it("windows the content and reports the scroll position", () => {
 		const content = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`);
-		const out = renderPlanViewer({ lines: content, offset: 5, choice: 2, maxVisible: 10 }, plain, 80);
+		const out = renderPlanViewer(
+			{ lines: content, offset: 5, choice: 3, choices: CHOICES, maxVisible: 10 },
+			plain,
+			80,
+		);
 		expect(out).toContain("line 6");
 		expect(out).not.toContain("line 5");
 		expect(out).not.toContain("line 16");
 		expect(out.some((l) => l.includes("lines 6–15 of 30"))).toBe(true);
-		expect(out.some((l) => l.includes("❯ 3. Keep planning"))).toBe(true);
+		expect(out.some((l) => l.includes("❯ 4. Keep planning"))).toBe(true);
+	});
+
+	it("leads the choice list with auto mode and numbers each choice", () => {
+		const out = renderPlanViewer({ lines: ["plan"], offset: 0, choice: 0, choices: CHOICES }, plain, 80);
+		expect(out.some((l) => l.includes("❯ 1. Approve — auto mode"))).toBe(true);
+		expect(out.some((l) => l.includes("2. Approve — auto-accept edits"))).toBe(true);
+		expect(out.some((l) => l.includes("1-4 pick"))).toBe(true);
 	});
 });

@@ -21,6 +21,7 @@ import { Type } from "typebox";
 import { oneCodeStateDir } from "../lib/paths.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { ccToolRenderers, safeThemePaint } from "../lib/tui-render.ts";
+import type { PermissionMode } from "../permissions/matcher.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../permissions/modes.ts";
 import { buildPlanModeReminder } from "./reminder.ts";
 import { randomSlug } from "./slug.ts";
@@ -155,6 +156,19 @@ export default function planModeExtension(pi: ExtensionAPI) {
 				};
 			}
 
+			// Auto mode leads the list when a classifier model is reachable — the
+			// same gate the mode cycle uses (permissions/index.ts autoInCycle). Each
+			// approving choice carries the mode it switches to; the final "Keep
+			// planning" choice has none and leaves the session in plan mode.
+			const autoAvailable = ctx.modelRegistry.getAvailable().length > 0;
+			const options: { label: string; mode?: PermissionMode }[] = [
+				...(autoAvailable ? [{ label: "Approve — auto mode", mode: "auto" as const }] : []),
+				{ label: "Approve — auto-accept edits", mode: "acceptEdits" },
+				{ label: "Approve — manual approvals", mode: "default" },
+				{ label: "Keep planning" },
+			];
+			const choices = options.map((o) => o.label);
+
 			const choice = await ctx.ui.custom<PlanChoice | null>((tui, theme, _keybindings, done) => {
 				const paint = safeThemePaint(theme);
 				const maxVisible = 12;
@@ -166,24 +180,26 @@ export default function planModeExtension(pi: ExtensionAPI) {
 						const lines = wrapPlanText(plan, Math.max(10, width - 1));
 						lineCount = lines.length;
 						offset = clampOffset(offset, lineCount, maxVisible);
-						return renderPlanViewer({ lines, offset, choice: selected, maxVisible }, paint, width);
+						return renderPlanViewer({ lines, offset, choice: selected, choices, maxVisible }, paint, width);
 					},
 					handleInput: (data: string) => {
 						const key = decodeViewerKey(data, maxVisible);
 						if (!key) return;
 						if (key.kind === "cancel") return done(null);
 						if (key.kind === "confirm") return done(selected);
-						if (key.kind === "pick") return done(key.index);
+						if (key.kind === "pick") return key.index < options.length ? done(key.index) : undefined;
 						if (key.kind === "scroll") offset = clampOffset(offset + key.delta, lineCount, maxVisible);
-						else if (key.kind === "choice") selected = (((selected + key.delta) % 3) + 3) % 3 as PlanChoice;
+						else if (key.kind === "choice")
+							selected = (((selected + key.delta) % options.length) + options.length) % options.length;
 						tui.requestRender();
 					},
 					invalidate: () => {},
 				};
 			});
 
-			if (choice === 0 || choice === 1) {
-				pi.events.emit(MODE_CHANNEL, { mode: choice === 1 ? "acceptEdits" : "default" });
+			const picked = choice != null ? options[choice] : undefined;
+			if (picked?.mode) {
+				pi.events.emit(MODE_CHANNEL, { mode: picked.mode });
 				return {
 					content: [
 						{
