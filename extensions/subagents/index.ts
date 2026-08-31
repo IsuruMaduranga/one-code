@@ -54,6 +54,7 @@ import { registerWorktreeIsolation } from "../lib/worktree-isolation.ts";
 import { systemNotification } from "../lib/notifications.ts";
 import { ccToolRenderers, customMessageText, notificationComponent, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import { deriveActivity, LiveRunRegistry } from "./live-runs.ts";
+import { DELEGATION_STEER } from "./delegation-steer.ts";
 import type { LiveSink } from "./runner.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
 import { SubagentWidget } from "./panel-widget.ts";
@@ -393,26 +394,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			order: CONTEXT_ORDER.agents,
 		});
 	};
-
-	/**
-	 * Tiny-tier-only strict delegation directive, riding the context stack right
-	 * after the agent catalog. Static prompt sections measurably move capable
-	 * models to delegate broad sweeps (workhorse/cheap went 2/6 → 6/6 in the
-	 * 2026-08-31 probe battery) but a sub-Haiku model ignored the same section
-	 * (qwen3.6-27b: 0/6 with it verified on the wire); a <system-reminder> sits
-	 * closer to the user text, where weak models actually attend. Keyed and
-	 * byte-stable, so it is cache-neutral; removed when a model switch leaves
-	 * the tiny tier.
-	 *
-	 * Sibling texts (same policy, separately tuned registers — keep aligned when
-	 * editing): DELEGATE_STRICT in system-prompt/tiers/low.ts (tiny prompt),
-	 * DELEGATING_WORK in tiers/mid.ts (workhorse/cheap prompt).
-	 */
-	const DELEGATION_STEER = [
-		"Delegation policy: when a request requires reading or searching MANY files (a codebase overview, \"find every place where…\", a consistency audit, exploring unfamiliar code), do NOT sweep the files yourself.",
-		'Make ONE Agent tool call with subagent_type: "explore" and the complete question as the task. The agent searches in its own separate context and returns just the answer; reading file after file yourself fills your context and degrades your answer.',
-		"Search directly only for a single targeted lookup (one known file or symbol).",
-	].join("\n");
 
 	const emitDelegationSteer = (sessionModel = lastCtx?.model) => {
 		if (resolveModelTier(sessionModel) === "tiny") {
