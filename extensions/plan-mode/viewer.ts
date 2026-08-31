@@ -68,6 +68,18 @@ export function clampOffset(offset: number, total: number, visible: number): num
 	return Math.max(0, Math.min(offset, Math.max(0, total - visible)));
 }
 
+/**
+ * The initially highlighted choice: the safest approving option ("manual
+ * approvals", mode "default"). Auto mode may lead the list so it is one
+ * keypress away, but Enter without arrowing must keep approving into manual
+ * mode — the pre-auto-option behavior — never silently switch the session
+ * into a more permissive mode.
+ */
+export function initialPlanChoice(options: readonly { mode?: string }[]): PlanChoice {
+	const index = options.findIndex((o) => o.mode === "default");
+	return index >= 0 ? index : 0;
+}
+
 export type Paint = (color: string, text: string) => string;
 
 export interface PlanViewerView {

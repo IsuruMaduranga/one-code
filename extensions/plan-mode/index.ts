@@ -26,7 +26,7 @@ import type { PermissionMode } from "../permissions/matcher.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../permissions/modes.ts";
 import { buildPlanModeReminder } from "./reminder.ts";
 import { randomSlug } from "./slug.ts";
-import { clampOffset, decodeViewerKey, type PlanChoice, renderPlanViewer, wrapPlanText } from "./viewer.ts";
+import { clampOffset, decodeViewerKey, initialPlanChoice, type PlanChoice, renderPlanViewer, wrapPlanText } from "./viewer.ts";
 
 export const MODE_CHANNEL = "one-code:set-permission-mode";
 /** Announces plan mode's one writable file; the permissions matcher consumes it. */
@@ -174,7 +174,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
 				const paint = safeThemePaint(theme);
 				const maxVisible = 12;
 				let offset = 0;
-				let selected: PlanChoice = 0;
+				let selected: PlanChoice = initialPlanChoice(options);
 				let lineCount = 0;
 				return {
 					render: (width: number) => {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildPlanModeReminder } from "../../extensions/plan-mode/reminder.ts";
 import { randomSlug } from "../../extensions/plan-mode/slug.ts";
-import { clampOffset, decodeViewerKey, renderPlanViewer, wrapPlanText } from "../../extensions/plan-mode/viewer.ts";
+import { clampOffset, decodeViewerKey, initialPlanChoice, renderPlanViewer, wrapPlanText } from "../../extensions/plan-mode/viewer.ts";
 
 /** The dialog's default choice list when auto mode is available (auto mode leads). */
 const CHOICES = [
@@ -126,5 +126,22 @@ describe("plan viewer", () => {
 		expect(out.some((l) => l.includes("❯ 1. Approve — auto mode"))).toBe(true);
 		expect(out.some((l) => l.includes("2. Approve — auto-accept edits"))).toBe(true);
 		expect(out.some((l) => l.includes("1-4 pick"))).toBe(true);
+	});
+});
+
+describe("initialPlanChoice", () => {
+	it("highlights manual approvals even when auto mode leads the list", () => {
+		// Enter without arrowing must approve into manual mode — never silently
+		// switch the session into auto mode (the pre-auto-option behavior).
+		const options = [{ mode: "auto" }, { mode: "acceptEdits" }, { mode: "default" }, {}];
+		expect(initialPlanChoice(options)).toBe(2);
+	});
+
+	it("highlights manual approvals when auto mode is unavailable", () => {
+		expect(initialPlanChoice([{ mode: "acceptEdits" }, { mode: "default" }, {}])).toBe(1);
+	});
+
+	it("falls back to the first option when no manual choice exists", () => {
+		expect(initialPlanChoice([{ mode: "acceptEdits" }, {}])).toBe(0);
 	});
 });
