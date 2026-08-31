@@ -32,7 +32,7 @@ import {
 import { estimateSkillTokens, scanSkills, scopeForPath } from "../lib/skill-scan.ts";
 import { recordUsage } from "../lib/usage-tracker.ts";
 import { boundedDockHeight, ccToolRenderers, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
-import { bareSkillMatches, buildSkillBlock, parseSkillCommand, resolveSkill } from "./invoke.ts";
+import { bareSkillMatches, buildSkillBlock, parseSkillCommand, redactOffSkillMessages, resolveSkill } from "./invoke.ts";
 import { decodeSkillsKey } from "./panel/keys.ts";
 import { renderSkillsPanel, type SkillsPaint } from "./panel/render.ts";
 import { applySkillsKey, initialSkillsState, type SkillsRow, visibleRows } from "./panel/state.ts";
@@ -281,7 +281,9 @@ export default function skillExtension(pi: ExtensionAPI) {
 			// in EVERY mode: falling through would hand the command to pi's native
 			// expansion, which has no knowledge of the overrides store and would run
 			// the skill anyway. A headless run gets the refusal as a next-turn
-			// reminder instead of a UI notice; never as silent execution.
+			// reminder instead of a UI notice; never as silent execution. This hook
+			// only covers prompt(); paths that expand without an `input` event
+			// (steer/followUp) are caught by the context-hook redaction below.
 			const where = found.source === "plugin" ? "/plugins" : "/skills";
 			const message = `Skill "${found.name}" is turned off — enable it from ${where} to run it.`;
 			if (ctx.hasUI) ctx.ui.notify(message, "warning");
@@ -305,6 +307,25 @@ export default function skillExtension(pi: ExtensionAPI) {
 			{ triggerTurn: true, ...(event.streamingBehavior ? { deliverAs: event.streamingBehavior } : {}) },
 		);
 		return { action: "handled" };
+	});
+
+	// Fail-closed backstop for the `input` interception above: pi's steer() and
+	// followUp() expand `/skill:<name>` natively WITHOUT firing an `input` event
+	// (queued interactive messages after the first, RPC steer/followUp), so a
+	// turned-off skill's instructions can land in the session history anyway.
+	// Strip them from every outgoing request instead — the wire copy carries the
+	// refusal notice, the session file keeps the original bytes, and untouched
+	// requests return undefined so the message array stays byte-identical
+	// (prompt-cache stable). Override states are read lazily, only when a
+	// message actually contains a `<skill>` block.
+	pi.on("context", (event) => {
+		let states: Map<string, string> | undefined;
+		const isOff = (name: string) => {
+			states ??= new Map(index().map((skill) => [skill.name, skill.state]));
+			return states.get(name) === "off";
+		};
+		const redacted = redactOffSkillMessages(event.messages, isOff);
+		return redacted ? { messages: redacted } : undefined;
 	});
 
 	const buildSkillsRows = (cwd: string | undefined): SkillsRow[] =>

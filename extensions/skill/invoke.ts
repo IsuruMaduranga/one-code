@@ -57,3 +57,70 @@ ${body}
 </skill>`;
 	return args ? `${block}\n\n${args}` : block;
 }
+
+/** Fast pre-check before the regex walk; also the marker `redactOffSkillText` scans for. */
+const SKILL_BLOCK_START = '<skill name="';
+const SKILL_BLOCK_RE = /<skill name="([^"]+)"[^>]*>[\s\S]*?<\/skill>/g;
+
+export const offSkillNotice = (name: string): string =>
+	`[Skill "${name}" is turned off — its instructions were removed. The user can re-enable it from /skills or /plugins.]`;
+
+/**
+ * Replace every `<skill>` block belonging to a turned-off skill with a short
+ * refusal notice. Returns the rewritten text, or undefined when nothing
+ * needed redacting (so callers keep the original object untouched).
+ *
+ * This is the fail-closed backstop behind the `input`-hook interception:
+ * pi's `steer()`/`followUp()` expand `/skill:<name>` natively WITHOUT firing
+ * the `input` event (queued interactive messages after the first, RPC
+ * steer/followUp), so an off skill's instructions can land in the session
+ * history. Redacting on the `context` hook strips them from every outgoing
+ * request — the session file keeps the original bytes, and the rewrite is
+ * deterministic for a fixed override state, so the request prefix stays
+ * byte-stable across turns (prompt-cache friendly).
+ */
+export function redactOffSkillText(text: string, isOff: (name: string) => boolean): string | undefined {
+	if (!text.includes(SKILL_BLOCK_START)) return undefined;
+	let changed = false;
+	const redacted = text.replace(SKILL_BLOCK_RE, (block, name: string) => {
+		if (!isOff(name)) return block;
+		changed = true;
+		return offSkillNotice(name);
+	});
+	return changed ? redacted : undefined;
+}
+
+/**
+ * Apply redactOffSkillText across a request's messages (user and custom roles,
+ * string or text-block content). Returns a rewritten copy, or undefined when
+ * no message needed redacting — callers must then keep the original array so
+ * untouched requests stay byte-identical.
+ */
+export function redactOffSkillMessages<M extends { role: string; content?: unknown }>(
+	messages: readonly M[],
+	isOff: (name: string) => boolean,
+): M[] | undefined {
+	let changed = false;
+	const out = messages.map((message) => {
+		if (message.role !== "user" && message.role !== "custom") return message;
+		if (typeof message.content === "string") {
+			const redacted = redactOffSkillText(message.content, isOff);
+			if (redacted === undefined) return message;
+			changed = true;
+			return { ...message, content: redacted };
+		}
+		if (!Array.isArray(message.content)) return message;
+		let blockChanged = false;
+		const blocks = message.content.map((block: { type?: string; text?: string }) => {
+			if (block?.type !== "text" || typeof block.text !== "string") return block;
+			const redacted = redactOffSkillText(block.text, isOff);
+			if (redacted === undefined) return block;
+			blockChanged = true;
+			return { ...block, text: redacted };
+		});
+		if (!blockChanged) return message;
+		changed = true;
+		return { ...message, content: blocks };
+	});
+	return changed ? out : undefined;
+}

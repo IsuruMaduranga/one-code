@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { buildSkillBlock, parseSkillCommand, resolveSkill } from "../../extensions/skill/invoke.ts";
+import {
+	buildSkillBlock,
+	offSkillNotice,
+	parseSkillCommand,
+	redactOffSkillMessages,
+	redactOffSkillText,
+	resolveSkill,
+} from "../../extensions/skill/invoke.ts";
 
 describe("parseSkillCommand", () => {
 	it("returns undefined for non-skill input", () => {
@@ -73,5 +80,62 @@ describe("buildSkillBlock", () => {
 	it("appends args after a blank line", () => {
 		const block = buildSkillBlock({ name: "s", filePath: "/a/b/SKILL.md" }, "body", "extra instructions");
 		expect(block.endsWith("</skill>\n\nextra instructions")).toBe(true);
+	});
+});
+
+describe("redactOffSkillText", () => {
+	const offBlock = buildSkillBlock({ name: "deploy", filePath: "/s/deploy/SKILL.md" }, "secret steps", "");
+	const onBlock = buildSkillBlock({ name: "review", filePath: "/s/review/SKILL.md" }, "review steps", "");
+	const isOff = (name: string) => name === "deploy";
+
+	it("replaces an off skill's block with the refusal notice", () => {
+		const out = redactOffSkillText(offBlock, isOff);
+		expect(out).toBe(offSkillNotice("deploy"));
+		expect(out).not.toContain("secret steps");
+	});
+
+	it("keeps trailing args and surrounding text intact", () => {
+		const out = redactOffSkillText(`before\n${offBlock}\n\nsome args`, isOff);
+		expect(out).toBe(`before\n${offSkillNotice("deploy")}\n\nsome args`);
+	});
+
+	it("redacts only the off skill when blocks are mixed", () => {
+		const out = redactOffSkillText(`${onBlock}\n\n${offBlock}`, isOff);
+		expect(out).toContain("review steps");
+		expect(out).not.toContain("secret steps");
+	});
+
+	it("returns undefined when nothing needs redacting (byte-stability)", () => {
+		expect(redactOffSkillText("plain user text", isOff)).toBeUndefined();
+		expect(redactOffSkillText(onBlock, isOff)).toBeUndefined();
+	});
+});
+
+describe("redactOffSkillMessages", () => {
+	const offBlock = buildSkillBlock({ name: "deploy", filePath: "/s/deploy/SKILL.md" }, "secret steps", "");
+	const isOff = (name: string) => name === "deploy";
+
+	it("rewrites user string content and text blocks, leaving other messages alone", () => {
+		const messages = [
+			{ role: "system", content: offBlock },
+			{ role: "user", content: offBlock },
+			{ role: "custom", content: [{ type: "text", text: offBlock }, { type: "image", data: "…" }] },
+			{ role: "assistant", content: "ack" },
+		];
+		const out = redactOffSkillMessages(messages, isOff);
+		expect(out).toBeDefined();
+		expect(out?.[0].content).toBe(offBlock); // system untouched
+		expect(out?.[1].content).toBe(offSkillNotice("deploy"));
+		expect((out?.[2].content as Array<{ text?: string }>)[0].text).toBe(offSkillNotice("deploy"));
+		expect((out?.[2].content as Array<{ type?: string }>)[1]).toEqual({ type: "image", data: "…" });
+		expect(out?.[3]).toBe(messages[3]); // untouched messages keep identity
+	});
+
+	it("returns undefined when no message contains an off skill's block", () => {
+		const messages = [
+			{ role: "user", content: "hello" },
+			{ role: "user", content: buildSkillBlock({ name: "review", filePath: "/s/r/SKILL.md" }, "steps", "") },
+		];
+		expect(redactOffSkillMessages(messages, isOff)).toBeUndefined();
 	});
 });
