@@ -185,8 +185,16 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 			// session model — never an automatic pick, and never `unresolved`: unlike a
 			// literal typo, a cross-provider alias is a naming mismatch, not a retryable
 			// mistake, so it degrades quietly (matching the module doc).
+			// Name what is actually next in the chain (same branching as the
+			// explicit-choice failure below) — an agent-sourced alias has no
+			// "agent's model" left to fall back to.
 			notices.push(
-				`No "${alias}" model exists within ${sessionModel ? spec(sessionModel) : "this session"} — falling back to the agent's model or the session model.`,
+				`No "${alias}" model exists within ${sessionModel ? spec(sessionModel) : "this session"} — ` +
+					(entry.source === "call"
+						? "falling back to the agent's configured model or the session default."
+						: entry.source === "agent"
+							? "falling back to the configured default or the session model."
+							: "the session model runs this subagent instead."),
 			);
 			suppressAutomatic = true;
 			continue;
