@@ -30,6 +30,13 @@ You review code.`,
 		expect(parseAgentFile("/x/b.md", "---\ntools:\n---\nbody")?.tools).toBeUndefined();
 	});
 
+	it("reads an excludeTools denylist (CC's all-except grant shape)", () => {
+		const agent = parseAgentFile("/x/e.md", "---\nexcludeTools: edit, write, notebook_edit, Agent\n---\nbody");
+		expect(agent?.excludeTools).toEqual(["edit", "write", "notebook_edit", "Agent"]);
+		expect(agent?.tools).toBeUndefined();
+		expect(parseAgentFile("/x/f.md", "---\nexcludeTools:\n---\nbody")?.excludeTools).toBeUndefined();
+	});
+
 	it("falls back to the filename when no name is given", () => {
 		expect(parseAgentFile("/x/scout.md", "---\ndescription: d\n---\nbody")?.name).toBe("scout");
 	});

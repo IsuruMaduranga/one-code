@@ -275,6 +275,9 @@ export class SubagentRuntime {
 				model: (model ? findConfigured(this.availableModels, model) : undefined) as never,
 				thinkingLevel: spec.thinking as never,
 				tools: spec.forkFrom ? undefined : spec.agent?.tools,
+				// Denylist grants (CC's "All tools except …" shape) — filters built-ins,
+				// extension tools, and injected customTools alike.
+				excludeTools: spec.forkFrom ? undefined : spec.agent?.excludeTools,
 				customTools: [sendToMainTool((m, s) => spec.onMessageToMain?.(m, s)), ...(spec.extraTools ?? []), ...mcpTools],
 				resourceLoader: loader,
 				sessionManager: newSessionManager(),

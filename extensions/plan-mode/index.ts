@@ -18,6 +18,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { oneCodeStateDir } from "../lib/paths.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { ccToolRenderers, safeThemePaint } from "../lib/tui-render.ts";
@@ -84,8 +85,8 @@ export default function planModeExtension(pi: ExtensionAPI) {
 		label: "Enter plan mode",
 		...ccToolRenderers("Enter plan mode"),
 		description:
-			"Enter plan mode for tasks that need investigation and design before changing anything. In plan mode only read-only tools are available, plus one writable file: the plan file whose path you are told, where you build the plan incrementally. Use for non-trivial multi-file work; skip it for simple direct changes.",
-		promptSnippet: "Switch to read-only planning before non-trivial changes",
+			"Enter plan mode: read-only investigation to design an approach before changing anything. Most tasks do not need it.\n" +
+			"For a small or clearly-scoped change, act directly instead. Enter plan mode only for multi-file work whose design is genuinely unclear, or when the user asks for a plan. In plan mode only read-only tools are available, plus one writable file: the plan file whose path you are told, where you build the plan incrementally.",
 		parameters: Type.Object({}),
 		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
 			pi.events.emit(MODE_CHANNEL, { mode: "plan" });
@@ -111,8 +112,8 @@ export default function planModeExtension(pi: ExtensionAPI) {
 		label: "Exit plan mode",
 		...ccToolRenderers("Exit plan mode"),
 		description:
-			"Signal that planning is complete and ask the user to approve the plan. Takes no parameters: the plan is read from the plan file named in the plan-mode reminder, which you must have written before calling this. The user reviews that file's contents.",
-		promptSnippet: "Present your plan file for user approval",
+			"Signal that planning is complete and ask the user to approve the plan.\n" +
+			"Takes no parameters: the plan is read from the plan file named in the plan-mode reminder, which you must have written before calling this. The user reviews that file's contents.",
 		parameters: Type.Object({}),
 		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
 			// Guard the out-of-sequence call: without this, a cold exit_plan_mode
@@ -221,5 +222,21 @@ export default function planModeExtension(pi: ExtensionAPI) {
 				details: { plan, approved: false },
 			};
 		},
+	});
+
+	// Claude Code defers both plan-mode tools behind ToolSearch: they are absent
+	// from the wire tool list and its system prompt never mentions plan mode, so
+	// the model must deliberately load them before planning. Keeping them
+	// always-active (with a prompt snippet) read as standing "plan first" policy
+	// to instruction-eager third-party models, which then entered plan mode for
+	// trivial tasks. User-initiated plan mode (mode cycling, defaultMode) is
+	// unaffected — that flows over MODE_CHANNEL, not through these tools.
+	pi.events.emit(DEFER_CHANNEL, {
+		name: "enter_plan_mode",
+		keywords: ["plan", "planning", "design", "approach", "architecture", "investigate", "read-only"],
+	});
+	pi.events.emit(DEFER_CHANNEL, {
+		name: "exit_plan_mode",
+		keywords: ["plan", "approve", "approval", "present", "finish planning"],
 	});
 }

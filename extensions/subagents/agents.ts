@@ -16,6 +16,13 @@ export interface AgentDefinition {
 	description: string;
 	/** Tool allowlist for the child; undefined means the child's defaults. */
 	tools?: string[];
+	/**
+	 * Tool denylist: the child gets its default toolset MINUS these — Claude
+	 * Code's "All tools except …" grant shape (its Explore/Plan agents). Filters
+	 * built-ins, extension tools, and injected custom tools alike (pi's
+	 * excludeTools). Combinable with `tools`, though agents use one or the other.
+	 */
+	excludeTools?: string[];
 	/** Model override (pi model id, e.g. "anthropic/claude-sonnet-5"). */
 	model?: string;
 	systemPrompt: string;
@@ -69,21 +76,24 @@ export function parseAgentFile(path: string, content: string): AgentDefinition |
 	const name = typeof fm.name === "string" && fm.name.trim() ? fm.name.trim() : basename(path, ".md");
 	if (!body.trim()) return undefined;
 
-	const rawTools = fm.tools;
-	const tools =
-		typeof rawTools === "string"
-			? rawTools
-					.split(",")
-					.map((t) => t.trim())
-					.filter(Boolean)
-			: Array.isArray(rawTools)
-				? rawTools.filter((t): t is string => typeof t === "string")
-				: undefined;
+	const parseToolList = (raw: unknown): string[] | undefined => {
+		const list =
+			typeof raw === "string"
+				? raw
+						.split(",")
+						.map((t) => t.trim())
+						.filter(Boolean)
+				: Array.isArray(raw)
+					? raw.filter((t): t is string => typeof t === "string")
+					: undefined;
+		return list && list.length > 0 ? list : undefined;
+	};
 
 	return {
 		name,
 		description: typeof fm.description === "string" ? fm.description : "",
-		tools: tools && tools.length > 0 ? tools : undefined,
+		tools: parseToolList(fm.tools),
+		excludeTools: parseToolList(fm.excludeTools),
 		// "inherit" is Claude Code's way of saying "use the session model".
 		model: typeof fm.model === "string" && fm.model !== "inherit" ? fm.model : undefined,
 		systemPrompt: body.trim(),

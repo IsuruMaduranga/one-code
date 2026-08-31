@@ -39,6 +39,7 @@ import { modelPickerComponent, pickerSpec, toPickerEntries, type PickerEntry } f
 import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { MCP_TOOLS_CHANNEL, type McpToolsPayload } from "../lib/mcp-share.ts";
+import { resolveModelTier } from "../lib/model-tier.ts";
 import { watchPermissionBridge } from "../permissions/subagent-gate.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { type BackgroundTask, generateTaskId, TASK_REGISTER_CHANNEL } from "../background/registry.ts";
@@ -376,14 +377,52 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		});
 	};
 
+	/**
+	 * Tiny-tier-only strict delegation directive, riding the context stack right
+	 * after the agent catalog. Static prompt sections measurably move capable
+	 * models to delegate broad sweeps (workhorse/cheap went 2/6 → 6/6 in the
+	 * 2026-08-31 probe battery) but a sub-Haiku model ignored the same section
+	 * (qwen3.6-27b: 0/6 with it verified on the wire); a <system-reminder> sits
+	 * closer to the user text, where weak models actually attend. Keyed and
+	 * byte-stable, so it is cache-neutral; removed when a model switch leaves
+	 * the tiny tier.
+	 *
+	 * Sibling texts (same policy, separately tuned registers — keep aligned when
+	 * editing): DELEGATE_STRICT in system-prompt/tiers/low.ts (tiny prompt),
+	 * DELEGATING_WORK in tiers/mid.ts (workhorse/cheap prompt).
+	 */
+	const DELEGATION_STEER = [
+		"Delegation policy: when a request requires reading or searching MANY files (a codebase overview, \"find every place where…\", a consistency audit, exploring unfamiliar code), do NOT sweep the files yourself.",
+		'Make ONE Agent tool call with subagent_type: "explore" and the complete question as the task. The agent searches in its own separate context and returns just the answer; reading file after file yourself fills your context and degrades your answer.',
+		"Search directly only for a single targeted lookup (one known file or symbol).",
+	].join("\n");
+
+	const emitDelegationSteer = (sessionModel = lastCtx?.model) => {
+		if (resolveModelTier(sessionModel) === "tiny") {
+			pi.events.emit(REMINDER_CHANNEL, {
+				scope: "every-turn",
+				key: "subagent-delegation",
+				text: DELEGATION_STEER,
+				placement: "first-prepend",
+				order: CONTEXT_ORDER.delegation,
+			});
+		} else {
+			pi.events.emit(REMINDER_CHANNEL, { key: "subagent-delegation", remove: true });
+		}
+	};
+
 	pi.on("session_start", (_event, ctx) => {
 		lastCtx = ctx;
 		reconstructRuns(ctx);
 		emitModelStatus(ctx);
 		emitAgentCatalog(ctx);
+		emitDelegationSteer(ctx.model);
 		registerPanelInputHook(ctx);
 	});
-	pi.on("model_select", (event, ctx) => emitModelStatus(ctx, event.model));
+	pi.on("model_select", (event, ctx) => {
+		emitModelStatus(ctx, event.model);
+		emitDelegationSteer(event.model);
+	});
 	pi.on("session_tree", (_event, ctx) => reconstructRuns(ctx));
 	pi.on("session_shutdown", () => {
 		stopAllAgents();
@@ -827,7 +866,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			name: "Agent",
 			label: "Agent",
 			description:
-				"Delegate a scoped task to a specialist subagent running in its own context window. The call BLOCKS until the agent finishes and returns its report — use it for well-scoped work whose intermediate output you don't need (broad searches, focused verification, independent research). Give a complete, self-contained task: the agent cannot ask follow-ups. Available agents:\n" +
+				"Delegate a scoped task to a specialist subagent running in its own context window. The call BLOCKS until the agent finishes and returns its report — use it for well-scoped work whose intermediate output you don't need (broad searches, focused verification, independent research). Give a complete, self-contained task: the agent cannot ask follow-ups. If an agent's description says it should be used proactively, use it without being asked. Available agents:\n" +
 				`${childCatalog(parentRecord.cwd)}\n` +
 				'(No "fork" here — forking is only available to the main conversation.)',
 			parameters: Type.Object({
@@ -1022,7 +1061,23 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			title: (a) => (a ? [a.subagent_type, a.task ?? a.action].filter(Boolean).join(": ") || undefined : undefined),
 		}),
 		description:
-			"Delegate a task to a specialist agent that runs in its own context window and reports back. Use it for well-scoped work whose intermediate output you don't need — broad codebase searches, focused reviews, independent research. Give a complete, self-contained task: the agent cannot ask follow-up questions. The available agents are listed in the \"Available agents\" system reminder. Use `subagent_type: \"fork\"` for a child that inherits this conversation (a fork always runs on this conversation's model and reasoning settings; if you are the fork, execute your assigned task directly — don't re-delegate), `isolation: \"worktree\"` when the agent will edit files, or `run_in_background: true` to keep working while it runs (completion arrives as a notification; manage with task_output/task_stop). To run several agents in parallel, issue multiple Agent calls in one turn. Each run gets a name — continue a finished agent later with SendMessage. action:'list' re-prints the agent catalog. Delegating means you keep the conclusion, not the file dumps — but for a single-fact lookup you already know how to run, search directly. Once you've delegated work, don't also run it yourself; wait for the result, and never fabricate or predict a pending agent's output — if asked before it arrives, say it's still running. The agent's final report isn't shown to the user, so relay what matters.",
+			'Delegate a task to a specialist agent that runs in its own context window and reports back. The available agents are listed in the "Available agents" system reminder.\n' +
+			"\n" +
+			"## When to use\n" +
+			"- Broad codebase searches or exploration where you need the conclusion, not the file dumps.\n" +
+			"- Self-contained research, reviews, or verification whose intermediate output you won't need again.\n" +
+			"- Independent questions that can run at once — issue multiple Agent tool calls in one message to run them in parallel.\n" +
+			"\n" +
+			"For a single-fact lookup you already know how to run, search directly instead. Once you've delegated work, don't also run it yourself — wait for the result.\n" +
+			"\n" +
+			"## Usage notes\n" +
+			"- Give a complete, self-contained task: the agent cannot ask follow-up questions.\n" +
+			"- If an agent's description says it should be used proactively, try your best to use it without the user having to ask first.\n" +
+			'- `subagent_type: "fork"` clones this conversation instead of starting fresh; a fork always runs on this conversation\'s model and reasoning settings. If you are the fork, execute your assigned task directly — don\'t re-delegate.\n' +
+			'- `isolation: "worktree"` gives the agent its own git worktree when it will edit files.\n' +
+			"- `run_in_background: true` returns immediately so you can keep working; completion arrives as a notification (manage with task_output/task_stop). Never fabricate or predict a pending agent's output — if asked before it arrives, say it's still running.\n" +
+			"- Each run gets a name — continue a finished agent later with SendMessage. `action: \"list\"` re-prints the agent catalog.\n" +
+			"- The agent's final report is not shown to the user, so relay what matters.",
 		promptSnippet: "Delegate scoped work to a specialist agent in its own context",
 		parameters: SubagentParams,
 		async execute(toolCallId, params, signal, onUpdate, ctx) {

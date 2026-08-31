@@ -62,7 +62,13 @@ describe("buildPlanModeReminder", () => {
 
 	it("names the One Code tools the workflow relies on", () => {
 		const text = buildPlanModeReminder({ filePath: path, fileExists: false });
-		for (const needle of ['`agent: "explore"`', '`agent: "plan"`', "`ask_user_question`", "`exit_plan_mode`"]) {
+		for (const needle of [
+			'`subagent_type: "explore"`',
+			'`subagent_type: "plan"`',
+			"`ask_user_question`",
+			"`exit_plan_mode`",
+			"`select:exit_plan_mode`",
+		]) {
 			expect(text).toContain(needle);
 		}
 	});

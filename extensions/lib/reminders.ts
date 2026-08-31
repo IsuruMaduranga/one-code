@@ -42,6 +42,8 @@ export const CONTEXT_ORDER = {
 	deferredTools: 10,
 	subagentModels: 20,
 	agents: 21,
+	/** Tiny-tier-only strict delegation directive, right after the catalog. */
+	delegation: 22,
 	mcp: 30,
 	skills: 40,
 	// CLAUDE.md-family (with AGENTS.md as a per-directory fallback when a directory
