@@ -277,11 +277,15 @@ export default function skillExtension(pi: ExtensionAPI) {
 		const found = resolveSkill(index(), cmd.name);
 		if (!found) return { action: "continue" };
 		if (found.state === "off") {
-			// "off" is refused even on explicit invocation (see skill-overrides.ts).
-			// With no UI to say why, fall through rather than silently no-op.
-			if (!ctx.hasUI) return { action: "continue" };
+			// "off" is refused even on explicit invocation (see skill-overrides.ts) —
+			// in EVERY mode: falling through would hand the command to pi's native
+			// expansion, which has no knowledge of the overrides store and would run
+			// the skill anyway. A headless run gets the refusal as a next-turn
+			// reminder instead of a UI notice; never as silent execution.
 			const where = found.source === "plugin" ? "/plugins" : "/skills";
-			ctx.ui.notify(`Skill "${found.name}" is turned off — enable it from ${where} to run it.`, "warning");
+			const message = `Skill "${found.name}" is turned off — enable it from ${where} to run it.`;
+			if (ctx.hasUI) ctx.ui.notify(message, "warning");
+			else pi.events.emit(REMINDER_CHANNEL, { text: message });
 			return { action: "handled" };
 		}
 
