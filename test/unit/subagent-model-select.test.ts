@@ -733,3 +733,29 @@ describe("persistSubagentModel", () => {
 		expect(readFileSync(settingsPath(), "utf-8")).toBe("{not json");
 	});
 });
+
+describe("resolveSubagentModel: alias-failure notice names the real fallback", () => {
+	const catalog = [...anthropic, ...openai];
+
+	it("call-sourced alias points at the agent model / session default", () => {
+		const resolution = resolveSubagentModel({ requested: "sonnet", sessionModel: openai[0], available: catalog });
+		expect(resolution.notices[0]).toContain("falling back to the agent's configured model or the session default");
+	});
+
+	it("agent-sourced alias no longer claims an agent-model fallback", () => {
+		const resolution = resolveSubagentModel({ agentModel: "sonnet", sessionModel: openai[0], available: catalog });
+		expect(resolution.model?.id).toBe("gpt-5.1");
+		expect(resolution.notices[0]).toContain("falling back to the configured default or the session model");
+		expect(resolution.notices[0]).not.toContain("agent's");
+	});
+
+	it("default-sourced alias names the session model directly", () => {
+		const resolution = resolveSubagentModel({
+			configuredDefault: setting("sonnet"),
+			sessionModel: openai[0],
+			available: catalog,
+		});
+		expect(resolution.model?.id).toBe("gpt-5.1");
+		expect(resolution.notices[0]).toContain("the session model runs this subagent instead");
+	});
+});
