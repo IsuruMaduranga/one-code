@@ -11,6 +11,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { registerWorktreeIsolation, releaseWorktreeIsolation } from "../lib/worktree-isolation.ts";
 
 const run = promisify(execFile);
 
@@ -39,6 +40,15 @@ export async function createWorktree(cwd: string, label: string): Promise<Worktr
 	const path = join(dir, "tree");
 	const branch = `cc-subagent/${safeLabel}-${Date.now().toString(36)}`;
 	await git(["worktree", "add", "-b", branch, path, "HEAD"], cwd);
+	// Register for the child permission gate's git-isolation guard. The shared
+	// checkout's ROOT, not cwd — the spawn may run from a subdirectory.
+	let sharedRoot = cwd;
+	try {
+		sharedRoot = await git(["rev-parse", "--show-toplevel"], cwd);
+	} catch {
+		// Keep cwd as the best available anchor.
+	}
+	registerWorktreeIsolation(path, sharedRoot);
 	return { path, branch };
 }
 
@@ -65,5 +75,8 @@ export async function cleanupWorktree(cwd: string, worktree: Worktree): Promise<
 		// Leave it behind rather than failing the run.
 		return false;
 	}
+	// Release only when the worktree is actually gone — a kept worktree can
+	// still host a resumed session (SendMessage), which must stay guarded.
+	releaseWorktreeIsolation(worktree.path);
 	return true;
 }

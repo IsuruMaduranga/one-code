@@ -1,31 +1,7 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import os from "node:os";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { permissionGateFactory } from "../../extensions/lib/permission-gate.ts";
+import { buildGate as buildGateHarness } from "./helpers/permission-gate-harness.ts";
 
-type ToolCallHandler = (
-	event: { toolName: string; input: Record<string, unknown> },
-) => Promise<{ block?: boolean; reason?: string } | undefined>;
-
-function buildGate(settings: object, getBridge?: Parameters<typeof permissionGateFactory>[3]): ToolCallHandler {
-	const cwd = mkdtempSync(join(os.tmpdir(), "wf-gate-cwd-"));
-	const home = mkdtempSync(join(os.tmpdir(), "wf-gate-home-"));
-	mkdirSync(join(cwd, ".claude"), { recursive: true });
-	writeFileSync(join(cwd, ".claude", "settings.json"), JSON.stringify(settings));
-
-	const gate = permissionGateFactory(cwd, home, undefined, getBridge);
-	const factory = typeof gate === "function" ? gate : gate.factory;
-	let handler: ToolCallHandler | undefined;
-	const fakePi = {
-		on: (event: string, h: ToolCallHandler) => {
-			if (event === "tool_call") handler = h;
-		},
-	};
-	factory(fakePi as never);
-	if (!handler) throw new Error("gate did not register a tool_call handler");
-	return handler;
-}
+const buildGate = (...args: Parameters<typeof buildGateHarness>) => buildGateHarness(...args).handler;
 
 describe("permissionGateFactory", () => {
 	it("blocks deny-ruled commands", async () => {

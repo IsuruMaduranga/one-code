@@ -49,6 +49,8 @@ import { type AgentRunRecord, nextRunName, RunRegistry } from "./runs.ts";
 import { SubagentRuntime } from "./runner.ts";
 import { emptyUsage, formatStats, type UsageTotals } from "./usage.ts";
 import { cleanupWorktree, createWorktree, isGitRepo, type Worktree } from "./worktree.ts";
+import { findGitRoot } from "../lib/git.ts";
+import { registerWorktreeIsolation } from "../lib/worktree-isolation.ts";
 import { systemNotification } from "../lib/notifications.ts";
 import { ccToolRenderers, customMessageText, notificationComponent, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import { deriveActivity, LiveRunRegistry } from "./live-runs.ts";
@@ -293,6 +295,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	};
 
 	const reconstructRuns = (ctx: ExtensionContext) => {
+		/** Loop-invariant; computed lazily so worktree-free histories pay nothing. */
+		let sharedRoot: string | undefined;
 		for (const entry of ctx.sessionManager.getBranch()) {
 			if (entry.type !== "message") continue;
 			const msg = entry.message;
@@ -300,7 +304,20 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			// Agent/SendMessage rename still reconstruct on resume.
 			if (msg.role !== "toolResult" || !["Agent", "SendMessage", "subagent", "send_message"].includes(msg.toolName ?? "")) continue;
 			const records = (msg.details as { agentRuns?: AgentRunRecord[] } | undefined)?.agentRuns;
-			for (const record of records ?? []) registry.add(record);
+			for (const record of records ?? []) {
+				registry.add(record);
+				// A kept worktree can host a resumed run in a NEW process, where
+				// createWorktree's registration no longer exists — re-register so the
+				// git-isolation guard survives the restart. A removed worktree's entry
+				// is inert (no session runs there any more). findGitRoot instead of
+				// `git rev-parse` because session_start handlers must stay fast
+				// (findings §15); a slightly-off sharedRoot only softens one message —
+				// the worktree containment check itself uses the exact record.cwd.
+				if (record.worktree) {
+					sharedRoot ??= findGitRoot(ctx.cwd) ?? ctx.cwd;
+					registerWorktreeIsolation(record.cwd, sharedRoot);
+				}
+			}
 		}
 	};
 	/** Notices about model fallbacks/crossings, shown once per distinct message. */
@@ -959,6 +976,14 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		return depth < MAX_SPAWN_DEPTH ? [childAgentTool(record, depth)] : [];
 	};
 
+	/** Create a run's isolation worktree and point its record at it (both spawn paths). */
+	const isolateInWorktree = async (ctx: ExtensionContext, record: AgentRunRecord, name: string): Promise<Worktree> => {
+		const worktree = await createWorktree(ctx.cwd, name);
+		record.cwd = worktree.path;
+		record.worktree = true;
+		return worktree;
+	};
+
 	/**
 	 * Start one child (creating a worktree first if asked) and finalize its
 	 * record when done. `parent` marks a NESTED spawn — a child's own Agent
@@ -978,8 +1003,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		let worktree: Worktree | undefined;
 		if (request.worktree) {
 			try {
-				worktree = await createWorktree(ctx.cwd, request.name);
-				record.cwd = worktree.path;
+				worktree = await isolateInWorktree(ctx, record, request.name);
 			} catch (error) {
 				return {
 					agent: request.agent,
@@ -1306,8 +1330,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					let worktree: Worktree | undefined;
 					if (p.request.worktree) {
 						try {
-							worktree = await createWorktree(ctx.cwd, p.request.name);
-							p.record.cwd = worktree.path;
+							worktree = await isolateInWorktree(ctx, p.record, p.request.name);
 						} catch (error) {
 							lines.push(`✗ ${p.record.name}: could not create a worktree: ${(error as Error).message}`);
 							continue;

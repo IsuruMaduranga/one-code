@@ -20,6 +20,7 @@ import { DefaultResourceLoader, type InlineExtension, ModelRuntime } from "@eare
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { PermissionBridge } from "../permissions/subagent-gate.ts";
 import { permissionGateFactory } from "./permission-gate.ts";
+import { worktreeGuardFactory } from "./worktree-isolation.ts";
 
 /** The last assistant message's text (the value an agent run returns). */
 export function finalAssistantText(messages: AgentMessage[]): string {
@@ -75,6 +76,10 @@ export async function buildAgentLoader(options: AgentLoaderOptions): Promise<Def
 		agentDir: options.agentDir,
 		noExtensions: true,
 		extensionFactories: [
+			// Order is load-bearing: the worktree git-isolation guard must run BEFORE
+			// the permission gate — the same guard-before-permissions layering the
+			// main session gets from extension load order.
+			worktreeGuardFactory(options.cwd),
 			permissionGateFactory(options.cwd, os.homedir(), options.neverGate, options.getPermissionBridge),
 			...(options.extraFactories ?? []),
 		],

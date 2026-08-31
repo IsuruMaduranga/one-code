@@ -19,6 +19,8 @@ export interface AgentRunRecord {
 	/** Resolved session file, once known. */
 	sessionFile?: string;
 	cwd: string;
+	/** True when `cwd` is an isolation worktree, so a resume re-applies the git-isolation guard. */
+	worktree?: boolean;
 	model?: string;
 	thinking?: string;
 	/**

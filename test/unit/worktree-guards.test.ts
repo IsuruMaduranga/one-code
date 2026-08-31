@@ -12,11 +12,12 @@ describe("worktree git-isolation guard", () => {
 		expect(guard("cd src && git add .")).toBeUndefined();
 	});
 
-	it("refuses git fed its arguments from stdin at runtime", () => {
+	it("refuses git fed its arguments from stdin at runtime, in Claude Code's wording", () => {
 		const reason = guard("git merge-base master feature | xargs git log --oneline -1") ?? "";
-		expect(reason).toContain("stdin at runtime (xargs)");
+		expect(reason).toContain("stdin at runtime (xargs/parallel)");
 		expect(reason).toContain("must target its own worktree");
-		expect(guard("ls | parallel git add")).toContain("parallel");
+		expect(reason).toContain(`Run the equivalent from ${WT} without the redirect.`);
+		expect(guard("ls | parallel git add")).toContain("stdin at runtime (xargs/parallel)");
 		expect(guard("find . -name '*.orig' -exec git rm {} \\;")).toContain("find -exec");
 	});
 

@@ -93,6 +93,15 @@ export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: W
 		);
 	}
 
+	// Claude Code's exact refusal for stdin-fed git (one static string for
+	// both mechanisms) — keep it byte-identical to the capture.
+	const stdinFed = () =>
+		isolated(
+			worktreePath,
+			"this command feeds git its arguments from stdin at runtime (xargs/parallel), so the repository it targets cannot be verified",
+			`Run the equivalent from ${worktreePath} without the redirect.`,
+		);
+
 	/** Directory later segments run in; undefined = not statically known. */
 	let dir: string | undefined = worktreePath;
 	/** Subshell nesting: a `cd` inside `(...)` must not leak past the `)`. */
@@ -128,20 +137,8 @@ export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: W
 
 		// Git whose arguments are assembled at runtime — the repository it will
 		// target cannot be read off the command.
-		if (cmd === "git" && peeled.includes("xargs")) {
-			return isolated(
-				worktreePath,
-				"this command feeds git its arguments from stdin at runtime (xargs), so the repository it targets cannot be verified",
-				"Run the git commands directly, with explicit literal paths, instead of assembling them at runtime.",
-			);
-		}
-		if (rawLead === "parallel" && tokens.some((t) => t.value === "git")) {
-			return isolated(
-				worktreePath,
-				"this command feeds git its arguments from stdin at runtime (parallel), so the repository it targets cannot be verified",
-				"Run the git commands directly, with explicit literal paths, instead of assembling them at runtime.",
-			);
-		}
+		if (cmd === "git" && peeled.includes("xargs")) return stdinFed();
+		if (rawLead === "parallel" && tokens.some((t) => t.value === "git")) return stdinFed();
 		if (
 			cmd === "find" &&
 			args.some((a) => ["-exec", "-execdir", "-ok", "-okdir"].includes(a.value)) &&
