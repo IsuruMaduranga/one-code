@@ -1,0 +1,43 @@
+/**
+ * Turn a language-server spawn failure into an actionable message.
+ *
+ * A missing binary (spawn ENOENT) is the common, fixable case: the built-in
+ * table assumes its servers are on PATH, and Claude Code LSP plugins ship
+ * config only — never the binary (findings §18.3). The raw
+ * "spawn pyright-langserver ENOENT" tells the user nothing about what to do,
+ * so it is rewritten here with the install command when we know it, and with
+ * PATH/plugin guidance when we don't. Every other failure passes through
+ * unchanged. Enrichment happens once, where the failure is recorded, so the
+ * one-time warning, /lsp, and the lsp_diagnostics tool all show the same text.
+ */
+
+/** Install commands for the built-in table's servers (and their npm siblings). */
+export const INSTALL_HINTS: Record<string, string> = {
+	"typescript-language-server": "npm install -g typescript-language-server typescript",
+	"pyright-langserver": "npm install -g pyright",
+	gopls: "go install golang.org/x/tools/gopls@latest",
+	"rust-analyzer": "rustup component add rust-analyzer",
+	jdtls: "brew install jdtls",
+};
+
+/** True when the failure is a spawn ENOENT — the binary itself is absent. */
+export function isMissingBinary(failure: string): boolean {
+	return /\bENOENT\b/.test(failure);
+}
+
+/**
+ * Rewrite a missing-binary failure into install guidance; return anything
+ * else verbatim. `pluginName` is set when a plugin's config (not the built-in
+ * table) named the command.
+ */
+export function describeStartFailure(rawFailure: string, command: string, pluginName?: string): string {
+	if (!isMissingBinary(rawFailure)) return rawFailure;
+	const from = pluginName ? ` (configured by the ${pluginName} plugin)` : "";
+	const hint = INSTALL_HINTS[command];
+	if (hint) return `${command} is not installed${from}. Install it with: ${hint}`;
+	if (command.startsWith("/")) {
+		return `${command} does not exist${from}. ${pluginName ? "Check the plugin's installation." : "Check the configured path."}`;
+	}
+	const docs = pluginName ? " (the plugin's documentation should say how)" : "";
+	return `${command} is not installed${from}. Install it and make sure it is on your PATH${docs}.`;
+}

@@ -26,9 +26,11 @@ import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil
 import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { defaultDiscoverRoots, discoverPlugins, pluginResources } from "../lib/plugins.ts";
-import { ccToolRenderers, customMessageText, notificationComponent } from "../lib/tui-render.ts";
+import { ccToolRenderers, customMessageText, cutPlainText, notificationComponent } from "../lib/tui-render.ts";
 import { LspClient, type LspClientOptions, pathToUri } from "./client.ts";
 import { filterDiagnostics, formatDiagnostics, type LspDiagnostic, type SeverityFilter } from "./format.ts";
+import { describeStartFailure, INSTALL_HINTS } from "./install-hints.ts";
+import { withKeepAlive } from "./keep-alive.ts";
 import {
 	pluginLanguageId,
 	readManifestLspServers,
@@ -155,7 +157,10 @@ export default function lspExtension(pi: ExtensionAPI) {
 			await client.start();
 			return client;
 		} catch (error) {
-			startFailures.set(key, client.error ?? (error as Error).message);
+			// A missing binary (spawn ENOENT) is rewritten into install guidance
+			// here, once, so the warning, /lsp, and the tool all show it.
+			const raw = client.error ?? (error as Error).message;
+			startFailures.set(key, describeStartFailure(raw, target.command, target.plugin?.pluginName));
 			return undefined;
 		}
 	};
@@ -166,9 +171,10 @@ export default function lspExtension(pi: ExtensionAPI) {
 		if (failure && !warned.has(target.key)) {
 			warned.add(target.key);
 			// Server errors run to paragraphs; the transcript gets one line and
-			// /lsp keeps the full status.
+			// /lsp keeps the full status. The cap leaves room for a full
+			// missing-binary line including its install command.
 			const brief = failure.split("\n")[0].replace(/\s+/g, " ").trim();
-			const capped = brief.length > 100 ? `${brief.slice(0, 99)}…` : brief;
+			const capped = cutPlainText(brief, 160);
 			notify(`LSP unavailable for ${target.languageId}: ${capped} (/lsp for status)`);
 		}
 	};
@@ -232,16 +238,21 @@ export default function lspExtension(pi: ExtensionAPI) {
 				const target = resolveTarget(path, ctx.cwd);
 				reportRoutingIssuesOnce(ctx);
 				if (target) {
-					const client = await clientFor(target);
-					if (client) {
-						tracker.clear(pathToUri(path));
-						forceDeltaScan();
-						await client.getDiagnostics(path, target.languageId);
-					} else {
-						reportFailureOnce(target, (message) => {
-							if (ctx.hasUI) ctx.ui.notify(message, "warning");
-						});
-					}
+					// withKeepAlive: in a one-shot run this await can be the only
+					// pending work, and everything the client holds is unref'd —
+					// without a ref the loop drains and pi exits mid-tool (keep-alive.ts).
+					await withKeepAlive(async () => {
+						const client = await clientFor(target);
+						if (client) {
+							tracker.clear(pathToUri(path));
+							forceDeltaScan();
+							await client.getDiagnostics(path, target.languageId);
+						} else {
+							reportFailureOnce(target, (message) => {
+								if (ctx.hasUI) ctx.ui.notify(message, "warning");
+							});
+						}
+					});
 				}
 			}
 		}
@@ -282,8 +293,14 @@ export default function lspExtension(pi: ExtensionAPI) {
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const path = params.path.startsWith("/") ? params.path : `${ctx.cwd}/${params.path}`;
 			const target = resolveTarget(path, ctx.cwd);
-			const client = target ? await clientFor(target) : undefined;
-			if (!target || !client) {
+			// One keep-alive spans both awaits (same pattern as the tool_result hook).
+			const fetched = target
+				? await withKeepAlive(async () => {
+						const client = await clientFor(target);
+						return client && { all: await client.getDiagnostics(path, target.languageId) };
+					})
+				: undefined;
+			if (!target || !fetched) {
 				const failure = target ? startFailures.get(target.key) : undefined;
 				return {
 					content: [
@@ -292,7 +309,10 @@ export default function lspExtension(pi: ExtensionAPI) {
 							text:
 								failure ??
 								(target
-									? `No language server available for ${target.languageId}. Install ${target.command}.`
+									? `No language server available for ${target.languageId}. ` +
+										(INSTALL_HINTS[target.command]
+											? `Install it with: ${INSTALL_HINTS[target.command]}`
+											: `Install ${target.command}.`)
 									: `No language server is configured for this file type.`),
 						},
 					],
@@ -304,7 +324,7 @@ export default function lspExtension(pi: ExtensionAPI) {
 				};
 			}
 
-			const all = await client.getDiagnostics(path, target.languageId);
+			const { all } = fetched;
 			// The model sees these in the tool result now; don't re-deliver them
 			// as <new-diagnostics> on the next round.
 			tracker.markDelivered(pathToUri(path), all.map(fingerprintDiagnostic));
