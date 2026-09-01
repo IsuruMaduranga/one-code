@@ -53,6 +53,18 @@ describe("anthropicBetas", () => {
 			"fine-grained-tool-streaming-2025-05-14,context-management-2025-06-27",
 		);
 	});
+
+	it("adds server-side fallback when the model carries allowedFallbackModels (pi puts `fallbacks` in the body)", () => {
+		expect(anthropicBetas(false, { forceAdaptiveThinking: true, allowedFallbackModels: [{ model: "x" }] })).toBe(
+			"server-side-fallback-2026-07-01,context-management-2025-06-27",
+		);
+	});
+
+	it("omits server-side fallback when allowedFallbackModels is empty or absent", () => {
+		expect(anthropicBetas(false, { forceAdaptiveThinking: true, allowedFallbackModels: [] })).toBe(
+			"context-management-2025-06-27",
+		);
+	});
 });
 
 describe("clearThinkingApplies", () => {

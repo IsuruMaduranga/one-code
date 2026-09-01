@@ -14,9 +14,11 @@
  *   Setting the header from `before_provider_headers` REPLACES the value pi
  *   computes at client creation (extension headers merge last), so we must
  *   rebuild pi's own beta list and append ours — see anthropicBetas(). That
- *   replicates pi-ai's createClient logic (pinned v0.83): OAuth identity betas,
- *   fine-grained tool streaming for models without eager input streaming, and
- *   interleaved thinking for non-adaptive models. Re-check on pi upgrades.
+ *   replicates pi-ai's createClient logic: OAuth identity betas, fine-grained
+ *   tool streaming for models without eager input streaming, interleaved
+ *   thinking for non-adaptive models, and server-side fallback for models with
+ *   `compat.allowedFallbackModels` (pi also puts a `fallbacks` body field on
+ *   those, which 400s if this beta is missing). Re-check on pi upgrades.
  *
  * - `thinking` enabled or an adaptive-thinking model, or the API 400s with
  *   "`clear_thinking_20251015` strategy requires `thinking` to be enabled or
@@ -42,10 +44,18 @@ const CONTEXT_MANAGEMENT_BETA = "context-management-2025-06-27";
 const OAUTH_BETAS = ["claude-code-20250219", "oauth-2025-04-20"];
 const FINE_GRAINED_TOOL_STREAMING_BETA = "fine-grained-tool-streaming-2025-05-14";
 const INTERLEAVED_THINKING_BETA = "interleaved-thinking-2025-05-14";
+// Newer pi versions add a `fallbacks` body field for models whose compat
+// carries `allowedFallbackModels` (server-side fallback, e.g. opus-5 →
+// opus-4-8), gated on this beta. Because we overwrite the whole header, we must
+// re-add the beta whenever pi added the body field, or the API 400s with
+// "fallbacks: Extra inputs are not permitted" (verified live, api.anthropic.com
+// 2026-09-01). Mirrors pi's shouldUseServerSideFallbackBeta.
+const SERVER_SIDE_FALLBACK_BETA = "server-side-fallback-2026-07-01";
 
 export interface AnthropicModelCompat {
 	forceAdaptiveThinking?: boolean;
 	supportsEagerToolInputStreaming?: boolean;
+	allowedFallbackModels?: unknown[];
 }
 
 /** pi's beta list for this model/auth, with the context-management beta appended. */
@@ -55,6 +65,8 @@ export function anthropicBetas(oauth: boolean, compat: AnthropicModelCompat | un
 	// pi sends this only when tools are present; we always register tools.
 	if (compat?.supportsEagerToolInputStreaming === false) betas.push(FINE_GRAINED_TOOL_STREAMING_BETA);
 	if (compat?.forceAdaptiveThinking !== true) betas.push(INTERLEAVED_THINKING_BETA);
+	// pi puts a `fallbacks` body field on these models; the beta must ride along.
+	if ((compat?.allowedFallbackModels?.length ?? 0) > 0) betas.push(SERVER_SIDE_FALLBACK_BETA);
 	betas.push(CONTEXT_MANAGEMENT_BETA);
 	return betas.join(",");
 }
