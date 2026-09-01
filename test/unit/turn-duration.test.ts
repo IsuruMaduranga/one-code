@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { turnDurationText } from "../../extensions/turn-duration/line.ts";
+import { TurnSpan } from "../../extensions/turn-duration/span.ts";
 import { pickCompletionVerb, TURN_COMPLETION_VERBS } from "../../extensions/turn-duration/verbs.ts";
 
 describe("turn-duration verbs", () => {
@@ -45,5 +46,70 @@ describe("turnDurationText", () => {
 
 	it("rounds sub-second turns to 0s (CC has no minimum threshold)", () => {
 		expect(turnDurationText("Brewed", 400)).toBe("Brewed for 0s");
+	});
+});
+
+const RAN = [{ role: "assistant", stopReason: "stop" }];
+const FAILED = [{ role: "assistant", stopReason: "error" }];
+const ABORTED = [{ role: "assistant", stopReason: "aborted" }];
+
+describe("TurnSpan", () => {
+	it("measures one plain run from start to settle", () => {
+		const span = new TurnSpan();
+		span.runStarted(1_000);
+		span.runEnded(RAN);
+		expect(span.settle(4_000)).toBe(3_000);
+	});
+
+	it("spans a retried turn from the FIRST run, so the line reports the real wait", () => {
+		const span = new TurnSpan();
+		span.runStarted(1_000);
+		span.runEnded(FAILED); // provider overloaded; pi retries
+		span.runStarted(3_000); // retry, same user turn
+		span.runEnded(RAN);
+		expect(span.settle(10_000)).toBe(9_000);
+	});
+
+	// Non-zero starts on purpose: with a 0 start these would pass even if the
+	// outcome gate broke, because the span would read as never opened.
+	it("renders nothing for a turn that ends errored or aborted", () => {
+		const errored = new TurnSpan();
+		errored.runStarted(1_000);
+		errored.runEnded(FAILED);
+		expect(errored.settle(5_000)).toBeUndefined();
+
+		const aborted = new TurnSpan();
+		aborted.runStarted(1_000);
+		aborted.runEnded(ABORTED);
+		expect(aborted.settle(5_000)).toBeUndefined();
+	});
+
+	it("renders nothing when settle arrives without a run", () => {
+		expect(new TurnSpan().settle(5_000)).toBeUndefined();
+
+		// A run that started but never ended is not a finished turn either.
+		const started = new TurnSpan();
+		started.runStarted(1_000);
+		expect(started.settle(5_000)).toBeUndefined();
+	});
+
+	it("treats a start of 0 as a real start, and keeps it across a retry", () => {
+		const span = new TurnSpan();
+		span.runStarted(0);
+		span.runEnded(FAILED);
+		span.runStarted(2_000);
+		span.runEnded(RAN);
+		expect(span.settle(6_000)).toBe(6_000);
+	});
+
+	it("resets between turns, so a failed turn does not mute or stretch the next one", () => {
+		const span = new TurnSpan();
+		span.runStarted(1_000);
+		span.runEnded(FAILED);
+		expect(span.settle(2_000)).toBeUndefined();
+
+		span.runStarted(8_000);
+		span.runEnded(RAN);
+		expect(span.settle(9_500)).toBe(1_500);
 	});
 });

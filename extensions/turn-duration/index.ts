@@ -2,8 +2,9 @@
  * turn-duration extension — Claude Code's "✻ Cooked for 5m 12s" line shown in
  * the transcript after each response.
  *
- * The turn's wall-clock is measured across agent_start→agent_end and emitted as
- * a display-only session entry (`appendEntry` — not part of the LLM context, so
+ * The turn's wall-clock is measured across agent_start→agent_settled by span.ts
+ * (one turn can hold several runs — `lib/interrupt.ts`) and emitted as a
+ * display-only session entry (`appendEntry` — not part of the LLM context, so
  * the model never sees its own timing line), rendered dim and led by the ✻ mark
  * to match CC's TurnDurationMessage. CC shows it after every response with no
  * threshold and defaults it on; CC_TURN_DURATION=0 opts out. The completion verb
@@ -11,10 +12,10 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { wasInterrupted } from "../lib/interrupt.ts";
 import { trackShellTasks } from "../lib/shell-tasks.ts";
 import { dimMarkedLine } from "../lib/tui-render.ts";
 import { TURN_MARK, turnDurationText } from "./line.ts";
+import { TurnSpan } from "./span.ts";
 import { pickCompletionVerb } from "./verbs.ts";
 
 const ENTRY_TYPE = "one-code:turn-duration";
@@ -35,23 +36,24 @@ export default function turnDurationExtension(pi: ExtensionAPI) {
 		return dimMarkedLine(theme, TURN_MARK, turnDurationText(data.verb, data.durationMs, data.runningShells ?? 0));
 	});
 
-	let turnStartedAt = 0;
+	const span = new TurnSpan();
 
 	pi.on("agent_start", () => {
-		turnStartedAt = Date.now();
+		span.runStarted(Date.now());
 	});
 
-	pi.on("agent_end", (event, ctx) => {
-		const startedAt = turnStartedAt;
-		turnStartedAt = 0;
+	pi.on("agent_end", (event) => {
+		span.runEnded(event.messages);
+	});
+
+	pi.on("agent_settled", (_event, ctx) => {
+		const durationMs = span.settle(Date.now());
+		if (durationMs === undefined) return;
 		if (process.env.CC_TURN_DURATION === "0") return;
-		if (!startedAt || !ctx.hasUI) return;
-		// An interrupted turn shows the interrupted extension's note instead
-		// (CC gates its turn-duration render on !aborted).
-		if (wasInterrupted(event.messages)) return;
+		if (!ctx.hasUI) return;
 		pi.appendEntry<TurnDurationData>(ENTRY_TYPE, {
 			verb: pickCompletionVerb(),
-			durationMs: Date.now() - startedAt,
+			durationMs,
 			runningShells: shellTasks.running().length,
 		});
 	});

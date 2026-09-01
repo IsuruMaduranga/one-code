@@ -1,20 +1,72 @@
 /**
- * Detect whether an agent turn ended because the user interrupted it.
+ * Read how an agent run ended off its last assistant message.
  *
  * pi marks the assistant message it was streaming with `stopReason: "aborted"`
- * when the user hits Esc (or otherwise calls `ctx.abort()`); a turn that ran to
- * completion carries "stop"/"toolUse"/etc. instead. Claude Code keys its
- * InterruptedByUser line off the same signal (ERROR_MESSAGE_USER_ABORT on the
- * last assistant message). Duck-typed so both the turn-duration and interrupted
- * extensions can share it without pulling in pi's message types.
+ * when the user hits Esc (or otherwise calls `ctx.abort()`), and with
+ * `stopReason: "error"` when the provider call failed; a run that completed
+ * carries "stop"/"toolUse"/etc. instead. Claude Code keys its InterruptedByUser
+ * line off the same abort signal (ERROR_MESSAGE_USER_ABORT on the last
+ * assistant message). Duck-typed so the extensions that need it can share it
+ * without pulling in pi's message types.
+ *
+ * **One turn is not one run.** `agent_end` fires per low-level run, and pi
+ * continues on its own afterwards in three cases: an auto-retry of a transient
+ * provider error, an auto-compaction followed by a retry, and a queued
+ * follow-up message. `agent_settled` is the one event meaning pi will not
+ * continue by itself, and it carries no messages — so anything that reports a
+ * turn as finished listens on `agent_settled` and keeps a `RunOutcomeLatch` to
+ * carry the outcome over from the runs' `agent_end`. Findings §3.
  */
 
-/** The last assistant message in a turn was aborted by the user. */
-export function wasInterrupted(messages: ReadonlyArray<{ role: string; stopReason?: string }> | undefined): boolean {
-	if (!messages) return false;
+/** How the last assistant message of a run ended. */
+export type RunOutcome = "ok" | "aborted" | "error";
+
+/** The only fields of a run's messages any of this reads. */
+export interface RunMessage {
+	role: string;
+	stopReason?: string;
+}
+
+/** Classify a run from its messages; a run with no assistant message counts as "ok". */
+export function runOutcome(messages: ReadonlyArray<RunMessage> | undefined): RunOutcome {
+	if (!messages) return "ok";
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const message = messages[i];
-		if (message.role === "assistant") return message.stopReason === "aborted";
+		if (message.role !== "assistant") continue;
+		if (message.stopReason === "aborted") return "aborted";
+		if (message.stopReason === "error") return "error";
+		return "ok";
 	}
-	return false;
+	return "ok";
+}
+
+/** The last assistant message in a turn was aborted by the user. */
+export function wasInterrupted(messages: ReadonlyArray<RunMessage> | undefined): boolean {
+	return runOutcome(messages) === "aborted";
+}
+
+/**
+ * Carries the last run's outcome from `agent_end` to `agent_settled`.
+ *
+ * Empty reads as `undefined` rather than "ok", so "no run ended in this turn"
+ * stays distinguishable from "a run finished cleanly". A settle with nothing
+ * recorded means the turn produced no response at all, and a caller gating on
+ * `=== "ok"` then holds off by construction instead of treating the stale
+ * default as success. `take()` empties the latch, so the next turn starts clean
+ * whether or not this turn's outcome was read.
+ */
+export class RunOutcomeLatch {
+	private outcome: RunOutcome | undefined;
+
+	/** `agent_end`: record how that run ended, replacing any earlier run's. */
+	record(messages: ReadonlyArray<RunMessage> | undefined): void {
+		this.outcome = runOutcome(messages);
+	}
+
+	/** `agent_settled`: the settled turn's outcome, or undefined if no run ended. */
+	take(): RunOutcome | undefined {
+		const outcome = this.outcome;
+		this.outcome = undefined;
+		return outcome;
+	}
 }

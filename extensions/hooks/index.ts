@@ -23,6 +23,7 @@
  */
 
 import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { RunOutcomeLatch } from "../lib/interrupt.ts";
 import { claudeConfigDir } from "../lib/paths.ts";
 import { defaultDiscoverRoots } from "../lib/plugins.ts";
 import { appendHookLog, formatDebugLine, hooksDebugEnabled, hooksLogPath } from "./debug.ts";
@@ -269,7 +270,21 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	});
 
 	// ---- Stop ---------------------------------------------------------------
-	pi.on("agent_end", async (_event, ctx) => {
+	// agent_settled, not agent_end: CC fires Stop once, when the main agent has
+	// finished responding, and a turn can hold several runs (`lib/interrupt.ts`).
+	// Dispatching per run would run the user's Stop hook several times per turn and
+	// let a blocking hook inject its follow-up mid-retry.
+	const stopOutcome = new RunOutcomeLatch();
+	pi.on("agent_end", (event) => {
+		stopOutcome.record(event.messages);
+	});
+
+	pi.on("agent_settled", async (_event, ctx) => {
+		// CC skips Stop when the turn ended on an API error (a blocking hook would
+		// spiral: error → block → retry → error) or on a user interrupt (its query
+		// loop returns on the abort signal before the stop-hook step). An empty latch
+		// means no run ended in this turn, which is not a response to stop on either.
+		if (stopOutcome.take() !== "ok") return;
 		const payload: HookStdinPayload = { ...basePayload(ctx, "Stop"), stop_hook_active: stopHookActive };
 		const outcome = await dispatch(ctx, "Stop", { ignoreMatcher: true }, payload);
 		if (!outcome.block) return;
