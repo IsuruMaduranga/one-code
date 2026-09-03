@@ -82,26 +82,77 @@ export interface PermissionRule {
 	pattern?: string;
 }
 
-/** Parse "Tool" or "Tool(pattern)". Returns undefined for malformed rules. */
+/**
+ * Parse "Tool" or "Tool(pattern)". Returns undefined for malformed rules. Tool
+ * names may carry `-` and `.` — MCP tools keep their servers' hyphens
+ * (`mcp__github__delete-repo`), and a rule naming one used to be dropped
+ * silently (review P5).
+ */
 export function parseRule(raw: string): PermissionRule | undefined {
 	const trimmed = raw.trim();
 	if (!trimmed) return undefined;
-	const match = trimmed.match(/^([A-Za-z0-9_]+)(?:\((.*)\))?$/s);
+	const match = trimmed.match(/^([A-Za-z0-9_.-]+)(?:\((.*)\))?$/s);
 	if (!match) return undefined;
 	const [, name, pattern] = match;
 	return { raw: trimmed, tool: normalizeToolName(name), pattern: pattern || undefined };
 }
 
-export function parseRules(raws: string[]): PermissionRule[] {
-	return raws.map(parseRule).filter((r): r is PermissionRule => r !== undefined);
+/** Parsed rules plus the raw strings that could not be parsed, so a caller can report them. */
+export function parseRulesReport(raws: string[]): { rules: PermissionRule[]; dropped: string[] } {
+	const rules: PermissionRule[] = [];
+	const dropped: string[] = [];
+	for (const raw of raws) {
+		const rule = parseRule(raw);
+		if (rule) rules.push(rule);
+		else if (raw.trim()) dropped.push(raw.trim());
+	}
+	return { rules, dropped };
 }
 
-/** Glob → RegExp. `**` crosses path separators, `*` does not. */
+export function parseRules(raws: string[]): PermissionRule[] {
+	return parseRulesReport(raws).rules;
+}
+
+/**
+ * Whether a bash pattern has a `*` that is a wildcard — i.e. not written `\*`.
+ * Claude Code's escape syntax: `\*` is a literal asterisk, `\\` a literal
+ * backslash. A pattern with no unescaped `*` is an exact command.
+ */
+export function hasUnescapedWildcard(pattern: string): boolean {
+	for (let i = 0; i < pattern.length; i++) {
+		if (pattern[i] === "\\") {
+			i++;
+			continue;
+		}
+		if (pattern[i] === "*") return true;
+	}
+	return false;
+}
+
+/** The literal command an exact (wildcard-free) bash pattern stands for. */
+export function unescapeLiteral(pattern: string): string {
+	return pattern.replace(/\\([*\\])/g, "$1");
+}
+
+/**
+ * Spell a literal command as a bash pattern that matches exactly it — `*` and
+ * `\` escaped — for rules minted from an approved command ("don't ask again
+ * this session"). Without this `ls *.ts` became a glob matching
+ * `ls ; rm -rf ~ #.ts` (review P7).
+ */
+export function escapeLiteral(command: string): string {
+	return command.replace(/[\\*]/g, (ch) => `\\${ch}`);
+}
+
+/** Glob → RegExp. `**` crosses path separators, `*` does not. `\*` / `\\` are literals. */
 function globToRegex(glob: string, pathMode: boolean): RegExp {
 	let out = "";
 	for (let i = 0; i < glob.length; i++) {
 		const ch = glob[i];
-		if (ch === "*") {
+		if (ch === "\\" && (glob[i + 1] === "*" || glob[i + 1] === "\\")) {
+			out += `\\${glob[i + 1]}`;
+			i++;
+		} else if (ch === "*") {
 			if (pathMode && glob[i + 1] === "*") {
 				out += ".*";
 				i++;
@@ -141,7 +192,7 @@ export function matchesBashPattern(pattern: string, command: string): boolean {
 		const viaXargs = `xargs ${prefix}`;
 		return cmd === viaXargs || cmd.startsWith(`${viaXargs} `);
 	}
-	if (pattern.includes("*")) {
+	if (hasUnescapedWildcard(pattern)) {
 		let regex = globToRegex(pattern, false);
 		const stars = pattern.split("*").length - 1;
 		if (stars === 1 && pattern.endsWith(" *")) {
@@ -150,7 +201,7 @@ export function matchesBashPattern(pattern: string, command: string): boolean {
 		}
 		return regex.test(cmd);
 	}
-	return cmd === pattern;
+	return cmd === unescapeLiteral(pattern);
 }
 
 /**
@@ -197,7 +248,9 @@ export function findBashAllowRule(rules: PermissionRule[], command: string): Per
 	const bashRules = rules.filter((r) => r.tool === "bash");
 	const bare = bashRules.find((r) => !r.pattern);
 	if (bare) return bare;
-	const exact = bashRules.find((r) => r.pattern !== undefined && !r.pattern.includes("*") && r.pattern === cmd);
+	const exact = bashRules.find(
+		(r) => r.pattern !== undefined && !hasUnescapedWildcard(r.pattern) && unescapeLiteral(r.pattern) === cmd,
+	);
 	if (exact) return exact;
 	if (hasInjectionSyntax(cmd)) return undefined;
 	const subs = bashSubcommands(cmd);
@@ -211,13 +264,19 @@ export function findBashAllowRule(rules: PermissionRule[], command: string): Per
 	return first;
 }
 
-/** Path pattern match against the raw, absolute, cwd-relative, and ~-expanded forms. */
+/**
+ * Path pattern match against the RESOLVED forms of the subject — absolute
+ * (with `.`/`..` normalised), cwd-relative, and `~/`-relative — never the raw
+ * spelling: `Edit(docs/**)` must not match `docs/../src/main.ts`, and a
+ * `~/.ssh/id_rsa` subject must hit `Read(~/.ssh/**)` (review P6).
+ */
 export function matchesPathPattern(pattern: string, subject: string, cwd: string): boolean {
 	const home = homedir();
 	const expandedPattern = pattern.startsWith("~/") ? `${home}/${pattern.slice(2)}` : pattern;
+	const expandedSubject = subject === "~" ? home : subject.startsWith("~/") ? `${home}/${subject.slice(2)}` : subject;
 
-	const candidates = new Set<string>([subject]);
-	const absolute = isAbsolute(subject) ? subject : resolve(cwd, subject);
+	const candidates = new Set<string>();
+	const absolute = isAbsolute(expandedSubject) ? resolve(expandedSubject) : resolve(cwd, expandedSubject);
 	candidates.add(absolute);
 	const rel = relative(cwd, absolute);
 	if (rel && !rel.startsWith("..")) candidates.add(rel);
@@ -436,7 +495,7 @@ export function isBroadExecutionRule(rule: PermissionRule): boolean {
 	// Without a wildcard the rule matches one exact command, which is narrow by
 	// construction however powerful that command is — `Bash(python)` only ever
 	// starts a bare REPL.
-	if (!pattern.includes("*")) return false;
+	if (!hasUnescapedWildcard(pattern)) return false;
 	if (/^(\*|:\*|\*\*)$/.test(pattern)) return true;
 
 	const head = pattern.split(/[\s*]/)[0] ?? "";

@@ -2,17 +2,22 @@ import { describe, expect, it } from "vitest";
 import {
 	bashSubcommands,
 	decide,
+	escapeLiteral,
 	extractSubject,
 	findBashAllowRule,
+	hasUnescapedWildcard,
 	isBroadExecutionRule,
 	matchesBashPattern,
 	matchesPathPattern,
 	normalizeToolName,
 	parseRule,
 	parseRules,
+	parseRulesReport,
 	type PermissionRule,
 	ruleMatches,
+	unescapeLiteral,
 } from "../../extensions/permissions/matcher.ts";
+import { isProtectedPath } from "../../extensions/permissions/protected-paths.ts";
 
 const CWD = "/home/user/project";
 
@@ -173,6 +178,52 @@ describe("matchesPathPattern", () => {
 	it("expands ~ in patterns", () => {
 		const home = process.env.HOME ?? "";
 		expect(matchesPathPattern("~/secrets/*", `${home}/secrets/key.pem`, CWD)).toBe(true);
+	});
+
+	it("matches resolved forms only: a traversal spelled through the pattern's dir does not match (P6)", () => {
+		expect(matchesPathPattern("docs/**", "docs/../src/main.ts", CWD)).toBe(false);
+		expect(matchesPathPattern("src/**", "docs/../src/main.ts", CWD)).toBe(true);
+	});
+
+	it("expands ~ in the subject too, so a deny on ~/.ssh catches the tilde spelling (P6)", () => {
+		expect(matchesPathPattern("~/.ssh/**", "~/.ssh/id_rsa", CWD)).toBe(true);
+	});
+});
+
+describe("rule parsing (P5) and literal escaping (P7)", () => {
+	it("accepts hyphenated and dotted tool names (MCP tools keep their servers' hyphens)", () => {
+		expect(parseRule("mcp__github__delete-repo")?.tool).toBe("mcp__github__delete-repo");
+		expect(parseRule("mcp__plugin_context7_context7__query-docs(x)")?.pattern).toBe("x");
+	});
+
+	it("reports the rules it drops instead of losing them silently", () => {
+		const report = parseRulesReport(["Bash(ls)", "Bad Rule(", "", "  ", "Edit"]);
+		expect(report.rules.map((r) => r.raw)).toEqual(["Bash(ls)", "Edit"]);
+		expect(report.dropped).toEqual(["Bad Rule("]);
+	});
+
+	it("escapes an approved command so it matches exactly itself, never as a glob", () => {
+		const minted = parseRule(`bash(${escapeLiteral("ls *.ts")})`)!;
+		expect(minted.pattern).toBe("ls \\*.ts");
+		expect(hasUnescapedWildcard(minted.pattern!)).toBe(false);
+		expect(unescapeLiteral(minted.pattern!)).toBe("ls *.ts");
+		expect(matchesBashPattern(minted.pattern!, "ls *.ts")).toBe(true);
+		expect(matchesBashPattern(minted.pattern!, "ls ; rm -rf ~ #.ts")).toBe(false);
+		expect(isBroadExecutionRule(parseRule(`Bash(${escapeLiteral("python *")})`)!)).toBe(false);
+		expect(findBashAllowRule([minted], "ls *.ts")).toBe(minted);
+		expect(findBashAllowRule([minted], "ls ; rm -rf ~ #.ts")).toBeUndefined();
+	});
+
+	it("keeps \\* literal inside a wildcard pattern", () => {
+		expect(matchesBashPattern("echo \\* *", "echo * now")).toBe(true);
+		expect(matchesBashPattern("echo \\* *", "echo x now")).toBe(false);
+	});
+});
+
+describe("protected paths (P9)", () => {
+	it("protects Claude Code's managed settings file in every mode", () => {
+		expect(isProtectedPath("/Library/Application Support/ClaudeCode/managed-settings.json")).toBe(true);
+		expect(decide({ subject: "/etc/claude-code/managed-settings.json", cwd: CWD, mode: "acceptEdits", deny: [], ask: [], allow: [], toolName: "edit" }).decision).toBe("ask");
 	});
 });
 

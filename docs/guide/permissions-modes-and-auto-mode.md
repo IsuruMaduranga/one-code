@@ -21,7 +21,8 @@ Bash rules follow Claude Code's matching rules:
 - `Bash(npm test:*)` matches `npm test` and any command that starts with
   `npm test ` followed by a space. It does not match `npm tests` or
   `npm test:unit`; write `Bash(npm test:unit:*)` for the latter.
-- `Bash(git * --dry-run)` uses `*` as a wildcard anywhere in the line.
+- `Bash(git * --dry-run)` uses `*` as a wildcard anywhere in the line. Write
+  `\*` for a literal asterisk and `\\` for a literal backslash.
 - A command line made of several commands (`&&`, `||`, `;`, `|`, a newline)
   is allowed only when an `allow` rule covers every one of them, or an exact
   rule matches the whole line. A `deny` or `ask` rule applies when it matches

@@ -7,14 +7,17 @@
  *   <cwd>/.claude/settings.json           (project, checked in — read only)
  *   <cwd>/.claude/settings.local.json     (project, personal — read only)
  *   ~/.onecode/projects/<slug>/settings.json (One Code per repo — read + write)
+ *   <managed-settings.json>                (organisation policy — read only, highest)
  *
  * allow/deny/ask arrays concatenate across sources; defaultMode from the most
- * specific `.claude` source wins (the One Code files contribute rules only).
+ * specific `.claude` source wins, with managed settings above all (the One Code
+ * files contribute rules only).
  * One Code persists the rules it records to its own files, never into Claude
  * Code's — `persistAllowRule` is pointed at a One Code path by its caller.
  * Unknown keys in the files are preserved on write.
  */
 
+import { managedSettingsPaths } from "../auto-mode/config.ts";
 import { readSettingsFile as readClaudeSettingsFile, settingsPaths } from "../lib/claude-settings.ts";
 import {
 	oneCodeProjectSettingsPath,
@@ -76,7 +79,10 @@ export function loadPermissionSettings(cwd: string, home: string): PermissionSet
 	const oneCodeGlobal = oneCodeSettingsPath(home);
 	const oneCodeProject = oneCodeProjectSettingsPath(cwd, home);
 
-	for (const path of [paths.user, oneCodeGlobal, paths.project, paths.local, oneCodeProject]) {
+	// Managed settings last: Claude Code's organisation policy outranks every
+	// user/project file, for rules and for defaultMode alike (review P14).
+	const managed = managedSettingsPaths();
+	for (const path of [paths.user, oneCodeGlobal, paths.project, paths.local, oneCodeProject, ...managed]) {
 		const file = readSettingsFile(path);
 		const perms = file?.permissions;
 		if (!perms) continue;
@@ -89,7 +95,7 @@ export function loadPermissionSettings(cwd: string, home: string): PermissionSet
 		// repository, so accepting it there would let a checked-in file put the
 		// session into auto mode — a repo granting itself the looser mode whose
 		// classifier is what contains it. Claude Code makes the same exclusion.
-		if (defaultMode && !(defaultMode === "auto" && path !== paths.user)) {
+		if (defaultMode && !(defaultMode === "auto" && path !== paths.user && !managed.includes(path))) {
 			merged.defaultMode = defaultMode;
 		}
 	}

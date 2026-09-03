@@ -59,7 +59,8 @@ import {
 	extractSubject,
 	normalizeToolName,
 	parseRule,
-	parseRules,
+	parseRulesReport,
+	escapeLiteral,
 	type PermissionMode,
 	type PermissionRule,
 } from "./matcher.ts";
@@ -157,6 +158,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	let ask: PermissionRule[] = [];
 	let allow: PermissionRule[] = [];
 	const sessionAllows: PermissionRule[] = [];
+	let unparsableRules: string[] = [];
+	let warnedUnparsable = "";
 	/** Plan mode's one writable file, announced by the plan-mode extension. */
 	let planFilePath: string | undefined;
 	/**
@@ -319,6 +322,10 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	 */
 	const userMessages: string[] = [];
 	pi.on("input", (event) => {
+		// Only what the user typed. A plugin command or skill body arrives as
+		// source "extension" and must not become "the user's own words" that an
+		// intent quote can cite (review P12; hooks make the same distinction).
+		if (event.source === "extension") return;
 		const text = event.text?.trim();
 		if (!text) return;
 		userMessages.push(text);
@@ -485,9 +492,25 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 
 	const reloadSettings = (ctx: ExtensionContext) => {
 		const settings = loadPermissionSettings(ctx.cwd, os.homedir());
-		deny = parseRules(settings.deny);
-		ask = parseRules(settings.ask);
-		allow = parseRules(settings.allow);
+		const parsed = {
+			deny: parseRulesReport(settings.deny),
+			ask: parseRulesReport(settings.ask),
+			allow: parseRulesReport(settings.allow),
+		};
+		deny = parsed.deny.rules;
+		ask = parsed.ask.rules;
+		allow = parsed.allow.rules;
+		// A rule that fails to parse is a rule the user believes is in force and is
+		// not. Say so (once per distinct set) and list them in /permissions.
+		unparsableRules = [...parsed.deny.dropped, ...parsed.ask.dropped, ...parsed.allow.dropped];
+		const signature = unparsableRules.join("\n");
+		if (unparsableRules.length > 0 && ctx.hasUI && signature !== warnedUnparsable) {
+			warnedUnparsable = signature;
+			ctx.ui.notify(
+				`${unparsableRules.length} permission rule(s) could not be parsed and are ignored: ${unparsableRules.join(", ")}`,
+				"warning",
+			);
+		}
 		// Dropped so edited autoMode rules and instruction files are picked up on
 		// reload rather than staying cached for the life of the process.
 		autoConfig = undefined;
@@ -771,7 +794,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		if (choice === YES) return undefined;
 		if (choice === YES_SESSION) {
 			const tool = normalizeToolName(event.toolName);
-			const rule = tool === "bash" && subject ? parseRule(`bash(${subject})`) : parseRule(tool);
+			// The approved command, as an exact literal — never a glob.
+			const rule = tool === "bash" && subject ? parseRule(`bash(${escapeLiteral(subject)})`) : parseRule(tool);
 			if (rule) sessionAllows.push(rule);
 			return undefined;
 		}
@@ -900,7 +924,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 
 		if (choice === YES) return undefined;
 		if (choice === YES_SESSION) {
-			const rule = normalizedTool === "bash" && subject ? parseRule(`bash(${subject})`) : parseRule(normalizedTool);
+			const rule = normalizedTool === "bash" && subject ? parseRule(`bash(${escapeLiteral(subject)})`) : parseRule(normalizedTool);
 			if (rule) sessionAllows.push(rule);
 			return undefined;
 		}
@@ -937,6 +961,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 					`ask: ${fmt(ask)}`,
 					`allow: ${fmt(allow)}`,
 					`session allows: ${fmt(sessionAllows)}`,
+					...(unparsableRules.length > 0 ? [`unparsable rules (ignored): ${unparsableRules.join(", ")}`] : []),
 					...autoLines,
 				].join("\n"),
 				"info",

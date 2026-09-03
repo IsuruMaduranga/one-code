@@ -77,6 +77,10 @@ const PROTECTED_FILES = new Set([
 	"pyrightconfig.json",
 	".mcp.json",
 	".claude.json",
+	// Claude Code's managed (organisation) settings: the highest-authority
+	// permission and auto-mode configuration. Protected in every mode, not only
+	// where the auto-mode safety floor covers it (review P9).
+	"managed-settings.json",
 ]);
 
 // `isWritingTool` / `WRITING_TOOLS` live in auto-mode/paths.ts (the shared lower

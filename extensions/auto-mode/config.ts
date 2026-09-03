@@ -92,7 +92,7 @@ interface AutoModeSettingsFile {
 const DEFAULTS_TOKEN = "$defaults";
 
 /** Managed-settings locations, highest authority, matching Claude Code's paths. */
-function managedSettingsPaths(): string[] {
+export function managedSettingsPaths(): string[] {
 	if (process.platform === "darwin") return ["/Library/Application Support/ClaudeCode/managed-settings.json"];
 	if (process.platform === "win32") return ["C:\\ProgramData\\ClaudeCode\\managed-settings.json"];
 	return ["/etc/claude-code/managed-settings.json"];
