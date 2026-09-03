@@ -9,7 +9,7 @@
 
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { hasInjectionSyntax, parseCommand } from "../auto-mode/shell-analysis.ts";
+import { analyzeShellCommand, hasInjectionSyntax, parseCommand } from "../auto-mode/shell-analysis.ts";
 import { isProtectedPath, isWritingTool } from "./protected-paths.ts";
 
 export type PermissionMode = "default" | "acceptEdits" | "plan" | "bypassPermissions" | "dontAsk" | "auto";
@@ -378,8 +378,24 @@ export interface Decision {
 	/** Rule that determined the outcome, when one did. */
 	rule?: PermissionRule;
 	/** Why, for deny/ask decisions surfaced to the model or user. */
-	cause: "rule" | "plan-mode" | "plan-file" | "memory-dir" | "scratchpad-dir" | "mode" | "tier" | "protected-path";
+	cause:
+		| "rule"
+		| "plan-mode"
+		| "plan-file"
+		| "plan-readonly"
+		| "memory-dir"
+		| "scratchpad-dir"
+		| "mode"
+		| "tier"
+		| "protected-path";
 }
+
+/**
+ * Custom-tier tools that only read (the network or MCP resources) and so stay
+ * available in plan mode, as WebFetch/WebSearch do in Claude Code. Everything
+ * else custom is treated as a mutation there.
+ */
+const PLAN_READ_ONLY_TOOLS = new Set(["web_fetch", "web_search", "list_mcp_resources", "read_mcp_resource", "read_mcp_resource_dir"]);
 
 /**
  * Tools that launch a fresh agent loop. In auto mode these are classified
@@ -458,6 +474,7 @@ export function decide(params: DecideInput): Decision {
 	if (mode === "bypassPermissions") return { decision: "allow", cause: "mode" };
 
 	const tier = toolTier(toolName);
+	const tool = normalizeToolName(toolName);
 	if (mode === "plan" && tier !== "safe" && !AUTO_ALLOWED_TOOLS.has(normalizeToolName(toolName))) {
 		// Plan mode's one writable file (~/.onecode/plans/<slug>.md, which
 		// protected-paths already excepts as working space).
@@ -468,6 +485,17 @@ export function decide(params: DecideInput): Decision {
 				(params.resolvedSubject ? isPlanFilePath(params.resolvedSubject, planFile, cwd) : false);
 			if (planTarget) return { decision: "allow", cause: "plan-file" };
 		}
+		// Read-only bash stays usable while planning (Claude Code permits it). The
+		// auto-mode shell pre-gate's "safe" verdict means "every command is on the
+		// read-only allowlist, nothing leaves the project" — plus in-project
+		// redirect writes, which it records; a safe verdict with no writes is
+		// exactly read-only. Anything it cannot vouch for is denied as before.
+		// Without this the frontier tier (no grep/find/ls) was left with `read` alone.
+		if (tool === "bash" && subject) {
+			const evidence = analyzeShellCommand({ command: subject, cwd, home: homedir() });
+			if (evidence.verdict === "safe" && evidence.writes.length === 0) return { decision: "allow", cause: "plan-readonly" };
+		}
+		if (PLAN_READ_ONLY_TOOLS.has(tool)) return { decision: "allow", cause: "plan-readonly" };
 		return { decision: "deny", cause: "plan-mode" };
 	}
 
@@ -502,7 +530,6 @@ export function decide(params: DecideInput): Decision {
 	// Protected-path writes are checked *before* allow rules, so an
 	// `Edit(.claude/**)` entry cannot pre-approve reconfiguring the agent's own
 	// permissions or planting a git hook. In auto mode they go to the classifier.
-	const tool = normalizeToolName(toolName);
 	const protectedTarget = () =>
 		isProtectedPath(subject, cwd) || (params.resolvedSubject ? isProtectedPath(params.resolvedSubject, cwd) : false);
 	if (isWritingTool(tool) && subject && protectedTarget()) {

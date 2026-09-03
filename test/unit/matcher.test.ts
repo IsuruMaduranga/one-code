@@ -226,6 +226,28 @@ describe("decide", () => {
 		expect(decide({ ...base, mode: "plan", toolName: "read", subject: "a.ts" }).decision).toBe("allow");
 	});
 
+	it("plan mode allows read-only bash (the pre-gate's safe verdict) and denies the rest (T1)", () => {
+		const plan = { ...base, mode: "plan" as const };
+		for (const cmd of ["ls -la", "git status", "git log --oneline -5", "grep -rn foo src", "cat package.json | head"]) {
+			const d = decide({ ...plan, toolName: "bash", subject: cmd });
+			expect(d.decision, cmd).toBe("allow");
+			expect(d.cause, cmd).toBe("plan-readonly");
+		}
+		for (const cmd of ["rm -rf dist", "echo x > notes.txt", "npm install", "git commit -m x", "curl https://x.test", "sed -i s/a/b/ f"]) {
+			expect(decide({ ...plan, toolName: "bash", subject: cmd }).decision, cmd).toBe("deny");
+		}
+	});
+
+	it("plan mode keeps the read-only custom tools and denies mutating ones (P13)", () => {
+		const plan = { ...base, mode: "plan" as const };
+		for (const tool of ["web_fetch", "web_search", "list_mcp_resources", "read_mcp_resource"]) {
+			expect(decide({ ...plan, toolName: tool, subject: "" }).decision, tool).toBe("allow");
+		}
+		for (const tool of ["monitor", "enter_worktree", "notebook_edit", "mcp__github__create_issue"]) {
+			expect(decide({ ...plan, toolName: tool, subject: "" }).decision, tool).toBe("deny");
+		}
+	});
+
 	it("plan mode allows writes to the plan file only", () => {
 		const planFilePath = "/home/user/.onecode/plans/brisk-otter-map.md";
 		const withPlan = { ...base, mode: "plan" as const, planFilePath };
