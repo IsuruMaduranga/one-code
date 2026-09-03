@@ -78,7 +78,8 @@ export default function footerExtension(pi: ExtensionAPI) {
 			const fd = footerData as {
 				getGitBranch(): string | null;
 				getExtensionStatuses(): ReadonlyMap<string, string>;
-				onBranchChange(cb: () => void): void;
+				/** Returns the unsubscribe (pi keeps callbacks in a Set for the process lifetime). */
+				onBranchChange(cb: () => void): () => void;
 			};
 
 			const snapshot = (): FooterData => {
@@ -106,15 +107,20 @@ export default function footerExtension(pi: ExtensionAPI) {
 				(tui as { requestRender?: () => void } | undefined)?.requestRender?.();
 			};
 
-			// The branch drives the PR lookup; seed it now and follow changes.
+			// The branch drives the PR lookup; seed it now and follow changes. The
+			// factory re-runs on every session_start (/clear, /new, resume) and pi
+			// only disposes the component, so the subscription must be released
+			// here — otherwise each replaced footer keeps firing its `gh pr list`
+			// against a stale cwd on every branch change.
 			refreshPr(ctx.cwd, fd.getGitBranch());
-			fd.onBranchChange(() => {
+			const stopFollowingBranch = fd.onBranchChange(() => {
 				refreshPr(ctx.cwd, fd.getGitBranch());
 				repaint();
 			});
 
 			return Object.assign(component, {
 				dispose: () => {
+					stopFollowingBranch();
 					repaint = () => {};
 				},
 			});

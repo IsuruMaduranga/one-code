@@ -75,8 +75,12 @@ const DENIED_BY_USER =
 	"The user doesn't want to proceed with this tool use. The tool use was rejected. Adjust your approach based on the user's feedback instead of retrying the same call.";
 const DENIED_NON_INTERACTIVE =
 	"Permission required but this session is non-interactive, so the user cannot approve the call. It was blocked. Only pre-approved tools can run here; work within those, or ask the user to re-run interactively or with an allow rule / --dangerously-skip-permissions.";
+// Must agree with the plan-mode reminder (plan-mode/reminder.ts): the plan is
+// built in the plan file and approved through exit_plan_mode, never presented
+// as chat text. A denial that said "present your plan to the user instead"
+// contradicted the reminder in the same turn.
 const DENIED_PLAN_MODE =
-	"You are in plan mode: only read-only tools may run. Do not attempt mutations; present your plan to the user instead.";
+	"You are in plan mode: only read-only tools may run, and edit/write are limited to the plan file. This call was blocked. Keep investigating with read-only tools and build the plan in the plan file named in the plan-mode reminder; finish the turn with ask_user_question or exit_plan_mode, not by presenting the plan as chat text.";
 const DENIED_DONT_ASK =
 	"Permission mode is dontAsk: anything that would normally prompt the user is denied instead. Only pre-approved tools can run; work within those, or tell the user which allow rule would unblock you.";
 const DENIED_PROTECTED_PATH =

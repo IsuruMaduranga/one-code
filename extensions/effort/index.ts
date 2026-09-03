@@ -97,6 +97,15 @@ export default function effortExtension(pi: ExtensionAPI) {
 		noteTimer = setTimeout(() => ctx.ui.setWidget(NOTE_KEY, undefined), NOTE_MS);
 		noteTimer.unref?.();
 	};
+	// The timer captured the ctx of the turn that changed the level; a /clear or
+	// shutdown inside the note's few seconds invalidates that ctx, and pi throws
+	// on a stale ctx use. Drop the timer with the session instead.
+	const cancelEffortNote = () => {
+		if (noteTimer) clearTimeout(noteTimer);
+		noteTimer = undefined;
+	};
+	pi.on("session_start", cancelEffortNote);
+	pi.on("session_shutdown", cancelEffortNote);
 
 	const setUltracode = (on: boolean, level?: ThinkingLevel) => {
 		ultracodeActive = on;
