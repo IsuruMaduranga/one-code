@@ -132,6 +132,13 @@ REMINDER: Do NOT call any tools. Respond with plain text only — an <analysis> 
 export function buildCompactionInstruction(options: {
 	reason: "manual" | "threshold" | "overflow";
 	customInstructions?: string;
+	/**
+	 * How many trailing messages of the conversation pi keeps verbatim after
+	 * the cut (its `keepRecentTokens` tail). When set and > 0 the instruction
+	 * says so, so the summary covers the part that is actually discarded
+	 * instead of re-telling what the model will still see in full.
+	 */
+	keptTail?: { count: number; opening?: string };
 }): string {
 	const notice =
 		options.reason === "manual"
@@ -141,8 +148,21 @@ export function buildCompactionInstruction(options: {
 	if (options.customInstructions?.trim()) {
 		parts.push(`<system-reminder>\n## Compact Instructions\n${options.customInstructions.trim()}\n</system-reminder>`);
 	}
-	parts.push(`<system-reminder>\n${notice}\n${COMPACTION_INSTRUCTION}\n</system-reminder>`);
+	const tail = options.keptTail && options.keptTail.count > 0 ? keptTailNote(options.keptTail) : "";
+	parts.push(`<system-reminder>\n${notice}${tail}\n${COMPACTION_INSTRUCTION}\n</system-reminder>`);
 	return parts.join("\n\n");
+}
+
+/**
+ * The scope note for pi's kept tail: the summary replaces only what precedes
+ * it. Quoting how the first kept message opens gives the model a landmark it
+ * can find in the transcript, since a bare count is easy to miscount.
+ */
+export function keptTailNote(tail: { count: number; opening?: string }): string {
+	const landmark = tail.opening?.trim() ? `, beginning with the message that opens "${tail.opening.trim()}"` : "";
+	return ` Only the earlier part of the conversation is being summarized: the final ${tail.count} ${
+		tail.count === 1 ? "message" : "messages"
+	}${landmark}, stay in context verbatim after the summary. Do not summarize them; cover everything before them, and use them only to judge which earlier details still matter.`;
 }
 
 /**

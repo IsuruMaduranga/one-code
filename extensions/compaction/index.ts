@@ -81,6 +81,13 @@ export default function compactionExtension(pi: ExtensionAPI) {
 	pi.on("context", (event) => {
 		capturedMessages = event.messages;
 	});
+	// After a compaction the capture describes the pre-compaction request. A
+	// second /compact before any turn would otherwise re-summarize history the
+	// first one already folded away (and mis-scope the kept tail); the fallback
+	// reconstruction from entries serves until the next request recaptures.
+	pi.on("session_compact", () => {
+		capturedMessages = undefined;
+	});
 
 	pi.on("session_before_compact", async (event, ctx) => {
 		if (process.env.CC_COMPACTION === "0") return undefined;
@@ -100,9 +107,19 @@ export default function compactionExtension(pi: ExtensionAPI) {
 			// resumed session, before any turn ran); that path cannot hit the cache.
 			const messages = capturedMessages ?? reconstructFromEntries(event.preparation);
 
+			// pi keeps the tail after the cut point verbatim (keepRecentTokens, ~20k
+			// tokens); the captured request still carries that tail, so the
+			// instruction names it. The reconstruction path holds only the doomed
+			// span and needs no note. (Cutting the tail off the request instead
+			// was rejected: Anthropic checks cache hits only ~20 blocks back from
+			// the breakpoint, so a request ending well before the last cached
+			// block misses the cache the whole replay exists to hit.)
+			const keptTail = capturedMessages ? keptTailOf(capturedMessages, event.preparation) : undefined;
+
 			const instruction = buildCompactionInstruction({
 				reason: event.reason,
 				customInstructions: event.customInstructions,
+				keptTail,
 			});
 
 			// The active tool definitions, in their active order — kept in the
@@ -201,6 +218,47 @@ export default function compactionExtension(pi: ExtensionAPI) {
 			return undefined;
 		}
 	});
+}
+
+/**
+ * The verbatim-kept tail of the captured request: everything after the doomed
+ * span. pi builds the context as `[compactionSummary?] + one message per entry`
+ * (`sessionEntryToContextMessages`) and `prepareCompaction` derives
+ * `messagesToSummarize`/`turnPrefixMessages` with the same mapping, so the
+ * doomed span is a prefix of the captured array. Alignment is checked role by
+ * role; on any mismatch (an extension that inserted a message) no note is made
+ * rather than a wrong one. Exported for the unit test.
+ */
+export function keptTailOf(
+	captured: readonly { role: string; content?: unknown }[],
+	preparation: Pick<SessionBeforeCompactEvent["preparation"], "messagesToSummarize" | "turnPrefixMessages" | "isSplitTurn" | "previousSummary">,
+): { count: number; opening?: string } | undefined {
+	const doomed: { role: string }[] = [
+		...(preparation.previousSummary ? [{ role: "compactionSummary" }] : []),
+		...preparation.messagesToSummarize,
+		...(preparation.isSplitTurn ? preparation.turnPrefixMessages : []),
+	];
+	if (doomed.length === 0 || doomed.length > captured.length) return undefined;
+	for (let i = 0; i < doomed.length; i++) {
+		if (captured[i].role !== doomed[i].role) return undefined;
+	}
+	const count = captured.length - doomed.length;
+	if (count === 0) return { count };
+	return { count, opening: openingText(captured[doomed.length]) };
+}
+
+/** The first ~80 characters of a message's text, single-line, for the landmark quote. */
+function openingText(message: { content?: unknown }): string | undefined {
+	const content = message.content;
+	const text =
+		typeof content === "string"
+			? content
+			: Array.isArray(content)
+				? (content.find((b) => b && typeof b === "object" && (b as { type?: string }).type === "text") as { text?: string } | undefined)?.text
+				: undefined;
+	if (!text) return undefined;
+	const line = text.replace(/\s+/g, " ").trim();
+	return line.length > 80 ? `${line.slice(0, 80)}…` : line;
 }
 
 /**

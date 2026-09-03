@@ -281,3 +281,33 @@ describe("injectReminders", () => {
 		]);
 	});
 });
+
+describe("one-shot delivery guarantees (C3)", () => {
+	it("a pinned one-shot is injected identically on every later request, including a retried attempt", () => {
+		const q = new ReminderQueue();
+		q.enqueue("deferred-tool miss", { placement: "last-append" });
+		q.pin({ kind: "toolResult", toolCallId: "c1" });
+		const messages = [user("do it"), assistant(), toolResult("ran")];
+		const attempt1 = injectReminders(messages, q.drain());
+		// A 529/overloaded retry re-runs the context event with the same messages.
+		const attempt2 = injectReminders(messages, q.drain());
+		expect(attempt2).toEqual(attempt1);
+		expect(blockTexts(attempt1[2])).toEqual(["ran", wrapReminder("deferred-tool miss")]);
+	});
+
+	it("takeOneShots hands over only last-append one-shots, leaving state and context reminders queued", () => {
+		const q = new ReminderQueue();
+		q.enqueue("one-shot", { placement: "last-append" });
+		q.enqueue("mode on", { placement: "sticky-append", scope: "every-turn", key: "mode" });
+		q.enqueue("claudeMd", { placement: "first-prepend" });
+		expect(q.takeOneShots().map((e) => e.text)).toEqual(["one-shot"]);
+		expect(q.hasPendingOneShots).toBe(false);
+		expect(q.drain().map((e) => e.text).sort()).toEqual(["claudeMd", "mode on"]);
+	});
+
+	it("a raw entry is injected without the system-reminder frame", () => {
+		const messages = [user("do it"), assistant(), toolResult("ran")];
+		const result = injectReminders(messages, [{ text: "<total_tokens>5 tokens left</total_tokens>", placement: "last-append", order: 0, raw: true }]);
+		expect(blockTexts(result[2])).toEqual(["ran", "<total_tokens>5 tokens left</total_tokens>"]);
+	});
+});

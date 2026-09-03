@@ -25,7 +25,6 @@ import {
 	setSkillState,
 	type SkillScope,
 	type SkillState,
-	skillListingVisibility,
 	skillOverrideKey,
 	skillStateFor,
 } from "../lib/skill-overrides.ts";
@@ -34,6 +33,7 @@ import { recordUsage } from "../lib/usage-tracker.ts";
 import { boundedDockHeight, ccToolRenderers, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import { bareSkillMatches, buildSkillBlock, parseSkillCommand, redactOffSkillMessages, resolveSkill } from "./invoke.ts";
 import { decodeSkillsKey } from "./panel/keys.ts";
+import { skillListingText } from "./listing.ts";
 import { renderSkillsPanel, type SkillsPaint } from "./panel/render.ts";
 import { applySkillsKey, initialSkillsState, type SkillsRow, visibleRows } from "./panel/state.ts";
 
@@ -155,23 +155,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 		return [...project, ...plugin];
 	};
 
-	// The model's listing honors the state: "on" carries name + description,
-	// "name-only" carries just the name (saving context tokens), and "user-only"
-	// / "off" are hidden so the model won't auto-trigger them. The description
-	// goes in whole, newlines included, the way Claude Code lists it: a skill
-	// written with a YAML block description puts its "Use when…" trigger on the
-	// later lines, and a first-line-only listing dropped exactly the sentence
-	// that tells the model when to reach for the skill.
-	const listingText = (skills: IndexedSkill[]): string => {
-		const lines = skills.flatMap((skill) => {
-			const visibility = skillListingVisibility(skill.state);
-			if (visibility === "hidden") return [];
-			if (visibility === "name") return [`- ${skill.name}`];
-			return [`- ${skill.name}${skill.description?.trim() ? `: ${skill.description.trim()}` : ""}`];
-		});
-		return lines.length === 0 ? "(no skills available)" : lines.join("\n");
-	};
-	const describe = () => listingText(index());
+	const describe = () => skillListingText(index());
 
 	pi.registerTool({
 		name: "skill",
@@ -198,7 +182,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 			const all = index();
 			if (params.list || (!params.skill && params.args == null)) {
 				return {
-					content: [{ type: "text", text: `Available skills:\n${listingText(all)}` }],
+					content: [{ type: "text", text: `Available skills:\n${skillListingText(all)}` }],
 					details: { skills: all.map((s) => s.name) } as Record<string, unknown>,
 				};
 			}
@@ -207,7 +191,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 					content: [
 						{
 							type: "text",
-							text: `No \`skill\` given, but you passed \`args\` — this looks like an invocation that forgot to name the skill. Set \`skill\` to one of the names below, or call with \`list: true\` to just browse.\n\nAvailable skills:\n${listingText(all)}`,
+							text: `No \`skill\` given, but you passed \`args\` — this looks like an invocation that forgot to name the skill. Set \`skill\` to one of the names below, or call with \`list: true\` to just browse.\n\nAvailable skills:\n${skillListingText(all)}`,
 						},
 					],
 					details: {} as Record<string, unknown>,
@@ -226,7 +210,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 				const ambiguous = bareMatches.length > 1;
 				const text = ambiguous
 					? `"${params.skill}" is ambiguous — it matches ${bareMatches.map((s) => s.name).join(", ")}. Use the full \`<plugin>:${wanted}\` name.`
-					: `No skill named "${params.skill}".\n\nAvailable skills:\n${listingText(all)}`;
+					: `No skill named "${params.skill}".\n\nAvailable skills:\n${skillListingText(all)}`;
 				return {
 					content: [{ type: "text", text }],
 					details: {} as Record<string, unknown>,

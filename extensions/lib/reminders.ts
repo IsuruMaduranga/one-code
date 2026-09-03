@@ -100,6 +100,12 @@ export interface ReminderEntry {
 	since?: number;
 	/** Set on a pinned one-shot: the exact message it rides on every request. */
 	pin?: PinAnchor;
+	/**
+	 * Emit `text` as-is instead of inside a `<system-reminder>` frame — for the
+	 * few Claude Code blocks that ride bare, like `<total_tokens>` after a tool
+	 * result. Defaults to false.
+	 */
+	raw?: boolean;
 }
 
 /** Pins kept; the oldest is dropped past this (its message has long scrolled into the cached past anyway). */
@@ -118,6 +124,8 @@ export interface ReminderPayload {
 	order?: number;
 	/** Literal text appended after the closing `</system-reminder>` tag. Defaults to "". */
 	suffix?: string;
+	/** Emit the text bare, with no `<system-reminder>` frame. */
+	raw?: boolean;
 }
 
 interface StoredReminder extends ReminderEntry {
@@ -130,6 +138,7 @@ type EnqueueOptions = {
 	placement?: ReminderPlacement;
 	order?: number;
 	suffix?: string;
+	raw?: boolean;
 	/** Test seam / explicit anchor for `sticky-append`; defaults to now. */
 	since?: number;
 };
@@ -154,6 +163,7 @@ export class ReminderQueue {
 			order: opts?.order ?? 0,
 			suffix: opts?.suffix,
 			key: opts?.key,
+			raw: opts?.raw,
 		};
 		if (placement === "sticky-append") {
 			// A standing reminder re-emitted with the SAME text (plan mode re-emits
@@ -225,6 +235,7 @@ export class ReminderQueue {
 
 function strip(r: StoredReminder): ReminderEntry {
 	const entry: ReminderEntry = { text: r.text, placement: r.placement, order: r.order, suffix: r.suffix };
+	if (r.raw) entry.raw = true;
 	if (r.since !== undefined) entry.since = r.since;
 	if (r.pin !== undefined) entry.pin = r.pin;
 	return entry;
@@ -269,7 +280,7 @@ function toBlocks(content: string | ContentBlock[]): ContentBlock[] {
 }
 
 function reminderBlock(entry: ReminderEntry): TextContent {
-	return { type: "text", text: wrapReminder(entry.text) + (entry.suffix ?? "") };
+	return { type: "text", text: (entry.raw ? entry.text : wrapReminder(entry.text)) + (entry.suffix ?? "") };
 }
 
 /** Roles a reminder block can be attached to. */

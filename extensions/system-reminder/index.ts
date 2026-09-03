@@ -36,6 +36,7 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 				placement: payload.placement,
 				order: payload.order,
 				suffix: payload.suffix,
+				raw: payload.raw,
 			});
 		}
 	});

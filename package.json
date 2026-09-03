@@ -28,6 +28,7 @@
 		"extensions": [
 			"extensions/branding/index.ts",
 			"extensions/claude-compat/index.ts",
+			"extensions/context-budget/index.ts",
 			"extensions/system-reminder/index.ts",
 			"extensions/claude-context/index.ts",
 			"extensions/hooks/index.ts",
