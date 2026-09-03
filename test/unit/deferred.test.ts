@@ -138,14 +138,21 @@ describe("deferredMissReminderText", () => {
 });
 
 describe("deferredReminderText", () => {
-	it("lists each tool with only the first line of its description", () => {
+	it("lists bare names one per line under CC's fixed sentence (no descriptions)", () => {
 		const text = deferredReminderText([
 			{ name: "web_fetch", description: "Fetch a URL.\nSecond line detail." },
 			{ name: "monitor", description: "Watch a command." },
 		]);
-		expect(text).toContain("- web_fetch: Fetch a URL.");
-		expect(text).not.toContain("Second line");
-		expect(text).toContain("- monitor: Watch a command.");
-		expect(text).toContain("tool_search");
+		const lines = text.split("\n");
+		expect(lines[0]).toMatch(/^The following deferred tools are available via tool_search\./);
+		expect(lines[0]).toContain('"select:<name>[,<name>...]"');
+		expect(lines.slice(1)).toEqual(["web_fetch", "monitor"]);
+		expect(text).not.toContain("Fetch a URL");
+	});
+
+	it("is byte-identical regardless of what has been loaded (cache-stable, like CC)", () => {
+		const tools = [{ name: "a", description: "x" }, { name: "b", description: "y" }];
+		expect(deferredReminderText(tools)).toBe(deferredReminderText(tools));
+		expect(deferredReminderText(tools)).not.toMatch(/cannot be called yet/);
 	});
 });

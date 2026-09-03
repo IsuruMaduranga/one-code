@@ -50,15 +50,19 @@ export const deferredRegistry = new DeferredRegistry();
 
 /**
  * The every-turn reminder telling the model which tools exist but are not
- * loaded. One line per tool (first description line only), like Claude Code's
- * deferred-tools listing.
+ * loaded — Claude Code's shape (cc-haiku.json, message 1, block 1): one fixed
+ * sentence, then bare names one per line. No descriptions: the model searches
+ * by keyword through `tool_search` (which does see descriptions), and a name-
+ * only list is ~7x smaller — the description form grew by several KB per MCP
+ * server and was the single largest block after `# claudeMd`. The wording is
+ * CC's with our tool name and our dispatcher's actual error text; it stays
+ * byte-identical after a load (as CC's does) so the cached prefix holds — a
+ * loaded tool is simply callable, and the sentence says as much.
  */
-export function deferredReminderText(tools: Array<Pick<SearchableTool, "name" | "description">>): string {
+export function deferredReminderText(tools: Array<Pick<SearchableTool, "name"> & Partial<SearchableTool>>): string {
 	return [
-		"The following tools are available but their schemas are NOT loaded, so they cannot be called yet:",
-		...tools.map((t) => `- ${t.name}: ${t.description.split("\n")[0]}`),
-		"",
-		"Load one with tool_search before using it — `select:<name>[,<name>]` for exact names, or keywords to search. Once a schema is loaded it stays callable for the rest of the session.",
+		'The following deferred tools are available via tool_search. Their schemas are NOT loaded — calling one directly fails with "Tool <name> not found" until you load it. Use tool_search with query "select:<name>[,<name>...]" to load tool schemas before calling them (once loaded, a tool stays callable for the rest of the session):',
+		...tools.map((t) => t.name),
 	].join("\n");
 }
 
