@@ -25,18 +25,23 @@
  *   combination re-cached the previous turn on every turn — permanently, in
  *   auto mode.
  * - `last-append` — ONE-SHOT STEERING about what just happened (a deferred tool
- *   miss, a file changed under the model, a mode change). Appended to the
- *   trailing tool result when one closes the request (that is where Claude Code
- *   puts mid-turn reminders: on the result the model is about to read), else to
- *   the last user message.
+ *   miss, a file changed under the model, a mode change). Delivered where the
+ *   model reads next, and then KEPT there so the message never changes again:
+ *   a one-shot pending when a tool result is stored is written INTO that result
+ *   (`takeOneShots` from the `tool_result` hook — Claude Code persists its
+ *   mid-turn reminders the same way, so the transcript carries them and no
+ *   request ever re-caches the result); a one-shot still pending when a request
+ *   goes out is `pin`ned to the request's tail (the trailing tool result by call
+ *   id, else the last user message by timestamp) and re-attached to that same
+ *   message on every later request, byte-identical. Pins are process memory
+ *   (a `--resume` drops them: one miss, once).
  *
  * A compaction summary counts as a user message for anchoring (pi renders it as
  * one), so the context stack survives a compaction that left no user turn.
  *
- * Delivery: `drain()` hands out next-turn entries but keeps them in flight until
- * `commit()` (the owner calls it once an assistant message actually lands). pi
- * re-runs the `context` transform per LLM attempt, so a 429/529 retry re-drains
- * and the model that finally answers still sees them.
+ * Retry safety falls out of this: pi re-runs the `context` transform per LLM
+ * attempt, and both a persisted and a pinned one-shot are present on every
+ * attempt by construction.
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -49,6 +54,9 @@ export type ReminderScope = "next-turn" | "every-turn";
 
 /** See the module header for which placement fits which kind of reminder. */
 export type ReminderPlacement = "first-prepend" | "sticky-append" | "last-append";
+
+/** Where a delivered one-shot stays: a tool result (by call id) or a user turn (by timestamp). */
+export type PinAnchor = { kind: "toolResult"; toolCallId: string } | { kind: "user"; timestamp: number };
 
 /**
  * `order` values for the `first-prepend` context stack, matching Claude Code's
@@ -90,7 +98,12 @@ export interface ReminderEntry {
 	 * it, carry the block.
 	 */
 	since?: number;
+	/** Set on a pinned one-shot: the exact message it rides on every request. */
+	pin?: PinAnchor;
 }
+
+/** Pins kept; the oldest is dropped past this (its message has long scrolled into the cached past anyway). */
+const MAX_PINS = 400;
 
 export interface ReminderPayload {
 	text?: string;
@@ -123,8 +136,8 @@ type EnqueueOptions = {
 
 export class ReminderQueue {
 	private nextTurn: StoredReminder[] = [];
-	/** Drained next-turn entries not yet confirmed delivered (see `commit`). */
-	private inFlight: StoredReminder[] = [];
+	/** Delivered one-shots, each fixed to the message it first rode (see `pin`). */
+	private pinned: StoredReminder[] = [];
 	private everyTurn = new Map<string, StoredReminder>();
 	private readonly now: () => number;
 
@@ -159,10 +172,7 @@ export class ReminderQueue {
 			// A keyed next-turn reminder replaces its predecessor, so a rapidly
 			// re-emitted state change (cycling permission modes) announces only
 			// where it settled.
-			if (opts?.key) {
-				this.nextTurn = this.nextTurn.filter((r) => r.key !== opts.key);
-				this.inFlight = this.inFlight.filter((r) => r.key !== opts.key);
-			}
+			if (opts?.key) this.nextTurn = this.nextTurn.filter((r) => r.key !== opts.key);
 			this.nextTurn.push(entry);
 		}
 	}
@@ -172,30 +182,70 @@ export class ReminderQueue {
 	}
 
 	/**
-	 * Returns pending reminders: every-turn ones, then next-turn ones (those
-	 * still in flight from a previous drain first). Next-turn entries stay in
-	 * flight until `commit()`, so a retried request re-delivers them.
+	 * Take the pending `last-append` one-shots out of the queue — for the
+	 * `tool_result` hook, which writes them into the stored result. Other
+	 * placements stay queued for the next request.
 	 */
-	drain(): ReminderEntry[] {
-		this.inFlight = [...this.inFlight, ...this.nextTurn];
-		this.nextTurn = [];
-		return [...[...this.everyTurn.values()].map(strip), ...this.inFlight.map(strip)];
+	takeOneShots(): ReminderEntry[] {
+		const taken = this.nextTurn.filter((r) => r.placement === "last-append");
+		this.nextTurn = this.nextTurn.filter((r) => r.placement !== "last-append");
+		return taken.map(strip);
 	}
 
-	/** An assistant message landed for the last drained request: its next-turn reminders were delivered. */
-	commit(): void {
-		this.inFlight = [];
+	/**
+	 * Fix the pending `last-append` one-shots to `anchor` — the message they ride
+	 * on this request — so every later request re-attaches them there unchanged.
+	 * Called by the owner at `context` time, after it has decided the tail.
+	 */
+	pin(anchor: PinAnchor): void {
+		for (const entry of this.nextTurn) {
+			if (entry.placement !== "last-append") continue;
+			this.pinned.push({ ...entry, pin: anchor });
+		}
+		this.nextTurn = this.nextTurn.filter((r) => r.placement !== "last-append");
+		if (this.pinned.length > MAX_PINS) this.pinned.splice(0, this.pinned.length - MAX_PINS);
+	}
+
+	/** Everything to inject on this request: every-turn state, pinned one-shots, then whatever is still pending. */
+	drain(): ReminderEntry[] {
+		const pending = this.nextTurn.map(strip);
+		this.nextTurn = [];
+		return [...[...this.everyTurn.values()].map(strip), ...this.pinned.map(strip), ...pending];
 	}
 
 	get size(): number {
-		return this.everyTurn.size + this.nextTurn.length + this.inFlight.length;
+		return this.everyTurn.size + this.nextTurn.length + this.pinned.length;
+	}
+
+	/** True when a one-shot is waiting to be delivered (the owner decides where). */
+	get hasPendingOneShots(): boolean {
+		return this.nextTurn.some((r) => r.placement === "last-append");
 	}
 }
 
 function strip(r: StoredReminder): ReminderEntry {
 	const entry: ReminderEntry = { text: r.text, placement: r.placement, order: r.order, suffix: r.suffix };
 	if (r.since !== undefined) entry.since = r.since;
+	if (r.pin !== undefined) entry.pin = r.pin;
 	return entry;
+}
+
+/** The anchor a one-shot lands on for this request: the trailing tool result, else the last user-like message. */
+export function tailAnchor(messages: AgentMessage[]): PinAnchor | undefined {
+	const last = messages[messages.length - 1] as (AgentMessage & { toolCallId?: string }) | undefined;
+	if (last?.role === "toolResult" && typeof last.toolCallId === "string") return { kind: "toolResult", toolCallId: last.toolCallId };
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const m = messages[i] as AgentMessage & { timestamp?: number };
+		if ((m.role === "user" || m.role === "compactionSummary") && typeof m.timestamp === "number") {
+			return { kind: "user", timestamp: m.timestamp };
+		}
+	}
+	return undefined;
+}
+
+/** A tool result's content with reminder blocks appended (for the `tool_result` hook). */
+export function appendReminderBlocks(content: ContentBlock[], entries: ReminderEntry[]): ContentBlock[] {
+	return [...content, ...entries.map(reminderBlock)];
 }
 
 export function wrapReminder(text: string): string {
@@ -267,7 +317,8 @@ export function injectReminders(messages: AgentMessage[], reminders: Array<strin
 		.sort((a, b) => a.e.order - b.e.order || a.i - b.i)
 		.map((x) => x.e);
 	const sticky = entries.filter((e) => e.placement === "sticky-append");
-	const lastAppend = entries.filter((e) => e.placement === "last-append");
+	const pinnedEntries = entries.filter((e) => e.pin !== undefined);
+	const lastAppend = entries.filter((e) => e.placement === "last-append" && e.pin === undefined);
 
 	const firstUserIndex = messages.findIndex(isUserLike);
 	const lastUserIndex = messages.findLastIndex(isUserLike);
@@ -311,6 +362,18 @@ export function injectReminders(messages: AgentMessage[], reminders: Array<strin
 	}
 
 	push(after, tailIndex === -1 ? firstUserIndex : tailIndex, lastAppend.map(reminderBlock));
+
+	// Pinned one-shots ride the exact message they first landed on; a message
+	// compacted away simply no longer carries its pin.
+	for (const entry of pinnedEntries) {
+		const pin = entry.pin as PinAnchor;
+		const index = messages.findIndex((m) =>
+			pin.kind === "toolResult"
+				? m.role === "toolResult" && (m as { toolCallId?: string }).toolCallId === pin.toolCallId
+				: (m.role === "user" || m.role === "compactionSummary") && (m as { timestamp?: number }).timestamp === pin.timestamp,
+		);
+		if (index !== -1) push(after, index, [reminderBlock(entry)]);
+	}
 
 	if (before.size === 0 && after.size === 0) return messages;
 	return messages.map((m, index) => withBlocks(m, before.get(index) ?? [], after.get(index) ?? []));

@@ -18,6 +18,7 @@ import {
 	textContent,
 	truncateLine,
 	type ThemeLike,
+	stripReminderBlocks,
 } from "../../extensions/lib/tui-render.ts";
 
 /** Theme stub that tags text with the color name so assertions can see it. */
@@ -364,3 +365,26 @@ describe("searchBoxLines", () => {
 		expect([...line].length).toBe([...plain(searchBoxLines("", "Search…", paint, 30)[0])].length);
 	});
 });
+
+describe("stripReminderBlocks", () => {
+	it("hides persisted <system-reminder> blocks from the transcript view and leaves everything else", () => {
+		const result = {
+			content: [
+				{ type: "text", text: "ok" },
+				{ type: "text", text: "<system-reminder>\nnote\n</system-reminder>" },
+				{ type: "image", data: "x", mimeType: "image/png" },
+			],
+			details: { a: 1 },
+		};
+		expect(stripReminderBlocks(result)).toEqual({
+			content: [
+				{ type: "text", text: "ok" },
+				{ type: "image", data: "x", mimeType: "image/png" },
+			],
+			details: { a: 1 },
+		});
+		const plain = { content: [{ type: "text", text: "ok" }] };
+		expect(stripReminderBlocks(plain)).toBe(plain);
+	});
+});
+

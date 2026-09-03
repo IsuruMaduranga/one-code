@@ -542,7 +542,7 @@ export function ccToolRenderers<TArgs = any, TDetails = any>(
 			} catch {
 				text = undefined;
 			}
-			text ??= textContent(result);
+			text ??= textContent(stripReminderBlocks(result));
 			if (!text) return linesComponent(() => []);
 			return linesComponent(() => resultLines(theme, text, options.expanded, context.isError, spec.maxCollapsedLines));
 		},
@@ -594,6 +594,28 @@ export interface CcWrapOptions<TArgs = any> {
  * because base renderers cast `lastComponent` to their own concrete classes
  * and would throw on our wrapper.
  */
+/**
+ * A tool result with its `<system-reminder>` text blocks removed, for display.
+ * One-shot reminders are persisted into the stored result (system-reminder
+ * extension); the model must see them, the transcript view must not — Claude
+ * Code hides them the same way.
+ */
+export function stripReminderBlocks<T extends { content?: unknown }>(result: T): T {
+	const content = result?.content;
+	if (!Array.isArray(content)) return result;
+	const kept = content.filter(
+		(block) =>
+			!(
+				block &&
+				typeof block === "object" &&
+				(block as any).type === "text" &&
+				typeof (block as any).text === "string" &&
+				(block as any).text.startsWith("<system-reminder>")
+			),
+	);
+	return kept.length === content.length ? result : { ...result, content: kept };
+}
+
 export function ccWrapBuiltinRenderers<TArgs = any>(
 	label: string,
 	base: {
@@ -655,7 +677,8 @@ export function ccWrapBuiltinRenderers<TArgs = any>(
 				},
 			};
 		},
-		renderResult(result: any, options: { expanded: boolean; isPartial: boolean }, theme: ThemeLike, context: any) {
+		renderResult(rawResult: any, options: { expanded: boolean; isPartial: boolean }, theme: ThemeLike, context: any) {
+			const result = stripReminderBlocks(rawResult);
 			let inner: any;
 			try {
 				inner = base.renderResult?.(result, options, theme, { ...context, lastComponent: context.state.ccInnerResult });

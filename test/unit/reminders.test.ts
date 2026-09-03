@@ -2,10 +2,12 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+	appendReminderBlocks,
 	COMPACTION_SUMMARY_PREFIX,
 	COMPACTION_SUMMARY_SUFFIX,
 	injectReminders,
 	ReminderQueue,
+	tailAnchor,
 	wrapReminder,
 } from "../../extensions/lib/reminders.ts";
 
@@ -22,12 +24,11 @@ const blockTexts = (m: any) => (typeof m.content === "string" ? [m.content] : m.
 const texts = (q: ReminderQueue) => q.drain().map((e) => e.text);
 
 describe("ReminderQueue", () => {
-	it("drains next-turn reminders once (after the delivery is committed)", () => {
+	it("drains pending next-turn reminders once", () => {
 		const q = new ReminderQueue();
 		q.enqueue("a");
 		q.enqueue("b");
 		expect(texts(q)).toEqual(["a", "b"]);
-		q.commit();
 		expect(texts(q)).toEqual([]);
 	});
 
@@ -36,7 +37,6 @@ describe("ReminderQueue", () => {
 		q.enqueue("persistent", { scope: "every-turn", key: "k" });
 		q.enqueue("once");
 		expect(texts(q)).toEqual(["persistent", "once"]);
-		q.commit();
 		expect(texts(q)).toEqual(["persistent"]);
 		q.remove("k");
 		expect(texts(q)).toEqual([]);
@@ -73,23 +73,25 @@ describe("ReminderQueue", () => {
 		]);
 	});
 
-	it("keeps next-turn reminders in flight until commit, so a retried attempt re-delivers them", () => {
+	it("takeOneShots removes only the pending last-append one-shots (for the tool_result hook)", () => {
 		const q = new ReminderQueue();
 		q.enqueue("file changed");
-		expect(texts(q)).toEqual(["file changed"]);
-		// The attempt failed (no commit): the retry's drain sees it again.
-		expect(texts(q)).toEqual(["file changed"]);
-		q.commit();
-		expect(texts(q)).toEqual([]);
-		expect(q.size).toBe(0);
+		q.enqueue("ctx", { scope: "every-turn", key: "c", placement: "first-prepend" });
+		q.enqueue("later", { placement: "first-prepend" });
+		expect(q.hasPendingOneShots).toBe(true);
+		expect(q.takeOneShots().map((e) => e.text)).toEqual(["file changed"]);
+		expect(q.hasPendingOneShots).toBe(false);
+		expect(texts(q)).toEqual(["ctx", "later"]);
 	});
 
-	it("a keyed re-enqueue replaces an in-flight predecessor too", () => {
+	it("pinned one-shots stay in every later drain, fixed to their anchor (retry-safe by construction)", () => {
 		const q = new ReminderQueue();
-		q.enqueue("mode is plan", { key: "mode" });
-		q.drain();
-		q.enqueue("mode is auto", { key: "mode" });
-		expect(texts(q)).toEqual(["mode is auto"]);
+		q.enqueue("file changed");
+		q.pin({ kind: "toolResult", toolCallId: "c1" });
+		const first = q.drain();
+		expect(first).toEqual([{ text: "file changed", placement: "last-append", order: 0, pin: { kind: "toolResult", toolCallId: "c1" } }]);
+		expect(q.drain()).toEqual(first);
+		expect(q.size).toBe(1);
 	});
 
 	it("stamps sticky-append with `since` at enqueue and keeps it while the text is unchanged", () => {
@@ -171,6 +173,33 @@ describe("injectReminders", () => {
 		expect(blockTexts(later[0])).toEqual(["t0"]);
 		expect(blockTexts(later[2])).toEqual(["t1", wrapReminder("plan on")]);
 		expect(blockTexts(later[6])).toEqual(["t2", wrapReminder("plan on")]);
+	});
+
+	it("a pinned one-shot rides the exact tool result or user turn it first landed on", () => {
+		const messages = [user("t1", 100), assistant(), toolResult("ran"), assistant(), user("t2", 200)];
+		const pinnedToResult = { text: "deferred miss", placement: "last-append" as const, order: 0, pin: { kind: "toolResult" as const, toolCallId: "c1" } };
+		const pinnedToTurn = { text: "mode changed", placement: "last-append" as const, order: 0, pin: { kind: "user" as const, timestamp: 100 } };
+		const result = injectReminders(messages, [pinnedToResult, pinnedToTurn]);
+		expect(blockTexts(result[0])).toEqual(["t1", wrapReminder("mode changed")]);
+		expect(blockTexts(result[2])).toEqual(["ran", wrapReminder("deferred miss")]);
+		expect(blockTexts(result[4])).toEqual(["t2"]);
+		// Anchor compacted away: the pin is simply absent, nothing else moves.
+		const later = injectReminders([user("t2", 200)], [pinnedToResult, pinnedToTurn]);
+		expect(blockTexts(later[0])).toEqual(["t2"]);
+	});
+
+	it("tailAnchor names the trailing tool result, else the last user-like turn", () => {
+		expect(tailAnchor([user("t1", 100), assistant(), toolResult("ran")])).toEqual({ kind: "toolResult", toolCallId: "c1" });
+		expect(tailAnchor([user("t1", 100), assistant(), user("t2", 200)])).toEqual({ kind: "user", timestamp: 200 });
+		expect(tailAnchor([compaction("s", 5), assistant(), user("t2", 200)])).toEqual({ kind: "user", timestamp: 200 });
+		expect(tailAnchor([assistant()])).toBeUndefined();
+	});
+
+	it("appendReminderBlocks adds wrapped blocks after the result's own content", () => {
+		expect(appendReminderBlocks([{ type: "text", text: "ok" }], [{ text: "note", placement: "last-append", order: 0 }])).toEqual([
+			{ type: "text", text: "ok" },
+			{ type: "text", text: wrapReminder("note") },
+		]);
 	});
 
 	it("sticky-append with no user turn at all rides the tail", () => {
