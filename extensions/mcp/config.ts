@@ -46,15 +46,6 @@ interface RawServer {
 	disabled?: unknown;
 }
 
-function readJson(path: string): Record<string, unknown> | undefined {
-	if (!existsSync(path)) return undefined;
-	try {
-		return JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown>;
-	} catch {
-		return undefined;
-	}
-}
-
 function asStringRecord(value: unknown): Record<string, string> | undefined {
 	if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
 	const out: Record<string, string> = {};
@@ -177,19 +168,36 @@ function serverMapOf(file: Record<string, unknown> | undefined): Record<string, 
 	return looksLikeServerMap ? (file as Record<string, RawServer>) : undefined;
 }
 
+export interface LoadServersOptions {
+	/** Plugin `.mcp.json` paths → plugin name; their servers are named `plugin:<plugin>:<server>` (CC's shape). */
+	pluginNames?: ReadonlyMap<string, string>;
+	/** Called for a config file that exists but is not valid JSON (review M11: a silent drop read as "no servers configured"). */
+	onError?: (path: string, message: string) => void;
+}
+
 export function loadServers(
 	cwd: string,
 	home: string,
 	env: Record<string, string | undefined> = process.env,
 	extraPaths: string[] = [],
+	options: LoadServersOptions = {},
 ): McpServer[] {
 	const byName = new Map<string, McpServer>();
 	// Plugin configs come first so project and user files can override them.
 	for (const path of [...extraPaths, ...configPaths(cwd, home)]) {
-		const file = readJson(path) as Record<string, unknown> | undefined;
+		if (!existsSync(path)) continue;
+		let file: Record<string, unknown> | undefined;
+		try {
+			file = JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown>;
+		} catch (error) {
+			options.onError?.(path, (error as Error).message);
+			continue;
+		}
 		const servers = serverMapOf(file);
 		if (!servers) continue;
-		for (const [name, raw] of Object.entries(servers)) {
+		const plugin = options.pluginNames?.get(path);
+		for (const [rawName, raw] of Object.entries(servers)) {
+			const name = plugin ? `plugin:${plugin}:${rawName}` : rawName;
 			const server = parseServer(name, raw ?? {}, path, env);
 			if (server) byName.set(name, server);
 			else byName.delete(name); // an explicit `disabled` entry removes an inherited one

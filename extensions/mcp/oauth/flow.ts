@@ -51,7 +51,13 @@ export async function authenticate(options: AuthenticateOptions): Promise<Connec
 		const started = await beginInteractiveAuth(server, provider);
 		if ("connection" in started) return started.connection; // valid tokens already present
 
-		const code = await callback.waitForCode(timeoutMs);
+		const { code, state } = await callback.waitForCode(timeoutMs);
+		// Login-CSRF guard (RFC 8252 §8.9): the redirect must echo the state this
+		// provider issued, or an attacker-planted code could bind their account.
+		const expected = provider.expectedState();
+		if (expected !== undefined && state !== expected) {
+			throw new Error(`authorization response state mismatch for "${server.name}" — the redirect did not come from this authorization request`);
+		}
 		await started.transport.finishAuth(code);
 
 		// Reconnect fresh: the provider now has stored tokens, so this is silent.

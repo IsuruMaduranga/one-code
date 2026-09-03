@@ -270,6 +270,8 @@ export interface DiscoveredPlugins {
 	skills: PluginSkill[];
 	commands: PluginCommand[];
 	mcpConfigs: string[];
+	/** The plugin each `mcpConfigs` path belongs to, so its servers can be namespaced `plugin:<name>:<server>`. */
+	mcpConfigPlugins: Map<string, string>;
 	/** Per-plugin summary keyed by plugin id, for status output. */
 	byPlugin: Map<string, { agents: boolean; skills: number; commands: number; mcp: boolean; lsp: boolean }>;
 }
@@ -323,6 +325,7 @@ export function discoverPlugins(roots: DiscoverRoots): DiscoveredPlugins {
 		skills: [],
 		commands: [],
 		mcpConfigs: [],
+		mcpConfigPlugins: new Map(),
 		byPlugin: new Map(),
 	};
 
@@ -343,7 +346,10 @@ export function discoverPlugins(roots: DiscoverRoots): DiscoveredPlugins {
 		if (resources.agentsDir) result.agentDirs.push({ dir: resources.agentsDir, namespace: plugin.name });
 		result.skills.push(...skills.filter((s) => isSkillEnabled(skillOverrides, skillOverrideKey("plugin", s.name))));
 		result.commands.push(...commands);
-		if (resources.mcpConfig) result.mcpConfigs.push(resources.mcpConfig);
+		if (resources.mcpConfig) {
+			result.mcpConfigs.push(resources.mcpConfig);
+			result.mcpConfigPlugins.set(resources.mcpConfig, plugin.name);
+		}
 	}
 
 	cache = { key, result };

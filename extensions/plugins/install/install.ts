@@ -11,9 +11,9 @@
  * dependencies) fail loudly with the reason named.
  */
 
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, readdirSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, resolve, relative, sep } from "node:path";
 import { gitClone, gitHeadSha } from "../marketplace/git.ts";
 import type { MarketplaceEntry } from "../marketplace/types.ts";
 import { addInstalledPlugin, installedEntry, removeInstalledPlugin } from "./registry.ts";
@@ -37,10 +37,42 @@ function manifestVersion(pluginDir: string): string | undefined {
 	}
 }
 
+/**
+ * A marketplace plugin may not smuggle files in via symlinks: `SKILL.md →
+ * ~/.ssh/id_rsa` would pass the containment check as a link and be copied
+ * (or, dereferenced, would copy the key into the plugin cache). Every symlink
+ * under `src` must resolve inside `src`; then the copy dereferences so the
+ * cache holds plain files (review M13).
+ */
+function assertSymlinksContained(src: string): void {
+	const root = realpathSync(src);
+	const stack = [src];
+	while (stack.length > 0) {
+		const dir = stack.pop() as string;
+		for (const entry of readdirSync(dir, { withFileTypes: true })) {
+			const path = join(dir, entry.name);
+			if (entry.isSymbolicLink()) {
+				let target: string;
+				try {
+					target = realpathSync(path);
+				} catch {
+					throw new Error(`plugin contains a broken symlink: ${relative(src, path)}`);
+				}
+				if (target !== root && !target.startsWith(root + sep)) {
+					throw new Error(`plugin contains a symlink that points outside the plugin: ${relative(src, path)} → ${target}`);
+				}
+			} else if (entry.isDirectory()) {
+				stack.push(path);
+			}
+		}
+	}
+}
+
 function copyIntoCache(src: string, dest: string): void {
+	assertSymlinksContained(src);
 	rmSync(dest, { recursive: true, force: true });
 	mkdirSync(join(dest, ".."), { recursive: true });
-	cpSync(src, dest, { recursive: true });
+	cpSync(src, dest, { recursive: true, dereference: true });
 }
 
 export async function installPlugin(

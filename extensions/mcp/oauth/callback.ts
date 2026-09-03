@@ -13,8 +13,8 @@ import { createServer, type Server } from "node:http";
 export interface CallbackServer {
 	/** The exact redirect_uri to register and hand to the authorization request. */
 	redirectUrl: string;
-	/** Resolves with the authorization code once the browser is redirected back. */
-	waitForCode: (timeoutMs?: number) => Promise<string>;
+	/** Resolves with the authorization code (and the echoed `state`, if any) once the browser is redirected back. */
+	waitForCode: (timeoutMs?: number) => Promise<{ code: string; state?: string }>;
 	close: () => void;
 }
 
@@ -29,13 +29,14 @@ export async function startCallbackServer(): Promise<CallbackServer> {
 	// The result may arrive before waitForCode() installs its handlers (an IdP
 	// with a live session can redirect instantly), so buffer it: settle() records
 	// the outcome, and waitForCode() replays a buffered one immediately.
-	let resolveCode: ((code: string) => void) | undefined;
+	type Redirect = { code: string; state?: string };
+	let resolveCode: ((redirect: Redirect) => void) | undefined;
 	let rejectCode: ((error: Error) => void) | undefined;
-	let outcome: { code: string } | { error: Error } | undefined;
-	const settle = (result: { code: string } | { error: Error }) => {
+	let outcome: Redirect | { error: Error } | undefined;
+	const settle = (result: Redirect | { error: Error }) => {
 		if (outcome) return;
 		outcome = result;
-		if ("code" in result) resolveCode?.(result.code);
+		if ("code" in result) resolveCode?.(result);
 		else rejectCode?.(result.error);
 	};
 
@@ -57,7 +58,7 @@ export async function startCallbackServer(): Promise<CallbackServer> {
 			return;
 		}
 		res.writeHead(200, { "content-type": "text/html" }).end(landingPage("Authorization complete"));
-		settle({ code });
+		settle({ code, state: url.searchParams.get("state") ?? undefined });
 	});
 
 	// Bind to loopback on an ephemeral port; the OS picks a free one.
@@ -72,11 +73,11 @@ export async function startCallbackServer(): Promise<CallbackServer> {
 	}
 	const redirectUrl = `http://127.0.0.1:${address.port}/callback`;
 
-	const waitForCode = (timeoutMs = DEFAULT_TIMEOUT_MS): Promise<string> =>
-		new Promise<string>((resolve, reject) => {
+	const waitForCode = (timeoutMs = DEFAULT_TIMEOUT_MS): Promise<Redirect> =>
+		new Promise<Redirect>((resolve, reject) => {
 			// Replay a result that already arrived before this call.
 			if (outcome) {
-				if ("code" in outcome) resolve(outcome.code);
+				if ("code" in outcome) resolve(outcome);
 				else reject(outcome.error);
 				return;
 			}

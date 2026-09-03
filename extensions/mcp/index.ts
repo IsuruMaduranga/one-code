@@ -20,7 +20,7 @@ import { getAgentDir, type ExtensionAPI, type ExtensionContext, type ToolDefinit
 import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { MCP_TOOLS_CHANNEL } from "../lib/mcp-share.ts";
-import { persistIfLarge } from "../lib/persisted-output.ts";
+import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 import {
 	callTool,
@@ -29,6 +29,7 @@ import {
 	connect,
 	type FailedConnection,
 	isUnauthorized,
+	mcpFailuresReminder,
 	mcpInstructionsReminder,
 	readResource,
 	readResourceDir,
@@ -95,15 +96,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 	 * Code's `<session-dir>/tool-results/<id>.txt`. A session-less run (`--no-session`)
 	 * has no such dir, so a temp folder serves; the model gets the path either way.
 	 */
-	const resultsDir = (ctx: ExtensionContext | undefined): string => {
-		try {
-			const dir = ctx?.sessionManager.getSessionDir();
-			if (dir) return dir;
-		} catch {
-			// fall through to the temp folder
-		}
-		return join(os.tmpdir(), "one-code");
-	};
+	const resultsDir = (ctx: ExtensionContext | undefined): string => sessionResultsDir(ctx);
 
 	const registerToolsFor = (connection: Connection) => {
 		for (const tool of connection.tools) {
@@ -240,7 +233,29 @@ export default function mcpExtension(pi: ExtensionAPI) {
 	 * Re-run after a reconnect/authenticate so a newly connected server's
 	 * instructions appear too.
 	 */
+	/**
+	 * Tell the MODEL which servers failed (Claude Code injects the same notice):
+	 * otherwise it concludes the tools do not exist or the user has no access,
+	 * instead of reporting a connection failure the user can fix (review M4).
+	 * First-prepend beside the MCP instructions; removed when nothing has failed.
+	 */
+	const emitFailures = () => {
+		const hardFailures = failures.filter((f) => !connections.has(f.server.name));
+		if (hardFailures.length === 0) {
+			pi.events.emit(REMINDER_CHANNEL, { scope: "every-turn", key: "mcp-failures", text: "", remove: true });
+			return;
+		}
+		pi.events.emit(REMINDER_CHANNEL, {
+			scope: "every-turn",
+			key: "mcp-failures",
+			text: mcpFailuresReminder(hardFailures.map((f) => ({ name: f.server.name, error: f.error }))),
+			placement: "first-prepend",
+			order: CONTEXT_ORDER.mcp + 1,
+		});
+	};
+
 	const emitInstructions = () => {
+		emitFailures();
 		const instructions = mcpInstructionsReminder([...connections.values()]);
 		if (instructions) {
 			pi.events.emit(REMINDER_CHANNEL, {
@@ -258,9 +273,22 @@ export default function mcpExtension(pi: ExtensionAPI) {
 		}
 	};
 
+	/** Config files that exist but failed to parse (review M11) — shown at startup and in /mcp. */
+	let configErrors: string[] = [];
+
 	const connectAll = async (ctx: ExtensionContext) => {
-		pluginConfigPaths = new Set(discoverPlugins(defaultDiscoverRoots(getAgentDir(), ctx.cwd)).mcpConfigs);
-		servers = loadServers(ctx.cwd, home, process.env, [...pluginConfigPaths]);
+		const plugins = discoverPlugins(defaultDiscoverRoots(getAgentDir(), ctx.cwd));
+		pluginConfigPaths = new Set(plugins.mcpConfigs);
+		configErrors = [];
+		servers = loadServers(ctx.cwd, home, process.env, [...pluginConfigPaths], {
+			pluginNames: plugins.mcpConfigPlugins,
+			onError: (path, message) => configErrors.push(`${path}: ${message}`),
+		});
+		if (configErrors.length > 0) {
+			const text = `MCP config could not be parsed (ignored): ${configErrors.join("; ")}`;
+			if (ctx.hasUI) ctx.ui.notify(text, "warning");
+			else process.stderr.write(`${text}\n`);
+		}
 		disabledNames = readDisabledMcpServers(ctx.cwd, home);
 		if (servers.length === 0) return;
 
@@ -298,11 +326,10 @@ export default function mcpExtension(pi: ExtensionAPI) {
 
 		if (shuttingDown) return;
 
-		if (failures.length > 0 && ctx.hasUI) {
-			ctx.ui.notify(
-				failures.map((f) => `MCP server "${f.server.name}" failed: ${f.error}`).join("\n") + " (/mcp for status)",
-				"warning",
-			);
+		if (failures.length > 0) {
+			const text = failures.map((f) => `MCP server "${f.server.name}" failed: ${f.error}`).join("\n") + " (/mcp for status)";
+			if (ctx.hasUI) ctx.ui.notify(text, "warning");
+			else process.stderr.write(`${text}\n`);
 		}
 		if (oauthNeeded.size > 0 && ctx.hasUI) {
 			ctx.ui.notify(

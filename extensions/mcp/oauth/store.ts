@@ -12,7 +12,7 @@
  * from settings.json because tokens are secrets, not configuration.
  */
 
-import { mkdirSync } from "node:fs";
+import { mkdirSync, chmodSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
 import type { OAuthClientInformationFull, OAuthClientMetadata, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
@@ -58,8 +58,16 @@ export function writeAuth(
 	home: string = os.homedir(),
 	env: NodeJS.ProcessEnv = process.env,
 ): void {
-	mkdirSync(authStoreDir(home, env), { recursive: true });
-	writeJsonAtomic(authFilePath(serverName, home, env), auth);
+	// Bearer tokens: owner-only file and directory (review M10). mkdir's mode
+	// applies only on creation, so an existing dir is tightened explicitly.
+	const dir = authStoreDir(home, env);
+	mkdirSync(dir, { recursive: true, mode: 0o700 });
+	try {
+		chmodSync(dir, 0o700);
+	} catch {
+		// Not fatal (a filesystem without modes); the file mode below still applies where it can.
+	}
+	writeJsonAtomic(authFilePath(serverName, home, env), auth, { mode: 0o600 });
 }
 
 /** Merge a partial update into the stored record. */

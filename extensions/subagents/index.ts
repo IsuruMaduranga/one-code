@@ -53,6 +53,7 @@ import { cleanupWorktree, createWorktree, isGitRepo, type Worktree } from "./wor
 import { findGitRoot } from "../lib/git.ts";
 import { registerWorktreeIsolation } from "../lib/worktree-isolation.ts";
 import { createTaskNotifier, sessionOutlivesTurn, systemNotification } from "../lib/notifications.ts";
+import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { ccToolRenderers, customMessageText, notificationComponent, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import { deriveActivity, LiveRunRegistry } from "./live-runs.ts";
 import { DELEGATION_STEER } from "./delegation-steer.ts";
@@ -824,18 +825,20 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	};
 
 	/**
-	 * A child's message to the main conversation is capped: it is unmetered model
-	 * output landing in the parent's context, N children at once (review S4). The
-	 * child is told where the cut is so it can put long content in a file.
+	 * Anything a child sends the parent — a mid-run message or its final report —
+	 * is unmetered model output landing in the parent's context, N children at
+	 * once (review S4). Past the cap it is PERSISTED, not cut: the full text goes
+	 * to `<session-dir>/tool-results/<id>.txt` (Claude Code's convention, the
+	 * same block MCP results use) and the notification carries a preview plus
+	 * the path, so nothing is lost — the parent reads the file when it needs it.
 	 */
 	const MESSAGE_TO_MAIN_CAP = 10_000;
+	const bounded = (text: string, id: string, maxBytes: number): string =>
+		persistIfLarge(text, { dir: sessionResultsDir(lastCtx), id, maxBytes });
 
 	/** Relay a child's send_message {to: "main"} into this conversation. */
 	const notifyAgentMessage = (name: string, message: string, summary?: string) => {
-		const body =
-			message.length > MESSAGE_TO_MAIN_CAP
-				? `${message.slice(0, MESSAGE_TO_MAIN_CAP)}\n… [message truncated at ${MESSAGE_TO_MAIN_CAP / 1000} KB — long content belongs in a file the parent can read]`
-				: message;
+		const body = bounded(message, `message-${name}-${Date.now()}`, MESSAGE_TO_MAIN_CAP);
 		notify("subagent-message", systemNotification(`Message from agent ${name}${summary ? ` (${summary})` : ""}:\n\n${body}`), {
 			name,
 			summary,
@@ -1467,7 +1470,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						"subagent-result",
 						systemNotification(
 							withReview(
-								`Agent ${p.record.name} (task ${p.record.taskId}) ${outcome.failed ? "failed" : "completed"} (${stats}). It stays reachable with SendMessage.\n\n${outcome.output.slice(0, OUTPUT_CAP)}${worktreeNote}`,
+								`Agent ${p.record.name} (task ${p.record.taskId}) ${outcome.failed ? "failed" : "completed"} (${stats}). It stays reachable with SendMessage.\n\n${bounded(outcome.output, `${p.record.taskId}-report`, OUTPUT_CAP)}${worktreeNote}`,
 								review,
 							),
 						),
@@ -1548,7 +1551,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 								// target turn and ran on its own) must still surface.
 								notify(
 									"subagent-result",
-									systemNotification(withReview(`Update from ${p.record.name}:\n\n${outcome.output.slice(0, OUTPUT_CAP)}`, review)),
+									systemNotification(withReview(`Update from ${p.record.name}:\n\n${bounded(outcome.output, `${p.record.taskId}-update-${Date.now()}`, OUTPUT_CAP)}`, review)),
 									{ name: p.record.name, failed: outcome.failed ?? false, reviewed: review !== undefined },
 								);
 							}
@@ -1682,7 +1685,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					const stats = formatStats(outcome.toolCalls, outcome.usage);
 					notify(
 						"subagent-result",
-						systemNotification(withReview(`Reply from ${record.name} (${stats}):\n\n${outcome.output.slice(0, OUTPUT_CAP)}`, review)),
+						systemNotification(withReview(`Reply from ${record.name} (${stats}):\n\n${bounded(outcome.output, `${taskId}-reply`, OUTPUT_CAP)}`, review)),
 						{ taskId, name: record.name, failed: outcome.failed ?? false, reviewed: review !== undefined },
 					);
 				});
@@ -1795,7 +1798,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				const stats = formatStats(outcome.toolCalls, outcome.usage);
 				notify(
 					"subagent-result",
-					systemNotification(`Reply from ${record.name} (${stats}):\n\n${outcome.output.slice(0, OUTPUT_CAP)}`),
+					systemNotification(`Reply from ${record.name} (${stats}):\n\n${bounded(outcome.output, `${taskId}-reply`, OUTPUT_CAP)}`),
 					{ taskId, name: record.name, failed: outcome.failed ?? false },
 				);
 			});

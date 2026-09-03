@@ -13,7 +13,25 @@
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+/**
+ * Where a session's oversized outputs are persisted — the session dir,
+ * matching Claude Code's `<session-dir>/tool-results/<id>.txt`. A session-less
+ * run (`--no-session`) has no such dir, so a temp folder serves; the model gets
+ * the path either way. Shared by every producer that would otherwise truncate:
+ * cutting text loses context, a file keeps it one `read` away.
+ */
+export function sessionResultsDir(ctx: { sessionManager?: { getSessionDir?: () => string | undefined } } | undefined): string {
+	try {
+		const dir = ctx?.sessionManager?.getSessionDir?.();
+		if (dir) return dir;
+	} catch {
+		// fall through to the temp folder
+	}
+	return join(tmpdir(), "one-code");
+}
 
 /** Claude Code persists around this size; pi's bash truncation uses 50KB too. */
 export const PERSIST_MAX_BYTES = 50 * 1024;

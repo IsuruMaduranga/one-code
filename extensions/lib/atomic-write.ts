@@ -13,10 +13,10 @@ import { dirname } from "node:path";
 
 let sequence = 0;
 
-export function writeJsonAtomic(path: string, data: unknown): void {
+export function writeJsonAtomic(path: string, data: unknown, options: { mode?: number } = {}): void {
 	mkdirSync(dirname(path), { recursive: true });
 	const tmp = `${path}.tmp-${process.pid}-${++sequence}`;
-	writeFileSync(tmp, `${JSON.stringify(data, null, 2)}\n`);
+	writeFileSync(tmp, `${JSON.stringify(data, null, 2)}\n`, options.mode !== undefined ? { mode: options.mode } : undefined);
 	renameSync(tmp, path);
 }
 

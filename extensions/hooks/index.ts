@@ -37,18 +37,19 @@ import {
 	interpretHookResult,
 } from "./protocol.ts";
 import { type HookCommand, type HooksSource, loadHookSettings } from "./settings.ts";
+import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { projectHooksApproved } from "./trust.ts";
 
 /**
  * Hook text that reaches the model (additionalContext, a string updatedToolResult)
- * is capped: the executor allows 1 MB per stream, and a runaway hook would
- * otherwise dump all of it into context (review T5).
+ * is bounded: the executor allows 1 MB per stream, and a runaway hook would
+ * otherwise dump all of it into context (review T5). Past the cap the full text
+ * is PERSISTED under the session's tool-results (Claude Code's convention) and
+ * the model gets a preview plus the path — nothing is cut away.
  */
 const HOOK_MODEL_TEXT_CAP = 20_000;
-function capHookText(text: string): string {
-	return text.length > HOOK_MODEL_TEXT_CAP
-		? `${text.slice(0, HOOK_MODEL_TEXT_CAP)}\n… [hook output truncated at ${HOOK_MODEL_TEXT_CAP / 1000} KB]`
-		: text;
+function capHookText(text: string, ctx: ExtensionContext, label: string): string {
+	return persistIfLarge(text, { dir: sessionResultsDir(ctx), id: `hook-${label}-${Date.now()}`, maxBytes: HOOK_MODEL_TEXT_CAP });
 }
 
 interface MatchedHook {
@@ -159,11 +160,13 @@ export default function hooksExtension(pi: ExtensionAPI) {
 				if (outcome.updatedInput) merged.updatedInput = { ...merged.updatedInput, ...outcome.updatedInput };
 				if ("updatedToolResult" in outcome) {
 					merged.updatedToolResult =
-						typeof outcome.updatedToolResult === "string" ? capHookText(outcome.updatedToolResult) : outcome.updatedToolResult;
+						typeof outcome.updatedToolResult === "string" ? capHookText(outcome.updatedToolResult, ctx, `${event}-result`) : outcome.updatedToolResult;
 				}
 				if (outcome.additionalContext) {
 					merged.additionalContext = capHookText(
 						[merged.additionalContext, outcome.additionalContext].filter(Boolean).join("\n"),
+						ctx,
+						`${event}-context`,
 					);
 				}
 				if (outcome.systemMessage) {

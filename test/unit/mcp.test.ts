@@ -9,6 +9,7 @@ import {
 	jsonSchemaToTypeBox,
 	namespacedToolName,
 	parseNamespacedToolName,
+	pluginServerName,
 } from "../../extensions/mcp/schema.ts";
 import { createTailBuffer } from "../../extensions/mcp/client.ts";
 
@@ -105,9 +106,13 @@ describe("loadServers", () => {
 });
 
 describe("tool naming", () => {
-	it("namespaces as Claude Code does and sanitises illegal characters", () => {
+	it("namespaces as Claude Code does: hyphens kept, other illegal characters sanitised", () => {
 		expect(namespacedToolName("github", "get_issue")).toBe("mcp__github__get_issue");
-		expect(namespacedToolName("my-server", "do.thing")).toBe("mcp__my_server__do_thing");
+		expect(namespacedToolName("my-server", "do.thing")).toBe("mcp__my-server__do_thing");
+		// CC's capture: mcp__plugin_context7_context7__query-docs
+		expect(namespacedToolName(pluginServerName("context7", "context7"), "query-docs")).toBe(
+			"mcp__plugin_context7_context7__query-docs",
+		);
 	});
 
 	it("round-trips a namespaced name", () => {

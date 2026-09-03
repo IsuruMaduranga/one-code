@@ -76,7 +76,7 @@ describe("startCallbackServer", () => {
 			const res = await fetch(`${cb.redirectUrl}?code=abc123`);
 			expect(res.status).toBe(200);
 			// waitForCode is only called afterwards — must still resolve, not time out.
-			await expect(cb.waitForCode(1000)).resolves.toBe("abc123");
+			await expect(cb.waitForCode(1000)).resolves.toMatchObject({ code: "abc123" });
 		} finally {
 			cb.close();
 		}
@@ -87,7 +87,7 @@ describe("startCallbackServer", () => {
 		try {
 			const pending = cb.waitForCode(2000);
 			await fetch(`${cb.redirectUrl}?code=later`);
-			await expect(pending).resolves.toBe("later");
+			await expect(pending).resolves.toMatchObject({ code: "later" });
 		} finally {
 			cb.close();
 		}
@@ -156,3 +156,21 @@ describe("McpOAuthProvider", () => {
 		expect(readAuth("srv", home, env)).toEqual({});
 	});
 });
+
+describe("OAuth state (M9)", () => {
+	it("issues one state per provider and echoes it back through the callback", async () => {
+		const provider = new McpOAuthProvider({ serverName: "srv", redirectUrl: "http://127.0.0.1:1/callback", home, env });
+		const state = provider.state();
+		expect(state).toMatch(/^[0-9a-f]{32}$/);
+		expect(provider.state()).toBe(state);
+		expect(provider.expectedState()).toBe(state);
+		const cb = await startCallbackServer();
+		try {
+			await fetch(`${cb.redirectUrl}?code=c1&state=${state}`);
+			await expect(cb.waitForCode(1000)).resolves.toEqual({ code: "c1", state });
+		} finally {
+			cb.close();
+		}
+	});
+});
+

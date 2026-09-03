@@ -15,6 +15,7 @@
  */
 
 import os from "node:os";
+import { readJsonFile } from "./atomic-write.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath, readSettingsForWrite, writeSettings } from "./one-code-settings.ts";
 
 const KEY = "disabledMcpServers";
@@ -26,7 +27,10 @@ function stringArray(value: unknown): string[] {
 }
 
 function namesAt(path: string): string[] {
-	return stringArray(readSettingsForWrite(path)[KEY]);
+	// Lenient on the READ path: a malformed settings file must not abort MCP
+	// startup (review M11). The write path below stays strict so it never
+	// clobbers a file it could not parse.
+	return stringArray(readJsonFile<Record<string, unknown>>(path)?.[KEY]);
 }
 
 /** Server names disabled at either scope, merged. */

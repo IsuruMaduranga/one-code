@@ -9,10 +9,21 @@
 
 import { type TSchema, Type } from "typebox";
 
-/** Claude Code's namespacing: mcp__<server>__<tool>, sanitised for tool-name rules. */
+/**
+ * Claude Code's namespacing: `mcp__<server>__<tool>`. Hyphens are KEPT (CC's
+ * captures show `mcp__plugin_context7_context7__query-docs`), so a user's
+ * existing `mcp__…` permission rules and hook matchers keep matching; anything
+ * else outside `[A-Za-z0-9_-]` (a plugin server's `plugin:x:y` colons, dots)
+ * becomes `_`, as in CC.
+ */
 export function namespacedToolName(server: string, tool: string): string {
-	const clean = (part: string) => part.replace(/[^a-zA-Z0-9_]/g, "_");
+	const clean = (part: string) => part.replace(/[^a-zA-Z0-9_-]/g, "_");
 	return `mcp__${clean(server)}__${clean(tool)}`;
+}
+
+/** CC's name for a plugin-provided server: `plugin:<plugin>:<server>`, so two plugins' `github` servers cannot collide with each other or with the user's. */
+export function pluginServerName(pluginName: string, serverName: string): string {
+	return `plugin:${pluginName}:${serverName}`;
 }
 
 export function parseNamespacedToolName(name: string): { server: string; tool: string } | undefined {

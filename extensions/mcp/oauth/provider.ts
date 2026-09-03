@@ -18,6 +18,7 @@ import type {
 	OAuthClientMetadata,
 	OAuthTokens,
 } from "@modelcontextprotocol/sdk/shared/auth.js";
+import { randomBytes } from "node:crypto";
 import type { OAuthClientProvider, OAuthDiscoveryState } from "@modelcontextprotocol/sdk/client/auth.js";
 import { readAuth, type StoredAuth, writeAuth } from "./store.ts";
 
@@ -42,6 +43,8 @@ export class McpOAuthProvider implements OAuthClientProvider {
 	// cached in-instance and re-read only after this provider's own writes,
 	// instead of a readFileSync + JSON.parse per getter.
 	private cache?: StoredAuth;
+	/** The `state` issued for this flow's authorization request; the callback must echo it (RFC 8252 §8.9). */
+	private issuedState?: string;
 
 	constructor(options: McpOAuthProviderOptions) {
 		this.serverName = options.serverName;
@@ -94,6 +97,18 @@ export class McpOAuthProvider implements OAuthClientProvider {
 
 	saveTokens(tokens: OAuthTokens): void {
 		this.save({ tokens });
+	}
+
+	/** Fresh per flow; the SDK puts it on the authorization URL. */
+	state(): string {
+		const issued = this.issuedState ?? randomBytes(16).toString("hex");
+		this.issuedState = issued;
+		return issued;
+	}
+
+	/** The state the loopback callback must carry back, or undefined before an authorization was started. */
+	expectedState(): string | undefined {
+		return this.issuedState;
 	}
 
 	redirectToAuthorization(authorizationUrl: URL): void {

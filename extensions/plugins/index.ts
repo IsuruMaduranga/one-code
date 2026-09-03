@@ -99,6 +99,9 @@ async function expandTemplate(body: string, args: string, cwd: string): Promise<
 
 export default function pluginsExtension(pi: ExtensionAPI) {
 	const registeredCommands = new Set<string>();
+	// Load-time discovery has no ctx, so it runs on process.cwd(); session_start
+	// below re-discovers on the session's real cwd (they differ under `pi -C`
+	// and in RPC children) so project-scoped plugin settings are the right ones.
 	let discovered = discoverPlugins(defaultDiscoverRoots(getAgentDir()));
 
 	const registerCommands = (plugins: DiscoveredPlugins) => {
@@ -110,6 +113,13 @@ export default function pluginsExtension(pi: ExtensionAPI) {
 			registerPluginCommand(pi, plugin, command.name, command.path);
 		}
 	};
+
+	pi.on("session_start", (_event, ctx) => {
+		if (ctx.cwd === process.cwd()) return;
+		invalidatePluginsCache();
+		discovered = discoverPlugins(defaultDiscoverRoots(getAgentDir(), ctx.cwd));
+		registerCommands(discovered);
+	});
 	registerCommands(discovered);
 
 	// Latest MCP snapshot; the panel triggers a request on open (the bus does
