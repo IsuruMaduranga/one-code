@@ -322,27 +322,40 @@ function decodeAnsiC(body: string): string {
 	});
 }
 
-/** Syntax we do not model at all; its presence alone forces escalation. */
-export function hasUnmodelledSyntax(command: string): string | undefined {
-	if (command.includes("\n")) return "spans multiple lines";
+/**
+ * Syntax through which a command can run something other than what its
+ * visible words say. The permission matcher refuses to let a prefix/wildcard
+ * allow rule cover a command carrying any of it (the user approved `npm test
+ * …`, not whatever `$(…)` evaluates to), and the pre-gate escalates on it.
+ */
+export function hasInjectionSyntax(command: string): string | undefined {
 	if (/\$\(/.test(command)) return "uses command substitution $( )";
 	if (/(^|[^\\])`/.test(command)) return "uses backtick command substitution";
-	if (/<<</.test(command)) return "uses a here-string";
-	if (/<</.test(command)) return "uses a heredoc";
 	if (/[<>]\(/.test(command)) return "uses process substitution";
-	// Brace expansion resolves to paths we cannot enumerate (review finding N3).
-	if (/\{[^{}]*,[^{}]*\}/.test(command)) return "uses brace expansion, whose expanded paths cannot be checked";
-	if (/\$\{?[A-Za-z_]/.test(command)) return "references environment variables, whose values are unknown here";
 	if (/\beval\b|\bexec\b/.test(command)) return "uses eval/exec";
 	if (/\|\s*(bash|sh|zsh|python|perl|node|ruby)\b/.test(command)) return "pipes into an interpreter";
 	if (/base64\s+(-d|--decode)/.test(command)) return "decodes base64, which can hide the real command";
 	return undefined;
 }
 
+/** Syntax we do not model at all; its presence alone forces escalation. */
+export function hasUnmodelledSyntax(command: string): string | undefined {
+	if (command.includes("\n")) return "spans multiple lines";
+	const injection = hasInjectionSyntax(command);
+	if (injection) return injection;
+	if (/<<</.test(command)) return "uses a here-string";
+	if (/<</.test(command)) return "uses a heredoc";
+	// Brace expansion resolves to paths we cannot enumerate (review finding N3).
+	if (/\{[^{}]*,[^{}]*\}/.test(command)) return "uses brace expansion, whose expanded paths cannot be checked";
+	if (/\$\{?[A-Za-z_]/.test(command)) return "references environment variables, whose values are unknown here";
+	return undefined;
+}
+
 /**
  * Split a command into pipeline/list segments and tokenize each. Unlike the
  * original, `<`, `>`, `&`, and `|` terminate a token even without surrounding
- * whitespace, so `cmd>file` and `a|b` are seen (review finding N4).
+ * whitespace, so `cmd>file` and `a|b` are seen (review finding N4). An
+ * unquoted newline ends a segment too (it is a command separator in bash).
  */
 export function parseCommand(command: string): { segments: Segment[]; parseFailed: boolean } {
 	const segments: Segment[] = [];
@@ -372,14 +385,15 @@ export function parseCommand(command: string): { segments: Segment[]; parseFaile
 		quoted = false;
 	};
 
-	const pushSegment = (at: number) => {
+	/** `at` = index of the separator; `width` = its length (`&&` is 2). */
+	const pushSegment = (at: number, width = 1) => {
 		pushToken();
 		if (tokens.length > 0 || redirects.length > 0) {
 			segments.push({ tokens, redirects, raw: command.slice(rawStart, at).trim() });
 		}
 		tokens = [];
 		redirects = [];
-		rawStart = at + 1;
+		rawStart = at + width;
 	};
 
 	for (let i = 0; i < command.length; i++) {
@@ -422,6 +436,12 @@ export function parseCommand(command: string): { segments: Segment[]; parseFaile
 			continue;
 		}
 
+		if (ch === "\n") {
+			// An unquoted newline separates commands exactly like `;`. Without this
+			// `npm test x\ncurl evil` would be one segment whose lead is `npm test`.
+			pushSegment(i);
+			continue;
+		}
 		if (/\s/.test(ch)) {
 			pushToken();
 			continue;
@@ -448,8 +468,9 @@ export function parseCommand(command: string): { segments: Segment[]; parseFaile
 		if (ch === "|" || ch === ";" || ch === "&") {
 			// `&&`, `||`, `;`, `|`, `&` all end a segment. Any of them means the
 			// next command is separate, which is all we need to know.
-			pushSegment(i);
-			if (command[i + 1] === ch) i++;
+			const doubled = command[i + 1] === ch;
+			pushSegment(i, doubled ? 2 : 1);
+			if (doubled) i++;
 			continue;
 		}
 

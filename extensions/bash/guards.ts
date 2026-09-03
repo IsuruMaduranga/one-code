@@ -68,7 +68,6 @@ function sleepSeconds(args: Token[]): number | undefined {
 
 // A segment's raw slice can keep half of the operator that ended the previous
 // one (`a && b` → second raw is `& b`) — strip it for a clean echo.
-const cleanRaw = (seg: Segment): string => seg.raw.replace(/^[;&|]+\s*/, "");
 
 function waitReason(segments: Segment[]): string | undefined {
 	// Measure the run of LEADING sleep segments: `sleep 1 && sleep 1 && …` is
@@ -86,8 +85,8 @@ function waitReason(segments: Segment[]): string | undefined {
 	}
 	if (leadSleeps === 0) return undefined;
 	if (leadSleeps === 1 && total !== undefined && total < 2) return undefined;
-	const rest = segments.slice(leadSleeps).map(cleanRaw).filter(Boolean).join("; ");
-	const shown = segments.slice(0, leadSleeps).map(cleanRaw).join(" && ");
+	const rest = segments.slice(leadSleeps).map((seg) => seg.raw).filter(Boolean).join("; ");
+	const shown = segments.slice(0, leadSleeps).map((seg) => seg.raw).join(" && ");
 	const echo = rest ? `\`${shown}\` followed by: ${clip(rest)}` : `standalone \`${shown}\``;
 	return (
 		`Blocked: ${echo}. A foreground sleep stalls the whole session while it runs. ` +

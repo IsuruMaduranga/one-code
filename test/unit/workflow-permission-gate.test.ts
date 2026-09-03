@@ -13,7 +13,7 @@ describe("permissionGateFactory", () => {
 
 	it("allows explicitly allowed commands and safe tools", async () => {
 		const handler = buildGate({ permissions: { allow: ["Bash(npm run test:*)"] } });
-		expect(await handler({ toolName: "bash", input: { command: "npm run test:unit" } })).toBeUndefined();
+		expect(await handler({ toolName: "bash", input: { command: "npm run test -- --grep x" } })).toBeUndefined();
 		expect(await handler({ toolName: "read", input: { path: "/etc/hosts" } })).toBeUndefined();
 	});
 

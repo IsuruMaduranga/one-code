@@ -15,6 +15,20 @@ One Code reads `allow`, `deny`, and `ask` rules from `.claude/settings.json`:
 Rules match tools by name and by argument. Claude Code's PascalCase tool names
 work in these rules, so a setup you wrote for Claude Code applies as it is.
 
+Bash rules follow Claude Code's matching rules:
+
+- `Bash(npm test)` matches that exact command line.
+- `Bash(npm test:*)` matches `npm test` and any command that starts with
+  `npm test ` followed by a space. It does not match `npm tests` or
+  `npm test:unit`; write `Bash(npm test:unit:*)` for the latter.
+- `Bash(git * --dry-run)` uses `*` as a wildcard anywhere in the line.
+- A command line made of several commands (`&&`, `||`, `;`, `|`, a newline)
+  is allowed only when an `allow` rule covers every one of them, or an exact
+  rule matches the whole line. A `deny` or `ask` rule applies when it matches
+  any one of them. Command substitution (`$(…)`, backticks), `eval`, and
+  piping into a shell or interpreter are never covered by a prefix or
+  wildcard `allow` rule.
+
 To add a rule during a session, run `/allow`. To review the current rules, run
 `/permissions`. Rules One Code adds for you are saved to `~/.onecode`, not to
 `~/.claude`.
