@@ -37,15 +37,18 @@ import {
 const clip = (text: string, max = 200): string => (text.length > max ? `${text.slice(0, max)}…` : text);
 
 export function bashGuardReason(command: string, opts: { background: boolean }): string | undefined {
-	// A heredoc body is data, but parseCommand tokenizes it as live shell —
-	// every guard here would misfire on body text (a literal `vim` or
-	// `while … sleep` inside a document). Pass instead (positive-parse only).
-	if (/<</.test(command)) return undefined;
-	const { segments, parseFailed } = parseCommand(command);
+	// A heredoc/here-string body is data, but parseCommand tokenizes it as live
+	// shell — every guard would misfire on body text (a literal `vim` or
+	// `while … sleep` inside a document). Judge only the command that PRECEDES
+	// the first `<<`: `sleep 600 <<< ""` is still a sleep (review T14), while a
+	// `cat <<EOF` body is never read.
+	const lead = command.split(/<</)[0];
+	if (lead !== command && !lead.trim()) return undefined;
+	const { segments, parseFailed } = parseCommand(lead);
 	if (parseFailed || segments.length === 0) return undefined;
 	const interactive = interactiveReason(segments);
 	if (interactive || opts.background) return interactive;
-	return waitReason(segments) ?? pollLoopReason(command, segments) ?? orphanReason(command, segments);
+	return waitReason(segments) ?? pollLoopReason(lead, segments) ?? orphanReason(lead, segments);
 }
 
 // ---------------------------------------------------------------------------
@@ -91,7 +94,7 @@ function waitReason(segments: Segment[]): string | undefined {
 	return (
 		`Blocked: ${echo}. A foreground sleep stalls the whole session while it runs. ` +
 		"To wait for a command you started, run it with run_in_background: true — its completion arrives as a system notification on its own, so you never need to poll. " +
-		"To wait for a condition, use the monitor tool with an until-loop (e.g. `until <check>; do sleep 2; done`). " +
+		"To wait for a condition, use the monitor tool with an until-loop (e.g. `until <check>; do sleep 2; done`) — monitor is deferred, load it with tool_search select:monitor. " +
 		"If you genuinely need a delay (rate limiting, deliberate pacing), keep it under 2 seconds. " +
 		"Do not chain shorter sleeps to work around this block."
 	);
@@ -112,7 +115,7 @@ function pollLoopReason(command: string, segments: Segment[]): string | undefine
 	if (!sleeps) return undefined;
 	return (
 		`Blocked: a foreground polling loop (\`${clip(command, 160)}\`). It occupies the whole session while it spins. ` +
-		"Use the monitor tool to run the until-loop for you — it returns when the condition holds — or start the underlying work with run_in_background: true and let its completion notification arrive on its own. " +
+		"Use the monitor tool to run the until-loop for you (deferred — load it with tool_search select:monitor) — it returns when the condition holds — or start the underlying work with run_in_background: true and let its completion notification arrive on its own. " +
 		"Do not shorten the sleep or unroll the loop to work around this block."
 	);
 }
@@ -203,7 +206,7 @@ function interactiveReason(segments: Segment[]): string | undefined {
 		if (cmd === "watch") {
 			return (
 				"Blocked: `watch` needs an interactive terminal, which this shell does not have. " +
-				"Use the monitor tool to wait for a condition (it runs an until-loop and returns when the condition holds), or run_in_background: true with task_output to check on long-running output."
+				"Use the monitor tool (deferred — load it with tool_search select:monitor) to wait for a condition, or run_in_background: true with task_output to check on long-running output."
 			);
 		}
 		if (cmd !== "git") continue;

@@ -48,6 +48,41 @@ export function ccToolName(nativeName: string): string {
 	return CC_CANONICAL[nativeName] ?? nativeName;
 }
 
+/**
+ * pi parameter name → Claude Code parameter name, per tool, for the hook stdin
+ * payload's `tool_input`. A CC hook reads `.tool_input.file_path`; pi's tools
+ * call it `path` (review T4). Tools not listed pass their input through
+ * unchanged (bash's `command`/`timeout`/`description`/`run_in_background`
+ * already match CC's Bash; MCP tools are their own schema).
+ */
+const CC_INPUT_NAMES: Record<string, Record<string, string>> = {
+	read: { path: "file_path" },
+	edit: { path: "file_path", oldText: "old_string", newText: "new_string" },
+	write: { path: "file_path" },
+	grep: { ignoreCase: "-i", context: "-C", limit: "head_limit" },
+	notebook_edit: { path: "notebook_path" },
+};
+
+function renameKeys(input: Record<string, unknown>, names: Record<string, string>): Record<string, unknown> {
+	const out: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(input)) out[names[key] ?? key] = value;
+	return out;
+}
+
+/** A pi tool's input spelled with Claude Code's parameter names. */
+export function ccToolInput(nativeName: string, input: Record<string, unknown>): Record<string, unknown> {
+	const names = CC_INPUT_NAMES[nativeName];
+	return names ? renameKeys(input, names) : input;
+}
+
+/** The inverse: a hook's `updatedInput` (CC names) back to the pi tool's names. */
+export function nativeToolInput(nativeName: string, input: Record<string, unknown>): Record<string, unknown> {
+	const names = CC_INPUT_NAMES[nativeName];
+	if (!names) return input;
+	const inverse = Object.fromEntries(Object.entries(names).map(([pi, cc]) => [cc, pi]));
+	return renameKeys(input, inverse);
+}
+
 /** Every spelling a matcher may reasonably target for this tool. */
 export function toolMatchCandidates(nativeName: string): string[] {
 	return [...new Set([nativeName, ccToolName(nativeName), ...ccAliasesForTool(nativeName)])];

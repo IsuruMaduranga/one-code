@@ -124,6 +124,10 @@ export default function lspExtension(pi: ExtensionAPI) {
 		};
 	};
 
+	/** Servers may be respawned this many times after a mid-session crash; beyond that the language is off for the session. */
+	const MAX_RESPAWNS = 2;
+	const respawns = new Map<string, number>();
+
 	const clientFor = async (target: ResolvedTarget): Promise<LspClient | undefined> => {
 		const { key } = target;
 		if (startFailures.has(key)) return undefined;
@@ -131,12 +135,19 @@ export default function lspExtension(pi: ExtensionAPI) {
 		const existing = clients.get(key);
 		if (existing?.isRunning) return existing;
 		if (existing) {
-			// Crashed mid-session. Record why so downstream reports the real cause
-			// (a server that was running and died) instead of falling through to
+			// Crashed mid-session. Respawn with a short backoff, up to MAX_RESPAWNS
+			// times; after that record why so downstream reports the real cause (a
+			// server that was running and died) instead of falling through to
 			// "install <command>" advice for an already-installed server — and so
-			// the one-time post-edit warning still fires. Don't respawn in a loop.
-			startFailures.set(key, existing.error ?? "language server stopped unexpectedly");
-			return undefined;
+			// the one-time post-edit warning still fires (review T10).
+			const count = (respawns.get(key) ?? 0) + 1;
+			respawns.set(key, count);
+			if (count > MAX_RESPAWNS) {
+				startFailures.set(key, `${existing.error ?? "language server stopped unexpectedly"} (gave up after ${MAX_RESPAWNS} restarts)`);
+				return undefined;
+			}
+			clients.delete(key);
+			await new Promise((resolve) => setTimeout(resolve, 500 * count));
 		}
 
 		// Keyed on the command being spawned, not on where the config came from —

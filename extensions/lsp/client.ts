@@ -125,6 +125,12 @@ export class LspClient {
 			this.failure = `Could not start ${this.config.command}: ${error.message}`;
 			this.rejectAll(new Error(this.failure));
 		});
+		// A write to a dead server's stdin is an EPIPE on the stream; without a
+		// listener that is an unhandled 'error' event, i.e. a crash (review T10).
+		child.stdin?.on("error", (error) => {
+			this.failure ??= `${this.config.command} stopped accepting input: ${error.message}`;
+			this.ready = false;
+		});
 		child.on("exit", (code, signal) => {
 			this.ready = false;
 			if (!this.failure && code !== 0) {

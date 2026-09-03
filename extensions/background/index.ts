@@ -96,7 +96,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		label: "Monitor",
 		...ccToolRenderers("Monitor"),
 		description:
-			"Start a background monitor that streams events from a long-running command. Each stdout line becomes a notification delivered to the conversation while you keep working; the command exiting ends the watch. Use for 'tell me every time X happens' (tail -f, polling loops); for a single completion signal prefer a subagent or a blocking command. Returns a task id — stop with task_stop, inspect with task_output. Alternatively pass `ws` to watch a WebSocket (each text frame is an event).",
+			"Start a background monitor that streams events from a long-running command. Each stdout line becomes a notification delivered to the conversation while you keep working; the command exiting ends the watch. Use for 'tell me every time X happens' (tail -f, an until-loop that polls a condition); for a single command's completion prefer bash with run_in_background: true — its completion notification arrives on its own. Returns a task id — stop with task_stop, inspect with task_output. Alternatively pass `ws` to watch a WebSocket (each text frame is an event).",
 		parameters: Type.Object({
 			command: Type.Optional(Type.String({ description: "Shell command; each stdout line is an event, exit ends the watch" })),
 			description: Type.String({ description: "Short description of what is being monitored (shown in notifications)" }),

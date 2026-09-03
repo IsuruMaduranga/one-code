@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ccToolName, matcherApplies, toolMatchCandidates } from "../../extensions/hooks/matcher.ts";
+import { ccToolName, matcherApplies, toolMatchCandidates, ccToolInput, nativeToolInput } from "../../extensions/hooks/matcher.ts";
 import { loadPluginHooks } from "../../extensions/hooks/plugin-hooks.ts";
 import { type FinishedRun, interpretHookResult, parseEnvelope } from "../../extensions/hooks/protocol.ts";
 import { hookSettingsPaths, loadHookSettings, parseHooksBlock, resetHookSettingsCache } from "../../extensions/hooks/settings.ts";
@@ -256,3 +256,19 @@ describe("plugin hooks", () => {
 		expect(loadPluginHooks(pluginRoots(), []).at(0)?.config.PreToolUse?.[0]?.hooks[0]?.command).toBe("second");
 	});
 });
+
+describe("hook tool_input translation (T4)", () => {
+	it("spells pi inputs with Claude Code's parameter names and round-trips updatedInput", () => {
+		expect(ccToolInput("edit", { path: "a.ts", oldText: "x", newText: "y" })).toEqual({
+			file_path: "a.ts",
+			old_string: "x",
+			new_string: "y",
+		});
+		expect(ccToolInput("read", { path: "a.ts", offset: 2, limit: 5 })).toEqual({ file_path: "a.ts", offset: 2, limit: 5 });
+		expect(ccToolInput("grep", { pattern: "x", ignoreCase: true, limit: 3 })).toEqual({ pattern: "x", "-i": true, head_limit: 3 });
+		expect(ccToolInput("bash", { command: "ls", timeout: 5 })).toEqual({ command: "ls", timeout: 5 });
+		expect(nativeToolInput("edit", { file_path: "b.ts", new_string: "z" })).toEqual({ path: "b.ts", newText: "z" });
+		expect(nativeToolInput("mcp__x__y", { q: 1 })).toEqual({ q: 1 });
+	});
+});
+

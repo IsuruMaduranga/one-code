@@ -28,7 +28,7 @@ import { claudeConfigDir } from "../lib/paths.ts";
 import { defaultDiscoverRoots } from "../lib/plugins.ts";
 import { appendHookLog, formatDebugLine, hooksDebugEnabled, hooksLogPath } from "./debug.ts";
 import { runHookCommand } from "./executor.ts";
-import { matcherApplies, ccToolName, toolMatchCandidates } from "./matcher.ts";
+import { matcherApplies, ccToolName, toolMatchCandidates, ccToolInput, nativeToolInput } from "./matcher.ts";
 import { loadPluginHooks } from "./plugin-hooks.ts";
 import {
 	type CcHookEvent,
@@ -38,6 +38,18 @@ import {
 } from "./protocol.ts";
 import { type HookCommand, type HooksSource, loadHookSettings } from "./settings.ts";
 import { projectHooksApproved } from "./trust.ts";
+
+/**
+ * Hook text that reaches the model (additionalContext, a string updatedToolResult)
+ * is capped: the executor allows 1 MB per stream, and a runaway hook would
+ * otherwise dump all of it into context (review T5).
+ */
+const HOOK_MODEL_TEXT_CAP = 20_000;
+function capHookText(text: string): string {
+	return text.length > HOOK_MODEL_TEXT_CAP
+		? `${text.slice(0, HOOK_MODEL_TEXT_CAP)}\n… [hook output truncated at ${HOOK_MODEL_TEXT_CAP / 1000} KB]`
+		: text;
+}
 
 interface MatchedHook {
 	source: HooksSource;
@@ -145,9 +157,14 @@ export default function hooksExtension(pi: ExtensionAPI) {
 			for (const outcome of outcomes) {
 				merged.block ??= outcome.block;
 				if (outcome.updatedInput) merged.updatedInput = { ...merged.updatedInput, ...outcome.updatedInput };
-				if ("updatedToolResult" in outcome) merged.updatedToolResult = outcome.updatedToolResult;
+				if ("updatedToolResult" in outcome) {
+					merged.updatedToolResult =
+						typeof outcome.updatedToolResult === "string" ? capHookText(outcome.updatedToolResult) : outcome.updatedToolResult;
+				}
 				if (outcome.additionalContext) {
-					merged.additionalContext = [merged.additionalContext, outcome.additionalContext].filter(Boolean).join("\n");
+					merged.additionalContext = capHookText(
+						[merged.additionalContext, outcome.additionalContext].filter(Boolean).join("\n"),
+					);
 				}
 				if (outcome.systemMessage) {
 					merged.systemMessage = [merged.systemMessage, outcome.systemMessage].filter(Boolean).join("\n");
@@ -183,15 +200,16 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		const payload: HookStdinPayload = {
 			...basePayload(ctx, "PreToolUse"),
 			tool_name: ccToolName(event.toolName),
-			tool_input: event.input as Record<string, unknown>,
+			tool_input: ccToolInput(event.toolName, event.input as Record<string, unknown>),
 		};
 		const outcome = await dispatch(ctx, "PreToolUse", { candidates: toolMatchCandidates(event.toolName) }, payload);
 		if (outcome.block) return { block: true, reason: `PreToolUse hook: ${outcome.block.reason}` };
 		if (outcome.updatedInput) {
 			// In-place, so worktree/file-tracker/permissions (later in the
 			// extension order) all see the rewritten input — CC applies hook
-			// input updates before permission evaluation.
-			Object.assign(event.input as Record<string, unknown>, outcome.updatedInput);
+			// input updates before permission evaluation. The hook answered in
+			// CC's parameter names; translate back to the tool's own.
+			Object.assign(event.input as Record<string, unknown>, nativeToolInput(event.toolName, outcome.updatedInput));
 		}
 		if (outcome.additionalContext) injectContext(outcome.additionalContext, true);
 		return undefined;
@@ -202,7 +220,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		const payload: HookStdinPayload = {
 			...basePayload(ctx, "PostToolUse"),
 			tool_name: ccToolName(event.toolName),
-			tool_input: event.input,
+			tool_input: ccToolInput(event.toolName, event.input as Record<string, unknown>),
 			tool_response: { content: event.content, is_error: event.isError },
 		};
 		const outcome = await dispatch(ctx, "PostToolUse", { candidates: toolMatchCandidates(event.toolName) }, payload);

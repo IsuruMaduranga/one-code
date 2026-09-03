@@ -25,6 +25,12 @@ import { ccToolRenderers } from "../lib/tui-render.ts";
 const DEFAULT_MAX_CHARS = 30_000;
 const CACHE_TTL_MS = 15 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 30_000;
+/** Same-host redirect hops followed before giving up (a redirect loop is otherwise unbounded recursion). */
+const MAX_REDIRECTS = 5;
+/** Response bytes read before the body is cut off — a multi-GB "page" must not be buffered whole. */
+const MAX_BODY_BYTES = 5_000_000;
+/** Cache entries kept; the oldest is evicted past this (the TTL alone never evicted). */
+const MAX_CACHE_ENTRIES = 50;
 /** Longer than the classifier's cap: the reader ingests whole pages. */
 const READER_TIMEOUT_MS = 60_000;
 const USER_AGENT = "one-code/0.1 (+https://github.com/IsuruMaduranga/one-code)";
@@ -116,6 +122,27 @@ async function answerFromPage(
 	}
 }
 
+/** Read a response body as text, stopping after `cap` bytes (the stream is cancelled, not drained). */
+async function readBodyCapped(response: Response, cap: number): Promise<{ text: string; truncated: boolean }> {
+	const reader = response.body?.getReader();
+	if (!reader) return { text: await response.text(), truncated: false };
+	const decoder = new TextDecoder();
+	let text = "";
+	let bytes = 0;
+	while (true) {
+		const { done, value } = await reader.read();
+		if (done) break;
+		bytes += value.byteLength;
+		if (bytes > cap) {
+			text += decoder.decode(value.subarray(0, Math.max(0, value.byteLength - (bytes - cap))), { stream: true });
+			await reader.cancel().catch(() => {});
+			return { text: text + decoder.decode(), truncated: true };
+		}
+		text += decoder.decode(value, { stream: true });
+	}
+	return { text: text + decoder.decode(), truncated: false };
+}
+
 export default function webFetchExtension(pi: ExtensionAPI) {
 	// Same 15-minute window Claude Code documents, so repeated reads of one page
 	// during a task don't re-download it.
@@ -123,7 +150,7 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 	// Per-session: a reader model's learned required thinking level (see answerFromPage).
 	const learnedReasoning = new Map<string, ThinkingLevel>();
 
-	const load = async (url: string, signal: AbortSignal | undefined): Promise<CacheEntry> => {
+	const load = async (url: string, signal: AbortSignal | undefined, redirects = 0): Promise<CacheEntry> => {
 		const cached = cache.get(url);
 		if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) return cached;
 
@@ -147,7 +174,8 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 				if (location) {
 					const target = new URL(location, url).toString();
 					if (isSameHost(target, url)) {
-						return await load(target, signal);
+						if (redirects >= MAX_REDIRECTS) throw new Error(`Too many redirects (${MAX_REDIRECTS}); last target ${target}`);
+						return await load(target, signal, redirects + 1);
 					}
 					throw new Error(`Redirects to a different host: ${target}\nCall web_fetch again with that URL if you want it.`);
 				}
@@ -158,7 +186,7 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 			}
 
 			const contentType = response.headers.get("content-type") ?? "";
-			const body = await response.text();
+			const { text: body, truncated } = await readBodyCapped(response, MAX_BODY_BYTES);
 
 			let entry: CacheEntry;
 			if (contentType.includes("html")) {
@@ -175,7 +203,13 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 				entry = { markdown: body.trim(), fetchedAt: Date.now() };
 			}
 
+			if (truncated) entry.note = [entry.note, `The response was cut at ${MAX_BODY_BYTES / 1_000_000} MB.`].filter(Boolean).join(" ");
 			cache.set(url, entry);
+			while (cache.size > MAX_CACHE_ENTRIES) {
+				const oldest = cache.keys().next().value;
+				if (oldest === undefined) break;
+				cache.delete(oldest);
+			}
 			return entry;
 		} finally {
 			clearTimeout(timer);

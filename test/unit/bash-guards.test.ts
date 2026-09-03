@@ -188,3 +188,18 @@ describe("interactive guard", () => {
 		expect(fg("grep -i pattern file")).toBeUndefined();
 	});
 });
+
+describe("heredoc handling (T14) and monitor deferral hints (T13)", () => {
+	it("judges the command before a heredoc/here-string and ignores the body", () => {
+		expect(bashGuardReason('sleep 600 <<< ""', { background: false })).toMatch(/Blocked/);
+		expect(bashGuardReason("vim notes.txt <<EOF\nx\nEOF", { background: false })).toMatch(/interactive editor/);
+		expect(bashGuardReason("cat <<EOF\nsleep 600\nvim x\nEOF", { background: false })).toBeUndefined();
+		expect(bashGuardReason("<<EOF\nsleep 5\nEOF", { background: false })).toBeUndefined();
+	});
+
+	it("tells the model monitor is deferred and how to load it", () => {
+		expect(bashGuardReason("sleep 30", { background: false })).toContain("tool_search select:monitor");
+		expect(bashGuardReason("while true; do sleep 5; done", { background: false })).toContain("tool_search select:monitor");
+	});
+});
+

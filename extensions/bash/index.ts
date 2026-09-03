@@ -30,13 +30,16 @@ import { createTaskNotifier, systemNotification } from "../lib/notifications.ts"
 import { perCwd } from "../lib/per-cwd.ts";
 import { ccWrapBuiltinRenderers, linesComponent, resultLines } from "../lib/tui-render.ts";
 
-const NOTIFY_OUTPUT_CAP = 30_000;
+// The completion notification carries status + exit code + where the output is,
+// plus only a short tail: a finished build used to push 30 KB (~8k tokens) into
+// context unasked (review T7). The full tail stays behind task_output / the log.
+const NOTIFY_OUTPUT_CAP = 2_000;
+/** Claude Code's Bash cap; the tool's `timeout` is milliseconds, as CC's is. */
+const MAX_TIMEOUT_MS = 600_000;
 
 const BashParams = Type.Object({
 	command: Type.String({ description: "Bash command to execute" }),
-	timeout: Type.Optional(
-		Type.Number({ description: "Timeout in seconds (optional; also applies to background runs)" }),
-	),
+	timeout: Type.Optional(Type.Number({ description: "Optional timeout in milliseconds (max 600000)" })),
 	run_in_background: Type.Optional(
 		Type.Boolean({
 			description:
@@ -81,7 +84,7 @@ export default function bashExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "bash",
 		label: base.label,
-		description: `${base.description} Pass run_in_background: true for long-running commands (builds, servers, watches): it returns a task id immediately so you can keep working, completion arrives as a system notification, and the output is retrievable with task_output / stoppable with task_stop. Foreground \`sleep\` is blocked; use the monitor tool with an until-loop to wait on a condition.`,
+		description: `${base.description} Pass run_in_background: true for long-running commands (builds, servers, watches): it returns a task id immediately so you can keep working, completion arrives as a system notification, and the output is retrievable with task_output / stoppable with task_stop. Foreground \`sleep\` is blocked; to wait on a condition use the monitor tool (deferred — load it with tool_search select:monitor) with an until-loop.`,
 		promptSnippet: base.promptSnippet,
 		promptGuidelines: base.promptGuidelines,
 		executionMode: base.executionMode,
@@ -114,11 +117,18 @@ export default function bashExtension(pi: ExtensionAPI) {
 			const originalCommand = commandToEvaluate(originalCommands, toolCallId, params.command);
 			const guardReason = bashGuardReason(originalCommand, { background: params.run_in_background === true });
 			if (guardReason) return { content: [{ type: "text" as const, text: guardReason }], isError: true, details: {} };
+			const timeoutSeconds =
+				params.timeout !== undefined && Number.isFinite(params.timeout) && params.timeout > 0
+					? Math.min(params.timeout, MAX_TIMEOUT_MS) / 1000
+					: undefined;
 
 			if (!params.run_in_background) {
+				// pi's executor takes seconds; the model-facing unit is milliseconds
+				// (Claude Code's Bash), so a habitual `timeout: 120000` is 2 minutes,
+				// not 33 hours (review T11).
 				return foreground(ctx.cwd).execute(
 					toolCallId,
-					{ command: params.command, timeout: params.timeout },
+					{ command: params.command, timeout: timeoutSeconds },
 					signal,
 					onUpdate,
 					ctx,
@@ -133,11 +143,15 @@ export default function bashExtension(pi: ExtensionAPI) {
 				command: params.command,
 				description,
 				cwd: ctx.cwd,
-				timeoutSeconds: params.timeout,
+				timeoutSeconds,
 				logPath,
 				onFinished: (finishedTask, summary) => {
+					const tail = tailCap(summary.output, NOTIFY_OUTPUT_CAP).trim();
+					const where = `Full output: task_output ${id}${logPath ? ` (or read ${logPath})` : ""}.`;
 					notify(
-						systemNotification(`Background bash ${id} (${description}) ${finishLine(summary, params.timeout)}.\n\n${tailCap(summary.output, NOTIFY_OUTPUT_CAP)}`),
+						systemNotification(
+							`Background bash ${id} (${description}) ${finishLine(summary, timeoutSeconds)}. ${where}${tail ? `\n\nLast output:\n${tail}` : ""}`,
+						),
 						{ taskId: id, status: finishedTask.status, exitCode: summary.exitCode, logPath },
 					);
 				},
