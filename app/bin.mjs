@@ -139,6 +139,14 @@ if (rewriteHelp || !machineOutput) {
 // --- 4. Launch pi with One Code's update check ----------------------------
 const { AssistantMessageComponent, InteractiveMode, main } = await import("@earendil-works/pi-coding-agent");
 
+// The two prototype patches below reach into pi internals that a pin bump can
+// rename. A patch that does not take falls back to stock behaviour silently for
+// users; with ONECODE_DEBUG=1 it says so, and test/unit/app-bin-patches.test.ts
+// asserts the patched members exist in the pinned build.
+const patchMissed = (what) => {
+	if (process.env.ONECODE_DEBUG) process.stderr.write(`onecode: pi internals changed, ${what} not patched (stock behaviour)\n`);
+};
+
 // Clean exit. pi 0.84.1's quit path leaves the rendered UI behind in both TUI
 // modes: fullscreen deliberately switches from the alt screen back to the
 // main-screen renderer and repaints the whole transcript into scrollback
@@ -151,6 +159,7 @@ const { AssistantMessageComponent, InteractiveMode, main } = await import("@eare
 // bump. Upstream proposal queued (an exit-preserve setting).
 try {
 	const original = InteractiveMode.prototype.stopInteractiveTui;
+	if (typeof original !== "function") patchMissed("InteractiveMode.prototype.stopInteractiveTui");
 	if (typeof original === "function") {
 		InteractiveMode.prototype.stopInteractiveTui = function stopInteractiveTuiPreserving() {
 			try {
@@ -172,6 +181,7 @@ try {
 					Number.isInteger(renderer.hardwareCursorRow) &&
 					Number.isInteger(renderer.previousViewportTop)
 				) {
+					// (renderer fields verified by app-bin-patches.test.ts against the pinned pi)
 					let buffer = "";
 					if (renderer.previousKittyImageIds && typeof renderer.deleteKittyImages === "function") {
 						buffer += renderer.deleteKittyImages(renderer.previousKittyImageIds);
@@ -186,6 +196,7 @@ try {
 			} catch {
 				// Any surprise in pi's internals: fall through to stock behavior.
 			}
+			patchMissed("renderer shape for the clean-exit path");
 			return original.call(this);
 		};
 	}
@@ -207,6 +218,7 @@ try {
 // pi's line. Exact-pinned pi keeps this stable; re-verify on every pin bump.
 try {
 	const original = AssistantMessageComponent.prototype.updateContent;
+	if (typeof original !== "function") patchMissed("AssistantMessageComponent.prototype.updateContent");
 	if (typeof original === "function") {
 		AssistantMessageComponent.prototype.updateContent = function updateContentWithoutAbortLine(message, ...rest) {
 			const hasToolCalls = Array.isArray(message?.content) && message.content.some((c) => c?.type === "toolCall");

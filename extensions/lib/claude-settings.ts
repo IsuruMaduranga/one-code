@@ -13,6 +13,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { claudeUserDir } from "./paths.ts";
 
 export interface ClaudeSettingsFile {
 	enabledPlugins?: Record<string, unknown>;
@@ -25,7 +26,7 @@ export interface ClaudeSettingsFile {
  * One Code's own keys found there) all compare against the same value.
  */
 export function claudeUserSettingsPath(home: string): string {
-	return join(home, ".claude", "settings.json");
+	return join(claudeUserDir(home), "settings.json");
 }
 
 export function settingsPaths(cwd: string, home: string): { user: string; project: string; local: string } {

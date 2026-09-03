@@ -301,12 +301,18 @@ describe("the # oneCodeMd block", () => {
 // Real-capture validation: our preamble/trailer constants and email/date framing
 // must match the wire bytes. Skips gracefully where the capture isn't present
 // (it is an internal-only file, absent from the public repo / CI).
-describe("against opus-4-8.json capture", () => {
-	const capturePath = fileURLToPath(new URL("../../opus-4-8.json", import.meta.url));
-	const run = existsSync(capturePath) ? it : it.skip;
+describe("against a real Claude Code capture", () => {
+	// Any of the internal captures will do — they share the request shape. The
+	// test skips only where none is present (CI, the public checkout); on a dev
+	// machine holding a capture it always runs, so the check is not vacuous.
+	const candidates = ["opus-4-8.json", "cc-opus-5.json", "cc-opus.json", "cc-sonnet.json", "cc-haiku.json"];
+	const capturePath = candidates
+		.map((name) => fileURLToPath(new URL(`../../${name}`, import.meta.url)))
+		.find((path) => existsSync(path));
+	const run = capturePath ? it : it.skip;
 
 	run("the claudeMd block starts/ends exactly as we assemble it", () => {
-		const payload = JSON.parse(readFileSync(capturePath, "utf8"));
+		const payload = JSON.parse(readFileSync(capturePath as string, "utf8"));
 		const block: string = payload.messages[0].content
 			.map((b: { text?: string }) => b.text ?? "")
 			.find((t: string) => t.startsWith("<system-reminder>") && t.includes("# claudeMd"));

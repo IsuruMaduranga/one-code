@@ -17,6 +17,7 @@
 
 import { lstatSync, readlinkSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { expandTilde } from "../lib/paths.ts";
 
 /**
  * Tools whose calls write to a path. Lives here — the lowest shared layer both
@@ -103,7 +104,7 @@ export function isWithin(base: string, target: string): boolean {
  */
 export function toAbsolute(cwd: string, token: string, home: string): string {
 	if (token === "~") return home;
-	if (token.startsWith("~/")) return resolve(home, token.slice(2));
+	if (token === "~" || token.startsWith("~/")) return resolve(expandTilde(token, home));
 	if (isAbsolute(token)) return resolve(token);
 	return resolve(cwd, token);
 }

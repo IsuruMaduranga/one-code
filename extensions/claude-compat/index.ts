@@ -23,6 +23,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { claudeConfigDir } from "../lib/paths.ts";
+import { claudeUserDir } from "../lib/paths.ts";
 
 /** The skill catalog shipped in this package: `<package>/skills`. */
 const BUNDLED_SKILLS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "skills");
@@ -36,7 +37,7 @@ const BUNDLED_SKILLS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "
 export function claudeResourcePaths(
 	cwd: string,
 	home: string,
-	claudeDir: string = join(home, ".claude"),
+	claudeDir: string = claudeUserDir(home),
 	bundledSkillsDir?: string,
 ): { skillPaths: string[]; promptPaths: string[] } {
 	const candidates = {

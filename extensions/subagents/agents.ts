@@ -9,7 +9,8 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
-import { parseFrontmatter } from "@earendil-works/pi-coding-agent";
+import { parseFrontmatterLoosely } from "../lib/frontmatter.ts";
+import { claudeUserDir } from "../lib/paths.ts";
 
 export interface AgentDefinition {
 	name: string;
@@ -42,33 +43,6 @@ function collectMarkdownFiles(dir: string, out: string[] = []): string[] {
 	return out;
 }
 
-/**
- * Frontmatter in the wild is not always valid YAML: real Claude Code plugin
- * agents contain unquoted descriptions with `: ` in them, which pi's parser
- * rejects ("Nested mappings are not allowed in compact mappings"). Falling back
- * to line-wise extraction keeps those definitions usable instead of dropping
- * them silently.
- */
-function parseFrontmatterLoosely(content: string): { frontmatter: Record<string, unknown>; body: string } {
-	try {
-		const parsed = parseFrontmatter(content) as { frontmatter?: Record<string, unknown>; body: string };
-		return { frontmatter: parsed.frontmatter ?? {}, body: parsed.body };
-	} catch {
-		// Fall through to the lenient path.
-	}
-
-	const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
-	if (!match) return { frontmatter: {}, body: content };
-
-	const frontmatter: Record<string, unknown> = {};
-	for (const line of match[1].split(/\r?\n/)) {
-		const keyValue = line.match(/^([A-Za-z_][A-Za-z0-9_-]*):\s*(.*)$/);
-		if (!keyValue) continue;
-		const value = keyValue[2].trim().replace(/^["']|["']$/g, "");
-		if (value) frontmatter[keyValue[1]] = value;
-	}
-	return { frontmatter, body: match[2] };
-}
 
 export function parseAgentFile(path: string, content: string): AgentDefinition | undefined {
 	const { frontmatter, body } = parseFrontmatterLoosely(content);
@@ -107,7 +81,7 @@ export function parseAgentFile(path: string, content: string): AgentDefinition |
  * project definition with the same name replaces a bundled one.
  */
 export function agentDirs(cwd: string, home: string, bundled?: string): string[] {
-	return [...(bundled ? [bundled] : []), join(home, ".claude", "agents"), join(cwd, ".claude", "agents")];
+	return [...(bundled ? [bundled] : []), join(claudeUserDir(home), "agents"), join(cwd, ".claude", "agents")];
 }
 
 /** A directory whose agents are exposed as `<namespace>:<name>` (plugins). */

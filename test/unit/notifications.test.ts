@@ -72,7 +72,7 @@ describe("createTaskNotifier", () => {
 	it("re-sends at most once, then drops the entry instead of looping a turn per settle", () => {
 		const { pi, sent, fire } = fakePi();
 		const notify = createTaskNotifier(pi);
-		notify("workflow-result", "report");
+		notify("one-code:workflow-result", "report");
 		fire("agent_settled");
 		fire("agent_settled");
 		fire("agent_settled");

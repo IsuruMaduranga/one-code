@@ -34,7 +34,7 @@ export function scratchpadDir(
  * resolved subject all name the same real location. Falls back to os.tmpdir()
  * where /tmp does not exist.
  */
-export function resolveTmpRoot(): string {
+function resolveTmpRoot(): string {
 	try {
 		return realpathSync("/tmp");
 	} catch {

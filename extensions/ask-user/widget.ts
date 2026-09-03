@@ -300,7 +300,7 @@ function advance(state: WidgetState): void {
 
 // ── answers ──────────────────────────────────────────────────────────────
 
-export function collectAnswer(question: Question, state: QuestionState): Answer {
+function collectAnswer(question: Question, state: QuestionState): Answer {
 	const labels = [...state.selected].sort((a, b) => a - b).map((index) => question.options[index].label);
 	if (state.otherChosen) labels.push(state.otherText);
 	return {
@@ -317,7 +317,7 @@ export function collectAnswers(state: WidgetState): Answer[] {
 }
 
 /** Answers for the questions already answered — what an Esc abandons. */
-export function answeredSoFar(state: WidgetState): Answer[] {
+function answeredSoFar(state: WidgetState): Answer[] {
 	return state.questions.flatMap((question, i) =>
 		isAnswered(state.qs[i]) ? [collectAnswer(question, state.qs[i])] : [],
 	);

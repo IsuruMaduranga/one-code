@@ -11,6 +11,7 @@ import { homedir } from "node:os";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { analyzeShellCommand, hasInjectionSyntax, parseCommand } from "../auto-mode/shell-analysis.ts";
 import { isProtectedPath, isWritingTool } from "./protected-paths.ts";
+import { expandTilde } from "../lib/paths.ts";
 
 export type PermissionMode = "default" | "acceptEdits" | "plan" | "bypassPermissions" | "dontAsk" | "auto";
 /** "classify" is auto mode's outcome: hand the call to the approval classifier. */
@@ -272,8 +273,8 @@ export function findBashAllowRule(rules: PermissionRule[], command: string): Per
  */
 export function matchesPathPattern(pattern: string, subject: string, cwd: string): boolean {
 	const home = homedir();
-	const expandedPattern = pattern.startsWith("~/") ? `${home}/${pattern.slice(2)}` : pattern;
-	const expandedSubject = subject === "~" ? home : subject.startsWith("~/") ? `${home}/${subject.slice(2)}` : subject;
+	const expandedPattern = expandTilde(pattern, home);
+	const expandedSubject = expandTilde(subject, home);
 
 	const candidates = new Set<string>();
 	const absolute = isAbsolute(expandedSubject) ? resolve(expandedSubject) : resolve(cwd, expandedSubject);
@@ -305,11 +306,10 @@ export function extractSubject(toolName: string, input: Record<string, unknown>)
 /** Expand a leading `~/`, resolve against cwd, and case-fold — the same shape
  * `resolveForContainment` folds its output to, so a subject compared here matches. */
 function toAbsoluteFolded(p: string, cwd: string): string {
-	const expanded = p.startsWith("~/") ? `${homedir()}/${p.slice(2)}` : p;
-	return resolve(cwd, expanded).toLowerCase();
+	return resolve(cwd, expandTilde(p, homedir())).toLowerCase();
 }
 
-export function isPlanFilePath(candidate: string, planFilePath: string, cwd: string): boolean {
+function isPlanFilePath(candidate: string, planFilePath: string, cwd: string): boolean {
 	return toAbsoluteFolded(candidate, cwd) === toAbsoluteFolded(planFilePath, cwd);
 }
 

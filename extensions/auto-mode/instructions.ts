@@ -13,6 +13,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { claudeUserDir } from "../lib/paths.ts";
 
 const FILE_NAMES = ["CLAUDE.md", "CLAUDE.local.md", "AGENTS.md"];
 
@@ -68,7 +69,7 @@ export function loadProjectInstructions(cwd: string, home: string): string | und
 		if (parent === dir) break;
 		dir = parent;
 	}
-	add(join(home, ".claude", "CLAUDE.md"));
+	add(join(claudeUserDir(home), "CLAUDE.md"));
 
 	return parts.length > 0 ? parts.join("\n\n") : undefined;
 }

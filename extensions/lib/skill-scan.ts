@@ -11,6 +11,7 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { PluginSkill } from "./plugins.ts";
 import type { SkillScope } from "./skill-overrides.ts";
+import { claudeUserDir } from "./paths.ts";
 
 export interface ScannedSkill {
 	name: string;
@@ -25,7 +26,7 @@ export interface ScannedSkill {
  * skill never shows different scopes in /plugins vs the skill tool.
  */
 export function scopeForPath(path: string, home: string, agentDir: string): SkillScope {
-	if (path.startsWith(join(home, ".claude", "skills")) || path.startsWith(join(agentDir, "skills"))) return "user";
+	if (path.startsWith(join(claudeUserDir(home), "skills")) || path.startsWith(join(agentDir, "skills"))) return "user";
 	return "project";
 }
 
@@ -49,7 +50,7 @@ function scanDir(dir: string, scope: SkillScope, into: Map<string, ScannedSkill>
 export function scanSkills(cwd: string, home: string, agentDir: string, pluginSkills: PluginSkill[]): ScannedSkill[] {
 	const skills = new Map<string, ScannedSkill>();
 	scanDir(join(cwd, ".claude", "skills"), "project", skills);
-	scanDir(join(home, ".claude", "skills"), "user", skills);
+	scanDir(join(claudeUserDir(home), "skills"), "user", skills);
 	scanDir(join(agentDir, "skills"), "user", skills);
 	for (const skill of pluginSkills) {
 		skills.set(`plugin:${skill.name}`, { name: skill.name, path: skill.path, scope: "plugin" });

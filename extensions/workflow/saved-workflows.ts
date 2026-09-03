@@ -10,6 +10,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { parseWorkflowScript } from "./script-source.ts";
 import type { SavedWorkflow } from "./types.ts";
+import { claudeUserDir } from "../lib/paths.ts";
 
 function scanDir(dir: string, source: SavedWorkflow["source"]): SavedWorkflow[] {
 	if (!existsSync(dir)) return [];
@@ -29,7 +30,7 @@ function scanDir(dir: string, source: SavedWorkflow["source"]): SavedWorkflow[] 
 }
 
 export function workflowDirs(cwd: string, home: string): { project: string; user: string } {
-	return { project: join(cwd, ".claude", "workflows"), user: join(home, ".claude", "workflows") };
+	return { project: join(cwd, ".claude", "workflows"), user: join(claudeUserDir(home), "workflows") };
 }
 
 export function discoverSavedWorkflows(cwd: string, home: string): SavedWorkflow[] {

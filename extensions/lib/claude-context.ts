@@ -34,6 +34,7 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import { tryReadFile } from "./plugins.ts";
+import { expandTilde } from "./paths.ts";
 
 /** One CLAUDE.md-family file as it appears in the block. `content` is raw (untrimmed). */
 export interface ContextFile {
@@ -115,9 +116,7 @@ function firstOneCodeFile(dir: string): string | null {
 
 /** Resolve an `@import` reference: `~`/`~/` → home, absolute as-is, else relative to `baseDir`. */
 function resolveImportPath(ref: string, baseDir: string, home: string): string {
-	let p = ref;
-	if (p === "~") p = home;
-	else if (p.startsWith("~/")) p = join(home, p.slice(2));
+	const p = expandTilde(ref, home);
 	return isAbsolute(p) ? p : join(baseDir, p);
 }
 
@@ -350,7 +349,7 @@ export function discoverContextFiles(opts: {
  * down to cwd (nearer wins). These ride in their own `# oneCodeMd` block, not the
  * `# claudeMd` block, so the latter stays byte-exact with Claude Code.
  */
-export function discoverOneCodeFilePaths(opts: { cwd: string; homeOneCodeDir: string }): ContextFilePath[] {
+function discoverOneCodeFilePaths(opts: { cwd: string; homeOneCodeDir: string }): ContextFilePath[] {
 	const paths: ContextFilePath[] = [];
 	const seen = new Set<string>();
 	const push = (path: string | null, descriptor: string) => {

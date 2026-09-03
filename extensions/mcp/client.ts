@@ -28,7 +28,7 @@ let sdkPromise:
 // unreliable — a custom-message instance would be missed).
 let unauthorizedClass: typeof import("@modelcontextprotocol/sdk/client/auth.js").UnauthorizedError | undefined;
 
-export function loadSdk() {
+function loadSdk() {
 	sdkPromise ??= Promise.all([
 		import("@modelcontextprotocol/sdk/client/index.js"),
 		import("@modelcontextprotocol/sdk/client/stdio.js"),

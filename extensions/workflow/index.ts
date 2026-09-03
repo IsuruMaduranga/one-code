@@ -219,10 +219,10 @@ export default function workflowExtension(pi: ExtensionAPI) {
 		const handle = manager.get(runId);
 		if (!handle || deliveredRuns.has(runId)) return;
 		deliveredRuns.add(runId);
-		notifyTask("workflow-result", buildRunReport(handle), { runId: handle.runId, name: handle.meta.name, status: handle.status });
+		notifyTask("one-code:workflow-result", buildRunReport(handle), { runId: handle.runId, name: handle.meta.name, status: handle.status });
 	};
 
-	pi.registerMessageRenderer("workflow-result", (message, { expanded }, theme) =>
+	pi.registerMessageRenderer("one-code:workflow-result", (message, { expanded }, theme) =>
 		notificationComponent(theme, customMessageText(message.content), expanded),
 	);
 

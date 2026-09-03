@@ -24,6 +24,7 @@ import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import type { AutoModeConfig } from "./config.ts";
 import { classifierCandidates, replyText, withAuthBaseUrl } from "./model-select.ts";
 import { buildSetupPrompt, parseGitRemotes, redactSecrets, type SetupDraft, parseSetupDraft, type SetupFacts } from "./setup.ts";
+import { claudeUserDir } from "../lib/paths.ts";
 
 const PROBE_TIMEOUT_MS = 10_000;
 /** Drafting reads a big fact dump and writes a full slot list — give it room. */
@@ -157,7 +158,7 @@ export async function gatherFacts(options: GatherOptions): Promise<SetupFacts> {
 		repoNameWithOwner,
 		defaultBranch,
 		claudeMdProject: readIfPresent(join(gitRoot || cwd, "CLAUDE.md"), CLAUDE_MD_LIMIT, notes, "project CLAUDE.md"),
-		claudeMdGlobal: readIfPresent(join(home, ".claude", "CLAUDE.md"), CLAUDE_MD_LIMIT, notes, "global CLAUDE.md"),
+		claudeMdGlobal: readIfPresent(join(claudeUserDir(home), "CLAUDE.md"), CLAUDE_MD_LIMIT, notes, "global CLAUDE.md"),
 		shellHistory,
 		permissionsAllow,
 		gatherNotes: notes,

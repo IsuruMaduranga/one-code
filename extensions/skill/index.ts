@@ -14,7 +14,7 @@
 import { readFileSync } from "node:fs";
 import os from "node:os";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { getAgentDir, parseFrontmatter, stripFrontmatter } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, stripFrontmatter } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { pluginRoot } from "../lib/plugin-root.ts";
 import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
@@ -36,6 +36,7 @@ import { decodeSkillsKey } from "./panel/keys.ts";
 import { skillListingText } from "./listing.ts";
 import { renderSkillsPanel, type SkillsPaint } from "./panel/render.ts";
 import { applySkillsKey, initialSkillsState, type SkillsRow, visibleRows } from "./panel/state.ts";
+import { parseFrontmatterLoosely } from "../lib/frontmatter.ts";
 
 interface IndexedSkill {
 	name: string;
@@ -101,7 +102,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 	};
 	const readDescriptionUncached = (path: string): string | undefined => {
 		try {
-			const { frontmatter } = parseFrontmatter(readFileSync(path, "utf-8")) as {
+			const { frontmatter } = parseFrontmatterLoosely(readFileSync(path, "utf-8")) as {
 				frontmatter?: { description?: unknown };
 			};
 			return typeof frontmatter?.description === "string" ? frontmatter.description : undefined;
@@ -233,7 +234,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 
 			let body: string;
 			try {
-				const parsed = parseFrontmatter(readFileSync(found.path, "utf-8")) as { body: string };
+				const parsed = parseFrontmatterLoosely(readFileSync(found.path, "utf-8")) as { body: string };
 				body = parsed.body.trim();
 			} catch (error) {
 				return {
@@ -305,7 +306,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 		// Carry any attached images alongside the block, as pi's native path would.
 		const content = event.images?.length ? [{ type: "text" as const, text: block }, ...event.images] : block;
 		pi.sendMessage(
-			{ customType: "skill-invocation", content, display: false, details: { skill: found.name, args: cmd.args } },
+			{ customType: "one-code:skill-invocation", content, display: false, details: { skill: found.name, args: cmd.args } },
 			{ triggerTurn: true, ...(event.streamingBehavior ? { deliverAs: event.streamingBehavior } : {}) },
 		);
 		return { action: "handled" };

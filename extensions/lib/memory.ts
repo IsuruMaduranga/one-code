@@ -19,6 +19,7 @@
 import os from "node:os";
 import { join } from "node:path";
 import { findGitRoot } from "./git.ts";
+import { claudeUserDir } from "./paths.ts";
 
 /** Claude Code's project-directory slug: every char outside [A-Za-z0-9-] becomes "-". */
 export function projectSlug(projectRoot: string): string {
@@ -31,7 +32,7 @@ export function projectSlug(projectRoot: string): string {
  * worktrees and subdirectories share one memory directory), else the cwd.
  */
 export function memoryDir(home: string, projectRoot: string): string {
-	return join(home, ".claude", "projects", projectSlug(projectRoot), "memory");
+	return join(claudeUserDir(home), "projects", projectSlug(projectRoot), "memory");
 }
 
 /**

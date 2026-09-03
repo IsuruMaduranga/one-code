@@ -353,7 +353,7 @@ function buildStructuredOutputTool(schema: Record<string, unknown>, capture: { c
 }
 
 /** Pull the first parseable JSON object/array out of free text (```json fences first). */
-export function extractJsonObject(text: string): unknown {
+function extractJsonObject(text: string): unknown {
 	const fenced = text.match(/```(?:json)?\s*\n([\s\S]*?)\n```/);
 	const braceIndex = text.indexOf("{");
 	const bracketIndex = text.indexOf("[");

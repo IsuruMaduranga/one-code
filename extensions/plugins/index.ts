@@ -20,7 +20,7 @@ import { execFile } from "node:child_process";
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { getAgentDir, parseFrontmatter } from "@earendil-works/pi-coding-agent";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readFavorites, toggleFavorite } from "../lib/favorites.ts";
 import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } from "../lib/mcp-status.ts";
@@ -62,6 +62,7 @@ import { type DiscoverDetail, renderPanel, type PanelPaint } from "./panel/rende
 import { buildDiscoverRows, buildInstalledRows, buildMarketplaceRows, type DiscoverRow } from "./panel/rows.ts";
 import { applyPanelKey, initialPanelState, type PanelEffect, type PanelView } from "./panel/state.ts";
 import { findShellPlaceholders, replaceShellPlaceholders, substituteArguments } from "./template.ts";
+import { parseFrontmatterLoosely } from "../lib/frontmatter.ts";
 
 const run = promisify(execFile);
 const SHELL_TIMEOUT_MS = 30_000;
@@ -107,7 +108,11 @@ export default function pluginsExtension(pi: ExtensionAPI) {
 	const registerCommands = (plugins: DiscoveredPlugins) => {
 		for (const command of plugins.commands) {
 			if (registeredCommands.has(command.name)) continue;
-			const plugin = plugins.plugins.find((p) => p.name === command.plugin);
+			// Two marketplaces may ship a plugin of the same name (they are keyed by
+			// `<name>@<marketplace>`); the command belongs to the ENABLED one.
+			const plugin =
+				plugins.plugins.find((p) => p.name === command.plugin && p.enabled) ??
+				plugins.plugins.find((p) => p.name === command.plugin);
 			if (!plugin) continue;
 			registeredCommands.add(command.name);
 			registerPluginCommand(pi, plugin, command.name, command.path);
@@ -496,7 +501,7 @@ function registerPluginCommand(pi: ExtensionAPI, plugin: Plugin, name: string, p
 	let description = `Command from the ${plugin.name} plugin`;
 	let argumentHint: string | undefined;
 	try {
-		const { frontmatter } = parseFrontmatter(readFileSync(path, "utf-8")) as {
+		const { frontmatter } = parseFrontmatterLoosely(readFileSync(path, "utf-8")) as {
 			frontmatter?: Record<string, unknown>;
 		};
 		if (typeof frontmatter?.description === "string") description = frontmatter.description;
@@ -510,7 +515,7 @@ function registerPluginCommand(pi: ExtensionAPI, plugin: Plugin, name: string, p
 		handler: async (args, ctx) => {
 			let body: string;
 			try {
-				const parsed = parseFrontmatter(readFileSync(path, "utf-8")) as { body: string };
+				const parsed = parseFrontmatterLoosely(readFileSync(path, "utf-8")) as { body: string };
 				body = parsed.body;
 			} catch (error) {
 				ctx.ui.notify(`Could not read ${path}: ${(error as Error).message}`, "error");

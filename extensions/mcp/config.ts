@@ -12,6 +12,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { claudeJsonPath } from "../lib/paths.ts";
 
 export interface StdioServer {
 	kind: "stdio";
@@ -149,7 +150,7 @@ export function findProjectConfigs(cwd: string): string[] {
 }
 
 export function configPaths(cwd: string, home: string): string[] {
-	return [join(home, ".claude.json"), ...findProjectConfigs(cwd), join(cwd, ".claude", "settings.local.json")];
+	return [claudeJsonPath(home), ...findProjectConfigs(cwd), join(cwd, ".claude", "settings.local.json")];
 }
 
 /**

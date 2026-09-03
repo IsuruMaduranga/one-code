@@ -131,7 +131,7 @@ function formatEvent(event: RunProgressEvent): string | undefined {
 }
 
 /** Immutable view of a run for the pure renderers (viewer + status strip). */
-export function snapshotRun(handle: RunHandle): ViewerRunSnapshot {
+function snapshotRun(handle: RunHandle): ViewerRunSnapshot {
 	return {
 		runId: handle.runId,
 		name: handle.meta.name,
@@ -319,7 +319,7 @@ export class WorkflowRunManager {
 	}
 }
 
-export function defaultConcurrency(): number {
+function defaultConcurrency(): number {
 	return Math.min(MAX_CONCURRENCY, Math.max(1, os.cpus().length - 2));
 }
 

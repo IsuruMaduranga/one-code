@@ -63,6 +63,22 @@ Set these before launching to change behavior:
 | `CC_RECAP=0` | Turn off the "while you were away" recap. |
 | `CC_RECAP_IDLE_MS` | Idle time in milliseconds before the recap triggers. |
 | `CC_TURN_DURATION=0` | Turn off the line that reports how long a turn took. |
+| `CC_FOOTER=0` | Keep pi's built-in footer instead of One Code's status line. |
+| `CC_COMPACTION=0` | Use pi's own compaction summary instead of the Claude Code-style one. |
+| `CC_TOTAL_TOKENS=0` | Stop appending the `<total_tokens>` budget line to tool results. |
+| `CC_PROMPT_TIER=frontier\|workhorse\|cheap\|tiny` | Force a system-prompt register instead of deriving it from the model. |
+| `CC_PERMISSION_MODE` | Starting permission mode (`default`, `acceptEdits`, `plan`, `bypassPermissions`, `dontAsk`, `auto`); the `--permission-mode` flag wins. One Code keeps it updated with the live mode while running. |
+| `CC_NO_INPUT_MARKER=1` / `CC_NO_ASSISTANT_MARKER=1` | Drop the `>` input marker / the `⏺` assistant marker in the transcript. |
+| `CC_HOOKS_DEBUG=1` | Print hook dispatch details to stderr. |
+| `CC_AUTO_MODE_DEBUG=1` | Print auto-mode classifier verdicts (stage, severity, rule) to stderr. |
+| `CC_VERSION` | Version shown in the banner (the bundled app sets it to its own version). |
+| `ONECODE_NO_UPDATE_CHECK=1` | Skip the daily npm update check (`--offline`/`PI_OFFLINE=1` also skip it). |
+| `ONECODE_STATE_DIR` | Where One Code keeps its own state (default `~/.onecode`). |
+| `ONECODE_DEBUG=1` | Report when a pi-internal patch in the bundled app did not take. |
+| `CLAUDE_CONFIG_DIR` | Honoured like Claude Code does: relocates the user-scope `.claude` dir and `.claude.json`. |
+
+The `CC_` prefix is historical (the project began as a Claude Code recreation);
+`ONECODE_`-prefixed aliases for every knob are planned before 1.0.
 
 ## Themes
 

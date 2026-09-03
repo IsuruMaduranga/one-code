@@ -31,7 +31,7 @@ import { clampOffset, decodeViewerKey, initialPlanChoice, type PlanChoice, rende
 import { MODE_CHANNEL, PLAN_FILE_CHANNEL } from "../lib/plan-mode-channels.ts";
 export { MODE_CHANNEL, PLAN_FILE_CHANNEL };
 /** Session entry type persisting the allocated path across resume/branch. */
-const PLAN_FILE_ENTRY = "plan-mode-file";
+const PLAN_FILE_ENTRY = "one-code:plan-mode-file";
 
 const PLANS_DIR = () => join(oneCodeStateDir(), "plans");
 

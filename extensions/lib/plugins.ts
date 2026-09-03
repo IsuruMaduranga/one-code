@@ -36,6 +36,7 @@ import { readEnabledPlugins } from "./claude-settings.ts";
 import { readOverrides } from "./plugin-overrides.ts";
 import { pluginRoot } from "./plugin-root.ts";
 import { isSkillEnabled, readSkillStates, skillOverrideKey } from "./skill-overrides.ts";
+import { claudeUserDir } from "./paths.ts";
 
 export interface PluginManifest {
 	name?: string;
@@ -223,7 +224,7 @@ export interface DiscoverRoots {
 /** The standard roots; wiring passes `getAgentDir()` (pure modules can't). */
 export function defaultDiscoverRoots(agentDir: string, cwd: string = process.cwd(), home: string = os.homedir()): DiscoverRoots {
 	return {
-		claudePluginsDir: join(home, ".claude", "plugins"),
+		claudePluginsDir: join(claudeUserDir(home), "plugins"),
 		oneCodeRoot: pluginRoot(agentDir),
 		cwd,
 		home,
@@ -276,21 +277,30 @@ export interface DiscoveredPlugins {
 	byPlugin: Map<string, { agents: boolean; skills: number; commands: number; mcp: boolean; lsp: boolean }>;
 }
 
-let cache: { key: string; result: DiscoveredPlugins } | undefined;
+/**
+ * ONE discovery cache for the whole process. Seven extensions import this
+ * module (branding, hooks, lsp, mcp, plugins, skill, subagents) and jiti gives
+ * each its own module instance, so a module-level variable meant seven full
+ * disk scans at startup and an invalidation that cleared only the caller's
+ * copy. The cache therefore hangs off `globalThis` under a symbol: a pure
+ * memo of filesystem state (not steering state — the module-isolation rule in
+ * CLAUDE.md is about *that*), read-through, cleared everywhere at once.
+ */
+const CACHE_SLOT = Symbol.for("one-code:plugins-discovery-cache");
+type CacheBox = { current?: { key: string; result: DiscoveredPlugins } };
+const box: CacheBox = ((globalThis as Record<symbol, unknown>)[CACHE_SLOT] ??= {}) as CacheBox;
 
 /**
- * Drops this module instance's discovery cache. Only affects the calling
- * extension's own jiti module graph — other extensions' copies re-read on
- * their next session; the /plugins panel calls this after installs/toggles so
- * its own next discoverPlugins() reflects them immediately.
+ * Drops the process-wide discovery cache; the /plugins panel calls this after
+ * installs/toggles so every extension's next discoverPlugins() reflects them.
  */
 export function invalidatePluginsCache(): void {
-	cache = undefined;
+	box.current = undefined;
 }
 
 export function discoverPlugins(roots: DiscoverRoots): DiscoveredPlugins {
 	const key = [roots.claudePluginsDir, roots.oneCodeRoot, roots.cwd, roots.home].join("\n");
-	if (cache?.key === key) return cache.result;
+	if (box.current?.key === key) return box.current.result;
 
 	const ccEnabled = readEnabledPlugins(roots.cwd, roots.home);
 	const overrides = readOverrides(roots.oneCodeRoot);
@@ -352,6 +362,6 @@ export function discoverPlugins(roots: DiscoverRoots): DiscoveredPlugins {
 		}
 	}
 
-	cache = { key, result };
+	box.current = { key, result };
 	return result;
 }

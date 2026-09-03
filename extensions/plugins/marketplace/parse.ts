@@ -14,6 +14,7 @@ import { existsSync, statSync } from "node:fs";
 import os from "node:os";
 import { basename, isAbsolute, resolve } from "node:path";
 import type { MarketplaceSource } from "./types.ts";
+import { expandTilde } from "../../lib/paths.ts";
 
 export interface ParsedMarketplaceInput {
 	source: MarketplaceSource;
@@ -66,9 +67,10 @@ export function parseMarketplaceInput(input: string, cwd: string): ParsedMarketp
 	}
 
 	const looksLikePath =
-		trimmed.startsWith("./") || trimmed.startsWith("../") || trimmed.startsWith("~") || isAbsolute(trimmed);
+		trimmed.startsWith("./") || trimmed.startsWith("../") || trimmed === "~" || trimmed.startsWith("~/") || isAbsolute(trimmed);
 	if (looksLikePath) {
-		const expanded = trimmed.startsWith("~") ? trimmed.replace(/^~/, os.homedir()) : trimmed;
+		// `~user` is deliberately not a path here: never guess another user's home.
+		const expanded = expandTilde(trimmed, os.homedir());
 		const path = resolve(cwd, expanded);
 		if (!existsSync(path)) return { error: `Path does not exist: ${path}` };
 		if (statSync(path).isDirectory()) {

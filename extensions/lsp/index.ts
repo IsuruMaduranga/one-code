@@ -41,7 +41,7 @@ import {
 import { findProjectRoot, serverForPath, typescriptPreflight } from "./servers.ts";
 import { computeDelta, DeliveredTracker, fingerprintDiagnostic, formatNewDiagnostics, markDelivered } from "./watcher.ts";
 
-const NEW_DIAGNOSTICS_TYPE = "lsp-new-diagnostics";
+const NEW_DIAGNOSTICS_TYPE = "one-code:lsp-new-diagnostics";
 
 /** Everything needed to spawn/reuse the server responsible for a path. */
 interface ResolvedTarget {

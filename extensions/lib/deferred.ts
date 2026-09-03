@@ -46,7 +46,9 @@ export class DeferredRegistry {
 	}
 }
 
-export const deferredRegistry = new DeferredRegistry();
+// The one registry instance is constructed by its owner (tool-search/index.ts):
+// a shared export here would be a distinct object in every other extension's
+// jiti module graph, and a tool deferred through that copy would steer nothing.
 
 /**
  * The every-turn reminder telling the model which tools exist but are not

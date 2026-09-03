@@ -29,7 +29,7 @@ import { Type } from "typebox";
 import {
 	DEFER_CHANNEL,
 	deferredMissReminderText,
-	deferredRegistry,
+	DeferredRegistry,
 	deferredReminderText,
 	type DeferRequest,
 	resultText,
@@ -45,6 +45,8 @@ import { ccToolRenderers } from "../lib/tui-render.ts";
 const ANNOUNCE_DEBOUNCE_MS = 100;
 
 export default function toolSearchExtension(pi: ExtensionAPI) {
+	// Owned here (see lib/deferred.ts): the only instance, fed over DEFER_CHANNEL.
+	const deferredRegistry = new DeferredRegistry();
 	let sessionStarted = false;
 	// The deferred-tools listing is a first-prepend reminder on message 1: every
 	// change to it invalidates the cached prefix from message 1 down. MCP servers

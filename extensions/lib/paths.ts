@@ -21,6 +21,36 @@ export function claudeConfigDir(env: Record<string, string | undefined> = proces
 }
 
 /**
+ * The user-scope Claude Code dir for a given `home` — `claudeConfigDir` for
+ * callers that thread a `home` (tests, `~`-expansion). `CLAUDE_CONFIG_DIR`
+ * still wins, exactly as Claude Code honours it; project-scope `<cwd>/.claude`
+ * is never relocated by that variable, so callers keep spelling that one out.
+ */
+export function claudeUserDir(home: string, env: Record<string, string | undefined> = process.env): string {
+	return env.CLAUDE_CONFIG_DIR || join(home, ".claude");
+}
+
+/**
+ * Claude Code's `.claude.json` (MCP servers, onboarding state): beside the
+ * home dir by default, and INSIDE `CLAUDE_CONFIG_DIR` when that is set — the
+ * one user-scope file that does not live under `~/.claude`.
+ */
+export function claudeJsonPath(home: string, env: Record<string, string | undefined> = process.env): string {
+	return env.CLAUDE_CONFIG_DIR ? join(env.CLAUDE_CONFIG_DIR, ".claude.json") : join(home, ".claude.json");
+}
+
+/**
+ * Shell-style `~` expansion with one semantics everywhere: a bare `~` is
+ * `home`, `~/x` is under it, and `~user` is left alone (no other user's home is
+ * ever guessed). Anything else is returned unchanged.
+ */
+export function expandTilde(path: string, home: string): string {
+	if (path === "~") return home;
+	if (path.startsWith("~/")) return join(home, path.slice(2));
+	return path;
+}
+
+/**
  * One Code's own state dir — everything One Code generates goes here. `home`
  * defaults to the real home; callers that already thread a `home` (the settings
  * loaders, hermetic in tests) pass it so the root stays under that home when
