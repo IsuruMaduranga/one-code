@@ -197,6 +197,20 @@ export default function mcpExtension(pi: ExtensionAPI) {
 		failures = failures.filter((f) => f.server.name !== server.name);
 		oauthNeeded.delete(server.name);
 		connections.set(server.name, connection);
+		// A server that dies (or drops the HTTP session) mid-session must not keep
+		// reading "connected" with a stale tool count; its tools stay registered
+		// and answer "not connected" until Reconnect in /mcp.
+		connection.client.onclose = () => {
+			if (connection.closing || shuttingDown) return;
+			if (connections.get(server.name) !== connection) return;
+			connections.delete(server.name);
+			const tail = connection.stderrTail();
+			failures.push({
+				server,
+				error: `connection closed by the server${tail ? `\nserver stderr: ${tail.slice(-1_000)}` : ""}`,
+			});
+			emitInstructions();
+		};
 		registerToolsFor(connection);
 		for (const warning of connection.warnings) failures.push({ server, error: warning });
 		if (connection.resources.length > 0) registerResourceTools();

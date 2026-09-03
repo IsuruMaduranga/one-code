@@ -37,11 +37,25 @@ import {
 	selectedNames,
 	toolNotFoundName,
 } from "../lib/deferred.ts";
+import { MCP_TOOLS_CHANNEL, type McpToolsPayload } from "../lib/mcp-share.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 
+/** Coalesces the burst of per-tool defers one server emits into one listing update. */
+const ANNOUNCE_DEBOUNCE_MS = 100;
+
 export default function toolSearchExtension(pi: ExtensionAPI) {
 	let sessionStarted = false;
+	// The deferred-tools listing is a first-prepend reminder on message 1: every
+	// change to it invalidates the cached prefix from message 1 down. MCP servers
+	// connect in the background and defer their tools one at a time, so once a
+	// request has gone out the listing is held until the connect settles and then
+	// updated once (review M7). Before the first request there is nothing cached,
+	// and after settle a late defer (a /mcp reconnect) is the user's own action.
+	let requestSent = false;
+	let mcpSettled = false;
+	let announcePending = false;
+	let announceTimer: NodeJS.Timeout | undefined;
 
 	const searchableTools = () =>
 		pi
@@ -65,6 +79,32 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		});
 	};
 
+	const scheduleAnnounce = () => {
+		if (requestSent && !mcpSettled) {
+			announcePending = true;
+			return;
+		}
+		if (announceTimer) clearTimeout(announceTimer);
+		announceTimer = setTimeout(() => {
+			announceTimer = undefined;
+			announceDeferred();
+		}, ANNOUNCE_DEBOUNCE_MS);
+		announceTimer.unref?.();
+	};
+
+	pi.events.on(MCP_TOOLS_CHANNEL, (data) => {
+		if (!(data as McpToolsPayload | undefined)?.settled) return;
+		mcpSettled = true;
+		if (announcePending) {
+			announcePending = false;
+			announceDeferred();
+		}
+	});
+
+	pi.on("context", () => {
+		requestSent = true;
+	});
+
 	/** Deactivate every deferred-registry tool and announce the loadable set. */
 	const deferAll = () => {
 		const deferred = new Set(deferredRegistry.names);
@@ -87,7 +127,9 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 			if (active.includes(request.name)) {
 				pi.setActiveTools(active.filter((name) => name !== request.name));
 			}
-			announceDeferred();
+			// The tool is searchable (keyword search reads the registry) from now;
+			// only the standing listing waits.
+			scheduleAnnounce();
 		}
 	});
 

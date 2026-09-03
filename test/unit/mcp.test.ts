@@ -10,6 +10,7 @@ import {
 	namespacedToolName,
 	parseNamespacedToolName,
 } from "../../extensions/mcp/schema.ts";
+import { createTailBuffer } from "../../extensions/mcp/client.ts";
 
 describe("expandEnv", () => {
 	it("expands both $VAR and ${VAR}", () => {
@@ -247,3 +248,13 @@ describe("mcpInstructionsReminder", () => {
 		expect(long!.length).toBeLessThan(4000);
 	});
 });
+
+describe("createTailBuffer", () => {
+	it("keeps only the last `cap` characters and trims", () => {
+		const tail = createTailBuffer(10);
+		tail.push("abcdefgh");
+		tail.push(Buffer.from("ijklmn\n"));
+		expect(tail.text()).toBe("fghijklmn");
+	});
+});
+

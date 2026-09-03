@@ -71,6 +71,37 @@ export interface Connection {
 	instructions?: string;
 	/** Non-fatal problems after a successful connect (e.g. listTools failed). */
 	warnings: string[];
+	/** The last few KB the server wrote to stderr (stdio servers), for failure messages. */
+	stderrTail: () => string;
+	/** Set by `close()` so the transport's onclose callback can tell our close from the server's. */
+	closing?: boolean;
+}
+
+const STDERR_TAIL_CAP = 8_000;
+
+/**
+ * A bounded tail of a stream's text. The SDK's `stderr: "pipe"` hands back a
+ * PassThrough that nobody read: once its 16 KB buffer filled, a chatty server
+ * blocked on write(2) and the connection hung until the call timeout (review
+ * M2). Draining into a small ring keeps the server running and gives failure
+ * messages the server's own last words.
+ */
+export function createTailBuffer(cap = STDERR_TAIL_CAP): { push(chunk: string | Uint8Array): void; text(): string } {
+	let text = "";
+	return {
+		push(chunk) {
+			text += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+			if (text.length > cap) text = text.slice(-cap);
+		},
+		text: () => text.trim(),
+	};
+}
+
+/** `error`'s message with the server's stderr tail appended, when there is one. */
+function withStderr(message: string, tail: string): string {
+	if (!tail) return message;
+	const shown = tail.length > 1_000 ? `…${tail.slice(-1_000)}` : tail;
+	return `${message}\nserver stderr: ${shown}`;
 }
 
 export interface FailedConnection {
@@ -109,23 +140,28 @@ function buildTransport(
 	server: McpServer,
 	sdk: Awaited<ReturnType<typeof loadSdk>>,
 	authProvider?: OAuthClientProvider,
-): Transport {
+): { transport: Transport; stderrTail: () => string } {
+	const tail = createTailBuffer();
 	if (server.kind === "stdio") {
-		return new sdk.StdioClientTransport({
+		const transport = new sdk.StdioClientTransport({
 			command: server.command,
 			args: server.args,
 			env: { ...(process.env as Record<string, string>), ...(server.env ?? {}) },
 			stderr: "pipe",
 		});
+		// The PassThrough exists before start(); drain it from the first byte.
+		transport.stderr?.on("data", (chunk: string | Uint8Array) => tail.push(chunk));
+		return { transport, stderrTail: tail.text };
 	}
-	return new sdk.StreamableHTTPClientTransport(new URL(server.url), {
+	const transport = new sdk.StreamableHTTPClientTransport(new URL(server.url), {
 		authProvider,
 		requestInit: server.headers ? { headers: server.headers } : undefined,
 	});
+	return { transport, stderrTail: tail.text };
 }
 
 /** List a connected client's tools and resources into a Connection. */
-async function finalizeConnection(client: Client, server: McpServer): Promise<Connection> {
+async function finalizeConnection(client: Client, server: McpServer, stderrTail: () => string = () => ""): Promise<Connection> {
 	const warnings: string[] = [];
 
 	// Each list call can take up to CONNECT_TIMEOUT_MS on a slow server; run
@@ -158,7 +194,7 @@ async function finalizeConnection(client: Client, server: McpServer): Promise<Co
 
 	const instructions = client.getInstructions()?.trim() || undefined;
 
-	return { server, client, tools, resources, instructions, warnings };
+	return { server, client, tools, resources, instructions, warnings, stderrTail };
 }
 
 /**
@@ -169,16 +205,41 @@ async function finalizeConnection(client: Client, server: McpServer): Promise<Co
  * mark a server "needs authentication" without an interactive redirect.
  */
 /** Load the SDK and build a client + transport pair for a server. */
-async function openClient(server: McpServer, authProvider?: OAuthClientProvider): Promise<{ client: Client; transport: Transport }> {
+async function openClient(
+	server: McpServer,
+	authProvider?: OAuthClientProvider,
+): Promise<{ client: Client; transport: Transport; stderrTail: () => string }> {
 	const sdk = await loadSdk();
 	const client = new sdk.Client({ name: "one-code", version: "0.1.0" }, { capabilities: {} });
-	return { client, transport: buildTransport(server, sdk, authProvider) };
+	return { client, ...buildTransport(server, sdk, authProvider) };
+}
+
+/**
+ * Connect with the timeout, and on ANY failure close the transport before
+ * rethrowing: a timed-out connect otherwise left the child process / HTTP
+ * session alive with nobody holding it (review M5). Non-auth errors carry the
+ * server's stderr tail; an UnauthorizedError is rethrown untouched so
+ * `isUnauthorized` (an instanceof check) still recognises it.
+ */
+async function connectOrClose(
+	client: Client,
+	transport: Transport,
+	server: McpServer,
+	stderrTail: () => string,
+): Promise<void> {
+	try {
+		await withTimeout(client.connect(transport), CONNECT_TIMEOUT_MS, `connecting to "${server.name}"`);
+	} catch (error) {
+		await transport.close().catch(() => {});
+		if (isUnauthorized(error)) throw error;
+		throw new Error(withStderr((error as Error).message, stderrTail()));
+	}
 }
 
 export async function connect(server: McpServer, authProvider?: OAuthClientProvider): Promise<Connection> {
-	const { client, transport } = await openClient(server, authProvider);
-	await withTimeout(client.connect(transport), CONNECT_TIMEOUT_MS, `connecting to "${server.name}"`);
-	return finalizeConnection(client, server);
+	const { client, transport, stderrTail } = await openClient(server, authProvider);
+	await connectOrClose(client, transport, server, stderrTail);
+	return finalizeConnection(client, server, stderrTail);
 }
 
 /**
@@ -195,13 +256,16 @@ export async function beginInteractiveAuth(
 	authProvider: OAuthClientProvider,
 ): Promise<{ transport: StreamableHTTPClientTransport } | { connection: Connection }> {
 	if (server.kind !== "http") throw new Error(`OAuth is only available for http MCP servers; "${server.name}" is stdio.`);
-	const { client, transport: baseTransport } = await openClient(server, authProvider);
+	const { client, transport: baseTransport, stderrTail } = await openClient(server, authProvider);
 	const transport = baseTransport as StreamableHTTPClientTransport;
 	try {
+		// Not connectOrClose: on a 401 the transport must stay open — it carries
+		// the OAuth flow state the caller finishes with finishAuth(code).
 		await withTimeout(client.connect(transport), CONNECT_TIMEOUT_MS, `connecting to "${server.name}"`);
-		return { connection: await finalizeConnection(client, server) };
+		return { connection: await finalizeConnection(client, server, stderrTail) };
 	} catch (error) {
 		if (isUnauthorized(error)) return { transport };
+		await transport.close().catch(() => {});
 		throw error;
 	}
 }
@@ -269,6 +333,7 @@ export async function readResourceDir(connection: Connection, uri: string): Prom
 }
 
 export async function close(connection: Connection): Promise<void> {
+	connection.closing = true;
 	try {
 		await withTimeout(connection.client.close(), 3000, "closing connection");
 	} catch {
