@@ -85,8 +85,21 @@ export default function skillExtension(pi: ExtensionAPI) {
 		}
 	});
 
-	/** Description first line from a SKILL.md, for skills pi hasn't resolved yet. */
+	/**
+	 * Description from a SKILL.md frontmatter, for skills pi hasn't resolved (the
+	 * pre-first-turn scan) and for plugin skills (discoverPlugins carries none).
+	 * Cached per path: the listing is rebuilt every turn and a description is
+	 * stable for the session anyway (the listing must stay byte-stable for the
+	 * cache prefix).
+	 */
+	const descriptionCache = new Map<string, string | undefined>();
 	const readDescription = (path: string): string | undefined => {
+		if (descriptionCache.has(path)) return descriptionCache.get(path);
+		const description = readDescriptionUncached(path);
+		descriptionCache.set(path, description);
+		return description;
+	};
+	const readDescriptionUncached = (path: string): string | undefined => {
 		try {
 			const { frontmatter } = parseFrontmatter(readFileSync(path, "utf-8")) as {
 				frontmatter?: { description?: unknown };
@@ -132,6 +145,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 		// aren't governed by skillOverrides — managed via /plugins).
 		const plugin = discoverPlugins(defaultDiscoverRoots(agentDir, cwd, home)).skills.map((skill) => ({
 			name: skill.name,
+			description: readDescription(skill.path),
 			path: skill.path,
 			source: "plugin" as const,
 			scope: "plugin" as const,
@@ -143,13 +157,17 @@ export default function skillExtension(pi: ExtensionAPI) {
 
 	// The model's listing honors the state: "on" carries name + description,
 	// "name-only" carries just the name (saving context tokens), and "user-only"
-	// / "off" are hidden so the model won't auto-trigger them.
+	// / "off" are hidden so the model won't auto-trigger them. The description
+	// goes in whole, newlines included, the way Claude Code lists it: a skill
+	// written with a YAML block description puts its "Use when…" trigger on the
+	// later lines, and a first-line-only listing dropped exactly the sentence
+	// that tells the model when to reach for the skill.
 	const listingText = (skills: IndexedSkill[]): string => {
 		const lines = skills.flatMap((skill) => {
 			const visibility = skillListingVisibility(skill.state);
 			if (visibility === "hidden") return [];
 			if (visibility === "name") return [`- ${skill.name}`];
-			return [`- ${skill.name}${skill.description ? `: ${skill.description.split("\n")[0]}` : ""}`];
+			return [`- ${skill.name}${skill.description?.trim() ? `: ${skill.description.trim()}` : ""}`];
 		});
 		return lines.length === 0 ? "(no skills available)" : lines.join("\n");
 	};
