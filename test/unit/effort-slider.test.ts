@@ -190,7 +190,7 @@ describe("renderEffortSlider", () => {
 		expect(out).toContain("Faster");
 		expect(out).toContain("Smarter");
 		for (const choice of EFFORT_CHOICES) expect(out).toContain(choice);
-		expect(out).toContain("←/→ adjust");
+		expect(out).toContain("←/→ or h/l adjust");
 		expect(out).toContain("Enter confirm");
 		expect(out).toContain("Esc cancel");
 		// Says which key does the same job, so the two dials don't look unrelated.

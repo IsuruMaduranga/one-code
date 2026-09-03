@@ -5,9 +5,12 @@
  *
  * pi's footer only ever sees the main session's usage. Here the cost figure is a
  * true total: the main session (from its entries, exactly as pi computes it)
- * plus every out-of-band LLM call reported on the usage bus (in-process
- * subagents, the auto-mode classifier, and the reader-style one-shots — web-fetch,
- * recap, and auto-mode setup — via the shared withReasoningFallback wrapper). The effort label
+ * plus every out-of-band LLM call (in-process subagents, the auto-mode
+ * classifier, and the reader-style one-shots — web-fetch, recap, and auto-mode
+ * setup — via the shared withReasoningFallback wrapper). Those are persisted as
+ * `one-code:usage` session entries by `recordUsage`, so the total survives a
+ * `--continue`/`--session` restart; the usage bus is only the live repaint
+ * signal. The effort label
  * after the model reads the live thinking level, and swaps to "✦ ultracode" when
  * the effort extension has published that status.
  *
@@ -18,20 +21,19 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { linesComponent, safeThemePaint } from "../lib/tui-render.ts";
 import { formatModel } from "../permissions/modes.ts";
 import { ULTRACODE_STATUS_KEY } from "../effort/slider.ts";
-import { USAGE_CHANNEL, type UsageRecord } from "../lib/usage-bus.ts";
+import { USAGE_CHANNEL } from "../lib/usage-bus.ts";
 import { buildFooterLines, computeMainUsage, type FooterData } from "./footer-line.ts";
 import { fetchPrNumber } from "./pr.ts";
 
 export default function footerExtension(pi: ExtensionAPI) {
 	if (process.env.CC_FOOTER === "0") return;
 
-	// Out-of-band cost accumulated from the usage bus, on top of the main-session
-	// total. Reset per session so the footer tracks the current session.
-	let extraCost = 0;
-	// Main-session cost + latest cache-hit, recomputed only when the main session's
-	// own entries change (message_end/agent_end) — an O(n) transcript scan that must
-	// NOT run on every repaint (usage-bus/model/effort events change neither).
+	// All-in cost + latest cache-hit, recomputed only when the session's entries
+	// change (message_end/agent_end, and a usage entry landing) — an O(n)
+	// transcript scan that must NOT run on every repaint (model/effort events
+	// change no entry).
 	let mainUsage: { cost: number; cacheHitPercent?: number } = { cost: 0 };
+	let lastCtx: ExtensionContext | undefined;
 	let pr: number | undefined;
 	/** Bumped per branch change so a slow gh lookup for an old branch is ignored. */
 	let prToken = 0;
@@ -40,17 +42,19 @@ export default function footerExtension(pi: ExtensionAPI) {
 	let repaint = () => {};
 
 	const recomputeMain = (ctx: ExtensionContext) => {
+		lastCtx = ctx;
 		mainUsage = computeMainUsage(ctx.sessionManager.getEntries());
 	};
 
-	// Known limitation: a background subagent spawned before a /clear (newSession)
-	// keeps reporting here after session_start has reset extraCost, so its late
-	// cost lands in the new session's total. Rare (only a *background* subagent
-	// outlives a turn — classifier/reader/recap/setup all finish synchronously),
-	// and it only nudges a display figure, so we accept it rather than thread
-	// session identity through the bus.
-	pi.events.on(USAGE_CHANNEL, (data) => {
-		extraCost += (data as UsageRecord).cost;
+	// A usage entry was just appended (recordUsage persists before it emits):
+	// re-sum the ledger. Known limitation: a background subagent spawned before
+	// a /clear (newSession) keeps reporting after the switch, so its late cost
+	// is persisted into — and shown for — the new session. Rare (only a
+	// *background* subagent outlives a turn — classifier/reader/recap/setup all
+	// finish synchronously), and it only nudges a display figure, so we accept
+	// it rather than thread session identity through the bus.
+	pi.events.on(USAGE_CHANNEL, () => {
+		if (lastCtx) recomputeMain(lastCtx);
 		repaint();
 	});
 
@@ -69,7 +73,6 @@ export default function footerExtension(pi: ExtensionAPI) {
 	};
 
 	pi.on("session_start", (_event, ctx) => {
-		extraCost = 0;
 		recomputeMain(ctx);
 		if (!ctx.hasUI) return;
 
@@ -93,7 +96,7 @@ export default function footerExtension(pi: ExtensionAPI) {
 					contextTokens: usage?.tokens ?? undefined,
 					contextWindow: usage?.contextWindow,
 					contextPercent: usage?.percent,
-					cost: mainUsage.cost + extraCost,
+					cost: mainUsage.cost,
 					cacheHitPercent: mainUsage.cacheHitPercent,
 					pr,
 					model: ctx.model ? formatModel(ctx.model.provider, ctx.model.id) : undefined,

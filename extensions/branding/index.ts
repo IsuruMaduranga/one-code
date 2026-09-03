@@ -36,7 +36,7 @@ import {
 	shouldDefaultHideThinking,
 	type StartupSection,
 } from "./startup.ts";
-import { safeThemePaint, truncateLine } from "../lib/tui-render.ts";
+import { linesComponent, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import { markAssistantMarkdown } from "./assistant-marker.ts";
 import { PROMPT_PADDING, PromptEditor } from "./prompt-editor.ts";
 
@@ -339,33 +339,32 @@ export default function brandingExtension(pi: ExtensionAPI) {
 		ctx.ui.setTitle(NAME);
 		ctx.ui.setHeader((tui: unknown, theme: unknown) => {
 			const paint = safeThemePaint(theme);
+			// Width-memoized (pi-tui renders every mounted component every frame);
+			// the mode/model/subagent lines stay live because each of their
+			// updates invalidates the cache before requesting a repaint.
+			const component = linesComponent((width) => [
+				"",
+				...bannerLines(
+					{
+						version,
+						model: currentModelId ? formatModel(currentModelProvider ?? "", currentModelId) : undefined,
+						cwd: ctx.cwd,
+						mode: permissionModeDisplay(permissionStatus ?? { mode: "default", paused: false }),
+						subagents: subagentStatus?.model
+							? `${formatModelSpec(subagentStatus.model)}${subagentStatus.via ? ` (${subagentStatus.via})` : ""}`
+							: undefined,
+						sections,
+					},
+					paint,
+					width,
+				),
+				"",
+			]);
 			requestHeaderRender = () => {
+				component.invalidate();
 				(tui as { requestRender?: () => void } | undefined)?.requestRender?.();
 			};
-			return {
-				// Rendered per paint rather than precomputed, so the mode line
-				// follows ctrl+q cycles and the classifier pinning.
-				render: (width: number) => [
-					"",
-					...bannerLines(
-						{
-							version,
-							model: currentModelId ? formatModel(currentModelProvider ?? "", currentModelId) : undefined,
-							cwd: ctx.cwd,
-							mode: permissionModeDisplay(permissionStatus ?? { mode: "default", paused: false }),
-							subagents: subagentStatus?.model
-								? `${formatModelSpec(subagentStatus.model)}${subagentStatus.via ? ` (${subagentStatus.via})` : ""}`
-								: undefined,
-							sections,
-						},
-						paint,
-						width,
-					),
-					"",
-				],
-				// Nothing is cached, so there is nothing to invalidate.
-				invalidate: () => {},
-			};
+			return component;
 		});
 	});
 }

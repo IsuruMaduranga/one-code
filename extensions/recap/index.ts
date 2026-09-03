@@ -16,11 +16,12 @@
  * not in LLM context). Best-effort throughout: any failure just shows nothing.
  *
  * Deviations from CC, logged in docs/decisions: the session-memory block is
- * omitted (decoupling), and the active tool definitions are sent rather than
- * an empty tool list — some providers reject a history carrying tool_use
- * blocks with no tools declared, and the small-token instruction keeps the
- * model answering in text rather than calling one. CC_RECAP=0 opts out;
- * CC_RECAP_IDLE_MS overrides the 5-minute delay.
+ * omitted (decoupling), and name-only stubs of the active tools are sent
+ * rather than an empty tool list — some providers reject a history carrying
+ * tool_use blocks with no tools declared, and the small-token instruction keeps
+ * the model answering in text rather than calling one. A failed recap does not
+ * retry until the next turn (one attempt per turn, success or not). CC_RECAP=0
+ * opts out; CC_RECAP_IDLE_MS overrides the 5-minute delay.
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -47,6 +48,22 @@ function idleMs(): number {
 
 interface RecapData {
 	content: string;
+}
+
+/**
+ * Name-only tool declarations: enough for a provider to accept the tool_use
+ * blocks already in the history, without the descriptions and schemas (the
+ * recap never calls a tool, and its prompt asks for text).
+ */
+export function toolStubs(names: readonly string[]): Tool[] {
+	return names.map(
+		(name) =>
+			({
+				name,
+				description: "Unavailable during this summary; answer in text.",
+				parameters: { type: "object", properties: {} },
+			}) as unknown as Tool,
+	);
 }
 
 export default function recapExtension(pi: ExtensionAPI) {
@@ -102,14 +119,11 @@ export default function recapExtension(pi: ExtensionAPI) {
 			if (!auth.ok) return;
 			const baseUrl = (auth as { baseUrl?: string }).baseUrl;
 
-			// The active tool definitions, so a history carrying tool_use blocks
-			// stays valid on strict providers (see the header note).
-			const byName = new Map(pi.getAllTools().map((tool) => [tool.name, tool]));
-			const tools = pi
-				.getActiveTools()
-				.map((name) => byName.get(name))
-				.filter((tool) => tool !== undefined)
-				.map(({ name, description, parameters }) => ({ name, description, parameters }) as Tool);
+			// Name-only stubs of the active tools, so a history carrying tool_use
+			// blocks stays valid on strict providers (see the header note) without
+			// shipping every full schema (~6k tokens) to a call that must answer
+			// in text.
+			const tools = toolStubs(pi.getActiveTools());
 
 			const recent = recentForRecap(messages);
 			const recapMessages = [...convertToLlm(recent), { role: "user" as const, content: RECAP_PROMPT, timestamp: Date.now() }];
@@ -141,7 +155,12 @@ export default function recapExtension(pi: ExtensionAPI) {
 			scheduler.markFired();
 			pi.appendEntry<RecapData>(ENTRY_TYPE, { content });
 		} catch {
-			// Best-effort: a failed/aborted recap call simply shows nothing.
+			// Best-effort: a failed recap shows nothing — and does not retry. Without
+			// this the failure re-arms on every keystroke (interacted() → arm()),
+			// hammering the provider once per idle period until a turn resets it.
+			// An abort means a new turn or session already reset the scheduler; a
+			// late markFired there would suppress that turn's own recap.
+			if (!controller.signal.aborted) scheduler.markFired();
 		} finally {
 			if (inFlight === controller) inFlight = undefined;
 		}

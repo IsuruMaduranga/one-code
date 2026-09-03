@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { costOf, recordUsage, USAGE_CHANNEL, type UsageRecord } from "../../extensions/lib/usage-bus.ts";
+import { costOf, recordUsage, USAGE_CHANNEL, USAGE_ENTRY_TYPE, usageEntryCost, type UsageRecord } from "../../extensions/lib/usage-bus.ts";
 
 describe("costOf", () => {
 	it("reads cost.total from a usage-like object", () => {
@@ -24,6 +24,15 @@ describe("recordUsage", () => {
 		expect(payload).toEqual({ source: "subagent", cost: 0.5 } satisfies UsageRecord);
 	});
 
+	it("persists the record as a session entry before announcing it", () => {
+		const order: string[] = [];
+		const emit = vi.fn(() => order.push("emit"));
+		const appendEntry = vi.fn(() => order.push("append"));
+		recordUsage({ events: { emit }, appendEntry }, "classifier", { cost: { total: 0.01 } });
+		expect(appendEntry).toHaveBeenCalledWith(USAGE_ENTRY_TYPE, { source: "classifier", cost: 0.01 });
+		expect(order).toEqual(["append", "emit"]);
+	});
+
 	it("skips emission when the call was unpriced", () => {
 		const emit = vi.fn();
 		recordUsage({ events: { emit } }, "classifier", { input: 10, output: 2, cost: { total: 0 } });
@@ -36,5 +45,15 @@ describe("recordUsage", () => {
 			throw new Error("bus down");
 		});
 		expect(() => recordUsage({ events: { emit } }, "reader", { output: 1, cost: { total: 0.1 } })).not.toThrow();
+	});
+});
+
+describe("usageEntryCost", () => {
+	it("reads the cost off a persisted usage entry and ignores everything else", () => {
+		expect(usageEntryCost({ type: "custom", customType: USAGE_ENTRY_TYPE, data: { source: "recap", cost: 0.25 } })).toBe(0.25);
+		expect(usageEntryCost({ type: "custom", customType: "one-code:recap", data: { cost: 0.25 } })).toBe(0);
+		expect(usageEntryCost({ type: "message", message: { role: "assistant", usage: { cost: { total: 1 } } } })).toBe(0);
+		expect(usageEntryCost({ type: "custom", customType: USAGE_ENTRY_TYPE, data: { cost: "0.25" } })).toBe(0);
+		expect(usageEntryCost(undefined)).toBe(0);
 	});
 });

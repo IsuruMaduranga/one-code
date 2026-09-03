@@ -168,8 +168,8 @@ export interface SliderView {
 }
 
 const TITLE = "Effort";
-const HINTS = "←/→ adjust · Enter confirm · Esc cancel · shift+tab cycles the plain levels";
-const SHORT_HINTS = "←/→ · Enter · Esc";
+const HINTS = "←/→ or h/l adjust · Enter confirm · Esc cancel · shift+tab cycles the plain levels";
+const SHORT_HINTS = "←/→ h/l · Enter · Esc";
 const ULTRACODE_SUBTITLE = `${ULTRACODE_LEVEL} + workflows`;
 
 /**

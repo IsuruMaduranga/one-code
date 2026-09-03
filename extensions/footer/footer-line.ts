@@ -11,7 +11,7 @@
  * always fits the width it was built for.
  */
 
-import { costOf } from "../lib/usage-bus.ts";
+import { costOf, usageEntryCost } from "../lib/usage-bus.ts";
 
 export type Paint = (color: string, text: string) => string;
 
@@ -164,9 +164,12 @@ export function buildFooterLines(data: FooterData, width: number, paint: Paint):
 }
 
 /**
- * Main-session cost and latest cache-hit rate, computed from the session
- * entries exactly as pi's own footer does (assistant messages, tool-result and
- * branch-summary/compaction usage). Kept pure and loosely typed so it tests
+ * All-in session cost and latest cache-hit rate, computed from the session
+ * entries: the main session exactly as pi's own footer does (assistant
+ * messages, tool-result and branch-summary/compaction usage) plus every
+ * persisted out-of-band usage entry (`recordUsage`). Reading the ledger from
+ * the entries, not process memory, is what keeps the figure honest across a
+ * `--continue`/`--session` restart. Kept pure and loosely typed so it tests
  * with plain fixtures.
  */
 export function computeMainUsage(entries: readonly unknown[]): { cost: number; cacheHitPercent?: number } {
@@ -194,6 +197,10 @@ export function computeMainUsage(entries: readonly unknown[]): { cost: number; c
 			cost += costOf(entry.message.usage);
 		} else if ((entry.type === "branch_summary" || entry.type === "compaction") && entry.usage) {
 			cost += costOf(entry.usage);
+		} else {
+			// Out-of-band calls (subagents, classifier, readers, recap, setup)
+			// persisted by recordUsage — the all-in half of the total.
+			cost += usageEntryCost(entry);
 		}
 	}
 	return { cost, cacheHitPercent };

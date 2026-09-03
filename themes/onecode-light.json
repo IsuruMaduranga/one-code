@@ -72,5 +72,10 @@
     "thinkingXhigh": "red",
     "thinkingMax": "violet",
     "bashMode": "amber"
+  },
+  "export": {
+    "pageBg": "#faf7f3",
+    "cardBg": "surface",
+    "infoBg": "surfaceRaised"
   }
 }

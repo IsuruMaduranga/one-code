@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createUpdateCheck, isNewerVersion } from "../../app/update-check.mjs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { CHECK_INTERVAL_MS, checkedRecently, createUpdateCheck, isNewerVersion, isOffline } from "../../app/update-check.mjs";
 
 describe("isNewerVersion", () => {
 	it("orders plain x.y.z versions", () => {
@@ -81,5 +84,59 @@ describe("createUpdateCheck", () => {
 		await flush();
 		expect(headless.notify).not.toHaveBeenCalled();
 		expect(fetchSpy).not.toHaveBeenCalled();
+	});
+});
+
+describe("offline and cadence gating", () => {
+	it("isOffline reads PI_OFFLINE the way pi does", () => {
+		expect(isOffline({ PI_OFFLINE: "1" })).toBe(true);
+		expect(isOffline({ PI_OFFLINE: "true" })).toBe(true);
+		expect(isOffline({ PI_OFFLINE: "yes" })).toBe(true);
+		expect(isOffline({ PI_OFFLINE: "0" })).toBe(false);
+		expect(isOffline({})).toBe(false);
+	});
+
+	it("checkedRecently is true only for a readable stamp inside the interval", () => {
+		const dir = mkdtempSync(join(tmpdir(), "onecode-update-"));
+		const stamp = join(dir, "last-update-check");
+		expect(checkedRecently(stamp)).toBe(false); // missing
+		writeFileSync(stamp, String(Date.now() - 60_000));
+		expect(checkedRecently(stamp)).toBe(true);
+		writeFileSync(stamp, String(Date.now() - CHECK_INTERVAL_MS - 1));
+		expect(checkedRecently(stamp)).toBe(false);
+		writeFileSync(stamp, "garbage");
+		expect(checkedRecently(stamp)).toBe(false);
+		expect(checkedRecently(undefined)).toBe(false);
+	});
+
+	it("skips the fetch when offline, and stamps + skips within a day", async () => {
+		const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ version: "9.9.9" }) }));
+		vi.stubGlobal("fetch", fetchMock);
+		const dir = mkdtempSync(join(tmpdir(), "onecode-update-"));
+		const stamp = join(dir, "last-update-check");
+
+		vi.stubEnv("PI_OFFLINE", "1");
+		const offline = harness();
+		createUpdateCheck({ currentVersion: "0.1.0", upgradeHint: "x", stampPath: stamp })(offline.pi);
+		offline.fire();
+		await flush();
+		expect(fetchMock).not.toHaveBeenCalled();
+		vi.unstubAllEnvs();
+
+		const first = harness();
+		createUpdateCheck({ currentVersion: "0.1.0", upgradeHint: "x", stampPath: stamp })(first.pi);
+		first.fire();
+		await flush();
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(first.notify).toHaveBeenCalledTimes(1);
+		expect(Number(readFileSync(stamp, "utf8"))).toBeGreaterThan(0);
+
+		// Same day, next start (or a /clear): no second request.
+		const second = harness();
+		createUpdateCheck({ currentVersion: "0.1.0", upgradeHint: "x", stampPath: stamp })(second.pi);
+		second.fire();
+		await flush();
+		expect(fetchMock).toHaveBeenCalledTimes(1);
+		expect(second.notify).not.toHaveBeenCalled();
 	});
 });

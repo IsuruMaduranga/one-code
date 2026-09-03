@@ -29,17 +29,46 @@ export function applyDefaultModel(
 	return { ...file, defaultProvider: provider, defaultModel: modelId };
 }
 
+/** Quiet period after the last switch before it is written (ctrl+p cycles fire one event per step). */
+export const PERSIST_DEBOUNCE_MS = 400;
+
 export default function modelDefaultExtension(pi: ExtensionAPI) {
-	pi.on("model_select", (event, ctx) => {
-		const model = event.model as { provider?: string; id?: string } | undefined;
-		if (!model?.provider || !model.id) return;
+	let pending: { provider: string; id: string; notify: (message: string) => void } | undefined;
+	let timer: ReturnType<typeof setTimeout> | undefined;
+
+	const flush = () => {
+		if (timer !== undefined) clearTimeout(timer);
+		timer = undefined;
+		const choice = pending;
+		pending = undefined;
+		if (!choice) return;
 		const path = join(getAgentDir(), "settings.json");
 		try {
-			writeSettings(path, applyDefaultModel(readSettingsForWrite(path), model.provider, model.id));
+			writeSettings(path, applyDefaultModel(readSettingsForWrite(path), choice.provider, choice.id));
 		} catch (error) {
 			// Persisting a preference must not break the model switch itself, but
 			// say why it will be forgotten (typically a malformed settings.json).
-			if (ctx.hasUI) ctx.ui.notify(`Could not save ${model.provider}/${model.id} as the default model: ${(error as Error).message}`, "warning");
+			choice.notify(`Could not save ${choice.provider}/${choice.id} as the default model: ${(error as Error).message}`);
 		}
+	};
+
+	// Debounced: a ctrl+p cycle emits model_select per step, and only the model
+	// the user settles on should hit the disk (last one wins).
+	pi.on("model_select", (event, ctx) => {
+		const model = event.model as { provider?: string; id?: string } | undefined;
+		if (!model?.provider || !model.id) return;
+		pending = {
+			provider: model.provider,
+			id: model.id,
+			notify: (message) => {
+				if (ctx.hasUI) ctx.ui.notify(message, "warning");
+			},
+		};
+		if (timer !== undefined) clearTimeout(timer);
+		timer = setTimeout(flush, PERSIST_DEBOUNCE_MS);
+		timer.unref?.();
 	});
+
+	// A quit inside the quiet period must not lose the choice.
+	pi.on("session_shutdown", () => flush());
 }

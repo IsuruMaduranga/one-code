@@ -136,6 +136,16 @@ describe("computeMainUsage", () => {
 		expect(cacheHitPercent).toBeCloseTo(90, 5);
 	});
 
+	it("adds persisted out-of-band usage entries to the total", () => {
+		const entries = [
+			{ type: "message", message: { role: "assistant", usage: { input: 100, cacheRead: 0, cacheWrite: 0, cost: { total: 0.1 } } } },
+			{ type: "custom", customType: "one-code:usage", data: { source: "classifier", cost: 0.01 } },
+			{ type: "custom", customType: "one-code:usage", data: { source: "subagent", cost: 0.4 } },
+			{ type: "custom", customType: "one-code:turn-duration", data: { ms: 1000 } },
+		];
+		expect(computeMainUsage(entries).cost).toBeCloseTo(0.51, 5);
+	});
+
 	it("returns zero cost and no cache-hit for an empty session", () => {
 		expect(computeMainUsage([])).toEqual({ cost: 0, cacheHitPercent: undefined });
 	});

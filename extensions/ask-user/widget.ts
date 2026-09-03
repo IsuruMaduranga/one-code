@@ -353,12 +353,12 @@ function renderTabBar(state: WidgetState, style: WidgetStyle): string {
 
 export function footerFor(state: WidgetState): string {
 	if (state.editing) return "Enter to confirm · Esc to back out";
-	if (state.tab === state.questions.length) return "Enter to submit · Tab to switch questions · Esc to cancel";
+	if (state.tab === state.questions.length) return "Enter to submit · Tab/shift+Tab to switch questions · Esc to cancel";
 	// The preview layout spells out ↑/↓ and the notes key; the stacked layout
 	// uses Claude Code's shorter wording.
 	if (hasPreviews(state.questions[state.tab]))
-		return "Enter to select · ↑/↓ to navigate · n to add notes · Tab to switch questions · Esc to cancel";
-	return "Enter to select · Tab/Arrow keys to navigate · Esc to cancel";
+		return "Enter to select · ↑/↓ to navigate · n to add notes · Tab/shift+Tab to switch questions · Esc to cancel";
+	return "Enter to select · Tab/shift+Tab or arrow keys to navigate · Esc to cancel";
 }
 
 function renderSubmitTab(state: WidgetState, paint: Paint, width: number, out: string[]): void {

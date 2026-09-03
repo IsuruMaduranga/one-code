@@ -49,6 +49,18 @@ describe("bundled themes", () => {
 				expect(unknown, `unknown tokens in ${file}`).toEqual([]);
 			});
 
+			it("declares the export-page colours pi's HTML export reads, resolvable to var or hex", () => {
+				// pi 0.84.1 core/export-html derives these from userMessageBg when
+				// absent; declaring them keeps the exported page on the theme's own
+				// surfaces (the only consumer is /export).
+				const exp = (theme as { export?: Record<string, unknown> }).export ?? {};
+				expect(Object.keys(exp).sort()).toEqual(["cardBg", "infoBg", "pageBg"]);
+				const vars = new Set(Object.keys(theme.vars ?? {}));
+				for (const [token, value] of Object.entries(exp)) {
+					expect(typeof value === "string" && (value.startsWith("#") || vars.has(value)), `${token}=${value}`).toBe(true);
+				}
+			});
+
 			it("resolves every var reference", () => {
 				const vars = new Set(Object.keys(theme.vars ?? {}));
 				const unresolved = Object.entries(theme.colors ?? {})

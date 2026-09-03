@@ -112,23 +112,29 @@ try {
 // --- 3. Surgical stdout rebranding ----------------------------------------
 // Only plain-text lines pi prints OUTSIDE the TUI are touched (the resume
 // hint after the TUI stops, and --help/usage output). Never rewrite inside
-// arbitrary chunks: TUI escape streams must pass through byte-identical.
+// arbitrary chunks: TUI escape streams must pass through byte-identical. And
+// only in the interactive TUI or for --help: `-p`/`--print`/`--mode json|rpc`
+// output is parsed by other programs (or is a model's answer) and must never
+// be altered, so those modes leave stdout untouched.
 const rewriteHelp = argv.includes("--help") || argv.includes("-h");
-const originalWrite = process.stdout.write.bind(process.stdout);
-process.stdout.write = (chunk, ...rest) => {
-	if (typeof chunk === "string") {
-		// The label may carry ANSI styling (chalk.dim), so match the command
-		// part: "…To resume this session:</dim> pi --session <id>[ --session-dir …]".
-		if (chunk.includes("To resume this session:")) {
-			chunk = chunk.replaceAll(" pi --session ", " onecode --session ");
+const machineOutput = argv.includes("-p") || argv.includes("--print") || argv.includes("--mode");
+if (rewriteHelp || !machineOutput) {
+	const originalWrite = process.stdout.write.bind(process.stdout);
+	process.stdout.write = (chunk, ...rest) => {
+		if (typeof chunk === "string") {
+			// The label may carry ANSI styling (chalk.dim), so match the command
+			// part: "…To resume this session:</dim> pi --session <id>[ --session-dir …]".
+			if (chunk.includes("To resume this session:")) {
+				chunk = chunk.replaceAll(" pi --session ", " onecode --session ");
+			}
+			if (rewriteHelp) {
+				// Standalone word "pi" only; "pi.dev", "pi-coding-agent" etc. survive.
+				chunk = chunk.replace(/(^|[\s"'`])pi(?=$|[\s"'`])/gm, "$1onecode");
+			}
 		}
-		if (rewriteHelp) {
-			// Standalone word "pi" only; "pi.dev", "pi-coding-agent" etc. survive.
-			chunk = chunk.replace(/(^|[\s"'`])pi(?=$|[\s"'`])/gm, "$1onecode");
-		}
-	}
-	return originalWrite(chunk, ...rest);
-};
+		return originalWrite(chunk, ...rest);
+	};
+}
 
 // --- 4. Launch pi with One Code's update check ----------------------------
 const { AssistantMessageComponent, InteractiveMode, main } = await import("@earendil-works/pi-coding-agent");
@@ -234,6 +240,7 @@ await main(argv, {
 			name: "one-code-update-check",
 			factory: createUpdateCheck({
 				currentVersion: appVersion,
+				stampPath: join(agentDir, "last-update-check"),
 				upgradeHint: installedViaBrew ? "brew upgrade one-code" : "npm install -g @one-ai/one-code",
 			}),
 		},
