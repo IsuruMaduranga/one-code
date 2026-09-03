@@ -1014,16 +1014,26 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			return;
 		}
 		// Background/resident: the spawning call already returned, so there is no
-		// tool_result to attach to. Review now and surface any concern as its own
-		// steered message, so it lands adjacent to the completion report the
-		// model receives (both ride the steering queue).
+		// tool_result to attach to. The emitter holds its completion report until
+		// we answer `onReview`, so the verdict travels with the report (a payload
+		// without the callback gets the older standalone notice instead). Answer
+		// synchronously when no review will run, so the report is never delayed
+		// for nothing. A review that throws fails closed: the report goes out
+		// flagged, not clean.
+		const respond =
+			payload.onReview ??
+			((flag: string | undefined) => {
+				if (flag) notifyTask("subagent-review", flag);
+			});
 		const ctx = lastReviewCtx;
-		if (mode !== "auto" || payload.actions.length === 0 || pauseTracker.isPaused() || !ctx) return;
+		if (mode !== "auto" || payload.actions.length === 0 || pauseTracker.isPaused() || !ctx) {
+			respond(undefined);
+			return;
+		}
 		const label = payload.agentName ? `${payload.agentName} (background run)` : "background run";
-		void reviewCompletedRun(payload.actions, ctx, label, new AbortController().signal).then((reason) => {
-			if (!reason) return;
-			notifyTask("subagent-review", reviewFlagged(reason));
-		});
+		reviewCompletedRun(payload.actions, ctx, label, new AbortController().signal)
+			.then((reason) => respond(reason ? reviewFlagged(reason) : undefined))
+			.catch((error) => respond(reviewFlagged(`the review itself failed (${(error as Error).message})`)));
 	});
 
 	pi.on("tool_result", async (event, ctx) => {

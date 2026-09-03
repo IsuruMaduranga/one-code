@@ -37,6 +37,15 @@ export interface SubagentActionsPayload {
 	background?: boolean;
 	/** Agent name, used to label a background review. */
 	agentName?: string;
+	/**
+	 * Background only: the gate answers here exactly once — the rendered flag
+	 * text when the review raised a concern, undefined when the sequence is
+	 * fine or auto mode is off — so the emitter can deliver the verdict with
+	 * the completion report rather than as a trailing notice. Answered
+	 * synchronously when no review will run, so the emitter never waits for
+	 * nothing.
+	 */
+	onReview?: (flag: string | undefined) => void;
 }
 
 /** Per-action and total caps: a long-running child must not blow up the prompt. */

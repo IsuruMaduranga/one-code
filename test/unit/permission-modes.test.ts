@@ -217,6 +217,20 @@ describe("permissionsExtension model_select updates classifier", () => {
 		return { pi, emitted, fire };
 	}
 
+	it("answers a background hand-back review synchronously when auto mode is off, so the report is not delayed", () => {
+		const fake = makeFakePi();
+		permissionsExtension(fake.pi as any);
+		const answers: Array<string | undefined> = [];
+		fake.pi.events.emit("one-code:subagent-actions", {
+			toolCallId: "t1",
+			actions: [{ toolName: "bash", subject: "ls" }],
+			background: true,
+			agentName: "worker",
+			onReview: (flag: string | undefined) => answers.push(flag),
+		});
+		expect(answers).toEqual([undefined]);
+	});
+
 	it("switches classifier candidates to the new provider when the session model changes", () => {
 		const anthropicSonnet = makeModel("anthropic", "claude-3-7-sonnet", 3);
 		const anthropicHaiku = makeModel("anthropic", "claude-3-5-haiku", 0.8);

@@ -56,6 +56,7 @@ import { createTaskNotifier, sessionOutlivesTurn, systemNotification } from "../
 import { ccToolRenderers, customMessageText, notificationComponent, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import { deriveActivity, LiveRunRegistry } from "./live-runs.ts";
 import { DELEGATION_STEER } from "./delegation-steer.ts";
+import { awaitHandBackReview, withReview } from "./hand-back-review.ts";
 import type { LiveSink } from "./runner.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
 import { SubagentWidget } from "./panel-widget.ts";
@@ -169,8 +170,13 @@ const RESIDENT_IDLE_MS = 15 * 60_000;
 /** A background agent's process, kept alive after its run so it can be messaged. */
 interface Resident {
 	handle: RpcChildHandle;
-	/** FIFO — the head entry handles the next turn_end (initial task, then one per idle-time message). */
-	turnHandlers: Array<(outcome: ChildOutcome) => void>;
+	/**
+	 * FIFO — the head entry handles the next turn_end (initial task, then one per
+	 * idle-time message). `review` is auto mode's rendered hand-back flag for
+	 * that turn (undefined when clean or auto mode is off); the handler puts it
+	 * ahead of the report in its notification.
+	 */
+	turnHandlers: Array<(outcome: ChildOutcome, review: string | undefined) => void>;
 }
 
 export default function subagentsExtension(pi: ExtensionAPI) {
@@ -1366,15 +1372,20 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				const worktreeNote = worktree
 					? `\n\n(Running in worktree ${worktree.path} — kept while the agent stays resident.)`
 					: "";
-				resident.turnHandlers.push((outcome) => {
+				resident.turnHandlers.push((outcome, review) => {
 					task.status = outcome.failed ? "failed" : "completed";
 					task.finishedAt = Date.now();
 					finish();
 					const stats = formatStats(outcome.toolCalls, outcome.usage);
 					notify(
 						"subagent-result",
-						systemNotification(`Agent ${p.record.name} (task ${p.record.taskId}) ${outcome.failed ? "failed" : "completed"} (${stats}). It stays reachable with SendMessage.\n\n${outcome.output.slice(0, OUTPUT_CAP)}${worktreeNote}`),
-						{ taskId: p.record.taskId, name: p.record.name, failed: outcome.failed ?? false },
+						systemNotification(
+							withReview(
+								`Agent ${p.record.name} (task ${p.record.taskId}) ${outcome.failed ? "failed" : "completed"} (${stats}). It stays reachable with SendMessage.\n\n${outcome.output.slice(0, OUTPUT_CAP)}${worktreeNote}`,
+								review,
+							),
+						),
+						{ taskId: p.record.taskId, name: p.record.name, failed: outcome.failed ?? false, reviewed: review !== undefined },
 					);
 				});
 
@@ -1428,31 +1439,27 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						live.settle();
 						lastOutput = resident.handle.snapshot().text || outcome.output;
 						if (logPath) writeFileSync(logPath, lastOutput);
-						// Auto mode reviews the turn's action sequence as a whole (the
-						// hand-back review). The spawning call already returned, so there
-						// is no tool_result to attach to; the gate reviews on receipt and
-						// notifies.
-						if (outcome.actions?.length) {
-							pi.events.emit(SUBAGENT_ACTIONS_CHANNEL, {
-								toolCallId: p.record.taskId,
-								actions: outcome.actions,
-								background: true,
-								agentName: p.record.name,
-							} satisfies SubagentActionsPayload);
-						}
+						// The handler is claimed now (so a message arriving mid-review pairs
+						// with the NEXT turn), but runs only once auto mode's hand-back
+						// review of this turn's action sequence has answered, so the
+						// verdict rides in the same notification as the report instead of
+						// trailing it. The wait is bounded (hand-back-review.ts) and
+						// answered synchronously when auto mode is off.
 						const handler = resident.turnHandlers.shift();
-						if (handler) {
-							handler(outcome);
-						} else {
-							// A turn nobody is waiting on (e.g. a steer that raced past its
-							// target turn and ran on its own) must still surface.
-							notify(
-								"subagent-result",
-								systemNotification(`Update from ${p.record.name}:\n\n${outcome.output.slice(0, OUTPUT_CAP)}`),
-								{ name: p.record.name, failed: outcome.failed ?? false },
-							);
-						}
 						armReaper();
+						void awaitHandBackReview(pi.events, p.record, outcome.actions).then((review) => {
+							if (handler) {
+								handler(outcome, review);
+							} else {
+								// A turn nobody is waiting on (e.g. a steer that raced past its
+								// target turn and ran on its own) must still surface.
+								notify(
+									"subagent-result",
+									systemNotification(withReview(`Update from ${p.record.name}:\n\n${outcome.output.slice(0, OUTPUT_CAP)}`, review)),
+									{ name: p.record.name, failed: outcome.failed ?? false, reviewed: review !== undefined },
+								);
+							}
+						});
 					},
 					onExit: () => {
 						if (reaper) clearTimeout(reaper);
@@ -1574,7 +1581,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					resident: () => !resident.handle.exited(),
 					finished,
 				};
-				resident.turnHandlers.push((outcome) => {
+				resident.turnHandlers.push((outcome, review) => {
 					task.status = outcome.failed ? "failed" : "completed";
 					task.finishedAt = Date.now();
 					replyOutput = outcome.output;
@@ -1582,8 +1589,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					const stats = formatStats(outcome.toolCalls, outcome.usage);
 					notify(
 						"subagent-result",
-						systemNotification(`Reply from ${record.name} (${stats}):\n\n${outcome.output.slice(0, OUTPUT_CAP)}`),
-						{ taskId, name: record.name, failed: outcome.failed ?? false },
+						systemNotification(withReview(`Reply from ${record.name} (${stats}):\n\n${outcome.output.slice(0, OUTPUT_CAP)}`, review)),
+						{ taskId, name: record.name, failed: outcome.failed ?? false, reviewed: review !== undefined },
 					);
 				});
 				pi.events.emit(TASK_REGISTER_CHANNEL, task);
