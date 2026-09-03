@@ -30,6 +30,7 @@
  * denylist — see `sensitive.ts`), F1 (git global flags).
  */
 
+import { isProtectedPath } from "../permissions/protected-paths.ts";
 import { isExecutionPrimitivePath, isSensitivePath } from "./sensitive.ts";
 import { isWithin, resolveForContainment, toAbsolute } from "./paths.ts";
 
@@ -47,6 +48,13 @@ export interface ShellEvidence {
 	sensitivePaths: string[];
 	/** In-project paths whose contents execute later (`.git/hooks/*`, `.vscode/*.json`). */
 	executionPrimitives: string[];
+	/**
+	 * Tooling/agent-configuration paths (`permissions/protected-paths.ts`: `.cargo/`,
+	 * `.claude/`, hook configs, shell rc files, …) this command writes. The
+	 * `write`/`edit` tools route these to the classifier; a shell redirect or
+	 * `rm`/`mv` onto the same path must not be "safe" merely for being in-project.
+	 */
+	protectedPaths: string[];
 	/** Network-capable commands present (curl, ssh, …) — an egress signal for the classifier. */
 	network: string[];
 	/**
@@ -681,6 +689,7 @@ export function analyzeShellCommand({ command, cwd, home }: AnalyzeInput): Shell
 		writes: [],
 		sensitivePaths: [],
 		executionPrimitives: [],
+		protectedPaths: [],
 		network: [],
 		containedNonNetwork: false,
 		wholeTree: false,
@@ -746,6 +755,14 @@ export function analyzeShellCommand({ command, cwd, home }: AnalyzeInput): Shell
 		if (isExecutionPrimitivePath(absolute) && !evidence.executionPrimitives.includes(token)) {
 			evidence.executionPrimitives.push(token);
 			escalate(`writes to ${token}, whose contents execute later without further approval`);
+		}
+		// Same list the write/edit tools are gated on: an in-project redirect onto
+		// `.cargo/config.toml`, `.claude/agents/x.md`, or `lefthook.yml` reconfigures
+		// the toolchain or the agent itself, so containment says nothing about it.
+		const protectedTarget = isProtectedPath(absolute, effectiveCwd) || (resolved !== undefined && isProtectedPath(resolved, effectiveCwd));
+		if (protectedTarget && !evidence.protectedPaths.includes(token)) {
+			evidence.protectedPaths.push(token);
+			escalate(`writes to ${token}, a protected tooling or agent configuration path`);
 		}
 	};
 

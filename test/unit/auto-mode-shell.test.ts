@@ -315,6 +315,33 @@ describe("containment signal for the recoverability gate (Phase 2)", () => {
 		expect(analyze("git --work-tree=/etc status").verdict).toBe("escalate");
 	});
 
+	it("escalates in-project writes to protected tooling/agent config paths (P3)", () => {
+		for (const cmd of [
+			"echo x > .cargo/config.toml",
+			"echo x > .pre-commit-config.yaml",
+			"echo x >> lefthook.yml",
+			"echo x > .idea/workspace.xml",
+			"echo x > .devcontainer/devcontainer.json",
+			"echo x > .claude/agents/evil.md",
+			"echo x > .claude/commands/deploy.md",
+			"cp a.json .claude/settings.json",
+			"rm .claude/settings.local.json",
+			"echo x > .onecode/settings.json",
+		]) {
+			const ev = analyze(cmd);
+			expect(ev.verdict, cmd).toBe("escalate");
+			expect(ev.protectedPaths.length, cmd).toBeGreaterThan(0);
+			expect(ev.containedNonNetwork, cmd).toBe(false);
+		}
+	});
+
+	it("keeps in-project writes to the protected-dir exceptions on the fast path", () => {
+		// .claude/worktrees is the agent's own working space, not configuration.
+		const ev = analyze("echo x > .claude/worktrees/fix/notes.txt");
+		expect(ev.protectedPaths).toEqual([]);
+		expect(ev.verdict).toBe("safe");
+	});
+
 	it("still marks a bare git reset --hard (no ref) as whole-tree contained", () => {
 		const ev = analyze("git reset --hard");
 		expect(ev.containedNonNetwork).toBe(true);
