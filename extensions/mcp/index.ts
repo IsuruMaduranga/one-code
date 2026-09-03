@@ -51,6 +51,7 @@ import { type McpEntry, type McpEntryStatus } from "./panel/model.ts";
 import { renderMcpPanel, type McpPaint } from "./panel/render.ts";
 import { applyMcpKey, initialMcpState, type McpEffect } from "./panel/state.ts";
 import { loadServers, type McpServer } from "./config.ts";
+import { approveMcpServers, persistApproval, projectRootOf } from "./trust.ts";
 import {
 	describeContent,
 	describeResourceContents,
@@ -79,6 +80,9 @@ export default function mcpExtension(pi: ExtensionAPI) {
 	const oauthNeeded = new Set<string>();
 	// Servers the user disabled (persisted in ~/.onecode) — discovered but not connected.
 	let disabledNames = new Set<string>();
+	// Project .mcp.json servers withheld this session (no consent yet, declined,
+	// or disabled via Claude Code's disabledMcpjsonServers) — listed, not connected.
+	const withheldNames = new Map<string, string>();
 	// Config file paths contributed by plugins, so the panel can group them.
 	let pluginConfigPaths = new Set<string>();
 	const home = os.homedir();
@@ -248,12 +252,35 @@ export default function mcpExtension(pi: ExtensionAPI) {
 
 		// Disabled servers are listed but never connected; a server with an unset
 		// credential env var stays "needs authentication" and is not attempted
-		// (connecting with an empty token fails confusingly). Everything else connects.
-		await Promise.all(
-			servers
-				.filter((server) => !disabledNames.has(server.name) && !server.missingEnv?.length)
-				.map(connectOne),
-		);
+		// (connecting with an empty token fails confusingly). A project .mcp.json
+		// server needs the user's consent first (trust.ts — a cloned repo must not
+		// run commands at startup). Everything else connects.
+		const candidates = servers.filter((server) => !disabledNames.has(server.name) && !server.missingEnv?.length);
+		const consent = await approveMcpServers(candidates, pluginConfigPaths, ctx.cwd, home, {
+			hasUI: ctx.hasUI,
+			select: (title, options) => ctx.ui.select(title, options),
+			notify: (message) => {
+				if (ctx.hasUI) ctx.ui.notify(message, "warning");
+				else process.stderr.write(`${message}\n`);
+			},
+			disable: (server) => {
+				setMcpServerDisabled(server.name, true, "project", ctx.cwd, home);
+				disabledNames.add(server.name);
+			},
+		});
+		if (shuttingDown) return;
+		withheldNames.clear();
+		for (const { server, reason } of consent.withheld) {
+			withheldNames.set(
+				server.name,
+				reason === "disabled-by-claude-settings"
+					? "disabled by disabledMcpjsonServers in Claude Code settings"
+					: reason === "declined"
+						? "not approved this session (project .mcp.json)"
+						: "not approved (project .mcp.json; approve in an interactive session)",
+			);
+		}
+		await Promise.all(consent.approved.map(connectOne));
 
 		if (shuttingDown) return;
 
@@ -426,6 +453,8 @@ export default function mcpExtension(pi: ExtensionAPI) {
 	// snapshot, the /mcp panel entries, and the text fallback.
 	const deriveStatus = (server: McpServer): { status: McpEntryStatus; detail?: string; toolCount?: number } => {
 		if (disabledNames.has(server.name)) return { status: "disabled" };
+		const withheld = withheldNames.get(server.name);
+		if (withheld) return { status: "disabled", detail: withheld };
 		const connection = connections.get(server.name);
 		if (connection) {
 			// A server can connect yet warn (e.g. listTools/listResources failed);
@@ -493,7 +522,9 @@ export default function mcpExtension(pi: ExtensionAPI) {
 				// sees which variable to set), and for a connected-but-warning server; an
 				// OAuth authNeeded needs no issue — the Authenticate action speaks for itself.
 				const issue =
-					status === "failed" || status === "connected" || (status === "authNeeded" && !canAuthenticate) ? detail : undefined;
+					status === "failed" || status === "connected" || status === "disabled" || (status === "authNeeded" && !canAuthenticate)
+						? detail
+						: undefined;
 				// Auth line shown on a failed http server (as Claude Code does), read
 				// honestly from whether tokens are stored — not just "failed http".
 				const authState =
@@ -600,6 +631,8 @@ export default function mcpExtension(pi: ExtensionAPI) {
 				if (!server || busy.has(entry.name)) return;
 				setMcpServerDisabled(entry.name, false, classify(server).scope, ctx.cwd, home);
 				disabledNames.delete(entry.name);
+				// Enabling a withheld project .mcp.json server by hand IS the consent.
+				if (withheldNames.delete(entry.name)) persistApproval(projectRootOf(server), server);
 				busy.add(entry.name);
 				notices = [`Enabling "${entry.name}"…`];
 				syncRepaint();

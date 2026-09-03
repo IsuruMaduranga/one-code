@@ -55,6 +55,19 @@ The Model Context Protocol (MCP) lets external servers provide tools and
 resources to the model. One Code connects the servers declared in your project's
 `.mcp.json` on startup.
 
+Servers listed in a project's checked-in `.mcp.json` run only after you
+approve them. On the first start in that project, One Code shows Claude Code's
+dialog ("New MCP server found in .mcp.json") with the command each server
+runs, and offers to use this server, to use this and all future servers in the
+project, or to decline. Approvals are remembered under `~/.onecode` and are
+tied to the server's configuration, so a changed command asks again. If you
+decline, the server appears as disabled in `/mcp`; choosing Enable there
+approves it. Claude Code's own `enabledMcpjsonServers`,
+`disabledMcpjsonServers`, and `enableAllProjectMcpServers` settings are
+honoured from your user and `.claude/settings.local.json` files. In
+non-interactive runs (`-p`, `--mode json`) unapproved servers are skipped with
+a note on stderr.
+
 Each server's tools load on demand rather than all at once, so a server with
 many tools does not bloat the prompt. The model loads a tool's full definition
 when it needs it.
