@@ -32,10 +32,18 @@ import {
 	parseLoopArgs,
 } from "./wakeup.ts";
 import { createTaskNotifier, systemNotification } from "../lib/notifications.ts";
+import {
+	batchSize,
+	emptyBatch,
+	formatMonitorBatch,
+	MONITOR_BATCH_BUSY_MS,
+	MONITOR_BATCH_IDLE_MS,
+	type MonitorBatch,
+	pushEvent,
+} from "./monitor-batch.ts";
 
 const OUTPUT_CAP = 30_000;
 const STORED_OUTPUT_CAP = 200_000;
-const EVENT_BATCH_MS = 1000;
 const DEFAULT_MONITOR_TIMEOUT_MS = 300_000;
 const MAX_MONITOR_TIMEOUT_MS = 3_600_000;
 const MAX_BLOCK_TIMEOUT_MS = 600_000;
@@ -120,7 +128,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 			let status: BackgroundTask["status"] = "running";
 			let stored = "";
 			let eventCount = 0;
-			let pending: string[] = [];
+			let pending: MonitorBatch = emptyBatch();
 			let flushTimer: NodeJS.Timeout | undefined;
 			let finish!: () => void;
 			const finished = new Promise<void>((resolve) => {
@@ -129,21 +137,23 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 
 			const flush = () => {
 				flushTimer = undefined;
-				if (pending.length === 0) return;
+				if (batchSize(pending) === 0) return;
 				const batch = pending;
-				pending = [];
-				notify(
-					"task-notification",
-					systemNotification(`Monitor ${id} (${params.description}) emitted ${batch.length} event(s):\n${batch.join("\n")}`),
-					{ taskId: id, events: batch.length },
-				);
+				pending = emptyBatch();
+				notify("task-notification", systemNotification(formatMonitorBatch(id, params.description, batch)), {
+					taskId: id,
+					events: batchSize(batch),
+				});
 			};
 
 			const onEvent = (line: string) => {
 				eventCount++;
 				stored = tail(`${stored}${line}\n`, STORED_OUTPUT_CAP);
-				pending.push(line);
-				flushTimer ??= setTimeout(flush, EVENT_BATCH_MS);
+				pushEvent(pending, line);
+				// Bounded batches, and a wider window mid-turn so a chatty stream
+				// coalesces instead of steering one notification per second
+				// (monitor-batch.ts).
+				flushTimer ??= setTimeout(flush, agentBusy ? MONITOR_BATCH_BUSY_MS : MONITOR_BATCH_IDLE_MS);
 			};
 
 			const end = (finalStatus: BackgroundTask["status"], note?: string) => {
