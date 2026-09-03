@@ -296,6 +296,25 @@ describe("containment signal for the recoverability gate (Phase 2)", () => {
 		expect(ev.containedNonNetwork).toBe(false);
 	});
 
+	it("does not treat a reset --hard aimed at another tree as a contained whole-tree op", () => {
+		for (const cmd of [
+			"git --work-tree=/other --git-dir=/other/.git reset --hard",
+			"git --work-tree /other reset --hard HEAD",
+			"git -C /other reset --hard",
+			"git -C pkg reset --hard",
+		]) {
+			const ev = analyze(cmd);
+			expect(ev.verdict, cmd).toBe("escalate");
+			expect(ev.wholeTree, cmd).toBe(false);
+			expect(ev.containedNonNetwork, cmd).toBe(false);
+		}
+	});
+
+	it("escalates git --git-dir=/x (the = spelling) pointing outside the working directory", () => {
+		expect(analyze("git --git-dir=/etc status").verdict).toBe("escalate");
+		expect(analyze("git --work-tree=/etc status").verdict).toBe("escalate");
+	});
+
 	it("still marks a bare git reset --hard (no ref) as whole-tree contained", () => {
 		const ev = analyze("git reset --hard");
 		expect(ev.containedNonNetwork).toBe(true);

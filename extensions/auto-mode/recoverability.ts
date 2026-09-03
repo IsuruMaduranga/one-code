@@ -26,7 +26,8 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { lstatSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync } from "node:fs";
+import { basename, join, sep } from "node:path";
 
 export type Recoverability = "recoverable" | "unrecoverable" | "unknown";
 
@@ -42,8 +43,10 @@ export interface TargetState {
 	token: string;
 	/** `git ls-files` matched it — git has a committed/indexed copy to restore from. */
 	tracked: boolean;
-	/** `git status --porcelain` reported anything for it — uncommitted state that a restore would not bring back. */
+	/** `git status --porcelain --ignored` reported anything for it — uncommitted, untracked, or ignored content that a restore would not bring back. */
 	dirty: boolean;
+	/** True when the target is a directory (its reason names the content git would not restore). */
+	directory?: boolean;
 }
 
 /**
@@ -60,7 +63,9 @@ export function judgeTargets(targets: TargetState[]): RecoverabilityResult {
 		if (target.dirty) {
 			return {
 				verdict: "unrecoverable",
-				reason: `${target.token} has uncommitted changes that a git restore would not bring back`,
+				reason: target.directory
+					? `${target.token} is a directory holding uncommitted, untracked, or ignored files that a git restore would not bring back`
+					: `${target.token} has uncommitted changes that a git restore would not bring back`,
 			};
 		}
 	}
@@ -88,6 +93,42 @@ export function combine(results: RecoverabilityResult[]): RecoverabilityResult {
 	if (results.length === 0) return { verdict: "unknown", reason: "nothing to check" };
 	const worst = results.find((r) => r.verdict === "unrecoverable") ?? results.find((r) => r.verdict === "unknown");
 	return worst ?? results[0];
+}
+
+/** The path is `.git`, sits inside a `.git`, or is a directory with a `.git` entry (repo root, nested repo, worktree). */
+function isOrHoldsGitDir(path: string): boolean {
+	if (basename(path) === ".git") return true;
+	if (path.split(sep).includes(".git")) return true;
+	try {
+		return lstatSync(path).isDirectory() && existsSync(join(path, ".git"));
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Whether any entry named `.git` exists anywhere under `dir`. Bounded by
+ * `budget` directory entries; returns undefined when the budget runs out (the
+ * caller escalates). Symlinks are not followed.
+ */
+function holdsNestedGitDir(dir: string, budget: number): boolean | undefined {
+	const stack = [dir];
+	let seen = 0;
+	while (stack.length > 0) {
+		const current = stack.pop() as string;
+		let entries;
+		try {
+			entries = readdirSync(current, { withFileTypes: true });
+		} catch {
+			continue;
+		}
+		for (const entry of entries) {
+			if (++seen > budget) return undefined;
+			if (entry.name === ".git") return true;
+			if (entry.isDirectory()) stack.push(join(current, entry.name));
+		}
+	}
+	return false;
 }
 
 /** A thin, defensive git call: any failure (not a repo, git missing, timeout) becomes `undefined`. */
@@ -146,12 +187,41 @@ export function checkRecoverability(cwd: string, destruction: Destruction): Reco
 			entryExists = false;
 		}
 		if (!entryExists) continue;
+		// The repository itself is never recoverable from itself: `rm -rf .` at the
+		// root passes every tracked/clean test (git ls-files matches any dir with
+		// tracked files) yet deletes `.git`. Same for a path inside `.git` and for a
+		// directory holding a nested repository or worktree link.
+		if (isOrHoldsGitDir(path)) {
+			return { verdict: "unrecoverable", reason: `${path} is or contains a .git directory, so deleting it destroys the history that would restore it` };
+		}
+		const isDirectory = (() => {
+			try {
+				return lstatSync(path).isDirectory();
+			} catch {
+				return false;
+			}
+		})();
+		// `--ignored`: porcelain omits ignored files by default, so a directory of
+		// build output or a `.env` read as "clean" while `rm -rf` erased it for good.
 		const tracked = git(cwd, ["ls-files", "--error-unmatch", "--", path]);
-		const status = git(cwd, ["status", "--porcelain", "--", path]);
+		const status = git(cwd, ["status", "--porcelain", "--ignored", "--", path]);
 		if (tracked === undefined || status === undefined) {
 			return { verdict: "unknown", reason: "could not query git for a deletion target" };
 		}
-		states.push({ token: path, tracked: tracked.ok, dirty: status.stdout.trim().length > 0 });
+		const dirty = status.stdout.trim().length > 0;
+		// A clean, tracked directory can still hold a nested repository deeper down
+		// (git status never lists a `.git`, so it reads as clean). Only scanned once
+		// the cheap checks passed; a huge tree exhausts the budget and stays unknown.
+		if (isDirectory && tracked.ok && !dirty) {
+			const nested = holdsNestedGitDir(path, 5_000);
+			if (nested === undefined) {
+				return { verdict: "unknown", reason: `${path} is too large to scan for nested repositories` };
+			}
+			if (nested) {
+				return { verdict: "unrecoverable", reason: `${path} contains a nested .git directory whose history git cannot restore` };
+			}
+		}
+		states.push({ token: path, tracked: tracked.ok, dirty, directory: isDirectory });
 	}
 	// Every target was a non-existent path (pure creation / no-op) — nothing to lose.
 	if (states.length === 0) return { verdict: "recoverable", reason: "no existing content would be destroyed" };

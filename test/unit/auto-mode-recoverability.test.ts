@@ -131,6 +131,57 @@ describe("checkRecoverability (real git)", () => {
 		);
 	});
 
+	it("refuses deleting the repository root itself (rm -rf . passes the tracked test but removes .git)", () => {
+		const result = checkRecoverability(repo, { targets: [repo], wholeTree: false });
+		expect(result.verdict).toBe("unrecoverable");
+		expect(result.reason).toMatch(/\.git/);
+	});
+
+	it("refuses deleting .git or anything inside it", () => {
+		expect(checkRecoverability(repo, { targets: [join(repo, ".git")], wholeTree: false }).verdict).toBe("unrecoverable");
+		expect(checkRecoverability(repo, { targets: [join(repo, ".git", "HEAD")], wholeTree: false }).verdict).toBe(
+			"unrecoverable",
+		);
+	});
+
+	it("refuses deleting a directory that holds a nested repository", () => {
+		mkdirSync(join(repo, "vendor", "lib"), { recursive: true });
+		writeFileSync(join(repo, "vendor", "lib", "a.txt"), "x\n");
+		g("add", "vendor");
+		g("commit", "-qm", "vendor");
+		execFileSync("git", ["init", "-q"], { cwd: join(repo, "vendor", "lib"), stdio: "ignore" });
+		expect(checkRecoverability(repo, { targets: [join(repo, "vendor")], wholeTree: false }).verdict).toBe("unrecoverable");
+	});
+
+	it("clears deleting a directory whose content is all tracked and clean", () => {
+		mkdirSync(join(repo, "sub"));
+		writeFileSync(join(repo, "sub", "a.txt"), "x\n");
+		g("add", "sub");
+		g("commit", "-qm", "sub");
+		expect(checkRecoverability(repo, { targets: [join(repo, "sub")], wholeTree: false }).verdict).toBe("recoverable");
+	});
+
+	it("refuses deleting a directory holding an untracked file", () => {
+		mkdirSync(join(repo, "sub"));
+		writeFileSync(join(repo, "sub", "a.txt"), "x\n");
+		g("add", "sub");
+		g("commit", "-qm", "sub");
+		writeFileSync(join(repo, "sub", "scratch.txt"), "new\n");
+		const result = checkRecoverability(repo, { targets: [join(repo, "sub")], wholeTree: false });
+		expect(result.verdict).toBe("unrecoverable");
+		expect(result.reason).toMatch(/directory holding/);
+	});
+
+	it("refuses deleting a directory holding IGNORED files (porcelain omits them by default)", () => {
+		mkdirSync(join(repo, "sub"));
+		writeFileSync(join(repo, "sub", "a.txt"), "x\n");
+		writeFileSync(join(repo, ".gitignore"), "*.env\n");
+		g("add", "sub", ".gitignore");
+		g("commit", "-qm", "sub");
+		writeFileSync(join(repo, "sub", "secrets.env"), "KEY=1\n");
+		expect(checkRecoverability(repo, { targets: [join(repo, "sub")], wholeTree: false }).verdict).toBe("unrecoverable");
+	});
+
 	it("treats a non-git directory as unrecoverable", () => {
 		const plain = mkdtempSync(join(tmpdir(), "cc-plain-"));
 		mkdirSync(join(plain, "sub"), { recursive: true });

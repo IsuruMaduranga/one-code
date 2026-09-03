@@ -201,6 +201,22 @@ function isWholeTreeGitReset(args: Token[]): boolean {
 }
 
 /**
+ * Whether git is being pointed at another repository or tree (`-C dir`,
+ * `--git-dir[=]…`, `--work-tree[=]…`, `--namespace`, `--exec-path`). A
+ * whole-tree op carrying one of these acts on THAT tree, so judging it against
+ * the working directory would clear a reset of some other checkout.
+ */
+function hasGitRetargetFlag(args: Token[]): boolean {
+	return args.some((token) => {
+		const value = token.value;
+		if (!value.startsWith("-")) return false;
+		if (GIT_GLOBAL_VALUE_FLAGS.has(value)) return true;
+		const eq = value.indexOf("=");
+		return eq > 0 && GIT_GLOBAL_VALUE_FLAGS.has(value.slice(0, eq));
+	});
+}
+
+/**
  * Interpreters whose *scripts* can write files the token-level pass never sees
  * (review finding N8: `awk 'BEGIN{print > "f"}'`). Their programs are not
  * parsed — they escalate unconditionally.
@@ -625,16 +641,19 @@ function gitEscalationReason(args: Token[], isDirOutsideCwd: (dir: string) => bo
 		if (token === "-c" || token.startsWith("-c=") || token === "--config-env") {
 			return "passes git -c/--config-env, which can turn a read into code execution";
 		}
-		if (GIT_GLOBAL_VALUE_FLAGS.has(token)) {
-			const value = args[index + 1]?.value;
+		// `--git-dir=/x` spells the same flag as `--git-dir /x`; normalise both.
+		const eq = token.indexOf("=");
+		const flag = eq > 0 ? token.slice(0, eq) : token;
+		if (GIT_GLOBAL_VALUE_FLAGS.has(flag)) {
+			const value = eq > 0 ? token.slice(eq + 1) : args[index + 1]?.value;
 			// `-C`/`--git-dir`/`--work-tree` retarget git at another directory. If that
 			// directory escapes the working directory the operation is no longer
 			// provably in-project, so escalate rather than skipping the flag blindly
 			// (was review gap: `git -C /etc status` classified safe).
-			if ((token === "-C" || token === "--git-dir" || token === "--work-tree") && value && isDirOutsideCwd(value)) {
-				return `runs git ${token} ${value}, which points outside the working directory`;
+			if ((flag === "-C" || flag === "--git-dir" || flag === "--work-tree") && value && isDirOutsideCwd(value)) {
+				return `runs git ${flag} ${value}, which points outside the working directory`;
 			}
-			index += 2;
+			index += eq > 0 ? 1 : 2;
 			continue;
 		}
 		index++;
@@ -786,6 +805,12 @@ export function analyzeShellCommand({ command, cwd, home }: AnalyzeInput): Shell
 			// mark it contained so the recoverability gate can clear it when the tree
 			// is clean. Any other non-read-only git subcommand is uncontained.
 			if (isWholeTreeGitReset(args)) {
+				if (hasGitRetargetFlag(args)) {
+					// The reset acts on whatever -C/--git-dir/--work-tree names, not on
+					// the working directory the recoverability judge would inspect.
+					escalate("runs git reset --hard against another tree (-C/--git-dir/--work-tree), which cannot be judged here");
+					continue;
+				}
 				evidence.wholeTree = true;
 				escalate("runs git reset --hard, which discards uncommitted changes in the working tree", {
 					contained: true,
