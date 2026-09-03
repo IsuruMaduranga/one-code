@@ -66,6 +66,7 @@ import {
 import { modeBadge, nextMode, PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "./modes.ts";
 import { type ChildToolCall, type ChildGateDecision, SUBAGENT_GATE_CHANNEL } from "./subagent-gate.ts";
 import { ORIGINAL_COMMAND_KEY } from "../worktree/rewrite.ts";
+import { MODE_CHANNEL, PLAN_FILE_CHANNEL } from "../lib/plan-mode-channels.ts";
 import { isWritingTool } from "./protected-paths.ts";
 import { loadPermissionSettings, normalizePermissionMode, persistAllowRule } from "./settings.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
@@ -543,14 +544,14 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	});
 
 	// Mode-change requests from other extensions (e.g. plan-mode tools).
-	pi.events.on("one-code:set-permission-mode", (data) => {
+	pi.events.on(MODE_CHANNEL, (data) => {
 		const requested = normalizePermissionMode((data as { mode?: unknown })?.mode);
 		if (requested) setMode(requested);
 	});
 
-	// The plan-mode extension announces the plan file (see PLAN_FILE_CHANNEL
-	// there); decide() then allows writes to that one path in plan mode.
-	pi.events.on("one-code:plan-file-path", (data) => {
+	// The plan-mode extension announces the plan file on PLAN_FILE_CHANNEL;
+	// decide() then allows writes to that one path in plan mode.
+	pi.events.on(PLAN_FILE_CHANNEL, (data) => {
 		const path = (data as { path?: unknown })?.path;
 		if (typeof path === "string" && path) planFilePath = path;
 	});

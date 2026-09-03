@@ -104,7 +104,17 @@ export default function mcpExtension(pi: ExtensionAPI) {
 	const registerToolsFor = (connection: Connection) => {
 		for (const tool of connection.tools) {
 			const name = namespacedToolName(connection.server.name, tool.name);
-			if (registered.has(name)) continue;
+			if (registered.has(name)) {
+				// Two tools sanitise to one name (`a-b` and `a_b`, or a server
+				// reconnecting under a stale registration). Skipping silently would
+				// make the second tool unreachable with no trace; record it where
+				// the connection summary reports it.
+				failures.push({
+					server: connection.server,
+					error: `tool "${tool.name}" skipped: its registered name "${name}" is already taken by another tool`,
+				});
+				continue;
+			}
 			registered.add(name);
 
 			const def: ToolDefinition = {

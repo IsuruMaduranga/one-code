@@ -28,9 +28,8 @@ import { buildPlanModeReminder } from "./reminder.ts";
 import { randomSlug } from "./slug.ts";
 import { clampOffset, decodeViewerKey, initialPlanChoice, type PlanChoice, renderPlanViewer, wrapPlanText } from "./viewer.ts";
 
-export const MODE_CHANNEL = "one-code:set-permission-mode";
-/** Announces plan mode's one writable file; the permissions matcher consumes it. */
-export const PLAN_FILE_CHANNEL = "one-code:plan-file-path";
+import { MODE_CHANNEL, PLAN_FILE_CHANNEL } from "../lib/plan-mode-channels.ts";
+export { MODE_CHANNEL, PLAN_FILE_CHANNEL };
 /** Session entry type persisting the allocated path across resume/branch. */
 const PLAN_FILE_ENTRY = "plan-mode-file";
 

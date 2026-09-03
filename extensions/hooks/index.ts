@@ -217,9 +217,11 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		if (outcome.block) {
 			// The tool already ran; the only channel left is the result the
 			// model reads, so the objection is delivered there (CC feeds
-			// PostToolUse block reasons back to the model the same way).
+			// PostToolUse block reasons back to the model the same way). The
+			// result's own error flag is left as the tool returned it: the side
+			// effect happened, and marking a successful write or command as an
+			// error invites the model to redo it.
 			content = [{ type: "text" as const, text: `PostToolUse hook: ${outcome.block.reason}` }, ...content];
-			isError = true;
 		}
 		if (outcome.additionalContext) {
 			content = [...content, { type: "text" as const, text: `<hook-additional-context>\n${outcome.additionalContext}\n</hook-additional-context>` }];
