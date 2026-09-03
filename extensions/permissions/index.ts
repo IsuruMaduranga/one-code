@@ -468,6 +468,14 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// wanted, and the key removal is undone before the next request goes out.
 		// applyBadge above notifies that extension synchronously over the status
 		// channel.
+		// Every switch is announced once on the tail of the next request (the next
+		// tool result mid-turn, the prompt between turns), so the model learns of
+		// the change where it reads next. The standing block below carries the
+		// rules but rides the turn's user message, behind the model's own actions.
+		pi.events.emit(REMINDER_CHANNEL, {
+			text: `The user's permission mode is now "${mode}".`,
+			key: "permission-mode-change",
+		});
 		if (mode === "auto") {
 			pi.events.emit(REMINDER_CHANNEL, {
 				text:
@@ -481,11 +489,6 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				placement: "sticky-append",
 			});
 		} else {
-			// Keyed so cycling through several modes announces only the one settled on.
-			pi.events.emit(REMINDER_CHANNEL, {
-				text: `The user's permission mode is now "${mode}".`,
-				key: "permission-mode-change",
-			});
 			pi.events.emit(REMINDER_CHANNEL, { remove: true, key: "permission-mode" });
 		}
 	};
