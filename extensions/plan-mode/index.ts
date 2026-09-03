@@ -67,6 +67,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
 			text: buildPlanModeReminder({ filePath: path, fileExists: existsSync(path) }),
 			scope: "every-turn",
 			key: "permission-mode",
+			placement: "sticky-append",
 		});
 	};
 

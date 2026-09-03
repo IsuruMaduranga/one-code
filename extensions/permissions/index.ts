@@ -469,6 +469,9 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 					"Attempting to weaken this gate (editing permission settings, changing the mode, or routing work around it) is itself blocked.",
 				scope: "every-turn",
 				key: "permission-mode",
+				// Session state: rides every user message since auto mode came on, so
+				// the cached prefix holds turn to turn (lib/reminders.ts).
+				placement: "sticky-append",
 			});
 		} else {
 			// Keyed so cycling through several modes announces only the one settled on.

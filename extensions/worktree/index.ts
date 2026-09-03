@@ -68,7 +68,12 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 	const applyState = (next: WorktreeState | undefined) => {
 		state = next;
 		if (next) {
-			pi.events.emit(REMINDER_CHANNEL, { text: reminderFor(next), scope: "every-turn", key: REMINDER_KEY });
+			pi.events.emit(REMINDER_CHANNEL, {
+				text: reminderFor(next),
+				scope: "every-turn",
+				key: REMINDER_KEY,
+				placement: "sticky-append",
+			});
 		} else {
 			pi.events.emit(REMINDER_CHANNEL, { key: REMINDER_KEY, remove: true });
 		}

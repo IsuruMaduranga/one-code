@@ -115,6 +115,7 @@ export default function effortExtension(pi: ExtensionAPI) {
 				text: ULTRACODE_STANDING_REMINDER,
 				scope: "every-turn",
 				key: REMINDER_KEY,
+				placement: "sticky-append",
 			});
 		} else {
 			pi.events.emit(REMINDER_CHANNEL, { remove: true, key: REMINDER_KEY });
