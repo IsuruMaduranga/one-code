@@ -66,6 +66,12 @@ export interface ScriptGlobalsOptions {
 	runWorkflow?: (nameOrRef: unknown, childArgs: unknown) => Promise<unknown>;
 	/** Injected clock for journal timestamps (the vm blocks Date.now, the host doesn't). */
 	now?: () => number;
+	/**
+	 * A nested workflow() reports its spend to the parent run's state, so the
+	 * parent's agent and token limits cover the whole tree, not just its own
+	 * direct agent() calls (review S9).
+	 */
+	onAccount?: (delta: { agents?: number; outputTokens?: number; cost?: number }) => void;
 }
 
 export interface ScriptGlobals {
@@ -85,6 +91,8 @@ export interface ScriptRunState {
 	outputTokens: () => number;
 	cost: () => number;
 	currentPhase: () => string | undefined;
+	/** Fold a child workflow's spend into this run (see ScriptGlobalsOptions.onAccount). */
+	account: (delta: { agents?: number; outputTokens?: number; cost?: number }) => void;
 }
 
 export function createScriptGlobals(options: ScriptGlobalsOptions): { globals: ScriptGlobals; state: ScriptRunState } {
@@ -127,6 +135,7 @@ export function createScriptGlobals(options: ScriptGlobalsOptions): { globals: S
 		// synchronous, so invocation order fully determines replay identity.
 		const callIndex = callSeq++;
 		agentCount++;
+		options.onAccount?.({ agents: 1 });
 		const hash = hashAgentCall(prompt, opts);
 		const phase = opts.phase ?? currentPhase;
 		const label = opts.label ?? `agent ${callIndex + 1}`;
@@ -157,6 +166,7 @@ export function createScriptGlobals(options: ScriptGlobalsOptions): { globals: S
 				const result = await options.agentCall(prompt, opts, onUpdate);
 				outputTokens += result.tokens.output;
 				cost += result.cost;
+				options.onAccount?.({ outputTokens: result.tokens.output, cost: result.cost });
 				options.onJournal?.({ callIndex, hash, result, timestamp: now() });
 				options.onEvent({
 					type: "agentEnd",
@@ -272,6 +282,11 @@ export function createScriptGlobals(options: ScriptGlobalsOptions): { globals: S
 		outputTokens: () => outputTokens,
 		cost: () => cost,
 		currentPhase: () => currentPhase,
+		account: (delta) => {
+			agentCount += delta.agents ?? 0;
+			outputTokens += delta.outputTokens ?? 0;
+			cost += delta.cost ?? 0;
+		},
 	};
 
 	return { globals, state };

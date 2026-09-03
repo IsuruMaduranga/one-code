@@ -188,3 +188,35 @@ describe("budget + workflow()", () => {
 		await expect(globals.workflow("child")).rejects.toThrow(/one level/);
 	});
 });
+
+describe("nested workflow accounting (S9)", () => {
+	it("reports agent starts and spend to the parent, and the parent folds them into its own state", async () => {
+		const deltas: Array<{ agents?: number; outputTokens?: number; cost?: number }> = [];
+		const parent = createScriptGlobals({
+			agentCall: async () => ({ value: "p", tokens: { input: 0, output: 0, total: 0 }, cost: 0 }),
+			args: undefined,
+			budgetTotal: null,
+			concurrency: 1,
+			signal: new AbortController().signal,
+			onEvent: () => {},
+		});
+		const child = createScriptGlobals({
+			agentCall: async () => ({ value: "c", tokens: { input: 1, output: 40, total: 41 }, cost: 0.5 }),
+			args: undefined,
+			budgetTotal: null,
+			concurrency: 1,
+			signal: new AbortController().signal,
+			onEvent: () => {},
+			onAccount: (delta) => {
+				deltas.push(delta);
+				parent.state.account(delta);
+			},
+		});
+		await child.globals.agent("do a thing");
+		expect(deltas).toEqual([{ agents: 1 }, { outputTokens: 40, cost: 0.5 }]);
+		expect(parent.state.agentCount()).toBe(1);
+		expect(parent.state.outputTokens()).toBe(40);
+		expect(parent.state.cost()).toBe(0.5);
+	});
+});
+

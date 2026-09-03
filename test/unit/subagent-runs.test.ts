@@ -60,3 +60,16 @@ describe("findSessionFile", () => {
 		expect(findSessionFile(join(dir, "nope"))).toBeUndefined();
 	});
 });
+
+describe("RunRegistry.clear (S5)", () => {
+	it("drops every record so a new session starts empty", () => {
+		const registry = new RunRegistry();
+		registry.add({ name: "a", agent: "explore", taskId: "t1", sessionSearchDir: "", cwd: "/p" } as never);
+		expect(registry.names()).toEqual(["a"]);
+		registry.clear();
+		expect(registry.names()).toEqual([]);
+		expect(registry.resolve("a")).toBeUndefined();
+		expect(registry.resolve("t1")).toBeUndefined();
+	});
+});
+

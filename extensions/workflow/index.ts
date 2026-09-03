@@ -20,6 +20,7 @@ import os from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { recordUsage } from "../lib/usage-bus.ts";
 import { createTaskNotifier } from "../lib/notifications.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../permissions/modes.ts";
@@ -286,6 +287,8 @@ export default function workflowExtension(pi: ExtensionAPI) {
 					configuredDefault,
 					defaultEffort: ctx.thinkingLevel,
 					getPermissionBridge,
+					// Workflow agents run in their own sessions; their spend reaches the footer only through the bus.
+					onUsage: (cost) => recordUsage(pi, "subagent", { cost: { total: cost } }),
 				});
 				widget.attach(handle);
 

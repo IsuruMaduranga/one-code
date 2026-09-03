@@ -182,6 +182,9 @@ export class SubagentRuntime {
 			systemPrompt,
 			neverGate: NEVER_GATE,
 			extraExtensionPaths: CHILD_EXTENSION_PATHS,
+			// claude-context (above) injects # claudeMd; pi must not append the same
+			// files to the system prompt as well.
+			noContextFiles: true,
 			getPermissionBridge: this.getPermissionBridge,
 		});
 	}
@@ -191,7 +194,10 @@ export class SubagentRuntime {
 		// Fork loaders are keyed by the parent's system prompt, which varies turn to
 		// turn (files read, date, todo state). Caching them would grow an unbounded
 		// key set and leak a full loader per distinct prompt, so a fork builds fresh.
-		if (spec.forkFrom) return this.buildChildLoader(spec.parentSystemPrompt);
+		// A fork's prompt also comes back on a RESUME of a finished fork (read from
+		// the file persisted beside its session) — without it the resume ran on
+		// pi's stock prompt and default tools (review S6).
+		if (spec.forkFrom || spec.parentSystemPrompt !== undefined) return this.buildChildLoader(spec.parentSystemPrompt);
 		const [key, systemPrompt] = spec.agent ? [`agent:${spec.agent.name}`, spec.agent.systemPrompt] : ["base", undefined];
 		let pending = this.loaderCache.get(key);
 		if (!pending) {

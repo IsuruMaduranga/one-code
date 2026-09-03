@@ -16,7 +16,7 @@
  * children persist their sessions per run to make that possible).
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import os from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -415,8 +415,22 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		}
 	};
 
+	let shuttingDown = false;
+	let currentSessionId: string | undefined;
 	pi.on("session_start", (_event, ctx) => {
 		lastCtx = ctx;
+		// A NEW session (/clear, /new) must not keep the old one's agents: a
+		// resident finishing later would post into a conversation that never
+		// spawned it, and its name would shadow a new run's (review S5).
+		const id = ctx.sessionManager.getSessionId?.();
+		if (currentSessionId !== undefined && id !== currentSessionId) {
+			stopAllAgents();
+			residents.clear();
+			liveHandles.clear();
+			runningNames.clear();
+			registry.clear();
+		}
+		currentSessionId = id;
 		reconstructRuns(ctx);
 		emitModelStatus(ctx);
 		emitAgentCatalog(ctx);
@@ -428,9 +442,15 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		emitDelegationSteer(event.model);
 	});
 	pi.on("session_tree", (_event, ctx) => reconstructRuns(ctx));
-	pi.on("session_shutdown", () => {
+	pi.on("session_shutdown", async () => {
+		// Teardown: kills must not surface as "terminated" notifications, and the
+		// worktree cleanups the exits trigger get a bounded moment to finish
+		// before the process goes (review S14).
+		shuttingDown = true;
+		const exits = [...liveHandles.values()].map((h) => ("result" in h ? (h as { result?: Promise<unknown> }).result : undefined)).filter(Boolean);
 		stopAllAgents();
 		panel.dispose();
+		await Promise.race([Promise.allSettled(exits), new Promise((resolve) => setTimeout(resolve, 1_500))]);
 	});
 
 	// --- The subagent panel: strip soft focus + Enter-to-view transcript swap ---
@@ -796,15 +816,50 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		);
 	}
 
-	const notify = createTaskNotifier(pi);
+	const notifier = createTaskNotifier(pi);
+	/** Every subagent notification; silent during shutdown (a teardown kill is not news). */
+	const notify: typeof notifier = (customType, text, details) => {
+		if (shuttingDown) return;
+		notifier(customType, text, details);
+	};
+
+	/**
+	 * A child's message to the main conversation is capped: it is unmetered model
+	 * output landing in the parent's context, N children at once (review S4). The
+	 * child is told where the cut is so it can put long content in a file.
+	 */
+	const MESSAGE_TO_MAIN_CAP = 10_000;
 
 	/** Relay a child's send_message {to: "main"} into this conversation. */
-	const notifyAgentMessage = (name: string, message: string, summary?: string) =>
-		notify(
-			"subagent-message",
-			systemNotification(`Message from agent ${name}${summary ? ` (${summary})` : ""}:\n\n${message}`),
-			{ name, summary },
-		);
+	const notifyAgentMessage = (name: string, message: string, summary?: string) => {
+		const body =
+			message.length > MESSAGE_TO_MAIN_CAP
+				? `${message.slice(0, MESSAGE_TO_MAIN_CAP)}\n… [message truncated at ${MESSAGE_TO_MAIN_CAP / 1000} KB — long content belongs in a file the parent can read]`
+				: message;
+		notify("subagent-message", systemNotification(`Message from agent ${name}${summary ? ` (${summary})` : ""}:\n\n${body}`), {
+			name,
+			summary,
+		});
+	};
+
+	/** A fork's system prompt is persisted beside its session so a later resume can restore it (review S6). */
+	const FORK_PROMPT_FILE = "system-prompt.md";
+	const persistForkPrompt = (record: AgentRunRecord, prompt: string) => {
+		if (!record.sessionSearchDir) return;
+		try {
+			writeFileSync(join(record.sessionSearchDir, FORK_PROMPT_FILE), prompt);
+		} catch {
+			// The run still works; only a later resume loses the prompt (and says so).
+		}
+	};
+	const readForkPrompt = (record: AgentRunRecord): string | undefined => {
+		if (!record.sessionSearchDir) return undefined;
+		try {
+			return readFileSync(join(record.sessionSearchDir, FORK_PROMPT_FILE), "utf-8");
+		} catch {
+			return undefined;
+		}
+	};
 
 	/** Session dir for a run's persisted child session; undefined → child runs --no-session. */
 	const runSessionDir = (ctx: ExtensionContext, taskId: string): string | undefined => {
@@ -919,6 +974,32 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					depth: parentDepth + 1,
 				};
 				registry.add(record); // SendMessage from main can reach the nested run too
+
+				// The main conversation's Agent calls are classified as delegations
+				// (matcher DELEGATION_TOOLS); a child's nested spawn must be judged the
+				// same way — a prompt-injected child could otherwise hand a task the
+				// parent would never be allowed to a grandchild unclassified (review
+				// S8). The child's own gate never sees this call (Agent is NEVER_GATE
+				// there), so route it through the parent's bridge here. Fails closed.
+				try {
+					const bridge = getPermissionBridge();
+					const verdict = bridge
+						? await bridge({ toolName: "Agent", input: { subagent_type: agentName, prompt: task, description: name }, cwd: parentRecord.cwd, signal })
+						: { block: true as const, reason: "no permission bridge is available to judge the delegation" };
+					if (verdict?.block) {
+						return {
+							content: [{ type: "text" as const, text: `Nested Agent call refused: ${verdict.reason}` }],
+							details: { agentRuns: [] as AgentRunRecord[] },
+							isError: true,
+						};
+					}
+				} catch (error) {
+					return {
+						content: [{ type: "text" as const, text: `Nested Agent call refused: permission check failed (${(error as Error).message}).` }],
+						details: { agentRuns: [] as AgentRunRecord[] },
+						isError: true,
+					};
+				}
 
 				const result = await executeRun(
 					{
@@ -1367,6 +1448,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				// Keeps task_output consistent with the log and the completion
 				// notification rather than showing an empty body in that case.
 				let lastOutput = "";
+				// The initial task's own report. task_output for THIS task must return the
+				// first turn's reply — not the resident's growing multi-turn transcript —
+				// the same way a SendMessage task returns one reply (review S12).
+				let firstTurnOutput: string | undefined;
 				const live = trackLiveRun(p.record, p.request);
 				const resident: Resident = { handle: undefined as never, turnHandlers: [] };
 				const worktreeNote = worktree
@@ -1375,6 +1460,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				resident.turnHandlers.push((outcome, review) => {
 					task.status = outcome.failed ? "failed" : "completed";
 					task.finishedAt = Date.now();
+					firstTurnOutput = outcome.output;
 					finish();
 					const stats = formatStats(outcome.toolCalls, outcome.usage);
 					notify(
@@ -1411,11 +1497,18 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					}, RESIDENT_IDLE_MS);
 					reaper.unref?.();
 				};
+				// Captured as a string: onExit runs from a `.finally` long after this
+				// turn's ctx may be stale (review S5).
+				const parentCwd = ctx.cwd;
+				const forkPrompt = p.request.fork ? ctx.getSystemPrompt() : undefined;
+				if (forkPrompt !== undefined) persistForkPrompt(p.record, forkPrompt);
+				// No `signal` here on purpose: a resident outlives the spawning turn and
+				// is stopped through task_stop / the panel, not by the turn ending (S15).
 				const handle = await runtime.runResident({
 					agent: p.agentDef,
 					cwd: p.record.cwd,
 					forkFrom: p.request.fork ? (sessionFile ?? undefined) : undefined,
-					parentSystemPrompt: p.request.fork ? ctx.getSystemPrompt() : undefined,
+					parentSystemPrompt: forkPrompt,
 					sessionDir: p.record.sessionSearchDir || undefined,
 					model: p.request.model,
 					fallbackModel: p.request.fallbackModel,
@@ -1466,7 +1559,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						live.finish(false);
 						if (residents.get(p.record.name) === resident) residents.delete(p.record.name);
 						liveHandles.delete(p.record.taskId);
-						if (worktree) void cleanupWorktree(ctx.cwd, worktree);
+						if (worktree) void cleanupWorktree(parentCwd, worktree);
 					},
 				});
 				resident.handle = handle;
@@ -1481,7 +1574,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					status: "running",
 					startedAt: Date.now(),
 					logPath,
-					output: () => handle.snapshot().text || lastOutput,
+					output: () => firstTurnOutput ?? (handle.snapshot().text || lastOutput),
 					stop: () => handle.kill(),
 					resident: () => !handle.exited(),
 					finished,
@@ -1616,6 +1709,22 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				};
 			}
 			const sessionFile = registry.sessionFileFor(record);
+			// A fork has no agent definition: its identity is the parent's prompt at
+			// spawn time, persisted beside its session. Without it a resume would run
+			// on pi's stock prompt and default tools — refuse instead (review S6).
+			const forkPrompt = record.agent === FORK_AGENT ? readForkPrompt(record) : undefined;
+			if (record.agent === FORK_AGENT && forkPrompt === undefined) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Agent ${record.name} is a fork whose system prompt was not persisted (it ran before fork resume was supported, or its files were removed), so it cannot be resumed faithfully. Start a fresh run instead.`,
+						},
+					],
+					details: {},
+					isError: true,
+				};
+			}
 			if (!sessionFile) {
 				return {
 					content: [
@@ -1648,6 +1757,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				task: params.message,
 				cwd: record.cwd,
 				sessionFile,
+				parentSystemPrompt: forkPrompt,
 				model: record.model,
 				// Resume degrades to the session model if the recorded model has become
 				// unavailable since the original run, rather than failing the resume

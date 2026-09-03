@@ -44,6 +44,8 @@ export interface StartRunOptions {
 	defaultEffort?: string;
 	/** Parent permission bridge, threaded into every agent's gate (see AgentRunnerOptions). */
 	getPermissionBridge?: () => PermissionBridge | undefined;
+	/** Each finished agent's dollar cost, for the footer's all-in total (review S13). */
+	onUsage?: (cost: number) => void;
 }
 
 export class RunHandle extends EventEmitter {
@@ -233,6 +235,7 @@ export class WorkflowRunManager {
 				defaultEffort: options.defaultEffort as never,
 				onNotice: (message) => handle.record({ type: "log", text: `⚠ ${message}` }),
 				getPermissionBridge: options.getPermissionBridge,
+				onUsage: options.onUsage,
 			});
 
 			const { globals, state } = createScriptGlobals({
@@ -300,6 +303,8 @@ export class WorkflowRunManager {
 			budgetTotal: remainingBudget,
 			concurrency: defaultConcurrency(),
 			maxAgents: remainingAgents,
+			// One budget for the tree: the child's spend counts against the parent.
+			onAccount: (delta) => state.account(delta),
 			signal: parent.signal,
 			onEvent: (event) =>
 				parent.record({

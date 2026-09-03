@@ -74,6 +74,12 @@ export class RunRegistry {
 	private byId = new Map<string, AgentRunRecord>();
 
 	/** Latest wins per name, matching Claude Code's semantics. */
+	/** Drop every record — a new session (/clear) starts with no runs to address. */
+	clear(): void {
+		this.byName.clear();
+		this.byId.clear();
+	}
+
 	add(record: AgentRunRecord): void {
 		this.byName.set(record.name, record);
 		this.byId.set(record.taskId, record);

@@ -67,6 +67,13 @@ export interface AgentLoaderOptions {
 	 * read lazily — the bridge may not be published yet when the loader is built.
 	 */
 	getPermissionBridge?: () => PermissionBridge | undefined;
+	/**
+	 * Stop pi from appending CLAUDE.md/AGENTS.md to the child's system prompt. Set
+	 * by a caller whose child session loads the `claude-context` extension, which
+	 * injects the `# claudeMd` reminder itself — otherwise the child carried the
+	 * project instructions twice (review S10).
+	 */
+	noContextFiles?: boolean;
 }
 
 /** Build and `reload()` a resource loader for an in-process agent session. */
@@ -75,6 +82,7 @@ export async function buildAgentLoader(options: AgentLoaderOptions): Promise<Def
 		cwd: options.cwd,
 		agentDir: options.agentDir,
 		noExtensions: true,
+		...(options.noContextFiles ? { noContextFiles: true } : {}),
 		extensionFactories: [
 			// Order is load-bearing: the worktree git-isolation guard must run BEFORE
 			// the permission gate — the same guard-before-permissions layering the

@@ -54,6 +54,8 @@ export interface AgentRunnerOptions {
 	 * that would normally ask — unusable outside auto/bypass modes.
 	 */
 	getPermissionBridge?: () => PermissionBridge | undefined;
+	/** Each finished agent's dollar cost (review S13: workflow agents never reached the footer). */
+	onUsage?: (cost: number) => void;
 }
 
 /**
@@ -253,6 +255,7 @@ export class AgentRunner {
 			}
 
 			const stats = session.getSessionStats();
+			this.options.onUsage?.(stats.cost);
 			// cleanupWorktree keeps trees holding uncommitted changes; report those.
 			let worktreePath: string | undefined;
 			if (worktree) {
