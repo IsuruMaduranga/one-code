@@ -175,7 +175,11 @@ export default function recapExtension(pi: ExtensionAPI) {
 		abortInFlight();
 	});
 
-	pi.on("agent_end", (_event, ctx) => {
+	// Settle, not agent_end: `agent_end` fires per run, and arming the idle
+	// timer there could fire a recap during a retry backoff longer than the
+	// configured idle (CC_RECAP_IDLE_MS floors at 1s), burning the
+	// one-per-turn budget mid-turn.
+	pi.on("agent_settled", (_event, ctx) => {
 		lastCtx = ctx;
 		// Unconditional: turnEnded() both clears turn state and arms the idle
 		// timer, so gating it on hasUI could leave turnRunning stuck true (and

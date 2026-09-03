@@ -13,10 +13,11 @@
  *      descendants never grows while subagents run (a reconnecting child would
  *      spawn its own server). No-op/graceful when no MCP server is configured.
  *
- * Functionally it exercises: foreground Agent, `fork`, `isolation:"worktree"`,
- * `run_in_background` + resident, and SendMessage to the resident child. Each
- * turn asks the subagent to echo a unique marker; the harness confirms the
- * marker reaches the main session's stream.
+ * Functionally it exercises: a plain Agent run, `fork`, `isolation:"worktree"`,
+ * a named run + SendMessage to the resident child. Every run is a background
+ * resident (CC parity): the spawn turn settles immediately and the marker
+ * arrives later in the completion notification, which the harness waits for
+ * in the main session's stream.
  *
  * Real model calls — run it manually (like the other rpc-*.mjs harnesses), not
  * in CI. From a sandboxed assistant shell, wrap in tmux (findings §10):
@@ -139,7 +140,7 @@ const send = (obj) => child.stdin.write(`${JSON.stringify(obj)}\n`);
 let rawStdout = "";
 let buffer = "";
 const seenMarkers = new Set();
-const MARKERS = ["FG-MARK-42", "FORK-MARK-5", "WT-MARK-3", "BG-MARK-7", "MSG-MARK-9"];
+const MARKERS = ["FG-MARK-42", "FORK-MARK-5", "WT-MARK-3", "BG-MARK-7", "MSG-MARK-9", "STEER-MARK-11"];
 
 const waiters = []; // { needle, resolve }
 const noteMarkers = () => {
@@ -152,7 +153,11 @@ const noteMarkers = () => {
 	}
 };
 
-let turnEnds = 0; // count of agent_end events (top-level turns and follow-up turns)
+// Turn boundaries are agent_settled, NOT agent_end: a provider retry or
+// auto-compaction emits extra agent_end events inside one logical turn
+// (findings §3), which would resolve promptTurn() early and fail a scenario
+// spuriously even though production behavior is correct.
+let turnEnds = 0; // count of agent_settled events (top-level turns and follow-up turns)
 const turnWaiters = [];
 
 child.stdout.on("data", (chunk) => {
@@ -172,7 +177,7 @@ child.stdout.on("data", (chunk) => {
 		// Auto-answer any UI request (skip-permissions should prevent these, but be safe).
 		if (event.type === "extension_ui_request") {
 			send({ type: "extension_ui_response", id: event.id, cancelled: true, confirmed: false });
-		} else if (event.type === "agent_end") {
+		} else if (event.type === "agent_settled") {
 			turnEnds += 1;
 			for (const w of turnWaiters.splice(0)) w();
 		}
@@ -193,7 +198,7 @@ const waitFor = (needle, ms, label) =>
 	});
 
 let reqN = 0;
-// Send a prompt and resolve when THIS turn settles (the next agent_end). Rejects
+// Send a prompt and resolve when THIS turn settles (the next agent_settled). Rejects
 // on timeout so a wedged turn fails its own scenario rather than the whole run.
 const promptTurn = (message, ms, label) =>
 	new Promise((resolve, reject) => {
@@ -243,45 +248,45 @@ const run = async () => {
 	sampler.takeBaseline();
 	console.log(`MCP baseline (parent's servers): ${sampler.mcpBaseline}`);
 
-	// 1. Foreground Agent.
-	await step("foreground: subagent marker relayed", async () => {
+	// 1. Plain Agent run: dispatch returns immediately; the marker arrives in
+	// the completion notification (a steered message / its own turn).
+	await step("agent run: completion marker relayed", async () => {
 		await promptTurn(
-			"Use the Agent tool with subagent_type 'general-purpose' and task: \"Reply with exactly the single token FG-MARK-42 and nothing else.\" Do NOT do the work yourself. When the agent returns, tell me the token.",
-			150_000,
-			"foreground",
+			"Use the Agent tool with subagent_type 'general-purpose' and task: \"Reply with exactly the single token FG-MARK-42 and nothing else.\" Do NOT do the work yourself. Then tell me you started it.",
+			120_000,
+			"agent dispatch",
 		);
-		if (!seenMarkers.has("FG-MARK-42")) throw new Error("FG-MARK-42 not seen");
+		await waitFor("FG-MARK-42", 150_000, "agent completion notification");
 	});
 
 	// 2. fork (inherits this conversation; needs a persisted session).
-	await step("fork: subagent marker relayed", async () => {
+	await step("fork: completion marker relayed", async () => {
 		await promptTurn(
-			"Use the Agent tool with subagent_type 'fork' and task: \"Reply with exactly the single token FORK-MARK-5 and nothing else.\" When it returns, tell me the token.",
-			150_000,
-			"fork",
+			"Use the Agent tool with subagent_type 'fork' and task: \"Reply with exactly the single token FORK-MARK-5 and nothing else.\" Then tell me you started it.",
+			120_000,
+			"fork dispatch",
 		);
-		if (!seenMarkers.has("FORK-MARK-5")) throw new Error("FORK-MARK-5 not seen");
+		await waitFor("FORK-MARK-5", 150_000, "fork completion notification");
 	});
 
 	// 3. worktree isolation.
-	await step("worktree: subagent marker relayed", async () => {
+	await step("worktree: completion marker relayed", async () => {
 		await promptTurn(
-			"Use the Agent tool with subagent_type 'general-purpose', isolation 'worktree', and task: \"Reply with exactly the single token WT-MARK-3 and nothing else.\" When it returns, tell me the token.",
-			150_000,
-			"worktree",
+			"Use the Agent tool with subagent_type 'general-purpose', isolation 'worktree', and task: \"Reply with exactly the single token WT-MARK-3 and nothing else.\" Then tell me you started it.",
+			120_000,
+			"worktree dispatch",
 		);
-		if (!seenMarkers.has("WT-MARK-3")) throw new Error("WT-MARK-3 not seen");
+		await waitFor("WT-MARK-3", 150_000, "worktree completion notification");
 	});
 
-	// 4. Background / resident: dispatch returns immediately; completion arrives
-	// asynchronously as a notification (its own follow-up turn).
-	await step("background: resident completion relayed", async () => {
+	// 4. Named run staying resident for SendMessage below.
+	await step("named run: resident completion relayed", async () => {
 		await promptTurn(
-			"Use the Agent tool with run_in_background true, subagent_type 'general-purpose', name 'bg1', and task: \"Reply with exactly the single token BG-MARK-7 and nothing else.\" Then immediately, without waiting for it, tell me you started it.",
+			"Use the Agent tool with subagent_type 'general-purpose', name 'bg1', and task: \"Reply with exactly the single token BG-MARK-7 and nothing else.\" Then tell me you started it.",
 			120_000,
-			"background dispatch",
+			"named dispatch",
 		);
-		await waitFor("BG-MARK-7", 150_000, "background completion notification");
+		await waitFor("BG-MARK-7", 150_000, "named-run completion notification");
 	});
 
 	// 5. SendMessage to the resident child.
@@ -292,6 +297,20 @@ const run = async () => {
 			"SendMessage dispatch",
 		);
 		await waitFor("MSG-MARK-9", 150_000, "SendMessage reply notification");
+	});
+
+	// 6. Mid-turn steer: an agent completing while the main turn is busy on a
+	// slow tool call must be attended INSIDE that same turn (the notification
+	// is steered in after the tool batch), so the marker is present by the
+	// time this turn settles — a followUp regression would deliver it in a
+	// later turn and fail the check.
+	await step("steer: completion attended mid-turn", async () => {
+		await promptTurn(
+			"Do these in order, in this one reply: (1) Use the Agent tool with subagent_type 'general-purpose' and task: \"Reply with exactly the single token STEER-MARK-11 and nothing else.\" (2) Immediately after starting it, run the Bash command `ping -c 25 127.0.0.1` and wait for it to finish. (3) Then, if the agent's completion notification has arrived, end your reply with the agent's token.",
+			240_000,
+			"steer turn",
+		);
+		if (!seenMarkers.has("STEER-MARK-11")) throw new Error("STEER-MARK-11 not delivered within the busy turn");
 	});
 };
 

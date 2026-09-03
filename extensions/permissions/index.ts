@@ -22,6 +22,8 @@ import { join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { type ChildAction, SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../auto-mode/actions.ts";
+import { createTaskNotifier } from "../lib/notifications.ts";
+import { customMessageText, notificationComponent } from "../lib/tui-render.ts";
 import { classify, createClassifierState } from "../auto-mode/classifier.ts";
 import {
 	type AutoModeConfig,
@@ -114,6 +116,12 @@ const YES_SESSION = "Yes, don't ask again this session";
 const NO = "No, tell the agent what to do differently";
 
 export default function permissionsExtension(pi: ExtensionAPI) {
+	const notifyTask = createTaskNotifier(pi);
+	// The background hand-back review rides the same steered path as agent
+	// completions; render it the same compact way (full body on ctrl+o).
+	pi.registerMessageRenderer("subagent-review", (message, { expanded }, theme) =>
+		notificationComponent(theme, customMessageText(message.content), expanded),
+	);
 	pi.registerFlag("permission-mode", {
 		description:
 			"Permission mode: default (alias: manual) | acceptEdits | plan | auto | bypassPermissions | dontAsk",
@@ -522,7 +530,10 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		streaming = true;
 		applyBadge();
 	});
-	pi.on("agent_end", () => {
+	// Settle, not agent_end: `agent_end` fires per run, so flipping there made
+	// the badge's "· esc to interrupt" suffix flicker off and back on across a
+	// provider retry — the model is still working until the turn settles.
+	pi.on("agent_settled", () => {
 		streaming = false;
 		applyBadge();
 	});
@@ -1004,16 +1015,14 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		}
 		// Background/resident: the spawning call already returned, so there is no
 		// tool_result to attach to. Review now and surface any concern as its own
-		// follow-up, alongside the completion report the model receives.
+		// steered message, so it lands adjacent to the completion report the
+		// model receives (both ride the steering queue).
 		const ctx = lastReviewCtx;
 		if (mode !== "auto" || payload.actions.length === 0 || pauseTracker.isPaused() || !ctx) return;
 		const label = payload.agentName ? `${payload.agentName} (background run)` : "background run";
 		void reviewCompletedRun(payload.actions, ctx, label, new AbortController().signal).then((reason) => {
 			if (!reason) return;
-			pi.sendMessage(
-				{ customType: "subagent-review", content: [{ type: "text", text: reviewFlagged(reason) }], display: true, details: {} },
-				{ deliverAs: "followUp", triggerTurn: true },
-			);
+			notifyTask("subagent-review", reviewFlagged(reason));
 		});
 	});
 

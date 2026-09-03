@@ -5,8 +5,8 @@
  * Owns the BackgroundRegistry. Other extensions (subagents) register their
  * long-running work over TASK_REGISTER_CHANNEL at runtime, so task_output and
  * task_stop address every background task in the session regardless of which
- * extension started it. Events and completions are delivered as follow-up
- * messages framed as system notifications, never as user input.
+ * extension started it. Events and completions are delivered as steered
+ * system notifications (lib/notifications.ts), never as user input.
  */
 
 import { spawn } from "node:child_process";
@@ -31,7 +31,7 @@ import {
 	MIN_DELAY_SECONDS,
 	parseLoopArgs,
 } from "./wakeup.ts";
-import { systemNotification } from "../lib/notifications.ts";
+import { createTaskNotifier, systemNotification } from "../lib/notifications.ts";
 
 const OUTPUT_CAP = 30_000;
 const STORED_OUTPUT_CAP = 200_000;
@@ -65,11 +65,10 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 
 	const updateWidget = () => {
 		if (!lastCtx?.hasUI) return;
-		// Bash shells have their own first-class UI (the subagents panel's shell
-		// manager), so they are excluded here. A bash-only carve-out, not a
-		// general "has its own UI" rule: background subagent runs still count
-		// even though the agent strip also shows them (pre-existing).
-		const running = registry.running().filter((t) => t.kind !== "bash").length;
+		// A task whose producer gives it first-class panel UI (bash shells and
+		// subagent runs in the subagents panel) is excluded, or this line would
+		// stay permanently lit next to the panel already showing the same work.
+		const running = registry.running().filter((t) => !t.ownUI).length;
 		lastCtx.ui.setWidget("cc-background", running > 0 ? [` background tasks: ${running} running`] : undefined);
 	};
 
@@ -82,12 +81,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		);
 	}
 
-	const notify = (customType: string, text: string, details: Record<string, unknown>) => {
-		pi.sendMessage(
-			{ customType, content: [{ type: "text", text }], display: true, details },
-			{ deliverAs: "followUp", triggerTurn: true },
-		);
-	};
+	const notify = createTaskNotifier(pi);
 
 	pi.registerTool({
 		name: "monitor",

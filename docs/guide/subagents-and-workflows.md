@@ -32,8 +32,10 @@ this with the `explore` agent." Useful ways to run them:
   [Providers and models](providers-and-models.md).
 - **Fork the current session.** A forked subagent inherits your conversation so
   far, which suits a task that needs the full context you have built up.
-- **Run in the background.** Send a subagent to the background and keep working;
-  message it while it runs and read its reply when it is ready.
+- **Keep working while agents run.** Every subagent runs in the background: the
+  model keeps working (and you can keep talking to it) while agents run, each
+  agent's report is picked up the moment it finishes, and a finished agent can
+  still be messaged later.
 - **Isolate in a git worktree.** Give a subagent its own worktree so it can edit
   files without colliding with your working tree or with other agents.
 

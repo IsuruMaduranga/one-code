@@ -11,8 +11,8 @@
  * A background run spawns detached, returns a task id immediately, spools
  * output to `<sessionDir>/bash/<taskId>/output.log`, registers on the shared
  * background registry (task_output/task_stop just work — they are
- * kind-agnostic), and announces completion as a follow-up system
- * notification. The permission gate and auto-mode classifier run before
+ * kind-agnostic), and announces completion as a steered system notification
+ * (lib/notifications.ts). The permission gate and auto-mode classifier run before
  * execute like any bash call — a background command is NOT auto-allowed, and
  * the gate fires before anything detaches.
  */
@@ -26,7 +26,7 @@ import { generateTaskId, TASK_REGISTER_CHANNEL } from "../background/registry.ts
 import { type BashFinishSummary, startBackgroundBash, tailCap } from "./background.ts";
 import { bashGuardReason } from "./guards.ts";
 import { ORIGINAL_COMMAND_KEY } from "../worktree/rewrite.ts";
-import { systemNotification } from "../lib/notifications.ts";
+import { createTaskNotifier, systemNotification } from "../lib/notifications.ts";
 import { perCwd } from "../lib/per-cwd.ts";
 import { ccWrapBuiltinRenderers, linesComponent, resultLines } from "../lib/tui-render.ts";
 
@@ -55,12 +55,8 @@ export default function bashExtension(pi: ExtensionAPI) {
 	const base = createBashToolDefinition(process.cwd());
 	const foreground = perCwd(createBashToolDefinition);
 
-	const notify = (text: string, details: Record<string, unknown>) => {
-		pi.sendMessage(
-			{ customType: "task-notification", content: [{ type: "text", text }], display: true, details },
-			{ deliverAs: "followUp", triggerTurn: true },
-		);
-	};
+	const notifyTask = createTaskNotifier(pi);
+	const notify = (text: string, details: Record<string, unknown>) => notifyTask("task-notification", text, details);
 
 	const taskLogPath = (ctx: ExtensionContext, taskId: string): string | undefined => {
 		try {

@@ -65,14 +65,21 @@ export default function spinnerExtension(pi: ExtensionAPI) {
 
 	pi.on("agent_start", (_event, ctx) => {
 		lastCtx = ctx;
-		verb = pickVerb();
-		turnStartedAt = Date.now();
-		settledChars = 0;
+		// A turn can hold several runs (provider retry, auto-compaction, queued
+		// follow-up — findings §3): a later run joins the open span, keeping the
+		// first run's start and verb, so the elapsed shown is the time the user
+		// has actually waited (the live counterpart of turn-duration's TurnSpan).
+		if (!turnStartedAt) {
+			verb = pickVerb();
+			turnStartedAt = Date.now();
+			settledChars = 0;
+		}
 		streamingMessage = undefined;
 		updateWorkingMessage();
-		stopTicker();
-		ticker = setInterval(updateWorkingMessage, TICK_MS);
-		ticker.unref?.();
+		if (!ticker) {
+			ticker = setInterval(updateWorkingMessage, TICK_MS);
+			ticker.unref?.();
+		}
 	});
 
 	pi.on("message_update", (event) => {
@@ -87,7 +94,11 @@ export default function spinnerExtension(pi: ExtensionAPI) {
 		}
 	});
 
-	pi.on("agent_end", (_event, ctx) => {
+	// Settle, not agent_end: `agent_end` fires per run, and stopping there made
+	// the counter restart from zero on a provider retry. The ticker runs through
+	// the backoff so the elapsed keeps counting, and stops (for any outcome,
+	// unlike the gated duration line) only when pi will not continue by itself.
+	pi.on("agent_settled", (_event, ctx) => {
 		stopTicker();
 		turnStartedAt = 0;
 		if (ctx.hasUI) ctx.ui.setWorkingMessage(); // restore pi's default for non-turn work

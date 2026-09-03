@@ -9,10 +9,11 @@
  *
  * Claude Code features covered: parallel tasks, per-call `model`/`thinking`
  * overrides, `fork` (a child inheriting this conversation), `isolation:
- * "worktree"`, `run_in_background` (detached runs addressable via
- * task_output/task_stop, completion delivered as a system notification), and
- * send_message (resume a finished agent with its context intact — children
- * persist their sessions per run to make that possible).
+ * "worktree"`, background execution (every run returns immediately — CC parity
+ * — stays addressable via task_output/task_stop, and steers its completion
+ * into the conversation as a system notification), and SendMessage (reach a
+ * running agent live, or resume a finished one with its context intact —
+ * children persist their sessions per run to make that possible).
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -44,14 +45,14 @@ import { watchPermissionBridge } from "../permissions/subagent-gate.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { type BackgroundTask, generateTaskId, TASK_REGISTER_CHANNEL } from "../background/registry.ts";
 import { type ChildAction } from "../auto-mode/actions.ts";
-import { type ChildHandle, type ChildOutcome, forkTaskMessage, OUTPUT_CAP, type RpcChildHandle } from "./outcome.ts";
+import { type ChildOutcome, forkTaskMessage, OUTPUT_CAP, type RpcChildHandle } from "./outcome.ts";
 import { type AgentRunRecord, nextRunName, RunRegistry } from "./runs.ts";
 import { SubagentRuntime } from "./runner.ts";
 import { emptyUsage, formatStats, type UsageTotals } from "./usage.ts";
 import { cleanupWorktree, createWorktree, isGitRepo, type Worktree } from "./worktree.ts";
 import { findGitRoot } from "../lib/git.ts";
 import { registerWorktreeIsolation } from "../lib/worktree-isolation.ts";
-import { systemNotification } from "../lib/notifications.ts";
+import { createTaskNotifier, sessionOutlivesTurn, systemNotification } from "../lib/notifications.ts";
 import { ccToolRenderers, customMessageText, notificationComponent, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import { deriveActivity, LiveRunRegistry } from "./live-runs.ts";
 import { DELEGATION_STEER } from "./delegation-steer.ts";
@@ -151,12 +152,6 @@ const SubagentParams = Type.Object({
 			description: "Run the agent in its own git worktree so its file edits are isolated from the main checkout",
 		}),
 	),
-	run_in_background: Type.Optional(
-		Type.Boolean({
-			description:
-				"Return immediately with a task id instead of waiting. Completion arrives as a system notification; inspect with task_output, stop with task_stop",
-		}),
-	),
 	action: Type.Optional(
 		StringEnum(["run", "list"] as const, {
 			description: '"run" (the default) executes; "list" only browses the agent catalog and ignores run options',
@@ -165,6 +160,11 @@ const SubagentParams = Type.Object({
 });
 
 export const FORK_AGENT = "fork";
+
+/** Floor between interim output.log rewrites (onProgress fires per tool call/message). */
+const LOG_WRITE_INTERVAL_MS = 250;
+/** Idle time after which a resident agent session is released (its session file keeps it reachable). */
+const RESIDENT_IDLE_MS = 15 * 60_000;
 
 /** A background agent's process, kept alive after its run so it can be messaged. */
 interface Resident {
@@ -175,7 +175,7 @@ interface Resident {
 
 export default function subagentsExtension(pi: ExtensionAPI) {
 	const registry = new RunRegistry();
-	/** Names with a foreground/respawned child currently running (send_message must wait for these). */
+	/** Names with a blocking child (nested spawn or SendMessage resume) currently running (SendMessage must wait for these). */
 	const runningNames = new Set<string>();
 	const residents = new Map<string, Resident>();
 
@@ -429,7 +429,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
 	// --- The subagent panel: strip soft focus + Enter-to-view transcript swap ---
 
-	/** Stop one live agent by task id (foreground handle or background task). */
+	/** Stop one live agent by task id (blocking-run handle or resident task). */
 	const stopAgent = (taskId: string) => liveHandles.get(taskId)?.kill();
 	const stopAllAgents = () => {
 		for (const [, handle] of liveHandles) handle.kill();
@@ -790,12 +790,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		);
 	}
 
-	const notify = (customType: string, text: string, details: Record<string, unknown>) => {
-		pi.sendMessage(
-			{ customType, content: [{ type: "text", text }], display: true, details },
-			{ deliverAs: "followUp", triggerTurn: true },
-		);
-	};
+	const notify = createTaskNotifier(pi);
 
 	/** Relay a child's send_message {to: "main"} into this conversation. */
 	const notifyAgentMessage = (name: string, message: string, summary?: string) =>
@@ -932,9 +927,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						agentDef,
 					},
 					ctx,
-					undefined,
 					signal, // the spawning child aborting (stop/esc) kills the nested run
-					() => {},
 					undefined,
 					{ taskId: parentRecord.taskId, depth: parentDepth },
 				);
@@ -966,18 +959,21 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	};
 
 	/**
-	 * Start one child (creating a worktree first if asked) and finalize its
-	 * record when done. `parent` marks a NESTED spawn — a child's own Agent
-	 * call — which links the run under its parent in the panel tree.
+	 * Run one child to completion, blocking until it finishes — the shape a
+	 * NESTED spawn needs (a child's own Agent call has no notification surface,
+	 * so it waits for the result) and the one-shot modes need (a `-p` process
+	 * exits when the turn settles, so a background run would be orphaned).
+	 * Main-conversation runs in TUI/RPC sessions are background residents
+	 * instead. Creates a worktree first if asked and finalizes the record when
+	 * done. `parent` links the run under its parent in the panel tree.
 	 */
 	const executeRun = async (
 		prepared: PreparedRun,
 		ctx: ExtensionContext,
-		forkFrom: string | undefined,
 		signal: AbortSignal | undefined,
-		onProgress: (toolCalls: number, text: string, usage: UsageTotals) => void,
-		onStarted?: (handle: ChildHandle, worktree?: Worktree) => void,
+		forkFrom?: string,
 		parent?: { taskId: string; depth: number },
+		onProgress?: (toolCalls: number, text: string, usage: UsageTotals) => void,
 	): Promise<TaskResult> => {
 		const { request, record, agentDef } = prepared;
 
@@ -1015,14 +1011,13 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			signal,
 			onProgress: (toolCalls, text, usage) => {
 				live.progress(toolCalls, usage);
-				onProgress(toolCalls, text, usage);
+				onProgress?.(toolCalls, text, usage);
 			},
 			sink: live.sink,
 			onMessageToMain: (message, summary) => notifyAgentMessage(request.name, message, summary),
 			extraTools: spawnToolsFor(record),
 		});
 		liveHandles.set(record.taskId, handle);
-		onStarted?.(handle, worktree);
 
 		try {
 			const outcome: ChildOutcome = await handle.result;
@@ -1075,30 +1070,31 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			"\n" +
 			"For a single-fact lookup you already know how to run, search directly instead. Once you've delegated work, don't also run it yourself — wait for the result.\n" +
 			"\n" +
+			"## How agents run\n" +
+			"Agents run in the background: the call returns immediately with a task id, and you'll be notified when one completes — the agent's report arrives as a system notification while you keep working, or on its own if you are idle. Never fabricate or predict a pending agent's results — the notification is never something you write yourself; if the user asks before it arrives, say it's still running. Call task_output only if your next step cannot proceed without the result (block=true waits); stop a run with task_stop. (Exception: in a one-shot print session the call blocks and returns the report directly — no notification follows.)\n" +
+			"\n" +
 			"## Usage notes\n" +
 			"- Give a complete, self-contained task: the agent cannot ask follow-up questions.\n" +
 			"- If an agent's description says it should be used proactively, try your best to use it without the user having to ask first.\n" +
 			'- `subagent_type: "fork"` clones this conversation instead of starting fresh; a fork always runs on this conversation\'s model and reasoning settings. If you are the fork, execute your assigned task directly — don\'t re-delegate.\n' +
 			'- `isolation: "worktree"` gives the agent its own git worktree when it will edit files.\n' +
-			"- `run_in_background: true` returns immediately so you can keep working; completion arrives as a notification (manage with task_output/task_stop). Never fabricate or predict a pending agent's output — if asked before it arrives, say it's still running.\n" +
-			"- Each run gets a name — continue a finished agent later with SendMessage. `action: \"list\"` re-prints the agent catalog.\n" +
+			"- Each run gets a name — SendMessage reaches it live while it runs and continues it after it finishes. `action: \"list\"` re-prints the agent catalog.\n" +
 			"- The agent's final report is not shown to the user, so relay what matters.",
 		promptSnippet: "Delegate scoped work to a specialist agent in its own context",
 		parameters: SubagentParams,
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			const agents = loadAgents(ctx.cwd);
 
-			// A call carrying run options (a task, a name, run_in_background, a
-			// model/thinking/isolation override, or action:"run") but no `subagent_type`
-			// is a run that forgot to name its agent. Fail loudly with a diagnostic
-			// rather than silently returning the catalog: a weaker model reads the
-			// catalog as a non-sequitur and invents wrong reasons for it, instead of
-			// learning it omitted `subagent_type`.
+			// A call carrying run options (a task, a name, a model/thinking/isolation
+			// override, or action:"run") but no `subagent_type` is a run that forgot
+			// to name its agent. Fail loudly with a diagnostic rather than silently
+			// returning the catalog: a weaker model reads the catalog as a
+			// non-sequitur and invents wrong reasons for it, instead of learning it
+			// omitted `subagent_type`.
 			const wantsRun =
 				params.action === "run" ||
 				params.task != null ||
 				params.name != null ||
-				params.run_in_background != null ||
 				params.model != null ||
 				params.isolation != null ||
 				params.thinking != null;
@@ -1302,167 +1298,202 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			for (const p of prepared) registry.add(p.record);
 			const records = prepared.map((p) => p.record);
 
-			// --- Background: RPC children that stay resident after their run, so
-			// send_message can reach them live (steer mid-turn, prompt when idle).
-			if (params.run_in_background) {
-				const lines: string[] = [];
-				const runtime = await getRuntime(ctx);
-				for (const p of prepared) {
-					let worktree: Worktree | undefined;
-					if (p.request.worktree) {
-						try {
-							worktree = await isolateInWorktree(ctx, p.record, p.request.name);
-						} catch (error) {
-							lines.push(`✗ ${p.record.name}: could not create a worktree: ${(error as Error).message}`);
-							continue;
-						}
-					}
-
-					const logPath = p.record.sessionSearchDir ? join(p.record.sessionSearchDir, "output.log") : undefined;
-					let finish!: () => void;
-					const finished = new Promise<void>((resolve) => {
-						finish = resolve;
-					});
-
-					// The child's final output. task.output() falls back to this
-					// because handle.snapshot().text can be blank at a turn boundary —
-					// the same reason the log write below uses `|| outcome.output`.
-					// Keeps task_output consistent with the log and the completion
-					// notification rather than showing an empty body in that case.
-					let lastOutput = "";
-					const live = trackLiveRun(p.record, p.request);
-					const resident: Resident = { handle: undefined as never, turnHandlers: [] };
-					const worktreeNote = worktree
-						? `\n\n(Running in worktree ${worktree.path} — kept while the agent stays resident.)`
-						: "";
-					resident.turnHandlers.push((outcome) => {
-						task.status = outcome.failed ? "failed" : "completed";
-						task.finishedAt = Date.now();
-						finish();
-						const stats = formatStats(outcome.toolCalls, outcome.usage);
-						notify(
-							"subagent-result",
-							systemNotification(`Background agent ${p.record.name} (${p.record.taskId}) ${outcome.failed ? "failed" : "completed"} (${stats}). It stays resident — message it with send_message.\n\n${outcome.output.slice(0, OUTPUT_CAP)}${worktreeNote}`),
-							{ taskId: p.record.taskId, name: p.record.name, failed: outcome.failed ?? false },
-						);
-					});
-
-					const handle = await runtime.runResident({
-						agent: p.agentDef,
-						cwd: p.record.cwd,
-						forkFrom: p.request.fork ? (sessionFile ?? undefined) : undefined,
-						parentSystemPrompt: p.request.fork ? ctx.getSystemPrompt() : undefined,
-						sessionDir: p.record.sessionSearchDir || undefined,
-						model: p.request.model,
-						fallbackModel: p.request.fallbackModel,
-						thinking: p.request.thinking,
-						onProgress: (toolCalls, text, usage) => {
-							live.progress(toolCalls, usage);
-							if (logPath && text) writeFileSync(logPath, text);
-						},
-						sink: live.sink,
-						onMessageToMain: (message, summary) => notifyAgentMessage(p.record.name, message, summary),
-						extraTools: spawnToolsFor(p.record),
-						onTurnEnd: (outcome) => {
-							registry.sessionFileFor(p.record);
-							live.settle();
-							lastOutput = resident.handle.snapshot().text || outcome.output;
-							if (logPath) writeFileSync(logPath, lastOutput);
-							// Auto mode reviews a background/resident turn's action sequence as a
-							// whole, like the foreground path (line ~758). There is no tool_result
-							// to attach to here, so the gate reviews on receipt and notifies.
-							if (outcome.actions?.length) {
-								pi.events.emit(SUBAGENT_ACTIONS_CHANNEL, {
-									toolCallId: p.record.taskId,
-									actions: outcome.actions,
-									background: true,
-									agentName: p.record.name,
-								} satisfies SubagentActionsPayload);
-							}
-							const handler = resident.turnHandlers.shift();
-							if (handler) {
-								handler(outcome);
-							} else {
-								// A turn nobody is waiting on (e.g. a steer that raced past its
-								// target turn and ran on its own) must still surface.
-								notify(
-									"subagent-result",
-									systemNotification(`Update from ${p.record.name}:\n\n${outcome.output.slice(0, OUTPUT_CAP)}`),
-									{ name: p.record.name, failed: outcome.failed ?? false },
-								);
-							}
-						},
-						onExit: () => {
-							live.finish(false);
-							if (residents.get(p.record.name) === resident) residents.delete(p.record.name);
-							if (worktree) void cleanupWorktree(ctx.cwd, worktree);
-						},
-					});
-					resident.handle = handle;
-					residents.set(p.record.name, resident);
-					liveHandles.set(p.record.taskId, handle);
-
-					const task: BackgroundTask = {
-						id: p.record.taskId,
-						kind: "subagent",
-						description: `${p.record.name}: ${p.request.task.slice(0, 80)}`,
-						status: "running",
-						startedAt: Date.now(),
-						logPath,
-						output: () => handle.snapshot().text || lastOutput,
-						stop: () => handle.kill(),
-						resident: () => !handle.exited(),
-						finished,
-					};
-					pi.events.emit(TASK_REGISTER_CHANNEL, task);
-					handle.send(p.request.fork ? forkTaskMessage(p.request.task) : p.request.task);
-
-					lines.push(
-						`⏳ ${p.record.name} (task ${p.record.taskId}) running in background${logPath ? ` — interim output readable at ${logPath}` : ""}`,
-					);
-				}
+			// One-shot modes (`-p` / `--mode json`) exit when the turn settles, so
+			// a background run would be orphaned with its report undelivered — run
+			// blocking there and return the report in the tool result instead.
+			if (!sessionOutlivesTurn(ctx.mode)) {
+				// Stream progress through onUpdate (tool_execution_update) like the
+				// old foreground path — a headless JSON/RPC consumer has no panel,
+				// so this is its only signal between dispatch and result.
+				let progress = { toolCalls: 0, text: "", usage: emptyUsage() };
+				const report = () => {
+					const stats = formatStats(progress.toolCalls, progress.usage);
+					const line = `${progress.text ? "✓" : "⏳"} ${prepared[0].request.name} (${stats})${progress.text ? "" : " running…"}`;
+					onUpdate?.({ content: [{ type: "text", text: line }], details: {} });
+				};
+				report();
+				const result = await executeRun(prepared[0], ctx, signal, sessionFile ?? undefined, undefined, (toolCalls, text, usage) => {
+					progress = { toolCalls, text, usage };
+					report();
+				});
+				// Auto mode reviews what the child actually did once it returns; the
+				// permission gate attaches the review to this tool_result.
+				pi.events.emit(SUBAGENT_ACTIONS_CHANNEL, {
+					toolCallId,
+					actions: result.actions ?? [],
+				} satisfies SubagentActionsPayload);
+				const stats = formatStats(result.toolCalls, result.usage);
+				const worktreeNote = result.worktreePath ? `\n\n(Changes left in worktree ${result.worktreePath} — review or merge them.)` : "";
 				return {
-					content: [
-						{
-							type: "text",
-							text: `${lines.join("\n")}\n\nCompletion (with the agent's report) will arrive as a system notification on its own — you do not need to wait for it or poll; keep working. Call task_output only if your next step cannot proceed without the result (block=true waits). Stop with task_stop; send_message reaches the agent even while it runs (the message is steered into its current turn).`,
-						},
-					],
-					details: { agentRuns: records, background: true },
+					content: [{ type: "text", text: `${result.output}${worktreeNote}\n\n(${stats})` }],
+					details: { results: [result], agentRuns: records },
+					isError: result.failed ?? false,
 				};
 			}
 
-			// --- Foreground: live progress, blocking result (one run per call).
-			const prep = prepared[0];
-			let progress = { toolCalls: 0, text: "", usage: emptyUsage() };
-			const report = () => {
-				const stats = formatStats(progress.toolCalls, progress.usage);
-				const line = `${progress.text ? "✓" : "⏳"} ${prep.request.name} (${stats})${progress.text ? "" : " running…"}`;
-				onUpdate?.({ content: [{ type: "text", text: line }], details: {} });
-			};
-			report();
+			// Every run is a background resident (Claude Code parity): the call
+			// returns as soon as the child is launched, the report arrives as a
+			// steered system notification, and the child stays resident so
+			// SendMessage can reach it live (steer mid-turn, prompt when idle).
+			const lines: string[] = [];
+			const runtime = await getRuntime(ctx);
+			for (const p of prepared) {
+				let worktree: Worktree | undefined;
+				if (p.request.worktree) {
+					try {
+						worktree = await isolateInWorktree(ctx, p.record, p.request.name);
+					} catch (error) {
+						lines.push(`✗ ${p.record.name}: could not create a worktree: ${(error as Error).message}`);
+						continue;
+					}
+				}
 
-			const result = await executeRun(prep, ctx, sessionFile ?? undefined, signal, (toolCalls, text, usage) => {
-				progress = { toolCalls, text, usage };
-				report();
-			});
+				const logPath = p.record.sessionSearchDir ? join(p.record.sessionSearchDir, "output.log") : undefined;
+				let lastLogWrite = 0;
+				let finish!: () => void;
+				const finished = new Promise<void>((resolve) => {
+					finish = resolve;
+				});
 
-			const stats = formatStats(result.toolCalls, result.usage);
-			const worktreeNote = result.worktreePath ? `\n\n(Changes left in worktree ${result.worktreePath} — review or merge them.)` : "";
-			const text = `${result.output}${worktreeNote}\n\n(${stats})`;
+				// The child's final output. task.output() falls back to this
+				// because handle.snapshot().text can be blank at a turn boundary —
+				// the same reason the log write below uses `|| outcome.output`.
+				// Keeps task_output consistent with the log and the completion
+				// notification rather than showing an empty body in that case.
+				let lastOutput = "";
+				const live = trackLiveRun(p.record, p.request);
+				const resident: Resident = { handle: undefined as never, turnHandlers: [] };
+				const worktreeNote = worktree
+					? `\n\n(Running in worktree ${worktree.path} — kept while the agent stays resident.)`
+					: "";
+				resident.turnHandlers.push((outcome) => {
+					task.status = outcome.failed ? "failed" : "completed";
+					task.finishedAt = Date.now();
+					finish();
+					const stats = formatStats(outcome.toolCalls, outcome.usage);
+					notify(
+						"subagent-result",
+						systemNotification(`Agent ${p.record.name} (task ${p.record.taskId}) ${outcome.failed ? "failed" : "completed"} (${stats}). It stays reachable with SendMessage.\n\n${outcome.output.slice(0, OUTPUT_CAP)}${worktreeNote}`),
+						{ taskId: p.record.taskId, name: p.record.name, failed: outcome.failed ?? false },
+					);
+				});
 
-			// Auto mode reviews what a child actually did once it returns, catching a
-			// sequence whose individual steps each passed. Emitted rather than
-			// checked here: the permission gate owns the classifier.
-			pi.events.emit(SUBAGENT_ACTIONS_CHANNEL, {
-				toolCallId,
-				actions: result.actions ?? [],
-			} satisfies SubagentActionsPayload);
+				// Idle reaper: every run is a resident now, so without this a long
+				// session accumulates one live AgentSession (extension instances,
+				// message array, MCP tool refs) per delegation for its whole life.
+				// After RESIDENT_IDLE_MS idle the session is released quietly; the
+				// agent stays reachable — SendMessage resumes it from its session
+				// file. Worktree residents are exempt: release would remove the
+				// worktree a resume still needs. Armed from every turn end.
+				let reaper: ReturnType<typeof setTimeout> | undefined;
+				const armReaper = () => {
+					if (worktree) return;
+					if (reaper) clearTimeout(reaper);
+					reaper = setTimeout(() => {
+						reaper = undefined;
+						if (handle.exited()) return;
+						if (handle.busy()) {
+							armReaper();
+							return;
+						}
+						handle.release();
+					}, RESIDENT_IDLE_MS);
+					reaper.unref?.();
+				};
+				const handle = await runtime.runResident({
+					agent: p.agentDef,
+					cwd: p.record.cwd,
+					forkFrom: p.request.fork ? (sessionFile ?? undefined) : undefined,
+					parentSystemPrompt: p.request.fork ? ctx.getSystemPrompt() : undefined,
+					sessionDir: p.record.sessionSearchDir || undefined,
+					model: p.request.model,
+					fallbackModel: p.request.fallbackModel,
+					thinking: p.request.thinking,
+					onProgress: (toolCalls, text, usage) => {
+						live.progress(toolCalls, usage);
+						// Throttled: onProgress fires per tool call/message with the whole
+						// turn text so far, and this path now carries EVERY run — an
+						// unthrottled sync rewrite would be O(n²) bytes on the hot path.
+						// onTurnEnd below flushes the final state, so the tail is never lost.
+						if (logPath && text && Date.now() - lastLogWrite > LOG_WRITE_INTERVAL_MS) {
+							lastLogWrite = Date.now();
+							writeFileSync(logPath, text);
+						}
+					},
+					sink: live.sink,
+					onMessageToMain: (message, summary) => notifyAgentMessage(p.record.name, message, summary),
+					extraTools: spawnToolsFor(p.record),
+					onTurnEnd: (outcome) => {
+						registry.sessionFileFor(p.record);
+						live.settle();
+						lastOutput = resident.handle.snapshot().text || outcome.output;
+						if (logPath) writeFileSync(logPath, lastOutput);
+						// Auto mode reviews the turn's action sequence as a whole (the
+						// hand-back review). The spawning call already returned, so there
+						// is no tool_result to attach to; the gate reviews on receipt and
+						// notifies.
+						if (outcome.actions?.length) {
+							pi.events.emit(SUBAGENT_ACTIONS_CHANNEL, {
+								toolCallId: p.record.taskId,
+								actions: outcome.actions,
+								background: true,
+								agentName: p.record.name,
+							} satisfies SubagentActionsPayload);
+						}
+						const handler = resident.turnHandlers.shift();
+						if (handler) {
+							handler(outcome);
+						} else {
+							// A turn nobody is waiting on (e.g. a steer that raced past its
+							// target turn and ran on its own) must still surface.
+							notify(
+								"subagent-result",
+								systemNotification(`Update from ${p.record.name}:\n\n${outcome.output.slice(0, OUTPUT_CAP)}`),
+								{ name: p.record.name, failed: outcome.failed ?? false },
+							);
+						}
+						armReaper();
+					},
+					onExit: () => {
+						if (reaper) clearTimeout(reaper);
+						live.finish(false);
+						if (residents.get(p.record.name) === resident) residents.delete(p.record.name);
+						liveHandles.delete(p.record.taskId);
+						if (worktree) void cleanupWorktree(ctx.cwd, worktree);
+					},
+				});
+				resident.handle = handle;
+				residents.set(p.record.name, resident);
+				liveHandles.set(p.record.taskId, handle);
 
+				const task: BackgroundTask = {
+					id: p.record.taskId,
+					kind: "subagent",
+					ownUI: true, // rendered live by the subagents panel's agent strip
+					description: `${p.record.name}: ${p.request.task.slice(0, 80)}`,
+					status: "running",
+					startedAt: Date.now(),
+					logPath,
+					output: () => handle.snapshot().text || lastOutput,
+					stop: () => handle.kill(),
+					resident: () => !handle.exited(),
+					finished,
+				};
+				pi.events.emit(TASK_REGISTER_CHANNEL, task);
+				handle.send(p.request.fork ? forkTaskMessage(p.request.task) : p.request.task);
+
+				lines.push(
+					`⏳ ${p.record.name} (task ${p.record.taskId}) running in background${logPath ? ` — interim output readable at ${logPath}` : ""}`,
+				);
+			}
 			return {
-				content: [{ type: "text", text }],
-				details: { results: [result], agentRuns: records },
-				isError: result.failed ?? false,
+				content: [
+					{
+						type: "text",
+						text: `${lines.join("\n")}\n\nCompletion (with the agent's report) will arrive as a system notification on its own — you do not need to wait for it or poll; keep working. Call task_output only if your next step cannot proceed without the result (block=true waits). Stop with task_stop; SendMessage reaches the agent even while it runs (the message is steered into its current turn).`,
+					},
+				],
+				details: { agentRuns: records, background: true },
 			};
 		},
 	});
@@ -1534,6 +1565,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				const task: BackgroundTask = {
 					id: taskId,
 					kind: "subagent",
+					ownUI: true, // rendered live by the subagents panel's agent strip
 					description: `message to ${record.name}${params.summary ? `: ${params.summary}` : ""}`,
 					status: "running",
 					startedAt: Date.now(),
@@ -1627,6 +1659,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			const task: BackgroundTask = {
 				id: taskId,
 				kind: "subagent",
+				ownUI: true, // rendered live by the subagents panel's agent strip
 				description: `message to ${record.name}${params.summary ? `: ${params.summary}` : ""}`,
 				status: "running",
 				startedAt: Date.now(),
@@ -1664,7 +1697,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	pi.events.emit(DEFER_CHANNEL, { name: "SendMessage", keywords: ["message", "agent", "resume", "continue", "teammate"] });
 
 	// Same precedence as SendMessage's own dispatch (a live resident is reachable
-	// even while a foreground run of the same name is in flight): resident-live
+	// even while a blocking run of the same name is in flight): resident-live
 	// first, then running, then a finished run resumable from its session.
 	const agentStatus = (name: string) => {
 		const resident = residents.get(name);

@@ -35,6 +35,13 @@ export interface BackgroundTask {
 	 * terminate it even though the task itself already completed.
 	 */
 	resident?: () => boolean;
+	/**
+	 * The task already has dedicated panel UI showing it live (bash shells and
+	 * subagent runs render in the subagents panel), so ambient counters like
+	 * the " background tasks: N" widget must not double-count it. Set by the
+	 * producer — never re-derived from `kind` by consumers.
+	 */
+	ownUI?: boolean;
 }
 
 export function generateTaskId(): string {

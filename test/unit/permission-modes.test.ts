@@ -205,6 +205,7 @@ describe("permissionsExtension model_select updates classifier", () => {
 			},
 			registerCommand: () => {},
 			registerShortcut: () => {},
+			registerMessageRenderer: () => {},
 			registerFlag: () => {},
 			getFlag: () => undefined,
 		};

@@ -97,6 +97,7 @@ export function startBackgroundBash(options: StartBackgroundBashOptions): Backgr
 		status: "running",
 		startedAt: Date.now(),
 		logPath: options.logPath,
+		ownUI: true, // rendered live by the subagents panel's shell manager
 		output: () => stored || (task.status === "running" ? "" : EMPTY_OUTPUT_MARKER),
 		stop: () => {
 			stopRequested = true;

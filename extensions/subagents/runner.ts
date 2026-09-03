@@ -81,7 +81,7 @@ const CHILD_EXTENSION_PATHS = CHILD_EXTENSIONS.map((name) => join(EXTENSIONS_DIR
 type Session = Awaited<ReturnType<typeof createAgentSession>>["session"];
 type Loader = Awaited<ReturnType<typeof buildAgentLoader>>;
 
-/** The fields buildChildSession needs — the common subset of a foreground and a resident run. */
+/** The fields buildChildSession needs — the common subset of a blocking and a resident run. */
 interface ChildSessionSpec {
 	cwd: string;
 	agent?: AgentDefinition;
@@ -298,7 +298,7 @@ export class SubagentRuntime {
 		}
 	}
 
-	/** A foreground run: one prompt, awaited, then disposed. */
+	/** A blocking run (nested spawn, SendMessage resume): one prompt, awaited, then disposed. */
 	run(options: SubagentRunOptions): ChildHandle {
 		const task = options.forkFrom ? forkTaskMessage(options.task) : options.task;
 		const tracker = new SessionTurnTracker();
@@ -440,6 +440,12 @@ export class SubagentRuntime {
 					session.dispose();
 					options.onExit?.();
 				});
+			},
+			release: () => {
+				if (exited || turnActive || !session.isIdle) return;
+				exited = true;
+				session.dispose();
+				options.onExit?.();
 			},
 			snapshot: () => {
 				const text =

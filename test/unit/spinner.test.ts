@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { alignRight, formatDuration } from "../../extensions/lib/tui-render.ts";
 import { composeWorkingMessage, estimateTokens, messageChars, spinnerFrames } from "../../extensions/spinner/line.ts";
 import { pickVerb, SPINNER_VERBS } from "../../extensions/spinner/verbs.ts";
@@ -73,5 +73,68 @@ describe("formatDuration (shared)", () => {
 	it("keeps the viewer's humane format", () => {
 		expect(formatDuration(0, 45_000)).toBe("45s");
 		expect(formatDuration(0, 67_000)).toBe("1m 7s");
+	});
+});
+
+describe("spinner wiring (retry keeps the open span)", () => {
+	it("keeps the first run's start and verb across agent_end/agent_start, stopping only at settle", async () => {
+		vi.useFakeTimers();
+		try {
+			const { default: spinnerExtension } = await import("../../extensions/spinner/index.ts");
+			const handlers = new Map<string, Array<(event: unknown, ctx: unknown) => void>>();
+			const pi = {
+				on(event: string, handler: (event: unknown, ctx: unknown) => void) {
+					const list = handlers.get(event) ?? [];
+					list.push(handler);
+					handlers.set(event, list);
+				},
+			};
+			const fire = (event: string, ctx: unknown) => {
+				for (const h of handlers.get(event) ?? []) h({}, ctx);
+			};
+			const messages: Array<string | undefined> = [];
+			const ctx = {
+				hasUI: true,
+				ui: {
+					theme: undefined,
+					setWorkingIndicator: () => {},
+					setWorkingMessage: (text?: string) => {
+						messages.push(text);
+					},
+				},
+			};
+
+			spinnerExtension(pi as never);
+			fire("agent_start", ctx);
+			vi.advanceTimersByTime(5000);
+			const beforeRetry = messages.at(-1);
+			expect(beforeRetry).toContain("(5s");
+			const verb = beforeRetry?.split("…")[0];
+
+			// Provider retry: pi fires agent_end for the failed run and then a
+			// fresh agent_start, with no agent_settled in between. The spinner
+			// does not subscribe to agent_end at all (a retry must be invisible
+			// to it), so the retry is modelled as a second agent_start on the
+			// open span. The elapsed counter must NOT restart from zero, and the
+			// verb stays.
+			fire("agent_start", ctx);
+			vi.advanceTimersByTime(1000);
+			const afterRetry = messages.at(-1);
+			expect(afterRetry).toContain("(6s");
+			expect(afterRetry?.split("…")[0]).toBe(verb);
+
+			// Settle stops the ticker and restores pi's default message.
+			fire("agent_settled", ctx);
+			expect(messages.at(-1)).toBeUndefined();
+			const count = messages.length;
+			vi.advanceTimersByTime(5000);
+			expect(messages.length).toBe(count);
+
+			// The next turn opens a fresh span from zero.
+			fire("agent_start", ctx);
+			expect(messages.at(-1)).toContain("(0s");
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });

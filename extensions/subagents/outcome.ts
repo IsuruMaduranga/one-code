@@ -38,7 +38,7 @@ export interface ChildOutcome {
 	actions: ChildAction[];
 }
 
-/** A foreground run handle: await the result, or kill/snapshot it while it runs. */
+/** A blocking run handle: await the result, or kill/snapshot it while it runs. */
 export interface ChildHandle {
 	result: Promise<ChildOutcome>;
 	kill(): void;
@@ -54,6 +54,13 @@ export interface RpcChildHandle {
 	send(message: string): "started" | "steered";
 	busy(): boolean;
 	exited(): boolean;
+	/** Abort any in-flight turn (reported as terminated) and dispose the session. */
 	kill(): void;
+	/**
+	 * Dispose an IDLE session quietly — no turn outcome, no notification. A
+	 * no-op mid-turn. Its persisted session file remains, so SendMessage still
+	 * reaches the agent by resuming from disk instead of live.
+	 */
+	release(): void;
 	snapshot(): { toolCalls: number; text: string; usage: UsageTotals };
 }

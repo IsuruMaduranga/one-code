@@ -20,6 +20,7 @@ import os from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { createTaskNotifier } from "../lib/notifications.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../permissions/modes.ts";
 import { watchPermissionBridge } from "../permissions/subagent-gate.ts";
@@ -192,6 +193,7 @@ const WorkflowParams = Type.Object({
 });
 
 export default function workflowExtension(pi: ExtensionAPI) {
+	const notifyTask = createTaskNotifier(pi);
 	const manager = new WorkflowRunManager();
 	let lastCtx: ExtensionContext | undefined;
 	const widget = new WorkflowWidget(manager, () => lastCtx);
@@ -216,15 +218,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 		const handle = manager.get(runId);
 		if (!handle || deliveredRuns.has(runId)) return;
 		deliveredRuns.add(runId);
-		pi.sendMessage(
-			{
-				customType: "workflow-result",
-				content: [{ type: "text", text: buildRunReport(handle) }],
-				display: true,
-				details: { runId: handle.runId, name: handle.meta.name, status: handle.status },
-			},
-			{ deliverAs: "followUp", triggerTurn: true },
-		);
+		notifyTask("workflow-result", buildRunReport(handle), { runId: handle.runId, name: handle.meta.name, status: handle.status });
 	};
 
 	pi.registerMessageRenderer("workflow-result", (message, { expanded }, theme) =>
