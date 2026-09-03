@@ -479,7 +479,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 			// late-connecting servers instead of snapshotting an empty set forever.
 			pi.events.emit(MCP_TOOLS_CHANNEL, { tools: [...sharedTools], settled: true });
 		});
-		if (!ctx.hasUI || process.env.PI_SUBAGENT_CHILD) {
+		if (!ctx.hasUI) {
 			await connecting;
 		}
 	});

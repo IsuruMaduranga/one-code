@@ -329,6 +329,13 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 					const s2 = await call(stage2User(userPrefix), 1024, 4096, 2);
 					verdict = parseStage2(s2, index, request.userMessages);
 					stageInfo = `s1=${sev1 ?? "?"} s2=${parseSeverity(s2) ?? "?"}`;
+					// Stage 1 flagged the call and stage 2 cleared it without quoting the
+					// user's intent or citing any rule. CC allows here (severity rules),
+					// so this stays an allow — but tagged, so the decision log and debug
+					// trace show a clear that rests on nothing checkable (review P11).
+					if (verdict.decision === "allow" && verdict.tier === "allow" && !verdict.ruleId) {
+						verdict = { ...verdict, ruleId: "unverified-clear" };
+					}
 				}
 			}
 

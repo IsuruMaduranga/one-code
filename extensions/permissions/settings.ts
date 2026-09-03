@@ -9,9 +9,10 @@
  *   ~/.onecode/projects/<slug>/settings.json (One Code per repo — read + write)
  *   <managed-settings.json>                (organisation policy — read only, highest)
  *
- * allow/deny/ask arrays concatenate across sources; defaultMode from the most
- * specific `.claude` source wins, with managed settings above all (the One Code
- * files contribute rules only).
+ * allow/deny/ask arrays concatenate across sources — except that the two
+ * in-repo files' allow rules land in `projectAllow`, gated behind consent
+ * (review P10); defaultMode from the most specific `.claude` source wins, with
+ * managed settings above all (the One Code files contribute rules only).
  * One Code persists the rules it records to its own files, never into Claude
  * Code's — `persistAllowRule` is pointed at a One Code path by its caller.
  * Unknown keys in the files are preserved on write.
@@ -30,7 +31,16 @@ import type { PermissionMode } from "./matcher.ts";
 export { settingsPaths };
 
 export interface PermissionSettings {
+	/** Allow rules from sources the user wrote or that outrank the repo (user, One Code, managed). */
 	allow: string[];
+	/**
+	 * Allow rules from the repository's own `.claude/settings.json` /
+	 * `settings.local.json`. A checked-in file pre-approving `Bash(curl:*)` is a
+	 * grant the user never made, so these apply only after a once-per-config
+	 * consent (project-trust.ts) — deny and ask rules from the same files load
+	 * freely, since they can only tighten the gate.
+	 */
+	projectAllow: string[];
 	deny: string[];
 	ask: string[];
 	defaultMode?: PermissionMode;
@@ -69,7 +79,7 @@ function readSettingsFile(path: string): ClaudeSettingsFile | undefined {
 
 export function loadPermissionSettings(cwd: string, home: string): PermissionSettings {
 	const paths = settingsPaths(cwd, home);
-	const merged: PermissionSettings = { allow: [], deny: [], ask: [] };
+	const merged: PermissionSettings = { allow: [], projectAllow: [], deny: [], ask: [] };
 
 	// One Code writes the rules it records (via /allow, the auto-mode setup) to its
 	// own files, never into Claude Code's — so its own files are read alongside the
@@ -86,7 +96,8 @@ export function loadPermissionSettings(cwd: string, home: string): PermissionSet
 		const file = readSettingsFile(path);
 		const perms = file?.permissions;
 		if (!perms) continue;
-		if (Array.isArray(perms.allow)) merged.allow.push(...perms.allow.filter((r) => typeof r === "string"));
+		const allowTarget = path === paths.project || path === paths.local ? merged.projectAllow : merged.allow;
+		if (Array.isArray(perms.allow)) allowTarget.push(...perms.allow.filter((r) => typeof r === "string"));
 		if (Array.isArray(perms.deny)) merged.deny.push(...perms.deny.filter((r) => typeof r === "string"));
 		if (Array.isArray(perms.ask)) merged.ask.push(...perms.ask.filter((r) => typeof r === "string"));
 		if (path === oneCodeGlobal || path === oneCodeProject) continue;

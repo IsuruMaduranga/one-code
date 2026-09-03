@@ -35,7 +35,10 @@ describe("loadPermissionSettings", () => {
 		});
 
 		const s = loadPermissionSettings(cwd, home);
-		expect(s.allow).toEqual(["Bash(ls:*)", "Read"]);
+		// The repo's own allow rules are held apart for consent (review P10); its
+		// deny/ask rules load freely.
+		expect(s.allow).toEqual(["Bash(ls:*)"]);
+		expect(s.projectAllow).toEqual(["Read"]);
 		expect(s.deny).toEqual(["Bash(rm -rf:*)"]);
 		expect(s.ask).toEqual(["Bash(git push:*)"]);
 		expect(s.defaultMode).toBe("acceptEdits");
@@ -82,7 +85,7 @@ describe("loadPermissionSettings", () => {
 	it("tolerates missing and malformed files", () => {
 		writeFileSync(join(cwd, ".claude", "settings.json"), "{not json");
 		const s = loadPermissionSettings(cwd, home);
-		expect(s).toEqual({ allow: [], deny: [], ask: [] });
+		expect(s).toEqual({ allow: [], projectAllow: [], deny: [], ask: [] });
 	});
 
 	it("merges One Code's own global and per-repo allow files alongside .claude", () => {

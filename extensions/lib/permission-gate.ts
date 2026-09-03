@@ -8,10 +8,14 @@
  * loads explicitly passed `extensionFactories` (even under noExtensions),
  * which is where this inline factory attaches.
  *
- * Policy: deny rules always win; explicit allow rules allow; edits are
- * auto-allowed (Claude Code runs these agents in acceptEdits); anything that
- * would normally *ask* is denied — there is no interactive prompt inside an
- * in-process agent, and fail-closed beats silently trusting the model.
+ * Policy: deny rules always win; explicit allow rules allow; the mode is the
+ * parent session's live mode (published as CC_PERMISSION_MODE, read per call),
+ * else the settings' defaultMode, else acceptEdits (Claude Code runs these
+ * agents in acceptEdits); ask rules are honoured; anything that would normally
+ * *ask* is denied — there is no interactive prompt inside an in-process agent,
+ * and fail-closed beats silently trusting the model. Auto mode has no classifier
+ * here, so it degrades to acceptEdits *inside the cwd* and denies the rest.
+ * Project-scope allow rules apply only with a stored consent (project-trust.ts).
  *
  * `neverGate` names tools the runtime itself injects (e.g. `structured_output`,
  * the child-only `SendMessage`-to-main tool) that must never be gated.
@@ -21,12 +25,26 @@ import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 import { findGitRoot } from "./git.ts";
 import { memoryDir } from "./memory.ts";
 import { sessionScratchpadDir } from "./scratchpad.ts";
-import { decide, extractSubject, normalizeToolName, parseRules } from "../permissions/matcher.ts";
-import { loadPermissionSettings } from "../permissions/settings.ts";
+import { decide, extractSubject, isInsideDir, normalizeToolName, type PermissionMode, parseRules, toolTier } from "../permissions/matcher.ts";
+import { projectAllowApproved } from "../permissions/project-trust.ts";
+import { isWritingTool } from "../permissions/protected-paths.ts";
+import { loadPermissionSettings, normalizePermissionMode } from "../permissions/settings.ts";
 import type { PermissionBridge } from "../permissions/subagent-gate.ts";
+import { resolveForContainment, toAbsolute } from "../auto-mode/paths.ts";
 
 /** Tools the runtime itself injects; never gate them. */
 const DEFAULT_INTERNAL_TOOLS = new Set(["structured_output"]);
+
+/** The parent permissions extension publishes its live mode here (in-process children read it). */
+export const MODE_ENV = "CC_PERMISSION_MODE";
+
+/**
+ * The mode the local gate judges under: the parent's published live mode, else
+ * the settings' defaultMode, else Claude Code's subagent default. Pure, for tests.
+ */
+export function localGateMode(envValue: string | undefined, defaultMode: PermissionMode | undefined): PermissionMode {
+	return normalizePermissionMode(envValue) ?? defaultMode ?? "acceptEdits";
+}
 
 export function permissionGateFactory(
 	cwd: string,
@@ -44,8 +62,13 @@ export function permissionGateFactory(
 ): InlineExtension {
 	const settings = loadPermissionSettings(cwd, home);
 	const deny = parseRules(settings.deny);
-	const allow = parseRules(settings.allow);
-	const mode = settings.defaultMode === "bypassPermissions" ? "bypassPermissions" : "acceptEdits";
+	const ask = parseRules(settings.ask);
+	const projectRoot = findGitRoot(cwd) ?? cwd;
+	// Repo-shipped allow rules count only once the user has consented to exactly
+	// this list (the parent session's dialog); there is no one to ask here.
+	const allow = parseRules(
+		projectAllowApproved(projectRoot, settings.projectAllow) ? [...settings.allow, ...settings.projectAllow] : settings.allow,
+	);
 	// Memory writes work inside agent sessions too — otherwise the protected
 	// `.claude` check turns them into "needs interactive approval" and the
 	// harness blocks its own feature (same rationale as in decide()).
@@ -79,26 +102,51 @@ export function permissionGateFactory(
 
 				const sessionId = ctx?.sessionManager?.getSessionId?.();
 				if (!scratchpadDirPath && sessionId) scratchpadDirPath = sessionScratchpadDir(runCwd, sessionId);
-				const subject = extractSubject(normalizeToolName(event.toolName), event.input as Record<string, unknown>);
+				const tool = normalizeToolName(event.toolName);
+				const subject = extractSubject(tool, event.input as Record<string, unknown>);
+				const resolvedSubject =
+					isWritingTool(tool) && subject ? resolveForContainment(toAbsolute(runCwd, subject, home)) : undefined;
+				// Read per call: the parent may cycle modes while a child runs.
+				const liveMode = localGateMode(process.env[MODE_ENV], settings.defaultMode);
+				// No classifier is reachable without the bridge, so auto mode is judged
+				// as acceptEdits, then its edit-tier allow is confined to the cwd below.
+				const mode = liveMode === "auto" ? "acceptEdits" : liveMode;
 				const result = decide({
 					toolName: event.toolName,
 					subject,
 					cwd: runCwd,
 					mode,
 					deny,
-					ask: [],
+					ask,
 					allow,
+					resolvedSubject,
 					memoryDirPath,
 					scratchpadDirPath,
 				});
-				if (result.decision === "allow") return undefined;
+				if (result.decision === "allow") {
+					// Both sides resolved (macOS /var → /private/var) so a real in-cwd write is not misjudged.
+					const containDir = resolveForContainment(runCwd) ?? runCwd;
+					const confinedEdit =
+						liveMode === "auto" &&
+						result.cause === "mode" &&
+						toolTier(tool) === "edit" &&
+						!(resolvedSubject !== undefined && isInsideDir(resolvedSubject, containDir, containDir));
+					if (!confinedEdit) return undefined;
+					return {
+						block: true,
+						reason:
+							"Auto mode's classifier is only reachable through the parent session, which this agent has no link to; a write outside the working directory is denied to fail safe.",
+					};
+				}
 				const ruleNote = result.rule ? ` (rule: ${result.rule.raw})` : "";
 				return {
 					block: true,
 					reason:
 						result.decision === "deny"
 							? `Denied by permission rules${ruleNote}.`
-							: "This action needs interactive approval, which is not available inside an in-process agent. Ask for it to be added to the allow rules, or work around it.",
+							: liveMode === "auto"
+								? "Auto mode's classifier is only reachable through the parent session, which this agent has no link to; denied to fail safe."
+								: "This action needs interactive approval, which is not available inside an in-process agent. Ask for it to be added to the allow rules, or work around it.",
 				};
 			});
 		},

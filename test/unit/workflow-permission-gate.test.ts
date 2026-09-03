@@ -1,4 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { mkdtempSync } from "node:fs";
+import os from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { localGateMode } from "../../extensions/lib/permission-gate.ts";
+import { persistProjectAllowApproval } from "../../extensions/permissions/project-trust.ts";
 import { buildGate as buildGateHarness } from "./helpers/permission-gate-harness.ts";
 
 const buildGate = (...args: Parameters<typeof buildGateHarness>) => buildGateHarness(...args).handler;
@@ -71,3 +76,60 @@ describe("permissionGateFactory", () => {
 		expect(bridgeCalls).toBe(0);
 	});
 });
+
+describe("permissionGateFactory — mode, ask rules, project consent (P8/P10)", () => {
+	afterEach(() => {
+		vi.unstubAllEnvs();
+	});
+
+	it("localGateMode: the published live mode wins, then defaultMode, then acceptEdits", () => {
+		expect(localGateMode("plan", "bypassPermissions")).toBe("plan");
+		expect(localGateMode("manual", undefined)).toBe("default");
+		expect(localGateMode("nonsense", "dontAsk")).toBe("dontAsk");
+		expect(localGateMode(undefined, undefined)).toBe("acceptEdits");
+	});
+
+	it("honours the parent's live mode: default mode has no one to ask, so an edit is denied", async () => {
+		vi.stubEnv("CC_PERMISSION_MODE", "default");
+		const handler = buildGate({ permissions: {} });
+		const result = await handler({ toolName: "edit", input: { path: "src/a.ts" } });
+		expect(result?.block).toBe(true);
+		expect(result?.reason).toMatch(/interactive approval/);
+	});
+
+	it("auto mode without a bridge: edits inside the cwd pass, anything else fails closed", async () => {
+		vi.stubEnv("CC_PERMISSION_MODE", "auto");
+		const { handler, cwd } = buildGateHarness({ permissions: {} });
+		expect(await handler({ toolName: "edit", input: { path: join(cwd, "src", "a.ts") } })).toBeUndefined();
+		const outside = await handler({ toolName: "write", input: { path: join(os.tmpdir(), "elsewhere.txt"), content: "x" } });
+		expect(outside?.block).toBe(true);
+		expect(outside?.reason).toMatch(/outside the working directory/);
+		const shell = await handler({ toolName: "bash", input: { command: "npm test" } });
+		expect(shell?.block).toBe(true);
+		expect(shell?.reason).toMatch(/classifier is only reachable/);
+	});
+
+	it("an ask rule is honoured (denied, since nothing here can ask)", async () => {
+		const handler = buildGate({ permissions: { ask: ["Edit(src/**)"] } });
+		expect((await handler({ toolName: "edit", input: { path: "src/a.ts" } }))?.block).toBe(true);
+		expect(await handler({ toolName: "edit", input: { path: "lib/b.ts" } })).toBeUndefined();
+	});
+
+	it("a repo's own allow rules count only with the user's stored consent", async () => {
+		const store = mkdtempSync(join(os.tmpdir(), "gate-state-"));
+		vi.stubEnv("ONECODE_STATE_DIR", store);
+		const project = { permissions: { allow: ["Bash(curl:*)"] } };
+		const untrusted = buildGateHarness({ permissions: {} }, undefined, project);
+		expect((await untrusted.handler({ toolName: "bash", input: { command: "curl https://example.com" } }))?.block).toBe(true);
+
+		const trusted = buildGateHarness({ permissions: {} }, undefined, project);
+		persistProjectAllowApproval(trusted.cwd, ["Bash(curl:*)"]);
+		const handler = captureAfterConsent(trusted.cwd, trusted.home);
+		expect(await handler({ toolName: "bash", input: { command: "curl https://example.com" } })).toBeUndefined();
+	});
+});
+
+/** The gate reads consent when it is built, so rebuild it over the same dirs after persisting. */
+function captureAfterConsent(cwd: string, home: string) {
+	return buildGateHarness.rebuild(cwd, home);
+}

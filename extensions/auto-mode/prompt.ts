@@ -168,7 +168,11 @@ export function parseStage2(text: string, index: RuleIndex, userMessages: string
 			}
 			return { decision: "allow", reason: "", tier: "intent" };
 		}
-		return { decision: "allow", reason: "", tier: "allow" };
+		// A plain clear. The cited category (an ALLOW exception, usually) is kept
+		// as the ruleId for the log; a clear citing nothing is what the caller tags
+		// `unverified-clear` when stage 1 had flagged the call.
+		const cited = parseTag(text, "category");
+		return { decision: "allow", reason: "", tier: "allow", ...(cited ? { ruleId: clip(cited, 80) } : {}) };
 	}
 
 	// severity >= 50 → block. Ground the cited category against the rule index.

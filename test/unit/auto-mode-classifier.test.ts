@@ -102,6 +102,10 @@ describe("parseStage2", () => {
 	it("allows below the threshold", () => {
 		expect(parseStage2("<severity>10</severity>", index).decision).toBe("allow");
 		expect(parseStage2("<severity>10</severity>", index).tier).toBe("allow");
+		// A plain clear carries no ruleId (the classifier tags it `unverified-clear`
+		// when stage 1 had flagged the call); a cited category is kept for the log.
+		expect(parseStage2("<severity>10</severity>", index).ruleId).toBeUndefined();
+		expect(parseStage2("<severity>10</severity><category>Git Read</category>", index).ruleId).toBe("Git Read");
 	});
 
 	it("allows on intent when the quoted words really are the user's", () => {

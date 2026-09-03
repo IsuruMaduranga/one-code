@@ -70,6 +70,9 @@ import { trackOriginalCommands } from "../lib/original-command.ts";
 import { MODE_CHANNEL, PLAN_FILE_CHANNEL } from "../lib/plan-mode-channels.ts";
 import { isWritingTool } from "./protected-paths.ts";
 import { loadPermissionSettings, normalizePermissionMode, persistAllowRule } from "./settings.ts";
+import { MODE_ENV } from "../lib/permission-gate.ts";
+import { describeProjectAllow, persistProjectAllowApproval, projectAllowApproved } from "./project-trust.ts";
+import { findGitRoot } from "../lib/git.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
 
@@ -138,14 +141,10 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		type: "boolean",
 	});
 
-	/**
-	 * Subagent children (pi subprocesses spawned by pi-subagents) inherit the
-	 * parent session's permission mode, Claude Code-style: the parent exports
-	 * it via env, the child's copy of this extension reads it back.
-	 */
-	const MODE_ENV = "CC_PERMISSION_MODE";
-	const isSubagentChild = process.env.PI_SUBAGENT_CHILD === "1";
-
+	// The live mode is published in the process environment (MODE_ENV) for the
+	// in-process child gate (lib/permission-gate.ts), which judges under it when
+	// no bridge to this extension is reachable. Subagents run in-process; there
+	// is no child *process* reading this any more.
 	let mode: PermissionMode = "default";
 	// Worktree-wrapped bash calls publish the model's original command here,
 	// keyed by pi's toolCallId (never read from `event.input` — model-writable).
@@ -157,6 +156,16 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	let deny: PermissionRule[] = [];
 	let ask: PermissionRule[] = [];
 	let allow: PermissionRule[] = [];
+	/**
+	 * The repository's own allow rules (project-trust.ts). Applied only once the
+	 * user has consented to exactly this list; until then they are held here and
+	 * the first call they would decide raises the consent dialog.
+	 */
+	let projectAllow: PermissionRule[] = [];
+	let projectAllowRaw: string[] = [];
+	let projectAllowTrusted = false;
+	let projectAllowDeclined = false;
+	let projectRoot = "";
 	const sessionAllows: PermissionRule[] = [];
 	let unparsableRules: string[] = [];
 	let warnedUnparsable = "";
@@ -499,13 +508,19 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			deny: parseRulesReport(settings.deny),
 			ask: parseRulesReport(settings.ask),
 			allow: parseRulesReport(settings.allow),
+			projectAllow: parseRulesReport(settings.projectAllow),
 		};
 		deny = parsed.deny.rules;
 		ask = parsed.ask.rules;
 		allow = parsed.allow.rules;
+		projectAllow = parsed.projectAllow.rules;
+		projectAllowRaw = settings.projectAllow;
+		projectRoot = findGitRoot(ctx.cwd) ?? ctx.cwd;
+		projectAllowTrusted = projectAllowApproved(projectRoot, projectAllowRaw);
+		projectAllowDeclined = false;
 		// A rule that fails to parse is a rule the user believes is in force and is
 		// not. Say so (once per distinct set) and list them in /permissions.
-		unparsableRules = [...parsed.deny.dropped, ...parsed.ask.dropped, ...parsed.allow.dropped];
+		unparsableRules = [...parsed.deny.dropped, ...parsed.ask.dropped, ...parsed.allow.dropped, ...parsed.projectAllow.dropped];
 		const signature = unparsableRules.join("\n");
 		if (unparsableRules.length > 0 && ctx.hasUI && signature !== warnedUnparsable) {
 			warnedUnparsable = signature;
@@ -520,13 +535,10 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		projectInstructionsByCwd.clear();
 
 		const flagMode = normalizePermissionMode(pi.getFlag("permission-mode"));
-		const inheritedMode = isSubagentChild ? normalizePermissionMode(process.env[MODE_ENV]) : undefined;
 		if (pi.getFlag("dangerously-skip-permissions") === true) {
 			mode = "bypassPermissions";
 		} else if (flagMode) {
 			mode = flagMode;
-		} else if (inheritedMode) {
-			mode = inheritedMode;
 		} else if (settings.defaultMode) {
 			mode = settings.defaultMode;
 		}
@@ -542,6 +554,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
 		badgeCtx = ctx;
 		lastReviewCtx = ctx;
+		sessionEpoch++;
 		memoryDirPath = projectMemoryDir(ctx.cwd);
 		scratchpadDirPath = sessionScratchpadDir(ctx.cwd, ctx.sessionManager.getSessionId());
 		reloadSettings(ctx);
@@ -604,6 +617,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	// fire off a channel event and so have no live ctx of their own) and by the
 	// subagent permission bridge (a child prompt renders on this parent ctx's UI).
 	let lastReviewCtx: ExtensionContext | undefined;
+	/** Bumped per session_start: an async review that finishes after a /clear must not post into the new session. */
+	let sessionEpoch = 0;
 
 	// Serialize interactive prompts: a background/resident subagent can hit an "ask"
 	// while the main turn (or another child) is already awaiting one, and driving
@@ -651,20 +666,42 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			capTranscript();
 		}
 
-		const result = decide({
-			toolName: event.toolName,
-			subject: matchSubject,
-			cwd: ctx.cwd,
-			mode,
-			deny,
-			ask,
-			allow: [...allow, ...sessionAllows],
-			classifyAllShell: autoConfig?.classifyAllShell,
-			resolvedSubject,
-			planFilePath,
-			memoryDirPath,
-			scratchpadDirPath,
-		});
+		const decideWith = (allowRules: PermissionRule[]) =>
+			decide({
+				toolName: event.toolName,
+				subject: matchSubject,
+				cwd: ctx.cwd,
+				mode,
+				deny,
+				ask,
+				allow: allowRules,
+				classifyAllShell: autoConfig?.classifyAllShell,
+				resolvedSubject,
+				planFilePath,
+				memoryDirPath,
+				scratchpadDirPath,
+			});
+		let result = decideWith([...allow, ...sessionAllows, ...(projectAllowTrusted ? projectAllow : [])]);
+
+		// A repo-shipped allow rule would decide this call: ask the user to trust
+		// the repository's rule list first (once per list; project-trust.ts). No UI
+		// → the rules stay off and the call takes the normal path (fail closed).
+		if (result.decision !== "allow" && !projectAllowTrusted && !projectAllowDeclined && projectAllow.length > 0 && ctx.hasUI) {
+			const withProject = decideWith([...allow, ...sessionAllows, ...projectAllow]);
+			if (withProject.decision === "allow" && withProject.rule && projectAllow.includes(withProject.rule)) {
+				const firing = withProject.rule.raw;
+				const { title, message } = describeProjectAllow(projectAllowRaw, firing);
+				const approved = (await serializePrompt(() => ctx.ui.confirm(title, message))) === true;
+				if (approved) {
+					projectAllowTrusted = true;
+					persistProjectAllowApproval(projectRoot, projectAllowRaw);
+					result = withProject;
+				} else {
+					projectAllowDeclined = true;
+					ctx.ui.notify("This repository's allow rules stay off for this session (its deny/ask rules still apply).", "info");
+				}
+			}
+		}
 
 		/**
 		 * Auto mode's deterministic floor: a write to the files the gate is made
@@ -963,6 +1000,11 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 					`deny: ${fmt(deny)}`,
 					`ask: ${fmt(ask)}`,
 					`allow: ${fmt(allow)}`,
+					...(projectAllow.length > 0
+						? [
+								`project allow (${projectAllowTrusted ? "trusted" : projectAllowDeclined ? "declined this session" : "awaiting consent"}): ${fmt(projectAllow)}`,
+							]
+						: []),
 					`session allows: ${fmt(sessionAllows)}`,
 					...(unparsableRules.length > 0 ? [`unparsable rules (ignored): ${unparsableRules.join(", ")}`] : []),
 					...autoLines,
@@ -1071,9 +1113,15 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			return;
 		}
 		const label = payload.agentName ? `${payload.agentName} (background run)` : "background run";
+		const epoch = sessionEpoch;
+		// A review that outlives its session (a /clear mid-review) is dropped: the
+		// agents were stopped with the old session and its ctx no longer renders.
+		const respondIfCurrent = (flag: string | undefined) => {
+			if (epoch === sessionEpoch) respond(flag);
+		};
 		reviewCompletedRun(payload.actions, ctx, label, new AbortController().signal)
-			.then((reason) => respond(reason ? reviewFlagged(reason) : undefined))
-			.catch((error) => respond(reviewFlagged(`the review itself failed (${(error as Error).message})`)));
+			.then((reason) => respondIfCurrent(reason ? reviewFlagged(reason) : undefined))
+			.catch((error) => respondIfCurrent(reviewFlagged(`the review itself failed (${(error as Error).message})`)));
 	});
 
 	pi.on("tool_result", async (event, ctx) => {
