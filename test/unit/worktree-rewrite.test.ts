@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ORIGINAL_COMMAND_KEY, rewriteToolInput, shellQuote, validateWorktreeName } from "../../extensions/worktree/rewrite.ts";
+import { rewriteToolInput, shellQuote, validateWorktreeName } from "../../extensions/worktree/rewrite.ts";
 
 const WT = "/repo/.claude/worktrees/fix";
 
@@ -10,12 +10,20 @@ describe("rewriteToolInput", () => {
 		expect(input.command).toBe(`cd '${WT}' && (npm test\n)`);
 	});
 
-	it("preserves the original bash command so permission rules still match it", () => {
-		// Without this, the cd-wrapper defeats every configured Bash allow/ask/deny
-		// rule for the duration of the worktree session.
+	it("returns the original bash command for the side channel instead of storing it in input", () => {
+		// Without the original, the cd-wrapper defeats every configured Bash
+		// allow/ask/deny rule for the duration of the worktree session. It must
+		// travel over the bus keyed by toolCallId, never inside input: a key there
+		// is model-writable and the gate would match rules against a fake.
 		const input: Record<string, unknown> = { command: "npm run test:unit" };
-		rewriteToolInput("bash", input, WT);
-		expect(input[ORIGINAL_COMMAND_KEY]).toBe("npm run test:unit");
+		const { originalCommand } = rewriteToolInput("bash", input, WT);
+		expect(originalCommand).toBe("npm run test:unit");
+		expect(Object.keys(input)).toEqual(["command"]);
+	});
+
+	it("returns no original for non-bash tools", () => {
+		expect(rewriteToolInput("edit", { path: "a.ts" }, WT)).toEqual({});
+		expect(rewriteToolInput("tool_search", { query: "x" }, WT)).toEqual({});
 	});
 
 	it("resolves relative paths against the worktree and leaves absolute ones alone", () => {

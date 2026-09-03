@@ -21,6 +21,7 @@ import { restoreLatestDetails } from "../lib/branch-restore.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { worktreeBashGuardReason } from "./guards.ts";
+import { ORIGINAL_COMMAND_CHANNEL, type OriginalCommandRecord } from "../lib/original-command.ts";
 import { rewriteToolInput, validateWorktreeName } from "./rewrite.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 
@@ -98,7 +99,11 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 				if (reason) return { block: true, reason };
 			}
 		}
-		rewriteToolInput(event.toolName, event.input as Record<string, unknown>, state.path);
+		const { originalCommand } = rewriteToolInput(event.toolName, event.input as Record<string, unknown>, state.path);
+		if (originalCommand !== undefined) {
+			const record: OriginalCommandRecord = { toolCallId: event.toolCallId, command: originalCommand };
+			pi.events.emit(ORIGINAL_COMMAND_CHANNEL, record);
+		}
 	});
 
 	pi.registerTool({

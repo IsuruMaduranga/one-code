@@ -25,7 +25,7 @@ import { Type } from "typebox";
 import { generateTaskId, TASK_REGISTER_CHANNEL } from "../background/registry.ts";
 import { type BashFinishSummary, startBackgroundBash, tailCap } from "./background.ts";
 import { bashGuardReason } from "./guards.ts";
-import { ORIGINAL_COMMAND_KEY } from "../worktree/rewrite.ts";
+import { commandToEvaluate, trackOriginalCommands } from "../lib/original-command.ts";
 import { createTaskNotifier, systemNotification } from "../lib/notifications.ts";
 import { perCwd } from "../lib/per-cwd.ts";
 import { ccWrapBuiltinRenderers, linesComponent, resultLines } from "../lib/tui-render.ts";
@@ -56,6 +56,9 @@ export default function bashExtension(pi: ExtensionAPI) {
 	const foreground = perCwd(createBashToolDefinition);
 
 	const notifyTask = createTaskNotifier(pi);
+	// A worktree session cd-wraps input.command; the pre-wrapper original arrives
+	// over the bus keyed by toolCallId (never read from params — model-writable).
+	const originalCommands = trackOriginalCommands(pi);
 	const notify = (text: string, details: Record<string, unknown>) => notifyTask("task-notification", text, details);
 
 	const taskLogPath = (ctx: ExtensionContext, taskId: string): string | undefined => {
@@ -108,8 +111,7 @@ export default function bashExtension(pi: ExtensionAPI) {
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			// Guards check the model's original command — a worktree session rewrites
 			// input.command to `cd '<wt>' && (…)`, which would hide the real lead.
-			const originalCommand =
-				((params as Record<string, unknown>)[ORIGINAL_COMMAND_KEY] as string | undefined) ?? params.command;
+			const originalCommand = commandToEvaluate(originalCommands, toolCallId, params.command);
 			const guardReason = bashGuardReason(originalCommand, { background: params.run_in_background === true });
 			if (guardReason) return { content: [{ type: "text" as const, text: guardReason }], isError: true, details: {} };
 

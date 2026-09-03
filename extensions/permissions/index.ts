@@ -65,7 +65,7 @@ import {
 } from "./matcher.ts";
 import { modeBadge, nextMode, PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "./modes.ts";
 import { type ChildToolCall, type ChildGateDecision, SUBAGENT_GATE_CHANNEL } from "./subagent-gate.ts";
-import { ORIGINAL_COMMAND_KEY } from "../worktree/rewrite.ts";
+import { trackOriginalCommands } from "../lib/original-command.ts";
 import { MODE_CHANNEL, PLAN_FILE_CHANNEL } from "../lib/plan-mode-channels.ts";
 import { isWritingTool } from "./protected-paths.ts";
 import { loadPermissionSettings, normalizePermissionMode, persistAllowRule } from "./settings.ts";
@@ -146,6 +146,9 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	const isSubagentChild = process.env.PI_SUBAGENT_CHILD === "1";
 
 	let mode: PermissionMode = "default";
+	// Worktree-wrapped bash calls publish the model's original command here,
+	// keyed by pi's toolCallId (never read from `event.input` — model-writable).
+	const originalCommands = trackOriginalCommands(pi);
 	/** Whether bypassPermissions is a stop on the cycle — only when the session started with it (Claude Code semantics). */
 	let bypassInCycle = false;
 	/** Whether auto mode is a stop on the cycle — only when a classifier model is reachable. */
@@ -598,12 +601,15 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				? resolveForContainment(toAbsolute(ctx.cwd, subject, os.homedir()))
 				: undefined;
 		// In a worktree session, worktree's tool_call handler (which runs before this
-		// one) cd-wraps bash commands for execution. Rule matching must evaluate the
-		// model's original command, not the wrapper — otherwise every configured Bash
+		// one) cd-wraps bash commands for execution and publishes the model's
+		// original command over the bus under this call's id. Rule matching must
+		// evaluate that original, not the wrapper — otherwise every configured Bash
 		// rule stops matching for the whole session. The classifier and safety floor
-		// keep reading event.input (the wrapped command that actually runs).
-		const original = (event.input as Record<string, unknown>)[ORIGINAL_COMMAND_KEY];
-		const matchSubject = normalizedTool === "bash" && typeof original === "string" ? original : subject;
+		// keep reading event.input (the wrapped command that actually runs). The
+		// lookup is by toolCallId on purpose: a value inside `event.input` would be
+		// the model's to write, and rules would match a string of its choosing.
+		const original = normalizedTool === "bash" ? originalCommands.get(event.toolCallId) : undefined;
+		const matchSubject = original ?? subject;
 
 		// Record every tool call into the classifier transcript (inputs only). In
 		// auto mode this is the running <transcript> the classifier reads, and this
@@ -611,9 +617,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// model's original command, not the worktree cd-wrapper that actually runs.
 		if (mode === "auto") {
 			const recordedInput =
-				normalizedTool === "bash" && typeof original === "string"
-					? { command: original }
-					: (event.input as Record<string, unknown>);
+				original !== undefined ? { command: original } : (event.input as Record<string, unknown>);
 			transcript.push({ kind: "tool", tool: normalizedTool, input: recordedInput });
 			capTranscript();
 		}

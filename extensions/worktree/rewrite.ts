@@ -20,32 +20,40 @@ export function shellQuote(path: string): string {
 	return `'${path.replace(/'/g, "'\\''")}'`;
 }
 
-/**
- * Key under which a worktree-rewritten bash call preserves the model's original
- * (pre-`cd`-wrapper) command. The permission matcher reads it so allow/ask/deny
- * rules are evaluated against what the model actually asked for, not the
- * `cd '<wt>' && (…)` wrapper (which starts with `cd` and matches no Bash rule).
- * The classifier and safety floor still see the wrapped `input.command`, whose
- * `cd` makes containment resolve inside the worktree — see docs/decisions/worktree.md.
- */
-export const ORIGINAL_COMMAND_KEY = "__ccOriginalCommand";
 
-/** Mutates `input` in place so the call runs inside the worktree. */
-export function rewriteToolInput(toolName: string, input: Record<string, unknown>, worktreePath: string): void {
+/**
+ * Mutates `input` in place so the call runs inside the worktree. For bash,
+ * returns the model's ORIGINAL command (pre-`cd`-wrapper) so the caller can
+ * publish it over `ORIGINAL_COMMAND_CHANNEL` keyed by the call id: the
+ * permission matcher evaluates rules against what the model asked for, not
+ * the wrapper (which starts with `cd` and matches no Bash rule), while the
+ * classifier and safety floor keep reading the wrapped `input.command`, whose
+ * `cd` makes containment resolve inside the worktree —
+ * docs/decisions/code-review-remediation.md ("Worktree vs. permission rules").
+ * The original is deliberately NOT stored in `input`: a key there is
+ * model-writable (lib/original-command.ts).
+ */
+export function rewriteToolInput(
+	toolName: string,
+	input: Record<string, unknown>,
+	worktreePath: string,
+): { originalCommand?: string } {
 	if (toolName === "bash") {
 		if (typeof input.command === "string") {
-			input[ORIGINAL_COMMAND_KEY] = input.command;
-			input.command = `cd ${shellQuote(worktreePath)} && (${input.command}\n)`;
+			const originalCommand = input.command;
+			input.command = `cd ${shellQuote(worktreePath)} && (${originalCommand}\n)`;
+			return { originalCommand };
 		}
-		return;
+		return {};
 	}
-	if (!PATH_TOOLS.has(toolName)) return;
+	if (!PATH_TOOLS.has(toolName)) return {};
 
 	if (typeof input.path === "string" && input.path.length > 0) {
 		if (!isAbsolute(input.path)) input.path = resolve(worktreePath, input.path);
 	} else if (DEFAULTS_TO_CWD.has(toolName)) {
 		input.path = worktreePath;
 	}
+	return {};
 }
 
 /** Validates an EnterWorktree name: /-separated segments of [A-Za-z0-9._-], ≤64 chars total. */
