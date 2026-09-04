@@ -88,6 +88,14 @@ try {
 		// to regular mode keep their choice.
 		settings = { theme: "onecode", quietStartup: true, tuiMode: "fullscreen" };
 	}
+	// pi 0.85.0 made the clean fullscreen exit reachable from settings
+	// (stopInteractiveTui skips the transcript repaint and stops with
+	// preserveScreen unless fullscreenExitOutput is "transcript"), which is
+	// the Claude Code exit One Code used to get by patching that method.
+	// Backfill the key once for sessions seeded before 0.85.0; an explicit
+	// value, "transcript" included, is the user's and is never rewritten.
+	const backfillExitOutput = settings.fullscreenExitOutput === undefined;
+	if (backfillExitOutput) settings.fullscreenExitOutput = "resume-hint";
 	const packages = Array.isArray(settings.packages) ? settings.packages : [];
 	const sourceOf = (entry) => (typeof entry === "string" ? entry : entry?.source);
 	// "Ours" = any path ending in /node_modules/one-code-extension (stale npm
@@ -98,7 +106,11 @@ try {
 	};
 	const kept = packages.filter((entry) => !isOurs(entry) && sourceOf(entry) !== corePath);
 	const next = [...kept, corePath];
-	const changed = firstRun || packages.length !== next.length || packages.some((p, i) => sourceOf(p) !== sourceOf(next[i]));
+	const changed =
+		firstRun ||
+		backfillExitOutput ||
+		packages.length !== next.length ||
+		packages.some((p, i) => sourceOf(p) !== sourceOf(next[i]));
 	if (changed) {
 		settings.packages = next;
 		writeFileSync(settingsPath, JSON.stringify(settings, null, "\t") + "\n");
@@ -147,57 +159,57 @@ const patchMissed = (what) => {
 	if (process.env.ONECODE_DEBUG) process.stderr.write(`onecode: pi internals changed, ${what} not patched (stock behaviour)\n`);
 };
 
-// Clean exit. pi 0.84.1's quit path leaves the rendered UI behind in both TUI
-// modes: fullscreen deliberately switches from the alt screen back to the
-// main-screen renderer and repaints the whole transcript into scrollback
-// (stopInteractiveTui → switchTuiMode("regular") + renderNow); regular mode
-// just parks the cursor below the rendered lines. One Code wants the Claude
-// Code exit: restore the terminal, print only the resume hint. Overriding this
-// one method keeps the mid-session /settings renderer switch untouched.
-// Exact-pinned pi makes the private internals (renderer, hasOverlayEntries,
-// ui, and the main-screen render bookkeeping) stable; re-verify on every pin
-// bump. Upstream proposal queued (an exit-preserve setting).
+// Clean exit in regular (main-screen) mode. One Code wants the Claude Code
+// exit: restore the terminal, print only the resume hint. pi 0.85.0 delivers
+// that for FULLSCREEN by itself — stopInteractiveTui skips the transcript
+// repaint and stops with preserveScreen unless fullscreenExitOutput is
+// "transcript" — so the seeded "resume-hint" setting above covers that mode
+// and this patch no longer touches it. Regular mode is still stock pi's
+// park-the-cursor-below-the-lines exit, which leaves banner, editor and
+// footer on screen, so that half stays here. Overriding this one method keeps
+// the mid-session /settings renderer switch untouched. Exact-pinned pi makes
+// the private internals (renderer, ui, and the main-screen render
+// bookkeeping) stable; re-verify on every pin bump. Upstream proposal queued
+// for the regular-mode half.
 try {
 	const original = InteractiveMode.prototype.stopInteractiveTui;
 	if (typeof original !== "function") patchMissed("InteractiveMode.prototype.stopInteractiveTui");
 	if (typeof original === "function") {
-		InteractiveMode.prototype.stopInteractiveTui = function stopInteractiveTuiPreserving() {
+		InteractiveMode.prototype.stopInteractiveTui = function stopInteractiveTuiPreservingRegular(fullscreenExitOutput) {
 			try {
 				const renderer = this.renderer;
-				if (renderer?.mode === "fullscreen") {
-					while (renderer.hasOverlayEntries) renderer.hideOverlay();
-					this.ui.stop({ preserveScreen: true });
-					return;
-				}
 				// Regular (main-screen) mode: erase the on-screen part of the
 				// working area, then stop without the stock cursor-park. Only
 				// the viewport can be erased — lines already scrolled into
 				// scrollback stay (clearing scrollback would take ESC[3J,
 				// which also destroys the user's own shell history).
-				if (
-					renderer?.mode === "regular" &&
-					Array.isArray(renderer.previousLines) &&
-					renderer.previousLines.length > 0 &&
-					Number.isInteger(renderer.hardwareCursorRow) &&
-					Number.isInteger(renderer.previousViewportTop)
-				) {
+				if (renderer?.mode === "regular") {
 					// (renderer fields verified by app-bin-patches.test.ts against the pinned pi)
-					let buffer = "";
-					if (renderer.previousKittyImageIds && typeof renderer.deleteKittyImages === "function") {
-						buffer += renderer.deleteKittyImages(renderer.previousKittyImageIds);
+					if (
+						Array.isArray(renderer.previousLines) &&
+						renderer.previousLines.length > 0 &&
+						Number.isInteger(renderer.hardwareCursorRow) &&
+						Number.isInteger(renderer.previousViewportTop)
+					) {
+						let buffer = "";
+						if (renderer.previousKittyImageIds && typeof renderer.deleteKittyImages === "function") {
+							buffer += renderer.deleteKittyImages(renderer.previousKittyImageIds);
+						}
+						const rowsUp = Math.max(0, renderer.hardwareCursorRow - renderer.previousViewportTop);
+						if (rowsUp > 0) buffer += `\x1b[${rowsUp}A`;
+						buffer += "\r\x1b[0J";
+						renderer.terminal.write(buffer);
+						this.ui.stop({ preserveScreen: true });
+						return;
 					}
-					const rowsUp = Math.max(0, renderer.hardwareCursorRow - renderer.previousViewportTop);
-					if (rowsUp > 0) buffer += `\x1b[${rowsUp}A`;
-					buffer += "\r\x1b[0J";
-					renderer.terminal.write(buffer);
-					this.ui.stop({ preserveScreen: true });
-					return;
+					patchMissed("renderer shape for the clean-exit path");
 				}
 			} catch {
 				// Any surprise in pi's internals: fall through to stock behavior.
 			}
-			patchMissed("renderer shape for the clean-exit path");
-			return original.call(this);
+			// Fullscreen lands here by design: pi 0.85.0 does the clean exit
+			// itself, driven by the fullscreenExitOutput it passes through.
+			return original.call(this, fullscreenExitOutput);
 		};
 	}
 } catch {

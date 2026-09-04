@@ -48,8 +48,8 @@ If you already run pi, add One Code as an extension:
 pi install npm:one-code-extension
 ```
 
-The extension is tested against pi 0.83 and 0.84. It warns if your pi falls
-outside that range.
+The extension is tested against pi 0.83, 0.84 and 0.85. It warns if your pi
+falls outside that range.
 
 ## Install from source
 

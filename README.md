@@ -36,7 +36,7 @@ One project, two npm packages. Pick the one that fits you:
 | You | Install | Package |
 |---|---|---|
 | **Most people** (new to pi included) | `npm install -g @one-ai/one-code` | [`@one-ai/one-code`](https://www.npmjs.com/package/@one-ai/one-code): the app, with its own `onecode` command, a pinned pi bundled inside, state isolated in `~/.onecode`, coexisting with any existing `pi` |
-| Already running pi, want it on your own install | `pi install npm:one-code-extension` | [`one-code-extension`](https://www.npmjs.com/package/one-code-extension): the extensions only; rides your pi (tested against pi 0.83-0.84, warns outside that range) |
+| Already running pi, want it on your own install | `pi install npm:one-code-extension` | [`one-code-extension`](https://www.npmjs.com/package/one-code-extension): the extensions only; rides your pi (tested against pi 0.83-0.85, warns outside that range) |
 
 ```bash
 npm install -g @one-ai/one-code
