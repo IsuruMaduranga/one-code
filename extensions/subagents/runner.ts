@@ -12,13 +12,15 @@
  * `<sessionDir>/subagents/<taskId>/`, so a finished run can be resumed from disk.
  */
 
+import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createAgentSession, getAgentDir, SessionManager, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { buildAgentLoader, createSharedModelRuntime } from "../lib/agent-loader.ts";
+import { PrefixWarmGate, type Release } from "../lib/prefix-warm-gate.ts";
 import type { PermissionBridge } from "../permissions/subagent-gate.ts";
-import { findConfigured } from "../lib/model-policy.ts";
+import { findConfigured, modelSpec } from "../lib/model-policy.ts";
 import { isModelUnavailableError } from "../auto-mode/model-select.ts";
 import type { AgentDefinition } from "./agents.ts";
 import { type ChildHandle, type ChildOutcome, forkTaskMessage, type RpcChildHandle } from "./outcome.ts";
@@ -150,6 +152,13 @@ export class SubagentRuntime {
 	 * agent or fork prompt reuses the built loader.
 	 */
 	private readonly loaderCache = new Map<string, Promise<Loader>>();
+	/**
+	 * Parallel children with the same request prefix (same agent prompt and
+	 * model; forks share the parent's) let the first one start streaming before
+	 * the rest go, so the fan-out writes the shared prefix once and reads it
+	 * N-1 times (lib/prefix-warm-gate.ts).
+	 */
+	private readonly warmGate = new PrefixWarmGate();
 
 	private constructor(
 		modelRuntime: SubagentRuntime["modelRuntime"],
@@ -189,6 +198,18 @@ export class SubagentRuntime {
 		});
 	}
 
+	/**
+	 * The system-prompt identity of a run: a fork (keyed by the parent prompt it
+	 * inherits, which varies turn to turn — two forks from one message share it,
+	 * forks from different turns do not), a named agent, or pi's base prompt.
+	 */
+	private static promptKey(spec: Pick<ChildSessionSpec, "forkFrom" | "parentSystemPrompt" | "agent">): string {
+		if (spec.forkFrom || spec.parentSystemPrompt !== undefined) {
+			return `fork:${createHash("sha1").update(spec.parentSystemPrompt ?? "").digest("hex").slice(0, 16)}`;
+		}
+		return spec.agent ? `agent:${spec.agent.name}` : "base";
+	}
+
 	/** Get-or-build a loader for a system-prompt identity, evicting the entry if the build fails. */
 	private loaderFor(spec: ChildSessionSpec): Promise<Loader> {
 		// Fork loaders are keyed by the parent's system prompt, which varies turn to
@@ -197,8 +218,9 @@ export class SubagentRuntime {
 		// A fork's prompt also comes back on a RESUME of a finished fork (read from
 		// the file persisted beside its session) — without it the resume ran on
 		// pi's stock prompt and default tools (review S6).
-		if (spec.forkFrom || spec.parentSystemPrompt !== undefined) return this.buildChildLoader(spec.parentSystemPrompt);
-		const [key, systemPrompt] = spec.agent ? [`agent:${spec.agent.name}`, spec.agent.systemPrompt] : ["base", undefined];
+		const key = SubagentRuntime.promptKey(spec);
+		if (key.startsWith("fork:")) return this.buildChildLoader(spec.parentSystemPrompt);
+		const systemPrompt = spec.agent?.systemPrompt;
 		let pending = this.loaderCache.get(key);
 		if (!pending) {
 			pending = this.buildChildLoader(systemPrompt);
@@ -206,6 +228,18 @@ export class SubagentRuntime {
 			this.loaderCache.set(key, pending);
 		}
 		return pending;
+	}
+
+	/**
+	 * Hold a run until a sibling with the same request prefix has started
+	 * streaming (see `warmGate`): same prompt identity, same cwd (the child's
+	 * `# claudeMd` block names its paths) and same model. Resolves to the release
+	 * for the caller's `finally`.
+	 */
+	private admitPrefix(spec: Pick<ChildSessionSpec, "cwd" | "forkFrom" | "parentSystemPrompt" | "agent">, session: Session): Promise<Release> {
+		const model = session.model;
+		const key = `${SubagentRuntime.promptKey(spec)}|${spec.cwd}|${model ? modelSpec(model) : ""}`;
+		return this.warmGate.admitOnFirstToken(key, session);
 	}
 
 	/** Subscribe a turn tracker to a session, feeding progress and (optionally) turn-settle. Returns the unsubscribe. */
@@ -327,7 +361,13 @@ export class SubagentRuntime {
 				session = built.session;
 				spawnNote = built.note;
 				unsubscribe = this.wireTracker(session, tracker, options.onProgress, undefined, options.sink);
-				await session.prompt(task);
+				// A resume continues a unique history; only a fresh run shares a prefix.
+				const releasePrefix = options.sessionFile ? undefined : await this.admitPrefix(options, session);
+				try {
+					await session.prompt(task);
+				} finally {
+					releasePrefix?.(false);
+				}
 				return withNote(tracker.turnOutcome(), spawnNote);
 			} catch (error) {
 				// Keep the fallback note if the model was swapped before the turn failed.
@@ -366,6 +406,7 @@ export class SubagentRuntime {
 		const tracker = new SessionTurnTracker();
 		let exited = false;
 		let turnActive = false;
+		let firstTurn = true;
 		let turnTimer: ReturnType<typeof setTimeout> | undefined;
 		const clearTurnCap = () => {
 			if (turnTimer) clearTimeout(turnTimer);
@@ -382,6 +423,8 @@ export class SubagentRuntime {
 		};
 
 		this.wireTracker(session, tracker, options.onProgress, () => finishTurn(tracker.turnOutcome()), options.sink);
+		// `this` inside the handle's methods is the handle, so bind the gate here.
+		const admitPrefix = () => this.admitPrefix(options, session);
 
 		return {
 			send(message: string): "started" | "steered" {
@@ -391,25 +434,42 @@ export class SubagentRuntime {
 				if (!turnActive && session.isIdle) {
 					tracker.beginTurn();
 					turnActive = true;
-					clearTurnCap();
-					turnTimer = setTimeout(() => {
-						// Same rationale as kill(): the abort settles through the normal
-						// turn path, which would report the capped turn as a completion.
-						finishTurn({
-							output: tracker.turnText
-								? `${tracker.turnText}\n\n[terminated: turn hit the wall-clock cap]`
-								: "Subagent terminated: turn hit the wall-clock cap.",
-							toolCalls: tracker.toolCalls,
-							usage: tracker.usage,
-							actions: tracker.actions,
-							failed: true,
+					// The cap measures the turn's own work, so it is armed when the prompt
+					// actually starts — after any wait behind the prefix gate.
+					const armTurnCap = () => {
+						clearTurnCap();
+						turnTimer = setTimeout(() => {
+							// Same rationale as kill(): the abort settles through the normal
+							// turn path, which would report the capped turn as a completion.
+							finishTurn({
+								output: tracker.turnText
+									? `${tracker.turnText}\n\n[terminated: turn hit the wall-clock cap]`
+									: "Subagent terminated: turn hit the wall-clock cap.",
+								toolCalls: tracker.toolCalls,
+								usage: tracker.usage,
+								actions: tracker.actions,
+								failed: true,
+							});
+							void session.abort();
+						}, WALL_CLOCK_CAP_MS);
+						turnTimer.unref?.();
+					};
+					// The first turn waits for a sibling with the same prefix to start
+					// streaming (admitPrefix); later turns continue a unique history.
+					let prompting: Promise<void>;
+					if (firstTurn) {
+						prompting = admitPrefix().then((release) => {
+							armTurnCap();
+							return session.prompt(message).finally(() => release(false));
 						});
-						void session.abort();
-					}, WALL_CLOCK_CAP_MS);
-					turnTimer.unref?.();
+					} else {
+						armTurnCap();
+						prompting = session.prompt(message);
+					}
+					firstTurn = false;
 					// A prompt that can't even start (no API key, bad model) rejects; surface
 					// it as a failed turn instead of leaving the caller waiting forever.
-					void session.prompt(message).catch((error) => {
+					void prompting.catch((error) => {
 						finishTurn({
 							output: `Subagent could not start the turn: ${(error as Error).message}`,
 							toolCalls: tracker.toolCalls,

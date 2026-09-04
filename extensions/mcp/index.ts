@@ -47,6 +47,7 @@ import { readDisabledMcpServers, setMcpServerDisabled } from "../lib/mcp-overrid
 import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import { authenticate as runOAuthFlow, silentProvider } from "./oauth/flow.ts";
 import { hasStoredTokens } from "./oauth/store.ts";
+import { announcedFrom, applyMcpDelta, emptyAnnounced, mcpChangeNotices, mcpDelta, type McpSnapshot } from "./announce.ts";
 import { decodeMcpKey } from "./panel/keys.ts";
 import { type McpEntry, type McpEntryStatus } from "./panel/model.ts";
 import { renderMcpPanel, type McpPaint } from "./panel/render.ts";
@@ -90,6 +91,14 @@ export default function mcpExtension(pi: ExtensionAPI) {
 	// Live tool definitions, shared with in-process subagents so they reach MCP
 	// through these same open connections instead of connecting their own.
 	const sharedTools: ToolDefinition[] = [];
+	// Message 1 carries the MCP instructions and failed-servers reminders. Once a
+	// request has gone out it is part of every later request's cached prefix, so
+	// those blocks are frozen and later changes ride one-shot notices (./announce.ts).
+	let requestSent = false;
+	let announced = emptyAnnounced();
+	pi.on("context", () => {
+		requestSent = true;
+	});
 
 	/**
 	 * Where oversized results are persisted — the session dir, matching Claude
@@ -228,49 +237,59 @@ export default function mcpExtension(pi: ExtensionAPI) {
 	};
 
 	/**
-	 * Re-publish servers' own usage instructions (initialize result) as an
-	 * every-turn reminder, the way Claude Code injects them (findings §14).
-	 * Re-run after a reconnect/authenticate so a newly connected server's
-	 * instructions appear too.
+	 * Tell the MODEL about the servers, the way Claude Code does (findings §14):
+	 * each connected server's own usage instructions (its initialize result), and
+	 * which servers failed — otherwise it concludes the tools do not exist or the
+	 * user has no access instead of reporting a connection failure the user can
+	 * fix (review M4). Re-run on every connect, close, reconnect, authenticate,
+	 * enable and disable. Before the first request the two first-prepend blocks on
+	 * message 1 are (re)written; after it they are frozen and only the changes are
+	 * announced (./announce.ts).
 	 */
-	/**
-	 * Tell the MODEL which servers failed (Claude Code injects the same notice):
-	 * otherwise it concludes the tools do not exist or the user has no access,
-	 * instead of reporting a connection failure the user can fix (review M4).
-	 * First-prepend beside the MCP instructions; removed when nothing has failed.
-	 */
-	const emitFailures = () => {
-		const hardFailures = failures.filter((f) => !connections.has(f.server.name));
-		if (hardFailures.length === 0) {
-			pi.events.emit(REMINDER_CHANNEL, { scope: "every-turn", key: "mcp-failures", text: "", remove: true });
+	const emitInstructions = () => {
+		const live = [...connections.values()];
+		const snapshot: McpSnapshot = {
+			connected: live.map((c) => ({ name: c.server.name, instructions: c.instructions })),
+			failed: failures.filter((f) => !connections.has(f.server.name)).map((f) => ({ name: f.server.name, error: f.error })),
+		};
+
+		if (!requestSent) {
+			// Nothing is cached yet: (re)write the standing message-1 blocks.
+			if (snapshot.failed.length === 0) {
+				pi.events.emit(REMINDER_CHANNEL, { scope: "every-turn", key: "mcp-failures", text: "", remove: true });
+			} else {
+				pi.events.emit(REMINDER_CHANNEL, {
+					scope: "every-turn",
+					key: "mcp-failures",
+					text: mcpFailuresReminder(snapshot.failed),
+					placement: "first-prepend",
+					order: CONTEXT_ORDER.mcp + 1,
+				});
+			}
+			const instructions = mcpInstructionsReminder(live);
+			if (instructions) {
+				pi.events.emit(REMINDER_CHANNEL, {
+					scope: "every-turn",
+					key: "mcp-instructions",
+					text: instructions,
+					placement: "first-prepend",
+					order: CONTEXT_ORDER.mcp,
+				});
+			} else {
+				// No server has instructions anymore (e.g. the last one was disabled or
+				// disconnected) — drop the stale every-turn reminder so the model stops
+				// being told to use tools that are gone.
+				pi.events.emit(REMINDER_CHANNEL, { scope: "every-turn", key: "mcp-instructions", text: "", remove: true });
+			}
+			announced = announcedFrom(snapshot);
 			return;
 		}
-		pi.events.emit(REMINDER_CHANNEL, {
-			scope: "every-turn",
-			key: "mcp-failures",
-			text: mcpFailuresReminder(hardFailures.map((f) => ({ name: f.server.name, error: f.error }))),
-			placement: "first-prepend",
-			order: CONTEXT_ORDER.mcp + 1,
-		});
-	};
 
-	const emitInstructions = () => {
-		emitFailures();
-		const instructions = mcpInstructionsReminder([...connections.values()]);
-		if (instructions) {
-			pi.events.emit(REMINDER_CHANNEL, {
-				scope: "every-turn",
-				key: "mcp-instructions",
-				text: instructions,
-				placement: "first-prepend",
-				order: CONTEXT_ORDER.mcp,
-			});
-		} else {
-			// No server has instructions anymore (e.g. the last one was disabled or
-			// disconnected) — drop the stale every-turn reminder so the model stops
-			// being told to use tools that are gone.
-			pi.events.emit(REMINDER_CHANNEL, { scope: "every-turn", key: "mcp-instructions", text: "", remove: true });
-		}
+		// Message 1 is frozen (rewriting it would re-cache the whole conversation):
+		// tell the model only what changed, as one-shots where it reads next.
+		const delta = mcpDelta(announced, snapshot);
+		for (const text of mcpChangeNotices(delta)) pi.events.emit(REMINDER_CHANNEL, { text });
+		applyMcpDelta(announced, delta);
 	};
 
 	/** Config files that exist but failed to parse (review M11) — shown at startup and in /mcp. */
@@ -458,6 +477,10 @@ export default function mcpExtension(pi: ExtensionAPI) {
 	};
 
 	pi.on("session_start", async (_event, ctx) => {
+		// A new session (/clear, resume in a new process) has no cached prefix yet:
+		// its message-1 blocks are written fresh (same reset as tool-search).
+		requestSent = false;
+		announced = emptyAnnounced();
 		// pi awaits session_start handlers serially before the prompt opens, and
 		// remote servers take seconds to answer — awaiting here was the entire
 		// "slow startup" (4.9s → 0.24s measured, findings §15). In the interactive

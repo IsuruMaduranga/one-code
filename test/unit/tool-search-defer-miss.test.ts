@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { DEFER_CHANNEL } from "../../extensions/lib/deferred.ts";
 import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/mcp-share.ts";
-import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import toolSearchExtension from "../../extensions/tool-search/index.ts";
+import { makeToolSearchFakePi, type Reminder } from "./helpers/tool-search-fake-pi.ts";
 
 /**
  * Integration test for the deferred-miss steering wired in tool-search/index.ts:
@@ -11,50 +11,7 @@ import toolSearchExtension from "../../extensions/tool-search/index.ts";
  * extension against a fake pi and assert the one-shot correction is emitted.
  */
 
-interface Reminder {
-	scope?: string;
-	key?: string;
-	text?: string;
-}
-
-function makeFakePi() {
-	const busHandlers = new Map<string, Array<(data: unknown) => void>>();
-	const lifecycleHandlers = new Map<string, Array<(event: unknown) => void>>();
-	const reminders: Reminder[] = [];
-	let active: string[] = [];
-	const allTools: Array<{ name: string; description: string }> = [];
-
-	const pi = {
-		events: {
-			on(channel: string, handler: (data: unknown) => void) {
-				const list = busHandlers.get(channel) ?? [];
-				list.push(handler);
-				busHandlers.set(channel, list);
-			},
-			emit(channel: string, data: unknown) {
-				if (channel === REMINDER_CHANNEL) reminders.push(data as Reminder);
-				for (const h of busHandlers.get(channel) ?? []) h(data);
-			},
-		},
-		on(event: string, handler: (event: unknown) => void) {
-			const list = lifecycleHandlers.get(event) ?? [];
-			list.push(handler);
-			lifecycleHandlers.set(event, list);
-		},
-		fire(event: string, payload: unknown) {
-			for (const h of lifecycleHandlers.get(event) ?? []) h(payload);
-		},
-		getAllTools: () => allTools,
-		getActiveTools: () => active,
-		setActiveTools: (names: string[]) => {
-			active = names;
-		},
-		registerTool: () => {},
-		registerCommand: () => {},
-	};
-
-	return { pi, reminders, allTools, setActive: (n: string[]) => (active = n) };
-}
+const makeFakePi = () => makeToolSearchFakePi();
 
 function correctionFor(reminders: Reminder[], name: string) {
 	return reminders.find((r) => r.key === `deferred-miss-${name}`);
@@ -146,17 +103,21 @@ describe("tool-search late-defer announcements (M7)", () => {
 		expect(listings()[0].text).toContain("mcp__s__b");
 	});
 
-	it("after a request went out, holds the listing until MCP settles, then updates once", async () => {
+	it("after a request went out, holds the announcement until MCP settles, then sends one addendum (the listing stays frozen)", async () => {
 		fake.pi.fire("context", { messages: [] });
 		fake.allTools.push({ name: "mcp__s__a", description: "a" });
 		fake.setActive(["read", "mcp__s__a"]);
 		fake.pi.events.emit(DEFER_CHANNEL, { name: "mcp__s__a" });
 		await new Promise((r) => setTimeout(r, 150));
 		expect(fake.pi.getActiveTools()).toEqual(["read"]); // deactivated at once
-		expect(listings()).toHaveLength(0); // but not announced yet
+		expect(fake.reminders).toHaveLength(0); // but not announced yet
 		fake.pi.events.emit(MCP_TOOLS_CHANNEL, { tools: [], settled: true });
-		expect(listings()).toHaveLength(1);
-		expect(listings()[0].text).toContain("mcp__s__a");
+		// Message 1 is cached by now: the standing listing is never rewritten …
+		expect(listings()).toHaveLength(0);
+		// … the new name rides an unkeyed one-shot addendum instead (tool-search/announce.ts).
+		expect(fake.reminders).toHaveLength(1);
+		expect(fake.reminders[0].key).toBeUndefined();
+		expect(fake.reminders[0].text).toContain("mcp__s__a");
 	});
 });
 

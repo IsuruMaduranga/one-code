@@ -19,6 +19,7 @@ import { join } from "node:path";
 import { DefaultResourceLoader, type InlineExtension, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { PermissionBridge } from "../permissions/subagent-gate.ts";
+import { withShortCacheRetention } from "./cache-retention.ts";
 import { permissionGateFactory } from "./permission-gate.ts";
 import { worktreeGuardFactory } from "./worktree-isolation.ts";
 
@@ -40,12 +41,18 @@ export function finalAssistantText(messages: AgentMessage[]): string {
 	return "";
 }
 
-/** The canonical model/auth runtime, shared across all agents in a run (building one per agent is expensive). */
-export function createSharedModelRuntime(agentDir: string): Promise<ModelRuntime> {
-	return ModelRuntime.create({
+/**
+ * The canonical model/auth runtime, shared across all agents in a run (building
+ * one per agent is expensive). Children are tight loops, so it answers every
+ * auth with the provider's 5-minute cache TTL rather than the main session's
+ * 1-hour one (lib/cache-retention.ts).
+ */
+export async function createSharedModelRuntime(agentDir: string): Promise<ModelRuntime> {
+	const runtime = await ModelRuntime.create({
 		authPath: join(agentDir, "auth.json"),
 		modelsPath: join(agentDir, "models.json"),
 	});
+	return withShortCacheRetention(runtime);
 }
 
 export interface AgentLoaderOptions {

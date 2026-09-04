@@ -66,13 +66,27 @@ export function tierOverride(env: NodeJS.ProcessEnv = process.env): PromptTier |
  */
 function isAnthropicFrontier(model: Model<Api>): boolean {
 	if (model.provider !== "anthropic" || model.id.includes("haiku")) return false;
-	const version = model.id.match(/^claude-(opus|sonnet|fable)-(\d+)(?:-(\d+))?(?:-|$)/);
+	const version = parseClaudeVersion(model.id);
 	if (!version) return false;
-	const family = version[1];
-	if (family === "sonnet") return false; // Sonnet is workhorse, never frontier
-	const major = Number(version[2]);
-	const minor = version[3] && version[3].length < 8 ? Number(version[3]) : 0;
-	return major > 4 || (major === 4 && minor >= 7);
+	if (version.family === "sonnet") return false; // Sonnet is workhorse, never frontier
+	return version.major > 4 || (version.major === 4 && version.minor >= 7);
+}
+
+/**
+ * Structural parse of a first-party Claude model id (`claude-opus-4-8`,
+ * `claude-sonnet-5`, `claude-opus-4-5-20251101`): family, major, minor. A
+ * dated suffix is never read as the minor version (the `length < 8` guard).
+ * Undefined for anything else. Shared by the frontier gate here and the
+ * tool-reference gate in `deferred.ts`.
+ */
+export function parseClaudeVersion(id: string): { family: "opus" | "sonnet" | "fable"; major: number; minor: number } | undefined {
+	const version = id.match(/^claude-(opus|sonnet|fable)-(\d+)(?:-(\d+))?(?:-|$)/);
+	if (!version) return undefined;
+	return {
+		family: version[1] as "opus" | "sonnet" | "fable",
+		major: Number(version[2]),
+		minor: version[3] && version[3].length < 8 ? Number(version[3]) : 0,
+	};
 }
 
 /**

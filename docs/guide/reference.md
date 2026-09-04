@@ -72,6 +72,7 @@ Set these before launching to change behavior:
 | `CC_HOOKS_DEBUG=1` | Print hook dispatch details to stderr. |
 | `CC_AUTO_MODE_DEBUG=1` | Print auto-mode classifier verdicts (stage, severity, rule) to stderr. |
 | `CC_VERSION` | Version shown in the banner (the bundled app sets it to its own version). |
+| `PI_CACHE_RETENTION` | pi's prompt-cache TTL. Interactive sessions (the TUI and `--mode rpc`) default to `long` — a one-hour cache on Anthropic, 24 hours on OpenAI, so a pause between turns does not re-write the whole context. `-p`/`--mode json` runs, subagents and workflow agents use the provider's short default. Set `short` (or any value) to take over the setting yourself. |
 | `ONECODE_NO_UPDATE_CHECK=1` | Skip the daily npm update check (`--offline`/`PI_OFFLINE=1` also skip it). |
 | `ONECODE_STATE_DIR` | Where One Code keeps its own state (default `~/.onecode`). |
 | `ONECODE_DEBUG=1` | Report when a pi-internal patch in the bundled app did not take. |

@@ -24,6 +24,8 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { buildAgentLoader, createSharedModelRuntime, finalAssistantText } from "../lib/agent-loader.ts";
+import { modelSpec as modelSpecOf } from "../lib/model-policy.ts";
+import { PrefixWarmGate } from "../lib/prefix-warm-gate.ts";
 import type { PermissionBridge } from "../permissions/subagent-gate.ts";
 import { summarizeArgs } from "../lib/tui-render.ts";
 import { agentDirs, type AgentDefinition, discoverAgents } from "../subagents/agents.ts";
@@ -134,6 +136,12 @@ export class AgentRunner {
 	/** Per-agentType loader cache — building one re-runs every extension factory, so each
 	 * agentType's loader is built once (lazily, on first use) and reused for the rest of the run. */
 	private readonly loadersByAgentType = new Map<string, Promise<DefaultResourceLoader>>();
+	/**
+	 * `parallel()` children of one agent type share a request prefix; the first
+	 * starts streaming before the rest go, so the fan-out writes the prefix once
+	 * and reads it N-1 times (lib/prefix-warm-gate.ts).
+	 */
+	private readonly warmGate = new PrefixWarmGate();
 
 	private constructor(
 		options: AgentRunnerOptions,
@@ -239,6 +247,12 @@ export class AgentRunner {
 					}
 				})
 			: undefined;
+		// Same prompt identity + cwd + model = same request prefix (see warmGate).
+		const model = session.model;
+		const releasePrefix = await this.warmGate.admitOnFirstToken(
+			`${agentDef ? `agent:${agentDef.name}` : "base"}|${cwd}|${model ? modelSpecOf(model) : ""}`,
+			session,
+		);
 		try {
 			await session.prompt(this.buildPrompt(prompt, Boolean(opts.schema)));
 			if (signal.aborted) throw new WorkflowScriptError("aborted");
@@ -270,6 +284,7 @@ export class AgentRunner {
 				worktreePath,
 			};
 		} finally {
+			releasePrefix(false);
 			unsubscribe?.();
 			signal.removeEventListener("abort", onAbort);
 			session.dispose();

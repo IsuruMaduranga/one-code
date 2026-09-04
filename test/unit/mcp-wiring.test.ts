@@ -184,6 +184,31 @@ describe("mcp wiring", () => {
 		expect(removed).toBeDefined();
 	});
 
+	it("after the first request, a dropped connection leaves message 1 alone and notifies as a one-shot", async () => {
+		writeUserServers({ demo: { command: "demo-server" } });
+		state.fixtures.set("demo", { tools: [{ name: "foo" }], instructions: "Use foo wisely." });
+		const reminders: unknown[] = [];
+		fake.events.on(REMINDER_CHANNEL, (data) => reminders.push(data));
+		await boot();
+
+		// The first request goes out: message 1 (with the instructions block) is now cached.
+		await fake.fire("context", { messages: [] });
+		reminders.length = 0;
+		const connectMock = mcpClient.connect as unknown as ReturnType<typeof vi.fn>;
+		const liveConnection = await connectMock.mock.results.at(-1)!.value;
+		liveConnection.client.onclose();
+
+		// No keyed first-prepend change of any kind …
+		expect(reminders.some((r) => (r as { key?: string }).key === "mcp-instructions")).toBe(false);
+		expect(reminders.some((r) => (r as { key?: string }).key === "mcp-failures")).toBe(false);
+		// … just an unkeyed one-shot the model reads where it is.
+		const notice = reminders.find((r) => (r as { key?: string }).key === undefined) as { text: string; scope?: string } | undefined;
+		expect(notice).toBeDefined();
+		expect(notice!.text).toContain("demo");
+		expect(notice!.text).toContain("connection closed by the server");
+		expect(notice!.scope).toBeUndefined();
+	});
+
 	it("registers resource tools once a connected server exposes resources, and they read through the connection", async () => {
 		writeUserServers({ demo: { command: "demo-server" } });
 		state.fixtures.set("demo", {

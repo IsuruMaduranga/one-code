@@ -28,6 +28,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import {
 	DEFER_CHANNEL,
+	deferredAddendumText,
 	deferredMissReminderText,
 	DeferredRegistry,
 	deferredReminderText,
@@ -35,11 +36,15 @@ import {
 	resultText,
 	searchTools,
 	selectedNames,
+	supportsToolReferences,
 	toolNotFoundName,
+	withDeferredToolDefinitions,
 } from "../lib/deferred.ts";
+import { looksLikeAnthropicRequest } from "../lib/anthropic-payload.ts";
 import { MCP_TOOLS_CHANNEL, type McpToolsPayload } from "../lib/mcp-share.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
+import { applyAnnouncement, planAnnouncement } from "./announce.ts";
 
 /** Coalesces the burst of per-tool defers one server emits into one listing update. */
 const ANNOUNCE_DEBOUNCE_MS = 100;
@@ -48,16 +53,20 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	// Owned here (see lib/deferred.ts): the only instance, fed over DEFER_CHANNEL.
 	const deferredRegistry = new DeferredRegistry();
 	let sessionStarted = false;
-	// The deferred-tools listing is a first-prepend reminder on message 1: every
-	// change to it invalidates the cached prefix from message 1 down. MCP servers
-	// connect in the background and defer their tools one at a time, so once a
-	// request has gone out the listing is held until the connect settles and then
-	// updated once (review M7). Before the first request there is nothing cached,
-	// and after settle a late defer (a /mcp reconnect) is the user's own action.
+	// The deferred-tools listing is a first-prepend reminder on message 1, part of
+	// the cached prefix of every later request. Before the first request nothing
+	// is cached, so the listing is (re)written freely; after it the listing is
+	// FROZEN and later arrivals ride a one-shot addendum where the model reads
+	// next (./announce.ts — a rewrite re-cached 16.7k tokens of history on
+	// request 2 of every run whose MCP tools registered inside the debounce,
+	// measured 2026-09-04). While the initial MCP connect is still settling the
+	// addendum waits for settle, so one burst of per-tool defers is one notice.
 	let requestSent = false;
 	let mcpSettled = false;
 	let announcePending = false;
 	let announceTimer: NodeJS.Timeout | undefined;
+	/** Names the model has been told about: the frozen listing plus every addendum. */
+	const announced = new Set<string>();
 
 	const searchableTools = () =>
 		pi
@@ -69,27 +78,36 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 				keywords: deferredRegistry.keywordsFor(tool.name),
 			}));
 
-	const announceDeferred = () => {
+	const announce = () => {
 		const available = searchableTools();
-		if (available.length === 0) return;
-		pi.events.emit(REMINDER_CHANNEL, {
-			scope: "every-turn",
-			key: "deferred-tools",
-			text: deferredReminderText(available),
-			placement: "first-prepend",
-			order: CONTEXT_ORDER.deferredTools,
-		});
+		const plan = planAnnouncement({ requestSent, announced, available: available.map((t) => t.name) });
+		if (plan.kind === "rewrite") {
+			pi.events.emit(REMINDER_CHANNEL, {
+				scope: "every-turn",
+				key: "deferred-tools",
+				text: deferredReminderText(available),
+				placement: "first-prepend",
+				order: CONTEXT_ORDER.deferredTools,
+			});
+		} else if (plan.kind === "addendum") {
+			// Unkeyed on purpose: a keyed next-turn reminder replaces its
+			// predecessor, and an addendum replaced before delivery would lose names.
+			pi.events.emit(REMINDER_CHANNEL, { text: deferredAddendumText(plan.added) });
+		}
+		applyAnnouncement(announced, plan);
 	};
 
 	const scheduleAnnounce = () => {
-		if (requestSent && !mcpSettled) {
-			announcePending = true;
-			return;
-		}
 		if (announceTimer) clearTimeout(announceTimer);
 		announceTimer = setTimeout(() => {
 			announceTimer = undefined;
-			announceDeferred();
+			// Decided at fire time, not schedule time: a request may have gone out
+			// during the debounce (the -p race).
+			if (requestSent && !mcpSettled) {
+				announcePending = true;
+				return;
+			}
+			announce();
 		}, ANNOUNCE_DEBOUNCE_MS);
 		announceTimer.unref?.();
 	};
@@ -99,12 +117,27 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		mcpSettled = true;
 		if (announcePending) {
 			announcePending = false;
-			announceDeferred();
+			announce();
 		}
 	});
 
 	pi.on("context", () => {
 		requestSent = true;
+	});
+
+	// On models that take client-side tool references (first-party Claude >= 4.5,
+	// not Haiku) every deferred tool rides every Anthropic request as a
+	// `defer_loading: true` definition from request 1, so `tools` never changes
+	// when tool_search loads one. Anthropic keeps deferred definitions out of the
+	// cached prefix, but adding one mid-session still re-cached the whole message
+	// history (lib/deferred.ts withDeferredToolDefinitions has the measurement);
+	// unloaded deferred definitions cost no input tokens, so this is free.
+	pi.on("before_provider_request", (event, ctx) => {
+		if (!supportsToolReferences(ctx.model as { provider?: string; id?: string } | undefined)) return undefined;
+		if (!looksLikeAnthropicRequest(event.payload)) return undefined;
+		return withDeferredToolDefinitions(event.payload as Record<string, unknown>, pi.getAllTools(), (name) =>
+			deferredRegistry.has(name),
+		);
 	});
 
 	/** Deactivate every deferred-registry tool and announce the loadable set. */
@@ -114,7 +147,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		const active = pi.getActiveTools();
 		const next = active.filter((name) => !deferred.has(name));
 		if (next.length !== active.length) pi.setActiveTools(next);
-		announceDeferred();
+		announce();
 	};
 
 	pi.events.on(DEFER_CHANNEL, (data) => {
@@ -137,6 +170,10 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 
 	pi.on("session_start", () => {
 		sessionStarted = true;
+		// A new session (/clear, or a resume in a new process) has no cached prefix
+		// yet: its first request gets a freshly written listing.
+		requestSent = false;
+		announced.clear();
 		deferAll();
 	});
 

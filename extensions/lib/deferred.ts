@@ -10,6 +10,8 @@
  * `{ name, keywords? }` while extensions are loading (before session_start).
  */
 
+import { parseClaudeVersion } from "./model-tier.ts";
+
 export const DEFER_CHANNEL = "one-code:defer-tool";
 
 export interface DeferRequest {
@@ -66,6 +68,88 @@ export function deferredReminderText(tools: Array<Pick<SearchableTool, "name"> &
 		'The following deferred tools are available via tool_search. Their schemas are NOT loaded — calling one directly fails with "Tool <name> not found" until you load it. Use tool_search with query "select:<name>[,<name>...]" to load tool schemas before calling them (once loaded, a tool stays callable for the rest of the session):',
 		...tools.map((t) => t.name),
 	].join("\n");
+}
+
+/**
+ * The one-shot that announces deferred tools which registered AFTER the first
+ * request went out (a slow MCP connect, a reconnect, a plugin install). The
+ * standing listing on message 1 is frozen once cached (tool-search/announce.ts);
+ * this rides the tail instead, so the cached prefix holds.
+ */
+export function deferredAddendumText(added: readonly string[]): string {
+	return [
+		"Additional deferred tools became available via tool_search after the listing at the start of this conversation. Same rules: load with tool_search \"select:<name>\" before calling.",
+		...added,
+	].join("\n");
+}
+
+/**
+ * Whether Anthropic accepts client-side `tool_reference` blocks for this model —
+ * pi-ai's `defaultSupportsToolReferences` rule, with the model's own compat flag
+ * winning: first-party Anthropic, not Haiku, Claude 4.5 or newer.
+ */
+export function supportsToolReferences(
+	model: { provider?: string; id?: string; compat?: { supportsToolReferences?: boolean } } | undefined,
+): boolean {
+	if (!model) return false;
+	if (typeof model.compat?.supportsToolReferences === "boolean") return model.compat.supportsToolReferences;
+	if (model.provider !== "anthropic" || !model.id || model.id.includes("haiku")) return false;
+	const version = parseClaudeVersion(model.id);
+	return version !== undefined && (version.major > 4 || (version.major === 4 && version.minor >= 5));
+}
+
+/** The slice of pi's ToolInfo the deferred definitions need. */
+export interface DeferrableToolInfo {
+	name: string;
+	description?: string;
+	parameters?: { properties?: unknown; required?: unknown };
+}
+
+/**
+ * An Anthropic request with every deferred tool that pi left out appended as a
+ * `defer_loading: true` definition, sorted by name (pi's own entries stay first
+ * and untouched). Anthropic keeps deferred definitions out of the cached prefix,
+ * but ADDING one to `tools` mid-session still re-caches the message history —
+ * measured 2026-09-04 on Sonnet 5: the request after a `tool_search` load read
+ * only tools + system (8.7k of 25k tokens); with the full deferred set present
+ * from request 1 it read all 25k. Unloaded deferred definitions cost no input
+ * tokens, so sending them always is free and keeps `tools` byte-stable.
+ *
+ * Returns undefined (leave the payload alone) when there is nothing to add, the
+ * request carries no tools, or the tool names on the wire are not the registry's
+ * (pi's OAuth "stealth" mode renames them to Claude Code casing, and a name that
+ * cannot be matched must not be duplicated). Schemas follow pi's own
+ * `convertTools` shape. Never mutates its input.
+ */
+export function withDeferredToolDefinitions(
+	payload: Record<string, unknown>,
+	tools: readonly DeferrableToolInfo[],
+	isDeferred: (name: string) => boolean,
+): Record<string, unknown> | undefined {
+	const existing = payload.tools;
+	if (!Array.isArray(existing) || existing.length === 0) return undefined;
+	const registry = new Set(tools.map((t) => t.name));
+	const present = new Set<string>();
+	for (const tool of existing) {
+		const name = (tool as { name?: unknown } | null)?.name;
+		if (typeof name !== "string" || !registry.has(name)) return undefined;
+		present.add(name);
+	}
+	const extra = tools
+		.filter((t) => isDeferred(t.name) && !present.has(t.name))
+		.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+		.map((t) => ({
+			name: t.name,
+			description: t.description ?? "",
+			input_schema: {
+				type: "object",
+				properties: t.parameters?.properties ?? {},
+				required: t.parameters?.required ?? [],
+			},
+			defer_loading: true,
+		}));
+	if (extra.length === 0) return undefined;
+	return { ...payload, tools: [...existing, ...extra] };
 }
 
 /**

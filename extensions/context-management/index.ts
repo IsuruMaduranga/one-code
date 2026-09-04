@@ -35,6 +35,8 @@
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { type ExtensionAPI, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { looksLikeAnthropicRequest } from "../lib/anthropic-payload.ts";
+import { CACHE_RETENTION_ENV, mainSessionCacheRetention } from "../lib/cache-retention.ts";
 
 const CLEAR_THINKING_EDIT = { type: "clear_thinking_20251015", keep: "all" };
 const CONTEXT_MANAGEMENT_BETA = "context-management-2025-06-27";
@@ -71,15 +73,9 @@ export function anthropicBetas(oauth: boolean, compat: AnthropicModelCompat | un
 	return betas.join(",");
 }
 
-/** Anthropic Messages API shape: `messages` + `max_tokens`, and not an OpenAI `input`. */
-export function looksLikeAnthropicRequest(payload: unknown): boolean {
-	if (!payload || typeof payload !== "object") return false;
-	const record = payload as Record<string, unknown>;
-	if (!Array.isArray(record.messages)) return false;
-	if ("input" in record) return false;
-	const model = typeof record.model === "string" ? record.model : "";
-	return model.includes("claude") || typeof record.max_tokens === "number";
-}
+// The payload predicate lives in lib (pure, shared with compaction and
+// tool-search); re-exported so existing importers keep working.
+export { looksLikeAnthropicRequest } from "../lib/anthropic-payload.ts";
 
 /** The edit is rejected unless thinking is enabled or the model is adaptive. */
 export function clearThinkingApplies(payload: Record<string, unknown>, forceAdaptiveThinking: boolean): boolean {
@@ -141,6 +137,16 @@ export function clearThinkingEnabled(flag: string | undefined, model: Anthropici
 
 export default function contextManagementExtension(pi: ExtensionAPI) {
 	const flag = () => process.env.CC_CLEAR_THINKING;
+
+	// Prompt-cache TTL for the main session: one hour in the interactive modes,
+	// the way Claude Code caches (a pause between turns no longer re-writes the
+	// context); a `-p`/json run keeps pi's 5-minute default, and so do
+	// in-process children (lib/cache-retention.ts). pi reads the variable per
+	// request, so setting it here, before the first prompt, is early enough.
+	pi.on("session_start", (_event, ctx) => {
+		const value = mainSessionCacheRetention(ctx.mode, process.env[CACHE_RETENTION_ENV]);
+		if (value) process.env[CACHE_RETENTION_ENV] = value;
+	});
 
 	pi.on("before_provider_headers", (event, ctx) => {
 		const model = ctx.model as AnthropicishModel | undefined;

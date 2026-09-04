@@ -46,9 +46,9 @@ import {
 	clearThinkingApplies,
 	clearThinkingEnabled,
 	isAnthropicOAuth,
-	looksLikeAnthropicRequest,
 	withClearThinking,
 } from "../context-management/index.ts";
+import { looksLikeAnthropicRequest } from "../lib/anthropic-payload.ts";
 import { forcedReasoningLevel } from "../lib/model-policy.ts";
 import { buildCompactionInstruction, COMPACTION_MAX_TOKENS, continuationSummary, extractSummary } from "./prompt.ts";
 
