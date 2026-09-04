@@ -55,7 +55,9 @@ export class SessionTurnTracker {
 
 	/** The runner cut this turn short (kill, wall-clock cap, cancelled signal); `reason` is the suffix the report carries. */
 	markAborted(reason = "terminated before the turn finished"): void {
-		this.aborted = reason;
+		// First reason wins: a wall-clock cap followed by a shutdown kill in the same
+		// abort-settling window keeps the more specific explanation.
+		this.aborted ??= reason;
 	}
 
 	/** Feed one subscribed event. Returns true when a turn just settled. */

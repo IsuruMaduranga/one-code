@@ -81,7 +81,19 @@ describe("resolveRunName", () => {
 		const registry = new RunRegistry();
 		expect(resolveRunName(registry, "explore", "scout")).toEqual({ name: "scout" });
 		expect(resolveRunName(registry, "explore", undefined)).toEqual({ name: "explore-1" });
-		expect(resolveRunName(registry, "explore", "  ")).toEqual({ name: "explore-1" });
+		// The blank request also allocates; explore-1 is reserved by the previous pick.
+		expect(resolveRunName(registry, "explore", "  ")).toEqual({ name: "explore-2" });
+	});
+
+	it("reserves the picked name so a parallel same-turn spawn cannot pick it before the record lands", () => {
+		const registry = new RunRegistry();
+		expect(resolveRunName(registry, "explore", undefined).name).toBe("explore-1");
+		expect(resolveRunName(registry, "explore", undefined).name).toBe("explore-2");
+		expect(resolveRunName(registry, "explore", "explore-1").name).toBe("explore-3");
+		// Adding the record releases the reservation (the recorded name still counts).
+		registry.add(record("explore-1", "aaaa1111"));
+		expect(registry.names().sort()).toEqual(["explore-1", "explore-2", "explore-3"]);
+		expect(registry.list().map((r) => r.name)).toEqual(["explore-1"]);
 	});
 
 	it("renames a colliding request and explains which task holds the name (M1)", () => {

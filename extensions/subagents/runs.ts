@@ -50,14 +50,21 @@ export function nextRunName(existing: Iterable<string>, agent: string): string {
  * Shared by the main Agent tool and the nested spawn tool.
  */
 export function resolveRunName(
-	registry: Pick<RunRegistry, "names" | "resolve">,
+	registry: Pick<RunRegistry, "names" | "resolve" | "reserve">,
 	agent: string,
 	requested: string | undefined,
 ): { name: string; note?: string } {
 	const taken = new Set(registry.names());
 	const wanted = requested?.trim();
-	if (wanted && !taken.has(wanted)) return { name: wanted };
+	// Reserved synchronously: pi runs a message's tool calls in parallel, and the
+	// record is only added after async work (worktree creation, model checks), so
+	// two same-turn spawns would otherwise both pick "explore-1".
+	if (wanted && !taken.has(wanted)) {
+		registry.reserve(wanted);
+		return { name: wanted };
+	}
 	const name = nextRunName(taken, agent);
+	registry.reserve(name);
 	if (!wanted) return { name };
 	return {
 		name,
@@ -96,21 +103,31 @@ export function findSessionFile(dir: string): string | undefined {
 export class RunRegistry {
 	private byName = new Map<string, AgentRunRecord>();
 	private byId = new Map<string, AgentRunRecord>();
+	/** Names picked for runs whose record has not been added yet (see resolveRunName). */
+	private reserved = new Set<string>();
 
-	/** Latest wins per name, matching Claude Code's semantics. */
 	/** Drop every record — a new session (/clear) starts with no runs to address. */
 	clear(): void {
 		this.byName.clear();
 		this.byId.clear();
+		this.reserved.clear();
 	}
 
+	/** Hold a name until its record is added (a spawn that fails validation leaves it held — harmless). */
+	reserve(name: string): void {
+		this.reserved.add(name);
+	}
+
+	/** Latest wins per name, matching Claude Code's semantics. */
 	add(record: AgentRunRecord): void {
+		this.reserved.delete(record.name);
 		this.byName.set(record.name, record);
 		this.byId.set(record.taskId, record);
 	}
 
+	/** Every name in use: recorded runs plus names reserved for runs being spawned. */
 	names(): string[] {
-		return [...this.byName.keys()];
+		return [...new Set([...this.byName.keys(), ...this.reserved])];
 	}
 
 	/** Every spawned run, latest-per-name (what list_agents enumerates). */

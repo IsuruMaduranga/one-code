@@ -860,25 +860,22 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	 * work it did not delegate (SUBAGENT-REVIEW L4).
 	 */
 	const relayToParent = (parentTaskId: string, name: string, message: string, summary?: string) => {
+		// Bounded once: the fallback reuses the same body (and persisted file).
+		const body = boundedMessage(name, message);
+		const toMain = () => announceAgentMessage(name, body, summary);
 		const parent = residents.get(parentTaskId);
 		if (!parent || parent.handle.exited()) {
-			notifyAgentMessage(name, message, summary);
+			toMain();
 			return;
 		}
-		const body = bounded(message, `message-${name}-${Date.now()}`, MESSAGE_TO_MAIN_CAP);
-		void parent.handle
-			.send(`Message from your subagent ${name}${summary ? ` (${summary})` : ""}:\n\n${body}`)
-			.catch(() => notifyAgentMessage(name, message, summary));
+		void parent.handle.send(`Message from your subagent ${name}${summary ? ` (${summary})` : ""}:\n\n${body}`).catch(toMain);
 	};
 
+	const boundedMessage = (name: string, message: string) => bounded(message, `message-${name}-${Date.now()}`, MESSAGE_TO_MAIN_CAP);
+	const announceAgentMessage = (name: string, body: string, summary?: string) =>
+		notify("subagent-message", systemNotification(`Message from agent ${name}${summary ? ` (${summary})` : ""}:\n\n${body}`), { name, summary });
 	/** Relay a child's send_message {to: "main"} into this conversation. */
-	const notifyAgentMessage = (name: string, message: string, summary?: string) => {
-		const body = bounded(message, `message-${name}-${Date.now()}`, MESSAGE_TO_MAIN_CAP);
-		notify("subagent-message", systemNotification(`Message from agent ${name}${summary ? ` (${summary})` : ""}:\n\n${body}`), {
-			name,
-			summary,
-		});
-	};
+	const notifyAgentMessage = (name: string, message: string, summary?: string) => announceAgentMessage(name, boundedMessage(name, message), summary);
 
 	/** A fork's system prompt is persisted beside its session so a later resume can restore it (review S6). */
 	const FORK_PROMPT_FILE = "system-prompt.md";
