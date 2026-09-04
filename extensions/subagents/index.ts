@@ -16,7 +16,7 @@
  * children persist their sessions per run to make that possible).
  */
 
-import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import os from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -182,8 +182,14 @@ interface Resident {
 
 export default function subagentsExtension(pi: ExtensionAPI) {
 	const registry = new RunRegistry();
-	/** Names with a blocking child (nested spawn or SendMessage resume) currently running (SendMessage must wait for these). */
-	const runningNames = new Set<string>();
+	/**
+	 * Task ids with a blocking child (nested spawn or SendMessage resume) currently
+	 * running (SendMessage must wait for these). Keyed by task id, like `residents`:
+	 * run NAMES repeat across a session (the model reuses "reviewer"), and a name key
+	 * routed a message addressed to the older task id to the newer agent (M1).
+	 */
+	const runningIds = new Set<string>();
+	/** Task id → live resident. */
 	const residents = new Map<string, Resident>();
 
 	// The live subagent panel (Claude Code's below-editor agent tree): a registry
@@ -322,7 +328,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				// `git rev-parse` because session_start handlers must stay fast
 				// (findings §15); a slightly-off sharedRoot only softens one message —
 				// the worktree containment check itself uses the exact record.cwd.
-				if (record.worktree) {
+				if (record.worktree && existsSync(record.cwd)) {
 					sharedRoot ??= findGitRoot(ctx.cwd) ?? ctx.cwd;
 					registerWorktreeIsolation(record.cwd, sharedRoot);
 				}
@@ -842,6 +848,25 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	const bounded = (text: string, id: string, maxBytes: number): string =>
 		persistIfLarge(text, { dir: sessionResultsDir(lastCtx), id, maxBytes });
 
+	/**
+	 * Route a nested run's SendMessage {to: "main"}: to the CHILD that spawned it
+	 * (steered into the turn that is blocking on the grandchild's result) when
+	 * that child is a live resident, else to the main conversation. Without this
+	 * the spawning child never saw the message and the main model was told about
+	 * work it did not delegate (SUBAGENT-REVIEW L4).
+	 */
+	const relayToParent = (parentTaskId: string, name: string, message: string, summary?: string) => {
+		const parent = residents.get(parentTaskId);
+		if (!parent || parent.handle.exited()) {
+			notifyAgentMessage(name, message, summary);
+			return;
+		}
+		const body = bounded(message, `message-${name}-${Date.now()}`, MESSAGE_TO_MAIN_CAP);
+		void parent.handle
+			.send(`Message from your subagent ${name}${summary ? ` (${summary})` : ""}:\n\n${body}`)
+			.catch(() => notifyAgentMessage(name, message, summary));
+	};
+
 	/** Relay a child's send_message {to: "main"} into this conversation. */
 	const notifyAgentMessage = (name: string, message: string, summary?: string) => {
 		const body = bounded(message, `message-${name}-${Date.now()}`, MESSAGE_TO_MAIN_CAP);
@@ -1099,10 +1124,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			}
 		}
 
-		runningNames.add(request.name);
+		runningIds.add(record.taskId);
 		const live = trackLiveRun(record, request, parent);
 		const runtime = await getRuntime(ctx);
 		const handle = runtime.run({
+			name: request.name,
 			agent: agentDef,
 			task: frameTask(request, worktree, ctx.cwd),
 			cwd: record.cwd,
@@ -1118,7 +1144,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				onProgress?.(toolCalls, text, usage);
 			},
 			sink: live.sink,
-			onMessageToMain: (message, summary) => notifyAgentMessage(request.name, message, summary),
+			onMessageToMain: (message, summary) =>
+				parent ? relayToParent(parent.taskId, request.name, message, summary) : notifyAgentMessage(request.name, message, summary),
 			extraTools: spawnToolsFor(record),
 		});
 		liveHandles.set(record.taskId, handle);
@@ -1154,7 +1181,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				failed: true,
 			};
 		} finally {
-			runningNames.delete(request.name);
+			runningIds.delete(record.taskId);
 		}
 	};
 
@@ -1224,8 +1251,16 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			}
 
 			const taken = new Set(registry.names());
+			/** A requested name already used this session → the run gets a fresh one, and the result says so. */
+			const renamed: string[] = [];
 			const requested: RunRequest[] = [{ agent: params.subagent_type, task: params.task ?? "", name: params.name }].map((entry) => {
-				const name = entry.name || nextRunName(taken, entry.agent);
+				// Same rule as the nested spawn tool: a name is an identifier for the whole
+				// session, so a reused one is replaced rather than shadowing the older run
+				// (which would vanish from list_agents while still running — M1).
+				const name = entry.name && !taken.has(entry.name) ? entry.name : nextRunName(taken, entry.agent);
+				if (entry.name && name !== entry.name) {
+					renamed.push(`Note: the name "${entry.name}" is already used by task ${registry.resolve(entry.name)?.taskId ?? "?"} in this session; this run is named "${name}".`);
+				}
 				taken.add(name);
 				return {
 					agent: entry.agent,
@@ -1439,7 +1474,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			// returns as soon as the child is launched, the report arrives as a
 			// steered system notification, and the child stays resident so
 			// SendMessage can reach it live (steer mid-turn, prompt when idle).
-			const lines: string[] = [];
+			const lines: string[] = [...renamed];
 			const runtime = await getRuntime(ctx);
 			for (const p of prepared) {
 				let worktree: Worktree | undefined;
@@ -1522,6 +1557,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				// No `signal` here on purpose: a resident outlives the spawning turn and
 				// is stopped through task_stop / the panel, not by the turn ending (S15).
 				const handle = await runtime.runResident({
+					name: p.record.name,
 					agent: p.agentDef,
 					cwd: p.record.cwd,
 					forkFrom: p.request.fork ? (sessionFile ?? undefined) : undefined,
@@ -1574,13 +1610,13 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					onExit: () => {
 						if (reaper) clearTimeout(reaper);
 						live.finish(false);
-						if (residents.get(p.record.name) === resident) residents.delete(p.record.name);
+						if (residents.get(p.record.taskId) === resident) residents.delete(p.record.taskId);
 						liveHandles.delete(p.record.taskId);
 						if (worktree) void cleanupWorktree(parentCwd, worktree);
 					},
 				});
 				resident.handle = handle;
-				residents.set(p.record.name, resident);
+				residents.set(p.record.taskId, resident);
 				liveHandles.set(p.record.taskId, handle);
 
 				const task: BackgroundTask = {
@@ -1597,7 +1633,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					finished,
 				};
 				pi.events.emit(TASK_REGISTER_CHANNEL, task);
-				handle.send(frameTask(p.request, worktree, parentCwd));
+				void handle.send(frameTask(p.request, worktree, parentCwd));
 
 				lines.push(
 					`⏳ ${p.record.name} (task ${p.record.taskId}) running in background${logPath ? ` — interim output readable at ${logPath}` : ""}`,
@@ -1653,19 +1689,41 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					isError: true,
 				};
 			}
-			// Resident background agent: reach it live over its RPC channel.
-			const resident = residents.get(record.name);
+			// Resident background agent: reach its in-process session live.
+			const resident = residents.get(record.taskId);
 			if (resident && !resident.handle.exited()) {
 				if (resident.handle.busy()) {
-					resident.handle.send(params.message);
+					let delivery: "started" | "steered";
+					try {
+						delivery = await resident.handle.send(params.message);
+					} catch (error) {
+						return {
+							content: [{ type: "text", text: `Could not deliver the message to ${record.name}: ${(error as Error).message}` }],
+							details: {},
+							isError: true,
+						};
+					}
+					if (delivery === "steered") {
+						return {
+							content: [
+								{
+									type: "text",
+									text: `Message steered into ${record.name}'s running turn — it will be taken into account before the turn completes, and the turn's completion notification will reflect it.`,
+								},
+							],
+							details: { agentRuns: [record], steered: true },
+						};
+					}
+					// The turn had just ended (settle window): the message rides the next
+					// turn, whose reply nobody has claimed yet — announce it as an update.
 					return {
 						content: [
 							{
 								type: "text",
-								text: `Message steered into ${record.name}'s running turn — it will be taken into account before the turn completes, and the turn's completion notification will reflect it.`,
+								text: `${record.name}'s turn had just finished; the message starts its next turn. The reply will arrive as a system notification ("Update from ${record.name}").`,
 							},
 						],
-						details: { agentRuns: [record], steered: true },
+						details: { agentRuns: [record] },
 					};
 				}
 
@@ -1704,7 +1762,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					);
 				});
 				pi.events.emit(TASK_REGISTER_CHANNEL, task);
-				resident.handle.send(params.message);
+				void resident.handle.send(params.message);
 				return {
 					content: [
 						{
@@ -1716,7 +1774,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				};
 			}
 
-			if (runningNames.has(record.name)) {
+			if (runningIds.has(record.taskId)) {
 				return {
 					content: [
 						{ type: "text", text: `Agent ${record.name} is still running — wait for its completion notification, then resend.` },
@@ -1752,13 +1810,24 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				};
 			}
 
+			// A worktree run whose agent left no changes had its worktree removed at
+			// exit, but the record (persisted in the tool result) still points there.
+			// Resume in the parent cwd instead of a deleted directory, say so in the
+			// reply, and fix the record so later messages don't repeat the note (M2).
+			let relocationNote = "";
+			if (!existsSync(record.cwd)) {
+				relocationNote = `[${record.name}'s working directory ${record.cwd} no longer exists${record.worktree ? " (its isolation worktree was removed when the run left no changes)" : ""}; this turn ran in ${ctx.cwd}.]\n\n`;
+				record.cwd = ctx.cwd;
+				record.worktree = undefined;
+			}
+
 			const taskId = generateTaskId();
 			let finish!: () => void;
 			const finished = new Promise<void>((resolve) => {
 				finish = resolve;
 			});
 
-			runningNames.add(record.name);
+			runningIds.add(record.taskId);
 			// Re-enter the panel: the finished run's entry flips back to running (or
 			// registers fresh after a session resume) and streams this turn live.
 			const live = trackLiveRun(record, {
@@ -1770,6 +1839,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			});
 			const runtime = await getRuntime(ctx);
 			const handle = runtime.run({
+				name: record.name,
 				agent: loadAgents(ctx.cwd).find((a) => a.name === record.agent),
 				task: params.message,
 				cwd: record.cwd,
@@ -1804,7 +1874,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			pi.events.emit(TASK_REGISTER_CHANNEL, task);
 
 			void handle.result.then((outcome) => {
-				runningNames.delete(record.name);
+				runningIds.delete(record.taskId);
 				live.finish(Boolean(outcome.failed));
 				task.status = outcome.failed ? "failed" : "completed";
 				task.finishedAt = Date.now();
@@ -1812,7 +1882,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				const stats = formatStats(outcome.toolCalls, outcome.usage);
 				notify(
 					"subagent-result",
-					systemNotification(`Reply from ${record.name} (${stats}):\n\n${bounded(outcome.output, `${taskId}-reply`, OUTPUT_CAP)}`),
+					systemNotification(`Reply from ${record.name} (${stats}):\n\n${relocationNote}${bounded(outcome.output, `${taskId}-reply`, OUTPUT_CAP)}`),
 					{ taskId, name: record.name, failed: outcome.failed ?? false },
 				);
 			});
@@ -1833,10 +1903,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	// Same precedence as SendMessage's own dispatch (a live resident is reachable
 	// even while a blocking run of the same name is in flight): resident-live
 	// first, then running, then a finished run resumable from its session.
-	const agentStatus = (name: string) => {
-		const resident = residents.get(name);
+	const agentStatus = (record: AgentRunRecord) => {
+		const resident = residents.get(record.taskId);
 		if (resident && !resident.handle.exited()) return "resident (reachable live)";
-		if (runningNames.has(name)) return "running";
+		if (runningIds.has(record.taskId)) return "running";
 		return "finished (resume with SendMessage)";
 	};
 
@@ -1855,7 +1925,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					details: { agents: [] as unknown[] },
 				};
 			}
-			const agents = runs.map((r) => ({ name: r.name, agent: r.agent, taskId: r.taskId, status: agentStatus(r.name) }));
+			const agents = runs.map((r) => ({ name: r.name, agent: r.agent, taskId: r.taskId, status: agentStatus(r) }));
 			const lines = agents.map((a) => `- ${a.name} [${a.agent}] — ${a.status} (task ${a.taskId})`);
 			return {
 				content: [{ type: "text", text: `Agents spawned this session:\n${lines.join("\n")}` }],

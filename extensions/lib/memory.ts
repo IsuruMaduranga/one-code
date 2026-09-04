@@ -18,7 +18,7 @@
 
 import os from "node:os";
 import { join } from "node:path";
-import { findGitRoot } from "./git.ts";
+import { findProjectRoot } from "./git.ts";
 import { claudeUserDir } from "./paths.ts";
 
 /** Claude Code's project-directory slug: every char outside [A-Za-z0-9-] becomes "-". */
@@ -37,11 +37,13 @@ export function memoryDir(home: string, projectRoot: string): string {
 
 /**
  * `memoryDir` composed with the actual project-root resolution every caller
- * needs: the git repository root when there is one (shared by worktrees and
- * subdirectories), else `cwd` itself. `home` defaults to `os.homedir()`.
+ * needs: the git repository root when there is one — a linked worktree
+ * (including a subagent's isolation worktree) resolves to its main checkout, so
+ * worktrees and subdirectories share one directory — else `cwd` itself. `home`
+ * defaults to `os.homedir()`.
  */
 export function projectMemoryDir(cwd: string, home: string = os.homedir()): string {
-	return memoryDir(home, findGitRoot(cwd) ?? cwd);
+	return memoryDir(home, findProjectRoot(cwd) ?? cwd);
 }
 
 /**

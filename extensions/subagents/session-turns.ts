@@ -32,6 +32,14 @@ export class SessionTurnTracker {
 	turnText = "";
 	/** Set when the turn's last assistant message ended with a provider error; cleared by a later success. */
 	providerError: string | undefined;
+	/**
+	 * Set when the turn was cut short: by pi (the aborted assistant message
+	 * carries `stopReason: "aborted"`), or by the runner via `markAborted` (an
+	 * abort that lands during a tool call leaves no such message — the tool
+	 * results just say "Operation aborted" and the loop ends). Either way the
+	 * partial text must not be reported as a completion (SUBAGENT-REVIEW M3).
+	 */
+	aborted: string | undefined;
 	/** Every turn's final text joined, for task_output on a resident agent. */
 	transcript = "";
 
@@ -39,8 +47,14 @@ export class SessionTurnTracker {
 	beginTurn(): void {
 		this.turnText = "";
 		this.providerError = undefined;
+		this.aborted = undefined;
 		// Per turn, not per session: the review that reads this judges the turn just finished.
 		this.actions = [];
+	}
+
+	/** The runner cut this turn short (kill, wall-clock cap, cancelled signal); `reason` is the suffix the report carries. */
+	markAborted(reason = "terminated before the turn finished"): void {
+		this.aborted = reason;
 	}
 
 	/** Feed one subscribed event. Returns true when a turn just settled. */
@@ -56,6 +70,7 @@ export class SessionTurnTracker {
 				addUsage(this.usage, event.message.usage);
 				this.providerError =
 					event.message.stopReason === "error" ? event.message.errorMessage || "unknown provider error" : undefined;
+				if (event.message.stopReason === "aborted") this.aborted ??= "terminated before the turn finished";
 				const blocks = Array.isArray(event.message.content) ? event.message.content : [];
 				const text = blocks
 					.filter((b): b is { type: string; text: string } => (b as { type?: string }).type === "text")
@@ -77,19 +92,33 @@ export class SessionTurnTracker {
 
 	/** The outcome of the turn that just settled. */
 	turnOutcome(): ChildOutcome {
-		return finishOutcome(this.turnText, this.providerError, this.toolCalls, this.usage, this.actions);
+		return finishOutcome(this.turnText, this.providerError, this.toolCalls, this.usage, this.actions, this.aborted);
 	}
 }
 
-/** Shape a run/turn's collected state into a ChildOutcome, matching the spawned child's messages. */
+/**
+ * Shape a run/turn's collected state into a ChildOutcome, matching the spawned
+ * child's messages. `aborted` (a reason) wins over everything: an aborted turn's
+ * partial text is reported as terminated and failed, never as the answer.
+ */
 export function finishOutcome(
 	rawOutput: string,
 	providerError: string | undefined,
 	toolCalls: number,
 	usage: UsageTotals,
 	actions: ChildAction[],
+	aborted?: string,
 ): ChildOutcome {
 	const output = rawOutput.slice(0, OUTPUT_CAP);
+	if (aborted) {
+		return {
+			output: output.trim() ? `${output}\n\n[${aborted}]` : `Subagent ${aborted}.`,
+			toolCalls,
+			usage,
+			actions,
+			failed: true,
+		};
+	}
 	if (providerError) {
 		return {
 			output: output.trim()

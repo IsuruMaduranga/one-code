@@ -65,10 +65,13 @@ export interface ChildHandle {
 /** A resident (background) agent handle: message it live, inspect it, stop it. */
 export interface RpcChildHandle {
 	/**
-	 * Deliver a message. "started" = the agent was idle and this began a new turn;
-	 * "steered" = the agent was mid-turn and the message joined it.
+	 * Deliver a message. "started" = the agent was idle and this began a new turn
+	 * (resolves as soon as the turn is dispatched, not when it ends); "steered" =
+	 * the agent was mid-turn and the message joined it. Rejects when the message
+	 * could not be queued at all (pi refuses to steer an extension command), so
+	 * the caller never reports a delivery that did not happen.
 	 */
-	send(message: string): "started" | "steered";
+	send(message: string): Promise<"started" | "steered">;
 	busy(): boolean;
 	exited(): boolean;
 	/**

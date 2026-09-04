@@ -72,7 +72,7 @@ import { isWritingTool } from "./protected-paths.ts";
 import { loadPermissionSettings, normalizePermissionMode, persistAllowRule } from "./settings.ts";
 import { MODE_ENV } from "../lib/permission-gate.ts";
 import { describeProjectAllow, persistProjectAllowApproval, projectAllowApproved } from "./project-trust.ts";
-import { findGitRoot } from "../lib/git.ts";
+import { findProjectRoot } from "../lib/git.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
 
@@ -515,7 +515,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		allow = parsed.allow.rules;
 		projectAllow = parsed.projectAllow.rules;
 		projectAllowRaw = settings.projectAllow;
-		projectRoot = findGitRoot(ctx.cwd) ?? ctx.cwd;
+		// A linked worktree shares its main checkout's consent (findProjectRoot).
+		projectRoot = findProjectRoot(ctx.cwd) ?? ctx.cwd;
 		projectAllowTrusted = projectAllowApproved(projectRoot, projectAllowRaw);
 		projectAllowDeclined = false;
 		// A rule that fails to parse is a rule the user believes is in force and is
@@ -880,7 +881,10 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			mode,
 			deny,
 			ask,
-			allow: [...allow, ...sessionAllows],
+			// Same rule set the main handler applies once the user has consented to
+			// the repo's own allow list — a child must not prompt (or, headless, be
+			// denied) for a call the parent would allow (SUBAGENT-REVIEW L5).
+			allow: [...allow, ...sessionAllows, ...(projectAllowTrusted ? projectAllow : [])],
 			classifyAllShell: autoConfig?.classifyAllShell,
 			resolvedSubject,
 			planFilePath,
@@ -940,12 +944,22 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// Reaching here from the classify branch only happens while auto mode is
 		// paused — this is the resume prompt, not a per-action approval.
 		const pausedResume = mode === "auto" && result.decision === "classify";
+		// Name the asking agent: two children prompting back-to-back are otherwise
+		// indistinguishable on screen.
+		const who = call.agent ? `subagent ${call.agent}'s` : "a subagent's";
 		const title = pausedResume
-			? `Auto mode is paused after repeated blocks — approve to resume.\n\n  subagent's ${toolName}: ${preview || "(no arguments)"}`
+			? `Auto mode is paused after repeated blocks — approve to resume.\n\n  ${who} ${toolName}: ${preview || "(no arguments)"}`
 			: result.cause === "protected-path"
-				? `Allow a subagent's ${toolName} to write a protected path?\n\n  ${preview}\n\n  This path configures your tooling or this agent, so allow rules do not pre-approve it.`
-				: `Allow a subagent's ${toolName}?\n\n  ${preview || "(no arguments)"}`;
-		const choice = await serializePrompt(() => ctx.ui.select(title, [YES, YES_SESSION, NO]));
+				? `Allow ${who} ${toolName} to write a protected path?\n\n  ${preview}\n\n  This path configures your tooling or this agent, so allow rules do not pre-approve it.`
+				: `Allow ${who} ${toolName}?\n\n  ${preview || "(no arguments)"}`;
+		// The child's turn signal dismisses the dialog (as a denial) when the child
+		// is stopped mid-prompt; a prompt whose child is already gone by the time
+		// its turn in the chain comes is skipped outright. Otherwise a dead agent's
+		// dialog stays on screen and every later prompt waits behind it (M5).
+		const childPrompt = <T>(show: () => Promise<T>): Promise<T | undefined> =>
+			serializePrompt(() => (call.signal?.aborted ? Promise.resolve(undefined) : show()));
+		const choice = await childPrompt(() => ctx.ui.select(title, [YES, YES_SESSION, NO], { signal: call.signal }));
+		if (call.signal?.aborted) return { block: true, reason: "The agent was stopped while waiting for the user's approval." };
 
 		if (pausedResume) {
 			logDecision(ctx, {
@@ -968,7 +982,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			if (rule) sessionAllows.push(rule);
 			return undefined;
 		}
-		const feedback = await serializePrompt(() => ctx.ui.input("What should the agent do instead?", "Optional — press Esc to skip"));
+		const feedback = await childPrompt(() => ctx.ui.input("What should the agent do instead?", "Optional — press Esc to skip", { signal: call.signal }));
 		return {
 			block: true,
 			reason: feedback?.trim() ? `${DENIED_BY_USER}\n\nThe user said: ${feedback.trim()}` : DENIED_BY_USER,

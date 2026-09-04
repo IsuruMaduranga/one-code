@@ -86,6 +86,8 @@ type Loader = Awaited<ReturnType<typeof buildAgentLoader>>;
 /** The fields buildChildSession needs — the common subset of a blocking and a resident run. */
 interface ChildSessionSpec {
 	cwd: string;
+	/** The run's name, shown in the permission prompts its tool calls bubble to the user. */
+	name?: string;
 	agent?: AgentDefinition;
 	/** Parent session file — present for a fork run (inherit the parent transcript). */
 	forkFrom?: string;
@@ -134,7 +136,6 @@ function withNote(outcome: ChildOutcome, note: string | undefined): ChildOutcome
 
 export class SubagentRuntime {
 	private readonly modelRuntime: Awaited<ReturnType<typeof createSharedModelRuntime>>;
-	private readonly availableModels: Model<Api>[];
 	private readonly baseCwd: string;
 	/**
 	 * Live MCP tools shared in from the parent session (empty when no MCP
@@ -143,8 +144,16 @@ export class SubagentRuntime {
 	 * still-connecting (possibly empty) one.
 	 */
 	private readonly getMcpTools: () => ToolDefinition[] | Promise<ToolDefinition[]>;
-	/** The parent's permission decision closure (undefined until permissions publishes it). */
+	/**
+	 * The parent's permission decision closure (undefined until permissions
+	 * publishes it), wrapped so every call carries the asking run's name: the
+	 * gate inside a child only knows its session id (child loaders are cached
+	 * across runs, so the name cannot be baked in), and the parent's prompt
+	 * title needs the name once two children ask back-to-back.
+	 */
 	private readonly getPermissionBridge: () => PermissionBridge | undefined;
+	/** Child session id → run name, for the bridge wrapper above. */
+	private readonly runNames = new Map<string, string>();
 	/**
 	 * Loader cache keyed by system-prompt identity ("base", `agent:<name>`,
 	 * `fork:<prompt>`). Building one re-runs every curated extension factory plus
@@ -162,16 +171,18 @@ export class SubagentRuntime {
 
 	private constructor(
 		modelRuntime: SubagentRuntime["modelRuntime"],
-		availableModels: Model<Api>[],
 		baseCwd: string,
 		getMcpTools: () => ToolDefinition[] | Promise<ToolDefinition[]>,
 		getPermissionBridge: () => PermissionBridge | undefined,
 	) {
 		this.modelRuntime = modelRuntime;
-		this.availableModels = availableModels;
 		this.baseCwd = baseCwd;
 		this.getMcpTools = getMcpTools;
-		this.getPermissionBridge = getPermissionBridge;
+		this.getPermissionBridge = () => {
+			const bridge = getPermissionBridge();
+			if (!bridge) return undefined;
+			return (call) => bridge({ ...call, agent: call.agent ?? (call.sessionId ? this.runNames.get(call.sessionId) : undefined) });
+		};
 	}
 
 	static async create(
@@ -180,8 +191,26 @@ export class SubagentRuntime {
 		getPermissionBridge: () => PermissionBridge | undefined = () => undefined,
 	): Promise<SubagentRuntime> {
 		const modelRuntime = await createSharedModelRuntime(getAgentDir());
-		const availableModels = [...(await modelRuntime.getAvailable())];
-		return new SubagentRuntime(modelRuntime, availableModels, cwd, getMcpTools, getPermissionBridge);
+		// Prime the catalog once; spawns read the live snapshot (see resolveModel).
+		await modelRuntime.getAvailable();
+		return new SubagentRuntime(modelRuntime, cwd, getMcpTools, getPermissionBridge);
+	}
+
+	/**
+	 * Resolve a `provider/id` spec against the child runtime's CURRENT catalog.
+	 * The parent resolved the spec against its own live registry; this runtime
+	 * has a second one, and they drift (a /login mid-session, a models.json edit,
+	 * a provider that appeared later). Passing an unresolved model to
+	 * createAgentSession would make pi fall back to the user's SAVED DEFAULT
+	 * silently — so an unknown spec throws in the shape the fallback path
+	 * recognises (`isModelUnavailableError`), which reports the swap instead of
+	 * hiding it (SUBAGENT-REVIEW M6).
+	 */
+	private async resolveModel(spec: string): Promise<Model<Api>> {
+		let found = findConfigured([...this.modelRuntime.getAvailableSnapshot()], spec);
+		if (!found) found = findConfigured([...(await this.modelRuntime.getAvailable())], spec);
+		if (!found) throw new Error(`model ${spec} not found in the subagent runtime's catalog`);
+		return found;
 	}
 
 	private buildChildLoader(systemPrompt?: string): Promise<Loader> {
@@ -300,8 +329,10 @@ export class SubagentRuntime {
 	private async buildChildSession(spec: ChildSessionSpec): Promise<{ session: Session; note?: string }> {
 		const [loader, mcpTools] = await Promise.all([this.loaderFor(spec), this.getMcpTools()]);
 		const newSessionManager = () =>
+			// The resume cwd is passed explicitly: a worktree run's persisted cwd may
+			// be gone by the time it is messaged (index.ts substitutes the parent cwd).
 			spec.sessionFile
-				? SessionManager.open(spec.sessionFile)
+				? SessionManager.open(spec.sessionFile, undefined, spec.cwd)
 				: spec.forkFrom
 					? SessionManager.forkFrom(spec.forkFrom, spec.cwd, spec.sessionDir)
 					: spec.sessionDir
@@ -310,11 +341,12 @@ export class SubagentRuntime {
 		// A fork keeps the parent's toolset; only a named agent carries an allowlist.
 		const allowlist = spec.forkFrom ? undefined : spec.agent?.tools;
 		const make = async (model: string | undefined): Promise<Session> => {
+			const resolvedModel = model ? await this.resolveModel(model) : undefined;
 			const { session } = await createAgentSession({
 				cwd: spec.cwd,
 				agentDir: getAgentDir(),
 				modelRuntime: this.modelRuntime,
-				model: (model ? findConfigured(this.availableModels, model) : undefined) as never,
+				model: resolvedModel as never,
 				thinkingLevel: spec.thinking as never,
 				tools: childToolAllowlist(allowlist),
 				// Denylist grants (CC's "All tools except …" shape) — filters built-ins,
@@ -333,12 +365,13 @@ export class SubagentRuntime {
 					allowlist,
 				).length === 0
 			) {
-				session.dispose();
+				this.discard(session);
 				throw new Error(
 					`Agent "${spec.agent?.name}" lists tools (${allowlist.join(", ")}) that match no available tool. ` +
 						"Use Claude Code names (Read, Edit, Write, Bash, Grep, Glob, WebFetch, WebSearch, NotebookEdit, Skill, Agent, SendMessage) or pi names (read, edit, write, bash, grep, find, ls, …) in the agent file's `tools` list.",
 				);
 			}
+			if (spec.name) this.runNames.set(session.sessionManager.getSessionId(), spec.name);
 			return session;
 		};
 		try {
@@ -355,6 +388,12 @@ export class SubagentRuntime {
 		}
 	}
 
+	/** Dispose a child session and forget its run-name mapping. */
+	private discard(session: Session): void {
+		this.runNames.delete(session.sessionManager.getSessionId());
+		session.dispose();
+	}
+
 	/**
 	 * A blocking run (nested spawn, SendMessage resume, one-shot-mode spawn): one
 	 * prompt, awaited, then disposed. The caller frames a fork's task
@@ -367,9 +406,16 @@ export class SubagentRuntime {
 		const result: Promise<ChildOutcome> = (async () => {
 			let unsubscribe: (() => void) | undefined;
 			let spawnNote: string | undefined;
-			const onAbort = () => void session?.abort();
+			// Every way this turn can be cut short marks the tracker first, so the
+			// outcome read after prompt() resolves reports "terminated", never the
+			// partial text as a clean completion (M3).
+			const abortWith = (reason?: string) => {
+				tracker.markAborted(reason);
+				void session?.abort();
+			};
+			const onAbort = () => abortWith();
 			options.signal?.addEventListener("abort", onAbort, { once: true });
-			const wallClock = setTimeout(() => void session?.abort(), WALL_CLOCK_CAP_MS);
+			const wallClock = setTimeout(() => abortWith("terminated: turn hit the wall-clock cap"), WALL_CLOCK_CAP_MS);
 			wallClock.unref?.();
 
 			try {
@@ -388,7 +434,9 @@ export class SubagentRuntime {
 					// yet: a cancellation that landed during the gate wait must stop the
 					// turn from starting at all, not let it run to completion unnoticed.
 					if (options.signal?.aborted) throw new Error("cancelled before the first request was sent");
-					await session.prompt(options.task);
+					// No template/command expansion: a task starting with "/" is text, not
+					// a command lookup (pi's own sendUserMessage does the same — L2).
+					await session.prompt(options.task, { expandPromptTemplates: false });
 				} finally {
 					releasePrefix?.(false);
 				}
@@ -403,13 +451,16 @@ export class SubagentRuntime {
 				clearTimeout(wallClock);
 				options.signal?.removeEventListener("abort", onAbort);
 				unsubscribe?.();
-				session?.dispose();
+				if (session) this.discard(session);
 			}
 		})();
 
 		return {
 			result,
-			kill: () => void session?.abort(),
+			kill: () => {
+				tracker.markAborted();
+				void session?.abort();
+			},
 			snapshot: () => ({ toolCalls: tracker.toolCalls, text: tracker.turnText, usage: tracker.usage }),
 		};
 	}
@@ -446,72 +497,110 @@ export class SubagentRuntime {
 			spawnNote = undefined;
 		};
 
-		this.wireTracker(session, tracker, options.onProgress, () => finishTurn(tracker.turnOutcome()), options.sink);
-		// `this` inside the handle's methods is the handle, so bind the gate here.
+		// On settle: report the turn, then dispatch a message held over the settle
+		// window (pendingSend below). The dispatch runs on the settle EVENT, not
+		// inside finishTurn, because a capped turn reports early from its timer
+		// while the session is still aborting — the next turn must not start
+		// until the session is really idle.
+		this.wireTracker(
+			session,
+			tracker,
+			options.onProgress,
+			() => {
+				finishTurn(tracker.turnOutcome());
+				releasePending();
+			},
+			options.sink,
+		);
+		// `this` inside the handle's methods is the handle, so bind these here.
 		const admitPrefix = () => this.admitPrefix(options, session);
+		const discard = () => this.discard(session);
+
+		/**
+		 * A message that arrived in the settle window: pi has already cleared
+		 * `_isAgentRunActive` (so `session.isIdle` is true) but our subscribe
+		 * listener has not yet run `finishTurn` for the turn that just ended. Starting
+		 * a turn there would reset the tracker under the unreported outcome, and
+		 * steering would queue against an idle agent (delivered only with the NEXT
+		 * prompt while the tool result claimed "steered"). Instead the message is held
+		 * and dispatched by finishTurn as the next turn (SUBAGENT-REVIEW L6).
+		 */
+		let pendingSend: string | undefined;
+		const startTurn = (message: string): void => {
+			tracker.beginTurn();
+			turnActive = true;
+			// The cap measures the turn's own work, so it is armed when the prompt
+			// actually starts — after any wait behind the prefix gate.
+			const armTurnCap = () => {
+				clearTurnCap();
+				turnTimer = setTimeout(() => {
+					// Same rationale as kill(): the abort settles through the normal
+					// turn path, which would report the capped turn as a completion.
+					tracker.markAborted("terminated: turn hit the wall-clock cap");
+					finishTurn(tracker.turnOutcome());
+					void session.abort();
+				}, WALL_CLOCK_CAP_MS);
+				turnTimer.unref?.();
+			};
+			// No template/command expansion: a task starting with "/" is text (L2).
+			const prompt = () => session.prompt(message, { expandPromptTemplates: false });
+			// The first turn waits for a sibling with the same prefix to start
+			// streaming (admitPrefix); later turns continue a unique history.
+			let prompting: Promise<void>;
+			if (firstTurn) {
+				prompting = admitPrefix().then((release) => {
+					// kill() may have aborted and disposed the session while this
+					// turn was queued behind the gate; prompting it now would fail
+					// silently (finishTurn already ran). Hand the lead on instead.
+					if (exited) {
+						release(false);
+						return;
+					}
+					armTurnCap();
+					return prompt().finally(() => release(false));
+				});
+			} else {
+				armTurnCap();
+				prompting = prompt();
+			}
+			firstTurn = false;
+			// A prompt that can't even start (no API key, bad model) rejects; surface
+			// it as a failed turn instead of leaving the caller waiting forever.
+			void prompting.catch((error) => {
+				finishTurn({
+					output: `Subagent could not start the turn: ${(error as Error).message}`,
+					toolCalls: tracker.toolCalls,
+					usage: tracker.usage,
+					actions: tracker.actions,
+					failed: true,
+				});
+			});
+		};
+		const releasePending = () => {
+			if (pendingSend === undefined || exited || turnActive || !session.isIdle) return;
+			const message = pendingSend;
+			pendingSend = undefined;
+			startTurn(message);
+		};
 
 		return {
-			send(message: string): "started" | "steered" {
+			async send(message: string): Promise<"started" | "steered"> {
 				// Gate on our own synchronous turnActive flag, not session.isIdle alone:
 				// isIdle only flips deep inside prompt() after real awaits, so two rapid
 				// sends could both see an idle session and issue concurrent prompts.
 				if (!turnActive && session.isIdle) {
-					tracker.beginTurn();
-					turnActive = true;
-					// The cap measures the turn's own work, so it is armed when the prompt
-					// actually starts — after any wait behind the prefix gate.
-					const armTurnCap = () => {
-						clearTurnCap();
-						turnTimer = setTimeout(() => {
-							// Same rationale as kill(): the abort settles through the normal
-							// turn path, which would report the capped turn as a completion.
-							finishTurn({
-								output: tracker.turnText
-									? `${tracker.turnText}\n\n[terminated: turn hit the wall-clock cap]`
-									: "Subagent terminated: turn hit the wall-clock cap.",
-								toolCalls: tracker.toolCalls,
-								usage: tracker.usage,
-								actions: tracker.actions,
-								failed: true,
-							});
-							void session.abort();
-						}, WALL_CLOCK_CAP_MS);
-						turnTimer.unref?.();
-					};
-					// The first turn waits for a sibling with the same prefix to start
-					// streaming (admitPrefix); later turns continue a unique history.
-					let prompting: Promise<void>;
-					if (firstTurn) {
-						prompting = admitPrefix().then((release) => {
-							// kill() may have aborted and disposed the session while this
-							// turn was queued behind the gate; prompting it now would fail
-							// silently (finishTurn already ran). Hand the lead on instead.
-							if (exited) {
-								release(false);
-								return;
-							}
-							armTurnCap();
-							return session.prompt(message).finally(() => release(false));
-						});
-					} else {
-						armTurnCap();
-						prompting = session.prompt(message);
-					}
-					firstTurn = false;
-					// A prompt that can't even start (no API key, bad model) rejects; surface
-					// it as a failed turn instead of leaving the caller waiting forever.
-					void prompting.catch((error) => {
-						finishTurn({
-							output: `Subagent could not start the turn: ${(error as Error).message}`,
-							toolCalls: tracker.toolCalls,
-							usage: tracker.usage,
-							actions: tracker.actions,
-							failed: true,
-						});
-					});
+					startTurn(message);
 					return "started";
 				}
-				void session.steer(message).catch(() => {});
+				if (turnActive && session.isIdle) {
+					// Settle window (see pendingSend). Only one message can ride it; a
+					// second one joins the held one as the same next turn.
+					pendingSend = pendingSend === undefined ? message : `${pendingSend}\n\n${message}`;
+					return "started";
+				}
+				// Mid-turn: joins the running turn. pi refuses to queue an extension
+				// command; the rejection reaches the caller instead of being swallowed.
+				await session.steer(message);
 				return "steered";
 			},
 			busy: () => turnActive || !session.isIdle,
@@ -519,18 +608,12 @@ export class SubagentRuntime {
 			kill: () => {
 				if (exited) return Promise.resolve();
 				exited = true;
+				pendingSend = undefined;
 				// Report an in-flight turn as terminated, not as a normal completion:
 				// the settle path can't tell an abort's partial text from success, so
 				// without this a killed run notifies as if it finished cleanly.
-				finishTurn({
-					output: tracker.turnText
-						? `${tracker.turnText}\n\n[terminated before the turn finished]`
-						: "Subagent terminated before the turn finished.",
-					toolCalls: tracker.toolCalls,
-					usage: tracker.usage,
-					actions: tracker.actions,
-					failed: true,
-				});
+				tracker.markAborted();
+				finishTurn(tracker.turnOutcome());
 				// onExit only after the abort settles: it triggers worktree cleanup,
 				// which must not race an aborting session still writing files. The
 				// returned promise lets session_shutdown wait for exactly that.
@@ -538,14 +621,14 @@ export class SubagentRuntime {
 					.abort()
 					.catch(() => undefined)
 					.finally(() => {
-						session.dispose();
+						discard();
 						options.onExit?.();
 					});
 			},
 			release: () => {
 				if (exited || turnActive || !session.isIdle) return;
 				exited = true;
-				session.dispose();
+				discard();
 				options.onExit?.();
 			},
 			snapshot: () => {

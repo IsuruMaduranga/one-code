@@ -8,21 +8,29 @@
  * loads explicitly passed `extensionFactories` (even under noExtensions),
  * which is where this inline factory attaches.
  *
- * Policy: deny rules always win; explicit allow rules allow; the mode is the
- * parent session's live mode (published as CC_PERMISSION_MODE, read per call),
- * else the settings' defaultMode, else acceptEdits (Claude Code runs these
- * agents in acceptEdits); ask rules are honoured; anything that would normally
- * *ask* is denied — there is no interactive prompt inside an in-process agent,
- * and fail-closed beats silently trusting the model. Auto mode has no classifier
- * here, so it degrades to acceptEdits *inside the cwd* and denies the rest.
- * Project-scope allow rules apply only with a stored consent (project-trust.ts).
+ * Primary path: every tool call is routed through the parent's permission
+ * BRIDGE (`permissions/subagent-gate.ts`) — the parent's live mode, rules,
+ * auto-mode classifier and interactive prompts, exactly as the main agent's
+ * calls are judged (Claude Code parity, findings §17.1). Resolving or invoking
+ * the bridge fails CLOSED.
+ *
+ * Local fallback (no bridge — workflow/headless runs, or a parent without the
+ * permissions extension): deny rules always win; explicit allow rules allow;
+ * the mode is the parent session's live mode (published as CC_PERMISSION_MODE,
+ * read per call), else the settings' defaultMode, else acceptEdits (Claude Code
+ * runs these agents in acceptEdits); ask rules are honoured; anything that
+ * would normally *ask* is denied — there is no interactive prompt inside an
+ * in-process agent, and fail-closed beats silently trusting the model. Auto
+ * mode has no classifier here, so it degrades to acceptEdits *inside the cwd*
+ * and denies the rest. Project-scope allow rules apply only with a stored
+ * consent (project-trust.ts).
  *
  * `neverGate` names tools the runtime itself injects (e.g. `structured_output`,
  * the child-only `SendMessage`-to-main tool) that must never be gated.
  */
 
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
-import { findGitRoot } from "./git.ts";
+import { findProjectRoot } from "./git.ts";
 import { memoryDir } from "./memory.ts";
 import { sessionScratchpadDir } from "./scratchpad.ts";
 import { decide, extractSubject, isInsideDir, normalizeToolName, type PermissionMode, parseRules, toolTier } from "../permissions/matcher.ts";
@@ -63,7 +71,9 @@ export function permissionGateFactory(
 	const settings = loadPermissionSettings(cwd, home);
 	const deny = parseRules(settings.deny);
 	const ask = parseRules(settings.ask);
-	const projectRoot = findGitRoot(cwd) ?? cwd;
+	// The repository the run belongs to: an isolation worktree shares its main
+	// checkout's consent and memory (findProjectRoot), not a throwaway slug.
+	const projectRoot = findProjectRoot(cwd) ?? cwd;
 	// Repo-shipped allow rules count only once the user has consented to exactly
 	// this list (the parent session's dialog); there is no one to ask here.
 	const allow = parseRules(
@@ -72,7 +82,7 @@ export function permissionGateFactory(
 	// Memory writes work inside agent sessions too — otherwise the protected
 	// `.claude` check turns them into "needs interactive approval" and the
 	// harness blocks its own feature (same rationale as in decide()).
-	const memoryDirPath = memoryDir(home, findGitRoot(cwd) ?? cwd);
+	const memoryDirPath = memoryDir(home, projectRoot);
 
 	return {
 		name: "agent-permission-gate",
@@ -89,12 +99,19 @@ export function permissionGateFactory(
 				// pipeline. Everything here — resolving the bridge AND invoking it — fails
 				// CLOSED (deny); a broken bridge or getter must never silently open the gate.
 				// The child's own signal rides along so an aborted child turn cancels any
-				// classifier call the bridge makes.
+				// classifier call the bridge makes and dismisses a prompt it bubbled; the
+				// session id lets the runner name the asking agent in that prompt.
 				try {
 					const bridge = getBridge?.();
 					if (bridge) {
 						const input = (event.input ?? {}) as Record<string, unknown>;
-						return await bridge({ toolName: event.toolName, input, cwd: runCwd, signal: ctx?.signal });
+						return await bridge({
+							toolName: event.toolName,
+							input,
+							cwd: runCwd,
+							signal: ctx?.signal,
+							sessionId: ctx?.sessionManager?.getSessionId?.(),
+						});
 					}
 				} catch (error) {
 					return { block: true, reason: `Permission bridge failed (${(error as Error).message}); denied to fail safe.` };

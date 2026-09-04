@@ -68,3 +68,38 @@ describe("SessionTurnTracker", () => {
 		expect(t.turnText).toBe("");
 	});
 });
+
+describe("SessionTurnTracker — aborted turns (SUBAGENT-REVIEW M3)", () => {
+	it("reports pi's aborted assistant message as terminated, never as the answer", () => {
+		const t = new SessionTurnTracker();
+		t.beginTurn();
+		t.process(toolStart("bash", { command: "sleep 100" }));
+		t.process(assistantEnd("I was about to", undefined, "aborted"));
+		t.process(settled);
+		const outcome = t.turnOutcome();
+		expect(outcome.failed).toBe(true);
+		expect(outcome.output).toBe("I was about to\n\n[terminated before the turn finished]");
+	});
+
+	it("markAborted covers an abort that lands during a tool call (no aborted assistant message)", () => {
+		const t = new SessionTurnTracker();
+		t.beginTurn();
+		t.process(assistantEnd("partial", undefined, "toolUse"));
+		t.process(toolStart("bash", { command: "sleep 100" }));
+		t.markAborted("terminated: turn hit the wall-clock cap");
+		t.process(settled);
+		expect(t.turnOutcome()).toMatchObject({ failed: true, output: "partial\n\n[terminated: turn hit the wall-clock cap]" });
+	});
+
+	it("an aborted turn with no text says so, and beginTurn clears the flag", () => {
+		const t = new SessionTurnTracker();
+		t.beginTurn();
+		t.markAborted();
+		expect(t.turnOutcome()).toMatchObject({ failed: true, output: "Subagent terminated before the turn finished." });
+		t.beginTurn();
+		t.process(assistantEnd("fresh answer"));
+		t.process(settled);
+		expect(t.turnOutcome()).toMatchObject({ output: "fresh answer" });
+		expect(t.turnOutcome().failed).toBeUndefined();
+	});
+});

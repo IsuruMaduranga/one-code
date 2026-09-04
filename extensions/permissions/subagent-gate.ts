@@ -26,8 +26,17 @@ export interface ChildToolCall {
 	toolName: string;
 	input: Record<string, unknown>;
 	cwd: string;
-	/** The child's live turn signal, so a classifier call is aborted when the child turn is. */
+	/**
+	 * The child's live turn signal: a classifier call is aborted when the child
+	 * turn is, and a prompt bubbled to the user is dismissed (as a denial) when
+	 * the child is stopped mid-prompt — otherwise a dead agent's dialog stays on
+	 * screen and holds the prompt chain (SUBAGENT-REVIEW M5).
+	 */
 	signal?: AbortSignal;
+	/** The child session's id (what the gate can see); the runner maps it to `agent`. */
+	sessionId?: string;
+	/** The run name of the asking agent, for the prompt title — set by the runner, not the gate. */
+	agent?: string;
 }
 
 /** A permission decision: `undefined` = allow; otherwise block with a model-facing reason. */

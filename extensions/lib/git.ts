@@ -1,8 +1,15 @@
 /** Shared git helpers — pure functions only (safe to import across extensions). */
 
-import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
+/**
+ * The nearest checkout root at or above `startDir`: the directory holding a
+ * `.git` entry (a directory for a main checkout, a file for a linked worktree
+ * or a submodule). This is the bound for walking up a checkout (context files,
+ * banner listing); for the repository a directory *belongs to*, which linked
+ * worktrees share with their main checkout, use `findProjectRoot`.
+ */
 export function findGitRoot(startDir: string): string | undefined {
 	let dir = startDir;
 	while (true) {
@@ -11,4 +18,39 @@ export function findGitRoot(startDir: string): string | undefined {
 		if (parent === dir) return undefined;
 		dir = parent;
 	}
+}
+
+/**
+ * The repository `startDir` belongs to — the checkout root, except that a
+ * linked worktree (`git worktree add`, including a subagent's isolation
+ * worktree in a tmpdir) resolves to its MAIN checkout, so every worktree of one
+ * repository shares one project identity (auto-memory dir, per-repo settings,
+ * project trust). A submodule keeps its own root. Pure filesystem: the linked
+ * worktree's `.git` is a file reading `gitdir: <main>/.git/worktrees/<name>`.
+ */
+export function findProjectRoot(startDir: string): string | undefined {
+	const root = findGitRoot(startDir);
+	if (!root) return undefined;
+	return linkedWorktreeMainRoot(root) ?? root;
+}
+
+/** For a linked worktree root, the main checkout it belongs to; undefined otherwise. Exported for tests. */
+export function linkedWorktreeMainRoot(root: string): string | undefined {
+	const dotGit = join(root, ".git");
+	let gitdir: string;
+	try {
+		if (!statSync(dotGit).isFile()) return undefined;
+		const match = /^gitdir:\s*(.+?)\s*$/m.exec(readFileSync(dotGit, "utf-8"));
+		if (!match) return undefined;
+		gitdir = match[1];
+	} catch {
+		return undefined;
+	}
+	const absolute = isAbsolute(gitdir) ? gitdir : resolve(root, gitdir);
+	// <main>/.git/worktrees/<name> → <main>. A submodule's gitdir points into
+	// <super>/.git/modules/<name> and is left alone.
+	const worktrees = dirname(absolute);
+	const mainDotGit = dirname(worktrees);
+	if (basename(worktrees) !== "worktrees" || basename(mainDotGit) !== ".git") return undefined;
+	return dirname(mainDotGit);
 }

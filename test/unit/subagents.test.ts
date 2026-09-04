@@ -240,4 +240,13 @@ describe("finishOutcome", () => {
 		expect(empty.failed).toBe(true);
 		expect(empty.output).toContain("Subagent produced no output.");
 	});
+
+	it("an abort reason wins over partial text and over a provider error (M3)", async () => {
+		const { finishOutcome } = await import("../../extensions/subagents/session-turns.ts");
+		const { emptyUsage } = await import("../../extensions/subagents/usage.ts");
+		const cut = finishOutcome("halfway", undefined, 1, emptyUsage(), [], "terminated before the turn finished");
+		expect(cut).toMatchObject({ failed: true, output: "halfway\n\n[terminated before the turn finished]" });
+		const both = finishOutcome("", "rate limited", 0, emptyUsage(), [], "terminated before the turn finished");
+		expect(both.output).toBe("Subagent terminated before the turn finished.");
+	});
 });

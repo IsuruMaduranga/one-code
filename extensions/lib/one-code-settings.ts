@@ -23,7 +23,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { writeJsonAtomic } from "./atomic-write.ts";
-import { findGitRoot } from "./git.ts";
+import { findProjectRoot } from "./git.ts";
 import { projectSlug } from "./memory.ts";
 import { oneCodeStateDir } from "./paths.ts";
 
@@ -38,7 +38,7 @@ export function oneCodeSettingsPath(home: string, env: NodeJS.ProcessEnv = proce
  * worktrees and subdirectories), else the cwd — the same slug the memory dir uses.
  */
 export function oneCodeProjectSettingsPath(cwd: string, home: string, env: NodeJS.ProcessEnv = process.env): string {
-	return join(oneCodeStateDir(env, home), "projects", projectSlug(findGitRoot(cwd) ?? cwd), "settings.json");
+	return join(oneCodeStateDir(env, home), "projects", projectSlug(findProjectRoot(cwd) ?? cwd), "settings.json");
 }
 
 /**

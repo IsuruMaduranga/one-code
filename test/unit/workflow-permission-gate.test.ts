@@ -133,3 +133,19 @@ describe("permissionGateFactory — mode, ask rules, project consent (P8/P10)", 
 function captureAfterConsent(cwd: string, home: string) {
 	return buildGateHarness.rebuild(cwd, home);
 }
+
+describe("permissionGateFactory — what the bridge call carries (SUBAGENT-REVIEW M5)", () => {
+	it("passes the child's session id and turn signal so the parent can name the agent and dismiss its prompt", async () => {
+		const calls: Array<Record<string, unknown>> = [];
+		const handler = buildGate({ permissions: {} }, () => async (call) => {
+			calls.push({ ...call });
+			return undefined;
+		});
+		const controller = new AbortController();
+		const ctx = { cwd: "/tmp/child", signal: controller.signal, sessionManager: { getSessionId: () => "sess-123" } };
+		await (handler as unknown as (e: unknown, c: unknown) => Promise<unknown>)({ toolName: "bash", input: { command: "ls" } }, ctx);
+		expect(calls).toHaveLength(1);
+		expect(calls[0]).toMatchObject({ toolName: "bash", cwd: "/tmp/child", sessionId: "sess-123" });
+		expect(calls[0].signal).toBe(controller.signal);
+	});
+});

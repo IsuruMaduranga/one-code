@@ -1,9 +1,9 @@
 /**
- * Token/cost accounting for child-process subagent runs.
+ * Token/cost accounting for in-process subagent runs.
  *
- * A child run in `--mode json` emits one `message_end` per assistant message,
- * each carrying a pi-ai `Usage` for that API call; summing them gives the
- * run's totals (the in-process equivalent is `session.getSessionStats()`).
+ * A child session emits one `message_end` per assistant message, each carrying
+ * a pi-ai `Usage` for that API call (SessionTurnTracker feeds them in); summing
+ * them gives the run's totals, across every turn of a resident.
  */
 
 export interface UsageTotals {
