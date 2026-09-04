@@ -65,7 +65,6 @@ function buildEnvironmentSection(env: EnvironmentInfo): string {
  - Platform: ${env.platform}
  - OS Version: ${env.osVersion}
  - Shell: ${env.shell}
- - Today's date: ${env.date}
  - Model: ${env.modelLine}`;
 }
 

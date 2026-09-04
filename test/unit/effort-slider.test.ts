@@ -195,6 +195,8 @@ describe("renderEffortSlider", () => {
 		expect(out).toContain("Esc cancel");
 		// Says which key does the same job, so the two dials don't look unrelated.
 		expect(out).toContain("shift+tab");
+		// The cost the user is about to pay is on screen, not something to learn later.
+		expect(out).toContain("re-caches the conversation");
 	});
 
 	it("puts the marker under the selected label", () => {

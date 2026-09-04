@@ -45,23 +45,22 @@ describe("randomSlug", () => {
 describe("buildPlanModeReminder", () => {
 	const path = "/home/u/.claude/plans/brisk-otter-map.md";
 
-	it("is byte-stable for the same state", () => {
-		const a = buildPlanModeReminder({ filePath: path, fileExists: false });
-		const b = buildPlanModeReminder({ filePath: path, fileExists: false });
+	it("is byte-stable for a path (the sticky block must not re-anchor when the file appears)", () => {
+		const a = buildPlanModeReminder(path);
+		const b = buildPlanModeReminder(path);
 		expect(a).toBe(b);
+		expect(a).toContain(path);
 	});
 
-	it("flips wording once the file exists", () => {
-		const before = buildPlanModeReminder({ filePath: path, fileExists: false });
-		const after = buildPlanModeReminder({ filePath: path, fileExists: true });
-		expect(before).toContain("No plan file exists yet");
-		expect(before).toContain(path);
-		expect(after).toContain("Continue building your plan");
-		expect(after).not.toContain("No plan file exists yet");
+	it("covers both file states in one text: create it if missing, then edit incrementally", () => {
+		const text = buildPlanModeReminder(path);
+		expect(text).toContain("create it if it does not exist yet");
+		expect(text).toContain("edit it incrementally");
+		expect(text).not.toContain("No plan file exists yet");
 	});
 
 	it("names the One Code tools the workflow relies on", () => {
-		const text = buildPlanModeReminder({ filePath: path, fileExists: false });
+		const text = buildPlanModeReminder(path);
 		for (const needle of [
 			'`subagent_type: "explore"`',
 			'`subagent_type: "plan"`',

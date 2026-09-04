@@ -64,7 +64,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
 		const path = ensurePlanFile(ctx);
 		pi.events.emit(PLAN_FILE_CHANNEL, { path });
 		pi.events.emit(REMINDER_CHANNEL, {
-			text: buildPlanModeReminder({ filePath: path, fileExists: existsSync(path) }),
+			text: buildPlanModeReminder(path),
 			scope: "every-turn",
 			key: "permission-mode",
 			placement: "sticky-append",

@@ -9,7 +9,6 @@ const env: EnvironmentInfo = {
 	platform: "darwin",
 	osVersion: "Darwin 24.2.0",
 	shell: "zsh",
-	date: "2026-08-05",
 	modelLine: "claude-opus-5 (anthropic)",
 	memoryDir: "/home/u/.claude/projects/-tmp-project/memory",
 };

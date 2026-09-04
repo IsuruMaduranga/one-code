@@ -108,9 +108,6 @@ export interface ReminderEntry {
 	raw?: boolean;
 }
 
-/** Pins kept; the oldest is dropped past this (its message has long scrolled into the cached past anyway). */
-const MAX_PINS = 400;
-
 export interface ReminderPayload {
 	text?: string;
 	scope?: ReminderScope;
@@ -213,11 +210,23 @@ export class ReminderQueue {
 			this.pinned.push({ ...entry, pin: anchor });
 		}
 		this.nextTurn = this.nextTurn.filter((r) => r.placement !== "last-append");
-		if (this.pinned.length > MAX_PINS) this.pinned.splice(0, this.pinned.length - MAX_PINS);
 	}
 
-	/** Everything to inject on this request: every-turn state, pinned one-shots, then whatever is still pending. */
-	drain(): ReminderEntry[] {
+	/**
+	 * Everything to inject on this request: every-turn state, pinned one-shots,
+	 * then whatever is still pending. `messages` is the request being built:
+	 * pins whose anchor is no longer in it (compacted away, or left behind on
+	 * another branch) are dropped here, as part of draining, so no caller can
+	 * forget the step. Nothing else is ever evicted: a pin is one small object,
+	 * and removing a pin whose message is still in context would change that
+	 * message and re-cache everything after it — the old "oldest past 400" cap
+	 * did exactly that (CACHE-REVIEW-2026-09-04 M3).
+	 */
+	drain(messages: AgentMessage[]): ReminderEntry[] {
+		if (this.pinned.length > 0) {
+			const locate = pinLocator(messages);
+			this.pinned = this.pinned.filter((entry) => locate(entry.pin as PinAnchor) !== -1);
+		}
 		const pending = this.nextTurn.map(strip);
 		this.nextTurn = [];
 		return [...[...this.everyTurn.values()].map(strip), ...this.pinned.map(strip), ...pending];
@@ -239,6 +248,27 @@ function strip(r: StoredReminder): ReminderEntry {
 	if (r.since !== undefined) entry.since = r.since;
 	if (r.pin !== undefined) entry.pin = r.pin;
 	return entry;
+}
+
+/**
+ * One pass over `messages` → a lookup from a pin to the index of the message it
+ * rides (-1 when that message left the context). Built once per request by the
+ * queue's drain and once by injectReminders, so pin count never multiplies the
+ * message count on the per-request path.
+ */
+function pinLocator(messages: AgentMessage[]): (pin: PinAnchor) => number {
+	const byToolCall = new Map<string, number>();
+	const byTimestamp = new Map<number, number>();
+	messages.forEach((m, index) => {
+		if (m.role === "toolResult") {
+			const id = (m as { toolCallId?: string }).toolCallId;
+			if (typeof id === "string" && !byToolCall.has(id)) byToolCall.set(id, index);
+		} else if (m.role === "user" || m.role === "compactionSummary") {
+			const stamp = (m as { timestamp?: number }).timestamp;
+			if (typeof stamp === "number" && !byTimestamp.has(stamp)) byTimestamp.set(stamp, index);
+		}
+	});
+	return (pin) => (pin.kind === "toolResult" ? byToolCall.get(pin.toolCallId) : byTimestamp.get(pin.timestamp)) ?? -1;
 }
 
 /** The anchor a one-shot lands on for this request: the trailing tool result, else the last user-like message. */
@@ -376,14 +406,12 @@ export function injectReminders(messages: AgentMessage[], reminders: Array<strin
 
 	// Pinned one-shots ride the exact message they first landed on; a message
 	// compacted away simply no longer carries its pin.
-	for (const entry of pinnedEntries) {
-		const pin = entry.pin as PinAnchor;
-		const index = messages.findIndex((m) =>
-			pin.kind === "toolResult"
-				? m.role === "toolResult" && (m as { toolCallId?: string }).toolCallId === pin.toolCallId
-				: (m.role === "user" || m.role === "compactionSummary") && (m as { timestamp?: number }).timestamp === pin.timestamp,
-		);
-		if (index !== -1) push(after, index, [reminderBlock(entry)]);
+	if (pinnedEntries.length > 0) {
+		const locate = pinLocator(messages);
+		for (const entry of pinnedEntries) {
+			const index = locate(entry.pin as PinAnchor);
+			if (index !== -1) push(after, index, [reminderBlock(entry)]);
+		}
 	}
 
 	if (before.size === 0 && after.size === 0) return messages;

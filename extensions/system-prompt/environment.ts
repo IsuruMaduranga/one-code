@@ -1,7 +1,11 @@
 /**
  * Environment facts for the system prompt's # Environment section.
  * Collected once per (cwd, model) and cached so the prompt stays byte-stable
- * across turns — required for provider prompt caching to pay off.
+ * across turns — required for provider prompt caching to pay off. Nothing
+ * time-valued belongs here: the date rides Claude Code's `# currentDate` line
+ * in the first-message reminder (claude-context), never the system prompt
+ * (Claude Code's own prompt has no date line; a cached one went stale at
+ * midnight — CACHE-REVIEW-2026-09-04 L2).
  */
 
 import os from "node:os";
@@ -14,7 +18,6 @@ export interface EnvironmentInfo {
 	platform: string;
 	osVersion: string;
 	shell: string;
-	date: string;
 	modelLine: string;
 	/** Per-project auto-memory directory; the memory extension guarantees it exists. */
 	memoryDir: string;
@@ -28,7 +31,6 @@ export function collectEnvironment(cwd: string, modelLine: string): EnvironmentI
 		platform: process.platform,
 		osVersion: `${os.type()} ${os.release()}`,
 		shell: process.env.SHELL ? (process.env.SHELL.split("/").pop() ?? "unknown") : "unknown",
-		date: new Date().toISOString().slice(0, 10),
 		modelLine,
 		memoryDir: projectMemoryDir(cwd, os.homedir()),
 	};

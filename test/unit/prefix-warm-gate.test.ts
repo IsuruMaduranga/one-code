@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PrefixWarmGate } from "../../extensions/lib/prefix-warm-gate.ts";
+import { agentPromptIdentity, PrefixWarmGate, prefixWarmKey } from "../../extensions/lib/prefix-warm-gate.ts";
 
 /** Drain the microtask queue (no timers — those are faked), so pending `admit()`s can settle. */
 const flush = async () => {
@@ -166,5 +166,17 @@ describe("PrefixWarmGate", () => {
 		});
 		await vi.advanceTimersByTimeAsync(0);
 		expect(admitted).toBe(true);
+	});
+});
+
+describe("gate key", () => {
+	it("is one scheme for both fan-out sites: prompt identity | cwd | model spec", () => {
+		expect(agentPromptIdentity("explore")).toBe("agent:explore");
+		expect(agentPromptIdentity(undefined)).toBe("base");
+		expect(prefixWarmKey(agentPromptIdentity("explore"), "/repo", "anthropic/claude-sonnet-5")).toBe(
+			"agent:explore|/repo|anthropic/claude-sonnet-5",
+		);
+		// No resolved model yet: the segment is empty, never "undefined".
+		expect(prefixWarmKey("base", "/repo", undefined)).toBe("base|/repo|");
 	});
 });

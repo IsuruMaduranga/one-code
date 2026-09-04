@@ -21,7 +21,7 @@ const compaction = (summary = "what happened", timestamp = 0) =>
 	({ role: "compactionSummary", summary, tokensBefore: 1, timestamp }) as any;
 const blockTexts = (m: any) => (typeof m.content === "string" ? [m.content] : m.content.map((b: any) => b.text));
 
-const texts = (q: ReminderQueue) => q.drain().map((e) => e.text);
+const texts = (q: ReminderQueue) => q.drain([]).map((e) => e.text);
 
 describe("ReminderQueue", () => {
 	it("drains pending next-turn reminders once", () => {
@@ -67,7 +67,7 @@ describe("ReminderQueue", () => {
 		const q = new ReminderQueue();
 		q.enqueue("plain");
 		q.enqueue("ctx", { scope: "every-turn", key: "c", placement: "first-prepend", order: 4 });
-		expect(q.drain()).toEqual([
+		expect(q.drain([])).toEqual([
 			{ text: "ctx", placement: "first-prepend", order: 4 },
 			{ text: "plain", placement: "last-append", order: 0 },
 		]);
@@ -88,10 +88,27 @@ describe("ReminderQueue", () => {
 		const q = new ReminderQueue();
 		q.enqueue("file changed");
 		q.pin({ kind: "toolResult", toolCallId: "c1" });
-		const first = q.drain();
+		const messages = [user("go"), assistant(), toolResult()];
+		const first = q.drain(messages);
 		expect(first).toEqual([{ text: "file changed", placement: "last-append", order: 0, pin: { kind: "toolResult", toolCallId: "c1" } }]);
-		expect(q.drain()).toEqual(first);
+		expect(q.drain(messages)).toEqual(first);
 		expect(q.size).toBe(1);
+	});
+
+	it("drain drops only the pins whose anchor left the context; there is no count cap", () => {
+		const q = new ReminderQueue();
+		for (let i = 0; i < 1000; i++) {
+			q.enqueue(`note ${i}`);
+			q.pin({ kind: "user", timestamp: i });
+		}
+		expect(q.size).toBe(1000);
+		// Every anchor still present: nothing is evicted, however many there are.
+		q.drain(Array.from({ length: 1000 }, (_, i) => user(`t${i}`, i)));
+		expect(q.size).toBe(1000);
+		// Compaction replaced the first 990 turns with a summary: exactly those pins go.
+		const after = q.drain([compaction("summary", 5000), ...Array.from({ length: 10 }, (_, i) => user(`t${990 + i}`, 990 + i))]);
+		expect(q.size).toBe(10);
+		expect(after.map((r) => r.text)).toEqual(Array.from({ length: 10 }, (_, i) => `note ${990 + i}`));
 	});
 
 	it("stamps sticky-append with `since` at enqueue and keeps it while the text is unchanged", () => {
@@ -100,10 +117,10 @@ describe("ReminderQueue", () => {
 		q.enqueue("plan mode on", { scope: "every-turn", key: "permission-mode", placement: "sticky-append" });
 		now = 2000;
 		q.enqueue("plan mode on", { scope: "every-turn", key: "permission-mode", placement: "sticky-append" });
-		expect(q.drain()[0].since).toBe(1000);
+		expect(q.drain([])[0].since).toBe(1000);
 		// Different text under the same key is a new fact: anchors from now.
 		q.enqueue("auto mode on", { scope: "every-turn", key: "permission-mode", placement: "sticky-append" });
-		expect(q.drain()[0].since).toBe(2000);
+		expect(q.drain([])[0].since).toBe(2000);
 	});
 });
 
@@ -288,9 +305,9 @@ describe("one-shot delivery guarantees (C3)", () => {
 		q.enqueue("deferred-tool miss", { placement: "last-append" });
 		q.pin({ kind: "toolResult", toolCallId: "c1" });
 		const messages = [user("do it"), assistant(), toolResult("ran")];
-		const attempt1 = injectReminders(messages, q.drain());
+		const attempt1 = injectReminders(messages, q.drain(messages));
 		// A 529/overloaded retry re-runs the context event with the same messages.
-		const attempt2 = injectReminders(messages, q.drain());
+		const attempt2 = injectReminders(messages, q.drain(messages));
 		expect(attempt2).toEqual(attempt1);
 		expect(blockTexts(attempt1[2])).toEqual(["ran", wrapReminder("deferred-tool miss")]);
 	});
@@ -302,7 +319,7 @@ describe("one-shot delivery guarantees (C3)", () => {
 		q.enqueue("claudeMd", { placement: "first-prepend" });
 		expect(q.takeOneShots().map((e) => e.text)).toEqual(["one-shot"]);
 		expect(q.hasPendingOneShots).toBe(false);
-		expect(q.drain().map((e) => e.text).sort()).toEqual(["claudeMd", "mode on"]);
+		expect(q.drain([]).map((e) => e.text).sort()).toEqual(["claudeMd", "mode on"]);
 	});
 
 	it("a raw entry is injected without the system-reminder frame", () => {

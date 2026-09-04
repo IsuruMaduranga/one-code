@@ -1,10 +1,16 @@
 /**
- * context-management extension — asks Anthropic to drop old thinking blocks.
+ * context-management extension — asks Anthropic to KEEP old thinking blocks.
  *
  * Claude Code sends `context_management: { edits: [{ type: "clear_thinking_20251015",
- * keep: "all" }] }` on every request, which keeps long sessions from carrying
- * every past reasoning block. pi does not, so a long One Code session
- * accumulates more context than Claude Code would.
+ * keep: "all" }] }` on every request. Despite the edit's name, `keep: "all"` is
+ * a cache preserver, not a trimmer: models that strip previous-turn thinking by
+ * default (Haiku through 4.5, Sonnet <= 4.5, Opus <= 4.1) would otherwise
+ * invalidate the messages cache at the first stripped block; with the edit the
+ * API keeps every block and the cached prefix survives (Anthropic's docs: "keeps
+ * all thinking blocks (maximizes cache hits)"). It does not reduce context. pi
+ * does not send it, so a long One Code session on such a model would re-cache
+ * its history every turn without this extension — do not "optimize" the
+ * parameter away (findings §9, CACHE-REVIEW-2026-09-04 L1).
  *
  * Two things the parameter needs, both found empirically against the live API
  * (2026-08-05, api.anthropic.com):

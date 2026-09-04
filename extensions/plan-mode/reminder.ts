@@ -1,23 +1,20 @@
 /**
- * Plan-mode reminder text (pure). Byte-identical for a given state so the
- * every-turn re-emit replaces the queue entry with the same string except when
- * the state genuinely changed (file created, different path).
+ * Plan-mode reminder text (pure). Byte-identical for a given plan-file path,
+ * whether or not the file exists yet: the block is a sticky-append reminder
+ * carried by every user message since plan mode came on, and the queue keeps
+ * that anchor only while the re-emitted text is unchanged. A text that flipped
+ * when the file appeared re-anchored the block and re-cached every message
+ * between entering plan mode and the first write (CACHE-REVIEW-2026-09-04 M2).
  *
- * Mirrors Claude Code's plan-mode system message: the plan lives in a file the
- * model builds incrementally — the one writable path in plan mode — and
- * exit_plan_mode reads that file rather than taking the plan as a parameter.
+ * Adapted from Claude Code's plan-mode system message: the plan lives in a
+ * file the model builds incrementally — the one writable path in plan mode —
+ * and exit_plan_mode reads that file rather than taking the plan as a
+ * parameter. Claude Code's own text does vary with the file's existence; ours
+ * folds both states into one sentence so the cached prefix survives.
  */
 
-export interface PlanReminderState {
-	filePath: string;
-	fileExists: boolean;
-}
-
-export function buildPlanModeReminder({ filePath, fileExists }: PlanReminderState): string {
-	const fileLine = fileExists
-		? `Continue building your plan at ${filePath} with the write/edit tools — edit it incrementally rather than rewriting it from scratch.`
-		: `No plan file exists yet — create it at ${filePath} with the write tool. Build the plan there incrementally as you investigate; do not present the plan as chat text.`;
-
+export function buildPlanModeReminder(filePath: string): string {
+	const fileLine = `Build your plan at ${filePath} with the write/edit tools — create it if it does not exist yet, then edit it incrementally rather than rewriting it from scratch. Do not present the plan as chat text.`;
 	return [
 		`Plan mode is active. You may only use read-only tools; edit and write are blocked everywhere except one file. ${fileLine}`,
 		"",

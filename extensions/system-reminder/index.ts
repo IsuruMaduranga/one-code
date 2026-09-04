@@ -66,7 +66,7 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 			const anchor = tailAnchor(event.messages);
 			if (anchor) reminderQueue.pin(anchor);
 		}
-		const reminders = reminderQueue.drain();
+		const reminders = reminderQueue.drain(event.messages);
 		return { messages: injectReminders(event.messages, reminders) };
 	});
 }

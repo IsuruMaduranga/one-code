@@ -20,6 +20,20 @@ type Entry =
 	| { kind: "warming"; done: Promise<void>; resolve: () => void }
 	| { kind: "warm"; at: number };
 
+/**
+ * The gate key for a child run: same prompt identity + cwd + model spec = same
+ * request prefix. Both fan-out sites (subagents/runner.ts, workflow/agent-session.ts)
+ * build their key here so the scheme cannot drift between them.
+ */
+export function prefixWarmKey(promptIdentity: string, cwd: string, modelSpec: string | undefined): string {
+	return `${promptIdentity}|${cwd}|${modelSpec ?? ""}`;
+}
+
+/** Prompt identity of a fresh (non-fork) child: its agent definition, else the base prompt. */
+export function agentPromptIdentity(agentName: string | undefined): string {
+	return agentName ? `agent:${agentName}` : "base";
+}
+
 export interface PrefixWarmGateOptions {
 	/** How long a leader may take to stream before waiters are released anyway. */
 	timeoutMs?: number;

@@ -5,7 +5,12 @@
  *   Stage 1 grades HARM ONLY (maxTokens 64). severity < 50 → allow, no stage 2.
  *   Stage 2 applies intent + ALLOW (maxTokens 8192, <thinking> CoT) → severity +
  *   <category> (+ our verified <intent>). Both stages share one system prompt and
- *   transcript byte-for-byte, so stage 2 is a near-total cache hit off stage 1.
+ *   transcript byte-for-byte. Only the system prompt (the ~30k-token ruleset) is
+ *   a cache hit across stages and calls: pi-ai marks a breakpoint on the last
+ *   user block only, so the <transcript> (up to ~15k tokens) is re-read uncached
+ *   by stage 2 and by every gated call on Anthropic-style providers. Known,
+ *   deferred — docs/decisions/caching.md "Classifier transcript" and
+ *   docs/upstream_prs.md #16 (fixable locally via pi-ai's `onPayload`).
  *
  * A one-shot `completeSimple` per stage rather than an agent session: no tools,
  * no history beyond the transcript it is handed, nothing to be talked into. Every

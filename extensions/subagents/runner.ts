@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 import { createAgentSession, getAgentDir, SessionManager, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { buildAgentLoader, createSharedModelRuntime } from "../lib/agent-loader.ts";
-import { PrefixWarmGate, type Release } from "../lib/prefix-warm-gate.ts";
+import { agentPromptIdentity, PrefixWarmGate, prefixWarmKey, type Release } from "../lib/prefix-warm-gate.ts";
 import type { PermissionBridge } from "../permissions/subagent-gate.ts";
 import { findConfigured, modelSpec } from "../lib/model-policy.ts";
 import { isModelUnavailableError } from "../auto-mode/model-select.ts";
@@ -207,7 +207,7 @@ export class SubagentRuntime {
 		if (spec.forkFrom || spec.parentSystemPrompt !== undefined) {
 			return `fork:${createHash("sha1").update(spec.parentSystemPrompt ?? "").digest("hex").slice(0, 16)}`;
 		}
-		return spec.agent ? `agent:${spec.agent.name}` : "base";
+		return agentPromptIdentity(spec.agent?.name);
 	}
 
 	/** Get-or-build a loader for a system-prompt identity, evicting the entry if the build fails. */
@@ -238,7 +238,7 @@ export class SubagentRuntime {
 	 */
 	private admitPrefix(spec: Pick<ChildSessionSpec, "cwd" | "forkFrom" | "parentSystemPrompt" | "agent">, session: Session): Promise<Release> {
 		const model = session.model;
-		const key = `${SubagentRuntime.promptKey(spec)}|${spec.cwd}|${model ? modelSpec(model) : ""}`;
+		const key = prefixWarmKey(SubagentRuntime.promptKey(spec), spec.cwd, model ? modelSpec(model) : undefined);
 		return this.warmGate.admitOnFirstToken(key, session);
 	}
 
@@ -364,6 +364,10 @@ export class SubagentRuntime {
 				// A resume continues a unique history; only a fresh run shares a prefix.
 				const releasePrefix = options.sessionFile ? undefined : await this.admitPrefix(options, session);
 				try {
+					// The abort listener calls session.abort(), a no-op while nothing runs
+					// yet: a cancellation that landed during the gate wait must stop the
+					// turn from starting at all, not let it run to completion unnoticed.
+					if (options.signal?.aborted) throw new Error("cancelled before the first request was sent");
 					await session.prompt(task);
 				} finally {
 					releasePrefix?.(false);
@@ -459,6 +463,13 @@ export class SubagentRuntime {
 					let prompting: Promise<void>;
 					if (firstTurn) {
 						prompting = admitPrefix().then((release) => {
+							// kill() may have aborted and disposed the session while this
+							// turn was queued behind the gate; prompting it now would fail
+							// silently (finishTurn already ran). Hand the lead on instead.
+							if (exited) {
+								release(false);
+								return;
+							}
 							armTurnCap();
 							return session.prompt(message).finally(() => release(false));
 						});

@@ -169,6 +169,8 @@ export interface SliderView {
 
 const TITLE = "Effort";
 const HINTS = "←/→ or h/l adjust · Enter confirm · Esc cancel · shift+tab cycles the plain levels";
+/** Anthropic's cache hierarchy: a thinking/effort change invalidates the message cache once (CACHE-REVIEW-2026-09-04 M4). */
+const CACHE_NOTE = "changing effort re-caches the conversation (one uncached request)";
 const SHORT_HINTS = "←/→ h/l · Enter · Esc";
 const ULTRACODE_SUBTITLE = `${ULTRACODE_LEVEL} + workflows`;
 
@@ -241,6 +243,7 @@ export function renderEffortSlider(view: SliderView, paint: Paint): string[] {
 	const anyDisabled = stops.some((_, i) => !view.enabled[i]);
 	const note = anyDisabled ? `dimmed = unsupported by ${view.modelLabel ?? "this model"}` : "";
 	if (note) rows.push([note, paint("dim", note)]);
+	rows.push([CACHE_NOTE, paint("dim", CACHE_NOTE)]);
 	rows.push(["", ""], [HINTS, paint("dim", HINTS)]);
 
 	const fits = rows.every(([plainRow]) => [...plainRow].length <= view.width);

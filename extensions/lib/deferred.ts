@@ -78,7 +78,7 @@ export function deferredReminderText(tools: Array<Pick<SearchableTool, "name"> &
  */
 export function deferredAddendumText(added: readonly string[]): string {
 	return [
-		"Additional deferred tools became available via tool_search after the listing at the start of this conversation. Same rules: load with tool_search \"select:<name>\" before calling.",
+		"Additional deferred tools became available via tool_search since this conversation started (they registered after the first request). Same rules: load with tool_search \"select:<name>\" before calling.",
 		...added,
 	].join("\n");
 }
