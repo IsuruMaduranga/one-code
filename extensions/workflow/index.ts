@@ -478,8 +478,11 @@ export default function workflowExtension(pi: ExtensionAPI) {
 	pi.events.on(PERMISSION_STATUS_CHANNEL, () => widget.refresh());
 
 	pi.on("session_shutdown", () => {
+		// Fires on /clear, /new and /resume too (findings §8): after this the ctx
+		// is invalid, so nothing below may paint on it.
 		manager.abortAll("session ended");
 		widget.dispose();
+		lastCtx = undefined;
 	});
 }
 

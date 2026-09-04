@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { agentDirs, discoverAgents, parseAgentFile } from "../../extensions/subagents/agents.ts";
+import { agentDirs, childToolAllowlist, discoverAgents, parseAgentFile, parseToolList, usableAllowlistedTools } from "../../extensions/subagents/agents.ts";
 
 describe("parseAgentFile", () => {
 	it("reads name, description, tools and model from frontmatter", () => {
@@ -30,11 +30,43 @@ You review code.`,
 		expect(parseAgentFile("/x/b.md", "---\ntools:\n---\nbody")?.tools).toBeUndefined();
 	});
 
-	it("reads an excludeTools denylist (CC's all-except grant shape)", () => {
-		const agent = parseAgentFile("/x/e.md", "---\nexcludeTools: edit, write, notebook_edit, Agent\n---\nbody");
+	it("reads Claude Code's disallowedTools denylist (the all-except grant shape), normalized to pi names", () => {
+		const agent = parseAgentFile("/x/e.md", "---\ndisallowedTools: Edit, Write, NotebookEdit, Agent\n---\nbody");
 		expect(agent?.excludeTools).toEqual(["edit", "write", "notebook_edit", "Agent"]);
 		expect(agent?.tools).toBeUndefined();
-		expect(parseAgentFile("/x/f.md", "---\nexcludeTools:\n---\nbody")?.excludeTools).toBeUndefined();
+		expect(parseAgentFile("/x/f.md", "---\ndisallowedTools:\n---\nbody")?.excludeTools).toBeUndefined();
+	});
+
+	it("accepts excludeTools as a synonym and merges both keys", () => {
+		const agent = parseAgentFile("/x/e.md", "---\ndisallowedTools: Write\nexcludeTools: edit, Write\n---\nbody");
+		expect(agent?.excludeTools).toEqual(["write", "edit"]);
+	});
+
+	it("maps Claude Code tool spellings in `tools` to pi names (a real CC agent file gets real tools)", () => {
+		const agent = parseAgentFile(
+			"/x/scout.md",
+			"---\ntools: Read, Grep, Glob, Bash, WebFetch, WebSearch, NotebookEdit, Skill, Task, SendMessage, ToolSearch, mcp__github__get_issue\n---\nbody",
+		);
+		expect(agent?.tools).toEqual([
+			"read",
+			"grep",
+			"find",
+			"bash",
+			"web_fetch",
+			"web_search",
+			"notebook_edit",
+			"skill",
+			"Agent",
+			"SendMessage",
+			"tool_search",
+			"mcp__github__get_issue",
+		]);
+	});
+
+	it("parseToolList collapses duplicates across spellings and trims yaml entries", () => {
+		expect(parseToolList(["Read", " read ", "Glob", "find"])).toEqual(["read", "find"]);
+		expect(parseToolList("")).toBeUndefined();
+		expect(parseToolList(42)).toBeUndefined();
 	});
 
 	it("falls back to the filename when no name is given", () => {
@@ -145,6 +177,22 @@ describe("namespaced discovery", () => {
 	});
 });
 
+describe("child tool allowlist (CC agent files)", () => {
+	it("keeps the child's plumbing when an allowlist omits it", () => {
+		expect(childToolAllowlist(["read", "grep"])).toEqual(["read", "grep", "SendMessage", "tool_search", "structured_output"]);
+		expect(childToolAllowlist(["read", "SendMessage"])).toEqual(["read", "SendMessage", "tool_search", "structured_output"]);
+		expect(childToolAllowlist(undefined)).toBeUndefined();
+	});
+
+	it("reports an allowlist as unusable only when none of the agent's own names was registered", () => {
+		const registered = ["read", "bash", "SendMessage", "tool_search", "structured_output"];
+		expect(usableAllowlistedTools(registered, ["foo", "bar"])).toEqual([]);
+		expect(usableAllowlistedTools(registered, ["read", "foo"])).toEqual(["read"]);
+		// A deliberately narrow agent that lists only the plumbing is narrow, not broken.
+		expect(usableAllowlistedTools(registered, ["SendMessage"])).toEqual(["SendMessage"]);
+	});
+});
+
 describe("forkTaskMessage", () => {
 	it("frames the task with do-only-this and not-the-inherited-topic instructions", async () => {
 		const { forkTaskMessage } = await import("../../extensions/subagents/outcome.ts");
@@ -153,7 +201,17 @@ describe("forkTaskMessage", () => {
 		expect(framed).toContain("inherited context");
 		expect(framed).toContain("Do ONLY the task below");
 		expect(framed).toContain("cannot see the parent's background tasks");
+		expect(framed).not.toContain("worktree");
 		expect(framed.endsWith("Task:\nreport exactly: DONE")).toBe(true);
+	});
+
+	it("tells a worktree-isolated fork that its paths moved, and where to write instead", async () => {
+		const { forkTaskMessage } = await import("../../extensions/subagents/outcome.ts");
+		const framed = forkTaskMessage("fix the bug", { worktreePath: "/tmp/cc-wt-x/tree", parentCwd: "/Users/me/repo" });
+		expect(framed).toContain("your working directory is now /tmp/cc-wt-x/tree");
+		expect(framed).toContain("Every path under /Users/me/repo in the inherited context refers to the shared checkout");
+		expect(framed).toContain("must NOT modify");
+		expect(framed.endsWith("Task:\nfix the bug")).toBe(true);
 	});
 });
 

@@ -30,6 +30,16 @@ export function isWritingTool(toolName: string): boolean {
 	return WRITING_TOOLS.has(toolName);
 }
 
+/**
+ * The path a file tool call targets (`path` for pi's built-ins, `file_path`
+ * for Claude Code-shaped calls), or undefined. The one place that knows the
+ * field names, shared by every path-based gate.
+ */
+export function pathArgument(input: Record<string, unknown> | undefined): string | undefined {
+	const path = input?.path ?? input?.file_path;
+	return typeof path === "string" ? path : undefined;
+}
+
 /** Case-folded on darwin/win32, where the filesystem is case-insensitive. */
 function normalize(target: string): string {
 	const normalized = resolve(target).replace(/\\/g, "/").replace(/\/+$/, "");

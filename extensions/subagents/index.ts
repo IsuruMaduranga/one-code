@@ -192,7 +192,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	// widget carries the background-shell manager (chip → list → details), fed
 	// by the bash tasks that cross TASK_REGISTER_CHANNEL.
 	const liveRuns = new LiveRunRegistry();
-	const liveHandles = new Map<string, { kill(): void }>();
+	/** taskId → kill handle: a resident's kill resolves when it has exited; a blocking run exposes `result`. */
+	const liveHandles = new Map<string, { kill(): void | Promise<void>; result?: Promise<unknown> }>();
 	let lastCtx: ExtensionContext | undefined;
 	const shellTasks = trackShellTasks(pi);
 	const panel = new SubagentWidget(liveRuns, () => lastCtx, shellTasks);
@@ -417,21 +418,14 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	};
 
 	let shuttingDown = false;
-	let currentSessionId: string | undefined;
 	pi.on("session_start", (_event, ctx) => {
 		lastCtx = ctx;
-		// A NEW session (/clear, /new) must not keep the old one's agents: a
-		// resident finishing later would post into a conversation that never
-		// spawned it, and its name would shadow a new run's (review S5).
-		const id = ctx.sessionManager.getSessionId?.();
-		if (currentSessionId !== undefined && id !== currentSessionId) {
-			stopAllAgents();
-			residents.clear();
-			liveHandles.clear();
-			runningNames.clear();
-			registry.clear();
-		}
-		currentSessionId = id;
+		// A replaced session (/clear, /new, /resume) never reaches this instance
+		// with the old one's agents: pi emits `session_shutdown` (reason "new" /
+		// "resume") to the OLD extension instance, which stops every agent below,
+		// then re-runs this factory for the new session (verified live on pi
+		// 0.84.1, SUBAGENT-REVIEW-2026-09-04 appendix B). So the state here is
+		// always fresh; only a resumed session's persisted run records are rebuilt.
 		reconstructRuns(ctx);
 		emitModelStatus(ctx);
 		emitAgentCatalog(ctx);
@@ -444,22 +438,34 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	});
 	pi.on("session_tree", (_event, ctx) => reconstructRuns(ctx));
 	pi.on("session_shutdown", async () => {
-		// Teardown: kills must not surface as "terminated" notifications, and the
-		// worktree cleanups the exits trigger get a bounded moment to finish
-		// before the process goes (review S14).
+		// Teardown — at process exit AND on /clear, /new, /resume (pi replaces the
+		// session and re-runs this factory; afterwards every use of this
+		// instance's ctx or pi throws). Kills must not surface as "terminated"
+		// notifications; the panel and the transcript view must stop painting
+		// before the ctx goes stale (a timer painting on the dead ctx took the
+		// whole process down — SUBAGENT-REVIEW H1); and the exits — including the
+		// worktree cleanups they trigger — get a bounded moment to finish (S14).
 		shuttingDown = true;
-		const exits = [...liveHandles.values()].map((h) => ("result" in h ? (h as { result?: Promise<unknown> }).result : undefined)).filter(Boolean);
-		stopAllAgents();
+		closeView();
+		const exits = stopAllAgents();
 		panel.dispose();
+		lastCtx = undefined;
 		await Promise.race([Promise.allSettled(exits), new Promise((resolve) => setTimeout(resolve, 1_500))]);
 	});
 
 	// --- The subagent panel: strip soft focus + Enter-to-view transcript swap ---
 
 	/** Stop one live agent by task id (blocking-run handle or resident task). */
-	const stopAgent = (taskId: string) => liveHandles.get(taskId)?.kill();
-	const stopAllAgents = () => {
-		for (const [, handle] of liveHandles) handle.kill();
+	const stopAgent = (taskId: string) => void liveHandles.get(taskId)?.kill();
+	/** Stop every live agent; returns one settle promise per agent (a resident's exit, a blocking run's result). */
+	const stopAllAgents = (): Promise<unknown>[] => {
+		const exits: Promise<unknown>[] = [];
+		for (const [, handle] of liveHandles) {
+			const killed = handle.kill();
+			const settled = handle.result ?? killed;
+			if (settled) exits.push(settled);
+		}
+		return exits;
 	};
 
 	/**
@@ -1040,6 +1046,14 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		return depth < MAX_SPAWN_DEPTH ? [childAgentTool(record, depth)] : [];
 	};
 
+	/**
+	 * The text a child's first turn is prompted with: a fork gets the inherited-
+	 * context framing (plus, in a worktree, where its paths moved to); a named
+	 * agent gets the task as written. Shared by both spawn paths.
+	 */
+	const frameTask = (request: RunRequest, worktree: Worktree | undefined, parentCwd: string): string =>
+		request.fork ? forkTaskMessage(request.task, worktree ? { worktreePath: worktree.path, parentCwd } : undefined) : request.task;
+
 	/** Create a run's isolation worktree and point its record at it (both spawn paths). */
 	const isolateInWorktree = async (ctx: ExtensionContext, record: AgentRunRecord, name: string): Promise<Worktree> => {
 		const worktree = await createWorktree(ctx.cwd, name);
@@ -1090,7 +1104,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		const runtime = await getRuntime(ctx);
 		const handle = runtime.run({
 			agent: agentDef,
-			task: request.task,
+			task: frameTask(request, worktree, ctx.cwd),
 			cwd: record.cwd,
 			forkFrom: request.fork ? forkFrom : undefined,
 			parentSystemPrompt: request.fork ? ctx.getSystemPrompt() : undefined,
@@ -1583,7 +1597,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					finished,
 				};
 				pi.events.emit(TASK_REGISTER_CHANNEL, task);
-				handle.send(p.request.fork ? forkTaskMessage(p.request.task) : p.request.task);
+				handle.send(frameTask(p.request, worktree, parentCwd));
 
 				lines.push(
 					`⏳ ${p.record.name} (task ${p.record.taskId}) running in background${logPath ? ` — interim output readable at ${logPath}` : ""}`,

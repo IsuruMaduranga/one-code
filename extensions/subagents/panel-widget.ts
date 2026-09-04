@@ -12,7 +12,7 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { BackgroundTask } from "../background/registry.ts";
 import type { ShellTaskTracker } from "../lib/shell-tasks.ts";
-import { linesComponent, safeThemeBold, safeThemeInverse, safeThemePaint } from "../lib/tui-render.ts";
+import { linesComponent, liveUiCtx, safeThemeBold, safeThemeInverse, safeThemePaint } from "../lib/tui-render.ts";
 import { buildRows, MAX_STRIP_ROWS, nextAgentTaskId, renderStrip, type PanelRow } from "./panel-render.ts";
 import type { LiveRunRegistry } from "./live-runs.ts";
 import {
@@ -51,20 +51,35 @@ export class SubagentWidget {
 	private viewedId: string | undefined;
 	tui: TuiLike | undefined;
 	editorBaseline: unknown;
+	/**
+	 * Set by dispose(). pi replaces the session (and this extension instance) on
+	 * /clear, /new and /resume, then invalidates the old ctx: every getter on it
+	 * throws. Children killed at that shutdown keep emitting registry changes for
+	 * a moment, so schedule()/render() must become no-ops the instant we are
+	 * disposed — a timer firing render() against the stale ctx crashed the whole
+	 * process (SUBAGENT-REVIEW H1).
+	 */
+	private disposed = false;
+	private readonly unsubscribes: Array<() => void> = [];
 
 	constructor(
 		private readonly registry: LiveRunRegistry,
 		private readonly getCtx: () => ExtensionContext | undefined,
 		private readonly shells?: ShellTaskTracker,
 	) {
-		registry.subscribe(() => this.schedule());
-		shells?.subscribe(() => this.schedule());
+		this.unsubscribes.push(registry.subscribe(() => this.schedule()));
+		if (shells) this.unsubscribes.push(shells.subscribe(() => this.schedule()));
+	}
+
+	/** The ctx to paint on: none once disposed, or once pi has invalidated it (lib/tui-render.ts liveUiCtx). */
+	private liveCtx(): ExtensionContext | undefined {
+		return this.disposed ? undefined : liveUiCtx(this.getCtx());
 	}
 
 	private rows(): PanelRow[] {
-		const ctx = this.getCtx();
 		let mainBusy = false;
 		try {
+			const ctx = this.getCtx();
 			mainBusy = ctx ? !ctx.isIdle() : false;
 		} catch {
 			mainBusy = false;
@@ -193,16 +208,31 @@ export class SubagentWidget {
 		return Boolean(this.tui && this.editorBaseline && this.tui.getFocusedComponent?.() === this.editorBaseline);
 	}
 
+	/** Whether dispose() has run (for tests and callers that hold a reference). */
+	get isDisposed(): boolean {
+		return this.disposed;
+	}
+
 	dispose(): void {
+		if (this.disposed) return;
+		// Order matters: the widget is removed through the ctx BEFORE the flag
+		// flips (liveCtx() refuses a disposed panel), and the subscriptions go
+		// so no later registry/shell event can re-arm a timer.
+		const ctx = this.liveCtx();
+		this.disposed = true;
 		if (this.timer) clearTimeout(this.timer);
 		if (this.ticker) clearInterval(this.ticker);
 		this.timer = this.ticker = undefined;
-		const ctx = this.getCtx();
-		if (ctx?.hasUI) ctx.ui.setWidget(WIDGET_KEY, undefined);
+		for (const unsubscribe of this.unsubscribes.splice(0)) unsubscribe();
+		try {
+			ctx?.ui.setWidget(WIDGET_KEY, undefined);
+		} catch {
+			// The ctx went stale between the check and the call; nothing to remove.
+		}
 	}
 
 	private schedule(): void {
-		if (this.timer) return;
+		if (this.disposed || this.timer) return;
 		this.timer = setTimeout(() => {
 			this.timer = undefined;
 			this.render();
@@ -228,8 +258,13 @@ export class SubagentWidget {
 	}
 
 	private render(): void {
-		const ctx = this.getCtx();
-		if (!ctx?.hasUI) return;
+		const ctx = this.liveCtx();
+		if (!ctx) {
+			// No live UI to paint (headless, or the session was replaced): stop the
+			// ticker too, or it keeps waking a panel nobody can see.
+			this.syncTicker(false);
+			return;
+		}
 		const rows = this.rows();
 		const shellVisible = this.shellVisible();
 		// The chip is time-invariant while every shell runs (count changes arrive
@@ -284,7 +319,7 @@ export class SubagentWidget {
 	 * all without needing another registry event.
 	 */
 	private syncTicker(active: boolean): void {
-		if (active && !this.ticker) {
+		if (active && !this.ticker && !this.disposed) {
 			this.ticker = setInterval(() => this.render(), 1000);
 			this.ticker.unref?.();
 		} else if (!active && this.ticker) {

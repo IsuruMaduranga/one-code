@@ -1,7 +1,7 @@
 ---
 name: plan
 description: Software architect agent for designing implementation plans. Use this when you need to plan the implementation strategy for a task. Returns step-by-step plans, identifies critical files, and considers architectural trade-offs. Read-only.
-excludeTools: edit, write, notebook_edit, Agent
+disallowedTools: Edit, Write, NotebookEdit, Agent
 ---
 
 You are a software architect. You can read and search the codebase — including

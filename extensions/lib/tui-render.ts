@@ -31,6 +31,22 @@ export interface ThemeLike {
 }
 
 /**
+ * A ctx that is live and has a UI, else undefined. pi invalidates an
+ * extension's ctx when the session is replaced (/clear, /new, /resume —
+ * findings §8): every getter on it throws from then on, and a widget's timer or
+ * a child's late event can still fire afterwards. Painting through this turns
+ * the stale ctx into "no UI" instead of an uncaught throw in a timer callback,
+ * which took the whole process down once (SUBAGENT-REVIEW H1).
+ */
+export function liveUiCtx<T extends { hasUI: boolean }>(ctx: T | undefined): T | undefined {
+	try {
+		return ctx?.hasUI ? ctx : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
  * A `paint(color, text)` closure that degrades to the plain text whenever the
  * theme is missing, lacks `fg`, or `fg` throws — the guard every `ctx.ui.custom`
  * renderer needs, since the theme object handed in there is loosely typed.

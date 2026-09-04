@@ -10,6 +10,7 @@
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { analyzeShellCommand, hasInjectionSyntax, parseCommand } from "../auto-mode/shell-analysis.ts";
+import { pathArgument } from "../auto-mode/paths.ts";
 import { isProtectedPath, isWritingTool } from "./protected-paths.ts";
 import { expandTilde } from "../lib/paths.ts";
 
@@ -37,6 +38,8 @@ const CC_TOOL_NAMES: Record<string, string> = {
 	agent: "Agent",
 	subagent: "Agent", // pre-rename internal name, so old permission rules still match
 	skill: "skill",
+	toolsearch: "tool_search",
+	tool_search: "tool_search",
 	askuserquestion: "ask_user_question",
 	ask_user_question: "ask_user_question",
 	workflow: "workflow",
@@ -293,8 +296,7 @@ export function matchesPathPattern(pattern: string, subject: string, cwd: string
 /** The argument a rule pattern applies to, per tool. */
 export function extractSubject(toolName: string, input: Record<string, unknown>): string {
 	if (toolName === "bash") return typeof input.command === "string" ? input.command : "";
-	const path = input.path ?? input.file_path;
-	return typeof path === "string" ? path : "";
+	return pathArgument(input) ?? "";
 }
 
 /**

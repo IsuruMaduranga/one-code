@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
 	deriveActivity,
 	deriveLabel,
@@ -489,5 +489,67 @@ describe("decodeStripKey", () => {
 		const after = decodeStripKey("x", true);
 		expect(after.key).toBe("stop");
 		expect(after.chordArmed).toBe(false);
+	});
+});
+
+// pi replaces the session (and this extension instance) on /clear, /new and
+// /resume, then invalidates the old ctx so every getter throws. Children killed
+// at that shutdown keep emitting registry changes for a moment; a timer that
+// painted on the stale ctx crashed the whole process (SUBAGENT-REVIEW H1).
+describe("SubagentWidget after dispose", () => {
+	const makeCtx = (state: { stale: boolean; setWidget: (key: string, value: unknown) => void }) =>
+		({
+			get hasUI() {
+				if (state.stale) throw new Error("This extension ctx is stale after session replacement or reload.");
+				return true;
+			},
+			isIdle() {
+				if (state.stale) throw new Error("stale");
+				return true;
+			},
+			ui: { setWidget: state.setWidget },
+		}) as unknown as import("@earendil-works/pi-coding-agent").ExtensionContext;
+
+	it("stops scheduling, ticking and painting once disposed, even when the ctx has gone stale", async () => {
+		const { SubagentWidget } = await import("../../extensions/subagents/panel-widget.ts");
+		vi.useFakeTimers();
+		try {
+			const calls: Array<[string, unknown]> = [];
+			const state = { stale: false, setWidget: (key: string, value: unknown) => calls.push([key, value]) };
+			const registry = new LiveRunRegistry();
+			const widget = new SubagentWidget(registry, () => makeCtx(state));
+			registry.register({ taskId: "t1", name: "explore-1", agentType: "explore", task: "look", startedAt: Date.now() });
+			vi.advanceTimersByTime(300);
+			expect(calls.length).toBeGreaterThan(0);
+			expect(calls.at(-1)?.[1]).not.toBeUndefined(); // strip rendered
+
+			widget.dispose();
+			expect(widget.isDisposed).toBe(true);
+			expect(calls.at(-1)?.[1]).toBeUndefined(); // widget removed on dispose
+			const painted = calls.length;
+
+			// The session is replaced: the ctx now throws; the dying child still reports.
+			state.stale = true;
+			registry.block("t1", { kind: "text", text: "bye" });
+			registry.finish("t1", true);
+			expect(() => vi.advanceTimersByTime(10_000)).not.toThrow();
+			expect(calls.length).toBe(painted); // nothing painted after dispose
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("treats a ctx whose getters throw as no UI even before dispose", async () => {
+		const { SubagentWidget } = await import("../../extensions/subagents/panel-widget.ts");
+		vi.useFakeTimers();
+		try {
+			const state = { stale: true, setWidget: () => {} };
+			const registry = new LiveRunRegistry();
+			new SubagentWidget(registry, () => makeCtx(state));
+			registry.register({ taskId: "t2", name: "plan-1", agentType: "plan", task: "plan", startedAt: Date.now() });
+			expect(() => vi.advanceTimersByTime(2_000)).not.toThrow();
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });

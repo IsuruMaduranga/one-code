@@ -22,8 +22,8 @@ import { agentPromptIdentity, PrefixWarmGate, prefixWarmKey, type Release } from
 import type { PermissionBridge } from "../permissions/subagent-gate.ts";
 import { findConfigured, modelSpec } from "../lib/model-policy.ts";
 import { isModelUnavailableError } from "../auto-mode/model-select.ts";
-import type { AgentDefinition } from "./agents.ts";
-import { type ChildHandle, type ChildOutcome, forkTaskMessage, type RpcChildHandle } from "./outcome.ts";
+import { type AgentDefinition, childToolAllowlist, usableAllowlistedTools } from "./agents.ts";
+import type { ChildHandle, ChildOutcome, RpcChildHandle } from "./outcome.ts";
 import { sendToMainTool } from "./send-to-main-tool.ts";
 import { SessionTurnTracker } from "./session-turns.ts";
 import type { UsageTotals } from "./usage.ts";
@@ -307,6 +307,8 @@ export class SubagentRuntime {
 					: spec.sessionDir
 						? SessionManager.create(spec.cwd, spec.sessionDir)
 						: SessionManager.inMemory(spec.cwd);
+		// A fork keeps the parent's toolset; only a named agent carries an allowlist.
+		const allowlist = spec.forkFrom ? undefined : spec.agent?.tools;
 		const make = async (model: string | undefined): Promise<Session> => {
 			const { session } = await createAgentSession({
 				cwd: spec.cwd,
@@ -314,7 +316,7 @@ export class SubagentRuntime {
 				modelRuntime: this.modelRuntime,
 				model: (model ? findConfigured(this.availableModels, model) : undefined) as never,
 				thinkingLevel: spec.thinking as never,
-				tools: spec.forkFrom ? undefined : spec.agent?.tools,
+				tools: childToolAllowlist(allowlist),
 				// Denylist grants (CC's "All tools except …" shape) — filters built-ins,
 				// extension tools, and injected customTools alike.
 				excludeTools: spec.forkFrom ? undefined : spec.agent?.excludeTools,
@@ -322,6 +324,21 @@ export class SubagentRuntime {
 				resourceLoader: loader,
 				sessionManager: newSessionManager(),
 			});
+			// An allowlist that matched nothing real would run a tool-less agent
+			// (pi drops unknown names silently). Fail loud with the fix named.
+			if (
+				allowlist &&
+				usableAllowlistedTools(
+					session.getAllTools().map((t) => t.name),
+					allowlist,
+				).length === 0
+			) {
+				session.dispose();
+				throw new Error(
+					`Agent "${spec.agent?.name}" lists tools (${allowlist.join(", ")}) that match no available tool. ` +
+						"Use Claude Code names (Read, Edit, Write, Bash, Grep, Glob, WebFetch, WebSearch, NotebookEdit, Skill, Agent, SendMessage) or pi names (read, edit, write, bash, grep, find, ls, …) in the agent file's `tools` list.",
+				);
+			}
 			return session;
 		};
 		try {
@@ -338,9 +355,12 @@ export class SubagentRuntime {
 		}
 	}
 
-	/** A blocking run (nested spawn, SendMessage resume): one prompt, awaited, then disposed. */
+	/**
+	 * A blocking run (nested spawn, SendMessage resume, one-shot-mode spawn): one
+	 * prompt, awaited, then disposed. The caller frames a fork's task
+	 * (`forkTaskMessage`) — it knows the worktree the fork may be isolated in.
+	 */
 	run(options: SubagentRunOptions): ChildHandle {
-		const task = options.forkFrom ? forkTaskMessage(options.task) : options.task;
 		const tracker = new SessionTurnTracker();
 		let session: Session | undefined;
 
@@ -368,7 +388,7 @@ export class SubagentRuntime {
 					// yet: a cancellation that landed during the gate wait must stop the
 					// turn from starting at all, not let it run to completion unnoticed.
 					if (options.signal?.aborted) throw new Error("cancelled before the first request was sent");
-					await session.prompt(task);
+					await session.prompt(options.task);
 				} finally {
 					releasePrefix?.(false);
 				}
@@ -497,7 +517,7 @@ export class SubagentRuntime {
 			busy: () => turnActive || !session.isIdle,
 			exited: () => exited,
 			kill: () => {
-				if (exited) return;
+				if (exited) return Promise.resolve();
 				exited = true;
 				// Report an in-flight turn as terminated, not as a normal completion:
 				// the settle path can't tell an abort's partial text from success, so
@@ -512,11 +532,15 @@ export class SubagentRuntime {
 					failed: true,
 				});
 				// onExit only after the abort settles: it triggers worktree cleanup,
-				// which must not race an aborting session still writing files.
-				void session.abort().finally(() => {
-					session.dispose();
-					options.onExit?.();
-				});
+				// which must not race an aborting session still writing files. The
+				// returned promise lets session_shutdown wait for exactly that.
+				return session
+					.abort()
+					.catch(() => undefined)
+					.finally(() => {
+						session.dispose();
+						options.onExit?.();
+					});
 			},
 			release: () => {
 				if (exited || turnActive || !session.isIdle) return;

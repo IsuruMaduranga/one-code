@@ -12,7 +12,7 @@
  */
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { linesComponent, safeThemeBold, safeThemePaint } from "../lib/tui-render.ts";
+import { linesComponent, liveUiCtx, safeThemeBold, safeThemePaint } from "../lib/tui-render.ts";
 import type { RunHandle, WorkflowRunManager } from "./run-manager.ts";
 import { MAX_STATUS_ROWS, renderStatusRows, type ViewerRunSnapshot } from "./viewer.ts";
 
@@ -89,14 +89,23 @@ export class WorkflowWidget {
 		return Boolean(this.tui && this.editorBaseline && this.tui.getFocusedComponent?.() === this.editorBaseline);
 	}
 
+	/**
+	 * Set by dispose(): pi replaces the session (and this instance) on /clear,
+	 * /new and /resume and invalidates the old ctx, while aborting runs still
+	 * report progress for a moment — schedule()/render() must go quiet the
+	 * instant we are disposed (same hazard as the subagent panel, SUBAGENT-REVIEW H1).
+	 */
+	private disposed = false;
+
 	dispose(): void {
+		this.disposed = true;
 		if (this.timer) clearTimeout(this.timer);
 		if (this.ticker) clearInterval(this.ticker);
 		this.timer = this.ticker = undefined;
 	}
 
 	private schedule(): void {
-		if (this.timer) return;
+		if (this.disposed || this.timer) return;
 		this.timer = setTimeout(() => {
 			this.timer = undefined;
 			this.render();
@@ -105,8 +114,11 @@ export class WorkflowWidget {
 	}
 
 	private render(): void {
-		const ctx = this.getCtx();
-		if (!ctx?.hasUI) return;
+		const ctx = this.disposed ? undefined : liveUiCtx(this.getCtx());
+		if (!ctx) {
+			this.syncTicker([]);
+			return;
+		}
 		const totalRuns = this.manager.list().length;
 		const runs = this.manager.snapshots(MAX_STATUS_ROWS);
 		this.syncTicker(runs);
@@ -141,7 +153,7 @@ export class WorkflowWidget {
 	/** Keep elapsed time ticking while any run is live; stop when none is. */
 	private syncTicker(runs: ViewerRunSnapshot[]): void {
 		const active = runs.some((run) => run.status === "running");
-		if (active && !this.ticker) {
+		if (active && !this.ticker && !this.disposed) {
 			this.ticker = setInterval(() => this.render(), 1000);
 			this.ticker.unref?.();
 		} else if (!active && this.ticker) {
