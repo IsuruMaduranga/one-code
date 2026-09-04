@@ -178,11 +178,15 @@ export class SubagentRuntime {
 		this.modelRuntime = modelRuntime;
 		this.baseCwd = baseCwd;
 		this.getMcpTools = getMcpTools;
-		this.getPermissionBridge = () => {
+		// One stable wrapper (the gate calls the getter per tool call; allocating a
+		// closure each time would be waste). A bridge that vanished between the
+		// getter and the call throws, which the gate turns into a fail-closed deny.
+		const namedBridge: PermissionBridge = (call) => {
 			const bridge = getPermissionBridge();
-			if (!bridge) return undefined;
-			return (call) => bridge({ ...call, agent: call.agent ?? (call.sessionId ? this.runNames.get(call.sessionId) : undefined) });
+			if (!bridge) throw new Error("the parent's permission bridge is no longer available");
+			return bridge({ ...call, agent: call.agent ?? (call.sessionId ? this.runNames.get(call.sessionId) : undefined) });
 		};
+		this.getPermissionBridge = () => (getPermissionBridge() ? namedBridge : undefined);
 	}
 
 	static async create(

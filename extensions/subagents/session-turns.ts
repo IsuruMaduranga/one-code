@@ -33,11 +33,12 @@ export class SessionTurnTracker {
 	/** Set when the turn's last assistant message ended with a provider error; cleared by a later success. */
 	providerError: string | undefined;
 	/**
-	 * Set when the turn was cut short: by pi (the aborted assistant message
-	 * carries `stopReason: "aborted"`), or by the runner via `markAborted` (an
-	 * abort that lands during a tool call leaves no such message — the tool
-	 * results just say "Operation aborted" and the loop ends). Either way the
-	 * partial text must not be reported as a completion (SUBAGENT-REVIEW M3).
+	 * Set when the turn was cut short, so its partial text is never reported as
+	 * a completion (SUBAGENT-REVIEW M3). The runner's `markAborted` is the
+	 * authoritative setter: every `session.abort()` the runner issues marks the
+	 * tracker first, and an abort that lands during a tool call leaves no
+	 * aborted assistant message to observe. The `stopReason: "aborted"` branch
+	 * in `process` is belt-and-braces for an abort the runner did not initiate.
 	 */
 	aborted: string | undefined;
 	/** Every turn's final text joined, for task_output on a resident agent. */

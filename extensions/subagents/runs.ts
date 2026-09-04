@@ -41,6 +41,30 @@ export function nextRunName(existing: Iterable<string>, agent: string): string {
 	}
 }
 
+/**
+ * The name a new run gets: the requested one when free, else a fresh
+ * `<agent>-<n>`. A run name is an identifier for the whole session, so a reused
+ * one is replaced rather than shadowing the older run (which would vanish from
+ * list_agents while still running). `note` is the model-facing explanation
+ * when the request was overridden; the caller prepends it to the spawn result.
+ * Shared by the main Agent tool and the nested spawn tool.
+ */
+export function resolveRunName(
+	registry: Pick<RunRegistry, "names" | "resolve">,
+	agent: string,
+	requested: string | undefined,
+): { name: string; note?: string } {
+	const taken = new Set(registry.names());
+	const wanted = requested?.trim();
+	if (wanted && !taken.has(wanted)) return { name: wanted };
+	const name = nextRunName(taken, agent);
+	if (!wanted) return { name };
+	return {
+		name,
+		note: `Note: the name "${wanted}" is already used by task ${registry.resolve(wanted)?.taskId ?? "?"} in this session; this run is named "${name}".`,
+	};
+}
+
 /** Newest .jsonl under `dir` (recursive) — the child session pi created there. */
 export function findSessionFile(dir: string): string | undefined {
 	let newest: { path: string; mtime: number } | undefined;

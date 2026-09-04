@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { findSessionFile, nextRunName, RunRegistry } from "../../extensions/subagents/runs.ts";
+import { findSessionFile, nextRunName, resolveRunName, RunRegistry } from "../../extensions/subagents/runs.ts";
 
 describe("nextRunName", () => {
 	it("allocates the lowest free <agent>-<n>", () => {
@@ -73,3 +73,23 @@ describe("RunRegistry.clear (S5)", () => {
 	});
 });
 
+
+describe("resolveRunName", () => {
+	const record = (name: string, taskId: string) => ({ name, agent: "explore", taskId, sessionSearchDir: "", cwd: "/x" });
+
+	it("keeps a free requested name, and allocates <agent>-<n> when none was requested", () => {
+		const registry = new RunRegistry();
+		expect(resolveRunName(registry, "explore", "scout")).toEqual({ name: "scout" });
+		expect(resolveRunName(registry, "explore", undefined)).toEqual({ name: "explore-1" });
+		expect(resolveRunName(registry, "explore", "  ")).toEqual({ name: "explore-1" });
+	});
+
+	it("renames a colliding request and explains which task holds the name (M1)", () => {
+		const registry = new RunRegistry();
+		registry.add(record("reviewer", "abc12345"));
+		registry.add(record("explore-1", "def67890"));
+		const resolved = resolveRunName(registry, "explore", "reviewer");
+		expect(resolved.name).toBe("explore-2");
+		expect(resolved.note).toBe('Note: the name "reviewer" is already used by task abc12345 in this session; this run is named "explore-2".');
+	});
+});

@@ -94,6 +94,7 @@ export function permissionGateFactory(
 			pi.on("tool_call", async (event, ctx) => {
 				if (neverGate.has(event.toolName)) return undefined;
 				const runCwd = ctx?.cwd ?? cwd;
+				const sessionId = ctx?.sessionManager?.getSessionId?.();
 
 				// Preferred path: route the call through the parent's real permission
 				// pipeline. Everything here — resolving the bridge AND invoking it — fails
@@ -110,14 +111,13 @@ export function permissionGateFactory(
 							input,
 							cwd: runCwd,
 							signal: ctx?.signal,
-							sessionId: ctx?.sessionManager?.getSessionId?.(),
+							sessionId,
 						});
 					}
 				} catch (error) {
 					return { block: true, reason: `Permission bridge failed (${(error as Error).message}); denied to fail safe.` };
 				}
 
-				const sessionId = ctx?.sessionManager?.getSessionId?.();
 				if (!scratchpadDirPath && sessionId) scratchpadDirPath = sessionScratchpadDir(runCwd, sessionId);
 				const tool = normalizeToolName(event.toolName);
 				const subject = extractSubject(tool, event.input as Record<string, unknown>);

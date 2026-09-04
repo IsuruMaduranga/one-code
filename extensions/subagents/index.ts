@@ -46,7 +46,7 @@ import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { type BackgroundTask, generateTaskId, TASK_REGISTER_CHANNEL } from "../background/registry.ts";
 import { type ChildAction } from "../auto-mode/actions.ts";
 import { type ChildOutcome, forkTaskMessage, OUTPUT_CAP, type RpcChildHandle } from "./outcome.ts";
-import { type AgentRunRecord, nextRunName, RunRegistry } from "./runs.ts";
+import { type AgentRunRecord, resolveRunName, RunRegistry } from "./runs.ts";
 import { SubagentRuntime } from "./runner.ts";
 import { emptyUsage, formatStats, type UsageTotals } from "./usage.ts";
 import { cleanupWorktree, createWorktree, isGitRepo, type Worktree } from "./worktree.ts";
@@ -312,6 +312,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	const reconstructRuns = (ctx: ExtensionContext) => {
 		/** Loop-invariant; computed lazily so worktree-free histories pay nothing. */
 		let sharedRoot: string | undefined;
+		/** A resident messaged N times embeds its record N times; stat and register each worktree once. */
+		const worktreesSeen = new Set<string>();
 		for (const entry of ctx.sessionManager.getBranch()) {
 			if (entry.type !== "message") continue;
 			const msg = entry.message;
@@ -328,7 +330,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				// `git rev-parse` because session_start handlers must stay fast
 				// (findings §15); a slightly-off sharedRoot only softens one message —
 				// the worktree containment check itself uses the exact record.cwd.
-				if (record.worktree && existsSync(record.cwd)) {
+				if (record.worktree && !worktreesSeen.has(record.cwd)) {
+					worktreesSeen.add(record.cwd);
+					if (!existsSync(record.cwd)) continue;
 					sharedRoot ??= findGitRoot(ctx.cwd) ?? ctx.cwd;
 					registerWorktreeIsolation(record.cwd, sharedRoot);
 				}
@@ -978,9 +982,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				}
 				if (!task) return err("`task` is required: a complete, self-contained instruction for the agent.");
 
-				const taken = new Set(registry.names());
-				const requestedName = typeof p.name === "string" ? p.name.trim() : "";
-				const name = requestedName && !taken.has(requestedName) ? requestedName : nextRunName(taken, agentName);
+				const { name, note: renamedNote } = resolveRunName(registry, agentName, typeof p.name === "string" ? p.name : undefined);
 				// Same parent-side model resolution as the main Agent tool, minus
 				// per-call overrides: the agent's own model, else the configured
 				// default, else the session model.
@@ -1053,7 +1055,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					{ taskId: parentRecord.taskId, depth: parentDepth },
 				);
 				return {
-					content: [{ type: "text" as const, text: `${result.output}\n\n(${formatStats(result.toolCalls, result.usage)})` }],
+					content: [
+						{
+							type: "text" as const,
+							text: `${renamedNote ? `${renamedNote}\n\n` : ""}${result.output}\n\n(${formatStats(result.toolCalls, result.usage)})`,
+						},
+					],
 					details: { agentRuns: [record] },
 					isError: result.failed ?? false,
 				};
@@ -1250,18 +1257,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				};
 			}
 
-			const taken = new Set(registry.names());
-			/** A requested name already used this session → the run gets a fresh one, and the result says so. */
+			/** A requested name already used this session → the run gets a fresh one, and the result says so (M1). */
 			const renamed: string[] = [];
 			const requested: RunRequest[] = [{ agent: params.subagent_type, task: params.task ?? "", name: params.name }].map((entry) => {
-				// Same rule as the nested spawn tool: a name is an identifier for the whole
-				// session, so a reused one is replaced rather than shadowing the older run
-				// (which would vanish from list_agents while still running — M1).
-				const name = entry.name && !taken.has(entry.name) ? entry.name : nextRunName(taken, entry.agent);
-				if (entry.name && name !== entry.name) {
-					renamed.push(`Note: the name "${entry.name}" is already used by task ${registry.resolve(entry.name)?.taskId ?? "?"} in this session; this run is named "${name}".`);
-				}
-				taken.add(name);
+				const { name, note } = resolveRunName(registry, entry.agent, entry.name);
+				if (note) renamed.push(note);
 				return {
 					agent: entry.agent,
 					task: entry.task,
