@@ -16,7 +16,15 @@
 
 import os from "node:os";
 import { join } from "node:path";
-import { DefaultResourceLoader, type InlineExtension, ModelRuntime } from "@earendil-works/pi-coding-agent";
+import {
+	type AgentSession,
+	type CreateAgentSessionOptions,
+	createAgentSession,
+	DefaultResourceLoader,
+	type ExtensionError,
+	type InlineExtension,
+	ModelRuntime,
+} from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { HookBridge } from "../hooks/subagent-bridge.ts";
 import type { PermissionBridge } from "../permissions/subagent-gate.ts";
@@ -94,7 +102,20 @@ export interface AgentLoaderOptions {
 	noContextFiles?: boolean;
 }
 
-/** Build and `reload()` a resource loader for an in-process agent session. */
+/**
+ * Build and `reload()` a resource loader for an in-process agent session.
+ *
+ * ONE LOADER PER SESSION — never cache one across sessions. `AgentSession.dispose()`
+ * invalidates the loader's shared extension runtime, not just the session's
+ * runner: from then on every `pi.*` call from those extension instances throws
+ * the stale-ctx error and their `pi.events.on` subscriptions are gone, silently
+ * (pi's handler wrappers catch the throw, and an SDK session has no error
+ * listener). A cached loader therefore broke the second child of the same
+ * agent type, every SendMessage resume, every workflow agent after the first,
+ * and any sibling still running when one was disposed
+ * (LIFECYCLE-REVIEW-2026-09-06 H3, measured). A build costs ~3 ms once the
+ * extension modules are in jiti's cache, so there is nothing to save.
+ */
 export async function buildAgentLoader(options: AgentLoaderOptions): Promise<DefaultResourceLoader> {
 	const loader = new DefaultResourceLoader({
 		cwd: options.cwd,
@@ -115,4 +136,44 @@ export async function buildAgentLoader(options: AgentLoaderOptions): Promise<Def
 	});
 	await loader.reload();
 	return loader;
+}
+
+export interface OpenChildSessionOptions {
+	/** The loader to build for this one session (see buildAgentLoader: never shared). */
+	loader: AgentLoaderOptions;
+	/** Everything else `createAgentSession` takes: cwd, model, tools, customTools, sessionManager, … */
+	session: Omit<CreateAgentSessionOptions, "resourceLoader" | "sessionStartEvent">;
+	/**
+	 * Why the child starts — a fresh run, a resume of a persisted child session,
+	 * or a fork of the parent transcript. Handlers read it the way they read pi's
+	 * own (file-tracker reconstructs its read state on `resume`/`fork`).
+	 */
+	startReason?: "startup" | "resume" | "fork";
+	/**
+	 * Where a child extension's handler errors go. An SDK session has no listener
+	 * of its own, so without this a throwing child handler leaves no trace.
+	 */
+	onError?: (error: ExtensionError) => void;
+}
+
+/**
+ * Build a fresh loader, create the session on it, and START it: `createAgentSession`
+ * never emits `session_start` — pi emits it only from `bindExtensions`, which the
+ * CLI modes call and an SDK caller must call itself (measured, LIFECYCLE-REVIEW
+ * H2; identical in 0.84.1 and 0.85.0). Until this helper existed no child ever
+ * saw the event, so every child ran without `# claudeMd` (claude-context), with
+ * its deferred tools eager and unlisted (tool-search), without its tier's search
+ * tools (search-tools) and without read-state reconstruction on a resume
+ * (file-tracker). Binding also runs the child's `resources_discover` pass, the
+ * way pi's own modes do.
+ */
+export async function openChildSession(options: OpenChildSessionOptions): Promise<AgentSession> {
+	const loader = await buildAgentLoader(options.loader);
+	const { session } = await createAgentSession({
+		...options.session,
+		resourceLoader: loader,
+		sessionStartEvent: { type: "session_start", reason: options.startReason ?? "startup" },
+	});
+	await session.bindExtensions({ onError: options.onError });
+	return session;
 }

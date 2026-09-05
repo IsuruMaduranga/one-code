@@ -44,6 +44,8 @@ export interface HookStdinPayload {
 	/** PostCompact: the summary that replaced the compacted span. */
 	compact_summary?: string;
 	source?: string;
+	/** SessionEnd: why the session ended — clear | logout | prompt_input_exit | other (Claude Code's values). */
+	reason?: string;
 	/** Set when the call is a subagent's (Claude Code: hooks tell a child's call from the main thread's by its presence). */
 	agent_id?: string;
 	agent_type?: string;

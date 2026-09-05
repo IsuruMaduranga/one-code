@@ -12,9 +12,10 @@
  * notification and task_output can never disagree.
  */
 
-import { type ChildProcess, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import type { BackgroundTask } from "../background/registry.ts";
+import { detachedSpawnOptions, killProcessTree } from "../lib/process-tree.ts";
 
 export const STORED_OUTPUT_CAP = 200_000;
 
@@ -46,24 +47,11 @@ export interface StartBackgroundBashOptions {
 	onFinished(task: BackgroundTask, summary: BashFinishSummary): void;
 }
 
-function killTree(child: ChildProcess): void {
-	if (child.pid == null) return;
-	// Detached → own process group; negative pid signals the whole tree.
-	try {
-		process.kill(-child.pid, "SIGTERM");
-	} catch {
-		try {
-			child.kill("SIGTERM");
-		} catch {
-			// Already gone.
-		}
-	}
-}
-
 export function startBackgroundBash(options: StartBackgroundBashOptions): BackgroundTask {
+	// Own process group, so stop/timeout can signal the whole tree (lib/process-tree.ts).
 	const child = spawn(process.env.SHELL || "/bin/sh", ["-c", options.command], {
 		cwd: options.cwd,
-		detached: process.platform !== "win32",
+		...detachedSpawnOptions(),
 		stdio: ["ignore", "pipe", "pipe"],
 	});
 
@@ -101,7 +89,7 @@ export function startBackgroundBash(options: StartBackgroundBashOptions): Backgr
 		output: () => stored || (task.status === "running" ? "" : EMPTY_OUTPUT_MARKER),
 		stop: () => {
 			stopRequested = true;
-			killTree(child);
+			killProcessTree(child);
 		},
 		finished,
 	};
@@ -110,7 +98,7 @@ export function startBackgroundBash(options: StartBackgroundBashOptions): Backgr
 	if (options.timeoutSeconds && options.timeoutSeconds > 0) {
 		timer = setTimeout(() => {
 			timedOut = true;
-			killTree(child);
+			killProcessTree(child);
 		}, options.timeoutSeconds * 1000);
 		timer.unref?.();
 	}

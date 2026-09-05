@@ -65,6 +65,10 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	let mcpSettled = false;
 	let announcePending = false;
 	let announceTimer: NodeJS.Timeout | undefined;
+	// After session_shutdown every pi.* call throws (the runner is invalidated,
+	// findings §8); a debounced announce landing in a timer callback then would
+	// be an uncaught exception and take pi down (LIFECYCLE-REVIEW L1).
+	let shuttingDown = false;
 	/** Names the model has been told about: the frozen listing plus every addendum. */
 	const announced = new Set<string>();
 
@@ -79,6 +83,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 			}));
 
 	const announce = () => {
+		if (shuttingDown) return;
 		const available = searchableTools();
 		const plan = planAnnouncement({ requestSent, announced, available: available.map((t) => t.name) });
 		if (plan.kind === "rewrite") {
@@ -97,8 +102,13 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		applyAnnouncement(announced, plan);
 	};
 
-	const scheduleAnnounce = () => {
+	const clearAnnounce = () => {
 		if (announceTimer) clearTimeout(announceTimer);
+		announceTimer = undefined;
+	};
+	const scheduleAnnounce = () => {
+		clearAnnounce();
+		if (shuttingDown) return;
 		announceTimer = setTimeout(() => {
 			announceTimer = undefined;
 			// Decided at fire time, not schedule time: a request may have gone out
@@ -170,11 +180,21 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 
 	pi.on("session_start", () => {
 		sessionStarted = true;
+		shuttingDown = false;
+		// A pending debounce belongs to the previous session's listing (RPC's
+		// new_session emits session_start twice, findings §3); deferAll below
+		// announces the fresh one.
+		clearAnnounce();
 		// A new session (/clear, or a resume in a new process) has no cached prefix
 		// yet: its first request gets a freshly written listing.
 		requestSent = false;
 		announced.clear();
 		deferAll();
+	});
+
+	pi.on("session_shutdown", () => {
+		shuttingDown = true;
+		clearAnnounce();
 	});
 
 	// The every-turn deferred-tools list tells the model to load via tool_search,

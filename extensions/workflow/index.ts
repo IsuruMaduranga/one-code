@@ -24,7 +24,7 @@ import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { recordUsage } from "../lib/usage-bus.ts";
-import { createTaskNotifier } from "../lib/notifications.ts";
+import { createTaskNotifier, sessionOutlivesTurn } from "../lib/notifications.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { ULTRACODE_MODE_CHANNEL } from "../effort/slider.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../permissions/modes.ts";
@@ -299,7 +299,13 @@ export default function workflowExtension(pi: ExtensionAPI) {
 				});
 				widget.attach(handle);
 
-				if (params.sync) {
+				// One-shot modes (`-p` / `--mode json`) exit when the turn settles:
+				// session_shutdown aborts every run, so a backgrounded workflow never
+				// finished and its promised follow-up never came (LIFECYCLE-REVIEW
+				// M1, measured: no result, no journal). Run it to completion there,
+				// the rule bash and Agent apply, and return the report in the result.
+				const forcedSync = !params.sync && !sessionOutlivesTurn(ctx.mode);
+				if (params.sync || forcedSync) {
 					const onProgress = () => {
 						onUpdate?.({
 							content: [{ type: "text", text: handle.recentEvents.slice(-8).join("\n") || "starting…" }],
@@ -316,8 +322,11 @@ export default function workflowExtension(pi: ExtensionAPI) {
 						handle.removeListener("progress", onProgress);
 					}
 					deliveredRuns.add(handle.runId); // sync result goes in the tool result, not a followUp
+					const oneShotNote = forcedSync
+						? "This is a one-shot session, so the workflow ran to completion instead of in the background.\n\n"
+						: "";
 					return {
-						content: [{ type: "text", text: buildRunReport(handle) }],
+						content: [{ type: "text", text: `${oneShotNote}${buildRunReport(handle)}` }],
 						details: { runId: handle.runId, status: handle.status, scriptPath: handle.scriptPath },
 						isError: handle.status !== "completed",
 					};

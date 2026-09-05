@@ -58,9 +58,15 @@ export interface HookRunOptions {
 	/** Exposed to the hook as CLAUDE_PROJECT_DIR; defaults to cwd. */
 	projectDir?: string;
 	/**
-	 * Let the process exit without waiting for this hook (`child.unref()`). Only
-	 * for fire-and-forget dispatches at shutdown; an awaited hook must keep the
-	 * event loop alive or a one-shot run drains mid-await (header).
+	 * Let the process exit without waiting for this hook. Only for fire-and-forget
+	 * dispatches at shutdown; an awaited hook must keep the event loop alive or a
+	 * one-shot run drains mid-await (header). The child is `unref()`d AND spawned
+	 * without stdout/stderr pipes: `unref` releases the process handle only, and
+	 * each inherited pipe is a ref'd handle of its own that stays open until the
+	 * child exits — a `sleep 20` SessionEnd hook held a `-p` run open for the
+	 * full 20 s (LIFECYCLE-REVIEW-2026-09-06 M4, measured). stdin is still piped
+	 * for the payload, written and closed at once, and unref'd too. The result's
+	 * stdout/stderr are therefore empty for a detached hook — nothing reads them.
 	 */
 	detached?: boolean;
 }
@@ -80,7 +86,7 @@ export function runHookCommand(command: string, stdinJson: string, opts: HookRun
 			child = spawn("/bin/sh", ["-c", command], {
 				cwd: opts.cwd,
 				detached: true,
-				stdio: ["pipe", "pipe", "pipe"],
+				stdio: opts.detached ? ["pipe", "ignore", "ignore"] : ["pipe", "pipe", "pipe"],
 				env: { ...process.env, CLAUDE_PROJECT_DIR: opts.projectDir ?? opts.cwd },
 			});
 		} catch (error) {
@@ -94,7 +100,12 @@ export function runHookCommand(command: string, stdinJson: string, opts: HookRun
 			});
 			return;
 		}
-		if (opts.detached) child.unref();
+		if (opts.detached) {
+			child.unref();
+			// The stdin pipe is the one handle left; it closes as soon as the
+			// payload is flushed below, and must not hold the loop meanwhile.
+			(child.stdin as { unref?: () => void } | null)?.unref?.();
+		}
 
 		let stdout = "";
 		let stderr = "";

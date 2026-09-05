@@ -55,7 +55,7 @@ import { findGitRoot } from "../lib/git.ts";
 import { registerWorktreeIsolation } from "../lib/worktree-isolation.ts";
 import { createTaskNotifier, sessionOutlivesTurn, systemNotification } from "../lib/notifications.ts";
 import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
-import { ccToolRenderers, customMessageText, notificationComponent, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
+import { ccToolRenderers, customMessageText, liveUiCtx, notificationComponent, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import { deriveActivity, LiveRunRegistry } from "./live-runs.ts";
 import { DELEGATION_STEER } from "./delegation-steer.ts";
 import { awaitHandBackReview, withReview } from "./hand-back-review.ts";
@@ -294,6 +294,15 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			awaitMcpTools,
 			getPermissionBridge,
 			getHookBridge,
+			// A child extension handler threw. pi's wrapper swallows it inside the
+			// child, so this is the only trace; shown in the parent's UI (stderr
+			// when headless), through the live ctx so a late one cannot throw.
+			(runName, error) => {
+				const text = `Subagent ${runName ?? "(unnamed)"}: extension error in ${error.event} (${error.extensionPath}): ${error.error}`;
+				const live = liveUiCtx(lastCtx);
+				if (live) live.ui.notify(text, "warning");
+				else process.stderr.write(`${text}\n`);
+			},
 		));
 
 	const loadAgents = (cwd: string) => {

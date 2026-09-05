@@ -22,10 +22,17 @@ function mount(): FakePi {
 	return fake;
 }
 
+/**
+ * A ctx for a session that outlives the turn (the TUI): the monitor detaches
+ * there. The fake's default mode is "print", a one-shot, where the monitor now
+ * runs to its end inside the tool call (LIFECYCLE-REVIEW-2026-09-06 M3).
+ */
+const liveSessionCtx = (overrides: Record<string, unknown> = {}) => createFakeCtx({ hasUI: true, mode: "tui", ...overrides });
+
 describe("background wiring: monitor batching", () => {
 	it("flushes a batch (capped, with overflow count) as soon as the command exits", async () => {
 		const fake = mount();
-		const ctx = createFakeCtx({ hasUI: true });
+		const ctx = liveSessionCtx();
 		const monitor = fake.tools.get("monitor")!;
 		const lineCount = MONITOR_BATCH_MAX_LINES + 10;
 		const start = (await monitor.execute(
@@ -65,7 +72,7 @@ describe("background wiring: monitor batching", () => {
 
 	it("task_stop ends a still-running monitor; task_output then reports it stopped", async () => {
 		const fake = mount();
-		const ctx = createFakeCtx({ hasUI: true });
+		const ctx = liveSessionCtx();
 		const monitor = fake.tools.get("monitor")!;
 		const start = (await monitor.execute(
 			"c1",
@@ -199,5 +206,147 @@ describe("background wiring: /loop and schedule_wakeup timers", () => {
 		await vi.advanceTimersByTimeAsync(120_000);
 		expect(fake.sentMessages.filter((m) => m.message.customType === "loop")).toHaveLength(2);
 		expect(notify).toHaveBeenCalledWith(expect.stringContaining("Loop stopped"), "info");
+	});
+});
+
+describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", () => {
+	it("H1: a monitor whose command ends after session_shutdown repaints nothing, notifies nothing, and never throws", async () => {
+		const fake = mount();
+		const setWidget = vi.fn();
+		const ctx = liveSessionCtx({ ui: { setWidget } });
+		const start = (await fake.tools.get("monitor")!.execute(
+			"c1",
+			{ command: "sleep 30; echo done", description: "outlives the session" },
+			undefined,
+			undefined,
+			ctx,
+		)) as { details: { taskId: string } };
+		expect(setWidget).toHaveBeenCalledTimes(1);
+		fake.sentMessages.length = 0;
+
+		await fake.fire("session_shutdown", { reason: "new" }, ctx);
+		// From here every getter on the old ctx throws, as pi's does after dispose.
+		Object.defineProperty(ctx, "hasUI", {
+			get() {
+				throw new Error("This extension ctx is stale after session replacement");
+			},
+		});
+		// stopAll SIGTERMed the tree; its `close` lands after shutdown. Wait for it
+		// through task_output on a fresh (post-swap) ctx — must not throw either.
+		const out = (await fake.tools.get("task_output")!.execute(
+			"c2",
+			{ task_id: start.details.taskId, block: true, timeout: 5000 },
+			undefined,
+			undefined,
+			createFakeCtx({ mode: "tui" }),
+		)) as { details: { status: string } };
+		expect(out.details.status).toBe("stopped");
+		await new Promise((resolve) => setTimeout(resolve, DEFAULT_COALESCE_MS + 50));
+		expect(setWidget).toHaveBeenCalledTimes(1); // no repaint after shutdown
+		expect(fake.sentMessages).toHaveLength(0); // no completion notification
+	});
+
+	it("M2: task_stop ends the monitored command itself (a `cmd; echo` sequence), so the task finishes at once", async () => {
+		const fake = mount();
+		const ctx = liveSessionCtx();
+		const start = (await fake.tools.get("monitor")!.execute(
+			"c1",
+			{ command: "sleep 30; echo done", description: "sequence" },
+			undefined,
+			undefined,
+			ctx,
+		)) as { details: { taskId: string } };
+		await new Promise((resolve) => setTimeout(resolve, 100)); // let the shell fork `sleep`
+		const stopped = Date.now();
+		await fake.tools.get("task_stop")!.execute("c2", { task_id: start.details.taskId }, undefined, undefined, ctx);
+		const out = (await fake.tools.get("task_output")!.execute(
+			"c3",
+			{ task_id: start.details.taskId, block: true, timeout: 5000 },
+			undefined,
+			undefined,
+			ctx,
+		)) as { details: { status: string } };
+		expect(out.details.status).toBe("stopped");
+		// Killing only the shell left `sleep 30` holding the pipe: close came 30 s later.
+		expect(Date.now() - stopped).toBeLessThan(3000);
+	});
+
+	it("M3: in a one-shot mode the monitor runs to its end and returns the events in the result, registering nothing", async () => {
+		const fake = mount();
+		const ctx = createFakeCtx({ mode: "print" });
+		const result = (await fake.tools.get("monitor")!.execute(
+			"c1",
+			{ command: "echo ev1; echo ev2; echo ev3", description: "one-shot" },
+			undefined,
+			undefined,
+			ctx,
+		)) as { content: Array<{ text: string }>; details: Record<string, unknown>; isError?: boolean };
+		const text = result.content[0].text;
+		expect(text).toContain("completed after 3 event(s)");
+		expect(text).toContain("This is a one-shot session, so the monitor ran to its end");
+		expect(text).toContain("ev1\nev2\nev3");
+		expect(result.isError).toBeFalsy();
+		expect(result.details.taskId).toBeUndefined();
+		// Nothing addressable afterwards, and no notification ever queued.
+		const lookup = (await fake.tools.get("task_output")!.execute("c2", { task_id: "anything" }, undefined, undefined, ctx)) as {
+			content: Array<{ text: string }>;
+		};
+		expect(lookup.content[0].text).toContain("Known tasks: (none)");
+		await new Promise((resolve) => setTimeout(resolve, DEFAULT_COALESCE_MS + 50));
+		expect(fake.sentMessages).toHaveLength(0);
+	});
+
+	it("M3: a one-shot monitor stops when the tool call is aborted and says so", async () => {
+		const fake = mount();
+		const controller = new AbortController();
+		setTimeout(() => controller.abort(), 150);
+		const result = (await fake.tools.get("monitor")!.execute(
+			"c1",
+			{ command: "sleep 30; echo done", description: "aborted" },
+			controller.signal,
+			undefined,
+			createFakeCtx({ mode: "json" }),
+		)) as { content: Array<{ text: string }> };
+		expect(result.content[0].text).toContain("stopped (tool call aborted) after 0 event(s)");
+	});
+
+	it("L3: /clear reports the tasks it stopped in the NEXT session, not the one being torn down", async () => {
+		const fake = mount();
+		const ctx = liveSessionCtx();
+		const start = (await fake.tools.get("monitor")!.execute(
+			"c1",
+			{ command: "sleep 30", description: "dev server" },
+			undefined,
+			undefined,
+			ctx,
+		)) as { details: { taskId: string } };
+		await fake.fire("session_shutdown", { reason: "new" }, ctx);
+
+		// The replacement instance (factories re-run on /clear, findings §8).
+		const next = createFakePi();
+		backgroundExtension(next.pi as never);
+		const notify = vi.fn();
+		await next.fire("session_start", { reason: "new" }, createFakeCtx({ hasUI: true, mode: "tui", ui: { notify } }));
+		expect(notify).toHaveBeenCalledTimes(1);
+		expect(notify.mock.calls[0][0]).toContain(`Stopped 1 background task with the previous session: ${start.details.taskId} (dev server).`);
+
+		// Consumed: a further session start says nothing.
+		const later = createFakePi();
+		backgroundExtension(later.pi as never);
+		const notifyLater = vi.fn();
+		await later.fire("session_start", { reason: "new" }, createFakeCtx({ hasUI: true, mode: "tui", ui: { notify: notifyLater } }));
+		expect(notifyLater).not.toHaveBeenCalled();
+	});
+
+	it("L3: a quit leaves no notice behind", async () => {
+		const fake = mount();
+		const ctx = liveSessionCtx();
+		await fake.tools.get("monitor")!.execute("c1", { command: "sleep 30", description: "x" }, undefined, undefined, ctx);
+		await fake.fire("session_shutdown", { reason: "quit" }, ctx);
+		const next = createFakePi();
+		backgroundExtension(next.pi as never);
+		const notify = vi.fn();
+		await next.fire("session_start", { reason: "startup" }, createFakeCtx({ hasUI: true, mode: "tui", ui: { notify } }));
+		expect(notify).not.toHaveBeenCalled();
 	});
 });

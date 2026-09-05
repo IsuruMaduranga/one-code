@@ -233,7 +233,9 @@ export default function pluginsExtension(pi: ExtensionAPI) {
 						}),
 					]);
 				};
-				void openTasks();
+				// void'ed panel work: a late throw (a pi.* call on a replaced session)
+				// must never surface as an unhandled rejection (LIFECYCLE-REVIEW L2).
+				void openTasks().catch(() => {});
 				pi.events.emit(MCP_STATUS_REQUEST_CHANNEL, {});
 
 				const buildView = (): PanelView => {
@@ -348,7 +350,7 @@ export default function pluginsExtension(pi: ExtensionAPI) {
 						case "close":
 							return close();
 						case "installToggle":
-							void installToggle(effect.row);
+							void installToggle(effect.row).catch(() => {});
 							return;
 						case "setPluginEnabled": {
 							if (effect.origin === "one-code") setInstalledEnabled(oneCodeRoot, effect.id, effect.enabled);
@@ -385,7 +387,7 @@ export default function pluginsExtension(pi: ExtensionAPI) {
 							};
 							writeKnownMarketplace(oneCodeRoot, name, entry);
 							known = { ...known, [name]: entry };
-							void syncOne(name, entry, false);
+							void syncOne(name, entry, false).catch(() => {});
 							state.tab = "marketplaces";
 							return;
 						}
@@ -409,7 +411,7 @@ export default function pluginsExtension(pi: ExtensionAPI) {
 						}
 						case "refreshMarketplace": {
 							const entry = known[effect.name];
-							if (entry) void syncOne(effect.name, entry, true);
+							if (entry) void syncOne(effect.name, entry, true).catch(() => {});
 							return;
 						}
 					}

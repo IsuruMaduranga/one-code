@@ -673,6 +673,11 @@ export default function mcpExtension(pi: ExtensionAPI) {
 					await close(existing);
 				}
 				await connectOne(server);
+				// The session may have been replaced during the connect (an RPC
+				// new_session while the panel was open): every pi.* call throws
+				// then, and from a void'ed continuation that is an unhandled
+				// rejection (LIFECYCLE-REVIEW-2026-09-06 L2).
+				if (shuttingDown) return;
 				emitInstructions();
 				notices = outcomeNotice(server);
 				busy.delete(entry.name);
@@ -706,6 +711,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 				notices = [`Enabling "${entry.name}"…`];
 				syncRepaint();
 				await connectOne(server);
+				if (shuttingDown) return; // see runReconnect
 				emitInstructions();
 				busy.delete(entry.name);
 				notices = outcomeNotice(server);
@@ -732,6 +738,10 @@ export default function mcpExtension(pi: ExtensionAPI) {
 							repaint();
 						},
 					});
+					if (shuttingDown) {
+						await close(connection); // see runReconnect
+						return;
+					}
 					adoptConnection(server, connection);
 					emitInstructions();
 					notices = [`Authenticated "${entry.name}".`];
@@ -749,17 +759,19 @@ export default function mcpExtension(pi: ExtensionAPI) {
 						clearInterval(ticker);
 						done(null);
 						return;
+					// Each action is a void'ed promise; a late throw (a pi.* call on a
+					// replaced session) must never surface as an unhandled rejection.
 					case "reconnect":
-						void runReconnect(effect.entry);
+						void runReconnect(effect.entry).catch(() => {});
 						return;
 					case "disable":
 						runDisable(effect.entry);
 						return;
 					case "enable":
-						void runEnable(effect.entry);
+						void runEnable(effect.entry).catch(() => {});
 						return;
 					case "authenticate":
-						void runAuthenticate(effect.entry);
+						void runAuthenticate(effect.entry).catch(() => {});
 						return;
 				}
 			};

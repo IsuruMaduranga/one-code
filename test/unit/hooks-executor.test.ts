@@ -1,4 +1,5 @@
-import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -97,4 +98,34 @@ describe("runHookCommand", () => {
 		});
 		expect(result.stdout.trim()).toBe(`/some/project|${dir}`);
 	});
+});
+
+describe("runHookCommand detached (fire-and-forget)", () => {
+	// A `-p` run exits when the loop drains. `child.unref()` releases the process
+	// handle only; inherited stdout/stderr pipes are ref'd handles of their own,
+	// so a `sleep 20` SessionEnd hook held the run open for the full 20 s
+	// (LIFECYCLE-REVIEW-2026-09-06 M4, measured). Run the executor in a child
+	// node process and time its exit: it must not wait for the hook.
+	it("does not keep the process alive for the hook's duration", async () => {
+		const executor = join(process.cwd(), "extensions", "hooks", "executor.ts");
+		const script = join(dir, "detached-probe.mts");
+		writeFileSync(
+			script,
+			[
+				`import { runHookCommand } from ${JSON.stringify(executor)};`,
+				`void runHookCommand("sleep 3", "{}", { cwd: process.cwd(), detached: true });`,
+				`console.log("dispatched");`,
+			].join("\n"),
+		);
+		const started = Date.now();
+		const { stdout, code } = await new Promise<{ stdout: string; code: number | null }>((resolve) => {
+			const child = spawn(process.execPath, ["--experimental-strip-types", "--no-warnings", script], { cwd: process.cwd() });
+			let out = "";
+			child.stdout.on("data", (chunk) => (out += chunk));
+			child.on("close", (exitCode) => resolve({ stdout: out, code: exitCode }));
+		});
+		expect(stdout.trim()).toBe("dispatched");
+		expect(code).toBe(0);
+		expect(Date.now() - started).toBeLessThan(2500);
+	}, 10_000);
 });

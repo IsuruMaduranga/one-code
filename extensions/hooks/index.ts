@@ -81,6 +81,9 @@ interface MatchedHook {
 	hook: HookCommand;
 }
 
+/** Marks the frozen ctx a SessionEnd dispatch runs on (see shutdownCtx). */
+const SHUTDOWN_CTX = Symbol("one-code:shutdown-ctx");
+
 export default function hooksExtension(pi: ExtensionAPI) {
 	let stopHookActive = false;
 	/** Context from UserPromptSubmit / SessionStart / PostCompact hooks, delivered with the next prompt. */
@@ -89,6 +92,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	let lastCtx: ExtensionContext | undefined;
 
 	const notify = (ctx: ExtensionContext, message: string) => {
+		if ((ctx as { [SHUTDOWN_CTX]?: true })[SHUTDOWN_CTX]) return; // session gone; nowhere to show it
 		if (ctx.hasUI) ctx.ui.notify(message, "info");
 		else process.stderr.write(`${message}\n`);
 	};
@@ -347,11 +351,36 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		},
 	};
 
-	pi.on("session_shutdown", async (_event, ctx) => {
-		const payload: HookStdinPayload = { ...basePayload(ctx, "SessionEnd"), source: "other" };
-		// Fire and forget: the process is on its way out; nothing to apply.
-		void dispatch(ctx, "SessionEnd", { ignoreMatcher: true }, payload);
+	pi.on("session_shutdown", (event, ctx) => {
+		// Claude Code's SessionEnd carries `reason`: clear | logout | prompt_input_exit
+		// | other. pi's `new` (/clear, /new) is a clear; a `quit` from the TUI is the
+		// user leaving the prompt; a headless run's end, a resume and a fork are
+		// `other` (LIFECYCLE-REVIEW-2026-09-06 M4).
+		const reason = event.reason === "new" ? "clear" : event.reason === "quit" && ctx.hasUI ? "prompt_input_exit" : "other";
+		const payload: HookStdinPayload = { ...basePayload(ctx, "SessionEnd"), reason };
+		// Fire and forget: the process is on its way out; nothing to apply. The ctx
+		// is frozen first: after this handler returns pi disposes the session and
+		// every getter on the real ctx throws, so a dispatch that awaited (the
+		// project-hooks consent read) would then fail inside its own try and the
+		// hook silently would not run. Consent is never PROMPTED at shutdown: a
+		// project config that was never approved is skipped, as in headless runs.
+		void dispatch(shutdownCtx(ctx), "SessionEnd", { ignoreMatcher: true }, payload);
 	});
+
+	/** The subset of ctx `dispatch` reads, snapshotted so it survives the session's disposal. */
+	const shutdownCtx = (ctx: ExtensionContext): ExtensionContext => {
+		const sessionId = ctx.sessionManager.getSessionId();
+		const sessionFile = ctx.sessionManager.getSessionFile();
+		const sessionDir = ctx.sessionManager.getSessionDir?.();
+		const frozen = {
+			[SHUTDOWN_CTX]: true,
+			cwd: ctx.cwd,
+			hasUI: false,
+			sessionManager: { getSessionId: () => sessionId, getSessionFile: () => sessionFile, getSessionDir: () => sessionDir },
+			ui: { confirm: async () => false, notify: () => {} },
+		};
+		return frozen as unknown as ExtensionContext;
+	};
 
 	// ---- Stop ---------------------------------------------------------------
 	// agent_settled, not agent_end: CC fires Stop once, when the main agent has

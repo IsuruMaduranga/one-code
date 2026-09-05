@@ -15,9 +15,9 @@
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createAgentSession, getAgentDir, SessionManager, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { type AgentSession, type ExtensionError, getAgentDir, SessionManager, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { buildAgentLoader, createSharedModelRuntime } from "../lib/agent-loader.ts";
+import { type AgentLoaderOptions, createSharedModelRuntime, openChildSession } from "../lib/agent-loader.ts";
 import { agentPromptIdentity, PrefixWarmGate, prefixWarmKey, type Release } from "../lib/prefix-warm-gate.ts";
 import type { PermissionBridge } from "../permissions/subagent-gate.ts";
 import type { HookBridge } from "../hooks/subagent-bridge.ts";
@@ -81,8 +81,7 @@ const EXTENSIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
 const CHILD_EXTENSIONS = ["system-reminder", "tool-search", "claude-context", "file-tracker", "search-tools", "skill", "web", "web-fetch", "notebook"];
 const CHILD_EXTENSION_PATHS = CHILD_EXTENSIONS.map((name) => join(EXTENSIONS_DIR, name, "index.ts"));
 
-type Session = Awaited<ReturnType<typeof createAgentSession>>["session"];
-type Loader = Awaited<ReturnType<typeof buildAgentLoader>>;
+type Session = AgentSession;
 
 /** The fields buildChildSession needs — the common subset of a blocking and a resident run. */
 interface ChildSessionSpec {
@@ -148,24 +147,19 @@ export class SubagentRuntime {
 	/**
 	 * The parent's permission decision closure (undefined until permissions
 	 * publishes it), wrapped so every call carries the asking run's name: the
-	 * gate inside a child only knows its session id (child loaders are cached
-	 * across runs, so the name cannot be baked in), and the parent's prompt
+	 * gate inside a child only knows its session id (one bridge wrapper serves
+	 * every child, so the name cannot be baked in), and the parent's prompt
 	 * title needs the name once two children ask back-to-back.
 	 */
 	private readonly getPermissionBridge: () => PermissionBridge | undefined;
 	/** The parent hooks extension's bridge (undefined until hooks publishes it); the child's tool hooks. */
 	private readonly getHookBridge: () => HookBridge | undefined;
+	/** A child extension handler threw (pi swallows it otherwise); surfaced to the user by index.ts. */
+	private readonly onExtensionError: (runName: string | undefined, error: ExtensionError) => void;
 	/** Child session id → run name, for the bridge wrapper above. */
 	private readonly runNames = new Map<string, string>();
 	/** Child session id → agent type (`explore`, …), for the hook payload's `agent_type`. */
 	private readonly agentTypes = new Map<string, string>();
-	/**
-	 * Loader cache keyed by system-prompt identity ("base", `agent:<name>`,
-	 * `fork:<prompt>`). Building one re-runs every curated extension factory plus
-	 * synchronous permission-settings/git-root reads, so a repeat run on the same
-	 * agent or fork prompt reuses the built loader.
-	 */
-	private readonly loaderCache = new Map<string, Promise<Loader>>();
 	/**
 	 * Parallel children with the same request prefix (same agent prompt and
 	 * model; forks share the parent's) let the first one start streaming before
@@ -180,11 +174,13 @@ export class SubagentRuntime {
 		getMcpTools: () => ToolDefinition[] | Promise<ToolDefinition[]>,
 		getPermissionBridge: () => PermissionBridge | undefined,
 		getHookBridge: () => HookBridge | undefined,
+		onExtensionError: (runName: string | undefined, error: ExtensionError) => void,
 	) {
 		this.modelRuntime = modelRuntime;
 		this.baseCwd = baseCwd;
 		this.getMcpTools = getMcpTools;
 		this.getHookBridge = getHookBridge;
+		this.onExtensionError = onExtensionError;
 		// One stable wrapper (the gate calls the getter per tool call; allocating a
 		// closure each time would be waste). A bridge that vanished between the
 		// getter and the call throws, which the gate turns into a fail-closed deny.
@@ -201,11 +197,12 @@ export class SubagentRuntime {
 		getMcpTools: () => ToolDefinition[] | Promise<ToolDefinition[]> = () => [],
 		getPermissionBridge: () => PermissionBridge | undefined = () => undefined,
 		getHookBridge: () => HookBridge | undefined = () => undefined,
+		onExtensionError: (runName: string | undefined, error: ExtensionError) => void = () => {},
 	): Promise<SubagentRuntime> {
 		const modelRuntime = await createSharedModelRuntime(getAgentDir());
 		// Prime the catalog once; spawns read the live snapshot (see resolveModel).
 		await modelRuntime.getAvailable();
-		return new SubagentRuntime(modelRuntime, cwd, getMcpTools, getPermissionBridge, getHookBridge);
+		return new SubagentRuntime(modelRuntime, cwd, getMcpTools, getPermissionBridge, getHookBridge, onExtensionError);
 	}
 
 	/**
@@ -225,20 +222,28 @@ export class SubagentRuntime {
 		return found;
 	}
 
-	private buildChildLoader(systemPrompt?: string): Promise<Loader> {
-		return buildAgentLoader({
+	/**
+	 * The loader options for one child session. A fork inherits the parent's
+	 * system prompt (also on a RESUME of a finished fork, read from the file
+	 * persisted beside its session — without it the resume ran on pi's stock
+	 * prompt and default tools, review S6); a named agent carries its own; a
+	 * plain run gets pi's base prompt. Built fresh per session (agent-loader.ts).
+	 */
+	private childLoaderOptions(spec: ChildSessionSpec): AgentLoaderOptions {
+		const systemPrompt = spec.forkFrom || spec.parentSystemPrompt !== undefined ? spec.parentSystemPrompt : spec.agent?.systemPrompt;
+		return {
 			cwd: this.baseCwd,
 			agentDir: getAgentDir(),
 			systemPrompt,
 			neverGate: NEVER_GATE,
 			extraExtensionPaths: CHILD_EXTENSION_PATHS,
-			// claude-context (above) injects # claudeMd; pi must not append the same
-			// files to the system prompt as well.
+			// claude-context (above) injects # claudeMd on the child's session_start;
+			// pi must not append the same files to the system prompt as well.
 			noContextFiles: true,
 			getPermissionBridge: this.getPermissionBridge,
 			getHookBridge: this.getHookBridge,
 			agentTypeOf: (sessionId) => (sessionId ? this.agentTypes.get(sessionId) : undefined),
-		});
+		};
 	}
 
 	/**
@@ -251,26 +256,6 @@ export class SubagentRuntime {
 			return `fork:${createHash("sha1").update(spec.parentSystemPrompt ?? "").digest("hex").slice(0, 16)}`;
 		}
 		return agentPromptIdentity(spec.agent?.name);
-	}
-
-	/** Get-or-build a loader for a system-prompt identity, evicting the entry if the build fails. */
-	private loaderFor(spec: ChildSessionSpec): Promise<Loader> {
-		// Fork loaders are keyed by the parent's system prompt, which varies turn to
-		// turn (files read, date, todo state). Caching them would grow an unbounded
-		// key set and leak a full loader per distinct prompt, so a fork builds fresh.
-		// A fork's prompt also comes back on a RESUME of a finished fork (read from
-		// the file persisted beside its session) — without it the resume ran on
-		// pi's stock prompt and default tools (review S6).
-		const key = SubagentRuntime.promptKey(spec);
-		if (key.startsWith("fork:")) return this.buildChildLoader(spec.parentSystemPrompt);
-		const systemPrompt = spec.agent?.systemPrompt;
-		let pending = this.loaderCache.get(key);
-		if (!pending) {
-			pending = this.buildChildLoader(systemPrompt);
-			pending.catch(() => this.loaderCache.delete(key));
-			this.loaderCache.set(key, pending);
-		}
-		return pending;
 	}
 
 	/**
@@ -338,14 +323,14 @@ export class SubagentRuntime {
 	 * to retry — never a silent swap of a model it chose. The returned `note` is
 	 * surfaced to the user/main model so the fallback is never silent.
 	 *
-	 * The resource loader is built once and reused across the fallback attempt, but
-	 * the session manager is created fresh per attempt: reusing one after a failed
-	 * `createAgentSession` could inherit a half-initialized manager. Resume reopens
-	 * a finished session; fork inherits the parent transcript + system prompt; a
+	 * The loader and the session manager are both created fresh per attempt: a
+	 * loader is one session's (agent-loader.ts), and a manager reused after a
+	 * failed `createAgentSession` could be half-initialized. Resume reopens a
+	 * finished session; fork inherits the parent transcript + system prompt; a
 	 * fresh named run gets the agent's own prompt and toolset.
 	 */
 	private async buildChildSession(spec: ChildSessionSpec): Promise<{ session: Session; note?: string }> {
-		const [loader, mcpTools] = await Promise.all([this.loaderFor(spec), this.getMcpTools()]);
+		const mcpTools = await this.getMcpTools();
 		const newSessionManager = () =>
 			// The resume cwd is passed explicitly: a worktree run's persisted cwd may
 			// be gone by the time it is messaged (index.ts substitutes the parent cwd).
@@ -360,19 +345,23 @@ export class SubagentRuntime {
 		const allowlist = spec.forkFrom ? undefined : spec.agent?.tools;
 		const make = async (model: string | undefined): Promise<Session> => {
 			const resolvedModel = model ? await this.resolveModel(model) : undefined;
-			const { session } = await createAgentSession({
-				cwd: spec.cwd,
-				agentDir: getAgentDir(),
-				modelRuntime: this.modelRuntime,
-				model: resolvedModel as never,
-				thinkingLevel: spec.thinking as never,
-				tools: childToolAllowlist(allowlist),
-				// Denylist grants (CC's "All tools except …" shape) — filters built-ins,
-				// extension tools, and injected customTools alike.
-				excludeTools: spec.forkFrom ? undefined : spec.agent?.excludeTools,
-				customTools: [sendToMainTool((m, s) => spec.onMessageToMain?.(m, s)), ...(spec.extraTools ?? []), ...mcpTools],
-				resourceLoader: loader,
-				sessionManager: newSessionManager(),
+			const session = await openChildSession({
+				loader: this.childLoaderOptions(spec),
+				session: {
+					cwd: spec.cwd,
+					agentDir: getAgentDir(),
+					modelRuntime: this.modelRuntime,
+					model: resolvedModel as never,
+					thinkingLevel: spec.thinking as never,
+					tools: childToolAllowlist(allowlist),
+					// Denylist grants (CC's "All tools except …" shape) — filters built-ins,
+					// extension tools, and injected customTools alike.
+					excludeTools: spec.forkFrom ? undefined : spec.agent?.excludeTools,
+					customTools: [sendToMainTool((m, s) => spec.onMessageToMain?.(m, s)), ...(spec.extraTools ?? []), ...mcpTools],
+					sessionManager: newSessionManager(),
+				},
+				startReason: spec.sessionFile ? "resume" : spec.forkFrom ? "fork" : "startup",
+				onError: (error) => this.onExtensionError(spec.name, error),
 			});
 			// An allowlist that matched nothing real would run a tool-less agent
 			// (pi drops unknown names silently). Fail loud with the fix named.

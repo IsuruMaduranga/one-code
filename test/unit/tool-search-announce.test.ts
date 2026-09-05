@@ -151,3 +151,42 @@ describe("tool-search announce wiring", () => {
 		expect(all[0].text).toContain("mcp__c__w");
 	});
 });
+
+describe("tool-search announce lifecycle (LIFECYCLE-REVIEW-2026-09-06 L1)", () => {
+	afterEach(() => vi.useRealTimers());
+
+	it("a debounced announce pending at session_shutdown is dropped, not fired on the dead runner", async () => {
+		vi.useFakeTimers();
+		const fake = makeFakePi();
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		toolSearchExtension(fake.pi as any);
+		fake.pi.fire("session_start", {});
+		fake.pi.events.emit(MCP_TOOLS_CHANNEL, { tools: [], settled: true });
+		fake.reminders.length = 0;
+
+		fake.addDeferred("mcp__late__tool"); // 100 ms debounce armed
+		fake.pi.fire("session_shutdown", { reason: "new" });
+		// After shutdown every pi.* call throws (runner invalidated); the fake models that.
+		const dead = () => {
+			throw new Error("This extension ctx is stale after session replacement or reload");
+		};
+		fake.pi.getAllTools = dead;
+		fake.pi.events.emit = dead;
+		await vi.advanceTimersByTimeAsync(500); // would have thrown from the timer callback
+		expect(fake.reminders).toHaveLength(0);
+	});
+
+	it("session_start clears a debounce armed by the previous session and re-announces fresh", async () => {
+		vi.useFakeTimers();
+		const fake = makeFakePi();
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		toolSearchExtension(fake.pi as any);
+		fake.pi.fire("session_start", {});
+		fake.addDeferred("web_fetch");
+		fake.reminders.length = 0;
+		fake.pi.fire("session_start", {}); // RPC new_session emits twice (findings §3)
+		await vi.advanceTimersByTimeAsync(500);
+		// Exactly the one listing deferAll wrote at the second start; the stale debounce did not add another.
+		expect(fake.reminders.filter((r) => r.key === "deferred-tools")).toHaveLength(1);
+	});
+});

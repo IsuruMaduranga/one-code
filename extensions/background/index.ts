@@ -13,7 +13,9 @@ import { spawn } from "node:child_process";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
-import { ccToolRenderers, customMessageText, notificationComponent } from "../lib/tui-render.ts";
+import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
+import { detachedSpawnOptions, stopProcessTree } from "../lib/process-tree.ts";
+import { ccToolRenderers, customMessageText, liveUiCtx, notificationComponent } from "../lib/tui-render.ts";
 import {
 	type BackgroundTask,
 	BackgroundRegistry,
@@ -31,7 +33,7 @@ import {
 	MIN_DELAY_SECONDS,
 	parseLoopArgs,
 } from "./wakeup.ts";
-import { createTaskNotifier, systemNotification } from "../lib/notifications.ts";
+import { createTaskNotifier, sessionOutlivesTurn, systemNotification } from "../lib/notifications.ts";
 import {
 	batchSize,
 	emptyBatch,
@@ -47,14 +49,33 @@ const STORED_OUTPUT_CAP = 200_000;
 const DEFAULT_MONITOR_TIMEOUT_MS = 300_000;
 const MAX_MONITOR_TIMEOUT_MS = 3_600_000;
 const MAX_BLOCK_TIMEOUT_MS = 600_000;
+/** SIGTERM → SIGKILL grace for a stopped monitor's process tree (lib/process-tree.ts). */
+export const MONITOR_KILL_GRACE_MS = 2_000;
 
 function tail(text: string, cap: number): string {
 	return text.length <= cap ? text : `… (earlier output truncated)\n${text.slice(-cap)}`;
 }
 
+/**
+ * `/clear`, `/new` and `/resume` stop every background task with the session
+ * they belong to (the notifier that would report them is inert by then, and
+ * the new session has no handle on them). Say so, once, in the NEW session:
+ * the old session's UI is torn down right after `session_shutdown`, so a
+ * notice printed there is lost. Module scope on purpose — jiti keeps this
+ * module across the factory re-run that builds the new instance, which is the
+ * only thing that survives the swap (LIFECYCLE-REVIEW-2026-09-06 L3).
+ */
+let pendingShutdownNotice: string | undefined;
+
 export default function backgroundExtension(pi: ExtensionAPI) {
 	const registry = new BackgroundRegistry();
 	let lastCtx: ExtensionContext | undefined;
+	// After session_shutdown the captured ctx throws on every access and the
+	// notifier is inert; a monitor whose command ends later (its shell was
+	// killed, the orphaned command finished) must repaint nothing and say
+	// nothing — before this flag, the widget repaint from the child's `close`
+	// callback took the whole process down (LIFECYCLE-REVIEW-2026-09-06 H1).
+	let shuttingDown = false;
 	let wakeup: { timer: NodeJS.Timeout; prompt: string; reason: string } | undefined;
 	// Fixed-interval /loop (harness-driven, auto-re-arming — distinct from the
 	// model-driven `wakeup` used by dynamic /loop). One at a time, like wakeup.
@@ -72,12 +93,14 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	pi.events.on(TASK_REGISTER_CHANNEL, (task) => registry.register(task as BackgroundTask));
 
 	const updateWidget = () => {
-		if (!lastCtx?.hasUI) return;
+		// liveUiCtx: a stale ctx (session replaced) reads as "no UI", never a throw.
+		const live = shuttingDown ? undefined : liveUiCtx(lastCtx);
+		if (!live) return;
 		// A task whose producer gives it first-class panel UI (bash shells and
 		// subagent runs in the subagents panel) is excluded, or this line would
 		// stay permanently lit next to the panel already showing the same work.
 		const running = registry.running().filter((t) => !t.ownUI).length;
-		lastCtx.ui.setWidget("cc-background", running > 0 ? [` background tasks: ${running} running`] : undefined);
+		live.ui.setWidget("cc-background", running > 0 ? [` background tasks: ${running} running`] : undefined);
 	};
 
 	// Harness-injected notifications carry anti-confabulation framing for the
@@ -114,7 +137,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				),
 			),
 		}),
-		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			lastCtx = ctx;
 			if (Boolean(params.command) === Boolean(params.ws)) {
 				return {
@@ -124,6 +147,13 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				};
 			}
 
+			// One-shot modes (`-p` / `--mode json`) exit when the turn settles: the
+			// notifier goes inert, shutdown kills the monitor, and nothing it saw
+			// reaches anyone — the tool result had promised "events arrive as
+			// notifications" (LIFECYCLE-REVIEW M3, measured). Run it to its end
+			// there (exit or deadline) and return the collected events in the
+			// result — the shape bash and Agent use in these modes.
+			const oneShot = !sessionOutlivesTurn(ctx.mode);
 			const id = generateTaskId();
 			let status: BackgroundTask["status"] = "running";
 			let stored = "";
@@ -149,6 +179,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 			const onEvent = (line: string) => {
 				eventCount++;
 				stored = tail(`${stored}${line}\n`, STORED_OUTPUT_CAP);
+				if (oneShot) return; // collected into the tool result instead
 				pushEvent(pending, line);
 				// Bounded batches, and a wider window mid-turn so a chatty stream
 				// coalesces instead of steering one notification per second
@@ -162,8 +193,12 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				task.status = finalStatus;
 				task.finishedAt = Date.now();
 				if (flushTimer) clearTimeout(flushTimer);
-				flush();
 				finish();
+				// Past this point everything touches the session: a monitor ending
+				// after shutdown (H1) or inside a one-shot run reports through
+				// `finished` alone.
+				if (shuttingDown || oneShot) return;
+				flush();
 				updateWidget();
 				notify(
 					"task-notification",
@@ -175,8 +210,13 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 			let stopRequested = false;
 			let stop: () => void;
 			if (params.command) {
+				// Own process group: stop() must end the COMMAND, not just the `$SHELL -c`
+				// leader — with zsh a `cmd; echo` or a pipeline otherwise lives on as an
+				// orphan holding the stdout pipe, so the task never finishes and, in a
+				// one-shot run, the process cannot exit (LIFECYCLE-REVIEW M2, measured).
 				const child = spawn(process.env.SHELL || "/bin/sh", ["-c", params.command], {
 					cwd: ctx.cwd,
+					...detachedSpawnOptions(),
 					stdio: ["ignore", "pipe", "pipe"],
 				});
 				let buffer = "";
@@ -201,7 +241,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				);
 				stop = () => {
 					stopRequested = true;
-					child.kill("SIGTERM");
+					stopProcessTree(child, MONITOR_KILL_GRACE_MS);
 				};
 			} else {
 				let ws: WebSocket;
@@ -240,15 +280,48 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				stop,
 				finished,
 			};
-			registry.register(task);
-			updateWidget();
+			// A one-shot monitor is awaited below and never addressable afterwards, so
+			// it is not registered behind task_output/task_stop (like bash's blocking
+			// path); `persistent` cannot be honoured either — the deadline applies.
+			if (!oneShot) {
+				registry.register(task);
+				updateWidget();
+			}
 
-			if (!params.persistent) {
-				const timeoutMs = Math.min(params.timeout_ms ?? DEFAULT_MONITOR_TIMEOUT_MS, MAX_MONITOR_TIMEOUT_MS);
+			const timeoutMs = Math.min(params.timeout_ms ?? DEFAULT_MONITOR_TIMEOUT_MS, MAX_MONITOR_TIMEOUT_MS);
+			if (oneShot || !params.persistent) {
 				const timer = setTimeout(() => {
 					if (task.status === "running") stop();
 				}, timeoutMs);
 				timer.unref?.();
+			}
+
+			if (oneShot) {
+				const onAbort = () => stop();
+				if (signal?.aborted) onAbort();
+				else signal?.addEventListener("abort", onAbort, { once: true });
+				try {
+					await finished;
+				} finally {
+					signal?.removeEventListener("abort", onAbort);
+				}
+				const output = persistIfLarge(stored.trim() || "(no events)", { dir: sessionResultsDir(ctx), id: `monitor-${id}` });
+				const finalStatus = task.status;
+				const how =
+					finalStatus === "stopped"
+						? `stopped${signal?.aborted ? " (tool call aborted)" : ` at its ${params.persistent ? `default deadline of ${timeoutMs} ms (persistent is not available in a one-shot session)` : `${timeoutMs} ms deadline`}`}`
+						: finalStatus;
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Monitor ${id} (${params.description}) ${how} after ${eventCount} event(s). This is a one-shot session, so the monitor ran to its end instead of in the background.\n\n${output}`,
+						},
+					],
+					// No taskId: nothing is registered behind task_output/task_stop.
+					details: { status: finalStatus, events: eventCount },
+					isError: finalStatus === "failed",
+				};
 			}
 
 			return {
@@ -513,6 +586,12 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 
 	pi.on("session_start", (_event, ctx) => {
 		lastCtx = ctx;
+		shuttingDown = false;
+		if (pendingShutdownNotice) {
+			const notice = pendingShutdownNotice;
+			pendingShutdownNotice = undefined;
+			if (ctx.hasUI) ctx.ui.notify(notice, "info");
+		}
 	});
 	pi.on("agent_start", () => {
 		agentBusy = true;
@@ -521,9 +600,19 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		agentBusy = false;
 	});
 
-	pi.on("session_shutdown", () => {
+	pi.on("session_shutdown", (event) => {
+		shuttingDown = true;
+		// Fires on /clear, /new and /resume too (findings §8). Everything running
+		// dies with the session; the replacement session is told (see
+		// pendingShutdownNotice) — a quit needs no note.
+		const running = registry.running();
+		if (running.length > 0 && event.reason !== "quit") {
+			const names = running.map((t) => `${t.id} (${t.description})`).join(", ");
+			pendingShutdownNotice = `Stopped ${running.length} background task${running.length === 1 ? "" : "s"} with the previous session: ${names}.`;
+		}
 		registry.stopAll();
 		clearWakeup();
 		clearLoop();
+		lastCtx = undefined;
 	});
 }

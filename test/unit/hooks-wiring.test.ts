@@ -313,3 +313,85 @@ describe("hooks wiring", () => {
 		expect(sources).toEqual(["startup", "clear", "resume"]);
 	});
 });
+
+describe("hooks wiring: SessionEnd (LIFECYCLE-REVIEW-2026-09-06 M4)", () => {
+	let root: string;
+	let claudeDir: string;
+	let projectDir: string;
+	let fake: FakePi;
+
+	beforeEach(() => {
+		root = mkdtempSync(join(tmpdir(), "hooks-wiring-end-"));
+		claudeDir = join(root, "claude-config");
+		projectDir = join(root, "project");
+		mkdirSync(claudeDir, { recursive: true });
+		mkdirSync(projectDir, { recursive: true });
+		vi.stubEnv("CLAUDE_CONFIG_DIR", claudeDir);
+		resetHookSettingsCache();
+		fake = createFakePi();
+	});
+	afterEach(() => {
+		vi.unstubAllEnvs();
+		rmSync(root, { recursive: true, force: true });
+	});
+
+	/** The dispatch is fire-and-forget; poll for the hook's write. */
+	const waitForLines = async (file: string, count: number) => {
+		for (let i = 0; i < 100; i++) {
+			if (existsSync(file) && readFileSync(file, "utf-8").split("\n").filter((l) => l.trim()).length >= count) break;
+			await new Promise((r) => setTimeout(r, 30));
+		}
+		return readFileSync(file, "utf-8")
+			.split("\n")
+			.filter((l) => l.trim())
+			.map((l) => JSON.parse(l) as Record<string, unknown>);
+	};
+
+	it("sends Claude Code's `reason` (clear / prompt_input_exit / other), the cwd and session id, and no `source`", async () => {
+		const seen = join(root, "end-stdin.jsonl");
+		const hook = `sh "${join(root, "hook-end.sh")}"`;
+		writeFileSync(join(root, "hook-end.sh"), `#!/bin/sh\ncat >> "${seen}"\necho >> "${seen}"\n`);
+		writeFileSync(join(claudeDir, "settings.json"), JSON.stringify({ hooks: { SessionEnd: [{ hooks: [{ type: "command", command: hook }] }] } }));
+		hooksExtension(fake.pi as never);
+		const ctx = (hasUI: boolean) => createFakeCtx({ cwd: projectDir, hasUI, sessionManager: { getSessionId: () => "sess-42", getSessionFile: () => undefined, getBranch: () => [] } });
+
+		await fake.fireOne("session_shutdown", { reason: "new" }, ctx(true));
+		await fake.fireOne("session_shutdown", { reason: "quit" }, ctx(true));
+		await fake.fireOne("session_shutdown", { reason: "quit" }, ctx(false));
+		await fake.fireOne("session_shutdown", { reason: "resume" }, ctx(true));
+
+		const payloads = await waitForLines(seen, 4);
+		// The four hooks run concurrently (fire-and-forget), so their writes land in any order.
+		expect(payloads.map((p) => p.reason).sort()).toEqual(["clear", "other", "other", "prompt_input_exit"]);
+		for (const payload of payloads) {
+			expect(payload.hook_event_name).toBe("SessionEnd");
+			expect(payload.cwd).toBe(projectDir);
+			expect(payload.session_id).toBe("sess-42");
+			expect(payload).not.toHaveProperty("source");
+		}
+	});
+
+	it("runs the hook off a frozen ctx: the real ctx throwing after dispose does not stop the hook", async () => {
+		const seen = join(root, "end-frozen.jsonl");
+		writeFileSync(join(root, "hook-frozen.sh"), `#!/bin/sh\ncat >> "${seen}"\necho >> "${seen}"\n`);
+		writeFileSync(
+			join(claudeDir, "settings.json"),
+			JSON.stringify({ hooks: { SessionEnd: [{ hooks: [{ type: "command", command: `sh "${join(root, "hook-frozen.sh")}"` }] }] } }),
+		);
+		hooksExtension(fake.pi as never);
+		const ctx = createFakeCtx({ cwd: projectDir, hasUI: true });
+		const handled = fake.fireOne("session_shutdown", { reason: "quit" }, ctx);
+		// pi disposes the session right after the handler: every getter throws.
+		for (const key of ["cwd", "hasUI", "sessionManager", "ui"]) {
+			Object.defineProperty(ctx, key, {
+				get() {
+					throw new Error("This extension ctx is stale after session replacement or reload");
+				},
+			});
+		}
+		await handled;
+		const payloads = await waitForLines(seen, 1);
+		expect(payloads).toHaveLength(1);
+		expect(payloads[0].cwd).toBe(projectDir);
+	});
+});

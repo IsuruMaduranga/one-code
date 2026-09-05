@@ -1,29 +1,25 @@
 /**
  * In-process subagent execution — the one place the workflow extension
- * touches pi's SDK. Each agent() call becomes a real `createAgentSession()`
- * with an in-memory session; the run shares a single ModelRuntime and
- * DefaultResourceLoader across all its agents (building either per agent is
- * expensive and, for the loader, re-runs every extension factory).
+ * touches pi's SDK. Each agent() call becomes a real agent session with an
+ * in-memory session file; the run shares a single ModelRuntime across all its
+ * agents (building one per agent is expensive). The resource loader is NOT
+ * shared: disposing one session on a loader invalidates the loader's runtime
+ * for every other session built on it (lib/agent-loader.ts, LIFECYCLE-REVIEW
+ * H3), so each agent() call opens its own through `openChildSession`, which
+ * also emits the `session_start` pi's SDK never sends (H2).
  *
- * The shared loader uses `noExtensions: true`, which structurally blocks
- * recursive orchestration (no workflow tool inside subagents) — and would
- * also drop One Code's permission gate, so `permissionGateFactory` is passed
- * via `extensionFactories`, which DefaultResourceLoader always loads.
+ * Each loader uses `noExtensions: true`, which structurally blocks recursive
+ * orchestration (no workflow tool inside subagents) — and would also drop One
+ * Code's permission gate, so `permissionGateFactory` is passed via
+ * `extensionFactories`, which DefaultResourceLoader always loads.
  */
 
 import os from "node:os";
-import {
-	createAgentSession,
-	type DefaultResourceLoader,
-	getAgentDir,
-	type ModelRuntime,
-	SessionManager,
-	type ToolDefinition,
-} from "@earendil-works/pi-coding-agent";
+import { getAgentDir, type ModelRuntime, SessionManager, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
-import { buildAgentLoader, createSharedModelRuntime, finalAssistantText } from "../lib/agent-loader.ts";
+import { createSharedModelRuntime, finalAssistantText, openChildSession } from "../lib/agent-loader.ts";
 import { modelSpec as modelSpecOf } from "../lib/model-policy.ts";
 import { agentPromptIdentity, PrefixWarmGate, prefixWarmKey } from "../lib/prefix-warm-gate.ts";
 import type { PermissionBridge } from "../permissions/subagent-gate.ts";
@@ -175,12 +171,8 @@ export function resolveWorkflowAgentModel(input: WorkflowModelInput): {
 export class AgentRunner {
 	private readonly options: AgentRunnerOptions;
 	private readonly modelRuntime: ModelRuntime;
-	private readonly loader: DefaultResourceLoader;
 	private readonly agentCatalog: AgentDefinition[];
 	private readonly availableModels: Model<Api>[];
-	/** Per-agentType loader cache — building one re-runs every extension factory, so each
-	 * agentType's loader is built once (lazily, on first use) and reused for the rest of the run. */
-	private readonly loadersByAgentType = new Map<string, Promise<DefaultResourceLoader>>();
 	/**
 	 * `parallel()` children of one agent type share a request prefix; the first
 	 * starts streaming before the rest go, so the fan-out writes the prefix once
@@ -188,16 +180,9 @@ export class AgentRunner {
 	 */
 	private readonly warmGate = new PrefixWarmGate();
 
-	private constructor(
-		options: AgentRunnerOptions,
-		modelRuntime: ModelRuntime,
-		loader: DefaultResourceLoader,
-		agentCatalog: AgentDefinition[],
-		availableModels: Model<Api>[],
-	) {
+	private constructor(options: AgentRunnerOptions, modelRuntime: ModelRuntime, agentCatalog: AgentDefinition[], availableModels: Model<Api>[]) {
 		this.options = options;
 		this.modelRuntime = modelRuntime;
-		this.loader = loader;
 		this.agentCatalog = agentCatalog;
 		this.availableModels = availableModels;
 	}
@@ -205,10 +190,9 @@ export class AgentRunner {
 	static async create(options: AgentRunnerOptions): Promise<AgentRunner> {
 		const agentDir = getAgentDir();
 		const modelRuntime = await createSharedModelRuntime(agentDir);
-		const loader = await buildAgentLoader({ cwd: options.cwd, agentDir, getPermissionBridge: options.getPermissionBridge, getHookBridge: options.getHookBridge });
 		const agentCatalog = discoverAgents(agentDirs(options.cwd, os.homedir()));
 		const availableModels = [...(await modelRuntime.getAvailable())];
-		return new AgentRunner(options, modelRuntime, loader, agentCatalog, availableModels);
+		return new AgentRunner(options, modelRuntime, agentCatalog, availableModels);
 	}
 
 	/**
@@ -265,18 +249,25 @@ export class AgentRunner {
 		const capture: { called: boolean; value: unknown } = { called: false, value: undefined };
 		const customTools: ToolDefinition[] = opts.schema ? [buildStructuredOutputTool(opts.schema, capture)] : [];
 
-		const loader = agentDef ? await this.loaderForAgentType(agentDef) : this.loader;
-
-		const { session } = await createAgentSession({
-			cwd,
-			agentDir: getAgentDir(),
-			modelRuntime: this.modelRuntime,
-			model: modelSpec.model as never,
-			thinkingLevel: modelSpec.thinkingLevel as never,
-			tools: agentDef?.tools,
-			customTools,
-			resourceLoader: loader,
-			sessionManager: SessionManager.inMemory(cwd),
+		const session = await openChildSession({
+			loader: {
+				cwd: this.options.cwd,
+				agentDir: getAgentDir(),
+				systemPrompt: agentDef?.systemPrompt,
+				getPermissionBridge: this.options.getPermissionBridge,
+				getHookBridge: this.options.getHookBridge,
+			},
+			session: {
+				cwd,
+				agentDir: getAgentDir(),
+				modelRuntime: this.modelRuntime,
+				model: modelSpec.model as never,
+				thinkingLevel: modelSpec.thinkingLevel as never,
+				tools: agentDef?.tools,
+				customTools,
+				sessionManager: SessionManager.inMemory(cwd),
+			},
+			onError: (error) => this.options.onNotice?.(`${opts.label ?? "agent"}: extension error in ${error.event}: ${error.error}`),
 		});
 
 		const onAbort = () => void session.abort();
@@ -375,33 +366,10 @@ export class AgentRunner {
 		throw new Error("subagent never produced structured output");
 	}
 
-	/** Builds (once) and reuses the loader for this agentType, keyed by agent name. */
-	private loaderForAgentType(agentDef: AgentDefinition): Promise<DefaultResourceLoader> {
-		let pending = this.loadersByAgentType.get(agentDef.name);
-		if (!pending) {
-			pending = this.buildLoaderWithSystemPrompt(agentDef.systemPrompt);
-			// A failed build must not poison the cache — let the next call retry.
-			pending.catch(() => this.loadersByAgentType.delete(agentDef.name));
-			this.loadersByAgentType.set(agentDef.name, pending);
-		}
-		return pending;
-	}
-
-	private buildLoaderWithSystemPrompt(systemPrompt: string): Promise<DefaultResourceLoader> {
-		return buildAgentLoader({
-			cwd: this.options.cwd,
-			agentDir: getAgentDir(),
-			systemPrompt,
-			getPermissionBridge: this.options.getPermissionBridge,
-			getHookBridge: this.options.getHookBridge,
-		});
-	}
-
 	dispose(): void {
-		// ModelRuntime/loader(s) hold no OS resources that need explicit teardown today;
-		// this hook exists so run-manager can stay correct if that changes. The
-		// per-agentType cache is dropped alongside the base loader.
-		this.loadersByAgentType.clear();
+		// The ModelRuntime holds no OS resources that need explicit teardown today
+		// (each agent()'s loader dies with its session); this hook exists so
+		// run-manager can stay correct if that changes.
 	}
 }
 
