@@ -27,6 +27,16 @@ export const ULTRACODE = "ultracode";
  * pure module so both extensions reference one constant, not a bare string. */
 export const ULTRACODE_STATUS_KEY = "ultracode";
 
+/**
+ * Event-bus channel the effort extension emits `{ active: boolean }` on when
+ * ultracode mode switches. The workflow extension listens so the keyword
+ * one-shot ("the user included ultracode") is skipped while the standing block
+ * already says so — two instructions for one fact, the weaker one on top,
+ * steered worse than one. Emitted on change only (the bus does not replay);
+ * the mode starts off, so a listener registered at load is never behind.
+ */
+export const ULTRACODE_MODE_CHANNEL = "one-code:ultracode-mode";
+
 /** The reasoning level ultracode pins, when the model can reach it. */
 export const ULTRACODE_LEVEL: ThinkingLevel = "xhigh";
 

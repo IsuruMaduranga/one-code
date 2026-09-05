@@ -20,6 +20,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import { buildAgentLoader, createSharedModelRuntime } from "../lib/agent-loader.ts";
 import { agentPromptIdentity, PrefixWarmGate, prefixWarmKey, type Release } from "../lib/prefix-warm-gate.ts";
 import type { PermissionBridge } from "../permissions/subagent-gate.ts";
+import type { HookBridge } from "../hooks/subagent-bridge.ts";
 import { findConfigured, modelSpec } from "../lib/model-policy.ts";
 import { isModelUnavailableError } from "../auto-mode/model-select.ts";
 import { type AgentDefinition, childToolAllowlist, usableAllowlistedTools } from "./agents.ts";
@@ -152,8 +153,12 @@ export class SubagentRuntime {
 	 * title needs the name once two children ask back-to-back.
 	 */
 	private readonly getPermissionBridge: () => PermissionBridge | undefined;
+	/** The parent hooks extension's bridge (undefined until hooks publishes it); the child's tool hooks. */
+	private readonly getHookBridge: () => HookBridge | undefined;
 	/** Child session id → run name, for the bridge wrapper above. */
 	private readonly runNames = new Map<string, string>();
+	/** Child session id → agent type (`explore`, …), for the hook payload's `agent_type`. */
+	private readonly agentTypes = new Map<string, string>();
 	/**
 	 * Loader cache keyed by system-prompt identity ("base", `agent:<name>`,
 	 * `fork:<prompt>`). Building one re-runs every curated extension factory plus
@@ -174,10 +179,12 @@ export class SubagentRuntime {
 		baseCwd: string,
 		getMcpTools: () => ToolDefinition[] | Promise<ToolDefinition[]>,
 		getPermissionBridge: () => PermissionBridge | undefined,
+		getHookBridge: () => HookBridge | undefined,
 	) {
 		this.modelRuntime = modelRuntime;
 		this.baseCwd = baseCwd;
 		this.getMcpTools = getMcpTools;
+		this.getHookBridge = getHookBridge;
 		// One stable wrapper (the gate calls the getter per tool call; allocating a
 		// closure each time would be waste). A bridge that vanished between the
 		// getter and the call throws, which the gate turns into a fail-closed deny.
@@ -193,11 +200,12 @@ export class SubagentRuntime {
 		cwd: string,
 		getMcpTools: () => ToolDefinition[] | Promise<ToolDefinition[]> = () => [],
 		getPermissionBridge: () => PermissionBridge | undefined = () => undefined,
+		getHookBridge: () => HookBridge | undefined = () => undefined,
 	): Promise<SubagentRuntime> {
 		const modelRuntime = await createSharedModelRuntime(getAgentDir());
 		// Prime the catalog once; spawns read the live snapshot (see resolveModel).
 		await modelRuntime.getAvailable();
-		return new SubagentRuntime(modelRuntime, cwd, getMcpTools, getPermissionBridge);
+		return new SubagentRuntime(modelRuntime, cwd, getMcpTools, getPermissionBridge, getHookBridge);
 	}
 
 	/**
@@ -228,6 +236,8 @@ export class SubagentRuntime {
 			// files to the system prompt as well.
 			noContextFiles: true,
 			getPermissionBridge: this.getPermissionBridge,
+			getHookBridge: this.getHookBridge,
+			agentTypeOf: (sessionId) => (sessionId ? this.agentTypes.get(sessionId) : undefined),
 		});
 	}
 
@@ -376,6 +386,7 @@ export class SubagentRuntime {
 				);
 			}
 			if (spec.name) this.runNames.set(session.sessionManager.getSessionId(), spec.name);
+			if (spec.agent) this.agentTypes.set(session.sessionManager.getSessionId(), spec.agent.name);
 			return session;
 		};
 		try {
@@ -395,6 +406,7 @@ export class SubagentRuntime {
 	/** Dispose a child session and forget its run-name mapping. */
 	private discard(session: Session): void {
 		this.runNames.delete(session.sessionManager.getSessionId());
+		this.agentTypes.delete(session.sessionManager.getSessionId());
 		session.dispose();
 	}
 

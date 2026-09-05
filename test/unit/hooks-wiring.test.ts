@@ -18,8 +18,10 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import hooksExtension from "../../extensions/hooks/index.ts";
+import hooksExtension, { hookContextText } from "../../extensions/hooks/index.ts";
 import { resetHookSettingsCache } from "../../extensions/hooks/settings.ts";
+import { type HookBridge, SUBAGENT_HOOK_CHANNEL } from "../../extensions/hooks/subagent-bridge.ts";
+import { REMINDER_CHANNEL, wrapReminder } from "../../extensions/lib/reminders.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
 const state = vi.hoisted(() => ({
@@ -70,6 +72,8 @@ describe("hooks wiring", () => {
 		const hookB = script("hook-b.sh", `#!/bin/sh\ncat >/dev/null\necho '{"hookSpecificOutput":{"updatedInput":{"command":"echo replaced"}}}'\n`);
 		writeUserHooks({ PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: hookA }, { type: "command", command: hookB }] }] });
 		mount();
+		const reminders: Array<{ text: string; placement?: string }> = [];
+		fake.events.on(REMINDER_CHANNEL, (data) => reminders.push(data as { text: string; placement?: string }));
 
 		const input: Record<string, unknown> = { command: "echo original" };
 		const result = await fake.fireOne<{ block?: boolean } | undefined>(
@@ -81,10 +85,104 @@ describe("hooks wiring", () => {
 		// updatedInput is applied in place, so downstream handlers see it too.
 		expect(input.command).toBe("echo replaced");
 
-		const contextMessage = fake.sentMessages.find((m) => m.message.customType === "one-code:hook-context");
-		expect(contextMessage).toBeDefined();
-		expect(contextMessage!.message.content as string).toContain("extra context from hook A");
-		expect(contextMessage!.options).toMatchObject({ deliverAs: "steer" });
+		// PreToolUse context is a one-shot on the reminder channel — it lands inside
+		// this call's tool result, in Claude Code's hook_additional_context wording,
+		// at no extra turn (STEERING-REVIEW-2026-09-05 M6). Never a steer of its own.
+		expect(reminders).toHaveLength(1);
+		expect(reminders[0].text).toBe(hookContextText("PreToolUse", "extra context from hook A"));
+		expect(reminders[0].placement).toBeUndefined();
+		expect(fake.sentMessages).toHaveLength(0);
+	});
+
+	it("PostToolUse context is appended to the result as a system-reminder in CC's wording", async () => {
+		const hookPost = script("hook-post-ctx.sh", `#!/bin/sh\ncat >/dev/null\necho '{"hookSpecificOutput":{"additionalContext":"lint clean"}}'\n`);
+		writeUserHooks({ PostToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: hookPost }] }] });
+		mount();
+		const result = await fake.fireOne<{ content: Array<{ type: string; text: string }> }>(
+			"tool_result",
+			{ toolName: "bash", toolCallId: "t3", input: {}, content: [{ type: "text", text: "original" }], isError: false },
+			ctx(),
+		);
+		expect(result?.content).toEqual([
+			{ type: "text", text: "original" },
+			{ type: "text", text: wrapReminder(hookContextText("PostToolUse", "lint clean")) },
+		]);
+		expect(fake.sentMessages).toHaveLength(0);
+	});
+
+	it("UserPromptSubmit context rides the prompt's own turn, AFTER the prompt (before_agent_start message), not as an idle message before it", async () => {
+		const hookPrompt = script("hook-prompt.sh", `#!/bin/sh\ncat >/dev/null\necho '{"hookSpecificOutput":{"additionalContext":"today is a holiday"}}'\n`);
+		writeUserHooks({ UserPromptSubmit: [{ hooks: [{ type: "command", command: hookPrompt }] }] });
+		mount();
+		await fake.fireOne("input", { source: "interactive", text: "hello" }, ctx());
+		// Nothing is sent on its own: pi would have appended an idle custom message
+		// BEFORE the user message it is about to add.
+		expect(fake.sentMessages).toHaveLength(0);
+		const result = await fake.fireOne<{ message?: { customType: string; content: string; display: boolean } }>("before_agent_start", { prompt: "hello" }, ctx());
+		expect(result?.message).toEqual({
+			customType: "one-code:hook-context",
+			content: wrapReminder(hookContextText("UserPromptSubmit", "today is a holiday")),
+			display: false,
+		});
+		// Delivered once.
+		const again = await fake.fireOne<{ message?: unknown }>("before_agent_start", { prompt: "next" }, ctx());
+		expect(again).toBeUndefined();
+	});
+
+	it("publishes a hook bridge at session start that runs the user's tool hooks for a child's calls, naming the agent", async () => {
+		const seen = join(root, "child-stdin.json");
+		const hookA = script(
+			"hook-child.sh",
+			`#!/bin/sh\ncat > "${seen}"\nif grep -q '"agent_id"' "${seen}"; then echo '{"hookSpecificOutput":{"permissionDecision":"deny","permissionDecisionReason":"no rm in children"}}'; fi\n`,
+		);
+		writeUserHooks({ PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: hookA }] }] });
+		mount();
+		let bridge: HookBridge | undefined;
+		fake.events.on(SUBAGENT_HOOK_CHANNEL, (data) => {
+			bridge = (data as { bridge: HookBridge }).bridge;
+		});
+		await fake.fireOne("session_start", { reason: "startup" }, ctx());
+		expect(bridge).toBeDefined();
+
+		const outcome = await bridge!.preToolUse({
+			toolName: "bash",
+			input: { command: "rm -rf build" },
+			cwd: join(projectDir, "wt"),
+			sessionId: "child-1",
+			agentType: "explore",
+		});
+		expect(outcome.block?.reason).toBe("no rm in children");
+		// The hook read a Claude Code payload naming the child (agent_id present,
+		// agent_type = the agent), with the child's cwd and session id.
+		const stdin = JSON.parse(readFileSync(seen, "utf-8"));
+		expect(stdin).toMatchObject({
+			hook_event_name: "PreToolUse",
+			tool_name: "Bash",
+			tool_input: { command: "rm -rf build" },
+			session_id: "child-1",
+			agent_id: "child-1",
+			agent_type: "explore",
+			cwd: join(projectDir, "wt"),
+		});
+	});
+
+	it("the bridge translates a child's updatedInput back to native names and frames its context like the parent's", async () => {
+		const hookB = script("hook-child-b.sh", `#!/bin/sh\ncat >/dev/null\necho '{"hookSpecificOutput":{"updatedInput":{"file_path":"/tmp/other.txt"},"additionalContext":"careful"}}'\n`);
+		writeUserHooks({ PreToolUse: [{ matcher: "Read", hooks: [{ type: "command", command: hookB }] }] });
+		mount();
+		let bridge: HookBridge | undefined;
+		fake.events.on(SUBAGENT_HOOK_CHANNEL, (data) => {
+			bridge = (data as { bridge: HookBridge }).bridge;
+		});
+		await fake.fireOne("session_start", { reason: "startup" }, ctx());
+		const pre = await bridge!.preToolUse({ toolName: "read", input: { path: "/tmp/a.txt" }, cwd: projectDir, sessionId: "c" });
+		expect(pre.block).toBeUndefined();
+		expect(pre.updatedInput).toEqual({ path: "/tmp/other.txt" });
+		expect(pre.additionalContext).toBe(hookContextText("PreToolUse", "careful"));
+
+		const post = await bridge!.postToolUse({ toolName: "read", input: {}, cwd: projectDir, sessionId: "c", content: [], isError: false });
+		// No PostToolUse hooks configured: nothing to apply.
+		expect(post).toEqual({ block: undefined, updatedToolResult: undefined, additionalContext: undefined });
 	});
 
 	it("a PreToolUse hook blocks the tool call, quoting the hook's reason", async () => {

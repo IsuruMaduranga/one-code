@@ -7,11 +7,17 @@
  *
  * Mode state is owned by the permissions extension; this extension requests
  * changes over MODE_CHANNEL and reacts to transitions it observes on
- * PERMISSION_STATUS_CHANNEL (which fires on every setMode). Plan-file
- * allocation happens lazily in before_agent_start — the one hook that covers
- * all three ways into plan mode (the tool, ctrl+q, defaultMode: "plan") and
- * runs after every extension's session_start, so restoring a previous path
- * from the session branch can never race a fresh allocation.
+ * PERMISSION_STATUS_CHANNEL (which fires on every setMode). The plan block is
+ * (re)installed at two points: synchronously on the transition INTO plan mode
+ * (the status handler, with the last context seen), so a ctrl+q during a long
+ * turn puts the block on the queue before the turn's next request — until
+ * 2026-09-05 the mid-turn requests ran with no plan reminder while every edit
+ * was denied "see the plan-mode reminder" (STEERING-REVIEW-2026-09-05 M3) —
+ * and on before_agent_start, which covers a session that STARTS in plan mode
+ * before this extension has seen a context (defaultMode: "plan"; permissions'
+ * session_start runs first) and runs after every extension's session_start,
+ * so restoring a previous path from the session branch never races a fresh
+ * allocation.
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -71,12 +77,29 @@ export default function planModeExtension(pi: ExtensionAPI) {
 		});
 	};
 
+	/** The last context seen, for a refresh triggered off the bus (no ctx of its own). */
+	let lastCtx: ExtensionContext | undefined;
+
 	pi.events.on(PERMISSION_STATUS_CHANNEL, (data) => {
 		const status = data as PermissionStatus;
-		if (typeof status?.mode === "string") currentMode = status.mode;
+		if (typeof status?.mode !== "string") return;
+		const previous = currentMode;
+		currentMode = status.mode;
+		// Entering plan mode mid-turn: permissions' setMode has just dropped the
+		// shared "permission-mode" key (before broadcasting this status, so this
+		// re-add is not undone) and will announce the change on the next tool
+		// result; the standing block has to be back on the queue for that same
+		// request. The path is announced over PLAN_FILE_CHANNEL inside refresh,
+		// synchronously, so setMode's announcement can name it.
+		if (currentMode === "plan" && previous !== "plan" && lastCtx) refresh(lastCtx);
+	});
+
+	pi.on("session_start", (_event, ctx) => {
+		lastCtx = ctx;
 	});
 
 	pi.on("before_agent_start", (_event, ctx) => {
+		lastCtx = ctx;
 		if (currentMode === "plan") refresh(ctx);
 	});
 
@@ -90,11 +113,11 @@ export default function planModeExtension(pi: ExtensionAPI) {
 		parameters: Type.Object({}),
 		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
 			pi.events.emit(MODE_CHANNEL, { mode: "plan" });
-			// setMode fires synchronously over the status channel, so currentMode
-			// is already "plan"; announce the file in the tool result too so the
-			// model can start writing this same turn.
+			// setMode broadcasts synchronously over the status channel, so the
+			// listener above has already installed the block and announced the
+			// path (or the mode was plan already and both stand); name the file in
+			// the tool result too so the model can start writing this same turn.
 			const path = ensurePlanFile(ctx);
-			refresh(ctx);
 			return {
 				content: [
 					{

@@ -9,7 +9,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import backgroundExtension from "../../extensions/background/index.ts";
 import { MONITOR_BATCH_MAX_LINES } from "../../extensions/background/monitor-batch.ts";
-import { NOTIFICATION_ID_KEY } from "../../extensions/lib/notifications.ts";
+import { DEFAULT_COALESCE_MS, NOTIFICATION_ID_KEY } from "../../extensions/lib/notifications.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
 function mount(): FakePi {
@@ -39,6 +39,9 @@ describe("background wiring: monitor batching", () => {
 
 		const taskOutput = fake.tools.get("task_output")!;
 		await taskOutput.execute("c2", { task_id: taskId, block: true, timeout: 5000 }, undefined, undefined, ctx);
+		// The batch and the completion arrive together, so the notifier merges them
+		// into one message after its coalescing window (real timers here).
+		await new Promise((resolve) => setTimeout(resolve, DEFAULT_COALESCE_MS + 50));
 
 		const batchMessage = fake.sentMessages.find((m) => {
 			const text = (m.message.content as Array<{ text?: string }>)[0]?.text ?? "";
@@ -53,6 +56,9 @@ describe("background wiring: monitor batching", () => {
 			return text.includes("completed") && text.includes(`after ${lineCount} event(s)`);
 		});
 		expect(completion).toBeDefined();
+		// Coalesced (STEERING-REVIEW-2026-09-05 M1): one custom message carries both.
+		expect(completion).toBe(batchMessage);
+		expect(fake.sentMessages).toHaveLength(1);
 		// Delivery policy: steered mid-turn, and able to start a turn on its own.
 		expect(batchMessage!.options).toMatchObject({ deliverAs: "steer", triggerTurn: true });
 	});
@@ -116,7 +122,7 @@ describe("background wiring: /loop and schedule_wakeup timers", () => {
 		// 5s is below the 60s floor, so it is clamped and the tool says so.
 		expect(scheduled.content[0].text).toContain("adjusted from 5s");
 
-		await vi.advanceTimersByTimeAsync(60_000);
+		await vi.advanceTimersByTimeAsync(60_000 + DEFAULT_COALESCE_MS);
 		const wakeup = fake.sentMessages.find((m) => m.message.customType === "wakeup");
 		expect(wakeup).toBeDefined();
 		const text = (wakeup!.message.content as Array<{ text: string }>)[0].text;
@@ -146,7 +152,7 @@ describe("background wiring: /loop and schedule_wakeup timers", () => {
 		expect(rejected.content[0].text).toContain("previous wakeup is still pending");
 
 		// The original schedule is untouched: it still fires.
-		await vi.advanceTimersByTimeAsync(120_000);
+		await vi.advanceTimersByTimeAsync(120_000 + DEFAULT_COALESCE_MS);
 		expect(fake.sentMessages.find((m) => m.message.customType === "wakeup")).toBeDefined();
 	});
 
@@ -170,6 +176,8 @@ describe("background wiring: /loop and schedule_wakeup timers", () => {
 		};
 
 		await loop.handler("1m check the deploy", ctx);
+		// The first tick is queued at once; the notifier's coalescing window is the only delay.
+		await vi.advanceTimersByTimeAsync(DEFAULT_COALESCE_MS);
 		await confirmPending();
 		// Fires the first iteration immediately.
 		expect(fake.sentMessages.filter((m) => m.message.customType === "loop")).toHaveLength(1);
@@ -183,7 +191,7 @@ describe("background wiring: /loop and schedule_wakeup timers", () => {
 
 		// Once settled, the next tick fires again.
 		await fake.fireOne("agent_settled", {});
-		await vi.advanceTimersByTimeAsync(60_000);
+		await vi.advanceTimersByTimeAsync(60_000 + DEFAULT_COALESCE_MS);
 		await confirmPending();
 		expect(fake.sentMessages.filter((m) => m.message.customType === "loop")).toHaveLength(2);
 

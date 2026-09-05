@@ -23,9 +23,9 @@ export class TurnSpan {
 		this.startedAt ??= now;
 	}
 
-	/** `agent_end`: remembers how that run ended, for settle to read. */
-	runEnded(messages: ReadonlyArray<RunMessage> | undefined): void {
-		this.outcome.record(messages);
+	/** `agent_end`: remembers how that run ended (with the run's `signal.aborted`), for settle to read. */
+	runEnded(messages: ReadonlyArray<RunMessage> | undefined, signalAborted = false): void {
+		this.outcome.record(messages, signalAborted);
 	}
 
 	/**

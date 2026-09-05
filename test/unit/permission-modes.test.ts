@@ -304,5 +304,49 @@ describe("permissionsExtension model_select updates classifier", () => {
 		expect(standing?.text).toContain("Auto mode is active");
 		expect(standing?.placement).toBe("sticky-append");
 	});
+
+	it("entering plan mode drops the old block BEFORE broadcasting, lets plan-mode re-add its own, and names the plan file in the announcement", () => {
+		// The plan-mode extension re-installs the shared "permission-mode" block
+		// synchronously from the status broadcast (and publishes the plan file);
+		// setMode used to remove the key afterwards, undoing that re-add for the
+		// rest of a turn entered mid-stream (STEERING-REVIEW-2026-09-05 M3).
+		const fake = makeFakePi();
+		const order: string[] = [];
+		fake.pi.events.on("one-code:system-reminder", (data) => {
+			const r = data as { key?: string; remove?: boolean; text?: string };
+			if (r.key === "permission-mode") order.push(r.remove ? "remove" : "add");
+		});
+		fake.pi.events.on(PERMISSION_STATUS_CHANNEL, (data) => {
+			const status = data as PermissionStatus;
+			order.push(`status:${status.mode}`);
+			if (status.mode === "plan") {
+				// What plan-mode's refresh does inside the broadcast.
+				fake.pi.events.emit("one-code:plan-file-path", { path: "/home/u/.onecode/plans/brisk-otter-map.md" });
+				fake.pi.events.emit("one-code:system-reminder", { text: "plan block", scope: "every-turn", key: "permission-mode", placement: "sticky-append" });
+			}
+		});
+		permissionsExtension(fake.pi as any);
+		fake.fire(
+			"session_start",
+			{},
+			{
+				cwd: "/tmp/project",
+				model: makeModel("anthropic", "claude-3-7-sonnet", 3),
+				modelRegistry: { getAvailable: () => [] },
+				sessionManager: { getSessionId: () => "sess-1", getSessionDir: () => "/tmp/sess" },
+				ui: { setWidget: () => {}, notify: () => {}, setStatus: () => {} },
+				hasUI: false,
+			},
+		);
+		order.length = 0;
+		fake.pi.events.emit("one-code:set-permission-mode", { mode: "plan" });
+
+		expect(order).toEqual(["remove", "status:plan", "add"]);
+		const reminders = (fake.emitted["one-code:system-reminder"] ?? []) as Array<{ key?: string; text?: string }>;
+		const announce = reminders.filter((r) => r.key === "permission-mode-change").pop();
+		expect(announce?.text).toContain('The user\'s permission mode is now "plan".');
+		expect(announce?.text).toContain("/home/u/.onecode/plans/brisk-otter-map.md");
+		expect(announce?.text).toContain("exit_plan_mode");
+	});
 });
 

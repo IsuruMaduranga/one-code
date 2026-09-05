@@ -12,6 +12,28 @@ const dir = realpathSync(mkdtempSync(join(tmpdir(), "cc-hooks-exec-")));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
 describe("runHookCommand", () => {
+	it("keeps the hook's child process ref'd while it runs, so a one-shot run cannot drain mid-hook (detached only on request)", async () => {
+		// A ChildProcess exposes its ref state on the underlying libuv handle.
+		type Handle = { constructor: { name: string }; _handle?: { hasRef?: () => boolean } };
+		const childRefs = () =>
+			(process as unknown as { _getActiveHandles(): Handle[] })
+				._getActiveHandles()
+				.filter((h) => h.constructor.name === "ChildProcess")
+				.map((h) => h._handle?.hasRef?.());
+		const before = childRefs().length;
+
+		const awaited = runHookCommand("sleep 0.2", "{}", { cwd: process.cwd() });
+		await new Promise((r) => setTimeout(r, 50));
+		expect(childRefs().filter((ref) => ref === true).length).toBeGreaterThan(before);
+		await awaited;
+
+		const fireAndForget = runHookCommand("sleep 0.2", "{}", { cwd: process.cwd(), detached: true });
+		await new Promise((r) => setTimeout(r, 50));
+		// Unref'd: either absent from the active list or listed without a ref.
+		expect(childRefs().filter((ref) => ref === true).length).toBe(before);
+		await fireAndForget;
+	});
+
 	it("captures stdout, stderr, and the exit code", async () => {
 		const result = await runHookCommand("echo out; echo err >&2; exit 3", "{}", { cwd: dir });
 		expect(result.stdout.trim()).toBe("out");

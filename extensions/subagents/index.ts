@@ -42,6 +42,7 @@ import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { MCP_TOOLS_CHANNEL, type McpToolsPayload } from "../lib/mcp-share.ts";
 import { resolveModelTier } from "../lib/model-tier.ts";
 import { watchPermissionBridge } from "../permissions/subagent-gate.ts";
+import { watchHookBridge } from "../hooks/subagent-bridge.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { type BackgroundTask, generateTaskId, TASK_REGISTER_CHANNEL } from "../background/registry.ts";
 import { type ChildAction } from "../auto-mode/actions.ts";
@@ -281,6 +282,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	// bubbled to the user). Undefined until permissions emits it at session start;
 	// a child built before then falls back to the fail-closed local gate.
 	const getPermissionBridge = watchPermissionBridge(pi);
+	// Likewise the hooks extension's bridge: the user's PreToolUse/PostToolUse
+	// hooks run for a child's tool calls too (hooks/subagent-bridge.ts).
+	const getHookBridge = watchHookBridge(pi);
 
 	/** The in-process runner, built lazily on first run and shared across all runs. */
 	let runtimePromise: Promise<SubagentRuntime> | undefined;
@@ -289,6 +293,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			ctx.cwd,
 			awaitMcpTools,
 			getPermissionBridge,
+			getHookBridge,
 		));
 
 	const loadAgents = (cwd: string) => {

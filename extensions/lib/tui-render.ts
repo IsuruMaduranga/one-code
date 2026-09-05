@@ -15,7 +15,8 @@
  * every line goes through `truncateLine` — never skip it.
  */
 
-import { NOTIFICATION_HEADER, NOTIFICATION_PREFIX } from "./notifications.ts";
+import { notificationBody } from "./notifications.ts";
+export { notificationBody };
 
 /** The structural subset of pi-tui's Component that pi's renderers require. */
 export interface TuiComponent {
@@ -563,20 +564,6 @@ export function ccToolRenderers<TArgs = any, TDetails = any>(
 			return linesComponent(() => resultLines(theme, text, options.expanded, context.isError, spec.maxCollapsedLines));
 		},
 	};
-}
-
-/**
- * Strip the `systemNotification` anti-confabulation framing for display: the
- * framing exists for the model, not the user (findings §14). Returns the body.
- */
-export function notificationBody(text: string): string {
-	const lines = text.split("\n");
-	if (lines[0]?.startsWith(NOTIFICATION_HEADER)) {
-		let i = 1;
-		while (i < lines.length && (lines[i].trim() === "" || lines[i].startsWith(NOTIFICATION_PREFIX))) i++;
-		return lines.slice(i).join("\n").trim();
-	}
-	return text.trim();
 }
 
 /** True when a line is visually empty — ANSI codes (Box padding paints) don't count as content. */

@@ -36,6 +36,17 @@
  *   message on every later request, byte-identical. Pins are process memory
  *   (a `--resume` drops them: one miss, once).
  *
+ * Persisted or pinned is decided by WHEN the one-shot is emitted, which is a
+ * load-order rule: system-reminder's `tool_result` hook takes the one-shots
+ * pending at that moment, so only an extension whose own `tool_result` handler
+ * runs BEFORE it (listed before `system-reminder` in `package.json`
+ * `pi.extensions`, like `context-budget`) or that emits from `tool_call` gets
+ * its block written into the result. Emitting from a later `tool_result`
+ * handler, or from `tool_execution_end` (pi runs it AFTER the `tool_result`
+ * hooks, findings §3), lands the block on the same result but as a pin. Same
+ * wording on the wire, so this only matters for `--resume` and for ordering
+ * after the `<total_tokens>` line.
+ *
  * A compaction summary counts as a user message for anchoring (pi renders it as
  * one), so the context stack survives a compaction that left no user turn. So
  * does a `custom` harness message (task notification, wakeup, hook context):
@@ -325,7 +336,7 @@ function reminderBlock(entry: ReminderEntry): TextContent {
  * the previous user message (STEERING-REVIEW-2026-09-05 H1).
  */
 function isUserLike(m: AgentMessage): boolean {
-	return m.role === "user" || m.role === "compactionSummary" || m.role === "custom";
+	return isStickyCarrier(m) || m.role === "compactionSummary";
 }
 
 /** User-role messages that carry sticky blocks: real turns and harness messages, not a compaction summary. */

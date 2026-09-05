@@ -16,6 +16,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
 import type { PermissionBridge } from "../permissions/subagent-gate.ts";
+import type { HookBridge } from "../hooks/subagent-bridge.ts";
 import type { SubagentDefault } from "../subagents/default-model.ts";
 import { AgentRunner } from "./agent-session.ts";
 import { createScriptGlobals, MAX_CONCURRENCY, MAX_AGENTS_PER_RUN, type ScriptRunState } from "./globals.ts";
@@ -44,6 +45,8 @@ export interface StartRunOptions {
 	defaultEffort?: string;
 	/** Parent permission bridge, threaded into every agent's gate (see AgentRunnerOptions). */
 	getPermissionBridge?: () => PermissionBridge | undefined;
+	/** The parent hooks extension's bridge (hooks/subagent-bridge.ts), threaded into every workflow agent. */
+	getHookBridge?: () => HookBridge | undefined;
 	/** Each finished agent's dollar cost, for the footer's all-in total (review S13). */
 	onUsage?: (cost: number) => void;
 }
@@ -235,6 +238,7 @@ export class WorkflowRunManager {
 				defaultEffort: options.defaultEffort as never,
 				onNotice: (message) => handle.record({ type: "log", text: `⚠ ${message}` }),
 				getPermissionBridge: options.getPermissionBridge,
+				getHookBridge: options.getHookBridge,
 				onUsage: options.onUsage,
 			});
 

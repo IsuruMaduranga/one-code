@@ -40,6 +40,9 @@ export interface HookStdinPayload {
 	stop_hook_active?: boolean;
 	trigger?: "manual" | "auto";
 	source?: string;
+	/** Set when the call is a subagent's (Claude Code: hooks tell a child's call from the main thread's by its presence). */
+	agent_id?: string;
+	agent_type?: string;
 }
 
 export interface HookEnvelope {
@@ -148,4 +151,35 @@ export function interpretHookResult(event: CcHookEvent, run: FinishedRun): HookO
 	if (specific?.additionalContext?.trim()) outcome.additionalContext = specific.additionalContext.trim();
 	if (envelope.systemMessage?.trim()) outcome.systemMessage = envelope.systemMessage.trim();
 	return outcome;
+}
+
+/** A text block as pi's tool results carry it; what PostToolUse assembly adds. */
+interface TextBlock {
+	type: "text";
+	text: string;
+}
+
+/**
+ * A tool result's content after PostToolUse hooks spoke, or undefined when no
+ * hook changed anything. Shared by the parent's `tool_result` handler and the
+ * child hook gate so a subagent's results are assembled exactly like the
+ * parent's: an `updatedToolResult` replaces the content (a non-string is
+ * JSON-encoded), a block's reason is put in front — the tool already ran, so
+ * the objection is delivered in the result the model reads, the error flag left
+ * as the tool set it (a successful write marked as an error invites a redo) —
+ * and `additionalContext` (already framed by the caller) goes behind.
+ */
+export function applyPostToolUseOutcome<T extends { type: string }>(
+	content: readonly T[],
+	outcome: Pick<HookOutcome, "block" | "updatedToolResult" | "additionalContext">,
+): Array<T | TextBlock> | undefined {
+	if (!outcome.block && outcome.updatedToolResult === undefined && !outcome.additionalContext) return undefined;
+	let result: Array<T | TextBlock> = [...content];
+	if (outcome.updatedToolResult !== undefined) {
+		const replacement = outcome.updatedToolResult;
+		result = [{ type: "text", text: typeof replacement === "string" ? replacement : JSON.stringify(replacement) }];
+	}
+	if (outcome.block) result = [{ type: "text", text: `PostToolUse hook: ${outcome.block.reason}` }, ...result];
+	if (outcome.additionalContext) result = [...result, { type: "text", text: outcome.additionalContext }];
+	return result;
 }

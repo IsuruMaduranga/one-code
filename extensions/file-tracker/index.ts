@@ -12,12 +12,19 @@
  * that went through bash and never touched an intercepted tool.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { pathsReadOnBranch } from "./replay.ts";
-import { describeChanges, EXTERNAL_CHANGE_REMINDER, FileTracker, STALE_REASON, UNREAD_REASON } from "./tracker.ts";
+import {
+	describeChanges,
+	EXTERNAL_CHANGE_REMINDER,
+	type FileStamp,
+	FileTracker,
+	STALE_REASON,
+	UNREAD_REASON,
+} from "./tracker.ts";
 
 const GUARDED_TOOLS = new Set(["edit", "write", "notebook_edit"]);
 const READ_TOOLS = new Set(["read", "notebook_edit"]);
@@ -36,6 +43,24 @@ function readIfPresent(path: string): string | undefined {
 		// Binary or unreadable: not something we can reason about, so don't guard it.
 		return undefined;
 	}
+}
+
+/** The file's disk stamp, or undefined when it is gone (or not a plain file we could stat). */
+function statIfPresent(path: string): FileStamp | undefined {
+	try {
+		const stat = statSync(path);
+		return { mtimeMs: stat.mtimeMs, size: stat.size };
+	} catch {
+		return undefined;
+	}
+}
+
+/** Observe a file's current content together with the stamp it was read at. */
+function observeFromDisk(tracker: FileTracker, path: string): void {
+	const stamp = statIfPresent(path);
+	const current = readIfPresent(path);
+	if (current === undefined) tracker.forget(path);
+	else tracker.observe(path, current, Date.now(), stamp);
 }
 
 function pathOf(input: unknown, cwd: string): string | undefined {
@@ -65,9 +90,7 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 			return;
 		}
 		for (const raw of pathsReadOnBranch(entries)) {
-			const path = isAbsolute(raw) ? raw : resolve(ctx.cwd, raw);
-			const current = readIfPresent(path);
-			if (current !== undefined) tracker.observe(path, current, Date.now());
+			observeFromDisk(tracker, isAbsolute(raw) ? raw : resolve(ctx.cwd, raw));
 		}
 	};
 	pi.on("session_start", (_event, ctx) => reconstruct(ctx));
@@ -96,35 +119,53 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 
 		// After a read we know the file; after our own write we know it again, so a
 		// successful edit does not make the file look stale to the next edit.
-		const current = readIfPresent(path);
-		if (current === undefined) tracker.forget(path);
-		else tracker.observe(path, current, Date.now());
+		observeFromDisk(tracker, path);
 		return undefined;
 	});
 
 	/**
-	 * At the start of each run, report anything that changed under us. Doing it
-	 * here rather than on a watcher keeps it deterministic and costs one stat+read
-	 * per tracked file, only for files the model actually touched. `agent_start`,
-	 * not `before_agent_start`: pi emits the latter only from `prompt()`, so a run
-	 * opened by a harness notification (a `/loop` tick, an agent report arriving
-	 * while idle) never fired it and changes went unreported until the next user
-	 * prompt (STEERING-REVIEW-2026-09-05 H1). `agent_start` fires for every run,
-	 * including pi's own retry/continue runs; a repeat scan is cheap and
-	 * `alreadyNotified` keeps it from repeating a warning.
+	 * Report anything that changed under us. Costs one stat per tracked file
+	 * (only files the model actually touched) and a read only for a file whose
+	 * stamp moved since we last read it; `alreadyNotified` keeps a repeat scan
+	 * from repeating a warning.
+	 *
+	 * Two triggers:
+	 * - `agent_start`, for changes made between turns. Not `before_agent_start`:
+	 *   pi emits that only from `prompt()`, so a run opened by a harness
+	 *   notification (a `/loop` tick, an agent report arriving while idle) never
+	 *   fired it and changes went unreported until the next user prompt
+	 *   (STEERING-REVIEW-2026-09-05 H1). `agent_start` fires for every run.
+	 * - `tool_execution_end`, for changes made DURING a turn — a formatter hook,
+	 *   a watcher, format-on-save in the user's editor, a `git checkout` by a
+	 *   background command. Until 2026-09-05 these waited for the next prompt;
+	 *   mid-turn the model discovered them only by hitting the stale-edit guard
+	 *   (one blocked call plus a re-read per edit for anyone with an asynchronous
+	 *   formatter). Claude Code computes its `edited_text_file` attachments on
+	 *   every tool round, so the model reads the change before its next edit
+	 *   (review M5). The one-shot is pending when the next request goes out and
+	 *   the injector pins it to that tool result — pi runs `tool_result` hooks
+	 *   BEFORE it emits `tool_execution_end` (agent-loop.js
+	 *   finalizeExecutedToolCall → emitToolExecutionEnd), so it cannot be written
+	 *   into the stored result; pinned is the same mechanism tool-search's
+	 *   deferred-tool miss uses. Our own edit/write/read of a file was observed by
+	 *   the `tool_result` handler above before this fires, so it is fresh here
+	 *   and never reported as external.
 	 */
-	pi.on("agent_start", () => {
+	const reportExternalChanges = () => {
 		const detailed: string[] = [];
 		const overflow: string[] = [];
 		for (const path of tracker.tracked) {
 			const previous = tracker.lastSeen(path);
 			if (previous === undefined || previous === "") continue;
-			const current = readIfPresent(path);
-			if (current === undefined) {
+			const stamp = statIfPresent(path);
+			if (stamp && tracker.unchangedOnDisk(path, stamp)) continue;
+			const current = stamp ? readIfPresent(path) : undefined;
+			if (stamp === undefined || current === undefined) {
 				tracker.forget(path);
 				detailed.push(`${path} no longer exists; it was deleted or moved after you read it.`);
 				continue;
 			}
+			tracker.recordStamp(path, stamp);
 			if (current === previous) continue;
 			// Don't repeat the same warning every turn…
 			if (tracker.alreadyNotified(path, current)) continue;
@@ -146,5 +187,7 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 				text: `${overflow.length} more file(s) you read earlier changed on disk since: ${overflow.join(", ")}. Re-read any of them before editing it.`,
 			});
 		}
-	});
+	};
+	pi.on("agent_start", reportExternalChanges);
+	pi.on("tool_execution_end", reportExternalChanges);
 }

@@ -54,7 +54,10 @@ merging.
 
 For a big job (a broad audit, a migration, or a review worth double-checking),
 type **`ultracode`** in your message. The model writes a short JavaScript script
-that fans the work out across many agents running in parallel.
+that fans the work out across many agents running in parallel. The keyword
+arms the turn it starts; a message you queue while the model is still working
+does not arm the next turn, so for a longer stretch of this kind of work switch
+the mode on with `/effort ultracode` instead (see below).
 
 ### How a workflow runs
 

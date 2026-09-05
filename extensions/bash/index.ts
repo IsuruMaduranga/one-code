@@ -102,8 +102,8 @@ export default function bashExtension(pi: ExtensionAPI) {
 				renderResult: ((result, options, theme, context) => {
 					// A background start returns a model-facing instruction paragraph;
 					// the transcript needs one line (Claude Code: "Running in the background").
-					const details = result.details as { taskId?: string; logPath?: string; completed?: boolean } | undefined;
-					if (details?.taskId && !details.completed && !context.isError) {
+					const details = result.details as { taskId?: string; logPath?: string } | undefined;
+					if (details?.taskId && !context.isError) {
 						const line = options.expanded
 							? `Running in the background (task ${details.taskId}${details.logPath ? ` · log: ${details.logPath}` : ""})`
 							: "Running in the background (↓ to manage)";
@@ -160,7 +160,9 @@ export default function bashExtension(pi: ExtensionAPI) {
 							text: `Bash task ${id} (${description}) ${finishLine(summary, timeoutSeconds)}. This is a one-shot session, so the command ran to completion instead of in the background.${logPath ? ` Log: ${logPath}.` : ""}\n\n${output}`,
 						},
 					],
-					details: { taskId: id, logPath, completed: true },
+					// No taskId: nothing was registered behind task_output/task_stop, and
+					// its presence is what renderResult reads as "running in the background".
+					details: { logPath },
 					isError: summary.exitCode !== 0 && !summary.stopped,
 				};
 			}

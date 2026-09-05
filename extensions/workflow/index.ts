@@ -12,7 +12,10 @@
  *
  * Orchestration is opt-in, like Claude Code: the tool description gates it,
  * and the literal keyword "ultracode" in a user message arms the turn via a
- * system reminder.
+ * system reminder (skipped while `/effort ultracode` has the standing block
+ * on — see `effort/`). The keyword is read by pi's `input` event, which only
+ * a prompt sent to an idle session fires; a message queued mid-turn does not
+ * arm (docs/upstream_prs.md #14).
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -23,8 +26,10 @@ import { Type } from "typebox";
 import { recordUsage } from "../lib/usage-bus.ts";
 import { createTaskNotifier } from "../lib/notifications.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
+import { ULTRACODE_MODE_CHANNEL } from "../effort/slider.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../permissions/modes.ts";
 import { watchPermissionBridge } from "../permissions/subagent-gate.ts";
+import { watchHookBridge } from "../hooks/subagent-bridge.ts";
 import { applicableSubagentDefault, loadSubagentDefault } from "../subagents/default-model.ts";
 import { discoverSavedWorkflows, findSavedWorkflow, workflowDirs } from "./saved-workflows.ts";
 import { buildRunReport, WorkflowRunManager } from "./run-manager.ts";
@@ -204,6 +209,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 	// Parent permission bridge for workflow agents' gates — same bridge the
 	// subagent runner uses; see AgentRunnerOptions.getPermissionBridge.
 	const getPermissionBridge = watchPermissionBridge(pi);
+	const getHookBridge = watchHookBridge(pi);
 
 	const openViewer = async (ctx: ExtensionContext, opts?: { height?: "full" | "half"; runIndex?: number }) => {
 		if (viewerOpen) return;
@@ -287,6 +293,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 					configuredDefault,
 					defaultEffort: ctx.thinkingLevel,
 					getPermissionBridge,
+					getHookBridge,
 					// Workflow agents run in their own sessions; their spend reaches the footer only through the bus.
 					onUsage: (cost) => recordUsage(pi, "subagent", { cost: { total: cost } }),
 				});
@@ -391,8 +398,17 @@ export default function workflowExtension(pi: ExtensionAPI) {
 		},
 	});
 
+	// While ultracode MODE is on (/effort ultracode) the standing block already
+	// carries the opt-in, so the keyword's single-turn one-shot is skipped: one
+	// instruction for one fact. `input` fires for prompt() only — a message the
+	// user queues while a turn is running (pi's steer()/followUp()) is expanded
+	// without it and does not arm the turn (upstream ask #14; the mode covers it).
+	let ultracodeMode = false;
+	pi.events.on(ULTRACODE_MODE_CHANNEL, (data) => {
+		ultracodeMode = (data as { active?: boolean })?.active === true;
+	});
 	pi.on("input", (event) => {
-		if (/\bultracode\b/i.test(event.text)) {
+		if (!ultracodeMode && /\bultracode\b/i.test(event.text)) {
 			pi.events.emit(REMINDER_CHANNEL, { text: ULTRACODE_REMINDER, scope: "next-turn" });
 		}
 		return undefined;

@@ -120,6 +120,15 @@ const denyReason = (result: { cause?: string; rule?: { raw?: string } }): string
 				: DENIED_BY_RULE(result.rule?.raw ?? "deny");
 
 /** Ask-prompt option labels — shared by both gate paths. */
+/**
+ * Modes that carry a standing `permission-mode` reminder block: auto installs
+ * its own in `setMode`, plan's is owned by the plan-mode extension (it knows
+ * the plan file) and re-installed from the status broadcast `setMode` sends.
+ * Startup announces exactly these; a new mode with a standing block is added
+ * here, next to the emitter it belongs to.
+ */
+const STANDING_REMINDER_MODES: ReadonlySet<PermissionMode> = new Set<PermissionMode>(["plan", "auto"]);
+
 const YES = "Yes";
 const YES_SESSION = "Yes, don't ask again this session";
 const NO = "No, tell the agent what to do differently";
@@ -470,19 +479,30 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	const setMode = (next: PermissionMode) => {
 		mode = next;
 		process.env[MODE_ENV] = next;
+		// The standing block of the mode being left goes first, BEFORE the status
+		// broadcast in applyBadge: the plan-mode extension owns the shared
+		// "permission-mode" key while planning (it knows the plan file) and
+		// re-installs its block synchronously from that broadcast when the mode
+		// becomes plan — removing the key afterwards would undo that re-add and
+		// leave a turn entered mid-stream with no plan reminder until the next
+		// prompt (STEERING-REVIEW-2026-09-05 M3). Auto installs its own block below.
+		if (mode !== "auto") pi.events.emit(REMINDER_CHANNEL, { remove: true, key: "permission-mode" });
 		applyBadge();
-		// No plan branch: the plan-mode extension owns the "permission-mode"
-		// reminder while planning (it knows the plan file) and re-emits it every
-		// turn, so plan mode takes the generic path below — the announce is
-		// wanted, and the key removal is undone before the next request goes out.
-		// applyBadge above notifies that extension synchronously over the status
-		// channel.
 		// Every switch is announced once on the tail of the next request (the next
 		// tool result mid-turn, the prompt between turns), so the model learns of
-		// the change where it reads next. The standing block below carries the
-		// rules but rides the turn's user message, behind the model's own actions.
+		// the change where it reads next. The standing block carries the rules
+		// but rides the turn's user message, behind the model's own actions — so
+		// for plan mode the announcement, the one thing guaranteed to land
+		// mid-turn, also names the plan file (published by plan-mode's refresh
+		// inside the applyBadge broadcast above).
+		const planNote =
+			mode === "plan"
+				? planFilePath
+					? ` Only read-only tools are available now, plus one writable file: your plan file at ${planFilePath}. Build the plan there, then call exit_plan_mode.`
+					: " Only read-only tools are available now, plus the plan file named in the plan-mode reminder."
+				: "";
 		pi.events.emit(REMINDER_CHANNEL, {
-			text: `The user's permission mode is now "${mode}".`,
+			text: `The user's permission mode is now "${mode}".${planNote}`,
 			key: "permission-mode-change",
 		});
 		if (mode === "auto") {
@@ -497,8 +517,6 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				// the cached prefix holds turn to turn (lib/reminders.ts).
 				placement: "sticky-append",
 			});
-		} else {
-			pi.events.emit(REMINDER_CHANNEL, { remove: true, key: "permission-mode" });
 		}
 	};
 
@@ -553,7 +571,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// only emitter of the block; until 2026-09-05 startup called it for plan
 		// alone, so `--permission-mode auto` / `defaultMode: "auto"` sessions ran
 		// with no auto-mode reminder at all (STEERING-REVIEW-2026-09-05 H2).
-		if (mode === "plan" || mode === "auto") setMode(mode);
+		if (STANDING_REMINDER_MODES.has(mode)) setMode(mode);
 		process.env[MODE_ENV] = mode;
 	};
 

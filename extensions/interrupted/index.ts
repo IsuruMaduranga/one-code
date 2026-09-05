@@ -3,7 +3,9 @@
  * instead?" line, shown when the user aborts a turn (Esc).
  *
  * On agent_end, if the turn's last assistant message was aborted by the user
- * (findings: pi marks it `stopReason: "aborted"`), a display-only session entry
+ * (findings: pi marks it `stopReason: "aborted"`, or `"error"` on a run whose
+ * signal is aborted when the abort reached the provider call —
+ * `lib/interrupt.ts`), a display-only session entry
  * is appended (`appendEntry` — not part of the LLM context, so the model never
  * sees the note about its own interruption), rendered dim to match CC's
  * InterruptedByUser component. The paired turn-duration line suppresses itself
@@ -27,7 +29,7 @@ export default function interruptedExtension(pi: ExtensionAPI) {
 
 	pi.on("agent_end", (event, ctx) => {
 		if (!ctx.hasUI) return;
-		if (!wasInterrupted(event.messages)) return;
+		if (!wasInterrupted(event.messages, ctx.signal?.aborted)) return;
 		pi.appendEntry(ENTRY_TYPE);
 	});
 }

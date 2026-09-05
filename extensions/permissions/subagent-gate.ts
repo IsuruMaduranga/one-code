@@ -19,6 +19,8 @@
  * same shape as `MCP_TOOLS_CHANNEL` sharing tool definitions).
  */
 
+import { type BridgeWatchApi, watchBridge } from "../lib/bridge-watch.ts";
+
 export const SUBAGENT_GATE_CHANNEL = "one-code:subagent-permission-gate";
 
 /** One child tool call to evaluate. `cwd` is the child's runtime cwd (a worktree, if isolated). */
@@ -49,18 +51,7 @@ export interface SubagentGatePayload {
 	decide: PermissionBridge;
 }
 
-/**
- * Subscribe to the gate channel and return a lazy getter for the latest bridge.
- * Call once from an extension entry point (only they hold a `pi`); the getter is
- * what gets threaded into child runners, and yields `undefined` until the
- * permissions extension publishes at session start.
- */
-export function watchPermissionBridge(pi: {
-	events: { on(channel: string, handler: (data: unknown) => void): void };
-}): () => PermissionBridge | undefined {
-	let bridge: PermissionBridge | undefined;
-	pi.events.on(SUBAGENT_GATE_CHANNEL, (data) => {
-		bridge = (data as SubagentGatePayload | undefined)?.decide;
-	});
-	return () => bridge;
+/** A lazy getter for the latest published permission bridge (`lib/bridge-watch.ts`); undefined until the permissions extension publishes. */
+export function watchPermissionBridge(pi: BridgeWatchApi): () => PermissionBridge | undefined {
+	return watchBridge(pi, SUBAGENT_GATE_CHANNEL, (data) => (data as SubagentGatePayload | undefined)?.decide);
 }

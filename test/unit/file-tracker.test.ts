@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeChanges, FileTracker } from "../../extensions/file-tracker/tracker.ts";
+import { describeChanges, FileTracker, RACY_STAMP_MS } from "../../extensions/file-tracker/tracker.ts";
 import { looksLikeAnthropicRequest, withClearThinking } from "../../extensions/context-management/index.ts";
 
 describe("FileTracker.status", () => {
@@ -50,6 +50,53 @@ describe("FileTracker.status", () => {
 		expect(tracker.tracked.length).toBeLessThanOrEqual(300);
 		expect(tracker.has("/x/0.ts")).toBe(false);
 		expect(tracker.has("/x/319.ts")).toBe(true);
+	});
+});
+
+// The change scan runs after every tool call; the stamp is what lets it skip
+// the full read for every tracked file whose mtime and size have not moved.
+describe("FileTracker disk stamps", () => {
+	const stamp = { mtimeMs: 1000, size: 5 };
+
+	it("reports a file unchanged only while the stamp recorded at observe matches", () => {
+		const tracker = new FileTracker();
+		tracker.observe("/x/a.ts", "hello", 1, stamp);
+		expect(tracker.unchangedOnDisk("/x/a.ts", { ...stamp })).toBe(true);
+		expect(tracker.unchangedOnDisk("/x/a.ts", { mtimeMs: 2000, size: 5 })).toBe(false);
+		expect(tracker.unchangedOnDisk("/x/a.ts", { mtimeMs: 1000, size: 6 })).toBe(false);
+	});
+
+	it("never reports unchanged without a recorded stamp, so a stamp-less observe is always re-read", () => {
+		const tracker = new FileTracker();
+		tracker.observe("/x/a.ts", "hello", 1);
+		expect(tracker.unchangedOnDisk("/x/a.ts", stamp)).toBe(false);
+		// An observe without a stamp also drops a stale one.
+		tracker.observe("/x/a.ts", "hello", 2, stamp);
+		tracker.observe("/x/a.ts", "hello", 3);
+		expect(tracker.unchangedOnDisk("/x/a.ts", stamp)).toBe(false);
+	});
+
+	it("never trusts a stamp younger than the racy window, so a same-size rewrite right after our read is still re-read", () => {
+		const tracker = new FileTracker();
+		const now = 50_000;
+		const fresh = { mtimeMs: now - RACY_STAMP_MS + 1, size: 5 };
+		tracker.observe("/x/a.ts", "hello", 1, fresh);
+		expect(tracker.unchangedOnDisk("/x/a.ts", fresh, now)).toBe(false);
+		// Once it has aged past the window the same stamp is trusted.
+		expect(tracker.unchangedOnDisk("/x/a.ts", fresh, now + RACY_STAMP_MS)).toBe(true);
+	});
+
+	it("moves with the scan's own reads and is dropped with the file", () => {
+		const tracker = new FileTracker();
+		tracker.observe("/x/a.ts", "hello", 1, stamp);
+		const later = { mtimeMs: 3000, size: 9 };
+		tracker.recordStamp("/x/a.ts", later);
+		expect(tracker.unchangedOnDisk("/x/a.ts", later)).toBe(true);
+		expect(tracker.unchangedOnDisk("/x/a.ts", stamp)).toBe(false);
+		// The scan recording a stamp does not make the file count as read.
+		expect(tracker.lastSeen("/x/a.ts")).toBe("hello");
+		tracker.forget("/x/a.ts");
+		expect(tracker.unchangedOnDisk("/x/a.ts", later)).toBe(false);
 	});
 });
 

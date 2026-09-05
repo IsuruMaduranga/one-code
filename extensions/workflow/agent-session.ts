@@ -27,6 +27,7 @@ import { buildAgentLoader, createSharedModelRuntime, finalAssistantText } from "
 import { modelSpec as modelSpecOf } from "../lib/model-policy.ts";
 import { agentPromptIdentity, PrefixWarmGate, prefixWarmKey } from "../lib/prefix-warm-gate.ts";
 import type { PermissionBridge } from "../permissions/subagent-gate.ts";
+import type { HookBridge } from "../hooks/subagent-bridge.ts";
 import { summarizeArgs } from "../lib/tui-render.ts";
 import { agentDirs, type AgentDefinition, discoverAgents } from "../subagents/agents.ts";
 import type { SubagentDefault } from "../subagents/default-model.ts";
@@ -56,6 +57,8 @@ export interface AgentRunnerOptions {
 	 * that would normally ask — unusable outside auto/bypass modes.
 	 */
 	getPermissionBridge?: () => PermissionBridge | undefined;
+	/** The parent hooks extension's bridge, so the user's tool hooks run for workflow agents too. */
+	getHookBridge?: () => HookBridge | undefined;
 	/** Each finished agent's dollar cost (review S13: workflow agents never reached the footer). */
 	onUsage?: (cost: number) => void;
 }
@@ -160,7 +163,7 @@ export class AgentRunner {
 	static async create(options: AgentRunnerOptions): Promise<AgentRunner> {
 		const agentDir = getAgentDir();
 		const modelRuntime = await createSharedModelRuntime(agentDir);
-		const loader = await buildAgentLoader({ cwd: options.cwd, agentDir, getPermissionBridge: options.getPermissionBridge });
+		const loader = await buildAgentLoader({ cwd: options.cwd, agentDir, getPermissionBridge: options.getPermissionBridge, getHookBridge: options.getHookBridge });
 		const agentCatalog = discoverAgents(agentDirs(options.cwd, os.homedir()));
 		const availableModels = [...(await modelRuntime.getAvailable())];
 		return new AgentRunner(options, modelRuntime, loader, agentCatalog, availableModels);
@@ -334,6 +337,7 @@ export class AgentRunner {
 			agentDir: getAgentDir(),
 			systemPrompt,
 			getPermissionBridge: this.options.getPermissionBridge,
+			getHookBridge: this.options.getHookBridge,
 		});
 	}
 

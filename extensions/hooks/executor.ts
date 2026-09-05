@@ -22,8 +22,20 @@
  *   `read -r line` sees EOF-before-delimiter and `read` exits 1, so the
  *   `if read -r line; then …` branch is silently skipped even though the
  *   variable was populated (Claude Code carries the same fix — bug CC-161)
- * - timeout clamped under Node's 2^31-1 ms timer overflow, timer unref'd so a
- *   pending hook can't keep a one-shot `pi -p` process alive
+ * - timeout clamped under Node's 2^31-1 ms timer overflow, timer unref'd (it
+ *   still fires while the process lives; it must not be what keeps it alive)
+ * - the child process handle stays REF'd while the hook runs, unless the caller
+ *   passes `detached` (SessionEnd at shutdown, fire-and-forget). Until
+ *   2026-09-05 every hook child was `unref()`d, and in a one-shot run
+ *   (`pi -p` / `--mode json`) a PreToolUse hook was often the only pending
+ *   work: the provider's keep-alive socket is idle between the response and
+ *   the tool's spawn, so nothing ref'd remained but the hook's stdio pipes.
+ *   When the child exited, the pipe-close callbacks could run before its
+ *   SIGCHLD-driven exit callback; with the process handle unref'd the loop
+ *   counted itself empty and node exited 0 mid-tool, silently, before the
+ *   hook's `close` ever fired — measured at ~55% of runs with a trivial
+ *   `exit 0` hook (docs/one-shot-lsp-event-loop-drain.md has the same
+ *   mechanism for the LSP client). A ref'd child holds the loop until `close`.
  */
 
 import { spawn } from "node:child_process";
@@ -45,6 +57,12 @@ export interface HookRunOptions {
 	timeoutSeconds?: number;
 	/** Exposed to the hook as CLAUDE_PROJECT_DIR; defaults to cwd. */
 	projectDir?: string;
+	/**
+	 * Let the process exit without waiting for this hook (`child.unref()`). Only
+	 * for fire-and-forget dispatches at shutdown; an awaited hook must keep the
+	 * event loop alive or a one-shot run drains mid-await (header).
+	 */
+	detached?: boolean;
 }
 
 const MAX_OUTPUT_BYTES = 1_000_000;
@@ -76,7 +94,7 @@ export function runHookCommand(command: string, stdinJson: string, opts: HookRun
 			});
 			return;
 		}
-		child.unref();
+		if (opts.detached) child.unref();
 
 		let stdout = "";
 		let stderr = "";

@@ -18,8 +18,10 @@ import os from "node:os";
 import { join } from "node:path";
 import { DefaultResourceLoader, type InlineExtension, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { HookBridge } from "../hooks/subagent-bridge.ts";
 import type { PermissionBridge } from "../permissions/subagent-gate.ts";
 import { withShortCacheRetention } from "./cache-retention.ts";
+import { hookGateFactory } from "./hook-gate.ts";
 import { permissionGateFactory } from "./permission-gate.ts";
 import { worktreeGuardFactory } from "./worktree-isolation.ts";
 
@@ -75,6 +77,15 @@ export interface AgentLoaderOptions {
 	 */
 	getPermissionBridge?: () => PermissionBridge | undefined;
 	/**
+	 * The parent hooks extension's bridge (hooks/subagent-bridge.ts). When present,
+	 * the user's PreToolUse/PostToolUse hooks run for the child's tool calls, before
+	 * the guards and the permission gate (Claude Code runs hooks inside subagents).
+	 * A getter, read per call, like the permission bridge.
+	 */
+	getHookBridge?: () => HookBridge | undefined;
+	/** Resolves a child session id to its agent type, for the hook payload's `agent_type`. */
+	agentTypeOf?: (sessionId: string | undefined) => string | undefined;
+	/**
 	 * Stop pi from appending CLAUDE.md/AGENTS.md to the child's system prompt. Set
 	 * by a caller whose child session loads the `claude-context` extension, which
 	 * injects the `# claudeMd` reminder itself — otherwise the child carried the
@@ -91,9 +102,10 @@ export async function buildAgentLoader(options: AgentLoaderOptions): Promise<Def
 		noExtensions: true,
 		...(options.noContextFiles ? { noContextFiles: true } : {}),
 		extensionFactories: [
-			// Order is load-bearing: the worktree git-isolation guard must run BEFORE
-			// the permission gate — the same guard-before-permissions layering the
-			// main session gets from extension load order.
+			// Order is load-bearing, mirroring the main session's extension order:
+			// hooks first (a hook's updatedInput must be what every guard judges),
+			// then the worktree git-isolation guard, then the permission gate.
+			...(options.getHookBridge ? [hookGateFactory(options.getHookBridge, { agentTypeOf: options.agentTypeOf, neverGate: options.neverGate })] : []),
 			worktreeGuardFactory(options.cwd),
 			permissionGateFactory(options.cwd, os.homedir(), options.neverGate, options.getPermissionBridge),
 			...(options.extraFactories ?? []),

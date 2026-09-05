@@ -64,6 +64,26 @@ describe("runOutcome", () => {
 		expect(runOutcome([{ role: "user" }])).toBe("ok");
 		expect(runOutcome(undefined)).toBe("ok");
 	});
+
+	// Measured over RPC (STEERING-REVIEW-2026-09-05 L1): an abort landing between
+	// a stored tool result and the next provider call is labelled "error" by pi.
+	// The run's signal is aborted, and that is what says it was the user's abort.
+	it("reads an error stop on an aborted run as aborted", () => {
+		expect(runOutcome([{ role: "assistant", stopReason: "error" }], true)).toBe("aborted");
+		expect(wasInterrupted([{ role: "assistant", stopReason: "error" }], true)).toBe(true);
+		const latch = new RunOutcomeLatch();
+		latch.record([{ role: "assistant", stopReason: "error" }], true);
+		expect(latch.take()).toBe("aborted");
+	});
+
+	it("leaves a provider error on a live run, and a completed run whose signal aborted late, alone", () => {
+		expect(runOutcome([{ role: "assistant", stopReason: "error" }], false)).toBe("error");
+		expect(runOutcome([{ role: "assistant", stopReason: "error" }])).toBe("error");
+		// The signal only reclassifies an error stop: a turn that finished before
+		// the abort landed was not interrupted.
+		expect(runOutcome([{ role: "assistant", stopReason: "stop" }], true)).toBe("ok");
+		expect(runOutcome([{ role: "assistant", stopReason: "toolUse" }], true)).toBe("ok");
+	});
 });
 
 describe("RunOutcomeLatch", () => {

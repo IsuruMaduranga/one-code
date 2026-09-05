@@ -120,6 +120,41 @@ describe("file-tracker wiring", () => {
 		expect(emitted).toHaveLength(0);
 	});
 
+	it("reports a change made during the turn at the end of the next tool execution, with Claude Code's steer, and does not report our own writes", async () => {
+		const file = path("f.ts");
+		writeFileSync(file, "before");
+		await fake.fireOne("tool_result", { toolName: "read", input: { path: file }, isError: false }, ctx());
+		const emitted: Array<{ text: string; placement?: string }> = [];
+		fake.events.on(REMINDER_CHANNEL, (data) => emitted.push(data as { text: string }));
+
+		// Our own edit: the tool_result handler observes the new content first
+		// (pi runs tool_result hooks before tool_execution_end), so it is fresh.
+		writeFileSync(file, "our edit");
+		await fake.fireOne("tool_result", { toolName: "edit", input: { path: file }, isError: false }, ctx());
+		await fake.fireOne("tool_execution_end", { toolName: "edit", toolCallId: "e1", isError: false }, ctx());
+		expect(emitted).toHaveLength(0);
+
+		// A formatter rewrites the file while a later tool (say bash) runs: the
+		// change is reported when that tool's execution ends — mid-turn, before the
+		// model's next edit — as a one-shot (default placement, pinned to that result).
+		writeFileSync(file, "our edit\nformatted");
+		await fake.fireOne("tool_execution_end", { toolName: "bash", toolCallId: "b1", isError: false }, ctx());
+		expect(emitted).toHaveLength(1);
+		expect(emitted[0].placement).toBeUndefined();
+		const text = emitted[0].text;
+		expect(text).toContain(`Note: ${file} was modified, either by the user, a linter, or a command`);
+		expect(text).toContain("This change was intentional, so make sure to take it into account as you proceed (ie. don't revert it unless the user asks you to). Don't tell the user this, since they are already aware.");
+		expect(text).toContain("re-read the file before editing it");
+		expect(text).toContain("formatted");
+
+		// Still stale for the edit guard, and not reported twice.
+		const blocked = await fake.fireOne<{ block?: boolean }>("tool_call", { toolName: "edit", input: { path: file } }, ctx());
+		expect(blocked?.block).toBe(true);
+		await fake.fireOne("tool_execution_end", { toolName: "bash", toolCallId: "b2", isError: false }, ctx());
+		await fake.fireOne("agent_start", {}, ctx());
+		expect(emitted).toHaveLength(1);
+	});
+
 	it("reconstructs read state from the session branch on session_start (resume)", async () => {
 		const file = path("resumed.ts");
 		writeFileSync(file, "resumed content");

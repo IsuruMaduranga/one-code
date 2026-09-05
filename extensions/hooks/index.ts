@@ -20,6 +20,22 @@
  *
  * pi's emitToolCall has no try/catch around handlers, so every hook dispatch
  * here is wrapped — a throwing hook fails open, never takes the turn down.
+ *
+ * Hook context reaches the model in Claude Code's `hook_additional_context`
+ * shape — a `<system-reminder>` reading "<Event> hook additional context: …" —
+ * never as a message of its own: PreToolUse context is queued as a one-shot on
+ * the reminder channel, so it lands INSIDE the tool result it belongs to,
+ * persisted, at no extra turn; PostToolUse context is appended to the result
+ * the same way; prompt/session/compaction context is returned from
+ * `before_agent_start` as a custom message right AFTER the user's prompt. Until
+ * 2026-09-05 each was a custom steer (one extra LLM turn per hook per tool,
+ * pi draining one steer per call) and prompt context landed BEFORE the prompt
+ * (STEERING-REVIEW-2026-09-05 M6).
+ *
+ * Subagents: the tool hooks also run for a child's tool calls, through the
+ * bridge published on `SUBAGENT_HOOK_CHANNEL` (subagent-bridge.ts): the child
+ * calls back into this extension, which dispatches with the parent's context
+ * (settings, consent, logging) and a payload naming the child.
  */
 
 import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -31,6 +47,7 @@ import { runHookCommand } from "./executor.ts";
 import { matcherApplies, ccToolName, toolMatchCandidates, ccToolInput, nativeToolInput } from "./matcher.ts";
 import { loadPluginHooks } from "./plugin-hooks.ts";
 import {
+	applyPostToolUseOutcome,
 	type CcHookEvent,
 	type HookOutcome,
 	type HookStdinPayload,
@@ -38,7 +55,14 @@ import {
 } from "./protocol.ts";
 import { type HookCommand, type HooksSource, loadHookSettings } from "./settings.ts";
 import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
+import { REMINDER_CHANNEL, wrapReminder } from "../lib/reminders.ts";
+import { type ChildHookCall, type ChildHookResult, type HookBridge, SUBAGENT_HOOK_CHANNEL, type SubagentHookPayload } from "./subagent-bridge.ts";
 import { projectHooksApproved } from "./trust.ts";
+
+/** Claude Code's `hook_additional_context` attachment text (utils/messages.ts). */
+export function hookContextText(event: CcHookEvent, text: string): string {
+	return `${event} hook additional context: ${text}`;
+}
 
 /**
  * Hook text that reaches the model (additionalContext, a string updatedToolResult)
@@ -59,7 +83,10 @@ interface MatchedHook {
 
 export default function hooksExtension(pi: ExtensionAPI) {
 	let stopHookActive = false;
-	let pendingPromptContext: string[] = [];
+	/** Context from UserPromptSubmit / SessionStart / PostCompact hooks, delivered with the next prompt. */
+	let pendingPromptContext: Array<{ event: CcHookEvent; text: string }> = [];
+	/** The last context seen, for bridged child calls (dispatched parent-side). */
+	let lastCtx: ExtensionContext | undefined;
 
 	const notify = (ctx: ExtensionContext, message: string) => {
 		if (ctx.hasUI) ctx.ui.notify(message, "info");
@@ -136,6 +163,10 @@ export default function hooksExtension(pi: ExtensionAPI) {
 						cwd: ctx.cwd,
 						timeoutSeconds: hook.timeout,
 						projectDir: ctx.cwd,
+						// SessionEnd is fire-and-forget at shutdown: it must not hold a
+						// one-shot process open. Every other hook is awaited work that
+						// must (executor.ts, the event-loop drain).
+						detached: event === "SessionEnd",
 					});
 					const outcome = interpretHookResult(event, run);
 					const decision = outcome.block ? "block" : outcome.additionalContext ? "context" : run.exitCode === 0 || run.exitCode === 2 ? "allow" : "error";
@@ -183,21 +214,6 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		return merged;
 	};
 
-	/** Hidden custom message the model sees as context, CC's additionalContext. */
-	const injectContext = (text: string, midLoop: boolean) => {
-		const message = { customType: "one-code:hook-context", content: `<hook-additional-context>\n${text}\n</hook-additional-context>`, display: false };
-		try {
-			if (midLoop) pi.sendMessage(message, { deliverAs: "steer" });
-			else pi.sendMessage(message);
-		} catch {
-			try {
-				pi.sendMessage(message);
-			} catch {
-				// No session to speak to; drop the context.
-			}
-		}
-	};
-
 	// ---- PreToolUse ---------------------------------------------------------
 	pi.on("tool_call", async (event, ctx) => {
 		const payload: HookStdinPayload = {
@@ -214,7 +230,9 @@ export default function hooksExtension(pi: ExtensionAPI) {
 			// CC's parameter names; translate back to the tool's own.
 			Object.assign(event.input as Record<string, unknown>, nativeToolInput(event.toolName, outcome.updatedInput));
 		}
-		if (outcome.additionalContext) injectContext(outcome.additionalContext, true);
+		// A one-shot pending when this call's result is stored is written into
+		// that result by the system-reminder extension — CC's shape, no extra turn.
+		if (outcome.additionalContext) pi.events.emit(REMINDER_CHANNEL, { text: hookContextText("PreToolUse", outcome.additionalContext) });
 		return undefined;
 	});
 
@@ -227,27 +245,14 @@ export default function hooksExtension(pi: ExtensionAPI) {
 			tool_response: { content: event.content, is_error: event.isError },
 		};
 		const outcome = await dispatch(ctx, "PostToolUse", { candidates: toolMatchCandidates(event.toolName) }, payload);
-		if (!outcome.block && outcome.updatedToolResult === undefined && !outcome.additionalContext) return undefined;
-
-		let content = [...event.content];
-		let isError = event.isError;
-		if (outcome.updatedToolResult !== undefined) {
-			const replacement = outcome.updatedToolResult;
-			content = [{ type: "text", text: typeof replacement === "string" ? replacement : JSON.stringify(replacement) }];
-		}
-		if (outcome.block) {
-			// The tool already ran; the only channel left is the result the
-			// model reads, so the objection is delivered there (CC feeds
-			// PostToolUse block reasons back to the model the same way). The
-			// result's own error flag is left as the tool returned it: the side
-			// effect happened, and marking a successful write or command as an
-			// error invites the model to redo it.
-			content = [{ type: "text" as const, text: `PostToolUse hook: ${outcome.block.reason}` }, ...content];
-		}
-		if (outcome.additionalContext) {
-			content = [...content, { type: "text" as const, text: `<hook-additional-context>\n${outcome.additionalContext}\n</hook-additional-context>` }];
-		}
-		return { content, isError };
+		// CC feeds PostToolUse block reasons back to the model in the result the
+		// same way; the assembly rules live in applyPostToolUseOutcome.
+		const content = applyPostToolUseOutcome(event.content, {
+			...outcome,
+			additionalContext: outcome.additionalContext && wrapReminder(hookContextText("PostToolUse", outcome.additionalContext)),
+		});
+		if (!content) return undefined;
+		return { content, isError: event.isError };
 	});
 
 	// ---- UserPromptSubmit ---------------------------------------------------
@@ -260,31 +265,84 @@ export default function hooksExtension(pi: ExtensionAPI) {
 			notify(ctx, `Prompt blocked by UserPromptSubmit hook: ${outcome.block.reason}`);
 			return { action: "handled" as const };
 		}
-		if (outcome.additionalContext) pendingPromptContext.push(outcome.additionalContext);
+		if (outcome.additionalContext) pendingPromptContext.push({ event: "UserPromptSubmit", text: outcome.additionalContext });
 		return undefined;
 	});
 
-	// Prompt-hook context is injected right before the agent loop builds its
-	// context, so it lands on the same turn as the prompt that produced it.
-	pi.on("before_agent_start", () => {
+	// Prompt/session/compaction hook context rides the turn it belongs to as a
+	// custom message pi appends right AFTER the user's prompt (the
+	// before_agent_start `message` return). An idle `sendMessage` from here
+	// landed it BEFORE the prompt (pi appends first, then adds the user message).
+	pi.on("before_agent_start", (_event, ctx) => {
+		lastCtx = ctx;
 		if (pendingPromptContext.length === 0) return;
 		const texts = pendingPromptContext;
 		pendingPromptContext = [];
-		for (const text of texts) injectContext(text, false);
+		return {
+			message: {
+				customType: "one-code:hook-context",
+				content: texts.map(({ event, text }) => wrapReminder(hookContextText(event, text))).join("\n"),
+				display: false,
+			},
+		};
 	});
 
 	// ---- SessionStart / SessionEnd -----------------------------------------
 	const dispatchSessionStart = async (ctx: ExtensionContext, source: string) => {
 		const payload: HookStdinPayload = { ...basePayload(ctx, "SessionStart"), source };
 		const outcome = await dispatch(ctx, "SessionStart", { candidates: [source] }, payload);
-		if (outcome.additionalContext) injectContext(outcome.additionalContext, false);
+		if (outcome.additionalContext) pendingPromptContext.push({ event: "SessionStart", text: outcome.additionalContext });
 	};
 
 	pi.on("session_start", async (event, ctx) => {
+		lastCtx = ctx;
+		pendingPromptContext = [];
+		// Publish the child hook bridge (subagent-bridge.ts). The closures read
+		// live parent state per call, so once per session start is enough.
+		pi.events.emit(SUBAGENT_HOOK_CHANNEL, { bridge: childHookBridge } satisfies SubagentHookPayload);
 		const reason = (event as { reason?: string }).reason ?? "startup";
 		if (reason === "reload" || reason === "fork") return;
 		await dispatchSessionStart(ctx, reason === "new" ? "startup" : reason);
 	});
+
+	// ---- Subagent bridge ----------------------------------------------------
+	/** A child's payload: the child's identity, the parent's config and consent. */
+	const childPayload = (call: ChildHookCall, event: CcHookEvent): HookStdinPayload => ({
+		session_id: call.sessionId ?? "",
+		transcript_path: call.transcriptPath ?? "",
+		cwd: call.cwd,
+		hook_event_name: event,
+		tool_name: ccToolName(call.toolName),
+		tool_input: ccToolInput(call.toolName, call.input),
+		agent_id: call.sessionId,
+		agent_type: call.agentType,
+	});
+	const childHookBridge: HookBridge = {
+		async preToolUse(call) {
+			const ctx = lastCtx;
+			if (!ctx) return {};
+			const outcome = await dispatch(ctx, "PreToolUse", { candidates: toolMatchCandidates(call.toolName) }, childPayload(call, "PreToolUse"));
+			return {
+				block: outcome.block,
+				updatedInput: outcome.updatedInput ? nativeToolInput(call.toolName, outcome.updatedInput) : undefined,
+				additionalContext: outcome.additionalContext ? hookContextText("PreToolUse", outcome.additionalContext) : undefined,
+			};
+		},
+		async postToolUse(result: ChildHookResult) {
+			const ctx = lastCtx;
+			if (!ctx) return {};
+			const payload: HookStdinPayload = {
+				...childPayload(result, "PostToolUse"),
+				tool_response: { content: result.content, is_error: result.isError },
+			};
+			const outcome = await dispatch(ctx, "PostToolUse", { candidates: toolMatchCandidates(result.toolName) }, payload);
+			return {
+				block: outcome.block,
+				updatedToolResult: outcome.updatedToolResult,
+				additionalContext: outcome.additionalContext ? wrapReminder(hookContextText("PostToolUse", outcome.additionalContext)) : undefined,
+			};
+		},
+	};
 
 	pi.on("session_shutdown", async (_event, ctx) => {
 		const payload: HookStdinPayload = { ...basePayload(ctx, "SessionEnd"), source: "other" };
@@ -298,8 +356,8 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	// Dispatching per run would run the user's Stop hook several times per turn and
 	// let a blocking hook inject its follow-up mid-retry.
 	const stopOutcome = new RunOutcomeLatch();
-	pi.on("agent_end", (event) => {
-		stopOutcome.record(event.messages);
+	pi.on("agent_end", (event, ctx) => {
+		stopOutcome.record(event.messages, ctx.signal?.aborted);
 	});
 
 	pi.on("agent_settled", async (_event, ctx) => {
@@ -342,7 +400,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	pi.on("session_compact", async (_event, ctx) => {
 		const payload: HookStdinPayload = { ...basePayload(ctx, "PostCompact"), trigger: "auto" };
 		const outcome = await dispatch(ctx, "PostCompact", { ignoreMatcher: true }, payload);
-		if (outcome.additionalContext) injectContext(outcome.additionalContext, false);
+		if (outcome.additionalContext) pendingPromptContext.push({ event: "PostCompact", text: outcome.additionalContext });
 		// CC fires SessionStart(source: "compact") after compaction.
 		await dispatchSessionStart(ctx, "compact");
 	});

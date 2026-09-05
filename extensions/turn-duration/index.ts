@@ -42,8 +42,8 @@ export default function turnDurationExtension(pi: ExtensionAPI) {
 		span.runStarted(Date.now());
 	});
 
-	pi.on("agent_end", (event) => {
-		span.runEnded(event.messages);
+	pi.on("agent_end", (event, ctx) => {
+		span.runEnded(event.messages, ctx.signal?.aborted);
 	});
 
 	pi.on("agent_settled", (_event, ctx) => {

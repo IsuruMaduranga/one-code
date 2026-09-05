@@ -39,6 +39,7 @@ import {
 	thinkingLevelFor,
 	ULTRACODE,
 	ULTRACODE_LEVEL,
+	ULTRACODE_MODE_CHANNEL,
 	ULTRACODE_STATUS_KEY,
 } from "./slider.ts";
 
@@ -108,8 +109,10 @@ export default function effortExtension(pi: ExtensionAPI) {
 	pi.on("session_shutdown", cancelEffortNote);
 
 	const setUltracode = (on: boolean, level?: ThinkingLevel) => {
+		const changed = ultracodeActive !== on;
 		ultracodeActive = on;
 		ultracodeLevel = on ? level : undefined;
+		if (changed) pi.events.emit(ULTRACODE_MODE_CHANNEL, { active: on });
 		if (on) {
 			pi.events.emit(REMINDER_CHANNEL, {
 				text: ULTRACODE_STANDING_REMINDER,
