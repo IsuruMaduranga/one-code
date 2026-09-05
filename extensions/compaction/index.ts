@@ -116,6 +116,9 @@ export default function compactionExtension(pi: ExtensionAPI) {
 
 		const model = ctx.model;
 		if (!model) return undefined;
+		// Snapshot before the first await so the capture and pi's preparation
+		// describe the same request even if a context event lands meanwhile.
+		const captured = capturedMessages;
 
 		try {
 			const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
@@ -128,8 +131,9 @@ export default function compactionExtension(pi: ExtensionAPI) {
 			// carries the leading compactionSummary message on a re-compaction — as
 			// long as pi's max_tokens clamp leaves it room for the reply (fit.ts).
 			// Otherwise (no capture yet, an overflow, a nearly full window) the
-			// standalone shape summarizes the doomed span pi isolated.
-			const replay = capturedMessages ? replayRequest(pi, ctx, capturedMessages, event) : undefined;
+			// standalone shape summarizes the doomed span pi isolated. An overflow
+			// never replays, so its replay request is not even built.
+			const replay = captured && event.reason !== "overflow" ? replayRequest(pi, ctx, captured, event) : undefined;
 			const request =
 				replay && replayFits(event.reason, model, replay, maxTokens)
 					? replay
