@@ -674,6 +674,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 					await close(existing);
 				}
 				await connectOne(server);
+				busy.delete(entry.name);
 				// The session may have been replaced during the connect (an RPC
 				// new_session while the panel was open): every pi.* call throws
 				// then, and from a void'ed continuation that is an unhandled
@@ -681,7 +682,6 @@ export default function mcpExtension(pi: ExtensionAPI) {
 				if (!alive()) return;
 				emitInstructions();
 				notices = outcomeNotice(server);
-				busy.delete(entry.name);
 				syncRepaint();
 			};
 
@@ -712,9 +712,9 @@ export default function mcpExtension(pi: ExtensionAPI) {
 				notices = [`Enabling "${entry.name}"…`];
 				syncRepaint();
 				await connectOne(server);
+				busy.delete(entry.name);
 				if (!alive()) return; // see runReconnect
 				emitInstructions();
-				busy.delete(entry.name);
 				notices = outcomeNotice(server);
 				syncRepaint();
 			};
@@ -754,25 +754,33 @@ export default function mcpExtension(pi: ExtensionAPI) {
 				}
 			};
 
+			// Each action is a void'ed promise. A throw after the session was
+			// replaced is expected (every pi.* call throws then) and dropped; any
+			// other failure is shown in the panel, never an unhandled rejection.
+			const guarded = (work: Promise<void>) =>
+				work.catch((error) => {
+					if (!alive()) return;
+					notices = [`Action failed: ${(error as Error).message}`];
+					syncRepaint();
+				});
+
 			const runEffect = (effect: McpEffect) => {
 				switch (effect.kind) {
 					case "close":
 						clearInterval(ticker);
 						done(null);
 						return;
-					// Each action is a void'ed promise; a late throw (a pi.* call on a
-					// replaced session) must never surface as an unhandled rejection.
 					case "reconnect":
-						void runReconnect(effect.entry).catch(() => {});
+						void guarded(runReconnect(effect.entry));
 						return;
 					case "disable":
 						runDisable(effect.entry);
 						return;
 					case "enable":
-						void runEnable(effect.entry).catch(() => {});
+						void guarded(runEnable(effect.entry));
 						return;
 					case "authenticate":
-						void runAuthenticate(effect.entry).catch(() => {});
+						void guarded(runAuthenticate(effect.entry));
 						return;
 				}
 			};

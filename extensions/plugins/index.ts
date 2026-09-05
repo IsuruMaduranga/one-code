@@ -63,6 +63,7 @@ import { buildDiscoverRows, buildInstalledRows, buildMarketplaceRows, type Disco
 import { applyPanelKey, initialPanelState, type PanelEffect, type PanelView } from "./panel/state.ts";
 import { findShellPlaceholders, replaceShellPlaceholders, substituteArguments } from "./template.ts";
 import { parseFrontmatterLoosely } from "../lib/frontmatter.ts";
+import { sessionAlive } from "../lib/session-lifecycle.ts";
 
 const run = promisify(execFile);
 const SHELL_TIMEOUT_MS = 30_000;
@@ -99,6 +100,9 @@ async function expandTemplate(body: string, args: string, cwd: string): Promise<
 }
 
 export default function pluginsExtension(pi: ExtensionAPI) {
+	// False once the session is replaced: a panel action still awaiting then
+	// throws on its first pi.* call, which is expected and not an error to show.
+	const alive = sessionAlive(pi);
 	const registeredCommands = new Set<string>();
 	// Load-time discovery has no ctx, so it runs on process.cwd(); session_start
 	// below re-discovers on the session's real cwd (they differ under `pi -C`
@@ -234,8 +238,16 @@ export default function pluginsExtension(pi: ExtensionAPI) {
 					]);
 				};
 				// void'ed panel work: a late throw (a pi.* call on a replaced session)
-				// must never surface as an unhandled rejection (LIFECYCLE-REVIEW L2).
-				void openTasks().catch(() => {});
+				// must never surface as an unhandled rejection (LIFECYCLE-REVIEW L2);
+				// any other failure is shown in the panel's error list.
+				const guarded = (work: Promise<unknown>) =>
+					work.catch((error) => {
+						if (!alive()) return;
+						actionErrors.push((error as Error).message);
+						state.notice = (error as Error).message;
+						refresh();
+					});
+				void guarded(openTasks());
 				pi.events.emit(MCP_STATUS_REQUEST_CHANNEL, {});
 
 				const buildView = (): PanelView => {
@@ -350,7 +362,7 @@ export default function pluginsExtension(pi: ExtensionAPI) {
 						case "close":
 							return close();
 						case "installToggle":
-							void installToggle(effect.row).catch(() => {});
+							void guarded(installToggle(effect.row));
 							return;
 						case "setPluginEnabled": {
 							if (effect.origin === "one-code") setInstalledEnabled(oneCodeRoot, effect.id, effect.enabled);
@@ -387,7 +399,7 @@ export default function pluginsExtension(pi: ExtensionAPI) {
 							};
 							writeKnownMarketplace(oneCodeRoot, name, entry);
 							known = { ...known, [name]: entry };
-							void syncOne(name, entry, false).catch(() => {});
+							void guarded(syncOne(name, entry, false));
 							state.tab = "marketplaces";
 							return;
 						}
@@ -411,7 +423,7 @@ export default function pluginsExtension(pi: ExtensionAPI) {
 						}
 						case "refreshMarketplace": {
 							const entry = known[effect.name];
-							if (entry) void syncOne(effect.name, entry, true).catch(() => {});
+							if (entry) void guarded(syncOne(effect.name, entry, true));
 							return;
 						}
 					}

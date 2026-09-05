@@ -118,3 +118,18 @@ describe("runBackgroundBashBlocking (one-shot modes, STEERING-REVIEW-2026-09-05 
 		expect(summary.stopped).toBe(true);
 	});
 });
+
+describe("startBackgroundBash stop escalation", () => {
+	it("SIGKILLs a command that traps SIGTERM, so the task still finishes", async () => {
+		// The shell ignores TERM and sleep inherits the disposition: a bare SIGTERM
+		// never ended it, so `close` never fired and a blocking caller hung.
+		const { task, summary } = start("trap '' TERM; sleep 30", { timeoutSeconds: 1 });
+		await new Promise((r) => setTimeout(r, 150));
+		const stopped = Date.now();
+		task.stop();
+		await task.finished;
+		expect(task.status).toBe("stopped");
+		expect(summary()?.stopped).toBe(true);
+		expect(Date.now() - stopped).toBeLessThan(4000);
+	}, 10_000);
+});

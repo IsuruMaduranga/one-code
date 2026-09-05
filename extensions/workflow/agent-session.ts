@@ -19,6 +19,7 @@ import { getAgentDir, type ModelRuntime, SessionManager, type ToolDefinition } f
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
+import { whenAborted } from "../lib/abort.ts";
 import { createSharedModelRuntime, finalAssistantText, openChildSession } from "../lib/agent-loader.ts";
 import { modelSpec as modelSpecOf } from "../lib/model-policy.ts";
 import { agentPromptIdentity, PrefixWarmGate, prefixWarmKey } from "../lib/prefix-warm-gate.ts";
@@ -270,8 +271,7 @@ export class AgentRunner {
 			onError: (error) => this.options.onNotice?.(`${opts.label ?? "agent"}: extension error in ${error.event}: ${error.error}`),
 		});
 
-		const onAbort = () => void session.abort();
-		signal.addEventListener("abort", onAbort, { once: true });
+		const unhookAbort = whenAborted(signal, () => void session.abort());
 		// Forward tool calls for the viewer's Activity pane; never let a bad
 		// args shape in the summary kill the agent.
 		const unsubscribe = onUpdate
@@ -324,7 +324,7 @@ export class AgentRunner {
 		} finally {
 			releasePrefix(false);
 			unsubscribe?.();
-			signal.removeEventListener("abort", onAbort);
+			unhookAbort();
 			session.dispose();
 			if (worktree) await cleanupWorktree(this.options.cwd, worktree);
 		}

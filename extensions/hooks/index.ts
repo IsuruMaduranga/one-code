@@ -364,6 +364,9 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	};
 
 	pi.on("session_shutdown", (event, ctx) => {
+		// A reload re-runs the extensions but keeps the conversation (pi's
+		// AgentSession.reload): not a session end, Claude Code has no such event.
+		if (event.reason === "reload") return;
 		// Claude Code's SessionEnd carries `reason`: clear | logout | prompt_input_exit
 		// | other. pi's `new` (/clear, /new) is a clear; a `quit` from the TUI is the
 		// user leaving the prompt; a headless run's end, a resume and a fork are

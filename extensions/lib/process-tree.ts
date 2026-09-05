@@ -20,6 +20,9 @@
 
 import type { ChildProcess } from "node:child_process";
 
+/** SIGTERM → SIGKILL grace for a stopped background tree (bash tasks, monitors). */
+export const KILL_GRACE_MS = 2_000;
+
 /** `detached` everywhere but Windows, where process groups do not exist. */
 export function detachedSpawnOptions(): { detached: boolean } {
 	return { detached: process.platform !== "win32" };

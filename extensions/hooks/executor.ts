@@ -39,6 +39,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { killProcessTree } from "../lib/process-tree.ts";
 
 export interface HookRunResult {
 	/** null when the process was killed (timeout) or never spawned. */
@@ -124,21 +125,10 @@ export function runHookCommand(command: string, stdinJson: string, opts: HookRun
 		child.stdout?.on("data", capture("stdout"));
 		child.stderr?.on("data", capture("stderr"));
 
-		const killTree = () => {
-			// Negative pid = the whole process group the detached shell leads.
-			try {
-				if (child.pid) process.kill(-child.pid, "SIGKILL");
-			} catch {
-				try {
-					child.kill("SIGKILL");
-				} catch {
-					// Already gone.
-				}
-			}
-		};
 		const timer = setTimeout(() => {
 			timedOut = true;
-			killTree();
+			// The whole process group the detached shell leads (lib/process-tree.ts).
+			killProcessTree(child, "SIGKILL");
 		}, timeoutMs);
 		timer.unref();
 

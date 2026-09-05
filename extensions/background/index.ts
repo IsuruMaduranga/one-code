@@ -15,7 +15,7 @@ import { Type } from "typebox";
 import { whenAborted } from "../lib/abort.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
-import { detachedSpawnOptions, stopProcessTree } from "../lib/process-tree.ts";
+import { detachedSpawnOptions, KILL_GRACE_MS, stopProcessTree } from "../lib/process-tree.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
 import { ccToolRenderers, customMessageText, liveUiCtx, notificationComponent } from "../lib/tui-render.ts";
 import {
@@ -51,9 +51,6 @@ const STORED_OUTPUT_CAP = 200_000;
 const DEFAULT_MONITOR_TIMEOUT_MS = 300_000;
 const MAX_MONITOR_TIMEOUT_MS = 3_600_000;
 const MAX_BLOCK_TIMEOUT_MS = 600_000;
-/** SIGTERM → SIGKILL grace for a stopped monitor's process tree (lib/process-tree.ts). */
-const MONITOR_KILL_GRACE_MS = 2_000;
-
 function tail(text: string, cap: number): string {
 	return text.length <= cap ? text : `… (earlier output truncated)\n${text.slice(-cap)}`;
 }
@@ -244,7 +241,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				);
 				stop = () => {
 					stopRequested = true;
-					stopProcessTree(child, MONITOR_KILL_GRACE_MS);
+					stopProcessTree(child, KILL_GRACE_MS);
 				};
 			} else {
 				let ws: WebSocket;
@@ -603,13 +600,15 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("session_shutdown", (event) => {
-		// Fires on /clear, /new and /resume too (findings §8). Everything running
-		// dies with the session; the replacement session is told (see
-		// pendingShutdownNotice) — a quit needs no note.
+		// Fires on /clear, /new, /resume and /reload too (findings §8). Everything
+		// running dies with this instance — the replacement instance has no handle
+		// on it — and the replacement is told (see pendingShutdownNotice); a quit
+		// needs no note. A reload keeps the conversation, so its note says so.
 		const running = registry.running();
 		if (running.length > 0 && event.reason !== "quit") {
 			const names = running.map((t) => `${t.id} (${t.description})`).join(", ");
-			pendingShutdownNotice = `Stopped ${running.length} background task${running.length === 1 ? "" : "s"} with the previous session: ${names}.`;
+			const when = event.reason === "reload" ? "on reload" : "with the previous session";
+			pendingShutdownNotice = `Stopped ${running.length} background task${running.length === 1 ? "" : "s"} ${when}: ${names}.`;
 		}
 		registry.stopAll();
 		clearWakeup();

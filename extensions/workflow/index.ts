@@ -24,6 +24,7 @@ import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { recordUsage } from "../lib/usage-bus.ts";
+import { whenAborted } from "../lib/abort.ts";
 import { createTaskNotifier, oneShotNote, sessionOutlivesTurn } from "../lib/notifications.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { ULTRACODE_MODE_CHANNEL } from "../effort/slider.ts";
@@ -313,12 +314,11 @@ export default function workflowExtension(pi: ExtensionAPI) {
 						});
 					};
 					handle.on("progress", onProgress);
-					const onAbort = () => handle.abort("tool call aborted");
-					signal?.addEventListener("abort", onAbort, { once: true });
+					const unhookAbort = whenAborted(signal, () => handle.abort("tool call aborted"));
 					try {
 						await handle.finished;
 					} finally {
-						signal?.removeEventListener("abort", onAbort);
+						unhookAbort();
 						handle.removeListener("progress", onProgress);
 					}
 					deliveredRuns.add(handle.runId); // sync result goes in the tool result, not a followUp

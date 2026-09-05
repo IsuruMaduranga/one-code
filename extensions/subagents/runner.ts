@@ -17,6 +17,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type AgentSession, type ExtensionError, getAgentDir, SessionManager, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
+import { whenAborted } from "../lib/abort.ts";
 import { type AgentLoaderOptions, buildAgentLoader, createSharedModelRuntime, openChildSession } from "../lib/agent-loader.ts";
 import { agentPromptIdentity, PrefixWarmGate, prefixWarmKey, type Release } from "../lib/prefix-warm-gate.ts";
 import type { PermissionBridge } from "../permissions/subagent-gate.ts";
@@ -429,8 +430,7 @@ export class SubagentRuntime {
 				tracker.markAborted(reason);
 				void session?.abort();
 			};
-			const onAbort = () => abortWith();
-			options.signal?.addEventListener("abort", onAbort, { once: true });
+			const unhookAbort = whenAborted(options.signal, () => abortWith());
 			const wallClock = setTimeout(() => abortWith("terminated: turn hit the wall-clock cap"), WALL_CLOCK_CAP_MS);
 			wallClock.unref?.();
 
@@ -465,7 +465,7 @@ export class SubagentRuntime {
 				);
 			} finally {
 				clearTimeout(wallClock);
-				options.signal?.removeEventListener("abort", onAbort);
+				unhookAbort();
 				unsubscribe?.();
 				if (session) this.discard(session);
 			}

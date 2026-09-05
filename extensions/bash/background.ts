@@ -16,7 +16,7 @@ import { spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import type { BackgroundTask } from "../background/registry.ts";
 import { whenAborted } from "../lib/abort.ts";
-import { detachedSpawnOptions, killProcessTree } from "../lib/process-tree.ts";
+import { detachedSpawnOptions, KILL_GRACE_MS, stopProcessTree } from "../lib/process-tree.ts";
 
 export const STORED_OUTPUT_CAP = 200_000;
 
@@ -90,7 +90,9 @@ export function startBackgroundBash(options: StartBackgroundBashOptions): Backgr
 		output: () => stored || (task.status === "running" ? "" : EMPTY_OUTPUT_MARKER),
 		stop: () => {
 			stopRequested = true;
-			killProcessTree(child);
+			// SIGTERM the tree, SIGKILL after the grace: a command that traps TERM
+			// would otherwise never close, and a blocking one-shot run never return.
+			stopProcessTree(child, KILL_GRACE_MS);
 		},
 		finished,
 	};
@@ -99,7 +101,7 @@ export function startBackgroundBash(options: StartBackgroundBashOptions): Backgr
 	if (options.timeoutSeconds && options.timeoutSeconds > 0) {
 		timer = setTimeout(() => {
 			timedOut = true;
-			killProcessTree(child);
+			stopProcessTree(child, KILL_GRACE_MS);
 		}, options.timeoutSeconds * 1000);
 		timer.unref?.();
 	}
