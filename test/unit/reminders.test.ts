@@ -299,6 +299,41 @@ describe("injectReminders", () => {
 	});
 });
 
+describe("custom (harness) messages are anchors (STEERING-REVIEW-2026-09-05 H1)", () => {
+	const custom = (text: string, timestamp = 0) =>
+		({ role: "custom", customType: "task-notification", content: [{ type: "text", text }], display: true, timestamp }) as any;
+
+	it("prepends the context stack to a request whose only user-like message is a notification", () => {
+		const messages = [custom("SYSTEM NOTIFICATION — loop tick", 7)];
+		const result = injectReminders(messages, [{ text: "claudeMd", placement: "first-prepend", order: 50 }]);
+		expect(result[0].role).toBe("custom");
+		expect(blockTexts(result[0])).toEqual([wrapReminder("claudeMd"), "SYSTEM NOTIFICATION — loop tick"]);
+	});
+
+	it("pins a pending one-shot to the notification that opened the turn, not the earlier user message", () => {
+		const messages = [user("hi", 1), assistant(), custom("agent report", 9)];
+		expect(tailAnchor(messages)).toEqual({ kind: "user", timestamp: 9 });
+		const result = injectReminders(messages, [{ text: "mode changed", placement: "last-append", order: 0, pin: { kind: "user", timestamp: 9 } }]);
+		expect(blockTexts(result[0])).toEqual(["hi"]);
+		expect(blockTexts(result[2])).toEqual(["agent report", wrapReminder("mode changed")]);
+	});
+
+	it("sticky-append rides notification messages too (they are user turns on the wire)", () => {
+		const messages = [user("hi", 1), assistant(), custom("agent report", 9)];
+		const result = injectReminders(messages, [{ text: "auto on", placement: "sticky-append", order: 0, since: 0 }]);
+		expect(blockTexts(result[0])).toEqual(["hi", wrapReminder("auto on")]);
+		expect(blockTexts(result[2])).toEqual(["agent report", wrapReminder("auto on")]);
+	});
+
+	it("drain keeps a pin anchored to a notification while that message is in context", () => {
+		const q = new ReminderQueue(() => 5);
+		q.enqueue("one-shot");
+		q.pin({ kind: "user", timestamp: 9 });
+		expect(q.drain([custom("report", 9)]).map((e) => e.text)).toEqual(["one-shot"]);
+		expect(q.drain([user("other", 1)])).toEqual([]);
+	});
+});
+
 describe("one-shot delivery guarantees (C3)", () => {
 	it("a pinned one-shot is injected identically on every later request, including a retried attempt", () => {
 		const q = new ReminderQueue();

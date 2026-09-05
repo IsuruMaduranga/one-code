@@ -548,7 +548,12 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// would block every call, so it stays out of the cycle instead — the same
 		// thing Claude Code does when auto mode's requirements aren't met.
 		autoInCycle = ctx.modelRegistry.getAvailable().length > 0;
-		if (mode === "plan") setMode("plan");
+		// A mode that owns a standing reminder must be announced when the session
+		// STARTS in it, not only when the user switches into it. setMode is the
+		// only emitter of the block; until 2026-09-05 startup called it for plan
+		// alone, so `--permission-mode auto` / `defaultMode: "auto"` sessions ran
+		// with no auto-mode reminder at all (STEERING-REVIEW-2026-09-05 H2).
+		if (mode === "plan" || mode === "auto") setMode(mode);
 		process.env[MODE_ENV] = mode;
 	};
 

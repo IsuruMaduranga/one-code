@@ -23,10 +23,11 @@ import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-w
 import { createBashToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { generateTaskId, TASK_REGISTER_CHANNEL } from "../background/registry.ts";
-import { type BashFinishSummary, startBackgroundBash, tailCap } from "./background.ts";
+import { type BashFinishSummary, runBackgroundBashBlocking, startBackgroundBash, tailCap } from "./background.ts";
 import { bashGuardReason } from "./guards.ts";
 import { commandToEvaluate, trackOriginalCommands } from "../lib/original-command.ts";
-import { createTaskNotifier, systemNotification } from "../lib/notifications.ts";
+import { createTaskNotifier, sessionOutlivesTurn, systemNotification } from "../lib/notifications.ts";
+import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { perCwd } from "../lib/per-cwd.ts";
 import { ccWrapBuiltinRenderers, linesComponent, resultLines } from "../lib/tui-render.ts";
 
@@ -34,6 +35,8 @@ import { ccWrapBuiltinRenderers, linesComponent, resultLines } from "../lib/tui-
 // plus only a short tail: a finished build used to push 30 KB (~8k tokens) into
 // context unasked (review T7). The full tail stays behind task_output / the log.
 const NOTIFY_OUTPUT_CAP = 2_000;
+/** One-shot modes return the whole output in the result; past this it is persisted (file + preview), never cut. */
+const ONE_SHOT_OUTPUT_CAP = 30_000;
 /** Claude Code's Bash cap; the tool's `timeout` is milliseconds, as CC's is. */
 const MAX_TIMEOUT_MS = 600_000;
 
@@ -84,7 +87,7 @@ export default function bashExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "bash",
 		label: base.label,
-		description: `${base.description} Pass run_in_background: true for long-running commands (builds, servers, watches): it returns a task id immediately so you can keep working, completion arrives as a system notification, and the output is retrievable with task_output / stoppable with task_stop. Foreground \`sleep\` is blocked; to wait on a condition use the monitor tool (deferred — load it with tool_search select:monitor) with an until-loop.`,
+		description: `${base.description} Pass run_in_background: true for long-running commands (builds, servers, watches): it returns a task id immediately so you can keep working, completion arrives as a system notification, and the output is retrievable with task_output / stoppable with task_stop (in a one-shot print/json session the call runs to completion and returns the output directly). Foreground \`sleep\` is blocked; to wait on a condition use the monitor tool (deferred — load it with tool_search select:monitor) with an until-loop.`,
 		promptSnippet: base.promptSnippet,
 		promptGuidelines: base.promptGuidelines,
 		executionMode: base.executionMode,
@@ -99,8 +102,8 @@ export default function bashExtension(pi: ExtensionAPI) {
 				renderResult: ((result, options, theme, context) => {
 					// A background start returns a model-facing instruction paragraph;
 					// the transcript needs one line (Claude Code: "Running in the background").
-					const details = result.details as { taskId?: string; logPath?: string } | undefined;
-					if (details?.taskId && !context.isError) {
+					const details = result.details as { taskId?: string; logPath?: string; completed?: boolean } | undefined;
+					if (details?.taskId && !details.completed && !context.isError) {
 						const line = options.expanded
 							? `Running in the background (task ${details.taskId}${details.logPath ? ` · log: ${details.logPath}` : ""})`
 							: "Running in the background (↓ to manage)";
@@ -138,6 +141,30 @@ export default function bashExtension(pi: ExtensionAPI) {
 			const id = generateTaskId();
 			const logPath = taskLogPath(ctx, id);
 			const description = params.description || params.command.slice(0, 80);
+
+			// One-shot modes (`-p` / `--mode json`) exit when the turn settles: a
+			// detached task would be orphaned, and its completion callback would
+			// call sendMessage on the disposed session and crash pi (measured,
+			// STEERING-REVIEW-2026-09-05 H3). Run blocking there — the same rule the
+			// Agent tool applies — and return the output in the result.
+			if (!sessionOutlivesTurn(ctx.mode)) {
+				const summary = await runBackgroundBashBlocking(
+					{ id, command: params.command, description, cwd: ctx.cwd, timeoutSeconds, logPath },
+					signal,
+				);
+				const output = persistIfLarge(summary.output, { dir: sessionResultsDir(ctx), id: `bash-${id}`, maxBytes: ONE_SHOT_OUTPUT_CAP });
+				return {
+					content: [
+						{
+							type: "text",
+							text: `Bash task ${id} (${description}) ${finishLine(summary, timeoutSeconds)}. This is a one-shot session, so the command ran to completion instead of in the background.${logPath ? ` Log: ${logPath}.` : ""}\n\n${output}`,
+						},
+					],
+					details: { taskId: id, logPath, completed: true },
+					isError: summary.exitCode !== 0 && !summary.stopped,
+				};
+			}
+
 			const task = startBackgroundBash({
 				id,
 				command: params.command,

@@ -497,6 +497,11 @@ export default function mcpExtension(pi: ExtensionAPI) {
 		});
 		connecting.finally(() => {
 			connectSettled = true;
+			// The session may be gone by now (/clear while a remote server was still
+			// answering): pi's API throws from assertActive after session_shutdown,
+			// and from a promise continuation that is an uncaught exception that
+			// killed the process (STEERING-REVIEW-2026-09-05 H3, measured).
+			if (shuttingDown) return;
 			// Final publish, marked settled — emitted even with zero servers/tools so
 			// a consumer that spawns children early (subagents) can stop waiting for
 			// late-connecting servers instead of snapshotting an empty set forever.

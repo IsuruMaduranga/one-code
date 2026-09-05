@@ -143,3 +143,30 @@ export function startBackgroundBash(options: StartBackgroundBashOptions): Backgr
 
 	return task;
 }
+
+/**
+ * Run a background command to completion and resolve with its summary — the
+ * shape the one-shot modes need (`-p` / `--mode json`): the process exits when
+ * the turn settles, so a detached task would be orphaned with its completion
+ * undelivered — and, worse, its late callback would call `sendMessage` on the
+ * disposed session and crash pi (STEERING-REVIEW-2026-09-05 H3). The tool's
+ * abort signal stops the process tree; the summary then reports `stopped`.
+ */
+export function runBackgroundBashBlocking(
+	options: Omit<StartBackgroundBashOptions, "onFinished">,
+	signal?: AbortSignal,
+): Promise<BashFinishSummary> {
+	return new Promise((resolve) => {
+		let onAbort = () => {};
+		const task = startBackgroundBash({
+			...options,
+			onFinished: (_task, summary) => {
+				signal?.removeEventListener("abort", onAbort);
+				resolve(summary);
+			},
+		});
+		onAbort = () => task.stop();
+		if (signal?.aborted) onAbort();
+		else signal?.addEventListener("abort", onAbort, { once: true });
+	});
+}

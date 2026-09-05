@@ -18,8 +18,14 @@ import {
 	tailAnchor,
 } from "../lib/reminders.ts";
 
-/** Roles a reminder can be attached to (see injectReminders). */
-const ANCHOR_ROLES = new Set(["user", "toolResult", "compactionSummary"]);
+/**
+ * Roles a reminder can be attached to (see injectReminders). `custom` is a
+ * harness message (a task notification, a wakeup, hook context) that pi sends
+ * to the model as a user message; a turn opened by one has no `user` message
+ * of its own, so without it the model got no reminder stack at all
+ * (STEERING-REVIEW-2026-09-05 H1).
+ */
+const ANCHOR_ROLES = new Set(["user", "toolResult", "compactionSummary", "custom"]);
 
 export default function systemReminderExtension(pi: ExtensionAPI) {
 	const reminderQueue = new ReminderQueue();

@@ -103,11 +103,17 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 	});
 
 	/**
-	 * Before each turn, report anything that changed under us. Doing it here rather
-	 * than on a watcher keeps it deterministic and costs one stat+read per tracked
-	 * file, only for files the model actually touched.
+	 * At the start of each run, report anything that changed under us. Doing it
+	 * here rather than on a watcher keeps it deterministic and costs one stat+read
+	 * per tracked file, only for files the model actually touched. `agent_start`,
+	 * not `before_agent_start`: pi emits the latter only from `prompt()`, so a run
+	 * opened by a harness notification (a `/loop` tick, an agent report arriving
+	 * while idle) never fired it and changes went unreported until the next user
+	 * prompt (STEERING-REVIEW-2026-09-05 H1). `agent_start` fires for every run,
+	 * including pi's own retry/continue runs; a repeat scan is cheap and
+	 * `alreadyNotified` keeps it from repeating a warning.
 	 */
-	pi.on("before_agent_start", () => {
+	pi.on("agent_start", () => {
 		const detailed: string[] = [];
 		const overflow: string[] = [];
 		for (const path of tracker.tracked) {

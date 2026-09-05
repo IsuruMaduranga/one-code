@@ -29,7 +29,7 @@ export const NOTIFICATION_ID_KEY = "notificationId";
 export type TaskNotifier = (customType: string, text: string, details?: Record<string, unknown>) => void;
 
 /** The ExtensionAPI slice the notifier uses. */
-export type TaskNotifierApi = Pick<ExtensionAPI, "sendMessage" | "on">;
+export type TaskNotifierApi = Pick<ExtensionAPI, "sendMessage" | "sendUserMessage" | "on">;
 
 /**
  * Build the notifier for one extension. Call once at factory scope: it
@@ -57,6 +57,26 @@ export type TaskNotifierApi = Pick<ExtensionAPI, "sendMessage" | "on">;
  * notification takes when nothing is running). One re-send per notification:
  * if the second copy is not confirmed either, the entry is dropped rather than
  * looping a turn per settle.
+ *
+ * Dead sessions: a producer's callback can outlive the session it belongs to
+ * (a background shell finishing after `/clear` replaced the session, or after
+ * a `-p` run settled and pi disposed it). pi's extension API then throws from
+ * `assertActive`, and from a stream/child-process callback that is an uncaught
+ * exception — it took the whole process down (STEERING-REVIEW-2026-09-05 H3,
+ * measured both ways). The notifier goes inert on `session_shutdown` and drops
+ * anything dispatched afterwards; a throwing `sendMessage` is swallowed as a
+ * second line.
+ *
+ * First turn of a session: pi's idle `sendMessage(…, {triggerTurn: true})`
+ * calls `_runAgentPrompt` directly and skips the `prompt()` preamble, so no
+ * `before_agent_start` fires — and our system prompt is set from that hook.
+ * A session whose first input was `/loop …` therefore ran its first request on
+ * pi's stock system prompt with no reminder stack (review H1, measured). Until
+ * no `prompt()` has run in this process, an idle notification is delivered as a
+ * user message (`sendUserMessage`, source "extension"), which takes the full
+ * prompt path; the cost is that this one notification renders as a user bubble.
+ * Every later notification goes the custom-message way. Upstream ask:
+ * docs/upstream_prs.md #17.
  */
 export function createTaskNotifier(pi: TaskNotifierApi): TaskNotifier {
 	interface Pending {
@@ -67,17 +87,40 @@ export function createTaskNotifier(pi: TaskNotifierApi): TaskNotifier {
 	}
 	const pending = new Map<string, Pending>();
 	let seq = 0;
+	/** False once the session this notifier belongs to has shut down. */
+	let active = true;
+	/** True once `prompt()` has run in this process (the only path that emits before_agent_start). */
+	let prompted = false;
+	/** True between agent_start and agent_settled. */
+	let busy = false;
 
 	const dispatch = (id: string, entry: Pending) => {
-		pi.sendMessage(
-			{
-				customType: entry.customType,
-				content: [{ type: "text", text: entry.text }],
-				display: true,
-				details: { ...entry.details, [NOTIFICATION_ID_KEY]: id },
-			},
-			{ deliverAs: "steer", triggerTurn: true },
-		);
+		if (!active) {
+			pending.delete(id);
+			return;
+		}
+		try {
+			if (!prompted && !busy) {
+				// No confirmation possible for a user-role message (no details), and
+				// prompt() cannot be cleared by Esc before it starts: count it delivered.
+				pending.delete(id);
+				pi.sendUserMessage(entry.text);
+				return;
+			}
+			pi.sendMessage(
+				{
+					customType: entry.customType,
+					content: [{ type: "text", text: entry.text }],
+					display: true,
+					details: { ...entry.details, [NOTIFICATION_ID_KEY]: id },
+				},
+				{ deliverAs: "steer", triggerTurn: true },
+			);
+		} catch {
+			// The session was disposed under us (assertActive). Dropping the notice
+			// beats taking the process down from a stream callback.
+			pending.delete(id);
+		}
 	};
 
 	pi.on("message_end", (event) => {
@@ -87,6 +130,7 @@ export function createTaskNotifier(pi: TaskNotifierApi): TaskNotifier {
 		if (typeof id === "string") pending.delete(id);
 	});
 	pi.on("agent_settled", () => {
+		busy = false;
 		for (const [id, entry] of [...pending]) {
 			if (entry.resent) {
 				pending.delete(id);
@@ -96,8 +140,22 @@ export function createTaskNotifier(pi: TaskNotifierApi): TaskNotifier {
 			dispatch(id, entry);
 		}
 	});
+	pi.on("agent_start", () => {
+		busy = true;
+	});
+	pi.on("before_agent_start", () => {
+		prompted = true;
+	});
 	// A replaced session (/clear, /new, resume) has no use for the old one's undelivered notices.
-	pi.on("session_start", () => pending.clear());
+	pi.on("session_start", () => {
+		pending.clear();
+		active = true;
+		prompted = false;
+		busy = false;
+	});
+	pi.on("session_shutdown", () => {
+		active = false;
+	});
 
 	return (customType, text, details = {}) => {
 		const id = `${++seq}-${Date.now().toString(36)}`;

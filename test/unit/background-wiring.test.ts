@@ -15,6 +15,10 @@ import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 function mount(): FakePi {
 	const fake = createFakePi();
 	backgroundExtension(fake.pi as never);
+	// An established session: a prompt() has run, so notifications take the
+	// custom-message path (before the first prompt they go out as a user message
+	// — createTaskNotifier, STEERING-REVIEW-2026-09-05 H1).
+	void fake.fire("before_agent_start", {}, createFakeCtx({}));
 	return fake;
 }
 

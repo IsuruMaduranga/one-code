@@ -279,5 +279,30 @@ describe("permissionsExtension model_select updates classifier", () => {
 		// 3. Banner mode display reflects the updated classifier
 		expect(permissionModeDisplay(lastStatus2)).toBe("auto · classifier 5-mini (planned)");
 	});
+
+	it("announces the auto-mode standing reminder when the session STARTS in auto mode", () => {
+		// setMode is the only emitter of the standing block; startup used to call it
+		// for plan alone, so `--permission-mode auto` sessions ran with no reminder
+		// (STEERING-REVIEW-2026-09-05 H2, measured on the wire).
+		const fake = makeFakePi();
+		fake.pi.getFlag = ((name: string) => (name === "permission-mode" ? "auto" : undefined)) as never;
+		permissionsExtension(fake.pi as any);
+		fake.fire(
+			"session_start",
+			{},
+			{
+				cwd: "/tmp/project",
+				model: makeModel("anthropic", "claude-3-7-sonnet", 3),
+				modelRegistry: { getAvailable: () => [makeModel("anthropic", "claude-3-5-haiku", 0.8)] },
+				sessionManager: { getSessionId: () => "sess-1", getSessionDir: () => "/tmp/sess" },
+				ui: { setWidget: () => {}, notify: () => {}, setStatus: () => {} },
+				hasUI: false,
+			},
+		);
+		const reminders = (fake.emitted["one-code:system-reminder"] ?? []) as Array<{ key?: string; text?: string; placement?: string }>;
+		const standing = reminders.find((r) => r.key === "permission-mode" && typeof r.text === "string");
+		expect(standing?.text).toContain("Auto mode is active");
+		expect(standing?.placement).toBe("sticky-append");
+	});
 });
 

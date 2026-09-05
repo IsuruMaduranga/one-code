@@ -1,6 +1,6 @@
 /**
  * file-tracker/index.ts wiring (T15a): handler sequencing across tool_call /
- * tool_result / before_agent_start, plus the session_start / session_tree
+ * tool_result / agent_start, plus the session_start / session_tree
  * replay reconstruction — as opposed to tracker.ts's pure state machine,
  * already covered by file-tracker.test.ts.
  */
@@ -90,7 +90,7 @@ describe("file-tracker wiring", () => {
 		expect(result).toBeUndefined();
 	});
 
-	it("reports external changes as a system-reminder on before_agent_start, without marking the file read", async () => {
+	it("reports external changes as a system-reminder on agent_start, without marking the file read", async () => {
 		const file = path("d.ts");
 		writeFileSync(file, "before");
 		await fake.fireOne("tool_result", { toolName: "read", input: { path: file }, isError: false }, ctx());
@@ -99,12 +99,12 @@ describe("file-tracker wiring", () => {
 		const emitted: unknown[] = [];
 		fake.events.on(REMINDER_CHANNEL, (data) => emitted.push(data));
 
-		await fake.fireOne("before_agent_start", {}, ctx());
+		await fake.fireOne("agent_start", {}, ctx());
 		expect(emitted).toHaveLength(1);
 		expect((emitted[0] as { text: string }).text).toContain(file);
 		expect((emitted[0] as { text: string }).text).toContain("after");
 
-		// The stale-edit guard must still fire: before_agent_start's notice does
+		// The stale-edit guard must still fire: agent_start's notice does
 		// NOT count as a re-read, or the model could clobber the external change.
 		const blocked = await fake.fireOne<{ block?: boolean }>(
 			"tool_call",
@@ -113,10 +113,10 @@ describe("file-tracker wiring", () => {
 		);
 		expect(blocked?.block).toBe(true);
 
-		// A second before_agent_start with no further change must not repeat the
+		// A second agent_start with no further change must not repeat the
 		// same warning (DETAILED_CHANGE_REMINDERS_PER_TURN / alreadyNotified).
 		emitted.length = 0;
-		await fake.fireOne("before_agent_start", {}, ctx());
+		await fake.fireOne("agent_start", {}, ctx());
 		expect(emitted).toHaveLength(0);
 	});
 

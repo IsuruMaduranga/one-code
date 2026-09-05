@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
 	type BashFinishSummary,
 	EMPTY_OUTPUT_MARKER,
+	runBackgroundBashBlocking,
 	startBackgroundBash,
 	tailCap,
 } from "../../extensions/bash/background.ts";
@@ -89,5 +90,31 @@ describe("tailCap", () => {
 		const capped = tailCap("x".repeat(500), 100);
 		expect(capped).toContain("earlier output truncated");
 		expect(capped.endsWith("x".repeat(100))).toBe(true);
+	});
+});
+
+describe("runBackgroundBashBlocking (one-shot modes, STEERING-REVIEW-2026-09-05 H3)", () => {
+	const options = (command: string) => ({ id: "bblock01", command, description: "test", cwd: process.cwd() });
+
+	it("resolves with the finished command's summary and output", async () => {
+		const summary = await runBackgroundBashBlocking(options("echo blocking-ok"));
+		expect(summary.exitCode).toBe(0);
+		expect(summary.stopped).toBe(false);
+		expect(summary.output).toContain("blocking-ok");
+	});
+
+	it("stops the process tree when the tool's signal aborts and reports stopped", async () => {
+		const controller = new AbortController();
+		const pending = runBackgroundBashBlocking(options("sleep 30"), controller.signal);
+		setTimeout(() => controller.abort(), 100);
+		const summary = await pending;
+		expect(summary.stopped).toBe(true);
+	});
+
+	it("stops immediately when the signal is already aborted", async () => {
+		const controller = new AbortController();
+		controller.abort();
+		const summary = await runBackgroundBashBlocking(options("sleep 30"), controller.signal);
+		expect(summary.stopped).toBe(true);
 	});
 });

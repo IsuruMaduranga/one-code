@@ -37,7 +37,9 @@
  *   (a `--resume` drops them: one miss, once).
  *
  * A compaction summary counts as a user message for anchoring (pi renders it as
- * one), so the context stack survives a compaction that left no user turn.
+ * one), so the context stack survives a compaction that left no user turn. So
+ * does a `custom` harness message (task notification, wakeup, hook context):
+ * pi sends it as a user message, and a turn it opens has no other user turn.
  *
  * Retry safety falls out of this: pi re-runs the `context` transform per LLM
  * attempt, and both a persisted and a pinned one-shot are present on every
@@ -263,7 +265,7 @@ function pinLocator(messages: AgentMessage[]): (pin: PinAnchor) => number {
 		if (m.role === "toolResult") {
 			const id = (m as { toolCallId?: string }).toolCallId;
 			if (typeof id === "string" && !byToolCall.has(id)) byToolCall.set(id, index);
-		} else if (m.role === "user" || m.role === "compactionSummary") {
+		} else if (isUserLike(m)) {
 			const stamp = (m as { timestamp?: number }).timestamp;
 			if (typeof stamp === "number" && !byTimestamp.has(stamp)) byTimestamp.set(stamp, index);
 		}
@@ -277,7 +279,7 @@ export function tailAnchor(messages: AgentMessage[]): PinAnchor | undefined {
 	if (last?.role === "toolResult" && typeof last.toolCallId === "string") return { kind: "toolResult", toolCallId: last.toolCallId };
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const m = messages[i] as AgentMessage & { timestamp?: number };
-		if ((m.role === "user" || m.role === "compactionSummary") && typeof m.timestamp === "number") {
+		if (isUserLike(m) && typeof m.timestamp === "number") {
 			return { kind: "user", timestamp: m.timestamp };
 		}
 	}
@@ -313,9 +315,22 @@ function reminderBlock(entry: ReminderEntry): TextContent {
 	return { type: "text", text: (entry.raw ? entry.text : wrapReminder(entry.text)) + (entry.suffix ?? "") };
 }
 
-/** Roles a reminder block can be attached to. */
+/**
+ * Roles a reminder block can be attached to. `custom` is a harness message
+ * (task notification, wakeup, hook context, `<new-diagnostics>`); pi's
+ * `convertToLlm` sends it to the model as `role: "user"`, so on the wire it IS
+ * a user turn — and a turn opened by one (a `/loop` tick, an agent report
+ * arriving while idle) has no `user` message of its own. Before 2026-09-05 such
+ * a request got no context stack at all, and its pending one-shots pinned to
+ * the previous user message (STEERING-REVIEW-2026-09-05 H1).
+ */
 function isUserLike(m: AgentMessage): boolean {
-	return m.role === "user" || m.role === "compactionSummary";
+	return m.role === "user" || m.role === "compactionSummary" || m.role === "custom";
+}
+
+/** User-role messages that carry sticky blocks: real turns and harness messages, not a compaction summary. */
+function isStickyCarrier(m: AgentMessage): boolean {
+	return m.role === "user" || m.role === "custom";
 }
 
 /** A copy of `message` with `before` blocks in front of its content and `after` blocks behind. */
@@ -388,7 +403,7 @@ export function injectReminders(messages: AgentMessage[], reminders: Array<strin
 		let opener = -1;
 		const carriers: number[] = [];
 		messages.forEach((m, index) => {
-			if (m.role !== "user") return;
+			if (!isStickyCarrier(m)) return;
 			const stamp = (m as { timestamp?: number }).timestamp ?? 0;
 			if (stamp >= since) carriers.push(index);
 			else opener = index;
