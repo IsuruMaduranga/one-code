@@ -29,7 +29,7 @@ import { sendToMainTool } from "./send-to-main-tool.ts";
 import { SessionTurnTracker } from "./session-turns.ts";
 import type { UsageTotals } from "./usage.ts";
 import { streamingText, type TranscriptBlock } from "./live-runs.ts";
-import { cutPlainText, firstNonEmptyLine, summarizeArgs, textContent } from "../lib/tui-render.ts";
+import { cutPlainText, firstNonEmptyLine, stripReminderBlocks, summarizeArgs, textContent } from "../lib/tui-render.ts";
 
 /**
  * Optional live sink for the subagent panel: a one-line activity string from
@@ -301,7 +301,11 @@ export class SubagentRuntime {
 					sink?.onBlock?.({ kind: "call", tool: e.toolName ?? "tool", text: summarizeArgs(e.args) });
 					sink?.onActivity?.(e.toolName, e.args, tracker.turnText);
 				} else if (e.type === "tool_execution_end") {
-					const text = cutPlainText(firstNonEmptyLine(textContent(e.result as { content?: Array<{ type: string; text?: string }> })), 200);
+					// Display only: the child's persisted reminders (file-tracker, hook context) stay with the model.
+					const text = cutPlainText(
+						firstNonEmptyLine(textContent(stripReminderBlocks(e.result as { content?: Array<{ type: string; text?: string }> }))),
+						200,
+					);
 					sink?.onBlock?.({ kind: "result", tool: e.toolName ?? "tool", text: text || (e.isError ? "error" : "done"), isError: e.isError });
 				} else if (e.type === "message_update" && e.message?.role === "assistant") {
 					sink?.onStreaming?.(e.message);

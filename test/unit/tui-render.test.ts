@@ -18,6 +18,7 @@ import {
 	textContent,
 	truncateLine,
 	type ThemeLike,
+	stripHarnessText,
 	stripReminderBlocks,
 } from "../../extensions/lib/tui-render.ts";
 
@@ -385,6 +386,34 @@ describe("stripReminderBlocks", () => {
 		});
 		const plain = { content: [{ type: "text", text: "ok" }] };
 		expect(stripReminderBlocks(plain)).toBe(plain);
+	});
+
+	it("hides the raw <total_tokens> and <new-diagnostics> blocks too, whether they stand alone or close a text block", () => {
+		const result = {
+			content: [
+				{ type: "text", text: "hi" },
+				{ type: "text", text: "<total_tokens>14974751 tokens left</total_tokens>" },
+				{ type: "text", text: "<new-diagnostics>The following new diagnostic issues were detected:\n\na.ts:\n  ✘ [Line 1:7] bad\n</new-diagnostics>" },
+			],
+		};
+		expect(stripReminderBlocks(result)).toEqual({ content: [{ type: "text", text: "hi" }] });
+
+		// The same bytes merged into one block (a suffix, or a merge downstream): the tail goes, the output stays.
+		const merged = {
+			content: [
+				{
+					type: "text",
+					text: "Successfully wrote to src/a.ts\n<total_tokens>974381 tokens left</total_tokens>\n<new-diagnostics>x\n</new-diagnostics>\n<system-reminder>\nnote\n</system-reminder>",
+				},
+			],
+		};
+		expect(stripReminderBlocks(merged)).toEqual({ content: [{ type: "text", text: "Successfully wrote to src/a.ts" }] });
+	});
+
+	it("leaves a harness tag quoted inside real output alone", () => {
+		const doc = { content: [{ type: "text", text: "CC appends <total_tokens>N tokens left</total_tokens> after results.\nMore prose." }] };
+		expect(stripReminderBlocks(doc)).toBe(doc);
+		expect(stripHarnessText("a <system-reminder>quoted</system-reminder> b")).toBe("a <system-reminder>quoted</system-reminder> b");
 	});
 });
 

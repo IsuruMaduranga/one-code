@@ -29,7 +29,11 @@ ROWS="${ROWS:-45}"
 cleanup() { tmux kill-session -t "$SESSION" 2>/dev/null || true; }
 trap cleanup EXIT
 
-tmux new-session -d -s "$SESSION" -x "$COLS" -y "$ROWS" -c "$WORKDIR" "pi $*"
+# Re-quote every argument: tmux takes one shell string, and a bare "$*" split a
+# quoted prompt ("Run echo hi. Then …") into one message per word.
+CMD="pi"
+for arg in "$@"; do CMD+=" $(printf '%q' "$arg")"; done
+tmux new-session -d -s "$SESSION" -x "$COLS" -y "$ROWS" -c "$WORKDIR" "$CMD"
 sleep "$WAIT"
 
 if [ "${CAPTURE_ANSI:-0}" = "1" ]; then

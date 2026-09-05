@@ -598,25 +598,55 @@ export interface CcWrapOptions<TArgs = any> {
  * and would throw on our wrapper.
  */
 /**
- * A tool result with its `<system-reminder>` text blocks removed, for display.
+ * One harness block as it is written into a stored tool result: the
+ * `<system-reminder>` frame, the raw `<total_tokens>` budget line, the raw
+ * `<new-diagnostics>` block. Model-facing only; every transcript view strips
+ * them (Claude Code shows none of these to the user).
+ */
+const HARNESS_BLOCK = String.raw`<system-reminder>[\s\S]*?</system-reminder>|<total_tokens>[^<]*</total_tokens>|<new-diagnostics>[\s\S]*?</new-diagnostics>`;
+/** A text block that IS a harness block (the injector appends them as blocks of their own). */
+const HARNESS_BLOCK_ONLY = new RegExp(String.raw`^\s*(?:${HARNESS_BLOCK})\s*$`);
+/** A run of harness blocks at the END of a text block (the same bytes after a merge or a `suffix`). */
+const HARNESS_TAIL = new RegExp(String.raw`(?:\s*(?:${HARNESS_BLOCK}))+\s*$`);
+
+/**
+ * Display text with the harness blocks that were appended to it removed. Only
+ * a block that stands alone or closes the text is stripped — never one quoted
+ * in the middle of real output (a file that documents these tags reads back
+ * intact). Returns "" when nothing but harness blocks remained.
+ */
+export function stripHarnessText(text: string): string {
+	if (HARNESS_BLOCK_ONLY.test(text)) return "";
+	return text.replace(HARNESS_TAIL, "");
+}
+
+/**
+ * A tool result with the harness blocks removed from its content, for display.
  * One-shot reminders are persisted into the stored result (system-reminder
- * extension); the model must see them, the transcript view must not — Claude
- * Code hides them the same way.
+ * extension) as text blocks of their own; the model must see them, the
+ * transcript view must not — Claude Code hides them the same way. A text block
+ * that ends in harness blocks keeps its own text and loses the tail.
  */
 export function stripReminderBlocks<T extends { content?: unknown }>(result: T): T {
 	const content = result?.content;
 	if (!Array.isArray(content)) return result;
-	const kept = content.filter(
-		(block) =>
-			!(
-				block &&
-				typeof block === "object" &&
-				(block as any).type === "text" &&
-				typeof (block as any).text === "string" &&
-				(block as any).text.startsWith("<system-reminder>")
-			),
-	);
-	return kept.length === content.length ? result : { ...result, content: kept };
+	let changed = false;
+	const kept: unknown[] = [];
+	for (const block of content) {
+		const text = block && typeof block === "object" && (block as any).type === "text" ? (block as any).text : undefined;
+		if (typeof text !== "string") {
+			kept.push(block);
+			continue;
+		}
+		const stripped = stripHarnessText(text);
+		if (stripped === text) {
+			kept.push(block);
+			continue;
+		}
+		changed = true;
+		if (stripped !== "") kept.push({ ...(block as object), text: stripped });
+	}
+	return changed ? { ...result, content: kept } : result;
 }
 
 export function ccWrapBuiltinRenderers<TArgs = any>(
