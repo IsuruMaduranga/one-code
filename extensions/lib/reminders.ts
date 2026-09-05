@@ -136,6 +136,12 @@ export interface ReminderPayload {
 	suffix?: string;
 	/** Emit the text bare, with no `<system-reminder>` frame. */
 	raw?: boolean;
+	/**
+	 * `sticky-append` only: anchor the block from this timestamp instead of now —
+	 * `0` puts it on every user message in the session, including ones a resume
+	 * brought back (the `<total_tokens>` line rides every user message in CC).
+	 */
+	since?: number;
 }
 
 interface StoredReminder extends ReminderEntry {

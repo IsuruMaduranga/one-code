@@ -65,7 +65,8 @@ Set these before launching to change behavior:
 | `CC_TURN_DURATION=0` | Turn off the line that reports how long a turn took. |
 | `CC_FOOTER=0` | Keep pi's built-in footer instead of One Code's status line. |
 | `CC_COMPACTION=0` | Use pi's own compaction summary instead of the Claude Code-style one. |
-| `CC_TOTAL_TOKENS=0` | Stop appending the `<total_tokens>` budget line to tool results. |
+| `CC_TOTAL_TOKENS=0` | Drop the `<total_tokens>` per-turn budget line from the system prompt, user messages and tool results. |
+| `CC_TOTAL_TOKENS_BUDGET` | The per-turn token budget that line counts down from (default 15000000, Claude Code's figure). |
 | `CC_PROMPT_TIER=frontier\|workhorse\|cheap\|tiny` | Force a system-prompt register instead of deriving it from the model. |
 | `CC_PERMISSION_MODE` | Starting permission mode (`default`, `acceptEdits`, `plan`, `bypassPermissions`, `dontAsk`, `auto`); the `--permission-mode` flag wins. One Code keeps it updated with the live mode while running. |
 | `CC_NO_INPUT_MARKER=1` / `CC_NO_ASSISTANT_MARKER=1` | Drop the `>` input marker / the `⏺` assistant marker in the transcript. |

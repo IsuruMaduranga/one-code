@@ -43,6 +43,7 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 				order: payload.order,
 				suffix: payload.suffix,
 				raw: payload.raw,
+				since: payload.since,
 			});
 		}
 	});

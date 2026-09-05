@@ -84,6 +84,12 @@ export function buildClaudeCodeSystemPrompt(
 	 * CC. Session-constant, so it too stays outside the EnvironmentInfo cache.
 	 */
 	gitStatus?: string | null,
+	/**
+	 * Claude Code's per-turn budget line (`<total_tokens>N tokens left</total_tokens>`,
+	 * `context-budget/budget.ts`), placed after the cwd line and before the git
+	 * snapshot. Constant for the session, so it stays cache-stable.
+	 */
+	totalTokensLine?: string | null,
 ): string {
 	const bundle = BUNDLES[tier];
 	const sections = [
@@ -114,7 +120,11 @@ export function buildClaudeCodeSystemPrompt(
 
 	prompt += `\nCurrent working directory: ${env.cwd.replace(/\\/g, "/")}`;
 
-	// Claude Code appends the git snapshot last, separated by a blank line.
+	// Claude Code follows the cwd line with its budget line, then the git
+	// snapshot last, each separated by a blank line.
+	if (totalTokensLine) {
+		prompt += `\n\n${totalTokensLine}`;
+	}
 	if (gitStatus) {
 		prompt += `\n\n${gitStatus}`;
 	}

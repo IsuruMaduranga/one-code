@@ -139,3 +139,15 @@ describe("buildClaudeCodeSystemPrompt", () => {
 		}
 	});
 });
+
+describe("the per-turn budget line", () => {
+	it("sits after the cwd line and before the git snapshot, and is absent when not given", () => {
+		const line = "<total_tokens>15000000 tokens left</total_tokens>";
+		const git = "gitStatus: This is the git status at the start of the conversation.";
+		const prompt = buildClaudeCodeSystemPrompt(baseOptions, env, "frontier", undefined, git, line);
+		expect(prompt.endsWith(`Current working directory: /tmp/project\n\n${line}\n\n${git}`)).toBe(true);
+		// No git repo: the line closes the prompt.
+		expect(buildClaudeCodeSystemPrompt(baseOptions, env, "frontier", undefined, null, line).endsWith(`\n\n${line}`)).toBe(true);
+		expect(buildClaudeCodeSystemPrompt(baseOptions, env, "frontier", undefined, git, null).endsWith(`Current working directory: /tmp/project\n\n${git}`)).toBe(true);
+	});
+});

@@ -14,6 +14,7 @@ import { resolveModelTier } from "../lib/model-tier.ts";
 import { sessionScratchpadDir } from "../lib/scratchpad.ts";
 import { collectEnvironment, type EnvironmentInfo } from "./environment.ts";
 import { collectGitStatus } from "./git-status.ts";
+import { totalTokensBlock, turnTokenBudget } from "../context-budget/budget.ts";
 import { buildClaudeCodeSystemPrompt } from "./template.ts";
 
 export default function systemPromptExtension(pi: ExtensionAPI) {
@@ -66,8 +67,10 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 			cachedKey = key;
 		}
 
+		// The same constant the context-budget extension puts on every user message.
+		const totalTokensLine = process.env.CC_TOTAL_TOKENS === "0" ? null : totalTokensBlock(turnTokenBudget());
 		return {
-			systemPrompt: buildClaudeCodeSystemPrompt(event.systemPromptOptions, cachedEnv, tier, scratchpad, gitStatus),
+			systemPrompt: buildClaudeCodeSystemPrompt(event.systemPromptOptions, cachedEnv, tier, scratchpad, gitStatus, totalTokensLine),
 		};
 	});
 }
