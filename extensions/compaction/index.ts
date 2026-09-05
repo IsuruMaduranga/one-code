@@ -28,22 +28,20 @@
  *     prefix thinking-cleared while this call sends full thinking blocks, and the
  *     mismatch invalidates the message-block cache (system+tools still read).
  *
- * The replay only works while the captured request leaves room for the reply;
- * an overflow's capture is the request that just failed. Those compactions —
- * and any with no capture to replay — run *standalone* on the doomed span pi
- * isolated, trimmed to the window (`fit.ts`): no cache alignment, but still One
- * Code's summary rather than pi's.
+ * Not every compaction can replay — `fit.ts` explains when and why the
+ * standalone shape (the doomed span alone, trimmed to the window) is used.
  *
  * Any failure returns nothing, so pi's own compaction serves — a different
  * summary style, never a broken compaction. CC_COMPACTION=0 opts out.
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { Api, Model, Tool } from "@earendil-works/pi-ai";
+import type { Api, Context, Message, Model, Tool } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import {
 	convertToLlm,
 	type ExtensionAPI,
+	type ExtensionContext,
 	type SessionBeforeCompactEvent,
 } from "@earendil-works/pi-coding-agent";
 import {
@@ -56,7 +54,7 @@ import {
 } from "../context-management/index.ts";
 import { looksLikeAnthropicRequest } from "../lib/anthropic-payload.ts";
 import { forcedReasoningLevel } from "../lib/model-policy.ts";
-import { estimateTextTokens, fitToBudget, replayFits, standaloneBudget, withoutUsage } from "./fit.ts";
+import { fitToBudget, replayFits, withoutUsage } from "./fit.ts";
 import { buildCompactionInstruction, COMPACTION_MAX_TOKENS, continuationSummary, extractSummary } from "./prompt.ts";
 
 /** Compaction reads a whole context window; give it more room than the classifier's 30s. */
@@ -69,6 +67,8 @@ const COMPACTION_TIMEOUT_MS = 120_000;
  */
 export const STANDALONE_SYSTEM_PROMPT =
 	"You are the coding assistant from the conversation below, asked to summarize it so work can continue in a fresh context. Respond with text only.";
+
+type Preparation = Pick<SessionBeforeCompactEvent["preparation"], "messagesToSummarize" | "turnPrefixMessages" | "isSplitTurn" | "previousSummary">;
 
 export default function compactionExtension(pi: ExtensionAPI) {
 	/**
@@ -122,39 +122,23 @@ export default function compactionExtension(pi: ExtensionAPI) {
 			if (!auth.ok) return undefined;
 			const baseUrl = (auth as { baseUrl?: string }).baseUrl;
 
+			const maxTokens = Math.min(COMPACTION_MAX_TOKENS, model.maxTokens || COMPACTION_MAX_TOKENS);
+
 			// Prefer the captured request prefix — it is cache-aligned and already
-			// carries the leading compactionSummary message on a re-compaction. It is
-			// only usable while it leaves room for the reply: an overflow's capture IS
-			// the request that just failed, and pi's max_tokens clamp (or the
-			// provider) turns a window-sized replay into an empty reply (review H2).
-			// Otherwise — no capture yet (a /compact first thing in a resumed
-			// session), an overflow, or a window nearly full — summarize the doomed
-			// span pi isolated, standalone: no cache alignment (moot there), but One
-			// Code's summary rather than pi's.
-			const captured =
-				capturedMessages !== undefined &&
-				replayFits({ reason: event.reason, contextWindow: model.contextWindow, tokensBefore: event.preparation.tokensBefore })
-					? capturedMessages
-					: undefined;
-
-			// pi keeps the tail after the cut point verbatim (keepRecentTokens, ~20k
-			// tokens); the captured request still carries that tail, so the
-			// instruction names it. The standalone path holds only the doomed span
-			// and needs no note. (Cutting the tail off the request instead was
-			// rejected: Anthropic checks cache hits only ~20 blocks back from the
-			// breakpoint, so a request ending well before the last cached block
-			// misses the cache the whole replay exists to hit.)
-			const keptTail = captured ? keptTailOf(captured, event.preparation) : undefined;
-
-			const instruction = buildCompactionInstruction({
-				reason: event.reason,
-				customInstructions: event.customInstructions,
-				keptTail,
-			});
-
-			const request = captured
-				? replayRequest(pi, ctx.getSystemPrompt(), captured)
-				: standaloneRequest(model.contextWindow, event.preparation, instruction);
+			// carries the leading compactionSummary message on a re-compaction — as
+			// long as pi's max_tokens clamp leaves it room for the reply (fit.ts).
+			// Otherwise (no capture yet, an overflow, a nearly full window) the
+			// standalone shape summarizes the doomed span pi isolated.
+			const replay = capturedMessages ? replayRequest(pi, ctx, capturedMessages, event) : undefined;
+			const request =
+				replay && replayFits(event.reason, model, replay, maxTokens)
+					? replay
+					: standaloneRequest(
+							model,
+							event.preparation,
+							buildCompactionInstruction({ reason: event.reason, customInstructions: event.customInstructions }),
+							maxTokens,
+						);
 
 			// When context-management (clear_thinking) is active for this session,
 			// the agent loop's cached message prefix has old thinking blocks cleared
@@ -176,50 +160,42 @@ export default function compactionExtension(pi: ExtensionAPI) {
 				: auth.headers;
 
 			const timeout = AbortSignal.timeout(COMPACTION_TIMEOUT_MS);
-			const result = await completeSimple(
-				baseUrl ? ({ ...model, baseUrl } as Model<Api>) : model,
-				{
-					systemPrompt: request.systemPrompt,
-					messages: [...convertToLlm(request.messages), { role: "user", content: instruction, timestamp: Date.now() }],
-					tools: request.tools,
-				},
-				{
-					apiKey: auth.apiKey,
-					headers,
-					env: auth.env,
-					signal: AbortSignal.any([event.signal, timeout]),
-					maxTokens: Math.min(COMPACTION_MAX_TOKENS, model.maxTokens || COMPACTION_MAX_TOKENS),
-					// The session id is the prompt-cache key / routing affinity on the
-					// providers that use one (openai-codex prompt_cache_key, session
-					// headers). Without it the replayed prefix cannot hit the session's
-					// cache no matter how well the bytes match.
-					sessionId: ctx.sessionManager.getSessionId(),
-					// Reasoning config is part of the cache identity on the Responses
-					// API: with a byte-identical prefix, prompt_cache_key, tools, and
-					// system prompt, omitting `reasoning` on a reasoning-configured
-					// session still misses the cache entirely (measured: cacheRead 0).
-					// Mirror the session's own thinking level so the request matches
-					// the prefix the session cached. Unlike the auto-mode classifier —
-					// which may run a *different*, unvalidated model where reasoning
-					// fails closed — this is the session's own model, already proven to
-					// accept this level, and streamSimple clamps an unsupported level
-					// down rather than erroring, so mirroring never fails closed here.
-					// "off" carries no reasoning (matching what such a session sends) —
-					// unless the model cannot disable thinking, where an off-request
-					// would 400 (forcedReasoningLevel sends its lowest level instead).
-					reasoning: ctx.thinkingLevel === "off" ? forcedReasoningLevel(model) : ctx.thinkingLevel,
-					// The clear_thinking body edit, matching the session's requests (see
-					// the header note above). Only attached on Anthropic requests that
-					// carry thinking, exactly as the context-management extension gates it.
-					onPayload: clearThinking
-						? (payload: unknown) =>
-								looksLikeAnthropicRequest(payload) &&
-								clearThinkingApplies(payload as Record<string, unknown>, cmModel.compat?.forceAdaptiveThinking === true)
-									? withClearThinking(payload as Record<string, unknown>)
-									: payload
-						: undefined,
-				},
-			);
+			const result = await completeSimple(baseUrl ? ({ ...model, baseUrl } as Model<Api>) : model, request, {
+				apiKey: auth.apiKey,
+				headers,
+				env: auth.env,
+				signal: AbortSignal.any([event.signal, timeout]),
+				maxTokens,
+				// The session id is the prompt-cache key / routing affinity on the
+				// providers that use one (openai-codex prompt_cache_key, session
+				// headers). Without it the replayed prefix cannot hit the session's
+				// cache no matter how well the bytes match.
+				sessionId: ctx.sessionManager.getSessionId(),
+				// Reasoning config is part of the cache identity on the Responses
+				// API: with a byte-identical prefix, prompt_cache_key, tools, and
+				// system prompt, omitting `reasoning` on a reasoning-configured
+				// session still misses the cache entirely (measured: cacheRead 0).
+				// Mirror the session's own thinking level so the request matches
+				// the prefix the session cached. Unlike the auto-mode classifier —
+				// which may run a *different*, unvalidated model where reasoning
+				// fails closed — this is the session's own model, already proven to
+				// accept this level, and streamSimple clamps an unsupported level
+				// down rather than erroring, so mirroring never fails closed here.
+				// "off" carries no reasoning (matching what such a session sends) —
+				// unless the model cannot disable thinking, where an off-request
+				// would 400 (forcedReasoningLevel sends its lowest level instead).
+				reasoning: ctx.thinkingLevel === "off" ? forcedReasoningLevel(model) : ctx.thinkingLevel,
+				// The clear_thinking body edit, matching the session's requests (see
+				// the header note above). Only attached on Anthropic requests that
+				// carry thinking, exactly as the context-management extension gates it.
+				onPayload: clearThinking
+					? (payload: unknown) =>
+							looksLikeAnthropicRequest(payload) &&
+							clearThinkingApplies(payload as Record<string, unknown>, cmModel.compat?.forceAdaptiveThinking === true)
+								? withClearThinking(payload as Record<string, unknown>)
+								: payload
+					: undefined,
+			});
 
 			const text = result.content
 				.filter((block): block is { type: "text"; text: string } => block.type === "text")
@@ -244,49 +220,47 @@ export default function compactionExtension(pi: ExtensionAPI) {
 	});
 }
 
-/** What a compaction request is made of, before the instruction is appended. */
-interface CompactionRequest {
-	systemPrompt: string;
-	messages: AgentMessage[];
-	tools: Tool[] | undefined;
-}
-
 /**
  * The cache-aligned shape: the session's system prompt, the active tool
  * definitions in their active order — kept purely so the cached prefix (tools
  * come first) still matches; a mismatch costs cache hits, never correctness —
- * and the captured request verbatim.
+ * the captured request verbatim, and the instruction as one more user message.
+ *
+ * pi keeps the tail after the cut point verbatim (keepRecentTokens, ~20k
+ * tokens); the captured request still carries that tail, so the instruction
+ * names it (`keptTailOf`). Cutting the tail off the request instead was
+ * rejected: Anthropic checks cache hits only ~20 blocks back from the
+ * breakpoint, so a request ending well before the last cached block misses
+ * the cache the whole replay exists to hit.
  */
-function replayRequest(pi: ExtensionAPI, systemPrompt: string, captured: AgentMessage[]): CompactionRequest {
+function replayRequest(pi: ExtensionAPI, ctx: ExtensionContext, captured: AgentMessage[], event: SessionBeforeCompactEvent): Context {
 	const byName = new Map(pi.getAllTools().map((tool) => [tool.name, tool]));
 	const tools = pi
 		.getActiveTools()
 		.map((name) => byName.get(name))
 		.filter((tool) => tool !== undefined)
 		.map(({ name, description, parameters }) => ({ name, description, parameters }) as Tool);
-	return { systemPrompt, messages: captured, tools };
+	const instruction = buildCompactionInstruction({
+		reason: event.reason,
+		customInstructions: event.customInstructions,
+		keptTail: keptTailOf(captured, event.preparation),
+	});
+	return { systemPrompt: ctx.getSystemPrompt(), messages: [...convertToLlm(captured), instructionMessage(instruction)], tools };
 }
 
 /**
  * The standalone shape: the doomed span reconstructed from session entries,
- * trimmed to the window (largest tool results cleared first — `fit.ts`), its
- * assistant usage zeroed so pi's max_tokens clamp counts what is sent rather
- * than the session request the usage came from, no tools, a one-line system
- * prompt. This cannot hit the prompt cache (the
- * request-time <system-reminder> injections are absent from entries, and on an
- * overflow the cache is unreachable anyway), but it yields One Code's summary
- * on the path that used to lose it — and if it fails, pi's own compaction
- * serves. Exported for the unit test.
+ * its assistant usage zeroed and its largest tool results cleared until pi's
+ * clamp leaves room for the summary (`fit.ts`), no tools, a one-line system
+ * prompt. Gets no kept-tail note: it holds only the doomed span. If it fails,
+ * pi's own compaction serves. Exported for the unit test.
  */
-export function standaloneRequest(
-	contextWindow: number,
-	preparation: Pick<SessionBeforeCompactEvent["preparation"], "messagesToSummarize" | "turnPrefixMessages" | "isSplitTurn" | "previousSummary">,
-	instruction: string,
-): CompactionRequest {
-	const fixed = estimateTextTokens(STANDALONE_SYSTEM_PROMPT) + estimateTextTokens(instruction);
-	const { messages } = fitToBudget(reconstructFromEntries(preparation), standaloneBudget(contextWindow, fixed));
-	return { systemPrompt: STANDALONE_SYSTEM_PROMPT, messages: withoutUsage(messages), tools: undefined };
+export function standaloneRequest(model: Model<Api>, preparation: Preparation, instruction: string, maxTokens: number): Context {
+	const messages = [...withoutUsage(convertToLlm(reconstructFromEntries(preparation))), instructionMessage(instruction)];
+	return fitToBudget(model, { systemPrompt: STANDALONE_SYSTEM_PROMPT, messages }, maxTokens).request;
 }
+
+const instructionMessage = (instruction: string): Message => ({ role: "user", content: instruction, timestamp: Date.now() });
 
 /**
  * The verbatim-kept tail of the captured request: everything after the doomed
@@ -299,7 +273,7 @@ export function standaloneRequest(
  */
 export function keptTailOf(
 	captured: readonly { role: string; content?: unknown }[],
-	preparation: Pick<SessionBeforeCompactEvent["preparation"], "messagesToSummarize" | "turnPrefixMessages" | "isSplitTurn" | "previousSummary">,
+	preparation: Preparation,
 ): { count: number; opening?: string } | undefined {
 	const doomed: { role: string }[] = [
 		...(preparation.previousSummary ? [{ role: "compactionSummary" }] : []),
@@ -340,9 +314,7 @@ function openingText(message: { content?: unknown }): string | undefined {
  * turn's discarded prefix has no separate summary on this path, so it is
  * summarized with the rest.
  */
-function reconstructFromEntries(
-	preparation: Pick<SessionBeforeCompactEvent["preparation"], "messagesToSummarize" | "turnPrefixMessages" | "isSplitTurn" | "previousSummary">,
-): AgentMessage[] {
+function reconstructFromEntries(preparation: Preparation): AgentMessage[] {
 	const doomed = preparation.isSplitTurn
 		? [...preparation.messagesToSummarize, ...preparation.turnPrefixMessages]
 		: preparation.messagesToSummarize;
