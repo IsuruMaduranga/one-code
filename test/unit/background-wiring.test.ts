@@ -209,6 +209,15 @@ describe("background wiring: /loop and schedule_wakeup timers", () => {
 	});
 });
 
+/** Mount a fresh instance (the factory re-run after a session swap), start it with a UI, and return its notify mock. */
+async function freshSessionNotify(reason: string) {
+	const next = createFakePi();
+	backgroundExtension(next.pi as never);
+	const notify = vi.fn();
+	await next.fire("session_start", { reason }, createFakeCtx({ hasUI: true, mode: "tui", ui: { notify } }));
+	return notify;
+}
+
 describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", () => {
 	it("H1: a monitor whose command ends after session_shutdown repaints nothing, notifies nothing, and never throws", async () => {
 		const fake = mount();
@@ -283,7 +292,7 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 		)) as { content: Array<{ text: string }>; details: Record<string, unknown>; isError?: boolean };
 		const text = result.content[0].text;
 		expect(text).toContain("completed after 3 event(s)");
-		expect(text).toContain("This is a one-shot session, so the monitor ran to its end");
+		expect(text).toContain("This is a one-shot session, so the monitor ran to completion instead of in the background.");
 		expect(text).toContain("ev1\nev2\nev3");
 		expect(result.isError).toBeFalsy();
 		expect(result.details.taskId).toBeUndefined();
@@ -323,19 +332,12 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 		await fake.fire("session_shutdown", { reason: "new" }, ctx);
 
 		// The replacement instance (factories re-run on /clear, findings §8).
-		const next = createFakePi();
-		backgroundExtension(next.pi as never);
-		const notify = vi.fn();
-		await next.fire("session_start", { reason: "new" }, createFakeCtx({ hasUI: true, mode: "tui", ui: { notify } }));
+		const notify = await freshSessionNotify("new");
 		expect(notify).toHaveBeenCalledTimes(1);
 		expect(notify.mock.calls[0][0]).toContain(`Stopped 1 background task with the previous session: ${start.details.taskId} (dev server).`);
 
 		// Consumed: a further session start says nothing.
-		const later = createFakePi();
-		backgroundExtension(later.pi as never);
-		const notifyLater = vi.fn();
-		await later.fire("session_start", { reason: "new" }, createFakeCtx({ hasUI: true, mode: "tui", ui: { notify: notifyLater } }));
-		expect(notifyLater).not.toHaveBeenCalled();
+		expect(await freshSessionNotify("new")).not.toHaveBeenCalled();
 	});
 
 	it("L3: a quit leaves no notice behind", async () => {
@@ -343,10 +345,6 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 		const ctx = liveSessionCtx();
 		await fake.tools.get("monitor")!.execute("c1", { command: "sleep 30", description: "x" }, undefined, undefined, ctx);
 		await fake.fire("session_shutdown", { reason: "quit" }, ctx);
-		const next = createFakePi();
-		backgroundExtension(next.pi as never);
-		const notify = vi.fn();
-		await next.fire("session_start", { reason: "startup" }, createFakeCtx({ hasUI: true, mode: "tui", ui: { notify } }));
-		expect(notify).not.toHaveBeenCalled();
+		expect(await freshSessionNotify("startup")).not.toHaveBeenCalled();
 	});
 });

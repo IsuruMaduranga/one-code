@@ -15,6 +15,7 @@
 import { spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import type { BackgroundTask } from "../background/registry.ts";
+import { whenAborted } from "../lib/abort.ts";
 import { detachedSpawnOptions, killProcessTree } from "../lib/process-tree.ts";
 
 export const STORED_OUTPUT_CAP = 200_000;
@@ -145,16 +146,14 @@ export function runBackgroundBashBlocking(
 	signal?: AbortSignal,
 ): Promise<BashFinishSummary> {
 	return new Promise((resolve) => {
-		let onAbort = () => {};
+		let unhook = () => {};
 		const task = startBackgroundBash({
 			...options,
 			onFinished: (_task, summary) => {
-				signal?.removeEventListener("abort", onAbort);
+				unhook();
 				resolve(summary);
 			},
 		});
-		onAbort = () => task.stop();
-		if (signal?.aborted) onAbort();
-		else signal?.addEventListener("abort", onAbort, { once: true });
+		unhook = whenAborted(signal, () => task.stop());
 	});
 }

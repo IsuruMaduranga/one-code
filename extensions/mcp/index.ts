@@ -52,6 +52,7 @@ import { decodeMcpKey } from "./panel/keys.ts";
 import { type McpEntry, type McpEntryStatus } from "./panel/model.ts";
 import { renderMcpPanel, type McpPaint } from "./panel/render.ts";
 import { applyMcpKey, initialMcpState, type McpEffect } from "./panel/state.ts";
+import { sessionAlive } from "../lib/session-lifecycle.ts";
 import { loadServers, type McpServer } from "./config.ts";
 import { approveMcpServers, persistApproval, projectRootOf } from "./trust.ts";
 import {
@@ -177,7 +178,8 @@ export default function mcpExtension(pi: ExtensionAPI) {
 	/** Resolves when every configured server has connected or failed. */
 	let connecting: Promise<void> | undefined;
 	let connectSettled = false;
-	let shuttingDown = false;
+	// False after session_shutdown: every pi.* call throws from then on (lib/session-lifecycle.ts).
+	const alive = sessionAlive(pi);
 
 	/**
 	 * Connect one server, updating the live maps. Prior failure/authNeeded state
@@ -203,7 +205,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 		// reading "connected" with a stale tool count; its tools stay registered
 		// and answer "not connected" until Reconnect in /mcp.
 		connection.client.onclose = () => {
-			if (connection.closing || shuttingDown) return;
+			if (connection.closing || !alive()) return;
 			if (connections.get(server.name) !== connection) return;
 			connections.delete(server.name);
 			const tail = connection.stderrTail();
@@ -224,13 +226,13 @@ export default function mcpExtension(pi: ExtensionAPI) {
 		const provider = server.kind === "http" && hasStoredTokens(server.name) ? silentProvider(server.name) : undefined;
 		try {
 			const connection = await connect(server, provider);
-			if (shuttingDown) {
+			if (!alive()) {
 				await close(connection);
 				return;
 			}
 			adoptConnection(server, connection);
 		} catch (error) {
-			if (shuttingDown) return;
+			if (!alive()) return;
 			if (server.kind === "http" && isUnauthorized(error)) oauthNeeded.add(server.name);
 			else failures.push({ server, error: (error as Error).message });
 		}
@@ -329,7 +331,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 				disabledNames.add(server.name);
 			},
 		});
-		if (shuttingDown) return;
+		if (!alive()) return;
 		withheldNames.clear();
 		for (const { server, reason } of consent.withheld) {
 			withheldNames.set(
@@ -343,7 +345,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 		}
 		await Promise.all(consent.approved.map(connectOne));
 
-		if (shuttingDown) return;
+		if (!alive()) return;
 
 		if (failures.length > 0) {
 			const text = failures.map((f) => `MCP server "${f.server.name}" failed: ${f.error}`).join("\n") + " (/mcp for status)";
@@ -501,7 +503,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 			// answering): pi's API throws from assertActive after session_shutdown,
 			// and from a promise continuation that is an uncaught exception that
 			// killed the process (STEERING-REVIEW-2026-09-05 H3, measured).
-			if (shuttingDown) return;
+			if (!alive()) return;
 			// Final publish, marked settled — emitted even with zero servers/tools so
 			// a consumer that spawns children early (subagents) can stop waiting for
 			// late-connecting servers instead of snapshotting an empty set forever.
@@ -513,7 +515,6 @@ export default function mcpExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("session_shutdown", async () => {
-		shuttingDown = true;
 		await Promise.all([...connections.values()].map((connection) => close(connection)));
 		connections.clear();
 	});
@@ -677,7 +678,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 				// new_session while the panel was open): every pi.* call throws
 				// then, and from a void'ed continuation that is an unhandled
 				// rejection (LIFECYCLE-REVIEW-2026-09-06 L2).
-				if (shuttingDown) return;
+				if (!alive()) return;
 				emitInstructions();
 				notices = outcomeNotice(server);
 				busy.delete(entry.name);
@@ -711,7 +712,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 				notices = [`Enabling "${entry.name}"…`];
 				syncRepaint();
 				await connectOne(server);
-				if (shuttingDown) return; // see runReconnect
+				if (!alive()) return; // see runReconnect
 				emitInstructions();
 				busy.delete(entry.name);
 				notices = outcomeNotice(server);
@@ -738,7 +739,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 							repaint();
 						},
 					});
-					if (shuttingDown) {
+					if (!alive()) {
 						await close(connection); // see runReconnect
 						return;
 					}

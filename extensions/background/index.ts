@@ -12,9 +12,11 @@
 import { spawn } from "node:child_process";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { whenAborted } from "../lib/abort.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { detachedSpawnOptions, stopProcessTree } from "../lib/process-tree.ts";
+import { sessionAlive } from "../lib/session-lifecycle.ts";
 import { ccToolRenderers, customMessageText, liveUiCtx, notificationComponent } from "../lib/tui-render.ts";
 import {
 	type BackgroundTask,
@@ -33,7 +35,7 @@ import {
 	MIN_DELAY_SECONDS,
 	parseLoopArgs,
 } from "./wakeup.ts";
-import { createTaskNotifier, sessionOutlivesTurn, systemNotification } from "../lib/notifications.ts";
+import { createTaskNotifier, oneShotNote, sessionOutlivesTurn, systemNotification } from "../lib/notifications.ts";
 import {
 	batchSize,
 	emptyBatch,
@@ -50,7 +52,7 @@ const DEFAULT_MONITOR_TIMEOUT_MS = 300_000;
 const MAX_MONITOR_TIMEOUT_MS = 3_600_000;
 const MAX_BLOCK_TIMEOUT_MS = 600_000;
 /** SIGTERM → SIGKILL grace for a stopped monitor's process tree (lib/process-tree.ts). */
-export const MONITOR_KILL_GRACE_MS = 2_000;
+const MONITOR_KILL_GRACE_MS = 2_000;
 
 function tail(text: string, cap: number): string {
 	return text.length <= cap ? text : `… (earlier output truncated)\n${text.slice(-cap)}`;
@@ -68,14 +70,14 @@ function tail(text: string, cap: number): string {
 let pendingShutdownNotice: string | undefined;
 
 export default function backgroundExtension(pi: ExtensionAPI) {
-	const registry = new BackgroundRegistry();
-	let lastCtx: ExtensionContext | undefined;
 	// After session_shutdown the captured ctx throws on every access and the
 	// notifier is inert; a monitor whose command ends later (its shell was
 	// killed, the orphaned command finished) must repaint nothing and say
-	// nothing — before this flag, the widget repaint from the child's `close`
+	// nothing — before this guard, the widget repaint from the child's `close`
 	// callback took the whole process down (LIFECYCLE-REVIEW-2026-09-06 H1).
-	let shuttingDown = false;
+	const alive = sessionAlive(pi);
+	const registry = new BackgroundRegistry();
+	let lastCtx: ExtensionContext | undefined;
 	let wakeup: { timer: NodeJS.Timeout; prompt: string; reason: string } | undefined;
 	// Fixed-interval /loop (harness-driven, auto-re-arming — distinct from the
 	// model-driven `wakeup` used by dynamic /loop). One at a time, like wakeup.
@@ -93,8 +95,9 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	pi.events.on(TASK_REGISTER_CHANNEL, (task) => registry.register(task as BackgroundTask));
 
 	const updateWidget = () => {
-		// liveUiCtx: a stale ctx (session replaced) reads as "no UI", never a throw.
-		const live = shuttingDown ? undefined : liveUiCtx(lastCtx);
+		// liveUiCtx: a stale ctx (session replaced) reads as "no UI", never a throw;
+		// session_shutdown also drops lastCtx, so a late repaint is a no-op.
+		const live = liveUiCtx(lastCtx);
 		if (!live) return;
 		// A task whose producer gives it first-class panel UI (bash shells and
 		// subagent runs in the subagents panel) is excluded, or this line would
@@ -197,7 +200,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				// Past this point everything touches the session: a monitor ending
 				// after shutdown (H1) or inside a one-shot run reports through
 				// `finished` alone.
-				if (shuttingDown || oneShot) return;
+				if (!alive() || oneShot) return;
 				flush();
 				updateWidget();
 				notify(
@@ -297,25 +300,25 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 			}
 
 			if (oneShot) {
-				const onAbort = () => stop();
-				if (signal?.aborted) onAbort();
-				else signal?.addEventListener("abort", onAbort, { once: true });
+				const unhook = whenAborted(signal, stop);
 				try {
 					await finished;
 				} finally {
-					signal?.removeEventListener("abort", onAbort);
+					unhook();
 				}
 				const output = persistIfLarge(stored.trim() || "(no events)", { dir: sessionResultsDir(ctx), id: `monitor-${id}` });
 				const finalStatus = task.status;
-				const how =
-					finalStatus === "stopped"
-						? `stopped${signal?.aborted ? " (tool call aborted)" : ` at its ${params.persistent ? `default deadline of ${timeoutMs} ms (persistent is not available in a one-shot session)` : `${timeoutMs} ms deadline`}`}`
-						: finalStatus;
+				let how: string = finalStatus;
+				if (finalStatus === "stopped") {
+					if (signal?.aborted) how = "stopped (tool call aborted)";
+					else if (params.persistent) how = `stopped at its default deadline of ${timeoutMs} ms (persistent is not available in a one-shot session)`;
+					else how = `stopped at its ${timeoutMs} ms deadline`;
+				}
 				return {
 					content: [
 						{
 							type: "text",
-							text: `Monitor ${id} (${params.description}) ${how} after ${eventCount} event(s). This is a one-shot session, so the monitor ran to its end instead of in the background.\n\n${output}`,
+							text: `Monitor ${id} (${params.description}) ${how} after ${eventCount} event(s). ${oneShotNote("monitor")}\n\n${output}`,
 						},
 					],
 					// No taskId: nothing is registered behind task_output/task_stop.
@@ -586,7 +589,6 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 
 	pi.on("session_start", (_event, ctx) => {
 		lastCtx = ctx;
-		shuttingDown = false;
 		if (pendingShutdownNotice) {
 			const notice = pendingShutdownNotice;
 			pendingShutdownNotice = undefined;
@@ -601,7 +603,6 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("session_shutdown", (event) => {
-		shuttingDown = true;
 		// Fires on /clear, /new and /resume too (findings §8). Everything running
 		// dies with the session; the replacement session is told (see
 		// pendingShutdownNotice) — a quit needs no note.

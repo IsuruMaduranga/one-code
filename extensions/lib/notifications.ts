@@ -326,3 +326,12 @@ export function sessionOutlivesTurn(mode: ExtensionMode): boolean {
 function assertNever(mode: never): never {
 	throw new Error(`Unhandled session mode: ${String(mode)}`);
 }
+
+/**
+ * The sentence a tool adds to its result when `sessionOutlivesTurn` was false
+ * and it ran its normally-detached work to completion instead. One wording for
+ * bash, monitor and workflow, so the model reads the same rule everywhere.
+ */
+export function oneShotNote(what: string): string {
+	return `This is a one-shot session, so the ${what} ran to completion instead of in the background.`;
+}

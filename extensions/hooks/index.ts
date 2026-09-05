@@ -72,7 +72,7 @@ export function hookContextText(event: CcHookEvent, text: string): string {
  * the model gets a preview plus the path — nothing is cut away.
  */
 const HOOK_MODEL_TEXT_CAP = 20_000;
-function capHookText(text: string, ctx: ExtensionContext, label: string): string {
+function capHookText(text: string, ctx: HookDispatchCtx, label: string): string {
 	return persistIfLarge(text, { dir: sessionResultsDir(ctx), id: `hook-${label}-${Date.now()}`, maxBytes: HOOK_MODEL_TEXT_CAP });
 }
 
@@ -81,8 +81,19 @@ interface MatchedHook {
 	hook: HookCommand;
 }
 
-/** Marks the frozen ctx a SessionEnd dispatch runs on (see shutdownCtx). */
-const SHUTDOWN_CTX = Symbol("one-code:shutdown-ctx");
+/**
+ * What the hook pipeline reads off a context — the live `ExtensionContext` is
+ * assignable, and a SessionEnd dispatch runs on a snapshot of the same shape
+ * (see `shutdownCtx`) after the real one has been disposed.
+ */
+interface HookDispatchCtx {
+	cwd: string;
+	hasUI: boolean;
+	sessionManager: { getSessionId(): string; getSessionFile(): string | undefined; getSessionDir?(): string | undefined };
+	ui: { confirm(title: string, message: string): Promise<boolean | undefined>; notify(message: string, type: "info"): void };
+	/** Set on the shutdown snapshot: no consent prompt, no notices — the session is gone. */
+	sessionEnded?: true;
+}
 
 export default function hooksExtension(pi: ExtensionAPI) {
 	let stopHookActive = false;
@@ -91,15 +102,15 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	/** The last context seen, for bridged child calls (dispatched parent-side). */
 	let lastCtx: ExtensionContext | undefined;
 
-	const notify = (ctx: ExtensionContext, message: string) => {
-		if ((ctx as { [SHUTDOWN_CTX]?: true })[SHUTDOWN_CTX]) return; // session gone; nowhere to show it
+	const notify = (ctx: HookDispatchCtx, message: string) => {
+		if (ctx.sessionEnded) return; // session gone; nowhere to show it
 		if (ctx.hasUI) ctx.ui.notify(message, "info");
 		else process.stderr.write(`${message}\n`);
 	};
 
 	/** All hooks for an event across trusted sources, matcher already applied. */
 	const collectHooks = async (
-		ctx: ExtensionContext,
+		ctx: HookDispatchCtx,
 		event: CcHookEvent,
 		matchValue: { candidates?: string[]; ignoreMatcher?: boolean },
 	): Promise<MatchedHook[]> => {
@@ -116,6 +127,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		if (hasProjectHooks) {
 			projectAllowed = await projectHooksApproved(ctx.cwd, projectSources, {
 				hasUI: ctx.hasUI,
+				noPrompt: ctx.sessionEnded,
 				confirm: (title, message) => ctx.ui.confirm(title, message),
 				notify: (message) => notify(ctx, message),
 			});
@@ -138,7 +150,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		return matched;
 	};
 
-	const basePayload = (ctx: ExtensionContext, event: CcHookEvent): HookStdinPayload => ({
+	const basePayload = (ctx: HookDispatchCtx, event: CcHookEvent): HookStdinPayload => ({
 		session_id: ctx.sessionManager.getSessionId(),
 		transcript_path: ctx.sessionManager.getSessionFile() ?? "",
 		cwd: ctx.cwd,
@@ -151,7 +163,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	 * systemMessages concatenate. Any throw inside is caught → fail open.
 	 */
 	const dispatch = async (
-		ctx: ExtensionContext,
+		ctx: HookDispatchCtx,
 		event: CcHookEvent,
 		matchValue: { candidates?: string[]; ignoreMatcher?: boolean },
 		payload: HookStdinPayload,
@@ -368,18 +380,17 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	});
 
 	/** The subset of ctx `dispatch` reads, snapshotted so it survives the session's disposal. */
-	const shutdownCtx = (ctx: ExtensionContext): ExtensionContext => {
+	const shutdownCtx = (ctx: ExtensionContext): HookDispatchCtx => {
 		const sessionId = ctx.sessionManager.getSessionId();
 		const sessionFile = ctx.sessionManager.getSessionFile();
-		const sessionDir = ctx.sessionManager.getSessionDir?.();
-		const frozen = {
-			[SHUTDOWN_CTX]: true,
+		const sessionDir = ctx.sessionManager.getSessionDir();
+		return {
+			sessionEnded: true,
 			cwd: ctx.cwd,
 			hasUI: false,
 			sessionManager: { getSessionId: () => sessionId, getSessionFile: () => sessionFile, getSessionDir: () => sessionDir },
 			ui: { confirm: async () => false, notify: () => {} },
 		};
-		return frozen as unknown as ExtensionContext;
 	};
 
 	// ---- Stop ---------------------------------------------------------------

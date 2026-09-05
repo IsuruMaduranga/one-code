@@ -139,8 +139,12 @@ export async function buildAgentLoader(options: AgentLoaderOptions): Promise<Def
 }
 
 export interface OpenChildSessionOptions {
-	/** The loader to build for this one session (see buildAgentLoader: never shared). */
-	loader: AgentLoaderOptions;
+	/**
+	 * The loader for this one session: options to build it, or one already built
+	 * by `buildAgentLoader` and never used by a session (see buildAgentLoader:
+	 * a disposed session leaves its loader dead).
+	 */
+	loader: AgentLoaderOptions | DefaultResourceLoader;
 	/** Everything else `createAgentSession` takes: cwd, model, tools, customTools, sessionManager, … */
 	session: Omit<CreateAgentSessionOptions, "resourceLoader" | "sessionStartEvent">;
 	/**
@@ -168,7 +172,7 @@ export interface OpenChildSessionOptions {
  * way pi's own modes do.
  */
 export async function openChildSession(options: OpenChildSessionOptions): Promise<AgentSession> {
-	const loader = await buildAgentLoader(options.loader);
+	const loader = options.loader instanceof DefaultResourceLoader ? options.loader : await buildAgentLoader(options.loader);
 	const { session } = await createAgentSession({
 		...options.session,
 		resourceLoader: loader,

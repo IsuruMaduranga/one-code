@@ -26,7 +26,7 @@ import { generateTaskId, TASK_REGISTER_CHANNEL } from "../background/registry.ts
 import { type BashFinishSummary, runBackgroundBashBlocking, startBackgroundBash, tailCap } from "./background.ts";
 import { bashGuardReason } from "./guards.ts";
 import { commandToEvaluate, trackOriginalCommands } from "../lib/original-command.ts";
-import { createTaskNotifier, sessionOutlivesTurn, systemNotification } from "../lib/notifications.ts";
+import { createTaskNotifier, oneShotNote, sessionOutlivesTurn, systemNotification } from "../lib/notifications.ts";
 import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { perCwd } from "../lib/per-cwd.ts";
 import { ccWrapBuiltinRenderers, linesComponent, resultLines } from "../lib/tui-render.ts";
@@ -157,7 +157,7 @@ export default function bashExtension(pi: ExtensionAPI) {
 					content: [
 						{
 							type: "text",
-							text: `Bash task ${id} (${description}) ${finishLine(summary, timeoutSeconds)}. This is a one-shot session, so the command ran to completion instead of in the background.${logPath ? ` Log: ${logPath}.` : ""}\n\n${output}`,
+							text: `Bash task ${id} (${description}) ${finishLine(summary, timeoutSeconds)}. ${oneShotNote("command")}${logPath ? ` Log: ${logPath}.` : ""}\n\n${output}`,
 						},
 					],
 					// No taskId: nothing was registered behind task_output/task_stop, and

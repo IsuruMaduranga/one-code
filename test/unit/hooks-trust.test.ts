@@ -58,6 +58,24 @@ describe("projectHooksApproved", () => {
 		...overrides,
 	});
 
+	it("noPrompt answers from the store only and records nothing, so a later session still gets its prompt", async () => {
+		let prompts = 0;
+		const asking = deps({
+			confirm: async () => {
+				prompts += 1;
+				return true;
+			},
+		});
+		// A shutdown-time dispatch: not approved yet, must neither ask nor remember "no".
+		expect(await projectHooksApproved("/p", [source("echo a")], deps({ noPrompt: true, hasUI: false }))).toBe(false);
+		// The next session asks as if nothing had happened (the old code remembered a decline).
+		expect(await projectHooksApproved("/p", [source("echo a")], asking)).toBe(true);
+		expect(prompts).toBe(1);
+		// Once approved, noPrompt reads the approval without asking.
+		expect(await projectHooksApproved("/p", [source("echo a")], deps({ noPrompt: true, hasUI: false }))).toBe(true);
+		expect(prompts).toBe(1);
+	});
+
 	it("approves, persists, and never re-prompts for the same config", async () => {
 		let prompts = 0;
 		const d = deps({

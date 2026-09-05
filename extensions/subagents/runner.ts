@@ -6,9 +6,9 @@
  * parent transcript), and the child-only SendMessage→main tool.
  *
  * One SubagentRuntime is built lazily per extension and shared across all runs:
- * a single ModelRuntime and a loader cache (building a loader re-runs every
- * curated extension factory, so each distinct system prompt is built once). Each
- * run gets its own AgentSession backed by a persisted SessionManager under
+ * a single ModelRuntime. Each run gets its own AgentSession — and its own
+ * resource loader, since disposing a session kills the loader it ran on
+ * (lib/agent-loader.ts) — backed by a persisted SessionManager under
  * `<sessionDir>/subagents/<taskId>/`, so a finished run can be resumed from disk.
  */
 
@@ -17,7 +17,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type AgentSession, type ExtensionError, getAgentDir, SessionManager, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { type AgentLoaderOptions, createSharedModelRuntime, openChildSession } from "../lib/agent-loader.ts";
+import { type AgentLoaderOptions, buildAgentLoader, createSharedModelRuntime, openChildSession } from "../lib/agent-loader.ts";
 import { agentPromptIdentity, PrefixWarmGate, prefixWarmKey, type Release } from "../lib/prefix-warm-gate.ts";
 import type { PermissionBridge } from "../permissions/subagent-gate.ts";
 import type { HookBridge } from "../hooks/subagent-bridge.ts";
@@ -71,7 +71,7 @@ const NEVER_GATE = new Set(["structured_output", "SendMessage", "Agent"]);
  * `lsp` is deliberately NOT here (matching CC, findings §17.3): a child session is torn
  * down with the raw AgentSession.dispose(), which never fires session_shutdown, so lsp's
  * cleanup would never run and any language server it started would leak for the life of
- * the parent session (worsened by the shared loader cache). MCP is also not listed: its
+ * the parent session. MCP is also not listed: its
  * tools are shared in from the parent as customTools (getMcpTools), not reconnected.
  *
  * Order mirrors the package's load order: reminder/deferral sinks (system-reminder,
@@ -230,7 +230,7 @@ export class SubagentRuntime {
 	 * plain run gets pi's base prompt. Built fresh per session (agent-loader.ts).
 	 */
 	private childLoaderOptions(spec: ChildSessionSpec): AgentLoaderOptions {
-		const systemPrompt = spec.forkFrom || spec.parentSystemPrompt !== undefined ? spec.parentSystemPrompt : spec.agent?.systemPrompt;
+		const systemPrompt = SubagentRuntime.isFork(spec) ? spec.parentSystemPrompt : spec.agent?.systemPrompt;
 		return {
 			cwd: this.baseCwd,
 			agentDir: getAgentDir(),
@@ -246,13 +246,18 @@ export class SubagentRuntime {
 		};
 	}
 
+	/** A fork run, or a resume of one (its inherited prompt comes back from the persisted file). */
+	private static isFork(spec: Pick<ChildSessionSpec, "forkFrom" | "parentSystemPrompt">): boolean {
+		return Boolean(spec.forkFrom) || spec.parentSystemPrompt !== undefined;
+	}
+
 	/**
 	 * The system-prompt identity of a run: a fork (keyed by the parent prompt it
 	 * inherits, which varies turn to turn — two forks from one message share it,
 	 * forks from different turns do not), a named agent, or pi's base prompt.
 	 */
 	private static promptKey(spec: Pick<ChildSessionSpec, "forkFrom" | "parentSystemPrompt" | "agent">): string {
-		if (spec.forkFrom || spec.parentSystemPrompt !== undefined) {
+		if (SubagentRuntime.isFork(spec)) {
 			return `fork:${createHash("sha1").update(spec.parentSystemPrompt ?? "").digest("hex").slice(0, 16)}`;
 		}
 		return agentPromptIdentity(spec.agent?.name);
@@ -323,14 +328,16 @@ export class SubagentRuntime {
 	 * to retry — never a silent swap of a model it chose. The returned `note` is
 	 * surfaced to the user/main model so the fallback is never silent.
 	 *
-	 * The loader and the session manager are both created fresh per attempt: a
-	 * loader is one session's (agent-loader.ts), and a manager reused after a
-	 * failed `createAgentSession` could be half-initialized. Resume reopens a
-	 * finished session; fork inherits the parent transcript + system prompt; a
-	 * fresh named run gets the agent's own prompt and toolset.
+	 * The loader is built once per call, alongside the MCP-tools wait, and is
+	 * reused across the fallback attempt (a failed `createAgentSession` leaves no
+	 * session, so nothing has invalidated it — agent-loader.ts); the session
+	 * manager is created fresh per attempt, since one reused after a failed
+	 * create could be half-initialized. Resume reopens a finished session; fork
+	 * inherits the parent transcript + system prompt; a fresh named run gets the
+	 * agent's own prompt and toolset.
 	 */
 	private async buildChildSession(spec: ChildSessionSpec): Promise<{ session: Session; note?: string }> {
-		const mcpTools = await this.getMcpTools();
+		const [loader, mcpTools] = await Promise.all([buildAgentLoader(this.childLoaderOptions(spec)), this.getMcpTools()]);
 		const newSessionManager = () =>
 			// The resume cwd is passed explicitly: a worktree run's persisted cwd may
 			// be gone by the time it is messaged (index.ts substitutes the parent cwd).
@@ -346,7 +353,7 @@ export class SubagentRuntime {
 		const make = async (model: string | undefined): Promise<Session> => {
 			const resolvedModel = model ? await this.resolveModel(model) : undefined;
 			const session = await openChildSession({
-				loader: this.childLoaderOptions(spec),
+				loader,
 				session: {
 					cwd: spec.cwd,
 					agentDir: getAgentDir(),

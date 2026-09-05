@@ -201,6 +201,7 @@ export function createFakeCtx(overrides: Record<string, unknown> = {}): Record<s
 	const sessionManager = {
 		getSessionId: () => "fake-session",
 		getSessionFile: () => undefined,
+		getSessionDir: () => undefined,
 		getBranch: () => [],
 		...(overrides.sessionManager as Record<string, unknown> | undefined),
 	};

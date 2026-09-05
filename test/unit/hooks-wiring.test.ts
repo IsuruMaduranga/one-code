@@ -353,7 +353,7 @@ describe("hooks wiring: SessionEnd (LIFECYCLE-REVIEW-2026-09-06 M4)", () => {
 		writeFileSync(join(root, "hook-end.sh"), `#!/bin/sh\ncat >> "${seen}"\necho >> "${seen}"\n`);
 		writeFileSync(join(claudeDir, "settings.json"), JSON.stringify({ hooks: { SessionEnd: [{ hooks: [{ type: "command", command: hook }] }] } }));
 		hooksExtension(fake.pi as never);
-		const ctx = (hasUI: boolean) => createFakeCtx({ cwd: projectDir, hasUI, sessionManager: { getSessionId: () => "sess-42", getSessionFile: () => undefined, getBranch: () => [] } });
+		const ctx = (hasUI: boolean) => createFakeCtx({ cwd: projectDir, hasUI, sessionManager: { getSessionId: () => "sess-42", getSessionFile: () => undefined, getSessionDir: () => undefined, getBranch: () => [] } });
 
 		await fake.fireOne("session_shutdown", { reason: "new" }, ctx(true));
 		await fake.fireOne("session_shutdown", { reason: "quit" }, ctx(true));

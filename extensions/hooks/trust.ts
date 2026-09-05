@@ -94,6 +94,12 @@ export interface TrustDecisionDeps {
 	confirm: (title: string, message: string) => Promise<boolean | undefined>;
 	notify: (message: string) => void;
 	storePath?: string;
+	/**
+	 * Answer from the remembered/stored approval only: neither prompt nor record
+	 * a decision. For a dispatch at session shutdown — recording "declined" there
+	 * would silence the consent prompt in the session that replaces it.
+	 */
+	noPrompt?: boolean;
 }
 
 /** Process-lifetime memory of declined/approved hashes per project, so a dispatch storm asks once. */
@@ -120,6 +126,7 @@ export async function projectHooksApproved(
 		sessionDecisions.set(key, true);
 		return true;
 	}
+	if (deps.noPrompt) return false;
 	if (!deps.hasUI) {
 		sessionDecisions.set(key, false);
 		deps.notify("Project hooks skipped: not yet approved and no UI to ask (user/managed hooks still run).");

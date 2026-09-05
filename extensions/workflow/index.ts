@@ -24,7 +24,7 @@ import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { recordUsage } from "../lib/usage-bus.ts";
-import { createTaskNotifier, sessionOutlivesTurn } from "../lib/notifications.ts";
+import { createTaskNotifier, oneShotNote, sessionOutlivesTurn } from "../lib/notifications.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { ULTRACODE_MODE_CHANNEL } from "../effort/slider.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../permissions/modes.ts";
@@ -322,11 +322,9 @@ export default function workflowExtension(pi: ExtensionAPI) {
 						handle.removeListener("progress", onProgress);
 					}
 					deliveredRuns.add(handle.runId); // sync result goes in the tool result, not a followUp
-					const oneShotNote = forcedSync
-						? "This is a one-shot session, so the workflow ran to completion instead of in the background.\n\n"
-						: "";
+					const oneShotPrefix = forcedSync ? `${oneShotNote("workflow")}\n\n` : "";
 					return {
-						content: [{ type: "text", text: `${oneShotNote}${buildRunReport(handle)}` }],
+						content: [{ type: "text", text: `${oneShotPrefix}${buildRunReport(handle)}` }],
 						details: { runId: handle.runId, status: handle.status, scriptPath: handle.scriptPath },
 						isError: handle.status !== "completed",
 					};

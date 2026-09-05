@@ -43,6 +43,7 @@ import {
 import { looksLikeAnthropicRequest } from "../lib/anthropic-payload.ts";
 import { MCP_TOOLS_CHANNEL, type McpToolsPayload } from "../lib/mcp-share.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
+import { sessionAlive } from "../lib/session-lifecycle.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 import { applyAnnouncement, planAnnouncement } from "./announce.ts";
 
@@ -68,7 +69,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	// After session_shutdown every pi.* call throws (the runner is invalidated,
 	// findings §8); a debounced announce landing in a timer callback then would
 	// be an uncaught exception and take pi down (LIFECYCLE-REVIEW L1).
-	let shuttingDown = false;
+	const alive = sessionAlive(pi);
 	/** Names the model has been told about: the frozen listing plus every addendum. */
 	const announced = new Set<string>();
 
@@ -83,7 +84,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 			}));
 
 	const announce = () => {
-		if (shuttingDown) return;
+		if (!alive()) return;
 		const available = searchableTools();
 		const plan = planAnnouncement({ requestSent, announced, available: available.map((t) => t.name) });
 		if (plan.kind === "rewrite") {
@@ -108,7 +109,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	};
 	const scheduleAnnounce = () => {
 		clearAnnounce();
-		if (shuttingDown) return;
+		if (!alive()) return;
 		announceTimer = setTimeout(() => {
 			announceTimer = undefined;
 			// Decided at fire time, not schedule time: a request may have gone out
@@ -180,7 +181,6 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 
 	pi.on("session_start", () => {
 		sessionStarted = true;
-		shuttingDown = false;
 		// A pending debounce belongs to the previous session's listing (RPC's
 		// new_session emits session_start twice, findings §3); deferAll below
 		// announces the fresh one.
@@ -192,10 +192,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		deferAll();
 	});
 
-	pi.on("session_shutdown", () => {
-		shuttingDown = true;
-		clearAnnounce();
-	});
+	pi.on("session_shutdown", clearAnnounce);
 
 	// The every-turn deferred-tools list tells the model to load via tool_search,
 	// but if it calls a deferred tool directly anyway, pi's core dispatcher fails
