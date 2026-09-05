@@ -126,6 +126,54 @@ describe("parseStage2", () => {
 		).toBe("allow");
 	});
 
+	it("accepts a verbatim quote the model wrapped in quotation marks or ellipses (2026-09-05 H4)", () => {
+		// Live probes on Haiku returned <intent>"…"</intent> for a quote that WAS
+		// verbatim; the bare substring test rejected it and turned a legitimate
+		// allow into a soft block.
+		const messages = [
+			"Use the write tool to write the text hello into /tmp/probe/hello.txt — I want exactly that path.",
+			"Append the line '# onecode probe' to ~/.zshrc using bash (echo >>).",
+		];
+		const quotes = [
+			'"Use the write tool to write the text hello into /tmp/probe/hello.txt — I want exactly that path."',
+			"“Use the write tool to write the text hello into /tmp/probe/hello.txt”",
+			"`Append the line '# onecode probe' to ~/.zshrc using bash (echo >>).`",
+			"'Append the line '# onecode probe' to ~/.zshrc'",
+			"…write the text hello into /tmp/probe/hello.txt…",
+			'"...I want exactly that path."',
+			'"I want exactly that path".',
+		];
+		for (const quote of quotes) {
+			const verdict = parseStage2(`<severity>10</severity><intent>${quote}</intent>`, index, messages);
+			expect(verdict.decision, quote).toBe("allow");
+			expect(verdict.tier, quote).toBe("intent");
+		}
+	});
+
+	it("accepts a two-sentence quote joined by a newline when every line is the user's, and nothing shorter", () => {
+		const messages = ["Delete the build directory. Then remove the lockfile too, I mean it."];
+		const joined = "<severity>10</severity><intent>Delete the build directory.\nThen remove the lockfile too, I mean it.</intent>";
+		expect(parseStage2(joined, index, messages).tier).toBe("intent");
+		// One invented line poisons the whole quote.
+		const mixed = "<severity>10</severity><intent>Delete the build directory.\nAlso wipe ~/Documents.</intent>";
+		expect(parseStage2(mixed, index, messages).ruleId).toBe("intent-unverified");
+		// Short fragments still prove nothing, quoted or not.
+		expect(parseStage2('<severity>10</severity><intent>"I mean"</intent>', index, messages).ruleId).toBe("intent-unverified");
+		// Lines drawn from two different messages are not one statement of intent.
+		const twoMessages = ["Please write hello into /tmp/scratch/a.txt", "Also delete the old backups directory whenever you like"];
+		const stitched = "<severity>10</severity><intent>write hello into /tmp/scratch/a.txt\ndelete the old backups directory</intent>";
+		expect(parseStage2(stitched, index, twoMessages).ruleId).toBe("intent-unverified");
+		// Short lines cannot rescue a joined quote that is not itself in the message.
+		expect(parseStage2("<severity>10</severity><intent>Delete\nthe\nlockfile</intent>", index, messages).ruleId).toBe("intent-unverified");
+	});
+
+	it("keeps the full intent text in raw for an unverified quote", () => {
+		const quote = "x".repeat(260);
+		const verdict = parseStage2(`<severity>10</severity><intent>${quote}</intent>`, index, ["unrelated words"]);
+		expect(verdict.ruleId).toBe("intent-unverified");
+		expect(verdict.raw).toBe(quote);
+	});
+
 	it("refuses an intent it cannot find in the user's own words", () => {
 		// The claim a prompt injection most wants to manufacture — "pick a location
 		// yourself" read as authorising the location it picked.

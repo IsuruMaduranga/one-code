@@ -16,10 +16,33 @@ describe("permissionGateFactory", () => {
 		expect(result?.reason).toMatch(/Denied by permission rules/);
 	});
 
-	it("allows explicitly allowed commands and safe tools", async () => {
-		const handler = buildGate({ permissions: { allow: ["Bash(npm run test:*)"] } });
+	it("allows explicitly allowed commands and in-project reads; a read outside the cwd fails closed (2026-09-05 H2)", async () => {
+		const { handler, cwd } = buildGateHarness({ permissions: { allow: ["Bash(npm run test:*)"] } });
 		expect(await handler({ toolName: "bash", input: { command: "npm run test -- --grep x" } })).toBeUndefined();
-		expect(await handler({ toolName: "read", input: { path: "/etc/hosts" } })).toBeUndefined();
+		expect(await handler({ toolName: "read", input: { path: join(cwd, "README.md") } })).toBeUndefined();
+		expect(await handler({ toolName: "read", input: { path: "README.md" } })).toBeUndefined();
+		expect(await handler({ toolName: "grep", input: { pattern: "x" } })).toBeUndefined();
+		const outside = await handler({ toolName: "read", input: { path: "/etc/hosts" } });
+		expect(outside?.block).toBe(true);
+		expect(outside?.reason).toMatch(/outside the working directory/);
+		// A Read allow rule covering the path still clears it.
+		const allowed = buildGate({ permissions: { allow: ["Read(//etc/**)"] } });
+		expect(await allowed({ toolName: "read", input: { path: "/etc/hosts" } })).toBeUndefined();
+	});
+
+	it("lets the agent read back its own persisted tool output (sessionResultsDir)", async () => {
+		const { handler } = buildGateHarness({ permissions: {} });
+		// No ctx in this harness → the same tmpdir fallback lib/persisted-output.ts writes to.
+		const persisted = join(os.tmpdir(), "one-code", "tool-results", "abc.txt");
+		expect(await handler({ toolName: "read", input: { path: persisted } })).toBeUndefined();
+	});
+
+	it("acceptEdits (the default here) writes inside the cwd only (2026-09-05 H1)", async () => {
+		const { handler, cwd } = buildGateHarness({ permissions: {} });
+		expect(await handler({ toolName: "write", input: { path: join(cwd, "out.txt"), content: "x" } })).toBeUndefined();
+		const outside = await handler({ toolName: "write", input: { path: join(os.tmpdir(), "gate-probe-outside.txt"), content: "x" } });
+		expect(outside?.block).toBe(true);
+		expect(outside?.reason).toMatch(/outside the working directory/);
 	});
 
 	it("auto-allows edits (acceptEdits parity) but blocks unmatched bash fail-closed", async () => {

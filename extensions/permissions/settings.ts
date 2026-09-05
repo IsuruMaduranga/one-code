@@ -44,6 +44,13 @@ export interface PermissionSettings {
 	deny: string[];
 	ask: string[];
 	defaultMode?: PermissionMode;
+	/**
+	 * Claude Code's `permissions.disableBypassPermissionsMode: "disable"` seen in
+	 * any source: bypassPermissions is refused however it is requested (flag,
+	 * `--dangerously-skip-permissions`, settings). A restriction, so every scope
+	 * may set it — the repo included.
+	 */
+	disableBypassPermissionsMode?: boolean;
 }
 
 interface ClaudeSettingsFile {
@@ -52,9 +59,25 @@ interface ClaudeSettingsFile {
 		deny?: string[];
 		ask?: string[];
 		defaultMode?: string;
+		disableBypassPermissionsMode?: string;
 	};
 	[key: string]: unknown;
 }
+
+/**
+ * Modes a repository's own files (`<cwd>/.claude/settings.json`,
+ * `settings.local.json`) may NOT select — honoured from user and managed scope
+ * only. Both files live in the checkout, so honouring these there lets a cloned
+ * repo grant itself the mode: `auto`, whose classifier is what contains it
+ * (Claude Code makes the same exclusion), and `bypassPermissions`, which has no
+ * classifier, no prompt and no protected path at all — the footer badge is the
+ * only sign (PERMISSIONS-REVIEW-2026-09-05 H3, measured: a checked-in
+ * `bypassPermissions` ran an outside-project write with no prompt). `dontAsk`
+ * and `acceptEdits` stay honoured: neither can approve what default mode would
+ * not (dontAsk turns asks into denials; acceptEdits is confined to the working
+ * directory).
+ */
+export const MODES_NEVER_FROM_PROJECT: ReadonlySet<PermissionMode> = new Set<PermissionMode>(["auto", "bypassPermissions"]);
 
 const MODES: PermissionMode[] = ["default", "acceptEdits", "plan", "bypassPermissions", "dontAsk", "auto"];
 
@@ -100,18 +123,43 @@ export function loadPermissionSettings(cwd: string, home: string): PermissionSet
 		if (Array.isArray(perms.allow)) allowTarget.push(...perms.allow.filter((r) => typeof r === "string"));
 		if (Array.isArray(perms.deny)) merged.deny.push(...perms.deny.filter((r) => typeof r === "string"));
 		if (Array.isArray(perms.ask)) merged.ask.push(...perms.ask.filter((r) => typeof r === "string"));
+		if (perms.disableBypassPermissionsMode === "disable") merged.disableBypassPermissionsMode = true;
 		if (path === oneCodeGlobal || path === oneCodeProject) continue;
 		const defaultMode = normalizePermissionMode(perms.defaultMode);
-		// `auto` is honoured from user settings only. Both project files live in the
-		// repository, so accepting it there would let a checked-in file put the
-		// session into auto mode — a repo granting itself the looser mode whose
-		// classifier is what contains it. Claude Code makes the same exclusion.
-		if (defaultMode && !(defaultMode === "auto" && path !== paths.user && !managed.includes(path))) {
+		// The modes a repo may not grant itself (MODES_NEVER_FROM_PROJECT) are
+		// honoured from user and managed scope only.
+		const fromProject = path === paths.project || path === paths.local;
+		if (defaultMode && !(fromProject && MODES_NEVER_FROM_PROJECT.has(defaultMode))) {
 			merged.defaultMode = defaultMode;
 		}
 	}
 
 	return merged;
+}
+
+/**
+ * The mode a session starts in, from the modes requested in Claude Code's
+ * precedence order (`--dangerously-skip-permissions`, `--permission-mode`,
+ * settings' `defaultMode`), skipping `bypassPermissions` wherever a settings
+ * source disabled it (CC's `permissionSetup.ts`). `mode` is undefined when
+ * nothing usable was requested — the caller keeps its live mode, so a
+ * mid-session reload never undoes a ctrl+q switch. `bypassRefused` says a
+ * bypass request was skipped, for CC's "disabled by settings" notification.
+ */
+export function resolveStartupMode(
+	requested: (PermissionMode | undefined)[],
+	settings: Pick<PermissionSettings, "disableBypassPermissionsMode">,
+): { mode?: PermissionMode; bypassRefused: boolean } {
+	let bypassRefused = false;
+	for (const candidate of requested) {
+		if (!candidate) continue;
+		if (candidate === "bypassPermissions" && settings.disableBypassPermissionsMode) {
+			bypassRefused = true;
+			continue;
+		}
+		return { mode: candidate, bypassRefused };
+	}
+	return { bypassRefused };
 }
 
 /**

@@ -126,6 +126,52 @@ function parseTag(text: string, tag: string): string | undefined {
 /** The threshold: below is allow, at/above is block (CC's Output Format). */
 export const SEVERITY_THRESHOLD = 50;
 
+/** A quote shorter than this proves nothing — a stray word matches any transcript. */
+const INTENT_MIN_CHARS = 8;
+
+/**
+ * Strip what a model adds around a verbatim quote without changing its words:
+ * wrapping quotation marks (straight, typographic, backticks, any nesting —
+ * the runs are greedy), sentence punctuation left outside the closing quote
+ * (`"…".`), and leading or trailing ellipses marking a truncated quote. Then
+ * normalizeName folds case, whitespace runs and trailing sentence punctuation.
+ * Exported for tests.
+ */
+export function normalizeQuote(value: string): string {
+	const text = value
+		.replace(/^[\s"'`\u201c\u201d\u2018\u2019\u00ab\u00bb]+/, "")
+		.replace(/["'`\u201c\u201d\u2018\u2019\u00ab\u00bb\s.,:;]+$/, "")
+		.replace(/^(\u2026|\.{3})\s*/, "")
+		.replace(/\s*(\u2026|\.{3})$/, "");
+	return normalizeName(text);
+}
+
+/**
+ * Whether the classifier's `<intent>` quote is really the user's words. The
+ * whole quote (after normalizeQuote) must be a substring of one user message;
+ * failing that, a multi-line quote passes when every line of at least
+ * INTENT_MIN_CHARS is itself a substring — a model quoting two sentences from
+ * one message often joins them with a newline the original never had. Live
+ * probes (2026-09-05, Haiku twice) returned `<intent>"…"</intent>` for a quote
+ * that was verbatim; the bare substring test rejected it and a legitimate allow
+ * became a soft block — the failure the auto-mode entry says gets auto mode
+ * switched off. Still one-directional: nothing here can turn a block into an
+ * allow that the words themselves do not support.
+ */
+export function intentQuoted(intent: string, userMessages: string[]): boolean {
+	const messages = userMessages.map((message) => normalizeName(message));
+	const whole = normalizeQuote(intent);
+	if (whole.length >= INTENT_MIN_CHARS && messages.some((message) => message.includes(whole))) return true;
+	const lines = intent
+		.split(/\r?\n/)
+		.map((line) => normalizeQuote(line))
+		.filter((line) => line.length > 0);
+	if (lines.length < 2) return false;
+	// Every line must come from the SAME message: two authorizations from
+	// different turns stitched together are not one statement of intent.
+	return messages.some((message) => lines.every((line) => line.length >= INTENT_MIN_CHARS && message.includes(line)));
+}
+
 /**
  * Parse a completed stage-2 reply and ground it. severity < 50 ⇒ allow (with the
  * one-directional intent-quote check when the model credits user intent);
@@ -152,18 +198,17 @@ export function parseStage2(text: string, index: RuleIndex, userMessages: string
 			// An allow resting on user intent is the one claim worth checking: it is
 			// what a prompt injection most wants to manufacture and what the model is
 			// most prone to stretch. Verified against the full user messages, so an
-			// early authorization still clears late (decision 2). normalizeName
-			// (reused) folds case/whitespace and trailing punctuation — fine here.
-			const quote = normalizeName(intent);
-			const found = quote.length >= 8 && userMessages.some((message) => normalizeName(message).includes(quote));
-			if (!found) {
+			// early authorization still clears late (decision 2).
+			if (!intentQuoted(intent, userMessages)) {
 				return {
 					decision: "block",
 					reason:
 						"The classifier cleared this as something the user asked for, but could not point to the user's own words asking for it.",
 					tier: "soft_deny",
 					ruleId: "intent-unverified",
-					raw: clip(intent, 200),
+					// The full quote, not a clip: the mismatch class is only diagnosable
+					// from the exact text the model produced (2026-09-05 H4).
+					raw: intent,
 				};
 			}
 			return { decision: "allow", reason: "", tier: "intent" };

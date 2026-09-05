@@ -36,9 +36,20 @@ const SENSITIVE_DIR_PAIRS = [
 	[".config", "gcloud"],
 	[".config", "gh"],
 	[".local", "share"],
+	[".huggingface", "token"],
+	["library", "keychains"], // macOS keychain databases
 ] as const;
 
 const SENSITIVE_BASENAMES = new Set([
+	// The harness's own credential stores: pi's / One Code's `agent/auth.json`
+	// and Claude Code's `~/.claude/.credentials.json` (PERMISSIONS-REVIEW-2026-09-05
+	// H2 — the classifier's own API key was readable unclassified).
+	"auth.json",
+	".credentials.json",
+	"credentials.json",
+	"credentials.toml", // cargo
+	".vault-token",
+	".gitconfig", // credential helpers, embedded tokens
 	".bash_history",
 	".bash_profile",
 	".bashrc",

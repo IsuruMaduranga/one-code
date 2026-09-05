@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { loadPermissionSettings, persistAllowRule } from "../../extensions/permissions/settings.ts";
+import { loadPermissionSettings, persistAllowRule, resolveStartupMode } from "../../extensions/permissions/settings.ts";
 
 let dir: string;
 let home: string;
@@ -64,6 +64,36 @@ describe("loadPermissionSettings", () => {
 			expect(loadPermissionSettings(cwd, home).defaultMode, file).toBeUndefined();
 			rmSync(join(cwd, ".claude", file));
 		}
+	});
+
+	it("ignores defaultMode bypassPermissions from project and local settings (2026-09-05 H3)", () => {
+		// A cloned repo must not start the session with every check off; only the
+		// user's own or a managed file may pick bypass.
+		for (const file of ["settings.json", "settings.local.json"]) {
+			write(join(cwd, ".claude", file), { permissions: { defaultMode: "bypassPermissions" } });
+			expect(loadPermissionSettings(cwd, home).defaultMode, file).toBeUndefined();
+			rmSync(join(cwd, ".claude", file));
+		}
+		write(join(home, ".claude", "settings.json"), { permissions: { defaultMode: "bypassPermissions" } });
+		expect(loadPermissionSettings(cwd, home).defaultMode).toBe("bypassPermissions");
+		// A project file cannot override the user's choice with a refused mode either.
+		write(join(cwd, ".claude", "settings.json"), { permissions: { defaultMode: "bypassPermissions" } });
+		expect(loadPermissionSettings(cwd, home).defaultMode).toBe("bypassPermissions");
+	});
+
+	it("still honours dontAsk and acceptEdits from project settings (they cannot approve more than default)", () => {
+		for (const mode of ["dontAsk", "acceptEdits"]) {
+			write(join(cwd, ".claude", "settings.json"), { permissions: { defaultMode: mode } });
+			expect(loadPermissionSettings(cwd, home).defaultMode, mode).toBe(mode);
+		}
+	});
+
+	it("reads disableBypassPermissionsMode from any source, as a restriction", () => {
+		expect(loadPermissionSettings(cwd, home).disableBypassPermissionsMode).toBeUndefined();
+		write(join(cwd, ".claude", "settings.json"), { permissions: { disableBypassPermissionsMode: "disable" } });
+		expect(loadPermissionSettings(cwd, home).disableBypassPermissionsMode).toBe(true);
+		write(join(cwd, ".claude", "settings.json"), { permissions: { disableBypassPermissionsMode: "enable" } });
+		expect(loadPermissionSettings(cwd, home).disableBypassPermissionsMode).toBeUndefined();
 	});
 
 	it("still honours other modes from project settings", () => {
@@ -129,5 +159,27 @@ describe("persistAllowRule", () => {
 		expect(parsed.model).toBe("opus");
 		expect(parsed.permissions.deny).toEqual(["Bash(sudo:*)"]);
 		expect(parsed.permissions.allow).toEqual(["Read"]);
+	});
+});
+
+describe("resolveStartupMode", () => {
+	it("takes the first requested mode in Claude Code's precedence order", () => {
+		expect(resolveStartupMode(["bypassPermissions", "plan", "auto"], {})).toEqual({ mode: "bypassPermissions", bypassRefused: false });
+		expect(resolveStartupMode([undefined, "plan", "auto"], {})).toEqual({ mode: "plan", bypassRefused: false });
+		expect(resolveStartupMode([undefined, undefined, "auto"], {})).toEqual({ mode: "auto", bypassRefused: false });
+	});
+
+	it("leaves the mode undefined when nothing was requested (a reload keeps the live mode)", () => {
+		expect(resolveStartupMode([undefined, undefined, undefined], {})).toEqual({ bypassRefused: false });
+	});
+
+	it("skips bypassPermissions when disabled by settings, however it was requested, and falls to the next", () => {
+		const disabled = { disableBypassPermissionsMode: true };
+		expect(resolveStartupMode(["bypassPermissions", undefined, "acceptEdits"], disabled)).toEqual({ mode: "acceptEdits", bypassRefused: true });
+		expect(resolveStartupMode([undefined, "bypassPermissions", undefined], disabled)).toEqual({ bypassRefused: true });
+		expect(resolveStartupMode([undefined, undefined, "bypassPermissions"], disabled)).toEqual({ bypassRefused: true });
+		expect(resolveStartupMode(["bypassPermissions", "bypassPermissions", "plan"], disabled)).toEqual({ mode: "plan", bypassRefused: true });
+		// Not disabled: bypass wins as requested.
+		expect(resolveStartupMode(["bypassPermissions", undefined, "plan"], {})).toEqual({ mode: "bypassPermissions", bypassRefused: false });
 	});
 });

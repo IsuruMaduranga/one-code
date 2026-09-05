@@ -276,7 +276,10 @@ export function findBashAllowRule(rules: PermissionRule[], command: string): Per
  */
 export function matchesPathPattern(pattern: string, subject: string, cwd: string): boolean {
 	const home = homedir();
-	const expandedPattern = expandTilde(pattern, home);
+	// Claude Code's rule syntax: `//path` is an absolute filesystem path (the
+	// doubled slash distinguishes it from `/path`, which CC reads relative to
+	// the project root). `Read(//etc/**)` is the form CC's own suggestions write.
+	const expandedPattern = pattern.startsWith("//") ? expandTilde(pattern.slice(1), home) : expandTilde(pattern, home);
 	const expandedSubject = expandTilde(subject, home);
 
 	const candidates = new Set<string>();
@@ -326,6 +329,11 @@ export function isInsideDir(candidate: string, dir: string, cwd: string): boolea
 	return toAbsoluteFolded(candidate, cwd).startsWith(toAbsoluteFolded(dir, cwd) + sep);
 }
 
+/** `isInsideDir`, plus the directory itself (`ls <cwd>` lists the working directory). */
+export function isAtOrInsideDir(candidate: string, dir: string, cwd: string): boolean {
+	return toAbsoluteFolded(candidate, cwd) === toAbsoluteFolded(dir, cwd) || isInsideDir(candidate, dir, cwd);
+}
+
 /**
  * Whether one rule matches a call. For bash this is the deny/ask ("any
  * subcommand") semantics — allow rules go through {@link findBashAllowRule}.
@@ -350,6 +358,18 @@ export function toolTier(toolName: string): ToolTier {
 	if (EDIT_TOOLS.has(name)) return "edit";
 	if (name === "bash") return "execute";
 	return "custom";
+}
+
+/**
+ * Whether a tool's subject is a filesystem path whose RESOLVED form the gate
+ * judges (protected paths, working-directory containment): the writing tools
+ * and the read tier. A bash subject is a command line; a custom tool's is
+ * whatever pathArgument found, not necessarily a path. Callers pass
+ * `resolveForContainment(toAbsolute(...))` as `resolvedSubject` for these only.
+ */
+export function isPathSubjectTool(toolName: string): boolean {
+	const name = normalizeToolName(toolName);
+	return isWritingTool(name) || toolTier(name) === "safe";
 }
 
 /**
@@ -432,6 +452,21 @@ export interface DecideInput {
 	 * the memory dir.
 	 */
 	scratchpadDirPath?: string;
+	/**
+	 * The working directory's own resolved form (`resolveForContainment(cwd)`),
+	 * when the caller could resolve it. A resolved subject is compared against
+	 * it as well as the literal cwd: on macOS a project under `/var/folders`
+	 * resolves to `/private/var/folders`, and without this every in-project
+	 * path read as outside the working directory. Kept an input so this module
+	 * stays pure.
+	 */
+	resolvedCwd?: string;
+	/**
+	 * Where the session persists oversized tool outputs (`lib/persisted-output.ts
+	 * sessionResultsDir`). Readable like the working directory: the model is
+	 * told to read those files back.
+	 */
+	resultsDirPath?: string;
 }
 
 export interface Decision {
@@ -448,7 +483,9 @@ export interface Decision {
 		| "scratchpad-dir"
 		| "mode"
 		| "tier"
-		| "protected-path";
+		| "protected-path"
+		/** A read, or an acceptEdits write, whose path is outside the working directory. */
+		| "working-dir";
 }
 
 /**
@@ -555,6 +592,10 @@ export function decide(params: DecideInput): Decision {
 		if (tool === "bash" && subject) {
 			const evidence = analyzeShellCommand({ command: subject, cwd, home: homedir() });
 			if (evidence.verdict === "safe" && evidence.writes.length === 0) return { decision: "allow", cause: "plan-readonly" };
+			// Read-only, but of a path outside the working directory: still a read,
+			// so it is put to the user rather than refused as a plan-mode mutation
+			// (the read tools ask for the same path below).
+			if (evidence.readOnlyOutside && evidence.writes.length === 0) return { decision: "ask", cause: "working-dir" };
 		}
 		if (PLAN_READ_ONLY_TOOLS.has(tool)) return { decision: "allow", cause: "plan-readonly" };
 		return { decision: "deny", cause: "plan-mode" };
@@ -621,10 +662,40 @@ export function decide(params: DecideInput): Decision {
 		return { decision: "classify", cause: "mode" };
 	}
 
-	if (tier === "safe" || AUTO_ALLOWED_TOOLS.has(tool)) {
-		return { decision: "allow", cause: "tier" };
+	/**
+	 * Working-directory containment — Claude Code's `pathInAllowedWorkingPath`
+	 * (filesystem.ts): the read tier is allowed inside the working directory and
+	 * asks outside it, and acceptEdits approves edits inside it only. The
+	 * harness's own session dirs (auto-memory, scratchpad, persisted tool
+	 * results, the plan file) count as inside — the system prompt tells the
+	 * model to read and write there. The resolved subject is judged where the
+	 * caller resolved one, so a symlink inside the project that points out of
+	 * it is outside. Until 2026-09-05 neither check existed: `read ~/.ssh/id_rsa`
+	 * was allowed in every mode including auto and plan, and acceptEdits wrote
+	 * anywhere on disk (PERMISSIONS-REVIEW-2026-09-05 H1, H2).
+	 */
+	const inWorkingSpace = (): boolean => {
+		const target = params.resolvedSubject ?? subject;
+		const roots = [cwd, params.resolvedCwd, params.memoryDirPath, params.scratchpadDirPath, params.resultsDirPath];
+		if (roots.some((dir) => dir && isAtOrInsideDir(target, dir, cwd))) return true;
+		return params.planFilePath ? isPlanFilePath(target, params.planFilePath, cwd) : false;
+	};
+	const outsideWorkingDir = (): Decision => {
+		if (mode === "auto") return { decision: "classify", cause: "working-dir" };
+		if (mode === "dontAsk") return { decision: "deny", cause: "working-dir" };
+		return { decision: "ask", cause: "working-dir" };
+	};
+
+	if (tier === "safe") {
+		// No path argument (grep/find/ls default to the cwd) is an in-project read.
+		if (!subject || inWorkingSpace()) return { decision: "allow", cause: "tier" };
+		return outsideWorkingDir();
 	}
-	if (tier === "edit" && mode === "acceptEdits") return { decision: "allow", cause: "mode" };
+	if (AUTO_ALLOWED_TOOLS.has(tool)) return { decision: "allow", cause: "tier" };
+	if (tier === "edit" && mode === "acceptEdits") {
+		if (subject && inWorkingSpace()) return { decision: "allow", cause: "mode" };
+		return outsideWorkingDir();
+	}
 
 	// Everything left over goes to the classifier in auto mode, and to the user
 	// in every other mode.

@@ -356,7 +356,10 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 				process.stderr.write(
 					`[auto-mode] ${key} ${request.toolName} → ${verdict.decision}` +
 						`${verdict.ruleId ? ` (${verdict.ruleId})` : ""} [${stageInfo}]\n` +
-						(verdict.raw ? `  raw: ${verdict.raw.slice(0, 300)}\n` : ""),
+						// An unverified intent quote is printed whole: the next mismatch class
+						// (2026-09-05 H4 was wrapping quotation marks) is only visible in the
+						// exact text the model produced.
+						(verdict.raw ? `  raw: ${verdict.ruleId === "intent-unverified" ? verdict.raw : verdict.raw.slice(0, 300)}\n` : ""),
 				);
 			}
 			return verdict;

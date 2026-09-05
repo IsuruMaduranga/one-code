@@ -21,9 +21,9 @@
  * runs these agents in acceptEdits); ask rules are honoured; anything that
  * would normally *ask* is denied — there is no interactive prompt inside an
  * in-process agent, and fail-closed beats silently trusting the model. Auto
- * mode has no classifier here, so it degrades to acceptEdits *inside the cwd*
- * and denies the rest. Project-scope allow rules apply only with a stored
- * consent (project-trust.ts).
+ * mode has no classifier here, so it degrades to acceptEdits, which decide()
+ * confines to the cwd (as it does reads); the rest is denied. Project-scope
+ * allow rules apply only with a stored consent (project-trust.ts).
  *
  * `neverGate` names tools the runtime itself injects (e.g. `structured_output`,
  * the child-only `SendMessage`-to-main tool) that must never be gated.
@@ -32,13 +32,16 @@
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 import { findProjectRoot } from "./git.ts";
 import { memoryDir } from "./memory.ts";
+import { sessionResultsDir } from "./persisted-output.ts";
 import { sessionScratchpadDir } from "./scratchpad.ts";
-import { decide, extractSubject, isInsideDir, normalizeToolName, type PermissionMode, parseRules, toolTier } from "../permissions/matcher.ts";
+import { decide, extractSubject, isPathSubjectTool, normalizeToolName, type PermissionMode, parseRules } from "../permissions/matcher.ts";
 import { projectAllowApproved } from "../permissions/project-trust.ts";
-import { isWritingTool } from "../permissions/protected-paths.ts";
 import { loadPermissionSettings, normalizePermissionMode } from "../permissions/settings.ts";
 import type { PermissionBridge } from "../permissions/subagent-gate.ts";
 import { resolveForContainment, toAbsolute } from "../auto-mode/paths.ts";
+
+/** A directory's realpath for containment, or the path itself when nothing about it resolves. */
+const resolvedOrSelf = (dir: string) => resolveForContainment(dir) ?? dir;
 
 /** Tools the runtime itself injects; never gate them. */
 const DEFAULT_INTERNAL_TOOLS = new Set(["structured_output"]);
@@ -121,12 +124,15 @@ export function permissionGateFactory(
 				if (!scratchpadDirPath && sessionId) scratchpadDirPath = sessionScratchpadDir(runCwd, sessionId);
 				const tool = normalizeToolName(event.toolName);
 				const subject = extractSubject(tool, event.input as Record<string, unknown>);
+				// Path tools (writers and the read tier) are judged by where the path
+				// resolves; both sides resolved (macOS /var → /private/var) so a real
+				// in-cwd path is not misjudged as an escape.
 				const resolvedSubject =
-					isWritingTool(tool) && subject ? resolveForContainment(toAbsolute(runCwd, subject, home)) : undefined;
+					isPathSubjectTool(tool) && subject ? resolveForContainment(toAbsolute(runCwd, subject, home)) : undefined;
 				// Read per call: the parent may cycle modes while a child runs.
 				const liveMode = localGateMode(process.env[MODE_ENV], settings.defaultMode);
 				// No classifier is reachable without the bridge, so auto mode is judged
-				// as acceptEdits, then its edit-tier allow is confined to the cwd below.
+				// as acceptEdits — which decide() confines to the working directory.
 				const mode = liveMode === "auto" ? "acceptEdits" : liveMode;
 				const result = decide({
 					toolName: event.toolName,
@@ -137,33 +143,25 @@ export function permissionGateFactory(
 					ask,
 					allow,
 					resolvedSubject,
+					resolvedCwd: resolveForContainment(runCwd),
 					memoryDirPath,
 					scratchpadDirPath,
+					// The agent's own persisted-output dir: a read of a result it was
+					// handed a path to must not be judged an outside read. Resolved like
+					// the subject (the tmpdir fallback sits under a symlinked /var on macOS).
+					resultsDirPath: resolvedOrSelf(sessionResultsDir(ctx)),
 				});
-				if (result.decision === "allow") {
-					// Both sides resolved (macOS /var → /private/var) so a real in-cwd write is not misjudged.
-					const containDir = resolveForContainment(runCwd) ?? runCwd;
-					const confinedEdit =
-						liveMode === "auto" &&
-						result.cause === "mode" &&
-						toolTier(tool) === "edit" &&
-						!(resolvedSubject !== undefined && isInsideDir(resolvedSubject, containDir, containDir));
-					if (!confinedEdit) return undefined;
-					return {
-						block: true,
-						reason:
-							"Auto mode's classifier is only reachable through the parent session, which this agent has no link to; a write outside the working directory is denied to fail safe.",
-					};
-				}
+				if (result.decision === "allow") return undefined;
 				const ruleNote = result.rule ? ` (rule: ${result.rule.raw})` : "";
+				const outside = result.cause === "working-dir" ? " outside the working directory" : "";
 				return {
 					block: true,
 					reason:
 						result.decision === "deny"
 							? `Denied by permission rules${ruleNote}.`
 							: liveMode === "auto"
-								? "Auto mode's classifier is only reachable through the parent session, which this agent has no link to; denied to fail safe."
-								: "This action needs interactive approval, which is not available inside an in-process agent. Ask for it to be added to the allow rules, or work around it.",
+								? `Auto mode's classifier is only reachable through the parent session, which this agent has no link to; a call${outside} is denied to fail safe.`
+								: `This action${outside} needs interactive approval, which is not available inside an in-process agent. Ask for it to be added to the allow rules, or work around it.`,
 				};
 			});
 		},

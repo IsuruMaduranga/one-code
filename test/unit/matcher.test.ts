@@ -356,6 +356,92 @@ describe("decide", () => {
 		expect(decide({ ...base, mode: "acceptEdits", toolName: "bash", subject: "ls" }).decision).toBe("ask");
 	});
 
+	describe("working-directory containment (PERMISSIONS-REVIEW-2026-09-05 H1, H2)", () => {
+		const accept = { ...base, mode: "acceptEdits" as const };
+
+		it("acceptEdits approves writes inside the cwd only; outside asks", () => {
+			for (const subject of ["a.ts", "./src/a.ts", `${CWD}/docs/x.md`]) {
+				expect(decide({ ...accept, toolName: "write", subject }).decision, subject).toBe("allow");
+			}
+			for (const subject of ["~/x.txt", "/etc/hosts", "../sibling/a.ts", `${CWD}/../other/a.ts`, "/home/user/.ssh/authorized_keys"]) {
+				const d = decide({ ...accept, toolName: "write", subject });
+				expect(d.decision, subject).toBe("ask");
+				expect(d.cause, subject).toBe("working-dir");
+			}
+			// dontAsk denies where acceptEdits would ask; bypass still allows.
+			expect(decide({ ...base, mode: "dontAsk", toolName: "write", subject: "~/x.txt" }).decision).toBe("deny");
+			expect(decide({ ...base, mode: "bypassPermissions", toolName: "write", subject: "~/x.txt" }).decision).toBe("allow");
+		});
+
+		it("judges the RESOLVED subject: a symlink inside the cwd pointing outside is outside", () => {
+			const d = decide({ ...accept, toolName: "write", subject: "link.txt", resolvedSubject: "/home/user/elsewhere/real.txt" });
+			expect(d.decision).toBe("ask");
+			expect(d.cause).toBe("working-dir");
+			// …and a resolved cwd (macOS /var → /private/var) keeps in-project writes in.
+			const mac = decide({
+				...accept,
+				cwd: "/var/folders/x/proj",
+				resolvedCwd: "/private/var/folders/x/proj",
+				toolName: "write",
+				subject: "a.ts",
+				resolvedSubject: "/private/var/folders/x/proj/a.ts",
+			});
+			expect(mac.decision).toBe("allow");
+		});
+
+		it("the read tier is allowed inside the cwd (and with no path) and asks outside it, in every non-bypass mode", () => {
+			for (const tool of ["read", "grep", "find", "ls"]) {
+				expect(decide({ ...base, toolName: tool, subject: "" }).decision, tool).toBe("allow");
+				expect(decide({ ...base, toolName: tool, subject: "src" }).decision, tool).toBe("allow");
+				expect(decide({ ...base, toolName: tool, subject: CWD }).decision, `${tool} cwd itself`).toBe("allow");
+			}
+			for (const mode of ["default", "acceptEdits", "plan"] as const) {
+				const d = decide({ ...base, mode, toolName: "read", subject: "~/.ssh/id_rsa" });
+				expect(d.decision, mode).toBe("ask");
+				expect(d.cause, mode).toBe("working-dir");
+			}
+			expect(decide({ ...base, mode: "auto", toolName: "read", subject: "~/.ssh/id_rsa" }).decision).toBe("classify");
+			expect(decide({ ...base, mode: "dontAsk", toolName: "read", subject: "/etc/passwd" }).decision).toBe("deny");
+			expect(decide({ ...base, mode: "bypassPermissions", toolName: "read", subject: "/etc/passwd" }).decision).toBe("allow");
+			// Symlinked read: resolved form decides.
+			expect(decide({ ...base, toolName: "read", subject: "notes.md", resolvedSubject: "/home/user/private/notes.md" }).decision).toBe("ask");
+		});
+
+		it("a Read allow rule covering the path still clears an outside read (incl. CC's //absolute form)", () => {
+			const allow = [parseRule("Read(~/.zshrc)")!, parseRule("Read(//etc/**)")!];
+			expect(decide({ ...base, toolName: "read", subject: "~/.zshrc", allow }).decision).toBe("allow");
+			expect(decide({ ...base, toolName: "read", subject: "/etc/hosts", allow }).decision).toBe("allow");
+			expect(decide({ ...base, toolName: "read", subject: "/usr/share/x", allow }).decision).toBe("ask");
+		});
+
+		it("the harness's own session dirs and the plan file are readable and (acceptEdits) writable", () => {
+			const dirs = {
+				memoryDirPath: "/home/user/.claude/projects/-home-user-project/memory",
+				scratchpadDirPath: "/tmp/claude-501/scratch",
+				resultsDirPath: "/home/user/.onecode/agent/sessions/abc",
+				planFilePath: "/home/user/.onecode/plans/plan.md",
+			};
+			for (const subject of [`${dirs.memoryDirPath}/MEMORY.md`, `${dirs.scratchpadDirPath}/a.txt`, `${dirs.resultsDirPath}/tool-results/x.txt`, dirs.planFilePath]) {
+				expect(decide({ ...base, ...dirs, toolName: "read", subject }).decision, subject).toBe("allow");
+			}
+			// Writable: memory, scratchpad, plan file (the results dir is the
+			// harness's, under protected ~/.onecode — a write there still asks).
+			for (const subject of [`${dirs.memoryDirPath}/MEMORY.md`, `${dirs.scratchpadDirPath}/a.txt`, dirs.planFilePath]) {
+				expect(decide({ ...accept, ...dirs, toolName: "write", subject }).decision, subject).toBe("allow");
+			}
+			expect(decide({ ...base, ...dirs, toolName: "read", subject: "/home/user/.onecode/agent/auth.json" }).decision).toBe("ask");
+		});
+
+		it("plan mode: read-only bash of an outside path asks (a read), a mutation still denies", () => {
+			const plan = { ...base, mode: "plan" as const };
+			const d = decide({ ...plan, toolName: "bash", subject: "cat /etc/hosts" });
+			expect(d.decision).toBe("ask");
+			expect(d.cause).toBe("working-dir");
+			expect(decide({ ...plan, toolName: "bash", subject: "cat /etc/hosts > out.txt" }).decision).toBe("deny");
+			expect(decide({ ...plan, toolName: "bash", subject: "cat README.md" }).decision).toBe("allow");
+		});
+	});
+
 	it("allow rules allow, ask rules force prompting even when allowed", () => {
 		expect(
 			decide({ ...base, toolName: "bash", subject: "npm test", allow: rules(["Bash(npm test:*)"]) }).decision,

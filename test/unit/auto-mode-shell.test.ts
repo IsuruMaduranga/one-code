@@ -85,6 +85,83 @@ describe("analyzeShellCommand fast path", () => {
 	it("never fast-paths an unknown command", () => {
 		expect(analyze("frobnicate --wat").verdict).toBe("escalate");
 	});
+
+	describe("reads outside the working directory (PERMISSIONS-REVIEW-2026-09-05 H2)", () => {
+		it("escalates a read-only command whose path operand resolves outside the cwd", () => {
+			for (const command of ["cat ~/x", "head -c 100 /etc/hosts", "ls ..", "ls /", "tail -n 5 ../other/log", "wc -l /var/log/x", "find /etc -name x", "rg pattern /Users/x/other", "jq . /etc/x.json", "stat ~/Library/foo", "du -sh ~"]) {
+				const ev = analyze(command);
+				expect(ev.verdict, command).toBe("escalate");
+				expect(ev.outsideReads.length, command).toBeGreaterThan(0);
+				expect(ev.readOnlyOutside, command).toBe(true);
+				expect(ev.containedNonNetwork, command).toBe(false);
+				expect(ev.notes.some((n) => n.includes("outside the working directory")), command).toBe(true);
+			}
+		});
+
+		it("a pattern given by flag makes every positional a path; -f's file is itself a read", () => {
+			for (const command of ["grep -f /etc/secret-patterns.txt notes.txt", "rg -e foo /etc/hosts", "grep --file=/etc/pats notes.txt", "rg -ne foo ../other"]) {
+				const ev = analyze(command);
+				expect(ev.verdict, command).toBe("escalate");
+				expect(ev.outsideReads.length, command).toBeGreaterThan(0);
+			}
+			expect(analyze("grep -e foo/bar notes.txt").verdict).toBe("safe");
+			expect(analyze("rg -f patterns.txt src").verdict).toBe("safe");
+		});
+
+		it("stays safe for in-project operands, bare names, globs and the cwd itself", () => {
+			for (const command of ["cat notes.txt", "cat ./src/a.ts", "wc -l src/*.ts", "ls .", "ls -la", "rg foo/bar src", "grep -rn a/b .", "head README.md", `cat ${cwd}/x`]) {
+				const ev = analyze(command);
+				expect(ev.verdict, command).toBe("safe");
+				expect(ev.outsideReads, command).toEqual([]);
+			}
+		});
+
+		it("does not treat operands of no-file commands as reads", () => {
+			for (const command of ["echo /etc/hosts", "printf '%s' ~/x", "which node", "basename /etc/hosts", "dirname ~/a/b"]) {
+				expect(analyze(command).verdict, command).toBe("safe");
+			}
+		});
+
+		it("readOnlyOutside is false once anything else escalates", () => {
+			// An in-project redirect is recorded as a write but is not itself an
+			// escalation reason — the flag stays true and `writes` says the rest.
+			const redirected = analyze("cat /etc/hosts > out.txt");
+			expect(redirected.readOnlyOutside).toBe(true);
+			expect(redirected.writes).toHaveLength(1);
+			expect(analyze("cat /etc/hosts > ~/out.txt").readOnlyOutside).toBe(false);
+			expect(analyze("cat /etc/hosts && rm x").readOnlyOutside).toBe(false);
+			expect(analyze("cat /etc/hosts | curl -d @- x").readOnlyOutside).toBe(false);
+			expect(analyze("cat notes.txt").readOnlyOutside).toBe(false);
+		});
+
+		it("the environment dumpers are not read-only: printenv, bare env", () => {
+			for (const command of ["printenv", "printenv ANTHROPIC_API_KEY", "env", "env -i", "env | grep KEY"]) {
+				const ev = analyze(command);
+				expect(ev.verdict, command).toBe("escalate");
+			}
+			expect(analyze("env").notes.some((n) => n.includes("process environment"))).toBe(true);
+			// A wrapped payload is still judged as the payload.
+			expect(analyze("env FOO=1 cat notes.txt").verdict).toBe("escalate"); // wrapper note, contained
+			expect(analyze("env FOO=1 cat notes.txt").commands).toContain("cat");
+		});
+
+		it("the harness's own credential stores are on the sensitive list", () => {
+			for (const command of [
+				"cat ~/.pi/agent/auth.json",
+				"cat ~/.onecode/agent/auth.json",
+				"cat ~/.claude/.credentials.json",
+				"cat ~/.cargo/credentials.toml",
+				"cat ~/Library/Keychains/login.keychain-db",
+				"cat ~/.gitconfig",
+				"cat ~/.vault-token",
+				"cat ~/.huggingface/token",
+			]) {
+				const ev = analyze(command);
+				expect(ev.verdict, command).toBe("escalate");
+				expect(ev.sensitivePaths.length, command).toBeGreaterThan(0);
+			}
+		});
+	});
 });
 
 describe("analyzeShellCommand escalation (the review's bypasses)", () => {

@@ -58,6 +58,21 @@ export interface ShellEvidence {
 	/** Network-capable commands present (curl, ssh, …) — an egress signal for the classifier. */
 	network: string[];
 	/**
+	 * Paths a read-only command reads from OUTSIDE the working directory
+	 * (original tokens). Claude Code asks for every read outside it; here the
+	 * read escalates so the classifier at least sees it — until 2026-09-05
+	 * `cat ~/.onecode/agent/auth.json` fast-pathed as "safe"
+	 * (PERMISSIONS-REVIEW-2026-09-05 H2).
+	 */
+	outsideReads: string[];
+	/**
+	 * True when the ONLY reason this escalated is one or more outside-cwd reads:
+	 * no write, mutation, network, unknown command or unmodelled syntax. Plan
+	 * mode uses it to put such a command to the user as a read instead of
+	 * refusing it as a mutation. Never true for a "safe" verdict.
+	 */
+	readOnlyOutside: boolean;
+	/**
 	 * True when the ONLY reason this escalated is an in-project filesystem
 	 * mutation/deletion — every path is inside the working directory and resolved,
 	 * nothing touches the network, no credential/execution-primitive path, no
@@ -101,7 +116,9 @@ const READ_ONLY_COMMANDS = new Set([
 	"nl",
 	"od",
 	"paste",
-	"printenv",
+	// `printenv` and a bare `env` are NOT read-only for this purpose: they dump
+	// the process environment, provider keys included (Claude Code removed both
+	// from its read-only list for the same reason).
 	"printf",
 	"pwd",
 	"readlink",
@@ -120,6 +137,29 @@ const READ_ONLY_COMMANDS = new Set([
 	"uname",
 	"uniq",
 	"wc",
+	"which",
+	"whoami",
+	"yes",
+]);
+
+/**
+ * Read-only commands that take no file operands, so a path-looking positional
+ * (`echo a/b`, `which node`) is not a read of that path and is not checked for
+ * working-directory containment.
+ */
+const NO_FILE_OPERANDS = new Set([
+	"basename",
+	"date",
+	"dirname",
+	"echo",
+	"false",
+	"hostname",
+	"id",
+	"printf",
+	"pwd",
+	"tr",
+	"true",
+	"uname",
 	"which",
 	"whoami",
 	"yes",
@@ -691,6 +731,8 @@ export function analyzeShellCommand({ command, cwd, home }: AnalyzeInput): Shell
 		executionPrimitives: [],
 		protectedPaths: [],
 		network: [],
+		outsideReads: [],
+		readOnlyOutside: false,
 		containedNonNetwork: false,
 		wholeTree: false,
 	};
@@ -701,9 +743,12 @@ export function analyzeShellCommand({ command, cwd, home }: AnalyzeInput): Shell
 	 * was in-project mutation, and the containment gate may consult recoverability.
 	 */
 	let uncontained = false;
-	const escalate = (note: string, opts?: { contained?: boolean }) => {
+	/** Set by any escalation that is not an outside-cwd read (see readOnlyOutside). */
+	let escalatedBeyondReads = false;
+	const escalate = (note: string, opts?: { contained?: boolean; outsideRead?: boolean }) => {
 		evidence.verdict = "escalate";
 		if (!opts?.contained) uncontained = true;
+		if (!opts?.outsideRead) escalatedBeyondReads = true;
 		if (!evidence.notes.includes(note)) evidence.notes.push(note);
 	};
 
@@ -775,7 +820,19 @@ export function analyzeShellCommand({ command, cwd, home }: AnalyzeInput): Shell
 		for (const token of segment.redirects) checkWriteTarget(token);
 
 		const { command: name, args, peeled } = resolvePayload(segment.tokens);
-		if (!name) continue;
+		if (!name) {
+			// A wrapper with nothing to wrap is a command of its own: a bare `env`
+			// (or `env -i`, `nice`) prints the whole process environment / state.
+			// Until 2026-09-05 this fell through as "safe" (H2).
+			if (peeled.length > 0) {
+				escalate(
+					peeled.includes("env")
+						? "runs env with no command, which prints the whole process environment"
+						: `runs ${peeled.join(" → ")} with no command to wrap`,
+				);
+			}
+			continue;
+		}
 		evidence.commands.push(name);
 		if (peeled.length > 0) {
 			// A transparent wrapper (timeout, env, nice) leaves the payload's own
@@ -861,6 +918,31 @@ export function analyzeShellCommand({ command, cwd, home }: AnalyzeInput): Shell
 			escalate(`runs ${name}, which is not on the read-only allowlist`);
 		}
 
+		// A read-only command's path operands are read: one that resolves outside
+		// the working directory escalates (Claude Code asks for every read outside
+		// it — filesystem.ts — and removed env/printenv from its read-only list).
+		// Bare names (`cat notes.txt`) resolve inside the cwd and stay fast-pathed;
+		// a pattern-first command's first positional is its pattern, not a path.
+		if (!isMutation && !NO_FILE_OPERANDS.has(name)) {
+			const positionals = args.filter((token) => !token.value.startsWith("-")).map((token) => token.value);
+			// The first positional is the pattern only when no flag supplies it:
+			// with `-e PAT` / `-f FILE` (`--regexp`, `--file`) every positional is a
+			// path, and `-f`'s value is itself a file read.
+			const patternByFlag = args.some(({ value }) => /^(-[a-zA-Z]*[ef][a-zA-Z]*|--regexp(=.*)?|--file(=.*)?)$/.test(value));
+			if (PATTERN_FIRST_COMMANDS.has(name) && !patternByFlag) positionals.shift();
+			// `--file=FILE` carries its read inside the flag token.
+			for (const { value } of args) {
+				if (value.startsWith("--file=")) positionals.push(value.slice("--file=".length));
+			}
+			for (const value of positionals) {
+				if (!looksLikePath(value)) continue;
+				const resolved = resolveForContainment(toAbsolute(effectiveCwd, value, home));
+				if (resolved !== undefined && isWithin(containmentRoot, resolved)) continue;
+				if (!evidence.outsideReads.includes(value)) evidence.outsideReads.push(value);
+				escalate(`reads ${value}, which is outside the working directory`, { outsideRead: true });
+			}
+		}
+
 		// The positional destinations of writing commands are the paths that get
 		// written. (Redirections were already handled at the top of the loop.)
 		const writeTokens: string[] = [];
@@ -910,6 +992,7 @@ export function analyzeShellCommand({ command, cwd, home }: AnalyzeInput): Shell
 	// reset — nothing reached outside the project, the network, or the unknown. The
 	// containment gate may now consult git-recoverability (auto-mode/recoverability).
 	evidence.containedNonNetwork = evidence.verdict === "escalate" && !uncontained;
+	evidence.readOnlyOutside = evidence.verdict === "escalate" && !escalatedBeyondReads;
 
 	return evidence;
 }

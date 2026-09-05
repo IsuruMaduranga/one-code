@@ -52,6 +52,7 @@ import { safetyControlWrite } from "../auto-mode/safety-floor.ts";
 import { isExecutionPrimitivePath, isSensitivePath } from "../auto-mode/sensitive.ts";
 import { analyzeShellCommand, type ShellEvidence } from "../auto-mode/shell-analysis.ts";
 import { projectMemoryDir } from "../lib/memory.ts";
+import { sessionResultsDir } from "../lib/persisted-output.ts";
 import { sessionScratchpadDir } from "../lib/scratchpad.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import {
@@ -63,13 +64,14 @@ import {
 	escapeLiteral,
 	type PermissionMode,
 	type PermissionRule,
+	isPathSubjectTool,
 } from "./matcher.ts";
 import { modeBadge, nextMode, PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "./modes.ts";
 import { type ChildToolCall, type ChildGateDecision, SUBAGENT_GATE_CHANNEL } from "./subagent-gate.ts";
 import { trackOriginalCommands } from "../lib/original-command.ts";
 import { MODE_CHANNEL, PLAN_FILE_CHANNEL } from "../lib/plan-mode-channels.ts";
 import { isWritingTool } from "./protected-paths.ts";
-import { loadPermissionSettings, normalizePermissionMode, persistAllowRule } from "./settings.ts";
+import { loadPermissionSettings, normalizePermissionMode, persistAllowRule, resolveStartupMode } from "./settings.ts";
 import { MODE_ENV } from "../lib/permission-gate.ts";
 import { describeProjectAllow, persistProjectAllowApproval, projectAllowApproved } from "./project-trust.ts";
 import { findProjectRoot } from "../lib/git.ts";
@@ -90,6 +92,8 @@ const DENIED_DONT_ASK =
 	"Permission mode is dontAsk: anything that would normally prompt the user is denied instead. Only pre-approved tools can run; work within those, or tell the user which allow rule would unblock you.";
 const DENIED_PROTECTED_PATH =
 	"That path is protected: it configures the user's tooling or this agent itself, so writes to it are never auto-approved and allow rules do not cover them. Achieve the goal another way, or ask the user to make the change.";
+const DENIED_OUTSIDE_WORKING_DIR =
+	"That path is outside the working directory, which needs the user's approval, and permission mode is dontAsk (anything that would prompt is denied instead). Work inside the project, or tell the user which allow rule (e.g. Read(~/dir/**)) would unblock you.";
 // Returned to the MODEL, not the user: auto mode exists to run unattended, so a
 // block is handed back so the model can accomplish the goal a safe way — mirrors
 // Claude Code's own auto-mode denial message rather than halting for a prompt.
@@ -109,15 +113,30 @@ const DENIED_BY_RULE = (rule: string) =>
 /** Truncate a subject for a permission prompt — shared by the main gate and the subagent bridge. */
 const previewSubject = (subject: string) => (subject.length > 200 ? `${subject.slice(0, 200)}…` : subject);
 
+/**
+ * The ask-prompt title for a non-floor decision — shared by the main gate and
+ * the subagent bridge so a new `cause` is worded once. `actor` is the tool name,
+ * prefixed for a child ("subagent x's write").
+ */
+const askTitle = (actor: string, preview: string, cause: string, pausedResume: boolean): string => {
+	if (pausedResume) return `Auto mode is paused after repeated blocks — approve to resume.\n\n  ${actor}: ${preview || "(no arguments)"}`;
+	if (cause === "protected-path")
+		return `Allow ${actor} to write a protected path?\n\n  ${preview}\n\n  This path configures your tooling or this agent, so allow rules do not pre-approve it.`;
+	if (cause === "working-dir") return `Allow ${actor} outside the working directory?\n\n  ${preview}`;
+	return `Allow ${actor}?\n\n  ${preview || "(no arguments)"}`;
+};
+
 /** Map a `decide()` deny result to its model-facing reason — shared by both gate paths. */
 const denyReason = (result: { cause?: string; rule?: { raw?: string } }): string =>
 	result.cause === "plan-mode"
 		? DENIED_PLAN_MODE
 		: result.cause === "protected-path"
 			? DENIED_PROTECTED_PATH
-			: result.cause === "mode"
-				? DENIED_DONT_ASK
-				: DENIED_BY_RULE(result.rule?.raw ?? "deny");
+			: result.cause === "working-dir"
+				? DENIED_OUTSIDE_WORKING_DIR
+				: result.cause === "mode"
+					? DENIED_DONT_ASK
+					: DENIED_BY_RULE(result.rule?.raw ?? "deny");
 
 /** Ask-prompt option labels — shared by both gate paths. */
 /**
@@ -187,6 +206,10 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	 */
 	let memoryDirPath: string | undefined;
 	let scratchpadDirPath: string | undefined;
+	/** Where oversized tool outputs are persisted this session — readable like the cwd. */
+	let resultsDirPath: string | undefined;
+	/** The session cwd's own realpath (macOS /var → /private/var), for decide()'s containment check. */
+	let resolvedCwd: string | undefined;
 
 	/**
 	 * Mode changes arrive over the event bus too (plan-mode tools), where no ctx
@@ -553,14 +576,19 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		autoConfig = undefined;
 		projectInstructionsByCwd.clear();
 
-		const flagMode = normalizePermissionMode(pi.getFlag("permission-mode"));
-		if (pi.getFlag("dangerously-skip-permissions") === true) {
-			mode = "bypassPermissions";
-		} else if (flagMode) {
-			mode = flagMode;
-		} else if (settings.defaultMode) {
-			mode = settings.defaultMode;
-		}
+		// Claude Code's resolution order (flags, then settings' defaultMode), with
+		// bypassPermissions refused wherever a settings source disabled it — before
+		// 2026-09-05 (H3) that policy was silently not in force here.
+		const startup = resolveStartupMode(
+			[
+				pi.getFlag("dangerously-skip-permissions") === true ? "bypassPermissions" : undefined,
+				normalizePermissionMode(pi.getFlag("permission-mode")),
+				settings.defaultMode,
+			],
+			settings,
+		);
+		if (startup.mode) mode = startup.mode;
+		if (startup.bypassRefused && ctx.hasUI) ctx.ui.notify("Bypass permissions mode was disabled by settings", "warning");
 		bypassInCycle = mode === "bypassPermissions";
 		// Auto mode needs a model to run its classifier on; with none reachable it
 		// would block every call, so it stays out of the cycle instead — the same
@@ -581,6 +609,9 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		sessionEpoch++;
 		memoryDirPath = projectMemoryDir(ctx.cwd);
 		scratchpadDirPath = sessionScratchpadDir(ctx.cwd, ctx.sessionManager.getSessionId());
+		// Resolved like the subjects compared against it (a symlinked parent, macOS /var).
+		resultsDirPath = resolveForContainment(sessionResultsDir(ctx)) ?? sessionResultsDir(ctx);
+		resolvedCwd = resolveForContainment(ctx.cwd);
 		reloadSettings(ctx);
 		applyBadge();
 		// Publish the subagent permission bridge (see subagent-gate.ts). The closure
@@ -661,11 +692,11 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		lastReviewCtx = ctx;
 		const normalizedTool = normalizeToolName(event.toolName);
 		const subject = extractSubject(normalizedTool, event.input as Record<string, unknown>);
-		// Resolved through symlinks so the protected-path check sees where a
-		// write actually lands, not how the path is spelled. Only for writing
-		// tools: a bash subject is a command line, not a path.
+		// Resolved through symlinks so the protected-path and working-directory
+		// checks see where a write lands or a read comes from, not how the path
+		// is spelled. Path tools only: a bash subject is a command line.
 		const resolvedSubject =
-			isWritingTool(normalizedTool) && subject
+			isPathSubjectTool(normalizedTool) && subject
 				? resolveForContainment(toAbsolute(ctx.cwd, subject, os.homedir()))
 				: undefined;
 		// In a worktree session, worktree's tool_call handler (which runs before this
@@ -701,9 +732,11 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				allow: allowRules,
 				classifyAllShell: autoConfig?.classifyAllShell,
 				resolvedSubject,
+				resolvedCwd,
 				planFilePath,
 				memoryDirPath,
 				scratchpadDirPath,
+				resultsDirPath,
 			});
 		let result = decideWith([...allow, ...sessionAllows, ...(projectAllowTrusted ? projectAllow : [])]);
 
@@ -827,11 +860,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		const pausedResume = mode === "auto" && result.decision === "classify";
 		const title = floorReason
 			? `Auto mode never auto-approves this — ${event.toolName} ${floorReason}.\n\n  ${preview}\n\n  Allow it this once?`
-			: pausedResume
-				? `Auto mode is paused after repeated blocks — approve to resume.\n\n  ${event.toolName}: ${preview || "(no arguments)"}`
-				: result.cause === "protected-path"
-				? `Allow ${event.toolName} to write a protected path?\n\n  ${preview}\n\n  This path configures your tooling or this agent, so allow rules do not pre-approve it.`
-				: `Allow ${event.toolName}?\n\n  ${preview || "(no arguments)"}`;
+			: askTitle(event.toolName, preview, result.cause, pausedResume);
 		const choice = await serializePrompt(() => ctx.ui.select(title, [YES, YES_SESSION, NO]));
 
 		// The user's answer is itself a gate decision worth recording — it is the
@@ -893,7 +922,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		const normalizedTool = normalizeToolName(toolName);
 		const subject = extractSubject(normalizedTool, input);
 		const resolvedSubject =
-			isWritingTool(normalizedTool) && subject
+			isPathSubjectTool(normalizedTool) && subject
 				? resolveForContainment(toAbsolute(cwd, subject, os.homedir()))
 				: undefined;
 
@@ -910,9 +939,12 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			allow: [...allow, ...sessionAllows, ...(projectAllowTrusted ? projectAllow : [])],
 			classifyAllShell: autoConfig?.classifyAllShell,
 			resolvedSubject,
+			// The child's own cwd (a worktree, if isolated) is its working directory.
+			resolvedCwd: resolveForContainment(cwd),
 			planFilePath,
 			memoryDirPath,
 			scratchpadDirPath,
+			resultsDirPath,
 		});
 
 		const floorReason =
@@ -970,11 +1002,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// Name the asking agent: two children prompting back-to-back are otherwise
 		// indistinguishable on screen.
 		const who = call.agent ? `subagent ${call.agent}'s` : "a subagent's";
-		const title = pausedResume
-			? `Auto mode is paused after repeated blocks — approve to resume.\n\n  ${who} ${toolName}: ${preview || "(no arguments)"}`
-			: result.cause === "protected-path"
-				? `Allow ${who} ${toolName} to write a protected path?\n\n  ${preview}\n\n  This path configures your tooling or this agent, so allow rules do not pre-approve it.`
-				: `Allow ${who} ${toolName}?\n\n  ${preview || "(no arguments)"}`;
+		const title = askTitle(`${who} ${toolName}`, preview, result.cause, pausedResume);
 		// The child's turn signal dismisses the dialog (as a denial) when the child
 		// is stopped mid-prompt; a prompt whose child is already gone by the time
 		// its turn in the chain comes is skipped outright. Otherwise a dead agent's
