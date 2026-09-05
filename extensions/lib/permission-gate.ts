@@ -29,7 +29,7 @@
  * the child-only `SendMessage`-to-main tool) that must never be gated.
  */
 
-import type { InlineExtension } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, type InlineExtension } from "@earendil-works/pi-coding-agent";
 import { findProjectRoot } from "./git.ts";
 import { memoryDir } from "./memory.ts";
 import { sessionResultsDir } from "./persisted-output.ts";
@@ -41,7 +41,20 @@ import type { PermissionBridge } from "../permissions/subagent-gate.ts";
 import { resolveForContainment, toAbsolute } from "../auto-mode/paths.ts";
 
 /** A directory's realpath for containment, or the path itself when nothing about it resolves. */
-const resolvedOrSelf = (dir: string) => resolveForContainment(dir) ?? dir;
+export const resolvedOrSelf = (dir: string) => resolveForContainment(dir) ?? dir;
+
+/**
+ * Directories protected at runtime, beyond protected-paths.ts's static list:
+ * pi's own agent directory (`getAgentDir()` — `~/.pi/agent` for stock pi,
+ * `~/.onecode/agent` bundled), whose extensions, settings and auth are code
+ * and credentials the harness loads. Literal and resolved spelling, so both
+ * the raw and the realpath'd subject match. One definition for both gates
+ * (PERMISSIONS-REVIEW-2026-09-05 M7).
+ */
+export function runtimeProtectedDirs(): string[] {
+	const agentDir = getAgentDir();
+	return [...new Set([agentDir, resolvedOrSelf(agentDir)])];
+}
 
 /** Tools the runtime itself injects; never gate them. */
 const DEFAULT_INTERNAL_TOOLS = new Set(["structured_output"]);
@@ -86,6 +99,7 @@ export function permissionGateFactory(
 	// `.claude` check turns them into "needs interactive approval" and the
 	// harness blocks its own feature (same rationale as in decide()).
 	const memoryDirPath = memoryDir(home, projectRoot);
+	const protectedDirs = runtimeProtectedDirs();
 
 	return {
 		name: "agent-permission-gate",
@@ -150,6 +164,7 @@ export function permissionGateFactory(
 					// handed a path to must not be judged an outside read. Resolved like
 					// the subject (the tmpdir fallback sits under a symlinked /var on macOS).
 					resultsDirPath: resolvedOrSelf(sessionResultsDir(ctx)),
+					protectedDirs,
 				});
 				if (result.decision === "allow") return undefined;
 				const ruleNote = result.rule ? ` (rule: ${result.rule.raw})` : "";

@@ -437,3 +437,19 @@ describe("containment signal for the recoverability gate (Phase 2)", () => {
 		}
 	});
 });
+
+describe("runtime protected dirs (PERMISSIONS-REVIEW-2026-09-05 M7)", () => {
+	it("escalates a redirect into pi's agent dir when the caller passes it, and stays safe otherwise", () => {
+		const agentDir = join(home, ".pi", "agent");
+		mkdirSync(join(agentDir, "extensions"), { recursive: true });
+		const command = `echo evil > ${agentDir}/extensions/x.ts`;
+		const plain = analyzeShellCommand({ command, cwd, home });
+		expect(plain.protectedPaths).toEqual([]);
+		const guarded = analyzeShellCommand({ command, cwd, home, protectedDirs: [agentDir] });
+		expect(guarded.verdict).toBe("escalate");
+		expect(guarded.protectedPaths).toHaveLength(1);
+		expect(guarded.notes.join(" ")).toContain("protected tooling or agent configuration path");
+		// A redirect elsewhere under ~/.pi is not covered by the dir.
+		expect(analyzeShellCommand({ command: `echo x > ${home}/.pi/notes.txt`, cwd, home, protectedDirs: [agentDir] }).protectedPaths).toEqual([]);
+	});
+});

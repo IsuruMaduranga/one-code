@@ -30,6 +30,13 @@ const PROTECTED_DIRS = [
 	// as generated state moves here, a write that reconfigures the gate must
 	// stay just as guarded in its new home.
 	".onecode",
+	// Run-at-login and on-PATH locations (PERMISSIONS-REVIEW-2026-09-05 M7): a
+	// launchd agent plist runs at the next login, a fish config at the next
+	// shell, and `~/.local/bin` is where the `pi` shim and user tools live.
+	// Lowercase — segments are compared case-folded.
+	"library/launchagents",
+	".config/fish",
+	".local/bin",
 ];
 
 /**
@@ -92,6 +99,8 @@ export { isWritingTool } from "../auto-mode/paths.ts";
  * Whether a path is protected. Matched on path *segments* so the check works
  * for absolute paths, cwd-relative ones, and any depth of nesting — a
  * `packages/app/.vscode/settings.json` is as protected as a top-level one.
+ * pi's own agent directory is protected at runtime, not here — its location
+ * is `getAgentDir()`'s to know (`DecideInput.protectedDirs`).
  */
 export function isProtectedPath(candidate: string, cwd?: string): boolean {
 	const forward = candidate.replace(/\\/g, "/").toLowerCase();

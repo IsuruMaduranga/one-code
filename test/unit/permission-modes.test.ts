@@ -268,16 +268,18 @@ describe("permissionsExtension model_select updates classifier", () => {
 		expect(statusList.length).toBeGreaterThan(0);
 		const lastStatus1 = statusList[statusList.length - 1];
 		expect(lastStatus1.mode).toBe("auto");
-		expect(lastStatus1.classifier).toBe("anthropic/claude-3-5-haiku");
+		// A Sonnet session is screened by a workhorse-or-better model (M6): with
+		// only Haiku cheaper, that is the session model itself.
+		expect(lastStatus1.classifier).toBe("anthropic/claude-3-7-sonnet");
 
 		// 2. Main model changes to OpenAI
 		fake.fire("model_select", { model: openaiGpt5 }, makeCtx(openaiGpt5));
 		const lastStatus2 = statusList[statusList.length - 1];
 		expect(lastStatus2.mode).toBe("auto");
-		expect(lastStatus2.classifier).toBe("openai/gpt-5-mini");
+		expect(lastStatus2.classifier).toBe("openai/gpt-5.5");
 
 		// 3. Banner mode display reflects the updated classifier
-		expect(permissionModeDisplay(lastStatus2)).toBe("auto · classifier 5-mini (planned)");
+		expect(permissionModeDisplay(lastStatus2)).toBe("auto · classifier 5.5 (planned)");
 	});
 
 	it("announces the auto-mode standing reminder when the session STARTS in auto mode", () => {

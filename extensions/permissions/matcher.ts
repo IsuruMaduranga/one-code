@@ -9,7 +9,7 @@
 
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { analyzeShellCommand, hasInjectionSyntax, parseCommand } from "../auto-mode/shell-analysis.ts";
+import { analyzeShellCommand, hasInjectionSyntax, leadTokens, parseCommand, resolvePayload } from "../auto-mode/shell-analysis.ts";
 import { pathArgument } from "../auto-mode/paths.ts";
 import { isProtectedPath, isWritingTool } from "./protected-paths.ts";
 import { expandTilde } from "../lib/paths.ts";
@@ -90,12 +90,13 @@ export interface PermissionRule {
  * Parse "Tool" or "Tool(pattern)". Returns undefined for malformed rules. Tool
  * names may carry `-` and `.` — MCP tools keep their servers' hyphens
  * (`mcp__github__delete-repo`), and a rule naming one used to be dropped
- * silently (review P5).
+ * silently (review P5) — and `:`, the plugin MCP namespace
+ * (`mcp__plugin:name:server__tool`).
  */
 export function parseRule(raw: string): PermissionRule | undefined {
 	const trimmed = raw.trim();
 	if (!trimmed) return undefined;
-	const match = trimmed.match(/^([A-Za-z0-9_.-]+)(?:\((.*)\))?$/s);
+	const match = trimmed.match(/^([A-Za-z0-9_.:-]+)(?:\((.*)\))?$/s);
 	if (!match) return undefined;
 	const [, name, pattern] = match;
 	return { raw: trimmed, tool: normalizeToolName(name), pattern: pattern || undefined };
@@ -220,18 +221,68 @@ export function bashSubcommands(command: string): string[] | undefined {
 	return segments.map((seg) => seg.raw).filter((raw) => raw.length > 0);
 }
 
+/** Shells whose `-c` argument is a nested command line. */
+const SHELL_INTERPRETERS = new Set(["sh", "bash", "zsh", "dash", "ksh", "fish"]);
+
+/** The script a `sh -c '…'` / `bash -lc '…'` invocation runs, if any. */
+function inlineShellScript(args: string[]): string | undefined {
+	for (let i = 0; i < args.length - 1; i++) {
+		if (/^-[a-zA-Z]*c$/.test(args[i])) return args[i + 1];
+	}
+	return undefined;
+}
+
 /**
- * A bash deny/ask rule matches when its pattern covers the WHOLE command or
- * ANY subcommand of it — wrapping `rm -rf x` in `ls && rm -rf x` must not slip
- * past `Bash(rm:*)` (CC: "deny/ask rules must match compound commands so they
- * can't be bypassed"). Unparseable lines are matched as a whole only.
+ * Every spelling of a command line a deny/ask pattern is tested against: the
+ * raw line, each subcommand, and each subcommand's *payload form* — transparent
+ * wrappers peeled (`env`, `command`, `nice`, `timeout`, `xargs`, …), subshell
+ * and group punctuation stripped, the command word reduced to its lowercased
+ * basename (`/bin/rm`, `\rm`, `RM` → `rm`), and a `sh|bash|zsh -c '…'` script
+ * expanded recursively. Claude Code strips the same wrappers before its deny
+ * check (`bashPermissions.ts stripSafeWrappers`); until 2026-09-05 `env rm -f
+ * x` ran past `Bash(rm:*)` here after a plain "Allow bash?" prompt
+ * (PERMISSIONS-REVIEW-2026-09-05 M1). Deny/ask only — an allow rule keeps
+ * matching the literal spelling (findBashAllowRule), so widening here can only
+ * make the gate stricter.
+ */
+export function bashMatchForms(command: string, depth = 0): string[] {
+	const forms = new Set<string>();
+	const trimmed = command.trim();
+	if (!trimmed) return [];
+	forms.add(trimmed);
+	if (depth > 4) return [...forms];
+	const { segments, parseFailed } = parseCommand(trimmed);
+	if (parseFailed) return [...forms];
+	for (const segment of segments) {
+		if (segment.raw) forms.add(segment.raw);
+		const tokens = leadTokens(segment);
+		if (tokens.length === 0) continue;
+		const payload = resolvePayload(tokens);
+		if (!payload.command) continue;
+		const args = payload.args.map((token) => token.value);
+		forms.add([payload.command, ...args].join(" "));
+		if (SHELL_INTERPRETERS.has(payload.command)) {
+			const script = inlineShellScript(args);
+			if (script) for (const form of bashMatchForms(script, depth + 1)) forms.add(form);
+		}
+	}
+	return [...forms];
+}
+
+/**
+ * A bash deny/ask rule matches when its pattern covers the WHOLE command, ANY
+ * subcommand of it, or any subcommand's payload form ({@link bashMatchForms}) —
+ * wrapping `rm -rf x` in `ls && rm -rf x` or `env rm -rf x` must not slip past
+ * `Bash(rm:*)` (CC: "deny/ask rules must match compound commands so they can't
+ * be bypassed"). Unparseable lines are matched as a whole only.
  */
 function bashPatternMatchesAny(pattern: string, command: string): boolean {
-	if (matchesBashPattern(pattern, command)) return true;
-	const subs = bashSubcommands(command);
-	if (!subs || subs.length < 2) return false;
-	return subs.some((sub) => matchesBashPattern(pattern, sub));
+	// decide() tests every deny rule, then every ask rule, against the same
+	// command; the forms depend on the command alone, so the last parse is kept.
+	if (lastForms?.command !== command) lastForms = { command, forms: bashMatchForms(command) };
+	return lastForms.forms.some((form) => matchesBashPattern(pattern, form));
 }
+let lastForms: { command: string; forms: string[] } | undefined;
 
 /**
  * The allow rule that lets a bash command run, or undefined. CC semantics: an
@@ -246,10 +297,12 @@ function bashPatternMatchesAny(pattern: string, command: string): boolean {
  * unparseable line is not covered. The rule returned is the first one that
  * covered a subcommand (for the "allowed by rule …" note).
  */
-export function findBashAllowRule(rules: PermissionRule[], command: string): PermissionRule | undefined {
+export function findBashAllowRule(rules: PermissionRule[], command: string, toolName = "bash"): PermissionRule | undefined {
 	const cmd = command.trim();
 	if (!cmd) return undefined;
-	const bashRules = rules.filter((r) => r.tool === "bash");
+	// `monitor` carries a shell command too and is judged with the same
+	// semantics; its rules are `monitor(...)`, never `bash(...)`.
+	const bashRules = rules.filter((r) => ruleCoversTool(r.tool, toolName));
 	const bare = bashRules.find((r) => !r.pattern);
 	if (bare) return bare;
 	const exact = bashRules.find(
@@ -296,10 +349,82 @@ export function matchesPathPattern(pattern: string, subject: string, cwd: string
 	return false;
 }
 
-/** The argument a rule pattern applies to, per tool. */
+/**
+ * What kind of thing a tool's subject is, which decides how a rule pattern is
+ * matched against it and how a session grant is scoped: a shell command line
+ * (bash-pattern semantics), a filesystem path (path globs against the resolved
+ * forms), a URL (Claude Code's `domain:` form), or plain text (a glob).
+ */
+export type SubjectKind = "command" | "path" | "url" | "text";
+
+export function subjectKind(toolName: string): SubjectKind {
+	const name = normalizeToolName(toolName);
+	if (name === "bash" || name === "monitor") return "command";
+	if (name === "web_fetch") return "url";
+	if (isPathSubjectTool(name)) return "path";
+	return "text";
+}
+
+/** A tool call's arguments as one line, for a prompt that would otherwise read "(no arguments)". */
+function compactArguments(input: Record<string, unknown>): string {
+	if (Object.keys(input).length === 0) return "";
+	try {
+		return JSON.stringify(input);
+	} catch {
+		return "";
+	}
+}
+
+/**
+ * The argument a rule pattern applies to — and the thing the user is shown in
+ * an approval prompt — per tool. Until 2026-09-05 everything but bash fell
+ * back to a `path` argument, so a `web_fetch`, `monitor` or `enter_worktree`
+ * prompt read "(no arguments)" and the user approved blind
+ * (PERMISSIONS-REVIEW-2026-09-05 M5). A tool with none of the named fields
+ * shows its arguments compactly (MCP tools in particular).
+ */
 export function extractSubject(toolName: string, input: Record<string, unknown>): string {
-	if (toolName === "bash") return typeof input.command === "string" ? input.command : "";
-	return pathArgument(input) ?? "";
+	const name = normalizeToolName(toolName);
+	const str = (key: string): string | undefined => (typeof input[key] === "string" ? (input[key] as string) : undefined);
+	switch (name) {
+		case "bash":
+		case "monitor":
+			return str("command") ?? "";
+		case "web_fetch":
+			return str("url") ?? "";
+		case "web_search":
+			return str("query") ?? "";
+		case "enter_worktree":
+			return str("name") ?? str("path") ?? "";
+		case "read_mcp_resource":
+		case "read_mcp_resource_dir":
+			return str("uri") ?? "";
+	}
+	if (isPathSubjectTool(name)) return pathArgument(input) ?? "";
+	return pathArgument(input) ?? compactArguments(input);
+}
+
+/** The lowercased host of a URL, or undefined when it does not parse (a bare `example.com/x` is tried as https). */
+export function urlHost(url: string): string | undefined {
+	for (const candidate of [url, `https://${url}`]) {
+		try {
+			const host = new URL(candidate).hostname.toLowerCase();
+			if (host) return host;
+		} catch {
+			// try the next spelling
+		}
+	}
+	return undefined;
+}
+
+/**
+ * URL rule match: Claude Code's `WebFetch(domain:example.com)` form compares
+ * the URL's host exactly; any other pattern is a glob over the whole URL.
+ */
+function matchesUrlPattern(pattern: string, url: string): boolean {
+	const domain = pattern.match(/^domain:(.+)$/)?.[1]?.trim().toLowerCase();
+	if (domain) return urlHost(url) === domain;
+	return globToRegex(pattern, false).test(url);
 }
 
 /**
@@ -308,10 +433,16 @@ export function extractSubject(toolName: string, input: Record<string, unknown>)
  * arrives case-folded from `resolveForContainment`, and without folding that
  * branch of the check could never match on macOS.
  */
-/** Expand a leading `~/`, resolve against cwd, and case-fold — the same shape
- * `resolveForContainment` folds its output to, so a subject compared here matches. */
+/**
+ * Expand a leading `~/`, resolve against cwd, and case-fold where the
+ * filesystem does (darwin/win32) — the same shape `resolveForContainment`
+ * folds its output to, so a subject compared here matches. Linux stays
+ * case-sensitive: folding there would make `/home/u/PROJECT` read as inside
+ * `/home/u/project`.
+ */
 function toAbsoluteFolded(p: string, cwd: string): string {
-	return resolve(cwd, expandTilde(p, homedir())).toLowerCase();
+	const absolute = resolve(cwd, expandTilde(p, homedir()));
+	return process.platform === "linux" ? absolute : absolute.toLowerCase();
 }
 
 function isPlanFilePath(candidate: string, planFilePath: string, cwd: string): boolean {
@@ -339,11 +470,35 @@ export function isAtOrInsideDir(candidate: string, dir: string, cwd: string): bo
  * subcommand") semantics — allow rules go through {@link findBashAllowRule}.
  */
 export function ruleMatches(rule: PermissionRule, toolName: string, subject: string, cwd: string): boolean {
-	if (rule.tool !== normalizeToolName(toolName)) return false;
+	if (!ruleCoversTool(rule.tool, toolName)) return false;
 	if (!rule.pattern) return true;
 	if (!subject) return false;
-	if (rule.tool === "bash") return bashPatternMatchesAny(rule.pattern, subject);
-	return matchesPathPattern(rule.pattern, subject, cwd);
+	switch (subjectKind(toolName)) {
+		case "command":
+			return bashPatternMatchesAny(rule.pattern, subject);
+		case "path":
+			return matchesPathPattern(rule.pattern, subject, cwd);
+		case "url":
+			return matchesUrlPattern(rule.pattern, subject);
+		case "text":
+			return globToRegex(rule.pattern, false).test(subject);
+	}
+}
+
+/**
+ * Whether a rule's tool covers a call's tool: the same name, or Claude Code's
+ * server-wide MCP form — `mcp__github` covers every `mcp__github__*` tool, and
+ * `mcp__plugin:x:server` the plugin-namespaced form. A rule naming a specific
+ * tool (`mcp__github__delete_repo`, two `__` groups) stays exact. Until
+ * 2026-09-05 the server-wide spelling, the natural way to keep an agent off a
+ * server, matched nothing (PERMISSIONS-REVIEW-2026-09-05 M3).
+ */
+export function ruleCoversTool(ruleTool: string, toolName: string): boolean {
+	const tool = normalizeToolName(toolName);
+	if (ruleTool === tool) return true;
+	if (!ruleTool.startsWith("mcp__")) return false;
+	const server = ruleTool.slice("mcp__".length);
+	return server.length > 0 && !server.includes("__") && tool.startsWith(`${ruleTool}__`);
 }
 
 /** Risk tier drives the unmatched-rule default. */
@@ -467,6 +622,15 @@ export interface DecideInput {
 	 * told to read those files back.
 	 */
 	resultsDirPath?: string;
+	/**
+	 * Directories protected at runtime, beyond the static list in
+	 * protected-paths.ts: pi's own agent directory (`getAgentDir()` — wherever it
+	 * is: `~/.pi/agent` for stock pi, `~/.onecode/agent` bundled), whose
+	 * extensions, settings and auth are code and credentials the harness loads.
+	 * Absolute paths; a write landing inside one is judged like a protected path
+	 * (PERMISSIONS-REVIEW-2026-09-05 M7).
+	 */
+	protectedDirs?: string[];
 }
 
 export interface Decision {
@@ -501,9 +665,12 @@ const PLAN_READ_ONLY_TOOLS = new Set(["web_fetch", "web_search", "list_mcp_resou
  * starts — a child cannot be trusted to refuse a task its parent should not have
  * handed it, and Claude Code evaluates the task description at spawn time for
  * the same reason. Outside auto mode they stay auto-allowed: each child enforces
- * its own permissions by inheriting the mode.
+ * its own permissions by inheriting the mode. `SendMessage` is a delegation
+ * too: a new task handed to a resident agent after its spawn was judged is a
+ * new delegation, and until 2026-09-05 it was never classified
+ * (PERMISSIONS-REVIEW-2026-09-05 L4).
  */
-const DELEGATION_TOOLS = new Set(["Agent", "workflow"]);
+const DELEGATION_TOOLS = new Set(["Agent", "workflow", "SendMessage"]);
 
 /**
  * Interpreters and runners whose arguments are code, so a wildcarded rule over
@@ -526,7 +693,7 @@ const INTERPRETERS_AND_RUNNERS =
 export function isBroadExecutionRule(rule: PermissionRule): boolean {
 	// Delegation rules are dropped outright: a subagent is a fresh agent loop, so
 	// pre-approving one pre-approves whatever that loop decides to do.
-	if (rule.tool === "Agent" || rule.tool === "workflow") return true;
+	if (DELEGATION_TOOLS.has(rule.tool)) return true;
 	if (rule.tool !== "bash") return false;
 
 	if (!rule.pattern) return true;
@@ -590,7 +757,7 @@ export function decide(params: DecideInput): Decision {
 		// exactly read-only. Anything it cannot vouch for is denied as before.
 		// Without this the frontier tier (no grep/find/ls) was left with `read` alone.
 		if (tool === "bash" && subject) {
-			const evidence = analyzeShellCommand({ command: subject, cwd, home: homedir() });
+			const evidence = analyzeShellCommand({ command: subject, cwd, home: homedir(), protectedDirs: params.protectedDirs });
 			if (evidence.verdict === "safe" && evidence.writes.length === 0) return { decision: "allow", cause: "plan-readonly" };
 			// Read-only, but of a path outside the working directory: still a read,
 			// so it is put to the user rather than refused as a plan-mode mutation
@@ -633,7 +800,11 @@ export function decide(params: DecideInput): Decision {
 	// `Edit(.claude/**)` entry cannot pre-approve reconfiguring the agent's own
 	// permissions or planting a git hook. In auto mode they go to the classifier.
 	const protectedTarget = () =>
-		isProtectedPath(subject, cwd) || (params.resolvedSubject ? isProtectedPath(params.resolvedSubject, cwd) : false);
+		[subject, params.resolvedSubject].some(
+			(candidate) =>
+				candidate &&
+				(isProtectedPath(candidate, cwd) || (params.protectedDirs ?? []).some((dir) => isInsideDir(candidate, dir, cwd))),
+		);
 	if (isWritingTool(tool) && subject && protectedTarget()) {
 		if (mode === "dontAsk") return { decision: "deny", cause: "protected-path" };
 		if (mode === "auto") return { decision: "classify", cause: "protected-path" };
@@ -648,12 +819,12 @@ export function decide(params: DecideInput): Decision {
 					return true;
 				})
 			: allow;
-	// Bash allow rules must cover EVERY subcommand of a compound line (CC
-	// semantics); a deny/ask rule above fired on ANY subcommand.
+	// Command allow rules (bash, monitor) must cover EVERY subcommand of a
+	// compound line (CC semantics); a deny/ask rule above fired on ANY subcommand.
 	const allowRule =
-		tool === "bash"
+		subjectKind(tool) === "command"
 			? subject
-				? findBashAllowRule(usableAllow, subject)
+				? findBashAllowRule(usableAllow, subject, tool)
 				: undefined
 			: usableAllow.find((r) => ruleMatches(r, toolName, subject, cwd));
 	if (allowRule) return { decision: "allow", rule: allowRule, cause: "rule" };

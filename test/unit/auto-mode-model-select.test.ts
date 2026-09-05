@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	classifierCandidates,
+	classifierTierFloor,
 	describeCandidate,
 	findConfigured,
 	isModelUnavailableError,
@@ -18,15 +19,18 @@ const pickFull = (available: any[], sessionModel: any, configured?: string, conf
 	classifierCandidates({ available, sessionModel, configured, configuredSetForContainment });
 
 describe("classifierCandidates: provider containment", () => {
-	it("screens with the cheapest capable same-provider model", () => {
-		// mini is the cheap tier; nano is tiny (excluded); gpt-5.5 is the session.
+	it("screens with the cheapest same-provider model that meets the tier floor", () => {
+		// gpt-5.5 (workhorse) is the session, so the floor is workhorse: the cheaper
+		// codex variant screens; mini (cheap) and nano (tiny) are excluded.
 		const available = [
 			model("openai", "gpt-5.5", 10),
+			model("openai", "gpt-5.5-codex", 5),
 			model("openai", "gpt-5-mini", 0.25),
 			model("openai", "gpt-5-nano", 0.05),
 		];
 		const chain = pick(available, available[0]);
 		expect(chain[0]).toMatchObject({ model: available[1], source: "economical" });
+		expect(chain.every((c) => !/mini|nano/.test(c.model.id))).toBe(true);
 	});
 
 	it("never leaves the session's provider on its own initiative", () => {
@@ -81,11 +85,12 @@ describe("classifierCandidates: gateway family containment", () => {
 		// and CLAUDE.md to a vendor they did not pick.
 		const available = [
 			model("openrouter", "openai/gpt-5.1", 1.25),
+			model("openrouter", "openai/gpt-5.1-codex", 1),
 			model("openrouter", "openai/gpt-5-mini", 0.25),
 			model("openrouter", "anthropic/claude-haiku-4.5", 1),
 		];
 		const chain = pick(available, model("openrouter", "openai/gpt-5.1", 1.25));
-		expect(chain[0].model.id).toBe("openai/gpt-5-mini");
+		expect(chain[0].model.id).toBe("openai/gpt-5.1-codex");
 		for (const candidate of chain) {
 			expect(candidate.model.id.startsWith("openai/"), candidate.model.id).toBe(true);
 		}
@@ -112,21 +117,31 @@ describe("classifierCandidates: gateway family containment", () => {
 	});
 });
 
-describe("classifierCandidates: tier preference (cheap → workhorse → frontier, never tiny)", () => {
+describe("classifierCandidates: tier floor (workhorse-or-better sessions get a workhorse-or-better screener, never tiny)", () => {
 	const anthropic = [
 		model("anthropic", "claude-opus-4-8", 15), // frontier
 		model("anthropic", "claude-sonnet-5", 3), // workhorse
 		model("anthropic", "claude-haiku-4-5", 1), // cheap
 	];
 
-	it("screens an Opus session with Haiku (cheapest capable tier)", () => {
+	it("screens an Opus session with Sonnet, never Haiku (Claude Code's min(main, sonnet))", () => {
+		// PERMISSIONS-REVIEW-2026-09-05 M6: the same rm -rf graded 62 on Sonnet and
+		// ~22 on Haiku; the cheapest model is not the boundary a Sonnet+ session gets.
 		const chain = pick(anthropic, anthropic[0]);
-		expect(chain[0]).toMatchObject({ model: anthropic[2], source: "economical" });
+		expect(chain[0]).toMatchObject({ model: anthropic[1], source: "economical" });
+		expect(chain.every((c) => c.model.id !== "claude-haiku-4-5")).toBe(true);
 	});
 
-	it("screens a Sonnet session with Haiku too (cheap beats the session's own tier)", () => {
+	it("screens a Sonnet session with itself (nothing cheaper meets the workhorse floor)", () => {
 		const chain = pick(anthropic, anthropic[1]);
-		expect(chain[0].model).toMatchObject({ id: "claude-haiku-4-5" });
+		expect(chain).toHaveLength(1);
+		expect(chain[0]).toMatchObject({ model: anthropic[1], source: "session" });
+	});
+
+	it("floor is workhorse for workhorse and frontier sessions, cheap for cheap ones", () => {
+		expect(classifierTierFloor(anthropic[0])).toBe("workhorse");
+		expect(classifierTierFloor(anthropic[1])).toBe("workhorse");
+		expect(classifierTierFloor(anthropic[2])).toBe("cheap");
 	});
 
 	it("screens a Haiku session with itself (nothing cheaper and capable)", () => {
@@ -152,9 +167,9 @@ describe("classifierCandidates: tier preference (cheap → workhorse → frontie
 		expect(chain.every((c) => c.model.id !== "gpt-5-nano")).toBe(true);
 	});
 
-	it("prefers a cheap-tier model over a cheaper tiny one", () => {
+	it("prefers a cheap-tier model over a cheaper tiny one (cheap session)", () => {
 		const available = [
-			model("openai", "gpt-5.5", 10),
+			model("openai", "gpt-5.1-mini", 1), // cheap session → cheap floor
 			model("openai", "gpt-5-mini", 0.25), // cheap
 			model("openai", "gpt-5-nano", 0.05), // tiny, cheaper
 		];
@@ -168,6 +183,7 @@ describe("classifierCandidates: cost", () => {
 	it("never selects a model more expensive than the session's own", () => {
 		const available = [
 			model("anthropic", "claude-haiku-4-5", 1),
+			model("anthropic", "claude-sonnet-5", 3),
 			model("anthropic", "claude-fable-5", 15),
 			model("anthropic", "claude-opus-5", 30),
 		];
@@ -175,7 +191,7 @@ describe("classifierCandidates: cost", () => {
 		for (const candidate of chain) {
 			expect(candidate.model.cost?.input ?? 0, candidate.model.id).toBeLessThanOrEqual(15);
 		}
-		expect(chain[0].model.id).toBe("claude-haiku-4-5");
+		expect(chain[0].model.id).toBe("claude-sonnet-5");
 	});
 
 	it("treats sentinel and zero prices as unpriced, not as cheap", () => {
@@ -209,15 +225,15 @@ describe("classifierCandidates: unsuitable variants", () => {
 		// Batch endpoints are asynchronous — a blocking gate would wait out its
 		// timeout — and they are systematically cheaper, so cost ranking prefers them.
 		const available = [
-			model("openrouter", "anthropic/claude-haiku-4.5:batch", 0.5),
-			model("openrouter", "anthropic/claude-haiku-4.5", 1),
+			model("openrouter", "anthropic/claude-sonnet-4.6:batch", 1),
+			model("openrouter", "anthropic/claude-sonnet-4.6", 2),
 			model("openrouter", "anthropic/claude-fable-5", 3),
 		];
 		const chain = pick(available, model("openrouter", "anthropic/claude-fable-5", 3));
 		for (const candidate of chain) {
 			expect(candidate.model.id, candidate.model.id).not.toContain(":batch");
 		}
-		expect(chain[0].model.id).toBe("anthropic/claude-haiku-4.5");
+		expect(chain[0].model.id).toBe("anthropic/claude-sonnet-4.6");
 	});
 
 	it("also skips :free, :online and :thinking variants", () => {
@@ -305,10 +321,10 @@ describe("describeCandidate", () => {
 			"autoMode.classifierModel",
 		);
 		expect(describeCandidate({ model: model("groq", "llama-3.3-70b-versatile", 0.6), source: "session" })).toContain(
-			"no cheaper capable model within",
+			"nothing cheaper within",
 		);
 		expect(describeCandidate({ model: model("openai", "gpt-5-mini", 0.25), source: "economical" })).toContain(
-			"cheapest capable model within",
+			"cheapest model within",
 		);
 	});
 });

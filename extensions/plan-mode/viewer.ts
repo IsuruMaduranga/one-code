@@ -75,7 +75,14 @@ export function clampOffset(offset: number, total: number, visible: number): num
  * mode — the pre-auto-option behavior — never silently switch the session
  * into a more permissive mode.
  */
-export function initialPlanChoice(options: readonly { mode?: string }[]): PlanChoice {
+/**
+ * The pre-selected choice: the option that restores the mode the session was
+ * in before planning when one is offered (Claude Code's ExitPlanMode restores
+ * `prePlanMode`), else "manual approvals", else the first option.
+ */
+export function initialPlanChoice(options: readonly { mode?: string; restore?: boolean }[]): PlanChoice {
+	const restore = options.findIndex((o) => o.restore);
+	if (restore >= 0) return restore;
 	const index = options.findIndex((o) => o.mode === "default");
 	return index >= 0 ? index : 0;
 }

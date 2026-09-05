@@ -49,8 +49,12 @@ const request = {
 	environment: config.environment,
 };
 
-/** An openai session where the chain is: gpt-5-mini (provider default) → session. */
-const sessionModel = model("openai", "gpt-5.1", 10);
+/**
+ * An openai session where the chain is: gpt-5-mini (provider default) → session.
+ * The session is itself cheap-tier so the classifier tier floor (M6) admits the
+ * cheaper mini; a workhorse session would be screened by a workhorse.
+ */
+const sessionModel = model("openai", "gpt-5.1-mini", 10);
 const miniModel = model("openai", "gpt-5-mini", 0.25);
 const tinyModel = model("openai", "my-tiny-model", 0.01);
 
@@ -98,7 +102,7 @@ describe("classify: pinning and fallback", () => {
 		const verdict = await classify(request, deps);
 		expect(verdict.decision).toBe("allow");
 		expect(deps.state.rejected.has("openai/gpt-5-mini")).toBe(true);
-		expect(deps.state.pinned?.id).toBe("gpt-5.1");
+		expect(deps.state.pinned?.id).toBe("gpt-5.1-mini");
 		expect(notices.some((n) => n.includes("cannot use openai/gpt-5-mini"))).toBe(true);
 	});
 
@@ -185,14 +189,14 @@ describe("classify: pinning and fallback", () => {
 	it("retries the session model when every candidate has been rejected — never the cost-ranked pick", async () => {
 		const { deps } = makeDeps();
 		deps.state.rejected.add("openai/gpt-5-mini");
-		deps.state.rejected.add("openai/gpt-5.1");
+		deps.state.rejected.add("openai/gpt-5.1-mini");
 		deps.state.rejected.add("openai/my-tiny-model");
 
 		completeMock.mockResolvedValue(allowReply());
 		const verdict = await classify(request, deps);
 		expect(verdict.decision).toBe("allow");
 		expect(completeMock).toHaveBeenCalledTimes(1);
-		expect((completeMock.mock.calls[0]?.[0] as any).id).toBe("gpt-5.1");
+		expect((completeMock.mock.calls[0]?.[0] as any).id).toBe("gpt-5.1-mini");
 	});
 
 	it("walks auth failures the same way as provider rejections", async () => {
@@ -207,7 +211,7 @@ describe("classify: pinning and fallback", () => {
 		const verdict = await classify(request, deps);
 		expect(verdict.decision).toBe("allow");
 		expect(deps.state.rejected.has("openai/gpt-5-mini")).toBe(true);
-		expect(deps.state.pinned?.id).toBe("gpt-5.1");
+		expect(deps.state.pinned?.id).toBe("gpt-5.1-mini");
 	});
 });
 

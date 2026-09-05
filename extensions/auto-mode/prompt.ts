@@ -141,8 +141,8 @@ export function normalizeQuote(value: string): string {
 	const text = value
 		.replace(/^[\s"'`\u201c\u201d\u2018\u2019\u00ab\u00bb]+/, "")
 		.replace(/["'`\u201c\u201d\u2018\u2019\u00ab\u00bb\s.,:;]+$/, "")
-		.replace(/^(\u2026|\.{3})\s*/, "")
-		.replace(/\s*(\u2026|\.{3})$/, "");
+		.replace(/^(\u2026|\.{3,})\s*/, "")
+		.replace(/\s*(\u2026|\.{3,})$/, "");
 	return normalizeName(text);
 }
 
@@ -166,10 +166,21 @@ export function intentQuoted(intent: string, userMessages: string[]): boolean {
 		.split(/\r?\n/)
 		.map((line) => normalizeQuote(line))
 		.filter((line) => line.length > 0);
-	if (lines.length < 2) return false;
-	// Every line must come from the SAME message: two authorizations from
-	// different turns stitched together are not one statement of intent.
-	return messages.some((message) => lines.every((line) => line.length >= INTENT_MIN_CHARS && message.includes(line)));
+	if (lines.length < 2 || lines.some((line) => line.length < INTENT_MIN_CHARS)) return false;
+	// Every line must come from the SAME message, IN ORDER: two authorizations
+	// from different turns stitched together are not one statement of intent,
+	// and neither is a later clause pasted in front of an earlier one ("edit
+	// config.yaml" + "touch secrets.yaml" lifted out of "under no circumstances
+	// touch secrets.yaml" must not verify because each is a substring somewhere).
+	return messages.some((message) => {
+		let cursor = 0;
+		for (const line of lines) {
+			const at = message.indexOf(line, cursor);
+			if (at < 0) return false;
+			cursor = at + line.length;
+		}
+		return true;
+	});
 }
 
 /**

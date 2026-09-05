@@ -76,6 +76,14 @@ export class PauseTracker {
 		return this.paused;
 	}
 
+	/** Forget everything — a new session (`/clear`, `/resume`) starts with a clean record. */
+	reset(): void {
+		this.consecutive = 0;
+		this.total = 0;
+		this.paused = false;
+		this.denials.length = 0;
+	}
+
 	/** Most recent first, for the `/permissions` "recently denied" listing. */
 	recentDenials(limit = 10): Denial[] {
 		return this.denials.slice(-limit).reverse();

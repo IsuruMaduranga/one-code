@@ -165,6 +165,16 @@ describe("parseStage2", () => {
 		expect(parseStage2(stitched, index, twoMessages).ruleId).toBe("intent-unverified");
 		// Short lines cannot rescue a joined quote that is not itself in the message.
 		expect(parseStage2("<severity>10</severity><intent>Delete\nthe\nlockfile</intent>", index, messages).ruleId).toBe("intent-unverified");
+		// The lines must appear in the message IN ORDER: two substrings lifted out of
+		// sequence — one of them from a negated clause — are not what the user said.
+		const negated = ["You may edit config.yaml. Under no circumstances touch secrets.yaml."];
+		const outOfOrder = "<severity>10</severity><intent>touch secrets.yaml\nYou may edit config.yaml</intent>";
+		expect(parseStage2(outOfOrder, index, negated).ruleId).toBe("intent-unverified");
+		const inOrder = "<severity>10</severity><intent>You may edit config.yaml.\nUnder no circumstances touch secrets.yaml.</intent>";
+		expect(parseStage2(inOrder, index, negated).tier).toBe("intent");
+		// An ellipsis of more than three dots is still an ellipsis.
+		expect(parseStage2('<severity>10</severity><intent>"....I mean"</intent>', index, messages).ruleId).toBe("intent-unverified"); // too short
+		expect(parseStage2("<severity>10</severity><intent>....remove the lockfile too, I mean it.</intent>", index, messages).tier).toBe("intent");
 	});
 
 	it("keeps the full intent text in raw for an unverified quote", () => {

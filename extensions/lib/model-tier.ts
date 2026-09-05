@@ -239,6 +239,16 @@ export function economicalContainedCandidates(
 /** No CC_PROMPT_TIER override: automatic model *selection* always uses intrinsic tiers. */
 const INTRINSIC_TIER_ENV: NodeJS.ProcessEnv = Object.freeze({}) as NodeJS.ProcessEnv;
 
+/** A model's own tier, CC_PROMPT_TIER ignored — what selection judges a candidate by. */
+export function intrinsicTier(model: Model<Api>): PromptTier {
+	return resolveModelTier(model, INTRINSIC_TIER_ENV);
+}
+
+/** Whether `tier` is at least as capable as `floor` (frontier ≥ workhorse ≥ cheap ≥ tiny). */
+export function atLeastTier(tier: PromptTier, floor: PromptTier): boolean {
+	return TIER_RANK[tier] <= TIER_RANK[floor];
+}
+
 /**
  * The budget-gated form the automatic secondary-model pickers all share: same as
  * `economicalContainedCandidates`, minus the session model itself and anything

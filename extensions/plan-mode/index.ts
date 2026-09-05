@@ -41,8 +41,28 @@ const PLAN_FILE_ENTRY = "one-code:plan-mode-file";
 
 const PLANS_DIR = () => join(oneCodeStateDir(), "plans");
 
+/** How each mode is named in the approval choices. */
+const MODE_NAMES: Record<PermissionMode, string> = {
+	default: "manual approvals",
+	acceptEdits: "auto-accept edits",
+	plan: "plan mode",
+	auto: "auto mode",
+	bypassPermissions: "bypass permissions",
+	dontAsk: "dontAsk",
+};
+
 export default function planModeExtension(pi: ExtensionAPI) {
-	let currentMode = "default";
+	/** The last mode broadcast by permissions; undefined until the first status arrives. */
+	let currentMode: string | undefined;
+	/**
+	 * The mode the session was in when it entered plan mode, offered first on
+	 * exit (Claude Code's ExitPlanMode restores `prePlanMode`). Unknown for a
+	 * session that STARTED in plan mode — the first status seen is plan itself —
+	 * so that session gets the fixed list. Until 2026-09-05 the exit could only
+	 * escalate: a default-mode session that planned was offered auto
+	 * (PERMISSIONS-REVIEW-2026-09-05 M4).
+	 */
+	let modeBeforePlan: PermissionMode | undefined;
 	let planFilePath: string | undefined;
 
 	/** Restore the branch's plan file, else allocate a fresh slug. */
@@ -85,6 +105,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
 		if (typeof status?.mode !== "string") return;
 		const previous = currentMode;
 		currentMode = status.mode;
+		if (currentMode === "plan" && previous !== "plan") modeBeforePlan = previous as PermissionMode | undefined;
 		// Entering plan mode mid-turn: permissions' setMode has just dropped the
 		// shared "permission-mode" key (before broadcasting this status, so this
 		// re-add is not undone) and will announce the change on the next tool
@@ -170,25 +191,37 @@ export default function planModeExtension(pi: ExtensionAPI) {
 				};
 			}
 
+			// Plan approval is the user's: with no UI there is no one to approve, and
+			// until 2026-09-05 the model exited plan mode by itself here — a
+			// `-p --permission-mode plan` run was read-only in name only, since the
+			// user's allow rules applied the moment the mode became default
+			// (PERMISSIONS-REVIEW-2026-09-05 M4, measured: `git add -A` ran). The
+			// session stays in plan mode; the plan file is the run's product.
 			if (!ctx.hasUI) {
-				pi.events.emit(MODE_CHANNEL, { mode: "default" });
 				return {
 					content: [
-						{ type: "text", text: "Non-interactive session: plan recorded and plan mode exited. Proceed." },
+						{
+							type: "text",
+							text: `Plan approval needs an interactive session, and this one has no user to approve it. The session stays in plan mode; the plan is recorded at ${path} for the user to review. Do not try to implement it here.`,
+						},
 					],
-					details: { plan, approved: true },
+					details: { planFilePath: path, plan, approved: false },
+					isError: true,
 				};
 			}
 
-			// Auto mode leads the list when a classifier model is reachable — the
-			// same gate the mode cycle uses (permissions/index.ts autoInCycle). Each
-			// approving choice carries the mode it switches to; the final "Keep
-			// planning" choice has none and leaves the session in plan mode.
+			// The mode the session was in before planning leads the list (Claude
+			// Code restores it), then auto mode when a classifier model is reachable —
+			// the same gate the mode cycle uses (permissions/index.ts autoInCycle) —
+			// and the fixed choices. Each approving choice carries the mode it
+			// switches to; the final "Keep planning" choice has none and leaves the
+			// session in plan mode.
 			const autoAvailable = ctx.modelRegistry.getAvailable().length > 0;
-			const options: { label: string; mode?: PermissionMode }[] = [
-				...(autoAvailable ? [{ label: "Approve — auto mode", mode: "auto" as const }] : []),
-				{ label: "Approve — auto-accept edits", mode: "acceptEdits" },
-				{ label: "Approve — manual approvals", mode: "default" },
+			const restore = modeBeforePlan && (modeBeforePlan !== "auto" || autoAvailable) ? modeBeforePlan : undefined;
+			const fixedModes: PermissionMode[] = [...(autoAvailable ? (["auto"] as const) : []), "acceptEdits", "default"];
+			const options: { label: string; mode?: PermissionMode; restore?: boolean }[] = [
+				...(restore ? [{ label: `Approve — back to ${MODE_NAMES[restore]} (the mode before planning)`, mode: restore, restore: true }] : []),
+				...fixedModes.filter((mode) => mode !== restore).map((mode) => ({ label: `Approve — ${MODE_NAMES[mode]}`, mode })),
 				{ label: "Keep planning" },
 			];
 			const choices = options.map((o) => o.label);

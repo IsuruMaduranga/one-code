@@ -34,7 +34,7 @@ import {
 	modelIdentity,
 	modelSpec as spec,
 } from "../lib/model-policy.ts";
-import { cheaperContainedCandidates } from "../lib/model-tier.ts";
+import { atLeastTier, cheaperContainedCandidates, intrinsicTier, type PromptTier } from "../lib/model-tier.ts";
 
 export { findConfigured } from "../lib/model-policy.ts";
 
@@ -78,11 +78,17 @@ export interface ClassifierNotice {
  * degrades to "correct but not cheap" rather than to "broken".
  *
  * The automatic pick is the SAME tier selector subagents use — the cheapest
- * *capable* same-provider model (cheap → workhorse → frontier, never `tiny`),
- * so a session screens and delegates on one economical model. That closes the
- * capability floor `docs/decisions/auto-mode.md` recorded as still-missing: a
- * sub-Haiku model is a weak security boundary, so automatic selection never
- * lands there.
+ * *capable* same-provider model (cheap → workhorse → frontier, never `tiny`) —
+ * with one floor of its own ({@link classifierTierFloor}): a session on a
+ * workhorse-or-better model is screened by a workhorse-or-better model, Claude
+ * Code's `min(main, sonnet)`. `docs/decisions/auto-mode.md` measured the same
+ * `rm -rf` grading stage-1 62 on Sonnet and ~22 on Haiku — "a weak classifier
+ * is a weak boundary" — yet until 2026-09-05 the selector picked Haiku even
+ * when the session itself was Sonnet, so the gate's threshold behaviour
+ * depended on which model happened to be cheapest (PERMISSIONS-REVIEW-2026-09-05
+ * M6). A cheap session keeps a cheap screener (nothing cheaper and capable
+ * exists), and `autoMode.classifierModel` overrides either way. The `tiny`
+ * exclusion is the capability floor `auto-mode.md` recorded as still-missing.
  */
 export function classifierCandidates({
 	available,
@@ -135,7 +141,10 @@ export function classifierCandidates({
 	//    the session model itself, so an unpriced provider yields nothing here and
 	//    the session model (step 3) screens the calls.
 	if (sessionModel) {
-		for (const model of cheaperContainedCandidates(available, sessionModel)) push(model, "economical");
+		const floor = classifierTierFloor(sessionModel);
+		for (const model of cheaperContainedCandidates(available, sessionModel)) {
+			if (atLeastTier(intrinsicTier(model), floor)) push(model, "economical");
+		}
 	}
 
 	// 3. The session's own model: always correct, just not cheap. Terminal fallback,
@@ -159,6 +168,17 @@ export function classifierCandidates({
 	}
 
 	return { candidates, notices };
+}
+
+/**
+ * The weakest tier the automatic classifier may run on for a session: workhorse
+ * when the session itself is workhorse or frontier (Claude Code's
+ * `min(main, sonnet)`), cheap otherwise (a cheap session has nothing cheaper
+ * and capable to screen it; `tiny` is excluded upstream regardless).
+ */
+export function classifierTierFloor(sessionModel: Model<Api>): PromptTier {
+	const tier = intrinsicTier(sessionModel);
+	return tier === "frontier" || tier === "workhorse" ? "workhorse" : "cheap";
 }
 
 /**
@@ -187,9 +207,9 @@ export function describeCandidate(candidate: Candidate): string {
 		case "configured":
 			return `${name} (from autoMode.classifierModel)`;
 		case "economical":
-			return `${name} (cheapest capable model within ${where})`;
+			return `${name} (cheapest model within ${where} no weaker than the session's tier floor)`;
 		case "session":
-			return `${name} (this session's model — no cheaper capable model within ${where})`;
+			return `${name} (this session's model — nothing cheaper within ${where} meets the tier floor)`;
 	}
 }
 

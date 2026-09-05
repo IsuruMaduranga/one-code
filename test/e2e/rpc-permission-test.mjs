@@ -3,7 +3,8 @@
  * E2E: drive pi in RPC mode, answer the permission prompt programmatically.
  *
  * Usage: node rpc-permission-test.mjs <answer> <workdir>
- *   answer: "Yes" | "Yes, don't ask again this session" | "No, tell the agent what to do differently"
+ *   answer: "Yes" | the scoped grant label (starts "Yes, and …", see
+ *           extensions/permissions/session-grant.ts) | "No, tell the agent what to do differently"
  *
  * Prints PROMPT_SEEN when the permission select arrives, then ANSWERED,
  * then AGENT_DONE when the turn completes. Exits 0 on success.

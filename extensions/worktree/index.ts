@@ -106,7 +106,7 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 		}
 		const { originalCommand } = rewriteToolInput(event.toolName, event.input as Record<string, unknown>, state.path);
 		if (originalCommand !== undefined) {
-			const record: OriginalCommandRecord = { toolCallId: event.toolCallId, command: originalCommand };
+			const record: OriginalCommandRecord = { toolCallId: event.toolCallId, command: originalCommand, cwd: state.path };
 			pi.events.emit(ORIGINAL_COMMAND_CHANNEL, record);
 		}
 	});

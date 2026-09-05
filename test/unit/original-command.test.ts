@@ -23,8 +23,8 @@ describe("trackOriginalCommands", () => {
 	it("resolves a published original by toolCallId and nothing else", () => {
 		const pi = fakeBus();
 		const store = trackOriginalCommands(pi);
-		pi.events.emit(ORIGINAL_COMMAND_CHANNEL, { toolCallId: "call_1", command: "npm test" });
-		expect(store.get("call_1")).toBe("npm test");
+		pi.events.emit(ORIGINAL_COMMAND_CHANNEL, { toolCallId: "call_1", command: "npm test", cwd: "/wt" });
+		expect(store.get("call_1")).toEqual({ command: "npm test", cwd: "/wt" });
 		expect(store.get("call_2")).toBeUndefined();
 	});
 
@@ -42,7 +42,7 @@ describe("trackOriginalCommands", () => {
 		const store = trackOriginalCommands(pi);
 		for (let i = 0; i < 300; i++) pi.events.emit(ORIGINAL_COMMAND_CHANNEL, { toolCallId: `c${i}`, command: `cmd ${i}` });
 		expect(store.get("c0")).toBeUndefined();
-		expect(store.get("c299")).toBe("cmd 299");
+		expect(store.get("c299")?.command).toBe("cmd 299");
 	});
 });
 

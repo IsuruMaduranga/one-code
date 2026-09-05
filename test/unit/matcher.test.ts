@@ -688,3 +688,136 @@ describe("decide", () => {
 		});
 	});
 });
+
+describe("PERMISSIONS-REVIEW-2026-09-05 medium findings", () => {
+	const base = { subject: "", cwd: CWD, mode: "default" as const, deny: [], ask: [], allow: [] };
+
+	describe("M1: deny/ask rules see through wrappers, paths, subshells and sh -c", () => {
+		const deny = parseRules(["Bash(rm:*)"]);
+		const denied = (command: string) => decide({ ...base, toolName: "bash", subject: command, deny }).decision;
+
+		it("denies every spelling of rm the review measured slipping through", () => {
+			for (const command of [
+				"rm -rf x",
+				"env rm -rf x",
+				"\\rm -rf x",
+				"/bin/rm -rf x",
+				"command rm -rf x",
+				'sh -c "rm -rf x"',
+				"bash -lc 'rm -rf x'",
+				"(rm -rf x)",
+				"ls && { rm -rf x; }",
+				"RM -rf x",
+				"ls; rm -rf x",
+				"timeout 30 rm -rf x",
+				"nice -n 10 rm -rf x",
+				"xargs rm -rf",
+				'sh -c "ls && env rm -rf x"',
+			]) {
+				expect(denied(command), command).toBe("deny");
+			}
+		});
+
+		it("does not over-match unrelated commands", () => {
+			for (const command of ["git rm --cached a", "echo rm", "grep rm README.md", "ls"]) {
+				expect(denied(command), command).not.toBe("deny");
+			}
+		});
+
+		it("widens deny/ask only — allow rules still need the literal spelling", () => {
+			const allow = parseRules(["Bash(npm test:*)"]);
+			expect(decide({ ...base, toolName: "bash", subject: "npm test", allow }).decision).toBe("allow");
+			expect(decide({ ...base, toolName: "bash", subject: "env npm test", allow }).decision).toBe("ask");
+			expect(decide({ ...base, toolName: "bash", subject: "(npm test)", allow }).decision).toBe("ask");
+		});
+
+		it("an ask rule fires through a wrapper too, so auto mode cannot auto-approve it", () => {
+			const ask = parseRules(["Bash(git push:*)"]);
+			const d = decide({ ...base, mode: "auto", toolName: "bash", subject: "command git push origin main", ask });
+			expect(d.decision).toBe("ask");
+			expect(d.rule?.raw).toBe("Bash(git push:*)");
+		});
+	});
+
+	describe("M3: server-wide MCP rules", () => {
+		it("mcp__server covers every tool of that server, in deny, allow and ask", () => {
+			expect(decide({ ...base, toolName: "mcp__github__delete_repo", deny: parseRules(["mcp__github"]) }).decision).toBe("deny");
+			expect(
+				decide({ ...base, mode: "bypassPermissions", toolName: "mcp__github__delete_repo", deny: parseRules(["mcp__github"]) }).decision,
+			).toBe("deny");
+			expect(decide({ ...base, toolName: "mcp__github__get_issue", allow: parseRules(["mcp__github"]) }).decision).toBe("allow");
+			const asked = decide({ ...base, mode: "auto", toolName: "mcp__github__get_issue", ask: parseRules(["mcp__github"]) });
+			expect(asked.decision).toBe("ask");
+		});
+
+		it("covers the plugin-namespaced form and stays exact for a specific tool", () => {
+			expect(decide({ ...base, toolName: "mcp__plugin:x:server__tool", deny: parseRules(["mcp__plugin:x:server"]) }).decision).toBe("deny");
+			expect(decide({ ...base, toolName: "mcp__github__get_issue", deny: parseRules(["mcp__github__delete_repo"]) }).decision).toBe("ask");
+			// Another server with a longer name is not a prefix match.
+			expect(decide({ ...base, toolName: "mcp__github2__get_issue", deny: parseRules(["mcp__github"]) }).decision).toBe("ask");
+		});
+	});
+
+	describe("M5: every gated tool has a subject", () => {
+		it("extracts the per-tool subject the prompt shows and rules match", () => {
+			expect(extractSubject("web_fetch", { url: "https://example.com" })).toBe("https://example.com");
+			expect(extractSubject("monitor", { command: "tail -f app.log" })).toBe("tail -f app.log");
+			expect(extractSubject("web_search", { query: "pi agent" })).toBe("pi agent");
+			expect(extractSubject("enter_worktree", { name: "feature-x" })).toBe("feature-x");
+			expect(extractSubject("enter_worktree", { path: "/wt/existing" })).toBe("/wt/existing");
+			expect(extractSubject("read_mcp_resource", { server: "fs", uri: "file:///a" })).toBe("file:///a");
+			expect(extractSubject("mcp__github__create_issue", { title: "x", body: "y" })).toBe('{"title":"x","body":"y"}');
+			expect(extractSubject("exit_worktree", {})).toBe("");
+		});
+
+		it("matches Claude Code's WebFetch(domain:…) rules on the host", () => {
+			const deny = parseRules(["WebFetch(domain:evil.test)"]);
+			expect(decide({ ...base, toolName: "web_fetch", subject: "https://evil.test/x", deny }).decision).toBe("deny");
+			expect(decide({ ...base, toolName: "web_fetch", subject: "https://EVIL.test:8443/y", deny }).decision).toBe("deny");
+			expect(decide({ ...base, toolName: "web_fetch", subject: "https://good.test/x", deny }).decision).toBe("ask");
+			const allow = parseRules(["WebFetch(domain:docs.example.com)"]);
+			expect(decide({ ...base, toolName: "web_fetch", subject: "https://docs.example.com/a", allow }).decision).toBe("allow");
+			expect(decide({ ...base, toolName: "web_fetch", subject: "https://docs.example.com.evil.test/a", allow }).decision).toBe("ask");
+		});
+
+		it("judges monitor's command with bash-rule semantics", () => {
+			const allow = parseRules(["monitor(tail:*)"]);
+			expect(decide({ ...base, toolName: "monitor", subject: "tail -f app.log", allow }).decision).toBe("allow");
+			expect(decide({ ...base, toolName: "monitor", subject: "tail -f app.log && rm -rf x", allow }).decision).toBe("ask");
+			expect(decide({ ...base, toolName: "monitor", subject: "env rm -rf x", deny: parseRules(["monitor(rm:*)"]) }).decision).toBe("deny");
+		});
+	});
+
+	describe("M7: pi's agent directory is protected at runtime", () => {
+		const protectedDirs = ["/home/user/.pi/agent"];
+		it("a write under a runtime protected dir asks (classifies in auto) even in acceptEdits or under an allow rule", () => {
+			const target = "/home/user/.pi/agent/extensions/evil.ts";
+			const d = decide({ ...base, mode: "acceptEdits", toolName: "write", subject: target, protectedDirs });
+			expect(d.decision).toBe("ask");
+			expect(d.cause).toBe("protected-path");
+			expect(decide({ ...base, toolName: "write", subject: target, protectedDirs, allow: parseRules(["Write(//home/**)"]) }).cause).toBe(
+				"protected-path",
+			);
+			expect(decide({ ...base, mode: "auto", toolName: "write", subject: target, protectedDirs }).decision).toBe("classify");
+			expect(decide({ ...base, mode: "dontAsk", toolName: "write", subject: target, protectedDirs }).decision).toBe("deny");
+			// The resolved spelling is judged too.
+			expect(decide({ ...base, toolName: "write", subject: "/tmp/link.ts", resolvedSubject: target, protectedDirs }).cause).toBe("protected-path");
+			// A sibling of the agent dir is not.
+			expect(decide({ ...base, mode: "acceptEdits", toolName: "write", subject: "/home/user/.pi/notes.txt", protectedDirs }).cause).toBe(
+				"working-dir",
+			);
+		});
+	});
+
+	describe("L4: SendMessage is a delegation in auto mode", () => {
+		it("classifies SendMessage in auto and auto-allows it elsewhere", () => {
+			expect(decide({ ...base, mode: "auto", toolName: "SendMessage", subject: "" }).decision).toBe("classify");
+			expect(decide({ ...base, toolName: "SendMessage", subject: "" }).decision).toBe("allow");
+			expect(decide({ ...base, mode: "plan", toolName: "SendMessage", subject: "" }).decision).toBe("allow");
+		});
+		it("drops a bare SendMessage allow rule in auto mode like Agent", () => {
+			expect(isBroadExecutionRule(parseRule("SendMessage")!)).toBe(true);
+			expect(decide({ ...base, mode: "auto", toolName: "SendMessage", subject: "", allow: parseRules(["SendMessage"]) }).decision).toBe("classify");
+		});
+	});
+});

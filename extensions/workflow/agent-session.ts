@@ -27,6 +27,7 @@ import { buildAgentLoader, createSharedModelRuntime, finalAssistantText } from "
 import { modelSpec as modelSpecOf } from "../lib/model-policy.ts";
 import { agentPromptIdentity, PrefixWarmGate, prefixWarmKey } from "../lib/prefix-warm-gate.ts";
 import type { PermissionBridge } from "../permissions/subagent-gate.ts";
+import { localGateMode, MODE_ENV } from "../lib/permission-gate.ts";
 import type { HookBridge } from "../hooks/subagent-bridge.ts";
 import { summarizeArgs } from "../lib/tui-render.ts";
 import { agentDirs, type AgentDefinition, discoverAgents } from "../subagents/agents.ts";
@@ -61,6 +62,47 @@ export interface AgentRunnerOptions {
 	getHookBridge?: () => HookBridge | undefined;
 	/** Each finished agent's dollar cost (review S13: workflow agents never reached the footer). */
 	onUsage?: (cost: number) => void;
+}
+
+/**
+ * Judge one `agent()` prompt as a delegation before the child starts — the
+ * same `Agent` check the main conversation's spawns and a subagent's nested
+ * spawns go through (matcher DELEGATION_TOOLS; subagents/index.ts). The one
+ * `workflow` call was classified when the script was submitted, but every
+ * prompt is computed inside the vm afterwards, often from an earlier agent's
+ * output, and until 2026-09-05 none of them was judged
+ * (PERMISSIONS-REVIEW-2026-09-05 L4). Outside auto mode the bridge allows at
+ * once (Agent is auto-allowed there unless a deny rule names it). Without a
+ * bridge — no publishing parent — the run is allowed unless the live mode is
+ * auto, whose classifier is only reachable through the parent; then it fails
+ * closed. A refusal is thrown as a plain Error, i.e. an agent failure (the
+ * call resolves null, CC semantics), not a WorkflowScriptError: the script's
+ * other agents still run.
+ */
+export async function judgeWorkflowDelegation(input: {
+	bridge: PermissionBridge | undefined;
+	liveMode: string;
+	prompt: string;
+	agentType?: string;
+	label?: string;
+	cwd: string;
+	signal?: AbortSignal;
+}): Promise<void> {
+	if (!input.bridge) {
+		if (input.liveMode === "auto") {
+			throw new Error(
+				"agent() refused: auto mode's classifier is only reachable through the parent session, which this run has no link to",
+			);
+		}
+		return;
+	}
+	const verdict = await input.bridge({
+		toolName: "Agent",
+		input: { subagent_type: input.agentType, prompt: input.prompt, description: input.label },
+		cwd: input.cwd,
+		signal: input.signal,
+	});
+	if (verdict?.block) throw new Error(`agent() refused by the permission gate: ${verdict.reason}`);
 }
 
 /**
@@ -208,6 +250,8 @@ export class AgentRunner {
 		const resolvedModel = modelSpec.model as Model<Api> | undefined;
 		if (resolvedModel?.id) onUpdate?.({ model: resolvedModel.id });
 
+		await this.judgeDelegation(prompt, opts, agentDef, signal);
+
 		let worktree: Worktree | undefined;
 		let cwd = this.options.cwd;
 		if (opts.isolation === "worktree") {
@@ -293,6 +337,18 @@ export class AgentRunner {
 			session.dispose();
 			if (worktree) await cleanupWorktree(this.options.cwd, worktree);
 		}
+	}
+
+	private judgeDelegation(prompt: string, opts: AgentCallOptions, agentDef: AgentDefinition | undefined, signal: AbortSignal): Promise<void> {
+		return judgeWorkflowDelegation({
+			bridge: this.options.getPermissionBridge?.(),
+			liveMode: localGateMode(process.env[MODE_ENV], undefined),
+			prompt,
+			agentType: agentDef?.name,
+			label: opts.label,
+			cwd: this.options.cwd,
+			signal,
+		});
 	}
 
 	private buildPrompt(prompt: string, structured: boolean): string {

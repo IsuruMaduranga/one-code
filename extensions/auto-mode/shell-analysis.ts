@@ -716,12 +716,18 @@ export interface AnalyzeInput {
 	command: string;
 	cwd: string;
 	home: string;
+	/**
+	 * Directories protected at runtime beyond protected-paths.ts's static list
+	 * (pi's own agent dir — permissions/matcher.ts `DecideInput.protectedDirs`).
+	 * A redirect landing inside one escalates like a write to `.git/hooks`.
+	 */
+	protectedDirs?: string[];
 }
 
 /**
  * Classify a shell command. Never denies — see the module contract above.
  */
-export function analyzeShellCommand({ command, cwd, home }: AnalyzeInput): ShellEvidence {
+export function analyzeShellCommand({ command, cwd, home, protectedDirs = [] }: AnalyzeInput): ShellEvidence {
 	const evidence: ShellEvidence = {
 		verdict: "safe",
 		notes: [],
@@ -804,7 +810,11 @@ export function analyzeShellCommand({ command, cwd, home }: AnalyzeInput): Shell
 		// Same list the write/edit tools are gated on: an in-project redirect onto
 		// `.cargo/config.toml`, `.claude/agents/x.md`, or `lefthook.yml` reconfigures
 		// the toolchain or the agent itself, so containment says nothing about it.
-		const protectedTarget = isProtectedPath(absolute, effectiveCwd) || (resolved !== undefined && isProtectedPath(resolved, effectiveCwd));
+		const protectedTarget = [absolute, resolved].some(
+			(candidate) =>
+				candidate !== undefined &&
+				(isProtectedPath(candidate, effectiveCwd) || protectedDirs.some((dir) => isWithin(dir, candidate))),
+		);
 		if (protectedTarget && !evidence.protectedPaths.includes(token)) {
 			evidence.protectedPaths.push(token);
 			escalate(`writes to ${token}, a protected tooling or agent configuration path`);

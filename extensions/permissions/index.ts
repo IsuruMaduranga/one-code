@@ -61,18 +61,18 @@ import {
 	normalizeToolName,
 	parseRule,
 	parseRulesReport,
-	escapeLiteral,
 	type PermissionMode,
 	type PermissionRule,
 	isPathSubjectTool,
 } from "./matcher.ts";
+import { type SessionGrant, sessionGrant } from "./session-grant.ts";
 import { modeBadge, nextMode, PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "./modes.ts";
 import { type ChildToolCall, type ChildGateDecision, SUBAGENT_GATE_CHANNEL } from "./subagent-gate.ts";
 import { trackOriginalCommands } from "../lib/original-command.ts";
 import { MODE_CHANNEL, PLAN_FILE_CHANNEL } from "../lib/plan-mode-channels.ts";
 import { isWritingTool } from "./protected-paths.ts";
 import { loadPermissionSettings, normalizePermissionMode, persistAllowRule, resolveStartupMode } from "./settings.ts";
-import { MODE_ENV } from "../lib/permission-gate.ts";
+import { MODE_ENV, resolvedOrSelf, runtimeProtectedDirs } from "../lib/permission-gate.ts";
 import { describeProjectAllow, persistProjectAllowApproval, projectAllowApproved } from "./project-trust.ts";
 import { findProjectRoot } from "../lib/git.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
@@ -122,7 +122,7 @@ const askTitle = (actor: string, preview: string, cause: string, pausedResume: b
 	if (pausedResume) return `Auto mode is paused after repeated blocks — approve to resume.\n\n  ${actor}: ${preview || "(no arguments)"}`;
 	if (cause === "protected-path")
 		return `Allow ${actor} to write a protected path?\n\n  ${preview}\n\n  This path configures your tooling or this agent, so allow rules do not pre-approve it.`;
-	if (cause === "working-dir") return `Allow ${actor} outside the working directory?\n\n  ${preview}`;
+	if (cause === "working-dir") return `Allow ${actor} outside the working directory?\n\n  ${preview || "(no arguments)"}`;
 	return `Allow ${actor}?\n\n  ${preview || "(no arguments)"}`;
 };
 
@@ -149,8 +149,15 @@ const denyReason = (result: { cause?: string; rule?: { raw?: string } }): string
 const STANDING_REMINDER_MODES: ReadonlySet<PermissionMode> = new Set<PermissionMode>(["plan", "auto"]);
 
 const YES = "Yes";
-const YES_SESSION = "Yes, don't ask again this session";
 const NO = "No, tell the agent what to do differently";
+/**
+ * The ask prompt's options: Yes, the scoped session grant when one exists
+ * (session-grant.ts — none for a protected path, the safety floor, or auto
+ * mode, where a minted rule could not or must not apply), No.
+ */
+const askOptions = (grant: SessionGrant | undefined) => (grant ? [YES, grant.label, NO] : [YES, NO]);
+const approved = (choice: string | undefined, grant: SessionGrant | undefined) =>
+	choice === YES || (grant !== undefined && choice === grant.label);
 
 export default function permissionsExtension(pi: ExtensionAPI) {
 	const notifyTask = createTaskNotifier(pi);
@@ -194,7 +201,14 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	let projectAllowTrusted = false;
 	let projectAllowDeclined = false;
 	let projectRoot = "";
+	/**
+	 * Rules minted by "Yes, and don't ask again … this session" (session-grant.ts).
+	 * Never applied in auto mode: there the classifier is the boundary and a
+	 * standing grant would be a bypass of it (PERMISSIONS-REVIEW-2026-09-05 M2).
+	 * Cleared with the session (L1).
+	 */
 	const sessionAllows: PermissionRule[] = [];
+	const activeSessionAllows = () => (mode === "auto" ? [] : sessionAllows);
 	let unparsableRules: string[] = [];
 	let warnedUnparsable = "";
 	/** Plan mode's one writable file, announced by the plan-mode extension. */
@@ -210,6 +224,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	let resultsDirPath: string | undefined;
 	/** The session cwd's own realpath (macOS /var → /private/var), for decide()'s containment check. */
 	let resolvedCwd: string | undefined;
+	/** pi's own agent directory, protected like the static list (lib/permission-gate.ts runtimeProtectedDirs). */
+	let protectedDirs: string[] = [];
 
 	/**
 	 * Mode changes arrive over the event bus too (plan-mode tools), where no ctx
@@ -270,8 +286,16 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		} satisfies PermissionStatus);
 	};
 
-	/** Auto-mode state. Loaded lazily: most sessions never enter auto mode. */
+	/** Auto-mode state. Loaded lazily by every reader (`autoConfig ??= …`): most sessions never enter auto mode. */
 	let autoConfig: AutoModeConfig | undefined;
+	/**
+	 * `decide()`'s classifyAllShell input, loading the config itself like every
+	 * other reader in this file — until 2026-09-05 the two gate call sites read
+	 * `autoConfig?.classifyAllShell` bare and were correct only because painting
+	 * the badge happened to load it first (PERMISSIONS-REVIEW-2026-09-05 L2).
+	 */
+	const classifyAllShell = (): boolean | undefined =>
+		mode === "auto" ? (autoConfig ??= loadAutoModeConfig(os.homedir())).classifyAllShell : undefined;
 
 	// Drop the cached config and classifier selection state, then refresh the badge.
 	// Shared by the "set classifier model" and "clear" paths.
@@ -410,7 +434,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 
 		let evidence: ShellEvidence | undefined;
 		if (normalizeToolName(toolName) === "bash" && subject) {
-			evidence = analyzeShellCommand({ command: subject, cwd, home });
+			evidence = analyzeShellCommand({ command: subject, cwd, home, protectedDirs });
 			if (evidence.verdict === "safe") {
 				logDecision(ctx, { tool: toolName, subject, outcome: "allow", source: "pre-gate" });
 				return allow();
@@ -603,15 +627,26 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		process.env[MODE_ENV] = mode;
 	};
 
-	pi.on("session_start", (_event, ctx) => {
+	pi.on("session_start", (event, ctx) => {
 		badgeCtx = ctx;
 		lastReviewCtx = ctx;
 		sessionEpoch++;
+		// A new session (`/clear`, `/resume`, a fork) starts with a clean gate: the
+		// previous conversation's user messages are not intent evidence for this
+		// one, its "don't ask again" grants and its pause state do not carry over
+		// (PERMISSIONS-REVIEW-2026-09-05 L1). A reload keeps them — same conversation.
+		if (event.reason !== "reload") {
+			sessionAllows.length = 0;
+			transcript.length = 0;
+			userMessages.length = 0;
+			pauseTracker.reset();
+		}
 		memoryDirPath = projectMemoryDir(ctx.cwd);
 		scratchpadDirPath = sessionScratchpadDir(ctx.cwd, ctx.sessionManager.getSessionId());
 		// Resolved like the subjects compared against it (a symlinked parent, macOS /var).
-		resultsDirPath = resolveForContainment(sessionResultsDir(ctx)) ?? sessionResultsDir(ctx);
+		resultsDirPath = resolvedOrSelf(sessionResultsDir(ctx));
 		resolvedCwd = resolveForContainment(ctx.cwd);
+		protectedDirs = runtimeProtectedDirs();
 		reloadSettings(ctx);
 		applyBadge();
 		// Publish the subagent permission bridge (see subagent-gate.ts). The closure
@@ -701,14 +736,19 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				: undefined;
 		// In a worktree session, worktree's tool_call handler (which runs before this
 		// one) cd-wraps bash commands for execution and publishes the model's
-		// original command over the bus under this call's id. Rule matching must
-		// evaluate that original, not the wrapper — otherwise every configured Bash
-		// rule stops matching for the whole session. The classifier and safety floor
-		// keep reading event.input (the wrapped command that actually runs). The
-		// lookup is by toolCallId on purpose: a value inside `event.input` would be
-		// the model's to write, and rules would match a string of its choosing.
+		// original command — and the worktree it runs in — over the bus under this
+		// call's id. Rule matching, the shell pre-gate, the recoverability judge and
+		// the prompt all evaluate that original against the worktree cwd: matched
+		// against the wrapper every configured Bash rule stopped matching, and
+		// analysed as the wrapper (a `cd` plus a newline) every call escalated to
+		// the classifier and the prompt showed `cd '…' && (…)` (PERMISSIONS-REVIEW-
+		// 2026-09-05 L3). The safety floor keeps reading event.input (the wrapped
+		// command that actually runs). The lookup is by toolCallId on purpose: a
+		// value inside `event.input` would be the model's to write, and rules would
+		// match a string of its choosing.
 		const original = normalizedTool === "bash" ? originalCommands.get(event.toolCallId) : undefined;
-		const matchSubject = original ?? subject;
+		const matchSubject = original?.command ?? subject;
+		const callCwd = original?.cwd ?? ctx.cwd;
 
 		// Record every tool call into the classifier transcript (inputs only). In
 		// auto mode this is the running <transcript> the classifier reads, and this
@@ -716,7 +756,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// model's original command, not the worktree cd-wrapper that actually runs.
 		if (mode === "auto") {
 			const recordedInput =
-				original !== undefined ? { command: original } : (event.input as Record<string, unknown>);
+				original !== undefined ? { command: original.command } : (event.input as Record<string, unknown>);
 			transcript.push({ kind: "tool", tool: normalizedTool, input: recordedInput });
 			capTranscript();
 		}
@@ -725,26 +765,27 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			decide({
 				toolName: event.toolName,
 				subject: matchSubject,
-				cwd: ctx.cwd,
+				cwd: callCwd,
 				mode,
 				deny,
 				ask,
 				allow: allowRules,
-				classifyAllShell: autoConfig?.classifyAllShell,
+				classifyAllShell: classifyAllShell(),
 				resolvedSubject,
 				resolvedCwd,
 				planFilePath,
 				memoryDirPath,
 				scratchpadDirPath,
 				resultsDirPath,
+				protectedDirs,
 			});
-		let result = decideWith([...allow, ...sessionAllows, ...(projectAllowTrusted ? projectAllow : [])]);
+		let result = decideWith([...allow, ...activeSessionAllows(), ...(projectAllowTrusted ? projectAllow : [])]);
 
 		// A repo-shipped allow rule would decide this call: ask the user to trust
 		// the repository's rule list first (once per list; project-trust.ts). No UI
 		// → the rules stay off and the call takes the normal path (fail closed).
 		if (result.decision !== "allow" && !projectAllowTrusted && !projectAllowDeclined && projectAllow.length > 0 && ctx.hasUI) {
-			const withProject = decideWith([...allow, ...sessionAllows, ...projectAllow]);
+			const withProject = decideWith([...allow, ...activeSessionAllows(), ...projectAllow]);
 			if (withProject.decision === "allow" && withProject.rule && projectAllow.includes(withProject.rule)) {
 				const firing = withProject.rule.raw;
 				const { title, message } = describeProjectAllow(projectAllowRaw, firing);
@@ -806,11 +847,14 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				const outcome = await runClassifier(
 					event.toolName,
 					event.input as Record<string, unknown>,
-					subject,
+					matchSubject,
 					ctx,
 					// Protected paths must always be judged; everything else may be cleared
 					// by the deterministic containment fast-path.
 					result.cause !== "protected-path",
+					// A worktree-wrapped command is analysed as the model wrote it, in the
+					// worktree it runs in (the classifier transcript already holds it).
+					original?.cwd ? { cwd: original.cwd } : undefined,
 				);
 				if (outcome.decision === "allow") {
 					pauseTracker.recordAllow();
@@ -827,7 +871,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 
 				const tripped = pauseTracker.recordBlock({
 					toolName: event.toolName,
-					subject,
+					subject: matchSubject,
 					reason: outcome.reason,
 					tier: outcome.tier,
 					ruleId: outcome.ruleId,
@@ -854,42 +898,46 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			return { block: true, reason: DENIED_NON_INTERACTIVE };
 		}
 
-		const preview = previewSubject(subject);
+		const preview = previewSubject(matchSubject);
 		// Reaching a prompt from the classify branch only happens when auto mode is
 		// paused — this is the resume prompt, not a per-action approval.
 		const pausedResume = mode === "auto" && result.decision === "classify";
 		const title = floorReason
 			? `Auto mode never auto-approves this — ${event.toolName} ${floorReason}.\n\n  ${preview}\n\n  Allow it this once?`
 			: askTitle(event.toolName, preview, result.cause, pausedResume);
-		const choice = await serializePrompt(() => ctx.ui.select(title, [YES, YES_SESSION, NO]));
+		const grant = sessionGrant({
+			toolName: normalizedTool,
+			subject: matchSubject,
+			cwd: callCwd,
+			mode,
+			cause: result.cause,
+			floor: floorReason !== undefined,
+			home: os.homedir(),
+		});
+		const choice = await serializePrompt(() => ctx.ui.select(title, askOptions(grant)));
 
 		// The user's answer is itself a gate decision worth recording — it is the
 		// ground truth a drifting classifier gets calibrated against.
 		if (mode === "auto" && (floorReason || pausedResume)) {
 			logDecision(ctx, {
 				tool: event.toolName,
-				subject,
-				outcome: choice === YES || choice === YES_SESSION ? "allow" : "block",
+				subject: matchSubject,
+				outcome: approved(choice, grant) ? "allow" : "block",
 				source: "user",
 				reason: floorReason ?? "resume after pause",
 			});
 		}
 
 		// Approving a prompted call is what resumes a paused auto mode.
-		if (choice === YES || choice === YES_SESSION) {
-			if (mode === "auto") {
-				const wasPaused = pauseTracker.isPaused();
-				pauseTracker.resume();
-				if (wasPaused) applyBadge();
-			}
+		if (approved(choice, grant) && mode === "auto") {
+			const wasPaused = pauseTracker.isPaused();
+			pauseTracker.resume();
+			if (wasPaused) applyBadge();
 		}
 
 		if (choice === YES) return undefined;
-		if (choice === YES_SESSION) {
-			const tool = normalizeToolName(event.toolName);
-			// The approved command, as an exact literal — never a glob.
-			const rule = tool === "bash" && subject ? parseRule(`bash(${escapeLiteral(subject)})`) : parseRule(tool);
-			if (rule) sessionAllows.push(rule);
+		if (grant && choice === grant.label) {
+			sessionAllows.push(grant.rule);
 			return undefined;
 		}
 
@@ -936,8 +984,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			// Same rule set the main handler applies once the user has consented to
 			// the repo's own allow list — a child must not prompt (or, headless, be
 			// denied) for a call the parent would allow (SUBAGENT-REVIEW L5).
-			allow: [...allow, ...sessionAllows, ...(projectAllowTrusted ? projectAllow : [])],
-			classifyAllShell: autoConfig?.classifyAllShell,
+			allow: [...allow, ...activeSessionAllows(), ...(projectAllowTrusted ? projectAllow : [])],
+			classifyAllShell: classifyAllShell(),
 			resolvedSubject,
 			// The child's own cwd (a worktree, if isolated) is its working directory.
 			resolvedCwd: resolveForContainment(cwd),
@@ -945,6 +993,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			memoryDirPath,
 			scratchpadDirPath,
 			resultsDirPath,
+			protectedDirs,
 		});
 
 		const floorReason =
@@ -1009,28 +1058,28 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// dialog stays on screen and every later prompt waits behind it (M5).
 		const childPrompt = <T>(show: () => Promise<T>): Promise<T | undefined> =>
 			serializePrompt(() => (call.signal?.aborted ? Promise.resolve(undefined) : show()));
-		const choice = await childPrompt(() => ctx.ui.select(title, [YES, YES_SESSION, NO], { signal: call.signal }));
+		const grant = sessionGrant({ toolName: normalizedTool, subject, cwd, mode, cause: result.cause, home: os.homedir() });
+		const choice = await childPrompt(() => ctx.ui.select(title, askOptions(grant), { signal: call.signal }));
 		if (call.signal?.aborted) return { block: true, reason: "The agent was stopped while waiting for the user's approval." };
 
 		if (pausedResume) {
 			logDecision(ctx, {
 				tool: toolName,
 				subject,
-				outcome: choice === YES || choice === YES_SESSION ? "allow" : "block",
+				outcome: approved(choice, grant) ? "allow" : "block",
 				source: "user",
 				reason: "resume after pause",
 			});
 			// Approving a prompted call is what resumes a paused auto mode.
-			if (choice === YES || choice === YES_SESSION) {
+			if (approved(choice, grant)) {
 				pauseTracker.resume();
 				applyBadge();
 			}
 		}
 
 		if (choice === YES) return undefined;
-		if (choice === YES_SESSION) {
-			const rule = normalizedTool === "bash" && subject ? parseRule(`bash(${escapeLiteral(subject)})`) : parseRule(normalizedTool);
-			if (rule) sessionAllows.push(rule);
+		if (grant && choice === grant.label) {
+			sessionAllows.push(grant.rule);
 			return undefined;
 		}
 		const feedback = await childPrompt(() => ctx.ui.input("What should the agent do instead?", "Optional — press Esc to skip", { signal: call.signal }));

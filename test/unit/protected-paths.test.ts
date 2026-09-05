@@ -213,3 +213,18 @@ describe("decide: delegation in auto mode", () => {
 		expect(decide({ ...base, mode: "default", toolName: "Agent" }).decision).toBe("allow");
 	});
 });
+
+describe("run-at-login locations (PERMISSIONS-REVIEW-2026-09-05 M7)", () => {
+	it("protects launchd agents, fish config and ~/.local/bin", () => {
+		for (const path of [
+			"/Users/x/Library/LaunchAgents/com.evil.plist",
+			"~/.config/fish/config.fish",
+			"/home/x/.local/bin/pi",
+			".local/bin/tool",
+		]) {
+			expect(isProtectedPath(path), path).toBe(true);
+		}
+		expect(isProtectedPath("/Users/x/Library/Preferences/x.plist")).toBe(false);
+		expect(isProtectedPath("/home/x/.local/share/data.db")).toBe(false);
+	});
+});

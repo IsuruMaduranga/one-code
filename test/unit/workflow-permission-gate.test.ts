@@ -172,3 +172,16 @@ describe("permissionGateFactory — what the bridge call carries (SUBAGENT-REVIE
 		expect(calls[0].signal).toBe(controller.signal);
 	});
 });
+
+describe("runtime protected dirs (PERMISSIONS-REVIEW-2026-09-05 M7)", () => {
+	afterEach(() => vi.unstubAllEnvs());
+
+	it("blocks a write into pi's agent dir (getAgentDir) even in acceptEdits", async () => {
+		const agentDir = mkdtempSync(join(os.tmpdir(), "gate-agent-dir-"));
+		vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
+		const { handler } = buildGateHarness({ permissions: {} });
+		const result = await handler({ toolName: "write", input: { path: join(agentDir, "extensions", "evil.ts") } });
+		expect(result?.block).toBe(true);
+		expect(result?.reason).toMatch(/needs interactive approval/);
+	});
+});

@@ -15,12 +15,19 @@
  * extension boundaries, findings §3); multiple bus listeners are fine.
  */
 
-/** `{ toolCallId, command }` — the pre-wrapper command of one bash call. */
+/** `{ toolCallId, command, cwd }` — the pre-wrapper command of one bash call and the directory it runs in. */
 export const ORIGINAL_COMMAND_CHANNEL = "one-code:bash-original-command";
 
 export interface OriginalCommandRecord {
 	toolCallId: string;
 	command: string;
+	/**
+	 * The directory the wrapper `cd`s into (the worktree). The pre-gate and the
+	 * recoverability judge run on the original command against THIS cwd, so a
+	 * worktree session keeps the containment fast path and the prompt shows the
+	 * command the model wrote, not `cd '…' && (…)` (PERMISSIONS-REVIEW-2026-09-05 L3).
+	 */
+	cwd?: string;
 }
 
 /** Bounded so a long session cannot grow the map without limit. */
@@ -30,17 +37,23 @@ interface EventBusLike {
 	events: { on(channel: string, handler: (payload: unknown) => void): unknown };
 }
 
+/** The published original of one call: the command and, when known, the directory it runs in. */
+export interface OriginalCommand {
+	command: string;
+	cwd?: string;
+}
+
 export interface OriginalCommandStore {
-	/** The model's original command for this call id, when a wrapper published one. */
-	get(toolCallId: string): string | undefined;
+	/** The model's original command (and its cwd) for this call id, when a wrapper published one. */
+	get(toolCallId: string): OriginalCommand | undefined;
 }
 
 export function trackOriginalCommands(pi: EventBusLike): OriginalCommandStore {
-	const byId = new Map<string, string>();
+	const byId = new Map<string, OriginalCommand>();
 	pi.events.on(ORIGINAL_COMMAND_CHANNEL, (payload) => {
 		const record = payload as Partial<OriginalCommandRecord> | undefined;
 		if (typeof record?.toolCallId !== "string" || typeof record.command !== "string") return;
-		byId.set(record.toolCallId, record.command);
+		byId.set(record.toolCallId, { command: record.command, cwd: typeof record.cwd === "string" ? record.cwd : undefined });
 		if (byId.size > MAX_ENTRIES) {
 			const oldest = byId.keys().next().value;
 			if (oldest !== undefined) byId.delete(oldest);
@@ -54,5 +67,5 @@ export function trackOriginalCommands(pi: EventBusLike): OriginalCommandStore {
  * when this call was wrapped, otherwise the command as sent.
  */
 export function commandToEvaluate(store: OriginalCommandStore, toolCallId: string, command: string): string {
-	return store.get(toolCallId) ?? command;
+	return store.get(toolCallId)?.command ?? command;
 }
