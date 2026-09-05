@@ -14,7 +14,7 @@
  * CLAUDE_CONFIG_DIR — can never pick up whatever hook plugins happen to be
  * installed on the machine running this test.
  */
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -251,5 +251,65 @@ describe("hooks wiring", () => {
 		await fake.fireOne("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] }, ctx());
 		await fake.fireOne("agent_settled", {}, ctx());
 		expect(countHits()).toBe(2);
+	});
+
+	it("PreCompact and PostCompact carry Claude Code's trigger, custom_instructions and compact_summary (review M1/M3)", async () => {
+		const pre = join(root, "pre-stdin.json");
+		const post = join(root, "post-stdin.json");
+		const hookPre = script("hook-pre.sh", `#!/bin/sh\ncat > "${pre}"\n`);
+		const hookPost = script("hook-post.sh", `#!/bin/sh\ncat > "${post}"\n`);
+		// Matchers keyed on the trigger, as Claude Code's PreCompact/PostCompact allow.
+		writeUserHooks({
+			PreCompact: [{ matcher: "manual", hooks: [{ type: "command", command: hookPre }] }],
+			PostCompact: [{ matcher: "manual", hooks: [{ type: "command", command: hookPost }] }],
+		});
+		mount();
+
+		await fake.fireOne("session_before_compact", { reason: "manual", customInstructions: "focus on tests" }, ctx());
+		expect(JSON.parse(readFileSync(pre, "utf-8"))).toMatchObject({
+			hook_event_name: "PreCompact",
+			trigger: "manual",
+			custom_instructions: "focus on tests",
+		});
+
+		await fake.fireOne("session_compact", { reason: "manual", compactionEntry: { summary: "the summary text" } }, ctx());
+		expect(JSON.parse(readFileSync(post, "utf-8"))).toMatchObject({
+			hook_event_name: "PostCompact",
+			trigger: "manual",
+			compact_summary: "the summary text",
+		});
+
+		// A threshold or overflow compaction is `auto`: neither manual-matched hook runs.
+		rmSync(pre);
+		rmSync(post);
+		await fake.fireOne("session_before_compact", { reason: "threshold" }, ctx());
+		await fake.fireOne("session_compact", { reason: "overflow", compactionEntry: { summary: "s" } }, ctx());
+		expect(existsSync(pre)).toBe(false);
+		expect(existsSync(post)).toBe(false);
+	});
+
+	it("an auto PreCompact sends custom_instructions as an empty string, like Claude Code", async () => {
+		const pre = join(root, "pre-auto-stdin.json");
+		const hookPre = script("hook-pre-auto.sh", `#!/bin/sh\ncat > "${pre}"\n`);
+		writeUserHooks({ PreCompact: [{ matcher: "auto", hooks: [{ type: "command", command: hookPre }] }] });
+		mount();
+		await fake.fireOne("session_before_compact", { reason: "overflow" }, ctx());
+		expect(JSON.parse(readFileSync(pre, "utf-8"))).toMatchObject({ trigger: "auto", custom_instructions: "" });
+	});
+
+	it("SessionStart reports `clear` for pi's new-session reason and `startup` only at process launch (review M2)", async () => {
+		const seen = join(root, "start-stdin.jsonl");
+		const hook = script("hook-start.sh", `#!/bin/sh\ncat >> "${seen}"\necho >> "${seen}"\n`);
+		writeUserHooks({ SessionStart: [{ hooks: [{ type: "command", command: hook }] }] });
+		mount();
+		await fake.fireOne("session_start", { reason: "startup" }, ctx());
+		await fake.fireOne("session_start", { reason: "new" }, ctx());
+		await fake.fireOne("session_start", { reason: "resume" }, ctx());
+		await fake.fireOne("session_start", { reason: "reload" }, ctx());
+		const sources = readFileSync(seen, "utf-8")
+			.split("\n")
+			.filter((line) => line.trim())
+			.map((line) => JSON.parse(line).source);
+		expect(sources).toEqual(["startup", "clear", "resume"]);
 	});
 });

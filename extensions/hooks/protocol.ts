@@ -39,6 +39,10 @@ export interface HookStdinPayload {
 	prompt?: string;
 	stop_hook_active?: boolean;
 	trigger?: "manual" | "auto";
+	/** PreCompact: the `/compact <instructions>` text, empty when none (Claude Code sends the string as is). */
+	custom_instructions?: string;
+	/** PostCompact: the summary that replaced the compacted span. */
+	compact_summary?: string;
 	source?: string;
 	/** Set when the call is a subagent's (Claude Code: hooks tell a child's call from the main thread's by its presence). */
 	agent_id?: string;

@@ -300,9 +300,12 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		// Publish the child hook bridge (subagent-bridge.ts). The closures read
 		// live parent state per call, so once per session start is enough.
 		pi.events.emit(SUBAGENT_HOOK_CHANNEL, { bridge: childHookBridge } satisfies SubagentHookPayload);
+		// Claude Code's sources are startup | resume | clear | compact; pi's
+		// `new` (/clear, /new) is a clear — the process-launch case arrives as
+		// `startup` already. `compact` is dispatched from session_compact below.
 		const reason = (event as { reason?: string }).reason ?? "startup";
 		if (reason === "reload" || reason === "fork") return;
-		await dispatchSessionStart(ctx, reason === "new" ? "startup" : reason);
+		await dispatchSessionStart(ctx, reason === "new" ? "clear" : reason);
 	});
 
 	// ---- Subagent bridge ----------------------------------------------------
@@ -385,10 +388,18 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	});
 
 	// ---- PreCompact / PostCompact ------------------------------------------
+	// Claude Code's trigger is manual | auto; pi's threshold and overflow
+	// reasons are both `auto`. Both payloads mirror CC's PreCompactHookInput /
+	// PostCompactHookInput field for field.
+	const compactTrigger = (event: { reason?: string }): "manual" | "auto" => (event.reason === "manual" ? "manual" : "auto");
+
 	pi.on("session_before_compact", async (event, ctx) => {
-		const reason = (event as { reason?: string }).reason;
-		const trigger = reason === "manual" ? "manual" : "auto";
-		const payload: HookStdinPayload = { ...basePayload(ctx, "PreCompact"), trigger };
+		const trigger = compactTrigger(event);
+		const payload: HookStdinPayload = {
+			...basePayload(ctx, "PreCompact"),
+			trigger,
+			custom_instructions: event.customInstructions ?? "",
+		};
 		const outcome = await dispatch(ctx, "PreCompact", { candidates: [trigger] }, payload);
 		if (outcome.block) {
 			notify(ctx, `Compaction cancelled by PreCompact hook: ${outcome.block.reason}`);
@@ -397,9 +408,14 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		return undefined;
 	});
 
-	pi.on("session_compact", async (_event, ctx) => {
-		const payload: HookStdinPayload = { ...basePayload(ctx, "PostCompact"), trigger: "auto" };
-		const outcome = await dispatch(ctx, "PostCompact", { ignoreMatcher: true }, payload);
+	pi.on("session_compact", async (event, ctx) => {
+		const trigger = compactTrigger(event);
+		const payload: HookStdinPayload = {
+			...basePayload(ctx, "PostCompact"),
+			trigger,
+			compact_summary: event.compactionEntry.summary,
+		};
+		const outcome = await dispatch(ctx, "PostCompact", { candidates: [trigger] }, payload);
 		if (outcome.additionalContext) pendingPromptContext.push({ event: "PostCompact", text: outcome.additionalContext });
 		// CC fires SessionStart(source: "compact") after compaction.
 		await dispatchSessionStart(ctx, "compact");
