@@ -3,11 +3,15 @@
  *
  * Three behaviors:
  *  1. A session-wide watcher (watcher.ts): new diagnostics — cross-file, all
- *     severities, deduplicated against what was already delivered — are
- *     injected as a `<new-diagnostics>` message after the current tool round
- *     (deliverAs "steer"), or at the start of the next run when they arrived
- *     while idle. Editing a file clears its delivered-set so fixed-then-
- *     reintroduced issues resurface.
+ *     severities, deduplicated against what was already delivered — ride the
+ *     tool result of the round that surfaced them as a raw `<new-diagnostics>`
+ *     block (a reminder-queue one-shot, pinned to the trailing tool result
+ *     after the `<total_tokens>` line — the exact place a Claude Code session
+ *     shows them), or the message that opens the next run when they arrived
+ *     while idle (`agent_start`, so a notification-opened run gets them too).
+ *     Until 2026-09-05 they went out as a custom steer message of their own
+ *     (a separate user turn on the wire). Editing a file clears its
+ *     delivered-set so fixed-then-reintroduced issues resurface.
  *  2. Plugin-provided servers (plugin-servers.ts): an enabled plugin's
  *     `.lsp.json` / manifest `lspServers` adds servers routed by file
  *     extension, taking precedence over the built-in table — installing the
@@ -26,7 +30,8 @@ import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil
 import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { defaultDiscoverRoots, discoverPlugins, pluginResources } from "../lib/plugins.ts";
-import { ccToolRenderers, customMessageText, cutPlainText, notificationComponent } from "../lib/tui-render.ts";
+import { REMINDER_CHANNEL, type ReminderPayload } from "../lib/reminders.ts";
+import { ccToolRenderers, cutPlainText } from "../lib/tui-render.ts";
 import { LspClient, type LspClientOptions, pathToUri } from "./client.ts";
 import { filterDiagnostics, formatDiagnostics, type LspDiagnostic, type SeverityFilter } from "./format.ts";
 import { describeStartFailure, INSTALL_HINTS } from "./install-hints.ts";
@@ -40,8 +45,6 @@ import {
 } from "./plugin-servers.ts";
 import { findProjectRoot, serverForPath, typescriptPreflight } from "./servers.ts";
 import { computeDelta, DeliveredTracker, fingerprintDiagnostic, formatNewDiagnostics, markDelivered } from "./watcher.ts";
-
-const NEW_DIAGNOSTICS_TYPE = "one-code:lsp-new-diagnostics";
 
 /** Everything needed to spawn/reuse the server responsible for a path. */
 interface ResolvedTarget {
@@ -234,10 +237,17 @@ export default function lspExtension(pi: ExtensionAPI) {
 		return text;
 	};
 
-	// The transcript shows a compact ✳ headline (ctrl+o expands the block).
-	pi.registerMessageRenderer(NEW_DIAGNOSTICS_TYPE, (message, { expanded }, theme) =>
-		notificationComponent(theme, customMessageText(message.content), expanded),
-	);
+	/**
+	 * Queue the block where the model reads next. Raw (no `<system-reminder>`
+	 * frame, as in Claude Code) and last-append: from a `tool_result` hook this
+	 * extension runs after system-reminder's, so the one-shot is pending at the
+	 * next `context` and pinned to the trailing tool result (process memory,
+	 * same mechanism as the file-tracker's per-round report); from `agent_start`
+	 * it pins to the message that opened the run.
+	 */
+	const queueNewDiagnostics = (text: string) => {
+		pi.events.emit(REMINDER_CHANNEL, { text, placement: "last-append", raw: true } satisfies ReminderPayload);
+	};
 
 	pi.on("tool_result", async (event, ctx) => {
 		// An edit/write is the one place a fresh publish can be usefully provoked:
@@ -270,23 +280,20 @@ export default function lspExtension(pi: ExtensionAPI) {
 
 		// Every tool round drains whatever is newly known — including dependents
 		// of an earlier edit whose diagnostics arrived while other tools ran.
+		// Diagnostics never wake an idle agent: a one-shot waits for the next
+		// request, whoever opens it.
 		const text = takePendingDelta(ctx.cwd);
-		if (text) {
-			pi.sendMessage(
-				{ customType: NEW_DIAGNOSTICS_TYPE, content: [{ type: "text", text }], display: true },
-				// triggerTurn stays false: diagnostics attach to whatever turn comes
-				// next; they never wake an idle agent on their own.
-				{ deliverAs: "steer", triggerTurn: false },
-			);
-		}
+		if (text) queueNewDiagnostics(text);
 	});
 
-	// Diagnostics that finished publishing while the agent was idle (wakeup
-	// turns, session resume) attach to the next run's start.
-	pi.on("before_agent_start", (_event, ctx) => {
+	// Diagnostics that finished publishing while the agent was idle (session
+	// resume, a server still typechecking after the turn ended) ride the message
+	// that opens the next run. `agent_start`, not `before_agent_start`: pi emits
+	// the latter only from `prompt()`, so a run a harness notification opened
+	// (a `/loop` tick, an agent report) never fired it (STEERING-REVIEW H1).
+	pi.on("agent_start", (_event, ctx) => {
 		const text = takePendingDelta(ctx.cwd);
-		if (!text) return;
-		return { message: { customType: NEW_DIAGNOSTICS_TYPE, content: [{ type: "text", text }], display: true } };
+		if (text) queueNewDiagnostics(text);
 	});
 
 	pi.registerTool({

@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LspDiagnostic } from "../../extensions/lsp/format.ts";
 import { pathToUri } from "../../extensions/lsp/client.ts";
 import lspExtension from "../../extensions/lsp/index.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
 const state = vi.hoisted(() => ({
@@ -86,11 +87,15 @@ vi.mock("../../extensions/lsp/client.ts", async (importOriginal) => {
 describe("lsp wiring", () => {
 	let dir: string;
 	let fake: FakePi;
+	/** `<new-diagnostics>` blocks queued on the reminder channel, in order. */
+	const delivered: Array<{ text?: string; placement?: string; raw?: boolean }> = [];
 
 	beforeEach(() => {
 		dir = mkdtempSync(join(tmpdir(), "lsp-wiring-"));
 		state.instances.length = 0;
+		delivered.length = 0;
 		fake = createFakePi();
+		fake.events.on(REMINDER_CHANNEL, (data) => delivered.push(data as never));
 		lspExtension(fake.pi as never);
 	});
 	afterEach(() => {
@@ -156,22 +161,52 @@ describe("lsp wiring", () => {
 		// check (still count 0 -> going to 1 for the FIRST time here), so this
 		// is the initial publish reaching the model.
 		await fake.fireOne("tool_result", { toolName: "read" as const, input: {}, isError: false, content: [], toolCallId: "c2" }, ctx);
-		const firstDelivery = fake.sentMessages.find((m) => m.message.customType === "one-code:lsp-new-diagnostics");
-		expect(firstDelivery).toBeDefined();
-		expect((firstDelivery!.message.content as Array<{ text: string }>)[0].text).toContain("unresolved name x");
+		expect(delivered).toHaveLength(1);
+		expect(delivered[0].text).toContain("unresolved name x");
+		// Claude Code's shape: a bare <new-diagnostics> block inside the tool
+		// result, no <system-reminder> frame, never a message of its own.
+		expect(delivered[0].text?.startsWith("<new-diagnostics>")).toBe(true);
+		expect(delivered[0]).toMatchObject({ placement: "last-append", raw: true });
+		expect(fake.sentMessages).toHaveLength(0);
 
 		// Same publish tally (1), unrelated tool call: no re-fingerprinting, no
 		// duplicate delivery (the tool_result waste-avoidance short-circuit).
-		fake.sentMessages.length = 0;
+		delivered.length = 0;
 		await fake.fireOne("tool_result", { toolName: "read" as const, input: {}, isError: false, content: [], toolCallId: "c3" }, ctx);
-		expect(fake.sentMessages.find((m) => m.message.customType === "one-code:lsp-new-diagnostics")).toBeUndefined();
+		expect(delivered).toHaveLength(0);
 
 		// Re-editing the SAME file clears its delivered-set and forces a delta
 		// scan, so the still-unfixed diagnostic resurfaces even though the
 		// server's publish tally never moved from 1.
 		await fake.fireOne("tool_result", editEvent(file), ctx);
-		const redelivery = fake.sentMessages.find((m) => m.message.customType === "one-code:lsp-new-diagnostics");
-		expect(redelivery).toBeDefined();
-		expect((redelivery!.message.content as Array<{ text: string }>)[0].text).toContain("unresolved name x");
+		expect(delivered).toHaveLength(1);
+		expect(delivered[0].text).toContain("unresolved name x");
+	});
+
+	it("delivers diagnostics that arrived while idle on the next run's start, whoever opened it", async () => {
+		const ctx = createFakeCtx({ cwd: dir, hasUI: true });
+		const file = join(dir, "c.py");
+		writeFileSync(file, "y = 2\n");
+		await fake.fireOne("tool_result", editEvent(file), ctx);
+		const client = state.instances[0];
+
+		// The server publishes after the turn settled: nothing is sent now…
+		client.publishCountValue = 1;
+		client.diagnosticsMap.set(pathToUri(file), [
+			{ range: { start: { line: 0, character: 0 } }, severity: 1, message: "unresolved name y" },
+		]);
+		expect(delivered).toHaveLength(0);
+
+		// …and the next run — a harness notification's as much as a prompt's,
+		// since agent_start fires for both — carries it as a one-shot.
+		await fake.fireOne("agent_start", {}, ctx);
+		expect(delivered).toHaveLength(1);
+		expect(delivered[0].text).toContain("unresolved name y");
+		expect(fake.sentMessages).toHaveLength(0);
+
+		// Delivered once: the following run has nothing new.
+		delivered.length = 0;
+		await fake.fireOne("agent_start", {}, ctx);
+		expect(delivered).toHaveLength(0);
 	});
 });
