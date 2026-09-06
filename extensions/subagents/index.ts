@@ -1807,11 +1807,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					}
 					// The turn had just ended (settle window): the message rides the next
 					// turn, whose reply nobody has claimed yet — announce it as an update.
+					spawnedThisLoop.add(record.taskId); // arm the anti-fabrication backstop (WEAK-MODEL-REVIEW H1)
 					return {
 						content: [
 							{
 								type: "text",
-								text: `${record.name}'s turn had just finished; the message starts its next turn. The reply will arrive as a system notification ("Update from ${record.name}").`,
+								text: `${record.name}'s turn had just finished; the message starts its next turn. The reply will arrive as a system notification ("Update from ${record.name}"). ${PENDING_RESULT_PROHIBITION}`,
 							},
 						],
 						details: { agentRuns: [record] },
@@ -1854,11 +1855,15 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				});
 				pi.events.emit(TASK_REGISTER_CHANNEL, task);
 				void resident.handle.send(params.message);
+				// Same anti-fabrication guard as a fresh spawn (WEAK-MODEL-REVIEW H1):
+				// the reply arrives as a notification, so forbid predicting it and arm
+				// the agent_end backstop (keyed by the agent's persistent id).
+				spawnedThisLoop.add(record.taskId);
 				return {
 					content: [
 						{
 							type: "text",
-							text: `Message sent to resident agent ${record.name} (task ${taskId}). The reply will arrive as a system notification; inspect with task_output.`,
+							text: `Message sent to resident agent ${record.name} (task ${taskId}). The reply will arrive as a system notification on its own; inspect with task_output. ${PENDING_RESULT_PROHIBITION}`,
 						},
 					],
 					details: { agentRuns: [record], taskId },
@@ -1978,11 +1983,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				);
 			});
 
+			spawnedThisLoop.add(record.taskId); // arm the anti-fabrication backstop (WEAK-MODEL-REVIEW H1)
 			return {
 				content: [
 					{
 						type: "text",
-						text: `Message sent to ${record.name} (task ${taskId}). The reply will arrive as a system notification; inspect with task_output.`,
+						text: `Message sent to ${record.name} (task ${taskId}). The reply will arrive as a system notification on its own; inspect with task_output. ${PENDING_RESULT_PROHIBITION}`,
 					},
 				],
 				details: { agentRuns: [record], taskId },
