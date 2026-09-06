@@ -53,7 +53,9 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 	// re-caches the message (a transient block would vanish on the next request
 	// and cost the result and everything after it). Runs before the hooks
 	// extension's PostToolUse in load order, so a hook that replaces the whole
-	// result wholesale drops the block — accepted; such hooks are rare.
+	// result would drop these appended blocks — the hooks extension re-attaches
+	// the trailing reminder run when it applies a replacement (review M3,
+	// applyPostToolUseOutcome / isAppendedReminderText).
 	pi.on("tool_result", (event) => {
 		if (!reminderQueue.hasPendingOneShots) return;
 		const entries = reminderQueue.takeOneShots();

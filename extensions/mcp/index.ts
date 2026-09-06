@@ -56,6 +56,7 @@ import { sessionAlive } from "../lib/session-lifecycle.ts";
 import { loadServers, type McpServer } from "./config.ts";
 import { approveMcpServers, persistApproval, projectRootOf } from "./trust.ts";
 import {
+	capDescription,
 	describeContent,
 	describeResourceContents,
 	jsonSchemaToTypeBox,
@@ -63,6 +64,9 @@ import {
 	type McpResourceContents,
 	namespacedToolName,
 } from "./schema.ts";
+
+/** Anthropic's hard limit on a tool name; a longer one fails the whole request. */
+const MAX_TOOL_NAME_LENGTH = 128;
 
 /** Shared "server name not found" tool result for the resource read/list-dir tools. */
 function unknownServerError(name: string) {
@@ -111,6 +115,18 @@ export default function mcpExtension(pi: ExtensionAPI) {
 	const registerToolsFor = (connection: Connection) => {
 		for (const tool of connection.tools) {
 			const name = namespacedToolName(connection.server.name, tool.name);
+			// Anthropic caps a tool name at 128 characters and rejects the whole
+			// request when one is longer — and a deferred definition rides every
+			// request from request 1, so one over-long name would fail every turn
+			// of the session with an opaque `tools.N.custom.name` error. Drop it
+			// here with a clear reason instead.
+			if (name.length > MAX_TOOL_NAME_LENGTH) {
+				failures.push({
+					server: connection.server,
+					error: `tool "${tool.name}" skipped: its namespaced name is ${name.length} characters, over the ${MAX_TOOL_NAME_LENGTH}-character limit the provider enforces`,
+				});
+				continue;
+			}
 			if (registered.has(name)) {
 				// Two tools sanitise to one name (`a-b` and `a_b`, or a server
 				// reconnecting under a stale registration). Skipping silently would
@@ -128,7 +144,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 				name,
 				label: `${connection.server.name}: ${tool.name}`,
 				...ccToolRenderers(`${connection.server.name}: ${tool.name}`),
-				description: tool.description ?? `MCP tool "${tool.name}" from server "${connection.server.name}".`,
+				description: capDescription(tool.description) ?? `MCP tool "${tool.name}" from server "${connection.server.name}".`,
 				parameters: jsonSchemaToTypeBox(tool.inputSchema),
 				async execute(toolCallId, params, _signal, _onUpdate, ctx) {
 					const live = connections.get(connection.server.name);
@@ -141,7 +157,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 					}
 					try {
 						const result = await callTool(live, tool.name, (params ?? {}) as Record<string, unknown>);
-						const { text, images } = describeContent(result.content as McpContentBlock[] | undefined);
+						const { text, images } = describeContent(result.content as McpContentBlock[] | undefined, connection.server.name);
 						return {
 							content: [
 								{
@@ -376,7 +392,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 			parameters: Type.Object({
 				server: Type.Optional(Type.String({ description: "Limit to one server by name" })),
 			}),
-			async execute(_toolCallId, params) {
+			async execute(toolCallId, params, _signal, _onUpdate, ctx) {
 				// A bad `server` name must not read back as "this server has zero
 				// resources" — validate it like read_mcp_resource does, else a typo
 				// looks like an empty (but real) server.
@@ -402,7 +418,12 @@ export default function mcpExtension(pi: ExtensionAPI) {
 					}
 				}
 				return {
-					content: [{ type: "text", text: lines.length ? lines.join("\n") : "No MCP resources available." }],
+					content: [
+						{
+							type: "text",
+							text: lines.length ? persistIfLarge(lines.join("\n"), { dir: resultsDir(ctx), id: toolCallId }) : "No MCP resources available.",
+						},
+					],
 					details: { count: lines.length },
 				};
 			},
@@ -452,7 +473,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 				server: Type.String({ description: "Server name that owns the directory" }),
 				uri: Type.String({ description: "The directory resource uri to list" }),
 			}),
-			async execute(_toolCallId, params) {
+			async execute(toolCallId, params, _signal, _onUpdate, ctx) {
 				const connection = connections.get(params.server);
 				if (!connection) return unknownServerError(params.server);
 				try {
@@ -460,7 +481,12 @@ export default function mcpExtension(pi: ExtensionAPI) {
 					const entries = (result.resources ?? result.entries ?? []) as Array<{ uri?: string; name?: string; mimeType?: string }>;
 					const lines = entries.map((e) => `${e.uri ?? "(no uri)"}${e.name ? ` — ${e.name}` : ""}${e.mimeType ? ` (${e.mimeType})` : ""}`);
 					return {
-						content: [{ type: "text", text: lines.length ? lines.join("\n") : "(empty directory)" }],
+						content: [
+							{
+								type: "text",
+								text: lines.length ? persistIfLarge(lines.join("\n"), { dir: resultsDir(ctx), id: toolCallId }) : "(empty directory)",
+							},
+						],
 						details: { server: params.server, uri: params.uri },
 					};
 				} catch (error) {

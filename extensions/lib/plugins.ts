@@ -30,7 +30,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import os from "node:os";
-import { basename, join } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
 import { readJsonFile } from "./atomic-write.ts";
 import { readEnabledPlugins } from "./claude-settings.ts";
 import { readOverrides } from "./plugin-overrides.ts";
@@ -79,9 +79,27 @@ export interface PluginResources {
 
 interface InstalledEntry {
 	scope?: string;
+	/** For scope "project"/"local": the project the plugin was installed for. */
+	projectPath?: string;
 	installPath?: string;
 	version?: string;
 	enabled?: boolean;
+}
+
+/**
+ * Whether an installed-plugin entry applies to the session cwd. A project- or
+ * local-scoped entry belongs to one project (its `projectPath`), so it should
+ * be live only in that project or a descendant — not in every project under One
+ * Code (review L6). A user-scoped entry (or one with no `projectPath`, or when
+ * cwd is unknown) applies everywhere.
+ */
+export function entryAppliesToCwd(entry: InstalledEntry, cwd: string | undefined): boolean {
+	if (!cwd) return true;
+	if (entry.scope !== "project" && entry.scope !== "local") return true;
+	if (!entry.projectPath) return true;
+	const base = resolve(entry.projectPath);
+	const here = resolve(cwd);
+	return here === base || here.startsWith(base + sep);
 }
 
 export function splitPluginKey(key: string): { name: string; marketplace?: string } {
@@ -117,7 +135,7 @@ export interface InstalledPlugin {
  * existing installPath wins; a raw `enabled` value is passed through for the
  * One Code root, where the entry schema is ours.
  */
-export function loadInstalledPlugins(pluginsDir: string): InstalledPlugin[] {
+export function loadInstalledPlugins(pluginsDir: string, cwd?: string): InstalledPlugin[] {
 	const registry = readJsonFile<{ plugins?: Record<string, InstalledEntry[]> }>(
 		join(pluginsDir, "installed_plugins.json"),
 	);
@@ -126,22 +144,35 @@ export function loadInstalledPlugins(pluginsDir: string): InstalledPlugin[] {
 	const plugins: InstalledPlugin[] = [];
 	for (const [key, entries] of Object.entries(registry.plugins)) {
 		if (!Array.isArray(entries) || entries.length === 0) continue;
-		const entry = entries.find((e) => e.installPath && existsSync(e.installPath));
+		const entry = entries.find((e) => e.installPath && existsSync(e.installPath) && entryAppliesToCwd(e, cwd));
 		if (!entry?.installPath) continue;
 
 		const { name, marketplace } = splitPluginKey(key);
 		const manifest = readJsonFile<PluginManifest>(join(entry.installPath, ".claude-plugin", "plugin.json"));
 		plugins.push({
 			id: key,
-			name: manifest?.name || name,
+			// A third-party manifest is copied in verbatim: a non-string `name`
+			// (or one carrying path separators) would later crash `localeCompare`
+			// or poison the namespace it becomes. Fall back to the registry key's
+			// name for anything not a clean string (review H2).
+			name: validPluginName(manifest?.name) ?? name,
 			marketplace,
 			path: entry.installPath,
 			version: entry.version,
-			description: manifest?.description,
+			description: typeof manifest?.description === "string" ? manifest.description : undefined,
 			rawEnabled: typeof entry.enabled === "boolean" ? entry.enabled : undefined,
 		});
 	}
 	return plugins.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** A manifest `name` usable as a namespace: a non-empty string free of path separators, colons and whitespace. */
+export function validPluginName(value: unknown): string | undefined {
+	if (typeof value !== "string") return undefined;
+	const trimmed = value.trim();
+	if (trimmed.length === 0) return undefined;
+	if (/[/\\:\s]/.test(trimmed)) return undefined;
+	return trimmed;
 }
 
 export function pluginResources(plugin: Pick<Plugin, "path">): PluginResources {
@@ -306,7 +337,7 @@ export function discoverPlugins(roots: DiscoverRoots): DiscoveredPlugins {
 	const overrides = readOverrides(roots.oneCodeRoot);
 	const skillOverrides = readSkillStates(roots.oneCodeRoot);
 
-	const claudePlugins: Plugin[] = loadInstalledPlugins(roots.claudePluginsDir).map((p) => ({
+	const claudePlugins: Plugin[] = loadInstalledPlugins(roots.claudePluginsDir, roots.cwd).map((p) => ({
 		...p,
 		originRoot: "claude" as const,
 		enabled: claudePluginEnabled(p.id, ccEnabled, overrides),
@@ -314,7 +345,7 @@ export function discoverPlugins(roots: DiscoverRoots): DiscoveredPlugins {
 		dataRoot: join(roots.claudePluginsDir, "data"),
 	}));
 
-	const oneCodePlugins: Plugin[] = loadInstalledPlugins(roots.oneCodeRoot).map((p) => ({
+	const oneCodePlugins: Plugin[] = loadInstalledPlugins(roots.oneCodeRoot, roots.cwd).map((p) => ({
 		...p,
 		originRoot: "one-code" as const,
 		enabled: oneCodePluginEnabled(p.rawEnabled),
@@ -340,25 +371,33 @@ export function discoverPlugins(roots: DiscoverRoots): DiscoveredPlugins {
 	};
 
 	for (const plugin of plugins) {
-		const resources = pluginResources(plugin);
-		const skills = resources.skillsDir ? findPluginSkills(plugin, resources.skillsDir) : [];
-		const commands = resources.commandsDir ? findPluginCommands(plugin, resources.commandsDir) : [];
+		// One plugin's fault (a broken symlink in its resource dirs, a statSync
+		// permission error) must skip only that plugin, not blank out every
+		// other plugin's skills/commands/agents for the session. safeDiscover's
+		// outer catch is the last resort; this keeps the blast radius to one entry.
+		try {
+			const resources = pluginResources(plugin);
+			const skills = resources.skillsDir ? findPluginSkills(plugin, resources.skillsDir) : [];
+			const commands = resources.commandsDir ? findPluginCommands(plugin, resources.commandsDir) : [];
 
-		result.byPlugin.set(plugin.id, {
-			agents: !!resources.agentsDir,
-			skills: skills.length,
-			commands: commands.length,
-			mcp: !!resources.mcpConfig,
-			lsp: !!resources.lspConfig,
-		});
+			result.byPlugin.set(plugin.id, {
+				agents: !!resources.agentsDir,
+				skills: skills.length,
+				commands: commands.length,
+				mcp: !!resources.mcpConfig,
+				lsp: !!resources.lspConfig,
+			});
 
-		if (!plugin.enabled) continue;
-		if (resources.agentsDir) result.agentDirs.push({ dir: resources.agentsDir, namespace: plugin.name });
-		result.skills.push(...skills.filter((s) => isSkillEnabled(skillOverrides, skillOverrideKey("plugin", s.name))));
-		result.commands.push(...commands);
-		if (resources.mcpConfig) {
-			result.mcpConfigs.push(resources.mcpConfig);
-			result.mcpConfigPlugins.set(resources.mcpConfig, plugin.name);
+			if (!plugin.enabled) continue;
+			if (resources.agentsDir) result.agentDirs.push({ dir: resources.agentsDir, namespace: plugin.name });
+			result.skills.push(...skills.filter((s) => isSkillEnabled(skillOverrides, skillOverrideKey("plugin", s.name))));
+			result.commands.push(...commands);
+			if (resources.mcpConfig) {
+				result.mcpConfigs.push(resources.mcpConfig);
+				result.mcpConfigPlugins.set(resources.mcpConfig, plugin.name);
+			}
+		} catch (error) {
+			console.error(`One Code: skipping plugin "${plugin.id}" — its resources could not be read: ${(error as Error).message}`);
 		}
 	}
 

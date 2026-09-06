@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	type DiscoverRoots,
 	discoverPlugins,
+	entryAppliesToCwd,
 	findPluginCommands,
 	findPluginSkills,
 	invalidatePluginsCache,
@@ -19,6 +20,18 @@ import {
 	replaceShellPlaceholders,
 	substituteArguments,
 } from "../../extensions/plugins/template.ts";
+
+describe("entryAppliesToCwd (review L6)", () => {
+	it("user scope and no-projectPath entries apply everywhere; project/local scope is confined", () => {
+		expect(entryAppliesToCwd({ scope: "user", projectPath: "/x" }, "/anywhere")).toBe(true);
+		expect(entryAppliesToCwd({ scope: "project" }, "/anywhere")).toBe(true); // no projectPath
+		expect(entryAppliesToCwd({ scope: "project", projectPath: "/x" }, undefined)).toBe(true); // cwd unknown
+		expect(entryAppliesToCwd({ scope: "project", projectPath: "/x" }, "/x")).toBe(true);
+		expect(entryAppliesToCwd({ scope: "local", projectPath: "/x" }, "/x/sub")).toBe(true);
+		expect(entryAppliesToCwd({ scope: "project", projectPath: "/x" }, "/y")).toBe(false);
+		expect(entryAppliesToCwd({ scope: "local", projectPath: "/x" }, "/xy")).toBe(false); // not a path-boundary match
+	});
+});
 
 describe("splitPluginKey", () => {
 	it("splits name@marketplace", () => {
@@ -87,6 +100,33 @@ describe("plugin discovery", () => {
 		mkdirSync(join(claudeDir, "plugins"), { recursive: true });
 		writeFileSync(join(claudeDir, "plugins", "installed_plugins.json"), "{ broken");
 		expect(loadInstalledPlugins(join(claudeDir, "plugins"))).toEqual([]);
+	});
+
+	it("skips a project/local-scoped entry unless cwd is that project or under it (review L6)", () => {
+		const projA = join(root, "projA");
+		writeRegistry({
+			"demo@market": [{ scope: "project", projectPath: projA, installPath, version: "1.0.0" }],
+		});
+		// A different project: the project-scoped plugin does not apply.
+		expect(loadInstalledPlugins(join(claudeDir, "plugins"), join(root, "projB"))).toEqual([]);
+		// The owning project (and a descendant) sees it.
+		expect(loadInstalledPlugins(join(claudeDir, "plugins"), projA)).toHaveLength(1);
+		expect(loadInstalledPlugins(join(claudeDir, "plugins"), join(projA, "sub"))).toHaveLength(1);
+		// No cwd given (or a user-scoped entry) applies everywhere.
+		expect(loadInstalledPlugins(join(claudeDir, "plugins"))).toHaveLength(1);
+	});
+
+	it("falls back to the registry name for a non-string or unsafe manifest name (review H2)", () => {
+		for (const badName of [42, {}, "", "../x", "a:b", "a b"] as unknown[]) {
+			writeFileSync(join(installPath, ".claude-plugin", "plugin.json"), JSON.stringify({ name: badName, description: 5 }));
+			writeRegistry({ "demo@market": [{ scope: "user", installPath, version: "1.0.0" }] });
+			const plugins = loadInstalledPlugins(join(claudeDir, "plugins"));
+			expect(plugins).toHaveLength(1);
+			// Name falls back to the key's, and a non-string description is dropped —
+			// no throw, so a later localeCompare sort cannot crash startup.
+			expect(plugins[0].name).toBe("demo");
+			expect(plugins[0].description).toBeUndefined();
+		}
 	});
 
 	it("detects only the resource directories that exist", () => {

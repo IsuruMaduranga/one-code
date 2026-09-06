@@ -66,15 +66,19 @@ export function hookContextText(event: CcHookEvent, text: string): string {
 }
 
 /**
- * Hook text that reaches the model (additionalContext, a string updatedToolResult)
- * is bounded: the executor allows 1 MB per stream, and a runaway hook would
- * otherwise dump all of it into context (review T5). Past the cap the full text
- * is PERSISTED under the session's tool-results (Claude Code's convention) and
- * the model gets a preview plus the path — nothing is cut away.
+ * Every hook text that reaches the model is bounded through this: additional
+ * context, a string or (JSON-encoded) object updatedToolResult, a block reason,
+ * a Stop stopReason. The executor allows 1 MB per stream, and a runaway hook
+ * would otherwise dump all of it into context (reviews T5, M2). Past the cap the
+ * full text is PERSISTED under the session's tool-results (Claude Code's
+ * convention) and the model gets a preview plus the path — nothing is cut away.
  */
 const HOOK_MODEL_TEXT_CAP = 20_000;
+// A monotonic counter, not Date.now(), so two hooks finishing in the same
+// millisecond do not persist to the same file and clobber each other (review M2).
+let hookPersistSeq = 0;
 function capHookText(text: string, ctx: HookDispatchCtx, label: string): string {
-	return persistIfLarge(text, { dir: sessionResultsDir(ctx), id: `hook-${label}-${Date.now()}`, maxBytes: HOOK_MODEL_TEXT_CAP });
+	return persistIfLarge(text, { dir: sessionResultsDir(ctx), id: `hook-${label}-${hookPersistSeq++}`, maxBytes: HOOK_MODEL_TEXT_CAP });
 }
 
 interface MatchedHook {
@@ -217,11 +221,19 @@ export default function hooksExtension(pi: ExtensionAPI) {
 				}),
 			);
 			for (const outcome of outcomes) {
-				merged.block ??= outcome.block;
+				// A block reason becomes model-facing text (the tool result, or a
+				// Stop follow-up), so it is bounded like the other hook texts —
+				// stderr on an exit-2 hook is easily a full stack trace (review M2).
+				if (!merged.block && outcome.block) {
+					merged.block = { reason: capHookText(outcome.block.reason, ctx, `${event}-block`) };
+				}
 				if (outcome.updatedInput) merged.updatedInput = { ...merged.updatedInput, ...outcome.updatedInput };
 				if ("updatedToolResult" in outcome) {
-					merged.updatedToolResult =
-						typeof outcome.updatedToolResult === "string" ? capHookText(outcome.updatedToolResult, ctx, `${event}-result`) : outcome.updatedToolResult;
+					// A non-string replacement is JSON-encoded before it reaches the
+					// model, so stringify then cap it too — not just the string case.
+					const text =
+						typeof outcome.updatedToolResult === "string" ? outcome.updatedToolResult : JSON.stringify(outcome.updatedToolResult);
+					merged.updatedToolResult = capHookText(text, ctx, `${event}-result`);
 				}
 				if (outcome.additionalContext) {
 					merged.additionalContext = capHookText(

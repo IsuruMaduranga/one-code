@@ -163,11 +163,13 @@ describe("projectHooksApproved", () => {
 });
 
 describe("describeProjectHooks", () => {
-	it("lists commands, truncating long ones and long lists", () => {
+	it("lists every command in full, hiding nothing (review M5)", () => {
 		const sources = Array.from({ length: 7 }, (_, i) => source(`command-${i} ${"y".repeat(100)}`));
 		const text = describeProjectHooks(sources);
 		expect(text).toContain("7 command hook(s)");
-		expect(text).toContain("… and 2 more");
-		expect(text).not.toContain("y".repeat(90));
+		// Every command shown, no "and N more" cap and no per-command truncation.
+		expect(text).not.toContain(" more");
+		expect(text).toContain(`command-6 ${"y".repeat(100)}`);
+		expect(text).toContain(`command-0 ${"y".repeat(100)}`);
 	});
 });

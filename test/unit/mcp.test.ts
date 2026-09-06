@@ -2,14 +2,17 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { expandEnv, loadServers, missingEnvVars, parseServer } from "../../extensions/mcp/config.ts";
+import { expandEnv, loadServers, missingEnvVars, parseServer, referencedEnvVars } from "../../extensions/mcp/config.ts";
 import {
+	capDescription,
+	DESCRIPTION_CAP,
 	describeContent,
 	describeResourceContents,
 	jsonSchemaToTypeBox,
 	namespacedToolName,
 	parseNamespacedToolName,
 	pluginServerName,
+	validateImageData,
 } from "../../extensions/mcp/schema.ts";
 import { createTailBuffer } from "../../extensions/mcp/client.ts";
 
@@ -34,12 +37,15 @@ describe("parseServer", () => {
 			args: ["-y", "server", "/home/u"],
 			env: undefined,
 			source: "/p/.mcp.json",
+			referencedEnv: ["HOME_DIR"],
 		});
 	});
 
-	it("parses an http server and expands header values", () => {
+	it("parses an http server and expands header values, capturing the referenced var name", () => {
 		const server = parseServer("api", { url: "https://x/mcp", headers: { Authorization: "Bearer $TOKEN" } }, "s", env);
 		expect(server).toMatchObject({ kind: "http", url: "https://x/mcp", headers: { Authorization: "Bearer secret" } });
+		// The var name is kept for the consent dialog even though the value is expanded away (review M5).
+		expect(server?.referencedEnv).toEqual(["TOKEN"]);
 	});
 
 	it("prefers url over command when both are present", () => {
@@ -167,9 +173,19 @@ describe("describeContent", () => {
 		expect(describeContent([{ type: "text", text: "one" }, { type: "text", text: "two" }]).text).toBe("one\ntwo");
 	});
 
-	it("collects images separately with a default mime type", () => {
-		const result = describeContent([{ type: "image", data: "abc" }]);
-		expect(result.images).toEqual([{ data: "abc", mimeType: "image/png" }]);
+	it("collects a decodable image, deriving the mime type from its bytes", () => {
+		const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]).toString("base64");
+		const result = describeContent([{ type: "image", data: png, mimeType: "image/gif" }]);
+		// mimeType comes from the magic bytes (png), not the server's claim (gif).
+		expect(result.images).toEqual([{ data: png, mimeType: "image/png" }]);
+	});
+
+	it("turns an undecodable image into a text note instead of poisoning the request (review H4)", () => {
+		const junk = Buffer.from("this is not an image at all").toString("base64");
+		const result = describeContent([{ type: "image", data: junk, mimeType: "image/png" }], "stub");
+		expect(result.images).toEqual([]);
+		expect(result.text).toContain("could not be decoded");
+		expect(result.text).toContain("stub");
 	});
 
 	it("renders embedded resources and unknown block types", () => {
@@ -180,6 +196,48 @@ describe("describeContent", () => {
 
 	it("handles missing content", () => {
 		expect(describeContent(undefined)).toEqual({ text: "", images: [] });
+	});
+});
+
+describe("validateImageData", () => {
+	const b64 = (bytes: number[]) => Buffer.from(bytes).toString("base64");
+	it("accepts png/jpeg/gif/webp by magic bytes and reports the true mime", () => {
+		expect(validateImageData(b64([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), "x")).toEqual({ ok: true, mimeType: "image/png" });
+		expect(validateImageData(b64([0xff, 0xd8, 0xff, 0x00]), "x")).toEqual({ ok: true, mimeType: "image/jpeg" });
+		expect(validateImageData(b64([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]), "x")).toEqual({ ok: true, mimeType: "image/gif" });
+		const webp = Buffer.concat([Buffer.from("RIFF"), Buffer.from([0, 0, 0, 0]), Buffer.from("WEBP")]).toString("base64");
+		expect(validateImageData(webp, "x")).toEqual({ ok: true, mimeType: "image/webp" });
+	});
+	it("rejects unrecognised and empty data", () => {
+		expect(validateImageData(Buffer.from("nope").toString("base64"), "image/png").ok).toBe(false);
+		expect(validateImageData("", "image/png").ok).toBe(false);
+	});
+});
+
+describe("referencedEnvVars", () => {
+	it("collects every $VAR and ${VAR} name referenced", () => {
+		expect(referencedEnvVars("Bearer ${TOKEN}", "$OTHER and plain")).toEqual(["TOKEN", "OTHER"]);
+		expect(referencedEnvVars("no vars here")).toEqual([]);
+	});
+});
+
+describe("capDescription (review L2)", () => {
+	it("passes short descriptions through and truncates long ones with a labelled marker", () => {
+		expect(capDescription("short")).toBe("short");
+		expect(capDescription(undefined)).toBeUndefined();
+		const big = "z".repeat(DESCRIPTION_CAP + 500);
+		const capped = capDescription(big)!;
+		expect(capped.length).toBeLessThan(big.length);
+		expect(capped).toContain("[truncated,");
+	});
+
+	it("caps a parameter description inside a converted schema", () => {
+		const big = "y".repeat(DESCRIPTION_CAP + 100);
+		const schema = jsonSchemaToTypeBox({ type: "object", properties: { q: { type: "string", description: big } } }) as {
+			properties: { q: { description: string } };
+		};
+		expect(schema.properties.q.description.length).toBeLessThan(big.length);
+		expect(schema.properties.q.description).toContain("[truncated,");
 	});
 });
 

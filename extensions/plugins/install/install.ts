@@ -17,7 +17,7 @@ import { join, resolve, relative, sep } from "node:path";
 import { gitClone, gitHeadSha } from "../marketplace/git.ts";
 import type { MarketplaceEntry } from "../marketplace/types.ts";
 import { addInstalledPlugin, installedEntry, removeInstalledPlugin } from "./registry.ts";
-import { versionedCachePath, withinBase } from "./paths.ts";
+import { pluginCacheDir, versionedCachePath, withinBase } from "./paths.ts";
 
 export interface InstallResult {
 	id: string;
@@ -128,6 +128,15 @@ export async function installPlugin(
 	try {
 		const version = entry.version ?? manifestVersion(sourceDir) ?? (gitCommitSha ? gitCommitSha.slice(0, 12) : "0.0.0");
 		const installPath = versionedCachePath(root, marketplaceName, entry.name, version);
+		// Defence in depth against a crafted version/name that escapes its own
+		// cache subdirectory (review M4): copyIntoCache would rmSync the resolved
+		// dest, so a path landing on the plugin or marketplace directory would
+		// delete siblings. sanitizePathSegment already neutralises dots-only
+		// segments; assert containment before the destructive copy regardless.
+		const pluginCacheBase = pluginCacheDir(root, marketplaceName, entry.name);
+		if (!withinBase(pluginCacheBase, installPath)) {
+			throw new Error(`${id}: computed install path "${installPath}" escapes the plugin cache directory — refusing to install`);
+		}
 		copyIntoCache(sourceDir, installPath);
 		const now = new Date().toISOString();
 		addInstalledPlugin(root, id, {

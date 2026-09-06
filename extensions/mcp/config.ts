@@ -23,6 +23,8 @@ export interface StdioServer {
 	source: string;
 	/** Config referenced these environment variables and they are not set. */
 	missingEnv?: string[];
+	/** Every env var the config references (set or not), for the consent dialog — values are expanded away by parse time. */
+	referencedEnv?: string[];
 }
 
 export interface HttpServer {
@@ -33,6 +35,8 @@ export interface HttpServer {
 	source: string;
 	/** Config referenced these environment variables and they are not set. */
 	missingEnv?: string[];
+	/** Every env var the config references (set or not), for the consent dialog — values are expanded away by parse time. */
+	referencedEnv?: string[];
 }
 
 export type McpServer = StdioServer | HttpServer;
@@ -56,11 +60,24 @@ function asStringRecord(value: unknown): Record<string, string> | undefined {
 	return Object.keys(out).length > 0 ? out : undefined;
 }
 
+/** `$VAR` and `${VAR}` references. A string source (not a shared object) so each use gets a fresh, unshared lastIndex. */
+const ENV_VAR_SOURCE = "\\$\\{([A-Za-z_][A-Za-z0-9_]*)\\}|\\$([A-Za-z_][A-Za-z0-9_]*)";
+
+/** Every env var name a value references, in order (with duplicates). The one scanner the others build on. */
+function envVarNames(value: string): string[] {
+	const names: string[] = [];
+	const pattern = new RegExp(ENV_VAR_SOURCE, "g");
+	let match = pattern.exec(value);
+	while (match) {
+		names.push(match[1] ?? match[2]);
+		match = pattern.exec(value);
+	}
+	return names;
+}
+
 /** Expands $VAR and ${VAR} in a config string, as Claude Code does. */
 export function expandEnv(value: string, env: Record<string, string | undefined>): string {
-	return value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (_match, braced, bare) => {
-		return env[braced ?? bare] ?? "";
-	});
+	return value.replace(new RegExp(ENV_VAR_SOURCE, "g"), (_match, braced, bare) => env[braced ?? bare] ?? "");
 }
 
 /**
@@ -70,15 +87,12 @@ export function expandEnv(value: string, env: Record<string, string | undefined>
  * becoming `"Bearer "`, which the endpoint rejects as a badly formatted header.
  */
 export function missingEnvVars(value: string, env: Record<string, string | undefined>): string[] {
-	const missing: string[] = [];
-	const pattern = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g;
-	let match = pattern.exec(value);
-	while (match) {
-		const name = match[1] ?? match[2];
-		if (!env[name]) missing.push(name);
-		match = pattern.exec(value);
-	}
-	return [...new Set(missing)];
+	return [...new Set(envVarNames(value).filter((name) => !env[name]))];
+}
+
+/** Every env var a value references, set or not — for the consent dialog (values are gone after expandEnv). */
+export function referencedEnvVars(...values: string[]): string[] {
+	return [...new Set(values.flatMap(envVarNames))];
 }
 
 export function parseServer(
@@ -95,6 +109,7 @@ export function parseServer(
 			...missingEnvVars(raw.url, env),
 			...Object.values(headers ?? {}).flatMap((value) => missingEnvVars(value, env)),
 		];
+		const referenced = referencedEnvVars(raw.url, ...Object.values(headers ?? {}));
 		return {
 			kind: "http",
 			name,
@@ -104,6 +119,7 @@ export function parseServer(
 				: undefined,
 			source,
 			missingEnv: missing.length > 0 ? [...new Set(missing)] : undefined,
+			referencedEnv: referenced.length > 0 ? referenced : undefined,
 		};
 	}
 
@@ -119,6 +135,11 @@ export function parseServer(
 				.flatMap((a) => missingEnvVars(a, env)),
 			...Object.values(rawEnv ?? {}).flatMap((value) => missingEnvVars(value, env)),
 		];
+		const referenced = referencedEnvVars(
+			raw.command,
+			...(Array.isArray(raw.args) ? raw.args.filter((a): a is string => typeof a === "string") : []),
+			...Object.values(rawEnv ?? {}),
+		);
 		return {
 			kind: "stdio",
 			name,
@@ -127,6 +148,7 @@ export function parseServer(
 			env: rawEnv ? Object.fromEntries(Object.entries(rawEnv).map(([k, v]) => [k, expandEnv(v, env)])) : undefined,
 			source,
 			missingEnv: missing.length > 0 ? [...new Set(missing)] : undefined,
+			referencedEnv: referenced.length > 0 ? referenced : undefined,
 		};
 	}
 

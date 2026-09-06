@@ -5,6 +5,19 @@
  * fail-closed choices are One Code's own (see docs/decisions.md).
  */
 
+import { isAppendedReminderText } from "../lib/reminders.ts";
+
+/** The contiguous run of reminder/countdown blocks at the tail of a tool result (review M3). */
+function trailingReminderBlocks<T extends { type: string }>(content: readonly T[]): T[] {
+	let start = content.length;
+	for (let i = content.length - 1; i >= 0; i--) {
+		const block = content[i] as { type: string; text?: unknown };
+		if (block.type === "text" && typeof block.text === "string" && isAppendedReminderText(block.text)) start = i;
+		else break;
+	}
+	return content.slice(start);
+}
+
 export type CcHookEvent =
 	| "PreToolUse"
 	| "PostToolUse"
@@ -183,7 +196,12 @@ export function applyPostToolUseOutcome<T extends { type: string }>(
 	let result: Array<T | TextBlock> = [...content];
 	if (outcome.updatedToolResult !== undefined) {
 		const replacement = outcome.updatedToolResult;
-		result = [{ type: "text", text: typeof replacement === "string" ? replacement : JSON.stringify(replacement) }];
+		// The reminder queue may already have appended one-shots and the
+		// `<total_tokens>` countdown onto this result (system-reminder runs its
+		// tool_result hook before ours). Replacing the content must not drop
+		// them, so keep the trailing run of reminder blocks (review M3).
+		const reminderTail = trailingReminderBlocks(content);
+		result = [{ type: "text", text: typeof replacement === "string" ? replacement : JSON.stringify(replacement) }, ...reminderTail];
 	}
 	if (outcome.block) result = [{ type: "text", text: `PostToolUse hook: ${outcome.block.reason}` }, ...result];
 	if (outcome.additionalContext) result = [...result, { type: "text", text: outcome.additionalContext }];

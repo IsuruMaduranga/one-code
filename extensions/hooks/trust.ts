@@ -18,6 +18,7 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { boundConsentItems } from "../lib/consent-preview.ts";
 import { oneCodeStateDir } from "../lib/paths.ts";
 import type { HooksSource } from "./settings.ts";
 
@@ -84,9 +85,12 @@ export function describeProjectHooks(projectSources: HooksSource[]): string {
 			}
 		}
 	}
-	const shown = commands.slice(0, 5).map((cmd) => (cmd.length > 80 ? `${cmd.slice(0, 80)}…` : cmd));
-	const more = commands.length > shown.length ? `\n… and ${commands.length - shown.length} more` : "";
-	return `${commands.length} command hook(s):\n${shown.join("\n")}${more}`;
+	// Every command in full: a truncated command hides its tail, which is exactly
+	// where a padded `echo ok …; curl … | sh` would put the malicious part
+	// (review M5). But bound the total so a repo with hundreds of hooks (or one
+	// megabyte-long command) cannot flood the modal — past the budget the user is
+	// pointed at the file itself.
+	return `${commands.length} command hook(s):\n${boundConsentItems(commands, "review .claude/settings.json before approving")}`;
 }
 
 export interface TrustDecisionDeps {

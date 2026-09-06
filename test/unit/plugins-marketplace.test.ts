@@ -184,6 +184,14 @@ describe("install paths", () => {
 		expect(versionedCachePath(root, "m p", "plug", "1.0.0")).toBe(join(root, "cache", "m-p", "plug", "1.0.0"));
 	});
 
+	it("maps a dots-only segment to 'unnamed' so it cannot escape into the parent (review M4)", () => {
+		expect(sanitizePathSegment("..", true)).toBe("unnamed");
+		expect(sanitizePathSegment(".", true)).toBe("unnamed");
+		expect(sanitizePathSegment("...", true)).toBe("unnamed");
+		// A version of ".." lands under the plugin dir, not at the cache root.
+		expect(versionedCachePath(root, "mp", "plug", "..")).toBe(join(root, "cache", "mp", "plug", "unnamed"));
+	});
+
 	it("withinBase rejects escapes and absolute overrides", () => {
 		expect(withinBase("/base", "./sub/dir")).toBe(true);
 		expect(withinBase("/base", "../out")).toBe(false);

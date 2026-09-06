@@ -276,6 +276,13 @@ const INSTRUCTIONS_CAP = 3000;
  * The reminder carrying servers' own usage instructions, formatted the way
  * Claude Code injects them (findings §14). Servers without instructions are
  * skipped; returns undefined when none have any.
+ *
+ * Instructions ride message 1 (the cached prefix). Past the cap they are
+ * truncated with a `[truncated]` label rather than persisted to a file: the
+ * label keeps it out of the "never a bare slice" rule, and a persisted path
+ * would change per session and bust the cached prefix on every resume. This is
+ * the deliberate documented exception to the persist rule (review L2); the cap
+ * matches Claude Code's.
  */
 export function mcpInstructionsReminder(
 	connections: Array<{ server: { name: string }; instructions?: string }>,

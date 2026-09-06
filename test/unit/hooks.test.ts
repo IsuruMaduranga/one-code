@@ -4,10 +4,36 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ccToolName, matcherApplies, toolMatchCandidates, ccToolInput, nativeToolInput } from "../../extensions/hooks/matcher.ts";
 import { loadPluginHooks } from "../../extensions/hooks/plugin-hooks.ts";
-import { type FinishedRun, interpretHookResult, parseEnvelope } from "../../extensions/hooks/protocol.ts";
+import { applyPostToolUseOutcome, type FinishedRun, interpretHookResult, parseEnvelope } from "../../extensions/hooks/protocol.ts";
 import { hookSettingsPaths, loadHookSettings, parseHooksBlock, resetHookSettingsCache } from "../../extensions/hooks/settings.ts";
 
 const ok = (stdout: string): FinishedRun => ({ exitCode: 0, timedOut: false, stdout, stderr: "" });
+
+describe("protocol: applyPostToolUseOutcome", () => {
+	const own = [{ type: "text", text: "tool output" }];
+	const reminderTail = [
+		{ type: "text", text: "tool output" },
+		{ type: "text", text: "<system-reminder>\nPreToolUse hook additional context: note\n</system-reminder>" },
+		{ type: "text", text: "<total_tokens>14000000 tokens left</total_tokens>" },
+	];
+
+	it("returns undefined when a hook changed nothing", () => {
+		expect(applyPostToolUseOutcome(own, {})).toBeUndefined();
+	});
+
+	it("a replacement preserves the appended reminder/countdown blocks (review M3)", () => {
+		const result = applyPostToolUseOutcome(reminderTail, { updatedToolResult: "hi (formatted)" });
+		expect(result).toEqual([
+			{ type: "text", text: "hi (formatted)" },
+			{ type: "text", text: "<system-reminder>\nPreToolUse hook additional context: note\n</system-reminder>" },
+			{ type: "text", text: "<total_tokens>14000000 tokens left</total_tokens>" },
+		]);
+	});
+
+	it("a replacement with no reminder tail just replaces", () => {
+		expect(applyPostToolUseOutcome(own, { updatedToolResult: "x" })).toEqual([{ type: "text", text: "x" }]);
+	});
+});
 
 describe("protocol: interpretHookResult", () => {
 	it("exit 2 blocks with stderr as the reason", () => {

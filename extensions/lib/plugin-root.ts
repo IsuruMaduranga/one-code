@@ -25,7 +25,12 @@ export function pluginRoot(agentDir: string): string {
 export function sanitizePathSegment(value: string, allowDots = false): string {
 	const pattern = allowDots ? /[^a-zA-Z0-9\-_.]/g : /[^a-zA-Z0-9\-_]/g;
 	const cleaned = value.replace(pattern, "-");
-	return cleaned.length > 0 ? cleaned : "unnamed";
+	// A dots-only result (`.`, `..`, `...`) is not a directory name: `join`
+	// normalises it and the segment escapes into the parent — a `version: ".."`
+	// would install into the cache root and wipe siblings (review M4). Treat any
+	// all-dots segment as empty.
+	if (cleaned.length === 0 || /^\.+$/.test(cleaned)) return "unnamed";
+	return cleaned;
 }
 
 /**

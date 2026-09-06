@@ -10,14 +10,13 @@
 import { join } from "node:path";
 import { pathWithinBase, sanitizePathSegment } from "../../lib/plugin-root.ts";
 
+/** The directory holding every version of one plugin: `<root>/cache/<marketplace>/<plugin>`. */
+export function pluginCacheDir(root: string, marketplace: string, plugin: string): string {
+	return join(root, "cache", sanitizePathSegment(marketplace), sanitizePathSegment(plugin));
+}
+
 export function versionedCachePath(root: string, marketplace: string, plugin: string, version: string): string {
-	return join(
-		root,
-		"cache",
-		sanitizePathSegment(marketplace),
-		sanitizePathSegment(plugin),
-		sanitizePathSegment(version, true),
-	);
+	return join(pluginCacheDir(root, marketplace, plugin), sanitizePathSegment(version, true));
 }
 
 /** True when `target` resolves inside `base` (rejects .. escapes and absolute overrides). */

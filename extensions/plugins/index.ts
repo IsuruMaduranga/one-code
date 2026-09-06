@@ -24,6 +24,7 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readFavorites, toggleFavorite } from "../lib/favorites.ts";
 import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } from "../lib/mcp-status.ts";
+import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { setOverride } from "../lib/plugin-overrides.ts";
 import { pathWithinBase, pluginRoot } from "../lib/plugin-root.ts";
 import {
@@ -74,14 +75,15 @@ const SHELL_TIMEOUT_MS = 30_000;
 // terminals still shrink to fit. ~6 discover rows show at this cap.
 const PANEL_MAX_HEIGHT = 22;
 
-async function expandTemplate(body: string, args: string, cwd: string): Promise<string> {
+async function expandTemplate(body: string, args: string, cwd: string, persist?: { dir: string; name: string }): Promise<string> {
 	const withArgs = substituteArguments(body, args);
 	const commands = [...new Set(findShellPlaceholders(withArgs))];
 	if (commands.length === 0) return withArgs;
 
 	const outputs = new Map<string, string>();
 	await Promise.all(
-		commands.map(async (command) => {
+		commands.map(async (command, index) => {
+			let text: string;
 			try {
 				const { stdout, stderr } = await run(command, {
 					cwd,
@@ -89,14 +91,47 @@ async function expandTemplate(body: string, args: string, cwd: string): Promise<
 					timeout: SHELL_TIMEOUT_MS,
 					maxBuffer: 2 * 1024 * 1024,
 				});
-				outputs.set(command, (stdout || stderr || "").trim());
+				text = (stdout || stderr || "").trim();
 			} catch (error) {
 				const detail = error as { stdout?: string; stderr?: string; message?: string };
-				outputs.set(command, (detail.stdout || detail.stderr || detail.message || "command failed").trim());
+				text = (detail.stdout || detail.stderr || detail.message || "command failed").trim();
 			}
+			// A `!`command's output (a `git diff` of a large change) lands in the
+			// user turn bounded only by maxBuffer — persist it past the cap so the
+			// model gets a preview plus the path, never a wall of text (review L3).
+			outputs.set(command, persist ? persistIfLarge(text, { dir: persist.dir, id: `plugin-cmd-${persist.name}-${index}` }) : text);
 		}),
 	);
 	return replaceShellPlaceholders(withArgs, outputs);
+}
+
+/** An empty discovery result — the fallback when a scan throws. */
+function emptyDiscovered(): DiscoveredPlugins {
+	return {
+		plugins: [],
+		enabledPlugins: [],
+		agentDirs: [],
+		skills: [],
+		commands: [],
+		mcpConfigs: [],
+		mcpConfigPlugins: new Map(),
+		byPlugin: new Map(),
+	};
+}
+
+/**
+ * discoverPlugins can throw on a malformed installed plugin (a bad manifest, an
+ * unreadable file). This extension is the one that runs discovery at LOAD time,
+ * where a throw becomes "Failed to load extension" and aborts pi entirely — so
+ * it degrades to "no plugins" instead of taking the whole session down (review H2).
+ */
+function safeDiscover(roots: ReturnType<typeof defaultDiscoverRoots>): DiscoveredPlugins {
+	try {
+		return discoverPlugins(roots);
+	} catch (error) {
+		console.error(`One Code: plugin discovery failed, continuing without plugins: ${(error as Error).message}`);
+		return emptyDiscovered();
+	}
 }
 
 export default function pluginsExtension(pi: ExtensionAPI) {
@@ -107,7 +142,7 @@ export default function pluginsExtension(pi: ExtensionAPI) {
 	// Load-time discovery has no ctx, so it runs on process.cwd(); session_start
 	// below re-discovers on the session's real cwd (they differ under `pi -C`
 	// and in RPC children) so project-scoped plugin settings are the right ones.
-	let discovered = discoverPlugins(defaultDiscoverRoots(getAgentDir()));
+	let discovered = safeDiscover(defaultDiscoverRoots(getAgentDir()));
 
 	const registerCommands = (plugins: DiscoveredPlugins) => {
 		for (const command of plugins.commands) {
@@ -126,7 +161,7 @@ export default function pluginsExtension(pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
 		if (ctx.cwd === process.cwd()) return;
 		invalidatePluginsCache();
-		discovered = discoverPlugins(defaultDiscoverRoots(getAgentDir(), ctx.cwd));
+		discovered = safeDiscover(defaultDiscoverRoots(getAgentDir(), ctx.cwd));
 		registerCommands(discovered);
 	});
 	registerCommands(discovered);
@@ -535,7 +570,7 @@ function registerPluginCommand(pi: ExtensionAPI, plugin: Plugin, name: string, p
 				ctx.ui.notify(`Could not read ${path}: ${(error as Error).message}`, "error");
 				return;
 			}
-			const expanded = await expandTemplate(body, args, ctx.cwd);
+			const expanded = await expandTemplate(body, args, ctx.cwd, { dir: sessionResultsDir(ctx), name });
 			recordUsage(pluginRoot(getAgentDir()), "command", name);
 			// Deliver as a user turn, which is how Claude Code runs a command template.
 			pi.sendUserMessage(expanded);

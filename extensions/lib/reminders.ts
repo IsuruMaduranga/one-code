@@ -308,6 +308,20 @@ export function appendReminderBlocks(content: ContentBlock[], entries: ReminderE
 	return [...content, ...entries.map(reminderBlock)];
 }
 
+/**
+ * The framings a reminder/countdown block appended onto a tool result begins
+ * with: a `<system-reminder>`-wrapped one-shot, or a raw one-shot (the
+ * context-budget `<total_tokens>` countdown, an LSP `<new-diagnostics>` block).
+ * A PostToolUse hook that replaces the whole result must re-attach the trailing
+ * run of these, or it silently drops the harness's own context (review M3).
+ */
+const APPENDED_REMINDER_PREFIXES = ["<system-reminder>", "<total_tokens>", "<new-diagnostics>"];
+
+/** True when a text block is one the reminder queue appended onto a tool result. */
+export function isAppendedReminderText(text: string): boolean {
+	return APPENDED_REMINDER_PREFIXES.some((prefix) => text.startsWith(prefix));
+}
+
 export function wrapReminder(text: string): string {
 	return `<system-reminder>\n${text}\n</system-reminder>`;
 }

@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,8 +10,9 @@ import {
 	CHOICE_NO,
 	CHOICE_THESE,
 	CHOICE_THIS,
+	describeServers,
 	hashServerConfig,
-	isProjectMcpJson,
+	isProjectScopedServer,
 	persistApproval,
 	promptTitle,
 	readClaudeMcpjsonPolicy,
@@ -69,13 +71,14 @@ function deps(opts: { choose?: string | undefined; hasUI?: boolean } = {}) {
 	};
 }
 
-describe("isProjectMcpJson", () => {
-	it("is true only for a non-plugin .mcp.json", () => {
+describe("isProjectScopedServer", () => {
+	it("gates a project .mcp.json and a checked-in settings.local.json, but not a plugin or the user file", () => {
 		const plugins = new Set([join(root, "plugin", ".mcp.json")]);
-		expect(isProjectMcpJson(projectServer("a"), plugins)).toBe(true);
-		expect(isProjectMcpJson(stdio("p", join(root, "plugin", ".mcp.json")), plugins)).toBe(false);
-		expect(isProjectMcpJson(stdio("u", join(home, ".claude.json")), plugins)).toBe(false);
-		expect(isProjectMcpJson(stdio("l", join(cwd, ".claude", "settings.local.json")), plugins)).toBe(false);
+		expect(isProjectScopedServer(projectServer("a"), plugins)).toBe(true);
+		// A repo can ship settings.local.json too, so it is consent-gated (review H1).
+		expect(isProjectScopedServer(stdio("l", join(cwd, ".claude", "settings.local.json")), plugins)).toBe(true);
+		expect(isProjectScopedServer(stdio("p", join(root, "plugin", ".mcp.json")), plugins)).toBe(false);
+		expect(isProjectScopedServer(stdio("u", join(home, ".claude.json")), plugins)).toBe(false);
 	});
 });
 
@@ -87,17 +90,28 @@ describe("hashServerConfig", () => {
 });
 
 describe("readClaudeMcpjsonPolicy", () => {
-	it("reads user and local scopes, never the checked-in project settings.json", () => {
+	it("reads user and local scopes, never the checked-in project settings.json", async () => {
 		writeFileSync(join(cwd, ".claude", "settings.json"), JSON.stringify({ enableAllProjectMcpServers: true }));
-		expect(readClaudeMcpjsonPolicy(cwd, home).enableAll).toBe(false);
+		expect((await readClaudeMcpjsonPolicy(cwd, home)).enableAll).toBe(false);
 		writeFileSync(
 			join(cwd, ".claude", "settings.local.json"),
 			JSON.stringify({ enabledMcpjsonServers: ["ok"], disabledMcpjsonServers: ["nope"] }),
 		);
 		writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ enableAllProjectMcpServers: false }));
-		const policy = readClaudeMcpjsonPolicy(cwd, home);
+		const policy = await readClaudeMcpjsonPolicy(cwd, home);
 		expect([...policy.enabled]).toEqual(["ok"]);
 		expect([...policy.disabled]).toEqual(["nope"]);
+	});
+
+	it("ignores a git-tracked settings.local.json (a repo cannot approve its own servers)", async () => {
+		execFileSync("git", ["init", "-q"], { cwd });
+		execFileSync("git", ["config", "user.email", "t@t"], { cwd });
+		execFileSync("git", ["config", "user.name", "t"], { cwd });
+		const local = join(cwd, ".claude", "settings.local.json");
+		writeFileSync(local, JSON.stringify({ enableAllProjectMcpServers: true }));
+		// -f: a global gitignore may ignore settings.local.json; the point is that it is tracked.
+		execFileSync("git", ["add", "-f", "--", local], { cwd });
+		expect((await readClaudeMcpjsonPolicy(cwd, home)).enableAll).toBe(false);
 	});
 });
 
@@ -184,5 +198,24 @@ describe("approveMcpServers", () => {
 	it("uses Claude Code's dialog titles", () => {
 		expect(promptTitle(["a"])).toBe("New MCP server found in .mcp.json: a");
 		expect(promptTitle(["a", "b"])).toBe("2 new MCP servers found in .mcp.json");
+	});
+});
+
+describe("describeServers", () => {
+	it("shows the command in full and names referenced env vars and header names (review M5)", () => {
+		const server: McpServer = {
+			kind: "http",
+			name: "docs",
+			url: "https://evil.example/mcp",
+			headers: { Authorization: "Bearer secretvalue" },
+			source: join(cwd, ".mcp.json"),
+			referencedEnv: ["ANTHROPIC_API_KEY"],
+		};
+		const text = describeServers([server]);
+		expect(text).toContain("https://evil.example/mcp");
+		expect(text).toContain("$ANTHROPIC_API_KEY");
+		expect(text).toContain("Authorization");
+		// The secret value is never echoed.
+		expect(text).not.toContain("secretvalue");
 	});
 });
