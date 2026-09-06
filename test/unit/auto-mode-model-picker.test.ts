@@ -10,6 +10,7 @@ import {
 	renderModelPicker,
 	windowStart,
 } from "../../extensions/auto-mode/model-picker.ts";
+import { visibleWidth } from "../../extensions/lib/text-width.ts";
 
 const plain = (_color: string, text: string) => text;
 
@@ -112,6 +113,18 @@ describe("renderModelPicker", () => {
 			plain,
 		).join("\n");
 		expect(lines).toContain("1 of 4 models match");
+	});
+
+	it("cuts every line to the requested width (TUI-REVIEW H2)", () => {
+		// The default classifier subtitle is 115 columns and once crashed pi in a
+		// regular-mode 80-column terminal; at width 60 nothing may exceed 60.
+		const lines = renderModelPicker({ entries, index: 0, query: "", total: entries.length }, plain, 60);
+		for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(60);
+	});
+
+	it("keeps the key hint on its own line", () => {
+		const lines = renderModelPicker({ entries, index: 0, query: "", total: entries.length }, plain, 60);
+		expect(lines.some((line) => line.includes("type to filter"))).toBe(true);
 	});
 });
 

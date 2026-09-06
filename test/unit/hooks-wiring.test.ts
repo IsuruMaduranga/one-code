@@ -302,15 +302,40 @@ describe("hooks wiring", () => {
 		const hook = script("hook-start.sh", `#!/bin/sh\ncat >> "${seen}"\necho >> "${seen}"\n`);
 		writeUserHooks({ SessionStart: [{ hooks: [{ type: "command", command: hook }] }] });
 		mount();
-		await fake.fireOne("session_start", { reason: "startup" }, ctx());
-		await fake.fireOne("session_start", { reason: "new" }, ctx());
-		await fake.fireOne("session_start", { reason: "resume" }, ctx());
-		await fake.fireOne("session_start", { reason: "reload" }, ctx());
+		// The SessionStart dispatch now runs off the session_start handler and is
+		// awaited by the first before_agent_start (TUI-REVIEW M2), so drive a turn
+		// after each start to force it to completion before reading the file.
+		const start = async (reason: string) => {
+			await fake.fireOne("session_start", { reason }, ctx());
+			await fake.fireOne("before_agent_start", { prompt: "go" }, ctx());
+		};
+		await start("startup");
+		await start("new");
+		await start("resume");
+		await start("reload");
 		const sources = readFileSync(seen, "utf-8")
 			.split("\n")
 			.filter((line) => line.trim())
 			.map((line) => JSON.parse(line).source);
 		expect(sources).toEqual(["startup", "clear", "resume"]);
+	});
+
+	it("SessionStart runs off the session_start handler so a slow hook does not hold the prompt (TUI-REVIEW M2)", async () => {
+		const seen = join(root, "slow-start-stdin.jsonl");
+		// A hook that sleeps ~400ms before writing.
+		const hook = script("hook-slow.sh", `#!/bin/sh\ncat >> "${seen}"\necho >> "${seen}"\nsleep 0.4\n`);
+		writeUserHooks({ SessionStart: [{ hooks: [{ type: "command", command: hook }] }] });
+		mount();
+		const t0 = Date.now();
+		await fake.fireOne("session_start", { reason: "startup" }, ctx());
+		const startElapsed = Date.now() - t0;
+		// The handler returns promptly — it does not wait for the 400ms hook.
+		expect(startElapsed).toBeLessThan(200);
+		// The first turn awaits the dispatch, so by the time it resolves the hook has run.
+		const t1 = Date.now();
+		await fake.fireOne("before_agent_start", { prompt: "go" }, ctx());
+		expect(Date.now() - t1).toBeGreaterThanOrEqual(300);
+		expect(readFileSync(seen, "utf-8").trim()).not.toBe("");
 	});
 });
 

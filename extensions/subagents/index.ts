@@ -57,7 +57,7 @@ import { registerWorktreeIsolation } from "../lib/worktree-isolation.ts";
 import { createTaskNotifier, oneShotNote, sessionOutlivesTurn, systemNotification } from "../lib/notifications.ts";
 import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { ccToolRenderers, customMessageText, liveUiCtx, notificationComponent, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
-import { deriveActivity, LiveRunRegistry } from "./live-runs.ts";
+import { deriveActivity, type FinishOutcome, LiveRunRegistry } from "./live-runs.ts";
 import { DELEGATION_STEER } from "./delegation-steer.ts";
 import { awaitHandBackReview, withReview } from "./hand-back-review.ts";
 import type { LiveSink } from "./runner.ts";
@@ -222,6 +222,13 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	const liveRuns = new LiveRunRegistry();
 	/** taskId → kill handle: a resident's kill resolves when it has exited; a blocking run exposes `result`. */
 	const liveHandles = new Map<string, { kill(): void | Promise<void>; result?: Promise<unknown> }>();
+	/**
+	 * Task ids the user asked to stop (x / ctrl+x ctrl+k / session teardown). A
+	 * kill still surfaces as an exit, but it neither completed nor failed — so the
+	 * strip and the notification read this to say "Stopped" instead of the
+	 * misleading "Completed"/"failed" (TUI-REVIEW L1). Cleared when a run (re)starts.
+	 */
+	const stoppedTaskIds = new Set<string>();
 	let lastCtx: ExtensionContext | undefined;
 	const shellTasks = trackShellTasks(pi);
 	const panel = new SubagentWidget(liveRuns, () => lastCtx, shellTasks);
@@ -232,6 +239,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	 * fold into the existing onProgress, and settle/finish terminal marks.
 	 */
 	const trackLiveRun = (record: AgentRunRecord, request: RunRequest, parent?: { taskId: string; depth: number }) => {
+		// A (re)starting run is no longer stopped — a resumed agent that was killed
+		// earlier must not inherit the "Stopped" mark.
+		stoppedTaskIds.delete(record.taskId);
 		// A resumed run (SendMessage to a finished agent) re-enters its existing
 		// panel entry; only a never-seen taskId registers fresh.
 		if (!liveRuns.reactivate(record.taskId, request.task, Date.now())) {
@@ -257,8 +267,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			sink,
 			progress: (toolCalls: number, usage: UsageTotals) => liveRuns.stats(record.taskId, toolCalls, usage),
 			settle: () => liveRuns.settle(record.taskId),
-			finish: (failed: boolean) => {
-				liveRuns.finish(record.taskId, failed);
+			finish: (outcome: FinishOutcome) => {
+				liveRuns.finish(record.taskId, outcome);
 				liveHandles.delete(record.taskId);
 			},
 		};
@@ -535,11 +545,15 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	// --- The subagent panel: strip soft focus + Enter-to-view transcript swap ---
 
 	/** Stop one live agent by task id (blocking-run handle or resident task). */
-	const stopAgent = (taskId: string) => void liveHandles.get(taskId)?.kill();
+	const stopAgent = (taskId: string) => {
+		stoppedTaskIds.add(taskId); // the coming exit is a user stop, not a completion (L1)
+		void liveHandles.get(taskId)?.kill();
+	};
 	/** Stop every live agent; returns one settle promise per agent (a resident's exit, a blocking run's result). */
 	const stopAllAgents = (): Promise<unknown>[] => {
 		const exits: Promise<unknown>[] = [];
-		for (const [, handle] of liveHandles) {
+		for (const [taskId, handle] of liveHandles) {
+			stoppedTaskIds.add(taskId);
 			const killed = handle.kill();
 			const settled = handle.result ?? killed;
 			if (settled) exits.push(settled);
@@ -1584,20 +1598,22 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					? `\n\n(Running in worktree ${worktree.path} — kept while the agent stays resident.)`
 					: "";
 				resident.turnHandlers.push((outcome, review) => {
-					task.status = outcome.failed ? "failed" : "completed";
+					const stopped = stoppedTaskIds.has(p.record.taskId);
+					task.status = stopped ? "stopped" : outcome.failed ? "failed" : "completed";
 					task.finishedAt = Date.now();
 					firstTurnOutput = outcome.output;
 					finish();
 					const stats = formatStats(outcome.toolCalls, outcome.usage);
+					const verb = stopped ? "was stopped" : outcome.failed ? "failed" : "completed";
 					notify(
 						"subagent-result",
 						systemNotification(
 							withReview(
-								`Agent ${p.record.name} (task ${p.record.taskId}) ${outcome.failed ? "failed" : "completed"} (${stats}). It stays reachable with SendMessage.\n\n${bounded(outcome.output, `${p.record.taskId}-report`, OUTPUT_CAP)}${worktreeNote}`,
+								`Agent ${p.record.name} (task ${p.record.taskId}) ${verb} (${stats}). It stays reachable with SendMessage.\n\n${bounded(outcome.output, `${p.record.taskId}-report`, OUTPUT_CAP)}${worktreeNote}`,
 								review,
 							),
 						),
-						{ taskId: p.record.taskId, name: p.record.name, failed: outcome.failed ?? false, reviewed: review !== undefined },
+						{ taskId: p.record.taskId, name: p.record.name, failed: stopped ? false : (outcome.failed ?? false), reviewed: review !== undefined },
 					);
 				});
 
@@ -1683,7 +1699,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					},
 					onExit: () => {
 						if (reaper) clearTimeout(reaper);
-						live.finish(false);
+						live.finish(stoppedTaskIds.has(p.record.taskId) ? "stopped" : false);
 						if (residents.get(p.record.taskId) === resident) residents.delete(p.record.taskId);
 						liveHandles.delete(p.record.taskId);
 						if (worktree) void cleanupWorktree(parentCwd, worktree);
@@ -2172,8 +2188,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						entries,
 						current,
 						title: "Select the default subagent model",
-						subtitle:
-							"Default for subagent/workflow runs unless overridden · type to filter · ↑/↓ · enter · esc",
+						subtitle: "Default for subagent/workflow runs unless overridden",
 					},
 					tui,
 					theme,

@@ -232,12 +232,30 @@ export default function planModeExtension(pi: ExtensionAPI) {
 				let offset = 0;
 				let selected: PlanChoice = initialPlanChoice(options);
 				let lineCount = 0;
+				// The dialog stays open while exit_plan_mode runs, so pi's working
+				// spinner drives ~8 frames a second — and re-wrapping the whole plan
+				// each frame burned 5–17 ms on a long plan (TUI-REVIEW M1). The plan
+				// is immutable for the dialog's life: wrap once per width, and cache
+				// the rendered frame by (width, offset, selected) so a steady frame
+				// costs nothing. invalidate() (theme swap) drops both.
+				// Only one width is ever live at a time (a resize is the only thing that
+				// changes it), so a single-slot memo is enough — like the model picker's.
+				let wrapped: { width: number; lines: string[] } | undefined;
+				let frame: { key: string; lines: string[] } | undefined;
+				const wrapAt = (wrapWidth: number): string[] => {
+					if (wrapped?.width !== wrapWidth) wrapped = { width: wrapWidth, lines: wrapPlanText(plan, wrapWidth) };
+					return wrapped.lines;
+				};
 				return {
 					render: (width: number) => {
-						const lines = wrapPlanText(plan, Math.max(10, width - 1));
+						const lines = wrapAt(Math.max(10, width - 1));
 						lineCount = lines.length;
 						offset = clampOffset(offset, lineCount, maxVisible);
-						return renderPlanViewer({ lines, offset, choice: selected, choices, maxVisible }, paint, width);
+						const key = `${width}:${offset}:${selected}`;
+						if (frame?.key === key) return frame.lines;
+						const rendered = renderPlanViewer({ lines, offset, choice: selected, choices, maxVisible }, paint, width);
+						frame = { key, lines: rendered };
+						return rendered;
 					},
 					handleInput: (data: string) => {
 						const key = decodeViewerKey(data, maxVisible);
@@ -250,7 +268,10 @@ export default function planModeExtension(pi: ExtensionAPI) {
 							selected = (((selected + key.delta) % options.length) + options.length) % options.length;
 						tui.requestRender();
 					},
-					invalidate: () => {},
+					invalidate: () => {
+						wrapped = undefined;
+						frame = undefined;
+					},
 				};
 			});
 

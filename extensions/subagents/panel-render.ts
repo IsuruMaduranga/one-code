@@ -6,7 +6,8 @@
  * index.ts; this file owns layout only, mirroring workflow/viewer.ts.
  */
 
-import { cutPlainText as cut, formatDuration, splitCell, splitRow } from "../lib/tui-render.ts";
+import { cutPlainText as cut, formatDuration, splitCell, splitRow, visibleWidth } from "../lib/tui-render.ts";
+import { hardWrapColumns } from "../lib/text-width.ts";
 import { formatTokenCount } from "./usage.ts";
 import { type LiveRun, type LiveStatus, streamingText, type TranscriptBlock } from "./live-runs.ts";
 
@@ -110,6 +111,13 @@ export function nextAgentTaskId(rows: PanelRow[], taskId: string | undefined): s
 
 const STATUS_ROW_STYLE: Partial<Record<LiveStatus, string>> = { failed: "error" };
 
+/** Terminal-status label + colour for the transcript view's bottom row (running handled separately). */
+const TERMINAL_STATUS: Partial<Record<LiveStatus, [text: string, color: string]>> = {
+	failed: ["✗ Failed", "error"],
+	stopped: ["■ Stopped", "dim"],
+	idle: ["Idle — resident", "dim"],
+};
+
 // ---------------------------------------------------------------------------
 // The strip (below-editor, always-on while agents are alive)
 // ---------------------------------------------------------------------------
@@ -193,17 +201,17 @@ export function wrapProse(text: string, width: number): string[] {
 		}
 		let line = "";
 		for (const word of raw.split(" ")) {
-			const chars = [...word];
-			if (chars.length > columns) {
+			if (visibleWidth(word) > columns) {
 				// A word wider than the screen (path, hash): flush, then hard-break it.
+				// The last chunk becomes the running line so later words can join it.
 				if (line) out.push(line);
-				let i = 0;
-				for (; i + columns < chars.length; i += columns) out.push(chars.slice(i, i + columns).join(""));
-				line = chars.slice(i).join("");
+				const chunks = hardWrapColumns(word, columns);
+				line = chunks.pop() ?? "";
+				out.push(...chunks);
 				continue;
 			}
 			const candidate = line ? `${line} ${word}` : word;
-			if ([...candidate].length > columns) {
+			if (visibleWidth(candidate) > columns) {
 				out.push(line);
 				line = word;
 			} else {
@@ -298,8 +306,7 @@ export function renderTranscript(input: TranscriptInput, paint: Paint): Transcri
 		}${run.thinking ? ` · thinking with ${run.thinking} effort` : ""})`;
 		out.push(bottomRow(spin, "accent"));
 	} else {
-		const [text, color] =
-			run.status === "failed" ? ["✗ Failed", "error"] : run.status === "idle" ? ["Idle — resident", "dim"] : ["✔ Completed", "dim"];
+		const [text, color] = TERMINAL_STATUS[run.status] ?? ["✔ Completed", "dim"];
 		out.push(bottomRow(text, color));
 	}
 	// The header alone exceeds a very small height; trim so the "exactly

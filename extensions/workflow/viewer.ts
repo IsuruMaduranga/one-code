@@ -11,7 +11,7 @@
  * before painting so ANSI escapes never enter the width accounting.
  */
 
-import { cutPlainText as cut, formatDuration, padPlainText, splitCell, splitRow, wrapPlainText } from "../lib/tui-render.ts";
+import { cutPlainText as cut, formatDuration, padPlainText, splitCell, splitRow, visibleWidth, wrapPlainText } from "../lib/tui-render.ts";
 import { formatTokenCount } from "../subagents/usage.ts";
 import type { AgentRecord, RunStatus } from "./types.ts";
 
@@ -230,7 +230,7 @@ function boxPane(title: string, lines: PaneLine[], width: number, height: number
 	const innerWidth = Math.max(1, width - 4);
 	const contentRows = Math.max(0, height - 2);
 	const titleCut = cut(title, Math.max(0, width - 4));
-	const dashes = "─".repeat(Math.max(0, width - [...titleCut].length - 4));
+	const dashes = "─".repeat(Math.max(0, width - visibleWidth(titleCut) - 4));
 	const out: string[] = [paint.fg("dim", "┌ ") + paint.bold(titleCut) + paint.fg("dim", ` ${dashes}┐`)];
 	for (let i = 0; i < contentRows; i++) {
 		const line = lines[i];

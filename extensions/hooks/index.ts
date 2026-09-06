@@ -102,6 +102,16 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	let pendingPromptContext: Array<{ event: CcHookEvent; text: string }> = [];
 	/** The last context seen, for bridged child calls (dispatched parent-side). */
 	let lastCtx: ExtensionContext | undefined;
+	/**
+	 * The in-flight SessionStart hook dispatch. It runs OFF the `session_start`
+	 * path so the editor opens immediately (a slow hook used to hold the prompt
+	 * for its whole run — TUI-REVIEW M2); the first `before_agent_start` awaits it
+	 * so the first turn still carries the hook's additionalContext, and the
+	 * first-run approval dialog still gates execution.
+	 */
+	let sessionStartPending: Promise<void> | undefined;
+	/** Bumped on every session_start; a superseded dispatch checks it before writing context. */
+	let sessionGen = 0;
 
 	const notify = (ctx: HookDispatchCtx, message: string) => {
 		if (ctx.sessionEnded) return; // session gone; nowhere to show it
@@ -287,10 +297,27 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		return { content, isError: event.isError };
 	});
 
+	/** Await the backgrounded SessionStart dispatch once, if one is pending. */
+	const drainSessionStart = async () => {
+		if (!sessionStartPending) return;
+		const pending = sessionStartPending;
+		sessionStartPending = undefined;
+		try {
+			await pending;
+		} catch {
+			// dispatch already reports its own failures; never block the turn on one.
+		}
+	};
+
 	// ---- UserPromptSubmit ---------------------------------------------------
 	pi.on("input", async (event, ctx) => {
 		if (event.source === "extension") return undefined;
 		stopHookActive = false;
+		// Drain the backgrounded SessionStart dispatch before this prompt's own
+		// UserPromptSubmit context, so their order in the first turn is unchanged
+		// (SessionStart context precedes UserPromptSubmit). before_agent_start is
+		// the backstop for turns with no input event (one-shot, programmatic).
+		await drainSessionStart();
 		const payload: HookStdinPayload = { ...basePayload(ctx, "UserPromptSubmit"), prompt: event.text };
 		const outcome = await dispatch(ctx, "UserPromptSubmit", { ignoreMatcher: true }, payload);
 		if (outcome.block) {
@@ -305,8 +332,14 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	// custom message pi appends right AFTER the user's prompt (the
 	// before_agent_start `message` return). An idle `sendMessage` from here
 	// landed it BEFORE the prompt (pi appends first, then adds the user message).
-	pi.on("before_agent_start", (_event, ctx) => {
+	pi.on("before_agent_start", async (_event, ctx) => {
 		lastCtx = ctx;
+		// The SessionStart dispatch runs in the background from session_start; the
+		// first turn must wait for it so its additionalContext is present (and, on
+		// first run, so its approval dialog gates execution before the model runs).
+		// The `input` handler usually drained it already; this is the backstop for
+		// turns with no input event.
+		await drainSessionStart();
 		if (pendingPromptContext.length === 0) return;
 		const texts = pendingPromptContext;
 		pendingPromptContext = [];
@@ -320,15 +353,22 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	});
 
 	// ---- SessionStart / SessionEnd -----------------------------------------
-	const dispatchSessionStart = async (ctx: ExtensionContext, source: string) => {
+	const dispatchSessionStart = async (ctx: ExtensionContext, source: string, gen: number) => {
 		const payload: HookStdinPayload = { ...basePayload(ctx, "SessionStart"), source };
 		const outcome = await dispatch(ctx, "SessionStart", { candidates: [source] }, payload);
-		if (outcome.additionalContext) pendingPromptContext.push({ event: "SessionStart", text: outcome.additionalContext });
+		// A later session_start (rapid /clear, resume) may have superseded this one
+		// while its hook ran; discard the stale result instead of pushing it into
+		// the new session's context (`pendingPromptContext` is shared and reset).
+		if (gen === sessionGen && outcome.additionalContext) {
+			pendingPromptContext.push({ event: "SessionStart", text: outcome.additionalContext });
+		}
 	};
 
-	pi.on("session_start", async (event, ctx) => {
+	pi.on("session_start", (event, ctx) => {
 		lastCtx = ctx;
+		const gen = ++sessionGen;
 		pendingPromptContext = [];
+		sessionStartPending = undefined;
 		// Publish the child hook bridge (subagent-bridge.ts). The closures read
 		// live parent state per call, so once per session start is enough.
 		pi.events.emit(SUBAGENT_HOOK_CHANNEL, { bridge: childHookBridge } satisfies SubagentHookPayload);
@@ -337,7 +377,12 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		// `startup` already. `compact` is dispatched from session_compact below.
 		const reason = (event as { reason?: string }).reason ?? "startup";
 		if (reason === "reload" || reason === "fork") return;
-		await dispatchSessionStart(ctx, reason === "new" ? "clear" : reason);
+		// Run the dispatch OFF this handler so the prompt editor opens immediately;
+		// the first before_agent_start awaits the promise (TUI-REVIEW M2). The
+		// detached `.catch` only suppresses an unhandled rejection before that
+		// await attaches — the real error still surfaces there.
+		sessionStartPending = dispatchSessionStart(ctx, reason === "new" ? "clear" : reason, gen);
+		sessionStartPending.catch(() => {});
 	});
 
 	// ---- Subagent bridge ----------------------------------------------------
@@ -487,7 +532,8 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		};
 		const outcome = await dispatch(ctx, "PostCompact", { candidates: [trigger] }, payload);
 		if (outcome.additionalContext) pendingPromptContext.push({ event: "PostCompact", text: outcome.additionalContext });
-		// CC fires SessionStart(source: "compact") after compaction.
-		await dispatchSessionStart(ctx, "compact");
+		// CC fires SessionStart(source: "compact") after compaction. Awaited inline
+		// (not backgrounded), so the current generation is still in force.
+		await dispatchSessionStart(ctx, "compact", sessionGen);
 	});
 }

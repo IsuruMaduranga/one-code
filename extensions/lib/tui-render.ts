@@ -16,7 +16,9 @@
  */
 
 import { notificationBody } from "./notifications.ts";
+import { fitPainted, hardWrapColumns, sliceColumns, visibleWidth } from "./text-width.ts";
 export { notificationBody };
+export { visibleWidth } from "./text-width.ts";
 
 /** The structural subset of pi-tui's Component that pi's renderers require. */
 export interface TuiComponent {
@@ -102,10 +104,10 @@ export function countNoun(count: number, noun: string): string {
 	return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
-/** Right-align plain text within `width` columns. */
+/** Right-align plain text within `width` terminal columns. */
 export function alignRight(text: string, width: number): string {
-	const length = [...text].length;
-	if (length >= width) return text.slice(0, Math.max(0, width));
+	const length = visibleWidth(text);
+	if (length >= width) return sliceColumns(text, Math.max(0, width)).text;
 	return " ".repeat(width - length) + text;
 }
 
@@ -138,17 +140,18 @@ export function boundedDockHeight(terminalRows: number, max: number, min = 12): 
 	return avail <= min ? avail : Math.min(avail, max);
 }
 
-/** Cut plain (unpainted) text to `width` columns by code point, with an ellipsis. */
+/** Cut plain (unpainted) text to `width` terminal columns, with an ellipsis. */
 export function cutPlainText(text: string, width: number): string {
 	if (width <= 0) return "";
-	const chars = [...text];
-	return chars.length > width ? `${chars.slice(0, Math.max(0, width - 1)).join("")}…` : text;
+	if (visibleWidth(text) <= width) return text;
+	// Reserve one column for the ellipsis (itself width 1).
+	return `${sliceColumns(text, Math.max(0, width - 1)).text}…`;
 }
 
-/** Cut then pad plain (unpainted) text to exactly `width` columns, by code point. */
+/** Cut then pad plain (unpainted) text to exactly `width` terminal columns. */
 export function padPlainText(text: string, width: number): string {
 	const shortened = cutPlainText(text, width);
-	return shortened + " ".repeat(Math.max(0, width - [...shortened].length));
+	return shortened + " ".repeat(Math.max(0, width - visibleWidth(shortened)));
 }
 
 /** First non-empty line of a possibly-multiline string, trimmed. */
@@ -181,7 +184,7 @@ export function searchBoxLines(
 	const inner = boxWidth - 2; // space between the vertical borders
 	const label = query ? `⌕ ${query}` : `⌕ ${placeholder}`;
 	const cut = cutPlainText(label, inner - 2); // one space padding each side
-	const content = ` ${cut}${" ".repeat(Math.max(0, inner - 2 - [...cut].length))} `;
+	const content = ` ${cut}${" ".repeat(Math.max(0, inner - 2 - visibleWidth(cut)))} `;
 	const v = paint("border", "│");
 	return [
 		` ${paint("border", `╭${"─".repeat(inner)}╮`)}`,
@@ -225,8 +228,9 @@ export function windowBlocks(blocks: RenderBlock[], cursor: number, budget: numb
  * rows, and transcript headers all build on it.
  */
 export function splitRow(left: string, right: string, width: number): { fused: string } | { left: string; right: string } {
-	const leftWidth = width - [...right].length - 2;
-	if ([...right].length === 0 || leftWidth < 8) return { fused: cutPlainText(`${left}  ${right}`.trimEnd(), width) };
+	const rightWidth = visibleWidth(right);
+	const leftWidth = width - rightWidth - 2;
+	if (rightWidth === 0 || leftWidth < 8) return { fused: cutPlainText(`${left}  ${right}`.trimEnd(), width) };
 	return { left: padPlainText(left, leftWidth), right };
 }
 
@@ -236,66 +240,33 @@ export function splitCell(left: string, right: string, width: number): string {
 	return "fused" in row ? padPlainText(row.fused, width) : `${row.left}  ${row.right}`;
 }
 
-/** Hard-wrap plain text to `width` columns by code point, preserving blank lines. */
+/** Hard-wrap plain text to `width` terminal columns, preserving blank lines. */
 export function wrapPlainText(text: string, width: number): string[] {
 	const columns = Math.max(1, width);
 	const out: string[] = [];
 	for (const raw of text.replace(/\r\n/g, "\n").split("\n")) {
-		const chars = [...raw];
-		if (chars.length === 0) {
-			out.push("");
-			continue;
-		}
-		for (let i = 0; i < chars.length; i += columns) {
-			out.push(chars.slice(i, i + columns).join(""));
-		}
+		if (raw.length === 0) out.push("");
+		else out.push(...hardWrapColumns(raw, columns));
 	}
 	return out;
 }
 
 /**
- * Cut a painted line to `width` visible columns without splitting ANSI escape
- * sequences, ending with an ellipsis and a reset so truncation cannot leak a
- * colour into the next line. pi-tui *crashes* the whole app on an overwide
- * line ("Rendered line exceeds terminal width"), and only validates a
- * component when its output changes — so an overflow can hide in static
- * content for weeks, then kill pi the moment something makes it re-render.
+ * Cut a painted line to `width` terminal columns without splitting ANSI escape
+ * sequences or a wide/emoji grapheme, ending with an ellipsis and a reset so
+ * truncation cannot leak a colour into the next line. pi-tui *crashes* the
+ * whole app on an overwide line ("Rendered line exceeds terminal width") — and
+ * it measures columns, not code points: a CJK ideograph or an emoji is two
+ * columns wide (findings/TUI-REVIEW H1). It only validates a component when its
+ * output changes, so an overflow can hide in static content for weeks, then
+ * kill pi the moment something makes it re-render.
  */
-const ANSI_AT = /\x1b\[[0-9;]*m/y;
-
 export function truncateLine(line: string, width: number): string {
 	if (width <= 0) return "";
-	// Raw length bounds visible width (escapes only ever add), so a line whose
-	// raw length fits needs no scan — the hot path for nearly every line.
-	if (line.length <= width) return line;
-	let visible = 0;
-	for (let i = 0; i < line.length; ) {
-		ANSI_AT.lastIndex = i;
-		const escape = ANSI_AT.exec(line);
-		if (escape) {
-			i += escape[0].length;
-			continue;
-		}
-		visible++;
-		i++;
-	}
-	if (visible <= width) return line;
-
-	let out = "";
-	let used = 0;
-	for (let i = 0; i < line.length && used < width - 1; ) {
-		ANSI_AT.lastIndex = i;
-		const escape = ANSI_AT.exec(line);
-		if (escape) {
-			out += escape[0];
-			i += escape[0].length;
-			continue;
-		}
-		out += line[i];
-		used++;
-		i++;
-	}
-	return `${out}\x1b[0m…`;
+	if (visibleWidth(line) <= width) return line;
+	// Reserve one column for the ellipsis (itself width 1).
+	const { text } = fitPainted(line, Math.max(0, width - 1));
+	return `${text}\x1b[0m…`;
 }
 
 /**

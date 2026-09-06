@@ -15,7 +15,10 @@ import { cutPlainText, firstNonEmptyLine } from "../lib/tui-render.ts";
 import { normalizeToolName } from "../permissions/matcher.ts";
 import { emptyUsage, sumUsage, type UsageTotals } from "./usage.ts";
 
-export type LiveStatus = "running" | "idle" | "done" | "failed";
+export type LiveStatus = "running" | "idle" | "done" | "failed" | "stopped";
+
+/** Terminal outcome for `finish`: false = completed, true = failed, "stopped" = stopped by the user. */
+export type FinishOutcome = boolean | "stopped";
 
 /** One rendered block of a child's transcript, mirroring the main-session marks. */
 export interface TranscriptBlock {
@@ -263,13 +266,18 @@ export class LiveRunRegistry {
 		this.changed(taskId);
 	}
 
-	/** Terminal: the run finished (or failed). */
-	finish(taskId: string, failed: boolean): void {
+	/** Terminal: the run finished, failed, or was stopped by the user. */
+	finish(taskId: string, outcome: FinishOutcome): void {
 		const run = this.byId.get(taskId);
 		if (!run) return;
-		run.status = failed ? "failed" : "done";
+		if (outcome === "stopped") {
+			run.status = "stopped";
+			run.activity = "Stopped";
+		} else {
+			run.status = outcome ? "failed" : "done";
+			run.activity = outcome ? "Failed" : "Completed";
+		}
 		run.finishedAt = Date.now();
-		run.activity = failed ? "Failed" : "Completed";
 		run.streaming = undefined;
 		this.changed(taskId);
 	}

@@ -154,4 +154,26 @@ describe("exit_plan_mode and the mode before planning (PERMISSIONS-REVIEW-2026-0
 		expect(modeRequests).toEqual([{ mode: "default" }]);
 		expect(offered[0].join("\n")).not.toContain("the mode before planning");
 	});
+
+	it("interactive: a steady frame is served from cache, not re-wrapped (TUI-REVIEW M1)", async () => {
+		// render() twice at the same width with no input between → the exact same
+		// array is returned, proving the plan was not re-wrapped and the frame not
+		// rebuilt while the spinner drives repaints.
+		let firstRender: string[] | undefined;
+		let secondRender: string[] | undefined;
+		const custom = vi.fn(async (factory: ViewerFactory) => {
+			let picked: unknown;
+			const component = factory({ requestRender: () => {} }, {}, {}, (v) => (picked = v));
+			firstRender = component.render(120);
+			secondRender = component.render(120);
+			component.handleInput("\r");
+			return picked;
+		});
+		const ctx = createFakeCtx({ cwd: stateDir, hasUI: true, modelRegistry: { getAvailable: () => [] }, ui: { custom } });
+		await fake.fireOne("session_start", {}, ctx);
+		await enterPlanWithPlanText(ctx);
+		await fake.tools.get("exit_plan_mode")!.execute("t5", {}, undefined, undefined, ctx);
+		expect(firstRender).toBeDefined();
+		expect(secondRender).toBe(firstRender); // same reference: cache hit, no rework
+	});
 });

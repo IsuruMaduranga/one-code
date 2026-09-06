@@ -9,7 +9,7 @@
  * under-measure and risk pi's overwide-line crash.
  */
 
-import { cutPlainText, padPlainText, panelTopRule, searchBoxLines } from "../../lib/tui-render.ts";
+import { cutPlainText, padPlainText, panelTopRule, searchBoxLines, visibleWidth } from "../../lib/tui-render.ts";
 import type { SkillState } from "../../lib/skill-overrides.ts";
 import { clampSkillsCursor, type SkillsPanelState, type SkillsRow, visibleRows } from "./state.ts";
 
@@ -42,7 +42,7 @@ function rowLine(row: SkillsRow, isCursor: boolean, paint: SkillsPaint, width: n
 	if (isCursor) return paint.fg("accent", cutPlainText(plainHead + meta, width - 1));
 	const color = row.locked ? "dim" : COLOR[row.state];
 	// Cut the meta on the visible-length budget left after the head, then paint.
-	const remaining = Math.max(0, width - 1 - [...plainHead].length);
+	const remaining = Math.max(0, width - 1 - visibleWidth(plainHead));
 	return `${marker}${paint.fg(color, label)}${row.name}${paint.fg("dim", cutPlainText(meta, remaining))}`;
 }
 

@@ -15,6 +15,8 @@
  * assume (see model-select.ts).
  */
 
+import { truncateLine } from "../lib/tui-render.ts";
+
 export interface PickerEntry {
 	provider: string;
 	id: string;
@@ -143,7 +145,7 @@ export function modelPickerComponent(
 	tui: { requestRender(): void },
 	theme: unknown,
 	done: (choice: PickerEntry | null) => void,
-): { render(): string[]; handleInput(data: string): void; invalidate(): void } {
+): { render(width: number): string[]; handleInput(data: string): void; invalidate(): void } {
 	const paint: Paint = (color, text) => {
 		const themed = theme as { fg?(c: string, t: string): string } | undefined;
 		try {
@@ -155,23 +157,34 @@ export function modelPickerComponent(
 	let query = "";
 	let index = 0;
 	let filtered = options.entries;
+	// pi calls render(width) every frame and the picker repaints per keystroke;
+	// memoize by width and clear on any state change so a wide default subtitle
+	// (115 columns) never reaches the wire uncut — an overwide line crashes pi
+	// in regular TUI mode (TUI-REVIEW H2).
+	let cache: { width: number; lines: string[] } | undefined;
 	return {
-		render: () => [
-			"",
-			...renderModelPicker(
-				{
-					entries: filtered,
-					index,
-					query,
-					total: options.entries.length,
-					current: options.current,
-					title: options.title,
-					subtitle: options.subtitle,
-				},
-				paint,
-			),
-			"",
-		],
+		render: (width: number) => {
+			if (cache && cache.width === width) return cache.lines;
+			const lines = [
+				"",
+				...renderModelPicker(
+					{
+						entries: filtered,
+						index,
+						query,
+						total: options.entries.length,
+						current: options.current,
+						title: options.title,
+						subtitle: options.subtitle,
+					},
+					paint,
+					width,
+				),
+				"",
+			];
+			cache = { width, lines };
+			return lines;
+		},
 		handleInput: (data: string) => {
 			const key = decodePickerKey(data);
 			if (!key) return;
@@ -184,27 +197,36 @@ export function modelPickerComponent(
 				filtered = filterEntries(options.entries, query);
 				index = 0;
 			}
+			cache = undefined;
 			tui.requestRender();
 		},
-		invalidate: () => {},
+		invalidate: () => {
+			cache = undefined;
+		},
 	};
 }
 
-export function renderModelPicker(view: PickerView, paint: Paint): string[] {
+/** Key hint, kept on its own line so it survives at narrow widths. */
+const PICKER_HINT = "type to filter · ↑/↓ · enter · esc";
+/** Default privacy note for the classifier picker (the key hint rides its own line below). */
+const CLASSIFIER_SUBTITLE = "It reads your prompts and CLAUDE.md — picking another provider sends them there.";
+
+export function renderModelPicker(view: PickerView, paint: Paint, width = Infinity): string[] {
 	const maxVisible = view.maxVisible ?? 10;
+	// Every line is cut to `width` — pi-tui crashes the whole app on a rendered
+	// line wider than the terminal (TUI-REVIEW H2). The default Infinity leaves
+	// lines uncut (truncateLine returns them unchanged) for unit tests.
+	const cut = (line: string): string => truncateLine(line, width);
 	const lines: string[] = [];
-	lines.push(paint("accent", view.title ?? "Select the auto-mode classifier model"));
-	lines.push(
-		paint(
-			"dim",
-			view.subtitle ??
-				"It reads your prompts and CLAUDE.md — picking another provider sends them there. type to filter · ↑/↓ · enter · esc",
-		),
-	);
-	lines.push(`  filter: ${view.query}${paint("dim", "▏")}`);
+	lines.push(cut(paint("accent", view.title ?? "Select the auto-mode classifier model")));
+	lines.push(cut(paint("dim", view.subtitle ?? CLASSIFIER_SUBTITLE)));
+	// The key hint is always its own line, so a narrow terminal never clips the
+	// only place the keys are documented.
+	lines.push(cut(paint("dim", `  ${PICKER_HINT}`)));
+	lines.push(cut(`  filter: ${view.query}${paint("dim", "▏")}`));
 
 	if (view.entries.length === 0) {
-		lines.push(paint("warning", "  (no available model matches)"));
+		lines.push(cut(paint("warning", "  (no available model matches)")));
 		return lines;
 	}
 
@@ -216,10 +238,10 @@ export function renderModelPicker(view: PickerView, paint: Paint): string[] {
 			.filter(Boolean)
 			.join("  ");
 		const suffix = annotations ? `  ${paint("dim", annotations)}` : "";
-		lines.push(at === view.index ? `${paint("accent", `❯ ${spec}`)}${suffix}` : `  ${spec}${suffix}`);
+		lines.push(cut(at === view.index ? `${paint("accent", `❯ ${spec}`)}${suffix}` : `  ${spec}${suffix}`));
 	}
 	if (view.entries.length > maxVisible || view.entries.length < view.total) {
-		lines.push(paint("dim", `  ${view.entries.length} of ${view.total} models${view.query ? " match" : ""}`));
+		lines.push(cut(paint("dim", `  ${view.entries.length} of ${view.total} models${view.query ? " match" : ""}`)));
 	}
 	return lines;
 }

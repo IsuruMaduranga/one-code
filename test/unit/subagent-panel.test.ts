@@ -167,6 +167,23 @@ describe("LiveRunRegistry", () => {
 		expect(reg.get(id)?.status).toBe("failed");
 	});
 
+	it("finish('stopped') marks a user stop distinctly, not as completion or failure (TUI-REVIEW L1)", () => {
+		const reg = new LiveRunRegistry();
+		const id = register(reg);
+		reg.finish(id, "stopped");
+		const run = reg.get(id)!;
+		expect(run.status).toBe("stopped");
+		expect(run.activity).toBe("Stopped");
+		const finishedAt = run.finishedAt!;
+		expect(finishedAt).toBeGreaterThan(0);
+		// The strip shows "Stopped", and it is not painted with the error token
+		// (STATUS_ROW_STYLE only maps failed → error).
+		const rows = buildRows(reg.list(), false, finishedAt);
+		const lines = renderStrip({ rows, width: 60, now: finishedAt }, paint);
+		expect(lines.some((line) => strip(line).includes("Stopped"))).toBe(true);
+		expect(lines.every((line) => !line.includes("fg:error"))).toBe(true);
+	});
+
 	it("lists newest-first", () => {
 		const reg = new LiveRunRegistry();
 		register(reg, { taskId: "a", name: "a" });

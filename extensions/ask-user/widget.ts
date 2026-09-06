@@ -14,7 +14,7 @@
  * painting wherever it can along the way.
  */
 
-import { cutPlainText, padPlainText, truncateLine, wrapPlainText } from "../lib/tui-render.ts";
+import { cutPlainText, padPlainText, truncateLine, visibleWidth, wrapPlainText } from "../lib/tui-render.ts";
 import type { Answer, Question } from "./questions.ts";
 
 export type Paint = (color: string, text: string) => string;
@@ -472,7 +472,7 @@ function renderPreviewRows(state: WidgetState, style: WidgetStyle, width: number
 	// ANSI escapes never enter the width math.
 	const leftPlain = question.options.map((option, i) => `${pointerFor(state, i)} ${numbers[i]}. ${option.label}`);
 	const leftWidth = Math.min(
-		Math.max(...leftPlain.map((line) => [...line].length)) + 2,
+		Math.max(...leftPlain.map((line) => visibleWidth(line))) + 2,
 		Math.max(12, Math.floor(width * 0.45)),
 	);
 	const leftLines = leftPlain.map((line, i) => {
@@ -521,7 +521,7 @@ function previewBox(preview: string, maxOuter: number, paint: Paint): string[] {
 	const wrapped = wrapPlainText(preview.replace(/\t/g, "  "), inner);
 	const shown = wrapped.slice(0, MAX_PREVIEW_ROWS);
 	const hidden = wrapped.length - shown.length;
-	const contentWidth = Math.min(inner, Math.max(8, ...shown.map((line) => [...line].length)));
+	const contentWidth = Math.min(inner, Math.max(8, ...shown.map((line) => visibleWidth(line))));
 	const border = paint("dim", "│");
 	const body = shown.map((line) => `${border} ${padPlainText(line, contentWidth)} ${border}`);
 	if (hidden > 0) body.push(`${border} ${paint("dim", padPlainText(`… +${hidden} more lines`, contentWidth))} ${border}`);

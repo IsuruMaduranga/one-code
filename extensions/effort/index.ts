@@ -21,7 +21,7 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
-import { dimRightAlignedWidget, safeThemePaint } from "../lib/tui-render.ts";
+import { dimRightAlignedWidget, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import {
 	acceptedEffortArgs,
 	choiceForState,
@@ -167,7 +167,11 @@ export default function effortExtension(pi: ExtensionAPI) {
 		const chosen = await ctx.ui.custom<EffortChoice | null>((tui, theme, _keybindings, done) => {
 			const paint = safeThemePaint(theme);
 			return {
-				render: (width: number) => ["", ...renderEffortSlider({ index, enabled, width, modelLabel: label }, paint), ""],
+				// The slider's own layout is column-safe for its ASCII labels, but this
+				// dialog has no linesComponent wrap, so a final truncate is the safety
+				// net that guarantees no overwide line reaches pi-tui (TUI-REVIEW H1/H2).
+				render: (width: number) =>
+					["", ...renderEffortSlider({ index, enabled, width, modelLabel: label }, paint), ""].map((line) => truncateLine(line, width)),
 				handleInput: (data: string) => {
 					const key = decodeKey(data);
 					if (!key) return;
