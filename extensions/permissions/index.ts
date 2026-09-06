@@ -1052,7 +1052,12 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		if (result.decision === "allow" && !floorReason) return undefined;
 
 		if (result.decision === "deny") {
-			recordRuleDenial(result, toolName, subject);
+			// A child's rule denial must NOT be recorded here: the child path never
+			// mutates the parent's live transcript (docs/decisions/subagents-workflows.md
+			// — child calls stay out of it). Pushing a `denied` entry would leak the
+			// child's action into the parent and flip `afterRuleDenial` on for every
+			// later MAIN classification. The child's classifier already learns the
+			// user's forbidden classes from the rule extras.
 			return { block: true, reason: denyReason(result) };
 		}
 
