@@ -30,6 +30,12 @@ export interface AgentRunRecord {
 	 * on records from before nesting existed (treated as 0).
 	 */
 	depth?: number;
+	/**
+	 * The run completed inline in a one-shot session (`-p` / `--mode json`): its
+	 * report was returned in the tool result and no background task was ever
+	 * registered, so `task_output` does not know its id.
+	 */
+	inline?: boolean;
 }
 
 /** `<agent>-<n>` with the lowest n not already taken. */

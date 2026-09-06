@@ -30,7 +30,12 @@ export interface DecisionEntry {
 	subject: string;
 	outcome: "allow" | "block" | "prompt";
 	/** Which layer decided. */
-	source: "pre-gate" | "classifier" | "floor" | "user" | "review";
+	/**
+	 * Which stage decided. `rule-reach` is a rule denial extended to an
+	 * equivalent-effect retry of the same target (permissions/denied-subjects.ts):
+	 * deterministic, and never a classifier verdict, so it is logged apart from one.
+	 */
+	source: "pre-gate" | "classifier" | "floor" | "user" | "review" | "rule-reach";
 	tier?: string;
 	ruleId?: string;
 	reason?: string;

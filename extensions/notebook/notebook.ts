@@ -1,5 +1,15 @@
 /**
  * Jupyter notebook editing (pure) — Claude Code's NotebookEdit semantics.
+ *
+ * Cells are addressed by `id`, but nbformat only made `id` mandatory in 4.5:
+ * a 4.4-era notebook has none, and a model handed one had no id to pass and no
+ * way to append. Both a cheap-tier and a tiny-tier model fell back to bash plus
+ * `nbformat`/`json` to patch ids in — the exact route the prompt had told them
+ * not to take — 6/6 runs (WEAK-MODEL-REVIEW-2026-09-06 M4). So cells are also
+ * addressable by POSITION, as Claude Code's Read renders them: `cell-0`,
+ * `cell-1`, … Positional ids are resolved against the notebook as it is when
+ * the call arrives, so they shift after an insert or a delete — which is why
+ * every failure enumerates the notebook's current cells.
  */
 
 export interface NotebookCell {
@@ -16,7 +26,7 @@ export interface Notebook {
 	[key: string]: unknown;
 }
 
-export type EditMode = "replace" | "insert" | "delete";
+export type EditMode = "replace" | "insert" | "append" | "delete";
 
 export interface EditRequest {
 	cellId?: string;
@@ -37,8 +47,43 @@ export function toSourceLines(source: string): string[] {
 	return lines.map((line, i) => (i === lines.length - 1 ? line : `${line}\n`)).filter((l, i) => l !== "" || i === 0);
 }
 
+/** The positional id of a cell, Claude Code's spelling. */
+export function positionalId(index: number): string {
+	return `cell-${index}`;
+}
+
+/** How a cell should be named back to the model: its own id, else its position. */
+export function cellLabel(cell: NotebookCell, index: number): string {
+	return cell.id ?? positionalId(index);
+}
+
+/** `aaa (markdown), cell-1 (code)` — every id the notebook currently answers to. */
+export function describeCells(notebook: Notebook): string {
+	if (notebook.cells.length === 0) return "(none — the notebook has no cells)";
+	return notebook.cells.map((cell, index) => `${cellLabel(cell, index)} (${cell.cell_type})`).join(", ");
+}
+
+/** Index of a cell by its own id, or by its `cell-N` position. -1 when neither matches. */
 export function findCellIndex(notebook: Notebook, cellId: string): number {
-	return notebook.cells.findIndex((cell) => cell.id === cellId);
+	const byId = notebook.cells.findIndex((cell) => cell.id === cellId);
+	if (byId !== -1) return byId;
+	const positional = /^cell-(\d+)$/.exec(cellId);
+	if (!positional) return -1;
+	const index = Number.parseInt(positional[1], 10);
+	return index < notebook.cells.length ? index : -1;
+}
+
+/**
+ * The "fail loud, name the fix" error for an id that resolves to nothing
+ * (docs/decisions/tools.md): which ids exist, and the two ways to add a cell
+ * without naming one.
+ */
+export function noSuchCellError(notebook: Notebook, cellId: string): Error {
+	return new Error(
+		`No cell with id "${cellId}". This notebook's cells are: ${describeCells(notebook)}. ` +
+			"Cells can be addressed by their own id or by position (cell-0 is the first). " +
+			'To add a cell without naming one, use edit_mode "append" (at the end) or omit cell_id with edit_mode "insert" (at the top).',
+	);
 }
 
 function newCell(cellType: "code" | "markdown", source: string, id: string): NotebookCell {
@@ -48,6 +93,19 @@ function newCell(cellType: "code" | "markdown", source: string, id: string): Not
 		cell.execution_count = null;
 	}
 	return cell;
+}
+
+/**
+ * nbformat 4.5 REQUIRES every cell to carry an id, so a 4.5+ notebook missing
+ * them is malformed and filling them in on the way out is a repair, not a
+ * rewrite. A 4.4 notebook is left alone: `id` is not a legal cell field there,
+ * and its cells stay addressable by position.
+ */
+function withRepairedIds(notebook: Notebook, cells: NotebookCell[], makeId: () => string): NotebookCell[] {
+	const minor = typeof notebook.nbformat_minor === "number" ? notebook.nbformat_minor : 0;
+	const major = typeof notebook.nbformat === "number" ? notebook.nbformat : 4;
+	if (major < 4 || (major === 4 && minor < 5)) return cells;
+	return cells.map((cell) => (cell.id ? cell : { ...cell, id: makeId() }));
 }
 
 export interface EditResult {
@@ -61,35 +119,43 @@ export interface EditResult {
  */
 export function applyEdit(notebook: Notebook, request: EditRequest, makeId: () => string): EditResult {
 	const cells = [...notebook.cells];
+	const finish = (updated: NotebookCell[], summary: string): EditResult => ({
+		notebook: { ...notebook, cells: withRepairedIds(notebook, updated, makeId) },
+		summary,
+	});
 
 	if (request.editMode === "delete") {
 		if (!request.cellId) throw new Error("cell_id is required for edit_mode 'delete'");
 		const index = findCellIndex(notebook, request.cellId);
-		if (index === -1) throw new Error(`No cell with id "${request.cellId}"`);
+		if (index === -1) throw noSuchCellError(notebook, request.cellId);
+		const label = cellLabel(cells[index], index);
 		cells.splice(index, 1);
-		return { notebook: { ...notebook, cells }, summary: `Deleted cell ${request.cellId}` };
+		return finish(cells, `Deleted cell ${label}`);
 	}
 
 	if (request.newSource === undefined) throw new Error("new_source is required unless edit_mode is 'delete'");
 
-	if (request.editMode === "insert") {
-		if (!request.cellType) throw new Error("cell_type is required for edit_mode 'insert'");
+	if (request.editMode === "insert" || request.editMode === "append") {
+		if (!request.cellType) throw new Error(`cell_type is required for edit_mode '${request.editMode}'`);
 		const id = makeId();
 		const cell = newCell(request.cellType, request.newSource, id);
+		if (request.editMode === "append") {
+			cells.push(cell);
+			return finish(cells, `Appended ${request.cellType} cell ${id} at the end`);
+		}
 		// Claude Code inserts AFTER the given cell; no cell_id means insert first.
 		const index = request.cellId ? findCellIndex(notebook, request.cellId) : -1;
-		if (request.cellId && index === -1) throw new Error(`No cell with id "${request.cellId}"`);
+		if (request.cellId && index === -1) throw noSuchCellError(notebook, request.cellId);
+		const afterLabel = request.cellId ? cellLabel(notebook.cells[index], index) : undefined;
 		cells.splice(index + 1, 0, cell);
-		return {
-			notebook: { ...notebook, cells },
-			summary: `Inserted ${request.cellType} cell ${id}${request.cellId ? ` after ${request.cellId}` : " at the top"}`,
-		};
+		return finish(cells, `Inserted ${request.cellType} cell ${id}${afterLabel ? ` after ${afterLabel}` : " at the top"}`);
 	}
 
 	if (!request.cellId) throw new Error("cell_id is required for edit_mode 'replace'");
 	const index = findCellIndex(notebook, request.cellId);
-	if (index === -1) throw new Error(`No cell with id "${request.cellId}"`);
+	if (index === -1) throw noSuchCellError(notebook, request.cellId);
 	const existing = cells[index];
+	const label = cellLabel(existing, index);
 	const cellType = (request.cellType ?? existing.cell_type) as "code" | "markdown";
 	const replacement: NotebookCell = {
 		...existing,
@@ -104,5 +170,5 @@ export function applyEdit(notebook: Notebook, request: EditRequest, makeId: () =
 		delete replacement.execution_count;
 	}
 	cells[index] = replacement;
-	return { notebook: { ...notebook, cells }, summary: `Replaced cell ${request.cellId}` };
+	return finish(cells, `Replaced cell ${label}`);
 }

@@ -280,6 +280,16 @@ describe("buildPayload / stage instructions", () => {
 		expect(s2).toContain("Review the classification process");
 		expect(s2).toContain("<intent>"); // our addendum
 	});
+
+	it("adds the circumvention instruction to stage 2 only after a rule denial", () => {
+		const { userPrefix } = buildPayload(base);
+		expect(stage2User(userPrefix)).not.toContain("denied_by_permission_rule");
+		const after = stage2User(userPrefix, true);
+		expect(after).toContain("denied_by_permission_rule");
+		expect(after).toContain("BLOCK it");
+		// Stage 1 grades harm only and stays byte-identical to CC's either way.
+		expect(stage1User(userPrefix)).not.toContain("denied_by_permission_rule");
+	});
 });
 
 describe("PauseTracker", () => {

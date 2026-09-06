@@ -244,6 +244,7 @@ export function intrinsicTier(model: Model<Api>): PromptTier {
 	return resolveModelTier(model, INTRINSIC_TIER_ENV);
 }
 
+
 /** Whether `tier` is at least as capable as `floor` (frontier ≥ workhorse ≥ cheap ≥ tiny). */
 export function atLeastTier(tier: PromptTier, floor: PromptTier): boolean {
 	return TIER_RANK[tier] <= TIER_RANK[floor];

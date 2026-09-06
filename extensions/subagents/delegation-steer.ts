@@ -19,4 +19,5 @@ export const DELEGATION_STEER = [
 	'Delegation policy: when a request requires reading or searching MANY files (a codebase overview, "find every place where…", a consistency audit, exploring unfamiliar code), do NOT sweep the files yourself.',
 	'Make ONE Agent tool call with subagent_type: "explore" and the complete question as the task. The agent searches in its own separate context and returns just the answer; reading file after file yourself fills your context and degrades your answer.',
 	"Search directly only for a single targeted lookup (one known file or symbol).",
+	"When the agent has answered, report its answer and move on — do not re-read the files it already covered.",
 ].join("\n");

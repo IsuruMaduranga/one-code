@@ -41,6 +41,7 @@ import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { MCP_TOOLS_CHANNEL, type McpToolsPayload } from "../lib/mcp-share.ts";
 import { resolveModelTier } from "../lib/model-tier.ts";
+import { pendingClaimReminder } from "./pending-claim.ts";
 import { watchPermissionBridge } from "../permissions/subagent-gate.ts";
 import { watchHookBridge } from "../hooks/subagent-bridge.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
@@ -53,7 +54,7 @@ import { emptyUsage, formatStats, type UsageTotals } from "./usage.ts";
 import { cleanupWorktree, createWorktree, isGitRepo, type Worktree } from "./worktree.ts";
 import { findGitRoot } from "../lib/git.ts";
 import { registerWorktreeIsolation } from "../lib/worktree-isolation.ts";
-import { createTaskNotifier, sessionOutlivesTurn, systemNotification } from "../lib/notifications.ts";
+import { createTaskNotifier, oneShotNote, sessionOutlivesTurn, systemNotification } from "../lib/notifications.ts";
 import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { ccToolRenderers, customMessageText, liveUiCtx, notificationComponent, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import { deriveActivity, LiveRunRegistry } from "./live-runs.ts";
@@ -164,6 +165,19 @@ const SubagentParams = Type.Object({
 
 export const FORK_AGENT = "fork";
 
+/**
+ * The anti-fabrication sentence, carried by the tool RESULT of a background
+ * spawn and not only by the Agent tool's description. Claude Code puts it in the
+ * result ("You know nothing about its results until that notification
+ * arrives…"), and a cheap-tier model that had the description in every request
+ * still wrote a pending agent's answer in the message before the notification
+ * arrived, then read the real notification as confirmation of what it had
+ * invented (WEAK-MODEL-REVIEW-2026-09-06 H1). The description keeps its own
+ * copy; this is the one the model reads at the point of action.
+ */
+const PENDING_RESULT_PROHIBITION =
+	"You know nothing about the agent's result until that notification arrives: do not report, assume, or predict it, in prose or otherwise. If the request asks you to report what the agent found, that IS a step that cannot proceed without the result — call task_output with block=true and wait, rather than ending your turn with an answer you do not have yet.";
+
 /** Floor between interim output.log rewrites (onProgress fires per tool call/message). */
 const LOG_WRITE_INTERVAL_MS = 250;
 /** Idle time after which a resident agent session is released (its session file keeps it reachable). */
@@ -192,6 +206,13 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	const runningIds = new Set<string>();
 	/** Task id → live resident. */
 	const residents = new Map<string, Resident>();
+	/**
+	 * Task ids of background runs spawned during the agent loop now in flight.
+	 * Cleared at `agent_start`; read at `agent_end` to notice a turn that ended
+	 * with an agent still pending, which is the shape of the fabricated-result
+	 * failure (pending-claim.ts, WEAK-MODEL-REVIEW-2026-09-06 H1).
+	 */
+	const spawnedThisLoop = new Set<string>();
 
 	// The live subagent panel (Claude Code's below-editor agent tree): a registry
 	// of every in-process child fed by the runner's live sink, a below-editor
@@ -442,6 +463,37 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	};
 
 	let shuttingDown = false;
+	
+	/**
+	 * The fabricated-result backstop (pending-claim.ts). Only the tiers that were
+	 * measured to need it: a frontier model that correctly said "I'm waiting"
+	 * would get the reminder on every delegating turn for nothing, and the
+	 * trigger fires on correct behaviour as readily as on the failure.
+	 */
+	const backstopApplies = (ctx: ExtensionContext | undefined) => {
+		const tier = resolveModelTier(ctx?.model);
+		return tier === "cheap" || tier === "tiny";
+	};
+	pi.on("agent_start", () => {
+		spawnedThisLoop.clear();
+		return undefined;
+	});
+	pi.on("agent_end", (_event, ctx) => {
+		const pending = [...spawnedThisLoop]
+			.filter((taskId) => {
+				const resident = residents.get(taskId);
+				return (resident !== undefined && !resident.handle.exited()) || runningIds.has(taskId);
+			})
+			.map((taskId) => registry.resolve(taskId))
+			.filter((record): record is AgentRunRecord => record !== undefined)
+			.map((record) => ({ name: record.name, taskId: record.taskId }));
+		spawnedThisLoop.clear();
+		if (!backstopApplies(ctx)) return undefined;
+		const text = pendingClaimReminder(pending);
+		if (text) pi.events.emit(REMINDER_CHANNEL, { text });
+		return undefined;
+	});
+	
 	pi.on("session_start", (_event, ctx) => {
 		lastCtx = ctx;
 		// A replaced session (/clear, /new, /resume) never reaches this instance
@@ -1474,8 +1526,16 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				} satisfies SubagentActionsPayload);
 				const stats = formatStats(result.toolCalls, result.usage);
 				const worktreeNote = result.worktreePath ? `\n\n(Changes left in worktree ${result.worktreePath} — review or merge them.)` : "";
+				// The report arrives inline with no frame, no task id and no note, so a
+				// model told to "retrieve the result with task_output" chased an id that
+				// was never registered (WEAK-MODEL-REVIEW-2026-09-06 M3). Say it up
+				// front, in bash's and monitor's shared wording.
+				prepared[0].record.inline = true;
+				const inlineNote =
+					`${prepared[0].record.name} (task ${prepared[0].record.taskId}): ${oneShotNote("agent")} ` +
+					"Its report follows here; there is no background task to poll, and task_output does not know this id.";
 				return {
-					content: [{ type: "text", text: `${result.output}${worktreeNote}\n\n(${stats})` }],
+					content: [{ type: "text", text: `${inlineNote}\n\n${result.output}${worktreeNote}\n\n(${stats})` }],
 					details: { results: [result], agentRuns: records },
 					isError: result.failed ?? false,
 				};
@@ -1646,6 +1706,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				pi.events.emit(TASK_REGISTER_CHANNEL, task);
 				void handle.send(frameTask(p.request, worktree, parentCwd));
 
+				spawnedThisLoop.add(p.record.taskId);
 				lines.push(
 					`⏳ ${p.record.name} (task ${p.record.taskId}) running in background${logPath ? ` — interim output readable at ${logPath}` : ""}`,
 				);
@@ -1654,7 +1715,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				content: [
 					{
 						type: "text",
-						text: `${lines.join("\n")}\n\nCompletion (with the agent's report) will arrive as a system notification on its own — you do not need to wait for it or poll; keep working. Call task_output only if your next step cannot proceed without the result (block=true waits). Stop with task_stop; SendMessage reaches the agent even while it runs (the message is steered into its current turn).`,
+						text: `${lines.join("\n")}\n\nCompletion (with the agent's report) will arrive as a system notification on its own — you do not need to wait for it or poll; keep working. ${PENDING_RESULT_PROHIBITION} Call task_output only if your next step cannot proceed without the result (block=true waits). Stop with task_stop; SendMessage reaches the agent even while it runs (the message is steered into its current turn).`,
 					},
 				],
 				details: { agentRuns: records, background: true },
@@ -1918,6 +1979,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		const resident = residents.get(record.taskId);
 		if (resident && !resident.handle.exited()) return "resident (reachable live)";
 		if (runningIds.has(record.taskId)) return "running";
+		// A one-shot run returned its report in the tool result and never registered
+		// a background task, so pointing at task_output here sends the model chasing
+		// an unknown id (WEAK-MODEL-REVIEW-2026-09-06 M3).
+		if (record.inline) return "finished (one-shot run, report was returned inline)";
 		return "finished (resume with SendMessage)";
 	};
 

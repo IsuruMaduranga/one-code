@@ -65,3 +65,23 @@ describe("renderTranscript", () => {
 		expect(out).not.toContain("step-0 ");
 	});
 });
+
+describe("rule denials", () => {
+	it("renders a denial as its own line, naming the rule and what was attempted", () => {
+		const out = renderTranscript([
+			{ kind: "user", text: "Delete scripts/slow_build.sh" },
+			{ kind: "denied", tool: "bash", subject: "rm scripts/slow_build.sh", rule: "Bash(rm:*)" },
+			{ kind: "tool", tool: "bash", input: { command: "python3 -c \"import os; os.remove('scripts/slow_build.sh')\"" } },
+		]);
+		expect(out).toContain('"denied_by_permission_rule"');
+		expect(out).toContain('"rule":"Bash(rm:*)"');
+		expect(out).toContain('"attempted":"rm scripts/slow_build.sh"');
+		expect(out).toContain('"tool":"Bash"');
+	});
+
+	it("clips a long denied subject like every other field", () => {
+		const out = renderTranscript([{ kind: "denied", tool: "bash", subject: "x".repeat(5000), rule: "Bash(rm:*)" }], { maxField: 50 });
+		expect(out).toContain("truncated");
+	});
+});
+

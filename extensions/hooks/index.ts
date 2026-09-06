@@ -44,6 +44,7 @@ import { claudeConfigDir } from "../lib/paths.ts";
 import { defaultDiscoverRoots } from "../lib/plugins.ts";
 import { appendHookLog, formatDebugLine, hooksDebugEnabled, hooksLogPath } from "./debug.ts";
 import { runHookCommand } from "./executor.ts";
+import { changedSince, FORMATTER_NOTICE, type FileSnapshot, fileToolTarget, snapshotFile } from "./formatter-notice.ts";
 import { matcherApplies, ccToolName, toolMatchCandidates, ccToolInput, nativeToolInput } from "./matcher.ts";
 import { loadPluginHooks } from "./plugin-hooks.ts";
 import {
@@ -167,11 +168,14 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		event: CcHookEvent,
 		matchValue: { candidates?: string[]; ignoreMatcher?: boolean },
 		payload: HookStdinPayload,
+		/** Runs once, only when hooks will actually run — the point where a caller can snapshot state the hooks may change. */
+		willRun?: () => void,
 	): Promise<HookOutcome> => {
 		const merged: HookOutcome = {};
 		try {
 			const hooks = await collectHooks(ctx, event, matchValue);
 			if (hooks.length === 0) return merged;
+			willRun?.();
 			const stdin = JSON.stringify(payload);
 			const outcomes = await Promise.all(
 				hooks.map(async ({ source, hook }) => {
@@ -260,12 +264,24 @@ export default function hooksExtension(pi: ExtensionAPI) {
 			tool_input: ccToolInput(event.toolName, event.input as Record<string, unknown>),
 			tool_response: { content: event.content, is_error: event.isError },
 		};
-		const outcome = await dispatch(ctx, "PostToolUse", { candidates: toolMatchCandidates(event.toolName) }, payload);
+		// A hook that rewrites the file the model just edited is otherwise invisible
+		// to it: this extension awaits the hook and loads before file-tracker, so
+		// the tracker records the hook's version as the model's own write
+		// (formatter-notice.ts, review M1). Snapshot only when hooks will run.
+		const target = event.isError ? undefined : fileToolTarget(event.toolName, event.input, ctx.cwd);
+		let before: FileSnapshot | undefined;
+		const outcome = await dispatch(ctx, "PostToolUse", { candidates: toolMatchCandidates(event.toolName) }, payload, () => {
+			if (target) before = snapshotFile(target);
+		});
+		const formatterNotice = target && before && changedSince(target, before) ? wrapReminder(FORMATTER_NOTICE(target)) : undefined;
 		// CC feeds PostToolUse block reasons back to the model in the result the
 		// same way; the assembly rules live in applyPostToolUseOutcome.
 		const content = applyPostToolUseOutcome(event.content, {
 			...outcome,
-			additionalContext: outcome.additionalContext && wrapReminder(hookContextText("PostToolUse", outcome.additionalContext)),
+			additionalContext:
+				[outcome.additionalContext && wrapReminder(hookContextText("PostToolUse", outcome.additionalContext)), formatterNotice]
+					.filter(Boolean)
+					.join("\n") || undefined,
 		});
 		if (!content) return undefined;
 		return { content, isError: event.isError };
@@ -354,11 +370,19 @@ export default function hooksExtension(pi: ExtensionAPI) {
 				...childPayload(result, "PostToolUse"),
 				tool_response: { content: result.content, is_error: result.isError },
 			};
-			const outcome = await dispatch(ctx, "PostToolUse", { candidates: toolMatchCandidates(result.toolName) }, payload);
+			const target = result.isError ? undefined : fileToolTarget(result.toolName, result.input, ctx.cwd);
+			let before: FileSnapshot | undefined;
+			const outcome = await dispatch(ctx, "PostToolUse", { candidates: toolMatchCandidates(result.toolName) }, payload, () => {
+				if (target) before = snapshotFile(target);
+			});
+			const formatterNotice = target && before && changedSince(target, before) ? wrapReminder(FORMATTER_NOTICE(target)) : undefined;
 			return {
 				block: outcome.block,
 				updatedToolResult: outcome.updatedToolResult,
-				additionalContext: outcome.additionalContext ? wrapReminder(hookContextText("PostToolUse", outcome.additionalContext)) : undefined,
+				additionalContext:
+					[outcome.additionalContext && wrapReminder(hookContextText("PostToolUse", outcome.additionalContext)), formatterNotice]
+						.filter(Boolean)
+						.join("\n") || undefined,
 			};
 		},
 	};

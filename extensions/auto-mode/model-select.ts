@@ -89,6 +89,10 @@ export interface ClassifierNotice {
  * M6). A cheap session keeps a cheap screener (nothing cheaper and capable
  * exists), and `autoMode.classifierModel` overrides either way. The `tiny`
  * exclusion is the capability floor `auto-mode.md` recorded as still-missing.
+ *
+ * The floor governs the AUTOMATIC pick only; the terminal fallback is never
+ * refused, so the chain is empty only when there is no session model and nothing
+ * available at all.
  */
 export function classifierCandidates({
 	available,
@@ -147,8 +151,14 @@ export function classifierCandidates({
 		}
 	}
 
-	// 3. The session's own model: always correct, just not cheap. Terminal fallback,
-	//    so the gate degrades to screening on it rather than to broken.
+	// 3. The session's own model: always correct, just not cheap. Terminal
+	//    fallback, so the gate degrades to screening on it rather than to broken.
+	//    No tier floor here: a floor that refused a `tiny` session model would
+	//    disarm auto mode on exactly the sessions least able to do without it,
+	//    on a price-and-name heuristic rather than measured competence. The
+	//    circumvention of a permission rule that motivated one is handled
+	//    deterministically instead (permissions/denied-subjects.ts), where it
+	//    does not depend on any model's judgement.
 	push(sessionModel, "session");
 
 	// Nothing configured and no session model (a headless run with a bare

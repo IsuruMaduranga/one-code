@@ -149,7 +149,13 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 	 *   into the stored result; pinned is the same mechanism tool-search's
 	 *   deferred-tool miss uses. Our own edit/write/read of a file was observed by
 	 *   the `tool_result` handler above before this fires, so it is fresh here
-	 *   and never reported as external.
+	 *   and never reported as external — but only for a call that ran alone. pi
+	 *   executes a batch of parallel tool calls CONCURRENTLY, so the first edit's
+	 *   end fires while a sibling edit has already written its file and not yet
+	 *   had its `tool_result` observation, and the scan reported the model's own
+	 *   edit as "modified by the user, a linter, or a command"
+	 *   (WEAK-MODEL-REVIEW-2026-09-06 M2). Hence `executing`: mid-turn the scan
+	 *   runs only once the batch has fully drained.
 	 */
 	const reportExternalChanges = () => {
 		const detailed: string[] = [];
@@ -188,6 +194,28 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 			});
 		}
 	};
-	pi.on("agent_start", reportExternalChanges);
-	pi.on("tool_execution_end", reportExternalChanges);
+	/**
+	 * Tool calls currently executing, by call id. A batch issued in one assistant
+	 * message runs concurrently, and only the last call to finish sees every
+	 * sibling's write already observed.
+	 */
+	const executing = new Set<string>();
+	pi.on("tool_execution_start", (event) => {
+		executing.add(event.toolCallId);
+		return undefined;
+	});
+	pi.on("agent_start", () => {
+		// A turn aborted mid-batch can leave ids behind; each turn starts from a
+		// clean set so the mid-turn scan cannot be wedged off for the rest of the
+		// session.
+		executing.clear();
+		reportExternalChanges();
+		return undefined;
+	});
+	pi.on("tool_execution_end", (event) => {
+		executing.delete(event.toolCallId);
+		if (executing.size > 0) return undefined;
+		reportExternalChanges();
+		return undefined;
+	});
 }

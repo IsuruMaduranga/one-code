@@ -19,10 +19,18 @@ import { ccToolName } from "../hooks/matcher.ts";
 
 export { ccToolName };
 
-/** One line of the transcript: a user message, or a tool call's input. */
+/**
+ * One line of the transcript: a user message, a tool call's input, or a call the
+ * permission rules refused. A `denied` line is harness-generated, never tool
+ * output, so it does not weaken the results-stripped isolation boundary — and
+ * without it the classifier could not see that the rules had already refused
+ * this class of action, so it cleared an equivalent-effect retry on the user's
+ * original intent (WEAK-MODEL-REVIEW-2026-09-06 H2).
+ */
 export type TranscriptEntry =
 	| { kind: "user"; text: string }
-	| { kind: "tool"; tool: string; input: Record<string, unknown> };
+	| { kind: "tool"; tool: string; input: Record<string, unknown> }
+	| { kind: "denied"; tool: string; subject: string; rule: string };
 
 /** Truncate one field so a single huge argument cannot dominate the transcript. */
 export function clip(value: string, max: number): string {
@@ -45,6 +53,11 @@ function clipInput(input: Record<string, unknown>, max: number): Record<string, 
  */
 function renderEntry(entry: TranscriptEntry, maxField: number): string {
 	if (entry.kind === "user") return JSON.stringify({ user: clip(entry.text, maxField) });
+	if (entry.kind === "denied") {
+		return JSON.stringify({
+			denied_by_permission_rule: { tool: ccToolName(entry.tool), attempted: clip(entry.subject, maxField), rule: entry.rule },
+		});
+	}
 	const name = ccToolName(entry.tool);
 	const command = entry.input.command;
 	if (entry.tool === "bash" && typeof command === "string") {

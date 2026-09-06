@@ -70,6 +70,7 @@ import { modeBadge, nextMode, PERMISSION_STATUS_CHANNEL, type PermissionStatus }
 import { type ChildToolCall, type ChildGateDecision, SUBAGENT_GATE_CHANNEL } from "./subagent-gate.ts";
 import { trackOriginalCommands } from "../lib/original-command.ts";
 import { MODE_CHANNEL, PLAN_FILE_CHANNEL } from "../lib/plan-mode-channels.ts";
+import { circumventsDeniedRule, pathTokens } from "./denied-subjects.ts";
 import { isWritingTool } from "./protected-paths.ts";
 import { loadPermissionSettings, normalizePermissionMode, persistAllowRule, resolveStartupMode } from "./settings.ts";
 import { MODE_ENV, resolvedOrSelf, runtimeProtectedDirs } from "../lib/permission-gate.ts";
@@ -107,8 +108,20 @@ const BLOCKED_BY_TIMEOUT = (reason: string) =>
 	"Do not try to route around the gate; if this specific action is essential, tell the user what you were about to do so they can re-run interactively or pin a faster classifier with /auto-mode model.";
 const DENIED_SAFETY_FLOOR = (reason: string) =>
 	`Auto mode blocked this call without consulting the classifier: ${reason}. Writes to the gate's own configuration are never auto-approved. Do not retry or route around this; ask the user to make the change themselves.`;
+// "Choose a different approach" is exactly what a literal reader does with a
+// second command of the same effect: a tiny-tier model met `Bash(rm:*)` and
+// deleted the file with `python3 -c "import os; os.remove(…)"` 3/3 times
+// (WEAK-MODEL-REVIEW-2026-09-06 H2). A rule is the user's standing decision
+// about a CLASS of action, so the denial has to say that equivalents are denied
+// too — the wording the classifier's own denial already uses.
+// A rule's reach extends to equivalent-effect retries, enforced deterministically
+// rather than by asking a classifier to re-litigate a decision the user already
+// made (denied-subjects.ts). Only a provably read-only command may still touch
+// the path.
+const DENIED_AS_CIRCUMVENTION = (target: string) =>
+	`This action would reach ${target}, which a permission rule in the user's settings already refused this session. Achieving a denied action's effect by another route — a different command, an interpreter one-liner, another tool — is the same denial, so this call is blocked without consulting the approval classifier. Only a read-only inspection of that path is still allowed. Continue with work that does not depend on it, and tell the user what was denied and by which rule.`;
 const DENIED_BY_RULE = (rule: string) =>
-	`This tool call is denied by the permission rule "${rule}" in the user's settings. Do not retry it; choose a different approach.`;
+	`This tool call is denied by the permission rule "${rule}" in the user's settings. The rule is the user's standing decision about this class of action: do not retry it, and do not achieve the same effect another way (a different command, a script, or another tool). Continue with work that does not depend on it, and tell the user what was denied and by which rule.`;
 
 /** Truncate a subject for a permission prompt — shared by the main gate and the subagent bridge. */
 const previewSubject = (subject: string) => (subject.length > 200 ? `${subject.slice(0, 200)}…` : subject);
@@ -343,6 +356,27 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		}
 	};
 
+	/**
+	 * Whether auto mode has any classifier to run on — an empty chain means it has
+	 * none, which for a known-weak session model is the whole point (model-select.ts).
+	 * The config is loaded here rather than read optionally: a pinned
+	 * `autoMode.classifierModel` is exactly what keeps auto mode available on such
+	 * a session, and this runs while `reloadSettings` has the cached config cleared.
+	 */
+	const classifierReachable = (ctx: ExtensionContext): boolean => {
+		const available = ctx.modelRegistry.getAvailable();
+		if (available.length === 0) return false;
+		autoConfig ??= loadAutoModeConfig(os.homedir());
+		return (
+			classifierCandidates({
+				available,
+				sessionModel: ctx.model,
+				configured: autoConfig.classifierModel,
+				configuredSetForContainment: autoConfig.classifierModelSetFor,
+			}).candidates.length > 0
+		);
+	};
+
 	/** What would be tried, in order, before anything has been pinned. */
 	const describeChain = (ctx: ExtensionContext): string => {
 		const { candidates } = classifierCandidates({
@@ -376,6 +410,35 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// O(n) splice is amortized over the next ~100 pushes on the tool_call path.
 		if (transcript.length > 500) transcript.splice(0, transcript.length - 400);
 	};
+
+	/**
+	 * Path-like tokens from calls a permission RULE refused this session. A later
+	 * call that names one of them may be an equivalent-effect retry of the denied
+	 * action, so auto mode's deterministic containment fast-path is skipped for it
+	 * and the classifier judges it with the denial in its transcript
+	 * (WEAK-MODEL-REVIEW-2026-09-06 H2). This only ever escalates a call to the
+	 * classifier — it never denies one, and it never applies outside auto mode.
+	 */
+	const deniedSubjectTokens: string[] = [];
+
+	/**
+	 * Record a rule denial for the classifier: one `denied` transcript line (which
+	 * also switches on the stage-2 denial addendum) plus the subject's path-like
+	 * tokens. Rule denials only — a plan-mode, protected-path, working-dir or
+	 * dontAsk block is a mode fact, not a standing user decision about a class of
+	 * action, and each already has its own model-facing text.
+	 */
+	const recordRuleDenial = (result: { cause?: string; rule?: { raw?: string } }, toolName: string, subject: string) => {
+		if (mode !== "auto") return;
+		if (result.cause === "plan-mode" || result.cause === "protected-path" || result.cause === "working-dir" || result.cause === "mode") return;
+		transcript.push({ kind: "denied", tool: normalizeToolName(toolName), subject, rule: result.rule?.raw ?? "deny" });
+		capTranscript();
+		for (const token of pathTokens(subject)) {
+			if (!deniedSubjectTokens.includes(token)) deniedSubjectTokens.push(token);
+		}
+		if (deniedSubjectTokens.length > 100) deniedSubjectTokens.splice(0, deniedSubjectTokens.length - 100);
+	};
+
 
 	/**
 	 * The user's own messages, and only those — the classifier's "explicit intent"
@@ -432,13 +495,35 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		const home = os.homedir();
 		const allow = () => ({ decision: "allow" as const, reason: "", tier: undefined });
 
+		const normalized = normalizeToolName(toolName);
 		let evidence: ShellEvidence | undefined;
-		if (normalizeToolName(toolName) === "bash" && subject) {
+		if (normalized === "bash" && subject) {
 			evidence = analyzeShellCommand({ command: subject, cwd, home, protectedDirs });
 			if (evidence.verdict === "safe") {
 				logDecision(ctx, { tool: toolName, subject, outcome: "allow", source: "pre-gate" });
 				return allow();
 			}
+		}
+		
+		// A rule already refused this target, and the pre-gate did not prove this
+		// call a read of it: an equivalent-effect retry is the same denial, decided
+		// here rather than by the classifier (denied-subjects.ts). Deterministic on
+		// purpose — a rule is the user's decision, not a question for a model.
+		const circumvented = subject
+			? circumventsDeniedRule({
+				toolName: normalized,
+				subject,
+				deniedTokens: deniedSubjectTokens,
+				readOnly: false,
+				writesFile: isWritingTool(normalized),
+			})
+			: undefined;
+		if (circumvented) {
+			logDecision(ctx, { tool: toolName, subject, outcome: "block", source: "rule-reach", reason: `circumvention of a rule denial on ${circumvented}` });
+			return { decision: "block" as const, reason: DENIED_AS_CIRCUMVENTION(circumvented), tier: "rule-reach" as const };
+		}
+		
+		if (normalized === "bash" && subject && evidence) {
 			// The command's only risk is an in-project delete or whole-tree reset.
 			// Auto mode trusts the project as the agent's sandbox — but, unlike Claude
 			// Code, only when git can put the bytes back. A recoverable destruction
@@ -616,8 +701,10 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		bypassInCycle = mode === "bypassPermissions";
 		// Auto mode needs a model to run its classifier on; with none reachable it
 		// would block every call, so it stays out of the cycle instead — the same
-		// thing Claude Code does when auto mode's requirements aren't met.
-		autoInCycle = ctx.modelRegistry.getAvailable().length > 0;
+		// thing Claude Code does when auto mode's requirements aren't met. A
+		// known-weak session model yields an EMPTY chain (model-select.ts), which
+		// is that same condition: no classifier, so no auto mode.
+		autoInCycle = classifierReachable(ctx);
 		// A mode that owns a standing reminder must be announced when the session
 		// STARTS in it, not only when the user switches into it. setMode is the
 		// only emitter of the block; until 2026-09-05 startup called it for plan
@@ -638,6 +725,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		if (event.reason !== "reload") {
 			sessionAllows.length = 0;
 			transcript.length = 0;
+			deniedSubjectTokens.length = 0;
 			userMessages.length = 0;
 			pauseTracker.reset();
 		}
@@ -658,8 +746,9 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	pi.on("model_select", (event, ctx) => {
 		badgeCtx = ctx;
 		lastReviewCtx = ctx;
-		autoInCycle = ctx.modelRegistry.getAvailable().length > 0;
 		resetClassifierChoice(event.model);
+		// After the reset, so the fresh model's chain decides.
+		autoInCycle = classifierReachable(ctx);
 	});
 
 	// The badge carries "· esc to interrupt" only while the model works (CC's
@@ -823,7 +912,10 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		if (result.decision === "allow" && !floorReason) return undefined;
 
 		// (dontAsk is the only mode that denies rather than allows unmatched calls.)
-		if (result.decision === "deny") return { block: true, reason: denyReason(result) };
+		if (result.decision === "deny") {
+			recordRuleDenial(result, event.toolName, matchSubject);
+			return { block: true, reason: denyReason(result) };
+		}
 
 		if (floorReason) {
 			// The floor never reaches the classifier. Auto mode is unattended, so a
@@ -887,8 +979,11 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				}
 				// Every classifier block (hard or soft) goes back to the model with the
 				// classifier's own reason, so it can find a safe alternative. Auto mode
-				// does not hand a soft block to the user as a per-action prompt.
-				return { block: true, reason: DENIED_BY_CLASSIFIER(outcome.reason) };
+				// does not hand a soft block to the user as a per-action prompt. A
+				// `rule-reach` block is not a classifier verdict — no model was asked —
+				// so it must not be dressed as one: qwen relayed the wrapped version to
+				// the user as "the classifier recognized it", which is simply untrue.
+				return { block: true, reason: outcome.tier === "rule-reach" ? outcome.reason : DENIED_BY_CLASSIFIER(outcome.reason) };
 			}
 			// Paused: fall through to the resume prompt below.
 		}
@@ -1003,7 +1098,10 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 
 		if (result.decision === "allow" && !floorReason) return undefined;
 
-		if (result.decision === "deny") return { block: true, reason: denyReason(result) };
+		if (result.decision === "deny") {
+			recordRuleDenial(result, toolName, subject);
+			return { block: true, reason: denyReason(result) };
+		}
 
 		// Auto mode: the classifier screens the child's call, exactly as it screens
 		// the main agent's. A block is returned to the child (never a per-action
@@ -1029,7 +1127,9 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			});
 			if (outcome.decision === "allow") return undefined;
 			if (outcome.tier === "timeout") return { block: true, reason: BLOCKED_BY_TIMEOUT(outcome.reason) };
-			return { block: true, reason: DENIED_BY_CLASSIFIER(outcome.reason) };
+			// A child's call reaches a rule-denied target the same way the parent's can,
+			// and the block is just as much not a classifier verdict.
+			return { block: true, reason: outcome.tier === "rule-reach" ? outcome.reason : DENIED_BY_CLASSIFIER(outcome.reason) };
 		}
 
 		// Safety floor: a write to the gate's own config is NEVER auto-approved and

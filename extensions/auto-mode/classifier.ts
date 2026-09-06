@@ -196,6 +196,11 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 	// derived from it, so the ruleset is not rebuilt/re-parsed a second time here.
 	const { system, userPrefix, index } = buildPayload(request);
 	const stage1Text = stage1User(userPrefix);
+	// A permission rule refused something this turn, so stage 2 gets the extra
+	// instruction that the user's intent does not excuse an equivalent-effect
+	// retry (prompt.ts STAGE2_DENIAL_ADDENDUM). Stage 1 grades harm only and is
+	// left byte-identical to CC's.
+	const afterRuleDenial = request.transcript.some((entry) => entry.kind === "denied");
 	const debug = process.env.CC_AUTO_MODE_DEBUG;
 
 	// A model already pinned this session is tried first, so the classifier does
@@ -331,7 +336,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 					// sev1 >= 50, or unparseable → fall to the fuller stage-2 evaluation.
 					// stage2User is built here (not eagerly) so the common allow case
 					// does not concatenate the transcript prefix a second time.
-					const s2 = await call(stage2User(userPrefix), 1024, 4096, 2);
+					const s2 = await call(stage2User(userPrefix, afterRuleDenial), 1024, 4096, 2);
 					verdict = parseStage2(s2, index, request.userMessages);
 					stageInfo = `s1=${sev1 ?? "?"} s2=${parseSeverity(s2) ?? "?"}`;
 					// Stage 1 flagged the call and stage 2 cleared it without quoting the
