@@ -22,6 +22,26 @@ SOFTWARE.
 
 ---
 
+ADDITIONAL NOTICE — AUTONOMOUS EXECUTION
+
+This software runs a large language model as an autonomous agent. It reads,
+writes and deletes files, runs shell commands, and calls network services on
+your behalf, and in some modes it does so without asking you first.
+
+Its permission rules, approval classifier and safety checks are best-effort
+measures, not guarantees. A model can take a destructive or unintended action
+that no rule matched, achieve a forbidden effect by a route the rules did not
+anticipate, or be steered by content it reads. You are responsible for what you
+authorize it to do, for the environment you run it in, and for keeping backups
+and version control of anything you care about.
+
+As stated in the MIT terms above, the software is provided "as is" and the
+authors and copyright holders accept no liability for any damage, data loss,
+cost, or other harm arising from its use, including actions taken by the model
+it runs.
+
+---
+
 This package bundles or adapts work from other MIT-licensed projects:
 
 - The language-server command table in `extensions/lsp/servers.ts` follows the
