@@ -56,13 +56,7 @@ export interface ClassifyVerdict {
 	/** Shown to the user and the model: the grounded rule name, never a paraphrase. */
 	reason: string;
 	/** Derived from the grounded category's section, not a field the model chose. */
-	/**
-	 * Which band decided. `rule-reach` is ours and is NOT a classifier verdict:
-	 * a permission rule already refused this target, so the call was blocked
-	 * without a model being consulted (permissions/denied-subjects.ts). It is
-	 * tiered separately so the gate does not tell the user a classifier acted.
-	 */
-	tier?: "hard_deny" | "soft_deny" | "allow" | "intent" | "unmatched" | "timeout" | "rule-reach";
+	tier?: "hard_deny" | "soft_deny" | "allow" | "intent" | "unmatched" | "timeout";
 	/** The grounded rule name (or a sentinel like `intent-unverified`). */
 	ruleId?: string;
 	/** The model's own wording, kept for diagnosis and shown attributed to it. */

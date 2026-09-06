@@ -156,9 +156,9 @@ export function classifierCandidates({
 	//    No tier floor here: a floor that refused a `tiny` session model would
 	//    disarm auto mode on exactly the sessions least able to do without it,
 	//    on a price-and-name heuristic rather than measured competence. The
-	//    circumvention of a permission rule that motivated one is handled
-	//    deterministically instead (permissions/denied-subjects.ts), where it
-	//    does not depend on any model's judgement.
+	//    circumvention of a permission rule that motivated one is handled by
+	//    giving the classifier the user's own deny rules to judge by effect
+	//    (permissions/rule-prose.ts), not by picking a different screener.
 	push(sessionModel, "session");
 
 	// Nothing configured and no session model (a headless run with a bare
@@ -202,9 +202,20 @@ export function classifierTierFloor(sessionModel: Model<Api>): PromptTier {
  * model for the whole session over a blip. Misreading billing as transient
  * merely retries and blocks noisily; misreading a blip as permanent bricks the
  * candidate — so uncertainty goes to transient.
+ *
+ * "not supported" is here because a plan/entitlement refusal is often phrased
+ * that way rather than as a 403: Codex answers a classifier call on
+ * `gpt-5.3-codex-spark` with "The 'gpt-5.3-codex-spark' model is not supported
+ * when using Codex with a ChatGPT account." Without the match that read as a
+ * substantive error, so the chain never stepped past the cheapest-capable pick
+ * and auto mode blocked every call of the session (findings §10.19). It is
+ * anchored to the word "model" ahead of it, because plenty of REQUEST-shape
+ * complaints are phrased the same way ("streaming is not supported",
+ * "response_format is not supported for this model") and those are fixable
+ * quirks of one call, not a model this account can never use.
  */
 export function isModelUnavailableError(message: string): boolean {
-	return /\b(401|403|404)\b|not_found|not found|does not exist|(no|have|lacks?)\s+access|unauthoriz|forbidden|invalid[_ -]?model|model[_ -]?not|unsupported[_ -]?model|no such model|entitl|insufficient[_ -]?quota|exceeded your current quota|billing/i.test(
+	return /\b(401|403|404)\b|not_found|not found|does not exist|(no|have|lacks?)\s+access|unauthoriz|forbidden|invalid[_ -]?model|model[_ -]?not|unsupported[_ -]?model|\bmodel\b[^.\n]{0,40}not supported|no such model|entitl|insufficient[_ -]?quota|exceeded your current quota|billing/i.test(
 		message,
 	);
 }

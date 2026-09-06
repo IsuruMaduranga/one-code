@@ -302,6 +302,8 @@ describe("isModelUnavailableError", () => {
 			"you do not have access to this model",
 			"insufficient_quota",
 			"invalid_model",
+			// A plan/entitlement refusal, phrased as prose rather than a 403.
+			"The 'gpt-5.3-codex-spark' model is not supported when using Codex with a ChatGPT account.",
 		]) {
 			expect(isModelUnavailableError(message), message).toBe(true);
 		}
@@ -309,7 +311,16 @@ describe("isModelUnavailableError", () => {
 
 	it("does not mistake a transient failure for an unusable model", () => {
 		// Switching models on these would paper over something about to clear.
-		for (const message of ["socket hang up", "500 internal server error", "ETIMEDOUT", "529 overloaded_error"]) {
+		for (const message of [
+			"socket hang up",
+			"500 internal server error",
+			"ETIMEDOUT",
+			"529 overloaded_error",
+			// Request-shape complaints, not "this account cannot use this model":
+			// switching models would hide a fixable parameter problem.
+			"streaming is not supported",
+			"response_format is not supported for this model",
+		]) {
 			expect(isModelUnavailableError(message), message).toBe(false);
 		}
 	});
