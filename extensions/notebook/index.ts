@@ -12,7 +12,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
-import { applyEdit, describeCells, type EditMode, type Notebook, parseNotebook } from "./notebook.ts";
+import { applyEdit, type EditMode, type Notebook, notebookErrorHint, parseNotebook } from "./notebook.ts";
 
 export default function notebookExtension(pi: ExtensionAPI) {
 	pi.registerTool({
@@ -61,16 +61,13 @@ export default function notebookExtension(pi: ExtensionAPI) {
 					details: { path, cellCount: updated.cells.length },
 				};
 			} catch (error) {
-				const code = (error as NodeJS.ErrnoException).code;
 				const message = (error as Error).message;
-				const hint =
-					code === "ENOENT"
-						? " — no such file; check the path points to an existing .ipynb"
-						: error instanceof SyntaxError
-							? " — the file is not valid notebook JSON"
-							: parsed && !message.includes("cells are:")
-								? ` — this notebook's cells are: ${describeCells(parsed)}. Address a cell by its own id or by position (cell-0 is the first); edit_mode "append" adds one at the end.`
-								: "";
+				const hint = notebookErrorHint({
+					code: (error as NodeJS.ErrnoException).code,
+					syntax: error instanceof SyntaxError,
+					message,
+					parsed,
+				});
 				return {
 					content: [{ type: "text", text: `Notebook edit failed: ${message}${hint}` }],
 					details: {},

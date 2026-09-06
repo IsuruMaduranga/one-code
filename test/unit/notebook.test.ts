@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyEdit, describeCells, findCellIndex, type Notebook, parseNotebook, toSourceLines } from "../../extensions/notebook/notebook.ts";
+import { applyEdit, describeCells, findCellIndex, type Notebook, notebookErrorHint, parseNotebook, toSourceLines } from "../../extensions/notebook/notebook.ts";
 
 const nb = (): Notebook => ({
 	nbformat: 4,
@@ -170,5 +170,27 @@ describe("id repair", () => {
 		const { notebook: updated } = applyEdit(idless(), { newSource: "x", cellType: "code", editMode: "append" }, ids);
 		expect(updated.cells[0].id).toBeUndefined();
 		expect(updated.cells[1].id).toBeUndefined();
+	});
+});
+
+describe("notebookErrorHint (code-review F3)", () => {
+	it("lists cell ids for a missing/wrong cell_id, so a weak tier picks a real one (review M4)", () => {
+		const hint = notebookErrorHint({ syntax: false, message: "cell_id is required for edit_mode 'delete'", parsed: nb() });
+		expect(hint).toContain("this notebook's cells are: aaa (markdown), bbb (code)");
+	});
+
+	it("does NOT list cell ids for a missing new_source or cell_type — those are not cell-addressing errors", () => {
+		expect(notebookErrorHint({ syntax: false, message: "new_source is required unless edit_mode is 'delete'", parsed: nb() })).toBe("");
+		expect(notebookErrorHint({ syntax: false, message: "cell_type is required for edit_mode 'insert'", parsed: nb() })).toBe("");
+	});
+
+	it("does not double-list when the message already names the cells", () => {
+		const already = 'No cell with id "zzz". This notebook\'s cells are: aaa (markdown), bbb (code).';
+		expect(notebookErrorHint({ syntax: false, message: already, parsed: nb() })).toBe("");
+	});
+
+	it("gives targeted pointers for a missing file or bad JSON, never a cell listing", () => {
+		expect(notebookErrorHint({ code: "ENOENT", syntax: false, message: "ENOENT", parsed: undefined })).toContain("no such file");
+		expect(notebookErrorHint({ syntax: true, message: "Unexpected token", parsed: undefined })).toContain("not valid notebook JSON");
 	});
 });

@@ -45,6 +45,15 @@ describe("changedSince", () => {
 		const before = snapshotFile(real);
 		expect(changedSince(join(dir(), "gone.py"), before)).toBe(false);
 	});
+
+	it("reports changed when the file crossed the compare-size boundary (kind mismatch)", () => {
+		// The file grew past MAX_COMPARE_BYTES since the snapshot: `before` is a
+		// stamp, `after` is content — a kind mismatch that means the size changed,
+		// so the file changed. Must not be swallowed as "no change" (code-review F5).
+		const path = join(dir(), "grew.py");
+		writeFileSync(path, "x = 1\n"); // small: snapshotFile returns content
+		expect(changedSince(path, { kind: "stamp", value: "123:9999999" })).toBe(true);
+	});
 });
 
 describe("FORMATTER_NOTICE", () => {

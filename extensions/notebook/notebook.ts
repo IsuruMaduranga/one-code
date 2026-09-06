@@ -63,6 +63,24 @@ export function describeCells(notebook: Notebook): string {
 	return notebook.cells.map((cell, index) => `${cellLabel(cell, index)} (${cell.cell_type})`).join(", ");
 }
 
+/**
+ * Trailing hint appended to a notebook_edit failure message. A missing file or
+ * malformed JSON gets a targeted pointer; a cell-addressing failure (a missing or
+ * wrong `cell_id`) gets the list of ids the notebook actually has, so a weak tier
+ * picks a real one instead of inventing it by hand (review M4). A missing
+ * `new_source`/`cell_type` is not about a cell, so it gets no id listing — that
+ * would misdirect (code-review F3). A real "No cell with id" already lists them,
+ * so it is left untouched.
+ */
+export function notebookErrorHint(opts: { code?: string; syntax: boolean; message: string; parsed: Notebook | undefined }): string {
+	if (opts.code === "ENOENT") return " — no such file; check the path points to an existing .ipynb";
+	if (opts.syntax) return " — the file is not valid notebook JSON";
+	if (opts.parsed && opts.message.includes("cell_id") && !opts.message.includes("cells are:")) {
+		return ` — this notebook's cells are: ${describeCells(opts.parsed)}. Address a cell by its own id or by position (cell-0 is the first); edit_mode "append" adds one at the end.`;
+	}
+	return "";
+}
+
 /** Index of a cell by its own id, or by its `cell-N` position. -1 when neither matches. */
 export function findCellIndex(notebook: Notebook, cellId: string): number {
 	const byId = notebook.cells.findIndex((cell) => cell.id === cellId);

@@ -59,7 +59,11 @@ export function snapshotFile(path: string): FileSnapshot | undefined {
 export function changedSince(path: string, before: FileSnapshot | undefined): boolean {
 	if (!before) return false;
 	const after = snapshotFile(path);
-	if (!after || after.kind !== before.kind) return false;
+	if (!after) return false;
+	// A kind change means the file crossed the MAX_COMPARE_BYTES boundary between
+	// snapshots — the size changed, so the file changed. (Comparing values across
+	// kinds is meaningless: a stamp is never equal to file content.)
+	if (after.kind !== before.kind) return true;
 	return after.value !== before.value;
 }
 
