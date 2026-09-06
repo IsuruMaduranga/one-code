@@ -42,7 +42,17 @@ import { spawn } from "node:child_process";
 import { killProcessTree } from "../lib/process-tree.ts";
 
 export interface HookRunResult {
-	/** null when the process was killed (timeout) or never spawned. */
+	/**
+	 * null when the process was killed (timeout) or never spawned. Normalized on
+	 * the timeout path rather than taken from `waitpid`: a group SIGKILL is not
+	 * atomic, so the shell can be scheduled after its foreground child is killed
+	 * and before its own signal lands, reap the child and exit(128+9) itself —
+	 * `close` then reports a normal exit of 137 instead of death by signal
+	 * (roughly 1% of timeouts under load, and never when the shell had exec'd
+	 * away, leaving no shell to reap; findings §10.20). Callers should still
+	 * prefer `timedOut`, which says what happened rather than what it looked
+	 * like, but they no longer have to.
+	 */
 	exitCode: number | null;
 	timedOut: boolean;
 	/** Set when the child could not be spawned at all. */
@@ -143,7 +153,11 @@ export function runHookCommand(command: string, stdinJson: string, opts: HookRun
 			finish({ exitCode: null, timedOut, spawnError: error.message, stdout, stderr });
 		});
 		child.on("close", (code) => {
-			finish({ exitCode: code, timedOut, stdout, stderr });
+			// A killed process reports null here, EXCEPT when the shell outlived the
+			// group kill just long enough to reap its child and exit 128+9 itself
+			// (see exitCode's contract). Normalizing keeps "we killed it" from ever
+			// looking like an ordinary non-zero exit, which fails OPEN downstream.
+			finish({ exitCode: timedOut ? null : code, timedOut, stdout, stderr });
 		});
 
 		// A hook that never reads stdin (e.g. plain `exit 2`) closes the pipe

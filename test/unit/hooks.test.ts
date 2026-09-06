@@ -32,6 +32,19 @@ describe("protocol: interpretHookResult", () => {
 		expect(interpretHookResult("Stop", timedOut)).toEqual({});
 	});
 
+	it("a timeout that reports 128+SIGKILL is still a timeout", () => {
+		// The executor normalizes a timed-out run's exit code to null, so this
+		// shape should not arrive from it any more — but this is a pure function
+		// with other callers (the child hook bridge, tests, a future executor), and
+		// a timeout must never be detected by `exitCode === null` alone: 137 is
+		// otherwise an ordinary non-zero exit, which fails OPEN. Kept as the
+		// contract, not as a description of what the executor emits.
+		const killedLate: FinishedRun = { exitCode: 137, timedOut: true, stdout: "", stderr: "" };
+		expect(interpretHookResult("PreToolUse", killedLate).block).toBeDefined();
+		expect(interpretHookResult("UserPromptSubmit", killedLate).block).toBeDefined();
+		expect(interpretHookResult("PostToolUse", killedLate)).toEqual({});
+	});
+
 	it("a spawn failure fails open everywhere", () => {
 		const failed: FinishedRun = { exitCode: null, timedOut: false, spawnError: "ENOENT", stdout: "", stderr: "" };
 		expect(interpretHookResult("PreToolUse", failed)).toEqual({});

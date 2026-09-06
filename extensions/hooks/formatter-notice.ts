@@ -15,10 +15,8 @@
  */
 
 import { readFileSync, statSync } from "node:fs";
-import { isAbsolute, resolve } from "node:path";
-
-/** Tools whose target file a PostToolUse hook is likely to reformat. */
-const FILE_TOOLS = new Set(["edit", "write", "notebook_edit"]);
+import { resolve } from "node:path";
+import { isWritingTool, pathArgument } from "../auto-mode/paths.ts";
 
 /**
  * Reading the whole file twice per edit is fine for source files and wrong for
@@ -27,34 +25,41 @@ const FILE_TOOLS = new Set(["edit", "write", "notebook_edit"]);
  */
 const MAX_COMPARE_BYTES = 2 * 1024 * 1024;
 
-/** What a file looked like at snapshot time: its content, or its stamp when too large. */
-export type FileSnapshot = { kind: "content"; value: string } | { kind: "stamp"; value: string } | { kind: "absent" };
+/**
+ * What a file looked like at snapshot time: its content, or its stamp when too
+ * large. `undefined` is "nothing comparable" — missing, binary or unreadable —
+ * which every caller already treats as "make no claim".
+ */
+export type FileSnapshot = { kind: "content"; value: string } | { kind: "stamp"; value: string };
 
-/** The absolute path a file tool is acting on, or undefined for any other tool. */
+/**
+ * The absolute path a file tool is acting on, or undefined for any other tool.
+ * The tool set and the `path`/`file_path` field names come from `auto-mode/paths.ts`,
+ * the one place that knows them, so a new writing tool is added once.
+ */
 export function fileToolTarget(toolName: string, input: unknown, cwd: string): string | undefined {
-	if (!FILE_TOOLS.has(toolName)) return undefined;
-	const raw = (input as { path?: unknown; file_path?: unknown } | undefined)?.path ?? (input as { file_path?: unknown } | undefined)?.file_path;
-	if (typeof raw !== "string" || !raw.trim()) return undefined;
-	return isAbsolute(raw) ? raw : resolve(cwd, raw);
+	if (!isWritingTool(toolName)) return undefined;
+	const raw = pathArgument(input as Record<string, unknown> | undefined);
+	if (!raw?.trim()) return undefined;
+	return resolve(cwd, raw);
 }
 
-export function snapshotFile(path: string): FileSnapshot {
+export function snapshotFile(path: string): FileSnapshot | undefined {
 	try {
 		const stat = statSync(path);
 		if (stat.size > MAX_COMPARE_BYTES) return { kind: "stamp", value: `${stat.mtimeMs}:${stat.size}` };
 		return { kind: "content", value: readFileSync(path, "utf-8") };
 	} catch {
 		// Missing, binary, or unreadable: nothing we could compare meaningfully.
-		return { kind: "absent" };
+		return undefined;
 	}
 }
 
 /** True when the file differs from the snapshot. An unreadable file compares equal (nothing to claim). */
-export function changedSince(path: string, before: FileSnapshot): boolean {
-	if (before.kind === "absent") return false;
+export function changedSince(path: string, before: FileSnapshot | undefined): boolean {
+	if (!before) return false;
 	const after = snapshotFile(path);
-	if (after.kind === "absent") return false;
-	if (after.kind !== before.kind) return false;
+	if (!after || after.kind !== before.kind) return false;
 	return after.value !== before.value;
 }
 

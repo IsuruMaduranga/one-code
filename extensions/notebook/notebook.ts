@@ -86,8 +86,12 @@ export function noSuchCellError(notebook: Notebook, cellId: string): Error {
 	);
 }
 
-function newCell(cellType: "code" | "markdown", source: string, id: string): NotebookCell {
-	const cell: NotebookCell = { cell_type: cellType, id, metadata: {}, source: toSourceLines(source) };
+function newCell(cellType: "code" | "markdown", source: string, id: string | undefined): NotebookCell {
+	const cell: NotebookCell = { cell_type: cellType, metadata: {}, source: toSourceLines(source) };
+	// A 4.4 notebook has no legal `id` field, so a new cell must not carry one
+	// either — stamping one would leave a single id-bearing cell among id-less
+	// ones, which is exactly the shape withRepairedIds refuses to create.
+	if (id !== undefined) cell.id = id;
 	if (cellType === "code") {
 		cell.outputs = [];
 		cell.execution_count = null;
@@ -101,10 +105,14 @@ function newCell(cellType: "code" | "markdown", source: string, id: string): Not
  * rewrite. A 4.4 notebook is left alone: `id` is not a legal cell field there,
  * and its cells stay addressable by position.
  */
-function withRepairedIds(notebook: Notebook, cells: NotebookCell[], makeId: () => string): NotebookCell[] {
+function supportsIds(notebook: Notebook): boolean {
 	const minor = typeof notebook.nbformat_minor === "number" ? notebook.nbformat_minor : 0;
 	const major = typeof notebook.nbformat === "number" ? notebook.nbformat : 4;
-	if (major < 4 || (major === 4 && minor < 5)) return cells;
+	return major > 4 || (major === 4 && minor >= 5);
+}
+
+function withRepairedIds(notebook: Notebook, cells: NotebookCell[], makeId: () => string): NotebookCell[] {
+	if (!supportsIds(notebook)) return cells;
 	return cells.map((cell) => (cell.id ? cell : { ...cell, id: makeId() }));
 }
 
@@ -137,18 +145,19 @@ export function applyEdit(notebook: Notebook, request: EditRequest, makeId: () =
 
 	if (request.editMode === "insert" || request.editMode === "append") {
 		if (!request.cellType) throw new Error(`cell_type is required for edit_mode '${request.editMode}'`);
-		const id = makeId();
-		const cell = newCell(request.cellType, request.newSource, id);
+		const cell = newCell(request.cellType, request.newSource, supportsIds(notebook) ? makeId() : undefined);
 		if (request.editMode === "append") {
 			cells.push(cell);
-			return finish(cells, `Appended ${request.cellType} cell ${id} at the end`);
+			// Named the way the model must address it next: its id, or its position
+			// in a notebook that has none.
+			return finish(cells, `Appended ${request.cellType} cell ${cellLabel(cell, cells.length - 1)} at the end`);
 		}
 		// Claude Code inserts AFTER the given cell; no cell_id means insert first.
 		const index = request.cellId ? findCellIndex(notebook, request.cellId) : -1;
 		if (request.cellId && index === -1) throw noSuchCellError(notebook, request.cellId);
 		const afterLabel = request.cellId ? cellLabel(notebook.cells[index], index) : undefined;
 		cells.splice(index + 1, 0, cell);
-		return finish(cells, `Inserted ${request.cellType} cell ${id}${afterLabel ? ` after ${afterLabel}` : " at the top"}`);
+		return finish(cells, `Inserted ${request.cellType} cell ${cellLabel(cell, index + 1)}${afterLabel ? ` after ${afterLabel}` : " at the top"}`);
 	}
 
 	if (!request.cellId) throw new Error("cell_id is required for edit_mode 'replace'");

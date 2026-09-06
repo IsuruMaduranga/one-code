@@ -463,7 +463,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	};
 
 	let shuttingDown = false;
-	
+
 	/**
 	 * The fabricated-result backstop (pending-claim.ts). Only the tiers that were
 	 * measured to need it: a frontier model that correctly said "I'm waiting"
@@ -479,7 +479,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		return undefined;
 	});
 	pi.on("agent_end", (_event, ctx) => {
-		const pending = [...spawnedThisLoop]
+		const spawned = [...spawnedThisLoop];
+		spawnedThisLoop.clear();
+		// Tier check first: on a frontier session the backstop never fires, so the
+		// lookups below would be discarded work on every turn that delegated.
+		if (!backstopApplies(ctx)) return undefined;
+		const pending = spawned
 			.filter((taskId) => {
 				const resident = residents.get(taskId);
 				return (resident !== undefined && !resident.handle.exited()) || runningIds.has(taskId);
@@ -487,13 +492,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			.map((taskId) => registry.resolve(taskId))
 			.filter((record): record is AgentRunRecord => record !== undefined)
 			.map((record) => ({ name: record.name, taskId: record.taskId }));
-		spawnedThisLoop.clear();
-		if (!backstopApplies(ctx)) return undefined;
 		const text = pendingClaimReminder(pending);
 		if (text) pi.events.emit(REMINDER_CHANNEL, { text });
 		return undefined;
 	});
-	
+
 	pi.on("session_start", (_event, ctx) => {
 		lastCtx = ctx;
 		// A replaced session (/clear, /new, /resume) never reaches this instance

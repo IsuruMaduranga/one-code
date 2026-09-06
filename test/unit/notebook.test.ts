@@ -130,12 +130,28 @@ describe("addressing cells without ids", () => {
 });
 
 describe("append", () => {
-	it("adds a cell at the end with no cell_id at all", () => {
+	it("adds a cell at the end with no cell_id at all, named by position on a 4.4 notebook", () => {
 		const { notebook, summary } = applyEdit(idless(), { newSource: "print('hello')", cellType: "code", editMode: "append" }, ids);
 		expect(notebook.cells).toHaveLength(3);
 		expect(notebook.cells[2].source).toEqual(["print('hello')"]);
+		// `id` is not a legal cell field before 4.5, so the new cell must not carry
+		// one either — one id-bearing cell among id-less ones is exactly the shape
+		// withRepairedIds refuses to create.
+		expect(notebook.cells[2].id).toBeUndefined();
+		expect(notebook.cells.every((cell) => cell.id === undefined)).toBe(true);
+		expect(summary).toContain("Appended code cell cell-2 at the end");
+	});
+
+	it("stamps an id on the appended cell when the notebook is 4.5, where ids are required", () => {
+		const { notebook, summary } = applyEdit(
+			{ ...idless(), nbformat_minor: 5 },
+			{ newSource: "print('hello')", cellType: "code", editMode: "append" },
+			ids,
+		);
 		expect(notebook.cells[2].id).toBe("new1");
 		expect(summary).toContain("Appended code cell new1 at the end");
+		// And the repair fills the pre-existing cells in, so none is left id-less.
+		expect(notebook.cells.every((cell) => typeof cell.id === "string")).toBe(true);
 	});
 
 	it("still requires a cell type", () => {

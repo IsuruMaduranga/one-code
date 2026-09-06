@@ -370,7 +370,10 @@ export default function hooksExtension(pi: ExtensionAPI) {
 				...childPayload(result, "PostToolUse"),
 				tool_response: { content: result.content, is_error: result.isError },
 			};
-			const target = result.isError ? undefined : fileToolTarget(result.toolName, result.input, ctx.cwd);
+			// The CHILD's cwd, not the parent's: a worktree-isolated subagent edits
+			// its own copy, and resolving against ctx.cwd would snapshot the main
+			// checkout — missing the hook's rewrite, or reporting an unrelated change.
+			const target = result.isError ? undefined : fileToolTarget(result.toolName, result.input, result.cwd);
 			let before: FileSnapshot | undefined;
 			const outcome = await dispatch(ctx, "PostToolUse", { candidates: toolMatchCandidates(result.toolName) }, payload, () => {
 				if (target) before = snapshotFile(target);

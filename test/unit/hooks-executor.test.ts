@@ -85,6 +85,11 @@ describe("runHookCommand", () => {
 		const started = Date.now();
 		const result = await runHookCommand(command, "{}", { cwd: dir, timeoutSeconds: 1 });
 		expect(result.timedOut).toBe(true);
+		// Deterministic only because the executor normalizes it: `kill(-pgid)` is
+		// NOT atomic across the group, so the shell can be scheduled after its
+		// foreground `sleep` is killed and before its own SIGKILL lands, reap the
+		// child and exit(128+9) itself — raw `close` then reports 137, which flaked
+		// this assertion in roughly 3 of 312 runs under load (findings §10.20).
 		expect(result.exitCode).toBeNull();
 		expect(Date.now() - started).toBeLessThan(2500);
 		await new Promise((r) => setTimeout(r, 2500));
