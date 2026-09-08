@@ -255,8 +255,8 @@ export async function approveMcpServers(
 	const approved: McpServer[] = [];
 	const withheld: McpTrustOutcome["withheld"] = [];
 	const pending: McpServer[] = [];
-	// Reading CC's policy shells out to git (isFileGitTracked) synchronously, so
-	// only do it when a server actually needs consent — a session with only
+	// Reading CC's policy shells out to git (localPolicyFileIsTrusted), so only
+	// do it when a server actually needs consent — a session with only
 	// user-scope or plugin servers must not pay a git spawn at connect.
 	const anyProjectScoped = servers.some((s) => isProjectScopedServer(s, pluginConfigPaths));
 	const claude: ClaudeMcpjsonPolicy = anyProjectScoped

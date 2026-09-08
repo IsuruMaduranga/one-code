@@ -65,7 +65,7 @@ const ULTRACODE_REMINDER =
 /**
  * Ported from Claude Code's Workflow tool description, adapted to this harness
  * (runId + follow-up message instead of a task id + task-notification,
- * `/workflows stop` instead of TaskStop, `subagent` as the single-agent
+ * `/workflows stop` instead of TaskStop, `Agent` as the single-agent
  * alternative). The authoring guidance is the substantive part: it is what
  * makes the model reach for pipeline() over barriers and pick sane fan-out
  * sizes, so it is kept rather than trimmed.
@@ -76,10 +76,12 @@ A workflow structures work across many agents — to be comprehensive (decompose
 
 ONLY call this tool when the user has explicitly opted into multi-agent orchestration. Workflows can spawn dozens of agents and consume a large amount of tokens; the user must request that scale, not have it inferred. Explicit opt-in means one of:
 - The user included the keyword "ultracode" in their prompt (you'll see a system-reminder confirming it).
+- Ultracode is on for the session (a system-reminder confirms it), which makes the opt-in standing for every turn until it is turned off.
 - The user directly asked you to run a workflow or use multi-agent orchestration in their own words ("use a workflow", "run a workflow", "fan out agents", "orchestrate this with subagents"). The ask must be in the user's words — a task that would merely benefit from a workflow does not count.
+- The user invoked a skill or slash command whose instructions tell you to call Workflow.
 - The user asked you to run a specific named or saved workflow.
 
-For any other task — even one that would clearly benefit from parallelism — do NOT call this tool. Use the \`subagent\` tool for individual subagents, or briefly describe what a multi-agent workflow could do and ask the user whether to run it.
+For any other task — even one that would clearly benefit from parallelism — do NOT call this tool. Use the \`Agent\` tool for individual subagents, or briefly describe what a multi-agent workflow could do and how much it would roughly cost, and ask the user whether to run it.
 
 When you do call it, the right move is often **hybrid**: scout inline first (list the files, find the targets, scope the diff) to discover the work-list, then call workflow to pipeline over it. You don't need to know the shape before the *task* — only before the *orchestration step*.
 

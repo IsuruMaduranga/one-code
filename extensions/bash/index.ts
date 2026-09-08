@@ -60,6 +60,16 @@ export default function bashExtension(pi: ExtensionAPI) {
 	// switches change ctx.cwd mid-session).
 	const base = createBashToolDefinition(process.cwd());
 	const foreground = perCwd(createBashToolDefinition);
+	// pi's base sentence is "Optionally provide a timeout in seconds." — but the
+	// `timeout` parameter and the execute path both use milliseconds (Claude
+	// Code's Bash unit; the executor divides by 1000). The two must not
+	// contradict, or a model that trusts the description sends `timeout: 120`
+	// and gets a 120 ms deadline (TOOL-FIDELITY-REVIEW-2026-09-07 H3). Swap in
+	// CC's Bash sentence.
+	const baseDescription = base.description.replace(
+		"Optionally provide a timeout in seconds.",
+		"`timeout` is in milliseconds: default 120000, max 600000.",
+	);
 
 	const notifyTask = createTaskNotifier(pi);
 	// A worktree session cd-wraps input.command; the pre-wrapper original arrives
@@ -87,7 +97,7 @@ export default function bashExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "bash",
 		label: base.label,
-		description: `${base.description} Pass run_in_background: true for long-running commands (builds, servers, watches): it returns a task id immediately so you can keep working, completion arrives as a system notification, and the output is retrievable with task_output / stoppable with task_stop (in a one-shot print/json session the call runs to completion and returns the output directly). Foreground \`sleep\` is blocked; to wait on a condition use the monitor tool (deferred — load it with tool_search select:monitor) with an until-loop.`,
+		description: `${baseDescription} Pass run_in_background: true for long-running commands (builds, servers, watches): it returns a task id immediately so you can keep working, completion arrives as a system notification, and the output is retrievable with task_output / stoppable with task_stop (both deferred — load them with tool_search; in a one-shot print/json session the call runs to completion and returns the output directly). Foreground \`sleep\` is blocked; to wait on a condition use the monitor tool (deferred — load it with tool_search select:monitor) with an until-loop.`,
 		promptSnippet: base.promptSnippet,
 		promptGuidelines: base.promptGuidelines,
 		executionMode: base.executionMode,

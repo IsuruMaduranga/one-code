@@ -15,6 +15,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { pathArgument } from "../auto-mode/paths.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { pathsReadOnBranch } from "./replay.ts";
 import {
@@ -64,7 +65,11 @@ function observeFromDisk(tracker: FileTracker, path: string): void {
 }
 
 function pathOf(input: unknown, cwd: string): string | undefined {
-	const raw = (input as { path?: unknown })?.path;
+	// Share the field-name knowledge with the auto-mode gates: `path` for pi's
+	// built-ins, `file_path`/`notebook_path` for Claude Code-shaped calls. A
+	// notebook_edit using only `notebook_path` would otherwise bypass the
+	// read-before-write guard (code-review).
+	const raw = pathArgument(input as Record<string, unknown> | undefined);
 	if (typeof raw !== "string" || !raw.trim()) return undefined;
 	return isAbsolute(raw) ? raw : resolve(cwd, raw);
 }

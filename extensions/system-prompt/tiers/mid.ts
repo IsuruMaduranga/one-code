@@ -30,7 +30,7 @@ export const DOING_TASKS = `# Doing tasks
  - Be careful not to introduce security vulnerabilities (command injection, XSS, SQL injection, and the rest of the OWASP top 10). If you notice you wrote insecure code, fix it immediately.
  - Default to writing no comments. Add one only when the WHY is non-obvious — a hidden constraint, a subtle invariant, a workaround. Don't explain WHAT the code does; well-named identifiers already do that.
  - Prefer the dedicated tools over the shell: read/edit/write instead of cat/sed/echo. Reserve the shell for operations that genuinely need it.
- - Use the todo tool to plan and track multi-step work; mark each item done as soon as it's done, rather than batching.`;
+ - Use \`task_create\` (deferred — load it with \`tool_search select:task_create,task_update\`) to plan and track multi-step work; mark each item done as soon as it's done, rather than batching.`;
 
 // Sibling texts (same delegation policy, separately tuned registers — keep
 // aligned when editing): DELEGATE_STRICT in low.ts (tiny prompt) and

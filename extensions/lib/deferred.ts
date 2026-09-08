@@ -11,6 +11,7 @@
  */
 
 import { parseClaudeVersion } from "./model-tier.ts";
+import { normalizeToolName } from "../permissions/matcher.ts";
 
 export const DEFER_CHANNEL = "one-code:defer-tool";
 
@@ -191,9 +192,12 @@ export interface SearchMatch {
 }
 
 /**
- * The exact names a `select:` query asks for (lowercased), or undefined when the
- * query is not a select: query. Lets tool_search report which requested names
- * matched nothing instead of silently dropping them.
+ * The exact names a `select:` query asks for (lowercased and mapped through the
+ * Claude Code alias table), or undefined when the query is not a select: query.
+ * A CC-trained model writes `select:WebFetch,NotebookEdit`; without the alias
+ * pass those are "not found — check spelling" even though the tools exist under
+ * our names (TOOL-FIDELITY-REVIEW-2026-09-07 M1). Lets tool_search report which
+ * requested names matched nothing instead of silently dropping them.
  */
 export function selectedNames(query: string): string[] | undefined {
 	const trimmed = query.trim();
@@ -201,8 +205,12 @@ export function selectedNames(query: string): string[] | undefined {
 	return trimmed
 		.slice("select:".length)
 		.split(",")
-		.map((n) => n.trim().toLowerCase())
-		.filter(Boolean);
+		.map((n) => n.trim())
+		.filter(Boolean)
+		// normalizeToolName lowercases ordinary names but PRESERVES case for
+		// `mcp__…` names; the trailing toLowerCase keeps select: case-insensitive
+		// for those too. Don't drop it as "redundant".
+		.map((n) => normalizeToolName(n).toLowerCase());
 }
 
 /**

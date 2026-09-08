@@ -119,7 +119,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		label: "Monitor",
 		...ccToolRenderers("Monitor"),
 		description:
-			"Start a background monitor that streams events from a long-running command. Each stdout line becomes a notification delivered to the conversation while you keep working; the command exiting ends the watch. Use for 'tell me every time X happens' (tail -f, an until-loop that polls a condition); for a single command's completion prefer bash with run_in_background: true — its completion notification arrives on its own. Returns a task id — stop with task_stop, inspect with task_output. Alternatively pass `ws` to watch a WebSocket (each text frame is an event).",
+			"Start a background monitor that streams events from a long-running command. Each stdout line becomes a notification delivered to the conversation while you keep working; the command exiting ends the watch. Use for 'tell me every time X happens' (tail -f, an until-loop that polls a condition); for a single command's completion prefer bash with run_in_background: true — its completion notification arrives on its own. Returns a task id — stop with task_stop, inspect with task_output (both deferred — load them with tool_search). Alternatively pass `ws` to watch a WebSocket (each text frame is an event).",
 		parameters: Type.Object({
 			command: Type.Optional(Type.String({ description: "Shell command; each stdout line is an event, exit ends the watch" })),
 			description: Type.String({ description: "Short description of what is being monitored (shown in notifications)" }),
@@ -341,7 +341,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		label: "Task Output",
 		...ccToolRenderers("Task Output"),
 		description:
-			"Retrieve output from a running or finished background task (monitor, background subagent, or background bash) by task id. block=true (default) waits up to `timeout` ms for completion; block=false returns the current status immediately. You never need this just to learn that a task finished — completion always arrives as a system notification carrying the output; call this only when your next step needs the result now, or for a mid-run peek.",
+			"Retrieve output from a running or finished background task (monitor, background subagent, or background bash) by task id. block=true (default) waits up to `timeout` ms for completion; block=false returns the current status immediately. You never need this just to learn that a task finished — completion arrives as a system notification with the status and the last 2 KB of output; call this for the rest of the output, when your next step needs the result now, or for a mid-run peek.",
 		parameters: Type.Object({
 			task_id: Type.String({ description: "The task id to get output from" }),
 			block: Type.Optional(Type.Boolean({ description: "Wait for completion (default true)" })),

@@ -126,6 +126,42 @@ export interface SubagentModelResolution {
 	notices: string[];
 }
 
+/**
+ * The model-facing form of a resolution's notices, for the spawn tool's result.
+ *
+ * Every notice above says what was NOT honored ("falling back to the agent's
+ * configured model or the session default"); none of them names where the walk
+ * actually landed, because it is written before the chain finishes. The user
+ * can see the answer in the banner, but the model that asked for `sonnet` could
+ * not: on a non-Anthropic session — where a global "use Sonnet for subagents"
+ * memory shared with Claude Code makes that the standing request — it spawned
+ * children believing they ran on Sonnet and reasoned about their cost and
+ * capability on that basis (WEAK-MODEL-REVIEW-2026-09-06 L4).
+ *
+ * So the concrete spec is appended whenever there is a notice at all. It is
+ * stated rather than inferred even when a notice already mentions that spec:
+ * the notices name models in every position — the session ("no sonnet model in
+ * this session's provider family (openai/gpt-5.1)"), the one refused, the one
+ * honored — and a reader cannot tell which mention is the answer.
+ *
+ * The source rides along because it is the question the answer raises. The
+ * notices used to end by listing which knob might serve next; naming the one
+ * that actually did is the same information after the fact, and true.
+ */
+const SOURCE_LABEL: Record<SubagentModelSource, string> = {
+	call: "the model this call named",
+	agent: "the agent's own model",
+	default: "the configured default",
+	automatic: "the automatic smaller default",
+	session: "this session's model",
+};
+
+export function subagentModelNotes(resolution: Pick<SubagentModelResolution, "model" | "notices" | "source">): string[] {
+	if (resolution.notices.length === 0) return [];
+	if (!resolution.model) return [...resolution.notices];
+	return [...resolution.notices, `This subagent runs on ${spec(resolution.model)} (${SOURCE_LABEL[resolution.source]}).`];
+}
+
 const isDated = (id: string): boolean => /-20\d{6}$/.test(id);
 
 /**
@@ -185,17 +221,17 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 			// session model — never an automatic pick, and never `unresolved`: unlike a
 			// literal typo, a cross-provider alias is a naming mismatch, not a retryable
 			// mistake, so it degrades quietly (matching the module doc).
-			// Name what is actually next in the chain (same branching as the
-			// explicit-choice failure below) — an agent-sourced alias has no
-			// "agent's model" left to fall back to.
-			notices.push(
-				`No "${alias}" model exists within ${sessionModel ? spec(sessionModel) : "this session"} — ` +
-					(entry.source === "call"
-						? "falling back to the agent's configured model or the session default."
-						: entry.source === "agent"
-							? "falling back to the configured default or the session model."
-							: "the session model runs this subagent instead."),
-			);
+			// SCOPE the claim. "No sonnet model exists" is false at machine level
+			// whenever Anthropic is also authenticated, and a model relaying it tells
+			// the user "Sonnet is not available" — wrong, and the everyday case given
+			// a global "use Sonnet for subagents" memory on another provider. What is
+			// true is narrower: the alias cannot leave this session's containment.
+			// "Provider family" covers both a plain provider and a gateway, where
+			// containment is the model-creator namespace (`modelsContainedToSession`).
+			// No chain narration: which knob MIGHT serve next was worth saying only
+			// while nothing said which one did. `subagentModelNotes` now closes every
+			// notice with the model that ran and the source it came from.
+			notices.push(`No "${alias}" model in this session's provider family${sessionModel ? ` (${spec(sessionModel)})` : ""}.`);
 			suppressAutomatic = true;
 			continue;
 		}

@@ -32,11 +32,12 @@ export function isWritingTool(toolName: string): boolean {
 
 /**
  * The path a file tool call targets (`path` for pi's built-ins, `file_path`
- * for Claude Code-shaped calls), or undefined. The one place that knows the
- * field names, shared by every path-based gate.
+ * for Claude Code-shaped calls, `notebook_path` for notebook_edit), or
+ * undefined. The one place that knows the field names, shared by every
+ * path-based gate.
  */
 export function pathArgument(input: Record<string, unknown> | undefined): string | undefined {
-	const path = input?.path ?? input?.file_path;
+	const path = input?.path ?? input?.file_path ?? input?.notebook_path;
 	return typeof path === "string" ? path : undefined;
 }
 

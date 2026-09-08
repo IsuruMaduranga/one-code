@@ -34,7 +34,7 @@ Do the work rather than asking permission to start; ask the user only when you g
 
 export const USING_TOOLS = `# Using your tools
  - Prefer the dedicated tools over the shell: use read to read files (not cat/head/tail/sed), edit to change them (not sed/awk), write to create them (not echo redirection), and the search tools to find files or content (not find/grep/ls). Reserve the shell for commands that genuinely need it.
- - Break multi-step work down with the todo tool and keep it updated as you go.
+ - Break multi-step work down with \`task_create\` (deferred — load it with \`tool_search select:task_create,task_update\`) and keep it updated as you go.
  - When a skill fits the task, use it — invoke it with the skill tool instead of redoing the same work by hand. Skills are set up on purpose; reach for the matching one rather than improvising.
  - You can call multiple independent tools in one response — do so when the calls don't depend on each other.`;
 

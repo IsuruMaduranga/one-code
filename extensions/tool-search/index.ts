@@ -45,6 +45,7 @@ import { MCP_TOOLS_CHANNEL, type McpToolsPayload } from "../lib/mcp-share.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
+import { normalizeToolName } from "../permissions/matcher.ts";
 import { applyAnnouncement, planAnnouncement } from "./announce.ts";
 
 /** Coalesces the burst of per-tool defers one server emits into one listing update. */
@@ -203,7 +204,10 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	// step with a one-shot reminder, far more pointed than the standing list.
 	pi.on("tool_execution_end", (event) => {
 		if (!event.isError) return;
-		const name = toolNotFoundName(resultText(event.result));
+		const raw = toolNotFoundName(resultText(event.result));
+		// Map a Claude Code spelling (a direct `NotebookEdit` call) to our name so
+		// the miss is recognised and the steer names the loadable tool (M1).
+		const name = raw ? normalizeToolName(raw) : undefined;
 		if (!name || !deferredRegistry.has(name)) return;
 		pi.events.emit(REMINDER_CHANNEL, {
 			scope: "next-turn",

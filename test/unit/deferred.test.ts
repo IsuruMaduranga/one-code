@@ -84,6 +84,26 @@ describe("selectedNames", () => {
 		expect(selectedNames("+slack search")).toBeUndefined();
 	});
 
+	it("resolves Claude Code tool spellings through the alias table (M1)", () => {
+		// A CC-trained model writes PascalCase names; these must load our tools.
+		expect(selectedNames("select:WebFetch,NotebookEdit,WebSearch")).toEqual([
+			"web_fetch",
+			"notebook_edit",
+			"web_search",
+		]);
+	});
+
+	it("loads a CC-named deferred tool via select: (M1)", () => {
+		const deferrable: SearchableTool[] = [
+			{ name: "web_fetch", description: "Fetch a URL", keywords: [] },
+			{ name: "notebook_edit", description: "Edit a notebook", keywords: [] },
+		];
+		expect(searchTools("select:WebFetch,NotebookEdit", deferrable).map((m) => m.name)).toEqual([
+			"web_fetch",
+			"notebook_edit",
+		]);
+	});
+
 	it("drops empty entries so the caller can flag unmatched names", () => {
 		expect(selectedNames("select:web_search,,")).toEqual(["web_search"]);
 		// A typo'd name is present in the request but absent from searchTools results,

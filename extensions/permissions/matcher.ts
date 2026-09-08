@@ -44,6 +44,7 @@ const CC_TOOL_NAMES: Record<string, string> = {
 	ask_user_question: "ask_user_question",
 	workflow: "workflow",
 	taskcreate: "task_create",
+	todowrite: "task_create", // CC's TodoWrite maps to our task list; steers a direct call to the task tools
 	taskget: "task_get",
 	tasklist: "task_list",
 	taskupdate: "task_update",
@@ -57,6 +58,8 @@ const CC_TOOL_NAMES: Record<string, string> = {
 	list_agents: "list_agents",
 	enterworktree: "enter_worktree",
 	exitworktree: "exit_worktree",
+	lsp: "lsp_diagnostics", // CC defers a tool named `LSP`; our counterpart is lsp_diagnostics
+	lsp_diagnostics: "lsp_diagnostics",
 	listmcpresourcestool: "list_mcp_resources",
 	readmcpresourcetool: "read_mcp_resource",
 	readmcpresourcedirtool: "read_mcp_resource_dir",

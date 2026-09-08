@@ -36,6 +36,20 @@ describe("rewriteToolInput", () => {
 		expect(absolute.path).toBe("/etc/hosts");
 	});
 
+	it("rewrites a Claude Code-shaped notebook_path so the edit lands in the worktree", () => {
+		// A notebook_edit using CC's `notebook_path` (not `path`) must still be
+		// redirected into the worktree, or the edit silently hits the shared
+		// checkout (code-review).
+		const nb: Record<string, unknown> = { notebook_path: "analysis.ipynb", cell_id: "c1" };
+		rewriteToolInput("notebook_edit", nb, WT);
+		expect(nb.notebook_path).toBe(`${WT}/analysis.ipynb`);
+		expect(nb.path).toBeUndefined();
+
+		const abs: Record<string, unknown> = { notebook_path: "/tmp/x.ipynb" };
+		rewriteToolInput("notebook_edit", abs, WT);
+		expect(abs.notebook_path).toBe("/tmp/x.ipynb");
+	});
+
 	it("defaults a missing path to the worktree for cwd-scoped tools only", () => {
 		const ls: Record<string, unknown> = {};
 		rewriteToolInput("ls", ls, WT);

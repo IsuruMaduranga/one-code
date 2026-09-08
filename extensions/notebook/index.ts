@@ -22,8 +22,13 @@ export default function notebookExtension(pi: ExtensionAPI) {
 		description:
 			"Edit a Jupyter notebook (.ipynb): replace a cell's source, insert or append a new cell, or delete a cell. Read the notebook first — like the other file tools, this one refuses to edit a file you have not read. Cells are addressed by their `id` or, for a notebook whose cells have none, by position — `cell-0` is the first cell. Use edit_mode `append` to add a cell at the end without naming one. Editing a code cell clears its outputs.",
 		parameters: Type.Object({
-			path: Type.String({ description: "Absolute or workspace-relative path to the .ipynb file" }),
-			edit_mode: StringEnum(["replace", "insert", "append", "delete"] as const),
+			path: Type.Optional(Type.String({ description: "Absolute or workspace-relative path to the .ipynb file" })),
+			// Claude Code's NotebookEdit spells the path `notebook_path` and defaults
+			// edit_mode to `replace`; a CC-trained model's `{notebook_path, cell_id,
+			// new_source}` used to fail schema validation twice over
+			// (TOOL-FIDELITY-REVIEW-2026-09-07 M2). Accept both.
+			notebook_path: Type.Optional(Type.String({ description: "Alias of `path` (Claude Code's name for it)." })),
+			edit_mode: Type.Optional(StringEnum(["replace", "insert", "append", "delete"] as const, { description: "The type of edit to make. Defaults to replace." })),
 			cell_id: Type.Optional(
 				Type.String({
 					description:
@@ -38,7 +43,16 @@ export default function notebookExtension(pi: ExtensionAPI) {
 			),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const path = isAbsolute(params.path) ? params.path : resolve(ctx.cwd, params.path);
+			const rawPath = params.path ?? params.notebook_path;
+			if (!rawPath) {
+				return {
+					content: [{ type: "text", text: "`path` (or Claude Code's `notebook_path`) is required: the .ipynb file to edit." }],
+					details: {},
+					isError: true,
+				};
+			}
+			const editMode = (params.edit_mode ?? "replace") as EditMode;
+			const path = isAbsolute(rawPath) ? rawPath : resolve(ctx.cwd, rawPath);
 			// Held outside the try so a failure raised AFTER the parse can name the
 			// ids the notebook actually has — a bare "cell_id is required" left both
 			// weak tiers patching ids in by hand with bash (review M4).
@@ -51,13 +65,13 @@ export default function notebookExtension(pi: ExtensionAPI) {
 						cellId: params.cell_id,
 						newSource: params.new_source,
 						cellType: params.cell_type as "code" | "markdown" | undefined,
-						editMode: params.edit_mode as EditMode,
+						editMode,
 					},
 					() => randomUUID().slice(0, 8),
 				);
 				writeFileSync(path, `${JSON.stringify(updated, null, 1)}\n`);
 				return {
-					content: [{ type: "text", text: `${summary} in ${params.path} (${updated.cells.length} cells).` }],
+					content: [{ type: "text", text: `${summary} in ${rawPath} (${updated.cells.length} cells).` }],
 					details: { path, cellCount: updated.cells.length },
 				};
 			} catch (error) {

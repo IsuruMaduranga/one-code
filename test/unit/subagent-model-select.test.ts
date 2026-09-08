@@ -13,6 +13,7 @@ import {
 	expensiveModelGate,
 	resolveSubagentModel,
 	subagentModelMenu,
+	subagentModelNotes,
 	subagentModelsReminder,
 	subagentStatusModel,
 } from "../../extensions/subagents/model-select.ts";
@@ -734,28 +735,92 @@ describe("persistSubagentModel", () => {
 	});
 });
 
-describe("resolveSubagentModel: alias-failure notice names the real fallback", () => {
+describe("resolveSubagentModel: the alias notice scopes its claim", () => {
 	const catalog = [...anthropic, ...openai];
 
-	it("call-sourced alias points at the agent model / session default", () => {
+	it("blames the containment, not the model's existence", () => {
+		// "No sonnet model exists" is false whenever Anthropic is also
+		// authenticated, and a model relaying it tells the user Sonnet is
+		// unavailable. What is true is that the alias cannot leave this session's
+		// containment.
 		const resolution = resolveSubagentModel({ requested: "sonnet", sessionModel: openai[0], available: catalog });
-		expect(resolution.notices[0]).toContain("falling back to the agent's configured model or the session default");
+		expect(resolution.notices[0]).toBe('No "sonnet" model in this session\'s provider family (openai/gpt-5.1).');
 	});
 
-	it("agent-sourced alias no longer claims an agent-model fallback", () => {
-		const resolution = resolveSubagentModel({ agentModel: "sonnet", sessionModel: openai[0], available: catalog });
-		expect(resolution.model?.id).toBe("gpt-5.1");
-		expect(resolution.notices[0]).toContain("falling back to the configured default or the session model");
-		expect(resolution.notices[0]).not.toContain("agent's");
+	it("names no provider family when there is no session model", () => {
+		const resolution = resolveSubagentModel({ requested: "sonnet", available: [] });
+		expect(resolution.notices[0]).toBe('No "sonnet" model in this session\'s provider family.');
 	});
 
-	it("default-sourced alias names the session model directly", () => {
-		const resolution = resolveSubagentModel({
+	it("no longer narrates the fallback chain, whatever asked", () => {
+		// Which knob MIGHT serve next was worth saying only while nothing said
+		// which one did; subagentModelNotes now names the one that did. So the
+		// notice is the same sentence from all three sources.
+		const fromCall = resolveSubagentModel({ requested: "sonnet", sessionModel: openai[0], available: catalog });
+		const fromAgent = resolveSubagentModel({ agentModel: "sonnet", sessionModel: openai[0], available: catalog });
+		const fromDefault = resolveSubagentModel({
 			configuredDefault: setting("sonnet"),
 			sessionModel: openai[0],
 			available: catalog,
 		});
-		expect(resolution.model?.id).toBe("gpt-5.1");
-		expect(resolution.notices[0]).toContain("the session model runs this subagent instead");
+		for (const resolution of [fromCall, fromAgent, fromDefault]) {
+			expect(resolution.model?.id).toBe("gpt-5.1");
+			expect(resolution.notices[0]).not.toContain("falling back");
+			expect(resolution.notices[0]).not.toContain("serves");
+		}
+		expect(fromAgent.notices[0]).toBe(fromCall.notices[0]);
+		expect(fromDefault.notices[0]).toBe(fromCall.notices[0]);
+	});
+});
+
+describe("subagentModelNotes: the model is told what its child actually runs on", () => {
+	const catalog = [...anthropic, ...openai];
+
+	it("says nothing when the requested model resolved exactly", () => {
+		const resolution = resolveSubagentModel({ requested: "haiku", sessionModel: anthropic[0], available: catalog });
+		expect(subagentModelNotes(resolution)).toEqual([]);
+	});
+
+	it("names the model an unmatched alias landed on, and where it came from", () => {
+		// The L4 case: a global "use sonnet for subagents" memory, a session on
+		// another provider. The notice alone says only what was NOT used.
+		const resolution = resolveSubagentModel({ requested: "sonnet", sessionModel: openai[0], available: catalog });
+		const notes = subagentModelNotes(resolution);
+		expect(notes).toHaveLength(2);
+		expect(notes[0]).toContain('No "sonnet" model');
+		expect(notes[1]).toBe("This subagent runs on openai/gpt-5.1 (this session's model).");
+	});
+
+	it("names the agent's own model when that is what served", () => {
+		// The alias failed and the agent file's model carried the run: the source
+		// is the question the answer raises, so it is stated rather than guessed.
+		const resolution = resolveSubagentModel({
+			requested: "sonnet",
+			agentModel: "openai/gpt-5-mini",
+			sessionModel: openai[0],
+			available: catalog,
+		});
+		expect(subagentModelNotes(resolution).at(-1)).toBe("This subagent runs on openai/gpt-5-mini (the agent's own model).");
+	});
+
+	it("states the model even when a notice already mentions that spec", () => {
+		// An honored crossing names the model it honored, but the alias notice
+		// names the SESSION model in the same position — so the answer is always
+		// spelled out rather than left to be inferred from a mention.
+		const resolution = resolveSubagentModel({
+			requested: "anthropic/claude-sonnet-5",
+			sessionModel: openai[0],
+			available: catalog,
+		});
+		expect(resolution.model?.id).toBe("claude-sonnet-5");
+		expect(subagentModelNotes(resolution).at(-1)).toBe(
+			"This subagent runs on anthropic/claude-sonnet-5 (the model this call named).",
+		);
+	});
+
+	it("adds no claim when nothing resolved at all", () => {
+		const resolution = resolveSubagentModel({ requested: "sonnet", available: [] });
+		expect(resolution.model).toBeUndefined();
+		expect(subagentModelNotes(resolution)).toEqual(resolution.notices);
 	});
 });

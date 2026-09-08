@@ -48,8 +48,16 @@ export function rewriteToolInput(
 	}
 	if (!PATH_TOOLS.has(toolName)) return {};
 
-	if (typeof input.path === "string" && input.path.length > 0) {
-		if (!isAbsolute(input.path)) input.path = resolve(worktreePath, input.path);
+	// Rewrite whichever field carries the path — `path` for pi's built-ins,
+	// `file_path`/`notebook_path` for Claude Code-shaped calls — so a
+	// notebook_edit using `notebook_path` still lands inside the worktree
+	// instead of the shared checkout (code-review).
+	const pathField = (["path", "file_path", "notebook_path"] as const).find(
+		(field) => typeof input[field] === "string" && (input[field] as string).length > 0,
+	);
+	if (pathField) {
+		const value = input[pathField] as string;
+		if (!isAbsolute(value)) input[pathField] = resolve(worktreePath, value);
 	} else if (DEFAULTS_TO_CWD.has(toolName)) {
 		input.path = worktreePath;
 	}

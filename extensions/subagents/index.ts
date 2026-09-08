@@ -33,6 +33,7 @@ import {
 	resolveSubagentModel,
 	type SubagentModelResolution,
 	SUBAGENT_STATUS_CHANNEL,
+	subagentModelNotes,
 	subagentModelsReminder,
 	subagentStatusModel,
 } from "./model-select.ts";
@@ -132,6 +133,12 @@ const SubagentParams = Type.Object({
 	task: Type.Optional(
 		Type.String({ description: "The task — a complete, self-contained instruction (the agent cannot ask follow-ups). Required with subagent_type." }),
 	),
+	// `prompt` is Claude Code's name for the task text and `description` its short
+	// title. A CC-trained model writes `{subagent_type, description, prompt}`; pi
+	// does not reject unknown keys, so without these the task silently became ""
+	// (TOOL-FIDELITY-REVIEW-2026-09-07 H1). Accept both as aliases.
+	prompt: Type.Optional(Type.String({ description: "Alias of `task` (Claude Code's name for it) — the task for the agent to perform." })),
+	description: Type.Optional(Type.String({ description: "A short (3-5 word) description of the task, shown as the run's title." })),
 	name: Type.Optional(Type.String({ description: "Name for this run, usable later with SendMessage (default: <agent>-<n>)" })),
 	model: Type.Optional(
 		Type.String({
@@ -347,9 +354,19 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		return discoverAgents(sources);
 	};
 
+	// Claude Code closes every catalog row with a tools clause — "(Tools: *)",
+	// "(Tools: All tools except Edit, Write)", "(Tools: Bash, Read)" — the one
+	// place it tells the model an agent cannot edit. Our frontmatter enforces
+	// `tools`/`excludeTools` but never showed them (TOOL-FIDELITY-REVIEW M4).
+	const toolsClause = (a: AgentDefinition): string => {
+		if (a.tools && a.tools.length > 0) return ` (Tools: ${a.tools.join(", ")})`;
+		if (a.excludeTools && a.excludeTools.length > 0) return ` (Tools: All tools except ${a.excludeTools.join(", ")})`;
+		return " (Tools: *)";
+	};
+
 	const describeAgents = (cwd: string) => {
 		const agents = loadAgents(cwd);
-		const lines = agents.map((a) => `- ${a.name}: ${a.description || "(no description)"}`);
+		const lines = agents.map((a) => `- ${a.name}: ${a.description || "(no description)"}${toolsClause(a)}`);
 		lines.push(`- ${FORK_AGENT}: clone this conversation, with its full context, to work on a task in parallel`);
 		return lines.join("\n");
 	};
@@ -452,7 +469,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		pi.events.emit(REMINDER_CHANNEL, {
 			scope: "every-turn",
 			key: "subagent-agents",
-			text: `Available agents for the Agent tool (\`subagent_type\` field):\n${describeAgents(ctx.cwd)}`,
+			text: `Available agent types for the Agent tool:\n${describeAgents(ctx.cwd)}\n\nWhen you launch multiple agents for independent work, send them in a single message with multiple tool uses so they run concurrently.`,
 			placement: "first-prepend",
 			order: CONTEXT_ORDER.agents,
 		});
@@ -1017,7 +1034,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		let text = childCatalogCache.get(cwd);
 		if (text === undefined) {
 			text = loadAgents(cwd)
-				.map((a) => `- ${a.name}: ${a.description || "(no description)"}`)
+				.map((a) => `- ${a.name}: ${a.description || "(no description)"}${toolsClause(a)}`)
 				.join("\n");
 			childCatalogCache.set(cwd, text);
 		}
@@ -1041,28 +1058,35 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				"Delegate a scoped task to a specialist subagent running in its own context window. The call BLOCKS until the agent finishes and returns its report — use it for well-scoped work whose intermediate output you don't need (broad searches, focused verification, independent research). Give a complete, self-contained task: the agent cannot ask follow-ups. If an agent's description says it should be used proactively, use it without being asked. Available agents:\n" +
 				`${childCatalog(parentRecord.cwd)}\n` +
 				'(No "fork" here — forking is only available to the main conversation.)',
+			// Same CC-parity surface as the main Agent tool (H1): `prompt` is
+			// accepted as `task`, `description` is tolerated, and the agent name is
+			// matched case-insensitively — a nested subagent is just as likely to be
+			// CC-trained.
 			parameters: Type.Object({
 				subagent_type: Type.String({ description: "An agent name from the list in this tool's description" }),
-				task: Type.String({ description: "The task — a complete, self-contained instruction" }),
+				task: Type.Optional(Type.String({ description: "The task — a complete, self-contained instruction" })),
+				prompt: Type.Optional(Type.String({ description: "Alias of `task` (Claude Code's name for it)." })),
+				description: Type.Optional(Type.String({ description: "A short (3-5 word) description of the task." })),
 				name: Type.Optional(Type.String({ description: "Name for this run (default: <agent>-<n>)" })),
 			}) as never,
 			async execute(_toolCallId: string, params: unknown, signal?: AbortSignal) {
 				const ctx = lastCtx;
-				const p = (params ?? {}) as { subagent_type?: unknown; task?: unknown; name?: unknown };
+				const p = (params ?? {}) as { subagent_type?: unknown; task?: unknown; prompt?: unknown; name?: unknown };
 				const agentName = typeof p.subagent_type === "string" ? p.subagent_type : "";
-				const task = typeof p.task === "string" ? p.task.trim() : "";
+				const taskInput = typeof p.task === "string" ? p.task : typeof p.prompt === "string" ? p.prompt : "";
+				const task = taskInput.trim();
 				const err = (text: string) => ({ content: [{ type: "text" as const, text }], details: {}, isError: true });
 				if (!ctx) return err("The host session is not ready to spawn agents — retry shortly.");
-				if (agentName === FORK_AGENT) return err('"fork" is only available to the main conversation — pick a named agent instead.');
+				if (agentName.toLowerCase() === FORK_AGENT) return err('"fork" is only available to the main conversation — pick a named agent instead.');
 				const agents = loadAgents(parentRecord.cwd);
-				const agentDef = agents.find((a) => a.name === agentName);
+				const agentDef = agents.find((a) => a.name.toLowerCase() === agentName.toLowerCase());
 				if (!agentDef) {
-					const catalog = agents.map((a) => `- ${a.name}: ${a.description || "(no description)"}`).join("\n");
+					const catalog = agents.map((a) => `- ${a.name}: ${a.description || "(no description)"}${toolsClause(a)}`).join("\n");
 					return err(`${agentName ? `Unknown agent "${agentName}"` : "`subagent_type` is required"}. Available agents:\n${catalog}`);
 				}
-				if (!task) return err("`task` is required: a complete, self-contained instruction for the agent.");
+				if (!task) return err("`task` is required: a complete, self-contained instruction for the agent (Claude Code names this parameter `prompt` — either is accepted).");
 
-				const { name, note: renamedNote } = resolveRunName(registry, agentName, typeof p.name === "string" ? p.name : undefined);
+				const { name, note: renamedNote } = resolveRunName(registry, agentDef.name, typeof p.name === "string" ? p.name : undefined);
 				// Same parent-side model resolution as the main Agent tool, minus
 				// per-call overrides: the agent's own model, else the configured
 				// default, else the session model.
@@ -1074,12 +1098,13 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					available,
 				});
 				for (const notice of resolution.notices) notifyModelOnce(ctx, notice);
+				const modelNotes = subagentModelNotes(resolution);
 				const resolved = resolution.model ? modelSpec(resolution.model) : undefined;
 
 				const taskId = generateTaskId();
 				const record: AgentRunRecord = {
 					name,
-					agent: agentName,
+					agent: agentDef.name,
 					taskId,
 					sessionSearchDir: runSessionDir(ctx, taskId) ?? "",
 					// The SPAWNING agent's cwd, not the top-level session's: a worktree-
@@ -1100,7 +1125,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				try {
 					const bridge = getPermissionBridge();
 					const verdict = bridge
-						? await bridge({ toolName: "Agent", input: { subagent_type: agentName, prompt: task, description: name }, cwd: parentRecord.cwd, signal })
+						? await bridge({ toolName: "Agent", input: { subagent_type: agentDef.name, prompt: task, description: name }, cwd: parentRecord.cwd, signal })
 						: { block: true as const, reason: "no permission bridge is available to judge the delegation" };
 					if (verdict?.block) {
 						return {
@@ -1120,7 +1145,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				const result = await executeRun(
 					{
 						request: {
-							agent: agentName,
+							agent: agentDef.name,
 							task,
 							name,
 							model: resolved,
@@ -1134,11 +1159,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					undefined,
 					{ taskId: parentRecord.taskId, depth: parentDepth },
 				);
+				const notes = [...(renamedNote ? [renamedNote] : []), ...modelNotes];
 				return {
 					content: [
 						{
 							type: "text" as const,
-							text: `${renamedNote ? `${renamedNote}\n\n` : ""}${result.output}\n\n(${formatStats(result.toolCalls, result.usage)})`,
+							text: `${notes.length ? `${notes.join("\n")}\n\n` : ""}${result.output}\n\n(${formatStats(result.toolCalls, result.usage)})`,
 						},
 					],
 					details: { agentRuns: [record] },
@@ -1275,8 +1301,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "Agent",
 		label: "Agent",
-		...ccToolRenderers<{ subagent_type?: string; task?: string; action?: string }>("Agent", {
-			title: (a) => (a ? [a.subagent_type, a.task ?? a.action].filter(Boolean).join(": ") || undefined : undefined),
+		...ccToolRenderers<{ subagent_type?: string; task?: string; prompt?: string; description?: string; action?: string }>("Agent", {
+			title: (a) => (a ? [a.subagent_type, a.description ?? a.task ?? a.prompt ?? a.action].filter(Boolean).join(": ") || undefined : undefined),
 		}),
 		description:
 			'Delegate a task to a specialist agent that runs in its own context window and reports back. The available agents are listed in the "Available agents" system reminder.\n' +
@@ -1289,7 +1315,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			"For a single-fact lookup you already know how to run, search directly instead. Once you've delegated work, don't also run it yourself — wait for the result.\n" +
 			"\n" +
 			"## How agents run\n" +
-			"Agents run in the background: the call returns immediately with a task id, and you'll be notified when one completes — the agent's report arrives as a system notification while you keep working, or on its own if you are idle. Never fabricate or predict a pending agent's results — the notification is never something you write yourself; if the user asks before it arrives, say it's still running. Call task_output only if your next step cannot proceed without the result (block=true waits); stop a run with task_stop. (Exception: in a one-shot print session the call blocks and returns the report directly — no notification follows.)\n" +
+			"Agents run in the background: the call returns immediately with a task id, and you'll be notified when one completes — the agent's report arrives as a system notification while you keep working, or on its own if you are idle. Never fabricate or predict a pending agent's results — the notification is never something you write yourself; if the user asks before it arrives, say it's still running. Call task_output only if your next step cannot proceed without the result (block=true waits); stop a run with task_stop. Both are deferred — load them with tool_search first. (Exception: in a one-shot print session the call blocks and returns the report directly — no notification follows.)\n" +
 			"\n" +
 			"## Usage notes\n" +
 			"- Give a complete, self-contained task: the agent cannot ask follow-up questions.\n" +
@@ -1303,6 +1329,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			const agents = loadAgents(ctx.cwd);
 
+			// `task` is our name, `prompt` Claude Code's; a CC-trained model sends
+			// the latter (H1). Resolve to one value here so the rest of execute is
+			// unaffected.
+			const taskText = params.task ?? params.prompt;
+
 			// A call carrying run options (a task, a name, a model/thinking/isolation
 			// override, or action:"run") but no `subagent_type` is a run that forgot
 			// to name its agent. Fail loudly with a diagnostic rather than silently
@@ -1311,7 +1342,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			// omitted `subagent_type`.
 			const wantsRun =
 				params.action === "run" ||
-				params.task != null ||
+				taskText != null ||
 				params.name != null ||
 				params.model != null ||
 				params.isolation != null ||
@@ -1337,9 +1368,32 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				};
 			}
 
+			// A run needs a task. A CC-shaped call that put its instruction in an
+			// unrecognized key, or none at all, must fail loud rather than start a
+			// child prompted with "" (H1). Fork included — cloning to do nothing is
+			// never intended.
+			if (!taskText || !taskText.trim()) {
+				return {
+					content: [{ type: "text", text: "`task` is required: a complete, self-contained instruction for the agent (Claude Code names this parameter `prompt` — either is accepted)." }],
+					details: {},
+					isError: true,
+				};
+			}
+
+			// Match `subagent_type` against the catalog case-insensitively and run
+			// the agent under its canonical name: a CC-trained model writes
+			// `Explore`/`Plan` where our bundled agents are `explore`/`plan` (H1).
+			// "Fork" is canonicalized the same way so downstream fork detection
+			// (entry.agent === FORK_AGENT) is case-insensitive too.
+			const requestedType = params.subagent_type!;
+			const canonicalType =
+				requestedType.toLowerCase() === FORK_AGENT
+					? FORK_AGENT
+					: (agents.find((a) => a.name.toLowerCase() === requestedType.toLowerCase())?.name ?? requestedType);
+
 			/** A requested name already used this session → the run gets a fresh one, and the result says so (M1). */
 			const renamed: string[] = [];
-			const requested: RunRequest[] = [{ agent: params.subagent_type, task: params.task ?? "", name: params.name }].map((entry) => {
+			const requested: RunRequest[] = [{ agent: canonicalType, task: taskText, name: params.name }].map((entry) => {
 				const { name, note } = resolveRunName(registry, entry.agent, entry.name);
 				if (note) renamed.push(note);
 				return {
@@ -1433,6 +1487,13 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			 */
 			const available = ctx.modelRegistry.getAvailable();
 			const configuredDefault = applicableSubagentDefault(loadSubagentDefault(os.homedir()), ctx.model);
+			/**
+			 * What the model is told about its own model choice: the same sentences
+			 * the user gets, plus the model each child actually runs on. Deduped —
+			 * a batch of spawns that all requested one unavailable alias says it
+			 * once. See `subagentModelNotes` for why the model needs this.
+			 */
+			const modelNotes = new Set<string>();
 			for (const p of prepared) {
 				// A fork inherits the parent transcript, so it must continue on THIS
 				// conversation's exact model — never a configured default or the
@@ -1508,6 +1569,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					};
 				}
 				for (const notice of resolution.notices) notifyModelOnce(ctx, notice);
+				for (const note of subagentModelNotes(resolution)) modelNotes.add(note);
 				const resolved = resolution.model ? modelSpec(resolution.model) : undefined;
 				p.request.model = resolved;
 				p.request.fallbackModel = spawnFallbackModel(resolved, resolution.source, ctx.model);
@@ -1551,8 +1613,17 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				const inlineNote =
 					`${prepared[0].record.name} (task ${prepared[0].record.taskId}): ${oneShotNote("agent")} ` +
 					"Its report follows here; there is no background task to poll, and task_output does not know this id.";
+				// The background path reports renames and model fallbacks in its own
+				// result; a one-shot run must say the same things or the model reads
+				// the report believing it named the run and the model.
+				const notes = [...renamed, ...modelNotes];
 				return {
-					content: [{ type: "text", text: `${inlineNote}\n\n${result.output}${worktreeNote}\n\n(${stats})` }],
+					content: [
+						{
+							type: "text",
+							text: `${notes.length ? `${notes.join("\n")}\n\n` : ""}${inlineNote}\n\n${result.output}${worktreeNote}\n\n(${stats})`,
+						},
+					],
 					details: { results: [result], agentRuns: records },
 					isError: result.failed ?? false,
 				};
@@ -1562,7 +1633,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			// returns as soon as the child is launched, the report arrives as a
 			// steered system notification, and the child stays resident so
 			// SendMessage can reach it live (steer mid-turn, prompt when idle).
-			const lines: string[] = [...renamed];
+			const lines: string[] = [...renamed, ...modelNotes];
 			const runtime = await getRuntime(ctx);
 			for (const p of prepared) {
 				let worktree: Worktree | undefined;
@@ -1749,7 +1820,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			title: (a) => (a?.to ? `to ${a.to}${a.summary ? `: ${a.summary}` : ""}` : undefined),
 		}),
 		description:
-			'Send a message to a previously spawned agent, addressed by the name from its spawn result (or its task id). A resident background agent is reached live (mid-turn the message is steered into its current work; when idle it starts a new turn); a finished agent is resumed from its session with full context. Replies arrive as system notifications. (A subagent reporting back to the main conversation uses its own SendMessage with to: "main".)',
+			'Send a message to a previously spawned agent, addressed by the name from its spawn result (or its task id). To discover the names of running or finished agents, use list_agents (deferred — load it with tool_search select:list_agents). A resident background agent is reached live (mid-turn the message is steered into its current work; when idle it starts a new turn); a finished agent is resumed from its session with full context. Replies arrive as system notifications. (A subagent reporting back to the main conversation uses its own SendMessage with to: "main".)',
 		parameters: Type.Object({
 			to: Type.String({ description: "Agent name (or task id) from a previous Agent run" }),
 			message: Type.String({ description: "Plain text message for the agent" }),
