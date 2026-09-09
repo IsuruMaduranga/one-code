@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { isSafetyControlTarget, safetyControlWrite } from "../../extensions/auto-mode/safety-floor.ts";
+import { oneCodeProjectSettingsPath } from "../../extensions/lib/one-code-settings.ts";
+import { claudeJsonPath } from "../../extensions/lib/paths.ts";
 
 let home: string;
 let cwd: string;
@@ -77,6 +79,37 @@ describe("safetyControlWrite: shell commands", () => {
 	it("leaves ordinary shell work alone", () => {
 		expect(check("bash", { command: "npm test" })).toBeUndefined();
 		expect(check("bash", { command: `echo hi > ${join(cwd, "out.txt")}` })).toBeUndefined();
+	});
+});
+
+describe("safetyControlWrite: relocated config dirs (distribution L2)", () => {
+	const savedClaude = process.env.CLAUDE_CONFIG_DIR;
+	const savedState = process.env.ONECODE_STATE_DIR;
+	afterEach(() => {
+		if (savedClaude === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+		else process.env.CLAUDE_CONFIG_DIR = savedClaude;
+		if (savedState === undefined) delete process.env.ONECODE_STATE_DIR;
+		else process.env.ONECODE_STATE_DIR = savedState;
+	});
+
+	it("floors the relocated .claude.json when CLAUDE_CONFIG_DIR is set", () => {
+		const cfg = join(cwd, "cc-work");
+		mkdirSync(cfg, { recursive: true });
+		process.env.CLAUDE_CONFIG_DIR = cfg;
+		expect(check("write", { path: claudeJsonPath(home) })).toBeDefined();
+	});
+
+	it("floors the per-repo One Code settings file for the current cwd", () => {
+		const perRepo = oneCodeProjectSettingsPath(cwd, home);
+		expect(check("write", { path: perRepo })).toBeDefined();
+	});
+
+	it("floors the per-repo One Code settings file under a relocated ONECODE_STATE_DIR", () => {
+		const state = join(cwd, "state");
+		process.env.ONECODE_STATE_DIR = state;
+		const perRepo = oneCodeProjectSettingsPath(cwd, home);
+		expect(perRepo.startsWith(state)).toBe(true);
+		expect(check("write", { path: perRepo })).toBeDefined();
 	});
 });
 

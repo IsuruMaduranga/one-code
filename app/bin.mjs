@@ -21,7 +21,7 @@
  * version is checked: pi crashes on Node < 22.19 at import time (bundled
  * undici), so the friendly error must come first.
  */
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -113,7 +113,13 @@ try {
 		packages.some((p, i) => sourceOf(p) !== sourceOf(next[i]));
 	if (changed) {
 		settings.packages = next;
-		writeFileSync(settingsPath, JSON.stringify(settings, null, "\t") + "\n");
+		// Write-then-rename: a crash mid-write must not leave a truncated
+		// settings.json that the next launch reports as unregistered extensions
+		// (review L4). Rename is atomic within the same directory. Same pattern as
+		// the extensions' lib/atomic-write.ts, inlined to keep bin.mjs import-free.
+		const tempPath = `${settingsPath}.${process.pid}.tmp`;
+		writeFileSync(tempPath, JSON.stringify(settings, null, "\t") + "\n");
+		renameSync(tempPath, settingsPath);
 	}
 } catch (error) {
 	// Fail loud but keep launching: a broken settings file is the user's to
@@ -140,8 +146,11 @@ if (rewriteHelp || !machineOutput) {
 				chunk = chunk.replaceAll(" pi --session ", " onecode --session ");
 			}
 			if (rewriteHelp) {
-				// Standalone word "pi" only; "pi.dev", "pi-coding-agent" etc. survive.
-				chunk = chunk.replace(/(^|[\s"'`])pi(?=$|[\s"'`])/gm, "$1onecode");
+				// Standalone word "pi" only: preceded by start/whitespace/quote, and
+				// NOT followed by a word char, "." or "-". The negative lookahead means
+				// any trailing punctuation (`,`, `]`, `:`, …) is rewritten without
+				// another patch, while "pi.dev" and "pi-coding-agent" survive (review L4a).
+				chunk = chunk.replace(/(^|[\s"'`])pi(?![\w.\-])/gm, "$1onecode");
 			}
 		}
 		return originalWrite(chunk, ...rest);

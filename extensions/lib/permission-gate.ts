@@ -32,6 +32,7 @@
 import { getAgentDir, type InlineExtension } from "@earendil-works/pi-coding-agent";
 import { findProjectRoot } from "./git.ts";
 import { memoryDir } from "./memory.ts";
+import { claudeConfigDir, oneCodeStateDir } from "./paths.ts";
 import { sessionResultsDir } from "./persisted-output.ts";
 import { sessionScratchpadDir } from "./scratchpad.ts";
 import { decide, extractSubject, isPathSubjectTool, normalizeToolName, type PermissionMode, parseRules } from "../permissions/matcher.ts";
@@ -47,13 +48,20 @@ export const resolvedOrSelf = (dir: string) => resolveForContainment(dir) ?? dir
  * Directories protected at runtime, beyond protected-paths.ts's static list:
  * pi's own agent directory (`getAgentDir()` — `~/.pi/agent` for stock pi,
  * `~/.onecode/agent` bundled), whose extensions, settings and auth are code
- * and credentials the harness loads. Literal and resolved spelling, so both
- * the raw and the realpath'd subject match. One definition for both gates
- * (PERMISSIONS-REVIEW-2026-09-05 M7).
+ * and credentials the harness loads; Claude Code's config dir and One Code's
+ * state dir, which hold the permission settings the gate is made of. The
+ * segment list in protected-paths.ts already catches literal `.claude` /
+ * `.onecode`; these absolute roots also catch them when `CLAUDE_CONFIG_DIR` /
+ * `ONECODE_STATE_DIR` relocated the dir (distribution review 2026-09-09, L2).
+ * The memory dir (under the config dir) and the plan file (under the state dir)
+ * are cleared as harness working space *before* the protected check in
+ * `decide()`, so protecting these roots does not block them. Literal and
+ * resolved spelling, so both the raw and the realpath'd subject match. One
+ * definition for both gates (PERMISSIONS-REVIEW-2026-09-05 M7).
  */
 export function runtimeProtectedDirs(): string[] {
-	const agentDir = getAgentDir();
-	return [...new Set([agentDir, resolvedOrSelf(agentDir)])];
+	const roots = [getAgentDir(), claudeConfigDir(), oneCodeStateDir()];
+	return [...new Set(roots.flatMap((dir) => [dir, resolvedOrSelf(dir)]))];
 }
 
 /** Tools the runtime itself injects; never gate them. */

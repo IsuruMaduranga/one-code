@@ -22,9 +22,10 @@
  * fires on routine work teaches the user to approve without reading.
  */
 
-import { join } from "node:path";
 import { analyzeShellCommand } from "./shell-analysis.ts";
 import { autoModeSettingsPaths } from "./config.ts";
+import { oneCodeProjectSettingsPath } from "../lib/one-code-settings.ts";
+import { claudeJsonPath } from "../lib/paths.ts";
 import { isWritingTool, resolveForContainment, toAbsolute } from "./paths.ts";
 
 /** Case-fold the same way resolveForContainment's output is folded. */
@@ -52,22 +53,32 @@ const SETTINGS_TAIL = /\/\.claude\/settings(\.local)?\.json$/;
  */
 const ONECODE_SETTINGS_TAIL = /\/\.onecode\/(projects\/[^/]+\/)?settings\.json$/;
 
-function safetyControlFiles(home: string): string[] {
+function safetyControlFiles(home: string, oneCodeProjectSettings?: string): string[] {
 	return [
-		// autoMode + user permission rules, and the managed-settings paths.
+		// autoMode + user permission rules, and the managed-settings paths (the
+		// global ~/.onecode/settings.json here honours ONECODE_STATE_DIR).
 		...autoModeSettingsPaths(home),
-		// Claude Code's global state file also carries permission configuration.
-		join(home, ".claude.json"),
+		// Claude Code's global state file also carries permission configuration;
+		// claudeJsonPath honours CLAUDE_CONFIG_DIR so a relocated file is still caught.
+		claudeJsonPath(home),
+		// The per-repo One Code settings file also carries permission rules. The
+		// tail regex catches it under a literal `.onecode`; this catches it when
+		// ONECODE_STATE_DIR relocated the state root (review L2).
+		...(oneCodeProjectSettings ? [oneCodeProjectSettings] : []),
 	];
 }
 
-/** Whether a *resolved* path (resolveForContainment output) is a gate control. */
-export function isSafetyControlTarget(resolved: string, home: string): boolean {
+/**
+ * Whether a *resolved* path (resolveForContainment output) is a gate control.
+ * `oneCodeProjectSettings` is the current repo's One Code settings file, resolved
+ * by the caller (once per session) so this need not re-walk for the project root.
+ */
+export function isSafetyControlTarget(resolved: string, home: string, oneCodeProjectSettings?: string): boolean {
 	const target = fold(resolved);
 	if (SETTINGS_TAIL.test(target) || ONECODE_SETTINGS_TAIL.test(target)) return true;
 	// The control files go through the same resolution as the write target, or
 	// the two sides can disagree about the same file (macOS /var → /private/var).
-	return safetyControlFiles(home).some((file) => {
+	return safetyControlFiles(home, oneCodeProjectSettings).some((file) => {
 		const control = resolveForContainment(file) ?? fold(file);
 		return control === target || fold(file) === target;
 	});
@@ -79,6 +90,13 @@ export interface FloorInput {
 	input: Record<string, unknown>;
 	cwd: string;
 	home: string;
+	/**
+	 * The current repo's One Code settings file, resolved once per session by the
+	 * caller. When omitted it is derived from `cwd` (a filesystem walk) — fine for
+	 * tests, but the per-tool-call permission path passes it to avoid the walk
+	 * (distribution review 2026-09-09, L2 / efficiency pass).
+	 */
+	oneCodeProjectSettings?: string;
 }
 
 const REASON = (token: string) =>
@@ -90,12 +108,14 @@ const REASON = (token: string) =>
  * files included), so linking a settings file elsewhere and writing the link
  * does not slip past.
  */
-export function safetyControlWrite({ toolName, input, cwd, home }: FloorInput): string | undefined {
+export function safetyControlWrite({ toolName, input, cwd, home, oneCodeProjectSettings }: FloorInput): string | undefined {
+	const perRepoSettings = oneCodeProjectSettings ?? oneCodeProjectSettingsPath(cwd, home);
+
 	if (isWritingTool(toolName)) {
 		const raw = input.path ?? input.file_path ?? input.notebook_path;
 		if (typeof raw !== "string" || raw.length === 0) return undefined;
 		const resolved = resolveForContainment(toAbsolute(cwd, raw, home));
-		return resolved && isSafetyControlTarget(resolved, home) ? REASON(raw) : undefined;
+		return resolved && isSafetyControlTarget(resolved, home, perRepoSettings) ? REASON(raw) : undefined;
 	}
 
 	if (toolName === "bash") {
@@ -103,7 +123,7 @@ export function safetyControlWrite({ toolName, input, cwd, home }: FloorInput): 
 		if (!command) return undefined;
 		const evidence = analyzeShellCommand({ command, cwd, home });
 		for (const write of evidence.writes) {
-			if (write.resolved && isSafetyControlTarget(write.resolved, home)) return REASON(write.token);
+			if (write.resolved && isSafetyControlTarget(write.resolved, home, perRepoSettings)) return REASON(write.token);
 		}
 	}
 

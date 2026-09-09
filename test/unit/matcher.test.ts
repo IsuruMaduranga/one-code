@@ -417,7 +417,7 @@ describe("decide", () => {
 		it("the harness's own session dirs and the plan file are readable and (acceptEdits) writable", () => {
 			const dirs = {
 				memoryDirPath: "/home/user/.claude/projects/-home-user-project/memory",
-				scratchpadDirPath: "/tmp/claude-501/scratch",
+				scratchpadDirPath: "/tmp/onecode-501/scratch",
 				resultsDirPath: "/home/user/.onecode/agent/sessions/abc",
 				planFilePath: "/home/user/.onecode/plans/plan.md",
 			};
@@ -657,7 +657,7 @@ describe("decide", () => {
 
 	describe("scratchpad dir", () => {
 		// Same machinery as the memory dir (isInsideDir); these pin the wiring.
-		const scratchpadDirPath = "/private/tmp/claude-501/-home-user-project/abc-123/scratchpad";
+		const scratchpadDirPath = "/private/tmp/onecode-501/-home-user-project/abc-123/scratchpad";
 		const withScratchpad = { ...base, scratchpadDirPath };
 
 		it("allows writes into the session scratchpad, in auto mode too", () => {
@@ -669,7 +669,7 @@ describe("decide", () => {
 		});
 
 		it("does not clear other sessions' scratchpads or bare /tmp", () => {
-			const other = "/private/tmp/claude-501/-home-user-project/other-session/scratchpad/x.md";
+			const other = "/private/tmp/onecode-501/-home-user-project/other-session/scratchpad/x.md";
 			expect(decide({ ...withScratchpad, mode: "auto", toolName: "write", subject: other }).decision).toBe("classify");
 			expect(decide({ ...withScratchpad, mode: "auto", toolName: "write", subject: "/tmp/x.md" }).decision).toBe(
 				"classify",

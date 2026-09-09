@@ -4,6 +4,7 @@ import type { PermissionMode } from "../../extensions/permissions/matcher.ts";
 import {
 	formatModel,
 	formatModelSpec,
+	isRealModel,
 	MODE_BADGES,
 	modeBadge,
 	nextMode,
@@ -122,6 +123,18 @@ describe("formatModel / formatModelSpec", () => {
 	});
 	it("handles a spec with no provider segment", () => {
 		expect(formatModelSpec("bare-model")).toBe("bare-model");
+	});
+});
+
+describe("isRealModel (distribution M3)", () => {
+	it("is false for the no-provider placeholder and for nothing", () => {
+		expect(isRealModel("unknown")).toBe(false);
+		expect(isRealModel(undefined)).toBe(false);
+		expect(isRealModel("")).toBe(false);
+	});
+	it("is true for a genuine model id", () => {
+		expect(isRealModel("claude-opus-4-8")).toBe(true);
+		expect(isRealModel("google/gemini-3.7-flash")).toBe(true);
 	});
 });
 

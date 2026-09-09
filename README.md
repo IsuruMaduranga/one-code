@@ -47,7 +47,7 @@ Or via Homebrew (also installs Node for you):
 
 ```bash
 brew install isurumaduranga/one-ai/one-code
-# or tap once, then run: brew tap isurumaduranga/one-ai && brew install onecode
+# or tap once, then run: brew tap isurumaduranga/one-ai && brew install one-code
 ```
 
 > The npm route needs **Node 22.19+**.
@@ -199,7 +199,7 @@ matching tool automatically.
 ### 🎚️ Reasoning effort and 🎨 themes
 An `/effort` slider from `minimal` to `max` (and `ultracode` past the end), on
 the same dial shift+tab cycles. Two themes ship, `onecode` (dark) and
-`one-code-light`, with a warm clay accent in the spirit of Claude Code's
+`onecode-light`, with a warm clay accent in the spirit of Claude Code's
 terminal.
 
 ---

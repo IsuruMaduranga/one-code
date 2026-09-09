@@ -7,13 +7,20 @@ model next to a frontier one.
 
 ## Connect your first provider
 
-You need one provider API key to start. On the first run, One Code asks you to
-pick a provider and paste a key:
+You need one provider API key to start. On the first run there is no provider
+yet, so the banner shows `model none` and prompts you to run `/login`. Start One
+Code and run `/login` to pick a provider and paste (or OAuth) a key:
 
 ```bash
 cd your-project
 onecode
+# then, inside One Code:
+/login
 ```
+
+Alternatively, set the provider's key as an environment variable before
+launching (see [Store keys as environment variables](#store-keys-as-environment-variables)
+below); One Code picks it up automatically and no `/login` is needed.
 
 Two providers hand out free models you can try at no cost:
 

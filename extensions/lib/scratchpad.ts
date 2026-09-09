@@ -1,10 +1,13 @@
 /**
- * Session scratchpad — Claude Code's designated temp-files directory.
+ * Session scratchpad — a designated temp-files directory.
  *
- * Claude Code puts one under `<tmp>/claude-<uid>/<project-slug>/<session-id>/scratchpad`
- * and tells the model (via a system-prompt section) to use it for everything
- * that would otherwise land in `/tmp` or leak into the project. The path is
- * per-session, so parallel sessions on one project never collide.
+ * The shape follows Claude Code's (`<tmp>/<owner>/<project-slug>/<session-id>/scratchpad`),
+ * but the owner segment carries One Code's name, not Claude Code's, so a machine
+ * running both products never interleaves their scratchpads under one owner dir
+ * (distribution review 2026-09-09, H2). We tell the model (via a system-prompt
+ * section) to use it for everything that would otherwise land in `/tmp` or leak
+ * into the project. The path is per-session, so parallel sessions on one project
+ * never collide.
  *
  * Three extensions need the same path (system-prompt renders the section,
  * permissions and the workflow gate allow writes into it), and jiti isolates
@@ -17,14 +20,14 @@ import { join } from "node:path";
 import { findGitRoot } from "./git.ts";
 import { projectSlug } from "./memory.ts";
 
-/** Pure core, testable: the Claude Code path shape. */
+/** Pure core, testable: Claude Code's path shape under a One Code-named owner dir. */
 export function scratchpadDir(
 	tmpRoot: string,
 	uid: number | undefined,
 	projectRoot: string,
 	sessionId: string,
 ): string {
-	const owner = uid === undefined ? "claude" : `claude-${uid}`;
+	const owner = uid === undefined ? "onecode" : `onecode-${uid}`;
 	return join(tmpRoot, owner, projectSlug(projectRoot), sessionId, "scratchpad");
 }
 

@@ -67,6 +67,23 @@ export function formatModelSpec(spec: string): string {
 }
 
 /**
+ * pi's placeholder model id when no provider is configured yet. A fresh machine
+ * with no key reports `{ provider: "unknown", id: "unknown" }`, which
+ * `formatModel` would render as the meaningless `(unknown) unknown`
+ * (distribution review 2026-09-09, M3). The banner and footer show "none"
+ * instead, so the first screen reads as "no provider" rather than a broken model.
+ */
+export const PLACEHOLDER_MODEL = "unknown";
+
+/**
+ * True when `id` names a real selected model, not pi's no-provider placeholder.
+ * A type predicate so callers narrow the id to `string` in the true branch.
+ */
+export function isRealModel(id: string | undefined): id is string {
+	return !!id && id !== PLACEHOLDER_MODEL;
+}
+
+/**
  * The key that cycles permission modes. Claude Code cycles on shift+tab and
  * says so in this footer; pi reserves shift+tab for the effort dial, so One Code
  * cycles on ctrl+q (see docs/decisions/modes.md) and the hint names that key.

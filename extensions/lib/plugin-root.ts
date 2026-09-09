@@ -8,7 +8,7 @@
  *
  * Callers pass `getAgentDir()` so the root follows the distribution mode:
  * `~/.onecode/agent/plugins` under the bundled app (PI_CODING_AGENT_DIR),
- * `~/.pi/plugins` when running as a plain pi extension.
+ * `~/.pi/agent/plugins` when running as a plain pi extension.
  */
 
 import { join, relative, resolve } from "node:path";

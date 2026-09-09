@@ -35,7 +35,7 @@ describe("buildClaudeCodeSystemPrompt", () => {
 	});
 
 	it("includes the scratchpad section after the environment block, only when a dir exists", () => {
-		const scratchpad = "/private/tmp/claude-501/-tmp-project/abc-123/scratchpad";
+		const scratchpad = "/private/tmp/onecode-501/-tmp-project/abc-123/scratchpad";
 		const prompt = buildClaudeCodeSystemPrompt(baseOptions, env, "frontier", scratchpad);
 		expect(prompt).toContain("# Scratchpad Directory");
 		expect(prompt).toContain(scratchpad);

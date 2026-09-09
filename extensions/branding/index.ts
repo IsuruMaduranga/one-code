@@ -24,6 +24,7 @@ import { extensionVersion } from "../lib/package-version.ts";
 import {
 	formatModel,
 	formatModelSpec,
+	isRealModel,
 	PERMISSION_STATUS_CHANNEL,
 	permissionModeDisplay,
 	type PermissionStatus,
@@ -342,29 +343,50 @@ export default function brandingExtension(pi: ExtensionAPI) {
 			// Width-memoized (pi-tui renders every mounted component every frame);
 			// the mode/model/subagent lines stay live because each of their
 			// updates invalidates the cache before requesting a repaint.
-			const component = linesComponent((width) => [
-				"",
-				...bannerLines(
-					{
-						version,
-						model: currentModelId ? formatModel(currentModelProvider ?? "", currentModelId) : undefined,
-						cwd: ctx.cwd,
-						mode: permissionModeDisplay(permissionStatus ?? { mode: "default", paused: false }),
-						subagents: subagentStatus?.model
-							? `${formatModelSpec(subagentStatus.model)}${subagentStatus.via ? ` (${subagentStatus.via})` : ""}`
-							: undefined,
-						sections,
-					},
-					paint,
-					width,
-				),
-				"",
-			]);
+			const component = linesComponent((width) => {
+				// Read live each render (model_select invalidates the cache). isRealModel
+				// narrows currentModelId to string; the label is undefined when no
+				// provider is configured, which both fields below render as "none" — a
+				// fresh machine must not show pi's placeholder `(unknown) unknown` (M3).
+				const modelLabel = isRealModel(currentModelId) ? formatModel(currentModelProvider ?? "", currentModelId) : undefined;
+				return [
+					"",
+					...bannerLines(
+						{
+							version,
+							model: modelLabel ?? "none",
+							cwd: ctx.cwd,
+							mode: permissionModeDisplay(permissionStatus ?? { mode: "default", paused: false }),
+							subagents:
+								modelLabel === undefined
+									? "none"
+									: subagentStatus?.model
+										? `${formatModelSpec(subagentStatus.model)}${subagentStatus.via ? ` (${subagentStatus.via})` : ""}`
+										: undefined,
+							sections,
+						},
+						paint,
+						width,
+					),
+					"",
+				];
+			});
 			requestHeaderRender = () => {
 				component.invalidate();
 				(tui as { requestRender?: () => void } | undefined)?.requestRender?.();
 			};
 			return component;
 		});
+
+		// A fresh machine has no provider configured; pi's own hint prints two
+		// absolute doc paths inside node_modules. Replace it with a One Code
+		// onboarding line that names the command that actually connects a provider
+		// and points at the guide, not pi's files (distribution review M3).
+		if (!isRealModel(ctx.model?.id)) {
+			ctx.ui.notify(
+				"No model provider yet. Run /login to connect one (free options at https://github.com/IsuruMaduranga/one-code/blob/master/docs/guide/providers-and-models.md).",
+				"warning",
+			);
+		}
 	});
 }

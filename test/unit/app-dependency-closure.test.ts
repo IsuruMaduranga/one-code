@@ -12,14 +12,18 @@ import { piDist, piRoot, repoRoot } from "./helpers/pi-install.ts";
  * pi statically imports on that path must be resolvable from the APP's
  * dependency tree.
  *
- * pi 0.85.0 shipped one that is not: `dist/index.js` re-exports `main` from
- * `main.js`, which imports `experimental/server.js`, which imports
+ * pi 0.85.0 shipped one that was not: `dist/index.js` re-exported `main` from
+ * `main.js`, which imported `experimental/server.js`, which imported
  * `@earendil-works/pi-server` — a package published on npm but absent from
- * pi's own `dependencies` and `npm-shrinkwrap.json`. pi's CLI never notices
- * (its bundle inlines that code), and neither does `tsc` (types resolve
- * without evaluating the graph), so a clean `npm i -g @one-ai/one-code` would
- * have crashed on launch for every user. Reproduced in an isolated install
- * 2026-09-04; findings §6.
+ * pi's own `dependencies` and `npm-shrinkwrap.json`. pi's CLI never noticed
+ * (its bundle inlines that code), and neither did `tsc` (types resolve without
+ * evaluating the graph), so a clean `npm i -g @one-ai/one-code` crashed on
+ * launch. The app declared `pi-server` to cover it (findings §6). pi 0.85.1
+ * fixed it (#9132): the experimental code is source-only, `dist/experimental/`
+ * is gone, nothing imports `pi-server`, and pi now declares its own shared
+ * internals (pi-agent-core, pi-ai, pi-tui) — so the app no longer carries
+ * `pi-server` and needs no `overrides`. This test stays as the guard for the
+ * next time pi forgets to declare something its library entry imports.
  *
  * This walks the real static import graph from pi's library entry and asserts
  * every `@earendil-works/*` package it reaches is declared by pi itself or,
@@ -31,7 +35,11 @@ const piPackage = JSON.parse(readFileSync(join(piRoot, "package.json"), "utf8"))
 	optionalDependencies?: Record<string, string>;
 };
 const appPackage = JSON.parse(readFileSync(join(repoRoot, "app", "package.json"), "utf8")) as {
+	version: string;
 	dependencies?: Record<string, string>;
+};
+const rootPackage = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")) as {
+	version: string;
 };
 
 const SCOPE = "@earendil-works/";
@@ -95,8 +103,10 @@ describe("bundled app dependency closure over pi's library entry", () => {
 	it("declares every @earendil-works package pi statically imports but does not declare itself", () => {
 		const reachable = reachableScopedPackages(join(piDist, "index.js"));
 		// Sanity: the walk must actually reach pi's own internals, or a broken
-		// traversal would make this test vacuously pass.
-		expect(reachable.size).toBeGreaterThan(3);
+		// traversal would make this test vacuously pass. 0.85.1's slimmer library
+		// entry (experimental code removed, #9132) reaches three (pi-agent-core,
+		// pi-ai, pi-tui); a real traversal never returns fewer.
+		expect(reachable.size).toBeGreaterThanOrEqual(3);
 
 		const appDeclares = appPackage.dependencies ?? {};
 		const undeclared = [...reachable].filter((name) => !(name in piDeclares) && !(name in appDeclares)).sort();
@@ -122,6 +132,21 @@ describe("bundled app dependency closure over pi's library entry", () => {
 	 * `package.json` is strict JSON and cannot hold a reminder comment, so the
 	 * reminder has to be executable.
 	 */
+	/**
+	 * Releases are lockstep (docs/decisions/distribution.md): both packages ship
+	 * the same version every release, and the app pins `one-code-extension` at
+	 * exactly its own version. The exact pin means the extension must publish
+	 * FIRST — publishing the app first gives every installer "No matching version
+	 * found for one-code-extension@<v>". Distribution review 2026-09-09, M2: the
+	 * tag v0.2.0 named a tree that was never published while three weeks of
+	 * commits carried the same version, and nothing guarded the three-way match.
+	 */
+	it("keeps root version, app version, and the app's extension pin in lockstep", () => {
+		const appDeclares = appPackage.dependencies ?? {};
+		expect(appPackage.version, "app version matches root version").toBe(rootPackage.version);
+		expect(appDeclares["one-code-extension"], "the app pins one-code-extension at its own version").toBe(rootPackage.version);
+	});
+
 	it("has no app-side entry for a package pi has since started declaring itself", () => {
 		const appDeclares = appPackage.dependencies ?? {};
 		const nowRedundant = Object.keys(appDeclares)

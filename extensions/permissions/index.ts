@@ -231,6 +231,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	let resultsDirPath: string | undefined;
 	/** The session cwd's own realpath (macOS /var → /private/var), for decide()'s containment check. */
 	let resolvedCwd: string | undefined;
+	/** The per-repo One Code settings file, resolved once per session so the auto-mode floor need not re-walk for the project root on every tool call. */
+	let oneCodeProjectSettingsFile: string | undefined;
 	/** pi's own agent directory, protected like the static list (lib/permission-gate.ts runtimeProtectedDirs). */
 	let protectedDirs: string[] = [];
 
@@ -691,6 +693,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// Resolved like the subjects compared against it (a symlinked parent, macOS /var).
 		resultsDirPath = resolvedOrSelf(sessionResultsDir(ctx));
 		resolvedCwd = resolveForContainment(ctx.cwd);
+		oneCodeProjectSettingsFile = oneCodeProjectSettingsPath(ctx.cwd, os.homedir());
 		protectedDirs = runtimeProtectedDirs();
 		reloadSettings(ctx);
 		applyBadge();
@@ -862,6 +865,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 						input: event.input as Record<string, unknown>,
 						cwd: ctx.cwd,
 						home: os.homedir(),
+						oneCodeProjectSettings: oneCodeProjectSettingsFile,
 					})
 				: undefined;
 
@@ -1044,6 +1048,11 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			protectedDirs,
 		});
 
+		// A child's cwd can be a worktree (different project → different per-repo
+		// settings path), so the floor must derive it from THIS call's cwd, not the
+		// parent-session-cached path. Omitting it lets safetyControlWrite derive
+		// from `cwd`; the fs walk is acceptable on the (rarer) child path, and
+		// correctness of the gate-control floor is not negotiable.
 		const floorReason =
 			mode === "auto"
 				? safetyControlWrite({ toolName: normalizedTool, input, cwd, home: os.homedir() })

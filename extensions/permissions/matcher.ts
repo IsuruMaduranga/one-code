@@ -627,10 +627,13 @@ export interface DecideInput {
 	resultsDirPath?: string;
 	/**
 	 * Directories protected at runtime, beyond the static list in
-	 * protected-paths.ts: pi's own agent directory (`getAgentDir()` — wherever it
-	 * is: `~/.pi/agent` for stock pi, `~/.onecode/agent` bundled), whose
-	 * extensions, settings and auth are code and credentials the harness loads.
-	 * Absolute paths; a write landing inside one is judged like a protected path
+	 * protected-paths.ts (see `runtimeProtectedDirs()`, the sole producer): pi's
+	 * own agent directory (`getAgentDir()` — `~/.pi/agent` for stock pi,
+	 * `~/.onecode/agent` bundled), Claude Code's config dir (`claudeConfigDir()`)
+	 * and One Code's state dir (`oneCodeStateDir()`). The last two catch a
+	 * relocated `CLAUDE_CONFIG_DIR` / `ONECODE_STATE_DIR`, which the static
+	 * segment list cannot (distribution review 2026-09-09, L2). Absolute paths; a
+	 * write landing inside one is judged like a protected path
 	 * (PERMISSIONS-REVIEW-2026-09-05 M7).
 	 */
 	protectedDirs?: string[];
@@ -797,6 +800,10 @@ export function decide(params: DecideInput): Decision {
 		]) {
 			if (dir && isInsideDir(target, dir, cwd)) return { decision: "allow", cause };
 		}
+		// The plan file lives under the state dir (`~/.onecode/plans`), which the
+		// runtime protects; clear it here, before the protected check, since it is
+		// harness working space the model is told to write (review L2).
+		if (params.planFilePath && isPlanFilePath(target, params.planFilePath, cwd)) return { decision: "allow", cause: "plan-file" };
 	}
 
 	// Protected-path writes are checked *before* allow rules, so an

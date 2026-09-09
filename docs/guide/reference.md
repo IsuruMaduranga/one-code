@@ -73,9 +73,9 @@ Set these before launching to change behavior:
 | `CC_HOOKS_DEBUG=1` | Print hook dispatch details to stderr. |
 | `CC_AUTO_MODE_DEBUG=1` | Print auto-mode classifier verdicts (stage, severity, rule) to stderr. |
 | `CC_VERSION` | Version shown in the banner (the bundled app sets it to its own version). |
-| `PI_CACHE_RETENTION` | pi's prompt-cache TTL. Interactive sessions (the TUI and `--mode rpc`) default to `long` — a one-hour cache on Anthropic, 24 hours on OpenAI, so a pause between turns does not re-write the whole context. `-p`/`--mode json` runs, subagents and workflow agents use the provider's short default. Set `short` (or any value) to take over the setting yourself. |
+| `PI_CACHE_RETENTION` | pi's prompt-cache TTL. Interactive sessions (the TUI and `--mode rpc`) default to `long` — an extended cache (one hour on Anthropic; on OpenAI the exact TTL is pi's own and model-dependent, e.g. 30 minutes on GPT-5.6+ Responses models), so a pause between turns does not re-write the whole context. `-p`/`--mode json` runs, subagents and workflow agents use the provider's short default. Set `short` (or any value) to take over the setting yourself. |
 | `ONECODE_NO_UPDATE_CHECK=1` | Skip the daily npm update check (`--offline`/`PI_OFFLINE=1` also skip it). |
-| `ONECODE_STATE_DIR` | Where One Code keeps its own state (default `~/.onecode`). |
+| `ONECODE_STATE_DIR` | Where One Code keeps its own state (default `~/.onecode`). This is independent of pi's agent directory: if you point pi elsewhere with `PI_CODING_AGENT_DIR`, pi's own state moves but One Code's stays in `~/.onecode` unless you also set `ONECODE_STATE_DIR`. |
 | `ONECODE_DEBUG=1` | Report when a pi-internal patch in the bundled app did not take. |
 | `CLAUDE_CONFIG_DIR` | Honoured like Claude Code does: relocates the user-scope `.claude` dir and `.claude.json`. |
 
@@ -84,7 +84,7 @@ The `CC_` prefix is historical (the project began as a Claude Code recreation);
 
 ## Themes
 
-Two themes ship: `onecode` (dark) and `one-code-light`. Select one through your
+Two themes ship: `onecode` (dark) and `onecode-light`. Select one through your
 pi settings.
 
 ## Other run modes

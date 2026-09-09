@@ -19,7 +19,7 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { linesComponent, safeThemePaint } from "../lib/tui-render.ts";
-import { formatModel } from "../permissions/modes.ts";
+import { formatModel, isRealModel } from "../permissions/modes.ts";
 import { ULTRACODE_STATUS_KEY } from "../effort/slider.ts";
 import { USAGE_CHANNEL } from "../lib/usage-bus.ts";
 import { buildFooterLines, computeMainUsage, type FooterData } from "./footer-line.ts";
@@ -89,6 +89,7 @@ export default function footerExtension(pi: ExtensionAPI) {
 				const usage = ctx.getContextUsage();
 				const ultracode = fd.getExtensionStatuses().get(ULTRACODE_STATUS_KEY);
 				const effort = ultracode ?? safeThinkingLevel(ctx);
+				const model = ctx.model;
 				return {
 					cwd: ctx.cwd,
 					home: process.env.HOME || process.env.USERPROFILE || "",
@@ -99,7 +100,7 @@ export default function footerExtension(pi: ExtensionAPI) {
 					cost: mainUsage.cost,
 					cacheHitPercent: mainUsage.cacheHitPercent,
 					pr,
-					model: ctx.model ? formatModel(ctx.model.provider, ctx.model.id) : undefined,
+					model: model && isRealModel(model.id) ? formatModel(model.provider, model.id) : "none",
 					effort,
 				};
 			};

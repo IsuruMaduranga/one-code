@@ -6,7 +6,7 @@ how you already work.
 | You | Install | What you get |
 |---|---|---|
 | New to this, or you want the simplest setup | `npm install -g @one-ai/one-code` | The bundled app: its own `onecode` command, a pinned version of the pi coding agent inside it, and its state kept in `~/.onecode`. It coexists with any `pi` you already have. |
-| Already running [pi](https://github.com/earendil-works/pi) | `pi install npm:one-code-extension` | The extensions only. They run on your existing pi and store state under your pi agent directory. |
+| Already running [pi](https://github.com/earendil-works/pi) | `pi install npm:one-code-extension` | The extensions only. They run on your existing pi. One Code's own state (settings, plans, trust stores) still goes to `~/.onecode`; pi's own files and plugin state stay under your pi agent directory (`~/.pi/agent`). |
 
 ## Requirements
 
@@ -22,8 +22,10 @@ cd your-project
 onecode
 ```
 
-The first run asks you to pick a model provider and paste an API key. For a
-free option, see [Providers and models](providers-and-models.md).
+On the first run there is no provider yet: the banner shows `model none`. Run
+`/login` inside One Code to connect a provider and paste (or OAuth) a key, or
+set a provider key in your environment before launching. For a free option, see
+[Providers and models](providers-and-models.md).
 
 ## Install with Homebrew
 
@@ -33,11 +35,11 @@ Homebrew installs Node for you, so this route has no separate Node step:
 brew install isurumaduranga/one-ai/one-code
 ```
 
-To tap once and then install by short name:
+To tap once and then install (the formula is `one-code`; the command it installs is `onecode`):
 
 ```bash
 brew tap isurumaduranga/one-ai
-brew install onecode
+brew install one-code
 ```
 
 ## Install the extension on your own pi

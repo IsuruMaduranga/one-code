@@ -33,9 +33,10 @@
  */
 
 import { type Api, type Context, contentText, type Message, type Model } from "@earendil-works/pi-ai";
-import { clampMaxTokensToContext } from "@earendil-works/pi-ai/api/simple-options";
-import { estimateMessageTokens } from "@earendil-works/pi-ai/utils/estimate";
 import { PREVIEW_BYTES } from "../lib/persisted-output.ts";
+// Vendored from pi-ai: importing its deep subpaths directly breaks under the
+// bundled app's library loader (distribution review 2026-09-09, H1).
+import { clampMaxTokensToContext, estimateMessageTokens } from "../lib/pi-ai-estimate.ts";
 
 /**
  * The least output room a replay must leave for the summary. Below it the
