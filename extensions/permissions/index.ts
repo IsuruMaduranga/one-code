@@ -187,7 +187,20 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	// in-process child gate (lib/permission-gate.ts), which judges under it when
 	// no bridge to this extension is reachable. Subagents run in-process; there
 	// is no child *process* reading this any more.
-	let mode: PermissionMode = "default";
+	//
+	// Auto is the shipped default: Claude Code 2.1.266 made auto its default
+	// permission mode ("Auto mode is now Claude Code's default permission mode"),
+	// so One Code follows. Deliberate divergences from CC's rollout, both the
+	// user's call: CC gates it behind a one-time first-run offer and pairs it with
+	// an OS sandbox for outside-cwd reads; One Code flips the default directly and
+	// has no sandbox yet (reads outside the working directory are still
+	// classified/asked, never auto-read). The auto-mode safety architecture still
+	// holds — the deterministic safety floor, classifier-verdicts-verified, the
+	// git-recoverability gate, and the classifier tier floor — and with no
+	// classifier model reachable the classifier fails closed. A user or project
+	// `defaultMode` (or `--permission-mode`) still overrides this; `auto` from a
+	// project file is still refused. See docs/decisions/auto-mode.md.
+	let mode: PermissionMode = "auto";
 	// Worktree-wrapped bash calls publish the model's original command here,
 	// keyed by pi's toolCallId (never read from `event.input` — model-writable).
 	const originalCommands = trackOriginalCommands(pi);

@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ORIGINAL_COMMAND_CHANNEL } from "../../extensions/lib/original-command.ts";
 import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
+import { PERMISSION_STATUS_CHANNEL } from "../../extensions/permissions/modes.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
 type Prompt = { title: string; options: string[] };
@@ -57,6 +58,11 @@ describe("permissions session state", () => {
 		permissionsExtension(fake.pi as never);
 		ctx = makeCtx();
 		await fake.fire("session_start", { reason: "startup" }, ctx);
+		// The shipped default is now `auto` (CC 2.1.266 parity); these cases
+		// exercise default-mode machinery (interactive prompts, session grants),
+		// so pin the mode to `default` explicitly. Tests that need another mode
+		// emit their own MODE_CHANNEL after this.
+		fake.events.emit(MODE_CHANNEL, { mode: "default" });
 	});
 	afterEach(() => {
 		vi.unstubAllEnvs();
@@ -113,10 +119,12 @@ describe("permissions session state", () => {
 			expect(prompts).toHaveLength(1);
 
 			await fake.fire("session_start", { reason: "reload" }, ctx);
+			fake.events.emit(MODE_CHANNEL, { mode: "default" }); // session_start resets to the auto default
 			expect(await call("write", { path: "c.ts" })).toBeUndefined();
 			expect(prompts).toHaveLength(1); // a reload is the same conversation
 
 			await fake.fire("session_start", { reason: "new" }, ctx);
+			fake.events.emit(MODE_CHANNEL, { mode: "default" });
 			expect(await call("write", { path: "d.ts" })).toBeUndefined();
 			expect(prompts).toHaveLength(2); // /clear: the grant is gone
 		});
@@ -156,6 +164,20 @@ describe("permissions session state", () => {
 			// An unwrapped call with the same wrapper text (no original published) is still judged as written.
 			const raw = await call("bash", { command: wrap("git status") }, "w4");
 			expect(raw?.block).toBe(true);
+		});
+	});
+
+	describe("shipped default mode", () => {
+		it("starts a fresh session in auto, matching Claude Code 2.1.266", async () => {
+			// A fresh extension instance (mode initialized, no default pin): with no
+			// --permission-mode flag and no settings defaultMode, the first
+			// session_start must land in auto.
+			const freshFake = createFakePi();
+			const modes: string[] = [];
+			freshFake.events.on(PERMISSION_STATUS_CHANNEL, (d) => modes.push((d as { mode: string }).mode));
+			permissionsExtension(freshFake.pi as never);
+			await freshFake.fire("session_start", { reason: "startup" }, makeCtx());
+			expect(modes.at(-1)).toBe("auto");
 		});
 	});
 });

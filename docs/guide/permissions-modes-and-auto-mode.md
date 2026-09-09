@@ -36,15 +36,23 @@ To add a rule during a session, run `/allow`. To review the current rules, run
 
 ## Permission modes
 
-A mode sets the default answer for actions no rule covers. Cycle through the
-modes with **ctrl+q**. The cycle is:
+A mode sets the default answer for actions no rule covers. **Auto is the default**
+(matching current Claude Code): a classifier approves routine actions and stops
+risky ones, so you are not prompted for every step. Cycle through the modes with
+**ctrl+q**. The cycle is:
 
-1. **Manual** (the default): prompts for anything not already allowed.
+1. **Manual**: prompts for anything not already allowed.
 2. **Accept edits**: file edits run without a prompt; other actions still
    prompt.
 3. **Plan**: read-only planning. See the next section.
-4. **Auto**: a classifier approves routine actions and stops risky ones. See
-   [Auto mode](#auto-mode).
+4. **Auto** (the default): a classifier approves routine actions and stops risky
+   ones. See [Auto mode](#auto-mode).
+
+To start in a different mode every session, set `defaultMode` in your user
+settings (`~/.onecode/settings.json`) — for example `"defaultMode": "default"`
+for manual approval — or pass `--permission-mode <mode>` for one run. Auto mode
+needs a model to run its classifier; with none configured it stays out of the
+cycle.
 
 Two more modes exist outside the cycle. **Bypass permissions** runs everything
 without prompts; reach it deliberately, not by cycling. **Don't ask** suppresses
