@@ -14,10 +14,7 @@
       "node"
     ],
     "paths": {
-      "pi-web-search/src/index.ts": [
-        "./types/community-packages.d.ts"
-      ],
-      "pi-web-search/src/api.ts": [
+      "pi-web-search/src/*": [
         "./types/community-packages.d.ts"
       ]
     }

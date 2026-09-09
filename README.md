@@ -235,7 +235,9 @@ pi inside a container: the permission gate and the container compose.
 ## Good to know
 
 - **Web search** uses your provider's own search API (OpenAI, Anthropic,
-  Gemini), so it needs a provider that offers one.
+  Gemini). Elsewhere it falls back to Brave or Tavily when you set
+  `BRAVE_SEARCH_API_KEY` / `TAVILY_API_KEY`, else to Exa's free keyless endpoint
+  (rate-limited; One Code warns when it is used).
 - **LSP diagnostics** need the language server on your `PATH` (for example,
   `npm i -g typescript-language-server typescript`).
 - Verified end-to-end on Anthropic and OpenAI models, and through **OpenRouter**

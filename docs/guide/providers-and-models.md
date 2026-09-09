@@ -77,8 +77,30 @@ One Code adjusts how much guidance the system prompt gives based on the model's
 capability, so a smaller model receives more direction than a frontier one. You
 do not configure this; it follows the model you select.
 
-## Web search needs a provider that offers it
+## Web search on providers without a search API
 
-Web search uses your provider's own search API, available today on OpenAI,
-Anthropic, and Gemini. If your current provider has no search API, web search is
-unavailable until you switch to one that does.
+Web search uses your provider's own search API when it has one (OpenAI,
+Anthropic, and Gemini). On any other provider (OpenRouter, Z.ai, Ollama, and the
+rest) One Code falls back to a third-party search API:
+
+- **Brave Search** when `BRAVE_SEARCH_API_KEY` is set.
+- **Tavily** when `TAVILY_API_KEY` is set.
+- **Exa's free keyless endpoint** when neither key is set. It is rate-limited and
+  best-effort, so One Code warns you the first time a session uses it and labels
+  every result that came from it.
+
+Both Brave and Tavily have free tiers. If you would rather not use environment
+variables, put the keys in `~/.onecode/settings.json`:
+
+```json
+{
+  "webSearch": {
+    "apiKeys": { "brave": "…", "tavily": "…" },
+    "order": ["tavily", "brave", "exa-free"]
+  }
+}
+```
+
+`order` is optional; the default tries Brave, then Tavily, then the free
+endpoint. A backend that fails is skipped and the result says so. Web fetch
+works on every provider; it never depends on a search API.
