@@ -19,14 +19,12 @@
 
 import { existsSync } from "node:fs";
 import os from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { claudeConfigDir } from "../lib/paths.ts";
 import { claudeUserDir } from "../lib/paths.ts";
 
-/** The skill catalog shipped in this package: `<package>/skills`. */
-const BUNDLED_SKILLS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "skills");
+import { BUNDLED_SKILLS_DIR } from "../lib/skill-scan.ts";
 
 /**
  * `claudeDir` is Claude Code's config dir (honours CLAUDE_CONFIG_DIR), defaulting

@@ -124,3 +124,62 @@ export function redactOffSkillMessages<M extends { role: string; content?: unkno
 	});
 	return changed ? out : undefined;
 }
+
+// ---------------------------------------------------------------------------
+// Bare `/<skill>` commands (Claude Code's invocation shape)
+
+/**
+ * pi's interactive built-ins, matched by literal text before anything reaches
+ * an extension — a skill of the same name can never be invoked bare, so no
+ * alias is registered for it (its `/skill:<name>` form still works).
+ */
+export const PI_BUILTIN_COMMANDS: ReadonlySet<string> = new Set([
+	"changelog",
+	"clone",
+	"compact",
+	"copy",
+	"debug",
+	"export",
+	"fork",
+	"hotkeys",
+	"import",
+	"login",
+	"logout",
+	"model",
+	"name",
+	"new",
+	"quit",
+	"reload",
+	"resume",
+	"scoped-models",
+	"session",
+	"settings",
+	"share",
+	"thinking",
+	"tree",
+	"trust",
+]);
+
+/** A skill name that can be a bare slash command: one token, no `:` (plugin skills stay `<plugin>:<skill>`, as in Claude Code). */
+export function isBareCommandName(name: string): boolean {
+	return /^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(name);
+}
+
+/**
+ * Which skills get a bare `/<name>` command, given the command names already
+ * taken (other extensions' commands, `.claude/commands` templates, pi's
+ * built-ins). Plugin skills are excluded (they keep `<plugin>:<skill>`), a
+ * name already taken keeps its owner (first-registered command wins; pi would
+ * otherwise rename BOTH to `name:1`/`name:2`), and a duplicate skill name
+ * registers once. Pure, so the collision policy is testable.
+ */
+export function skillCommandCandidates<T extends { name: string; source: string }>(skills: T[], taken: Iterable<string>): T[] {
+	const used = new Set<string>([...taken, ...PI_BUILTIN_COMMANDS]);
+	const out: T[] = [];
+	for (const skill of skills) {
+		if (skill.source === "plugin" || !isBareCommandName(skill.name) || used.has(skill.name)) continue;
+		used.add(skill.name);
+		out.push(skill);
+	}
+	return out;
+}

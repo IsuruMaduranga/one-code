@@ -100,21 +100,30 @@ describe("skill scan", () => {
 		const cwd = join(root, "proj");
 		const home = join(root, "home");
 		const agentDir = join(root, "agent");
+		const bundled = join(root, "bundled-skills");
 		for (const [base, name] of [
 			[join(cwd, ".claude", "skills"), "proj-skill"],
+			[join(cwd, ".agents", "skills"), "proj-agents-skill"],
 			[join(home, ".claude", "skills"), "user-skill"],
+			[join(home, ".agents", "skills"), "user-agents-skill"],
 			[join(agentDir, "skills"), "agent-skill"],
+			[bundled, "bundled-skill"],
 		] as const) {
 			mkdirSync(join(base, name), { recursive: true });
 			writeFileSync(join(base, name, "SKILL.md"), "---\nname: x\n---\nbody text here");
 		}
-		const skills = scanSkills(cwd, home, agentDir, [{ name: "demo:helper", plugin: "demo", path: "/p/SKILL.md" }]);
+		const skills = scanSkills(cwd, home, agentDir, [{ name: "demo:helper", plugin: "demo", path: "/p/SKILL.md" }], bundled);
 		expect(skills.map((s) => `${s.scope}:${s.name}`).sort()).toEqual([
 			"plugin:demo:helper",
+			"project:bundled-skill",
+			"project:proj-agents-skill",
 			"project:proj-skill",
 			"user:agent-skill",
+			"user:user-agents-skill",
 			"user:user-skill",
 		]);
+		// Without the bundled root (the /plugins tab's call) the catalog is not scanned.
+		expect(scanSkills(cwd, home, agentDir, []).some((s) => s.name === "bundled-skill")).toBe(false);
 		expect(estimateSkillTokens(skills.find((s) => s.name === "proj-skill")!.path)).toBeGreaterThan(0);
 		expect(estimateSkillTokens("/nope/SKILL.md")).toBe(0);
 	});

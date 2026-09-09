@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+	PI_BUILTIN_COMMANDS,
 	buildSkillBlock,
+	isBareCommandName,
 	offSkillNotice,
 	parseSkillCommand,
 	redactOffSkillMessages,
 	redactOffSkillText,
 	resolveSkill,
+	skillCommandCandidates,
 } from "../../extensions/skill/invoke.ts";
 
 describe("parseSkillCommand", () => {
@@ -137,5 +140,38 @@ describe("redactOffSkillMessages", () => {
 			{ role: "user", content: buildSkillBlock({ name: "review", filePath: "/s/r/SKILL.md" }, "steps", "") },
 		];
 		expect(redactOffSkillMessages(messages, isOff)).toBeUndefined();
+	});
+});
+
+describe("bare skill commands", () => {
+	it("accepts one-token names and rejects plugin-style or odd ones", () => {
+		expect(isBareCommandName("simplify")).toBe(true);
+		expect(isBareCommandName("code-review")).toBe(true);
+		expect(isBareCommandName("pr-review-toolkit:review-pr")).toBe(false);
+		expect(isBareCommandName("with space")).toBe(false);
+		expect(isBareCommandName("-lead")).toBe(false);
+		expect(isBareCommandName("")).toBe(false);
+	});
+
+	const skills = [
+		{ name: "simplify", source: "project" },
+		{ name: "code-review", source: "project" },
+		{ name: "skills", source: "project" },
+		{ name: "model", source: "project" },
+		{ name: "acme:deploy", source: "plugin" },
+		{ name: "simplify", source: "project" },
+	];
+
+	it("skips plugin skills, taken names, pi built-ins, and duplicates", () => {
+		const picked = skillCommandCandidates(skills, ["skills", "plugins"]);
+		expect(picked.map((s) => s.name)).toEqual(["simplify", "code-review"]);
+	});
+
+	it("registers everything eligible when nothing is taken", () => {
+		expect(skillCommandCandidates([{ name: "a", source: "project" }, { name: "b", source: "project" }], []).map((s) => s.name)).toEqual(["a", "b"]);
+	});
+
+	it("keeps pi's literal-matched built-ins out of the alias set", () => {
+		for (const name of ["model", "new", "compact", "quit", "reload"]) expect(PI_BUILTIN_COMMANDS.has(name)).toBe(true);
 	});
 });

@@ -28,10 +28,17 @@ import {
 	skillOverrideKey,
 	skillStateFor,
 } from "../lib/skill-overrides.ts";
-import { estimateSkillTokens, scanSkills, scopeForPath } from "../lib/skill-scan.ts";
+import { BUNDLED_SKILLS_DIR, estimateSkillTokens, promptTemplateNames, scanSkills, scopeForPath } from "../lib/skill-scan.ts";
 import { recordUsage } from "../lib/usage-tracker.ts";
 import { boundedDockHeight, ccToolRenderers, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
-import { bareSkillMatches, buildSkillBlock, parseSkillCommand, redactOffSkillMessages, resolveSkill } from "./invoke.ts";
+import {
+	bareSkillMatches,
+	buildSkillBlock,
+	parseSkillCommand,
+	redactOffSkillMessages,
+	resolveSkill,
+	skillCommandCandidates,
+} from "./invoke.ts";
 import { decodeSkillsKey } from "./panel/keys.ts";
 import { skillListingText } from "./listing.ts";
 import { renderSkillsPanel, type SkillsPaint } from "./panel/render.ts";
@@ -129,7 +136,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 		const base =
 			resolved.length > 0
 				? resolved
-				: scanSkills(cwd ?? process.cwd(), home, agentDir, []).map((skill) => ({
+				: scanSkills(cwd ?? process.cwd(), home, agentDir, [], BUNDLED_SKILLS_DIR).map((skill) => ({
 						name: skill.name,
 						description: readDescription(skill.path),
 						path: skill.path,
@@ -264,52 +271,112 @@ export default function skillExtension(pi: ExtensionAPI) {
 		},
 	});
 
+	/**
+	 * Run a resolved skill the way a user-typed command does: refuse an "off"
+	 * skill (in EVERY mode — falling through would hand `/skill:` to pi's native
+	 * expansion, which knows nothing of the overrides store and would run it; a
+	 * headless run gets the refusal as a next-turn reminder instead of a UI
+	 * notice, never as silent execution), else re-deliver pi's exact `<skill>`
+	 * block as a hidden custom message. The model receives the same bytes pi's
+	 * own expansion would submit as a user turn (convertToLlm maps a custom
+	 * message to a user message regardless of `display`), but nothing renders.
+	 * Shared by the `/skill:<name>` interception and the bare `/<name>` commands.
+	 */
+	const deliverSkill = (
+		found: IndexedSkill,
+		args: string,
+		ctx: { hasUI: boolean; ui: { notify(message: string, level: "info" | "warning" | "error"): void } },
+		extra: { images?: Array<{ type: "image"; data: string; mimeType: string }>; streamingBehavior?: "steer" | "followUp" } = {},
+	): "handled" | "unavailable" => {
+		if (found.state === "off") {
+			const where = found.source === "plugin" ? "/plugins" : "/skills";
+			const message = `Skill "${found.name}" is turned off — enable it from ${where} to run it.`;
+			if (ctx.hasUI) ctx.ui.notify(message, "warning");
+			else pi.events.emit(REMINDER_CHANNEL, { text: message });
+			return "handled";
+		}
+		let body: string;
+		try {
+			body = stripFrontmatter(readFileSync(found.path, "utf-8")).trim();
+		} catch {
+			return "unavailable";
+		}
+		recordUsage(pluginRoot(getAgentDir()), "skill", found.name);
+		const block = buildSkillBlock({ name: found.name, filePath: found.path }, body, args);
+		// Carry any attached images alongside the block, as pi's native path would.
+		const content = extra.images?.length ? [{ type: "text" as const, text: block }, ...extra.images] : block;
+		pi.sendMessage(
+			{ customType: "one-code:skill-invocation", content, display: false, details: { skill: found.name, args } },
+			{ triggerTurn: true, ...(extra.streamingBehavior ? { deliverAs: extra.streamingBehavior } : {}) },
+		);
+		return "handled";
+	};
+
 	// A user-typed `/skill:<name>` normally runs pi's own expansion, which submits
 	// the skill's `<skill>` block as a *user message* — so loading a skill shows in
 	// the transcript as a new user turn. Intercept it here, suppress pi's
-	// expansion (return "handled"), and re-deliver the identical block as a hidden
-	// custom message: the model receives the same bytes (convertToLlm maps a custom
-	// message to a user message regardless of `display`), but nothing renders. An
-	// unknown name, an ambiguous plugin match, or an unreadable file falls through
-	// to pi's native handling; an "off" skill is refused here (matching the Skill
-	// tool), because pi's own expansion has no knowledge of the overrides store and
-	// would otherwise run it.
+	// expansion (return "handled"), and deliver through deliverSkill. An unknown
+	// name, an ambiguous plugin match, or an unreadable file falls through to
+	// pi's native handling. This hook only covers prompt(); paths that expand
+	// without an `input` event (steer/followUp) are caught by the context-hook
+	// redaction below.
 	pi.on("input", (event, ctx) => {
 		const cmd = parseSkillCommand(event.text);
 		if (!cmd) return { action: "continue" };
 		const found = resolveSkill(index(), cmd.name);
 		if (!found) return { action: "continue" };
-		if (found.state === "off") {
-			// "off" is refused even on explicit invocation (see skill-overrides.ts) —
-			// in EVERY mode: falling through would hand the command to pi's native
-			// expansion, which has no knowledge of the overrides store and would run
-			// the skill anyway. A headless run gets the refusal as a next-turn
-			// reminder instead of a UI notice; never as silent execution. This hook
-			// only covers prompt(); paths that expand without an `input` event
-			// (steer/followUp) are caught by the context-hook redaction below.
-			const where = found.source === "plugin" ? "/plugins" : "/skills";
-			const message = `Skill "${found.name}" is turned off — enable it from ${where} to run it.`;
-			if (ctx.hasUI) ctx.ui.notify(message, "warning");
-			else pi.events.emit(REMINDER_CHANNEL, { text: message });
-			return { action: "handled" };
-		}
+		const outcome = deliverSkill(found, cmd.args, ctx, {
+			images: event.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined,
+			streamingBehavior: event.streamingBehavior,
+		});
+		return { action: outcome === "handled" ? "handled" : "continue" };
+	});
 
-		let body: string;
+	// Claude Code invokes a user/project skill as a bare `/<name>` (only plugin
+	// skills carry a `<plugin>:` prefix); pi registers `/skill:<name>`. Register
+	// each project/user/bundled skill as a bare extension command too, so
+	// `/simplify` works and autocompletes. pi runs extension commands before the
+	// `input` hook and before its own `/skill:`/template expansion — in prompt(),
+	// so interactive, `-p` and RPC alike — and emits session_start before it
+	// builds the autocomplete list, so aliases registered here are listed. A name
+	// another command already owns is skipped (pi would rename BOTH to `name:1`/
+	// `name:2`), as are pi's built-ins (matched by literal text before extensions
+	// see them) and `.claude/commands` templates (pi resolves those per turn,
+	// AFTER session_start, so they are pre-scanned from disk here — otherwise a
+	// bare skill command would shadow a same-named template for the whole
+	// session); those skills keep only their `/skill:` form. Commands can never
+	// be unregistered, so the handler resolves the skill afresh at invocation:
+	// a skill deleted or turned off since registration is refused, never run.
+	const registeredSkillCommands = new Set<string>();
+	const registerSkillCommands = (cwd: string | undefined) => {
+		let taken: string[];
 		try {
-			body = stripFrontmatter(readFileSync(found.path, "utf-8")).trim();
+			taken = pi.getCommands().map((command) => command.name);
 		} catch {
-			return { action: "continue" };
+			return; // not bound yet (load time) — session_start retries
 		}
-
-		recordUsage(pluginRoot(getAgentDir()), "skill", found.name);
-		const block = buildSkillBlock({ name: found.name, filePath: found.path }, body, cmd.args);
-		// Carry any attached images alongside the block, as pi's native path would.
-		const content = event.images?.length ? [{ type: "text" as const, text: block }, ...event.images] : block;
-		pi.sendMessage(
-			{ customType: "one-code:skill-invocation", content, display: false, details: { skill: found.name, args: cmd.args } },
-			{ triggerTurn: true, ...(event.streamingBehavior ? { deliverAs: event.streamingBehavior } : {}) },
-		);
-		return { action: "handled" };
+		const templates = promptTemplateNames(cwd ?? process.cwd(), os.homedir(), getAgentDir());
+		for (const skill of skillCommandCandidates(index(cwd), [...taken, ...templates, ...registeredSkillCommands])) {
+			registeredSkillCommands.add(skill.name);
+			pi.registerCommand(skill.name, {
+				description: skill.description ? `${skill.description} (skill)` : `Run the ${skill.name} skill`,
+				handler: async (args, ctx) => {
+					const found = resolveSkill(index(ctx.cwd), skill.name);
+					if (!found || deliverSkill(found, args.trim(), ctx) === "unavailable") {
+						ctx.ui.notify(`Skill "${skill.name}" is no longer available (its SKILL.md was removed or is unreadable).`, "error");
+					}
+				},
+			});
+		}
+	};
+	pi.on("session_start", (_event, ctx) => registerSkillCommands(ctx.cwd));
+	// pi's per-turn resolution (frontmatter `name`, description required) can
+	// surface skills the pre-turn disk scan missed; late registrations still
+	// execute (autocomplete lists them after a /reload). Gated on an unseen
+	// name so the steady state costs one Set lookup per skill per turn, not a
+	// re-index (before_agent_start runs every turn).
+	pi.on("before_agent_start", (_event, ctx) => {
+		if (piSkills.some((skill) => !registeredSkillCommands.has(skill.name))) registerSkillCommands(ctx.cwd);
 	});
 
 	// Fail-closed backstop for the `input` interception above: pi's steer() and

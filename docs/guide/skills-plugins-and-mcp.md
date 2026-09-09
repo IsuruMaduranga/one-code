@@ -8,8 +8,10 @@ them.
 
 An Agent Skill is a packaged set of instructions for a kind of task. One Code
 discovers skills from `.claude/skills/` and lists them for the model to call.
-The model invokes a skill when the task matches, or you can ask for one by name
-with its slash command.
+The model invokes a skill when the task matches, or you can run one yourself by
+typing its name as a slash command, as in Claude Code: `/simplify`,
+`/code-review`, or any skill from `.claude/skills/`. Plugin skills keep their
+plugin prefix (`/plugin-name:skill`). pi's `/skill:name` form also works.
 
 Run `/skills` to open the skills panel. Each skill can be in one of four states,
 which control how it appears to the model:
