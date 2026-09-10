@@ -46,6 +46,8 @@ import {
 	crossesProvider,
 	findConfigured,
 	isClaudeFamilyModel,
+	isDatedDuplicate,
+	isDatedModelId,
 	isStaleContainmentStamp,
 	modelsContainedToSession,
 	modelSpec as spec,
@@ -162,8 +164,6 @@ export function subagentModelNotes(resolution: Pick<SubagentModelResolution, "mo
 	return [...resolution.notices, `This subagent runs on ${spec(resolution.model)} (${SOURCE_LABEL[resolution.source]}).`];
 }
 
-const isDated = (id: string): boolean => /-20\d{6}$/.test(id);
-
 /**
  * Resolve a Claude Code alias by name within the contained set, preferring
  * undated alias ids and then the newest id. Returns undefined off-family —
@@ -173,7 +173,7 @@ const isDated = (id: string): boolean => /-20\d{6}$/.test(id);
 function resolveAlias(alias: string, contained: Model<Api>[]): Model<Api> | undefined {
 	const matches = contained.filter((model) => model.id.toLowerCase().includes(alias));
 	if (matches.length === 0) return undefined;
-	const undated = matches.filter((model) => !isDated(model.id));
+	const undated = matches.filter((model) => !isDatedModelId(model.id));
 	const pool = undated.length > 0 ? undated : matches;
 	return pool.sort((a, b) => b.id.localeCompare(a.id))[0];
 }
@@ -392,11 +392,7 @@ export function subagentModelMenu({ available, sessionModel, defaultModel, defau
 			.map((model) => ({ model, input: pricedInput(model) }))
 			.filter((entry): entry is { model: Model<Api>; input: number } => entry.input !== undefined)
 			// Collapse dated duplicates when the undated alias is also present.
-			.filter(
-				(entry) =>
-					!isDated(entry.model.id) ||
-					!contained.some((other) => other.id !== entry.model.id && entry.model.id.startsWith(other.id)),
-			)
+			.filter((entry) => !isDatedDuplicate(entry.model, contained))
 			.sort((a, b) => a.input - b.input);
 		const sessionPrice = pricedInput(sessionModel);
 		for (const entry of priced) {

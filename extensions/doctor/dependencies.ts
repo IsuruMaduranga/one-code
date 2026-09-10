@@ -14,6 +14,7 @@
 import { accessSync, constants, existsSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
+import { getProviderKind } from "pi-web-search/src/api.ts";
 import { INSTALL_HINTS } from "../lsp/install-hints.ts";
 import { SERVERS } from "../lsp/servers.ts";
 import { typescriptPreflight } from "../lsp/servers.ts";
@@ -76,14 +77,9 @@ export function projectLanguages(cwd: string): string[] {
 	return [...seen.values()];
 }
 
-/** pi-web-search's provider kinds, mirrored so the report needs no live model registry to answer. */
+/** Whether the model's provider has a search API of its own — pi-web-search's judgement, the same gate the web_search tool uses. */
 export function providerHasNativeSearch(model: Model<Api> | undefined): boolean {
-	if (!model) return false;
-	const api = String(model.api);
-	if (model.provider === "google" || model.provider === "google-vertex" || api === "google-generative-ai") return true;
-	if (model.provider === "xai" && api === "openai-responses") return true;
-	if (api === "openai-responses" || api === "azure-openai-responses" || api === "openai-codex-responses") return true;
-	return api === "anthropic-messages";
+	return model !== undefined && getProviderKind(model) !== "unsupported";
 }
 
 export interface DependencyInput {

@@ -38,7 +38,7 @@ import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../permissions
 import { persistSubagentModel } from "../subagents/default-model.ts";
 import { buildDoctorReport, oneCodeVersion } from "./build.ts";
 import { doctorFixPrompt } from "./fix-prompt.ts";
-import { computePresets, findPreset, PRESET_NAMES, presetsSection } from "./presets.ts";
+import { computePresets, describePresetChanges, findPreset, PRESET_NAMES, presetsSection } from "./presets.ts";
 import { type DoctorReport, renderDoctorReport, renderDoctorText, renderSection } from "./report.ts";
 import { lookupLatestVersion } from "./update-lookup.ts";
 import { applyDoctorKey, decodeDoctorKey, renderDoctorViewer, visibleBodyRows } from "./viewer.ts";
@@ -128,11 +128,10 @@ export default function doctorExtension(pi: ExtensionAPI) {
 			const paint = safeThemePaint(theme);
 			const bold = safeThemeBold(theme);
 			const state = { offset: 0 };
-			let cache: { width: number; lines: string[]; body: string[] } | undefined;
+			let cache: { width: number; lines: string[] } | undefined;
 			const body = (width: number) => {
 				if (cache?.width === width) return cache;
-				const lines = renderDoctorReport(report, { width: width - 2, paint, bold }).map((line) => ` ${line}`);
-				cache = { width, lines, body: lines };
+				cache = { width, lines: renderDoctorReport(report, { width: width - 2, paint, bold }).map((line) => ` ${line}`) };
 				return cache;
 			};
 			return {
@@ -180,20 +179,14 @@ export default function doctorExtension(pi: ExtensionAPI) {
 			return;
 		}
 		const home = os.homedir();
-		const changed: string[] = [];
-		if (!ctx.model || modelSpec(ctx.model) !== modelSpec(preset.main)) {
-			const ok = await pi.setModel(preset.main);
-			if (!ok) {
-				ctx.ui.notify(`Could not switch the main model to ${modelSpec(preset.main)}; nothing was changed.`, "error");
-				return;
-			}
-			changed.push(`main model → ${modelSpec(preset.main)}`);
+		const mainSwitched = !ctx.model || modelSpec(ctx.model) !== modelSpec(preset.main);
+		if (mainSwitched && !(await pi.setModel(preset.main))) {
+			ctx.ui.notify(`Could not switch the main model to ${modelSpec(preset.main)}; nothing was changed.`, "error");
+			return;
 		}
 		try {
 			persistSubagentModel(preset.subagents.setting === "inherit" ? "inherit" : undefined, home);
-			changed.push(preset.subagents.setting === "inherit" ? "subagent default → inherit the main model" : `subagent default → automatic (picks ${modelSpec(preset.subagents.model)})`);
 			persistClassifierModel(undefined, home);
-			changed.push(`auto-mode classifier → automatic${preset.classifier ? ` (picks ${modelSpec(preset.classifier)})` : ""}`);
 		} catch (error) {
 			ctx.ui.notify(`Could not save settings: ${error instanceof Error ? error.message : String(error)}`, "error");
 			return;
@@ -201,7 +194,11 @@ export default function doctorExtension(pi: ExtensionAPI) {
 		pi.events.emit(SUBAGENT_DEFAULT_CHANGED_CHANNEL, {});
 		pi.events.emit(CLASSIFIER_SETTING_CHANGED_CHANNEL, {});
 		ctx.ui.notify(
-			[`Applied the ${preset.label} preset:`, ...changed.map((line) => `  ${line}`), "Undo any part with /model, /subagent, or /auto-mode model. Saved to ~/.onecode/settings.json; the main model is remembered as pi's default."].join("\n"),
+			[
+				`Applied the ${preset.label} preset:`,
+				...describePresetChanges(preset, mainSwitched).map((line) => `  ${line}`),
+				"Saved to ~/.onecode/settings.json; the main model is remembered as pi's default.",
+			].join("\n"),
 			"info",
 		);
 	};

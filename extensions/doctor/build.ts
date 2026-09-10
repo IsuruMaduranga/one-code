@@ -21,6 +21,7 @@ import { checkDependencies, dependenciesSection } from "./dependencies.ts";
 import { collectModelFacts, modelsSection } from "./models.ts";
 import { computePresets, presetsSection } from "./presets.ts";
 import {
+	countNoun,
 	type DoctorEnvironment,
 	type DoctorReport,
 	type Finding,
@@ -136,7 +137,7 @@ export function providersSection(registry: RegistryView, findings: Finding[]): {
 	for (const provider of ready) {
 		const models = provider.available || provider.models;
 		lines.push({
-			text: `${provider.name} (${provider.provider}): ready — ${provider.source ?? "credentials configured"} · ${models} model${models === 1 ? "" : "s"}`,
+			text: `${provider.name} (${provider.provider}): ready — ${provider.source ?? "credentials configured"} · ${countNoun(models, "model")}`,
 			level: "ok",
 		});
 	}
@@ -149,7 +150,7 @@ export function providersSection(registry: RegistryView, findings: Finding[]): {
 			fix: `Run /login inside One Code, or export a key such as ${COMMON_KEY_ENV_VARS.slice(0, 2).join(" or ")} before launching. Free options: OpenCode Zen (deepseek-v4-flash-free) and OpenRouter's :free models.`,
 		});
 	} else if (rest > 0) {
-		lines.push({ text: `${rest} more provider${rest === 1 ? "" : "s"} without credentials — /login to add one, or set its API-key environment variable`, level: "dim" });
+		lines.push({ text: `${countNoun(rest, "more provider")} without credentials — /login to add one, or set its API-key environment variable`, level: "dim" });
 	}
 	return { section: { title: "Providers", lines }, readyCount: ready.length };
 }
@@ -209,13 +210,13 @@ function summaryText(input: {
 }): string {
 	const errors = input.findings.filter((f) => f.level === "error").length;
 	const warnings = input.findings.length - errors;
-	const config = `${input.files} settings file${input.files === 1 ? "" : "s"} and ${input.contextFiles} instruction file${input.contextFiles === 1 ? "" : "s"} are in use.`;
+	const config = `${countNoun(input.files, "settings file")} and ${countNoun(input.contextFiles, "instruction file")} are in use.`;
 	if (input.providersReady === 0 || !input.main) {
 		return `Not ready: no model provider has credentials, so nothing can run yet. Connect one with /login (or an API-key environment variable), then rerun /doctor. ${config}`;
 	}
 	const roles = `Main model ${modelSpec(input.main)}${input.subagent ? `, subagents on ${modelSpec(input.subagent)}` : ""}${input.classifier ? `, auto-mode classifier ${modelSpec(input.classifier)}` : ""}.`;
-	if (!input.ready) return `${errors} problem${errors === 1 ? "" : "s"} need attention (listed at the bottom). ${roles} ${config}`;
-	const tail = warnings ? `${warnings} warning${warnings === 1 ? "" : "s"} below; none blocks a session.` : "No issues found.";
+	if (!input.ready) return `${countNoun(errors, "problem")} need${errors === 1 ? "s" : ""} attention (listed at the bottom). ${roles} ${config}`;
+	const tail = warnings ? `${countNoun(warnings, "warning")} below; none blocks a session.` : "No issues found.";
 	return `Ready. ${roles} ${config} ${tail}`;
 }
 

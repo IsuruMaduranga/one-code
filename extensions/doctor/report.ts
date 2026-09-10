@@ -18,6 +18,8 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { McpStatusEvent } from "../lib/mcp-status.ts";
 import { hardWrapColumns, visibleWidth } from "../lib/text-width.ts";
+import { countNoun } from "../lib/tui-render.ts";
+export { countNoun };
 
 export type LineLevel = "ok" | "info" | "warn" | "error" | "dim";
 
@@ -134,67 +136,56 @@ export function wrapWords(text: string, width: number): string[] {
 	return out;
 }
 
-/**
- * Render the report to lines no wider than `width`, Claude Code's `└ ` style.
- * Long values wrap onto continuation lines aligned under the text, so a 300-char
- * path never produces an overwide line (pi-tui crashes on one).
- */
-export function renderDoctorReport(report: DoctorReport, options: RenderOptions = {}): string[] {
-	const width = Math.max(20, options.width ?? 100);
-	const paint = options.paint ?? ((_color: string, text: string) => text);
-	const bold = options.bold ?? ((text: string) => text);
-	const out: string[] = [];
-
-	const pushWrapped = (prefix: string, text: string, level: LineLevel | undefined) => {
-		const glyph = level ? GLYPH[level] : "";
-		const lead = glyph ? `${glyph} ` : "";
-		// Continuation lines align under the text, past the bullet and the glyph.
-		const body = wrapWords(text, Math.max(10, width - prefix.length - lead.length));
-		body.forEach((segment, i) => {
-			const head = i === 0 ? `${prefix}${lead}` : " ".repeat(prefix.length + lead.length);
-			out.push(head + (level ? paint(COLOR[level], segment) : segment));
-		});
+/** Resolve the optional painters once; identity when absent (the CLI prints plain text). */
+function painters(options: RenderOptions) {
+	return {
+		width: Math.max(20, options.width ?? 100),
+		paint: options.paint ?? ((_color: string, text: string) => text),
+		bold: options.bold ?? ((text: string) => text),
 	};
+}
 
-	out.push(bold(report.title));
-	for (const sentence of wrapWords(report.summary, width)) out.push(sentence);
-	for (const section of report.sections) {
-		out.push("");
-		out.push(...renderSection(section, options));
-	}
-	out.push("");
-	if (report.findings.length === 0) {
-		out.push(paint("success", "No setup issues found."));
-	} else {
-		const errors = report.findings.filter((f) => f.level === "error").length;
-		const warns = report.findings.length - errors;
-		const parts = [errors ? `${errors} problem${errors === 1 ? "" : "s"}` : "", warns ? `${warns} warning${warns === 1 ? "" : "s"}` : ""].filter(Boolean);
-		out.push(bold(`Issues (${parts.join(", ")})`));
-		for (const finding of report.findings) {
-			pushWrapped("└ ", finding.text, finding.level);
-			if (finding.fix) pushWrapped("  ", `Fix: ${finding.fix}`, "dim");
-		}
-	}
-	return out;
+type Paint = (color: string, text: string) => string;
+
+/**
+ * One `└ `-style entry: the glyph for its level, word-wrapped to `width`, with
+ * continuation lines aligned under the text (past the bullet and the glyph) so a
+ * 300-char path never produces an overwide line (pi-tui crashes on one).
+ */
+function renderEntry(prefix: string, text: string, level: LineLevel | undefined, width: number, paint: Paint): string[] {
+	const glyph = level ? GLYPH[level] : "";
+	const lead = glyph ? `${glyph} ` : "";
+	return wrapWords(text, Math.max(10, width - prefix.length - lead.length)).map((segment, i) => {
+		const head = i === 0 ? `${prefix}${lead}` : " ".repeat(prefix.length + lead.length);
+		return head + (level ? paint(COLOR[level], segment) : segment);
+	});
 }
 
 /** One section — title, optional dim subtitle, its `└ ` lines — rendered standalone (the `/doctor presets` listing). */
 export function renderSection(section: ReportSection, options: RenderOptions = {}): string[] {
-	const width = Math.max(20, options.width ?? 100);
-	const paint = options.paint ?? ((_color: string, text: string) => text);
-	const bold = options.bold ?? ((text: string) => text);
+	const { width, paint, bold } = painters(options);
 	const out: string[] = [bold(section.title) + (section.subtitle ? paint("dim", ` — ${section.subtitle}`) : "")];
 	if (section.lines.length === 0) out.push(paint("dim", "└ (nothing)"));
-	for (const line of section.lines) {
-		const depth = line.indent ?? 0;
-		const prefix = `${"  ".repeat(depth)}└ `;
-		const glyph = line.level ? GLYPH[line.level] : "";
-		const lead = glyph ? `${glyph} ` : "";
-		const body = wrapWords(line.text, Math.max(10, width - prefix.length - lead.length));
-		body.forEach((segment, i) => {
-			const head = i === 0 ? `${prefix}${lead}` : " ".repeat(prefix.length + lead.length);
-			out.push(head + (line.level ? paint(COLOR[line.level], segment) : segment));
-		});
+	for (const line of section.lines) out.push(...renderEntry(`${"  ".repeat(line.indent ?? 0)}└ `, line.text, line.level, width, paint));
+	return out;
+}
+
+/** Render the whole report to lines no wider than `width`, Claude Code's `└ ` style. */
+export function renderDoctorReport(report: DoctorReport, options: RenderOptions = {}): string[] {
+	const { width, paint, bold } = painters(options);
+	const out: string[] = [bold(report.title), ...wrapWords(report.summary, width)];
+	for (const section of report.sections) out.push("", ...renderSection(section, options));
+	out.push("");
+	if (report.findings.length === 0) {
+		out.push(paint("success", "No setup issues found."));
+		return out;
+	}
+	const errors = report.findings.filter((f) => f.level === "error").length;
+	const warns = report.findings.length - errors;
+	out.push(bold(`Issues (${[errors ? countNoun(errors, "problem") : "", warns ? countNoun(warns, "warning") : ""].filter(Boolean).join(", ")})`));
+	for (const finding of report.findings) {
+		out.push(...renderEntry("└ ", finding.text, finding.level, width, paint));
+		if (finding.fix) out.push(...renderEntry("  ", `Fix: ${finding.fix}`, "dim", width, paint));
 	}
 	return out;
 }

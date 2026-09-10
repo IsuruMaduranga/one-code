@@ -215,6 +215,19 @@ export function pricedInput(model: Model<Api>): number | undefined {
 	return typeof input === "number" && input > 0 ? input : undefined;
 }
 
+/** A dated snapshot id (`claude-haiku-4-5-20251001`): the trailing `-YYYYMMDD` marks a pinned alias of an undated model. */
+export function isDatedModelId(id: string): boolean {
+	return /-20\d{6}$/.test(id);
+}
+
+/**
+ * Whether `model` is a dated snapshot whose undated alias is also present in
+ * `pool` — the row a listing collapses so the same model is not offered twice.
+ */
+export function isDatedDuplicate(model: { id: string }, pool: ReadonlyArray<{ id: string }>): boolean {
+	return isDatedModelId(model.id) && pool.some((other) => other.id !== model.id && model.id.startsWith(other.id));
+}
+
 /** The canonical `provider/id` spec — one source of truth for the string form. */
 export function modelSpec(model: { provider: string; id: string }): string {
 	return `${model.provider}/${model.id}`;

@@ -35,6 +35,8 @@ export interface DoctorCliOptions {
 /** Build the report headlessly. Exported separately so tests can inspect the structure. */
 export async function collectDoctorCliReport(options: DoctorCliOptions): Promise<DoctorReport> {
 	const { agentDir, cwd, home, env } = options;
+	// The registry lookup (network, up to 3s) overlaps the local runtime load.
+	const latestPending = options.network === false ? undefined : lookupLatestVersion({ install: options.install, current: options.version, env });
 	const runtime = await ModelRuntime.create({
 		authPath: join(agentDir, "auth.json"),
 		modelsPath: join(agentDir, "models.json"),
@@ -59,7 +61,7 @@ export async function collectDoctorCliReport(options: DoctorCliOptions): Promise
 		source: permissions.defaultMode ? "permissions.defaultMode in settings" : "One Code's default",
 	};
 
-	const latest = options.network === false ? undefined : await lookupLatestVersion({ install: options.install, current: options.version, env });
+	const latest = await latestPending;
 	return buildDoctorReport({
 		env: {
 			cwd,

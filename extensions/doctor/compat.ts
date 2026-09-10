@@ -34,7 +34,7 @@ import { BUNDLED_SKILLS_DIR, promptTemplateNames, scanSkills } from "../lib/skil
 import { loadServers, type McpServer } from "../mcp/config.ts";
 import { agentDirs, parseAgentFile } from "../subagents/agents.ts";
 import type { Finding, ReportLine, ReportSection, SessionView } from "./report.ts";
-import { shortenHome } from "./report.ts";
+import { countNoun, shortenHome } from "./report.ts";
 
 export type SettingsScope = "claude-user" | "claude-project" | "claude-local" | "managed" | "onecode-user" | "onecode-project" | "claude-json";
 
@@ -74,13 +74,24 @@ export interface CompatReport {
 	findings: Finding[];
 }
 
-/** Keys One Code reads from a Claude Code settings file, by scope. */
-const CLAUDE_USER_KEYS = new Set(["permissions", "hooks", "env", "enabledPlugins", "autoMode", "enableAllProjectMcpServers", "enabledMcpjsonServers", "disabledMcpjsonServers"]);
-/** A repository's files: no `autoMode` (the classifier is what contains the repo) and no `env` (a checked-in env block must not route subagents). */
-const CLAUDE_PROJECT_KEYS = new Set(["permissions", "hooks", "enabledPlugins", "enableAllProjectMcpServers", "enabledMcpjsonServers", "disabledMcpjsonServers"]);
-const MANAGED_KEYS = new Set(["permissions", "hooks", "env", "autoMode", "enabledPlugins"]);
-const ONECODE_USER_KEYS = new Set(["subagentModel", "subagentModelSetFor", "autoMode", "permissions", "webSearch", "disabledMcpServers"]);
-const ONECODE_PROJECT_KEYS = new Set(["permissions", "disabledMcpServers"]);
+/**
+ * The top-level keys One Code reads from each settings scope — the policy the
+ * loaders implement (permissions/settings.ts, hooks/settings.ts, auto-mode/config.ts,
+ * subagents/default-model.ts, mcp/trust.ts, lib/plugins.ts). A repository's own
+ * files get no `autoMode` (the classifier is what contains the repo) and no `env`
+ * (a checked-in env block must not route subagents).
+ */
+const MCP_POLICY_KEYS = ["enableAllProjectMcpServers", "enabledMcpjsonServers", "disabledMcpjsonServers"];
+const CLAUDE_PROJECT_KEYS = new Set(["permissions", "hooks", "enabledPlugins", ...MCP_POLICY_KEYS]);
+const SCOPE_KEYS: Record<SettingsScope, ReadonlySet<string>> = {
+	"claude-user": new Set(["permissions", "hooks", "env", "enabledPlugins", "autoMode", ...MCP_POLICY_KEYS]),
+	"claude-project": CLAUDE_PROJECT_KEYS,
+	"claude-local": CLAUDE_PROJECT_KEYS,
+	managed: new Set(["permissions", "hooks", "env", "autoMode", "enabledPlugins"]),
+	"onecode-user": new Set(["subagentModel", "subagentModelSetFor", "autoMode", "permissions", "webSearch", "disabledMcpServers"]),
+	"onecode-project": new Set(["permissions", "disabledMcpServers"]),
+	"claude-json": new Set(),
+};
 /** Never worth reporting as "ignored". */
 const SILENT_KEYS = new Set(["$schema"]);
 
@@ -158,17 +169,13 @@ function summarizeFile(scope: SettingsScope, label: string, path: string, home: 
 		return report;
 	}
 	const file = read.value;
-	const known =
-		scope === "claude-user" ? CLAUDE_USER_KEYS
-		: scope === "claude-project" || scope === "claude-local" ? CLAUDE_PROJECT_KEYS
-		: scope === "managed" ? MANAGED_KEYS
-		: scope === "onecode-user" ? ONECODE_USER_KEYS
-		: scope === "onecode-project" ? ONECODE_PROJECT_KEYS
-		: new Set<string>();
+	const known = SCOPE_KEYS[scope];
+	/** Keys a branch below has already classified (used, refused or ignored), so the final sweep skips them. */
+	const handled = new Set<string>();
 
 	if (scope === "claude-json") {
 		const servers = file.mcpServers && typeof file.mcpServers === "object" ? Object.keys(file.mcpServers as Json).length : 0;
-		if (servers) report.used.push(`mcpServers: ${servers} user-scope server${servers === 1 ? "" : "s"}`);
+		if (servers) report.used.push(`mcpServers: ${countNoun(servers, "user-scope server")}`);
 		report.used.push("everything else in this file (onboarding state, usage counters) is Claude Code's own");
 		return report;
 	}
@@ -182,18 +189,20 @@ function summarizeFile(scope: SettingsScope, label: string, path: string, home: 
 		report.used.push(`enabledPlugins: ${Object.keys(file.enabledPlugins as Json).length}`);
 	}
 	if (file.env && typeof file.env === "object") {
+		handled.add("env");
 		const env = file.env as Json;
 		const keys = Object.keys(env);
 		if (known.has("env")) {
 			const borrowed = typeof env.CLAUDE_CODE_SUBAGENT_MODEL === "string" ? `env.CLAUDE_CODE_SUBAGENT_MODEL = "${env.CLAUDE_CODE_SUBAGENT_MODEL}"` : undefined;
 			if (borrowed) report.used.push(borrowed);
 			const rest = keys.filter((k) => k !== "CLAUDE_CODE_SUBAGENT_MODEL");
-			if (rest.length) report.ignored.push(`env (${rest.length} variable${rest.length === 1 ? "" : "s"} — One Code does not export settings env blocks)`);
+			if (rest.length) report.ignored.push(`env (${countNoun(rest.length, "variable")} — One Code does not export settings env blocks)`);
 		} else if (keys.length) {
 			report.refused.push(`env (${keys.length}) — a repository's env block is not applied`);
 		}
 	}
 	if (file.autoMode && typeof file.autoMode === "object") {
+		handled.add("autoMode");
 		const auto = file.autoMode as Json;
 		const keys = Object.keys(auto);
 		if (known.has("autoMode")) {
@@ -217,6 +226,7 @@ function summarizeFile(scope: SettingsScope, label: string, path: string, home: 
 		}
 	}
 	if (scope === "claude-user" && ("subagentModel" in file || "subagentModelSetFor" in file)) {
+		handled.add("subagentModel").add("subagentModelSetFor");
 		report.refused.push("subagentModel — One Code's own key, read from ~/.onecode/settings.json only");
 		findings.push({
 			level: "warn",
@@ -234,8 +244,7 @@ function summarizeFile(scope: SettingsScope, label: string, path: string, home: 
 	if ("disabledMcpServers" in file && known.has("disabledMcpServers")) report.used.push(`disabledMcpServers: ${count(file.disabledMcpServers)} (via /mcp disable)`);
 
 	for (const key of Object.keys(file)) {
-		if (known.has(key) || SILENT_KEYS.has(key)) continue;
-		if (key === "autoMode" || key === "env" || key === "subagentModel" || key === "subagentModelSetFor") continue; // reported above
+		if (known.has(key) || SILENT_KEYS.has(key) || handled.has(key)) continue;
 		report.ignored.push(key);
 	}
 	return report;
@@ -429,7 +438,6 @@ export function collectCompat(input: CompatInput): CompatReport {
 	};
 }
 
-const plural = (n: number, noun: string): string => `${n} ${noun}${n === 1 ? "" : "s"}`;
 /** `user 2 · project 0 · plugin 7` — counts by origin, the noun being the origin not the thing counted. */
 const byOrigin = (counts: Record<string, number>): string =>
 	Object.entries(counts)
@@ -474,7 +482,7 @@ export function importedConfigSection(compat: CompatReport, home: string): Repor
 	});
 	const s = compat.skills;
 	lines.push({
-		text: `Skills: ${byOrigin({ user: s.user, project: s.project, plugin: s.plugin, bundled: s.bundled })} · ${plural(compat.commands, "command template")}`,
+		text: `Skills: ${byOrigin({ user: s.user, project: s.project, plugin: s.plugin, bundled: s.bundled })} · ${countNoun(compat.commands, "command template")}`,
 		level: s.noDescription.length ? "warn" : "ok",
 	});
 	const p = compat.plugins;
@@ -484,7 +492,7 @@ export function importedConfigSection(compat: CompatReport, home: string): Repor
 	});
 	if (compat.hooks.sources.length) {
 		const scopes = compat.hooks.sources.map((s) => (s.pluginName ? `plugin ${s.pluginName}` : s.scope)).join(", ");
-		lines.push({ text: `Hooks: ${plural(compat.hooks.commands, "command")} from ${scopes}`, level: compat.hooks.diagnostics.length ? "warn" : "ok" });
+		lines.push({ text: `Hooks: ${countNoun(compat.hooks.commands, "command")} from ${scopes}`, level: compat.hooks.diagnostics.length ? "warn" : "ok" });
 	} else {
 		lines.push({ text: "Hooks: none configured", level: "dim" });
 	}

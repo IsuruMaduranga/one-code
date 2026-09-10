@@ -25,7 +25,7 @@
 
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { classifierCandidates } from "../auto-mode/model-select.ts";
-import { modelsContainedToSession, modelSpec, pricedInput } from "../lib/model-policy.ts";
+import { isDatedDuplicate, modelsContainedToSession, modelSpec, pricedInput } from "../lib/model-policy.ts";
 import { intrinsicTier, type PromptTier } from "../lib/model-tier.ts";
 import { resolveSubagentModel } from "../subagents/model-select.ts";
 import type { ReportLine, ReportSection } from "./report.ts";
@@ -62,8 +62,6 @@ export interface PresetPlan {
 /** Only well-known reasons a preset list is empty; the section renders them. */
 export type PresetsUnavailable = "no-model" | "no-priced-models";
 
-const isDated = (id: string): boolean => /-20\d{6}$/.test(id);
-
 /**
  * The candidate pool for one provider family: contained, priced, dated duplicates
  * collapsed when the undated alias is present (`claude-haiku-4-5-20251001` next
@@ -71,9 +69,7 @@ const isDated = (id: string): boolean => /-20\d{6}$/.test(id);
  */
 export function presetPool(available: Model<Api>[], sessionModel: Model<Api>): Model<Api>[] {
 	const contained = modelsContainedToSession(available, sessionModel).filter((m) => pricedInput(m) !== undefined);
-	return contained.filter(
-		(m) => !isDated(m.id) || !contained.some((other) => other.id !== m.id && m.id.startsWith(other.id)),
-	);
+	return contained.filter((m) => !isDatedDuplicate(m, contained));
 }
 
 const price = (m: Model<Api>): number => pricedInput(m) ?? 0;
@@ -189,13 +185,17 @@ export function presetsSection(result: ReturnType<typeof computePresets>, sessio
 	};
 }
 
-/** The three settings writes a preset amounts to, spelled for the confirmation/undo text. */
-export function describePresetChanges(preset: PresetPlan): string[] {
+/**
+ * The three settings writes a preset amounts to, one line each with its undo —
+ * the text `/doctor preset` reports after applying. `mainSwitched` false means
+ * the session already ran the preset's main model, so that line says so.
+ */
+export function describePresetChanges(preset: PresetPlan, mainSwitched = true): string[] {
 	return [
-		`main model → ${modelSpec(preset.main)} (undo: /model)`,
+		mainSwitched ? `main model → ${modelSpec(preset.main)} (undo: /model)` : `main model: already ${modelSpec(preset.main)}`,
 		preset.subagents.setting === "inherit"
-			? `subagent default → inherit the main model (undo: /subagent clear)`
-			: `subagent default → automatic (cheapest capable model on this provider; would pick ${modelSpec(preset.subagents.model)})`,
-		`auto-mode classifier → automatic${preset.classifier ? ` (would pick ${modelSpec(preset.classifier)})` : ""} (undo: /auto-mode model)`,
+			? "subagent default → inherit the main model (undo: /subagent clear)"
+			: `subagent default → automatic (picks ${modelSpec(preset.subagents.model)}; undo: /subagent)`,
+		`auto-mode classifier → automatic${preset.classifier ? ` (picks ${modelSpec(preset.classifier)})` : ""} (undo: /auto-mode model)`,
 	];
 }
