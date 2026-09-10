@@ -1,0 +1,509 @@
+{
+ "status": 200,
+ "prompt_options": {
+  "parallel_queries": 1,
+  "prompt_length": 1000
+ },
+ "data": [
+  {
+   "id": "19496b81-9f41-4214-a77a-1df803b3c5ae",
+   "name": "GLM-5.3-Flash",
+   "slug": "glm-5-3-flash",
+   "release_date": "2026-08-26",
+   "model_creator": {
+    "id": "67437eb6-7dc1-4e93-befd-22c8b8ec2065",
+    "slug": "zai",
+    "name": "Z AI"
+   },
+   "evaluations": {
+    "artificial_analysis_intelligence_index": 41.9,
+    "artificial_analysis_coding_index": 71.5
+   },
+   "pricing": {
+    "price_1m_blended_3_to_1": 0.237,
+    "price_1m_input_tokens": 0.15,
+    "price_1m_output_tokens": 0.5
+   }
+  },
+  {
+   "id": "d93edfe8-bf35-49ad-b56e-b18116142a1c",
+   "name": "GPT-5.6 Sol (max)",
+   "slug": "gpt-5-6-sol",
+   "release_date": "2026-07-09",
+   "model_creator": {
+    "id": "e67e56e3-15cd-43db-b679-da4660a69f41",
+    "slug": "openai",
+    "name": "OpenAI"
+   },
+   "evaluations": {
+    "artificial_analysis_intelligence_index": 47.1,
+    "artificial_analysis_coding_index": 77.4
+   },
+   "pricing": {
+    "price_1m_blended_3_to_1": 8,
+    "price_1m_input_tokens": 4,
+    "price_1m_output_tokens": 20
+   }
+  },
+  {
+   "id": "426d24c8-49ae-482a-b4a8-20f1c53f21c1",
+   "name": "GPT-5.6 Luna (max)",
+   "slug": "gpt-5-6-luna",
+   "release_date": "2026-07-09",
+   "model_creator": {
+    "id": "e67e56e3-15cd-43db-b679-da4660a69f41",
+    "slug": "openai",
+    "name": "OpenAI"
+   },
+   "evaluations": {
+    "artificial_analysis_intelligence_index": 37.5,
+    "artificial_analysis_coding_index": 71.4
+   },
+   "pricing": {
+    "price_1m_blended_3_to_1": 0.45,
+    "price_1m_input_tokens": 0.2,
+    "price_1m_output_tokens": 1.2
+   }
+  },
+  {
+   "id": "7c4d1e30-6ecb-46cf-880c-41446d7b51f1",
+   "name": "GPT-5.6 Sol (Non-reasoning)",
+   "slug": "gpt-5-6-sol-non-reasoning",
+   "release_date": "2026-07-09",
+   "model_creator": {
+    "id": "e67e56e3-15cd-43db-b679-da4660a69f41",
+    "slug": "openai",
+    "name": "OpenAI"
+   },
+   "evaluations": {
+    "artificial_analysis_intelligence_index": 28.3,
+    "artificial_analysis_coding_index": 65.1
+   },
+   "pricing": {
+    "price_1m_blended_3_to_1": 8,
+    "price_1m_input_tokens": 4,
+    "price_1m_output_tokens": 20
+   }
+  },
+  {
+   "id": "d998db47-9b67-4727-a2bb-2e1261020ac0",
+   "name": "GPT-5.6 Sol (xhigh)",
+   "slug": "gpt-5-6-sol-xhigh",
+   "release_date": "2026-07-09",
+   "model_creator": {
+    "id": "e67e56e3-15cd-43db-b679-da4660a69f41",
+    "slug": "openai",
+    "name": "OpenAI"
+   },
+   "evaluations": {
+    "artificial_analysis_intelligence_index": 44.1,
+    "artificial_analysis_coding_index": 78.3
+   },
+   "pricing": {
+    "price_1m_blended_3_to_1": 8,
+    "price_1m_input_tokens": 4,
+    "price_1m_output_tokens": 20
+   }
+  },
+  {
+   "id": "b2331108-72ed-415a-82d1-188633875bbc",
+   "name": "Gemini 3.7 Flash (high)",
+   "slug": "gemini-3-7-flash",
+   "release_date": "2026-08-13",
+   "model_creator": {
+    "id": "faddc6d9-2c14-445f-9b28-56726f59c793",
+    "slug": "google",
+    "name": "Google"
+   },
+   "evaluations": {
+    "artificial_analysis_intelligence_index": 39.4,
+    "artificial_analysis_coding_index": 76.1
+   },
+   "pricing": {
+    "price_1m_blended_3_to_1": 1.5,
+    "price_1m_input_tokens": 0.75,
+    "price_1m_output_tokens": 3.75
+   }
+  },
+  {
+   "id": "23c86e4a-c769-43c0-a056-79e3cd15834f",
+   "name": "Claude Sonnet 5 (Adaptive Reasoning, Max Effort)",
+   "slug": "claude-sonnet-5",
+   "release_date": "2026-06-30",
+   "model_creator": {
+    "id": "f0aa413f-e8ae-4fcd-9c48-0e049f4f3128",
+    "slug": "anthropic",
+    "name": "Anthropic"
+   },
+   "evaluations": {
+    "artificial_analysis_intelligence_index": 38.4,
+    "artificial_analysis_coding_index": 71.5
+   },
+   "pricing": {
+    "price_1m_blended_3_to_1": 4,
+    "price_1m_input_tokens": 2,
+    "price_1m_output_tokens": 10
+   }
+  },
+  {
+   "id": "a6340098-d7ae-462d-b372-0a0a67fc44b4",
+   "name": "Claude 4.5 Haiku (Reasoning)",
+   "slug": "claude-4-5-haiku-reasoning",
+   "release_date": "2025-10-15",
+   "model_creator": {
+    "id": "f0aa413f-e8ae-4fcd-9c48-0e049f4f3128",
+    "slug": "anthropic",
+    "name": "Anthropic"
+   },
+   "evaluations": {
+    "artificial_analysis_intelligence_index": 17.6,
+    "artificial_analysis_coding_index": 43.9
+   },
+   "pricing": {
+    "price_1m_blended_3_to_1": 2,
+    "price_1m_input_tokens": 1,
+    "price_1m_output_tokens": 5
+   }
+  },
+  {
+   "id": "b8fc61f7-5e9a-49e6-8547-6ac56db24627",
+   "name": "Claude Opus 5 (Adaptive Reasoning, Max Effort)",
+   "slug": "claude-opus-5",
+   "release_date": "2026-07-24",
+   "model_creator": {
+    "id": "f0aa413f-e8ae-4fcd-9c48-0e049f4f3128",
+    "slug": "anthropic",
+    "name": "Anthropic"
+   },
+   "evaluations": {
+    "artificial_analysis_intelligence_index": 50.7,
+    "artificial_analysis_coding_index": 78
+   },
+   "pricing": {
+    "price_1m_blended_3_to_1": 10,
+    "price_1m_input_tokens": 5,
+    "price_1m_output_tokens": 25
+   }
+  },
+  {
+   "id": "c2b1e769-7aee-4669-8076-73918bdebf6c",
+   "name": "Claude 4.5 Haiku (Non-reasoning)",
+   "slug": "claude-4-5-haiku",
+   "release_date": "2025-10-15",
+   "model_creator": {
+    "id": "f0aa413f-e8ae-4fcd-9c48-0e049f4f3128",
+    "slug": "anthropic",
+    "name": "Anthropic"
+   },
+   "evaluations": {
+    "artificial_analysis_intelligence_index": 15.4,
+    "artificial_analysis_coding_index": null
+   },
+   "pricing": {
+    "price_1m_blended_3_to_1": 2,
+    "price_1m_input_tokens": 1,
+    "price_1m_output_tokens": 5
+   }
+  },
+  {
+   "id": "d58b9ada-fd9d-4fff-a086-242034657963",
+   "name": "Claude Sonnet 5 (Non-reasoning, High Effort)",
+   "slug": "claude-sonnet-5-non-reasoning",
+   "release_date": "2026-06-30",
+   "model_creator": {
+    "id": "f0aa413f-e8ae-4fcd-9c48-0e049f4f3128",
+    "slug": "anthropic",
+    "name": "Anthropic"
+   },
+   "evaluations": {
+    "artificial_analysis_intelligence_index": 28.9,
+    "artificial_analysis_coding_index": 66.4
+   },
+   "pricing": {
+    "price_1m_blended_3_to_1": 4,
+    "price_1m_input_tokens": 2,
+    "price_1m_output_tokens": 10
+   }
+  },
+  {
+   "id": "83173329-c09a-41f1-a028-a282a5f908d7",
+   "name": "DeepSeek V4 Pro 0813 (Reasoning, Max Effort)",
+   "slug": "deepseek-v4-pro",
+   "release_date": "2026-08-13",
+   "model_creator": {
+    "id": "58b835bf-4c87-4f87-a846-df4b692c6e7d",
+    "slug": "deepseek",
+    "name": "DeepSeek"
+   },
+   "evaluations": {
+    "artificial_analysis_intelligence_index": 36.3,
+    "artificial_analysis_coding_index": 68.8
+   },
+   "pricing": {
+    "price_1m_blended_3_to_1": 1.98,
+    "price_1m_input_tokens": 1.32,
+    "price_1m_output_tokens": 3.96
+   }
+  },
+  {
+   "id": "fe4c0848-e284-4e52-a79d-cdc28392f1a9",
+   "name": "DeepSeek V4 Flash 0731 (Reasoning, Max Effort)",
+   "slug": "deepseek-v4-flash",
+   "release_date": "2026-07-31",
+   "model_creator": {
+    "id": "58b835bf-4c87-4f87-a846-df4b692c6e7d",
+    "slug": "deepseek",
+    "name": "DeepSeek"
+   },
+   "evaluations": {
+    "artificial_analysis_intelligence_index": 34.5,
+    "artificial_analysis_coding_index": 69.1
+   },
+   "pricing": {
+    "price_1m_blended_3_to_1": 0.66,
+    "price_1m_input_tokens": 0.44,
+    "price_1m_output_tokens": 1.32
+   }
+  },
+  {
+   "id": "ad173c8d-f14f-4230-90e9-60979b7720e7",
+   "name": "DeepSeek V4 Flash (Non-reasoning)",
+   "slug": "deepseek-v4-flash-0420-non-reasoning",
+   "release_date": "2026-04-24",
+   "model_creator": {
+    "id": "58b835bf-4c87-4f87-a846-df4b692c6e7d",
+    "slug": "deepseek",
+    "name": "DeepSeek"
+   },
+   "evaluations": {
+    "artificial_analysis_intelligence_index": 18.9,
+    "artificial_analysis_coding_index": null
+   },
+   "pricing": {
+    "price_1m_blended_3_to_1": 0.119,
+    "price_1m_input_tokens": 0.094,
+    "price_1m_output_tokens": 0.195
+   }
+  },
+  {
+   "id": "6e2a2572-ed8d-4616-8d7d-68d125fc8ee7",
+   "name": "DeepSeek V4 Pro (Non-reasoning)",
+   "slug": "deepseek-v4-pro-0424-non-reasoning",
+   "release_date": "2026-04-24",
+   "model_creator": {
+    "id": "58b835bf-4c87-4f87-a846-df4b692c6e7d",
+    "slug": "deepseek",
+    "name": "DeepSeek"
+   },
+   "evaluations": {
+    "artificial_analysis_intelligence_index": 20.8,
+    "artificial_analysis_coding_index": null
+   },
+   "pricing": {
+    "price_1m_blended_3_to_1": 0.544,
+    "price_1m_input_tokens": 0.435,
+    "price_1m_output_tokens": 0.87
+   }
+  },
+  {
+   "id": "277f939a-985b-4b37-859d-b3eabc7c0b26",
+   "name": "MiniMax-M3",
+   "slug": "minimax-m3",
+   "release_date": "2026-06-01",
+   "model_creator": {
+    "id": "a31a9071-6144-4dbb-92dc-2e02d653ecea",
+    "slug": "minimax",
+    "name": "MiniMax"
+   },
+   "evaluations": {
+    "artificial_analysis_intelligence_index": 29.6,
+    "artificial_analysis_coding_index": 58.6
+   },
+   "pricing": {
+    "price_1m_blended_3_to_1": 0.525,
+    "price_1m_input_tokens": 0.3,
+    "price_1m_output_tokens": 1.2
+   }
+  },
+  {
+   "id": "f7d2fc3e-1f7b-405f-818c-07952a4af78f",
+   "name": "Kimi K3 (max)",
+   "slug": "kimi-k3",
+   "release_date": "2026-07-16",
+   "model_creator": {
+    "id": "0a177021-87dd-4250-9a37-f01df196bfe0",
+    "slug": "kimi",
+    "name": "Kimi"
+   },
+   "evaluations": {
+    "artificial_analysis_intelligence_index": 43.8,
+    "artificial_analysis_coding_index": 76.2
+   },
+   "pricing": {
+    "price_1m_blended_3_to_1": 6,
+    "price_1m_input_tokens": 3,
+    "price_1m_output_tokens": 15
+   }
+  },
+  {
+   "id": "f7a4ea75-e548-4069-80d4-9be8bc7c009b",
+   "name": "GLM-5.2 (max)",
+   "slug": "glm-5-2",
+   "release_date": "2026-06-16",
+   "model_creator": {
+    "id": "67437eb6-7dc1-4e93-befd-22c8b8ec2065",
+    "slug": "zai",
+    "name": "Z AI"
+   },
+   "evaluations": {
+    "artificial_analysis_intelligence_index": 38.6,
+    "artificial_analysis_coding_index": 68.8
+   },
+   "pricing": {
+    "price_1m_blended_3_to_1": 2.15,
+    "price_1m_input_tokens": 1.4,
+    "price_1m_output_tokens": 4.4
+   }
+  },
+  {
+   "id": "e8aa417f-18fe-46b0-ba62-ef99785a9585",
+   "name": "GLM-5.2 (Non-reasoning)",
+   "slug": "glm-5-2-non-reasoning",
+   "release_date": "2026-06-16",
+   "model_creator": {
+    "id": "67437eb6-7dc1-4e93-befd-22c8b8ec2065",
+    "slug": "zai",
+    "name": "Z AI"
+   },
+   "evaluations": {
+    "artificial_analysis_intelligence_index": 22.4,
+    "artificial_analysis_coding_index": 46.5
+   },
+   "pricing": {
+    "price_1m_blended_3_to_1": 2.15,
+    "price_1m_input_tokens": 1.4,
+    "price_1m_output_tokens": 4.4
+   }
+  },
+  {
+   "id": "29855680-7469-43eb-8b88-cd3fb1d99da3",
+   "name": "GPT-5 mini (high)",
+   "slug": "gpt-5-mini",
+   "release_date": "2025-08-07",
+   "model_creator": {
+    "id": "e67e56e3-15cd-43db-b679-da4660a69f41",
+    "slug": "openai",
+    "name": "OpenAI"
+   },
+   "evaluations": {
+    "artificial_analysis_intelligence_index": 17.4,
+    "artificial_analysis_coding_index": 15.6
+   },
+   "pricing": {
+    "price_1m_blended_3_to_1": 0.688,
+    "price_1m_input_tokens": 0.25,
+    "price_1m_output_tokens": 2
+   }
+  },
+  {
+   "id": "e18e5e6a-5a31-4c0b-b80b-ac401392f446",
+   "name": "GPT-5 nano (high)",
+   "slug": "gpt-5-nano",
+   "release_date": "2025-08-07",
+   "model_creator": {
+    "id": "e67e56e3-15cd-43db-b679-da4660a69f41",
+    "slug": "openai",
+    "name": "OpenAI"
+   },
+   "evaluations": {
+    "artificial_analysis_intelligence_index": 13,
+    "artificial_analysis_coding_index": null
+   },
+   "pricing": {
+    "price_1m_blended_3_to_1": 0.138,
+    "price_1m_input_tokens": 0.05,
+    "price_1m_output_tokens": 0.4
+   }
+  },
+  {
+   "id": "43fc5506-c5ed-4dee-9b85-962bf7ae3986",
+   "name": "DeepSeek V3 (Dec '24)",
+   "slug": "deepseek-v3",
+   "release_date": "2024-12-26",
+   "model_creator": {
+    "id": "58b835bf-4c87-4f87-a846-df4b692c6e7d",
+    "slug": "deepseek",
+    "name": "DeepSeek"
+   },
+   "evaluations": {
+    "artificial_analysis_intelligence_index": 8.5,
+    "artificial_analysis_coding_index": 23
+   },
+   "pricing": {
+    "price_1m_blended_3_to_1": 0.463,
+    "price_1m_input_tokens": 0.32,
+    "price_1m_output_tokens": 0.89
+   }
+  },
+  {
+   "id": "d8ddb241-b3e4-4c25-a6a3-72eb1b30c541",
+   "name": "DeepSeek V4 Flash (Reasoning, Max Effort)",
+   "slug": "deepseek-v4-flash-0420",
+   "release_date": "2026-04-24",
+   "model_creator": {
+    "id": "58b835bf-4c87-4f87-a846-df4b692c6e7d",
+    "slug": "deepseek",
+    "name": "DeepSeek"
+   },
+   "evaluations": {
+    "artificial_analysis_intelligence_index": 24.6,
+    "artificial_analysis_coding_index": 56.2
+   },
+   "pricing": {
+    "price_1m_blended_3_to_1": 0.168,
+    "price_1m_input_tokens": 0.13,
+    "price_1m_output_tokens": 0.28
+   }
+  },
+  {
+   "id": "a83f84b3-473a-4276-9ae1-8909da723159",
+   "name": "DeepSeek R1 0528 (May '25)",
+   "slug": "deepseek-r1",
+   "release_date": "2025-05-28",
+   "model_creator": {
+    "id": "58b835bf-4c87-4f87-a846-df4b692c6e7d",
+    "slug": "deepseek",
+    "name": "DeepSeek"
+   },
+   "evaluations": {
+    "artificial_analysis_intelligence_index": 13.1,
+    "artificial_analysis_coding_index": null
+   },
+   "pricing": {
+    "price_1m_blended_3_to_1": 1.763,
+    "price_1m_input_tokens": 1.35,
+    "price_1m_output_tokens": 3
+   }
+  },
+  {
+   "id": "cd684ea4-b475-4269-b001-d469d06d8a7a",
+   "name": "GLM-5.3 (max)",
+   "slug": "glm-5-3",
+   "release_date": "2026-08-18",
+   "model_creator": {
+    "id": "67437eb6-7dc1-4e93-befd-22c8b8ec2065",
+    "slug": "zai",
+    "name": "Z AI"
+   },
+   "evaluations": {
+    "artificial_analysis_intelligence_index": 44.9,
+    "artificial_analysis_coding_index": 74.8
+   },
+   "pricing": {
+    "price_1m_blended_3_to_1": 2.15,
+    "price_1m_input_tokens": 1.4,
+    "price_1m_output_tokens": 4.4
+   }
+  }
+ ]
+}

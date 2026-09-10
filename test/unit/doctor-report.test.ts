@@ -1,10 +1,15 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildDoctorReport, summarizeProviders } from "../../extensions/doctor/build.ts";
 import { collectModelFacts, modelsSection } from "../../extensions/doctor/models.ts";
-import { type DoctorEnvironment, type RegistryView, renderDoctorReport, renderDoctorText } from "../../extensions/doctor/report.ts";
+import { type DoctorEnvironment, type Finding, type RegistryView, renderDoctorReport, renderDoctorText } from "../../extensions/doctor/report.ts";
+import { setCapabilitySnapshotForTest, snapshotFromResponse } from "../../extensions/lib/capability-index.ts";
+import { setModelFactsForTest } from "../../extensions/lib/model-facts.ts";
+
+const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 
 /** Minimal structural stand-in; the checks read provider/id/api/cost/contextWindow only. */
 const model = (provider: string, id: string, input?: number, api = "anthropic-messages") =>
@@ -115,6 +120,38 @@ describe("buildDoctorReport", () => {
 		const facts = collectModelFacts([unpriced], { model: unpriced, modelSource: "session" }, home, {});
 		const section = modelsSection(facts, { model: unpriced, modelSource: "session" }, []);
 		expect(section.lines.some((l) => l.text.includes("carries no price"))).toBe(true);
+	});
+
+	it("explains the capability floor: a key hint without a snapshot, the measured verdicts with one", () => {
+		// No key, no snapshot → a warning finding with the advice.
+		const findings: Finding[] = [];
+		const facts = collectModelFacts(anthropic, { model: anthropic[0], modelSource: "session" }, home, {});
+		expect(facts.capability).toMatchObject({ keyConfigured: false, snapshot: undefined });
+		const section = modelsSection(facts, { model: anthropic[0], modelSource: "session" }, findings);
+		expect(section.lines.some((l) => l.text.startsWith("Capability scores: none"))).toBe(true);
+		expect(findings.some((f) => f.text.includes("No Artificial Analysis key") && f.fix?.includes("AA_API_KEY"))).toBe(true);
+
+		// Key configured, snapshot not fetched yet → a dim explanation, no warning.
+		mkdirSync(join(home, ".onecode"), { recursive: true });
+		writeFileSync(join(home, ".onecode", "settings.json"), JSON.stringify({ capabilityIndex: { artificialAnalysisApiKey: "aa_x" } }));
+		const pending = collectModelFacts(anthropic, { model: anthropic[0], modelSource: "session" }, home, {});
+		expect(pending.capability.keyConfigured).toBe(true);
+		expect(modelsSection(pending, { model: anthropic[0], modelSource: "session" }, []).lines.some((l) => l.text.includes("snapshot not fetched yet"))).toBe(true);
+
+		// A snapshot with confirmed scores → the verdict each automatic pick was judged on, with attribution.
+		setModelFactsForTest({ "zai/glm-5.3": { releaseDate: "2026-08-14" }, "zai/glm-5.3-flash": { releaseDate: "2026-08-26" } });
+		setCapabilitySnapshotForTest(
+			snapshotFromResponse(JSON.parse(readFileSync(join(FIXTURES, "artificial-analysis-sample.json"), "utf8")), new Date("2026-09-10T12:00:00Z")),
+		);
+		const zai = [model("zai", "glm-5.3", 1.4, "openai-completions"), model("zai", "glm-5.3-flash", 0.075, "openai-completions")];
+		const measured = collectModelFacts(zai, { model: zai[0], modelSource: "session" }, home, {});
+		expect(measured.classifier.model?.id).toBe("glm-5.3-flash");
+		expect(measured.capability.classifier).toMatchObject({ verdict: "pass", floor: 71.5 });
+		expect(measured.capability.subagent).toMatchObject({ verdict: "pass" });
+		const text = modelsSection(measured, { model: zai[0], modelSource: "session" }, []).lines.map((l) => l.text);
+		expect(text.some((t) => t.startsWith("Capability scores: Artificial Analysis snapshot, 25 models"))).toBe(true);
+		expect(text.some((t) => t.startsWith("Classifier pick: coding index 71.5 vs floor 71.5"))).toBe(true);
+		expect(text).toContain("Scores: Artificial Analysis (https://artificialanalysis.ai)");
 	});
 
 	it("reads the subagent and classifier settings from One Code's own file", () => {

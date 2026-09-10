@@ -29,7 +29,10 @@ import {
 	VERSION as PI_VERSION,
 } from "@earendil-works/pi-coding-agent";
 import { loadAutoModeConfig, persistClassifierModel } from "../auto-mode/config.ts";
+import { readJsonFile } from "../lib/atomic-write.ts";
+import { capabilityIndexKey, loadCapabilitySnapshot, refreshCapabilitySnapshot, snapshotIsStale } from "../lib/capability-index.ts";
 import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } from "../lib/mcp-status.ts";
+import { sessionOutlivesTurn } from "../lib/notifications.ts";
 import { modelSpec } from "../lib/model-policy.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 import { oneCodeStateDir } from "../lib/paths.ts";
@@ -69,10 +72,35 @@ export default function doctorExtension(pi: ExtensionAPI) {
 
 	const install = (): "app" | "pi-package" => (process.env.CC_VERSION ? "app" : "pi-package");
 
+	// The Artificial Analysis snapshot behind the measured capability floor
+	// (lib/capability-index.ts): refreshed at most daily, only from a session
+	// that outlives the turn, never awaited in session_start (findings §15, §19),
+	// inert once the session is shutting down. A failure is logged once.
+	let shuttingDown = false;
+	let refreshWarned = false;
+	const capabilityKey = (home: string) => capabilityIndexKey(process.env, readJsonFile(oneCodeSettingsPath(home)));
+	const refreshCapability = async (ctx: ExtensionContext, home: string): Promise<void> => {
+		const outcome = await refreshCapabilitySnapshot({ key: capabilityKey(home), stateDir: oneCodeStateDir(process.env, home) });
+		if (outcome.status === "failed" && !refreshWarned && !shuttingDown) {
+			refreshWarned = true;
+			ctx.ui.notify(`Capability scores not refreshed: ${outcome.error}. Automatic picks keep using the last snapshot, if any.`, "warning");
+		}
+	};
+	pi.on("session_start", (_event, ctx) => {
+		const home = os.homedir();
+		if (!sessionOutlivesTurn(ctx.mode) || !capabilityKey(home)) return;
+		if (!snapshotIsStale(loadCapabilitySnapshot(oneCodeStateDir(process.env, home)))) return;
+		void refreshCapability(ctx, home).catch(() => {});
+	});
+	pi.on("session_shutdown", () => {
+		shuttingDown = true;
+	});
+
 	const gather = async (ctx: ExtensionContext, options: { network: boolean }): Promise<DoctorReport> => {
 		const home = os.homedir();
 		const version = oneCodeVersion();
 		const latest = options.network ? await lookupLatestVersion({ install: install(), current: version, env: process.env }) : undefined;
+		if (options.network) await refreshCapability(ctx, home); // a no-op when fresh or keyless; bounded by FETCH_TIMEOUT_MS
 		return buildDoctorReport({
 			env: {
 				cwd: ctx.cwd,

@@ -303,7 +303,11 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 		// `strict` requires a genuinely cheaper model and yields nothing when the
 		// session price is unknown, so a cheap-tier pick never silently upgrades an
 		// unpriced session. Reuse the `contained` set computed above for the hot path.
-		const cheaper = cheaperContainedCandidates(available, sessionModel, { strict: true, contained })[0];
+		// `role` applies the measured capability floor when an Artificial Analysis
+		// snapshot exists (lib/capability-index.ts): a candidate scoring below
+		// SUBAGENT_TOLERANCE × min(session, Sonnet 5) is skipped, passers rank by
+		// price; without a snapshot the list is the tier ranking, as before.
+		const cheaper = cheaperContainedCandidates(available, sessionModel, { strict: true, contained, role: "subagent" })[0];
 		if (cheaper) return { model: cheaper, source: "automatic", notices };
 	}
 

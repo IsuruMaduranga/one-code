@@ -26,8 +26,10 @@
  */
 
 import type { Api, Model } from "@earendil-works/pi-ai";
+import { byInputPrice, capabilityFloor, type CapabilitySnapshot, type FloorRole, type FloorVerdict, loadCapabilitySnapshot } from "./capability-index.ts";
 import { isPriorGeneration, lacksToolCalls, modelGeneration } from "./model-facts.ts";
 import { isDatedDuplicate, modelIdentity, modelsContainedToSession, modelSpec, pricedInput } from "./model-policy.ts";
+import { oneCodeStateDir } from "./paths.ts";
 
 export type PromptTier = "frontier" | "workhorse" | "cheap" | "tiny";
 
@@ -344,16 +346,50 @@ export function atLeastTier(tier: PromptTier, floor: PromptTier): boolean {
 export function cheaperContainedCandidates(
 	available: Model<Api>[],
 	sessionModel: Model<Api>,
-	opts: { strict?: boolean; contained?: Model<Api>[] } = {},
+	opts: { strict?: boolean; contained?: Model<Api>[]; role?: FloorRole } = {},
 ): Model<Api>[] {
 	const sessionSpec = modelSpec(sessionModel);
 	const sessionPrice = pricedInput(sessionModel);
-	return economicalContainedCandidates(available, sessionModel, opts.contained).filter((model) => {
+	const cheaper = economicalContainedCandidates(available, sessionModel, opts.contained).filter((model) => {
 		if (modelSpec(model) === sessionSpec) return false;
 		if (sessionPrice === undefined) return !opts.strict;
 		const price = pricedInput(model);
 		return price !== undefined && (opts.strict ? price < sessionPrice : price <= sessionPrice);
 	});
+	return opts.role ? applyCapabilityFloor(cheaper, sessionModel, opts.role) : cheaper;
+}
+
+/**
+ * The measured capability floor (`capability-index.ts`) over a tier-ranked
+ * candidate list: candidates the Artificial Analysis snapshot shows reaching
+ * min(session, Sonnet 5) come first, cheapest first — capability per dollar is
+ * the question here, and a flash-class model that measurably matches the
+ * session model should beat a dearer "workhorse"-named one. Measured failures
+ * are dropped. Unscored candidates (no key, no confirmed match) follow in their
+ * tier order, for the caller's name-class rule to judge. The score never admits
+ * anything the tier gate already refused (tiny, prior generation, no tools).
+ */
+function applyCapabilityFloor(candidates: Model<Api>[], sessionModel: Model<Api>, role: FloorRole): Model<Api>[] {
+	const snapshot = currentCapabilitySnapshot();
+	if (!snapshot) return candidates;
+	const measured: Model<Api>[] = [];
+	const unscored: Model<Api>[] = [];
+	for (const model of candidates) {
+		const verdict = capabilityFloor(snapshot, model, sessionModel, role).verdict;
+		if (verdict === "pass") measured.push(model);
+		else if (verdict === "unscored") unscored.push(model);
+	}
+	return [...measured.sort(byInputPrice), ...unscored];
+}
+
+/** The verdict behind a pick, for the doctor report and the classifier's name-class fallback. */
+export function capabilityVerdict(candidate: Model<Api>, sessionModel: Model<Api>, role: FloorRole): FloorVerdict {
+	return capabilityFloor(currentCapabilitySnapshot(), candidate, sessionModel, role);
+}
+
+/** The cached Artificial Analysis snapshot, if a key has ever produced one (`capability-index.ts`). */
+export function currentCapabilitySnapshot(): CapabilitySnapshot | undefined {
+	return loadCapabilitySnapshot(oneCodeStateDir());
 }
 
 export interface EconomicalModelChoice {
@@ -374,6 +410,6 @@ export function pickEconomicalContainedModel(
 	sessionModel: Model<Api> | undefined,
 ): EconomicalModelChoice | undefined {
 	if (!sessionModel) return undefined;
-	const cheaper = cheaperContainedCandidates(available, sessionModel)[0];
+	const cheaper = cheaperContainedCandidates(available, sessionModel, { role: "subagent" })[0];
 	return cheaper ? { model: cheaper, via: "tier" } : { model: sessionModel, via: "session" };
 }

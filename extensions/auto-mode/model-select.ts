@@ -34,7 +34,7 @@ import {
 	modelIdentity,
 	modelSpec as spec,
 } from "../lib/model-policy.ts";
-import { atLeastTier, cheaperContainedCandidates, intrinsicTier, type PromptTier } from "../lib/model-tier.ts";
+import { atLeastTier, capabilityVerdict, cheaperContainedCandidates, intrinsicTier, type PromptTier } from "../lib/model-tier.ts";
 
 export { findConfigured } from "../lib/model-policy.ts";
 
@@ -144,10 +144,19 @@ export function classifierCandidates({
 	//    indefensible. The shared gate excludes `tiny`, unpriced/opaque rows, and
 	//    the session model itself, so an unpriced provider yields nothing here and
 	//    the session model (step 3) screens the calls.
+	//    With an Artificial Analysis snapshot (an optional user key —
+	//    lib/capability-index.ts) the floor is MEASURED: a candidate whose coding
+	//    index reaches min(session, Sonnet 5), on the thinking-off variant the
+	//    classifier actually runs, screens — Claude Code's min(main, Sonnet) taken
+	//    literally, so a flash-class model that measurably matches its vendor's
+	//    flagship may screen it. A measured failure is never admitted; an
+	//    unscored candidate (no key, no confirmed match) is judged by the
+	//    name-class tier floor below, exactly as before the snapshot existed.
 	if (sessionModel) {
 		const floor = classifierTierFloor(sessionModel);
-		for (const model of cheaperContainedCandidates(available, sessionModel)) {
-			if (atLeastTier(intrinsicTier(model), floor)) push(model, "economical");
+		for (const model of cheaperContainedCandidates(available, sessionModel, { role: "classifier" })) {
+			const measured = capabilityVerdict(model, sessionModel, "classifier").verdict;
+			if (measured === "pass" || (measured === "unscored" && atLeastTier(intrinsicTier(model), floor))) push(model, "economical");
 		}
 	}
 
@@ -228,9 +237,9 @@ export function describeCandidate(candidate: Candidate): string {
 		case "configured":
 			return `${name} (from autoMode.classifierModel)`;
 		case "economical":
-			return `${name} (cheapest model within ${where} no weaker than the session's tier floor)`;
+			return `${name} (cheapest model within ${where} that meets the capability floor — measured coding index when an Artificial Analysis snapshot is cached, else the session's tier)`;
 		case "session":
-			return `${name} (this session's model — nothing cheaper within ${where} meets the tier floor)`;
+			return `${name} (this session's model — nothing cheaper within ${where} meets the capability floor)`;
 	}
 }
 

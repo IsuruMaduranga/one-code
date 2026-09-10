@@ -12,8 +12,19 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { loadAutoModeConfig } from "../auto-mode/config.ts";
 import { classifierCandidates, describeCandidate, type ClassifierNotice } from "../auto-mode/model-select.ts";
+import { readJsonFile } from "../lib/atomic-write.ts";
+import { ATTRIBUTION, capabilityIndexKey, type FloorRole, type FloorVerdict, KEY_ADVICE, snapshotAgeMs } from "../lib/capability-index.ts";
 import { modelSpec, pricedInput } from "../lib/model-policy.ts";
-import { intrinsicTier, pickEconomicalContainedModel, type PromptTier, resolveModelTier, tierOverride } from "../lib/model-tier.ts";
+import {
+	capabilityVerdict,
+	currentCapabilitySnapshot,
+	intrinsicTier,
+	pickEconomicalContainedModel,
+	type PromptTier,
+	resolveModelTier,
+	tierOverride,
+} from "../lib/model-tier.ts";
+import { oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 import { applicableSubagentDefault, loadSubagentDefault, type SubagentDefault } from "../subagents/default-model.ts";
 import { resolveSubagentModel, type SubagentModelResolution } from "../subagents/model-select.ts";
 import { contextLabel, type Finding, priceLabel, type ReportLine, type ReportSection, type SessionView } from "./report.ts";
@@ -30,6 +41,18 @@ export interface ModelFacts {
 	subagentConfiguredInapplicable: boolean;
 	classifier: { model?: Model<Api>; description?: string; notices: ClassifierNotice[]; configured?: string };
 	reader?: { model: Model<Api>; via: "tier" | "session" };
+	/**
+	 * The optional Artificial Analysis snapshot behind the measured capability
+	 * floor (lib/capability-index.ts): whether a key is configured, the snapshot's
+	 * age, and the verdict each automatic pick was judged on.
+	 */
+	capability: {
+		keyConfigured: boolean;
+		snapshot?: { fetchedAt: string; rows: number };
+		subagent?: FloorVerdict;
+		classifier?: FloorVerdict;
+		reader?: FloorVerdict;
+	};
 }
 
 export const TIER_LABEL: Record<PromptTier, string> = {
@@ -53,7 +76,18 @@ export function collectModelFacts(available: Model<Api>[], session: SessionView,
 	});
 	const first = chain.candidates[0];
 	const reader = pickEconomicalContainedModel(available, sessionModel);
+	const snapshot = currentCapabilitySnapshot();
+	const verdict = (pick: Model<Api> | undefined, role: FloorRole): FloorVerdict | undefined =>
+		snapshot && sessionModel && pick && modelSpec(pick) !== modelSpec(sessionModel) ? capabilityVerdict(pick, sessionModel, role) : undefined;
+	const capability: ModelFacts["capability"] = {
+		keyConfigured: capabilityIndexKey(env, readJsonFile(oneCodeSettingsPath(home, env))) !== undefined,
+		snapshot: snapshot ? { fetchedAt: snapshot.fetchedAt, rows: snapshot.rows.length } : undefined,
+		subagent: verdict(subagent.source === "automatic" ? subagent.model : undefined, "subagent"),
+		classifier: verdict(first?.source === "economical" ? first.model : undefined, "classifier"),
+		reader: verdict(reader?.via === "tier" ? reader.model : undefined, "subagent"),
+	};
 	return {
+		capability,
 		session: sessionModel,
 		sessionTier: sessionModel ? intrinsicTier(sessionModel) : undefined,
 		promptTier: resolveModelTier(sessionModel, env),
@@ -147,6 +181,33 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 			text: `Web-fetch and recap reader: ${modelSpec(facts.reader.model)} — ${facts.reader.via === "tier" ? "cheapest capable model on this provider" : "the main model"}`,
 			level: "dim",
 		});
+	}
+
+	// The measured capability floor: what each automatic pick was judged on, or
+	// how to switch it on. Scores shown carry the attribution the free API requires.
+	const cap = facts.capability;
+	const verdictLine = (label: string, v: FloorVerdict | undefined): ReportLine | undefined => {
+		if (!v) return undefined;
+		if (v.verdict === "unscored") return { text: `${label}: not measured — ${v.reason ?? "no confirmed score"}; the name-class rule decided`, indent: 1, level: "dim" };
+		const basis = v.candidate?.variant === "non-reasoning" ? "thinking-off" : "default-effort";
+		return {
+			text: `${label}: coding index ${v.candidate?.coding} vs floor ${v.floor?.toFixed(1)} (${basis}; session ${v.session?.coding}, Sonnet 5 ${v.reference?.coding}) — ${v.verdict === "pass" ? "measured capable" : "below the floor"}`,
+			indent: 1,
+			level: "dim",
+		};
+	};
+	if (cap.snapshot) {
+		const ageH = Math.round(snapshotAgeMs({ fetchedAt: cap.snapshot.fetchedAt, source: "", rows: [] }) / 3_600_000);
+		lines.push({ text: `Capability scores: Artificial Analysis snapshot, ${cap.snapshot.rows} models, ${ageH} h old — measured picks for subagents and the classifier`, level: "ok" });
+		for (const line of [verdictLine("Subagent pick", cap.subagent), verdictLine("Classifier pick", cap.classifier), verdictLine("Reader pick", cap.reader)]) {
+			if (line) lines.push(line);
+		}
+		lines.push({ text: ATTRIBUTION, indent: 1, level: "dim" });
+	} else if (cap.keyConfigured) {
+		lines.push({ text: "Capability scores: key configured, snapshot not fetched yet — it downloads in the background on the next interactive start", level: "dim" });
+	} else {
+		lines.push({ text: "Capability scores: none — automatic picks use model names and generations only", level: "warn" });
+		findings.push({ level: "warn", text: "No Artificial Analysis key: subagent and classifier picks cannot be judged by measured coding ability.", fix: KEY_ADVICE });
 	}
 
 	if (session.permission) {
