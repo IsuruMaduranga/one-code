@@ -97,11 +97,14 @@ describe("resolveModelTier", () => {
 		expect(resolveModelTier(model("acme-instant", "acme", 2), noEnv)).toBe("tiny"); // instant cap beats workhorse price
 	});
 
-	it("keeps a cheap or unpriced 'pro'/'max'-class flagship in workhorse", () => {
-		expect(resolveModelTier(model("deepseek-v4-pro", "deepseek", 0.435), noEnv)).toBe("workhorse");
-		expect(resolveModelTier(model("qwen3.8-max", "alibaba", 0.4), noEnv)).toBe("workhorse");
-		expect(resolveModelTier(model("gemini-3-pro-preview", "google", 2), noEnv)).toBe("workhorse"); // anchor
-		expect(resolveModelTier(model("some-model-pro", "acme"), noEnv)).toBe("workhorse"); // unpriced but pro
+	it("keeps a cheap or unpriced 'pro'/'max'-class flagship in workhorse on a verifiable provider", () => {
+		expect(resolveModelTier(model("deepseek-v4-pro", "deepseek", 0.435), noEnv)).toBe("workhorse"); // anchor
+		expect(resolveModelTier(model("qwen3.8-max", "qwen-token-plan", 0.4), noEnv)).toBe("workhorse"); // hosted, known catalog
+		expect(resolveModelTier(model("gemini-3-pro-preview", "google", 2), noEnv)).toBe("workhorse");
+		expect(resolveModelTier(model("qwen3.8-max", "qwen-token-plan"), noEnv)).toBe("workhorse"); // unpriced, capable name
+		// An opaque (unknown/local) provider's id is unverifiable: a 'pro' name lifts nothing.
+		expect(resolveModelTier(model("some-model-pro", "acme"), noEnv)).toBe("tiny");
+		expect(resolveModelTier(model("qwen3.8-max", "ollama", 0.4), noEnv)).toBe("tiny");
 	});
 
 	it("matches capable/lean hints only as delimited tokens, not substrings", () => {

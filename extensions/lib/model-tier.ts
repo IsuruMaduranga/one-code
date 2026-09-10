@@ -26,6 +26,7 @@
  */
 
 import type { Api, Model } from "@earendil-works/pi-ai";
+import { isPriorGeneration, lacksToolCalls, modelGeneration } from "./model-facts.ts";
 import { isDatedDuplicate, modelIdentity, modelsContainedToSession, modelSpec, pricedInput } from "./model-policy.ts";
 
 export type PromptTier = "frontier" | "workhorse" | "cheap" | "tiny";
@@ -94,9 +95,12 @@ export function parseClaudeVersion(id: string): { family: "opus" | "sonnet" | "f
  * (specific before general). A vetted allowlist — distinct from heuristic
  * substring matching — that fixes cases where price/name alone misroute a
  * flagship, and encodes the three ratified overrides (GPT-5-full→workhorse,
- * GPT-5-mini→cheap, GPT-5.6-Luna→cheap). A match here is authoritative (the human
- * already accounted for the name), so it wins outright. Refresh the reference
- * table with `tools/model-tiers/model_tiers.py`.
+ * GPT-5-mini→cheap, GPT-5.6-Luna→cheap). A match here is authoritative for the
+ * name class (the human already accounted for the name and its generation), so
+ * it wins outright — only the two-generations-behind rule still demotes it to
+ * tiny (`classifyModelTier`). Shrink it whenever the catalog-wide snapshot
+ * (`test/unit/model-tier-catalog.test.ts`) shows the generic rules reproduce an
+ * entry; refresh the reference table with `tools/model-tiers/model_tiers.py`.
  */
 const ANCHOR_MAP: Array<[RegExp, PromptTier]> = [
 	// OpenAI GPT-5 family — order matters: variant suffixes before the generic.
@@ -110,10 +114,9 @@ const ANCHOR_MAP: Array<[RegExp, PromptTier]> = [
 	// a proxied model can't be version-verified for frontier, so Opus/Sonnet → workhorse.
 	[/claude[-/.].*haiku/i, "cheap"],
 	[/claude[-/.].*(?:sonnet|opus)/i, "workhorse"],
-	// Google Gemini — flash-lite is tiny, pro is workhorse; bare flash left to the
-	// price+cap heuristic (3.x-flash → cheap, 2.5-flash → tiny) since it varies by gen.
-	[/gemini[-.\d]*flash-lite/i, "tiny"],
-	[/gemini[-.\d]*pro/i, "workhorse"],
+	// Google Gemini needs no anchor: `lite` is a tiny name, `pro` a capable one, and
+	// bare flash is cheap by name class (generation decides 2.5 vs 3.x) — removed
+	// 2026-09-10 once the catalog-wide snapshot showed the generic rules reproduce it.
 	// Other capable flagships whose price may dip below the workhorse floor.
 	[/(?:^|[-/.])grok-4/i, "workhorse"],
 	// DeepSeek — priced ~10x below the vendors the price floors were calibrated
@@ -123,13 +126,14 @@ const ANCHOR_MAP: Array<[RegExp, PromptTier]> = [
 	// V3.x line and the `deepseek-chat` alias of V3 are prior generation → tiny,
 	// the same treatment gpt-4 gets above. Phase 2 of the tiering plan replaces
 	// this block with a release-date generation filter.
-	[/(?:^|[-/.])deepseek-v4[.\d]*-flash/i, "cheap"],
-	[/(?:^|[-/.])deepseek-v4[.\d]*-pro/i, "workhorse"],
-	[/(?:^|[-/.])deepseek-(?:r1|chat|v3)(?:[-.:]|$)/i, "tiny"],
+	[/(?:^|[-/.])deepseek[-.]v4[.\d]*-flash/i, "cheap"],
+	[/(?:^|[-/.])deepseek[-.]v4[.\d]*-pro/i, "workhorse"],
+	[/(?:^|[-/.])deepseek[-.](?:r1|chat|v3)(?:[-.:]|$)/i, "tiny"], // `deepseek.v3` is Bedrock's spelling
 ];
 
 function anchorTier(id: string): PromptTier | undefined {
-	for (const [pattern, tier] of ANCHOR_MAP) if (pattern.test(id)) return tier;
+	const base = nameBase(id);
+	for (const [pattern, tier] of ANCHOR_MAP) if (pattern.test(base)) return tier;
 	return undefined;
 }
 
@@ -139,12 +143,18 @@ function anchorTier(id: string): PromptTier | undefined {
  * Gemini model to cheap. `\d+b` catches size tags (8b, 70b) as the strongest
  * (tiny) signal. Returns the ceiling tier the name justifies.
  */
-const TINY_NAME_HINT = /(?:^|[-/.])(?:nano|lite|tiny|distill|instant|\d+b)(?:[-/.]|$)/i;
+const TINY_NAME_HINT = /(?:^|[-/.])(?:nano|micro|lite|tiny|xs|distill|instant|\d+b)(?:[-/.]|$)/i;
 const CHEAP_NAME_HINT = /(?:^|[-/.])(?:flash|mini|small|air)(?:[-/.]|$)/i;
 function nameClassCap(id: string): PromptTier {
-	if (TINY_NAME_HINT.test(id)) return "tiny";
-	if (CHEAP_NAME_HINT.test(id)) return "cheap";
+	const base = nameBase(id);
+	if (TINY_NAME_HINT.test(base)) return "tiny";
+	if (CHEAP_NAME_HINT.test(base)) return "cheap";
 	return "workhorse";
+}
+
+/** The id the name rules read: no `~` redirect marker, no `:batch`-style endpoint variant (`flash:batch` must still read as flash). */
+function nameBase(id: string): string {
+	return (id.startsWith("~") ? id.slice(1) : id).replace(/:[a-z]+$/i, "");
 }
 
 /**
@@ -169,35 +179,85 @@ function priceFloorTier(model: Model<Api>): PromptTier {
 	return "tiny";
 }
 
-export function resolveModelTier(
-	model: Model<Api> | undefined,
-	env: NodeJS.ProcessEnv = process.env,
-): PromptTier {
+/** One step more scaffolded: workhorse → cheap → tiny (frontier never enters). */
+function demote(tier: PromptTier): PromptTier {
+	return tier === "workhorse" ? "cheap" : "tiny";
+}
+
+export interface TierClassification {
+	tier: PromptTier;
+	/** Which rule decided, for the catalog-wide snapshot and the doctor report. */
+	reason: string;
+}
+
+/**
+ * The tier and the rule that produced it. `resolveModelTier` is the plain form.
+ *
+ * Non-frontier, non-first-party models are classified in this order:
+ *   1. the curated anchor map (verifiable providers only) sets the name-class tier;
+ *   2. otherwise the name class does (pro/max/unmarked → workhorse, flash/mini →
+ *      cheap, nano/lite/size-tag → tiny) — when the model has release-date facts.
+ *      Then its GENERATION demotes: one tier when it trails its vendor family's
+ *      newest release by more than a year (name-class path only — an anchor is
+ *      human-reviewed), to tiny beyond two for both. Price is not
+ *      consulted: it encodes neither capability nor generation (an old model
+ *      keeps its old price), and absolute dollar floors misread every vendor
+ *      priced below the US majors — `model-facts.ts`.
+ *   3. without facts, the pre-facts heuristics: name-class cap, the capable-name
+ *      hint (verifiable providers only), and the absolute price floor, combined
+ *      as the more scaffolded of the two.
+ */
+export function classifyModelTier(model: Model<Api> | undefined, env: NodeJS.ProcessEnv = process.env): TierClassification {
 	const forced = tierOverride(env);
-	if (forced) return forced;
-	if (!model) return "tiny"; // unknown model → maximum scaffolding
+	if (forced) return { tier: forced, reason: "CC_PROMPT_TIER" };
+	if (!model) return { tier: "tiny", reason: "no model" }; // unknown model → maximum scaffolding
 
-	if (isAnthropicFrontier(model)) return "frontier";
+	if (isAnthropicFrontier(model)) return { tier: "frontier", reason: "anthropic frontier allowlist" };
 	if (model.provider === "anthropic") {
-		// First-party non-frontier: Haiku → cheap; Sonnet / Opus 4.1–4.6 / other → workhorse.
-		return model.id.includes("haiku") ? "cheap" : "workhorse";
+		// First-party non-frontier: Haiku → cheap; Sonnet / Opus 4.1–4.6 / other →
+		// workhorse. Version-named ids already encode generation, and the tiny
+		// register would be wrong for a still-sold Opus, so no date demotion here;
+		// automatic selection still skips prior-generation rows.
+		return model.id.includes("haiku") ? { tier: "cheap", reason: "anthropic haiku" } : { tier: "workhorse", reason: "anthropic first-party" };
 	}
 
-	// A curated anchor is authoritative — but only for a verifiable provider. A
-	// local/self-hosted (opaque) provider's id could be anything, so it must NOT
-	// reach the anchor map (a model aliased "claude-sonnet-5" on ollama is not the
-	// real thing); it falls through to the generic price/name heuristics, where
-	// priceFloorTier's opaque check biases it to maximum scaffolding.
-	if (modelIdentity(model).confidence !== "opaque") {
-		const anchor = anchorTier(model.id);
-		if (anchor) return anchor;
+	// A curated anchor is authoritative for the NAME CLASS — but only for a
+	// verifiable provider. A local/self-hosted (opaque) provider's id could be
+	// anything, so it must NOT reach the anchor map (a model aliased
+	// "claude-sonnet-5" on ollama is not the real thing) nor the capable-name
+	// hint; it falls through to the generic heuristics, where the opaque check
+	// biases it to maximum scaffolding.
+	const opaque = modelIdentity(model).confidence === "opaque";
+	const anchor = opaque ? undefined : anchorTier(model.id);
+
+	const generation = opaque ? undefined : modelGeneration(model);
+	if (generation !== undefined) {
+		const nameTier = anchor ?? nameClassTier(model.id);
+		if (nameTier === "frontier") return { tier: nameTier, reason: "anchor" };
+		if (generation === "ancient") return { tier: "tiny", reason: `${anchor ? "anchor" : "name class"} · two generations behind` };
+		// A curated anchor already weighed the model's generation (it is reviewed
+		// against the catalog diff), so only the name-class path is demoted here.
+		if (generation === "prior" && !anchor) return { tier: demote(nameTier), reason: "name class · one generation behind" };
+		return { tier: nameTier, reason: anchor ? "anchor" : "name class" };
 	}
+	if (anchor) return { tier: anchor, reason: "anchor" };
 
 	const cap = nameClassCap(model.id);
 	// A "pro"/"max"-class name keeps a cheap/unpriced flagship at workhorse; a lean
 	// name (cap below workhorse) always wins, so only consult it when cap allows.
-	const base = cap === "workhorse" && CAPABLE_NAME_HINT.test(model.id) ? "workhorse" : priceFloorTier(model);
-	return moreScaffolded(base, cap);
+	if (!opaque && cap === "workhorse" && CAPABLE_NAME_HINT.test(nameBase(model.id))) return { tier: "workhorse", reason: "capable name, no facts" };
+	const floor = priceFloorTier(model);
+	const tier = moreScaffolded(floor, cap);
+	return { tier, reason: opaque ? "opaque provider" : pricedInput(model) === undefined ? "unpriced, no facts" : "price floor, no facts" };
+}
+
+export function resolveModelTier(model: Model<Api> | undefined, env: NodeJS.ProcessEnv = process.env): PromptTier {
+	return classifyModelTier(model, env).tier;
+}
+
+/** The name-class tier when facts are known: the cap where a lean name applies, workhorse otherwise. */
+function nameClassTier(id: string): PromptTier {
+	return nameClassCap(id);
 }
 
 /**
@@ -215,6 +275,10 @@ export function resolveModelTier(
  *     coding worker, so automatic selection stops at `cheap` and steps UP
  *     (cheap → workhorse → frontier), never down. This is the capability floor
  *     `docs/decisions/auto-mode.md` recorded as still-missing;
+ *   - current generation only, and able to call tools: with models.dev facts
+ *     known (`model-facts.ts`), a row more than a year behind its vendor family's
+ *     newest release is excluded whatever its price or name, as is a row marked
+ *     as lacking tool calls. Rows without facts pass this gate unchanged;
  *   - priced only: an unpriced/opaque row is treated as `tiny` by
  *     `resolveModelTier`, so this excludes it too. On a provider with no usable
  *     prices the chain is empty and callers degrade to the session model
@@ -238,6 +302,10 @@ export function economicalContainedCandidates(
 		// twice; rank the alias so every automatic pick (classifier, subagent,
 		// reader, presets) names the model the way the user sees it in /model.
 		.filter((model) => !isDatedDuplicate(model, pool))
+		// Facts, when known: a model one generation behind its family is never
+		// picked automatically however it prices (the R1-over-V4-Flash incident),
+		// and a subagent or screener must be able to call tools at all.
+		.filter((model) => !isPriorGeneration(model) && !lacksToolCalls(model))
 		// Classify by the model's INTRINSIC tier — never `process.env`: CC_PROMPT_TIER
 		// forces the *session's* prompt-scaffolding register, and honoring it here
 		// would collapse every candidate to one tier and let a `tiny` model through

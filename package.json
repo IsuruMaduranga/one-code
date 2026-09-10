@@ -84,7 +84,8 @@
 	],
 	"scripts": {
 		"typecheck": "tsc --noEmit",
-		"test": "vitest run"
+		"test": "vitest run",
+		"gen:model-facts": "node scripts/gen-model-facts.mjs"
 	},
 	"dependencies": {
 		"@modelcontextprotocol/sdk": "^1.30.0",
