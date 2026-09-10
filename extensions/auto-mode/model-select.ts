@@ -34,7 +34,7 @@ import {
 	modelIdentity,
 	modelSpec as spec,
 } from "../lib/model-policy.ts";
-import { atLeastTier, capabilityVerdict, cheaperContainedCandidates, intrinsicTier, type PromptTier } from "../lib/model-tier.ts";
+import { atLeastTier, intrinsicTier, type PromptTier, rankedContainedCandidates } from "../lib/model-tier.ts";
 
 export { findConfigured } from "../lib/model-policy.ts";
 
@@ -154,9 +154,8 @@ export function classifierCandidates({
 	//    name-class tier floor below, exactly as before the snapshot existed.
 	if (sessionModel) {
 		const floor = classifierTierFloor(sessionModel);
-		for (const model of cheaperContainedCandidates(available, sessionModel, { role: "classifier" })) {
-			const measured = capabilityVerdict(model, sessionModel, "classifier").verdict;
-			if (measured === "pass" || (measured === "unscored" && atLeastTier(intrinsicTier(model), floor))) push(model, "economical");
+		for (const { model, measured } of rankedContainedCandidates(available, sessionModel, "classifier")) {
+			if (measured === "pass" || atLeastTier(intrinsicTier(model), floor)) push(model, "economical");
 		}
 	}
 

@@ -29,8 +29,7 @@ import {
 	VERSION as PI_VERSION,
 } from "@earendil-works/pi-coding-agent";
 import { loadAutoModeConfig, persistClassifierModel } from "../auto-mode/config.ts";
-import { readJsonFile } from "../lib/atomic-write.ts";
-import { capabilityIndexKey, loadCapabilitySnapshot, refreshCapabilitySnapshot, snapshotIsStale } from "../lib/capability-index.ts";
+import { configuredCapabilityKey, loadCapabilitySnapshot, refreshCapabilitySnapshot, snapshotIsStale } from "../lib/capability-index.ts";
 import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } from "../lib/mcp-status.ts";
 import { sessionOutlivesTurn } from "../lib/notifications.ts";
 import { modelSpec } from "../lib/model-policy.ts";
@@ -78,9 +77,8 @@ export default function doctorExtension(pi: ExtensionAPI) {
 	// inert once the session is shutting down. A failure is logged once.
 	let shuttingDown = false;
 	let refreshWarned = false;
-	const capabilityKey = (home: string) => capabilityIndexKey(process.env, readJsonFile(oneCodeSettingsPath(home)));
 	const refreshCapability = async (ctx: ExtensionContext, home: string): Promise<void> => {
-		const outcome = await refreshCapabilitySnapshot({ key: capabilityKey(home), stateDir: oneCodeStateDir(process.env, home) });
+		const outcome = await refreshCapabilitySnapshot({ key: configuredCapabilityKey(home), stateDir: oneCodeStateDir(process.env, home) });
 		if (outcome.status === "failed" && !refreshWarned && !shuttingDown) {
 			refreshWarned = true;
 			ctx.ui.notify(`Capability scores not refreshed: ${outcome.error}. Automatic picks keep using the last snapshot, if any.`, "warning");
@@ -88,7 +86,7 @@ export default function doctorExtension(pi: ExtensionAPI) {
 	};
 	pi.on("session_start", (_event, ctx) => {
 		const home = os.homedir();
-		if (!sessionOutlivesTurn(ctx.mode) || !capabilityKey(home)) return;
+		if (!sessionOutlivesTurn(ctx.mode) || !configuredCapabilityKey(home)) return;
 		if (!snapshotIsStale(loadCapabilitySnapshot(oneCodeStateDir(process.env, home)))) return;
 		void refreshCapability(ctx, home).catch(() => {});
 	});
@@ -99,8 +97,11 @@ export default function doctorExtension(pi: ExtensionAPI) {
 	const gather = async (ctx: ExtensionContext, options: { network: boolean }): Promise<DoctorReport> => {
 		const home = os.homedir();
 		const version = oneCodeVersion();
-		const latest = options.network ? await lookupLatestVersion({ install: install(), current: version, env: process.env }) : undefined;
-		if (options.network) await refreshCapability(ctx, home); // a no-op when fresh or keyless; bounded by FETCH_TIMEOUT_MS
+		// Two unrelated endpoints (npm registry, Artificial Analysis): overlap them.
+		// The snapshot refresh is a no-op when fresh or keyless, bounded by FETCH_TIMEOUT_MS.
+		const [latest] = options.network
+			? await Promise.all([lookupLatestVersion({ install: install(), current: version, env: process.env }), refreshCapability(ctx, home)])
+			: [undefined];
 		return buildDoctorReport({
 			env: {
 				cwd: ctx.cwd,

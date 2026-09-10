@@ -26,9 +26,9 @@
  */
 
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { byInputPrice, capabilityFloor, type CapabilitySnapshot, type FloorRole, type FloorVerdict, loadCapabilitySnapshot } from "./capability-index.ts";
+import { capabilityFloor, type CapabilitySnapshot, type FloorRole, loadCapabilitySnapshot } from "./capability-index.ts";
 import { isPriorGeneration, lacksToolCalls, modelGeneration } from "./model-facts.ts";
-import { isDatedDuplicate, modelIdentity, modelsContainedToSession, modelSpec, pricedInput } from "./model-policy.ts";
+import { baseModelId, isDatedDuplicate, modelIdentity, modelsContainedToSession, modelSpec, pricedInput } from "./model-policy.ts";
 import { oneCodeStateDir } from "./paths.ts";
 
 export type PromptTier = "frontier" | "workhorse" | "cheap" | "tiny";
@@ -122,19 +122,19 @@ const ANCHOR_MAP: Array<[RegExp, PromptTier]> = [
 	// Other capable flagships whose price may dip below the workhorse floor.
 	[/(?:^|[-/.])grok-4/i, "workhorse"],
 	// DeepSeek — priced ~10x below the vendors the price floors were calibrated
-	// on, so the floors alone put every V4 Flash row in tiny and let R1-0528
-	// ($0.50, on the cheap boundary) win automatic selection (2026-09-10). V4 is
-	// the current generation: Pro is the flagship, Flash the lean line. R1, the
-	// V3.x line and the `deepseek-chat` alias of V3 are prior generation → tiny,
-	// the same treatment gpt-4 gets above. Phase 2 of the tiering plan replaces
-	// this block with a release-date generation filter.
+	// on, so on the no-facts path the floors alone put every V4 Flash row in tiny
+	// and let R1-0528 ($0.50, on the cheap boundary) win automatic selection
+	// (2026-09-10). With release-date facts the generic rules reproduce the V4
+	// rows; the block stays for rows models.dev does not know yet (V4.1 Flash on
+	// its release day) and for R1/V3.x/`deepseek-chat`, which a one-generation
+	// demotion would leave at cheap rather than tiny.
 	[/(?:^|[-/.])deepseek[-.]v4[.\d]*-flash/i, "cheap"],
 	[/(?:^|[-/.])deepseek[-.]v4[.\d]*-pro/i, "workhorse"],
 	[/(?:^|[-/.])deepseek[-.](?:r1|chat|v3)(?:[-.:]|$)/i, "tiny"], // `deepseek.v3` is Bedrock's spelling
 ];
 
 function anchorTier(id: string): PromptTier | undefined {
-	const base = nameBase(id);
+	const base = baseModelId(id);
 	for (const [pattern, tier] of ANCHOR_MAP) if (pattern.test(base)) return tier;
 	return undefined;
 }
@@ -148,15 +148,10 @@ function anchorTier(id: string): PromptTier | undefined {
 const TINY_NAME_HINT = /(?:^|[-/.])(?:nano|micro|lite|tiny|xs|distill|instant|\d+b)(?:[-/.]|$)/i;
 const CHEAP_NAME_HINT = /(?:^|[-/.])(?:flash|mini|small|air)(?:[-/.]|$)/i;
 function nameClassCap(id: string): PromptTier {
-	const base = nameBase(id);
+	const base = baseModelId(id); // `flash:batch` must still read as flash
 	if (TINY_NAME_HINT.test(base)) return "tiny";
 	if (CHEAP_NAME_HINT.test(base)) return "cheap";
 	return "workhorse";
-}
-
-/** The id the name rules read: no `~` redirect marker, no `:batch`-style endpoint variant (`flash:batch` must still read as flash). */
-function nameBase(id: string): string {
-	return (id.startsWith("~") ? id.slice(1) : id).replace(/:[a-z]+$/i, "");
 }
 
 /**
@@ -234,7 +229,7 @@ export function classifyModelTier(model: Model<Api> | undefined, env: NodeJS.Pro
 
 	const generation = opaque ? undefined : modelGeneration(model);
 	if (generation !== undefined) {
-		const nameTier = anchor ?? nameClassTier(model.id);
+		const nameTier = anchor ?? nameClassCap(model.id);
 		if (nameTier === "frontier") return { tier: nameTier, reason: "anchor" };
 		if (generation === "ancient") return { tier: "tiny", reason: `${anchor ? "anchor" : "name class"} · two generations behind` };
 		// A curated anchor already weighed the model's generation (it is reviewed
@@ -247,7 +242,7 @@ export function classifyModelTier(model: Model<Api> | undefined, env: NodeJS.Pro
 	const cap = nameClassCap(model.id);
 	// A "pro"/"max"-class name keeps a cheap/unpriced flagship at workhorse; a lean
 	// name (cap below workhorse) always wins, so only consult it when cap allows.
-	if (!opaque && cap === "workhorse" && CAPABLE_NAME_HINT.test(nameBase(model.id))) return { tier: "workhorse", reason: "capable name, no facts" };
+	if (!opaque && cap === "workhorse" && CAPABLE_NAME_HINT.test(baseModelId(model.id))) return { tier: "workhorse", reason: "capable name, no facts" };
 	const floor = priceFloorTier(model);
 	const tier = moreScaffolded(floor, cap);
 	return { tier, reason: opaque ? "opaque provider" : pricedInput(model) === undefined ? "unpriced, no facts" : "price floor, no facts" };
@@ -257,10 +252,6 @@ export function resolveModelTier(model: Model<Api> | undefined, env: NodeJS.Proc
 	return classifyModelTier(model, env).tier;
 }
 
-/** The name-class tier when facts are known: the cap where a lean name applies, workhorse otherwise. */
-function nameClassTier(id: string): PromptTier {
-	return nameClassCap(id);
-}
 
 /**
  * The ordered candidate chain for an automatic *secondary* model — the same
@@ -356,7 +347,27 @@ export function cheaperContainedCandidates(
 		const price = pricedInput(model);
 		return price !== undefined && (opts.strict ? price < sessionPrice : price <= sessionPrice);
 	});
-	return opts.role ? applyCapabilityFloor(cheaper, sessionModel, opts.role) : cheaper;
+	return opts.role ? rankByCapability(cheaper, sessionModel, opts.role).map((entry) => entry.model) : cheaper;
+}
+
+export interface RankedCandidate {
+	model: Model<Api>;
+	/** "pass": measurably reaches the floor; "unscored": no snapshot or no confirmed score (the caller's name-class rule decides). */
+	measured: "pass" | "unscored";
+}
+
+/**
+ * `cheaperContainedCandidates` with the measured verdict kept on each entry, so a
+ * caller that must tell a measured pass from an unscored candidate (the
+ * classifier's name-class fallback) reads it instead of recomputing it.
+ */
+export function rankedContainedCandidates(
+	available: Model<Api>[],
+	sessionModel: Model<Api>,
+	role: FloorRole,
+	opts: { strict?: boolean; contained?: Model<Api>[] } = {},
+): RankedCandidate[] {
+	return rankByCapability(cheaperContainedCandidates(available, sessionModel, opts), sessionModel, role);
 }
 
 /**
@@ -369,22 +380,18 @@ export function cheaperContainedCandidates(
  * tier order, for the caller's name-class rule to judge. The score never admits
  * anything the tier gate already refused (tiny, prior generation, no tools).
  */
-function applyCapabilityFloor(candidates: Model<Api>[], sessionModel: Model<Api>, role: FloorRole): Model<Api>[] {
+function rankByCapability(candidates: Model<Api>[], sessionModel: Model<Api>, role: FloorRole): RankedCandidate[] {
 	const snapshot = currentCapabilitySnapshot();
-	if (!snapshot) return candidates;
-	const measured: Model<Api>[] = [];
-	const unscored: Model<Api>[] = [];
+	if (!snapshot) return candidates.map((model) => ({ model, measured: "unscored" }));
+	const measured: RankedCandidate[] = [];
+	const unscored: RankedCandidate[] = [];
 	for (const model of candidates) {
 		const verdict = capabilityFloor(snapshot, model, sessionModel, role).verdict;
-		if (verdict === "pass") measured.push(model);
-		else if (verdict === "unscored") unscored.push(model);
+		if (verdict === "pass") measured.push({ model, measured: "pass" });
+		else if (verdict === "unscored") unscored.push({ model, measured: "unscored" });
 	}
-	return [...measured.sort(byInputPrice), ...unscored];
-}
-
-/** The verdict behind a pick, for the doctor report and the classifier's name-class fallback. */
-export function capabilityVerdict(candidate: Model<Api>, sessionModel: Model<Api>, role: FloorRole): FloorVerdict {
-	return capabilityFloor(currentCapabilitySnapshot(), candidate, sessionModel, role);
+	const price = (entry: RankedCandidate) => pricedInput(entry.model) ?? Number.POSITIVE_INFINITY;
+	return [...measured.sort((a, b) => price(a) - price(b)), ...unscored];
 }
 
 /** The cached Artificial Analysis snapshot, if a key has ever produced one (`capability-index.ts`). */

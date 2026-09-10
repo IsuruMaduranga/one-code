@@ -12,11 +12,9 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { loadAutoModeConfig } from "../auto-mode/config.ts";
 import { classifierCandidates, describeCandidate, type ClassifierNotice } from "../auto-mode/model-select.ts";
-import { readJsonFile } from "../lib/atomic-write.ts";
-import { ATTRIBUTION, capabilityIndexKey, type FloorRole, type FloorVerdict, KEY_ADVICE, snapshotAgeMs } from "../lib/capability-index.ts";
+import { ATTRIBUTION, capabilityFloor, configuredCapabilityKey, type FloorRole, type FloorVerdict, KEY_ADVICE, snapshotAgeMs } from "../lib/capability-index.ts";
 import { modelSpec, pricedInput } from "../lib/model-policy.ts";
 import {
-	capabilityVerdict,
 	currentCapabilitySnapshot,
 	intrinsicTier,
 	pickEconomicalContainedModel,
@@ -24,7 +22,6 @@ import {
 	resolveModelTier,
 	tierOverride,
 } from "../lib/model-tier.ts";
-import { oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 import { applicableSubagentDefault, loadSubagentDefault, type SubagentDefault } from "../subagents/default-model.ts";
 import { resolveSubagentModel, type SubagentModelResolution } from "../subagents/model-select.ts";
 import { contextLabel, type Finding, priceLabel, type ReportLine, type ReportSection, type SessionView } from "./report.ts";
@@ -78,9 +75,9 @@ export function collectModelFacts(available: Model<Api>[], session: SessionView,
 	const reader = pickEconomicalContainedModel(available, sessionModel);
 	const snapshot = currentCapabilitySnapshot();
 	const verdict = (pick: Model<Api> | undefined, role: FloorRole): FloorVerdict | undefined =>
-		snapshot && sessionModel && pick && modelSpec(pick) !== modelSpec(sessionModel) ? capabilityVerdict(pick, sessionModel, role) : undefined;
+		snapshot && sessionModel && pick && modelSpec(pick) !== modelSpec(sessionModel) ? capabilityFloor(snapshot, pick, sessionModel, role) : undefined;
 	const capability: ModelFacts["capability"] = {
-		keyConfigured: capabilityIndexKey(env, readJsonFile(oneCodeSettingsPath(home, env))) !== undefined,
+		keyConfigured: configuredCapabilityKey(home, env) !== undefined,
 		snapshot: snapshot ? { fetchedAt: snapshot.fetchedAt, rows: snapshot.rows.length } : undefined,
 		subagent: verdict(subagent.source === "automatic" ? subagent.model : undefined, "subagent"),
 		classifier: verdict(first?.source === "economical" ? first.model : undefined, "classifier"),

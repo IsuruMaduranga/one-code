@@ -205,6 +205,21 @@ export function modelIdentity(model: Model<Api>): ModelIdentity {
 const UNSUITABLE_VARIANT = /:(batch|free|online|thinking)$/i;
 
 /**
+ * The id without OpenRouter's `~` redirect-alias marker and without a
+ * `:batch`-style endpoint variant — the spelling the name rules, the facts
+ * table and the capability index all key on (`~deepseek/deepseek-v4-flash-latest`
+ * → `deepseek/deepseek-v4-flash-latest`, `gpt-5-mini:batch` → `gpt-5-mini`).
+ */
+export function baseModelId(id: string): string {
+	return (id.startsWith("~") ? id.slice(1) : id).replace(/:[a-z]+$/i, "");
+}
+
+/** Whether the id carries a redirect marker or endpoint variant (`baseModelId` would change it). */
+export function isAliasOrVariantId(id: string): boolean {
+	return baseModelId(id) !== id;
+}
+
+/**
  * Automatic selection excludes endpoint variants with the wrong execution shape,
  * and OpenRouter's `~vendor/family-latest` redirect aliases ("always redirects to
  * the latest model in the family"): the model behind one moves without notice,
@@ -215,6 +230,9 @@ const UNSUITABLE_VARIANT = /:(batch|free|online|thinking)$/i;
 export function isSelectableVariant(model: Model<Api>): boolean {
 	return !UNSUITABLE_VARIANT.test(model.id) && !model.id.startsWith("~");
 }
+
+/** One day in milliseconds, for the release-date arithmetic in model-facts.ts and capability-index.ts. */
+export const DAY_MS = 86_400_000;
 
 /** Non-positive values are catalog sentinels/unpriced, not evidence of being free. */
 export function pricedInput(model: Model<Api>): number | undefined {

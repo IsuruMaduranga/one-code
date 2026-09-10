@@ -12,6 +12,7 @@ import {
 	capabilityFloor,
 	capabilityIndexKey,
 	type CapabilitySnapshot,
+	clearCapabilitySnapshotForTest,
 	loadCapabilitySnapshot,
 	referenceScore,
 	refreshCapabilitySnapshot,
@@ -168,7 +169,7 @@ describe("key, cache and refresh", () => {
 	let dir: string;
 	beforeEach(() => {
 		dir = mkdtempSync(join(tmpdir(), "onecode-capability-"));
-		setCapabilitySnapshotForTest(null); // real disk reads for this block
+		clearCapabilitySnapshotForTest(); // real disk reads for this block
 	});
 	afterEach(() => {
 		rmSync(dir, { recursive: true, force: true });

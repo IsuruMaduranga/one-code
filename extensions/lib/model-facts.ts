@@ -19,7 +19,7 @@
 
 import { readFileSync } from "node:fs";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { modelIdentity } from "./model-policy.ts";
+import { baseModelId, DAY_MS, isAliasOrVariantId, modelIdentity } from "./model-policy.ts";
 
 export interface ModelFactsRow {
 	/** ISO date (YYYY-MM-DD) the model was released, per models.dev. */
@@ -36,8 +36,6 @@ interface FactsFile {
 export const PRIOR_GENERATION_DAYS = 365;
 /** …and this many days behind is two generations: maximum scaffolding, never auto-selected. */
 export const ANCIENT_GENERATION_DAYS = 730;
-
-const DAY_MS = 86_400_000;
 
 let loaded: { facts: Record<string, ModelFactsRow>; familyNewest: Map<string, number> } | undefined;
 
@@ -77,7 +75,7 @@ function index(facts: Record<string, ModelFactsRow>) {
 		if (slash <= 0) continue;
 		const model = { provider: key.slice(0, slash), id: key.slice(slash + 1) };
 		// Variants and redirect aliases carry no generation of their own.
-		if (/:[a-z]+$/i.test(model.id) || model.id.startsWith("~")) continue;
+		if (isAliasOrVariantId(model.id)) continue;
 		const t = Date.parse(row.releaseDate);
 		if (Number.isNaN(t)) continue;
 		const family = modelFamily(model);
@@ -86,15 +84,10 @@ function index(facts: Record<string, ModelFactsRow>) {
 	return { facts, familyNewest };
 }
 
-function baseId(id: string): string {
-	const noAlias = id.startsWith("~") ? id.slice(1) : id;
-	return noAlias.replace(/:[a-z]+$/i, "");
-}
-
 /** The models.dev row for a model, resolved through alias and variant spellings. */
 export function modelFacts(model: { provider: string; id: string }): ModelFactsRow | undefined {
 	const { facts } = load();
-	return facts[`${model.provider}/${model.id}`] ?? facts[`${model.provider}/${baseId(model.id)}`];
+	return facts[`${model.provider}/${model.id}`] ?? facts[`${model.provider}/${baseModelId(model.id)}`];
 }
 
 /** Whether models.dev says the model cannot call tools (undefined = unknown or yes). */

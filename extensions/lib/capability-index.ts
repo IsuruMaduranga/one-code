@@ -45,9 +45,10 @@
 
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { writeJsonAtomic } from "./atomic-write.ts";
+import { readJsonFile, writeJsonAtomic } from "./atomic-write.ts";
 import { modelFacts } from "./model-facts.ts";
-import { pricedInput, stripSnapshotDate } from "./model-policy.ts";
+import { baseModelId, DAY_MS, modelIdentity, stripSnapshotDate } from "./model-policy.ts";
+import { oneCodeSettingsPath } from "./one-code-settings.ts";
 
 export const AA_KEY_ENV = "AA_API_KEY";
 export const AA_MODELS_URL = "https://artificialanalysis.ai/api/v2/data/llms/models";
@@ -101,6 +102,11 @@ export function capabilityIndexKey(env: Record<string, string | undefined>, sett
 	return undefined;
 }
 
+/** The key as configured for a home: env first, then `~/.onecode/settings.json`. */
+export function configuredCapabilityKey(home: string, env: Record<string, string | undefined> = process.env): string | undefined {
+	return capabilityIndexKey(env, readJsonFile(oneCodeSettingsPath(home, env as NodeJS.ProcessEnv)));
+}
+
 export function capabilityCachePath(stateDir: string): string {
 	return join(stateDir, "cache", "artificial-analysis.json");
 }
@@ -131,17 +137,23 @@ export function snapshotFromResponse(body: unknown, fetchedAt: Date): Capability
 }
 
 let memo: { path: string; mtimeMs: number; snapshot: CapabilitySnapshot | undefined } | undefined;
-let testSnapshot: { value: CapabilitySnapshot | undefined } | undefined;
+let pinned: { value: CapabilitySnapshot | undefined } | undefined;
 
-/** Test seam: pin the snapshot every selection call sees (`undefined` = none); `null` restores disk reads. */
-export function setCapabilitySnapshotForTest(snapshot: CapabilitySnapshot | undefined | null): void {
-	testSnapshot = snapshot === null ? undefined : { value: snapshot };
+/** Test seam: pin the snapshot every selection call sees (`undefined` pins "none"). */
+export function setCapabilitySnapshotForTest(snapshot: CapabilitySnapshot | undefined): void {
+	pinned = { value: snapshot };
+	memo = undefined;
+}
+
+/** Test seam: unpin, so `loadCapabilitySnapshot` reads the disk cache again. */
+export function clearCapabilitySnapshotForTest(): void {
+	pinned = undefined;
 	memo = undefined;
 }
 
 /** The cached snapshot, memoized on the file's mtime so a background refresh is picked up without a restart. */
 export function loadCapabilitySnapshot(stateDir: string): CapabilitySnapshot | undefined {
-	if (testSnapshot) return testSnapshot.value;
+	if (pinned) return pinned.value;
 	const path = capabilityCachePath(stateDir);
 	let mtimeMs: number;
 	try {
@@ -232,10 +244,9 @@ export function baseSlug(slug: string): string {
  * needed on 2026-09-10 (findings §9) — add to them as mismatches are found.
  */
 export function slugCandidates(id: string): string[] {
-	let s = (id.startsWith("~") ? id.slice(1) : id).toLowerCase();
+	let s = baseModelId(id).toLowerCase(); // no `~` marker, no `:variant`
 	const slash = s.indexOf("/");
 	if (slash > 0) s = s.slice(slash + 1); // gateway route prefix
-	s = s.replace(/:[a-z]+$/i, ""); // endpoint variant
 	s = stripSnapshotDate(s); // -YYYYMMDD / -MMDD
 	s = s.replace(/\./g, "-");
 	s = s.replace(/-(preview|latest|exp)(-\d{2}-\d{2})?$/, "");
@@ -260,8 +271,6 @@ export interface CapabilityScore {
 	variant: ScoreVariant;
 	releaseDate: string;
 }
-
-const DAY_MS = 86_400_000;
 
 function withinTolerance(a: string, b: string): boolean {
 	const ta = Date.parse(a);
@@ -298,7 +307,9 @@ export function scoreFor(
 	const facts = modelFacts(model);
 	if (!facts) return undefined; // nothing to confirm a slug match against
 	const families = rowsByBase(snapshot);
-	for (const candidate of slugCandidates(model.id)) {
+	// The identity's normalized id already peels gateway routes and hosted-provider
+	// prefixes (Bedrock's `anthropic.` / `us.`, Cloudflare's `workers-ai/@cf/…`).
+	for (const candidate of slugCandidates(modelIdentity(model as never).normalizedId)) {
 		const rows = families.get(candidate);
 		if (!rows) continue;
 		const base = rows.find((row) => row.slug === candidate);
@@ -356,21 +367,15 @@ export function capabilityFloor(
 ): FloorVerdict {
 	if (!snapshot) return { verdict: "unscored", reason: "no capability snapshot (no key)" };
 	const variants: ScoreVariant[] = role === "classifier" ? ["non-reasoning", "default"] : ["default"];
+	let last: { c?: CapabilityScore; s?: CapabilityScore; r?: CapabilityScore } = {};
 	for (const variant of variants) {
-		const c = scoreFor(snapshot, candidate, variant);
-		const s = scoreFor(snapshot, session, variant);
-		const r = referenceScore(snapshot, variant);
+		last = { c: scoreFor(snapshot, candidate, variant), s: scoreFor(snapshot, session, variant), r: referenceScore(snapshot, variant) };
+		const { c, s, r } = last;
 		if (!c || !s || !r) continue;
 		const floor = Math.min(s.coding, r.coding) * (role === "subagent" ? SUBAGENT_TOLERANCE : 1);
 		return { verdict: c.coding >= floor ? "pass" : "fail", candidate: c, session: s, reference: r, floor };
 	}
-	const missing = [!scoreFor(snapshot, candidate, "default") && "candidate", !scoreFor(snapshot, session, "default") && "session model", !referenceScore(snapshot, "default") && "reference"]
-		.filter(Boolean)
-		.join(", ");
-	return { verdict: "unscored", reason: `no confirmed score for: ${missing || "the non-reasoning variants"}` };
-}
-
-/** Sort key helper the selectors share: cheapest first, unknown price last. */
-export function byInputPrice(a: { cost?: { input?: number } }, b: { cost?: { input?: number } }): number {
-	return (pricedInput(a as never) ?? Number.POSITIVE_INFINITY) - (pricedInput(b as never) ?? Number.POSITIVE_INFINITY);
+	// `last` holds the "default" variant's lookups (always the final one tried).
+	const missing = [!last.c && "candidate", !last.s && "session model", !last.r && "reference"].filter(Boolean).join(", ");
+	return { verdict: "unscored", reason: `no confirmed score for: ${missing}` };
 }
