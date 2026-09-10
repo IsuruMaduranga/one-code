@@ -116,6 +116,16 @@ const ANCHOR_MAP: Array<[RegExp, PromptTier]> = [
 	[/gemini[-.\d]*pro/i, "workhorse"],
 	// Other capable flagships whose price may dip below the workhorse floor.
 	[/(?:^|[-/.])grok-4/i, "workhorse"],
+	// DeepSeek — priced ~10x below the vendors the price floors were calibrated
+	// on, so the floors alone put every V4 Flash row in tiny and let R1-0528
+	// ($0.50, on the cheap boundary) win automatic selection (2026-09-10). V4 is
+	// the current generation: Pro is the flagship, Flash the lean line. R1, the
+	// V3.x line and the `deepseek-chat` alias of V3 are prior generation → tiny,
+	// the same treatment gpt-4 gets above. Phase 2 of the tiering plan replaces
+	// this block with a release-date generation filter.
+	[/(?:^|[-/.])deepseek-v4[.\d]*-flash/i, "cheap"],
+	[/(?:^|[-/.])deepseek-v4[.\d]*-pro/i, "workhorse"],
+	[/(?:^|[-/.])deepseek-(?:r1|chat|v3)(?:[-.:]|$)/i, "tiny"],
 ];
 
 function anchorTier(id: string): PromptTier | undefined {

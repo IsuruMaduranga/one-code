@@ -3,12 +3,52 @@ import {
 	BUILTIN_PROVIDER_POLICIES,
 	crossesProvider,
 	forcedReasoningLevel,
+	isDatedDuplicate,
 	isReasoningMandatoryError,
+	isSelectableVariant,
 	modelIdentity,
 	modelsContainedToSession,
 	reasoningRetryLevel,
+	stripSnapshotDate,
 	withReasoningFallback,
 } from "../../extensions/lib/model-policy.ts";
+
+describe("isSelectableVariant", () => {
+	it("excludes batch/free/online/thinking endpoint variants and OpenRouter's moving ~…-latest redirect aliases", () => {
+		expect(isSelectableVariant(model("openrouter", "deepseek/deepseek-v4-flash"))).toBe(true);
+		expect(isSelectableVariant(model("openrouter", "deepseek/deepseek-v4-flash-0731:batch"))).toBe(false);
+		expect(isSelectableVariant(model("openrouter", "z-ai/glm-4.6:free"))).toBe(false);
+		expect(isSelectableVariant(model("openrouter", "~deepseek/deepseek-v4-flash-latest"))).toBe(false);
+		expect(isSelectableVariant(model("openrouter", "~anthropic/claude-sonnet-latest"))).toBe(false);
+	});
+});
+
+describe("stripSnapshotDate / isDatedDuplicate", () => {
+	it("strips a trailing -YYYYMMDD or a real -MMDD, and nothing else", () => {
+		expect(stripSnapshotDate("claude-haiku-4-5-20251001")).toBe("claude-haiku-4-5");
+		expect(stripSnapshotDate("deepseek/deepseek-v4-flash-0731")).toBe("deepseek/deepseek-v4-flash");
+		expect(stripSnapshotDate("deepseek/deepseek-v4-pro-0813")).toBe("deepseek/deepseek-v4-pro");
+		expect(stripSnapshotDate("mistral-large-2411")).toBe("mistral-large-2411"); // month 24: a version, not a date
+		expect(stripSnapshotDate("deepseek/deepseek-v4-flash-vision-exp")).toBe("deepseek/deepseek-v4-flash-vision-exp");
+		expect(stripSnapshotDate("llama-3.1-405b")).toBe("llama-3.1-405b");
+	});
+
+	it("collapses a snapshot only onto its exact undated alias", () => {
+		const pool = [
+			{ id: "deepseek/deepseek-v4-flash" },
+			{ id: "deepseek/deepseek-v4-flash-0731" },
+			{ id: "deepseek/deepseek-v4-flash-vision-exp" },
+			{ id: "deepseek/deepseek-v4-pro-0813" },
+			{ id: "claude-haiku-4-5" },
+			{ id: "claude-haiku-4-5-20251001" },
+		];
+		expect(isDatedDuplicate({ id: "deepseek/deepseek-v4-flash-0731" }, pool)).toBe(true);
+		expect(isDatedDuplicate({ id: "claude-haiku-4-5-20251001" }, pool)).toBe(true);
+		expect(isDatedDuplicate({ id: "deepseek/deepseek-v4-pro-0813" }, pool)).toBe(false); // no undated alias listed
+		expect(isDatedDuplicate({ id: "deepseek/deepseek-v4-flash-vision-exp" }, pool)).toBe(false); // not a snapshot
+		expect(isDatedDuplicate({ id: "deepseek/deepseek-v4-flash" }, pool)).toBe(false);
+	});
+});
 
 const model = (provider: string, id: string, input = 1, api = "openai-responses") =>
 	({

@@ -53,6 +53,26 @@ describe("resolveModelTier", () => {
 		expect(resolveModelTier(model("gpt-4o", "openai", 2.5), noEnv)).toBe("tiny");
 	});
 
+	it("anchors DeepSeek by generation, not by its ~10x-lower price scale", () => {
+		// Real OpenRouter catalog prices (2026-09-10): the floors alone put every V4
+		// Flash row in tiny and let R1-0528 (exactly $0.50) win the subagent pick.
+		expect(resolveModelTier(model("deepseek/deepseek-v4-flash", "openrouter", 0.08526), noEnv)).toBe("cheap");
+		expect(resolveModelTier(model("deepseek/deepseek-v4-flash-0731", "openrouter", 0.065), noEnv)).toBe("cheap");
+		expect(resolveModelTier(model("deepseek/deepseek-v4.1-flash", "openrouter", 0.15), noEnv)).toBe("cheap");
+		expect(resolveModelTier(model("deepseek/deepseek-v4-pro", "openrouter", 0.890358), noEnv)).toBe("workhorse");
+		expect(resolveModelTier(model("deepseek-v4-pro", "deepseek", 0.435), noEnv)).toBe("workhorse");
+		expect(resolveModelTier(model("deepseek-v4-flash", "deepseek", 0.14), noEnv)).toBe("cheap");
+		// Prior generation → tiny, like gpt-4, whatever the price says.
+		expect(resolveModelTier(model("deepseek/deepseek-r1-0528", "openrouter", 0.5), noEnv)).toBe("tiny");
+		expect(resolveModelTier(model("deepseek/deepseek-r1", "openrouter", 0.7), noEnv)).toBe("tiny");
+		expect(resolveModelTier(model("deepseek/deepseek-chat-v3.1", "openrouter", 0.55), noEnv)).toBe("tiny");
+		expect(resolveModelTier(model("deepseek/deepseek-chat", "openrouter", 0.32), noEnv)).toBe("tiny");
+		expect(resolveModelTier(model("deepseek/deepseek-v3.2", "openrouter", 0.269), noEnv)).toBe("tiny");
+		// An opaque/local provider never reaches the anchor map: the same Flash id
+		// on ollama falls to the price/containment floor (opaque → tiny).
+		expect(resolveModelTier(model("deepseek-v4-flash", "ollama", 0.14), noEnv)).toBe("tiny");
+	});
+
 	it("uses the name-class cap for lean models over price", () => {
 		expect(resolveModelTier(model("gemini-2.5-flash", "google", 0.3), noEnv)).toBe("tiny"); // flash cap + tiny price
 		expect(resolveModelTier(model("gemini-3-flash-preview", "google", 1.12), noEnv)).toBe("cheap"); // flash cap over workhorse price

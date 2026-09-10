@@ -204,9 +204,16 @@ export function modelIdentity(model: Model<Api>): ModelIdentity {
 
 const UNSUITABLE_VARIANT = /:(batch|free|online|thinking)$/i;
 
-/** Automatic selection excludes endpoint variants with the wrong execution shape. */
+/**
+ * Automatic selection excludes endpoint variants with the wrong execution shape,
+ * and OpenRouter's `~vendor/family-latest` redirect aliases ("always redirects to
+ * the latest model in the family"): the model behind one moves without notice,
+ * so it has no stable identity to tier, date or price — and the classifier is a
+ * permission boundary. The alias stays available by hand (/model, an explicit
+ * `subagentModel` / `classifierModel` setting).
+ */
 export function isSelectableVariant(model: Model<Api>): boolean {
-	return !UNSUITABLE_VARIANT.test(model.id);
+	return !UNSUITABLE_VARIANT.test(model.id) && !model.id.startsWith("~");
 }
 
 /** Non-positive values are catalog sentinels/unpriced, not evidence of being free. */
@@ -221,11 +228,26 @@ export function isDatedModelId(id: string): boolean {
 }
 
 /**
+ * The id with a trailing snapshot date removed: `-YYYYMMDD` (Anthropic, OpenAI)
+ * or `-MMDD` (DeepSeek's `deepseek-v4-flash-0731`, `deepseek-v4-pro-0813`; the
+ * four digits must be a real month and day, so a `-2411`-style version tag is
+ * left alone). The id itself when it carries no such suffix.
+ */
+export function stripSnapshotDate(id: string): string {
+	if (isDatedModelId(id)) return id.slice(0, -9);
+	const short = id.match(/-(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$/);
+	return short ? id.slice(0, -5) : id;
+}
+
+/**
  * Whether `model` is a dated snapshot whose undated alias is also present in
  * `pool` — the row a listing collapses so the same model is not offered twice.
+ * Exact: the alias must be the id minus its date, so `deepseek-v4-flash-vision-exp`
+ * is never read as a snapshot of `deepseek-v4-flash`.
  */
 export function isDatedDuplicate(model: { id: string }, pool: ReadonlyArray<{ id: string }>): boolean {
-	return isDatedModelId(model.id) && pool.some((other) => other.id !== model.id && model.id.startsWith(other.id));
+	const alias = stripSnapshotDate(model.id);
+	return alias !== model.id && pool.some((other) => other.id === alias);
 }
 
 /** The canonical `provider/id` spec — one source of truth for the string form. */
