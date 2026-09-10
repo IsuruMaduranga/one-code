@@ -32,6 +32,8 @@ import { parseFrontmatterLoosely } from "../lib/frontmatter.ts";
 import { defaultDiscoverRoots, discoverPlugins, type DiscoveredPlugins } from "../lib/plugins.ts";
 import { BUNDLED_SKILLS_DIR, promptTemplateNames, scanSkills } from "../lib/skill-scan.ts";
 import { loadServers, type McpServer } from "../mcp/config.ts";
+import type { PermissionMode } from "../permissions/matcher.ts";
+import { MODES_NEVER_FROM_PROJECT } from "../permissions/settings.ts";
 import { agentDirs, parseAgentFile } from "../subagents/agents.ts";
 import type { Finding, ReportLine, ReportSection, SessionView } from "./report.ts";
 import { countNoun, shortenHome } from "./report.ts";
@@ -132,7 +134,7 @@ function permissionsSummary(perms: unknown, scope: SettingsScope, findings: Find
 				text: `${shortenHome(path, home)} sets permissions.defaultMode "${mode}", which One Code does not read from its own settings files.`,
 				fix: "Set the default mode in ~/.claude/settings.json (or start with --permission-mode); remove the key here.",
 			});
-		} else if (repoFile && (mode === "auto" || mode === "bypassPermissions")) {
+		} else if (repoFile && MODES_NEVER_FROM_PROJECT.has(mode as PermissionMode)) {
 			refused = `permissions.defaultMode "${mode}" — a repository's files may not select it`;
 			findings.push({
 				level: "warn",

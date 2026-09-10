@@ -128,12 +128,12 @@ export function computePresets(
 		if (!main) continue;
 		const inherit = name !== "balanced";
 		// The resolvers judge the preset's main model as if it were the session's,
-		// over the deduplicated pool so a dated alias of the same model never shows
-		// up as "the" pick.
+		// over the same catalog the live session uses, so the preview names exactly
+		// what applying the preset produces.
 		const subagentModel = inherit
 			? main.model
-			: (resolveSubagentModel({ sessionModel: main.model, available: pool }).model ?? main.model);
-		const classifier = classifierCandidates({ available: pool, sessionModel: main.model }).candidates[0]?.model;
+			: (resolveSubagentModel({ sessionModel: main.model, available }).model ?? main.model);
+		const classifier = classifierCandidates({ available, sessionModel: main.model }).candidates[0]?.model;
 		presets.push({
 			name,
 			label: PRESET_LABEL[name],

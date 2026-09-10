@@ -26,7 +26,7 @@
  */
 
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { modelIdentity, modelsContainedToSession, modelSpec, pricedInput } from "./model-policy.ts";
+import { isDatedDuplicate, modelIdentity, modelsContainedToSession, modelSpec, pricedInput } from "./model-policy.ts";
 
 export type PromptTier = "frontier" | "workhorse" | "cheap" | "tiny";
 
@@ -222,7 +222,12 @@ export function economicalContainedCandidates(
 	sessionModel: Model<Api>,
 	contained?: Model<Api>[],
 ): Model<Api>[] {
-	return (contained ?? modelsContainedToSession(available, sessionModel))
+	const pool = contained ?? modelsContainedToSession(available, sessionModel);
+	return pool
+		// A dated snapshot whose undated alias is also listed is the same model
+		// twice; rank the alias so every automatic pick (classifier, subagent,
+		// reader, presets) names the model the way the user sees it in /model.
+		.filter((model) => !isDatedDuplicate(model, pool))
 		// Classify by the model's INTRINSIC tier — never `process.env`: CC_PROMPT_TIER
 		// forces the *session's* prompt-scaffolding register, and honoring it here
 		// would collapse every candidate to one tier and let a `tiny` model through

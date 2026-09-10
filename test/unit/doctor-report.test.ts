@@ -156,3 +156,12 @@ describe("renderDoctorReport", () => {
 		expect(lines.at(-1)).toBe("No setup issues found.");
 	});
 });
+
+describe("shortenHome", () => {
+	it("folds only paths under home, never a sibling directory sharing the prefix", async () => {
+		const { shortenHome } = await import("../../extensions/doctor/report.ts");
+		expect(shortenHome("/Users/bob/.claude/settings.json", "/Users/bob")).toBe("~/.claude/settings.json");
+		expect(shortenHome("/Users/bobby/.claude/settings.json", "/Users/bob")).toBe("/Users/bobby/.claude/settings.json");
+		expect(shortenHome("/Users/bob", "/Users/bob")).toBe("~");
+	});
+});

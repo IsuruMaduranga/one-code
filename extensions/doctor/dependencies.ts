@@ -19,7 +19,7 @@ import { INSTALL_HINTS } from "../lsp/install-hints.ts";
 import { SERVERS } from "../lsp/servers.ts";
 import { typescriptPreflight } from "../lsp/servers.ts";
 import type { McpServer } from "../mcp/config.ts";
-import { BRAVE_KEY_ENV, TAVILY_KEY_ENV, type WebSearchSettings } from "../web/backends.ts";
+import { BRAVE_KEY_ENV, resolveChain, TAVILY_KEY_ENV, type WebSearchSettings } from "../web/backends.ts";
 import type { Finding, ReportLine, ReportSection } from "./report.ts";
 
 export type DependencyNeed = "required" | "project" | "optional" | "unused";
@@ -156,18 +156,16 @@ export function webSearchRoute(input: Pick<DependencyInput, "env" | "sessionMode
 	if (providerHasNativeSearch(input.sessionModel)) {
 		return { route: "provider-native", detail: `${input.sessionModel!.provider} has its own search API; web_search uses it` };
 	}
-	const brave = input.env[BRAVE_KEY_ENV]?.trim() || input.webSearchSettings.apiKeys?.brave;
-	const tavily = input.env[TAVILY_KEY_ENV]?.trim() || input.webSearchSettings.apiKeys?.tavily;
-	const order = [...(input.webSearchSettings.order ?? []), "brave", "tavily", "exa-free"];
-	for (const name of order) {
-		if (name === "brave" && brave) return { route: "brave", detail: `Brave Search (${input.env[BRAVE_KEY_ENV] ? BRAVE_KEY_ENV : "key in ~/.onecode/settings.json"})` };
-		if (name === "tavily" && tavily) return { route: "tavily", detail: `Tavily (${input.env[TAVILY_KEY_ENV] ? TAVILY_KEY_ENV : "key in ~/.onecode/settings.json"})` };
-		if (name === "exa-free") break;
+	// The same chain the web_search tool builds, so the report names the route a session would take.
+	const first = resolveChain(input.env, input.webSearchSettings)[0];
+	if (!first || first.keyless) {
+		return {
+			route: "exa-free",
+			detail: `no provider search and no ${BRAVE_KEY_ENV}/${TAVILY_KEY_ENV}: falls back to Exa's free, rate-limited endpoint (results are labelled)`,
+		};
 	}
-	return {
-		route: "exa-free",
-		detail: `no provider search and no ${BRAVE_KEY_ENV}/${TAVILY_KEY_ENV}: falls back to Exa's free, rate-limited endpoint (results are labelled)`,
-	};
+	const envVar = first.name === "brave" ? BRAVE_KEY_ENV : TAVILY_KEY_ENV;
+	return { route: first.name, detail: `${first.label} (${input.env[envVar]?.trim() ? envVar : "key in ~/.onecode/settings.json"})` };
 }
 
 export function dependenciesSection(report: DependencyReport): ReportSection {

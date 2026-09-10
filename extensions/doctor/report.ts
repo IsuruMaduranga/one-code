@@ -17,7 +17,7 @@
 
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { McpStatusEvent } from "../lib/mcp-status.ts";
-import { hardWrapColumns, visibleWidth } from "../lib/text-width.ts";
+import { wrapProse } from "../subagents/panel-render.ts";
 import { countNoun } from "../lib/tui-render.ts";
 export { countNoun };
 
@@ -107,35 +107,6 @@ export interface RenderOptions {
 
 const COLOR: Record<LineLevel, string> = { ok: "success", info: "text", warn: "warning", error: "error", dim: "dim" };
 
-/**
- * Word-wrap plain text to `width` columns: breaks at spaces, and hard-breaks a
- * single token wider than the line (a long path) rather than overflowing.
- */
-export function wrapWords(text: string, width: number): string[] {
-	const columns = Math.max(1, width);
-	const out: string[] = [];
-	for (const paragraph of text.replace(/\r\n/g, "\n").split("\n")) {
-		if (paragraph.length === 0) {
-			out.push("");
-			continue;
-		}
-		let line = "";
-		for (const word of paragraph.split(" ")) {
-			const pieces = visibleWidth(word) > columns ? hardWrapColumns(word, columns) : [word];
-			for (const piece of pieces) {
-				if (line.length === 0) line = piece;
-				else if (visibleWidth(line) + 1 + visibleWidth(piece) <= columns) line += ` ${piece}`;
-				else {
-					out.push(line);
-					line = piece;
-				}
-			}
-		}
-		out.push(line);
-	}
-	return out;
-}
-
 /** Resolve the optional painters once; identity when absent (the CLI prints plain text). */
 function painters(options: RenderOptions) {
 	return {
@@ -155,7 +126,7 @@ type Paint = (color: string, text: string) => string;
 function renderEntry(prefix: string, text: string, level: LineLevel | undefined, width: number, paint: Paint): string[] {
 	const glyph = level ? GLYPH[level] : "";
 	const lead = glyph ? `${glyph} ` : "";
-	return wrapWords(text, Math.max(10, width - prefix.length - lead.length)).map((segment, i) => {
+	return wrapProse(text, Math.max(10, width - prefix.length - lead.length)).map((segment, i) => {
 		const head = i === 0 ? `${prefix}${lead}` : " ".repeat(prefix.length + lead.length);
 		return head + (level ? paint(COLOR[level], segment) : segment);
 	});
@@ -173,7 +144,7 @@ export function renderSection(section: ReportSection, options: RenderOptions = {
 /** Render the whole report to lines no wider than `width`, Claude Code's `└ ` style. */
 export function renderDoctorReport(report: DoctorReport, options: RenderOptions = {}): string[] {
 	const { width, paint, bold } = painters(options);
-	const out: string[] = [bold(report.title), ...wrapWords(report.summary, width)];
+	const out: string[] = [bold(report.title), ...wrapProse(report.summary, width)];
 	for (const section of report.sections) out.push("", ...renderSection(section, options));
 	out.push("");
 	if (report.findings.length === 0) {
@@ -212,5 +183,7 @@ export function contextLabel(tokens: number | undefined): string {
 
 /** `~/…` for anything under home, so paths stay readable at any width. */
 export function shortenHome(path: string, home: string): string {
-	return path.startsWith(home) ? `~${path.slice(home.length)}` : path;
+	if (path === home) return "~";
+	const root = home.endsWith("/") ? home : `${home}/`;
+	return path.startsWith(root) ? `~/${path.slice(root.length)}` : path;
 }

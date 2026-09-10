@@ -97,7 +97,9 @@ export default function doctorExtension(pi: ExtensionAPI) {
 				model: ctx.model,
 				modelSource: ctx.model ? "session" : "none",
 				thinkingLevel: ctx.thinkingLevel,
-				permission: permission ? { mode: permission.mode, classifier: permission.classifier, pinned: permission.pinned } : undefined,
+				permission: permission
+					? { mode: permission.mode, classifier: permission.classifier, pinned: permission.pinned, source: permission.mode === "auto" ? undefined : "set for this session" }
+					: undefined,
 				mcp: mcpSnapshot(),
 			},
 		});
@@ -173,6 +175,10 @@ export default function doctorExtension(pi: ExtensionAPI) {
 			ctx.ui.notify("No model is available — connect a provider with /login first.", "warning");
 			return;
 		}
+		if (unavailable === "no-priced-models") {
+			ctx.ui.notify("No priced models on this provider, so tiers cannot be told apart and no preset can be applied. Pick models by hand with /model, /subagent and /auto-mode model.", "warning");
+			return;
+		}
 		const preset = findPreset(presets, name);
 		if (!preset) {
 			ctx.ui.notify(`Unknown preset "${name}". Choose one of: ${PRESET_NAMES.join(", ")} (see /doctor presets).`, "error");
@@ -188,7 +194,8 @@ export default function doctorExtension(pi: ExtensionAPI) {
 			persistSubagentModel(preset.subagents.setting === "inherit" ? "inherit" : undefined, home);
 			persistClassifierModel(undefined, home);
 		} catch (error) {
-			ctx.ui.notify(`Could not save settings: ${error instanceof Error ? error.message : String(error)}`, "error");
+			const switched = mainSwitched ? ` The main model was already switched to ${modelSpec(preset.main)}; /model switches it back.` : "";
+			ctx.ui.notify(`Could not save settings: ${error instanceof Error ? error.message : String(error)}.${switched}`, "error");
 			return;
 		}
 		pi.events.emit(SUBAGENT_DEFAULT_CHANGED_CHANNEL, {});

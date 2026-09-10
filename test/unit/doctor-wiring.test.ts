@@ -144,3 +144,21 @@ describe("/doctor wiring", () => {
 		expect(without.notified[0]).toContain("No model is available");
 	});
 });
+
+describe("/doctor preset on an unpriced provider", () => {
+	it("explains that no preset can be applied instead of calling a valid name unknown", async () => {
+		const unpriced = { provider: "ollama", id: "local", name: "local", api: "openai-completions", cost: undefined, contextWindow: 8000 } as any;
+		const notified: string[] = [];
+		const ctx = {
+			cwd,
+			hasUI: false,
+			mode: "print",
+			model: unpriced,
+			modelRegistry: { getAll: () => [unpriced], getAvailable: () => [unpriced], getProviderAuthStatus: () => ({ configured: true }), getProviderDisplayName: (p: string) => p },
+			ui: { notify: (text: string) => notified.push(text) },
+		};
+		await run("preset quality", ctx);
+		expect(notified[0]).toContain("No priced models on this provider");
+		expect(setModel).not.toHaveBeenCalled();
+	});
+});
