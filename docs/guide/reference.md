@@ -1,103 +1,224 @@
 # Command and keyboard reference
 
-A quick lookup for the slash commands, keyboard shortcuts, environment-variable
-toggles, and themes.
+A lookup for every slash command, keyboard shortcut, command-line flag,
+environment variable, and file location. Each entry points to the page
+that explains it.
 
 ## Slash commands
 
-One Code adds these commands. Type them at the prompt.
+### One Code commands
+
+| Command | What it does | Page |
+|---|---|---|
+| `/doctor` | Run the checkup: the model reviews the measured setup report and proposes repairs. | [Doctor](doctor.md) |
+| `/doctor report` | Show the report alone in a scrollable panel. | [Doctor](doctor.md) |
+| `/doctor presets` | Show the three model presets and what each would pick. | [Doctor](doctor.md#model-presets) |
+| `/doctor preset <economical\|balanced\|quality>` | Apply a preset. | [Doctor](doctor.md#model-presets) |
+| `/agents` | Open the live subagent panel, or list the available agents. | [Subagents](subagents-and-workflows.md) |
+| `/subagent <provider/model-id>` | Save the default model for subagents and workflow agents. | [Subagents](subagents-and-workflows.md#choose-the-subagent-model) |
+| `/subagent inherit` | Use the main model for subagents. | |
+| `/subagent status` | Show the configured default and what it resolves to. | |
+| `/subagent clear` | Return to automatic selection. | |
+| `/subagent` | Open a model picker. | |
+| `/workflows` | Open the workflow run viewer. | [Workflows](subagents-and-workflows.md#the-run-viewer) |
+| `/workflows stop <runId>` | Stop a running workflow. | |
+| `/workflows log <runId>` | Print a run's recent events. | |
+| `/workflows list` | List this session's runs and the saved workflows. | |
+| `/effort [level]` | Set the reasoning effort (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultracode`), or open the slider. | [Reasoning effort](subagents-and-workflows.md#reasoning-effort) |
+| `/skills` | Manage which skills the model sees. | [Skills](skills-plugins-and-mcp.md#manage-skills) |
+| `/<skill-name> [args]` | Run a skill. | [Skills](skills-plugins-and-mcp.md#skills) |
+| `/skill:<name>`, `/skill:<plugin>:<name>` | Run a skill by its full name. | |
+| `/<command-name> [args]` | Run a custom command from `.claude/commands/`. | [Custom commands](skills-plugins-and-mcp.md#custom-commands) |
+| `/<plugin>:<command>` | Run a plugin command. | |
+| `/plugins` | Browse, install, and toggle plugins and marketplaces. | [Plugins](skills-plugins-and-mcp.md#plugins) |
+| `/mcp` | Manage MCP servers: status, reconnect, authenticate, enable, disable. | [MCP servers](skills-plugins-and-mcp.md#manage-servers) |
+| `/lsp` | Show language-server status. | [Language servers](configuration.md#language-server-diagnostics) |
+| `/permissions` | Show the permission mode and every loaded rule. | [Permissions](permissions-modes-and-auto-mode.md) |
+| `/allow <rule> [global]` | Save an allow rule for this repository, or for every repository with `global`. | [Add a rule](permissions-modes-and-auto-mode.md#add-a-rule-during-a-session) |
+| `/auto-mode`, `/auto-mode config` | Show the effective auto-mode configuration. | [Auto mode](permissions-modes-and-auto-mode.md#configure-auto-mode) |
+| `/auto-mode setup` | Draft and save an auto-mode configuration for this environment. | |
+| `/auto-mode defaults` | Show the built-in environment description. | |
+| `/auto-mode model [provider/model-id\|clear]` | Choose or clear the classifier model. | |
+| `/memory` | Open an instruction file or the memory folder. | [Memory](sessions-and-context.md#memory) |
+| `/tasks`, `/tasks hide`, `/tasks show` | Print the task list, or hide and show its widget. | [Tasks](tasks-and-background-work.md#the-task-list) |
+| `/background` | List background tasks. | [Background](tasks-and-background-work.md#the-background-list) |
+| `/loop <interval> <task>` | Repeat a task at a fixed interval (`30s`, `5m`, `1h`). | [Loops](tasks-and-background-work.md#scheduled-wake-ups-and-loops) |
+| `/loop <task>` | Repeat a task, letting the model choose the pace. | |
+| `/loop status`, `/loop stop` | Report or end the loop. | |
+| `/tools-deferred` | List deferred tools and whether each is loaded. | [Tools](tools.md#eager-and-deferred-tools) |
+| `/init` | Have the model write a `CLAUDE.md` for the project. | [CLAUDE.md](bring-your-claude-code-setup.md#project-instructions-claudemd) |
+| `/clear` | Start a new session (pi's `/new`). | [Sessions](sessions-and-context.md#start-over) |
+| `/exit` | Quit (pi's `/quit`). | |
+
+### pi commands
+
+These come from pi and are available in every One Code session.
 
 | Command | What it does |
 |---|---|
-| `/agents` | Open the subagent panel: available agents and a live tree of running ones. |
-| `/subagent` | Set the default model for subagent and workflow runs. Pass a `provider/model-id`, or `inherit`, `status`, or `clear`. |
-| `/workflows` | Open the `ultracode` workflow run viewer. |
-| `/effort` | Set the reasoning-effort level. |
-| `/skills` | Manage which skills are available to the model. |
-| `/plugins` | Browse, install, and toggle plugins. |
-| `/mcp` | Manage MCP servers: status, reconnect, enable, disable. |
-| `/lsp` | Show language-server status and diagnostics. |
-| `/permissions` | Review the current permission rules. |
-| `/allow` | Add a permission rule. |
-| `/auto-mode` | View and adjust auto-mode settings. Add `setup` to run the configuration wizard. |
-| `/memory` | View and edit stored memory entries. |
-| `/tasks` | Open the task board. |
-| `/background` | List background tasks. |
-| `/loop` | Run a prompt or command on a recurring interval, or let the model pace itself. |
-| `/tools-deferred` | List the tools loaded on demand behind tool search. |
-| `/init` | Generate a `CLAUDE.md` for the current project. |
-| `/clear` | Start a new session. |
-| `/exit` | Quit One Code. |
-
-These commands come from pi and are also available:
-
-| Command | What it does |
-|---|---|
-| `/model` | Switch the active model. |
-| `/login` | Connect a provider. |
-| `/compact` | Compact the conversation to reclaim context. |
+| `/login`, `/logout` | Add or remove provider credentials. |
+| `/model` | Switch the model. **ctrl+s** in the picker saves it as the startup default. |
+| `/thinking` | Switch the thinking level. **ctrl+s** in the picker saves it as the startup default. Covers the same dial as `/effort`. |
+| `/scoped-models` | Choose which models **ctrl+p** cycles through. |
+| `/settings` | pi's preferences: theme, message delivery, and more. |
+| `/compact [instructions]` | Compact the context now. |
+| `/resume` | Pick a previous session. |
+| `/new` | Start a new session. |
+| `/name <name>` | Name the session. |
+| `/session` | Show the session file, id, message count, tokens, and cost. |
+| `/tree` | Jump to any point in the session and continue from there. |
+| `/fork`, `/clone` | Copy the session from a message, or duplicate the current branch. |
+| `/trust` | Save the project trust decision for pi's own project resources. |
+| `/copy` | Copy the last reply to the clipboard. |
+| `/export [file]`, `/import <file>` | Export the session to HTML or JSONL; import a JSONL session. |
+| `/share` | Upload the session as a private GitHub gist. |
+| `/reload` | Reload extensions, skills, prompts, themes, and context files. |
+| `/hotkeys` | Show every keyboard shortcut. |
+| `/changelog` | Show pi's version history. |
+| `/quit` | Quit. |
 
 ## Keyboard shortcuts
+
+### One Code
 
 | Shortcut | What it does |
 |---|---|
 | **ctrl+q** | Cycle the permission mode: manual, accept edits, plan, auto. |
-| **shift+tab** | Move the reasoning-effort dial. |
-| **ctrl+x** then **ctrl+k** | Stop every running agent, from the agent panel. |
+| **↓** (empty editor) | Focus the panel below the editor: background shells, then subagents, then workflows. |
+| **ctrl+x** then **ctrl+k** | Stop every running agent (in the subagent panel). |
+| **x** | Stop the selected agent, shell, or workflow (in a panel). |
+| **Esc** | Leave a panel, or cancel a dialog. |
+| **ctrl+c** | Close any panel. |
 
-## Reasoning effort
+Panel-specific keys are listed in
+[The terminal interface](terminal-interface.md#panels-opened-by-commands).
 
-The `/effort` command and the **shift+tab** dial set how much reasoning the
-model spends, from `minimal` to `max`. One stop past `max` is `ultracode`, which
-turns on parallel-agent workflows. See
-[Subagents and workflows](subagents-and-workflows.md).
+### pi
 
-## Environment-variable toggles
+The ones you will use most; `/hotkeys` shows all of them.
 
-Set these before launching to change behavior:
-
-| Variable | Effect |
+| Shortcut | What it does |
 |---|---|
-| `CC_NO_BANNER=1` | Restore pi's default header instead of the One Code banner. |
-| `CC_CLEAR_THINKING=0` | Turn off automatic trimming of old thinking on Anthropic models. It is on by default for `api.anthropic.com`. Set to `1` to force it on elsewhere. |
-| `CC_RECAP=0` | Turn off the "while you were away" recap. |
-| `CC_RECAP_IDLE_MS` | Idle time in milliseconds before the recap triggers. |
-| `CC_TURN_DURATION=0` | Turn off the line that reports how long a turn took. |
-| `CC_FOOTER=0` | Keep pi's built-in footer instead of One Code's status line. |
-| `CC_COMPACTION=0` | Use pi's own compaction summary instead of the Claude Code-style one. |
-| `CC_TOTAL_TOKENS=0` | Drop the `<total_tokens>` per-turn budget line from the system prompt, user messages and tool results. |
-| `CC_TOTAL_TOKENS_BUDGET` | The per-turn token budget that line counts down from (default 15000000, Claude Code's figure). |
-| `CC_PROMPT_TIER=frontier\|workhorse\|cheap\|tiny` | Force a system-prompt register instead of deriving it from the model. |
-| `CC_PERMISSION_MODE` | Starting permission mode (`default`, `acceptEdits`, `plan`, `bypassPermissions`, `dontAsk`, `auto`); the `--permission-mode` flag wins. One Code keeps it updated with the live mode while running. |
-| `CC_NO_INPUT_MARKER=1` / `CC_NO_ASSISTANT_MARKER=1` | Drop the `>` input marker / the `⏺` assistant marker in the transcript. |
-| `CC_HOOKS_DEBUG=1` | Print hook dispatch details to stderr. |
-| `CC_AUTO_MODE_DEBUG=1` | Print auto-mode classifier verdicts (stage, severity, rule) to stderr. |
-| `CC_VERSION` | Version shown in the banner (the bundled app sets it to its own version). |
-| `PI_CACHE_RETENTION` | pi's prompt-cache TTL. Interactive sessions (the TUI and `--mode rpc`) default to `long` — an extended cache (one hour on Anthropic; on OpenAI the exact TTL is pi's own and model-dependent, e.g. 30 minutes on GPT-5.6+ Responses models), so a pause between turns does not re-write the whole context. `-p`/`--mode json` runs, subagents and workflow agents use the provider's short default. Set `short` (or any value) to take over the setting yourself. |
-| `ONECODE_NO_UPDATE_CHECK=1` | Skip the daily npm update check (`--offline`/`PI_OFFLINE=1` also skip it). |
-| `ONECODE_STATE_DIR` | Where One Code keeps its own state (default `~/.onecode`). This is independent of pi's agent directory: if you point pi elsewhere with `PI_CODING_AGENT_DIR`, pi's own state moves but One Code's stays in `~/.onecode` unless you also set `ONECODE_STATE_DIR`. |
-| `ONECODE_DEBUG=1` | Report when a pi-internal patch in the bundled app did not take. |
-| `CLAUDE_CONFIG_DIR` | Honoured like Claude Code does: relocates the user-scope `.claude` dir and `.claude.json`. |
+| **shift+tab** | Cycle the thinking level. |
+| **ctrl+t** | Show or hide thinking blocks. |
+| **ctrl+o** | Expand or collapse a tool's output. |
+| **ctrl+p**, **shift+ctrl+p** | Cycle models forward or backward. |
+| **ctrl+l** | Open the model picker. |
+| **Esc** | Interrupt the model. |
+| **ctrl+c** | Clear the editor; press twice to exit. |
+| **ctrl+d** | Exit when the editor is empty. |
+| **alt+enter** (**ctrl+q** on Windows and WSL) | Queue a follow-up message while the model works. |
+| **alt+↑** | Restore queued messages to the editor. |
+| **ctrl+g** | Edit the prompt in your external editor. |
+| **ctrl+v** | Paste an image or text. |
+| **shift+enter**, **ctrl+j** | Insert a newline. |
+| **ctrl+x** | Copy the last reply. |
+| **PgUp**, **PgDn**, **Home**, **End** | Scroll the transcript in full-screen mode. |
+| **ctrl+shift+f** | Search the transcript in full-screen mode. |
+| **!** at the start of a line | Run a shell command yourself. |
 
-The `CC_` prefix is historical (the project began as a Claude Code recreation);
-`ONECODE_`-prefixed aliases for every knob are planned before 1.0.
+Rebind keys in pi's keybindings file; see pi's documentation.
 
-## Themes
+## Command-line flags
 
-Two themes ship: `onecode` (dark) and `onecode-light`. Select one through your
-pi settings.
-
-## Other run modes
-
-The `onecode` and `pi` commands accept these flags for non-interactive use:
+`onecode` forwards every flag to pi except `--version` and `doctor`. On the
+extension installation, use `pi` in place of `onecode`.
 
 | Flag | What it does |
 |---|---|
-| `-p "…"` | Run one prompt and exit. |
-| `-c` | Continue the previous session. |
-| `--mode json` | Emit machine-readable events for scripting. |
-| `--permission-mode plan` | Start in plan mode. |
-| `--model <provider/id>` | Start on a specific model. |
+| `onecode --version`, `-v` | Print the app version and the pi version inside it. |
+| `onecode doctor` | Print the setup report without starting a session. Exit 1 when no provider is ready. |
+| `-p "…"`, `--print` | Run one prompt and exit. |
+| `--mode json` | Emit JSON events for scripting. |
+| `--mode rpc` | Speak pi's RPC protocol over stdin and stdout. |
+| `-c`, `--continue` | Continue the most recent session. |
+| `-r`, `--resume` | Browse and pick a session. |
+| `--session <id>`, `--fork <id>` | Open or fork a specific session. |
+| `--no-session` | Do not save this session. |
+| `--permission-mode <mode>` | Start in `default`, `acceptEdits`, `plan`, `auto`, `bypassPermissions`, or `dontAsk`. |
+| `--dangerously-skip-permissions` | Start in bypass mode. |
+| `--model <provider/id>` | Start on a model. Add `:<level>` to set thinking. |
+| `--thinking <level>` | Start at a thinking level. |
+| `--provider <name>`, `--api-key <key>` | Choose a provider and supply a key for this run. |
+| `--tui-mode fullscreen` | Full-screen interface (the default under the app). |
+| `--tools <list>` | Restrict the tools available. |
+| `-e <source>` | Load an extra extension. |
+| `--offline` | Skip network checks, including the update check. |
+| `--append-system-prompt <text>` | Append to the system prompt. |
+| `--verbose` | Show the full startup listing. |
 
-On the pi-extension install, use `pi` in place of `onecode` for all of the
-preceding.
+## Environment variables
+
+Set these before launching.
+
+### One Code
+
+| Variable | Effect |
+|---|---|
+| `ONECODE_STATE_DIR` | Where One Code keeps its state (default `~/.onecode`). Independent of pi's agent directory. |
+| `ONECODE_NO_UPDATE_CHECK=1` | Skip the daily update check. |
+| `ONECODE_DEBUG=1` | Report when a pi-internal patch in the bundled app did not apply. |
+| `AA_API_KEY` | Artificial Analysis key for measured model selection. |
+| `BRAVE_SEARCH_API_KEY`, `TAVILY_API_KEY` | Web-search fallback keys. |
+
+### Claude Code compatibility toggles
+
+The `CC_` prefix is historical; `ONECODE_`-prefixed aliases are planned.
+
+| Variable | Effect |
+|---|---|
+| `CC_NO_BANNER=1` | Keep pi's header instead of the One Code banner. |
+| `CC_NO_INPUT_MARKER=1` | Remove the `❯` prompt marker. |
+| `CC_NO_ASSISTANT_MARKER=1` | Remove the `●` reply marker. |
+| `CC_FOOTER=0` | Keep pi's footer instead of One Code's status line. |
+| `CC_TURN_DURATION=0` | Remove the post-turn timing line. |
+| `CC_RECAP=0` | Turn off the "while you were away" recap. |
+| `CC_RECAP_IDLE_MS` | Idle time before a recap, in milliseconds (default 300000). |
+| `CC_COMPACTION=0` | Use pi's compaction summary instead of Claude Code's. |
+| `CC_CLEAR_THINKING=0`, `=1` | Force the thinking-preservation request off or on for Anthropic models. Default: on for `api.anthropic.com` only. |
+| `CC_TOTAL_TOKENS=0` | Remove the `<total_tokens>` budget line. |
+| `CC_TOTAL_TOKENS_BUDGET` | The per-turn budget the line counts down from (default 15000000). |
+| `CC_PROMPT_TIER=frontier\|workhorse\|cheap\|tiny` | Force a system-prompt tier. |
+| `CC_HOOKS_DEBUG=1` | Print hook dispatches to stderr and log decisions. |
+| `CC_AUTO_MODE_DEBUG=1` | Print classifier verdicts to stderr. `2` is more verbose. |
+| `CC_VERSION` | The version shown in the banner (set by the app). |
+| `CC_PERMISSION_MODE` | Set by One Code to the live mode for child processes. Not an input; use `--permission-mode`. |
+
+### pi and Claude Code variables honored
+
+| Variable | Effect |
+|---|---|
+| `PI_CODING_AGENT_DIR` | pi's agent directory. The app sets `~/.onecode/agent`. |
+| `PI_CACHE_RETENTION` | pi's prompt-cache lifetime. One Code sets `long` for interactive sessions unless you set it yourself. |
+| `PI_OFFLINE=1` | Same as `--offline`. |
+| `CLAUDE_CONFIG_DIR` | Where Claude Code's user configuration is read from. |
+| `CLAUDE_CODE_SUBAGENT_MODEL` | Default subagent model on a Claude session. |
+| `EDITOR`, `VISUAL` | Editor used by `/memory` (and pi's **ctrl+g**). |
+| `SHELL` | Shell used for commands (default `/bin/sh`). |
+| Provider keys | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `OPENCODE_API_KEY`, and the rest pi supports. |
+
+Variables One Code sets for hooks and children: `CLAUDE_PROJECT_DIR` in a
+hook's environment, `CC_PERMISSION_MODE` for child tool gates.
+
+## Files and directories
+
+| Path | Contents |
+|---|---|
+| `~/.onecode/` | One Code's state. See [What is stored under ~/.onecode](configuration.md#what-is-stored-under-onecode). |
+| `~/.onecode/agent/` | pi's state under the bundled app: credentials, sessions, pi's settings, plugins. |
+| `~/.claude/` | Claude Code's configuration, read only, except `projects/<slug>/memory/`. |
+| `~/.claude/projects/<slug>/memory/` | Per-repository memory, shared with Claude Code. |
+| `.claude/` | Project configuration: `settings.json`, `settings.local.json`, `skills/`, `commands/`, `agents/`, `workflows/`, `worktrees/`. |
+| `.mcp.json` | Project MCP servers. |
+| `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `ONECODE.md` | Instruction files. |
+| System temp directory | Session scratchpads. |
+
+## Tools
+
+The tools available to the model are listed in [Tools](tools.md), with the
+mapping from Claude Code's names.
+
+## Themes
+
+`onecode` (dark) and `onecode-light`. See
+[Full-screen mode and themes](configuration.md#full-screen-mode-and-themes).

@@ -1,83 +1,192 @@
 # Subagents and workflows
 
-One Code delegates work in two ways: subagents for individual tasks that deserve
-their own context, and `ultracode` workflows for fanning a large job out across
-many agents at once.
+One Code delegates work in two ways: subagents for tasks that deserve their
+own context window, and `ultracode` workflows for fanning a large job out
+across many agents at once.
 
 ## Subagents
 
-A subagent is a child agent with its own context window. It does its work and
-returns only the result, so the noise of the investigation stays out of your
+A subagent is a child agent with its own context window. It does its work
+and returns a report, so the noise of an investigation stays out of your
 main conversation.
 
 ### Where subagents come from
 
-- Definitions in `.claude/agents/`, each a markdown file that sets the
-  agent's model, tools, and instructions.
-- Three ship with One Code: `general-purpose`, `explore`, and `plan`.
+- Three ship with One Code: `general-purpose` (any task), `explore`
+  (read-only search), and `plan` (design an implementation plan).
+- Markdown definitions in `.claude/agents/` (project) and
+  `~/.claude/agents/` (user), each setting an agent's model, tools, and
+  system prompt. A project definition wins over a user definition of the
+  same name.
+- Plugins can add agents, namespaced by plugin.
+- `fork`, a synthetic type that copies the current conversation.
 
-Run `/agents` to open the live agent panel, which lists the available agents and
-shows running ones as a tree with their output.
+Run `/agents` with no agents running to list the catalog with each agent's
+tools.
 
 ### Run a subagent
 
-The model delegates to a subagent through the Agent tool. You steer this in
-plain language, for example "use a subagent to find every call site" or "explore
-this with the `explore` agent." Useful ways to run them:
+The model delegates through the `Agent` tool. You steer it in plain
+language: "use a subagent to find every call site", or "explore this with
+the `explore` agent". What happens next:
 
-- **Pick a model per agent.** Assign a cheap model to routine research and
-  review so it does not spend your main model's budget. An agent definition in
-  `.claude/agents/` can name its own model, and `/subagent <provider/model-id>`
-  sets the default model for all subagent and workflow runs. See
-  [Providers and models](providers-and-models.md).
-- **Fork the current session.** A forked subagent inherits your conversation so
-  far, which suits a task that needs the full context you have built up.
-- **Keep working while agents run.** Every subagent runs in the background: the
-  model keeps working (and you can keep talking to it) while agents run, each
-  agent's report is picked up the moment it finishes, and a finished agent can
-  still be messaged later.
-- **Isolate in a git worktree.** Give a subagent its own worktree so it can edit
-  files without colliding with your working tree or with other agents.
+- **The run starts in the background.** The model receives a task id at
+  once and keeps working. The subagent's report arrives as a notification
+  when it finishes, mid-turn if the model is still busy, or as a new turn
+  if it is idle. In a `-p` or `--mode json` run, the subagent runs to
+  completion instead and the report is returned inline.
+- **You can keep talking to the model** while agents run.
+- **Subagents go through your permission gate.** A subagent's tool calls
+  are decided by the same mode, rules, and classifier as the main session,
+  and a prompt it triggers is shown to you. Your hooks run inside subagents
+  too.
+- **A finished agent can be messaged later.** The `SendMessage` tool
+  reaches a running agent live, or resumes a finished one from its saved
+  session. `list_agents` lists the session's agents and their status.
 
-To stop every running agent from the panel, press **ctrl+x** then **ctrl+k**.
+Two options change how a subagent runs:
 
-## Git worktrees
+- **Fork.** A forked subagent inherits the whole conversation so far, for a
+  task that needs everything you have built up. Forks run on the main
+  model and can only be started from the main conversation. Depth is
+  limited: the main conversation can start a subagent, and that subagent
+  one more, but no further.
+- **Worktree isolation.** The subagent gets its own git worktree, branched
+  from `HEAD`, so it can edit files without colliding with your working
+  tree or other agents. A worktree the agent left unchanged is removed;
+  otherwise it is kept and its path reported.
 
-You can also move your whole session into an isolated git worktree, separate
-from subagents. The model enters a worktree branched from your current `HEAD`
-under `.claude/worktrees/`. Every command and relative path then runs there, and
-your main working tree stays untouched until the session exits the worktree.
-This is the safe way to let a task make sweeping changes you review before
+### Choose the subagent model
+
+Subagents and workflow agents can run on a different model or provider
+from the main session. The default is chosen for you: the cheapest model on
+your provider that is at least as capable as a floor derived from your
+main model. When an Artificial Analysis key is configured, measured coding
+ability is used for that floor; see
+[Automatic model selection](providers-and-models.md#automatic-model-selection).
+
+To set the default yourself:
+
+| Command | Effect |
+|---|---|
+| `/subagent <provider/model-id>` | Save a default for subagents and workflow agents. Short aliases such as `sonnet` or `haiku` work when they resolve to one model. |
+| `/subagent inherit` | Use the main session's model. |
+| `/subagent status` | Show the configured default, the model it resolves to, and where the setting came from. |
+| `/subagent clear` | Remove the saved default and return to automatic selection. |
+| `/subagent` | Open a model picker. |
+
+The choice is saved to `~/.onecode/settings.json`. A saved choice is tied
+to the provider it was made on; after switching providers, run
+`/subagent status` and pick again if it no longer applies.
+
+On a Claude session, Claude Code's `CLAUDE_CODE_SUBAGENT_MODEL` variable is
+honored, from the environment or from the `env` block of your user or
+managed settings. One Code's own setting wins when both are set.
+
+An agent definition's own `model` field overrides the default for that
+agent.
+
+### Follow agents live
+
+While agents run, the panel below the editor shows a tree: `main` first,
+then each agent with its type, what it is doing right now ("Reading
+src/index.ts", "Running a command"), its elapsed time, and its token count.
+Nested agents appear under their parent. A finished agent stays for a few
+seconds.
+
+- Press **↓** from an empty editor to focus the rows (after the shells
+  chip, if background shells exist).
+- **↑** and **↓** select an agent. **Enter** opens its live transcript.
+- **x** stops the selected agent. **ctrl+x** then **ctrl+k** stops all of
+  them.
+- In the transcript: **↑** and **↓** scroll, **PgUp** and **PgDn** page,
+  **Tab** moves to the next agent, **←** returns to the rows, **Enter**
+  closes the view.
+
+`/agents` opens the panel on the newest agent.
+
+## Git worktrees for the whole session
+
+Separately from subagents, the model can move your whole session into an
+isolated worktree with `enter_worktree`. It creates a worktree under
+`.claude/worktrees/`, branched from your current `HEAD`. Every shell command
+and relative path then resolves there, and your main working tree stays
+untouched until `exit_worktree` leaves the worktree, keeping or removing
+it. Removal is refused while there is uncommitted or unmerged work. Ask for
+this when a task will make sweeping changes you want to review before
 merging.
 
 ## Ultracode workflows
 
-For a big job (a broad audit, a migration, or a review worth double-checking),
-type **`ultracode`** in your message. The model writes a short JavaScript script
-that fans the work out across many agents running in parallel. The keyword
-arms the turn it starts; a message you queue while the model is still working
-does not arm the next turn, so for a longer stretch of this kind of work switch
-the mode on with `/effort ultracode` instead (see below).
+For a big job (a broad audit, a migration, a review worth double-checking),
+include the word **`ultracode`** in your message. The model writes a short
+JavaScript script that fans the work out across many agents in parallel,
+then runs it with the `workflow` tool.
+
+The keyword arms the turn it appears in. A message you queue while the
+model is still working does not arm the next turn. For a longer stretch of
+this kind of work, turn the mode on with `/effort ultracode`: it sets the
+reasoning effort to `xhigh` and keeps workflow orchestration armed until
+you change the effort again. The footer shows `✦ ultracode` while it is
+armed.
 
 ### How a workflow runs
 
-- The run goes to the background with a live progress panel.
-- Every run is journaled, so re-running a workflow replays the parts that did
-  not change and only re-runs what did.
-- Assign the fan-out agents a cheap model to keep a large run affordable while
-  the parent stays on a frontier model.
+- The script runs in a separate thread, so a runaway script cannot freeze
+  the interface. A script that stops making progress is stopped after a
+  few seconds; a run is capped at 30 minutes.
+- The run goes to the background and the model gets a run id. Progress
+  shows in a strip below the editor (**↓** to focus it, **Enter** to open,
+  **x** to stop) and in `/workflows`.
+- Every completed agent call is journaled. Re-running a workflow with
+  `resumeFromRunId` replays the calls whose inputs did not change at no
+  cost and runs only what differs. A background run does not survive the
+  end of a session, but its journal does.
+- A script can carry an output-token target. Once the target is reached,
+  new and queued agent calls stop; agents already running finish and can
+  land above it.
+- Fan-out agents use the subagent default model, so a cheap subagent tier
+  keeps a large run affordable while the main conversation stays on a
+  frontier model.
+- In a `-p` or `--mode json` run, the workflow runs to completion and
+  returns its result inline.
 
-Run `/workflows` to open the run viewer, which shows the phase and agent tree, a
-detail pane for each agent's prompt and output, and a live ticker.
+### The run viewer
+
+`/workflows` opens the viewer: a list of phases, the agents in each phase,
+and a detail pane with each agent's prompt and output, with a live ticker.
+
+| Key | Action |
+|---|---|
+| **↑**, **↓** | Move. |
+| **Enter** | Open a phase or agent; expand a truncated prompt. |
+| **Tab** | Switch to another running workflow. |
+| **PgUp**, **PgDn** | Scroll the detail pane. |
+| **x** | Stop the running workflow. |
+| **s** | Save the script to `.claude/workflows/<name>.js`. A second **s** confirms an overwrite. |
+| **Esc** | Go up a level, then close. **q** closes at once. |
+
+From the prompt, `/workflows stop <runId>` stops a run, `/workflows log
+<runId>` prints its recent events, and `/workflows list` prints this
+session's runs and the saved workflows.
 
 ### Save a workflow to reuse
 
-Save a workflow script to `.claude/workflows/` to invoke it again by name later,
-instead of describing the job from scratch each time.
+Scripts in `.claude/workflows/` (project) or `~/.claude/workflows/` (user)
+can be invoked by name instead of describing the job again. A project
+script shadows a user script of the same name. The viewer's **s** key saves
+the current run's script there.
 
-## Reasoning effort and ultracode
+## Reasoning effort
 
-The `/effort` slider sets how much reasoning the model spends, from `minimal` to
-`max`. One stop past `max` is `ultracode`, which turns on the workflow behavior
-described here. Move the same dial with **shift+tab**. See
-[Reasoning effort](reference.md#reasoning-effort).
+`/effort` sets how much reasoning the model spends: `off`, `minimal`,
+`low`, `medium`, `high`, `xhigh`, `max`, or `ultracode`. A bare `/effort`
+opens a slider (**←** and **→** or **h** and **l** move, **Enter** confirms).
+Levels the current model does not support are skipped. **shift+tab** cycles
+the plain levels; cycling away from `xhigh` while ultracode is armed turns
+ultracode off.
+
+Changing the effort re-caches the conversation, so the next request costs
+more than usual. `/effort` does not save the level across restarts; to
+save one, open pi's `/thinking` picker and press **ctrl+s**, or pass
+`--thinking <level>` at launch.

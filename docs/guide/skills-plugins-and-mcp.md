@@ -1,84 +1,174 @@
 # Skills, plugins, and MCP
 
 One Code runs Agent Skills, Claude Code plugins, and MCP servers from your
-existing configuration. This page covers using each and the panels that manage
-them.
+existing configuration. This page covers using each and the panels that
+manage them.
 
 ## Skills
 
-An Agent Skill is a packaged set of instructions for a kind of task. One Code
-discovers skills from `.claude/skills/` and lists them for the model to call.
-The model invokes a skill when the task matches, or you can run one yourself by
-typing its name as a slash command, as in Claude Code: `/simplify`,
-`/code-review`, or any skill from `.claude/skills/`. Plugin skills keep their
-plugin prefix (`/plugin-name:skill`). pi's `/skill:name` form also works.
+An Agent Skill is a packaged set of instructions for a kind of task. One
+Code discovers skills from these places, in order of precedence:
 
-Run `/skills` to open the skills panel. Each skill can be in one of four states,
-which control how it appears to the model:
+1. `.claude/skills/` in the project
+2. `~/.claude/skills/` and `~/.agents/skills/`
+3. Skills from installed plugins
+4. The bundled catalog
 
-- On: the model sees the skill's full description and can call it.
-- Name only: the model sees the name but not the full description.
-- User only: available when you invoke it, hidden from the model otherwise.
-- Off: not available.
+A skill of the same name earlier in the list wins.
+
+The model calls a skill with the `skill` tool when a task matches its
+description. You can also run one yourself by typing its name as a slash
+command, as in Claude Code: `/simplify`, `/code-review`, or any skill from
+`.claude/skills/`. Anything after the name is passed to the skill as
+arguments. Plugin skills keep their plugin prefix and are run as
+`/skill:<plugin>:<name>`. pi's `/skill:<name>` form works for every skill.
+
+A skill's slash command is not created when the name is already taken by a
+built-in command, a `.claude/commands/` template, or another skill.
+
+### Manage skills
+
+`/skills` opens the skills panel. Each skill has one of four states, which
+control how the model sees it:
+
+| State | Effect |
+|---|---|
+| On | The model sees the full description and can call the skill. |
+| Name only | The model sees the name but not the description. |
+| User only | You can run it as a command; the model does not see it. |
+| Off | Not available to anyone. |
+
+**↑** and **↓** move, **Enter** or **Space** cycle the state, **/**
+searches, **t** sorts by name or state, **Esc** closes. Plugin skills are
+managed from `/plugins` instead. States are saved under One Code's plugin
+directory, never in the skill files.
 
 ### Bundled skills
 
-A small catalog of Claude Code's built-in skills ships with One Code so they
-appear in the skill list and run the same way:
+Four of Claude Code's built-in skills ship with One Code:
 
 - `simplify`: clean up recently changed code for clarity.
 - `code-review`: review changes for correctness bugs.
 - `security-review`: review changes for security issues.
 - `fewer-permission-prompts`: scan your usage and propose an allowlist.
 
-A skill of the same name in your own `.claude/skills/` takes precedence over the
-bundled one.
+A skill of the same name in your own `.claude/skills/` takes precedence.
+
+### Skills not bundled
+
+The bundle omits the Claude Code skills that depend on services One Code
+does not have:
+
+| Group | Skills omitted |
+|---|---|
+| Hosted artifacts and design | `design`, `design-sync`, `dataviz`, the `artifact-*` guides, and the dashboard, report, table, explainer, plan, and whiteboard publishers. |
+| Claude Code configuration, account, and desktop workflows | `update-config`, `keybindings-help`, `claude-in-chrome`, `debug`, `usage`, `explain-usage`, `setup-cowork`, `schedule` cloud routines, `batch`, and `claude-code-guide`. |
+| Run-skill generation | `run` and `run-skill-generator`. Use project-local run skills instead. |
+| API reference | `claude-api`. |
+
+One Code provides `/init` and `/loop` itself. Commit and pull-request
+workflows are available through the `commit-commands` plugin.
+
+You can add your own skills under `.claude/skills/`. A skill that requires a
+service or tool still needs that service or tool configured.
+
+## Custom commands
+
+Markdown files in `.claude/commands/` (project) and `~/.claude/commands/`
+(user) become slash commands with the file's name, as in Claude Code.
+`$ARGUMENTS` is replaced with what you type after the command. Plugin
+commands are namespaced as `/<plugin>:<command>`, and may run shell
+snippets from their body; oversized output is written to a file rather than
+truncated.
 
 ## Plugins
 
-A plugin bundles agents, skills, commands, and MCP servers. One Code picks up
-plugins installed under `~/.claude/plugins` and makes their contents available,
-each namespaced by the plugin so names never collide with yours.
+A plugin bundles agents, skills, commands, hooks, MCP servers, and
+language-server configuration. One Code picks up plugins installed under
+`~/.claude/plugins` and makes their contents available, each namespaced by
+plugin so names never collide with yours. The `enabledPlugins` key in your
+Claude Code settings is honored.
 
-Run `/plugins` to open the marketplace panel. It has four views:
+Run `/plugins` to open the marketplace panel. Its four tabs are:
 
-- **Discover**: browse plugins available to install.
-- **Installed**: see what is installed and turn plugins on or off.
-- **Marketplaces**: manage the sources plugins come from.
-- **Errors**: see plugins that failed to load and why.
+- **Discover**: browse plugins from your marketplaces. Type to search,
+  **Space** to install, **Enter** for details.
+- **Installed**: see what is installed and turn plugins, or individual
+  skills within them, on or off. **Space** toggles, **Enter** for details.
+  In the details, **e** and **d** toggle, **u** uninstalls, **f** marks a
+  favorite.
+- **Marketplaces**: the sources plugins come from. **a** adds one (a GitHub
+  `owner/repo`, a git URL, or a local path), **u** refreshes, **d** removes.
+- **Errors**: plugins that failed to load, and why.
 
-Plugins you install through One Code go to its own plugin directory. Plugins
-Claude Code installed stay read-only; toggling one writes to an overrides layer,
-never to `~/.claude`.
+**←** and **→** switch tabs; **Esc** closes.
+
+Plugins you install through One Code go to One Code's own plugin directory
+under its agent directory. Plugins Claude Code installed stay read-only;
+turning one off writes to an overrides layer, never to `~/.claude`.
+Installing or toggling a plugin takes effect for commands at once; its MCP
+servers, agents, and hooks load on the next session, and the panel says so
+when you close it.
+
+Marketplace sources are git repositories and local paths. Version pinning,
+npm or pip sources, and dependency resolution are not implemented.
 
 ## MCP servers
 
 The Model Context Protocol (MCP) lets external servers provide tools and
-resources to the model. One Code connects the servers declared in your project's
-`.mcp.json` on startup.
+resources to the model. One Code reads server definitions from:
 
-Servers listed in a project's checked-in `.mcp.json` run only after you
-approve them. On the first start in that project, One Code shows Claude Code's
-dialog ("New MCP server found in .mcp.json") with the command each server
-runs, and offers to use this server, to use this and all future servers in the
-project, or to decline. Approvals are remembered under `~/.onecode` and are
-tied to the server's configuration, so a changed command asks again. If you
-decline, the server appears as disabled in `/mcp`; choosing Enable there
-approves it. Claude Code's own `enabledMcpjsonServers`,
-`disabledMcpjsonServers`, and `enableAllProjectMcpServers` settings are
-honoured from your user and `.claude/settings.local.json` files. In
-non-interactive runs (`-p`, `--mode json`) unapproved servers are skipped with
-a note on stderr.
+- `.mcp.json` in the project (the nearest one, walking up to the
+  repository root)
+- `~/.claude.json` (the `mcpServers` key)
+- `.claude/settings.local.json`
+- Installed plugins
 
-Each server's tools load on demand rather than all at once, so a server with
-many tools does not bloat the prompt. The model loads a tool's full definition
-when it needs it.
+Definitions may reference environment variables as `$VAR` or `${VAR}` in
+the command, arguments, environment, URL, and headers; an unset variable
+produces a warning. Stdio servers (`command`) and HTTP servers (`url`) are
+verified; servers using server-sent events are untested.
 
-Run `/mcp` to open the server manager. It groups servers, shows the status of
-each, and offers per-server actions to reconnect, enable, or disable a server.
-Disabling a server is saved to `~/.onecode`, so it stays disabled across
-sessions. Servers that need authorization support an OAuth sign-in flow that
-opens your browser.
+### Approve a project's servers
 
-MCP tools appear to the model as `mcp__<server>__<tool>`. You do not type these
-names; the model calls them.
+Servers listed in a project's `.mcp.json` run only after you approve them.
+On the first start in a project, One Code shows the servers found, with the
+command each one runs, and offers to use this server, to use this and all
+future servers in the project, or to decline. Approvals are stored in
+`~/.onecode/mcp/project-approvals.json`, tied to the server's
+configuration, so a changed command asks again. If you decline, the server
+appears as disabled in `/mcp`; choosing Enable there approves it.
+
+Claude Code's `enabledMcpjsonServers`, `disabledMcpjsonServers`, and
+`enableAllProjectMcpServers` settings are honored from
+`~/.claude/settings.json`, and from `.claude/settings.local.json` when that
+file is not tracked by git. They are never honored from a checked-in
+`.claude/settings.json`, which would let a repository approve its own
+servers.
+
+In non-interactive runs, unapproved servers are skipped with a note on
+stderr.
+
+### Use MCP tools
+
+Each server's tools appear to the model as `mcp__<server>__<tool>` and load
+on demand, so a server with many tools does not bloat the prompt. Servers
+also expose resources, which the model can list and read.
+
+A permission rule naming `mcp__<server>` covers every tool of that server.
+
+### Manage servers
+
+`/mcp` opens the server manager: servers grouped by source (user, project,
+plugin), each with its status, tool and resource counts, and any warnings.
+**Enter** on a server shows its details and a numbered action list:
+
+- **Reconnect** restarts the connection.
+- **Disable** stops the server and remembers that in `~/.onecode` (user
+  scope or per repository), so it stays disabled across sessions.
+  **Enable** reverses it.
+- **Authenticate** appears for HTTP servers that need OAuth. It opens your
+  browser for sign-in; tokens are stored under `~/.onecode/mcp-auth/` with
+  owner-only permissions.
+
+Press the action's number to run it, or **Esc** to go back.
