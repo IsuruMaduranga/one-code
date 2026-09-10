@@ -71,6 +71,19 @@ describe("snapshot parsing and slug matching", () => {
 		expect(baseSlug("kimi-k3")).toBe("kimi-k3");
 	});
 
+	it("keeps a '-max' flagship as its own family when no shorter row exists", () => {
+		const known = new Set(["qwen3-8-max", "gpt-5-6-sol", "gpt-5-6-sol-max", "gpt-5-6-sol-high-non-reasoning"]);
+		expect(baseSlug("qwen3-8-max", known)).toBe("qwen3-8-max"); // the flagship, not an effort variant
+		expect(baseSlug("gpt-5-6-sol-max", known)).toBe("gpt-5-6-sol"); // a real effort variant
+		expect(baseSlug("gpt-5-6-sol-high-non-reasoning", known)).toBe("gpt-5-6-sol"); // two suffixes, base is a row
+		const snapshot = snapshotFromResponse(
+			{ data: [{ id: "q", slug: "qwen3-8-max", release_date: "2026-08-03", model_creator: { slug: "alibaba" }, evaluations: { artificial_analysis_coding_index: 71.8 } }] },
+			NOW,
+		);
+		setModelFactsForTest({ "qwen-token-plan/qwen3.8-max": { releaseDate: "2026-08-03" } });
+		expect(scoreFor(snapshot, model("qwen-token-plan", "qwen3.8-max"), "default")?.coding).toBe(71.8);
+	});
+
 	it("derives candidate slugs from pi ids, including the Claude 4.x spelling", () => {
 		expect(slugCandidates("deepseek/deepseek-chat-v3.1")).toContain("deepseek-v3-1");
 		expect(slugCandidates("~deepseek/deepseek-v4-flash-latest")[0]).toBe("deepseek-v4-flash");
@@ -78,6 +91,8 @@ describe("snapshot parsing and slug matching", () => {
 		expect(slugCandidates("claude-haiku-4-5")).toContain("claude-4-5-haiku");
 		expect(slugCandidates("claude-haiku-4-5-20251001")).toContain("claude-4-5-haiku");
 		expect(slugCandidates("gemini-3-pro-preview-05-06")[0]).toBe("gemini-3-pro");
+		// A four-digit version tag that is not a valid month/day is left alone (no unvalidated strip).
+		expect(slugCandidates("mistralai/mistral-large-2411")).not.toContain("mistral-large");
 	});
 
 	it("scores a row only when the slug's release date agrees with models.dev", () => {
@@ -190,7 +205,13 @@ describe("key, cache and refresh", () => {
 			return new Response(JSON.stringify(RESPONSE), { status: 200 });
 		}) as unknown as typeof fetch;
 		expect(await refreshCapabilitySnapshot({ key: undefined, stateDir: dir, fetchImpl, now: NOW })).toEqual({ status: "no-key" });
-		expect(await refreshCapabilitySnapshot({ key: "aa_test", stateDir: dir, fetchImpl, now: NOW })).toEqual({ status: "refreshed", rows: 25 });
+		// Two concurrent refreshes (session_start + /doctor) share one live fetch.
+		const [first, second] = await Promise.all([
+			refreshCapabilitySnapshot({ key: "aa_test", stateDir: dir, fetchImpl, now: NOW }),
+			refreshCapabilitySnapshot({ key: "aa_test", stateDir: dir, fetchImpl, now: NOW }),
+		]);
+		expect(first).toEqual({ status: "refreshed", rows: 25 });
+		expect(second).toEqual(first);
 		expect(calls).toEqual([{ url: "https://artificialanalysis.ai/api/v2/data/llms/models", key: "aa_test" }]);
 		const cached = loadCapabilitySnapshot(dir)!;
 		expect(cached.fetchedAt).toBe(NOW.toISOString());

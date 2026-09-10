@@ -6,6 +6,7 @@ import {
 	isDatedDuplicate,
 	isReasoningMandatoryError,
 	isSelectableVariant,
+	isSnapshotDatedId,
 	modelIdentity,
 	modelsContainedToSession,
 	reasoningRetryLevel,
@@ -31,6 +32,13 @@ describe("stripSnapshotDate / isDatedDuplicate", () => {
 		expect(stripSnapshotDate("mistral-large-2411")).toBe("mistral-large-2411"); // month 24: a version, not a date
 		expect(stripSnapshotDate("deepseek/deepseek-v4-flash-vision-exp")).toBe("deepseek/deepseek-v4-flash-vision-exp");
 		expect(stripSnapshotDate("llama-3.1-405b")).toBe("llama-3.1-405b");
+	});
+
+	it("recognises both snapshot shapes as dated", () => {
+		expect(isSnapshotDatedId("claude-haiku-4-5-20251001")).toBe(true);
+		expect(isSnapshotDatedId("deepseek/deepseek-v4-flash-0731")).toBe(true);
+		expect(isSnapshotDatedId("deepseek/deepseek-v4-flash")).toBe(false);
+		expect(isSnapshotDatedId("mistral-large-2411")).toBe(false);
 	});
 
 	it("collapses a snapshot only onto its exact undated alias", () => {

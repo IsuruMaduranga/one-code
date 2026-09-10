@@ -17,12 +17,15 @@
  *
  * The classification obeys the repo convention against id-substring matching as
  * the LEAD signal (see `auto-mode/model-select.ts`): frontier is a version-gated
- * first-party Anthropic allowlist; the non-frontier split leads on a curated
- * anchor map + price + containment, with name-class used only as a *cap* (a
- * lean/fast model class can raise scaffolding, never lower it) and a corroborating
- * "pro"-class hint. The Artificial Analysis Intelligence Index informs the anchor
- * map OFFLINE (`tools/model-tiers/model_tiers.py`) — it is never consulted at
- * runtime (it ranks max-effort benchmark score, not harness reliability).
+ * first-party Anthropic allowlist. Below it, a curated anchor map or the name
+ * class sets the tier and the model's GENERATION (models.dev release dates,
+ * `model-facts.ts`) demotes it — price is not consulted once facts are known, so
+ * an unpriced but current flagship on a hosted catalog keeps the workhorse
+ * register. Rows without facts fall back to the name-class cap, the "pro"-class
+ * hint and the absolute price floor, where unpriced/opaque means maximum
+ * scaffolding. The Artificial Analysis index never sets a register; it feeds the
+ * optional measured SELECTION floor (`capability-index.ts`) — see
+ * `classifyModelTier` and `docs/decisions/model-tiers.md`.
  */
 
 import type { Api, Model } from "@earendil-works/pi-ai";
@@ -229,8 +232,7 @@ export function classifyModelTier(model: Model<Api> | undefined, env: NodeJS.Pro
 
 	const generation = opaque ? undefined : modelGeneration(model);
 	if (generation !== undefined) {
-		const nameTier = anchor ?? nameClassCap(model.id);
-		if (nameTier === "frontier") return { tier: nameTier, reason: "anchor" };
+		const nameTier = anchor ?? nameClassCap(model.id); // never frontier: anchors and name classes stop at workhorse
 		if (generation === "ancient") return { tier: "tiny", reason: `${anchor ? "anchor" : "name class"} · two generations behind` };
 		// A curated anchor already weighed the model's generation (it is reviewed
 		// against the catalog diff), so only the name-class path is demoted here.

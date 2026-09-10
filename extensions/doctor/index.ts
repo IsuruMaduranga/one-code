@@ -81,7 +81,11 @@ export default function doctorExtension(pi: ExtensionAPI) {
 		const outcome = await refreshCapabilitySnapshot({ key: configuredCapabilityKey(home), stateDir: oneCodeStateDir(process.env, home) });
 		if (outcome.status === "failed" && !refreshWarned && !shuttingDown) {
 			refreshWarned = true;
-			ctx.ui.notify(`Capability scores not refreshed: ${outcome.error}. Automatic picks keep using the last snapshot, if any.`, "warning");
+			try {
+				ctx.ui.notify(`Capability scores not refreshed: ${outcome.error}. Automatic picks keep using the last snapshot, if any.`, "warning");
+			} catch {
+				// A UI hiccup must not fail the report that awaits this refresh.
+			}
 		}
 	};
 	pi.on("session_start", (_event, ctx) => {

@@ -25,6 +25,7 @@
 
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { classifierCandidates } from "../auto-mode/model-select.ts";
+import { isPriorGeneration, lacksToolCalls } from "../lib/model-facts.ts";
 import { isDatedDuplicate, modelsContainedToSession, modelSpec, pricedInput } from "../lib/model-policy.ts";
 import { intrinsicTier, type PromptTier } from "../lib/model-tier.ts";
 import { resolveSubagentModel } from "../subagents/model-select.ts";
@@ -68,7 +69,11 @@ export type PresetsUnavailable = "no-model" | "no-priced-models";
  * to `claude-haiku-4-5`). Tiny-tier rows stay in the pool only as a last resort.
  */
 export function presetPool(available: Model<Api>[], sessionModel: Model<Api>): Model<Api>[] {
-	const contained = modelsContainedToSession(available, sessionModel).filter((m) => pricedInput(m) !== undefined);
+	const contained = modelsContainedToSession(available, sessionModel).filter(
+		// A preset recommends a MAIN model: never one a generation behind its family
+		// or one models.dev says cannot call tools (model-facts.ts), whatever its tier.
+		(m) => pricedInput(m) !== undefined && !isPriorGeneration(m) && !lacksToolCalls(m),
+	);
 	return contained.filter((m) => !isDatedDuplicate(m, contained));
 }
 

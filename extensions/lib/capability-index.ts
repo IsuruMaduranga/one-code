@@ -46,6 +46,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { readJsonFile, writeJsonAtomic } from "./atomic-write.ts";
+import { fetchWithTimeout } from "./fetch-timeout.ts";
 import { modelFacts } from "./model-facts.ts";
 import { baseModelId, DAY_MS, modelIdentity, stripSnapshotDate } from "./model-policy.ts";
 import { oneCodeSettingsPath } from "./one-code-settings.ts";
@@ -199,14 +200,26 @@ export async function refreshCapabilitySnapshot(options: {
 	now?: Date;
 	force?: boolean;
 }): Promise<RefreshOutcome> {
-	const { key, stateDir, fetchImpl = globalThis.fetch, now = new Date(), force = false } = options;
+	const { key, stateDir, fetchImpl, now = new Date(), force = false } = options;
 	if (!key) return { status: "no-key" };
 	if (!force && !snapshotIsStale(loadCapabilitySnapshot(stateDir), now)) return { status: "fresh" };
+	// One live fetch per state dir at a time: the session_start refresh and a
+	// /doctor run inside the same 20 s window must not both spend a quota call.
+	const running = inflight.get(stateDir);
+	if (running) return running;
+	const attempt = fetchSnapshot(key, stateDir, fetchImpl, now).finally(() => inflight.delete(stateDir));
+	inflight.set(stateDir, attempt);
+	return attempt;
+}
+
+const inflight = new Map<string, Promise<RefreshOutcome>>();
+
+async function fetchSnapshot(key: string, stateDir: string, fetchImpl: typeof fetch | undefined, now: Date): Promise<RefreshOutcome> {
 	try {
-		const response = await fetchImpl(AA_MODELS_URL, {
-			headers: { "x-api-key": key, accept: "application/json" },
-			signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-		});
+		const init: RequestInit = { headers: { "x-api-key": key, accept: "application/json" } };
+		const response = fetchImpl
+			? await fetchImpl(AA_MODELS_URL, { ...init, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })
+			: await fetchWithTimeout(AA_MODELS_URL, FETCH_TIMEOUT_MS, init);
 		if (!response.ok) return { status: "failed", error: `Artificial Analysis responded ${response.status}` };
 		const snapshot = snapshotFromResponse(await response.json(), now);
 		if (snapshot.rows.length === 0) return { status: "failed", error: "Artificial Analysis returned no model rows" };
@@ -228,12 +241,30 @@ export function capabilityCacheExists(stateDir: string): boolean {
 
 const EFFORT_SUFFIX = /-(non-reasoning|reasoning|thinking|adaptive|xhigh|high|medium|low|minimal|max)$/;
 
-/** The slug with every effort suffix removed — the family key a pi id is matched to. */
-export function baseSlug(slug: string): string {
+/**
+ * The slug with its effort suffixes removed — the family key a pi id is matched
+ * to. `-max` (and `-high`, …) is an effort variant only when the shorter slug is
+ * itself a row: `gpt-5-6-sol-max` belongs to `gpt-5-6-sol`, but `qwen3-8-max`
+ * IS the flagship (there is no `qwen3-8` row) and must stay its own family.
+ * Without `known`, every suffix is stripped (the tests' plain form).
+ */
+export function baseSlug(slug: string, known?: ReadonlySet<string>): string {
 	let current = slug;
 	for (;;) {
 		const next = current.replace(EFFORT_SUFFIX, "");
 		if (next === current) return current;
+		if (known && !known.has(next) && !hasKnownPrefix(next, known)) return current;
+		current = next;
+	}
+}
+
+/** Whether stripping further would still land on a known row (`gpt-5-6-sol-high-non-reasoning` → `…-high` → `gpt-5-6-sol`). */
+function hasKnownPrefix(slug: string, known: ReadonlySet<string>): boolean {
+	let current = slug;
+	for (;;) {
+		const next = current.replace(EFFORT_SUFFIX, "");
+		if (next === current) return false;
+		if (known.has(next)) return true;
 		current = next;
 	}
 }
@@ -252,7 +283,6 @@ export function slugCandidates(id: string): string[] {
 	s = s.replace(/-(preview|latest|exp)(-\d{2}-\d{2})?$/, "");
 	s = s.replace(/^deepseek-chat-v3/, "deepseek-v3").replace(/^deepseek-chat$/, "deepseek-v3");
 	const out = new Set<string>([s]);
-	out.add(s.replace(/-\d{4}$/, "")); // a four-digit build tag the date strip did not recognise
 	out.add(s.replace(/-instruct$/, ""));
 	out.add(s.replace(/-it$/, ""));
 	// Artificial Analysis spells the Claude 4.x line `claude-4-5-haiku`, the 5.x line `claude-sonnet-5`.
@@ -282,8 +312,9 @@ function rowsByBase(snapshot: CapabilitySnapshot): Map<string, CapabilityRow[]> 
 	const cached = indexMemo.get(snapshot);
 	if (cached) return cached;
 	const map = new Map<string, CapabilityRow[]>();
+	const known = new Set(snapshot.rows.map((row) => row.slug));
 	for (const row of snapshot.rows) {
-		const base = baseSlug(row.slug);
+		const base = baseSlug(row.slug, known);
 		const list = map.get(base);
 		if (list) list.push(row);
 		else map.set(base, [row]);
@@ -366,6 +397,26 @@ export function capabilityFloor(
 	role: FloorRole,
 ): FloorVerdict {
 	if (!snapshot) return { verdict: "unscored", reason: "no capability snapshot (no key)" };
+	// Memoized per snapshot: the permission badge re-derives the classifier chain
+	// on every repaint, and the verdict for a (candidate, session, role) triple
+	// cannot change while the snapshot object lives.
+	const key = `${role}|${candidate.provider}/${candidate.id}|${session.provider}/${session.id}`;
+	let memoized = verdictMemo.get(snapshot);
+	if (!memoized) verdictMemo.set(snapshot, (memoized = new Map()));
+	const cached = memoized.get(key);
+	if (cached) return cached;
+	const verdict = computeFloor(snapshot, candidate, session, role);
+	memoized.set(key, verdict);
+	return verdict;
+}
+const verdictMemo = new WeakMap<CapabilitySnapshot, Map<string, FloorVerdict>>();
+
+function computeFloor(
+	snapshot: CapabilitySnapshot,
+	candidate: { provider: string; id: string },
+	session: { provider: string; id: string },
+	role: FloorRole,
+): FloorVerdict {
 	const variants: ScoreVariant[] = role === "classifier" ? ["non-reasoning", "default"] : ["default"];
 	let last: { c?: CapabilityScore; s?: CapabilityScore; r?: CapabilityScore } = {};
 	for (const variant of variants) {

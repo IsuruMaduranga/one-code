@@ -257,6 +257,11 @@ export function stripSnapshotDate(id: string): string {
 	return short ? id.slice(0, -5) : id;
 }
 
+/** Whether the id ends in a snapshot date of either shape (`stripSnapshotDate` would change it). */
+export function isSnapshotDatedId(id: string): boolean {
+	return stripSnapshotDate(id) !== id;
+}
+
 /**
  * Whether `model` is a dated snapshot whose undated alias is also present in
  * `pool` — the row a listing collapses so the same model is not offered twice.

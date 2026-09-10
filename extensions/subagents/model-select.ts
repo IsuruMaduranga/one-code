@@ -47,7 +47,7 @@ import {
 	findConfigured,
 	isClaudeFamilyModel,
 	isDatedDuplicate,
-	isDatedModelId,
+	isSnapshotDatedId,
 	isStaleContainmentStamp,
 	modelsContainedToSession,
 	modelSpec as spec,
@@ -173,7 +173,7 @@ export function subagentModelNotes(resolution: Pick<SubagentModelResolution, "mo
 function resolveAlias(alias: string, contained: Model<Api>[]): Model<Api> | undefined {
 	const matches = contained.filter((model) => model.id.toLowerCase().includes(alias));
 	if (matches.length === 0) return undefined;
-	const undated = matches.filter((model) => !isDatedModelId(model.id));
+	const undated = matches.filter((model) => !isSnapshotDatedId(model.id));
 	const pool = undated.length > 0 ? undated : matches;
 	return pool.sort((a, b) => b.id.localeCompare(a.id))[0];
 }

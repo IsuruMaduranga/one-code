@@ -45,6 +45,17 @@ const anthropic = [
 const openai = [model("openai", "gpt-5.1", 1.25), model("openai", "gpt-5-mini", 0.25)];
 
 describe("resolveSubagentModel: aliases", () => {
+	it("prefers the undated id over a -MMDD snapshot when an alias matches both", () => {
+		// Reverse-lexicographic order alone would pick the "-0731" snapshot; the undated alias must win.
+		const catalog = [
+			model("openrouter", "anthropic/claude-sonnet-5", 3),
+			model("openrouter", "anthropic/claude-haiku-4.5", 1),
+			model("openrouter", "anthropic/claude-haiku-4.5-0731", 1),
+		];
+		const resolution = resolveSubagentModel({ requested: "haiku", sessionModel: catalog[0], available: catalog });
+		expect(resolution.model?.id).toBe("anthropic/claude-haiku-4.5");
+	});
+
 	it("resolves Claude Code aliases within the session's provider, preferring undated ids", () => {
 		const resolution = resolveSubagentModel({
 			requested: "haiku",

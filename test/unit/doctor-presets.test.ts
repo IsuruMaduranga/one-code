@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { computePresets, describePresetChanges, findPreset, presetPool, presetsSection } from "../../extensions/doctor/presets.ts";
+import { setModelFactsForTest } from "../../extensions/lib/model-facts.ts";
 
 const model = (provider: string, id: string, input?: number, api = "anthropic-messages") =>
 	({ provider, id, name: id, api, cost: input === undefined ? undefined : { input, output: input * 5 }, contextWindow: 200_000 }) as any;
@@ -74,6 +75,22 @@ describe("computePresets", () => {
 		expect(byName.balanced.classifier?.id).toBe("deepseek/deepseek-v4-pro"); // workhorse floor: Pro is the only workhorse row
 		expect(byName.economical.main.id).toBe("deepseek/deepseek-v4-flash");
 		expect(byName.quality.main.id).toBe("deepseek/deepseek-v4-pro"); // the undated alias, not the pricier -0813 snapshot
+	});
+
+	it("never recommends a prior-generation or tool-less model as a preset's main", () => {
+		setModelFactsForTest({
+			"openai/gpt-6-astra": { releaseDate: "2026-09-04" },
+			"openai/gpt-5-pro": { releaseDate: "2025-08-07" }, // a year behind → prior generation
+			"openai/gpt-5.6-sol": { releaseDate: "2026-07-09" },
+			"openai/gpt-5.6-luna": { releaseDate: "2026-07-09" },
+			"openai/text-only": { releaseDate: "2026-08-01", toolCall: false },
+		});
+		const oa = (id: string, input: number) => model("openai", id, input, "openai-responses");
+		const catalog = [oa("gpt-6-astra", 5), oa("gpt-5-pro", 15), oa("gpt-5.6-sol", 4.5), oa("gpt-5.6-luna", 0.2), oa("text-only", 0.05)];
+		expect(presetPool(catalog, catalog[2]).map((m) => m.id)).toEqual(["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-luna"]);
+		const { presets } = computePresets(catalog, catalog[2]);
+		expect(presets.find((p) => p.name === "quality")?.main.id).toBe("gpt-6-astra"); // not the pricier, prior-generation gpt-5-pro
+		expect(presets.find((p) => p.name === "economical")?.main.id).toBe("gpt-5.6-luna"); // not the tool-less row
 	});
 
 	it("never lands the economical preset on a tiny model while a capable one exists", () => {
