@@ -119,6 +119,6 @@ export function renderDoctorViewer(input: DoctorViewerInput, paint: (color: stri
 	const position = lines.length > visible ? ` · ${state.offset + 1}-${Math.min(lines.length, state.offset + visible)} of ${lines.length}` : "";
 	// PageUp/PageDown are pi-tui's own scrollback keys in fullscreen mode and never
 	// reach a component, so the hint names keys that do.
-	const hints = [`↑/↓ scroll · space/b page · g/G top/end${position}`, ...(input.canFix ? ["f ask the model to fix"] : []), "esc close"].join(" · ");
+	const hints = [`↑/↓ scroll · space/b page · g/G top/end${position}`, ...(input.canFix ? ["f run the checkup (the model fixes the findings)"] : []), "esc close"].join(" · ");
 	return [panelTopRule(paint, width), ...window, "", paint("dim", ` ${hints}`)];
 }

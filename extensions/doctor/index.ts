@@ -3,14 +3,15 @@
  *
  * Claude Code has two: `claude doctor` (a read-only terminal diagnostics
  * screen) and the in-session `/doctor` (a model-driven checkup skill that reads
- * the same diagnostics and fixes what it finds). One Code mirrors both, with
- * one deliberate inversion: here the DETERMINISTIC report is the default and
- * the model-driven checkup is `/doctor fix`, because the first-session problem
- * this command exists for — "no provider is ready" — is exactly the state in
- * which a model-driven check cannot run. docs/decisions/doctor.md.
+ * the same diagnostics and fixes what it finds). One Code mirrors both: bare
+ * `/doctor` is the checkup, as in Claude Code, with the harness's measured
+ * report attached to the prompt; `/doctor report` shows that report alone, and
+ * bare `/doctor` falls back to it when no model can run — the first-session
+ * state ("no provider is ready") this command exists for. docs/decisions/doctor.md.
  *
- *   /doctor                  the report (a scrollable panel in the TUI, plain text elsewhere)
- *   /doctor fix              attach the report to Claude Code's checkup prompt and let the model act
+ *   /doctor                  the checkup: the report goes to the model inside Claude Code's
+ *                            doctor prompt, adapted (falls back to the report when no model can run)
+ *   /doctor report           the measured report alone (a scrollable panel in the TUI, plain text elsewhere)
  *   /doctor presets          the three model presets for this provider
  *   /doctor preset <name>    apply one: main model, subagent default, classifier
  *
@@ -107,7 +108,7 @@ export default function doctorExtension(pi: ExtensionAPI) {
 
 	const sendFix = (ctx: ExtensionContext, report: DoctorReport): boolean => {
 		if (!ctx.model) {
-			ctx.ui.notify("No model is available, so the model-driven checkup cannot run. Connect a provider with /login first; the report above already lists what to fix.", "warning");
+			ctx.ui.notify("No model is available, so the checkup cannot run. Connect a provider with /login first; the report already lists what to fix.", "warning");
 			return false;
 		}
 		const home = os.homedir();
@@ -210,12 +211,21 @@ export default function doctorExtension(pi: ExtensionAPI) {
 		);
 	};
 
+	/** The subcommands, with the one-line explanation the completion menu shows next to each. */
+	const SUBCOMMANDS: Array<{ value: string; description: string }> = [
+		{ value: "report", description: "Show the measured setup report: providers, the model each role gets, imported Claude Code config, MCP servers, dependencies" },
+		{ value: "presets", description: "List the economical / balanced / maximum-quality model presets for this provider, with the models each would pick" },
+		{ value: "preset economical", description: "Apply: one cheap model for the main session, subagents and the classifier" },
+		{ value: "preset balanced", description: "Apply: a capable main model, cheaper automatic picks for subagents and the classifier" },
+		{ value: "preset quality", description: "Apply: the strongest model for the main session and its subagents" },
+	];
+
 	pi.registerCommand("doctor", {
-		description: "Check your setup: provider readiness, the model each role gets, imported Claude Code config, missing dependencies. /doctor [fix|presets|preset <economical|balanced|quality>]",
+		description:
+			"Health-check your setup and fix what's wrong (Claude Code's checkup, run by the model). Subcommands: report (the measured report only), presets, preset <economical|balanced|quality>",
 		getArgumentCompletions: (prefix) => {
-			const options = ["fix", "presets", ...PRESET_NAMES.map((name) => `preset ${name}`)];
 			const typed = prefix.trim().toLowerCase();
-			return options.filter((option) => option.startsWith(typed)).map((value) => ({ value, label: value }));
+			return SUBCOMMANDS.filter((option) => option.value.startsWith(typed)).map((option) => ({ value: option.value, label: option.value, description: option.description }));
 		},
 		handler: async (args, ctx) => {
 			const [verb, ...rest] = args.trim().split(/\s+/).filter(Boolean);
@@ -232,16 +242,20 @@ export default function doctorExtension(pi: ExtensionAPI) {
 				ctx.ui.notify(renderSection(section, { width: 100 }).join("\n"), "info");
 				return;
 			}
-			if (verb === "fix") {
-				const report = await gather(ctx, { network: false });
+			if (verb && verb !== "report") {
+				ctx.ui.notify(`Unknown /doctor argument "${verb}". Use /doctor, /doctor report, /doctor presets, or /doctor preset <name>.`, "error");
+				return;
+			}
+			// Bare `/doctor` is the checkup (Claude Code parity). Without a model it
+			// cannot run, so the report — which is what explains the missing model —
+			// shows instead.
+			const checkup = verb === undefined;
+			const report = await gather(ctx, { network: !checkup });
+			if (checkup && ctx.model) {
 				sendFix(ctx, report);
 				return;
 			}
-			if (verb) {
-				ctx.ui.notify(`Unknown /doctor argument "${verb}". Use /doctor, /doctor fix, /doctor presets, or /doctor preset <name>.`, "error");
-				return;
-			}
-			const report = await gather(ctx, { network: true });
+			if (checkup) ctx.ui.notify("No model is available, so the checkup cannot run; showing the setup report instead. Connect a provider with /login, then rerun /doctor.", "warning");
 			if (ctx.hasUI && ctx.mode === "tui") {
 				await showPanel(ctx, report);
 				return;

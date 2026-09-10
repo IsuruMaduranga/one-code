@@ -46,7 +46,8 @@ describe("onecode doctor (headless)", () => {
 		const out = chunks.join("");
 		expect(code).toBe(1);
 		expect(out.startsWith("One Code doctor\n")).toBe(true);
-		expect(out).toContain("For a full setup checkup that can also fix issues, run /doctor fix inside an onecode session.");
+		expect(out).toContain("For a full setup checkup that can also fix issues, run /doctor inside an onecode session.");
+		expect(out).toContain("/doctor report shows this report alone");
 		expect(out.split("\n").every((line) => line.length <= 100)).toBe(true);
 	});
 });

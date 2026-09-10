@@ -38,10 +38,10 @@ describe("doctor viewer", () => {
 		expect(visibleBodyRows(13)).toBe(13 - VIEWER_CHROME_ROWS);
 		expect(out[1]).toBe("line 6");
 		expect(out.at(-1)).toContain("6-15 of 30");
-		expect(out.at(-1)).toContain("f ask the model to fix");
+		expect(out.at(-1)).toContain("f run the checkup");
 		expect(out.at(-1)).toContain("esc close");
 		const noFix = renderDoctorViewer({ lines, state: { offset: 0 }, width: 60, height: 40, canFix: false }, paint);
-		expect(noFix.at(-1)).not.toContain("f ask");
+		expect(noFix.at(-1)).not.toContain("f run");
 		expect(noFix.at(-1)).not.toContain(" of ");
 	});
 

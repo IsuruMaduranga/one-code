@@ -92,10 +92,8 @@ export async function runDoctorCli(options: DoctorCliOptions, write: (text: stri
 	const report = await collectDoctorCliReport(options);
 	const width = options.columns ?? process.stdout.columns ?? 100;
 	write(`${renderDoctorText(report, Math.max(60, Math.min(width, 120)))}\n\n`);
-	write(
-		options.install === "app"
-			? "For a full setup checkup that can also fix issues, run /doctor fix inside an onecode session.\n"
-			: "For a full setup checkup that can also fix issues, run /doctor fix inside a pi session.\n",
-	);
+	const where = options.install === "app" ? "an onecode session" : "a pi session";
+	write(`For a full setup checkup that can also fix issues, run /doctor inside ${where}.\n`);
+	write("Inside a session, /doctor report shows this report alone.\n");
 	return report.findings.some((finding) => finding.level === "error") ? 1 : 0;
 }

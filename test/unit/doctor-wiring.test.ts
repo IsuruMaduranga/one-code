@@ -63,23 +63,35 @@ describe("/doctor wiring", () => {
 	it("registers the command with argument completions", () => {
 		const command = fake.commands.get("doctor")!;
 		expect(command).toBeDefined();
-		const completions = (command.getArgumentCompletions as (p: string) => Array<{ value: string }>)("pre");
+		const completions = (command.getArgumentCompletions as (p: string) => Array<{ value: string; description?: string }>)("pre");
 		expect(completions.map((c) => c.value)).toEqual(["presets", "preset economical", "preset balanced", "preset quality"]);
+		// Every subcommand explains itself in the completion menu.
+		const all = (command.getArgumentCompletions as (p: string) => Array<{ value: string; description?: string }>)("");
+		expect(all.map((c) => c.value)).toEqual(["report", "presets", "preset economical", "preset balanced", "preset quality"]);
+		expect(all.every((c) => (c.description ?? "").length > 20)).toBe(true);
 	});
 
-	it("prints the report as a notification outside the TUI, marking a missing provider", async () => {
+	it("`report` prints the report as a notification outside the TUI, marking a missing provider", async () => {
 		const { ctx, notified } = ctxFor(undefined);
-		await run("", ctx);
+		await run("report", ctx);
 		expect(notified).toHaveLength(1);
 		expect(notified[0]).toContain("One Code doctor");
 		expect(notified[0]).toContain("Not ready: no model provider has credentials");
 		expect(notified[0]).toContain("Updates: check skipped (ONECODE_NO_UPDATE_CHECK=1)");
 	});
 
+	it("bare /doctor without a model falls back to the report and says why", async () => {
+		const { ctx, notified } = ctxFor(undefined);
+		await run("", ctx);
+		expect(fake.sentUserMessages).toHaveLength(0);
+		expect(notified[0]).toContain("No model is available, so the checkup cannot run");
+		expect(notified[1]).toContain("One Code doctor");
+	});
+
 	it("shows the live permission status it heard on the bus", async () => {
 		fake.events.emit(PERMISSION_STATUS_CHANNEL, { mode: "plan", paused: false, classifier: "anthropic/claude-sonnet-5", pinned: true });
 		const { ctx, notified } = ctxFor(anthropic[0]);
-		await run("", ctx);
+		await run("report", ctx);
 		expect(notified[0]).toContain("Permission mode: plan");
 		expect(notified[0]).toContain("screening this session on anthropic/claude-sonnet-5");
 	});
@@ -128,9 +140,9 @@ describe("/doctor wiring", () => {
 		expect(setModel).not.toHaveBeenCalled();
 	});
 
-	it("`fix` sends the report inside the checkup prompt as a user turn, or refuses without a model", async () => {
+	it("bare /doctor with a model sends the report inside the checkup prompt as a user turn", async () => {
 		const withModel = ctxFor(anthropic[1]);
-		await run("fix", withModel.ctx);
+		await run("", withModel.ctx);
 		expect(fake.sentUserMessages).toHaveLength(1);
 		const content = fake.sentUserMessages[0].content as string;
 		expect(content.startsWith("# One Code Doctor")).toBe(true);
@@ -138,10 +150,9 @@ describe("/doctor wiring", () => {
 		expect(content).toContain("One Code never writes Claude Code's files");
 		expect(fake.sentUserMessages[0].options).toEqual({ deliverAs: "followUp" });
 
-		const without = ctxFor(undefined);
-		await run("fix", without.ctx);
+		await run("fix", withModel.ctx);
+		expect(withModel.notified.at(-1)).toContain('Unknown /doctor argument "fix"');
 		expect(fake.sentUserMessages).toHaveLength(1);
-		expect(without.notified[0]).toContain("No model is available");
 	});
 });
 
