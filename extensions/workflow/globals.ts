@@ -1,16 +1,16 @@
 /**
- * Script-visible globals (pure, dependency-injected). Everything the vm
- * script can touch — agent/parallel/pipeline/phase/log/console/args/budget —
- * is built here around one injected AgentCallFn, so the whole orchestration
- * semantics (concurrency, caps, null-on-failure, replay) is unit-testable
- * with a fake agent runner.
+ * Host-side script globals (pure, dependency-injected). The script itself runs
+ * in a worker thread (`script-worker.mjs`, launched by `vm-runtime.ts`); what
+ * reaches the host over RPC is built here around one injected AgentCallFn —
+ * agent()/workflow() calls, phase/log notices, args and the budget snapshot —
+ * so the orchestration semantics that matter for replay and safety
+ * (concurrency, caps, budget admission, null-on-failure, journal replay) are
+ * unit-testable with a fake agent runner. parallel()/pipeline()/console live
+ * in the worker: they take callbacks, which cannot cross the RPC boundary.
  *
  * Claude Code semantics implemented here:
  * - agent() resolves null when the underlying agent fails; caps/budget/abort
  *   violations throw (they must unwind the script).
- * - parallel() takes thunks, is a barrier, and maps a throwing thunk to null.
- * - pipeline() has no barrier between stages; stage callbacks receive
- *   (prev, originalItem, index); a throwing stage drops that item to null.
  * - callIndex is assigned synchronously at invocation time, which is what
  *   makes journal replay deterministic under parallel().
  */
@@ -31,6 +31,8 @@ import type { ReplayCursor } from "./journal.ts";
 export const MAX_AGENTS_PER_RUN = 1000;
 export const MAX_ITEMS_PER_CALL = 4096;
 export const MAX_CONCURRENCY = 16;
+/** log()/phase() notices a script may emit between two worker heartbeats (25 ms) before it is judged a flood. */
+export const MAX_NOTICES_PER_TICK = 10_000;
 
 /** Promise-queue limiter: at most `limit` callbacks in flight, FIFO overflow. */
 export function createLimiter(limit: number): <T>(fn: () => Promise<T>) => Promise<T> {
@@ -51,13 +53,61 @@ export function createLimiter(limit: number): <T>(fn: () => Promise<T>) => Promi
 	};
 }
 
-export interface ScriptGlobalsOptions {
-	agentCall: AgentCallFn;
-	args: unknown;
-	/** null = no budget ceiling. */
+/**
+ * One run tree's admission controls and totals: the budget snapshot, the
+ * concurrency limiter, the agent cap and the counters they read. Created ONCE
+ * per run (`createRunAdmission`) and shared by every nested workflow(), so a
+ * child's agents queue behind the same limiter, spend the same budget and
+ * count against the same cap as the root's — a per-child copy taken at spawn
+ * could not see the parent's later spend and let a tree exceed the run's
+ * concurrency (review S9).
+ */
+export interface RunAdmission {
+	budget: BudgetSnapshot;
+	limit: ReturnType<typeof createLimiter>;
+	maxAgents: number;
+	agentCount: () => number;
+	outputTokens: () => number;
+	cost: () => number;
+	account: (delta: { agents?: number; outputTokens?: number; cost?: number }) => void;
+}
+
+export interface RunAdmissionOptions {
+	/** null = no budget target. */
 	budgetTotal: number | null;
 	concurrency: number;
 	maxAgents?: number;
+}
+
+export function createRunAdmission(options: RunAdmissionOptions): RunAdmission {
+	const total = options.budgetTotal;
+	let agents = 0;
+	let outputTokens = 0;
+	let cost = 0;
+	return {
+		budget: Object.freeze({
+			total,
+			spent: () => outputTokens,
+			remaining: () => (total === null ? Number.POSITIVE_INFINITY : Math.max(0, total - outputTokens)),
+		}),
+		limit: createLimiter(Math.max(1, Math.min(options.concurrency, MAX_CONCURRENCY))),
+		maxAgents: options.maxAgents ?? MAX_AGENTS_PER_RUN,
+		agentCount: () => agents,
+		outputTokens: () => outputTokens,
+		cost: () => cost,
+		account: (delta) => {
+			agents += delta.agents ?? 0;
+			outputTokens += delta.outputTokens ?? 0;
+			cost += delta.cost ?? 0;
+		},
+	};
+}
+
+export interface ScriptGlobalsOptions {
+	agentCall: AgentCallFn;
+	args: unknown;
+	/** The run tree's shared controls — the root's own, or inherited by a nested workflow(). */
+	admission: RunAdmission;
 	signal: AbortSignal;
 	onEvent: (event: RunProgressEvent) => void;
 	onJournal?: (entry: JournalEntry) => void;
@@ -66,54 +116,41 @@ export interface ScriptGlobalsOptions {
 	runWorkflow?: (nameOrRef: unknown, childArgs: unknown) => Promise<unknown>;
 	/** Injected clock for journal timestamps (the vm blocks Date.now, the host doesn't). */
 	now?: () => number;
-	/**
-	 * A nested workflow() reports its spend to the parent run's state, so the
-	 * parent's agent and token limits cover the whole tree, not just its own
-	 * direct agent() calls (review S9).
-	 */
-	onAccount?: (delta: { agents?: number; outputTokens?: number; cost?: number }) => void;
 }
 
 export interface ScriptGlobals {
 	agent: (prompt: string, opts?: AgentCallOptions) => Promise<unknown>;
-	parallel: (thunks: Array<() => Promise<unknown>>) => Promise<unknown[]>;
-	pipeline: (items: unknown[], ...stages: Array<(prev: unknown, item: unknown, index: number) => unknown>) => Promise<unknown[]>;
 	workflow: (nameOrRef: unknown, childArgs?: unknown) => Promise<unknown>;
 	phase: (title: string) => void;
 	log: (message: unknown) => void;
-	console: { log: (m: unknown) => void; info: (m: unknown) => void; warn: (m: unknown) => void; error: (m: unknown) => void };
 	args: unknown;
 	budget: BudgetSnapshot;
 }
 
+/** What the run manager reads back: tree-wide totals plus this script's phase. */
 export interface ScriptRunState {
+	admission: RunAdmission;
 	agentCount: () => number;
 	outputTokens: () => number;
 	cost: () => number;
 	currentPhase: () => string | undefined;
-	/** Fold a child workflow's spend into this run (see ScriptGlobalsOptions.onAccount). */
-	account: (delta: { agents?: number; outputTokens?: number; cost?: number }) => void;
 }
 
 export function createScriptGlobals(options: ScriptGlobalsOptions): { globals: ScriptGlobals; state: ScriptRunState } {
-	const maxAgents = options.maxAgents ?? MAX_AGENTS_PER_RUN;
-	const limiter = createLimiter(Math.max(1, Math.min(options.concurrency, MAX_CONCURRENCY)));
+	const { admission } = options;
+	const { budget, limit: limiter } = admission;
 	const now = options.now ?? (() => Date.now());
 
 	let callSeq = 0;
-	let agentCount = 0;
-	let outputTokens = 0;
-	let cost = 0;
 	let currentPhase: string | undefined;
-
-	const budget: BudgetSnapshot = Object.freeze({
-		total: options.budgetTotal,
-		spent: () => outputTokens,
-		remaining: () => (options.budgetTotal === null ? Number.POSITIVE_INFINITY : Math.max(0, options.budgetTotal - outputTokens)),
-	});
 
 	const throwIfAborted = () => {
 		if (options.signal.aborted) throw new WorkflowScriptError("Workflow run was aborted");
+	};
+	const checkBudget = () => {
+		if (budget.total !== null && budget.remaining() <= 0) {
+			throw new WorkflowScriptError(`Workflow token budget exhausted (${budget.total} output tokens)`);
+		}
 	};
 
 	const agent = async (prompt: string, opts: AgentCallOptions = {}): Promise<unknown> => {
@@ -124,26 +161,22 @@ export function createScriptGlobals(options: ScriptGlobalsOptions): { globals: S
 			throw new WorkflowScriptError("agent() schema must be a JSON Schema object");
 		}
 		throwIfAborted();
-		if (agentCount >= maxAgents) {
-			throw new WorkflowScriptError(`Workflow agent limit reached (${maxAgents} agents per run)`);
+		if (admission.agentCount() >= admission.maxAgents) {
+			throw new WorkflowScriptError(`Workflow agent limit reached (${admission.maxAgents} agents per run)`);
 		}
-		if (budget.total !== null && budget.remaining() <= 0) {
-			throw new WorkflowScriptError(`Workflow token budget exhausted (${budget.total} output tokens)`);
-		}
+		checkBudget();
 
 		// Everything up to here — and the index/hash/phase capture — is
 		// synchronous, so invocation order fully determines replay identity.
 		const callIndex = callSeq++;
-		agentCount++;
-		options.onAccount?.({ agents: 1 });
+		admission.account({ agents: 1 });
 		const hash = hashAgentCall(prompt, opts);
 		const phase = opts.phase ?? currentPhase;
 		const label = opts.label ?? `agent ${callIndex + 1}`;
 
 		const replayed = options.replay?.match(callIndex, hash);
 		if (replayed !== undefined) {
-			outputTokens += replayed.tokens?.output ?? 0;
-			cost += replayed.cost ?? 0;
+			admission.account({ outputTokens: replayed.tokens?.output ?? 0, cost: replayed.cost ?? 0 });
 			options.onEvent({
 				type: "agentEnd",
 				callIndex,
@@ -158,15 +191,22 @@ export function createScriptGlobals(options: ScriptGlobalsOptions): { globals: S
 		}
 
 		return limiter(async () => {
-			throwIfAborted();
+			// Queued calls were admitted before earlier agents reported usage.
+			// Recheck here, before any provider work or agentStart event — and
+			// give the admission slot back, since this agent never runs.
+			try {
+				throwIfAborted();
+				checkBudget();
+			} catch (error) {
+				admission.account({ agents: -1 });
+				throw error;
+			}
 			options.onEvent({ type: "agentStart", callIndex, label, phase, prompt });
 			try {
 				const onUpdate = (update: AgentRunUpdate) =>
 					options.onEvent({ type: "agentUpdate", callIndex, label, phase, ...update });
 				const result = await options.agentCall(prompt, opts, onUpdate);
-				outputTokens += result.tokens.output;
-				cost += result.cost;
-				options.onAccount?.({ outputTokens: result.tokens.output, cost: result.cost });
+				admission.account({ outputTokens: result.tokens.output, cost: result.cost });
 				options.onJournal?.({ callIndex, hash, result, timestamp: now() });
 				options.onEvent({
 					type: "agentEnd",
@@ -179,7 +219,12 @@ export function createScriptGlobals(options: ScriptGlobalsOptions): { globals: S
 				});
 				return result.value;
 			} catch (error) {
-				throwIfAborted();
+				if (options.signal.aborted) {
+					// Close the record: the viewer would otherwise show a completed or
+					// stopped run with this agent still "running".
+					options.onEvent({ type: "agentEnd", callIndex, label, phase, text: "aborted" });
+					throw new WorkflowScriptError("Workflow run was aborted");
+				}
 				// A script-authoring mistake (bad agentType/model, worktree without a
 				// git repo, malformed schema) must unwind the script, not vanish into
 				// a null the way a genuine agent failure does — same rule parallel()
@@ -192,58 +237,6 @@ export function createScriptGlobals(options: ScriptGlobalsOptions): { globals: S
 				return null;
 			}
 		});
-	};
-
-	const parallel = async (thunks: Array<() => Promise<unknown>>): Promise<unknown[]> => {
-		if (!Array.isArray(thunks)) throw new WorkflowScriptError("parallel() takes an array of functions");
-		if (thunks.length > MAX_ITEMS_PER_CALL) {
-			throw new WorkflowScriptError(`parallel() accepts at most ${MAX_ITEMS_PER_CALL} items (got ${thunks.length})`);
-		}
-		// Invoke every thunk synchronously first so agent() callIndexes are
-		// assigned in array order regardless of completion timing.
-		const promises = thunks.map((thunk) => {
-			if (typeof thunk !== "function") {
-				return Promise.reject(new WorkflowScriptError("parallel() items must be functions returning promises"));
-			}
-			try {
-				return Promise.resolve(thunk());
-			} catch (error) {
-				return Promise.reject(error);
-			}
-		});
-		const settled = await Promise.allSettled(promises);
-		return settled.map((s) => {
-			if (s.status === "fulfilled") return s.value;
-			if (s.reason instanceof WorkflowScriptError) throw s.reason;
-			return null;
-		});
-	};
-
-	const pipeline = async (
-		items: unknown[],
-		...stages: Array<(prev: unknown, item: unknown, index: number) => unknown>
-	): Promise<unknown[]> => {
-		if (!Array.isArray(items)) throw new WorkflowScriptError("pipeline() takes an array of items");
-		if (items.length > MAX_ITEMS_PER_CALL) {
-			throw new WorkflowScriptError(`pipeline() accepts at most ${MAX_ITEMS_PER_CALL} items (got ${items.length})`);
-		}
-		if (stages.some((s) => typeof s !== "function")) {
-			throw new WorkflowScriptError("pipeline() stages must be functions");
-		}
-		return Promise.all(
-			items.map(async (item, index) => {
-				let prev: unknown = item;
-				for (const stage of stages) {
-					try {
-						prev = await stage(prev, item, index);
-					} catch (error) {
-						if (error instanceof WorkflowScriptError) throw error;
-						return null;
-					}
-				}
-				return prev;
-			}),
-		);
 	};
 
 	const workflowFn = async (nameOrRef: unknown, childArgs?: unknown): Promise<unknown> => {
@@ -259,34 +252,22 @@ export function createScriptGlobals(options: ScriptGlobalsOptions): { globals: S
 
 	const globals: ScriptGlobals = {
 		agent,
-		parallel,
-		pipeline,
 		workflow: workflowFn,
 		phase: (title: string) => {
 			currentPhase = String(title);
 			options.onEvent({ type: "phase", phase: currentPhase });
 		},
 		log,
-		console: {
-			log,
-			info: log,
-			warn: (m) => log(`[warn] ${String(m)}`),
-			error: (m) => log(`[error] ${String(m)}`),
-		},
 		args: options.args,
 		budget,
 	};
 
 	const state: ScriptRunState = {
-		agentCount: () => agentCount,
-		outputTokens: () => outputTokens,
-		cost: () => cost,
+		admission,
+		agentCount: admission.agentCount,
+		outputTokens: admission.outputTokens,
+		cost: admission.cost,
 		currentPhase: () => currentPhase,
-		account: (delta) => {
-			agentCount += delta.agents ?? 0;
-			outputTokens += delta.outputTokens ?? 0;
-			cost += delta.cost ?? 0;
-		},
 	};
 
 	return { globals, state };

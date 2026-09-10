@@ -307,7 +307,6 @@ export class AgentRunner {
 			}
 
 			const stats = session.getSessionStats();
-			this.options.onUsage?.(stats.cost);
 			// cleanupWorktree keeps trees holding uncommitted changes; report those.
 			let worktreePath: string | undefined;
 			if (worktree) {
@@ -322,6 +321,11 @@ export class AgentRunner {
 				worktreePath,
 			};
 		} finally {
+			// Whatever the outcome — success, failure, or an abort (a user stop, or
+			// the run finishing with this agent un-awaited) — the provider was
+			// billed for what ran, so the footer's all-in cost sees it.
+			const cost = session.getSessionStats().cost;
+			if (cost > 0) this.options.onUsage?.(cost);
 			releasePrefix(false);
 			unsubscribe?.();
 			unhookAbort();

@@ -19,7 +19,7 @@ import type { PermissionBridge } from "../permissions/subagent-gate.ts";
 import type { HookBridge } from "../hooks/subagent-bridge.ts";
 import type { SubagentDefault } from "../subagents/default-model.ts";
 import { AgentRunner } from "./agent-session.ts";
-import { createScriptGlobals, MAX_CONCURRENCY, MAX_AGENTS_PER_RUN, type ScriptRunState } from "./globals.ts";
+import { createRunAdmission, createScriptGlobals, MAX_CONCURRENCY, type ScriptRunState } from "./globals.ts";
 import { appendJournal, readJournal, ReplayCursor } from "./journal.ts";
 import { AgentRecordStore, previewValue } from "./records.ts";
 import { findSavedWorkflow } from "./saved-workflows.ts";
@@ -88,6 +88,11 @@ export class RunHandle extends EventEmitter {
 		return this.controller.signal;
 	}
 
+	/** The one place the run's signal is fired: every agent, child worker and script hangs off it. */
+	private stopWork(): void {
+		this.controller.abort();
+	}
+
 	record(event: RunProgressEvent): void {
 		this.agents.apply(event);
 		const line = formatEvent(event);
@@ -103,7 +108,7 @@ export class RunHandle extends EventEmitter {
 		// First reason wins — a user stop shouldn't be masked by the script's
 		// consequent "aborted" error.
 		this.errorMessage ??= reason;
-		this.controller.abort();
+		this.stopWork();
 	}
 
 	finish(status: RunStatus, result?: unknown, errorMessage?: string): void {
@@ -112,6 +117,9 @@ export class RunHandle extends EventEmitter {
 		this.result = result;
 		this.errorMessage ??= errorMessage;
 		this.finishedAt = Date.now();
+		// A script can return without awaiting every agent()/workflow() promise.
+		// Terminal runs must not leave those agents or child workers running.
+		this.stopWork();
 		this.emit("done", this);
 		this.resolveFinished(this);
 	}
@@ -245,8 +253,7 @@ export class WorkflowRunManager {
 			const { globals, state } = createScriptGlobals({
 				agentCall: (prompt, opts, onUpdate) => runner!.run(prompt, opts, handle.signal, onUpdate),
 				args: options.args,
-				budgetTotal: options.tokenBudget,
-				concurrency: defaultConcurrency(),
+				admission: createRunAdmission({ budgetTotal: options.tokenBudget, concurrency: defaultConcurrency() }),
 				signal: handle.signal,
 				onEvent: (event) => handle.record(event),
 				onJournal: (entry) => appendJournal(journalPath, entry),
@@ -255,7 +262,7 @@ export class WorkflowRunManager {
 			});
 			handle.state = state;
 
-			const result = await runWorkflowScript(body, globals, `${handle.meta.name}.js`);
+			const result = await runWorkflowScript(body, globals, `${handle.meta.name}.js`, { signal: handle.signal });
 			handle.finish(handle.signal.aborted ? "aborted" : "completed", result);
 		} catch (error) {
 			const aborted = handle.signal.aborted;
@@ -295,20 +302,14 @@ export class WorkflowRunManager {
 
 		const { meta, body } = parseWorkflowScript(source);
 		const state = parentState();
-		const remainingAgents = Math.max(0, MAX_AGENTS_PER_RUN - state.agentCount());
-		const remainingBudget =
-			options.tokenBudget === null ? null : Math.max(0, options.tokenBudget - state.outputTokens());
 
 		// Child calls are not journaled in v1: resume replays the parent's own
 		// agent() prefix only. Progress is forwarded under a "▸ name" phase.
 		const { globals } = createScriptGlobals({
 			agentCall: (prompt, opts, onUpdate) => runner.run(prompt, opts, parent.signal, onUpdate),
 			args: childArgs,
-			budgetTotal: remainingBudget,
-			concurrency: defaultConcurrency(),
-			maxAgents: remainingAgents,
-			// One budget for the tree: the child's spend counts against the parent.
-			onAccount: (delta) => state.account(delta),
+			// One budget, limiter and agent cap for the whole tree.
+			admission: state.admission,
 			signal: parent.signal,
 			onEvent: (event) =>
 				parent.record({
@@ -319,7 +320,7 @@ export class WorkflowRunManager {
 					phase: `▸ ${meta.name}${event.phase ? ` · ${event.phase}` : ""}`,
 				}),
 		});
-		return runWorkflowScript(body, globals, `${label}.js`);
+		return runWorkflowScript(body, globals, `${label}.js`, { signal: parent.signal });
 	}
 }
 

@@ -1,29 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { hashAgentCall, ReplayCursor } from "../../extensions/workflow/journal.ts";
-import { createLimiter, createScriptGlobals, type ScriptGlobalsOptions } from "../../extensions/workflow/globals.ts";
-import type { AgentCallFn, JournalEntry, RunProgressEvent } from "../../extensions/workflow/types.ts";
-
-function makeGlobals(overrides: Partial<ScriptGlobalsOptions> = {}) {
-	const events: RunProgressEvent[] = [];
-	const journal: JournalEntry[] = [];
-	const agentCall: AgentCallFn = async (prompt) => ({
-		value: `done: ${prompt}`,
-		tokens: { input: 10, output: 50, total: 60 },
-		cost: 0.01,
-	});
-	const options: ScriptGlobalsOptions = {
-		agentCall,
-		args: undefined,
-		budgetTotal: null,
-		concurrency: 4,
-		signal: new AbortController().signal,
-		onEvent: (e) => events.push(e),
-		onJournal: (e) => journal.push(e),
-		now: () => 1700000000000,
-		...overrides,
-	};
-	return { ...createScriptGlobals(options), events, journal };
-}
+import { createLimiter, createScriptGlobals, createRunAdmission } from "../../extensions/workflow/globals.ts";
+import type { AgentCallFn } from "../../extensions/workflow/types.ts";
+import { makeGlobals } from "./workflow-test-helpers.ts";
 
 describe("createLimiter", () => {
 	it("never exceeds the limit", async () => {
@@ -82,6 +61,39 @@ describe("agent()", () => {
 		await expect(globals.agent("x")).rejects.toThrow(/aborted/);
 	});
 
+	it("stops queued agents when the first completion exhausts the budget", async () => {
+		const { globals, state, events, journal } = makeGlobals({ budgetTotal: 50, concurrency: 1 });
+		const settled = await Promise.allSettled(Array.from({ length: 10 }, (_, i) => globals.agent(`task ${i}`)));
+		expect(settled.map((result) => result.status)).toEqual(["fulfilled", ...Array<string>(9).fill("rejected")]);
+		expect((settled[1] as PromiseRejectedResult).reason.message).toMatch(/budget exhausted/);
+		expect(state.outputTokens()).toBe(50);
+		expect(events.filter((event) => event.type === "agentStart")).toHaveLength(1);
+		expect(journal).toHaveLength(1);
+		// Rejected queued calls give their admission slot back: only one agent ran.
+		expect(state.agentCount()).toBe(1);
+	});
+
+	it("allows in-flight work to finish but does not start queued work after exhaustion", async () => {
+		let started = 0;
+		let release!: () => void;
+		const blocked = new Promise<void>((resolve) => { release = resolve; });
+		const { globals, state } = makeGlobals({
+			budgetTotal: 50,
+			concurrency: 2,
+			agentCall: async () => {
+				started++;
+				await blocked;
+				return { value: "done", tokens: { input: 0, output: 50, total: 50 }, cost: 0 };
+			},
+		});
+		const result = Promise.all(Array.from({ length: 10 }, (_, i) => globals.agent(`task ${i}`)));
+		expect(started).toBe(2);
+		release();
+		await expect(result).rejects.toThrow(/budget exhausted/);
+		expect(started).toBe(2);
+		expect(state.outputTokens()).toBe(100);
+	});
+
 	it("tags calls with the current phase, letting opts.phase override", async () => {
 		const { globals, events } = makeGlobals();
 		globals.phase("Scan");
@@ -118,21 +130,9 @@ describe("agent()", () => {
 	});
 });
 
-describe("parallel()", () => {
-	it("is a barrier that maps throwing thunks to null", async () => {
-		const { globals } = makeGlobals();
-		const results = await globals.parallel([
-			async () => "ok",
-			async () => {
-				throw new Error("boom");
-			},
-			() => globals.agent("c"),
-		]);
-		expect(results).toEqual(["ok", null, "done: c"]);
-	});
-
-	it("assigns callIndexes in array order regardless of completion order", async () => {
-		// "slow" is enqueued first but finishes last; its callIndex must still be 0.
+describe("callIndex determinism", () => {
+	it("assigns callIndexes in invocation order regardless of completion order", async () => {
+		// "slow" is invoked first but finishes last; its callIndex must still be 0.
 		const delays: Record<string, number> = { slow: 30, fast: 5 };
 		const { globals, journal } = makeGlobals({
 			agentCall: async (prompt) => {
@@ -140,36 +140,9 @@ describe("parallel()", () => {
 				return { value: prompt, tokens: { input: 0, output: 1, total: 1 }, cost: 0 };
 			},
 		});
-		await globals.parallel([() => globals.agent("slow"), () => globals.agent("fast")]);
+		await Promise.all([globals.agent("slow"), globals.agent("fast")]);
 		expect(journal.find((e) => e.hash === hashAgentCall("slow", {}))?.callIndex).toBe(0);
 		expect(journal.find((e) => e.hash === hashAgentCall("fast", {}))?.callIndex).toBe(1);
-	});
-
-	it("rejects oversized batches", async () => {
-		const { globals } = makeGlobals();
-		const thunks = Array.from({ length: 4097 }, () => async () => null);
-		await expect(globals.parallel(thunks)).rejects.toThrow(/at most 4096/);
-	});
-});
-
-describe("pipeline()", () => {
-	it("chains stages per item with (prev, item, index) and no barrier", async () => {
-		const { globals } = makeGlobals();
-		const results = await globals.pipeline(
-			["a", "b"],
-			async (prev) => `${prev}1`,
-			async (prev, item, index) => `${prev}|${item}|${index}`,
-		);
-		expect(results).toEqual(["a1|a|0", "b1|b|1"]);
-	});
-
-	it("drops an item to null when a stage throws, keeping others", async () => {
-		const { globals } = makeGlobals();
-		const results = await globals.pipeline(["ok", "bad"], async (prev) => {
-			if (prev === "bad") throw new Error("stage failed");
-			return prev;
-		});
-		expect(results).toEqual(["ok", null]);
 	});
 });
 
@@ -190,33 +163,60 @@ describe("budget + workflow()", () => {
 });
 
 describe("nested workflow accounting (S9)", () => {
-	it("reports agent starts and spend to the parent, and the parent folds them into its own state", async () => {
-		const deltas: Array<{ agents?: number; outputTokens?: number; cost?: number }> = [];
+	it("shares live budget and concurrency across the parent and sibling workflows", async () => {
+		let calls = 0;
+		let release!: () => void;
+		const blocked = new Promise<void>((resolve) => { release = resolve; });
+		const agentCall: AgentCallFn = async () => {
+			calls++;
+			await blocked;
+			return { value: "done", tokens: { input: 0, output: 50, total: 50 }, cost: 0 };
+		};
+		const parent = makeGlobals({ agentCall, budgetTotal: 50, concurrency: 1 });
+		const children = Array.from({ length: 2 }, () => makeGlobals({ agentCall, admission: parent.state.admission }));
+		const results = Promise.allSettled([
+			children[0].globals.agent("first"),
+			parent.globals.agent("parent queued"),
+			children[1].globals.agent("sibling queued"),
+		]);
+		expect(calls).toBe(1);
+		release();
+		const settled = await results;
+		expect(settled.map((result) => result.status)).toEqual(["fulfilled", "rejected", "rejected"]);
+		expect(calls).toBe(1);
+		expect(parent.state.outputTokens()).toBe(50);
+		expect(children[1].globals.budget.remaining()).toBe(0);
+		await expect(children[1].globals.agent("new call")).rejects.toThrow(/budget exhausted/);
+	});
+
+	it("shares the agent-count limit across sibling workflows", async () => {
+		const parent = makeGlobals({ maxAgents: 1 });
+		const child = () => makeGlobals({ admission: parent.state.admission });
+		await child().globals.agent("first");
+		await expect(child().globals.agent("second")).rejects.toThrow(/agent limit/);
+		expect(parent.state.agentCount()).toBe(1);
+	});
+
+	it("folds a child's agents and spend into the shared run totals", async () => {
+		const admission = createRunAdmission({ budgetTotal: null, concurrency: 1 });
 		const parent = createScriptGlobals({
 			agentCall: async () => ({ value: "p", tokens: { input: 0, output: 0, total: 0 }, cost: 0 }),
 			args: undefined,
-			budgetTotal: null,
-			concurrency: 1,
+			admission,
 			signal: new AbortController().signal,
 			onEvent: () => {},
 		});
 		const child = createScriptGlobals({
 			agentCall: async () => ({ value: "c", tokens: { input: 1, output: 40, total: 41 }, cost: 0.5 }),
 			args: undefined,
-			budgetTotal: null,
-			concurrency: 1,
+			admission,
 			signal: new AbortController().signal,
 			onEvent: () => {},
-			onAccount: (delta) => {
-				deltas.push(delta);
-				parent.state.account(delta);
-			},
 		});
 		await child.globals.agent("do a thing");
-		expect(deltas).toEqual([{ agents: 1 }, { outputTokens: 40, cost: 0.5 }]);
 		expect(parent.state.agentCount()).toBe(1);
 		expect(parent.state.outputTokens()).toBe(40);
 		expect(parent.state.cost()).toBe(0.5);
+		expect(parent.globals.budget.spent()).toBe(40);
 	});
 });
-

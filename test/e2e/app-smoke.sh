@@ -55,6 +55,37 @@ npm install -g --silent --prefix "$S/gprefix" "$APP_LOCAL_TGZ" >/dev/null
 BIN="$S/gprefix/bin/onecode"
 [ -x "$BIN" ] || { echo "FAIL: $BIN not installed"; exit 1; }
 
+# Exercise the packaged worker asset through the same TypeScript loader family
+# as pi. Unit tests use Vite, which cannot catch a missing .mjs npm asset or a
+# jiti import.meta.url resolving the worker relative to its cache directory.
+echo "smoke: running a workflow worker from the installed package"
+WORKER_SMOKE="$S/gprefix/lib/node_modules/@one-ai/one-code/worker-smoke.mjs"
+cat >"$WORKER_SMOKE" <<'JS'
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+const require = createRequire(import.meta.url);
+const piRequire = createRequire(import.meta.resolve('@earendil-works/pi-coding-agent'));
+const { createJiti } = await import(pathToFileURL(piRequire.resolve('jiti')));
+const jiti = createJiti(import.meta.url, { moduleCache: false });
+const extensionRoot = dirname(require.resolve('one-code-extension/package.json'));
+const { createRunAdmission, createScriptGlobals } = await jiti.import(join(extensionRoot, 'extensions/workflow/globals.ts'));
+const { runWorkflowScript } = await jiti.import(join(extensionRoot, 'extensions/workflow/vm-runtime.ts'));
+const { globals } = createScriptGlobals({
+  agentCall: async () => ({ value: 42, tokens: { input: 0, output: 1, total: 1 }, cost: 0 }),
+  args: null, admission: createRunAdmission({ budgetTotal: 10, concurrency: 1 }),
+  signal: new AbortController().signal, onEvent: () => {},
+});
+assert.equal(await runWorkflowScript("return await agent('smoke')", globals), 42);
+await assert.rejects(
+  runWorkflowScript('await Promise.resolve(); while (true) {}', globals, 'loop.js', { timeoutMs: 500 }),
+  /timed out/,
+);
+console.log('PASS: packaged workflow worker executes and terminates runaway scripts.');
+JS
+node "$WORKER_SMOKE"
+
 # Scratch git project as cwd, and a throwaway HOME so nothing touches real state.
 mkdir -p "$S/proj"
 (cd "$S/proj" && git init -q && printf '# Smoke project\n' > CLAUDE.md && git add . && git commit -qm init)

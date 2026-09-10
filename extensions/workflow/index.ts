@@ -117,7 +117,7 @@ Script body hooks:
 - log(message: string): void — emit a progress message to the user.
 - phase(title: string): void — start a new phase; subsequent agent() calls are grouped under it.
 - args: any — the value passed as this tool's \`args\` input, verbatim. Pass arrays/objects as actual JSON values, NOT as a JSON-encoded string.
-- budget: {total: number|null, spent(): number, remaining(): number} — the run's token target from \`tokenBudget\`. \`total\` is null if none was set. The target is a HARD ceiling: once spent() reaches total, further agent() calls throw. Use for dynamic loops: \`while (budget.total && budget.remaining() > 50_000) { ... }\`.
+- budget: {total: number|null, spent(): number, remaining(): number} — the run's output-token target from \`tokenBudget\`, shared with nested workflows. \`total\` is null if none was set. Once spent() reaches total, new and queued agent() calls throw before starting. Already-running agents may finish above the target; this is not a hard cap on provider usage. Use for dynamic loops: \`while (budget.total && budget.remaining() > 50_000) { ... }\`.
 - workflow(nameOrRef: string | {scriptPath: string}, args?: any): Promise<any> — run another workflow inline as a sub-step. Nesting is one level only.
 
 DEFAULT TO pipeline(). Only reach for a barrier (parallel between stages) when you genuinely need ALL prior-stage results together — dedup/merge across the full result set, early-exit on a zero count, or a prompt that references "the other findings". A barrier is NOT justified by "I need to flatten/map/filter first" (do it inside a pipeline stage) or "the stages are conceptually separate".
@@ -193,7 +193,7 @@ const WorkflowParams = Type.Object({
 	tokenBudget: Type.Optional(
 		Type.Integer({
 			minimum: 1000,
-			description: "Hard output-token ceiling for the run, exposed to the script as budget {total, spent(), remaining()}",
+			description: "Output-token target shared by the run and nested workflows. Stops new and queued agents once reached; already-running agents may exceed it. Exposed as budget {total, spent(), remaining()}",
 		}),
 	),
 	sync: Type.Optional(
