@@ -17,6 +17,9 @@
  * 4. Suppresses pi's own update check and installs One Code's instead
  *    (update-check.mjs), with an install-method-aware upgrade hint.
  *
+ * Two subcommands never reach pi: `onecode --version` (the app's version) and
+ * `onecode doctor` (the setup report, extensions/doctor/cli.ts).
+ *
  * Deliberately plain JS with no imports beyond node builtins until the Node
  * version is checked: pi crashes on Node < 22.19 at import time (bundled
  * undici), so the friendly error must come first.
@@ -25,7 +28,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFil
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 // --- 0. Node version gate (before any pi import) -------------------------
 const [major, minor] = process.versions.node.split(".").map(Number);
@@ -60,6 +63,15 @@ if (argv[0] === "--version" || argv[0] === "-v") {
 	process.stdout.write(`${appVersion} (pi ${piVersion})\n`);
 	process.exit(0);
 }
+
+// --- fast path: `onecode doctor` prints the setup report without a session --
+// Claude Code's `claude doctor`. It must work on the machine it exists for —
+// one with no provider yet — so it never goes through pi's session bootstrap:
+// the extension's report module is loaded through pi's own TypeScript loader
+// (jiti, a pi dependency) and reads pi's auth/model files directly. The
+// extension package is registered first (step 2 below) so the report sees the
+// same settings a session would.
+const runDoctor = argv[0] === "doctor";
 
 // --- 2. Register the extension package in the isolated settings -----------
 // pi resolves local-path package sources in place (no copying), so pointing
@@ -125,6 +137,49 @@ try {
 	// Fail loud but keep launching: a broken settings file is the user's to
 	// fix, and pi will surface its own diagnostics for it too.
 	process.stderr.write(`onecode: could not register extensions in ${settingsPath}: ${error?.message ?? error}\n`);
+}
+
+if (runDoctor) {
+	process.exitCode = await runDoctorCli();
+	process.exit();
+}
+
+/**
+ * Load `extensions/doctor/cli.ts` with pi's own jiti and run it. pi's loader
+ * aliases `@earendil-works/pi-ai` onto its compat entry for extension code;
+ * mirrored here so the module resolves the same way it does inside a session.
+ * Any failure prints a plain error and exits 2 — a diagnostic that crashes
+ * with a stack trace is worse than none.
+ */
+async function runDoctorCli() {
+	try {
+		const piEntry = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
+		const piRequire = createRequire(piEntry);
+		const piVersion = JSON.parse(readFileSync(join(dirname(dirname(piEntry)), "package.json"), "utf8")).version;
+		const jitiModule = await import(pathToFileURL(piRequire.resolve("jiti")).href);
+		const createJiti = jitiModule.createJiti ?? jitiModule.default;
+		const alias = {};
+		try {
+			alias["@earendil-works/pi-ai"] = fileURLToPath(import.meta.resolve("@earendil-works/pi-ai/compat"));
+		} catch {
+			// No compat entry (older pi-ai): plain resolution of the root entry serves.
+		}
+		const jiti = createJiti(import.meta.url, { moduleCache: false, interopDefault: true, alias });
+		const { runDoctorCli: run } = await jiti.import(join(corePath, "extensions", "doctor", "cli.ts"));
+		return await run({
+			agentDir,
+			cwd: process.cwd(),
+			home: homedir(),
+			env: process.env,
+			version: appVersion,
+			install: "app",
+			piVersion,
+			columns: process.stdout.columns,
+		});
+	} catch (error) {
+		process.stderr.write(`onecode doctor: could not run the diagnostics: ${error?.stack ?? error}\n`);
+		return 2;
+	}
 }
 
 // --- 3. Surgical stdout rebranding ----------------------------------------

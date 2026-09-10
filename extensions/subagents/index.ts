@@ -63,6 +63,7 @@ import { DELEGATION_STEER } from "./delegation-steer.ts";
 import { awaitHandBackReview, withReview } from "./hand-back-review.ts";
 import type { LiveSink } from "./runner.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
+import { SUBAGENT_DEFAULT_CHANGED_CHANNEL } from "../lib/settings-channels.ts";
 import { SubagentWidget } from "./panel-widget.ts";
 import { type ProseRenderer, renderTranscript } from "./panel-render.ts";
 import { decodeStripKey, type StripKey } from "./panel-keys.ts";
@@ -541,6 +542,14 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	pi.on("model_select", (event, ctx) => {
 		emitModelStatus(ctx, event.model);
 		emitDelegationSteer(event.model);
+	});
+	// Another extension wrote `subagentModel` on disk (`/doctor preset`): drop the
+	// cached automatic default and republish the reminder + banner status, the
+	// same refresh `/subagent` itself performs after its own write.
+	pi.events.on(SUBAGENT_DEFAULT_CHANGED_CHANNEL, () => {
+		autoDefaultCache = undefined;
+		const live = liveUiCtx(lastCtx);
+		if (live) emitModelStatus(live);
 	});
 	pi.on("session_tree", (_event, ctx) => reconstructRuns(ctx));
 	pi.on("session_shutdown", async () => {

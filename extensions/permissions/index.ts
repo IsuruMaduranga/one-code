@@ -74,6 +74,7 @@ import { isWritingTool } from "./protected-paths.ts";
 import { denyRuleLines } from "./rule-prose.ts";
 import { loadPermissionSettings, normalizePermissionMode, persistAllowRule, resolveStartupMode } from "./settings.ts";
 import { MODE_ENV, resolvedOrSelf, runtimeProtectedDirs } from "../lib/permission-gate.ts";
+import { CLASSIFIER_SETTING_CHANGED_CHANNEL } from "../lib/settings-channels.ts";
 import { describeProjectAllow, persistProjectAllowApproval, projectAllowApproved } from "./project-trust.ts";
 import { findProjectRoot } from "../lib/git.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
@@ -740,6 +741,10 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	});
 
 	// Mode-change requests from other extensions (e.g. plan-mode tools).
+	// `autoMode.classifierModel` was rewritten by another extension (`/doctor
+	// preset`): forget the pinned classifier and the cached config, exactly as
+	// `/auto-mode model` does after its own write, so the next call re-plans.
+	pi.events.on(CLASSIFIER_SETTING_CHANGED_CHANNEL, () => resetClassifierChoice(badgeCtx?.model));
 	pi.events.on(MODE_CHANNEL, (data) => {
 		const requested = normalizePermissionMode((data as { mode?: unknown })?.mode);
 		if (requested) setMode(requested);
