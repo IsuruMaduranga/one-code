@@ -9,7 +9,7 @@ import {
 	modelGeneration,
 	setModelFactsForTest,
 } from "../../extensions/lib/model-facts.ts";
-import { classifyModelTier, economicalContainedCandidates, resolveModelTier } from "../../extensions/lib/model-tier.ts";
+import { classifyModelTier, economicalContainedCandidates, pickEconomicalContainedModel, resolveModelTier } from "../../extensions/lib/model-tier.ts";
 import { resolveSubagentModel } from "../../extensions/subagents/model-select.ts";
 
 const model = (provider: string, id: string, input?: number) =>
@@ -108,7 +108,10 @@ describe("automatic selection with facts", () => {
 			model("openai", "text-only-legacy", 0.1),
 		];
 		expect(economicalContainedCandidates(catalog, catalog[0]).map((m) => m.id)).toEqual(["gpt-5-mini", "gpt-5.6-sol"]);
-		expect(resolveSubagentModel({ sessionModel: catalog[0], available: catalog }).model?.id).toBe("gpt-5-mini");
+		// The reader takes the cheapest capable row; a subagent is held to the
+		// session's workhorse floor, which mini does not meet, so Sol delegates to itself.
+		expect(pickEconomicalContainedModel(catalog, catalog[0])?.model.id).toBe("gpt-5-mini");
+		expect(resolveSubagentModel({ sessionModel: catalog[0], available: catalog })).toMatchObject({ model: { id: "gpt-5.6-sol" }, source: "session" });
 	});
 
 	it("lets the R1-over-Flash incident resolve to Flash even without the DeepSeek anchors", () => {
@@ -118,6 +121,11 @@ describe("automatic selection with facts", () => {
 			model("openrouter", "deepseek/deepseek-r1-0528", 0.5),
 			model("openrouter", "deepseek/deepseek-chat", 0.32),
 		];
-		expect(resolveSubagentModel({ sessionModel: catalog[0], available: catalog }).model?.id).toBe("deepseek/deepseek-v4-flash");
+		// The generation facts drop R1 and deepseek-chat: the reader lands on Flash, and
+		// a subagent (workhorse floor, no measured snapshot) on Pro itself — never on R1.
+		expect(pickEconomicalContainedModel(catalog, catalog[0])?.model.id).toBe("deepseek/deepseek-v4-flash");
+		const subagent = resolveSubagentModel({ sessionModel: catalog[0], available: catalog });
+		expect(subagent.model?.id).toBe("deepseek/deepseek-v4-pro");
+		expect(economicalContainedCandidates(catalog, catalog[0]).map((m) => m.id)).not.toContain("deepseek/deepseek-r1-0528");
 	});
 });

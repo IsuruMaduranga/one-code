@@ -49,6 +49,8 @@ export interface StartRunOptions {
 	getHookBridge?: () => HookBridge | undefined;
 	/** Each finished agent's dollar cost, for the footer's all-in total (review S13). */
 	onUsage?: (cost: number) => void;
+	/** Models this account cannot run, learned this session (lib/model-unusable.ts); the runner resolves around them. */
+	unusableModels?: () => ReadonlySet<string>;
 }
 
 export class RunHandle extends EventEmitter {
@@ -248,6 +250,7 @@ export class WorkflowRunManager {
 				getPermissionBridge: options.getPermissionBridge,
 				getHookBridge: options.getHookBridge,
 				onUsage: options.onUsage,
+				unusableModels: options.unusableModels,
 			});
 
 			const { globals, state } = createScriptGlobals({

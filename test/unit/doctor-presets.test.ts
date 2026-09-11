@@ -28,14 +28,14 @@ describe("computePresets", () => {
 		expect(byName.balanced.main.id).toBe("claude-sonnet-5");
 		expect(byName.balanced.current).toBe(true);
 		expect(byName.balanced.subagents).toMatchObject({ setting: "auto" });
-		expect(byName.balanced.subagents.model.id).toBe("claude-haiku-4-5");
-		expect(byName.balanced.classifier?.id).toBe("claude-sonnet-5"); // workhorse floor: nothing cheaper qualifies
+		expect(byName.balanced.subagents.model.id).toBe("claude-sonnet-5"); // workhorse floor (shared with the classifier): nothing cheaper qualifies
+		expect(byName.balanced.classifier?.id).toBe("claude-sonnet-5");
 		expect(byName.quality.main.id).toBe("claude-opus-5");
 		expect(byName.quality.subagents.model.id).toBe("claude-opus-5");
 		expect(byName.quality.classifier?.id).toBe("claude-sonnet-5");
 	});
 
-	it("picks the current-generation DeepSeek Flash for balanced subagents on OpenRouter, not the boundary-priced R1", () => {
+	it("picks the current-generation DeepSeek Flash as the economical main on OpenRouter, not the boundary-priced R1", () => {
 		// pi's bundled OpenRouter catalog rows and prices, 2026-09-10 — the shape that
 		// made /doctor preset balanced name deepseek-r1-0528 (docs/features/tiering/plan.md).
 		const or = (id: string, input: number) => model("openrouter", `deepseek/${id}`, input, "openai-completions");
@@ -71,8 +71,8 @@ describe("computePresets", () => {
 		const { presets } = computePresets(catalog, session);
 		const byName = Object.fromEntries(presets.map((p) => [p.name, p]));
 		expect(byName.balanced.main.id).toBe("deepseek/deepseek-v4-pro");
-		expect(byName.balanced.subagents.model.id).toBe("deepseek/deepseek-v4-flash");
-		expect(byName.balanced.classifier?.id).toBe("deepseek/deepseek-v4-pro"); // workhorse floor: Pro is the only workhorse row
+		expect(byName.balanced.subagents.model.id).toBe("deepseek/deepseek-v4-pro"); // workhorse floor: Pro is the only workhorse row (Flash qualifies only by measured score)
+		expect(byName.balanced.classifier?.id).toBe("deepseek/deepseek-v4-pro");
 		expect(byName.economical.main.id).toBe("deepseek/deepseek-v4-flash");
 		expect(byName.quality.main.id).toBe("deepseek/deepseek-v4-pro"); // the undated alias, not the pricier -0813 snapshot
 	});

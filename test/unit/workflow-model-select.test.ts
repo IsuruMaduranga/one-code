@@ -32,9 +32,10 @@ const resolve = (overrides: Partial<Parameters<typeof resolveWorkflowAgentModel>
 	});
 
 describe("workflow model defaults", () => {
-	it("uses the same automatic smaller default as foreground subagents", () => {
+	it("uses the same automatic floor-gated default as foreground subagents", () => {
+		// A Sol session delegates to Terra (workhorse floor), not the cheap-line Luna.
 		const result = resolve();
-		expect(result.model?.id).toBe("gpt-5.6-luna");
+		expect(result.model?.id).toBe("gpt-5.6-terra");
 		expect(result.thinkingLevel).toBe("high");
 	});
 

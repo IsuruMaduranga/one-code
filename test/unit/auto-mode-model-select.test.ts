@@ -1,12 +1,7 @@
 import { describe, expect, it } from "vitest";
-import {
-	classifierCandidates,
-	classifierTierFloor,
-	describeCandidate,
-	findConfigured,
-	isModelUnavailableError,
-} from "../../extensions/auto-mode/model-select.ts";
+import { classifierCandidates, describeCandidate, findConfigured, isModelUnavailableError } from "../../extensions/auto-mode/model-select.ts";
 import { modelIdentity } from "../../extensions/lib/model-policy.ts";
+import { automaticTierFloor } from "../../extensions/lib/model-tier.ts";
 
 /** Minimal structural stand-in; only provider/id/cost are consulted. */
 const model = (provider: string, id: string, input?: number) =>
@@ -138,10 +133,10 @@ describe("classifierCandidates: tier floor (workhorse-or-better sessions get a w
 		expect(chain[0]).toMatchObject({ model: anthropic[1], source: "session" });
 	});
 
-	it("floor is workhorse for workhorse and frontier sessions, cheap for cheap ones", () => {
-		expect(classifierTierFloor(anthropic[0])).toBe("workhorse");
-		expect(classifierTierFloor(anthropic[1])).toBe("workhorse");
-		expect(classifierTierFloor(anthropic[2])).toBe("cheap");
+	it("floor is workhorse for workhorse and frontier sessions, cheap for cheap ones (shared with subagents)", () => {
+		expect(automaticTierFloor(anthropic[0])).toBe("workhorse");
+		expect(automaticTierFloor(anthropic[1])).toBe("workhorse");
+		expect(automaticTierFloor(anthropic[2])).toBe("cheap");
 	});
 
 	it("screens a Haiku session with itself (nothing cheaper and capable)", () => {

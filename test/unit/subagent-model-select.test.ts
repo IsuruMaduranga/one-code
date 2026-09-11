@@ -67,17 +67,41 @@ describe("resolveSubagentModel: aliases", () => {
 		expect(resolution.notices).toEqual([]);
 	});
 
-	it("never stretches an alias across providers — the session model serves instead", () => {
+	it("never stretches an alias across providers — it resolves as its tier in-family instead", () => {
 		// "sonnet" on an openai session names nothing there; picking Anthropic
 		// would silently ship the task (or a fork's whole transcript) elsewhere.
+		// The alias is Claude Code's name for the workhorse tier, so the cheapest
+		// workhorse-class openai model is what it meant here.
 		const resolution = resolveSubagentModel({
 			requested: "sonnet",
 			sessionModel: openai[0],
 			available: [...anthropic, ...openai],
 		});
+		expect(resolution.model?.provider).toBe("openai");
 		expect(resolution.model?.id).toBe("gpt-5.1");
-		expect(resolution.source).toBe("session");
+		expect(resolution.source).toBe("call");
 		expect(resolution.notices[0]).toContain('No "sonnet" model');
+		expect(resolution.notices[0]).toContain("read as its Claude Code tier");
+	});
+
+	it("reads an alias as its tier: sonnet → the cheapest workhorse-class model, haiku → the cheapest capable one", () => {
+		const codex = [
+			model("openai-codex", "gpt-5.6-sol", 5),
+			model("openai-codex", "gpt-5.6-terra", 2),
+			model("openai-codex", "gpt-5.4-mini", 0.75),
+			model("openai-codex", "gpt-5.6-luna", 0.2),
+			model("openai-codex", "gpt-5-nano", 0.05),
+		];
+		const sonnet = resolveSubagentModel({ requested: "sonnet", sessionModel: codex[0], available: codex });
+		expect(sonnet.model?.id).toBe("gpt-5.6-terra");
+		expect(sonnet.source).toBe("call");
+		const haiku = resolveSubagentModel({ requested: "haiku", sessionModel: codex[0], available: codex });
+		expect(haiku.model?.id).toBe("gpt-5.6-luna"); // cheapest capable; nano is tiny and never picked
+		// opus/fable mean the strongest model the user chose on this provider: the session model.
+		expect(resolveSubagentModel({ requested: "opus", sessionModel: codex[1], available: codex }).model?.id).toBe("gpt-5.6-terra");
+		expect(resolveSubagentModel({ requested: "fable", sessionModel: codex[0], available: codex }).model?.id).toBe("gpt-5.6-sol");
+		// A name match still wins over the tier reading on a provider that has one.
+		expect(resolveSubagentModel({ requested: "sonnet", sessionModel: anthropic[0], available: anthropic }).model?.id).toBe("claude-sonnet-5");
 	});
 
 	it("stays with the session's model-creator namespace on a gateway", () => {
@@ -87,9 +111,10 @@ describe("resolveSubagentModel: aliases", () => {
 			model("openrouter", "anthropic/claude-haiku-4.5", 1),
 		];
 		const resolution = resolveSubagentModel({ requested: "haiku", sessionModel: catalog[0], available: catalog });
-		// anthropic/claude-haiku-4.5 is same *pi provider* but another vendor.
-		expect(resolution.model?.id).toBe("openai/gpt-5.1");
-		expect(resolution.source).toBe("session");
+		// anthropic/claude-haiku-4.5 is same *pi provider* but another vendor; the
+		// alias reads as the cheap tier within the openai namespace instead.
+		expect(resolution.model?.id).toBe("openai/gpt-5-mini");
+		expect(resolution.source).toBe("call");
 	});
 
 	it('treats "inherit" as the session model', () => {
@@ -175,29 +200,33 @@ describe("resolveSubagentModel: precedence and exact references", () => {
 		expect(resolution.model).toBeUndefined();
 	});
 
-	it("falls a per-call alias that names nothing in-provider through to the agent's model", () => {
-		// "opus" on an OpenAI session names nothing there; the agent's own valid
-		// model must still run rather than dropping straight to the session model.
+	it("falls a per-call alias the provider cannot tier through to the agent's model", () => {
+		// An unpriced catalog has nothing the tier reading can rank, so the alias
+		// names nothing; the agent's own valid model must still run rather than
+		// dropping straight to the session model.
+		const unpriced = [model("openai", "gpt-5.1"), model("openai", "gpt-5-mini")];
 		const resolution = resolveSubagentModel({
-			requested: "opus",
+			requested: "sonnet",
 			agentModel: "gpt-5-mini",
-			sessionModel: openai[0],
-			available: openai,
+			sessionModel: unpriced[0],
+			available: unpriced,
 		});
 		expect(resolution.model?.id).toBe("gpt-5-mini");
 		expect(resolution.source).toBe("agent");
 		expect(resolution.unresolved).toBeUndefined();
 	});
 
-	it("degrades a bad configured default to the session model with a notice", () => {
-		// A default the user set months ago must not fail every subagent run.
+	it("degrades a bad configured default to the automatic same-provider pick with a notice", () => {
+		// A default the user set months ago must not fail every subagent run —
+		// and must not land on the session model, the most expensive answer, when
+		// a cheaper model at the session's floor exists (opus session → sonnet).
 		const resolution = resolveSubagentModel({
 			configuredDefault: setting("some/withdrawn-model"),
 			sessionModel: anthropic[0],
 			available: anthropic,
 		});
-		expect(resolution.model?.id).toBe("claude-opus-4-8");
-		expect(resolution.source).toBe("session");
+		expect(resolution.model?.id).toBe("claude-sonnet-5");
+		expect(resolution.source).toBe("automatic");
 		expect(resolution.notices[0]).toContain("not available");
 	});
 
@@ -212,21 +241,33 @@ describe("resolveSubagentModel: precedence and exact references", () => {
 		expect(resolution.source).toBe("default");
 	});
 
-	it("automatically chooses a smaller role-profile model when nothing is requested", () => {
-		const resolution = resolveSubagentModel({ sessionModel: anthropic[1], available: anthropic });
-		expect(resolution.model?.id).toBe("claude-haiku-4-5");
+	it("automatically chooses the cheapest model at the session's floor when nothing is requested", () => {
+		// The classifier's floor, shared: an opus session delegates to sonnet,
+		// never haiku (a weak worker spends the saving on retries).
+		const resolution = resolveSubagentModel({ sessionModel: anthropic[0], available: anthropic });
+		expect(resolution.model?.id).toBe("claude-sonnet-5");
 		expect(resolution.source).toBe("automatic");
 	});
 
-	it("uses Luna automatically for a Sol session", () => {
+	it("keeps a Sonnet session's subagents on Sonnet: nothing cheaper meets the workhorse floor", () => {
+		const resolution = resolveSubagentModel({ sessionModel: anthropic[1], available: anthropic });
+		expect(resolution.model?.id).toBe("claude-sonnet-5");
+		expect(resolution.source).toBe("session");
+	});
+
+	it("uses Terra automatically for a Sol session, never the cheap-line Luna", () => {
 		const catalog = [
 			model("openai-codex", "gpt-5.6-sol", 5),
+			model("openai-codex", "gpt-5.6-terra", 2),
 			model("openai-codex", "gpt-5.6-luna", 0.2),
 			model("openai-codex", "gpt-5.4-mini", 0.75),
 		];
 		const resolution = resolveSubagentModel({ sessionModel: catalog[0], available: catalog });
-		expect(resolution.model?.id).toBe("gpt-5.6-luna");
+		expect(resolution.model?.id).toBe("gpt-5.6-terra");
 		expect(resolution.source).toBe("automatic");
+		// Without a cheaper workhorse the session model itself delegates.
+		const noTerra = catalog.filter((m) => m.id !== "gpt-5.6-terra");
+		expect(resolveSubagentModel({ sessionModel: noTerra[0], available: noTerra })).toMatchObject({ model: { id: "gpt-5.6-sol" }, source: "session" });
 	});
 
 	it("never selects automatically without price evidence on both sides", () => {
@@ -243,38 +284,40 @@ describe("resolveSubagentModel: precedence and exact references", () => {
 		expect(unpricedCandidate.source).toBe("session");
 	});
 
-	it("requires a small-model name in the price-ranked fallback and ranks tiers over price", () => {
-		// Profile misses everything here (a stale-profile future family). Raw
-		// cheapest would pick the unknown $0.05 model or the nano as the default
-		// coding worker; the hint floor excludes the former and tier rank puts
-		// mini-class ahead of the cheaper nano.
+	it("holds the automatic pick to the session's tier floor in a future family the anchors do not know", () => {
+		// No anchor matches gpt-6; name class and price decide. Raw cheapest would
+		// pick the unknown $0.05 model or the nano; the workhorse floor (the
+		// session is workhorse-class) excludes the mini too, so the cheaper
+		// unmarked sibling is the worker.
 		const catalog = [
 			model("openai", "gpt-6", 10),
+			model("openai", "gpt-6-codex", 4),
 			model("openai", "gpt-6-mini", 1),
 			model("openai", "gpt-6-nano", 0.1),
 			model("openai", "gpt-6-zz", 0.05),
 		];
 		const resolution = resolveSubagentModel({ sessionModel: catalog[0], available: catalog });
-		expect(resolution.model?.id).toBe("gpt-6-mini");
+		expect(resolution.model?.id).toBe("gpt-6-codex");
 		expect(resolution.source).toBe("automatic");
 	});
 
-	it("does not get creative after an explicit agent-frontmatter choice fails", () => {
-		// The agent author asked for a specific model; substituting an automatic
-		// cheaper pick is a model nobody described. The session model serves.
+	it("falls back to the automatic same-provider pick after an explicit agent-frontmatter choice fails", () => {
+		// The agent author asked for a model that is gone. The session model is no
+		// better described than the automatic pick, and it is the dearer of the two.
 		const resolution = resolveSubagentModel({
 			agentModel: "some/withdrawn-model",
 			sessionModel: anthropic[0],
 			available: anthropic,
 		});
-		expect(resolution.model?.id).toBe("claude-opus-4-8");
-		expect(resolution.source).toBe("session");
+		expect(resolution.model?.id).toBe("claude-sonnet-5");
+		expect(resolution.source).toBe("automatic");
 		expect(resolution.notices[0]).toContain("falling back");
 	});
 });
 
 describe("resolveSubagentModel: agent-file provider containment", () => {
-	const openaiCatalog = [model("openai", "gpt-5.1", 1.25), model("openai", "gpt-5-mini", 0.25)];
+	// gpt-5.1-codex: the cheaper workhorse-class sibling the automatic pick lands on.
+	const openaiCatalog = [model("openai", "gpt-5.1", 1.25), model("openai", "gpt-5-mini", 0.25), model("openai", "gpt-5.1-codex", 0.75)];
 
 	it("does not honor a cross-provider agent-file model on a non-Claude session", () => {
 		// A .claude/agents file naming an Anthropic model on an OpenAI session:
@@ -286,7 +329,7 @@ describe("resolveSubagentModel: agent-file provider containment", () => {
 			available: [...openaiCatalog, ...anthropic],
 		});
 		expect(resolution.model?.provider).toBe("openai");
-		expect(resolution.model?.id).toBe("gpt-5-mini");
+		expect(resolution.model?.id).toBe("gpt-5.1-codex");
 		expect(resolution.source).toBe("automatic");
 		expect(resolution.notices[0]).toContain("stay on this provider");
 	});
@@ -755,7 +798,9 @@ describe("resolveSubagentModel: the alias notice scopes its claim", () => {
 		// unavailable. What is true is that the alias cannot leave this session's
 		// containment.
 		const resolution = resolveSubagentModel({ requested: "sonnet", sessionModel: openai[0], available: catalog });
-		expect(resolution.notices[0]).toBe('No "sonnet" model in this session\'s provider family (openai/gpt-5.1).');
+		expect(resolution.notices[0]).toBe(
+			'No "sonnet" model in this session\'s provider family (openai/gpt-5.1); read as its Claude Code tier, "sonnet" resolves to openai/gpt-5.1 here.',
+		);
 	});
 
 	it("names no provider family when there is no session model", () => {
@@ -799,14 +844,14 @@ describe("subagentModelNotes: the model is told what its child actually runs on"
 		const notes = subagentModelNotes(resolution);
 		expect(notes).toHaveLength(2);
 		expect(notes[0]).toContain('No "sonnet" model');
-		expect(notes[1]).toBe("This subagent runs on openai/gpt-5.1 (this session's model).");
+		expect(notes[1]).toBe("This subagent runs on openai/gpt-5.1 (the model this call named).");
 	});
 
 	it("names the agent's own model when that is what served", () => {
-		// The alias failed and the agent file's model carried the run: the source
-		// is the question the answer raises, so it is stated rather than guessed.
+		// The per-call model failed and the agent file's model carried the run: the
+		// source is the question the answer raises, so it is stated rather than guessed.
 		const resolution = resolveSubagentModel({
-			requested: "sonnet",
+			requested: "gpt-9000-ultra",
 			agentModel: "openai/gpt-5-mini",
 			sessionModel: openai[0],
 			available: catalog,

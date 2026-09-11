@@ -79,6 +79,21 @@ beforeEach(() => {
 });
 
 describe("classify: pinning and fallback", () => {
+	it("reports a model the provider refuses as unusable, so the subagent selector can skip it too", async () => {
+		// The Codex "not supported when using Codex with a ChatGPT account" case:
+		// mini is refused, the classifier steps on, and the refusal is published
+		// (lib/model-unusable.ts) — a timeout or a transient error is not.
+		completeMock.mockImplementation(async (m: any) =>
+			m.id === "gpt-5-mini" ? errorReply("The 'gpt-5-mini' model is not supported when using Codex with a ChatGPT account.") : allowReply(),
+		);
+		const unusable: string[] = [];
+		const { deps } = makeDeps({ onModelUnusable: (model: string) => unusable.push(model) });
+		const verdict = await classify(request, deps);
+		expect(verdict.decision).toBe("allow");
+		expect(unusable).toEqual(["openai/gpt-5-mini"]);
+		expect(deps.state.rejected.has("openai/gpt-5-mini")).toBe(true);
+	});
+
 	it("pins the first model that answers", async () => {
 		completeMock.mockResolvedValue(allowReply());
 		const { deps } = makeDeps();

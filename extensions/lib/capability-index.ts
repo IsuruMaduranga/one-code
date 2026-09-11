@@ -67,8 +67,13 @@ export const FETCH_TIMEOUT_MS = 20_000;
 export const DATE_TOLERANCE_DAYS = 31;
 /** The reference Claude Code's classifier rule names: min(main, Sonnet). */
 export const REFERENCE_SLUG = "claude-sonnet-5";
-/** How far below the floor a delegated worker may score (the classifier allows nothing). */
-export const SUBAGENT_TOLERANCE = 0.9;
+/**
+ * How far below the floor the low-stakes reader (web_fetch answers, recaps) may
+ * score. The classifier and delegated workers allow nothing: a subagent writes
+ * code and calls tools for many turns, and since 2026-09-11 it is held to the
+ * same floor as the permission screener (docs/decisions/model-policy.md).
+ */
+export const READER_TOLERANCE = 0.9;
 
 export interface CapabilityRow {
 	id: string;
@@ -367,7 +372,7 @@ function pick(rows: CapabilityRow[], base: string, variant: ScoreVariant): Capab
 // The floor
 // ---------------------------------------------------------------------------
 
-export type FloorRole = "classifier" | "subagent";
+export type FloorRole = "classifier" | "subagent" | "reader";
 
 export interface FloorVerdict {
 	verdict: "pass" | "fail" | "unscored";
@@ -386,9 +391,10 @@ export interface FloorVerdict {
  * scores (Sonnet 5 drops from 71.5 to 66.4, GLM-5.2 from 68.8 to 46.5); when
  * any of the three lacks a non-reasoning row, all three fall back to the default
  * variant so the comparison stays on one basis. Delegated workers run with
- * thinking and may sit `SUBAGENT_TOLERANCE` below the floor. Unscored means the
- * caller applies its name-class rule instead — the score never lowers a floor
- * it cannot measure.
+ * thinking, so they are judged on the default variant, at the full floor; only
+ * the reader may sit `READER_TOLERANCE` below it. Unscored means the caller
+ * applies its name-class rule instead — the score never lowers a floor it
+ * cannot measure.
  */
 export function capabilityFloor(
 	snapshot: CapabilitySnapshot | undefined,
@@ -423,7 +429,7 @@ function computeFloor(
 		last = { c: scoreFor(snapshot, candidate, variant), s: scoreFor(snapshot, session, variant), r: referenceScore(snapshot, variant) };
 		const { c, s, r } = last;
 		if (!c || !s || !r) continue;
-		const floor = Math.min(s.coding, r.coding) * (role === "subagent" ? SUBAGENT_TOLERANCE : 1);
+		const floor = Math.min(s.coding, r.coding) * (role === "reader" ? READER_TOLERANCE : 1);
 		return { verdict: c.coding >= floor ? "pass" : "fail", candidate: c, session: s, reference: r, floor };
 	}
 	// `last` holds the "default" variant's lookups (always the final one tried).

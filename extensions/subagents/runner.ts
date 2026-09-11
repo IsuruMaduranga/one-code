@@ -157,6 +157,7 @@ export class SubagentRuntime {
 	private readonly getHookBridge: () => HookBridge | undefined;
 	/** A child extension handler threw (pi swallows it otherwise); surfaced to the user by index.ts. */
 	private readonly onExtensionError: (runName: string | undefined, error: ExtensionError) => void;
+	private readonly onModelUnusable: (model: string, reason: string) => void;
 	/** Child session id → run name, for the bridge wrapper above. */
 	private readonly runNames = new Map<string, string>();
 	/** Child session id → agent type (`explore`, …), for the hook payload's `agent_type`. */
@@ -176,12 +177,14 @@ export class SubagentRuntime {
 		getPermissionBridge: () => PermissionBridge | undefined,
 		getHookBridge: () => HookBridge | undefined,
 		onExtensionError: (runName: string | undefined, error: ExtensionError) => void,
+		onModelUnusable: (model: string, reason: string) => void,
 	) {
 		this.modelRuntime = modelRuntime;
 		this.baseCwd = baseCwd;
 		this.getMcpTools = getMcpTools;
 		this.getHookBridge = getHookBridge;
 		this.onExtensionError = onExtensionError;
+		this.onModelUnusable = onModelUnusable;
 		// One stable wrapper (the gate calls the getter per tool call; allocating a
 		// closure each time would be waste). A bridge that vanished between the
 		// getter and the call throws, which the gate turns into a fail-closed deny.
@@ -199,11 +202,12 @@ export class SubagentRuntime {
 		getPermissionBridge: () => PermissionBridge | undefined = () => undefined,
 		getHookBridge: () => HookBridge | undefined = () => undefined,
 		onExtensionError: (runName: string | undefined, error: ExtensionError) => void = () => {},
+		onModelUnusable: (model: string, reason: string) => void = () => {},
 	): Promise<SubagentRuntime> {
 		const modelRuntime = await createSharedModelRuntime(getAgentDir());
 		// Prime the catalog once; spawns read the live snapshot (see resolveModel).
 		await modelRuntime.getAvailable();
-		return new SubagentRuntime(modelRuntime, cwd, getMcpTools, getPermissionBridge, getHookBridge, onExtensionError);
+		return new SubagentRuntime(modelRuntime, cwd, getMcpTools, getPermissionBridge, getHookBridge, onExtensionError, onModelUnusable);
 	}
 
 	/**
@@ -303,6 +307,15 @@ export class SubagentRuntime {
 				} else if (e.type === "message_end" && e.message?.role === "assistant") {
 					sink?.onStreaming?.(undefined);
 					sink?.onUsage?.((e.message as { usage?: unknown }).usage);
+					// The provider refused this model for this account ("not supported
+					// with a ChatGPT account", 404 on the model): the catalog offered it,
+					// the account cannot run it. Tell the parent so selection skips it
+					// from now on (lib/model-unusable.ts) — the same class of error the
+					// auto-mode classifier steps over (`isModelUnavailableError`).
+					const reply = e.message as { stopReason?: string; errorMessage?: string; provider?: string; model?: string };
+					if (reply.stopReason === "error" && reply.errorMessage && reply.provider && reply.model && isModelUnavailableError(reply.errorMessage)) {
+						this.onModelUnusable(`${reply.provider}/${reply.model}`, reply.errorMessage);
+					}
 					const text = streamingText(e.message).trim();
 					if (text) {
 						sink?.onBlock?.({ kind: "text", text });

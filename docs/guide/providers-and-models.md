@@ -85,13 +85,20 @@ For its side roles, One Code chooses a model from the **same provider** as
 your session; automatic picks never send your data to another provider. The
 choice is the cheapest model that clears a capability floor:
 
-- **Subagents** need a model at least as capable as your main model's tier,
-  with some tolerance.
-- **The classifier** needs a Sonnet-class model when your session runs a
-  Sonnet-class or stronger model, and a Haiku-class model otherwise. This is
-  Claude Code's own rule.
+- **Subagents and the classifier** share one rule: a Sonnet-class model when
+  your session runs a Sonnet-class or stronger model, and a Haiku-class model
+  otherwise. This is Claude Code's classifier rule, applied to delegated work
+  too, so on most providers both roles land on the same model. A subagent is
+  never dearer than your main model; if nothing cheaper qualifies, it runs on
+  the main model.
 - **The reader** (web fetch answers, recaps) uses the cheapest capable
   model.
+
+Claude Code's model aliases work everywhere: `sonnet`, `haiku`, `opus` and
+`fable` resolve to a model of that name when your provider has one, and
+otherwise to the matching class within your provider (`haiku` the cheapest
+capable model, `sonnet` the cheapest Sonnet-class model, `opus` and `fable`
+your main model). They never switch providers.
 
 Capability is judged by tier (see the next section). Models are excluded
 when they cannot call tools, have no price, or are a generation behind: a
@@ -104,8 +111,8 @@ Provider aliases such as `:free` or `:online` variants are skipped.
 If you have an [Artificial Analysis](https://artificialanalysis.ai) API key,
 One Code uses measured coding ability instead of name-based tiers for these
 picks: a candidate must score at least the lower of your session model's
-coding index and a Sonnet 5 reference (with 10 percent tolerance for
-subagents). Set `AA_API_KEY`, or add the key to `~/.onecode/settings.json`:
+coding index and a Sonnet 5 reference (the reader gets 10 percent
+tolerance; subagents and the classifier get none). Set `AA_API_KEY`, or add the key to `~/.onecode/settings.json`:
 
 ```json
 {

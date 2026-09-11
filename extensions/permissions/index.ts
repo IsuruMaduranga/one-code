@@ -23,6 +23,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { type ChildAction, SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../auto-mode/actions.ts";
 import { createTaskNotifier } from "../lib/notifications.ts";
+import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent } from "../lib/model-unusable.ts";
 import { customMessageText, notificationComponent } from "../lib/tui-render.ts";
 import { classify, createClassifierState } from "../auto-mode/classifier.ts";
 import {
@@ -348,6 +349,12 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	 * to be unusable is not retried on every tool call.
 	 */
 	const classifierState = createClassifierState();
+	// What another role learned the hard way (a subagent's provider refused its
+	// model as not usable on this account) is a rejection here too — the roles
+	// share one selection floor, so they share one first pick (lib/model-unusable.ts).
+	pi.events.on(MODEL_UNUSABLE_CHANNEL, (data) => {
+		classifierState.rejected.add((data as ModelUnusableEvent).model);
+	});
 	/** Report each classifier reply's usage to the all-in footer cost. */
 	const onClassifierUsage = (usage: unknown) => recordUsage(pi, "classifier", usage);
 
@@ -559,6 +566,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				signal: opts?.signal ?? ctx.signal,
 				state: classifierState,
 				onUsage: onClassifierUsage,
+				onModelUnusable: (model, reason) =>
+					pi.events.emit(MODEL_UNUSABLE_CHANNEL, { model, reason, source: "classifier" } satisfies ModelUnusableEvent),
 				onNotice: (message, level) => {
 					ctx.ui.notify(message, level);
 					// The badge names the classifier, so it has to repaint when the first
@@ -1260,6 +1269,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				state: classifierState,
 				onNotice: (message, level) => ctx.ui.notify(message, level),
 				onUsage: onClassifierUsage,
+				onModelUnusable: (model, reason) =>
+					pi.events.emit(MODEL_UNUSABLE_CHANNEL, { model, reason, source: "classifier" } satisfies ModelUnusableEvent),
 				reviewOnly: true,
 			},
 		);

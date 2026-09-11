@@ -81,7 +81,7 @@ export function collectModelFacts(available: Model<Api>[], session: SessionView,
 		snapshot: snapshot ? { fetchedAt: snapshot.fetchedAt, rows: snapshot.rows.length } : undefined,
 		subagent: verdict(subagent.source === "automatic" ? subagent.model : undefined, "subagent"),
 		classifier: verdict(first?.source === "economical" ? first.model : undefined, "classifier"),
-		reader: verdict(reader?.via === "tier" ? reader.model : undefined, "subagent"),
+		reader: verdict(reader?.via === "tier" ? reader.model : undefined, "reader"),
 	};
 	return {
 		capability,

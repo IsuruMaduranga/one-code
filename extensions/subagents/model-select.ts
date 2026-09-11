@@ -16,8 +16,13 @@
  * child is spawned with a concrete `provider/id`:
  *
  * - Claude Code aliases (`sonnet`/`opus`/`haiku`/`fable`) resolve **within the
- *   session's provider** (and contained route/model family on gateways); where the name
- *   matches nothing, the session model serves and the parent says so.
+ *   session's provider** (and contained route/model family on gateways): by
+ *   name where a model carries it, else as the Claude Code *tier* the alias
+ *   names — `haiku` the cheapest capable contained model, `sonnet` the cheapest
+ *   workhorse-class one, `opus`/`fable` the session model — and the parent says
+ *   so (2026-09-11; before, an off-family alias landed on the session model,
+ *   the most expensive answer available, and a global "use Sonnet for
+ *   subagents" instruction did exactly that on every non-Anthropic provider).
  * - An exact per-call reference (the main model's `model` field) or the user's
  *   own `subagentModel` setting resolves anywhere — naming a model is choosing
  *   it — but crossing providers is announced, never silent.
@@ -26,13 +31,15 @@
  *   *not* honored (a fork inherits the parent transcript, so subagents stay on
  *   the session's provider) — the configured default or the automatic
  *   same-provider profile serves instead.
- * - A configured default that cannot resolve degrades to the session model with
- *   a notice naming the knob; without one, a reviewed same-provider role profile
- *   chooses an economical default before the session fallback. A bad *per-call*
- *   request first falls through to the agent's own model and the configured
- *   default (running the subagent on its intended model, with a notice); only
- *   when nothing downstream resolves does it error, so the model can read the
- *   menu and retry.
+ * - A configured default or agent-file model that cannot resolve degrades, with
+ *   a notice naming the knob, to the automatic same-provider pick — the
+ *   cheapest contained model at the session's capability floor, the SAME floor
+ *   the auto-mode classifier applies (`capableContainedCandidates`) — and only
+ *   then to the session model. Only an explicit `inherit` names the session
+ *   model outright. A bad *per-call* request first falls through to the agent's
+ *   own model and the configured default (running the subagent on its intended
+ *   model, with a notice); only when nothing downstream resolves does it error,
+ *   so the model can read the menu and retry.
  *
  * The menu keeps the main model informed without dumping a 300-model gateway
  * catalog into every request: vendor-contained, variant- and unpriced-filtered,
@@ -53,7 +60,7 @@ import {
 	modelSpec as spec,
 	pricedInput,
 } from "../lib/model-policy.ts";
-import { cheaperContainedCandidates } from "../lib/model-tier.ts";
+import { atLeastTier, capableContainedCandidates, economicalContainedCandidates, intrinsicTier, type PromptTier } from "../lib/model-tier.ts";
 
 /**
  * Cross-extension channel carrying the resolved default subagent model, so the
@@ -93,8 +100,13 @@ export function subagentStatusModel(
 	return { model: spec(resolution.model), via };
 }
 
-/** Claude Code's Agent-tool aliases, resolved as name matches within the session's provider. */
-const CLAUDE_CODE_ALIASES = new Set(["sonnet", "opus", "haiku", "fable"]);
+/**
+ * Claude Code's Agent-tool aliases, read as the tiers they name: `haiku` the
+ * cheap line, `sonnet` the workhorse line, `opus`/`fable` the frontier. An alias
+ * resolves by NAME within the session's provider family when a model carries it
+ * (an Anthropic session), else as its tier there — see `resolveAlias`.
+ */
+const ALIAS_TIER: Record<string, PromptTier> = { haiku: "cheap", sonnet: "workhorse", opus: "frontier", fable: "frontier" };
 
 export type SubagentModelSource = "call" | "agent" | "default" | "automatic" | "session";
 
@@ -164,18 +176,42 @@ export function subagentModelNotes(resolution: Pick<SubagentModelResolution, "mo
 	return [...resolution.notices, `This subagent runs on ${spec(resolution.model)} (${SOURCE_LABEL[resolution.source]}).`];
 }
 
+interface AliasResolution {
+	model: Model<Api>;
+	/** "name": a contained model carries the alias; "tier": the alias's Claude Code tier, resolved here. */
+	how: "name" | "tier";
+}
+
 /**
- * Resolve a Claude Code alias by name within the contained set, preferring
- * undated alias ids and then the newest id. Returns undefined off-family —
- * "sonnet" on a Groq session names nothing, and inventing a mapping would be
- * choosing a model the user never described.
+ * Resolve a Claude Code alias within the session's provider family: by name
+ * first (preferring undated alias ids, then the newest id), else as the tier
+ * the alias names — the cheapest contained model at or above it
+ * (`economicalContainedCandidates` order: never tiny, prior-generation or
+ * tool-less; cheap → workhorse → frontier, then price), `frontier` meaning the
+ * session model itself, the strongest model the user chose on this provider.
+ * Never off-family: "sonnet" on a Codex session is the cheapest workhorse-class
+ * Codex model, not Anthropic's Sonnet. The aliases ARE Claude Code's tier
+ * names, so the tier reading honors what the alias meant rather than
+ * substituting a model nobody described. Undefined only when the provider has
+ * nothing capable to offer (unpriced/opaque) or there is no session model.
  */
-function resolveAlias(alias: string, contained: Model<Api>[]): Model<Api> | undefined {
+function resolveAlias(
+	alias: string,
+	contained: Model<Api>[],
+	available: Model<Api>[],
+	sessionModel: Model<Api> | undefined,
+): AliasResolution | undefined {
 	const matches = contained.filter((model) => model.id.toLowerCase().includes(alias));
-	if (matches.length === 0) return undefined;
-	const undated = matches.filter((model) => !isSnapshotDatedId(model.id));
-	const pool = undated.length > 0 ? undated : matches;
-	return pool.sort((a, b) => b.id.localeCompare(a.id))[0];
+	if (matches.length > 0) {
+		const undated = matches.filter((model) => !isSnapshotDatedId(model.id));
+		const pool = undated.length > 0 ? undated : matches;
+		return { model: pool.sort((a, b) => b.id.localeCompare(a.id))[0], how: "name" };
+	}
+	if (!sessionModel) return undefined;
+	const tier = ALIAS_TIER[alias];
+	if (tier === "frontier") return { model: sessionModel, how: "tier" };
+	const byTier = economicalContainedCandidates(available, sessionModel, contained).find((model) => atLeastTier(intrinsicTier(model), tier));
+	return byTier ? { model: byTier, how: "tier" } : undefined;
 }
 
 
@@ -213,14 +249,9 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 		}
 
 		const alias = wanted.toLowerCase();
-		if (CLAUDE_CODE_ALIASES.has(alias)) {
-			const resolved = resolveAlias(alias, contained);
-			if (resolved) return { model: resolved, source: entry.source, notices };
-			// An alias that names nothing in-provider keeps walking the chain (the
-			// agent's model / configured default may still resolve), then lands on the
-			// session model — never an automatic pick, and never `unresolved`: unlike a
-			// literal typo, a cross-provider alias is a naming mismatch, not a retryable
-			// mistake, so it degrades quietly (matching the module doc).
+		if (alias in ALIAS_TIER) {
+			const resolved = resolveAlias(alias, contained, available, sessionModel);
+			if (resolved?.how === "name") return { model: resolved.model, source: entry.source, notices };
 			// SCOPE the claim. "No sonnet model exists" is false at machine level
 			// whenever Anthropic is also authenticated, and a model relaying it tells
 			// the user "Sonnet is not available" — wrong, and the everyday case given
@@ -228,11 +259,21 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 			// true is narrower: the alias cannot leave this session's containment.
 			// "Provider family" covers both a plain provider and a gateway, where
 			// containment is the model-creator namespace (`modelsContainedToSession`).
-			// No chain narration: which knob MIGHT serve next was worth saying only
-			// while nothing said which one did. `subagentModelNotes` now closes every
-			// notice with the model that ran and the source it came from.
-			notices.push(`No "${alias}" model in this session's provider family${sessionModel ? ` (${spec(sessionModel)})` : ""}.`);
-			suppressAutomatic = true;
+			const family = sessionModel ? ` (${spec(sessionModel)})` : "";
+			if (resolved) {
+				// The tier reading: what the alias meant, on this provider. Stated so
+				// the model that asked for "sonnet" knows which model actually runs
+				// (WEAK-MODEL-REVIEW-2026-09-06 L4) — `subagentModelNotes` repeats the
+				// spec, but this line says WHY it is not Sonnet.
+				notices.push(`No "${alias}" model in this session's provider family${family}; read as its Claude Code tier, "${alias}" resolves to ${spec(resolved.model)} here.`);
+				return { model: resolved.model, source: entry.source, notices };
+			}
+			// Nothing capable contained at all (an unpriced/opaque provider, or no
+			// session model): keep walking the chain — the agent's model / configured
+			// default may still resolve — then the automatic pick or the session
+			// model serve below. Never `unresolved`: unlike a literal typo, an
+			// off-family alias is a naming mismatch, not a retryable mistake.
+			notices.push(`No "${alias}" model in this session's provider family${family}.`);
 			continue;
 		}
 
@@ -276,13 +317,15 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 			);
 			continue;
 		}
-		// An explicit choice failed; automatic selection would substitute a model
-		// nobody described, so the remaining chain and the session model serve.
-		suppressAutomatic = true;
+		// An explicit choice failed: the rest of the chain, then the automatic
+		// same-provider pick, then the session model serve. The automatic pick is
+		// no more "a model nobody described" than the session model is, and it is
+		// the cheaper of the two (2026-09-11; before, this dropped straight to the
+		// session model).
 		notices.push(
 			entry.source === "agent"
-				? `Subagent model "${wanted}" (from ${entry.knob}) is not available — falling back to the configured default or the session model.`
-				: `Subagent model "${wanted}" (from ${entry.knob}) is not available — the session model runs this subagent instead.`,
+				? `Subagent model "${wanted}" (from ${entry.knob}) is not available — falling back to the configured default, the automatic same-provider pick, or the session model.`
+				: `Subagent model "${wanted}" (from ${entry.knob}) is not available — the automatic same-provider pick or the session model runs this subagent instead.`,
 		);
 	}
 
@@ -294,20 +337,23 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 	// Automatic selection is a cost optimisation, so it needs price evidence:
 	// with the session price unknown there is no demonstrable saving, and picking
 	// a cheap-tier model could silently *upgrade* an (unpriced) cheap session. The
-	// tier selector — cheapest capable same-provider model, never `tiny`, cheap →
-	// workhorse → frontier — is the SAME mechanism the auto-mode classifier uses,
-	// so a session screens and delegates on one economical model. It excludes
-	// unpriced/opaque providers by construction, which subsumes the old
-	// dynamic-selection gate; those degrade to the session model below.
+	// floor-gated selector — the cheapest same-provider model at the session's
+	// capability floor (workhorse-or-better for a workhorse-or-better session,
+	// Claude Code's min(main, sonnet); never `tiny`) — is the SAME one the
+	// auto-mode classifier uses, so a session screens and delegates on one
+	// model. A delegated worker writes code and calls tools for many turns; a
+	// weaker one spends the saving on retries (2026-09-11 — before, subagents
+	// took the cheapest capable model with no floor). It excludes unpriced/opaque
+	// providers by construction, which subsumes the old dynamic-selection gate;
+	// those degrade to the session model below.
 	if (sessionModel && !suppressAutomatic) {
 		// `strict` requires a genuinely cheaper model and yields nothing when the
 		// session price is unknown, so a cheap-tier pick never silently upgrades an
 		// unpriced session. Reuse the `contained` set computed above for the hot path.
-		// `role` applies the measured capability floor when an Artificial Analysis
-		// snapshot exists (lib/capability-index.ts): a candidate scoring below
-		// SUBAGENT_TOLERANCE × min(session, Sonnet 5) is skipped, passers rank by
-		// price; without a snapshot the list is the tier ranking, as before.
-		const cheaper = cheaperContainedCandidates(available, sessionModel, { strict: true, contained, role: "subagent" })[0];
+		// With an Artificial Analysis snapshot (lib/capability-index.ts) the floor
+		// is measured — coding index ≥ min(session, Sonnet 5), no tolerance —
+		// and passers rank by price; unscored candidates are judged by name-class tier.
+		const cheaper = capableContainedCandidates(available, sessionModel, "subagent", { strict: true, contained })[0];
 		if (cheaper) return { model: cheaper, source: "automatic", notices };
 	}
 
@@ -461,7 +507,8 @@ export function subagentModelsReminder(options: MenuOptions): string {
 		...menu,
 		...(setting ? [setting] : []),
 		...(warning ? [warning] : []),
-		'Aliases sonnet|opus|haiku|fable resolve within this session\'s provider; "inherit" means the session model. ' +
+		"Aliases sonnet|opus|haiku|fable resolve within this session's provider — by name when a model carries it, else as the tier it names " +
+			'(haiku: the cheapest capable model, sonnet: the cheapest workhorse-class model, opus/fable: this session\'s model); "inherit" means the session model. ' +
 			"Any exact provider/model-id the user asked for also works, even from another provider (that is announced to the user) or unlisted here — this is a menu, not a whitelist.",
 	].join("\n");
 }

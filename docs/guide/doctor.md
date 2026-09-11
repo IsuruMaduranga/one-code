@@ -58,7 +58,7 @@ priced models that support tool calls are considered.
 | Preset | Main model | Subagents | Classifier |
 |---|---|---|---|
 | `economical` | The cheapest small model. | Inherit the main model. | Automatic. |
-| `balanced` | The cheapest Sonnet-class model. | Chosen automatically (a cheaper model when one qualifies). | Automatic. |
+| `balanced` | The cheapest Sonnet-class model. | Chosen automatically (a cheaper Sonnet-class model when one exists, else the main model). | Automatic. |
 | `quality` | The most capable model available. | Inherit the main model. | Automatic. |
 
 `/doctor presets` shows what each preset would pick. `/doctor preset balanced`

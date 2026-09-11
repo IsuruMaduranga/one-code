@@ -352,6 +352,42 @@ export function cheaperContainedCandidates(
 	return opts.role ? rankByCapability(cheaper, sessionModel, opts.role).map((entry) => entry.model) : cheaper;
 }
 
+/**
+ * The weakest tier an AUTOMATIC pick may run on for a session: workhorse when
+ * the session itself is workhorse or frontier (Claude Code's `min(main, sonnet)`
+ * classifier rule), cheap otherwise (a cheap session has nothing cheaper and
+ * capable; `tiny` is excluded upstream regardless). Shared by the auto-mode
+ * classifier and the subagent default since 2026-09-11: a delegated worker
+ * writes code and calls tools for many turns, and a weak one spends the saving
+ * on retries — so both roles are held to one floor and, on most providers, one
+ * model (docs/decisions/model-policy.md).
+ */
+export function automaticTierFloor(sessionModel: Model<Api>): PromptTier {
+	const tier = intrinsicTier(sessionModel);
+	return tier === "frontier" || tier === "workhorse" ? "workhorse" : "cheap";
+}
+
+/**
+ * The floor-gated form the classifier and the subagent default share: the
+ * cheaper contained candidates (`cheaperContainedCandidates`) that either
+ * measurably reach the role's capability floor (an Artificial Analysis
+ * snapshot, when one exists — `capability-index.ts`) or, unscored, sit at or
+ * above `automaticTierFloor(sessionModel)` by name class. Measured failures are
+ * already dropped upstream. The head is "the cheapest model this provider
+ * offers that is capable enough for the session".
+ */
+export function capableContainedCandidates(
+	available: Model<Api>[],
+	sessionModel: Model<Api>,
+	role: FloorRole,
+	opts: { strict?: boolean; contained?: Model<Api>[] } = {},
+): Model<Api>[] {
+	const floor = automaticTierFloor(sessionModel);
+	return rankedContainedCandidates(available, sessionModel, role, opts)
+		.filter(({ model, measured }) => measured === "pass" || atLeastTier(intrinsicTier(model), floor))
+		.map((entry) => entry.model);
+}
+
 export interface RankedCandidate {
 	model: Model<Api>;
 	/** "pass": measurably reaches the floor; "unscored": no snapshot or no confirmed score (the caller's name-class rule decides). */
@@ -419,6 +455,6 @@ export function pickEconomicalContainedModel(
 	sessionModel: Model<Api> | undefined,
 ): EconomicalModelChoice | undefined {
 	if (!sessionModel) return undefined;
-	const cheaper = cheaperContainedCandidates(available, sessionModel, { role: "subagent" })[0];
+	const cheaper = cheaperContainedCandidates(available, sessionModel, { role: "reader" })[0];
 	return cheaper ? { model: cheaper, via: "tier" } : { model: sessionModel, via: "session" };
 }

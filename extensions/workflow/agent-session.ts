@@ -30,6 +30,7 @@ import { summarizeArgs } from "../lib/tui-render.ts";
 import { agentDirs, type AgentDefinition, discoverAgents } from "../subagents/agents.ts";
 import type { SubagentDefault } from "../subagents/default-model.ts";
 import { expensiveModelGate, resolveSubagentModel, subagentModelMenu } from "../subagents/model-select.ts";
+import { withoutUnusable } from "../lib/model-unusable.ts";
 import { cleanupWorktree, createWorktree, isGitRepo, type Worktree } from "../subagents/worktree.ts";
 import type { AgentCallOptions, AgentCallResult, AgentEffort, AgentRunUpdate } from "./types.ts";
 import { WorkflowScriptError } from "./types.ts";
@@ -46,6 +47,8 @@ export interface AgentRunnerOptions {
 	defaultEffort?: AgentEffort | string;
 	/** Surface model-resolution notices (fallbacks, provider crossings) in the run log. */
 	onNotice?: (message: string) => void;
+	/** Models this account cannot run (`provider/id`), learned this session — dropped from the catalog before resolving (lib/model-unusable.ts). */
+	unusableModels?: () => ReadonlySet<string>;
 	/**
 	 * The parent permissions extension's decision closure (same bridge the
 	 * subagent runner uses): when present, a workflow agent's tool calls route
@@ -209,7 +212,7 @@ export class AgentRunner {
 			agentModel,
 			configuredDefault: this.options.configuredDefault,
 			sessionModel: this.options.defaultModel as Model<Api> | undefined,
-			available: this.availableModels,
+			available: withoutUnusable(this.availableModels, this.options.unusableModels?.() ?? new Set()),
 			defaultEffort: this.options.defaultEffort as string | undefined,
 		});
 		for (const notice of resolution.notices) this.options.onNotice?.(notice);

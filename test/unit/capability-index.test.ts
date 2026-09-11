@@ -127,12 +127,16 @@ describe("capabilityFloor", () => {
 
 	it("passes a candidate whose coding index reaches min(session, Sonnet 5)", () => {
 		// Flash 69.1 ≥ min(Pro 68.8, Sonnet 71.5) — the flash line measurably matches its flagship.
-		expect(capabilityFloor(SNAPSHOT, flash, pro, "subagent")).toMatchObject({ verdict: "pass", floor: 68.8 * 0.9 });
-		// Luna 71.4 vs a GPT-5.6 Sol session: floor is Sonnet's 71.5 → subagents tolerate it, but not by a wide margin.
+		expect(capabilityFloor(SNAPSHOT, flash, pro, "subagent")).toMatchObject({ verdict: "pass", floor: 68.8 });
+		// Luna 71.4 vs a GPT-5.6 Sol session: floor is Sonnet's 71.5 → a delegated worker
+		// gets no tolerance (the classifier's floor, shared since 2026-09-11) and fails by 0.1;
+		// only the low-stakes reader may sit 10% under the floor.
 		const sol = model("openai", "gpt-5.6-sol", 4.5);
-		expect(capabilityFloor(SNAPSHOT, model("openai", "gpt-5.6-luna", 0.2), sol, "subagent")).toMatchObject({ verdict: "pass" });
+		expect(capabilityFloor(SNAPSHOT, model("openai", "gpt-5.6-luna", 0.2), sol, "subagent")).toMatchObject({ verdict: "fail", floor: 71.5 });
+		expect(capabilityFloor(SNAPSHOT, model("openai", "gpt-5.6-luna", 0.2), sol, "reader")).toMatchObject({ verdict: "pass", floor: 71.5 * 0.9 });
 		// GPT-5 mini 15.6 fails every floor.
 		expect(capabilityFloor(SNAPSHOT, model("openai", "gpt-5-mini", 0.25), sol, "subagent")).toMatchObject({ verdict: "fail" });
+		expect(capabilityFloor(SNAPSHOT, model("openai", "gpt-5-mini", 0.25), sol, "reader")).toMatchObject({ verdict: "fail" });
 	});
 
 	it("judges the classifier on thinking-off scores, falling back to the default variant on one basis", () => {
@@ -171,12 +175,15 @@ describe("selection with a measured floor", () => {
 			model("openai", "gpt-5.6-luna", 0.2),
 			model("openai", "gpt-5-mini", 0.25), // cheap tier by anchor, but scores 15.6 → fails
 		];
-		expect(cheaperContainedCandidates(catalog, catalog[0], { role: "subagent" }).map((m) => m.id)).toEqual(["gpt-5.6-luna"]);
-		expect(resolveSubagentModel({ sessionModel: catalog[0], available: catalog }).model?.id).toBe("gpt-5.6-luna");
+		// Luna 71.4 clears the reader's tolerant floor but not the worker's full one (71.5).
+		expect(cheaperContainedCandidates(catalog, catalog[0], { role: "reader" }).map((m) => m.id)).toEqual(["gpt-5.6-luna"]);
+		expect(cheaperContainedCandidates(catalog, catalog[0], { role: "subagent" }).map((m) => m.id)).toEqual([]);
+		expect(resolveSubagentModel({ sessionModel: catalog[0], available: catalog })).toMatchObject({ model: { id: "gpt-5.6-sol" }, source: "session" });
 		expect(pickEconomicalContainedModel(catalog, catalog[0])).toMatchObject({ model: { id: "gpt-5.6-luna" }, via: "tier" });
 		// Unscored rows keep their tier order after the measured passers.
 		const withUnknown = [...catalog, model("openai", "gpt-5.6-mystery", 0.1)];
-		expect(cheaperContainedCandidates(withUnknown, catalog[0], { role: "subagent" }).map((m) => m.id)).toEqual(["gpt-5.6-luna", "gpt-5.6-mystery"]);
+		expect(cheaperContainedCandidates(withUnknown, catalog[0], { role: "reader" }).map((m) => m.id)).toEqual(["gpt-5.6-luna", "gpt-5.6-mystery"]);
+		expect(cheaperContainedCandidates(withUnknown, catalog[0], { role: "subagent" }).map((m) => m.id)).toEqual(["gpt-5.6-mystery"]);
 	});
 });
 

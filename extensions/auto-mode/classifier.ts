@@ -120,6 +120,13 @@ export interface ClassifierDeps {
 	 * only — it never affects the payload sent or the verdict parsed. */
 	onUsage?: (usage: unknown) => void;
 	/**
+	 * A candidate the provider refused as not usable on this account (stepped
+	 * over and recorded in `state.rejected`). The wiring republishes it on
+	 * `lib/model-unusable.ts`'s channel so subagent selection — which shares this
+	 * classifier's floor and therefore its first pick — skips it too.
+	 */
+	onModelUnusable?: (model: string, reason: string) => void;
+	/**
 	 * Completed-run subagent review: evaluate the sequence with a single stage-2
 	 * style full-eval call instead of the two-stage gate (there is no harm floor
 	 * to short-circuit, and the whole point is the intent/ALLOW judgment).
@@ -419,6 +426,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 			}
 			// unavailable: this model is not usable here — step over it and record it.
 			reject(key);
+			deps.onModelUnusable?.(key, lastError);
 			const isConfigured = candidate.source === "configured";
 			notifyOnce(
 				deps,

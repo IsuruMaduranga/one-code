@@ -15,7 +15,9 @@
  *   economical        main = cheapest capable (cheap tier, never tiny); subagents inherit it;
  *                     classifier automatic (lands on the same model)
  *   balanced          main = cheapest workhorse-tier model; subagents automatic (the
- *                     cheaper capable model); classifier automatic (workhorse floor)
+ *                     cheapest model at the main's floor — often the main itself,
+ *                     since subagents share the classifier's workhorse floor);
+ *                     classifier automatic (workhorse floor)
  *   maximum quality   main = the strongest (frontier, else priciest workhorse);
  *                     subagents inherit it; classifier automatic
  * so applying a preset is three settings writes the user can each undo by hand
@@ -43,7 +45,7 @@ export const PRESET_LABEL: Record<PresetName, string> = {
 
 export const PRESET_INTENT: Record<PresetName, string> = {
 	economical: "lowest cost — one cheap model for everything",
-	balanced: "a capable main model, cheaper delegated work",
+	balanced: "a capable main model, delegated work on the cheapest model at its floor",
 	quality: "the strongest model for the main session and its subagents",
 };
 

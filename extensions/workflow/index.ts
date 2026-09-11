@@ -24,6 +24,7 @@ import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { recordUsage } from "../lib/usage-bus.ts";
+import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent } from "../lib/model-unusable.ts";
 import { whenAborted } from "../lib/abort.ts";
 import { createTaskNotifier, oneShotNote, sessionOutlivesTurn } from "../lib/notifications.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
@@ -202,6 +203,12 @@ const WorkflowParams = Type.Object({
 });
 
 export default function workflowExtension(pi: ExtensionAPI) {
+	// Models the account refused this session (classifier/subagent reports, lib/model-unusable.ts):
+	// workflow agents share the subagent selector, so they resolve around them too.
+	const unusableModels = new Set<string>();
+	pi.events.on(MODEL_UNUSABLE_CHANNEL, (data) => {
+		unusableModels.add((data as ModelUnusableEvent).model);
+	});
 	const notifyTask = createTaskNotifier(pi);
 	const manager = new WorkflowRunManager();
 	let lastCtx: ExtensionContext | undefined;
@@ -299,6 +306,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 					getHookBridge,
 					// Workflow agents run in their own sessions; their spend reaches the footer only through the bus.
 					onUsage: (cost) => recordUsage(pi, "subagent", { cost: { total: cost } }),
+					unusableModels: () => unusableModels,
 				});
 				widget.attach(handle);
 

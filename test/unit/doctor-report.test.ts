@@ -90,7 +90,7 @@ describe("buildDoctorReport", () => {
 		expect(text).toContain("frontier tier");
 		expect(text).toContain("Effort: high");
 		// Automatic subagent pick: cheapest capable strictly cheaper model on the same provider.
-		expect(text).toContain("Subagents and workflow agents: anthropic/claude-haiku-4-5 — automatic");
+		expect(text).toContain("Subagents and workflow agents: anthropic/claude-sonnet-5 — automatic");
 		// Classifier: workhorse floor on a frontier session → Sonnet, and the live pin is shown.
 		expect(text).toContain("Auto-mode classifier: anthropic/claude-sonnet-5");
 		expect(text).toContain("screening this session on anthropic/claude-sonnet-5");
@@ -98,7 +98,7 @@ describe("buildDoctorReport", () => {
 		expect(text).toContain("Updates: up to date (0.2.1 is the latest release)");
 		expect(text).toContain("ANTHROPIC (anthropic): ready — key saved by /login · 3 models");
 		expect(text).toContain("2 more providers without credentials");
-		expect(report.summary).toMatch(/^Ready\. Main model anthropic\/claude-opus-5, subagents on anthropic\/claude-haiku-4-5, auto-mode classifier anthropic\/claude-sonnet-5\./);
+		expect(report.summary).toMatch(/^Ready\. Main model anthropic\/claude-opus-5, subagents on anthropic\/claude-sonnet-5, auto-mode classifier anthropic\/claude-sonnet-5\./);
 	});
 
 	it("warns when the hosting pi is outside the tested range", () => {

@@ -34,7 +34,7 @@ import {
 	modelIdentity,
 	modelSpec as spec,
 } from "../lib/model-policy.ts";
-import { atLeastTier, intrinsicTier, type PromptTier, rankedContainedCandidates } from "../lib/model-tier.ts";
+import { capableContainedCandidates } from "../lib/model-tier.ts";
 
 export { findConfigured } from "../lib/model-policy.ts";
 
@@ -77,18 +77,20 @@ export interface ClassifierNotice {
  * The chain always ends at the session model when there is one, so auto mode
  * degrades to "correct but not cheap" rather than to "broken".
  *
- * The automatic pick is the SAME tier selector subagents use — the cheapest
- * *capable* same-provider model (cheap → workhorse → frontier, never `tiny`) —
- * with one floor of its own ({@link classifierTierFloor}): a session on a
- * workhorse-or-better model is screened by a workhorse-or-better model, Claude
- * Code's `min(main, sonnet)`. `docs/decisions/auto-mode.md` measured the same
- * `rm -rf` grading stage-1 62 on Sonnet and ~22 on Haiku — "a weak classifier
- * is a weak boundary" — yet until 2026-09-05 the selector picked Haiku even
- * when the session itself was Sonnet, so the gate's threshold behaviour
- * depended on which model happened to be cheapest (PERMISSIONS-REVIEW-2026-09-05
- * M6). A cheap session keeps a cheap screener (nothing cheaper and capable
- * exists), and `autoMode.classifierModel` overrides either way. The `tiny`
- * exclusion is the capability floor `auto-mode.md` recorded as still-missing.
+ * The automatic pick is the SAME floor-gated selector the subagent default uses
+ * (`capableContainedCandidates`): the cheapest same-provider model (cheap →
+ * workhorse → frontier, never `tiny`) at or above `automaticTierFloor` — a
+ * session on a workhorse-or-better model is screened by a workhorse-or-better
+ * model, Claude Code's `min(main, sonnet)`. `docs/decisions/auto-mode.md`
+ * measured the same `rm -rf` grading stage-1 62 on Sonnet and ~22 on Haiku —
+ * "a weak classifier is a weak boundary" — yet until 2026-09-05 the selector
+ * picked Haiku even when the session itself was Sonnet, so the gate's threshold
+ * behaviour depended on which model happened to be cheapest
+ * (PERMISSIONS-REVIEW-2026-09-05 M6). A cheap session keeps a cheap screener
+ * (nothing cheaper and capable exists), and `autoMode.classifierModel`
+ * overrides either way. The `tiny` exclusion is the capability floor
+ * `auto-mode.md` recorded as still-missing. Since 2026-09-11 subagents share
+ * the floor, so a session screens and delegates on one model.
  *
  * The floor governs the AUTOMATIC pick only; the terminal fallback is never
  * refused, so the chain is empty only when there is no session model and nothing
@@ -153,10 +155,7 @@ export function classifierCandidates({
 	//    unscored candidate (no key, no confirmed match) is judged by the
 	//    name-class tier floor below, exactly as before the snapshot existed.
 	if (sessionModel) {
-		const floor = classifierTierFloor(sessionModel);
-		for (const { model, measured } of rankedContainedCandidates(available, sessionModel, "classifier")) {
-			if (measured === "pass" || atLeastTier(intrinsicTier(model), floor)) push(model, "economical");
-		}
+		for (const model of capableContainedCandidates(available, sessionModel, "classifier")) push(model, "economical");
 	}
 
 	// 3. The session's own model: always correct, just not cheap. Terminal
@@ -186,17 +185,6 @@ export function classifierCandidates({
 	}
 
 	return { candidates, notices };
-}
-
-/**
- * The weakest tier the automatic classifier may run on for a session: workhorse
- * when the session itself is workhorse or frontier (Claude Code's
- * `min(main, sonnet)`), cheap otherwise (a cheap session has nothing cheaper
- * and capable to screen it; `tiny` is excluded upstream regardless).
- */
-export function classifierTierFloor(sessionModel: Model<Api>): PromptTier {
-	const tier = intrinsicTier(sessionModel);
-	return tier === "frontier" || tier === "workhorse" ? "workhorse" : "cheap";
 }
 
 /**

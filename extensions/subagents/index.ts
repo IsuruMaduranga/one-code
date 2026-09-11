@@ -27,6 +27,7 @@ import { Type } from "typebox";
 import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../auto-mode/actions.ts";
 import { type AgentDefinition, type AgentSource, agentDirs, discoverAgents } from "./agents.ts";
 import { modelIdentity, modelSpec } from "../lib/model-policy.ts";
+import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent, withoutUnusable } from "../lib/model-unusable.ts";
 import { applicableSubagentDefault, loadSubagentDefault, persistSubagentModel, type SubagentDefault } from "./default-model.ts";
 import {
 	expensiveModelGate,
@@ -326,6 +327,28 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	const getHookBridge = watchHookBridge(pi);
 
 	/** The in-process runner, built lazily on first run and shared across all runs. */
+	/**
+	 * Models this account cannot run, learned during the session: the auto-mode
+	 * classifier's rejections arrive on the shared channel, a child's own
+	 * provider refusal is reported by the runtime. Both roles pick from one
+	 * floor, so both would otherwise keep landing on the same refused model
+	 * (lib/model-unusable.ts). `usableModels` is the catalog every resolution
+	 * and menu here reads.
+	 */
+	const unusableModels = new Set<string>();
+	const usableModels = (ctx: ExtensionContext) => withoutUnusable(ctx.modelRegistry.getAvailable(), unusableModels);
+	const rememberUnusable = (model: string) => {
+		if (unusableModels.has(model)) return false;
+		unusableModels.add(model);
+		return true;
+	};
+	pi.events.on(MODEL_UNUSABLE_CHANNEL, (data) => {
+		// The default may have been that model: recompute and republish the
+		// reminder/banner so the next request already names the replacement.
+		const event = data as ModelUnusableEvent;
+		if (rememberUnusable(event.model) && lastCtx) emitModelStatus(lastCtx);
+	});
+
 	let runtimePromise: Promise<SubagentRuntime> | undefined;
 	const getRuntime = (ctx: ExtensionContext) =>
 		(runtimePromise ??= SubagentRuntime.create(
@@ -341,6 +364,13 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				const live = liveUiCtx(lastCtx);
 				if (live) live.ui.notify(text, "warning");
 				else process.stderr.write(`${text}\n`);
+			},
+			(model, reason) => {
+				if (!rememberUnusable(model)) return;
+				pi.events.emit(MODEL_UNUSABLE_CHANNEL, { model, reason, source: "subagent" } satisfies ModelUnusableEvent);
+				const live = liveUiCtx(lastCtx);
+				live?.ui.notify(`Subagent model ${model} is not usable on this account (${reason}); automatic selection skips it from now on.`, "warning");
+				if (lastCtx) emitModelStatus(lastCtx);
 			},
 		));
 
@@ -426,7 +456,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		configured: SubagentDefault | undefined,
 	): SubagentModelResolution => {
 		const session = sessionModel ? modelSpec(sessionModel) : "(none)";
-		const signature = `${session}|${configured?.spec ?? ""}|${configured?.setForContainment ?? ""}|${configured?.source ?? ""}`;
+		const signature = `${session}|${configured?.spec ?? ""}|${configured?.setForContainment ?? ""}|${configured?.source ?? ""}|${unusableModels.size}`;
 		if (autoDefaultCache?.signature === signature) return autoDefaultCache.resolution;
 		const resolution = resolveSubagentModel({ configuredDefault: configured, sessionModel, available });
 		autoDefaultCache = { signature, resolution };
@@ -440,7 +470,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	 * replaces it: the very next LLM call, even mid-turn, carries the update.
 	 */
 	const emitModelStatus = (ctx: ExtensionContext, sessionModel = ctx.model) => {
-		const available = ctx.modelRegistry.getAvailable();
+		const available = usableModels(ctx);
 		const configured = applicableSubagentDefault(loadSubagentDefault(os.homedir()), sessionModel);
 		const resolution = resolveAutoDefault(sessionModel, available, configured);
 		for (const notice of resolution.notices) notifyModelOnce(ctx, notice);
@@ -1099,7 +1129,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				// Same parent-side model resolution as the main Agent tool, minus
 				// per-call overrides: the agent's own model, else the configured
 				// default, else the session model.
-				const available = ctx.modelRegistry.getAvailable();
+				const available = usableModels(ctx);
 				const resolution = resolveSubagentModel({
 					agentModel: agentDef.model,
 					configuredDefault: applicableSubagentDefault(loadSubagentDefault(os.homedir()), ctx.model),
@@ -1494,7 +1524,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			 * `provider/id`; anything surprising (a fallback, a provider crossing)
 			 * is said out loud rather than happening silently.
 			 */
-			const available = ctx.modelRegistry.getAvailable();
+			const available = usableModels(ctx);
 			const configuredDefault = applicableSubagentDefault(loadSubagentDefault(os.homedir()), ctx.model);
 			/**
 			 * What the model is told about its own model choice: the same sentences
@@ -2137,7 +2167,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	const showSubagentModelStatus = (ctx: ExtensionContext) => {
 		const configured = loadSubagentDefault(os.homedir());
 		const applicable = applicableSubagentDefault(configured, ctx.model);
-		const available = ctx.modelRegistry.getAvailable();
+		const available = usableModels(ctx);
 		const resolution = resolveSubagentModel({
 			configuredDefault: applicable,
 			sessionModel: ctx.model,
@@ -2177,7 +2207,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			return;
 		}
 
-		const available = ctx.modelRegistry.getAvailable();
+		const available = usableModels(ctx);
 		const resolution = resolveSubagentModel({ requested: spec, sessionModel: ctx.model, available });
 		if (resolution.unresolved) {
 			const fallback = resolveSubagentModel({
@@ -2259,7 +2289,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				showSubagentModelStatus(ctx);
 				return;
 			}
-			const available = ctx.modelRegistry.getAvailable();
+			const available = usableModels(ctx);
 			if (available.length === 0) {
 				ctx.ui.notify("No models are available — authenticate a provider first.", "warning");
 				return;
