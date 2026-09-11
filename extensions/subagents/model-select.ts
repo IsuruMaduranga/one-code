@@ -210,10 +210,12 @@ function resolveAlias(
 	if (!sessionModel) return undefined;
 	const tier = ALIAS_TIER[alias];
 	if (tier === "frontier") return { model: sessionModel, how: "tier" };
+	// Name-class only, deliberately: an explicit alias asks for a *class* of model,
+	// so a measured pass (which lets a strong flash serve the automatic default)
+	// does not lift a lean-named model into "sonnet" here.
 	const byTier = economicalContainedCandidates(available, sessionModel, contained).find((model) => atLeastTier(intrinsicTier(model), tier));
 	return byTier ? { model: byTier, how: "tier" } : undefined;
 }
-
 
 export function resolveSubagentModel(input: ResolveInput): SubagentModelResolution {
 	const { available, sessionModel } = input;

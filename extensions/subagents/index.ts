@@ -326,7 +326,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	// hooks run for a child's tool calls too (hooks/subagent-bridge.ts).
 	const getHookBridge = watchHookBridge(pi);
 
-	/** The in-process runner, built lazily on first run and shared across all runs. */
 	/**
 	 * Models this account cannot run, learned during the session: the auto-mode
 	 * classifier's rejections arrive on the shared channel, a child's own
@@ -349,6 +348,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		if (rememberUnusable(event.model) && lastCtx) emitModelStatus(lastCtx);
 	});
 
+	/** The in-process runner, built lazily on first run and shared across all runs. */
 	let runtimePromise: Promise<SubagentRuntime> | undefined;
 	const getRuntime = (ctx: ExtensionContext) =>
 		(runtimePromise ??= SubagentRuntime.create(
@@ -367,7 +367,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			},
 			(model, reason) => {
 				if (!rememberUnusable(model)) return;
-				pi.events.emit(MODEL_UNUSABLE_CHANNEL, { model, reason, source: "subagent" } satisfies ModelUnusableEvent);
+				pi.events.emit(MODEL_UNUSABLE_CHANNEL, { model, reason } satisfies ModelUnusableEvent);
 				const live = liveUiCtx(lastCtx);
 				live?.ui.notify(`Subagent model ${model} is not usable on this account (${reason}); automatic selection skips it from now on.`, "warning");
 				if (lastCtx) emitModelStatus(lastCtx);

@@ -314,7 +314,7 @@ export class SubagentRuntime {
 					// auto-mode classifier steps over (`isModelUnavailableError`).
 					const reply = e.message as { stopReason?: string; errorMessage?: string; provider?: string; model?: string };
 					if (reply.stopReason === "error" && reply.errorMessage && reply.provider && reply.model && isModelUnavailableError(reply.errorMessage)) {
-						this.onModelUnusable(`${reply.provider}/${reply.model}`, reply.errorMessage);
+						this.onModelUnusable(modelSpec({ provider: reply.provider, id: reply.model }), reply.errorMessage);
 					}
 					const text = streamingText(e.message).trim();
 					if (text) {

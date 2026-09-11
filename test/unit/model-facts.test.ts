@@ -65,7 +65,7 @@ describe("classifyModelTier with facts", () => {
 	it("uses the name class for current-generation rows, price ignored", () => {
 		// Priced far below the old $0.50 floor, yet cheap by name and current by date.
 		expect(classifyModelTier(model("openrouter", "deepseek/deepseek-v4-flash", 0.085), noEnv)).toEqual({ tier: "cheap", reason: "anchor" });
-		expect(classifyModelTier(model("openai", "gpt-5.6-sol", 4.5), noEnv)).toEqual({ tier: "workhorse", reason: "anchor" });
+		expect(classifyModelTier(model("openai", "gpt-5.6-sol", 4.5), noEnv)).toEqual({ tier: "workhorse", reason: "name class" }); // the blanket gpt-5 anchor is gone
 		expect(classifyModelTier(model("openai", "gpt-5-mini", 0.25), noEnv)).toEqual({ tier: "cheap", reason: "anchor" });
 	});
 
@@ -83,6 +83,19 @@ describe("classifyModelTier with facts", () => {
 	it("never consults facts for an opaque provider, and no longer lets a 'pro' name lift one", () => {
 		setModelFactsForTest({ ...FACTS, "ollama/deepseek-v4-pro": { releaseDate: "2026-08-13" } });
 		expect(classifyModelTier(model("ollama", "deepseek-v4-pro", 0.4), noEnv)).toEqual({ tier: "tiny", reason: "opaque provider" });
+	});
+
+	it("borrows a release date from the same model on another provider, never the tool-call flag", () => {
+		// models.dev has no openai-codex entries; the Codex row is the same model as openai's.
+		expect(modelFacts(model("openai-codex", "gpt-5.6-sol"))).toEqual({ releaseDate: "2026-07-09" });
+		expect(classifyModelTier(model("openai-codex", "gpt-5.6-sol", 5), noEnv)).toEqual({ tier: "workhorse", reason: "name class" });
+		expect(modelFacts(model("openai-codex", "text-only-legacy"))).toEqual({ releaseDate: "2026-07-01" }); // toolCall: false stays with openai's own row
+		expect(lacksToolCalls(model("openai-codex", "text-only-legacy"))).toBe(false);
+		// Providers that disagree on the date (OpenRouter's April flash vs DeepSeek's July one) lend nothing.
+		setModelFactsForTest({ ...FACTS, "deepseek/deepseek-v4-flash": { releaseDate: "2026-07-31" } });
+		expect(modelFacts(model("baseten", "deepseek-ai/DeepSeek-V4-Flash"))).toBeUndefined();
+		// An opaque identity never borrows: a local "gpt-5.6-sol" is not OpenAI's.
+		expect(modelFacts(model("ollama", "gpt-5.6-sol"))).toBeUndefined();
 	});
 
 	it("falls back to the pre-facts heuristics for a row without facts", () => {

@@ -307,6 +307,11 @@ export default function workflowExtension(pi: ExtensionAPI) {
 					// Workflow agents run in their own sessions; their spend reaches the footer only through the bus.
 					onUsage: (cost) => recordUsage(pi, "subagent", { cost: { total: cost } }),
 					unusableModels: () => unusableModels,
+					onModelUnusable: (model, reason) => {
+						if (unusableModels.has(model)) return;
+						unusableModels.add(model);
+						pi.events.emit(MODEL_UNUSABLE_CHANNEL, { model, reason } satisfies ModelUnusableEvent);
+					},
 				});
 				widget.attach(handle);
 

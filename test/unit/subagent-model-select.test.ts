@@ -200,6 +200,19 @@ describe("resolveSubagentModel: precedence and exact references", () => {
 		expect(resolution.model).toBeUndefined();
 	});
 
+	it("falls an alias with no model of its class through to the automatic pick, not the session model", () => {
+		// A cheap-tier session on a provider with only cheap-tier models: "sonnet"
+		// names no workhorse-class model there, so the chain continues and the
+		// automatic pick (cheapest at the session's own floor) runs the subagent —
+		// the session model would have been the dearer answer for no reason.
+		const cheapOnly = [model("openai", "gpt-5.4-mini", 0.75), model("openai", "gpt-5-mini", 0.25)];
+		const resolution = resolveSubagentModel({ requested: "sonnet", sessionModel: cheapOnly[0], available: cheapOnly });
+		expect(resolution.model?.id).toBe("gpt-5-mini");
+		expect(resolution.source).toBe("automatic");
+		expect(resolution.notices[0]).toBe('No "sonnet" model in this session\'s provider family (openai/gpt-5.4-mini).');
+		expect(resolution.unresolved).toBeUndefined();
+	});
+
 	it("falls a per-call alias the provider cannot tier through to the agent's model", () => {
 		// An unpriced catalog has nothing the tier reading can rank, so the alias
 		// names nothing; the agent's own valid model must still run rather than
@@ -316,8 +329,9 @@ describe("resolveSubagentModel: precedence and exact references", () => {
 });
 
 describe("resolveSubagentModel: agent-file provider containment", () => {
-	// gpt-5.1-codex: the cheaper workhorse-class sibling the automatic pick lands on.
-	const openaiCatalog = [model("openai", "gpt-5.1", 1.25), model("openai", "gpt-5-mini", 0.25), model("openai", "gpt-5.1-codex", 0.75)];
+	// gpt-5.1-codex: the cheaper workhorse-class sibling the automatic pick lands on
+	// (no facts in unit tests, so the $1 price floor is what keeps it workhorse).
+	const openaiCatalog = [model("openai", "gpt-5.1", 1.25), model("openai", "gpt-5-mini", 0.25), model("openai", "gpt-5.1-codex", 1)];
 
 	it("does not honor a cross-provider agent-file model on a non-Claude session", () => {
 		// A .claude/agents file naming an Anthropic model on an OpenAI session:

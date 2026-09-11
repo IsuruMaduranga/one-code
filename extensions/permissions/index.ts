@@ -357,6 +357,9 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	});
 	/** Report each classifier reply's usage to the all-in footer cost. */
 	const onClassifierUsage = (usage: unknown) => recordUsage(pi, "classifier", usage);
+	/** A candidate the provider refused for this account: published so subagent/workflow selection skips it too (lib/model-unusable.ts). */
+	const onClassifierModelUnusable = (model: string, reason: string) =>
+		pi.events.emit(MODEL_UNUSABLE_CHANNEL, { model, reason } satisfies ModelUnusableEvent);
 
 	/**
 	 * One JSONL line per gate decision when `autoMode.logDecisions` is set. The
@@ -566,8 +569,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				signal: opts?.signal ?? ctx.signal,
 				state: classifierState,
 				onUsage: onClassifierUsage,
-				onModelUnusable: (model, reason) =>
-					pi.events.emit(MODEL_UNUSABLE_CHANNEL, { model, reason, source: "classifier" } satisfies ModelUnusableEvent),
+				onModelUnusable: onClassifierModelUnusable,
 				onNotice: (message, level) => {
 					ctx.ui.notify(message, level);
 					// The badge names the classifier, so it has to repaint when the first
@@ -1269,8 +1271,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				state: classifierState,
 				onNotice: (message, level) => ctx.ui.notify(message, level),
 				onUsage: onClassifierUsage,
-				onModelUnusable: (model, reason) =>
-					pi.events.emit(MODEL_UNUSABLE_CHANNEL, { model, reason, source: "classifier" } satisfies ModelUnusableEvent),
+				onModelUnusable: onClassifierModelUnusable,
 				reviewOnly: true,
 			},
 		);

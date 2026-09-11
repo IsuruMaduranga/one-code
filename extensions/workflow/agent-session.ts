@@ -22,6 +22,7 @@ import { Type } from "typebox";
 import { whenAborted } from "../lib/abort.ts";
 import { createSharedModelRuntime, finalAssistantText, openChildSession } from "../lib/agent-loader.ts";
 import { modelSpec as modelSpecOf } from "../lib/model-policy.ts";
+import { isModelUnavailableError } from "../auto-mode/model-select.ts";
 import { agentPromptIdentity, PrefixWarmGate, prefixWarmKey } from "../lib/prefix-warm-gate.ts";
 import type { PermissionBridge } from "../permissions/subagent-gate.ts";
 import { localGateMode, MODE_ENV } from "../lib/permission-gate.ts";
@@ -49,6 +50,8 @@ export interface AgentRunnerOptions {
 	onNotice?: (message: string) => void;
 	/** Models this account cannot run (`provider/id`), learned this session — dropped from the catalog before resolving (lib/model-unusable.ts). */
 	unusableModels?: () => ReadonlySet<string>;
+	/** An agent's provider refused its model as not usable on this account (`isModelUnavailableError`): report it so every picker skips it. */
+	onModelUnusable?: (model: string, reason: string) => void;
 	/**
 	 * The parent permissions extension's decision closure (same bridge the
 	 * subagent runner uses): when present, a workflow agent's tool calls route
@@ -275,19 +278,30 @@ export class AgentRunner {
 		});
 
 		const unhookAbort = whenAborted(signal, () => void session.abort());
-		// Forward tool calls for the viewer's Activity pane; never let a bad
-		// args shape in the summary kill the agent.
-		const unsubscribe = onUpdate
-			? session.subscribe((event) => {
-					if (event.type !== "tool_execution_start") return;
-					try {
-						const argsSummary = summarizeArgs((event as { args?: unknown }).args);
-						onUpdate({ tool: { name: event.toolName, argsSummary } });
-					} catch {
-						onUpdate({ tool: { name: event.toolName } });
+		// Forward tool calls for the viewer's Activity pane, and report a provider
+		// refusing the agent's model (the same check the subagent runner makes, so
+		// the refusal reaches every automatic picker — lib/model-unusable.ts).
+		// Never let a bad event shape kill the agent.
+		const unsubscribe = session.subscribe((event) => {
+			try {
+				if (event.type === "message_end") {
+					const reply = (event as { message?: { role?: string; stopReason?: string; errorMessage?: string; provider?: string; model?: string } }).message;
+					if (reply?.role === "assistant" && reply.stopReason === "error" && reply.errorMessage && reply.provider && reply.model && isModelUnavailableError(reply.errorMessage)) {
+						this.options.onModelUnusable?.(modelSpecOf({ provider: reply.provider, id: reply.model }), reply.errorMessage);
 					}
-				})
-			: undefined;
+					return;
+				}
+				if (event.type !== "tool_execution_start" || !onUpdate) return;
+				try {
+					const argsSummary = summarizeArgs((event as { args?: unknown }).args);
+					onUpdate({ tool: { name: event.toolName, argsSummary } });
+				} catch {
+					onUpdate({ tool: { name: event.toolName } });
+				}
+			} catch {
+				// observer only
+			}
+		});
 		// Same prompt identity + cwd + model = same request prefix (see warmGate).
 		const model = session.model;
 		const releasePrefix = await this.warmGate.admitOnFirstToken(

@@ -1,3 +1,4 @@
+import type { Api, Model } from "@earendil-works/pi-ai";
 /**
  * doctor extension — `/doctor`, One Code's setup checkup.
  *
@@ -30,6 +31,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { loadAutoModeConfig, persistClassifierModel } from "../auto-mode/config.ts";
 import { configuredCapabilityKey, loadCapabilitySnapshot, refreshCapabilitySnapshot, snapshotIsStale } from "../lib/capability-index.ts";
+import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent, withoutUnusable } from "../lib/model-unusable.ts";
 import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } from "../lib/mcp-status.ts";
 import { sessionOutlivesTurn } from "../lib/notifications.ts";
 import { modelSpec } from "../lib/model-policy.ts";
@@ -50,6 +52,13 @@ import { applyDoctorKey, decodeDoctorKey, renderDoctorViewer, visibleBodyRows } 
 export const DOCTOR_PANEL_MAX_HEIGHT = 40;
 
 export default function doctorExtension(pi: ExtensionAPI) {
+	// Models the account refused this session (lib/model-unusable.ts): the report
+	// and presets must not recommend a model the session has just learned to avoid.
+	const unusableModels = new Set<string>();
+	pi.events.on(MODEL_UNUSABLE_CHANNEL, (data) => {
+		unusableModels.add((data as ModelUnusableEvent).model);
+	});
+	const usableModels = (ctx: { modelRegistry: { getAvailable(): Model<Api>[] } }) => withoutUnusable(ctx.modelRegistry.getAvailable(), unusableModels);
 	let permission: PermissionStatus | undefined;
 	pi.events.on(PERMISSION_STATUS_CHANNEL, (data) => {
 		permission = data as PermissionStatus;
@@ -123,7 +132,7 @@ export default function doctorExtension(pi: ExtensionAPI) {
 			},
 			registry: {
 				all: ctx.modelRegistry.getAll(),
-				available: ctx.modelRegistry.getAvailable(),
+				available: usableModels(ctx),
 				authStatus: (provider) => ctx.modelRegistry.getProviderAuthStatus(provider),
 				displayName: (provider) => ctx.modelRegistry.getProviderDisplayName(provider),
 			},
@@ -203,7 +212,7 @@ export default function doctorExtension(pi: ExtensionAPI) {
 	};
 
 	const applyPreset = async (name: string, ctx: ExtensionCommandContext): Promise<void> => {
-		const available = ctx.modelRegistry.getAvailable();
+		const available = usableModels(ctx);
 		const { presets, unavailable } = computePresets(available, ctx.model);
 		if (unavailable === "no-model") {
 			ctx.ui.notify("No model is available — connect a provider with /login first.", "warning");
@@ -271,7 +280,7 @@ export default function doctorExtension(pi: ExtensionAPI) {
 				return;
 			}
 			if (verb === "presets") {
-				const section = presetsSection(computePresets(ctx.modelRegistry.getAvailable(), ctx.model), ctx.model);
+				const section = presetsSection(computePresets(usableModels(ctx), ctx.model), ctx.model);
 				ctx.ui.notify(renderSection(section, { width: 100 }).join("\n"), "info");
 				return;
 			}

@@ -13,8 +13,17 @@
  * docs/features/tiering/plan.md (Phase 1), docs/decisions/model-tiers.md.
  *
  * Lookups resolve OpenRouter's `~vendor/id` redirect aliases and `:variant`
- * endpoints through their base id. A row models.dev does not know has no facts
- * and gets the price-and-name behaviour that preceded this module.
+ * endpoints through their base id, and — since 2026-09-11 — BORROW across
+ * providers: models.dev has no `openai-codex` (or `azure-*`) provider entries,
+ * so `openai-codex/gpt-5.6-terra` had no facts while `openai/gpt-5.6-terra` did,
+ * which left every Codex row unscored by the measured floor and judged by name
+ * anchors alone. A row without its own facts takes the release date of the same
+ * model (same canonical vendor, same normalized id) on any other provider,
+ * provided every such row agrees on the date — a disagreement (OpenRouter's
+ * April `deepseek-v4-flash` vs DeepSeek's July one) borrows nothing. Only the
+ * date is borrowed, never the tool-call flag. A row models.dev does not know
+ * anywhere has no facts and gets the price-and-name behaviour that preceded
+ * this module. docs/decisions/model-tiers.md (2026-09-11).
  */
 
 import { readFileSync } from "node:fs";
@@ -37,7 +46,14 @@ export const PRIOR_GENERATION_DAYS = 365;
 /** …and this many days behind is two generations: maximum scaffolding, never auto-selected. */
 export const ANCIENT_GENERATION_DAYS = 730;
 
-let loaded: { facts: Record<string, ModelFactsRow>; familyNewest: Map<string, number> } | undefined;
+let loaded:
+	| {
+			facts: Record<string, ModelFactsRow>;
+			familyNewest: Map<string, number>;
+			/** `vendor|normalizedId` → the agreed release date, or null when providers disagree. */
+			borrowed: Map<string, ModelFactsRow | null>;
+	  }
+	| undefined;
 
 /** Test seam: replace the bundled table (pass `undefined` to restore it). */
 export function setModelFactsForTest(facts: Record<string, ModelFactsRow> | undefined): void {
@@ -70,6 +86,7 @@ export function modelFamily(model: { provider: string; id: string }): string {
 
 function index(facts: Record<string, ModelFactsRow>) {
 	const familyNewest = new Map<string, number>();
+	const borrowed = new Map<string, ModelFactsRow | null>();
 	for (const [key, row] of Object.entries(facts)) {
 		const slash = key.indexOf("/");
 		if (slash <= 0) continue;
@@ -80,14 +97,32 @@ function index(facts: Record<string, ModelFactsRow>) {
 		if (Number.isNaN(t)) continue;
 		const family = modelFamily(model);
 		if (t > (familyNewest.get(family) ?? -Infinity)) familyNewest.set(family, t);
+		const lend = borrowKey(model);
+		if (!lend) continue;
+		const prior = borrowed.get(lend);
+		if (prior === undefined) borrowed.set(lend, { releaseDate: row.releaseDate });
+		else if (prior !== null && prior.releaseDate !== row.releaseDate) borrowed.set(lend, null);
 	}
-	return { facts, familyNewest };
+	return { facts, familyNewest, borrowed };
 }
 
-/** The models.dev row for a model, resolved through alias and variant spellings. */
+/** The cross-provider identity a row may lend its release date under, or undefined for an unverifiable one. */
+function borrowKey(model: { provider: string; id: string }): string | undefined {
+	const identity = modelIdentity(model as Model<Api>);
+	if (identity.confidence === "opaque" || !identity.profile) return undefined;
+	return `${identity.profile}|${baseModelId(identity.normalizedId)}`;
+}
+
+/**
+ * The models.dev row for a model, resolved through alias and variant spellings,
+ * else borrowed from the same model on another provider (module doc).
+ */
 export function modelFacts(model: { provider: string; id: string }): ModelFactsRow | undefined {
-	const { facts } = load();
-	return facts[`${model.provider}/${model.id}`] ?? facts[`${model.provider}/${baseModelId(model.id)}`];
+	const { facts, borrowed } = load();
+	const own = facts[`${model.provider}/${model.id}`] ?? facts[`${model.provider}/${baseModelId(model.id)}`];
+	if (own) return own;
+	const key = borrowKey(model);
+	return (key && borrowed.get(key)) || undefined;
 }
 
 /** Whether models.dev says the model cannot call tools (undefined = unknown or yes). */

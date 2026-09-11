@@ -245,7 +245,10 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 
 		const auth = await deps.registry.getApiKeyAndHeaders(model);
 		if (!auth.ok) {
+			// No working credentials for this model: a subagent on it would fail the
+			// same way, so it is published like a provider refusal.
 			reject(key);
+			deps.onModelUnusable?.(key, auth.error);
 			lastError = auth.error;
 			continue;
 		}

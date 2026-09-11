@@ -68,6 +68,20 @@ export const DATE_TOLERANCE_DAYS = 31;
 /** The reference Claude Code's classifier rule names: min(main, Sonnet). */
 export const REFERENCE_SLUG = "claude-sonnet-5";
 /**
+ * The prompt REGISTER's measured caps, as fractions of the Sonnet 5 reference
+ * (the index rescales per version, so never absolute numbers): a model whose
+ * coding index sits below `REGISTER_CHEAP_RATIO` × reference gets at most the
+ * cheap register, below `REGISTER_TINY_RATIO` × reference at most tiny. A score
+ * only ever ADDS scaffolding — it never lifts a lean-named model to a leaner
+ * register (docs/decisions/model-tiers.md, 2026-09-11). On the 2026-09 snapshot
+ * (reference 71.5) the lines are 60.8 and 42.9: gpt-5.1 (49.4), glm-4.7 (45.3)
+ * and kimi-k2.5 (46.8) drop to cheap; gpt-5 (37.8), grok-4.3 (42.2) and
+ * mistral-medium-3.1 (20.5) to tiny; gpt-5.4-mini (56.1) stays cheap.
+ */
+export const REGISTER_CHEAP_RATIO = 0.85;
+export const REGISTER_TINY_RATIO = 0.6;
+
+/**
  * How far below the floor the low-stakes reader (web_fetch answers, recaps) may
  * score. The classifier and delegated workers allow nothing: a subagent writes
  * code and calls tools for many turns, and since 2026-09-11 it is held to the
@@ -142,7 +156,9 @@ export function snapshotFromResponse(body: unknown, fetchedAt: Date): Capability
 	return { fetchedAt: fetchedAt.toISOString(), source: AA_MODELS_URL, rows };
 }
 
-let memo: { path: string; mtimeMs: number; snapshot: CapabilitySnapshot | undefined } | undefined;
+let memo: { path: string; mtimeMs: number; snapshot: CapabilitySnapshot | undefined; checkedAt: number } | undefined;
+/** How long a stat result is trusted before the cache file is stat'ed again. */
+const RESTAT_AFTER_MS = 1000;
 let pinned: { value: CapabilitySnapshot | undefined } | undefined;
 
 /** Test seam: pin the snapshot every selection call sees (`undefined` pins "none"). */
@@ -157,18 +173,30 @@ export function clearCapabilitySnapshotForTest(): void {
 	memo = undefined;
 }
 
-/** The cached snapshot, memoized on the file's mtime so a background refresh is picked up without a restart. */
+/**
+ * The cached snapshot, memoized on the file's mtime so a background refresh is
+ * picked up without a restart. The stat itself is throttled to once a second:
+ * since the register consults the snapshot (`measuredRegisterCap`), a /doctor
+ * or presets render classifies every catalog row — hundreds of calls — and
+ * without the throttle each was a `statSync` (an ENOENT throw for the keyless
+ * majority). A refresh is still seen within a second.
+ */
 export function loadCapabilitySnapshot(stateDir: string): CapabilitySnapshot | undefined {
 	if (pinned) return pinned.value;
 	const path = capabilityCachePath(stateDir);
+	const now = Date.now();
+	if (memo && memo.path === path && now - memo.checkedAt < RESTAT_AFTER_MS) return memo.snapshot;
 	let mtimeMs: number;
 	try {
 		mtimeMs = statSync(path).mtimeMs;
 	} catch {
-		memo = { path, mtimeMs: -1, snapshot: undefined };
+		memo = { path, mtimeMs: -1, snapshot: undefined, checkedAt: now };
 		return undefined;
 	}
-	if (memo && memo.path === path && memo.mtimeMs === mtimeMs) return memo.snapshot;
+	if (memo && memo.path === path && memo.mtimeMs === mtimeMs) {
+		memo.checkedAt = now;
+		return memo.snapshot;
+	}
 	let snapshot: CapabilitySnapshot | undefined;
 	try {
 		const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<CapabilitySnapshot>;
@@ -178,7 +206,7 @@ export function loadCapabilitySnapshot(stateDir: string): CapabilitySnapshot | u
 	} catch {
 		snapshot = undefined; // a corrupt cache is "no snapshot"; the next refresh rewrites it
 	}
-	memo = { path, mtimeMs, snapshot };
+	memo = { path, mtimeMs, snapshot, checkedAt: now };
 	return snapshot;
 }
 

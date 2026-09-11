@@ -23,11 +23,12 @@ import {
 	snapshotIsStale,
 } from "../../extensions/lib/capability-index.ts";
 import { setModelFactsForTest } from "../../extensions/lib/model-facts.ts";
-import { cheaperContainedCandidates, pickEconomicalContainedModel } from "../../extensions/lib/model-tier.ts";
+import { cheaperContainedCandidates, classifyModelTier, economicalContainedCandidates, pickEconomicalContainedModel } from "../../extensions/lib/model-tier.ts";
 import { resolveSubagentModel } from "../../extensions/subagents/model-select.ts";
 
 const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), "fixtures", "artificial-analysis-sample.json");
 const RESPONSE = JSON.parse(readFileSync(FIXTURE, "utf8")) as unknown;
+const noEnv = {} as NodeJS.ProcessEnv;
 const NOW = new Date("2026-09-10T12:00:00Z");
 const SNAPSHOT = snapshotFromResponse(RESPONSE, NOW);
 
@@ -181,9 +182,62 @@ describe("selection with a measured floor", () => {
 		expect(resolveSubagentModel({ sessionModel: catalog[0], available: catalog })).toMatchObject({ model: { id: "gpt-5.6-sol" }, source: "session" });
 		expect(pickEconomicalContainedModel(catalog, catalog[0])).toMatchObject({ model: { id: "gpt-5.6-luna" }, via: "tier" });
 		// Unscored rows keep their tier order after the measured passers.
-		const withUnknown = [...catalog, model("openai", "gpt-5.6-mystery", 0.1)];
+		const withUnknown = [...catalog, model("openai", "gpt-5.6-mystery", 1.5)]; // unscored, workhorse by name class + price
 		expect(cheaperContainedCandidates(withUnknown, catalog[0], { role: "reader" }).map((m) => m.id)).toEqual(["gpt-5.6-luna", "gpt-5.6-mystery"]);
 		expect(cheaperContainedCandidates(withUnknown, catalog[0], { role: "subagent" }).map((m) => m.id)).toEqual(["gpt-5.6-mystery"]);
+	});
+});
+
+describe("measured register cap", () => {
+	// A synthetic snapshot: the Sonnet 5 reference (71.5 → cheap line 60.8, tiny line 42.9),
+	// gpt-5.1 at 49.4, gpt-5 at 37.8, terra at 76.7 — the 2026-09 numbers.
+	const row = (slug: string, coding: number, release_date: string, creator = "openai") => ({
+		id: slug,
+		slug,
+		release_date,
+		model_creator: { slug: creator },
+		evaluations: { artificial_analysis_coding_index: coding },
+	});
+	const snapshot = snapshotFromResponse(
+		{ data: [row("claude-sonnet-5", 71.5, "2026-06-30", "anthropic"), row("gpt-5-1", 49.4, "2025-11-13"), row("gpt-5", 37.8, "2025-08-07"), row("gpt-5-6-terra", 76.7, "2026-07-09")] },
+		NOW,
+	);
+	const facts = {
+		"openai/gpt-5.1": { releaseDate: "2025-11-13" },
+		"openai/gpt-5": { releaseDate: "2025-08-07" },
+		"openai/gpt-5.6-terra": { releaseDate: "2026-07-09" },
+		"openai/gpt-5.6-sol": { releaseDate: "2026-07-09" },
+		"openai/gpt-6-astra": { releaseDate: "2026-09-03" }, // family newest: 5.1 (294 days) is current, 5 (392 days) is prior
+		"anthropic/claude-sonnet-5": { releaseDate: "2026-06-30" },
+	};
+	beforeEach(() => setModelFactsForTest(facts));
+
+	it("only adds scaffolding: a workhorse-named model scoring under the lines drops to cheap or tiny", () => {
+		setCapabilitySnapshotForTest(snapshot);
+		expect(classifyModelTier(model("openai", "gpt-5.1", 1.25), noEnv)).toEqual({
+			tier: "cheap",
+			reason: "name class · measured coding 49.4 below the cheap line (60.8)",
+		});
+		expect(classifyModelTier(model("openai", "gpt-5", 1.25), noEnv)).toEqual({
+			tier: "tiny",
+			reason: "name class · one generation behind · measured coding 37.8 below the tiny line (42.9)",
+		});
+		// A score at or above the cheap line changes nothing; unscored rows keep the name-led tier.
+		expect(classifyModelTier(model("openai", "gpt-5.6-terra", 2), noEnv)).toEqual({ tier: "workhorse", reason: "name class" });
+		expect(classifyModelTier(model("openai", "gpt-5.6-sol", 4), noEnv)).toEqual({ tier: "workhorse", reason: "name class" });
+		// The scale's own anchor is never re-tiered by itself.
+		expect(classifyModelTier(model("anthropic", "claude-sonnet-5", 3), noEnv).tier).toBe("workhorse");
+		// Same rows without a snapshot: the name-led tiers, as before the key existed.
+		setCapabilitySnapshotForTest(undefined);
+		expect(classifyModelTier(model("openai", "gpt-5.1", 1.25), noEnv)).toEqual({ tier: "workhorse", reason: "name class" });
+		expect(classifyModelTier(model("openai", "gpt-5", 1.25), noEnv)).toEqual({ tier: "cheap", reason: "name class · one generation behind" });
+	});
+
+	it("keeps a measured-tiny model out of automatic selection", () => {
+		setCapabilitySnapshotForTest(snapshot);
+		const catalog = [model("openai", "gpt-5.6-sol", 4), model("openai", "gpt-5.6-terra", 2), model("openai", "gpt-5.1", 1.25), model("openai", "gpt-5", 1.25)];
+		// gpt-5 is tiny by measurement (and prior generation); gpt-5.1 is cheap-tier and current, so it stays a candidate.
+		expect(economicalContainedCandidates(catalog, catalog[0]).map((m) => m.id)).toEqual(["gpt-5.1", "gpt-5.6-terra", "gpt-5.6-sol"]);
 	});
 });
 

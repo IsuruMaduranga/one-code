@@ -29,7 +29,16 @@
  */
 
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { capabilityFloor, type CapabilitySnapshot, type FloorRole, loadCapabilitySnapshot } from "./capability-index.ts";
+import {
+	capabilityFloor,
+	type CapabilitySnapshot,
+	type FloorRole,
+	loadCapabilitySnapshot,
+	referenceScore,
+	REGISTER_CHEAP_RATIO,
+	REGISTER_TINY_RATIO,
+	scoreFor,
+} from "./capability-index.ts";
 import { isPriorGeneration, lacksToolCalls, modelGeneration } from "./model-facts.ts";
 import { baseModelId, isDatedDuplicate, modelIdentity, modelsContainedToSession, modelSpec, pricedInput } from "./model-policy.ts";
 import { oneCodeStateDir } from "./paths.ts";
@@ -99,8 +108,9 @@ export function parseClaudeVersion(id: string): { family: "opus" | "sonnet" | "f
  * Curated anchor map for well-known third-party families, checked in order
  * (specific before general). A vetted allowlist — distinct from heuristic
  * substring matching — that fixes cases where price/name alone misroute a
- * flagship, and encodes the three ratified overrides (GPT-5-full→workhorse,
- * GPT-5-mini→cheap, GPT-5.6-Luna→cheap). A match here is authoritative for the
+ * flagship, and encodes the ratified overrides (GPT-5-mini→cheap,
+ * GPT-5.6-Luna→cheap, GPT-5.x-codex-spark→cheap; the GPT-5-full→workhorse one
+ * was retired 2026-09-11 once the coding index contradicted it). A match here is authoritative for the
  * name class (the human already accounted for the name and its generation), so
  * it wins outright — only the two-generations-behind rule still demotes it to
  * tiny (`classifyModelTier`). Shrink it whenever the catalog-wide snapshot
@@ -112,7 +122,15 @@ const ANCHOR_MAP: Array<[RegExp, PromptTier]> = [
 	[/(?:^|[-/.])gpt-5[.\d]*-?nano/i, "tiny"],
 	[/(?:^|[-/.])gpt-5[.\d]*-?mini/i, "cheap"], // override: price would say tiny
 	[/(?:^|[-/.])gpt-5[.\d]*-?luna/i, "cheap"], // override: OpenAI's cheap line despite a high benchmark
-	[/(?:^|[-/.])gpt-5/i, "workhorse"], // gpt-5, gpt-5.x full (sol/terra/codex/base); guards the weak-scoring base variant
+	// Spark: OpenAI's fast/small Codex line; no Artificial Analysis row either way, so it
+	// is placed with the other lean lines rather than inheriting the family's workhorse
+	// name class (2026-09-11 — it had been the cheapest "workhorse" on every Codex session).
+	[/(?:^|[-/.])gpt-5[.\d]*-codex-spark/i, "cheap"],
+	// No blanket `gpt-5 → workhorse` anchor any more (2026-09-11): it existed to guard
+	// the base GPT-5 variant against a benchmark collision, but the coding index now
+	// reads base gpt-5 at 37.8 and gpt-5.1 at 49.4 — the anchor was the lie, not the
+	// score. Unsuffixed gpt-5.x rows take the name class (workhorse) and let their
+	// generation and measured score demote them.
 	[/(?:^|[-/.])o[34](?:[-/.]|$)/i, "cheap"], // o3, o3-pro, o4-mini
 	[/(?:^|[-/.])gpt-4/i, "tiny"], // gpt-4o, gpt-4.1, gpt-4-turbo — prior generation
 	// Anthropic reaching this path is gateway-proxied (first-party handled above);
@@ -208,6 +226,43 @@ export interface TierClassification {
  *      as the more scaffolded of the two.
  */
 export function classifyModelTier(model: Model<Api> | undefined, env: NodeJS.ProcessEnv = process.env): TierClassification {
+	const named = classifyByName(model, env);
+	// The measured cap: a name can only lie UPWARD about capability that a score
+	// then corrects (gpt-5 at 37.8 is not a Sonnet-class model whatever its
+	// anchor said), and downward it is already the safer register, so the score
+	// only ever adds scaffolding. Frontier (a first-party allowlist), Anthropic
+	// first-party (the scale's own anchors), a forced tier and an already-tiny
+	// row are left alone.
+	if (!model || named.reason === "CC_PROMPT_TIER" || named.tier === "frontier" || named.tier === "tiny" || model.provider === "anthropic") return named;
+	const measured = measuredRegisterCap(model);
+	if (!measured) return named;
+	const tier = moreScaffolded(named.tier, measured.cap);
+	if (tier === named.tier) return named;
+	return { tier, reason: `${named.reason} · measured coding ${measured.coding} below the ${measured.cap} line (${measured.threshold.toFixed(1)})` };
+}
+
+/**
+ * The register cap the Artificial Analysis snapshot supports for a model, if
+ * any: `cheap` below REGISTER_CHEAP_RATIO × Sonnet 5, `tiny` below
+ * REGISTER_TINY_RATIO × Sonnet 5, judged on the default (thinking-on) variant.
+ * Undefined without a snapshot, a confirmed score, or a reference score — the
+ * name-led tier then stands, as before the snapshot existed.
+ */
+export function measuredRegisterCap(model: Model<Api>): { cap: "cheap" | "tiny"; coding: number; threshold: number } | undefined {
+	const snapshot = currentCapabilitySnapshot();
+	if (!snapshot) return undefined;
+	const score = scoreFor(snapshot, model, "default");
+	const reference = referenceScore(snapshot, "default");
+	if (!score || !reference) return undefined;
+	const tinyLine = reference.coding * REGISTER_TINY_RATIO;
+	if (score.coding < tinyLine) return { cap: "tiny", coding: score.coding, threshold: tinyLine };
+	const cheapLine = reference.coding * REGISTER_CHEAP_RATIO;
+	if (score.coding < cheapLine) return { cap: "cheap", coding: score.coding, threshold: cheapLine };
+	return undefined;
+}
+
+/** The name-led classification (anchors, name class, generation, price) before the measured cap. */
+function classifyByName(model: Model<Api> | undefined, env: NodeJS.ProcessEnv): TierClassification {
 	const forced = tierOverride(env);
 	if (forced) return { tier: forced, reason: "CC_PROMPT_TIER" };
 	if (!model) return { tier: "tiny", reason: "no model" }; // unknown model → maximum scaffolding
@@ -388,7 +443,7 @@ export function capableContainedCandidates(
 		.map((entry) => entry.model);
 }
 
-export interface RankedCandidate {
+interface RankedCandidate {
 	model: Model<Api>;
 	/** "pass": measurably reaches the floor; "unscored": no snapshot or no confirmed score (the caller's name-class rule decides). */
 	measured: "pass" | "unscored";
@@ -399,7 +454,7 @@ export interface RankedCandidate {
  * caller that must tell a measured pass from an unscored candidate (the
  * classifier's name-class fallback) reads it instead of recomputing it.
  */
-export function rankedContainedCandidates(
+function rankedContainedCandidates(
 	available: Model<Api>[],
 	sessionModel: Model<Api>,
 	role: FloorRole,

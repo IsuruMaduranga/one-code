@@ -28,8 +28,6 @@ export interface ModelUnusableEvent {
 	model: string;
 	/** The provider's own words, for the notice. */
 	reason: string;
-	/** Which role found out. Informational — every listener records every event. */
-	source: "classifier" | "subagent" | "workflow";
 }
 
 /** The catalog minus the models this session has found unusable. */

@@ -51,6 +51,8 @@ export interface StartRunOptions {
 	onUsage?: (cost: number) => void;
 	/** Models this account cannot run, learned this session (lib/model-unusable.ts); the runner resolves around them. */
 	unusableModels?: () => ReadonlySet<string>;
+	/** An agent's provider refused its model: published so every picker skips it (lib/model-unusable.ts). */
+	onModelUnusable?: (model: string, reason: string) => void;
 }
 
 export class RunHandle extends EventEmitter {
@@ -251,6 +253,7 @@ export class WorkflowRunManager {
 				getHookBridge: options.getHookBridge,
 				onUsage: options.onUsage,
 				unusableModels: options.unusableModels,
+				onModelUnusable: options.onModelUnusable,
 			});
 
 			const { globals, state } = createScriptGlobals({

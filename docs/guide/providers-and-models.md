@@ -112,7 +112,13 @@ If you have an [Artificial Analysis](https://artificialanalysis.ai) API key,
 One Code uses measured coding ability instead of name-based tiers for these
 picks: a candidate must score at least the lower of your session model's
 coding index and a Sonnet 5 reference (the reader gets 10 percent
-tolerance; subagents and the classifier get none). Set `AA_API_KEY`, or add the key to `~/.onecode/settings.json`:
+tolerance; subagents and the classifier get none). The score can also move
+a model to a more scaffolded prompt: a model whose coding index is below 85
+percent of the Sonnet 5 reference gets at most the cheap register, and one
+below 60 percent at most the tiny register. A score never moves a model to
+a leaner register than its name class allows. Models sold under several
+providers share one release date for this purpose, so a Codex or Azure
+listing is scored like its OpenAI twin. Set `AA_API_KEY`, or add the key to `~/.onecode/settings.json`:
 
 ```json
 {
