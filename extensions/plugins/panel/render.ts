@@ -205,13 +205,13 @@ function detailLines(input: PanelRenderInput, paint: PanelPaint): { lines: strin
 		for (const noteLine of wrapNote(TRUST_NOTE, width - 4)) push(noteLine, (t) => paint.fg("warning", t));
 		const uninstall = row.origin === "one-code" ? " · u to uninstall" : "";
 		const overrideNote = row.origin === "claude" ? " (One Code override — Claude Code settings untouched)" : "";
-		return { lines, footer: `Space/e/d to toggle${overrideNote}${uninstall} · f to favorite · Esc to go back` };
+		return { lines, footer: `Enter/Space/e/d to toggle${overrideNote}${uninstall} · f to favorite · Esc to go back` };
 	}
 
 	if ("kind" in row && row.kind === "skill") {
 		push(`${row.name} Skill · ${row.scope}`, paint.bold);
 		push(`State: ${row.enabled ? "on" : "off"} · ~${row.tokens} tok · ${row.recency}`);
-		return { lines, footer: "Space/e/d to toggle · f to favorite · Esc to go back" };
+		return { lines, footer: "Enter/Space/e/d to toggle · f to favorite · Esc to go back" };
 	}
 
 	if ("kind" in row && row.kind === "mcp") {
@@ -240,27 +240,30 @@ function wrapNote(text: string, width: number): string[] {
 	return lines;
 }
 
-const FOOTERS: Record<Tab, string> = {
-	discover: "Type to search · Space to install/uninstall · Enter to view · ←/→ tabs · Esc to close",
-	installed: "Type to search · Space to toggle · Enter to view · ←/→ tabs · Esc to close",
-	marketplaces: "Enter to select · a to add · u to update · d to remove · Esc to close",
-	errors: "←/→ tabs · Esc to close",
+/** Footer hints per tab; a second line keeps the Installed hints readable at 80 columns. */
+const FOOTERS: Record<Tab, string[]> = {
+	discover: ["Type to search · Space to install/uninstall · Enter to view · ←/→ tabs · Esc to close"],
+	installed: ["Enter/Space to toggle · v to view · f to favorite · u to uninstall", "/ to search · ←/→ tabs · Esc to close"],
+	marketplaces: ["Enter to select · a to add · u to update · d to remove · Esc to close"],
+	errors: ["←/→ tabs · Esc to close"],
 };
+/** Installed search hints while the `/` box is open (Esc leaves it). */
+const INSTALLED_SEARCH_FOOTER = ["Type to search · Enter/Space to toggle · Esc to leave search"];
 
 export function renderPanel(input: PanelRenderInput, paint: PanelPaint): string[] {
 	const { state, view, width, height } = input;
 	clampPanelState(state, view);
 
 	const out: string[] = [panelTopRule(paint.fg, width), tabBar(state, view, paint, width), ""];
-	let footer: string;
+	let footer: string[];
 
 	if (state.addDialog) {
 		out.push(...addDialogLines(state.addDialog.draft, paint, width));
-		footer = "Enter to add · Esc to cancel";
+		footer = ["Enter to add · Esc to cancel"];
 	} else if (state.detail) {
 		const detail = detailLines(input, paint);
 		out.push(...detail.lines);
-		footer = detail.footer;
+		footer = [detail.footer];
 	} else {
 		let blocks: Block[];
 		switch (state.tab) {
@@ -273,7 +276,8 @@ export function renderPanel(input: PanelRenderInput, paint: PanelPaint): string[
 				break;
 			}
 			case "installed": {
-				out.push(...searchBoxLines(state.search.installed, "Search…", paint.fg, width));
+				const placeholder = state.installedSearching ? "Search…" : "Press / to search…";
+				out.push(...searchBoxLines(state.search.installed, placeholder, paint.fg, width));
 				blocks = installedBlocks(input, paint);
 				break;
 			}
@@ -289,11 +293,11 @@ export function renderPanel(input: PanelRenderInput, paint: PanelPaint): string[
 				break;
 			}
 		}
-		const budget = Math.max(3, height - out.length - 3);
+		footer = state.tab === "installed" && state.installedSearching ? INSTALLED_SEARCH_FOOTER : FOOTERS[state.tab];
+		const budget = Math.max(3, height - out.length - 2 - footer.length);
 		const windowed = windowBlocks(blocks, state.cursor[state.tab], budget);
 		out.push(...windowed.lines);
 		if (windowed.more > 0) out.push(paint.fg("dim", `  ↓ more below (${windowed.more})`));
-		footer = FOOTERS[state.tab];
 	}
 
 	for (const loading of input.loading) out.push(paint.fg("dim", cutPlainText(`  ${loading}`, width - 1)));
@@ -306,6 +310,6 @@ export function renderPanel(input: PanelRenderInput, paint: PanelPaint): string[
 			),
 		);
 	}
-	out.push("", paint.fg("dim", cutPlainText(` ${footer}`, width - 1)));
+	out.push("", ...footer.map((line) => paint.fg("dim", cutPlainText(` ${line}`, width - 1))));
 	return out;
 }

@@ -124,7 +124,7 @@ and [Plan mode](permissions-modes-and-auto-mode.md#plan-mode).
 | `/agents` | The live subagent panel, focused on the newest agent. | See the preceding section. |
 | `/workflows` | The workflow run viewer. | **↑↓** select, **Enter** open, **Tab** next run, **x** stop, **s** save the script, **Esc** back or close. |
 | `/skills` | The skills panel. | **↑↓** move, **Enter** or **Space** cycle a skill's state, **/** search, **t** sort, **Esc** close. |
-| `/plugins` | The plugin marketplace, with Discover, Installed, Marketplaces, and Errors tabs. | **←→** or **Tab** switch tabs, type to search, **Space** install or toggle, **Enter** view, **Esc** close. In a detail view: **e**/**d** toggle, **u** uninstall or update, **i** install, **f** favorite. On Marketplaces: **a** add, **u** update, **d** remove. |
+| `/plugins` | The plugin marketplace, with Discover, Installed, Marketplaces, and Errors tabs. | **←→** or **Tab** switch tabs, **Esc** close. Discover: type to search, **Space** install, **Enter** view. Installed (like `/skills`): **Enter**/**Space** toggle, **v** view, **e**/**d** set, **u** uninstall, **f** favorite, **/** search. In a detail view: **Enter**/**Space**/**e**/**d** toggle, **u** uninstall, **i** install, **f** favorite. On Marketplaces: **a** add, **u** update, **d** remove. |
 | `/mcp` | The MCP server manager. | **↑↓** navigate, **Enter** open a server or run an action, a digit picks a numbered action, **Esc** back or close. |
 | `/doctor report` | The setup report. | **↑↓** or **j**/**k** scroll, **Space**/**b** page, **g**/**G** top and end, **f** run the checkup, **Esc** or **q** close. |
 | `/memory` | The instruction and memory file picker. | **↑↓** move, **Enter** open, **Esc** close. |

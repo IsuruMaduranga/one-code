@@ -186,12 +186,80 @@ describe("panel state machine", () => {
 		expect(state.cursor.discover).toBe(0); // clamped to the single row
 	});
 
-	it("installed space toggles plugin enabled with origin routing info", () => {
+	const mcpRow: InstalledRow = { kind: "mcp", name: "srv", status: "connected", toolCount: 3 };
+	const skillRow: InstalledRow = {
+		kind: "skill",
+		overrideKey: "plugin:demo:helper",
+		name: "helper",
+		scope: "plugin",
+		tokens: 120,
+		recency: "never used",
+		enabled: true,
+		favorite: false,
+	};
+	const installedView = () =>
+		makeView({ installed: [{ kind: "section", title: "Plugins" }, pluginRow, { kind: "section", title: "MCP servers" }, mcpRow, skillRow] });
+	const installedState = () => {
 		const state = initialPanelState();
 		state.tab = "installed";
-		const view = makeView({ installed: [{ kind: "section", title: "Plugins" }, pluginRow] });
-		const effect = applyPanelKey(state, { kind: "space" }, view);
-		expect(effect).toEqual({ kind: "setPluginEnabled", id: "p@mp", origin: "claude", enabled: false });
+		return state;
+	};
+
+	it("installed: enter and space both toggle the row in place, like /skills", () => {
+		const state = installedState();
+		const view = installedView();
+		const toggled = { kind: "setPluginEnabled", id: "p@mp", origin: "claude", enabled: false };
+		expect(applyPanelKey(state, { kind: "enter" }, view)).toEqual(toggled);
+		expect(applyPanelKey(state, { kind: "space" }, view)).toEqual(toggled);
+		expect(state.detail).toBeUndefined();
+		applyPanelKey(state, { kind: "down" }, view);
+		applyPanelKey(state, { kind: "down" }, view);
+		expect(applyPanelKey(state, { kind: "enter" }, view)).toEqual({ kind: "setSkillEnabled", overrideKey: "plugin:demo:helper", enabled: false });
+	});
+
+	it("installed: enter on an MCP row opens its detail (nothing to toggle)", () => {
+		const state = installedState();
+		const view = installedView();
+		applyPanelKey(state, { kind: "down" }, view);
+		expect(applyPanelKey(state, { kind: "enter" }, view)).toBeUndefined();
+		expect(state.detail).toEqual({ kind: "mcp", name: "srv" });
+	});
+
+	it("installed: letters act on the row outside search — v view, e/d set, f favorite, u uninstall", () => {
+		const state = installedState();
+		const view = installedView();
+		expect(applyPanelKey(state, { kind: "text", text: "d" }, view)).toEqual({ kind: "setPluginEnabled", id: "p@mp", origin: "claude", enabled: false });
+		expect(applyPanelKey(state, { kind: "text", text: "e" }, view)).toEqual({ kind: "setPluginEnabled", id: "p@mp", origin: "claude", enabled: true });
+		expect(applyPanelKey(state, { kind: "text", text: "f" }, view)).toEqual({ kind: "toggleFavorite", target: "plugin", key: "p@mp" });
+		// Claude Code-installed plugins can't be uninstalled here (read-only files).
+		expect(applyPanelKey(state, { kind: "text", text: "u" }, view)).toBeUndefined();
+		expect(state.search.installed).toBe(""); // letters never leak into search
+		applyPanelKey(state, { kind: "text", text: "v" }, view);
+		expect(state.detail).toEqual({ kind: "plugin", id: "p@mp" });
+	});
+
+	it("installed: / opens search, typing filters, backspace edits, esc leaves search then closes", () => {
+		const state = installedState();
+		const view = installedView();
+		expect(applyPanelKey(state, { kind: "text", text: "/" }, view)).toBeUndefined();
+		expect(state.installedSearching).toBe(true);
+		applyPanelKey(state, { kind: "text", text: "ve" }, view);
+		expect(state.search.installed).toBe("ve"); // 'v'/'e' are text while searching, not actions
+		expect(state.detail).toBeUndefined();
+		applyPanelKey(state, { kind: "backspace" }, view);
+		expect(state.search.installed).toBe("v");
+		expect(applyPanelKey(state, { kind: "enter" }, view)).toMatchObject({ kind: "setPluginEnabled" }); // toggling still works in search
+		expect(applyPanelKey(state, { kind: "back" }, view)).toBeUndefined();
+		expect(state.installedSearching).toBe(false);
+		expect(state.search.installed).toBe("");
+		expect(applyPanelKey(state, { kind: "back" }, view)).toEqual({ kind: "close" });
+	});
+
+	it("detail: enter toggles like space", () => {
+		const state = installedState();
+		const view = installedView();
+		applyPanelKey(state, { kind: "text", text: "v" }, view);
+		expect(applyPanelKey(state, { kind: "enter" }, view)).toEqual({ kind: "setPluginEnabled", id: "p@mp", origin: "claude", enabled: false });
 	});
 
 	it("marketplaces: enter on Add opens the dialog; the dialog captures text and submits", () => {
@@ -310,5 +378,23 @@ describe("renderPanel", () => {
 		expect(lines.some((l) => l.includes("installed by Claude Code"))).toBe(true);
 		expect(lines.some((l) => l.includes("One Code override"))).toBe(true);
 		expect(lines.some((l) => l.includes("Make sure you trust a plugin"))).toBe(true);
+		expect(lines.some((l) => l.includes("Enter/Space/e/d to toggle"))).toBe(true);
+	});
+
+	it("renders the installed list with the /skills-style hints and the / search placeholder", () => {
+		const state = initialPanelState();
+		state.tab = "installed";
+		const view = makeView({
+			installed: [
+				{ kind: "plugin", id: "p@mp", name: "p", marketplace: "mp", enabled: true, origin: "claude", overridden: false, favorite: false, busy: false },
+			],
+		});
+		let lines = renderPanel(renderInput(state, view), paint).map(strip);
+		expect(lines.some((l) => l.includes("Press / to search"))).toBe(true);
+		expect(lines.some((l) => l.includes("Enter/Space to toggle · v to view · f to favorite · u to uninstall"))).toBe(true);
+		expect(lines.some((l) => l.includes("/ to search · ←/→ tabs · Esc to close"))).toBe(true);
+		applyPanelKey(state, { kind: "text", text: "/" }, view);
+		lines = renderPanel(renderInput(state, view), paint).map(strip);
+		expect(lines.some((l) => l.includes("Esc to leave search"))).toBe(true);
 	});
 });

@@ -94,9 +94,11 @@ Run `/plugins` to open the marketplace panel. Its four tabs are:
 - **Discover**: browse plugins from your marketplaces. Type to search,
   **Space** to install, **Enter** for details.
 - **Installed**: see what is installed and turn plugins, or individual
-  skills within them, on or off. **Space** toggles, **Enter** for details.
-  In the details, **e** and **d** toggle, **u** uninstalls, **f** marks a
-  favorite.
+  skills within them, on or off. It works like `/skills`: **Enter** or
+  **Space** toggles the selected row, **v** opens its details, **e** and
+  **d** set it on or off, **u** uninstalls, **f** marks a favorite, and
+  **/** opens the search box (**Esc** leaves it). MCP servers have no
+  toggle, so **Enter** opens their details.
 - **Marketplaces**: the sources plugins come from. **a** adds one (a GitHub
   `owner/repo`, a git URL, or a local path), **u** refreshes, **d** removes.
 - **Errors**: plugins that failed to load, and why.

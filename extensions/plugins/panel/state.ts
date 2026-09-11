@@ -7,11 +7,15 @@
  * asynchronously and reflects back through the data it renders.
  *
  * Key routing: navigation keys are always controls. Printable text feeds the
- * search box in Discover/Installed, the draft in the Add Marketplace dialog,
- * and single-letter actions in Marketplaces (`u` update, `d` remove) and the
- * detail view (`i`/`u`/`e`/`d`/`f`) — the views without a text field.
- * Favoriting lives in the detail view, not the Installed list, so `f` stays
- * typeable in search (a deliberate divergence from the CC footer hint).
+ * search box in Discover (a browse tab: type to filter, Enter to read before
+ * installing), the draft in the Add Marketplace dialog, and single-letter
+ * actions in Marketplaces (`u` update, `d` remove) and the detail view
+ * (`i`/`u`/`e`/`d`/`f`) — the views without a text field.
+ *
+ * The Installed tab follows the /skills panel instead: Enter and Space act on
+ * the row in place (toggle a plugin or skill; open an MCP server's detail,
+ * which has no toggle), search sits behind `/` (Esc leaves it), and the free
+ * letters act directly — `v` view, `e`/`d` set, `u` uninstall, `f` favorite.
  */
 
 import type { PanelKey } from "./keys.ts";
@@ -30,6 +34,8 @@ export interface PanelState {
 	tab: Tab;
 	cursor: Record<Tab, number>;
 	search: { discover: string; installed: string };
+	/** Installed tab: `/` opened the search box, so typed text feeds it. */
+	installedSearching: boolean;
 	addDialog?: { draft: string };
 	detail?: DetailRef;
 	restartNeeded: boolean;
@@ -59,6 +65,7 @@ export function initialPanelState(): PanelState {
 		tab: "discover",
 		cursor: { discover: 0, installed: 0, marketplaces: 0, errors: 0 },
 		search: { discover: "", installed: "" },
+		installedSearching: false,
 		restartNeeded: false,
 	};
 }
@@ -123,20 +130,52 @@ function detailEffect(state: PanelState, view: PanelView, letter: string): Panel
 		if (letter === "u" && discover.installed) return { kind: "installToggle", row: discover };
 		return undefined;
 	}
-	if ("kind" in row) {
-		if (row.kind === "plugin") {
-			if (letter === "e") return { kind: "setPluginEnabled", id: row.id, origin: row.origin, enabled: true };
-			if (letter === "d") return { kind: "setPluginEnabled", id: row.id, origin: row.origin, enabled: false };
-			if (letter === "u" && row.origin === "one-code") return { kind: "uninstall", id: row.id };
-			if (letter === "f") return { kind: "toggleFavorite", target: "plugin", key: row.id };
-		}
-		if (row.kind === "skill") {
-			if (letter === "e") return { kind: "setSkillEnabled", overrideKey: row.overrideKey, enabled: true };
-			if (letter === "d") return { kind: "setSkillEnabled", overrideKey: row.overrideKey, enabled: false };
-			if (letter === "f") return { kind: "toggleFavorite", target: "skill", key: row.overrideKey };
-		}
+	return "kind" in row ? installedLetterEffect(row, letter) : undefined;
+}
+
+/** `e`/`d` set, `u` uninstall (One Code-installed only), `f` favorite — shared by the detail view and the Installed list. */
+function installedLetterEffect(row: InstalledRow, letter: string): PanelEffect | undefined {
+	if (row.kind === "plugin") {
+		if (letter === "e") return { kind: "setPluginEnabled", id: row.id, origin: row.origin, enabled: true };
+		if (letter === "d") return { kind: "setPluginEnabled", id: row.id, origin: row.origin, enabled: false };
+		if (letter === "u" && row.origin === "one-code") return { kind: "uninstall", id: row.id };
+		if (letter === "f") return { kind: "toggleFavorite", target: "plugin", key: row.id };
+	}
+	if (row.kind === "skill") {
+		if (letter === "e") return { kind: "setSkillEnabled", overrideKey: row.overrideKey, enabled: true };
+		if (letter === "d") return { kind: "setSkillEnabled", overrideKey: row.overrideKey, enabled: false };
+		if (letter === "f") return { kind: "toggleFavorite", target: "skill", key: row.overrideKey };
 	}
 	return undefined;
+}
+
+/**
+ * Installed tab, Enter or Space: toggle a plugin/skill row in place (the
+ * /skills model); an MCP row has no toggle, so open its detail instead.
+ */
+function selectedInstalled(state: PanelState, view: PanelView): Exclude<InstalledRow, { kind: "section" }> | undefined {
+	if (state.tab !== "installed") return undefined;
+	return view.installed.filter((r) => r.kind !== "section")[state.cursor.installed];
+}
+
+function installedPrimary(state: PanelState, view: PanelView): PanelEffect | undefined {
+	const row = selectedInstalled(state, view);
+	if (!row) return undefined;
+	if (row.kind === "plugin") return { kind: "setPluginEnabled", id: row.id, origin: row.origin, enabled: !row.enabled };
+	if (row.kind === "skill") return { kind: "setSkillEnabled", overrideKey: row.overrideKey, enabled: !row.enabled };
+	if (row.kind === "mcp") state.detail = { kind: "mcp", name: row.name };
+	return undefined;
+}
+
+/** Installed tab, single letters outside search: `v` view, `e`/`d` set, `u` uninstall, `f` favorite. */
+function installedLetter(state: PanelState, view: PanelView, letter: string): PanelEffect | undefined {
+	const row = selectedInstalled(state, view);
+	if (!row) return undefined;
+	if (letter === "v") {
+		state.detail = detailFor(row, "installed");
+		return undefined;
+	}
+	return installedLetterEffect(row, letter);
 }
 
 export function applyPanelKey(state: PanelState, key: PanelKey, view: PanelView): PanelEffect | undefined {
@@ -173,6 +212,7 @@ export function applyPanelKey(state: PanelState, key: PanelKey, view: PanelView)
 				return undefined;
 			case "close":
 				return { kind: "close" };
+			case "enter":
 			case "space": {
 				const row = resolveDetail(state.detail, view);
 				if (row && "kind" in row) {
@@ -200,7 +240,8 @@ export function applyPanelKey(state: PanelState, key: PanelKey, view: PanelView)
 				state.search.discover = "";
 				return undefined;
 			}
-			if (state.tab === "installed" && state.search.installed) {
+			if (state.tab === "installed" && (state.installedSearching || state.search.installed)) {
+				state.installedSearching = false;
 				state.search.installed = "";
 				return undefined;
 			}
@@ -235,6 +276,7 @@ export function applyPanelKey(state: PanelState, key: PanelKey, view: PanelView)
 				}
 				return undefined;
 			}
+			if (state.tab === "installed") return installedPrimary(state, view);
 			const ref = detailFor(row, state.tab);
 			if (ref) state.detail = ref;
 			return undefined;
@@ -243,19 +285,14 @@ export function applyPanelKey(state: PanelState, key: PanelKey, view: PanelView)
 			const row = selected(state, view);
 			if (row === undefined || typeof row === "string") return undefined;
 			if (state.tab === "discover") return { kind: "installToggle", row: row as DiscoverRow };
-			if (state.tab === "installed" && "kind" in row) {
-				if (row.kind === "plugin") return { kind: "setPluginEnabled", id: row.id, origin: row.origin, enabled: !row.enabled };
-				if (row.kind === "skill") return { kind: "setSkillEnabled", overrideKey: row.overrideKey, enabled: !row.enabled };
-				if (row.kind === "mcp") {
-					state.notice = "MCP servers are configured in .mcp.json / plugin manifests — no toggle here.";
-					return undefined;
-				}
-			}
+			if (state.tab === "installed") return installedPrimary(state, view);
 			return undefined;
 		}
 		case "backspace": {
 			if (state.tab === "discover") state.search.discover = state.search.discover.slice(0, -1);
-			else if (state.tab === "installed") state.search.installed = state.search.installed.slice(0, -1);
+			else if (state.tab === "installed" && state.installedSearching) {
+				state.search.installed = state.search.installed.slice(0, -1);
+			}
 			return undefined;
 		}
 		case "text": {
@@ -265,9 +302,16 @@ export function applyPanelKey(state: PanelState, key: PanelKey, view: PanelView)
 				return undefined;
 			}
 			if (state.tab === "installed") {
-				state.search.installed += key.text;
-				state.cursor.installed = 0;
-				return undefined;
+				if (state.installedSearching) {
+					state.search.installed += key.text;
+					state.cursor.installed = 0;
+					return undefined;
+				}
+				if (key.text === "/") {
+					state.installedSearching = true;
+					return undefined;
+				}
+				return key.text.length === 1 ? installedLetter(state, view, key.text.toLowerCase()) : undefined;
 			}
 			if (state.tab === "marketplaces" && key.text.length === 1) {
 				const letter = key.text.toLowerCase();
