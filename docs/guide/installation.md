@@ -41,7 +41,7 @@ value you change later.
 Homebrew installs Node for you, so this route has no separate Node step:
 
 ```bash
-brew install isurumaduranga/one-ai/one-code
+brew install isurumaduranga/one-ai/onecode
 ```
 
 The formula is named `one-code`; the command it installs is `onecode`.
@@ -97,7 +97,7 @@ notice with the matching upgrade command when a newer version exists:
 
 ```bash
 npm install -g @one-ai/one-code      # npm installs
-brew upgrade one-code                # Homebrew installs
+brew upgrade onecode                 # Homebrew installs
 ```
 
 Set `ONECODE_NO_UPDATE_CHECK=1` to skip the check; `--offline` skips it too.
@@ -108,7 +108,7 @@ Both packages are released together with the same version number.
 ## Uninstall
 
 ```bash
-npm uninstall -g @one-ai/one-code    # or: brew uninstall one-code
+npm uninstall -g @one-ai/one-code    # or: brew uninstall onecode
 rm -rf ~/.onecode                    # One Code's state, including pi's under the app
 ```
 

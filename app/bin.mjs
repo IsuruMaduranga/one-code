@@ -329,7 +329,7 @@ await main(argv, {
 			factory: createUpdateCheck({
 				currentVersion: appVersion,
 				stampPath: join(agentDir, "last-update-check"),
-				upgradeHint: installedViaBrew ? "brew upgrade one-code" : "npm install -g @one-ai/one-code",
+				upgradeHint: installedViaBrew ? "brew upgrade onecode" : "npm install -g @one-ai/one-code",
 			}),
 		},
 	],

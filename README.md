@@ -60,7 +60,7 @@ connection options.
 **Homebrew** installs Node for you:
 
 ```bash
-brew install isurumaduranga/one-ai/one-code
+brew install isurumaduranga/one-ai/onecode
 ```
 
 **Already using pi?** Add the extensions to your existing installation:
