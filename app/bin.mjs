@@ -160,7 +160,25 @@ async function runDoctorCli() {
 		const createJiti = jitiModule.createJiti ?? jitiModule.default;
 		const alias = {};
 		try {
-			alias["@earendil-works/pi-ai"] = fileURLToPath(import.meta.resolve("@earendil-works/pi-ai/compat"));
+			// Mirror pi's own extension loader (dist/core/extensions/loader.js
+			// getAliases): the bare specifier AND /compat resolve to the compat
+			// entry, while /oauth and /providers/all resolve to their own real
+			// files. jiti applies aliases by PREFIX, so with only the bare key an
+			// import of `@earendil-works/pi-ai/compat` is rewritten to the dead
+			// `<compat.js>/compat` — which crashed `onecode doctor`, whose graph
+			// reaches pi-web-search's `/compat` import (dependencies.ts). The
+			// explicit subpath keys give jiti an exact match that wins over the
+			// bare prefix, so a doctor run resolves pi-ai exactly as a session does.
+			const compatEntry = fileURLToPath(import.meta.resolve("@earendil-works/pi-ai/compat"));
+			alias["@earendil-works/pi-ai"] = compatEntry;
+			alias["@earendil-works/pi-ai/compat"] = compatEntry;
+			for (const sub of ["oauth", "providers/all"]) {
+				try {
+					alias[`@earendil-works/pi-ai/${sub}`] = fileURLToPath(import.meta.resolve(`@earendil-works/pi-ai/${sub}`));
+				} catch {
+					// Subpath absent in this pi-ai build; skip it.
+				}
+			}
 		} catch {
 			// No compat entry (older pi-ai): plain resolution of the root entry serves.
 		}

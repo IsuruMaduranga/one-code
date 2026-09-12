@@ -86,6 +86,23 @@ console.log('PASS: packaged workflow worker executes and terminates runaway scri
 JS
 node "$WORKER_SMOKE"
 
+# `onecode doctor` loads through app/bin.mjs's own jiti (not pi's extension
+# loader), so it is the only check covering that second loader path. Its graph
+# reaches pi-web-search's `@earendil-works/pi-ai/compat` import; a naive bare-only
+# alias rewrote that to a dead path and crashed the CLI (fixed in bin.mjs). It
+# needs no session and no credentials, so a throwaway HOME is enough.
+echo "smoke: running onecode doctor (exercises the CLI jiti loader path)"
+DOUT="$S/doctor.txt"
+set +e
+env -i HOME="$S/home" PATH="$PATH" TERM=xterm-256color "$BIN" doctor >"$DOUT" 2>&1
+set -e
+if grep -qE "could not run the diagnostics|Cannot find module" "$DOUT"; then
+	echo "--- onecode doctor output ---"; cat "$DOUT"; echo "-----------------------------"
+	echo "FAIL: onecode doctor crashed under the app's library loader (H1 regression)."
+	exit 1
+fi
+echo "PASS: onecode doctor ran under the bundled app."
+
 # Scratch git project as cwd, and a throwaway HOME so nothing touches real state.
 mkdir -p "$S/proj"
 (cd "$S/proj" && git init -q && printf '# Smoke project\n' > CLAUDE.md && git add . && git commit -qm init)
