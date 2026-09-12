@@ -1,5 +1,7 @@
 # Sessions and context
 
+[← One Code user guide](README.md)
+
 This page covers what One Code puts into the model's context, how it keeps
 long sessions within the context window, what it remembers between
 sessions, and how to continue or branch a session.
@@ -82,7 +84,7 @@ full transcript if it needs a detail.
 Run `/compact` to compact at any time; you can pass instructions about what
 the summary should focus on. Compaction that happens because the context is
 full is more expensive than a manual or threshold compaction, because it
-cannot reuse the cached prefix of the conversation.
+can't reuse the cached prefix of the conversation.
 
 Set `CC_COMPACTION=0` to use pi's own summary instead.
 
@@ -107,7 +109,7 @@ turn it off.
 
 Interactive sessions ask the provider for an extended cache lifetime (one
 hour on Anthropic; provider-dependent elsewhere), so a pause between turns
-does not re-send the whole conversation. Subagents, workflow agents, and
+doesn't re-send the whole conversation. Subagents, workflow agents, and
 `-p` or `--mode json` runs use the provider's short default. Set
 `PI_CACHE_RETENTION` yourself to take over the choice. The footer shows the
 cache-hit rate of the latest turn.
@@ -121,7 +123,7 @@ Each session gets a scratchpad directory under the system temp directory,
 named by project and session. The model is told to use it for temporary
 files instead of `/tmp`; writes there need no approval.
 
-Tool output larger than 50 KB is not truncated. It is written to a file
+Tool output larger than 50 KB isn't truncated. It's written to a file
 under the session directory, and the model receives the path, the size,
 and a 2 KB preview in a `<persisted-output>` block, so it can read the part
 it needs.

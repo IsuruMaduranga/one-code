@@ -1,5 +1,7 @@
 # Subagents and workflows
 
+[← One Code user guide](README.md)
+
 One Code delegates work in two ways: subagents for tasks that deserve their
 own context window, and `ultracode` workflows for fanning a large job out
 across many agents at once.
@@ -33,7 +35,7 @@ the `explore` agent". What happens next:
 - **The run starts in the background.** The model receives a task id at
   once and keeps working. The subagent's report arrives as a notification
   when it finishes, mid-turn if the model is still busy, or as a new turn
-  if it is idle. In a `-p` or `--mode json` run, the subagent runs to
+  if it's idle. In a `-p` or `--mode json` run, the subagent runs to
   completion instead and the report is returned inline.
 - **You can keep talking to the model** while agents run.
 - **Subagents go through your permission gate.** A subagent's tool calls
@@ -47,14 +49,14 @@ the `explore` agent". What happens next:
 Two options change how a subagent runs:
 
 - **Fork.** A forked subagent inherits the whole conversation so far, for a
-  task that needs everything you have built up. Forks run on the main
+  task that needs everything you've built up. Forks run on the main
   model and can only be started from the main conversation. Depth is
   limited: the main conversation can start a subagent, and that subagent
   one more, but no further.
 - **Worktree isolation.** The subagent gets its own git worktree, branched
   from `HEAD`, so it can edit files without colliding with your working
   tree or other agents. A worktree the agent left unchanged is removed;
-  otherwise it is kept and its path reported.
+  otherwise it's kept and its path reported.
 
 ### Choose the subagent model
 
@@ -90,7 +92,7 @@ agent.
 ### Follow agents live
 
 While agents run, the panel below the editor shows a tree: `main` first,
-then each agent with its type, what it is doing right now ("Reading
+then each agent with its type, what it's doing right now ("Reading
 src/index.ts", "Running a command"), its elapsed time, and its token count.
 Nested agents appear under their parent. A finished agent stays for a few
 seconds.
@@ -125,23 +127,23 @@ JavaScript script that fans the work out across many agents in parallel,
 then runs it with the `workflow` tool.
 
 The keyword arms the turn it appears in. A message you queue while the
-model is still working does not arm the next turn. For a longer stretch of
+model is still working doesn't arm the next turn. For a longer stretch of
 this kind of work, turn the mode on with `/effort ultracode`: it sets the
 reasoning effort to `xhigh` and keeps workflow orchestration armed until
-you change the effort again. The footer shows `✦ ultracode` while it is
+you change the effort again. The footer shows `✦ ultracode` while it's
 armed.
 
 ### How a workflow runs
 
-- The script runs in a separate thread, so a runaway script cannot freeze
+- The script runs in a separate thread, so a runaway script can't freeze
   the interface. A script that stops making progress is stopped after a
   few seconds; a run is capped at 30 minutes.
 - The run goes to the background and the model gets a run id. Progress
   shows in a strip below the editor (**↓** to focus it, **Enter** to open,
   **x** to stop) and in `/workflows`.
 - Every completed agent call is journaled. Re-running a workflow with
-  `resumeFromRunId` replays the calls whose inputs did not change at no
-  cost and runs only what differs. A background run does not survive the
+  `resumeFromRunId` replays the calls whose inputs didn't change at no
+  cost and runs only what differs. A background run doesn't survive the
   end of a session, but its journal does.
 - A script can carry an output-token target. Once the target is reached,
   new and queued agent calls stop; agents already running finish and can
@@ -183,11 +185,11 @@ the current run's script there.
 `/effort` sets how much reasoning the model spends: `off`, `minimal`,
 `low`, `medium`, `high`, `xhigh`, `max`, or `ultracode`. A bare `/effort`
 opens a slider (**←** and **→** or **h** and **l** move, **Enter** confirms).
-Levels the current model does not support are skipped. **shift+tab** cycles
+Levels the current model doesn't support are skipped. **shift+tab** cycles
 the plain levels; cycling away from `xhigh` while ultracode is armed turns
 ultracode off.
 
 Changing the effort re-caches the conversation, so the next request costs
-more than usual. `/effort` does not save the level across restarts; to
+more than usual. `/effort` doesn't save the level across restarts; to
 save one, open pi's `/thinking` picker and press **ctrl+s**, or pass
 `--thinking <level>` at launch.

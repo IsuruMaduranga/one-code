@@ -1,5 +1,7 @@
 # Skills, plugins, and MCP
 
+[← One Code user guide](README.md)
+
 One Code runs Agent Skills, Claude Code plugins, and MCP servers from your
 existing configuration. This page covers using each and the panels that
 manage them.
@@ -23,7 +25,7 @@ command, as in Claude Code: `/simplify`, `/code-review`, or any skill from
 arguments. Plugin skills keep their plugin prefix and are run as
 `/skill:<plugin>:<name>`. pi's `/skill:<name>` form works for every skill.
 
-A skill's slash command is not created when the name is already taken by a
+A skill's slash command isn't created when the name is already taken by a
 built-in command, a `.claude/commands/` template, or another skill.
 
 ### Manage skills
@@ -57,7 +59,7 @@ A skill of the same name in your own `.claude/skills/` takes precedence.
 ### Skills not bundled
 
 The bundle omits the Claude Code skills that depend on services One Code
-does not have:
+doesn't have:
 
 | Group | Skills omitted |
 |---|---|
@@ -113,7 +115,7 @@ servers, agents, and hooks load on the next session, and the panel says so
 when you close it.
 
 Marketplace sources are git repositories and local paths. Version pinning,
-npm or pip sources, and dependency resolution are not implemented.
+npm or pip sources, and dependency resolution aren't implemented.
 
 ## MCP servers
 
@@ -144,7 +146,7 @@ appears as disabled in `/mcp`; choosing Enable there approves it.
 Claude Code's `enabledMcpjsonServers`, `disabledMcpjsonServers`, and
 `enableAllProjectMcpServers` settings are honored from
 `~/.claude/settings.json`, and from `.claude/settings.local.json` when that
-file is not tracked by git. They are never honored from a checked-in
+file isn't tracked by git. They are never honored from a checked-in
 `.claude/settings.json`, which would let a repository approve its own
 servers.
 
@@ -154,7 +156,7 @@ stderr.
 ### Use MCP tools
 
 Each server's tools appear to the model as `mcp__<server>__<tool>` and load
-on demand, so a server with many tools does not bloat the prompt. Servers
+on demand, so a server with many tools doesn't bloat the prompt. Servers
 also expose resources, which the model can list and read.
 
 A permission rule naming `mcp__<server>` covers every tool of that server.

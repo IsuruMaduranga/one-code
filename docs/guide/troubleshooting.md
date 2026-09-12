@@ -1,5 +1,7 @@
 # Troubleshooting
 
+[← One Code user guide](README.md)
+
 Symptoms you might hit, what causes them, and what to do.
 
 ## Start with the doctor
@@ -38,9 +40,9 @@ pins pi itself.
 pi it runs on are out of step. On the bundled app, reinstall it. On your own
 pi, run `pi update --extensions`.
 
-**The stock pi first-run wizard did not appear.** The bundled app seeds
+**The stock pi first-run wizard didn't appear.** The bundled app seeds
 pi's settings with the One Code theme, quiet startup, and full-screen mode
-on first run, so there is nothing to ask.
+on first run, so there's nothing to ask.
 
 ## Permissions
 
@@ -57,7 +59,7 @@ check `/permissions`: an `ask` rule prompts in every mode.
 
 **An allow rule I wrote has no effect in auto mode.** Broad execution rules
 (`Bash(*)`, wildcarded interpreters, delegation rules) are suspended in
-auto mode so they cannot bypass the classifier. Session grants from the
+auto mode so they can't bypass the classifier. Session grants from the
 approval prompt are also ignored there. Narrow the rule or switch to
 accept-edits or manual mode.
 
@@ -66,7 +68,7 @@ may not select auto or bypass mode. Set it in `~/.claude/settings.json`
 or pass `--permission-mode auto`.
 
 **`defaultMode` in `~/.onecode/settings.json` does nothing.** The
-permission loader does not read that key from One Code's file. Use a Claude
+permission loader doesn't read that key from One Code's file. Use a Claude
 Code settings file or the flag.
 
 **The model is denied a write to `.claude/settings.json`.** The auto-mode
@@ -80,12 +82,12 @@ allow rules, or use auto mode with a provider that can run the classifier.
 ## Auto-mode classifier
 
 **Actions are blocked with a message about the classifier being
-unavailable.** The classifier model could not be reached or returned
+unavailable.** The classifier model couldn't be reached or returned
 nothing usable; the gate fails closed. Check `/auto-mode config` for the
 model in use, and `/doctor report` for provider credentials. Set
 `CC_AUTO_MODE_DEBUG=1` to see each verdict on stderr.
 
-**The classifier approves or blocks something it should not.** Choose a
+**The classifier approves or blocks something it shouldn't.** Choose a
 stronger classifier with `/auto-mode model <provider/model-id>`. A
 Haiku-class classifier is a measurably weaker boundary than a Sonnet-class
 one.
@@ -122,7 +124,7 @@ to a rate-limited endpoint. Set `BRAVE_SEARCH_API_KEY` or
 `/doctor report` for install hints.
 
 **TypeScript diagnostics fail with a message about `lib/tsserver.js`.**
-TypeScript 7's native compiler does not ship that file, and
+TypeScript 7's native compiler doesn't ship that file, and
 `typescript-language-server` needs it. Install a TypeScript 5.x development
 dependency in the project.
 
@@ -139,7 +141,7 @@ Authenticate. Tokens are stored under `~/.onecode/mcp-auth/`.
 
 ## Hooks
 
-**A project's hooks do not run.** They need one-time approval at startup.
+**A project's hooks don't run.** They need one-time approval at startup.
 Restart the session and accept, or check
 `~/.onecode/hooks/project-approvals.json`.
 
@@ -152,10 +154,10 @@ Restart the session and accept, or check
 **My background shells are gone after `/clear`.** Background work ends
 with the session. The new session lists what was stopped.
 
-**A resumed session is in a different permission mode.** Modes are not
+**A resumed session is in a different permission mode.** Modes aren't
 saved with the session. Pass `--permission-mode` or set a default.
 
-**The `/effort` level reset after a restart.** `/effort` does not save the
+**The `/effort` level reset after a restart.** `/effort` doesn't save the
 level. Open pi's `/thinking` picker and press **ctrl+s** to save a startup
 default, or pass `--thinking <level>` at launch.
 

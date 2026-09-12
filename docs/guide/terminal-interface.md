@@ -1,5 +1,7 @@
 # The terminal interface
 
+[← One Code user guide](README.md)
+
 This page describes what you see on screen and how to move around it: the
 banner, the status line, the working indicator, the panels below the
 editor, the dialogs, and the themes.
@@ -70,8 +72,8 @@ Set `CC_FOOTER=0` to keep pi's footer.
 ## The panel below the editor
 
 One panel below the editor holds the background-shell manager and the
-live subagent tree. It appears when there is something to show and hides
-when there is not.
+live subagent tree. It appears when there's something to show and hides
+when there isn't.
 
 - Press **↓** from an empty editor to focus it. If background shells exist,
   the first **↓** lands on the shells chip; a second **↓** moves to the
@@ -85,7 +87,7 @@ when there is not.
   **Enter** closes the view.
 
 The panel's own footer names the keys that apply at each stage. Mouse-wheel
-scrolling is deliberately not enabled in the transcript view, because
+scrolling deliberately isn't enabled in the transcript view, because
 turning on mouse reporting would take over the terminal's native scrolling
 and text selection for the whole session.
 
@@ -132,7 +134,7 @@ and [Plan mode](permissions-modes-and-auto-mode.md#plan-mode).
 
 **ctrl+c** closes any panel.
 
-PgUp and PgDn do not reach these panels in full-screen mode, because pi uses
+PgUp and PgDn don't reach these panels in full-screen mode, because pi uses
 them for its own scrollback; use the keys the panel's footer names.
 
 ## Full-screen mode

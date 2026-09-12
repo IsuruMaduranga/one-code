@@ -1,5 +1,7 @@
 # Permissions, modes, and auto mode
 
+[← One Code user guide](README.md)
+
 Every tool call the model makes passes through One Code's permission gate
 before it runs. This page explains the permission modes, how to switch
 between them, how to write rules, what the approval prompt offers, and how
@@ -16,7 +18,7 @@ For each tool call, the gate checks the following in order:
 1. **Protected paths.** A write to a protected file or directory (see
    [Protected paths](#protected-paths)) is never approved automatically. In
    auto mode it goes to the classifier; in other modes it prompts you.
-   Allow rules do not cover protected paths.
+   Allow rules don't cover protected paths.
 2. **`deny` rules.** A matching `deny` rule blocks the call. `deny` always
    wins.
 3. **`ask` rules.** A matching `ask` rule prompts you, even in a mode that
@@ -96,7 +98,7 @@ Add `global` at the end to save it for every repository instead:
 ```
 
 To review the current mode and every loaded rule, including which project
-rules are trusted and which rules could not be parsed, run `/permissions`.
+rules are trusted and which rules couldn't be parsed, run `/permissions`.
 
 Rules One Code adds are saved under `~/.onecode`, never under `~/.claude`.
 
@@ -104,7 +106,7 @@ Rules One Code adds are saved under `~/.onecode`, never under `~/.claude`.
 
 A mode sets the default answer for actions no rule covers. **Auto is the
 default**, matching Claude Code: a classifier approves routine actions and
-stops risky ones, so you are not prompted for every step.
+stops risky ones, so you're not prompted for every step.
 
 | Mode | Badge | What it does |
 |---|---|---|
@@ -121,7 +123,7 @@ changes.
 ### Cycle modes with ctrl+q
 
 Press **ctrl+q** to cycle through manual, accept edits, plan, and auto.
-Two modes join the cycle only under conditions:
+Two modes join the cycle only under certain conditions:
 
 - **Auto** appears only when a model that can run the classifier is
   available. With no provider connected, the cycle skips it.
@@ -130,7 +132,7 @@ Two modes join the cycle only under conditions:
 **Don't ask** is never in the cycle; reach it with the `--permission-mode`
 flag or a settings file.
 
-Claude Code cycles modes with shift+tab. One Code cannot use that key
+Claude Code cycles modes with shift+tab. One Code can't use that key
 because pi reserves it for the reasoning-effort dial. On Windows and WSL,
 pi's own default keybindings also use ctrl+q to queue a follow-up message.
 If the two conflict there, change pi's binding in its keybindings file.
@@ -160,12 +162,12 @@ Claude Code settings files. Merge this into the existing object:
 }
 ```
 
-The scopes are not equal:
+The scopes aren't equal:
 
 - **User scope** (`~/.claude/settings.json`) and **managed settings** can
   set any mode.
 - **Project scope** (`.claude/settings.json` and `.claude/settings.local.json`)
-  can set `default`, `acceptEdits`, `plan`, or `dontAsk`. It cannot set
+  can set `default`, `acceptEdits`, `plan`, or `dontAsk`. It can't set
   `auto` or `bypassPermissions`; a checked-in file must not be able to turn
   off approvals for whoever clones it.
 - A `defaultMode` in `~/.onecode/settings.json` has no effect.
@@ -198,7 +200,7 @@ and these choices:
 - **No, tell the agent what to do differently.** Deny it, with an optional
   note that is passed to the model as the reason.
 
-The "don't ask again" option is not offered for protected paths, for writes
+The "don't ask again" option isn't offered for protected paths, for writes
 that the auto-mode safety floor caught, or in auto mode. Session grants never
 apply in auto mode and are cleared when the session ends.
 
@@ -226,7 +228,7 @@ check and always goes to the classifier.
 ## Protected paths
 
 Writes to these paths are never approved automatically in any mode other
-than bypass, and allow rules do not cover them.
+than bypass, and allow rules don't cover them.
 
 Protected directories, including everything inside them:
 
@@ -300,11 +302,11 @@ shows the plan. Nothing runs until you choose. The choices are:
 5. **Keep planning.** No mode change; the model refines the plan file.
 
 The initial highlight is the option that restores your previous mode, or
-manual mode when that is not offered. It never lands on a more permissive
+manual mode when that isn't offered. It never lands on a more permissive
 option by default. Press the number of a choice to pick it directly, or
 **Esc** to keep planning.
 
-In a non-interactive run there is no one to approve, so `exit_plan_mode`
+In a non-interactive run there's no one to approve, so `exit_plan_mode`
 refuses and the session stays in plan mode with the plan on disk.
 
 ## Auto mode
@@ -317,20 +319,20 @@ classifier.
 
 - Actions a deterministic analysis proves safe. Read-only shell commands
   inside the working directory are the common case. This analysis can only
-  ever conclude "safe"; anything it cannot parse or recognize goes to the
+  ever conclude "safe"; anything it can't parse or recognize goes to the
   classifier rather than through.
 - Edits and writes to files inside the project that are not credential
   files, not protected paths, and not files that run code on their own
   (build wrappers, CI workflows, editor auto-run configuration).
 - Deleting or resetting files inside the project **when git can recover
   them**. A tracked, committed file can be restored, so removing it is
-  approved. An untracked or modified file cannot, so removing it goes to
+  approved. An untracked or modified file can't, so removing it goes to
   the classifier. Claude Code trusts the whole project directory here; One
   Code checks recoverability first.
 
 ### What goes to the classifier
 
-Everything else: destructive commands git cannot undo, anything that
+Everything else: destructive commands git can't undo, anything that
 reaches outside the project, network-affecting commands, writes to
 protected paths, and reads outside the working directory.
 
@@ -342,21 +344,21 @@ The classifier is Claude Code's two-stage ruleset, embedded verbatim:
    stated intent and the allow list, and either approves or blocks with a
    named rule.
 
-Verdicts are checked before they are acted on. A block must cite a real
+Verdicts are checked before they're acted on. A block must cite a real
 rule from the ruleset. An approval based on intent must quote your own
-words from the conversation. A classifier that cannot be reached, times
-out, or returns something unparseable blocks the action; a gate that cannot
+words from the conversation. A classifier that can't be reached, times
+out, or returns something unparseable blocks the action; a gate that can't
 consult its classifier approves nothing.
 
 A blocked action is reported to the model with the reason so it can choose
-a safer route. You are not prompted per action while auto mode runs. After
+a safer route. You're not prompted per action while auto mode runs. After
 repeated blocks in a row, auto mode pauses and the next action prompts you;
 approving it resumes auto mode.
 
 Allow rules that are broad enough to pre-approve arbitrary execution, such
 as `Bash(*)`, a wildcarded interpreter, or a rule that allows delegation to
-subagents, are suspended in auto mode so they cannot bypass the classifier.
-Session grants from the approval prompt do not apply in auto mode either.
+subagents, are suspended in auto mode so they can't bypass the classifier.
+Session grants from the approval prompt don't apply in auto mode either.
 
 ### The classifier model
 
@@ -427,13 +429,13 @@ One Code's security model is the permission gate plus auto mode, not an
 assumption that the model behaves. Read these facts before you leave a
 session unattended:
 
-- **There is no operating-system sandbox.** The gate decides whether a
+- **There's no operating-system sandbox.** The gate decides whether a
   command runs; nothing constrains what an approved command can touch. For
   an OS-level wall, run One Code inside a container. The gate and the
   container work together.
 - **Bypass mode bypasses everything**, including protected paths. Claude
   Code keeps its protected-path checks active even under
-  `--dangerously-skip-permissions`; One Code does not.
+  `--dangerously-skip-permissions`; One Code doesn't.
 - **Auto mode is the default without a first-run consent step**, and
   without the OS sandbox Claude Code pairs its own auto default with.
 - **A weak classifier is a weaker boundary.** Automatic selection applies a

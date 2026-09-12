@@ -1,8 +1,10 @@
 # Differences from Claude Code
 
+[← One Code user guide](README.md)
+
 One Code recreates Claude Code's workflow on the pi agent harness with your
 choice of model. Most of what you know carries over. This page lists what
-is deliberately different, what is not provided, and the known limitations,
+is deliberately different, what isn't provided, and the known limitations,
 so nothing surprises you.
 
 ## What is the same
@@ -46,9 +48,9 @@ have no equivalent here: `Artifact`, `ReportFindings`,
 `ShareOnboardingGuide`, `PushNotification`, `RemoteTrigger`, `DesignSync`,
 `CronCreate`, `CronList`, `CronDelete`, `EndConversation`, and
 `SendFeedback`. Scheduling within a session is available through `/loop`
-and `schedule_wakeup`; scheduled cloud sessions are not.
+and `schedule_wakeup`; scheduled cloud sessions aren't.
 
-The `Agent` tool's remote isolation option is not implemented.
+The `Agent` tool's remote isolation option isn't implemented.
 
 ## Commands that are not provided
 
@@ -81,17 +83,17 @@ action but never pre-approve one. See [Hooks](hooks.md).
 
 ## Settings keys that are ignored
 
-`permissions.additionalDirectories` is not honored. The `env` block is read
+`permissions.additionalDirectories` isn't honored. The `env` block is read
 only for `CLAUDE_CODE_SUBAGENT_MODEL`, and only from user and managed
 scope. `includeCoAuthoredBy`, `apiKeyHelper`, `forceLoginMethod`,
-`cleanupPeriodDays`, and `spinnerTipsEnabled` are not read. Run
+`cleanupPeriodDays`, and `spinnerTipsEnabled` aren't read. Run
 `/doctor report` to see, per file, which keys were used, ignored, or
 refused.
 
 ## Prompt layout on Anthropic models
 
 Claude Code delivers part of its reminder stack to Opus and Sonnet as a
-system-role message after the first user message. pi's message model cannot
+system-role message after the first user message. pi's message model can't
 express that, so One Code uses the layout Claude Code uses for Haiku on
 every model. The content is the same; only the placement differs.
 
@@ -110,7 +112,7 @@ every model. The content is the same; only the placement differs.
 - Some models reject options that others accept. One Code sends minimal
   options to its side calls (classifier, recap, reader) for this reason. A
   provider incompatibility in a side call fails closed: a classifier that
-  cannot answer blocks the action.
+  can't answer blocks the action.
 - Prompt-cache lifetime and pricing are the provider's. The extended
   one-hour cache applies to Anthropic; other providers use their own
   values.
@@ -119,7 +121,7 @@ every model. The content is the same; only the placement differs.
 
 - A write or edit tool can reach a file that only a `Bash` deny rule
   protects, because in-project writes take the deterministic fast path in
-  auto mode and are not classified. Write `deny` rules for the write tools
+  auto mode and aren't classified. Write `deny` rules for the write tools
   as well. This is documented and accepted rather than fixed.
 - GLM-5.3 and GLM-5.3 Flash, used as the classifier, approve a request to
   back up the project to an unnamed outside location that the ruleset says
@@ -127,7 +129,7 @@ every model. The content is the same; only the placement differs.
 - Running a skill in a one-shot run (`-p '/simplify'`) delivers the skill
   but starts no model turn, so the process exits without doing anything.
   Interactive sessions are unaffected.
-- The reasoning effort set with `/effort` does not persist across
+- The reasoning effort set with `/effort` doesn't persist across
   restarts; the model chosen with `/model` does. To save a level, open
   pi's `/thinking` picker and press **ctrl+s**, or pass `--thinking`.
 - A subagent spawn that is blocked before it starts can leave its requested
@@ -145,6 +147,6 @@ every model. The content is the same; only the placement differs.
   has had limited live testing.
 - Plugin marketplaces support git and local sources only; npm and pip
   sources, version pinning, dependency resolution, and enterprise
-  blocklists are not implemented.
+  blocklists aren't implemented.
 
 Open work is tracked in the project's issue tracker on GitHub.

@@ -1,5 +1,7 @@
 # Check your setup with doctor
 
+[← One Code user guide](README.md)
+
 `/doctor` is One Code's health check, modelled on Claude Code's. It measures
 your setup, reports what a session will use, and can have the model repair
 the findings.
@@ -18,7 +20,7 @@ the findings.
 ## What the report contains
 
 1. **Installation.** Whether you run the bundled app or the extension on
-   your own pi, the pi version and whether it is in the tested range, the
+   your own pi, the pi version and whether it's in the tested range, the
    Node version and platform, pi's agent directory, One Code's state
    directory, where Claude Code configuration is read from, and whether a
    newer One Code is available.
@@ -47,12 +49,12 @@ Findings are listed first, errors before warnings, each with a suggested
 fix. The report is "ready" when at least one provider works, a model is
 selected, and there are no errors.
 
-In the panel, press **f** to run the checkup on the report you are reading.
+In the panel, press **f** to run the checkup on the report you're reading.
 
 ## Model presets
 
 A preset sets the main model, the subagent model, and the classifier model
-together, from the provider you are connected to. Only current-generation,
+together, from the provider you're connected to. Only current-generation,
 priced models that support tool calls are considered.
 
 | Preset | Main model | Subagents | Classifier |

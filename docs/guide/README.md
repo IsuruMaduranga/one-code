@@ -6,7 +6,7 @@ One Code is and why it exists, see the [project README](../../README.md).
 
 ## Start here
 
-If you have never run One Code, read these in order:
+If you've never run One Code, read these in order:
 
 1. [Install One Code](installation.md). Install it and open your first
    session.
@@ -35,7 +35,7 @@ If you have never run One Code, read these in order:
 | [Sessions and context](sessions-and-context.md) | What the model sees, memory, compaction, the cache, recaps, and resuming sessions. |
 | [Tasks and background work](tasks-and-background-work.md) | The task list, background shells, monitors, loops, and how results reach the model. |
 | [Check your setup with doctor](doctor.md) | The report, the checkup, model presets, and the `onecode doctor` command. |
-| [Differences from Claude Code](differences-from-claude-code.md) | What is different by design, what is not provided, and known issues. |
+| [Differences from Claude Code](differences-from-claude-code.md) | What is different by design, what isn't provided, and known issues. |
 | [Troubleshooting](troubleshooting.md) | Symptoms, causes, and fixes. |
 | [Command and keyboard reference](reference.md) | Every command, shortcut, flag, environment variable, and file location. |
 

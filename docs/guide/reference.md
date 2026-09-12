@@ -1,5 +1,7 @@
 # Command and keyboard reference
 
+[← One Code user guide](README.md)
+
 A lookup for every slash command, keyboard shortcut, command-line flag,
 environment variable, and file location. Each entry points to the page
 that explains it.
@@ -122,7 +124,7 @@ Rebind keys in pi's keybindings file; see pi's documentation.
 ## Command-line flags
 
 `onecode` forwards every flag to pi except `--version` and `doctor`. On the
-extension installation, use `pi` in place of `onecode`.
+extension install, use `pi` in place of `onecode`.
 
 | Flag | What it does |
 |---|---|
@@ -157,7 +159,7 @@ Set these before launching.
 |---|---|
 | `ONECODE_STATE_DIR` | Where One Code keeps its state (default `~/.onecode`). Independent of pi's agent directory. |
 | `ONECODE_NO_UPDATE_CHECK=1` | Skip the daily update check. |
-| `ONECODE_DEBUG=1` | Report when a pi-internal patch in the bundled app did not apply. |
+| `ONECODE_DEBUG=1` | Report when a pi-internal patch in the bundled app didn't apply. |
 | `AA_API_KEY` | Artificial Analysis key for measured model selection. |
 | `BRAVE_SEARCH_API_KEY`, `TAVILY_API_KEY` | Web-search fallback keys. |
 

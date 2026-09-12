@@ -1,5 +1,7 @@
 # Providers and models
 
+[← One Code user guide](README.md)
+
 One Code talks to each model provider natively, so you choose the provider
 and the model, and you can change either one during a session. This page
 covers connecting a provider, storing a key, switching models, how One Code
@@ -31,8 +33,8 @@ Two providers hand out free models you can try at no cost:
   a key, or sign in from inside One Code with no key copying. Free models
   carry a `:free` suffix, such as `nvidia/nemotron-3-ultra-550b-a55b:free`.
 
-Credentials are stored by pi in its agent directory (`~/.onecode/agent/`
-under the bundled app). `/logout` removes them.
+pi stores credentials in its agent directory (`~/.onecode/agent/` under
+the bundled app). `/logout` removes them.
 
 ## Store keys as environment variables
 
@@ -100,10 +102,10 @@ otherwise to the matching class within your provider (`haiku` the cheapest
 capable model, `sonnet` the cheapest Sonnet-class model, `opus` and `fable`
 your main model). They never switch providers.
 
-Capability is judged by tier (see the next section). Models are excluded
-when they cannot call tools, have no price, or are a generation behind: a
-model released more than a year after its vendor's newest is demoted one
-tier, and one more than two years behind is never picked automatically.
+Capability is judged by tier (see the next section). One Code excludes
+models that can't call tools, have no price, or are a generation behind: a
+model released more than a year after its vendor's newest drops one tier,
+and one more than two years behind never gets picked automatically.
 Provider aliases such as `:free` or `:online` variants are skipped.
 
 ### Measured selection with Artificial Analysis
@@ -148,8 +150,8 @@ the system prompt to match:
 | Cheap | Haiku-class models and comparable "flash", "mini", or "small" models. | The verbose prompt Claude Code gives Haiku. |
 | Tiny | Sub-Haiku models. | The verbose prompt plus extra scaffolding and the `grep`, `find`, and `ls` tools. |
 
-The tier is derived from the model's name, release date, and price. You do
-not configure it; set `CC_PROMPT_TIER` to force one when you want to
+The tier is derived from the model's name, release date, and price. You
+don't configure it; set `CC_PROMPT_TIER` to force one when you want to
 experiment. `/doctor report` shows the tier in use.
 
 ## Web search on providers without a search API
@@ -161,7 +163,7 @@ API, in this order:
 
 1. **Brave Search**, when `BRAVE_SEARCH_API_KEY` is set.
 2. **Tavily**, when `TAVILY_API_KEY` is set.
-3. **Exa's free keyless endpoint**, when neither key is set. It is
+3. **Exa's free keyless endpoint**, when neither key is set. It's
    rate-limited and best-effort, so One Code warns you the first time a
    session uses it and labels every result that came from it.
 
@@ -187,7 +189,7 @@ so. Web fetch works on every provider; it never depends on a search API.
 - Some models reject request options others accept (a temperature, a
   reasoning setting). One Code sends minimal options to its side calls for
   this reason, and a side call that still fails does so loudly: a
-  classifier that cannot answer blocks the action; a reader that fails
+  classifier that can't answer blocks the action; a reader that fails
   returns the raw page.
 - Interactive sessions request the provider's extended prompt cache (one
   hour on Anthropic). Subagents and one-shot runs use the short default.

@@ -1,7 +1,9 @@
 # Bring your Claude Code setup
 
+[← One Code user guide](README.md)
+
 One Code reads the same configuration files as Claude Code, so your
-existing setup works without changes. There is no import step and nothing
+existing setup works without changes. There's no import step and nothing
 to convert. Open a project that already has a `.claude/` directory, and One
 Code picks up each of the following as it is.
 
@@ -17,12 +19,12 @@ If a directory has no `CLAUDE.md`, One Code uses its `AGENTS.md` instead, so
 a repository that standardized on `AGENTS.md` works too. A `CLAUDE.md` takes
 precedence over an `AGENTS.md` in the same directory.
 
-To give One Code instructions that Claude Code should not read, add an
+To give One Code instructions that Claude Code shouldn't read, add an
 `ONECODE.md`. See [ONECODE.md](sessions-and-context.md#onecodemd).
 
 To generate a `CLAUDE.md` for a project that lacks one, run `/init`. It has
 the model survey the project (build, test, and lint commands, layout,
-existing AI-tool configuration), ask you about what the code cannot answer,
+existing AI-tool configuration), ask you about what the code can't answer,
 and write the file. It never overwrites an existing `CLAUDE.md` silently.
 
 ## Skills, commands, and agents
@@ -74,7 +76,7 @@ The keys One Code honors:
 | Key | Scopes | Notes |
 |---|---|---|
 | `permissions.allow`, `permissions.deny`, `permissions.ask` | All | Project allow rules need one-time approval. See [Permissions](permissions-modes-and-auto-mode.md#permission-rules). |
-| `permissions.defaultMode` | All | A project file cannot select `auto` or `bypassPermissions`. |
+| `permissions.defaultMode` | All | A project file can't select `auto` or `bypassPermissions`. |
 | `permissions.disableBypassPermissionsMode` | All | `"disable"` refuses bypass mode from any source. |
 | `autoMode.*` | User, managed | Never read from project files. See [Configure auto mode](permissions-modes-and-auto-mode.md#configure-auto-mode). |
 | `hooks` | All | Project hooks need one-time approval. See [Hooks](hooks.md). |
@@ -120,7 +122,7 @@ See [Where settings live](configuration.md#where-settings-live).
 
 ## What does not carry over
 
-Features that need Claude Code's own hosted or desktop services are not
+Features that need Claude Code's own hosted or desktop services aren't
 available. For the full list of tools, commands, and skills that are
 missing or different, see
 [Differences from Claude Code](differences-from-claude-code.md).

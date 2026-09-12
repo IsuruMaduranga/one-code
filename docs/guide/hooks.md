@@ -1,5 +1,7 @@
 # Hooks
 
+[← One Code user guide](README.md)
+
 Hooks are shell commands that run at fixed points in a session. One Code
 runs Claude Code's command hooks from your existing settings files, with
 the same input, output, and exit-code contract, so hooks you wrote for
@@ -39,8 +41,8 @@ Only command hooks are supported. Hook entries of type `http`, `prompt`, or
 | `PostCompact` | After context compaction, with the summary. |
 
 Claude Code's `Notification`, `SubagentStop`, and `PermissionRequest`
-events are not supported. pi has no event that carries the notification
-concept, and the other two are not implemented.
+events aren't supported. pi has no event that carries the notification
+concept, and the other two aren't implemented.
 
 Hooks also run inside subagents: a `PreToolUse` hook that blocks a command
 blocks it in a subagent too.
@@ -55,7 +57,7 @@ The hook's standard input is a JSON object with these fields:
 | Field | Present | Meaning |
 |---|---|---|
 | `session_id` | Always | The session id. |
-| `transcript_path` | Always | The session file, or an empty string when there is none. |
+| `transcript_path` | Always | The session file, or an empty string when there's none. |
 | `cwd` | Always | The working directory. |
 | `hook_event_name` | Always | The event name from the table. |
 | `tool_name`, `tool_input` | Tool events | The tool and its arguments. Tool names are One Code's names; see [Claude Code tool names](tools.md#claude-code-tool-names). |
@@ -90,7 +92,7 @@ Envelope fields honored in a JSON result:
 |---|---|
 | `continue: false` | Blocks, with `stopReason` as the reason. |
 | `decision: "block"` | Blocks, with `reason` as the reason. |
-| `hookSpecificOutput.permissionDecision` | `"deny"` and `"ask"` both block, with `permissionDecisionReason`. `"allow"` is read but never honored; a hook cannot pre-approve an action, and the permission gate still runs. |
+| `hookSpecificOutput.permissionDecision` | `"deny"` and `"ask"` both block, with `permissionDecisionReason`. `"allow"` is read but never honored; a hook can't pre-approve an action, and the permission gate still runs. |
 | `hookSpecificOutput.updatedInput` | Replaces the tool's input (`PreToolUse`). |
 | `hookSpecificOutput.updatedToolResult` | Replaces the tool's result (`PostToolUse`). |
 | `hookSpecificOutput.additionalContext` | Adds text to the model's context. |
@@ -105,5 +107,5 @@ Set `CC_HOOKS_DEBUG=1` before launching to print each hook dispatch and its
 outcome to stderr. Decisions are also appended to
 `~/.onecode/hooks/hooks-decisions.jsonl` while the variable is set.
 
-Hooks run through `/bin/sh`. On native Windows this path does not exist,
+Hooks run through `/bin/sh`. On native Windows this path doesn't exist,
 which is one reason native Windows is unsupported; use WSL.

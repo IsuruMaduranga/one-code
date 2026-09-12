@@ -1,6 +1,8 @@
 # Tools
 
-The model works by calling tools. You do not type tool names; you describe
+[← One Code user guide](README.md)
+
+The model works by calling tools. You don't type tool names; you describe
 the task and the model chooses. This page lists every tool One Code gives
 the model, what each does, what you see when it runs, and how Claude Code's
 tool names map onto them.
@@ -55,7 +57,7 @@ Some command shapes are refused before they run, with a message that steers
 the model to a better route:
 
 - A foreground command that starts with `sleep`, or a polling loop that
-  sleeps, when the wait is not provably short. The model is told to use
+  sleeps, when the wait isn't provably short. The model is told to use
   `run_in_background` or `monitor` instead.
 - A command that would orphan a process (`nohup`, `setsid`, or a trailing
   `&` with no `wait`).
@@ -131,7 +133,7 @@ deferred until needed. `list_mcp_resources`, `read_mcp_resource`, and
 
 `tool_search` loads deferred tools. The model passes exact names
 (`select:monitor,task_output`), a required term (`+notebook`), or free
-keywords. If the model calls a tool it has not loaded yet, the call fails
+keywords. If the model calls a tool it hasn't loaded yet, the call fails
 and the model is steered to `tool_search`.
 
 ## Behavior in non-interactive runs

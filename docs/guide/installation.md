@@ -1,5 +1,7 @@
 # Install One Code
 
+[← One Code user guide](README.md)
+
 One Code ships as two npm packages from one repository. Choose the one that
 fits how you already work.
 
@@ -27,7 +29,7 @@ cd your-project
 onecode
 ```
 
-On the first run there is no provider yet: the banner shows `model none`.
+On the first run there's no provider yet: the banner shows `model none`.
 Run `/login` inside One Code to connect a provider, or set a provider key
 in your environment before launching. For a free option, see
 [Providers and models](providers-and-models.md).
@@ -44,7 +46,7 @@ Homebrew installs Node for you, so this route has no separate Node step:
 brew install isurumaduranga/one-ai/onecode
 ```
 
-The formula is named `one-code`; the command it installs is `onecode`.
+The formula and the command it installs are both named `onecode`.
 Homebrew refuses npm packages published less than a day ago, so a release
 becomes installable this way about a day after it appears on npm.
 
@@ -62,7 +64,7 @@ your pi is outside that range. Full-screen mode is opt-in on your own pi;
 see [Full-screen mode and themes](configuration.md#full-screen-mode-and-themes).
 
 A few interface refinements are applied only by the bundled app, because
-they patch pi internals the extension API cannot reach: a clean exit that
+they patch pi internals the extension API can't reach: a clean exit that
 erases the screen in regular mode, and suppression of pi's "Operation
 aborted" line when you interrupt a reply. Everything else is identical.
 

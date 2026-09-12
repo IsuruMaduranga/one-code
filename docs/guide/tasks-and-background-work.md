@@ -1,5 +1,7 @@
 # Tasks and background work
 
+[← One Code user guide](README.md)
+
 One Code keeps long-running work out of the model's way. This page covers
 the structured task list, background shells, monitors, scheduled
 wake-ups, and how the results of background work reach the model.
@@ -22,8 +24,8 @@ summary line and up to 12 tasks: `✔` for completed, `◼` for in progress,
 | `/tasks show` | Shows it again. |
 
 The list is stored inside the session, so it survives a resume and follows
-the branch you are on in `/tree`. If the model has not touched the list for
-a while during a long task, it is reminded that the list exists.
+the branch you're on in `/tree`. If the model hasn't touched the list for
+a while during a long task, it's reminded that the list exists.
 
 ## Background shells
 
@@ -55,14 +57,14 @@ session is told which ones.
 The `monitor` tool watches a long-running command, or a WebSocket URL, and
 turns each line of output (or each message) into an event. Events are
 batched and delivered to the model as notifications: at most once a second
-while the model is idle, once every ten seconds while it is working, so a
-noisy process does not flood the conversation.
+while the model is idle, once every ten seconds while it's working, so a
+noisy process doesn't flood the conversation.
 
 A monitor runs until its command exits or its timeout passes (five minutes
 by default, one hour at most), or for the whole session when started as
 persistent. The model can stop it with `task_stop`.
 
-A monitor is not auto-approved, because it runs a shell command; the
+A monitor isn't auto-approved, because it runs a shell command; the
 permission gate treats it like `bash`.
 
 ## Scheduled wake-ups and loops
@@ -77,7 +79,7 @@ permission gate treats it like `bash`.
 - **Self-paced.** `/loop watch the CI run` with no interval lets the model
   choose when to check next. It uses the `schedule_wakeup` tool, which
   schedules one wake-up at a time between one minute and one hour ahead.
-  The model is told to pick a delay that matches what it is waiting for,
+  The model is told to pick a delay that matches what it's waiting for,
   and to stop the loop when the task is done.
 
 `/loop status` (or a bare `/loop`) reports the current loop. `/loop stop`
@@ -100,7 +102,7 @@ Background work reports back through notifications:
   merged into one message.
 - After you interrupt a turn, notifications are held and attached to your
   next prompt instead of starting a turn on their own.
-- Each notification is framed as an automated event, so the model does not
+- Each notification is framed as an automated event, so the model doesn't
   mistake it for something you said or approved.
 
 ## Non-interactive runs
@@ -108,4 +110,4 @@ Background work reports back through notifications:
 In `-p` and `--mode json` runs nothing can run in the background, because
 the process exits when the turn settles. Background shells, monitors,
 subagents, and workflows run to completion and return their output
-directly. `/loop` and `schedule_wakeup` do not fire.
+directly. `/loop` and `schedule_wakeup` don't fire.

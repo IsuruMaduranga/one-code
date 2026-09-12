@@ -1,5 +1,7 @@
 # Configure One Code
 
+[← One Code user guide](README.md)
+
 Use this page to find the right settings file, learn what One Code stores
 and where, change the terminal appearance, and set up language-server
 diagnostics. Provider keys are covered in
@@ -36,7 +38,7 @@ atomically; a malformed file is reported rather than overwritten.
 | `PI_CODING_AGENT_DIR` | pi's agent directory. The bundled app sets it to `~/.onecode/agent`. |
 | `CLAUDE_CONFIG_DIR` | Where Claude Code's user configuration is read from (default `~/.claude`). |
 
-Setting one does not move the others.
+Setting one doesn't move the others.
 
 ## What is stored under ~/.onecode
 
@@ -154,7 +156,7 @@ its files, from the nearest directory that has a project marker such as
 server that crashes is restarted twice, then disabled for the session.
 
 If the project's TypeScript installation lacks `lib/tsserver.js`
-(TypeScript 7's native compiler), the server cannot start; One Code
+(TypeScript 7's native compiler), the server can't start; One Code
 reports this. Install a TypeScript 5.x development dependency in that
 project.
 
@@ -163,7 +165,7 @@ precedence over the built-in table for the file extensions it claims.
 
 Run `/lsp` to see each server's status and diagnostic count, start
 failures, and plugin configuration problems. `/doctor report` lists the
-servers your project needs and whether they are installed.
+servers your project needs and whether they're installed.
 
 ## Environment variables
 
