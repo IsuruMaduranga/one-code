@@ -41,6 +41,64 @@ them across, because the good part was never the logo.
   Forks go stale; packages do not have to.
 - **Free and open source** under the MIT license.
 
+## 🤔 Can't I just point Claude Code at another model?
+
+You can. Set `ANTHROPIC_BASE_URL` to an Anthropic-compatible endpoint (Ollama,
+a gateway, a proxy) and pass `--model`. Claude Code will talk to whatever
+answers. If you want Claude Code's exact interface on one model and the
+results are good, that's a fine setup and you don't need One Code.
+
+It stops being enough the moment you want more than one model, or a model that
+isn't Claude 5-class. Here is what the base URL trick can't do and One Code
+does.
+
+**One endpoint means one model for everything.** The main conversation, every
+subagent, the permission classifier, compaction, and the small side jobs all go
+to the same place. One Code picks a model per role: a frontier model in charge,
+a cheap fast model for a fan-out of subagents, a contained model for the
+classifier. Each role can sit on a different provider. This is the usual reason
+people switch, and no gateway gives it to you.
+
+**Claude Code's prompts were written for Claude.** Recent versions send Opus
+and Fable a short prompt, because Claude 5 models need little guidance. Point
+that harness at a smaller model and it gets a prompt written for a model that
+isn't there. Skills go unused, the task list is ignored, and it edits with prose
+instead of tools. One Code reads the model's capability and sends one of four
+prompt registers, from Claude Code's lean frontier prompt to a heavily
+scaffolded one for small and local models, with explicit search tools switched
+on where a model needs them. A weaker model gets more help, not the same prompt
+with a different logo.
+
+**Caching is per provider, and the request has to be shaped for it.** Claude
+Code's requests carry Anthropic's explicit cache markers with a one-hour
+lifetime, deferred tool definitions, and effort settings. A translation layer
+has to turn those into another provider's dialect, and what survives depends on
+the layer. Other providers also cache differently: most match on an exact
+prefix, so one moved byte re-bills the whole context. One Code talks to each
+provider through its native API, sets the cache lifetime the provider actually
+supports, keeps the system prompt and the first message byte-stable across a
+session, and staggers parallel subagents so the first one warms the cache for
+the rest. This is measured, not assumed; the repository ships the probe that
+checks it.
+
+**Anthropic-only features have to land somewhere.** Deferred tool loading,
+Anthropic's server-side web search, and the thinking block are constructs of
+Anthropic's API. Behind a translating endpoint they are dropped, rejected, or
+turned off, and the model in front of you never had them. One Code does
+deferred tool loading on every provider, maps reasoning effort onto the
+provider's own dial, and uses the provider's search when it has one, else
+Brave, Tavily, or Exa.
+
+**Side jobs name Claude models.** Claude Code asks for specific Claude models
+for its cheap side calls. Behind a gateway, either the gateway answers to those
+names or the calls fail. One Code selects each side model from your provider's
+own catalog, with a capability floor and a check that your account can actually
+use it.
+
+**And it's a package, not a fork.** One Code is a set of pi extensions, so you
+can add a tool, a theme, a hook, or a whole workflow as one more extension.
+Claude Code isn't open source; a base URL is the only knob it gives you.
+
 ## 🚀 Get started
 
 You need **Node.js 22.19+**. One Code is developed and verified on macOS and
