@@ -43,29 +43,100 @@ them across, because the good part was never the logo.
 
 ## 🤔 "But I can already point Claude Code at Ollama"
 
-You can. Set `ANTHROPIC_BASE_URL`, pass `--model whatever`, and Claude Code will
-happily talk to whoever picks up the phone. If that's working for you, enjoy
-it. Here's what it can't do.
+A reader sent me this, as a reason One Code doesn't need to exist:
 
-- **One phone line.** Main agent, subagents, permission classifier, compaction:
-  everyone shares the one model behind that URL. One Code gives each role its
-  own model on its own provider. Frontier model in charge, a cheap fast one
-  doing the grunt work.
-- **Someone else's prompt.** Claude Code's prompt is short because Claude 5
-  doesn't need hand-holding. Give it to a smaller model and you get a stranger
-  reading Claude's notes. One Code sizes the prompt to the model, in four tiers
-  from "you know what to do" to "here is exactly what to do".
-- **Cache misses, billed to you.** Claude Code's requests are shaped for
-  Anthropic's cache. Other providers cache differently, and a translation layer
-  in the middle shreds the shape. One Code speaks each provider's native API
-  and keeps the prefix byte-stable, so the cache actually hits. We measure it.
-- **Side jobs that ask for Haiku by name.** Your gateway had better know who
-  that is. One Code picks side models from your provider's own catalog.
-- **A knob, not a toolbox.** Claude Code gives you a base URL. One Code gives
-  you pi extensions, so you add what you need instead of asking for it.
+```bash
+export ANTHROPIC_AUTH_TOKEN="ollama"
+export ANTHROPIC_BASE_URL="http://localhost:11434"
+claude --model kimi-k2.7-code:cloud
+```
 
-The base URL trick swaps the model. One Code swaps the harness's assumptions
-along with it.
+And yes, it works. Claude Code will happily talk to whoever picks up the phone.
+If you want Claude Code's exact interface on one model and the results are good,
+enjoy it. You don't need One Code for that.
+
+But it's worth knowing what you've done there. You swapped the brain and told
+the body nothing. Claude Code's prompts, its caching, its side calls, its whole
+request shape are built around one assumption: there's a current Claude on the
+other end. That assumption doesn't come off with an environment variable.
+
+One Code started as the experiment that follows from that observation. My
+[Harness Engineering 101](https://isuruwijesiri.com/harness-engineering-101/)
+series argues that the LLM is the brain and the harness is the body, and that
+the good parts of a coding agent live in the body. If that's true, you should be
+able to rebuild the body from scratch on a model-neutral runtime and put any
+brain in it. This repository is that rebuild. Here's what it does differently
+from a base URL, and why each one matters.
+
+**One phone line means one brain for every job.** Behind a base URL, the main
+conversation, every subagent, the permission classifier, compaction, and the
+"while you were away" recap all go to the same model. That's like sending a
+surgeon to take blood pressure. One Code gives each seat its own brain: `/model`
+for the main conversation, `/subagent` for delegated work, and the classifier
+picked automatically from your provider's catalog. Each seat can sit on a
+different provider. OpenAI's frontier model in charge and DeepSeek V4 Flash
+running a fan-out of twelve subagents is exactly the setup this was built for.
+It is the usual reason people switch, and no gateway can give it to you.
+([Appendix A: One Harness, Many Brains](https://isuruwijesiri.com/harness-engineering-101/appendix-a-one-harness-many-brains))
+
+**Claude Code's prompt was written for Claude, and lately a very good Claude.**
+The current Opus and Fable prompt is about 8k characters. Claude 5 doesn't need
+hand-holding, so Anthropic stopped holding hands. Give that prompt to a smaller
+model and you get a stranger reading Claude's notes: skills go unused, the task
+list gets ignored, and it explains the edit instead of making it. One Code sizes
+the prompt to the model, in four registers. The frontier tier gets the lean
+prompt. Workhorse and cheap tiers get the fuller instructions Claude Code itself
+sends to Sonnet and Haiku. The tiny tier, for flash-class and local models, gets
+the most scaffolding: per-task playbooks, a "make the change with tools, not
+prose" rule, and dedicated `grep`, `find`, and `ls` tools with strict schemas,
+because a small model drives a shell badly. Weaker brains need more body. Same
+policies, different level of instruction.
+
+**Caching is where the base URL trick quietly bills you.** Anthropic's cache is
+explicit: the request carries markers saying "cache up to here", with a
+one-hour lifetime. OpenAI, Gemini, and DeepSeek cache implicitly on an exact
+prefix. Claude Code's requests are shaped for the first kind, and a translation
+layer in the middle has to turn one into the other. Often it doesn't, or does it
+halfway. Nothing errors. You pay full price on every request and only notice if
+you measure the hit rate. One Code speaks each provider's native API, sets the
+cache lifetime that provider supports, keeps the system prompt and the first
+message byte-stable across the whole session, sends deferred tool definitions so
+the tools array never changes shape mid-session, and staggers a parallel fan-out
+so the first subagent warms the cache for the rest. The footer shows your
+cache-hit rate, and the repository ships the probe that asserts prefix stability
+on a live run. One careless byte at the top is an invisible ten-times price
+increase. We treat it as a bug.
+([Chapter 5: Caching](https://isuruwijesiri.com/harness-engineering-101/05-caching))
+
+**Anthropic-only constructs have to land somewhere.** Deferred tool loading,
+Anthropic's server-side web search, the thinking block, and the effort setting
+are features of Anthropic's API, not of models in general. Behind a translating
+endpoint they get dropped or rejected, and the model in front of you never had
+them. One Code does deferred tool loading on every provider, maps reasoning
+effort onto each provider's own dial, and uses the provider's search when it
+has one, or Brave, Tavily, or Exa when it doesn't. Its side calls send each
+provider minimal options, because one provider's optional field is another's
+hard error, and a safety call that fails should fail loudly, not get silently
+rerouted.
+
+**The side jobs ask for Claude by name.** Claude Code's cheap calls, the
+classifier among them, request specific Claude models. Behind a gateway, either
+the gateway answers to those names or the calls fail. One Code picks each side
+model from your provider's own catalog: a capability floor keeps a flash model
+out of a seat it can't hold, a model a year behind its own family is never
+auto-picked, and a model your account refused at runtime is dropped for the
+session. Optionally, with your own Artificial Analysis key, the floor is a
+measured coding score rather than a name.
+
+**A knob, not a toolbox.** Claude Code isn't open source. The base URL is the
+one knob it gives you, and the prompt, the tools, and the permission logic stay
+sealed. One Code is a set of [pi](https://github.com/earendil-works/pi)
+extensions. Every feature on this page is one, and anything you're missing can
+be one more: a tool, a hook, a theme, a whole workflow. Forks go stale.
+Packages don't have to.
+
+So: the base URL trick swaps the brain and hopes the body doesn't notice. One
+Code is the body that was built to notice.
 
 ## 🚀 Get started
 
@@ -270,9 +341,12 @@ pi list
 
 ## 🧠 Learn the ideas behind it
 
-One Code is the practical companion to the Harness Engineering 101 series, which
-builds these ideas up from first principles: what a coding harness actually does,
-and why the good parts are model-independent.
+One Code is the production-scale companion to
+[Harness Engineering 101](https://isuruwijesiri.com/harness-engineering-101/),
+a sixteen-chapter series that builds these ideas up from first principles: what
+a coding harness actually does, why the good parts are model-independent, and
+how a ~300-line toy agent grows into the patterns you see here. The series
+points at this repository wherever it needs a grown-up example.
 
 ## 📄 License
 
