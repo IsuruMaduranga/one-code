@@ -64,10 +64,16 @@ parts live in the body. So: rebuild the body from scratch on a model-neutral
 runtime and put any brain in it. This repository is that rebuild, and here's
 what it does that a base URL can't.
 
-- **One phone line, one brain for every job.** Main agent, subagents,
-  classifier, compaction: all the same model. One Code gives each seat its own
-  brain, on its own provider. A frontier model in charge, DeepSeek V4 Flash
-  running twelve subagents. That's the setup this was built for.
+- **One phone line.** You can rename the subagent model in Claude Code, but
+  every call, main agent, subagents, classifier, compaction, still dials the one
+  endpoint behind that URL. Mixing providers means running a routing gateway
+  and maintaining it. One Code gives each seat its own brain on its own
+  provider, natively. A frontier model in charge, DeepSeek V4 Flash running
+  twelve subagents. That's the setup this was built for.
+- **Subscriptions don't fit behind a base URL.** A gateway wants API keys. One
+  Code signs you in with the account you already pay for: Claude Pro and Max,
+  ChatGPT, GitHub Copilot, OpenRouter, Kimi, xAI, and Radius all have native
+  OAuth logins, and you can mix them in one session.
 - **Someone else's prompt.** Claude Code's prompt is about 8k characters,
   because Claude 5 doesn't need hand-holding. Give it to a smaller model and
   you get a stranger reading Claude's notes. One Code sizes the prompt to the
