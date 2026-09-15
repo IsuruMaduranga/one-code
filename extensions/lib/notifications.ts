@@ -328,6 +328,37 @@ function assertNever(mode: never): never {
 }
 
 /**
+ * Block until the current agent run settles, but only in one-shot modes.
+ *
+ * A command handler that starts a turn through `pi.sendMessage`/`sendUserMessage`
+ * returns before that turn runs — the call is fire-and-forget. In `-p`/`--mode
+ * json` pi's runner disposes the session the moment the command handler returns
+ * (`session.prompt()` awaits nothing more for a `/command`), so the process exits
+ * before the triggered turn produces anything. Awaiting here keeps the one-shot
+ * alive until the run it kicked off has settled. Interactive/RPC keep the live
+ * event loop, so they detach as before and this returns immediately.
+ *
+ * `waitForIdle()` exists on a command context; a plain event-handler context
+ * (e.g. the `input` hook) only exposes `isIdle()`, so poll that as the fallback.
+ * `pi.sendMessage` marks the run active synchronously, so `isIdle()` already
+ * reads false by the time a caller reaches here.
+ */
+export async function awaitOneShotTurn(ctx: {
+	mode: ExtensionMode;
+	isIdle(): boolean;
+	waitForIdle?: () => Promise<void>;
+}): Promise<void> {
+	if (sessionOutlivesTurn(ctx.mode)) return;
+	if (ctx.waitForIdle) {
+		await ctx.waitForIdle();
+		return;
+	}
+	while (!ctx.isIdle()) {
+		await new Promise((resolve) => setTimeout(resolve, 20));
+	}
+}
+
+/**
  * The sentence a tool adds to its result when `sessionOutlivesTurn` was false
  * and it ran its normally-detached work to completion instead. One wording for
  * bash, monitor and workflow, so the model reads the same rule everywhere.

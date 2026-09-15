@@ -18,6 +18,7 @@ import { getAgentDir, stripFrontmatter } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { pluginRoot } from "../lib/plugin-root.ts";
 import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
+import { awaitOneShotTurn } from "../lib/notifications.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
 import {
 	nextSkillState,
@@ -272,27 +273,47 @@ export default function skillExtension(pi: ExtensionAPI) {
 	});
 
 	/**
+	 * Surface a user-facing skill message: a TUI/RPC toast where there is UI, or
+	 * stderr in a one-shot run (`-p`, `--mode json`), where `ctx.ui.notify` is a
+	 * no-op (pi wires no UI context there) so the message would otherwise vanish
+	 * and the command would exit silently. `console.error` writes to stderr, so it
+	 * never corrupts the `--mode json` event stream on stdout.
+	 */
+	const notifyOrPrint = (
+		ctx: { hasUI: boolean; ui: { notify(message: string, level: "info" | "warning" | "error"): void } },
+		message: string,
+		level: "warning" | "error",
+	): void => {
+		if (ctx.hasUI) ctx.ui.notify(message, level);
+		else console.error(message);
+	};
+
+	/**
 	 * Run a resolved skill the way a user-typed command does: refuse an "off"
 	 * skill (in EVERY mode — falling through would hand `/skill:` to pi's native
 	 * expansion, which knows nothing of the overrides store and would run it; a
-	 * headless run gets the refusal as a next-turn reminder instead of a UI
-	 * notice, never as silent execution), else re-deliver pi's exact `<skill>`
-	 * block as a hidden custom message. The model receives the same bytes pi's
-	 * own expansion would submit as a user turn (convertToLlm maps a custom
-	 * message to a user message regardless of `display`), but nothing renders.
-	 * Shared by the `/skill:<name>` interception and the bare `/<name>` commands.
+	 * one-shot run gets the refusal on stderr instead of a UI notice, never as
+	 * silent execution), else re-deliver pi's exact `<skill>` block as a hidden
+	 * custom message. The model receives the same bytes pi's own expansion would
+	 * submit as a user turn (convertToLlm maps a custom message to a user message
+	 * regardless of `display`), but nothing renders. Shared by the `/skill:<name>`
+	 * interception and the bare `/<name>` commands.
 	 */
-	const deliverSkill = (
+	const deliverSkill = async (
 		found: IndexedSkill,
 		args: string,
-		ctx: { hasUI: boolean; ui: { notify(message: string, level: "info" | "warning" | "error"): void } },
+		ctx: {
+			hasUI: boolean;
+			mode: ExtensionContext["mode"];
+			ui: { notify(message: string, level: "info" | "warning" | "error"): void };
+			isIdle(): boolean;
+			waitForIdle?: () => Promise<void>;
+		},
 		extra: { images?: Array<{ type: "image"; data: string; mimeType: string }>; streamingBehavior?: "steer" | "followUp" } = {},
-	): "handled" | "unavailable" => {
+	): Promise<"handled" | "unavailable"> => {
 		if (found.state === "off") {
 			const where = found.source === "plugin" ? "/plugins" : "/skills";
-			const message = `Skill "${found.name}" is turned off — enable it from ${where} to run it.`;
-			if (ctx.hasUI) ctx.ui.notify(message, "warning");
-			else pi.events.emit(REMINDER_CHANNEL, { text: message });
+			notifyOrPrint(ctx, `Skill "${found.name}" is turned off — enable it from ${where} to run it.`, "warning");
 			return "handled";
 		}
 		let body: string;
@@ -309,6 +330,12 @@ export default function skillExtension(pi: ExtensionAPI) {
 			{ customType: "one-code:skill-invocation", content, display: false, details: { skill: found.name, args } },
 			{ triggerTurn: true, ...(extra.streamingBehavior ? { deliverAs: extra.streamingBehavior } : {}) },
 		);
+		// The turn we just triggered rides a fire-and-forget pi.sendMessage. In a
+		// one-shot run (-p, --mode json) pi disposes the session the moment this
+		// command/input handler returns, so without blocking the process would exit
+		// before that turn ran — the skill would load with no agent response (issue
+		// #1; real Claude Code runs the turn). Block until it settles there.
+		await awaitOneShotTurn(ctx);
 		return "handled";
 	};
 
@@ -320,12 +347,12 @@ export default function skillExtension(pi: ExtensionAPI) {
 	// pi's native handling. This hook only covers prompt(); paths that expand
 	// without an `input` event (steer/followUp) are caught by the context-hook
 	// redaction below.
-	pi.on("input", (event, ctx) => {
+	pi.on("input", async (event, ctx) => {
 		const cmd = parseSkillCommand(event.text);
 		if (!cmd) return { action: "continue" };
 		const found = resolveSkill(index(), cmd.name);
 		if (!found) return { action: "continue" };
-		const outcome = deliverSkill(found, cmd.args, ctx, {
+		const outcome = await deliverSkill(found, cmd.args, ctx, {
 			images: event.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined,
 			streamingBehavior: event.streamingBehavior,
 		});
@@ -362,8 +389,8 @@ export default function skillExtension(pi: ExtensionAPI) {
 				description: skill.description ? `${skill.description} (skill)` : `Run the ${skill.name} skill`,
 				handler: async (args, ctx) => {
 					const found = resolveSkill(index(ctx.cwd), skill.name);
-					if (!found || deliverSkill(found, args.trim(), ctx) === "unavailable") {
-						ctx.ui.notify(`Skill "${skill.name}" is no longer available (its SKILL.md was removed or is unreadable).`, "error");
+					if (!found || (await deliverSkill(found, args.trim(), ctx)) === "unavailable") {
+						notifyOrPrint(ctx, `Skill "${skill.name}" is no longer available (its SKILL.md was removed or is unreadable).`, "error");
 					}
 				},
 			});

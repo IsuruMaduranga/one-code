@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+	awaitOneShotTurn,
 	createTaskNotifier,
 	mergeNotificationTexts,
 	NOTIFICATION_BATCH_KEY,
@@ -388,6 +389,32 @@ describe("sessionOutlivesTurn", () => {
 		expect(sessionOutlivesTurn("rpc")).toBe(true);
 		expect(sessionOutlivesTurn("print")).toBe(false);
 		expect(sessionOutlivesTurn("json")).toBe(false);
+	});
+});
+
+describe("awaitOneShotTurn", () => {
+	it("returns immediately in interactive modes without touching idle state", async () => {
+		const waitForIdle = vi.fn(async () => {});
+		const isIdle = vi.fn(() => false);
+		await awaitOneShotTurn({ mode: "tui", isIdle, waitForIdle });
+		await awaitOneShotTurn({ mode: "rpc", isIdle, waitForIdle });
+		expect(waitForIdle).not.toHaveBeenCalled();
+		expect(isIdle).not.toHaveBeenCalled();
+	});
+
+	it("awaits waitForIdle in one-shot modes when the context provides it", async () => {
+		const waitForIdle = vi.fn(async () => {});
+		const isIdle = vi.fn(() => true);
+		await awaitOneShotTurn({ mode: "print", isIdle, waitForIdle });
+		expect(waitForIdle).toHaveBeenCalledTimes(1);
+		expect(isIdle).not.toHaveBeenCalled();
+	});
+
+	it("polls isIdle in one-shot modes when there is no waitForIdle, until it reads idle", async () => {
+		let calls = 0;
+		const isIdle = vi.fn(() => ++calls >= 3); // busy for the first two polls, then idle
+		await awaitOneShotTurn({ mode: "json", isIdle });
+		expect(calls).toBe(3);
 	});
 });
 
