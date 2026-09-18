@@ -34,9 +34,14 @@ export const KILL_GRACE_MS = 2_000;
 /** After `exit`, how long buffered stdio may keep arriving before the wait settles. */
 export const EXIT_STDIO_GRACE_MS = 200;
 
-/** `detached` everywhere but Windows, where process groups do not exist. */
-export function detachedSpawnOptions(): { detached: boolean } {
-	return { detached: process.platform !== "win32" };
+/**
+ * `detached` everywhere but Windows, where process groups do not exist — except
+ * for a child that must outlive an exiting parent (a fire-and-forget hook),
+ * which is what `detached: true` means on Windows (Node's documented use); the
+ * leader is still killed by pid there.
+ */
+export function detachedSpawnOptions(opts: { outlivesParent?: boolean } = {}): { detached: boolean } {
+	return { detached: process.platform !== "win32" || Boolean(opts.outlivesParent) };
 }
 
 /**

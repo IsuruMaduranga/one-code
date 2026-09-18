@@ -25,7 +25,7 @@ import {
 	ONECODE_GLOBAL_DESCRIPTOR,
 	PROJECT_DESCRIPTOR,
 } from "../lib/claude-context.ts";
-import { forwardSlashes, isPathAtOrUnder, tildify } from "../lib/paths.ts";
+import { forwardSlashes, isRelativeInside, tildify } from "../lib/paths.ts";
 import { tryReadFile } from "../lib/plugins.ts";
 
 export interface MemoryEntry {
@@ -46,8 +46,8 @@ export interface MemoryEntry {
  * in this picker), whatever the platform's separator.
  */
 function displayPath(path: string, cwd: string, home: string): string {
-	if (isPathAtOrUnder(path, cwd) && resolve(path) !== resolve(cwd)) return `./${forwardSlashes(relative(resolve(cwd), resolve(path)))}`;
-	return tildify(path, home);
+	const rel = relative(resolve(cwd), resolve(path));
+	return isRelativeInside(rel) ? `./${forwardSlashes(rel)}` : tildify(path, home);
 }
 
 /**

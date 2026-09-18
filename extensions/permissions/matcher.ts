@@ -8,7 +8,7 @@
  */
 
 import { homedir } from "node:os";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 import { analyzeShellCommand, hasInjectionSyntax, leadTokens, parseCommand, resolvePayload } from "../auto-mode/shell-analysis.ts";
 import { pathArgument } from "../auto-mode/paths.ts";
 import { isProtectedPath, isWritingTool } from "./protected-paths.ts";
@@ -20,7 +20,7 @@ import {
 	powershellReadOnly,
 	powershellStatements,
 } from "./powershell-rules.ts";
-import { expandTilde, forwardSlashes, isPathAtOrUnder, toPosixPath } from "../lib/paths.ts";
+import { comparablePath, expandTilde, forwardSlashes, isRelativeInside, toPosixPath } from "../lib/paths.ts";
 import { isShellToolName } from "../lib/shell-tools.ts";
 
 export type PermissionMode = "default" | "acceptEdits" | "plan" | "bypassPermissions" | "dontAsk" | "auto";
@@ -397,10 +397,9 @@ export function matchesPathPattern(pattern: string, subject: string, cwd: string
 	candidates.add(toPosixPath(absolute));
 	if (win32) candidates.add(forwardSlashes(absolute));
 	const rel = relative(cwd, absolute);
-	if (rel && !rel.startsWith("..") && !isAbsolute(rel)) candidates.add(forwardSlashes(rel));
-	if (isPathAtOrUnder(absolute, home) && resolve(absolute) !== resolve(home)) {
-		candidates.add(`~/${forwardSlashes(relative(resolve(home), absolute))}`);
-	}
+	if (isRelativeInside(rel)) candidates.add(forwardSlashes(rel));
+	const homeRel = relative(resolve(home), absolute);
+	if (isRelativeInside(homeRel)) candidates.add(`~/${forwardSlashes(homeRel)}`);
 
 	const regex = globToRegex(forwardSlashes(expandedPattern), true, win32);
 	for (const candidate of candidates) {
@@ -502,8 +501,7 @@ function matchesUrlPattern(pattern: string, url: string): boolean {
  * `/home/u/project`.
  */
 function toAbsoluteFolded(p: string, cwd: string): string {
-	const absolute = resolve(cwd, expandTilde(p, homedir()));
-	return process.platform === "linux" ? absolute : absolute.toLowerCase();
+	return comparablePath(resolve(cwd, expandTilde(p, homedir())));
 }
 
 function isPlanFilePath(candidate: string, planFilePath: string, cwd: string): boolean {
@@ -518,7 +516,7 @@ function isPlanFilePath(candidate: string, planFilePath: string, cwd: string): b
  * case-folded from `resolveForContainment`.
  */
 export function isInsideDir(candidate: string, dir: string, cwd: string): boolean {
-	return toAbsoluteFolded(candidate, cwd).startsWith(toAbsoluteFolded(dir, cwd) + sep);
+	return toAbsoluteFolded(candidate, cwd).startsWith(`${toAbsoluteFolded(dir, cwd)}/`);
 }
 
 /** `isInsideDir`, plus the directory itself (`ls <cwd>` lists the working directory). */

@@ -17,7 +17,7 @@
 
 import { lstatSync, readlinkSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
-import { expandTilde } from "../lib/paths.ts";
+import { comparablePath, expandTilde, isPathAtOrUnder } from "../lib/paths.ts";
 
 /**
  * Tools whose calls write to a path. Lives here — the lowest shared layer both
@@ -41,11 +41,8 @@ export function pathArgument(input: Record<string, unknown> | undefined): string
 	return typeof path === "string" ? path : undefined;
 }
 
-/** Case-folded on darwin/win32, where the filesystem is case-insensitive. */
-function normalize(target: string): string {
-	const normalized = resolve(target).replace(/\\/g, "/").replace(/\/+$/, "");
-	return process.platform === "linux" ? normalized : normalized.toLowerCase();
-}
+/** The shared comparison form (lib/paths.ts): `/` separators, case-folded on darwin/win32. */
+const normalize = comparablePath;
 
 function tryRealpath(target: string): string | undefined {
 	try {
@@ -99,11 +96,9 @@ export function resolveForContainment(target: string): string | undefined {
 	}
 }
 
-/** True only when `target` is provably at or under `base`. */
+/** True only when `target` is provably at or under `base` (lib/paths.ts `isPathAtOrUnder`, argument order kept for the callers here). */
 export function isWithin(base: string, target: string): boolean {
-	const normalizedBase = normalize(base);
-	const normalizedTarget = normalize(target);
-	return normalizedTarget === normalizedBase || normalizedTarget.startsWith(`${normalizedBase}/`);
+	return isPathAtOrUnder(target, base);
 }
 
 /**

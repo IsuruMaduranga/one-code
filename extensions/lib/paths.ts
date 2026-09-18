@@ -10,7 +10,7 @@
  */
 
 import { homedir } from "node:os";
-import { join, relative, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 
 /**
  * Claude Code's config dir — the compat surface One Code reads, never writes.
@@ -82,32 +82,44 @@ export function forwardSlashes(path: string): string {
 }
 
 /** Filesystems that fold case (darwin, win32): two spellings of one path compare equal. */
-export function foldsCase(platform: NodeJS.Platform = process.platform): boolean {
-	return platform !== "linux";
+export function foldsCase(): boolean {
+	return process.platform !== "linux";
 }
 
 /**
- * Whether `path` is at or under `dir`, compared on the resolved forms with the
- * platform's separator and case rules (case-folded on darwin/win32). Pure string
- * work: no symlink resolution — callers that need that resolve both sides first.
+ * The one comparison form of a path: resolved, `/` separators, no trailing
+ * slash, case-folded where the filesystem folds (darwin, win32). Every
+ * containment check in the codebase compares these — the shell pre-gate's
+ * `resolveForContainment`/`isWithin`, the permission matcher's session dirs,
+ * the safety floor — so "under this directory" means one thing everywhere.
  */
+export function comparablePath(path: string): string {
+	const normalized = forwardSlashes(resolve(path)).replace(/\/+$/, "");
+	return foldsCase() ? normalized.toLowerCase() : normalized;
+}
+
+/** Whether `path` is at or under `dir`, on {@link comparablePath} forms. No symlink resolution — resolve both sides first when that matters. */
 export function isPathAtOrUnder(path: string, dir: string): boolean {
-	const fold = (p: string) => (foldsCase() ? forwardSlashes(resolve(p)).toLowerCase() : forwardSlashes(resolve(p)));
-	const target = fold(path);
-	const base = fold(dir).replace(/\/+$/, "");
+	const target = comparablePath(path);
+	const base = comparablePath(dir);
 	return target === base || target.startsWith(`${base}/`);
+}
+
+/** A `path.relative` result that stays inside its base: non-empty, no `..` hop, not another root/drive. */
+export function isRelativeInside(rel: string): boolean {
+	return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
 }
 
 /**
  * `~`-abbreviated display form of a path: the home dir itself is `~`, a path
  * under it is `~/rest` with forward slashes, anything else is returned as
- * given. Separator- and case-agnostic on the platforms whose filesystems are
- * (`C:\Users\x\.claude` under `C:\Users\x` shows as `~/.claude`).
+ * given (`C:\Users\x\.claude` under `C:\Users\x` shows as `~/.claude`;
+ * `path.relative` compares case-insensitively on Windows, like its filesystem).
  */
 export function tildify(path: string, home: string): string {
 	if (!home) return path;
-	if (!isPathAtOrUnder(path, home)) return path;
 	const rest = relative(resolve(home), resolve(path));
-	return rest ? `~/${forwardSlashes(rest)}` : "~";
+	if (rest === "") return "~";
+	return isRelativeInside(rest) ? `~/${forwardSlashes(rest)}` : path;
 }
 

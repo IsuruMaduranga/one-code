@@ -41,11 +41,6 @@ export interface SessionGrantInput {
 	home: string;
 }
 
-/** `~`-abbreviated path for a label. */
-function displayPath(path: string, home: string): string {
-	return tildify(path, home);
-}
-
 /**
  * Claude Code's `//absolute` rule form for a directory and everything under
  * it — on Windows in CC's POSIX spelling (`//c/Users/x/proj/**`), the form
@@ -83,7 +78,7 @@ export function sessionGrant(input: SessionGrantInput): SessionGrant | undefined
 				return mint(`${tool}(${absoluteDirPattern(cwd)})`, `Yes, and allow ${tool} anywhere in the working directory this session`);
 			}
 			const dir = dirname(absolute);
-			return mint(`${tool}(${absoluteDirPattern(dir)})`, `Yes, and allow ${tool} under ${displayPath(dir, home)} this session`);
+			return mint(`${tool}(${absoluteDirPattern(dir)})`, `Yes, and allow ${tool} under ${tildify(dir, home)} this session`);
 		}
 		case "url": {
 			const host = urlHost(subject);

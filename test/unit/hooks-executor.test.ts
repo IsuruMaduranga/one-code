@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { runHookCommand } from "../../extensions/hooks/executor.ts";
+import { forwardSlashes } from "../../extensions/lib/paths.ts";
 
 // Real /bin/sh children, per the repo convention of never mocking
 // child_process: keep spawn in a thin executor and test that executor live.
@@ -105,7 +106,7 @@ describe("runHookCommand", () => {
 			cwd: dir,
 			projectDir: "/some/project",
 		});
-		const same = (a: string, b: string) => a.replace(/\\/g, "/").toLowerCase() === b.replace(/\\/g, "/").toLowerCase();
+		const same = (a: string, b: string) => forwardSlashes(a).toLowerCase() === forwardSlashes(b).toLowerCase();
 		const [projectDir, cwd] = result.stdout.trim().split("|");
 		expect(projectDir).toBe("/some/project");
 		expect(same(cwd, dir), `${cwd} vs ${dir}`).toBe(true);

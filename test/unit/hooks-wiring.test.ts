@@ -33,6 +33,20 @@ vi.mock("node:os", async (importOriginal) => {
 	return { ...actual, homedir: () => state.fakeHome, default: { ...actualDefault, homedir: () => state.fakeHome } };
 });
 
+/**
+ * A fire-and-forget SessionEnd hook may still be running with its cwd in the
+ * temp root (ENOTEMPTY mid-walk under load; EBUSY on the dir on Windows until
+ * the shell exits): let rmSync retry for a few seconds, and a temp dir that
+ * still cannot be removed is not a test failure.
+ */
+function removeTempRoot(root: string): void {
+	try {
+		rmSync(root, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 });
+	} catch (error) {
+		console.warn(`hooks-wiring: could not remove ${root}: ${(error as Error).message}`);
+	}
+}
+
 describe("hooks wiring", () => {
 	let root: string;
 	let claudeDir: string;
@@ -57,15 +71,7 @@ describe("hooks wiring", () => {
 	});
 	afterEach(() => {
 		vi.unstubAllEnvs();
-		// A fire-and-forget SessionEnd hook may still be running with its cwd in
-		// here (ENOTEMPTY mid-walk under load; EBUSY on the dir on Windows until
-		// the shell exits): let rmSync retry for a few seconds, and a temp dir
-		// that still cannot be removed is not a test failure.
-		try {
-			rmSync(root, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 });
-		} catch (error) {
-			console.warn(`hooks-wiring: could not remove ${root}: ${(error as Error).message}`);
-		}
+		removeTempRoot(root);
 	});
 
 	const writeUserHooks = (hooks: Record<string, unknown>) => {
@@ -365,15 +371,7 @@ describe("hooks wiring: SessionEnd (LIFECYCLE-REVIEW-2026-09-06 M4)", () => {
 	});
 	afterEach(() => {
 		vi.unstubAllEnvs();
-		// A fire-and-forget SessionEnd hook may still be running with its cwd in
-		// here (ENOTEMPTY mid-walk under load; EBUSY on the dir on Windows until
-		// the shell exits): let rmSync retry for a few seconds, and a temp dir
-		// that still cannot be removed is not a test failure.
-		try {
-			rmSync(root, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 });
-		} catch (error) {
-			console.warn(`hooks-wiring: could not remove ${root}: ${(error as Error).message}`);
-		}
+		removeTempRoot(root);
 	});
 
 	/** The dispatch is fire-and-forget; poll for the hook's write. */

@@ -25,14 +25,11 @@
 import { analyzeShellCommand } from "./shell-analysis.ts";
 import { autoModeSettingsPaths } from "./config.ts";
 import { oneCodeProjectSettingsPath } from "../lib/one-code-settings.ts";
-import { claudeJsonPath } from "../lib/paths.ts";
+import { claudeJsonPath, comparablePath } from "../lib/paths.ts";
 import { isWritingTool, resolveForContainment, toAbsolute } from "./paths.ts";
 
-/** Case-fold the same way resolveForContainment's output is folded. */
-function fold(path: string): string {
-	const forward = path.replace(/\\/g, "/");
-	return process.platform === "linux" ? forward : forward.toLowerCase();
-}
+/** The same comparison form resolveForContainment's output is in (lib/paths.ts). */
+const fold = comparablePath;
 
 /**
  * Any `.claude/settings.json` or `.claude/settings.local.json`, wherever it

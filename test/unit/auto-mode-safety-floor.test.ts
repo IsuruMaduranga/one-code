@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { isSafetyControlTarget, safetyControlWrite } from "../../extensions/auto-mode/safety-floor.ts";
 import { oneCodeProjectSettingsPath } from "../../extensions/lib/one-code-settings.ts";
-import { claudeJsonPath } from "../../extensions/lib/paths.ts";
+import { claudeJsonPath, forwardSlashes } from "../../extensions/lib/paths.ts";
 
 let home: string;
 let cwd: string;
@@ -26,7 +26,7 @@ const check = (toolName: string, input: Record<string, unknown>) =>
 	safetyControlWrite({ toolName, input, cwd, home });
 
 /** A path as it is spelled inside a bash command line: forward slashes (a backslash is an escape there). */
-const sh = (path: string) => path.replace(/\\/g, "/");
+const sh = forwardSlashes;
 
 describe("safetyControlWrite: writing tools", () => {
 	it("floors a write to the user settings file, however it is spelled", () => {

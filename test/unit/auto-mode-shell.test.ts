@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { analyzeShellCommand, hasUnmodelledSyntax, parseCommand } from "../../extensions/auto-mode/shell-analysis.ts";
+import { forwardSlashes as sh } from "../../extensions/lib/paths.ts";
 
 let cwd: string;
 let home: string;
@@ -443,7 +444,6 @@ describe("runtime protected dirs (PERMISSIONS-REVIEW-2026-09-05 M7)", () => {
 		const agentDir = join(home, ".pi", "agent");
 		mkdirSync(join(agentDir, "extensions"), { recursive: true });
 		// Spelled with forward slashes, as a path is inside a bash command line.
-		const sh = (path: string) => path.replace(/\\/g, "/");
 		const command = `echo evil > ${sh(agentDir)}/extensions/x.ts`;
 		const plain = analyzeShellCommand({ command, cwd, home });
 		expect(plain.protectedPaths).toEqual([]);
