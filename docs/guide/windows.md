@@ -127,14 +127,21 @@ the whole process tree through `taskkill /T` on Windows. See
 
 - The unit suite, including live PowerShell runs, passes on the
   `windows-latest`, `macos-latest`, and `ubuntu-latest` GitHub runners.
-- The PowerShell tool has been driven end to end through a real model with
-  a `pwsh` on macOS, the same way Claude Code's own PowerShell tool was
+- A real model drives both shell tools on the `windows-latest` runner: the
+  bash tool under Git Bash and the PowerShell tool under PowerShell 7, each
+  running a command whose output has to come back in the tool result. This
+  runs as its own workflow whenever the shell-facing code changes.
+- Drive-letter, backslash, `C:/` and `~` paths in `Read(...)`/`Edit(...)`
+  rules, Windows PowerShell 5.1 (edition text, UTF-8 output, no `&&`),
+  stopping background PowerShell commands and timed-out hooks, and
+  npm-installed language servers all have Windows-only unit tests that run
+  on that runner.
+- The PowerShell tool has also been driven through a real model with a
+  `pwsh` on macOS, the same way Claude Code's own PowerShell tool was
   captured for reference.
-- A native Windows desktop session has not been driven end to end yet.
-  Drive-letter and backslash paths in `Read(...)`/`Edit(...)` rules, Git
-  Bash detection order, and Windows PowerShell 5.1 quirks are the open
-  items. If you hit one, [Troubleshooting](troubleshooting.md) says what to
-  collect.
+- An interactive session on a Windows desktop (Windows Terminal, permission
+  prompts, plan mode) has not been checked by hand yet. If you hit something
+  there, [Troubleshooting](troubleshooting.md) says what to collect.
 
 ## Not provided
 
