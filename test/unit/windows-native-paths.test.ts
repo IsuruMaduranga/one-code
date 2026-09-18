@@ -59,9 +59,13 @@ describe.skipIf(!win32)("Windows: permission path patterns against native subjec
 		expect(matchesPathPattern(otherDrive, inNotes, cwd), `${otherDrive} vs ${inNotes}`).toBe(false);
 	});
 
-	it("a backslash-spelled rule and a C:/ rule are read as their / forms", () => {
-		expect(matchesPathPattern(`${notes}\\**`, join(notes, "deep", "a.md"), cwd)).toBe(true);
+	it("a backslash-spelled rule is read as its / form, except before a wildcard, where \\ is the escape", () => {
+		expect(matchesPathPattern(`${notes}\\deep\\a.md`, join(notes, "deep", "a.md"), cwd)).toBe(true);
 		expect(matchesPathPattern(`${forwardSlashes(notes)}/**`, inNotes, cwd)).toBe(true);
+		// `\*` is a literal star in a rule — gitignore semantics, which Claude
+		// Code's `ignore`-based matcher applies to the pattern as written — so a
+		// Windows rule spells the separator before a wildcard as `/` (`C:/notes/**`).
+		expect(matchesPathPattern(`${notes}\\**`, join(notes, "deep", "a.md"), cwd)).toBe(false);
 	});
 
 	it("a ~ rule matches a native path under the profile", () => {
@@ -129,7 +133,8 @@ describe.skipIf(!win32)("Windows: a .cmd shim on PATH (npm's shape for an LSP se
 	it("is found by whichOnPath (PATHEXT) but not by a bare spawn, which is how lsp/client.ts starts a server", async () => {
 		writeFileSync(join(dir, "probe-tool.cmd"), "@echo off\r\necho probe-ok\r\n");
 		const env = { ...process.env, PATH: `${dir};${process.env.PATH ?? ""}` };
-		expect(whichOnPath("probe-tool", env, "win32")).toBe(join(dir, "probe-tool.cmd"));
+		// PATHEXT spells the extension `.CMD`; the filesystem folds case, so the match is by name.
+		expect(whichOnPath("probe-tool", env, "win32")?.toLowerCase()).toBe(join(dir, "probe-tool.cmd").toLowerCase());
 		const outcome = await new Promise<string>((done) => {
 			const child = spawn("probe-tool", [], { env, stdio: "ignore", windowsHide: true });
 			child.on("error", (error) => done(`error:${(error as NodeJS.ErrnoException).code}`));
