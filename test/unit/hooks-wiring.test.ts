@@ -59,8 +59,13 @@ describe("hooks wiring", () => {
 		vi.unstubAllEnvs();
 		// A fire-and-forget SessionEnd hook may still be running with its cwd in
 		// here (ENOTEMPTY mid-walk under load; EBUSY on the dir on Windows until
-		// the shell exits): let rmSync retry for a couple of seconds.
-		rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+		// the shell exits): let rmSync retry for a few seconds, and a temp dir
+		// that still cannot be removed is not a test failure.
+		try {
+			rmSync(root, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 });
+		} catch (error) {
+			console.warn(`hooks-wiring: could not remove ${root}: ${(error as Error).message}`);
+		}
 	});
 
 	const writeUserHooks = (hooks: Record<string, unknown>) => {
@@ -362,8 +367,13 @@ describe("hooks wiring: SessionEnd (LIFECYCLE-REVIEW-2026-09-06 M4)", () => {
 		vi.unstubAllEnvs();
 		// A fire-and-forget SessionEnd hook may still be running with its cwd in
 		// here (ENOTEMPTY mid-walk under load; EBUSY on the dir on Windows until
-		// the shell exits): let rmSync retry for a couple of seconds.
-		rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+		// the shell exits): let rmSync retry for a few seconds, and a temp dir
+		// that still cannot be removed is not a test failure.
+		try {
+			rmSync(root, { recursive: true, force: true, maxRetries: 50, retryDelay: 100 });
+		} catch (error) {
+			console.warn(`hooks-wiring: could not remove ${root}: ${(error as Error).message}`);
+		}
 	});
 
 	/** The dispatch is fire-and-forget; poll for the hook's write. */

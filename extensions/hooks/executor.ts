@@ -221,7 +221,18 @@ export function runHookCommand(command: string, stdinJson: string, opts: HookRun
 		// A hook that never reads stdin (e.g. plain `exit 2`) closes the pipe
 		// early; the resulting EPIPE must not take the extension down.
 		child.stdin?.on("error", () => {});
-		child.stdin?.write(stdinJson.endsWith("\n") ? stdinJson : `${stdinJson}\n`);
-		child.stdin?.end();
+		const payload = stdinJson.endsWith("\n") ? stdinJson : `${stdinJson}\n`;
+		if (opts.detached) {
+			// Close the pipe the moment the payload is written, not with a graceful
+			// shutdown: on Windows libuv's pipe shutdown stays pending until the
+			// reader has drained the data, and a hook that never reads stdin would
+			// keep the process alive for its whole run (the probe test measured a
+			// `sleep 3` SessionEnd hook holding a one-shot open for 3 s). The data
+			// already written stays readable by the hook after the handle closes.
+			child.stdin?.write(payload, () => child.stdin?.destroy());
+		} else {
+			child.stdin?.write(payload);
+			child.stdin?.end();
+		}
 	});
 }
