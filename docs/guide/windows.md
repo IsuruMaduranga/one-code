@@ -112,8 +112,16 @@ the whole process tree through `taskkill /T` on Windows. See
 - The scratchpad directory is under `%TEMP%`.
 - The `Shell:` line in the system prompt is the basename of `SHELL`, else
   `COMSPEC`, with `.exe` stripped, the value Claude Code prints.
-- Language servers that install as `.cmd` shims need a shell to start; a
-  plugin's `.lsp.json` should name the real executable.
+- Language servers installed with npm are `.cmd` shims on Windows
+  (`typescript-language-server.cmd`). One Code finds them on `PATH` and
+  starts them through `cmd.exe`, so a plugin's `.lsp.json` can name the
+  command the way it does elsewhere.
+- Auto mode's shell pre-gate and the worktree guards understand Git Bash's
+  path spellings inside a command line: `/c/Users/…` is `C:\Users\…`, and
+  `/tmp/…` is your temp directory, which Git for Windows mounts there. A
+  path rule with a wildcard is spelled with forward slashes
+  (`Read(C:/notes/**)` or `Read(//c/notes/**)`), because a backslash before
+  `*` is the escape character.
 
 ## What is verified
 
