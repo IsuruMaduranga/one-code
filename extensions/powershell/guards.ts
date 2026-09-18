@@ -16,6 +16,7 @@
  */
 
 import { leadingSleepReason } from "../bash/guards.ts";
+import { gitSubcommand } from "../auto-mode/shell-analysis.ts";
 import { powershellStatements, statementCommand } from "../permissions/powershell-rules.ts";
 
 /** Seconds a `Start-Sleep` statement provably lasts, or undefined when its argument is not a literal. */
@@ -58,9 +59,13 @@ export function powershellGuardReason(command: string, opts: { background: boole
 			);
 		}
 		if (cmd === "git") {
+			// `gitSubcommand` skips git's value-taking global flags (`-C <dir>`,
+			// `--git-dir <dir>`, `-c <key=val>`, …) so `git -C X rebase -i` still
+			// finds "rebase" instead of misreading the flag's value as the
+			// subcommand and missing the interactive-editor guard entirely.
 			const words = statement.trim().split(/\s+/).slice(1);
-			const sub = words.find((w) => !w.startsWith("-"));
-			const flags = new Set(words);
+			const { sub, rest } = gitSubcommand(words.map((value) => ({ value, hadExpansion: false })));
+			const flags = new Set(rest.map((t) => t.value));
 			if (sub === "rebase" && (flags.has("-i") || flags.has("--interactive"))) {
 				return (
 					"Blocked: `git rebase -i` opens an interactive editor, which this shell cannot provide — it would hang until the timeout. " +

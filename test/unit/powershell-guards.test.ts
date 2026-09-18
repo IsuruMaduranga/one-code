@@ -34,6 +34,9 @@ describe("powershellGuardReason", () => {
 		expect(powershellGuardReason("ls | Out-GridView", { background: true })).toMatch(/out-gridview/);
 		expect(powershellGuardReason("git rebase -i HEAD~3", fg)).toMatch(/git rebase -i/);
 		expect(powershellGuardReason("git add -p", fg)).toMatch(/interactive `git add`/);
+		// git's value-taking global flags precede the subcommand (code-review fix).
+		expect(powershellGuardReason("git -C C:\\repo rebase -i HEAD~3", fg)).toMatch(/git rebase -i/);
+		expect(powershellGuardReason("git -c core.pager=cat add --patch", fg)).toMatch(/interactive `git add`/);
 	});
 	it("passes ordinary and unparseable lines", () => {
 		expect(powershellGuardReason("git status; npm test", fg)).toBeUndefined();

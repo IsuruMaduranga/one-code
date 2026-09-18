@@ -48,6 +48,10 @@ describe("matchers", () => {
 		expect(matcherApplies("Bash,PowerShell", toolMatchCandidates("bash"))).toBe(true);
 		expect(matcherApplies("Edit,Write", toolMatchCandidates("bash"))).toBe(false);
 	});
+	it("still honours a regex whose comma is a quantifier (code-review fix)", () => {
+		expect(matcherApplies("Bash{1,2}", ["Bash"])).toBe(true);
+		expect(matcherApplies("(Bash|PowerShell){1,1}", toolMatchCandidates("powershell"))).toBe(true);
+	});
 });
 
 describe("hook shell resolution", () => {

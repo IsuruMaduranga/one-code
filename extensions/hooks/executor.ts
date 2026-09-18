@@ -47,7 +47,7 @@
 
 import type { ChildProcess } from "node:child_process";
 import { detachedSpawnOptions, killProcessTree } from "../lib/process-tree.ts";
-import { bashSpawn, powerShellSpawn, type ShellSpawn, spawnShellCommand } from "../lib/shell-spawn.ts";
+import { bashSpawn, POWERSHELL_UTF8_PREFIX, powerShellSpawn, type ShellSpawn, spawnShellCommand } from "../lib/shell-spawn.ts";
 import type { HookShell } from "./settings.ts";
 
 /**
@@ -60,11 +60,11 @@ export function defaultHookShell(): HookShell {
 }
 
 /** The interpreter for one hook, or the reason none can run it. */
-export function hookShellSpawn(shell: HookShell | undefined): { spec?: ShellSpawn; error?: string } {
+export function hookShellSpawn(shell: HookShell | undefined): { spec?: ShellSpawn; shell?: HookShell; error?: string } {
 	const want = shell ?? defaultHookShell();
 	if (want === "powershell") {
 		const spec = powerShellSpawn();
-		return spec ? { spec } : { error: "hook needs PowerShell but no pwsh/powershell executable was found on PATH" };
+		return spec ? { spec, shell: want } : { error: "hook needs PowerShell but no pwsh/powershell executable was found on PATH" };
 	}
 	const resolved = bashSpawn();
 	if (!resolved.spawn) return { error: resolved.error ?? "hook needs bash but none was found" };
@@ -73,7 +73,7 @@ export function hookShellSpawn(shell: HookShell | undefined): { spec?: ShellSpaw
 		// payload already occupies.
 		return { error: `hook cannot run under ${resolved.spawn.shell} (a WSL launcher); set CLAUDE_CODE_GIT_BASH_PATH to Git Bash's bash.exe` };
 	}
-	return { spec: resolved.spawn };
+	return { spec: resolved.spawn, shell: want };
 }
 
 export interface HookRunResult {
@@ -132,17 +132,22 @@ export function runHookCommand(command: string, stdinJson: string, opts: HookRun
 		let child: ChildProcess;
 		const failed = (spawnError: string) =>
 			resolve({ exitCode: null, timedOut: false, spawnError, stdout: "", stderr: "", durationMs: Date.now() - started });
-		const { spec, error } = hookShellSpawn(opts.shell);
+		const { spec, shell, error } = hookShellSpawn(opts.shell);
 		if (!spec) {
 			failed(error ?? "no shell available for the hook");
 			return;
 		}
+		// Windows PowerShell 5.1 (`powershell.exe`) defaults its console to
+		// UTF-16, which would corrupt this stream once decoded as UTF-8 below
+		// (setEncoding("utf8")) — the same fix every other PowerShell execution
+		// path applies (lib/shell-spawn.ts, extensions/powershell/index.ts).
+		const runCommand = shell === "powershell" ? `${POWERSHELL_UTF8_PREFIX}${command}` : command;
 		try {
 			// An absolute interpreter path (pi's resolver never yields a bare name
 			// where a real bash exists), so a repo-local `sh` on PATH cannot hijack
 			// the hook; the shell leads its own process group so a timeout kills
 			// grandchildren too (Windows: taskkill /T — lib/process-tree.ts).
-			child = spawnShellCommand(spec, command, {
+			child = spawnShellCommand(spec, runCommand, {
 				cwd: opts.cwd,
 				...detachedSpawnOptions(),
 				stdio: opts.detached ? ["pipe", "ignore", "ignore"] : ["pipe", "pipe", "pipe"],

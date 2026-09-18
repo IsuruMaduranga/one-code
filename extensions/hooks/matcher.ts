@@ -89,26 +89,32 @@ export function toolMatchCandidates(nativeName: string): string[] {
 	return [...new Set([nativeName, ccToolName(nativeName), ...ccAliasesForTool(nativeName)])];
 }
 
+/** One matcher spelling: a regex when it compiles, else a case-insensitive exact match. */
+function matchesAlternative(alternative: string, candidates: string[]): boolean {
+	let regex: RegExp | undefined;
+	try {
+		regex = new RegExp(`^(?:${alternative})$`, "i");
+	} catch {
+		regex = undefined;
+	}
+	const lowered = alternative.toLowerCase();
+	return candidates.some((candidate) => (regex ? regex.test(candidate) : candidate.toLowerCase() === lowered));
+}
+
 /**
  * Whether a CC matcher applies to any candidate spelling. Anchored and
  * case-insensitive (`^(?:matcher)$`, the CC semantics); an invalid regex
- * falls back to case-insensitive exact comparison rather than throwing. A
- * comma-separated list (`Bash,PowerShell`) is tried part by part as well —
- * the spelling Claude Code's Windows docs use beside `Bash|PowerShell`.
+ * falls back to case-insensitive exact comparison rather than throwing. The
+ * whole matcher is tried first — so a regex that legitimately contains a
+ * comma (a `{m,n}` quantifier, a character class) still compiles and matches
+ * as written. Only once that fails is a comma-separated list
+ * (`Bash,PowerShell`) tried part by part — the spelling Claude Code's Windows
+ * docs use beside `Bash|PowerShell`.
  */
 export function matcherApplies(matcher: string | undefined, candidates: string[]): boolean {
 	if (matcher === undefined || matcher === "" || matcher === "*") return true;
-	// No comma → the one matcher; a regex holding a literal `,` could never
-	// equal a bare tool name, so the unsplit form is not worth testing.
+	if (matchesAlternative(matcher, candidates)) return true;
+	if (!matcher.includes(",")) return false;
 	const alternatives = matcher.split(",").map((part) => part.trim()).filter(Boolean);
-	return alternatives.some((alternative) => {
-		let regex: RegExp | undefined;
-		try {
-			regex = new RegExp(`^(?:${alternative})$`, "i");
-		} catch {
-			regex = undefined;
-		}
-		const lowered = alternative.toLowerCase();
-		return candidates.some((candidate) => (regex ? regex.test(candidate) : candidate.toLowerCase() === lowered));
-	});
+	return alternatives.some((alternative) => matchesAlternative(alternative, candidates));
 }

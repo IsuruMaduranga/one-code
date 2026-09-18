@@ -418,16 +418,26 @@ export function powershellReadOnly(command: string): PowerShellReadOnlyVerdict {
 	return { readOnly: true };
 }
 
+/** git global flags that take a value and can precede the subcommand (`git -C x status`). */
+const GIT_GLOBAL_VALUE_FLAGS = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--config-env"]);
+
 /**
- * Whether the statement is a bare `git status` (flags allowed, no other
- * statements) — the call after which Claude Code's classifier transcript
- * carries a `{"meta":{"gitStatus":{"clean":…}}}` ground-truth line
- * (findings §22). Works for bash and PowerShell spellings alike.
+ * Whether the statement is a bare `git status` (global flags before it and
+ * plain flags after it allowed, no other statements) — the call after which
+ * Claude Code's classifier transcript carries a
+ * `{"meta":{"gitStatus":{"clean":…}}}` ground-truth line (findings §22).
+ * Works for bash and PowerShell spellings alike. Global value-taking flags
+ * (`-C <dir>`, `-c <key=val>`, …) are skipped so `git -C <dir> status` is
+ * still recognised instead of mistaking the flag's value for the subcommand.
  */
 export function isGitStatusCommand(command: string): boolean {
 	const statements = powershellStatements(command);
 	if (!statements || statements.length !== 1) return false;
 	if (statementCommand(statements[0]) !== "git") return false;
-	const words = statements[0].trim().split(/\s+/);
-	return words[1] === "status" && words.slice(2).every((w) => w.startsWith("-"));
+	const words = statements[0].trim().split(/\s+/).slice(1);
+	let i = 0;
+	while (i < words.length && words[i].startsWith("-")) {
+		i += GIT_GLOBAL_VALUE_FLAGS.has(words[i]) ? 2 : 1;
+	}
+	return words[i] === "status" && words.slice(i + 1).every((w) => w.startsWith("-"));
 }
