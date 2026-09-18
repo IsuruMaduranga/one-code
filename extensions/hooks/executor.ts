@@ -150,6 +150,10 @@ export function runHookCommand(command: string, stdinJson: string, opts: HookRun
 			child = spawnShellCommand(spec, runCommand, {
 				cwd: opts.cwd,
 				...detachedSpawnOptions(),
+				// A fire-and-forget hook must outlive a parent that is exiting; on
+				// Windows that is what `detached: true` is for (Node's documented
+				// meaning there), and the leader is still killed by pid.
+				...(opts.detached && process.platform === "win32" ? { detached: true } : {}),
 				stdio: opts.detached ? ["pipe", "ignore", "ignore"] : ["pipe", "pipe", "pipe"],
 				env: { ...process.env, CLAUDE_PROJECT_DIR: opts.projectDir ?? opts.cwd },
 			});

@@ -128,6 +128,10 @@ describe("runHookCommand detached (fire-and-forget)", () => {
 				`import { runHookCommand } from ${JSON.stringify(pathToFileURL(executor).href)};`,
 				`void runHookCommand("sleep 3", "{}", { cwd: process.cwd(), detached: true });`,
 				`console.log("dispatched");`,
+				// Diagnostics: if the loop is still alive after 1 s, name what holds it
+				// (an unref'd timer, so it never keeps the loop alive itself).
+				`const probe = setTimeout(() => console.error("alive at 1s:", process._getActiveHandles().map((h) => h.constructor.name + (h.hasRef?.() ? "(ref)" : "(unref)")).join(", ")), 1000);`,
+				`probe.unref();`,
 			].join("\n"),
 		);
 		// Timed from "dispatched" (the hook is running) to the probe's exit, so
@@ -147,6 +151,6 @@ describe("runHookCommand detached (fire-and-forget)", () => {
 		});
 		expect(stdout.trim(), stderr).toBe("dispatched");
 		expect(code).toBe(0);
-		expect(Date.now() - dispatchedAt).toBeLessThan(2500);
+		expect(Date.now() - dispatchedAt, stderr).toBeLessThan(2500);
 	}, 10_000);
 });
