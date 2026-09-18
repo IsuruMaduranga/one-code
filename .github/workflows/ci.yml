@@ -1,0 +1,36 @@
+# Typecheck and unit tests on the three platforms One Code runs on. The Windows
+# job is the only place the Git Bash and PowerShell paths run natively:
+# `windows-latest` ships Git for Windows (Git Bash) and PowerShell 7, and
+# pwsh is preinstalled on every runner, so the live PowerShell operations and
+# hook tests exercise a real shell everywhere. Live model runs need a provider
+# key and stay out of CI (docs/features/windows/handoff.md, "Verification").
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npx vitest run
+      - name: Report the shells the Windows job saw
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Write-Output "Git Bash: $((Get-Command bash -ErrorAction SilentlyContinue).Source)"
+          Write-Output "pwsh: $((Get-Command pwsh).Source) $($PSVersionTable.PSVersion)"

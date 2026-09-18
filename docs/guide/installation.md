@@ -14,8 +14,10 @@ fits how you already work.
 
 - Node.js 22.19 or later. The app refuses to start on older versions,
   because pi crashes at import time there.
-- macOS or Linux. Windows Subsystem for Linux (WSL) works the same way.
-  Native Windows is untested and unsupported.
+- macOS, Linux, or Windows. Windows Subsystem for Linux (WSL) works like
+  Linux. On native Windows, One Code takes Claude Code's shape: Git for
+  Windows is recommended but optional, and PowerShell is the primary shell
+  tool. See [Windows](windows.md) for what is verified and what isn't.
 - `git`. Optional: `rg` (ripgrep) for faster search, the GitHub CLI for the
   pull-request marker in the footer, and a language server for your
   language (see

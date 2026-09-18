@@ -12,6 +12,14 @@ import { isAbsolute, relative, resolve, sep } from "node:path";
 import { analyzeShellCommand, hasInjectionSyntax, leadTokens, parseCommand, resolvePayload } from "../auto-mode/shell-analysis.ts";
 import { pathArgument } from "../auto-mode/paths.ts";
 import { isProtectedPath, isWritingTool } from "./protected-paths.ts";
+import {
+	canonicalCommandName,
+	canonicalizeStatement,
+	powershellInjectionSyntax,
+	powershellMatchForms,
+	powershellReadOnly,
+	powershellStatements,
+} from "./powershell-rules.ts";
 import { expandTilde } from "../lib/paths.ts";
 
 export type PermissionMode = "default" | "acceptEdits" | "plan" | "bypassPermissions" | "dontAsk" | "auto";
@@ -21,6 +29,7 @@ export type PermissionDecision = "allow" | "deny" | "ask" | "classify";
 /** Claude Code tool name (lowercased) → One Code tool name. */
 const CC_TOOL_NAMES: Record<string, string> = {
 	bash: "bash",
+	powershell: "powershell",
 	read: "read",
 	edit: "edit",
 	write: "write",
@@ -288,6 +297,32 @@ function bashPatternMatchesAny(pattern: string, command: string): boolean {
 let lastForms: { command: string; forms: string[] } | undefined;
 
 /**
+ * PowerShell's Bash-pattern match against ONE statement: both sides have their
+ * command word alias-canonicalized (`ls` ≡ `Get-ChildItem`) and are compared
+ * case-insensitively (cmdlet names are), then Claude Code's Bash pattern rules
+ * apply unchanged — exact, `prefix:*`, wildcards (powershell-rules.ts).
+ */
+export function matchesPowerShellPattern(pattern: string, statement: string): boolean {
+	const canonicalPattern = pattern.endsWith(":*")
+		? `${canonicalizeStatement(pattern.slice(0, -2))}:*`
+		: canonicalizeStatement(pattern);
+	return matchesBashPattern(canonicalPattern.toLowerCase(), canonicalizeStatement(statement).toLowerCase());
+}
+
+/** Deny/ask semantics for PowerShell: the pattern covers the line, any statement, or any canonical/nested form. */
+function powershellPatternMatchesAny(pattern: string, command: string): boolean {
+	if (lastPowerShellForms?.command !== command) lastPowerShellForms = { command, forms: powershellMatchForms(command) };
+	return lastPowerShellForms.forms.some((form) => matchesPowerShellPattern(pattern, form));
+}
+let lastPowerShellForms: { command: string; forms: string[] } | undefined;
+
+/** The tools whose subject is a shell command line and whose rules follow the Bash shape. */
+export function isShellTool(toolName: string): boolean {
+	const name = normalizeToolName(toolName);
+	return name === "bash" || name === "powershell";
+}
+
+/**
  * The allow rule that lets a bash command run, or undefined. CC semantics: an
  * EXACT rule equal to the whole command allows it outright (the user approved
  * that literal string); otherwise the command is split into subcommands and
@@ -312,12 +347,17 @@ export function findBashAllowRule(rules: PermissionRule[], command: string, tool
 		(r) => r.pattern !== undefined && !hasUnescapedWildcard(r.pattern) && unescapeLiteral(r.pattern) === cmd,
 	);
 	if (exact) return exact;
-	if (hasInjectionSyntax(cmd)) return undefined;
-	const subs = bashSubcommands(cmd);
+	// PowerShell lines split on PowerShell's separators and match alias-
+	// canonicalized, case-insensitively (powershell-rules.ts); the shape of
+	// the rule — every statement covered, no injection syntax — is the same.
+	const powershell = normalizeToolName(toolName) === "powershell";
+	if (powershell ? powershellInjectionSyntax(cmd) : hasInjectionSyntax(cmd)) return undefined;
+	const subs = powershell ? powershellStatements(cmd) : bashSubcommands(cmd);
 	if (!subs || subs.length === 0) return undefined;
+	const matches = powershell ? matchesPowerShellPattern : matchesBashPattern;
 	let first: PermissionRule | undefined;
 	for (const sub of subs) {
-		const rule = bashRules.find((r) => r.pattern !== undefined && matchesBashPattern(r.pattern, sub));
+		const rule = bashRules.find((r) => r.pattern !== undefined && matches(r.pattern, sub));
 		if (!rule) return undefined;
 		first ??= rule;
 	}
@@ -362,7 +402,7 @@ export type SubjectKind = "command" | "path" | "url" | "text";
 
 export function subjectKind(toolName: string): SubjectKind {
 	const name = normalizeToolName(toolName);
-	if (name === "bash" || name === "monitor") return "command";
+	if (name === "bash" || name === "powershell" || name === "monitor") return "command";
 	if (name === "web_fetch") return "url";
 	if (isPathSubjectTool(name)) return "path";
 	return "text";
@@ -391,6 +431,7 @@ export function extractSubject(toolName: string, input: Record<string, unknown>)
 	const str = (key: string): string | undefined => (typeof input[key] === "string" ? (input[key] as string) : undefined);
 	switch (name) {
 		case "bash":
+		case "powershell":
 		case "monitor":
 			return str("command") ?? "";
 		case "web_fetch":
@@ -478,7 +519,9 @@ export function ruleMatches(rule: PermissionRule, toolName: string, subject: str
 	if (!subject) return false;
 	switch (subjectKind(toolName)) {
 		case "command":
-			return bashPatternMatchesAny(rule.pattern, subject);
+			return normalizeToolName(toolName) === "powershell"
+				? powershellPatternMatchesAny(rule.pattern, subject)
+				: bashPatternMatchesAny(rule.pattern, subject);
 		case "path":
 			return matchesPathPattern(rule.pattern, subject, cwd);
 		case "url":
@@ -514,7 +557,7 @@ export function toolTier(toolName: string): ToolTier {
 	const name = normalizeToolName(toolName);
 	if (SAFE_TOOLS.has(name)) return "safe";
 	if (EDIT_TOOLS.has(name)) return "edit";
-	if (name === "bash") return "execute";
+	if (name === "bash" || name === "powershell") return "execute";
 	return "custom";
 }
 
@@ -684,7 +727,7 @@ const DELEGATION_TOOLS = new Set(["Agent", "workflow", "SendMessage"]);
  * surely as `Bash(*)` does.
  */
 const INTERPRETERS_AND_RUNNERS =
-	/^(python[0-9.]*|python3|node|deno|bun|ruby|perl|php|osascript|bash|sh|zsh|fish|pwsh|powershell|eval|exec|env|xargs|nohup|setsid|timeout|make|npx|pnpx|yarn|npm|pnpm|bunx|uv|uvx|pip[0-9]*|poetry|cargo|go|dotnet|java|mvn|gradle|docker|kubectl|ssh)\b/;
+	/^(python[0-9.]*|python3|node|deno|bun|ruby|perl|php|osascript|bash|sh|zsh|fish|pwsh|powershell|cmd|wsl|eval|exec|env|xargs|nohup|setsid|timeout|make|npx|pnpx|yarn|npm|pnpm|bunx|uv|uvx|pip[0-9]*|poetry|cargo|go|dotnet|java|mvn|gradle|docker|kubectl|ssh|invoke-expression|invoke-command|start-process|start-job)\b/;
 
 /**
  * An allow rule broad enough to grant arbitrary code execution. Auto mode
@@ -700,7 +743,7 @@ export function isBroadExecutionRule(rule: PermissionRule): boolean {
 	// Delegation rules are dropped outright: a subagent is a fresh agent loop, so
 	// pre-approving one pre-approves whatever that loop decides to do.
 	if (DELEGATION_TOOLS.has(rule.tool)) return true;
-	if (rule.tool !== "bash") return false;
+	if (rule.tool !== "bash" && rule.tool !== "powershell") return false;
 
 	if (!rule.pattern) return true;
 	const pattern = rule.pattern.trim().toLowerCase();
@@ -710,10 +753,13 @@ export function isBroadExecutionRule(rule: PermissionRule): boolean {
 	if (!hasUnescapedWildcard(pattern)) return false;
 	if (/^(\*|:\*|\*\*)$/.test(pattern)) return true;
 
-	const head = pattern.split(/[\s*]/)[0] ?? "";
+	const rawHead = pattern.split(/[\s*]/)[0] ?? "";
+	// A PowerShell alias is as broad as its cmdlet: `PowerShell(iex *)` is
+	// `Invoke-Expression *`, `PowerShell(saps *)` is `Start-Process *`.
+	const head = rule.tool === "powershell" ? canonicalCommandName(rawHead).toLowerCase() : rawHead;
 	if (!INTERPRETERS_AND_RUNNERS.test(head)) return false;
 
-	const rest = pattern.slice(head.length).trim();
+	const rest = pattern.slice(rawHead.length).trim();
 	// Nothing constrains the arguments: `python*`, `node *`, `npm *`.
 	if (/^[:\s]*\*+$/.test(rest)) return true;
 	// The runner's own escape hatch takes arbitrary code: `npm run *`, `npx *`.
@@ -770,6 +816,9 @@ export function decide(params: DecideInput): Decision {
 			// (the read tools ask for the same path below).
 			if (evidence.readOnlyOutside && evidence.writes.length === 0) return { decision: "ask", cause: "working-dir" };
 		}
+		// The PowerShell counterpart: Claude Code's read-only cmdlet allowlist,
+		// with in-project paths by shape (powershell-rules.ts).
+		if (tool === "powershell" && subject && powershellReadOnly(subject).readOnly) return { decision: "allow", cause: "plan-readonly" };
 		if (PLAN_READ_ONLY_TOOLS.has(tool)) return { decision: "allow", cause: "plan-readonly" };
 		return { decision: "deny", cause: "plan-mode" };
 	}
@@ -825,7 +874,7 @@ export function decide(params: DecideInput): Decision {
 		mode === "auto"
 			? allow.filter((rule) => {
 					if (isBroadExecutionRule(rule)) return false;
-					if (params.classifyAllShell && rule.tool === "bash") return false;
+					if (params.classifyAllShell && isShellTool(rule.tool)) return false;
 					return true;
 				})
 			: allow;

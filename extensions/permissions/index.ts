@@ -52,6 +52,9 @@ import { checkRecoverability } from "../auto-mode/recoverability.ts";
 import { safetyControlWrite } from "../auto-mode/safety-floor.ts";
 import { isExecutionPrimitivePath, isSensitivePath } from "../auto-mode/sensitive.ts";
 import { analyzeShellCommand, type ShellEvidence } from "../auto-mode/shell-analysis.ts";
+import { isGitStatusCommand, powershellReadOnly } from "./powershell-rules.ts";
+import { isShellTool } from "./matcher.ts";
+import { gitStatusClean } from "../lib/git.ts";
 import { projectMemoryDir } from "../lib/memory.ts";
 import { sessionResultsDir } from "../lib/persisted-output.ts";
 import { sessionScratchpadDir } from "../lib/scratchpad.ts";
@@ -523,6 +526,17 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				}
 				evidence.notes.push(`git recoverability: ${rec.reason}`);
 			}
+		} else if (normalizeToolName(toolName) === "powershell" && subject) {
+			// PowerShell has no pre-gate in v1 beyond Claude Code's read-only cmdlet
+			// allowlist (powershell-rules.ts): a read-only line runs unclassified,
+			// everything else — every write, delete or unknown executable — goes to
+			// the classifier. No containment fast path either: the recoverability
+			// judge understands bash deletes, not `Remove-Item`, so PowerShell
+			// destruction is always classified (docs/decisions/windows.md).
+			if (powershellReadOnly(subject).readOnly) {
+				logDecision(ctx, { tool: toolName, subject, outcome: "allow", source: "pre-gate" });
+				return allow();
+			}
 		} else if (containmentEligible && isWritingTool(normalizeToolName(toolName))) {
 			// A write/edit whose target is inside the project and not a credential
 			// path is ordinary sandbox work — Claude Code auto-approves it, and so do
@@ -823,7 +837,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// command that actually runs). The lookup is by toolCallId on purpose: a
 		// value inside `event.input` would be the model's to write, and rules would
 		// match a string of its choosing.
-		const original = normalizedTool === "bash" ? originalCommands.get(event.toolCallId) : undefined;
+		const original = isShellTool(normalizedTool) ? originalCommands.get(event.toolCallId) : undefined;
 		const matchSubject = original?.command ?? subject;
 		const callCwd = original?.cwd ?? ctx.cwd;
 
@@ -835,6 +849,14 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			const recordedInput =
 				original !== undefined ? { command: original.command } : (event.input as Record<string, unknown>);
 			transcript.push({ kind: "tool", tool: normalizedTool, input: recordedInput });
+			// Claude Code follows a `git status` call with a ground-truth line the
+			// classifier can trust over the model's account of the tree
+			// (`{"meta":{"gitStatus":{"clean":…}}}`, captured 2.1.276 — findings §22).
+			const recordedCommand = typeof recordedInput.command === "string" ? recordedInput.command : undefined;
+			if (isShellTool(normalizedTool) && recordedCommand && isGitStatusCommand(recordedCommand)) {
+				const clean = gitStatusClean(callCwd);
+				if (clean !== undefined) transcript.push({ kind: "meta", gitStatus: { clean } });
+			}
 			capTranscript();
 		}
 
@@ -1111,7 +1133,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			const appendEntry: TranscriptEntry = {
 				kind: "tool",
 				tool: normalizedTool,
-				input: normalizedTool === "bash" ? { command: subject } : input,
+				input: isShellTool(normalizedTool) ? { command: subject } : input,
 			};
 			const outcome = await runClassifier(toolName, input, subject, ctx, result.cause !== "protected-path", {
 				cwd,
@@ -1249,7 +1271,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// there is no harm floor to short-circuit for a run that already happened.
 		const childEntries: TranscriptEntry[] = actions.map((action) => {
 			const tool = normalizeToolName(action.toolName);
-			return { kind: "tool", tool, input: tool === "bash" ? { command: action.subject } : { subject: action.subject } };
+			return { kind: "tool", tool, input: isShellTool(tool) ? { command: action.subject } : { subject: action.subject } };
 		});
 		const verdict = await classify(
 			{

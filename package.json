@@ -44,6 +44,7 @@
 			"extensions/skill/index.ts",
 			"extensions/background/index.ts",
 			"extensions/bash/index.ts",
+			"extensions/powershell/index.ts",
 			"extensions/subagents/index.ts",
 			"extensions/workflow/index.ts",
 			"extensions/effort/index.ts",

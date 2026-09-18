@@ -15,6 +15,7 @@ import { ccAliasesForTool } from "../permissions/matcher.ts";
  */
 const CC_CANONICAL: Record<string, string> = {
 	bash: "Bash",
+	powershell: "PowerShell",
 	read: "Read",
 	edit: "Edit",
 	write: "Write",
@@ -91,16 +92,21 @@ export function toolMatchCandidates(nativeName: string): string[] {
 /**
  * Whether a CC matcher applies to any candidate spelling. Anchored and
  * case-insensitive (`^(?:matcher)$`, the CC semantics); an invalid regex
- * falls back to case-insensitive exact comparison rather than throwing.
+ * falls back to case-insensitive exact comparison rather than throwing. A
+ * comma-separated list (`Bash,PowerShell`) is tried part by part as well —
+ * the spelling Claude Code's Windows docs use beside `Bash|PowerShell`.
  */
 export function matcherApplies(matcher: string | undefined, candidates: string[]): boolean {
 	if (matcher === undefined || matcher === "" || matcher === "*") return true;
-	let regex: RegExp | undefined;
-	try {
-		regex = new RegExp(`^(?:${matcher})$`, "i");
-	} catch {
-		regex = undefined;
-	}
-	const lowered = matcher.toLowerCase();
-	return candidates.some((candidate) => (regex ? regex.test(candidate) : candidate.toLowerCase() === lowered));
+	const alternatives = matcher.includes(",") ? [matcher, ...matcher.split(",").map((part) => part.trim()).filter(Boolean)] : [matcher];
+	return alternatives.some((alternative) => {
+		let regex: RegExp | undefined;
+		try {
+			regex = new RegExp(`^(?:${alternative})$`, "i");
+		} catch {
+			regex = undefined;
+		}
+		const lowered = alternative.toLowerCase();
+		return candidates.some((candidate) => (regex ? regex.test(candidate) : candidate.toLowerCase() === lowered));
+	});
 }

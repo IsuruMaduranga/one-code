@@ -17,11 +17,19 @@ import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { CC_HOOK_EVENTS, type CcHookEvent } from "./protocol.ts";
 
+/** Claude Code's per-hook `shell` field: which interpreter runs the command string. */
+export type HookShell = "bash" | "powershell";
+
 export interface HookCommand {
 	type: "command";
 	command: string;
 	/** Seconds, CC convention. */
 	timeout?: number;
+	/**
+	 * Unset means the platform default: bash where one exists, PowerShell on
+	 * Windows without Git Bash (Claude Code's rule — executor.ts `defaultHookShell`).
+	 */
+	shell?: HookShell;
 }
 
 export interface HookMatcherEntry {
@@ -97,10 +105,17 @@ export function parseHooksBlock(raw: unknown, origin: string, diagnostics: strin
 					diagnostics.push(`${origin}: ${event} hook of type "${String(candidate?.type)}" skipped (only "command" is supported)`);
 					continue;
 				}
+				const { shell } = hook as { shell?: unknown };
+				let hookShell: HookShell | undefined;
+				if (shell !== undefined) {
+					if (shell === "bash" || shell === "powershell") hookShell = shell;
+					else diagnostics.push(`${origin}: ${event} hook shell "${String(shell)}" ignored (use "bash" or "powershell")`);
+				}
 				hooks.push({
 					type: "command",
 					command: candidate.command,
 					timeout: typeof candidate.timeout === "number" && candidate.timeout > 0 ? candidate.timeout : undefined,
+					shell: hookShell,
 				});
 			}
 			if (hooks.length > 0) {

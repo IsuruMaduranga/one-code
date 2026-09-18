@@ -194,6 +194,8 @@ The `CC_` prefix is historical; `ONECODE_`-prefixed aliases are planned.
 | `PI_CACHE_RETENTION` | pi's prompt-cache lifetime. One Code sets `long` for interactive sessions unless you set it yourself. |
 | `PI_OFFLINE=1` | Same as `--offline`. |
 | `CLAUDE_CONFIG_DIR` | Where Claude Code's user configuration is read from. |
+| `CLAUDE_CODE_USE_POWERSHELL_TOOL` | `1` turns the `powershell` tool on (the default on Windows), `0` turns it off. Off Windows it needs a `pwsh` on PATH. See [Windows](windows.md). |
+| `CLAUDE_CODE_GIT_BASH_PATH` | The bash that drives the `bash` tool, hooks, and background shells. Also read from the `env` block of `~/.claude/settings.json`; a non-bash binary is ignored with a warning. |
 | `CLAUDE_CODE_SUBAGENT_MODEL` | Default subagent model on a Claude session. |
 | `EDITOR`, `VISUAL` | Editor used by `/memory` (and pi's **ctrl+g**). |
 | `SHELL` | Shell used for commands (default `/bin/sh`). |

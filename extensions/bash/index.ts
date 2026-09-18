@@ -29,7 +29,10 @@ import { commandToEvaluate, trackOriginalCommands } from "../lib/original-comman
 import { createTaskNotifier, oneShotNote, sessionOutlivesTurn, systemNotification } from "../lib/notifications.ts";
 import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { perCwd } from "../lib/per-cwd.ts";
+import { readSettingsEnv } from "../lib/claude-settings.ts";
+import { bashSpawn } from "../lib/shell-spawn.ts";
 import { ccWrapBuiltinRenderers, linesComponent, resultLines } from "../lib/tui-render.ts";
+import { homedir } from "node:os";
 
 // The completion notification carries status + exit code + where the output is,
 // plus only a short tail: a finished build used to push 30 KB (~8k tokens) into
@@ -55,11 +58,26 @@ const BashParams = Type.Object({
 });
 
 export default function bashExtension(pi: ExtensionAPI) {
+	// Resolve the process's bash once, honouring CLAUDE_CODE_GIT_BASH_PATH from
+	// the environment or Claude Code's user settings `env` block
+	// (lib/shell-spawn.ts): every later spawn — background bash, monitor,
+	// hooks — reads this cached resolution. An ignored override is reported
+	// once, at the first session start.
+	const bash = bashSpawn({ settingsEnv: readSettingsEnv(homedir()) });
+	const shellPath = bash.spawn?.commandTransport === "stdin" ? undefined : bash.spawn?.shell;
 	// pi's definition supplies the description and TUI renderers; the executor
 	// is re-created per working directory because it closes over cwd (worktree
-	// switches change ctx.cwd mid-session).
-	const base = createBashToolDefinition(process.cwd());
-	const foreground = perCwd(createBashToolDefinition);
+	// switches change ctx.cwd mid-session). The same bash drives pi's foreground
+	// executor, so the override applies there too.
+	const base = createBashToolDefinition(process.cwd(), { shellPath });
+	const foreground = perCwd((cwd: string) => createBashToolDefinition(cwd, { shellPath }));
+	let warned = false;
+	pi.on("session_start", (_event, ctx) => {
+		if (warned || !bash.warning) return;
+		warned = true;
+		if (ctx.hasUI) ctx.ui.notify(bash.warning, "warning");
+		else process.stderr.write(`${bash.warning}\n`);
+	});
 	// pi's base sentence is "Optionally provide a timeout in seconds." — but the
 	// `timeout` parameter and the execute path both use milliseconds (Claude
 	// Code's Bash unit; the executor divides by 1000). The two must not

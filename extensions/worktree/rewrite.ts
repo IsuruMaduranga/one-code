@@ -20,6 +20,11 @@ export function shellQuote(path: string): string {
 	return `'${path.replace(/'/g, "'\\''")}'`;
 }
 
+/** PowerShell single-quoted literal: only `'` needs escaping, as `''`. */
+export function powershellQuote(path: string): string {
+	return `'${path.replace(/'/g, "''")}'`;
+}
+
 
 /**
  * Mutates `input` in place so the call runs inside the worktree. For bash,
@@ -42,6 +47,18 @@ export function rewriteToolInput(
 		if (typeof input.command === "string") {
 			const originalCommand = input.command;
 			input.command = `cd ${shellQuote(worktreePath)} && (${originalCommand}\n)`;
+			return { originalCommand };
+		}
+		return {};
+	}
+	if (toolName === "powershell") {
+		// `Set-Location -LiteralPath` takes the path verbatim (no wildcard
+		// expansion); `;` chains regardless of edition (`&&` is pwsh-7-only), and a
+		// failed Set-Location is a terminating error under -NonInteractive, so the
+		// command does not run in the wrong directory.
+		if (typeof input.command === "string") {
+			const originalCommand = input.command;
+			input.command = `Set-Location -LiteralPath ${powershellQuote(worktreePath)} -ErrorAction Stop; ${originalCommand}`;
 			return { originalCommand };
 		}
 		return {};

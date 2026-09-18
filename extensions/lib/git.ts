@@ -1,7 +1,23 @@
 /** Shared git helpers — pure functions only (safe to import across extensions). */
 
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+
+/**
+ * Whether the checkout at `cwd` has no uncommitted or untracked changes, or
+ * undefined when git could not say (not a repo, git missing). One short
+ * `git status --porcelain`; used for the classifier transcript's ground-truth
+ * line after a `git status` call (permissions/index.ts).
+ */
+export function gitStatusClean(cwd: string): boolean | undefined {
+	try {
+		const out = execFileSync("git", ["status", "--porcelain"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 5_000 });
+		return out.trim().length === 0;
+	} catch {
+		return undefined;
+	}
+}
 
 /**
  * The nearest checkout root at or above `startDir`: the directory holding a

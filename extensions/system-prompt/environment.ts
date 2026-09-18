@@ -23,6 +23,19 @@ export interface EnvironmentInfo {
 	memoryDir: string;
 }
 
+/**
+ * The `Shell:` value Claude Code prints: the basename of `SHELL`, else of
+ * `COMSPEC` (Windows, where `SHELL` is unset outside Git Bash), with a `.exe`
+ * suffix stripped and either path separator honoured — `cmd`, not `cmd.exe`.
+ */
+export function shellName(env: NodeJS.ProcessEnv = process.env): string {
+	const raw = env.SHELL || env.COMSPEC;
+	if (!raw) return "unknown";
+	const base = raw.split(/[\\/]/).pop() ?? "";
+	if (!base) return "unknown";
+	return base.toLowerCase().endsWith(".exe") ? base.slice(0, -4) : base;
+}
+
 export function collectEnvironment(cwd: string, modelLine: string): EnvironmentInfo {
 	const gitRoot = findGitRoot(cwd);
 	return {
@@ -30,7 +43,7 @@ export function collectEnvironment(cwd: string, modelLine: string): EnvironmentI
 		isGitRepo: gitRoot !== undefined,
 		platform: process.platform,
 		osVersion: `${os.type()} ${os.release()}`,
-		shell: process.env.SHELL ? (process.env.SHELL.split("/").pop() ?? "unknown") : "unknown",
+		shell: shellName(),
 		modelLine,
 		memoryDir: projectMemoryDir(cwd, os.homedir()),
 	};

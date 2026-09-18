@@ -18,7 +18,8 @@
  * which is exactly the late callback the shutdown paths guard against).
  */
 
-import type { ChildProcess } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
+import { join } from "node:path";
 
 /** SIGTERM → SIGKILL grace for a stopped background tree (bash tasks, monitors). */
 export const KILL_GRACE_MS = 2_000;
@@ -28,8 +29,32 @@ export function detachedSpawnOptions(): { detached: boolean } {
 	return { detached: process.platform !== "win32" };
 }
 
+/**
+ * Windows has no process groups and no SIGTERM: `taskkill /T /F` ends the
+ * tree by pid (the same call pi's own `killProcessTree` makes), from System32
+ * so a PATH entry cannot substitute the binary. A failed spawn is consumed —
+ * the leader may already be gone.
+ */
+function taskkillTree(pid: number): void {
+	try {
+		const child = spawn(join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe"), ["/F", "/T", "/PID", String(pid)], {
+			stdio: "ignore",
+			detached: true,
+			windowsHide: true,
+		});
+		child.once("error", () => {});
+		child.unref();
+	} catch {
+		// Already gone.
+	}
+}
+
 export function killProcessTree(child: ChildProcess, signal: NodeJS.Signals = "SIGTERM"): void {
 	if (child.pid == null) return;
+	if (process.platform === "win32") {
+		taskkillTree(child.pid);
+		return;
+	}
 	try {
 		process.kill(-child.pid, signal);
 	} catch {
@@ -47,6 +72,8 @@ export function killProcessTree(child: ChildProcess, signal: NodeJS.Signals = "S
  */
 export function stopProcessTree(child: ChildProcess, graceMs: number): void {
 	killProcessTree(child, "SIGTERM");
+	// taskkill /F is already forceful; there is no gentler first signal to grace.
+	if (process.platform === "win32") return;
 	if (child.exitCode !== null || child.signalCode !== null) return;
 	const timer = setTimeout(() => {
 		if (child.exitCode === null && child.signalCode === null) killProcessTree(child, "SIGKILL");

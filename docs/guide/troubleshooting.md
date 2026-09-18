@@ -171,6 +171,16 @@ for its scrollback. Use the keys the panel's footer names (**Space** and
 `CC_FOOTER=0`, or the other toggles listed in
 [Environment variables](reference.md#environment-variables).
 
+**On Windows the model has no shell tool, or the wrong one.** With Git for
+Windows installed you get `bash` plus `powershell`; without it, `powershell`
+alone. Set `CLAUDE_CODE_USE_POWERSHELL_TOOL=0` to hide the PowerShell tool
+or `=1` to force it on (it also works on macOS and Linux with a `pwsh` on
+PATH). A startup warning names a `CLAUDE_CODE_GIT_BASH_PATH` that was
+ignored and why. If you report a Windows problem, include the shells on your
+PATH (`where bash`, `where pwsh`, `where powershell`), the value of those two
+variables, and whether the command came through `bash` or `powershell`.
+See [Windows](windows.md).
+
 ## Getting help
 
 Report problems at the project's GitHub repository. Include the output of

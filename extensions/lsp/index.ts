@@ -24,7 +24,7 @@
  */
 
 import { mkdirSync } from "node:fs";
-import { extname, relative } from "node:path";
+import { extname, isAbsolute, join, relative } from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -309,7 +309,7 @@ export default function lspExtension(pi: ExtensionAPI) {
 			),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const path = params.path.startsWith("/") ? params.path : `${ctx.cwd}/${params.path}`;
+			const path = isAbsolute(params.path) ? params.path : join(ctx.cwd, params.path);
 			const target = resolveTarget(path, ctx.cwd);
 			// One keep-alive spans both awaits (same pattern as the tool_result hook).
 			const fetched = target

@@ -35,6 +35,7 @@ If you've never run One Code, read these in order:
 | [Sessions and context](sessions-and-context.md) | What the model sees, memory, compaction, the cache, recaps, and resuming sessions. |
 | [Tasks and background work](tasks-and-background-work.md) | The task list, background shells, monitors, loops, and how results reach the model. |
 | [Check your setup with doctor](doctor.md) | The report, the checkup, model presets, and the `onecode doctor` command. |
+| [Windows](windows.md) | Git Bash and the PowerShell tool, `PowerShell(...)` rules, hooks' `shell` field, paths, and what is verified on native Windows. |
 | [Differences from Claude Code](differences-from-claude-code.md) | What is different by design, what isn't provided, and known issues. |
 | [Troubleshooting](troubleshooting.md) | Symptoms, causes, and fixes. |
 | [Command and keyboard reference](reference.md) | Every command, shortcut, flag, environment variable, and file location. |

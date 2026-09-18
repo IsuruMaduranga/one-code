@@ -11,6 +11,8 @@
  * one-time warning, /lsp, and the lsp_diagnostics tool all show the same text.
  */
 
+import { isAbsolute } from "node:path";
+
 /** Install commands for the built-in table's servers (and their npm siblings). */
 export const INSTALL_HINTS: Record<string, string> = {
 	"typescript-language-server": "npm install -g typescript-language-server typescript",
@@ -35,7 +37,7 @@ export function describeStartFailure(rawFailure: string, command: string, plugin
 	const from = pluginName ? ` (configured by the ${pluginName} plugin)` : "";
 	const hint = INSTALL_HINTS[command];
 	if (hint) return `${command} is not installed${from}. Install it with: ${hint}`;
-	if (command.startsWith("/")) {
+	if (isAbsolute(command)) {
 		return `${command} does not exist${from}. ${pluginName ? "Check the plugin's installation." : "Check the configured path."}`;
 	}
 	const docs = pluginName ? " (the plugin's documentation should say how)" : "";

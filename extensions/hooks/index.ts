@@ -196,6 +196,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 					const run = await runHookCommand(hook.command, stdin, {
 						cwd: ctx.cwd,
 						timeoutSeconds: hook.timeout,
+						shell: hook.shell,
 						projectDir: ctx.cwd,
 						// SessionEnd is fire-and-forget at shutdown: it must not hold a
 						// one-shot process open. Every other hook is awaited work that

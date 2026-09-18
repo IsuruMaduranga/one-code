@@ -101,9 +101,18 @@ every model. The content is the same; only the placement differs.
 
 - **macOS and Linux** are developed and verified. **WSL** works the same
   way.
-- **Native Windows** is untested and unsupported. Hooks run through
-  `/bin/sh`, background shells fall back to it when `SHELL` is unset, and
-  no PowerShell tool exists. Use WSL.
+- **Native Windows** follows Claude Code's shape: Git for Windows is
+  optional, PowerShell is the primary shell tool when it is enabled (on by
+  default on Windows, `CLAUDE_CODE_USE_POWERSHELL_TOOL=0` turns it off), and
+  your `PowerShell(...)` rules, `CLAUDE_CODE_GIT_BASH_PATH`, and per-hook
+  `shell` field work unchanged. The PowerShell tool's description is Claude
+  Code's own text. What differs: One Code has no PowerShell command parser
+  yet, so in auto mode every PowerShell command that isn't on Claude Code's
+  read-only cmdlet list goes to the classifier (Claude Code auto-approves
+  more in-project work), and the git-recoverability shortcut for in-project
+  deletes is bash-only. Verified on CI runners and through a `pwsh` on
+  macOS; a real Windows desktop has not been driven end to end yet. See
+  [Windows](windows.md).
 
 ## Provider notes
 

@@ -9,11 +9,18 @@
  * a JSON payload from stdin. (Ported from pi-code's runHookCommand, MIT — see
  * docs/decisions.md.)
  *
+ * The interpreter is Claude Code's: bash (Git Bash on Windows, honouring
+ * `CLAUDE_CODE_GIT_BASH_PATH`) unless the hook says `shell: "powershell"`, or
+ * the machine is a Windows box without Git Bash — lib/shell-spawn.ts resolves
+ * both through pi's own shell lookup.
+ *
  * Hardening carried over:
- * - absolute /bin/sh, so a repo-local `sh` on PATH can't hijack the hook
+ * - an absolute interpreter path, so a repo-local `sh` on PATH can't hijack
+ *   the hook
  * - detached:true makes the shell a process-group leader; timeout SIGKILLs
  *   the negative pid so grandchildren holding the stdio pipes die too —
  *   otherwise `close` never fires and the promise hangs past the timeout
+ *   (Windows: `taskkill /T /F` on the leader's pid does the same)
  * - setEncoding("utf8") so multi-byte characters can't be split across chunks
  * - output capped at 1MB per stream
  * - stdin errors ignored (a hook that exits without reading stdin — `exit 2`
@@ -38,8 +45,36 @@
  *   mechanism for the LSP client). A ref'd child holds the loop until `close`.
  */
 
-import { spawn } from "node:child_process";
-import { killProcessTree } from "../lib/process-tree.ts";
+import type { ChildProcess } from "node:child_process";
+import { detachedSpawnOptions, killProcessTree } from "../lib/process-tree.ts";
+import { bashSpawn, powerShellSpawn, type ShellSpawn, spawnShellCommand } from "../lib/shell-spawn.ts";
+import type { HookShell } from "./settings.ts";
+
+/**
+ * Claude Code's default: hooks run in bash (Git Bash on Windows) when one
+ * exists, otherwise in PowerShell — which only happens on Windows without Git
+ * for Windows, since every other platform resolves a bash.
+ */
+export function defaultHookShell(): HookShell {
+	return bashSpawn().spawn ? "bash" : "powershell";
+}
+
+/** The interpreter for one hook, or the reason none can run it. */
+export function hookShellSpawn(shell: HookShell | undefined): { spec?: ShellSpawn; error?: string } {
+	const want = shell ?? defaultHookShell();
+	if (want === "powershell") {
+		const spec = powerShellSpawn();
+		return spec ? { spec } : { error: "hook needs PowerShell but no pwsh/powershell executable was found on PATH" };
+	}
+	const resolved = bashSpawn();
+	if (!resolved.spawn) return { error: resolved.error ?? "hook needs bash but none was found" };
+	if (resolved.spawn.commandTransport === "stdin") {
+		// pi's legacy-WSL launcher takes its script on stdin, which the hook
+		// payload already occupies.
+		return { error: `hook cannot run under ${resolved.spawn.shell} (a WSL launcher); set CLAUDE_CODE_GIT_BASH_PATH to Git Bash's bash.exe` };
+	}
+	return { spec: resolved.spawn };
+}
 
 export interface HookRunResult {
 	/**
@@ -80,6 +115,8 @@ export interface HookRunOptions {
 	 * stdout/stderr are therefore empty for a detached hook — nothing reads them.
 	 */
 	detached?: boolean;
+	/** The hook's `shell` field; unset → `defaultHookShell()`. */
+	shell?: HookShell;
 }
 
 const MAX_OUTPUT_BYTES = 1_000_000;
@@ -92,11 +129,22 @@ export function runHookCommand(command: string, stdinJson: string, opts: HookRun
 	const started = Date.now();
 
 	return new Promise((resolve) => {
-		let child: ReturnType<typeof spawn>;
+		let child: ChildProcess;
+		const failed = (spawnError: string) =>
+			resolve({ exitCode: null, timedOut: false, spawnError, stdout: "", stderr: "", durationMs: Date.now() - started });
+		const { spec, error } = hookShellSpawn(opts.shell);
+		if (!spec) {
+			failed(error ?? "no shell available for the hook");
+			return;
+		}
 		try {
-			child = spawn("/bin/sh", ["-c", command], {
+			// An absolute interpreter path (pi's resolver never yields a bare name
+			// where a real bash exists), so a repo-local `sh` on PATH cannot hijack
+			// the hook; the shell leads its own process group so a timeout kills
+			// grandchildren too (Windows: taskkill /T — lib/process-tree.ts).
+			child = spawnShellCommand(spec, command, {
 				cwd: opts.cwd,
-				detached: true,
+				...detachedSpawnOptions(),
 				stdio: opts.detached ? ["pipe", "ignore", "ignore"] : ["pipe", "pipe", "pipe"],
 				env: { ...process.env, CLAUDE_PROJECT_DIR: opts.projectDir ?? opts.cwd },
 			});

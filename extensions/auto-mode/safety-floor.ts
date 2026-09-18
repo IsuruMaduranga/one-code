@@ -127,5 +127,46 @@ export function safetyControlWrite({ toolName, input, cwd, home, oneCodeProjectS
 		}
 	}
 
+	if (toolName === "powershell") {
+		// No PowerShell write model yet, so the floor is textual and wider than
+		// bash's: ANY mention of a gate-control file in the command line stops it,
+		// whether the cmdlet reads or writes. A `Get-Content` of settings.json
+		// costs one prompt; a `Set-Content` that slipped through would cost the
+		// gate (the floor may only ever say "stop" — header).
+		const command = typeof input.command === "string" ? input.command : "";
+		if (!command) return undefined;
+		for (const token of powershellPathTokens(command, home)) {
+			const resolved = resolveForContainment(toAbsolute(cwd, token, home)) ?? toAbsolute(cwd, token, home);
+			if (isSafetyControlTarget(resolved, home, perRepoSettings)) return REASON(token);
+		}
+	}
+
 	return undefined;
+}
+
+/**
+ * Path-looking tokens of a PowerShell line, quotes stripped, `$env:USERPROFILE`,
+ * `$env:HOME`, `$HOME` and `~` expanded to the home dir, backslashes
+ * forward-slashed. Anything with a separator or a `.json`-style file name
+ * counts; the floor tolerates false positives.
+ */
+export function powershellPathTokens(command: string, home: string): string[] {
+	const out: string[] = [];
+	for (const raw of command.split(/[\s;|()]+/)) {
+		let token = raw.replace(/^["']+|["',]+$/g, "");
+		if (!token) continue;
+		token = token
+			.replace(/^\$env:(USERPROFILE|HOME)/i, home)
+			.replace(/^\$HOME\b/i, home)
+			.replace(/^~(?=[\\/]|$)/, home)
+			.replace(/\\/g, "/");
+		// Parameter names (`-Path`) are not paths; `-Path:value` carries one.
+		if (token.startsWith("-")) {
+			const colon = token.indexOf(":");
+			if (colon === -1) continue;
+			token = token.slice(colon + 1);
+		}
+		if (/[\\/]/.test(token) || /\.json$/i.test(token)) out.push(token);
+	}
+	return out;
 }

@@ -26,6 +26,7 @@
  */
 
 import { homedir } from "node:os";
+import { isAbsolute } from "node:path";
 import { isWithin, toAbsolute } from "../auto-mode/paths.ts";
 import { gitSubcommand, leadTokens, parseCommand, resolvePayload, type Token } from "../auto-mode/shell-analysis.ts";
 
@@ -124,7 +125,7 @@ export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: W
 			else if (hasExpansion(target) || target === "-") dir = undefined;
 			// An absolute (or ~) destination re-anchors the tracked directory
 			// even when it was unknown — later git commands become checkable again.
-			else if (target.startsWith("/") || target === "~" || target.startsWith("~/")) dir = toAbsolute("/", target, homedir());
+			else if (isAbsolute(target) || target === "~" || target.startsWith("~/")) dir = toAbsolute("/", target, homedir());
 			else if (dir !== undefined) dir = toAbsolute(dir, target, homedir());
 			return undefined;
 		}

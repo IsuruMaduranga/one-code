@@ -53,6 +53,15 @@ notification. A background shell shows up in the shells section of the
 panel below the editor. See
 [Tasks and background work](tasks-and-background-work.md).
 
+`powershell` is Claude Code's PowerShell tool: on by default on Windows,
+where it becomes the primary shell and `bash` (Git Bash) stays alongside
+when Git for Windows is installed; off elsewhere unless
+`CLAUDE_CODE_USE_POWERSHELL_TOOL=1` and a `pwsh` is on your PATH. It has the
+same `run_in_background`, the same background panel, and its description is
+Claude Code's own, with the edition section (PowerShell 7 or Windows
+PowerShell 5.1) picked from the executable found. Permission rules use
+Claude Code's `PowerShell(...)` form. See [Windows](windows.md).
+
 Some command shapes are refused before they run, with a message that steers
 the model to a better route:
 
@@ -140,8 +149,8 @@ and the model is steered to `tool_search`.
 
 In `-p` and `--mode json` runs the process exits when the turn settles, so
 nothing can run in the background. Tools that would detach work run to
-completion instead and return the output in their result: `bash` with
-`run_in_background`, `Agent`, `monitor`, and `workflow`. Timers such as
+completion instead and return the output in their result: `bash` and
+`powershell` with `run_in_background`, `Agent`, `monitor`, and `workflow`. Timers such as
 `schedule_wakeup` and `/loop` never fire in these modes.
 
 ## Claude Code tool names
@@ -152,6 +161,7 @@ matchers, and mapped to One Code's names. Case is ignored.
 | Claude Code | One Code |
 |---|---|
 | `Bash` | `bash` |
+| `PowerShell` | `powershell` |
 | `Read`, `Write`, `Edit` | `read`, `write`, `edit` |
 | `Grep`, `Glob`, `LS` | `grep`, `find`, `ls` |
 | `NotebookEdit` | `notebook_edit` |

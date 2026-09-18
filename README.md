@@ -101,7 +101,8 @@ is the body that was built to notice.
 ## 🚀 Get started
 
 You need **Node.js 22.19+**. One Code is developed and verified on macOS and
-Linux; WSL works too. Native Windows is untested.
+Linux; WSL works too. Native Windows runs in Claude Code's shape (Git Bash
+optional, PowerShell tool) — see the [Windows guide](docs/guide/windows.md).
 
 ```bash
 npm install -g @one-ai/one-code
@@ -283,8 +284,10 @@ troubleshooting, and a full reference.
 - **Web search:** set `BRAVE_SEARCH_API_KEY` or `TAVILY_API_KEY` on a provider
   without native search. With neither key, the fallback is Exa's rate-limited
   keyless endpoint, and One Code labels those results.
-- **Native Windows:** hooks and background shells assume `/bin/sh` for now. Use
-  WSL until native Windows is verified.
+- **Native Windows:** shells, hooks, and the PowerShell tool follow Claude
+  Code's behavior and pass on Windows CI runners, but a real Windows desktop
+  session hasn't been driven end to end yet. Expect rough edges around
+  drive-letter paths in permission rules; WSL remains the safest route.
 
 ## 🔧 Install from source
 

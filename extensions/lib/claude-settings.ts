@@ -47,6 +47,25 @@ export function readSettingsFile(path: string): ClaudeSettingsFile | undefined {
 }
 
 /**
+ * Claude Code's `env` block from the USER settings file only: the string
+ * values it would export into every session. Read for `CLAUDE_CODE_GIT_BASH_PATH`
+ * (lib/shell-spawn.ts). Project and local files are deliberately not merged —
+ * a checked-in `env` that pointed the shell at a `tools/bash` inside the repo
+ * would run that binary for every hook and background command, and the file
+ * is the repository's, not the user's (Claude Code gates the same block behind
+ * its project-trust prompt).
+ */
+export function readSettingsEnv(home: string): Record<string, string> {
+	const env = readSettingsFile(claudeUserSettingsPath(home))?.env;
+	if (!env || typeof env !== "object" || Array.isArray(env)) return {};
+	const out: Record<string, string> = {};
+	for (const [key, value] of Object.entries(env as Record<string, unknown>)) {
+		if (typeof value === "string") out[key] = value;
+	}
+	return out;
+}
+
+/**
  * Claude Code's plugin enabled-state map (`{"name@marketplace": boolean}`),
  * merged across the three settings files — later files win per key.
  */

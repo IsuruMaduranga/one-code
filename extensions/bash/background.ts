@@ -12,11 +12,11 @@
  * notification and task_output can never disagree.
  */
 
-import { spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import type { BackgroundTask } from "../background/registry.ts";
 import { whenAborted } from "../lib/abort.ts";
 import { detachedSpawnOptions, KILL_GRACE_MS, stopProcessTree } from "../lib/process-tree.ts";
+import { bashSpawnOrThrow, type ShellSpawn, spawnShellCommand } from "../lib/shell-spawn.ts";
 
 export const STORED_OUTPUT_CAP = 200_000;
 
@@ -45,12 +45,20 @@ export interface StartBackgroundBashOptions {
 	/** Kill the process tree after this many seconds. */
 	timeoutSeconds?: number;
 	logPath?: string;
+	/**
+	 * The interpreter to run `command` under. Default: the session's bash
+	 * (lib/shell-spawn.ts — Git Bash on Windows, `CLAUDE_CODE_GIT_BASH_PATH`
+	 * honoured); the powershell extension passes its own spec.
+	 */
+	shell?: ShellSpawn;
+	/** Task kind on the registry; "bash" (the default) is what the shell panel lists. */
+	kind?: BackgroundTask["kind"];
 	onFinished(task: BackgroundTask, summary: BashFinishSummary): void;
 }
 
 export function startBackgroundBash(options: StartBackgroundBashOptions): BackgroundTask {
 	// Own process group, so stop/timeout can signal the whole tree (lib/process-tree.ts).
-	const child = spawn(process.env.SHELL || "/bin/sh", ["-c", options.command], {
+	const child = spawnShellCommand(options.shell ?? bashSpawnOrThrow(), options.command, {
 		cwd: options.cwd,
 		...detachedSpawnOptions(),
 		stdio: ["ignore", "pipe", "pipe"],
@@ -80,7 +88,7 @@ export function startBackgroundBash(options: StartBackgroundBashOptions): Backgr
 
 	const task: BackgroundTask = {
 		id: options.id,
-		kind: "bash",
+		kind: options.kind ?? "bash",
 		description: options.description,
 		command: options.command,
 		status: "running",

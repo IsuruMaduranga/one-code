@@ -83,6 +83,18 @@ contains command substitution (`$(…)` or backticks), `eval`, `exec`, a pipe
 into an interpreter, or a base64 decode is never covered by a prefix or
 wildcard `allow` rule.
 
+### PowerShell rule patterns
+
+`PowerShell(...)` rules have the same shape and follow Claude Code's
+PowerShell matching: aliases are canonicalized on both sides
+(`PowerShell(Remove-Item:*)` catches `rm`, `del`, and `ri`), cmdlet names
+are case-insensitive, a line is split on `|`, `;`, `&&`, `||`, and newlines
+outside quotes and here-strings, an `allow` rule must cover every statement,
+and a `deny` or `ask` rule fires on any statement. A `$(…)` subexpression, a
+backtick escape, a script block, the `&`/`.` call operators,
+`Invoke-Expression`, or an encoded command keeps a wildcard `allow` from
+applying. Details in [Windows](windows.md#permission-rules).
+
 ### Add a rule during a session
 
 To add an allow rule for the current repository, run:

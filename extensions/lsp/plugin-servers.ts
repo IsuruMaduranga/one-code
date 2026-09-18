@@ -23,7 +23,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { extname, join, resolve } from "node:path";
+import { extname, isAbsolute, join, resolve } from "node:path";
 import { pathWithinBase, sanitizePathSegment } from "../lib/plugin-root.ts";
 
 export interface ResolvedPluginServer {
@@ -198,7 +198,7 @@ export function resolveServerConfig(
 	if (typeof config.command !== "string" || config.command.length === 0) {
 		return reject('"command" must be a non-empty string');
 	}
-	if (config.command.includes(" ") && !config.command.startsWith("/")) {
+	if (config.command.includes(" ") && !isAbsolute(config.command)) {
 		return reject('"command" must not contain spaces — use the args array for arguments');
 	}
 

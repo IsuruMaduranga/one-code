@@ -35,9 +35,11 @@ export function scratchpadDir(
  * `/tmp` resolved through its symlink (macOS: `/private/tmp`), so the path in
  * the prompt, the path the permission check compares, and the case-folded
  * resolved subject all name the same real location. Falls back to os.tmpdir()
- * where /tmp does not exist.
+ * where /tmp does not exist. Windows has no `/tmp` at all: `os.tmpdir()` is
+ * `%TEMP%`, Claude Code's own choice there.
  */
 function resolveTmpRoot(): string {
+	if (process.platform === "win32") return os.tmpdir();
 	try {
 		return realpathSync("/tmp");
 	} catch {

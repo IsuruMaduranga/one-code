@@ -30,7 +30,16 @@ export { ccToolName };
 export type TranscriptEntry =
 	| { kind: "user"; text: string }
 	| { kind: "tool"; tool: string; input: Record<string, unknown> }
-	| { kind: "denied"; tool: string; subject: string; rule: string };
+	| { kind: "denied"; tool: string; subject: string; rule: string }
+	/**
+	 * Harness ground truth, Claude Code's `{"meta":{"gitStatus":{"clean":…}}}`
+	 * line after a `git status` call (captured 2.1.276, findings §22): the
+	 * classifier reads the tree's real state, not the model's account of it.
+	 */
+	| { kind: "meta"; gitStatus: { clean: boolean } };
+
+/** Tools whose call renders as `{"<Tool>":"<command>"}` — the shell tools. */
+const SHELL_TOOLS = new Set(["bash", "powershell"]);
 
 /** Truncate one field so a single huge argument cannot dominate the transcript. */
 export function clip(value: string, max: number): string {
@@ -47,12 +56,14 @@ function clipInput(input: Record<string, unknown>, max: number): Record<string, 
 }
 
 /**
- * Render one entry as its compact JSON line. Bash renders as `{"Bash":"<command>"}`
- * (the command string, as Claude Code does); every other tool renders as
- * `{"<Tool>":{…input…}}` with string fields clipped.
+ * Render one entry as its compact JSON line. The shell tools render as
+ * `{"Bash":"<command>"}` / `{"PowerShell":"<command>"}` (the command string,
+ * as Claude Code does); every other tool renders as `{"<Tool>":{…input…}}`
+ * with string fields clipped.
  */
 function renderEntry(entry: TranscriptEntry, maxField: number): string {
 	if (entry.kind === "user") return JSON.stringify({ user: clip(entry.text, maxField) });
+	if (entry.kind === "meta") return JSON.stringify({ meta: { gitStatus: { clean: entry.gitStatus.clean } } });
 	if (entry.kind === "denied") {
 		return JSON.stringify({
 			denied_by_permission_rule: { tool: ccToolName(entry.tool), attempted: clip(entry.subject, maxField), rule: entry.rule },
@@ -60,7 +71,7 @@ function renderEntry(entry: TranscriptEntry, maxField: number): string {
 	}
 	const name = ccToolName(entry.tool);
 	const command = entry.input.command;
-	if (entry.tool === "bash" && typeof command === "string") {
+	if (SHELL_TOOLS.has(entry.tool) && typeof command === "string") {
 		return JSON.stringify({ [name]: clip(command, maxField) });
 	}
 	return JSON.stringify({ [name]: clipInput(entry.input, maxField) });

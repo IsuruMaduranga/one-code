@@ -9,7 +9,6 @@
  * system notifications (lib/notifications.ts), never as user input.
  */
 
-import { spawn } from "node:child_process";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { whenAborted } from "../lib/abort.ts";
@@ -17,6 +16,7 @@ import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { detachedSpawnOptions, KILL_GRACE_MS, stopProcessTree } from "../lib/process-tree.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
+import { bashSpawn, spawnShellCommand } from "../lib/shell-spawn.ts";
 import { ccToolRenderers, customMessageText, liveUiCtx, notificationComponent } from "../lib/tui-render.ts";
 import {
 	type BackgroundTask,
@@ -214,13 +214,22 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				// leader — with zsh a `cmd; echo` or a pipeline otherwise lives on as an
 				// orphan holding the stdout pipe, so the task never finishes and, in a
 				// one-shot run, the process cannot exit (LIFECYCLE-REVIEW M2, measured).
-				const child = spawn(process.env.SHELL || "/bin/sh", ["-c", params.command], {
+				// The session's bash (Git Bash on Windows) — lib/shell-spawn.ts.
+				const bash = bashSpawn();
+				if (!bash.spawn) {
+					return {
+						content: [{ type: "text", text: `Cannot start the monitor: ${bash.error ?? "no bash shell was found"}` }],
+						details: {},
+						isError: true,
+					};
+				}
+				const child = spawnShellCommand(bash.spawn, params.command, {
 					cwd: ctx.cwd,
 					...detachedSpawnOptions(),
 					stdio: ["ignore", "pipe", "pipe"],
 				});
 				let buffer = "";
-				child.stdout.on("data", (chunk: Buffer) => {
+				child.stdout?.on("data", (chunk: Buffer) => {
 					buffer += chunk.toString();
 					let idx: number;
 					while ((idx = buffer.indexOf("\n")) !== -1) {
@@ -229,7 +238,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 						if (line) onEvent(line);
 					}
 				});
-				child.stderr.on("data", (chunk: Buffer) => {
+				child.stderr?.on("data", (chunk: Buffer) => {
 					stored = tail(`${stored}${chunk.toString()}`, STORED_OUTPUT_CAP);
 				});
 				child.on("error", (error) => end("failed", error.message));
