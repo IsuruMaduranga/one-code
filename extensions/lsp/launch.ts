@@ -5,7 +5,7 @@
  * On Windows an npm-installed server is a `.cmd` shim
  * (`typescript-language-server.cmd`): `whichOnPath` finds it through PATHEXT,
  * but a bare `spawn(command)` does not — libuv tries the name and `.com`/`.exe`
- * only, so the spawn fails with ENOENT (findings §22) — and
+ * only, so the spawn fails with ENOENT (findings §22, run 35389425891) — and
  * Node refuses to run a batch file without a shell anyway (20.12+,
  * CVE-2024-27980). Such a shim is started through `cmd.exe /d /s /c` with the
  * command line quoted the way Node's own `shell: true` does, and the arguments

@@ -6,7 +6,7 @@
  * scratchpad dirs, and a `.cmd` shim on PATH (the shape npm gives an LSP
  * server on Windows). Windows-only: the inputs mean nothing elsewhere. Runs on
  * the windows-latest CI job; assertions carry the paths they compared so the
- * CI log is enough to debug a failure.
+ * CI log is enough to debug a failure (docs/features/windows/handoff.md).
  */
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
