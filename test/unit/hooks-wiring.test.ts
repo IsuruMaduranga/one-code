@@ -57,9 +57,10 @@ describe("hooks wiring", () => {
 	});
 	afterEach(() => {
 		vi.unstubAllEnvs();
-		// A fire-and-forget SessionEnd hook may still be closing its output file
-		// (ENOTEMPTY mid-walk under load; EBUSY on Windows): let rmSync retry.
-		rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+		// A fire-and-forget SessionEnd hook may still be running with its cwd in
+		// here (ENOTEMPTY mid-walk under load; EBUSY on the dir on Windows until
+		// the shell exits): let rmSync retry for a couple of seconds.
+		rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
 	});
 
 	const writeUserHooks = (hooks: Record<string, unknown>) => {
@@ -359,9 +360,10 @@ describe("hooks wiring: SessionEnd (LIFECYCLE-REVIEW-2026-09-06 M4)", () => {
 	});
 	afterEach(() => {
 		vi.unstubAllEnvs();
-		// A fire-and-forget SessionEnd hook may still be closing its output file
-		// (ENOTEMPTY mid-walk under load; EBUSY on Windows): let rmSync retry.
-		rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+		// A fire-and-forget SessionEnd hook may still be running with its cwd in
+		// here (ENOTEMPTY mid-walk under load; EBUSY on the dir on Windows until
+		// the shell exits): let rmSync retry for a couple of seconds.
+		rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
 	});
 
 	/** The dispatch is fire-and-forget; poll for the hook's write. */

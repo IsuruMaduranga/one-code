@@ -130,17 +130,23 @@ describe("runHookCommand detached (fire-and-forget)", () => {
 				`console.log("dispatched");`,
 			].join("\n"),
 		);
-		const started = Date.now();
+		// Timed from "dispatched" (the hook is running) to the probe's exit, so
+		// node's own start-up — several seconds on a cold Windows runner — is not
+		// counted against the hook.
+		let dispatchedAt = 0;
 		const { stdout, stderr, code } = await new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve) => {
 			const child = spawn(process.execPath, ["--experimental-strip-types", "--no-warnings", script], { cwd: process.cwd() });
 			let out = "";
 			let err = "";
-			child.stdout.on("data", (chunk) => (out += chunk));
+			child.stdout.on("data", (chunk) => {
+				out += chunk;
+				if (!dispatchedAt && out.includes("dispatched")) dispatchedAt = Date.now();
+			});
 			child.stderr.on("data", (chunk) => (err += chunk));
 			child.on("close", (exitCode) => resolve({ stdout: out, stderr: err, code: exitCode }));
 		});
 		expect(stdout.trim(), stderr).toBe("dispatched");
 		expect(code).toBe(0);
-		expect(Date.now() - started).toBeLessThan(2500);
+		expect(Date.now() - dispatchedAt).toBeLessThan(2500);
 	}, 10_000);
 });

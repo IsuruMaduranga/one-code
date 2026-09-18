@@ -15,7 +15,7 @@
  * mode: session allows are never applied there).
  */
 
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 import { toAbsolute } from "../auto-mode/paths.ts";
 import { tildify, toPosixPath } from "../lib/paths.ts";
 import { escapeLiteral, isAtOrInsideDir, normalizeToolName, parseRule, type PermissionMode, type PermissionRule, subjectKind, urlHost } from "./matcher.ts";
@@ -52,7 +52,7 @@ function displayPath(path: string, home: string): string {
  * `matchesPathPattern` matches native paths as.
  */
 function absoluteDirPattern(dir: string): string {
-	return `/${toPosixPath(dir).replace(/\/+$/, "")}/**`;
+	return `/${toPosixPath(resolve(dir)).replace(/\/+$/, "")}/**`;
 }
 
 export function sessionGrant(input: SessionGrantInput): SessionGrant | undefined {

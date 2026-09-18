@@ -26,10 +26,12 @@ const CWD = "/home/user/project";
 
 /**
  * A rule pattern for an absolute path, in the spelling that matches on this
- * platform: the POSIX path as written, or on Windows Claude Code's `//c/…`
- * form of what that path resolves to (`D:\home\user\x` → `//d/home/user/x`).
+ * platform: the POSIX pattern as written (`/x/**` or CC's `//x/**`), or on
+ * Windows Claude Code's `//c/…` form of what that path resolves to
+ * (`D:\home\user\x` → `//d/home/user/x`).
  */
-const absPattern = (posixPath: string) => (process.platform === "win32" ? `/${toPosixPath(resolve(posixPath))}` : posixPath);
+const absPattern = (posixPattern: string) =>
+	process.platform === "win32" ? `/${toPosixPath(resolve(posixPattern.replace(/^\/+/, "/")))}` : posixPattern;
 
 describe("normalizeToolName", () => {
 	it("maps Claude Code PascalCase names to pi names", () => {
@@ -418,7 +420,7 @@ describe("decide", () => {
 		});
 
 		it("a Read allow rule covering the path still clears an outside read (incl. CC's //absolute form)", () => {
-			const allow = [parseRule("Read(~/.zshrc)")!, parseRule(`Read(/${absPattern("/etc/**")})`)!];
+			const allow = [parseRule("Read(~/.zshrc)")!, parseRule(`Read(${absPattern("//etc/**")})`)!];
 			expect(decide({ ...base, toolName: "read", subject: "~/.zshrc", allow }).decision).toBe("allow");
 			expect(decide({ ...base, toolName: "read", subject: "/etc/hosts", allow }).decision).toBe("allow");
 			expect(decide({ ...base, toolName: "read", subject: "/usr/share/x", allow }).decision).toBe("ask");
