@@ -390,7 +390,11 @@ export function matchesPathPattern(pattern: string, subject: string, cwd: string
 	// A Windows pattern spelled with backslash separators is read as its `/`
 	// form; `\*` and `\\` stay the literal escapes globToRegex documents.
 	const spelled = win32 ? pattern.replace(/\\(?![*\\])/g, "/") : pattern;
-	const expandedPattern = spelled.startsWith("//") ? expandTilde(spelled.slice(1), home) : expandTilde(spelled, home);
+	// `~` in a pattern expands to the home dir spelled with `/` (never `join`,
+	// whose backslashes would read as escapes on Windows); it matches the
+	// `C:/Users/x/…` candidate below.
+	const expandHome = (p: string) => (p === "~" ? forwardSlashes(home) : p.startsWith("~/") ? `${forwardSlashes(home)}/${p.slice(2)}` : p);
+	const expandedPattern = expandHome(spelled.startsWith("//") ? spelled.slice(1) : spelled);
 	const expandedSubject = expandTilde(subject, home);
 
 	const candidates = new Set<string>();
