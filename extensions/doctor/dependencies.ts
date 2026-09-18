@@ -11,8 +11,9 @@
  * providers it depends on a third-party key.
  */
 
-import { accessSync, constants, existsSync } from "node:fs";
-import { delimiter, join } from "node:path";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { whichOnPath } from "../lib/which.ts";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { getProviderKind } from "pi-web-search/src/api.ts";
 import { INSTALL_HINTS } from "../lsp/install-hints.ts";
@@ -41,30 +42,6 @@ export interface DependencyReport {
 	checks: DependencyCheck[];
 	webSearch: { route: WebSearchRoute; detail: string };
 	findings: Finding[];
-}
-
-/** Minimal `which`: the first PATH entry holding an executable of that name. */
-export function whichOnPath(command: string, env: NodeJS.ProcessEnv, platform: string = process.platform): string | undefined {
-	if (!command) return undefined;
-	if (command.includes("/") || command.includes("\\")) return isExecutable(command) ? command : undefined;
-	const extensions = platform === "win32" ? (env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";") : [""];
-	for (const dir of (env.PATH ?? "").split(delimiter)) {
-		if (!dir) continue;
-		for (const ext of extensions) {
-			const candidate = join(dir, command + ext);
-			if (isExecutable(candidate)) return candidate;
-		}
-	}
-	return undefined;
-}
-
-function isExecutable(path: string): boolean {
-	try {
-		accessSync(path, constants.X_OK);
-		return true;
-	} catch {
-		return false;
-	}
 }
 
 /** Languages the working directory plausibly contains, by the LSP table's own root markers. */

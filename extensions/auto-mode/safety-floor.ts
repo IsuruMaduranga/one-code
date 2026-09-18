@@ -136,8 +136,8 @@ export function safetyControlWrite({ toolName, input, cwd, home, oneCodeProjectS
 		const command = typeof input.command === "string" ? input.command : "";
 		if (!command) return undefined;
 		for (const token of powershellPathTokens(command, home)) {
-			const resolved = resolveForContainment(toAbsolute(cwd, token, home)) ?? toAbsolute(cwd, token, home);
-			if (isSafetyControlTarget(resolved, home, perRepoSettings)) return REASON(token);
+			const absolute = toAbsolute(cwd, token, home);
+			if (isSafetyControlTarget(resolveForContainment(absolute) ?? absolute, home, perRepoSettings)) return REASON(token);
 		}
 	}
 

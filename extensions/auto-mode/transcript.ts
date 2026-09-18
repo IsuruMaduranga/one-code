@@ -16,6 +16,8 @@
 // the hooks matcher (its `ccToolName` is the correct-direction, mcp-passthrough
 // map; permissions/matcher.ts's is lower-cased and cannot recover casing).
 import { ccToolName } from "../hooks/matcher.ts";
+// The shell tools render as `{"<Tool>":"<command>"}` (lib/shell-tools.ts is the one list).
+import { SHELL_TOOLS } from "../lib/shell-tools.ts";
 
 export { ccToolName };
 
@@ -37,9 +39,6 @@ export type TranscriptEntry =
 	 * classifier reads the tree's real state, not the model's account of it.
 	 */
 	| { kind: "meta"; gitStatus: { clean: boolean } };
-
-/** Tools whose call renders as `{"<Tool>":"<command>"}` — the shell tools. */
-const SHELL_TOOLS = new Set(["bash", "powershell"]);
 
 /** Truncate one field so a single huge argument cannot dominate the transcript. */
 export function clip(value: string, max: number): string {

@@ -28,9 +28,12 @@
 import { type ChildProcess, spawn, type SpawnOptions } from "node:child_process";
 import { constants, existsSync } from "node:fs";
 import { access } from "node:fs/promises";
-import { basename, delimiter } from "node:path";
+import { homedir } from "node:os";
+import { basename } from "node:path";
 import { getPowerShellConfig, getShellConfig } from "@earendil-works/pi-coding-agent";
+import { readSettingsEnv } from "./claude-settings.ts";
 import { detachedSpawnOptions, killProcessTree } from "./process-tree.ts";
+import { whichOnPath } from "./which.ts";
 
 /** How to start a shell for one command line. */
 export interface ShellSpawn {
@@ -124,14 +127,16 @@ export function resolveBashSpawn(input: BashResolveInput = {}): BashResolution {
 let cachedBash: BashResolution | undefined;
 
 /**
- * The bash this process spawns, resolved once (pi's Windows lookup runs
- * `where`, and hooks resolve on every tool call). `readSettingsEnv` is not read
- * here — the bash extension seeds the cache with the settings-aware
- * resolution at load; a bare call before that resolves from the process env.
+ * The bash this extension spawns, resolved once per module instance (pi's
+ * Windows lookup runs `where`, and hooks resolve on every tool call). The
+ * resolution reads Claude Code's user-settings `env` block itself, so every
+ * consumer — bash tool, hooks, monitor, PowerShell fallback — sees the same
+ * `CLAUDE_CODE_GIT_BASH_PATH`. Note the cache is per extension file: jiti
+ * gives each extension its own copy of this module (findings §3), so this is
+ * a memo, never a cross-extension channel — each extension resolves once.
  */
-export function bashSpawn(input?: BashResolveInput): BashResolution {
-	if (input) cachedBash = resolveBashSpawn(input);
-	cachedBash ??= resolveBashSpawn();
+export function bashSpawn(): BashResolution {
+	cachedBash ??= resolveBashSpawn({ settingsEnv: readSettingsEnv(homedir()) });
 	return cachedBash;
 }
 
@@ -154,22 +159,13 @@ export function resetShellSpawnCache(): void {
 export interface PowerShellResolveInput {
 	platform?: NodeJS.Platform;
 	env?: NodeJS.ProcessEnv;
-	exists?: (path: string) => boolean;
+	/** PATH lookup (lib/which.ts `whichOnPath`); injectable for tests. */
+	which?: (command: string, env: NodeJS.ProcessEnv) => string | undefined;
 	/** pi's `getPowerShellConfig` (Windows only); injectable for tests. */
 	windowsFallback?: () => ShellSpawn;
 }
 
-/** The first `pwsh` on PATH (macOS/Linux — pi's resolver is Windows-only). */
-export function findPwshOnPath(env: NodeJS.ProcessEnv = process.env, exists: (path: string) => boolean = existsSync): string | undefined {
-	const pathKey = Object.keys(env).find((key) => key.toLowerCase() === "path");
-	const entries = (pathKey ? env[pathKey] : undefined)?.split(delimiter).filter(Boolean) ?? [];
-	for (const dir of entries) {
-		const candidate = `${dir.replace(/[\\/]+$/, "")}/pwsh`;
-		if (exists(candidate)) return candidate;
-	}
-	return undefined;
-}
-
+/** pi's resolver on Windows (`pwsh.exe` then `powershell.exe`); the first executable `pwsh` on PATH elsewhere. */
 export function resolvePowerShellSpawn(input: PowerShellResolveInput = {}): ShellSpawn | undefined {
 	const platform = input.platform ?? process.platform;
 	if (platform === "win32") {
@@ -179,7 +175,7 @@ export function resolvePowerShellSpawn(input: PowerShellResolveInput = {}): Shel
 			return undefined;
 		}
 	}
-	const pwsh = findPwshOnPath(input.env, input.exists);
+	const pwsh = (input.which ?? ((cmd, env) => whichOnPath(cmd, env, platform)))("pwsh", input.env ?? process.env);
 	return pwsh ? { shell: pwsh, args: [...POWERSHELL_ARGS] } : undefined;
 }
 

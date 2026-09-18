@@ -21,6 +21,7 @@ import {
 	powershellStatements,
 } from "./powershell-rules.ts";
 import { expandTilde } from "../lib/paths.ts";
+import { isShellToolName } from "../lib/shell-tools.ts";
 
 export type PermissionMode = "default" | "acceptEdits" | "plan" | "bypassPermissions" | "dontAsk" | "auto";
 /** "classify" is auto mode's outcome: hand the call to the approval classifier. */
@@ -288,13 +289,20 @@ export function bashMatchForms(command: string, depth = 0): string[] {
  * `Bash(rm:*)` (CC: "deny/ask rules must match compound commands so they can't
  * be bypassed"). Unparseable lines are matched as a whole only.
  */
-function bashPatternMatchesAny(pattern: string, command: string): boolean {
-	// decide() tests every deny rule, then every ask rule, against the same
-	// command; the forms depend on the command alone, so the last parse is kept.
-	if (lastForms?.command !== command) lastForms = { command, forms: bashMatchForms(command) };
-	return lastForms.forms.some((form) => matchesBashPattern(pattern, form));
+/**
+ * "Any form matches" with a one-entry memo of the forms: decide() tests every
+ * deny rule, then every ask rule, against the same command, and the forms
+ * depend on the command alone, so the last parse is kept per shell grammar.
+ */
+function anyFormMatcher(formsOf: (command: string) => string[], matches: (pattern: string, form: string) => boolean) {
+	let last: { command: string; forms: string[] } | undefined;
+	return (pattern: string, command: string): boolean => {
+		if (last?.command !== command) last = { command, forms: formsOf(command) };
+		return last.forms.some((form) => matches(pattern, form));
+	};
 }
-let lastForms: { command: string; forms: string[] } | undefined;
+
+const bashPatternMatchesAny = anyFormMatcher(bashMatchForms, matchesBashPattern);
 
 /**
  * PowerShell's Bash-pattern match against ONE statement: both sides have their
@@ -310,16 +318,11 @@ export function matchesPowerShellPattern(pattern: string, statement: string): bo
 }
 
 /** Deny/ask semantics for PowerShell: the pattern covers the line, any statement, or any canonical/nested form. */
-function powershellPatternMatchesAny(pattern: string, command: string): boolean {
-	if (lastPowerShellForms?.command !== command) lastPowerShellForms = { command, forms: powershellMatchForms(command) };
-	return lastPowerShellForms.forms.some((form) => matchesPowerShellPattern(pattern, form));
-}
-let lastPowerShellForms: { command: string; forms: string[] } | undefined;
+const powershellPatternMatchesAny = anyFormMatcher(powershellMatchForms, matchesPowerShellPattern);
 
-/** The tools whose subject is a shell command line and whose rules follow the Bash shape. */
+/** The tools whose subject is a shell command line and whose rules follow the Bash shape (lib/shell-tools.ts). */
 export function isShellTool(toolName: string): boolean {
-	const name = normalizeToolName(toolName);
-	return name === "bash" || name === "powershell";
+	return isShellToolName(normalizeToolName(toolName));
 }
 
 /**
@@ -402,7 +405,7 @@ export type SubjectKind = "command" | "path" | "url" | "text";
 
 export function subjectKind(toolName: string): SubjectKind {
 	const name = normalizeToolName(toolName);
-	if (name === "bash" || name === "powershell" || name === "monitor") return "command";
+	if (isShellToolName(name) || name === "monitor") return "command";
 	if (name === "web_fetch") return "url";
 	if (isPathSubjectTool(name)) return "path";
 	return "text";
@@ -557,7 +560,7 @@ export function toolTier(toolName: string): ToolTier {
 	const name = normalizeToolName(toolName);
 	if (SAFE_TOOLS.has(name)) return "safe";
 	if (EDIT_TOOLS.has(name)) return "edit";
-	if (name === "bash" || name === "powershell") return "execute";
+	if (isShellToolName(name)) return "execute";
 	return "custom";
 }
 
@@ -743,7 +746,7 @@ export function isBroadExecutionRule(rule: PermissionRule): boolean {
 	// Delegation rules are dropped outright: a subagent is a fresh agent loop, so
 	// pre-approving one pre-approves whatever that loop decides to do.
 	if (DELEGATION_TOOLS.has(rule.tool)) return true;
-	if (rule.tool !== "bash" && rule.tool !== "powershell") return false;
+	if (!isShellToolName(rule.tool)) return false;
 
 	if (!rule.pattern) return true;
 	const pattern = rule.pattern.trim().toLowerCase();

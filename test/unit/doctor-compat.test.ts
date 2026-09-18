@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { collectCompat, importedConfigSection, mcpSection } from "../../extensions/doctor/compat.ts";
-import { checkDependencies, projectLanguages, providerHasNativeSearch, webSearchRoute, whichOnPath } from "../../extensions/doctor/dependencies.ts";
+import { checkDependencies, projectLanguages, providerHasNativeSearch, webSearchRoute } from "../../extensions/doctor/dependencies.ts";
+import { whichOnPath } from "../../extensions/lib/which.ts";
 import { invalidatePluginsCache } from "../../extensions/lib/plugins.ts";
 import { resetHookSettingsCache } from "../../extensions/hooks/settings.ts";
 

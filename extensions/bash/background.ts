@@ -51,8 +51,6 @@ export interface StartBackgroundBashOptions {
 	 * honoured); the powershell extension passes its own spec.
 	 */
 	shell?: ShellSpawn;
-	/** Task kind on the registry; "bash" (the default) is what the shell panel lists. */
-	kind?: BackgroundTask["kind"];
 	onFinished(task: BackgroundTask, summary: BashFinishSummary): void;
 }
 
@@ -88,7 +86,8 @@ export function startBackgroundBash(options: StartBackgroundBashOptions): Backgr
 
 	const task: BackgroundTask = {
 		id: options.id,
-		kind: options.kind ?? "bash",
+		// "bash" for a PowerShell run too: the kind is what the shell panel lists.
+		kind: "bash",
 		description: options.description,
 		command: options.command,
 		status: "running",

@@ -854,7 +854,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			// (`{"meta":{"gitStatus":{"clean":…}}}`, captured 2.1.276 — findings §22).
 			const recordedCommand = typeof recordedInput.command === "string" ? recordedInput.command : undefined;
 			if (isShellTool(normalizedTool) && recordedCommand && isGitStatusCommand(recordedCommand)) {
-				const clean = gitStatusClean(callCwd);
+				const clean = await gitStatusClean(callCwd);
 				if (clean !== undefined) transcript.push({ kind: "meta", gitStatus: { clean } });
 			}
 			capTranscript();

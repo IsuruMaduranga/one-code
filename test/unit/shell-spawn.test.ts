@@ -4,13 +4,12 @@
  * or the cc-windows-mode skill's portable copy); the repo never mocks
  * child_process. Skipped cleanly where no pwsh exists.
  */
-import { existsSync } from "node:fs";
-import { homedir } from "node:os";
+import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
 	createPowerShellOperations,
-	findPwshOnPath,
 	gitBashOverride,
 	isBashBinaryName,
 	POWERSHELL_ARGS,
@@ -111,19 +110,23 @@ describe("resolvePowerShellSpawn", () => {
 		).toBeUndefined();
 	});
 
-	it("elsewhere finds pwsh on PATH with pi's argument list", () => {
+	it("elsewhere finds an executable pwsh on PATH with pi's argument list", () => {
 		const env = { PATH: "/usr/bin:/opt/pwsh" };
-		const exists = (p: string) => p === "/opt/pwsh/pwsh";
-		expect(findPwshOnPath(env, exists)).toBe("/opt/pwsh/pwsh");
-		expect(resolvePowerShellSpawn({ platform: "darwin", env, exists })).toEqual({
+		const which = (cmd: string, e: NodeJS.ProcessEnv) => (cmd === "pwsh" && e.PATH?.includes("/opt/pwsh") ? "/opt/pwsh/pwsh" : undefined);
+		expect(resolvePowerShellSpawn({ platform: "darwin", env, which })).toEqual({
 			shell: "/opt/pwsh/pwsh",
 			args: ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command"],
 		});
-		expect(resolvePowerShellSpawn({ platform: "linux", env, exists: () => false })).toBeUndefined();
+		expect(resolvePowerShellSpawn({ platform: "linux", env, which: () => undefined })).toBeUndefined();
 	});
 
-	it("honours a lowercase `Path` key (Windows spelling)", () => {
-		expect(findPwshOnPath({ Path: "/x" }, (p) => p === "/x/pwsh")).toBe("/x/pwsh");
+	it("uses the shared PATH lookup, which requires the file to be executable", () => {
+		const dir = mkdtempSync(join(tmpdir(), "pwsh-which-"));
+		writeFileSync(join(dir, "pwsh"), "#!/bin/sh\n", { mode: 0o644 });
+		expect(resolvePowerShellSpawn({ platform: "darwin", env: { PATH: dir } })).toBeUndefined();
+		chmodSync(join(dir, "pwsh"), 0o755);
+		expect(resolvePowerShellSpawn({ platform: "darwin", env: { PATH: dir } })?.shell).toBe(join(dir, "pwsh"));
+		rmSync(dir, { recursive: true, force: true });
 	});
 });
 

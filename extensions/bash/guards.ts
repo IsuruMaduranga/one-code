@@ -34,7 +34,7 @@ import {
 	type Token,
 } from "../auto-mode/shell-analysis.ts";
 
-const clip = (text: string, max = 200): string => (text.length > max ? `${text.slice(0, max)}…` : text);
+export const clip = (text: string, max = 200): string => (text.length > max ? `${text.slice(0, max)}…` : text);
 
 export function bashGuardReason(command: string, opts: { background: boolean }): string | undefined {
 	// A heredoc/here-string body is data, but parseCommand tokenizes it as live
@@ -72,31 +72,51 @@ function sleepSeconds(args: Token[]): number | undefined {
 // A segment's raw slice can keep half of the operator that ended the previous
 // one (`a && b` → second raw is `& b`) — strip it for a clean echo.
 
-function waitReason(segments: Segment[]): string | undefined {
-	// Measure the run of LEADING sleep segments: `sleep 1 && sleep 1 && …` is
-	// one wait spelled as a chain, so the pacing exemption applies only to a
-	// single provably-short sleep. Unprovable durations (`sleep "$DELAY"`)
-	// count as long — the model controls the literal.
+/**
+ * The wait guard's grammar-independent half, shared with the PowerShell
+ * guards: measure the run of LEADING sleep statements — `sleep 1 && sleep 1 &&
+ * …` is one wait spelled as a chain, so the pacing exemption applies only to a
+ * single provably-short sleep. Unprovable durations (`sleep "$DELAY"`) count
+ * as long: the model controls the literal. `sleepSeconds` returns undefined
+ * for a non-sleep statement.
+ */
+export function leadingSleepReason<T>(
+	statements: T[],
+	sleepSeconds: (statement: T) => number | undefined | null,
+	raw: (statement: T) => string,
+	opts: { sleepName: string; joiner: string; untilExample: string },
+): string | undefined {
 	let leadSleeps = 0;
 	let total: number | undefined = 0;
-	for (const seg of segments) {
-		const { command: cmd, args } = resolvePayload(leadTokens(seg));
-		if (cmd !== "sleep") break;
+	for (const statement of statements) {
+		const seconds = sleepSeconds(statement);
+		if (seconds === null) break; // not a sleep
 		leadSleeps++;
-		const seconds = sleepSeconds(args);
 		total = total === undefined || seconds === undefined ? undefined : total + seconds;
 	}
 	if (leadSleeps === 0) return undefined;
 	if (leadSleeps === 1 && total !== undefined && total < 2) return undefined;
-	const rest = segments.slice(leadSleeps).map((seg) => seg.raw).filter(Boolean).join("; ");
-	const shown = segments.slice(0, leadSleeps).map((seg) => seg.raw).join(" && ");
+	const rest = statements.slice(leadSleeps).map(raw).filter(Boolean).join("; ");
+	const shown = statements.slice(0, leadSleeps).map(raw).join(opts.joiner);
 	const echo = rest ? `\`${shown}\` followed by: ${clip(rest)}` : `standalone \`${shown}\``;
 	return (
-		`Blocked: ${echo}. A foreground sleep stalls the whole session while it runs. ` +
+		`Blocked: ${echo}. A foreground ${opts.sleepName} stalls the whole session while it runs. ` +
 		"To wait for a command you started, run it with run_in_background: true — its completion arrives as a system notification on its own, so you never need to poll. " +
-		"To wait for a condition, use the monitor tool with an until-loop (e.g. `until <check>; do sleep 2; done`) — monitor is deferred, load it with tool_search select:monitor. " +
+		`To wait for a condition, use the monitor tool with an until-loop (e.g. \`${opts.untilExample}\`) — monitor is deferred, load it with tool_search select:monitor. ` +
 		"If you genuinely need a delay (rate limiting, deliberate pacing), keep it under 2 seconds. " +
 		"Do not chain shorter sleeps to work around this block."
+	);
+}
+
+function waitReason(segments: Segment[]): string | undefined {
+	return leadingSleepReason(
+		segments,
+		(seg) => {
+			const { command: cmd, args } = resolvePayload(leadTokens(seg));
+			return cmd === "sleep" ? sleepSeconds(args) : null;
+		},
+		(seg) => seg.raw,
+		{ sleepName: "sleep", joiner: " && ", untilExample: "until <check>; do sleep 2; done" },
 	);
 }
 

@@ -98,7 +98,9 @@ export function toolMatchCandidates(nativeName: string): string[] {
  */
 export function matcherApplies(matcher: string | undefined, candidates: string[]): boolean {
 	if (matcher === undefined || matcher === "" || matcher === "*") return true;
-	const alternatives = matcher.includes(",") ? [matcher, ...matcher.split(",").map((part) => part.trim()).filter(Boolean)] : [matcher];
+	// No comma → the one matcher; a regex holding a literal `,` could never
+	// equal a bare tool name, so the unsplit form is not worth testing.
+	const alternatives = matcher.split(",").map((part) => part.trim()).filter(Boolean);
 	return alternatives.some((alternative) => {
 		let regex: RegExp | undefined;
 		try {

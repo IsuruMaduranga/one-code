@@ -1,9 +1,10 @@
 /**
  * Deterministic pre-execution guards for the powershell tool (pure) — the
- * PowerShell spelling of `bash/guards.ts`'s wait and interactive guards.
- * Steering, not security: the permission gate and the auto-mode classifier
- * still judge everything that passes. A guard concludes only on a positive
- * parse, so an unparseable line always passes through.
+ * PowerShell spelling of `bash/guards.ts`'s wait and interactive guards, on
+ * the same shared `leadingSleepReason` core. Steering, not security: the
+ * permission gate and the auto-mode classifier still judge everything that
+ * passes. A guard concludes only on a positive parse, so an unparseable line
+ * always passes through.
  *
  * - wait guard (foreground): a line that LEADS with `Start-Sleep` (or its
  *   `sleep` alias) exists only to wait and stalls the session; a provably
@@ -14,9 +15,8 @@
  *   already forbids them; the guard makes the refusal instructive.
  */
 
+import { leadingSleepReason } from "../bash/guards.ts";
 import { powershellStatements, statementCommand } from "../permissions/powershell-rules.ts";
-
-const clip = (text: string, max = 200): string => (text.length > max ? `${text.slice(0, max)}…` : text);
 
 /** Seconds a `Start-Sleep` statement provably lasts, or undefined when its argument is not a literal. */
 export function startSleepSeconds(statement: string): number | undefined {
@@ -77,25 +77,10 @@ export function powershellGuardReason(command: string, opts: { background: boole
 	}
 	if (opts.background) return undefined;
 
-	// Wait guard: the run of LEADING Start-Sleep statements.
-	let leadSleeps = 0;
-	let total: number | undefined = 0;
-	for (const statement of statements) {
-		if (statementCommand(statement) !== "start-sleep") break;
-		leadSleeps++;
-		const seconds = startSleepSeconds(statement);
-		total = total === undefined || seconds === undefined ? undefined : total + seconds;
-	}
-	if (leadSleeps === 0) return undefined;
-	if (leadSleeps === 1 && total !== undefined && total < 2) return undefined;
-	const rest = statements.slice(leadSleeps).join("; ");
-	const shown = statements.slice(0, leadSleeps).join("; ");
-	const echo = rest ? `\`${shown}\` followed by: ${clip(rest)}` : `standalone \`${shown}\``;
-	return (
-		`Blocked: ${echo}. A foreground Start-Sleep stalls the whole session while it runs. ` +
-		"To wait for a command you started, run it with run_in_background: true — its completion arrives as a system notification on its own, so you never need to poll. " +
-		"To wait for a condition, use the monitor tool with an until-loop (deferred — load it with tool_search select:monitor). " +
-		"If you genuinely need a delay (rate limiting, deliberate pacing), keep it under 2 seconds. " +
-		"Do not chain shorter sleeps to work around this block."
+	return leadingSleepReason(
+		statements,
+		(statement) => (statementCommand(statement) === "start-sleep" ? startSleepSeconds(statement) : null),
+		(statement) => statement,
+		{ sleepName: "Start-Sleep", joiner: "; ", untilExample: "while (-not (<check>)) { Start-Sleep 2 }" },
 	);
 }

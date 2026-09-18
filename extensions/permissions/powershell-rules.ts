@@ -164,6 +164,17 @@ export function canonicalizeStatement(statement: string): string {
  * an allow rule over a script block has to cover the pieces.
  */
 export function powershellStatements(command: string): string[] | undefined {
+	// One decision parses the same line from several places (read-only check,
+	// allow-rule split, match forms, guards, git-status detection); a one-entry
+	// memo keyed by the exact string keeps that to one scan per command.
+	if (lastSplit?.command === command) return lastSplit.statements?.slice();
+	const statements = splitStatements(command);
+	lastSplit = { command, statements };
+	return statements?.slice();
+}
+let lastSplit: { command: string; statements: string[] | undefined } | undefined;
+
+function splitStatements(command: string): string[] | undefined {
 	const parts: string[] = [];
 	let current = "";
 	let i = 0;
@@ -416,7 +427,7 @@ export function powershellReadOnly(command: string): PowerShellReadOnlyVerdict {
 export function isGitStatusCommand(command: string): boolean {
 	const statements = powershellStatements(command);
 	if (!statements || statements.length !== 1) return false;
-	const words = statements[0].split(/\s+/);
-	if (canonicalCommandName(words[0] ?? "").toLowerCase() !== "git") return false;
+	if (statementCommand(statements[0]) !== "git") return false;
+	const words = statements[0].trim().split(/\s+/);
 	return words[1] === "status" && words.slice(2).every((w) => w.startsWith("-"));
 }
