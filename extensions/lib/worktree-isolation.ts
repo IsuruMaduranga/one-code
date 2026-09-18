@@ -24,6 +24,7 @@ import { isAbsolute, join, relative } from "node:path";
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 import { isWithin, isWritingTool, pathArgument, resolveForContainment, toAbsolute } from "../auto-mode/paths.ts";
 import { analyzeShellCommand } from "../auto-mode/shell-analysis.ts";
+import { gitBashPathToNative } from "./paths.ts";
 import { worktreeBashGuardReason } from "../worktree/guards.ts";
 
 export interface WorktreeIsolation {
@@ -130,7 +131,8 @@ export function worktreeBashWriteGuardReason(input: { command: string; cwd: stri
 	const home = input.home ?? homedir();
 	const evidence = analyzeShellCommand({ command: input.command, cwd: input.cwd, home });
 	for (const write of evidence.writes) {
-		const mapped = sharedCheckoutWriteTarget(write.token, input.cwd, input.isolation, home);
+		// The token as Git Bash reaches it (`/c/…`, `/tmp/…` on Windows), judged like a file-tool path.
+		const mapped = sharedCheckoutWriteTarget(gitBashPathToNative(write.token), input.cwd, input.isolation, home);
 		if (mapped) return refusal(input.isolation, `this command writes to ${write.token}, which`, mapped);
 	}
 	return undefined;

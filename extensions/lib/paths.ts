@@ -9,7 +9,7 @@
  * other's. See "Own state, borrowed config" in docs/decisions.md.
  */
 
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
 /**
@@ -74,6 +74,37 @@ export function toPosixPath(path: string): string {
 	const drive = /^([A-Za-z]):[/\\]/.exec(path);
 	if (drive) return `/${drive[1].toLowerCase()}${path.slice(2).replace(/\\/g, "/")}`;
 	return path.replace(/\\/g, "/");
+}
+
+/**
+ * The inverse conversion, for a path spelled the way Git Bash (MSYS2) spells
+ * it, on every platform (pure — `gitBashPathToNative` is the win32-gated
+ * form). Claude Code's `posixPathToWindowsPath` covers the first two shapes:
+ * `/c/Users/x` is `C:\Users\x`, `/cygdrive/c/x` is `C:\x`. The third is Git
+ * for Windows' own mount table: `/tmp/x` is `<tmp>\x`, because its default
+ * fstab mounts `/tmp` on the user's temp dir (`usertemp`; findings §22 saw
+ * `pwd` print `/tmp/…` for a cwd under `%TEMP%`). Every other POSIX absolute
+ * path (`/usr/bin/…`, `/etc/hosts` — files under the Git install) and every
+ * non-POSIX path is returned as given.
+ */
+export function msysPathToWindows(path: string, tmp: string): string {
+	const drive = /^\/(?:cygdrive\/)?([A-Za-z])(?:\/(.*))?$/.exec(path);
+	if (drive) return `${drive[1].toUpperCase()}:\\${(drive[2] ?? "").replace(/\//g, "\\")}`;
+	const temp = /^\/tmp(?:\/(.*))?$/.exec(path);
+	if (temp) return temp[1] ? join(tmp, temp[1]) : tmp;
+	return path;
+}
+
+/**
+ * A token from a bash command line as the path it reaches on this machine:
+ * on Windows the bash tool runs Git Bash, so `/c/…`, `/cygdrive/c/…` and
+ * `/tmp/…` are converted ({@link msysPathToWindows}); elsewhere, and for any
+ * other spelling, the token is unchanged. For bash tokens only — pi's file
+ * tools resolve their paths natively, so a gate judging a file-tool path must
+ * see what `path.resolve` sees.
+ */
+export function gitBashPathToNative(token: string): string {
+	return process.platform === "win32" ? msysPathToWindows(token, tmpdir()) : token;
 }
 
 /** Separators as `/`, whatever the platform — for display and for `/`-spelled comparisons. */

@@ -32,7 +32,7 @@
 
 import { isProtectedPath } from "../permissions/protected-paths.ts";
 import { isExecutionPrimitivePath, isSensitivePath } from "./sensitive.ts";
-import { isWithin, resolveForContainment, toAbsolute } from "./paths.ts";
+import { isWithin, resolveForContainment, toAbsoluteBash } from "./paths.ts";
 
 export type ShellVerdict = "safe" | "escalate";
 
@@ -790,7 +790,7 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [] }: 
 	 */
 	const checkWriteTarget = (token: string) => {
 		if (token === "/dev/null") return;
-		const absolute = toAbsolute(effectiveCwd, token, home);
+		const absolute = toAbsoluteBash(effectiveCwd, token, home);
 		const resolved = resolveForContainment(absolute);
 		const outsideCwd = resolved === undefined || !isWithin(containmentRoot, resolved);
 		evidence.writes.push({ token, resolved, outsideCwd });
@@ -863,7 +863,7 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [] }: 
 		// `~/.kube/config` through two tokens that each look harmless (N12).
 		for (const { value } of args) {
 			if (!value || value.startsWith("-")) continue;
-			const absolute = toAbsolute(effectiveCwd, value, home);
+			const absolute = toAbsoluteBash(effectiveCwd, value, home);
 			if (isSensitivePath(value) || isSensitivePath(absolute)) {
 				// The *original* token, never the resolved/expanded form (N18).
 				if (!evidence.sensitivePaths.includes(value)) evidence.sensitivePaths.push(value);
@@ -878,7 +878,7 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [] }: 
 		if (name === "cd") {
 			const target = args.find((token) => !token.value.startsWith("-"))?.value;
 			if (target) {
-				effectiveCwd = toAbsolute(effectiveCwd, target, home);
+				effectiveCwd = toAbsoluteBash(effectiveCwd, target, home);
 				escalate(`changes directory to ${target}, so later paths in this command resolve elsewhere`);
 			}
 			continue;
@@ -902,7 +902,7 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [] }: 
 				continue;
 			}
 			const reason = gitEscalationReason(args, (dir) => {
-				const resolved = resolveForContainment(toAbsolute(effectiveCwd, dir, home));
+				const resolved = resolveForContainment(toAbsoluteBash(effectiveCwd, dir, home));
 				return resolved === undefined || !isWithin(containmentRoot, resolved);
 			});
 			if (reason) escalate(reason);
@@ -946,7 +946,7 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [] }: 
 			}
 			for (const value of positionals) {
 				if (!looksLikePath(value)) continue;
-				const resolved = resolveForContainment(toAbsolute(effectiveCwd, value, home));
+				const resolved = resolveForContainment(toAbsoluteBash(effectiveCwd, value, home));
 				if (resolved !== undefined && isWithin(containmentRoot, resolved)) continue;
 				if (!evidence.outsideReads.includes(value)) evidence.outsideReads.push(value);
 				escalate(`reads ${value}, which is outside the working directory`, { outsideRead: true });

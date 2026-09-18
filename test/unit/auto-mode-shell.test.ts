@@ -1,9 +1,9 @@
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { analyzeShellCommand, hasUnmodelledSyntax, parseCommand } from "../../extensions/auto-mode/shell-analysis.ts";
-import { forwardSlashes as sh } from "../../extensions/lib/paths.ts";
+import { forwardSlashes as sh, toPosixPath } from "../../extensions/lib/paths.ts";
 
 let cwd: string;
 let home: string;
@@ -453,5 +453,38 @@ describe("runtime protected dirs (PERMISSIONS-REVIEW-2026-09-05 M7)", () => {
 		expect(guarded.notes.join(" ")).toContain("protected tooling or agent configuration path");
 		// A redirect elsewhere under ~/.pi is not covered by the dir.
 		expect(analyzeShellCommand({ command: `echo x > ${sh(home)}/.pi/notes.txt`, cwd, home, protectedDirs: [agentDir] }).protectedPaths).toEqual([]);
+	});
+});
+
+/**
+ * On Windows the bash tool runs Git Bash, and a model working there spells the
+ * project as `/c/Users/…` (or, for a project under %TEMP%, as `/tmp/…` — Git
+ * for Windows mounts /tmp on the user's temp dir). The pre-gate must read those
+ * as the project, or every in-project write spelled that way is classified.
+ * Windows-only: the spellings mean nothing elsewhere.
+ */
+describe.skipIf(process.platform !== "win32")("Git Bash path spellings on Windows", () => {
+	it("reads /c/… as the project it is", () => {
+		const evidence = analyze(`echo hi > ${toPosixPath(cwd)}/out.txt`);
+		expect(evidence, JSON.stringify(evidence)).toMatchObject({ verdict: "safe" });
+		expect(evidence.writes[0]?.outsideCwd).toBe(false);
+	});
+
+	it("reads /tmp/… as the user's temp dir, where this project lives", () => {
+		const underTemp = sh(relative(tmpdir(), cwd));
+		expect(underTemp.startsWith("..")).toBe(false);
+		const evidence = analyze(`echo hi > /tmp/${underTemp}/out.txt`);
+		expect(evidence, JSON.stringify(evidence)).toMatchObject({ verdict: "safe" });
+	});
+
+	it("still escalates a /c/… target outside the project", () => {
+		const evidence = analyze("cp a.txt /c/Windows/Temp/x.txt");
+		expect(evidence.verdict).toBe("escalate");
+		expect(evidence.notes.join("\n")).toContain("outside the working directory");
+	});
+
+	it("follows a cd to a /c/… spelling of the project", () => {
+		const evidence = analyze(`cd ${toPosixPath(cwd)} && echo hi > out.txt`);
+		expect(evidence.writes[0]?.outsideCwd, JSON.stringify(evidence)).toBe(false);
 	});
 });

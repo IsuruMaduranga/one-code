@@ -1,6 +1,6 @@
 import { mkdtempSync } from "node:fs";
 import os from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	describeIsolation,
@@ -133,5 +133,21 @@ describe("worktreeWriteGuardReason", () => {
 		} finally {
 			releaseWorktreeIsolation(cwd);
 		}
+	});
+});
+
+describe.skipIf(process.platform !== "win32")("worktree write guard: Git Bash path spellings on Windows", () => {
+	const drive = resolve("/").charAt(0).toLowerCase();
+	const isolation = describeIsolation("/tmp/cc-wt-y/tree", "/repo");
+	const bash = (command: string) => worktreeBashWriteGuardReason({ command, cwd: "/tmp/cc-wt-y/tree", isolation, home: "/home/u" });
+
+	it("refuses a shell write into the shared checkout spelled /<drive>/repo", () => {
+		const reason = bash(`echo x > /${drive}/repo/src/a.ts`);
+		expect(reason).toContain("shared checkout");
+		expect(reason).toContain(join("/tmp/cc-wt-y/tree", "src", "a.ts"));
+	});
+
+	it("lets a shell write into the worktree spelled /<drive>/tmp/… through", () => {
+		expect(bash(`echo x > /${drive}/tmp/cc-wt-y/tree/src/a.ts`)).toBeUndefined();
 	});
 });

@@ -1,10 +1,10 @@
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { isSafetyControlTarget, safetyControlWrite } from "../../extensions/auto-mode/safety-floor.ts";
 import { oneCodeProjectSettingsPath } from "../../extensions/lib/one-code-settings.ts";
-import { claudeJsonPath, forwardSlashes } from "../../extensions/lib/paths.ts";
+import { claudeJsonPath, forwardSlashes, toPosixPath } from "../../extensions/lib/paths.ts";
 
 let home: string;
 let cwd: string;
@@ -136,5 +136,16 @@ describe("isSafetyControlTarget", () => {
 		// One Code's plan files and other .onecode contents are not gate controls.
 		expect(isSafetyControlTarget("/home/u/.onecode/plans/p.md", home)).toBe(false);
 		expect(isSafetyControlTarget("/home/u/.onecode/settings.json.bak", home)).toBe(false);
+	});
+});
+
+describe.skipIf(process.platform !== "win32")("safetyControlWrite: Git Bash path spellings on Windows", () => {
+	it("floors a settings write spelled /c/…", () => {
+		expect(check("bash", { command: `echo '{}' > ${toPosixPath(join(home, ".claude", "settings.json"))}` })).toBeDefined();
+	});
+
+	it("floors a settings write spelled /tmp/… (this home is under %TEMP%)", () => {
+		const underTemp = forwardSlashes(relative(tmpdir(), join(home, ".claude", "settings.json")));
+		expect(check("bash", { command: `echo '{}' > /tmp/${underTemp}` })).toBeDefined();
 	});
 });

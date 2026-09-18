@@ -17,7 +17,7 @@
 
 import { lstatSync, readlinkSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
-import { comparablePath, expandTilde, isPathAtOrUnder } from "../lib/paths.ts";
+import { comparablePath, expandTilde, gitBashPathToNative, isPathAtOrUnder } from "../lib/paths.ts";
 
 /**
  * Tools whose calls write to a path. Lives here — the lowest shared layer both
@@ -113,4 +113,19 @@ export function toAbsolute(cwd: string, token: string, home: string): string {
 	if (token === "~" || token.startsWith("~/")) return resolve(expandTilde(token, home));
 	if (isAbsolute(token)) return resolve(token);
 	return resolve(cwd, token);
+}
+
+/**
+ * {@link toAbsolute} for a token taken from a bash command line. On Windows the
+ * bash tool runs Git Bash, whose absolute paths are MSYS spellings — `/c/proj/f`
+ * is `C:\proj\f`, `/tmp/f` sits under the user's temp dir — so the token is
+ * converted first (lib/paths.ts gitBashPathToNative). `path.resolve` alone reads
+ * `/c/proj/f` as `<cwd drive>:\c\proj\f`, which no gate recognises as the
+ * project: the error fell towards escalate/prompt, never towards allow, but every
+ * in-project write spelled that way went to the classifier. File-tool paths keep
+ * `toAbsolute`: pi's read/edit/write resolve them natively, and a gate must
+ * judge the path the tool acts on, not the one Git Bash would reach.
+ */
+export function toAbsoluteBash(cwd: string, token: string, home: string): string {
+	return toAbsolute(cwd, gitBashPathToNative(token), home);
 }

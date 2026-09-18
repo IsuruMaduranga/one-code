@@ -27,7 +27,7 @@
 
 import { homedir } from "node:os";
 import { isAbsolute } from "node:path";
-import { isWithin, toAbsolute } from "../auto-mode/paths.ts";
+import { isWithin, toAbsoluteBash } from "../auto-mode/paths.ts";
 import { gitSubcommand, leadTokens, parseCommand, resolvePayload, type Token } from "../auto-mode/shell-analysis.ts";
 
 export interface WorktreeGuardContext {
@@ -125,8 +125,8 @@ export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: W
 			else if (hasExpansion(target) || target === "-") dir = undefined;
 			// An absolute (or ~) destination re-anchors the tracked directory
 			// even when it was unknown — later git commands become checkable again.
-			else if (isAbsolute(target) || target === "~" || target.startsWith("~/")) dir = toAbsolute("/", target, homedir());
-			else if (dir !== undefined) dir = toAbsolute(dir, target, homedir());
+			else if (isAbsolute(target) || target === "~" || target.startsWith("~/")) dir = toAbsoluteBash("/", target, homedir());
+			else if (dir !== undefined) dir = toAbsoluteBash(dir, target, homedir());
 			return undefined;
 		}
 		if (rawLead === "pushd" || rawLead === "popd") {
@@ -180,7 +180,7 @@ export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: W
 						`Use literal paths inside ${worktreePath} instead.`,
 					);
 				}
-				const resolved = toAbsolute(effective, raw, homedir());
+				const resolved = toAbsoluteBash(effective, raw, homedir());
 				if (value === "-C") effective = resolved;
 				else extraTargets.push(resolved);
 				i += inlined ? 1 : 2;

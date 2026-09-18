@@ -115,3 +115,18 @@ describe("worktree shared-stash guard", () => {
 		expect(guard("git -C /Users/x/other-repo stash pop")).toBeUndefined();
 	});
 });
+
+describe.skipIf(process.platform !== "win32")("worktree git-isolation guard: Git Bash path spellings on Windows", () => {
+	// `/repo` resolves onto the current drive; the MSYS spelling of that same path.
+	const drive = resolve("/").charAt(0).toLowerCase();
+
+	it("refuses git pointed at the shared checkout spelled /<drive>/repo", () => {
+		expect(guard(`git -C /${drive}/repo status`)).toContain(`targets ${resolve("/repo")}`);
+		expect(guard(`cd /${drive}/repo && git status`)).toBeDefined();
+		expect(guard(`git --git-dir=/${drive}/repo/.git log`)).toBeDefined();
+	});
+
+	it("leaves git against an unrelated repository spelled /<drive>/… alone", () => {
+		expect(guard(`git -C /${drive}/Users/x/other-repo pull`)).toBeUndefined();
+	});
+});
