@@ -280,7 +280,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 	 * never corrupts the `--mode json` event stream on stdout.
 	 */
 	const notifyOrPrint = (
-		ctx: { hasUI: boolean; ui: { notify(message: string, level: "info" | "warning" | "error"): void } },
+		ctx: Pick<ExtensionContext, "hasUI" | "ui">,
 		message: string,
 		level: "warning" | "error",
 	): void => {
@@ -302,13 +302,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 	const deliverSkill = async (
 		found: IndexedSkill,
 		args: string,
-		ctx: {
-			hasUI: boolean;
-			mode: ExtensionContext["mode"];
-			ui: { notify(message: string, level: "info" | "warning" | "error"): void };
-			isIdle(): boolean;
-			waitForIdle?: () => Promise<void>;
-		},
+		ctx: ExtensionContext & { waitForIdle?: () => Promise<void> },
 		extra: { images?: Array<{ type: "image"; data: string; mimeType: string }>; streamingBehavior?: "steer" | "followUp" } = {},
 	): Promise<"handled" | "unavailable"> => {
 		if (found.state === "off") {
