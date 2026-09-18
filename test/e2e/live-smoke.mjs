@@ -7,7 +7,7 @@
  * back in the tool result. The one check the unit suite cannot make: the
  * shell spawn, the permission gate and the provider round trip together, on
  * the machine that runs it. `.github/workflows/live-smoke.yml` runs both
- * shells on windows-latest (docs/features/windows/plan.md, Phase 3 item 7).
+ * shells on windows-latest.
  *
  *   node test/e2e/live-smoke.mjs --shell bash|powershell [--model <provider/model>] [--timeout <seconds>]
  *
@@ -15,8 +15,7 @@
  * none is set and the real pi agent dir has an auth.json, that is copied into
  * the isolated agent dir the run uses (a local convenience; CI has no such
  * file). Exit 0 on success; on failure the events and stderr are left in the
- * work dir and its path is printed. From a sandboxed assistant shell run this
- * inside tmux (findings §10).
+ * work dir and its path is printed.
  */
 import { execFileSync, spawn } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
