@@ -10,8 +10,13 @@ import { delimiter, join } from "node:path";
 
 export function whichOnPath(command: string, env: NodeJS.ProcessEnv, platform: string = process.platform): string | undefined {
 	if (!command) return undefined;
-	if (command.includes("/") || command.includes("\\")) return isExecutable(command) ? command : undefined;
-	const extensions = platform === "win32" ? (env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";") : [""];
+	// Windows resolves `foo` to `foo.exe`/`foo.cmd` whether or not a directory is
+	// spelled (`node_modules/.bin/tsserver` is `…\tsserver.cmd` on disk), so the
+	// extension list applies to both forms; elsewhere only the literal name counts.
+	const extensions = platform === "win32" ? ["", ...(env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";")] : [""];
+	if (command.includes("/") || command.includes("\\")) {
+		return extensions.map((ext) => command + ext).find(isExecutable);
+	}
 	for (const dir of (env.PATH ?? "").split(delimiter)) {
 		if (!dir) continue;
 		for (const ext of extensions) {

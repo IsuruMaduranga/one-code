@@ -20,6 +20,7 @@ import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import type { LspDiagnostic } from "./format.ts";
 import { commandLaunch } from "../lib/command-launch.ts";
+import { killProcessTree } from "../lib/process-tree.ts";
 import { createReaderState, encodeMessage, type JsonRpcMessage, readMessages } from "./protocol.ts";
 
 const INITIALIZE_TIMEOUT_MS = 15_000;
@@ -329,7 +330,10 @@ export class LspClient {
 		this.child = undefined;
 		await new Promise<void>((resolve) => {
 			const timer = setTimeout(() => {
-				child.kill("SIGKILL");
+				// The tree, not the leader: on Windows a .cmd-shimmed server runs
+				// under the cmd.exe `commandLaunch` started, and killing cmd.exe
+				// alone would orphan the server on the inherited pipes.
+				killProcessTree(child, "SIGKILL");
 				resolve();
 			}, 1000);
 			timer.unref?.();

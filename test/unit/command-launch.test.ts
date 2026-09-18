@@ -1,6 +1,9 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { commandLaunch, isBatchFile, quoteForCmd } from "../../extensions/lib/command-launch.ts";
+import { whichOnPath } from "../../extensions/lib/which.ts";
 
 /**
  * npm installs a language server (and VS Code its `code` CLI) on Windows as
@@ -51,5 +54,33 @@ describe("commandLaunch", () => {
 		expect(quoteForCmd("a&b")).toBe('"a&b"');
 		expect(quoteForCmd('say "hi"')).toBe('"say \\"hi\\""');
 		expect(quoteForCmd("")).toBe('""');
+	});
+
+	it("doubles backslashes that would otherwise escape a quote (a quoted path ending in \\)", () => {
+		// C runtime rule: `\\"` is an escaped quote, so a trailing separator before
+		// the closing quote must be doubled to survive as a separator.
+		expect(quoteForCmd("C:\\Program Files\\srv\\")).toBe('"C:\\Program Files\\srv\\\\"');
+		expect(quoteForCmd('dir\\"x')).toBe('"dir\\\\\\"x"');
+		// A backslash not before a quote is left alone.
+		expect(quoteForCmd("C:\\Program Files\\srv.cmd")).toBe('"C:\\Program Files\\srv.cmd"');
+	});
+
+	it("locates cmd.exe from the process environment, not the server's env (a config must not redirect it)", () => {
+		const hostile = { ...env, SystemRoot: "C:\\Malicious" };
+		const launch = commandLaunch("typescript-language-server", ["--stdio"], hostile, { platform: "win32", which });
+		expect(launch.command).toBe(join(process.env.SystemRoot ?? "C:\\Windows", "System32", "cmd.exe"));
+	});
+});
+
+describe("whichOnPath for a command spelled with a directory", () => {
+	const dir = mkdtempSync(join(tmpdir(), "which-ext-"));
+	afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+	it("applies PATHEXT on Windows (node_modules/.bin/tsserver is tsserver.cmd on disk) and only the literal name elsewhere", () => {
+		writeFileSync(join(dir, "probe.cmd"), "@echo off\r\n", { mode: 0o755 });
+		const spelled = join(dir, "probe");
+		expect(whichOnPath(spelled, { PATHEXT: ".EXE;.CMD" }, "win32")).toBe(join(dir, "probe.cmd"));
+		expect(whichOnPath(spelled, {}, "darwin")).toBeUndefined();
+		expect(whichOnPath(join(dir, "probe.cmd"), {}, "darwin")).toBe(join(dir, "probe.cmd"));
 	});
 });

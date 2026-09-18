@@ -30,8 +30,6 @@ export interface CommandLaunch {
 export interface CommandLaunchOptions {
 	platform?: string;
 	which?: (command: string, env: NodeJS.ProcessEnv, platform: string) => string | undefined;
-	/** The environment `cmd.exe` is located from (`SystemRoot`); defaults to the process environment. */
-	systemEnv?: Record<string, string | undefined>;
 }
 
 /** A batch-file shim, by extension (the filesystem folds case; PATHEXT spells them upper-case). */
@@ -41,12 +39,18 @@ export function isBatchFile(path: string): boolean {
 
 /**
  * One argument for a cmd.exe command line: quoted when it holds whitespace or
- * a cmd metacharacter, inner quotes escaped for the program the shim runs.
+ * a cmd metacharacter, with the C runtime's rules for what the program the
+ * shim runs will read back — an inner quote is `\"`, and a run of backslashes
+ * directly before a quote (an inner one, or the closing one after a path that
+ * ends in `\`) is doubled, or it would escape that quote. A literal `%` cannot
+ * be protected: cmd.exe expands `%NAME%` before it reads the quotes, the same
+ * limit Node's `shell: true` has, and `.cmd` shims are only reached this way.
  */
 export function quoteForCmd(arg: string): string {
 	if (arg === "") return '""';
 	if (!/[\s"&|<>^()]/.test(arg)) return arg;
-	return `"${arg.replace(/"/g, '\\"')}"`;
+	const body = arg.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, "$1$1");
+	return `"${body}"`;
 }
 
 export function commandLaunch(command: string, args: string[], env: NodeJS.ProcessEnv, opts: CommandLaunchOptions = {}): CommandLaunch {
@@ -56,8 +60,11 @@ export function commandLaunch(command: string, args: string[], env: NodeJS.Proce
 	if (!resolved) return { command, args };
 	if (!isBatchFile(resolved)) return { command: resolved, args };
 	const line = [resolved, ...args].map(quoteForCmd).join(" ");
+	// cmd.exe is located from the PROCESS environment, never from `env`: a
+	// server's config may set its own variables (a plugin's `.lsp.json` env
+	// block), and `SystemRoot` among them must not redirect the interpreter.
 	return {
-		command: system32Path("cmd.exe", opts.systemEnv ?? env),
+		command: system32Path("cmd.exe"),
 		args: ["/d", "/s", "/c", `"${line}"`],
 		windowsVerbatimArguments: true,
 	};
