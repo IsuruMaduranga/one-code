@@ -17,6 +17,7 @@ import { resolveForContainment } from "../../extensions/auto-mode/paths.ts";
 import { forwardSlashes, oneCodeStateDir, tildify, toPosixPath } from "../../extensions/lib/paths.ts";
 import { sessionScratchpadDir } from "../../extensions/lib/scratchpad.ts";
 import { whichOnPath } from "../../extensions/lib/which.ts";
+import { serverLaunch } from "../../extensions/lsp/launch.ts";
 import { decide, isInsideDir, matchesPathPattern } from "../../extensions/permissions/matcher.ts";
 import { sessionGrant } from "../../extensions/permissions/session-grant.ts";
 
@@ -129,18 +130,31 @@ describe.skipIf(!win32)("Windows: the scratchpad under %TEMP%", () => {
 describe.skipIf(!win32)("Windows: a .cmd shim on PATH (npm's shape for an LSP server)", () => {
 	const dir = mkdtempSync(join(tmpdir(), "cmd-shim-"));
 	afterAll(() => rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }));
+	writeFileSync(join(dir, "probe-tool.cmd"), "@echo off\r\necho probe-ok %*\r\n");
+	const env = { ...process.env, PATH: `${dir};${process.env.PATH ?? ""}` };
 
-	it("is found by whichOnPath (PATHEXT) but not by a bare spawn, which is how lsp/client.ts starts a server", async () => {
-		writeFileSync(join(dir, "probe-tool.cmd"), "@echo off\r\necho probe-ok\r\n");
-		const env = { ...process.env, PATH: `${dir};${process.env.PATH ?? ""}` };
+	/** Spawn and collect stdout with the spawn outcome, the way lsp/client.ts starts a server. */
+	const run = (command: string, args: string[], extra: { windowsVerbatimArguments?: boolean } = {}) =>
+		new Promise<{ outcome: string; stdout: string; code: number | null }>((done) => {
+			let stdout = "";
+			const child = spawn(command, args, { env, stdio: ["ignore", "pipe", "ignore"], windowsHide: true, ...extra });
+			child.stdout?.on("data", (d: Buffer) => (stdout += d.toString()));
+			child.on("error", (error) => done({ outcome: `error:${(error as NodeJS.ErrnoException).code}`, stdout, code: null }));
+			child.on("close", (code) => done({ outcome: "ran", stdout, code }));
+		});
+
+	it("is found by whichOnPath (PATHEXT) but not by a bare spawn — the ENOENT the fix exists for", async () => {
 		// PATHEXT spells the extension `.CMD`; the filesystem folds case, so the match is by name.
 		expect(whichOnPath("probe-tool", env, "win32")?.toLowerCase()).toBe(join(dir, "probe-tool.cmd").toLowerCase());
-		const outcome = await new Promise<string>((done) => {
-			const child = spawn("probe-tool", [], { env, stdio: "ignore", windowsHide: true });
-			child.on("error", (error) => done(`error:${(error as NodeJS.ErrnoException).code}`));
-			child.on("spawn", () => done("spawned"));
-		});
-		console.log(`bare spawn of a .cmd shim on Windows: ${outcome}`);
-		expect(outcome).toMatch(/^error:(ENOENT|EINVAL)$/);
+		const bare = await run("probe-tool", []);
+		expect(bare.outcome).toBe("error:ENOENT");
+	});
+
+	it("starts through serverLaunch's cmd.exe form, arguments intact", async () => {
+		const launch = serverLaunch("probe-tool", ["--stdio", "two words"], env);
+		expect(launch.command.toLowerCase()).toContain("cmd.exe");
+		const result = await run(launch.command, launch.args, { windowsVerbatimArguments: launch.windowsVerbatimArguments });
+		expect(result, JSON.stringify(result)).toMatchObject({ outcome: "ran", code: 0 });
+		expect(result.stdout.trim()).toBe('probe-ok --stdio "two words"');
 	});
 });
