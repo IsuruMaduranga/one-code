@@ -79,7 +79,9 @@ describe("whichOnPath for a command spelled with a directory", () => {
 	it("applies PATHEXT on Windows (node_modules/.bin/tsserver is tsserver.cmd on disk) and only the literal name elsewhere", () => {
 		writeFileSync(join(dir, "probe.cmd"), "@echo off\r\n", { mode: 0o755 });
 		const spelled = join(dir, "probe");
-		expect(whichOnPath(spelled, { PATHEXT: ".EXE;.CMD" }, "win32")).toBe(join(dir, "probe.cmd"));
+		// PATHEXT spelled in the file's own case: a case-folding filesystem would
+		// otherwise return `probe.CMD` here, a case-sensitive one nothing.
+		expect(whichOnPath(spelled, { PATHEXT: ".EXE;.cmd" }, "win32")).toBe(join(dir, "probe.cmd"));
 		expect(whichOnPath(spelled, {}, "darwin")).toBeUndefined();
 		expect(whichOnPath(join(dir, "probe.cmd"), {}, "darwin")).toBe(join(dir, "probe.cmd"));
 	});
