@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { toPosixPath } from "../../extensions/lib/paths.ts";
+import { foldsCase, toPosixPath } from "../../extensions/lib/paths.ts";
 import {
 	bashSubcommands,
 	decide,
@@ -199,6 +199,11 @@ describe("matchesPathPattern", () => {
 
 	it("expands ~ in the subject too, so a deny on ~/.ssh catches the tilde spelling (P6)", () => {
 		expect(matchesPathPattern("~/.ssh/**", "~/.ssh/id_rsa", CWD)).toBe(true);
+	});
+
+	it("folds case where the filesystem does (darwin, win32) and keeps it on linux", () => {
+		expect(matchesPathPattern("~/Notes/**", "~/notes/a.md", CWD)).toBe(foldsCase());
+		expect(matchesPathPattern("docs/**", "DOCS/a.md", CWD)).toBe(foldsCase());
 	});
 });
 

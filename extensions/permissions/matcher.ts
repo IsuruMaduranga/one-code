@@ -20,7 +20,7 @@ import {
 	powershellReadOnly,
 	powershellStatements,
 } from "./powershell-rules.ts";
-import { comparablePath, expandTilde, forwardSlashes, isRelativeInside, toPosixPath } from "../lib/paths.ts";
+import { comparablePath, expandTilde, foldsCase, forwardSlashes, isRelativeInside, toPosixPath } from "../lib/paths.ts";
 import { isShellToolName } from "../lib/shell-tools.ts";
 
 export type PermissionMode = "default" | "acceptEdits" | "plan" | "bypassPermissions" | "dontAsk" | "auto";
@@ -379,7 +379,7 @@ export function findBashAllowRule(rules: PermissionRule[], command: string, tool
  * `/c/Users/x/docs/a.md` (`lib/paths.ts toPosixPath`, the shape CC's own
  * Windows rules such as `Read(//c/Users/x/**)` are written in) — and also as
  * `C:/Users/x/docs/a.md`, so a rule spelled with the drive letter works too.
- * Windows compares case-insensitively, like its filesystem.
+ * darwin and win32 compare case-insensitively, like their filesystems.
  */
 export function matchesPathPattern(pattern: string, subject: string, cwd: string): boolean {
 	const home = homedir();
@@ -387,8 +387,9 @@ export function matchesPathPattern(pattern: string, subject: string, cwd: string
 	// Claude Code's rule syntax: `//path` is an absolute filesystem path (the
 	// doubled slash distinguishes it from `/path`, which CC reads relative to
 	// the project root). `Read(//etc/**)` is the form CC's own suggestions write.
-	// A Windows pattern spelled with backslashes is read as its `/` form.
-	const spelled = win32 ? forwardSlashes(pattern) : pattern;
+	// A Windows pattern spelled with backslash separators is read as its `/`
+	// form; `\*` and `\\` stay the literal escapes globToRegex documents.
+	const spelled = win32 ? pattern.replace(/\\(?![*\\])/g, "/") : pattern;
 	const expandedPattern = spelled.startsWith("//") ? expandTilde(spelled.slice(1), home) : expandTilde(spelled, home);
 	const expandedSubject = expandTilde(subject, home);
 
@@ -401,7 +402,10 @@ export function matchesPathPattern(pattern: string, subject: string, cwd: string
 	const homeRel = relative(resolve(home), absolute);
 	if (isRelativeInside(homeRel)) candidates.add(`~/${forwardSlashes(homeRel)}`);
 
-	const regex = globToRegex(forwardSlashes(expandedPattern), true, win32);
+	// Case-insensitive where the filesystem is (darwin, win32): `Read(~/Notes/**)`
+	// covers `~/notes/a.md`, the same file there — the rule every other
+	// containment check in this file compares by (comparablePath).
+	const regex = globToRegex(expandedPattern, true, foldsCase());
 	for (const candidate of candidates) {
 		if (regex.test(candidate)) return true;
 	}

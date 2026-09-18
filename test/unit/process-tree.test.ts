@@ -13,7 +13,7 @@
  */
 import { spawn } from "node:child_process";
 import { describe, expect, it } from "vitest";
-import { detachedSpawnOptions, killProcessTree, stopProcessTree, waitForChildExit } from "../../extensions/lib/process-tree.ts";
+import { detachedSpawnOptions, EXIT_STDIO_MAX_MS, killProcessTree, stopProcessTree, waitForChildExit } from "../../extensions/lib/process-tree.ts";
 import { bashSpawnOrThrow } from "../../extensions/lib/shell-spawn.ts";
 
 const win32 = process.platform === "win32";
@@ -75,6 +75,17 @@ describe("killProcessTree", () => {
 		const { code, signal } = await exited;
 		expect(Date.now() - started).toBeLessThan(3000);
 		expect(code === null || code !== 0 || signal !== null).toBe(true);
+	});
+
+	it("waitForChildExit settles within the post-exit cap when a straggler keeps writing to the inherited pipe", async () => {
+		// The leader exits at once; the backgrounded loop it left behind writes
+		// every 50 ms, re-arming the stdio grace forever without the cap.
+		const child = spawnShell("(while true; do echo x; sleep 0.05; done) & exit 0");
+		const started = Date.now();
+		await waitForChildExit(child);
+		const elapsed = Date.now() - started;
+		expect(elapsed).toBeLessThan(EXIT_STDIO_MAX_MS + 1500);
+		killProcessTree(child, "SIGKILL"); // the loop is not the leader's group on Windows; best effort
 	});
 });
 

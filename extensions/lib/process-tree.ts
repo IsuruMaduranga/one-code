@@ -34,6 +34,9 @@ export const KILL_GRACE_MS = 2_000;
 /** After `exit`, how long buffered stdio may keep arriving before the wait settles. */
 export const EXIT_STDIO_GRACE_MS = 200;
 
+/** ...and the most it may keep arriving in total: a straggler writing continuously must not keep re-arming the grace. */
+export const EXIT_STDIO_MAX_MS = 2_000;
+
 /**
  * `detached` everywhere but Windows, where process groups do not exist — except
  * for a child that must outlive an exiting parent (a fire-and-forget hook),
@@ -118,17 +121,21 @@ export interface ChildExit {
  * Resolve when the child has exited and its stdio has drained: on `close`
  * when that arrives promptly, else `EXIT_STDIO_GRACE_MS` after `exit` (the
  * grace re-arms while output is still arriving, so a burst written just before
- * exit is not cut). Rejects on a spawn `error`. Listeners the caller attached
- * for `data` keep working; the streams are destroyed once this settles so a
- * straggler holding the far end cannot keep them — or the process — alive.
+ * exit is not cut) and `EXIT_STDIO_MAX_MS` after `exit` at the latest (a
+ * descendant the kill missed that keeps writing must not hold the wait).
+ * Rejects on a spawn `error`. Listeners the caller attached for `data` keep
+ * working; the streams are destroyed once this settles so a straggler holding
+ * the far end cannot keep them — or the process — alive.
  */
 export function waitForChildExit(child: ChildProcess): Promise<ChildExit> {
 	return new Promise((resolve, reject) => {
 		let settled = false;
 		let exited: ChildExit | undefined;
 		let grace: NodeJS.Timeout | undefined;
+		let deadline: NodeJS.Timeout | undefined;
 		const cleanup = () => {
 			if (grace) clearTimeout(grace);
+			if (deadline) clearTimeout(deadline);
 			child.removeListener("error", onError);
 			child.removeListener("exit", onExit);
 			child.removeListener("close", onClose);
@@ -158,6 +165,7 @@ export function waitForChildExit(child: ChildProcess): Promise<ChildExit> {
 		const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
 			exited = { code, signal };
 			arm();
+			deadline = setTimeout(finish, EXIT_STDIO_MAX_MS);
 		};
 		const onClose = (code: number | null, signal: NodeJS.Signals | null) => {
 			exited ??= { code, signal };
