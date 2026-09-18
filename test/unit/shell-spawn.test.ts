@@ -8,6 +8,7 @@ import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { localPwsh, windowsPowerShell } from "./helpers/local-pwsh.ts";
 import {
 	bashSpawnOrThrow,
 	createPowerShellOperations,
@@ -154,14 +155,6 @@ describe("spawnShellCommand", () => {
 	});
 });
 
-/** A pwsh to test against: PATH, else the cc-windows-mode skill's portable copy. */
-function localPwsh(): ShellSpawn | undefined {
-	const onPath = resolvePowerShellSpawn();
-	if (onPath) return onPath;
-	const portable = join(homedir(), ".cache", "cc-windows-mode", "pwsh", "pwsh");
-	return existsSync(portable) ? { shell: portable, args: [...POWERSHELL_ARGS] } : undefined;
-}
-
 const pwsh = localPwsh();
 
 // pwsh's cold start took over 5 s on the Ubuntu CI runner; the suite's default timeout is too tight for it.
@@ -215,3 +208,38 @@ function collect(child: ReturnType<typeof spawnShellCommand>): Promise<string> {
 		child.on("close", () => resolve(out));
 	});
 }
+
+const winPS = windowsPowerShell();
+
+/**
+ * Windows PowerShell 5.1 — the edition every Windows machine has without an
+ * install, and the one Claude Code's description warns the model about (no
+ * `&&`, UTF-16 default). Runs only on Windows (the CI runner has it).
+ */
+describe.skipIf(!winPS)("createPowerShellOperations (Windows PowerShell 5.1, powershell.exe)", { timeout: 60_000 }, () => {
+	const ops = createPowerShellOperations(() => winPS);
+	const run = async (command: string) => {
+		let output = "";
+		const result = await ops.exec(command, process.cwd(), { onData: (d) => (output += d.toString()) });
+		return { ...result, output };
+	};
+
+	it("is the desktop edition by executable name, and in fact", async () => {
+		expect(powerShellEdition(winPS)).toBe("desktop");
+		const { exitCode, output } = await run("Write-Output $PSVersionTable.PSEdition; Write-Output $PSVersionTable.PSVersion.Major");
+		expect(exitCode).toBe(0);
+		expect(output).toContain("Desktop");
+		expect(output).toContain("5");
+	});
+
+	it("emits UTF-8 through pi's prefix, although 5.1 does not default to it", async () => {
+		const { output } = await run("Write-Output 'héllo — ✓'");
+		expect(output).toContain("héllo — ✓");
+	});
+
+	it("has no && chain operator — a parser error, as the description says", async () => {
+		const { exitCode, output } = await run("Write-Output a && Write-Output b");
+		expect(exitCode, output).not.toBe(0);
+		expect(output).toContain("&&");
+	});
+});

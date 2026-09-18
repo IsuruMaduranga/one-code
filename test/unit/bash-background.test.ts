@@ -10,6 +10,7 @@ import {
 	tailCap,
 } from "../../extensions/bash/background.ts";
 import type { BackgroundTask } from "../../extensions/background/registry.ts";
+import { localPwsh } from "./helpers/local-pwsh.ts";
 
 function start(command: string, extra?: { timeoutSeconds?: number; logPath?: string }) {
 	let summary: BashFinishSummary | undefined;
@@ -132,4 +133,54 @@ describe("startBackgroundBash stop escalation", () => {
 		expect(summary()?.stopped).toBe(true);
 		expect(Date.now() - stopped).toBeLessThan(4000);
 	}, 10_000);
+});
+
+const pwsh = localPwsh();
+
+/**
+ * The powershell extension runs its `run_in_background` through the same
+ * starter with its own spawn spec; stop and timeout must end a PowerShell tree
+ * the way they end a bash one (on Windows: taskkill /T /F, lib/process-tree.ts).
+ */
+describe.skipIf(!pwsh)("startBackgroundBash with a PowerShell spec (real pwsh)", { timeout: 45_000 }, () => {
+	const startPwsh = (command: string, extra?: { timeoutSeconds?: number }) => {
+		let summary: BashFinishSummary | undefined;
+		const task = startBackgroundBash({
+			id: "bpwsh001",
+			command,
+			description: "test",
+			cwd: process.cwd(),
+			shell: pwsh,
+			...extra,
+			onFinished: (_task: BackgroundTask, s) => {
+				summary = s;
+			},
+		});
+		return { task, summary: () => summary };
+	};
+	const settled = (task: BackgroundTask) =>
+		Promise.race([task.finished, new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`task still ${task.status} after 30 s`)), 30_000))]);
+
+	it("completes with the command's output", async () => {
+		const { task } = startPwsh("Write-Output 'bg from pwsh'");
+		await settled(task);
+		expect(task.status).toBe("completed");
+		expect(task.output()).toContain("bg from pwsh");
+	});
+
+	it("stop() ends the PowerShell tree and reports stopped", async () => {
+		const { task, summary } = startPwsh("Start-Sleep -Seconds 60");
+		await new Promise((r) => setTimeout(r, 300));
+		task.stop();
+		await settled(task);
+		expect(task.status).toBe("stopped");
+		expect(summary()?.stopped).toBe(true);
+	});
+
+	it("kills a PowerShell run when the timeout elapses and says it timed out", async () => {
+		const { task, summary } = startPwsh("Start-Sleep -Seconds 60", { timeoutSeconds: 1 });
+		await settled(task);
+		expect(task.status).toBe("failed");
+		expect(summary()?.timedOut).toBe(true);
+	});
 });

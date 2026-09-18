@@ -18,6 +18,12 @@ describe("projectSlug", () => {
 		expect(projectSlug("/Users/isuruWij/ml/pi-claude-code")).toBe("-Users-isuruWij-ml-pi-claude-code");
 		expect(projectSlug("/tmp/my_app.v2")).toBe("-tmp-my-app-v2");
 	});
+
+	it("slugs a native Windows path the same way (drive colon and backslashes become dashes)", () => {
+		expect(projectSlug("C:\\Users\\x\\proj")).toBe("C--Users-x-proj");
+		expect(projectSlug("\\\\server\\share\\proj")).toBe("--server-share-proj");
+		expect(memoryDir("C:\\Users\\x", "C:\\Users\\x\\proj")).toBe(join("C:\\Users\\x", ".claude", "projects", "C--Users-x-proj", "memory"));
+	});
 });
 
 describe("memoryDir", () => {

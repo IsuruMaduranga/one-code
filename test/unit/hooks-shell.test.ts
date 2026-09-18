@@ -4,13 +4,13 @@
  * this machine (PATH or the cc-windows-mode portable copy).
  */
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { defaultHookShell, hookShellSpawn, runHookCommand } from "../../extensions/hooks/executor.ts";
 import { matcherApplies, toolMatchCandidates } from "../../extensions/hooks/matcher.ts";
 import { parseHooksBlock } from "../../extensions/hooks/settings.ts";
 import { resolvePowerShellSpawn } from "../../extensions/lib/shell-spawn.ts";
+import { PORTABLE_PWSH_DIR } from "./helpers/local-pwsh.ts";
 
 describe("parseHooksBlock shell field", () => {
 	it("keeps bash/powershell and drops anything else with a diagnostic", () => {
@@ -69,10 +69,9 @@ describe("hook shell resolution", () => {
 
 function localPwshOnPath(): boolean {
 	if (resolvePowerShellSpawn()) return true;
-	const portable = join(homedir(), ".cache", "cc-windows-mode", "pwsh", "pwsh");
-	if (!existsSync(portable)) return false;
+	if (!existsSync(join(PORTABLE_PWSH_DIR, "pwsh"))) return false;
 	// Put the portable copy on PATH for this process so the executor's resolver finds it.
-	process.env.PATH = `${join(homedir(), ".cache", "cc-windows-mode", "pwsh")}:${process.env.PATH ?? ""}`;
+	process.env.PATH = `${PORTABLE_PWSH_DIR}${delimiter}${process.env.PATH ?? ""}`;
 	return !!resolvePowerShellSpawn();
 }
 
@@ -93,4 +92,13 @@ describe.skipIf(!localPwshOnPath())("runHookCommand with shell: powershell (real
 		expect(result.exitCode).toBe(2);
 		expect(result.stderr).toContain("nope");
 	});
+
+	it("kills a hook that overruns its timeout (taskkill on Windows) and says so", async () => {
+		const started = Date.now();
+		const result = await runHookCommand("Start-Sleep -Seconds 30", "{}", { cwd: process.cwd(), shell: "powershell", timeoutSeconds: 1 });
+		expect(result.timedOut, JSON.stringify(result)).toBe(true);
+		expect(result.exitCode).toBeNull();
+		// pwsh's cold start alone takes seconds on the CI runners; the bound is on the kill, not the start.
+		expect(Date.now() - started).toBeLessThan(15_000);
+	}, 30_000);
 });

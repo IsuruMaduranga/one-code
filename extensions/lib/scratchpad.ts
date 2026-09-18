@@ -32,14 +32,24 @@ export function scratchpadDir(
 }
 
 /**
- * `/tmp` resolved through its symlink (macOS: `/private/tmp`), so the path in
- * the prompt, the path the permission check compares, and the case-folded
- * resolved subject all name the same real location. Falls back to os.tmpdir()
- * where /tmp does not exist. Windows has no `/tmp` at all: `os.tmpdir()` is
- * `%TEMP%`, Claude Code's own choice there.
+ * The temp root in its resolved spelling, so the path in the prompt, the path
+ * the permission check compares, and the resolved subject all name the same
+ * real location: `/tmp` through its symlink (macOS: `/private/tmp`), and on
+ * Windows — which has no `/tmp`; `os.tmpdir()` is `%TEMP%`, Claude Code's own
+ * choice there — `%TEMP%` through its 8.3 short names, which Windows often
+ * spells it with (`C:\Users\RUNNER~1\…`, `ISURUW~1` for a long user name).
+ * A write's subject arrives realpath'd to the long name, so a scratchpad dir
+ * kept in the short spelling never contained anything (the runner showed it,
+ * findings §22). Falls back to the spelling as given where resolution fails.
  */
 function resolveTmpRoot(): string {
-	if (process.platform === "win32") return os.tmpdir();
+	if (process.platform === "win32") {
+		try {
+			return realpathSync.native(os.tmpdir());
+		} catch {
+			return os.tmpdir();
+		}
+	}
 	try {
 		return realpathSync("/tmp");
 	} catch {
