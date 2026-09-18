@@ -15,9 +15,9 @@
  *    and every caller treats that as "not provably contained".
  */
 
-import { lstatSync, readlinkSync, realpathSync } from "node:fs";
+import { lstatSync, readlinkSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
-import { comparablePath, expandTilde, gitBashPathToNative, isPathAtOrUnder } from "../lib/paths.ts";
+import { comparablePath, expandTilde, gitBashPathToNative, isPathAtOrUnder, tryRealpath } from "../lib/paths.ts";
 
 /**
  * Tools whose calls write to a path. Lives here — the lowest shared layer both
@@ -43,18 +43,6 @@ export function pathArgument(input: Record<string, unknown> | undefined): string
 
 /** The shared comparison form (lib/paths.ts): `/` separators, case-folded on darwin/win32. */
 const normalize = comparablePath;
-
-function tryRealpath(target: string): string | undefined {
-	try {
-		return realpathSync.native(target);
-	} catch {
-		try {
-			return realpathSync(target);
-		} catch {
-			return undefined;
-		}
-	}
-}
 
 /**
  * Resolve a path for containment checks, following a symlink leaf that does not

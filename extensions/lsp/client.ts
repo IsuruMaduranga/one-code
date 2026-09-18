@@ -19,7 +19,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import type { LspDiagnostic } from "./format.ts";
-import { serverLaunch } from "./launch.ts";
+import { commandLaunch } from "../lib/command-launch.ts";
 import { createReaderState, encodeMessage, type JsonRpcMessage, readMessages } from "./protocol.ts";
 
 const INITIALIZE_TIMEOUT_MS = 15_000;
@@ -102,8 +102,8 @@ export class LspClient {
 
 		const env = this.options.env ? { ...process.env, ...this.options.env } : process.env;
 		// On Windows an npm-installed server is a .cmd shim, which a bare spawn
-		// cannot start (lsp/launch.ts); failure messages keep naming the command.
-		const launch = serverLaunch(this.config.command, this.config.args, env);
+		// cannot start (lib/command-launch.ts); failure messages keep naming the command.
+		const launch = commandLaunch(this.config.command, this.config.args, env);
 		const child = spawn(launch.command, launch.args, {
 			cwd: this.root,
 			stdio: ["pipe", "pipe", "pipe"],

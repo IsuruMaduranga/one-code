@@ -17,7 +17,7 @@ import { resolveForContainment } from "../../extensions/auto-mode/paths.ts";
 import { forwardSlashes, oneCodeStateDir, tildify, toPosixPath } from "../../extensions/lib/paths.ts";
 import { sessionScratchpadDir } from "../../extensions/lib/scratchpad.ts";
 import { whichOnPath } from "../../extensions/lib/which.ts";
-import { serverLaunch } from "../../extensions/lsp/launch.ts";
+import { commandLaunch } from "../../extensions/lib/command-launch.ts";
 import { decide, isInsideDir, matchesPathPattern } from "../../extensions/permissions/matcher.ts";
 import { sessionGrant } from "../../extensions/permissions/session-grant.ts";
 
@@ -150,8 +150,8 @@ describe.skipIf(!win32)("Windows: a .cmd shim on PATH (npm's shape for an LSP se
 		expect(bare.outcome).toBe("error:ENOENT");
 	});
 
-	it("starts through serverLaunch's cmd.exe form, arguments intact", async () => {
-		const launch = serverLaunch("probe-tool", ["--stdio", "two words"], env);
+	it("starts through commandLaunch's cmd.exe form, arguments intact", async () => {
+		const launch = commandLaunch("probe-tool", ["--stdio", "two words"], env);
 		expect(launch.command.toLowerCase()).toContain("cmd.exe");
 		const result = await run(launch.command, launch.args, { windowsVerbatimArguments: launch.windowsVerbatimArguments });
 		expect(result, JSON.stringify(result)).toMatchObject({ outcome: "ran", code: 0 });

@@ -14,11 +14,11 @@
  * module state — so each re-derives it through `sessionScratchpadDir`.
  */
 
-import { realpathSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
 import { findGitRoot } from "./git.ts";
 import { projectSlug } from "./memory.ts";
+import { tryRealpath } from "./paths.ts";
 
 /** Pure core, testable: Claude Code's path shape under a One Code-named owner dir. */
 export function scratchpadDir(
@@ -43,18 +43,7 @@ export function scratchpadDir(
  * findings §22). Falls back to the spelling as given where resolution fails.
  */
 function resolveTmpRoot(): string {
-	if (process.platform === "win32") {
-		try {
-			return realpathSync.native(os.tmpdir());
-		} catch {
-			return os.tmpdir();
-		}
-	}
-	try {
-		return realpathSync("/tmp");
-	} catch {
-		return os.tmpdir();
-	}
+	return tryRealpath(process.platform === "win32" ? os.tmpdir() : "/tmp") ?? os.tmpdir();
 }
 
 /** The session's scratchpad, derived the same way by every consumer. */

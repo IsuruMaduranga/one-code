@@ -43,7 +43,13 @@ export interface ShellEvidence {
 	/** The commands that actually run, wrappers peeled (`env rm` → `rm`). */
 	commands: string[];
 	/** Resolved paths this command may write, with containment already decided. */
-	writes: { token: string; resolved?: string; outsideCwd: boolean }[];
+	/**
+	 * Every write target: the token as written, its absolute form as the shell
+	 * reaches it (`toAbsoluteBash`: Git Bash spellings converted, `~` and cwd
+	 * applied, not yet realpath'd — the form a "write it here instead" message
+	 * keeps the model's spelling from), the realpath'd form, and the verdict.
+	 */
+	writes: { token: string; absolute: string; resolved?: string; outsideCwd: boolean }[];
 	/** Credential/secret paths named anywhere in the command (original tokens, never expanded). */
 	sensitivePaths: string[];
 	/** In-project paths whose contents execute later (`.git/hooks/*`, `.vscode/*.json`). */
@@ -793,7 +799,7 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [] }: 
 		const absolute = toAbsoluteBash(effectiveCwd, token, home);
 		const resolved = resolveForContainment(absolute);
 		const outsideCwd = resolved === undefined || !isWithin(containmentRoot, resolved);
-		evidence.writes.push({ token, resolved, outsideCwd });
+		evidence.writes.push({ token, absolute, resolved, outsideCwd });
 		if (resolved === undefined) {
 			escalate(`writes to ${token}, which could not be resolved to a real path`);
 		} else if (outsideCwd) {

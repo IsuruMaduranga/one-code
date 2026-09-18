@@ -9,6 +9,7 @@
  * other's. See "Own state, borrowed config" in docs/decisions.md.
  */
 
+import { realpathSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
@@ -105,6 +106,33 @@ export function msysPathToWindows(path: string, tmp: string): string {
  */
 export function gitBashPathToNative(token: string): string {
 	return process.platform === "win32" ? msysPathToWindows(token, tmpdir()) : token;
+}
+
+/**
+ * A Windows system executable by its canonical location, `%SystemRoot%\System32\<name>`
+ * (defaulting to `C:\Windows`), so a PATH entry can never substitute it —
+ * `taskkill.exe`, `cmd.exe`, Windows PowerShell's `powershell.exe`.
+ */
+export function system32Path(name: string, env: Record<string, string | undefined> = process.env): string {
+	return join(env.SystemRoot ?? "C:\\Windows", "System32", name);
+}
+
+/**
+ * The real path of `target`, or undefined when nothing about it resolves:
+ * the native realpath first (on Windows it also expands 8.3 short names and
+ * fixes the case), the JS one as a fallback. Shared by every containment
+ * resolver so "resolved" means one thing.
+ */
+export function tryRealpath(target: string): string | undefined {
+	try {
+		return realpathSync.native(target);
+	} catch {
+		try {
+			return realpathSync(target);
+		} catch {
+			return undefined;
+		}
+	}
 }
 
 /** Separators as `/`, whatever the platform — for display and for `/`-spelled comparisons. */

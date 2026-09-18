@@ -58,11 +58,13 @@ const realAgentDir = process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "
 const hasKey = Object.keys(process.env).some((k) => /_API_KEY$/.test(k));
 if (!hasKey && existsSync(join(realAgentDir, "auth.json"))) copyFileSync(join(realAgentDir, "auth.json"), join(agentDir, "auth.json"));
 
-const MARKER = "smoke-42";
+// The shell computes the marker, so a result carrying it came from a real run, not from the prompt.
+const [A, B] = [6, 7];
+const MARKER = `smoke-${A * B}`;
 const prompt =
 	shell === "bash"
-		? "Use the bash tool to run exactly this command, then reply with the single word done: echo smoke-$((6*7)) from-$(uname -s)"
-		: "Use the powershell tool to run exactly this command, then reply with the single word done: Write-Output ('smoke-' + (6*7)); Write-Output $PSVersionTable.PSEdition";
+		? `Use the bash tool to run exactly this command, then reply with the single word done: echo smoke-$((${A}*${B})) from-$(uname -s)`
+		: `Use the powershell tool to run exactly this command, then reply with the single word done: Write-Output ('smoke-' + (${A}*${B})); Write-Output $PSVersionTable.PSEdition`;
 
 const env = { ...process.env, PI_CODING_AGENT_DIR: agentDir };
 if (shell === "powershell") env.CLAUDE_CODE_USE_POWERSHELL_TOOL = "1";
@@ -78,6 +80,7 @@ child.stderr.on("data", (d) => (stderr += d.toString()));
 let timedOut = false;
 const timer = setTimeout(() => {
 	timedOut = true;
+	// Plain JS cannot import lib/process-tree.ts; this mirrors its Windows kill (taskkill /T /F from System32, then the leader).
 	if (process.platform === "win32" && child.pid) {
 		try {
 			execFileSync(join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe"), ["/F", "/T", "/PID", String(child.pid)], { stdio: "ignore" });

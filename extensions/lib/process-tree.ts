@@ -26,7 +26,7 @@
  */
 
 import { type ChildProcess, execFile } from "node:child_process";
-import { join } from "node:path";
+import { system32Path } from "./paths.ts";
 
 /** SIGTERM → SIGKILL grace for a stopped background tree (bash tasks, monitors). */
 export const KILL_GRACE_MS = 2_000;
@@ -66,8 +66,7 @@ function taskkillTree(child: ChildProcess): void {
 		}
 	};
 	try {
-		const taskkill = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe");
-		const proc = execFile(taskkill, ["/F", "/T", "/PID", String(pid)], { windowsHide: true }, (error, stdout, stderr) => {
+		const proc = execFile(system32Path("taskkill.exe"), ["/F", "/T", "/PID", String(pid)], { windowsHide: true }, (error, stdout, stderr) => {
 			if (process.env.ONECODE_DEBUG_KILL) {
 				process.stderr.write(`[process-tree] taskkill /T /F /PID ${pid}: ${error ? `error ${error.message}` : "ok"}\n${stdout}${stderr}`);
 			}

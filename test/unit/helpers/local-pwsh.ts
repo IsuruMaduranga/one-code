@@ -6,6 +6,7 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { system32Path } from "../../../extensions/lib/paths.ts";
 import { POWERSHELL_ARGS, resolvePowerShellSpawn, type ShellSpawn } from "../../../extensions/lib/shell-spawn.ts";
 
 export const PORTABLE_PWSH_DIR = join(homedir(), ".cache", "cc-windows-mode", "pwsh");
@@ -20,6 +21,6 @@ export function localPwsh(): ShellSpawn | undefined {
 /** Windows PowerShell 5.1 (`powershell.exe`), present on every Windows install; undefined elsewhere. */
 export function windowsPowerShell(): ShellSpawn | undefined {
 	if (process.platform !== "win32") return undefined;
-	const exe = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+	const exe = system32Path(join("WindowsPowerShell", "v1.0", "powershell.exe"));
 	return existsSync(exe) ? { shell: exe, args: [...POWERSHELL_ARGS] } : undefined;
 }

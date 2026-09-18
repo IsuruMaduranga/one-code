@@ -14,6 +14,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { commandLaunch } from "../lib/command-launch.ts";
 
 export interface OpenPlan {
 	command: string;
@@ -78,7 +79,9 @@ export function openPath(path: string, kind: "file" | "folder"): Promise<OpenRes
 		};
 		let child: ReturnType<typeof spawn>;
 		try {
-			child = spawn(command, args, { stdio: "ignore", detached: true });
+			// `$EDITOR=code` is VS Code's `code.cmd` shim on Windows, which a bare spawn cannot start.
+			const launch = commandLaunch(command, args, process.env);
+			child = spawn(launch.command, launch.args, { stdio: "ignore", detached: true, windowsVerbatimArguments: launch.windowsVerbatimArguments });
 		} catch (error) {
 			finish({ message: `Could not open ${path}: ${error instanceof Error ? error.message : error}`, ok: false });
 			return;
