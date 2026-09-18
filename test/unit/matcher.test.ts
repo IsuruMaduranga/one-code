@@ -1,4 +1,7 @@
+import { homedir } from "node:os";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { toPosixPath } from "../../extensions/lib/paths.ts";
 import {
 	bashSubcommands,
 	decide,
@@ -20,6 +23,13 @@ import {
 import { isProtectedPath } from "../../extensions/permissions/protected-paths.ts";
 
 const CWD = "/home/user/project";
+
+/**
+ * A rule pattern for an absolute path, in the spelling that matches on this
+ * platform: the POSIX path as written, or on Windows Claude Code's `//c/…`
+ * form of what that path resolves to (`D:\home\user\x` → `//d/home/user/x`).
+ */
+const absPattern = (posixPath: string) => (process.platform === "win32" ? `/${toPosixPath(resolve(posixPath))}` : posixPath);
 
 describe("normalizeToolName", () => {
 	it("maps Claude Code PascalCase names to pi names", () => {
@@ -176,7 +186,7 @@ describe("matchesPathPattern", () => {
 	});
 
 	it("expands ~ in patterns", () => {
-		const home = process.env.HOME ?? "";
+		const home = homedir();
 		expect(matchesPathPattern("~/secrets/*", `${home}/secrets/key.pem`, CWD)).toBe(true);
 	});
 
@@ -316,7 +326,7 @@ describe("decide", () => {
 	});
 
 	it("matches the plan file across ~, relative, and resolved spellings", () => {
-		const home = process.env.HOME ?? "";
+		const home = homedir();
 		const planFilePath = "~/.onecode/plans/brisk-otter-map.md";
 		const withPlan = { ...base, mode: "plan" as const, planFilePath };
 		expect(decide({ ...withPlan, toolName: "write", subject: `${home}/.onecode/plans/brisk-otter-map.md` }).decision).toBe(
@@ -346,7 +356,7 @@ describe("decide", () => {
 			planFilePath,
 			toolName: "write",
 			subject: planFilePath,
-			deny: rules(["Write(/home/user/.onecode/**)"]),
+			deny: rules([`Write(${absPattern("/home/user/.onecode/**")})`]),
 		});
 		expect(d.decision).toBe("deny");
 	});
@@ -408,7 +418,7 @@ describe("decide", () => {
 		});
 
 		it("a Read allow rule covering the path still clears an outside read (incl. CC's //absolute form)", () => {
-			const allow = [parseRule("Read(~/.zshrc)")!, parseRule("Read(//etc/**)")!];
+			const allow = [parseRule("Read(~/.zshrc)")!, parseRule(`Read(/${absPattern("/etc/**")})`)!];
 			expect(decide({ ...base, toolName: "read", subject: "~/.zshrc", allow }).decision).toBe("allow");
 			expect(decide({ ...base, toolName: "read", subject: "/etc/hosts", allow }).decision).toBe("allow");
 			expect(decide({ ...base, toolName: "read", subject: "/usr/share/x", allow }).decision).toBe("ask");
@@ -597,7 +607,10 @@ describe("decide", () => {
 			).toBe("classify");
 		});
 
-		it("matches the case-folded resolved subject resolveForContainment produces", () => {
+		// Linux filesystems keep case, so resolveForContainment does not fold there
+		// and this spelling pair is two different paths — the test is for the
+		// folding platforms (darwin, win32).
+		it.skipIf(process.platform === "linux")("matches the case-folded resolved subject resolveForContainment produces", () => {
 			// resolveForContainment case-folds (macOS); the first live run of this
 			// feature missed the allow because the comparison was case-sensitive.
 			const d = decide({
@@ -682,7 +695,7 @@ describe("decide", () => {
 					...withScratchpad,
 					toolName: "write",
 					subject: `${scratchpadDirPath}/x.md`,
-					deny: rules(["Write(/private/tmp/**)"]),
+					deny: rules([`Write(${absPattern("/private/tmp/**")})`]),
 				}).decision,
 			).toBe("deny");
 		});

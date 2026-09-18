@@ -14,7 +14,7 @@ import { Type } from "typebox";
 import { whenAborted } from "../lib/abort.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
-import { detachedSpawnOptions, KILL_GRACE_MS, stopProcessTree } from "../lib/process-tree.ts";
+import { detachedSpawnOptions, KILL_GRACE_MS, stopProcessTree, waitForChildExit } from "../lib/process-tree.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
 import { bashSpawn, spawnShellCommand } from "../lib/shell-spawn.ts";
 import { ccToolRenderers, customMessageText, liveUiCtx, notificationComponent } from "../lib/tui-render.ts";
@@ -241,12 +241,14 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				child.stderr?.on("data", (chunk: Buffer) => {
 					stored = tail(`${stored}${chunk.toString()}`, STORED_OUTPUT_CAP);
 				});
-				child.on("error", (error) => end("failed", error.message));
-				child.on("close", (code) =>
-					end(
-						stopRequested ? "stopped" : code === 0 ? "completed" : "failed",
-						code !== null && code !== 0 ? `exit code ${code}` : undefined,
-					),
+				// Exit plus a short stdio grace, not `close` (lib/process-tree.ts).
+				waitForChildExit(child).then(
+					({ code }) =>
+						end(
+							stopRequested ? "stopped" : code === 0 ? "completed" : "failed",
+							code !== null && code !== 0 ? `exit code ${code}` : undefined,
+						),
+					(error: Error) => end("failed", error.message),
 				);
 				stop = () => {
 					stopRequested = true;

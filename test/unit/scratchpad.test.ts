@@ -1,15 +1,16 @@
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { scratchpadDir, scratchpadPromptSection } from "../../extensions/lib/scratchpad.ts";
 
 describe("scratchpadDir", () => {
 	it("builds Claude Code's path shape under a One Code-named owner dir", () => {
 		expect(scratchpadDir("/private/tmp", 501, "/Users/u/ml/proj", "abc-123")).toBe(
-			"/private/tmp/onecode-501/-Users-u-ml-proj/abc-123/scratchpad",
+			join("/private/tmp", "onecode-501", "-Users-u-ml-proj", "abc-123", "scratchpad"),
 		);
 	});
 
 	it("drops the uid suffix where the platform has none", () => {
-		expect(scratchpadDir("/tmp", undefined, "/home/u/proj", "s1")).toBe("/tmp/onecode/-home-u-proj/s1/scratchpad");
+		expect(scratchpadDir("/tmp", undefined, "/home/u/proj", "s1")).toBe(join("/tmp", "onecode", "-home-u-proj", "s1", "scratchpad"));
 	});
 });
 

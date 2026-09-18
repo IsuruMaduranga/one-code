@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -89,8 +89,13 @@ describe("buildClaudeMdBlock", () => {
 
 describe("expandImports (@path expansion)", () => {
 	const home = "/home/u";
-	// Virtual filesystem so tests never touch disk.
-	const vfs = (files: Record<string, string>) => (p: string) => (p in files ? files[p] : null);
+	// Virtual filesystem so tests never touch disk. Keys are resolved like the
+	// expander resolves its imports, so `/p/a.md` is looked up as `D:\p\a.md` on
+	// Windows too.
+	const vfs = (files: Record<string, string>) => {
+		const resolved = new Map(Object.entries(files).map(([k, v]) => [resolve(k), v]));
+		return (p: string) => resolved.get(resolve(p)) ?? null;
+	};
 
 	it("inlines a referenced file at the @token's position", () => {
 		const read = vfs({ "/p/AGENTS.md": "AGENT RULES\n" });

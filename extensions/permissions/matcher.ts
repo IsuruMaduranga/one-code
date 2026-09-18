@@ -20,7 +20,7 @@ import {
 	powershellReadOnly,
 	powershellStatements,
 } from "./powershell-rules.ts";
-import { expandTilde } from "../lib/paths.ts";
+import { expandTilde, forwardSlashes, isPathAtOrUnder, toPosixPath } from "../lib/paths.ts";
 import { isShellToolName } from "../lib/shell-tools.ts";
 
 export type PermissionMode = "default" | "acceptEdits" | "plan" | "bypassPermissions" | "dontAsk" | "auto";
@@ -163,7 +163,7 @@ export function escapeLiteral(command: string): string {
 }
 
 /** Glob → RegExp. `**` crosses path separators, `*` does not. `\*` / `\\` are literals. */
-function globToRegex(glob: string, pathMode: boolean): RegExp {
+function globToRegex(glob: string, pathMode: boolean, ignoreCase = false): RegExp {
 	let out = "";
 	for (let i = 0; i < glob.length; i++) {
 		const ch = glob[i];
@@ -184,7 +184,7 @@ function globToRegex(glob: string, pathMode: boolean): RegExp {
 			out += ch;
 		}
 	}
-	return new RegExp(`^${out}$`);
+	return new RegExp(`^${out}$`, ignoreCase ? "i" : "");
 }
 
 /**
@@ -372,23 +372,37 @@ export function findBashAllowRule(rules: PermissionRule[], command: string, tool
  * (with `.`/`..` normalised), cwd-relative, and `~/`-relative — never the raw
  * spelling: `Edit(docs/**)` must not match `docs/../src/main.ts`, and a
  * `~/.ssh/id_rsa` subject must hit `Read(~/.ssh/**)` (review P6).
+ *
+ * Every candidate is spelled with forward slashes: patterns are `/`-globs
+ * (gitignore semantics, as in Claude Code), so on Windows the native
+ * `C:\Users\x\docs\a.md` is matched as Claude Code matches it — its POSIX form
+ * `/c/Users/x/docs/a.md` (`lib/paths.ts toPosixPath`, the shape CC's own
+ * Windows rules such as `Read(//c/Users/x/**)` are written in) — and also as
+ * `C:/Users/x/docs/a.md`, so a rule spelled with the drive letter works too.
+ * Windows compares case-insensitively, like its filesystem.
  */
 export function matchesPathPattern(pattern: string, subject: string, cwd: string): boolean {
 	const home = homedir();
+	const win32 = process.platform === "win32";
 	// Claude Code's rule syntax: `//path` is an absolute filesystem path (the
 	// doubled slash distinguishes it from `/path`, which CC reads relative to
 	// the project root). `Read(//etc/**)` is the form CC's own suggestions write.
-	const expandedPattern = pattern.startsWith("//") ? expandTilde(pattern.slice(1), home) : expandTilde(pattern, home);
+	// A Windows pattern spelled with backslashes is read as its `/` form.
+	const spelled = win32 ? forwardSlashes(pattern) : pattern;
+	const expandedPattern = spelled.startsWith("//") ? expandTilde(spelled.slice(1), home) : expandTilde(spelled, home);
 	const expandedSubject = expandTilde(subject, home);
 
 	const candidates = new Set<string>();
 	const absolute = isAbsolute(expandedSubject) ? resolve(expandedSubject) : resolve(cwd, expandedSubject);
-	candidates.add(absolute);
+	candidates.add(toPosixPath(absolute));
+	if (win32) candidates.add(forwardSlashes(absolute));
 	const rel = relative(cwd, absolute);
-	if (rel && !rel.startsWith("..")) candidates.add(rel);
-	if (absolute.startsWith(`${home}/`)) candidates.add(`~/${absolute.slice(home.length + 1)}`);
+	if (rel && !rel.startsWith("..") && !isAbsolute(rel)) candidates.add(forwardSlashes(rel));
+	if (isPathAtOrUnder(absolute, home) && resolve(absolute) !== resolve(home)) {
+		candidates.add(`~/${forwardSlashes(relative(resolve(home), absolute))}`);
+	}
 
-	const regex = globToRegex(expandedPattern, true);
+	const regex = globToRegex(forwardSlashes(expandedPattern), true, win32);
 	for (const candidate of candidates) {
 		if (regex.test(candidate)) return true;
 	}

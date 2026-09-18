@@ -10,7 +10,7 @@
  */
 
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, relative, resolve } from "node:path";
 
 /**
  * Claude Code's config dir — the compat surface One Code reads, never writes.
@@ -59,3 +59,55 @@ export function expandTilde(path: string, home: string): string {
 export function oneCodeStateDir(env: Record<string, string | undefined> = process.env, home: string = homedir()): string {
 	return env.ONECODE_STATE_DIR || join(home, ".onecode");
 }
+
+/**
+ * A path with forward slashes, in Claude Code's POSIX shape on Windows
+ * (`utils/windowsPaths.ts windowsPathToPosixPath`): `C:\Users\x` becomes
+ * `/c/Users/x`, a UNC `\\server\share` becomes `//server/share`, anything
+ * else only flips its separators. This is the form Claude Code matches
+ * permission path patterns against on Windows, so a rule written for it —
+ * `Read(//c/Users/x/**)` — matches here too. Elsewhere the path is unchanged.
+ */
+export function toPosixPath(path: string): string {
+	if (process.platform !== "win32") return path;
+	if (path.startsWith("\\\\")) return path.replace(/\\/g, "/");
+	const drive = /^([A-Za-z]):[/\\]/.exec(path);
+	if (drive) return `/${drive[1].toLowerCase()}${path.slice(2).replace(/\\/g, "/")}`;
+	return path.replace(/\\/g, "/");
+}
+
+/** Separators as `/`, whatever the platform — for display and for `/`-spelled comparisons. */
+export function forwardSlashes(path: string): string {
+	return path.replace(/\\/g, "/");
+}
+
+/** Filesystems that fold case (darwin, win32): two spellings of one path compare equal. */
+export function foldsCase(platform: NodeJS.Platform = process.platform): boolean {
+	return platform !== "linux";
+}
+
+/**
+ * Whether `path` is at or under `dir`, compared on the resolved forms with the
+ * platform's separator and case rules (case-folded on darwin/win32). Pure string
+ * work: no symlink resolution — callers that need that resolve both sides first.
+ */
+export function isPathAtOrUnder(path: string, dir: string): boolean {
+	const fold = (p: string) => (foldsCase() ? forwardSlashes(resolve(p)).toLowerCase() : forwardSlashes(resolve(p)));
+	const target = fold(path);
+	const base = fold(dir).replace(/\/+$/, "");
+	return target === base || target.startsWith(`${base}/`);
+}
+
+/**
+ * `~`-abbreviated display form of a path: the home dir itself is `~`, a path
+ * under it is `~/rest` with forward slashes, anything else is returned as
+ * given. Separator- and case-agnostic on the platforms whose filesystems are
+ * (`C:\Users\x\.claude` under `C:\Users\x` shows as `~/.claude`).
+ */
+export function tildify(path: string, home: string): string {
+	if (!home) return path;
+	if (!isPathAtOrUnder(path, home)) return path;
+	const rest = relative(resolve(home), resolve(path));
+	return rest ? `~/${forwardSlashes(rest)}` : "~";
+}
+

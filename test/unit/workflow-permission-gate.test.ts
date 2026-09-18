@@ -22,12 +22,16 @@ describe("permissionGateFactory", () => {
 		expect(await handler({ toolName: "read", input: { path: join(cwd, "README.md") } })).toBeUndefined();
 		expect(await handler({ toolName: "read", input: { path: "README.md" } })).toBeUndefined();
 		expect(await handler({ toolName: "grep", input: { pattern: "x" } })).toBeUndefined();
-		const outside = await handler({ toolName: "read", input: { path: "/etc/hosts" } });
+		// A file outside the cwd, and Claude Code's `//absolute` rule covering it —
+		// on Windows in CC's POSIX spelling of the drive path (`//c/Windows/**`).
+		const [outsideFile, outsideRule] =
+			process.platform === "win32" ? ["C:\\Windows\\System32\\drivers\\etc\\hosts", "Read(//c/Windows/**)"] : ["/etc/hosts", "Read(//etc/**)"];
+		const outside = await handler({ toolName: "read", input: { path: outsideFile } });
 		expect(outside?.block).toBe(true);
 		expect(outside?.reason).toMatch(/outside the working directory/);
 		// A Read allow rule covering the path still clears it.
-		const allowed = buildGate({ permissions: { allow: ["Read(//etc/**)"] } });
-		expect(await allowed({ toolName: "read", input: { path: "/etc/hosts" } })).toBeUndefined();
+		const allowed = buildGate({ permissions: { allow: [outsideRule] } });
+		expect(await allowed({ toolName: "read", input: { path: outsideFile } })).toBeUndefined();
 	});
 
 	it("lets the agent read back its own persisted tool output (sessionResultsDir)", async () => {

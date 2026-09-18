@@ -41,6 +41,7 @@ beforeEach(() => {
 	home = mkdtempSync(join(tmpdir(), "onecode-doctor-wiring-home-"));
 	cwd = mkdtempSync(join(tmpdir(), "onecode-doctor-wiring-cwd-"));
 	vi.stubEnv("HOME", home);
+	vi.stubEnv("USERPROFILE", home); // os.homedir() reads this one on Windows
 	vi.stubEnv("PI_CODING_AGENT_DIR", join(home, ".onecode", "agent"));
 	vi.stubEnv("ONECODE_NO_UPDATE_CHECK", "1");
 	vi.stubEnv("CC_VERSION", "");

@@ -1,6 +1,7 @@
 /**
  * Process-tree termination for the shells One Code spawns in the background
- * (`bash run_in_background`, `monitor`).
+ * (`bash run_in_background`, `monitor`), and the one way to wait for such a
+ * child to finish.
  *
  * A `$SHELL -c "cmd"` child is only the leader: with zsh (macOS default) a
  * `cmd; echo` or a pipeline runs the command in further processes, and
@@ -16,13 +17,22 @@
  * `stopProcessTree` adds the grace period: SIGTERM now, SIGKILL if the leader
  * has not exited by then (a command that ignores SIGTERM still closes late,
  * which is exactly the late callback the shutdown paths guard against).
+ *
+ * `waitForChildExit` is the counterpart on the waiting side: it settles on
+ * `exit` plus a short stdio grace, never on `close` alone — a descendant the
+ * kill missed (Windows: a process the `taskkill /T` snapshot did not see) can
+ * hold the inherited pipes open for as long as it lives, and the task must not
+ * wait for it (pi's `waitForChildProcess` has the same shape and reason).
  */
 
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, execFile } from "node:child_process";
 import { join } from "node:path";
 
 /** SIGTERM → SIGKILL grace for a stopped background tree (bash tasks, monitors). */
 export const KILL_GRACE_MS = 2_000;
+
+/** After `exit`, how long buffered stdio may keep arriving before the wait settles. */
+export const EXIT_STDIO_GRACE_MS = 200;
 
 /** `detached` everywhere but Windows, where process groups do not exist. */
 export function detachedSpawnOptions(): { detached: boolean } {
@@ -32,27 +42,39 @@ export function detachedSpawnOptions(): { detached: boolean } {
 /**
  * Windows has no process groups and no SIGTERM: `taskkill /T /F` ends the
  * tree by pid (the same call pi's own `killProcessTree` makes), from System32
- * so a PATH entry cannot substitute the binary. A failed spawn is consumed —
- * the leader may already be gone.
+ * so a PATH entry cannot substitute the binary. Whatever taskkill reports, the
+ * leader itself is then terminated directly too — taskkill can fail to kill
+ * (or to find) a member, and the leader's exit is what the waiting side keys
+ * on. `ONECODE_DEBUG_KILL=1` logs taskkill's output to stderr.
  */
-function taskkillTree(pid: number): void {
+function taskkillTree(child: ChildProcess): void {
+	const pid = child.pid;
+	if (pid == null) return;
+	const direct = () => {
+		try {
+			child.kill();
+		} catch {
+			// Already gone.
+		}
+	};
 	try {
-		const child = spawn(join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe"), ["/F", "/T", "/PID", String(pid)], {
-			stdio: "ignore",
-			detached: true,
-			windowsHide: true,
+		const taskkill = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe");
+		const proc = execFile(taskkill, ["/F", "/T", "/PID", String(pid)], { windowsHide: true }, (error, stdout, stderr) => {
+			if (process.env.ONECODE_DEBUG_KILL) {
+				process.stderr.write(`[process-tree] taskkill /T /F /PID ${pid}: ${error ? `error ${error.message}` : "ok"}\n${stdout}${stderr}`);
+			}
+			direct();
 		});
-		child.once("error", () => {});
-		child.unref();
+		proc.unref();
 	} catch {
-		// Already gone.
+		direct();
 	}
 }
 
 export function killProcessTree(child: ChildProcess, signal: NodeJS.Signals = "SIGTERM"): void {
 	if (child.pid == null) return;
 	if (process.platform === "win32") {
-		taskkillTree(child.pid);
+		taskkillTree(child);
 		return;
 	}
 	try {
@@ -80,4 +102,69 @@ export function stopProcessTree(child: ChildProcess, graceMs: number): void {
 	}, graceMs);
 	timer.unref?.();
 	child.once("exit", () => clearTimeout(timer));
+}
+
+export interface ChildExit {
+	code: number | null;
+	signal: NodeJS.Signals | null;
+}
+
+/**
+ * Resolve when the child has exited and its stdio has drained: on `close`
+ * when that arrives promptly, else `EXIT_STDIO_GRACE_MS` after `exit` (the
+ * grace re-arms while output is still arriving, so a burst written just before
+ * exit is not cut). Rejects on a spawn `error`. Listeners the caller attached
+ * for `data` keep working; the streams are destroyed once this settles so a
+ * straggler holding the far end cannot keep them — or the process — alive.
+ */
+export function waitForChildExit(child: ChildProcess): Promise<ChildExit> {
+	return new Promise((resolve, reject) => {
+		let settled = false;
+		let exited: ChildExit | undefined;
+		let grace: NodeJS.Timeout | undefined;
+		const cleanup = () => {
+			if (grace) clearTimeout(grace);
+			child.removeListener("error", onError);
+			child.removeListener("exit", onExit);
+			child.removeListener("close", onClose);
+			child.stdout?.removeListener("data", onData);
+			child.stderr?.removeListener("data", onData);
+		};
+		const finish = () => {
+			if (settled || !exited) return;
+			settled = true;
+			cleanup();
+			child.stdout?.destroy();
+			child.stderr?.destroy();
+			resolve(exited);
+		};
+		const arm = () => {
+			if (grace) clearTimeout(grace);
+			// Ref'd on purpose: in a one-shot run this timer may be the only handle
+			// left once the pipes have closed, and the promise must still settle.
+			grace = setTimeout(finish, EXIT_STDIO_GRACE_MS);
+		};
+		const onError = (error: Error) => {
+			if (settled) return;
+			settled = true;
+			cleanup();
+			reject(error);
+		};
+		const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+			exited = { code, signal };
+			arm();
+		};
+		const onClose = (code: number | null, signal: NodeJS.Signals | null) => {
+			exited ??= { code, signal };
+			finish();
+		};
+		const onData = () => {
+			if (exited && !settled) arm();
+		};
+		child.once("error", onError);
+		child.once("exit", onExit);
+		child.once("close", onClose);
+		child.stdout?.on("data", onData);
+		child.stderr?.on("data", onData);
+	});
 }

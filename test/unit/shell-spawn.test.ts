@@ -9,6 +9,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+	bashSpawnOrThrow,
 	createPowerShellOperations,
 	gitBashOverride,
 	isBashBinaryName,
@@ -120,7 +121,8 @@ describe("resolvePowerShellSpawn", () => {
 		expect(resolvePowerShellSpawn({ platform: "linux", env, which: () => undefined })).toBeUndefined();
 	});
 
-	it("uses the shared PATH lookup, which requires the file to be executable", () => {
+	// Windows has no execute bit (X_OK is existence there), so the mode half is POSIX-only.
+	it.skipIf(process.platform === "win32")("uses the shared PATH lookup, which requires the file to be executable", () => {
 		const dir = mkdtempSync(join(tmpdir(), "pwsh-which-"));
 		writeFileSync(join(dir, "pwsh"), "#!/bin/sh\n", { mode: 0o644 });
 		expect(resolvePowerShellSpawn({ platform: "darwin", env: { PATH: dir } })).toBeUndefined();
@@ -141,10 +143,12 @@ describe("powerShellEdition", () => {
 
 describe("spawnShellCommand", () => {
 	it("appends the command for argv transport and feeds stdin for the legacy-WSL form", async () => {
-		const sh: ShellSpawn = { shell: "/bin/sh", args: ["-c"] };
+		// The resolved bash (Git Bash on Windows) stands in for /bin/sh.
+		const bash = bashSpawnOrThrow().shell;
+		const sh: ShellSpawn = { shell: bash, args: ["-c"] };
 		const out = await collect(spawnShellCommand(sh, "echo argv-ok", { stdio: ["ignore", "pipe", "pipe"] }));
 		expect(out.trim()).toBe("argv-ok");
-		const viaStdin: ShellSpawn = { shell: "/bin/sh", args: ["-s"], commandTransport: "stdin" };
+		const viaStdin: ShellSpawn = { shell: bash, args: ["-s"], commandTransport: "stdin" };
 		const out2 = await collect(spawnShellCommand(viaStdin, "echo stdin-ok", { stdio: ["ignore", "pipe", "pipe"] }));
 		expect(out2.trim()).toBe("stdin-ok");
 	});
@@ -160,7 +164,8 @@ function localPwsh(): ShellSpawn | undefined {
 
 const pwsh = localPwsh();
 
-describe.skipIf(!pwsh)("createPowerShellOperations (real pwsh)", () => {
+// pwsh's cold start took over 5 s on the Ubuntu CI runner; the suite's default timeout is too tight for it.
+describe.skipIf(!pwsh)("createPowerShellOperations (real pwsh)", { timeout: 30_000 }, () => {
 	const ops = createPowerShellOperations(() => pwsh);
 	const run = async (command: string, extra: { signal?: AbortSignal; timeout?: number } = {}) => {
 		let output = "";

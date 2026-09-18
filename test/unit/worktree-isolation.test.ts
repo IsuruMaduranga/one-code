@@ -85,7 +85,7 @@ describe("worktreeWriteGuardReason", () => {
 			const reason = worktreeWriteGuardReason({ ...base, toolName, target: "/repo/src/a.ts" });
 			expect(reason).toContain("isolated in the worktree /tmp/cc-wt-x/tree");
 			expect(reason).toContain("/repo/src/a.ts is in the shared checkout /repo");
-			expect(reason).toContain("Write the corresponding path there instead: /tmp/cc-wt-x/tree/src/a.ts");
+			expect(reason).toContain(`Write the corresponding path there instead: ${join("/tmp/cc-wt-x/tree", "src", "a.ts")}`);
 		}
 	});
 
@@ -98,13 +98,13 @@ describe("worktreeWriteGuardReason", () => {
 
 	it("keeps the model's spelling in the suggested path (case-folded resolution must not rename A.ts)", () => {
 		const reason = worktreeWriteGuardReason({ ...base, toolName: "edit", target: "/repo/src/A.ts" });
-		expect(reason).toContain("there instead: /tmp/cc-wt-x/tree/src/A.ts");
+		expect(reason).toContain(`there instead: ${join("/tmp/cc-wt-x/tree", "src", "A.ts")}`);
 	});
 
 	it("refuses shell commands that write into the shared checkout, and lets reads through", () => {
 		const bash = (command: string) => worktreeBashWriteGuardReason({ command, cwd: base.cwd, isolation: base.isolation, home: base.home });
 		expect(bash("echo hi > /repo/notes.txt")).toContain("this command writes to /repo/notes.txt");
-		expect(bash("echo hi > /repo/notes.txt")).toContain("there instead: /tmp/cc-wt-x/tree/notes.txt");
+		expect(bash("echo hi > /repo/notes.txt")).toContain(`there instead: ${join("/tmp/cc-wt-x/tree", "notes.txt")}`);
 		expect(bash("cp fixed.ts /repo/src/a.ts")).toContain("shared checkout /repo");
 		expect(bash("tee /repo/out.log < in.txt")).toContain("/repo/out.log");
 		expect(bash("cat /repo/README.md")).toBeUndefined();

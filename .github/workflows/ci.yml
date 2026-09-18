@@ -26,11 +26,15 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx tsc --noEmit
-      - run: npx vitest run
-      - name: Report the shells the Windows job saw
+      - name: Report the shells the Windows job sees
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           Write-Output "Git Bash: $((Get-Command bash -ErrorAction SilentlyContinue).Source)"
           Write-Output "pwsh: $((Get-Command pwsh).Source) $($PSVersionTable.PSVersion)"
+          Write-Output "powershell.exe: $((Get-Command powershell -ErrorAction SilentlyContinue).Source)"
+      - run: npx tsc --noEmit
+      - run: npx vitest run
+        env:
+          # Log taskkill's verdicts (lib/process-tree.ts) so a kill that misses shows why.
+          ONECODE_DEBUG_KILL: ${{ runner.os == 'Windows' && '1' || '' }}

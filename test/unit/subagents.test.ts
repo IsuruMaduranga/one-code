@@ -82,13 +82,13 @@ describe("agentDirs", () => {
 	it("orders bundled, then user, then project", () => {
 		expect(agentDirs("/proj", "/home/u", "/pkg/agents")).toEqual([
 			"/pkg/agents",
-			"/home/u/.claude/agents",
-			"/proj/.claude/agents",
+			join("/home/u", ".claude", "agents"),
+			join("/proj", ".claude", "agents"),
 		]);
 	});
 
 	it("omits the bundled directory when not supplied", () => {
-		expect(agentDirs("/proj", "/home/u")).toEqual(["/home/u/.claude/agents", "/proj/.claude/agents"]);
+		expect(agentDirs("/proj", "/home/u")).toEqual([join("/home/u", ".claude", "agents"), join("/proj", ".claude", "agents")]);
 	});
 });
 

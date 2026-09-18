@@ -136,7 +136,8 @@ describe("dependencies", () => {
 		writeFileSync(join(bin, "gopls"), "#!/bin/sh\n", { mode: 0o755 });
 		writeFileSync(join(bin, "notexec"), "");
 		expect(whichOnPath("gopls", { PATH: bin }, "darwin")).toBe(join(bin, "gopls"));
-		expect(whichOnPath("notexec", { PATH: bin }, "darwin")).toBeUndefined();
+		// Windows has no execute bit: a plain file is "executable" there, so the check is POSIX-only.
+		if (process.platform !== "win32") expect(whichOnPath("notexec", { PATH: bin }, "darwin")).toBeUndefined();
 		expect(whichOnPath("git", { PATH: bin }, "darwin")).toBeUndefined();
 		writeFileSync(join(cwd, "go.mod"), "module x");
 		writeFileSync(join(cwd, "pyproject.toml"), "");

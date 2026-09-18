@@ -32,7 +32,7 @@ import { homedir } from "node:os";
 import { basename } from "node:path";
 import { getPowerShellConfig, getShellConfig } from "@earendil-works/pi-coding-agent";
 import { readSettingsEnv } from "./claude-settings.ts";
-import { detachedSpawnOptions, killProcessTree } from "./process-tree.ts";
+import { detachedSpawnOptions, killProcessTree, waitForChildExit } from "./process-tree.ts";
 import { whichOnPath } from "./which.ts";
 
 /** How to start a shell for one command line. */
@@ -240,36 +240,6 @@ function resolveTimeoutMs(timeout: number | undefined): number | undefined {
 }
 
 /**
- * Wait for the child to exit and report its code (null when killed). Resolves
- * on `exit`, not `close`: a detached descendant holding the stdio pipes would
- * otherwise keep `close` from ever firing (pi's `waitForChildProcess` has the
- * same reason). A brief grace lets the last buffered output flush first.
- */
-function waitForExit(child: ChildProcess): Promise<number | null> {
-	return new Promise((resolve, reject) => {
-		let settled = false;
-		child.once("error", (error) => {
-			if (settled) return;
-			settled = true;
-			reject(error);
-		});
-		child.once("exit", (code) => {
-			if (settled) return;
-			settled = true;
-			let done = false;
-			const finish = () => {
-				if (done) return;
-				done = true;
-				resolve(code);
-			};
-			child.once("close", finish);
-			const grace = setTimeout(finish, 200);
-			grace.unref?.();
-		});
-	});
-}
-
-/**
  * Operations for `createPowerShellToolDefinition(cwd, { operations })` backed
  * by the PowerShell `resolve()` names. Mirrors pi's local shell operations
  * (spawn, stream, kill the tree on abort/timeout, wait) with pi's error strings
@@ -315,7 +285,7 @@ export function createPowerShellOperations(resolve: () => ShellSpawn | undefined
 					if (signal.aborted) onAbort();
 					else signal.addEventListener("abort", onAbort, { once: true });
 				}
-				const exitCode = await waitForExit(child);
+				const { code: exitCode } = await waitForChildExit(child);
 				if (signal?.aborted) throw new Error("aborted");
 				if (timedOut) throw new Error(`timeout:${timeout}`);
 				return { exitCode };

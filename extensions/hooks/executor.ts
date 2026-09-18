@@ -46,7 +46,7 @@
  */
 
 import type { ChildProcess } from "node:child_process";
-import { detachedSpawnOptions, killProcessTree } from "../lib/process-tree.ts";
+import { detachedSpawnOptions, killProcessTree, waitForChildExit } from "../lib/process-tree.ts";
 import { bashSpawn, POWERSHELL_UTF8_PREFIX, powerShellSpawn, type ShellSpawn, spawnShellCommand } from "../lib/shell-spawn.ts";
 import type { HookShell } from "./settings.ts";
 
@@ -202,16 +202,17 @@ export function runHookCommand(command: string, stdinJson: string, opts: HookRun
 			resolve({ ...result, durationMs: Date.now() - started });
 		};
 
-		child.on("error", (error) => {
-			finish({ exitCode: null, timedOut, spawnError: error.message, stdout, stderr });
-		});
-		child.on("close", (code) => {
-			// A killed process reports null here, EXCEPT when the shell outlived the
-			// group kill just long enough to reap its child and exit 128+9 itself
-			// (see exitCode's contract). Normalizing keeps "we killed it" from ever
-			// looking like an ordinary non-zero exit, which fails OPEN downstream.
-			finish({ exitCode: timedOut ? null : code, timedOut, stdout, stderr });
-		});
+		// Settles on exit plus a short stdio grace, not on `close`: a grandchild
+		// the kill missed could otherwise hold the pipes — and this promise — open
+		// for its whole life (lib/process-tree.ts). A killed process reports null,
+		// EXCEPT when the shell outlived the group kill just long enough to reap
+		// its child and exit 128+9 itself (see exitCode's contract). Normalizing
+		// keeps "we killed it" from ever looking like an ordinary non-zero exit,
+		// which fails OPEN downstream.
+		waitForChildExit(child).then(
+			({ code }) => finish({ exitCode: timedOut ? null : code, timedOut, stdout, stderr }),
+			(error: Error) => finish({ exitCode: null, timedOut, spawnError: error.message, stdout, stderr }),
+		);
 
 		// A hook that never reads stdin (e.g. plain `exit 2`) closes the pipe
 		// early; the resulting EPIPE must not take the extension down.

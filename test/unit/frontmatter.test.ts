@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseFrontmatterLoosely } from "../../extensions/lib/frontmatter.ts";
 import { expandTilde } from "../../extensions/lib/paths.ts";
@@ -26,7 +27,7 @@ describe("parseFrontmatterLoosely (A8)", () => {
 describe("expandTilde (A13)", () => {
 	it("expands ~ and ~/ against the given home and leaves ~user alone", () => {
 		expect(expandTilde("~", "/home/me")).toBe("/home/me");
-		expect(expandTilde("~/x/y", "/home/me")).toBe("/home/me/x/y");
+		expect(expandTilde("~/x/y", "/home/me")).toBe(join("/home/me", "x", "y"));
 		expect(expandTilde("~other/x", "/home/me")).toBe("~other/x");
 		expect(expandTilde("/abs", "/home/me")).toBe("/abs");
 		expect(expandTilde("rel", "/home/me")).toBe("rel");

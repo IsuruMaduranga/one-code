@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { runHookCommand } from "../../extensions/hooks/executor.ts";
 
@@ -97,11 +98,17 @@ describe("runHookCommand", () => {
 	}, 10_000);
 
 	it("exposes CLAUDE_PROJECT_DIR and runs in cwd", async () => {
-		const result = await runHookCommand('echo "$CLAUDE_PROJECT_DIR|$(pwd)"', "{}", {
+		// Git Bash reports `pwd` in its own /tmp mount; `pwd -W` gives the Windows
+		// path (forward-slashed), which is what `dir` is here.
+		const pwd = process.platform === "win32" ? "$(pwd -W)" : "$(pwd)";
+		const result = await runHookCommand(`echo "$CLAUDE_PROJECT_DIR|${pwd}"`, "{}", {
 			cwd: dir,
 			projectDir: "/some/project",
 		});
-		expect(result.stdout.trim()).toBe(`/some/project|${dir}`);
+		const same = (a: string, b: string) => a.replace(/\\/g, "/").toLowerCase() === b.replace(/\\/g, "/").toLowerCase();
+		const [projectDir, cwd] = result.stdout.trim().split("|");
+		expect(projectDir).toBe("/some/project");
+		expect(same(cwd, dir), `${cwd} vs ${dir}`).toBe(true);
 	});
 });
 
@@ -117,19 +124,22 @@ describe("runHookCommand detached (fire-and-forget)", () => {
 		writeFileSync(
 			script,
 			[
-				`import { runHookCommand } from ${JSON.stringify(executor)};`,
+				// A file URL: on Windows a bare absolute path is not a valid ESM specifier.
+				`import { runHookCommand } from ${JSON.stringify(pathToFileURL(executor).href)};`,
 				`void runHookCommand("sleep 3", "{}", { cwd: process.cwd(), detached: true });`,
 				`console.log("dispatched");`,
 			].join("\n"),
 		);
 		const started = Date.now();
-		const { stdout, code } = await new Promise<{ stdout: string; code: number | null }>((resolve) => {
+		const { stdout, stderr, code } = await new Promise<{ stdout: string; stderr: string; code: number | null }>((resolve) => {
 			const child = spawn(process.execPath, ["--experimental-strip-types", "--no-warnings", script], { cwd: process.cwd() });
 			let out = "";
+			let err = "";
 			child.stdout.on("data", (chunk) => (out += chunk));
-			child.on("close", (exitCode) => resolve({ stdout: out, code: exitCode }));
+			child.stderr.on("data", (chunk) => (err += chunk));
+			child.on("close", (exitCode) => resolve({ stdout: out, stderr: err, code: exitCode }));
 		});
-		expect(stdout.trim()).toBe("dispatched");
+		expect(stdout.trim(), stderr).toBe("dispatched");
 		expect(code).toBe(0);
 		expect(Date.now() - started).toBeLessThan(2500);
 	}, 10_000);

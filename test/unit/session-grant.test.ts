@@ -3,7 +3,9 @@
  * M2): a scoped rule whose label names the scope — never a bare tool grant that
  * turns one approved write into every write on disk.
  */
+import { dirname, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { toPosixPath } from "../../extensions/lib/paths.ts";
 import { decide } from "../../extensions/permissions/matcher.ts";
 import { sessionGrant } from "../../extensions/permissions/session-grant.ts";
 
@@ -25,7 +27,8 @@ describe("sessionGrant", () => {
 
 	it("scopes an in-project write to the working directory (Claude Code's 'allow all edits this session')", () => {
 		const grant = sessionGrant({ ...base, toolName: "write", subject: "src/a.ts" })!;
-		expect(grant.rule.raw).toBe(`write(/${CWD}/**)`);
+		// Claude Code's `//absolute` form — on Windows in its POSIX spelling (`//d/home/…`).
+		expect(grant.rule.raw).toBe(`write(/${toPosixPath(resolve(CWD))}/**)`);
 		expect(grant.label).toBe("Yes, and allow write anywhere in the working directory this session");
 		const allow = [grant.rule];
 		expect(decide({ ...base, toolName: "write", subject: "docs/b.md", deny: [], ask: [], allow }).decision).toBe("allow");
@@ -38,7 +41,7 @@ describe("sessionGrant", () => {
 
 	it("scopes an outside-cwd path to that file's directory and names it with ~", () => {
 		const grant = sessionGrant({ ...base, toolName: "read", subject: "~/notes/private.txt", cause: "working-dir" })!;
-		expect(grant.rule.raw).toBe("read(//home/user/notes/**)");
+		expect(grant.rule.raw).toBe(`read(/${toPosixPath(dirname(resolve(HOME, "notes/private.txt")))}/**)`);
 		expect(grant.label).toBe("Yes, and allow read under ~/notes this session");
 		const allow = [grant.rule];
 		expect(decide({ ...base, toolName: "read", subject: "/home/user/notes/other.txt", deny: [], ask: [], allow }).decision).toBe("allow");

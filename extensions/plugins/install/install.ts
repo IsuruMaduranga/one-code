@@ -160,7 +160,7 @@ export function uninstallPlugin(root: string, id: string): void {
 	removeInstalledPlugin(root, id);
 	// Only delete what lives inside OUR cache — never an install path that
 	// points elsewhere (hand-edited registries, claude-origin paths).
-	const cacheDir = `${resolve(join(root, "cache"))}/`;
+	const cacheDir = `${resolve(join(root, "cache"))}${sep}`;
 	if (entry?.installPath && resolve(entry.installPath).startsWith(cacheDir)) {
 		rmSync(entry.installPath, { recursive: true, force: true });
 	}

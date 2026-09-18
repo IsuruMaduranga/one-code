@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { worktreeBashGuardReason } from "../../extensions/worktree/guards.ts";
 
@@ -26,8 +27,8 @@ describe("worktree git-isolation guard", () => {
 	});
 
 	it("refuses git pointed at the shared checkout or a sibling worktree", () => {
-		expect(guard("git -C /repo status")).toContain("targets /repo");
-		expect(guard("git -C ../wt2 log")).toContain("/repo/.claude/worktrees/wt2");
+		expect(guard("git -C /repo status")).toContain(`targets ${resolve("/repo")}`);
+		expect(guard("git -C ../wt2 log")).toContain(resolve("/repo/.claude/worktrees/wt2"));
 		expect(guard("git --git-dir=/repo/.git log")).toBeDefined();
 		expect(guard("git --work-tree /repo status")).toBeDefined();
 		expect(guard("cd /repo && git status")).toBeDefined();
@@ -48,7 +49,7 @@ describe("worktree git-isolation guard", () => {
 	});
 
 	it("sees a -C that follows --config-env", () => {
-		expect(guard("git --config-env foo=BAR -C /repo status")).toContain("targets /repo");
+		expect(guard("git --config-env foo=BAR -C /repo status")).toContain(`targets ${resolve("/repo")}`);
 	});
 
 	it("sees through cd options to the real destination", () => {

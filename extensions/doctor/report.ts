@@ -16,6 +16,7 @@
  */
 
 import type { Api, Model } from "@earendil-works/pi-ai";
+import { tildify } from "../lib/paths.ts";
 import type { McpStatusEvent } from "../lib/mcp-status.ts";
 import { wrapProse } from "../subagents/panel-render.ts";
 import { countNoun } from "../lib/tui-render.ts";
@@ -183,7 +184,5 @@ export function contextLabel(tokens: number | undefined): string {
 
 /** `~/…` for anything under home, so paths stay readable at any width. */
 export function shortenHome(path: string, home: string): string {
-	if (path === home) return "~";
-	const root = home.endsWith("/") ? home : `${home}/`;
-	return path.startsWith(root) ? `~/${path.slice(root.length)}` : path;
+	return tildify(path, home);
 }

@@ -15,7 +15,7 @@
 import { createWriteStream } from "node:fs";
 import type { BackgroundTask } from "../background/registry.ts";
 import { whenAborted } from "../lib/abort.ts";
-import { detachedSpawnOptions, KILL_GRACE_MS, stopProcessTree } from "../lib/process-tree.ts";
+import { detachedSpawnOptions, KILL_GRACE_MS, stopProcessTree, waitForChildExit } from "../lib/process-tree.ts";
 import { bashSpawnOrThrow, type ShellSpawn, spawnShellCommand } from "../lib/shell-spawn.ts";
 
 export const STORED_OUTPUT_CAP = 200_000;
@@ -131,13 +131,15 @@ export function startBackgroundBash(options: StartBackgroundBashOptions): Backgr
 		else complete();
 	};
 
-	child.on("error", (error) => {
-		stored = stored ? `${stored}\n${error.message}` : error.message;
-		end("failed", null, null);
-	});
-	child.on("close", (code, signal) => {
-		end(stopRequested ? "stopped" : timedOut || code !== 0 ? "failed" : "completed", code, signal);
-	});
+	// Exit plus a short stdio grace, not `close`: a descendant the stop missed
+	// must not keep the task "running" for its whole life (lib/process-tree.ts).
+	waitForChildExit(child).then(
+		({ code, signal }) => end(stopRequested ? "stopped" : timedOut || code !== 0 ? "failed" : "completed", code, signal),
+		(error: Error) => {
+			stored = stored ? `${stored}\n${error.message}` : error.message;
+			end("failed", null, null);
+		},
+	);
 
 	return task;
 }

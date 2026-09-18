@@ -25,6 +25,9 @@ afterEach(() => {
 const check = (toolName: string, input: Record<string, unknown>) =>
 	safetyControlWrite({ toolName, input, cwd, home });
 
+/** A path as it is spelled inside a bash command line: forward slashes (a backslash is an escape there). */
+const sh = (path: string) => path.replace(/\\/g, "/");
+
 describe("safetyControlWrite: writing tools", () => {
 	it("floors a write to the user settings file, however it is spelled", () => {
 		expect(check("write", { path: join(home, ".claude", "settings.json") })).toContain("permission rules");
@@ -64,12 +67,12 @@ describe("safetyControlWrite: writing tools", () => {
 
 describe("safetyControlWrite: shell commands", () => {
 	it("floors a redirect into the settings file", () => {
-		expect(check("bash", { command: `echo '{}' > ${join(home, ".claude", "settings.json")}` })).toBeDefined();
+		expect(check("bash", { command: `echo '{}' > ${sh(join(home, ".claude", "settings.json"))}` })).toBeDefined();
 		expect(check("bash", { command: "echo '{}' > ~/.claude/settings.json" })).toBeDefined();
 	});
 
 	it("floors file-writing commands aimed at settings files", () => {
-		expect(check("bash", { command: `cp /tmp/mine.json ${join(cwd, ".claude", "settings.local.json")}` })).toBeDefined();
+		expect(check("bash", { command: `cp /tmp/mine.json ${sh(join(cwd, ".claude", "settings.local.json"))}` })).toBeDefined();
 	});
 
 	it("does not floor reads of the same files", () => {

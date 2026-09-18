@@ -12,7 +12,7 @@
  * concept at all), and the auto-memory folder as the last entry.
  */
 
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import {
 	AGENTS_DESCRIPTOR,
 	ancestorDirs,
@@ -25,6 +25,7 @@ import {
 	ONECODE_GLOBAL_DESCRIPTOR,
 	PROJECT_DESCRIPTOR,
 } from "../lib/claude-context.ts";
+import { forwardSlashes, isPathAtOrUnder, tildify } from "../lib/paths.ts";
 import { tryReadFile } from "../lib/plugins.ts";
 
 export interface MemoryEntry {
@@ -39,12 +40,14 @@ export interface MemoryEntry {
 	exists: boolean;
 }
 
-/** Display form of a path: a file at the cwd as `./name`, under home as `~/…`, else absolute. */
+/**
+ * Display form of a path: a file under the cwd as `./name`, under home as
+ * `~/…`, else as given — always with forward slashes (Claude Code's spelling
+ * in this picker), whatever the platform's separator.
+ */
 function displayPath(path: string, cwd: string, home: string): string {
-	if (path.startsWith(`${cwd}/`)) return `./${path.slice(cwd.length + 1)}`;
-	if (home && path === home) return "~";
-	if (home && path.startsWith(`${home}/`)) return `~${path.slice(home.length)}`;
-	return path;
+	if (isPathAtOrUnder(path, cwd) && resolve(path) !== resolve(cwd)) return `./${forwardSlashes(relative(resolve(cwd), resolve(path)))}`;
+	return tildify(path, home);
 }
 
 /**

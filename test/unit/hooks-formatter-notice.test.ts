@@ -1,6 +1,6 @@
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { changedSince, FORMATTER_NOTICE, fileToolTarget, snapshotFile } from "../../extensions/hooks/formatter-notice.ts";
 
@@ -8,9 +8,9 @@ const dir = () => mkdtempSync(join(tmpdir(), "formatter-notice-"));
 
 describe("fileToolTarget", () => {
 	it("resolves a file tool's target against the cwd", () => {
-		expect(fileToolTarget("edit", { path: "src/a.py" }, "/repo")).toBe("/repo/src/a.py");
-		expect(fileToolTarget("write", { path: "/abs/b.py" }, "/repo")).toBe("/abs/b.py");
-		expect(fileToolTarget("notebook_edit", { path: "n.ipynb" }, "/repo")).toBe("/repo/n.ipynb");
+		expect(fileToolTarget("edit", { path: "src/a.py" }, "/repo")).toBe(resolve("/repo", "src/a.py"));
+		expect(fileToolTarget("write", { path: "/abs/b.py" }, "/repo")).toBe(resolve("/abs/b.py"));
+		expect(fileToolTarget("notebook_edit", { path: "n.ipynb" }, "/repo")).toBe(resolve("/repo", "n.ipynb"));
 	});
 
 	it("ignores tools that do not write a file, and calls with no path", () => {

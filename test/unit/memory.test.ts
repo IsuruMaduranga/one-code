@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
 	INDEX_MAX_BYTES,
@@ -21,7 +22,7 @@ describe("projectSlug", () => {
 
 describe("memoryDir", () => {
 	it("lives under ~/.claude/projects/<slug>/memory", () => {
-		expect(memoryDir("/Users/u", "/tmp/project")).toBe("/Users/u/.claude/projects/-tmp-project/memory");
+		expect(memoryDir("/Users/u", "/tmp/project")).toBe(join("/Users/u", ".claude", "projects", "-tmp-project", "memory"));
 	});
 });
 

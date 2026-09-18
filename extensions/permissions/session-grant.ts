@@ -17,6 +17,7 @@
 
 import { dirname } from "node:path";
 import { toAbsolute } from "../auto-mode/paths.ts";
+import { tildify, toPosixPath } from "../lib/paths.ts";
 import { escapeLiteral, isAtOrInsideDir, normalizeToolName, parseRule, type PermissionMode, type PermissionRule, subjectKind, urlHost } from "./matcher.ts";
 
 export interface SessionGrant {
@@ -42,12 +43,16 @@ export interface SessionGrantInput {
 
 /** `~`-abbreviated path for a label. */
 function displayPath(path: string, home: string): string {
-	return path === home ? "~" : path.startsWith(`${home}/`) ? `~/${path.slice(home.length + 1)}` : path;
+	return tildify(path, home);
 }
 
-/** Claude Code's `//absolute` rule form for a directory and everything under it. */
+/**
+ * Claude Code's `//absolute` rule form for a directory and everything under
+ * it — on Windows in CC's POSIX spelling (`//c/Users/x/proj/**`), the form
+ * `matchesPathPattern` matches native paths as.
+ */
 function absoluteDirPattern(dir: string): string {
-	return `/${dir.replace(/\/+$/, "")}/**`;
+	return `/${toPosixPath(dir).replace(/\/+$/, "")}/**`;
 }
 
 export function sessionGrant(input: SessionGrantInput): SessionGrant | undefined {

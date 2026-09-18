@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { rewriteToolInput, shellQuote, validateWorktreeName } from "../../extensions/worktree/rewrite.ts";
 
@@ -29,7 +30,7 @@ describe("rewriteToolInput", () => {
 	it("resolves relative paths against the worktree and leaves absolute ones alone", () => {
 		const relative: Record<string, unknown> = { path: "src/index.ts" };
 		rewriteToolInput("edit", relative, WT);
-		expect(relative.path).toBe(`${WT}/src/index.ts`);
+		expect(relative.path).toBe(resolve(WT, "src/index.ts"));
 
 		const absolute: Record<string, unknown> = { path: "/etc/hosts" };
 		rewriteToolInput("read", absolute, WT);
@@ -42,7 +43,7 @@ describe("rewriteToolInput", () => {
 		// checkout (code-review).
 		const nb: Record<string, unknown> = { notebook_path: "analysis.ipynb", cell_id: "c1" };
 		rewriteToolInput("notebook_edit", nb, WT);
-		expect(nb.notebook_path).toBe(`${WT}/analysis.ipynb`);
+		expect(nb.notebook_path).toBe(resolve(WT, "analysis.ipynb"));
 		expect(nb.path).toBeUndefined();
 
 		const abs: Record<string, unknown> = { notebook_path: "/tmp/x.ipynb" };
