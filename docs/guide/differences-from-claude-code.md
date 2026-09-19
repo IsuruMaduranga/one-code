@@ -28,7 +28,7 @@ so nothing surprises you.
 |---|---|---|
 | Models | Anthropic models. | Any provider pi supports, switchable mid-session, with a different model per role. |
 | Tool names on the wire | PascalCase (`Read`, `Bash`). | snake_case (`read`, `bash`); `Agent` and `SendMessage` keep their names. Claude Code names still work in rules and hook matchers. |
-| Permission-mode key | shift+tab. | ctrl+q. pi reserves shift+tab for the reasoning-effort dial. |
+| Permission-mode key | shift+tab. | ctrl+q; alt+m on Windows and WSL. pi reserves shift+tab for the reasoning-effort dial and, on Windows, ctrl+q for queuing a follow-up. |
 | Task-list key | ctrl+t. | `/tasks show` and `/tasks hide`. pi reserves ctrl+t for thinking blocks. |
 | Deleting files in auto mode | The whole project directory is trusted. | A delete is approved only when git can recover the file; otherwise the classifier decides. |
 | Bypass mode | Protected paths stay protected. | Bypass mode bypasses everything, including protected paths. |

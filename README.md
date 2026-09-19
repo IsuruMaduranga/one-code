@@ -227,7 +227,7 @@ while permission rules and deterministic checks enforce the rest. `deny` rules
 beat `allow` rules. Trust approval covers project-provided hooks, MCP servers,
 and allow rules.
 
-Press **ctrl+q** to cycle through manual, accept-edits, plan, and auto modes.
+Press **ctrl+q** (**alt+m** on Windows and WSL) to cycle through manual, accept-edits, plan, and auto modes.
 Plan mode lets the agent investigate and write a plan file before you approve
 implementation. Use `/permissions` to inspect rules and `/auto-mode` to
 configure the classifier.

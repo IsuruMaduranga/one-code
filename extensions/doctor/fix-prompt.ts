@@ -22,6 +22,8 @@
  * kept in substance. Rationale: docs/decisions/doctor.md.
  */
 
+import { modeCycleKey } from "../lib/keys.ts";
+
 export interface FixPromptInput {
 	/** The rendered deterministic report, plain text. */
 	reportText: string;
@@ -107,7 +109,7 @@ Installed: ${input.oneCodeVersion} (${input.install === "app" ? "the bundled one
 
 ## Check 8 — permission mode (report only)
 
-Auto mode is One Code's shipped default. If the report shows a different mode pinned by \`permissions.defaultMode\` in \`~/.claude/settings.json\` or a managed file, say so in one line and leave it — One Code does not edit those files, and the user can change the mode with ctrl+q or \`--permission-mode\`. If a repository file pins \`auto\` or \`bypassPermissions\`, the report already explains why it is ignored.
+Auto mode is One Code's shipped default. If the report shows a different mode pinned by \`permissions.defaultMode\` in \`~/.claude/settings.json\` or a managed file, say so in one line and leave it — One Code does not edit those files, and the user can change the mode with ${modeCycleKey()} or \`--permission-mode\`. If a repository file pins \`auto\` or \`bypassPermissions\`, the report already explains why it is ignored.
 
 ## Check 9 — pre-approve frequently denied read-only commands
 

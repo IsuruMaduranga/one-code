@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { whichOnPath } from "../lib/which.ts";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { getProviderKind } from "pi-web-search/src/api.ts";
-import { INSTALL_HINTS } from "../lsp/install-hints.ts";
+import { INSTALL_HINTS, installHint } from "../lsp/install-hints.ts";
 import { SERVERS } from "../lsp/servers.ts";
 import { typescriptPreflight } from "../lsp/servers.ts";
 import type { McpServer } from "../mcp/config.ts";
@@ -63,6 +63,8 @@ export interface DependencyInput {
 	cwd: string;
 	env: NodeJS.ProcessEnv;
 	platform?: string;
+	/** pi's agent dir; its `bin/` holds the ripgrep pi downloads itself. */
+	agentDir?: string;
 	mcpServers: McpServer[];
 	sessionModel?: Model<Api>;
 	webSearchSettings: WebSearchSettings;
@@ -79,8 +81,12 @@ export function checkDependencies(input: DependencyInput): DependencyReport {
 	checks.push({ name: "git", found: !!git, path: git, need: "required", reason: "repository detection, auto mode's recoverability check, worktree isolation", hint: "https://git-scm.com/downloads" });
 	if (!git) findings.push({ level: "warn", text: "git is not on PATH: worktree isolation and auto mode's git-recoverability check are unavailable.", fix: "Install git and make sure it is on the PATH used to launch One Code." });
 
-	const rg = which("rg");
-	checks.push({ name: "rg", found: !!rg, path: rg, need: "optional", reason: "faster code search when the model shells out to ripgrep", hint: "brew install ripgrep" });
+	// pi downloads ripgrep into <agentDir>/bin on first run when PATH has none
+	// and puts that dir on the shell tools' PATH, so a copy there is "found".
+	const rgName = platform === "win32" ? "rg.exe" : "rg";
+	const bundledRg = input.agentDir ? join(input.agentDir, "bin", rgName) : undefined;
+	const rg = which("rg") ?? (bundledRg && existsSync(bundledRg) ? bundledRg : undefined);
+	checks.push({ name: "rg", found: !!rg, path: rg, need: "optional", reason: "faster code search when the model shells out to ripgrep", hint: installHint("ripgrep", platform) });
 
 	const languages = projectLanguages(cwd);
 	const seenCommands = new Set<string>();

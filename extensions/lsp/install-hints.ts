@@ -13,13 +13,30 @@
 
 import { isAbsolute } from "node:path";
 
+/**
+ * Tools that come from the OS package manager, by platform. Homebrew is a
+ * macOS answer; a Windows user needs winget (the doctor said `brew install
+ * ripgrep` on Windows until 2026-09-19), a Linux user their distro's manager.
+ */
+const PACKAGE_MANAGER_HINTS: Record<string, { darwin: string; win32: string; linux: string }> = {
+	ripgrep: { darwin: "brew install ripgrep", win32: "winget install BurntSushi.ripgrep.MSVC", linux: "apt install ripgrep (or your distribution's package manager)" },
+	jdtls: { darwin: "brew install jdtls", win32: "download from https://download.eclipse.org/jdtls/ and put its bin\\jdtls.bat on PATH", linux: "download from https://download.eclipse.org/jdtls/ and put its bin/jdtls on PATH" },
+};
+
+/** The install command for a package-manager tool on `platform` (defaults to this one). */
+export function installHint(tool: keyof typeof PACKAGE_MANAGER_HINTS | string, platform: string = process.platform): string {
+	const byPlatform = PACKAGE_MANAGER_HINTS[tool];
+	if (!byPlatform) return `install ${tool} and make sure it is on your PATH`;
+	return platform === "win32" ? byPlatform.win32 : platform === "darwin" ? byPlatform.darwin : byPlatform.linux;
+}
+
 /** Install commands for the built-in table's servers (and their npm siblings). */
 export const INSTALL_HINTS: Record<string, string> = {
 	"typescript-language-server": "npm install -g typescript-language-server typescript",
 	"pyright-langserver": "npm install -g pyright",
 	gopls: "go install golang.org/x/tools/gopls@latest",
 	"rust-analyzer": "rustup component add rust-analyzer",
-	jdtls: "brew install jdtls",
+	jdtls: installHint("jdtls"),
 };
 
 /** True when the failure is a spawn ENOENT — the binary itself is absent. */

@@ -85,7 +85,7 @@ These come from pi and are available in every One Code session.
 
 | Shortcut | What it does |
 |---|---|
-| **ctrl+q** | Cycle the permission mode: manual, accept edits, plan, auto. |
+| **ctrl+q** (**alt+m** on Windows and WSL) | Cycle the permission mode: manual, accept edits, plan, auto. |
 | **↓** (empty editor) | Focus the panel below the editor: background shells, then subagents, then workflows. |
 | **ctrl+x** then **ctrl+k** | Stop every running agent (in the subagent panel). |
 | **x** | Stop the selected agent, shell, or workflow (in a panel). |

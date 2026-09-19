@@ -181,7 +181,7 @@ export function buildDoctorReport({ env, registry, session }: BuildInput): Docto
 	sections.push(mcpSection(compat, session, env.home));
 
 	const webSearchSettings = webSearchSettingsFrom(readJsonFile<{ webSearch?: unknown }>(oneCodeSettingsPath(env.home, env.env))?.webSearch);
-	const deps = checkDependencies({ cwd: env.cwd, env: env.env, platform: env.platform, mcpServers: compat.mcp.servers, sessionModel: session.model, webSearchSettings });
+	const deps = checkDependencies({ cwd: env.cwd, env: env.env, platform: env.platform, agentDir: env.agentDir, mcpServers: compat.mcp.servers, sessionModel: session.model, webSearchSettings });
 	findings.push(...deps.findings);
 	sections.push(dependenciesSection(deps));
 

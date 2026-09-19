@@ -10,6 +10,7 @@
  */
 
 import type { PermissionMode } from "./matcher.ts";
+import { modeCycleKey } from "../lib/keys.ts";
 
 /** Footer badge per mode — Claude Code's exact strings and icons. */
 export const MODE_BADGES: Record<PermissionMode, string> = {
@@ -86,9 +87,11 @@ export function isRealModel(id: string | undefined): id is string {
 /**
  * The key that cycles permission modes. Claude Code cycles on shift+tab and
  * says so in this footer; pi reserves shift+tab for the effort dial, so One Code
- * cycles on ctrl+q (see docs/decisions/modes.md) and the hint names that key.
+ * cycles on ctrl+q (see docs/decisions/modes.md) — alt+m on Windows and WSL,
+ * where pi owns ctrl+q (lib/keys.ts) — and the hint names that key.
  */
-export const CYCLE_KEY_HINT = "ctrl+q to cycle";
+export const CYCLE_KEY = modeCycleKey();
+export const CYCLE_KEY_HINT = `${CYCLE_KEY} to cycle`;
 
 /**
  * The footer badge, with auto mode naming the model screening the calls. That

@@ -10,6 +10,7 @@
  */
 
 import type { Api, Model } from "@earendil-works/pi-ai";
+import { modeCycleKey } from "../lib/keys.ts";
 import { loadAutoModeConfig } from "../auto-mode/config.ts";
 import { classifierCandidates, describeCandidate, type ClassifierNotice } from "../auto-mode/model-select.ts";
 import { ATTRIBUTION, capabilityFloor, configuredCapabilityKey, type FloorRole, type FloorVerdict, KEY_ADVICE, snapshotAgeMs } from "../lib/capability-index.ts";
@@ -210,7 +211,7 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 	if (session.permission) {
 		const mode = session.permission.mode;
 		const from = session.permission.source ? ` (${session.permission.source})` : "";
-		lines.push({ text: `Permission mode: ${mode}${from} — ctrl+q cycles, /permissions lists the rules`, level: "dim" });
+		lines.push({ text: `Permission mode: ${mode}${from} — ${modeCycleKey()} cycles, /permissions lists the rules`, level: "dim" });
 	}
 
 	if (facts.sessionTier === "tiny") {

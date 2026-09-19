@@ -104,6 +104,17 @@ without Git for Windows. A hook can pick its interpreter with Claude Code's
 the whole process tree through `taskkill /T` on Windows. See
 [Hooks](hooks.md#which-shell-runs-a-hook).
 
+## Keys
+
+pi binds a few of its own shortcuts differently on Windows and WSL, where
+alt+enter and ctrl+shift+letter do not reach the terminal reliably: queue a
+follow-up is ctrl+q instead of alt+enter, fork is ctrl+f, paste is alt+v,
+model selection is alt+p. Because ctrl+q is taken there, One Code cycles
+permission modes with **alt+m** on Windows and WSL (ctrl+q everywhere
+else). The footer badge, the startup hints, and `/doctor` name the key that
+applies on your machine. Everything else in the [terminal reference](reference.md)
+is the same.
+
 ## Paths and state
 
 - One Code's state lives in `%USERPROFILE%\.onecode`; Claude Code's

@@ -70,7 +70,7 @@ import {
 	isPathSubjectTool,
 } from "./matcher.ts";
 import { type SessionGrant, sessionGrant } from "./session-grant.ts";
-import { modeBadge, nextMode, PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "./modes.ts";
+import { modeBadge, nextMode, PERMISSION_STATUS_CHANNEL, type PermissionStatus, CYCLE_KEY } from "./modes.ts";
 import { type ChildToolCall, type ChildGateDecision, SUBAGENT_GATE_CHANNEL } from "./subagent-gate.ts";
 import { trackOriginalCommands } from "../lib/original-command.ts";
 import { MODE_CHANNEL, PLAN_FILE_CHANNEL } from "../lib/plan-mode-channels.ts";
@@ -785,8 +785,10 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	// Claude Code cycles permission modes with shift+tab; pi reserves that key
 	// for the thinking dial. ctrl+q is the one ctrl+letter pi leaves unbound
 	// that terminals don't already own (ctrl+m *is* Enter's byte, alt needs
-	// option-as-meta configured on macOS) — see docs/decisions.md.
-	pi.registerShortcut("ctrl+q", {
+	// option-as-meta configured on macOS) — except on Windows and WSL, where
+	// pi binds ctrl+q itself and the key is alt+m (lib/keys.ts) — see
+	// docs/decisions.md.
+	pi.registerShortcut(CYCLE_KEY, {
 		description: "Cycle permission mode",
 		handler: (ctx) => {
 			badgeCtx = ctx;

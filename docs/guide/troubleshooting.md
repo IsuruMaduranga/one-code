@@ -46,12 +46,12 @@ on first run, so there's nothing to ask.
 
 ## Permissions
 
-**Auto mode is missing from the ctrl+q cycle.** Auto mode needs a model to
+**Auto mode is missing from the mode cycle.** Auto mode needs a model to
 run its classifier. Connect a provider.
 
-**ctrl+q does something else.** On Windows and WSL, pi's default
-keybindings also bind ctrl+q, to queue a follow-up message. Rebind one of
-them in pi's keybindings file.
+**ctrl+q queues a follow-up instead of changing the mode.** On Windows and
+WSL that is pi's own binding for ctrl+q. The mode key there is alt+m; the
+footer badge names it.
 
 **Everything prompts, even in auto mode.** Auto mode pauses after several
 blocked actions in a row and prompts you once; approving resumes it. Also

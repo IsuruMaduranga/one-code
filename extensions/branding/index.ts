@@ -14,6 +14,7 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
+import { modeCycleKey } from "../lib/keys.ts";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -91,8 +92,9 @@ const HINTS: [key: string, what: string][] = [
 	// it as Claude Code's "effort" so the key and /effort agree on the name.
 	["shift+tab", "effort"],
 	// Claude Code cycles permission modes on shift+tab; pi owns that key, and
-	// ctrl+q is the one ctrl+letter both pi and terminals leave free.
-	["ctrl+q", "permissions"],
+	// ctrl+q is the one ctrl+letter both pi and terminals leave free — except
+	// on Windows and WSL, where pi takes ctrl+q and the key is alt+m.
+	[modeCycleKey(), "permissions"],
 	["ctrl+t", "thinking"],
 	["ctrl+o", "expand output"],
 	["/", "commands"],

@@ -132,10 +132,10 @@ stops risky ones, so you're not prompted for every step.
 The current badge appears in the banner and is announced when the mode
 changes.
 
-### Cycle modes with ctrl+q
+### Cycle modes with ctrl+q (alt+m on Windows and WSL)
 
-Press **ctrl+q** to cycle through manual, accept edits, plan, and auto.
-Two modes join the cycle only under certain conditions:
+Press **ctrl+q** to cycle through manual, accept edits, plan, and auto. On
+Windows and WSL the key is **alt+m**. Two modes join the cycle only under certain conditions:
 
 - **Auto** appears only when a model that can run the classifier is
   available. With no provider connected, the cycle skips it.
@@ -146,8 +146,9 @@ flag or a settings file.
 
 Claude Code cycles modes with shift+tab. One Code can't use that key
 because pi reserves it for the reasoning-effort dial. On Windows and WSL,
-pi's own default keybindings also use ctrl+q to queue a follow-up message.
-If the two conflict there, change pi's binding in its keybindings file.
+pi's own default keybindings use ctrl+q to queue a follow-up message, so
+One Code cycles modes with alt+m there instead. The footer badge and the
+startup hints name whichever key applies on your machine.
 
 ### Choose the starting mode
 
@@ -299,7 +300,7 @@ code. Only read-only tools and edits to one plan file are available.
   `plan` agent, and then write the plan.
 - You can read and edit the plan file yourself while the model works.
 
-Enter plan mode by cycling to it with **ctrl+q**, by starting with
+Enter plan mode by cycling to it with **ctrl+q** (**alt+m** on Windows and WSL), by starting with
 `--permission-mode plan`, or by asking the model to plan first (it can call
 `enter_plan_mode` itself).
 

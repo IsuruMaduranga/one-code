@@ -125,7 +125,7 @@ Set the subagent default with `/subagent`, or apply a preset with
 ## Permission settings
 
 `/permissions` shows the mode and rules, `/allow` adds a rule, and
-`/auto-mode setup` configures the classifier. **ctrl+q** cycles modes. To
+`/auto-mode setup` configures the classifier. **ctrl+q** (**alt+m** on Windows and WSL) cycles modes. To
 start a session in a given mode:
 
 ```bash
