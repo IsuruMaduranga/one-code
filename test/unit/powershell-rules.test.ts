@@ -204,6 +204,11 @@ describe("powershellReadOnly with roots (absolute paths judged by containment, 2
 		}
 	});
 
+	it.skipIf(process.platform === "win32")("a Windows-spelled path on a POSIX host is refused: this platform cannot resolve it", () => {
+		expect(powershellReadOnly("Get-Content C:\\secrets.txt", opts).readOnly).toBe(false);
+		expect(powershellReadOnly(`Get-Content C:\\${join(cwd, "src", "a.ts").replace(/^\//, "")}`, opts).readOnly).toBe(false);
+	});
+
 	it("without roots an absolute path is refused as before", () => {
 		expect(powershellReadOnly(`Get-Content ${join(cwd, "src", "a.ts")}`).readOnly).toBe(false);
 	});

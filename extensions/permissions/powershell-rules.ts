@@ -31,6 +31,7 @@
  * call or a prompt, never a bypass — docs/decisions/windows.md.
  */
 
+import { isAbsolute } from "node:path";
 import { isWithin, resolveForContainment, toAbsolute } from "../auto-mode/paths.ts";
 
 /** Claude Code's `COMMON_ALIASES` (utils/powershell/parser.ts), alias → canonical cmdlet. */
@@ -471,6 +472,10 @@ function pathOutsideRoots(value: string, opts: PowerShellReadOnlyOptions | undef
 		if (pathUnvouchable(trimmed)) return true;
 		if (!isAbsoluteSpelling(trimmed)) continue;
 		if (!opts) return true;
+		// Resolve only what THIS platform's path module calls absolute: on a POSIX
+		// host `C:\x` is not, and `toAbsolute` would join it onto the cwd and
+		// vouch for a file the shell would never touch. Refuse it by shape there.
+		if (!isAbsolute(trimmed)) return true;
 		const resolved = resolveForContainment(toAbsolute(opts.cwd, trimmed, opts.home));
 		if (resolved === undefined || !roots.some((root) => isWithin(root, resolved))) return true;
 	}
