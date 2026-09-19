@@ -823,10 +823,14 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				return undefined; // typing resumes in the editor, byte included
 			}
 			if (result.effect === "toAgents") {
-				// No agent rows to land on → the byte passes through to the editor,
-				// consistent with the initial-entry branch.
 				panel.setShellFocus(undefined);
-				return focusFirstAgentRow() ? { consume: true } : undefined;
+				if (focusFirstAgentRow()) return { consume: true };
+				// No agent rows below the chip: stay on it. Dropping focus here handed
+				// the NEXT key to the editor, where ↑ recalls the last prompt — the
+				// "sometimes ↓ recalls history" seen on the Windows VM (2026-09-19):
+				// ↓ chip, ↓ (nothing below, focus silently gone), ↑ → history.
+				panel.setShellFocus({ stage: "chip" });
+				return { consume: true };
 			}
 			if (result.effect === "stopSelected") {
 				try {
