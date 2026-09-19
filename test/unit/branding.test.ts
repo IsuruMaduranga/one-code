@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { modeCycleKey } from "../../extensions/lib/keys.ts";
 import { WORDMARK, WORDMARK_WIDTH, bannerLines, sectionSummary, truncateLine } from "../../extensions/branding/index.ts";
 import { shouldDefaultFlushOutputPad, shouldDefaultHideThinking } from "../../extensions/branding/startup.ts";
 
@@ -28,7 +29,7 @@ describe("bannerLines", () => {
 		expect(hintLines).toHaveLength(1);
 		for (const hint of [
 			"shift+tab effort",
-			"ctrl+q permissions",
+			`${modeCycleKey()} permissions`,
 			"ctrl+t thinking",
 			"ctrl+o expand output",
 			"/ commands",

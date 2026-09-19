@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import type { PermissionMode } from "../../extensions/permissions/matcher.ts";
+import { modeCycleKey, pauseGlyph } from "../../extensions/lib/keys.ts";
+
+// The key and the pause icon follow the platform (alt+m and a single-cell
+// glyph on Windows and WSL — lib/keys.ts), so the expectations are built from
+// the same rule this process resolves to; keys.test.ts pins the rule itself.
+const KEY = modeCycleKey();
+const P = pauseGlyph();
 import {
 	formatModel,
 	formatModelSpec,
@@ -55,15 +62,15 @@ describe("MODE_BADGES", () => {
 	});
 
 	it("uses Claude Code's strings", () => {
-		expect(MODE_BADGES.default).toBe("⏸ manual mode on");
+		expect(MODE_BADGES.default).toBe(`${P} manual mode on`);
 		expect(MODE_BADGES.acceptEdits).toBe("⏵⏵ accept edits on");
-		expect(MODE_BADGES.plan).toBe("⏸ plan mode on");
+		expect(MODE_BADGES.plan).toBe(`${P} plan mode on`);
 		expect(MODE_BADGES.auto).toBe("⏵⏵ auto mode on");
 	});
 });
 
 describe("modeBadge", () => {
-	const HINT = " (ctrl+q to cycle)";
+	const HINT = ` (${KEY} to cycle)`;
 
 	it("ends every badge with the cycle-key hint", () => {
 		expect(modeBadge("default", {})).toBe(`${MODE_BADGES.default}${HINT}`);
@@ -82,7 +89,7 @@ describe("modeBadge", () => {
 	});
 
 	it("keeps the model visible while paused", () => {
-		expect(modeBadge("auto", { paused: true, classifierModel: "gpt-5-mini" })).toBe(`⏸ auto mode paused · 5-mini${HINT}`);
+		expect(modeBadge("auto", { paused: true, classifierModel: "gpt-5-mini" })).toBe(`${P} auto mode paused · 5-mini${HINT}`);
 	});
 
 	it("appends the interrupt hint only while streaming (CC's mode line)", () => {
