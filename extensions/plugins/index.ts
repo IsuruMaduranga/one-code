@@ -65,6 +65,7 @@ import { applyPanelKey, initialPanelState, type PanelEffect, type PanelView } fr
 import { findShellPlaceholders, replaceShellPlaceholders, substituteArguments } from "./template.ts";
 import { parseFrontmatterLoosely } from "../lib/frontmatter.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
+import { registerLocalCommand } from "../lib/local-command.ts";
 
 const run = promisify(execFile);
 const SHELL_TIMEOUT_MS = 30_000;
@@ -518,9 +519,9 @@ export default function pluginsExtension(pi: ExtensionAPI) {
 		}
 	};
 
-	pi.registerCommand("plugins", {
+	registerLocalCommand(pi, "plugins", {
 		description: "Browse, install, and manage Claude Code-compatible plugins and marketplaces",
-		handler: async (_args, ctx) => {
+		handler: async (args, ctx) => {
 			if (ctx.hasUI) {
 				await openPanel(ctx);
 				return;

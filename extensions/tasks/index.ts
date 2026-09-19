@@ -22,6 +22,7 @@ import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { ccToolRenderers, linesComponent, safeThemeBold, safeThemePaint, strike } from "../lib/tui-render.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { formatTaskDetails, formatTaskLine, formatTaskList, formatTaskWidget, nudgeMessage, type TaskSnapshot, TaskStore } from "./store.ts";
+import { registerLocalCommand } from "../lib/local-command.ts";
 
 interface TaskDetails {
 	taskSnapshot: TaskSnapshot;
@@ -174,7 +175,7 @@ export default function tasksExtension(pi: ExtensionAPI) {
 		pi.events.emit(DEFER_CHANNEL, { name, keywords: ["task", "todo", "plan", "progress", "dependencies", "tracking"] });
 	}
 
-	pi.registerCommand("tasks", {
+	registerLocalCommand(pi, "tasks", {
 		description: "Show the structured task list; 'hide'/'show' toggles the widget",
 		handler: async (args, ctx) => {
 			const arg = args?.trim().toLowerCase();

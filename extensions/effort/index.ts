@@ -42,6 +42,7 @@ import {
 	ULTRACODE_MODE_CHANNEL,
 	ULTRACODE_STATUS_KEY,
 } from "./slider.ts";
+import { registerLocalCommand } from "../lib/local-command.ts";
 
 /** The levels pi says the active model can reach; the full ladder when unknown. */
 function supportedLevels(ctx: ExtensionContext): ThinkingLevel[] {
@@ -193,7 +194,7 @@ export default function effortExtension(pi: ExtensionAPI) {
 		if (chosen) applyChoice(chosen, ctx);
 	};
 
-	pi.registerCommand("effort", {
+	registerLocalCommand(pi, "effort", {
 		description: `Set reasoning effort (shift+tab cycles the plain levels): /effort [${EFFORT_CHOICES.join("|")}] — ultracode is ${ULTRACODE_LEVEL} + workflows`,
 		getArgumentCompletions: (prefix) => {
 			const matches = acceptedEffortArgs().filter((value) => value.startsWith(prefix.trim().toLowerCase()));

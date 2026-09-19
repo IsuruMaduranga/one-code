@@ -46,6 +46,7 @@ import {
 } from "./plugin-servers.ts";
 import { findProjectRoot, serverForPath, typescriptPreflight } from "./servers.ts";
 import { computeDelta, DeliveredTracker, fingerprintDiagnostic, formatNewDiagnostics, markDelivered } from "./watcher.ts";
+import { registerLocalCommand } from "../lib/local-command.ts";
 
 /** Everything needed to spawn/reuse the server responsible for a path. */
 interface ResolvedTarget {
@@ -361,9 +362,9 @@ export default function lspExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	pi.registerCommand("lsp", {
+	registerLocalCommand(pi, "lsp", {
 		description: "Show language server status",
-		handler: async (_args, ctx) => {
+		handler: async (args, ctx) => {
 			const lines = [...clients.entries()].map(
 				([key, client]) => `${client.isRunning ? "running" : "stopped"} ${key} (${client.diagnosticsCount} diagnostics)`,
 			);

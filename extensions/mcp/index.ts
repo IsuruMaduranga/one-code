@@ -64,6 +64,7 @@ import {
 	type McpResourceContents,
 	namespacedToolName,
 } from "./schema.ts";
+import { registerLocalCommand } from "../lib/local-command.ts";
 
 /** Anthropic's hard limit on a tool name; a longer one fails the whole request. */
 const MAX_TOOL_NAME_LENGTH = 128;
@@ -842,9 +843,9 @@ export default function mcpExtension(pi: ExtensionAPI) {
 		});
 	};
 
-	pi.registerCommand("mcp", {
+	registerLocalCommand(pi, "mcp", {
 		description: "Manage MCP servers (status, reconnect, authenticate, enable/disable)",
-		handler: async (_args, ctx) => {
+		handler: async (args, ctx) => {
 			if (servers.length === 0) {
 				ctx.ui.notify("No MCP servers configured. Add them to .mcp.json or ~/.claude.json.", "info");
 				return;

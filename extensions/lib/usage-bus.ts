@@ -22,7 +22,7 @@ export const USAGE_CHANNEL = "one-code:usage-recorded";
  */
 export const USAGE_ENTRY_TYPE = "one-code:usage";
 
-export type UsageSource = "subagent" | "classifier" | "reader" | "recap" | "setup";
+export type UsageSource = "subagent" | "classifier" | "reader" | "recap" | "session-title" | "setup";
 
 export interface UsageRecord {
 	source: UsageSource;

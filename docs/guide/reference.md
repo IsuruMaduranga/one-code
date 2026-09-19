@@ -49,7 +49,7 @@ that explains it.
 | `/loop status`, `/loop stop` | Report or end the loop. | |
 | `/tools-deferred` | List deferred tools and whether each is loaded. | [Tools](tools.md#eager-and-deferred-tools) |
 | `/init` | Have the model write a `CLAUDE.md` for the project. | [CLAUDE.md](bring-your-claude-code-setup.md#project-instructions-claudemd) |
-| `/clear` | Start a new session (pi's `/new`). | [Sessions](sessions-and-context.md#start-over) |
+| `/clear` | Start a new session (pi's `/new`); the model is told. | [Sessions](sessions-and-context.md#start-over) |
 | `/exit` | Quit (pi's `/quit`). | |
 
 ### pi commands
@@ -175,6 +175,7 @@ The `CC_` prefix is historical; `ONECODE_`-prefixed aliases are planned.
 | `CC_FOOTER=0` | Keep pi's footer instead of One Code's status line. |
 | `CC_TURN_DURATION=0` | Remove the post-turn timing line. |
 | `CC_RECAP=0` | Turn off the "while you were away" recap. |
+| `CC_SESSION_TITLE=0` | Turn off the automatic session title. |
 | `CC_RECAP_IDLE_MS` | Idle time before a recap, in milliseconds (default 300000). |
 | `CC_COMPACTION=0` | Use pi's compaction summary instead of Claude Code's. |
 | `CC_CLEAR_THINKING=0`, `=1` | Force the thinking-preservation request off or on for Anthropic models. Default: on for `api.anthropic.com` only. |

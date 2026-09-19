@@ -45,6 +45,7 @@ import {
 	type MonitorBatch,
 	pushEvent,
 } from "./monitor-batch.ts";
+import { registerLocalCommand } from "../lib/local-command.ts";
 
 const OUTPUT_CAP = 30_000;
 const STORED_OUTPUT_CAP = 200_000;
@@ -499,9 +500,9 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		pi.events.emit(DEFER_CHANNEL, { name, keywords });
 	}
 
-	pi.registerCommand("background", {
+	registerLocalCommand(pi, "background", {
 		description: "List background tasks (monitors, background subagents)",
-		handler: async (_args, ctx) => {
+		handler: async (args, ctx) => {
 			const tasks = registry.list();
 			ctx.ui.notify(tasks.length ? tasks.map(formatTaskLine).join("\n") : "No background tasks.", "info");
 		},
@@ -520,7 +521,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		}
 	};
 
-	pi.registerCommand("loop", {
+	registerLocalCommand(pi, "loop", {
 		description: "Repeat a task on a loop: `/loop 5m <task>` (fixed interval) or `/loop <task>` (self-paced). `/loop stop` ends it.",
 		handler: async (args, ctx) => {
 			lastCtx = ctx;

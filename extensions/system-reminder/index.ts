@@ -12,6 +12,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
 	appendReminderBlocks,
 	injectReminders,
+	openingUserAnchor,
 	REMINDER_CHANNEL,
 	ReminderQueue,
 	type ReminderPayload,
@@ -44,6 +45,7 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 				suffix: payload.suffix,
 				raw: payload.raw,
 				since: payload.since,
+				once: payload.once,
 			});
 		}
 	});
@@ -74,6 +76,13 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 		if (reminderQueue.hasPendingOneShots) {
 			const anchor = tailAnchor(event.messages);
 			if (anchor) reminderQueue.pin(anchor);
+		}
+		// A local-command breadcrumb rides the prompt that opens a request, before
+		// the user's text (Claude Code's placement), and stays there. Mid-turn —
+		// the request ends in a tool result — it waits for the next prompt.
+		if (reminderQueue.hasPending("user-prepend")) {
+			const anchor = openingUserAnchor(event.messages);
+			if (anchor) reminderQueue.pin(anchor, "user-prepend");
 		}
 		const reminders = reminderQueue.drain(event.messages);
 		return { messages: injectReminders(event.messages, reminders) };

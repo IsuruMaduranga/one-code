@@ -45,6 +45,7 @@ import { skillListingText } from "./listing.ts";
 import { renderSkillsPanel, type SkillsPaint } from "./panel/render.ts";
 import { applySkillsKey, initialSkillsState, type SkillsRow, visibleRows } from "./panel/state.ts";
 import { parseFrontmatterLoosely } from "../lib/frontmatter.ts";
+import { registerLocalCommand } from "../lib/local-command.ts";
 
 interface IndexedSkill {
 	name: string;
@@ -493,9 +494,9 @@ export default function skillExtension(pi: ExtensionAPI) {
 		});
 	};
 
-	pi.registerCommand("skills", {
+	registerLocalCommand(pi, "skills", {
 		description: "View and manage skills (on / name-only / user-only / off)",
-		handler: async (_args, ctx) => {
+		handler: async (args, ctx) => {
 			if (ctx.hasUI) {
 				await openSkillsPanel(ctx);
 				return;

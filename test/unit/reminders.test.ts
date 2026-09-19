@@ -6,6 +6,7 @@ import {
 	COMPACTION_SUMMARY_PREFIX,
 	COMPACTION_SUMMARY_SUFFIX,
 	injectReminders,
+	openingUserAnchor,
 	ReminderQueue,
 	tailAnchor,
 	wrapReminder,
@@ -361,5 +362,62 @@ describe("one-shot delivery guarantees (C3)", () => {
 		const messages = [user("do it"), assistant(), toolResult("ran")];
 		const result = injectReminders(messages, [{ text: "<total_tokens>5 tokens left</total_tokens>", placement: "last-append", order: 0, raw: true }]);
 		expect(blockTexts(result[2])).toEqual(["ran", "<total_tokens>5 tokens left</total_tokens>"]);
+	});
+});
+
+describe("user-prepend (local-command breadcrumbs)", () => {
+	const brief = (q: ReminderQueue) => q.enqueue("<cmd>", { placement: "user-prepend", raw: true });
+
+	it("stays queued through a drain until pinned to a user message", () => {
+		const q = new ReminderQueue();
+		brief(q);
+		expect(q.hasPending("user-prepend")).toBe(true);
+		expect(q.drain([toolResult()]).map((e) => e.text)).toEqual([]);
+		expect(q.hasPending("user-prepend")).toBe(true);
+		q.pin({ kind: "user", timestamp: 7 }, "user-prepend");
+		expect(q.hasPending("user-prepend")).toBe(false);
+		const drained = q.drain([user("hi", 7)]);
+		expect(drained.map((e) => [e.text, e.placement, e.pin])).toEqual([["<cmd>", "user-prepend", { kind: "user", timestamp: 7 }]]);
+	});
+
+	it("never enters a tool result (takeOneShots leaves it); `once` text is not queued twice while pending", () => {
+		const q = new ReminderQueue();
+		q.enqueue("<caveat>", { placement: "user-prepend", raw: true, once: true });
+		brief(q);
+		q.enqueue("<caveat>", { placement: "user-prepend", raw: true, once: true });
+		brief(q); // a second identical command block is a second command — kept
+		expect(q.takeOneShots()).toEqual([]);
+		q.pin({ kind: "user", timestamp: 1 }, "user-prepend");
+		expect(q.drain([user("x", 1)]).map((e) => e.text)).toEqual(["<caveat>", "<cmd>", "<cmd>"]);
+		// A later command starts a new run: the caveat is queued again.
+		q.enqueue("<caveat>", { placement: "user-prepend", raw: true, once: true });
+		expect(q.hasPending("user-prepend")).toBe(true);
+	});
+
+	it("openingUserAnchor names a trailing user-like message only", () => {
+		expect(openingUserAnchor([user("a", 3)])).toEqual({ kind: "user", timestamp: 3 });
+		expect(openingUserAnchor([user("a", 3), assistant(), toolResult()])).toBeUndefined();
+		expect(openingUserAnchor([{ role: "custom", content: "tick", timestamp: 9 } as any])).toEqual({ kind: "user", timestamp: 9 });
+		expect(openingUserAnchor([])).toBeUndefined();
+	});
+
+	it("injects a pinned breadcrumb BEFORE the user text, after the first-prepend stack, raw", () => {
+		const messages = [user("build it", 5)];
+		const out = injectReminders(messages, [
+			{ text: "ctx", placement: "first-prepend", order: 50 },
+			{ text: "<caveat>\n", placement: "user-prepend", order: 0, raw: true, pin: { kind: "user", timestamp: 5 } },
+			{ text: "<command-name>/clear</command-name>\n", placement: "user-prepend", order: 0, raw: true, pin: { kind: "user", timestamp: 5 } },
+			{ text: "budget", placement: "sticky-append", order: 0, raw: true, since: 0 },
+		]);
+		expect(blockTexts(out[0])).toEqual([wrapReminder("ctx"), "<caveat>\n", "<command-name>/clear</command-name>\n", "build it", "budget"]);
+	});
+
+	it("a pinned breadcrumb rides its own message on a later request, not the new prompt", () => {
+		const out = injectReminders(
+			[user("first", 1), assistant(), user("second", 2)],
+			[{ text: "<crumb>\n", placement: "user-prepend", order: 0, raw: true, pin: { kind: "user", timestamp: 1 } }],
+		);
+		expect(blockTexts(out[0])).toEqual(["<crumb>\n", "first"]);
+		expect(blockTexts(out[2])).toEqual(["second"]);
 	});
 });

@@ -35,6 +35,15 @@
  *   id, else the last user message by timestamp) and re-attached to that same
  *   message on every later request, byte-identical. Pins are process memory
  *   (a `--resume` drops them: one miss, once).
+ * - `user-prepend` — LOCAL-COMMAND BREADCRUMBS (`/clear`, `/model`, a panel
+ *   command): what Claude Code shows the model when the user ran a slash
+ *   command. Bare text blocks placed BEFORE the user's text on the next user
+ *   message that opens a request (after the `first-prepend` stack on message
+ *   one), then pinned there like a delivered one-shot. They never ride a tool
+ *   result — a command run mid-turn waits for the next prompt. The caveat
+ *   block is queued `once` per pending run (a second command joins the first
+ *   caveat); the command and stdout blocks are never collapsed.
+ *   `lib/local-command.ts` builds the blocks.
  *
  * Persisted or pinned is decided by WHEN the one-shot is emitted, which is a
  * load-order rule: system-reminder's `tool_result` hook takes the one-shots
@@ -66,7 +75,7 @@ export const REMINDER_CHANNEL = "one-code:system-reminder";
 export type ReminderScope = "next-turn" | "every-turn";
 
 /** See the module header for which placement fits which kind of reminder. */
-export type ReminderPlacement = "first-prepend" | "sticky-append" | "last-append";
+export type ReminderPlacement = "first-prepend" | "sticky-append" | "last-append" | "user-prepend";
 
 /** Where a delivered one-shot stays: a tool result (by call id) or a user turn (by timestamp). */
 export type PinAnchor = { kind: "toolResult"; toolCallId: string } | { kind: "user"; timestamp: number };
@@ -136,6 +145,8 @@ export interface ReminderPayload {
 	suffix?: string;
 	/** Emit the text bare, with no `<system-reminder>` frame. */
 	raw?: boolean;
+	/** `user-prepend` only: skip when the same text is already pending (the shared caveat). */
+	once?: boolean;
 	/**
 	 * `sticky-append` only: anchor the block from this timestamp instead of now —
 	 * `0` puts it on every user message in the session, including ones a resume
@@ -157,6 +168,8 @@ type EnqueueOptions = {
 	raw?: boolean;
 	/** Test seam / explicit anchor for `sticky-append`; defaults to now. */
 	since?: number;
+	/** `user-prepend` only: skip when the same text is already pending. */
+	once?: boolean;
 };
 
 export class ReminderQueue {
@@ -194,13 +207,18 @@ export class ReminderQueue {
 		}
 		if (opts?.scope === "every-turn") {
 			this.everyTurn.set(opts.key ?? text, entry);
-		} else {
-			// A keyed next-turn reminder replaces its predecessor, so a rapidly
-			// re-emitted state change (cycling permission modes) announces only
-			// where it settled.
-			if (opts?.key) this.nextTurn = this.nextTurn.filter((r) => r.key !== opts.key);
-			this.nextTurn.push(entry);
+			return;
 		}
+		// A breadcrumb run shares one caveat block (`once`): the same text pending
+		// twice would show the model two identical blocks in a row. Only the
+		// announcer's caveat asks for this — two commands with the same (empty)
+		// stdout are two commands, and both stay.
+		if (placement === "user-prepend" && opts?.once && this.nextTurn.some((r) => r.placement === placement && r.text === text)) return;
+		// A keyed next-turn reminder replaces its predecessor, so a rapidly
+		// re-emitted state change (cycling permission modes) announces only
+		// where it settled.
+		if (opts?.key) this.nextTurn = this.nextTurn.filter((r) => r.key !== opts.key);
+		this.nextTurn.push(entry);
 	}
 
 	remove(key: string): void {
@@ -213,27 +231,30 @@ export class ReminderQueue {
 	 * placements stay queued for the next request.
 	 */
 	takeOneShots(): ReminderEntry[] {
-		const taken = this.nextTurn.filter((r) => r.placement === "last-append");
-		this.nextTurn = this.nextTurn.filter((r) => r.placement !== "last-append");
-		return taken.map(strip);
+		const { matching, rest } = partition(this.nextTurn, (r) => r.placement === "last-append");
+		this.nextTurn = rest;
+		return matching.map(strip);
 	}
 
 	/**
-	 * Fix the pending `last-append` one-shots to `anchor` — the message they ride
-	 * on this request — so every later request re-attaches them there unchanged.
-	 * Called by the owner at `context` time, after it has decided the tail.
+	 * Fix the pending one-shots of `placement` to `anchor` — the message they
+	 * ride on this request — so every later request re-attaches them there
+	 * unchanged. Called by the owner at `context` time, after it has decided the
+	 * tail: `last-append` goes on the tail (`tailAnchor`), `user-prepend` only
+	 * on a request that ends in a user-like message (`openingUserAnchor`) —
+	 * mid-turn, breadcrumbs stay queued.
 	 */
-	pin(anchor: PinAnchor): void {
-		for (const entry of this.nextTurn) {
-			if (entry.placement !== "last-append") continue;
-			this.pinned.push({ ...entry, pin: anchor });
-		}
-		this.nextTurn = this.nextTurn.filter((r) => r.placement !== "last-append");
+	pin(anchor: PinAnchor, placement: "last-append" | "user-prepend" = "last-append"): void {
+		const { matching, rest } = partition(this.nextTurn, (r) => r.placement === placement);
+		for (const entry of matching) this.pinned.push({ ...entry, pin: anchor });
+		this.nextTurn = rest;
 	}
 
 	/**
 	 * Everything to inject on this request: every-turn state, pinned one-shots,
-	 * then whatever is still pending. `messages` is the request being built:
+	 * then whatever is still pending. A `user-prepend` breadcrumb leaves the
+	 * queue only through `pin(anchor, "user-prepend")` (it must land on a user
+	 * message, not a tool result), so an unpinned one stays for the next request. `messages` is the request being built:
 	 * pins whose anchor is no longer in it (compacted away, or left behind on
 	 * another branch) are dropped here, as part of draining, so no caller can
 	 * forget the step. Nothing else is ever evicted: a pin is one small object,
@@ -246,19 +267,32 @@ export class ReminderQueue {
 			const locate = pinLocator(messages);
 			this.pinned = this.pinned.filter((entry) => locate(entry.pin as PinAnchor) !== -1);
 		}
-		const pending = this.nextTurn.map(strip);
-		this.nextTurn = [];
-		return [...[...this.everyTurn.values()].map(strip), ...this.pinned.map(strip), ...pending];
+		const { matching: held, rest: pending } = partition(this.nextTurn, (r) => r.placement === "user-prepend");
+		this.nextTurn = held;
+		return [...[...this.everyTurn.values()].map(strip), ...this.pinned.map(strip), ...pending.map(strip)];
 	}
 
 	get size(): number {
 		return this.everyTurn.size + this.nextTurn.length + this.pinned.length;
 	}
 
-	/** True when a one-shot is waiting to be delivered (the owner decides where). */
-	get hasPendingOneShots(): boolean {
-		return this.nextTurn.some((r) => r.placement === "last-append");
+	/** True when a one-shot of `placement` is waiting to be delivered (the owner decides where). */
+	hasPending(placement: "last-append" | "user-prepend"): boolean {
+		return this.nextTurn.some((r) => r.placement === placement);
 	}
+
+	/** `hasPending("last-append")` — kept for the existing callers and tests. */
+	get hasPendingOneShots(): boolean {
+		return this.hasPending("last-append");
+	}
+}
+
+/** One pass: the entries `test` accepts and the rest, in order. */
+function partition<T>(items: T[], test: (item: T) => boolean): { matching: T[]; rest: T[] } {
+	const matching: T[] = [];
+	const rest: T[] = [];
+	for (const item of items) (test(item) ? matching : rest).push(item);
+	return { matching, rest };
 }
 
 function strip(r: StoredReminder): ReminderEntry {
@@ -300,6 +334,17 @@ export function tailAnchor(messages: AgentMessage[]): PinAnchor | undefined {
 			return { kind: "user", timestamp: m.timestamp };
 		}
 	}
+	return undefined;
+}
+
+/**
+ * The anchor for a `user-prepend` breadcrumb on this request: the trailing
+ * message when it is a user-like turn (the prompt that opens the request), else
+ * undefined — mid-turn (a trailing tool result) the breadcrumbs keep waiting.
+ */
+export function openingUserAnchor(messages: AgentMessage[]): PinAnchor | undefined {
+	const last = messages[messages.length - 1] as (AgentMessage & { timestamp?: number }) | undefined;
+	if (last && isUserLike(last) && typeof last.timestamp === "number") return { kind: "user", timestamp: last.timestamp };
 	return undefined;
 }
 
@@ -406,6 +451,10 @@ export function injectReminders(messages: AgentMessage[], reminders: Array<strin
 	const sticky = entries.filter((e) => e.placement === "sticky-append");
 	const pinnedEntries = entries.filter((e) => e.pin !== undefined);
 	const lastAppend = entries.filter((e) => e.placement === "last-append" && e.pin === undefined);
+	// An unpinned `user-prepend` never reaches here through the queue (drain
+	// holds it back); a caller passing one directly gets it on the opening user
+	// message, before the text, like a pinned one.
+	const looseUserPrepend = entries.filter((e) => e.placement === "user-prepend" && e.pin === undefined);
 
 	const firstUserIndex = messages.findIndex(isUserLike);
 	const lastUserIndex = messages.findLastIndex(isUserLike);
@@ -449,14 +498,18 @@ export function injectReminders(messages: AgentMessage[], reminders: Array<strin
 	}
 
 	push(after, tailIndex === -1 ? firstUserIndex : tailIndex, lastAppend.map(reminderBlock));
+	if (lastUserIndex !== -1) push(before, lastUserIndex, looseUserPrepend.map(reminderBlock));
 
 	// Pinned one-shots ride the exact message they first landed on; a message
-	// compacted away simply no longer carries its pin.
+	// compacted away simply no longer carries its pin. A pinned breadcrumb sits
+	// BEFORE that message's text (after the first-prepend stack, which was
+	// pushed first); every other pin sits after it.
 	if (pinnedEntries.length > 0) {
 		const locate = pinLocator(messages);
 		for (const entry of pinnedEntries) {
 			const index = locate(entry.pin as PinAnchor);
-			if (index !== -1) push(after, index, [reminderBlock(entry)]);
+			if (index === -1) continue;
+			push(entry.placement === "user-prepend" ? before : after, index, [reminderBlock(entry)]);
 		}
 	}
 

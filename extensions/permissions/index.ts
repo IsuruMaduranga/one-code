@@ -83,6 +83,7 @@ import { describeProjectAllow, persistProjectAllowApproval, projectAllowApproved
 import { findProjectRoot } from "../lib/git.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
+import { registerLocalCommand } from "../lib/local-command.ts";
 
 const DENIED_BY_USER =
 	"The user doesn't want to proceed with this tool use. The tool use was rejected. Adjust your approach based on the user's feedback instead of retrying the same call.";
@@ -1219,9 +1220,9 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		};
 	};
 
-	pi.registerCommand("permissions", {
+	registerLocalCommand(pi, "permissions", {
 		description: "Show permission mode and loaded rules",
-		handler: async (_args, ctx) => {
+		handler: async (args, ctx) => {
 			const fmt = (rules: PermissionRule[]) => (rules.length ? rules.map((r) => r.raw).join(", ") : "(none)");
 			const denials = pauseTracker.recentDenials();
 			const autoLines =
@@ -1569,7 +1570,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		}
 	};
 
-	pi.registerCommand("auto-mode", {
+	registerLocalCommand(pi, "auto-mode", {
 		description: "Auto-mode classifier: /auto-mode [setup|defaults|config|model [provider/model-id|clear]]",
 		getArgumentCompletions: () =>
 			[
@@ -1655,7 +1656,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	pi.registerCommand("allow", {
+	registerLocalCommand(pi, "allow", {
 		description: 'Persist an allow rule: /allow Bash(npm test:*) [global]',
 		handler: async (args, ctx) => {
 			const global = /\s+global$/.test(args.trim());

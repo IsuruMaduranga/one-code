@@ -47,6 +47,7 @@ import { sessionAlive } from "../lib/session-lifecycle.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 import { normalizeToolName } from "../permissions/matcher.ts";
 import { applyAnnouncement, planAnnouncement } from "./announce.ts";
+import { registerLocalCommand } from "../lib/local-command.ts";
 
 /** Coalesces the burst of per-tool defers one server emits into one listing update. */
 const ANNOUNCE_DEBOUNCE_MS = 100;
@@ -279,9 +280,9 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	pi.registerCommand("tools-deferred", {
+	registerLocalCommand(pi, "tools-deferred", {
 		description: "Show which tools are deferred (loadable via tool_search)",
-		handler: async (_args, ctx) => {
+		handler: async (args, ctx) => {
 			const available = searchableTools();
 			const activeSet = new Set(pi.getActiveTools());
 			const lines = available.map((t) => `${activeSet.has(t.name) ? "loaded " : "deferred"} ${t.name}`);

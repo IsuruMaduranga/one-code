@@ -54,6 +54,7 @@ import {
 	type ViewerRunSnapshot,
 } from "./viewer.ts";
 import { WorkflowWidget } from "./widget.ts";
+import { registerLocalCommand } from "../lib/local-command.ts";
 
 /**
  * Claude Code's own arming reminder, verbatim in intent: the keyword is a
@@ -370,7 +371,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	pi.registerCommand("workflows", {
+	registerLocalCommand(pi, "workflows", {
 		description: "Open the workflow viewer; list, stop, or inspect runs",
 		getArgumentCompletions: (prefix) => {
 			const items = ["stop ", "log ", "list"].filter((c) => c.startsWith(prefix));

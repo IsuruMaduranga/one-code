@@ -40,6 +40,7 @@ import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "
 import { buildMemoryEntries, entryName, type MemoryEntry } from "./entries.ts";
 import { openPath } from "./open-external.ts";
 import { applyMemoryKey, decodeMemoryKey, initialMemoryState, renderMemoryPanel } from "./panel.ts";
+import { registerLocalCommand } from "../lib/local-command.ts";
 
 const MEMORY_PANEL_MAX_HEIGHT = 20;
 
@@ -144,9 +145,9 @@ export default function memoryExtension(pi: ExtensionAPI) {
 	// ---- /memory: Claude Code's Memory picker --------------------------------
 	// Pick a memory-related file (or the auto-memory folder) and open it in the
 	// external editor, matching CC. Pure panel logic lives in ./panel.ts.
-	pi.registerCommand("memory", {
+	registerLocalCommand(pi, "memory", {
 		description: "View or edit CLAUDE.md and memory files",
-		handler: async (_args, ctx) => {
+		handler: async (args, ctx) => {
 			const entries = memoryEntriesFor(ctx.cwd);
 			if (!ctx.hasUI) {
 				const lines = entries.map(

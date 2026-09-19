@@ -71,6 +71,7 @@ import { decodeStripKey, type StripKey } from "./panel-keys.ts";
 import { reduceShellKey } from "./shell-panel.ts";
 import { trackShellTasks } from "../lib/shell-tasks.ts";
 import { createMarkdownProse } from "./prose.ts";
+import { registerLocalCommand } from "../lib/local-command.ts";
 
 /** The catalog shipped in this package: <package>/agents. */
 const BUNDLED_AGENTS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "agents");
@@ -2150,9 +2151,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	});
 	pi.events.emit(DEFER_CHANNEL, { name: "list_agents", keywords: ["agents", "list", "running", "spawned", "subagents", "who"] });
 
-	pi.registerCommand("agents", {
+	registerLocalCommand(pi, "agents", {
 		description: "Open the live subagent panel, or list available agents",
-		handler: async (_args, ctx) => {
+		handler: async (args, ctx) => {
 			// With live children, focus the strip on the newest and open its view
 			// (Claude Code's agent panel); otherwise there is nothing running, so
 			// list the catalog the way the tool's action:"list" does.
@@ -2253,7 +2254,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		ctx.ui.notify(`Subagent default set to "${spec}" (saved to ~/.onecode/settings.json).`, "info");
 	};
 
-	pi.registerCommand("subagent", {
+	registerLocalCommand(pi, "subagent", {
 		description: "Set the default model for subagent/workflow runs: /subagent [provider/model-id|inherit|status|clear]",
 		getArgumentCompletions: (prefix) =>
 			["inherit", "status", "clear"]

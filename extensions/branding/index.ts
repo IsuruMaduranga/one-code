@@ -17,7 +17,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { modeCycleKey } from "../lib/keys.ts";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getAgentDir, SettingsManager, VERSION as PI_VERSION } from "@earendil-works/pi-coding-agent";
 import { piVersionWarning } from "../lib/pi-version.ts";
@@ -282,7 +282,37 @@ export default function brandingExtension(pi: ExtensionAPI) {
 	}
 	// The label and prompt marker apply in every session; CC_NO_BANNER only
 	// disables the header.
+	// The terminal title. pi writes "π - [<session name> - ]<cwd>" at the end of
+	// its startup, on every session replacement and whenever the name changes —
+	// each AFTER our session_start handler ran, so a title set there alone lost
+	// (seen live 2026-09-19: "π - proj"). Re-assert it once the current task
+	// has drained (setTimeout 0, past pi's synchronous tail) and on every
+	// agent_start, and follow the name like pi does, brand first.
+	let lastTitle: string | undefined;
+	// A ctx captured for the deferred write is stale once the runtime is replaced
+	// (a second /clear inside the 0 ms window); pi's stale-ctx guard throws, and a
+	// throw inside a timer is uncaught — so the write is inert after shutdown.
+	let live = false;
+	const retitle = (ctx: { hasUI: boolean; cwd: string; ui: { setTitle(title: string): void } }) => {
+		if (!live || !ctx.hasUI) return;
+		const name = pi.getSessionName?.()?.trim();
+		const title = name ? `${NAME} - ${name} - ${basename(ctx.cwd)}` : NAME;
+		if (title === lastTitle) return; // agent_start fires every turn; write only on change
+		lastTitle = title;
+		ctx.ui.setTitle(title);
+	};
+	pi.on("session_info_changed", (_event, ctx) => retitle(ctx));
+	pi.on("agent_start", (_event, ctx) => retitle(ctx));
+	pi.on("session_shutdown", () => {
+		live = false;
+	});
+
 	pi.on("session_start", (_event, ctx) => {
+		// pi's own write lands after this handler, so only the deferred write
+		// sticks; a new session may carry a name (resume), so forget the last.
+		lastTitle = undefined;
+		live = true;
+		setTimeout(() => retitle(ctx), 0).unref?.();
 		ctx.ui.setHiddenThinkingLabel(THINKING_LABEL);
 		installPromptMarker(ctx as unknown as { hasUI: boolean; mode: string; ui: BrandingEditorUI });
 		// Soft drift guard: warn once at startup when the hosting pi is outside
@@ -339,7 +369,6 @@ export default function brandingExtension(pi: ExtensionAPI) {
 			? collectStartupSections(ctx.cwd, home, join(dirname(fileURLToPath(import.meta.url)), "..", "..", "themes"), agentDir)
 			: undefined;
 
-		ctx.ui.setTitle(NAME);
 		ctx.ui.setHeader((tui: unknown, theme: unknown) => {
 			const paint = safeThemePaint(theme);
 			// Width-memoized (pi-tui renders every mounted component every frame);

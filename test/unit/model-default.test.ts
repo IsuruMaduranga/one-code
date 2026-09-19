@@ -35,12 +35,29 @@ describe("modelDefaultExtension", () => {
 		const dir = mkdtempSync(join(tmpdir(), "onecode-model-default-"));
 		vi.stubEnv("PI_CODING_AGENT_DIR", dir);
 		const handlers = new Map<string, (event: unknown, ctx: unknown) => void>();
-		modelDefaultExtension({ on: (name: string, fn: (event: unknown, ctx: unknown) => void) => handlers.set(name, fn) } as never);
+		const emitted: Array<{ text?: string; placement?: string }> = [];
+		modelDefaultExtension({
+			on: (name: string, fn: (event: unknown, ctx: unknown) => void) => handlers.set(name, fn),
+			events: { emit: (_channel: string, data: unknown) => emitted.push(data as { text?: string }) },
+		} as never);
 		const ctx = { hasUI: false };
-		const select = (provider: string, id: string) => handlers.get("model_select")?.({ model: { provider, id } }, ctx);
+		const select = (provider: string, id: string, name?: string) => handlers.get("model_select")?.({ model: { provider, id, name } }, ctx);
 		const read = () => JSON.parse(readFileSync(join(dir, "settings.json"), "utf8")) as Record<string, unknown>;
-		return { select, read, shutdown: () => handlers.get("session_shutdown")?.({}, ctx), dir };
+		return { select, read, shutdown: () => handlers.get("session_shutdown")?.({}, ctx), dir, emitted };
 	}
+
+	it("announces the settled switch to the model as Claude Code's /model breadcrumb, once", () => {
+		vi.useFakeTimers();
+		const { select, emitted } = mount();
+		select("anthropic", "claude-haiku-4-5", "Claude Haiku 4.5");
+		select("anthropic", "claude-sonnet-5", "Claude Sonnet 5");
+		vi.advanceTimersByTime(PERSIST_DEBOUNCE_MS);
+		expect(emitted.map((e) => e.placement)).toEqual(["user-prepend", "user-prepend", "user-prepend"]);
+		expect(emitted[1].text).toBe("<command-name>/model</command-name>\n            <command-message>model</command-message>\n            <command-args></command-args>\n");
+		expect(emitted[2].text).toBe(
+			"<local-command-stdout>Set model to `Claude Sonnet 5` and saved as your default for new sessions</local-command-stdout>\n",
+		);
+	});
 
 	it("writes only the model a ctrl+p cycle settles on, after the quiet period", () => {
 		vi.useFakeTimers();

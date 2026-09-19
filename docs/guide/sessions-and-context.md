@@ -184,6 +184,24 @@ Not restored:
 `/new`. Running background tasks are stopped and listed. The permission
 mode you chose carries over.
 
+### What the model learns about your commands
+
+As in Claude Code, a slash command you run is recorded for the model: the
+next message you send carries a short note that the command ran, wrapped in a
+caveat telling the model not to act on it. `/clear` opens the new session
+with that note, and a model switch records "Set model to …" the way Claude
+Code does. Commands that One Code cannot observe (pi's own `/compact`,
+`/settings`, `/name`) leave no note.
+
+### The session title
+
+After your first real message, One Code names the session the way Claude
+Code does: a cheap model on your provider turns the message into a short
+title (Claude Code's own naming prompt), which shows in the terminal tab as
+`One Code - <title> - <folder>` and in the session picker. A name you set
+with `/name` is never overwritten. The call's cost is included in the
+footer's total. Set `CC_SESSION_TITLE=0` to turn it off.
+
 ## Turn timing
 
 After each turn, a dim line such as `✻ Cooked for 5m 12s` reports how long
