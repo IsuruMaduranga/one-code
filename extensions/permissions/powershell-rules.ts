@@ -343,7 +343,16 @@ export function powershellMatchForms(command: string, depth = 0): string[] {
 // ---------------------------------------------------------------------------
 // Read-only allowlist
 
-/** The read-only cmdlet sets in the 2.1.276 binary (findings §22), plus the neutral output pair. */
+/**
+ * The read-only cmdlet sets in the 2.1.276 binary (findings §22), plus the
+ * neutral output pair, plus — One Code's addition (2026-09-19, user decision,
+ * docs/decisions/windows.md) — the pure in-process pipeline cmdlets a
+ * read-only line is piped through: they shape objects already in memory and
+ * touch neither disk nor network. `Where-Object`/`ForEach-Object` are NOT
+ * here: they take script blocks, which the check refuses anyway. Claude Code's
+ * captured list has no pipeline cmdlets at all, so `Select-String … |
+ * Measure-Object` (the /doctor transcript scan) always went to the classifier.
+ */
 export const READ_ONLY_POWERSHELL_COMMANDS = new Set<string>([
 	// search
 	"select-string",
@@ -364,6 +373,17 @@ export const READ_ONLY_POWERSHELL_COMMANDS = new Set<string>([
 	// neutral output
 	"write-output",
 	"write-host",
+	// pure pipeline transforms (One Code's addition)
+	"select-object",
+	"sort-object",
+	"measure-object",
+	"group-object",
+	"convertfrom-json",
+	"out-string",
+	"format-table",
+	"format-list",
+	"format-wide",
+	"format-custom",
 ]);
 
 /** Parameters that turn a read-only cmdlet into a write. */

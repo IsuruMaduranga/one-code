@@ -139,6 +139,20 @@ describe("isGitStatusCommand", () => {
 	});
 });
 
+describe("powershellReadOnly pipeline cmdlets (One Code's addition to CC's list, 2026-09-19)", () => {
+	it("a read-only line piped through pure transforms stays read-only", () => {
+		expect(powershellReadOnly("Select-String -Pattern toolCall -Path .\\a.jsonl | Measure-Object | Select-Object -ExpandProperty Count").readOnly).toBe(true);
+		expect(powershellReadOnly("Get-ChildItem src | Sort-Object LastWriteTime -Descending | Select-Object -First 5 | Format-Table Name").readOnly).toBe(true);
+		expect(powershellReadOnly("Get-Content package.json | ConvertFrom-Json | Out-String").readOnly).toBe(true);
+	});
+	it("script-block cmdlets and writers are still not", () => {
+		expect(powershellReadOnly("Get-ChildItem | Where-Object { $_.Length -gt 1 }").readOnly).toBe(false);
+		expect(powershellReadOnly("Get-ChildItem | ForEach-Object { $_.Name }").readOnly).toBe(false);
+		expect(powershellReadOnly("Get-Content a.json | ConvertFrom-Json | Set-Content b.json").readOnly).toBe(false);
+		expect(powershellReadOnly("Get-ChildItem | Out-File list.txt").readOnly).toBe(false);
+	});
+});
+
 describe("powershellReadOnly with roots (absolute paths judged by containment, 2026-09-19)", () => {
 	const root = mkdtempSync(join(tmpdir(), "ps-ro-"));
 	const cwd = join(root, "project");

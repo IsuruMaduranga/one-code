@@ -80,7 +80,12 @@ Claude Code's read-only cmdlets run without a prompt or a classifier call:
 `Get-ChildItem`, `Get-Content`, `Get-Item`, `Test-Path`, `Resolve-Path`,
 `Select-String`, `Get-Location`, `Get-Process`, `Get-Service`,
 `Get-FileHash`, `Get-Acl`, `Format-Hex`, `findstr`, `where.exe`, plus
-`Write-Output` and `Write-Host`. The check is textual and strict: no
+`Write-Output` and `Write-Host`. One Code adds the pure pipeline cmdlets
+those are usually piped through, `Select-Object`, `Sort-Object`,
+`Measure-Object`, `Group-Object`, `ConvertFrom-Json`, `Out-String` and the
+`Format-*` family, so `Select-String … | Measure-Object` counts as read-only
+too; `Where-Object` and `ForEach-Object` do not, because they take script
+blocks. The check is textual and strict: no
 redirection, no variables, no script blocks, and every path inside the
 project or one of the harness's own session directories (auto-memory, the
 scratchpad, persisted tool output, this project's transcripts). A relative
