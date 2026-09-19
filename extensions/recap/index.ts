@@ -25,12 +25,13 @@
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { Api, Model, Tool } from "@earendil-works/pi-ai";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { convertToLlm, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { withReasoningFallback } from "../lib/model-policy.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
 import { pickEconomicalContainedModel } from "../lib/model-tier.ts";
+import { answerText, toolStubs } from "../lib/side-call.ts";
 import { dimMarkedLine } from "../lib/tui-render.ts";
 import { RECAP_PROMPT, recapLine, recentForRecap, REFERENCE_MARK } from "./prompt.ts";
 import { RecapScheduler } from "./scheduler.ts";
@@ -38,6 +39,8 @@ import { RecapScheduler } from "./scheduler.ts";
 const ENTRY_TYPE = "one-code:recap";
 const DEFAULT_IDLE_MS = 5 * 60_000; // CC's BLUR_DELAY_MS
 const RECAP_MAX_TOKENS = 256; // 1-3 short sentences
+/** Description on the name-only tool stubs sent with the recap. */
+const STUB_REASON = "Unavailable during this summary; answer in text.";
 const RECAP_TIMEOUT_MS = 30_000;
 
 /** The idle delay before a recap, overridable via CC_RECAP_IDLE_MS (floor 1s). */
@@ -48,22 +51,6 @@ function idleMs(): number {
 
 interface RecapData {
 	content: string;
-}
-
-/**
- * Name-only tool declarations: enough for a provider to accept the tool_use
- * blocks already in the history, without the descriptions and schemas (the
- * recap never calls a tool, and its prompt asks for text).
- */
-export function toolStubs(names: readonly string[]): Tool[] {
-	return names.map(
-		(name) =>
-			({
-				name,
-				description: "Unavailable during this summary; answer in text.",
-				parameters: { type: "object", properties: {} },
-			}) as unknown as Tool,
-	);
 }
 
 export default function recapExtension(pi: ExtensionAPI) {
@@ -123,7 +110,7 @@ export default function recapExtension(pi: ExtensionAPI) {
 			// blocks stays valid on strict providers (see the header note) without
 			// shipping every full schema (~6k tokens) to a call that must answer
 			// in text.
-			const tools = toolStubs(pi.getActiveTools());
+			const tools = toolStubs(pi.getActiveTools(), STUB_REASON);
 
 			const recent = recentForRecap(messages);
 			const recapMessages = [...convertToLlm(recent), { role: "user" as const, content: RECAP_PROMPT, timestamp: Date.now() }];
@@ -146,11 +133,7 @@ export default function recapExtension(pi: ExtensionAPI) {
 				);
 			}, undefined, (usage) => recordUsage(pi, "recap", usage));
 			if (controller.signal.aborted) return;
-			const content = result.content
-				.filter((block): block is { type: "text"; text: string } => block.type === "text")
-				.map((block) => block.text)
-				.join("\n")
-				.trim();
+			const content = answerText(result.content);
 			if (!content) return;
 			scheduler.markFired();
 			pi.appendEntry<RecapData>(ENTRY_TYPE, { content });

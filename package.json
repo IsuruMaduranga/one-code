@@ -54,6 +54,7 @@
 			"extensions/turn-duration/index.ts",
 			"extensions/interrupted/index.ts",
 			"extensions/recap/index.ts",
+			"extensions/btw/index.ts",
 			"extensions/session-title/index.ts",
 			"extensions/exit/index.ts",
 			"extensions/init/index.ts",

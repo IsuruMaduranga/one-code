@@ -6,6 +6,8 @@
  * prepends is omitted here (kept decoupled from One Code's memory extension).
  */
 
+import { trimToTurnBoundary } from "../lib/side-call.ts";
+
 /** CC's REFERENCE_MARK (figures.ts) — the away-summary/recap marker. */
 export const REFERENCE_MARK = "※";
 
@@ -38,7 +40,5 @@ export function recapLine(content: string): string {
  * `{ role }` so it is testable with plain objects.
  */
 export function recentForRecap<T extends { role: string }>(messages: readonly T[], window = RECENT_MESSAGE_WINDOW): T[] {
-	const tail = messages.slice(-window);
-	const start = tail.findIndex((message) => message.role === "user" || message.role === "assistant");
-	return start === -1 ? [] : tail.slice(start);
+	return trimToTurnBoundary(messages.slice(-window));
 }
