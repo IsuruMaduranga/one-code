@@ -34,7 +34,7 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import { tryReadFile } from "./plugins.ts";
-import { expandTilde } from "./paths.ts";
+import { absoluteFrom, expandTilde } from "./paths.ts";
 
 /** One CLAUDE.md-family file as it appears in the block. `content` is raw (untrimmed). */
 export interface ContextFile {
@@ -116,8 +116,7 @@ function firstOneCodeFile(dir: string): string | null {
 
 /** Resolve an `@import` reference: `~`/`~/` → home, absolute as-is, else relative to `baseDir`. */
 function resolveImportPath(ref: string, baseDir: string, home: string): string {
-	const p = expandTilde(ref, home);
-	return isAbsolute(p) ? p : join(baseDir, p);
+	return absoluteFrom(baseDir, expandTilde(ref, home));
 }
 
 /**

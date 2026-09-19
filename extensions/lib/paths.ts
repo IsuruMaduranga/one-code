@@ -135,6 +135,11 @@ export function tryRealpath(target: string): string | undefined {
 	}
 }
 
+/** `path` as given when absolute, else joined onto `base` (no `..` normalisation — the spelling stays recognisable). */
+export function absoluteFrom(base: string, path: string): string {
+	return isAbsolute(path) ? path : join(base, path);
+}
+
 /** Separators as `/`, whatever the platform — for display and for `/`-spelled comparisons. */
 export function forwardSlashes(path: string): string {
 	return path.replace(/\\/g, "/");

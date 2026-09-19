@@ -148,16 +148,20 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 				const known = await listWorktreePaths(ctx.cwd);
 				const target = known.find((p) => p === params.path);
 				if (!target) return fail(`${params.path} is not a worktree of this repository. Known worktrees:\n${known.join("\n")}`);
-				// Best effort: the branch is display-only here (footer, reminder); a detached HEAD leaves it unset.
+				// The branch is display-only here (footer, reminder): a detached HEAD
+				// leaves it unset silently, a failing git is reported in the result text.
 				let branch: string | undefined;
+				let branchNote = "";
 				try {
 					const ref = await git(["rev-parse", "--abbrev-ref", "HEAD"], target);
 					if (ref && ref !== "HEAD") branch = ref;
-				} catch {}
+				} catch (error) {
+					branchNote = ` Its branch could not be read (${(error as Error).message.split("\n")[0]}).`;
+				}
 				const next: WorktreeState = { path: target, branch, createdByUs: false, originalCwd: ctx.cwd, sharedRoot: repoRoot };
 				applyState(next);
 				return {
-					content: [{ type: "text", text: `Switched into existing worktree ${target}. All work now happens there; exit_worktree returns to ${ctx.cwd}.` }],
+					content: [{ type: "text", text: `Switched into existing worktree ${target}${branch ? ` (branch ${branch})` : ""}.${branchNote} All work now happens there; exit_worktree returns to ${ctx.cwd}.` }],
 					details: { worktreeState: next } satisfies WorktreeDetails,
 				};
 			}

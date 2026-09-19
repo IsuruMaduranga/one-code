@@ -24,11 +24,12 @@
  */
 
 import { mkdirSync } from "node:fs";
-import { extname, isAbsolute, join, relative } from "node:path";
+import { extname, relative } from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
 import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
+import { absoluteFrom } from "../lib/paths.ts";
 import { defaultDiscoverRoots, discoverPlugins, pluginResources } from "../lib/plugins.ts";
 import { REMINDER_CHANNEL, type ReminderPayload } from "../lib/reminders.ts";
 import { ccToolRenderers, cutPlainText } from "../lib/tui-render.ts";
@@ -260,7 +261,7 @@ export default function lspExtension(pi: ExtensionAPI) {
 				// the delivered-set URI and the diagnostics request. A relative path
 				// used to yield root `.` and a URI keyed on process.cwd(), so one file
 				// could end up on a second server instance (findings §23).
-				const path = isAbsolute(raw) ? raw : join(ctx.cwd, raw);
+				const path = absoluteFrom(ctx.cwd, raw);
 				const target = resolveTarget(path, ctx.cwd);
 				reportRoutingIssuesOnce(ctx);
 				if (target) {
@@ -314,7 +315,7 @@ export default function lspExtension(pi: ExtensionAPI) {
 			),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			const path = isAbsolute(params.path) ? params.path : join(ctx.cwd, params.path);
+			const path = absoluteFrom(ctx.cwd, params.path);
 			const target = resolveTarget(path, ctx.cwd);
 			// One keep-alive spans both awaits (same pattern as the tool_result hook).
 			const fetched = target

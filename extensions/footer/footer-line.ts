@@ -39,7 +39,6 @@ export interface FooterData {
 	effort?: string;
 }
 
-/** pi's token formatter, replicated so a "1.1M" here reads like pi's own. */
 /**
  * Where the footer says the session is: the active worktree's path and branch
  * while `enter_worktree` is in effect (the process cwd never changes — the
@@ -52,6 +51,7 @@ export function footerLocation(cwd: string, branch: string | undefined, worktree
 	return { cwd, branch };
 }
 
+/** pi's token formatter, replicated so a "1.1M" here reads like pi's own. */
 export function formatTokens(count: number): string {
 	if (count < 1000) return count.toString();
 	if (count < 10000) return `${(count / 1000).toFixed(1)}k`;

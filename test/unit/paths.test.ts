@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { claudeConfigDir, gitBashPathToNative, msysPathToWindows, oneCodeStateDir } from "../../extensions/lib/paths.ts";
+import { claudeConfigDir, gitBashPathToNative, msysPathToWindows, oneCodeStateDir, absoluteFrom } from "../../extensions/lib/paths.ts";
 
 describe("paths", () => {
 	it("defaults to ~/.claude and ~/.onecode", () => {
@@ -54,5 +54,13 @@ describe("msysPathToWindows", () => {
 		const converted = gitBashPathToNative("/c/proj/a.ts");
 		if (process.platform === "win32") expect(converted).toBe("C:\\proj\\a.ts");
 		else expect(converted).toBe("/c/proj/a.ts");
+	});
+});
+
+describe("absoluteFrom", () => {
+	it("keeps an absolute path and joins a relative one onto the base", () => {
+		const abs = resolve("/repo/src/a.ts");
+		expect(absoluteFrom("/elsewhere", abs)).toBe(abs);
+		expect(absoluteFrom(resolve("/repo"), join("src", "a.ts"))).toBe(join(resolve("/repo"), "src", "a.ts"));
 	});
 });

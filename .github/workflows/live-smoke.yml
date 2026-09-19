@@ -28,14 +28,17 @@ on:
       - ".github/workflows/live-smoke.yml"
 
 jobs:
-  windows:
-    name: windows-latest (${{ matrix.shell }})
-    runs-on: windows-latest
+  smoke:
+    name: ${{ matrix.os }} (${{ matrix.shell }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        shell: [bash, powershell]
+        include:
+          - { os: windows-latest, shell: bash }
+          - { os: windows-latest, shell: powershell }
+          - { os: ubuntu-latest, shell: bash }
     env:
       OPENROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
     steps:
@@ -47,18 +50,3 @@ jobs:
       - run: npm ci
       - name: Drive the ${{ matrix.shell }} tool live
         run: node test/e2e/live-smoke.mjs --shell ${{ matrix.shell }} --model "${{ inputs.model || 'openrouter/deepseek/deepseek-v4.1-flash' }}"
-  linux:
-    name: ubuntu-latest (bash)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    env:
-      OPENROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - name: Drive the bash tool live
-        run: node test/e2e/live-smoke.mjs --shell bash --model "${{ inputs.model || 'openrouter/deepseek/deepseek-v4.1-flash' }}"
