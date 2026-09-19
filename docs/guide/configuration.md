@@ -144,7 +144,7 @@ be installed and on the `PATH` used to launch One Code.
 
 | Language | Server | Install |
 |---|---|---|
-| TypeScript, JavaScript | `typescript-language-server` | `npm install -g typescript-language-server typescript` |
+| TypeScript, JavaScript | `typescript-language-server` | `npm install -g typescript-language-server`, plus `npm install -D typescript@5` in the project (the server reads the project's TypeScript and never a global one; TypeScript 7 no longer ships the `tsserver.js` it needs) |
 | Python | `pyright-langserver` | `npm install -g pyright` |
 | Go | `gopls` | `go install golang.org/x/tools/gopls@latest` |
 | Rust | `rust-analyzer` | `rustup component add rust-analyzer` |

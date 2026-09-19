@@ -19,6 +19,7 @@ import {
 	serverForPath,
 	SERVERS,
 	typescriptPreflight,
+	findTypescript,
 } from "../../extensions/lsp/servers.ts";
 
 const diag = (message: string, severity = 1, line = 0, character = 0): LspDiagnostic => ({
@@ -103,6 +104,15 @@ describe("project root and preflight", () => {
 		expect(findProjectRoot(join(dir, "pkg", "src", "a.ts"), ["tsconfig.json"], dir)).toBe(join(dir, "pkg"));
 	});
 
+	it("resolves a relative path against the fallback cwd, so both spellings share one root", () => {
+		mkdirSync(join(dir, "pkg", "src"), { recursive: true });
+		writeFileSync(join(dir, "pkg", "tsconfig.json"), "{}");
+		const absolute = findProjectRoot(join(dir, "pkg", "src", "a.ts"), ["tsconfig.json"], dir);
+		const relative = findProjectRoot(join("pkg", "src", "a.ts"), ["tsconfig.json"], dir);
+		expect(relative).toBe(absolute);
+		expect(relative).toBe(join(dir, "pkg"));
+	});
+
 	it("falls back when no marker exists", () => {
 		mkdirSync(join(dir, "src"), { recursive: true });
 		expect(findProjectRoot(join(dir, "src", "a.ts"), ["nonexistent.json"], dir)).toBe(dir);
@@ -113,11 +123,25 @@ describe("project root and preflight", () => {
 		expect(typescriptPreflight(dir)).toMatch(/tsserver\.js/);
 	});
 
-	it("passes when tsserver.js is present or typescript is absent", () => {
-		expect(typescriptPreflight(dir)).toBeUndefined();
+	it("passes when tsserver.js is present", () => {
 		mkdirSync(join(dir, "node_modules", "typescript", "lib"), { recursive: true });
 		writeFileSync(join(dir, "node_modules", "typescript", "lib", "tsserver.js"), "");
 		expect(typescriptPreflight(dir)).toBeUndefined();
+	});
+
+	it("flags a project with no TypeScript reachable at all (a global install does not count)", () => {
+		const problem = typescriptPreflight(dir);
+		expect(problem).toMatch(/No TypeScript installation is reachable/);
+		expect(problem).toMatch(/npm install -D typescript@5/);
+		expect(findTypescript(dir)).toBeUndefined();
+	});
+
+	it("accepts a monorepo root's TypeScript for a nested package", () => {
+		mkdirSync(join(dir, "node_modules", "typescript", "lib"), { recursive: true });
+		writeFileSync(join(dir, "node_modules", "typescript", "lib", "tsserver.js"), "");
+		mkdirSync(join(dir, "packages", "web"), { recursive: true });
+		expect(findTypescript(join(dir, "packages", "web"))).toBe(join(dir, "node_modules", "typescript"));
+		expect(typescriptPreflight(join(dir, "packages", "web"))).toBeUndefined();
 	});
 });
 
