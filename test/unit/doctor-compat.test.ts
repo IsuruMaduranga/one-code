@@ -188,6 +188,14 @@ describe("checkDependencies: the shell tools (Shells entry, 2026-09-19)", () => 
 		expect(r.checks.find((c) => c.name === "powershell")!.need).toBe("unused");
 		expect(r.findings.some((f) => f.level === "warn" && f.text.includes("CLAUDE_CODE_GIT_BASH_PATH ignored"))).toBe(true);
 	});
+	it("a set switch with no pwsh gets the switch-specific fix on every platform; the jdtls hint follows the injected platform", () => {
+		const notice = "CLAUDE_CODE_USE_POWERSHELL_TOOL is set but no pwsh.exe or powershell.exe was found on PATH; the powershell tool stays off.";
+		const r = checkDependencies({ ...base, platform: "win32", shells: { bash: "C:\\Program Files\\Git\\bin\\bash.exe", powershellWanted: true, bashExpected: false, primary: "bash", notices: [notice] } });
+		expect(r.findings.find((f) => f.text === notice)!.fix).toContain("unset CLAUDE_CODE_USE_POWERSHELL_TOOL");
+		const jdtls = r.checks.find((c) => c.name === "jdtls");
+		if (jdtls) expect(jdtls.hint).not.toMatch(/brew/);
+	});
+
 	it("without a shells input the report is unchanged", () => {
 		const r = checkDependencies({ ...base, platform: "darwin" });
 		expect(r.checks.some((c) => c.name === "bash" || c.name === "powershell")).toBe(false);

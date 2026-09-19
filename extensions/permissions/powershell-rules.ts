@@ -399,9 +399,39 @@ function pathUnvouchable(value: string): boolean {
 	if (!value) return false;
 	if (value.startsWith("\\\\") || value.startsWith("//")) return true;
 	if (/^[A-Za-z][A-Za-z0-9]+:/.test(value)) return true; // HKLM:, env:, cert: (a drive is one letter)
+	// Drive-relative (`C:foo.txt`, no separator after the colon) means "foo.txt
+	// relative to PowerShell's current directory ON C:", which need not be the
+	// tool's cwd; `path.isAbsolute` does not call it absolute, so `toAbsolute`
+	// would join it onto the cwd and vouch for the wrong file. Refuse by shape.
+	if (/^[A-Za-z]:(?![\\/])/.test(value)) return true;
 	if (value.startsWith("~")) return true;
 	if (/(^|[\\/])\.\.([\\/]|$)/.test(value)) return true;
 	return false;
+}
+
+/**
+ * PowerShell's array syntax splits an argument on commas — outside quotes.
+ * `"a,b.txt"` is one path with a comma in its name; `a,"b,c"` is two.
+ */
+export function splitPowerShellList(token: string): string[] {
+	const parts: string[] = [];
+	let current = "";
+	let quote: string | undefined;
+	for (const ch of token) {
+		if (quote) {
+			if (ch === quote) quote = undefined;
+			else current += ch;
+		} else if (ch === '"' || ch === "'") {
+			quote = ch;
+		} else if (ch === ",") {
+			parts.push(current);
+			current = "";
+		} else {
+			current += ch;
+		}
+	}
+	parts.push(current);
+	return parts;
 }
 
 /** An absolute path by Windows or POSIX spelling: `C:\x`, `C:/x`, `/x`, `\x`. */
@@ -425,7 +455,8 @@ export interface PowerShellReadOnlyOptions {
 
 /**
  * Whether a path token lies outside every root. Each comma-separated part
- * (PowerShell's array syntax, `-Path a,b`) is judged on its own: refused by
+ * (PowerShell's array syntax, `-Path a,b`; commas inside quotes are part of
+ * the name) is judged on its own: refused by
  * shape when unvouchable; a relative part is inside by construction; an
  * absolute part is resolved through `resolveForContainment` — the nearest
  * existing ancestor's realpath, so a glob leaf (`C:\src\play\*.ts`) is
@@ -434,8 +465,8 @@ export interface PowerShellReadOnlyOptions {
  * (no options) an absolute part is refused, the pre-2026-09-19 behaviour.
  */
 function pathOutsideRoots(value: string, opts: PowerShellReadOnlyOptions | undefined, roots: string[]): boolean {
-	for (const part of value.split(",")) {
-		const trimmed = part.trim().replace(/^["']|["']$/g, "");
+	for (const part of splitPowerShellList(value)) {
+		const trimmed = part.trim();
 		if (!trimmed) continue;
 		if (pathUnvouchable(trimmed)) return true;
 		if (!isAbsoluteSpelling(trimmed)) continue;

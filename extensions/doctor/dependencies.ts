@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { whichOnPath } from "../lib/which.ts";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { getProviderKind } from "pi-web-search/src/api.ts";
-import { INSTALL_HINTS, installHint } from "../lsp/install-hints.ts";
+import { installHint, serverInstallHint } from "../lsp/install-hints.ts";
 import { SERVERS } from "../lsp/servers.ts";
 import { typescriptPreflight } from "../lsp/servers.ts";
 import type { McpServer } from "../mcp/config.ts";
@@ -124,7 +124,14 @@ export function checkDependencies(input: DependencyInput): DependencyReport {
 		checks.push({ name: "bash", found: !!s.bash, path: s.bash, need: s.bashExpected ? "required" : "optional", reason: bashReason(s), hint: s.bashExpected ? undefined : "https://git-scm.com/download/win" });
 		checks.push({ name: "powershell", found: !!s.powershell, path: s.powershell, need: s.powershellWanted ? "required" : "unused", reason: powershellReason(s), hint: "https://aka.ms/powershell" });
 		if (s.bashWarning) findings.push({ level: "warn", text: s.bashWarning, fix: "Point CLAUDE_CODE_GIT_BASH_PATH at a bash.exe or sh.exe, or unset it to use Git for Windows' default location." });
-		for (const notice of s.notices) findings.push({ level: s.primary === "none" ? "error" : "warn", text: notice, fix: s.bashExpected ? "Install PowerShell 7 (pwsh) or unset CLAUDE_CODE_USE_POWERSHELL_TOOL." : "Install Git for Windows or PowerShell 7." });
+		for (const notice of s.notices) {
+			const switchSet = notice.includes("CLAUDE_CODE_USE_POWERSHELL_TOOL");
+			findings.push({
+				level: s.primary === "none" ? "error" : "warn",
+				text: notice,
+				fix: switchSet ? "Install PowerShell 7 (pwsh) or unset CLAUDE_CODE_USE_POWERSHELL_TOOL." : "Install Git for Windows or PowerShell 7.",
+			});
+		}
 	}
 
 	const rg = which("rg") ?? (bundledRg && existsSync(bundledRg) ? bundledRg : undefined);
@@ -144,13 +151,13 @@ export function checkDependencies(input: DependencyInput): DependencyReport {
 			path: found,
 			need: needed ? "project" : "unused",
 			reason: `lsp_diagnostics for ${family.join("/")}${needed ? " (this project)" : ""}`,
-			hint: INSTALL_HINTS[config.command],
+			hint: serverInstallHint(config.command, platform),
 		});
 		if (needed && !found) {
 			findings.push({
 				level: "warn",
 				text: `${config.command} is not installed, so the model gets no language-server diagnostics after editing ${family[0]} files here.`,
-				fix: INSTALL_HINTS[config.command] ? `Install it with: ${INSTALL_HINTS[config.command]}` : "Install it and make sure it is on your PATH.",
+				fix: serverInstallHint(config.command, platform) ? `Install it with: ${serverInstallHint(config.command, platform)}` : "Install it and make sure it is on your PATH.",
 			});
 		}
 		if (needed && found && config.command === "typescript-language-server") {

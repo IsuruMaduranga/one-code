@@ -11,6 +11,7 @@ import {
 	powershellMatchForms,
 	powershellReadOnly,
 	powershellStatements,
+	splitPowerShellList,
 	statementCommand,
 } from "../../extensions/permissions/powershell-rules.ts";
 
@@ -179,6 +180,21 @@ describe("powershellReadOnly with roots (absolute paths judged by containment, 2
 		expect(powershellReadOnly(`Get-Content ${join(elsewhere, "secret.txt")}`, opts).readOnly).toBe(false);
 		expect(powershellReadOnly(`Get-Content ${join(root, "agent", "sessions", "C--other", "x.jsonl")}`, opts).readOnly).toBe(false); // a sibling project
 		expect(powershellReadOnly(`Get-Content -Path ${join(cwd, "src", "a.ts")},${join(elsewhere, "secret.txt")}`, opts).readOnly).toBe(false);
+	});
+
+	it("refuses a drive-relative path (C:foo.txt) by shape: it names a file relative to PowerShell's directory on that drive, not the cwd", () => {
+		expect(powershellReadOnly("Get-Content C:foo.txt", opts).readOnly).toBe(false);
+		expect(powershellReadOnly("Get-Content C:src\\a.ts", opts).readOnly).toBe(false);
+		expect(powershellReadOnly("Get-Content C:foo.txt").readOnly).toBe(false);
+	});
+
+	it("a quoted path with a comma in its name is one path, and an unquoted list still splits", () => {
+		writeFileSync(join(cwd, "src", "a,b.ts"), "");
+		expect(powershellReadOnly(`Get-Content "${join(cwd, "src", "a,b.ts")}"`, opts).readOnly).toBe(true);
+		expect(powershellReadOnly(`Get-Content '${join(elsewhere, "x,y.txt")}'`, opts).readOnly).toBe(false);
+		expect(splitPowerShellList('"a,b.txt"')).toEqual(["a,b.txt"]);
+		expect(splitPowerShellList("a,\"b,c\"")).toEqual(["a", "b,c"]);
+		expect(splitPowerShellList("a,b")).toEqual(["a", "b"]);
 	});
 
 	it("keeps refusing UNC, ~, PSDrives and .. by shape, roots or not", () => {

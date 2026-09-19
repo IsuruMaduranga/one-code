@@ -30,6 +30,16 @@ export function installHint(tool: string, platform: string = process.platform): 
 	return platform === "win32" ? byPlatform.win32 : platform === "darwin" ? byPlatform.darwin : byPlatform.linux;
 }
 
+/**
+ * The install command for a built-in server on `platform`: the package-manager
+ * ones (jdtls) per platform, the rest as in `INSTALL_HINTS`. The doctor
+ * renders a report for an injected platform, so it must not read the
+ * module-load default frozen into `INSTALL_HINTS`.
+ */
+export function serverInstallHint(command: string, platform: string = process.platform): string | undefined {
+	return PACKAGE_MANAGER_HINTS[command] ? installHint(command, platform) : INSTALL_HINTS[command];
+}
+
 /** Install commands for the built-in table's servers (and their npm siblings). */
 export const INSTALL_HINTS: Record<string, string> = {
 	"typescript-language-server": "npm install -g typescript-language-server typescript",

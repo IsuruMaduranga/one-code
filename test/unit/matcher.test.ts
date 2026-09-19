@@ -463,6 +463,14 @@ describe("decide", () => {
 			expect(decide({ ...accept, sessionDirPath, toolName: "write", subject: `${sessionDirPath}/x.jsonl` }).decision).not.toBe("allow");
 		});
 
+		it("plan mode: a read-only shell command over this project's session dir is allowed, like the read tools", () => {
+			const sessionDirPath = "/home/user/.onecode/agent/sessions/--home-user-project";
+			const plan = { ...base, mode: "plan" as const, sessionDirPath };
+			// bash: with the root the read is plan-readonly; without it, an outside read → ask.
+			expect(decide({ ...plan, toolName: "bash", subject: `head -n 5 ${sessionDirPath}/x.jsonl` }).cause).not.toBe("plan-mode");
+			expect(decide({ ...base, mode: "plan" as const, toolName: "bash", subject: `head -n 5 ${sessionDirPath}/x.jsonl` }).decision).toBe("ask");
+		});
+
 		it("plan mode: read-only bash of an outside path asks (a read), a mutation still denies", () => {
 			const plan = { ...base, mode: "plan" as const };
 			const d = decide({ ...plan, toolName: "bash", subject: "cat /etc/hosts" });

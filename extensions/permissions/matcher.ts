@@ -10,7 +10,7 @@
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
 import { analyzeShellCommand, hasInjectionSyntax, leadTokens, parseCommand, resolvePayload } from "../auto-mode/shell-analysis.ts";
-import { pathArgument } from "../auto-mode/paths.ts";
+import { pathArgument, resolveForContainment } from "../auto-mode/paths.ts";
 import { isProtectedPath, isWritingTool } from "./protected-paths.ts";
 import {
 	canonicalCommandName,
@@ -842,8 +842,12 @@ export function decide(params: DecideInput): Decision {
 		// redirect writes, which it records; a safe verdict with no writes is
 		// exactly read-only. Anything it cannot vouch for is denied as before.
 		// Without this the frontier tier (no grep/find/ls) was left with `read` alone.
+		// The harness's readable session dirs, as the auto-mode pre-gate sees them
+		// (permissions/index.ts `readableRoots`): a plan-mode read of this project's
+		// transcripts is a read like any other.
+		const readableRoots = [params.memoryDirPath, params.scratchpadDirPath, params.resultsDirPath, params.sessionDirPath].filter((d): d is string => !!d).map((d) => resolveForContainment(d) ?? d);
 		if (tool === "bash" && subject) {
-			const evidence = analyzeShellCommand({ command: subject, cwd, home: homedir(), protectedDirs: params.protectedDirs });
+			const evidence = analyzeShellCommand({ command: subject, cwd, home: homedir(), protectedDirs: params.protectedDirs, readableRoots });
 			if (evidence.verdict === "safe" && evidence.writes.length === 0) return { decision: "allow", cause: "plan-readonly" };
 			// Read-only, but of a path outside the working directory: still a read,
 			// so it is put to the user rather than refused as a plan-mode mutation
@@ -852,7 +856,7 @@ export function decide(params: DecideInput): Decision {
 		}
 		// The PowerShell counterpart: Claude Code's read-only cmdlet allowlist,
 		// with in-project paths by shape (powershell-rules.ts).
-		if (tool === "powershell" && subject && powershellReadOnly(subject).readOnly) return { decision: "allow", cause: "plan-readonly" };
+		if (tool === "powershell" && subject && powershellReadOnly(subject, { cwd, home: homedir(), readableRoots }).readOnly) return { decision: "allow", cause: "plan-readonly" };
 		if (PLAN_READ_ONLY_TOOLS.has(tool)) return { decision: "allow", cause: "plan-readonly" };
 		return { decision: "deny", cause: "plan-mode" };
 	}

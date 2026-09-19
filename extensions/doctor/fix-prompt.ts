@@ -29,7 +29,6 @@ export interface FixPromptInput {
 	reportText: string;
 	install: "app" | "pi-package";
 	oneCodeVersion: string;
-	/** `<agentDir>/sessions` — where pi keeps every session's JSONL. */
 	/** pi's sessions root, `<agentDir>/sessions` (other projects' directories live here — out of scope). */
 	sessionsDir: string;
 	/** THIS project's session directory under it — the only transcripts the permission gate lets a session read (Claude Code's own rule). */
