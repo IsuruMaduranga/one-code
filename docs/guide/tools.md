@@ -153,6 +153,18 @@ completion instead and return the output in their result: `bash` and
 `powershell` with `run_in_background`, `Agent`, `monitor`, and `workflow`. Timers such as
 `schedule_wakeup` and `/loop` never fire in these modes.
 
+Give a scripted run its own deadline. One Code has no idle timeout on a
+provider response, so a stream that stalls mid-reply keeps the process
+waiting indefinitely. Wrap the call in your script:
+
+```bash
+timeout 180 onecode --mode json -p "…" </dev/null
+```
+
+The `</dev/null` matters too: in `-p` mode piped standard input is read as
+part of the prompt, so a run inside a shell script that reads its own body
+from stdin would hand the rest of the script to the model.
+
 ## Claude Code tool names
 
 Claude Code's tool names are accepted in permission rules and hook

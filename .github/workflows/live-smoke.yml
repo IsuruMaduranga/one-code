@@ -1,6 +1,7 @@
-# Live smoke on Windows against a real model (docs/features/windows/plan.md,
-# Phase 3 item 7): One Code drives the bash tool (Git Bash) and the PowerShell
-# tool end to end on windows-latest, through `test/e2e/live-smoke.mjs`. Needs
+# Live smoke against a real model: One Code drives the bash tool (Git Bash on
+# Windows) and the PowerShell tool end to end on windows-latest, and the bash
+# tool on ubuntu-latest, through `test/e2e/live-smoke.mjs`
+# (docs/features/windows/ Phase 3 item 7; docs/features/linux/ Phase 1). Needs
 # the OPEN_ROUTER_API_KEY repository secret; the default model is the cheap
 # one used for testing. Runs on demand and when the shell-facing code changes
 # on master — never in the unit-test matrix (ci.yml), which stays key-free.
@@ -46,3 +47,18 @@ jobs:
       - run: npm ci
       - name: Drive the ${{ matrix.shell }} tool live
         run: node test/e2e/live-smoke.mjs --shell ${{ matrix.shell }} --model "${{ inputs.model || 'openrouter/deepseek/deepseek-v4.1-flash' }}"
+  linux:
+    name: ubuntu-latest (bash)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OPENROUTER_API_KEY: ${{ secrets.OPEN_ROUTER_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Drive the bash tool live
+        run: node test/e2e/live-smoke.mjs --shell bash --model "${{ inputs.model || 'openrouter/deepseek/deepseek-v4.1-flash' }}"
