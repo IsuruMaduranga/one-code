@@ -86,3 +86,28 @@ describe("whichOnPath for a command spelled with a directory", () => {
 		expect(whichOnPath(join(dir, "probe.cmd"), {}, "darwin")).toBe(join(dir, "probe.cmd"));
 	});
 });
+
+describe("whichOnPath on Windows with npm's three shims side by side", () => {
+	const dir = mkdtempSync(join(tmpdir(), "which-shims-"));
+	afterAll(() => rmSync(dir, { recursive: true, force: true }));
+	// npm installs `tsls` (a POSIX sh script for Git Bash), `tsls.cmd` and `tsls.ps1`.
+	writeFileSync(join(dir, "tsls"), "#!/bin/sh\n", { mode: 0o755 });
+	writeFileSync(join(dir, "tsls.cmd"), "@echo off\r\n", { mode: 0o755 });
+	writeFileSync(join(dir, "tsls.ps1"), "", { mode: 0o755 });
+	// PATHEXT spelled in the files' own case (see the test above).
+	const env = { PATH: dir, PATHEXT: ".COM;.EXE;.BAT;.cmd" };
+
+	it("prefers the PATHEXT sibling over the extensionless sh script, which Windows cannot run", () => {
+		expect(whichOnPath("tsls", env, "win32")).toBe(join(dir, "tsls.cmd"));
+		expect(whichOnPath(join(dir, "tsls"), env, "win32")).toBe(join(dir, "tsls.cmd"));
+	});
+
+	it("still takes a name spelled with its extension as-is", () => {
+		expect(whichOnPath("tsls.cmd", env, "win32")).toBe(join(dir, "tsls.cmd"));
+	});
+
+	it("reads PATH and PATHEXT by any key case, the shape a spread of process.env has on Windows", () => {
+		expect(whichOnPath("tsls", { Path: dir, PathExt: ".cmd" }, "win32")).toBe(join(dir, "tsls.cmd"));
+		expect(whichOnPath("tsls", { Path: dir }, "darwin")).toBe(join(dir, "tsls"));
+	});
+});
