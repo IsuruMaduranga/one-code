@@ -729,11 +729,12 @@ export interface AnalyzeInput {
 	 */
 	protectedDirs?: string[];
 	/**
-	 * Resolved directories a read-only command may read from besides the
-	 * working directory without escalating: the harness's own session dirs
+	 * REALPATH-resolved directories a read-only command may read from besides
+	 * the working directory without escalating: the harness's own session dirs
 	 * (memory, scratchpad, persisted results, this project's transcripts —
-	 * permissions/matcher.ts `DecideInput.sessionDirPath`). Reads only; the
-	 * write and delete checks never consult this list.
+	 * permissions/matcher.ts `DecideInput.sessionDirPath`), resolved once per
+	 * session by the caller (compared against realpaths here, unresolved). Reads
+	 * only; the write and delete checks never consult this list.
 	 */
 	readableRoots?: string[];
 }
@@ -792,9 +793,6 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 	 * in-project write as an escape.
 	 */
 	const containmentRoot = resolveForContainment(cwd) ?? cwd;
-	// Compared against realpaths below, so the roots are realpaths too (macOS
-	// spells the temp dir /var/… and resolves it to /private/var/…).
-	const readableRootsResolved = readableRoots.map((root) => resolveForContainment(root) ?? root);
 
 	/** `cd` changes what later relative paths mean; the original never tracked it (F6/N12). */
 	let effectiveCwd = cwd;
@@ -964,7 +962,7 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 			for (const value of positionals) {
 				if (!looksLikePath(value)) continue;
 				const resolved = resolveForContainment(toAbsoluteBash(effectiveCwd, value, home));
-				if (resolved !== undefined && (isWithin(containmentRoot, resolved) || readableRootsResolved.some((root) => isWithin(root, resolved)))) continue;
+				if (resolved !== undefined && (isWithin(containmentRoot, resolved) || readableRoots.some((root) => isWithin(root, resolved)))) continue;
 				if (!evidence.outsideReads.includes(value)) evidence.outsideReads.push(value);
 				escalate(`reads ${value}, which is outside the working directory`, { outsideRead: true });
 			}

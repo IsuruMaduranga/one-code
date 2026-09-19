@@ -230,14 +230,16 @@ export function oneCodeVersion(env: NodeJS.ProcessEnv = process.env): string {
 
 /** The shell tools exactly as a session resolves them (bash/index.ts, powershell/index.ts). */
 export function resolveShells(procEnv: NodeJS.ProcessEnv, home: string, platform: string): ShellsInput {
+	const plat = platform as NodeJS.Platform;
 	const bash = resolveBashSpawn({ env: procEnv, settingsEnv: readSettingsEnv(home) });
-	const powershell = resolvePowerShellSpawn({ platform: platform as NodeJS.Platform, env: procEnv });
-	const policy = shellToolPolicy({ platform: platform as NodeJS.Platform, env: procEnv, bash: !!bash.spawn, powershell: !!powershell });
+	const powershell = resolvePowerShellSpawn({ platform: plat, env: procEnv });
+	const policy = shellToolPolicy({ platform: plat, env: procEnv, bash: !!bash.spawn, powershell: !!powershell });
 	return {
 		bash: bash.spawn?.shell,
 		bashWarning: bash.warning,
 		powershell: powershell?.shell,
-		powershellActive: policy.powershell,
+		powershellWanted: policy.powershellWanted,
+		bashExpected: policy.bashExpected,
 		primary: policy.primary,
 		notices: policy.notices,
 	};

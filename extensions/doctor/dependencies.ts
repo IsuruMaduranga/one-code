@@ -85,10 +85,23 @@ export interface ShellsInput {
 	bashWarning?: string;
 	/** The PowerShell executable the powershell tool would run, or undefined. */
 	powershell?: string;
-	/** Whether the powershell tool is active (policy: env var, else Windows). */
-	powershellActive: boolean;
+	/** From `shellToolPolicy`: the tool is meant to be on (env switch, else Windows). */
+	powershellWanted: boolean;
+	/** From `shellToolPolicy`: a bash is part of this platform's expected shape (not Windows). */
+	bashExpected: boolean;
 	primary: "powershell" | "bash" | "none";
 	notices: string[];
+}
+
+function bashReason(s: ShellsInput): string {
+	if (s.primary === "bash") return "the primary shell tool";
+	if (s.bash) return "the bash tool, alongside PowerShell";
+	return s.bashExpected ? "the bash tool" : "the bash tool (Git for Windows provides one)";
+}
+
+function powershellReason(s: ShellsInput): string {
+	if (!s.powershellWanted) return s.bashExpected ? "the powershell tool (off; CLAUDE_CODE_USE_POWERSHELL_TOOL=1 turns it on with a pwsh on PATH)" : "the powershell tool (off: CLAUDE_CODE_USE_POWERSHELL_TOOL=0)";
+	return s.primary === "powershell" ? "the primary shell tool" : "the powershell tool";
 }
 
 export function checkDependencies(input: DependencyInput): DependencyReport {
@@ -108,27 +121,10 @@ export function checkDependencies(input: DependencyInput): DependencyReport {
 	const bundledRg = input.agentDir ? join(input.agentDir, "bin", rgName) : undefined;
 	if (input.shells) {
 		const s = input.shells;
-		const bashNeed: DependencyNeed = platform === "win32" ? "optional" : "required";
-		checks.push({
-			name: "bash",
-			found: !!s.bash,
-			path: s.bash,
-			need: bashNeed,
-			reason: s.primary === "bash" ? "the primary shell tool" : s.bash ? "the bash tool, alongside PowerShell" : platform === "win32" ? "the bash tool (Git for Windows provides one)" : "the bash tool",
-			hint: platform === "win32" ? "https://git-scm.com/download/win" : undefined,
-		});
-		checks.push({
-			name: "powershell",
-			found: !!s.powershell,
-			path: s.powershell,
-			need: platform === "win32" ? "required" : s.powershellActive ? "required" : "unused",
-			reason: s.powershellActive
-				? s.primary === "powershell" ? "the primary shell tool" : "the powershell tool"
-				: platform === "win32" ? "the powershell tool (off: CLAUDE_CODE_USE_POWERSHELL_TOOL=0)" : "the powershell tool (off; CLAUDE_CODE_USE_POWERSHELL_TOOL=1 turns it on with a pwsh on PATH)",
-			hint: platform === "win32" ? "https://aka.ms/powershell" : "https://aka.ms/powershell (pwsh 7)",
-		});
+		checks.push({ name: "bash", found: !!s.bash, path: s.bash, need: s.bashExpected ? "required" : "optional", reason: bashReason(s), hint: s.bashExpected ? undefined : "https://git-scm.com/download/win" });
+		checks.push({ name: "powershell", found: !!s.powershell, path: s.powershell, need: s.powershellWanted ? "required" : "unused", reason: powershellReason(s), hint: "https://aka.ms/powershell" });
 		if (s.bashWarning) findings.push({ level: "warn", text: s.bashWarning, fix: "Point CLAUDE_CODE_GIT_BASH_PATH at a bash.exe or sh.exe, or unset it to use Git for Windows' default location." });
-		for (const notice of s.notices) findings.push({ level: s.primary === "none" ? "error" : "warn", text: notice, fix: platform === "win32" ? "Install Git for Windows or PowerShell 7." : "Install PowerShell 7 (pwsh) or unset CLAUDE_CODE_USE_POWERSHELL_TOOL." });
+		for (const notice of s.notices) findings.push({ level: s.primary === "none" ? "error" : "warn", text: notice, fix: s.bashExpected ? "Install PowerShell 7 (pwsh) or unset CLAUDE_CODE_USE_POWERSHELL_TOOL." : "Install Git for Windows or PowerShell 7." });
 	}
 
 	const rg = which("rg") ?? (bundledRg && existsSync(bundledRg) ? bundledRg : undefined);

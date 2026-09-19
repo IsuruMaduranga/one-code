@@ -40,6 +40,18 @@ export interface ShellToolPolicy {
 	primary: PrimaryShell;
 	/** Startup notices for the user (a set switch with no PowerShell; no shell at all). */
 	notices: string[];
+	/**
+	 * The powershell tool is meant to be on here (the env switch, else Windows),
+	 * whether or not an executable was found. The doctor reports a missing
+	 * PowerShell as needed only when this is true.
+	 */
+	powershellWanted: boolean;
+	/**
+	 * A bash is part of this platform's expected shape: everywhere but Windows,
+	 * where Git for Windows is optional. The doctor's "needed" versus "optional"
+	 * for bash reads this rather than re-deriving the platform rule.
+	 */
+	bashExpected: boolean;
 }
 
 /** Claude Code's own wording for a Windows machine with no shell tool. */
@@ -62,7 +74,7 @@ export function shellToolPolicy(a: ShellAvailability): ShellToolPolicy {
 	const bash = a.bash;
 	const primary: PrimaryShell = powershell ? "powershell" : bash ? "bash" : "none";
 	if (primary === "none" && a.platform === "win32") notices.push(NO_SHELL_NOTICE);
-	return { powershell, bash, primary, notices };
+	return { powershell, bash, primary, notices, powershellWanted: wanted, bashExpected: a.platform !== "win32" };
 }
 
 /**

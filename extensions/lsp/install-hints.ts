@@ -24,7 +24,7 @@ const PACKAGE_MANAGER_HINTS: Record<string, { darwin: string; win32: string; lin
 };
 
 /** The install command for a package-manager tool on `platform` (defaults to this one). */
-export function installHint(tool: keyof typeof PACKAGE_MANAGER_HINTS | string, platform: string = process.platform): string {
+export function installHint(tool: string, platform: string = process.platform): string {
 	const byPlatform = PACKAGE_MANAGER_HINTS[tool];
 	if (!byPlatform) return `install ${tool} and make sure it is on your PATH`;
 	return platform === "win32" ? byPlatform.win32 : platform === "darwin" ? byPlatform.darwin : byPlatform.linux;

@@ -415,28 +415,31 @@ export interface PowerShellReadOnlyOptions {
 	/** The user's home, for `toAbsolute`. */
 	home: string;
 	/**
-	 * Resolved directories an absolute path may point into besides the working
-	 * directory: the harness's own session dirs (memory, scratchpad, persisted
-	 * results, this project's transcripts — matcher.ts `DecideInput`).
+	 * REALPATH-resolved directories an absolute path may point into besides the
+	 * working directory: the harness's own session dirs (memory, scratchpad,
+	 * persisted results, this project's transcripts — matcher.ts `DecideInput`),
+	 * resolved once per session by the caller.
 	 */
 	readableRoots?: string[];
 }
 
 /**
  * Whether a path token lies outside every root. Each comma-separated part
- * (PowerShell's array syntax, `-Path a,b`) is judged on its own; an absolute
- * part is resolved through `resolveForContainment` — the nearest existing
- * ancestor's realpath, so a glob leaf (`C:\src\play\*.ts`) is judged by its
- * directory and a symlink planted inside the project that points out of it is
- * outside. A relative part stays inside by construction (no `..`).
+ * (PowerShell's array syntax, `-Path a,b`) is judged on its own: refused by
+ * shape when unvouchable; a relative part is inside by construction; an
+ * absolute part is resolved through `resolveForContainment` — the nearest
+ * existing ancestor's realpath, so a glob leaf (`C:\src\play\*.ts`) is
+ * judged by its directory and a symlink planted inside the project that
+ * points out of it is outside — and must lie inside a root. With no roots
+ * (no options) an absolute part is refused, the pre-2026-09-19 behaviour.
  */
-function pathOutsideRoots(value: string, opts: PowerShellReadOnlyOptions): boolean {
-	const roots = [opts.cwd, ...(opts.readableRoots ?? [])].map((root) => resolveForContainment(root) ?? root);
+function pathOutsideRoots(value: string, opts: PowerShellReadOnlyOptions | undefined, roots: string[]): boolean {
 	for (const part of value.split(",")) {
 		const trimmed = part.trim().replace(/^["']|["']$/g, "");
 		if (!trimmed) continue;
 		if (pathUnvouchable(trimmed)) return true;
 		if (!isAbsoluteSpelling(trimmed)) continue;
+		if (!opts) return true;
 		const resolved = resolveForContainment(toAbsolute(opts.cwd, trimmed, opts.home));
 		if (resolved === undefined || !roots.some((root) => isWithin(root, resolved))) return true;
 	}
@@ -464,6 +467,8 @@ export function powershellReadOnly(command: string, opts?: PowerShellReadOnlyOpt
 	if (/[<>]/.test(command)) return { readOnly: false, reason: "redirection" };
 	if (/\$/.test(command)) return { readOnly: false, reason: "a variable or subexpression" };
 	if (/[`{}]/.test(command)) return { readOnly: false, reason: "an escape or script block" };
+	// The cwd's realpath once per command (the roots arrive resolved), not once per token.
+	const roots = opts ? [resolveForContainment(opts.cwd) ?? opts.cwd, ...(opts.readableRoots ?? [])] : [];
 	for (const statement of statements) {
 		if (startsWithCallOperator(statement)) return { readOnly: false, reason: "the call operator" };
 		const cmd = statementCommand(statement);
@@ -472,18 +477,12 @@ export function powershellReadOnly(command: string, opts?: PowerShellReadOnlyOpt
 		for (const token of tokens) {
 			if (WRITING_PARAMETERS.test(token)) return { readOnly: false, reason: `${token.split(":")[0]} writes or forwards` };
 			if (token.startsWith("-")) continue;
-			const value = token.replace(/^["']|["']$/g, "");
-			// By shape (UNC, ~, PSDrive, ..) the token is never vouched for. An
-			// absolute path is read-only only when it resolves inside the working
-			// directory or a harness session dir (2026-09-19: /doctor's transcript
-			// scan on Windows spelled `<agentDir>\sessions\…` and was classified —
-			// docs/decisions/auto-mode.md); without roots it is refused as before.
-			// A comma list is judged part by part (`-Path a,C:\x`).
-			if (opts) {
-				if (pathOutsideRoots(value, opts)) return { readOnly: false, reason: "a path outside the working directory" };
-			} else if (pathUnvouchable(value) || isAbsoluteSpelling(value)) {
-				return { readOnly: false, reason: "a path outside the working directory" };
-			}
+			// By shape (UNC, ~, PSDrive, ..) a token is never vouched for. An absolute
+			// path is read-only only when it resolves inside the working directory or
+			// a harness session dir (2026-09-19: /doctor's transcript scan on Windows
+			// spelled `<agentDir>\sessions\…` and was classified —
+			// docs/decisions/auto-mode.md); a comma list is judged part by part.
+			if (pathOutsideRoots(token, opts, roots)) return { readOnly: false, reason: "a path outside the working directory" };
 		}
 	}
 	return { readOnly: true };

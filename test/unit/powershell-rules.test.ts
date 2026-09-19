@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { resolveForContainment } from "../../extensions/auto-mode/paths.ts";
 import {
 	canonicalCommandName,
 	canonicalizeStatement,
@@ -163,7 +164,8 @@ describe("powershellReadOnly with roots (absolute paths judged by containment, 2
 	writeFileSync(join(sessions, "s.jsonl"), "{}\n");
 	writeFileSync(join(elsewhere, "secret.txt"), "");
 	const home = root;
-	const opts = { cwd, home, readableRoots: [sessions] };
+	// The caller hands over realpaths (macOS spells the temp dir /var/…, realpath /private/var/…).
+	const opts = { cwd, home, readableRoots: [resolveForContainment(sessions) ?? sessions] };
 	afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 	it("an absolute path inside the working directory or a readable root is read-only", () => {

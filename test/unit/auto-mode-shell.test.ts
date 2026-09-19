@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { resolveForContainment } from "../../extensions/auto-mode/paths.ts";
 import { analyzeShellCommand, hasUnmodelledSyntax, parseCommand } from "../../extensions/auto-mode/shell-analysis.ts";
 import { forwardSlashes as sh, toPosixPath } from "../../extensions/lib/paths.ts";
 
@@ -96,15 +97,16 @@ describe("analyzeShellCommand fast path", () => {
 				const without = analyzeShellCommand({ command, cwd, home });
 				expect(without.verdict).toBe("escalate");
 				expect(without.outsideReads.length).toBe(1);
-				const withRoot = analyzeShellCommand({ command, cwd, home, readableRoots: [sessions] });
+				const root = resolveForContainment(sessions) ?? sessions; // the caller hands over realpaths
+				const withRoot = analyzeShellCommand({ command, cwd, home, readableRoots: [root] });
 				expect(withRoot.verdict).toBe("safe");
 				expect(withRoot.outsideReads).toEqual([]);
 				// A sibling directory is not covered by the root.
 				const sibling = mkdtempSync(join(tmpdir(), "cc-sessions-other-"));
 				writeFileSync(join(sibling, "b.jsonl"), "{}\n");
-				expect(analyzeShellCommand({ command: `cat ${sh(join(sibling, "b.jsonl"))}`, cwd, home, readableRoots: [sessions] }).verdict).toBe("escalate");
+				expect(analyzeShellCommand({ command: `cat ${sh(join(sibling, "b.jsonl"))}`, cwd, home, readableRoots: [root] }).verdict).toBe("escalate");
 				// Reads only: a redirect INTO the root is still a write outside the cwd.
-				expect(analyzeShellCommand({ command: `echo x > ${sh(join(sessions, "a.jsonl"))}`, cwd, home, readableRoots: [sessions] }).verdict).toBe("escalate");
+				expect(analyzeShellCommand({ command: `echo x > ${sh(join(sessions, "a.jsonl"))}`, cwd, home, readableRoots: [root] }).verdict).toBe("escalate");
 				rmSync(sibling, { recursive: true, force: true });
 			} finally {
 				rmSync(sessions, { recursive: true, force: true });
