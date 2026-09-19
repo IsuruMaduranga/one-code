@@ -68,6 +68,27 @@ export interface DependencyInput {
 	mcpServers: McpServer[];
 	sessionModel?: Model<Api>;
 	webSearchSettings: WebSearchSettings;
+	/**
+	 * The shell tools as the session resolves them (build.ts, from
+	 * lib/shell-spawn.ts + powershell/policy.ts): which bash, which PowerShell,
+	 * which one is primary, and the startup notices. On Windows this is the
+	 * first thing a user asks the doctor — "which shells did you find?" — and
+	 * the report had no line for it until 2026-09-19 (the Vultr VM session).
+	 */
+	shells?: ShellsInput;
+}
+
+export interface ShellsInput {
+	/** The bash binary the bash tool runs, or undefined when none exists. */
+	bash?: string;
+	/** An ignored CLAUDE_CODE_GIT_BASH_PATH, in the resolver's words. */
+	bashWarning?: string;
+	/** The PowerShell executable the powershell tool would run, or undefined. */
+	powershell?: string;
+	/** Whether the powershell tool is active (policy: env var, else Windows). */
+	powershellActive: boolean;
+	primary: "powershell" | "bash" | "none";
+	notices: string[];
 }
 
 export function checkDependencies(input: DependencyInput): DependencyReport {
@@ -85,6 +106,31 @@ export function checkDependencies(input: DependencyInput): DependencyReport {
 	// and puts that dir on the shell tools' PATH, so a copy there is "found".
 	const rgName = platform === "win32" ? "rg.exe" : "rg";
 	const bundledRg = input.agentDir ? join(input.agentDir, "bin", rgName) : undefined;
+	if (input.shells) {
+		const s = input.shells;
+		const bashNeed: DependencyNeed = platform === "win32" ? "optional" : "required";
+		checks.push({
+			name: "bash",
+			found: !!s.bash,
+			path: s.bash,
+			need: bashNeed,
+			reason: s.primary === "bash" ? "the primary shell tool" : s.bash ? "the bash tool, alongside PowerShell" : platform === "win32" ? "the bash tool (Git for Windows provides one)" : "the bash tool",
+			hint: platform === "win32" ? "https://git-scm.com/download/win" : undefined,
+		});
+		checks.push({
+			name: "powershell",
+			found: !!s.powershell,
+			path: s.powershell,
+			need: platform === "win32" ? "required" : s.powershellActive ? "required" : "unused",
+			reason: s.powershellActive
+				? s.primary === "powershell" ? "the primary shell tool" : "the powershell tool"
+				: platform === "win32" ? "the powershell tool (off: CLAUDE_CODE_USE_POWERSHELL_TOOL=0)" : "the powershell tool (off; CLAUDE_CODE_USE_POWERSHELL_TOOL=1 turns it on with a pwsh on PATH)",
+			hint: platform === "win32" ? "https://aka.ms/powershell" : "https://aka.ms/powershell (pwsh 7)",
+		});
+		if (s.bashWarning) findings.push({ level: "warn", text: s.bashWarning, fix: "Point CLAUDE_CODE_GIT_BASH_PATH at a bash.exe or sh.exe, or unset it to use Git for Windows' default location." });
+		for (const notice of s.notices) findings.push({ level: s.primary === "none" ? "error" : "warn", text: notice, fix: platform === "win32" ? "Install Git for Windows or PowerShell 7." : "Install PowerShell 7 (pwsh) or unset CLAUDE_CODE_USE_POWERSHELL_TOOL." });
+	}
+
 	const rg = which("rg") ?? (bundledRg && existsSync(bundledRg) ? bundledRg : undefined);
 	checks.push({ name: "rg", found: !!rg, path: rg, need: "optional", reason: "faster code search when the model shells out to ripgrep", hint: installHint("ripgrep", platform) });
 

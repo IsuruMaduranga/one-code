@@ -164,3 +164,32 @@ describe("dependencies", () => {
 		expect(webSearchRoute({ env: {}, sessionModel: groq, webSearchSettings: { apiKeys: { brave: "b" } } }).detail).toContain("key in ~/.onecode/settings.json");
 	});
 });
+
+describe("checkDependencies: the shell tools (Shells entry, 2026-09-19)", () => {
+	const base = { cwd: process.cwd(), env: { PATH: "" }, mcpServers: [], webSearchSettings: { apiKeys: {} } as any };
+	it("Windows with PowerShell only: bash optional and missing with the Git hint, PowerShell primary", () => {
+		const r = checkDependencies({ ...base, platform: "win32", shells: { powershell: "C:\\Program Files\\PowerShell\\7\\pwsh.exe", powershellActive: true, primary: "powershell", notices: [] } });
+		const bash = r.checks.find((c) => c.name === "bash")!;
+		const ps = r.checks.find((c) => c.name === "powershell")!;
+		expect(bash.found).toBe(false);
+		expect(bash.need).toBe("optional");
+		expect(bash.hint).toContain("git-scm.com");
+		expect(ps.found).toBe(true);
+		expect(ps.reason).toBe("the primary shell tool");
+		expect(r.findings.some((f) => /bash|shell/i.test(f.text))).toBe(false);
+	});
+	it("Windows with neither shell: the no-shell notice is an error finding", () => {
+		const r = checkDependencies({ ...base, platform: "win32", shells: { powershellActive: false, primary: "none", notices: ["No shell available: install Git for Windows …"] } });
+		expect(r.findings.some((f) => f.level === "error" && f.text.startsWith("No shell available"))).toBe(true);
+	});
+	it("macOS: bash required and primary, PowerShell unused unless switched on; an ignored override is a warning", () => {
+		const r = checkDependencies({ ...base, platform: "darwin", shells: { bash: "/bin/bash", bashWarning: 'CLAUDE_CODE_GIT_BASH_PATH ignored: "/x" does not exist.', powershellActive: false, primary: "bash", notices: [] } });
+		expect(r.checks.find((c) => c.name === "bash")!.need).toBe("required");
+		expect(r.checks.find((c) => c.name === "powershell")!.need).toBe("unused");
+		expect(r.findings.some((f) => f.level === "warn" && f.text.includes("CLAUDE_CODE_GIT_BASH_PATH ignored"))).toBe(true);
+	});
+	it("without a shells input the report is unchanged", () => {
+		const r = checkDependencies({ ...base, platform: "darwin" });
+		expect(r.checks.some((c) => c.name === "bash" || c.name === "powershell")).toBe(false);
+	});
+});

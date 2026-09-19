@@ -17,7 +17,10 @@ import { readJsonFile } from "../lib/atomic-write.ts";
 import { oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 import { webSearchSettingsFrom } from "../web/backends.ts";
 import { collectCompat, importedConfigSection, mcpSection } from "./compat.ts";
-import { checkDependencies, dependenciesSection } from "./dependencies.ts";
+import { checkDependencies, dependenciesSection, type ShellsInput } from "./dependencies.ts";
+import { readSettingsEnv } from "../lib/claude-settings.ts";
+import { resolveBashSpawn, resolvePowerShellSpawn } from "../lib/shell-spawn.ts";
+import { shellToolPolicy } from "../powershell/policy.ts";
 import { collectModelFacts, modelsSection } from "./models.ts";
 import { computePresets, presetsSection } from "./presets.ts";
 import {
@@ -181,7 +184,7 @@ export function buildDoctorReport({ env, registry, session }: BuildInput): Docto
 	sections.push(mcpSection(compat, session, env.home));
 
 	const webSearchSettings = webSearchSettingsFrom(readJsonFile<{ webSearch?: unknown }>(oneCodeSettingsPath(env.home, env.env))?.webSearch);
-	const deps = checkDependencies({ cwd: env.cwd, env: env.env, platform: env.platform, agentDir: env.agentDir, mcpServers: compat.mcp.servers, sessionModel: session.model, webSearchSettings });
+	const deps = checkDependencies({ cwd: env.cwd, env: env.env, platform: env.platform, agentDir: env.agentDir, mcpServers: compat.mcp.servers, sessionModel: session.model, webSearchSettings, shells: resolveShells(env.env, env.home, env.platform) });
 	findings.push(...deps.findings);
 	sections.push(dependenciesSection(deps));
 
@@ -223,4 +226,19 @@ function summaryText(input: {
 /** The extension's own version — the app overrides it with CC_VERSION (lockstep releases). */
 export function oneCodeVersion(env: NodeJS.ProcessEnv = process.env): string {
 	return env.CC_VERSION ?? extensionVersion();
+}
+
+/** The shell tools exactly as a session resolves them (bash/index.ts, powershell/index.ts). */
+export function resolveShells(procEnv: NodeJS.ProcessEnv, home: string, platform: string): ShellsInput {
+	const bash = resolveBashSpawn({ env: procEnv, settingsEnv: readSettingsEnv(home) });
+	const powershell = resolvePowerShellSpawn({ platform: platform as NodeJS.Platform, env: procEnv });
+	const policy = shellToolPolicy({ platform: platform as NodeJS.Platform, env: procEnv, bash: !!bash.spawn, powershell: !!powershell });
+	return {
+		bash: bash.spawn?.shell,
+		bashWarning: bash.warning,
+		powershell: powershell?.shell,
+		powershellActive: policy.powershell,
+		primary: policy.primary,
+		notices: policy.notices,
+	};
 }
