@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { modeCycleKey, useWindowsKeybindings } from "../../extensions/lib/keys.ts";
+import { modeCycleKey, pauseGlyph, useWindowsKeybindings } from "../../extensions/lib/keys.ts";
 import { installHint } from "../../extensions/lsp/install-hints.ts";
 
 describe("useWindowsKeybindings (pi's rule, copied)", () => {
@@ -37,5 +37,16 @@ describe("installHint", () => {
 	});
 	it("falls back to a generic line for an unknown tool", () => {
 		expect(installHint("frobnicate", "win32")).toBe("install frobnicate and make sure it is on your PATH");
+	});
+});
+
+describe("pauseGlyph", () => {
+	it("is Claude Code's U+23F8 where terminals draw it one cell wide", () => {
+		expect(pauseGlyph("darwin", {})).toBe("\u23F8");
+		expect(pauseGlyph("linux", {})).toBe("\u23F8");
+	});
+	it("is the single-cell U+2016 on Windows and WSL, where Windows Terminal draws U+23F8 as a two-cell emoji", () => {
+		expect(pauseGlyph("win32", {})).toBe("\u2016");
+		expect(pauseGlyph("linux", { WSL_DISTRO_NAME: "Ubuntu" })).toBe("\u2016");
 	});
 });

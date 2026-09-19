@@ -23,3 +23,16 @@ export function useWindowsKeybindings(platform: string = process.platform, env: 
 export function modeCycleKey(platform: string = process.platform, env: NodeJS.ProcessEnv = process.env): "ctrl+q" | "alt+m" {
 	return useWindowsKeybindings(platform, env) ? "alt+m" : "ctrl+q";
 }
+
+/**
+ * The footer badge's pause icon. Claude Code's is U+23F8 (⏸); Windows Terminal
+ * draws that code point with its emoji font, two cells wide and coloured,
+ * while pi measures one cell, so the icon overlapped the mode name — and the
+ * text-presentation selector (U+FE0E) is ignored there (verified on the Vultr
+ * VM, 2026-09-19: rows A and B of the width test). U+2016 (‖) is a plain
+ * single-cell glyph in Windows Terminal, so it stands in on Windows and WSL,
+ * where the terminal is Windows Terminal either way.
+ */
+export function pauseGlyph(platform: string = process.platform, env: NodeJS.ProcessEnv = process.env): "⏸" | "‖" {
+	return useWindowsKeybindings(platform, env) ? "‖" : "⏸";
+}

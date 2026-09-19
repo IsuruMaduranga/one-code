@@ -10,13 +10,18 @@
  */
 
 import type { PermissionMode } from "./matcher.ts";
-import { modeCycleKey } from "../lib/keys.ts";
+import { modeCycleKey, pauseGlyph } from "../lib/keys.ts";
 
-/** Footer badge per mode — Claude Code's exact strings and icons. */
+/**
+ * Footer badge per mode — Claude Code's exact strings and icons. The pause
+ * icon is swapped for a single-cell glyph on Windows and WSL, where Windows
+ * Terminal draws U+23F8 two cells wide and over the mode name (lib/keys.ts).
+ */
+const PAUSE = pauseGlyph();
 export const MODE_BADGES: Record<PermissionMode, string> = {
-	default: "⏸ manual mode on",
+	default: `${PAUSE} manual mode on`,
 	acceptEdits: "⏵⏵ accept edits on",
-	plan: "⏸ plan mode on",
+	plan: `${PAUSE} plan mode on`,
 	bypassPermissions: "⏵⏵ bypass permissions on",
 	dontAsk: "⏵⏵ don't ask on",
 	auto: "⏵⏵ auto mode on",
@@ -113,7 +118,7 @@ export function modeBadge(
 function badgeBase(mode: PermissionMode, opts?: { paused?: boolean; classifierModel?: string }): string {
 	if (mode !== "auto") return MODE_BADGES[mode];
 	const suffix = opts?.classifierModel ? ` · ${shortModelName(opts.classifierModel)}` : "";
-	return opts?.paused ? `⏸ auto mode paused${suffix}` : `${MODE_BADGES.auto}${suffix}`;
+	return opts?.paused ? `${PAUSE} auto mode paused${suffix}` : `${MODE_BADGES.auto}${suffix}`;
 }
 
 /**
