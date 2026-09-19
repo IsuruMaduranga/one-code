@@ -254,8 +254,13 @@ export default function lspExtension(pi: ExtensionAPI) {
 		// sync the file, await the server's next publish, and reset the file's
 		// delivered-set so a reintroduced issue resurfaces.
 		if (!event.isError && (event.toolName === "edit" || event.toolName === "write")) {
-			const path = (event.input as { path?: unknown }).path;
-			if (typeof path === "string") {
+			const raw = (event.input as { path?: unknown }).path;
+			if (typeof raw === "string") {
+				// One absolute spelling for everything below: the server key (root),
+				// the delivered-set URI and the diagnostics request. A relative path
+				// used to yield root `.` and a URI keyed on process.cwd(), so one file
+				// could end up on a second server instance (findings §23).
+				const path = isAbsolute(raw) ? raw : join(ctx.cwd, raw);
 				const target = resolveTarget(path, ctx.cwd);
 				reportRoutingIssuesOnce(ctx);
 				if (target) {

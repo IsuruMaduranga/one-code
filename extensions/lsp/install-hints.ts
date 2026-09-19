@@ -12,6 +12,7 @@
  */
 
 import { isAbsolute } from "node:path";
+import { TYPESCRIPT_PROJECT_INSTALL } from "./servers.ts";
 
 /**
  * Tools that come from the OS package manager, by platform. Homebrew is a
@@ -42,7 +43,7 @@ export function serverInstallHint(command: string, platform: string = process.pl
 
 /** Install commands for the built-in table's servers (and their npm siblings). */
 export const INSTALL_HINTS: Record<string, string> = {
-	"typescript-language-server": "npm install -g typescript-language-server (and typescript 5.x in the project: npm install -D typescript@5 — the server never uses a global TypeScript)",
+	"typescript-language-server": `npm install -g typescript-language-server (and in the project: ${TYPESCRIPT_PROJECT_INSTALL} — the server never uses a global TypeScript)`,
 	"pyright-langserver": "npm install -g pyright",
 	gopls: "go install golang.org/x/tools/gopls@latest",
 	"rust-analyzer": "rustup component add rust-analyzer",

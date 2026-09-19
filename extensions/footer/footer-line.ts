@@ -12,6 +12,7 @@
  */
 
 import { costOf, usageEntryCost } from "../lib/usage-bus.ts";
+import type { WorktreeLocation } from "../lib/worktree-channel.ts";
 
 export type Paint = (color: string, text: string) => string;
 
@@ -46,7 +47,7 @@ export interface FooterData {
  * would keep naming the original checkout), else the process cwd and its
  * branch.
  */
-export function footerLocation(cwd: string, branch: string | undefined, worktree: { path: string; branch?: string } | null | undefined): { cwd: string; branch?: string } {
+export function footerLocation(cwd: string, branch: string | undefined, worktree: WorktreeLocation | null | undefined): { cwd: string; branch?: string } {
 	if (worktree) return { cwd: worktree.path, branch: worktree.branch };
 	return { cwd, branch };
 }

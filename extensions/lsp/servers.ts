@@ -6,7 +6,8 @@
  */
 
 import { existsSync } from "node:fs";
-import { dirname, extname, isAbsolute, join, resolve } from "node:path";
+import { dirname, extname, join } from "node:path";
+import { ancestorDirs } from "../lib/claude-context.ts";
 
 export interface ServerConfig {
 	command: string;
@@ -55,16 +56,9 @@ export function serverForPath(path: string): { languageId: string; config: Serve
 	return config ? { languageId, config } : undefined;
 }
 
-/**
- * Nearest ancestor directory containing one of the language's root markers.
- * A relative `startPath` is resolved against `fallback` (the session cwd)
- * first: the root keys the server instance, and a tool that spells the same
- * file `src/a.ts` once and `/repo/src/a.ts` later must land on ONE server —
- * before this, the relative spelling produced root `.` and a second server
- * (and a second row in /lsp; findings §23).
- */
+/** Nearest ancestor directory containing one of the language's root markers. */
 export function findProjectRoot(startPath: string, markers: string[], fallback: string): string {
-	let dir = dirname(isAbsolute(startPath) ? startPath : resolve(fallback, startPath));
+	let dir = dirname(startPath);
 	while (true) {
 		if (markers.some((marker) => existsSync(join(dir, marker)))) return dir;
 		const parent = dirname(dir);
@@ -82,15 +76,14 @@ export function findProjectRoot(startPath: string, markers: string[], fallback: 
  * resolution path (verified 2026-09-19 on macOS and Ubuntu, findings §23).
  */
 export function findTypescript(root: string): string | undefined {
-	let dir = root;
-	while (true) {
-		const candidate = join(dir, "node_modules", "typescript");
-		if (existsSync(candidate)) return candidate;
-		const parent = dirname(dir);
-		if (parent === dir) return undefined;
-		dir = parent;
-	}
+	return ancestorDirs(root)
+		.reverse()
+		.map((dir) => join(dir, "node_modules", "typescript"))
+		.find((candidate) => existsSync(candidate));
 }
+
+/** The one way to give typescript-language-server a TypeScript it will use: 5.x in the project (findings §23). */
+export const TYPESCRIPT_PROJECT_INSTALL = "npm install -D typescript@5";
 
 /**
  * Say up front why typescript-language-server cannot analyse `root`, instead
@@ -101,8 +94,8 @@ export function findTypescript(root: string): string | undefined {
 export function typescriptPreflight(root: string): string | undefined {
 	const typescript = findTypescript(root);
 	if (!typescript) {
-		return "No TypeScript installation is reachable from this project (typescript-language-server resolves `typescript` from the project's node_modules upward and never uses a global install). Run `npm install -D typescript@5` in the project for LSP diagnostics.";
+		return `No TypeScript installation is reachable from this project (typescript-language-server resolves \`typescript\` from the project's node_modules upward and never uses a global install). Run \`${TYPESCRIPT_PROJECT_INSTALL}\` in the project for LSP diagnostics.`;
 	}
 	if (existsSync(join(typescript, "lib", "tsserver.js"))) return undefined;
-	return "The project's TypeScript has no lib/tsserver.js (TypeScript 7's native compiler removed it), so typescript-language-server cannot analyse this project. Install typescript 5.x as a dev dependency for LSP diagnostics.";
+	return `The project's TypeScript has no lib/tsserver.js (TypeScript 7's native compiler removed it), so typescript-language-server cannot analyse this project. Run \`${TYPESCRIPT_PROJECT_INSTALL}\` for LSP diagnostics.`;
 }

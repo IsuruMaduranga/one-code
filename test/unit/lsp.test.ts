@@ -104,15 +104,6 @@ describe("project root and preflight", () => {
 		expect(findProjectRoot(join(dir, "pkg", "src", "a.ts"), ["tsconfig.json"], dir)).toBe(join(dir, "pkg"));
 	});
 
-	it("resolves a relative path against the fallback cwd, so both spellings share one root", () => {
-		mkdirSync(join(dir, "pkg", "src"), { recursive: true });
-		writeFileSync(join(dir, "pkg", "tsconfig.json"), "{}");
-		const absolute = findProjectRoot(join(dir, "pkg", "src", "a.ts"), ["tsconfig.json"], dir);
-		const relative = findProjectRoot(join("pkg", "src", "a.ts"), ["tsconfig.json"], dir);
-		expect(relative).toBe(absolute);
-		expect(relative).toBe(join(dir, "pkg"));
-	});
-
 	it("falls back when no marker exists", () => {
 		mkdirSync(join(dir, "src"), { recursive: true });
 		expect(findProjectRoot(join(dir, "src", "a.ts"), ["nonexistent.json"], dir)).toBe(dir);

@@ -96,12 +96,15 @@ export default function footerExtension(pi: ExtensionAPI) {
 				onBranchChange(cb: () => void): () => void;
 			};
 
+			/** The path + branch shown, and the PR looked up: the worktree's while one is active. */
+			const currentLocation = () => footerLocation(ctx.cwd, fd.getGitBranch() ?? undefined, worktree);
+
 			const snapshot = (): FooterData => {
 				const usage = ctx.getContextUsage();
 				const ultracode = fd.getExtensionStatuses().get(ULTRACODE_STATUS_KEY);
 				const effort = ultracode ?? safeThinkingLevel(ctx);
 				const model = ctx.model;
-				const location = footerLocation(ctx.cwd, fd.getGitBranch() ?? undefined, worktree);
+				const location = currentLocation();
 				return {
 					cwd: location.cwd,
 					home: process.env.HOME || process.env.USERPROFILE || "",
@@ -128,9 +131,8 @@ export default function footerExtension(pi: ExtensionAPI) {
 			// only disposes the component, so the subscription must be released
 			// here — otherwise each replaced footer keeps firing its `gh pr list`
 			// against a stale cwd on every branch change.
-			// Inside a worktree session the PR belongs to the worktree's branch.
 			refreshLocation = () => {
-				const location = footerLocation(ctx.cwd, fd.getGitBranch() ?? undefined, worktree);
+				const location = currentLocation();
 				refreshPr(location.cwd, location.branch ?? null);
 			};
 			refreshLocation();
