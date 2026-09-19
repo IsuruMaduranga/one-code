@@ -20,6 +20,7 @@ import { Type } from "typebox";
 import { restoreLatestDetails } from "../lib/branch-restore.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
+import { WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
 import { worktreeBashGuardReason } from "./guards.ts";
 import { ORIGINAL_COMMAND_CHANNEL, type OriginalCommandRecord } from "../lib/original-command.ts";
 import { rewriteToolInput, validateWorktreeName } from "./rewrite.ts";
@@ -67,6 +68,8 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 
 	const applyState = (next: WorktreeState | undefined) => {
 		state = next;
+		const location: WorktreeLocation | null = next ? { path: next.path, branch: next.branch } : null;
+		pi.events.emit(WORKTREE_CHANNEL, location);
 		if (next) {
 			pi.events.emit(REMINDER_CHANNEL, {
 				text: reminderFor(next),
@@ -145,7 +148,13 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 				const known = await listWorktreePaths(ctx.cwd);
 				const target = known.find((p) => p === params.path);
 				if (!target) return fail(`${params.path} is not a worktree of this repository. Known worktrees:\n${known.join("\n")}`);
-				const next: WorktreeState = { path: target, createdByUs: false, originalCwd: ctx.cwd, sharedRoot: repoRoot };
+				// Best effort: the branch is display-only here (footer, reminder); a detached HEAD leaves it unset.
+				let branch: string | undefined;
+				try {
+					const ref = await git(["rev-parse", "--abbrev-ref", "HEAD"], target);
+					if (ref && ref !== "HEAD") branch = ref;
+				} catch {}
+				const next: WorktreeState = { path: target, branch, createdByUs: false, originalCwd: ctx.cwd, sharedRoot: repoRoot };
 				applyState(next);
 				return {
 					content: [{ type: "text", text: `Switched into existing worktree ${target}. All work now happens there; exit_worktree returns to ${ctx.cwd}.` }],

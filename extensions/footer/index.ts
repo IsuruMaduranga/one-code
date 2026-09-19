@@ -22,7 +22,8 @@ import { linesComponent, safeThemePaint } from "../lib/tui-render.ts";
 import { formatModel, isRealModel } from "../permissions/modes.ts";
 import { ULTRACODE_STATUS_KEY } from "../effort/slider.ts";
 import { USAGE_CHANNEL } from "../lib/usage-bus.ts";
-import { buildFooterLines, computeMainUsage, type FooterData } from "./footer-line.ts";
+import { buildFooterLines, computeMainUsage, footerLocation, type FooterData } from "./footer-line.ts";
+import { WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
 import { fetchPrNumber } from "./pr.ts";
 
 export default function footerExtension(pi: ExtensionAPI) {
@@ -40,6 +41,16 @@ export default function footerExtension(pi: ExtensionAPI) {
 
 	/** Invalidate the memoized line and repaint; set once the footer mounts. */
 	let repaint = () => {};
+	/** The active worktree session, if any; shown in place of the process cwd + branch. */
+	let worktree: WorktreeLocation | null = null;
+	/** Re-point the PR lookup at the location currently shown; set once the footer mounts. */
+	let refreshLocation = () => {};
+
+	pi.events.on(WORKTREE_CHANNEL, (data: unknown) => {
+		worktree = data as WorktreeLocation | null;
+		refreshLocation();
+		repaint();
+	});
 
 	const recomputeMain = (ctx: ExtensionContext) => {
 		lastCtx = ctx;
@@ -90,10 +101,11 @@ export default function footerExtension(pi: ExtensionAPI) {
 				const ultracode = fd.getExtensionStatuses().get(ULTRACODE_STATUS_KEY);
 				const effort = ultracode ?? safeThinkingLevel(ctx);
 				const model = ctx.model;
+				const location = footerLocation(ctx.cwd, fd.getGitBranch() ?? undefined, worktree);
 				return {
-					cwd: ctx.cwd,
+					cwd: location.cwd,
 					home: process.env.HOME || process.env.USERPROFILE || "",
-					branch: fd.getGitBranch() ?? undefined,
+					branch: location.branch,
 					contextTokens: usage?.tokens ?? undefined,
 					contextWindow: usage?.contextWindow,
 					contextPercent: usage?.percent,
@@ -116,9 +128,14 @@ export default function footerExtension(pi: ExtensionAPI) {
 			// only disposes the component, so the subscription must be released
 			// here — otherwise each replaced footer keeps firing its `gh pr list`
 			// against a stale cwd on every branch change.
-			refreshPr(ctx.cwd, fd.getGitBranch());
+			// Inside a worktree session the PR belongs to the worktree's branch.
+			refreshLocation = () => {
+				const location = footerLocation(ctx.cwd, fd.getGitBranch() ?? undefined, worktree);
+				refreshPr(location.cwd, location.branch ?? null);
+			};
+			refreshLocation();
 			const stopFollowingBranch = fd.onBranchChange(() => {
-				refreshPr(ctx.cwd, fd.getGitBranch());
+				refreshLocation();
 				repaint();
 			});
 
@@ -126,6 +143,7 @@ export default function footerExtension(pi: ExtensionAPI) {
 				dispose: () => {
 					stopFollowingBranch();
 					repaint = () => {};
+					refreshLocation = () => {};
 				},
 			});
 		});

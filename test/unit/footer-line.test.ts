@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	buildFooterLines,
 	computeMainUsage,
+	footerLocation,
 	formatCost,
 	formatTokens,
 	type FooterData,
@@ -157,5 +158,20 @@ describe("computeMainUsage", () => {
 		const { cost, cacheHitPercent } = computeMainUsage(entries);
 		expect(cost).toBeCloseTo(0.1, 5);
 		expect(cacheHitPercent).toBeUndefined();
+	});
+});
+
+describe("footerLocation", () => {
+	it("shows the process cwd and branch when no worktree session is active", () => {
+		expect(footerLocation("/repo", "main", null)).toEqual({ cwd: "/repo", branch: "main" });
+		expect(footerLocation("/repo", undefined, undefined)).toEqual({ cwd: "/repo", branch: undefined });
+	});
+
+	it("shows the worktree's path and branch while one is active, even though the process cwd never changed", () => {
+		expect(footerLocation("/repo", "main", { path: "/repo/.claude/worktrees/wt", branch: "wt" })).toEqual({ cwd: "/repo/.claude/worktrees/wt", branch: "wt" });
+	});
+
+	it("hides the branch for a worktree entered by path with a detached HEAD", () => {
+		expect(footerLocation("/repo", "main", { path: "/elsewhere/wt" })).toEqual({ cwd: "/elsewhere/wt", branch: undefined });
 	});
 });
