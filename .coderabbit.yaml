@@ -1,0 +1,29 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# CodeRabbit review configuration for One Code.
+# Repository conventions live in AGENTS.md at the repo root; the review
+# instructions below point CodeRabbit at that file.
+language: en-US
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  review_status: true
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - master
+  path_instructions:
+    - path: "**/*.{ts,tsx,mjs,js}"
+      instructions: |
+        Follow the repository conventions documented in AGENTS.md at the repo
+        root. In particular: logic lives in pure modules with no pi imports and
+        index.ts is thin wiring; tool names are snake_case; the pi.extensions
+        order in package.json is load-bearing; never share module state between
+        extension files (use pi.events); keep the request prefix cache-stable
+        (do not rebuild the system prompt for a deferred tool); never truncate
+        model-facing text (persist it); tool execute() errors must fail loud,
+        never soft-fallback. Flag any change to auto mode or the permission
+        gate as security-sensitive.
+chat:
+  auto_reply: true
