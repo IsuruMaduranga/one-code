@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, describe, expect, it } from "vitest";
 import {
 	canonicalCommandName,
 	canonicalizeStatement,
@@ -133,5 +136,53 @@ describe("isGitStatusCommand", () => {
 		expect(isGitStatusCommand("git status; git diff")).toBe(false);
 		expect(isGitStatusCommand("git status src")).toBe(false);
 		expect(isGitStatusCommand("git log")).toBe(false);
+	});
+});
+
+describe("powershellReadOnly with roots (absolute paths judged by containment, 2026-09-19)", () => {
+	const root = mkdtempSync(join(tmpdir(), "ps-ro-"));
+	const cwd = join(root, "project");
+	const sessions = join(root, "agent", "sessions", "C--project");
+	const elsewhere = join(root, "elsewhere");
+	for (const dir of [join(cwd, "src"), sessions, elsewhere]) mkdirSync(dir, { recursive: true });
+	writeFileSync(join(cwd, "src", "a.ts"), "");
+	writeFileSync(join(sessions, "s.jsonl"), "{}\n");
+	writeFileSync(join(elsewhere, "secret.txt"), "");
+	const home = root;
+	const opts = { cwd, home, readableRoots: [sessions] };
+	afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+	it("an absolute path inside the working directory or a readable root is read-only", () => {
+		expect(powershellReadOnly(`Get-Content ${join(cwd, "src", "a.ts")}`, opts).readOnly).toBe(true);
+		expect(powershellReadOnly(`Select-String -Pattern toolCall -Path ${join(sessions, "s.jsonl")}`, opts).readOnly).toBe(true);
+		expect(powershellReadOnly(`Get-ChildItem '${join(sessions, "*.jsonl")}'`, opts).readOnly).toBe(true); // glob leaf: judged by its directory
+		expect(powershellReadOnly(`Get-ChildItem ${sessions}`, opts).readOnly).toBe(true); // the root itself
+	});
+
+	it("an absolute path anywhere else is not, nor a comma list with one such part", () => {
+		expect(powershellReadOnly(`Get-Content ${join(elsewhere, "secret.txt")}`, opts).readOnly).toBe(false);
+		expect(powershellReadOnly(`Get-Content ${join(root, "agent", "sessions", "C--other", "x.jsonl")}`, opts).readOnly).toBe(false); // a sibling project
+		expect(powershellReadOnly(`Get-Content -Path ${join(cwd, "src", "a.ts")},${join(elsewhere, "secret.txt")}`, opts).readOnly).toBe(false);
+	});
+
+	it("keeps refusing UNC, ~, PSDrives and .. by shape, roots or not", () => {
+		for (const command of ["Get-Content \\\\server\\share\\x", "Get-Content ~/x", "Get-ChildItem HKLM:\\Software", `Get-Content ${join(cwd, "..", "elsewhere", "secret.txt")}`]) {
+			expect(powershellReadOnly(command, opts).readOnly, command).toBe(false);
+			expect(powershellReadOnly(command).readOnly, command).toBe(false);
+		}
+	});
+
+	it("without roots an absolute path is refused as before", () => {
+		expect(powershellReadOnly(`Get-Content ${join(cwd, "src", "a.ts")}`).readOnly).toBe(false);
+	});
+
+	it.skipIf(process.platform === "win32")("a symlink inside the project that points out of it is outside", () => {
+		symlinkSync(elsewhere, join(cwd, "link"));
+		expect(powershellReadOnly(`Get-Content ${join(cwd, "link", "secret.txt")}`, opts).readOnly).toBe(false);
+	});
+
+	it("a writing parameter or a non-read-only cmdlet still fails regardless of the path", () => {
+		expect(powershellReadOnly(`Get-Content ${join(cwd, "src", "a.ts")} | Set-Content ${join(cwd, "src", "b.ts")}`, opts).readOnly).toBe(false);
+		expect(powershellReadOnly(`Get-Content ${join(sessions, "s.jsonl")} -OutFile ${join(cwd, "x")}`, opts).readOnly).toBe(false);
 	});
 });

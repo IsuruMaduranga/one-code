@@ -31,6 +31,8 @@
  * call or a prompt, never a bypass — docs/decisions/windows.md.
  */
 
+import { isWithin, resolveForContainment, toAbsolute } from "../auto-mode/paths.ts";
+
 /** Claude Code's `COMMON_ALIASES` (utils/powershell/parser.ts), alias → canonical cmdlet. */
 export const POWERSHELL_ALIASES: Readonly<Record<string, string>> = Object.freeze({
 	ls: "Get-ChildItem",
@@ -368,18 +370,56 @@ export const READ_ONLY_POWERSHELL_COMMANDS = new Set<string>([
 const WRITING_PARAMETERS = /^-(outfile|filepath|destination)\b/i;
 
 /**
- * Whether a token names a path this check will not vouch for: absolute
- * (`/x`, `\x`), drive-lettered (`C:`), UNC (`\\server`), home (`~`), a PSDrive
- * outside the filesystem (`HKLM:`, `env:`), or one that climbs (`..`).
+ * Whether a token names a path this check will not vouch for by shape: UNC
+ * (`\\server`), home (`~`), a PSDrive outside the filesystem (`HKLM:`,
+ * `env:`), or one that climbs (`..`). An absolute or drive-lettered path is
+ * judged by `pathOutsideRoots` when roots are known, and refused otherwise.
  */
-function pathOutsideProject(token: string): boolean {
-	const value = token.replace(/^["']|["']$/g, "");
+function pathUnvouchable(value: string): boolean {
 	if (!value) return false;
 	if (value.startsWith("\\\\") || value.startsWith("//")) return true;
-	if (/^[A-Za-z]:/.test(value)) return true;
-	if (/^[A-Za-z][A-Za-z0-9]+:/.test(value)) return true; // HKLM:, env:, cert:
-	if (value.startsWith("/") || value.startsWith("\\") || value.startsWith("~")) return true;
+	if (/^[A-Za-z][A-Za-z0-9]+:/.test(value)) return true; // HKLM:, env:, cert: (a drive is one letter)
+	if (value.startsWith("~")) return true;
 	if (/(^|[\\/])\.\.([\\/]|$)/.test(value)) return true;
+	return false;
+}
+
+/** An absolute path by Windows or POSIX spelling: `C:\x`, `C:/x`, `/x`, `\x`. */
+function isAbsoluteSpelling(value: string): boolean {
+	return /^[A-Za-z]:/.test(value) || value.startsWith("/") || value.startsWith("\\");
+}
+
+export interface PowerShellReadOnlyOptions {
+	/** The working directory the command runs in. */
+	cwd: string;
+	/** The user's home, for `toAbsolute`. */
+	home: string;
+	/**
+	 * Resolved directories an absolute path may point into besides the working
+	 * directory: the harness's own session dirs (memory, scratchpad, persisted
+	 * results, this project's transcripts — matcher.ts `DecideInput`).
+	 */
+	readableRoots?: string[];
+}
+
+/**
+ * Whether a path token lies outside every root. Each comma-separated part
+ * (PowerShell's array syntax, `-Path a,b`) is judged on its own; an absolute
+ * part is resolved through `resolveForContainment` — the nearest existing
+ * ancestor's realpath, so a glob leaf (`C:\src\play\*.ts`) is judged by its
+ * directory and a symlink planted inside the project that points out of it is
+ * outside. A relative part stays inside by construction (no `..`).
+ */
+function pathOutsideRoots(value: string, opts: PowerShellReadOnlyOptions): boolean {
+	const roots = [opts.cwd, ...(opts.readableRoots ?? [])].map((root) => resolveForContainment(root) ?? root);
+	for (const part of value.split(",")) {
+		const trimmed = part.trim().replace(/^["']|["']$/g, "");
+		if (!trimmed) continue;
+		if (pathUnvouchable(trimmed)) return true;
+		if (!isAbsoluteSpelling(trimmed)) continue;
+		const resolved = resolveForContainment(toAbsolute(opts.cwd, trimmed, opts.home));
+		if (resolved === undefined || !roots.some((root) => isWithin(root, resolved))) return true;
+	}
 	return false;
 }
 
@@ -397,7 +437,7 @@ export interface PowerShellReadOnlyVerdict {
  * read-only and takes the ordinary route (classifier in auto mode, a prompt
  * elsewhere).
  */
-export function powershellReadOnly(command: string): PowerShellReadOnlyVerdict {
+export function powershellReadOnly(command: string, opts?: PowerShellReadOnlyOptions): PowerShellReadOnlyVerdict {
 	const statements = powershellStatements(command);
 	if (statements === undefined) return { readOnly: false, reason: "unbalanced quoting" };
 	if (statements.length === 0) return { readOnly: false, reason: "empty command" };
@@ -412,7 +452,18 @@ export function powershellReadOnly(command: string): PowerShellReadOnlyVerdict {
 		for (const token of tokens) {
 			if (WRITING_PARAMETERS.test(token)) return { readOnly: false, reason: `${token.split(":")[0]} writes or forwards` };
 			if (token.startsWith("-")) continue;
-			if (pathOutsideProject(token)) return { readOnly: false, reason: "a path outside the working directory" };
+			const value = token.replace(/^["']|["']$/g, "");
+			// By shape (UNC, ~, PSDrive, ..) the token is never vouched for. An
+			// absolute path is read-only only when it resolves inside the working
+			// directory or a harness session dir (2026-09-19: /doctor's transcript
+			// scan on Windows spelled `<agentDir>\sessions\…` and was classified —
+			// docs/decisions/auto-mode.md); without roots it is refused as before.
+			// A comma list is judged part by part (`-Path a,C:\x`).
+			if (opts) {
+				if (pathOutsideRoots(value, opts)) return { readOnly: false, reason: "a path outside the working directory" };
+			} else if (pathUnvouchable(value) || isAbsoluteSpelling(value)) {
+				return { readOnly: false, reason: "a path outside the working directory" };
+			}
 		}
 	}
 	return { readOnly: true };

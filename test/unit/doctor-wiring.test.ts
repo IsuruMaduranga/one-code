@@ -24,6 +24,7 @@ function ctxFor(current: any | undefined, mode: "tui" | "print" = "print") {
 			cwd,
 			hasUI: mode === "tui",
 			mode,
+			sessionManager: { getSessionDir: () => join(cwd, ".sessions") },
 			model: current,
 			thinkingLevel: "medium",
 			modelRegistry: {
@@ -165,6 +166,7 @@ describe("/doctor preset on an unpriced provider", () => {
 			cwd,
 			hasUI: false,
 			mode: "print",
+			sessionManager: { getSessionDir: () => join(cwd, ".sessions") },
 			model: unpriced,
 			modelRegistry: { getAll: () => [unpriced], getAvailable: () => [unpriced], getProviderAuthStatus: () => ({ configured: true }), getProviderDisplayName: (p: string) => p },
 			ui: { notify: (text: string) => notified.push(text) },

@@ -229,7 +229,10 @@ Reads and edits are confined to the working directory by default:
   mode, and is denied in don't-ask mode.
 - Accept-edits mode approves edits only inside the working directory.
 - The harness's own session directories count as inside: the auto-memory
-  folder, the session scratchpad, persisted tool output, and the plan file.
+  folder, the session scratchpad, persisted tool output, the plan file, and
+  this project's own session transcripts (with auto mode's decision log next
+  to them), which is what `/doctor` reads. Other projects' transcripts are
+  outside, as they are for Claude Code.
 
 Paths are compared after resolving symlinks, so a symlink inside the project
 that points outside it counts as outside.

@@ -81,9 +81,14 @@ Claude Code's read-only cmdlets run without a prompt or a classifier call:
 `Select-String`, `Get-Location`, `Get-Process`, `Get-Service`,
 `Get-FileHash`, `Get-Acl`, `Format-Hex`, `findstr`, `where.exe`, plus
 `Write-Output` and `Write-Host`. The check is textual and strict: no
-redirection, no variables, no script blocks, and every path relative and
-inside the project. A UNC path, a drive-lettered path, `~`, or `..` takes
-the ordinary route.
+redirection, no variables, no script blocks, and every path inside the
+project or one of the harness's own session directories (auto-memory, the
+scratchpad, persisted tool output, this project's transcripts). A relative
+path is inside by construction; an absolute or drive-lettered path is
+resolved and checked, so `Select-String -Path C:\src\app\notes.md` runs
+unprompted while `Get-Content C:\Users\you\.ssh\id_rsa` does not. A UNC
+path, `~`, a registry or environment drive, or `..` always takes the
+ordinary route.
 
 Everything else goes to the auto-mode classifier. One Code has no PowerShell
 command parser yet, so unlike bash there is no deterministic shortcut for

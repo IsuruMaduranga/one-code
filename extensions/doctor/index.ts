@@ -159,6 +159,7 @@ export default function doctorExtension(pi: ExtensionAPI) {
 			install: install(),
 			oneCodeVersion: oneCodeVersion(),
 			sessionsDir: join(getAgentDir(), "sessions"),
+			sessionDir: ctx.sessionManager.getSessionDir(),
 			oneCodeSettingsPath: oneCodeSettingsPath(home),
 			oneCodeProjectSettingsPath: oneCodeProjectSettingsPath(ctx.cwd, home),
 			decisionLogEnabled: loadAutoModeConfig(home).logDecisions,

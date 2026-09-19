@@ -449,6 +449,20 @@ describe("decide", () => {
 			expect(decide({ ...base, ...dirs, toolName: "read", subject: "/home/user/.onecode/agent/auth.json" }).decision).toBe("ask");
 		});
 
+		it("this project's session dir (transcripts + the auto-mode decision log) is readable, never writable, and other projects' are not", () => {
+			const sessionDirPath = "/home/user/.onecode/agent/sessions/--home-user-project";
+			for (const subject of [`${sessionDirPath}/2026-09-19T07-00-00.jsonl`, `${sessionDirPath}/auto-mode-decisions.jsonl`, sessionDirPath]) {
+				expect(decide({ ...base, sessionDirPath, toolName: "read", subject }).decision, subject).toBe("allow");
+				expect(decide({ ...base, mode: "auto", sessionDirPath, toolName: "read", subject }).decision, subject).toBe("allow");
+			}
+			// Without the root the same read asks (default) / classifies (auto).
+			expect(decide({ ...base, toolName: "read", subject: `${sessionDirPath}/x.jsonl` }).decision).toBe("ask");
+			// A sibling project's transcripts are outside.
+			expect(decide({ ...base, sessionDirPath, toolName: "read", subject: "/home/user/.onecode/agent/sessions/--home-user-other/x.jsonl" }).decision).toBe("ask");
+			// Reads only: the agent dir stays protected for writes.
+			expect(decide({ ...accept, sessionDirPath, toolName: "write", subject: `${sessionDirPath}/x.jsonl` }).decision).not.toBe("allow");
+		});
+
 		it("plan mode: read-only bash of an outside path asks (a read), a mutation still denies", () => {
 			const plan = { ...base, mode: "plan" as const };
 			const d = decide({ ...plan, toolName: "bash", subject: "cat /etc/hosts" });

@@ -87,6 +87,31 @@ describe("analyzeShellCommand fast path", () => {
 		expect(analyze("frobnicate --wat").verdict).toBe("escalate");
 	});
 
+	describe("reads inside a readable root (the harness's session dirs, 2026-09-19)", () => {
+		it("a read-only command reading this project's transcripts is safe with the root, escalates without", () => {
+			const sessions = mkdtempSync(join(tmpdir(), "cc-sessions-"));
+			try {
+				writeFileSync(join(sessions, "a.jsonl"), "{}\n");
+				const command = `grep -c toolCall ${sh(join(sessions, "a.jsonl"))}`;
+				const without = analyzeShellCommand({ command, cwd, home });
+				expect(without.verdict).toBe("escalate");
+				expect(without.outsideReads.length).toBe(1);
+				const withRoot = analyzeShellCommand({ command, cwd, home, readableRoots: [sessions] });
+				expect(withRoot.verdict).toBe("safe");
+				expect(withRoot.outsideReads).toEqual([]);
+				// A sibling directory is not covered by the root.
+				const sibling = mkdtempSync(join(tmpdir(), "cc-sessions-other-"));
+				writeFileSync(join(sibling, "b.jsonl"), "{}\n");
+				expect(analyzeShellCommand({ command: `cat ${sh(join(sibling, "b.jsonl"))}`, cwd, home, readableRoots: [sessions] }).verdict).toBe("escalate");
+				// Reads only: a redirect INTO the root is still a write outside the cwd.
+				expect(analyzeShellCommand({ command: `echo x > ${sh(join(sessions, "a.jsonl"))}`, cwd, home, readableRoots: [sessions] }).verdict).toBe("escalate");
+				rmSync(sibling, { recursive: true, force: true });
+			} finally {
+				rmSync(sessions, { recursive: true, force: true });
+			}
+		});
+	});
+
 	describe("reads outside the working directory (PERMISSIONS-REVIEW-2026-09-05 H2)", () => {
 		it("escalates a read-only command whose path operand resolves outside the cwd", () => {
 			for (const command of ["cat ~/x", "head -c 100 /etc/hosts", "ls ..", "ls /", "tail -n 5 ../other/log", "wc -l /var/log/x", "find /etc -name x", "rg pattern /Users/x/other", "jq . /etc/x.json", "stat ~/Library/foo", "du -sh ~"]) {

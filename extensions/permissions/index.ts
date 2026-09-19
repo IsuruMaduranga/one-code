@@ -247,6 +247,10 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	let scratchpadDirPath: string | undefined;
 	/** Where oversized tool outputs are persisted this session — readable like the cwd. */
 	let resultsDirPath: string | undefined;
+	/** This project's pi session dir: transcripts + auto-mode-decisions.jsonl (readable, never a write root). */
+	let sessionDirPath: string | undefined;
+	/** The harness dirs a read may reach besides the cwd, resolved — one list for both shell pre-gates. */
+	const readableRoots = () => [memoryDirPath, scratchpadDirPath, resultsDirPath, sessionDirPath].filter((d): d is string => !!d).map((d) => resolveForContainment(d) ?? d);
 	/** The session cwd's own realpath (macOS /var → /private/var), for decide()'s containment check. */
 	let resolvedCwd: string | undefined;
 	/** The per-repo One Code settings file, resolved once per session so the auto-mode floor need not re-walk for the project root on every tool call. */
@@ -505,7 +509,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 
 		let evidence: ShellEvidence | undefined;
 		if (normalizeToolName(toolName) === "bash" && subject) {
-			evidence = analyzeShellCommand({ command: subject, cwd, home, protectedDirs });
+			evidence = analyzeShellCommand({ command: subject, cwd, home, protectedDirs, readableRoots: readableRoots() });
 			if (evidence.verdict === "safe") {
 				logDecision(ctx, { tool: toolName, subject, outcome: "allow", source: "pre-gate" });
 				return allow();
@@ -533,7 +537,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			// the classifier. No containment fast path either: the recoverability
 			// judge understands bash deletes, not `Remove-Item`, so PowerShell
 			// destruction is always classified (docs/decisions/windows.md).
-			if (powershellReadOnly(subject).readOnly) {
+			if (powershellReadOnly(subject, { cwd, home, readableRoots: readableRoots() }).readOnly) {
 				logDecision(ctx, { tool: toolName, subject, outcome: "allow", source: "pre-gate" });
 				return allow();
 			}
@@ -731,6 +735,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		scratchpadDirPath = sessionScratchpadDir(ctx.cwd, ctx.sessionManager.getSessionId());
 		// Resolved like the subjects compared against it (a symlinked parent, macOS /var).
 		resultsDirPath = resolvedOrSelf(sessionResultsDir(ctx));
+		sessionDirPath = resolvedOrSelf(ctx.sessionManager.getSessionDir());
 		resolvedCwd = resolveForContainment(ctx.cwd);
 		oneCodeProjectSettingsFile = oneCodeProjectSettingsPath(ctx.cwd, os.homedir());
 		protectedDirs = runtimeProtectedDirs();
@@ -878,6 +883,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				memoryDirPath,
 				scratchpadDirPath,
 				resultsDirPath,
+				sessionDirPath,
 				protectedDirs,
 			});
 		let result = decideWith([...allow, ...activeSessionAllows(), ...(projectAllowTrusted ? projectAllow : [])]);
@@ -1098,6 +1104,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			memoryDirPath,
 			scratchpadDirPath,
 			resultsDirPath,
+			sessionDirPath,
 			protectedDirs,
 		});
 

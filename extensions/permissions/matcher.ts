@@ -692,6 +692,17 @@ export interface DecideInput {
 	 */
 	resultsDirPath?: string;
 	/**
+	 * This project's pi session directory (`<agentDir>/sessions/<encoded-cwd>`):
+	 * the session transcripts and, next to them, auto mode's decision log.
+	 * Readable like the working directory — Claude Code lets a session read
+	 * its own project directory under its config root, which is where its
+	 * transcripts live (`checkReadableInternalPath`, "Project directory files
+	 * are allowed for reading"), and /doctor's evidence gathering depends on
+	 * it. Other projects' session directories are not in the set. Never a
+	 * write root: the agent dir stays protected.
+	 */
+	sessionDirPath?: string;
+	/**
 	 * Directories protected at runtime, beyond the static list in
 	 * protected-paths.ts (see `runtimeProtectedDirs()`, the sole producer): pi's
 	 * own agent directory (`getAgentDir()` — `~/.pi/agent` for stock pi,
@@ -929,7 +940,7 @@ export function decide(params: DecideInput): Decision {
 	 */
 	const inWorkingSpace = (): boolean => {
 		const target = params.resolvedSubject ?? subject;
-		const roots = [cwd, params.resolvedCwd, params.memoryDirPath, params.scratchpadDirPath, params.resultsDirPath];
+		const roots = [cwd, params.resolvedCwd, params.memoryDirPath, params.scratchpadDirPath, params.resultsDirPath, params.sessionDirPath];
 		if (roots.some((dir) => dir && isAtOrInsideDir(target, dir, cwd))) return true;
 		return params.planFilePath ? isPlanFilePath(target, params.planFilePath, cwd) : false;
 	};
