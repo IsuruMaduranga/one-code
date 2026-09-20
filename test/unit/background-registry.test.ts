@@ -59,27 +59,14 @@ describe("schedule_wakeup helpers", () => {
 		expect(clampDelaySeconds(Number.NaN)).toBe(60);
 	});
 
-	it("frames the fired message as a system notification carrying the prompt", () => {
+	it("delivers the fired prompt verbatim — the harness re-invokes with it, as Claude Code does", () => {
 		const message = buildWakeupMessage({ delaySeconds: 120, prompt: "check the deploy", reason: "deploy takes ~2min" });
-		expect(message).toContain("SYSTEM NOTIFICATION — NOT USER INPUT");
-		expect(message).toContain("check the deploy");
-		expect(message).toContain("deploy takes ~2min");
+		expect(message).toBe("check the deploy");
 	});
 
 	it("says so when the requested delay was clamped", () => {
 		expect(describeSchedule({ delaySeconds: 5, prompt: "p", reason: "r" })).toContain("adjusted from 5s");
 		expect(describeSchedule({ delaySeconds: 999999, prompt: "p", reason: "r" })).toContain("adjusted from 999999s");
 		expect(describeSchedule({ delaySeconds: 600, prompt: "p", reason: "r" })).not.toContain("adjusted");
-	});
-});
-
-describe("systemNotification framing", () => {
-	it("carries the anti-confabulation preamble before the body", async () => {
-		const { systemNotification } = await import("../../extensions/lib/notifications.ts");
-		const text = systemNotification("Background bash b1 completed.");
-		expect(text.startsWith("SYSTEM NOTIFICATION — NOT USER INPUT")).toBe(true);
-		expect(text).toContain("not a message from the user");
-		expect(text).toContain("acknowledgement, confirmation, or approval");
-		expect(text.endsWith("Background bash b1 completed.")).toBe(true);
 	});
 });

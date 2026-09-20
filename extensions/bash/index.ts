@@ -31,7 +31,7 @@ const BashParams = Type.Object({
 	run_in_background: Type.Optional(
 		Type.Boolean({
 			description:
-				"Run detached and return a task id immediately instead of waiting. Completion arrives as a system notification; inspect with task_output, stop with task_stop. Use this instead of nohup/'&' — those leave an unmanaged orphan process",
+				"Run detached and return a task id immediately instead of waiting. Completion arrives as a task notification; inspect with task_output, stop with task_stop. Use this instead of nohup/'&' — those leave an unmanaged orphan process",
 		}),
 	),
 	description: Type.Optional(
@@ -71,7 +71,7 @@ export default function bashExtension(pi: ExtensionAPI) {
 	registerShellTool(pi, {
 		name: "bash",
 		ccLabel: "Bash",
-		description: `${baseDescription} Pass run_in_background: true for long-running commands (builds, servers, watches): it returns a task id immediately so you can keep working, completion arrives as a system notification, and the output is retrievable with task_output / stoppable with task_stop (both deferred — load them with tool_search; in a one-shot print/json session the call runs to completion and returns the output directly). Foreground \`sleep\` is blocked; to wait on a condition use the monitor tool (deferred — load it with tool_search select:monitor) with an until-loop.`,
+		description: `${baseDescription} Pass run_in_background: true for long-running commands (builds, servers, watches): it returns a task id immediately so you can keep working, completion arrives as a task notification, and the output is retrievable with task_output / stoppable with task_stop (both deferred — load them with tool_search; in a one-shot print/json session the call runs to completion and returns the output directly). Foreground \`sleep\` is blocked; to wait on a condition use the monitor tool (deferred — load it with tool_search select:monitor) with an until-loop.`,
 		parameters: BashParams,
 		base,
 		foreground: perCwd((cwd: string) => createBashToolDefinition(cwd, { shellPath })),

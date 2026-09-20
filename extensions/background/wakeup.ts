@@ -1,8 +1,12 @@
 /**
  * schedule_wakeup helpers (pure) — Claude Code's self-paced /loop timer.
+ *
+ * A fired wakeup or loop tick is a RE-INVOCATION, not a notification: Claude
+ * Code enqueues the scheduled prompt verbatim as the next turn's input, behind
+ * a dim "Running scheduled task" line in the TUI (findings §21), so the model
+ * reads its own task back exactly as it wrote it. These builders therefore
+ * return the prompt as-is; the TUI shows the line (`scheduledTaskComponent`).
  */
-
-import { systemNotification } from "../lib/notifications.ts";
 
 export const MIN_DELAY_SECONDS = 60;
 export const MAX_DELAY_SECONDS = 3600;
@@ -42,37 +46,27 @@ export function parseLoopArgs(raw: string): ParsedLoop {
 	return { task: raw.trim() };
 }
 
-/** A loop follow-up: an instruction line, a blank, then the task — system-framed. */
-function framedLoop(lead: string, task: string): string {
-	return systemNotification([lead, "", task].join("\n"));
-}
-
-/** The follow-up a fixed-interval `/loop` tick delivers. */
+/** The turn input a fixed-interval `/loop` tick delivers: the task, verbatim (CC's cron fire). */
 export function buildLoopMessage(task: string): string {
-	return framedLoop(
-		"Loop tick — run the task below now. This repeats automatically on the interval and keeps firing until the user runs `/loop stop`.",
-		task,
-	);
+	return task;
 }
 
-/** The opening message for a dynamic (self-paced) `/loop` — instructs the model to drive schedule_wakeup. */
+/**
+ * The opening turn of a dynamic (self-paced) `/loop`: the user's command, so it
+ * reads as their instruction — drive schedule_wakeup, pass the task back each
+ * time. Unframed: it is the user's `/loop`, not a harness event.
+ */
 export function buildDynamicLoopPrompt(task: string): string {
-	return framedLoop(
+	return [
 		"Self-paced loop started. Work the task below now. When this iteration is done, call schedule_wakeup to schedule the next one — choose delaySeconds by what you're waiting for, and pass the same task back as `prompt`. End the loop with schedule_wakeup {stop: true} when the task is complete or the user says to stop.",
+		"",
 		task,
-	);
+	].join("\n");
 }
 
-/** The follow-up message a fired wakeup delivers. Framed so it never reads as user input. */
+/** The turn input a fired wakeup delivers: the scheduled prompt, verbatim (CC re-invokes with it). */
 export function buildWakeupMessage(request: WakeupRequest): string {
-	return systemNotification(
-		[
-			`Scheduled wake-up fired (reason given when scheduled: ${request.reason}).`,
-			"Continue the task below; when done, either schedule the next wake-up with schedule_wakeup or end the loop with schedule_wakeup {stop: true}.",
-			"",
-			request.prompt,
-		].join("\n"),
-	);
+	return request.prompt;
 }
 
 export function describeSchedule(request: WakeupRequest): string {

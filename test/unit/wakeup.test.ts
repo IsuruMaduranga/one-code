@@ -38,17 +38,15 @@ describe("parseLoopArgs", () => {
 });
 
 describe("loop messages", () => {
-	it("frames both loop openers as system notifications carrying the task", () => {
-		const task = "run the smoke tests";
-		for (const msg of [buildLoopMessage(task), buildDynamicLoopPrompt(task)]) {
-			expect(msg).toContain("NOT USER INPUT"); // anti-confabulation framing
-			expect(msg).toContain(task);
-		}
+	it("a fixed-interval tick is the task verbatim (Claude Code's cron fire)", () => {
+		expect(buildLoopMessage("run the smoke tests")).toBe("run the smoke tests");
 	});
 
-	it("the dynamic opener tells the model to drive schedule_wakeup", () => {
+	it("the dynamic opener is unframed and tells the model to drive schedule_wakeup", () => {
 		const msg = buildDynamicLoopPrompt("do it");
 		expect(msg).toContain("schedule_wakeup");
 		expect(msg).toContain("stop: true");
+		expect(msg.endsWith("\n\ndo it")).toBe(true);
+		expect(msg).not.toContain("NOT USER INPUT");
 	});
 });

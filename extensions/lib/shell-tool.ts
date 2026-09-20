@@ -17,7 +17,7 @@ import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-w
 import type { Static, TObject } from "typebox";
 import { generateTaskId, TASK_REGISTER_CHANNEL } from "../background/registry.ts";
 import { type BashFinishSummary, runBackgroundBashBlocking, startBackgroundBash, tailCap } from "../bash/background.ts";
-import { createTaskNotifier, oneShotNote, sessionOutlivesTurn, systemNotification } from "./notifications.ts";
+import { createTaskNotifier, oneShotNote, sessionOutlivesTurn, shellSummary, type TaskStatus, taskNotification } from "./notifications.ts";
 import { commandToEvaluate, trackOriginalCommands } from "./original-command.ts";
 import { persistIfLarge, sessionResultsDir } from "./persisted-output.ts";
 import type { ShellSpawn } from "./shell-spawn.ts";
@@ -76,11 +76,25 @@ export interface ShellToolSpec<P extends TObject> {
 	wrapBackgroundCommand?: (command: string) => string;
 }
 
+/**
+ * How a shell task ended, read once from the finish summary: CC's `<status>`
+ * (a stop is `killed`, a timeout or non-zero exit `failed`) and, for a failure
+ * that an exit code does not explain, the detail (the timeout, the signal).
+ * `finishLine` (foreground text) and the background notification both build
+ * on this, so the two can never disagree.
+ */
+export function shellFinish(summary: BashFinishSummary, timeoutSeconds?: number): { status: TaskStatus; detail?: string } {
+	if (summary.stopped) return { status: "killed" };
+	if (summary.timedOut) return { status: "failed", detail: `timed out after ${timeoutSeconds}s` };
+	if (summary.exitCode === 0) return { status: "completed" };
+	return { status: "failed", detail: summary.exitCode === null ? `terminated by ${summary.signal ?? "unknown signal"}` : undefined };
+}
+
 export function finishLine(summary: BashFinishSummary, timeoutSeconds?: number): string {
-	if (summary.stopped) return "stopped";
-	if (summary.timedOut) return `failed (timed out after ${timeoutSeconds}s)`;
-	if (summary.exitCode === 0) return "completed";
-	return `failed (${summary.exitCode !== null ? `exit code ${summary.exitCode}` : `terminated by ${summary.signal ?? "unknown signal"}`})`;
+	const { status, detail } = shellFinish(summary, timeoutSeconds);
+	if (status === "killed") return "stopped";
+	if (status === "completed") return "completed";
+	return `failed (${detail ?? `exit code ${summary.exitCode}`})`;
 }
 
 /** `<sessionDir>/bash/<taskId>/output.log` — one spool location for every shell tool (the shell panel reads it). */
@@ -95,7 +109,9 @@ export function taskLogPath(ctx: ExtensionContext, taskId: string): string | und
 }
 
 export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: ShellToolSpec<P>): void {
-	const notifyTask = createTaskNotifier(pi);
+	// A completion whose output task_output just returned is withdrawn (CC's
+	// delivered_as_tool_result) — the model already has it.
+	const notifyTask = createTaskNotifier(pi, { withdrawOnDelivery: true });
 	// A worktree session cd-wraps input.command; the pre-wrapper original arrives
 	// over the bus keyed by toolCallId (never read from params — model-writable).
 	const originalCommands = trackOriginalCommands(pi);
@@ -192,12 +208,20 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 				logPath,
 				shell,
 				onFinished: (finishedTask, summary) => {
-					const tail = tailCap(summary.output, NOTIFY_OUTPUT_CAP).trim();
-					const where = `Full output: task_output ${id}${logPath ? ` (or read ${logPath})` : ""}.`;
+					// Claude Code's shell completion names the output file and nothing
+					// else — the model reads it (or task_output) when it needs the text.
+					// Without a spool file the tail rides `<result>` so nothing is lost.
+					const { status, detail } = shellFinish(summary, timeoutSeconds);
 					notify(
-						systemNotification(
-							`Background ${spec.ccLabel} ${id} (${description}) ${finishLine(summary, timeoutSeconds)}. ${where}${tail ? `\n\nLast output:\n${tail}` : ""}`,
-						),
+						taskNotification({
+							kind: "shell",
+							taskId: id,
+							toolUseId: toolCallId,
+							outputFile: logPath,
+							status,
+							summary: shellSummary(description, status, summary.exitCode, detail),
+							result: logPath ? undefined : tailCap(summary.output, NOTIFY_OUTPUT_CAP).trim() || undefined,
+						}),
 						{ taskId: id, status: finishedTask.status, exitCode: summary.exitCode, logPath },
 					);
 				},
@@ -210,7 +234,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 				content: [
 					{
 						type: "text" as const,
-						text: `⏳ ${spec.ccLabel} task ${id} running in background (${description}).\n\nCompletion (with output) will arrive as a system notification on its own — you do not need to wait for it or poll; keep working.${logPath ? ` To check interim output, read ${logPath}.` : ""} If your next step cannot proceed without the result, task_output with block=true waits for it. Stop with task_stop.`,
+						text: `⏳ ${spec.ccLabel} task ${id} running in background (${description}).\n\nCompletion will arrive as a task notification on its own naming the output file — you do not need to wait for it or poll; keep working.${logPath ? ` To check interim output, read ${logPath}.` : ""} If your next step cannot proceed without the result, task_output with block=true waits for it. Stop with task_stop.`,
 					},
 				],
 				details: { taskId: id, logPath },

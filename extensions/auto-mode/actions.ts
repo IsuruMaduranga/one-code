@@ -17,6 +17,8 @@
  * path auto mode exists to close.
  */
 
+import type { HandBackVerdict } from "../lib/notifications.ts";
+
 export const SUBAGENT_ACTIONS_CHANNEL = "one-code:subagent-actions";
 
 export interface ChildAction {
@@ -45,7 +47,7 @@ export interface SubagentActionsPayload {
 	 * synchronously when no review will run, so the emitter never waits for
 	 * nothing.
 	 */
-	onReview?: (flag: string | undefined) => void;
+	onReview?: (verdict: HandBackVerdict | undefined) => void;
 }
 
 /** Per-action and total caps: a long-running child must not blow up the prompt. */

@@ -15,13 +15,16 @@
  * that waits forever.
  */
 import { SUBAGENT_ACTIONS_CHANNEL, type ChildAction, type SubagentActionsPayload } from "../auto-mode/actions.ts";
+import type { HandBackVerdict } from "../lib/notifications.ts";
 
 /** How long a completion report waits for the gate's verdict before going out with a note instead. */
 export const HAND_BACK_REVIEW_TIMEOUT_MS = 45_000;
 
-/** The note that replaces a verdict that did not arrive in time. */
-export const HAND_BACK_REVIEW_TIMEOUT_NOTE =
-	"<system-reminder>\nAuto mode's review of this agent's actions did not finish before the report was delivered. Treat the output as unverified until you have checked it.\n</system-reminder>";
+/** The verdict that replaces one that did not arrive in time (rendered by `handBackWarning`). */
+export const HAND_BACK_REVIEW_TIMEOUT_VERDICT: HandBackVerdict = {
+	kind: "unavailable",
+	reason: "auto mode's review of this agent's actions did not finish before the report was delivered",
+};
 
 /** The events slice this module needs. */
 export interface ActionsEmitter {
@@ -39,17 +42,17 @@ export function awaitHandBackReview(
 	run: { taskId: string; name: string },
 	actions: ChildAction[] | undefined,
 	timeoutMs = HAND_BACK_REVIEW_TIMEOUT_MS,
-): Promise<string | undefined> {
+): Promise<HandBackVerdict | undefined> {
 	if (!actions?.length) return Promise.resolve(undefined);
 	return new Promise((resolve) => {
 		let settled = false;
-		const finish = (flag: string | undefined) => {
+		const finish = (verdict: HandBackVerdict | undefined) => {
 			if (settled) return;
 			settled = true;
 			clearTimeout(timer);
-			resolve(flag);
+			resolve(verdict);
 		};
-		const timer = setTimeout(() => finish(HAND_BACK_REVIEW_TIMEOUT_NOTE), timeoutMs);
+		const timer = setTimeout(() => finish(HAND_BACK_REVIEW_TIMEOUT_VERDICT), timeoutMs);
 		timer.unref?.();
 		events.emit(SUBAGENT_ACTIONS_CHANNEL, {
 			toolCallId: run.taskId,
@@ -61,7 +64,4 @@ export function awaitHandBackReview(
 	});
 }
 
-/** Prepend a review flag to a notification body, when there is one. */
-export function withReview(body: string, flag: string | undefined): string {
-	return flag ? `${flag}\n\n${body}` : body;
-}
+

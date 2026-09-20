@@ -44,23 +44,29 @@ describe("background wiring: monitor batching", () => {
 		)) as { details: { taskId: string } };
 		const taskId = start.details.taskId;
 
-		const taskOutput = fake.tools.get("task_output")!;
-		await taskOutput.execute("c2", { task_id: taskId, block: true, timeout: 5000 }, undefined, undefined, ctx);
-		// The batch and the completion arrive together, so the notifier merges them
-		// into one message after its coalescing window (real timers here).
+		// Wait for the notifier to deliver (real timers): the batch and the
+		// completion arrive together, so they merge into one message after the
+		// coalescing window. (Not task_output: reading a finished task's output
+		// withdraws its pending notification — see the next test.)
+		for (let waited = 0; fake.sentMessages.length === 0 && waited < 5000; waited += 50) {
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		}
 		await new Promise((resolve) => setTimeout(resolve, DEFAULT_COALESCE_MS + 50));
 
+		// CC's mid-run monitor batch: `Monitor event: "…"` with the lines in <event>.
 		const batchMessage = fake.sentMessages.find((m) => {
 			const text = (m.message.content as Array<{ text?: string }>)[0]?.text ?? "";
-			return text.includes(`emitted ${lineCount} event(s)`);
+			return text.includes('<summary>Monitor event: "many lines"</summary>');
 		});
 		expect(batchMessage).toBeDefined();
 		const batchText = (batchMessage!.message.content as Array<{ text: string }>)[0].text;
 		expect(batchText).toContain(`+10 more line(s) not shown — task_output ${taskId} has the full stream`);
+		expect(batchText).toContain(`<task-id>${taskId}</task-id>\n<summary>Monitor event`); // no <status> on a batch
 
+		// CC's monitor end: status + the ended summary, the recent tail in <event>.
 		const completion = fake.sentMessages.find((m) => {
 			const text = (m.message.content as Array<{ text?: string }>)[0]?.text ?? "";
-			return text.includes("completed") && text.includes(`after ${lineCount} event(s)`);
+			return text.includes("<status>completed</status>") && text.includes('<summary>Monitor "many lines" stream ended</summary>');
 		});
 		expect(completion).toBeDefined();
 		// Coalesced (STEERING-REVIEW-2026-09-05 M1): one custom message carries both.
@@ -68,6 +74,22 @@ describe("background wiring: monitor batching", () => {
 		expect(fake.sentMessages).toHaveLength(1);
 		// Delivery policy: steered mid-turn, and able to start a turn on its own.
 		expect(batchMessage!.options).toMatchObject({ deliverAs: "steer", triggerTurn: true });
+	});
+
+	it("a monitor's end is withheld when task_output already returned its finished output", async () => {
+		const fake = mount();
+		const ctx = liveSessionCtx();
+		const monitor = fake.tools.get("monitor")!;
+		const start = (await monitor.execute("c1", { command: "echo one; echo two", description: "short" }, undefined, undefined, ctx)) as {
+			details: { taskId: string };
+		};
+		const taskOutput = fake.tools.get("task_output")!;
+		const result = (await taskOutput.execute("c2", { task_id: start.details.taskId, block: true, timeout: 5000 }, undefined, undefined, ctx)) as {
+			content: Array<{ text: string }>;
+		};
+		expect(result.content[0].text).toContain("two");
+		await new Promise((resolve) => setTimeout(resolve, DEFAULT_COALESCE_MS + 50));
+		expect(fake.sentMessages.filter((m) => m.message.customType === "task-notification")).toHaveLength(0);
 	});
 
 	it("task_stop ends a still-running monitor; task_output then reports it stopped", async () => {
@@ -113,7 +135,7 @@ describe("background wiring: /loop and schedule_wakeup timers", () => {
 		vi.useRealTimers();
 	});
 
-	it("schedule_wakeup fires the framed follow-up after the (clamped) delay, and stop cancels it", async () => {
+	it("schedule_wakeup fires the prompt after the (clamped) delay, and stop cancels it", async () => {
 		vi.useFakeTimers();
 		const fake = mount();
 		const ctx = createFakeCtx({ hasUI: true });
@@ -132,9 +154,9 @@ describe("background wiring: /loop and schedule_wakeup timers", () => {
 		await vi.advanceTimersByTimeAsync(60_000 + DEFAULT_COALESCE_MS);
 		const wakeup = fake.sentMessages.find((m) => m.message.customType === "wakeup");
 		expect(wakeup).toBeDefined();
-		const text = (wakeup!.message.content as Array<{ text: string }>)[0].text;
-		expect(text).toContain("check the build");
-		expect(text).toContain("quick poll");
+		// The prompt, verbatim: a wakeup re-invokes the session with it (findings §21).
+		expect((wakeup!.message.content as Array<{ text: string }>)[0].text).toBe("check the build");
+		expect((wakeup!.message.details as Record<string, unknown>).reason).toBe("quick poll");
 
 		// Scheduling again and then stopping must cancel the pending timer.
 		fake.sentMessages.length = 0;

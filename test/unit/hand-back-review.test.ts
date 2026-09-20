@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../extensions/auto-mode/actions.ts";
-import { awaitHandBackReview, HAND_BACK_REVIEW_TIMEOUT_NOTE, withReview } from "../../extensions/subagents/hand-back-review.ts";
+import { withReview } from "../../extensions/lib/notifications.ts";
+import { awaitHandBackReview, HAND_BACK_REVIEW_TIMEOUT_VERDICT } from "../../extensions/subagents/hand-back-review.ts";
 
 const run = { taskId: "t1", name: "worker" };
 const actions = [{ toolName: "bash", subject: "rm -rf build" }];
@@ -38,26 +39,26 @@ describe("awaitHandBackReview", () => {
 		await expect(pending).resolves.toBeUndefined();
 	});
 
-	it("resolves with the gate's rendered flag", async () => {
+	it("resolves with the gate's verdict", async () => {
 		const { events, emitted } = capturingEvents();
 		const pending = awaitHandBackReview(events, run, actions);
-		emitted[0].payload.onReview?.("<system-reminder>flagged</system-reminder>");
-		await expect(pending).resolves.toBe("<system-reminder>flagged</system-reminder>");
+		emitted[0].payload.onReview?.({ kind: "blocked", reason: "read a token" });
+		await expect(pending).resolves.toEqual({ kind: "blocked", reason: "read a token" });
 	});
 
 	it("falls back to the timeout note when nobody answers, and ignores a late answer", async () => {
 		const { events, emitted } = capturingEvents();
 		const pending = awaitHandBackReview(events, run, actions, 1000);
 		vi.advanceTimersByTime(1000);
-		await expect(pending).resolves.toBe(HAND_BACK_REVIEW_TIMEOUT_NOTE);
-		expect(() => emitted[0].payload.onReview?.("late")).not.toThrow();
+		await expect(pending).resolves.toBe(HAND_BACK_REVIEW_TIMEOUT_VERDICT);
+		expect(() => emitted[0].payload.onReview?.({ kind: "blocked", reason: "late" })).not.toThrow();
 	});
 
 	it("takes the first answer only", async () => {
 		const { events, emitted } = capturingEvents();
 		const pending = awaitHandBackReview(events, run, actions, 1000);
 		emitted[0].payload.onReview?.(undefined);
-		emitted[0].payload.onReview?.("second");
+		emitted[0].payload.onReview?.({ kind: "blocked", reason: "second" });
 		vi.advanceTimersByTime(1000);
 		await expect(pending).resolves.toBeUndefined();
 	});

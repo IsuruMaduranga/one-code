@@ -15,7 +15,7 @@
  * every line goes through `truncateLine` — never skip it.
  */
 
-import { notificationBody } from "./notifications.ts";
+import { framesToText, notificationBody, parseNotificationFrames } from "./notifications.ts";
 import { fitPainted, hardWrapColumns, sliceColumns, visibleWidth } from "./text-width.ts";
 export { notificationBody };
 export { visibleWidth } from "./text-width.ts";
@@ -729,21 +729,72 @@ export function customMessageText(content: unknown): string {
 	return String(content ?? "");
 }
 
+/** `Sep 11 12:03pm` — the time stamp on Claude Code's "Running scheduled task" line. */
+export function formatFireTime(ms: number): string {
+	const d = new Date(ms);
+	const month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getMonth()];
+	const hours = d.getHours();
+	const h12 = hours % 12 === 0 ? 12 : hours % 12;
+	const minutes = String(d.getMinutes()).padStart(2, "0");
+	return `${month} ${d.getDate()} ${h12}:${minutes}${hours < 12 ? "am" : "pm"}`;
+}
+
 /**
- * Compact transcript rendering for harness-injected messages (background
- * completions, subagent replies, monitor batches, wakeups): one dim headline
- * collapsed, the full body on ctrl+o.
+ * A fired wakeup or loop tick in the transcript: Claude Code's dim
+ * `✻ Running scheduled task (Sep 11 12:03pm)` line, the prompt itself under it
+ * on ctrl+o (the prompt is the turn's input, verbatim — findings §21).
  */
-export function notificationComponent(theme: ThemeLike, text: string, expanded: boolean): TuiComponent {
-	const body = notificationBody(text);
-	const lines = body.split("\n");
-	const headline = oneLine(lines[0] ?? "");
-	// pi's custom-message shell already prepends a spacer — emit content only.
+export function scheduledTaskComponent(theme: ThemeLike, prompt: string, firedAt: number, expanded: boolean): TuiComponent {
+	const lines = prompt.trim().split("\n");
+	const headline = `Running scheduled task (${formatFireTime(firedAt)})`;
 	return linesComponent(() => {
 		if (!expanded) {
-			const more = lines.length > 1 ? theme.fg("dim", ` (+${lines.length - 1} lines, ${EXPAND_HINT})`) : "";
-			return [`${theme.fg("dim", "✳")} ${theme.fg("muted", theme.italic(headline))}${more}`];
+			return [`${theme.fg("dim", "✻")} ${theme.fg("dim", headline)}${theme.fg("dim", ` (+${lines.length} lines, ${EXPAND_HINT})`)}`];
 		}
-		return [`${theme.fg("dim", "✳")} ${theme.fg("muted", theme.italic(headline))}`, ...lines.slice(1).map((l) => `  ${theme.fg("muted", l)}`)];
+		return [`${theme.fg("dim", "✻")} ${theme.fg("dim", headline)}`, ...lines.map((l) => `  ${theme.fg("muted", l)}`)];
+	});
+}
+
+/**
+ * Compact transcript rendering for harness-injected messages (background
+ * completions, subagent replies and reports, monitor batches): one dim headline
+ * per frame collapsed, each with its own "+N lines" hint, the bodies on ctrl+o.
+ * A coalesced message (several frames arriving together) therefore lists one
+ * line per event, the way the events would read had they arrived apart. The
+ * wire frames (`<task-notification>`, the agent-message envelope) are
+ * model-only; `parseNotificationFrames` takes them apart for display.
+ */
+export function notificationComponent(theme: ThemeLike, text: string, expanded: boolean): TuiComponent {
+	// An agent's completion pointer says nothing the message above it does not;
+	// CC's transcript shows the message alone.
+	const parsed = parseNotificationFrames(text);
+	const frames = parsed.filter((frame) => !(frame.kind === "task" && frame.pointer));
+	if (frames.length === 0) frames.push({ kind: "text", text: framesToText(parsed) });
+	const dim = (s: string) => theme.fg("dim", s);
+	const muted = (s: string) => theme.fg("muted", s);
+	// pi's custom-message shell already prepends a spacer — emit content only.
+	return linesComponent((width) => {
+		const out: string[] = [];
+		// Body lines wrap to the terminal (CC wraps its long preamble line) rather
+		// than being cut; continuation lines start at column 0, as CC's do.
+		const body = (lines: string[]) => lines.flatMap((l) => wrapPlainText(`  ${l}`, width).map((w) => muted(w)));
+		const hint = (lines: string[]) => (lines.length > 0 ? dim(` (+${lines.length} lines, ${EXPAND_HINT})`) : "");
+		for (const frame of frames) {
+			if (frame.kind === "agent-message") {
+				// Claude Code's look: `› Message from @ID (ctrl+o to expand)` collapsed;
+				// the header, then the body as delivered (preamble, indented report),
+				// indented under it, when expanded. The guard is never shown.
+				const bodyLines = frame.body.split("\n");
+				if (expanded) out.push(dim(`› Message from ${frame.from}`), ...body(bodyLines));
+				else out.push(dim(`› Message from @${frame.from}`) + hint(bodyLines));
+				continue;
+			}
+			const headline = frame.kind === "task" ? frame.summary : oneLine(frame.text.split("\n")[0] ?? "");
+			const bodyLines = frame.kind === "task" ? (frame.body ? frame.body.split("\n") : []) : frame.text.split("\n").slice(1);
+			const head = `${dim("✳")} ${muted(theme.italic(oneLine(headline)))}`;
+			if (expanded) out.push(head, ...body(bodyLines));
+			else out.push(head + hint(bodyLines));
+		}
+		return out;
 	});
 }
