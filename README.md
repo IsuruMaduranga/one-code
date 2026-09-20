@@ -143,7 +143,7 @@ pi install npm:one-code-extension
 The app package, [`@one-ai/one-code`](https://www.npmjs.com/package/@one-ai/one-code),
 bundles a pinned pi and gives you the `onecode` command. The extension package,
 [`one-code-extension`](https://www.npmjs.com/package/one-code-extension), runs on
-your own pi and is tested against pi 0.83 to 0.85; use `pi` in place of `onecode`
+your own pi and is tested against pi 0.83 to 0.86; use `pi` in place of `onecode`
 for that install.
 
 The app opens in a full-screen terminal interface by default. See the
