@@ -79,12 +79,17 @@ what it does that a base URL can't.
   you get a stranger reading Claude's notes. One Code sizes the prompt to the
   model in four tiers, down to playbooks and strict-schema search tools for
   flash-class and local models. Weaker brains need more body.
-- **Cache misses, billed to you.** Anthropic caches on explicit markers; other
-  providers cache on an exact prefix. A translation layer shreds the shape,
-  nothing errors, and you pay full price every request. One Code speaks each
-  provider's native API, keeps the prefix byte-stable, and shows the hit rate
-  in the footer. One careless byte up top is a ten-times price increase, so we
-  treat it as a bug.
+- **Cache misses, billed to you.** Anthropic caches at explicit `cache_control`
+  markers; most other providers cache on an exact prefix, and the two do not
+  line up. A gateway that translates between them silently maps the markers
+  wrong, so the cache sticks at the system prompt and never advances, or never
+  forms at all. Nothing errors. You just pay full price every turn. This is not
+  hypothetical: users report proxies where the cache-creation count is zero on
+  every turn and half the turns re-bill the whole context, and Claude Code's own
+  attribution header defeats caching behind a base URL unless you know the flag
+  to turn off. One Code speaks each provider's native API, keeps the prefix
+  byte-stable, and shows the live hit rate in the footer, because one careless
+  byte up top is a tenfold price increase.
 - **Anthropic-only parts.** Deferred tools, server-side web search, the
   thinking block. A foreign endpoint drops them. One Code has a
   provider-neutral version of each.
