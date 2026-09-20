@@ -183,6 +183,21 @@ describe("economicalContainedCandidates", () => {
 			else process.env.CC_PROMPT_TIER = prev;
 		}
 	});
+
+	it("with requireImageInput, drops text-only candidates (fake ids, so no models.dev facts intrude)", () => {
+		const withInput = (id: string, cost: number, input: string[]) =>
+			({ id, provider: "openai", cost: { input: cost }, input }) as unknown as Model<Api>;
+		const session = withInput("gpt-5-main", 2, ["text", "image"]); // workhorse, image-capable
+		const available = [
+			session,
+			withInput("gpt-5-flash-text", 0.6, ["text"]), // cheap, text-only
+			withInput("gpt-5-flash-vision", 0.7, ["text", "image"]), // cheap, image-capable
+		];
+		// Ungated: the cheaper text-only model ranks first.
+		expect(ids(economicalContainedCandidates(available, session))).toEqual(["gpt-5-flash-text", "gpt-5-flash-vision", "gpt-5-main"]);
+		// Gated: the text-only model is dropped; the image-capable ones remain.
+		expect(ids(economicalContainedCandidates(available, session, undefined, true))).toEqual(["gpt-5-flash-vision", "gpt-5-main"]);
+	});
 });
 
 describe("pickEconomicalContainedModel", () => {

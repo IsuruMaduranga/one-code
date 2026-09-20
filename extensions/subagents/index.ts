@@ -26,7 +26,7 @@ import { getAgentDir, type ExtensionAPI, type ExtensionContext, type ToolDefinit
 import { Type } from "typebox";
 import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../auto-mode/actions.ts";
 import { type AgentDefinition, type AgentSource, agentDirs, discoverAgents } from "./agents.ts";
-import { modelIdentity, modelSpec } from "../lib/model-policy.ts";
+import { modelIdentity, modelSpec, supportsImageInput } from "../lib/model-policy.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent, withoutUnusable } from "../lib/model-unusable.ts";
 import { applicableSubagentDefault, loadSubagentDefault, persistSubagentModel, type SubagentDefault } from "./default-model.ts";
 import {
@@ -474,7 +474,14 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		const session = sessionModel ? modelSpec(sessionModel) : "(none)";
 		const signature = `${session}|${configured?.spec ?? ""}|${configured?.setForContainment ?? ""}|${configured?.source ?? ""}|${unusableModels.size}`;
 		if (autoDefaultCache?.signature === signature) return autoDefaultCache.resolution;
-		const resolution = resolveSubagentModel({ configuredDefault: configured, sessionModel, available });
+		// The image-modality gate keys off the session model, which is part of the
+		// cache signature above, so the cached resolution stays correct per session.
+		const resolution = resolveSubagentModel({
+			configuredDefault: configured,
+			sessionModel,
+			available,
+			requireImageInput: supportsImageInput(sessionModel),
+		});
 		autoDefaultCache = { signature, resolution };
 		return resolution;
 	};
@@ -1230,6 +1237,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					configuredDefault: applicableSubagentDefault(loadSubagentDefault(os.homedir()), ctx.model),
 					sessionModel: ctx.model,
 					available,
+					requireImageInput: supportsImageInput(ctx.model),
 				});
 				for (const notice of resolution.notices) notifyModelOnce(ctx, notice);
 				const modelNotes = subagentModelNotes(resolution);
@@ -1648,6 +1656,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 								configuredDefault: configuredDefault,
 								sessionModel: ctx.model,
 								available,
+								requireImageInput: supportsImageInput(ctx.model),
 							})
 						: resolveAutoDefault(ctx.model, available, configuredDefault);
 				if (resolution.unresolved) {
@@ -1662,7 +1671,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 							{
 								type: "text",
 								text:
-									`Unknown model "${resolution.unresolved}" — no available model matches it.\n\n` +
+									`${resolution.unresolvedReason ?? `Unknown model "${resolution.unresolved}" — no available model matches it.`}\n\n` +
 									subagentModelsReminder({
 										available,
 										sessionModel: ctx.model,

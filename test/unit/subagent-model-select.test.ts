@@ -8,7 +8,7 @@ import {
 	persistSubagentModel,
 	type SubagentDefault,
 } from "../../extensions/subagents/default-model.ts";
-import { crossesProvider } from "../../extensions/lib/model-policy.ts";
+import { crossesProvider, supportsImageInput } from "../../extensions/lib/model-policy.ts";
 import {
 	expensiveModelGate,
 	resolveSubagentModel,
@@ -892,5 +892,59 @@ describe("subagentModelNotes: the model is told what its child actually runs on"
 		const resolution = resolveSubagentModel({ requested: "sonnet", available: [] });
 		expect(resolution.model).toBeUndefined();
 		expect(subagentModelNotes(resolution)).toEqual(resolution.notices);
+	});
+});
+
+describe("resolveSubagentModel — image modality gate", () => {
+	// Fake ids so models.dev facts never intrude. session is workhorse + image-capable.
+	const withInput = (id: string, cost: number, input: string[]) =>
+		({ provider: "openai", id, name: id, cost: { input: cost, output: cost * 4 }, input }) as any;
+	const session = withInput("gpt-5-main", 2, ["text", "image"]);
+	const textOnly = withInput("gpt-5-flash-text", 0.6, ["text"]);
+	const imageCheap = withInput("gpt-5-flash-vision", 0.7, ["text", "image"]);
+	const available = [session, textOnly, imageCheap];
+
+	it("sanity: the session is image-capable, the cheap flash is text-only", () => {
+		expect(supportsImageInput(session)).toBe(true);
+		expect(supportsImageInput(textOnly)).toBe(false);
+	});
+
+	it("hard-blocks a per-call text-only model, naming the reason for the retry", () => {
+		const r = resolveSubagentModel({ requested: "openai/gpt-5-flash-text", sessionModel: session, available, requireImageInput: true });
+		expect(r.unresolved).toBe("openai/gpt-5-flash-text");
+		expect(r.unresolvedReason).toContain("text-only");
+		expect(r.notices.join(" ")).toContain("image-capable");
+	});
+
+	it("does NOT gate when requireImageInput is unset (no regression, text session)", () => {
+		const r = resolveSubagentModel({ requested: "openai/gpt-5-flash-text", sessionModel: session, available });
+		expect(r.model?.id).toBe("gpt-5-flash-text");
+		expect(r.unresolved).toBeUndefined();
+	});
+
+	it("upgrades a text-only agent-file model to an image-capable model with a notice", () => {
+		const r = resolveSubagentModel({ agentModel: "openai/gpt-5-flash-text", sessionModel: session, available, requireImageInput: true });
+		expect(r.source).not.toBe("agent");
+		expect(r.model && supportsImageInput(r.model)).toBe(true);
+		expect(r.notices.join(" ")).toContain("text-only");
+	});
+
+	it("upgrades a text-only configured default to an image-capable model with a notice", () => {
+		const r = resolveSubagentModel({
+			configuredDefault: setting("openai/gpt-5-flash-text", "openai"),
+			sessionModel: session,
+			available,
+			requireImageInput: true,
+		});
+		expect(r.source).not.toBe("default");
+		expect(r.model && supportsImageInput(r.model)).toBe(true);
+		expect(r.notices.join(" ")).toContain("text-only");
+	});
+
+	it("resolves an alias to an image-capable model, skipping the cheaper text-only one", () => {
+		// Ungated, "haiku" (cheap tier) would land on the cheapest cheap model (text-only).
+		expect(resolveSubagentModel({ requested: "haiku", sessionModel: session, available }).model?.id).toBe("gpt-5-flash-text");
+		// Gated, it is auto-upgraded to the image-capable cheap model.
+		expect(resolveSubagentModel({ requested: "haiku", sessionModel: session, available, requireImageInput: true }).model?.id).toBe("gpt-5-flash-vision");
 	});
 });

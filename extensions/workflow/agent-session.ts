@@ -21,7 +21,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { whenAborted } from "../lib/abort.ts";
 import { createSharedModelRuntime, finalAssistantText, openChildSession } from "../lib/agent-loader.ts";
-import { modelSpec as modelSpecOf } from "../lib/model-policy.ts";
+import { modelSpec as modelSpecOf, supportsImageInput } from "../lib/model-policy.ts";
 import { isModelUnavailableError } from "../auto-mode/model-select.ts";
 import { agentPromptIdentity, PrefixWarmGate, prefixWarmKey } from "../lib/prefix-warm-gate.ts";
 import type { PermissionBridge } from "../permissions/subagent-gate.ts";
@@ -145,6 +145,7 @@ export function resolveWorkflowAgentModel(input: WorkflowModelInput): {
 		configuredDefault: input.configuredDefault,
 		sessionModel: input.sessionModel,
 		available: input.available,
+		requireImageInput: supportsImageInput(input.sessionModel),
 	});
 	if (resolution.unresolved) {
 		const fallback = resolveSubagentModel({
@@ -158,9 +159,8 @@ export function resolveWorkflowAgentModel(input: WorkflowModelInput): {
 			defaultModel: fallback.model,
 			defaultSource: fallback.source,
 		});
-		throw new WorkflowScriptError(
-			`agent() model "${resolution.unresolved}" is not available.\n${menu.join("\n")}\nAny exact provider/model-id also resolves.`,
-		);
+		const reason = resolution.unresolvedReason ?? `agent() model "${resolution.unresolved}" is not available.`;
+		throw new WorkflowScriptError(`${reason}\n${menu.join("\n")}\nAny exact provider/model-id also resolves.`);
 	}
 	const gate = expensiveModelGate(resolution, input.sessionModel, input.opts.allowExpensive);
 	if (gate) {

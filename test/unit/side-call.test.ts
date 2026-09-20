@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { answerText, toolStubs, trimToTurnBoundary } from "../../extensions/lib/side-call.ts";
+import { answerText, IMAGE_OMITTED_TEXT, stripImageBlocks, toolStubs, trimToTurnBoundary } from "../../extensions/lib/side-call.ts";
 
 describe("toolStubs", () => {
 	it("builds a name-only, empty-schema stub per tool with the given reason", () => {
@@ -53,5 +53,26 @@ describe("answerText", () => {
 
 	it("trims surrounding whitespace", () => {
 		expect(answerText([{ type: "text", text: "  spaced  " }])).toBe("spaced");
+	});
+});
+
+describe("stripImageBlocks", () => {
+	it("removes image blocks, leaves text blocks, other roles, and string content untouched", () => {
+		const msgs = [
+			{ role: "user", content: [{ type: "text", text: "hi" }, { type: "image", source: {} }] },
+			{ role: "assistant", content: [{ type: "text", text: "ok" }] },
+			{ role: "user", content: "plain string" },
+		];
+		const out = stripImageBlocks(msgs);
+		expect(out[0].content).toEqual([{ type: "text", text: "hi" }]);
+		expect(out[1]).toBe(msgs[1]); // no images → same reference, untouched
+		expect(out[2]).toBe(msgs[2]); // string content → untouched
+	});
+
+	it("replaces an image-only message with a placeholder, preserving other fields", () => {
+		const msgs = [{ role: "toolResult", toolCallId: "t1", content: [{ type: "image", source: {} }] }];
+		const out = stripImageBlocks(msgs);
+		expect(out[0].content).toEqual([{ type: "text", text: IMAGE_OMITTED_TEXT }]);
+		expect((out[0] as { toolCallId: string }).toolCallId).toBe("t1");
 	});
 });
