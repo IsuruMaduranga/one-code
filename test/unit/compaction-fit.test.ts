@@ -8,7 +8,7 @@
  * real clamp, not a copy of its arithmetic.
  */
 import type { Api, Context, Message, Model } from "@earendil-works/pi-ai";
-import { clampMaxTokensToContext } from "@earendil-works/pi-ai/api/simple-options";
+import { clampMaxTokensToContext as clampMaxTokensToContextImpl } from "@earendil-works/pi-ai/api/simple-options";
 import { describe, expect, it } from "vitest";
 import {
 	CLEARED_RESULT_HEAD_CHARS,
@@ -30,6 +30,9 @@ const assistant = (text = "…", usage: Record<string, unknown> = zeroUsage): Me
 const toolResult = (text: string, extra: Record<string, unknown> = {}): Message =>
 	({ role: "toolResult", toolCallId: "t", toolName: "read", content: [{ type: "text", text }], timestamp: 3, ...extra }) as unknown as Message;
 const request = (messages: Message[], systemPrompt = "sys"): Context => ({ systemPrompt, messages });
+// pi 0.86.1 types the real clamp's context as the branded `TranscriptContext`;
+// it only reads `.messages` at runtime, so cast a plain `Context` past the brand.
+const clampMaxTokensToContext = (model: Model<Api>, context: Context, maxTokens: number) => clampMaxTokensToContextImpl(model, context as never, maxTokens);
 /** ~N tokens of text under pi's chars/4 estimate. */
 const tokensOf = (n: number) => "x".repeat(n * 4);
 

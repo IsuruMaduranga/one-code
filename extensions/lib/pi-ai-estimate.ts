@@ -16,7 +16,10 @@
  *
  * So the two consumed helpers (`clampMaxTokensToContext`, `estimateMessageTokens`)
  * and the private estimator chain they depend on are copied here from pi-ai
- * 0.85.0, importing only types from the bare specifier. The two exported helpers
+ * 0.86.1, importing from the bare specifier only types plus `getSystemMessageText`
+ * (which pi-ai re-exports from its entry point, so it needs no vendoring — unlike
+ * the estimate/clamp helpers under `/utils/estimate` and `/api/simple-options`,
+ * which have no bare re-export). The two exported helpers
  * are byte-identical to upstream; the one adaptation is the internal
  * `estimateContextTokens`, narrowed to accept only `Context` (the sole shape we
  * call it with) rather than upstream's `Context | Message[]` overload — the
@@ -24,9 +27,27 @@
  * imports the real deep paths from node_modules and asserts the two exported
  * helpers produce identical numbers, so an upstream change is caught rather than
  * silently drifting.
+ *
+ * pi 0.86.1 changes re-vendored here (from 0.85.0): the `Message` union gained a
+ * `SystemMessage` (its prompt text, `toolsAdded`, and `toolsRemoved` now ride the
+ * transcript, so `estimateMessageTokens` has a `system` branch that calls pi-ai's
+ * `getSystemMessageText`); `addedToolNames` was removed
+ * from `ToolResultMessage`; and `estimateContextTokens` no longer adds
+ * `context.systemPrompt`/`context.tools` separately — it sums the messages alone,
+ * counting the prompt and tools through any `SystemMessage` present.
+ *
+ * Caller implication: pi's `completeSimple`/`streamSimple` run `normalizeContext`
+ * (folding `systemPrompt`/`tools` into a leading `SystemMessage`) BEFORE the
+ * clamp, but the compaction extension calls the vendored clamp with a RAW
+ * `Context`, whose `systemPrompt`/`tools` fields are therefore not counted. This
+ * is immaterial for both compaction callers. The replay path keeps its captured
+ * usage (the usage-anchored branch runs, and the prompt is inside the usage
+ * total, never added separately); the standalone path carries a ~36-token system
+ * prompt and no tools. A future caller passing a raw `Context` with a large
+ * prompt or tools that needs an exact prediction should normalize it first.
  */
 
-import type { Api, Context, ImageContent, Message, Model, TextContent, Tool, Usage } from "@earendil-works/pi-ai";
+import { getSystemMessageText, type Api, type Context, type ImageContent, type Message, type Model, type TextContent, type Usage } from "@earendil-works/pi-ai";
 
 const CHARS_PER_TOKEN = 4;
 const ESTIMATED_IMAGE_CHARS = 4800;
@@ -62,6 +83,9 @@ function estimateTextAndImageContentTokens(content: string | Array<TextContent |
 
 export function estimateMessageTokens(message: Message): number {
 	let chars = 0;
+	if (message.role === "system") {
+		return estimateTextTokens(getSystemMessageText(message)) + estimateToolsTokens(message.toolsAdded) + estimateToolsTokens(message.toolsRemoved);
+	}
 	if (message.role === "user") return estimateTextAndImageContentTokens(message.content);
 	if (message.role === "toolResult") return estimateTextAndImageContentTokens(message.content);
 	for (const block of message.content) {
@@ -122,35 +146,18 @@ function estimateMessages(messages: readonly Message[]): ContextUsageEstimate {
 	return { tokens, usageTokens: 0, trailingTokens: tokens, lastUsageIndex: null };
 }
 
-function estimateToolsTokens(tools: Tool[] | undefined): number {
+// Accepts `Tool[]` (`toolsAdded`) or `ToolReference[]` (`toolsRemoved`); pi's own
+// helper only JSON-stringifies, so the element shape is immaterial.
+function estimateToolsTokens(tools: readonly unknown[] | undefined): number {
 	if (!tools || tools.length === 0) return 0;
 	return estimateTextTokens(safeJsonStringify(tools));
 }
 
+// pi 0.86.1: the prompt and tool declarations ride the transcript as system
+// messages, so this sums the messages alone — no separate systemPrompt/tools
+// term, and no `addedToolNames` accounting (both gone upstream).
 function estimateContextTokens(context: Context): ContextUsageEstimate {
-	const estimate = estimateMessages(context.messages);
-	if (estimate.lastUsageIndex !== null) {
-		const addedNames = new Set(
-			context.messages
-				.slice(estimate.lastUsageIndex + 1)
-				.filter((message) => message.role === "toolResult")
-				.flatMap((message) => (message.role === "toolResult" ? message.addedToolNames ?? [] : [])),
-		);
-		const addedToolTokens = estimateToolsTokens(context.tools?.filter((tool) => addedNames.has(tool.name)));
-		return {
-			tokens: estimate.tokens + addedToolTokens,
-			usageTokens: estimate.usageTokens,
-			trailingTokens: estimate.trailingTokens + addedToolTokens,
-			lastUsageIndex: estimate.lastUsageIndex,
-		};
-	}
-	const prefixTokens = (context.systemPrompt ? estimateTextTokens(context.systemPrompt) : 0) + estimateToolsTokens(context.tools);
-	return {
-		tokens: estimate.tokens + prefixTokens,
-		usageTokens: estimate.usageTokens,
-		trailingTokens: estimate.trailingTokens + prefixTokens,
-		lastUsageIndex: estimate.lastUsageIndex,
-	};
+	return estimateMessages(context.messages);
 }
 
 export function clampMaxTokensToContext(model: Model<Api>, context: Context, maxTokens: number): number {

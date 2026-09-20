@@ -134,6 +134,7 @@ export function redactOffSkillMessages<M extends { role: string; content?: unkno
  * alias is registered for it (its `/skill:<name>` form still works).
  */
 export const PI_BUILTIN_COMMANDS: ReadonlySet<string> = new Set([
+	"bug",
 	"changelog",
 	"clone",
 	"compact",

@@ -11,10 +11,15 @@
  * silently. When it fails after a pi pin bump, re-vendor from the new source.
  */
 import type { Api, Context, Message, Model } from "@earendil-works/pi-ai";
-import { clampMaxTokensToContext as realClamp } from "@earendil-works/pi-ai/api/simple-options";
+import { clampMaxTokensToContext as realClampImpl } from "@earendil-works/pi-ai/api/simple-options";
 import { estimateMessageTokens as realEstimate } from "@earendil-works/pi-ai/utils/estimate";
 import { describe, expect, it } from "vitest";
 import { clampMaxTokensToContext, estimateMessageTokens } from "../../extensions/lib/pi-ai-estimate.ts";
+
+// pi 0.86.1 types the real clamp's context as the branded `TranscriptContext`,
+// but at runtime `estimateContextTokens` only reads `.messages`, so a plain
+// `Context` is what pi itself hands it — cast past the brand for the parity check.
+const realClamp = (model: Model<Api>, context: Context, maxTokens: number) => realClampImpl(model, context as never, maxTokens);
 
 const model = (contextWindow: number, maxTokens = 8000) => ({ contextWindow, maxTokens }) as Model<Api>;
 const usage = (over: Record<string, number> = {}) => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, ...over });
