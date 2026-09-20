@@ -27,16 +27,19 @@
  *
  * Both decisions ask pi-ai's `clampMaxTokensToContext` — the very function
  * `completeSimple` applies to the request — rather than re-deriving its
- * arithmetic, so they can never disagree with the clamp they predict. One
- * trap in that estimator: it anchors on the last assistant message's
- * `usage` total when there is one (`withoutUsage`).
+ * arithmetic, so they can never disagree with the clamp they predict. They
+ * `normalizeContext` the request first, exactly as `completeSimple` does, so the
+ * prompt and tools are counted (pi 0.86.1 carries them in a leading system
+ * message, not separate `Context` fields). One trap in that estimator: it
+ * anchors on the last assistant message's `usage` total when there is one
+ * (`withoutUsage`).
  */
 
 import { type Api, type Context, contentText, type Message, type Model } from "@earendil-works/pi-ai";
 import { PREVIEW_BYTES } from "../lib/persisted-output.ts";
 // Vendored from pi-ai: importing its deep subpaths directly breaks under the
 // bundled app's library loader (distribution review 2026-09-09, H1).
-import { clampMaxTokensToContext, estimateMessageTokens } from "../lib/pi-ai-estimate.ts";
+import { clampMaxTokensToContext, estimateMessageTokens, normalizeContext } from "../lib/pi-ai-estimate.ts";
 
 /**
  * The least output room a replay must leave for the summary. Below it the
@@ -60,7 +63,7 @@ export const CLEARED_RESULT_HEAD_CHARS = PREVIEW_BYTES;
  */
 export function replayFits(reason: "manual" | "threshold" | "overflow", model: Model<Api>, request: Context, maxTokens: number): boolean {
 	if (reason === "overflow") return false;
-	return clampMaxTokensToContext(model, request, maxTokens) >= MIN_REPLAY_SUMMARY_TOKENS;
+	return clampMaxTokensToContext(model, normalizeContext(request), maxTokens) >= MIN_REPLAY_SUMMARY_TOKENS;
 }
 
 /**
@@ -80,7 +83,7 @@ export function fitToBudget(model: Model<Api>, request: Context, maxTokens: numb
 
 	let cleared = 0;
 	for (const { index } of candidates) {
-		if (clampMaxTokensToContext(model, fitted, maxTokens) >= STANDALONE_SUMMARY_TOKENS) break;
+		if (clampMaxTokensToContext(model, normalizeContext(fitted), maxTokens) >= STANDALONE_SUMMARY_TOKENS) break;
 		messages[index] = clearToolResult(messages[index]);
 		cleared++;
 	}

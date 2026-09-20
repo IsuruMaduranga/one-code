@@ -36,15 +36,15 @@
  * `context.systemPrompt`/`context.tools` separately — it sums the messages alone,
  * counting the prompt and tools through any `SystemMessage` present.
  *
- * Caller implication: pi's `completeSimple`/`streamSimple` run `normalizeContext`
- * (folding `systemPrompt`/`tools` into a leading `SystemMessage`) BEFORE the
- * clamp, but the compaction extension calls the vendored clamp with a RAW
- * `Context`, whose `systemPrompt`/`tools` fields are therefore not counted. This
- * is immaterial for both compaction callers. The replay path keeps its captured
- * usage (the usage-anchored branch runs, and the prompt is inside the usage
- * total, never added separately); the standalone path carries a ~36-token system
- * prompt and no tools. A future caller passing a raw `Context` with a large
- * prompt or tools that needs an exact prediction should normalize it first.
+ * pi's `completeSimple`/`streamSimple` run `normalizeContext` (folding
+ * `systemPrompt`/`tools` into a leading `SystemMessage`) BEFORE the clamp, and
+ * `estimateContextTokens` counts the prompt and tools only through that message.
+ * So `normalizeContext` and `createInitialSystemMessage` are vendored here too
+ * (byte-identical to pi-ai's `utils/transcript`), and the compaction extension
+ * normalizes a `Context` before clamping it, exactly as `completeSimple` does —
+ * otherwise a raw `Context`'s `systemPrompt`/`tools` go uncounted and the clamp
+ * over-estimates the output room. `test/unit/pi-ai-estimate.test.ts` locks all
+ * four helpers against the real ones.
  */
 
 import { getSystemMessageText, type Api, type Context, type ImageContent, type Message, type Model, type TextContent, type Usage } from "@earendil-works/pi-ai";
@@ -158,6 +158,30 @@ function estimateToolsTokens(tools: readonly unknown[] | undefined): number {
 // term, and no `addedToolNames` accounting (both gone upstream).
 function estimateContextTokens(context: Context): ContextUsageEstimate {
 	return estimateMessages(context.messages);
+}
+
+/**
+ * pi-ai's `createInitialSystemMessage` (`utils/transcript`): the leading system
+ * message carrying the prompt and tool declarations, or undefined when both are
+ * empty. Byte-identical to upstream.
+ */
+export function createInitialSystemMessage(systemPrompt: Context["systemPrompt"], tools: Context["tools"]): Message | undefined {
+	const hasSystemPrompt = systemPrompt !== undefined && systemPrompt.length > 0;
+	const hasTools = tools !== undefined && tools.length > 0;
+	if (!hasSystemPrompt && !hasTools) return undefined;
+	return { role: "system", content: systemPrompt ?? "", ...(hasTools ? { toolsAdded: tools } : {}), timestamp: 0 };
+}
+
+/**
+ * pi-ai's `normalizeContext` (`utils/transcript`): fold `systemPrompt`/`tools`
+ * into a leading system message so the estimate counts them. `completeSimple`
+ * runs this before the clamp; callers of the vendored clamp must do the same.
+ * Returns a plain `Context` (the vendored clamp reads only `.messages`; pi's real
+ * clamp is typed for the branded `TranscriptContext`).
+ */
+export function normalizeContext(context: Context): Context {
+	const initialMessage = createInitialSystemMessage(context.systemPrompt, context.tools);
+	return { messages: initialMessage ? [initialMessage, ...context.messages] : context.messages };
 }
 
 export function clampMaxTokensToContext(model: Model<Api>, context: Context, maxTokens: number): number {
