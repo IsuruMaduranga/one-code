@@ -29,6 +29,7 @@ import {
 	TASK_NOTIFICATION_PREAMBLE,
 	TASK_NOTIFICATION_PREAMBLE_WITH_USER_TURN,
 	taskNotification,
+	taskStatusOf,
 	workflowSummary,
 } from "../../extensions/lib/notifications.ts";
 
@@ -169,12 +170,21 @@ describe("frame shapes, byte-exact against transcripts", () => {
 			"SECURITY WARNING: auto mode blocked this subagent's report. Reason: It read ~/.aws/credentials. The report follows; review the subagent's actions carefully before acting on it.",
 		);
 		expect(handBackWarning({ kind: "blocked", reason: "x".repeat(600) }).includes("x".repeat(501))).toBe(false);
+		// The `unavailable` reason can carry a thrown error's message, so it is clipped too.
+		expect(handBackWarning({ kind: "unavailable", reason: "x".repeat(600) }).includes("x".repeat(501))).toBe(false);
 		const warning = handBackWarning({ kind: "blocked", reason: "r" });
 		const text = agentMessage({ from: "a1", body: "line 1\nline 2", handBack: true, warning });
 		expect(text).toBe(
 			`Another Claude session sent a message:\n<agent-message from="a1">\n  ${warning}\n${HAND_BACK_PREAMBLE}\n  line 1\n  line 2\n</agent-message>\n\n${AGENT_MESSAGE_GUARD}`,
 		);
 		expect(handBackPointer("a1", true)).toContain("SECURITY WARNING");
+	});
+
+	it("taskStatusOf maps terminal statuses and fails loud on a non-terminal 'running'", () => {
+		expect(taskStatusOf("completed")).toBe("completed");
+		expect(taskStatusOf("failed")).toBe("failed");
+		for (const status of ["stopped", "aborted", "killed"] as const) expect(taskStatusOf(status)).toBe("killed");
+		expect(() => taskStatusOf("running")).toThrow(/non-terminal 'running'/);
 	});
 
 	it("the task-notification preambles and CC's send-time framing per delivery", () => {
