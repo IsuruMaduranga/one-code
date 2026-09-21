@@ -46,6 +46,7 @@ export interface ShellToolBase {
 	promptSnippet?: string;
 	promptGuidelines?: readonly string[];
 	executionMode?: ToolDefinition["executionMode"];
+	constrainedSampling?: ToolDefinition["constrainedSampling"];
 	renderCall?: (args: any, theme: any, context: any) => any;
 	renderResult?: (result: any, options: any, theme: any, context: any) => any;
 }
@@ -130,6 +131,13 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 		promptSnippet: spec.base.promptSnippet,
 		promptGuidelines: spec.promptGuidelines ?? spec.base.promptGuidelines,
 		executionMode: spec.base.executionMode,
+		// pi 0.86 samples its own shell tools against a strict JSON schema by
+		// default (`{ type: "json_schema", strict: "prefer" }`); inherit that as
+		// tool-style does for read/edit/write, so every built-in-shaped tool gets
+		// the same treatment. Our parameter objects are strict-compatible, pi
+		// strips the `null` a strict optional arrives as before validation, and
+		// a provider without strict tools is left alone by "prefer".
+		constrainedSampling: spec.base.constrainedSampling,
 		renderShell: wrapped.renderShell,
 		renderCall: wrapped.renderCall as ToolDefinition<P>["renderCall"],
 		renderResult: ((result, options, theme, context) => {
