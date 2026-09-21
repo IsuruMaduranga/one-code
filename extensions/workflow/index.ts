@@ -235,6 +235,10 @@ export default function workflowExtension(pi: ExtensionAPI) {
 	/** The tool call that started each background run — the notification's `<tool-use-id>`. */
 	const startedBy = new Map<string, string>();
 	const deliverResult = (runId: string) => {
+		// One delivery per run, so the id is spent here even when the run has
+		// already gone from the manager or was delivered another way.
+		const toolUseId = startedBy.get(runId);
+		startedBy.delete(runId);
 		const handle = manager.get(runId);
 		if (!handle || deliveredRuns.has(runId)) return;
 		deliveredRuns.add(runId);
@@ -247,14 +251,13 @@ export default function workflowExtension(pi: ExtensionAPI) {
 			taskNotification({
 				kind: "workflow",
 				taskId: handle.runId,
-				toolUseId: startedBy.get(runId),
+				toolUseId,
 				status,
 				summary: workflowSummary(handle.meta.name, status, status === "completed" ? undefined : handle.errorMessage),
 				result: buildRunReport(handle),
 			}),
 			{ runId: handle.runId, name: handle.meta.name, status: handle.status },
 		);
-		startedBy.delete(runId);
 	};
 
 	pi.registerMessageRenderer("one-code:workflow-result", (message, { expanded }, theme) =>
