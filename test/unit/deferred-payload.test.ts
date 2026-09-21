@@ -68,6 +68,16 @@ describe("stabilizeDeferredTools", () => {
 		expect(payload.tools).toHaveLength(2);
 	});
 
+	it("returns undefined without throwing when no eager registry tool remains on the wire", () => {
+		// Every registry tool already carries defer_loading, and the rest are pi
+		// anchors, so `eager` is empty — the final-eager-tool lookup must not deref
+		// an undefined entry inside the before_provider_request hook.
+		const anchor = { name: "__pi_deferred_placeholder__", input_schema: {}, defer_loading: true };
+		const payload = { tools: [deferredDef("web_fetch"), deferredDef("lsp_diagnostics"), anchor], messages: [] };
+		expect(() => stabilizeDeferredTools(payload, registry, deferred)).not.toThrow();
+		expect(stabilizeDeferredTools(payload, registry, deferred)).toBeUndefined();
+	});
+
 	it("is idempotent: a payload already in request 1's shape comes back equal", () => {
 		const payload = { tools: request1Tools, messages: [] };
 		expect(stabilizeDeferredTools(payload, registry, deferred)).toEqual(payload);

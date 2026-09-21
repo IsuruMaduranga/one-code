@@ -459,6 +459,12 @@ export interface MenuOptions {
 	/** How many cheaper-option lines to include. */
 	maxCheaper?: number;
 	/**
+	 * When true (an image-capable session), text-only models are omitted from the
+	 * menu — they would only be rejected again on retry (`modalityMismatch`). The
+	 * caller passes `supportsImageInput(sessionModel)`.
+	 */
+	requireImageInput?: boolean;
+	/**
 	 * The configured default and which knob set it, so the reminder can tell the
 	 * main model when the user has *manually* pinned the subagent model via the
 	 * `subagentModel` setting (as opposed to Claude Code's env var or automatic
@@ -477,11 +483,14 @@ const price = (model: Model<Api>): string => {
  * entries dropped, dated duplicates collapsed, capped — useful, not complete,
  * which is safe because resolution accepts unlisted models too.
  */
-export function subagentModelMenu({ available, sessionModel, defaultModel, defaultSource, maxCheaper = 3 }: MenuOptions): string[] {
+export function subagentModelMenu({ available, sessionModel, defaultModel, defaultSource, maxCheaper = 3, requireImageInput = false }: MenuOptions): string[] {
 	const lines: string[] = [];
 	const listed = new Set<string>();
+	// On an image-capable session a text-only model is rejected on retry
+	// (`modalityMismatch`), so it never belongs in a retry menu.
+	const imageOk = (model: Model<Api>) => !requireImageInput || supportsImageInput(model);
 	const add = (model: Model<Api>, label: string) => {
-		if (listed.has(spec(model))) return;
+		if (listed.has(spec(model)) || !imageOk(model)) return;
 		listed.add(spec(model));
 		lines.push(`- ${spec(model)}${price(model)} — ${label}`);
 	};

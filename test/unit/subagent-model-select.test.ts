@@ -553,6 +553,23 @@ describe("subagentModelMenu", () => {
 		expect(text).not.toContain("20251001");
 	});
 
+	it("omits text-only cheaper options when requireImageInput is set", () => {
+		const withInput = (id: string, cost: number, input: string[]) =>
+			({ provider: "openai", id, name: id, cost: { input: cost, output: cost * 4 }, input }) as any;
+		// Image session; the cheaper same-provider pool holds one image-capable and
+		// one text-only model. A text-only entry would only be refused on retry.
+		const session = withInput("gpt-5-main", 2, ["text", "image"]);
+		const imageCheap = withInput("gpt-5-vision-mini", 0.7, ["text", "image"]);
+		const textCheap = withInput("gpt-5-text-mini", 0.3, ["text"]);
+		const catalog = [session, imageCheap, textCheap];
+		const gated = subagentModelMenu({ available: catalog, sessionModel: session, defaultModel: session, requireImageInput: true }).join("\n");
+		expect(gated).toContain("gpt-5-vision-mini");
+		expect(gated).not.toContain("gpt-5-text-mini");
+		// Ungated (a text session), the same catalog still lists the text-only model.
+		const ungated = subagentModelMenu({ available: catalog, sessionModel: session, defaultModel: session }).join("\n");
+		expect(ungated).toContain("gpt-5-text-mini");
+	});
+
 	it("stays small on a gateway catalog and keeps to the session's vendor", () => {
 		const catalog = [
 			model("openrouter", "z-ai/glm-4.6", 0.5),

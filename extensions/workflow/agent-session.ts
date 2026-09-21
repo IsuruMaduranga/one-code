@@ -159,6 +159,7 @@ export function resolveWorkflowAgentModel(input: WorkflowModelInput): {
 			sessionModel: input.sessionModel,
 			defaultModel: fallback.model,
 			defaultSource: fallback.source,
+			requireImageInput: supportsImageInput(input.sessionModel),
 		});
 		const reason = resolution.unresolvedReason ?? `agent() model "${resolution.unresolved}" is not available.`;
 		throw new WorkflowScriptError(`${reason}\n${menu.join("\n")}\nAny exact provider/model-id also resolves.`);

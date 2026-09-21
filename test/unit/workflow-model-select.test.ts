@@ -89,6 +89,12 @@ describe("workflow model defaults", () => {
 		expect(message).toMatch(/image/i);
 		const defaultLine = message.split("\n").find((line) => /default/i.test(line)) ?? "";
 		expect(defaultLine).not.toMatch(/terra|luna/);
+		// Every menu entry (the "- model — label" lines) must be image-capable:
+		// a text-only suggestion would only be refused again on retry.
+		const menuLines = message.split("\n").filter((line) => line.startsWith("- "));
+		expect(menuLines.length).toBeGreaterThan(0);
+		expect(menuLines.some((line) => line.includes("gpt-5.4-mini"))).toBe(true);
+		for (const line of menuLines) expect(line).not.toMatch(/terra|luna/);
 	});
 
 	it("rejects a per-call model pricier than the session unless allowExpensive", () => {

@@ -243,10 +243,10 @@ export function stabilizeDeferredTools(
 
 	// pi puts the tools breakpoint on the last eager tool; if that one is demoted
 	// the breakpoint moves to the new last one, otherwise nothing moves.
-	const last = eager[eager.length - 1];
+	const last = eager.at(-1);
 	const keptEager = withBreakpointOnLast(
 		eager.filter((tool) => !demoted.has(tool.name)),
-		demoted.has(last.name) ? last.cache_control : undefined,
+		last !== undefined && demoted.has(last.name) ? last.cache_control : undefined,
 	);
 	if (keptEager.length === 0) return undefined;
 	const eagerNames = new Set(keptEager.map((tool) => tool.name));

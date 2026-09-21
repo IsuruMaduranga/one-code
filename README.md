@@ -1,5 +1,7 @@
 # One Code
 
+[![CI](https://github.com/IsuruMaduranga/one-code/actions/workflows/ci.yml/badge.svg)](https://github.com/IsuruMaduranga/one-code/actions/workflows/ci.yml)
+
 **Claude Code with the model slot left open. The full workflow, open source, on any model or provider.**
 
 Claude Code is a good harness. It just ships bolted to one model. One Code
@@ -33,7 +35,9 @@ them across, because the good part was never the logo.
 - **Your Claude Code setup runs unchanged.** `CLAUDE.md`, `.claude/commands`,
   `.claude/skills`, `.claude/agents`, `.mcp.json`, plugins, and permission rules
   are picked up as they are. No migration, and no second config file to keep in
-  sync.
+  sync. A directory with no `CLAUDE.md` falls back to its `AGENTS.md`, the
+  cross-tool convention Claude Code now reads too, so a repo written for another
+  agent works here with nothing to change.
 - **Capability-tiered prompting.** A weaker model gets more guidance, not less.
   Not out of politeness; it is how you get output you can use.
 - **A package, not a fork.** One Code is a [pi](https://github.com/earendil-works/pi)
