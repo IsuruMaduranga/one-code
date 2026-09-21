@@ -1665,6 +1665,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						configuredDefault: configuredDefault,
 						sessionModel: ctx.model,
 						available,
+						requireImageInput: supportsImageInput(ctx.model),
 					});
 					return {
 						content: [
@@ -1690,6 +1691,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						configuredDefault: configuredDefault,
 						sessionModel: ctx.model,
 						available,
+						requireImageInput: supportsImageInput(ctx.model),
 					});
 					return {
 						content: [

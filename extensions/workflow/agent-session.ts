@@ -152,6 +152,7 @@ export function resolveWorkflowAgentModel(input: WorkflowModelInput): {
 			configuredDefault: input.configuredDefault,
 			sessionModel: input.sessionModel,
 			available: input.available,
+			requireImageInput: supportsImageInput(input.sessionModel),
 		});
 		const menu = subagentModelMenu({
 			available: input.available,
