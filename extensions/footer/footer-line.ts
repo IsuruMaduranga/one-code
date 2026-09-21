@@ -210,6 +210,12 @@ export function computeMainUsage(entries: readonly unknown[]): { cost: number; c
 			cost += costOf(entry.message.usage);
 		} else if ((entry.type === "branch_summary" || entry.type === "compaction") && entry.usage) {
 			cost += costOf(entry.usage);
+		} else if (entry.type === "usage" && entry.usage) {
+			// pi 0.86's model-attributed usage outside the LLM context — today its
+			// cache-warming refreshes (`kind: "cache_warm"`), billed as a cache read
+			// of the full context plus one output token. pi's /session counts them;
+			// so does the footer.
+			cost += costOf(entry.usage);
 		} else {
 			// Out-of-band calls (subagents, classifier, readers, recap, setup)
 			// persisted by recordUsage — the all-in half of the total.

@@ -147,6 +147,17 @@ describe("computeMainUsage", () => {
 		expect(computeMainUsage(entries).cost).toBeCloseTo(0.51, 5);
 	});
 
+	it("counts pi's own out-of-context usage entries (cache-warming refreshes) without touching cache-hit", () => {
+		const entries = [
+			{ type: "message", message: { role: "assistant", usage: { input: 100, cacheRead: 900, cacheWrite: 0, cost: { total: 0.1 } } } },
+			{ type: "usage", kind: "cache_warm", provider: "anthropic", model: "claude-sonnet-5", usage: { input: 1, cacheRead: 30000, cacheWrite: 0, output: 1, cost: { total: 0.009 } } },
+			{ type: "usage", kind: "cache_warm", provider: "anthropic", model: "claude-sonnet-5" }, // no usage yet: ignored
+		];
+		const { cost, cacheHitPercent } = computeMainUsage(entries);
+		expect(cost).toBeCloseTo(0.109, 5);
+		expect(cacheHitPercent).toBeCloseTo(90, 5);
+	});
+
 	it("returns zero cost and no cache-hit for an empty session", () => {
 		expect(computeMainUsage([])).toEqual({ cost: 0, cacheHitPercent: undefined });
 	});
