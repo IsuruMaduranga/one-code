@@ -1,6 +1,6 @@
 {
 	"name": "one-code-extension",
-	"version": "0.4.0",
+	"version": "0.4.1",
 	"description": "One Code as a pi package — the Claude Code experience on your own pi install: ported system prompt, Claude-Code-format permissions, .claude/ compatibility, ToolSearch-style deferred tools, and system-reminder steering. For the bundled app, install `@one-ai/one-code` instead.",
 	"keywords": [
 		"pi",
@@ -88,7 +88,8 @@
 	"scripts": {
 		"typecheck": "tsc --noEmit",
 		"test": "vitest run",
-		"gen:model-facts": "node scripts/gen-model-facts.mjs"
+		"gen:model-facts": "node scripts/gen-model-facts.mjs",
+		"sync:app-readme": "node scripts/app-readme.mjs"
 	},
 	"dependencies": {
 		"@modelcontextprotocol/sdk": "^1.30.0",
