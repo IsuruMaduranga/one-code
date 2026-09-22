@@ -60,6 +60,7 @@ import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { REMINDER_CHANNEL, wrapReminder } from "../lib/reminders.ts";
 import { type ChildHookCall, type ChildHookResult, type HookBridge, SUBAGENT_HOOK_CHANNEL, type SubagentHookPayload } from "./subagent-bridge.ts";
 import { projectHooksApproved } from "./trust.ts";
+import { QueuedDelivery } from "../lib/queued-delivery.ts";
 
 /** Claude Code's `hook_additional_context` attachment text (utils/messages.ts). */
 export function hookContextText(event: CcHookEvent, text: string): string {
@@ -106,14 +107,11 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	/** Context from UserPromptSubmit / SessionStart / PostCompact hooks, delivered with the next prompt. */
 	let pendingPromptContext: Array<{ event: CcHookEvent; text: string }> = [];
 	/**
-	 * UserPromptSubmit context for messages queued mid-turn (pi 0.86+ fires
-	 * `input` for them), keyed by the typed text, until pi delivers the message.
-	 * Such a message never reaches before_agent_start, and pi drains one queued
-	 * message per request, so a context message of its own would arrive a
-	 * request late. A queued message pi expands (a template) or an extension
-	 * takes over (a skill) never matches, and is dropped when the turn settles.
+	 * UserPromptSubmit context for messages queued mid-turn, held until pi
+	 * delivers the message (lib/queued-delivery.ts): such a message never
+	 * reaches before_agent_start.
 	 */
-	let queuedPromptContext: Array<{ text: string; context: string }> = [];
+	const queuedPromptContext = new QueuedDelivery<string>();
 	/** The last context seen, for bridged child calls (dispatched parent-side). */
 	let lastCtx: ExtensionContext | undefined;
 	/**
@@ -356,7 +354,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		if (!outcome.additionalContext || gen !== sessionGen) return undefined;
 		// A queued message's context waits for pi to deliver that message
 		// (message_start below), so it rides the same request.
-		if (queued) queuedPromptContext.push({ text: event.text, context: hookContextText("UserPromptSubmit", outcome.additionalContext) });
+		if (queued) queuedPromptContext.hold(event.text, hookContextText("UserPromptSubmit", outcome.additionalContext));
 		else pendingPromptContext.push({ event: "UserPromptSubmit", text: outcome.additionalContext });
 		return undefined;
 	});
@@ -365,13 +363,9 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	// one-shot emitted here is pinned to that message: after the prompt, as the
 	// before_agent_start message is for a prompt that opens a turn.
 	pi.on("message_start", (event) => {
-		if (queuedPromptContext.length === 0 || event.message.role !== "user") return;
-		// pi matches a delivered message to its queue by this same comparison.
-		const text = contentText(event.message.content, "");
-		const index = queuedPromptContext.findIndex((entry) => entry.text === text);
-		if (index === -1) return;
-		const [entry] = queuedPromptContext.splice(index, 1);
-		pi.events.emit(REMINDER_CHANNEL, { text: entry.context, placement: "last-append" });
+		if (queuedPromptContext.isEmpty || event.message.role !== "user") return;
+		const text = queuedPromptContext.release(contentText(event.message.content, ""));
+		if (text) pi.events.emit(REMINDER_CHANNEL, { text, placement: "last-append" });
 	});
 
 	// Prompt/session/compaction hook context rides the turn it belongs to as a
@@ -417,7 +411,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		lastCtx = ctx;
 		const gen = ++sessionGen;
 		pendingPromptContext = [];
-		queuedPromptContext = [];
+		queuedPromptContext.clear();
 		sessionStartPending = undefined;
 		// Publish the child hook bridge (subagent-bridge.ts). The closures read
 		// live parent state per call, so once per session start is enough.
@@ -531,7 +525,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	pi.on("agent_settled", async (_event, ctx) => {
 		// A queued message pi never delivered as typed (expanded, or taken over by
 		// an extension) keeps no context for a later, unrelated prompt.
-		queuedPromptContext = [];
+		queuedPromptContext.clear();
 		// CC skips Stop when the turn ended on an API error (a blocking hook would
 		// spiral: error → block → retry → error) or on a user interrupt (its query
 		// loop returns on the abort signal before the stop-hook step). An empty latch

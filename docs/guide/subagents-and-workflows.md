@@ -126,8 +126,10 @@ include the word **`ultracode`** in your message. The model writes a short
 JavaScript script that fans the work out across many agents in parallel,
 then runs it with the `workflow` tool.
 
-The keyword arms the turn it appears in. A message you queue while the
-model is still working doesn't arm the next turn. For a longer stretch of
+The keyword arms the turn it appears in. That includes a message you
+queue while the model is still working: it arms once the model gets to
+your message. (Queued messages need pi 0.86 or later; the `onecode` app
+ships with it.) For a longer stretch of
 this kind of work, turn the mode on with `/effort ultracode`: it sets the
 reasoning effort to `xhigh` and keeps workflow orchestration armed until
 you change the effort again. The footer shows `✦ ultracode` while it's
