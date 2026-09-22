@@ -10,8 +10,11 @@ describe("btw side-question reminder", () => {
 		let capture: { messages: Array<{ content: string }> } | undefined;
 		try {
 			capture = JSON.parse(readFileSync(capturePath, "utf8"));
-		} catch {
-			return; // the capture is an internal file; SIDE_QUESTION_REMINDER below is the locked copy
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+				return; // the capture is an internal file; SIDE_QUESTION_REMINDER below is the locked copy
+			}
+			throw error;
 		}
 		// The last message is the side question CC sent: the reminder, a blank
 		// line, then the user's question verbatim.

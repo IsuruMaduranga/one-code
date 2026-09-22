@@ -217,7 +217,7 @@ interface Resident {
 	 * that turn (undefined when clean or auto mode is off); the handler puts it
 	 * ahead of the report in its notification.
 	 */
-	turnHandlers: Array<(outcome: ChildOutcome, review: HandBackVerdict | undefined) => void>;
+	turnHandlers: Array<(outcome: ChildOutcome, review: HandBackVerdict | undefined, stopped: boolean) => void>;
 }
 
 export default function subagentsExtension(pi: ExtensionAPI) {
@@ -248,7 +248,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	/** taskId → kill handle: a resident's kill resolves when it has exited; a blocking run exposes `result`. */
 	const liveHandles = new Map<string, { kill(): void | Promise<void>; result?: Promise<unknown> }>();
 	/**
-	 * Task ids the user asked to stop (x / ctrl+x ctrl+k / session teardown). A
+	 * Task ids the user asked to stop (task_stop / x / ctrl+x ctrl+k / session teardown). A
 	 * kill still surfaces as an exit, but it neither completed nor failed — so the
 	 * strip and the notification read this to say "Stopped" instead of the
 	 * misleading "Completed"/"failed" (TUI-REVIEW L1). Cleared when a run (re)starts.
@@ -628,17 +628,18 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
 	// --- The subagent panel: strip soft focus + Enter-to-view transcript swap ---
 
-	/** Stop one live agent by task id (blocking-run handle or resident task). */
-	const stopAgent = (taskId: string) => {
-		stoppedTaskIds.add(taskId); // the coming exit is a user stop, not a completion (L1)
-		void liveHandles.get(taskId)?.kill();
+	/** Stop an agent, recording its persistent id before kill can settle its turn. */
+	const stopAgent = (taskId: string, handle = liveHandles.get(taskId)) => {
+		// An old task can still await review after the agent has resumed. Its
+		// captured handle must not mark the replacement run as stopped.
+		if (handle && liveHandles.get(taskId) === handle) stoppedTaskIds.add(taskId);
+		return handle?.kill();
 	};
 	/** Stop every live agent; returns one settle promise per agent (a resident's exit, a blocking run's result). */
 	const stopAllAgents = (): Promise<unknown>[] => {
 		const exits: Promise<unknown>[] = [];
 		for (const [taskId, handle] of liveHandles) {
-			stoppedTaskIds.add(taskId);
-			const killed = handle.kill();
+			const killed = stopAgent(taskId, handle);
 			const settled = handle.result ?? killed;
 			if (settled) exits.push(settled);
 		}
@@ -1816,8 +1817,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				const worktreeNote = worktree
 					? `\n\n(Running in worktree ${worktree.path} — kept while the agent stays resident.)`
 					: "";
-				resident.turnHandlers.push((outcome, review) => {
-					const stopped = stoppedTaskIds.has(p.record.taskId);
+				resident.turnHandlers.push((outcome, review, stopped) => {
 					task.status = stopped ? "stopped" : outcome.failed ? "failed" : "completed";
 					task.finishedAt = Date.now();
 					firstTurnOutput = outcome.output;
@@ -1901,10 +1901,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						// trailing it. The wait is bounded (hand-back-review.ts) and
 						// answered synchronously when auto mode is off.
 						const handler = resident.turnHandlers.shift();
+						// A stop or resume during review must not change this turn's outcome.
+						const stopped = stoppedTaskIds.has(p.record.taskId);
 						armReaper();
 						void awaitHandBackReview(pi.events, p.record, outcome.actions).then((review) => {
 							if (handler) {
-								handler(outcome, review);
+								handler(outcome, review, stopped);
 							} else {
 								// A turn nobody is waiting on (e.g. a steer that raced past its
 								// target turn and ran on its own) must still surface.
@@ -1915,6 +1917,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 									toolUseId: toolCallId,
 									outputFile: logPath,
 									outcome,
+									stopped,
 									startedAt: resident.startedAt,
 									report: bounded(outcome.output, `${p.record.taskId}-update-${Date.now()}`, OUTPUT_CAP),
 									review,
@@ -1944,7 +1947,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					startedAt: Date.now(),
 					logPath,
 					output: () => firstTurnOutput ?? (handle.snapshot().text || lastOutput),
-					stop: () => handle.kill(),
+					stop: () => stopAgent(p.record.taskId, handle),
 					resident: () => !handle.exited(),
 					finished,
 				};
@@ -2063,12 +2066,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					status: "running",
 					startedAt: Date.now(),
 					output: () => replyOutput || resident.handle.snapshot().text,
-					stop: () => resident.handle.kill(),
+					stop: () => stopAgent(record.taskId, resident.handle),
 					resident: () => !resident.handle.exited(),
 					finished,
 				};
-				resident.turnHandlers.push((outcome, review) => {
-					task.status = outcome.failed ? "failed" : "completed";
+				resident.turnHandlers.push((outcome, review, stopped) => {
+					task.status = stopped ? "stopped" : outcome.failed ? "failed" : "completed";
 					task.finishedAt = Date.now();
 					replyOutput = outcome.output;
 					finish();
@@ -2083,6 +2086,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						toolUseId: toolCallId,
 						outputFile: outputLogPath(record),
 						outcome,
+						stopped,
 						startedAt: resident.startedAt,
 						report: bounded(outcome.output, `${taskId}-reply`, OUTPUT_CAP),
 						review,
@@ -2199,15 +2203,16 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				status: "running",
 				startedAt: Date.now(),
 				output: () => handle.snapshot().text,
-				stop: () => handle.kill(),
+				stop: () => stopAgent(record.taskId, handle),
 				finished,
 			};
 			pi.events.emit(TASK_REGISTER_CHANNEL, task);
 
 			void handle.result.then((outcome) => {
 				runningIds.delete(record.taskId);
-				live.finish(Boolean(outcome.failed));
-				task.status = outcome.failed ? "failed" : "completed";
+				const stopped = stoppedTaskIds.has(record.taskId);
+				live.finish(stopped ? "stopped" : Boolean(outcome.failed));
+				task.status = stopped ? "stopped" : outcome.failed ? "failed" : "completed";
 				task.finishedAt = Date.now();
 				finish();
 				notifyHandBack({
@@ -2216,6 +2221,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					name: record.name,
 					toolUseId: toolCallId,
 					outcome,
+					stopped,
 					startedAt: task.startedAt,
 					report: `${relocationNote}${bounded(outcome.output, `${taskId}-reply`, OUTPUT_CAP)}`,
 					review: undefined,
@@ -2301,6 +2307,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			configuredDefault: applicable,
 			sessionModel: ctx.model,
 			available,
+			requireImageInput: supportsImageInput(ctx.model),
 		});
 		ctx.ui.notify(
 			[
@@ -2337,15 +2344,21 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		}
 
 		const available = usableModels(ctx);
-		const resolution = resolveSubagentModel({ requested: spec, sessionModel: ctx.model, available });
+		const resolution = resolveSubagentModel({
+			requested: spec,
+			sessionModel: ctx.model,
+			available,
+			requireImageInput: supportsImageInput(ctx.model),
+		});
 		if (resolution.unresolved) {
 			const fallback = resolveSubagentModel({
 				configuredDefault: applicableSubagentDefault(loadSubagentDefault(os.homedir()), ctx.model),
 				sessionModel: ctx.model,
 				available,
+				requireImageInput: supportsImageInput(ctx.model),
 			});
 			ctx.ui.notify(
-				`No available model matches "${spec}".\n\n` +
+				`${resolution.unresolvedReason ?? `No available model matches "${spec}".`}\n\n` +
 					subagentModelsReminder({
 						available,
 						sessionModel: ctx.model,
