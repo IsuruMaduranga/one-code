@@ -15,7 +15,7 @@ context management) live in the harness, not the model. One Code brings all of
 them across, because the good part was never the logo.
 
 <p align="center">
-  <img src="demo/onecode.gif" alt="One Code switching models and running an agentic task" width="820">
+  <img src="demo/onecode.gif" alt="One Code: permission modes, a mid-session model switch, an agentic edit approved by auto mode, a /btw side question, /doctor report, and a subagent in the live panel" width="820">
 </p>
 
 [User guide](docs/guide/README.md) ·
