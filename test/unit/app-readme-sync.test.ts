@@ -18,11 +18,14 @@ describe("app/README.md is the root README with absolute links", () => {
 		expect(app).not.toMatch(/src="(?!https?:)/);
 	});
 
-	it("rewrites links to blob URLs and images to raw URLs", () => {
-		const out = appReadmeFrom('[g](docs/guide/README.md) [a](#x) [h](https://x.y) <img src="demo/a.gif"> [l](LICENSE)');
+	it("rewrites links to blob URLs and images (HTML or Markdown) to raw URLs", () => {
+		const out = appReadmeFrom(
+			'[g](docs/guide/README.md) [a](#x) [h](https://x.y) <img src="demo/a.gif"> ![shot](demo/b.png) [l](LICENSE)',
+		);
 		expect(out).toBe(
 			'[g](https://github.com/IsuruMaduranga/one-code/blob/master/docs/guide/README.md) [a](#x) [h](https://x.y) ' +
 				'<img src="https://raw.githubusercontent.com/IsuruMaduranga/one-code/master/demo/a.gif"> ' +
+				"![shot](https://raw.githubusercontent.com/IsuruMaduranga/one-code/master/demo/b.png) " +
 				"[l](https://github.com/IsuruMaduranga/one-code/blob/master/LICENSE)",
 		);
 	});

@@ -14,6 +14,8 @@ const RAW = `https://raw.githubusercontent.com/${REPO}/master/`;
 /** Rewrite the root README's relative links and images to absolute GitHub URLs. */
 export function appReadmeFrom(rootReadme) {
 	return rootReadme
+		// Markdown images first: raw content, so the image renders.
+		.replace(/!\[([^\]]*)\]\((?!https?:)([^)\s]+)\)/g, (_m, alt, path) => `![${alt}](${RAW}${path})`)
 		// Markdown links: skip absolute URLs, anchors and mailto.
 		.replace(/\]\((?!https?:|#|mailto:)([^)\s]+)\)/g, (_m, path) => `](${BLOB}${path})`)
 		// HTML image sources (the demo GIF): raw content, so the image renders.
