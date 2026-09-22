@@ -11,6 +11,19 @@ export function isClaudeFamilyModel(model: { provider: string; id: string }): bo
 	return model.provider === "anthropic" || /claude/i.test(model.id);
 }
 
+/**
+ * Whether a model accepts image input, from pi's catalog `input` modality
+ * (`("text" | "image")[]`). PDFs count as image input too: pi's Read tool renders
+ * PDF pages visually, so a model that cannot take images cannot read a PDF a
+ * subagent opens either. A model whose modality is unknown (undefined `input`, as
+ * on some opaque/self-hosted providers, or a minimal test stub, or no model at all) reads as
+ * text-only here — the safe direction for a gate that only ever ADDS a
+ * requirement, never relaxes one. See `docs/decisions/model-policy.md`.
+ */
+export function supportsImageInput(model: { input?: readonly string[] } | undefined): boolean {
+	return Array.isArray(model?.input) && model.input.includes("image");
+}
+
 export type ProviderPolicyKind = "direct" | "hosted" | "gateway" | "opaque";
 
 export interface ProviderPolicy {

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	batchSize,
 	emptyBatch,
-	formatMonitorBatch,
+	formatMonitorEvents,
 	MONITOR_BATCH_MAX_CHARS,
 	MONITOR_BATCH_MAX_LINES,
 	pushEvent,
@@ -15,16 +15,15 @@ describe("monitor batching", () => {
 		expect(batch.shown).toHaveLength(MONITOR_BATCH_MAX_LINES);
 		expect(batch.overflow).toBe(25);
 		expect(batchSize(batch)).toBe(MONITOR_BATCH_MAX_LINES + 25);
-		const text = formatMonitorBatch("m1", "log", batch);
-		expect(text).toContain(`emitted ${MONITOR_BATCH_MAX_LINES + 25} event(s)`);
+		const text = formatMonitorEvents("m1", batch);
 		expect(text).toContain("+25 more line(s) not shown — task_output m1 has the full stream");
-		expect(text.split("\n")).toHaveLength(1 + MONITOR_BATCH_MAX_LINES + 1);
+		expect(text.split("\n")).toHaveLength(MONITOR_BATCH_MAX_LINES + 1);
 	});
 
 	it("caps the characters shown and reports the lines it dropped", () => {
 		const batch = emptyBatch();
 		for (let i = 0; i < 10; i++) pushEvent(batch, "x".repeat(1_000));
-		const text = formatMonitorBatch("m2", "log", batch);
+		const text = formatMonitorEvents("m2", batch);
 		expect(text.length).toBeLessThan(MONITOR_BATCH_MAX_CHARS + 300);
 		expect(text).toMatch(/\+\d+ more line\(s\) not shown/);
 	});
@@ -33,6 +32,6 @@ describe("monitor batching", () => {
 		const batch = emptyBatch();
 		pushEvent(batch, "a");
 		pushEvent(batch, "b");
-		expect(formatMonitorBatch("m3", "log", batch)).toBe("Monitor m3 (log) emitted 2 event(s):\na\nb");
+		expect(formatMonitorEvents("m3", batch)).toBe("a\nb");
 	});
 });

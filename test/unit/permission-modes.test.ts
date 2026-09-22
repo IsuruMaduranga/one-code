@@ -240,13 +240,13 @@ describe("permissionsExtension model_select updates classifier", () => {
 	it("answers a background hand-back review synchronously when auto mode is off, so the report is not delayed", () => {
 		const fake = makeFakePi();
 		permissionsExtension(fake.pi as any);
-		const answers: Array<string | undefined> = [];
+		const answers: Array<unknown> = [];
 		fake.pi.events.emit("one-code:subagent-actions", {
 			toolCallId: "t1",
 			actions: [{ toolName: "bash", subject: "ls" }],
 			background: true,
 			agentName: "worker",
-			onReview: (flag: string | undefined) => answers.push(flag),
+			onReview: (verdict: unknown) => answers.push(verdict),
 		});
 		expect(answers).toEqual([undefined]);
 	});

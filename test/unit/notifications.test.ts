@@ -1,14 +1,23 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+	agentMessage,
 	awaitOneShotTurn,
 	createTaskNotifier,
+	frameForDelivery,
+	TASK_OUTPUT_DELIVERED_CHANNEL,
+	handBackPointer,
 	mergeNotificationTexts,
 	NOTIFICATION_BATCH_KEY,
 	NOTIFICATION_ID_KEY,
 	notificationBody,
 	sessionOutlivesTurn,
-	systemNotification,
+	shellSummary,
+	taskNotification,
 } from "../../extensions/lib/notifications.ts";
+
+/** A kind=shell notification for a finished background command. */
+const shellDone = (id: string, tail?: string) =>
+	taskNotification({ kind: "shell", taskId: id, status: "completed", summary: shellSummary(`build ${id}`, "completed", 0), result: tail });
 
 type Handler = (event: unknown, ctx: unknown) => void;
 
@@ -17,9 +26,18 @@ function fakePi(options: { prompted?: boolean; sendThrows?: boolean } = {}) {
 	const handlers = new Map<string, Handler[]>();
 	const sent: Array<{ message: Record<string, unknown>; options: Record<string, unknown> }> = [];
 	const sentAsUser: string[] = [];
+	const channels = new Map<string, Array<(data: unknown) => void>>();
 	const pi = {
 		on(event: string, handler: Handler) {
 			handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+		},
+		events: {
+			on(channel: string, handler: (data: unknown) => void) {
+				channels.set(channel, [...(channels.get(channel) ?? []), handler]);
+			},
+			emit(channel: string, data: unknown) {
+				for (const h of channels.get(channel) ?? []) h(data);
+			},
 		},
 		sendMessage(message: Record<string, unknown>, options: Record<string, unknown>) {
 			if (options && (pi as { throws?: boolean }).throws) throw new Error("Extension API is no longer active");
@@ -43,7 +61,7 @@ function fakePi(options: { prompted?: boolean; sendThrows?: boolean } = {}) {
 		const details = sent[index]?.message.details;
 		fire("message_end", { message: { role: "custom", details } });
 	};
-	return { pi: pi as never, sent, sentAsUser, fire, deliver, primed };
+	return { pi: pi as never, sent, sentAsUser, fire, deliver, primed, emit: pi.events.emit };
 }
 
 describe("createTaskNotifier", () => {
@@ -206,12 +224,13 @@ describe("createTaskNotifier coalescing (M1)", () => {
 
 	it("merges notifications that arrive within the window into one message, in arrival order", () => {
 		vi.useFakeTimers();
-		const { pi, sent, primed } = fakePi();
+		const { pi, sent, fire, primed } = fakePi();
 		const notify = createTaskNotifier(pi, { coalesceMs: 250 });
 		primed();
-		notify("task-notification", systemNotification("Background bash 1 completed.\n\nout A"), { taskId: "1" });
-		notify("task-notification", systemNotification("Background bash 2 completed.\n\nout B"), { taskId: "2" });
-		notify("task-notification", systemNotification("Background bash 3 completed."), { taskId: "3" });
+		fire("agent_start"); // mid-turn: the frames ride the bare preamble, no reminder wrapper
+		notify("task-notification", shellDone("1", "out A"), { taskId: "1" });
+		notify("task-notification", shellDone("2", "out B"), { taskId: "2" });
+		notify("task-notification", shellDone("3"), { taskId: "3" });
 		expect(sent).toHaveLength(0);
 		vi.advanceTimersByTime(249);
 		expect(sent).toHaveLength(0);
@@ -221,14 +240,11 @@ describe("createTaskNotifier coalescing (M1)", () => {
 		expect(sent[0].options).toEqual({ deliverAs: "steer", triggerTurn: true });
 		expect(sent[0].message.customType).toBe("task-notification");
 		const text = (sent[0].message.content as Array<{ text: string }>)[0].text;
-		// One frame, three bodies, numbered in arrival order.
-		expect(text.startsWith("SYSTEM NOTIFICATION — NOT USER INPUT\n")).toBe(true);
-		expect(text.match(/SYSTEM NOTIFICATION/g)).toHaveLength(1);
-		expect(text).toContain("3 events arrived together");
-		expect(text.indexOf("Event 1 of 3")).toBeLessThan(text.indexOf("Event 2 of 3"));
-		expect(text.indexOf("Event 2 of 3")).toBeLessThan(text.indexOf("Event 3 of 3"));
-		expect(text).toContain("out A");
-		expect(text).toContain("out B");
+		// Three self-delimiting frames, a blank line apart, in arrival order (CC delivers all pending in one round).
+		expect(text.match(/<task-notification>/g)).toHaveLength(3);
+		expect(text).toBe(frameForDelivery([shellDone("1", "out A"), shellDone("2", "out B"), shellDone("3")].join("\n\n"), "mid-turn"));
+		expect(text.indexOf("<task-id>1</task-id>")).toBeLessThan(text.indexOf("<task-id>2</task-id>"));
+		expect(text.indexOf("<task-id>2</task-id>")).toBeLessThan(text.indexOf("<task-id>3</task-id>"));
 		const details = sent[0].message.details as Record<string, unknown>;
 		expect(details[NOTIFICATION_BATCH_KEY]).toEqual([
 			{ customType: "task-notification", details: { taskId: "1" } },
@@ -236,6 +252,67 @@ describe("createTaskNotifier coalescing (M1)", () => {
 			{ customType: "task-notification", details: { taskId: "3" } },
 		]);
 		expect(typeof details[NOTIFICATION_ID_KEY]).toBe("string");
+	});
+
+	it("a fired wakeup or loop tick is never merged with frames: it is the turn's input, sent on its own in arrival order", () => {
+		vi.useFakeTimers();
+		const { pi, sent, fire, primed } = fakePi();
+		const notify = createTaskNotifier(pi, { coalesceMs: 250 });
+		primed();
+		fire("agent_start");
+		notify("task-notification", shellDone("1"), { taskId: "1" });
+		notify("wakeup", "check the deploy", { reason: "r" });
+		notify("task-notification", shellDone("2"), { taskId: "2" });
+		notify("task-notification", shellDone("3"), { taskId: "3" });
+		vi.advanceTimersByTime(250);
+		expect(sent.map((s) => s.message.customType)).toEqual(["task-notification", "wakeup", "task-notification"]);
+		expect(sent[1].message.content).toEqual([{ type: "text", text: "check the deploy" }]);
+		expect((sent[1].message.details as Record<string, unknown>).reason).toBe("r");
+		expect((sent[2].message.content as Array<{ text: string }>)[0].text).toBe(frameForDelivery([shellDone("2"), shellDone("3")].join("\n\n"), "mid-turn"));
+	});
+
+	it("frames a task notification for its delivery: reminder-wrapped when it opens a turn, bare preamble mid-turn, the with-user-turn variant after an interrupt", () => {
+		vi.useFakeTimers();
+		const { pi, sent, fire, primed } = fakePi();
+		const notify = createTaskNotifier(pi, { coalesceMs: 0 });
+		primed();
+		notify("task-notification", shellDone("1"), { taskId: "1" });
+		expect((sent[0].message.content as Array<{ text: string }>)[0].text).toBe(frameForDelivery(shellDone("1"), "opens-turn"));
+		fire("agent_start");
+		notify("task-notification", shellDone("2"), { taskId: "2" });
+		expect((sent[1].message.content as Array<{ text: string }>)[0].text).toBe(frameForDelivery(shellDone("2"), "mid-turn"));
+		fire("agent_end", { messages: [] });
+		fire("agent_settled");
+		// Interrupted: the next notification waits for the user's prompt, framed as riding with it.
+		fire("agent_start");
+		fire("agent_end", { messages: [{ role: "assistant", stopReason: "aborted" }] });
+		fire("agent_settled");
+		notify("task-notification", shellDone("3"), { taskId: "3" });
+		const held = sent.at(-1)!;
+		expect(held.options).toEqual({ deliverAs: "nextTurn" });
+		expect((held.message.content as Array<{ text: string }>)[0].text).toBe(frameForDelivery(shellDone("3"), "with-user-prompt"));
+	});
+
+	it("withdraws a completion still in the window once task_output delivered that task's output (opt-in per notifier)", () => {
+		vi.useFakeTimers();
+		const { pi, sent, fire, primed, emit } = fakePi();
+		const notify = createTaskNotifier(pi, { coalesceMs: 250, withdrawOnDelivery: true });
+		primed();
+		fire("agent_start");
+		notify("task-notification", shellDone("1"), { taskId: "1" });
+		notify("task-notification", shellDone("2"), { taskId: "2" });
+		emit(TASK_OUTPUT_DELIVERED_CHANNEL, { taskId: "1" });
+		vi.advanceTimersByTime(250);
+		expect(sent).toHaveLength(1);
+		expect((sent[0].message.content as Array<{ text: string }>)[0].text).toBe(frameForDelivery(shellDone("2"), "mid-turn"));
+		// Without the option nothing is withdrawn.
+		const other = fakePi();
+		const notifyAgent = createTaskNotifier(other.pi, { coalesceMs: 250 });
+		other.primed();
+		notifyAgent("subagent-result", shellDone("3"), { taskId: "3" });
+		other.emit(TASK_OUTPUT_DELIVERED_CHANNEL, { taskId: "3" });
+		vi.advanceTimersByTime(250);
+		expect(other.sent).toHaveLength(1);
 	});
 
 	it("a lone notification keeps its own type, text and details (no merge frame)", () => {
@@ -374,12 +451,41 @@ describe("mergeNotificationTexts / notificationBody", () => {
 		expect(mergeNotificationTexts(["x"])).toBe("x");
 	});
 
-	it("strips each body's own framing so the merged message carries exactly one", () => {
-		const merged = mergeNotificationTexts([systemNotification("A done"), "plain B", systemNotification("C done\n\ntail")]);
-		expect(merged.match(/SYSTEM NOTIFICATION/g)).toHaveLength(1);
-		expect(notificationBody(merged)).toContain("--- Event 1 of 3 ---\nA done");
-		expect(notificationBody(merged)).toContain("--- Event 2 of 3 ---\nplain B");
-		expect(notificationBody(merged)).toContain("--- Event 3 of 3 ---\nC done\n\ntail");
+	it("joins frames with a blank line and keeps a hand-back's message ahead of its pointer", () => {
+		const report = agentMessage({ from: "a1", body: "line 1\n\nline 3", handBack: true });
+		const pointer = taskNotification({ kind: "agent", taskId: "a1", status: "completed", summary: 'Agent "explore-1" finished', result: handBackPointer("a1", false) });
+		const merged = mergeNotificationTexts([report, pointer, "plain B"]);
+		expect(merged).toBe(`${report}\n\n${pointer}\n\nplain B`);
+		expect(merged.indexOf("<agent-message")).toBeLessThan(merged.indexOf("<task-notification>"));
+	});
+
+	it("reduces a task notification to its summary and unescaped body for display", () => {
+		const text = taskNotification({ kind: "shell", taskId: "b1", status: "completed", summary: shellSummary("run <tests>", "completed", 0), result: "a < b && c" });
+		expect(notificationBody(text)).toBe('Background command "run <tests>" completed (exit code 0)\na < b && c');
+		const batch = taskNotification({ kind: "monitor", taskId: "m1", summary: 'Monitor event: "log"', result: "l1\nl2" });
+		expect(notificationBody(batch)).toBe('Monitor event: "log"\nl1\nl2');
+		expect(notificationBody("plain text\n")).toBe("plain text");
+		// The send-time framing (preamble, reminder wrapper) never shows.
+		for (const delivery of ["mid-turn", "opens-turn", "with-user-prompt"] as const) {
+			expect(notificationBody(frameForDelivery(batch, delivery))).toBe('Monitor event: "log"\nl1\nl2');
+		}
+	});
+
+	it("reduces a hand-back to the sender line and the de-indented report, guard and preamble dropped", () => {
+		const text = agentMessage({ from: "a1", body: "first\n\n  indented already", handBack: true, warning: "<system-reminder>\nflag\n</system-reminder>" });
+		expect(notificationBody(text)).toBe("Report from agent a1:\n<system-reminder>\nflag\n</system-reminder>\nfirst\n\n  indented already");
+		expect(notificationBody(text)).not.toContain("permission laundering");
+		expect(notificationBody(agentMessage({ from: "a2", body: "hello" }))).toBe("Message from agent a2:\nhello");
+		// The mid-turn form (other opener, reply hint after the guard) parses the same way.
+		expect(notificationBody(agentMessage({ from: "a2", body: "hello", midTurn: true }))).toBe("Message from agent a2:\nhello");
+	});
+
+	it("renders every frame of a coalesced message, in order", () => {
+		const merged = mergeNotificationTexts([
+			agentMessage({ from: "a1", body: "report", handBack: true }),
+			taskNotification({ kind: "agent", taskId: "a1", status: "completed", summary: 'Agent "x" finished', result: handBackPointer("a1", false) }),
+		]);
+		expect(notificationBody(merged)).toBe(`Report from agent a1:\nreport\n\nAgent "x" finished\n${handBackPointer("a1", false).trim()}`);
 	});
 });
 
@@ -415,13 +521,5 @@ describe("awaitOneShotTurn", () => {
 		const isIdle = vi.fn(() => ++calls >= 3); // busy for the first two polls, then idle
 		await awaitOneShotTurn({ mode: "json", isIdle });
 		expect(calls).toBe(3);
-	});
-});
-
-describe("systemNotification", () => {
-	it("frames the body with the anti-confabulation header", () => {
-		const text = systemNotification("body");
-		expect(text.startsWith("SYSTEM NOTIFICATION — NOT USER INPUT\n")).toBe(true);
-		expect(text.endsWith("\n\nbody")).toBe(true);
 	});
 });

@@ -40,6 +40,32 @@ export function trimToTurnBoundary<T extends { role: string }>(messages: readonl
 	return start === -1 ? [] : messages.slice(start);
 }
 
+/** The placeholder left in a message whose only content was an image we removed. */
+export const IMAGE_OMITTED_TEXT = "[image omitted]";
+
+/**
+ * Drop image content blocks from a message history, so a side call can run on a
+ * text-only model without the images the conversation carried breaking the
+ * request. Used by the recap and btw side calls, which reuse the exact messages
+ * the session last sent — those can hold `image` blocks (pasted images, an image
+ * a Read returned), and neither call needs them: recap summarises "what
+ * happened" and btw answers a text question. The classifier renders the
+ * transcript to text (never blocks) and the web_fetch reader sends page text, so
+ * they need no stripping. A message left with no content becomes a single
+ * placeholder text block, so it stays a valid turn on strict providers. Purely
+ * structural (any `{ role, content }` message) to stay free of runtime pi
+ * imports; assistant messages carry no images and pass through untouched.
+ * See `docs/decisions/model-policy.md`.
+ */
+export function stripImageBlocks<M extends { role: string; content: unknown }>(messages: readonly M[]): M[] {
+	return messages.map((message) => {
+		const content = message.content;
+		if (!Array.isArray(content) || !content.some((block) => (block as { type?: string })?.type === "image")) return message;
+		const kept = content.filter((block) => (block as { type?: string })?.type !== "image");
+		return { ...message, content: kept.length > 0 ? kept : [{ type: "text", text: IMAGE_OMITTED_TEXT }] } as M;
+	});
+}
+
 /** Join the text blocks of a completion result into one trimmed string. */
 export function answerText(content: readonly { type: string; text?: string }[]): string {
 	return content

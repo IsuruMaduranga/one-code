@@ -12,7 +12,7 @@
 
 /** Inclusive minimum and exclusive maximum pi version this release is tested against. */
 export const TESTED_PI_MIN = "0.83.0";
-export const TESTED_PI_MAX_EXCLUSIVE = "0.86.0";
+export const TESTED_PI_MAX_EXCLUSIVE = "0.87.0";
 
 /** Dotted-numeric parse; undefined for anything that is not plain x.y.z numbers. */
 export function parseVersion(version: string): number[] | undefined {

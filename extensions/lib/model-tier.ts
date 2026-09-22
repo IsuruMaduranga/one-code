@@ -40,7 +40,7 @@ import {
 	scoreFor,
 } from "./capability-index.ts";
 import { isPriorGeneration, lacksToolCalls, modelGeneration } from "./model-facts.ts";
-import { baseModelId, isDatedDuplicate, modelIdentity, modelsContainedToSession, modelSpec, pricedInput } from "./model-policy.ts";
+import { baseModelId, isDatedDuplicate, modelIdentity, modelsContainedToSession, modelSpec, pricedInput, supportsImageInput } from "./model-policy.ts";
 import { oneCodeStateDir } from "./paths.ts";
 
 export type PromptTier = "frontier" | "workhorse" | "cheap" | "tiny";
@@ -340,14 +340,25 @@ export function resolveModelTier(model: Model<Api> | undefined, env: NodeJS.Proc
  * drops it. Budget ceilings and strictly-cheaper-than-session are caller policy —
  * this function ranks, it does not gate. A caller that already computed the
  * containment set may pass it as `contained` to skip the O(catalog) recompute.
+ *
+ * `requireImageInput` (default false) drops every candidate that cannot take
+ * image input — the modality gate a subagent selection sets when the session
+ * model is image-capable, so a delegated worker can still read an image or PDF
+ * the session may feed it. The classifier and the readers leave it false: the
+ * classifier renders the transcript to text and the readers strip images, so
+ * neither ever sends one. See `docs/decisions/model-policy.md`.
  */
 export function economicalContainedCandidates(
 	available: Model<Api>[],
 	sessionModel: Model<Api>,
 	contained?: Model<Api>[],
+	requireImageInput = false,
 ): Model<Api>[] {
 	const pool = contained ?? modelsContainedToSession(available, sessionModel);
 	return pool
+		// Modality gate: when the session works with images/PDFs a subagent may
+		// need to read, a text-only worker cannot serve — drop it before ranking.
+		.filter((model) => !requireImageInput || supportsImageInput(model))
 		// A dated snapshot whose undated alias is also listed is the same model
 		// twice; rank the alias so every automatic pick (classifier, subagent,
 		// reader, presets) names the model the way the user sees it in /model.
@@ -394,11 +405,11 @@ export function atLeastTier(tier: PromptTier, floor: PromptTier): boolean {
 export function cheaperContainedCandidates(
 	available: Model<Api>[],
 	sessionModel: Model<Api>,
-	opts: { strict?: boolean; contained?: Model<Api>[]; role?: FloorRole } = {},
+	opts: { strict?: boolean; contained?: Model<Api>[]; role?: FloorRole; requireImageInput?: boolean } = {},
 ): Model<Api>[] {
 	const sessionSpec = modelSpec(sessionModel);
 	const sessionPrice = pricedInput(sessionModel);
-	const cheaper = economicalContainedCandidates(available, sessionModel, opts.contained).filter((model) => {
+	const cheaper = economicalContainedCandidates(available, sessionModel, opts.contained, opts.requireImageInput).filter((model) => {
 		if (modelSpec(model) === sessionSpec) return false;
 		if (sessionPrice === undefined) return !opts.strict;
 		const price = pricedInput(model);
@@ -435,7 +446,7 @@ export function capableContainedCandidates(
 	available: Model<Api>[],
 	sessionModel: Model<Api>,
 	role: FloorRole,
-	opts: { strict?: boolean; contained?: Model<Api>[] } = {},
+	opts: { strict?: boolean; contained?: Model<Api>[]; requireImageInput?: boolean } = {},
 ): Model<Api>[] {
 	const floor = automaticTierFloor(sessionModel);
 	return rankedContainedCandidates(available, sessionModel, role, opts)
@@ -458,7 +469,7 @@ function rankedContainedCandidates(
 	available: Model<Api>[],
 	sessionModel: Model<Api>,
 	role: FloorRole,
-	opts: { strict?: boolean; contained?: Model<Api>[] } = {},
+	opts: { strict?: boolean; contained?: Model<Api>[]; requireImageInput?: boolean } = {},
 ): RankedCandidate[] {
 	return rankByCapability(cheaperContainedCandidates(available, sessionModel, opts), sessionModel, role);
 }

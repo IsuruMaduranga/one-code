@@ -22,9 +22,9 @@ import { join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { type ChildAction, SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../auto-mode/actions.ts";
-import { createTaskNotifier } from "../lib/notifications.ts";
+import type { HandBackVerdict } from "../lib/notifications.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent } from "../lib/model-unusable.ts";
-import { customMessageText, notificationComponent } from "../lib/tui-render.ts";
+
 import { classify, createClassifierState } from "../auto-mode/classifier.ts";
 import {
 	type AutoModeConfig,
@@ -173,12 +173,8 @@ const approved = (choice: string | undefined, grant: SessionGrant | undefined) =
 	choice === YES || (grant !== undefined && choice === grant.label);
 
 export default function permissionsExtension(pi: ExtensionAPI) {
-	const notifyTask = createTaskNotifier(pi);
 	// The background hand-back review rides the same steered path as agent
 	// completions; render it the same compact way (full body on ctrl+o).
-	pi.registerMessageRenderer("subagent-review", (message, { expanded }, theme) =>
-		notificationComponent(theme, customMessageText(message.content), expanded),
-	);
 	pi.registerFlag("permission-mode", {
 		description:
 			"Permission mode: default (alias: manual) | acceptEdits | plan | auto | bypassPermissions | dontAsk",
@@ -1344,16 +1340,12 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		}
 		// Background/resident: the spawning call already returned, so there is no
 		// tool_result to attach to. The emitter holds its completion report until
-		// we answer `onReview`, so the verdict travels with the report (a payload
-		// without the callback gets the older standalone notice instead). Answer
+		// we answer `onReview`, so the verdict travels with the report. Answer
 		// synchronously when no review will run, so the report is never delayed
 		// for nothing. A review that throws fails closed: the report goes out
 		// flagged, not clean.
-		const respond =
-			payload.onReview ??
-			((flag: string | undefined) => {
-				if (flag) notifyTask("subagent-review", flag);
-			});
+		const respond = payload.onReview;
+		if (!respond) return; // every background emitter supplies the callback (hand-back-review.ts)
 		const ctx = lastReviewCtx;
 		if (mode !== "auto" || payload.actions.length === 0 || pauseTracker.isPaused() || !ctx) {
 			respond(undefined);
@@ -1363,12 +1355,12 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		const epoch = sessionEpoch;
 		// A review that outlives its session (a /clear mid-review) is dropped: the
 		// agents were stopped with the old session and its ctx no longer renders.
-		const respondIfCurrent = (flag: string | undefined) => {
-			if (epoch === sessionEpoch) respond(flag);
+		const respondIfCurrent = (verdict: HandBackVerdict | undefined) => {
+			if (epoch === sessionEpoch) respond(verdict);
 		};
 		reviewCompletedRun(payload.actions, ctx, label, new AbortController().signal)
-			.then((reason) => respondIfCurrent(reason ? reviewFlagged(reason) : undefined))
-			.catch((error) => respondIfCurrent(reviewFlagged(`the review itself failed (${(error as Error).message})`)));
+			.then((reason) => respondIfCurrent(reason ? { kind: "blocked", reason } : undefined))
+			.catch((error) => respondIfCurrent({ kind: "unavailable", reason: `the review itself failed (${(error as Error).message})` }));
 	});
 
 	pi.on("tool_result", async (event, ctx) => {

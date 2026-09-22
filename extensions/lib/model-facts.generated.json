@@ -1,10 +1,10 @@
 {
 	"generatedFrom": "https://models.dev/api.json",
-	"piCatalogRows": 1354,
-	"rows": 824,
+	"piCatalogRows": 1443,
+	"rows": 889,
 	"facts": {
 		"amazon-bedrock/amazon.nova-2-lite-v1:0": {
-			"releaseDate": "2024-12-01"
+			"releaseDate": "2025-12-02"
 		},
 		"amazon-bedrock/amazon.nova-lite-v1:0": {
 			"releaseDate": "2024-12-03"
@@ -28,7 +28,7 @@
 			"releaseDate": "2025-08-05"
 		},
 		"amazon-bedrock/anthropic.claude-opus-4-5-20251101-v1:0": {
-			"releaseDate": "2025-11-24"
+			"releaseDate": "2025-11-01"
 		},
 		"amazon-bedrock/anthropic.claude-opus-4-6-v1": {
 			"releaseDate": "2026-02-05"
@@ -48,11 +48,26 @@
 		"amazon-bedrock/anthropic.claude-sonnet-5": {
 			"releaseDate": "2026-06-30"
 		},
+		"amazon-bedrock/apac.amazon.nova-lite-v1:0": {
+			"releaseDate": "2024-12-03"
+		},
+		"amazon-bedrock/apac.amazon.nova-micro-v1:0": {
+			"releaseDate": "2024-12-03"
+		},
+		"amazon-bedrock/apac.amazon.nova-pro-v1:0": {
+			"releaseDate": "2024-12-03"
+		},
+		"amazon-bedrock/apac.anthropic.claude-sonnet-4-20250514-v1:0": {
+			"releaseDate": "2025-05-22"
+		},
 		"amazon-bedrock/au.anthropic.claude-haiku-4-5-20251001-v1:0": {
 			"releaseDate": "2025-10-15"
 		},
 		"amazon-bedrock/au.anthropic.claude-opus-4-6-v1": {
 			"releaseDate": "2026-02-05"
+		},
+		"amazon-bedrock/au.anthropic.claude-opus-4-7": {
+			"releaseDate": "2026-04-16"
 		},
 		"amazon-bedrock/au.anthropic.claude-opus-4-8": {
 			"releaseDate": "2026-05-28"
@@ -69,14 +84,26 @@
 		"amazon-bedrock/au.anthropic.claude-sonnet-5": {
 			"releaseDate": "2026-06-30"
 		},
-		"amazon-bedrock/deepseek.r1-v1:0": {
-			"releaseDate": "2025-01-20"
+		"amazon-bedrock/ca.amazon.nova-lite-v1:0": {
+			"releaseDate": "2024-12-03"
 		},
 		"amazon-bedrock/deepseek.v3-v1:0": {
-			"releaseDate": "2025-09-18"
+			"releaseDate": "2025-08-21"
 		},
 		"amazon-bedrock/deepseek.v3.2": {
-			"releaseDate": "2026-02-06"
+			"releaseDate": "2025-12-01"
+		},
+		"amazon-bedrock/eu.amazon.nova-2-lite-v1:0": {
+			"releaseDate": "2025-12-02"
+		},
+		"amazon-bedrock/eu.amazon.nova-lite-v1:0": {
+			"releaseDate": "2024-12-03"
+		},
+		"amazon-bedrock/eu.amazon.nova-micro-v1:0": {
+			"releaseDate": "2024-12-03"
+		},
+		"amazon-bedrock/eu.amazon.nova-pro-v1:0": {
+			"releaseDate": "2024-12-03"
 		},
 		"amazon-bedrock/eu.anthropic.claude-fable-5": {
 			"releaseDate": "2026-06-09"
@@ -85,7 +112,7 @@
 			"releaseDate": "2025-10-15"
 		},
 		"amazon-bedrock/eu.anthropic.claude-opus-4-5-20251101-v1:0": {
-			"releaseDate": "2025-11-24"
+			"releaseDate": "2025-11-01"
 		},
 		"amazon-bedrock/eu.anthropic.claude-opus-4-6-v1": {
 			"releaseDate": "2026-02-05"
@@ -99,6 +126,9 @@
 		"amazon-bedrock/eu.anthropic.claude-opus-5": {
 			"releaseDate": "2026-07-24"
 		},
+		"amazon-bedrock/eu.anthropic.claude-sonnet-4-20250514-v1:0": {
+			"releaseDate": "2025-05-22"
+		},
 		"amazon-bedrock/eu.anthropic.claude-sonnet-4-5-20250929-v1:0": {
 			"releaseDate": "2025-09-29"
 		},
@@ -107,6 +137,12 @@
 		},
 		"amazon-bedrock/eu.anthropic.claude-sonnet-5": {
 			"releaseDate": "2026-06-30"
+		},
+		"amazon-bedrock/eu.mistral.pixtral-large-2502-v1:0": {
+			"releaseDate": "2025-04-08"
+		},
+		"amazon-bedrock/global.amazon.nova-2-lite-v1:0": {
+			"releaseDate": "2025-12-02"
 		},
 		"amazon-bedrock/global.anthropic.claude-fable-5": {
 			"releaseDate": "2026-06-09"
@@ -118,7 +154,7 @@
 			"releaseDate": "2025-10-15"
 		},
 		"amazon-bedrock/global.anthropic.claude-opus-4-5-20251101-v1:0": {
-			"releaseDate": "2025-11-24"
+			"releaseDate": "2025-11-01"
 		},
 		"amazon-bedrock/global.anthropic.claude-opus-4-6-v1": {
 			"releaseDate": "2026-02-05"
@@ -131,6 +167,9 @@
 		},
 		"amazon-bedrock/global.anthropic.claude-opus-5": {
 			"releaseDate": "2026-07-24"
+		},
+		"amazon-bedrock/global.anthropic.claude-sonnet-4-20250514-v1:0": {
+			"releaseDate": "2025-05-22"
 		},
 		"amazon-bedrock/global.anthropic.claude-sonnet-4-5-20250929-v1:0": {
 			"releaseDate": "2025-09-29"
@@ -150,11 +189,29 @@
 		"amazon-bedrock/global.openai.gpt-5.6-terra": {
 			"releaseDate": "2026-07-09"
 		},
-		"amazon-bedrock/google.gemma-3-27b-it": {
-			"releaseDate": "2025-07-27"
+		"amazon-bedrock/global.openai.gpt-6-astra": {
+			"releaseDate": "2026-09-04"
 		},
-		"amazon-bedrock/google.gemma-3-4b-it": {
-			"releaseDate": "2024-12-01"
+		"amazon-bedrock/global.xai.grok-4.6": {
+			"releaseDate": "2026-08-12"
+		},
+		"amazon-bedrock/google.gemma-4-26b-a4b": {
+			"releaseDate": "2026-04-02"
+		},
+		"amazon-bedrock/google.gemma-4-31b": {
+			"releaseDate": "2026-04-02"
+		},
+		"amazon-bedrock/google.gemma-4-e2b": {
+			"releaseDate": "2026-04-02"
+		},
+		"amazon-bedrock/in.openai.gpt-5.6-luna": {
+			"releaseDate": "2026-07-09"
+		},
+		"amazon-bedrock/in.openai.gpt-5.6-terra": {
+			"releaseDate": "2026-07-09"
+		},
+		"amazon-bedrock/jp.amazon.nova-2-lite-v1:0": {
+			"releaseDate": "2025-12-02"
 		},
 		"amazon-bedrock/jp.anthropic.claude-haiku-4-5-20251001-v1:0": {
 			"releaseDate": "2025-10-15"
@@ -199,22 +256,22 @@
 			"releaseDate": "2025-12-23"
 		},
 		"amazon-bedrock/minimax.minimax-m2.5": {
-			"releaseDate": "2026-03-18"
+			"releaseDate": "2026-02-12"
 		},
 		"amazon-bedrock/mistral.devstral-2-123b": {
-			"releaseDate": "2026-02-17"
+			"releaseDate": "2025-12-09"
 		},
 		"amazon-bedrock/mistral.magistral-small-2509": {
-			"releaseDate": "2025-12-02"
+			"releaseDate": "2025-09-18"
 		},
 		"amazon-bedrock/mistral.ministral-3-14b-instruct": {
-			"releaseDate": "2024-12-01"
+			"releaseDate": "2025-12-02"
 		},
 		"amazon-bedrock/mistral.ministral-3-3b-instruct": {
 			"releaseDate": "2025-12-02"
 		},
 		"amazon-bedrock/mistral.ministral-3-8b-instruct": {
-			"releaseDate": "2024-12-01"
+			"releaseDate": "2025-12-02"
 		},
 		"amazon-bedrock/mistral.mistral-large-3-675b-instruct": {
 			"releaseDate": "2025-12-02"
@@ -223,25 +280,25 @@
 			"releaseDate": "2025-04-08"
 		},
 		"amazon-bedrock/mistral.voxtral-mini-3b-2507": {
-			"releaseDate": "2024-12-01"
+			"releaseDate": "2025-07-15"
 		},
 		"amazon-bedrock/mistral.voxtral-small-24b-2507": {
-			"releaseDate": "2025-07-01"
+			"releaseDate": "2025-07-15"
 		},
 		"amazon-bedrock/moonshot.kimi-k2-thinking": {
-			"releaseDate": "2025-12-02"
+			"releaseDate": "2025-11-06"
 		},
 		"amazon-bedrock/moonshotai.kimi-k2.5": {
-			"releaseDate": "2026-02-06"
+			"releaseDate": "2026-01-27"
 		},
 		"amazon-bedrock/nvidia.nemotron-nano-12b-v2": {
-			"releaseDate": "2024-12-01"
+			"releaseDate": "2025-10-28"
 		},
 		"amazon-bedrock/nvidia.nemotron-nano-3-30b": {
-			"releaseDate": "2025-12-23"
+			"releaseDate": "2025-12-15"
 		},
 		"amazon-bedrock/nvidia.nemotron-nano-9b-v2": {
-			"releaseDate": "2024-12-01"
+			"releaseDate": "2025-08-18"
 		},
 		"amazon-bedrock/nvidia.nemotron-super-3-120b": {
 			"releaseDate": "2026-03-11"
@@ -260,6 +317,9 @@
 		},
 		"amazon-bedrock/openai.gpt-5.6-terra": {
 			"releaseDate": "2026-07-09"
+		},
+		"amazon-bedrock/openai.gpt-6-astra": {
+			"releaseDate": "2026-09-04"
 		},
 		"amazon-bedrock/openai.gpt-oss-120b": {
 			"releaseDate": "2025-08-05"
@@ -280,25 +340,46 @@
 			"releaseDate": "2025-10-29"
 		},
 		"amazon-bedrock/qwen.qwen3-235b-a22b-2507-v1:0": {
-			"releaseDate": "2025-09-18"
+			"releaseDate": "2025-07-21"
 		},
 		"amazon-bedrock/qwen.qwen3-32b-v1:0": {
-			"releaseDate": "2025-09-18"
+			"releaseDate": "2025-04"
 		},
 		"amazon-bedrock/qwen.qwen3-coder-30b-a3b-v1:0": {
-			"releaseDate": "2025-09-18"
+			"releaseDate": "2025-07-31"
 		},
 		"amazon-bedrock/qwen.qwen3-coder-480b-a35b-v1:0": {
-			"releaseDate": "2025-09-18"
+			"releaseDate": "2025-07-23"
 		},
 		"amazon-bedrock/qwen.qwen3-coder-next": {
-			"releaseDate": "2026-02-06"
+			"releaseDate": "2026-02-03"
 		},
 		"amazon-bedrock/qwen.qwen3-next-80b-a3b": {
-			"releaseDate": "2025-09-18"
+			"releaseDate": "2025-09-11"
 		},
 		"amazon-bedrock/qwen.qwen3-vl-235b-a22b": {
-			"releaseDate": "2025-10-04"
+			"releaseDate": "2025-09-23"
+		},
+		"amazon-bedrock/us-gov.openai.gpt-oss-120b-1:0": {
+			"releaseDate": "2025-08-05"
+		},
+		"amazon-bedrock/us-gov.openai.gpt-oss-20b-1:0": {
+			"releaseDate": "2025-08-05"
+		},
+		"amazon-bedrock/us.amazon.nova-2-lite-v1:0": {
+			"releaseDate": "2025-12-02"
+		},
+		"amazon-bedrock/us.amazon.nova-lite-v1:0": {
+			"releaseDate": "2024-12-03"
+		},
+		"amazon-bedrock/us.amazon.nova-micro-v1:0": {
+			"releaseDate": "2024-12-03"
+		},
+		"amazon-bedrock/us.amazon.nova-premier-v1:0": {
+			"releaseDate": "2025-04-30"
+		},
+		"amazon-bedrock/us.amazon.nova-pro-v1:0": {
+			"releaseDate": "2024-12-03"
 		},
 		"amazon-bedrock/us.anthropic.claude-fable-5": {
 			"releaseDate": "2026-06-09"
@@ -313,7 +394,7 @@
 			"releaseDate": "2025-08-05"
 		},
 		"amazon-bedrock/us.anthropic.claude-opus-4-5-20251101-v1:0": {
-			"releaseDate": "2025-11-24"
+			"releaseDate": "2025-11-01"
 		},
 		"amazon-bedrock/us.anthropic.claude-opus-4-6-v1": {
 			"releaseDate": "2026-02-05"
@@ -327,6 +408,9 @@
 		"amazon-bedrock/us.anthropic.claude-opus-5": {
 			"releaseDate": "2026-07-24"
 		},
+		"amazon-bedrock/us.anthropic.claude-sonnet-4-20250514-v1:0": {
+			"releaseDate": "2025-05-22"
+		},
 		"amazon-bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0": {
 			"releaseDate": "2025-09-29"
 		},
@@ -336,8 +420,14 @@
 		"amazon-bedrock/us.anthropic.claude-sonnet-5": {
 			"releaseDate": "2026-06-30"
 		},
-		"amazon-bedrock/us.deepseek.r1-v1:0": {
-			"releaseDate": "2025-01-20"
+		"amazon-bedrock/us.meta.llama3-1-70b-instruct-v1:0": {
+			"releaseDate": "2024-07-23"
+		},
+		"amazon-bedrock/us.meta.llama3-1-8b-instruct-v1:0": {
+			"releaseDate": "2024-07-23"
+		},
+		"amazon-bedrock/us.meta.llama3-3-70b-instruct-v1:0": {
+			"releaseDate": "2024-12-06"
 		},
 		"amazon-bedrock/us.meta.llama4-maverick-17b-instruct-v1:0": {
 			"releaseDate": "2025-04-05"
@@ -345,8 +435,32 @@
 		"amazon-bedrock/us.meta.llama4-scout-17b-instruct-v1:0": {
 			"releaseDate": "2025-04-05"
 		},
-		"amazon-bedrock/writer.palmyra-x4-v1:0": {
+		"amazon-bedrock/us.mistral.pixtral-large-2502-v1:0": {
+			"releaseDate": "2025-04-08"
+		},
+		"amazon-bedrock/us.openai.gpt-5.6-luna": {
+			"releaseDate": "2026-07-09"
+		},
+		"amazon-bedrock/us.openai.gpt-5.6-sol": {
+			"releaseDate": "2026-07-09"
+		},
+		"amazon-bedrock/us.openai.gpt-5.6-terra": {
+			"releaseDate": "2026-07-09"
+		},
+		"amazon-bedrock/us.openai.gpt-6-astra": {
+			"releaseDate": "2026-09-04"
+		},
+		"amazon-bedrock/us.writer.palmyra-x4-v1:0": {
+			"releaseDate": "2024-10-09"
+		},
+		"amazon-bedrock/us.writer.palmyra-x5-v1:0": {
 			"releaseDate": "2025-04-28"
+		},
+		"amazon-bedrock/us.xai.grok-4.6": {
+			"releaseDate": "2026-08-12"
+		},
+		"amazon-bedrock/writer.palmyra-x4-v1:0": {
+			"releaseDate": "2024-10-09"
 		},
 		"amazon-bedrock/writer.palmyra-x5-v1:0": {
 			"releaseDate": "2025-04-28"
@@ -364,7 +478,7 @@
 			"releaseDate": "2026-01-19"
 		},
 		"amazon-bedrock/zai.glm-5": {
-			"releaseDate": "2026-03-18"
+			"releaseDate": "2026-02-12"
 		},
 		"anthropic/claude-fable-5": {
 			"releaseDate": "2026-06-07"
@@ -416,6 +530,9 @@
 		},
 		"baseten/deepseek-ai/DeepSeek-V4-Pro-0813": {
 			"releaseDate": "2026-08-12"
+		},
+		"baseten/deepseek-ai/DeepSeek-V4.1-Flash": {
+			"releaseDate": "2026-09-10"
 		},
 		"baseten/moonshotai/Kimi-K2.5": {
 			"releaseDate": "2026-01-30"
@@ -471,6 +588,9 @@
 		"cerebras/gpt-oss-120b": {
 			"releaseDate": "2025-08-05"
 		},
+		"cerebras/qwen-3.8-27b": {
+			"releaseDate": "2026-08-14"
+		},
 		"cloudflare-workers-ai/@cf/deepseek-ai/deepseek-v4-flash-0731": {
 			"releaseDate": "2026-07-31"
 		},
@@ -525,11 +645,8 @@
 		"cloudflare-workers-ai/@cf/zai-org/glm-5.3-flash": {
 			"releaseDate": "2026-08-26"
 		},
-		"deepseek/deepseek-v4-flash": {
-			"releaseDate": "2026-07-31"
-		},
-		"deepseek/deepseek-v4-flash-vision-exp": {
-			"releaseDate": "2026-08-21"
+		"deepseek/deepseek-flash": {
+			"releaseDate": "2026-09-10"
 		},
 		"deepseek/deepseek-v4-pro": {
 			"releaseDate": "2026-08-12"
@@ -870,6 +987,18 @@
 		"huggingface/deepseek-ai/DeepSeek-V4-Pro-0813": {
 			"releaseDate": "2026-08-12"
 		},
+		"huggingface/deepseek-ai/DeepSeek-V4.1-Flash": {
+			"releaseDate": "2026-09-10"
+		},
+		"huggingface/google/gemma-3-12b-it": {
+			"releaseDate": "2025-03-12"
+		},
+		"huggingface/google/gemma-3-27b-it": {
+			"releaseDate": "2025-03-12"
+		},
+		"huggingface/google/gemma-3-4b-it": {
+			"releaseDate": "2025-03-12"
+		},
 		"huggingface/google/gemma-4-26B-A4B-it": {
 			"releaseDate": "2026-04-02"
 		},
@@ -959,6 +1088,21 @@
 		},
 		"huggingface/zai-org/GLM-5.3-Flash": {
 			"releaseDate": "2026-08-26"
+		},
+		"meta/muse-spark-1.1": {
+			"releaseDate": "2026-04-08"
+		},
+		"meta/muse-spark-1.2": {
+			"releaseDate": "2026-08-05"
+		},
+		"meta/muse-spark-1.2-contributor": {
+			"releaseDate": "2026-08-05"
+		},
+		"meta/muse-spark-1.3": {
+			"releaseDate": "2026-09-02"
+		},
+		"meta/muse-spark-1.3-contributor": {
+			"releaseDate": "2026-09-02"
 		},
 		"minimax-cn/MiniMax-M2.7": {
 			"releaseDate": "2026-03-18"
@@ -1071,6 +1215,9 @@
 		"mistral/zai-glm-5-2": {
 			"releaseDate": "2026-06-13"
 		},
+		"mistral/zai-glm-5-3": {
+			"releaseDate": "2026-08-14"
+		},
 		"moonshotai-cn/kimi-k2.6": {
 			"releaseDate": "2026-04-21"
 		},
@@ -1098,9 +1245,6 @@
 		"nvidia/deepseek-ai/deepseek-v4-flash-0731": {
 			"releaseDate": "2026-07-31"
 		},
-		"nvidia/deepseek-ai/deepseek-v4-pro-0813": {
-			"releaseDate": "2026-08-12"
-		},
 		"nvidia/google/gemma-3-12b-it": {
 			"releaseDate": "2025-03-12"
 		},
@@ -1115,9 +1259,6 @@
 		},
 		"nvidia/meta/muse-glimmer-30b": {
 			"releaseDate": "2026-08-10"
-		},
-		"nvidia/minimaxai/minimax-m3": {
-			"releaseDate": "2026-06-01"
 		},
 		"nvidia/mistralai/mistral-7b-instruct-v0.3": {
 			"releaseDate": "2025-04-01"
@@ -1154,6 +1295,12 @@
 		},
 		"nvidia/poolside/laguna-xs-2.1": {
 			"releaseDate": "2026-07-02"
+		},
+		"nvidia/z-ai/glm-5.3": {
+			"releaseDate": "2026-08-14"
+		},
+		"nvidia/z-ai/glm-5.3-flash": {
+			"releaseDate": "2026-08-26"
 		},
 		"openai/gpt-4": {
 			"releaseDate": "2023-11-06"
@@ -1278,6 +1425,9 @@
 		"opencode-go/deepseek-v4-pro": {
 			"releaseDate": "2026-04-24"
 		},
+		"opencode-go/deepseek-v4.1-flash": {
+			"releaseDate": "2026-09-10"
+		},
 		"opencode-go/glm-5.1": {
 			"releaseDate": "2026-04-07"
 		},
@@ -1331,9 +1481,6 @@
 		},
 		"opencode-go/muse-spark-1.3-contributor": {
 			"releaseDate": "2026-09-02"
-		},
-		"opencode-go/omen-alpha": {
-			"releaseDate": "2026-09-04"
 		},
 		"opencode-go/qwen3.6-plus": {
 			"releaseDate": "2026-04-02"
@@ -1397,6 +1544,9 @@
 		},
 		"opencode/deepseek-v4-pro": {
 			"releaseDate": "2026-04-24"
+		},
+		"opencode/deepseek-v4.1-flash": {
+			"releaseDate": "2026-09-10"
 		},
 		"opencode/gemini-3-flash": {
 			"releaseDate": "2025-12-17"
@@ -1554,6 +1704,9 @@
 		"opencode/qwen3.6-plus": {
 			"releaseDate": "2026-04-02"
 		},
+		"opencode/qwen3.8-flash": {
+			"releaseDate": "2026-08-26"
+		},
 		"openrouter/aion-labs/aion-2.0": {
 			"releaseDate": "2026-02-23"
 		},
@@ -1692,6 +1845,9 @@
 		"openrouter/deepseek/deepseek-v4-pro-0813": {
 			"releaseDate": "2026-08-12"
 		},
+		"openrouter/deepseek/deepseek-v4.1-flash": {
+			"releaseDate": "2026-09-10"
+		},
 		"openrouter/dots-studio/dots-3-note-preview:free": {
 			"releaseDate": "2026-08-14"
 		},
@@ -1706,9 +1862,6 @@
 		},
 		"openrouter/google/gemini-2.5-pro-preview": {
 			"releaseDate": "2025-06-05"
-		},
-		"openrouter/google/gemini-2.5-pro-preview-05-06": {
-			"releaseDate": "2025-05-07"
 		},
 		"openrouter/google/gemini-3-flash-preview": {
 			"releaseDate": "2025-12-17"
@@ -1744,7 +1897,7 @@
 			"releaseDate": "2026-09-02"
 		},
 		"openrouter/google/gemma-3-12b-it": {
-			"releaseDate": "2025-03-13"
+			"releaseDate": "2025-03-12"
 		},
 		"openrouter/google/gemma-3-27b-it": {
 			"releaseDate": "2025-03-12"
@@ -1767,6 +1920,9 @@
 		"openrouter/inception/mercury-2": {
 			"releaseDate": "2026-03-04"
 		},
+		"openrouter/inception/mercury-2.5": {
+			"releaseDate": "2026-09-08"
+		},
 		"openrouter/inclusionai/ling-3.0-flash": {
 			"releaseDate": "2026-07-23"
 		},
@@ -1778,6 +1934,12 @@
 		},
 		"openrouter/inclusionai/ling-3.0-flash-sante:free": {
 			"releaseDate": "2026-09-04"
+		},
+		"openrouter/inclusionai/ling-3.0-flash-vl": {
+			"releaseDate": "2026-09-10"
+		},
+		"openrouter/inclusionai/ling-3.0-flash-vl:free": {
+			"releaseDate": "2026-09-10"
 		},
 		"openrouter/kwaipilot/kat-coder-pro-v2": {
 			"releaseDate": "2026-03-27"
@@ -1863,9 +2025,6 @@
 		"openrouter/mistralai/mistral-large-2407": {
 			"releaseDate": "2024-11-19"
 		},
-		"openrouter/mistralai/mistral-large-2512": {
-			"releaseDate": "2024-11-01"
-		},
 		"openrouter/mistralai/mistral-medium-3": {
 			"releaseDate": "2025-05-07"
 		},
@@ -1884,6 +2043,9 @@
 		"openrouter/mistralai/mistral-small-2603": {
 			"releaseDate": "2026-03-16"
 		},
+		"openrouter/mistralai/mistral-small-3.1-24b-instruct": {
+			"releaseDate": "2025-03-17"
+		},
 		"openrouter/mistralai/mistral-small-3.2-24b-instruct": {
 			"releaseDate": "2025-06-20"
 		},
@@ -1891,7 +2053,7 @@
 			"releaseDate": "2024-04-17"
 		},
 		"openrouter/mistralai/voxtral-small-24b-2507": {
-			"releaseDate": "2025-10-30"
+			"releaseDate": "2025-07-15"
 		},
 		"openrouter/moonshotai/kimi-k2": {
 			"releaseDate": "2025-07-11"
@@ -1913,6 +2075,12 @@
 		},
 		"openrouter/moonshotai/kimi-k3": {
 			"releaseDate": "2026-07-16"
+		},
+		"openrouter/nex-agi/nex-n2.5-mini:free": {
+			"releaseDate": "2026-09-08"
+		},
+		"openrouter/nex-agi/nex-n2.5-pro:free": {
+			"releaseDate": "2026-09-08"
 		},
 		"openrouter/nvidia/nemotron-3-nano-30b-a3b": {
 			"releaseDate": "2025-12-15"
@@ -1952,9 +2120,6 @@
 		},
 		"openrouter/openai/gpt-4-turbo": {
 			"releaseDate": "2023-11-06"
-		},
-		"openrouter/openai/gpt-4-turbo-preview": {
-			"releaseDate": "2024-01-25"
 		},
 		"openrouter/openai/gpt-4.1": {
 			"releaseDate": "2025-04-14"
@@ -2125,6 +2290,9 @@
 		"openrouter/poolside/laguna-xs-2.1:free": {
 			"releaseDate": "2026-07-02"
 		},
+		"openrouter/prism-ml/ternary-bonsai-2-27b": {
+			"releaseDate": "2026-09-18"
+		},
 		"openrouter/qwen/qwen-2.5-72b-instruct": {
 			"releaseDate": "2024-09-19"
 		},
@@ -2266,6 +2434,9 @@
 		"openrouter/qwen/qwen3.8-27b": {
 			"releaseDate": "2026-08-14"
 		},
+		"openrouter/qwen/qwen3.8-27b:free": {
+			"releaseDate": "2026-08-14"
+		},
 		"openrouter/qwen/qwen3.8-flash": {
 			"releaseDate": "2026-08-26"
 		},
@@ -2278,8 +2449,14 @@
 		"openrouter/relace/relace-search": {
 			"releaseDate": "2025-12-08"
 		},
+		"openrouter/sakana/fugu-max": {
+			"releaseDate": "2026-09-11"
+		},
 		"openrouter/sakana/fugu-ultra": {
 			"releaseDate": "2026-06-15"
+		},
+		"openrouter/sakana/fugu-ultra-v2": {
+			"releaseDate": "2026-09-11"
 		},
 		"openrouter/sakana/sakana-namazu": {
 			"releaseDate": "2026-08-03"
@@ -2302,9 +2479,6 @@
 		"openrouter/tencent/hy4-preview": {
 			"releaseDate": "2026-08-28"
 		},
-		"openrouter/thedrummer/unslopnemo-12b": {
-			"releaseDate": "2024-11-08"
-		},
 		"openrouter/thinkingmachines/inkling": {
 			"releaseDate": "2026-07-15"
 		},
@@ -2316,6 +2490,9 @@
 		},
 		"openrouter/thinkingmachines/inkling:free": {
 			"releaseDate": "2026-07-15"
+		},
+		"openrouter/unbiased/pareto": {
+			"releaseDate": "2026-09-17"
 		},
 		"openrouter/upstage/solar-pro-3": {
 			"releaseDate": "2026-01-27"
@@ -2383,6 +2560,9 @@
 		"openrouter/z-ai/glm-5.3-flash": {
 			"releaseDate": "2026-08-26"
 		},
+		"openrouter/z-ai/glm-5.3-flashx": {
+			"releaseDate": "2026-09-18"
+		},
 		"openrouter/z-ai/glm-5v-turbo": {
 			"releaseDate": "2026-04-01"
 		},
@@ -2398,6 +2578,12 @@
 		"openrouter/~anthropic/claude-sonnet-latest": {
 			"releaseDate": "2026-04-27"
 		},
+		"openrouter/~deepseek/deepseek-flash-latest": {
+			"releaseDate": "2026-09-14"
+		},
+		"openrouter/~deepseek/deepseek-pro-latest": {
+			"releaseDate": "2026-09-14"
+		},
 		"openrouter/~deepseek/deepseek-v4-flash-latest": {
 			"releaseDate": "2026-08-01"
 		},
@@ -2410,11 +2596,20 @@
 		"openrouter/~moonshotai/kimi-latest": {
 			"releaseDate": "2026-04-27"
 		},
-		"openrouter/~openai/gpt-latest": {
-			"releaseDate": "2026-04-27"
+		"openrouter/~openai/gpt-astra-latest": {
+			"releaseDate": "2026-09-11"
+		},
+		"openrouter/~openai/gpt-luna-latest": {
+			"releaseDate": "2026-09-11"
 		},
 		"openrouter/~openai/gpt-mini-latest": {
 			"releaseDate": "2026-04-27"
+		},
+		"openrouter/~openai/gpt-sol-latest": {
+			"releaseDate": "2026-09-11"
+		},
+		"openrouter/~openai/gpt-terra-latest": {
+			"releaseDate": "2026-09-11"
 		},
 		"openrouter/~x-ai/grok-latest": {
 			"releaseDate": "2026-07-08"

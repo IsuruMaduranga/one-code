@@ -59,6 +59,7 @@ import {
 	modelsContainedToSession,
 	modelSpec as spec,
 	pricedInput,
+	supportsImageInput,
 } from "../lib/model-policy.ts";
 import { atLeastTier, capableContainedCandidates, economicalContainedCandidates, intrinsicTier, type PromptTier } from "../lib/model-tier.ts";
 
@@ -125,6 +126,18 @@ export interface ResolveInput {
 	configuredDefault?: SubagentDefault;
 	sessionModel?: Model<Api>;
 	available: Model<Api>[];
+	/**
+	 * Set by a spawn path when the session model is image-capable: the subagent
+	 * inherits the parent transcript (fork) or may read an image/PDF file by path
+	 * (any run), so a text-only worker cannot serve. The automatic pick and any
+	 * alias then resolve to an image-capable same-provider model; an explicit
+	 * text-only choice is hard-blocked (a per-call `model` field, retryable) or
+	 * upgraded with a notice (a standing setting or agent-file model). The
+	 * `/subagent` set command leaves this false — a saved default may be meant for
+	 * another (text) session, and is gated at spawn instead. See
+	 * `docs/decisions/model-policy.md`.
+	 */
+	requireImageInput?: boolean;
 }
 
 export interface SubagentModelResolution {
@@ -136,6 +149,13 @@ export interface SubagentModelResolution {
 	 * the tool call with the menu, so the model that chose the string can retry.
 	 */
 	unresolved?: string;
+	/**
+	 * The reason for `unresolved`, when it is not the plain "no such model" case —
+	 * currently only a per-call text-only model refused on an image-capable
+	 * session. The caller shows this in place of its default "unknown model" line
+	 * so the fix is named. Undefined for an ordinary unavailable model.
+	 */
+	unresolvedReason?: string;
 	/** One-line warnings the parent should surface (fallbacks, provider crossings). */
 	notices: string[];
 }
@@ -200,8 +220,13 @@ function resolveAlias(
 	contained: Model<Api>[],
 	available: Model<Api>[],
 	sessionModel: Model<Api> | undefined,
+	requireImageInput = false,
 ): AliasResolution | undefined {
-	const matches = contained.filter((model) => model.id.toLowerCase().includes(alias));
+	// An alias asks for a *class*, so an image-capable session resolves it to an
+	// image-capable model of that class rather than erroring — the alias is
+	// auto-upgraded, never hard-blocked (unlike an explicit text-only id).
+	const imageOk = (model: Model<Api>) => !requireImageInput || supportsImageInput(model);
+	const matches = contained.filter((model) => model.id.toLowerCase().includes(alias) && imageOk(model));
 	if (matches.length > 0) {
 		const undated = matches.filter((model) => !isSnapshotDatedId(model.id));
 		const pool = undated.length > 0 ? undated : matches;
@@ -209,11 +234,12 @@ function resolveAlias(
 	}
 	if (!sessionModel) return undefined;
 	const tier = ALIAS_TIER[alias];
+	// The session model carries the caller's own modality, so frontier is always safe.
 	if (tier === "frontier") return { model: sessionModel, how: "tier" };
 	// Name-class only, deliberately: an explicit alias asks for a *class* of model,
 	// so a measured pass (which lets a strong flash serve the automatic default)
 	// does not lift a lean-named model into "sonnet" here.
-	const byTier = economicalContainedCandidates(available, sessionModel, contained).find((model) => atLeastTier(intrinsicTier(model), tier));
+	const byTier = economicalContainedCandidates(available, sessionModel, contained, requireImageInput).find((model) => atLeastTier(intrinsicTier(model), tier));
 	return byTier ? { model: byTier, how: "tier" } : undefined;
 }
 
@@ -233,6 +259,17 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 	// A per-call `model` that did not resolve — deferred, not errored (see the
 	// "per-call request" paragraph in the module doc above).
 	let callFailed: string | undefined;
+	let callFailedReason: string | undefined;
+
+	// The modality gate: when the caller marks the session image-capable, a
+	// text-only worker cannot receive the images/PDFs the session may feed it. An
+	// EXPLICIT text-only id is refused here (a per-call `model` field is
+	// hard-blocked so the model retries; a standing setting or agent-file model is
+	// upgraded with a notice). Aliases and the automatic pick are steered to an
+	// image-capable model upstream instead, never refused. `requireImageInput`
+	// already reflects `supportsImageInput(sessionModel)` — the caller computed it.
+	const requireImageInput = input.requireImageInput ?? false;
+	const modalityMismatch = (model: Model<Api>) => requireImageInput && !supportsImageInput(model);
 
 	// The `subagentModel` setting is stale when it was stamped for a different
 	// provider than this session (or never stamped — a hand-edited setting): the
@@ -252,7 +289,7 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 
 		const alias = wanted.toLowerCase();
 		if (alias in ALIAS_TIER) {
-			const resolved = resolveAlias(alias, contained, available, sessionModel);
+			const resolved = resolveAlias(alias, contained, available, sessionModel, requireImageInput);
 			if (resolved?.how === "name") return { model: resolved.model, source: entry.source, notices };
 			// SCOPE the claim. "No sonnet model exists" is false at machine level
 			// whenever Anthropic is also authenticated, and a model relaying it tells
@@ -281,6 +318,28 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 
 		const resolved = findConfigured(available, wanted);
 		if (resolved) {
+			if (modalityMismatch(resolved)) {
+				// An explicit text-only id on an image-capable session. A per-call
+				// `model` field is hard-blocked (deferred like an unavailable model,
+				// so the chain may still land on the agent/default, else the caller
+				// shows the menu and the model retries with an image-capable one). A
+				// standing setting or agent-file model is upgraded silently to the
+				// automatic same-provider image-capable pick with a notice, because
+				// the user configured it once and it should not break a fork.
+				if (entry.source === "call") {
+					callFailed = wanted;
+					callFailedReason =
+						`Requested subagent model ${spec(resolved)} is text-only, but this session works with images or PDFs a subagent may need to read ` +
+						"(the inherited transcript, or a file it opens). Pick an image-capable model.";
+					notices.push(callFailedReason);
+				} else {
+					notices.push(
+						`${spec(resolved)} (from ${entry.knob}) is text-only, but this session works with images or PDFs a subagent may need to read; ` +
+							"an image-capable same-provider model runs this subagent instead.",
+					);
+				}
+				continue;
+			}
 			if (sessionModel && crossesProvider(resolved, sessionModel)) {
 				// An `.claude/agents` model is a Claude Code convention; on a
 				// non-Claude session it does not get to move a subagent (which
@@ -334,7 +393,7 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 	// Per-call model failed and nothing downstream resolved: surface it so the
 	// caller shows the menu and the model retries, rather than silently dropping
 	// to the automatic/session pick for a model the main model named.
-	if (callFailed) return { source: "call", unresolved: callFailed, notices };
+	if (callFailed) return { source: "call", unresolved: callFailed, unresolvedReason: callFailedReason, notices };
 
 	// Automatic selection is a cost optimisation, so it needs price evidence:
 	// with the session price unknown there is no demonstrable saving, and picking
@@ -355,7 +414,7 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 		// With an Artificial Analysis snapshot (lib/capability-index.ts) the floor
 		// is measured — coding index ≥ min(session, Sonnet 5), no tolerance —
 		// and passers rank by price; unscored candidates are judged by name-class tier.
-		const cheaper = capableContainedCandidates(available, sessionModel, "subagent", { strict: true, contained })[0];
+		const cheaper = capableContainedCandidates(available, sessionModel, "subagent", { strict: true, contained, requireImageInput })[0];
 		if (cheaper) return { model: cheaper, source: "automatic", notices };
 	}
 
@@ -400,6 +459,12 @@ export interface MenuOptions {
 	/** How many cheaper-option lines to include. */
 	maxCheaper?: number;
 	/**
+	 * When true (an image-capable session), text-only models are omitted from the
+	 * menu — they would only be rejected again on retry (`modalityMismatch`). The
+	 * caller passes `supportsImageInput(sessionModel)`.
+	 */
+	requireImageInput?: boolean;
+	/**
 	 * The configured default and which knob set it, so the reminder can tell the
 	 * main model when the user has *manually* pinned the subagent model via the
 	 * `subagentModel` setting (as opposed to Claude Code's env var or automatic
@@ -418,11 +483,14 @@ const price = (model: Model<Api>): string => {
  * entries dropped, dated duplicates collapsed, capped — useful, not complete,
  * which is safe because resolution accepts unlisted models too.
  */
-export function subagentModelMenu({ available, sessionModel, defaultModel, defaultSource, maxCheaper = 3 }: MenuOptions): string[] {
+export function subagentModelMenu({ available, sessionModel, defaultModel, defaultSource, maxCheaper = 3, requireImageInput = false }: MenuOptions): string[] {
 	const lines: string[] = [];
 	const listed = new Set<string>();
+	// On an image-capable session a text-only model is rejected on retry
+	// (`modalityMismatch`), so it never belongs in a retry menu.
+	const imageOk = (model: Model<Api>) => !requireImageInput || supportsImageInput(model);
 	const add = (model: Model<Api>, label: string) => {
-		if (listed.has(spec(model))) return;
+		if (listed.has(spec(model)) || !imageOk(model)) return;
 		listed.add(spec(model));
 		lines.push(`- ${spec(model)}${price(model)} — ${label}`);
 	};

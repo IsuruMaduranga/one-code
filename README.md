@@ -1,5 +1,7 @@
 # One Code
 
+[![CI](https://github.com/IsuruMaduranga/one-code/actions/workflows/ci.yml/badge.svg)](https://github.com/IsuruMaduranga/one-code/actions/workflows/ci.yml)
+
 **Claude Code with the model slot left open. The full workflow, open source, on any model or provider.**
 
 Claude Code is a good harness. It just ships bolted to one model. One Code
@@ -33,7 +35,9 @@ them across, because the good part was never the logo.
 - **Your Claude Code setup runs unchanged.** `CLAUDE.md`, `.claude/commands`,
   `.claude/skills`, `.claude/agents`, `.mcp.json`, plugins, and permission rules
   are picked up as they are. No migration, and no second config file to keep in
-  sync.
+  sync. A directory with no `CLAUDE.md` falls back to its `AGENTS.md`, the
+  cross-tool convention Claude Code now reads too, so a repo written for another
+  agent works here with nothing to change.
 - **Capability-tiered prompting.** A weaker model gets more guidance, not less.
   Not out of politeness; it is how you get output you can use.
 - **A package, not a fork.** One Code is a [pi](https://github.com/earendil-works/pi)
@@ -79,12 +83,17 @@ what it does that a base URL can't.
   you get a stranger reading Claude's notes. One Code sizes the prompt to the
   model in four tiers, down to playbooks and strict-schema search tools for
   flash-class and local models. Weaker brains need more body.
-- **Cache misses, billed to you.** Anthropic caches on explicit markers; other
-  providers cache on an exact prefix. A translation layer shreds the shape,
-  nothing errors, and you pay full price every request. One Code speaks each
-  provider's native API, keeps the prefix byte-stable, and shows the hit rate
-  in the footer. One careless byte up top is a ten-times price increase, so we
-  treat it as a bug.
+- **Cache misses, billed to you.** Anthropic caches at explicit `cache_control`
+  markers; most other providers cache on an exact prefix, and the two do not
+  line up. A gateway that translates between them silently maps the markers
+  wrong, so the cache sticks at the system prompt and never advances, or never
+  forms at all. Nothing errors. You just pay full price every turn. This is not
+  hypothetical: users report proxies where the cache-creation count is zero on
+  every turn and half the turns re-bill the whole context, and Claude Code's own
+  attribution header defeats caching behind a base URL unless you know the flag
+  to turn off. One Code speaks each provider's native API, keeps the prefix
+  byte-stable, and shows the live hit rate in the footer, because one careless
+  byte up top is a tenfold price increase.
 - **Anthropic-only parts.** Deferred tools, server-side web search, the
   thinking block. A foreign endpoint drops them. One Code has a
   provider-neutral version of each.
@@ -143,7 +152,7 @@ pi install npm:one-code-extension
 The app package, [`@one-ai/one-code`](https://www.npmjs.com/package/@one-ai/one-code),
 bundles a pinned pi and gives you the `onecode` command. The extension package,
 [`one-code-extension`](https://www.npmjs.com/package/one-code-extension), runs on
-your own pi and is tested against pi 0.83 to 0.85; use `pi` in place of `onecode`
+your own pi and is tested against pi 0.83 to 0.86; use `pi` in place of `onecode`
 for that install.
 
 The app opens in a full-screen terminal interface by default. See the

@@ -30,7 +30,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { convertToLlm, copyToClipboard, type ExtensionAPI, type ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { withReasoningFallback } from "../lib/model-policy.ts";
-import { answerText, toolStubs, trimToTurnBoundary } from "../lib/side-call.ts";
+import { answerText, stripImageBlocks, toolStubs, trimToTurnBoundary } from "../lib/side-call.ts";
 import { boundedDockHeight, truncateLine } from "../lib/tui-render.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
 import { applyBtwKey, type BtwBody, BTW_MAX_HEIGHT, decodeBtwKey, initialBtwState, renderBtwPanel } from "./panel.ts";
@@ -77,7 +77,10 @@ export default function btwExtension(pi: ExtensionAPI) {
 
 		const tools = toolStubs(pi.getActiveTools(), STUB_REASON);
 		const context = trimToTurnBoundary(capturedMessages ?? []);
-		const messages = [...convertToLlm(context), { role: "user" as const, content: sideQuestionMessage(question), timestamp: Date.now() }];
+		// btw runs on a cheap, possibly text-only reader and answers a text question,
+		// so images the conversation carried are stripped before the call
+		// (docs/decisions/model-policy.md).
+		const messages = [...stripImageBlocks(convertToLlm(context)), { role: "user" as const, content: sideQuestionMessage(question), timestamp: Date.now() }];
 
 		const result = await withReasoningFallback(
 			model as Model<Api>,

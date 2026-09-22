@@ -72,6 +72,31 @@ describe("workflow model defaults", () => {
 		expect(() => resolve({ opts: { model: "openai-codex/not-real" } })).toThrow(/not available/);
 	});
 
+	it("recommends only an image-capable default on an image-capable session, even in the retry menu", () => {
+		// Session sees images; the script names a text-only model, which is refused —
+		// and the menu's "current default" line must not point back at a text-only one.
+		// Terra (the ungated automatic pick, see the first test) is text-only here;
+		// only mini can see images among the cheaper models.
+		const imageSession = { ...model("gpt-5.6-sol", 5), input: ["text", "image"] };
+		const imageMini = { ...model("gpt-5.4-mini", 0.75), input: ["text", "image"] };
+		const available = [imageSession, model("gpt-5.6-terra", 2), imageMini, model("gpt-5.6-luna", 0.2)];
+		let message = "";
+		try {
+			resolveWorkflowAgentModel({ opts: { model: "openai-codex/gpt-5.6-luna" }, sessionModel: imageSession, available });
+		} catch (error) {
+			message = (error as Error).message;
+		}
+		expect(message).toMatch(/image/i);
+		const defaultLine = message.split("\n").find((line) => /default/i.test(line)) ?? "";
+		expect(defaultLine).not.toMatch(/terra|luna/);
+		// Every menu entry (the "- model — label" lines) must be image-capable:
+		// a text-only suggestion would only be refused again on retry.
+		const menuLines = message.split("\n").filter((line) => line.startsWith("- "));
+		expect(menuLines.length).toBeGreaterThan(0);
+		expect(menuLines.some((line) => line.includes("gpt-5.4-mini"))).toBe(true);
+		for (const line of menuLines) expect(line).not.toMatch(/terra|luna/);
+	});
+
 	it("rejects a per-call model pricier than the session unless allowExpensive", () => {
 		// Session on luna ($0.2); the script asks for sol ($5).
 		expect(() =>

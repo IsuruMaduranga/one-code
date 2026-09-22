@@ -31,7 +31,7 @@ import { convertToLlm, type ExtensionAPI, type ExtensionContext } from "@earendi
 import { withReasoningFallback } from "../lib/model-policy.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
 import { pickEconomicalContainedModel } from "../lib/model-tier.ts";
-import { answerText, toolStubs } from "../lib/side-call.ts";
+import { answerText, stripImageBlocks, toolStubs } from "../lib/side-call.ts";
 import { dimMarkedLine } from "../lib/tui-render.ts";
 import { RECAP_PROMPT, recapLine, recentForRecap, REFERENCE_MARK } from "./prompt.ts";
 import { RecapScheduler } from "./scheduler.ts";
@@ -113,7 +113,10 @@ export default function recapExtension(pi: ExtensionAPI) {
 			const tools = toolStubs(pi.getActiveTools(), STUB_REASON);
 
 			const recent = recentForRecap(messages);
-			const recapMessages = [...convertToLlm(recent), { role: "user" as const, content: RECAP_PROMPT, timestamp: Date.now() }];
+			// The cheap reader may be a text-only model, and the recap does not need
+			// images — strip them so a pasted image or one a Read returned cannot break
+			// the call (docs/decisions/model-policy.md).
+			const recapMessages = [...stripImageBlocks(convertToLlm(recent)), { role: "user" as const, content: RECAP_PROMPT, timestamp: Date.now() }];
 			// Thinking off unless the model cannot disable it; withReasoningFallback
 			// sends a level up front for catalog-marked models and retries on the 400
 			// for the rest. Fires on a 5-min idle timer, so no cross-call memo.

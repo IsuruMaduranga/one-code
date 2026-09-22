@@ -26,7 +26,7 @@ import { Type } from "typebox";
 import { recordUsage } from "../lib/usage-bus.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent } from "../lib/model-unusable.ts";
 import { whenAborted } from "../lib/abort.ts";
-import { createTaskNotifier, oneShotNote, sessionOutlivesTurn } from "../lib/notifications.ts";
+import { createTaskNotifier, oneShotNote, sessionOutlivesTurn, taskNotification, taskStatusOf, workflowSummary } from "../lib/notifications.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { ULTRACODE_MODE_CHANNEL } from "../effort/slider.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../permissions/modes.ts";
@@ -232,11 +232,32 @@ export default function workflowExtension(pi: ExtensionAPI) {
 		}
 	};
 
+	/** The tool call that started each background run — the notification's `<tool-use-id>`. */
+	const startedBy = new Map<string, string>();
 	const deliverResult = (runId: string) => {
+		// One delivery per run, so the id is spent here even when the run has
+		// already gone from the manager or was delivered another way.
+		const toolUseId = startedBy.get(runId);
+		startedBy.delete(runId);
 		const handle = manager.get(runId);
 		if (!handle || deliveredRuns.has(runId)) return;
 		deliveredRuns.add(runId);
-		notifyTask("one-code:workflow-result", buildRunReport(handle), { runId: handle.runId, name: handle.meta.name, status: handle.status });
+		// CC's kind=workflow task notification; the run report (result or the
+		// failure and how to resume) is its `<result>`. Summary literal: see
+		// workflowSummary — unverified against CC.
+		const status = taskStatusOf(handle.status);
+		notifyTask(
+			"one-code:workflow-result",
+			taskNotification({
+				kind: "workflow",
+				taskId: handle.runId,
+				toolUseId,
+				status,
+				summary: workflowSummary(handle.meta.name, status, status === "completed" ? undefined : handle.errorMessage),
+				result: buildRunReport(handle),
+			}),
+			{ runId: handle.runId, name: handle.meta.name, status: handle.status },
+		);
 	};
 
 	pi.registerMessageRenderer("one-code:workflow-result", (message, { expanded }, theme) =>
@@ -261,7 +282,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 		description: WORKFLOW_TOOL_DESCRIPTION,
 		promptSnippet: "Run a script that orchestrates many subagents (opt-in ultracode mode)",
 		parameters: WorkflowParams,
-		async execute(_toolCallId, params, signal, onUpdate, ctx) {
+		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			lastCtx = ctx;
 			const sessionDir = ctx.sessionManager.getSessionDir();
 
@@ -346,6 +367,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 					};
 				}
 
+				startedBy.set(handle.runId, toolCallId);
 				void handle.finished.then(() => deliverResult(handle.runId));
 				return {
 					content: [
@@ -354,7 +376,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 							text:
 								`Workflow **${handle.meta.name}** ${handle.resumed ? "resumed" : "started"} in the background.\n` +
 								`runId: ${handle.runId}\nscript: ${handle.scriptPath}\n` +
-								"The result will arrive as a follow-up message when the run finishes. " +
+								"The result will arrive as a task notification when the run finishes. " +
 								"You know nothing about its outcome until then — do not predict it. " +
 								"The user can watch with /workflows and stop with /workflows stop.",
 						},

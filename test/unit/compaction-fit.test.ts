@@ -8,7 +8,8 @@
  * real clamp, not a copy of its arithmetic.
  */
 import type { Api, Context, Message, Model } from "@earendil-works/pi-ai";
-import { clampMaxTokensToContext } from "@earendil-works/pi-ai/api/simple-options";
+import { clampMaxTokensToContext as clampMaxTokensToContextImpl } from "@earendil-works/pi-ai/api/simple-options";
+import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import { describe, expect, it } from "vitest";
 import {
 	CLEARED_RESULT_HEAD_CHARS,
@@ -30,6 +31,10 @@ const assistant = (text = "…", usage: Record<string, unknown> = zeroUsage): Me
 const toolResult = (text: string, extra: Record<string, unknown> = {}): Message =>
 	({ role: "toolResult", toolCallId: "t", toolName: "read", content: [{ type: "text", text }], timestamp: 3, ...extra }) as unknown as Message;
 const request = (messages: Message[], systemPrompt = "sys"): Context => ({ systemPrompt, messages });
+// Mirror what fit.ts does: normalize before clamping (so systemPrompt/tools are
+// counted), exactly as pi's completeSimple does. normalizeContext returns the
+// branded TranscriptContext the real clamp expects, so no cast is needed.
+const clampMaxTokensToContext = (model: Model<Api>, context: Context, maxTokens: number) => clampMaxTokensToContextImpl(model, normalizeContext(context), maxTokens);
 /** ~N tokens of text under pi's chars/4 estimate. */
 const tokensOf = (n: number) => "x".repeat(n * 4);
 

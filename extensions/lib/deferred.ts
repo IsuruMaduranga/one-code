@@ -10,6 +10,8 @@
  * `{ name, keywords? }` while extensions are loading (before session_start).
  */
 
+import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+import { toolResultsOnBranch } from "./branch-restore.ts";
 import { parseClaudeVersion } from "./model-tier.ts";
 import { normalizeToolName } from "../permissions/matcher.ts";
 
@@ -106,51 +108,189 @@ export interface DeferrableToolInfo {
 	parameters?: { properties?: unknown; required?: unknown };
 }
 
+/** The `tool_search` calls that loaded tools: each call's id → the names it loaded. */
+export type ToolSearchLoads = ReadonlyMap<string, readonly string[]>;
+
 /**
- * An Anthropic request with every deferred tool that pi left out appended as a
- * `defer_loading: true` definition, sorted by name (pi's own entries stay first
- * and untouched). Anthropic keeps deferred definitions out of the cached prefix,
- * but ADDING one to `tools` mid-session still re-caches the message history —
- * measured 2026-09-04 on Sonnet 5: the request after a `tool_search` load read
- * only tools + system (8.7k of 25k tokens); with the full deferred set present
- * from request 1 it read all 25k. Unloaded deferred definitions cost no input
- * tokens, so sending them always is free and keeps `tools` byte-stable.
- *
- * Returns undefined (leave the payload alone) when there is nothing to add, the
- * request carries no tools, or the tool names on the wire are not the registry's
- * (pi's OAuth "stealth" mode renames them to Claude Code casing, and a name that
- * cannot be matched must not be duplicated). Schemas follow pi's own
- * `convertTools` shape. Never mutates its input.
+ * Every load recorded on a session branch: a `tool_search` result whose
+ * persisted `details.added` names the tools it activated. Read once at
+ * session start (a resumed session's earlier loads); loads made during the
+ * session are captured at the call itself.
  */
-export function withDeferredToolDefinitions(
+export function toolSearchLoads(branch: readonly SessionEntry[]): Map<string, string[]> {
+	const loads = new Map<string, string[]>();
+	for (const message of toolResultsOnBranch(branch, TOOL_SEARCH_NAMES)) {
+		const added = (message.details as { added?: unknown } | undefined)?.added;
+		if (!Array.isArray(added)) continue;
+		const names = added.filter((n): n is string => typeof n === "string");
+		if (names.length > 0) loads.set(message.toolCallId, names);
+	}
+	return loads;
+}
+const TOOL_SEARCH_NAMES: ReadonlySet<string> = new Set(["tool_search"]);
+
+type WireTool = Record<string, unknown> & { name: string };
+type WireBlock = Record<string, unknown> & { type?: unknown };
+type WireMessage = { role?: unknown; content?: unknown };
+
+/** A deferred definition in pi's own `convertTools` shape (findings §7). */
+function deferredDefinition(tool: DeferrableToolInfo): WireTool {
+	return {
+		name: tool.name,
+		description: tool.description ?? "",
+		input_schema: {
+			type: "object",
+			properties: tool.parameters?.properties ?? {},
+			required: tool.parameters?.required ?? [],
+		},
+		defer_loading: true,
+	};
+}
+
+/** The list with pi's cache breakpoint on its last item (a no-op without one). */
+function withBreakpointOnLast<T extends Record<string, unknown>>(items: T[], cache_control: unknown): T[] {
+	if (cache_control === undefined || items.length === 0) return items;
+	return [...items.slice(0, -1), { ...items[items.length - 1], cache_control }];
+}
+
+/**
+ * An Anthropic request whose `tools` array is byte-identical to request 1's,
+ * whatever `tool_search` has loaded since — the client side of Anthropic's
+ * deferred-tool contract, which pi 0.86 no longer supplies for One Code
+ * (rationale and measurements: docs/decisions/caching.md "Loaded deferred
+ * tools stay deferred on the wire", findings §7).
+ *
+ * - Every registry tool `isDeferred` that is not eager on the wire is appended
+ *   as a `defer_loading: true` definition, sorted by name; pi's own rendering
+ *   of a later-deferred registry tool is replaced by ours.
+ * - A loaded tool pi promoted to eager is demoted back to deferred, the tools
+ *   cache breakpoint moves to the last remaining eager tool, and the
+ *   `tool_search` result that loaded it (`loads`) is rewritten to
+ *   `tool_reference` blocks, its own content moving to trailing sibling blocks
+ *   that take the result's breakpoint (Anthropic rejects references mixed with
+ *   ordinary result content). Demotion happens only when that result is on the
+ *   wire and precedes every `tool_use` of the tool; otherwise the tool stays
+ *   eager (one accepted cache miss, never a request Anthropic rejects).
+ * - pi's own deferred entries that are not registry tools (its
+ *   `__pi_deferred_placeholder__`) stay in place.
+ *
+ * Returns undefined (leave the payload alone) when the request carries no
+ * tools or the wire names are not the registry's (pi's OAuth "stealth" mode
+ * renames them to Claude Code casing, and an unmatched name must not be
+ * duplicated). Never mutates its input.
+ */
+export function stabilizeDeferredTools(
 	payload: Record<string, unknown>,
 	tools: readonly DeferrableToolInfo[],
 	isDeferred: (name: string) => boolean,
+	loads: ToolSearchLoads = new Map(),
 ): Record<string, unknown> | undefined {
 	const existing = payload.tools;
 	if (!Array.isArray(existing) || existing.length === 0) return undefined;
 	const registry = new Set(tools.map((t) => t.name));
-	const present = new Set<string>();
-	for (const tool of existing) {
-		const name = (tool as { name?: unknown } | null)?.name;
-		if (typeof name !== "string" || !registry.has(name)) return undefined;
-		present.add(name);
+
+	const eager: WireTool[] = [];
+	const anchors: WireTool[] = [];
+	for (const raw of existing) {
+		const tool = raw as WireTool | null;
+		if (typeof tool?.name !== "string") return undefined;
+		if (!registry.has(tool.name)) {
+			if (tool.defer_loading === true) anchors.push(tool);
+			else return undefined;
+			continue;
+		}
+		if (tool.defer_loading !== true) eager.push(tool);
 	}
-	const extra = tools
-		.filter((t) => isDeferred(t.name) && !present.has(t.name))
+
+	const messages: WireMessage[] = Array.isArray(payload.messages) ? (payload.messages as WireMessage[]) : [];
+	const referencesAt = new Map<string, string[]>();
+	const demoted = new Set<string>();
+	if (loads.size > 0 && eager.some((tool) => isDeferred(tool.name))) {
+		// Message index of each tool's first use and of each tool result: a
+		// reference is valid only ahead of every use of the tool.
+		const firstUse = new Map<string, number>();
+		const resultAt = new Map<string, number>();
+		messages.forEach((message, index) => {
+			if (!Array.isArray(message?.content)) return;
+			for (const block of message.content as WireBlock[]) {
+				if (block?.type === "tool_use" && typeof block.name === "string" && !firstUse.has(block.name)) {
+					firstUse.set(block.name, index);
+				} else if (block?.type === "tool_result" && typeof block.tool_use_id === "string") {
+					resultAt.set(block.tool_use_id, index);
+				}
+			}
+		});
+		// The earliest on-wire load of each tool.
+		const loaderOf = new Map<string, { callId: string; at: number }>();
+		for (const [callId, names] of loads) {
+			const at = resultAt.get(callId);
+			if (at === undefined) continue;
+			for (const name of names) {
+				const current = loaderOf.get(name);
+				if (current === undefined || at < current.at) loaderOf.set(name, { callId, at });
+			}
+		}
+		for (const tool of eager) {
+			if (!isDeferred(tool.name)) continue;
+			const loader = loaderOf.get(tool.name);
+			if (loader === undefined) continue;
+			const use = firstUse.get(tool.name);
+			if (use !== undefined && use < loader.at) continue;
+			demoted.add(tool.name);
+			referencesAt.set(loader.callId, [...(referencesAt.get(loader.callId) ?? []), tool.name]);
+		}
+	}
+
+	// pi puts the tools breakpoint on the last eager tool; if that one is demoted
+	// the breakpoint moves to the new last one, otherwise nothing moves.
+	const last = eager.at(-1);
+	const keptEager = withBreakpointOnLast(
+		eager.filter((tool) => !demoted.has(tool.name)),
+		last !== undefined && demoted.has(last.name) ? last.cache_control : undefined,
+	);
+	if (keptEager.length === 0) return undefined;
+	const eagerNames = new Set(keptEager.map((tool) => tool.name));
+	const deferred = tools
+		.filter((t) => isDeferred(t.name) && !eagerNames.has(t.name))
 		.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
-		.map((t) => ({
-			name: t.name,
-			description: t.description ?? "",
-			input_schema: {
-				type: "object",
-				properties: t.parameters?.properties ?? {},
-				required: t.parameters?.required ?? [],
-			},
-			defer_loading: true,
-		}));
-	if (extra.length === 0) return undefined;
-	return { ...payload, tools: [...existing, ...extra] };
+		.map(deferredDefinition);
+	return {
+		...payload,
+		tools: [...keptEager, ...anchors, ...deferred],
+		messages: referencesAt.size === 0 ? payload.messages : messages.map((m) => withToolReferences(m, referencesAt)),
+	};
+}
+
+/**
+ * The user message with each loading `tool_result` rewritten to carry its
+ * `tool_reference` blocks and its original content moved to trailing sibling
+ * blocks; a breakpoint on the rewritten result moves to the new last block so
+ * the whole message stays inside the cached prefix.
+ */
+function withToolReferences(message: WireMessage, referencesAt: ReadonlyMap<string, readonly string[]>): WireMessage {
+	if (message?.role !== "user" || !Array.isArray(message.content)) return message;
+	const content = message.content as WireBlock[];
+	if (!content.some((block) => block?.type === "tool_result" && referencesAt.has(block.tool_use_id as string))) return message;
+
+	const blocks: WireBlock[] = [];
+	const siblings: WireBlock[] = [];
+	let movedBreakpoint: unknown;
+	for (const block of content) {
+		const names = block?.type === "tool_result" ? referencesAt.get(block.tool_use_id as string) : undefined;
+		if (!names) {
+			blocks.push(block);
+			continue;
+		}
+		const { content: original, cache_control, ...rest } = block;
+		if (cache_control !== undefined) movedBreakpoint = cache_control;
+		blocks.push({ ...rest, content: names.map((name) => ({ type: "tool_reference", tool_name: name })) });
+		if (typeof original === "string") {
+			if (original.trim().length > 0) siblings.push({ type: "text", text: original });
+		} else if (Array.isArray(original)) {
+			siblings.push(...(original as WireBlock[]));
+		}
+	}
+	return { ...message, content: withBreakpointOnLast([...blocks, ...siblings], movedBreakpoint) };
 }
 
 /**

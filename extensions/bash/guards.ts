@@ -101,7 +101,7 @@ export function leadingSleepReason<T>(
 	const echo = rest ? `\`${shown}\` followed by: ${clip(rest)}` : `standalone \`${shown}\``;
 	return (
 		`Blocked: ${echo}. A foreground ${opts.sleepName} stalls the whole session while it runs. ` +
-		"To wait for a command you started, run it with run_in_background: true — its completion arrives as a system notification on its own, so you never need to poll. " +
+		"To wait for a command you started, run it with run_in_background: true — its completion arrives as a task notification on its own, so you never need to poll. " +
 		`To wait for a condition, use the monitor tool with an until-loop (e.g. \`${opts.untilExample}\`) — monitor is deferred, load it with tool_search select:monitor. ` +
 		"If you genuinely need a delay (rate limiting, deliberate pacing), keep it under 2 seconds. " +
 		"Do not chain shorter sleeps to work around this block."
@@ -193,7 +193,7 @@ export function hasBackgroundAmp(command: string): boolean {
 function orphanReason(command: string, segments: Segment[]): string | undefined {
 	const message = (via: string) =>
 		`Blocked: this command detaches a process with ${via}, leaving an orphan this session cannot manage — its output and exit status would be lost. ` +
-		"Run it with run_in_background: true instead: it returns a task id immediately, completion arrives as a system notification, output stays readable with task_output, and it can be stopped with task_stop. " +
+		"Run it with run_in_background: true instead: it returns a task id immediately, completion arrives as a task notification, output stays readable with task_output, and it can be stopped with task_stop. " +
 		"If you need shell-level parallelism inside one command, end it with `wait` so the children are reaped.";
 
 	for (const seg of segments) {

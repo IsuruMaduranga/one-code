@@ -17,7 +17,9 @@
  * Provider-native deferral (Anthropic `defer_loading`, OpenAI `tool_search_call`)
  * is only a cache optimization on top; without it, loading a tool mid-session
  * grows the tools array and invalidates the prompt cache from the tools block
- * down — an accepted tradeoff (findings §7).
+ * down — an accepted tradeoff (findings §7). On Anthropic tool-reference models
+ * this extension keeps the tools array byte-stable itself (the
+ * before_provider_request hook below), since pi 0.86 no longer does.
  *
  * Load order matters: this extension must come BEFORE any extension that defers
  * a tool, because those emit their defer request while extensions are loading
@@ -36,9 +38,10 @@ import {
 	resultText,
 	searchTools,
 	selectedNames,
+	stabilizeDeferredTools,
 	supportsToolReferences,
 	toolNotFoundName,
-	withDeferredToolDefinitions,
+	toolSearchLoads,
 } from "../lib/deferred.ts";
 import { looksLikeAnthropicRequest } from "../lib/anthropic-payload.ts";
 import { MCP_TOOLS_CHANNEL, type McpToolsPayload } from "../lib/mcp-share.ts";
@@ -138,27 +141,41 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		requestSent = true;
 	});
 
+	// Every tool_search load of this session (call id → names), seeded from the
+	// transcript at session_start and extended by each load: the wire hook needs
+	// it to reference a loaded tool from the result that loaded it.
+	let loads = new Map<string, string[]>();
+	// The loads a resumed session's transcript already holds (empty after
+	// /clear). The transcript tells the model those tools are callable, and
+	// Claude Code keeps a ToolSearch-loaded tool callable across a resume (its
+	// tool_reference blocks stay in the history), so deferring them again would
+	// send the model into a "Tool <name> not found" round trip. pi restores them
+	// as active from the transcript before session_start; deferAll and the
+	// late-defer handler leave those alone. A load made during this session
+	// activates the tool directly and never needs this set.
+	let loadedBefore = new Set<string>();
+
 	// On models that take client-side tool references (first-party Claude >= 4.5,
-	// not Haiku) every deferred tool rides every Anthropic request as a
-	// `defer_loading: true` definition from request 1, so `tools` never changes
-	// when tool_search loads one. Anthropic keeps deferred definitions out of the
-	// cached prefix, but adding one mid-session still re-cached the whole message
-	// history (lib/deferred.ts withDeferredToolDefinitions has the measurement);
-	// unloaded deferred definitions cost no input tokens, so this is free.
+	// not Haiku) the `tools` array is held byte-identical to request 1's: every
+	// deferred tool rides every Anthropic request as a `defer_loading: true`
+	// definition, and a tool that tool_search loaded — which pi 0.86 promotes into
+	// the eager list, re-caching everything from the tools block down — is
+	// demoted back to deferred and loaded through `tool_reference` blocks in the
+	// tool_search result that activated it (lib/deferred.ts stabilizeDeferredTools
+	// has the rules; docs/decisions/caching.md the measurements).
 	pi.on("before_provider_request", (event, ctx) => {
 		if (!supportsToolReferences(ctx.model as { provider?: string; id?: string } | undefined)) return undefined;
 		if (!looksLikeAnthropicRequest(event.payload)) return undefined;
-		return withDeferredToolDefinitions(event.payload as Record<string, unknown>, pi.getAllTools(), (name) =>
-			deferredRegistry.has(name),
-		);
+		return stabilizeDeferredTools(event.payload as Record<string, unknown>, pi.getAllTools(), (name) => deferredRegistry.has(name), loads);
 	});
 
-	/** Deactivate every deferred-registry tool and announce the loadable set. */
+
+	/** Deactivate every deferred-registry tool the transcript has not loaded, and announce the loadable set. */
 	const deferAll = () => {
 		const deferred = new Set(deferredRegistry.names);
 		if (deferred.size === 0) return;
 		const active = pi.getActiveTools();
-		const next = active.filter((name) => !deferred.has(name));
+		const next = active.filter((name) => !deferred.has(name) || loadedBefore.has(name));
 		if (next.length !== active.length) pi.setActiveTools(next);
 		announce();
 	};
@@ -168,11 +185,11 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		deferredRegistry.add(request);
 		// A defer arriving after the session_start pass (MCP servers connect
 		// asynchronously and register their tools then) would otherwise leave the
-		// tool eager AND unlisted in the reminder. Deactivate it and refresh the
-		// keyed reminder.
+		// tool eager AND unlisted in the reminder. Deactivate it (unless the
+		// transcript loaded it) and refresh the keyed reminder.
 		if (sessionStarted && request?.name) {
 			const active = pi.getActiveTools();
-			if (active.includes(request.name)) {
+			if (active.includes(request.name) && !loadedBefore.has(request.name)) {
 				pi.setActiveTools(active.filter((name) => name !== request.name));
 			}
 			// The tool is searchable (keyword search reads the registry) from now;
@@ -181,12 +198,14 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		}
 	});
 
-	pi.on("session_start", () => {
+	pi.on("session_start", (_event, ctx) => {
 		sessionStarted = true;
 		// A pending debounce belongs to the previous session's listing (RPC's
 		// new_session emits session_start twice, findings §3); deferAll below
 		// announces the fresh one.
 		clearAnnounce();
+		loads = toolSearchLoads(ctx?.sessionManager?.getBranch?.() ?? []);
+		loadedBefore = new Set([...loads.values()].flat());
 		// A new session (/clear, or a resume in a new process) has no cached prefix
 		// yet: its first request gets a freshly written listing.
 		requestSent = false;
@@ -230,7 +249,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 				Type.Integer({ minimum: 1, maximum: 20, description: "Maximum tools to load (default 5)" }),
 			),
 		}),
-		async execute(_toolCallId, params) {
+		async execute(toolCallId, params) {
 			const available = searchableTools();
 			const matches = searchTools(params.query, available, params.max_results ?? 5);
 
@@ -262,6 +281,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 			const added = matches.map((m) => m.name).filter((name) => !active.includes(name));
 			if (added.length > 0) {
 				pi.setActiveTools([...new Set([...active, ...added])]);
+				loads.set(toolCallId, added);
 			}
 
 			const loaded = matches.map((m) => m.name);

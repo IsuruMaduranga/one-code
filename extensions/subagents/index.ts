@@ -26,7 +26,7 @@ import { getAgentDir, type ExtensionAPI, type ExtensionContext, type ToolDefinit
 import { Type } from "typebox";
 import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../auto-mode/actions.ts";
 import { type AgentDefinition, type AgentSource, agentDirs, discoverAgents } from "./agents.ts";
-import { modelIdentity, modelSpec } from "../lib/model-policy.ts";
+import { modelIdentity, modelSpec, supportsImageInput } from "../lib/model-policy.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent, withoutUnusable } from "../lib/model-unusable.ts";
 import { applicableSubagentDefault, loadSubagentDefault, persistSubagentModel, type SubagentDefault } from "./default-model.ts";
 import {
@@ -56,12 +56,25 @@ import { emptyUsage, formatStats, type UsageTotals } from "./usage.ts";
 import { cleanupWorktree, createWorktree, isGitRepo, type Worktree } from "./worktree.ts";
 import { findGitRoot } from "../lib/git.ts";
 import { registerWorktreeIsolation } from "../lib/worktree-isolation.ts";
-import { createTaskNotifier, oneShotNote, sessionOutlivesTurn, systemNotification } from "../lib/notifications.ts";
+import {
+	AGENT_NOTE,
+	agentMessage,
+	agentSummary,
+	createTaskNotifier,
+	type HandBackVerdict,
+	handBackPointer,
+	handBackWarning,
+	oneShotNote,
+	sessionOutlivesTurn,
+	taskNotification,
+	type TaskStatus,
+	withReview,
+} from "../lib/notifications.ts";
 import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { ccToolRenderers, customMessageText, liveUiCtx, notificationComponent, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import { deriveActivity, type FinishOutcome, LiveRunRegistry } from "./live-runs.ts";
 import { DELEGATION_STEER } from "./delegation-steer.ts";
-import { awaitHandBackReview, withReview } from "./hand-back-review.ts";
+import { awaitHandBackReview } from "./hand-back-review.ts";
 import type { LiveSink } from "./runner.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
 import { SUBAGENT_DEFAULT_CHANGED_CHANNEL } from "../lib/settings-channels.ts";
@@ -196,13 +209,15 @@ const RESIDENT_IDLE_MS = 15 * 60_000;
 /** A background agent's process, kept alive after its run so it can be messaged. */
 interface Resident {
 	handle: RpcChildHandle;
+	/** When the resident was started: its hand-backs report tokens and tool uses cumulatively, so the duration is too. */
+	startedAt: number;
 	/**
 	 * FIFO — the head entry handles the next turn_end (initial task, then one per
 	 * idle-time message). `review` is auto mode's rendered hand-back flag for
 	 * that turn (undefined when clean or auto mode is off); the handler puts it
 	 * ahead of the report in its notification.
 	 */
-	turnHandlers: Array<(outcome: ChildOutcome, review: string | undefined) => void>;
+	turnHandlers: Array<(outcome: ChildOutcome, review: HandBackVerdict | undefined, stopped: boolean) => void>;
 }
 
 export default function subagentsExtension(pi: ExtensionAPI) {
@@ -233,7 +248,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	/** taskId → kill handle: a resident's kill resolves when it has exited; a blocking run exposes `result`. */
 	const liveHandles = new Map<string, { kill(): void | Promise<void>; result?: Promise<unknown> }>();
 	/**
-	 * Task ids the user asked to stop (x / ctrl+x ctrl+k / session teardown). A
+	 * Task ids the user asked to stop (task_stop / x / ctrl+x ctrl+k / session teardown). A
 	 * kill still surfaces as an exit, but it neither completed nor failed — so the
 	 * strip and the notification read this to say "Stopped" instead of the
 	 * misleading "Completed"/"failed" (TUI-REVIEW L1). Cleared when a run (re)starts.
@@ -459,7 +474,14 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		const session = sessionModel ? modelSpec(sessionModel) : "(none)";
 		const signature = `${session}|${configured?.spec ?? ""}|${configured?.setForContainment ?? ""}|${configured?.source ?? ""}|${unusableModels.size}`;
 		if (autoDefaultCache?.signature === signature) return autoDefaultCache.resolution;
-		const resolution = resolveSubagentModel({ configuredDefault: configured, sessionModel, available });
+		// The image-modality gate keys off the session model, which is part of the
+		// cache signature above, so the cached resolution stays correct per session.
+		const resolution = resolveSubagentModel({
+			configuredDefault: configured,
+			sessionModel,
+			available,
+			requireImageInput: supportsImageInput(sessionModel),
+		});
 		autoDefaultCache = { signature, resolution };
 		return resolution;
 	};
@@ -482,6 +504,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				defaultModel: resolution.model,
 				defaultSource: resolution.source,
 				configured,
+				requireImageInput: supportsImageInput(sessionModel),
 			}),
 			scope: "every-turn",
 			key: "subagent-models",
@@ -535,7 +558,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	};
 	pi.on("agent_start", () => {
 		spawnedThisLoop.clear();
+		parentBusy = true;
 		return undefined;
+	});
+	pi.on("agent_settled", () => {
+		parentBusy = false;
 	});
 	pi.on("agent_end", (_event, ctx) => {
 		const spawned = [...spawnedThisLoop];
@@ -601,17 +628,18 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
 	// --- The subagent panel: strip soft focus + Enter-to-view transcript swap ---
 
-	/** Stop one live agent by task id (blocking-run handle or resident task). */
-	const stopAgent = (taskId: string) => {
-		stoppedTaskIds.add(taskId); // the coming exit is a user stop, not a completion (L1)
-		void liveHandles.get(taskId)?.kill();
+	/** Stop an agent, recording its persistent id before kill can settle its turn. */
+	const stopAgent = (taskId: string, handle = liveHandles.get(taskId)) => {
+		// An old task can still await review after the agent has resumed. Its
+		// captured handle must not mark the replacement run as stopped.
+		if (handle && liveHandles.get(taskId) === handle) stoppedTaskIds.add(taskId);
+		return handle?.kill();
 	};
 	/** Stop every live agent; returns one settle promise per agent (a resident's exit, a blocking run's result). */
 	const stopAllAgents = (): Promise<unknown>[] => {
 		const exits: Promise<unknown>[] = [];
 		for (const [taskId, handle] of liveHandles) {
-			stoppedTaskIds.add(taskId);
-			const killed = handle.kill();
+			const killed = stopAgent(taskId, handle);
 			const settled = handle.result ?? killed;
 			if (settled) exits.push(settled);
 		}
@@ -977,7 +1005,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		);
 	}
 
-	const notifier = createTaskNotifier(pi);
+	// A hand-back the model already read through task_output (block: true on the
+	// agent's task) is withdrawn — One Code's task_output returns the full report,
+	// so the message and its pointer would only repeat it (see decisions).
+	const notifier = createTaskNotifier(pi, { withdrawOnDelivery: true });
 	/** Every subagent notification; silent during shutdown (a teardown kill is not news). */
 	const notify: typeof notifier = (customType, text, details) => {
 		if (shuttingDown) return;
@@ -1003,10 +1034,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	 * the spawning child never saw the message and the main model was told about
 	 * work it did not delegate (SUBAGENT-REVIEW L4).
 	 */
-	const relayToParent = (parentTaskId: string, name: string, message: string, summary?: string) => {
+	const relayToParent = (parentTaskId: string, from: string, name: string, message: string, summary?: string) => {
 		// Bounded once: the fallback reuses the same body (and persisted file).
 		const body = boundedMessage(name, message);
-		const toMain = () => announceAgentMessage(name, body, summary);
+		const toMain = () => announceAgentMessage(from, name, body);
 		const parent = residents.get(parentTaskId);
 		if (!parent || parent.handle.exited()) {
 			toMain();
@@ -1016,10 +1047,78 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	};
 
 	const boundedMessage = (name: string, message: string) => bounded(message, `message-${name}-${Date.now()}`, MESSAGE_TO_MAIN_CAP);
-	const announceAgentMessage = (name: string, body: string, summary?: string) =>
-		notify("subagent-message", systemNotification(`Message from agent ${name}${summary ? ` (${summary})` : ""}:\n\n${body}`), { name, summary });
+	/** True between agent_start and agent_settled: a child's mid-run message then lands mid-turn (CC's other opener). */
+	let parentBusy = false;
+	/**
+	 * A child's mid-run message as CC's `<agent-message>` (no hand-back preamble:
+	 * it is not a report), addressed from the child's task id — the address
+	 * SendMessage reaches it by. CC's frame has no slot for the child's own
+	 * one-line summary, so it is dropped here (it still labels the relay to a
+	 * parent child).
+	 */
+	const announceAgentMessage = (from: string, name: string, body: string) =>
+		notify("subagent-message", agentMessage({ from, body, midTurn: parentBusy }), { taskId: from, name });
 	/** Relay a child's send_message {to: "main"} into this conversation. */
-	const notifyAgentMessage = (name: string, message: string, summary?: string) => announceAgentMessage(name, boundedMessage(name, message), summary);
+	const notifyAgentMessage = (from: string, name: string, message: string) => announceAgentMessage(from, name, boundedMessage(name, message));
+
+	/** The spool a resident's turns are written to (`task_output` and the notification's `<output-file>`). */
+	const outputLogPath = (record: AgentRunRecord): string | undefined =>
+		record.sessionSearchDir ? join(record.sessionSearchDir, "output.log") : undefined;
+
+	/**
+	 * Claude Code's two-message hand-back for a resident agent's finished turn
+	 * (its first report, an update, a reply): the report goes out as an
+	 * `<agent-message>` from the agent — the preamble, every line indented, auto
+	 * mode's review flag above it — and the agent's own `<task-notification>`
+	 * follows, its `<result>` a pointer at that message, never the report again.
+	 * A turn that failed or was stopped delivered no report, so it is one
+	 * notification with the output (and any flag) inline in `<result>`. Both go
+	 * through the same notifier, in this order, so a coalesced round keeps the
+	 * report ahead of the pointer.
+	 */
+	const notifyHandBack = (opts: {
+		/** The agent's persistent id: `from=` on the message, the SendMessage address. */
+		from: string;
+		/** The registered task this turn is (the agent's own id, or a SendMessage task's). */
+		taskId: string;
+		name: string;
+		toolUseId?: string;
+		outputFile?: string;
+		/** The turn's outcome: its status, tool count and tokens come from here. */
+		outcome: ChildOutcome;
+		/** The turn ended because the user or the model stopped the agent (CC's `killed`). */
+		stopped?: boolean;
+		/** Start of the span `outcome`'s tokens and tool uses cover, for CC's `<duration_ms>`. */
+		startedAt: number;
+		/** The bounded report text (a failed turn's output rides `<result>` instead). */
+		report: string;
+		review: HandBackVerdict | undefined;
+		details?: Record<string, unknown>;
+	}) => {
+		const status: TaskStatus = opts.stopped ? "killed" : opts.outcome.failed ? "failed" : "completed";
+		const warning = opts.review ? handBackWarning(opts.review) : undefined;
+		const details = { ...opts.details, taskId: opts.taskId, name: opts.name, failed: status === "failed", reviewed: opts.review !== undefined };
+		const envelope = (result: string) =>
+			taskNotification({
+				kind: "agent",
+				taskId: opts.taskId,
+				toolUseId: opts.toolUseId,
+				outputFile: opts.outputFile,
+				status,
+				summary: agentSummary(opts.name, status),
+				note: AGENT_NOTE,
+				result,
+				usage: { subagentTokens: opts.outcome.usage.total, toolUses: opts.outcome.toolCalls, durationMs: Date.now() - opts.startedAt },
+			});
+		if (status !== "completed") {
+			notify("subagent-result", envelope(withReview(opts.report, warning)), details);
+			return;
+		}
+		// CC's mid-turn form applies to hand-backs too (observed live: a report
+		// landing while the parent works takes the other opener and the hint).
+		notify("subagent-message", agentMessage({ from: opts.from, body: opts.report, handBack: true, warning, midTurn: parentBusy }), details);
+		notify("subagent-result", envelope(handBackPointer(opts.from, opts.review !== undefined)), details);
+	};
 
 	/** A fork's system prompt is persisted beside its session so a later resume can restore it (review S6). */
 	const FORK_PROMPT_FILE = "system-prompt.md";
@@ -1140,6 +1239,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					configuredDefault: applicableSubagentDefault(loadSubagentDefault(os.homedir()), ctx.model),
 					sessionModel: ctx.model,
 					available,
+					requireImageInput: supportsImageInput(ctx.model),
 				});
 				for (const notice of resolution.notices) notifyModelOnce(ctx, notice);
 				const modelNotes = subagentModelNotes(resolution);
@@ -1302,7 +1402,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			},
 			sink: live.sink,
 			onMessageToMain: (message, summary) =>
-				parent ? relayToParent(parent.taskId, request.name, message, summary) : notifyAgentMessage(request.name, message, summary),
+				parent ? relayToParent(parent.taskId, record.taskId, request.name, message, summary) : notifyAgentMessage(record.taskId, request.name, message),
 			extraTools: spawnToolsFor(record),
 		});
 		liveHandles.set(record.taskId, handle);
@@ -1359,7 +1459,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			"For a single-fact lookup you already know how to run, search directly instead. Once you've delegated work, don't also run it yourself — wait for the result.\n" +
 			"\n" +
 			"## How agents run\n" +
-			"Agents run in the background: the call returns immediately with a task id, and you'll be notified when one completes — the agent's report arrives as a system notification while you keep working, or on its own if you are idle. Never fabricate or predict a pending agent's results — the notification is never something you write yourself; if the user asks before it arrives, say it's still running. Call task_output only if your next step cannot proceed without the result (block=true waits); stop a run with task_stop. Both are deferred — load them with tool_search first. (Exception: in a one-shot print session the call blocks and returns the report directly — no notification follows.)\n" +
+			"Agents run in the background: the call returns immediately with a task id, and you'll be notified when one completes — the agent's report arrives as a task notification while you keep working, or on its own if you are idle. Never fabricate or predict a pending agent's results — the notification is never something you write yourself; if the user asks before it arrives, say it's still running. Call task_output only if your next step cannot proceed without the result (block=true waits); stop a run with task_stop. Both are deferred — load them with tool_search first. (Exception: in a one-shot print session the call blocks and returns the report directly — no notification follows.)\n" +
 			"\n" +
 			"## Usage notes\n" +
 			"- Give a complete, self-contained task: the agent cannot ask follow-up questions.\n" +
@@ -1558,6 +1658,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 								configuredDefault: configuredDefault,
 								sessionModel: ctx.model,
 								available,
+								requireImageInput: supportsImageInput(ctx.model),
 							})
 						: resolveAutoDefault(ctx.model, available, configuredDefault);
 				if (resolution.unresolved) {
@@ -1566,18 +1667,20 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						configuredDefault: configuredDefault,
 						sessionModel: ctx.model,
 						available,
+						requireImageInput: supportsImageInput(ctx.model),
 					});
 					return {
 						content: [
 							{
 								type: "text",
 								text:
-									`Unknown model "${resolution.unresolved}" — no available model matches it.\n\n` +
+									`${resolution.unresolvedReason ?? `Unknown model "${resolution.unresolved}" — no available model matches it.`}\n\n` +
 									subagentModelsReminder({
 										available,
 										sessionModel: ctx.model,
 										defaultModel: fallback.model,
 										defaultSource: fallback.source,
+										requireImageInput: supportsImageInput(ctx.model),
 									}),
 							},
 						],
@@ -1591,6 +1694,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						configuredDefault: configuredDefault,
 						sessionModel: ctx.model,
 						available,
+						requireImageInput: supportsImageInput(ctx.model),
 					});
 					return {
 						content: [
@@ -1605,6 +1709,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 										sessionModel: ctx.model,
 										defaultModel: fallback.model,
 										defaultSource: fallback.source,
+										requireImageInput: supportsImageInput(ctx.model),
 									}),
 							},
 						],
@@ -1690,7 +1795,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					}
 				}
 
-				const logPath = p.record.sessionSearchDir ? join(p.record.sessionSearchDir, "output.log") : undefined;
+				const logPath = outputLogPath(p.record);
 				let lastLogWrite = 0;
 				let finish!: () => void;
 				const finished = new Promise<void>((resolve) => {
@@ -1708,28 +1813,27 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				// the same way a SendMessage task returns one reply (review S12).
 				let firstTurnOutput: string | undefined;
 				const live = trackLiveRun(p.record, p.request);
-				const resident: Resident = { handle: undefined as never, turnHandlers: [] };
+				const resident: Resident = { handle: undefined as never, startedAt: Date.now(), turnHandlers: [] };
 				const worktreeNote = worktree
 					? `\n\n(Running in worktree ${worktree.path} — kept while the agent stays resident.)`
 					: "";
-				resident.turnHandlers.push((outcome, review) => {
-					const stopped = stoppedTaskIds.has(p.record.taskId);
+				resident.turnHandlers.push((outcome, review, stopped) => {
 					task.status = stopped ? "stopped" : outcome.failed ? "failed" : "completed";
 					task.finishedAt = Date.now();
 					firstTurnOutput = outcome.output;
 					finish();
-					const stats = formatStats(outcome.toolCalls, outcome.usage);
-					const verb = stopped ? "was stopped" : outcome.failed ? "failed" : "completed";
-					notify(
-						"subagent-result",
-						systemNotification(
-							withReview(
-								`Agent ${p.record.name} (task ${p.record.taskId}) ${verb} (${stats}). It stays reachable with SendMessage.\n\n${bounded(outcome.output, `${p.record.taskId}-report`, OUTPUT_CAP)}${worktreeNote}`,
-								review,
-							),
-						),
-						{ taskId: p.record.taskId, name: p.record.name, failed: stopped ? false : (outcome.failed ?? false), reviewed: review !== undefined },
-					);
+					notifyHandBack({
+						from: p.record.taskId,
+						taskId: p.record.taskId,
+						name: p.record.name,
+						toolUseId: toolCallId,
+						outputFile: logPath,
+						outcome,
+						stopped,
+						startedAt: task.startedAt,
+						report: `${bounded(outcome.output, `${p.record.taskId}-report`, OUTPUT_CAP)}${worktreeNote}`,
+						review,
+					});
 				});
 
 				// Idle reaper: every run is a resident now, so without this a long
@@ -1783,7 +1887,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						}
 					},
 					sink: live.sink,
-					onMessageToMain: (message, summary) => notifyAgentMessage(p.record.name, message, summary),
+					onMessageToMain: (message) => notifyAgentMessage(p.record.taskId, p.record.name, message),
 					extraTools: spawnToolsFor(p.record),
 					onTurnEnd: (outcome) => {
 						registry.sessionFileFor(p.record);
@@ -1797,18 +1901,28 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						// trailing it. The wait is bounded (hand-back-review.ts) and
 						// answered synchronously when auto mode is off.
 						const handler = resident.turnHandlers.shift();
+						// A stop or resume during review must not change this turn's outcome.
+						const stopped = stoppedTaskIds.has(p.record.taskId);
 						armReaper();
 						void awaitHandBackReview(pi.events, p.record, outcome.actions).then((review) => {
 							if (handler) {
-								handler(outcome, review);
+								handler(outcome, review, stopped);
 							} else {
 								// A turn nobody is waiting on (e.g. a steer that raced past its
 								// target turn and ran on its own) must still surface.
-								notify(
-									"subagent-result",
-									systemNotification(withReview(`Update from ${p.record.name}:\n\n${bounded(outcome.output, `${p.record.taskId}-update-${Date.now()}`, OUTPUT_CAP)}`, review)),
-									{ name: p.record.name, failed: outcome.failed ?? false, reviewed: review !== undefined },
-								);
+								notifyHandBack({
+									from: p.record.taskId,
+									taskId: p.record.taskId,
+									name: p.record.name,
+									toolUseId: toolCallId,
+									outputFile: logPath,
+									outcome,
+									stopped,
+									startedAt: resident.startedAt,
+									report: bounded(outcome.output, `${p.record.taskId}-update-${Date.now()}`, OUTPUT_CAP),
+									review,
+									details: { update: true },
+								});
 							}
 						});
 					},
@@ -1833,7 +1947,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					startedAt: Date.now(),
 					logPath,
 					output: () => firstTurnOutput ?? (handle.snapshot().text || lastOutput),
-					stop: () => handle.kill(),
+					stop: () => stopAgent(p.record.taskId, handle),
 					resident: () => !handle.exited(),
 					finished,
 				};
@@ -1849,7 +1963,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				content: [
 					{
 						type: "text",
-						text: `${lines.join("\n")}\n\nCompletion (with the agent's report) will arrive as a system notification on its own — you do not need to wait for it or poll; keep working. ${PENDING_RESULT_PROHIBITION} Call task_output only if your next step cannot proceed without the result (block=true waits). Stop with task_stop; SendMessage reaches the agent even while it runs (the message is steered into its current turn).`,
+						text: `${lines.join("\n")}\n\nCompletion (with the agent's report) will arrive as a task notification on its own — you do not need to wait for it or poll; keep working. ${PENDING_RESULT_PROHIBITION} Call task_output only if your next step cannot proceed without the result (block=true waits). Stop with task_stop; SendMessage reaches the agent even while it runs (the message is steered into its current turn).`,
 					},
 				],
 				details: { agentRuns: records, background: true },
@@ -1864,13 +1978,13 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			title: (a) => (a?.to ? `to ${a.to}${a.summary ? `: ${a.summary}` : ""}` : undefined),
 		}),
 		description:
-			'Send a message to a previously spawned agent, addressed by the name from its spawn result (or its task id). To discover the names of running or finished agents, use list_agents (deferred — load it with tool_search select:list_agents). A resident background agent is reached live (mid-turn the message is steered into its current work; when idle it starts a new turn); a finished agent is resumed from its session with full context. Replies arrive as system notifications. (A subagent reporting back to the main conversation uses its own SendMessage with to: "main".)',
+			'Send a message to a previously spawned agent, addressed by the name from its spawn result (or its task id). To discover the names of running or finished agents, use list_agents (deferred — load it with tool_search select:list_agents). A resident background agent is reached live (mid-turn the message is steered into its current work; when idle it starts a new turn); a finished agent is resumed from its session with full context. Replies arrive as task notifications. (A subagent reporting back to the main conversation uses its own SendMessage with to: "main".)',
 		parameters: Type.Object({
 			to: Type.String({ description: "Agent name (or task id) from a previous Agent run" }),
 			message: Type.String({ description: "Plain text message for the agent" }),
 			summary: Type.Optional(Type.String({ description: "5-10 word preview shown in the UI" })),
 		}),
-		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+		async execute(toolCallId, params, _signal, _onUpdate, ctx) {
 			if (params.to === "main") {
 				// The main conversation's SendMessage only addresses spawned agents; the
 				// "main" recipient exists only on a subagent's own injected SendMessage.
@@ -1927,7 +2041,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						content: [
 							{
 								type: "text",
-								text: `${record.name}'s turn had just finished; the message starts its next turn. The reply will arrive as a system notification ("Update from ${record.name}"). ${PENDING_RESULT_PROHIBITION}`,
+								text: `${record.name}'s turn had just finished; the message starts its next turn. The reply will arrive as a task notification from ${record.name}. ${PENDING_RESULT_PROHIBITION}`,
 							},
 						],
 						details: { agentRuns: [record] },
@@ -1952,21 +2066,31 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					status: "running",
 					startedAt: Date.now(),
 					output: () => replyOutput || resident.handle.snapshot().text,
-					stop: () => resident.handle.kill(),
+					stop: () => stopAgent(record.taskId, resident.handle),
 					resident: () => !resident.handle.exited(),
 					finished,
 				};
-				resident.turnHandlers.push((outcome, review) => {
-					task.status = outcome.failed ? "failed" : "completed";
+				resident.turnHandlers.push((outcome, review, stopped) => {
+					task.status = stopped ? "stopped" : outcome.failed ? "failed" : "completed";
 					task.finishedAt = Date.now();
 					replyOutput = outcome.output;
 					finish();
-					const stats = formatStats(outcome.toolCalls, outcome.usage);
-					notify(
-						"subagent-result",
-						systemNotification(withReview(`Reply from ${record.name} (${stats}):\n\n${bounded(outcome.output, `${taskId}-reply`, OUTPUT_CAP)}`, review)),
-						{ taskId, name: record.name, failed: outcome.failed ?? false, reviewed: review !== undefined },
-					);
+					// `<task-id>` is this message's task (what task_output resolves); `from=`
+					// stays the agent's id, the address a further SendMessage uses. The
+					// tracker's tokens and tool uses span the resident's life, so the
+					// duration does too.
+					notifyHandBack({
+						from: record.taskId,
+						taskId,
+						name: record.name,
+						toolUseId: toolCallId,
+						outputFile: outputLogPath(record),
+						outcome,
+						stopped,
+						startedAt: resident.startedAt,
+						report: bounded(outcome.output, `${taskId}-reply`, OUTPUT_CAP),
+						review,
+					});
 				});
 				pi.events.emit(TASK_REGISTER_CHANNEL, task);
 				void resident.handle.send(params.message);
@@ -1978,7 +2102,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					content: [
 						{
 							type: "text",
-							text: `Message sent to resident agent ${record.name} (task ${taskId}). The reply will arrive as a system notification on its own; inspect with task_output. ${PENDING_RESULT_PROHIBITION}`,
+							text: `Message sent to resident agent ${record.name} (task ${taskId}). The reply will arrive as a task notification on its own; inspect with task_output. ${PENDING_RESULT_PROHIBITION}`,
 						},
 					],
 					details: { agentRuns: [record], taskId },
@@ -2066,7 +2190,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				thinking: record.thinking,
 				onProgress: (toolCalls, _text, usage) => live.progress(toolCalls, usage),
 				sink: live.sink,
-				onMessageToMain: (message, summary) => notifyAgentMessage(record.name, message, summary),
+				onMessageToMain: (message) => notifyAgentMessage(record.taskId, record.name, message),
 				extraTools: spawnToolsFor(record),
 			});
 			liveHandles.set(record.taskId, handle);
@@ -2079,23 +2203,29 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				status: "running",
 				startedAt: Date.now(),
 				output: () => handle.snapshot().text,
-				stop: () => handle.kill(),
+				stop: () => stopAgent(record.taskId, handle),
 				finished,
 			};
 			pi.events.emit(TASK_REGISTER_CHANNEL, task);
 
 			void handle.result.then((outcome) => {
 				runningIds.delete(record.taskId);
-				live.finish(Boolean(outcome.failed));
-				task.status = outcome.failed ? "failed" : "completed";
+				const stopped = stoppedTaskIds.has(record.taskId);
+				live.finish(stopped ? "stopped" : Boolean(outcome.failed));
+				task.status = stopped ? "stopped" : outcome.failed ? "failed" : "completed";
 				task.finishedAt = Date.now();
 				finish();
-				const stats = formatStats(outcome.toolCalls, outcome.usage);
-				notify(
-					"subagent-result",
-					systemNotification(`Reply from ${record.name} (${stats}):\n\n${relocationNote}${bounded(outcome.output, `${taskId}-reply`, OUTPUT_CAP)}`),
-					{ taskId, name: record.name, failed: outcome.failed ?? false },
-				);
+				notifyHandBack({
+					from: record.taskId,
+					taskId,
+					name: record.name,
+					toolUseId: toolCallId,
+					outcome,
+					stopped,
+					startedAt: task.startedAt,
+					report: `${relocationNote}${bounded(outcome.output, `${taskId}-reply`, OUTPUT_CAP)}`,
+					review: undefined,
+				});
 			});
 
 			spawnedThisLoop.add(record.taskId); // arm the anti-fabrication backstop (WEAK-MODEL-REVIEW H1)
@@ -2103,7 +2233,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				content: [
 					{
 						type: "text",
-						text: `Message sent to ${record.name} (task ${taskId}). The reply will arrive as a system notification on its own; inspect with task_output. ${PENDING_RESULT_PROHIBITION}`,
+						text: `Message sent to ${record.name} (task ${taskId}). The reply will arrive as a task notification on its own; inspect with task_output. ${PENDING_RESULT_PROHIBITION}`,
 					},
 				],
 				details: { agentRuns: [record], taskId },
@@ -2177,6 +2307,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			configuredDefault: applicable,
 			sessionModel: ctx.model,
 			available,
+			requireImageInput: supportsImageInput(ctx.model),
 		});
 		ctx.ui.notify(
 			[
@@ -2213,20 +2344,27 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		}
 
 		const available = usableModels(ctx);
-		const resolution = resolveSubagentModel({ requested: spec, sessionModel: ctx.model, available });
+		const resolution = resolveSubagentModel({
+			requested: spec,
+			sessionModel: ctx.model,
+			available,
+			requireImageInput: supportsImageInput(ctx.model),
+		});
 		if (resolution.unresolved) {
 			const fallback = resolveSubagentModel({
 				configuredDefault: applicableSubagentDefault(loadSubagentDefault(os.homedir()), ctx.model),
 				sessionModel: ctx.model,
 				available,
+				requireImageInput: supportsImageInput(ctx.model),
 			});
 			ctx.ui.notify(
-				`No available model matches "${spec}".\n\n` +
+				`${resolution.unresolvedReason ?? `No available model matches "${spec}".`}\n\n` +
 					subagentModelsReminder({
 						available,
 						sessionModel: ctx.model,
 						defaultModel: fallback.model,
 						defaultSource: fallback.source,
+						requireImageInput: supportsImageInput(ctx.model),
 					}),
 				"error",
 			);

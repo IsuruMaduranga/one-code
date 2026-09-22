@@ -126,7 +126,7 @@ Usage notes:
 
 /** One Code's addendum: where the harness differs from Claude Code's runtime (task tools are deferred, the sleep guard). */
 export const ONE_CODE_ADDENDUM =
-	" A background run returns a task id immediately; completion arrives as a system notification, and the output is retrievable with task_output / stoppable with task_stop (both deferred — load them with tool_search; in a one-shot print/json session the call runs to completion and returns the output directly). A foreground command that LEADS with `Start-Sleep` is blocked; to wait on a condition use the monitor tool (deferred — load it with tool_search select:monitor).";
+	" A background run returns a task id immediately; completion arrives as a task notification, and the output is retrievable with task_output / stoppable with task_stop (both deferred — load them with tool_search; in a one-shot print/json session the call runs to completion and returns the output directly). A foreground command that LEADS with `Start-Sleep` is blocked; to wait on a condition use the monitor tool (deferred — load it with tool_search select:monitor).";
 
 /** Claude Code's description for the detected edition, verbatim, without One Code's addendum. */
 export function claudeCodePowerShellDescription(edition: PowerShellEditionName): string {

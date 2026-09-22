@@ -6,7 +6,8 @@
  * long-running work over TASK_REGISTER_CHANNEL at runtime, so task_output and
  * task_stop address every background task in the session regardless of which
  * extension started it. Events and completions are delivered as steered
- * system notifications (lib/notifications.ts), never as user input.
+ * task notifications (lib/notifications.ts), never as user input; a fired
+ * wakeup or loop tick re-invokes the session with its prompt verbatim.
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -17,7 +18,7 @@ import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { detachedSpawnOptions, KILL_GRACE_MS, stopProcessTree, waitForChildExit } from "../lib/process-tree.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
 import { bashSpawn, spawnShellCommand } from "../lib/shell-spawn.ts";
-import { ccToolRenderers, customMessageText, liveUiCtx, notificationComponent } from "../lib/tui-render.ts";
+import { ccToolRenderers, customMessageText, liveUiCtx, notificationComponent, scheduledTaskComponent } from "../lib/tui-render.ts";
 import {
 	type BackgroundTask,
 	BackgroundRegistry,
@@ -35,12 +36,23 @@ import {
 	MIN_DELAY_SECONDS,
 	parseLoopArgs,
 } from "./wakeup.ts";
-import { createTaskNotifier, oneShotNote, sessionOutlivesTurn, systemNotification } from "../lib/notifications.ts";
+import {
+	createTaskNotifier,
+	monitorEndedSummary,
+	monitorEventSummary,
+	oneShotNote,
+	sessionOutlivesTurn,
+	TASK_OUTPUT_DELIVERED_CHANNEL,
+	type TaskOutputDelivered,
+	taskNotification,
+	taskStatusOf,
+} from "../lib/notifications.ts";
 import {
 	batchSize,
 	emptyBatch,
-	formatMonitorBatch,
+	formatMonitorEvents,
 	MONITOR_BATCH_BUSY_MS,
+	MONITOR_BATCH_MAX_CHARS,
 	MONITOR_BATCH_IDLE_MS,
 	type MonitorBatch,
 	pushEvent,
@@ -104,16 +116,26 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		live.ui.setWidget("cc-background", running > 0 ? [` background tasks: ${running} running`] : undefined);
 	};
 
-	// Harness-injected notifications carry anti-confabulation framing for the
-	// model; the transcript shows a compact headline instead (ctrl+o expands).
-	// One registration covers every emitter of the type (bash uses it too).
-	for (const customType of ["task-notification", "wakeup", "loop"]) {
+	// The wire frames are model-facing; the transcript shows a compact headline
+	// instead (ctrl+o expands). One registration covers every emitter of
+	// `task-notification` (bash uses it too). A fired wakeup or loop tick is the
+	// prompt verbatim, shown behind Claude Code's "Running scheduled task" line.
+	pi.registerMessageRenderer("task-notification", (message, { expanded }, theme) =>
+		notificationComponent(theme, customMessageText(message.content), expanded),
+	);
+	for (const customType of ["wakeup", "loop"]) {
 		pi.registerMessageRenderer(customType, (message, { expanded }, theme) =>
-			notificationComponent(theme, customMessageText(message.content), expanded),
+			scheduledTaskComponent(theme, customMessageText(message.content), (message as { timestamp?: number }).timestamp ?? Date.now(), expanded),
 		);
 	}
+	// The dynamic /loop's opening turn is the user's command, not a fired task.
+	pi.registerMessageRenderer("loop-start", (message, { expanded }, theme) =>
+		notificationComponent(theme, customMessageText(message.content), expanded),
+	);
 
-	const notify = createTaskNotifier(pi);
+	// A monitor's end the model already read through task_output is withdrawn
+	// like a shell's (lib/notifications.ts).
+	const notify = createTaskNotifier(pi, { withdrawOnDelivery: true });
 
 	pi.registerTool({
 		name: "monitor",
@@ -138,7 +160,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				),
 			),
 		}),
-		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+		async execute(toolCallId, params, signal, _onUpdate, ctx) {
 			lastCtx = ctx;
 			if (Boolean(params.command) === Boolean(params.ws)) {
 				return {
@@ -171,10 +193,12 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				if (batchSize(pending) === 0) return;
 				const batch = pending;
 				pending = emptyBatch();
-				notify("task-notification", systemNotification(formatMonitorBatch(id, params.description, batch)), {
-					taskId: id,
-					events: batchSize(batch),
-				});
+				// CC's mid-run monitor batch: no status, the lines in `<event>`.
+				notify(
+					"task-notification",
+					taskNotification({ kind: "monitor", taskId: id, summary: monitorEventSummary(params.description), result: formatMonitorEvents(id, batch) }),
+					{ taskId: id, events: batchSize(batch) },
+				);
 			};
 
 			const onEvent = (line: string) => {
@@ -201,9 +225,19 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				if (!alive() || oneShot) return;
 				flush();
 				updateWidget();
+				// CC's monitor end: the recent tail rides `<event>` under the ended summary.
+				const ccStatus = taskStatusOf(finalStatus);
+				const recent = tail(stored, MONITOR_BATCH_MAX_CHARS).trim();
 				notify(
 					"task-notification",
-					systemNotification(`Monitor ${id} (${params.description}) ${finalStatus}${note ? ` — ${note}` : ""} after ${eventCount} event(s).`),
+					taskNotification({
+						kind: "monitor",
+						taskId: id,
+						toolUseId: toolCallId,
+						status: ccStatus,
+						summary: monitorEndedSummary(params.description, ccStatus, eventCount > 0, note),
+						result: recent || undefined,
+					}),
 					{ taskId: id, status: finalStatus },
 				);
 			};
@@ -340,7 +374,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				content: [
 					{
 						type: "text",
-						text: `Monitor ${id} started (${params.description}). Events arrive as system notifications; stop with task_stop, inspect with task_output.`,
+						text: `Monitor ${id} started (${params.description}). Events arrive as task notifications; stop with task_stop, inspect with task_output.`,
 					},
 				],
 				details: { taskId: id },
@@ -353,7 +387,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		label: "Task Output",
 		...ccToolRenderers("Task Output"),
 		description:
-			"Retrieve output from a running or finished background task (monitor, background subagent, or background bash) by task id. block=true (default) waits up to `timeout` ms for completion; block=false returns the current status immediately. You never need this just to learn that a task finished — completion arrives as a system notification with the status and the last 2 KB of output; call this for the rest of the output, when your next step needs the result now, or for a mid-run peek.",
+			"Retrieve output from a running or finished background task (monitor, background subagent, or background bash) by task id. block=true (default) waits up to `timeout` ms for completion; block=false returns the current status immediately. You never need this just to learn that a task finished — completion arrives as a task notification naming the output file; call this for the output itself, when your next step needs the result now, or for a mid-run peek.",
 		parameters: Type.Object({
 			task_id: Type.String({ description: "The task id to get output from" }),
 			block: Type.Optional(Type.Boolean({ description: "Wait for completion (default true)" })),
@@ -389,6 +423,9 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 			updateWidget();
 			const header = formatTaskLine(task);
 			const body = tail(task.output(), OUTPUT_CAP) || "(no output yet)";
+			// The model now holds a finished task's output: a completion notification
+			// still waiting to go out for it is redundant (lib/notifications.ts).
+			if (task.status !== "running") pi.events.emit(TASK_OUTPUT_DELIVERED_CHANNEL, { taskId: task.id } satisfies TaskOutputDelivered);
 			return {
 				content: [{ type: "text", text: `${header}\n\n${body}` }],
 				details: { taskId: task.id, status: task.status, logPath: task.logPath },
@@ -442,7 +479,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 			title: (a) => (a?.stop ? "stop" : a?.delaySeconds !== undefined ? `${a.delaySeconds}s` : undefined),
 		}),
 		description:
-			"Schedule when to resume work on a self-paced recurring task — the dynamic mode of the /loop command. After `delaySeconds` (clamped to [60, 3600]) the given prompt is delivered as a system notification and a new turn starts. One wakeup is pending at a time — scheduling again replaces it; {stop: true} ends the loop and cancels any pending wakeup.\n\nPass the same task back via `prompt` each turn so the next firing repeats it. Set `noop: true` when nothing changed this tick (you checked and there's nothing to report); `noop: false` when something happened worth keeping. Pick `delaySeconds` from what you're actually waiting for: poll external state (a CI run, a deploy) at the rate it changes; for a quiet idle heartbeat prefer a long delay (1200s+). Do NOT schedule a short wakeup just to poll background work you started here — its completion already notifies you.",
+			"Schedule when to resume work on a self-paced recurring task — the dynamic mode of the /loop command. After `delaySeconds` (clamped to [60, 3600]) the harness re-invokes you with the given prompt, verbatim, as the next turn's input. One wakeup is pending at a time — scheduling again replaces it; {stop: true} ends the loop and cancels any pending wakeup.\n\nPass the same task back via `prompt` each turn so the next firing repeats it. Set `noop: true` when nothing changed this tick (you checked and there's nothing to report); `noop: false` when something happened worth keeping. Pick `delaySeconds` from what you're actually waiting for: poll external state (a CI run, a deploy) at the rate it changes; for a quiet idle heartbeat prefer a long delay (1200s+). Do NOT schedule a short wakeup just to poll background work you started here — its completion already notifies you.",
 		parameters: Type.Object({
 			delaySeconds: Type.Optional(Type.Number({ description: "Seconds from now to wake up, clamped to [60, 3600]. Required unless stop is true" })),
 			prompt: Type.Optional(Type.String({ description: "The task to continue when the wakeup fires. Required unless stop is true" })),
@@ -592,7 +629,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				activatedWakeupTool = true;
 			}
 			ctx.ui.notify(`Self-paced loop started: ${parsed.task}. Stop with /loop stop.`, "info");
-			notify("loop", buildDynamicLoopPrompt(parsed.task), {});
+			notify("loop-start", buildDynamicLoopPrompt(parsed.task), {});
 		},
 	});
 

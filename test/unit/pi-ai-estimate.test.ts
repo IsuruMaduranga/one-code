@@ -11,10 +11,17 @@
  * silently. When it fails after a pi pin bump, re-vendor from the new source.
  */
 import type { Api, Context, Message, Model } from "@earendil-works/pi-ai";
-import { clampMaxTokensToContext as realClamp } from "@earendil-works/pi-ai/api/simple-options";
+import { clampMaxTokensToContext as realClampImpl } from "@earendil-works/pi-ai/api/simple-options";
 import { estimateMessageTokens as realEstimate } from "@earendil-works/pi-ai/utils/estimate";
+import { normalizeContext as realNormalize } from "@earendil-works/pi-ai/utils/transcript";
 import { describe, expect, it } from "vitest";
-import { clampMaxTokensToContext, estimateMessageTokens } from "../../extensions/lib/pi-ai-estimate.ts";
+import { clampMaxTokensToContext, estimateMessageTokens, normalizeContext } from "../../extensions/lib/pi-ai-estimate.ts";
+
+// Mirror fit.ts / completeSimple: normalize before clamping. The real
+// normalizeContext returns the branded TranscriptContext the real clamp expects,
+// and the vendored one returns the plain Context the vendored clamp reads — no cast.
+const realClamp = (model: Model<Api>, context: Context, maxTokens: number) => realClampImpl(model, realNormalize(context), maxTokens);
+const vendoredClamp = (model: Model<Api>, context: Context, maxTokens: number) => clampMaxTokensToContext(model, normalizeContext(context), maxTokens);
 
 const model = (contextWindow: number, maxTokens = 8000) => ({ contextWindow, maxTokens }) as Model<Api>;
 const usage = (over: Record<string, number> = {}) => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, ...over });
@@ -57,7 +64,21 @@ describe("clampMaxTokensToContext parity with pi-ai", () => {
 	];
 	for (const [name, m, context, maxTokens] of cases) {
 		it(`matches for ${name}`, () => {
-			expect(clampMaxTokensToContext(m, context, maxTokens)).toBe(realClamp(m, context, maxTokens));
+			expect(vendoredClamp(m, context, maxTokens)).toBe(realClamp(m, context, maxTokens));
+		});
+	}
+});
+
+describe("normalizeContext parity with pi-ai", () => {
+	const cases: Array<[string, Context]> = [
+		["no prompt, no tools", req([user("hi")])],
+		["prompt only", req([user("q"), assistant("a")], "you are helpful")],
+		["prompt + tools", req([user("q")], "sys", [{ name: "read", description: "d", parameters: {} }])],
+		["tools only", req([user("q")], undefined, [{ name: "read", description: "d", parameters: {} }])],
+	];
+	for (const [name, context] of cases) {
+		it(`folds the same leading system message for ${name}`, () => {
+			expect(normalizeContext(context).messages).toEqual(realNormalize(context).messages);
 		});
 	}
 });

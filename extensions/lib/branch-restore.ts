@@ -18,6 +18,18 @@
 
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 
+/** A tool result as the session stores it (pi's `ToolResultMessage` reaches us only through `SessionEntry`). */
+export type BranchToolResult = Extract<Extract<SessionEntry, { type: "message" }>["message"], { role: "toolResult" }>;
+
+/** Every tool result on the branch from one of `toolNames`, oldest first. */
+export function* toolResultsOnBranch(branch: readonly SessionEntry[], toolNames: ReadonlySet<string>): Generator<BranchToolResult> {
+	for (const entry of branch) {
+		if (entry.type !== "message") continue;
+		const msg = entry.message;
+		if (msg.role === "toolResult" && toolNames.has(msg.toolName)) yield msg;
+	}
+}
+
 export function restoreLatestDetails<T>(
 	branch: SessionEntry[],
 	toolNames: ReadonlySet<string>,
