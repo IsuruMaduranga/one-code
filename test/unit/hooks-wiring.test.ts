@@ -305,6 +305,43 @@ describe("hooks wiring", () => {
 		expect(countHits()).toBe(2);
 	});
 
+	it("stop_hook_active resets only when a turn really starts (before_agent_start), not for a message queued mid-turn", async () => {
+		const seen = join(root, "stop-stdin.jsonl");
+		const hookStop = script("hook-stop-block.sh", `#!/bin/sh\ncat >> "${seen}"\necho >> "${seen}"\necho "keep going" >&2\nexit 2\n`);
+		writeUserHooks({ Stop: [{ hooks: [{ type: "command", command: hookStop }] }] });
+		mount();
+		const settle = async () => {
+			await fake.fireOne("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] }, ctx());
+			await fake.fireOne("agent_settled", {}, ctx());
+		};
+		const flags = () =>
+			readFileSync(seen, "utf-8")
+				.split("\n")
+				.filter(Boolean)
+				.map((line) => (JSON.parse(line) as { stop_hook_active: boolean }).stop_hook_active);
+
+		await settle(); // the Stop hook blocks: its continuation runs with the latch set
+		await fake.fireOne("input", { source: "interactive", text: "also this", streamingBehavior: "steer" }, ctx());
+		await settle(); // the queued message joined that continuation
+		await fake.fireOne("before_agent_start", { prompt: "a new prompt" }, ctx());
+		await settle(); // a new turn
+		expect(flags()).toEqual([false, true, false]);
+	});
+
+	it("drops UserPromptSubmit context from a hook that outlived a session_start", async () => {
+		const hookPrompt = script("hook-slow.sh", `#!/bin/sh\ncat >/dev/null\nsleep 0.4\necho '{"hookSpecificOutput":{"additionalContext":"stale"}}'\n`);
+		writeUserHooks({ UserPromptSubmit: [{ hooks: [{ type: "command", command: hookPrompt }] }] });
+		const reminders: unknown[] = [];
+		fake.events.on(REMINDER_CHANNEL, (payload) => reminders.push(payload));
+		mount();
+		const pending = fake.fireOne("input", { source: "interactive", text: "queued text", streamingBehavior: "steer" }, ctx());
+		await new Promise((resolve) => setTimeout(resolve, 100));
+		await fake.fireOne("session_start", { reason: "new" }, ctx());
+		await pending;
+		await fake.fireOne("message_start", { message: { role: "user", content: [{ type: "text", text: "queued text" }] } }, ctx());
+		expect(reminders).toHaveLength(0);
+	});
+
 	it("PreCompact and PostCompact carry Claude Code's trigger, custom_instructions and compact_summary (review M1/M3)", async () => {
 		const pre = join(root, "pre-stdin.json");
 		const post = join(root, "post-stdin.json");

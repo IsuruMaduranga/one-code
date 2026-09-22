@@ -335,11 +335,12 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	// ---- UserPromptSubmit ---------------------------------------------------
 	pi.on("input", async (event, ctx) => {
 		if (event.source === "extension") return undefined;
-		// A message queued mid-turn (pi 0.86+ fires `input` for steer/followUp,
-		// with `streamingBehavior` set) joins the running turn; only a prompt
-		// that starts a turn resets the Stop latch.
+		// Set for a message queued mid-turn (pi 0.86+ fires `input` for
+		// steer/followUp). The Stop latch is reset in before_agent_start, where a
+		// turn really starts: pi re-checks streaming after these handlers, so a
+		// queued message whose turn ended during the hook opens a new turn.
 		const queued = event.streamingBehavior;
-		if (!queued) stopHookActive = false;
+		const gen = sessionGen;
 		// Drain the backgrounded SessionStart dispatch before this prompt's own
 		// UserPromptSubmit context, so their order in the first turn is unchanged
 		// (SessionStart context precedes UserPromptSubmit). before_agent_start is
@@ -351,7 +352,8 @@ export default function hooksExtension(pi: ExtensionAPI) {
 			notify(ctx, `Prompt blocked by UserPromptSubmit hook: ${outcome.block.reason}`);
 			return { action: "handled" as const };
 		}
-		if (!outcome.additionalContext) return undefined;
+		// A session_start during the hook (an RPC new_session) superseded it.
+		if (!outcome.additionalContext || gen !== sessionGen) return undefined;
 		// A queued message's context waits for pi to deliver that message
 		// (message_start below), so it rides the same request.
 		if (queued) queuedPromptContext.push({ text: event.text, context: hookContextText("UserPromptSubmit", outcome.additionalContext) });
@@ -384,6 +386,9 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		// The `input` handler usually drained it already; this is the backstop for
 		// turns with no input event.
 		await drainSessionStart();
+		// Every prompt that opens a turn lands here; a queued delivery and the
+		// Stop hook's own continuation (an idle sendMessage) do not.
+		stopHookActive = false;
 		if (pendingPromptContext.length === 0) return;
 		const texts = pendingPromptContext;
 		pendingPromptContext = [];
