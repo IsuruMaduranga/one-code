@@ -68,25 +68,34 @@ jobs:
           ONECODE_INSTALL_NODE: ${{ matrix.force_node }}
           INSTALL_SHELL: ${{ matrix.shell }}
         run: |
+          # The runner presets NPM_CONFIG_PREFIX=C:\npm\prefix; a user's machine
+          # without Node has no such thing, and npm's global folder is then the
+          # standalone Node folder itself. Drop it for that leg.
+          if ($env:ONECODE_INSTALL_NODE -eq '1') { Remove-Item Env:NPM_CONFIG_PREFIX -ErrorAction SilentlyContinue }
           & $env:INSTALL_SHELL -NoProfile -c '$PSVersionTable.PSVersion; Get-Content -Raw install.ps1 | Invoke-Expression'
           if ($LASTEXITCODE -ne 0) { throw "the installer exited with $LASTEXITCODE under $env:INSTALL_SHELL" }
       - name: Open the new terminal a user would and run onecode
         shell: pwsh
+        env:
+          FORCE_NODE: ${{ matrix.force_node }}
         run: |
+          if ($env:FORCE_NODE -eq '1') { Remove-Item Env:NPM_CONFIG_PREFIX -ErrorAction SilentlyContinue }
           $machine = [Environment]::GetEnvironmentVariable('Path', 'Machine')
           $user = [Environment]::GetEnvironmentVariable('Path', 'User')
           $env:Path = "$machine;$user"
           $cmd = Get-Command onecode.cmd -ErrorAction Stop
           Write-Output "onecode: $($cmd.Source)"
-          if ('${{ matrix.force_node }}' -eq '1') {
+          if ($env:FORCE_NODE -eq '1') {
             $expected = Join-Path $env:LOCALAPPDATA 'onecode\node\current'
             if (-not $cmd.Source.StartsWith($expected, [StringComparison]::OrdinalIgnoreCase)) {
               throw "onecode.cmd is not under the standalone Node folder $expected"
             }
-            $node = Join-Path $expected 'node.exe'
-            Write-Output "standalone node: $(& $node --version)"
+            Write-Output "standalone node: $(& (Join-Path $expected 'node.exe') --version)"
           }
           onecode --version
+          if ($LASTEXITCODE -ne 0) { throw "onecode --version exited with $LASTEXITCODE" }
           # No provider on the runner: doctor reports and exits 1. Anything else is a crash.
           onecode doctor
           if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 1) { throw "onecode doctor exited with $LASTEXITCODE" }
+          # GitHub's pwsh wrapper exits the step with the last native exit code.
+          $global:LASTEXITCODE = 0
