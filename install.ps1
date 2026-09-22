@@ -94,8 +94,16 @@ function Install-OneCodeStandaloneNode {
     Write-OneCodeStep "downloading Node.js $version ($arch) from nodejs.org"
     New-Item -ItemType Directory -Force -Path $staging | Out-Null
     $zipPath = Join-Path $staging $zipName
-    Invoke-WebRequest -Uri "$OneCodeNodeDist/$version/$zipName" -OutFile $zipPath -UseBasicParsing
-    $sums = Invoke-RestMethod -Uri "$OneCodeNodeDist/$version/SHASUMS256.txt" -UseBasicParsing
+    # Windows PowerShell 5.1 redraws the progress bar on every buffer write,
+    # which turns a 30 MB download from seconds into minutes.
+    $previousProgress = $ProgressPreference
+    $ProgressPreference = 'SilentlyContinue'
+    try {
+        Invoke-WebRequest -Uri "$OneCodeNodeDist/$version/$zipName" -OutFile $zipPath -UseBasicParsing
+        $sums = Invoke-RestMethod -Uri "$OneCodeNodeDist/$version/SHASUMS256.txt" -UseBasicParsing
+    } finally {
+        $ProgressPreference = $previousProgress
+    }
 
     $expected = $null
     foreach ($line in ($sums -split "`n")) {

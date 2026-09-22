@@ -38,12 +38,12 @@ export async function lookupLatestVersion(input: {
 		const response = await fetchImpl(url, { signal: AbortSignal.timeout(input.timeoutMs ?? LOOKUP_TIMEOUT_MS) });
 		if (!response.ok) return { status: "unknown", reason: `registry answered ${response.status}` };
 		const minReleaseAgeMs = minReleaseAgeFor(input.env);
-		const latest = pickAvailableVersion(await response.json(), { minReleaseAgeMs });
-		if (typeof latest !== "string") {
-			// A well-formed packument with nothing old enough is a Homebrew
-			// outcome, not a broken registry.
-			return { status: "unknown", reason: minReleaseAgeMs > 0 ? "no release is a day old yet (Homebrew installs wait that long)" : "unexpected registry payload" };
-		}
+		const body = (await response.json()) as { "dist-tags"?: { latest?: unknown }; time?: unknown };
+		const wellFormed = typeof body?.["dist-tags"]?.latest === "string" && (minReleaseAgeMs <= 0 || (typeof body.time === "object" && body.time !== null));
+		if (!wellFormed) return { status: "unknown", reason: "unexpected registry payload" };
+		const latest = pickAvailableVersion(body, { minReleaseAgeMs });
+		// A well-formed packument with nothing old enough is a Homebrew outcome, not a broken registry.
+		if (typeof latest !== "string") return { status: "unknown", reason: "no release is a day old yet (Homebrew installs wait that long)" };
 		const cmp = compareVersions(latest, input.current);
 		if (cmp === undefined) return { status: "unknown", version: latest, reason: "unparseable version" };
 		return { status: cmp > 0 ? "behind" : "current", version: latest };

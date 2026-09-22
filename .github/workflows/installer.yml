@@ -19,6 +19,12 @@ on:
     paths: [install.ps1, .github/workflows/installer.yml]
   workflow_dispatch:
 
+# The job runs code it did not write (the published app, npm's install
+# scripts), so the token carries no write scope and is not left in the
+# checkout's git config for that code to read.
+permissions:
+  contents: read
+
 jobs:
   windows:
     name: install.ps1 (${{ matrix.shell }}${{ matrix.force_node == '1' && ', standalone Node' || '' }})
@@ -35,6 +41,8 @@ jobs:
       FORCE_NODE: ${{ matrix.force_node }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       # `shell:` takes no expressions, so the matrix shell is launched from a
       # pwsh step with -c, the way the guide's `powershell -c "irm … | iex"` does.
       - name: Run the installer through Invoke-Expression

@@ -37,5 +37,8 @@ describe("doctor update lookup shares the app's newest-installable-version rule"
 		expect(brew.reason).toMatch(/Homebrew/);
 		const npm = await lookupLatestVersion({ install: "app", current: "0.1.0", env: {}, fetchImpl: fetching({ nothing: true }) });
 		expect(npm).toEqual({ status: "unknown", reason: "unexpected registry payload" });
+		// A latest tag without the time map is malformed for Homebrew, not "too young".
+		const noTime = await lookupLatestVersion({ install: "app", current: "0.1.0", env: { ONECODE_INSTALL_METHOD: "brew" }, fetchImpl: fetching({ "dist-tags": { latest: "0.2.0" } }) });
+		expect(noTime).toEqual({ status: "unknown", reason: "unexpected registry payload" });
 	});
 });
