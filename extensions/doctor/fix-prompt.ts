@@ -23,6 +23,7 @@
  */
 
 import { modeCycleKey } from "../lib/keys.ts";
+import { UPGRADE_COMMANDS } from "../lib/update-check.mjs";
 
 export interface FixPromptInput {
 	/** The rendered deterministic report, plain text. */
@@ -44,7 +45,10 @@ export function doctorFixPrompt(input: FixPromptInput): string {
 		input.install === "app"
 			? "`npm view @one-ai/one-code version --registry https://registry.npmjs.org/`"
 			: "`npm view one-code-extension version --registry https://registry.npmjs.org/`";
-	const upgradeCommand = input.install === "app" ? "`npm install -g @one-ai/one-code` (or `brew upgrade onecode` for a Homebrew install)" : "`pi update`";
+	const upgradeCommand =
+		input.install === "app"
+			? `\`${UPGRADE_COMMANDS.npm}\` (or \`${UPGRADE_COMMANDS.brew}\` for a Homebrew install)`
+			: `\`${UPGRADE_COMMANDS["pi-package"]}\``;
 
 	return `# One Code Doctor
 

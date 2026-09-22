@@ -40,7 +40,7 @@ APP_TGZ="$(ls "$S"/one-ai-one-code-*.tgz)"
 # then repack the app — the faithful global-install layout (appendix A of the
 # review).
 mkdir -p "$S/app-copy"
-cp "$REPO"/app/{bin.mjs,update-check.mjs,README.md,LICENSE} "$S/app-copy/"
+cp "$REPO"/app/{bin.mjs,README.md,LICENSE} "$S/app-copy/"
 node -e '
   const fs = require("fs");
   const p = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));

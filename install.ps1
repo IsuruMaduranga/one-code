@@ -17,7 +17,6 @@
 # Knobs, all environment variables, because `irm | iex` cannot pass parameters:
 #   ONECODE_INSTALL_NODE=1     download the standalone Node even when one exists
 #   ONECODE_NODE_VERSION=x.y.z pin the Node version to download (default: newest LTS)
-#   ONECODE_PACKAGE_SPEC=...   what to hand to npm install (default: @one-ai/one-code)
 #   ONECODE_INSTALL_GIT=1      install Git for Windows through winget when git is missing
 #   ONECODE_NO_PATH_UPDATE=1   never touch the user PATH (the script prints what to add)
 #
@@ -76,7 +75,6 @@ function Resolve-OneCodeNodeVersion {
     $index = Invoke-RestMethod -Uri "$OneCodeNodeDist/index.json" -UseBasicParsing
     foreach ($release in $index) {
         if (-not $release.lts) { continue }
-        if ($release.lts -is [bool]) { continue }
         if ($release.version -match '^v(\d+)\.') {
             if ([int]$Matches[1] -ge $OneCodeMinNodeVersion.Major) { return $release.version }
         }
@@ -186,10 +184,9 @@ function Install-OneCode {
     }
 
     # 2. The app
-    $spec = if ($env:ONECODE_PACKAGE_SPEC) { $env:ONECODE_PACKAGE_SPEC } else { '@one-ai/one-code' }
-    Write-OneCodeStep "npm install -g $spec"
-    & $npm install -g $spec
-    if ($LASTEXITCODE -ne 0) { throw "onecode: npm install -g $spec failed with exit code $LASTEXITCODE." }
+    Write-OneCodeStep 'npm install -g @one-ai/one-code'
+    & $npm install -g '@one-ai/one-code'
+    if ($LASTEXITCODE -ne 0) { throw "onecode: npm install -g @one-ai/one-code failed with exit code $LASTEXITCODE." }
 
     $prefix = (& $npm prefix -g | Select-Object -First 1).Trim()
     if ($prefix -and (Test-Path (Join-Path $prefix 'onecode.cmd'))) {

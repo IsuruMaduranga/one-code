@@ -32,7 +32,6 @@
 	},
 	"files": [
 		"bin.mjs",
-		"update-check.mjs",
 		"README.md",
 		"LICENSE"
 	],

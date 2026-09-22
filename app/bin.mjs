@@ -331,7 +331,12 @@ try {
 } catch {
 	// AssistantMessageComponent not patchable (unexpected pi build): stock behavior.
 }
-const { createUpdateCheck, HOMEBREW_MIN_RELEASE_AGE_MS } = await import("./update-check.mjs");
+// The update notice and the release facts (formula name, upgrade commands,
+// Homebrew's release-age rule) live in the extension package so the doctor
+// quotes the same ones; the app only decides the install method.
+const { createUpdateCheck, UPGRADE_COMMANDS, minReleaseAgeFor } = await import(
+	pathToFileURL(join(corePath, "extensions", "lib", "update-check.mjs")).href
+);
 const brewPrefixes = ["/opt/homebrew/", "/usr/local/Cellar/", "/home/linuxbrew/"];
 let installedViaBrew = false;
 try {
@@ -340,6 +345,8 @@ try {
 } catch {
 	// Unresolvable argv[1] (unusual embedding): assume npm.
 }
+// Read by the doctor's update lookup (lib/update-check.mjs minReleaseAgeFor).
+process.env.ONECODE_INSTALL_METHOD ||= installedViaBrew ? "brew" : "npm";
 await main(argv, {
 	extensionFactories: [
 		{
@@ -347,9 +354,8 @@ await main(argv, {
 			factory: createUpdateCheck({
 				currentVersion: appVersion,
 				stampPath: join(agentDir, "last-update-check"),
-				upgradeHint: installedViaBrew ? "brew upgrade onecode" : "npm install -g @one-ai/one-code",
-				// Homebrew can only serve a version a day after its npm publish.
-				minReleaseAgeMs: installedViaBrew ? HOMEBREW_MIN_RELEASE_AGE_MS : 0,
+				upgradeHint: installedViaBrew ? UPGRADE_COMMANDS.brew : UPGRADE_COMMANDS.npm,
+				minReleaseAgeMs: minReleaseAgeFor(),
 			}),
 		},
 	],

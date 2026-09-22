@@ -1,9 +1,13 @@
 /**
- * One Code's own update notice, replacing pi's (which is suppressed via
- * PI_SKIP_VERSION_CHECK — its endpoint is hardcoded to pi's registry and
- * cannot be pointed at one-code).
+ * One Code's own update notice and the release facts behind it — shared by
+ * the bundled app (app/bin.mjs registers createUpdateCheck as an inline
+ * extension) and the doctor (doctor/update-lookup.ts reports the same
+ * "newest installable version"). Plain JS with no pi imports: the app loads
+ * it from the extension package it depends on, so it must run on bare Node.
  *
- * Mirrors pi's behaviour: entirely non-blocking, and silent on any failure —
+ * The notice replaces pi's (suppressed via PI_SKIP_VERSION_CHECK — its
+ * endpoint is hardcoded to pi's registry and cannot be pointed at one-code).
+ * It mirrors pi's behaviour: entirely non-blocking, and silent on any failure —
  * an update hint must never cost startup time or surface a network error.
  * Honours pi's offline switch (`--offline` sets PI_OFFLINE=1 before extensions
  * load) and runs at most once a day per agent dir, stamped in
@@ -15,19 +19,45 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 
-// Scoped package: the slash must be percent-encoded in registry GETs. The full
-// packument (not `/latest`) because its `time` map dates every version, which
-// the Homebrew hint needs (see pickAvailableVersion).
-const REGISTRY_URL = "https://registry.npmjs.org/@one-ai%2Fone-code";
+export const APP_PACKAGE = "@one-ai/one-code";
+export const EXTENSION_PACKAGE = "one-code-extension";
+/** The Homebrew formula (IsuruMaduranga/homebrew-one-ai), renamed from one-code at 0.3.0. */
+export const HOMEBREW_FORMULA = "onecode";
+/** How each install method upgrades the app; the doctor and the update notice quote these. */
+export const UPGRADE_COMMANDS = {
+	npm: `npm install -g ${APP_PACKAGE}`,
+	brew: `brew upgrade ${HOMEBREW_FORMULA}`,
+	"pi-package": "pi update",
+};
+
+/**
+ * The registry packument for a package (scoped slash percent-encoded). The
+ * full document, not `/latest`: its `time` map dates every version, which
+ * the Homebrew rule needs (pickAvailableVersion). ~14 KB for this package.
+ */
+export function registryPackumentUrl(name) {
+	return `https://registry.npmjs.org/${name.replace("/", "%2F")}`;
+}
+
 const TIMEOUT_MS = 3000;
-export const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+export const CHECK_INTERVAL_MS = DAY_MS;
 /**
  * Homebrew's `std_npm_args` passes npm `--min-release-age=1`, so a version
  * becomes brew-installable only a day after its npm publish. A Homebrew user
  * told about a fresher version would run `brew upgrade onecode` and get
- * nothing, so the hint for that install method waits the same day.
+ * nothing, so every hint for that install method waits the same day.
  */
-export const HOMEBREW_MIN_RELEASE_AGE_MS = 24 * 60 * 60 * 1000;
+export const HOMEBREW_MIN_RELEASE_AGE_MS = DAY_MS;
+
+/**
+ * The minimum release age for an install method: a day for Homebrew, none
+ * otherwise. `ONECODE_INSTALL_METHOD` is set by the app launcher (app/bin.mjs)
+ * from where the binary lives; a plain pi package never sets it.
+ */
+export function minReleaseAgeFor(env = process.env) {
+	return env.ONECODE_INSTALL_METHOD === "brew" ? HOMEBREW_MIN_RELEASE_AGE_MS : 0;
+}
 
 /** pi's truthy-flag reading for PI_OFFLINE (1/true/yes). */
 export function isOffline(env = process.env) {
@@ -66,9 +96,9 @@ export function isNewerVersion(candidate, current) {
 /**
  * The newest version in a registry packument worth announcing, or undefined.
  * With no minimum age this is `dist-tags.latest` (what `npm install -g`
- * fetches). With one, it is the newest x.y.z version whose `time` entry is at
- * least that old — the newest one a `--min-release-age` install can see.
- * Prerelease tags never qualify (isNewerVersion rejects them).
+ * fetches). With one, it is the newest plain x.y.z version whose `time` entry
+ * is at least that old — the newest one a `--min-release-age` install can see.
+ * Prerelease tags never qualify.
  */
 export function pickAvailableVersion(packument, { minReleaseAgeMs = 0, now = Date.now() } = {}) {
 	if (!packument || typeof packument !== "object") return undefined;
@@ -107,7 +137,7 @@ export function createUpdateCheck({ currentVersion, upgradeHint, stampPath, minR
 							// Unwritable agent dir: check every start, as before.
 						}
 					}
-					const response = await fetch(REGISTRY_URL, { signal: AbortSignal.timeout(TIMEOUT_MS) });
+					const response = await fetch(registryPackumentUrl(APP_PACKAGE), { signal: AbortSignal.timeout(TIMEOUT_MS) });
 					if (!response.ok) return;
 					const latest = pickAvailableVersion(await response.json(), { minReleaseAgeMs });
 					if (typeof latest === "string" && isNewerVersion(latest, currentVersion)) {

@@ -1,7 +1,17 @@
-/** Types for the bundled app's plain-JS modules (app/), used by unit tests. */
-declare module "*/app/update-check.mjs" {
+/**
+ * Types for the plain-JS update-check module (extensions/lib/update-check.mjs),
+ * shared by the bundled app and the doctor; tsc has no allowJs, so the
+ * extension code and the unit tests see it through this declaration.
+ */
+declare module "*/lib/update-check.mjs" {
+	export const APP_PACKAGE: string;
+	export const EXTENSION_PACKAGE: string;
+	export const HOMEBREW_FORMULA: string;
+	export const UPGRADE_COMMANDS: { npm: string; brew: string; "pi-package": string };
+	export function registryPackumentUrl(name: string): string;
 	export const CHECK_INTERVAL_MS: number;
 	export const HOMEBREW_MIN_RELEASE_AGE_MS: number;
+	export function minReleaseAgeFor(env?: Record<string, string | undefined>): number;
 	export function isNewerVersion(candidate: string, current: string): boolean;
 	export function pickAvailableVersion(
 		packument: unknown,
