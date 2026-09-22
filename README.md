@@ -4,114 +4,34 @@
 
 **Claude Code with the model slot left open. The full workflow, open source, on any model or provider.**
 
-Claude Code is a good harness. It just ships bolted to one model. One Code
-unbolts it, and runs the whole workflow (subagents, git worktrees, auto mode,
-ultracode workflows, plan mode) on the model you pick. Keep Claude Code for the
-work that earns its best model. Reach for One Code whenever a cheaper or
-different model fits the job.
+One Code rebuilds the Claude Code workflow around the model you choose.
+Subagents, Git worktrees, auto mode, plan mode, permissions, and context
+management all live in the harness, so they come along whatever model you
+put in it. Your `CLAUDE.md`, skills, commands, agents, and permission rules
+carry over with no import step.
 
-The parts that make the harness good (the steering, the permission gate, the
-context management) live in the harness, not the model. One Code brings all of
-them across, because the good part was never the logo.
+If you already use Claude Code, nothing here needs relearning. Pick a model,
+give it a task, review its plan, and let it work. Switch models mid-session,
+or give each subagent its own model and provider: a frontier model on the
+main task, a cheaper one for exploration and tests.
+
+One Code is an independent, open-source implementation built on
+[pi](https://github.com/earendil-works/pi). It recreates the coding workflow;
+features that depend on Claude Code's hosted or desktop services are outside
+its scope.
 
 <p align="center">
-  <img src="demo/onecode.gif" alt="One Code: permission modes, a mid-session model switch, an agentic edit approved by auto mode, a /btw side question, /doctor report, and a subagent in the live panel" width="820">
+  <img src="demo/onecode.gif" alt="One Code terminal showing permission modes, a model switch, an approved edit, a side question, diagnostics, and a running subagent" width="820">
 </p>
 
 [User guide](docs/guide/README.md) ·
-[Bring your Claude Code setup](docs/guide/bring-your-claude-code-setup.md) ·
+[Reuse your Claude Code setup](docs/guide/bring-your-claude-code-setup.md) ·
 [Differences from Claude Code](docs/guide/differences-from-claude-code.md) ·
 [Command reference](docs/guide/reference.md)
 
-## ✨ What you get
-
-- **Any model, any provider.** Anthropic, OpenAI, Gemini, OpenRouter, or a
-  local model. Bring your own and switch mid-session with `/model`. Nothing
-  stops you.
-- **Mix providers in one session.** The parent and each subagent pick their own
-  model and provider, so an ultracode workflow can fan out to a cheap tier while
-  the parent stays on a frontier model. A single-gateway setup cannot do this,
-  which is usually the reason people switch.
-- **Your Claude Code setup runs unchanged.** `CLAUDE.md`, `.claude/commands`,
-  `.claude/skills`, `.claude/agents`, `.mcp.json`, plugins, and permission rules
-  are picked up as they are. No migration, and no second config file to keep in
-  sync. A directory with no `CLAUDE.md` falls back to its `AGENTS.md`, the
-  cross-tool convention Claude Code now reads too, so a repo written for another
-  agent works here with nothing to change.
-- **Capability-tiered prompting.** A weaker model gets more guidance, not less.
-  Not out of politeness; it is how you get output you can use.
-- **A package, not a fork.** One Code is a [pi](https://github.com/earendil-works/pi)
-  package, so you extend it with your own extensions, themes, and settings.
-  Forks go stale; packages do not have to.
-- **Free and open source** under the MIT license.
-
-## 🤔 "But I can already point Claude Code at Ollama"
-
-You can:
-
-```bash
-export ANTHROPIC_BASE_URL="http://localhost:11434"
-claude --model kimi-k2.7-code:cloud
-```
-
-Claude Code will happily talk to whoever picks up the phone. If one model
-behind Claude Code's interface is all you want, enjoy it.
-
-The catch: you swapped the brain and told the body nothing. Claude Code's
-prompts, caching, and side calls all assume a current Claude is on the other
-end, and that assumption doesn't come off with an environment variable.
-
-One Code started as the experiment that follows from that. My
-[Harness Engineering 101](https://isuruwijesiri.com/harness-engineering-101/)
-series argues the model is the brain and the harness is the body, and the good
-parts live in the body. So: rebuild the body from scratch on a model-neutral
-runtime and put any brain in it. This repository is that rebuild, and here's
-what it does that a base URL can't.
-
-- **One phone line.** You can rename the subagent model in Claude Code, but
-  every call, main agent, subagents, classifier, compaction, still dials the one
-  endpoint behind that URL. Mixing providers means running a routing gateway
-  and maintaining it. One Code gives each seat its own brain on its own
-  provider, natively. A frontier model in charge, DeepSeek V4 Flash running
-  twelve subagents. That's the setup this was built for.
-- **Subscriptions don't fit behind a base URL.** A gateway wants API keys. One
-  Code signs you in with the account you already pay for: Claude Pro and Max,
-  ChatGPT, GitHub Copilot, OpenRouter, Kimi, xAI, and Radius all have native
-  OAuth logins, and you can mix them in one session.
-- **Someone else's prompt.** Claude Code's prompt is about 8k characters,
-  because Claude 5 doesn't need hand-holding. Give it to a smaller model and
-  you get a stranger reading Claude's notes. One Code sizes the prompt to the
-  model in four tiers, down to playbooks and strict-schema search tools for
-  flash-class and local models. Weaker brains need more body.
-- **Cache misses, billed to you.** Anthropic caches at explicit `cache_control`
-  markers; most other providers cache on an exact prefix, and the two do not
-  line up. A gateway that translates between them silently maps the markers
-  wrong, so the cache sticks at the system prompt and never advances, or never
-  forms at all. Nothing errors. You just pay full price every turn. This is not
-  hypothetical: users report proxies where the cache-creation count is zero on
-  every turn and half the turns re-bill the whole context, and Claude Code's own
-  attribution header defeats caching behind a base URL unless you know the flag
-  to turn off. One Code speaks each provider's native API, keeps the prefix
-  byte-stable, and shows the live hit rate in the footer, because one careless
-  byte up top is a tenfold price increase.
-- **Anthropic-only parts.** Deferred tools, server-side web search, the
-  thinking block. A foreign endpoint drops them. One Code has a
-  provider-neutral version of each.
-- **Side jobs that ask for Haiku by name.** Your gateway had better know who
-  that is. One Code picks side models from your provider's own catalog, with
-  a capability floor.
-- **A knob, not a toolbox.** Claude Code isn't open source; the base URL is
-  the one knob. One Code is pi extensions all the way down, so anything
-  missing is one more extension.
-
-The base URL trick swaps the brain and hopes the body doesn't notice. One Code
-is the body that was built to notice.
-
 ## 🚀 Get started
 
-You need **Node.js 22.19+**. One Code is developed and verified on macOS and
-Linux; WSL works too. Native Windows runs in Claude Code's shape (Git Bash
-optional, PowerShell tool) — see the [Windows guide](docs/guide/windows.md).
+Install **Node.js 22.19 or later**, then run:
 
 ```bash
 npm install -g @one-ai/one-code
@@ -119,194 +39,262 @@ cd your-project
 onecode
 ```
 
-Inside One Code, run `/login` to connect a provider, then `/model` to pick a
-model. You can also pass a provider key through an environment variable such as
+Inside One Code, run `/login` to connect a provider, then `/model` to choose a
+model. You can also supply an API key through an environment variable such as
 `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `OPENROUTER_API_KEY`.
 
-Open a project that already has a `CLAUDE.md` or `.claude/` setup and One Code
-reuses it right away. Starting fresh? `/init` drafts a `CLAUDE.md` for you.
+One Code reads an existing `CLAUDE.md` and `.claude/` configuration directly.
+If a directory has no `CLAUDE.md`, it falls back to `AGENTS.md`. For a new
+project, run `/init` to draft a `CLAUDE.md`.
 
-Not sure what is wired up? Run `onecode doctor` (or `/doctor report` inside a
-session). It reports which providers have credentials, which model each role
-uses, what of your Claude Code configuration was picked up, and which programs
-are missing. `/doctor` runs the full checkup and has the model fix what it finds.
+To check your setup, run `onecode doctor` or `/doctor report` inside a session.
+The report lists provider credentials, model assignments, detected configuration,
+and missing programs. Run `/doctor` for a checkup with agent-assisted fixes.
 
-One Code is free. Model access, usage charges, and rate limits are between you
-and your provider. See [Providers and models](docs/guide/providers-and-models.md)
-for connection options.
+One Code is developed on macOS and verified on macOS, Linux, and Windows.
+WSL works too. For the native Windows setup and what has been checked there,
+see the [Windows guide](docs/guide/windows.md).
 
-### Other ways to install
+One Code is free under the MIT license. Model access, usage charges, and rate
+limits depend on your provider. See
+[Providers and models](docs/guide/providers-and-models.md) for connection options.
 
-**Homebrew** installs Node for you:
+### Other installation options
+
+**Homebrew**, which installs Node.js for you:
 
 ```bash
 brew install isurumaduranga/one-ai/onecode
 ```
 
-**Windows** without Node.js? This fetches Node for you and installs the app:
+**Windows installer**, which installs Node.js and One Code:
 
 ```powershell
 powershell -c "irm https://raw.githubusercontent.com/IsuruMaduranga/one-code/master/install.ps1 | iex"
 ```
 
-**Already on pi?** Add the extensions to your existing installation:
+**Existing pi installation**:
 
 ```bash
 pi install npm:one-code-extension
 ```
 
-The app package, [`@one-ai/one-code`](https://www.npmjs.com/package/@one-ai/one-code),
-bundles a pinned pi and gives you the `onecode` command. The extension package,
-[`one-code-extension`](https://www.npmjs.com/package/one-code-extension), runs on
-your own pi and is tested against pi 0.83 to 0.86; use `pi` in place of `onecode`
-for that install.
+The [`@one-ai/one-code`](https://www.npmjs.com/package/@one-ai/one-code)
+app package bundles a pinned version of pi and provides the `onecode` command.
+The [`one-code-extension`](https://www.npmjs.com/package/one-code-extension)
+package uses your existing pi installation and is tested against pi versions
+0.83 through 0.86. For the extension package, use `pi` in place of `onecode`.
 
 The app opens in a full-screen terminal interface by default. See the
-[installation guide](docs/guide/installation.md) for display settings and more.
+[installation guide](docs/guide/installation.md) for display settings and more
+installation details.
 
-## 🎛️ Put different models to work
+## ✨ Why One Code?
 
-A main conversation and a repository-wide investigation do not need the same
-model. Keep your preferred model in charge and let subagents use another
-provider for exploration, tests, or review.
+- **Choose models by task.** Use Anthropic, OpenAI, Gemini, OpenRouter, or a
+  local model. Switch the main model mid-session with `/model`.
+- **Mix providers in one session.** Give the main agent and each subagent
+  their own model and provider, without configuring a routing gateway.
+- **Reuse your Claude Code configuration.** One Code reads project
+  instructions, skills, commands, agents, plugins, permission rules, and
+  Model Context Protocol (MCP) server configuration. There is no import step.
+- **Adapt guidance to the model.** Four capability tiers adjust prompting
+  and tool guidance, with more explicit instructions for smaller models.
+- **Extend the harness.** One Code is a
+  [pi](https://github.com/earendil-works/pi) package built from extensions.
+  Add your own extensions, themes, and settings.
+- **Inspect and change the code.** The project is open source under the
+  [MIT license](LICENSE).
+
+## 🤔 Why not use Claude Code with a URL override?
+
+You can point Claude Code at another endpoint with `ANTHROPIC_BASE_URL`.
+If that endpoint supports the API Claude Code expects, this can be enough
+to use an alternative model in a familiar interface.
+
+The override changes where requests go. It does not, by itself, adapt the
+prompts, provider features, authentication, or supporting model calls to
+the model receiving them. Your endpoint or gateway has to bridge those gaps.
+
+One Code builds that adaptation into the harness:
+
+- **Different providers for different agents.** A URL override points
+  requests at one endpoint. To route those requests across providers, you
+  need a gateway. One Code connects each agent to its own provider directly.
+  The main agent can use a frontier model while subagents use a cheaper
+  model elsewhere.
+- **Prompts matched to the model.** Changing the endpoint does not change
+  the instructions sent to the model. One Code uses four capability tiers
+  to adjust prompting and tool guidance. Smaller and local models receive
+  more explicit playbooks and structured search tools.
+- **Native caching support.** Providers use different caching mechanisms.
+  An API-compatible response alone does not establish that a gateway
+  preserves caching behavior. One Code uses native provider integrations,
+  keeps prompt prefixes stable, and shows the cache hit rate in the footer.
+- **Account sign-ins as well as API keys.** Changing a URL does not add
+  a provider's sign-in flow. One Code signs in with the accounts you
+  already have (Claude Pro and Max, ChatGPT, GitHub Copilot, OpenRouter,
+  Kimi, xAI, and Radius), and you can mix them with API-key connections in
+  the same session.
+- **Tools and supporting calls that account for the provider.** Web search,
+  deferred tools, reasoning, and background model calls need more than an
+  endpoint change. One Code provides shared tool interfaces and selects
+  supporting models from the provider's catalog, subject to capability
+  requirements.
+- **An open harness you can change.** One Code's prompts, tools, and
+  workflows are implemented as pi extensions. You can inspect them,
+  change their behavior, and add your own.
+
+Use a URL override when one compatible endpoint covers your needs. Use
+One Code when you want the Claude Code workflow with model choice built
+into the prompts, tools, authentication, and agent coordination.
+
+See [Differences from Claude Code](docs/guide/differences-from-claude-code.md)
+for the full comparison and compatibility boundaries.
+
+## 🎛️ Use different models in one session
+
+Keep your preferred model on the main task and delegate exploration, tests,
+or review to another model or provider.
 
 1. Choose the main model with `/model`.
-2. Set the default for subagents and workflow agents with
+2. Set the default model for subagents and workflow agents with
    `/subagent <provider/model-id>`.
-3. Ask for delegated work, for example:
+3. Ask for delegated work. For example:
 
    > Use subagents to investigate the authentication code and its tests.
    > Have them report their findings, then make the fix in the main session.
 
-Agent definitions in `.claude/agents/` can name their own model, tools, and
-instructions. Use `/agents` to follow their progress and `/model` to change the
-main model as the task changes.
+Agent definitions in `.claude/agents/` can specify their own model, tools,
+and instructions. Use `/agents` to follow their progress and `/model` to
+change the main model as the task changes.
 
-This is where you decide where the money goes. Actual cost and quality depend on
-the models, the task, and how much you delegate.
+Cost and output quality depend on the models, the task, and how much work
+you delegate. See [Subagents and workflows](docs/guide/subagents-and-workflows.md)
+for configuration details.
 
-[Subagents and workflows →](docs/guide/subagents-and-workflows.md)
+## ♻️ Reuse your Claude Code setup
 
-## ♻️ Reuse the setup you already have
+One Code reads Claude Code configuration directly and keeps its own settings
+separately. It treats `~/.claude` as read-only, with one deliberate exception:
+per-repository memory is written to Claude Code's own memory folder, so both
+tools share it.
 
-One Code reads Claude Code configuration directly. There is no import step.
-
-| Your configuration | How One Code uses it |
+| Configuration | How One Code uses it |
 |---|---|
 | `CLAUDE.md` | Project instructions, including nested files and `@path` imports. Falls back to `AGENTS.md` when a directory has no `CLAUDE.md`. |
 | `.claude/skills/` and `.claude/commands/` | Discoverable skills and slash commands. |
-| `.claude/agents/` | Subagent definitions with their model, tools, and instructions. |
+| `.claude/agents/` | Subagent definitions with model, tool, and instruction settings. |
 | `.claude/settings.json` | `allow`, `deny`, and `ask` permission rules, plus supported command hooks. |
-| `.mcp.json` | MCP servers with tools loaded on demand. |
+| `.mcp.json` | MCP servers, with tools loaded on demand. |
 | Installed Claude Code plugins | Plugin agents, skills, commands, and MCP servers, namespaced by plugin. |
 
 Claude Code tool names such as `Read`, `Bash`, `Edit`, and `Task` work in
-permission rules and hook matchers. One Code keeps its own settings separately
-and treats `~/.claude` as read-only, so nothing you already have gets rewritten.
+permission rules and hook matchers.
 
-Compatibility covers configuration and workflow surfaces. Features and skills
-that need Claude Code's own hosted or desktop services are not included.
+Compatibility covers configuration and workflows. Features and skills that
+depend on Claude Code's hosted or desktop services are not included.
 
-[Configuration details →](docs/guide/bring-your-claude-code-setup.md) ·
-[Skills, plugins, and MCP →](docs/guide/skills-plugins-and-mcp.md)
+See [Configuration compatibility](docs/guide/bring-your-claude-code-setup.md)
+and [Skills, plugins, and MCP](docs/guide/skills-plugins-and-mcp.md).
 
-## ⚙️ Workflows that scale with the task
+## ⚙️ Plan and delegate work
 
-### Subagents and git worktrees
+### Subagents and Git worktrees
 
-Give an investigation its own context window and bring the result back to the
-main conversation. Subagents run in the background, take follow-up messages, and
-can fork the current conversation when they need its context. Three agent
-definitions ship with One Code: `general-purpose`, `explore`, and `plan`.
+Give an investigation its own context window and bring the results back to
+the main conversation. Subagents run in the background, accept follow-up
+messages, and can fork the conversation when they need its context.
 
-For parallel edits, give agents their own git worktrees. You can also move the
-whole session into a worktree with `enter_worktree` and leave it with
+One Code includes three agent definitions: `general-purpose`, `explore`,
+and `plan`.
+
+For parallel edits, give agents separate Git worktrees. You can also move
+the whole session into a worktree with `enter_worktree` and leave it with
 `exit_worktree`.
 
 ### Ultracode workflows
 
-Put **`ultracode`** in a request for a broad audit, migration, or review. The
-model writes a JavaScript workflow that coordinates agents in parallel, with
-progress visible in `/workflows`. Use `/effort ultracode` to keep this behavior
-on across turns.
+Include **`ultracode`** in a request for a broad audit, migration, or review.
+The model writes a JavaScript workflow to coordinate agents in parallel.
+Follow progress in `/workflows`, or use `/effort ultracode` to keep this
+behavior enabled across turns.
 
-Resume an interrupted run to reuse completed agent calls whose inputs still
-match. Save reusable scripts in `.claude/workflows/` to call them by name.
-Optional output-token targets stop new and queued agents once reached;
-agents already running can finish above the target.
+When you resume an interrupted run, completed agent calls can be reused if
+their inputs still match. Save reusable scripts in `.claude/workflows/` to
+call them by name.
+
+Optional output-token targets stop new and queued agents when the target
+is reached. Agents already running can finish above the target.
 
 ### Permissions and planning
 
-**Auto mode is the default.** A classifier judges actions that need review,
-while permission rules and deterministic checks enforce the rest. `deny` rules
-beat `allow` rules. Trust approval covers project-provided hooks, MCP servers,
-and allow rules.
+**Auto mode is the default.** A classifier evaluates actions that need
+review, while permission rules and deterministic checks enforce the remaining
+controls. `deny` rules take precedence over `allow` rules.
 
-Press **ctrl+q** (**alt+m** on Windows and WSL) to cycle through manual, accept-edits, plan, and auto modes.
-Plan mode lets the agent investigate and write a plan file before you approve
-implementation. Use `/permissions` to inspect rules and `/auto-mode` to
-configure the classifier.
+Project-provided hooks, MCP servers, and allow rules require trust approval.
 
-The permission system is an application-level control. For OS-level isolation,
-run One Code inside a container. The guide spells out the guarantees and the
-known gaps.
+Press **ctrl+q**, or **alt+m** on Windows and WSL, to cycle through manual,
+accept-edits, plan, and auto modes. In plan mode, the agent investigates and
+writes a plan file before you approve implementation.
 
-[Permissions and modes →](docs/guide/permissions-modes-and-auto-mode.md) ·
-[Hooks →](docs/guide/hooks.md)
+Use `/permissions` to inspect rules and `/auto-mode` to configure the
+classifier.
+
+The permission system provides application-level controls. For operating
+system isolation, run One Code inside a container. See
+[Permissions and modes](docs/guide/permissions-modes-and-auto-mode.md) for
+guarantees and known limitations, and [Hooks](docs/guide/hooks.md) for
+hook configuration.
 
 ## 🧰 Everyday tools
 
-| Capability | What you get |
+| Capability | Included features |
 |---|---|
-| Code and files | Read, write, edit, shell commands, background processes, repository search, and notebook editing. |
-| Web | Search and fetch, with provider search or Brave, Tavily, and Exa fallbacks. |
-| Diagnostics | Language-server diagnostics after edits; install the relevant server on your `PATH`. |
+| Code and files | File reading, writing, and editing; shell commands; background processes; repository search; and notebook editing. |
+| Web | Search and fetch, using provider search or Brave, Tavily, and Exa fallbacks. |
+| Diagnostics | Language server diagnostics after edits. Install the relevant server on your `PATH`. |
 | Long sessions | Per-repository memory, a session scratchpad, and context compaction. |
 | Task tracking | A pinned progress widget, background monitors, and scheduled wake-ups. |
-| Tool discovery | Deferred tools loaded when needed to keep prompt overhead down. |
-| Reasoning and appearance | `/effort` or **shift+tab** for reasoning effort; `onecode` and `onecode-light` themes. |
-| Customization | Extend One Code with pi extensions, themes, and settings. |
+| Tool discovery | Tools loaded on demand to reduce prompt overhead. |
+| Reasoning and appearance | `/effort` or **shift+tab** to set reasoning effort; `onecode` and `onecode-light` themes. |
+| Customization | pi extensions, themes, and settings. |
 
-The bundled skills include `simplify`, `code-review`, `security-review`, and
-`fewer-permission-prompts`. A project skill with the same name wins.
+Bundled skills include `simplify`, `code-review`, `security-review`, and
+`fewer-permission-prompts`. A project skill with the same name takes precedence.
 
 For scripting and session management:
 
 ```bash
 onecode -p "Explain how authentication works in this repository"
-onecode -c                       # continue the previous session
-onecode --mode json              # JSON event output
-onecode --permission-mode plan   # start in plan mode
+onecode -c                       # Continue the previous session.
+onecode --mode json              # Output JSON events.
+onecode --permission-mode plan   # Start in plan mode.
 ```
 
-See [Tools](docs/guide/tools.md) for every tool the model can call and the
-[command reference](docs/guide/reference.md) for every command, shortcut, flag,
-and environment variable.
+See [Tools](docs/guide/tools.md) for available tools and the
+[command reference](docs/guide/reference.md) for commands, shortcuts, flags,
+and environment variables.
 
-## 📚 Documentation
+## 💡 Platform and provider notes
 
-The [user guide](docs/guide/README.md) covers everything: installation,
-providers and models, the terminal interface, configuration, permissions and
-auto mode, hooks, subagents and workflows, skills, plugins, and MCP, tools,
-sessions and context, background work, the doctor, differences from Claude Code,
-troubleshooting, and a full reference.
-
-## 💡 Good to know
-
-- **Providers:** end-to-end testing has focused on Anthropic, OpenAI, and
-  OpenRouter. Other providers are less exercised, so expect the occasional rough
-  edge.
-- **Web search:** set `BRAVE_SEARCH_API_KEY` or `TAVILY_API_KEY` on a provider
-  without native search. With neither key, the fallback is Exa's rate-limited
-  keyless endpoint, and One Code labels those results.
-- **Native Windows:** shells, hooks, and the PowerShell tool follow Claude
-  Code's behavior and pass on Windows CI runners, but a real Windows desktop
-  session hasn't been driven end to end yet. Expect rough edges around
-  drive-letter paths in permission rules; WSL remains the safest route.
+- **Provider coverage:** End-to-end testing focuses on Anthropic, OpenAI,
+  and OpenRouter. Other providers have less test coverage.
+- **Web search:** For providers without native search, set
+  `BRAVE_SEARCH_API_KEY` or `TAVILY_API_KEY`. Without either key, One Code
+  falls back to Exa's rate-limited keyless endpoint and labels those results.
+- **Native Windows:** The shells, hooks, and the PowerShell tool follow
+  Claude Code's behavior. They pass on the Windows CI runner, where a real
+  model drives both shell tools, and they have been checked by hand on a
+  Windows Server 2025 machine: the interface in Windows Terminal, permission
+  prompts, plan mode, the PowerShell tool, background shells, and `/doctor`.
+  Windows 10 and 11 desktops have had less time in the field, so report what
+  you hit. WSL remains the longest-tested route.
 
 ## 🔧 Install from source
 
-This installs the local extensions into an existing pi installation:
+To install the local extensions into an existing pi installation, run:
 
 ```bash
 git clone https://github.com/IsuruMaduranga/one-code
@@ -317,15 +305,16 @@ pi install ./one-code
 pi list
 ```
 
-## 🧠 Learn the ideas behind it
+## 📚 Documentation and background
 
-One Code is the production-scale companion to
-[Harness Engineering 101](https://isuruwijesiri.com/harness-engineering-101/),
-a sixteen-chapter series that builds these ideas up from first principles: what
-a coding harness actually does, why the good parts are model-independent, and
-how a ~300-line toy agent grows into the patterns you see here. The series
-points at this repository wherever it needs a grown-up example.
+The [user guide](docs/guide/README.md) covers setup, configuration, providers,
+permissions, workflows, tools, session management, and troubleshooting.
+
+For the ideas behind the project, read
+[Harness Engineering 101](https://isuruwijesiri.com/harness-engineering-101/).
+The sixteen-chapter series starts with a small coding agent and develops the
+harness patterns used in One Code, with examples from this repository.
 
 ## 📄 License
 
-[MIT](LICENSE). Contributions welcome.
+[MIT](LICENSE). Contributions are welcome.

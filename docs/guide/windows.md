@@ -172,9 +172,14 @@ is the same.
 - The PowerShell tool has also been driven through a real model with a
   `pwsh` on macOS, the same way Claude Code's own PowerShell tool was
   captured for reference.
-- An interactive session on a Windows desktop (Windows Terminal, permission
-  prompts, plan mode) has not been checked by hand yet. If you hit something
-  there, [Troubleshooting](troubleshooting.md) says what to collect.
+- An interactive session on a real Windows machine (a Windows Server 2025
+  VM, the same kernel as the CI runner): the interface in Windows Terminal,
+  `alt+m` mode cycling, a permission prompt, plan mode, the PowerShell tool's
+  rendering, a background PowerShell shell with its panel and notification,
+  diagnostics through an npm-installed language server, and both `/doctor`
+  surfaces, with Git for Windows present and with PowerShell alone. Windows
+  10 and 11 desktops have not had the same pass; if you hit something there,
+  [Troubleshooting](troubleshooting.md) says what to collect.
 
 ## Not provided
 
