@@ -60,15 +60,18 @@ jobs:
             force_node: '1'
     steps:
       - uses: actions/checkout@v4
+      # `shell:` takes no expressions, so the matrix shell is launched from a
+      # pwsh step with -c, the way the guide's `powershell -c "irm … | iex"` does.
       - name: Run the installer through Invoke-Expression
-        shell: ${{ matrix.shell }}
+        shell: pwsh
         env:
           ONECODE_INSTALL_NODE: ${{ matrix.force_node }}
+          INSTALL_SHELL: ${{ matrix.shell }}
         run: |
-          $PSVersionTable.PSVersion
-          Get-Content -Raw install.ps1 | Invoke-Expression
+          & $env:INSTALL_SHELL -NoProfile -c '$PSVersionTable.PSVersion; Get-Content -Raw install.ps1 | Invoke-Expression'
+          if ($LASTEXITCODE -ne 0) { throw "the installer exited with $LASTEXITCODE under $env:INSTALL_SHELL" }
       - name: Open the new terminal a user would and run onecode
-        shell: ${{ matrix.shell }}
+        shell: pwsh
         run: |
           $machine = [Environment]::GetEnvironmentVariable('Path', 'Machine')
           $user = [Environment]::GetEnvironmentVariable('Path', 'User')
