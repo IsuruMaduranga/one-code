@@ -13,7 +13,8 @@
 # Sleep durations below must be long enough for your model to respond. A slower
 # model needs longer Sleeps; a fast model gives a snappier clip. In the `/model`
 # step, the filter text picks the model — the same model name can appear under
-# several providers, so add `Down` presses to land on your funded provider.
+# several providers, so qualify it with the provider (the picker matches
+# `provider/model`, e.g. `Type "openai luna"`) to land on your funded one.
 #
 # The /model choice is persisted into pi's settings by the app. To record
 # without changing your own default, point PI_CODING_AGENT_DIR at a copy of
@@ -67,7 +68,7 @@ Sleep 1500ms
 Type "/model"
 Enter
 Sleep 2000ms
-Type "luna"       # type to filter
+Type "luna"       # type to filter — prefix your provider ("openai luna") when the name is not unique
 Sleep 1500ms
 Enter
 Sleep 2000ms

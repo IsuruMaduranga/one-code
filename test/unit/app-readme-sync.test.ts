@@ -14,8 +14,8 @@ describe("app/README.md is the root README with absolute links", () => {
 
 	it("leaves no repo-relative link or image for npm to break", () => {
 		const app = readFileSync(join(root, "app", "README.md"), "utf8");
-		expect(app).not.toMatch(/\]\((?!https?:|#|mailto:)[^)]+\)/);
-		expect(app).not.toMatch(/src="(?!https?:)/);
+		expect(app).not.toMatch(/\]\((?![a-z][a-z\d+.-]*:|\/\/|#)[^)]+\)/i);
+		expect(app).not.toMatch(/src="(?![a-z][a-z\d+.-]*:|\/\/)/i);
 	});
 
 	it("rewrites links to blob URLs and images (HTML or Markdown) to raw URLs", () => {
@@ -28,5 +28,10 @@ describe("app/README.md is the root README with absolute links", () => {
 				"![shot](https://raw.githubusercontent.com/IsuruMaduranga/one-code/master/demo/b.png) " +
 				"[l](https://github.com/IsuruMaduranga/one-code/blob/master/LICENSE)",
 		);
+	});
+
+	it("leaves network-path and non-HTTP URI targets alone", () => {
+		const src = '![c](//cdn.example/i.png) [m](mailto:a@b.c) <img src="data:image/png;base64,AA==">';
+		expect(appReadmeFrom(src)).toBe(src);
 	});
 });
