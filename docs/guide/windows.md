@@ -8,6 +8,18 @@ enabled, and the Windows-specific pieces of your Claude Code configuration
 keep working. This page says what that means in practice and what has and
 hasn't been verified.
 
+## Install
+
+```powershell
+powershell -c "irm https://raw.githubusercontent.com/IsuruMaduranga/one-code/master/install.ps1 | iex"
+```
+
+This fetches Node.js when the machine has none and installs the app; with
+Node.js 22.19 or later already present, `npm install -g @one-ai/one-code`
+does the same. Details, and the script's knobs, are in
+[Install on Windows](installation.md#install-on-windows). Git for Windows is
+optional; the section below says what it adds.
+
 ## Two shell tools
 
 | Tool | When it is active | What runs it |

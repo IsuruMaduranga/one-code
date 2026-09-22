@@ -143,6 +143,12 @@ for connection options.
 brew install isurumaduranga/one-ai/onecode
 ```
 
+**Windows** without Node.js? This fetches Node for you and installs the app:
+
+```powershell
+powershell -c "irm https://raw.githubusercontent.com/IsuruMaduranga/one-code/master/install.ps1 | iex"
+```
+
 **Already on pi?** Add the extensions to your existing installation:
 
 ```bash

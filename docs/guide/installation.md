@@ -8,6 +8,7 @@ fits how you already work.
 | You | Install | What you get |
 |---|---|---|
 | New to this, or you want the simplest setup | `npm install -g @one-ai/one-code` | The bundled app: its own `onecode` command, a pinned version of the pi coding agent inside it, and its state kept in `~/.onecode`. It coexists with any `pi` you already have. |
+| On Windows without Node.js | `powershell -c "irm https://raw.githubusercontent.com/IsuruMaduranga/one-code/master/install.ps1 \| iex"` | The bundled app, with Node.js fetched for you when the machine has none. See [Install on Windows](#install-on-windows). |
 | Already running [pi](https://github.com/earendil-works/pi) | `pi install npm:one-code-extension` | The extensions only. They run on your existing pi. One Code's own state still goes to `~/.onecode`; pi's own files stay under your pi agent directory (`~/.pi/agent`). |
 
 ## Requirements
@@ -39,6 +40,46 @@ in your environment before launching. For a free option, see
 The first run also seeds pi's settings under `~/.onecode/agent/` with the
 `onecode` theme, quiet startup, and full-screen mode. It never overrides a
 value you change later.
+
+## Install on Windows
+
+Open Windows Terminal or PowerShell and run:
+
+```powershell
+powershell -c "irm https://raw.githubusercontent.com/IsuruMaduranga/one-code/master/install.ps1 | iex"
+```
+
+The script looks for Node.js 22.19 or later on your PATH. When there is
+none, it downloads the current Node LTS for your CPU from nodejs.org as a
+zip, checks it against nodejs.org's published checksums, unpacks it under
+`%LOCALAPPDATA%\onecode\node`, and adds that folder to your user PATH.
+Nothing is installed system-wide and no Windows installer runs. It then
+runs `npm install -g @one-ai/one-code` and makes sure the `onecode` command
+is on your PATH. Open a new terminal afterwards so it sees the PATH change.
+
+The script also tells you when `git` is missing. One Code runs without it,
+but Git for Windows gives you the branch in the footer, `/init`, worktrees,
+and a bash tool for the model next to PowerShell. Install it with
+`winget install --id Git.Git -e`, or set `ONECODE_INSTALL_GIT=1` before
+running the script to have it do that for you.
+
+If you already have Node.js 22.19 or later, the plain npm command works the
+same on Windows as anywhere else:
+
+```powershell
+npm install -g @one-ai/one-code
+```
+
+The script's knobs are environment variables, because a piped script
+cannot take parameters: `ONECODE_INSTALL_NODE=1` downloads the standalone
+Node even when one exists, `ONECODE_NODE_VERSION` pins the version it
+downloads, and `ONECODE_NO_PATH_UPDATE=1` leaves your PATH alone and prints
+what to add. Read the script before running it if you like; it is the
+`install.ps1` at the root of the repository.
+
+Windows Subsystem for Linux (WSL) is Linux: use the npm or Homebrew route
+inside the distribution. For what works on native Windows, see
+[Windows](windows.md).
 
 ## Install with Homebrew
 
@@ -104,7 +145,10 @@ npm install -g @one-ai/one-code      # npm installs
 brew upgrade onecode                 # Homebrew installs
 ```
 
-Set `ONECODE_NO_UPDATE_CHECK=1` to skip the check; `--offline` skips it too.
+A Homebrew install sees the notice a day after the npm release, because
+Homebrew refuses packages younger than that and `brew upgrade` would find
+nothing sooner. Set `ONECODE_NO_UPDATE_CHECK=1` to skip the check;
+`--offline` skips it too.
 On your own pi, update with `pi update --extensions`.
 
 Both packages are released together with the same version number.
@@ -116,8 +160,10 @@ npm uninstall -g @one-ai/one-code    # or: brew uninstall onecode
 rm -rf ~/.onecode                    # One Code's state, including pi's under the app
 ```
 
-On your own pi, run `pi remove one-code-extension` (or remove the package
-entry from pi's settings). Removing `~/.onecode` deletes One Code's
+If the Windows script fetched Node.js for you, delete `%LOCALAPPDATA%\onecode`
+too and remove that folder from your user PATH. On your own pi, run
+`pi remove one-code-extension` (or remove the package entry from pi's
+settings). Removing `~/.onecode` deletes One Code's
 settings, approvals, plan files, and, under the bundled app, pi's sessions
 and credentials. Memory files stay in `~/.claude/projects/`, because they
 are shared with Claude Code.

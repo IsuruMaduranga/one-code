@@ -2,7 +2,24 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CHECK_INTERVAL_MS, checkedRecently, createUpdateCheck, isNewerVersion, isOffline } from "../../app/update-check.mjs";
+import {
+	CHECK_INTERVAL_MS,
+	HOMEBREW_MIN_RELEASE_AGE_MS,
+	checkedRecently,
+	createUpdateCheck,
+	isNewerVersion,
+	isOffline,
+	pickAvailableVersion,
+} from "../../extensions/lib/update-check.mjs";
+
+const DAY = 24 * 60 * 60 * 1000;
+
+/** A registry packument whose `time` map dates each version `ageMs` before `now`. */
+function packument(latest: string, ages: Record<string, number>, now = Date.now()) {
+	const time: Record<string, string> = { created: new Date(now - 365 * DAY).toISOString() };
+	for (const [version, ageMs] of Object.entries(ages)) time[version] = new Date(now - ageMs).toISOString();
+	return { "dist-tags": { latest }, time };
+}
 
 describe("isNewerVersion", () => {
 	it("orders plain x.y.z versions", () => {
@@ -15,6 +32,29 @@ describe("isNewerVersion", () => {
 	it("treats unparseable versions as not newer", () => {
 		expect(isNewerVersion("0.2.0-beta.1", "0.1.0")).toBe(false);
 		expect(isNewerVersion("", "0.1.0")).toBe(false);
+	});
+});
+
+describe("pickAvailableVersion", () => {
+	const now = Date.UTC(2026, 8, 22, 12);
+	const doc = packument("0.4.0", { "0.3.0": 10 * DAY, "0.3.1": 9 * DAY, "0.4.0": 2 * 60 * 60 * 1000, "0.5.0-beta.1": 30 * DAY }, now);
+
+	it("returns dist-tags.latest when no minimum age is set (the npm route)", () => {
+		expect(pickAvailableVersion(doc, { now })).toBe("0.4.0");
+		expect(pickAvailableVersion({}, { now })).toBeUndefined();
+		expect(pickAvailableVersion(undefined, { now })).toBeUndefined();
+	});
+
+	it("skips a version published within the minimum age and falls back to the newest older one", () => {
+		expect(pickAvailableVersion(doc, { minReleaseAgeMs: HOMEBREW_MIN_RELEASE_AGE_MS, now })).toBe("0.3.1");
+		// A day later the fresh release qualifies.
+		expect(pickAvailableVersion(doc, { minReleaseAgeMs: HOMEBREW_MIN_RELEASE_AGE_MS, now: now + DAY })).toBe("0.4.0");
+	});
+
+	it("never picks a prerelease and copes with a packument without time", () => {
+		const onlyBeta = packument("0.5.0-beta.1", { "0.5.0-beta.1": 30 * DAY }, now);
+		expect(pickAvailableVersion(onlyBeta, { minReleaseAgeMs: DAY, now })).toBeUndefined();
+		expect(pickAvailableVersion({ "dist-tags": { latest: "0.4.0" } }, { minReleaseAgeMs: DAY, now })).toBeUndefined();
 	});
 });
 
@@ -42,7 +82,7 @@ describe("createUpdateCheck", () => {
 	it("notifies with the upgrade hint when the registry has a newer version", async () => {
 		vi.stubGlobal(
 			"fetch",
-			vi.fn(async () => ({ ok: true, json: async () => ({ version: "0.9.0" }) })),
+			vi.fn(async () => ({ ok: true, json: async () => packument("0.9.0", { "0.9.0": 2 * DAY }) })),
 		);
 		const { pi, notify, fire } = harness();
 		createUpdateCheck({ currentVersion: "0.1.0", upgradeHint: "brew upgrade one-code" })(pi);
@@ -52,10 +92,29 @@ describe("createUpdateCheck", () => {
 		expect(notify).toHaveBeenCalledWith(expect.stringContaining("brew upgrade one-code"), "info");
 	});
 
+	it("holds the Homebrew hint until the release is a day old, since brew cannot install it before", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => ({ ok: true, json: async () => packument("0.4.0", { "0.3.1": 9 * DAY, "0.4.0": 60 * 60 * 1000 }) })),
+		);
+		const brew = harness();
+		createUpdateCheck({ currentVersion: "0.3.1", upgradeHint: "brew upgrade onecode", minReleaseAgeMs: HOMEBREW_MIN_RELEASE_AGE_MS })(brew.pi);
+		brew.fire();
+		await flush();
+		expect(brew.notify).not.toHaveBeenCalled();
+
+		// The npm route announces it at once.
+		const npm = harness();
+		createUpdateCheck({ currentVersion: "0.3.1", upgradeHint: "npm install -g @one-ai/one-code" })(npm.pi);
+		npm.fire();
+		await flush();
+		expect(npm.notify).toHaveBeenCalledWith(expect.stringContaining("0.4.0"), "info");
+	});
+
 	it("stays silent when up to date, on registry errors, and without a UI", async () => {
 		vi.stubGlobal(
 			"fetch",
-			vi.fn(async () => ({ ok: true, json: async () => ({ version: "0.1.0" }) })),
+			vi.fn(async () => ({ ok: true, json: async () => packument("0.1.0", { "0.1.0": 2 * DAY }) })),
 		);
 		const same = harness();
 		createUpdateCheck({ currentVersion: "0.1.0", upgradeHint: "x" })(same.pi);
@@ -75,7 +134,7 @@ describe("createUpdateCheck", () => {
 		await flush();
 		expect(offline.notify).not.toHaveBeenCalled();
 
-		const fetchSpy = vi.fn(async () => ({ ok: true, json: async () => ({ version: "9.9.9" }) }));
+		const fetchSpy = vi.fn(async () => ({ ok: true, json: async () => packument("9.9.9", { "9.9.9": 2 * DAY }) }));
 		vi.stubGlobal("fetch", fetchSpy);
 		const headless = harness();
 		(headless.ctx as { hasUI: boolean }).hasUI = false;
@@ -110,7 +169,7 @@ describe("offline and cadence gating", () => {
 	});
 
 	it("skips the fetch when offline, and stamps + skips within a day", async () => {
-		const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ version: "9.9.9" }) }));
+		const fetchMock = vi.fn(async () => ({ ok: true, json: async () => packument("9.9.9", { "9.9.9": 2 * DAY }) }));
 		vi.stubGlobal("fetch", fetchMock);
 		const dir = mkdtempSync(join(tmpdir(), "onecode-update-"));
 		const stamp = join(dir, "last-update-check");

@@ -1,0 +1,82 @@
+# The Windows installer (install.ps1), run the way the guide tells users to:
+# piped into Invoke-Expression. Once under Windows PowerShell 5.1 with the
+# runner's Node (the `powershell -c "irm … | iex"` route on a machine that
+# already has Node), once under PowerShell 7 forcing the standalone Node
+# download, checksum and user-PATH edit. The second step opens the "new
+# terminal" a user would: PATH rebuilt from the registry, then `onecode`.
+#
+# It installs the PUBLISHED app, so it checks the installer's mechanics, not
+# this tree's code — which is why it runs only when the installer or this
+# file changes (or by hand), not on every push: two windows-latest legs and a
+# 35 MB Node download per run would otherwise test something that did not move.
+name: Installer
+
+on:
+  push:
+    branches: [master]
+    paths: [install.ps1, .github/workflows/installer.yml]
+  pull_request:
+    paths: [install.ps1, .github/workflows/installer.yml]
+  workflow_dispatch:
+
+# The job runs code it did not write (the published app, npm's install
+# scripts), so the token carries no write scope and is not left in the
+# checkout's git config for that code to read.
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: install.ps1 (${{ matrix.shell }}${{ matrix.force_node == '1' && ', standalone Node' || '' }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shell: powershell
+            force_node: ''
+          - shell: pwsh
+            force_node: '1'
+    env:
+      FORCE_NODE: ${{ matrix.force_node }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # `shell:` takes no expressions, so the matrix shell is launched from a
+      # pwsh step with -c, the way the guide's `powershell -c "irm … | iex"` does.
+      - name: Run the installer through Invoke-Expression
+        shell: pwsh
+        env:
+          ONECODE_INSTALL_NODE: ${{ matrix.force_node }}
+          INSTALL_SHELL: ${{ matrix.shell }}
+        run: |
+          # The runner presets NPM_CONFIG_PREFIX=C:\npm\prefix; a user's machine
+          # without Node has no such thing, and npm's global folder is then the
+          # standalone Node folder itself. Drop it for that leg.
+          if ($env:FORCE_NODE -eq '1') { Remove-Item Env:NPM_CONFIG_PREFIX -ErrorAction SilentlyContinue }
+          & $env:INSTALL_SHELL -NoProfile -c '$PSVersionTable.PSVersion; Get-Content -Raw install.ps1 | Invoke-Expression'
+          if ($LASTEXITCODE -ne 0) { throw "the installer exited with $LASTEXITCODE under $env:INSTALL_SHELL" }
+      - name: Open the new terminal a user would and run onecode
+        shell: pwsh
+        run: |
+          if ($env:FORCE_NODE -eq '1') { Remove-Item Env:NPM_CONFIG_PREFIX -ErrorAction SilentlyContinue }
+          $machine = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+          $user = [Environment]::GetEnvironmentVariable('Path', 'User')
+          $env:Path = "$machine;$user"
+          $cmd = Get-Command onecode.cmd -ErrorAction Stop
+          Write-Output "onecode: $($cmd.Source)"
+          if ($env:FORCE_NODE -eq '1') {
+            $expected = Join-Path $env:LOCALAPPDATA 'onecode\node\current'
+            if (-not $cmd.Source.StartsWith($expected, [StringComparison]::OrdinalIgnoreCase)) {
+              throw "onecode.cmd is not under the standalone Node folder $expected"
+            }
+            Write-Output "standalone node: $(& (Join-Path $expected 'node.exe') --version)"
+          }
+          onecode --version
+          if ($LASTEXITCODE -ne 0) { throw "onecode --version exited with $LASTEXITCODE" }
+          # No provider on the runner: doctor reports and exits 1. Anything else is a crash.
+          onecode doctor
+          if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 1) { throw "onecode doctor exited with $LASTEXITCODE" }
+          # GitHub's pwsh wrapper exits the step with the last native exit code.
+          $global:LASTEXITCODE = 0

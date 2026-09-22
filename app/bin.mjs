@@ -50,6 +50,19 @@ process.env.PI_CODING_AGENT_DIR ||= join(homedir(), ".onecode", "agent");
 process.env.PI_SKIP_VERSION_CHECK = "1"; // One Code ships its own update check
 process.env.CC_VERSION ||= appVersion; // the banner shows the app version
 const agentDir = process.env.PI_CODING_AGENT_DIR;
+// Where the bin lives says how it was installed. Published before any fast
+// path (the doctor CLI exits early): the doctor's update lookup and the update
+// notice read it (lib/update-check.mjs minReleaseAgeFor) — under Homebrew a
+// release counts as available only a day after its npm publish.
+const brewPrefixes = ["/opt/homebrew/", "/usr/local/Cellar/", "/home/linuxbrew/"];
+let installedViaBrew = false;
+try {
+	const binPath = realpathSync(process.argv[1] ?? "");
+	installedViaBrew = brewPrefixes.some((prefix) => binPath.startsWith(prefix));
+} catch {
+	// Unresolvable argv[1] (unusual embedding): assume npm.
+}
+process.env.ONECODE_INSTALL_METHOD ||= installedViaBrew ? "brew" : "npm";
 
 // --- fast path: --version reports the app, not the harness ----------------
 const argv = process.argv.slice(2);
@@ -331,15 +344,12 @@ try {
 } catch {
 	// AssistantMessageComponent not patchable (unexpected pi build): stock behavior.
 }
-const { createUpdateCheck } = await import("./update-check.mjs");
-const brewPrefixes = ["/opt/homebrew/", "/usr/local/Cellar/", "/home/linuxbrew/"];
-let installedViaBrew = false;
-try {
-	const binPath = realpathSync(process.argv[1] ?? "");
-	installedViaBrew = brewPrefixes.some((prefix) => binPath.startsWith(prefix));
-} catch {
-	// Unresolvable argv[1] (unusual embedding): assume npm.
-}
+// The update notice and the release facts (formula name, upgrade commands,
+// Homebrew's release-age rule) live in the extension package so the doctor
+// quotes the same ones; the app only decides the install method.
+const { createUpdateCheck, UPGRADE_COMMANDS, minReleaseAgeFor } = await import(
+	pathToFileURL(join(corePath, "extensions", "lib", "update-check.mjs")).href
+);
 await main(argv, {
 	extensionFactories: [
 		{
@@ -347,7 +357,8 @@ await main(argv, {
 			factory: createUpdateCheck({
 				currentVersion: appVersion,
 				stampPath: join(agentDir, "last-update-check"),
-				upgradeHint: installedViaBrew ? "brew upgrade onecode" : "npm install -g @one-ai/one-code",
+				upgradeHint: installedViaBrew ? UPGRADE_COMMANDS.brew : UPGRADE_COMMANDS.npm,
+				minReleaseAgeMs: minReleaseAgeFor(),
 			}),
 		},
 	],
