@@ -331,7 +331,7 @@ try {
 } catch {
 	// AssistantMessageComponent not patchable (unexpected pi build): stock behavior.
 }
-const { createUpdateCheck } = await import("./update-check.mjs");
+const { createUpdateCheck, HOMEBREW_MIN_RELEASE_AGE_MS } = await import("./update-check.mjs");
 const brewPrefixes = ["/opt/homebrew/", "/usr/local/Cellar/", "/home/linuxbrew/"];
 let installedViaBrew = false;
 try {
@@ -348,6 +348,8 @@ await main(argv, {
 				currentVersion: appVersion,
 				stampPath: join(agentDir, "last-update-check"),
 				upgradeHint: installedViaBrew ? "brew upgrade onecode" : "npm install -g @one-ai/one-code",
+				// Homebrew can only serve a version a day after its npm publish.
+				minReleaseAgeMs: installedViaBrew ? HOMEBREW_MIN_RELEASE_AGE_MS : 0,
 			}),
 		},
 	],

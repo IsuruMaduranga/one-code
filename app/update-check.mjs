@@ -15,10 +15,19 @@
 
 import { readFileSync, writeFileSync } from "node:fs";
 
-// Scoped package: the slash must be percent-encoded in registry GETs.
-const REGISTRY_URL = "https://registry.npmjs.org/@one-ai%2Fone-code/latest";
+// Scoped package: the slash must be percent-encoded in registry GETs. The full
+// packument (not `/latest`) because its `time` map dates every version, which
+// the Homebrew hint needs (see pickAvailableVersion).
+const REGISTRY_URL = "https://registry.npmjs.org/@one-ai%2Fone-code";
 const TIMEOUT_MS = 3000;
 export const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+/**
+ * Homebrew's `std_npm_args` passes npm `--min-release-age=1`, so a version
+ * becomes brew-installable only a day after its npm publish. A Homebrew user
+ * told about a fresher version would run `brew upgrade onecode` and get
+ * nothing, so the hint for that install method waits the same day.
+ */
+export const HOMEBREW_MIN_RELEASE_AGE_MS = 24 * 60 * 60 * 1000;
 
 /** pi's truthy-flag reading for PI_OFFLINE (1/true/yes). */
 export function isOffline(env = process.env) {
@@ -54,7 +63,31 @@ export function isNewerVersion(candidate, current) {
 	return false;
 }
 
-export function createUpdateCheck({ currentVersion, upgradeHint, stampPath }) {
+/**
+ * The newest version in a registry packument worth announcing, or undefined.
+ * With no minimum age this is `dist-tags.latest` (what `npm install -g`
+ * fetches). With one, it is the newest x.y.z version whose `time` entry is at
+ * least that old — the newest one a `--min-release-age` install can see.
+ * Prerelease tags never qualify (isNewerVersion rejects them).
+ */
+export function pickAvailableVersion(packument, { minReleaseAgeMs = 0, now = Date.now() } = {}) {
+	if (!packument || typeof packument !== "object") return undefined;
+	const latest = packument["dist-tags"]?.latest;
+	if (minReleaseAgeMs <= 0) return typeof latest === "string" ? latest : undefined;
+	const time = packument.time;
+	if (!time || typeof time !== "object") return undefined;
+	let best;
+	for (const [version, published] of Object.entries(time)) {
+		if (version === "created" || version === "modified") continue;
+		const publishedAt = Date.parse(published);
+		if (!Number.isFinite(publishedAt) || now - publishedAt < minReleaseAgeMs) continue;
+		if (!/^\d+\.\d+\.\d+$/.test(version)) continue; // prereleases never qualify
+		if (best === undefined || isNewerVersion(version, best)) best = version;
+	}
+	return best;
+}
+
+export function createUpdateCheck({ currentVersion, upgradeHint, stampPath, minReleaseAgeMs = 0 }) {
 	return function updateCheckExtension(pi) {
 		pi.on("session_start", (_event, ctx) => {
 			if (process.env.ONECODE_NO_UPDATE_CHECK === "1") return;
@@ -76,7 +109,7 @@ export function createUpdateCheck({ currentVersion, upgradeHint, stampPath }) {
 					}
 					const response = await fetch(REGISTRY_URL, { signal: AbortSignal.timeout(TIMEOUT_MS) });
 					if (!response.ok) return;
-					const { version: latest } = await response.json();
+					const latest = pickAvailableVersion(await response.json(), { minReleaseAgeMs });
 					if (typeof latest === "string" && isNewerVersion(latest, currentVersion)) {
 						ctx.ui.notify(
 							`One Code ${latest} is available (you have ${currentVersion}). Upgrade: ${upgradeHint}`,
