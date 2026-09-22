@@ -66,4 +66,15 @@ describe("app/bin.mjs doctor routing (pin against the installed pi)", () => {
 		expect(piImportAt).toBeGreaterThan(doctorAt);
 		expect(source).toContain('join(corePath, "extensions", "doctor", "cli.ts")');
 	});
+
+	it("publishes the install method before the doctor fast path exits", () => {
+		// The doctor's update lookup reads ONECODE_INSTALL_METHOD (Homebrew waits a
+		// day for a release); set after `process.exit()` in the doctor branch it
+		// would never be seen by `onecode doctor`.
+		const source = readFileSync(join(repoRoot, "app", "bin.mjs"), "utf8");
+		const methodAt = source.indexOf("process.env.ONECODE_INSTALL_METHOD ||=");
+		const doctorRunAt = source.indexOf("if (runDoctor) {");
+		expect(methodAt).toBeGreaterThan(0);
+		expect(doctorRunAt).toBeGreaterThan(methodAt);
+	});
 });

@@ -50,6 +50,19 @@ process.env.PI_CODING_AGENT_DIR ||= join(homedir(), ".onecode", "agent");
 process.env.PI_SKIP_VERSION_CHECK = "1"; // One Code ships its own update check
 process.env.CC_VERSION ||= appVersion; // the banner shows the app version
 const agentDir = process.env.PI_CODING_AGENT_DIR;
+// Where the bin lives says how it was installed. Published before any fast
+// path (the doctor CLI exits early): the doctor's update lookup and the update
+// notice read it (lib/update-check.mjs minReleaseAgeFor) — under Homebrew a
+// release counts as available only a day after its npm publish.
+const brewPrefixes = ["/opt/homebrew/", "/usr/local/Cellar/", "/home/linuxbrew/"];
+let installedViaBrew = false;
+try {
+	const binPath = realpathSync(process.argv[1] ?? "");
+	installedViaBrew = brewPrefixes.some((prefix) => binPath.startsWith(prefix));
+} catch {
+	// Unresolvable argv[1] (unusual embedding): assume npm.
+}
+process.env.ONECODE_INSTALL_METHOD ||= installedViaBrew ? "brew" : "npm";
 
 // --- fast path: --version reports the app, not the harness ----------------
 const argv = process.argv.slice(2);
@@ -337,16 +350,6 @@ try {
 const { createUpdateCheck, UPGRADE_COMMANDS, minReleaseAgeFor } = await import(
 	pathToFileURL(join(corePath, "extensions", "lib", "update-check.mjs")).href
 );
-const brewPrefixes = ["/opt/homebrew/", "/usr/local/Cellar/", "/home/linuxbrew/"];
-let installedViaBrew = false;
-try {
-	const binPath = realpathSync(process.argv[1] ?? "");
-	installedViaBrew = brewPrefixes.some((prefix) => binPath.startsWith(prefix));
-} catch {
-	// Unresolvable argv[1] (unusual embedding): assume npm.
-}
-// Read by the doctor's update lookup (lib/update-check.mjs minReleaseAgeFor).
-process.env.ONECODE_INSTALL_METHOD ||= installedViaBrew ? "brew" : "npm";
 await main(argv, {
 	extensionFactories: [
 		{

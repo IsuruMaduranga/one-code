@@ -37,8 +37,13 @@ export async function lookupLatestVersion(input: {
 	try {
 		const response = await fetchImpl(url, { signal: AbortSignal.timeout(input.timeoutMs ?? LOOKUP_TIMEOUT_MS) });
 		if (!response.ok) return { status: "unknown", reason: `registry answered ${response.status}` };
-		const latest = pickAvailableVersion(await response.json(), { minReleaseAgeMs: minReleaseAgeFor(input.env) });
-		if (typeof latest !== "string") return { status: "unknown", reason: "unexpected registry payload" };
+		const minReleaseAgeMs = minReleaseAgeFor(input.env);
+		const latest = pickAvailableVersion(await response.json(), { minReleaseAgeMs });
+		if (typeof latest !== "string") {
+			// A well-formed packument with nothing old enough is a Homebrew
+			// outcome, not a broken registry.
+			return { status: "unknown", reason: minReleaseAgeMs > 0 ? "no release is a day old yet (Homebrew installs wait that long)" : "unexpected registry payload" };
+		}
 		const cmp = compareVersions(latest, input.current);
 		if (cmp === undefined) return { status: "unknown", version: latest, reason: "unparseable version" };
 		return { status: cmp > 0 ? "behind" : "current", version: latest };
