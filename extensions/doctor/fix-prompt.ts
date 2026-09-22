@@ -44,7 +44,7 @@ export function doctorFixPrompt(input: FixPromptInput): string {
 		input.install === "app"
 			? "`npm view @one-ai/one-code version --registry https://registry.npmjs.org/`"
 			: "`npm view one-code-extension version --registry https://registry.npmjs.org/`";
-	const upgradeCommand = input.install === "app" ? "`npm install -g @one-ai/one-code` (or `brew upgrade one-code` for a Homebrew install)" : "`pi update`";
+	const upgradeCommand = input.install === "app" ? "`npm install -g @one-ai/one-code` (or `brew upgrade onecode` for a Homebrew install)" : "`pi update`";
 
 	return `# One Code Doctor
 
