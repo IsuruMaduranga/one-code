@@ -14,8 +14,9 @@
  * request that carries the message, so a `last-append` one-shot emitted then
  * is pinned to that message.
  *
- * A queued message pi expands first (a prompt template) or an extension takes
- * over (a skill command) never matches. Clear on `agent_settled` so its payload
+ * A queued message pi expands first (a prompt template) never matches, nor
+ * does one an extension replaces, unless its replacement carries the typed
+ * text (the skill extension's `details.input`, which hooks matches). Clear on `agent_settled` so its payload
  * never rides a later, unrelated prompt, and on `session_start`.
  *
  * Pure (no pi imports); each extension keeps its own instance.

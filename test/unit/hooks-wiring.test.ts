@@ -22,6 +22,7 @@ import hooksExtension, { hookContextText } from "../../extensions/hooks/index.ts
 import { resetHookSettingsCache } from "../../extensions/hooks/settings.ts";
 import { type HookBridge, SUBAGENT_HOOK_CHANNEL } from "../../extensions/hooks/subagent-bridge.ts";
 import { REMINDER_CHANNEL, wrapReminder } from "../../extensions/lib/reminders.ts";
+import { SKILL_INVOCATION_TYPE } from "../../extensions/skill/invoke.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
 const state = vi.hoisted(() => ({
@@ -168,6 +169,28 @@ describe("hooks wiring", () => {
 			expect(next).toBeUndefined();
 		},
 	);
+
+	it.each([
+		["queued mid-turn", "steer" as const],
+		["sent while idle", undefined],
+	])("UserPromptSubmit context for a /skill: command %s rides the skill's hidden message", async (_label, behavior) => {
+		const hookPrompt = script("hook-skill.sh", `#!/bin/sh\ncat >/dev/null\necho '{"hookSpecificOutput":{"additionalContext":"skill context"}}'\n`);
+		writeUserHooks({ UserPromptSubmit: [{ hooks: [{ type: "command", command: hookPrompt }] }] });
+		const reminders: unknown[] = [];
+		fake.events.on(REMINDER_CHANNEL, (payload) => reminders.push(payload));
+		mount();
+		await fake.fireOne("input", { source: "interactive", text: "/skill:foo now", ...(behavior ? { streamingBehavior: behavior } : {}) }, ctx());
+		expect(reminders).toHaveLength(0);
+		// The skill extension replaced the command with its hidden message (an idle
+		// one opens the turn through sendMessage, which skips before_agent_start).
+		const skillMessage = { role: "custom", customType: SKILL_INVOCATION_TYPE, content: "<skill>…</skill>", details: { skill: "foo", args: "now", input: "/skill:foo now" } };
+		await fake.fireOne("message_start", { message: skillMessage }, ctx());
+		expect(reminders).toEqual([{ text: hookContextText("UserPromptSubmit", "skill context"), placement: "last-append" }]);
+		// Not delivered again, and not held for the next prompt.
+		await fake.fireOne("message_start", { message: skillMessage }, ctx());
+		expect(reminders).toHaveLength(1);
+		expect(await fake.fireOne<{ message?: unknown }>("before_agent_start", { prompt: "next" }, ctx())).toBeUndefined();
+	});
 
 	it("drops a queued message's context when the turn settles without delivering it", async () => {
 		const hookPrompt = script("hook-undelivered.sh", `#!/bin/sh\ncat >/dev/null\necho '{"hookSpecificOutput":{"additionalContext":"orphan"}}'\n`);

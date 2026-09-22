@@ -61,6 +61,7 @@ import { REMINDER_CHANNEL, wrapReminder } from "../lib/reminders.ts";
 import { type ChildHookCall, type ChildHookResult, type HookBridge, SUBAGENT_HOOK_CHANNEL, type SubagentHookPayload } from "./subagent-bridge.ts";
 import { projectHooksApproved } from "./trust.ts";
 import { QueuedDelivery } from "../lib/queued-delivery.ts";
+import { SKILL_INVOCATION_TYPE, type SkillInvocationDetails } from "../skill/invoke.ts";
 
 /** Claude Code's `hook_additional_context` attachment text (utils/messages.ts). */
 export function hookContextText(event: CcHookEvent, text: string): string {
@@ -363,9 +364,25 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	// one-shot emitted here is pinned to that message: after the prompt, as the
 	// before_agent_start message is for a prompt that opens a turn.
 	pi.on("message_start", (event) => {
-		if (queuedPromptContext.isEmpty || event.message.role !== "user") return;
-		const text = queuedPromptContext.release(contentText(event.message.content, ""));
-		if (text) pi.events.emit(REMINDER_CHANNEL, { text, placement: "last-append" });
+		const message = event.message;
+		const emit = (text: string) => pi.events.emit(REMINDER_CHANNEL, { text, placement: "last-append" });
+		if (message.role === "user") {
+			if (queuedPromptContext.isEmpty) return;
+			const text = queuedPromptContext.release(contentText(message.content, ""));
+			if (text) emit(text);
+			return;
+		}
+		// A `/skill:` command the skill extension took over arrives as its hidden
+		// message, carrying the typed text. It opens the turn when the command
+		// was idle, through a sendMessage that never reaches before_agent_start,
+		// so the prompt context waiting there rides this message too.
+		if (message.role !== "custom" || message.customType !== SKILL_INVOCATION_TYPE) return;
+		const input = (message.details as Partial<SkillInvocationDetails> | undefined)?.input;
+		const queued = typeof input === "string" ? queuedPromptContext.release(input) : undefined;
+		if (queued) emit(queued);
+		const waiting = pendingPromptContext;
+		pendingPromptContext = [];
+		for (const { event: hookEvent, text } of waiting) emit(hookContextText(hookEvent, text));
 	});
 
 	// Prompt/session/compaction hook context rides the turn it belongs to as a

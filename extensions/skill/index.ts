@@ -38,6 +38,8 @@ import {
 	parseSkillCommand,
 	redactOffSkillMessages,
 	resolveSkill,
+	SKILL_INVOCATION_TYPE,
+	type SkillInvocationDetails,
 	skillCommandCandidates,
 } from "./invoke.ts";
 import { decodeSkillsKey } from "./panel/keys.ts";
@@ -304,7 +306,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 		found: IndexedSkill,
 		args: string,
 		ctx: ExtensionContext & { waitForIdle?: () => Promise<void> },
-		extra: { images?: Array<{ type: "image"; data: string; mimeType: string }>; streamingBehavior?: "steer" | "followUp" } = {},
+		extra: { images?: Array<{ type: "image"; data: string; mimeType: string }>; streamingBehavior?: "steer" | "followUp"; input?: string } = {},
 	): Promise<"handled" | "unavailable"> => {
 		if (found.state === "off") {
 			const where = found.source === "plugin" ? "/plugins" : "/skills";
@@ -322,7 +324,12 @@ export default function skillExtension(pi: ExtensionAPI) {
 		// Carry any attached images alongside the block, as pi's native path would.
 		const content = extra.images?.length ? [{ type: "text" as const, text: block }, ...extra.images] : block;
 		pi.sendMessage(
-			{ customType: "one-code:skill-invocation", content, display: false, details: { skill: found.name, args } },
+			{
+				customType: SKILL_INVOCATION_TYPE,
+				content,
+				display: false,
+				details: { skill: found.name, args, ...(extra.input !== undefined ? { input: extra.input } : {}) } satisfies SkillInvocationDetails,
+			},
 			{ triggerTurn: true, ...(extra.streamingBehavior ? { deliverAs: extra.streamingBehavior } : {}) },
 		);
 		// The turn we just triggered rides a fire-and-forget pi.sendMessage. In a
@@ -351,6 +358,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 		const outcome = await deliverSkill(found, cmd.args, ctx, {
 			images: event.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined,
 			streamingBehavior: event.streamingBehavior,
+			input: event.text,
 		});
 		return { action: outcome === "handled" ? "handled" : "continue" };
 	});
