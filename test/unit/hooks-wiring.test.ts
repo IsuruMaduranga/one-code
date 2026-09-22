@@ -143,6 +143,44 @@ describe("hooks wiring", () => {
 		expect(again).toBeUndefined();
 	});
 
+	it.each(["steer", "followUp"] as const)(
+		"UserPromptSubmit context for a message queued mid-turn (%s) rides the request that delivers it, not the next prompt",
+		async (behavior) => {
+			const hookPrompt = script("hook-queued.sh", `#!/bin/sh\ncat >/dev/null\necho '{"hookSpecificOutput":{"additionalContext":"queued context"}}'\n`);
+			writeUserHooks({ UserPromptSubmit: [{ hooks: [{ type: "command", command: hookPrompt }] }] });
+			const reminders: unknown[] = [];
+			fake.events.on(REMINDER_CHANNEL, (payload) => reminders.push(payload));
+			mount();
+			await fake.fireOne("input", { source: "interactive", text: "also do this", streamingBehavior: behavior }, ctx());
+			// Held while pi keeps the message queued: no message of its own (pi drains
+			// one queued message per request, so it would arrive a request late).
+			expect(fake.sentMessages).toHaveLength(0);
+			expect(reminders).toHaveLength(0);
+			await fake.fireOne("message_start", { message: { role: "user", content: [{ type: "text", text: "something else" }] } }, ctx());
+			expect(reminders).toHaveLength(0);
+			// pi delivers the queued message: its context rides that request as a one-shot.
+			await fake.fireOne("message_start", { message: { role: "user", content: [{ type: "text", text: "also do this" }] } }, ctx());
+			expect(reminders).toEqual([{ text: hookContextText("UserPromptSubmit", "queued context"), placement: "last-append" }]);
+			// Delivered once, and never held for the next prompt's turn.
+			await fake.fireOne("message_start", { message: { role: "user", content: [{ type: "text", text: "also do this" }] } }, ctx());
+			expect(reminders).toHaveLength(1);
+			const next = await fake.fireOne<{ message?: unknown }>("before_agent_start", { prompt: "next" }, ctx());
+			expect(next).toBeUndefined();
+		},
+	);
+
+	it("drops a queued message's context when the turn settles without delivering it", async () => {
+		const hookPrompt = script("hook-undelivered.sh", `#!/bin/sh\ncat >/dev/null\necho '{"hookSpecificOutput":{"additionalContext":"orphan"}}'\n`);
+		writeUserHooks({ UserPromptSubmit: [{ hooks: [{ type: "command", command: hookPrompt }] }] });
+		const reminders: unknown[] = [];
+		fake.events.on(REMINDER_CHANNEL, (payload) => reminders.push(payload));
+		mount();
+		await fake.fireOne("input", { source: "interactive", text: "/tpl expanded by pi", streamingBehavior: "steer" }, ctx());
+		await fake.fireOne("agent_settled", {}, ctx());
+		await fake.fireOne("message_start", { message: { role: "user", content: [{ type: "text", text: "/tpl expanded by pi" }] } }, ctx());
+		expect(reminders).toHaveLength(0);
+	});
+
 	it("publishes a hook bridge at session start that runs the user's tool hooks for a child's calls, naming the agent", async () => {
 		const seen = join(root, "child-stdin.json");
 		const hookA = script(

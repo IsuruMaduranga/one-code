@@ -59,6 +59,7 @@ import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { REMINDER_CHANNEL, wrapReminder } from "../lib/reminders.ts";
 import { type ChildHookCall, type ChildHookResult, type HookBridge, SUBAGENT_HOOK_CHANNEL, type SubagentHookPayload } from "./subagent-bridge.ts";
 import { projectHooksApproved } from "./trust.ts";
+import { messageText, QueuedPromptContext } from "./queued-context.ts";
 
 /** Claude Code's `hook_additional_context` attachment text (utils/messages.ts). */
 export function hookContextText(event: CcHookEvent, text: string): string {
@@ -104,6 +105,8 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	let stopHookActive = false;
 	/** Context from UserPromptSubmit / SessionStart / PostCompact hooks, delivered with the next prompt. */
 	let pendingPromptContext: Array<{ event: CcHookEvent; text: string }> = [];
+	/** UserPromptSubmit context for messages queued mid-turn, until pi delivers them. */
+	const queuedPromptContext = new QueuedPromptContext();
 	/** The last context seen, for bridged child calls (dispatched parent-side). */
 	let lastCtx: ExtensionContext | undefined;
 	/**
@@ -325,7 +328,11 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	// ---- UserPromptSubmit ---------------------------------------------------
 	pi.on("input", async (event, ctx) => {
 		if (event.source === "extension") return undefined;
-		stopHookActive = false;
+		// A message queued mid-turn (pi 0.86+ fires `input` for steer/followUp,
+		// with `streamingBehavior` set) joins the running turn; only a prompt
+		// that starts a turn resets the Stop latch.
+		const queued = event.streamingBehavior;
+		if (!queued) stopHookActive = false;
 		// Drain the backgrounded SessionStart dispatch before this prompt's own
 		// UserPromptSubmit context, so their order in the first turn is unchanged
 		// (SessionStart context precedes UserPromptSubmit). before_agent_start is
@@ -337,8 +344,21 @@ export default function hooksExtension(pi: ExtensionAPI) {
 			notify(ctx, `Prompt blocked by UserPromptSubmit hook: ${outcome.block.reason}`);
 			return { action: "handled" as const };
 		}
-		if (outcome.additionalContext) pendingPromptContext.push({ event: "UserPromptSubmit", text: outcome.additionalContext });
+		if (!outcome.additionalContext) return undefined;
+		// A queued message's context waits for pi to deliver that message
+		// (message_start below), so it rides the same request (queued-context.ts).
+		if (queued) queuedPromptContext.add(event.text, hookContextText("UserPromptSubmit", outcome.additionalContext));
+		else pendingPromptContext.push({ event: "UserPromptSubmit", text: outcome.additionalContext });
 		return undefined;
+	});
+
+	// pi awaits this before the request that carries the delivered message, so a
+	// one-shot emitted here is pinned to that message: after the prompt, as the
+	// before_agent_start message is for a prompt that opens a turn.
+	pi.on("message_start", (event) => {
+		if (queuedPromptContext.size === 0 || event.message.role !== "user") return;
+		const text = queuedPromptContext.take(messageText(event.message.content));
+		if (text) pi.events.emit(REMINDER_CHANNEL, { text, placement: "last-append" });
 	});
 
 	// Prompt/session/compaction hook context rides the turn it belongs to as a
@@ -381,6 +401,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		lastCtx = ctx;
 		const gen = ++sessionGen;
 		pendingPromptContext = [];
+		queuedPromptContext.clear();
 		sessionStartPending = undefined;
 		// Publish the child hook bridge (subagent-bridge.ts). The closures read
 		// live parent state per call, so once per session start is enough.
@@ -492,6 +513,9 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("agent_settled", async (_event, ctx) => {
+		// A queued message pi never delivered as typed (expanded, or taken over by
+		// an extension) keeps no context for a later, unrelated prompt.
+		queuedPromptContext.clear();
 		// CC skips Stop when the turn ended on an API error (a blocking hook would
 		// spiral: error → block → retry → error) or on a user interrupt (its query
 		// loop returns on the abort signal before the stop-hook step). An empty latch
