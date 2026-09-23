@@ -305,8 +305,13 @@ export async function approveMcpServers(
 
 	if (!deps.hasUI) {
 		for (const server of pending) withheld.push({ server, reason: "not-approved" });
+		// enabledMcpjsonServers approves `.mcp.json` servers only (above), so the
+		// hint names it only when one of those is waiting.
+		const fromMcpjson = pending.some((server) => !definedInLocalSettings(server));
+		const fromLocal = pending.some(definedInLocalSettings);
+		const sources = [fromMcpjson && ".mcp.json", fromLocal && ".claude/settings.local.json"].filter(Boolean).join(" and ");
 		deps.notify(
-			`Skipped ${pending.length} MCP server${pending.length === 1 ? "" : "s"} from .mcp.json (${pending.map((s) => s.name).join(", ")}): not yet approved and no UI to ask. Approve once in an interactive session, or set enabledMcpjsonServers in .claude/settings.local.json.`,
+			`Skipped ${pending.length} MCP server${pending.length === 1 ? "" : "s"} from ${sources} (${pending.map((s) => s.name).join(", ")}): not yet approved and no UI to ask. Approve once in an interactive session${fromMcpjson ? ", or set enabledMcpjsonServers in .claude/settings.local.json" : ""}.`,
 		);
 		return { approved, withheld };
 	}

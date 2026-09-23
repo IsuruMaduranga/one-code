@@ -181,7 +181,16 @@ describe("approveMcpServers", () => {
 		const out = await approveMcpServers([projectServer("a")], new Set(), cwd, home, d.deps);
 		expect(out.withheld[0].reason).toBe("not-approved");
 		expect(d.notices[0]).toMatch(/not yet approved and no UI/);
+		expect(d.notices[0]).toMatch(/set enabledMcpjsonServers/);
 		expect(d.selections).toEqual([]);
+	});
+
+	it("without a UI does not suggest enabledMcpjsonServers for a server defined in settings.local.json", async () => {
+		const d = deps({ hasUI: false });
+		const out = await approveMcpServers([stdio("l", join(cwd, ".claude", "settings.local.json"))], new Set(), cwd, home, d.deps);
+		expect(out.withheld[0].reason).toBe("not-approved");
+		expect(d.notices[0]).toMatch(/from \.claude\/settings\.local\.json \(l\)/);
+		expect(d.notices[0]).not.toMatch(/enabledMcpjsonServers/);
 	});
 
 	it("honours Claude Code's own answers read-only", async () => {

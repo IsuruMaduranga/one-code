@@ -6,10 +6,12 @@
  * honours the checkout's own `.git/config`, and `core.fsmonitor` there names a
  * program that `status` and other index reads run — so a directory whose
  * `.git` came from an archive or a copied tree would run it the moment One
- * Code starts in it, before any prompt (SECURITY-REVIEW-2026-09-23 M5). The
- * model's own git commands are judged by the permission gate instead.
+ * Code starts in it, before any prompt (SECURITY-REVIEW-2026-09-23 M5).
+ * `--no-optional-locks` stops `status` rewriting the index, which would run the
+ * checkout's `post-index-change` hook. The model's own git commands are judged
+ * by the permission gate instead (auto-mode/git-checkout-programs.ts).
  */
-export const HARNESS_GIT_CONFIG: readonly string[] = ["-c", "core.fsmonitor=false"];
+export const HARNESS_GIT_CONFIG: readonly string[] = ["-c", "core.fsmonitor=false", "--no-optional-locks"];
 
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
@@ -60,19 +62,27 @@ export function findProjectRoot(startDir: string): string | undefined {
 	return linkedWorktreeMainRoot(root) ?? root;
 }
 
-/** For a linked worktree root, the main checkout it belongs to; undefined otherwise. Exported for tests. */
-export function linkedWorktreeMainRoot(root: string): string | undefined {
+/**
+ * The git dir a checkout root's `.git` FILE points at (a linked worktree or a
+ * submodule: `gitdir: <path>`), absolute; undefined when `.git` is a directory,
+ * missing, or unreadable.
+ */
+export function gitdirFileTarget(root: string): string | undefined {
 	const dotGit = join(root, ".git");
-	let gitdir: string;
 	try {
 		if (!statSync(dotGit).isFile()) return undefined;
 		const match = /^gitdir:\s*(.+?)\s*$/m.exec(readFileSync(dotGit, "utf-8"));
 		if (!match) return undefined;
-		gitdir = match[1];
+		return isAbsolute(match[1]) ? match[1] : resolve(root, match[1]);
 	} catch {
 		return undefined;
 	}
-	const absolute = isAbsolute(gitdir) ? gitdir : resolve(root, gitdir);
+}
+
+/** For a linked worktree root, the main checkout it belongs to; undefined otherwise. Exported for tests. */
+export function linkedWorktreeMainRoot(root: string): string | undefined {
+	const absolute = gitdirFileTarget(root);
+	if (!absolute) return undefined;
 	// <main>/.git/worktrees/<name> → <main>. A submodule's gitdir points into
 	// <super>/.git/modules/<name> and is left alone.
 	const worktrees = dirname(absolute);

@@ -80,6 +80,13 @@ export function destructiveCategory(tool: "bash" | "powershell", command: string
 	return patterns.find(({ pattern }) => pattern.test(text))?.category;
 }
 
+/** The categories of every pattern this command matches (first 10,000 characters). */
+function matchedCategories(tool: "bash" | "powershell", command: string): { text: string; categories: string[] } {
+	const text = command.length > 10_000 ? command.slice(0, 10_000) : command;
+	const patterns = tool === "powershell" ? POWERSHELL_PATTERNS : BASH_PATTERNS;
+	return { text, categories: patterns.filter(({ pattern }) => pattern.test(text)).map(({ category }) => category) };
+}
+
 /**
  * Whether this shell command gets a gitStatus line above it in the transcript.
  * Any qualifying pattern counts, not only the first match, so `git push
@@ -87,22 +94,51 @@ export function destructiveCategory(tool: "bash" | "powershell", command: string
  * adds ground truth.
  */
 export function wantsGitStatusMeta(tool: "bash" | "powershell", command: string): boolean {
-	const text = command.length > 10_000 ? command.slice(0, 10_000) : command;
-	const patterns = tool === "powershell" ? POWERSHELL_PATTERNS : BASH_PATTERNS;
-	return patterns.some(({ pattern, category }) => GIT_STATUS_CATEGORIES.has(category) && pattern.test(text));
+	return matchedCategories(tool, command).categories.some((category) => GIT_STATUS_CATEGORIES.has(category));
 }
 
-/** The `git status` arguments for the line (the harness adds its own `-c` hardening). */
-export const GIT_STATUS_META_ARGS: readonly string[] = ["status", "--porcelain", "--ignore-submodules=dirty", "--untracked-files=normal"];
+/** `git clean` deletes ignored files only with `-x`/`-X`. */
+const GIT_CLEAN_IGNORED = /\bgit\s+clean\b[^;&|\n]*[ \t]-[a-zA-Z]*[xX]/i;
+
+/**
+ * Whether this shell command can also delete what `git status` normally hides
+ * and git cannot restore: ignored files (`.env`, local builds) and a
+ * submodule's own work. Every non-git removal category can; of the git ones,
+ * only a `git clean -x`/`-X`.
+ */
+export function reachesHiddenWork(tool: "bash" | "powershell", command: string): boolean {
+	const { text, categories } = matchedCategories(tool, command);
+	return categories.some((category) =>
+		category === "git_clean_force" ? GIT_CLEAN_IGNORED.test(text) : GIT_STATUS_CATEGORIES.has(category) && !category.startsWith("git_"),
+	);
+}
+
+/**
+ * The `git status` arguments for the line (the harness adds its own `-c`
+ * hardening): Claude Code's, or for a command that reaches hidden work
+ * (`reachesHiddenWork`) a wider set (PR #8 review) where a dirty submodule
+ * counts as modified and ignored entries are listed (`!!`, one per ignored
+ * directory) so the line can withhold `{"clean":true}`.
+ */
+export function gitStatusMetaArgs(reachesHidden: boolean): readonly string[] {
+	return reachesHidden
+		? ["status", "--porcelain", "--ignore-submodules=none", "--untracked-files=normal", "--ignored=matching"]
+		: ["status", "--porcelain", "--ignore-submodules=dirty", "--untracked-files=normal"];
+}
 
 /** The line's gitStatus value: `{clean: true}`, or the tree's counts. */
 export type GitStatusMeta = { clean: true } | { staged: number; modified: number; untracked: number };
 
-/** Summarize `git status --porcelain` output as clean, or staged/modified/untracked counts. */
-export function gitStatusMeta(porcelain: string): GitStatusMeta {
+/**
+ * Summarize `git status --porcelain` output as clean, or staged/modified/untracked
+ * counts. Undefined (no line: the classifier keeps presuming dirty) when only
+ * ignored entries remain, which the wider `gitStatusMetaArgs` list.
+ */
+export function gitStatusMeta(porcelain: string): GitStatusMeta | undefined {
 	let staged = 0;
 	let modified = 0;
 	let untracked = 0;
+	let ignored = 0;
 	for (const line of porcelain.split("\n")) {
 		if (line.length < 2) continue;
 		const [index, worktree] = [line[0], line[1]];
@@ -110,8 +146,13 @@ export function gitStatusMeta(porcelain: string): GitStatusMeta {
 			untracked++;
 			continue;
 		}
+		if (index === "!" && worktree === "!") {
+			ignored++;
+			continue;
+		}
 		if (index !== " " && index !== "?") staged++;
 		if (worktree !== " ") modified++;
 	}
-	return staged === 0 && modified === 0 && untracked === 0 ? { clean: true } : { staged, modified, untracked };
+	if (staged !== 0 || modified !== 0 || untracked !== 0) return { staged, modified, untracked };
+	return ignored > 0 ? undefined : { clean: true };
 }

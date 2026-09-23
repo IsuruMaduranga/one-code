@@ -48,7 +48,7 @@ import { findProjectRoot, serverForPath, typescriptPreflight } from "./servers.t
 import { computeDelta, DeliveredTracker, fingerprintDiagnostic, formatNewDiagnostics, markDelivered } from "./watcher.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 import { findProjectRoot as findRepoRoot } from "../lib/git.ts";
-import { isLspRootTrusted, PROJECT_CODE_REASON, PROJECT_CODE_SERVERS, persistLspTrust } from "./trust.ts";
+import { createLspTrustGate, PROJECT_CODE_REASON, PROJECT_CODE_SERVERS } from "./trust.ts";
 
 /** Everything needed to spawn/reuse the server responsible for a path. */
 interface ResolvedTarget {
@@ -192,40 +192,19 @@ export default function lspExtension(pi: ExtensionAPI) {
 	 * interactive session, and with no UI or a "no" leave it off with a
 	 * not-started failure the one-time notice and /lsp report.
 	 */
-	const sessionTrust = new Map<string, boolean>();
-	/** Server roots found trusted on disk this process, so the store is read once per root. */
-	const trustedServerRoots = new Set<string>();
-	const pendingTrust = new Map<string, Promise<boolean>>();
-	const trustRoot = (cwd: string) => findRepoRoot(cwd) ?? cwd;
+	const trustGate = createLspTrustGate({ projectRoot: (dir) => findRepoRoot(dir) ?? dir });
 	const NOT_TRUSTED = "not started:";
 	const projectCodeAllowed = async (target: ResolvedTarget, ctx: ExtensionContext): Promise<boolean> => {
 		if (target.plugin || !PROJECT_CODE_SERVERS.has(target.command)) return true;
-		const root = trustRoot(ctx.cwd);
-		if (sessionTrust.get(root) === true || trustedServerRoots.has(target.root)) return true;
-		if (isLspRootTrusted(target.root)) {
-			trustedServerRoots.add(target.root);
-			return true;
-		}
 		const why = PROJECT_CODE_REASON[target.command] ?? "runs this project's code";
-		if (sessionTrust.get(root) === undefined && ctx.hasUI) {
-			let pending = pendingTrust.get(root);
-			if (!pending) {
-				pending = ctx.ui
-					.confirm(
+		const confirm = ctx.hasUI
+			? async (root: string) =>
+					(await ctx.ui.confirm(
 						`Start ${target.command} in this project?`,
 						`${target.command} ${why}. Allow it only for a project you trust.\n\nThe answer for ${root} is remembered; /lsp trust allows it later.`,
-					)
-					.then((answer) => {
-						const ok = answer === true;
-						sessionTrust.set(root, ok);
-						if (ok) persistLspTrust(root);
-						return ok;
-					})
-					.finally(() => pendingTrust.delete(root));
-				pendingTrust.set(root, pending);
-			}
-			if (await pending) return true;
-		}
+					)) === true
+			: undefined;
+		if (await trustGate.allowed(target.root, confirm)) return true;
 		if (!startFailures.has(target.key)) {
 			startFailures.set(target.key, `${NOT_TRUSTED} ${target.command} ${why}, and this project is not trusted (run /lsp trust to allow it)`);
 		}
@@ -420,9 +399,7 @@ export default function lspExtension(pi: ExtensionAPI) {
 		],
 		handler: async (args, ctx) => {
 			if (args.trim() === "trust") {
-				const root = trustRoot(ctx.cwd);
-				persistLspTrust(root);
-				sessionTrust.set(root, true);
+				const root = trustGate.trust(ctx.cwd);
 				for (const [key, failure] of startFailures) {
 					if (failure.startsWith(NOT_TRUSTED)) {
 						startFailures.delete(key);

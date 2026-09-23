@@ -395,7 +395,7 @@ const WRITING_PARAMETERS = /^-(outfile|filepath|destination)\b/i;
  * `-ComputerName` (and its `-Cn` alias, and any abbreviation PowerShell
  * accepts for it) sends `Get-Process`/`Get-Service` to another machine.
  */
-const REMOTE_PARAMETER = /^-(cn|co(m(p(u(t(e(r(n(a(m(e)?)?)?)?)?)?)?)?)?)?)(:|$)/i;
+const REMOTE_PARAMETER = /^-(cn|c(o(m(p(u(t(e(r(n(a(m(e)?)?)?)?)?)?)?)?)?)?)?)(:|$)/i;
 
 /**
  * Whether a token names a path this check will not vouch for by shape: UNC

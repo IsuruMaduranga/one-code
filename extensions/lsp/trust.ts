@@ -58,3 +58,57 @@ export function persistLspTrust(projectRoot: string, storePath = lspTrustStorePa
 		// Trust still holds for this session through the caller's own memory.
 	}
 }
+
+/**
+ * The per-session trust decision for project-code servers. Every answer is
+ * keyed by the project the SERVER runs in (the repository holding its root),
+ * never the session's cwd: trusting the current checkout must not start a
+ * server rooted in another one (PR #8 review). One question per project is in
+ * flight at a time; a "yes" is persisted, a "no" holds for the session.
+ */
+export function createLspTrustGate(deps: {
+	/** The project a directory belongs to (its repository root, or itself). */
+	projectRoot: (dir: string) => string;
+	isTrusted?: (serverRoot: string) => boolean;
+	persist?: (projectRoot: string) => void;
+}) {
+	const { projectRoot, isTrusted = (root: string) => isLspRootTrusted(root), persist = (root: string) => persistLspTrust(root) } = deps;
+	const sessionTrust = new Map<string, boolean>();
+	/** Server roots found trusted on disk this process, so the store is read once per root. */
+	const trustedServerRoots = new Set<string>();
+	const pending = new Map<string, Promise<boolean>>();
+	return {
+		/**
+		 * Whether a server rooted at `serverRoot` may start. Without `confirm`
+		 * (no UI), or after a "no" for its project, only stored trust counts.
+		 */
+		async allowed(serverRoot: string, confirm?: (projectRoot: string) => Promise<boolean>): Promise<boolean> {
+			const root = projectRoot(serverRoot);
+			if (sessionTrust.get(root) === true || trustedServerRoots.has(serverRoot)) return true;
+			if (isTrusted(serverRoot)) {
+				trustedServerRoots.add(serverRoot);
+				return true;
+			}
+			if (sessionTrust.get(root) !== undefined || !confirm) return false;
+			let answer = pending.get(root);
+			if (!answer) {
+				answer = confirm(root)
+					.then((ok) => {
+						sessionTrust.set(root, ok);
+						if (ok) persist(root);
+						return ok;
+					})
+					.finally(() => pending.delete(root));
+				pending.set(root, answer);
+			}
+			return answer;
+		},
+		/** `/lsp trust`: trust the project `dir` belongs to, persisted. Returns that project root. */
+		trust(dir: string): string {
+			const root = projectRoot(dir);
+			persist(root);
+			sessionTrust.set(root, true);
+			return root;
+		},
+	};
+}

@@ -33,6 +33,7 @@
 import { isProtectedPath } from "../permissions/protected-paths.ts";
 import { isExecutionPrimitivePath, isSensitivePath } from "./sensitive.ts";
 import { isWithin, resolveForContainment, toAbsoluteBash } from "./paths.ts";
+import { checkoutGitRunsProgram } from "./git-checkout-programs.ts";
 import { lstatSync, readdirSync } from "node:fs";
 import {
 	GIT_GLOBAL_SAFE,
@@ -651,15 +652,21 @@ function entryExists(absolute: string): boolean {
 	}
 }
 
-/** A bash glob (one path component) as a RegExp: `*`, `?`, `[…]`/`[!…]`, everything else literal. */
-function globComponentRegex(glob: string): RegExp {
+/**
+ * A bash glob (one path component) as a RegExp: `*`, `?`, `[…]`/`[!…]`,
+ * everything else literal. Undefined when JavaScript cannot compile the
+ * bracket expression (`[z-a]`), which bash accepts and matches nothing with.
+ */
+export function globComponentRegex(glob: string): RegExp | undefined {
 	let out = "";
 	for (let i = 0; i < glob.length; i++) {
 		const ch = glob[i];
 		if (ch === "*") out += "[^/]*";
 		else if (ch === "?") out += "[^/]";
 		else if (ch === "[") {
-			const close = glob.indexOf("]", i + 2);
+			// A `]` first in the set, after any `!`/`^`, is a member, not the end.
+			const negation = glob[i + 1] === "!" || glob[i + 1] === "^" ? 1 : 0;
+			const close = glob.indexOf("]", i + 2 + negation);
 			if (close === -1) {
 				out += "\\[";
 				continue;
@@ -671,14 +678,18 @@ function globComponentRegex(glob: string): RegExp {
 			i = close;
 		} else out += ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 	}
-	return new RegExp(`^${out}$`);
+	try {
+		return new RegExp(`^${out}$`);
+	} catch {
+		return undefined;
+	}
 }
 
 /**
  * The words bash expands a glob operand to, or undefined when the check cannot
  * enumerate them: a glob in a directory component, a component starting with
- * `.` (bash before 5.2 matches `.` and `..` with `.*` or `.?`), or more than
- * 2,000 matches. Only the last component is expanded, as bash would with
+ * `.` (bash before 5.2 matches `.` and `..` with `.*` or `.?`), a bracket
+ * expression JavaScript cannot compile, or more than 2,000 matches. Only the last component is expanded, as bash would with
  * `dotglob`, `globstar` and `nocaseglob` off (their non-interactive defaults).
  * No match leaves the word as written, as bash does without `nullglob`.
  */
@@ -695,6 +706,7 @@ function expandGlob(cwd: string, pattern: string, home: string): string[] | unde
 		return [pattern];
 	}
 	const regex = globComponentRegex(leaf);
+	if (!regex) return undefined;
 	const matches = entries.filter((entry) => !entry.startsWith(".") && regex.test(entry));
 	if (matches.length > 2_000) return undefined;
 	if (matches.length === 0) return [pattern];
@@ -763,6 +775,23 @@ function gitEscalationReason(args: Token[], isDirOutsideCwd: (dir: string) => bo
 	return undefined;
 }
 
+/**
+ * For a git command the options already proved read-only: why the checkout it
+ * runs in (after every `-C`, each relative to the last) could still make it
+ * run a program (git-checkout-programs.ts), or undefined.
+ */
+function gitCheckoutReason(args: Token[], cwd: string, home: string, seen: Map<string, string | undefined>): string | undefined {
+	let dir = cwd;
+	for (let index = 0; index < args.length && args[index].value.startsWith("-"); index++) {
+		if (args[index].value === "-C" && args[index + 1]) dir = toAbsoluteBash(dir, args[++index].value, home);
+	}
+	// Memoized for one analysis only: nothing runs between its segments, but the
+	// model can rewrite `.git/config` between calls.
+	if (!seen.has(dir)) seen.set(dir, checkoutGitRunsProgram(dir, home));
+	const why = seen.get(dir);
+	return why && `runs git where ${why}`;
+}
+
 export interface AnalyzeInput {
 	command: string;
 	cwd: string;
@@ -788,6 +817,7 @@ export interface AnalyzeInput {
  * Classify a shell command. Never denies — see the module contract above.
  */
 export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], readableRoots = [] }: AnalyzeInput): ShellEvidence {
+	const checkoutReasons = new Map<string, string | undefined>();
 	const evidence: ShellEvidence = {
 		verdict: "safe",
 		notes: [],
@@ -979,11 +1009,12 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 				});
 				continue;
 			}
-			const reason = gitEscalationReason(args, (dir) => {
-				if (isUnknownTilde(dir)) return true;
-				const resolved = resolveForContainment(toAbsoluteBash(effectiveCwd, dir, home));
-				return resolved === undefined || !isWithin(containmentRoot, resolved);
-			});
+			const reason =
+				gitEscalationReason(args, (dir) => {
+					if (isUnknownTilde(dir)) return true;
+					const resolved = resolveForContainment(toAbsoluteBash(effectiveCwd, dir, home));
+					return resolved === undefined || !isWithin(containmentRoot, resolved);
+				}) ?? gitCheckoutReason(args, effectiveCwd, home, checkoutReasons);
 			if (reason) escalate(reason);
 			continue;
 		}

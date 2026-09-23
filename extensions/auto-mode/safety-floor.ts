@@ -22,7 +22,7 @@
  * fires on routine work teaches the user to approve without reading.
  */
 
-import { analyzeShellCommand, isUnknownTilde, parseCommand, resolvePayload } from "./shell-analysis.ts";
+import { analyzeShellCommand, globComponentRegex, isUnknownTilde, parseCommand, resolvePayload } from "./shell-analysis.ts";
 import { autoModeSettingsPaths } from "./config.ts";
 import { oneCodeProjectSettingsPath } from "../lib/one-code-settings.ts";
 import { claudeJsonPath, comparablePath } from "../lib/paths.ts";
@@ -93,6 +93,33 @@ function matchesControlFile(resolved: string, forms: ReadonlySet<string>): boole
 	return SETTINGS_TAIL.test(target) || ONECODE_SETTINGS_TAIL.test(target) || forms.has(target);
 }
 
+const GLOB_CHARS = /[*?[]/;
+
+/**
+ * Whether a resolved shell path names a control file, literally or as a glob
+ * the shell expands onto one (`> .claude/settings.*`, `.claude/s*.json`). A
+ * glob leaf is tried against every control file name in its directory; a glob
+ * in a directory component stops whenever the leaf could spell a control
+ * file's name, since the floor may only ever say "stop". `dotRule` is bash's:
+ * a leaf not starting with `.` never matches a name that does.
+ */
+function namesControlFile(resolved: string, forms: ReadonlySet<string>, dotRule: boolean): boolean {
+	if (matchesControlFile(resolved, forms)) return true;
+	const target = fold(resolved);
+	if (!GLOB_CHARS.test(target)) return false;
+	const slash = target.lastIndexOf("/");
+	const dir = target.slice(0, slash);
+	const leaf = target.slice(slash + 1);
+	// An uncompilable bracket expression matches nothing: the shell writes the literal name.
+	const regex = globComponentRegex(leaf);
+	if (!regex) return false;
+	const names = new Set(["settings.json", "settings.local.json"]);
+	for (const form of forms) names.add(form.slice(form.lastIndexOf("/") + 1));
+	const spelled = [...names].filter((name) => regex.test(name) && !(dotRule && name.startsWith(".") && !leaf.startsWith(".")));
+	if (spelled.length === 0) return false;
+	return GLOB_CHARS.test(dir) || spelled.some((name) => matchesControlFile(`${dir}/${name}`, forms));
+}
+
 export interface FloorInput {
 	/** Already-normalized tool name (see permissions/matcher.ts). */
 	toolName: string;
@@ -132,8 +159,9 @@ export function safetyControlWrite({ toolName, input, cwd, home, oneCodeProjectS
 		const command = typeof input.command === "string" ? input.command : "";
 		if (!command) return undefined;
 		const evidence = analyzeShellCommand({ command, cwd, home });
+		const forms = controlFileForms(home, perRepoSettings);
 		for (const write of evidence.writes) {
-			if (write.resolved && isSafetyControlTarget(write.resolved, home, perRepoSettings)) return REASON(write.token);
+			if (write.resolved && namesControlFile(write.resolved, forms, true)) return REASON(write.token);
 		}
 		// A command the pre-gate cannot prove read-only may write in ways its
 		// evidence does not model (an output operand, an option's value, a
@@ -145,7 +173,7 @@ export function safetyControlWrite({ toolName, input, cwd, home, oneCodeProjectS
 		// `readOnlyOutside` means every command was proven read-only by its
 		// options and only the location escalated: a read, not a hidden write.
 		if (evidence.verdict === "escalate" && !evidence.readOnlyOutside) {
-			const named = shellNamesControlFile(command, cwd, home, perRepoSettings);
+			const named = shellNamesControlFile(command, cwd, home, perRepoSettings, 0, forms);
 			if (named) return REASON(named);
 		}
 	}
@@ -158,9 +186,11 @@ export function safetyControlWrite({ toolName, input, cwd, home, oneCodeProjectS
 		// gate (the floor may only ever say "stop" — header).
 		const command = typeof input.command === "string" ? input.command : "";
 		if (!command) return undefined;
+		// PowerShell wildcards (`*`, `?`, `[…]`) have no leading-dot rule.
+		const forms = controlFileForms(home, perRepoSettings);
 		for (const token of powershellPathTokens(command, home)) {
 			const absolute = toAbsolute(cwd, token, home);
-			if (isSafetyControlTarget(resolveForContainment(absolute) ?? absolute, home, perRepoSettings)) return REASON(token);
+			if (namesControlFile(resolveForContainment(absolute) ?? absolute, forms, false)) return REASON(token);
 		}
 	}
 
@@ -235,7 +265,7 @@ export function shellNamesControlFile(
 			for (const candidate of eq >= 0 ? [word, word.slice(eq + 1)] : [word]) {
 				if (!candidate || isUnknownTilde(candidate)) continue;
 				const resolved = resolveForContainment(toAbsoluteBash(dir, candidate, home));
-				if (resolved && matchesControlFile(resolved, forms)) return candidate;
+				if (resolved && namesControlFile(resolved, forms, true)) return candidate;
 			}
 		}
 		if (payload.command === "cd") {
