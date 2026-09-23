@@ -153,8 +153,13 @@ function bareFamily(id: string): string | undefined {
 }
 
 function bedrockIdentity(model: Model<Api>): ModelIdentity {
-	const geography = model.id.match(/^(us|eu|apac|au|global)\./i)?.[1]?.toLowerCase() ?? "in-region";
-	const raw = model.id.replace(/^(?:us|eu|apac|au|global)\./i, "");
+	// A cross-region inference profile prefixes the vendor with its geography
+	// (`us.`, `jp.`, `us-gov.`, …): a first segment that is not a vendor, followed
+	// by one that is. Reading it that way needs no list of AWS region codes.
+	const [first, second] = model.id.split(".");
+	const regional = second !== undefined && !canonicalVendor(first) && canonicalVendor(second) !== undefined;
+	const geography = regional ? first.toLowerCase() : "in-region";
+	const raw = regional ? model.id.slice(first.length + 1) : model.id;
 	const dot = raw.indexOf(".");
 	if (dot <= 0 || raw.startsWith("arn:")) {
 		return { containment: `${model.provider}:opaque:${model.id}`, normalizedId: model.id, confidence: "opaque" };

@@ -190,6 +190,16 @@ describe("model identity and containment", () => {
 		expect(modelsContainedToSession([session, haiku, euHaiku], session)).toEqual([session, haiku]);
 	});
 
+	it("reads every Bedrock geography prefix the catalog uses, not only us/eu/apac/au/global", () => {
+		for (const geo of ["jp", "in", "ca", "us-gov"]) {
+			const session = model("amazon-bedrock", `${geo}.anthropic.claude-sonnet-5`, 2, "bedrock-converse-stream");
+			const haiku = model("amazon-bedrock", `${geo}.anthropic.claude-haiku-4-5-20251001-v1:0`, 1, "bedrock-converse-stream");
+			const usHaiku = model("amazon-bedrock", "us.anthropic.claude-haiku-4-5-20251001-v1:0", 1, "bedrock-converse-stream");
+			expect(modelIdentity(session)).toMatchObject({ profile: "anthropic", normalizedId: "claude-sonnet-5", confidence: "family" });
+			expect(modelsContainedToSession([session, haiku, usHaiku], session)).toEqual([session, haiku]);
+		}
+	});
+
 	it("fails unknown custom providers closed", () => {
 		const session = model("custom", "flagship", 10);
 		const cheap = model("custom", "cheap", 0.01);
