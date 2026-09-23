@@ -34,7 +34,7 @@ import { isProtectedPath } from "../permissions/protected-paths.ts";
 import { isExecutionPrimitivePath, isSensitivePath } from "./sensitive.ts";
 import { isWithin, resolveForContainment, toAbsoluteBash } from "./paths.ts";
 import { checkoutGitRunsProgram } from "./git-checkout-programs.ts";
-import { lstatSync, readdirSync } from "node:fs";
+import { lstatSync, readdirSync, statSync } from "node:fs";
 import {
 	GIT_GLOBAL_SAFE,
 	GIT_SUBCOMMAND_SPECS,
@@ -147,29 +147,72 @@ const NO_FILE_OPERANDS = new Set([
  */
 const PATTERN_FIRST_COMMANDS = new Set(["grep", "egrep", "fgrep", "rg"]);
 
-/**
- * Commands that run whatever follows them. The original only knew three of
- * these and never looked past them, so `env rm -rf ~/Desktop` classified as a
- * harmless `env` (review finding N5). Every one of these is peeled and the
- * payload command is classified instead.
- */
-const TRANSPARENT_WRAPPERS = new Set([
-	"command",
-	"env",
-	"flock",
-	"ionice",
-	"nice",
-	"nohup",
-	"script",
-	"setsid",
-	"stdbuf",
-	"time",
-	"timeout",
-	"xargs",
-]);
+interface WrapperSpec {
+	/** Options whose next word is a harmless value, skipped in both readings. */
+	values?: readonly string[];
+	/**
+	 * Options whose value changes where or how the payload runs (`env -C`,
+	 * `time -o`, `script -T`). The strict reading leaves the value in command
+	 * position, so the command escalates; the wide reading skips it.
+	 */
+	unsafeValues?: readonly string[];
+	/** Options whose value is a command line of its own (`flock -c`, `env -S`): the wide reading returns it. */
+	scripts?: readonly string[];
+	/** The first operand is a file, not the command (`flock LOCK cmd`, `script LOG cmd`). */
+	fileFirst?: boolean;
+	/** The first operand is a duration (`timeout 30 cmd`). */
+	durationFirst?: boolean;
+	/**
+	 * Whether an in-project payload stays contained for the recoverability
+	 * gate. xargs takes its targets from stdin, and flock and script write the
+	 * file they are given, which nothing write-checks.
+	 */
+	contained: boolean;
+	/** Peeled only for deny/ask forms; the pre-gate treats it as an unknown command. */
+	denyFormsOnly?: boolean;
+}
 
-/** Options of wrapper commands that consume the following token as a value. */
-const WRAPPER_VALUE_OPTIONS = new Set(["-u", "-c", "-n", "-I", "-L", "-P", "--signal", "-s", "-k"]);
+/**
+ * Commands that run whatever follows them, and how each one takes its own
+ * options. The original only knew three and never looked past them, so `env
+ * rm -rf ~/Desktop` classified as a harmless `env` (review finding N5); one
+ * shared value-option list later read `setsid -c` (a flag) and `stdbuf -o 1M`
+ * wrong, so the real command slipped past deny rules
+ * (PREGATE-REVIEW-2026-09-23 P6). `sudo`/`doas` are peeled for deny forms
+ * only: the pre-gate peeling them would clear `sudo rm` as a contained delete.
+ */
+const WRAPPERS: Record<string, WrapperSpec> = {
+	caffeinate: { values: ["-t", "-w"], contained: true, denyFormsOnly: true },
+	command: { contained: true },
+	doas: { values: ["-u", "-a"], unsafeValues: ["-C"], contained: false, denyFormsOnly: true },
+	env: { values: ["-u", "--unset"], unsafeValues: ["-C", "--chdir"], scripts: ["-S", "--split-string"], contained: true },
+	flock: { values: ["-w", "--timeout", "-E", "--conflict-exit-code"], scripts: ["-c", "--command"], fileFirst: true, contained: false },
+	ionice: { values: ["-c", "--class", "-n", "--classdata"], contained: true },
+	nice: { values: ["-n", "--adjustment"], contained: true },
+	nohup: { contained: true },
+	script: {
+		values: ["-t", "-E", "--echo", "-m", "--logging-format"],
+		unsafeValues: ["-T", "--log-timing", "-I", "--log-in", "-O", "--log-out", "-B", "--log-io"],
+		scripts: ["-c", "--command"],
+		fileFirst: true,
+		contained: false,
+	},
+	setsid: { contained: true },
+	stdbuf: { values: ["-i", "-o", "-e", "--input", "--output", "--error"], contained: true },
+	sudo: {
+		values: ["-u", "-g", "-h", "-p", "-r", "-t", "-U", "-T", "-a", "--user", "--group", "--host", "--prompt", "--role", "--type", "--other-user", "--command-timeout", "--auth-type"],
+		unsafeValues: ["-C", "-D", "-R", "--close-from", "--chdir", "--chroot"],
+		contained: false,
+		denyFormsOnly: true,
+	},
+	time: { values: ["-f", "--format"], unsafeValues: ["-o", "--output"], contained: true },
+	timeout: { values: ["-s", "--signal", "-k", "--kill-after"], durationFirst: true, contained: true },
+	xargs: {
+		values: ["-I", "-L", "-n", "-P", "-s", "-E", "-d", "--delimiter", "--max-args", "--max-procs", "--max-chars", "--max-lines", "--eof"],
+		unsafeValues: ["-a", "--arg-file"],
+		contained: false,
+	},
+};
 
 /**
  * Anything here writes, deletes, or fetches-and-writes. The list is only used to
@@ -311,41 +354,120 @@ export interface Token {
 
 export interface Segment {
 	tokens: Token[];
-	/** Redirection targets found in this segment, in written order. */
+	/**
+	 * Write targets (`>`, `>>`, `>|`, `>&word`, and `<>`, which opens its
+	 * target read-write and creates it), in written order.
+	 */
 	redirects: string[];
+	/**
+	 * Input targets (`<`): files the shell opens on the command's stdin, whatever
+	 * the command is. Kept out of `tokens`, where `< f cmd` made `f` the command
+	 * word and `jq < f .` made `f` jq's program.
+	 */
+	inputs: Token[];
 	raw: string;
 }
 
-/** Decode the escapes bash understands inside `$'…'`. */
-function decodeAnsiC(body: string): string {
-	return body.replace(/\\(n|t|r|\\|'|"|a|b|f|v|0|x[0-9a-fA-F]{1,2})/g, (match, escape: string) => {
-		switch (escape) {
-			case "n":
-				return "\n";
-			case "t":
-				return "\t";
-			case "r":
-				return "\r";
-			case "\\":
-				return "\\";
-			case "'":
-				return "'";
-			case '"':
-				return '"';
-			case "a":
-				return "\x07";
-			case "b":
-				return "\b";
-			case "f":
-				return "\f";
-			case "v":
-				return "\v";
-			case "0":
-				return "\0";
-			default:
-				return escape.startsWith("x") ? String.fromCharCode(Number.parseInt(escape.slice(1), 16)) : match;
+export interface ParseResult {
+	segments: Segment[];
+	/** The command could not be tokenized (unbalanced quotes). Nothing about it is known. */
+	parseFailed: boolean;
+	/**
+	 * Why a word was quoted in a way whose value this check cannot know, or
+	 * undefined: `$"…"` locale quoting (bash translates it through a message
+	 * catalog; Claude Code refuses "a translated string" too), or a `$'…'`
+	 * escape whose meaning differs between bash versions. The whole command
+	 * escalates. A parse-level signal, not per segment, so it survives an empty
+	 * segment being dropped.
+	 */
+	unknownQuoting?: string;
+}
+
+const ANSI_C_SIMPLE: Record<string, string> = {
+	a: "\x07",
+	b: "\b",
+	e: "\x1b",
+	E: "\x1b",
+	f: "\f",
+	n: "\n",
+	r: "\r",
+	t: "\t",
+	v: "\v",
+	"\\": "\\",
+	"'": "'",
+	'"': '"',
+	"?": "?",
+};
+
+/** Consecutive characters from `body[from]` that match `pattern`, at most `max` of them. */
+function scanWhile(body: string, from: number, pattern: RegExp, max: number): string {
+	let j = from;
+	while (j < body.length && j < from + max && pattern.test(body[j])) j++;
+	return body.slice(from, j);
+}
+
+/**
+ * Decode a `$'…'` string starting at `start` (the character after the opening
+ * quote) the way bash does: the simple escapes, `\NNN` (one to three octal
+ * digits), `\xHH`, `\uHHHH`, `\UHHHHHHHH` and `\cX`; a backslash escapes the
+ * closing quote (`$'it\'s'`); any other backslash stays literal. The word ends
+ * at a decoded NUL, as bash's C strings do. Returns the decoded text, the index
+ * just past the closing quote (`body.length` when it is unterminated), and
+ * whether an escape's meaning depends on the bash version.
+ *
+ * Until 2026-09-24 `\0` matched alone, so `\057` decoded to NUL plus "57"
+ * instead of `/`, and a path spelled that way skipped every path check
+ * (PREGATE-REVIEW-2026-09-23 P1); the caller ended the string at a `\'` with
+ * `indexOf`, so `$'it\'s'` failed to parse (PREGATE-REVIEW-2026-09-23 A2).
+ */
+export function decodeAnsiC(body: string, start = 0): { text: string; end: number; versionDependent: boolean } {
+	let out = "";
+	let versionDependent = false;
+	// Set once a decoded NUL ends the string value; the scan continues to the
+	// real closing quote so the caller resumes the command in the right place.
+	let truncated = false;
+	const emit = (text: string) => {
+		if (!truncated) out += text;
+	};
+	let i = start;
+	for (; i < body.length; i++) {
+		const ch = body[i];
+		if (ch === "'") return { text: out, end: i + 1, versionDependent };
+		if (ch !== "\\" || i + 1 >= body.length) {
+			emit(ch);
+			continue;
 		}
-	});
+		const next = body[i + 1];
+		let decoded: string | undefined;
+		let width = 2;
+		if (next in ANSI_C_SIMPLE) {
+			decoded = ANSI_C_SIMPLE[next];
+		} else if (/[0-7]/.test(next)) {
+			const octal = scanWhile(body, i + 1, /[0-7]/, 3);
+			decoded = String.fromCharCode(Number.parseInt(octal, 8) & 0xff);
+			width = 1 + octal.length;
+		} else if (next === "x" || next === "u" || next === "U") {
+			if (next !== "x") versionDependent = true;
+			const hex = scanWhile(body, i + 2, /[0-9a-fA-F]/, next === "x" ? 2 : next === "u" ? 4 : 8);
+			if (hex) {
+				decoded = String.fromCodePoint(Math.min(Number.parseInt(hex, 16), 0x10ffff));
+				width = 2 + hex.length;
+			}
+		} else if (next === "c" && i + 2 < body.length) {
+			const target = body[i + 2];
+			if (target === "?" || target === "\\") versionDependent = true;
+			decoded = target === "?" ? "\x7f" : String.fromCharCode(target.toUpperCase().charCodeAt(0) & 0x1f);
+			width = 3;
+		}
+		if (decoded === undefined) {
+			emit(ch);
+			continue;
+		}
+		if (decoded === "\0") truncated = true;
+		else emit(decoded);
+		i += width - 1;
+	}
+	return { text: out, end: body.length, versionDependent };
 }
 
 /**
@@ -374,6 +496,11 @@ export function hasUnmodelledSyntax(command: string): string | undefined {
 	// Brace expansion resolves to paths we cannot enumerate (review finding N3).
 	if (/\{[^{}]*,[^{}]*\}/.test(command)) return "uses brace expansion, whose expanded paths cannot be checked";
 	if (/\$\{?[A-Za-z_]/.test(command)) return "references environment variables, whose values are unknown here";
+	// `$@`, `$1`, `$!` are empty in a `bash -c` line and `$-`, `$$`, `$#` are
+	// not, so `cat $@/etc/passwd` read as a path under the working directory.
+	// The braced spelling (`${1}`, `${@}`) is the same parameter.
+	if (/\$\{?[0-9@*#?$!-]/.test(command)) return "references a shell special parameter ($1, $@, $$, …), whose value is unknown here";
+	if (/\$\[/.test(command)) return "uses $[ ] arithmetic expansion";
 	return undefined;
 }
 
@@ -383,30 +510,31 @@ export function hasUnmodelledSyntax(command: string): string | undefined {
  * whitespace, so `cmd>file` and `a|b` are seen (review finding N4). An
  * unquoted newline ends a segment too (it is a command separator in bash).
  */
-export function parseCommand(command: string): { segments: Segment[]; parseFailed: boolean } {
+export function parseCommand(command: string): ParseResult {
 	const segments: Segment[] = [];
 	let tokens: Token[] = [];
 	let redirects: string[] = [];
+	let inputs: Token[] = [];
 	let rawStart = 0;
 
 	let current = "";
 	let hadExpansion = false;
+	/** Accumulated across the whole command, never reset per segment. */
+	let unknownQuoting: string | undefined;
 	let glob = false;
 	let quoted = false;
 	let inSingle = false;
 	let inDouble = false;
 	let escape = false;
 	/** Set while consuming the token that follows a redirection operator. */
-	let pendingRedirect = false;
+	let pendingRedirect: "write" | "input" | undefined;
 
 	const pushToken = () => {
 		if (!current && !quoted) return;
-		if (pendingRedirect) {
-			redirects.push(current);
-			pendingRedirect = false;
-		} else {
-			tokens.push({ value: current, hadExpansion, glob });
-		}
+		if (pendingRedirect === "write") redirects.push(current);
+		else if (pendingRedirect === "input") inputs.push({ value: current, hadExpansion, glob });
+		else tokens.push({ value: current, hadExpansion, glob });
+		pendingRedirect = undefined;
 		current = "";
 		hadExpansion = false;
 		glob = false;
@@ -416,11 +544,15 @@ export function parseCommand(command: string): { segments: Segment[]; parseFaile
 	/** `at` = index of the separator; `width` = its length (`&&` is 2). */
 	const pushSegment = (at: number, width = 1) => {
 		pushToken();
-		if (tokens.length > 0 || redirects.length > 0) {
-			segments.push({ tokens, redirects, raw: command.slice(rawStart, at).trim() });
+		// A redirect operator with no target is a syntax error; its pending state
+		// must not swallow the next segment's command word.
+		pendingRedirect = undefined;
+		if (tokens.length > 0 || redirects.length > 0 || inputs.length > 0) {
+			segments.push({ tokens, redirects, inputs, raw: command.slice(rawStart, at).trim() });
 		}
 		tokens = [];
 		redirects = [];
+		inputs = [];
 		rawStart = at + width;
 	};
 
@@ -446,16 +578,25 @@ export function parseCommand(command: string): { segments: Segment[]; parseFaile
 			quoted = true;
 			continue;
 		}
+		// Locale quoting: `$"…"` is a double-quoted string passed through the
+		// message catalog. Kept as a literal `$`, `cat $"/etc/passwd"` read as
+		// the in-project path `$/etc/passwd`.
+		if (ch === "$" && command[i + 1] === '"' && !inSingle && !inDouble) {
+			unknownQuoting ??= 'uses $"…" locale quoting, whose translation this check cannot see';
+			hadExpansion = true;
+			continue;
+		}
 		// ANSI-C quoting: `$'\x2e\x2e'` is `..`. The original kept the leading `$`,
 		// which made the token look like a variable and skipped every path check
 		// (review finding N1, reproduced there).
 		if (ch === "$" && command[i + 1] === "'" && !inSingle && !inDouble) {
-			const end = command.indexOf("'", i + 2);
-			if (end === -1) return { segments: [], parseFailed: true };
-			current += decodeAnsiC(command.slice(i + 2, end));
+			const decoded = decodeAnsiC(command, i + 2);
+			if (decoded.end > command.length || command[decoded.end - 1] !== "'") return { segments: [], parseFailed: true };
+			if (decoded.versionDependent) unknownQuoting ??= "uses a $'…' escape (\\u, \\U or \\c?) whose meaning depends on the bash version";
+			current += decoded.text;
 			quoted = true;
 			hadExpansion = true;
-			i = end;
+			i = decoded.end - 1;
 			continue;
 		}
 
@@ -480,7 +621,9 @@ export function parseCommand(command: string): { segments: Segment[]; parseFaile
 		if (ch === ">" || ch === "<") {
 			pushToken();
 			let j = i + 1;
-			if (command[j] === ">" || command[j] === "|") j++;
+			// `<>` opens its target read-write and creates it: a write, like `>`.
+			const readWrite = ch === "<" && command[j] === ">";
+			if (readWrite || (ch === ">" && (command[j] === ">" || command[j] === "|"))) j++;
 			if (command[j] === "&") {
 				// `>&2`, `>&-`: fd duplication, no path involved. But `>&word` with
 				// any other word opens that file for writing (bash's `&>word`), so it
@@ -495,7 +638,7 @@ export function parseCommand(command: string): { segments: Segment[]; parseFaile
 				}
 				j++;
 			}
-			pendingRedirect = ch === ">";
+			pendingRedirect = ch === ">" || readWrite ? "write" : "input";
 			i = j - 1;
 			continue;
 		}
@@ -515,41 +658,82 @@ export function parseCommand(command: string): { segments: Segment[]; parseFaile
 
 	if (escape || inSingle || inDouble) return { segments: [], parseFailed: true };
 	pushSegment(command.length);
-	return { segments, parseFailed: false };
+	return { segments, parseFailed: false, unknownQuoting };
 }
 
-/** Peel wrappers to the command that actually runs (review finding N5). */
-export function resolvePayload(tokens: Token[]): { command: string; args: Token[]; peeled: string[] } {
-	const peeled: string[] = [];
+export interface Payload {
+	command: string;
+	args: Token[];
+	/** The wrappers peeled, outermost first. */
+	peeled: string[];
+	/** Command-position words spelled with a directory (`./cat`, `bin/ls`, `/bin/rm`), as written. */
+	pathNamed: string[];
+	/** Wide reading only: command lines a wrapper option runs (`flock -c '…'`, `env -S '…'`). */
+	scripts: string[];
+}
+
+/**
+ * Peel wrappers to the command that actually runs (review finding N5).
+ *
+ * The two readings fail in opposite directions. `"strict"` (the default: the
+ * pre-gate and the guards) peels only what it fully understands, so anything
+ * else stays in command position and escalates. `"wide"` (deny/ask forms)
+ * also skips the values of options that change where the payload runs,
+ * returns the command lines wrapper options carry, and peels `sudo`/`doas`,
+ * because a deny rule should see every command a line might run.
+ */
+export function resolvePayload(tokens: Token[], reading: "strict" | "wide" = "strict"): Payload {
+	const wide = reading === "wide";
+	const payload: Payload = { command: "", args: [], peeled: [], pathNamed: [], scripts: [] };
 	let index = 0;
+
+	/** Skip the wrapper's own options; `--` ends them. */
+	const skipOptions = (spec: WrapperSpec) => {
+		while (index < tokens.length && tokens[index].value.startsWith("-")) {
+			const flag = tokens[index++].value;
+			if (flag === "--") return;
+			if (index >= tokens.length) return;
+			if (spec.values?.includes(flag)) index++;
+			else if (wide && spec.unsafeValues?.includes(flag)) index++;
+			else if (wide && spec.scripts?.includes(flag)) payload.scripts.push(tokens[index++].value);
+		}
+	};
 
 	for (;;) {
 		// Leading `VAR=value` assignments are not the command.
 		while (index < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[index].value)) index++;
-		if (index >= tokens.length) return { command: "", args: [], peeled };
+		if (index >= tokens.length) return payload;
 
+		if (/[\\/]/.test(tokens[index].value)) payload.pathNamed.push(tokens[index].value);
 		const name = commandName(tokens[index].value);
-		if (!TRANSPARENT_WRAPPERS.has(name)) {
-			return { command: name, args: tokens.slice(index + 1), peeled };
+		const spec = WRAPPERS[name];
+		if (!spec || (spec.denyFormsOnly && !wide)) {
+			payload.command = name;
+			payload.args = tokens.slice(index + 1);
+			return payload;
 		}
 
-		peeled.push(name);
+		payload.peeled.push(name);
 		index++;
-		// Step over the wrapper's own flags and their values.
-		while (index < tokens.length && tokens[index].value.startsWith("-")) {
-			const flag = tokens[index].value;
+		skipOptions(spec);
+		if (spec.fileFirst && index < tokens.length) {
 			index++;
-			if (WRAPPER_VALUE_OPTIONS.has(flag) && index < tokens.length) index++;
+			// `flock LOCK -c '…'`: options may follow the file too.
+			skipOptions(spec);
 		}
-		// `timeout 30 cmd` — a bare duration is not the payload.
-		while (index < tokens.length && /^[0-9]+[smhd]?$/.test(tokens[index].value)) index++;
+		if (spec.durationFirst && index < tokens.length && /^[0-9.]+[smhd]?$/.test(tokens[index].value)) index++;
 	}
+}
+
+/** Whether every peeled wrapper keeps an in-project payload contained (see `WrapperSpec.contained`). */
+function wrappersContained(peeled: readonly string[]): boolean {
+	return peeled.every((name) => WRAPPERS[name]?.contained);
 }
 
 /**
  * A segment's tokens normalised for command-position checks: subshell parens
  * stripped from the head token only (`(cd` → `cd` — a later argument may
- * legitimately begin with `(`), leading `do`/`then`/`else` keywords skipped,
+ * legitimately begin with `(`), leading `do`/`then`/`else`/`!`/`time` skipped,
  * and as many trailing `)`s stripped off the last token as `(`s were opened at
  * the head, so `(git stash)` still matches subcommand `stash`. A subshell
  * whose closing paren lands in a *different* segment (`(a && git stash)`) is
@@ -574,8 +758,15 @@ export function leadTokens(seg: Segment): Token[] {
 			tokens[i] = { ...tokens[i], value: stripped };
 			break;
 		}
-		if (i < tokens.length && ["do", "then", "else"].includes(tokens[i].value)) {
+		// `!` negates and `time` times the pipeline that follows; neither is the
+		// command, and `time { rm x; }` put `{` in command position (P6).
+		if (i < tokens.length && ["do", "then", "else", "!"].includes(tokens[i].value)) {
 			i++;
+			continue;
+		}
+		if (i < tokens.length && tokens[i].value === "time") {
+			i++;
+			while (i < tokens.length && (tokens[i].value === "-p" || tokens[i].value === "--")) i++;
 			continue;
 		}
 		break;
@@ -634,6 +825,18 @@ function looksLikePath(value: string): boolean {
 const INERT_ASSIGNMENTS = /^(LANG|LANGUAGE|LC_[A-Z]+|TZ|NO_COLOR|FORCE_COLOR|CLICOLOR|CLICOLOR_FORCE|TERM|COLUMNS|LINES)$/;
 
 /**
+ * Whether an inert variable's VALUE keeps it inert. libc reads a file named by
+ * `TZ=:/path` or `TZ=/path`, and a locale name with a `/` is a path too, so
+ * only plain names pass: a zone name made of plain segments (`Asia/Tokyo`,
+ * read from the system zoneinfo) for TZ, and no `/` at all for the rest
+ * (PREGATE-REVIEW-2026-09-23 P4).
+ */
+function isInertValue(name: string, value: string): boolean {
+	if (name === "TZ") return /^[A-Za-z0-9_+-]*(\/[A-Za-z0-9_+-]+)*$/.test(value);
+	return /^[A-Za-z0-9_.,@:+-]*$/.test(value);
+}
+
+/**
  * A `~` word other than `~` and `~/…`: bash expands `~name` to that user's
  * home and `~-`/`~+` to `$OLDPWD`/`$PWD`, which `toAbsolute` would read as a
  * directory literally named `~name` inside the working directory.
@@ -651,6 +854,17 @@ function entryExists(absolute: string): boolean {
 		return false;
 	}
 }
+
+/** Whether `resolved` (already realpath'd) is a directory. */
+function isDirectory(resolved: string): boolean {
+	try {
+		return statSync(resolved).isDirectory();
+	} catch {
+		return false;
+	}
+}
+
+const FOLLOWS_DIR_ENTRY_SYMLINKS = "reads through symbolic links inside it, which can read outside the working directory";
 
 /**
  * A bash glob (one path component) as a RegExp: `*`, `?`, `[…]`/`[!…]`,
@@ -883,11 +1097,12 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 	const unmodelled = hasUnmodelledSyntax(trimmed);
 	if (unmodelled) escalate(unmodelled);
 
-	const { segments, parseFailed } = parseCommand(trimmed);
+	const { segments, parseFailed, unknownQuoting } = parseCommand(trimmed);
 	if (parseFailed) {
 		escalate("could not be parsed (unbalanced quotes), so nothing about it is known");
 		return evidence;
 	}
+	if (unknownQuoting) escalate(unknownQuoting);
 
 	/**
 	 * Containment is checked against the *resolved* working directory. Write
@@ -947,6 +1162,46 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		}
 	};
 
+	/**
+	 * A word a read-only command reads. It escalates when it resolves outside
+	 * the working directory and the readable roots, or onto a credential path
+	 * — judged where it RESOLVES, so an in-project symlink named `notes` that
+	 * points at a key file is the key file (SECURITY-REVIEW-2026-09-23 M1). A
+	 * `~name`/`~-` word and a glob that could reach `..` are paths bash
+	 * expands to places this check cannot see (M2); an ordinary glob is
+	 * expanded one level here and every match is judged.
+	 */
+	const escalateOutsideRead = (value: string, why: string) => {
+		if (!evidence.outsideReads.includes(value)) evidence.outsideReads.push(value);
+		escalate(`reads ${value}, ${why}`, { outsideRead: true });
+	};
+	// `base` is where the reading program resolves a relative word (git's
+	// final `-C` directory); bash still expands globs from the shell's cwd.
+	const checkRead = (word: { value: string; glob?: boolean }, base = effectiveCwd) => {
+		const value = word.value;
+		if (!value) return;
+		if (isUnknownTilde(value)) {
+			escalateOutsideRead(value, "which bash expands to a directory outside what this check can see");
+			return;
+		}
+		const targets = word.glob ? expandGlob(effectiveCwd, value, home) : [value];
+		if (targets === undefined) {
+			escalateOutsideRead(value, "a glob whose matches cannot be checked");
+			return;
+		}
+		for (const target of targets) {
+			const absolute = toAbsoluteBash(base, target, home);
+			if (!looksLikePath(target) && !entryExists(absolute)) continue;
+			const resolved = resolveForContainment(absolute);
+			if (resolved !== undefined && isSensitivePath(resolved) && !isSensitivePath(absolute)) {
+				if (!evidence.sensitivePaths.includes(value)) evidence.sensitivePaths.push(value);
+				escalate(`reads ${value}, which resolves to a credential or secret path`);
+			}
+			if (resolved !== undefined && (isWithin(containmentRoot, resolved) || readableRoots.some((root) => isWithin(root, resolved)))) continue;
+			escalateOutsideRead(value, "which is outside the working directory");
+		}
+	};
+
 	for (const segment of segments) {
 		// Redirection targets are writes regardless of the command word: a bare
 		// `> file` truncates/creates it with no command at all, and `git log > file`
@@ -954,6 +1209,9 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		// (cd/git) can never skip a redirect (was review gap: bare-redirect writes and
 		// read-only-command redirects were fast-pathed to "safe").
 		for (const token of segment.redirects) checkWriteTarget(token);
+		// An input redirect (`tr a b < f`) opens `f` whatever the command is, so
+		// it is read-checked even for a command that takes no file operands.
+		for (const word of segment.inputs) checkRead(word);
 
 		// A leading `NAME=value` changes what the command runs or reads: git takes
 		// its repository and configuration from GIT_* variables (the same
@@ -963,10 +1221,11 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		for (const token of segment.tokens) {
 			const assigned = /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(token.value)?.[1];
 			if (!assigned) break;
-			if (!INERT_ASSIGNMENTS.test(assigned)) escalate(`sets ${assigned}, which can change what the command runs or reads`);
+			const inert = INERT_ASSIGNMENTS.test(assigned) && isInertValue(assigned, token.value.slice(assigned.length + 1));
+			if (!inert) escalate(`sets ${assigned}, which can change what the command runs or reads`);
 		}
 
-		const { command: name, args, peeled } = resolvePayload(segment.tokens);
+		const { command: name, args, peeled, pathNamed } = resolvePayload(segment.tokens);
 		if (!name) {
 			// A wrapper with nothing to wrap is a command of its own: a bare `env`
 			// (or `env -i`, `nice`) prints the whole process environment / state.
@@ -981,12 +1240,15 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 			continue;
 		}
 		evidence.commands.push(name);
+		// `./cat` or `bin/timeout` runs whatever file sits there, not the command
+		// its basename names; Claude Code matches the command word exactly too.
+		for (const word of pathNamed) escalate(`runs ${word}, a program named by its path, so its name says nothing about what it does`);
 		if (peeled.length > 0) {
 			// A transparent wrapper (timeout, env, nice) leaves the payload's own
-			// arguments visible, so an in-project payload stays contained; xargs is
-			// the exception — its targets come from stdin, unknown to this check.
+			// arguments visible, so an in-project payload stays contained unless a
+			// wrapper's spec says otherwise (xargs, flock, script).
 			escalate(`wraps the real command in ${peeled.join(" → ")}, so ${name} is what actually runs`, {
-				contained: !peeled.includes("xargs"),
+				contained: wrappersContained(peeled),
 			});
 		}
 
@@ -1020,46 +1282,6 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 			}
 			continue;
 		}
-
-		/**
-		 * A word a read-only command reads. It escalates when it resolves outside
-		 * the working directory and the readable roots, or onto a credential path
-		 * — judged where it RESOLVES, so an in-project symlink named `notes` that
-		 * points at a key file is the key file (SECURITY-REVIEW-2026-09-23 M1). A
-		 * `~name`/`~-` word and a glob that could reach `..` are paths bash
-		 * expands to places this check cannot see (M2); an ordinary glob is
-		 * expanded one level here and every match is judged.
-		 */
-		const escalateOutsideRead = (value: string, why: string) => {
-			if (!evidence.outsideReads.includes(value)) evidence.outsideReads.push(value);
-			escalate(`reads ${value}, ${why}`, { outsideRead: true });
-		};
-		// `base` is where the reading program resolves a relative word (git's
-		// final `-C` directory); bash still expands globs from the shell's cwd.
-		const checkRead = (word: { value: string; glob?: boolean }, base = effectiveCwd) => {
-			const value = word.value;
-			if (!value) return;
-			if (isUnknownTilde(value)) {
-				escalateOutsideRead(value, "which bash expands to a directory outside what this check can see");
-				return;
-			}
-			const targets = word.glob ? expandGlob(effectiveCwd, value, home) : [value];
-			if (targets === undefined) {
-				escalateOutsideRead(value, "a glob whose matches cannot be checked");
-				return;
-			}
-			for (const target of targets) {
-				const absolute = toAbsoluteBash(base, target, home);
-				if (!looksLikePath(target) && !entryExists(absolute)) continue;
-				const resolved = resolveForContainment(absolute);
-				if (resolved !== undefined && isSensitivePath(resolved) && !isSensitivePath(absolute)) {
-					if (!evidence.sensitivePaths.includes(value)) evidence.sensitivePaths.push(value);
-					escalate(`reads ${value}, which resolves to a credential or secret path`);
-				}
-				if (resolved !== undefined && (isWithin(containmentRoot, resolved) || readableRoots.some((root) => isWithin(root, resolved)))) continue;
-				escalateOutsideRead(value, "which is outside the working directory");
-			}
-		};
 
 		if (name === "git") {
 			// `git reset --hard` is an in-project whole-tree discard: escalate, but
@@ -1132,10 +1354,31 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 				const operands = [...check.parsed.positionals];
 				// A pattern-first command's first operand is its pattern, unless an
 				// option (`-e PAT`, `-f FILE`) supplies it; jq's first is its program.
-				const patternFirst = PATTERN_FIRST_COMMANDS.has(name) && ![...check.parsed.seen].some((option) => PATTERN_OPTIONS.has(option));
+				// `rg --files` lists files and takes no pattern, so every operand is a
+				// path (PREGATE-REVIEW-2026-09-23 P3).
+				const patternFirst =
+					PATTERN_FIRST_COMMANDS.has(name) && !check.parsed.seen.has("--files") && ![...check.parsed.seen].some((option) => PATTERN_OPTIONS.has(option));
 				if (patternFirst || spec.programFirst) operands.shift();
 				const reads = NO_FILE_OPERANDS.has(name) ? check.parsed.fileValues : [...operands, ...check.parsed.fileValues];
 				for (const word of reads) checkRead(word);
+				// A command that dereferences the entries of a directory operand
+				// (`diff dir1 dir2`) reads through any symlink one level inside it,
+				// which the operand's own containment check never sees (A1).
+				if (spec.dereferencesDirEntries && !spec.dereferencesDirEntries.some((option) => check.parsed.seen.has(option))) {
+					for (const word of operands) {
+						// A glob could expand to a directory this check cannot enumerate, so
+						// it escalates rather than being skipped (code-review 2026-09-24).
+						if (word.glob) {
+							escalate(`runs ${name} on the glob ${word.value}, which could name a directory that ${FOLLOWS_DIR_ENTRY_SYMLINKS}`);
+							break;
+						}
+						const resolved = resolveForContainment(toAbsoluteBash(effectiveCwd, word.value, home));
+						if (resolved !== undefined && isDirectory(resolved)) {
+							escalate(`runs ${name} on the directory ${word.value}, which ${FOLLOWS_DIR_ENTRY_SYMLINKS}`);
+							break;
+						}
+					}
+				}
 			}
 		} else if (!isMutation) {
 			escalate(`runs ${name}, which is not on the read-only allowlist`);

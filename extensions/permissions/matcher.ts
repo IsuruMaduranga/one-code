@@ -9,7 +9,7 @@
 
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
-import { analyzeShellCommand, hasInjectionSyntax, leadTokens, parseCommand, resolvePayload } from "../auto-mode/shell-analysis.ts";
+import { analyzeShellCommand, decodeAnsiC, hasInjectionSyntax, leadTokens, parseCommand, resolvePayload } from "../auto-mode/shell-analysis.ts";
 import { pathArgument, resolveForContainment } from "../auto-mode/paths.ts";
 import { isProtectedPath, isWritingTool } from "./protected-paths.ts";
 import {
@@ -246,6 +246,61 @@ function inlineShellScript(args: string[]): string | undefined {
 }
 
 /**
+ * Shell text inside a line that runs as commands of its own: `$(…)`, `<(…)`,
+ * `>(…)` and backticks. Parentheses are balanced and single-quoted text is
+ * skipped; double quotes do not stop a substitution, as in bash. Until
+ * 2026-09-24 none of it became a deny form, so `cat $(rm -f x)` ran past
+ * `Bash(rm:*)` (PREGATE-REVIEW-2026-09-23 P7).
+ */
+export function substitutionBodies(command: string): string[] {
+	const bodies: string[] = [];
+	let inSingle = false;
+	for (let i = 0; i < command.length; i++) {
+		const ch = command[i];
+		if (ch === "\\" && !inSingle) {
+			i++;
+			continue;
+		}
+		// `$'…'` escapes its closing quote (`$'it\'s'`), so its `'` is not a
+		// delimiter; decodeAnsiC finds the real end (PREGATE-REVIEW-2026-09-23 A2).
+		if (ch === "$" && command[i + 1] === "'" && !inSingle) {
+			i = decodeAnsiC(command, i + 2).end - 1;
+			continue;
+		}
+		if (ch === "'") {
+			inSingle = !inSingle;
+			continue;
+		}
+		if (inSingle) continue;
+		if (ch === "`") {
+			const end = command.indexOf("`", i + 1);
+			if (end === -1) break;
+			bodies.push(command.slice(i + 1, end));
+			i = end;
+			continue;
+		}
+		if ((ch === "$" || ch === "<" || ch === ">") && command[i + 1] === "(") {
+			let depth = 0;
+			let quote: string | undefined;
+			let j = i + 1;
+			for (; j < command.length; j++) {
+				const c = command[j];
+				if (quote) {
+					if (c === quote) quote = undefined;
+					continue;
+				}
+				if (c === "'" || c === '"') quote = c;
+				else if (c === "(") depth++;
+				else if (c === ")" && --depth === 0) break;
+			}
+			bodies.push(command.slice(i + 2, j));
+			i = j;
+		}
+	}
+	return bodies;
+}
+
+/**
  * Every spelling of a command line a deny/ask pattern is tested against: the
  * raw line, each subcommand, and each subcommand's *payload form* — transparent
  * wrappers peeled (`env`, `command`, `nice`, `timeout`, `xargs`, …), subshell
@@ -264,21 +319,31 @@ export function bashMatchForms(command: string, depth = 0): string[] {
 	if (!trimmed) return [];
 	forms.add(trimmed);
 	if (depth > 4) return [...forms];
+	const nested: string[] = [];
 	const { segments, parseFailed } = parseCommand(trimmed);
-	if (parseFailed) return [...forms];
-	for (const segment of segments) {
-		if (segment.raw) forms.add(segment.raw);
-		const tokens = leadTokens(segment);
-		if (tokens.length === 0) continue;
-		const payload = resolvePayload(tokens);
-		if (!payload.command) continue;
-		const args = payload.args.map((token) => token.value);
-		forms.add([payload.command, ...args].join(" "));
-		if (SHELL_INTERPRETERS.has(payload.command)) {
-			const script = inlineShellScript(args);
-			if (script) for (const form of bashMatchForms(script, depth + 1)) forms.add(form);
+	if (!parseFailed) {
+		for (const segment of segments) {
+			if (segment.raw) forms.add(segment.raw);
+			const tokens = leadTokens(segment);
+			if (tokens.length === 0) continue;
+			// The wide reading also peels sudo/doas and returns the command lines
+			// wrapper options carry (`flock -c`, `env -S`).
+			const payload = resolvePayload(tokens, "wide");
+			nested.push(...payload.scripts);
+			if (!payload.command) continue;
+			const args = payload.args.map((token) => token.value);
+			forms.add([payload.command, ...args].join(" "));
+			if (SHELL_INTERPRETERS.has(payload.command)) {
+				const script = inlineShellScript(args);
+				if (script) nested.push(script);
+			}
+			// `eval` runs its arguments joined into one command line.
+			if (payload.command === "eval") nested.push(args.join(" "));
 		}
 	}
+	// Substitutions run even when the line as a whole does not parse here.
+	nested.push(...substitutionBodies(trimmed));
+	for (const script of nested) for (const form of bashMatchForms(script, depth + 1)) forms.add(form);
 	return [...forms];
 }
 
