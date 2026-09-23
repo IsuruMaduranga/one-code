@@ -68,10 +68,14 @@ export default function btwExtension(pi: ExtensionAPI) {
 	// or record usage on a stale `pi` (the crash the subagents panel once hit —
 	// docs/decisions/tools.md lifecycle review).
 	let inFlight: AbortController | undefined;
+	// Bumped when the session is replaced or torn down, so a fork request that
+	// settles afterwards touches neither the closed panel nor a stale ctx.
+	let sessionEpoch = 0;
 
 	// A new session (including after /clear) shares no context with the old one:
 	// its side history starts empty and any in-flight side question is abandoned.
 	pi.on("session_start", () => {
+		sessionEpoch++;
 		// Claude Code's `[question]` placeholder after a bare `/btw` in the prompt.
 		pi.events.emit(ARGUMENT_HINT_CHANNEL, { command: "btw", hint: "[question]" } satisfies ArgumentHint);
 		capturedMessages = undefined;
@@ -80,6 +84,7 @@ export default function btwExtension(pi: ExtensionAPI) {
 		inFlight = undefined;
 	});
 	pi.on("session_shutdown", () => {
+		sessionEpoch++;
 		inFlight?.abort();
 		inFlight = undefined;
 	});
@@ -188,6 +193,7 @@ export default function btwExtension(pi: ExtensionAPI) {
 				view.error !== undefined ? { kind: "error", message: view.error } : view.answer !== undefined ? { kind: "answer", text: view.answer } : { kind: "loading" };
 			// Shown after the panel closes: a started fork, or why it could not start.
 			let closingNotice: { text: string; level: "info" | "error" } | undefined;
+			let panelOpen = true;
 
 			await ctx.ui.custom<null>((tui, theme, _keybindings, done) => {
 				const state = initialBtwState();
@@ -221,11 +227,21 @@ export default function btwExtension(pi: ExtensionAPI) {
 					if (!model) return;
 					view.forking = true;
 					repaint();
+					const epoch = sessionEpoch;
 					void requestBtwFork(pi.events, { ctx, question, messages: exchangeMessages({ question, answer }, model) }).then((result) => {
-						view.forking = false;
-						closingNotice =
-							"error" in result ? { text: result.error, level: "error" } : { text: `Forked ${result.name} (${result.taskId.slice(-4)})`, level: "info" };
-						done(null);
+						if (epoch !== sessionEpoch) return;
+						const notice =
+							"error" in result ? { text: result.error, level: "error" as const } : { text: `Forked ${result.name} (${result.taskId.slice(-4)})`, level: "info" as const };
+						if (panelOpen) {
+							view.forking = false;
+							closingNotice = notice;
+							done(null);
+							return;
+						}
+						// The user closed the panel while the fork was starting.
+						try {
+							ctx.ui.notify(notice.text, notice.level);
+						} catch {}
 					});
 				};
 
@@ -255,10 +271,13 @@ export default function btwExtension(pi: ExtensionAPI) {
 						return lines;
 					},
 					handleInput: (data: string) => {
-						// A fork in flight owns the panel until it answers.
-						if (view.forking) return;
 						const key = decodeBtwKey(data);
 						if (!key) return;
+						// While a fork starts only closing works; its notice follows.
+						if (view.forking) {
+							if (key.kind === "close") done(null);
+							return;
+						}
 						const effect = applyBtwKey(state, key, earlier.length);
 						const shown = state.selected === null ? view.answer : earlier[state.selected]?.answer;
 						switch (effect?.kind) {
@@ -296,6 +315,7 @@ export default function btwExtension(pi: ExtensionAPI) {
 				};
 			});
 
+			panelOpen = false;
 			controller.abort();
 			if (inFlight === controller) inFlight = undefined;
 			if (closingNotice) ctx.ui.notify(closingNotice.text, closingNotice.level);

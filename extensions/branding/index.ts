@@ -314,6 +314,13 @@ export default function brandingExtension(pi: ExtensionAPI) {
 		live = false;
 	});
 
+	// Commands' argument placeholders (lib/argument-hints.ts), drawn by the prompt editor.
+	// Declared before the CC_NO_BANNER return below: session_start reads it.
+	const argumentHints = new Map<string, string>();
+	pi.events.on(ARGUMENT_HINT_CHANNEL, (data) => {
+		const { command, hint } = data as ArgumentHint;
+		argumentHints.set(command, hint);
+	});
 	pi.on("session_start", (_event, ctx) => {
 		// pi's own write lands after this handler, so only the deferred write
 		// sticks; a new session may carry a name (resume), so forget the last.
@@ -348,12 +355,6 @@ export default function brandingExtension(pi: ExtensionAPI) {
 		currentModelId = event.model?.id ?? currentModelId;
 		currentModelProvider = event.model?.provider ?? currentModelProvider;
 		requestHeaderRender?.();
-	});
-	// Commands' argument placeholders (lib/argument-hints.ts), drawn by the prompt editor.
-	const argumentHints = new Map<string, string>();
-	pi.events.on(ARGUMENT_HINT_CHANNEL, (data) => {
-		const { command, hint } = data as ArgumentHint;
-		argumentHints.set(command, hint);
 	});
 	pi.events.on(PERMISSION_STATUS_CHANNEL, (data) => {
 		permissionStatus = data as PermissionStatus;
