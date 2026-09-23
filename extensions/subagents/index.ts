@@ -1537,7 +1537,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		if (forkPrompt !== undefined) persistForkPrompt(p.record, forkPrompt);
 		// No `signal` here on purpose: a resident outlives the spawning turn and
 		// is stopped through task_stop / the panel, not by the turn ending (S15).
-		const handle = await runtime.runResident({
+		const started = await runtime.runResident({
 			name: p.record.name,
 			agent: p.agentDef,
 			cwd: p.record.cwd,
@@ -1606,7 +1606,16 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				liveHandles.delete(p.record.taskId);
 				if (worktree) void cleanupWorktree(parentCwd, worktree);
 			},
-		});
+		}).catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))));
+		if (started instanceof Error) {
+			// The child never started: settle its panel row and forget the run, so
+			// neither the panel nor list_agents offers it.
+			live.finish(true);
+			registry.remove(p.record.taskId);
+			if (worktree) void cleanupWorktree(parentCwd, worktree);
+			return { launched: false, line: `✗ ${p.record.name}: could not start: ${started.message}` };
+		}
+		const handle = started;
 		resident.handle = handle;
 		residents.set(p.record.taskId, resident);
 		liveHandles.set(p.record.taskId, handle);
@@ -1649,8 +1658,17 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		if (!sessionFile) return { error: "Cannot fork: this session is not persisted (started with --no-session), so there is no conversation to clone." };
 		const { name } = resolveRunName(registry, FORK_AGENT, undefined);
 		const taskId = generateTaskId();
+		// The session's current model and thinking, explicitly: before the first
+		// turn there is no transcript for the fork to restore them from.
 		const prepared: PreparedRun = {
-			request: { agent: FORK_AGENT, task: request.question, name, fork: true },
+			request: {
+				agent: FORK_AGENT,
+				task: request.question,
+				name,
+				fork: true,
+				model: ctx.model ? modelSpec(ctx.model) : undefined,
+				thinking: pi.getThinkingLevel(),
+			},
 			agentDef: undefined,
 			record: { name, agent: FORK_AGENT, taskId, sessionSearchDir: runSessionDir(ctx, taskId) ?? "", cwd: ctx.cwd, depth: 0 },
 		};

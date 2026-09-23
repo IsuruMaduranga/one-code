@@ -776,6 +776,24 @@ function gitEscalationReason(args: Token[], isDirOutsideCwd: (dir: string) => bo
 	return undefined;
 }
 
+/** The directory git runs in: `cwd`, then each leading `-C <dir>` in turn, as git applies them. */
+function gitWorkingDirectory(args: Token[], cwd: string, home: string): string {
+	let dir = cwd;
+	for (let index = 0; index < args.length; ) {
+		const token = args[index].value;
+		if (token === "-C") {
+			const next = args[index + 1]?.value;
+			if (next) dir = toAbsoluteBash(dir, next, home);
+			index += 2;
+		} else if (GIT_GLOBAL_SAFE.has(token)) {
+			index++;
+		} else {
+			break;
+		}
+	}
+	return dir;
+}
+
 /**
  * Subcommands whose operands can be files git reads outside the repository.
  * `git diff <path> <path>` goes `--no-index` by itself when either path is
@@ -1016,7 +1034,9 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 			if (!evidence.outsideReads.includes(value)) evidence.outsideReads.push(value);
 			escalate(`reads ${value}, ${why}`, { outsideRead: true });
 		};
-		const checkRead = (word: { value: string; glob?: boolean }) => {
+		// `base` is where the reading program resolves a relative word (git's
+		// final `-C` directory); bash still expands globs from the shell's cwd.
+		const checkRead = (word: { value: string; glob?: boolean }, base = effectiveCwd) => {
 			const value = word.value;
 			if (!value) return;
 			if (isUnknownTilde(value)) {
@@ -1029,7 +1049,7 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 				return;
 			}
 			for (const target of targets) {
-				const absolute = toAbsoluteBash(effectiveCwd, target, home);
+				const absolute = toAbsoluteBash(base, target, home);
 				if (!looksLikePath(target) && !entryExists(absolute)) continue;
 				const resolved = resolveForContainment(absolute);
 				if (resolved !== undefined && isSensitivePath(resolved) && !isSensitivePath(absolute)) {
@@ -1070,10 +1090,13 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 					(words) => fileReads.push(...words),
 				) ?? gitCheckoutReason(args, effectiveCwd, home, checkoutReasons);
 			if (reason) escalate(reason);
-			// Resolved against the working directory even under `-C <dir>`: that
-			// dir is inside it (or git escalated above), and a relative path that
-			// stays inside from here stays inside from any deeper directory.
-			else for (const word of fileReads) checkRead(word);
+			// git resolves a relative operand from its final `-C` directory, not
+			// the shell's: `git -C sub diff ../../x/data.txt a.txt` can climb out
+			// from `sub` where the same word stays inside from the working directory.
+			else {
+				const gitCwd = gitWorkingDirectory(args, effectiveCwd, home);
+				for (const word of fileReads) checkRead(word, gitCwd);
+			}
 			continue;
 		}
 

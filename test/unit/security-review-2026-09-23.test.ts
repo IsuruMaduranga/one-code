@@ -7,7 +7,7 @@
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { checkOptions, READ_ONLY_SPECS } from "../../extensions/auto-mode/read-only-options.ts";
 import { safetyControlWrite, shellNamesControlFile } from "../../extensions/auto-mode/safety-floor.ts";
@@ -540,6 +540,19 @@ describe("git diff's implicit --no-index reads files outside the repository", ()
 		symlinkSync("/etc/hosts", join(cwd, "hosts"));
 		expect(verdict("git diff hosts a.txt")).toBe("escalate");
 		expect(verdict("git -C sub diff ../../outside.txt a.txt")).toBe("escalate");
+	});
+
+	it("resolves operands from git's final -C directory, not the shell's", () => {
+		mkdirSync(join(cwd, "sub", "deeper"), { recursive: true });
+		const [project, parent, grandparent] = [basename(cwd), basename(root), basename(dirname(root))];
+		// Each operand climbs out of the project and walks back into it from the
+		// working directory, but from git's -C directory it lands outside.
+		expect(verdict(`git -C sub diff ../../${parent}/${project}/a.txt a.txt`)).toBe("escalate");
+		expect(verdict(`git -C sub -C deeper diff ../../../${grandparent}/${parent}/${project}/a.txt a.txt`)).toBe("escalate");
+		// The same operands without -C stay inside and pass.
+		expect(verdict(`git diff ../../${parent}/${project}/a.txt a.txt`)).toBe("safe");
+		// A relative operand that stays inside from `sub` passes too.
+		expect(verdict("git -C sub diff ../a.txt a.txt")).toBe("safe");
 	});
 
 	it("keeps revisions, ranges and in-project paths on the fast path", () => {

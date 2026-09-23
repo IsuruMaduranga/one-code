@@ -188,6 +188,18 @@ describe("renderBtwPanel", () => {
 		expect(render({ history, height: 12 })).toContain("  (+4 earlier /btw)");
 	});
 
+	it("keeps a browsed question listed on a short dock", () => {
+		const history = Array.from({ length: 8 }, (_, i) => ({ question: `q${i}`, answer: `a${i}` }));
+		for (const height of [8, 10]) {
+			const state = initialBtwState();
+			state.selected = 3; // the oldest of the five browsable
+			const lines = render({ state, history, height });
+			expect(lines.length).toBeLessThanOrEqual(height);
+			expect(lines).toContain("  /btw q3");
+			expect(lines).toContain("    a3");
+		}
+	});
+
 	it("puts a long question on one line with an ellipsis", () => {
 		const lines = render({ question: "why is this happening ".repeat(60), width: 40 });
 		const row = lines.find((line) => line.startsWith("  /btw "));

@@ -209,16 +209,23 @@ export function renderBtwPanel(input: BtwPanelInput, theme?: unknown): string[] 
 
 	// On a short dock, list fewer earlier questions rather than overflow it: the
 	// rule, blanks, current question, one answer row and the hint always fit.
+	// A browsed question the trimmed list leaves out takes the list's first row
+	// (the count's, if that is the only one), so its answer never shows alone.
 	const listRows = Math.max(0, height - 7);
 	let shownCount = Math.min(SHOWN_HISTORY, history.length);
 	while (shownCount > 0 && shownCount + (history.length > shownCount ? 1 : 0) > listRows) shownCount--;
-	const shown = history.slice(history.length - shownCount);
+	let start = history.length - shownCount;
+	if (state.selected !== null && state.selected < start) {
+		if (shownCount === 0 && listRows > 0) shownCount = 1;
+		start = Math.min(state.selected, history.length - shownCount);
+	}
+	const shown = history.slice(start, start + shownCount);
 	const hidden = history.length - shown.length;
 	const list: string[] = [];
 	if (hidden > 0 && shownCount < listRows) list.push(paint("muted", `${pad}(+${hidden} earlier /btw)`));
 	shown.forEach((exchange, i) => {
 		const text = `${pad}/btw ${questionLine(exchange.question, inner)}`;
-		list.push(state.selected === hidden + i ? bold(text) : paint("muted", text));
+		list.push(state.selected === start + i ? bold(text) : paint("muted", text));
 	});
 	const marker = selected ? paint("muted", "/btw ") : bold(paint("warning", "/btw "));
 	list.push(`${pad}${marker}${paint("muted", questionLine(question, inner))}`);
