@@ -26,9 +26,9 @@ export function followLastExchange(pi: ExtensionAPI): SessionExchange {
  * Send `prompt` as the replay of the last request on `model`, returning the
  * answer's text. Undefined when there is no capture for `model`, too little
  * output room is left, there is no API key, the call failed, or the reply
- * held no text (the replayed request declares the session's tools, so the
- * model can answer with a tool call), so the caller runs its standalone call
- * instead; an empty string when the caller's own signal aborted it. Throws
+ * called a tool or held no text (the replayed request declares the session's
+ * tools, and text beside a tool call is a preamble, not the answer), so the
+ * caller runs its standalone call instead; an empty string when the caller's own signal aborted it. Throws
  * when `timeoutMs` ran out: the time budget is spent, so a standalone call
  * must not start a second one.
  */
@@ -64,6 +64,6 @@ export async function replaySideCall(
 	options.onUsage(result.usage);
 	if (options.signal.aborted) return "";
 	if (timeout.aborted) throw new Error(`No answer within ${Math.round(options.timeoutMs / 1000)} seconds.`);
-	if (result.stopReason === "aborted" || result.stopReason === "error") return undefined;
+	if (result.stopReason === "aborted" || result.stopReason === "error" || result.stopReason === "toolUse") return undefined;
 	return answerText(result.content) || undefined;
 }

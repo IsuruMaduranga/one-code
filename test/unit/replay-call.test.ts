@@ -49,8 +49,11 @@ describe("replaySideCall", () => {
 		await expect(replaySideCall(ctx, model, exchange(), "q", { signal: new AbortController().signal, timeoutMs: 5, onUsage: () => {} })).rejects.toThrow("No answer within");
 	});
 
-	it("falls back (undefined) when the reply holds no text, such as a tool call", async () => {
-		completeSimple.mockResolvedValue({ role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", id: "t1", name: "read", arguments: {} }], usage: {} });
+	it("falls back (undefined) when the reply calls a tool, even beside text, or holds no text", async () => {
+		const call = { type: "toolCall", id: "t1", name: "read", arguments: {} };
+		completeSimple.mockResolvedValue({ role: "assistant", stopReason: "toolUse", content: [{ type: "text", text: "Let me check." }, call], usage: {} });
+		expect(await replaySideCall(ctx, model, exchange(), "q", { signal: new AbortController().signal, timeoutMs: 1000, onUsage: () => {} })).toBeUndefined();
+		completeSimple.mockResolvedValue(reply("stop"));
 		expect(await replaySideCall(ctx, model, exchange(), "q", { signal: new AbortController().signal, timeoutMs: 1000, onUsage: () => {} })).toBeUndefined();
 	});
 
