@@ -146,6 +146,10 @@ describe("renderBtwPanel", () => {
 		expect(plain(render({ body: { kind: "answer", text: "" } }))).toContain("(no answer)");
 	});
 
+	it("offers no copy or fork for an empty answer", () => {
+		expect(render({ canFork: true, body: { kind: "answer", text: "" } }).at(-1)).toBe("  ↑/↓ to scroll · Esc to close");
+	});
+
 	it("says Forking… while a fork starts, and confirms a copy", () => {
 		expect(render({ forking: true }).at(-1)).toBe("  Forking…");
 		const state = initialBtwState();

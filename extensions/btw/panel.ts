@@ -233,7 +233,8 @@ export function renderBtwPanel(input: BtwPanelInput, theme?: unknown): string[] 
 	const indent = " ".repeat(ANSWER_INDENT);
 	const visible = answerLines.slice(state.offset, state.offset + capacity).map((line) => `${indent}${line}`);
 
-	const hasAnswer = Boolean(selected) || body.kind === "answer";
+	const currentAnswer = body.kind === "answer" && body.text !== "";
+	const hasAnswer = Boolean(selected) || currentAnswer;
 	let hint: string;
 	if (input.forking) {
 		hint = paint("muted", "Forking…");
@@ -242,7 +243,7 @@ export function renderBtwPanel(input: BtwPanelInput, theme?: unknown): string[] 
 		if (history.length > 0) parts.push(paint("muted", "⇧←/→ to browse"));
 		else if (body.kind !== "loading") parts.push(paint("muted", "↑/↓ to scroll"));
 		if (hasAnswer) parts.push(state.copied ? paint("success", "Copied to clipboard") : paint("muted", "c to copy"));
-		if (input.canFork && !selected && body.kind === "answer") parts.push(paint("muted", "f to fork"));
+		if (input.canFork && !selected && currentAnswer) parts.push(paint("muted", "f to fork"));
 		if (history.length > 0) parts.push(paint("muted", "x to clear history"));
 		parts.push(paint("muted", "Esc to close"));
 		hint = parts.join(paint("muted", " · "));

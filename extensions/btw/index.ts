@@ -27,6 +27,7 @@
  * subagent through the subagents extension (lib/btw-fork.ts).
  */
 
+import { existsSync } from "node:fs";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
@@ -148,6 +149,11 @@ export default function btwExtension(pi: ExtensionAPI) {
 			undefined,
 			(usage) => recordUsage(pi, "btw", usage),
 		);
+		// completeSimple reports a failure (a network error, a timeout) in the
+		// reply instead of throwing; its empty text is not an answer.
+		if (signal.aborted) return "";
+		if (result.stopReason === "aborted") throw new Error(`No answer within ${BTW_TIMEOUT_MS / 1000} seconds.`);
+		if (result.stopReason === "error") throw new Error(result.errorMessage || "The model returned an error.");
 		return answerText(result.content);
 	}
 
@@ -182,7 +188,7 @@ export default function btwExtension(pi: ExtensionAPI) {
 			// The earlier exchanges this panel lists and browses; the current one
 			// joins `history` when it lands, so the next /btw lists it.
 			let earlier = [...history];
-			const view: { answer?: string; error?: string; forking?: boolean } = {};
+			const view: { answer?: string; error?: string; forking?: boolean; canFork?: boolean } = {};
 			const bodyState = (): BtwBody =>
 				view.error !== undefined ? { kind: "error", message: view.error } : view.answer !== undefined ? { kind: "answer", text: view.answer } : { kind: "loading" };
 			// Shown after the panel closes: a started fork, or why it could not start.
@@ -208,6 +214,10 @@ export default function btwExtension(pi: ExtensionAPI) {
 						if (controller.signal.aborted) return;
 						view.answer = answer;
 						if (answer) history.push({ question, answer });
+						// A fork clones the session file, which pi writes with the first
+						// assistant reply: before that, `f` could only fail.
+						const sessionFile = ctx.sessionManager.getSessionFile();
+						view.canFork = Boolean(sessionFile && existsSync(sessionFile));
 					} catch (error) {
 						if (controller.signal.aborted) return;
 						view.error = error instanceof Error ? error.message : String(error);
@@ -244,7 +254,7 @@ export default function btwExtension(pi: ExtensionAPI) {
 								body: bodyState(),
 								width,
 								height,
-								canFork: true,
+								canFork: view.canFork,
 								forking: view.forking,
 								renderAnswer: prose ? markdownAnswer(prose) : undefined,
 							},
@@ -275,7 +285,7 @@ export default function btwExtension(pi: ExtensionAPI) {
 								return;
 							case "fork":
 								// The current answer only, not one browsed from the history.
-								if (state.selected === null && view.answer) fork(view.answer);
+								if (state.selected === null && view.answer && view.canFork) fork(view.answer);
 								return;
 							case "clear":
 								if (earlier.length === 0) return;
