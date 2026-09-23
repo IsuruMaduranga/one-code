@@ -15,8 +15,8 @@ import {
 	renderTranscript,
 	spinnerVerb,
 	STRIP_LINGER_MS,
-	wrapProse,
 } from "../../extensions/subagents/panel-render.ts";
+import { wrapProse } from "../../extensions/lib/tui-render.ts";
 import { decodeStripKey } from "../../extensions/subagents/panel-keys.ts";
 import { resolvePiTuiEntry } from "../../extensions/subagents/prose.ts";
 import { existsSync } from "node:fs";

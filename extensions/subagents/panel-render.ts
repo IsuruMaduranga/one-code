@@ -6,8 +6,7 @@
  * index.ts; this file owns layout only, mirroring workflow/viewer.ts.
  */
 
-import { cutPlainText as cut, formatDuration, splitCell, splitRow, visibleWidth } from "../lib/tui-render.ts";
-import { hardWrapColumns } from "../lib/text-width.ts";
+import { cutPlainText as cut, formatDuration, splitCell, splitRow, visibleWidth, wrapProse } from "../lib/tui-render.ts";
 import { formatTokenCount } from "./usage.ts";
 import { type LiveRun, type LiveStatus, streamingText, type TranscriptBlock } from "./live-runs.ts";
 
@@ -184,43 +183,6 @@ const SPINNER_VERBS = ["Working", "Moseying", "Gusting", "Scampering", "Percolat
 export function spinnerVerb(startedAt: number, now: number): string {
 	const seconds = Math.max(0, Math.floor((now - startedAt) / 1000));
 	return SPINNER_VERBS[Math.floor(seconds / 3) % SPINNER_VERBS.length];
-}
-
-/**
- * Word-aware wrap for prose (task text, assistant text): breaks at spaces,
- * hard-breaking only words longer than the width; preserves blank lines. Plain
- * text in, plain lines out — painting happens after, per line.
- */
-export function wrapProse(text: string, width: number): string[] {
-	const columns = Math.max(1, width);
-	const out: string[] = [];
-	for (const raw of text.replace(/\r\n/g, "\n").split("\n")) {
-		if (raw.trim() === "") {
-			out.push("");
-			continue;
-		}
-		let line = "";
-		for (const word of raw.split(" ")) {
-			if (visibleWidth(word) > columns) {
-				// A word wider than the screen (path, hash): flush, then hard-break it.
-				// The last chunk becomes the running line so later words can join it.
-				if (line) out.push(line);
-				const chunks = hardWrapColumns(word, columns);
-				line = chunks.pop() ?? "";
-				out.push(...chunks);
-				continue;
-			}
-			const candidate = line ? `${line} ${word}` : word;
-			if (visibleWidth(candidate) > columns) {
-				out.push(line);
-				line = word;
-			} else {
-				line = candidate;
-			}
-		}
-		out.push(line);
-	}
-	return out;
 }
 
 /**

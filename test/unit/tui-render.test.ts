@@ -8,6 +8,7 @@ import {
 	scheduledTaskComponent,
 	collapseLines,
 	customMessageText,
+	dimMarkedLine,
 	linesComponent,
 	notificationBody,
 	notificationComponent,
@@ -499,3 +500,17 @@ describe("stripReminderBlocks", () => {
 	});
 });
 
+
+describe("dimMarkedLine", () => {
+	const plain = (lines: string[]) => lines.map((line) => line.replace(/\x1b\[[0-9;]*m/g, ""));
+
+	it("keeps short text on one line after the mark", () => {
+		expect(plain(dimMarkedLine(undefined, "※", "recap: short").render(40))).toEqual(["※ recap: short"]);
+	});
+
+	it("word-wraps long text under itself instead of cutting it at the edge", () => {
+		const lines = plain(dimMarkedLine(undefined, "※", "recap: the overall goal is bumping pi, and the one next action is the commit").render(24));
+		expect(lines).toEqual(["※ recap: the overall", "  goal is bumping pi,", "  and the one next", "  action is the commit"]);
+		for (const line of lines) expect(line.length).toBeLessThanOrEqual(24);
+	});
+});

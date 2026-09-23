@@ -252,6 +252,43 @@ export function wrapPlainText(text: string, width: number): string[] {
 }
 
 /**
+ * Word-aware wrap for prose (task text, assistant text, the dim transcript lines): breaks at spaces,
+ * hard-breaking only words longer than the width; preserves blank lines. Plain
+ * text in, plain lines out — painting happens after, per line.
+ */
+export function wrapProse(text: string, width: number): string[] {
+	const columns = Math.max(1, width);
+	const out: string[] = [];
+	for (const raw of text.replace(/\r\n/g, "\n").split("\n")) {
+		if (raw.trim() === "") {
+			out.push("");
+			continue;
+		}
+		let line = "";
+		for (const word of raw.split(" ")) {
+			if (visibleWidth(word) > columns) {
+				// A word wider than the screen (path, hash): flush, then hard-break it.
+				// The last chunk becomes the running line so later words can join it.
+				if (line) out.push(line);
+				const chunks = hardWrapColumns(word, columns);
+				line = chunks.pop() ?? "";
+				out.push(...chunks);
+				continue;
+			}
+			const candidate = line ? `${line} ${word}` : word;
+			if (visibleWidth(candidate) > columns) {
+				out.push(line);
+				line = word;
+			} else {
+				line = candidate;
+			}
+		}
+		out.push(line);
+	}
+	return out;
+}
+
+/**
  * Cut a painted line to `width` terminal columns without splitting ANSI escape
  * sequences or a wide/emoji grapheme, ending with an ellipsis and a reset so
  * truncation cannot leak a colour into the next line. pi-tui *crashes* the
@@ -296,13 +333,18 @@ export function linesComponent(build: (width: number) => string[]): TuiComponent
 }
 
 /**
- * A single dim transcript line led by a dim mark ("✻ Cooked for 5m 12s",
+ * A dim transcript line led by a dim mark ("✻ Cooked for 5m 12s",
  * "※ recap: …") — the shared shape behind the turn-duration and recap
- * display-only entries. Width-memoized via linesComponent.
+ * display-only entries. Text wider than the terminal word-wraps under itself
+ * (a hanging indent past the mark) instead of being cut at the edge.
+ * Width-memoized via linesComponent.
  */
 export function dimMarkedLine(theme: unknown, mark: string, text: string): TuiComponent {
 	const paint = safeThemePaint(theme);
-	return linesComponent(() => [`${paint("dim", mark)} ${paint("dim", text)}`]);
+	return linesComponent((width) => {
+		const indent = visibleWidth(mark) + 1;
+		return wrapProse(text, width - indent).map((line, index) => `${index === 0 ? paint("dim", mark) : " ".repeat(indent - 1)} ${paint("dim", line)}`);
+	});
 }
 
 /**
