@@ -55,7 +55,7 @@ import { analyzeShellCommand, type ShellEvidence } from "../auto-mode/shell-anal
 import { powershellReadOnly } from "./powershell-rules.ts";
 import { isShellTool } from "./matcher.ts";
 import { gitStatusOutput } from "../lib/git.ts";
-import { gitStatusMeta, gitStatusMetaArgs, reachesHiddenWork, wantsGitStatusMeta } from "../auto-mode/git-status-meta.ts";
+import { gitStatusMeta, gitStatusMetaArgs, reachesIgnoredFiles, wantsGitStatusMeta } from "../auto-mode/git-status-meta.ts";
 import { projectMemoryDir } from "../lib/memory.ts";
 import { sessionResultsDir } from "../lib/persisted-output.ts";
 import { sessionScratchpadDir } from "../lib/scratchpad.ts";
@@ -866,7 +866,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			// `monitor` runs a shell command exactly as `bash` does.
 			const shell = normalizedTool === "powershell" ? "powershell" : normalizedTool === "bash" || normalizedTool === "monitor" ? "bash" : undefined;
 			if (shell && recordedCommand && wantsGitStatusMeta(shell, recordedCommand)) {
-				const porcelain = await gitStatusOutput(callCwd, gitStatusMetaArgs(reachesHiddenWork(shell, recordedCommand)));
+				const porcelain = await gitStatusOutput(callCwd, gitStatusMetaArgs(reachesIgnoredFiles(shell, recordedCommand)));
 				const gitStatus = porcelain === undefined ? undefined : gitStatusMeta(porcelain);
 				if (gitStatus) transcript.push({ kind: "meta", gitStatus });
 			}

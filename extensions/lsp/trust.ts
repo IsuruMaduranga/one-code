@@ -85,7 +85,9 @@ export function createLspTrustGate(deps: {
 		async allowed(serverRoot: string, confirm?: (projectRoot: string) => Promise<boolean>): Promise<boolean> {
 			const root = projectRoot(serverRoot);
 			if (sessionTrust.get(root) === true || trustedServerRoots.has(serverRoot)) return true;
-			if (isTrusted(serverRoot)) {
+			// The project root is what a "yes" persists; a linked worktree outside
+			// its main checkout is not under it, so both are checked.
+			if (isTrusted(serverRoot) || isTrusted(root)) {
 				trustedServerRoots.add(serverRoot);
 				return true;
 			}

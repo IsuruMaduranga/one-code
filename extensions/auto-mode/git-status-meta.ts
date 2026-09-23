@@ -101,12 +101,11 @@ export function wantsGitStatusMeta(tool: "bash" | "powershell", command: string)
 const GIT_CLEAN_IGNORED = /\bgit\s+clean\b[^;&|\n]*[ \t]-[a-zA-Z]*[xX]/i;
 
 /**
- * Whether this shell command can also delete what `git status` normally hides
- * and git cannot restore: ignored files (`.env`, local builds) and a
- * submodule's own work. Every non-git removal category can; of the git ones,
- * only a `git clean -x`/`-X`.
+ * Whether this shell command can delete ignored files (`.env`, local builds),
+ * which `git status` hides and git cannot restore. Every non-git removal
+ * category can; of the git ones, only a `git clean -x`/`-X`.
  */
-export function reachesHiddenWork(tool: "bash" | "powershell", command: string): boolean {
+export function reachesIgnoredFiles(tool: "bash" | "powershell", command: string): boolean {
 	const { text, categories } = matchedCategories(tool, command);
 	return categories.some((category) =>
 		category === "git_clean_force" ? GIT_CLEAN_IGNORED.test(text) : GIT_STATUS_CATEGORIES.has(category) && !category.startsWith("git_"),
@@ -115,15 +114,17 @@ export function reachesHiddenWork(tool: "bash" | "powershell", command: string):
 
 /**
  * The `git status` arguments for the line (the harness adds its own `-c`
- * hardening): Claude Code's, or for a command that reaches hidden work
- * (`reachesHiddenWork`) a wider set (PR #8 review) where a dirty submodule
- * counts as modified and ignored entries are listed (`!!`, one per ignored
- * directory) so the line can withhold `{"clean":true}`.
+ * hardening), wider than Claude Code's `--ignore-submodules=dirty` (PR #8
+ * review). A dirty submodule always counts as modified: `rm -rf` deletes its
+ * work, and `git reset --hard --recurse-submodules` (or `submodule.recurse`,
+ * which the command line does not show) discards it. Ignored entries (`!!`,
+ * one per ignored directory) are listed only for a command that deletes them
+ * (`reachesIgnoredFiles`), so the line can withhold `{"clean":true}` there
+ * and keep it for a `git reset --hard` in a repo with an ignored `.env`.
  */
-export function gitStatusMetaArgs(reachesHidden: boolean): readonly string[] {
-	return reachesHidden
-		? ["status", "--porcelain", "--ignore-submodules=none", "--untracked-files=normal", "--ignored=matching"]
-		: ["status", "--porcelain", "--ignore-submodules=dirty", "--untracked-files=normal"];
+export function gitStatusMetaArgs(reachesIgnored: boolean): readonly string[] {
+	const args = ["status", "--porcelain", "--ignore-submodules=none", "--untracked-files=normal"];
+	return reachesIgnored ? [...args, "--ignored=matching"] : args;
 }
 
 /** The line's gitStatus value: `{clean: true}`, or the tree's counts. */

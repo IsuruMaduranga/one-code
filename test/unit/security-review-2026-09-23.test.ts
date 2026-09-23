@@ -389,6 +389,19 @@ describe("PR #8 review follow-ups", () => {
 		expect(gate.trust(join(cwd, "src"))).toBe(cwd);
 	});
 
+	it("honours a project's stored trust in a linked worktree outside it", async () => {
+		const store = join(root, "trust.json");
+		const worktree = join(root, "worktree");
+		persistLspTrust(cwd, store);
+		// A later session: nothing in memory, the worktree maps to its main checkout.
+		const gate = createLspTrustGate({
+			projectRoot: (dir) => (dir.startsWith(worktree) ? cwd : dir),
+			isTrusted: (serverRoot) => isLspRootTrusted(serverRoot, store),
+			persist: (projectRoot) => persistLspTrust(projectRoot, store),
+		});
+		expect(await gate.allowed(join(worktree, "crate"))).toBe(true);
+	});
+
 	posixOnly("lists ignored files and dirty submodules so a clean line is not claimed over them", async () => {
 		execFileSync("git", ["init", "-q"], { cwd });
 		writeFileSync(join(cwd, ".gitignore"), ".env\n");

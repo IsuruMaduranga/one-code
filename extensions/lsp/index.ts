@@ -135,7 +135,25 @@ export default function lspExtension(pi: ExtensionAPI) {
 	const MAX_RESPAWNS = 2;
 	const respawns = new Map<string, number>();
 
-	const clientFor = async (target: ResolvedTarget, ctx: ExtensionContext): Promise<LspClient | undefined> => {
+	/**
+	 * One startup per server key at a time: overlapping calls (two edits, or a
+	 * diagnostics wait racing an edit) share it, since both would otherwise
+	 * pass the empty-map check across the trust and backoff awaits and spawn a
+	 * second server whose predecessor shutdown can no longer reach.
+	 */
+	const starting = new Map<string, Promise<LspClient | undefined>>();
+	const clientFor = (target: ResolvedTarget, ctx: ExtensionContext): Promise<LspClient | undefined> => {
+		const running = clients.get(target.key);
+		if (running?.isRunning) return Promise.resolve(running);
+		let pending = starting.get(target.key);
+		if (!pending) {
+			pending = startClient(target, ctx).finally(() => starting.delete(target.key));
+			starting.set(target.key, pending);
+		}
+		return pending;
+	};
+
+	const startClient = async (target: ResolvedTarget, ctx: ExtensionContext): Promise<LspClient | undefined> => {
 		const { key } = target;
 		if (startFailures.has(key)) return undefined;
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { destructiveCategory, gitStatusMeta, gitStatusMetaArgs, reachesHiddenWork, wantsGitStatusMeta } from "../../extensions/auto-mode/git-status-meta.ts";
+import { destructiveCategory, gitStatusMeta, gitStatusMetaArgs, reachesIgnoredFiles, wantsGitStatusMeta } from "../../extensions/auto-mode/git-status-meta.ts";
 import { renderTranscript } from "../../extensions/auto-mode/transcript.ts";
 
 describe("the transcript's gitStatus line", () => {
@@ -36,19 +36,21 @@ describe("the transcript's gitStatus line", () => {
 		// A dirty submodule (--ignore-submodules=none) is a modification.
 		expect(gitStatusMeta(" M vendor/sub\n")).toEqual({ staged: 0, modified: 1, untracked: 0 });
 		// Only a command that reaches ignored files asks git to list them.
-		expect(gitStatusMetaArgs(false)).toEqual(["status", "--porcelain", "--ignore-submodules=dirty", "--untracked-files=normal"]);
-		expect(gitStatusMetaArgs(true)).toContain("--ignored=matching");
+		// Every command sees dirty submodules (a reset can recurse into them);
+		// only a command that deletes ignored files asks git to list those.
+		expect(gitStatusMetaArgs(false)).toEqual(["status", "--porcelain", "--ignore-submodules=none", "--untracked-files=normal"]);
+		expect(gitStatusMetaArgs(true)).toEqual([...gitStatusMetaArgs(false), "--ignored=matching"]);
 	});
 
-	it("knows which commands reach ignored files and submodule work", () => {
+	it("knows which commands reach ignored files", () => {
 		for (const command of ["rm -rf dist", "rm -f .env", "git clean -fdx", "git clean -fX", "ls && rm -r build"]) {
-			expect(reachesHiddenWork("bash", command), command).toBe(true);
+			expect(reachesIgnoredFiles("bash", command), command).toBe(true);
 		}
 		for (const command of ["git reset --hard", "git checkout .", "git restore .", "git clean -fd", "git clean -nfx"]) {
-			expect(reachesHiddenWork("bash", command), command).toBe(false);
+			expect(reachesIgnoredFiles("bash", command), command).toBe(false);
 		}
-		expect(reachesHiddenWork("powershell", "Remove-Item -Recurse -Force dist")).toBe(true);
-		expect(reachesHiddenWork("powershell", "git reset --hard")).toBe(false);
+		expect(reachesIgnoredFiles("powershell", "Remove-Item -Recurse -Force dist")).toBe(true);
+		expect(reachesIgnoredFiles("powershell", "git reset --hard")).toBe(false);
 	});
 
 	it("renders directly above the command it describes", () => {
