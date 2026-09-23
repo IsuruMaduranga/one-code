@@ -7,7 +7,7 @@
  * pi.exec is deliberately not used: it hardcodes shell:false and gives the
  * child no stdin, while Claude Code hooks are shell command strings that read
  * a JSON payload from stdin. (Ported from pi-code's runHookCommand, MIT — see
- * docs/decisions.md.)
+ * working-docs/decisions.md.)
  *
  * The interpreter is Claude Code's: bash (Git Bash on Windows, honouring
  * `CLAUDE_CODE_GIT_BASH_PATH`) unless the hook says `shell: "powershell"`, or
@@ -41,7 +41,7 @@
  *   SIGCHLD-driven exit callback; with the process handle unref'd the loop
  *   counted itself empty and node exited 0 mid-tool, silently, before the
  *   hook's `close` ever fired — measured at ~55% of runs with a trivial
- *   `exit 0` hook (docs/one-shot-lsp-event-loop-drain.md has the same
+ *   `exit 0` hook (working-docs/one-shot-lsp-event-loop-drain.md has the same
  *   mechanism for the LSP client). A ref'd child holds the loop until `close`.
  */
 

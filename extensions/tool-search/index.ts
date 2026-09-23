@@ -162,7 +162,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	// the eager list, re-caching everything from the tools block down — is
 	// demoted back to deferred and loaded through `tool_reference` blocks in the
 	// tool_search result that activated it (lib/deferred.ts stabilizeDeferredTools
-	// has the rules; docs/decisions/caching.md the measurements).
+	// has the rules; working-docs/decisions/caching.md the measurements).
 	pi.on("before_provider_request", (event, ctx) => {
 		if (!supportsToolReferences(ctx.model as { provider?: string; id?: string } | undefined)) return undefined;
 		if (!looksLikeAnthropicRequest(event.payload)) return undefined;

@@ -10,7 +10,7 @@
  * beat a 2026 model priced below the floor (V4 Flash). A model's *generation* is
  * measured against its vendor family's newest release, never against today, so
  * a family that ships rarely is not aged by the calendar.
- * docs/features/tiering/plan.md (Phase 1), docs/decisions/model-tiers.md.
+ * working-docs/features/tiering/plan.md (Phase 1), working-docs/decisions/model-tiers.md.
  *
  * Lookups resolve OpenRouter's `~vendor/id` redirect aliases and `:variant`
  * endpoints through their base id, and — since 2026-09-11 — BORROW across
@@ -23,7 +23,7 @@
  * April `deepseek-v4-flash` vs DeepSeek's July one) borrows nothing. Only the
  * date is borrowed, never the tool-call flag. A row models.dev does not know
  * anywhere has no facts and gets the price-and-name behaviour that preceded
- * this module. docs/decisions/model-tiers.md (2026-09-11).
+ * this module. working-docs/decisions/model-tiers.md (2026-09-11).
  */
 
 import { readFileSync } from "node:fs";

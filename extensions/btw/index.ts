@@ -66,7 +66,7 @@ export default function btwExtension(pi: ExtensionAPI) {
 	// The controller for an open panel's in-flight call. Aborted when the session
 	// is replaced or torn down, so a late resolve cannot repaint a disposed `tui`
 	// or record usage on a stale `pi` (the crash the subagents panel once hit —
-	// docs/decisions/tools.md lifecycle review).
+	// working-docs/decisions/tools.md lifecycle review).
 	let inFlight: AbortController | undefined;
 	// Bumped when the session is replaced or torn down, so a fork request that
 	// settles afterwards touches neither the closed panel nor a stale ctx.
@@ -122,7 +122,7 @@ export default function btwExtension(pi: ExtensionAPI) {
 		const context = trimToTurnBoundary(withoutSystemMessages(capturedMessages ?? []));
 		// btw runs on a cheap, possibly text-only reader and answers a text question,
 		// so images the conversation carried are stripped before the call
-		// (docs/decisions/model-policy.md).
+		// (working-docs/decisions/model-policy.md).
 		const messages = [
 			...stripImageBlocks(convertToLlm(context)),
 			...before,

@@ -157,7 +157,7 @@ function withBreakpointOnLast<T extends Record<string, unknown>>(items: T[], cac
  * An Anthropic request whose `tools` array is byte-identical to request 1's,
  * whatever `tool_search` has loaded since — the client side of Anthropic's
  * deferred-tool contract, which pi 0.86 no longer supplies for One Code
- * (rationale and measurements: docs/decisions/caching.md "Loaded deferred
+ * (rationale and measurements: working-docs/decisions/caching.md "Loaded deferred
  * tools stay deferred on the wire", findings §7).
  *
  * - Every registry tool `isDeferred` that is not eager on the wire is appended

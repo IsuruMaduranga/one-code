@@ -37,7 +37,7 @@ describe("computePresets", () => {
 
 	it("picks the current-generation DeepSeek Flash as the economical main on OpenRouter, not the boundary-priced R1", () => {
 		// pi's bundled OpenRouter catalog rows and prices, 2026-09-10 — the shape that
-		// made /doctor preset balanced name deepseek-r1-0528 (docs/features/tiering/plan.md).
+		// made /doctor preset balanced name deepseek-r1-0528 (working-docs/features/tiering/plan.md).
 		const or = (id: string, input: number) => model("openrouter", `deepseek/${id}`, input, "openai-completions");
 		const catalog = [
 			or("deepseek-chat", 0.32),

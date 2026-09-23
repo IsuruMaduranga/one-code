@@ -7,7 +7,7 @@
  * back in the tool result. The one check the unit suite cannot make: the
  * shell spawn, the permission gate and the provider round trip together, on
  * the machine that runs it. `.github/workflows/live-smoke.yml` runs both
- * shells on windows-latest (docs/features/windows/plan.md, Phase 3 item 7).
+ * shells on windows-latest (working-docs/features/windows/plan.md, Phase 3 item 7).
  *
  *   node test/e2e/live-smoke.mjs --shell bash|powershell [--model <provider/model>] [--timeout <seconds>]
  *

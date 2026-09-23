@@ -7,7 +7,7 @@
  * using Codex with a ChatGPT account"). The auto-mode classifier already learns
  * that on its first call and steps to the next candidate (`ClassifierState.
  * rejected`). Since subagents share the classifier's selection floor
- * (docs/decisions/model-policy.md, 2026-09-11) they land on the same first
+ * (working-docs/decisions/model-policy.md, 2026-09-11) they land on the same first
  * pick — so what one role learns must reach the other, or every session's
  * first subagent fails on a model the classifier already gave up on.
  *

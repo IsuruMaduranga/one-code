@@ -20,7 +20,7 @@ export interface ForkIsolation {
  * entire transcript; without this, a weaker model tends to abandon its assigned
  * task and continue (or confabulate about) the inherited topic — then its output
  * returns to the parent looking like independent confirmation. See
- * docs/features/tools/records/tool-ambiguity-hardening.md (fork confabulation).
+ * working-docs/features/tools/records/tool-ambiguity-hardening.md (fork confabulation).
  *
  * With `isolation`, the fork is told that its working directory moved: the
  * inherited system prompt and transcript name the parent's checkout in every

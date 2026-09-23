@@ -1,7 +1,7 @@
 /**
  * Classifier payload assembly and stage-verdict parsing (pure).
  *
- * The payload is Claude Code's shape (docs/decisions/auto-mode.md, P4/P5):
+ * The payload is Claude Code's shape (working-docs/decisions/auto-mode.md, P4/P5):
  *   system = <ruleset with Environment spliced> + <Session Context>
  *   user   = <CLAUDE.md framing> + <transcript> + <stage final instruction>
  * The two stages share system+framing+transcript byte-for-byte and differ only

@@ -93,7 +93,7 @@ export function findCellIndex(notebook: Notebook, cellId: string): number {
 
 /**
  * The "fail loud, name the fix" error for an id that resolves to nothing
- * (docs/decisions/tools.md): which ids exist, and the two ways to add a cell
+ * (working-docs/decisions/tools.md): which ids exist, and the two ways to add a cell
  * without naming one.
  */
 export function noSuchCellError(notebook: Notebook, cellId: string): Error {

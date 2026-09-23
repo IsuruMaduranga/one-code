@@ -12,7 +12,7 @@
  * `unmatched`, so a hallucinated name cannot borrow a real HARD rule's authority.
  * The rule's own name is what the user sees; the model's wording is kept as
  * commentary that is never mistaken for fact. This is decision 1 in
- * docs/decisions/auto-mode.md, re-expressed against CC's category scheme in
+ * working-docs/decisions/auto-mode.md, re-expressed against CC's category scheme in
  * place of our old H1/S4/A2 ids.
  */
 

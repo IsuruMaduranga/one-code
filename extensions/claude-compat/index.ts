@@ -11,7 +11,7 @@
  * It also points discovery at the catalog of skills bundled with this package
  * (`<package>/skills`) — Claude Code's self-contained built-in skills, which
  * ship inside its binary rather than on disk, so nothing else would surface
- * them. See docs/decisions/skills-plugins.md and docs/findings (the extraction
+ * them. See working-docs/decisions/skills-plugins.md and working-docs/findings (the extraction
  * process is recorded in .claude/skills/extract-cc-skills/).
  *
  * CLAUDE.md needs no handling — pi discovers it natively alongside AGENTS.md.
@@ -47,7 +47,7 @@ export function claudeResourcePaths(
 			// The bundled catalog is listed LAST so it loses a name collision:
 			// pi keeps the first-loaded skill for a given name, so a user or
 			// project skill of the same name wins and the bundled one is the
-			// fallback (see docs/decisions/skills-plugins.md).
+			// fallback (see working-docs/decisions/skills-plugins.md).
 			...(bundledSkillsDir ? [bundledSkillsDir] : []),
 		],
 		promptPaths: [join(claudeDir, "commands"), join(cwd, ".claude", "commands")],

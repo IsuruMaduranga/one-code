@@ -4,7 +4,7 @@
  * tool-calling flag for every row of pi's bundled model catalog that models.dev
  * knows about. pi's generated catalog strips both fields (findings §9), and the
  * tier classifier needs the release date to tell a model's generation
- * (docs/features/tiering/plan.md, Phase 1).
+ * (working-docs/features/tiering/plan.md, Phase 1).
  *
  * Run after every pi version bump (the catalog changes with it):
  *

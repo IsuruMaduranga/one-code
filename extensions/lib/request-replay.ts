@@ -3,7 +3,7 @@
  * so a side call (btw, recap, compaction) reads the prompt cache the session
  * wrote. Claude Code sends these calls the same way: the main request's
  * `system`, `tools` and `messages` unchanged, the final assistant reply, then
- * the side prompt (docs/decisions/caching.md "Side calls replay the last
+ * the side prompt (working-docs/decisions/caching.md "Side calls replay the last
  * request").
  *
  * The request cannot be rebuilt from pi's APIs: tool-search reshapes the wire

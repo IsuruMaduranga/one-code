@@ -9,7 +9,7 @@
  * Claude Code never has to explain: which provider is ready, which model each
  * role (main, subagents, classifier, reader) resolves to and why, what of the
  * imported Claude Code configuration is honoured, and which external programs
- * are missing. Rationale: docs/decisions/doctor.md.
+ * are missing. Rationale: working-docs/decisions/doctor.md.
  *
  * No pi imports. The wiring (index.ts, cli.ts) gathers the live inputs and hands
  * them to `buildDoctorReport`; everything below is deterministic given them.

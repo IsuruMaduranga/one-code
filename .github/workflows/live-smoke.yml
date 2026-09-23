@@ -1,7 +1,7 @@
 # Live smoke against a real model: One Code drives the bash tool (Git Bash on
 # Windows) and the PowerShell tool end to end on windows-latest, and the bash
 # tool on ubuntu-latest, through `test/e2e/live-smoke.mjs`
-# (docs/features/windows/ Phase 3 item 7; docs/features/linux/ Phase 1). Needs
+# (working-docs/features/windows/ Phase 3 item 7; working-docs/features/linux/ Phase 1). Needs
 # the OPEN_ROUTER_API_KEY repository secret; the default model is the cheap
 # one used for testing. Runs on demand and when the shell-facing code changes
 # on master — never in the unit-test matrix (ci.yml), which stays key-free.

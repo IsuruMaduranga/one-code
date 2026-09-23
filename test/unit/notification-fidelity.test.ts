@@ -4,7 +4,7 @@
  * Every expected string below was read out of real Claude Code transcripts on
  * this machine (`~/.claude/projects/**\/*.jsonl`, versions 2.1.273–2.1.278) or
  * the shipped binary (`~/.local/share/claude/versions/2.1.278`) — the
- * procedure is in docs/findings/24-claude-code-notifications.md. Mirrors
+ * procedure is in working-docs/findings/24-claude-code-notifications.md. Mirrors
  * auto-mode-prompt-fidelity.test.ts: a drift here is a parity regression, not
  * a wording preference. The one literal NOT verified is the workflow summary
  * (see `workflowSummary`).

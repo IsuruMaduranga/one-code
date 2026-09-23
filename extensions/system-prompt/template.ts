@@ -29,7 +29,7 @@ import { midBundle } from "./tiers/mid.ts";
  * carries, so splitting the text would invent a distinction CC doesn't make. The
  * tiers stay separate for tool-surface (search tools at `tiny` only) and model
  * routing, and can diverge later without reclassifying models. `tiny` = the
- * max-scaffolding `lowBundle`. See `docs/decisions/model-tiers.md`.
+ * max-scaffolding `lowBundle`. See `working-docs/decisions/model-tiers.md`.
  */
 const BUNDLES: Record<PromptTier, PromptBundle> = {
 	frontier: frontierBundle,

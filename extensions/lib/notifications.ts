@@ -12,7 +12,7 @@
  *    preamble, then every report line indented two spaces (a frame-like line at
  *    column zero inside the report is thereby forged). Its completion is a
  *    separate kind=agent `<task-notification>` whose `<result>` only points at
- *    that message — CC's two-message split (docs/decisions/subagents-workflows.md).
+ *    that message — CC's two-message split (working-docs/decisions/subagents-workflows.md).
  *
  * Wakeups are neither: CC re-invokes the session with the scheduled prompt
  * verbatim (findings §21), so `background/wakeup.ts` sends the prompt as-is.
@@ -25,7 +25,7 @@
  * applies it at dispatch (`frameForDelivery`), never the producers.
  *
  * Every literal below was read out of real CC transcripts and the shipped
- * 2.1.278 binary (docs/findings/24-claude-code-notifications.md) and is locked
+ * 2.1.278 binary (working-docs/findings/24-claude-code-notifications.md) and is locked
  * by test/unit/notification-fidelity.test.ts. The delivery engine
  * (`createTaskNotifier`, further down) is unchanged by the frame shape.
  */
@@ -154,7 +154,7 @@ export type HandBackVerdict = { kind: "blocked"; reason: string } | { kind: "una
  * provider body, a stack), and this is the choke point where it enters the
  * model-facing warning, so it must not go in unbounded. The clip is a bound on
  * a diagnostic clause, not on output the model works from, so it is not
- * persisted (docs/decisions/subagents-workflows.md, 2026-09-21); the
+ * persisted (working-docs/decisions/subagents-workflows.md, 2026-09-21); the
  * `unavailable` variant marks a clipped reason with an ellipsis, the `blocked`
  * one stays byte-exact with CC.
  */
@@ -278,7 +278,7 @@ export function monitorEndedSummary(description: string, status: TaskStatus, pro
  * `Workflow "NAME" finished` — UNVERIFIED: the 2.1.278 binary holds no local
  * workflow completion summary (only remote/error variants) and no transcript
  * on this machine carries one, so this mirrors the agent shape
- * (docs/features/notifications/plan.md, Deviations).
+ * (working-docs/features/notifications/plan.md, Deviations).
  */
 export function workflowSummary(name: string, status: TaskStatus, reason?: string): string {
 	const suffix = reason ? `: ${reason}` : "";
@@ -580,7 +580,7 @@ export const DEFAULT_COALESCE_MS = 250;
  * user message (`sendUserMessage`, source "extension"), which takes the full
  * prompt path; the cost is that this one notification renders as a user bubble.
  * Every later notification goes the custom-message way. Upstream ask:
- * docs/upstream_prs.md #17.
+ * working-docs/upstream_prs.md #17.
  */
 export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOptions = {}): TaskNotifier {
 	interface Pending {

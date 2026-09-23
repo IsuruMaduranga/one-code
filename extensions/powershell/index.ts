@@ -1,6 +1,6 @@
 /**
  * powershell extension — Claude Code's PowerShell tool on top of pi's own
- * `powershell` built-in (docs/decisions/windows.md, findings §22).
+ * `powershell` built-in (working-docs/decisions/windows.md, findings §22).
  *
  * Registering a tool named `powershell` overrides pi's built-in (findings §2),
  * exactly as `extensions/bash` overrides `bash`, and the shared body in

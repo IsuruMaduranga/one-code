@@ -7,7 +7,7 @@
  * Claude Code's auto mode trusts the whole project directory as the agent's
  * sandbox: an in-project `rm` or `git reset --hard` is auto-approved with no
  * classifier call, even when it destroys uncommitted or untracked work git can
- * never restore (confirmed live — see docs/decisions/auto-mode.md). One Code
+ * never restore (confirmed live — see working-docs/decisions/auto-mode.md). One Code
  * keeps the cheap in-project fast path but refuses that specific risk: an
  * in-project destructive action is auto-approved **only when git can put the
  * bytes back** — the target is tracked and clean (whole-tree ops: the entire

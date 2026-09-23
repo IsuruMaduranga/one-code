@@ -4,7 +4,7 @@
  * The /mcp panel's Disable/Enable action persists across sessions here rather
  * than by mutating the user's `~/.claude.json` or a plugin's `.mcp.json`: those
  * are Claude Code's / a plugin's config, which One Code only ever reads (the
- * "own state, borrowed config" rule — docs/decisions/memory-state.md). A
+ * "own state, borrowed config" rule — working-docs/decisions/memory-state.md). A
  * disabled server is still discovered and listed; the mcp extension just skips
  * connecting it, and the panel offers Enable to bring it back.
  *

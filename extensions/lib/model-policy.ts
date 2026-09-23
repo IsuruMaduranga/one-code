@@ -18,7 +18,7 @@ export function isClaudeFamilyModel(model: { provider: string; id: string }): bo
  * subagent opens either. A model whose modality is unknown (undefined `input`, as
  * on some opaque/self-hosted providers, or a minimal test stub, or no model at all) reads as
  * text-only here — the safe direction for a gate that only ever ADDS a
- * requirement, never relaxes one. See `docs/decisions/model-policy.md`.
+ * requirement, never relaxes one. See `working-docs/decisions/model-policy.md`.
  */
 export function supportsImageInput(model: { input?: readonly string[] } | undefined): boolean {
 	return Array.isArray(model?.input) && model.input.includes("image");

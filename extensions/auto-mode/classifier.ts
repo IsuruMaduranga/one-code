@@ -1,7 +1,7 @@
 /**
  * The classifier call itself — the one file here that talks to a provider.
  *
- * Claude Code's two-stage formula, reproduced (docs/decisions/auto-mode.md, P4):
+ * Claude Code's two-stage formula, reproduced (working-docs/decisions/auto-mode.md, P4):
  *   Stage 1 grades HARM ONLY (maxTokens 64). severity < 50 → allow, no stage 2.
  *   Stage 2 applies intent + ALLOW (maxTokens 8192, <thinking> CoT) → severity +
  *   <category> (+ our verified <intent>). Both stages share one system prompt and
@@ -9,8 +9,8 @@
  *   a cache hit across stages and calls: pi-ai marks a breakpoint on the last
  *   user block only, so the <transcript> (up to ~15k tokens) is re-read uncached
  *   by stage 2 and by every gated call on Anthropic-style providers. Known,
- *   deferred — docs/decisions/caching.md "Classifier transcript" and
- *   docs/upstream_prs.md #16 (fixable locally via pi-ai's `onPayload`).
+ *   deferred — working-docs/decisions/caching.md "Classifier transcript" and
+ *   working-docs/upstream_prs.md #16 (fixable locally via pi-ai's `onPayload`).
  *
  * A one-shot `completeSimple` per stage rather than an agent session: no tools,
  * no history beyond the transcript it is handed, nothing to be talked into. Every
@@ -257,7 +257,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 		// One provider call. `reasoning`/`temperature` are deliberately omitted: pi
 		// turns thinking off entirely when `reasoning` is absent (what a classifier
 		// wants), and `temperature` is deprecated/unsupported on several models and
-		// fails closed. See docs/decisions/auto-mode.md. The one exception: a model
+		// fails closed. See working-docs/decisions/auto-mode.md. The one exception: a model
 		// that CANNOT disable thinking (catalog-marked, or learned via the
 		// reasoning-mandatory retry below) gets its lowest supported level — the
 		// off-request would 400 and the gate would fail closed on every call.

@@ -7,7 +7,7 @@
  *
  *   UPDATE_TIER_SNAPSHOT=1 npx vitest run test/unit/model-tier-catalog.test.ts
  *
- * docs/features/tiering/plan.md (Phase 1 acceptance).
+ * working-docs/features/tiering/plan.md (Phase 1 acceptance).
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
