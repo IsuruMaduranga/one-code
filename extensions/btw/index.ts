@@ -10,35 +10,39 @@
  *
  * The call is Claude Code's: the session's last provider request replayed
  * unchanged (system, every tool, every message), the reply that answered it,
- * then the reminder and question, so it reads the cache the session wrote
- * (lib/request-replay.ts; the compaction extension publishes the capture).
- * Without a capture for the session model, or on a provider API the replay
- * does not cover, it falls back to a standalone call: the messages the session
- * last sent (captured from the `context` event), an empty system prompt,
+ * the session's earlier side exchanges, then the reminder and question, so it
+ * reads the cache the session wrote (lib/request-replay.ts; the compaction
+ * extension publishes the capture). Without a capture for the session model,
+ * or on a provider API the replay does not cover, it falls back to a
+ * standalone call: the messages the session last sent (captured from the
+ * `context` event), the earlier side exchanges, an empty system prompt,
  * name-only tool stubs so a history carrying tool_use blocks stays valid on
  * strict providers, and withReasoningFallback for models that cannot disable
  * thinking. Both run on the SESSION model: a side question deserves the same
  * quality as the main conversation.
  *
- * Deviations from CC, logged in docs/decisions/btw.md: the exchange is stateless
- * (each `/btw` sees only the shared main context, never a prior `/btw` — CC
- * keeps a side-session; the "one-off, no follow-up" framing holds either way);
- * `f to fork` is omitted (pi's `ctx.fork` branches from a session entry, not
- * from an injected side exchange).
+ * Like Claude Code, the session keeps a side history: each answered question
+ * is threaded into the next one and listed in the panel, where it can be
+ * browsed and cleared. `f` forks the current answer into a background fork
+ * subagent through the subagents extension (lib/btw-fork.ts).
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { convertToLlm, copyToClipboard, type ExtensionAPI, type ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { ARGUMENT_HINT_CHANNEL, type ArgumentHint } from "../lib/argument-hints.ts";
+import { requestBtwFork } from "../lib/btw-fork.ts";
 import { notifyOrPrint, printAnswer } from "../lib/headless-output.ts";
 import { withReasoningFallback } from "../lib/model-policy.ts";
 import { followLastExchange, replaySideCall } from "../lib/replay-call.ts";
 import { answerText, stripImageBlocks, toolStubs, trimToTurnBoundary, withoutSystemMessages } from "../lib/side-call.ts";
 import { boundedDockHeight, truncateLine } from "../lib/tui-render.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
+import type { ProseRenderer } from "../subagents/panel-render.ts";
+import { createMarkdownProse } from "../subagents/prose.ts";
 import { applyBtwKey, type BtwBody, BTW_MAX_HEIGHT, decodeBtwKey, initialBtwState, renderBtwPanel } from "./panel.ts";
-import { sideQuestionMessage } from "./prompt.ts";
+import { type BtwExchange, exchangeMessages, historyMessages, sideQuestionMessage } from "./prompt.ts";
 
 const BTW_MAX_TOKENS = 8192;
 const BTW_TIMEOUT_MS = 120_000;
@@ -55,32 +59,58 @@ export default function btwExtension(pi: ExtensionAPI) {
 	// The same request as it went on the wire, and the reply that answered it.
 	const exchange = followLastExchange(pi);
 
+	// The session's answered side questions, oldest first: sent before each new
+	// question and listed in the panel. `x` in the panel clears them.
+	let history: BtwExchange[] = [];
+
 	// The controller for an open panel's in-flight call. Aborted when the session
 	// is replaced or torn down, so a late resolve cannot repaint a disposed `tui`
 	// or record usage on a stale `pi` (the crash the subagents panel once hit —
 	// docs/decisions/tools.md lifecycle review).
 	let inFlight: AbortController | undefined;
+	// Bumped when the session is replaced or torn down, so a fork request that
+	// settles afterwards touches neither the closed panel nor a stale ctx.
+	let sessionEpoch = 0;
 
-	// A new session (including after /clear) shares no context with the old one,
-	// and any in-flight side question is abandoned.
+	// A new session (including after /clear) shares no context with the old one:
+	// its side history starts empty and any in-flight side question is abandoned.
 	pi.on("session_start", () => {
+		sessionEpoch++;
+		// Claude Code's `[question]` placeholder after a bare `/btw` in the prompt.
+		pi.events.emit(ARGUMENT_HINT_CHANNEL, { command: "btw", hint: "[question]" } satisfies ArgumentHint);
 		capturedMessages = undefined;
+		history = [];
 		inFlight?.abort();
 		inFlight = undefined;
 	});
 	pi.on("session_shutdown", () => {
+		sessionEpoch++;
 		inFlight?.abort();
 		inFlight = undefined;
 	});
 
-	/** Run the side question against the session model; returns the answer text. */
-	async function ask(ctx: ExtensionCommandContext, question: string, signal: AbortSignal): Promise<string> {
+	// The answer renders as Markdown, like the transcript; plain wrapped text
+	// until the renderer loads, or if it cannot.
+	let prose: ProseRenderer | undefined;
+	let proseLoad: Promise<void> | undefined;
+	const loadProse = (): Promise<void> =>
+		(proseLoad ??= createMarkdownProse().then(
+			(renderer) => {
+				prose = renderer;
+			},
+			() => {},
+		));
+
+	/** Run the side question against the session model, after the earlier exchanges; returns the answer text. */
+	async function ask(ctx: ExtensionCommandContext, question: string, earlier: readonly BtwExchange[], signal: AbortSignal): Promise<string> {
 		const model = ctx.model as Model<Api> | undefined;
 		if (!model) throw new Error("No model is configured for this session.");
+		const before = historyMessages(earlier, model);
 		const replayed = await replaySideCall(ctx, model, exchange, sideQuestionMessage(question), {
 			signal,
 			timeoutMs: BTW_TIMEOUT_MS,
 			onUsage: (usage) => recordUsage(pi, "btw", usage),
+			history: before,
 		});
 		if (replayed !== undefined) return replayed;
 
@@ -93,7 +123,11 @@ export default function btwExtension(pi: ExtensionAPI) {
 		// btw runs on a cheap, possibly text-only reader and answers a text question,
 		// so images the conversation carried are stripped before the call
 		// (docs/decisions/model-policy.md).
-		const messages = [...stripImageBlocks(convertToLlm(context)), { role: "user" as const, content: sideQuestionMessage(question), timestamp: Date.now() }];
+		const messages = [
+			...stripImageBlocks(convertToLlm(context)),
+			...before,
+			{ role: "user" as const, content: sideQuestionMessage(question), timestamp: Date.now() },
+		];
 
 		const result = await withReasoningFallback(
 			model as Model<Api>,
@@ -115,6 +149,11 @@ export default function btwExtension(pi: ExtensionAPI) {
 			undefined,
 			(usage) => recordUsage(pi, "btw", usage),
 		);
+		// completeSimple reports a failure (a network error, a timeout) in the
+		// reply instead of throwing; its empty text is not an answer.
+		if (signal.aborted) return "";
+		if (result.stopReason === "aborted") throw new Error(`No answer within ${BTW_TIMEOUT_MS / 1000} seconds.`);
+		if (result.stopReason === "error") throw new Error(result.errorMessage || "The model returned an error.");
 		return answerText(result.content);
 	}
 
@@ -131,7 +170,8 @@ export default function btwExtension(pi: ExtensionAPI) {
 			// handler blocks to completion, so the process does not exit early.
 			if (!ctx.hasUI) {
 				try {
-					const answer = await ask(ctx, question, new AbortController().signal);
+					const answer = await ask(ctx, question, history, new AbortController().signal);
+					if (answer) history.push({ question, answer });
 					printAnswer(ctx, answer || "(no answer)");
 				} catch (error) {
 					notifyOrPrint(ctx, `Side question failed: ${error instanceof Error ? error.message : String(error)}`, "error");
@@ -145,9 +185,15 @@ export default function btwExtension(pi: ExtensionAPI) {
 			inFlight?.abort();
 			const controller = new AbortController();
 			inFlight = controller;
-			const view: { answer?: string; error?: string } = {};
+			// The earlier exchanges this panel lists and browses; the current one
+			// joins `history` when it lands, so the next /btw lists it.
+			let earlier = [...history];
+			const view: { answer?: string; error?: string; forking?: boolean } = {};
 			const bodyState = (): BtwBody =>
 				view.error !== undefined ? { kind: "error", message: view.error } : view.answer !== undefined ? { kind: "answer", text: view.answer } : { kind: "loading" };
+			// Shown after the panel closes: a started fork, or why it could not start.
+			let closingNotice: { text: string; level: "info" | "error" } | undefined;
+			let panelOpen = true;
 
 			await ctx.ui.custom<null>((tui, theme, _keybindings, done) => {
 				const state = initialBtwState();
@@ -160,19 +206,47 @@ export default function btwExtension(pi: ExtensionAPI) {
 						tui.requestRender();
 					} catch {}
 				};
+				if (!prose) void loadProse().then(() => prose && repaint());
 
 				// Kick off the model call once, at mount, so `repaint` is bound.
 				void (async () => {
 					try {
-						const answer = await ask(ctx, question, controller.signal);
+						const answer = await ask(ctx, question, earlier, controller.signal);
 						if (controller.signal.aborted) return;
 						view.answer = answer;
+						if (answer) history.push({ question, answer });
 					} catch (error) {
 						if (controller.signal.aborted) return;
 						view.error = error instanceof Error ? error.message : String(error);
 					}
 					repaint();
 				})();
+
+				const fork = (answer: string) => {
+					const model = ctx.model as Model<Api> | undefined;
+					if (!model) return;
+					view.forking = true;
+					repaint();
+					const epoch = sessionEpoch;
+					// The fork sees what the answer was written from: the earlier exchanges
+					// still listed (none once cleared), then this one.
+					const messages = [...historyMessages(earlier, model), ...exchangeMessages({ question, answer }, model)];
+					void requestBtwFork(pi.events, { ctx, question, messages }).then((result) => {
+						if (epoch !== sessionEpoch) return;
+						const notice =
+							"error" in result ? { text: result.error, level: "error" as const } : { text: `Forked ${result.name} (${result.taskId.slice(-4)})`, level: "info" as const };
+						if (panelOpen) {
+							view.forking = false;
+							closingNotice = notice;
+							done(null);
+							return;
+						}
+						// The user closed the panel while the fork was starting.
+						try {
+							ctx.ui.notify(notice.text, notice.level);
+						} catch {}
+					});
+				};
 
 				return {
 					render: (width: number) => {
@@ -182,26 +256,57 @@ export default function btwExtension(pi: ExtensionAPI) {
 						// Belt-and-suspenders truncate on top of renderBtwPanel's own,
 						// matching every sibling dock panel: pi-tui crashes the app on
 						// a line wider than the terminal.
-						const lines = renderBtwPanel({ state, question, body: bodyState(), width, height }, theme).map((line) => truncateLine(line, width));
+						const lines = renderBtwPanel(
+							{
+								state,
+								history: earlier,
+								question,
+								body: bodyState(),
+								width,
+								height,
+								canFork: true,
+								forking: view.forking,
+								renderAnswer: prose ? (text, width, ref) => prose!(ref, text, width) : undefined,
+							},
+							theme,
+						).map((line) => truncateLine(line, width));
 						cache = { width, lines };
 						return lines;
 					},
 					handleInput: (data: string) => {
 						const key = decodeBtwKey(data);
 						if (!key) return;
-						const effect = applyBtwKey(state, key);
+						// While a fork starts only closing works; its notice follows.
+						if (view.forking) {
+							if (key.kind === "close") done(null);
+							return;
+						}
+						const effect = applyBtwKey(state, key, earlier.length);
+						const shown = state.selected === null ? view.answer : earlier[state.selected]?.answer;
 						switch (effect?.kind) {
 							case "close":
 								done(null);
 								return;
 							case "copy":
 								// Only offer copy once there is a non-empty answer.
-								if (view.answer) {
-									void copyToClipboard(view.answer).then(() => {
+								if (shown) {
+									void copyToClipboard(shown).then(() => {
 										state.copied = true;
 										repaint();
 									});
 								}
+								return;
+							case "fork":
+								// The current answer only, not one browsed from the history.
+								if (state.selected === null && view.answer) fork(view.answer);
+								return;
+							case "clear":
+								if (earlier.length === 0) return;
+								history = history.filter((entry) => !earlier.includes(entry));
+								earlier = [];
+								state.selected = null;
+								state.offset = 0;
+								repaint();
 								return;
 							default:
 								repaint();
@@ -213,8 +318,10 @@ export default function btwExtension(pi: ExtensionAPI) {
 				};
 			});
 
+			panelOpen = false;
 			controller.abort();
 			if (inFlight === controller) inFlight = undefined;
+			if (closingNotice) ctx.ui.notify(closingNotice.text, closingNotice.level);
 		},
 	});
 }

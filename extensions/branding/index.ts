@@ -14,6 +14,7 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
+import { ARGUMENT_HINT_CHANNEL, type ArgumentHint, hintForInput } from "../lib/argument-hints.ts";
 import { modeCycleKey } from "../lib/keys.ts";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
@@ -213,7 +214,7 @@ interface BrandingEditorUI {
  * a pi-tui render change ever makes the marker misplace (cosmetic only — typing
  * is never affected; see prompt-marker.ts).
  */
-function installPromptMarker(ctx: { hasUI: boolean; mode: string; ui: BrandingEditorUI }): void {
+function installPromptMarker(ctx: { hasUI: boolean; mode: string; ui: BrandingEditorUI }, argumentHints: ReadonlyMap<string, string>): void {
 	if (process.env.CC_NO_INPUT_MARKER === "1") return;
 	if (!ctx.hasUI || ctx.mode !== "tui") return;
 	const ui = ctx.ui;
@@ -223,7 +224,13 @@ function installPromptMarker(ctx: { hasUI: boolean; mode: string; ui: BrandingEd
 		// Bold makes the chevron read heavier than the input text beside it.
 		return `\x1b[1m${safeThemePaint(ui.theme)("accent", PROMPT_GLYPH)}\x1b[0m${" ".repeat(PROMPT_PADDING - 1)}`;
 	};
-	ui.setEditorComponent((tui: unknown, theme: unknown, keybindings: unknown) => new PromptEditor(tui as never, theme as never, keybindings as never, renderMarker));
+	const renderHint = (text: string) => {
+		const placeholder = hintForInput(text, argumentHints);
+		return placeholder === undefined ? undefined : safeThemePaint(ui.theme)("dim", placeholder);
+	};
+	ui.setEditorComponent(
+		(tui: unknown, theme: unknown, keybindings: unknown) => new PromptEditor(tui as never, theme as never, keybindings as never, renderMarker, renderHint),
+	);
 }
 
 /**
@@ -307,6 +314,13 @@ export default function brandingExtension(pi: ExtensionAPI) {
 		live = false;
 	});
 
+	// Commands' argument placeholders (lib/argument-hints.ts), drawn by the prompt editor.
+	// Declared before the CC_NO_BANNER return below: session_start reads it.
+	const argumentHints = new Map<string, string>();
+	pi.events.on(ARGUMENT_HINT_CHANNEL, (data) => {
+		const { command, hint } = data as ArgumentHint;
+		argumentHints.set(command, hint);
+	});
 	pi.on("session_start", (_event, ctx) => {
 		// pi's own write lands after this handler, so only the deferred write
 		// sticks; a new session may carry a name (resume), so forget the last.
@@ -314,7 +328,7 @@ export default function brandingExtension(pi: ExtensionAPI) {
 		live = true;
 		setTimeout(() => retitle(ctx), 0).unref?.();
 		ctx.ui.setHiddenThinkingLabel(THINKING_LABEL);
-		installPromptMarker(ctx as unknown as { hasUI: boolean; mode: string; ui: BrandingEditorUI });
+		installPromptMarker(ctx as unknown as { hasUI: boolean; mode: string; ui: BrandingEditorUI }, argumentHints);
 		// Soft drift guard: warn once at startup when the hosting pi is outside
 		// the range this release was tested against (see lib/pi-version.ts).
 		const versionWarning = piVersionWarning(PI_VERSION);

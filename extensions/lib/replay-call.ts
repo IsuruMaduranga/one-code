@@ -23,25 +23,26 @@ export function followLastExchange(pi: ExtensionAPI): SessionExchange {
 }
 
 /**
- * Send `prompt` as the replay of the last request on `model`, returning the
- * answer's text. Undefined when there is no capture for `model`, too little
- * output room is left, there is no API key, the call failed, or the reply
- * called a tool or held no text (the replayed request declares the session's
- * tools, and text beside a tool call is a preamble, not the answer), so the
- * caller runs its standalone call instead; an empty string when the caller's own signal aborted it. Throws
- * when `timeoutMs` ran out: the time budget is spent, so a standalone call
- * must not start a second one.
+ * Send `prompt` as the replay of the last request on `model`, after
+ * `options.history` (earlier side exchanges), returning the answer's text.
+ * Undefined when there is no capture for `model`, too little output room is
+ * left, there is no API key, the call failed, or the reply called a tool or
+ * held no text (the replayed request declares the session's tools, and text
+ * beside a tool call is a preamble, not the answer), so the caller runs its
+ * standalone call instead; an empty string when the caller's own signal
+ * aborted it. Throws when `timeoutMs` ran out: the time budget is spent, so a
+ * standalone call must not start a second one.
  */
 export async function replaySideCall(
 	ctx: Pick<ExtensionContext, "modelRegistry" | "sessionManager">,
 	model: Model<Api>,
 	exchange: SessionExchange,
 	prompt: string,
-	options: { signal: AbortSignal; timeoutMs: number; onUsage: (usage: Usage) => void },
+	options: { signal: AbortSignal; timeoutMs: number; onUsage: (usage: Usage) => void; history?: readonly Message[] },
 ): Promise<string | undefined> {
 	const wire = exchange.forModel(model);
 	if (!wire) return undefined;
-	const tail = replayTail(wire.reply as Message | undefined, prompt);
+	const tail = replayTail(wire.reply as Message | undefined, prompt, Date.now(), options.history);
 	const cap = replayOutputCap(wire.capture, tail);
 	if (cap === undefined) return undefined;
 	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);

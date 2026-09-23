@@ -153,6 +153,15 @@ describe("replayTail / replayOutputCap", () => {
 		expect(replayTail(undefined, "q", 1)).toEqual([{ role: "user", content: [{ type: "text", text: "q" }], timestamp: 1 }]);
 	});
 
+	it("puts a side session's earlier exchanges between the reply and the prompt", () => {
+		const earlier = [
+			{ role: "user", content: [{ type: "text", text: "a" }], timestamp: 1 },
+			{ role: "assistant", content: [{ type: "text", text: "1" }] },
+		] as never[];
+		expect(replayTail(reply, "q", 1, earlier).map((m) => m.role)).toEqual(["assistant", "user", "assistant", "user"]);
+		expect(replayTail(undefined, "q", 1, earlier)[0]).toBe(earlier[0]);
+	});
+
 	it("spends the captured cap on the tail, honours a limit, and refuses when too little is left", () => {
 		const capture = anthropicCapture();
 		const tail = replayTail(undefined, "x".repeat(400), 1);

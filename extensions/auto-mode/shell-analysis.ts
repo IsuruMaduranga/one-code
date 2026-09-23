@@ -730,7 +730,7 @@ function outputFlagTarget(args: Token[]): string | undefined {
  * options its table names, is safe. Returns undefined when safe, else the
  * reason to escalate.
  */
-function gitEscalationReason(args: Token[], isDirOutsideCwd: (dir: string) => boolean): string | undefined {
+function gitEscalationReason(args: Token[], isDirOutsideCwd: (dir: string) => boolean, onFileReads: (words: Token[]) => void): string | undefined {
 	let index = 0;
 	while (index < args.length) {
 		const token = args[index].value;
@@ -772,8 +772,37 @@ function gitEscalationReason(args: Token[], isDirOutsideCwd: (dir: string) => bo
 	if (!gitOperandsAllowed(subcommand, check.parsed)) {
 		return `runs git ${subcommand} with an operand and no --list, which creates a ref`;
 	}
+	if (GIT_FILE_OPERANDS.has(subcommand)) onFileReads(check.parsed.positionals);
 	return undefined;
 }
+
+/** The directory git runs in: `cwd`, then each leading `-C <dir>` in turn, as git applies them. */
+function gitWorkingDirectory(args: Token[], cwd: string, home: string): string {
+	let dir = cwd;
+	for (let index = 0; index < args.length; ) {
+		const token = args[index].value;
+		if (token === "-C") {
+			const next = args[index + 1]?.value;
+			if (next) dir = toAbsoluteBash(dir, next, home);
+			index += 2;
+		} else if (GIT_GLOBAL_SAFE.has(token)) {
+			index++;
+		} else {
+			break;
+		}
+	}
+	return dir;
+}
+
+/**
+ * Subcommands whose operands can be files git reads outside the repository.
+ * `git diff <path> <path>` goes `--no-index` by itself when either path is
+ * outside the work tree or there is no repository, and reads both files
+ * (findings §25). Every operand is read-checked, revisions included: a
+ * revision is not a path unless a file of that name exists, and one that
+ * resolves inside the working directory passes.
+ */
+const GIT_FILE_OPERANDS = new Set(["diff"]);
 
 /**
  * For a git command the options already proved read-only: why the checkout it
@@ -992,6 +1021,46 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 			continue;
 		}
 
+		/**
+		 * A word a read-only command reads. It escalates when it resolves outside
+		 * the working directory and the readable roots, or onto a credential path
+		 * — judged where it RESOLVES, so an in-project symlink named `notes` that
+		 * points at a key file is the key file (SECURITY-REVIEW-2026-09-23 M1). A
+		 * `~name`/`~-` word and a glob that could reach `..` are paths bash
+		 * expands to places this check cannot see (M2); an ordinary glob is
+		 * expanded one level here and every match is judged.
+		 */
+		const escalateOutsideRead = (value: string, why: string) => {
+			if (!evidence.outsideReads.includes(value)) evidence.outsideReads.push(value);
+			escalate(`reads ${value}, ${why}`, { outsideRead: true });
+		};
+		// `base` is where the reading program resolves a relative word (git's
+		// final `-C` directory); bash still expands globs from the shell's cwd.
+		const checkRead = (word: { value: string; glob?: boolean }, base = effectiveCwd) => {
+			const value = word.value;
+			if (!value) return;
+			if (isUnknownTilde(value)) {
+				escalateOutsideRead(value, "which bash expands to a directory outside what this check can see");
+				return;
+			}
+			const targets = word.glob ? expandGlob(effectiveCwd, value, home) : [value];
+			if (targets === undefined) {
+				escalateOutsideRead(value, "a glob whose matches cannot be checked");
+				return;
+			}
+			for (const target of targets) {
+				const absolute = toAbsoluteBash(base, target, home);
+				if (!looksLikePath(target) && !entryExists(absolute)) continue;
+				const resolved = resolveForContainment(absolute);
+				if (resolved !== undefined && isSensitivePath(resolved) && !isSensitivePath(absolute)) {
+					if (!evidence.sensitivePaths.includes(value)) evidence.sensitivePaths.push(value);
+					escalate(`reads ${value}, which resolves to a credential or secret path`);
+				}
+				if (resolved !== undefined && (isWithin(containmentRoot, resolved) || readableRoots.some((root) => isWithin(root, resolved)))) continue;
+				escalateOutsideRead(value, "which is outside the working directory");
+			}
+		};
+
 		if (name === "git") {
 			// `git reset --hard` is an in-project whole-tree discard: escalate, but
 			// mark it contained so the recoverability gate can clear it when the tree
@@ -1009,13 +1078,25 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 				});
 				continue;
 			}
+			const fileReads: Token[] = [];
 			const reason =
-				gitEscalationReason(args, (dir) => {
-					if (isUnknownTilde(dir)) return true;
-					const resolved = resolveForContainment(toAbsoluteBash(effectiveCwd, dir, home));
-					return resolved === undefined || !isWithin(containmentRoot, resolved);
-				}) ?? gitCheckoutReason(args, effectiveCwd, home, checkoutReasons);
+				gitEscalationReason(
+					args,
+					(dir) => {
+						if (isUnknownTilde(dir)) return true;
+						const resolved = resolveForContainment(toAbsoluteBash(effectiveCwd, dir, home));
+						return resolved === undefined || !isWithin(containmentRoot, resolved);
+					},
+					(words) => fileReads.push(...words),
+				) ?? gitCheckoutReason(args, effectiveCwd, home, checkoutReasons);
 			if (reason) escalate(reason);
+			// git resolves a relative operand from its final `-C` directory, not
+			// the shell's: `git -C sub diff ../../x/data.txt a.txt` can climb out
+			// from `sub` where the same word stays inside from the working directory.
+			else {
+				const gitCwd = gitWorkingDirectory(args, effectiveCwd, home);
+				for (const word of fileReads) checkRead(word, gitCwd);
+			}
 			continue;
 		}
 
@@ -1030,43 +1111,6 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		// stays uncontained and reaches the classifier as before.
 		if (isMutation) escalate(`runs ${name}, which modifies the filesystem`, { contained: isDelete });
 
-		/**
-		 * A word a read-only command reads. It escalates when it resolves outside
-		 * the working directory and the readable roots, or onto a credential path
-		 * — judged where it RESOLVES, so an in-project symlink named `notes` that
-		 * points at a key file is the key file (SECURITY-REVIEW-2026-09-23 M1). A
-		 * `~name`/`~-` word and a glob that could reach `..` are paths bash
-		 * expands to places this check cannot see (M2); an ordinary glob is
-		 * expanded one level here and every match is judged.
-		 */
-		const escalateOutsideRead = (value: string, why: string) => {
-			if (!evidence.outsideReads.includes(value)) evidence.outsideReads.push(value);
-			escalate(`reads ${value}, ${why}`, { outsideRead: true });
-		};
-		const checkRead = (word: { value: string; glob?: boolean }) => {
-			const value = word.value;
-			if (!value) return;
-			if (isUnknownTilde(value)) {
-				escalateOutsideRead(value, "which bash expands to a directory outside what this check can see");
-				return;
-			}
-			const targets = word.glob ? expandGlob(effectiveCwd, value, home) : [value];
-			if (targets === undefined) {
-				escalateOutsideRead(value, "a glob whose matches cannot be checked");
-				return;
-			}
-			for (const target of targets) {
-				const absolute = toAbsoluteBash(effectiveCwd, target, home);
-				if (!looksLikePath(target) && !entryExists(absolute)) continue;
-				const resolved = resolveForContainment(absolute);
-				if (resolved !== undefined && isSensitivePath(resolved) && !isSensitivePath(absolute)) {
-					if (!evidence.sensitivePaths.includes(value)) evidence.sensitivePaths.push(value);
-					escalate(`reads ${value}, which resolves to a credential or secret path`);
-				}
-				if (resolved !== undefined && (isWithin(containmentRoot, resolved) || readableRoots.some((root) => isWithin(root, resolved)))) continue;
-				escalateOutsideRead(value, "which is outside the working directory");
-			}
-		};
 
 		// A read-only command is proved read-only by its options, not its name:
 		// each option must be in the command's table (read-only-options.ts), so

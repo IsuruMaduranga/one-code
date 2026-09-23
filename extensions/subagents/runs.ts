@@ -131,6 +131,14 @@ export class RunRegistry {
 		this.byId.set(record.taskId, record);
 	}
 
+	/** Forget a run that never started, so neither list_agents nor a resume offers it. */
+	remove(taskId: string): void {
+		const record = this.byId.get(taskId);
+		if (!record) return;
+		this.byId.delete(taskId);
+		if (this.byName.get(record.name) === record) this.byName.delete(record.name);
+	}
+
 	/** Every name in use: recorded runs plus names reserved for runs being spawned. */
 	names(): string[] {
 		return [...new Set([...this.byName.keys(), ...this.reserved])];

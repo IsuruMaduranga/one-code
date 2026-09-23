@@ -13,10 +13,11 @@
  */
 
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type AgentSession, type ExtensionError, getAgentDir, SessionManager, type ToolDefinition } from "@earendil-works/pi-coding-agent";
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Api, Message, Model } from "@earendil-works/pi-ai";
 import { whenAborted } from "../lib/abort.ts";
 import { type AgentLoaderOptions, buildAgentLoader, createSharedModelRuntime, openChildSession } from "../lib/agent-loader.ts";
 import { agentPromptIdentity, PrefixWarmGate, prefixWarmKey, type Release } from "../lib/prefix-warm-gate.ts";
@@ -92,6 +93,8 @@ interface ChildSessionSpec {
 	agent?: AgentDefinition;
 	/** Parent session file — present for a fork run (inherit the parent transcript). */
 	forkFrom?: string;
+	/** Messages appended to a fork's transcript before its task (e.g. `/btw`'s side exchange). */
+	forkMessages?: Message[];
 	/** The parent's current system prompt, applied to a fork so it continues as the parent. */
 	parentSystemPrompt?: string;
 	/** Existing persisted session to resume (SendMessage to a finished agent). */
@@ -128,6 +131,27 @@ export interface ResidentRunOptions extends Omit<ChildSessionSpec, "sessionFile"
 	onExit?: () => void;
 	/** Optional live sink for the subagent panel (activity + transcript blocks). */
 	sink?: LiveSink;
+}
+
+/**
+ * A child's session manager: a resume reopens its file; otherwise a fork
+ * clones the parent transcript (when the parent has written one) and anything
+ * else starts empty, and `forkMessages` are appended so the child sees them before
+ * its task and a later resume finds them in its file. Exported for tests.
+ */
+export function newChildSessionManager(spec: Pick<ChildSessionSpec, "cwd" | "forkFrom" | "forkMessages" | "sessionFile" | "sessionDir">): SessionManager {
+	// The resume cwd is passed explicitly: a worktree run's persisted cwd may
+	// be gone by the time it is messaged (index.ts substitutes the parent cwd).
+	if (spec.sessionFile) return SessionManager.open(spec.sessionFile, undefined, spec.cwd);
+	// pi writes a session file with its first assistant reply, so a parent with
+	// no transcript yet (or run with --no-session) has nothing to clone.
+	const manager = spec.forkFrom && existsSync(spec.forkFrom)
+		? SessionManager.forkFrom(spec.forkFrom, spec.cwd, spec.sessionDir)
+		: spec.sessionDir
+			? SessionManager.create(spec.cwd, spec.sessionDir)
+			: SessionManager.inMemory(spec.cwd);
+	for (const message of spec.forkMessages ?? []) manager.appendMessage(message);
+	return manager;
 }
 
 /** Prepend a one-time spawn note (e.g. a model fallback) to an outcome's output. */
@@ -352,16 +376,7 @@ export class SubagentRuntime {
 	 */
 	private async buildChildSession(spec: ChildSessionSpec): Promise<{ session: Session; note?: string }> {
 		const [loader, mcpTools] = await Promise.all([buildAgentLoader(this.childLoaderOptions(spec)), this.getMcpTools()]);
-		const newSessionManager = () =>
-			// The resume cwd is passed explicitly: a worktree run's persisted cwd may
-			// be gone by the time it is messaged (index.ts substitutes the parent cwd).
-			spec.sessionFile
-				? SessionManager.open(spec.sessionFile, undefined, spec.cwd)
-				: spec.forkFrom
-					? SessionManager.forkFrom(spec.forkFrom, spec.cwd, spec.sessionDir)
-					: spec.sessionDir
-						? SessionManager.create(spec.cwd, spec.sessionDir)
-						: SessionManager.inMemory(spec.cwd);
+		const newSessionManager = () => newChildSessionManager(spec);
 		// A fork keeps the parent's toolset; only a named agent carries an allowlist.
 		const allowlist = spec.forkFrom ? undefined : spec.agent?.tools;
 		const make = async (model: string | undefined): Promise<Session> => {

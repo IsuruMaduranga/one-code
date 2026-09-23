@@ -34,6 +34,18 @@ describe("RunRegistry", () => {
 		expect(registry.resolve("b1")).toBeUndefined();
 		expect(registry.resolve("b11")?.taskId).toBe("b1111111");
 	});
+
+	it("forgets a run that never started, leaving an older run of the same name alone", () => {
+		const registry = new RunRegistry();
+		registry.add(record("fork-1", "c1111111"));
+		registry.remove("c1111111");
+		expect(registry.resolve("fork-1")).toBeUndefined();
+		expect(registry.list()).toEqual([]);
+		registry.add(record("explore-1", "d1111111"));
+		registry.add(record("explore-1", "d2222222"));
+		registry.remove("d1111111");
+		expect(registry.resolve("explore-1")?.taskId).toBe("d2222222");
+	});
 });
 
 describe("findSessionFile", () => {
