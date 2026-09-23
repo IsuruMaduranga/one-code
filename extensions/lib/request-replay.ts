@@ -142,10 +142,13 @@ export const MIN_REPLAY_OUTPUT_TOKENS = 1024;
 /** The output cap when neither the captured body nor the caller names one. */
 const DEFAULT_REPLAY_OUTPUT_TOKENS = 8192;
 
-/** The messages a side call appends: the reply that closed the exchange, if any, then its prompt. */
-export function replayTail(reply: Message | undefined, prompt: string, timestamp = Date.now()): Message[] {
+/**
+ * The messages a side call appends: the reply that closed the exchange, if
+ * any, then `before` (a side session's earlier exchanges), then its prompt.
+ */
+export function replayTail(reply: Message | undefined, prompt: string, timestamp = Date.now(), before: readonly Message[] = []): Message[] {
 	const question: Message = { role: "user", content: [{ type: "text", text: prompt }], timestamp };
-	return reply ? [reply, question] : [question];
+	return [...(reply ? [reply] : []), ...before, question];
 }
 
 /**

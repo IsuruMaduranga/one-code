@@ -57,6 +57,17 @@ describe("replaySideCall", () => {
 		expect(await replaySideCall(ctx, model, exchange(), "q", { signal: new AbortController().signal, timeoutMs: 1000, onUsage: () => {} })).toBeUndefined();
 	});
 
+	it("sends the earlier side exchanges before the prompt", async () => {
+		completeSimple.mockResolvedValue(reply("stop", "a2"));
+		const history = [
+			{ role: "user", content: [{ type: "text", text: "q1" }], timestamp: 1 },
+			{ role: "assistant", content: [{ type: "text", text: "a1" }], api: "anthropic-messages", provider: "my-proxy", model: "claude-sonnet-5", usage: {}, stopReason: "stop", timestamp: 1 },
+		] as never[];
+		await replaySideCall(ctx, model, exchange(), "q2", { signal: new AbortController().signal, timeoutMs: 1000, onUsage: () => {}, history });
+		const sent = completeSimple.mock.calls[0][1].messages as { content: { text: string }[] }[];
+		expect(sent.map((m) => m.content[0].text)).toEqual(["q1", "a1", "q2"]);
+	});
+
 	it("does not call the model without a capture for it", async () => {
 		const other = { ...(model as object), id: "claude-opus-5-5" } as never;
 		expect(await replaySideCall(ctx, other, exchange(), "q", { signal: new AbortController().signal, timeoutMs: 1000, onUsage: () => {} })).toBeUndefined();

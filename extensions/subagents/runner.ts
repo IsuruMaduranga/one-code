@@ -16,7 +16,7 @@ import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type AgentSession, type ExtensionError, getAgentDir, SessionManager, type ToolDefinition } from "@earendil-works/pi-coding-agent";
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Api, Message, Model } from "@earendil-works/pi-ai";
 import { whenAborted } from "../lib/abort.ts";
 import { type AgentLoaderOptions, buildAgentLoader, createSharedModelRuntime, openChildSession } from "../lib/agent-loader.ts";
 import { agentPromptIdentity, PrefixWarmGate, prefixWarmKey, type Release } from "../lib/prefix-warm-gate.ts";
@@ -92,6 +92,8 @@ interface ChildSessionSpec {
 	agent?: AgentDefinition;
 	/** Parent session file — present for a fork run (inherit the parent transcript). */
 	forkFrom?: string;
+	/** Messages appended to a fork's inherited transcript before its task (the `/btw` side exchange). */
+	forkMessages?: Message[];
 	/** The parent's current system prompt, applied to a fork so it continues as the parent. */
 	parentSystemPrompt?: string;
 	/** Existing persisted session to resume (SendMessage to a finished agent). */
@@ -131,6 +133,17 @@ export interface ResidentRunOptions extends Omit<ChildSessionSpec, "sessionFile"
 }
 
 /** Prepend a one-time spawn note (e.g. a model fallback) to an outcome's output. */
+/**
+ * A fork's session: the parent transcript cloned, then `messages` appended, so
+ * the child sees them before its task and a later resume finds them in its
+ * file. Exported for tests.
+ */
+export function forkSession(parentFile: string, cwd: string, sessionDir: string | undefined, messages: readonly Message[] = []): SessionManager {
+	const manager = SessionManager.forkFrom(parentFile, cwd, sessionDir);
+	for (const message of messages) manager.appendMessage(message);
+	return manager;
+}
+
 function withNote(outcome: ChildOutcome, note: string | undefined): ChildOutcome {
 	return note ? { ...outcome, output: `${note}\n\n${outcome.output}` } : outcome;
 }
@@ -358,7 +371,7 @@ export class SubagentRuntime {
 			spec.sessionFile
 				? SessionManager.open(spec.sessionFile, undefined, spec.cwd)
 				: spec.forkFrom
-					? SessionManager.forkFrom(spec.forkFrom, spec.cwd, spec.sessionDir)
+					? forkSession(spec.forkFrom, spec.cwd, spec.sessionDir, spec.forkMessages)
 					: spec.sessionDir
 						? SessionManager.create(spec.cwd, spec.sessionDir)
 						: SessionManager.inMemory(spec.cwd);

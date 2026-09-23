@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { SIDE_QUESTION_REMINDER, sideQuestionMessage } from "../../extensions/btw/prompt.ts";
+import { exchangeMessages, historyMessages, SIDE_QUESTION_REMINDER, sideQuestionMessage } from "../../extensions/btw/prompt.ts";
 
 const capturePath = fileURLToPath(new URL("../../captures/btw.json", import.meta.url));
 
@@ -35,5 +35,34 @@ describe("sideQuestionMessage", () => {
 		const message = sideQuestionMessage("  what is this?  ");
 		expect(message.endsWith("\n\nwhat is this?")).toBe(true);
 		expect(message.startsWith(SIDE_QUESTION_REMINDER)).toBe(true);
+	});
+});
+
+describe("exchangeMessages / historyMessages", () => {
+	const model = { api: "anthropic-messages", provider: "anthropic", id: "claude-sonnet-5" };
+
+	it("sends the bare question and the answer as a user/assistant pair, as Claude Code threads its side history", () => {
+		const [user, assistant] = exchangeMessages({ question: "why?", answer: "because." }, model, 7) as [never, never];
+		expect(user).toEqual({ role: "user", content: [{ type: "text", text: "why?" }], timestamp: 7 });
+		expect(assistant).toMatchObject({
+			role: "assistant",
+			content: [{ type: "text", text: "because." }],
+			api: "anthropic-messages",
+			provider: "anthropic",
+			model: "claude-sonnet-5",
+			stopReason: "stop",
+		});
+	});
+
+	it("lists every earlier exchange oldest first", () => {
+		const messages = historyMessages(
+			[
+				{ question: "a", answer: "1" },
+				{ question: "b", answer: "2" },
+			],
+			model,
+		);
+		expect(messages.map((m) => m.role)).toEqual(["user", "assistant", "user", "assistant"]);
+		expect(messages.map((m) => (m.content as { text: string }[])[0].text)).toEqual(["a", "1", "b", "2"]);
 	});
 });

@@ -21,7 +21,7 @@ import os from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StringEnum } from "@earendil-works/pi-ai";
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Api, Message, Model } from "@earendil-works/pi-ai";
 import { getAgentDir, type ExtensionAPI, type ExtensionContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../auto-mode/actions.ts";
@@ -41,6 +41,7 @@ import {
 import { modelPickerComponent, pickerSpec, toPickerEntries, type PickerEntry } from "../auto-mode/model-picker.ts";
 import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
+import { BTW_FORK_CHANNEL, type BtwForkRequest, type BtwForkResult } from "../lib/btw-fork.ts";
 import { MCP_TOOLS_CHANNEL, type McpToolsPayload } from "../lib/mcp-share.ts";
 import { resolveModelTier } from "../lib/model-tier.ts";
 import { pendingClaimReminder } from "./pending-claim.ts";
@@ -1442,6 +1443,228 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		}
 	};
 
+	/**
+	 * Launch one prepared run as a background resident (Claude Code parity):
+	 * it returns as soon as the child starts, the report arrives as a steered
+	 * task notification, and the child stays resident so SendMessage can reach
+	 * it live (steer mid-turn, prompt when idle). `toolCallId` links the
+	 * notifications to the spawning Agent call (none for a `/btw` fork);
+	 * `forkMessages` are appended to a fork's inherited transcript. Returns the
+	 * line reported for the run.
+	 */
+	const launchResident = async (
+		p: PreparedRun,
+		ctx: ExtensionContext,
+		runtime: SubagentRuntime,
+		sessionFile: string | undefined,
+		toolCallId: string | undefined,
+		forkMessages?: Message[],
+	): Promise<{ launched: boolean; line: string }> => {
+		let worktree: Worktree | undefined;
+		if (p.request.worktree) {
+			try {
+				worktree = await isolateInWorktree(ctx, p.record, p.request.name);
+			} catch (error) {
+				return { launched: false, line: `✗ ${p.record.name}: could not create a worktree: ${(error as Error).message}` };
+			}
+		}
+
+		const logPath = outputLogPath(p.record);
+		let lastLogWrite = 0;
+		let finish!: () => void;
+		const finished = new Promise<void>((resolve) => {
+			finish = resolve;
+		});
+
+		// The child's final output. task.output() falls back to this
+		// because handle.snapshot().text can be blank at a turn boundary —
+		// the same reason the log write below uses `|| outcome.output`.
+		// Keeps task_output consistent with the log and the completion
+		// notification rather than showing an empty body in that case.
+		let lastOutput = "";
+		// The initial task's own report. task_output for THIS task must return the
+		// first turn's reply — not the resident's growing multi-turn transcript —
+		// the same way a SendMessage task returns one reply (review S12).
+		let firstTurnOutput: string | undefined;
+		const live = trackLiveRun(p.record, p.request);
+		const resident: Resident = { handle: undefined as never, startedAt: Date.now(), turnHandlers: [] };
+		const worktreeNote = worktree
+			? `\n\n(Running in worktree ${worktree.path} — kept while the agent stays resident.)`
+			: "";
+		resident.turnHandlers.push((outcome, review, stopped) => {
+			task.status = stopped ? "stopped" : outcome.failed ? "failed" : "completed";
+			task.finishedAt = Date.now();
+			firstTurnOutput = outcome.output;
+			finish();
+			notifyHandBack({
+				from: p.record.taskId,
+				taskId: p.record.taskId,
+				name: p.record.name,
+				toolUseId: toolCallId,
+				outputFile: logPath,
+				outcome,
+				stopped,
+				startedAt: task.startedAt,
+				report: `${bounded(outcome.output, `${p.record.taskId}-report`, OUTPUT_CAP)}${worktreeNote}`,
+				review,
+			});
+		});
+
+		// Idle reaper: every run is a resident now, so without this a long
+		// session accumulates one live AgentSession (extension instances,
+		// message array, MCP tool refs) per delegation for its whole life.
+		// After RESIDENT_IDLE_MS idle the session is released quietly; the
+		// agent stays reachable — SendMessage resumes it from its session
+		// file. Worktree residents are exempt: release would remove the
+		// worktree a resume still needs. Armed from every turn end.
+		let reaper: ReturnType<typeof setTimeout> | undefined;
+		const armReaper = () => {
+			if (worktree) return;
+			if (reaper) clearTimeout(reaper);
+			reaper = setTimeout(() => {
+				reaper = undefined;
+				if (handle.exited()) return;
+				if (handle.busy()) {
+					armReaper();
+					return;
+				}
+				handle.release();
+			}, RESIDENT_IDLE_MS);
+			reaper.unref?.();
+		};
+		// Captured as a string: onExit runs from a `.finally` long after this
+		// turn's ctx may be stale (review S5).
+		const parentCwd = ctx.cwd;
+		const forkPrompt = p.request.fork ? ctx.getSystemPrompt() : undefined;
+		if (forkPrompt !== undefined) persistForkPrompt(p.record, forkPrompt);
+		// No `signal` here on purpose: a resident outlives the spawning turn and
+		// is stopped through task_stop / the panel, not by the turn ending (S15).
+		const handle = await runtime.runResident({
+			name: p.record.name,
+			agent: p.agentDef,
+			cwd: p.record.cwd,
+			forkFrom: p.request.fork ? sessionFile : undefined,
+			forkMessages: p.request.fork ? forkMessages : undefined,
+			parentSystemPrompt: forkPrompt,
+			sessionDir: p.record.sessionSearchDir || undefined,
+			model: p.request.model,
+			fallbackModel: p.request.fallbackModel,
+			thinking: p.request.thinking,
+			onProgress: (toolCalls, text, usage) => {
+				live.progress(toolCalls, usage);
+				// Throttled: onProgress fires per tool call/message with the whole
+				// turn text so far, and this path now carries EVERY run — an
+				// unthrottled sync rewrite would be O(n²) bytes on the hot path.
+				// onTurnEnd below flushes the final state, so the tail is never lost.
+				if (logPath && text && Date.now() - lastLogWrite > LOG_WRITE_INTERVAL_MS) {
+					lastLogWrite = Date.now();
+					writeFileSync(logPath, text);
+				}
+			},
+			sink: live.sink,
+			onMessageToMain: (message) => notifyAgentMessage(p.record.taskId, p.record.name, message),
+			extraTools: spawnToolsFor(p.record),
+			onTurnEnd: (outcome) => {
+				registry.sessionFileFor(p.record);
+				live.settle();
+				lastOutput = resident.handle.snapshot().text || outcome.output;
+				if (logPath) writeFileSync(logPath, lastOutput);
+				// The handler is claimed now (so a message arriving mid-review pairs
+				// with the NEXT turn), but runs only once auto mode's hand-back
+				// review of this turn's action sequence has answered, so the
+				// verdict rides in the same notification as the report instead of
+				// trailing it. The wait is bounded (hand-back-review.ts) and
+				// answered synchronously when auto mode is off.
+				const handler = resident.turnHandlers.shift();
+				// A stop or resume during review must not change this turn's outcome.
+				const stopped = stoppedTaskIds.has(p.record.taskId);
+				armReaper();
+				void awaitHandBackReview(pi.events, p.record, outcome.actions).then((review) => {
+					if (handler) {
+						handler(outcome, review, stopped);
+					} else {
+						// A turn nobody is waiting on (e.g. a steer that raced past its
+						// target turn and ran on its own) must still surface.
+						notifyHandBack({
+							from: p.record.taskId,
+							taskId: p.record.taskId,
+							name: p.record.name,
+							toolUseId: toolCallId,
+							outputFile: logPath,
+							outcome,
+							stopped,
+							startedAt: resident.startedAt,
+							report: bounded(outcome.output, `${p.record.taskId}-update-${Date.now()}`, OUTPUT_CAP),
+							review,
+							details: { update: true },
+						});
+					}
+				});
+			},
+			onExit: () => {
+				if (reaper) clearTimeout(reaper);
+				live.finish(stoppedTaskIds.has(p.record.taskId) ? "stopped" : false);
+				if (residents.get(p.record.taskId) === resident) residents.delete(p.record.taskId);
+				liveHandles.delete(p.record.taskId);
+				if (worktree) void cleanupWorktree(parentCwd, worktree);
+			},
+		});
+		resident.handle = handle;
+		residents.set(p.record.taskId, resident);
+		liveHandles.set(p.record.taskId, handle);
+
+		const task: BackgroundTask = {
+			id: p.record.taskId,
+			kind: "subagent",
+			ownUI: true, // rendered live by the subagents panel's agent strip
+			description: `${p.record.name}: ${p.request.task.slice(0, 80)}`,
+			status: "running",
+			startedAt: Date.now(),
+			logPath,
+			output: () => firstTurnOutput ?? (handle.snapshot().text || lastOutput),
+			stop: () => stopAgent(p.record.taskId, handle),
+			resident: () => !handle.exited(),
+			finished,
+		};
+		pi.events.emit(TASK_REGISTER_CHANNEL, task);
+		void handle.send(frameTask(p.request, worktree, parentCwd));
+
+		return {
+			launched: true,
+			line: `⏳ ${p.record.name} (task ${p.record.taskId}) running in background${logPath ? ` — interim output readable at ${logPath}` : ""}`,
+		};
+	};
+
+	/**
+	 * `/btw`'s `f to fork` (lib/btw-fork.ts): a background fork that inherits
+	 * the conversation, then the side question and its answer, and takes the
+	 * question as its task. It reports back like any spawned fork.
+	 */
+	const forkFromBtw = async (request: BtwForkRequest): Promise<BtwForkResult> => {
+		const ctx = request.ctx as ExtensionContext;
+		const sessionFile = ctx.sessionManager.getSessionFile();
+		if (!sessionFile) return { error: "Cannot fork: this session is not persisted (started with --no-session)." };
+		// pi writes the session file with the first assistant reply.
+		if (!existsSync(sessionFile)) return { error: "Cannot fork before the first conversation turn" };
+		const { name } = resolveRunName(registry, FORK_AGENT, undefined);
+		const taskId = generateTaskId();
+		const prepared: PreparedRun = {
+			request: { agent: FORK_AGENT, task: request.question, name, fork: true },
+			agentDef: undefined,
+			record: { name, agent: FORK_AGENT, taskId, sessionSearchDir: runSessionDir(ctx, taskId) ?? "", cwd: ctx.cwd, depth: 0 },
+		};
+		registry.add(prepared.record);
+		const { launched, line } = await launchResident(prepared, ctx, await getRuntime(ctx), sessionFile, undefined, request.messages);
+		return launched ? { name, taskId } : { error: line };
+	};
+	pi.events.on(BTW_FORK_CHANNEL, (data) => {
+		const request = data as BtwForkRequest;
+		request.handled = true;
+		void forkFromBtw(request).then(request.respond, (error: unknown) =>
+			request.respond({ error: `Failed to fork: ${error instanceof Error ? error.message : String(error)}` }),
+		);
+	});
+
 	pi.registerTool({
 		name: "Agent",
 		label: "Agent",
@@ -1785,179 +2008,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			const lines: string[] = [...renamed, ...modelNotes];
 			const runtime = await getRuntime(ctx);
 			for (const p of prepared) {
-				let worktree: Worktree | undefined;
-				if (p.request.worktree) {
-					try {
-						worktree = await isolateInWorktree(ctx, p.record, p.request.name);
-					} catch (error) {
-						lines.push(`✗ ${p.record.name}: could not create a worktree: ${(error as Error).message}`);
-						continue;
-					}
-				}
-
-				const logPath = outputLogPath(p.record);
-				let lastLogWrite = 0;
-				let finish!: () => void;
-				const finished = new Promise<void>((resolve) => {
-					finish = resolve;
-				});
-
-				// The child's final output. task.output() falls back to this
-				// because handle.snapshot().text can be blank at a turn boundary —
-				// the same reason the log write below uses `|| outcome.output`.
-				// Keeps task_output consistent with the log and the completion
-				// notification rather than showing an empty body in that case.
-				let lastOutput = "";
-				// The initial task's own report. task_output for THIS task must return the
-				// first turn's reply — not the resident's growing multi-turn transcript —
-				// the same way a SendMessage task returns one reply (review S12).
-				let firstTurnOutput: string | undefined;
-				const live = trackLiveRun(p.record, p.request);
-				const resident: Resident = { handle: undefined as never, startedAt: Date.now(), turnHandlers: [] };
-				const worktreeNote = worktree
-					? `\n\n(Running in worktree ${worktree.path} — kept while the agent stays resident.)`
-					: "";
-				resident.turnHandlers.push((outcome, review, stopped) => {
-					task.status = stopped ? "stopped" : outcome.failed ? "failed" : "completed";
-					task.finishedAt = Date.now();
-					firstTurnOutput = outcome.output;
-					finish();
-					notifyHandBack({
-						from: p.record.taskId,
-						taskId: p.record.taskId,
-						name: p.record.name,
-						toolUseId: toolCallId,
-						outputFile: logPath,
-						outcome,
-						stopped,
-						startedAt: task.startedAt,
-						report: `${bounded(outcome.output, `${p.record.taskId}-report`, OUTPUT_CAP)}${worktreeNote}`,
-						review,
-					});
-				});
-
-				// Idle reaper: every run is a resident now, so without this a long
-				// session accumulates one live AgentSession (extension instances,
-				// message array, MCP tool refs) per delegation for its whole life.
-				// After RESIDENT_IDLE_MS idle the session is released quietly; the
-				// agent stays reachable — SendMessage resumes it from its session
-				// file. Worktree residents are exempt: release would remove the
-				// worktree a resume still needs. Armed from every turn end.
-				let reaper: ReturnType<typeof setTimeout> | undefined;
-				const armReaper = () => {
-					if (worktree) return;
-					if (reaper) clearTimeout(reaper);
-					reaper = setTimeout(() => {
-						reaper = undefined;
-						if (handle.exited()) return;
-						if (handle.busy()) {
-							armReaper();
-							return;
-						}
-						handle.release();
-					}, RESIDENT_IDLE_MS);
-					reaper.unref?.();
-				};
-				// Captured as a string: onExit runs from a `.finally` long after this
-				// turn's ctx may be stale (review S5).
-				const parentCwd = ctx.cwd;
-				const forkPrompt = p.request.fork ? ctx.getSystemPrompt() : undefined;
-				if (forkPrompt !== undefined) persistForkPrompt(p.record, forkPrompt);
-				// No `signal` here on purpose: a resident outlives the spawning turn and
-				// is stopped through task_stop / the panel, not by the turn ending (S15).
-				const handle = await runtime.runResident({
-					name: p.record.name,
-					agent: p.agentDef,
-					cwd: p.record.cwd,
-					forkFrom: p.request.fork ? (sessionFile ?? undefined) : undefined,
-					parentSystemPrompt: forkPrompt,
-					sessionDir: p.record.sessionSearchDir || undefined,
-					model: p.request.model,
-					fallbackModel: p.request.fallbackModel,
-					thinking: p.request.thinking,
-					onProgress: (toolCalls, text, usage) => {
-						live.progress(toolCalls, usage);
-						// Throttled: onProgress fires per tool call/message with the whole
-						// turn text so far, and this path now carries EVERY run — an
-						// unthrottled sync rewrite would be O(n²) bytes on the hot path.
-						// onTurnEnd below flushes the final state, so the tail is never lost.
-						if (logPath && text && Date.now() - lastLogWrite > LOG_WRITE_INTERVAL_MS) {
-							lastLogWrite = Date.now();
-							writeFileSync(logPath, text);
-						}
-					},
-					sink: live.sink,
-					onMessageToMain: (message) => notifyAgentMessage(p.record.taskId, p.record.name, message),
-					extraTools: spawnToolsFor(p.record),
-					onTurnEnd: (outcome) => {
-						registry.sessionFileFor(p.record);
-						live.settle();
-						lastOutput = resident.handle.snapshot().text || outcome.output;
-						if (logPath) writeFileSync(logPath, lastOutput);
-						// The handler is claimed now (so a message arriving mid-review pairs
-						// with the NEXT turn), but runs only once auto mode's hand-back
-						// review of this turn's action sequence has answered, so the
-						// verdict rides in the same notification as the report instead of
-						// trailing it. The wait is bounded (hand-back-review.ts) and
-						// answered synchronously when auto mode is off.
-						const handler = resident.turnHandlers.shift();
-						// A stop or resume during review must not change this turn's outcome.
-						const stopped = stoppedTaskIds.has(p.record.taskId);
-						armReaper();
-						void awaitHandBackReview(pi.events, p.record, outcome.actions).then((review) => {
-							if (handler) {
-								handler(outcome, review, stopped);
-							} else {
-								// A turn nobody is waiting on (e.g. a steer that raced past its
-								// target turn and ran on its own) must still surface.
-								notifyHandBack({
-									from: p.record.taskId,
-									taskId: p.record.taskId,
-									name: p.record.name,
-									toolUseId: toolCallId,
-									outputFile: logPath,
-									outcome,
-									stopped,
-									startedAt: resident.startedAt,
-									report: bounded(outcome.output, `${p.record.taskId}-update-${Date.now()}`, OUTPUT_CAP),
-									review,
-									details: { update: true },
-								});
-							}
-						});
-					},
-					onExit: () => {
-						if (reaper) clearTimeout(reaper);
-						live.finish(stoppedTaskIds.has(p.record.taskId) ? "stopped" : false);
-						if (residents.get(p.record.taskId) === resident) residents.delete(p.record.taskId);
-						liveHandles.delete(p.record.taskId);
-						if (worktree) void cleanupWorktree(parentCwd, worktree);
-					},
-				});
-				resident.handle = handle;
-				residents.set(p.record.taskId, resident);
-				liveHandles.set(p.record.taskId, handle);
-
-				const task: BackgroundTask = {
-					id: p.record.taskId,
-					kind: "subagent",
-					ownUI: true, // rendered live by the subagents panel's agent strip
-					description: `${p.record.name}: ${p.request.task.slice(0, 80)}`,
-					status: "running",
-					startedAt: Date.now(),
-					logPath,
-					output: () => firstTurnOutput ?? (handle.snapshot().text || lastOutput),
-					stop: () => stopAgent(p.record.taskId, handle),
-					resident: () => !handle.exited(),
-					finished,
-				};
-				pi.events.emit(TASK_REGISTER_CHANNEL, task);
-				void handle.send(frameTask(p.request, worktree, parentCwd));
-
-				spawnedThisLoop.add(p.record.taskId);
-				lines.push(
-					`⏳ ${p.record.name} (task ${p.record.taskId}) running in background${logPath ? ` — interim output readable at ${logPath}` : ""}`,
-				);
+				const { launched, line } = await launchResident(p, ctx, runtime, sessionFile ?? undefined, toolCallId);
+				if (launched) spawnedThisLoop.add(p.record.taskId);
+				lines.push(line);
 			}
 			return {
 				content: [

@@ -6,9 +6,11 @@
  * answering model as a separate, tool-less instance, prepended to the user's
  * question as the final user message.
  *
- * Kept free of pi imports so the message assembly and text extraction are
+ * Kept free of pi imports (pi-ai types only) so the message assembly is
  * unit-tested; the extension owns the model call, the spinner, and the panel.
  */
+
+import type { AssistantMessage, Message, UserMessage } from "@earendil-works/pi-ai";
 
 /**
  * CC's verbatim side-question reminder (captures/btw.json message 20). It frames
@@ -16,8 +18,7 @@
  * model answers in one shot from context instead of trying to act. Like Claude
  * Code, the replayed request still declares the session's real tools (they are
  * part of the cached prefix); a tool call in the answer is never executed, only
- * its text is shown, and the exchange is not persisted, so there is no
- * follow-up turn.
+ * its text is shown, and the exchange never reaches the main conversation.
  */
 export const SIDE_QUESTION_REMINDER = `<system-reminder>This is a side question from the user. You must answer this question directly in a single response.
 
@@ -44,4 +45,42 @@ Simply answer the question with the information you have.</system-reminder>`;
  */
 export function sideQuestionMessage(question: string): string {
 	return `${SIDE_QUESTION_REMINDER}\n\n${question.trim()}`;
+}
+
+/** One answered side question, kept for the rest of the session. */
+export interface BtwExchange {
+	question: string;
+	answer: string;
+}
+
+/** The model an injected assistant message is attributed to. */
+export interface ModelRef {
+	api: string;
+	provider: string;
+	id: string;
+}
+
+/**
+ * One exchange as the user/assistant pair a later request carries: the bare
+ * question (no reminder) and the answer, as Claude Code threads its side
+ * session's history into the next side question and into a fork.
+ */
+export function exchangeMessages(exchange: BtwExchange, model: ModelRef, timestamp = Date.now()): Message[] {
+	const user: UserMessage = { role: "user", content: [{ type: "text", text: exchange.question }], timestamp };
+	const assistant: AssistantMessage = {
+		role: "assistant",
+		content: [{ type: "text", text: exchange.answer }],
+		api: model.api as AssistantMessage["api"],
+		provider: model.provider,
+		model: model.id,
+		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+		stopReason: "stop",
+		timestamp,
+	};
+	return [user, assistant];
+}
+
+/** Every earlier exchange, oldest first, as the messages sent before a new side question. */
+export function historyMessages(exchanges: readonly BtwExchange[], model: ModelRef, timestamp = Date.now()): Message[] {
+	return exchanges.flatMap((exchange) => exchangeMessages(exchange, model, timestamp));
 }
