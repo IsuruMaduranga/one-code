@@ -8,20 +8,22 @@
  * most one recap per user turn (firedSinceTurn), matching CC's
  * hasSummarySinceLastUserTurn guard.
  *
- * Generation mirrors CC's awaySummary.ts: a cheap same-containment model
- * (pickEconomicalContainedModel — the getSmallFastModel analog), CC's verbatim
- * prompt, and only the last 30 messages. It deliberately does NOT reuse the
- * session prompt cache the way compaction does — CC makes a small standalone
- * call here (skipCacheWrite). The result is a display-only entry (appendEntry,
+ * Generation is Claude Code 2.1.261's: the session's last provider request
+ * replayed unchanged on the session model, the reply that answered it, then
+ * the verbatim prompt, so the call reads the cache the session wrote and
+ * writes the reply for the user's next turn (lib/request-replay.ts; the
+ * compaction extension publishes the capture). Without a capture for the
+ * session model, or on a provider API the replay does not cover, it falls back
+ * to a small standalone call on a cheap same-containment model
+ * (pickEconomicalContainedModel): the last 30 messages and name-only stubs of
+ * the active tools (some providers reject a history carrying tool_use blocks
+ * with no tools declared). The result is a display-only entry (appendEntry,
  * not in LLM context). Best-effort throughout: any failure just shows nothing.
  *
  * Deviations from CC, logged in docs/decisions: the session-memory block is
- * omitted (decoupling), and name-only stubs of the active tools are sent
- * rather than an empty tool list — some providers reject a history carrying
- * tool_use blocks with no tools declared, and the small-token instruction keeps
- * the model answering in text rather than calling one. A failed recap does not
- * retry until the next turn (one attempt per turn, success or not). CC_RECAP=0
- * opts out; CC_RECAP_IDLE_MS overrides the 5-minute delay.
+ * omitted (decoupling). A failed recap does not retry until the next turn (one
+ * attempt per turn, success or not). CC_RECAP=0 opts out; CC_RECAP_IDLE_MS
+ * overrides the 5-minute delay.
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -29,9 +31,10 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { convertToLlm, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { withReasoningFallback } from "../lib/model-policy.ts";
+import { followLastExchange, replaySideCall } from "../lib/replay-call.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
 import { pickEconomicalContainedModel } from "../lib/model-tier.ts";
-import { answerText, stripImageBlocks, toolStubs } from "../lib/side-call.ts";
+import { answerText, stripImageBlocks, toolStubs, withoutSystemMessages } from "../lib/side-call.ts";
 import { dimMarkedLine } from "../lib/tui-render.ts";
 import { RECAP_PROMPT, recapLine, recentForRecap, REFERENCE_MARK } from "./prompt.ts";
 import { RecapScheduler } from "./scheduler.ts";
@@ -66,6 +69,8 @@ export default function recapExtension(pi: ExtensionAPI) {
 	pi.on("context", (event) => {
 		capturedMessages = event.messages;
 	});
+	// The same request as it went on the wire, and the reply that answered it.
+	const exchange = followLastExchange(pi);
 
 	let lastCtx: ExtensionContext | undefined;
 	let inFlight: AbortController | undefined;
@@ -90,6 +95,46 @@ export default function recapExtension(pi: ExtensionAPI) {
 		() => void generate(),
 	);
 
+	/** The fallback: a small standalone call on a cheap same-containment model. */
+	async function standaloneRecap(ctx: ExtensionContext, model: Model<Api>, messages: AgentMessage[], signal: AbortSignal): Promise<string> {
+		const choice = pickEconomicalContainedModel(ctx.modelRegistry.getAvailable(), model);
+		if (!choice) return "";
+		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(choice.model);
+		if (!auth.ok) return "";
+		const baseUrl = (auth as { baseUrl?: string }).baseUrl;
+
+		// Name-only stubs of the active tools, so a history carrying tool_use
+		// blocks stays valid on strict providers (see the header note) without
+		// shipping every full schema (~6k tokens) to a call that must answer
+		// in text.
+		const tools = toolStubs(pi.getActiveTools(), STUB_REASON);
+
+		const recent = recentForRecap(withoutSystemMessages(messages));
+		// The cheap reader may be a text-only model, and the recap does not need
+		// images — strip them so a pasted image or one a Read returned cannot break
+		// the call (docs/decisions/model-policy.md).
+		const recapMessages = [...stripImageBlocks(convertToLlm(recent)), { role: "user" as const, content: RECAP_PROMPT, timestamp: Date.now() }];
+		// Thinking off unless the model cannot disable it; withReasoningFallback
+		// sends a level up front for catalog-marked models and retries on the 400
+		// for the rest. Fires on a 5-min idle timer, so no cross-call memo.
+		const result = await withReasoningFallback(choice.model, (reasoning) => {
+			const timeout = AbortSignal.timeout(RECAP_TIMEOUT_MS);
+			return completeSimple(
+				baseUrl ? ({ ...choice.model, baseUrl } as Model<Api>) : choice.model,
+				{ systemPrompt: "", messages: recapMessages, tools },
+				{
+					apiKey: auth.apiKey,
+					headers: auth.headers,
+					env: auth.env,
+					signal: AbortSignal.any([signal, timeout]),
+					maxTokens: RECAP_MAX_TOKENS,
+					...(reasoning ? { reasoning } : {}),
+				},
+			);
+		}, undefined, (usage) => recordUsage(pi, "recap", usage));
+		return answerText(result.content);
+	}
+
 	async function generate() {
 		const ctx = lastCtx;
 		const messages = capturedMessages;
@@ -100,43 +145,13 @@ export default function recapExtension(pi: ExtensionAPI) {
 		try {
 			const model = ctx.model;
 			if (!model) return;
-			const choice = pickEconomicalContainedModel(ctx.modelRegistry.getAvailable(), model);
-			if (!choice) return;
-			const auth = await ctx.modelRegistry.getApiKeyAndHeaders(choice.model);
-			if (!auth.ok) return;
-			const baseUrl = (auth as { baseUrl?: string }).baseUrl;
-
-			// Name-only stubs of the active tools, so a history carrying tool_use
-			// blocks stays valid on strict providers (see the header note) without
-			// shipping every full schema (~6k tokens) to a call that must answer
-			// in text.
-			const tools = toolStubs(pi.getActiveTools(), STUB_REASON);
-
-			const recent = recentForRecap(messages);
-			// The cheap reader may be a text-only model, and the recap does not need
-			// images — strip them so a pasted image or one a Read returned cannot break
-			// the call (docs/decisions/model-policy.md).
-			const recapMessages = [...stripImageBlocks(convertToLlm(recent)), { role: "user" as const, content: RECAP_PROMPT, timestamp: Date.now() }];
-			// Thinking off unless the model cannot disable it; withReasoningFallback
-			// sends a level up front for catalog-marked models and retries on the 400
-			// for the rest. Fires on a 5-min idle timer, so no cross-call memo.
-			const result = await withReasoningFallback(choice.model, (reasoning) => {
-				const timeout = AbortSignal.timeout(RECAP_TIMEOUT_MS);
-				return completeSimple(
-					baseUrl ? ({ ...choice.model, baseUrl } as Model<Api>) : choice.model,
-					{ systemPrompt: "", messages: recapMessages, tools },
-					{
-						apiKey: auth.apiKey,
-						headers: auth.headers,
-						env: auth.env,
-						signal: AbortSignal.any([controller.signal, timeout]),
-						maxTokens: RECAP_MAX_TOKENS,
-						...(reasoning ? { reasoning } : {}),
-					},
-				);
-			}, undefined, (usage) => recordUsage(pi, "recap", usage));
+			const replayed = await replaySideCall(ctx, model as Model<Api>, exchange, RECAP_PROMPT, {
+				signal: controller.signal,
+				timeoutMs: RECAP_TIMEOUT_MS,
+				onUsage: (usage) => recordUsage(pi, "recap", usage),
+			});
+			const content = replayed ?? (await standaloneRecap(ctx, model as Model<Api>, messages, controller.signal));
 			if (controller.signal.aborted) return;
-			const content = answerText(result.content);
 			if (!content) return;
 			scheduler.markFired();
 			pi.appendEntry<RecapData>(ENTRY_TYPE, { content });

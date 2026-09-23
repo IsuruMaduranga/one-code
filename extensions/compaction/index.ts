@@ -38,22 +38,18 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Context, Message, Model, Tool } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
-import {
-	convertToLlm,
-	type ExtensionAPI,
-	type ExtensionContext,
-	type SessionBeforeCompactEvent,
-} from "@earendil-works/pi-coding-agent";
+import { convertToLlm, type ExtensionAPI, type SessionBeforeCompactEvent } from "@earendil-works/pi-coding-agent";
 import {
 	type AnthropicModelCompat,
-	anthropicBetas,
 	clearThinkingApplies,
 	clearThinkingEnabled,
-	isAnthropicOAuth,
+	sessionRequestHeaders,
 	withClearThinking,
 } from "../context-management/index.ts";
 import { looksLikeAnthropicRequest } from "../lib/anthropic-payload.ts";
 import { forcedReasoningLevel } from "../lib/model-policy.ts";
+import { captureRequest, extendPayload, LAST_REQUEST_CHANNEL, LastExchange, type RequestCapture, replayOutputCap } from "../lib/request-replay.ts";
+import { withoutSystemMessages } from "../lib/side-call.ts";
 import { fitToBudget, replayFits, withoutUsage } from "./fit.ts";
 import { buildCompactionInstruction, COMPACTION_MAX_TOKENS, continuationSummary, extractSummary } from "./prompt.ts";
 
@@ -87,28 +83,57 @@ export default function compactionExtension(pi: ExtensionAPI) {
 	 * standalone path) diverges at message one, because those injected reminders
 	 * never become entries — so it cannot reproduce the cached prefix at all.
 	 *
-	 * We hold the reference, not a copy: `emitContext` hands each handler a fresh
-	 * structuredClone the session never mutates again, and compaction is the
-	 * last extension with a `context` handler, so this reference is exactly the
-	 * array the turn sent. Returning nothing keeps the handler a pure observer.
+	 * We hold the messages themselves, not copies: `emitContext` hands each
+	 * handler a fresh structuredClone the session never mutates again, and
+	 * compaction is the last extension with a `context` handler, so these are
+	 * exactly the messages the turn sent. Returning nothing keeps the handler a
+	 * pure observer.
+	 *
+	 * The system prompt is captured at the same moment. `ctx.getSystemPrompt()`
+	 * reflects the prompt a run forced through `before_agent_start` only while
+	 * that run lasts; pi drops the run's options when it settles, so read from an
+	 * idle `/compact` it is pi's default prompt and the replay misses the cache
+	 * (findings §27).
 	 */
-	let capturedMessages: AgentMessage[] | undefined;
-	pi.on("context", (event) => {
-		capturedMessages = event.messages;
+	let captured: { messages: AgentMessage[]; systemPrompt: string; model: string | undefined } | undefined;
+	pi.on("context", (event, ctx) => {
+		captured = { messages: event.messages, systemPrompt: ctx.getSystemPrompt(), model: modelKey(ctx.model) };
 	});
+
+	/**
+	 * The same request as pi put it on the wire, and the reply that answered it
+	 * (lib/request-replay.ts). This extension loads after every extension that
+	 * edits the payload (tool-search, context-management), so the body it sees
+	 * is final; it is published for the btw and recap side calls too.
+	 */
+	const exchange = new LastExchange<AgentMessage & { role: string }>();
+	const publish = (capture: ReturnType<typeof captureRequest>) => {
+		exchange.setCapture(capture);
+		pi.events.emit(LAST_REQUEST_CHANNEL, capture);
+	};
+	pi.on("before_provider_request", (event, ctx) => {
+		publish(captureRequest(ctx.model as { api?: string; provider?: string; id?: string } | undefined, event.payload));
+	});
+	pi.on("message_end", (event) => {
+		exchange.noteMessage(event.message as AgentMessage & { role: string });
+	});
+	pi.on("session_start", () => publish(undefined));
+
 	// After a compaction the capture describes the pre-compaction request. A
 	// second /compact before any turn would otherwise re-summarize history the
 	// first one already folded away (and mis-scope the kept tail); the standalone
 	// reconstruction from entries serves until the next request recaptures.
 	pi.on("session_compact", () => {
-		capturedMessages = undefined;
+		captured = undefined;
+		publish(undefined);
 	});
 	// A /tree branch switch stays in the same process and fires no `context`
 	// event (navigateTree rebuilds the messages itself), so the capture would
 	// still describe the abandoned branch — and a /compact before the next turn
 	// summarized work the kept branch never did (review H1). Same remedy.
 	pi.on("session_tree", () => {
-		capturedMessages = undefined;
+		captured = undefined;
+		publish(undefined);
 	});
 
 	pi.on("session_before_compact", async (event, ctx) => {
@@ -118,7 +143,12 @@ export default function compactionExtension(pi: ExtensionAPI) {
 		if (!model) return undefined;
 		// Snapshot before the first await so the capture and pi's preparation
 		// describe the same request even if a context event lands meanwhile.
-		const captured = capturedMessages;
+		// A replay exists to read the session model's cache, and the prompt is built
+		// per model, so a capture made under another model (a `/model` switch with
+		// no turn since) is not replayed: the standalone shape serves.
+		const capture =
+			captured && captured.model === modelKey(model) ? { ...captured, messages: withoutSystemMessages(captured.messages) } : undefined;
+		const wire = exchange.forModel(model);
 
 		try {
 			const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
@@ -133,16 +163,24 @@ export default function compactionExtension(pi: ExtensionAPI) {
 			// Otherwise (no capture yet, an overflow, a nearly full window) the
 			// standalone shape summarizes the doomed span pi isolated. An overflow
 			// never replays, so its replay request is not even built.
-			const replay = captured && event.reason !== "overflow" ? replayRequest(pi, ctx, captured, event) : undefined;
-			const request =
-				replay && replayFits(event.reason, model, replay, maxTokens)
-					? replay
-					: standaloneRequest(
-							model,
-							event.preparation,
-							buildCompactionInstruction({ reason: event.reason, customInstructions: event.customInstructions }),
-							maxTokens,
-						);
+			const replay = capture && event.reason !== "overflow" ? replayRequest(pi, capture, event, wire?.reply) : undefined;
+			const replaying = replay !== undefined && replayFits(event.reason, model, replay, maxTokens);
+			const request = replaying
+				? replay
+				: standaloneRequest(
+						model,
+						event.preparation,
+						buildCompactionInstruction({ reason: event.reason, customInstructions: event.customInstructions }),
+						maxTokens,
+					);
+			// A replay goes out as the session's own last request body with the
+			// reply and the instruction appended, so it reads the cache that request
+			// wrote: rebuilt from `request`, the tools array (tool-search reshapes it
+			// on the wire) never matched on first-party Claude (measured on Sonnet 5:
+			// 0 read, 65k written). `request` still sizes the call (fit.ts), and
+			// pi-ai converts only the tail. No capture for this model, or too little
+			// room left under the captured cap: `request` as is.
+			const plan = replaying && wire ? wirePlan(wire, request, maxTokens) : undefined;
 
 			// When context-management (clear_thinking) is active for this session,
 			// the agent loop's cached message prefix has old thinking blocks cleared
@@ -159,17 +197,32 @@ export default function compactionExtension(pi: ExtensionAPI) {
 			// the Anthropic-shaped fields, and are gated to Anthropic anyway.
 			const cmModel = model as { api?: string; provider?: string; baseUrl?: string; compat?: AnthropicModelCompat };
 			const clearThinking = clearThinkingEnabled(process.env.CC_CLEAR_THINKING, cmModel);
-			const headers = clearThinking
-				? { ...auth.headers, "anthropic-beta": anthropicBetas(isAnthropicOAuth(), cmModel.compat) }
-				: auth.headers;
+			const headers = sessionRequestHeaders(cmModel, auth.headers);
+
+			// A replay sends the captured body (which already carries the
+			// clear_thinking edit) with the tail pi-ai just built appended.
+			// Otherwise the clear_thinking body edit, matching the session's
+			// requests (see the header note above), only on Anthropic requests
+			// that carry thinking, exactly as the context-management extension gates it.
+			let onPayload: ((payload: unknown) => unknown) | undefined;
+			if (plan) {
+				onPayload = (payload) => extendPayload(plan.capture, payload as Record<string, unknown>, plan.maxTokens);
+			} else if (clearThinking) {
+				onPayload = (payload) =>
+					looksLikeAnthropicRequest(payload) &&
+					clearThinkingApplies(payload as Record<string, unknown>, cmModel.compat?.forceAdaptiveThinking === true)
+						? withClearThinking(payload as Record<string, unknown>)
+						: payload;
+			}
 
 			const timeout = AbortSignal.timeout(COMPACTION_TIMEOUT_MS);
-			const result = await completeSimple(baseUrl ? ({ ...model, baseUrl } as Model<Api>) : model, request, {
+			const callContext: Context = plan ? { systemPrompt: "", messages: plan.tail, tools: [] } : request;
+			const result = await completeSimple(baseUrl ? ({ ...model, baseUrl } as Model<Api>) : model, callContext, {
 				apiKey: auth.apiKey,
 				headers,
 				env: auth.env,
 				signal: AbortSignal.any([event.signal, timeout]),
-				maxTokens,
+				maxTokens: plan?.maxTokens ?? maxTokens,
 				// The session id is the prompt-cache key / routing affinity on the
 				// providers that use one (openai-codex prompt_cache_key, session
 				// headers). Without it the replayed prefix cannot hit the session's
@@ -189,16 +242,7 @@ export default function compactionExtension(pi: ExtensionAPI) {
 				// unless the model cannot disable thinking, where an off-request
 				// would 400 (forcedReasoningLevel sends its lowest level instead).
 				reasoning: ctx.thinkingLevel === "off" ? forcedReasoningLevel(model) : ctx.thinkingLevel,
-				// The clear_thinking body edit, matching the session's requests (see
-				// the header note above). Only attached on Anthropic requests that
-				// carry thinking, exactly as the context-management extension gates it.
-				onPayload: clearThinking
-					? (payload: unknown) =>
-							looksLikeAnthropicRequest(payload) &&
-							clearThinkingApplies(payload as Record<string, unknown>, cmModel.compat?.forceAdaptiveThinking === true)
-								? withClearThinking(payload as Record<string, unknown>)
-								: payload
-					: undefined,
+				onPayload,
 			});
 
 			const text = result.content
@@ -224,6 +268,26 @@ export default function compactionExtension(pi: ExtensionAPI) {
 	});
 }
 
+/** A model's identity for matching a capture to the current model. */
+function modelKey(model: { provider?: string; id?: string } | undefined): string | undefined {
+	return model ? `${model.provider}/${model.id}` : undefined;
+}
+
+/**
+ * A replay's wire form: the tail pi-ai converts (the reply, if any, and the
+ * instruction: the last messages of `request`) and the output cap left under
+ * the captured request's own, or undefined when too little room is left.
+ */
+function wirePlan(
+	wire: { capture: RequestCapture; reply: unknown },
+	request: Context,
+	maxTokens: number,
+): { capture: RequestCapture; tail: Message[]; maxTokens: number } | undefined {
+	const tail = request.messages.slice(-(wire.reply ? 2 : 1));
+	const cap = replayOutputCap(wire.capture, tail, maxTokens);
+	return cap === undefined ? undefined : { capture: wire.capture, tail, maxTokens: cap };
+}
+
 /**
  * The cache-aligned shape: the session's system prompt, the active tool
  * definitions in their active order — kept purely so the cached prefix (tools
@@ -237,7 +301,15 @@ export default function compactionExtension(pi: ExtensionAPI) {
  * breakpoint, so a request ending well before the last cached block misses
  * the cache the whole replay exists to hit.
  */
-function replayRequest(pi: ExtensionAPI, ctx: ExtensionContext, captured: AgentMessage[], event: SessionBeforeCompactEvent): Context {
+function replayRequest(
+	pi: ExtensionAPI,
+	captured: { messages: AgentMessage[]; systemPrompt: string },
+	event: SessionBeforeCompactEvent,
+	reply: AgentMessage | undefined,
+): Context {
+	// The reply that answered the captured request is part of the conversation
+	// pi is compacting, and the last message the replayed body gains.
+	const conversation = reply ? [...captured.messages, reply] : captured.messages;
 	const byName = new Map(pi.getAllTools().map((tool) => [tool.name, tool]));
 	const tools = pi
 		.getActiveTools()
@@ -247,9 +319,9 @@ function replayRequest(pi: ExtensionAPI, ctx: ExtensionContext, captured: AgentM
 	const instruction = buildCompactionInstruction({
 		reason: event.reason,
 		customInstructions: event.customInstructions,
-		keptTail: keptTailOf(captured, event.preparation),
+		keptTail: keptTailOf(conversation, event.preparation),
 	});
-	return { systemPrompt: ctx.getSystemPrompt(), messages: [...convertToLlm(captured), instructionMessage(instruction)], tools };
+	return { systemPrompt: captured.systemPrompt, messages: [...convertToLlm(conversation), instructionMessage(instruction)], tools };
 }
 
 /**

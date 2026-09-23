@@ -18,9 +18,9 @@ export const REFERENCE_MARK = "※";
  */
 export const RECENT_MESSAGE_WINDOW = 30;
 
-/** The away-summary instruction, verbatim from CC's buildAwaySummaryPrompt (no memory block). */
+/** The away-summary instruction, verbatim from Claude Code 2.1.261's request (no memory block). */
 export const RECAP_PROMPT =
-	"The user stepped away and is coming back. Write exactly 1-3 short sentences. Start by stating the high-level task — what they are building or debugging, not implementation details. Next: the concrete next step. Skip status reports and commit recaps.";
+	"The user stepped away and is coming back. Recap in under 40 words, 1-2 plain sentences, no markdown. Lead with the overall goal and current task, then the one next action. Skip root-cause narrative, fix internals, secondary to-dos, and em-dash tangents.";
 
 /** The transcript text after the ※ mark, matching CC's shipped "recap: …" line. */
 export function recapLine(content: string): string {

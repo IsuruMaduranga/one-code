@@ -3,9 +3,9 @@ import { RECAP_PROMPT, RECENT_MESSAGE_WINDOW, recapLine, recentForRecap, REFEREN
 import { RecapScheduler, type TimerOps } from "../../extensions/recap/scheduler.ts";
 
 describe("recap prompt", () => {
-	it("uses Claude Code's verbatim away-summary instruction", () => {
+	it("uses Claude Code 2.1.261's verbatim away-summary instruction", () => {
 		expect(RECAP_PROMPT).toBe(
-			"The user stepped away and is coming back. Write exactly 1-3 short sentences. Start by stating the high-level task — what they are building or debugging, not implementation details. Next: the concrete next step. Skip status reports and commit recaps.",
+			"The user stepped away and is coming back. Recap in under 40 words, 1-2 plain sentences, no markdown. Lead with the overall goal and current task, then the one next action. Skip root-cause narrative, fix internals, secondary to-dos, and em-dash tangents.",
 		);
 	});
 

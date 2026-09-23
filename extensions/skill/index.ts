@@ -16,6 +16,7 @@ import os from "node:os";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getAgentDir, stripFrontmatter } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { notifyOrPrint } from "../lib/headless-output.ts";
 import { pluginRoot } from "../lib/plugin-root.ts";
 import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
 import { awaitOneShotTurn } from "../lib/notifications.ts";
@@ -274,22 +275,6 @@ export default function skillExtension(pi: ExtensionAPI) {
 			};
 		},
 	});
-
-	/**
-	 * Surface a user-facing skill message: a TUI/RPC toast where there is UI, or
-	 * stderr in a one-shot run (`-p`, `--mode json`), where `ctx.ui.notify` is a
-	 * no-op (pi wires no UI context there) so the message would otherwise vanish
-	 * and the command would exit silently. `console.error` writes to stderr, so it
-	 * never corrupts the `--mode json` event stream on stdout.
-	 */
-	const notifyOrPrint = (
-		ctx: Pick<ExtensionContext, "hasUI" | "ui">,
-		message: string,
-		level: "warning" | "error",
-	): void => {
-		if (ctx.hasUI) ctx.ui.notify(message, level);
-		else console.error(message);
-	};
 
 	/**
 	 * Run a resolved skill the way a user-typed command does: refuse an "off"
