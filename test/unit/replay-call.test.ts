@@ -32,13 +32,25 @@ describe("replaySideCall", () => {
 		expect(out.messages).toHaveLength(1);
 	});
 
-	it("returns empty when the caller aborted, but falls back (undefined) on its own timeout or an error", async () => {
+	it("returns empty when the caller aborted, and falls back (undefined) on an error", async () => {
 		const aborted = new AbortController();
 		aborted.abort();
 		completeSimple.mockResolvedValue(reply("aborted"));
 		expect(await replaySideCall(ctx, model, exchange(), "q", { signal: aborted.signal, timeoutMs: 1000, onUsage: () => {} })).toBe("");
-		expect(await replaySideCall(ctx, model, exchange(), "q", { signal: new AbortController().signal, timeoutMs: 1000, onUsage: () => {} })).toBeUndefined();
 		completeSimple.mockResolvedValue(reply("error"));
+		expect(await replaySideCall(ctx, model, exchange(), "q", { signal: new AbortController().signal, timeoutMs: 1000, onUsage: () => {} })).toBeUndefined();
+	});
+
+	it("throws on its own timeout, so the caller does not start a second call", async () => {
+		completeSimple.mockImplementationOnce(async (_model: unknown, _context: unknown, options: { signal: AbortSignal }) => {
+			await new Promise((resolve) => options.signal.addEventListener("abort", resolve));
+			return reply("aborted");
+		});
+		await expect(replaySideCall(ctx, model, exchange(), "q", { signal: new AbortController().signal, timeoutMs: 5, onUsage: () => {} })).rejects.toThrow("No answer within");
+	});
+
+	it("falls back (undefined) when the reply holds no text, such as a tool call", async () => {
+		completeSimple.mockResolvedValue({ role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", id: "t1", name: "read", arguments: {} }], usage: {} });
 		expect(await replaySideCall(ctx, model, exchange(), "q", { signal: new AbortController().signal, timeoutMs: 1000, onUsage: () => {} })).toBeUndefined();
 	});
 

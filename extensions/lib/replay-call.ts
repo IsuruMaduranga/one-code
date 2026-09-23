@@ -25,9 +25,12 @@ export function followLastExchange(pi: ExtensionAPI): SessionExchange {
 /**
  * Send `prompt` as the replay of the last request on `model`, returning the
  * answer's text. Undefined when there is no capture for `model`, too little
- * output room is left, there is no API key, or the call failed or timed out,
- * so the caller runs its standalone call instead; an empty string when the
- * caller's own signal aborted it.
+ * output room is left, there is no API key, the call failed, or the reply
+ * held no text (the replayed request declares the session's tools, so the
+ * model can answer with a tool call), so the caller runs its standalone call
+ * instead; an empty string when the caller's own signal aborted it. Throws
+ * when `timeoutMs` ran out: the time budget is spent, so a standalone call
+ * must not start a second one.
  */
 export async function replaySideCall(
 	ctx: Pick<ExtensionContext, "modelRegistry" | "sessionManager">,
@@ -44,6 +47,7 @@ export async function replaySideCall(
 	const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
 	if (!auth.ok) return undefined;
 	const baseUrl = (auth as { baseUrl?: string }).baseUrl;
+	const timeout = AbortSignal.timeout(options.timeoutMs);
 	const result = await completeSimple(
 		baseUrl ? ({ ...model, baseUrl } as Model<Api>) : model,
 		{ systemPrompt: "", messages: tail, tools: [] },
@@ -51,13 +55,15 @@ export async function replaySideCall(
 			apiKey: auth.apiKey,
 			headers: sessionRequestHeaders(model, auth.headers),
 			env: auth.env,
-			signal: AbortSignal.any([options.signal, AbortSignal.timeout(options.timeoutMs)]),
+			signal: AbortSignal.any([options.signal, timeout]),
 			maxTokens: cap,
 			sessionId: ctx.sessionManager.getSessionId(),
 			onPayload: (payload) => extendPayload(wire.capture, payload as Record<string, unknown>, cap),
 		},
 	);
 	options.onUsage(result.usage);
-	if (result.stopReason === "aborted") return options.signal.aborted ? "" : undefined;
-	return result.stopReason === "error" ? undefined : answerText(result.content);
+	if (options.signal.aborted) return "";
+	if (timeout.aborted) throw new Error(`No answer within ${Math.round(options.timeoutMs / 1000)} seconds.`);
+	if (result.stopReason === "aborted" || result.stopReason === "error") return undefined;
+	return answerText(result.content) || undefined;
 }
