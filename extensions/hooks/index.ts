@@ -38,6 +38,7 @@
  * (settings, consent, logging) and a payload naming the child.
  */
 
+import { contentText } from "@earendil-works/pi-ai";
 import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { RunOutcomeLatch } from "../lib/interrupt.ts";
 import { claudeConfigDir } from "../lib/paths.ts";
@@ -59,6 +60,8 @@ import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { REMINDER_CHANNEL, wrapReminder } from "../lib/reminders.ts";
 import { type ChildHookCall, type ChildHookResult, type HookBridge, SUBAGENT_HOOK_CHANNEL, type SubagentHookPayload } from "./subagent-bridge.ts";
 import { projectHooksApproved } from "./trust.ts";
+import { QueuedDelivery } from "../lib/queued-delivery.ts";
+import { SKILL_INVOCATION_TYPE, type SkillInvocationDetails } from "../skill/invoke.ts";
 
 /** Claude Code's `hook_additional_context` attachment text (utils/messages.ts). */
 export function hookContextText(event: CcHookEvent, text: string): string {
@@ -104,6 +107,12 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	let stopHookActive = false;
 	/** Context from UserPromptSubmit / SessionStart / PostCompact hooks, delivered with the next prompt. */
 	let pendingPromptContext: Array<{ event: CcHookEvent; text: string }> = [];
+	/**
+	 * UserPromptSubmit context for messages queued mid-turn, held until pi
+	 * delivers the message (lib/queued-delivery.ts): such a message never
+	 * reaches before_agent_start.
+	 */
+	const queuedPromptContext = new QueuedDelivery<string>();
 	/** The last context seen, for bridged child calls (dispatched parent-side). */
 	let lastCtx: ExtensionContext | undefined;
 	/**
@@ -325,7 +334,12 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	// ---- UserPromptSubmit ---------------------------------------------------
 	pi.on("input", async (event, ctx) => {
 		if (event.source === "extension") return undefined;
-		stopHookActive = false;
+		// Set for a message queued mid-turn (pi 0.86+ fires `input` for
+		// steer/followUp). The Stop latch is reset in before_agent_start, where a
+		// turn really starts: pi re-checks streaming after these handlers, so a
+		// queued message whose turn ended during the hook opens a new turn.
+		const queued = event.streamingBehavior;
+		const gen = sessionGen;
 		// Drain the backgrounded SessionStart dispatch before this prompt's own
 		// UserPromptSubmit context, so their order in the first turn is unchanged
 		// (SessionStart context precedes UserPromptSubmit). before_agent_start is
@@ -337,8 +351,38 @@ export default function hooksExtension(pi: ExtensionAPI) {
 			notify(ctx, `Prompt blocked by UserPromptSubmit hook: ${outcome.block.reason}`);
 			return { action: "handled" as const };
 		}
-		if (outcome.additionalContext) pendingPromptContext.push({ event: "UserPromptSubmit", text: outcome.additionalContext });
+		// A session_start during the hook (an RPC new_session) superseded it.
+		if (!outcome.additionalContext || gen !== sessionGen) return undefined;
+		// A queued message's context waits for pi to deliver that message
+		// (message_start below), so it rides the same request.
+		if (queued) queuedPromptContext.hold(event.text, hookContextText("UserPromptSubmit", outcome.additionalContext));
+		else pendingPromptContext.push({ event: "UserPromptSubmit", text: outcome.additionalContext });
 		return undefined;
+	});
+
+	// pi awaits this before the request that carries the delivered message, so a
+	// one-shot emitted here is pinned to that message: after the prompt, as the
+	// before_agent_start message is for a prompt that opens a turn.
+	pi.on("message_start", (event) => {
+		const message = event.message;
+		const emit = (text: string) => pi.events.emit(REMINDER_CHANNEL, { text, placement: "last-append" });
+		if (message.role === "user") {
+			if (queuedPromptContext.isEmpty) return;
+			const text = queuedPromptContext.release(contentText(message.content, ""));
+			if (text) emit(text);
+			return;
+		}
+		// A `/skill:` command the skill extension took over arrives as its hidden
+		// message, carrying the typed text. It opens the turn when the command
+		// was idle, through a sendMessage that never reaches before_agent_start,
+		// so the prompt context waiting there rides this message too.
+		if (message.role !== "custom" || message.customType !== SKILL_INVOCATION_TYPE) return;
+		const input = (message.details as Partial<SkillInvocationDetails> | undefined)?.input;
+		const queued = typeof input === "string" ? queuedPromptContext.release(input) : undefined;
+		if (queued) emit(queued);
+		const waiting = pendingPromptContext;
+		pendingPromptContext = [];
+		for (const { event: hookEvent, text } of waiting) emit(hookContextText(hookEvent, text));
 	});
 
 	// Prompt/session/compaction hook context rides the turn it belongs to as a
@@ -353,6 +397,9 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		// The `input` handler usually drained it already; this is the backstop for
 		// turns with no input event.
 		await drainSessionStart();
+		// Every prompt that opens a turn lands here; a queued delivery and the
+		// Stop hook's own continuation (an idle sendMessage) do not.
+		stopHookActive = false;
 		if (pendingPromptContext.length === 0) return;
 		const texts = pendingPromptContext;
 		pendingPromptContext = [];
@@ -381,6 +428,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		lastCtx = ctx;
 		const gen = ++sessionGen;
 		pendingPromptContext = [];
+		queuedPromptContext.clear();
 		sessionStartPending = undefined;
 		// Publish the child hook bridge (subagent-bridge.ts). The closures read
 		// live parent state per call, so once per session start is enough.
@@ -492,6 +540,9 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("agent_settled", async (_event, ctx) => {
+		// A queued message pi never delivered as typed (expanded, or taken over by
+		// an extension) keeps no context for a later, unrelated prompt.
+		queuedPromptContext.clear();
 		// CC skips Stop when the turn ended on an API error (a blocking hook would
 		// spiral: error → block → retry → error) or on a user interrupt (its query
 		// loop returns on the abort signal before the stop-hook step). An empty latch

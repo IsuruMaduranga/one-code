@@ -62,6 +62,19 @@ ${body}
 const SKILL_BLOCK_START = '<skill name="';
 const SKILL_BLOCK_RE = /<skill name="([^"]+)"[^>]*>[\s\S]*?<\/skill>/g;
 
+/**
+ * The hidden message a `/skill:` command is delivered as. `details.input` is
+ * the text the user typed, so an extension that saw that text at `input` (the
+ * hooks extension's UserPromptSubmit context) can find the message that
+ * replaced it.
+ */
+export const SKILL_INVOCATION_TYPE = "one-code:skill-invocation";
+export interface SkillInvocationDetails {
+	skill: string;
+	args: string;
+	input?: string;
+}
+
 export const offSkillNotice = (name: string): string =>
 	`[Skill "${name}" is turned off — its instructions were removed. The user can re-enable it from /skills or /plugins.]`;
 

@@ -13,20 +13,22 @@
  * Orchestration is opt-in, like Claude Code: the tool description gates it,
  * and the literal keyword "ultracode" in a user message arms the turn via a
  * system reminder (skipped while `/effort ultracode` has the standing block
- * on — see `effort/`). The keyword is read by pi's `input` event, which only
- * a prompt sent to an idle session fires; a message queued mid-turn does not
- * arm (docs/upstream_prs.md #14).
+ * on — see `effort/`). The keyword is read by pi's `input` event; on pi 0.86+
+ * that includes a message queued mid-turn, whose reminder is held until pi
+ * delivers the message. On older pi a queued message does not arm.
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
+import { contentText } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { recordUsage } from "../lib/usage-bus.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent } from "../lib/model-unusable.ts";
 import { whenAborted } from "../lib/abort.ts";
 import { createTaskNotifier, oneShotNote, sessionOutlivesTurn, taskNotification, taskStatusOf, workflowSummary } from "../lib/notifications.ts";
+import { QueuedDelivery } from "../lib/queued-delivery.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { ULTRACODE_MODE_CHANNEL } from "../effort/slider.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../permissions/modes.ts";
@@ -445,19 +447,27 @@ export default function workflowExtension(pi: ExtensionAPI) {
 
 	// While ultracode MODE is on (/effort ultracode) the standing block already
 	// carries the opt-in, so the keyword's single-turn one-shot is skipped: one
-	// instruction for one fact. `input` fires for prompt() only — a message the
-	// user queues while a turn is running (pi's steer()/followUp()) is expanded
-	// without it and does not arm the turn (upstream ask #14; the mode covers it).
+	// instruction for one fact. Since pi 0.86 `input` also fires for a message
+	// queued mid-turn; its one-shot waits until pi delivers that message
+	// (lib/queued-delivery.ts), or it would ride the running tool's result, before
+	// the message. On older pi a queued message never reaches `input` and the
+	// keyword arms nothing (the mode covers it).
 	let ultracodeMode = false;
 	pi.events.on(ULTRACODE_MODE_CHANNEL, (data) => {
 		ultracodeMode = (data as { active?: boolean })?.active === true;
 	});
+	const queuedKeyword = new QueuedDelivery<true>();
 	pi.on("input", (event) => {
-		if (!ultracodeMode && /\bultracode\b/i.test(event.text)) {
-			pi.events.emit(REMINDER_CHANNEL, { text: ULTRACODE_REMINDER, scope: "next-turn" });
-		}
+		if (ultracodeMode || !/\bultracode\b/i.test(event.text)) return undefined;
+		if (event.streamingBehavior) queuedKeyword.hold(event.text, true);
+		else pi.events.emit(REMINDER_CHANNEL, { text: ULTRACODE_REMINDER, scope: "next-turn" });
 		return undefined;
 	});
+	pi.on("message_start", (event) => {
+		if (queuedKeyword.isEmpty || event.message.role !== "user") return;
+		if (queuedKeyword.release(contentText(event.message.content, ""))) pi.events.emit(REMINDER_CHANNEL, { text: ULTRACODE_REMINDER, placement: "last-append" });
+	});
+	pi.on("agent_settled", () => queuedKeyword.clear());
 
 	// Down-arrow soft focus for the below-editor status strip (Claude Code's
 	// bottom workflow entry): with the editor focused and empty, ↓ highlights
@@ -530,6 +540,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 
 	pi.on("session_start", (_event, ctx) => {
 		lastCtx = ctx;
+		queuedKeyword.clear();
 		registerInputHook(ctx);
 	});
 

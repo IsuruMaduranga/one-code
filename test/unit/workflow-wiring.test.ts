@@ -44,6 +44,27 @@ describe("workflow wiring: the ultracode keyword", () => {
 		await fake.fire("input", { text: "ultracode: audit every extension", source: "interactive" });
 		expect(reminders).toHaveLength(1);
 	});
+
+	const delivered = (text: string) => fake.fire("message_start", { message: { role: "user", content: [{ type: "text", text }] } });
+
+	it.each(["steer", "followUp"] as const)("holds the one-shot for a message queued mid-turn (%s) until pi delivers it", async (behavior) => {
+		await fake.fire("input", { text: "ultracode: audit it", source: "interactive", streamingBehavior: behavior });
+		// Emitted now, the next tool result would take it: before the message.
+		expect(reminders).toHaveLength(0);
+		await delivered("an earlier queued message");
+		expect(reminders).toHaveLength(0);
+		await delivered("ultracode: audit it");
+		expect(reminders).toEqual([{ text: expect.stringContaining('keyword "ultracode"'), placement: "last-append" }]);
+		await delivered("ultracode: audit it");
+		expect(reminders).toHaveLength(1);
+	});
+
+	it("drops a held one-shot when the turn settles without delivering its message", async () => {
+		await fake.fire("input", { text: "/tpl ultracode", source: "interactive", streamingBehavior: "steer" });
+		await fake.fire("agent_settled", {});
+		await delivered("/tpl ultracode");
+		expect(reminders).toHaveLength(0);
+	});
 });
 
 describe("workflow wiring: one-shot modes (LIFECYCLE-REVIEW-2026-09-06 M1)", () => {

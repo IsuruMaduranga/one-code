@@ -38,6 +38,8 @@ import {
 	parseSkillCommand,
 	redactOffSkillMessages,
 	resolveSkill,
+	SKILL_INVOCATION_TYPE,
+	type SkillInvocationDetails,
 	skillCommandCandidates,
 } from "./invoke.ts";
 import { decodeSkillsKey } from "./panel/keys.ts";
@@ -304,7 +306,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 		found: IndexedSkill,
 		args: string,
 		ctx: ExtensionContext & { waitForIdle?: () => Promise<void> },
-		extra: { images?: Array<{ type: "image"; data: string; mimeType: string }>; streamingBehavior?: "steer" | "followUp" } = {},
+		extra: { images?: Array<{ type: "image"; data: string; mimeType: string }>; streamingBehavior?: "steer" | "followUp"; input?: string } = {},
 	): Promise<"handled" | "unavailable"> => {
 		if (found.state === "off") {
 			const where = found.source === "plugin" ? "/plugins" : "/skills";
@@ -322,7 +324,12 @@ export default function skillExtension(pi: ExtensionAPI) {
 		// Carry any attached images alongside the block, as pi's native path would.
 		const content = extra.images?.length ? [{ type: "text" as const, text: block }, ...extra.images] : block;
 		pi.sendMessage(
-			{ customType: "one-code:skill-invocation", content, display: false, details: { skill: found.name, args } },
+			{
+				customType: SKILL_INVOCATION_TYPE,
+				content,
+				display: false,
+				details: { skill: found.name, args, ...(extra.input !== undefined ? { input: extra.input } : {}) } satisfies SkillInvocationDetails,
+			},
 			{ triggerTurn: true, ...(extra.streamingBehavior ? { deliverAs: extra.streamingBehavior } : {}) },
 		);
 		// The turn we just triggered rides a fire-and-forget pi.sendMessage. In a
@@ -339,9 +346,10 @@ export default function skillExtension(pi: ExtensionAPI) {
 	// the transcript as a new user turn. Intercept it here, suppress pi's
 	// expansion (return "handled"), and deliver through deliverSkill. An unknown
 	// name, an ambiguous plugin match, or an unreadable file falls through to
-	// pi's native handling. This hook only covers prompt(); paths that expand
-	// without an `input` event (steer/followUp) are caught by the context-hook
-	// redaction below.
+	// pi's native handling. Since pi 0.86.0 (faa9863cb) this also runs for a
+	// message queued mid-turn and for RPC steer/followUp (`streamingBehavior` is
+	// set), so an off skill is refused before it enters the queue. On older pi
+	// those paths skip `input`; the context-hook redaction below covers them.
 	pi.on("input", async (event, ctx) => {
 		const cmd = parseSkillCommand(event.text);
 		if (!cmd) return { action: "continue" };
@@ -350,6 +358,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 		const outcome = await deliverSkill(found, cmd.args, ctx, {
 			images: event.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined,
 			streamingBehavior: event.streamingBehavior,
+			input: event.text,
 		});
 		return { action: outcome === "handled" ? "handled" : "continue" };
 	});
@@ -401,10 +410,13 @@ export default function skillExtension(pi: ExtensionAPI) {
 		if (piSkills.some((skill) => !registeredSkillCommands.has(skill.name))) registerSkillCommands(ctx.cwd);
 	});
 
-	// Fail-closed backstop for the `input` interception above: pi's steer() and
-	// followUp() expand `/skill:<name>` natively WITHOUT firing an `input` event
-	// (queued interactive messages after the first, RPC steer/followUp), so a
-	// turned-off skill's instructions can land in the session history anyway.
+	// FALLBACK for pi < 0.86.0 (plan.md "Fallbacks for older pi"; delete it
+	// when the peer floor reaches 0.86.0). Before faa9863cb, pi's steer() and
+	// followUp() expanded `/skill:<name>` natively WITHOUT firing an `input`
+	// event (queued interactive messages after the first, RPC steer/followUp),
+	// so a turned-off skill's instructions could land in the session history.
+	// On 0.86+ the `input` handler above refuses them first, so this finds
+	// nothing to redact and returns undefined.
 	// Strip them from every outgoing request instead — the wire copy carries the
 	// refusal notice, the session file keeps the original bytes, and untouched
 	// requests return undefined so the message array stays byte-identical

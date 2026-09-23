@@ -22,6 +22,7 @@ import hooksExtension, { hookContextText } from "../../extensions/hooks/index.ts
 import { resetHookSettingsCache } from "../../extensions/hooks/settings.ts";
 import { type HookBridge, SUBAGENT_HOOK_CHANNEL } from "../../extensions/hooks/subagent-bridge.ts";
 import { REMINDER_CHANNEL, wrapReminder } from "../../extensions/lib/reminders.ts";
+import { SKILL_INVOCATION_TYPE } from "../../extensions/skill/invoke.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
 const state = vi.hoisted(() => ({
@@ -141,6 +142,66 @@ describe("hooks wiring", () => {
 		// Delivered once.
 		const again = await fake.fireOne<{ message?: unknown }>("before_agent_start", { prompt: "next" }, ctx());
 		expect(again).toBeUndefined();
+	});
+
+	it.each(["steer", "followUp"] as const)(
+		"UserPromptSubmit context for a message queued mid-turn (%s) rides the request that delivers it, not the next prompt",
+		async (behavior) => {
+			const hookPrompt = script("hook-queued.sh", `#!/bin/sh\ncat >/dev/null\necho '{"hookSpecificOutput":{"additionalContext":"queued context"}}'\n`);
+			writeUserHooks({ UserPromptSubmit: [{ hooks: [{ type: "command", command: hookPrompt }] }] });
+			const reminders: unknown[] = [];
+			fake.events.on(REMINDER_CHANNEL, (payload) => reminders.push(payload));
+			mount();
+			await fake.fireOne("input", { source: "interactive", text: "also do this", streamingBehavior: behavior }, ctx());
+			// Held while pi keeps the message queued: no message of its own (pi drains
+			// one queued message per request, so it would arrive a request late).
+			expect(fake.sentMessages).toHaveLength(0);
+			expect(reminders).toHaveLength(0);
+			await fake.fireOne("message_start", { message: { role: "user", content: [{ type: "text", text: "something else" }] } }, ctx());
+			expect(reminders).toHaveLength(0);
+			// pi delivers the queued message: its context rides that request as a one-shot.
+			await fake.fireOne("message_start", { message: { role: "user", content: [{ type: "text", text: "also do this" }] } }, ctx());
+			expect(reminders).toEqual([{ text: hookContextText("UserPromptSubmit", "queued context"), placement: "last-append" }]);
+			// Delivered once, and never held for the next prompt's turn.
+			await fake.fireOne("message_start", { message: { role: "user", content: [{ type: "text", text: "also do this" }] } }, ctx());
+			expect(reminders).toHaveLength(1);
+			const next = await fake.fireOne<{ message?: unknown }>("before_agent_start", { prompt: "next" }, ctx());
+			expect(next).toBeUndefined();
+		},
+	);
+
+	it.each([
+		["queued mid-turn", "steer" as const],
+		["sent while idle", undefined],
+	])("UserPromptSubmit context for a /skill: command %s rides the skill's hidden message", async (_label, behavior) => {
+		const hookPrompt = script("hook-skill.sh", `#!/bin/sh\ncat >/dev/null\necho '{"hookSpecificOutput":{"additionalContext":"skill context"}}'\n`);
+		writeUserHooks({ UserPromptSubmit: [{ hooks: [{ type: "command", command: hookPrompt }] }] });
+		const reminders: unknown[] = [];
+		fake.events.on(REMINDER_CHANNEL, (payload) => reminders.push(payload));
+		mount();
+		await fake.fireOne("input", { source: "interactive", text: "/skill:foo now", ...(behavior ? { streamingBehavior: behavior } : {}) }, ctx());
+		expect(reminders).toHaveLength(0);
+		// The skill extension replaced the command with its hidden message (an idle
+		// one opens the turn through sendMessage, which skips before_agent_start).
+		const skillMessage = { role: "custom", customType: SKILL_INVOCATION_TYPE, content: "<skill>…</skill>", details: { skill: "foo", args: "now", input: "/skill:foo now" } };
+		await fake.fireOne("message_start", { message: skillMessage }, ctx());
+		expect(reminders).toEqual([{ text: hookContextText("UserPromptSubmit", "skill context"), placement: "last-append" }]);
+		// Not delivered again, and not held for the next prompt.
+		await fake.fireOne("message_start", { message: skillMessage }, ctx());
+		expect(reminders).toHaveLength(1);
+		expect(await fake.fireOne<{ message?: unknown }>("before_agent_start", { prompt: "next" }, ctx())).toBeUndefined();
+	});
+
+	it("drops a queued message's context when the turn settles without delivering it", async () => {
+		const hookPrompt = script("hook-undelivered.sh", `#!/bin/sh\ncat >/dev/null\necho '{"hookSpecificOutput":{"additionalContext":"orphan"}}'\n`);
+		writeUserHooks({ UserPromptSubmit: [{ hooks: [{ type: "command", command: hookPrompt }] }] });
+		const reminders: unknown[] = [];
+		fake.events.on(REMINDER_CHANNEL, (payload) => reminders.push(payload));
+		mount();
+		await fake.fireOne("input", { source: "interactive", text: "/tpl expanded by pi", streamingBehavior: "steer" }, ctx());
+		await fake.fireOne("agent_settled", {}, ctx());
+		await fake.fireOne("message_start", { message: { role: "user", content: [{ type: "text", text: "/tpl expanded by pi" }] } }, ctx());
+		expect(reminders).toHaveLength(0);
 	});
 
 	it("publishes a hook bridge at session start that runs the user's tool hooks for a child's calls, naming the agent", async () => {
@@ -265,6 +326,43 @@ describe("hooks wiring", () => {
 		await fake.fireOne("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] }, ctx());
 		await fake.fireOne("agent_settled", {}, ctx());
 		expect(countHits()).toBe(2);
+	});
+
+	it("stop_hook_active resets only when a turn really starts (before_agent_start), not for a message queued mid-turn", async () => {
+		const seen = join(root, "stop-stdin.jsonl");
+		const hookStop = script("hook-stop-block.sh", `#!/bin/sh\ncat >> "${seen}"\necho >> "${seen}"\necho "keep going" >&2\nexit 2\n`);
+		writeUserHooks({ Stop: [{ hooks: [{ type: "command", command: hookStop }] }] });
+		mount();
+		const settle = async () => {
+			await fake.fireOne("agent_end", { messages: [{ role: "assistant", stopReason: "stop" }] }, ctx());
+			await fake.fireOne("agent_settled", {}, ctx());
+		};
+		const flags = () =>
+			readFileSync(seen, "utf-8")
+				.split("\n")
+				.filter(Boolean)
+				.map((line) => (JSON.parse(line) as { stop_hook_active: boolean }).stop_hook_active);
+
+		await settle(); // the Stop hook blocks: its continuation runs with the latch set
+		await fake.fireOne("input", { source: "interactive", text: "also this", streamingBehavior: "steer" }, ctx());
+		await settle(); // the queued message joined that continuation
+		await fake.fireOne("before_agent_start", { prompt: "a new prompt" }, ctx());
+		await settle(); // a new turn
+		expect(flags()).toEqual([false, true, false]);
+	});
+
+	it("drops UserPromptSubmit context from a hook that outlived a session_start", async () => {
+		const hookPrompt = script("hook-slow.sh", `#!/bin/sh\ncat >/dev/null\nsleep 0.4\necho '{"hookSpecificOutput":{"additionalContext":"stale"}}'\n`);
+		writeUserHooks({ UserPromptSubmit: [{ hooks: [{ type: "command", command: hookPrompt }] }] });
+		const reminders: unknown[] = [];
+		fake.events.on(REMINDER_CHANNEL, (payload) => reminders.push(payload));
+		mount();
+		const pending = fake.fireOne("input", { source: "interactive", text: "queued text", streamingBehavior: "steer" }, ctx());
+		await new Promise((resolve) => setTimeout(resolve, 100));
+		await fake.fireOne("session_start", { reason: "new" }, ctx());
+		await pending;
+		await fake.fireOne("message_start", { message: { role: "user", content: [{ type: "text", text: "queued text" }] } }, ctx());
+		expect(reminders).toHaveLength(0);
 	});
 
 	it("PreCompact and PostCompact carry Claude Code's trigger, custom_instructions and compact_summary (review M1/M3)", async () => {
