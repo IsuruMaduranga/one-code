@@ -18,7 +18,7 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { tildify } from "../lib/paths.ts";
 import type { McpStatusEvent } from "../lib/mcp-status.ts";
-import { wrapProse } from "../subagents/panel-render.ts";
+import { wrapProse } from "../lib/tui-render.ts";
 import { countNoun } from "../lib/tui-render.ts";
 export { countNoun };
 

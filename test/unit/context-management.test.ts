@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
 	anthropicBetas,
@@ -64,6 +66,32 @@ describe("anthropicBetas", () => {
 		expect(anthropicBetas(false, { forceAdaptiveThinking: true, allowedFallbackModels: [] })).toBe(
 			"context-management-2025-06-27",
 		);
+	});
+
+	it("adds the mid-conversation effort betas when pi inserts per-message output_config", () => {
+		expect(anthropicBetas(false, { forceAdaptiveThinking: true, supportsMidConvoEffort: true })).toBe(
+			"mid-conversation-output-config-2026-07-01,thinking-binding-controls-2026-08-01,context-management-2025-06-27",
+		);
+	});
+
+	// Our header replaces the one pi computes, so every beta pi-ai can send must
+	// be mirrored here or deliberately skipped; a new one otherwise 400s whatever
+	// body field it gates (it happened for `fallbacks`, then per-message effort).
+	it("accounts for every beta constant the installed pi-ai declares", () => {
+		const source = readFileSync(resolve("node_modules/@earendil-works/pi-ai/dist/api/anthropic-messages.js"), "utf8");
+		const declared = [...source.matchAll(/const [A-Z_]+_BETA = "([^"]+)"/g)].map((match) => match[1]);
+		expect(declared.length).toBeGreaterThan(0);
+		// pi sends the tool-changes beta only on its native tool_addition path, which
+		// never engages while One Code forces the system prompt (findings §7).
+		const skipped = new Set(["mid-conversation-tool-changes-2026-07-01"]);
+		const mirrored = new Set(
+			anthropicBetas(true, {
+				supportsEagerToolInputStreaming: false,
+				allowedFallbackModels: [{ model: "x" }],
+				supportsMidConvoEffort: true,
+			}).split(","),
+		);
+		expect(declared.filter((beta) => !mirrored.has(beta) && !skipped.has(beta))).toEqual([]);
 	});
 });
 

@@ -8,29 +8,33 @@
  * focused overlay panel, not in the transcript — so the exchange never enters
  * the main agent's context and cannot steer its work.
  *
- * The call reuses recap's machinery: the exact messages the session last put on
- * the wire (captured from the `context` event), name-only tool stubs so a
- * history carrying tool_use blocks stays valid on strict providers, and
- * withReasoningFallback for models that cannot disable thinking. Unlike recap it
- * uses the SESSION model (not an economical one) — a side question deserves the
- * same quality as the main conversation — and sends the full captured history,
- * not just the recent window.
+ * The call is Claude Code's: the session's last provider request replayed
+ * unchanged (system, every tool, every message), the reply that answered it,
+ * then the reminder and question, so it reads the cache the session wrote
+ * (lib/request-replay.ts; the compaction extension publishes the capture).
+ * Without a capture for the session model, or on a provider API the replay
+ * does not cover, it falls back to a standalone call: the messages the session
+ * last sent (captured from the `context` event), an empty system prompt,
+ * name-only tool stubs so a history carrying tool_use blocks stays valid on
+ * strict providers, and withReasoningFallback for models that cannot disable
+ * thinking. Both run on the SESSION model: a side question deserves the same
+ * quality as the main conversation.
  *
  * Deviations from CC, logged in docs/decisions/btw.md: the exchange is stateless
  * (each `/btw` sees only the shared main context, never a prior `/btw` — CC
  * keeps a side-session; the "one-off, no follow-up" framing holds either way);
  * `f to fork` is omitted (pi's `ctx.fork` branches from a session entry, not
- * from an injected side exchange); and the call runs with an empty system prompt
- * (the `context` event carries no system prompt to reuse), relying on the shared
- * history plus the reminder.
+ * from an injected side exchange).
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { convertToLlm, copyToClipboard, type ExtensionAPI, type ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { notifyOrPrint, printAnswer } from "../lib/headless-output.ts";
 import { withReasoningFallback } from "../lib/model-policy.ts";
-import { answerText, stripImageBlocks, toolStubs, trimToTurnBoundary } from "../lib/side-call.ts";
+import { followLastExchange, replaySideCall } from "../lib/replay-call.ts";
+import { answerText, stripImageBlocks, toolStubs, trimToTurnBoundary, withoutSystemMessages } from "../lib/side-call.ts";
 import { boundedDockHeight, truncateLine } from "../lib/tui-render.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
 import { applyBtwKey, type BtwBody, BTW_MAX_HEIGHT, decodeBtwKey, initialBtwState, renderBtwPanel } from "./panel.ts";
@@ -48,6 +52,8 @@ export default function btwExtension(pi: ExtensionAPI) {
 	pi.on("context", (event) => {
 		capturedMessages = event.messages;
 	});
+	// The same request as it went on the wire, and the reply that answered it.
+	const exchange = followLastExchange(pi);
 
 	// The controller for an open panel's in-flight call. Aborted when the session
 	// is replaced or torn down, so a late resolve cannot repaint a disposed `tui`
@@ -69,14 +75,21 @@ export default function btwExtension(pi: ExtensionAPI) {
 
 	/** Run the side question against the session model; returns the answer text. */
 	async function ask(ctx: ExtensionCommandContext, question: string, signal: AbortSignal): Promise<string> {
-		const model = ctx.model;
+		const model = ctx.model as Model<Api> | undefined;
 		if (!model) throw new Error("No model is configured for this session.");
+		const replayed = await replaySideCall(ctx, model, exchange, sideQuestionMessage(question), {
+			signal,
+			timeoutMs: BTW_TIMEOUT_MS,
+			onUsage: (usage) => recordUsage(pi, "btw", usage),
+		});
+		if (replayed !== undefined) return replayed;
+
+		// No replay for this model, or it failed: the standalone call.
 		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
 		if (!auth.ok) throw new Error("No API key is available for the current model.");
 		const baseUrl = (auth as { baseUrl?: string }).baseUrl;
-
 		const tools = toolStubs(pi.getActiveTools(), STUB_REASON);
-		const context = trimToTurnBoundary(capturedMessages ?? []);
+		const context = trimToTurnBoundary(withoutSystemMessages(capturedMessages ?? []));
 		// btw runs on a cheap, possibly text-only reader and answers a text question,
 		// so images the conversation carried are stripped before the call
 		// (docs/decisions/model-policy.md).
@@ -87,7 +100,7 @@ export default function btwExtension(pi: ExtensionAPI) {
 			(reasoning) => {
 				const timeout = AbortSignal.timeout(BTW_TIMEOUT_MS);
 				return completeSimple(
-					baseUrl ? ({ ...model, baseUrl } as Model<Api>) : (model as Model<Api>),
+					baseUrl ? ({ ...model, baseUrl } as Model<Api>) : model,
 					{ systemPrompt: "", messages, tools },
 					{
 						apiKey: auth.apiKey,
@@ -119,9 +132,9 @@ export default function btwExtension(pi: ExtensionAPI) {
 			if (!ctx.hasUI) {
 				try {
 					const answer = await ask(ctx, question, new AbortController().signal);
-					ctx.ui.notify(answer || "(no answer)", "info");
+					printAnswer(ctx, answer || "(no answer)");
 				} catch (error) {
-					ctx.ui.notify(`Side question failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+					notifyOrPrint(ctx, `Side question failed: ${error instanceof Error ? error.message : String(error)}`, "error");
 				}
 				return;
 			}

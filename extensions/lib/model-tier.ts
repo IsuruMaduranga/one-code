@@ -109,7 +109,7 @@ export function parseClaudeVersion(id: string): { family: "opus" | "sonnet" | "f
  * (specific before general). A vetted allowlist — distinct from heuristic
  * substring matching — that fixes cases where price/name alone misroute a
  * flagship, and encodes the ratified overrides (GPT-5-mini→cheap,
- * GPT-5.6-Luna→cheap, GPT-5.x-codex-spark→cheap; the GPT-5-full→workhorse one
+ * GPT-5.6/6-Luna→cheap, GPT-5.x-codex-spark→cheap; the GPT-5-full→workhorse one
  * was retired 2026-09-11 once the coding index contradicted it). A match here is authoritative for the
  * name class (the human already accounted for the name and its generation), so
  * it wins outright — only the two-generations-behind rule still demotes it to
@@ -121,7 +121,7 @@ const ANCHOR_MAP: Array<[RegExp, PromptTier]> = [
 	// OpenAI GPT-5 family — order matters: variant suffixes before the generic.
 	[/(?:^|[-/.])gpt-5[.\d]*-?nano/i, "tiny"],
 	[/(?:^|[-/.])gpt-5[.\d]*-?mini/i, "cheap"], // override: price would say tiny
-	[/(?:^|[-/.])gpt-5[.\d]*-?luna/i, "cheap"], // override: OpenAI's cheap line despite a high benchmark
+	[/(?:^|[-/.])gpt-[56][.\d]*-?luna/i, "cheap"], // override: OpenAI's cheap line despite a high benchmark (GPT-6 Luna: $0.10/$0.50)
 	// Spark: OpenAI's fast/small Codex line; no Artificial Analysis row either way, so it
 	// is placed with the other lean lines rather than inheriting the family's workhorse
 	// name class (2026-09-11 — it had been the cheapest "workhorse" on every Codex session).

@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { answerText, IMAGE_OMITTED_TEXT, stripImageBlocks, toolStubs, trimToTurnBoundary } from "../../extensions/lib/side-call.ts";
+import {
+	answerText,
+	IMAGE_OMITTED_TEXT,
+	stripImageBlocks,
+	toolStubs,
+	trimToTurnBoundary,
+	withoutSystemMessages,
+} from "../../extensions/lib/side-call.ts";
 
 describe("toolStubs", () => {
 	it("builds a name-only, empty-schema stub per tool with the given reason", () => {
@@ -37,6 +44,20 @@ describe("trimToTurnBoundary", () => {
 	it("returns nothing when there is no safe boundary", () => {
 		expect(trimToTurnBoundary([msg("toolResult", "x"), msg("toolResult", "y")])).toEqual([]);
 		expect(trimToTurnBoundary([])).toEqual([]);
+	});
+});
+
+describe("withoutSystemMessages", () => {
+	const msg = (role: string, id: string) => ({ role, id });
+
+	it("drops the leading system message pi 0.86 hands context handlers, and any later one", () => {
+		const context = [msg("system", "head"), msg("user", "u1"), msg("assistant", "a1"), msg("system", "update"), msg("toolResult", "t1")];
+		expect(withoutSystemMessages(context)).toEqual([msg("user", "u1"), msg("assistant", "a1"), msg("toolResult", "t1")]);
+	});
+
+	it("returns the conversation unchanged when it carries no system message (pi 0.87)", () => {
+		const context = [msg("user", "u1"), msg("assistant", "a1")];
+		expect(withoutSystemMessages(context)).toEqual(context);
 	});
 });
 

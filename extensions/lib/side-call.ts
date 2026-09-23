@@ -40,6 +40,18 @@ export function trimToTurnBoundary<T extends { role: string }>(messages: readonl
 	return start === -1 ? [] : messages.slice(start);
 }
 
+/**
+ * The conversation without pi's `system` transcript messages, for a capture of
+ * the `context` event. pi 0.86 hands `context` handlers a leading system message
+ * holding pi's own default prompt sections and every full tool schema; a side
+ * call that forwarded it had pi-ai replay those into its system prompt and tools
+ * (over the stubs), and it shifted every role-by-index comparison. pi 0.87 strips
+ * system messages before `context` handlers run, so there this is a no-op.
+ */
+export function withoutSystemMessages<T extends { role: string }>(messages: readonly T[]): T[] {
+	return messages.filter((message) => message.role !== "system");
+}
+
 /** The placeholder left in a message whose only content was an image we removed. */
 export const IMAGE_OMITTED_TEXT = "[image omitted]";
 

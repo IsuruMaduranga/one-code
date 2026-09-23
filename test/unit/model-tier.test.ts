@@ -46,6 +46,9 @@ describe("resolveModelTier", () => {
 		expect(resolveModelTier(model("gpt-5-mini", "openai", 0.25), noEnv)).toBe("cheap");
 		// GPT-5.6-Luna is OpenAI's cheap line despite a high benchmark → cheap, not workhorse.
 		expect(resolveModelTier(model("gpt-5.6-luna", "openai", 1), noEnv)).toBe("cheap");
+		// GPT-6 Luna is the same line at half the price; its Sol and Astra siblings stay workhorse.
+		expect(resolveModelTier(model("gpt-6-luna", "openai", 0.1), noEnv)).toBe("cheap");
+		expect(resolveModelTier(model("gpt-6-sol", "openai", 2), noEnv)).toBe("workhorse");
 		// GPT-5-nano stays tiny.
 		expect(resolveModelTier(model("gpt-5-nano", "openai", 0.15), noEnv)).toBe("tiny");
 		// o3 family → cheap; prior-gen GPT-4x → tiny.

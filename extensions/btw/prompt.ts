@@ -13,9 +13,11 @@
 /**
  * CC's verbatim side-question reminder (captures/btw.json message 20). It frames
  * the answering instance as a separate, lightweight, tool-less agent so the
- * model answers in one shot from context instead of trying to act. One Code
- * backs this framing for real: it sends name-only tool stubs (never live tools)
- * and does not persist the exchange, so there genuinely is no follow-up turn.
+ * model answers in one shot from context instead of trying to act. Like Claude
+ * Code, the replayed request still declares the session's real tools (they are
+ * part of the cached prefix); a tool call in the answer is never executed, only
+ * its text is shown, and the exchange is not persisted, so there is no
+ * follow-up turn.
  */
 export const SIDE_QUESTION_REMINDER = `<system-reminder>This is a side question from the user. You must answer this question directly in a single response.
 

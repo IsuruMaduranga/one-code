@@ -59,11 +59,20 @@ const INTERLEAVED_THINKING_BETA = "interleaved-thinking-2025-05-14";
 // "fallbacks: Extra inputs are not permitted" (verified live, api.anthropic.com
 // 2026-09-01). Mirrors pi's shouldUseServerSideFallbackBeta.
 const SERVER_SIDE_FALLBACK_BETA = "server-side-fallback-2026-07-01";
+// The same trap for models whose compat carries `supportsMidConvoEffort` (Opus 5,
+// Opus 5.5, Fable 5.1): pi inserts `role: "system"` messages holding an
+// `output_config`, and without these two betas the API 400s with
+// "messages.1.output_config: Extra inputs are not permitted" (verified live,
+// 2026-09-23). `test/unit/context-management.test.ts` fails when the installed
+// pi-ai declares a beta this list does not account for.
+const MID_CONVERSATION_OUTPUT_CONFIG_BETA = "mid-conversation-output-config-2026-07-01";
+const THINKING_BINDING_CONTROLS_BETA = "thinking-binding-controls-2026-08-01";
 
 export interface AnthropicModelCompat {
 	forceAdaptiveThinking?: boolean;
 	supportsEagerToolInputStreaming?: boolean;
 	allowedFallbackModels?: unknown[];
+	supportsMidConvoEffort?: boolean;
 }
 
 /** pi's beta list for this model/auth, with the context-management beta appended. */
@@ -75,6 +84,7 @@ export function anthropicBetas(oauth: boolean, compat: AnthropicModelCompat | un
 	if (compat?.forceAdaptiveThinking !== true) betas.push(INTERLEAVED_THINKING_BETA);
 	// pi puts a `fallbacks` body field on these models; the beta must ride along.
 	if ((compat?.allowedFallbackModels?.length ?? 0) > 0) betas.push(SERVER_SIDE_FALLBACK_BETA);
+	if (compat?.supportsMidConvoEffort === true) betas.push(MID_CONVERSATION_OUTPUT_CONFIG_BETA, THINKING_BINDING_CONTROLS_BETA);
 	betas.push(CONTEXT_MANAGEMENT_BETA);
 	return betas.join(",");
 }
@@ -139,6 +149,21 @@ export function clearThinkingEnabled(flag: string | undefined, model: Anthropici
 	if (flag === "0") return false;
 	if (flag === "1") return true;
 	return model.provider === "anthropic" && (model.baseUrl ?? "").includes("api.anthropic.com");
+}
+
+/**
+ * The headers a side call on the session model needs so its request matches the
+ * session's: the auth headers plus, where clear_thinking is on, the beta header
+ * the session's requests carry (completeSimple bypasses our header hook).
+ */
+export function sessionRequestHeaders<H extends Record<string, string | null>>(
+	model: { api?: string; provider?: string; baseUrl?: string; compat?: unknown } | undefined,
+	headers: H | undefined,
+): H | Record<string, string | null> | undefined {
+	// compat is a provider union; clearThinkingEnabled only passes Anthropic models.
+	const anthropic = model as AnthropicishModel | undefined;
+	if (!clearThinkingEnabled(process.env.CC_CLEAR_THINKING, anthropic)) return headers;
+	return { ...headers, "anthropic-beta": anthropicBetas(isAnthropicOAuth(), anthropic?.compat) };
 }
 
 export default function contextManagementExtension(pi: ExtensionAPI) {

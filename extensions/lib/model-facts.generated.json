@@ -1,7 +1,7 @@
 {
 	"generatedFrom": "https://models.dev/api.json",
-	"piCatalogRows": 1443,
-	"rows": 889,
+	"piCatalogRows": 1495,
+	"rows": 927,
 	"facts": {
 		"amazon-bedrock/amazon.nova-2-lite-v1:0": {
 			"releaseDate": "2025-12-02"
@@ -39,6 +39,9 @@
 		"amazon-bedrock/anthropic.claude-opus-4-8": {
 			"releaseDate": "2026-05-28"
 		},
+		"amazon-bedrock/anthropic.claude-opus-5-5": {
+			"releaseDate": "2026-09-22"
+		},
 		"amazon-bedrock/anthropic.claude-sonnet-4-5-20250929-v1:0": {
 			"releaseDate": "2025-09-29"
 		},
@@ -74,6 +77,9 @@
 		},
 		"amazon-bedrock/au.anthropic.claude-opus-5": {
 			"releaseDate": "2026-07-24"
+		},
+		"amazon-bedrock/au.anthropic.claude-opus-5-5": {
+			"releaseDate": "2026-09-22"
 		},
 		"amazon-bedrock/au.anthropic.claude-sonnet-4-5-20250929-v1:0": {
 			"releaseDate": "2025-09-29"
@@ -126,6 +132,9 @@
 		"amazon-bedrock/eu.anthropic.claude-opus-5": {
 			"releaseDate": "2026-07-24"
 		},
+		"amazon-bedrock/eu.anthropic.claude-opus-5-5": {
+			"releaseDate": "2026-09-22"
+		},
 		"amazon-bedrock/eu.anthropic.claude-sonnet-4-20250514-v1:0": {
 			"releaseDate": "2025-05-22"
 		},
@@ -167,6 +176,9 @@
 		},
 		"amazon-bedrock/global.anthropic.claude-opus-5": {
 			"releaseDate": "2026-07-24"
+		},
+		"amazon-bedrock/global.anthropic.claude-opus-5-5": {
+			"releaseDate": "2026-09-22"
 		},
 		"amazon-bedrock/global.anthropic.claude-sonnet-4-20250514-v1:0": {
 			"releaseDate": "2025-05-22"
@@ -224,6 +236,9 @@
 		},
 		"amazon-bedrock/jp.anthropic.claude-opus-5": {
 			"releaseDate": "2026-07-24"
+		},
+		"amazon-bedrock/jp.anthropic.claude-opus-5-5": {
+			"releaseDate": "2026-09-22"
 		},
 		"amazon-bedrock/jp.anthropic.claude-sonnet-4-5-20250929-v1:0": {
 			"releaseDate": "2025-09-29"
@@ -408,6 +423,9 @@
 		"amazon-bedrock/us.anthropic.claude-opus-5": {
 			"releaseDate": "2026-07-24"
 		},
+		"amazon-bedrock/us.anthropic.claude-opus-5-5": {
+			"releaseDate": "2026-09-22"
+		},
 		"amazon-bedrock/us.anthropic.claude-sonnet-4-20250514-v1:0": {
 			"releaseDate": "2025-05-22"
 		},
@@ -510,6 +528,9 @@
 		"anthropic/claude-opus-5": {
 			"releaseDate": "2026-07-24"
 		},
+		"anthropic/claude-opus-5-5": {
+			"releaseDate": "2026-09-22"
+		},
 		"anthropic/claude-sonnet-4-5": {
 			"releaseDate": "2025-09-29"
 		},
@@ -601,7 +622,7 @@
 			"releaseDate": "2026-04-02"
 		},
 		"cloudflare-workers-ai/@cf/ibm-granite/granite-4.0-h-micro": {
-			"releaseDate": "2025-10-07"
+			"releaseDate": "2025-10-02"
 		},
 		"cloudflare-workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast": {
 			"releaseDate": "2024-12-06"
@@ -610,7 +631,7 @@
 			"releaseDate": "2025-04-05"
 		},
 		"cloudflare-workers-ai/@cf/mistralai/mistral-small-3.1-24b-instruct": {
-			"releaseDate": "2025-03-18"
+			"releaseDate": "2025-03-17"
 		},
 		"cloudflare-workers-ai/@cf/moonshotai/kimi-k2.6": {
 			"releaseDate": "2026-04-21"
@@ -669,6 +690,9 @@
 		"github-copilot/claude-opus-5": {
 			"releaseDate": "2026-07-24"
 		},
+		"github-copilot/claude-opus-5.5": {
+			"releaseDate": "2026-09-22"
+		},
 		"github-copilot/claude-sonnet-4.6": {
 			"releaseDate": "2026-02-17"
 		},
@@ -717,11 +741,20 @@
 		"github-copilot/gpt-6-astra": {
 			"releaseDate": "2026-09-04"
 		},
+		"github-copilot/gpt-6-luna": {
+			"releaseDate": "2026-09-22"
+		},
+		"github-copilot/gpt-6-sol": {
+			"releaseDate": "2026-09-22"
+		},
 		"github-copilot/grok-4.5": {
 			"releaseDate": "2026-07-08"
 		},
 		"github-copilot/grok-4.6": {
 			"releaseDate": "2026-08-12"
+		},
+		"github-copilot/grok-4.7": {
+			"releaseDate": "2026-09-21"
 		},
 		"github-copilot/kimi-k2.7-code": {
 			"releaseDate": "2026-06-12"
@@ -1047,6 +1080,9 @@
 		"huggingface/tencent/Hy3": {
 			"releaseDate": "2026-07-06"
 		},
+		"huggingface/tencent/Hy4-preview": {
+			"releaseDate": "2026-08-28"
+		},
 		"huggingface/thinkingmachines/Inkling": {
 			"releaseDate": "2026-07-15"
 		},
@@ -1242,9 +1278,6 @@
 		"moonshotai/kimi-k3": {
 			"releaseDate": "2026-07-16"
 		},
-		"nvidia/deepseek-ai/deepseek-v4-flash-0731": {
-			"releaseDate": "2026-07-31"
-		},
 		"nvidia/google/gemma-3-12b-it": {
 			"releaseDate": "2025-03-12"
 		},
@@ -1395,6 +1428,12 @@
 		"openai/gpt-6-astra": {
 			"releaseDate": "2026-09-04"
 		},
+		"openai/gpt-6-luna": {
+			"releaseDate": "2026-09-22"
+		},
+		"openai/gpt-6-sol": {
+			"releaseDate": "2026-09-22"
+		},
 		"openai/gpt-realtime-2.1": {
 			"releaseDate": "2026-07-06"
 		},
@@ -1446,6 +1485,9 @@
 		"opencode-go/grok-4.6": {
 			"releaseDate": "2026-08-12"
 		},
+		"opencode-go/grok-4.7": {
+			"releaseDate": "2026-09-21"
+		},
 		"opencode-go/hy3": {
 			"releaseDate": "2026-07-06"
 		},
@@ -1469,6 +1511,12 @@
 		},
 		"opencode-go/mimo-v2.5-pro": {
 			"releaseDate": "2026-04-22"
+		},
+		"opencode-go/mimo-v2.6-flash": {
+			"releaseDate": "2026-09-22"
+		},
+		"opencode-go/mimo-v2.6-pro": {
+			"releaseDate": "2026-09-22"
 		},
 		"opencode-go/minimax-m2.7": {
 			"releaseDate": "2026-03-18"
@@ -1523,6 +1571,9 @@
 		},
 		"opencode/claude-opus-5": {
 			"releaseDate": "2026-07-24"
+		},
+		"opencode/claude-opus-5-5": {
+			"releaseDate": "2026-09-22"
 		},
 		"opencode/claude-sonnet-4": {
 			"releaseDate": "2025-05-22"
@@ -1644,6 +1695,12 @@
 		"opencode/gpt-6-astra": {
 			"releaseDate": "2026-09-04"
 		},
+		"opencode/gpt-6-luna": {
+			"releaseDate": "2026-09-22"
+		},
+		"opencode/gpt-6-sol": {
+			"releaseDate": "2026-09-22"
+		},
 		"opencode/grok-4.5": {
 			"releaseDate": "2026-07-08"
 		},
@@ -1668,8 +1725,8 @@
 		"opencode/ling-3.0-flash-fin-free": {
 			"releaseDate": "2026-08-27"
 		},
-		"opencode/mimo-v2.5-free": {
-			"releaseDate": "2026-04-24"
+		"opencode/mimo-v2.6-flash-free": {
+			"releaseDate": "2026-09-22"
 		},
 		"opencode/minimax-m2.5": {
 			"releaseDate": "2026-02-12"
@@ -1743,9 +1800,6 @@
 		"openrouter/anthropic/claude-haiku-4.5": {
 			"releaseDate": "2025-10-15"
 		},
-		"openrouter/anthropic/claude-opus-4": {
-			"releaseDate": "2025-05-22"
-		},
 		"openrouter/anthropic/claude-opus-4.1": {
 			"releaseDate": "2025-08-05"
 		},
@@ -1763,6 +1817,9 @@
 		},
 		"openrouter/anthropic/claude-opus-5": {
 			"releaseDate": "2026-07-24"
+		},
+		"openrouter/anthropic/claude-opus-5.5": {
+			"releaseDate": "2026-09-22"
 		},
 		"openrouter/anthropic/claude-sonnet-4": {
 			"releaseDate": "2025-05-22"
@@ -1941,9 +1998,6 @@
 		"openrouter/inclusionai/ling-3.0-flash-vl:free": {
 			"releaseDate": "2026-09-10"
 		},
-		"openrouter/kwaipilot/kat-coder-pro-v2": {
-			"releaseDate": "2026-03-27"
-		},
 		"openrouter/kwaipilot/kat-coder-pro-v2.5": {
 			"releaseDate": "2026-07-10"
 		},
@@ -2077,6 +2131,9 @@
 			"releaseDate": "2026-07-16"
 		},
 		"openrouter/nex-agi/nex-n2.5-mini:free": {
+			"releaseDate": "2026-09-08"
+		},
+		"openrouter/nex-agi/nex-n2.5-pro": {
 			"releaseDate": "2026-09-08"
 		},
 		"openrouter/nex-agi/nex-n2.5-pro:free": {
@@ -2228,6 +2285,18 @@
 		},
 		"openrouter/openai/gpt-6-astra-pro": {
 			"releaseDate": "2026-09-04"
+		},
+		"openrouter/openai/gpt-6-luna": {
+			"releaseDate": "2026-09-22"
+		},
+		"openrouter/openai/gpt-6-luna-pro": {
+			"releaseDate": "2026-09-22"
+		},
+		"openrouter/openai/gpt-6-sol": {
+			"releaseDate": "2026-09-22"
+		},
+		"openrouter/openai/gpt-6-sol-pro": {
+			"releaseDate": "2026-09-22"
 		},
 		"openrouter/openai/gpt-audio": {
 			"releaseDate": "2026-01-19"
@@ -2443,6 +2512,9 @@
 		"openrouter/qwen/qwen3.8-max-0902": {
 			"releaseDate": "2026-09-02"
 		},
+		"openrouter/qwen/qwen3.8-omni-flash": {
+			"releaseDate": "2026-09-17"
+		},
 		"openrouter/rekaai/reka-edge": {
 			"releaseDate": "2026-03-20"
 		},
@@ -2512,6 +2584,9 @@
 		"openrouter/x-ai/grok-4.6": {
 			"releaseDate": "2026-08-12"
 		},
+		"openrouter/x-ai/grok-4.7": {
+			"releaseDate": "2026-09-21"
+		},
 		"openrouter/x-ai/grok-build-0.1": {
 			"releaseDate": "2026-04-16"
 		},
@@ -2520,6 +2595,15 @@
 		},
 		"openrouter/xiaomi/mimo-v2.5-pro": {
 			"releaseDate": "2026-04-22"
+		},
+		"openrouter/xiaomi/mimo-v2.6-flash": {
+			"releaseDate": "2026-09-22"
+		},
+		"openrouter/xiaomi/mimo-v2.6-pro": {
+			"releaseDate": "2026-09-22"
+		},
+		"openrouter/xiaomi/mimo-v2.6-pro-ultraspeed": {
+			"releaseDate": "2026-09-21"
 		},
 		"openrouter/z-ai/glm-4.5": {
 			"releaseDate": "2025-07-28"
@@ -2629,11 +2713,20 @@
 		"xai/grok-4.6": {
 			"releaseDate": "2026-08-12"
 		},
+		"xai/grok-4.7": {
+			"releaseDate": "2026-09-21"
+		},
 		"xiaomi-token-plan-ams/mimo-v2.5": {
 			"releaseDate": "2026-04-22"
 		},
 		"xiaomi-token-plan-ams/mimo-v2.5-pro": {
 			"releaseDate": "2026-04-22"
+		},
+		"xiaomi-token-plan-ams/mimo-v2.6-flash": {
+			"releaseDate": "2026-09-22"
+		},
+		"xiaomi-token-plan-ams/mimo-v2.6-pro": {
+			"releaseDate": "2026-09-22"
 		},
 		"xiaomi-token-plan-cn/mimo-v2.5": {
 			"releaseDate": "2026-04-22"
@@ -2641,11 +2734,23 @@
 		"xiaomi-token-plan-cn/mimo-v2.5-pro": {
 			"releaseDate": "2026-04-22"
 		},
+		"xiaomi-token-plan-cn/mimo-v2.6-flash": {
+			"releaseDate": "2026-09-22"
+		},
+		"xiaomi-token-plan-cn/mimo-v2.6-pro": {
+			"releaseDate": "2026-09-22"
+		},
 		"xiaomi-token-plan-sgp/mimo-v2.5": {
 			"releaseDate": "2026-04-22"
 		},
 		"xiaomi-token-plan-sgp/mimo-v2.5-pro": {
 			"releaseDate": "2026-04-22"
+		},
+		"xiaomi-token-plan-sgp/mimo-v2.6-flash": {
+			"releaseDate": "2026-09-22"
+		},
+		"xiaomi-token-plan-sgp/mimo-v2.6-pro": {
+			"releaseDate": "2026-09-22"
 		},
 		"xiaomi/mimo-v2.5": {
 			"releaseDate": "2026-04-22"
@@ -2655,6 +2760,15 @@
 		},
 		"xiaomi/mimo-v2.5-pro-ultraspeed": {
 			"releaseDate": "2026-06-08"
+		},
+		"xiaomi/mimo-v2.6-flash": {
+			"releaseDate": "2026-09-22"
+		},
+		"xiaomi/mimo-v2.6-pro": {
+			"releaseDate": "2026-09-22"
+		},
+		"xiaomi/mimo-v2.6-pro-ultraspeed": {
+			"releaseDate": "2026-09-21"
 		},
 		"zai/glm-4.7": {
 			"releaseDate": "2025-12-22"
