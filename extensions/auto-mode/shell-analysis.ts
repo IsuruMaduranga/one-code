@@ -730,7 +730,7 @@ function outputFlagTarget(args: Token[]): string | undefined {
  * options its table names, is safe. Returns undefined when safe, else the
  * reason to escalate.
  */
-function gitEscalationReason(args: Token[], isDirOutsideCwd: (dir: string) => boolean): string | undefined {
+function gitEscalationReason(args: Token[], isDirOutsideCwd: (dir: string) => boolean, onFileReads: (words: Token[]) => void): string | undefined {
 	let index = 0;
 	while (index < args.length) {
 		const token = args[index].value;
@@ -772,8 +772,19 @@ function gitEscalationReason(args: Token[], isDirOutsideCwd: (dir: string) => bo
 	if (!gitOperandsAllowed(subcommand, check.parsed)) {
 		return `runs git ${subcommand} with an operand and no --list, which creates a ref`;
 	}
+	if (GIT_FILE_OPERANDS.has(subcommand)) onFileReads(check.parsed.positionals);
 	return undefined;
 }
+
+/**
+ * Subcommands whose operands can be files git reads outside the repository.
+ * `git diff <path> <path>` goes `--no-index` by itself when either path is
+ * outside the work tree or there is no repository, and reads both files
+ * (findings §25). Every operand is read-checked, revisions included: a
+ * revision is not a path unless a file of that name exists, and one that
+ * resolves inside the working directory passes.
+ */
+const GIT_FILE_OPERANDS = new Set(["diff"]);
 
 /**
  * For a git command the options already proved read-only: why the checkout it
@@ -992,44 +1003,6 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 			continue;
 		}
 
-		if (name === "git") {
-			// `git reset --hard` is an in-project whole-tree discard: escalate, but
-			// mark it contained so the recoverability gate can clear it when the tree
-			// is clean. Any other non-read-only git subcommand is uncontained.
-			if (isWholeTreeGitReset(args)) {
-				if (hasGitRetargetFlag(args)) {
-					// The reset acts on whatever -C/--git-dir/--work-tree names, not on
-					// the working directory the recoverability judge would inspect.
-					escalate("runs git reset --hard against another tree (-C/--git-dir/--work-tree), which cannot be judged here");
-					continue;
-				}
-				evidence.wholeTree = true;
-				escalate("runs git reset --hard, which discards uncommitted changes in the working tree", {
-					contained: true,
-				});
-				continue;
-			}
-			const reason =
-				gitEscalationReason(args, (dir) => {
-					if (isUnknownTilde(dir)) return true;
-					const resolved = resolveForContainment(toAbsoluteBash(effectiveCwd, dir, home));
-					return resolved === undefined || !isWithin(containmentRoot, resolved);
-				}) ?? gitCheckoutReason(args, effectiveCwd, home, checkoutReasons);
-			if (reason) escalate(reason);
-			continue;
-		}
-
-		if (SCRIPT_INTERPRETERS.has(name)) {
-			escalate(`runs ${name}, whose script can read and write files this check cannot see`);
-		}
-
-		const isMutation = MUTATION_COMMANDS.has(name);
-		const isDelete = DELETE_COMMANDS.has(name);
-		// A delete confined to in-project paths is what the containment gate exists
-		// to clear (subject to recoverability); any other mutation (cp/mv/tar/…)
-		// stays uncontained and reaches the classifier as before.
-		if (isMutation) escalate(`runs ${name}, which modifies the filesystem`, { contained: isDelete });
-
 		/**
 		 * A word a read-only command reads. It escalates when it resolves outside
 		 * the working directory and the readable roots, or onto a credential path
@@ -1067,6 +1040,54 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 				escalateOutsideRead(value, "which is outside the working directory");
 			}
 		};
+
+		if (name === "git") {
+			// `git reset --hard` is an in-project whole-tree discard: escalate, but
+			// mark it contained so the recoverability gate can clear it when the tree
+			// is clean. Any other non-read-only git subcommand is uncontained.
+			if (isWholeTreeGitReset(args)) {
+				if (hasGitRetargetFlag(args)) {
+					// The reset acts on whatever -C/--git-dir/--work-tree names, not on
+					// the working directory the recoverability judge would inspect.
+					escalate("runs git reset --hard against another tree (-C/--git-dir/--work-tree), which cannot be judged here");
+					continue;
+				}
+				evidence.wholeTree = true;
+				escalate("runs git reset --hard, which discards uncommitted changes in the working tree", {
+					contained: true,
+				});
+				continue;
+			}
+			const fileReads: Token[] = [];
+			const reason =
+				gitEscalationReason(
+					args,
+					(dir) => {
+						if (isUnknownTilde(dir)) return true;
+						const resolved = resolveForContainment(toAbsoluteBash(effectiveCwd, dir, home));
+						return resolved === undefined || !isWithin(containmentRoot, resolved);
+					},
+					(words) => fileReads.push(...words),
+				) ?? gitCheckoutReason(args, effectiveCwd, home, checkoutReasons);
+			if (reason) escalate(reason);
+			// Resolved against the working directory even under `-C <dir>`: that
+			// dir is inside it (or git escalated above), and a relative path that
+			// stays inside from here stays inside from any deeper directory.
+			else for (const word of fileReads) checkRead(word);
+			continue;
+		}
+
+		if (SCRIPT_INTERPRETERS.has(name)) {
+			escalate(`runs ${name}, whose script can read and write files this check cannot see`);
+		}
+
+		const isMutation = MUTATION_COMMANDS.has(name);
+		const isDelete = DELETE_COMMANDS.has(name);
+		// A delete confined to in-project paths is what the containment gate exists
+		// to clear (subject to recoverability); any other mutation (cp/mv/tar/…)
+		// stays uncontained and reaches the classifier as before.
+		if (isMutation) escalate(`runs ${name}, which modifies the filesystem`, { contained: isDelete });
+
 
 		// A read-only command is proved read-only by its options, not its name:
 		// each option must be in the command's table (read-only-options.ts), so

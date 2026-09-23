@@ -517,3 +517,34 @@ describe("PR #8 review: a checkout's git config can make a git read run a progra
 		expect(verdict("cat [!]abc]")).toBe("escalate");
 	});
 });
+
+describe("git diff's implicit --no-index reads files outside the repository", () => {
+	// `git diff <path> <path>` goes --no-index by itself when a path is outside
+	// the work tree or there is no repository, and prints both files (findings §25).
+	it("escalates an operand outside the working directory, in any position", () => {
+		for (const command of [
+			"git diff /etc/hosts a.txt",
+			"git diff a.txt /etc/hosts",
+			"git diff -- /etc/hosts a.txt",
+			"git diff ../outside.txt a.txt",
+			"git diff ~/notes a.txt",
+			"git diff --stat /etc/hosts a.txt",
+		]) {
+			expect(analyzeShellCommand({ command, cwd, home }).outsideReads.length, command).toBeGreaterThan(0);
+			expect(verdict(command), command).toBe("escalate");
+		}
+	});
+
+	posixOnly("judges an operand where it resolves, and under -C from the working directory", () => {
+		mkdirSync(join(cwd, "sub"));
+		symlinkSync("/etc/hosts", join(cwd, "hosts"));
+		expect(verdict("git diff hosts a.txt")).toBe("escalate");
+		expect(verdict("git -C sub diff ../../outside.txt a.txt")).toBe("escalate");
+	});
+
+	it("keeps revisions, ranges and in-project paths on the fast path", () => {
+		for (const command of ["git diff", "git diff a.txt", "git diff HEAD~1", "git diff main..dev", "git diff origin/main -- a.txt", "git diff @{u}", "git diff --stat HEAD"]) {
+			expect(verdict(command), command).toBe("safe");
+		}
+	});
+});
