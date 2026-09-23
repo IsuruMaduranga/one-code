@@ -30,6 +30,7 @@ import { buildClaudeMdBlock, buildOneCodeBlock, discoverContextFiles, discoverOn
 import { projectMemoryDir, truncateIndex } from "../lib/memory.ts";
 import { claudeConfigDir, oneCodeStateDir } from "../lib/paths.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
+import { HARNESS_GIT_CONFIG } from "../lib/git.ts";
 
 const REMINDER_KEY = "claude-context";
 const ONECODE_REMINDER_KEY = "one-code-context";
@@ -37,7 +38,7 @@ const ONECODE_REMINDER_KEY = "one-code-context";
 /** The account email Claude Code stamps as `# userEmail`. git config is our proxy. */
 function resolveEmail(cwd: string): string | null {
 	try {
-		const email = execFileSync("git", ["config", "user.email"], { cwd, encoding: "utf8" }).trim();
+		const email = execFileSync("git", [...HARNESS_GIT_CONFIG, "config", "user.email"], { cwd, encoding: "utf8" }).trim();
 		if (email) return email;
 	} catch {
 		// no git / no config — fall through

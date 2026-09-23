@@ -28,6 +28,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, readdirSync } from "node:fs";
 import { basename, join, sep } from "node:path";
+import { HARNESS_GIT_CONFIG } from "../lib/git.ts";
 
 export type Recoverability = "recoverable" | "unrecoverable" | "unknown";
 
@@ -134,7 +135,7 @@ function holdsNestedGitDir(dir: string, budget: number): boolean | undefined {
 /** A thin, defensive git call: any failure (not a repo, git missing, timeout) becomes `undefined`. */
 function git(cwd: string, args: string[]): { ok: boolean; stdout: string } | undefined {
 	try {
-		const stdout = execFileSync("git", args, { cwd, encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"] });
+		const stdout = execFileSync("git", [...HARNESS_GIT_CONFIG, ...args], { cwd, encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"] });
 		return { ok: true, stdout };
 	} catch (error) {
 		// A non-zero exit still carries stdout (e.g. ls-files --error-unmatch), which

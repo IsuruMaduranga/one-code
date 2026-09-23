@@ -6,7 +6,6 @@ import { resolveForContainment } from "../../extensions/auto-mode/paths.ts";
 import {
 	canonicalCommandName,
 	canonicalizeStatement,
-	isGitStatusCommand,
 	powershellInjectionSyntax,
 	powershellMatchForms,
 	powershellReadOnly,
@@ -126,18 +125,6 @@ describe("powershellReadOnly", () => {
 		]) {
 			expect(powershellReadOnly(cmd).readOnly, cmd).toBe(false);
 		}
-	});
-});
-
-describe("isGitStatusCommand", () => {
-	it("recognises a lone git status with flags only", () => {
-		expect(isGitStatusCommand("git status")).toBe(true);
-		expect(isGitStatusCommand("git.exe status --short")).toBe(true);
-		expect(isGitStatusCommand("git -C C:\\repo status")).toBe(true);
-		expect(isGitStatusCommand("git -c color.ui=false --no-pager status -sb")).toBe(true);
-		expect(isGitStatusCommand("git status; git diff")).toBe(false);
-		expect(isGitStatusCommand("git status src")).toBe(false);
-		expect(isGitStatusCommand("git log")).toBe(false);
 	});
 });
 

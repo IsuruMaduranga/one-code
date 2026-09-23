@@ -25,6 +25,7 @@ import { worktreeBashGuardReason } from "./guards.ts";
 import { ORIGINAL_COMMAND_CHANNEL, type OriginalCommandRecord } from "../lib/original-command.ts";
 import { rewriteToolInput, validateWorktreeName } from "./rewrite.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
+import { HARNESS_GIT_CONFIG } from "../lib/git.ts";
 
 const run = promisify(execFile);
 const REMINDER_KEY = "cc-worktree-session";
@@ -46,7 +47,7 @@ interface WorktreeDetails {
 }
 
 async function git(args: string[], cwd: string): Promise<string> {
-	const { stdout } = await run("git", args, { cwd, maxBuffer: 10 * 1024 * 1024 });
+	const { stdout } = await run("git", [...HARNESS_GIT_CONFIG, ...args], { cwd, maxBuffer: 10 * 1024 * 1024 });
 	return stdout.trim();
 }
 

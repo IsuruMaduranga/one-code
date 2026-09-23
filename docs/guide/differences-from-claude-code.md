@@ -30,6 +30,7 @@ so nothing surprises you.
 | Tool names on the wire | PascalCase (`Read`, `Bash`). | snake_case (`read`, `bash`); `Agent` and `SendMessage` keep their names. Claude Code names still work in rules and hook matchers. |
 | Permission-mode key | shift+tab. | ctrl+q; alt+m on Windows and WSL. pi reserves shift+tab for the reasoning-effort dial and, on Windows, ctrl+q for queuing a follow-up. |
 | Task-list key | ctrl+t. | `/tasks show` and `/tasks hide`. pi reserves ctrl+t for thinking blocks. |
+| Where auto mode's classifier runs | On Anthropic's API server, through a request field the endpoint must support; the local classifier is a fallback only until about October 23, 2026 ([LiteLLM's notes](https://docs.litellm.ai/blog/claude-code-server-side-auto-mode)). | In the harness, on a model from your own provider, so auto mode works with any provider. |
 | Deleting files in auto mode | The whole project directory is trusted. | A delete is approved only when git can recover the file; otherwise the classifier decides. |
 | Bypass mode | Protected paths stay protected. | Bypass mode bypasses everything, including protected paths. |
 | First-run consent for auto mode | Asked once. | Not asked. Auto mode is on from the first session. |

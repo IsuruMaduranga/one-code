@@ -141,6 +141,13 @@ One Code builds that adaptation into the harness:
   endpoint change. One Code provides shared tool interfaces and selects
   supporting models from the provider's catalog, subject to capability
   requirements.
+- **Auto mode on any provider.** Claude Code's auto mode now sends each
+  tool call to the API server for a safety check, using a request field
+  the endpoint has to support. Claude Code keeps its local classifier as a
+  fallback only for a while ([LiteLLM's notes](https://docs.litellm.ai/blog/claude-code-server-side-auto-mode)
+  give October 23, 2026), so an endpoint without that support can leave
+  auto mode unavailable. One Code runs its own two-stage classifier on a
+  model from your provider, so auto mode works wherever your models run.
 - **An open harness you can change.** One Code's prompts, tools, and
   workflows are implemented as pi extensions. You can inspect them,
   change their behavior, and add your own.

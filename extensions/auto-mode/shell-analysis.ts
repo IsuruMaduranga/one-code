@@ -33,6 +33,17 @@
 import { isProtectedPath } from "../permissions/protected-paths.ts";
 import { isExecutionPrimitivePath, isSensitivePath } from "./sensitive.ts";
 import { isWithin, resolveForContainment, toAbsoluteBash } from "./paths.ts";
+import { checkoutGitRunsProgram } from "./git-checkout-programs.ts";
+import { lstatSync, readdirSync } from "node:fs";
+import {
+	GIT_GLOBAL_SAFE,
+	GIT_SUBCOMMAND_SPECS,
+	PATTERN_OPTIONS,
+	READ_ONLY_SPECS,
+	checkFind,
+	checkOptions,
+	gitOperandsAllowed,
+} from "./read-only-options.ts";
 
 export type ShellVerdict = "safe" | "escalate";
 
@@ -96,57 +107,14 @@ export interface ShellEvidence {
 	wholeTree: boolean;
 }
 
-/** Commands that read and do not write, and are safe to fast-path. */
-const READ_ONLY_COMMANDS = new Set([
-	"basename",
-	"cat",
-	"cksum",
-	"column",
-	"comm",
-	"cut",
-	"date",
-	"diff",
-	"dirname",
-	"du",
-	"echo",
-	"false",
-	"file",
-	"fold",
-	"head",
-	"hostname",
-	"id",
-	"join",
-	"jq",
-	"ls",
-	"md5sum",
-	"nl",
-	"od",
-	"paste",
-	// `printenv` and a bare `env` are NOT read-only for this purpose: they dump
-	// the process environment, provider keys included (Claude Code removed both
-	// from its read-only list for the same reason).
-	"printf",
-	"pwd",
-	"readlink",
-	"realpath",
-	"rev",
-	"rg",
-	"sha1sum",
-	"sha256sum",
-	"shasum",
-	"sort",
-	"stat",
-	"tail",
-	"tr",
-	"tree",
-	"true",
-	"uname",
-	"uniq",
-	"wc",
-	"which",
-	"whoami",
-	"yes",
-]);
+/**
+ * Commands that read and do not write, and are safe to fast-path — each only
+ * with the options its table in read-only-options.ts names. `printenv` and a
+ * bare `env` are not here: they dump the process environment, provider keys
+ * included (Claude Code removed both from its read-only list for the same
+ * reason).
+ */
+const READ_ONLY_COMMANDS = new Set(Object.keys(READ_ONLY_SPECS));
 
 /**
  * Read-only commands that take no file operands, so a path-looking positional
@@ -174,8 +142,10 @@ const NO_FILE_OPERANDS = new Set([
 /**
  * `grep` and friends take a pattern before their paths, so the first positional
  * is not a path token. Tracked separately to avoid classifying a regex as a file.
+ * `ag` and `ack` are not fast-pathed at all: both take a pager program, and ack
+ * reads a project `.ackrc` this check never sees.
  */
-const PATTERN_FIRST_COMMANDS = new Set(["grep", "egrep", "fgrep", "rg", "ag", "ack"]);
+const PATTERN_FIRST_COMMANDS = new Set(["grep", "egrep", "fgrep", "rg"]);
 
 /**
  * Commands that run whatever follows them. The original only knew three of
@@ -312,32 +282,16 @@ const NETWORK_COMMANDS = new Set([
 ]);
 
 /**
- * git is **default-deny by subcommand**: only these read-only subcommands can be
- * fast-pathed, and everything else escalates. The original enumerated *mutating*
+ * git is **default-deny by subcommand and by option**: only the subcommands in
+ * `GIT_SUBCOMMAND_SPECS` (read-only-options.ts) can be fast-pathed, each only
+ * with the options its table names. The original enumerated *mutating*
  * subcommands and allowed the rest, so `git rm`, `git mv`, `git archive`,
- * `git config`, and `git update-ref` all slipped through (review finding N11).
- * Enumerating the safe set instead means a git subcommand added upstream
- * tomorrow escalates rather than being silently permitted.
+ * `git config`, and `git update-ref` all slipped through (review finding N11);
+ * until 2026-09-23 the options after an allowed subcommand were never looked
+ * at, so `git branch -D`, `git diff --output=f` and `git grep -O<prog>` passed
+ * as reads (SECURITY-REVIEW-2026-09-23 H1). `ls-remote` is not read-only: it
+ * contacts a remote.
  */
-const GIT_READ_ONLY_SUBCOMMANDS = new Set([
-	"blame",
-	"branch", // listing; mutation forms carry flags, and any flag we do not model escalates
-	"cat-file",
-	"describe",
-	"diff",
-	"grep",
-	"log",
-	"ls-files",
-	"ls-remote",
-	"ls-tree",
-	"rev-parse",
-	"shortlog",
-	"show",
-	"show-ref",
-	"status",
-	"tag", // listing only, same reasoning as branch
-]);
-
 /**
  * git global flags that take a value. `git -c k=v <sub>` can turn a read into
  * code execution (`git -c protocol.ext.allow=always clone ext::sh …` — review
@@ -351,6 +305,8 @@ export interface Token {
 	value: string;
 	/** True when the token was written with any quoting or expansion syntax. */
 	hadExpansion: boolean;
+	/** True when an unquoted, unescaped `*`, `?` or `[` makes the token a glob bash expands. */
+	glob?: boolean;
 }
 
 export interface Segment {
@@ -435,6 +391,7 @@ export function parseCommand(command: string): { segments: Segment[]; parseFaile
 
 	let current = "";
 	let hadExpansion = false;
+	let glob = false;
 	let quoted = false;
 	let inSingle = false;
 	let inDouble = false;
@@ -448,10 +405,11 @@ export function parseCommand(command: string): { segments: Segment[]; parseFaile
 			redirects.push(current);
 			pendingRedirect = false;
 		} else {
-			tokens.push({ value: current, hadExpansion });
+			tokens.push({ value: current, hadExpansion, glob });
 		}
 		current = "";
 		hadExpansion = false;
+		glob = false;
 		quoted = false;
 	};
 
@@ -524,11 +482,18 @@ export function parseCommand(command: string): { segments: Segment[]; parseFaile
 			let j = i + 1;
 			if (command[j] === ">" || command[j] === "|") j++;
 			if (command[j] === "&") {
-				// fd duplication — consume the fd and move on, no path involved.
+				// `>&2`, `>&-`: fd duplication, no path involved. But `>&word` with
+				// any other word opens that file for writing (bash's `&>word`), so it
+				// is a write target like `>word` (SECURITY-REVIEW-2026-09-23 H3).
+				let k = j + 1;
+				while (k < command.length && /[0-9]/.test(command[k])) k++;
+				if (command[k] === "-") k++;
+				const boundary = k >= command.length || /[\s;&|<>()]/.test(command[k]);
+				if (k > j + 1 && boundary) {
+					i = k - 1;
+					continue;
+				}
 				j++;
-				while (j < command.length && /[0-9-]/.test(command[j])) j++;
-				i = j - 1;
-				continue;
 			}
 			pendingRedirect = ch === ">";
 			i = j - 1;
@@ -544,6 +509,7 @@ export function parseCommand(command: string): { segments: Segment[]; parseFaile
 			continue;
 		}
 
+		if (ch === "*" || ch === "?" || ch === "[") glob = true;
 		current += ch;
 	}
 
@@ -664,11 +630,87 @@ function looksLikePath(value: string): boolean {
 	return value.startsWith("/") || value.includes("/");
 }
 
-/** `find` actions that execute or write (review finding N7 adds the last four). */
-function findHasAction(args: Token[]): boolean {
-	return args.some(({ value }) =>
-		["-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprintf", "-fls", "-fprint", "-fprint0"].includes(value),
-	);
+/** Leading assignments that change nothing a command runs or reads: locale and display only. */
+const INERT_ASSIGNMENTS = /^(LANG|LANGUAGE|LC_[A-Z]+|TZ|NO_COLOR|FORCE_COLOR|CLICOLOR|CLICOLOR_FORCE|TERM|COLUMNS|LINES)$/;
+
+/**
+ * A `~` word other than `~` and `~/…`: bash expands `~name` to that user's
+ * home and `~-`/`~+` to `$OLDPWD`/`$PWD`, which `toAbsolute` would read as a
+ * directory literally named `~name` inside the working directory.
+ */
+export function isUnknownTilde(value: string): boolean {
+	return value.startsWith("~") && value !== "~" && !value.startsWith("~/");
+}
+
+/** Whether a directory entry exists at `absolute` (a dangling symlink counts). */
+function entryExists(absolute: string): boolean {
+	try {
+		lstatSync(absolute);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * A bash glob (one path component) as a RegExp: `*`, `?`, `[…]`/`[!…]`,
+ * everything else literal. Undefined when JavaScript cannot compile the
+ * bracket expression (`[z-a]`), which bash accepts and matches nothing with.
+ */
+export function globComponentRegex(glob: string): RegExp | undefined {
+	let out = "";
+	for (let i = 0; i < glob.length; i++) {
+		const ch = glob[i];
+		if (ch === "*") out += "[^/]*";
+		else if (ch === "?") out += "[^/]";
+		else if (ch === "[") {
+			// A `]` first in the set, after any `!`/`^`, is a member, not the end.
+			const negation = glob[i + 1] === "!" || glob[i + 1] === "^" ? 1 : 0;
+			const close = glob.indexOf("]", i + 2 + negation);
+			if (close === -1) {
+				out += "\\[";
+				continue;
+			}
+			let body = glob.slice(i + 1, close);
+			const negated = body.startsWith("!") || body.startsWith("^");
+			if (negated) body = body.slice(1);
+			out += `[${negated ? "^" : ""}${body.replace(/[\\\]]/g, "\\$&")}]`;
+			i = close;
+		} else out += ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	}
+	try {
+		return new RegExp(`^${out}$`);
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * The words bash expands a glob operand to, or undefined when the check cannot
+ * enumerate them: a glob in a directory component, a component starting with
+ * `.` (bash before 5.2 matches `.` and `..` with `.*` or `.?`), a bracket
+ * expression JavaScript cannot compile, or more than 2,000 matches. Only the last component is expanded, as bash would with
+ * `dotglob`, `globstar` and `nocaseglob` off (their non-interactive defaults).
+ * No match leaves the word as written, as bash does without `nullglob`.
+ */
+function expandGlob(cwd: string, pattern: string, home: string): string[] | undefined {
+	const slash = pattern.lastIndexOf("/");
+	const dirPart = slash >= 0 ? pattern.slice(0, slash) : "";
+	const leaf = slash >= 0 ? pattern.slice(slash + 1) : pattern;
+	if (!leaf || /[*?[]/.test(dirPart) || leaf.startsWith(".")) return undefined;
+	if (isUnknownTilde(dirPart)) return undefined;
+	let entries: string[];
+	try {
+		entries = readdirSync(toAbsoluteBash(cwd, slash >= 0 ? dirPart || "/" : ".", home));
+	} catch {
+		return [pattern];
+	}
+	const regex = globComponentRegex(leaf);
+	if (!regex) return undefined;
+	const matches = entries.filter((entry) => !entry.startsWith(".") && regex.test(entry));
+	if (matches.length > 2_000) return undefined;
+	if (matches.length === 0) return [pattern];
+	return matches.map((entry) => (slash >= 0 ? `${dirPart}/${entry}` : entry));
 }
 
 /** The file named by a `-o FILE` / `-oFILE` / `--output=FILE` flag, if present. */
@@ -683,39 +725,71 @@ function outputFlagTarget(args: Token[]): string | undefined {
 }
 
 /**
- * Decide git: only an explicitly read-only subcommand with no flags we cannot
- * account for is safe. Returns undefined when safe, else the reason to escalate.
+ * Decide git: only an explicitly read-only subcommand, preceded by global
+ * options from `GIT_GLOBAL_SAFE` or an in-project `-C`, and carrying only the
+ * options its table names, is safe. Returns undefined when safe, else the
+ * reason to escalate.
  */
 function gitEscalationReason(args: Token[], isDirOutsideCwd: (dir: string) => boolean): string | undefined {
 	let index = 0;
 	while (index < args.length) {
 		const token = args[index].value;
 		if (!token.startsWith("-")) break;
-		// `-c key=value` can reconfigure git into executing an arbitrary helper.
-		if (token === "-c" || token.startsWith("-c=") || token === "--config-env") {
+		// `-c key=value` / `--config-env` can reconfigure git into executing an arbitrary helper.
+		if (token === "-c" || token.startsWith("-c") || token === "--config-env" || token.startsWith("--config-env=")) {
 			return "passes git -c/--config-env, which can turn a read into code execution";
 		}
-		// `--git-dir=/x` spells the same flag as `--git-dir /x`; normalise both.
-		const eq = token.indexOf("=");
-		const flag = eq > 0 ? token.slice(0, eq) : token;
-		if (GIT_GLOBAL_VALUE_FLAGS.has(flag)) {
-			const value = eq > 0 ? token.slice(eq + 1) : args[index + 1]?.value;
-			// `-C`/`--git-dir`/`--work-tree` retarget git at another directory. If that
-			// directory escapes the working directory the operation is no longer
-			// provably in-project, so escalate rather than skipping the flag blindly
-			// (was review gap: `git -C /etc status` classified safe).
-			if ((flag === "-C" || flag === "--git-dir" || flag === "--work-tree") && value && isDirOutsideCwd(value)) {
-				return `runs git ${flag} ${value}, which points outside the working directory`;
-			}
-			index += eq > 0 ? 1 : 2;
+		if (token === "-C") {
+			const dir = args[index + 1]?.value;
+			// `-C` retargets git at another directory; outside the working directory
+			// the operation is no longer provably in-project (was review gap: `git
+			// -C /etc status` classified safe).
+			if (!dir || isDirOutsideCwd(dir)) return `runs git -C ${dir ?? ""}, which points outside the working directory`;
+			index += 2;
 			continue;
 		}
-		index++;
+		if (GIT_GLOBAL_SAFE.has(token)) {
+			index++;
+			continue;
+		}
+		// `--git-dir`, `--work-tree`, `--exec-path`, `--namespace` and every other
+		// global option can point git at a repository or configuration this check
+		// has not seen, in-project or not (SECURITY-REVIEW-2026-09-23 H2).
+		const eq = token.indexOf("=");
+		const flag = eq > 0 ? token.slice(0, eq) : token;
+		const value = eq > 0 ? token.slice(eq + 1) : undefined;
+		if ((flag === "--git-dir" || flag === "--work-tree") && value !== undefined && isDirOutsideCwd(value)) {
+			return `runs git ${flag} ${value}, which points outside the working directory`;
+		}
+		return `passes git ${flag}, which can point git at another repository or configuration`;
 	}
-	const subcommand = args[index]?.value?.toLowerCase();
+	const subcommand = args[index]?.value;
 	if (!subcommand) return undefined; // bare `git` prints help
-	if (!GIT_READ_ONLY_SUBCOMMANDS.has(subcommand)) return `runs git ${subcommand}, which is not a read-only subcommand`;
+	const spec = GIT_SUBCOMMAND_SPECS[subcommand];
+	if (!spec) return `runs git ${subcommand}, which is not a read-only subcommand`;
+	const check = checkOptions(spec, args.slice(index + 1));
+	if (!check.ok) return `runs git ${subcommand} and ${check.reason}`;
+	if (!gitOperandsAllowed(subcommand, check.parsed)) {
+		return `runs git ${subcommand} with an operand and no --list, which creates a ref`;
+	}
 	return undefined;
+}
+
+/**
+ * For a git command the options already proved read-only: why the checkout it
+ * runs in (after every `-C`, each relative to the last) could still make it
+ * run a program (git-checkout-programs.ts), or undefined.
+ */
+function gitCheckoutReason(args: Token[], cwd: string, home: string, seen: Map<string, string | undefined>): string | undefined {
+	let dir = cwd;
+	for (let index = 0; index < args.length && args[index].value.startsWith("-"); index++) {
+		if (args[index].value === "-C" && args[index + 1]) dir = toAbsoluteBash(dir, args[++index].value, home);
+	}
+	// Memoized for one analysis only: nothing runs between its segments, but the
+	// model can rewrite `.git/config` between calls.
+	if (!seen.has(dir)) seen.set(dir, checkoutGitRunsProgram(dir, home));
+	const why = seen.get(dir);
+	return why && `runs git where ${why}`;
 }
 
 export interface AnalyzeInput {
@@ -743,6 +817,7 @@ export interface AnalyzeInput {
  * Classify a shell command. Never denies — see the module contract above.
  */
 export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], readableRoots = [] }: AnalyzeInput): ShellEvidence {
+	const checkoutReasons = new Map<string, string | undefined>();
 	const evidence: ShellEvidence = {
 		verdict: "safe",
 		notes: [],
@@ -805,6 +880,13 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 	 */
 	const checkWriteTarget = (token: string) => {
 		if (token === "/dev/null") return;
+		// A `~name`/`~-` target or a glob lands wherever bash expands it, which
+		// this check cannot know (SECURITY-REVIEW-2026-09-23 M2).
+		if (isUnknownTilde(token) || /[*?[]/.test(token)) {
+			evidence.writes.push({ token, absolute: token, outsideCwd: true });
+			escalate(`writes to ${token}, which bash expands to a path this check cannot resolve`);
+			return;
+		}
 		const absolute = toAbsoluteBash(effectiveCwd, token, home);
 		const resolved = resolveForContainment(absolute);
 		const outsideCwd = resolved === undefined || !isWithin(containmentRoot, resolved);
@@ -843,6 +925,17 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		// (cd/git) can never skip a redirect (was review gap: bare-redirect writes and
 		// read-only-command redirects were fast-pathed to "safe").
 		for (const token of segment.redirects) checkWriteTarget(token);
+
+		// A leading `NAME=value` changes what the command runs or reads: git takes
+		// its repository and configuration from GIT_* variables (the same
+		// capability `git -c` is refused for), loaders and pagers from others, and
+		// a bare `PATH=./bin` segment changes which program every later word runs.
+		// Only locale and display variables are inert (SECURITY-REVIEW-2026-09-23 H2).
+		for (const token of segment.tokens) {
+			const assigned = /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(token.value)?.[1];
+			if (!assigned) break;
+			if (!INERT_ASSIGNMENTS.test(assigned)) escalate(`sets ${assigned}, which can change what the command runs or reads`);
+		}
 
 		const { command: name, args, peeled } = resolvePayload(segment.tokens);
 		if (!name) {
@@ -916,20 +1009,18 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 				});
 				continue;
 			}
-			const reason = gitEscalationReason(args, (dir) => {
-				const resolved = resolveForContainment(toAbsoluteBash(effectiveCwd, dir, home));
-				return resolved === undefined || !isWithin(containmentRoot, resolved);
-			});
+			const reason =
+				gitEscalationReason(args, (dir) => {
+					if (isUnknownTilde(dir)) return true;
+					const resolved = resolveForContainment(toAbsoluteBash(effectiveCwd, dir, home));
+					return resolved === undefined || !isWithin(containmentRoot, resolved);
+				}) ?? gitCheckoutReason(args, effectiveCwd, home, checkoutReasons);
 			if (reason) escalate(reason);
 			continue;
 		}
 
 		if (SCRIPT_INTERPRETERS.has(name)) {
 			escalate(`runs ${name}, whose script can read and write files this check cannot see`);
-		}
-
-		if (name === "find" && findHasAction(args)) {
-			escalate("uses a find action that executes commands or writes files");
 		}
 
 		const isMutation = MUTATION_COMMANDS.has(name);
@@ -939,33 +1030,71 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		// stays uncontained and reaches the classifier as before.
 		if (isMutation) escalate(`runs ${name}, which modifies the filesystem`, { contained: isDelete });
 
-		if (!isMutation && !READ_ONLY_COMMANDS.has(name) && !PATTERN_FIRST_COMMANDS.has(name) && name !== "find") {
-			escalate(`runs ${name}, which is not on the read-only allowlist`);
-		}
-
-		// A read-only command's path operands are read: one that resolves outside
-		// the working directory escalates (Claude Code asks for every read outside
-		// it — filesystem.ts — and removed env/printenv from its read-only list).
-		// Bare names (`cat notes.txt`) resolve inside the cwd and stay fast-pathed;
-		// a pattern-first command's first positional is its pattern, not a path.
-		if (!isMutation && !NO_FILE_OPERANDS.has(name)) {
-			const positionals = args.filter((token) => !token.value.startsWith("-")).map((token) => token.value);
-			// The first positional is the pattern only when no flag supplies it:
-			// with `-e PAT` / `-f FILE` (`--regexp`, `--file`) every positional is a
-			// path, and `-f`'s value is itself a file read.
-			const patternByFlag = args.some(({ value }) => /^(-[a-zA-Z]*[ef][a-zA-Z]*|--regexp(=.*)?|--file(=.*)?)$/.test(value));
-			if (PATTERN_FIRST_COMMANDS.has(name) && !patternByFlag) positionals.shift();
-			// `--file=FILE` carries its read inside the flag token.
-			for (const { value } of args) {
-				if (value.startsWith("--file=")) positionals.push(value.slice("--file=".length));
+		/**
+		 * A word a read-only command reads. It escalates when it resolves outside
+		 * the working directory and the readable roots, or onto a credential path
+		 * — judged where it RESOLVES, so an in-project symlink named `notes` that
+		 * points at a key file is the key file (SECURITY-REVIEW-2026-09-23 M1). A
+		 * `~name`/`~-` word and a glob that could reach `..` are paths bash
+		 * expands to places this check cannot see (M2); an ordinary glob is
+		 * expanded one level here and every match is judged.
+		 */
+		const escalateOutsideRead = (value: string, why: string) => {
+			if (!evidence.outsideReads.includes(value)) evidence.outsideReads.push(value);
+			escalate(`reads ${value}, ${why}`, { outsideRead: true });
+		};
+		const checkRead = (word: { value: string; glob?: boolean }) => {
+			const value = word.value;
+			if (!value) return;
+			if (isUnknownTilde(value)) {
+				escalateOutsideRead(value, "which bash expands to a directory outside what this check can see");
+				return;
 			}
-			for (const value of positionals) {
-				if (!looksLikePath(value)) continue;
-				const resolved = resolveForContainment(toAbsoluteBash(effectiveCwd, value, home));
+			const targets = word.glob ? expandGlob(effectiveCwd, value, home) : [value];
+			if (targets === undefined) {
+				escalateOutsideRead(value, "a glob whose matches cannot be checked");
+				return;
+			}
+			for (const target of targets) {
+				const absolute = toAbsoluteBash(effectiveCwd, target, home);
+				if (!looksLikePath(target) && !entryExists(absolute)) continue;
+				const resolved = resolveForContainment(absolute);
+				if (resolved !== undefined && isSensitivePath(resolved) && !isSensitivePath(absolute)) {
+					if (!evidence.sensitivePaths.includes(value)) evidence.sensitivePaths.push(value);
+					escalate(`reads ${value}, which resolves to a credential or secret path`);
+				}
 				if (resolved !== undefined && (isWithin(containmentRoot, resolved) || readableRoots.some((root) => isWithin(root, resolved)))) continue;
-				if (!evidence.outsideReads.includes(value)) evidence.outsideReads.push(value);
-				escalate(`reads ${value}, which is outside the working directory`, { outsideRead: true });
+				escalateOutsideRead(value, "which is outside the working directory");
 			}
+		};
+
+		// A read-only command is proved read-only by its options, not its name:
+		// each option must be in the command's table (read-only-options.ts), so
+		// `rg --pre=<prog>`, `tree -o f` and `uniq in out` escalate
+		// (SECURITY-REVIEW-2026-09-23 H1). Its operands, and the files named by
+		// options such as `grep -f`, are then read-checked.
+		if (name === "find") {
+			const find = checkFind(args);
+			if (!find.ok) escalate(find.reason);
+			else for (const word of find.paths) checkRead(word);
+		} else if (READ_ONLY_COMMANDS.has(name)) {
+			const check = checkOptions(READ_ONLY_SPECS[name], args);
+			if (!check.ok) {
+				escalate(`runs ${name} and ${check.reason}`);
+			} else {
+				const spec = READ_ONLY_SPECS[name];
+				const operandReason = spec.operandReason?.(check.parsed.positionals);
+				if (operandReason) escalate(operandReason);
+				const operands = [...check.parsed.positionals];
+				// A pattern-first command's first operand is its pattern, unless an
+				// option (`-e PAT`, `-f FILE`) supplies it; jq's first is its program.
+				const patternFirst = PATTERN_FIRST_COMMANDS.has(name) && ![...check.parsed.seen].some((option) => PATTERN_OPTIONS.has(option));
+				if (patternFirst || spec.programFirst) operands.shift();
+				const reads = NO_FILE_OPERANDS.has(name) ? check.parsed.fileValues : [...operands, ...check.parsed.fileValues];
+				for (const word of reads) checkRead(word);
+			}
+		} else if (!isMutation) {
+			escalate(`runs ${name}, which is not on the read-only allowlist`);
 		}
 
 		// The positional destinations of writing commands are the paths that get

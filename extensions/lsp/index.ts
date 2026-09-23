@@ -47,6 +47,9 @@ import {
 import { findProjectRoot, serverForPath, typescriptPreflight } from "./servers.ts";
 import { computeDelta, DeliveredTracker, fingerprintDiagnostic, formatNewDiagnostics, markDelivered } from "./watcher.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
+import { singleFlight } from "../lib/single-flight.ts";
+import { findProjectRoot as findRepoRoot } from "../lib/git.ts";
+import { createLspTrustGate, PROJECT_CODE_REASON, PROJECT_CODE_SERVERS } from "./trust.ts";
 
 /** Everything needed to spawn/reuse the server responsible for a path. */
 interface ResolvedTarget {
@@ -133,12 +136,28 @@ export default function lspExtension(pi: ExtensionAPI) {
 	const MAX_RESPAWNS = 2;
 	const respawns = new Map<string, number>();
 
-	const clientFor = async (target: ResolvedTarget): Promise<LspClient | undefined> => {
+	/**
+	 * One startup per server key at a time: overlapping calls (two edits, or a
+	 * diagnostics wait racing an edit) share it, since both would otherwise
+	 * pass the empty-map check across the trust and backoff awaits and spawn a
+	 * second server whose predecessor shutdown can no longer reach.
+	 */
+	const startOnce = singleFlight<LspClient | undefined>();
+	const clientFor = (target: ResolvedTarget, ctx: ExtensionContext): Promise<LspClient | undefined> => {
+		const running = clients.get(target.key);
+		if (running?.isRunning) return Promise.resolve(running);
+		return startOnce(target.key, () => startClient(target, ctx));
+	};
+
+	const startClient = async (target: ResolvedTarget, ctx: ExtensionContext): Promise<LspClient | undefined> => {
 		const { key } = target;
 		if (startFailures.has(key)) return undefined;
 
 		const existing = clients.get(key);
 		if (existing?.isRunning) return existing;
+		// A server that runs project code starts only in a trusted project
+		// (trust.ts); checked here so no caller can spawn one without it.
+		if (!(await projectCodeAllowed(target, ctx))) return undefined;
 		if (existing) {
 			// Crashed mid-session. Respawn with a short backoff, up to MAX_RESPAWNS
 			// times; after that record why so downstream reports the real cause (a
@@ -179,6 +198,31 @@ export default function lspExtension(pi: ExtensionAPI) {
 			startFailures.set(key, describeStartFailure(raw, target.command, target.plugin?.pluginName));
 			return undefined;
 		}
+	};
+
+	/**
+	 * Consent for a built-in server that runs the project's own code
+	 * (trust.ts): trusted project → start; otherwise ask once per project in an
+	 * interactive session, and with no UI or a "no" leave it off with a
+	 * not-started failure the one-time notice and /lsp report.
+	 */
+	const trustGate = createLspTrustGate({ projectRoot: (dir) => findRepoRoot(dir) ?? dir });
+	const NOT_TRUSTED = "not started:";
+	const projectCodeAllowed = async (target: ResolvedTarget, ctx: ExtensionContext): Promise<boolean> => {
+		if (target.plugin || !PROJECT_CODE_SERVERS.has(target.command)) return true;
+		const why = PROJECT_CODE_REASON[target.command] ?? "runs this project's code";
+		const confirm = ctx.hasUI
+			? async (root: string) =>
+					(await ctx.ui.confirm(
+						`Start ${target.command} in this project?`,
+						`${target.command} ${why}. Allow it only for a project you trust.\n\nThe answer for ${root} is remembered; /lsp trust allows it later.`,
+					)) === true
+			: undefined;
+		if (await trustGate.allowed(target.root, confirm)) return true;
+		if (!startFailures.has(target.key)) {
+			startFailures.set(target.key, `${NOT_TRUSTED} ${target.command} ${why}, and this project is not trusted (run /lsp trust to allow it)`);
+		}
+		return false;
 	};
 
 	/** One-time notice per server key so a missing server doesn't degrade silently. */
@@ -270,7 +314,7 @@ export default function lspExtension(pi: ExtensionAPI) {
 					// pending work, and everything the client holds is unref'd —
 					// without a ref the loop drains and pi exits mid-tool (keep-alive.ts).
 					await withKeepAlive(async () => {
-						const client = await clientFor(target);
+						const client = await clientFor(target, ctx);
 						if (client) {
 							tracker.clear(pathToUri(path));
 							forceDeltaScan();
@@ -321,7 +365,7 @@ export default function lspExtension(pi: ExtensionAPI) {
 			// One keep-alive spans both awaits (same pattern as the tool_result hook).
 			const fetched = target
 				? await withKeepAlive(async () => {
-						const client = await clientFor(target);
+						const client = await clientFor(target, ctx);
 						return client && { all: await client.getDiagnostics(path, target.languageId) };
 					})
 				: undefined;
@@ -363,8 +407,22 @@ export default function lspExtension(pi: ExtensionAPI) {
 	});
 
 	registerLocalCommand(pi, "lsp", {
-		description: "Show language server status",
+		description: "Show language server status: /lsp [trust]",
+		getArgumentCompletions: () => [
+			{ value: "trust", label: "let servers that run this project's code start here (rust-analyzer, jdtls)" },
+		],
 		handler: async (args, ctx) => {
+			if (args.trim() === "trust") {
+				const root = trustGate.trust(ctx.cwd);
+				for (const [key, failure] of startFailures) {
+					if (failure.startsWith(NOT_TRUSTED)) {
+						startFailures.delete(key);
+						warned.delete(key);
+					}
+				}
+				ctx.ui.notify(`Trusted ${root}: rust-analyzer and jdtls may start here. They run this project's build code.`, "info");
+				return;
+			}
 			const lines = [...clients.entries()].map(
 				([key, client]) => `${client.isRunning ? "running" : "stopped"} ${key} (${client.diagnosticsCount} diagnostics)`,
 			);

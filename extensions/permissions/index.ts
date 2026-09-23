@@ -52,9 +52,10 @@ import { checkRecoverability } from "../auto-mode/recoverability.ts";
 import { safetyControlWrite } from "../auto-mode/safety-floor.ts";
 import { isExecutionPrimitivePath, isSensitivePath } from "../auto-mode/sensitive.ts";
 import { analyzeShellCommand, type ShellEvidence } from "../auto-mode/shell-analysis.ts";
-import { isGitStatusCommand, powershellReadOnly } from "./powershell-rules.ts";
+import { powershellReadOnly } from "./powershell-rules.ts";
 import { isShellTool } from "./matcher.ts";
-import { gitStatusClean } from "../lib/git.ts";
+import { gitStatusOutput } from "../lib/git.ts";
+import { gitStatusMeta, gitStatusMetaArgs, reachesIgnoredFiles, wantsGitStatusMeta } from "../auto-mode/git-status-meta.ts";
 import { projectMemoryDir } from "../lib/memory.ts";
 import { sessionResultsDir } from "../lib/persisted-output.ts";
 import { sessionScratchpadDir } from "../lib/scratchpad.ts";
@@ -857,15 +858,19 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		if (mode === "auto") {
 			const recordedInput =
 				original !== undefined ? { command: original.command } : (event.input as Record<string, unknown>);
-			transcript.push({ kind: "tool", tool: normalizedTool, input: recordedInput });
-			// Claude Code follows a `git status` call with a ground-truth line the
-			// classifier can trust over the model's account of the tree
-			// (`{"meta":{"gitStatus":{"clean":…}}}`, captured 2.1.276 — findings §22).
+			// Before a command that can destroy uncommitted work, run `git status`
+			// and put the result directly above that command, so the classifier
+			// judges the tree's real state (git-status-meta.ts). It stays in the
+			// transcript above that call.
 			const recordedCommand = typeof recordedInput.command === "string" ? recordedInput.command : undefined;
-			if (isShellTool(normalizedTool) && recordedCommand && isGitStatusCommand(recordedCommand)) {
-				const clean = await gitStatusClean(callCwd);
-				if (clean !== undefined) transcript.push({ kind: "meta", gitStatus: { clean } });
+			// `monitor` runs a shell command exactly as `bash` does.
+			const shell = normalizedTool === "powershell" ? "powershell" : normalizedTool === "bash" || normalizedTool === "monitor" ? "bash" : undefined;
+			if (shell && recordedCommand && wantsGitStatusMeta(shell, recordedCommand)) {
+				const porcelain = await gitStatusOutput(callCwd, gitStatusMetaArgs(reachesIgnoredFiles(shell, recordedCommand)));
+				const gitStatus = porcelain === undefined ? undefined : gitStatusMeta(porcelain);
+				if (gitStatus) transcript.push({ kind: "meta", gitStatus });
 			}
+			transcript.push({ kind: "tool", tool: normalizedTool, input: recordedInput });
 			capTranscript();
 		}
 
