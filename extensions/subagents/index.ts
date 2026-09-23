@@ -1641,9 +1641,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	 */
 	const forkFromBtw = async (request: BtwForkRequest): Promise<BtwForkResult> => {
 		const ctx = request.ctx as ExtensionContext;
-		// Before the first turn there is no transcript to clone, and the fork starts
-		// from the side exchange alone, as Claude Code's does (newChildSessionManager).
+		// Before the first turn the file is not written yet and the fork starts from
+		// the side exchange alone, as Claude Code's does (newChildSessionManager).
+		// Without a session file at all the conversation cannot be cloned, and a
+		// fork framed as inheriting it would confabulate (the Agent tool refuses too).
 		const sessionFile = ctx.sessionManager.getSessionFile();
+		if (!sessionFile) return { error: "Cannot fork: this session is not persisted (started with --no-session), so there is no conversation to clone." };
 		const { name } = resolveRunName(registry, FORK_AGENT, undefined);
 		const taskId = generateTaskId();
 		const prepared: PreparedRun = {
@@ -1652,7 +1655,15 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			record: { name, agent: FORK_AGENT, taskId, sessionSearchDir: runSessionDir(ctx, taskId) ?? "", cwd: ctx.cwd, depth: 0 },
 		};
 		registry.add(prepared.record);
-		const { launched, line } = await launchResident(prepared, ctx, await getRuntime(ctx), { sessionFile, forkMessages: request.messages });
+		// The session can be torn down while the runtime or the child starts; a
+		// fork launched after shutdown's stop-all sweep would outlive it.
+		const runtime = await getRuntime(ctx);
+		if (shuttingDown) return { error: "The session ended before the fork started." };
+		const { launched, line } = await launchResident(prepared, ctx, runtime, { sessionFile, forkMessages: request.messages });
+		if (shuttingDown) {
+			void stopAgent(taskId);
+			return { error: "The session ended before the fork started." };
+		}
 		if (!launched) return { error: line };
 		pi.events.emit(REMINDER_CHANNEL, { text: btwForkReminder(name, taskId, request.question) });
 		return { name, taskId };

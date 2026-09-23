@@ -207,10 +207,15 @@ export function renderBtwPanel(input: BtwPanelInput, theme?: unknown): string[] 
 	if (state.selected !== null && (state.selected < 0 || state.selected >= history.length)) state.selected = null;
 	const selected = state.selected === null ? undefined : history[state.selected];
 
-	const shown = history.slice(-SHOWN_HISTORY);
+	// On a short dock, list fewer earlier questions rather than overflow it: the
+	// rule, blanks, current question, one answer row and the hint always fit.
+	const listRows = Math.max(0, height - 7);
+	let shownCount = Math.min(SHOWN_HISTORY, history.length);
+	while (shownCount > 0 && shownCount + (history.length > shownCount ? 1 : 0) > listRows) shownCount--;
+	const shown = history.slice(history.length - shownCount);
 	const hidden = history.length - shown.length;
 	const list: string[] = [];
-	if (hidden > 0) list.push(paint("muted", `${pad}(+${hidden} earlier /btw)`));
+	if (hidden > 0 && shownCount < listRows) list.push(paint("muted", `${pad}(+${hidden} earlier /btw)`));
 	shown.forEach((exchange, i) => {
 		const text = `${pad}/btw ${questionLine(exchange.question, inner)}`;
 		list.push(state.selected === hidden + i ? bold(text) : paint("muted", text));
@@ -230,7 +235,7 @@ export function renderBtwPanel(input: BtwPanelInput, theme?: unknown): string[] 
 
 	const header = [panelTopRule(paint, inner), "", ...list, ""];
 	const footerRows = 2; // blank + hint
-	const capacity = Math.max(3, height - header.length - footerRows);
+	const capacity = Math.max(1, height - header.length - footerRows);
 	state.viewport = capacity;
 	state.maxOffset = Math.max(0, answerLines.length - capacity);
 	state.offset = Math.min(Math.max(0, state.offset), state.maxOffset);

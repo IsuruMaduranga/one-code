@@ -59,7 +59,7 @@ type ModelRef = Pick<Model<Api>, "api" | "provider" | "id">;
 /**
  * One exchange as the user/assistant pair a later request carries: the bare
  * question (no reminder) and the answer, as Claude Code threads its side
- * session's history into the next side question and into a fork.
+ * session's history into the next side question. A fork gets the same pairs.
  */
 export function exchangeMessages(exchange: BtwExchange, model: ModelRef, timestamp = Date.now()): Message[] {
 	const user: UserMessage = { role: "user", content: [{ type: "text", text: exchange.question }], timestamp };

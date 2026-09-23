@@ -177,6 +177,17 @@ describe("renderBtwPanel", () => {
 		expect(lines.length).toBeLessThanOrEqual(12);
 	});
 
+	it("lists fewer earlier questions on a short dock instead of overflowing it", () => {
+		const history = Array.from({ length: 8 }, (_, i) => ({ question: `q${i}`, answer: `a${i}` }));
+		const text = Array.from({ length: 30 }, (_, i) => `line ${i}`).join("\n");
+		for (const height of [8, 10, 12]) {
+			const lines = render({ history, body: { kind: "answer", text }, height });
+			expect(lines.length).toBeLessThanOrEqual(height);
+			expect(lines.some((line) => line.includes("line 0"))).toBe(true);
+		}
+		expect(render({ history, height: 12 })).toContain("  (+4 earlier /btw)");
+	});
+
 	it("puts a long question on one line with an ellipsis", () => {
 		const lines = render({ question: "why is this happening ".repeat(60), width: 40 });
 		const row = lines.find((line) => line.startsWith("  /btw "));

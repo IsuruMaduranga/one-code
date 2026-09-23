@@ -228,7 +228,10 @@ export default function btwExtension(pi: ExtensionAPI) {
 					view.forking = true;
 					repaint();
 					const epoch = sessionEpoch;
-					void requestBtwFork(pi.events, { ctx, question, messages: exchangeMessages({ question, answer }, model) }).then((result) => {
+					// The fork sees what the answer was written from: the earlier exchanges
+					// still listed (none once cleared), then this one.
+					const messages = [...historyMessages(earlier, model), ...exchangeMessages({ question, answer }, model)];
+					void requestBtwFork(pi.events, { ctx, question, messages }).then((result) => {
 						if (epoch !== sessionEpoch) return;
 						const notice =
 							"error" in result ? { text: result.error, level: "error" as const } : { text: `Forked ${result.name} (${result.taskId.slice(-4)})`, level: "info" as const };
