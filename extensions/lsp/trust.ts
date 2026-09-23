@@ -18,6 +18,7 @@
 import { join } from "node:path";
 import { readJsonFile, writeJsonAtomic } from "../lib/atomic-write.ts";
 import { comparablePath, isPathAtOrUnder, oneCodeStateDir } from "../lib/paths.ts";
+import { singleFlight } from "../lib/single-flight.ts";
 
 /** Built-in server commands that execute project code. */
 export const PROJECT_CODE_SERVERS: ReadonlySet<string> = new Set(["rust-analyzer", "jdtls"]);
@@ -76,7 +77,7 @@ export function createLspTrustGate(deps: {
 	const sessionTrust = new Map<string, boolean>();
 	/** Server roots found trusted on disk this process, so the store is read once per root. */
 	const trustedServerRoots = new Set<string>();
-	const pending = new Map<string, Promise<boolean>>();
+	const askOnce = singleFlight<boolean>();
 	return {
 		/**
 		 * Whether a server rooted at `serverRoot` may start. Without `confirm`
@@ -92,18 +93,12 @@ export function createLspTrustGate(deps: {
 				return true;
 			}
 			if (sessionTrust.get(root) !== undefined || !confirm) return false;
-			let answer = pending.get(root);
-			if (!answer) {
-				answer = confirm(root)
-					.then((ok) => {
-						sessionTrust.set(root, ok);
-						if (ok) persist(root);
-						return ok;
-					})
-					.finally(() => pending.delete(root));
-				pending.set(root, answer);
-			}
-			return answer;
+			return askOnce(root, async () => {
+				const ok = await confirm(root);
+				sessionTrust.set(root, ok);
+				if (ok) persist(root);
+				return ok;
+			});
 		},
 		/** `/lsp trust`: trust the project `dir` belongs to, persisted. Returns that project root. */
 		trust(dir: string): string {
