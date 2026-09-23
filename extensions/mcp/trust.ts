@@ -15,7 +15,7 @@
  * otherwise spawn its servers with no consent, review H1); CC never reads
  * `mcpServers` from that file at all. Its `enableAll*`/`enabledMcpjsonServers`
  * policy keys are honoured only when the file is not git-tracked, for the same
- * reason.
+ * reason, and never approve the servers that same file defines.
  *
  * A "No" is persisted as a project-scope disable (`lib/mcp-overrides.ts`), so
  * the server shows as disabled in `/mcp` and Enable there brings it back —
@@ -30,6 +30,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { readSettingsFile, settingsPaths } from "../lib/claude-settings.ts";
 import { boundConsentItems } from "../lib/consent-preview.ts";
+import { HARNESS_GIT_CONFIG } from "../lib/git.ts";
 import { oneCodeStateDir } from "../lib/paths.ts";
 import type { McpServer } from "./config.ts";
 
@@ -60,6 +61,11 @@ export function isProjectScopedServer(server: McpServer, pluginConfigPaths: Read
 	if (pluginConfigPaths.has(server.source)) return false;
 	const base = basename(server.source);
 	return base === ".mcp.json" || base === "settings.local.json";
+}
+
+/** A server defined in `.claude/settings.local.json` rather than a `.mcp.json`. */
+function definedInLocalSettings(server: McpServer): boolean {
+	return basename(server.source) === "settings.local.json";
 }
 
 /** The directory the `.mcp.json` lives in — approvals are per config file, not per cwd. */
@@ -101,24 +107,24 @@ function stringArray(value: unknown): string[] {
 
 /**
  * Whether `.claude/settings.local.json`'s policy keys may be trusted: true ONLY
- * when git ran to a verdict and the file is not a tracked file (untracked in a
- * repo, or no repo at all — either way not something a `git clone` shipped).
- * FAILS CLOSED: git missing, a timeout, or any result we cannot interpret
- * returns false, so a checked-in file that we could not prove untracked is not
- * trusted (review H1 — a fail-open here silently re-opens the self-approval
- * hole). Async so it never blocks the event loop from the connect path
- * (findings §15: never do slow synchronous work on the startup path).
+ * when git ran inside a work tree and reported the file untracked — a file the
+ * user wrote in their own checkout, not one a `git clone` shipped. FAILS
+ * CLOSED: git missing, a timeout, a tracked file, and "not a git repository"
+ * (exit 128) all return false. Until 2026-09-23 exit 128 counted as trusted,
+ * so an extracted archive or copied folder carrying its own
+ * `settings.local.json` approved the servers it shipped with no prompt
+ * (SECURITY-REVIEW-2026-09-23 H4; review H1 before it). Async so it never
+ * blocks the event loop from the connect path (findings §15).
  */
 async function localPolicyFileIsTrusted(cwd: string, path: string): Promise<boolean> {
 	try {
-		await execFileAsync("git", ["ls-files", "--error-unmatch", "--", path], { cwd, timeout: 5_000 });
+		await execFileAsync("git", [...HARNESS_GIT_CONFIG, "ls-files", "--error-unmatch", "--", path], { cwd, timeout: 5_000 });
 		return false; // exit 0 → tracked → do not trust its policy keys
 	} catch (error) {
-		// execFile rejects with `code` = the numeric exit code on a non-zero exit
-		// (1 = untracked in a repo, 128 = not a repo — both mean "not tracked, safe
-		// to trust"); a spawn failure gives a string code (e.g. "ENOENT") and a
-		// timeout gives a non-numeric code — those are "could not decide" → closed.
-		return typeof (error as { code?: unknown }).code === "number";
+		// execFile rejects with `code` = the numeric exit code on a non-zero exit:
+		// 1 = untracked in a repo (trust), 128 = not a repo (no provenance: do
+		// not trust). A spawn failure or timeout gives a non-numeric code → closed.
+		return (error as { code?: unknown }).code === 1;
 	}
 }
 
@@ -131,14 +137,16 @@ export async function readClaudeMcpjsonPolicy(cwd: string, home: string): Promis
 	// untracked, user-authored file), for the same reason — a checked-in
 	// settings.local.json would otherwise approve the repo's own .mcp.json
 	// servers (review H1).
-	const sources = [paths.user];
-	if (await localPolicyFileIsTrusted(cwd, paths.local)) sources.push(paths.local);
-	for (const path of sources) {
+	// `disabledMcpjsonServers` only tightens, so it is honoured from the local
+	// file whatever its provenance; the approving keys need the check.
+	const localTrusted = await localPolicyFileIsTrusted(cwd, paths.local);
+	for (const path of [paths.user, paths.local]) {
 		const file = readSettingsFile(path);
 		if (!file) continue;
+		for (const name of stringArray(file.disabledMcpjsonServers)) policy.disabled.add(name);
+		if (path === paths.local && !localTrusted) continue;
 		if (typeof file.enableAllProjectMcpServers === "boolean") policy.enableAll = file.enableAllProjectMcpServers;
 		for (const name of stringArray(file.enabledMcpjsonServers)) policy.enabled.add(name);
-		for (const name of stringArray(file.disabledMcpjsonServers)) policy.disabled.add(name);
 	}
 	return policy;
 }
@@ -272,7 +280,11 @@ export async function approveMcpServers(
 			withheld.push({ server, reason: "disabled-by-claude-settings" });
 			continue;
 		}
-		if (claude.enableAll || claude.enabled.has(server.name)) {
+		// Claude Code's own answers approve `.mcp.json` servers only. A server
+		// DEFINED in settings.local.json must never be approved by that same
+		// file's `enableAllProjectMcpServers` (SECURITY-REVIEW-2026-09-23 H4): it
+		// goes through One Code's hash-keyed consent below, like any other.
+		if (!definedInLocalSettings(server) && (claude.enableAll || claude.enabled.has(server.name))) {
 			approved.push(server);
 			continue;
 		}

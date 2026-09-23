@@ -47,6 +47,13 @@ const PROTECTED_DIRS = [
 const PROTECTED_DIR_EXCEPTIONS = [".claude/worktrees", ".onecode/plans"];
 
 const PROTECTED_FILES = new Set([
+	// A `.git` FILE is a gitlink (`gitdir: <path>`): written into a subdirectory
+	// it points an in-project `git -C sub …` at any repository, and that
+	// repository's config (SECURITY-REVIEW-2026-09-23 H2). The `.git` directory
+	// is covered by PROTECTED_DIRS; this covers the file form. Checked before
+	// PROTECTED_DIR_EXCEPTIONS on purpose: a worktree's own gitlink under
+	// `.claude/worktrees` is git metadata, not working space (git writes it).
+	".git",
 	".gitconfig",
 	".gitmodules",
 	".bashrc",

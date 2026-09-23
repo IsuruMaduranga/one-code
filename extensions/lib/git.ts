@@ -1,20 +1,30 @@
 /** Shared git helpers — pure functions only (safe to import across extensions). */
 
+/**
+ * Global options for every git command the harness runs on its own (startup
+ * git status, recoverability, consent checks, worktree bookkeeping). git
+ * honours the checkout's own `.git/config`, and `core.fsmonitor` there names a
+ * program that `status` and other index reads run — so a directory whose
+ * `.git` came from an archive or a copied tree would run it the moment One
+ * Code starts in it, before any prompt (SECURITY-REVIEW-2026-09-23 M5). The
+ * model's own git commands are judged by the permission gate instead.
+ */
+export const HARNESS_GIT_CONFIG: readonly string[] = ["-c", "core.fsmonitor=false"];
+
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 /**
- * Whether the checkout at `cwd` has no uncommitted or untracked changes, or
- * undefined when git could not say (not a repo, git missing). One short
- * `git status --porcelain`, asynchronous so the tool_call hook it runs from
- * does not stall the event loop; used for the classifier transcript's
- * ground-truth line after a `git status` call (permissions/index.ts).
+ * `git status` output for `cwd` with the given arguments, or undefined when
+ * git could not say (not a repo, git missing, timeout). Asynchronous so the
+ * tool_call hook it runs from does not stall the event loop; used for the
+ * classifier transcript's gitStatus line (auto-mode/git-status-meta.ts).
  */
-export function gitStatusClean(cwd: string): Promise<boolean | undefined> {
+export function gitStatusOutput(cwd: string, args: readonly string[]): Promise<string | undefined> {
 	return new Promise((resolvePromise) => {
-		execFile("git", ["status", "--porcelain"], { cwd, encoding: "utf8", timeout: 5_000, windowsHide: true }, (error, stdout) => {
-			resolvePromise(error ? undefined : stdout.trim().length === 0);
+		execFile("git", [...HARNESS_GIT_CONFIG, ...args], { cwd, encoding: "utf8", timeout: 5_000, windowsHide: true }, (error, stdout) => {
+			resolvePromise(error ? undefined : stdout);
 		});
 	});
 }

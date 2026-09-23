@@ -91,6 +91,7 @@ describe("hashServerConfig", () => {
 
 describe("readClaudeMcpjsonPolicy", () => {
 	it("reads user and local scopes, never the checked-in project settings.json", async () => {
+		execFileSync("git", ["init", "-q"], { cwd });
 		writeFileSync(join(cwd, ".claude", "settings.json"), JSON.stringify({ enableAllProjectMcpServers: true }));
 		expect((await readClaudeMcpjsonPolicy(cwd, home)).enableAll).toBe(false);
 		writeFileSync(
@@ -184,6 +185,7 @@ describe("approveMcpServers", () => {
 	});
 
 	it("honours Claude Code's own answers read-only", async () => {
+		execFileSync("git", ["init", "-q"], { cwd });
 		writeFileSync(
 			join(cwd, ".claude", "settings.local.json"),
 			JSON.stringify({ enabledMcpjsonServers: ["yes"], disabledMcpjsonServers: ["no"] }),
@@ -193,6 +195,35 @@ describe("approveMcpServers", () => {
 		expect(out.approved.map((s) => s.name)).toEqual(["yes"]);
 		expect(out.withheld[0]).toMatchObject({ reason: "disabled-by-claude-settings" });
 		expect(d.selections).toEqual([]);
+	});
+
+	it("does not trust a settings.local.json outside any git repository (SECURITY-REVIEW-2026-09-23 H4)", async () => {
+		// An extracted archive or copied folder: no provenance, so its approving
+		// keys are ignored — but its disable list still tightens.
+		writeFileSync(
+			join(cwd, ".claude", "settings.local.json"),
+			JSON.stringify({ enableAllProjectMcpServers: true, enabledMcpjsonServers: ["a"], disabledMcpjsonServers: ["b"] }),
+		);
+		const policy = await readClaudeMcpjsonPolicy(cwd, home);
+		expect(policy.enableAll).toBe(false);
+		expect([...policy.enabled]).toEqual([]);
+		expect([...policy.disabled]).toEqual(["b"]);
+		const d = deps();
+		const out = await approveMcpServers([projectServer("a")], new Set(), cwd, home, { ...d.deps, hasUI: false });
+		expect(out.approved).toEqual([]);
+		expect(out.withheld[0].reason).toBe("not-approved");
+	});
+
+	it("never lets settings.local.json approve the servers it defines itself (SECURITY-REVIEW-2026-09-23 H4)", async () => {
+		execFileSync("git", ["init", "-q"], { cwd });
+		const local = join(cwd, ".claude", "settings.local.json");
+		writeFileSync(local, JSON.stringify({ enableAllProjectMcpServers: true }));
+		const d = deps();
+		const out = await approveMcpServers([stdio("own", local), projectServer("shipped")], new Set(), cwd, home, { ...d.deps, hasUI: false });
+		// Its enableAll still approves `.mcp.json` servers (Claude Code's semantics)…
+		expect(out.approved.map((s) => s.name)).toEqual(["shipped"]);
+		// …but a server defined in the same file needs One Code's own consent.
+		expect(out.withheld).toMatchObject([{ server: { name: "own" }, reason: "not-approved" }]);
 	});
 
 	it("uses Claude Code's dialog titles", () => {

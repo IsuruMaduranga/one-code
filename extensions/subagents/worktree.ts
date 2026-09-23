@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { registerWorktreeIsolation, releaseWorktreeIsolation } from "../lib/worktree-isolation.ts";
+import { HARNESS_GIT_CONFIG } from "../lib/git.ts";
 
 const run = promisify(execFile);
 
@@ -21,7 +22,7 @@ export interface Worktree {
 }
 
 async function git(args: string[], cwd: string): Promise<string> {
-	const { stdout } = await run("git", args, { cwd, maxBuffer: 10 * 1024 * 1024 });
+	const { stdout } = await run("git", [...HARNESS_GIT_CONFIG, ...args], { cwd, maxBuffer: 10 * 1024 * 1024 });
 	return stdout.trim();
 }
 

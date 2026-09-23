@@ -16,6 +16,7 @@
  */
 
 import { execFileSync } from "node:child_process";
+import { HARNESS_GIT_CONFIG } from "../lib/git.ts";
 
 export interface GitSnapshot {
 	branch: string;
@@ -56,7 +57,7 @@ export type GitRunner = (args: string[]) => string | null;
 function defaultRunner(cwd: string): GitRunner {
 	return (args) => {
 		try {
-			return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+			return execFileSync("git", [...HARNESS_GIT_CONFIG, ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
 		} catch {
 			return null;
 		}

@@ -18,6 +18,7 @@
 import { ccToolName } from "../hooks/matcher.ts";
 // The shell tools render as `{"<Tool>":"<command>"}` (lib/shell-tools.ts is the one list).
 import { SHELL_TOOLS } from "../lib/shell-tools.ts";
+import type { GitStatusMeta } from "./git-status-meta.ts";
 
 export { ccToolName };
 
@@ -34,11 +35,12 @@ export type TranscriptEntry =
 	| { kind: "tool"; tool: string; input: Record<string, unknown> }
 	| { kind: "denied"; tool: string; subject: string; rule: string }
 	/**
-	 * Harness ground truth, Claude Code's `{"meta":{"gitStatus":{"clean":…}}}`
-	 * line after a `git status` call (captured 2.1.276, findings §22): the
-	 * classifier reads the tree's real state, not the model's account of it.
+	 * Harness ground truth, the Claude Code-compatible
+	 * `{"meta":{"gitStatus":…}}` line, directly above a shell command that can
+	 * destroy uncommitted work (auto-mode/git-status-meta.ts): the classifier
+	 * reads the tree's real state, not the model's account of it.
 	 */
-	| { kind: "meta"; gitStatus: { clean: boolean } };
+	| { kind: "meta"; gitStatus: GitStatusMeta };
 
 /** Truncate one field so a single huge argument cannot dominate the transcript. */
 export function clip(value: string, max: number): string {
@@ -62,7 +64,7 @@ function clipInput(input: Record<string, unknown>, max: number): Record<string, 
  */
 function renderEntry(entry: TranscriptEntry, maxField: number): string {
 	if (entry.kind === "user") return JSON.stringify({ user: clip(entry.text, maxField) });
-	if (entry.kind === "meta") return JSON.stringify({ meta: { gitStatus: { clean: entry.gitStatus.clean } } });
+	if (entry.kind === "meta") return JSON.stringify({ meta: { gitStatus: entry.gitStatus } });
 	if (entry.kind === "denied") {
 		return JSON.stringify({
 			denied_by_permission_rule: { tool: ccToolName(entry.tool), attempted: clip(entry.subject, maxField), rule: entry.rule },

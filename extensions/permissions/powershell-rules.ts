@@ -31,6 +31,7 @@
  * call or a prompt, never a bypass — docs/decisions/windows.md.
  */
 
+import { isSensitivePath } from "../auto-mode/sensitive.ts";
 import { isAbsolute } from "node:path";
 import { isWithin, resolveForContainment, toAbsolute } from "../auto-mode/paths.ts";
 
@@ -391,6 +392,12 @@ export const READ_ONLY_POWERSHELL_COMMANDS = new Set<string>([
 const WRITING_PARAMETERS = /^-(outfile|filepath|destination)\b/i;
 
 /**
+ * `-ComputerName` (and its `-Cn` alias, and any abbreviation PowerShell
+ * accepts for it) sends `Get-Process`/`Get-Service` to another machine.
+ */
+const REMOTE_PARAMETER = /^-(cn|co(m(p(u(t(e(r(n(a(m(e)?)?)?)?)?)?)?)?)?)?)(:|$)/i;
+
+/**
  * Whether a token names a path this check will not vouch for by shape: UNC
  * (`\\server`), home (`~`), a PSDrive outside the filesystem (`HKLM:`,
  * `env:`), or one that climbs (`..`). An absolute or drive-lettered path is
@@ -512,38 +519,27 @@ export function powershellReadOnly(command: string, opts?: PowerShellReadOnlyOpt
 		const tokens = statement.trim().split(/\s+/).slice(1);
 		for (const token of tokens) {
 			if (WRITING_PARAMETERS.test(token)) return { readOnly: false, reason: `${token.split(":")[0]} writes or forwards` };
-			if (token.startsWith("-")) continue;
+			if (REMOTE_PARAMETER.test(token)) return { readOnly: false, reason: `${token.split(":")[0]} reaches another machine` };
+			// `-Path:value` binds its value in the same word; until 2026-09-23 the
+			// whole word was skipped as a parameter name, so `Get-Content
+			// -Path:~/.ssh/id_rsa` and a UNC `-LiteralPath:\\host\share` passed
+			// (SECURITY-REVIEW-2026-09-23 H5). The bound value is a path like any other.
+			const colon = token.startsWith("-") ? token.indexOf(":") : -1;
+			const value = token.startsWith("-") ? (colon > 0 ? token.slice(colon + 1) : "") : token;
+			if (!value) continue;
+			const unquoted = value.replace(/^["']|["']$/g, "");
+			if (splitPowerShellList(unquoted).some((part) => isSensitivePath(part.trim()))) {
+				return { readOnly: false, reason: "a credential or secret path" };
+			}
 			// By shape (UNC, ~, PSDrive, ..) a token is never vouched for. An absolute
 			// path is read-only only when it resolves inside the working directory or
 			// a harness session dir (2026-09-19: /doctor's transcript scan on Windows
 			// spelled `<agentDir>\sessions\…` and was classified —
 			// docs/decisions/auto-mode.md); a comma list is judged part by part.
-			if (pathOutsideRoots(token, opts, roots)) return { readOnly: false, reason: "a path outside the working directory" };
+			if (pathOutsideRoots(value, opts, roots)) return { readOnly: false, reason: "a path outside the working directory" };
 		}
 	}
 	return { readOnly: true };
 }
 
-/** git global flags that take a value and can precede the subcommand (`git -C x status`). */
-const GIT_GLOBAL_VALUE_FLAGS = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--config-env"]);
 
-/**
- * Whether the statement is a bare `git status` (global flags before it and
- * plain flags after it allowed, no other statements) — the call after which
- * Claude Code's classifier transcript carries a
- * `{"meta":{"gitStatus":{"clean":…}}}` ground-truth line (findings §22).
- * Works for bash and PowerShell spellings alike. Global value-taking flags
- * (`-C <dir>`, `-c <key=val>`, …) are skipped so `git -C <dir> status` is
- * still recognised instead of mistaking the flag's value for the subcommand.
- */
-export function isGitStatusCommand(command: string): boolean {
-	const statements = powershellStatements(command);
-	if (!statements || statements.length !== 1) return false;
-	if (statementCommand(statements[0]) !== "git") return false;
-	const words = statements[0].trim().split(/\s+/).slice(1);
-	let i = 0;
-	while (i < words.length && words[i].startsWith("-")) {
-		i += GIT_GLOBAL_VALUE_FLAGS.has(words[i]) ? 2 : 1;
-	}
-	return words[i] === "status" && words.slice(i + 1).every((w) => w.startsWith("-"));
-}

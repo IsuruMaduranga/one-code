@@ -60,8 +60,17 @@ describe("isProtectedPath", () => {
 
 	it("treats the directory itself as not-yet-a-write-target", () => {
 		// A protected match only counts when something lives under the directory.
-		expect(isProtectedPath(".git")).toBe(false);
+		expect(isProtectedPath(".vscode")).toBe(false);
+		expect(isProtectedPath(".vscode/x")).toBe(true);
+	});
+
+	it("protects a .git file, the gitlink that retargets git (SECURITY-REVIEW-2026-09-23 H2)", () => {
+		// `gitdir: <path>` written into a subdirectory points `git -C sub …` at any repository.
+		expect(isProtectedPath("sub/.git")).toBe(true);
 		expect(isProtectedPath(".git/x")).toBe(true);
+		// Including a worktree's own gitlink: the worktrees exception covers its files, not its git metadata.
+		expect(isProtectedPath(".claude/worktrees/fix/.git")).toBe(true);
+		expect(isProtectedPath(".claude/worktrees/fix/src/a.ts")).toBe(false);
 	});
 
 	it("matches an absolute in-project path the same as its relative form", () => {

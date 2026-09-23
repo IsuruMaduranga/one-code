@@ -22,11 +22,11 @@
  * fires on routine work teaches the user to approve without reading.
  */
 
-import { analyzeShellCommand } from "./shell-analysis.ts";
+import { analyzeShellCommand, isUnknownTilde, parseCommand, resolvePayload } from "./shell-analysis.ts";
 import { autoModeSettingsPaths } from "./config.ts";
 import { oneCodeProjectSettingsPath } from "../lib/one-code-settings.ts";
 import { claudeJsonPath, comparablePath } from "../lib/paths.ts";
-import { isWritingTool, resolveForContainment, toAbsolute } from "./paths.ts";
+import { isWritingTool, resolveForContainment, toAbsolute, toAbsoluteBash } from "./paths.ts";
 
 /** The same comparison form resolveForContainment's output is in (lib/paths.ts). */
 const fold = comparablePath;
@@ -71,14 +71,26 @@ function safetyControlFiles(home: string, oneCodeProjectSettings?: string): stri
  * by the caller (once per session) so this need not re-walk for the project root.
  */
 export function isSafetyControlTarget(resolved: string, home: string, oneCodeProjectSettings?: string): boolean {
+	return matchesControlFile(resolved, controlFileForms(home, oneCodeProjectSettings));
+}
+
+/**
+ * Every comparison form of the control files: each resolved like a write
+ * target, or the two sides can disagree about the same file (macOS /var →
+ * /private/var), plus its literal spelling.
+ */
+function controlFileForms(home: string, oneCodeProjectSettings?: string): Set<string> {
+	const forms = new Set<string>();
+	for (const file of safetyControlFiles(home, oneCodeProjectSettings)) {
+		forms.add(resolveForContainment(file) ?? fold(file));
+		forms.add(fold(file));
+	}
+	return forms;
+}
+
+function matchesControlFile(resolved: string, forms: ReadonlySet<string>): boolean {
 	const target = fold(resolved);
-	if (SETTINGS_TAIL.test(target) || ONECODE_SETTINGS_TAIL.test(target)) return true;
-	// The control files go through the same resolution as the write target, or
-	// the two sides can disagree about the same file (macOS /var → /private/var).
-	return safetyControlFiles(home, oneCodeProjectSettings).some((file) => {
-		const control = resolveForContainment(file) ?? fold(file);
-		return control === target || fold(file) === target;
-	});
+	return SETTINGS_TAIL.test(target) || ONECODE_SETTINGS_TAIL.test(target) || forms.has(target);
 }
 
 export interface FloorInput {
@@ -115,12 +127,26 @@ export function safetyControlWrite({ toolName, input, cwd, home, oneCodeProjectS
 		return resolved && isSafetyControlTarget(resolved, home, perRepoSettings) ? REASON(raw) : undefined;
 	}
 
-	if (toolName === "bash") {
+	// `monitor` runs a shell command exactly as `bash` does (review L1).
+	if (toolName === "bash" || toolName === "monitor") {
 		const command = typeof input.command === "string" ? input.command : "";
 		if (!command) return undefined;
 		const evidence = analyzeShellCommand({ command, cwd, home });
 		for (const write of evidence.writes) {
 			if (write.resolved && isSafetyControlTarget(write.resolved, home, perRepoSettings)) return REASON(write.token);
+		}
+		// A command the pre-gate cannot prove read-only may write in ways its
+		// evidence does not model (an output operand, an option's value, a
+		// nested script), and until 2026-09-23 such a write reached neither this
+		// floor nor, when the pre-gate wrongly said "safe", the classifier
+		// (SECURITY-REVIEW-2026-09-23 H3). So for those the floor is textual, as
+		// the PowerShell one below: any word naming a gate-control file stops the
+		// call. A proven read (`cat .claude/settings.json`) is not stopped.
+		// `readOnlyOutside` means every command was proven read-only by its
+		// options and only the location escalated: a read, not a hidden write.
+		if (evidence.verdict === "escalate" && !evidence.readOnlyOutside) {
+			const named = shellNamesControlFile(command, cwd, home, perRepoSettings);
+			if (named) return REASON(named);
 		}
 	}
 
@@ -166,4 +192,56 @@ export function powershellPathTokens(command: string, home: string): string[] {
 		if (/[\\/]/.test(token) || /\.json$/i.test(token)) out.push(token);
 	}
 	return out;
+}
+
+/**
+ * The gate-control file spellings the textual floor matches in a command line,
+ * lowercased, with `\\` turned to `/` and `/./`, `//` collapsed.
+ */
+const CONTROL_FILE_TEXT =
+	/(^|[\s'"=/<>|;&(:])(\.claude\/settings(\.local)?\.json|\.onecode\/(projects\/[^\s'"/]+\/)?settings\.json|managed-settings\.json|\.claude\.json)(?=$|[\s'";|&)<>])/;
+
+/**
+ * The first word of a shell line that names a gate-control file, or
+ * undefined. Every word counts, read or write, plus the value after an `=`
+ * (`--output=…`, `of=…`) and the words of a nested `sh -c '…'` script; `cd`
+ * is followed so a relative name is resolved where the shell would. False
+ * positives cost one stop; the floor may only ever say "stop".
+ */
+export function shellNamesControlFile(
+	command: string,
+	cwd: string,
+	home: string,
+	oneCodeProjectSettings?: string,
+	depth = 0,
+	/** Resolved once per top-level call, not once per word. */
+	forms: ReadonlySet<string> = controlFileForms(home, oneCodeProjectSettings),
+): string | undefined {
+	const text = command.toLowerCase().replace(/\\/g, "/").replace(/\/\.\//g, "/").replace(/\/{2,}/g, "/");
+	const match = CONTROL_FILE_TEXT.exec(text);
+	if (match) return match[2];
+
+	const { segments, parseFailed } = parseCommand(command);
+	if (parseFailed) return undefined;
+	let dir = cwd;
+	for (const segment of segments) {
+		const payload = resolvePayload(segment.tokens);
+		for (const word of [...segment.tokens.map((token) => token.value), ...segment.redirects]) {
+			if (depth < 3 && /\s/.test(word)) {
+				const nested = shellNamesControlFile(word, dir, home, oneCodeProjectSettings, depth + 1, forms);
+				if (nested) return nested;
+			}
+			const eq = word.indexOf("=");
+			for (const candidate of eq >= 0 ? [word, word.slice(eq + 1)] : [word]) {
+				if (!candidate || isUnknownTilde(candidate)) continue;
+				const resolved = resolveForContainment(toAbsoluteBash(dir, candidate, home));
+				if (resolved && matchesControlFile(resolved, forms)) return candidate;
+			}
+		}
+		if (payload.command === "cd") {
+			const target = payload.args.find((token) => !token.value.startsWith("-"))?.value;
+			if (target && !isUnknownTilde(target)) dir = toAbsoluteBash(dir, target, home);
+		}
+	}
+	return undefined;
 }

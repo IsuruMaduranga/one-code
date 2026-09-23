@@ -25,6 +25,7 @@ import type { AutoModeConfig } from "./config.ts";
 import { classifierCandidates, replyText, withAuthBaseUrl } from "./model-select.ts";
 import { buildSetupPrompt, parseGitRemotes, redactSecrets, type SetupDraft, parseSetupDraft, type SetupFacts } from "./setup.ts";
 import { claudeUserDir } from "../lib/paths.ts";
+import { HARNESS_GIT_CONFIG } from "../lib/git.ts";
 
 const PROBE_TIMEOUT_MS = 10_000;
 /** Drafting reads a big fact dump and writes a full slot list — give it room. */
@@ -77,13 +78,13 @@ export async function gatherFacts(options: GatherOptions): Promise<SetupFacts> {
 	const { cwd, home } = options;
 	const notes: string[] = [];
 
-	const gitRoot = await probe("git", ["rev-parse", "--show-toplevel"], cwd, notes, "git root");
+	const gitRoot = await probe("git", [...HARNESS_GIT_CONFIG, ...["rev-parse", "--show-toplevel"]], cwd, notes, "git root");
 	// The three follow-ups depend only on gitRoot, not on each other — run them
 	// concurrently so a slow `gh` (network) does not stack on the local git calls.
 	const [remotesRaw, branch, ghRaw] = gitRoot
 		? await Promise.all([
-				probe("git", ["remote", "-v"], cwd, notes, "git remotes"),
-				probe("git", ["branch", "--show-current"], cwd, notes, "current branch"),
+				probe("git", [...HARNESS_GIT_CONFIG, ...["remote", "-v"]], cwd, notes, "git remotes"),
+				probe("git", [...HARNESS_GIT_CONFIG, ...["branch", "--show-current"]], cwd, notes, "current branch"),
 				// gh gives visibility/default branch for the repo the cwd is in; treat
 				// its absence as "unknown", never as "private".
 				probe("gh", ["repo", "view", "--json", "visibility,nameWithOwner,defaultBranchRef"], cwd, notes, "repository visibility (gh)"),
