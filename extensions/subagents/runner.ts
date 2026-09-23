@@ -13,6 +13,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type AgentSession, type ExtensionError, getAgentDir, SessionManager, type ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -92,7 +93,7 @@ interface ChildSessionSpec {
 	agent?: AgentDefinition;
 	/** Parent session file — present for a fork run (inherit the parent transcript). */
 	forkFrom?: string;
-	/** Messages appended to a fork's inherited transcript before its task (the `/btw` side exchange). */
+	/** Messages appended to a fork's transcript before its task (e.g. `/btw`'s side exchange). */
 	forkMessages?: Message[];
 	/** The parent's current system prompt, applied to a fork so it continues as the parent. */
 	parentSystemPrompt?: string;
@@ -132,18 +133,28 @@ export interface ResidentRunOptions extends Omit<ChildSessionSpec, "sessionFile"
 	sink?: LiveSink;
 }
 
-/** Prepend a one-time spawn note (e.g. a model fallback) to an outcome's output. */
 /**
- * A fork's session: the parent transcript cloned, then `messages` appended, so
- * the child sees them before its task and a later resume finds them in its
- * file. Exported for tests.
+ * A child's session manager: a resume reopens its file; otherwise a fork
+ * clones the parent transcript (when the parent has written one) and anything
+ * else starts empty, and `forkMessages` are appended so the child sees them before
+ * its task and a later resume finds them in its file. Exported for tests.
  */
-export function forkSession(parentFile: string, cwd: string, sessionDir: string | undefined, messages: readonly Message[] = []): SessionManager {
-	const manager = SessionManager.forkFrom(parentFile, cwd, sessionDir);
-	for (const message of messages) manager.appendMessage(message);
+export function newChildSessionManager(spec: Pick<ChildSessionSpec, "cwd" | "forkFrom" | "forkMessages" | "sessionFile" | "sessionDir">): SessionManager {
+	// The resume cwd is passed explicitly: a worktree run's persisted cwd may
+	// be gone by the time it is messaged (index.ts substitutes the parent cwd).
+	if (spec.sessionFile) return SessionManager.open(spec.sessionFile, undefined, spec.cwd);
+	// pi writes a session file with its first assistant reply, so a parent with
+	// no transcript yet (or run with --no-session) has nothing to clone.
+	const manager = spec.forkFrom && existsSync(spec.forkFrom)
+		? SessionManager.forkFrom(spec.forkFrom, spec.cwd, spec.sessionDir)
+		: spec.sessionDir
+			? SessionManager.create(spec.cwd, spec.sessionDir)
+			: SessionManager.inMemory(spec.cwd);
+	for (const message of spec.forkMessages ?? []) manager.appendMessage(message);
 	return manager;
 }
 
+/** Prepend a one-time spawn note (e.g. a model fallback) to an outcome's output. */
 function withNote(outcome: ChildOutcome, note: string | undefined): ChildOutcome {
 	return note ? { ...outcome, output: `${note}\n\n${outcome.output}` } : outcome;
 }
@@ -365,16 +376,7 @@ export class SubagentRuntime {
 	 */
 	private async buildChildSession(spec: ChildSessionSpec): Promise<{ session: Session; note?: string }> {
 		const [loader, mcpTools] = await Promise.all([buildAgentLoader(this.childLoaderOptions(spec)), this.getMcpTools()]);
-		const newSessionManager = () =>
-			// The resume cwd is passed explicitly: a worktree run's persisted cwd may
-			// be gone by the time it is messaged (index.ts substitutes the parent cwd).
-			spec.sessionFile
-				? SessionManager.open(spec.sessionFile, undefined, spec.cwd)
-				: spec.forkFrom
-					? forkSession(spec.forkFrom, spec.cwd, spec.sessionDir, spec.forkMessages)
-					: spec.sessionDir
-						? SessionManager.create(spec.cwd, spec.sessionDir)
-						: SessionManager.inMemory(spec.cwd);
+		const newSessionManager = () => newChildSessionManager(spec);
 		// A fork keeps the parent's toolset; only a named agent carries an allowlist.
 		const allowlist = spec.forkFrom ? undefined : spec.agent?.tools;
 		const make = async (model: string | undefined): Promise<Session> => {

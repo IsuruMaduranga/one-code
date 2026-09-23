@@ -40,3 +40,12 @@ export function requestBtwFork(
 		if (!payload.handled) resolve({ error: "Forking needs the subagents extension, which is not loaded." });
 	});
 }
+
+/**
+ * The one-shot reminder the main conversation gets when a fork starts. The
+ * side question never entered its context, so without this the fork's report
+ * arrives as an answer to nothing the model asked for.
+ */
+export function btwForkReminder(name: string, taskId: string, question: string): string {
+	return `The user forked a /btw side question into background agent ${name} (task ${taskId}). The question was: ${JSON.stringify(question)}. Its report will arrive as a task notification and answers that question; it is not a task you delegated.`;
+}

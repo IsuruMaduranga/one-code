@@ -41,7 +41,7 @@ import {
 import { modelPickerComponent, pickerSpec, toPickerEntries, type PickerEntry } from "../auto-mode/model-picker.ts";
 import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
-import { BTW_FORK_CHANNEL, type BtwForkRequest, type BtwForkResult } from "../lib/btw-fork.ts";
+import { BTW_FORK_CHANNEL, btwForkReminder, type BtwForkRequest, type BtwForkResult } from "../lib/btw-fork.ts";
 import { MCP_TOOLS_CHANNEL, type McpToolsPayload } from "../lib/mcp-share.ts";
 import { resolveModelTier } from "../lib/model-tier.ts";
 import { pendingClaimReminder } from "./pending-claim.ts";
@@ -1447,18 +1447,16 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	 * Launch one prepared run as a background resident (Claude Code parity):
 	 * it returns as soon as the child starts, the report arrives as a steered
 	 * task notification, and the child stays resident so SendMessage can reach
-	 * it live (steer mid-turn, prompt when idle). `toolCallId` links the
-	 * notifications to the spawning Agent call (none for a `/btw` fork);
-	 * `forkMessages` are appended to a fork's inherited transcript. Returns the
-	 * line reported for the run.
+	 * it live (steer mid-turn, prompt when idle). `sessionFile` is the parent
+	 * transcript a fork clones; `toolCallId` links the notifications to the
+	 * spawning Agent call (none for a `/btw` fork); `forkMessages` are appended
+	 * to a fork's transcript. Returns the line reported for the run.
 	 */
 	const launchResident = async (
 		p: PreparedRun,
 		ctx: ExtensionContext,
 		runtime: SubagentRuntime,
-		sessionFile: string | undefined,
-		toolCallId: string | undefined,
-		forkMessages?: Message[],
+		{ sessionFile, toolCallId, forkMessages }: { sessionFile?: string; toolCallId?: string; forkMessages?: Message[] },
 	): Promise<{ launched: boolean; line: string }> => {
 		let worktree: Worktree | undefined;
 		if (p.request.worktree) {
@@ -1637,15 +1635,15 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
 	/**
 	 * `/btw`'s `f to fork` (lib/btw-fork.ts): a background fork that inherits
-	 * the conversation, then the side question and its answer, and takes the
-	 * question as its task. It reports back like any spawned fork.
+	 * the conversation (if the session has one yet), then the side question and
+	 * its answer, and takes the question as its task. It reports back like any
+	 * spawned fork.
 	 */
 	const forkFromBtw = async (request: BtwForkRequest): Promise<BtwForkResult> => {
 		const ctx = request.ctx as ExtensionContext;
+		// Before the first turn there is no transcript to clone, and the fork starts
+		// from the side exchange alone, as Claude Code's does (newChildSessionManager).
 		const sessionFile = ctx.sessionManager.getSessionFile();
-		if (!sessionFile) return { error: "Cannot fork: this session is not persisted (started with --no-session)." };
-		// pi writes the session file with the first assistant reply.
-		if (!existsSync(sessionFile)) return { error: "Cannot fork before the first conversation turn" };
 		const { name } = resolveRunName(registry, FORK_AGENT, undefined);
 		const taskId = generateTaskId();
 		const prepared: PreparedRun = {
@@ -1654,8 +1652,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			record: { name, agent: FORK_AGENT, taskId, sessionSearchDir: runSessionDir(ctx, taskId) ?? "", cwd: ctx.cwd, depth: 0 },
 		};
 		registry.add(prepared.record);
-		const { launched, line } = await launchResident(prepared, ctx, await getRuntime(ctx), sessionFile, undefined, request.messages);
-		return launched ? { name, taskId } : { error: line };
+		const { launched, line } = await launchResident(prepared, ctx, await getRuntime(ctx), { sessionFile, forkMessages: request.messages });
+		if (!launched) return { error: line };
+		pi.events.emit(REMINDER_CHANNEL, { text: btwForkReminder(name, taskId, request.question) });
+		return { name, taskId };
 	};
 	pi.events.on(BTW_FORK_CHANNEL, (data) => {
 		const request = data as BtwForkRequest;
@@ -2008,7 +2008,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			const lines: string[] = [...renamed, ...modelNotes];
 			const runtime = await getRuntime(ctx);
 			for (const p of prepared) {
-				const { launched, line } = await launchResident(p, ctx, runtime, sessionFile ?? undefined, toolCallId);
+				const { launched, line } = await launchResident(p, ctx, runtime, { sessionFile: sessionFile ?? undefined, toolCallId });
 				if (launched) spawnedThisLoop.add(p.record.taskId);
 				lines.push(line);
 			}

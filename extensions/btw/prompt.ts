@@ -10,7 +10,7 @@
  * unit-tested; the extension owns the model call, the spinner, and the panel.
  */
 
-import type { AssistantMessage, Message, UserMessage } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessage, Message, Model, UserMessage } from "@earendil-works/pi-ai";
 
 /**
  * CC's verbatim side-question reminder (captures/btw.json message 20). It frames
@@ -54,11 +54,7 @@ export interface BtwExchange {
 }
 
 /** The model an injected assistant message is attributed to. */
-export interface ModelRef {
-	api: string;
-	provider: string;
-	id: string;
-}
+type ModelRef = Pick<Model<Api>, "api" | "provider" | "id">;
 
 /**
  * One exchange as the user/assistant pair a later request carries: the bare
@@ -70,7 +66,7 @@ export function exchangeMessages(exchange: BtwExchange, model: ModelRef, timesta
 	const assistant: AssistantMessage = {
 		role: "assistant",
 		content: [{ type: "text", text: exchange.answer }],
-		api: model.api as AssistantMessage["api"],
+		api: model.api,
 		provider: model.provider,
 		model: model.id,
 		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },

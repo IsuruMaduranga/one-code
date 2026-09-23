@@ -165,8 +165,12 @@ export function applyBtwKey(state: BtwPanelState, key: BtwKey, historyLength: nu
 	}
 }
 
-/** Renders an answer to lines at a width: plain wrapping by default, Markdown in the extension. */
-export type AnswerRenderer = (text: string, width: number) => string[];
+/**
+ * Renders an answer to lines at a width: plain wrapping by default, Markdown in
+ * the extension. `ref` is stable for one answer (its exchange, or the panel
+ * state for the current one), so a renderer can cache by it.
+ */
+export type AnswerRenderer = (text: string, width: number, ref: object) => string[];
 
 export interface BtwPanelInput {
 	state: BtwPanelState;
@@ -217,9 +221,9 @@ export function renderBtwPanel(input: BtwPanelInput, theme?: unknown): string[] 
 	const answerWidth = Math.max(1, inner - ANSWER_INDENT);
 	const renderAnswer = input.renderAnswer ?? wrapPlainText;
 	const answerLines = selected
-		? renderAnswer(selected.answer, answerWidth)
+		? renderAnswer(selected.answer, answerWidth, selected)
 		: body.kind === "answer"
-			? renderAnswer(body.text || "(no answer)", answerWidth)
+			? renderAnswer(body.text || "(no answer)", answerWidth, state)
 			: body.kind === "error"
 				? wrapPlainText(body.message, answerWidth).map((line) => paint("error", line))
 				: [paint("muted", "Answering…")];

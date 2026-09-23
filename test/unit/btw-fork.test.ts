@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterAll, describe, expect, it } from "vitest";
 import { exchangeMessages } from "../../extensions/btw/prompt.ts";
-import { BTW_FORK_CHANNEL, type BtwForkRequest, requestBtwFork } from "../../extensions/lib/btw-fork.ts";
-import { forkSession } from "../../extensions/subagents/runner.ts";
+import { BTW_FORK_CHANNEL, btwForkReminder, type BtwForkRequest, requestBtwFork } from "../../extensions/lib/btw-fork.ts";
+import { newChildSessionManager } from "../../extensions/subagents/runner.ts";
 
 function bus() {
 	const listeners = new Map<string, ((data: unknown) => void)[]>();
@@ -34,7 +34,16 @@ describe("requestBtwFork", () => {
 	});
 });
 
-describe("forkSession", () => {
+describe("btwForkReminder", () => {
+	it("tells the main conversation which question the fork answers", () => {
+		const text = btwForkReminder("fork-1", "abcd1234", 'what is "x"?');
+		expect(text).toContain("background agent fork-1 (task abcd1234)");
+		expect(text).toContain('"what is \\"x\\"?"');
+		expect(text).toContain("not a task you delegated");
+	});
+});
+
+describe("newChildSessionManager", () => {
 	const root = mkdtempSync(join(tmpdir(), "btw-fork-"));
 	afterAll(() => rmSync(root, { recursive: true, force: true }));
 	const model = { api: "anthropic-messages", provider: "anthropic", id: "claude-sonnet-5" };
@@ -45,7 +54,12 @@ describe("forkSession", () => {
 		const parentFile = parent.getSessionFile();
 		expect(parentFile).toBeDefined();
 
-		const fork = forkSession(parentFile!, root, join(root, "forks"), exchangeMessages({ question: "side?", answer: "side." }, model));
+		const fork = newChildSessionManager({
+			cwd: root,
+			forkFrom: parentFile,
+			sessionDir: join(root, "forks"),
+			forkMessages: exchangeMessages({ question: "side?", answer: "side." }, model),
+		});
 		const texts = fork
 			.getEntries()
 			.filter((entry) => entry.type === "message")
@@ -55,5 +69,16 @@ describe("forkSession", () => {
 		// A resume reads the appended exchange back from the fork's own file.
 		const reopened = SessionManager.open(fork.getSessionFile()!, undefined, root);
 		expect(reopened.getEntries().filter((entry) => entry.type === "message")).toHaveLength(4);
+	});
+
+	it("starts a fork from the side exchange alone when the parent has no transcript yet", () => {
+		const fork = newChildSessionManager({
+			cwd: root,
+			forkFrom: join(root, "not-written-yet.jsonl"),
+			sessionDir: join(root, "fresh"),
+			forkMessages: exchangeMessages({ question: "side?", answer: "side." }, model),
+		});
+		expect(fork.getEntries().filter((entry) => entry.type === "message")).toHaveLength(2);
+		expect(fork.getSessionFile()).toBeDefined();
 	});
 });

@@ -27,11 +27,11 @@
  * subagent through the subagents extension (lib/btw-fork.ts).
  */
 
-import { existsSync } from "node:fs";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { convertToLlm, copyToClipboard, type ExtensionAPI, type ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { ARGUMENT_HINT_CHANNEL, type ArgumentHint } from "../lib/argument-hints.ts";
 import { requestBtwFork } from "../lib/btw-fork.ts";
 import { notifyOrPrint, printAnswer } from "../lib/headless-output.ts";
 import { withReasoningFallback } from "../lib/model-policy.ts";
@@ -41,7 +41,7 @@ import { boundedDockHeight, truncateLine } from "../lib/tui-render.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
 import type { ProseRenderer } from "../subagents/panel-render.ts";
 import { createMarkdownProse } from "../subagents/prose.ts";
-import { type AnswerRenderer, applyBtwKey, type BtwBody, BTW_MAX_HEIGHT, decodeBtwKey, initialBtwState, renderBtwPanel } from "./panel.ts";
+import { applyBtwKey, type BtwBody, BTW_MAX_HEIGHT, decodeBtwKey, initialBtwState, renderBtwPanel } from "./panel.ts";
 import { type BtwExchange, exchangeMessages, historyMessages, sideQuestionMessage } from "./prompt.ts";
 
 const BTW_MAX_TOKENS = 8192;
@@ -72,6 +72,8 @@ export default function btwExtension(pi: ExtensionAPI) {
 	// A new session (including after /clear) shares no context with the old one:
 	// its side history starts empty and any in-flight side question is abandoned.
 	pi.on("session_start", () => {
+		// Claude Code's `[question]` placeholder after a bare `/btw` in the prompt.
+		pi.events.emit(ARGUMENT_HINT_CHANNEL, { command: "btw", hint: "[question]" } satisfies ArgumentHint);
 		capturedMessages = undefined;
 		history = [];
 		inFlight?.abort();
@@ -93,13 +95,6 @@ export default function btwExtension(pi: ExtensionAPI) {
 			},
 			() => {},
 		));
-	/** The Markdown renderer caches per ref object; one ref per distinct answer text. */
-	const proseRefs = new Map<string, object>();
-	const markdownAnswer = (renderer: ProseRenderer): AnswerRenderer => (text, width) => {
-		let ref = proseRefs.get(text);
-		if (!ref) proseRefs.set(text, (ref = {}));
-		return renderer(ref, text, width);
-	};
 
 	/** Run the side question against the session model, after the earlier exchanges; returns the answer text. */
 	async function ask(ctx: ExtensionCommandContext, question: string, earlier: readonly BtwExchange[], signal: AbortSignal): Promise<string> {
@@ -188,7 +183,7 @@ export default function btwExtension(pi: ExtensionAPI) {
 			// The earlier exchanges this panel lists and browses; the current one
 			// joins `history` when it lands, so the next /btw lists it.
 			let earlier = [...history];
-			const view: { answer?: string; error?: string; forking?: boolean; canFork?: boolean } = {};
+			const view: { answer?: string; error?: string; forking?: boolean } = {};
 			const bodyState = (): BtwBody =>
 				view.error !== undefined ? { kind: "error", message: view.error } : view.answer !== undefined ? { kind: "answer", text: view.answer } : { kind: "loading" };
 			// Shown after the panel closes: a started fork, or why it could not start.
@@ -214,10 +209,6 @@ export default function btwExtension(pi: ExtensionAPI) {
 						if (controller.signal.aborted) return;
 						view.answer = answer;
 						if (answer) history.push({ question, answer });
-						// A fork clones the session file, which pi writes with the first
-						// assistant reply: before that, `f` could only fail.
-						const sessionFile = ctx.sessionManager.getSessionFile();
-						view.canFork = Boolean(sessionFile && existsSync(sessionFile));
 					} catch (error) {
 						if (controller.signal.aborted) return;
 						view.error = error instanceof Error ? error.message : String(error);
@@ -254,9 +245,9 @@ export default function btwExtension(pi: ExtensionAPI) {
 								body: bodyState(),
 								width,
 								height,
-								canFork: view.canFork,
+								canFork: true,
 								forking: view.forking,
-								renderAnswer: prose ? markdownAnswer(prose) : undefined,
+								renderAnswer: prose ? (text, width, ref) => prose!(ref, text, width) : undefined,
 							},
 							theme,
 						).map((line) => truncateLine(line, width));
@@ -285,7 +276,7 @@ export default function btwExtension(pi: ExtensionAPI) {
 								return;
 							case "fork":
 								// The current answer only, not one browsed from the history.
-								if (state.selected === null && view.answer && view.canFork) fork(view.answer);
+								if (state.selected === null && view.answer) fork(view.answer);
 								return;
 							case "clear":
 								if (earlier.length === 0) return;

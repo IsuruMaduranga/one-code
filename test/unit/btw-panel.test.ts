@@ -159,8 +159,11 @@ describe("renderBtwPanel", () => {
 
 	it("renders the answer through the given renderer, at the indented width", () => {
 		const widths: number[] = [];
-		const lines = render({ width: 50, renderAnswer: (text, width) => (widths.push(width), [`<${text}>`]) });
+		const state = initialBtwState();
+		const refs: object[] = [];
+		const lines = render({ state, width: 50, renderAnswer: (text, width, ref) => (widths.push(width), refs.push(ref), [`<${text}>`]) });
 		expect(widths).toEqual([46]);
+		expect(refs).toEqual([state]);
 		expect(lines).toContain("    <a>");
 	});
 
