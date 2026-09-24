@@ -28,7 +28,7 @@
 import { homedir } from "node:os";
 import { isAbsolute } from "node:path";
 import { isWithin, toAbsoluteBash } from "../auto-mode/paths.ts";
-import { gitSubcommand, leadTokens, LOOPS, parseCommand, resolvePayload, scopedTracker, type Token } from "../auto-mode/shell-analysis.ts";
+import { gitSubcommand, INLINE_SCRIPT_SHELLS, isUnknownTilde, leadTokens, LOOPS, movesDirectory, parseCommand, resolvePayload, scopedTracker, type Token } from "../auto-mode/shell-analysis.ts";
 
 export interface WorktreeGuardContext {
 	command: string;
@@ -83,9 +83,6 @@ function stashReason(rest: Token[]): string | undefined {
 	return undefined;
 }
 
-/** Shells whose `-c` script runs in a child: a `cd` there moves only that script. */
-const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh"]);
-
 export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: WorktreeGuardContext): string | undefined {
 	return guardScript(command, worktreePath, sharedRoot, worktreePath, 0).reason;
 }
@@ -112,6 +109,9 @@ function unverifiedScript(command: string, worktreePath: string, mayMove: boolea
 	};
 }
 
+/** How many directories a segment may run in before the guard treats its directory as unknown. */
+const MAX_POSSIBLE_DIRS = 8;
+
 function guardScript(
 	command: string,
 	worktreePath: string,
@@ -134,12 +134,14 @@ function guardScript(
 	/** Directory the current segment runs in; undefined = not statically known. */
 	let dir: string | undefined = startDir;
 	/**
-	 * The directory per subshell scope (`Segment.scopes`): a `cd` inside
-	 * `( … )`, a substitution or a pipeline member does not leak out.
+	 * The directories a segment may run in, per subshell scope
+	 * (`Segment.scopes`): a `cd` inside `( … )`, a substitution or a pipeline
+	 * member does not leak out. A `cd` that may not run (`false && cd x`, an
+	 * `if` branch) leaves both the old and the new directory possible, and every
+	 * git command must be safe in each.
 	 */
-	const scopeDirs = scopedTracker<string | undefined>(startDir);
+	const scopeDirs = scopedTracker<(string | undefined)[]>([startDir]);
 
-	const moves = (seg: (typeof segments)[number]) => ["cd", "pushd", "popd"].includes(resolvePayload(leadTokens(seg)).command);
 	// A git command as the parse sees it, spelled any way (`gi\t`, `env git`,
 	// `xargs git`, `parallel git`), or anywhere in the script a shell or `eval`
 	// runs (`bash -c '…'`), read as text with quotes and backslashes removed so
@@ -147,12 +149,12 @@ function guardScript(
 	const runsGit = (seg: (typeof segments)[number]) => {
 		const { command: cmd, args } = resolvePayload(leadTokens(seg));
 		if (cmd === "git" || (cmd === "parallel" && args.some((arg) => arg.value === "git"))) return true;
-		if (!SHELLS.has(cmd) && !["eval", "source", "."].includes(cmd)) return false;
+		if (!INLINE_SCRIPT_SHELLS.has(cmd) && !["eval", "source", "."].includes(cmd)) return false;
 		return args.some((arg) => /\bgit\b/.test(arg.value.replace(/[\\'"]/g, "")));
 	};
 	// A loop body runs more than once, so a `cd` in it moves every git command
 	// in the loop after the first pass; the segments show one pass only.
-	const movesInLoop = segments.some((seg) => seg.enclosing.some((construct) => LOOPS.has(construct)) && moves(seg));
+	const movesInLoop = segments.some((seg) => seg.enclosing.some((construct) => LOOPS.has(construct)) && movesDirectory(seg));
 	if (movesInLoop && segments.some(runsGit)) {
 		return {
 			reason: isolated(
@@ -165,7 +167,7 @@ function guardScript(
 	// The last member of a pipeline runs in the current shell under `shopt -s
 	// lastpipe`, so its `cd` may move every later command.
 	// Only a git command after such a `cd` can be moved by it.
-	const pipeMove = segments.findIndex((seg) => seg.lastInPipeline && moves(seg));
+	const pipeMove = segments.findIndex((seg) => seg.lastInPipeline && movesDirectory(seg));
 	if (pipeMove >= 0 && segments.slice(pipeMove + 1).some(runsGit)) {
 		return {
 			reason: isolated(
@@ -192,8 +194,8 @@ function guardScript(
 			const targetToken = leadArgs[j];
 			const target = targetToken?.value;
 			if (!target) dir = homedir();
-			// A glob (`cd /r*po`) or an expansion lands wherever bash expands it.
-			else if (hasExpansion(target) || target === "-" || targetToken.glob || targetToken.dynamic) dir = undefined;
+			// A glob (`cd /r*po`), an expansion or `~user` lands wherever bash expands it.
+			else if (hasExpansion(target) || target === "-" || targetToken.glob || targetToken.dynamic || isUnknownTilde(target)) dir = undefined;
 			// An absolute (or ~) destination re-anchors the tracked directory
 			// even when it was unknown — later git commands become checkable again.
 			else if (isAbsolute(target) || target === "~" || target.startsWith("~/")) dir = toAbsoluteBash("/", target, homedir());
@@ -212,7 +214,7 @@ function guardScript(
 		// runs git in /repo. A shell's script runs in a child, but `eval` runs
 		// in this shell, so a `cd` in it moves the commands after it.
 		// Past three levels a script is judged as one the guard cannot follow.
-		if (SHELLS.has(cmd) || cmd === "eval") {
+		if (INLINE_SCRIPT_SHELLS.has(cmd) || cmd === "eval") {
 			const scripts = cmd === "eval" ? [args.map((arg) => arg.value).join(" ")] : args.map((arg) => arg.value);
 			for (const script of scripts) {
 				const nested = depth < 3 ? guardScript(script, worktreePath, sharedRoot, dir, depth + 1) : unverifiedScript(script, worktreePath, true);
@@ -220,6 +222,13 @@ function guardScript(
 				if (cmd === "eval" && nested.moves) dir = undefined;
 			}
 			return undefined;
+		}
+
+		// `source <(…)`, `. "$f"`: the script is only known at runtime, so git in
+		// its source text cannot be checked.
+		if ((cmd === "source" || cmd === ".") && args.some((arg) => arg.dynamic)) {
+			const unverified = unverifiedScript(seg.raw, worktreePath, false);
+			if (unverified.reason) return unverified.reason;
 		}
 
 		// Git whose arguments are assembled at runtime — the repository it will
@@ -302,10 +311,17 @@ function guardScript(
 	};
 
 	for (const seg of segments) {
-		dir = scopeDirs.get(seg);
-		const reason = checkSegment(seg);
-		if (reason) return { reason };
-		scopeDirs.set(seg, dir);
+		const before = scopeDirs.get(seg);
+		const after: (string | undefined)[] = [];
+		for (const start of before) {
+			dir = start;
+			const reason = checkSegment(seg);
+			if (reason) return { reason };
+			after.push(dir);
+		}
+		const possible = [...new Set(seg.conditional ? [...before, ...after] : after)];
+		// Past a handful of possibilities the directory is as good as unknown.
+		scopeDirs.set(seg, possible.length > MAX_POSSIBLE_DIRS ? [undefined] : possible);
 	}
-	return { moves: segments.some(moves) || segments.some((seg) => resolvePayload(leadTokens(seg)).command === "eval") };
+	return { moves: segments.some(movesDirectory) || segments.some((seg) => resolvePayload(leadTokens(seg)).command === "eval") };
 }

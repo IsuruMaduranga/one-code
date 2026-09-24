@@ -110,6 +110,12 @@ export interface Segment {
 	 * move the outer shell.
 	 */
 	pipelineTail?: boolean;
+	/**
+	 * True when the command may not run even though the line reaches it: the
+	 * right side of `&&` or `||`, a branch of `if` or `case`, a loop body, a
+	 * function body. A `cd` here may or may not move the commands after it.
+	 */
+	conditional?: boolean;
 	/** True when a redirect target's value is only known when bash runs it (`> "$f"`, `< $(ls)`). */
 	unknownTarget?: boolean;
 	/**
@@ -287,6 +293,9 @@ const COMPLEX: Record<string, string> = {
 /** Constructs bash always runs in a subshell. */
 const ALWAYS_SUBSHELL = new Set(["subshell", "command_substitution", "process_substitution"]);
 
+/** Constructs whose commands may not run when the line reaches them (`Segment.conditional`). */
+const CONDITIONAL = new Set(["if_statement", "case_statement", "function_definition", "for_statement", "c_style_for_statement", "while_statement"]);
+
 /** Constructs recorded in `Segment.enclosing`. */
 const ENCLOSING = new Set([
 	...Object.keys(COMPLEX),
@@ -310,6 +319,8 @@ interface Context {
 	lastInPipeline?: boolean;
 	/** Inside the last member of a multi-command pipeline in any shell (`Segment.pipelineTail`). */
 	pipelineTail?: boolean;
+	/** Inside something that may not run (`Segment.conditional`). */
+	conditional?: boolean;
 	/**
 	 * Inside a context bash always runs in a subshell (`( … )`, a substitution,
 	 * a pipeline member other than the last): nothing here, a later pipeline's
@@ -345,6 +356,7 @@ class Walker {
 			// `( … )` and substitutions are always subshells, whatever pipeline they sit in.
 			lastInPipeline: ALWAYS_SUBSHELL.has(node.type) ? false : ctx.lastInPipeline,
 			pipelineTail: ALWAYS_SUBSHELL.has(node.type) ? false : ctx.pipelineTail,
+			conditional: ctx.conditional || CONDITIONAL.has(node.type),
 			isolated: ctx.isolated || ALWAYS_SUBSHELL.has(node.type),
 		};
 	}
@@ -365,12 +377,23 @@ class Walker {
 			case "comment":
 				return;
 			case "program":
-			case "list":
 				for (const child of node.children) {
 					if (child.type === "&") this.background = true;
 					else if (child.isNamed) this.statement(child, ctx);
 				}
 				return;
+			case "list": {
+				// `a && b`, `a || b`: only the first command is sure to run.
+				let first = true;
+				for (const child of node.children) {
+					if (child.type === "&") this.background = true;
+					else if (child.isNamed) {
+						this.statement(child, first ? ctx : { ...ctx, conditional: true });
+						first = false;
+					}
+				}
+				return;
+			}
 			case "pipeline": {
 				const members = node.namedChildren.filter((child) => child.type !== "comment");
 				for (const [index, child] of members.entries()) {
@@ -453,6 +476,7 @@ class Walker {
 		if (ctx.substitution !== undefined) segment.substitution = ctx.substitution;
 		if (ctx.lastInPipeline) segment.lastInPipeline = true;
 		if (ctx.pipelineTail) segment.pipelineTail = true;
+		if (ctx.conditional) segment.conditional = true;
 		if (node?.type === "variable_assignment" || node?.type === "variable_assignments") {
 			// A line that only assigns: `a=1`, `a=1 b=2`.
 			const assignments = node.type === "variable_assignment" ? [node] : node.namedChildren.filter((child) => child.type === "variable_assignment");
@@ -622,6 +646,7 @@ class Walker {
 					enclosing: [...scope.enclosing, ...segment.enclosing],
 					scopes: [...scope.scopes, ...segment.scopes],
 					substitution: scope.substitution,
+					...(scope.conditional || segment.conditional ? { conditional: true } : {}),
 					start: body.startIndex + i,
 				});
 			}

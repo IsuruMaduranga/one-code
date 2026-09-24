@@ -9,7 +9,7 @@
 
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
-import { analyzeShellCommand, leadTokens, parseCommand, resolvePayload } from "../auto-mode/shell-analysis.ts";
+import { analyzeShellCommand, INLINE_SCRIPT_SHELLS, leadTokens, movesDirectory, parseCommand, resolvePayload } from "../auto-mode/shell-analysis.ts";
 import { pathArgument, resolveForContainment, toAbsolute } from "../auto-mode/paths.ts";
 import { isSensitivePath } from "../auto-mode/sensitive.ts";
 import { isProtectedPath, isWritingTool } from "./protected-paths.ts";
@@ -238,12 +238,6 @@ export function bashSubcommands(command: string): string[] | undefined {
 	return segments.filter((seg) => seg.substitution === undefined).map((seg) => seg.raw).filter((raw) => raw.length > 0);
 }
 
-/** Commands after which a substitution's paths resolve somewhere the read-only check did not look. */
-const MOVES_DIRECTORY = new Set(["cd", "pushd", "popd"]);
-
-/** Shells whose `-c` argument is a nested command line. */
-const SHELL_INTERPRETERS = new Set(["sh", "bash", "zsh", "dash", "ksh", "fish"]);
-
 /** The script a `sh -c '…'` / `bash -lc '…'` invocation runs, if any. */
 function inlineShellScript(args: string[]): string | undefined {
 	for (let i = 0; i < args.length - 1; i++) {
@@ -296,7 +290,7 @@ export function bashMatchForms(command: string, depth = 0): string[] {
 	// (`sh <<'EOF'`, `cat <<EOF | sh`, `echo 'rm -rf x' | sh`). Only then, so
 	// a commit message mentioning `rm` never meets `Bash(rm:*)`.
 	const payloads = segments.map((segment) => resolvePayload(leadTokens(segment), "wide"));
-	if (payloads.some((payload) => SHELL_INTERPRETERS.has(payload.command))) {
+	if (payloads.some((payload) => INLINE_SCRIPT_SHELLS.has(payload.command))) {
 		for (const [index, segment] of segments.entries()) {
 			nested.push(...(segment.stdin ?? []));
 			const { command: printer, args } = payloads[index];
@@ -314,7 +308,7 @@ export function bashMatchForms(command: string, depth = 0): string[] {
 		if (!payload.command) continue;
 		const args = payload.args.map((token) => token.value);
 		forms.add([payload.command, ...args].join(" "));
-		if (SHELL_INTERPRETERS.has(payload.command)) {
+		if (INLINE_SCRIPT_SHELLS.has(payload.command)) {
 			const script = inlineShellScript(args);
 			if (script) nested.push(script);
 		}
@@ -432,11 +426,11 @@ export function findBashAllowRule(
 		if (!rule) return undefined;
 		first ??= rule;
 	}
-	const movesDirectory = topLevel.some((seg) => MOVES_DIRECTORY.has(resolvePayload(leadTokens(seg)).command));
+	const topLevelMoves = topLevel.some(movesDirectory);
 	for (const [index, text] of parsed.substitutions.entries()) {
 		const inner = parsed.segments.filter((seg) => seg.substitution === index);
 		if (inner.every((seg) => ruleFor(seg.raw))) continue;
-		if (!movesDirectory && opts.readOnly?.(text)) continue;
+		if (!topLevelMoves && opts.readOnly?.(text)) continue;
 		return undefined;
 	}
 	return first;

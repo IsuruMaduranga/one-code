@@ -22,7 +22,7 @@
  * fires on routine work teaches the user to approve without reading.
  */
 
-import { analyzeShellCommand, globComponentRegex, isUnknownTilde, LOOPS, parseCommand, resolvePayload, scopedTracker } from "./shell-analysis.ts";
+import { analyzeShellCommand, globComponentRegex, isUnknownTilde, LOOPS, movesDirectory, parseCommand, resolvePayload, scopedTracker } from "./shell-analysis.ts";
 import { autoModeSettingsPaths } from "./config.ts";
 import { oneCodeProjectSettingsPath } from "../lib/one-code-settings.ts";
 import { claudeJsonPath, comparablePath } from "../lib/paths.ts";
@@ -256,12 +256,12 @@ export function shellNamesControlFile(
 
 	const { segments, parseFailed } = parseCommand(command);
 	const dirs = scopedTracker(cwd);
-	const moves = (segment: (typeof segments)[number]) => ["cd", "pushd", "popd"].includes(resolvePayload(segment.tokens).command);
+
 	// Decided before the walk: in a loop, a word read before the `cd` runs after it on the next pass.
 	const unknownDir =
 		parseFailed ||
 		segments.some((segment) => {
-			if (!moves(segment)) return false;
+			if (!movesDirectory(segment)) return false;
 			const payload = resolvePayload(segment.tokens);
 			const target = payload.args.find((token) => !token.value.startsWith("-"));
 			// `cd -` goes to $OLDPWD.
@@ -272,6 +272,8 @@ export function shellNamesControlFile(
 				// A pipeline's last `cd` moves the later commands of its own shell
 				// under lastpipe, inside a substitution too.
 				!!segment.pipelineTail ||
+				// `false && cd x` may or may not move the commands after it.
+				!!segment.conditional ||
 				segment.enclosing.some((construct) => LOOPS.has(construct)) ||
 				!!target?.dynamic ||
 				!!target?.glob ||

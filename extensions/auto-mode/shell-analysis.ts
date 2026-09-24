@@ -464,6 +464,17 @@ function wrappersContained(peeled: readonly string[]): boolean {
 	return peeled.every((name) => WRAPPERS[name]?.contained);
 }
 
+/** Shells whose `-c` argument is a command line of its own. */
+export const INLINE_SCRIPT_SHELLS: ReadonlySet<string> = new Set(["sh", "bash", "zsh", "dash", "ksh", "fish"]);
+
+/** Commands that change the shell's working directory. */
+export const DIRECTORY_MOVERS: ReadonlySet<string> = new Set(["cd", "pushd", "popd"]);
+
+/** Whether a segment's command (past `time` and wrappers) changes the shell's directory. */
+export function movesDirectory(seg: Segment): boolean {
+	return DIRECTORY_MOVERS.has(resolvePayload(leadTokens(seg)).command);
+}
+
 /**
  * A segment's tokens from its command word on, for command-position checks.
  * `time` is a reserved word that the grammar reads as a command, so `time

@@ -85,6 +85,19 @@ describe("worktree git-isolation guard", () => {
 		expect(guard("shopt -s lastpipe; true | cd /repo; sh -c 'gi\\t status'")).toContain("last command of a pipeline");
 	});
 
+	it("keeps every directory a cd that may not run leaves possible", () => {
+		for (const moveBack of ["false && cd WT", "if false; then cd WT; fi", "f() { cd WT; }", "true || cd WT", "case x in y) cd WT;; esac"]) {
+			expect(guard(`cd /repo; ${moveBack.replace("WT", WT)}; git reset --hard`)).toContain(`targets ${resolve("/repo")}`);
+		}
+		expect(guard("cd /repo || cd WT; git status".replace("WT", WT))).toContain(`targets ${resolve("/repo")}`);
+		// Every possible directory inside the worktree: allowed.
+		expect(guard("cd a && cd b && git status")).toBeUndefined();
+		expect(guard("git status; false && cd sub; git log")).toBeUndefined();
+		expect(guard("test -d build && cd build; git status")).toBeUndefined();
+		// `~user` is another user's home, wherever that is.
+		expect(guard("cd ~someuser/repo && git status")).toContain("unverifiable");
+	});
+
 	it("judges a script a shell or eval runs from the directory it starts in (PR #13 review)", () => {
 		expect(guard("bash -c 'cd /repo && git status'")).toContain(`targets ${resolve("/repo")}`);
 		expect(guard("sh -c 'git -C /repo status'")).toContain(`targets ${resolve("/repo")}`);
@@ -97,6 +110,10 @@ describe("worktree git-isolation guard", () => {
 		expect(guard("eval 'cd /repo'; git status")).toContain("unverifiable");
 		expect(guard("eval cd /repo '&&' git status")).toContain(`targets ${resolve("/repo")}`);
 
+		// fish is a shell too, and a script built at runtime cannot be checked.
+		expect(guard("fish -c 'git -C /repo reset --hard'")).toContain(`targets ${resolve("/repo")}`);
+		expect(guard("source <(echo git -C /repo reset --hard)")).toContain("too complex to verify");
+		expect(guard("source .venv/bin/activate && git status")).toBeUndefined();
 		// Past three levels of nesting, git anywhere in the script is refused.
 		expect(guard("eval eval eval git -C /repo status")).toContain(`targets ${resolve("/repo")}`);
 		expect(guard("eval eval eval eval git -C /repo status")).toContain("too complex to verify");
