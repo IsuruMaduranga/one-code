@@ -687,15 +687,50 @@ export function resolvePayload(tokens: Token[], reading: "strict" | "wide" = "st
 	const payload: Payload = { command: "", args: [], peeled: [], pathNamed: [], scripts: [] };
 	let index = 0;
 
-	/** Skip the wrapper's own options; `--` ends them. */
+	const kind = (spec: WrapperSpec, option: string) =>
+		spec.values?.includes(option) ? "value" : spec.unsafeValues?.includes(option) ? "unsafe" : spec.scripts?.includes(option) ? "script" : undefined;
+
+	/**
+	 * Skip the wrapper's own options; `--` ends them. A value may be attached,
+	 * as getopt allows: `--chdir=/tmp`, `-C/tmp`, or last in a short cluster
+	 * (`-iC/tmp`). Until 2026-09-24 only the separate spelling was recognised,
+	 * so `env --chdir=/tmp rm -f a.txt` peeled as a contained delete and
+	 * `env --split-string='rm …'` hid its script from deny rules.
+	 */
 	const skipOptions = (spec: WrapperSpec) => {
 		while (index < tokens.length && tokens[index].value.startsWith("-")) {
-			const flag = tokens[index++].value;
-			if (flag === "--") return;
+			const word = tokens[index].value;
+			if (word === "--") {
+				index++;
+				return;
+			}
+			let option: string | undefined;
+			let attached: string | undefined;
+			if (word.startsWith("--")) {
+				const eq = word.indexOf("=");
+				option = eq > 0 ? word.slice(0, eq) : word;
+				attached = eq > 0 ? word.slice(eq + 1) : undefined;
+			} else {
+				for (let i = 1; i < word.length; i++) {
+					if (!kind(spec, `-${word[i]}`)) continue;
+					option = `-${word[i]}`;
+					attached = word.slice(i + 1) || undefined;
+					break;
+				}
+			}
+			const type = option === undefined ? undefined : kind(spec, option);
+			// Strict: an attached value that moves the payload or carries a script
+			// stays in command position, so the command escalates uncontained.
+			if (!wide && attached !== undefined && (type === "unsafe" || type === "script")) return;
+			index++;
+			if (type === undefined || attached !== undefined) {
+				if (wide && type === "script" && attached !== undefined) payload.scripts.push(attached);
+				continue;
+			}
 			if (index >= tokens.length) return;
-			if (spec.values?.includes(flag)) index++;
-			else if (wide && spec.unsafeValues?.includes(flag)) index++;
-			else if (wide && spec.scripts?.includes(flag)) payload.scripts.push(tokens[index++].value);
+			if (type === "value") index++;
+			else if (wide && type === "unsafe") index++;
+			else if (wide && type === "script") payload.scripts.push(tokens[index++].value);
 		}
 	};
 
@@ -832,7 +867,7 @@ const INERT_ASSIGNMENTS = /^(LANG|LANGUAGE|LC_[A-Z]+|TZ|NO_COLOR|FORCE_COLOR|CLI
  * (PREGATE-REVIEW-2026-09-23 P4).
  */
 function isInertValue(name: string, value: string): boolean {
-	if (name === "TZ") return /^[A-Za-z0-9_+-]*(\/[A-Za-z0-9_+-]+)*$/.test(value);
+	if (name === "TZ") return /^([A-Za-z0-9_+-]+(\/[A-Za-z0-9_+-]+)*)?$/.test(value);
 	return /^[A-Za-z0-9_.,@:+-]*$/.test(value);
 }
 
@@ -1210,8 +1245,17 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		// read-only-command redirects were fast-pathed to "safe").
 		for (const token of segment.redirects) checkWriteTarget(token);
 		// An input redirect (`tr a b < f`) opens `f` whatever the command is, so
-		// it is read-checked even for a command that takes no file operands.
-		for (const word of segment.inputs) checkRead(word);
+		// it is read-checked even for a command that takes no file operands. A
+		// literally named credential file is checked here too: checkRead only
+		// catches one reached through a symlink, leaving the literal name to the
+		// operand scan below, which never sees `inputs` (`cat < .env`).
+		for (const word of segment.inputs) {
+			if (isSensitivePath(word.value) || isSensitivePath(toAbsoluteBash(effectiveCwd, word.value, home))) {
+				if (!evidence.sensitivePaths.includes(word.value)) evidence.sensitivePaths.push(word.value);
+				escalate(`reads ${word.value} on stdin, which is a credential or secret path`);
+			}
+			checkRead(word);
+		}
 
 		// A leading `NAME=value` changes what the command runs or reads: git takes
 		// its repository and configuration from GIT_* variables (the same

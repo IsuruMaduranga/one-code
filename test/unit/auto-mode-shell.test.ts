@@ -692,3 +692,44 @@ describe("PREGATE-REVIEW-2026-09-23 second pass", () => {
 		expect(hasUnmodelledSyntax("cat ${HOME}/x")).toBeDefined();
 	});
 });
+
+describe("pre-gate review 2026-09-24: attached wrapper values, stdin credentials, TZ paths", () => {
+	it("does not peel a wrapper option whose attached value moves the payload", () => {
+		writeFileSync(join(cwd, "a.txt"), "x");
+		for (const command of [
+			"env --chdir=/tmp rm -f a.txt",
+			"env -C/tmp rm -f a.txt",
+			"env -iC/tmp rm -f a.txt",
+			"time --output=/tmp/t rm -f a.txt",
+			"time -o/tmp/t rm -f a.txt",
+			"script --log-timing=/tmp/t rm -f a.txt",
+		]) {
+			const evidence = analyze(command);
+			expect(evidence.verdict, command).toBe("escalate");
+			expect(evidence.containedNonNetwork, command).toBe(false);
+		}
+		// A harmless attached value still peels.
+		expect(analyze("nice -n5 rm -f a.txt").containedNonNetwork).toBe(true);
+		expect(analyze("timeout --signal=KILL 5 rm -f a.txt").containedNonNetwork).toBe(true);
+	});
+
+	it("gives deny rules the script an attached option carries", () => {
+		for (const command of ["env --split-string='rm -f v'", "env -S'rm -f v'", "script --command='rm -f v' log", "flock --command='rm -f v' lock"]) {
+			expect(bashMatchForms(command), command).toContain("rm -f v");
+		}
+	});
+
+	it("escalates a credential file read on stdin", () => {
+		writeFileSync(join(cwd, ".env"), "KEY=1");
+		for (const command of ["cat < .env", "< .env cat", "tr a b < .env"]) {
+			const evidence = analyze(command);
+			expect(evidence.verdict, command).toBe("escalate");
+			expect(evidence.sensitivePaths, command).toContain(".env");
+		}
+	});
+
+	it("escalates TZ set to an absolute path", () => {
+		expect(analyze("TZ=/etc/localtime date").verdict).toBe("escalate");
+		expect(analyze("TZ= date").verdict).toBe("safe");
+	});
+});
