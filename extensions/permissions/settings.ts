@@ -221,21 +221,12 @@ export function listWorkspaceDirectories(cwd: string, home: string): SourcedDire
 
 /** Add a directory to a One Code settings file's `permissions.additionalDirectories`. */
 export function persistWorkspaceDirectory(dir: string, filePath: string): void {
-	const file = readSettingsForWrite(filePath) as ClaudeSettingsFile;
-	const permissions = (file.permissions ??= {});
-	const list = (permissions.additionalDirectories ??= []);
-	if (!list.includes(dir)) list.push(dir);
-	writeSettings(filePath, file as Record<string, unknown>);
+	addToPermissionsList("additionalDirectories", dir, filePath);
 }
 
 /** Remove a directory, as written, from a One Code settings file. False when it is not there. */
 export function removeWorkspaceDirectory(raw: string, filePath: string): boolean {
-	const file = readSettingsForWrite(filePath) as ClaudeSettingsFile;
-	const list = file.permissions?.additionalDirectories;
-	if (!Array.isArray(list) || !list.includes(raw)) return false;
-	file.permissions!.additionalDirectories = list.filter((entry) => entry !== raw);
-	writeSettings(filePath, file as Record<string, unknown>);
-	return true;
+	return removeFromPermissionsList("additionalDirectories", raw, filePath);
 }
 
 /**
@@ -265,11 +256,7 @@ export function listPermissionRules(cwd: string, home: string): SourcedRule[] {
  * and a half-written file is never visible to a concurrent reader.
  */
 export function persistPermissionRule(behavior: RuleBehavior, rule: string, filePath: string): void {
-	const file = readSettingsForWrite(filePath) as ClaudeSettingsFile;
-	const permissions = (file.permissions ??= {});
-	const list = (permissions[behavior] ??= []);
-	if (!list.includes(rule)) list.push(rule);
-	writeSettings(filePath, file as Record<string, unknown>);
+	addToPermissionsList(behavior, rule, filePath);
 }
 
 /** `persistPermissionRule` for an allow rule (`/allow`). */
@@ -283,10 +270,24 @@ export function persistAllowRule(rule: string, filePath: string): void {
  * `[]`, and the file's other keys are preserved.
  */
 export function removePermissionRule(behavior: RuleBehavior, rule: string, filePath: string): boolean {
+	return removeFromPermissionsList(behavior, rule, filePath);
+}
+
+/** A string list under `permissions` that One Code edits in its own files. */
+type PermissionsList = RuleBehavior | "additionalDirectories";
+
+function addToPermissionsList(field: PermissionsList, value: string, filePath: string): void {
 	const file = readSettingsForWrite(filePath) as ClaudeSettingsFile;
-	const list = file.permissions?.[behavior];
-	if (!Array.isArray(list) || !list.includes(rule)) return false;
-	file.permissions![behavior] = list.filter((entry) => entry !== rule);
+	const list = ((file.permissions ??= {})[field] ??= []);
+	if (!list.includes(value)) list.push(value);
+	writeSettings(filePath, file as Record<string, unknown>);
+}
+
+function removeFromPermissionsList(field: PermissionsList, value: string, filePath: string): boolean {
+	const file = readSettingsForWrite(filePath) as ClaudeSettingsFile;
+	const list = file.permissions?.[field];
+	if (!Array.isArray(list) || !list.includes(value)) return false;
+	file.permissions![field] = list.filter((entry) => entry !== value);
 	writeSettings(filePath, file as Record<string, unknown>);
 	return true;
 }

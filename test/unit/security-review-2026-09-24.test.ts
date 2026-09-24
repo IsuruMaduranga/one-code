@@ -18,6 +18,7 @@ import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { powershellInjectionSyntax, powershellReadOnly } from "../../extensions/permissions/powershell-rules.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { stubHome } from "./helpers/home.ts";
 
 let root: string;
 let cwd: string;
@@ -50,7 +51,7 @@ describe("H1: one target per file-tool call", () => {
 	});
 
 	it("blocks a write whose file_path is in-project and whose path is not, in the real auto-mode gate", async () => {
-		vi.stubEnv("HOME", home);
+		stubHome(home);
 		vi.stubEnv("ONECODE_STATE_DIR", join(root, "state"));
 		vi.stubEnv("CLAUDE_CONFIG_DIR", join(home, ".claude"));
 		const fake = createFakePi();

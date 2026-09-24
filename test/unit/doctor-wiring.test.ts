@@ -6,6 +6,7 @@ import doctorExtension from "../../extensions/doctor/index.ts";
 import { CLASSIFIER_SETTING_CHANGED_CHANNEL, SUBAGENT_DEFAULT_CHANGED_CHANNEL } from "../../extensions/lib/settings-channels.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../../extensions/permissions/modes.ts";
 import { createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { stubHome } from "./helpers/home.ts";
 
 const model = (provider: string, id: string, input: number, api = "anthropic-messages") =>
 	({ provider, id, name: id, api, cost: { input, output: input * 5 }, contextWindow: 200_000 }) as any;
@@ -41,8 +42,7 @@ function ctxFor(current: any | undefined, mode: "tui" | "print" = "print") {
 beforeEach(() => {
 	home = mkdtempSync(join(tmpdir(), "onecode-doctor-wiring-home-"));
 	cwd = mkdtempSync(join(tmpdir(), "onecode-doctor-wiring-cwd-"));
-	vi.stubEnv("HOME", home);
-	vi.stubEnv("USERPROFILE", home); // os.homedir() reads this one on Windows
+	stubHome(home);
 	vi.stubEnv("PI_CODING_AGENT_DIR", join(home, ".onecode", "agent"));
 	vi.stubEnv("ONECODE_NO_UPDATE_CHECK", "1");
 	vi.stubEnv("CC_VERSION", "");

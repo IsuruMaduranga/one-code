@@ -69,10 +69,12 @@ export function persistProjectAllowApproval(projectRoot: string, rules: readonly
 /**
  * The consent dialog's text: what the repository wants pre-approved (allow
  * rules, and workspace directories whose files it wants readable), and what
- * the current call would use. `firing` is the rule the call matches, or a
- * phrase naming the directory it reads.
+ * the current call would use: the rule it matches, or the directory it reads
+ * inside.
  */
-export function describeProjectAllow(rules: readonly string[], firing: string, dirs: readonly string[] = []): { title: string; message: string } {
+export type TrustFiring = { rule: string } | { dir: string };
+
+export function describeProjectAllow(rules: readonly string[], firing: TrustFiring, dirs: readonly string[] = []): { title: string; message: string } {
 	const list = (items: readonly string[]) => {
 		const shown = items.slice(0, 8);
 		return `${shown.join("\n")}${items.length > shown.length ? `\n… and ${items.length - shown.length} more` : ""}`;
@@ -85,7 +87,7 @@ export function describeProjectAllow(rules: readonly string[], firing: string, d
 		title: dirs.length > 0 ? "Trust this repository's permission settings?" : "Trust this repository's allow rules?",
 		message:
 			`This repository's .claude settings ${parts.join("\n\nand ")}\n\n` +
-			`The current call ${firing.startsWith("the workspace directory") ? `reads inside ${firing}` : `matches "${firing}"`} and would run without a prompt` +
+			`The current call ${"dir" in firing ? `reads inside the workspace directory ${firing.dir}` : `matches "${firing.rule}"`} and would run without a prompt` +
 			" (in auto mode, without the classifier). Whoever committed the file granted this, not you." +
 			" Approval is remembered until these settings change; declining keeps them off for this session.",
 	};

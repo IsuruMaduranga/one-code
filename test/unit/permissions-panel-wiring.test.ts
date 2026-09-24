@@ -16,6 +16,7 @@ import { oneCodeProjectSettingsPath } from "../../extensions/lib/one-code-settin
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { stubHome } from "./helpers/home.ts";
 
 const completeMock = vi.mocked(completeSimple);
 const reply = (text: string) => ({ stopReason: "stop", content: [{ type: "text", text }], usage: {} }) as never;
@@ -53,8 +54,7 @@ describe("/permissions wiring", () => {
 		home = mkdtempSync(join(tmpdir(), "perm-panel-"));
 		cwd = join(home, "project");
 		mkdirSync(cwd, { recursive: true });
-		vi.stubEnv("HOME", home);
-		vi.stubEnv("USERPROFILE", home); // os.homedir() reads this one on Windows
+		stubHome(home);
 		vi.stubEnv("ONECODE_STATE_DIR", join(home, ".onecode"));
 		vi.stubEnv("PI_CODING_AGENT_DIR", join(home, "agent"));
 		screens = [];

@@ -17,6 +17,7 @@ import { listWorkspaceDirectories } from "../../extensions/permissions/settings.
 import { parseAddDirFlag, validateWorkspaceDirectory } from "../../extensions/permissions/workspace.ts";
 import { buildClaudeCodeSystemPrompt } from "../../extensions/system-prompt/template.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { stubHome } from "./helpers/home.ts";
 
 type GateResult = { block?: boolean; reason?: string } | undefined;
 
@@ -35,8 +36,7 @@ beforeEach(() => {
 	for (const dir of [home, cwd, shared, join(shared, ".ssh"), join(shared, "sub")]) mkdirSync(dir, { recursive: true });
 	writeFileSync(join(shared, "notes.md"), "notes");
 	writeFileSync(join(shared, ".ssh", "id_rsa"), "key");
-	vi.stubEnv("HOME", home);
-	vi.stubEnv("USERPROFILE", home); // os.homedir() reads this one on Windows
+	stubHome(home);
 	vi.stubEnv("ONECODE_STATE_DIR", join(home, ".onecode"));
 	vi.stubEnv("PI_CODING_AGENT_DIR", join(home, "agent"));
 });

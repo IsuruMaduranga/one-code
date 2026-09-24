@@ -100,7 +100,7 @@ import {
 } from "./settings.ts";
 import { MODE_ENV, resolvedOrSelf, runtimeProtectedDirs } from "../lib/permission-gate.ts";
 import { CLASSIFIER_SETTING_CHANGED_CHANNEL } from "../lib/settings-channels.ts";
-import { describeProjectAllow, persistProjectAllowApproval, projectAllowApproved, projectDirectoryConsentEntry } from "./project-trust.ts";
+import { describeProjectAllow, persistProjectAllowApproval, projectAllowApproved, projectDirectoryConsentEntry, type TrustFiring } from "./project-trust.ts";
 import { parseAddDirFlag, tooBroadForWorkspace, validateWorkspaceDirectory } from "./workspace.ts";
 import { WORKSPACE_CHANNEL, type WorkspaceAnnouncement } from "../lib/workspace-channel.ts";
 import { findProjectRoot } from "../lib/git.ts";
@@ -161,12 +161,12 @@ const DENIED_SAFETY_FLOOR = (reason: string) =>
 const DENIED_BY_RULE = (rule: string) =>
 	`This tool call is denied by the permission rule "${rule}" in the user's settings. The rule is the user's standing decision about this class of action: do not retry it, and do not achieve the same effect another way (a different command, a script, or another tool). Continue with work that does not depend on it, and tell the user what was denied and by which rule.`;
 
-/** Truncate a subject for a permission prompt — shared by the main gate and the subagent bridge. */
-/** Claude Code's denial notification: the tool, the reason cut to 80 columns, and where to act on it. */
 /** The hidden message a /permissions retry starts its turn with. */
 const PERMISSION_RETRY_TYPE = "one-code:permission-retry";
+/** Claude Code's denial notification: the tool, the reason cut to 80 columns, and where to act on it. */
 const deniedNotice = (toolName: string, reason: string): string =>
 	`${toolName} denied by auto mode · ${reason.length > 80 ? `${reason.slice(0, 79)}…` : reason} · /permissions`;
+/** Truncate a subject for a permission prompt — shared by the main gate and the subagent bridge. */
 const previewSubject = (subject: string) => (subject.length > 200 ? `${subject.slice(0, 200)}…` : subject);
 
 /**
@@ -1019,7 +1019,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// ask the user to trust the repository's settings first (once per list;
 		// project-trust.ts). No UI → they stay off and the call takes the normal
 		// path (fail closed).
-		const trustProject = async (withProject: typeof result, firing: string) => {
+		const trustProject = async (withProject: typeof result, firing: TrustFiring) => {
 			const repoDirs = repoWorkspaceDirs().map((dir) => dir.raw);
 			const { title, message } = describeProjectAllow(projectAllowRaw, firing, repoDirs);
 			const approved = (await serializePrompt(() => ctx.ui.confirm(title, message))) === true;
@@ -1037,13 +1037,13 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			const withRules = projectAllow.length > 0 ? decideWith([...allow, ...activeSessionAllows(), ...projectAllow]) : undefined;
 			const repoDirs = repoWorkspaceDirs();
 			if (withRules?.decision === "allow" && withRules.rule && projectAllow.includes(withRules.rule)) {
-				await trustProject(withRules, withRules.rule.raw);
+				await trustProject(withRules, { rule: withRules.rule.raw });
 			} else if (repoDirs.length > 0) {
 				const withDirs = decideWith([...allow, ...activeSessionAllows()], [...workspaceDirs, ...repoDirs.map((dir) => resolvedOrSelf(dir.path))]);
 				if (withDirs.decision === "allow" && (withDirs.cause === "tier" || withDirs.cause === "mode")) {
 					const target = resolvedSubject ?? toAbsolute(callCwd, matchSubject, os.homedir());
 					const firing = repoDirs.find((dir) => isWithin(resolvedOrSelf(dir.path), target))?.raw ?? repoDirs[0].raw;
-					await trustProject(withDirs, `the workspace directory ${firing}`);
+					await trustProject(withDirs, { dir: firing });
 				}
 			}
 		}
