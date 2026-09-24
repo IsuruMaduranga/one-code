@@ -208,6 +208,19 @@ function guardScript(
 		}
 
 		const { command: cmd, args, peeled } = resolvePayload(tokens);
+		// Git behind a wrapper the strict reading does not peel (`sudo`, `exec`,
+		// `env -C /repo`): the wrapper may have moved it, so its target cannot be
+		// read off the command.
+		if (cmd !== "git") {
+			const wide = resolvePayload(tokens, "wide");
+			if (wide.command === "git" || wide.scripts.some((script) => /\bgit\b/.test(script.replace(/[\\'"]/g, "")))) {
+				return isolated(
+					worktreePath,
+					`this command runs git through ${rawLead}, which can change the repository it targets`,
+					`Run git directly, with literal paths inside ${worktreePath}.`,
+				);
+			}
+		}
 
 		// A script a shell or `eval` runs is judged as commands of its own,
 		// starting where this command runs: `bash -c 'cd /repo && git status'`

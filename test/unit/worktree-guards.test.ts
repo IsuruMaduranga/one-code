@@ -85,6 +85,15 @@ describe("worktree git-isolation guard", () => {
 		expect(guard("shopt -s lastpipe; true | cd /repo; sh -c 'gi\\t status'")).toContain("last command of a pipeline");
 	});
 
+	it("refuses git behind a wrapper that can move it", () => {
+		for (const command of ["exec git -C /repo reset --hard", "sudo git -C /repo reset --hard", "env -C /repo git reset --hard", "env --chdir=/repo git status", "busybox git status", "flock /tmp/l -c 'git -C /repo status'"]) {
+			expect(guard(command), command).toContain("runs git through");
+		}
+		expect(guard("env git status")).toBeUndefined();
+		expect(guard("nohup git status")).toBeUndefined();
+		expect(guard("sudo ls")).toBeUndefined();
+	});
+
 	it("keeps every directory a cd that may not run leaves possible", () => {
 		for (const moveBack of ["false && cd WT", "if false; then cd WT; fi", "f() { cd WT; }", "true || cd WT", "case x in y) cd WT;; esac"]) {
 			expect(guard(`cd /repo; ${moveBack.replace("WT", WT)}; git reset --hard`)).toContain(`targets ${resolve("/repo")}`);
