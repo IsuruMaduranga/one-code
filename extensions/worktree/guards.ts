@@ -86,7 +86,8 @@ function stashReason(rest: Token[]): string | undefined {
 export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: WorktreeGuardContext): string | undefined {
 	const { segments, parseFailed } = parseCommand(command);
 	if (parseFailed || segments.length === 0) {
-		if (!/\bgit\b/.test(command)) return undefined;
+		// Quotes and backslashes removed first: `gi\t` and `g"it"` are git too.
+		if (!/\bgit\b/.test(command.replace(/[\\'"]/g, ""))) return undefined;
 		return isolated(
 			worktreePath,
 			"this command is too complex to verify that its git operations stay inside the worktree",
@@ -111,15 +112,35 @@ export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: W
 	 */
 	const scopeDirs = scopedTracker<string | undefined>(worktreePath);
 
+	const moves = (seg: (typeof segments)[number]) => ["cd", "pushd", "popd"].includes(resolvePayload(leadTokens(seg)).command);
+	// A git command as the parse sees it, spelled any way (`gi\t`, `env git`,
+	// `xargs git`, `parallel git`), or anywhere in the script a shell or `eval`
+	// runs (`bash -c '…'`), read as text with quotes and backslashes removed so
+	// a script too complex to parse still counts.
+	const runsGit = (seg: (typeof segments)[number]) => {
+		const { command: cmd, args } = resolvePayload(leadTokens(seg));
+		if (cmd === "git" || (cmd === "parallel" && args.some((arg) => arg.value === "git"))) return true;
+		if (!["sh", "bash", "zsh", "dash", "ksh", "eval", "source", "."].includes(cmd)) return false;
+		return args.some((arg) => /\bgit\b/.test(arg.value.replace(/[\\'"]/g, "")));
+	};
 	// A loop body runs more than once, so a `cd` in it moves every git command
 	// in the loop after the first pass; the segments show one pass only.
-	const movesInLoop = segments.some(
-		(seg) => seg.enclosing.some((construct) => LOOPS.has(construct)) && ["cd", "pushd", "popd"].includes(resolvePayload(leadTokens(seg)).command),
-	);
-	if (movesInLoop && /\bgit\b/.test(command)) {
+	const movesInLoop = segments.some((seg) => seg.enclosing.some((construct) => LOOPS.has(construct)) && moves(seg));
+	if (movesInLoop && segments.some(runsGit)) {
 		return isolated(
 			worktreePath,
 			"this command changes directory inside a loop, so the repository its git commands target cannot be verified",
+			`Break it into plain, separate git commands with literal paths and run them from ${worktreePath}.`,
+		);
+	}
+	// The last member of a pipeline runs in the current shell under `shopt -s
+	// lastpipe`, so its `cd` may move every later command.
+	// Only a git command after such a `cd` can be moved by it.
+	const pipeMove = segments.findIndex((seg) => seg.lastInPipeline && moves(seg));
+	if (pipeMove >= 0 && segments.slice(pipeMove + 1).some(runsGit)) {
+		return isolated(
+			worktreePath,
+			"this command changes directory in the last command of a pipeline, which can run in the current shell, so the repository its git commands target cannot be verified",
 			`Break it into plain, separate git commands with literal paths and run them from ${worktreePath}.`,
 		);
 	}

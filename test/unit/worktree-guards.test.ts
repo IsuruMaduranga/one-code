@@ -66,6 +66,23 @@ describe("worktree git-isolation guard", () => {
 		expect(guard("for d in a b; do git status; cd ../../..; done")).toContain("inside a loop");
 		expect(guard("for d in a b; do git status; builtin cd ../../..; done")).toContain("inside a loop");
 		expect(guard("for d in a b; do cd $d; done")).toBeUndefined();
+		expect(guard("for d in a b; do bash -c 'git status'; cd ../../..; done")).toContain("inside a loop");
+		expect(guard("for d in a b; do sh -c 'git status'; cd ../../..; done")).toContain("inside a loop");
+	});
+
+	it("refuses git after a cd in the last pipeline member, which lastpipe runs in this shell", () => {
+		expect(guard("shopt -s lastpipe; true | cd /repo; git status")).toContain("last command of a pipeline");
+		expect(guard("true | cd /repo")).toBeUndefined();
+		// Only git after the pipeline, spelled any way, and never a cd inside a subshell (PR #13 review).
+		expect(guard("shopt -s lastpipe; true | cd /repo; gi\\t status")).toContain("last command of a pipeline");
+		expect(guard("git status; true | cd /tmp")).toBeUndefined();
+		expect(guard("true | cd /tmp; echo git")).toBeUndefined();
+		expect(guard('true | echo "$(cd /repo)"; git status')).toBeUndefined();
+		expect(guard("true | (cd /repo); git status")).toBeUndefined();
+		expect(guard('echo "$(true | cd /tmp)"; git status')).toBeUndefined();
+		// git in a script a shell runs counts (PR #13 review).
+		expect(guard("shopt -s lastpipe; true | cd /repo; bash -c 'git status'")).toContain("last command of a pipeline");
+		expect(guard("shopt -s lastpipe; true | cd /repo; sh -c 'gi\\t status'")).toContain("last command of a pipeline");
 	});
 
 	it("treats a globbed cd target as an unknown directory (PR #12 review)", () => {
