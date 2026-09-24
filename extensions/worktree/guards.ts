@@ -123,6 +123,16 @@ export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: W
 			`Break it into plain, separate git commands with literal paths and run them from ${worktreePath}.`,
 		);
 	}
+	// The last member of a pipeline runs in the current shell under `shopt -s
+	// lastpipe`, so its `cd` may move every later command.
+	const movesInLastPipe = segments.some((seg) => seg.lastInPipeline && ["cd", "pushd", "popd"].includes(resolvePayload(leadTokens(seg)).command));
+	if (movesInLastPipe && /\bgit\b/.test(command)) {
+		return isolated(
+			worktreePath,
+			"this command changes directory in the last command of a pipeline, which can run in the current shell, so the repository its git commands target cannot be verified",
+			`Break it into plain, separate git commands with literal paths and run them from ${worktreePath}.`,
+		);
+	}
 
 	const checkSegment = (seg: (typeof segments)[number]): string | undefined => {
 		const tokens = leadTokens(seg);

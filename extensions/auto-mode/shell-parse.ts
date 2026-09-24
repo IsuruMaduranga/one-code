@@ -95,6 +95,13 @@ export interface Segment {
 	 * in `ParseResult.substitutions`, of the outermost substitution around it.
 	 */
 	substitution?: number;
+	/**
+	 * True for a command in the last member of a multi-command pipeline. Bash
+	 * runs that member in a subshell by default but in the current shell under
+	 * `shopt -s lastpipe`, so a `cd` there may or may not move the commands
+	 * after the pipeline; directory tracking treats it as unknown.
+	 */
+	lastInPipeline?: boolean;
 	/** True when a redirect target's value is only known when bash runs it (`> "$f"`, `< $(ls)`). */
 	unknownTarget?: boolean;
 	/**
@@ -288,6 +295,8 @@ interface Context {
 	scopes: number[];
 	/** The outermost substitution the walk is inside, as an index into `Walker.substitutions`. */
 	substitution?: number;
+	/** Inside the last member of a multi-command pipeline (`Segment.lastInPipeline`). */
+	lastInPipeline?: boolean;
 }
 
 class Walker {
@@ -314,6 +323,7 @@ class Walker {
 			enclosing: ENCLOSING.has(node.type) ? [...ctx.enclosing, node.type] : ctx.enclosing,
 			scopes: subshell ? [...ctx.scopes, this.nextScope++] : ctx.scopes,
 			substitution: ctx.substitution,
+			lastInPipeline: ctx.lastInPipeline,
 		};
 	}
 
@@ -341,7 +351,15 @@ class Walker {
 				return;
 			case "pipeline": {
 				const members = node.namedChildren.filter((child) => child.type !== "comment");
-				for (const child of members) this.statement(child, members.length > 1 ? this.enter(ctx, node, true) : ctx);
+				for (const [index, child] of members.entries()) {
+					if (members.length === 1) {
+						this.statement(child, ctx);
+						continue;
+					}
+					const member = this.enter(ctx, node, true);
+					if (index === members.length - 1) member.lastInPipeline = true;
+					this.statement(child, member);
+				}
 				return;
 			}
 			case "redirected_statement":
@@ -406,6 +424,7 @@ class Walker {
 	private simple(node: SyntaxNode | undefined, outerRedirects: SyntaxNode[], ctx: Context, at = node?.startIndex ?? 0): void {
 		const segment: Segment & { start: number } = { tokens: [], redirects: [], inputs: [], raw: "", enclosing: ctx.enclosing, scopes: ctx.scopes, start: at };
 		if (ctx.substitution !== undefined) segment.substitution = ctx.substitution;
+		if (ctx.lastInPipeline) segment.lastInPipeline = true;
 		if (node?.type === "variable_assignment" || node?.type === "variable_assignments") {
 			// A line that only assigns: `a=1`, `a=1 b=2`.
 			const assignments = node.type === "variable_assignment" ? [node] : node.namedChildren.filter((child) => child.type === "variable_assignment");

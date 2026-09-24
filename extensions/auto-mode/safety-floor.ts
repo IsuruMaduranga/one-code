@@ -269,6 +269,7 @@ export function shellNamesControlFile(
 			return (
 				payload.command !== "cd" ||
 				previous ||
+				!!segment.lastInPipeline ||
 				segment.enclosing.some((construct) => LOOPS.has(construct)) ||
 				!!target?.dynamic ||
 				!!target?.glob ||

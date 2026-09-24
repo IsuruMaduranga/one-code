@@ -90,6 +90,11 @@ describe("parseCommand on tree-sitter-bash", () => {
 		expect(new Set([cd.scopes[0], echo.scopes[0], wc.scopes[0]]).size).toBe(3);
 	});
 
+	it("marks the commands of a pipeline's last member", () => {
+		const { segments } = parseCommand("a | b | { c; d; }; e");
+		expect(segments.map((segment) => !!segment.lastInPipeline)).toEqual([false, false, true, true, false]);
+	});
+
 	it("detects only the background operator", () => {
 		expect(parseCommand("a & b").background).toBe(true);
 		expect(parseCommand("a && b 2>&1 &>log |& c").background).toBe(false);
