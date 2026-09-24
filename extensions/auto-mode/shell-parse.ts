@@ -52,8 +52,6 @@ function mergeDynamic(a: Dynamic | undefined, b: Dynamic | undefined): Dynamic |
 export interface Token {
 	/** The word with quotes removed, escapes applied and `$'…'` decoded; expansions keep their source text (`$HOME`). */
 	value: string;
-	/** True when the word used `$'…'` or `$"…"` quoting. */
-	hadExpansion: boolean;
 	/** True when an unquoted, unescaped `*`, `?` or `[` makes the token a glob bash expands. */
 	glob?: boolean;
 	/** Set when part of the value is only known when bash runs it. */
@@ -492,7 +490,7 @@ class Walker {
 				}
 				if (!child.isNamed) {
 					// The keyword of `export`/`unset`/`[[`: part of the command's words.
-					if (node.type !== "command" && /^[A-Za-z[\]]/.test(child.type)) segment.tokens.push({ value: child.text, hadExpansion: false });
+					if (node.type !== "command" && /^[A-Za-z[\]]/.test(child.type)) segment.tokens.push({ value: child.text });
 					continue;
 				}
 				if (child.type === "comment") continue;
@@ -515,10 +513,7 @@ class Walker {
 				}
 				const target = child.type === "command_name" ? (child.firstNamedChild ?? child) : child;
 				const word = this.word(target, ctx);
-				if (locale && target.type === "string") {
-					this.unknownQuoting ??= LOCALE_QUOTING;
-					word.hadExpansion = true;
-				}
+				if (locale && target.type === "string") this.unknownQuoting ??= LOCALE_QUOTING;
 				locale = false;
 				segment.tokens.push(word);
 			}
@@ -549,9 +544,9 @@ class Walker {
 		const value = node.childForFieldName("value");
 		const operator = node.children.find((child) => !child.isNamed && (child.type === "=" || child.type === "+="));
 		const name = node.childForFieldName("name")?.text ?? "";
-		if (!value) return { value: `${name}${operator?.type ?? "="}`, hadExpansion: false };
+		if (!value) return { value: `${name}${operator?.type ?? "="}` };
 		const word = this.word(value, ctx);
-		return { value: `${name}${operator?.type ?? "="}${word.value}`, hadExpansion: word.hadExpansion, glob: word.glob, dynamic: word.dynamic };
+		return { value: `${name}${operator?.type ?? "="}${word.value}`, glob: word.glob, dynamic: word.dynamic };
 	}
 
 	private redirect(node: SyntaxNode, segment: Segment, ctx: Context): void {
@@ -663,18 +658,18 @@ class Walker {
 	word(node: SyntaxNode, ctx: Context): Token {
 		// Punctuation the grammar keeps as its own node (a `$` before a closing
 		// quote) is literal text.
-		if (!node.isNamed) return { value: node.text, hadExpansion: false };
+		if (!node.isNamed) return { value: node.text };
 		switch (node.type) {
 			case "word":
 				return unquotedWord(node.text);
 			case "number":
-				return { value: node.text, hadExpansion: false };
+				return { value: node.text };
 			case "raw_string":
-				return { value: node.text.slice(1, -1), hadExpansion: false };
+				return { value: node.text.slice(1, -1) };
 			case "ansi_c_string": {
 				const decoded = decodeAnsiC(node.text, 2);
 				if (decoded.versionDependent) this.unknownQuoting ??= "uses a $'…' escape (\\u, \\U or \\c?) whose meaning depends on the bash version";
-				return { value: decoded.text, hadExpansion: true };
+				return { value: decoded.text };
 			}
 			case "string": {
 				let value = "";
@@ -690,12 +685,11 @@ class Walker {
 					// Quoted, `"<(x)"` is the literal text, never a pipe path.
 					dynamic = mergeDynamic(dynamic, piece.dynamic === "process-input" ? undefined : piece.dynamic);
 				}
-				return { value, hadExpansion: false, dynamic };
+				return { value, dynamic };
 			}
 			case "concatenation": {
 				let value = "";
 				let glob = false;
-				let hadExpansion = false;
 				let dynamic: Dynamic | undefined;
 				let locale = false;
 				const pieces = node.children;
@@ -709,13 +703,11 @@ class Walker {
 						// `x$"y"` is locale quoting; any other `$` is literal (`x$`).
 						if (child.type === "string") {
 							this.unknownQuoting ??= LOCALE_QUOTING;
-							hadExpansion = true;
 						} else value += "$";
 						locale = false;
 					}
 					value += piece.value;
 					glob ||= !!piece.glob;
-					hadExpansion ||= piece.hadExpansion;
 					// Joined to other text, a process substitution's pipe path is part of an unknown word.
 					dynamic = mergeDynamic(dynamic, piece.dynamic === "process-input" ? "substitution" : piece.dynamic);
 				}
@@ -724,7 +716,7 @@ class Walker {
 				if (pieces.some((child) => child.type === "word" && child.text === "{") && pieces.some((child) => child.type === "word" && child.text.includes(","))) {
 					this.markComplex("brace_expression");
 				}
-				return { value, hadExpansion, glob: glob || undefined, dynamic };
+				return { value, glob: glob || undefined, dynamic };
 			}
 			case "command_substitution":
 			case "process_substitution": {
@@ -732,7 +724,7 @@ class Walker {
 				const opener = node.text.startsWith("`") ? 1 : 2;
 				this.container(node, this.enterSubstitution(ctx, node.type, node.text.slice(opener, -1)));
 				const dynamic: Dynamic = node.type === "process_substitution" && node.text.startsWith("<(") ? "process-input" : "substitution";
-				return { value: node.text, hadExpansion: false, dynamic };
+				return { value: node.text, dynamic };
 			}
 			case "simple_expansion":
 			case "expansion":
@@ -740,7 +732,7 @@ class Walker {
 			case "special_variable_name":
 				// `${x:-$(cmd)}`: the default's command still runs.
 				for (const child of node.namedChildren) if (child.type !== "variable_name" && child.type !== "special_variable_name") this.word(child, ctx);
-				return { value: node.text, hadExpansion: false, dynamic: "variable" };
+				return { value: node.text, dynamic: "variable" };
 			default:
 				// Arithmetic, brace expansion and anything unrecognised: unknown value.
 				this.markComplex(node.type);
@@ -748,7 +740,7 @@ class Walker {
 					if (STATEMENTS.has(child.type)) this.statement(child, ctx);
 					else this.word(child, ctx);
 				}
-				return { value: node.text, hadExpansion: false, dynamic: "variable" };
+				return { value: node.text, dynamic: "variable" };
 		}
 	}
 }
@@ -773,7 +765,7 @@ function unquotedWord(text: string): Token {
 		if (ch === "*" || ch === "?" || ch === "[") glob = true;
 		value += ch;
 	}
-	return { value, hadExpansion: false, glob: glob || undefined };
+	return { value, glob: glob || undefined };
 }
 
 /** Double-quoted text: a backslash escapes only `$`, `` ` ``, `"`, `\` and a newline. */
