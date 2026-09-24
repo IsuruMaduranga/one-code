@@ -2,7 +2,7 @@
 /**
  * E2E: subagents run IN-PROCESS (Claude Code's Agent/SendMessage architecture),
  * not as nested `pi` processes — the claim from the 2026-08-17 in-process rewrite
- * (docs/decisions/subagents-workflows.md). Drives one persisted `--mode rpc`
+ * (working-docs/decisions/subagents-workflows.md). Drives one persisted `--mode rpc`
  * main session through every subagent path and asserts, out-of-band, that:
  *
  *   1. NO nested `pi` process ever spawns — the main pi's descendant tree is

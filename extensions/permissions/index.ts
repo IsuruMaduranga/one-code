@@ -202,7 +202,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	// git-recoverability gate, and the classifier tier floor — and with no
 	// classifier model reachable the classifier fails closed. A user or project
 	// `defaultMode` (or `--permission-mode`) still overrides this; `auto` from a
-	// project file is still refused. See docs/decisions/auto-mode.md.
+	// project file is still refused. See working-docs/decisions/auto-mode.md.
 	let mode: PermissionMode = "auto";
 	// Worktree-wrapped bash calls publish the model's original command here,
 	// keyed by pi's toolCallId (never read from `event.input` — model-writable).
@@ -460,7 +460,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	 * injection could manufacture its own authorisation. pi's `input` event fires
 	 * for real user input, which is exactly that boundary. Carried in FULL (not a
 	 * rolling window): in a long unattended run the authorizing setup message must
-	 * still clear a later action (decision 2 in docs/decisions/auto-mode.md).
+	 * still clear a later action (decision 2 in working-docs/decisions/auto-mode.md).
 	 */
 	const userMessages: string[] = [];
 	pi.on("input", (event) => {
@@ -538,7 +538,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			// everything else — every write, delete or unknown executable — goes to
 			// the classifier. No containment fast path either: the recoverability
 			// judge understands bash deletes, not `Remove-Item`, so PowerShell
-			// destruction is always classified (docs/decisions/windows.md).
+			// destruction is always classified (working-docs/decisions/windows.md).
 			if (powershellReadOnly(subject, { cwd, home, readableRoots }).readOnly) {
 				logDecision(ctx, { tool: toolName, subject, outcome: "allow", source: "pre-gate" });
 				return allow();
@@ -795,7 +795,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	// that terminals don't already own (ctrl+m *is* Enter's byte, alt needs
 	// option-as-meta configured on macOS) — except on Windows and WSL, where
 	// pi binds ctrl+q itself and the key is alt+m (lib/keys.ts) — see
-	// docs/decisions.md.
+	// working-docs/decisions.md.
 	pi.registerShortcut(CYCLE_KEY, {
 		description: "Cycle permission mode",
 		handler: (ctx) => {
@@ -1129,7 +1129,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 
 		if (result.decision === "deny") {
 			// A child's rule denial must NOT be recorded here: the child path never
-			// mutates the parent's live transcript (docs/decisions/subagents-workflows.md
+			// mutates the parent's live transcript (working-docs/decisions/subagents-workflows.md
 			// — child calls stay out of it). Pushing a `denied` entry would leak the
 			// child's action into the parent and flip `afterRuleDenial` on for every
 			// later MAIN classification. The child's classifier already learns the

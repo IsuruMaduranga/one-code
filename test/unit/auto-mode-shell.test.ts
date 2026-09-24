@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resolveForContainment } from "../../extensions/auto-mode/paths.ts";
-import { analyzeShellCommand, hasUnmodelledSyntax, parseCommand } from "../../extensions/auto-mode/shell-analysis.ts";
+import { analyzeShellCommand, decodeAnsiC, hasUnmodelledSyntax, parseCommand } from "../../extensions/auto-mode/shell-analysis.ts";
+import { bashMatchForms } from "../../extensions/permissions/matcher.ts";
 import { forwardSlashes as sh, toPosixPath } from "../../extensions/lib/paths.ts";
 
 let cwd: string;
@@ -513,5 +514,234 @@ describe.skipIf(process.platform !== "win32")("Git Bash path spellings on Window
 	it("follows a cd to a /c/… spelling of the project", () => {
 		const evidence = analyze(`cd ${toPosixPath(cwd)} && echo hi > out.txt`);
 		expect(evidence.writes[0]?.outsideCwd, JSON.stringify(evidence)).toBe(false);
+	});
+});
+
+describe("pre-gate review 2026-09-23: redirects, quoting, symlink-following options, path-named commands", () => {
+	let outside: string;
+	beforeEach(() => {
+		outside = join(cwd, "..", "outside");
+		mkdirSync(outside, { recursive: true });
+		writeFileSync(join(outside, "key"), "secret");
+		symlinkSync(join(outside, "key"), join(cwd, "notes"));
+		writeFileSync(join(cwd, "a.txt"), "x");
+	});
+
+	it("read-checks an input redirect whatever the command, and keeps it out of the words", () => {
+		for (const command of ["tr a a < notes", `tr a a < ${sh(join(outside, "key"))}`, "echo < notes", "< notes cat"]) {
+			expect(analyze(command).verdict, command).toBe("escalate");
+		}
+		// `jq < f .` once made `f` jq's program and read-checked `.` instead.
+		expect(analyze(`jq < ${sh(join(outside, "key"))} .`).outsideReads).toEqual([sh(join(outside, "key"))]);
+		expect(analyze("wc -l < a.txt").verdict).toBe("safe");
+		const [segment] = parseCommand("< in.txt sort").segments;
+		expect(segment.tokens.map((token) => token.value)).toEqual(["sort"]);
+		expect(segment.inputs.map((token) => token.value)).toEqual(["in.txt"]);
+	});
+
+	it("gives a deny rule the real command word behind a leading input redirect", () => {
+		expect(bashMatchForms("< /dev/null rm -rf x")).toContain("rm -rf x");
+	});
+
+	it("treats <> as a write that creates its target", () => {
+		expect(parseCommand("echo hi <> new.txt").segments[0].redirects).toEqual(["new.txt"]);
+		expect(analyze(`echo hi <> ${sh(join(outside, "new"))}`).verdict).toBe("escalate");
+	});
+
+	it('escalates $"…" locale quoting instead of reading it as a literal $', () => {
+		const evidence = analyze(`cat $"${sh(join(outside, "key"))}"`);
+		expect(evidence.verdict).toBe("escalate");
+		expect(evidence.notes.join(" ")).toContain("locale quoting");
+		// Inside double quotes `$"` is a literal dollar before the closing quote.
+		expect(analyze('grep "x$" a.txt').verdict).toBe("safe");
+	});
+
+	it("escalates shell special parameters and $[ ] arithmetic", () => {
+		for (const command of ["cat $@/etc/passwd", "cat $1/etc/passwd", "cat $!/etc/passwd", "cat $-/x", "cat $$", "echo $[1+1]"]) {
+			expect(hasUnmodelledSyntax(command), command).toBeDefined();
+		}
+		expect(hasUnmodelledSyntax("grep -c '^$' a.txt")).toBeUndefined();
+	});
+
+	it("escalates options that follow symlinks while recursing", () => {
+		for (const command of ["rg --follow x .", "rg -L x .", "grep -R x .", "grep --dereference-recursive x .", "find -L . -name k", "find . -follow", "tree -l", "du -L .", "ls -LR", "ls -R --dereference"]) {
+			expect(analyze(command).verdict, command).toBe("escalate");
+		}
+		for (const command of ["grep -r x .", "rg x .", "find -H . -name k", "ls -R", "ls -L", "du -H ."]) {
+			expect(analyze(command).verdict, command).toBe("safe");
+		}
+	});
+
+	it("escalates diff of a directory operand, which follows symlinks one level in (A1)", () => {
+		mkdirSync(join(cwd, "da"));
+		mkdirSync(join(cwd, "db"));
+		symlinkSync(join(outside, "key"), join(cwd, "da", "x"));
+		// A directory operand is dereferenced even without -r.
+		expect(analyze("diff da db").verdict).toBe("escalate");
+		expect(analyze("diff -r da db").verdict).toBe("escalate");
+		expect(analyze("diff --no-dereference da db").verdict).toBe("safe");
+		// Two in-project file operands have no entries to follow.
+		writeFileSync(join(cwd, "b.txt"), "y");
+		expect(analyze("diff a.txt b.txt").verdict).toBe("safe");
+	});
+
+	it("escalates a command word spelled with a directory, wrapper or payload", () => {
+		for (const command of ["./cat a.txt", "bin/ls", "/bin/cat a.txt", "command ./cat a.txt"]) {
+			expect(analyze(command).verdict, command).toBe("escalate");
+		}
+		// Was a contained delete the recoverability gate could clear, running ./timeout.
+		expect(analyze("./timeout 5 rm a.txt").containedNonNetwork).toBe(false);
+	});
+});
+
+describe("PREGATE-REVIEW-2026-09-23 second pass", () => {
+	let outside: string;
+	beforeEach(() => {
+		outside = join(cwd, "..", "outside");
+		mkdirSync(outside, { recursive: true });
+		writeFileSync(join(outside, "key"), "secret");
+		symlinkSync(outside, join(cwd, "outdir"));
+		writeFileSync(join(cwd, "a.txt"), "x");
+	});
+
+	it("P1: decodes $'…' octal escapes as bash does and fails closed on version-dependent ones", () => {
+		expect(decodeAnsiC("\\057a\\057b").text).toBe("/a/b");
+		expect(decodeAnsiC("a\\0b").text).toBe("a");
+		expect(decodeAnsiC("\\1234").text).toBe("S4");
+		expect(decodeAnsiC("\\q").text).toBe("\\q");
+		const octal = sh(join(outside, "key")).replace(/\//g, "\\057");
+		expect(analyze(`cat $'${octal}'`).verdict).toBe("escalate");
+		expect(analyze("cat $'\\u0061.txt'").notes.join(" ")).toContain("bash version");
+	});
+
+	it("P2: escalates checksum verification, which reads every file its list names", () => {
+		writeFileSync(join(cwd, "list"), "0  ../outside/key\n");
+		for (const command of ["shasum -a 256 -c list", "sha256sum --check list", "md5sum -c list"]) expect(analyze(command).verdict, command).toBe("escalate");
+		expect(analyze("shasum -a 256 a.txt").verdict).toBe("safe");
+	});
+
+	it("P3: read-checks every operand of rg --files", () => {
+		expect(analyze("rg --files outdir").verdict).toBe("escalate");
+		expect(analyze("rg --files .").verdict).toBe("safe");
+	});
+
+	it("P4: keeps TZ and locale variables inert only for plain names", () => {
+		expect(analyze(`TZ=:${sh(join(outside, "tz"))} date`).verdict).toBe("escalate");
+		expect(analyze("TZ=../../x date").verdict).toBe("escalate");
+		expect(analyze("LC_ALL=/tmp/loc ls").verdict).toBe("escalate");
+		for (const command of ["TZ=Asia/Tokyo date", "TZ=UTC date", "LANG=en_US.UTF-8 ls", "LANGUAGE=en:fr ls"]) expect(analyze(command).verdict, command).toBe("safe");
+	});
+
+	it("P5: read-checks date -r and --reference", () => {
+		expect(analyze("date -r ../outside/key").verdict).toBe("escalate");
+		expect(analyze("date -r a.txt").verdict).toBe("safe");
+	});
+
+	it("P6: gives deny rules the command behind !, time { }, file-first and privilege wrappers", () => {
+		for (const command of ["time { rm -f v; }", "! rm -f v", "script -q /dev/null rm -f v", "flock a.txt rm -f v", "stdbuf -o 1M rm -f v", "setsid -c rm -f v", "sudo -u root rm -f v"]) {
+			expect(bashMatchForms(command), command).toContain("rm -f v");
+		}
+		// flock and script write the file they are given, so they never reach the recoverability gate.
+		expect(analyze("flock lock rm -f a.txt").containedNonNetwork).toBe(false);
+		expect(analyze("script log rm -f a.txt").containedNonNetwork).toBe(false);
+		expect(analyze("timeout 5 rm -f a.txt").containedNonNetwork).toBe(true);
+	});
+
+	it("P7: gives deny rules the commands inside substitutions and eval", () => {
+		for (const command of ["cat <(rm -f v)", "cat $(rm -f v)", 'echo "$(rm -f v)"', "cat `rm -f v`", "eval rm -f v", "echo $(echo $(rm -f v))"]) {
+			expect(bashMatchForms(command).some((form) => form.startsWith("rm -f v")), command).toBe(true);
+		}
+		expect(bashMatchForms("echo '$(rm -f v)'").some((form) => form.startsWith("rm "))).toBe(false);
+	});
+
+	it("A2: parses $'…' with an escaped quote, so its substitution still reaches deny forms", () => {
+		expect(decodeAnsiC("it\\'s").text).toBe("it's");
+		expect(parseCommand("echo $'it\\'s'").parseFailed).toBe(false);
+		expect(bashMatchForms("echo $'it\\'s' $(rm -f v)").some((form) => form.startsWith("rm -f v"))).toBe(true);
+	});
+
+	it("A3: peels the value of options that change where a wrapper runs, for deny forms", () => {
+		// `time` at command position is the bash keyword, which rejects -o; GNU time is reached through `command time`.
+		for (const command of ["env -C /tmp rm -f v", "command time -o out rm -f v", "flock lock -c 'rm -f v'", "script -c 'rm -f v' log"]) {
+			expect(bashMatchForms(command).some((form) => form.startsWith("rm -f v")), command).toBe(true);
+		}
+		// The pre-gate's strict reading leaves that value in command position, so it escalates uncontained.
+		expect(analyze("env -C /tmp rm -f a.txt").containedNonNetwork).toBe(false);
+		// A bare word after nice is the command, not a duration — only timeout skips a duration.
+		expect(analyze("nice 5 rm -f a.txt").containedNonNetwork).toBe(false);
+	});
+
+	it("code-review: peels sudo/doas value options that take a directory (-R/--chroot, -a)", () => {
+		for (const command of ["sudo -R /tmp rm -rf f", "sudo --chroot=/tmp rm -rf f", "sudo -a PAM rm -rf f", "doas -a x rm -rf f"]) {
+			expect(bashMatchForms(command).some((form) => form.startsWith("rm ")), command).toBe(true);
+		}
+	});
+
+	it("code-review: escalates diff on a glob operand that could name a directory", () => {
+		mkdirSync(join(cwd, "da"));
+		mkdirSync(join(cwd, "db"));
+		symlinkSync(join(outside, "key"), join(cwd, "da", "x"));
+		expect(analyze("diff d* db").verdict).toBe("escalate");
+	});
+
+	it("code-review: escalates braced shell special parameters", () => {
+		for (const command of ["cat ${1}/etc/passwd", "cat ${@}", "cat ${!}", "cat ${#}"]) {
+			expect(hasUnmodelledSyntax(command), command).toBeDefined();
+		}
+		// A braced named variable is the ordinary variable-reference case, still escalated.
+		expect(hasUnmodelledSyntax("cat ${HOME}/x")).toBeDefined();
+	});
+});
+
+describe("pre-gate review 2026-09-24: attached wrapper values, stdin credentials, TZ paths", () => {
+	it("does not peel a wrapper option whose attached value moves the payload", () => {
+		writeFileSync(join(cwd, "a.txt"), "x");
+		for (const command of [
+			"env --chdir=/tmp rm -f a.txt",
+			"env -C/tmp rm -f a.txt",
+			"env -iC/tmp rm -f a.txt",
+			"time --output=/tmp/t rm -f a.txt",
+			"time -o/tmp/t rm -f a.txt",
+			"script --log-timing=/tmp/t rm -f a.txt",
+		]) {
+			const evidence = analyze(command);
+			expect(evidence.verdict, command).toBe("escalate");
+			expect(evidence.containedNonNetwork, command).toBe(false);
+		}
+		// A harmless attached value still peels.
+		expect(analyze("nice -n5 rm -f a.txt").containedNonNetwork).toBe(true);
+		expect(analyze("timeout --signal=KILL 5 rm -f a.txt").containedNonNetwork).toBe(true);
+	});
+
+	it("gives deny rules the script an attached option carries", () => {
+		for (const command of ["env --split-string='rm -f v'", "env -S'rm -f v'", "script --command='rm -f v' log", "flock --command='rm -f v' lock"]) {
+			expect(bashMatchForms(command), command).toContain("rm -f v");
+		}
+	});
+
+	it("escalates a credential file read on stdin", () => {
+		writeFileSync(join(cwd, ".env"), "KEY=1");
+		for (const command of ["cat < .env", "< .env cat", "tr a b < .env"]) {
+			const evidence = analyze(command);
+			expect(evidence.verdict, command).toBe("escalate");
+			expect(evidence.sensitivePaths, command).toContain(".env");
+		}
+	});
+
+	it("gives deny rules a substitution inside double quotes, whatever quote characters surround it", () => {
+		for (const command of [`echo "don't $(rm -f v)"`, `echo "$'$(rm -f v)'"`, "echo \"it's `rm -f v`\""]) {
+			expect(bashMatchForms(command).some((form) => form.startsWith("rm -f v")), command).toBe(true);
+		}
+		// An escaped `)` or backtick does not end the substitution.
+		expect(bashMatchForms('echo "$(printf \\); rm -f v)"')).toContain("rm -f v");
+		expect(bashMatchForms("echo `echo \\`id\\`; rm -f v`")).toContain("rm -f v");
+		// Inside double quotes `<(` is literal text, and single quotes still hide a substitution.
+		expect(bashMatchForms('echo "<(rm -f v)"').some((form) => form.startsWith("rm "))).toBe(false);
+		expect(bashMatchForms("echo '\"$(rm -f v)\"'").some((form) => form.startsWith("rm "))).toBe(false);
+	});
+
+	it("escalates TZ set to an absolute path", () => {
+		expect(analyze("TZ=/etc/localtime date").verdict).toBe("escalate");
+		expect(analyze("TZ= date").verdict).toBe("safe");
 	});
 });

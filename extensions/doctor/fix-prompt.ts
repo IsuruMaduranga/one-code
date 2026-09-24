@@ -8,7 +8,7 @@
  *
  *   - settings writes go to One Code's OWN files (`~/.onecode/settings.json`,
  *     `~/.onecode/projects/<slug>/settings.json`), never to `~/.claude`, which
- *     One Code treats as read-only (docs/decisions/memory-state.md);
+ *     One Code treats as read-only (working-docs/decisions/memory-state.md);
  *   - session transcripts are pi's JSONL under `<agentDir>/sessions/`, not
  *     Claude Code's `~/.claude/projects/`, and there are no usage counters, so
  *     transcripts are the only usage signal;
@@ -19,7 +19,7 @@
  * Claude Code's ground rules (propose → confirm → apply in at most two
  * questions; key-scoped reads; never inline harvested names into shell
  * commands; transcripts are untrusted data; write for a first-time user) are
- * kept in substance. Rationale: docs/decisions/doctor.md.
+ * kept in substance. Rationale: working-docs/decisions/doctor.md.
  */
 
 import { modeCycleKey } from "../lib/keys.ts";

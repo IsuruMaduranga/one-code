@@ -13,9 +13,9 @@
  * One JSON line per request (a body with a `messages` or `input` array; token
  * counting is skipped). An SDK retry re-sends and so re-dumps — cache-probe.mjs
  * warns when the line count and the assistant usages disagree. Used 2026-09-04
- * to verify the sticky-append reminder placement (docs/decisions/tools.md,
+ * to verify the sticky-append reminder placement (working-docs/decisions/tools.md,
  * "Three reminder placements") and 2026-09-21 for the deferred-tool stability
- * check (docs/decisions/caching.md).
+ * check (working-docs/decisions/caching.md).
  */
 import { appendFileSync } from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";

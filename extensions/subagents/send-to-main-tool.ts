@@ -27,7 +27,7 @@ export function sendToMainTool(onMessage: (message: string, summary?: string) =>
 		}) as never,
 		async execute(_toolCallId: string, params: unknown) {
 			const p = (params ?? {}) as { to?: unknown; message?: unknown; summary?: unknown };
-			// Fail loud (docs/decisions/tools.md): a wrong recipient or a missing
+			// Fail loud (working-docs/decisions/tools.md): a wrong recipient or a missing
 			// message returns isError with the fix named, never a silent success.
 			if (p.to !== undefined && p.to !== "main") {
 				return {

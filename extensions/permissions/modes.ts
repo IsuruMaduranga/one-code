@@ -92,7 +92,7 @@ export function isRealModel(id: string | undefined): id is string {
 /**
  * The key that cycles permission modes. Claude Code cycles on shift+tab and
  * says so in this footer; pi reserves shift+tab for the effort dial, so One Code
- * cycles on ctrl+q (see docs/decisions/modes.md) — alt+m on Windows and WSL,
+ * cycles on ctrl+q (see working-docs/decisions/modes.md) — alt+m on Windows and WSL,
  * where pi owns ctrl+q (lib/keys.ts) — and the hint names that key.
  */
 export const CYCLE_KEY = modeCycleKey();

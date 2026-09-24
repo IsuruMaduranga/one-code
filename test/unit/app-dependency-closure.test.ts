@@ -133,7 +133,7 @@ describe("bundled app dependency closure over pi's library entry", () => {
 	 * reminder has to be executable.
 	 */
 	/**
-	 * Releases are lockstep (docs/decisions/distribution.md): both packages ship
+	 * Releases are lockstep (working-docs/decisions/distribution.md): both packages ship
 	 * the same version every release, and the app pins `one-code-extension` at
 	 * exactly its own version. The exact pin means the extension must publish
 	 * FIRST — publishing the app first gives every installer "No matching version

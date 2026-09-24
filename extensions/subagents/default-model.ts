@@ -18,7 +18,7 @@
  *   have left a stale value the current session cannot reach. Claude Code's own
  *   `CLAUDE_CODE_SUBAGENT_MODEL` env block is still honoured from `~/.claude`
  *   (that key *is* Claude Code's). See "Own state, borrowed config" in
- *   docs/decisions/memory-state.md.
+ *   working-docs/decisions/memory-state.md.
  *
  * The env var additionally applies only to Claude-family sessions (see
  * `applicableSubagentDefault`): it is Claude Code's knob, and its typical

@@ -5,7 +5,7 @@
  * user messages and tool-call *inputs only*, with tool RESULTS stripped so
  * hostile content the agent read cannot reach the classifier as if it were
  * context. Tool names are CC's PascalCase (`Bash`, `Edit`, …). We mirror that
- * shape exactly (see docs/decisions/auto-mode.md, P5).
+ * shape exactly (see working-docs/decisions/auto-mode.md, P5).
  *
  * The last entry is always the action under review — permissions/index.ts appends
  * the call being judged before rendering. Results are never appended here; only

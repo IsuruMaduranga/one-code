@@ -3,7 +3,7 @@
  * banner never hardcodes (and drifts from) the released version.
  *
  * The bundled app sets CC_VERSION to the app package version, which is kept in
- * lockstep with this package (docs/decisions/distribution.md). When the
+ * lockstep with this package (working-docs/decisions/distribution.md). When the
  * extension is loaded directly via plain `pi` there is no CC_VERSION, so this
  * reads the extension's own package.json instead of falling back to a stale
  * literal.

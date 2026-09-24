@@ -20,7 +20,7 @@
  * with no tools declared). The result is a display-only entry (appendEntry,
  * not in LLM context). Best-effort throughout: any failure just shows nothing.
  *
- * Deviations from CC, logged in docs/decisions: the session-memory block is
+ * Deviations from CC, logged in working-docs/decisions: the session-memory block is
  * omitted (decoupling). A failed recap does not retry until the next turn (one
  * attempt per turn, success or not). CC_RECAP=0 opts out; CC_RECAP_IDLE_MS
  * overrides the 5-minute delay.
@@ -112,7 +112,7 @@ export default function recapExtension(pi: ExtensionAPI) {
 		const recent = recentForRecap(withoutSystemMessages(messages));
 		// The cheap reader may be a text-only model, and the recap does not need
 		// images — strip them so a pasted image or one a Read returned cannot break
-		// the call (docs/decisions/model-policy.md).
+		// the call (working-docs/decisions/model-policy.md).
 		const recapMessages = [...stripImageBlocks(convertToLlm(recent)), { role: "user" as const, content: RECAP_PROMPT, timestamp: Date.now() }];
 		// Thinking off unless the model cannot disable it; withReasoningFallback
 		// sends a level up front for catalog-marked models and retries on the 400

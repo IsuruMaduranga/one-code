@@ -8,7 +8,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
  * `/doctor` is the checkup, as in Claude Code, with the harness's measured
  * report attached to the prompt; `/doctor report` shows that report alone, and
  * bare `/doctor` falls back to it when no model can run — the first-session
- * state ("no provider is ready") this command exists for. docs/decisions/doctor.md.
+ * state ("no provider is ready") this command exists for. working-docs/decisions/doctor.md.
  *
  *   /doctor                  the checkup: the report goes to the model inside Claude Code's
  *                            doctor prompt, adapted (falls back to the report when no model can run)

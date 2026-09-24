@@ -7,7 +7,7 @@
  * process exits 0 mid-await, silently ending the run right after
  * tool_execution_start. Wrap each outermost LS await in this; keeping the ref
  * at the call sites (not inside the client) preserves drain-on-idle for
- * everything not actively awaited. docs/one-shot-lsp-event-loop-drain.md.
+ * everything not actively awaited. working-docs/one-shot-lsp-event-loop-drain.md.
  */
 export async function withKeepAlive<T>(work: () => Promise<T>): Promise<T> {
 	const keepAlive = setInterval(() => {}, 1_000);

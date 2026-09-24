@@ -13,7 +13,7 @@
  *
  * `extensions/system-prompt` picks the prompt text from the tier;
  * `extensions/search-tools` activates grep/find/ls only for `tiny`. Rationale +
- * rejected alternatives: `docs/decisions/model-tiers.md`.
+ * rejected alternatives: `working-docs/decisions/model-tiers.md`.
  *
  * The classification obeys the repo convention against id-substring matching as
  * the LEAD signal (see `auto-mode/model-select.ts`): frontier is a version-gated
@@ -25,7 +25,7 @@
  * hint and the absolute price floor, where unpriced/opaque means maximum
  * scaffolding. The Artificial Analysis index never sets a register; it feeds the
  * optional measured SELECTION floor (`capability-index.ts`) — see
- * `classifyModelTier` and `docs/decisions/model-tiers.md`.
+ * `classifyModelTier` and `working-docs/decisions/model-tiers.md`.
  */
 
 import type { Api, Model } from "@earendil-works/pi-ai";
@@ -73,7 +73,7 @@ export function tierOverride(env: NodeJS.ProcessEnv = process.env): PromptTier |
  * Anthropic first-party frontier gate: Opus/Fable ≥ 4.7 ONLY (Sonnet is
  * deliberately excluded — CC gives only Opus the terse register, and the
  * intelligence index would wrongly promote flash models to frontier at max
- * effort; see `docs/decisions/model-tiers.md`). Adapted from pi-ai's
+ * effort; see `working-docs/decisions/model-tiers.md`). Adapted from pi-ai's
  * `defaultSupportsToolReferences` — never Haiku, and the `length < 8` guard stops
  * a dated suffix (`claude-opus-4-8-20251101`) being read as the minor version.
  * Version parse, not price: `claude-opus-4-1` ($15/M) costs more than
@@ -324,7 +324,7 @@ export function resolveModelTier(model: Model<Api> | undefined, env: NodeJS.Proc
  *   - never `tiny`: a sub-Haiku model is a weak security boundary and a weak
  *     coding worker, so automatic selection stops at `cheap` and steps UP
  *     (cheap → workhorse → frontier), never down. This is the capability floor
- *     `docs/decisions/auto-mode.md` recorded as still-missing;
+ *     `working-docs/decisions/auto-mode.md` recorded as still-missing;
  *   - current generation only, and able to call tools: with models.dev facts
  *     known (`model-facts.ts`), a row more than a year behind its vendor family's
  *     newest release is excluded whatever its price or name, as is a row marked
@@ -346,7 +346,7 @@ export function resolveModelTier(model: Model<Api> | undefined, env: NodeJS.Proc
  * model is image-capable, so a delegated worker can still read an image or PDF
  * the session may feed it. The classifier and the readers leave it false: the
  * classifier renders the transcript to text and the readers strip images, so
- * neither ever sends one. See `docs/decisions/model-policy.md`.
+ * neither ever sends one. See `working-docs/decisions/model-policy.md`.
  */
 export function economicalContainedCandidates(
 	available: Model<Api>[],
@@ -426,7 +426,7 @@ export function cheaperContainedCandidates(
  * classifier and the subagent default since 2026-09-11: a delegated worker
  * writes code and calls tools for many turns, and a weak one spends the saving
  * on retries — so both roles are held to one floor and, on most providers, one
- * model (docs/decisions/model-policy.md).
+ * model (working-docs/decisions/model-policy.md).
  */
 export function automaticTierFloor(sessionModel: Model<Api>): PromptTier {
 	const tier = intrinsicTier(sessionModel);

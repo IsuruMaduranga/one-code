@@ -34,7 +34,7 @@ export function powershellQuote(path: string): string {
  * the wrapper (which starts with `cd` and matches no Bash rule), while the
  * classifier and safety floor keep reading the wrapped `input.command`, whose
  * `cd` makes containment resolve inside the worktree —
- * docs/decisions/code-review-remediation.md ("Worktree vs. permission rules").
+ * working-docs/decisions/code-review-remediation.md ("Worktree vs. permission rules").
  * The original is deliberately NOT stored in `input`: a key there is
  * model-writable (lib/original-command.ts).
  */

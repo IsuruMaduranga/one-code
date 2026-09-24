@@ -191,7 +191,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 			// call that passed `args` but no `skill` is an invocation that forgot to
 			// name the skill — fail loudly rather than silently returning the
 			// catalog, which a weak model reads as a non-sequitur (same archetype as
-			// the subagent tool; see docs/decisions/subagents-workflows.md).
+			// the subagent tool; see working-docs/decisions/subagents-workflows.md).
 			const all = index();
 			if (params.list || (!params.skill && params.args == null)) {
 				return {

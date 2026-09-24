@@ -16,7 +16,7 @@
  * message with EMPTY content, `stopReason: "error"` and `errorMessage: "This
  * operation was aborted"` — the fetch layer's AbortError, not pi's "aborted"
  * label (measured over RPC on pi 0.85.0, STEERING-REVIEW-2026-09-05 L1;
- * upstream ask docs/upstream_prs.md #18). The run's abort signal is still the
+ * upstream ask working-docs/upstream_prs.md #18). The run's abort signal is still the
  * ground truth, and `ctx.signal` at `agent_end` is that signal (pi's
  * `activeRun` outlives the event), so callers pass `ctx.signal?.aborted` and
  * an `error` stop on an aborted run reads as "aborted": the user stopped the

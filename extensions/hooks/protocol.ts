@@ -2,7 +2,7 @@
  * Claude Code hook protocol (pure): the stdin payload shape, the stdout JSON
  * envelope, and the mapping from a finished hook run to what One Code should do
  * about it. Envelope semantics follow Claude Code's hooks reference; the
- * fail-closed choices are One Code's own (see docs/decisions.md).
+ * fail-closed choices are One Code's own (see working-docs/decisions.md).
  */
 
 import { isAppendedReminderText } from "../lib/reminders.ts";

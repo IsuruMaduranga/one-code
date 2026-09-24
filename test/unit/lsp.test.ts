@@ -234,7 +234,7 @@ describe("withKeepAlive", () => {
 	// empty, so these run a bare node child. The awaited promise is backed by
 	// nothing but an unref'd timer — the shape of every LspClient await
 	// (unref'd child process, pipes, timeout timers).
-	// docs/one-shot-lsp-event-loop-drain.md.
+	// working-docs/one-shot-lsp-event-loop-drain.md.
 	const keepAliveUrl = new URL("../../extensions/lsp/keep-alive.ts", import.meta.url).href;
 	const unrefdWork = `
 		const work = () => new Promise((resolve) => {

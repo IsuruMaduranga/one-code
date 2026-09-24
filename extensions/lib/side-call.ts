@@ -67,7 +67,7 @@ export const IMAGE_OMITTED_TEXT = "[image omitted]";
  * placeholder text block, so it stays a valid turn on strict providers. Purely
  * structural (any `{ role, content }` message) to stay free of runtime pi
  * imports; assistant messages carry no images and pass through untouched.
- * See `docs/decisions/model-policy.md`.
+ * See `working-docs/decisions/model-policy.md`.
  */
 export function stripImageBlocks<M extends { role: string; content: unknown }>(messages: readonly M[]): M[] {
 	return messages.map((message) => {

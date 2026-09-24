@@ -6,7 +6,7 @@
  *
  * Presets never leave the current provider family: every automatic model choice
  * in One Code is contained to the session's provider (a subagent inherits the
- * transcript, the classifier reads the prompts — docs/decisions/model-policy.md),
+ * transcript, the classifier reads the prompts — working-docs/decisions/model-policy.md),
  * and a preset is a bundle of those same choices. A user who wants another
  * provider switches with /model first and reruns /doctor presets there.
  *

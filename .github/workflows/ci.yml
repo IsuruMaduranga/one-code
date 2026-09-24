@@ -3,7 +3,7 @@
 # `windows-latest` ships Git for Windows (Git Bash) and PowerShell 7, and
 # pwsh is preinstalled on every runner, so the live PowerShell operations and
 # hook tests exercise a real shell everywhere. Live model runs need a provider
-# key and stay out of CI (docs/features/windows/handoff.md, "Verification").
+# key and stay out of CI (working-docs/features/windows/handoff.md, "Verification").
 name: CI
 
 on:

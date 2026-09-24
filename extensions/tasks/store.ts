@@ -217,7 +217,7 @@ export function formatTaskWidget(store: TaskStore, maxTasks = 12, style: WidgetS
  * when the user pivots mid-session and the plan no longer matches the work.
  *
  * Byte-for-byte Claude Code's text (messages.ts) except the tool names, which
- * stay our snake_case (docs/decisions/tools.md). We do NOT branch on list state
+ * stay our snake_case (working-docs/decisions/tools.md). We do NOT branch on list state
  * the way CC's earlier prompt did — one reminder, always the same, and the
  * appended list is what the model reasons over.
  */

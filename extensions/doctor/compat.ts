@@ -8,7 +8,7 @@
  * borrows) and the keys it leaves alone. "Leaves alone" is stated per file
  * because the answer differs by scope on purpose — a repository's own
  * `.claude/settings.json` may not grant itself `auto` mode or configure the
- * auto-mode classifier (docs/decisions/modes.md, auto-mode.md) — and a user
+ * auto-mode classifier (working-docs/decisions/modes.md, auto-mode.md) — and a user
  * reading "works unchanged" must see exactly where it does not.
  *
  * Findings are the things silent elsewhere: a settings file that fails to

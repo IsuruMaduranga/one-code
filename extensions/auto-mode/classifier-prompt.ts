@@ -8,7 +8,7 @@
  * extras, appended exactly where Claude Code's own `/auto-mode-setup` config
  * lands), and Session Context's username. Everything else is held stable so
  * our emitted payload differs from Claude Code's only in those seams, the
- * transcript, and our own stage-final blocks (docs/decisions/auto-mode.md).
+ * transcript, and our own stage-final blocks (working-docs/decisions/auto-mode.md).
  */
 
 /** Ruleset text before the Environment slot lines (CC `system[1]` head). */

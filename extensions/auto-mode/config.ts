@@ -22,7 +22,7 @@
  * `~/.claude`: One Code used to write them there, and a stale value (a model the
  * session cannot reach) must not keep biting. Every write goes to
  * `~/.onecode/settings.json`; One Code never mutates Claude Code's files. See
- * "Own state, borrowed config" in docs/decisions/memory-state.md.
+ * "Own state, borrowed config" in working-docs/decisions/memory-state.md.
  *
  * ## The customization surface (CC 2.1.233's own)
  *
@@ -42,7 +42,7 @@
  *
  * (The rule lists were briefly retired between the ruleset adoption and CC
  * 2.1.233 shipping `/auto-mode-setup`, which writes this exact schema — see
- * docs/decisions/auto-mode.md.)
+ * working-docs/decisions/auto-mode.md.)
  */
 
 import { existsSync, readFileSync } from "node:fs";

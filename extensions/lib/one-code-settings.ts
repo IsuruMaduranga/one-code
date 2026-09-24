@@ -1,6 +1,6 @@
 /**
  * One Code's own settings files — the writable half of "own state, borrowed
- * config" (docs/decisions/memory-state.md). `~/.claude` is Claude Code's
+ * config" (working-docs/decisions/memory-state.md). `~/.claude` is Claude Code's
  * directory and One Code only ever *reads* it; anything One Code persists that
  * looks like a settings key (its own `subagentModel` / `autoMode.classifierModel`,
  * the allow rules `/allow` records) lands here instead, so One Code never mutates

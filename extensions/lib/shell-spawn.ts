@@ -2,7 +2,7 @@
  * Which shell One Code spawns, and how — the one place that knows about Git
  * Bash on Windows and about PowerShell.
  *
- * Claude Code's shape (findings §22, docs/decisions/windows.md): Git for
+ * Claude Code's shape (findings §22, working-docs/decisions/windows.md): Git for
  * Windows is optional. When a bash is available it drives the `bash` tool,
  * hooks and background shells; `CLAUDE_CODE_GIT_BASH_PATH` (process env, or
  * Claude Code's user-settings `env` block) names a custom bash and is ignored

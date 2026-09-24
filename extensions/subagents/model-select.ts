@@ -135,7 +135,7 @@ export interface ResolveInput {
 	 * upgraded with a notice (a standing setting or agent-file model). The
 	 * `/subagent` set command leaves this false — a saved default may be meant for
 	 * another (text) session, and is gated at spawn instead. See
-	 * `docs/decisions/model-policy.md`.
+	 * `working-docs/decisions/model-policy.md`.
 	 */
 	requireImageInput?: boolean;
 }

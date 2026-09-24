@@ -11,7 +11,7 @@
  * warning, and mode cycling had no key at all on Windows (seen on the Vultr
  * VM, 2026-09-19). No ctrl+letter is free on Windows once pi's app and editor
  * bindings are counted, and pi itself reaches for alt there, so mode cycling
- * is alt+m on Windows and WSL — docs/decisions/windows.md.
+ * is alt+m on Windows and WSL — working-docs/decisions/windows.md.
  */
 
 /** pi's rule for its Windows key table: native Windows, or a WSL distro. */

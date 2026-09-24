@@ -28,7 +28,7 @@
  * containment by shape: a read of an absolute, `~`, drive-lettered, UNC or
  * `..` path is not auto-cleared (UNC paths always ask in CC). Anything the
  * check cannot vouch for is simply "not read-only", which costs a classifier
- * call or a prompt, never a bypass — docs/decisions/windows.md.
+ * call or a prompt, never a bypass — working-docs/decisions/windows.md.
  */
 
 import { isSensitivePath } from "../auto-mode/sensitive.ts";
@@ -348,7 +348,7 @@ export function powershellMatchForms(command: string, depth = 0): string[] {
 /**
  * The read-only cmdlet sets in the 2.1.276 binary (findings §22), plus the
  * neutral output pair, plus — One Code's addition (2026-09-19, user decision,
- * docs/decisions/windows.md) — the pure in-process pipeline cmdlets a
+ * working-docs/decisions/windows.md) — the pure in-process pipeline cmdlets a
  * read-only line is piped through: they shape objects already in memory and
  * touch neither disk nor network. `Where-Object`/`ForEach-Object` are NOT
  * here: they take script blocks, which the check refuses anyway. Claude Code's
@@ -535,7 +535,7 @@ export function powershellReadOnly(command: string, opts?: PowerShellReadOnlyOpt
 			// path is read-only only when it resolves inside the working directory or
 			// a harness session dir (2026-09-19: /doctor's transcript scan on Windows
 			// spelled `<agentDir>\sessions\…` and was classified —
-			// docs/decisions/auto-mode.md); a comma list is judged part by part.
+			// working-docs/decisions/auto-mode.md); a comma list is judged part by part.
 			if (pathOutsideRoots(value, opts, roots)) return { readOnly: false, reason: "a path outside the working directory" };
 		}
 	}

@@ -256,7 +256,7 @@ export function shellNamesControlFile(
 	let dir = cwd;
 	for (const segment of segments) {
 		const payload = resolvePayload(segment.tokens);
-		for (const word of [...segment.tokens.map((token) => token.value), ...segment.redirects]) {
+		for (const word of [...segment.tokens.map((token) => token.value), ...segment.redirects, ...segment.inputs.map((token) => token.value)]) {
 			if (depth < 3 && /\s/.test(word)) {
 				const nested = shellNamesControlFile(word, dir, home, oneCodeProjectSettings, depth + 1, forms);
 				if (nested) return nested;

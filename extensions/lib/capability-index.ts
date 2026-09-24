@@ -17,7 +17,7 @@
  * scale it can mean what it says: a candidate whose coding index reaches the
  * lower of the session model's and Sonnet 5's, both read from the SAME
  * snapshot so the index rescaling every version cancels out.
- * docs/features/tiering/plan.md (Phase 2), docs/decisions/model-tiers.md.
+ * working-docs/features/tiering/plan.md (Phase 2), working-docs/decisions/model-tiers.md.
  *
  * ## Data handling (the API's terms, findings §9)
  *
@@ -73,7 +73,7 @@ export const REFERENCE_SLUG = "claude-sonnet-5";
  * coding index sits below `REGISTER_CHEAP_RATIO` × reference gets at most the
  * cheap register, below `REGISTER_TINY_RATIO` × reference at most tiny. A score
  * only ever ADDS scaffolding — it never lifts a lean-named model to a leaner
- * register (docs/decisions/model-tiers.md, 2026-09-11). On the 2026-09 snapshot
+ * register (working-docs/decisions/model-tiers.md, 2026-09-11). On the 2026-09 snapshot
  * (reference 71.5) the lines are 60.8 and 42.9: gpt-5.1 (49.4), glm-4.7 (45.3)
  * and kimi-k2.5 (46.8) drop to cheap; gpt-5 (37.8), grok-4.3 (42.2) and
  * mistral-medium-3.1 (20.5) to tiny; gpt-5.4-mini (56.1) stays cheap.
@@ -85,7 +85,7 @@ export const REGISTER_TINY_RATIO = 0.6;
  * How far below the floor the low-stakes reader (web_fetch answers, recaps) may
  * score. The classifier and delegated workers allow nothing: a subagent writes
  * code and calls tools for many turns, and since 2026-09-11 it is held to the
- * same floor as the permission screener (docs/decisions/model-policy.md).
+ * same floor as the permission screener (working-docs/decisions/model-policy.md).
  */
 export const READER_TOLERANCE = 0.9;
 

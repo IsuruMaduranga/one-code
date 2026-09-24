@@ -14,7 +14,7 @@
  *
  * One deliberate divergence: file headers are cwd-relative paths, not
  * basenames — two files with the same basename would otherwise be
- * indistinguishable in one block (docs/decisions/lsp.md).
+ * indistinguishable in one block (working-docs/decisions/lsp.md).
  */
 
 import { relative } from "node:path";

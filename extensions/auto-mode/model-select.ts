@@ -81,7 +81,7 @@ export interface ClassifierNotice {
  * (`capableContainedCandidates`): the cheapest same-provider model (cheap →
  * workhorse → frontier, never `tiny`) at or above `automaticTierFloor` — a
  * session on a workhorse-or-better model is screened by a workhorse-or-better
- * model, Claude Code's `min(main, sonnet)`. `docs/decisions/auto-mode.md`
+ * model, Claude Code's `min(main, sonnet)`. `working-docs/decisions/auto-mode.md`
  * measured the same `rm -rf` grading stage-1 62 on Sonnet and ~22 on Haiku —
  * "a weak classifier is a weak boundary" — yet until 2026-09-05 the selector
  * picked Haiku even when the session itself was Sonnet, so the gate's threshold

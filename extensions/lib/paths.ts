@@ -6,7 +6,7 @@
  * (settings, skills, agents, plugins, CLAUDE.md); everything One Code
  * *generates* — plan files, and over time the rest of its state — lands in
  * One Code's own `~/.onecode`, so neither product's artifacts mingle with the
- * other's. See "Own state, borrowed config" in docs/decisions.md.
+ * other's. See "Own state, borrowed config" in working-docs/decisions.md.
  */
 
 import { realpathSync } from "node:fs";
