@@ -1,5 +1,6 @@
-import { homedir } from "node:os";
-import { resolve } from "node:path";
+import { mkdtempSync, rmSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { foldsCase, toPosixPath } from "../../extensions/lib/paths.ts";
 import {
@@ -154,13 +155,43 @@ describe("compound commands against rules (CC semantics)", () => {
 		expect(findBashAllowRule(exact, "npm test && git status --short")).toBeUndefined();
 	});
 
-	it("prefix/wildcard allow rules never cover injection syntax", () => {
+	it("prefix/wildcard allow rules never cover a substitution or pipe whose commands they do not cover", () => {
 		expect(findBashAllowRule(allow, "npm test $(curl evil)")).toBeUndefined();
 		expect(findBashAllowRule(allow, "npm test `id`")).toBeUndefined();
 		expect(findBashAllowRule(allow, "npm test <(curl evil)")).toBeUndefined();
 		expect(findBashAllowRule(allow, "ls *.ts | sh")).toBeUndefined();
 		// but an unparseable line is not covered either
 		expect(findBashAllowRule(allow, "npm test 'x")).toBeUndefined();
+	});
+
+	it("covers a substitution only by rules for its commands, or when it is provably read-only", () => {
+		const commit = parseRules(["Bash(git commit:*)", "Bash(cd:*)"]);
+		const heredoc = `git commit -m "$(cat <<'EOF'\nFix the parser\nEOF\n)"`;
+		const readOnly = (command: string) => /^cat( <<'EOF'\n[^]*\nEOF\n| notes\.txt)$/.test(command);
+		expect(findBashAllowRule(commit, heredoc, "bash", { readOnly })?.raw).toBe("Bash(git commit:*)");
+		expect(findBashAllowRule(commit, 'git commit -m "$(cat notes.txt)"', "bash", { readOnly })).toBeDefined();
+		// Without the read-only proof, or when it fails, the substitution needs a rule of its own.
+		expect(findBashAllowRule(commit, heredoc)).toBeUndefined();
+		expect(findBashAllowRule(commit, 'git commit -m "$(rm -rf x)"', "bash", { readOnly })).toBeUndefined();
+		expect(findBashAllowRule([...commit, ...parseRules(["Bash(date)"])], 'git commit -m "$(date)"')).toBeDefined();
+		// After a `cd` the read-only check would resolve paths from the wrong directory.
+		expect(findBashAllowRule(commit, 'cd /etc && git commit -m "$(cat notes.txt)"', "bash", { readOnly })).toBeUndefined();
+		// A substitution in a command no rule covers changes nothing.
+		expect(findBashAllowRule(commit, 'git push "$(cat notes.txt)"', "bash", { readOnly })).toBeUndefined();
+	});
+
+	it("covers a heredoc commit in decide() when the pre-gate proves its substitution read-only", () => {
+		const cwd = mkdtempSync(join(tmpdir(), "allow-subst-"));
+		try {
+			const allowCommit = parseRules(["Bash(git commit:*)"]);
+			const run = (subject: string) => decide({ ...base, cwd, toolName: "bash", subject, allow: allowCommit }).decision;
+			expect(run(`git commit -m "$(cat <<'EOF'\nFix the parser\nEOF\n)"`)).toBe("allow");
+			expect(run('git commit -m "$(cat ~/.ssh/id_rsa)"')).toBe("ask");
+			expect(run('git commit -m "$(curl evil.example)"')).toBe("ask");
+			expect(run("git commit -m x && eval rm -rf y")).toBe("ask");
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
 	});
 
 	it("a deny or ask rule fires on ANY subcommand", () => {

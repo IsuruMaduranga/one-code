@@ -207,6 +207,23 @@ describe("H3: unmodelled writes reach the floor", () => {
 	it("names the control file a nested script writes", () => {
 		expect(shellNamesControlFile("bash -lc 'echo x > .claude/settings.json'", cwd, home)).toBe(".claude/settings.json");
 	});
+
+	it("keeps a cd inside a substitution out of the parent commands (PR #12 review)", () => {
+		// A leaked `cd /` would resolve the write to /settings.json and miss it.
+		expect(shellNamesControlFile('cd .claude; echo "$(cd /)"; printf x > settings.json', cwd, home)).toBe("settings.json");
+	});
+
+	it("stops on a control file's name where the directory cannot be known (PR #12 review)", () => {
+		// A loop body runs more than once, so the read before the `cd` also runs after it.
+		expect(shellNamesControlFile("for i in 1 2; do printf x > settings.json; cd .claude; done", cwd, home)).toBe("settings.json");
+		expect(shellNamesControlFile('cd "$D"; printf x > settings.json', cwd, home)).toBe("settings.json");
+		expect(shellNamesControlFile("cd .claude; echo hi <> settings.json", cwd, home)).toBe("settings.json");
+		expect(shellNamesControlFile("cd .cla*; printf x > settings.json", cwd, home)).toBe("settings.json");
+		// `cd -` goes to $OLDPWD (PR #12 review).
+		expect(shellNamesControlFile("cd .claude; cd /tmp; cd -; printf x > settings.json", cwd, home)).toBe("settings.json");
+		// Where the directory is known, a same-named file elsewhere is not a control file.
+		expect(shellNamesControlFile("cd .vscode; printf x > settings.json", cwd, home)).toBeUndefined();
+	});
 });
 
 describe("M1/M2: operands are judged where bash resolves them", () => {

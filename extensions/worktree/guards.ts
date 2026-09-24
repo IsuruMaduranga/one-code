@@ -28,7 +28,7 @@
 import { homedir } from "node:os";
 import { isAbsolute } from "node:path";
 import { isWithin, toAbsoluteBash } from "../auto-mode/paths.ts";
-import { gitSubcommand, leadTokens, parseCommand, resolvePayload, type Token } from "../auto-mode/shell-analysis.ts";
+import { gitSubcommand, leadTokens, LOOPS, parseCommand, resolvePayload, scopedTracker, type Token } from "../auto-mode/shell-analysis.ts";
 
 export interface WorktreeGuardContext {
 	command: string;
@@ -103,33 +103,52 @@ export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: W
 			`Run the equivalent from ${worktreePath} without the redirect.`,
 		);
 
-	/** Directory later segments run in; undefined = not statically known. */
+	/** Directory the current segment runs in; undefined = not statically known. */
 	let dir: string | undefined = worktreePath;
-	/** Subshell nesting: a `cd` inside `(...)` must not leak past the `)`. */
-	let depth = 0;
-	let dirBeforeSubshell: { dir: string | undefined } | undefined;
+	/**
+	 * The directory per subshell scope (`Segment.scopes`): a `cd` inside
+	 * `( … )`, a substitution or a pipeline member does not leak out.
+	 */
+	const scopeDirs = scopedTracker<string | undefined>(worktreePath);
+
+	// A loop body runs more than once, so a `cd` in it moves every git command
+	// in the loop after the first pass; the segments show one pass only.
+	const movesInLoop = segments.some(
+		(seg) => seg.enclosing.some((construct) => LOOPS.has(construct)) && ["cd", "pushd", "popd"].includes(resolvePayload(leadTokens(seg)).command),
+	);
+	if (movesInLoop && /\bgit\b/.test(command)) {
+		return isolated(
+			worktreePath,
+			"this command changes directory inside a loop, so the repository its git commands target cannot be verified",
+			`Break it into plain, separate git commands with literal paths and run them from ${worktreePath}.`,
+		);
+	}
 
 	const checkSegment = (seg: (typeof segments)[number]): string | undefined => {
 		const tokens = leadTokens(seg);
 		const rawLead = tokens[0]?.value;
 		if (!rawLead) return undefined;
+		// The command a wrapper runs (`builtin cd`, `command cd`), not the first word.
+		const { command: lead, args: leadArgs } = resolvePayload(tokens);
 
-		if (rawLead === "cd") {
+		if (lead === "cd") {
 			// Skip cd's own options (-P/-L/-e/-@); `--` ends them; a lone `-`
 			// means the previous directory, which is not statically known.
-			let j = 1;
-			while (j < tokens.length && tokens[j].value.startsWith("-") && !["-", "--"].includes(tokens[j].value)) j++;
-			if (tokens[j]?.value === "--") j++;
-			const target = tokens[j]?.value;
+			let j = 0;
+			while (j < leadArgs.length && leadArgs[j].value.startsWith("-") && !["-", "--"].includes(leadArgs[j].value)) j++;
+			if (leadArgs[j]?.value === "--") j++;
+			const targetToken = leadArgs[j];
+			const target = targetToken?.value;
 			if (!target) dir = homedir();
-			else if (hasExpansion(target) || target === "-") dir = undefined;
+			// A glob (`cd /r*po`) or an expansion lands wherever bash expands it.
+			else if (hasExpansion(target) || target === "-" || targetToken.glob || targetToken.dynamic) dir = undefined;
 			// An absolute (or ~) destination re-anchors the tracked directory
 			// even when it was unknown — later git commands become checkable again.
 			else if (isAbsolute(target) || target === "~" || target.startsWith("~/")) dir = toAbsoluteBash("/", target, homedir());
 			else if (dir !== undefined) dir = toAbsoluteBash(dir, target, homedir());
 			return undefined;
 		}
-		if (rawLead === "pushd" || rawLead === "popd") {
+		if (lead === "pushd" || lead === "popd") {
 			dir = undefined;
 			return undefined;
 		}
@@ -216,26 +235,10 @@ export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: W
 	};
 
 	for (const seg of segments) {
-		// Subshell bookkeeping reads the RAW tokens — leadTokens strips the very
-		// parens being counted. A `cd` between `(` and `)` is scoped: the tracked
-		// directory is restored when the subshell closes.
-		const first = seg.tokens[0]?.value ?? "";
-		const opens = (/^\(+/.exec(first)?.[0] ?? "").length;
-		if (opens > 0 && depth === 0) dirBeforeSubshell = { dir };
-		depth += opens;
-
+		dir = scopeDirs.get(seg);
 		const reason = checkSegment(seg);
 		if (reason) return reason;
-
-		const last = seg.tokens[seg.tokens.length - 1]?.value ?? "";
-		const closes = (/\)+$/.exec(last)?.[0] ?? "").length;
-		if (closes > 0 && depth > 0) {
-			depth = Math.max(0, depth - closes);
-			if (depth === 0 && dirBeforeSubshell) {
-				dir = dirBeforeSubshell.dir;
-				dirBeforeSubshell = undefined;
-			}
-		}
+		scopeDirs.set(seg, dir);
 	}
 	return undefined;
 }

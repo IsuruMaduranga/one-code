@@ -22,6 +22,7 @@ import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
 import { worktreeBashGuardReason } from "./guards.ts";
+import { bashParserReady } from "../lib/bash-parser.ts";
 import { ORIGINAL_COMMAND_CHANNEL, type OriginalCommandRecord } from "../lib/original-command.ts";
 import { rewriteToolInput, validateWorktreeName } from "./rewrite.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
@@ -95,7 +96,7 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => reconstructState(ctx));
 	pi.on("session_tree", (_event, ctx) => reconstructState(ctx));
 
-	pi.on("tool_call", (event) => {
+	pi.on("tool_call", async (event) => {
 		if (!state) return;
 		if (["enter_worktree", "exit_worktree", "Agent", "SendMessage", "workflow"].includes(event.toolName)) return;
 		if (event.toolName === "bash") {
@@ -104,6 +105,7 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 			// this worktree, and shared-stash footguns are refused with the recipe.
 			const command = (event.input as Record<string, unknown>).command;
 			if (typeof command === "string") {
+				await bashParserReady();
 				const reason = worktreeBashGuardReason({ command, worktreePath: state.path, sharedRoot: state.sharedRoot });
 				if (reason) return { block: true, reason };
 			}

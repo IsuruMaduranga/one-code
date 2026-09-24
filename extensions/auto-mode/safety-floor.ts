@@ -22,7 +22,7 @@
  * fires on routine work teaches the user to approve without reading.
  */
 
-import { analyzeShellCommand, globComponentRegex, isUnknownTilde, parseCommand, resolvePayload } from "./shell-analysis.ts";
+import { analyzeShellCommand, globComponentRegex, isUnknownTilde, LOOPS, parseCommand, resolvePayload, scopedTracker } from "./shell-analysis.ts";
 import { autoModeSettingsPaths } from "./config.ts";
 import { oneCodeProjectSettingsPath } from "../lib/one-code-settings.ts";
 import { claudeJsonPath, comparablePath } from "../lib/paths.ts";
@@ -235,8 +235,11 @@ const CONTROL_FILE_TEXT =
  * The first word of a shell line that names a gate-control file, or
  * undefined. Every word counts, read or write, plus the value after an `=`
  * (`--output=…`, `of=…`) and the words of a nested `sh -c '…'` script; `cd`
- * is followed so a relative name is resolved where the shell would. False
- * positives cost one stop; the floor may only ever say "stop".
+ * is followed, per subshell scope, so a relative name is resolved where the
+ * shell would. Where the directory cannot be known (the line does not parse,
+ * a `cd` sits in a loop body that runs more than once, or its target is an
+ * expansion), a word whose file name is a control file's stops by name alone.
+ * False positives cost one stop; the floor may only ever say "stop".
  */
 export function shellNamesControlFile(
 	command: string,
@@ -252,9 +255,31 @@ export function shellNamesControlFile(
 	if (match) return match[2];
 
 	const { segments, parseFailed } = parseCommand(command);
-	if (parseFailed) return undefined;
-	let dir = cwd;
+	const dirs = scopedTracker(cwd);
+	const moves = (segment: (typeof segments)[number]) => ["cd", "pushd", "popd"].includes(resolvePayload(segment.tokens).command);
+	// Decided before the walk: in a loop, a word read before the `cd` runs after it on the next pass.
+	const unknownDir =
+		parseFailed ||
+		segments.some((segment) => {
+			if (!moves(segment)) return false;
+			const payload = resolvePayload(segment.tokens);
+			const target = payload.args.find((token) => !token.value.startsWith("-"));
+			// `cd -` goes to $OLDPWD.
+			const previous = payload.args.some((token) => token.value === "-");
+			return (
+				payload.command !== "cd" ||
+				previous ||
+				segment.enclosing.some((construct) => LOOPS.has(construct)) ||
+				!!target?.dynamic ||
+				!!target?.glob ||
+				(!!target && isUnknownTilde(target.value))
+			);
+		});
+	// Lowercased on every platform: a false positive costs one stop.
+	const baseName = (path: string) => path.slice(path.replace(/\\/g, "/").lastIndexOf("/") + 1).toLowerCase();
+	const controlNames = new Set([...forms].map(baseName));
 	for (const segment of segments) {
+		const dir = dirs.get(segment);
 		const payload = resolvePayload(segment.tokens);
 		for (const word of [...segment.tokens.map((token) => token.value), ...segment.redirects, ...segment.inputs.map((token) => token.value)]) {
 			if (depth < 3 && /\s/.test(word)) {
@@ -266,11 +291,12 @@ export function shellNamesControlFile(
 				if (!candidate || isUnknownTilde(candidate)) continue;
 				const resolved = resolveForContainment(toAbsoluteBash(dir, candidate, home));
 				if (resolved && namesControlFile(resolved, forms, true)) return candidate;
+				if (unknownDir && controlNames.has(baseName(candidate))) return candidate;
 			}
 		}
-		if (payload.command === "cd") {
-			const target = payload.args.find((token) => !token.value.startsWith("-"))?.value;
-			if (target && !isUnknownTilde(target)) dir = toAbsoluteBash(dir, target, home);
+		if (payload.command === "cd" && !unknownDir) {
+			const target = payload.args.find((token) => !token.value.startsWith("-"));
+			if (target) dirs.set(segment, toAbsoluteBash(dir, target.value, home));
 		}
 	}
 	return undefined;

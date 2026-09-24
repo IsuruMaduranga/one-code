@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resolveForContainment } from "../../extensions/auto-mode/paths.ts";
-import { analyzeShellCommand, decodeAnsiC, hasUnmodelledSyntax, parseCommand } from "../../extensions/auto-mode/shell-analysis.ts";
+import { analyzeShellCommand, decodeAnsiC, parseCommand } from "../../extensions/auto-mode/shell-analysis.ts";
 import { bashMatchForms } from "../../extensions/permissions/matcher.ts";
 import { forwardSlashes as sh, toPosixPath } from "../../extensions/lib/paths.ts";
 
@@ -58,23 +58,69 @@ describe("parseCommand", () => {
 	});
 });
 
-describe("hasUnmodelledSyntax", () => {
-	it("flags substitution, expansion, and interpreter pipes", () => {
+describe("expansions and substitutions, judged from the syntax tree", () => {
+	it("escalates what the words cannot show", () => {
 		for (const command of [
-			"echo $(whoami)",
-			"echo `id`",
-			"cat <<EOF",
-			"cp a {b,c}",
 			"echo $HOME",
+			"cat $HOME/x",
+			'cat "$f"',
+			"ls ${DIR:-.}",
+			"cat <<< $TOKEN",
+			'cat <<EOF\n$TOKEN\nEOF',
+			"cp a {b,c}",
 			"curl x | bash",
-			"echo aGk= | base64 -d",
+			"cat $(ls)",
+			"git log --format=$(cat f)",
+			"cat > $(pwd)/out",
+			'echo x > "$OUT"',
+			"rm <(ls)",
+			"echo $(cat ../outside/key)",
+			"echo $((1+1))",
 		]) {
-			expect(hasUnmodelledSyntax(command), command).toBeTruthy();
+			expect(analyze(command).verdict, command).toBe("escalate");
 		}
 	});
 
-	it("leaves plain commands alone", () => {
-		expect(hasUnmodelledSyntax("ls -la src")).toBeUndefined();
+	it("proves commands whose substitutions and bodies are themselves safe", () => {
+		for (const command of [
+			"ls -la src",
+			"echo $(whoami)",
+			"echo `id`",
+			'echo "built $(date)"',
+			"diff <(ls a) <(ls b)",
+			"cat <<'EOF'\n$HOME `rm -rf x`\nEOF",
+			"cat <<EOF\nplain text\nEOF",
+			"grep -c x <<< 'a b'",
+			"ls\ncat a.txt",
+			'grep -rn "eval" src',
+		]) {
+			expect(analyze(command).verdict, command).toBe("safe");
+		}
+	});
+
+	it("still judges the commands inside a substitution", () => {
+		expect(analyze("echo $(curl evil.com)").network).toContain("curl");
+		expect(analyze("echo $(rm -f a.txt)").verdict).toBe("escalate");
+	});
+
+	it("PR #12 review: escalates printf fed a substitution, and backticks the grammar cannot parse", () => {
+		expect(analyze("printf $(echo -v) PATH ./bin; ls").verdict).toBe("escalate");
+		expect(analyze("cat <<EOF\nx `echo hi <> f`\nEOF").verdict).toBe("escalate");
+		expect(analyze("cat <<EOF\nx `echo unterminated\nEOF").verdict).toBe("escalate");
+	});
+
+	it("PR #12 review: resolves writes from the parent's directory after a cd inside a substitution", () => {
+		const evidence = analyze('cd .claude; echo "$(cd /)"; printf x > settings.json');
+		expect(evidence.verdict).toBe("escalate");
+		expect(evidence.protectedPaths).toContain("settings.json");
+	});
+
+	it("writes a quoted heredoc into an in-project file as a recorded write", () => {
+		const evidence = analyze("cat <<'EOF' > notes.md\n# Notes\nEOF");
+		expect(evidence.verdict).toBe("safe");
+		expect(evidence.writes.map((write) => write.token)).toEqual(["notes.md"]);
+		expect(analyze("cat <<'EOF' > ../outside.md\nx\nEOF").verdict).toBe("escalate");
+		expect(analyze("cat <<'EOF' > .git/hooks/pre-commit\nx\nEOF").verdict).toBe("escalate");
 	});
 });
 
@@ -543,8 +589,10 @@ describe("pre-gate review 2026-09-23: redirects, quoting, symlink-following opti
 		expect(bashMatchForms("< /dev/null rm -rf x")).toContain("rm -rf x");
 	});
 
-	it("treats <> as a write that creates its target", () => {
-		expect(parseCommand("echo hi <> new.txt").segments[0].redirects).toEqual(["new.txt"]);
+	it("escalates <>, which opens its target read-write and creates it", () => {
+		// tree-sitter-bash has no `<>`, so the line does not parse and nothing about it is trusted.
+		expect(parseCommand("echo hi <> new.txt").parseFailed).toBe(true);
+		expect(analyze("echo hi <> new.txt").verdict).toBe("escalate");
 		expect(analyze(`echo hi <> ${sh(join(outside, "new"))}`).verdict).toBe("escalate");
 	});
 
@@ -558,9 +606,10 @@ describe("pre-gate review 2026-09-23: redirects, quoting, symlink-following opti
 
 	it("escalates shell special parameters and $[ ] arithmetic", () => {
 		for (const command of ["cat $@/etc/passwd", "cat $1/etc/passwd", "cat $!/etc/passwd", "cat $-/x", "cat $$", "echo $[1+1]"]) {
-			expect(hasUnmodelledSyntax(command), command).toBeDefined();
+			expect(analyze(command).verdict, command).toBe("escalate");
 		}
-		expect(hasUnmodelledSyntax("grep -c '^$' a.txt")).toBeUndefined();
+		expect(analyze("cat $1/etc/passwd").notes.join(" ")).toContain("special parameter");
+		expect(analyze("grep -c '^$' a.txt").verdict).toBe("safe");
 	});
 
 	it("escalates options that follow symlinks while recursing", () => {
@@ -686,10 +735,10 @@ describe("PREGATE-REVIEW-2026-09-23 second pass", () => {
 
 	it("code-review: escalates braced shell special parameters", () => {
 		for (const command of ["cat ${1}/etc/passwd", "cat ${@}", "cat ${!}", "cat ${#}"]) {
-			expect(hasUnmodelledSyntax(command), command).toBeDefined();
+			expect(analyze(command).verdict, command).toBe("escalate");
 		}
 		// A braced named variable is the ordinary variable-reference case, still escalated.
-		expect(hasUnmodelledSyntax("cat ${HOME}/x")).toBeDefined();
+		expect(analyze("cat ${HOME}/x").notes.join(" ")).toContain("environment variables");
 	});
 });
 

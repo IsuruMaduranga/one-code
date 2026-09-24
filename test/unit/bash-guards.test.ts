@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { bashGuardReason, hasBackgroundAmp } from "../../extensions/bash/guards.ts";
+import { parseCommand } from "../../extensions/auto-mode/shell-analysis.ts";
+import { bashGuardReason } from "../../extensions/bash/guards.ts";
 
 const fg = (command: string) => bashGuardReason(command, { background: false });
 const bg = (command: string) => bashGuardReason(command, { background: true });
@@ -69,6 +70,8 @@ describe("wait guard", () => {
 describe("poll-loop guard", () => {
 	it("blocks foreground while/until/for loops that sleep", () => {
 		expect(fg("while true; do sleep 2; done")).toContain("polling loop");
+		// Wherever the loop sits in the line (PR #12 review).
+		expect(fg("echo start; while true; do sleep 5; done")).toContain("polling loop");
 		expect(fg("until curl -sf localhost/health; do sleep 2; done")).toBeDefined();
 		expect(fg("for i in 1 2 3; do check; sleep 5; done")).toBeDefined();
 	});
@@ -127,11 +130,9 @@ describe("orphan guard", () => {
 	it("tracks ANSI-C quoting when scanning for &", () => {
 		expect(fg("echo $'a & b' & sleep 999")).toBeDefined();
 		expect(fg("echo $'a & b'")).toBeUndefined();
-		// Backslash-escaped quote inside $'…' — parseCommand itself fails on
-		// this form (unparseable → guard passes), but the scanner must still
-		// track it correctly for inputs that do parse.
-		expect(hasBackgroundAmp("echo $'it\\'s fine' & sleep 999")).toBe(true);
-		expect(hasBackgroundAmp("echo $'it\\'s & fine'")).toBe(false);
+		// A backslash-escaped quote inside $'…' does not end the string.
+		expect(fg("echo $'it\\'s fine' & sleep 999")).toBeDefined();
+		expect(fg("echo $'it\\'s & fine'")).toBeUndefined();
 	});
 
 	it("never fires on a background run", () => {
@@ -140,14 +141,17 @@ describe("orphan guard", () => {
 	});
 });
 
-describe("hasBackgroundAmp", () => {
+describe("parseCommand background", () => {
 	it("detects only the shell background operator", () => {
-		expect(hasBackgroundAmp("cmd &")).toBe(true);
-		expect(hasBackgroundAmp("a & b")).toBe(true);
-		expect(hasBackgroundAmp("a && b")).toBe(false);
-		expect(hasBackgroundAmp("2>&1")).toBe(false);
-		expect(hasBackgroundAmp("cmd &>log")).toBe(false);
-		expect(hasBackgroundAmp("echo 'a & b'")).toBe(false);
+		const background = (command: string) => parseCommand(command).background;
+		expect(background("cmd &")).toBe(true);
+		expect(background("a & b")).toBe(true);
+		expect(background("(a &) ; b")).toBe(true);
+		expect(background("a && b")).toBe(false);
+		expect(background("make 2>&1")).toBe(false);
+		expect(background("cmd &>log")).toBe(false);
+		expect(background("a |& b")).toBe(false);
+		expect(background("echo 'a & b'")).toBe(false);
 	});
 });
 

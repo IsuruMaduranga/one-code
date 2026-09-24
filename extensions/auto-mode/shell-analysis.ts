@@ -44,6 +44,9 @@ import {
 	checkOptions,
 	gitOperandsAllowed,
 } from "./read-only-options.ts";
+import { parseCommand, scopedTracker, type Segment, type Token } from "./shell-parse.ts";
+
+export { decodeAnsiC, LOOPS, parseCommand, scopedTracker, type ParseResult, type Segment, type Token } from "./shell-parse.ts";
 
 export type ShellVerdict = "safe" | "escalate";
 
@@ -182,6 +185,8 @@ interface WrapperSpec {
  * only: the pre-gate peeling them would clear `sudo rm` as a contained delete.
  */
 const WRAPPERS: Record<string, WrapperSpec> = {
+	// `builtin cd x` runs the builtin `cd` (PR #12 review: it hid a `cd` from the worktree guard).
+	builtin: { contained: true },
 	caffeinate: { values: ["-t", "-w"], contained: true, denyFormsOnly: true },
 	command: { contained: true },
 	doas: { values: ["-u", "-a"], unsafeValues: ["-C"], contained: false, denyFormsOnly: true },
@@ -343,323 +348,17 @@ const NETWORK_COMMANDS = new Set([
  */
 const GIT_GLOBAL_VALUE_FLAGS = new Set(["-C", "--git-dir", "--work-tree", "--namespace", "--exec-path"]);
 
-export interface Token {
-	/** The token with quotes removed and `$'…'` decoded. */
-	value: string;
-	/** True when the token was written with any quoting or expansion syntax. */
-	hadExpansion: boolean;
-	/** True when an unquoted, unescaped `*`, `?` or `[` makes the token a glob bash expands. */
-	glob?: boolean;
-}
-
-export interface Segment {
-	tokens: Token[];
-	/**
-	 * Write targets (`>`, `>>`, `>|`, `>&word`, and `<>`, which opens its
-	 * target read-write and creates it), in written order.
-	 */
-	redirects: string[];
-	/**
-	 * Input targets (`<`): files the shell opens on the command's stdin, whatever
-	 * the command is. Kept out of `tokens`, where `< f cmd` made `f` the command
-	 * word and `jq < f .` made `f` jq's program.
-	 */
-	inputs: Token[];
-	raw: string;
-}
-
-export interface ParseResult {
-	segments: Segment[];
-	/** The command could not be tokenized (unbalanced quotes). Nothing about it is known. */
-	parseFailed: boolean;
-	/**
-	 * Why a word was quoted in a way whose value this check cannot know, or
-	 * undefined: `$"…"` locale quoting (bash translates it through a message
-	 * catalog; Claude Code refuses "a translated string" too), or a `$'…'`
-	 * escape whose meaning differs between bash versions. The whole command
-	 * escalates. A parse-level signal, not per segment, so it survives an empty
-	 * segment being dropped.
-	 */
-	unknownQuoting?: string;
-}
-
-const ANSI_C_SIMPLE: Record<string, string> = {
-	a: "\x07",
-	b: "\b",
-	e: "\x1b",
-	E: "\x1b",
-	f: "\f",
-	n: "\n",
-	r: "\r",
-	t: "\t",
-	v: "\v",
-	"\\": "\\",
-	"'": "'",
-	'"': '"',
-	"?": "?",
-};
-
-/** Consecutive characters from `body[from]` that match `pattern`, at most `max` of them. */
-function scanWhile(body: string, from: number, pattern: RegExp, max: number): string {
-	let j = from;
-	while (j < body.length && j < from + max && pattern.test(body[j])) j++;
-	return body.slice(from, j);
-}
-
 /**
- * Decode a `$'…'` string starting at `start` (the character after the opening
- * quote) the way bash does: the simple escapes, `\NNN` (one to three octal
- * digits), `\xHH`, `\uHHHH`, `\UHHHHHHHH` and `\cX`; a backslash escapes the
- * closing quote (`$'it\'s'`); any other backslash stays literal. The word ends
- * at a decoded NUL, as bash's C strings do. Returns the decoded text, the index
- * just past the closing quote (`body.length` when it is unterminated), and
- * whether an escape's meaning depends on the bash version.
- *
- * Until 2026-09-24 `\0` matched alone, so `\057` decoded to NUL plus "57"
- * instead of `/`, and a path spelled that way skipped every path check
- * (PREGATE-REVIEW-2026-09-23 P1); the caller ended the string at a `\'` with
- * `indexOf`, so `$'it\'s'` failed to parse (PREGATE-REVIEW-2026-09-23 A2).
+ * Commands that only print their arguments, so a command substitution among
+ * them is safe once the substituted command is: its output is printed, not
+ * read as an option, a path or a program (`echo "built $(date)"`). `echo`'s
+ * options only change how it prints. `printf` is not here: `printf $(echo
+ * -v) PATH ./bin` assigns a variable (PR #12 review).
  */
-export function decodeAnsiC(body: string, start = 0): { text: string; end: number; versionDependent: boolean } {
-	let out = "";
-	let versionDependent = false;
-	// Set once a decoded NUL ends the string value; the scan continues to the
-	// real closing quote so the caller resumes the command in the right place.
-	let truncated = false;
-	const emit = (text: string) => {
-		if (!truncated) out += text;
-	};
-	let i = start;
-	for (; i < body.length; i++) {
-		const ch = body[i];
-		if (ch === "'") return { text: out, end: i + 1, versionDependent };
-		if (ch !== "\\" || i + 1 >= body.length) {
-			emit(ch);
-			continue;
-		}
-		const next = body[i + 1];
-		let decoded: string | undefined;
-		let width = 2;
-		if (next in ANSI_C_SIMPLE) {
-			decoded = ANSI_C_SIMPLE[next];
-		} else if (/[0-7]/.test(next)) {
-			const octal = scanWhile(body, i + 1, /[0-7]/, 3);
-			decoded = String.fromCharCode(Number.parseInt(octal, 8) & 0xff);
-			width = 1 + octal.length;
-		} else if (next === "x" || next === "u" || next === "U") {
-			if (next !== "x") versionDependent = true;
-			const hex = scanWhile(body, i + 2, /[0-9a-fA-F]/, next === "x" ? 2 : next === "u" ? 4 : 8);
-			if (hex) {
-				decoded = String.fromCodePoint(Math.min(Number.parseInt(hex, 16), 0x10ffff));
-				width = 2 + hex.length;
-			}
-		} else if (next === "c" && i + 2 < body.length) {
-			const target = body[i + 2];
-			if (target === "?" || target === "\\") versionDependent = true;
-			decoded = target === "?" ? "\x7f" : String.fromCharCode(target.toUpperCase().charCodeAt(0) & 0x1f);
-			width = 3;
-		}
-		if (decoded === undefined) {
-			emit(ch);
-			continue;
-		}
-		if (decoded === "\0") truncated = true;
-		else emit(decoded);
-		i += width - 1;
-	}
-	return { text: out, end: body.length, versionDependent };
-}
+const PURE_OUTPUT = new Set(["echo"]);
 
-/**
- * Syntax through which a command can run something other than what its
- * visible words say. The permission matcher refuses to let a prefix/wildcard
- * allow rule cover a command carrying any of it (the user approved `npm test
- * …`, not whatever `$(…)` evaluates to), and the pre-gate escalates on it.
- */
-export function hasInjectionSyntax(command: string): string | undefined {
-	if (/\$\(/.test(command)) return "uses command substitution $( )";
-	if (/(^|[^\\])`/.test(command)) return "uses backtick command substitution";
-	if (/[<>]\(/.test(command)) return "uses process substitution";
-	if (/\beval\b|\bexec\b/.test(command)) return "uses eval/exec";
-	if (/\|\s*(bash|sh|zsh|python|perl|node|ruby)\b/.test(command)) return "pipes into an interpreter";
-	if (/base64\s+(-d|--decode)/.test(command)) return "decodes base64, which can hide the real command";
-	return undefined;
-}
-
-/** Syntax we do not model at all; its presence alone forces escalation. */
-export function hasUnmodelledSyntax(command: string): string | undefined {
-	if (command.includes("\n")) return "spans multiple lines";
-	const injection = hasInjectionSyntax(command);
-	if (injection) return injection;
-	if (/<<</.test(command)) return "uses a here-string";
-	if (/<</.test(command)) return "uses a heredoc";
-	// Brace expansion resolves to paths we cannot enumerate (review finding N3).
-	if (/\{[^{}]*,[^{}]*\}/.test(command)) return "uses brace expansion, whose expanded paths cannot be checked";
-	if (/\$\{?[A-Za-z_]/.test(command)) return "references environment variables, whose values are unknown here";
-	// `$@`, `$1`, `$!` are empty in a `bash -c` line and `$-`, `$$`, `$#` are
-	// not, so `cat $@/etc/passwd` read as a path under the working directory.
-	// The braced spelling (`${1}`, `${@}`) is the same parameter.
-	if (/\$\{?[0-9@*#?$!-]/.test(command)) return "references a shell special parameter ($1, $@, $$, …), whose value is unknown here";
-	if (/\$\[/.test(command)) return "uses $[ ] arithmetic expansion";
-	return undefined;
-}
-
-/**
- * Split a command into pipeline/list segments and tokenize each. Unlike the
- * original, `<`, `>`, `&`, and `|` terminate a token even without surrounding
- * whitespace, so `cmd>file` and `a|b` are seen (review finding N4). An
- * unquoted newline ends a segment too (it is a command separator in bash).
- */
-export function parseCommand(command: string): ParseResult {
-	const segments: Segment[] = [];
-	let tokens: Token[] = [];
-	let redirects: string[] = [];
-	let inputs: Token[] = [];
-	let rawStart = 0;
-
-	let current = "";
-	let hadExpansion = false;
-	/** Accumulated across the whole command, never reset per segment. */
-	let unknownQuoting: string | undefined;
-	let glob = false;
-	let quoted = false;
-	let inSingle = false;
-	let inDouble = false;
-	let escape = false;
-	/** Set while consuming the token that follows a redirection operator. */
-	let pendingRedirect: "write" | "input" | undefined;
-
-	const pushToken = () => {
-		if (!current && !quoted) return;
-		if (pendingRedirect === "write") redirects.push(current);
-		else if (pendingRedirect === "input") inputs.push({ value: current, hadExpansion, glob });
-		else tokens.push({ value: current, hadExpansion, glob });
-		pendingRedirect = undefined;
-		current = "";
-		hadExpansion = false;
-		glob = false;
-		quoted = false;
-	};
-
-	/** `at` = index of the separator; `width` = its length (`&&` is 2). */
-	const pushSegment = (at: number, width = 1) => {
-		pushToken();
-		// A redirect operator with no target is a syntax error; its pending state
-		// must not swallow the next segment's command word.
-		pendingRedirect = undefined;
-		if (tokens.length > 0 || redirects.length > 0 || inputs.length > 0) {
-			segments.push({ tokens, redirects, inputs, raw: command.slice(rawStart, at).trim() });
-		}
-		tokens = [];
-		redirects = [];
-		inputs = [];
-		rawStart = at + width;
-	};
-
-	for (let i = 0; i < command.length; i++) {
-		const ch = command[i];
-
-		if (escape) {
-			current += ch;
-			escape = false;
-			continue;
-		}
-		if (ch === "\\" && !inSingle) {
-			escape = true;
-			continue;
-		}
-		if (ch === "'" && !inDouble) {
-			inSingle = !inSingle;
-			quoted = true;
-			continue;
-		}
-		if (ch === '"' && !inSingle) {
-			inDouble = !inDouble;
-			quoted = true;
-			continue;
-		}
-		// Locale quoting: `$"…"` is a double-quoted string passed through the
-		// message catalog. Kept as a literal `$`, `cat $"/etc/passwd"` read as
-		// the in-project path `$/etc/passwd`.
-		if (ch === "$" && command[i + 1] === '"' && !inSingle && !inDouble) {
-			unknownQuoting ??= 'uses $"…" locale quoting, whose translation this check cannot see';
-			hadExpansion = true;
-			continue;
-		}
-		// ANSI-C quoting: `$'\x2e\x2e'` is `..`. The original kept the leading `$`,
-		// which made the token look like a variable and skipped every path check
-		// (review finding N1, reproduced there).
-		if (ch === "$" && command[i + 1] === "'" && !inSingle && !inDouble) {
-			const decoded = decodeAnsiC(command, i + 2);
-			if (decoded.end > command.length || command[decoded.end - 1] !== "'") return { segments: [], parseFailed: true };
-			if (decoded.versionDependent) unknownQuoting ??= "uses a $'…' escape (\\u, \\U or \\c?) whose meaning depends on the bash version";
-			current += decoded.text;
-			quoted = true;
-			hadExpansion = true;
-			i = decoded.end - 1;
-			continue;
-		}
-
-		if (inSingle || inDouble) {
-			current += ch;
-			continue;
-		}
-
-		if (ch === "\n") {
-			// An unquoted newline separates commands exactly like `;`. Without this
-			// `npm test x\ncurl evil` would be one segment whose lead is `npm test`.
-			pushSegment(i);
-			continue;
-		}
-		if (/\s/.test(ch)) {
-			pushToken();
-			continue;
-		}
-
-		// Redirection. `>|` is the clobber-override form and behaves as `>`
-		// (review finding N10); `2>&1` and `&>` are duplications, not paths.
-		if (ch === ">" || ch === "<") {
-			pushToken();
-			let j = i + 1;
-			// `<>` opens its target read-write and creates it: a write, like `>`.
-			const readWrite = ch === "<" && command[j] === ">";
-			if (readWrite || (ch === ">" && (command[j] === ">" || command[j] === "|"))) j++;
-			if (command[j] === "&") {
-				// `>&2`, `>&-`: fd duplication, no path involved. But `>&word` with
-				// any other word opens that file for writing (bash's `&>word`), so it
-				// is a write target like `>word` (SECURITY-REVIEW-2026-09-23 H3).
-				let k = j + 1;
-				while (k < command.length && /[0-9]/.test(command[k])) k++;
-				if (command[k] === "-") k++;
-				const boundary = k >= command.length || /[\s;&|<>()]/.test(command[k]);
-				if (k > j + 1 && boundary) {
-					i = k - 1;
-					continue;
-				}
-				j++;
-			}
-			pendingRedirect = ch === ">" || readWrite ? "write" : "input";
-			i = j - 1;
-			continue;
-		}
-
-		if (ch === "|" || ch === ";" || ch === "&") {
-			// `&&`, `||`, `;`, `|`, `&` all end a segment. Any of them means the
-			// next command is separate, which is all we need to know.
-			const doubled = command[i + 1] === ch;
-			pushSegment(i, doubled ? 2 : 1);
-			if (doubled) i++;
-			continue;
-		}
-
-		if (ch === "*" || ch === "?" || ch === "[") glob = true;
-		current += ch;
-	}
-
-	if (escape || inSingle || inDouble) return { segments: [], parseFailed: true };
-	pushSegment(command.length);
-	return { segments, parseFailed: false, unknownQuoting };
-}
+/** A parameter bash sets itself (`$1`, `$@`, `$$`, `${#}`), as opposed to an environment variable. */
+const SPECIAL_PARAMETER = /\$\{?[0-9@*#?$!-]/;
 
 export interface Payload {
 	command: string;
@@ -766,55 +465,20 @@ function wrappersContained(peeled: readonly string[]): boolean {
 }
 
 /**
- * A segment's tokens normalised for command-position checks: subshell parens
- * stripped from the head token only (`(cd` → `cd` — a later argument may
- * legitimately begin with `(`), leading `do`/`then`/`else`/`!`/`time` skipped,
- * and as many trailing `)`s stripped off the last token as `(`s were opened at
- * the head, so `(git stash)` still matches subcommand `stash`. A subshell
- * whose closing paren lands in a *different* segment (`(a && git stash)`) is
- * a known limitation — the closer is only balanced within one segment.
- * Used by the bash/worktree guard pipelines, not by the escalation analyzer.
+ * A segment's tokens from its command word on, for command-position checks.
+ * `time` is a reserved word that the grammar reads as a command, so `time
+ * { rm x; }` arrives as the words `time { rm x` (and a `}` command): a leading
+ * `time`, its `-p`, and the `{`, `(` or `!` it times are skipped. The grammar
+ * has already taken that punctuation out of every other command. Used by the
+ * guards and the deny forms, not by the escalation analyzer.
  */
 export function leadTokens(seg: Segment): Token[] {
-	const tokens = [...seg.tokens];
 	let i = 0;
-	let opened = 0;
-	for (;;) {
-		while (i < tokens.length) {
-			const value = tokens[i].value;
-			const lead = /^[({]+/.exec(value)?.[0] ?? "";
-			if (lead.length === 0) break;
-			opened += (lead.match(/\(/g) ?? []).length;
-			const stripped = value.slice(lead.length);
-			if (stripped.length === 0) {
-				i++;
-				continue;
-			}
-			tokens[i] = { ...tokens[i], value: stripped };
-			break;
-		}
-		// `!` negates and `time` times the pipeline that follows; neither is the
-		// command, and `time { rm x; }` put `{` in command position (P6).
-		if (i < tokens.length && ["do", "then", "else", "!"].includes(tokens[i].value)) {
-			i++;
-			continue;
-		}
-		if (i < tokens.length && tokens[i].value === "time") {
-			i++;
-			while (i < tokens.length && (tokens[i].value === "-p" || tokens[i].value === "--")) i++;
-			continue;
-		}
-		break;
+	while (seg.tokens[i]?.value === "time") {
+		i++;
+		while (["-p", "--", "{", "(", "!"].includes(seg.tokens[i]?.value)) i++;
 	}
-	if (opened > 0 && tokens.length > i) {
-		const last = tokens.length - 1;
-		const trailing = /\)+$/.exec(tokens[last].value)?.[0];
-		if (trailing) {
-			const strip = Math.min(trailing.length, opened);
-			tokens[last] = { ...tokens[last], value: tokens[last].value.slice(0, tokens[last].value.length - strip) };
-		}
-	}
-	return tokens.slice(i);
+	return seg.tokens.slice(i);
 }
 
 /**
@@ -1129,15 +793,13 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 	const trimmed = command.trim();
 	if (!trimmed) return { ...evidence, verdict: "escalate", notes: ["empty command"] };
 
-	const unmodelled = hasUnmodelledSyntax(trimmed);
-	if (unmodelled) escalate(unmodelled);
-
-	const { segments, parseFailed, unknownQuoting } = parseCommand(trimmed);
+	const { segments, parseFailed, unavailable, unknownQuoting, complex } = parseCommand(trimmed);
 	if (parseFailed) {
-		escalate("could not be parsed (unbalanced quotes), so nothing about it is known");
+		escalate(unavailable ? `could not be parsed: ${unavailable}` : "could not be parsed as bash, so nothing about it is known");
 		return evidence;
 	}
 	if (unknownQuoting) escalate(unknownQuoting);
+	if (complex) escalate(complex);
 
 	/**
 	 * Containment is checked against the *resolved* working directory. Write
@@ -1150,6 +812,8 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 
 	/** `cd` changes what later relative paths mean; the original never tracked it (F6/N12). */
 	let effectiveCwd = cwd;
+	/** The directory per subshell scope: a `cd` inside `$(…)` or `( … )` does not reach the parent. */
+	const cwdByScope = scopedTracker(cwd);
 
 	/**
 	 * Resolve a write-target token, record it as evidence, and escalate on any
@@ -1238,6 +902,7 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 	};
 
 	for (const segment of segments) {
+		effectiveCwd = cwdByScope.get(segment);
 		// Redirection targets are writes regardless of the command word: a bare
 		// `> file` truncates/creates it with no command at all, and `git log > file`
 		// writes it too. Check them first so the command-specific `continue`s below
@@ -1256,6 +921,23 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 			}
 			checkRead(word);
 		}
+		if (segment.unknownTarget) escalate("redirects to or from a path an expansion computes, which cannot be resolved here");
+		// `cat <<< "$TOKEN"` prints the environment's value as surely as `echo $TOKEN`.
+		if (segment.expandsIntoInput) escalate("expands a parameter into the command's input, whose value is unknown here");
+
+		// A word bash computes at run time. A parameter's value comes from the
+		// environment (`$@` is empty in a `bash -c` line, so `cat $@/etc/passwd`
+		// read as an in-project path); a substitution's output can be any words,
+		// options included. The substituted commands are segments of their own
+		// and judged below like any other.
+		const dynamicKinds = new Set(segment.tokens.map((token) => token.dynamic).filter((kind) => kind !== undefined));
+		if (dynamicKinds.has("variable")) {
+			escalate(
+				segment.tokens.some((token) => token.dynamic === "variable" && SPECIAL_PARAMETER.test(token.value))
+					? "references a shell special parameter ($1, $@, $$, …), whose value is unknown here"
+					: "references environment variables, whose values are unknown here",
+			);
+		}
 
 		// A leading `NAME=value` changes what the command runs or reads: git takes
 		// its repository and configuration from GIT_* variables (the same
@@ -1270,6 +952,13 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		}
 
 		const { command: name, args, peeled, pathNamed } = resolvePayload(segment.tokens);
+		if (dynamicKinds.has("substitution") && !PURE_OUTPUT.has(name)) {
+			escalate(`passes a command substitution's output to ${name || "the shell"}, and its words are unknown here`);
+		}
+		// `diff <(git show HEAD:a) a`: bash hands a read-only command a pipe from a command judged on its own.
+		if (dynamicKinds.has("process-input") && !READ_ONLY_COMMANDS.has(name) && name !== "find") {
+			escalate(`passes a <( ) pipe to ${name || "the shell"}, which is not a read-only command`);
+		}
 		if (!name) {
 			// A wrapper with nothing to wrap is a command of its own: a bare `env`
 			// (or `env -i`, `nice`) prints the whole process environment / state.
@@ -1322,6 +1011,7 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 			const target = args.find((token) => !token.value.startsWith("-"))?.value;
 			if (target) {
 				effectiveCwd = toAbsoluteBash(effectiveCwd, target, home);
+				cwdByScope.set(segment, effectiveCwd);
 				escalate(`changes directory to ${target}, so later paths in this command resolve elsewhere`);
 			}
 			continue;

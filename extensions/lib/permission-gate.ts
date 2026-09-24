@@ -30,6 +30,7 @@
  */
 
 import { getAgentDir, type InlineExtension } from "@earendil-works/pi-coding-agent";
+import { bashParserReady } from "./bash-parser.ts";
 import { findProjectRoot } from "./git.ts";
 import { memoryDir } from "./memory.ts";
 import { claudeConfigDir, oneCodeStateDir } from "./paths.ts";
@@ -117,6 +118,7 @@ export function permissionGateFactory(
 			// until the session runs — derived on first tool call, then pinned.
 			let scratchpadDirPath: string | undefined;
 			pi.on("tool_call", async (event, ctx) => {
+				await bashParserReady();
 				if (neverGate.has(event.toolName)) return undefined;
 				const runCwd = ctx?.cwd ?? cwd;
 				const sessionId = ctx?.sessionManager?.getSessionId?.();
