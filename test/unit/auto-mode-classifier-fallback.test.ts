@@ -23,6 +23,7 @@ import {
 } from "../../extensions/auto-mode/classifier.ts";
 import { loadAutoModeConfig } from "../../extensions/auto-mode/config.ts";
 import { isModelUnavailableError } from "../../extensions/auto-mode/model-select.ts";
+import { MAX_ACTION_CHARS } from "../../extensions/auto-mode/transcript.ts";
 
 const completeMock = vi.mocked(completeSimple);
 
@@ -374,5 +375,29 @@ describe("isModelUnavailableError: quota wording", () => {
 		// per-minute blip; misreading transient as permanent is the costly direction.
 		expect(isModelUnavailableError("quota exceeded, retry in 60 seconds")).toBe(false);
 		expect(isModelUnavailableError("429 rate limit: quota resets shortly")).toBe(false);
+	});
+});
+
+// AUTO-MODE-SECURITY-REVIEW-2026-09-24 M1: the classifier saw only the first
+// 2,000 characters of the action, while the tool ran all of it.
+describe("the action under review reaches the classifier whole", () => {
+	it("sends a long action's suffix to the model", async () => {
+		completeMock.mockResolvedValue(allowReply());
+		const command = `python3 -c "${"# pad\\n".repeat(600)}print('HIDDEN_ACTION')"`;
+		const { deps } = makeDeps();
+		await classify({ ...request, transcript: [{ kind: "tool", tool: "bash", input: { command } }] }, deps);
+		expect(completeMock).toHaveBeenCalled();
+		expect(JSON.stringify(completeMock.mock.calls[0])).toContain("HIDDEN_ACTION");
+	});
+
+	it("refuses an action too large to review in full, naming its size, without a model call", async () => {
+		const { deps } = makeDeps();
+		const verdict = await classify(
+			{ ...request, transcript: [{ kind: "tool", tool: "bash", input: { command: "x".repeat(MAX_ACTION_CHARS + 1) } }] },
+			deps,
+		);
+		expect(verdict.decision).toBe("block");
+		expect(verdict.reason).toMatch(/characters.*Split it/);
+		expect(completeMock).not.toHaveBeenCalled();
 	});
 });

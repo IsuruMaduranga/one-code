@@ -83,6 +83,61 @@ describe("worktree git-isolation guard", () => {
 		// git in a script a shell runs counts (PR #13 review).
 		expect(guard("shopt -s lastpipe; true | cd /repo; bash -c 'git status'")).toContain("last command of a pipeline");
 		expect(guard("shopt -s lastpipe; true | cd /repo; sh -c 'gi\\t status'")).toContain("last command of a pipeline");
+		expect(guard("x=$(echo | cd /repo; git status)")).toContain("last command of a pipeline");
+	});
+
+	it("refuses git behind a wrapper that can move it", () => {
+		for (const command of ["exec git -C /repo reset --hard", "sudo git -C /repo reset --hard", "env -C /repo git reset --hard", "env --chdir=/repo git status", "busybox git status", "busybox sh -c 'git -C /repo reset --hard'", "sudo bash -c 'git status'", "sudo eval 'git -C /repo reset --hard'", "flock /tmp/l -c 'git -C /repo status'"]) {
+			expect(guard(command), command).toContain("runs git through");
+		}
+		expect(guard("env git status")).toBeUndefined();
+		expect(guard("nohup git status")).toBeUndefined();
+		expect(guard("sudo ls")).toBeUndefined();
+	});
+
+	it("keeps every directory a cd that may not run leaves possible", () => {
+		for (const moveBack of ["false && cd WT", "if false; then cd WT; fi", "f() { cd WT; }", "true || cd WT", "case x in y) cd WT;; esac"]) {
+			expect(guard(`cd /repo; ${moveBack.replace("WT", WT)}; git reset --hard`)).toContain(`targets ${resolve("/repo")}`);
+		}
+		expect(guard("cd /repo || cd WT; git status".replace("WT", WT))).toContain(`targets ${resolve("/repo")}`);
+		// Every possible directory inside the worktree: allowed.
+		expect(guard("cd a && cd b && git status")).toBeUndefined();
+		expect(guard("git status; false && cd sub; git log")).toBeUndefined();
+		expect(guard("test -d build && cd build; git status")).toBeUndefined();
+		// `~user` is another user's home, wherever that is.
+		expect(guard("cd ~someuser/repo && git status")).toContain("unverifiable");
+	});
+
+	it("judges a script a shell or eval runs from the directory it starts in (PR #13 review)", () => {
+		expect(guard("bash -c 'cd /repo && git status'")).toContain(`targets ${resolve("/repo")}`);
+		expect(guard("sh -c 'git -C /repo status'")).toContain(`targets ${resolve("/repo")}`);
+		expect(guard("cd /repo && bash -c 'git status'")).toContain(`targets ${resolve("/repo")}`);
+		expect(guard(`cd /tmp && bash -c 'cd ${WT} && git status'`)).toBeUndefined();
+		expect(guard("bash -c 'git stash'")).toContain("stash stack is shared");
+		expect(guard("bash -c 'git status' && git log")).toBeUndefined();
+		// A shell's script runs in a child; eval runs in this shell, so its cd moves later git.
+		expect(guard("bash -c 'cd /repo'; git status")).toBeUndefined();
+		expect(guard("eval 'cd /repo'; git status")).toContain("unverifiable");
+		expect(guard("eval cd /repo '&&' git status")).toContain(`targets ${resolve("/repo")}`);
+
+		// fish is a shell too, and a script built at runtime cannot be checked.
+		expect(guard("fish -c 'git -C /repo reset --hard'")).toContain(`targets ${resolve("/repo")}`);
+		// Only the -c script runs; the words after it are $0, $1 (PR #15 review).
+		expect(guard("bash -c 'echo ok' 'git -C /repo status'")).toBeUndefined();
+		// …unless the script runs them (PR #15 review).
+		expect(guard(`bash -c '"$@"' _ git -C /repo status`)).toContain(`targets ${resolve("/repo")}`);
+		expect(guard("bash -c '$0 \"$@\"' git -C /repo status")).toContain(`targets ${resolve("/repo")}`);
+		// A script sourced from a substitution may cd; a literal file keeps the directory.
+		expect(guard("source <(echo cd /repo); git status")).toContain("unverifiable");
+		expect(guard("bash -o pipefail -lc 'git -C /repo status' x")).toContain(`targets ${resolve("/repo")}`);
+		// An eval in a loop may cd on the next pass.
+		expect(guard("for i in 1 2; do git status; eval cd /repo; done")).toContain("inside a loop");
+		expect(guard("source <(echo git -C /repo reset --hard)")).toContain("too complex to verify");
+		expect(guard("source .venv/bin/activate && git status")).toBeUndefined();
+		// Past three levels of nesting, git anywhere in the script is refused.
+		expect(guard("eval eval eval git -C /repo status")).toContain(`targets ${resolve("/repo")}`);
+		expect(guard("eval eval eval eval git -C /repo status")).toContain("too complex to verify");
+		expect(guard("eval eval eval eval echo hi")).toBeUndefined();
 	});
 
 	it("treats a globbed cd target as an unknown directory (PR #12 review)", () => {

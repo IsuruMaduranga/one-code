@@ -142,12 +142,24 @@ function submoduleGitDirs(root: string, commonDir: string): string[] | undefined
 	return [...found];
 }
 
+/** The hooks a git read can run: `status` rewrites the index. */
+export const READ_HOOKS = ["post-index-change"] as const;
+
 /**
- * Why a git read in `dir` could run a program the checkout names, or undefined
- * when its repository-scoped configuration names none (or `dir` is in no
- * checkout). `home` expands a `~` hooks path.
+ * The hooks `git reset --hard` can run: the index rewrite, and the ref update
+ * when it moves HEAD. A clean tree made the reset recoverable, but a
+ * recoverable reset still ran a configured hook unclassified
+ * (AUTO-MODE-SECURITY-REVIEW-2026-09-24 M2).
  */
-export function checkoutGitRunsProgram(dir: string, home: string): string | undefined {
+export const RESET_HOOKS = ["post-index-change", "reference-transaction"] as const;
+
+/**
+ * Why a git command in `dir` could run a program the checkout names, or
+ * undefined when its repository-scoped configuration names none (or `dir` is
+ * in no checkout). `hooks` are the hook names the command can run; `home`
+ * expands a `~` hooks path.
+ */
+export function checkoutGitRunsProgram(dir: string, home: string, hooks: readonly string[] = READ_HOOKS): string | undefined {
 	const checkout = checkoutOf(dir);
 	if (!checkout) return undefined;
 	const { root, gitDir, commonDir } = checkout;
@@ -169,10 +181,8 @@ export function checkoutGitRunsProgram(dir: string, home: string): string | unde
 			return `a submodule's git config ${found ? `sets ${found.program ?? "core.hookspath"}, which names a program git runs` : "cannot be read"}`;
 		}
 	}
-	if (hooksDirs.some((hooks) => existsSync(join(hooks, "post-index-change")))) {
-		return "the checkout has a post-index-change hook, which git status runs";
-	}
-	return undefined;
+	const hook = hooks.find((name) => hooksDirs.some((dir) => existsSync(join(dir, name))));
+	return hook && `the checkout has a ${hook} hook, which git runs`;
 }
 
 /** What a config file names; empty when it does not exist, undefined when it cannot be read. */

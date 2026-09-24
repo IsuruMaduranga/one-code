@@ -26,6 +26,8 @@ import {
 	readSettingsForWrite,
 	writeSettings,
 } from "../lib/one-code-settings.ts";
+import { resolve } from "node:path";
+import { expandTilde } from "../lib/paths.ts";
 import type { PermissionMode } from "./matcher.ts";
 
 export { settingsPaths };
@@ -58,6 +60,7 @@ interface ClaudeSettingsFile {
 		allow?: string[];
 		deny?: string[];
 		ask?: string[];
+		additionalDirectories?: string[];
 		defaultMode?: string;
 		disableBypassPermissionsMode?: string;
 	};
@@ -162,16 +165,133 @@ export function resolveStartupMode(
 	return { bypassRefused };
 }
 
+export type RuleBehavior = "allow" | "ask" | "deny";
+
+/** Where a permission rule was read from, for the `/permissions` panel. */
+export type RuleSource = "claude-user" | "onecode-user" | "project" | "project-local" | "onecode-project" | "managed";
+
+export interface SourcedRule {
+	behavior: RuleBehavior;
+	raw: string;
+	source: RuleSource;
+	/** The settings file the rule is in. */
+	path: string;
+}
+
+/** Every settings file permissions are read from, lowest precedence first, with its source. */
+function permissionSources(cwd: string, home: string): Array<[RuleSource, string]> {
+	const paths = settingsPaths(cwd, home);
+	return [
+		["claude-user", paths.user],
+		["onecode-user", oneCodeSettingsPath(home)],
+		["project", paths.project],
+		["project-local", paths.local],
+		["onecode-project", oneCodeProjectSettingsPath(cwd, home)],
+		...managedSettingsPaths().map((path): [RuleSource, string] => ["managed", path]),
+	];
+}
+
+export interface SourcedDirectory {
+	/** As written in the settings file. */
+	raw: string;
+	/** Absolute: `~` expanded, a relative entry resolved against the working directory. */
+	path: string;
+	source: RuleSource;
+	/** The settings file it is in. */
+	settingsPath: string;
+}
+
 /**
- * Append an allow rule to a One Code settings file, creating it if needed.
+ * Claude Code's `permissions.additionalDirectories`, from every source, with
+ * the file each came from. The caller decides which sources are trusted: a
+ * repository's own files are applied only after the user trusts them.
+ */
+export function listWorkspaceDirectories(cwd: string, home: string): SourcedDirectory[] {
+	const dirs: SourcedDirectory[] = [];
+	for (const [source, settingsPath] of permissionSources(cwd, home)) {
+		const list = readSettingsFile(settingsPath)?.permissions?.additionalDirectories;
+		if (!Array.isArray(list)) continue;
+		for (const raw of list) {
+			if (typeof raw !== "string" || !raw.trim()) continue;
+			dirs.push({ raw, path: resolve(cwd, expandTilde(raw.trim(), home)), source, settingsPath });
+		}
+	}
+	return dirs;
+}
+
+/** Add a directory to a One Code settings file's `permissions.additionalDirectories`. */
+export function persistWorkspaceDirectory(dir: string, filePath: string): void {
+	addToPermissionsList("additionalDirectories", dir, filePath);
+}
+
+/** Remove a directory, as written, from a One Code settings file. False when it is not there. */
+export function removeWorkspaceDirectory(raw: string, filePath: string): boolean {
+	return removeFromPermissionsList("additionalDirectories", raw, filePath);
+}
+
+/**
+ * Every permission rule with the file it came from, in load order (the order
+ * `loadPermissionSettings` merges them). The panel lists them and can delete a
+ * rule from One Code's own files only: One Code never edits Claude Code's
+ * files, the repository's or managed policy.
+ */
+export function listPermissionRules(cwd: string, home: string): SourcedRule[] {
+	const rules: SourcedRule[] = [];
+	for (const [source, path] of permissionSources(cwd, home)) {
+		const perms = readSettingsFile(path)?.permissions;
+		if (!perms) continue;
+		for (const behavior of ["allow", "ask", "deny"] as const) {
+			const list = perms[behavior];
+			if (!Array.isArray(list)) continue;
+			for (const raw of list) if (typeof raw === "string") rules.push({ behavior, raw, source, path });
+		}
+	}
+	return rules;
+}
+
+/**
+ * Append a rule to a One Code settings file, creating it if needed.
  * Strict read + atomic write, like the other `~/.onecode` writers: a malformed
  * file is not silently clobbered (it may also hold classifierModel/subagentModel),
- * and a half-written file is never visible to a concurrent reader.
+ * and a half-written file is never visible to a concurrent reader. Returns
+ * false, writing nothing, when the file already holds the rule.
  */
+export function persistPermissionRule(behavior: RuleBehavior, rule: string, filePath: string): boolean {
+	return addToPermissionsList(behavior, rule, filePath);
+}
+
+/** `persistPermissionRule` for an allow rule (`/allow`). */
 export function persistAllowRule(rule: string, filePath: string): void {
+	persistPermissionRule("allow", rule, filePath);
+}
+
+/**
+ * Remove every copy of a rule from a One Code settings file. Returns false,
+ * writing nothing, when the file does not hold it. An emptied list is kept as
+ * `[]`, and the file's other keys are preserved.
+ */
+export function removePermissionRule(behavior: RuleBehavior, rule: string, filePath: string): boolean {
+	return removeFromPermissionsList(behavior, rule, filePath);
+}
+
+/** A string list under `permissions` that One Code edits in its own files. */
+type PermissionsList = RuleBehavior | "additionalDirectories";
+
+/** False, writing nothing, when the list already holds `value`. */
+function addToPermissionsList(field: PermissionsList, value: string, filePath: string): boolean {
 	const file = readSettingsForWrite(filePath) as ClaudeSettingsFile;
-	const permissions = (file.permissions ??= {});
-	const allow = (permissions.allow ??= []);
-	if (!allow.includes(rule)) allow.push(rule);
+	const list = ((file.permissions ??= {})[field] ??= []);
+	if (list.includes(value)) return false;
+	list.push(value);
 	writeSettings(filePath, file as Record<string, unknown>);
+	return true;
+}
+
+function removeFromPermissionsList(field: PermissionsList, value: string, filePath: string): boolean {
+	const file = readSettingsForWrite(filePath) as ClaudeSettingsFile;
+	const list = file.permissions?.[field];
+	if (!Array.isArray(list) || !list.includes(value)) return false;
+	file.permissions![field] = list.filter((entry) => entry !== value);
+	writeSettings(filePath, file as Record<string, unknown>);
+	return true;
 }

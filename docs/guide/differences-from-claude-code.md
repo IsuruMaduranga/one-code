@@ -32,6 +32,9 @@ so nothing surprises you.
 | Task-list key | ctrl+t. | `/tasks show` and `/tasks hide`. pi reserves ctrl+t for thinking blocks. |
 | Where auto mode's classifier runs | On Anthropic's API server, through a request field the endpoint must support; the local classifier is a fallback only until about October 23, 2026 ([LiteLLM's notes](https://docs.litellm.ai/blog/claude-code-server-side-auto-mode)). | In the harness, on a model from your own provider, so auto mode works with any provider. |
 | Deleting files in auto mode | The whole project directory is trusted. | A delete is approved only when git can recover the file; otherwise the classifier decides. |
+| Approving a call auto mode denied | `/permissions` tells the model permission was granted; the retry is judged again. | The approval lets that exact call run once without the classifier. |
+| Auto-mode built-in rules | A section's built-in rules can be switched off. | Always in effect; your rules only add to them. |
+| Workspace directories | Reads, edits in accept-edits mode, and auto-mode writes. | Reads and accept-edits edits. Auto-mode writes there go to the classifier, and credential files there still prompt. |
 | Bypass mode | Protected paths stay protected. | Bypass mode bypasses everything, including protected paths. |
 | First-run consent for auto mode | Asked once. | Not asked. Auto mode is on from the first session. |
 | OS sandbox | Paired with auto mode. | None. Run One Code in a container for OS-level isolation. |
@@ -57,7 +60,7 @@ The `Agent` tool's remote isolation option isn't implemented.
 
 Claude Code commands with no One Code or pi counterpart: `/cost` (the
 footer shows cost instead), `/status`, `/vim`, `/terminal-setup`, `/bug`,
-`/help`, `/rewind`, `/add-dir`, `/hooks`, `/ide`, `/install-github-app`,
+`/help`, `/rewind`, `/hooks`, `/ide`, `/install-github-app`,
 `/statusline`, `/privacy-settings`, and `/upgrade`. pi's `/changelog` and
 `/settings` cover part of `/release-notes` and `/config`. `/review` is
 available through the `commit-commands` plugin when installed.
@@ -84,9 +87,8 @@ action but never pre-approve one. See [Hooks](hooks.md).
 
 ## Settings keys that are ignored
 
-`permissions.additionalDirectories` isn't honored. The `env` block is read
-only for `CLAUDE_CODE_SUBAGENT_MODEL`, and only from user and managed
-scope. `includeCoAuthoredBy`, `apiKeyHelper`, `forceLoginMethod`,
+The `env` block is read only for `CLAUDE_CODE_SUBAGENT_MODEL`, and only
+from user and managed scope. `includeCoAuthoredBy`, `apiKeyHelper`, `forceLoginMethod`,
 `cleanupPeriodDays`, and `spinnerTipsEnabled` aren't read. Run
 `/doctor report` to see, per file, which keys were used, ignored, or
 refused.

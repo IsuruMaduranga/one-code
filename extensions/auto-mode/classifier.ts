@@ -44,6 +44,7 @@ import {
 	replyText,
 	withAuthBaseUrl,
 } from "./model-select.ts";
+import { actionLength, MAX_ACTION_CHARS } from "./transcript.ts";
 
 /** A slow classifier stalls every tool call, so the wait is capped per stage. */
 export const CLASSIFIER_TIMEOUT_MS = 30_000;
@@ -191,13 +192,25 @@ function notifyOnce(deps: ClassifierDeps, key: string, message: string, level: "
 export async function classify(request: ClassifyRequest, deps: ClassifierDeps): Promise<ClassifyVerdict> {
 	const { candidates, notices } = remainingCandidates(deps);
 	if (candidates.length === 0) {
-		return { decision: "block", reason: "No model is available to run the auto-mode classifier.", tier: "unmatched" };
+		return { decision: "block", reason: "No model is available to run the auto-mode classifier.", tier: "unmatched", noVerdict: true };
 	}
 
 	// Selection notices (a configured model unavailable or overridden as stale, a
 	// cross-provider setting honored) — surfaced once each at their own level, keyed
 	// by their text so an informational "honored" line is not shown as a warning.
 	for (const notice of notices) notifyOnce(deps, notice.text, notice.text, notice.level);
+
+	// The action is sent whole (transcript.ts MAX_ACTION_CHARS); one too large for
+	// that is refused with its size, never judged from a prefix.
+	const actionChars = deps.reviewOnly ? 0 : actionLength(request.transcript);
+	if (actionChars > MAX_ACTION_CHARS) {
+		return {
+			decision: "block",
+			reason: `This call is ${actionChars} characters, more than the ${MAX_ACTION_CHARS} the auto-mode classifier reviews in full. Split it into smaller calls.`,
+			tier: "unmatched",
+			noVerdict: true,
+		};
+	}
 
 	// buildPayload builds the ~110KB ruleset once and returns the grounding index
 	// derived from it, so the ruleset is not rebuilt/re-parsed a second time here.
@@ -385,7 +398,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 			lastError = error instanceof Error ? error.message : String(error);
 
 			if (kind === "cancelled") {
-				return { decision: "block", reason: "Auto-mode classification was cancelled.", tier: "unmatched" };
+				return { decision: "block", reason: "Auto-mode classification was cancelled.", tier: "unmatched", noVerdict: true };
 			}
 			if (kind === "truncated") {
 				if (debug) process.stderr.write(`[auto-mode] ${key} ${request.toolName} → verdict truncated at maxTokens\n`);
@@ -394,6 +407,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 					reason:
 						"The approval classifier's reply was cut off by its output limit before the verdict completed. If this keeps happening, pin a stronger classifier model with /auto-mode model.",
 					tier: "unmatched",
+					noVerdict: true,
 				};
 			}
 			if (kind === "error") {
@@ -414,7 +428,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 				}
 				// A substantive, non-transient failure that is not "model unusable here":
 				// surface it rather than papering over something about to clear.
-				return { decision: "block", reason: `Auto-mode classifier could not be reached (${lastError}).`, tier: "unmatched" };
+				return { decision: "block", reason: `Auto-mode classifier could not be reached (${lastError}).`, tier: "unmatched", noVerdict: true };
 			}
 			if (kind === "timeout") {
 				// Transient — do NOT reject the model, it may be fine next call. Step to
@@ -451,6 +465,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 		return {
 			decision: "block",
 			tier: "timeout",
+			noVerdict: true,
 			reason:
 				`Auto mode could not screen this ${request.toolName} call in time — the approval classifier${model ? ` (${model})` : ""} ` +
 				"is temporarily unavailable (timed out), so the call was not judged either way.",
@@ -462,5 +477,6 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 		decision: "block",
 		reason: `No usable auto-mode classifier model (last error: ${lastError}). Set autoMode.classifierModel in ~/.onecode/settings.json.`,
 		tier: "unmatched",
+		noVerdict: true,
 	};
 }

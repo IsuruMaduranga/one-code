@@ -28,7 +28,7 @@
 import { homedir } from "node:os";
 import { isAbsolute } from "node:path";
 import { isWithin, toAbsoluteBash } from "../auto-mode/paths.ts";
-import { gitSubcommand, leadTokens, LOOPS, parseCommand, resolvePayload, scopedTracker, type Token } from "../auto-mode/shell-analysis.ts";
+import { gitSubcommand, INLINE_SCRIPT_SHELLS, isUnknownTilde, leadTokens, LOOPS, movesDirectory, parseCommand, resolvePayload, scopedTracker, type Token } from "../auto-mode/shell-analysis.ts";
 
 export interface WorktreeGuardContext {
 	command: string;
@@ -84,16 +84,80 @@ function stashReason(rest: Token[]): string | undefined {
 }
 
 export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: WorktreeGuardContext): string | undefined {
-	const { segments, parseFailed } = parseCommand(command);
-	if (parseFailed || segments.length === 0) {
-		// Quotes and backslashes removed first: `gi\t` and `g"it"` are git too.
-		if (!/\bgit\b/.test(command.replace(/[\\'"]/g, ""))) return undefined;
-		return isolated(
+	return guardScript(command, worktreePath, sharedRoot, worktreePath, 0).reason;
+}
+
+/**
+ * Judge one script that starts in `startDir` (undefined: not statically
+ * known). Returns the refusal, if any, and whether the script can change the
+ * directory of the shell it runs in (what an `eval` of it would do).
+ */
+/** Builtins that run a script in this shell. */
+const SCRIPT_RUNNERS: ReadonlySet<string> = new Set(["eval", "source", "."]);
+
+/** Shell options that take the next word as their value. */
+const SHELL_VALUE_OPTIONS = new Set(["-o", "+o", "-O", "+O", "--rcfile", "--init-file"]);
+
+/**
+ * The command lines a shell invocation runs: with `-c` (alone or in a cluster
+ * such as `-lc`), the first operand; the words after it are `$0`, `$1`, …
+ * (`bash -c 'echo ok' 'git status'` runs no git), unless the script expands
+ * them (`bash -c '"$@"' _ git status`), when they are a command line too.
+ * Without `-c`, every argument, since which one is a script file is not known.
+ */
+function shellScripts(args: Token[]): string[] {
+	let command = false;
+	let i = 0;
+	for (; i < args.length; i++) {
+		const value = args[i].value;
+		if (value === "--" || value === "-") {
+			i++;
+			break;
+		}
+		if (!/^[-+]/.test(value)) break;
+		if (SHELL_VALUE_OPTIONS.has(value)) i++;
+		else if (/^-[A-Za-z]+$/.test(value) && value.includes("c")) command = true;
+	}
+	const values = args.map((arg) => arg.value);
+	if (!command) return values;
+	const [script, ...positional] = values.slice(i);
+	if (script === undefined) return [];
+	// `$0`…`$9`, `$@`, `$*`, `${1}`, `${@}`: read both from `$0` and from `$1`.
+	if (!/\$(?:[0-9@*]|\{[0-9@*])/.test(script) || positional.length === 0) return [script];
+	return [script, positional.join(" "), positional.slice(1).join(" ")];
+}
+
+/** Whether git appears as a word in `text`, read with quotes and backslashes removed (`gi\t`, `g"it"`). */
+const mentionsGit = (text: string): boolean => /\bgit\b/.test(text.replace(/[\\'"]/g, ""));
+
+/**
+ * A script the guard cannot follow (it failed to parse, or is nested too deep):
+ * refused if git appears anywhere in it, and a `cd` in it leaves the directory
+ * unknown.
+ */
+function unverifiedScript(command: string, worktreePath: string, mayMove: boolean): { reason?: string; moves?: boolean } {
+	if (!mentionsGit(command)) return { moves: mayMove && /\b(?:cd|pushd|popd)\b/.test(command) };
+	return {
+		reason: isolated(
 			worktreePath,
 			"this command is too complex to verify that its git operations stay inside the worktree",
 			`Break it into plain, separate git commands with literal paths and run them from ${worktreePath}.`,
-		);
-	}
+		),
+	};
+}
+
+/** How many directories a segment may run in before the guard treats its directory as unknown. */
+const MAX_POSSIBLE_DIRS = 8;
+
+function guardScript(
+	command: string,
+	worktreePath: string,
+	sharedRoot: string,
+	startDir: string | undefined,
+	depth: number,
+): { reason?: string; moves?: boolean } {
+	const { segments, parseFailed } = parseCommand(command);
+	if (parseFailed || segments.length === 0) return unverifiedScript(command, worktreePath, parseFailed);
 
 	// Claude Code's exact refusal for stdin-fed git (one static string for
 	// both mechanisms) — keep it byte-identical to the capture.
@@ -105,14 +169,16 @@ export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: W
 		);
 
 	/** Directory the current segment runs in; undefined = not statically known. */
-	let dir: string | undefined = worktreePath;
+	let dir: string | undefined = startDir;
 	/**
-	 * The directory per subshell scope (`Segment.scopes`): a `cd` inside
-	 * `( … )`, a substitution or a pipeline member does not leak out.
+	 * The directories a segment may run in, per subshell scope
+	 * (`Segment.scopes`): a `cd` inside `( … )`, a substitution or a pipeline
+	 * member does not leak out. A `cd` that may not run (`false && cd x`, an
+	 * `if` branch) leaves both the old and the new directory possible, and every
+	 * git command must be safe in each.
 	 */
-	const scopeDirs = scopedTracker<string | undefined>(worktreePath);
+	const scopeDirs = scopedTracker<(string | undefined)[]>([startDir]);
 
-	const moves = (seg: (typeof segments)[number]) => ["cd", "pushd", "popd"].includes(resolvePayload(leadTokens(seg)).command);
 	// A git command as the parse sees it, spelled any way (`gi\t`, `env git`,
 	// `xargs git`, `parallel git`), or anywhere in the script a shell or `eval`
 	// runs (`bash -c '…'`), read as text with quotes and backslashes removed so
@@ -120,29 +186,40 @@ export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: W
 	const runsGit = (seg: (typeof segments)[number]) => {
 		const { command: cmd, args } = resolvePayload(leadTokens(seg));
 		if (cmd === "git" || (cmd === "parallel" && args.some((arg) => arg.value === "git"))) return true;
-		if (!["sh", "bash", "zsh", "dash", "ksh", "eval", "source", "."].includes(cmd)) return false;
-		return args.some((arg) => /\bgit\b/.test(arg.value.replace(/[\\'"]/g, "")));
+		if (!INLINE_SCRIPT_SHELLS.has(cmd) && !SCRIPT_RUNNERS.has(cmd)) return false;
+		return args.some((arg) => mentionsGit(arg.value));
 	};
 	// A loop body runs more than once, so a `cd` in it moves every git command
 	// in the loop after the first pass; the segments show one pass only.
-	const movesInLoop = segments.some((seg) => seg.enclosing.some((construct) => LOOPS.has(construct)) && moves(seg));
+	// An `eval` there may `cd` too.
+	const movesOrEvals = (seg: (typeof segments)[number]) => movesDirectory(seg) || resolvePayload(leadTokens(seg)).command === "eval";
+	const movesInLoop = segments.some((seg) => seg.enclosing.some((construct) => LOOPS.has(construct)) && movesOrEvals(seg));
 	if (movesInLoop && segments.some(runsGit)) {
-		return isolated(
-			worktreePath,
-			"this command changes directory inside a loop, so the repository its git commands target cannot be verified",
-			`Break it into plain, separate git commands with literal paths and run them from ${worktreePath}.`,
-		);
+		return {
+			reason: isolated(
+				worktreePath,
+				"this command changes directory inside a loop, so the repository its git commands target cannot be verified",
+				`Break it into plain, separate git commands with literal paths and run them from ${worktreePath}.`,
+			),
+		};
 	}
 	// The last member of a pipeline runs in the current shell under `shopt -s
 	// lastpipe`, so its `cd` may move every later command.
 	// Only a git command after such a `cd` can be moved by it.
-	const pipeMove = segments.findIndex((seg) => seg.lastInPipeline && moves(seg));
-	if (pipeMove >= 0 && segments.slice(pipeMove + 1).some(runsGit)) {
-		return isolated(
-			worktreePath,
-			"this command changes directory in the last command of a pipeline, which can run in the current shell, so the repository its git commands target cannot be verified",
-			`Break it into plain, separate git commands with literal paths and run them from ${worktreePath}.`,
-		);
+	// Inside a substitution too (`$(echo | cd /repo; git status)`), but only for
+	// git later in the shell that tail runs in.
+	const inShell = (seg: (typeof segments)[number], shell: number[]) => shell.every((scope, depth) => seg.scopes[depth] === scope);
+	const pipeMoved = segments.some(
+		(cd, index) => cd.pipelineShell && movesDirectory(cd) && segments.slice(index + 1).some((seg) => inShell(seg, cd.pipelineShell!) && runsGit(seg)),
+	);
+	if (pipeMoved) {
+		return {
+			reason: isolated(
+				worktreePath,
+				"this command changes directory in the last command of a pipeline, which can run in the current shell, so the repository its git commands target cannot be verified",
+				`Break it into plain, separate git commands with literal paths and run them from ${worktreePath}.`,
+			),
+		};
 	}
 
 	const checkSegment = (seg: (typeof segments)[number]): string | undefined => {
@@ -161,8 +238,8 @@ export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: W
 			const targetToken = leadArgs[j];
 			const target = targetToken?.value;
 			if (!target) dir = homedir();
-			// A glob (`cd /r*po`) or an expansion lands wherever bash expands it.
-			else if (hasExpansion(target) || target === "-" || targetToken.glob || targetToken.dynamic) dir = undefined;
+			// A glob (`cd /r*po`), an expansion or `~user` lands wherever bash expands it.
+			else if (hasExpansion(target) || target === "-" || targetToken.glob || targetToken.dynamic || isUnknownTilde(target)) dir = undefined;
 			// An absolute (or ~) destination re-anchors the tracked directory
 			// even when it was unknown — later git commands become checkable again.
 			else if (isAbsolute(target) || target === "~" || target.startsWith("~/")) dir = toAbsoluteBash("/", target, homedir());
@@ -175,6 +252,48 @@ export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: W
 		}
 
 		const { command: cmd, args, peeled } = resolvePayload(tokens);
+		// Git behind a wrapper the strict reading does not peel (`sudo`, `exec`,
+		// `env -C /repo`): the wrapper may have moved it, so its target cannot be
+		// read off the command.
+		// A shell, `eval` or `source` in command position is judged below instead.
+		if (cmd !== "git" && !SCRIPT_RUNNERS.has(cmd) && !INLINE_SCRIPT_SHELLS.has(cmd)) {
+			const wide = resolvePayload(tokens, "wide");
+			const runsScript = INLINE_SCRIPT_SHELLS.has(wide.command) || SCRIPT_RUNNERS.has(wide.command);
+			const shellScript = runsScript && wide.args.some((arg) => mentionsGit(arg.value));
+			if (wide.command === "git" || shellScript || wide.scripts.some(mentionsGit)) {
+				return isolated(
+					worktreePath,
+					`this command runs git through ${rawLead}, which can change the repository it targets`,
+					`Run git directly, with literal paths inside ${worktreePath}.`,
+				);
+			}
+		}
+
+		// A script a shell or `eval` runs is judged as commands of its own,
+		// starting where this command runs: `bash -c 'cd /repo && git status'`
+		// runs git in /repo. A shell's script runs in a child, but `eval` runs
+		// in this shell, so a `cd` in it moves the commands after it.
+		// Past three levels a script is judged as one the guard cannot follow.
+		if (INLINE_SCRIPT_SHELLS.has(cmd) || cmd === "eval") {
+			const scripts = cmd === "eval" ? [args.map((arg) => arg.value).join(" ")] : shellScripts(args);
+			for (const script of scripts) {
+				const nested = depth < 3 ? guardScript(script, worktreePath, sharedRoot, dir, depth + 1) : unverifiedScript(script, worktreePath, true);
+				if (nested.reason) return nested.reason;
+				if (cmd === "eval" && nested.moves) dir = undefined;
+			}
+			return undefined;
+		}
+
+		// `source <(…)`, `. "$f"`: the script is only known at runtime, so git in
+		// its source text cannot be checked.
+		// It runs in this shell, so a `cd` in it would move later git: the
+		// directory is unknown after it. A literal file (`source .venv/bin/activate`)
+		// keeps it: its text is not the guard's to read.
+		if ((cmd === "source" || cmd === ".") && args.some((arg) => arg.dynamic)) {
+			const unverified = unverifiedScript(seg.raw, worktreePath, false);
+			if (unverified.reason) return unverified.reason;
+			dir = undefined;
+		}
 
 		// Git whose arguments are assembled at runtime — the repository it will
 		// target cannot be read off the command.
@@ -256,10 +375,17 @@ export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: W
 	};
 
 	for (const seg of segments) {
-		dir = scopeDirs.get(seg);
-		const reason = checkSegment(seg);
-		if (reason) return reason;
-		scopeDirs.set(seg, dir);
+		const before = scopeDirs.get(seg);
+		const after: (string | undefined)[] = [];
+		for (const start of before) {
+			dir = start;
+			const reason = checkSegment(seg);
+			if (reason) return { reason };
+			after.push(dir);
+		}
+		const possible = [...new Set(seg.conditional ? [...before, ...after] : after)];
+		// Past a handful of possibilities the directory is as good as unknown.
+		scopeDirs.set(seg, possible.length > MAX_POSSIBLE_DIRS ? [undefined] : possible);
 	}
-	return undefined;
+	return { moves: segments.some(movesDirectory) || segments.some((seg) => resolvePayload(leadTokens(seg)).command === "eval") };
 }

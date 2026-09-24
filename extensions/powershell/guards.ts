@@ -64,7 +64,7 @@ export function powershellGuardReason(command: string, opts: { background: boole
 			// finds "rebase" instead of misreading the flag's value as the
 			// subcommand and missing the interactive-editor guard entirely.
 			const words = statement.trim().split(/\s+/).slice(1);
-			const { sub, rest } = gitSubcommand(words.map((value) => ({ value, hadExpansion: false })));
+			const { sub, rest } = gitSubcommand(words.map((value) => ({ value })));
 			const flags = new Set(rest.map((t) => t.value));
 			if (sub === "rebase" && (flags.has("-i") || flags.has("--interactive"))) {
 				return (

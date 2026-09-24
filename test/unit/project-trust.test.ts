@@ -30,7 +30,7 @@ describe("project allow-rule consent", () => {
 	});
 
 	it("describes what the repository wants and which rule fired", () => {
-		const { title, message } = describeProjectAllow(["Bash(curl:*)", "Read"], "Bash(curl:*)");
+		const { title, message } = describeProjectAllow(["Bash(curl:*)", "Read"], { rule: "Bash(curl:*)" });
 		expect(title).toMatch(/Trust this repository/);
 		expect(message).toContain("2 permission rule(s)");
 		expect(message).toContain('matches "Bash(curl:*)"');

@@ -59,8 +59,10 @@ function buildToolsSection(options: BuildSystemPromptOptions): string {
 }
 
 function buildEnvironmentSection(env: EnvironmentInfo): string {
+	// Claude Code's line and indentation for additional working directories.
+	const workspace = env.workspaceDirs?.length ? `\n - Additional working directories:\n${env.workspaceDirs.map((dir) => `  - ${dir}`).join("\n")}` : "";
 	return `# Environment
- - Working directory: ${env.cwd}
+ - Working directory: ${env.cwd}${workspace}
  - Is a git repository: ${env.isGitRepo ? "yes" : "no"}
  - Platform: ${env.platform}
  - OS Version: ${env.osVersion}

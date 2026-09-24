@@ -9,8 +9,9 @@
 
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
-import { analyzeShellCommand, leadTokens, parseCommand, resolvePayload } from "../auto-mode/shell-analysis.ts";
-import { pathArgument, resolveForContainment } from "../auto-mode/paths.ts";
+import { analyzeShellCommand, INLINE_SCRIPT_SHELLS, isUnknownTilde, leadTokens, movesDirectory, parseCommand, resolvePayload } from "../auto-mode/shell-analysis.ts";
+import { pathArgument, resolveForContainment, toAbsolute, toAbsoluteBash } from "../auto-mode/paths.ts";
+import { isSensitivePath } from "../auto-mode/sensitive.ts";
 import { isProtectedPath, isWritingTool } from "./protected-paths.ts";
 import {
 	canonicalCommandName,
@@ -237,11 +238,8 @@ export function bashSubcommands(command: string): string[] | undefined {
 	return segments.filter((seg) => seg.substitution === undefined).map((seg) => seg.raw).filter((raw) => raw.length > 0);
 }
 
-/** Commands after which a substitution's paths resolve somewhere the read-only check did not look. */
-const MOVES_DIRECTORY = new Set(["cd", "pushd", "popd"]);
-
-/** Shells whose `-c` argument is a nested command line. */
-const SHELL_INTERPRETERS = new Set(["sh", "bash", "zsh", "dash", "ksh", "fish"]);
+/** Redirect targets that are devices, never files: always fine under an allow rule. */
+const DEVICE_TARGETS = new Set(["/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty"]);
 
 /** The script a `sh -c '…'` / `bash -lc '…'` invocation runs, if any. */
 function inlineShellScript(args: string[]): string | undefined {
@@ -269,8 +267,9 @@ function roughPieces(line: string): string[] {
  * raw line, each subcommand, and each subcommand's *payload form* — transparent
  * wrappers peeled (`env`, `command`, `nice`, `timeout`, `xargs`, …), the
  * commands inside subshells, groups and substitutions, the command word reduced to its lowercased
- * basename (`/bin/rm`, `\rm`, `RM` → `rm`), and a `sh|bash|zsh -c '…'` script
- * expanded recursively. Claude Code strips the same wrappers before its deny
+ * basename (`/bin/rm`, `\rm`, `RM` → `rm`), and a `sh|bash|zsh -c '…'` script,
+ * an `eval` line, a `trap` handler and a `find -exec` command expanded
+ * recursively. Claude Code strips the same wrappers before its deny
  * check (`bashPermissions.ts stripSafeWrappers`); until 2026-09-05 `env rm -f
  * x` ran past `Bash(rm:*)` here after a plain "Allow bash?" prompt
  * (PERMISSIONS-REVIEW-2026-09-05 M1). Deny/ask only — an allow rule keeps
@@ -295,7 +294,7 @@ export function bashMatchForms(command: string, depth = 0): string[] {
 	// (`sh <<'EOF'`, `cat <<EOF | sh`, `echo 'rm -rf x' | sh`). Only then, so
 	// a commit message mentioning `rm` never meets `Bash(rm:*)`.
 	const payloads = segments.map((segment) => resolvePayload(leadTokens(segment), "wide"));
-	if (payloads.some((payload) => SHELL_INTERPRETERS.has(payload.command))) {
+	if (payloads.some((payload) => INLINE_SCRIPT_SHELLS.has(payload.command))) {
 		for (const [index, segment] of segments.entries()) {
 			nested.push(...(segment.stdin ?? []));
 			const { command: printer, args } = payloads[index];
@@ -313,12 +312,25 @@ export function bashMatchForms(command: string, depth = 0): string[] {
 		if (!payload.command) continue;
 		const args = payload.args.map((token) => token.value);
 		forms.add([payload.command, ...args].join(" "));
-		if (SHELL_INTERPRETERS.has(payload.command)) {
+		if (INLINE_SCRIPT_SHELLS.has(payload.command)) {
 			const script = inlineShellScript(args);
 			if (script) nested.push(script);
 		}
 		// `eval` runs its arguments joined into one command line.
 		if (payload.command === "eval") nested.push(args.join(" "));
+		// `trap 'cmd' EXIT` runs its first argument later, as a command line.
+		if (payload.command === "trap") {
+			const handler = args[args[0] === "--" ? 1 : 0];
+			if (handler && !handler.startsWith("-")) nested.push(handler);
+		}
+		// `find … -exec cmd {} ;` runs cmd on every match.
+		if (payload.command === "find") {
+			for (const [index, arg] of args.entries()) {
+				if (!["-exec", "-execdir", "-ok", "-okdir"].includes(arg)) continue;
+				const end = args.findIndex((word, at) => at > index && (word === ";" || word === "+"));
+				nested.push(args.slice(index + 1, end < 0 ? undefined : end).join(" "));
+			}
+		}
 	}
 	for (const script of nested) for (const form of bashMatchForms(script, depth + 1)) forms.add(form);
 	return [...forms];
@@ -431,11 +443,11 @@ export function findBashAllowRule(
 		if (!rule) return undefined;
 		first ??= rule;
 	}
-	const movesDirectory = topLevel.some((seg) => MOVES_DIRECTORY.has(resolvePayload(leadTokens(seg)).command));
+	const topLevelMoves = topLevel.some(movesDirectory);
 	for (const [index, text] of parsed.substitutions.entries()) {
 		const inner = parsed.segments.filter((seg) => seg.substitution === index);
 		if (inner.every((seg) => ruleFor(seg.raw))) continue;
-		if (!movesDirectory && opts.readOnly?.(text)) continue;
+		if (!topLevelMoves && opts.readOnly?.(text)) continue;
 		return undefined;
 	}
 	return first;
@@ -788,6 +800,14 @@ export interface DecideInput {
 	 * (PERMISSIONS-REVIEW-2026-09-05 M7).
 	 */
 	protectedDirs?: string[];
+	/**
+	 * The workspace directories in force (permissions/workspace.ts), absolute and
+	 * resolved. A read inside one is a working-space read, and acceptEdits may
+	 * write inside one, as in Claude Code; a credential path inside one is not
+	 * working space. Auto mode's unclassified writes stay confined to the working
+	 * directory (the classifier's containment fast path never sees these).
+	 */
+	workspaceDirs?: string[];
 }
 
 export interface Decision {
@@ -885,9 +905,15 @@ export function isBroadExecutionRule(rule: PermissionRule): boolean {
 
 export function decide(params: DecideInput): Decision {
 	const { toolName, subject, cwd, mode, deny, ask, allow } = params;
-	/** The harness's readable session dirs, realpath'd, as the auto-mode pre-gate sees them (permissions/index.ts `readableRoots`). */
-	const sessionReadableRoots = () =>
-		[params.memoryDirPath, params.scratchpadDirPath, params.resultsDirPath, params.sessionDirPath].filter((d): d is string => !!d).map((d) => resolveForContainment(d) ?? d);
+	/**
+	 * The harness's readable session dirs and the workspace directories,
+	 * realpath'd, as the auto-mode pre-gate sees them (permissions/index.ts
+	 * `readableRoots`).
+	 */
+	const sessionReadableRoots = () => [
+		...[params.memoryDirPath, params.scratchpadDirPath, params.resultsDirPath, params.sessionDirPath].filter((d): d is string => !!d).map((d) => resolveForContainment(d) ?? d),
+		...(params.workspaceDirs ?? []),
+	];
 	/** The pre-gate's proof that a command only reads inside the project, for a substitution in an allowed command. */
 	const readOnlyShell = (command: string): boolean => {
 		const evidence = analyzeShellCommand({ command, cwd, home: homedir(), protectedDirs: params.protectedDirs, readableRoots: sessionReadableRoots() });
@@ -978,17 +1004,70 @@ export function decide(params: DecideInput): Decision {
 	// Protected-path writes are checked *before* allow rules, so an
 	// `Edit(.claude/**)` entry cannot pre-approve reconfiguring the agent's own
 	// permissions or planting a git hook. In auto mode they go to the classifier.
-	const protectedTarget = () =>
-		[subject, params.resolvedSubject].some(
+	const isProtected = (...candidates: (string | undefined)[]) =>
+		candidates.some(
 			(candidate) =>
 				candidate &&
 				(isProtectedPath(candidate, cwd) || (params.protectedDirs ?? []).some((dir) => isInsideDir(candidate, dir, cwd))),
 		);
-	if (isWritingTool(tool) && subject && protectedTarget()) {
+	if (isWritingTool(tool) && subject && isProtected(subject, params.resolvedSubject)) {
 		if (mode === "dontAsk") return { decision: "deny", cause: "protected-path" };
 		if (mode === "auto") return { decision: "classify", cause: "protected-path" };
 		return { decision: "ask", cause: "protected-path" };
 	}
+
+	/**
+	 * Whether `target` (where `spelled` resolves) is working space: the working
+	 * directory, the harness's session dirs, the plan file, and the workspace
+	 * directories except for the credentials in them.
+	 */
+	const workingSpaceHolds = (spelled: string, target: string, workspace = true): boolean => {
+		const roots = [cwd, params.resolvedCwd, params.memoryDirPath, params.scratchpadDirPath, params.resultsDirPath, params.sessionDirPath];
+		if (roots.some((dir) => dir && isAtOrInsideDir(target, dir, cwd))) return true;
+		// A workspace directory is working space except for the credentials in it:
+		// adding a directory must not make its keys readable without a prompt.
+		// Judged on the spelling and on where it resolves, so a symlink cannot
+		// launder a credential in either direction.
+		const sensitive = [spelled, target].some((candidate) => isSensitivePath(toAbsolute(cwd, candidate, homedir())));
+		if (workspace && !sensitive && (params.workspaceDirs ?? []).some((dir) => isAtOrInsideDir(target, dir, cwd))) return true;
+		return params.planFilePath ? isPlanFilePath(target, params.planFilePath, cwd) : false;
+	};
+	const outsideWorkingDir = (): Decision => {
+		if (mode === "auto") return { decision: "classify", cause: "working-dir" };
+		if (mode === "dontAsk") return { decision: "deny", cause: "working-dir" };
+		return { decision: "ask", cause: "working-dir" };
+	};
+
+	/**
+	 * Whether a redirect on the line reads or writes outside the working space,
+	 * onto a protected path, or somewhere only known at runtime (an expansion,
+	 * a glob, `~user`, or a relative target after a `cd`).
+	 */
+	const redirectEscapes = (command: string): boolean => {
+		const { segments, parseFailed } = parseCommand(command.trim());
+		// A line that did not parse may hide a redirect the segments dropped.
+		if (parseFailed) return /[<>]/.test(command);
+		const home = homedir();
+		// Only a `cd` before a redirect moves where its relative target lands.
+		let moved = false;
+		for (const segment of segments) {
+			if (movesDirectory(segment)) moved = true;
+			const targets = [...segment.redirects.map((value) => ({ value, write: true })), ...segment.inputs.map((token) => ({ value: token.value, write: false }))];
+			if (targets.length > 0 && segment.unknownTarget) return true;
+			for (const { value: target, write } of targets) {
+				if (DEVICE_TARGETS.has(target) || target.startsWith("/dev/fd/")) continue;
+				if (isUnknownTilde(target) || /[*?[]/.test(target)) return true;
+				if (moved && !isAbsolute(target) && !target.startsWith("~")) return true;
+				const absolute = toAbsoluteBash(cwd, target, home);
+				const resolved = resolveForContainment(absolute) ?? absolute;
+				// Auto mode's unclassified writes stay in the working directory, a
+				// workspace directory's included (decisions/modes.md).
+				if (!workingSpaceHolds(target, resolved, !(write && mode === "auto"))) return true;
+				if (isProtected(absolute, resolved)) return true;
+			}
+		}
+		return false;
+	};
 
 	const usableAllow =
 		mode === "auto"
@@ -1006,7 +1085,13 @@ export function decide(params: DecideInput): Decision {
 				? findBashAllowRule(usableAllow, subject, tool, { readOnly: readOnlyShell })
 				: undefined
 			: usableAllow.find((r) => ruleMatches(r, toolName, subject, cwd));
-	if (allowRule) return { decision: "allow", rule: allowRule, cause: "rule" };
+	if (allowRule) {
+		// Claude Code's path constraints, checked before any allow rule: a rule
+		// for the command never covers a redirect outside the working space
+		// (`Bash(echo:*)` and `echo … >> ~/.zshrc`), or onto a protected path.
+		if (subjectKind(tool) === "command" && subject && normalizeToolName(tool) !== "powershell" && redirectEscapes(subject)) return outsideWorkingDir();
+		return { decision: "allow", rule: allowRule, cause: "rule" };
+	}
 
 	if (mode === "auto" && DELEGATION_TOOLS.has(tool)) {
 		return { decision: "classify", cause: "mode" };
@@ -1024,18 +1109,7 @@ export function decide(params: DecideInput): Decision {
 	 * was allowed in every mode including auto and plan, and acceptEdits wrote
 	 * anywhere on disk (PERMISSIONS-REVIEW-2026-09-05 H1, H2).
 	 */
-	const inWorkingSpace = (): boolean => {
-		const target = params.resolvedSubject ?? subject;
-		const roots = [cwd, params.resolvedCwd, params.memoryDirPath, params.scratchpadDirPath, params.resultsDirPath, params.sessionDirPath];
-		if (roots.some((dir) => dir && isAtOrInsideDir(target, dir, cwd))) return true;
-		return params.planFilePath ? isPlanFilePath(target, params.planFilePath, cwd) : false;
-	};
-	const outsideWorkingDir = (): Decision => {
-		if (mode === "auto") return { decision: "classify", cause: "working-dir" };
-		if (mode === "dontAsk") return { decision: "deny", cause: "working-dir" };
-		return { decision: "ask", cause: "working-dir" };
-	};
-
+	const inWorkingSpace = (): boolean => workingSpaceHolds(subject, params.resolvedSubject ?? subject);
 	if (tier === "safe") {
 		// No path argument (grep/find/ls default to the cwd) is an in-project read.
 		if (!subject || inWorkingSpace()) return { decision: "allow", cause: "tier" };

@@ -106,6 +106,23 @@ export function buildCategoryIndex(ruleset: string): RuleIndex {
 	return { rules, byName };
 }
 
+const countRules = (section: string): number => section.split("\n").filter((line) => ruleNameFromLine(line) !== undefined).length;
+
+/**
+ * How many rules each section of a ruleset holds, counted like the index (one
+ * per top-level bullet). On the embedded ruleset with no user extras, this is
+ * what the /permissions Auto mode tab shows as the built-in rules of each
+ * section (findings §33: Claude Code shows 70 soft-deny rules because it counts
+ * the Artifact consent rule this ruleset does not carry).
+ */
+export function builtinRuleCounts(ruleset: string): { hard_deny: number; soft_deny: number; allow: number } {
+	return {
+		hard_deny: countRules(sliceSection(ruleset, HARD_HEADING, SOFT_HEADING)),
+		soft_deny: countRules(sliceSection(ruleset, SOFT_HEADING, ALLOW_HEADING)),
+		allow: countRules(sliceSection(ruleset, ALLOW_HEADING, "\n## ")),
+	};
+}
+
 /** Look up a category the classifier emitted. undefined ⇒ not a known BLOCK rule. */
 export function groundCategory(index: RuleIndex, category: string | undefined): IndexedRule | undefined {
 	if (!category) return undefined;

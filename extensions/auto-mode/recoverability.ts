@@ -135,7 +135,7 @@ function holdsNestedGitDir(dir: string, budget: number): boolean | undefined {
 /** A thin, defensive git call: any failure (not a repo, git missing, timeout) becomes `undefined`. */
 function git(cwd: string, args: string[]): { ok: boolean; stdout: string } | undefined {
 	try {
-		const stdout = execFileSync("git", [...HARNESS_GIT_CONFIG, ...args], { cwd, encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"] });
+		const stdout = execFileSync("git", [...HARNESS_GIT_CONFIG, ...args], { cwd, encoding: "utf8", timeout: 5_000, maxBuffer: 64 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] });
 		return { ok: true, stdout };
 	} catch (error) {
 		// A non-zero exit still carries stdout (e.g. ls-files --error-unmatch), which
@@ -154,6 +154,35 @@ export interface Destruction {
 }
 
 /**
+ * The first index entry git has been told not to check for changes
+ * (`assume-unchanged`, tagged lowercase by `ls-files -v`, or `skip-worktree`,
+ * tagged `S`) that exists on disk under `root`, or undefined when there is
+ * none; null when git could not answer. `git status` reports no change for
+ * such a file whatever its bytes, so "tracked and clean" proves nothing about
+ * it (AUTO-MODE-SECURITY-REVIEW-2026-09-24 M3, findings §32). A skip-worktree
+ * entry that is not on disk (a sparse checkout's) has nothing to lose.
+ */
+function hiddenChangeEntry(root: string, pathspec?: string): string | undefined | null {
+	const listing = git(root, ["ls-files", "-v", "-z", ...(pathspec ? ["--", pathspec] : [])]);
+	if (!listing?.ok) return null;
+	for (const record of listing.stdout.split("\0")) {
+		const tag = record[0];
+		if (!tag || (tag !== "S" && !/[a-z]/.test(tag))) continue;
+		const file = record.slice(2);
+		try {
+			lstatSync(join(root, file));
+			return file;
+		} catch {
+			// Not on disk: nothing a delete or reset could lose.
+		}
+	}
+	return undefined;
+}
+
+const hiddenReason = (file: string) =>
+	`git is told not to check ${file} for changes (assume-unchanged or skip-worktree), so a clean status does not prove git can restore it`;
+
+/**
  * Run the git queries and judge. `cwd` is the command's effective directory.
  * Returns `unknown` on any git failure so the caller escalates rather than
  * trusting an answer we could not compute.
@@ -165,7 +194,12 @@ export function checkRecoverability(cwd: string, destruction: Destruction): Reco
 	if (destruction.wholeTree) {
 		if (!isRepo) return judgeWholeTree(false, "");
 		const status = git(cwd, ["status", "--porcelain"]);
-		if (!status) return { verdict: "unknown", reason: "could not read git status to judge a tree-wide reset" };
+		// A failed status prints nothing, which would read as a clean tree.
+		if (!status?.ok) return { verdict: "unknown", reason: "could not read git status to judge a tree-wide reset" };
+		const top = git(cwd, ["rev-parse", "--show-toplevel"]);
+		const hidden = top?.ok ? hiddenChangeEntry(top.stdout.trim()) : null;
+		if (hidden === null) return { verdict: "unknown", reason: "could not list the index to judge a tree-wide reset" };
+		if (hidden !== undefined) return { verdict: "unrecoverable", reason: hiddenReason(hidden) };
 		return judgeWholeTree(true, status.stdout);
 	}
 
@@ -206,9 +240,14 @@ export function checkRecoverability(cwd: string, destruction: Destruction): Reco
 		// build output or a `.env` read as "clean" while `rm -rf` erased it for good.
 		const tracked = git(cwd, ["ls-files", "--error-unmatch", "--", path]);
 		const status = git(cwd, ["status", "--porcelain", "--ignored", "--", path]);
-		if (tracked === undefined || status === undefined) {
+		// `ls-files --error-unmatch` failing means untracked; a failed status
+		// prints nothing, which would read as clean.
+		if (tracked === undefined || !status?.ok) {
 			return { verdict: "unknown", reason: "could not query git for a deletion target" };
 		}
+		const hidden = tracked.ok ? hiddenChangeEntry(cwd, path) : undefined;
+		if (hidden === null) return { verdict: "unknown", reason: "could not query git for a deletion target" };
+		if (hidden !== undefined) return { verdict: "unrecoverable", reason: hiddenReason(hidden) };
 		const dirty = status.stdout.trim().length > 0;
 		// A clean, tracked directory can still hold a nested repository deeper down
 		// (git status never lists a `.git`, so it reads as clean). Only scanned once

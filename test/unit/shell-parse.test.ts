@@ -18,6 +18,15 @@ describe("parseCommand on tree-sitter-bash", () => {
 		expect(words("(cd a && rm b) | { wc; }")).toEqual([["cd", "a"], ["rm", "b"], ["wc"]]);
 	});
 
+	it("marks the commands that may not run when the line reaches them", () => {
+		const conditional = (command: string) => parseCommand(command).segments.map((segment) => !!segment.conditional);
+		expect(conditional("a && b || c; d")).toEqual([false, true, true, false]);
+		expect(conditional("if a; then b; else c; fi; d")).toEqual([true, true, true, false]);
+		expect(conditional("case x in y) a;; esac; f() { b; }; while a; do b; done; c")).toEqual([true, true, true, true, false]);
+		expect(conditional("a; b")).toEqual([false, false]);
+		expect(conditional("echo $(a && b)")).toEqual([false, false, true]);
+	});
+
 	it("gives the words after a redirect target back to the command", () => {
 		// The grammar hangs `arg` on the redirect; bash passes it to `cmd`.
 		const [segment] = parseCommand("cmd 2>/dev/null arg").segments;
@@ -99,6 +108,15 @@ describe("parseCommand on tree-sitter-bash", () => {
 		// A pipeline inside a substitution or an earlier member cannot move the outer shell.
 		expect(parseCommand('echo "$(true | cd x)"').segments.map((segment) => !!segment.lastInPipeline)).toEqual([false, false, false]);
 		expect(parseCommand("{ a | cd x; } | b").segments.map((segment) => !!segment.lastInPipeline)).toEqual([false, false, true]);
+	});
+
+	it("marks a pipeline's last member in any shell as its tail", () => {
+		// Under lastpipe it moves the later commands of its own shell (PR #13 review).
+		expect(parseCommand('echo "$(true | cd x; y)"').segments.map((segment) => !!segment.pipelineShell)).toEqual([false, false, true, false]);
+		expect(parseCommand("{ a | cd x; } | b").segments.map((segment) => !!segment.pipelineShell)).toEqual([false, true, true]);
+		// A subshell or substitution inside the last member starts a shell of its own.
+		expect(parseCommand("a | (cd x)").segments.map((segment) => !!segment.pipelineShell)).toEqual([false, false]);
+		expect(parseCommand('a | echo "$(cd x)"').segments.map((segment) => !!segment.pipelineShell)).toEqual([false, true, false]);
 	});
 
 	it("detects only the background operator", () => {

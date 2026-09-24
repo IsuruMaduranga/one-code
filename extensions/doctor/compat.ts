@@ -146,7 +146,11 @@ function permissionsSummary(perms: unknown, scope: SettingsScope, findings: Find
 		}
 	}
 	if (p.disableBypassPermissionsMode === "disable") parts.push("bypass mode disabled");
-	if (p.additionalDirectories !== undefined) parts.push("additionalDirectories (not honoured)");
+	if (Array.isArray(p.additionalDirectories) && p.additionalDirectories.length > 0) {
+		const dirs = p.additionalDirectories.length;
+		const fromRepo = scope === "claude-project" || scope === "claude-local";
+		parts.push(`${dirs} workspace director${dirs === 1 ? "y" : "ies"}${fromRepo ? " (applied once you trust the repository's settings)" : ""}`);
+	}
 	return { used: parts.length ? `permissions: ${parts.join("; ")}` : undefined, refused };
 }
 

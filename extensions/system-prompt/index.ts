@@ -16,6 +16,7 @@ import { collectEnvironment, type EnvironmentInfo } from "./environment.ts";
 import { collectGitStatus } from "./git-status.ts";
 import { totalTokensBlock, turnTokenBudget } from "../context-budget/budget.ts";
 import { buildClaudeCodeSystemPrompt } from "./template.ts";
+import { WORKSPACE_CHANNEL, type WorkspaceAnnouncement } from "../lib/workspace-channel.ts";
 
 export default function systemPromptExtension(pi: ExtensionAPI) {
 	let cachedEnv: EnvironmentInfo | undefined;
@@ -28,6 +29,14 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 	// and stays constant across turns, keeping the system prompt cache-stable.
 	let gitStatus: string | null = null;
 	let gitStatusReady = false;
+	// The workspace directories as the session started. The permissions
+	// extension announces them from its own session_start, which runs before
+	// this one (load order), so this handler does not reset them.
+	let workspaceDirs: string[] = [];
+	pi.events.on(WORKSPACE_CHANNEL, (data) => {
+		const dirs = (data as WorkspaceAnnouncement | undefined)?.dirs;
+		workspaceDirs = Array.isArray(dirs) ? dirs.filter((dir): dir is string => typeof dir === "string") : [];
+	});
 
 	pi.on("session_start", (_event, ctx) => {
 		// The prompt section promises a usable directory, so the extension that
@@ -70,7 +79,7 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 		// The same constant the context-budget extension puts on every user message.
 		const totalTokensLine = process.env.CC_TOTAL_TOKENS === "0" ? null : totalTokensBlock(turnTokenBudget());
 		return {
-			systemPrompt: buildClaudeCodeSystemPrompt(event.systemPromptOptions, cachedEnv, tier, scratchpad, gitStatus, totalTokensLine),
+			systemPrompt: buildClaudeCodeSystemPrompt(event.systemPromptOptions, { ...cachedEnv, workspaceDirs }, tier, scratchpad, gitStatus, totalTokensLine),
 		};
 	});
 }

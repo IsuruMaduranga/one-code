@@ -52,8 +52,6 @@ function mergeDynamic(a: Dynamic | undefined, b: Dynamic | undefined): Dynamic |
 export interface Token {
 	/** The word with quotes removed, escapes applied and `$'…'` decoded; expansions keep their source text (`$HOME`). */
 	value: string;
-	/** True when the word used `$'…'` or `$"…"` quoting. */
-	hadExpansion: boolean;
 	/** True when an unquoted, unescaped `*`, `?` or `[` makes the token a glob bash expands. */
 	glob?: boolean;
 	/** Set when part of the value is only known when bash runs it. */
@@ -102,6 +100,20 @@ export interface Segment {
 	 * after the pipeline; directory tracking treats it as unknown.
 	 */
 	lastInPipeline?: boolean;
+	/**
+	 * Set for a command in the last member of a multi-command pipeline in any
+	 * shell, a substitution's or a `( … )`'s included: the scopes (as in
+	 * `scopes`) of the shell that member runs in under `lastpipe`, the one
+	 * around the pipeline. A `cd` there may move the later commands of that
+	 * shell. `lastInPipeline` is the subset that can move the outer shell.
+	 */
+	pipelineShell?: number[];
+	/**
+	 * True when the command may not run even though the line reaches it: the
+	 * right side of `&&` or `||`, a branch of `if` or `case`, a loop body, a
+	 * function body. A `cd` here may or may not move the commands after it.
+	 */
+	conditional?: boolean;
 	/** True when a redirect target's value is only known when bash runs it (`> "$f"`, `< $(ls)`). */
 	unknownTarget?: boolean;
 	/**
@@ -279,6 +291,9 @@ const COMPLEX: Record<string, string> = {
 /** Constructs bash always runs in a subshell. */
 const ALWAYS_SUBSHELL = new Set(["subshell", "command_substitution", "process_substitution"]);
 
+/** Constructs whose commands may not run when the line reaches them (`Segment.conditional`). */
+const CONDITIONAL = new Set(["if_statement", "case_statement", "function_definition", "for_statement", "c_style_for_statement", "while_statement"]);
+
 /** Constructs recorded in `Segment.enclosing`. */
 const ENCLOSING = new Set([
 	...Object.keys(COMPLEX),
@@ -300,6 +315,10 @@ interface Context {
 	substitution?: number;
 	/** Inside the last member of a multi-command pipeline (`Segment.lastInPipeline`). */
 	lastInPipeline?: boolean;
+	/** Inside the last member of a multi-command pipeline in any shell: the shell it runs in (`Segment.pipelineShell`). */
+	pipelineShell?: number[];
+	/** Inside something that may not run (`Segment.conditional`). */
+	conditional?: boolean;
 	/**
 	 * Inside a context bash always runs in a subshell (`( … )`, a substitution,
 	 * a pipeline member other than the last): nothing here, a later pipeline's
@@ -334,6 +353,8 @@ class Walker {
 			substitution: ctx.substitution,
 			// `( … )` and substitutions are always subshells, whatever pipeline they sit in.
 			lastInPipeline: ALWAYS_SUBSHELL.has(node.type) ? false : ctx.lastInPipeline,
+			pipelineShell: ALWAYS_SUBSHELL.has(node.type) ? undefined : ctx.pipelineShell,
+			conditional: ctx.conditional || CONDITIONAL.has(node.type),
 			isolated: ctx.isolated || ALWAYS_SUBSHELL.has(node.type),
 		};
 	}
@@ -354,12 +375,23 @@ class Walker {
 			case "comment":
 				return;
 			case "program":
-			case "list":
 				for (const child of node.children) {
 					if (child.type === "&") this.background = true;
 					else if (child.isNamed) this.statement(child, ctx);
 				}
 				return;
+			case "list": {
+				// `a && b`, `a || b`: only the first command is sure to run.
+				let first = true;
+				for (const child of node.children) {
+					if (child.type === "&") this.background = true;
+					else if (child.isNamed) {
+						this.statement(child, first ? ctx : { ...ctx, conditional: true });
+						first = false;
+					}
+				}
+				return;
+			}
 			case "pipeline": {
 				const members = node.namedChildren.filter((child) => child.type !== "comment");
 				for (const [index, child] of members.entries()) {
@@ -372,6 +404,8 @@ class Walker {
 					// and only when the pipeline is not itself inside a subshell.
 					const last = index === members.length - 1;
 					member.lastInPipeline = last && !ctx.isolated;
+					// A tail inside another tail runs, under lastpipe, where that one does.
+					member.pipelineShell = last ? (ctx.pipelineShell ?? ctx.scopes) : undefined;
 					member.isolated = ctx.isolated || !last;
 					this.statement(child, member);
 				}
@@ -440,6 +474,8 @@ class Walker {
 		const segment: Segment & { start: number } = { tokens: [], redirects: [], inputs: [], raw: "", enclosing: ctx.enclosing, scopes: ctx.scopes, start: at };
 		if (ctx.substitution !== undefined) segment.substitution = ctx.substitution;
 		if (ctx.lastInPipeline) segment.lastInPipeline = true;
+		if (ctx.pipelineShell) segment.pipelineShell = ctx.pipelineShell;
+		if (ctx.conditional) segment.conditional = true;
 		if (node?.type === "variable_assignment" || node?.type === "variable_assignments") {
 			// A line that only assigns: `a=1`, `a=1 b=2`.
 			const assignments = node.type === "variable_assignment" ? [node] : node.namedChildren.filter((child) => child.type === "variable_assignment");
@@ -455,7 +491,7 @@ class Walker {
 				}
 				if (!child.isNamed) {
 					// The keyword of `export`/`unset`/`[[`: part of the command's words.
-					if (node.type !== "command" && /^[A-Za-z[\]]/.test(child.type)) segment.tokens.push({ value: child.text, hadExpansion: false });
+					if (node.type !== "command" && /^[A-Za-z[\]]/.test(child.type)) segment.tokens.push({ value: child.text });
 					continue;
 				}
 				if (child.type === "comment") continue;
@@ -478,10 +514,7 @@ class Walker {
 				}
 				const target = child.type === "command_name" ? (child.firstNamedChild ?? child) : child;
 				const word = this.word(target, ctx);
-				if (locale && target.type === "string") {
-					this.unknownQuoting ??= LOCALE_QUOTING;
-					word.hadExpansion = true;
-				}
+				if (locale && target.type === "string") this.unknownQuoting ??= LOCALE_QUOTING;
 				locale = false;
 				segment.tokens.push(word);
 			}
@@ -512,9 +545,9 @@ class Walker {
 		const value = node.childForFieldName("value");
 		const operator = node.children.find((child) => !child.isNamed && (child.type === "=" || child.type === "+="));
 		const name = node.childForFieldName("name")?.text ?? "";
-		if (!value) return { value: `${name}${operator?.type ?? "="}`, hadExpansion: false };
+		if (!value) return { value: `${name}${operator?.type ?? "="}` };
 		const word = this.word(value, ctx);
-		return { value: `${name}${operator?.type ?? "="}${word.value}`, hadExpansion: word.hadExpansion, glob: word.glob, dynamic: word.dynamic };
+		return { value: `${name}${operator?.type ?? "="}${word.value}`, glob: word.glob, dynamic: word.dynamic };
 	}
 
 	private redirect(node: SyntaxNode, segment: Segment, ctx: Context): void {
@@ -609,6 +642,8 @@ class Walker {
 					enclosing: [...scope.enclosing, ...segment.enclosing],
 					scopes: [...scope.scopes, ...segment.scopes],
 					substitution: scope.substitution,
+					...(segment.pipelineShell ? { pipelineShell: [...scope.scopes, ...segment.pipelineShell] } : {}),
+					...(scope.conditional || segment.conditional ? { conditional: true } : {}),
 					start: body.startIndex + i,
 				});
 			}
@@ -625,18 +660,18 @@ class Walker {
 	word(node: SyntaxNode, ctx: Context): Token {
 		// Punctuation the grammar keeps as its own node (a `$` before a closing
 		// quote) is literal text.
-		if (!node.isNamed) return { value: node.text, hadExpansion: false };
+		if (!node.isNamed) return { value: node.text };
 		switch (node.type) {
 			case "word":
 				return unquotedWord(node.text);
 			case "number":
-				return { value: node.text, hadExpansion: false };
+				return { value: node.text };
 			case "raw_string":
-				return { value: node.text.slice(1, -1), hadExpansion: false };
+				return { value: node.text.slice(1, -1) };
 			case "ansi_c_string": {
 				const decoded = decodeAnsiC(node.text, 2);
 				if (decoded.versionDependent) this.unknownQuoting ??= "uses a $'…' escape (\\u, \\U or \\c?) whose meaning depends on the bash version";
-				return { value: decoded.text, hadExpansion: true };
+				return { value: decoded.text };
 			}
 			case "string": {
 				let value = "";
@@ -652,12 +687,11 @@ class Walker {
 					// Quoted, `"<(x)"` is the literal text, never a pipe path.
 					dynamic = mergeDynamic(dynamic, piece.dynamic === "process-input" ? undefined : piece.dynamic);
 				}
-				return { value, hadExpansion: false, dynamic };
+				return { value, dynamic };
 			}
 			case "concatenation": {
 				let value = "";
 				let glob = false;
-				let hadExpansion = false;
 				let dynamic: Dynamic | undefined;
 				let locale = false;
 				const pieces = node.children;
@@ -671,13 +705,11 @@ class Walker {
 						// `x$"y"` is locale quoting; any other `$` is literal (`x$`).
 						if (child.type === "string") {
 							this.unknownQuoting ??= LOCALE_QUOTING;
-							hadExpansion = true;
 						} else value += "$";
 						locale = false;
 					}
 					value += piece.value;
 					glob ||= !!piece.glob;
-					hadExpansion ||= piece.hadExpansion;
 					// Joined to other text, a process substitution's pipe path is part of an unknown word.
 					dynamic = mergeDynamic(dynamic, piece.dynamic === "process-input" ? "substitution" : piece.dynamic);
 				}
@@ -686,7 +718,7 @@ class Walker {
 				if (pieces.some((child) => child.type === "word" && child.text === "{") && pieces.some((child) => child.type === "word" && child.text.includes(","))) {
 					this.markComplex("brace_expression");
 				}
-				return { value, hadExpansion, glob: glob || undefined, dynamic };
+				return { value, glob: glob || undefined, dynamic };
 			}
 			case "command_substitution":
 			case "process_substitution": {
@@ -694,7 +726,7 @@ class Walker {
 				const opener = node.text.startsWith("`") ? 1 : 2;
 				this.container(node, this.enterSubstitution(ctx, node.type, node.text.slice(opener, -1)));
 				const dynamic: Dynamic = node.type === "process_substitution" && node.text.startsWith("<(") ? "process-input" : "substitution";
-				return { value: node.text, hadExpansion: false, dynamic };
+				return { value: node.text, dynamic };
 			}
 			case "simple_expansion":
 			case "expansion":
@@ -702,7 +734,7 @@ class Walker {
 			case "special_variable_name":
 				// `${x:-$(cmd)}`: the default's command still runs.
 				for (const child of node.namedChildren) if (child.type !== "variable_name" && child.type !== "special_variable_name") this.word(child, ctx);
-				return { value: node.text, hadExpansion: false, dynamic: "variable" };
+				return { value: node.text, dynamic: "variable" };
 			default:
 				// Arithmetic, brace expansion and anything unrecognised: unknown value.
 				this.markComplex(node.type);
@@ -710,7 +742,7 @@ class Walker {
 					if (STATEMENTS.has(child.type)) this.statement(child, ctx);
 					else this.word(child, ctx);
 				}
-				return { value: node.text, hadExpansion: false, dynamic: "variable" };
+				return { value: node.text, dynamic: "variable" };
 		}
 	}
 }
@@ -735,7 +767,7 @@ function unquotedWord(text: string): Token {
 		if (ch === "*" || ch === "?" || ch === "[") glob = true;
 		value += ch;
 	}
-	return { value, hadExpansion: false, glob: glob || undefined };
+	return { value, glob: glob || undefined };
 }
 
 /** Double-quoted text: a backslash escapes only `$`, `` ` ``, `"`, `\` and a newline. */

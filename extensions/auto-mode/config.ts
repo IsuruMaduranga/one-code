@@ -387,6 +387,63 @@ export function persistAutoModeSetup(patch: Record<string, string[] | undefined>
 	writeSettings(path, file);
 }
 
+/** The auto-mode keys the /permissions Auto mode tab lists and edits. */
+export type AutoModeListKey = "allow" | "soft_deny" | "hard_deny" | "environment";
+
+export interface SourcedAutoModeEntry {
+	key: AutoModeListKey;
+	text: string;
+	source: "claude-user" | "onecode-user" | "managed";
+	path: string;
+}
+
+/**
+ * Every auto-mode rule and environment entry with the file it came from, in
+ * load order. `"$defaults"` is left out: in the rule lists it means nothing
+ * here (the built-ins always apply), and in the environment it is the
+ * splice point, shown as the built-in default rather than as an entry.
+ */
+export function listAutoModeEntries(home: string): SourcedAutoModeEntry[] {
+	const claudeUser = claudeUserSettingsPath(home);
+	const oneCodeUser = oneCodeSettingsPath(home);
+	const entries: SourcedAutoModeEntry[] = [];
+	for (const path of autoModeSettingsPaths(home)) {
+		const block = asRecord(readFile(path, [])?.autoMode);
+		if (!block) continue;
+		const source = path === claudeUser ? "claude-user" : path === oneCodeUser ? "onecode-user" : "managed";
+		for (const key of ["allow", "soft_deny", "hard_deny", "environment"] as const) {
+			for (const text of stringArray(block[key]) ?? []) {
+				if (text.trim() !== DEFAULTS_TOKEN) entries.push({ key, text, source, path });
+			}
+		}
+	}
+	return entries;
+}
+
+/** Whether One Code's own `autoMode.environment` keeps the built-in default through `"$defaults"`. */
+export function oneCodeEnvironmentExtendsDefault(home: string): boolean {
+	const block = asRecord(readFile(oneCodeSettingsPath(home), [])?.autoMode);
+	return (stringArray(block?.environment) ?? []).some((text) => text.trim() === DEFAULTS_TOKEN);
+}
+
+/**
+ * Rewrite one auto-mode list in One Code's own settings file. An emptied list
+ * is removed (for the environment, that restores the built-in default), and so
+ * is an emptied `autoMode` block. Throws on a malformed file, like the other
+ * writers.
+ */
+export function updateOneCodeAutoModeList(key: AutoModeListKey, update: (entries: string[]) => string[], home: string): void {
+	const path = oneCodeSettingsPath(home);
+	const file = readSettingsForWrite(path);
+	const block = asRecord(file.autoMode) ?? {};
+	const next = update(stringArray(block[key]) ?? []);
+	if (next.length === 0) delete block[key];
+	else block[key] = next;
+	if (Object.keys(block).length === 0) delete file.autoMode;
+	else file.autoMode = block;
+	writeSettings(path, file);
+}
+
 /**
  * The `permissions.allow` entries in One Code's own settings file — what the
  * setup audit can actually remove. Broad rules that live in Claude Code's files

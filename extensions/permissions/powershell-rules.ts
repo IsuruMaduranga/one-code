@@ -32,7 +32,8 @@
  */
 
 import { isSensitivePath } from "../auto-mode/sensitive.ts";
-import { isAbsolute } from "node:path";
+import { readdirSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, sep } from "node:path";
 import { isWithin, resolveForContainment, toAbsolute } from "../auto-mode/paths.ts";
 
 /** Claude Code's `COMMON_ALIASES` (utils/powershell/parser.ts), alias → canonical cmdlet. */
@@ -239,7 +240,7 @@ function splitStatements(command: string): string[] | undefined {
 			i += 2;
 			continue;
 		}
-		if (ch === "#") {
+		if (ch === "#" && startsComment(text, i)) {
 			// Line comment runs to end of line.
 			const eol = text.indexOf("\n", i);
 			i = eol === -1 ? text.length : eol;
@@ -275,6 +276,55 @@ function splitStatements(command: string): string[] | undefined {
 	return parts;
 }
 
+/**
+ * Whether the `#` at `i` starts a comment: only at the start of a token. In
+ * `x#(Set-Content f y)` it is part of the word, and the parenthesis after it
+ * still runs.
+ */
+function startsComment(text: string, i: number): boolean {
+	return i === 0 || /[\s;|&(){}]/.test(text[i - 1]);
+}
+
+/**
+ * Whether the line has a `(` outside quotes. PowerShell evaluates a grouping
+ * expression in argument position before calling the command, so
+ * `Write-Output (Set-Content f x)` writes `f` behind a read-only cmdlet
+ * (AUTO-MODE-SECURITY-REVIEW-2026-09-24 H2); Claude Code's parser marks the
+ * same node a subexpression. A quoted `(` is a literal (`"Program Files (x86)"`),
+ * and a backtick-escaped one is too.
+ */
+function hasGroupingExpression(command: string): boolean {
+	let quote: "'" | '"' | "@'" | '@"' | undefined;
+	for (let i = 0; i < command.length; i++) {
+		const ch = command[i];
+		if (quote === "@'" || quote === '@"') {
+			if ((i === 0 || command[i - 1] === "\n") && command.startsWith(quote === "@'" ? "'@" : '"@', i)) {
+				quote = undefined;
+				i++;
+			}
+			continue;
+		}
+		if (quote === "'" || quote === '"') {
+			if (quote === '"' && ch === "`") i++;
+			else if (ch === quote) {
+				if (command[i + 1] === quote) i++;
+				else quote = undefined;
+			}
+			continue;
+		}
+		if (ch === "`") i++;
+		else if (ch === "#" && startsComment(command, i)) {
+			const eol = command.indexOf("\n", i);
+			i = eol === -1 ? command.length : eol;
+		} else if (ch === "@" && (command[i + 1] === "'" || command[i + 1] === '"')) {
+			quote = command[i + 1] === "'" ? "@'" : '@"';
+			i++;
+		} else if (ch === "'" || ch === '"') quote = ch;
+		else if (ch === "(") return true;
+	}
+	return false;
+}
+
 /** `& cmd` (call operator) or `. script.ps1` (dot-sourcing) at the head of a statement. */
 function startsWithCallOperator(statement: string): boolean {
 	const trimmed = statement.trim();
@@ -296,6 +346,7 @@ export function powershellInjectionSyntax(command: string): string | undefined {
 	if (/\$\(/.test(command)) return "a $(…) subexpression";
 	if (/`/.test(command)) return "a backtick escape";
 	if (/\{/.test(command)) return "a script block";
+	if (hasGroupingExpression(command)) return "a (…) grouping expression";
 	if (/-e(nc|ncoded|ncodedcommand)?\b/i.test(command) && /\b(pwsh|powershell)(\.exe)?\b/i.test(command)) return "an encoded command";
 	const statements = powershellStatements(command);
 	for (const statement of statements ?? []) {
@@ -401,7 +452,7 @@ const REMOTE_PARAMETER = /^-(cn|c(o(m(p(u(t(e(r(n(a(m(e)?)?)?)?)?)?)?)?)?)?)?)(:
  * Whether a token names a path this check will not vouch for by shape: UNC
  * (`\\server`), home (`~`), a PSDrive outside the filesystem (`HKLM:`,
  * `env:`), or one that climbs (`..`). An absolute or drive-lettered path is
- * judged by `pathOutsideRoots` when roots are known, and refused otherwise.
+ * judged by `pathProblem` when roots are known, and refused otherwise.
  */
 function pathUnvouchable(value: string): boolean {
 	if (!value) return false;
@@ -461,32 +512,123 @@ export interface PowerShellReadOnlyOptions {
 	readableRoots?: string[];
 }
 
+type WildcardPart = { star: true } | { star: false; matches: (ch: string) => boolean };
+
 /**
- * Whether a path token lies outside every root. Each comma-separated part
- * (PowerShell's array syntax, `-Path a,b`; commas inside quotes are part of
- * the name) is judged on its own: refused by
- * shape when unvouchable; a relative part is inside by construction; an
- * absolute part is resolved through `resolveForContainment` — the nearest
- * existing ancestor's realpath, so a glob leaf (`C:\src\play\*.ts`) is
- * judged by its directory and a symlink planted inside the project that
- * points out of it is outside — and must lie inside a root. With no roots
- * (no options) an absolute part is refused, the pre-2026-09-19 behaviour.
+ * A PowerShell wildcard component (`*`, `?`, `[a-c]`) as a case-insensitive
+ * matcher that matches a superset of what PowerShell does, or undefined. Matched without a regex over the whole name: the
+ * model writes the pattern, and `*a*a*a…z` would backtrack polynomially
+ * against every directory entry on the permission-gate path.
  */
-function pathOutsideRoots(value: string, opts: PowerShellReadOnlyOptions | undefined, roots: string[]): boolean {
+function wildcardMatcher(pattern: string): ((name: string) => boolean) | undefined {
+	const parts: WildcardPart[] = [];
+	for (let i = 0; i < pattern.length; i++) {
+		const ch = pattern[i];
+		const close = ch === "[" ? pattern.indexOf("]", i + 1) : -1;
+		if (ch === "*") {
+			if (!parts.at(-1)?.star) parts.push({ star: true });
+		} else if (ch === "?") {
+			// Read as `*`: a superset of what `?` matches (one character, or none
+			// at the end of a name on some filesystem APIs), so no match escapes.
+			if (!parts.at(-1)?.star) parts.push({ star: true });
+		}
+		else if (close > i + 1) {
+			let set: RegExp;
+			try {
+				set = new RegExp(`^[${pattern.slice(i + 1, close).replace(/[\\\]^]/g, "\\$&")}]$`, "i");
+			} catch {
+				return undefined;
+			}
+			parts.push({ star: false, matches: (c) => set.test(c) });
+			i = close;
+		} else {
+			const lower = ch.toLowerCase();
+			parts.push({ star: false, matches: (c) => c.toLowerCase() === lower });
+		}
+	}
+	// Greedy match that backtracks only to the last `*`: O(name × pattern).
+	return (name) => {
+		let p = 0;
+		let t = 0;
+		let starAt = -1;
+		let resumeAt = 0;
+		while (t < name.length) {
+			const part = parts[p];
+			if (part && !part.star && part.matches(name[t])) {
+				p++;
+				t++;
+			} else if (part?.star) {
+				starAt = p++;
+				resumeAt = t;
+			} else if (starAt >= 0) {
+				p = starAt + 1;
+				t = ++resumeAt;
+			} else return false;
+		}
+		while (parts[p]?.star) p++;
+		return p === parts.length;
+	};
+}
+
+/**
+ * The paths a wildcard in the last component names, or undefined when they
+ * cannot be enumerated (a wildcard in a directory component, an unreadable
+ * or huge directory). Matched case-insensitively and with hidden entries, a
+ * superset of what PowerShell reads, so every match that could be read is judged.
+ */
+function wildcardTargets(absolute: string): string[] | undefined {
+	const dir = dirname(absolute);
+	const matches = wildcardMatcher(basename(absolute));
+	if (/[*?[]/.test(dir) || !matches) return undefined;
+	let entries: string[];
+	try {
+		entries = readdirSync(dir);
+	} catch {
+		return [dir];
+	}
+	if (entries.length > 2_000) return undefined;
+	return [dir, ...entries.filter((entry) => matches(entry)).map((entry) => join(dir, entry))];
+}
+
+/**
+ * Why a path token must not be vouched for, or undefined. Each comma-separated
+ * part (PowerShell's array syntax, `-Path a,b`; commas inside quotes are part
+ * of the name) is judged on its own: refused by shape when unvouchable, then
+ * resolved through `resolveForContainment`, relative parts included. A
+ * relative name is not inside by construction: an in-project `notes.txt` can
+ * be a symlink out of it (AUTO-MODE-SECURITY-REVIEW-2026-09-24 M4). A
+ * wildcard leaf is judged match by match. Every target must lie inside a root
+ * and resolve to no credential path. With no roots (no options) an absolute
+ * part is refused and a relative one passes, the pre-2026-09-19 behaviour.
+ */
+function pathProblem(value: string, opts: PowerShellReadOnlyOptions | undefined, roots: string[]): string | undefined {
+	const outside = "a path outside the working directory";
 	for (const part of splitPowerShellList(value)) {
 		const trimmed = part.trim();
 		if (!trimmed) continue;
-		if (pathUnvouchable(trimmed)) return true;
-		if (!isAbsoluteSpelling(trimmed)) continue;
-		if (!opts) return true;
+		if (pathUnvouchable(trimmed)) return outside;
+		const absoluteSpelling = isAbsoluteSpelling(trimmed);
+		if (!opts) {
+			if (absoluteSpelling) return outside;
+			continue;
+		}
 		// Resolve only what THIS platform's path module calls absolute: on a POSIX
 		// host `C:\x` is not, and `toAbsolute` would join it onto the cwd and
 		// vouch for a file the shell would never touch. Refuse it by shape there.
-		if (!isAbsolute(trimmed)) return true;
-		const resolved = resolveForContainment(toAbsolute(opts.cwd, trimmed, opts.home));
-		if (resolved === undefined || !roots.some((root) => isWithin(root, resolved))) return true;
+		if (absoluteSpelling && !isAbsolute(trimmed)) return outside;
+		// PowerShell on macOS and Linux takes `\` as a separator too, so `sub\link`
+		// is `sub/link` there, not one file named with a backslash.
+		const spelled = sep === "/" ? trimmed.replaceAll("\\", "/") : trimmed;
+		const absolute = toAbsolute(opts.cwd, spelled, opts.home);
+		const targets = /[*?[]/.test(spelled) ? wildcardTargets(absolute) : [absolute];
+		if (targets === undefined) return outside;
+		for (const target of targets) {
+			const resolved = resolveForContainment(target);
+			if (resolved === undefined || !roots.some((root) => isWithin(root, resolved))) return outside;
+			if (isSensitivePath(resolved)) return "a credential or secret path";
+		}
 	}
-	return false;
+	return undefined;
 }
 
 export interface PowerShellReadOnlyVerdict {
@@ -510,6 +652,7 @@ export function powershellReadOnly(command: string, opts?: PowerShellReadOnlyOpt
 	if (/[<>]/.test(command)) return { readOnly: false, reason: "redirection" };
 	if (/\$/.test(command)) return { readOnly: false, reason: "a variable or subexpression" };
 	if (/[`{}]/.test(command)) return { readOnly: false, reason: "an escape or script block" };
+	if (hasGroupingExpression(command)) return { readOnly: false, reason: "a (…) grouping expression, which runs its own command" };
 	// The cwd's realpath once per command (the roots arrive resolved), not once per token.
 	const roots = opts ? [resolveForContainment(opts.cwd) ?? opts.cwd, ...(opts.readableRoots ?? [])] : [];
 	for (const statement of statements) {
@@ -536,7 +679,8 @@ export function powershellReadOnly(command: string, opts?: PowerShellReadOnlyOpt
 			// a harness session dir (2026-09-19: /doctor's transcript scan on Windows
 			// spelled `<agentDir>\sessions\…` and was classified —
 			// working-docs/decisions/auto-mode.md); a comma list is judged part by part.
-			if (pathOutsideRoots(value, opts, roots)) return { readOnly: false, reason: "a path outside the working directory" };
+			const problem = pathProblem(value, opts, roots);
+			if (problem) return { readOnly: false, reason: problem };
 		}
 	}
 	return { readOnly: true };

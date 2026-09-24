@@ -29,7 +29,11 @@ import { classify, createClassifierState } from "../auto-mode/classifier.ts";
 import {
 	type AutoModeConfig,
 	autoModeSettingsPaths,
+	listAutoModeEntries,
 	loadAutoModeConfig,
+	oneCodeEnvironmentExtendsDefault,
+	type SourcedAutoModeEntry,
+	updateOneCodeAutoModeList,
 	claudeUserPermissionAllow,
 	loadAutoModeConfigWithDiagnostics,
 	oneCodePermissionAllow,
@@ -41,12 +45,14 @@ import { auditPermissionAllow, renderProposal, settingsPatch } from "../auto-mod
 import { draftSetup, gatherFacts } from "../auto-mode/setup-run.ts";
 import { modelPickerComponent, type PickerEntry, pickerSpec, toPickerEntries } from "../auto-mode/model-picker.ts";
 import { DEFAULT_ENVIRONMENT } from "../auto-mode/defaults.ts";
+import { buildRuleset } from "../auto-mode/classifier-prompt.ts";
 import type { TranscriptEntry } from "../auto-mode/transcript.ts";
 import { appendDecision, type DecisionEntry, decisionEntry } from "../auto-mode/decision-log.ts";
 import { loadProjectInstructions } from "../auto-mode/instructions.ts";
 import { classifierCandidates, describeCandidate, findConfigured } from "../auto-mode/model-select.ts";
 import { modelIdentity } from "../lib/model-policy.ts";
-import { isWithin, resolveForContainment, toAbsolute } from "../auto-mode/paths.ts";
+import { conflictingPathArguments, isWithin, resolveForContainment, toAbsolute } from "../auto-mode/paths.ts";
+import { DenialStore, denialInputKey, permissionGrantedMessage } from "../auto-mode/denials.ts";
 import { PauseTracker } from "../auto-mode/pause.ts";
 import { checkRecoverability } from "../auto-mode/recoverability.ts";
 import { safetyControlWrite } from "../auto-mode/safety-floor.ts";
@@ -78,14 +84,45 @@ import { trackOriginalCommands } from "../lib/original-command.ts";
 import { MODE_CHANNEL, PLAN_FILE_CHANNEL } from "../lib/plan-mode-channels.ts";
 import { isWritingTool } from "./protected-paths.ts";
 import { denyRuleLines } from "./rule-prose.ts";
-import { loadPermissionSettings, normalizePermissionMode, persistAllowRule, resolveStartupMode } from "./settings.ts";
+import {
+	listPermissionRules,
+	listWorkspaceDirectories,
+	loadPermissionSettings,
+	normalizePermissionMode,
+	persistAllowRule,
+	persistPermissionRule,
+	removePermissionRule,
+	resolveStartupMode,
+	type RuleSource,
+	persistWorkspaceDirectory,
+	removeWorkspaceDirectory,
+	type SourcedDirectory,
+	type SourcedRule,
+} from "./settings.ts";
 import { MODE_ENV, resolvedOrSelf, runtimeProtectedDirs } from "../lib/permission-gate.ts";
 import { CLASSIFIER_SETTING_CHANGED_CHANNEL } from "../lib/settings-channels.ts";
-import { describeProjectAllow, persistProjectAllowApproval, projectAllowApproved } from "./project-trust.ts";
+import { describeProjectAllow, persistProjectAllowApproval, projectAllowApproved, projectDirectoryConsentEntry, type TrustFiring } from "./project-trust.ts";
+import { parseAddDirFlag, tooBroadForWorkspace, validateWorkspaceDirectory } from "./workspace.ts";
+import { WORKSPACE_CHANNEL, type WorkspaceAnnouncement } from "../lib/workspace-channel.ts";
 import { findProjectRoot } from "../lib/git.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
-import { registerLocalCommand } from "../lib/local-command.ts";
+import { announceLocalCommand, registerLocalCommand } from "../lib/local-command.ts";
+import { tildify, tryRealpath } from "../lib/paths.ts";
+import { openPermissionsPanel, type PermissionsPanelHost } from "./panel/host.ts";
+import {
+	AUTO_SECTION_LABELS,
+	AUTO_SECTIONS,
+	type AutoEntryRow,
+	type AutoModeView,
+	type Destination,
+	type PanelState,
+	RULE_TABS,
+	type RuleRow,
+	type RuleTab,
+	type WorkspaceDirRow,
+} from "./panel/state.ts";
+import { builtinRuleCounts } from "../auto-mode/rules.ts";
 
 const DENIED_BY_USER =
 	"The user doesn't want to proceed with this tool use. The tool use was rejected. Adjust your approach based on the user's feedback instead of retrying the same call.";
@@ -125,6 +162,11 @@ const DENIED_SAFETY_FLOOR = (reason: string) =>
 const DENIED_BY_RULE = (rule: string) =>
 	`This tool call is denied by the permission rule "${rule}" in the user's settings. The rule is the user's standing decision about this class of action: do not retry it, and do not achieve the same effect another way (a different command, a script, or another tool). Continue with work that does not depend on it, and tell the user what was denied and by which rule.`;
 
+/** The hidden message a /permissions retry starts its turn with. */
+const PERMISSION_RETRY_TYPE = "one-code:permission-retry";
+/** Claude Code's denial notification: the tool, the reason cut to 80 columns, and where to act on it. */
+const deniedNotice = (toolName: string, reason: string): string =>
+	`${toolName} denied by auto mode · ${reason.length > 80 ? `${reason.slice(0, 79)}…` : reason} · /permissions`;
 /** Truncate a subject for a permission prompt — shared by the main gate and the subagent bridge. */
 const previewSubject = (subject: string) => (subject.length > 200 ? `${subject.slice(0, 200)}…` : subject);
 
@@ -182,6 +224,10 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			"Permission mode: default (alias: manual) | acceptEdits | plan | auto | bypassPermissions | dontAsk",
 		type: "string",
 	});
+	pi.registerFlag("add-dir", {
+		description: `Additional workspace directories: readable without a prompt, writable in acceptEdits (separate several with "${process.platform === "win32" ? ";" : ":"}")`,
+		type: "string",
+	});
 	pi.registerFlag("dangerously-skip-permissions", {
 		description: "Skip all permission prompts (Claude Code compatible)",
 		type: "boolean",
@@ -235,6 +281,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	const activeSessionAllows = () => (mode === "auto" ? [] : sessionAllows);
 	let unparsableRules: string[] = [];
 	let warnedUnparsable = "";
+	let warnedTooBroad = "";
 	/** Plan mode's one writable file, announced by the plan-mode extension. */
 	let planFilePath: string | undefined;
 	/**
@@ -260,6 +307,30 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	let oneCodeProjectSettingsFile: string | undefined;
 	/** pi's own agent directory, protected like the static list (lib/permission-gate.ts runtimeProtectedDirs). */
 	let protectedDirs: string[] = [];
+	/** The harness's readable session dirs, resolved at session start; `readableRoots` adds the workspace to them. */
+	let harnessReadableRoots: string[] = [];
+	/**
+	 * Workspace directories (workspace.ts): from settings, where the
+	 * repository's own files apply only once the user trusts them, from
+	 * `--add-dir`, and added for this session in /permissions or with /add-dir.
+	 */
+	let settingsWorkspaceDirs: SourcedDirectory[] = [];
+	let flagWorkspaceDirs: string[] = [];
+	const sessionWorkspaceDirs: string[] = [];
+	/** The workspace directories in force, as real paths: what the user and the system prompt see. */
+	let workspacePaths: string[] = [];
+	/** The same directories in containment's comparison form: what decide() and both shell pre-gates see. */
+	let workspaceDirs: string[] = [];
+	const isRepoSource = (source: RuleSource) => source === "project" || source === "project-local";
+	const repoWorkspaceDirs = () => settingsWorkspaceDirs.filter((dir) => isRepoSource(dir.source));
+	/** What the repository-trust consent covers: its allow rules and its workspace directories. */
+	const projectTrustList = () => [...projectAllowRaw, ...repoWorkspaceDirs().map((dir) => projectDirectoryConsentEntry(dir.raw))];
+	const refreshWorkspace = () => {
+		const trusted = settingsWorkspaceDirs.filter((dir) => projectAllowTrusted || !isRepoSource(dir.source)).map((dir) => dir.path);
+		workspacePaths = [...new Set([...trusted, ...flagWorkspaceDirs, ...sessionWorkspaceDirs].map((dir) => tryRealpath(dir) ?? dir))];
+		workspaceDirs = [...new Set(workspacePaths.map(resolvedOrSelf))];
+		readableRoots = [...harnessReadableRoots, ...workspaceDirs];
+	};
 
 	/**
 	 * Mode changes arrive over the event bus too (plan-mode tools), where no ctx
@@ -353,6 +424,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		return projectInstructionsByCwd.get(cwd);
 	};
 	const pauseTracker = new PauseTracker();
+	/** Classifier denials this session, and the one-shot grants `/permissions` mints from them. */
+	const denials = new DenialStore();
 	/**
 	 * Which model the classifier settled on. Held here so the choice is pinned for
 	 * the session rather than re-resolved per call, and so a model that turns out
@@ -485,7 +558,6 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	 */
 	const runClassifier = async (
 		toolName: string,
-		input: Record<string, unknown>,
 		subject: string,
 		ctx: ExtensionContext,
 		/**
@@ -554,10 +626,11 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			// wrappers, CI workflows, editor auto-run config) are excluded exactly as
 			// the bash pre-gate excludes them — being in-project does not make a file
 			// that runs later without further approval safe to write unclassified.
-			const raw = input.file_path ?? input.path;
-			const target = typeof raw === "string" ? raw : undefined;
-			if (target) {
-				const absolute = toAbsolute(cwd, target, home);
+			// `subject` is pathArgument's pick, the field every other gate judged;
+			// picking a field again here once approved a different file from the
+			// one written (AUTO-MODE-SECURITY-REVIEW-2026-09-24 H1).
+			if (subject) {
+				const absolute = toAbsolute(cwd, subject, home);
 				const resolved = resolveForContainment(absolute);
 				const root = resolveForContainment(cwd) ?? cwd;
 				if (resolved && isWithin(root, resolved) && !isSensitivePath(absolute) && !isExecutionPrimitivePath(absolute)) {
@@ -658,7 +731,12 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		}
 	};
 
-	const reloadSettings = (ctx: ExtensionContext) => {
+	/**
+	 * Re-read the permission rules only: what a rule edit in /permissions needs.
+	 * The mode, a declined project-rule prompt and auto mode's cached config are
+	 * left alone (reloadSettings resets those for a new session).
+	 */
+	const reloadRules = (ctx: ExtensionContext) => {
 		const settings = loadPermissionSettings(ctx.cwd, os.homedir());
 		const parsed = {
 			deny: parseRulesReport(settings.deny),
@@ -673,8 +751,21 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		projectAllowRaw = settings.projectAllow;
 		// A linked worktree shares its main checkout's consent (findProjectRoot).
 		projectRoot = findProjectRoot(ctx.cwd) ?? ctx.cwd;
-		projectAllowTrusted = projectAllowApproved(projectRoot, projectAllowRaw);
-		projectAllowDeclined = false;
+		// A settings file is held to what /add-dir and --add-dir refuse: `/` or `~`
+		// there would make almost the whole disk working space.
+		const tooBroad: string[] = [];
+		settingsWorkspaceDirs = listWorkspaceDirectories(ctx.cwd, os.homedir()).filter((dir) => {
+			const refusal = tooBroadForWorkspace(tryRealpath(dir.path) ?? dir.path, os.homedir());
+			if (refusal) tooBroad.push(`${dir.raw} in ${tildify(dir.settingsPath, os.homedir())}: ${refusal}`);
+			return !refusal;
+		});
+		const tooBroadSignature = tooBroad.join("\n");
+		if (tooBroad.length > 0 && ctx.hasUI && tooBroadSignature !== warnedTooBroad) {
+			warnedTooBroad = tooBroadSignature;
+			ctx.ui.notify(`Ignored permissions.additionalDirectories entries: ${tooBroad.join("; ")}`, "warning");
+		}
+		projectAllowTrusted = projectAllowApproved(projectRoot, projectTrustList());
+		refreshWorkspace();
 		// A rule that fails to parse is a rule the user believes is in force and is
 		// not. Say so (once per distinct set) and list them in /permissions.
 		unparsableRules = [...parsed.deny.dropped, ...parsed.ask.dropped, ...parsed.allow.dropped, ...parsed.projectAllow.dropped];
@@ -686,6 +777,12 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				"warning",
 			);
 		}
+		return settings;
+	};
+
+	const reloadSettings = (ctx: ExtensionContext) => {
+		const settings = reloadRules(ctx);
+		projectAllowDeclined = false;
 		// Dropped so edited autoMode rules and instruction files are picked up on
 		// reload rather than staying cached for the life of the process.
 		autoConfig = undefined;
@@ -739,17 +836,28 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			transcript.length = 0;
 			userMessages.length = 0;
 			pauseTracker.reset();
+			denials.reset();
+			sessionWorkspaceDirs.length = 0;
 		}
 		memoryDirPath = projectMemoryDir(ctx.cwd);
 		scratchpadDirPath = sessionScratchpadDir(ctx.cwd, ctx.sessionManager.getSessionId());
 		// Resolved like the subjects compared against it (a symlinked parent, macOS /var).
 		resultsDirPath = resolvedOrSelf(sessionResultsDir(ctx));
 		sessionDirPath = resolvedOrSelf(ctx.sessionManager.getSessionDir());
-		readableRoots = [memoryDirPath, scratchpadDirPath, resultsDirPath, sessionDirPath].filter((d): d is string => !!d).map(resolvedOrSelf);
+		harnessReadableRoots = [memoryDirPath, scratchpadDirPath, resultsDirPath, sessionDirPath].filter((d): d is string => !!d).map(resolvedOrSelf);
+		// `--add-dir`: each directory is validated like one added in the panel.
+		flagWorkspaceDirs = [];
+		for (const entry of parseAddDirFlag(pi.getFlag("add-dir") as string | undefined)) {
+			const checked = validateWorkspaceDirectory(entry, ctx.cwd, os.homedir(), flagWorkspaceDirs);
+			if ("path" in checked) flagWorkspaceDirs.push(checked.path);
+			else if (ctx.hasUI) ctx.ui.notify(`--add-dir ${entry}: ${checked.error}`, "warning");
+		}
 		resolvedCwd = resolveForContainment(ctx.cwd);
 		oneCodeProjectSettingsFile = oneCodeProjectSettingsPath(ctx.cwd, os.homedir());
 		protectedDirs = runtimeProtectedDirs();
 		reloadSettings(ctx);
+		// The system prompt lists the workspace as the session starts (lib/workspace-channel.ts).
+		pi.events.emit(WORKSPACE_CHANNEL, { dirs: workspacePaths } satisfies WorkspaceAnnouncement);
 		applyBadge();
 		// Publish the subagent permission bridge (see subagent-gate.ts). The closure
 		// reads live parent state on each call, so emitting once at session start is
@@ -837,6 +945,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// command unparseable, which escalates or prompts.
 		await bashParserReady();
 		const normalizedTool = normalizeToolName(event.toolName);
+		const conflict = isPathSubjectTool(normalizedTool) ? conflictingPathArguments(event.input as Record<string, unknown>) : undefined;
+		if (conflict) return { block: true, reason: conflict };
 		const subject = extractSubject(normalizedTool, event.input as Record<string, unknown>);
 		// Resolved through symlinks so the protected-path and working-directory
 		// checks see where a write lands or a read comes from, not how the path
@@ -884,7 +994,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			capTranscript();
 		}
 
-		const decideWith = (allowRules: PermissionRule[]) =>
+		const decideWith = (allowRules: PermissionRule[], dirs: string[] = workspaceDirs) =>
 			decide({
 				toolName: event.toolName,
 				subject: matchSubject,
@@ -902,25 +1012,40 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				resultsDirPath,
 				sessionDirPath,
 				protectedDirs,
+				workspaceDirs: dirs,
 			});
 		let result = decideWith([...allow, ...activeSessionAllows(), ...(projectAllowTrusted ? projectAllow : [])]);
 
-		// A repo-shipped allow rule would decide this call: ask the user to trust
-		// the repository's rule list first (once per list; project-trust.ts). No UI
-		// → the rules stay off and the call takes the normal path (fail closed).
-		if (result.decision !== "allow" && !projectAllowTrusted && !projectAllowDeclined && projectAllow.length > 0 && ctx.hasUI) {
-			const withProject = decideWith([...allow, ...activeSessionAllows(), ...projectAllow]);
-			if (withProject.decision === "allow" && withProject.rule && projectAllow.includes(withProject.rule)) {
-				const firing = withProject.rule.raw;
-				const { title, message } = describeProjectAllow(projectAllowRaw, firing);
-				const approved = (await serializePrompt(() => ctx.ui.confirm(title, message))) === true;
-				if (approved) {
-					projectAllowTrusted = true;
-					persistProjectAllowApproval(projectRoot, projectAllowRaw);
-					result = withProject;
-				} else {
-					projectAllowDeclined = true;
-					ctx.ui.notify("This repository's allow rules stay off for this session (its deny/ask rules still apply).", "info");
+		// A repo-shipped allow rule or workspace directory would decide this call:
+		// ask the user to trust the repository's settings first (once per list;
+		// project-trust.ts). No UI → they stay off and the call takes the normal
+		// path (fail closed).
+		const trustProject = async (withProject: typeof result, firing: TrustFiring) => {
+			const repoDirs = repoWorkspaceDirs().map((dir) => dir.raw);
+			const { title, message } = describeProjectAllow(projectAllowRaw, firing, repoDirs);
+			const approved = (await serializePrompt(() => ctx.ui.confirm(title, message))) === true;
+			if (approved) {
+				projectAllowTrusted = true;
+				persistProjectAllowApproval(projectRoot, projectTrustList());
+				refreshWorkspace();
+				result = withProject;
+			} else {
+				projectAllowDeclined = true;
+				ctx.ui.notify("This repository's allow rules and workspace directories stay off for this session (its deny/ask rules still apply).", "info");
+			}
+		};
+		if (result.decision !== "allow" && !projectAllowTrusted && !projectAllowDeclined && ctx.hasUI) {
+			const withRules = projectAllow.length > 0 ? decideWith([...allow, ...activeSessionAllows(), ...projectAllow]) : undefined;
+			const repoDirs = repoWorkspaceDirs();
+			if (withRules?.decision === "allow" && withRules.rule && projectAllow.includes(withRules.rule)) {
+				await trustProject(withRules, { rule: withRules.rule.raw });
+			} else if (repoDirs.length > 0) {
+				const withDirs = decideWith([...allow, ...activeSessionAllows()], [...workspaceDirs, ...repoDirs.map((dir) => resolvedOrSelf(dir.path))]);
+				// A read tool's allow is "tier" or "mode"; a plan-mode shell read's is "plan-readonly".
+				if (withDirs.decision === "allow" && (withDirs.cause === "tier" || withDirs.cause === "mode" || withDirs.cause === "plan-readonly")) {
+					const target = resolvedSubject ?? toAbsolute(callCwd, matchSubject, os.homedir());
+					const firing = repoDirs.find((dir) => isWithin(resolvedOrSelf(dir.path), target))?.raw ?? repoDirs[0].raw;
+					await trustProject(withDirs, { dir: firing });
 				}
 			}
 		}
@@ -965,6 +1090,20 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			}
 			logDecision(ctx, { tool: event.toolName, subject, outcome: "prompt", source: "floor", reason: floorReason });
 		} else if (result.decision === "classify") {
+			// The exact call the user approved in /permissions after the classifier
+			// denied it runs once without the classifier (auto-mode/denials.ts). Deny
+			// rules and the safety floor were checked above, so no grant reaches them.
+			const inputKey = denialInputKey(
+				normalizedTool,
+				original !== undefined ? { command: original.command } : (event.input as Record<string, unknown>),
+				callCwd,
+				isShellTool(normalizedTool),
+			);
+			if (denials.takeGrant(inputKey)) {
+				logDecision(ctx, { tool: event.toolName, subject: matchSubject, outcome: "allow", source: "user", reason: "approved in /permissions" });
+				pauseTracker.recordAllow();
+				return undefined;
+			}
 			// Auto mode is for unattended runs: a block is returned to the MODEL so it
 			// can try a safe alternative — it is never raised as a per-action user
 			// prompt. The one exception is the loop-breaker: after repeated blocks the
@@ -974,7 +1113,6 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			if (!pauseTracker.isPaused()) {
 				const outcome = await runClassifier(
 					event.toolName,
-					event.input as Record<string, unknown>,
 					matchSubject,
 					ctx,
 					// Protected paths must always be judged; everything else may be cleared
@@ -986,6 +1124,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				);
 				if (outcome.decision === "allow") {
 					pauseTracker.recordAllow();
+					denials.settle(inputKey);
 					return undefined;
 				}
 
@@ -1005,6 +1144,18 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 					ruleId: outcome.ruleId,
 					raw: outcome.raw,
 				});
+				// A verdict, not a failure to reach one, can be approved in /permissions.
+				if (!outcome.noVerdict) {
+					denials.record({
+						toolName: normalizedTool,
+						display: `${event.toolName}(${previewSubject(matchSubject)})`,
+						inputKey,
+						reason: outcome.reason,
+						...(outcome.ruleId ? { rule: outcome.ruleId } : {}),
+						timestamp: Date.now(),
+					});
+					if (ctx.hasUI) ctx.ui.notify(deniedNotice(event.toolName, outcome.reason), "warning");
+				}
 				if (tripped) {
 					const { lifetime } = pauseTracker.stats();
 					ctx.ui.notify(
@@ -1096,6 +1247,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		const ctx = lastReviewCtx;
 		const { toolName, input, cwd } = call;
 		const normalizedTool = normalizeToolName(toolName);
+		const conflict = isPathSubjectTool(normalizedTool) ? conflictingPathArguments(input) : undefined;
+		if (conflict) return { block: true, reason: conflict };
 		const subject = extractSubject(normalizedTool, input);
 		const resolvedSubject =
 			isPathSubjectTool(normalizedTool) && subject
@@ -1123,6 +1276,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			resultsDirPath,
 			sessionDirPath,
 			protectedDirs,
+			workspaceDirs,
 		});
 
 		// A child's cwd can be a worktree (different project → different per-repo
@@ -1161,7 +1315,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				tool: normalizedTool,
 				input: isShellTool(normalizedTool) ? { command: subject } : input,
 			};
-			const outcome = await runClassifier(toolName, input, subject, ctx, result.cause !== "protected-path", {
+			const outcome = await runClassifier(toolName, subject, ctx, result.cause !== "protected-path", {
 				cwd,
 				appendEntry,
 				// The child's own turn signal, so an aborted child turn cancels the
@@ -1231,42 +1385,405 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		};
 	};
 
-	registerLocalCommand(pi, "permissions", {
-		description: "Show permission mode and loaded rules",
-		handler: async (args, ctx) => {
-			const fmt = (rules: PermissionRule[]) => (rules.length ? rules.map((r) => r.raw).join(", ") : "(none)");
-			const denials = pauseTracker.recentDenials();
-			const autoLines =
-				mode === "auto" || denials.length > 0
-					? [
-							`auto mode: ${pauseTracker.isPaused() ? "paused (approve a prompt to resume)" : "active"}, ${
-								pauseTracker.stats().lifetime
-							} blocked this session`,
-							...(denials.length > 0
-								? [
-										"recently denied:",
-										...denials.map((d) => `  ${d.toolName}(${d.subject.slice(0, 60)}) — ${d.reason}`),
-									]
-								: []),
-						]
-					: [];
-			ctx.ui.notify(
-				[
-					`mode: ${mode}`,
-					`deny: ${fmt(deny)}`,
-					`ask: ${fmt(ask)}`,
-					`allow: ${fmt(allow)}`,
-					...(projectAllow.length > 0
-						? [
-								`project allow (${projectAllowTrusted ? "trusted" : projectAllowDeclined ? "declined this session" : "awaiting consent"}): ${fmt(projectAllow)}`,
-							]
-						: []),
-					`session allows: ${fmt(sessionAllows)}`,
-					...(unparsableRules.length > 0 ? [`unparsable rules (ignored): ${unparsableRules.join(", ")}`] : []),
-					...autoLines,
-				].join("\n"),
-				"info",
+	/** Where a rule came from, and why the panel cannot edit it when it cannot. */
+	const describeSource = (rule: SourcedRule, home: string): { label: string; editable: boolean; note?: string } => {
+		const where = tildify(rule.path, home);
+		const readOnly = (label: string, note: string) => ({ label: `From ${label}`, editable: false, note });
+		switch (rule.source) {
+			case "onecode-user":
+				return { label: `From One Code user settings (${where})`, editable: true };
+			case "onecode-project":
+				return { label: `From One Code project settings (${where})`, editable: true };
+			case "claude-user":
+				return readOnly(`Claude Code user settings (${where})`, `One Code does not edit Claude Code's files. Change this rule in ${where}.`);
+			case "project":
+			case "project-local": {
+				const file = rule.source === "project" ? ".claude/settings.json" : ".claude/settings.local.json";
+				const consent =
+					rule.behavior !== "allow" ? "" : projectAllowTrusted ? " You trusted this repository's allow rules." : projectAllowDeclined ? " Its allow rules are off this session." : " Its allow rules apply only after you trust them.";
+				return readOnly(`the repository's ${file}`, `This rule ships with the repository. Change it in ${file}.${consent}`);
+			}
+			case "managed":
+				return readOnly("managed settings", "This rule is configured by managed settings and cannot be modified. Contact your system administrator for more information.");
+		}
+	};
+
+	const ruleRows = (cwd: string, home: string): Record<RuleTab, RuleRow[]> => {
+		const rows: Record<RuleTab, RuleRow[]> = { allow: [], ask: [], deny: [] };
+		for (const rule of listPermissionRules(cwd, home)) {
+			const source = describeSource(rule, home);
+			rows[rule.behavior].push({
+				key: `${rule.source}\0${rule.path}\0${rule.raw}`,
+				behavior: rule.behavior,
+				raw: rule.raw,
+				sourceLabel: source.label,
+				editable: source.editable,
+				...(source.note ? { readOnlyNote: source.note } : {}),
+			});
+		}
+		// "Don't ask again" grants live in memory for this session; deleting one ends it.
+		for (const grant of sessionAllows) {
+			rows.allow.push({ key: `session\0\0${grant.raw}`, behavior: "allow", raw: grant.raw, sourceLabel: "From this session (don't ask again)", editable: true });
+		}
+		for (const tab of RULE_TABS) rows[tab].sort((a, b) => a.raw.toLowerCase().localeCompare(b.raw.toLowerCase()));
+		return rows;
+	};
+
+	const ruleDestinations = (cwd: string, home: string): Destination[] => [
+		{ id: "onecode-project", label: "One Code project settings", description: `Saved in ${tildify(oneCodeProjectSettingsPath(cwd, home), home)}, for this project only` },
+		{ id: "onecode-user", label: "One Code user settings", description: `Saved in ${tildify(oneCodeSettingsPath(home), home)}, for every project` },
+	];
+
+	/** The status line under the panel's tabs. */
+	const panelStatus = (): string => {
+		const parts = [`Mode: ${mode}`];
+		if (mode === "auto" || pauseTracker.stats().lifetime > 0) {
+			parts.push(`${pauseTracker.stats().lifetime} blocked by auto mode this session`);
+			if (pauseTracker.isPaused()) parts.push("auto mode paused (approve a prompt to resume)");
+		}
+		if (unparsableRules.length > 0) parts.push(`${unparsableRules.length} rule(s) could not be parsed and are ignored`);
+		return parts.join(" · ");
+	};
+
+	/** The text summary /permissions prints where no panel can open. */
+	const permissionsSummary = (): string => {
+		const fmt = (rules: PermissionRule[]) => (rules.length ? rules.map((r) => r.raw).join(", ") : "(none)");
+		return [
+			`mode: ${mode}`,
+			`deny: ${fmt(deny)}`,
+			`ask: ${fmt(ask)}`,
+			`allow: ${fmt(allow)}`,
+			...(projectAllow.length > 0
+				? [`project allow (${projectAllowTrusted ? "trusted" : projectAllowDeclined ? "declined this session" : "awaiting consent"}): ${fmt(projectAllow)}`]
+				: []),
+			`session allows: ${fmt(sessionAllows)}`,
+			...(unparsableRules.length > 0 ? [`unparsable rules (ignored): ${unparsableRules.join(", ")}`] : []),
+			...(denials.list().length > 0 ? ["recently denied:", ...denials.list().map((d) => `  ${d.display} — ${d.reason}`)] : []),
+		].join("\n");
+	};
+
+	/** Built-in rules per auto-mode section, counted once from the embedded ruleset. */
+	let builtinCounts: ReturnType<typeof builtinRuleCounts> | undefined;
+
+	const autoSource = (entry: SourcedAutoModeEntry, home: string): { label: string; editable: boolean; note?: string } => {
+		const where = tildify(entry.path, home);
+		if (entry.source === "onecode-user") return { label: `From One Code user settings (${where})`, editable: true };
+		if (entry.source === "claude-user") {
+			return { label: `From Claude Code user settings (${where})`, editable: false, note: `One Code does not edit Claude Code's files. Change this entry in ${where}; it stays in effect here.` };
+		}
+		return { label: "From managed settings", editable: false, note: "This entry is configured by managed settings and cannot be modified. Contact your system administrator for more information." };
+	};
+
+	const autoModeView = (home: string): AutoModeView => {
+		const listed = listAutoModeEntries(home);
+		const entries: AutoEntryRow[] = [];
+		for (const section of AUTO_SECTIONS) {
+			for (const entry of listed.filter((e) => e.key === section)) {
+				const source = autoSource(entry, home);
+				entries.push({
+					key: `${entry.source}\0${entry.path}\0${section}\0${entry.text}`,
+					section,
+					text: entry.text,
+					sourceLabel: source.label,
+					editable: source.editable,
+					...(source.note ? { readOnlyNote: source.note } : {}),
+				});
+			}
+		}
+		const environment = loadAutoModeConfig(home).environment;
+		const envSources = [...new Set(listed.filter((e) => e.key === "environment").map((e) => autoSource(e, home).label.replace(/^From /, "").replace(/ \(.*\)$/, "")))];
+		const isDefault = envSources.length === 0;
+		const extendsDefault = !isDefault && DEFAULT_ENVIRONMENT.every((line) => environment.includes(line));
+		builtinCounts ??= builtinRuleCounts(buildRuleset(DEFAULT_ENVIRONMENT));
+		return {
+			builtins: builtinCounts,
+			entries,
+			environment: {
+				lines: environment,
+				summary: isDefault ? "Built-in default" : `${extendsDefault ? "Extends" : "Replaces"} the built-in default · from ${envSources.join(" and ")}`,
+				isDefault,
+			},
+		};
+	};
+
+	/** A panel row key for an auto-mode entry: source, file, section, text. */
+	const parseAutoKey = (key: string) => {
+		const [source, path, section, text] = key.split("\0");
+		if (source !== "onecode-user") throw new Error(`One Code can only change auto mode rules in its own settings file; this one is in ${tildify(path, os.homedir())}.`);
+		return { section: section as (typeof AUTO_SECTIONS)[number], text };
+	};
+	const autoLabel = (section: (typeof AUTO_SECTIONS)[number]) => AUTO_SECTION_LABELS[section].toLowerCase();
+
+	/**
+	 * Edit One Code's own `autoMode.environment` in pi's editor. It starts from
+	 * One Code's entries, or from the built-in default when nothing else sets
+	 * one (Claude Code starts from the full default text too). Saving it empty
+	 * removes the key, which restores the default. Returns the change line.
+	 */
+	const editEnvironment = async (ctx: ExtensionContext, home: string): Promise<string | undefined> => {
+		const listed = listAutoModeEntries(home).filter((e) => e.key === "environment");
+		const own = listed.filter((e) => e.source === "onecode-user").map((e) => e.text);
+		const others = listed.length - own.length;
+		// `"$defaults"` in the list: the user's lines extend the built-in default,
+		// which stays out of the editor and is kept on save.
+		const extendsDefault = oneCodeEnvironmentExtendsDefault(home);
+		const start = own.length > 0 ? own : others > 0 || extendsDefault ? [] : DEFAULT_ENVIRONMENT;
+		const title =
+			"Auto mode environment: one entry per line, `### ` lines are section headers. Save it empty to restore the built-in default." +
+			(extendsDefault ? " These lines are added to the built-in default." : "") +
+			(others > 0 ? ` These lines are added to the ${others} entries from Claude Code's user or managed settings.` : "");
+		const edited = await ctx.ui.editor(title, start.join("\n"));
+		if (edited === undefined) return undefined;
+		const lines = edited.split("\n").map((line) => line.trimEnd()).filter((line) => line.trim().length > 0);
+		if (lines.join("\n") === start.join("\n")) return undefined;
+		updateOneCodeAutoModeList(
+			"environment",
+			(entries) => {
+				const at = entries.findIndex((entry) => entry.trim() === "$defaults");
+				if (at < 0 || lines.length === 0) return lines;
+				return [...lines.slice(0, at), entries[at], ...lines.slice(at)];
+			},
+			home,
+		);
+		autoConfig = undefined;
+		return lines.length > 0 ? `Saved your auto mode environment to ${tildify(oneCodeSettingsPath(home), home)}` : "Restored the built-in auto mode environment";
+	};
+
+	/** Where a workspace directory came from, and why the panel cannot remove it when it cannot. */
+	const workspaceRows = (home: string): WorkspaceDirRow[] => {
+		const rows: WorkspaceDirRow[] = [];
+		for (const dir of settingsWorkspaceDirs) {
+			const where = tildify(dir.settingsPath, home);
+			const key = `${dir.source}\0${dir.settingsPath}\0${dir.raw}`;
+			if (dir.source === "onecode-user" || dir.source === "onecode-project") {
+				rows.push({ key, path: dir.path, sourceLabel: `From One Code ${dir.source === "onecode-user" ? "user" : "project"} settings (${where})`, editable: true });
+			} else if (isRepoSource(dir.source)) {
+				const file = dir.source === "project" ? ".claude/settings.json" : ".claude/settings.local.json";
+				const state = projectAllowTrusted ? "" : projectAllowDeclined ? ", off this session" : ", awaiting your trust";
+				rows.push({
+					key,
+					path: dir.path,
+					sourceLabel: `From the repository's ${file}${state}`,
+					editable: false,
+					readOnlyNote: `This directory ships with the repository. Change it in ${file}.${projectAllowTrusted ? "" : " It applies only after you trust the repository's settings, which you are asked the first time a call needs it."}`,
+				});
+			} else {
+				const label = dir.source === "claude-user" ? `Claude Code user settings (${where})` : "managed settings";
+				rows.push({ key, path: dir.path, sourceLabel: `From ${label}`, editable: false, readOnlyNote: dir.source === "claude-user" ? `One Code does not edit Claude Code's files. Change it in ${where}.` : "This directory is configured by managed settings and cannot be modified here." });
+			}
+		}
+		for (const path of flagWorkspaceDirs) rows.push({ key: `flag\0\0${path}`, path, sourceLabel: "From --add-dir", editable: false, readOnlyNote: "Added with --add-dir for this run. Start One Code without it to leave it out." });
+		for (const path of sessionWorkspaceDirs) rows.push({ key: `session\0\0${path}`, path, sourceLabel: "Added for this session", editable: true });
+		return rows;
+	};
+
+	/** Add a validated directory for this session, or remember it in One Code's project settings. Returns the change line. */
+	const addWorkspaceDirectory = (ctx: ExtensionContext, path: string, remember: boolean): string => {
+		const home = os.homedir();
+		if (remember) {
+			const target = oneCodeProjectSettingsPath(ctx.cwd, home);
+			persistWorkspaceDirectory(path, target);
+			reloadRules(ctx);
+			return `Added directory ${path} to workspace and saved to ${tildify(target, home)}`;
+		}
+		if (!sessionWorkspaceDirs.includes(path)) sessionWorkspaceDirs.push(path);
+		refreshWorkspace();
+		return `Added directory ${path} to workspace for this session`;
+	};
+
+	/** The panel's I/O over the gate's state (panel/host.ts). */
+	const panelHost = (ctx: ExtensionContext, home: string): PermissionsPanelHost => {
+		return {
+			view: () => ({
+				denials: denials.list().map((d) => ({ id: d.id, display: d.display, ...(d.rule ? { rule: d.rule } : {}) })),
+				rules: ruleRows(ctx.cwd, home),
+				autoMode: autoModeView(home),
+				destinations: ruleDestinations(ctx.cwd, home),
+				ruleError: (raw) =>
+					parseRule(raw) ? undefined : `Could not parse "${raw}". A rule is a tool name, optionally followed by a pattern in parentheses: Bash(npm test:*).`,
+				workspace: { cwd: ctx.cwd, dirs: workspaceRows(home) },
+				validateDir: (input) => validateWorkspaceDirectory(input, ctx.cwd, home, workspacePaths),
+			}),
+			status: panelStatus,
+			addRule: (behavior, rule, destination) => {
+				const target = destination === "onecode-user" ? oneCodeSettingsPath(home) : oneCodeProjectSettingsPath(ctx.cwd, home);
+				if (!persistPermissionRule(behavior, rule, target)) throw new Error(`That ${behavior} rule is already in ${tildify(target, home)}.`);
+				reloadRules(ctx);
+				return `Added ${behavior} rule ${rule} to ${tildify(target, home)}`;
+			},
+			deleteRule: (behavior, key) => {
+				const [source, path, raw] = key.split("\0");
+				if (source === "session") {
+					const index = sessionAllows.findIndex((grant) => grant.raw === raw);
+					if (index >= 0) sessionAllows.splice(index, 1);
+				} else if (source === ("onecode-user" satisfies RuleSource) || source === ("onecode-project" satisfies RuleSource)) {
+					if (!removePermissionRule(behavior, raw, path)) throw new Error(`${raw} is no longer in ${tildify(path, home)}.`);
+					reloadRules(ctx);
+				} else {
+					throw new Error(`One Code can only delete rules from its own settings files; ${raw} is in ${tildify(path, home)}.`);
+				}
+				return `Deleted ${behavior} rule ${raw}`;
+			},
+			// Auto mode rules go to One Code's user settings: autoMode is never read
+			// from project settings (decisions/modes.md). The cached config is dropped
+			// so the next classifier call reads the change.
+			addAutoRule: (section, text) => {
+				updateOneCodeAutoModeList(
+					section,
+					(entries) => {
+						if (entries.includes(text)) throw new Error(`That ${autoLabel(section)} rule is already in your settings.`);
+						return [...entries, text];
+					},
+					home,
+				);
+				autoConfig = undefined;
+				return `Added auto mode ${autoLabel(section)} rule: ${text}`;
+			},
+			editAutoRule: (key, text) => {
+				const { section, text: old } = parseAutoKey(key);
+				updateOneCodeAutoModeList(
+					section,
+					(entries) => {
+						const index = entries.indexOf(old);
+						if (index < 0) throw new Error("That rule is no longer in your settings.");
+						return entries.map((entry, i) => (i === index ? text : entry));
+					},
+					home,
+				);
+				autoConfig = undefined;
+				return `Updated auto mode ${autoLabel(section)} rule: ${text}`;
+			},
+			deleteAutoRule: (key) => {
+				const { section, text } = parseAutoKey(key);
+				updateOneCodeAutoModeList(
+					section,
+					(entries) => {
+						if (!entries.includes(text)) throw new Error("That rule is no longer in your settings.");
+						return entries.filter((entry) => entry !== text);
+					},
+					home,
+				);
+				autoConfig = undefined;
+				return `Deleted auto mode ${autoLabel(section)} rule: ${text}`;
+			},
+			addDir: (path, remember) => addWorkspaceDirectory(ctx, path, remember),
+			removeDir: (key) => {
+				const [source, settingsPath, raw] = key.split("\0");
+				if (source === "session") {
+					const index = sessionWorkspaceDirs.indexOf(raw);
+					if (index >= 0) sessionWorkspaceDirs.splice(index, 1);
+					refreshWorkspace();
+				} else if (source === ("onecode-user" satisfies RuleSource) || source === ("onecode-project" satisfies RuleSource)) {
+					if (!removeWorkspaceDirectory(raw, settingsPath)) throw new Error(`${raw} is no longer in ${tildify(settingsPath, home)}.`);
+					reloadRules(ctx);
+				} else {
+					throw new Error(`One Code can only remove directories it added; ${raw} comes from elsewhere.`);
+				}
+				return `Removed directory ${raw} from workspace`;
+			},
+		};
+	};
+
+	/**
+	 * Open the panel, run the environment editor round trips, then tell the
+	 * model what happened: approvals mint their grants here, once, as in Claude
+	 * Code (a row toggled on and off again grants nothing). `command` names the
+	 * breadcrumb (`permissions`, `add-dir`).
+	 */
+	const runPermissionsPanel = async (ctx: ExtensionContext, command: string, args: string, prepare?: (state: PanelState) => void) => {
+		const home = os.homedir();
+		const host = panelHost(ctx, home);
+		// The environment editor cannot open over the panel: close, edit, reopen.
+		let session = await openPermissionsPanel(ctx, host, undefined, prepare);
+		while (session.editEnvironment) {
+			session.editEnvironment = false;
+			try {
+				const change = await editEnvironment(ctx, home);
+				if (change) session.changes.push(change);
+			} catch (error) {
+				session.state.notice = `Could not save the environment: ${(error as Error).message}`;
+			}
+			session = await openPermissionsPanel(ctx, host, session);
+		}
+		const { state, changes } = session;
+
+		const approved = denials.approve(state.approved);
+		const retried = approved.filter((d) => state.retry.has(d.id));
+		const displays = approved.map((d) => d.display);
+		if (retried.length > 0) {
+			// Claude Code's retry: a banner says what was allowed, and a turn starts
+			// with the grant message.
+			announceLocalCommand(pi, { name: command, args, stdout: changes.join("\n") });
+			ctx.ui.notify(`Allowed ${retried.map((d) => d.display).join(", ")}`, "info");
+			pi.sendMessage(
+				{ customType: PERMISSION_RETRY_TYPE, content: permissionGrantedMessage(displays), display: false },
+				ctx.isIdle() ? { triggerTurn: true } : { deliverAs: "followUp", triggerTurn: true },
 			);
+			return;
+		}
+		if (approved.length === 0 && changes.length === 0) return;
+		const stdout = [...(approved.length > 0 ? [`Approved ${displays.join(", ")}`] : []), ...changes].join("\n");
+		announceLocalCommand(pi, { name: command, args, stdout });
+		// The grant message rides with the breadcrumb on the next prompt; no turn starts.
+		if (approved.length > 0) pi.events.emit(REMINDER_CHANNEL, { text: `${permissionGrantedMessage(displays)}\n`, placement: "user-prepend", raw: true });
+	};
+
+	/**
+	 * /permissions — Claude Code's panel (findings §33): approve or retry calls
+	 * the classifier denied, list, add or delete permission rules, manage auto
+	 * mode's own rules and environment, and the workspace directories.
+	 * Registered plainly, not through registerLocalCommand: the breadcrumb
+	 * carries what the panel did, so it is announced after the panel closes,
+	 * not before it opens.
+	 */
+	pi.registerCommand("permissions", {
+		description: "Review recently denied calls and manage permission rules, auto mode rules and workspace directories",
+		handler: async (args: string, ctx: ExtensionContext) => {
+			if (!ctx.hasUI) {
+				announceLocalCommand(pi, { name: "permissions", args });
+				ctx.ui.notify(permissionsSummary(), "info");
+				return;
+			}
+			await runPermissionsPanel(ctx, "permissions", args);
+		},
+	});
+
+	/**
+	 * /add-dir — Claude Code's: add a workspace directory. With a path it asks
+	 * whether to keep it for this session or remember it; without one it opens
+	 * the panel's Workspace tab on the path input.
+	 */
+	pi.registerCommand("add-dir", {
+		description: "Add a workspace directory: /add-dir <path>",
+		handler: async (args: string, ctx: ExtensionContext) => {
+			const input = args.trim();
+			if (!ctx.hasUI) {
+				announceLocalCommand(pi, { name: "add-dir", args });
+				ctx.ui.notify("/add-dir needs the interactive UI; start One Code with --add-dir instead.", "warning");
+				return;
+			}
+			if (!input) {
+				await runPermissionsPanel(ctx, "add-dir", args, (state) => {
+					state.tab = "workspace";
+					state.dialog = { kind: "addDir", draft: "" };
+				});
+				return;
+			}
+			const checked = validateWorkspaceDirectory(input, ctx.cwd, os.homedir(), workspacePaths);
+			if ("error" in checked) {
+				announceLocalCommand(pi, { name: "add-dir", args, stdout: checked.error });
+				ctx.ui.notify(checked.error, "warning");
+				return;
+			}
+			const choice = await ctx.ui.select(`Add ${checked.path} to the workspace? One Code will be able to read files in it and make edits when auto-accept edits is on.`, [
+				"Yes, for this session",
+				"Yes, and remember this directory",
+				"No",
+			]);
+			if (!choice || choice === "No") return;
+			const change = addWorkspaceDirectory(ctx, checked.path, choice !== "Yes, for this session");
+			announceLocalCommand(pi, { name: "add-dir", args, stdout: change });
+			ctx.ui.notify(change, "info");
 		},
 	});
 

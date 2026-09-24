@@ -217,10 +217,16 @@ describe("H3: unmodelled writes reach the floor", () => {
 		// A loop body runs more than once, so the read before the `cd` also runs after it.
 		expect(shellNamesControlFile("for i in 1 2; do printf x > settings.json; cd .claude; done", cwd, home)).toBe("settings.json");
 		expect(shellNamesControlFile('cd "$D"; printf x > settings.json', cwd, home)).toBe("settings.json");
+		// A script run in this shell may cd (PR #15 review).
+		expect(shellNamesControlFile('eval "cd .claude"; printf x > settings.json', cwd, home)).toBe("settings.json");
+		// A cd that may not run leaves the directory unknown too.
+		expect(shellNamesControlFile("cd .claude; false && cd /tmp; printf x > settings.json", cwd, home)).toBe("settings.json");
 		expect(shellNamesControlFile("cd .claude; echo hi <> settings.json", cwd, home)).toBe("settings.json");
 		expect(shellNamesControlFile("cd .cla*; printf x > settings.json", cwd, home)).toBe("settings.json");
 		// Under `shopt -s lastpipe` the last pipeline member runs in this shell.
 		expect(shellNamesControlFile("shopt -s lastpipe; true | cd .claude; printf x > settings.json", cwd, home)).toBe("settings.json");
+		// Inside a substitution too, for the later commands of that substitution (PR #13 review).
+		expect(shellNamesControlFile('echo "$(shopt -s lastpipe; true | cd .claude; printf x > settings.json)"', cwd, home)).toBe("settings.json");
 		// `cd -` goes to $OLDPWD (PR #12 review).
 		expect(shellNamesControlFile("cd .claude; cd /tmp; cd -; printf x > settings.json", cwd, home)).toBe("settings.json");
 		// Where the directory is known, a same-named file elsewhere is not a control file.

