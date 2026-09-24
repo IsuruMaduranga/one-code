@@ -289,14 +289,19 @@ export function bashMatchForms(command: string, depth = 0): string[] {
 	// its rough pieces besides.
 	const { segments, parseFailed } = parseCommand(trimmed);
 	if (parseFailed) nested.push(...roughPieces(trimmed));
-	// A shell with no `-c` script runs its input: every heredoc and here-string
-	// on the line may be what it reads (`sh <<'EOF'`, `cat <<EOF | sh`). Only
-	// then, so a commit message mentioning `rm` never meets `Bash(rm:*)`.
-	const shellReadsInput = segments.some((segment) => {
-		const payload = resolvePayload(leadTokens(segment), "wide");
-		return SHELL_INTERPRETERS.has(payload.command) && inlineShellScript(payload.args.map((token) => token.value)) === undefined;
-	});
-	if (shellReadsInput) for (const segment of segments) nested.push(...(segment.stdin ?? []));
+	// A shell on the line may run its input, a `-c` script included (`sh -c
+	// 'eval "$(cat)"'`). Then every heredoc and here-string on the line, and
+	// the words an `echo`/`printf` prints, may be the script it reads
+	// (`sh <<'EOF'`, `cat <<EOF | sh`, `echo 'rm -rf x' | sh`). Only then, so
+	// a commit message mentioning `rm` never meets `Bash(rm:*)`.
+	const payloads = segments.map((segment) => resolvePayload(leadTokens(segment), "wide"));
+	if (payloads.some((payload) => SHELL_INTERPRETERS.has(payload.command))) {
+		for (const [index, segment] of segments.entries()) {
+			nested.push(...(segment.stdin ?? []));
+			const { command: printer, args } = payloads[index];
+			if (printer === "echo" || printer === "printf") nested.push(args.map((token) => token.value).filter((value) => !/^-[neE]+$/.test(value)).join(" "));
+		}
+	}
 	for (const segment of segments) {
 		if (segment.raw) forms.add(segment.raw);
 		const tokens = leadTokens(segment);

@@ -142,7 +142,13 @@ describe("deny forms on the tree", () => {
 			expect(bashMatchForms(command), command).toContain("rm -rf x");
 		}
 		expect(bashMatchForms("git commit -F - <<'EOF'\nrm -rf x\nEOF")).not.toContain("rm -rf x");
-		expect(bashMatchForms("sh -c 'ls' <<'EOF'\nrm -rf x\nEOF")).not.toContain("rm -rf x");
+		expect(bashMatchForms("echo 'rm -rf x'")).not.toContain("rm -rf x");
+	});
+
+	it("see what a -c script or a pipe from echo feeds a shell (PR #12 review)", () => {
+		for (const command of [`sh -c 'eval "$(cat)"' <<< 'rm -rf x'`, "sh -c 'ls' <<'EOF'\nrm -rf x\nEOF", "echo 'rm -rf x' | sh", "printf 'rm -rf x' | bash", "echo -n rm -rf x | sh"]) {
+			expect(bashMatchForms(command), command).toContain("rm -rf x");
+		}
 	});
 
 	it("fail closed on a heredoc backtick the grammar cannot parse (PR #12 review)", () => {

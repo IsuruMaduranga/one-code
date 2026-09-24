@@ -185,6 +185,8 @@ interface WrapperSpec {
  * only: the pre-gate peeling them would clear `sudo rm` as a contained delete.
  */
 const WRAPPERS: Record<string, WrapperSpec> = {
+	// `builtin cd x` runs the builtin `cd` (PR #12 review: it hid a `cd` from the worktree guard).
+	builtin: { contained: true },
 	caffeinate: { values: ["-t", "-w"], contained: true, denyFormsOnly: true },
 	command: { contained: true },
 	doas: { values: ["-u", "-a"], unsafeValues: ["-C"], contained: false, denyFormsOnly: true },

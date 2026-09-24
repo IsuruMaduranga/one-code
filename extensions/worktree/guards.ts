@@ -114,7 +114,7 @@ export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: W
 	// A loop body runs more than once, so a `cd` in it moves every git command
 	// in the loop after the first pass; the segments show one pass only.
 	const movesInLoop = segments.some(
-		(seg) => seg.enclosing.some((construct) => LOOPS.has(construct)) && ["cd", "pushd", "popd"].includes(leadTokens(seg)[0]?.value ?? ""),
+		(seg) => seg.enclosing.some((construct) => LOOPS.has(construct)) && ["cd", "pushd", "popd"].includes(resolvePayload(leadTokens(seg)).command),
 	);
 	if (movesInLoop && /\bgit\b/.test(command)) {
 		return isolated(
@@ -128,14 +128,16 @@ export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: W
 		const tokens = leadTokens(seg);
 		const rawLead = tokens[0]?.value;
 		if (!rawLead) return undefined;
+		// The command a wrapper runs (`builtin cd`, `command cd`), not the first word.
+		const { command: lead, args: leadArgs } = resolvePayload(tokens);
 
-		if (rawLead === "cd") {
+		if (lead === "cd") {
 			// Skip cd's own options (-P/-L/-e/-@); `--` ends them; a lone `-`
 			// means the previous directory, which is not statically known.
-			let j = 1;
-			while (j < tokens.length && tokens[j].value.startsWith("-") && !["-", "--"].includes(tokens[j].value)) j++;
-			if (tokens[j]?.value === "--") j++;
-			const target = tokens[j]?.value;
+			let j = 0;
+			while (j < leadArgs.length && leadArgs[j].value.startsWith("-") && !["-", "--"].includes(leadArgs[j].value)) j++;
+			if (leadArgs[j]?.value === "--") j++;
+			const target = leadArgs[j]?.value;
 			if (!target) dir = homedir();
 			else if (hasExpansion(target) || target === "-") dir = undefined;
 			// An absolute (or ~) destination re-anchors the tracked directory
@@ -144,7 +146,7 @@ export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: W
 			else if (dir !== undefined) dir = toAbsoluteBash(dir, target, homedir());
 			return undefined;
 		}
-		if (rawLead === "pushd" || rawLead === "popd") {
+		if (lead === "pushd" || lead === "popd") {
 			dir = undefined;
 			return undefined;
 		}

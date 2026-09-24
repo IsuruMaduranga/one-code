@@ -264,7 +264,9 @@ export function shellNamesControlFile(
 			if (!moves(segment)) return false;
 			const payload = resolvePayload(segment.tokens);
 			const target = payload.args.find((token) => !token.value.startsWith("-"));
-			return payload.command !== "cd" || segment.enclosing.some((construct) => LOOPS.has(construct)) || !!target?.dynamic || (!!target && isUnknownTilde(target.value));
+			// `cd -` goes to $OLDPWD.
+			const previous = payload.args.some((token) => token.value === "-");
+			return payload.command !== "cd" || previous || segment.enclosing.some((construct) => LOOPS.has(construct)) || !!target?.dynamic || (!!target && isUnknownTilde(target.value));
 		});
 	// Lowercased on every platform: a false positive costs one stop.
 	const baseName = (path: string) => path.slice(path.replace(/\\/g, "/").lastIndexOf("/") + 1).toLowerCase();
