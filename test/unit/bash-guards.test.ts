@@ -70,6 +70,8 @@ describe("wait guard", () => {
 describe("poll-loop guard", () => {
 	it("blocks foreground while/until/for loops that sleep", () => {
 		expect(fg("while true; do sleep 2; done")).toContain("polling loop");
+		// Wherever the loop sits in the line (PR #12 review).
+		expect(fg("echo start; while true; do sleep 5; done")).toContain("polling loop");
 		expect(fg("until curl -sf localhost/health; do sleep 2; done")).toBeDefined();
 		expect(fg("for i in 1 2 3; do check; sleep 5; done")).toBeDefined();
 	});

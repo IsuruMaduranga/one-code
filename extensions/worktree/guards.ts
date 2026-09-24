@@ -28,7 +28,7 @@
 import { homedir } from "node:os";
 import { isAbsolute } from "node:path";
 import { isWithin, toAbsoluteBash } from "../auto-mode/paths.ts";
-import { gitSubcommand, leadTokens, parseCommand, resolvePayload, type Token } from "../auto-mode/shell-analysis.ts";
+import { gitSubcommand, leadTokens, LOOPS, parseCommand, resolvePayload, scopedTracker, type Token } from "../auto-mode/shell-analysis.ts";
 
 export interface WorktreeGuardContext {
 	command: string;
@@ -106,18 +106,23 @@ export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: W
 	/** Directory the current segment runs in; undefined = not statically known. */
 	let dir: string | undefined = worktreePath;
 	/**
-	 * The directory of each subshell scope (`Segment.scopes`, joined): a `cd`
-	 * inside `( … )`, a substitution or a pipeline member does not leak out. A
-	 * scope starts in its parent's directory.
+	 * The directory per subshell scope (`Segment.scopes`): a `cd` inside
+	 * `( … )`, a substitution or a pipeline member does not leak out.
 	 */
-	const scopeDirs = new Map<string, string | undefined>([["", worktreePath]]);
-	const dirOf = (scopes: number[]): string | undefined => {
-		for (let n = scopes.length; n >= 0; n--) {
-			const key = scopes.slice(0, n).join(".");
-			if (scopeDirs.has(key)) return scopeDirs.get(key);
-		}
-		return worktreePath;
-	};
+	const scopeDirs = scopedTracker<string | undefined>(worktreePath);
+
+	// A loop body runs more than once, so a `cd` in it moves every git command
+	// in the loop after the first pass; the segments show one pass only.
+	const movesInLoop = segments.some(
+		(seg) => seg.enclosing.some((construct) => LOOPS.has(construct)) && ["cd", "pushd", "popd"].includes(leadTokens(seg)[0]?.value ?? ""),
+	);
+	if (movesInLoop && /\bgit\b/.test(command)) {
+		return isolated(
+			worktreePath,
+			"this command changes directory inside a loop, so the repository its git commands target cannot be verified",
+			`Break it into plain, separate git commands with literal paths and run them from ${worktreePath}.`,
+		);
+	}
 
 	const checkSegment = (seg: (typeof segments)[number]): string | undefined => {
 		const tokens = leadTokens(seg);
@@ -226,10 +231,10 @@ export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: W
 	};
 
 	for (const seg of segments) {
-		dir = dirOf(seg.scopes);
+		dir = scopeDirs.get(seg);
 		const reason = checkSegment(seg);
 		if (reason) return reason;
-		scopeDirs.set(seg.scopes.join("."), dir);
+		scopeDirs.set(seg, dir);
 	}
 	return undefined;
 }

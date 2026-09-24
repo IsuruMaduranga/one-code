@@ -44,9 +44,9 @@ import {
 	checkOptions,
 	gitOperandsAllowed,
 } from "./read-only-options.ts";
-import { parseCommand, type Segment, type Token } from "./shell-parse.ts";
+import { parseCommand, scopedTracker, type Segment, type Token } from "./shell-parse.ts";
 
-export { decodeAnsiC, parseCommand, type ParseResult, type Segment, type Token } from "./shell-parse.ts";
+export { decodeAnsiC, LOOPS, parseCommand, scopedTracker, type ParseResult, type Segment, type Token } from "./shell-parse.ts";
 
 export type ShellVerdict = "safe" | "escalate";
 
@@ -349,9 +349,11 @@ const GIT_GLOBAL_VALUE_FLAGS = new Set(["-C", "--git-dir", "--work-tree", "--nam
 /**
  * Commands that only print their arguments, so a command substitution among
  * them is safe once the substituted command is: its output is printed, not
- * read as an option, a path or a program (`echo "built $(date)"`).
+ * read as an option, a path or a program (`echo "built $(date)"`). `echo`'s
+ * options only change how it prints. `printf` is not here: `printf $(echo
+ * -v) PATH ./bin` assigns a variable (PR #12 review).
  */
-const PURE_OUTPUT = new Set(["echo", "printf"]);
+const PURE_OUTPUT = new Set(["echo"]);
 
 /** A parameter bash sets itself (`$1`, `$@`, `$$`, `${#}`), as opposed to an environment variable. */
 const SPECIAL_PARAMETER = /\$\{?[0-9@*#?$!-]/;
@@ -808,6 +810,8 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 
 	/** `cd` changes what later relative paths mean; the original never tracked it (F6/N12). */
 	let effectiveCwd = cwd;
+	/** The directory per subshell scope: a `cd` inside `$(…)` or `( … )` does not reach the parent. */
+	const cwdByScope = scopedTracker(cwd);
 
 	/**
 	 * Resolve a write-target token, record it as evidence, and escalate on any
@@ -896,6 +900,7 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 	};
 
 	for (const segment of segments) {
+		effectiveCwd = cwdByScope.get(segment);
 		// Redirection targets are writes regardless of the command word: a bare
 		// `> file` truncates/creates it with no command at all, and `git log > file`
 		// writes it too. Check them first so the command-specific `continue`s below
@@ -1004,6 +1009,7 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 			const target = args.find((token) => !token.value.startsWith("-"))?.value;
 			if (target) {
 				effectiveCwd = toAbsoluteBash(effectiveCwd, target, home);
+				cwdByScope.set(segment, effectiveCwd);
 				escalate(`changes directory to ${target}, so later paths in this command resolve elsewhere`);
 			}
 			continue;

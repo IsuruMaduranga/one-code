@@ -62,6 +62,11 @@ describe("worktree git-isolation guard", () => {
 		expect(guard("cd $X && ls; cd /repo && git status")).toBeDefined();
 	});
 
+	it("refuses git in a line that changes directory inside a loop (PR #12 review)", () => {
+		expect(guard("for d in a b; do git status; cd ../../..; done")).toContain("inside a loop");
+		expect(guard("for d in a b; do cd $d; done")).toBeUndefined();
+	});
+
 	it("scopes a subshell cd to the subshell", () => {
 		expect(guard('(cd /repo && cat package.json); git commit -am "done"')).toBeUndefined();
 		expect(guard("(cd /repo && git status)")).toBeDefined();

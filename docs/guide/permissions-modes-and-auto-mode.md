@@ -73,7 +73,8 @@ they are hard to sidestep. They apply when they match the raw line, any
 subcommand of a compound line (`&&`, `||`, `;`, `|`, `&`, or a newline), or
 the payload of a wrapper. Wrappers such as `env`, `command`, `nice`,
 `timeout`, and `xargs` are peeled, `sh -c '…'` and the other shells are
-expanded, and the command word is reduced to its lowercased basename, so
+expanded (so is a heredoc or here-string fed to a shell, as in
+`sh <<'EOF'`), and the command word is reduced to its lowercased basename, so
 `/bin/rm`, `\rm`, and `RM` all match a rule written for `rm`.
 
 `allow` rules are matched against the literal spelling only, and a compound

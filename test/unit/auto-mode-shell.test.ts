@@ -103,6 +103,18 @@ describe("expansions and substitutions, judged from the syntax tree", () => {
 		expect(analyze("echo $(rm -f a.txt)").verdict).toBe("escalate");
 	});
 
+	it("PR #12 review: escalates printf fed a substitution, and backticks the grammar cannot parse", () => {
+		expect(analyze("printf $(echo -v) PATH ./bin; ls").verdict).toBe("escalate");
+		expect(analyze("cat <<EOF\nx `echo hi <> f`\nEOF").verdict).toBe("escalate");
+		expect(analyze("cat <<EOF\nx `echo unterminated\nEOF").verdict).toBe("escalate");
+	});
+
+	it("PR #12 review: resolves writes from the parent's directory after a cd inside a substitution", () => {
+		const evidence = analyze('cd .claude; echo "$(cd /)"; printf x > settings.json');
+		expect(evidence.verdict).toBe("escalate");
+		expect(evidence.protectedPaths).toContain("settings.json");
+	});
+
 	it("writes a quoted heredoc into an in-project file as a recorded write", () => {
 		const evidence = analyze("cat <<'EOF' > notes.md\n# Notes\nEOF");
 		expect(evidence.verdict).toBe("safe");

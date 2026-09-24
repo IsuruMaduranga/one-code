@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseCommand } from "../../extensions/auto-mode/shell-parse.ts";
 import { bashParserUnavailable } from "../../extensions/lib/bash-parser.ts";
-import { bashMatchForms, bashSubcommands } from "../../extensions/permissions/matcher.ts";
+import { bashMatchForms, bashSubcommands, findBashAllowRule, parseRules } from "../../extensions/permissions/matcher.ts";
 
 const words = (command: string) => parseCommand(command).segments.map((segment) => segment.tokens.map((token) => token.value));
 
@@ -135,6 +135,20 @@ describe("deny forms on the tree", () => {
 		expect(parseCommand("cat <<EOF; rm y\nbody\nEOF").parseFailed).toBe(true);
 		expect(bashMatchForms("cat <<EOF; rm y\nbody\nEOF")).toContain("rm y");
 		expect(bashMatchForms("ls <> f; rm -f x")).toContain("rm -f x");
+	});
+
+	it("see the script a heredoc or here-string feeds a shell, and only a shell (PR #12 review)", () => {
+		for (const command of ["sh <<'EOF'\nrm -rf x\nEOF", "cat <<EOF | sh\nrm -rf x\nEOF", "bash <<< 'rm -rf x'", "env bash -s <<'EOF'\nrm -rf x\nEOF"]) {
+			expect(bashMatchForms(command), command).toContain("rm -rf x");
+		}
+		expect(bashMatchForms("git commit -F - <<'EOF'\nrm -rf x\nEOF")).not.toContain("rm -rf x");
+		expect(bashMatchForms("sh -c 'ls' <<'EOF'\nrm -rf x\nEOF")).not.toContain("rm -rf x");
+	});
+
+	it("fail closed on a heredoc backtick the grammar cannot parse (PR #12 review)", () => {
+		expect(parseCommand("cat <<EOF\nx `echo hi <> f`\nEOF").parseFailed).toBe(true);
+		const allow = parseRules(["Bash(cat:*)", "Bash(echo:*)"]);
+		expect(findBashAllowRule(allow, "cat <<EOF\nx `echo hi <> f`\nEOF")).toBeUndefined();
 	});
 
 	it("see the command a time group runs", () => {

@@ -28,6 +28,7 @@
 import {
 	gitSubcommand,
 	leadTokens,
+	LOOPS,
 	parseCommand,
 	resolvePayload,
 	type Segment,
@@ -119,13 +120,12 @@ function waitReason(segments: Segment[]): string | undefined {
 // ---------------------------------------------------------------------------
 // Poll-loop guard
 
-const LOOPS = new Set(["for_statement", "c_style_for_statement", "while_statement"]);
-
 const inLoop = (seg: Segment) => seg.enclosing.some((construct) => LOOPS.has(construct));
 
 function pollLoopReason(command: string, segments: Segment[]): string | undefined {
-	if (!inLoop(segments[0])) return undefined;
-	// `sleep` counts only as a command inside the loop: `echo sleep` is data.
+	// Wherever the loop sits in the line: `echo start; while true; do sleep 5;
+	// done` stalls the session as surely as the loop alone. `sleep` counts only
+	// as a command inside the loop: `echo sleep` is data.
 	const sleeps = segments.some((seg) => inLoop(seg) && resolvePayload(leadTokens(seg)).command === "sleep");
 	if (!sleeps) return undefined;
 	return (

@@ -102,6 +102,12 @@ export interface Segment {
 	 * parameter into the command's input (`cat <<< "$TOKEN"`).
 	 */
 	expandsIntoInput?: boolean;
+	/**
+	 * The text each heredoc and here-string feeds the command's input, as
+	 * written: data to most commands, a script to a shell reading its input
+	 * (`sh <<'EOF'`, `cat <<EOF | sh`).
+	 */
+	stdin?: string[];
 }
 
 export interface ParseResult {
@@ -289,6 +295,8 @@ class Walker {
 	unknownQuoting: string | undefined;
 	complex: string | undefined;
 	background = false;
+	/** Set when a part parsed on its own (a heredoc's backtick body) did not parse. */
+	failed = false;
 	readonly substitutions: string[] = [];
 	private nextScope = 1;
 	private readonly source: string;
@@ -481,7 +489,11 @@ class Walker {
 			return;
 		}
 		if (node.type === "herestring_redirect") {
-			for (const part of node.namedChildren) if (this.word(part, ctx).dynamic === "variable") segment.expandsIntoInput = true;
+			for (const part of node.namedChildren) {
+				const word = this.word(part, ctx);
+				if (word.dynamic === "variable") segment.expandsIntoInput = true;
+				(segment.stdin ??= []).push(word.value);
+			}
 			return;
 		}
 		if (node.type !== "file_redirect") {
@@ -511,6 +523,7 @@ class Walker {
 		for (const child of node.namedChildren) {
 			if (child.type === "heredoc_start" || child.type === "heredoc_end") continue;
 			if (child.type === "heredoc_body") {
+				(segment.stdin ??= []).push(child.text);
 				if (literal) continue;
 				for (const part of child.namedChildren) {
 					if (part.type !== "heredoc_content" && this.word(part, ctx).dynamic === "variable") segment.expandsIntoInput = true;
@@ -549,6 +562,11 @@ class Walker {
 			if (text[i] !== "`") continue;
 			let end = i + 1;
 			while (end < text.length && text[end] !== "`") end += text[end] === "\\" ? 2 : 1;
+			if (end >= text.length) {
+				// An unterminated backtick: bash reports a syntax error.
+				this.failed = true;
+				return;
+			}
 			const inner = parseCommand(text.slice(i + 1, end));
 			const scope = this.enterSubstitution(ctx, "command_substitution", text.slice(i + 1, end));
 			for (const segment of inner.segments) {
@@ -563,6 +581,8 @@ class Walker {
 			this.unknownQuoting ??= inner.unknownQuoting;
 			this.complex ??= inner.complex;
 			this.background ||= inner.background;
+			// `echo hi <> f` in the backticks is as unparseable as it is on its own line.
+			this.failed ||= inner.parseFailed;
 			i = end;
 		}
 	}
@@ -690,6 +710,32 @@ function doubleQuoted(text: string): string {
 }
 
 /**
+ * A value tracked per subshell scope (`Segment.scopes`), such as the
+ * directory a `cd` sets. A scope starts with its parent's current value, and
+ * setting it never reaches the parent or a sibling: in `echo "$(cd /tmp)";
+ * cat x`, `x` is still read from the starting directory. Segments must be
+ * visited in source order.
+ */
+export function scopedTracker<T>(initial: T): { get(segment: Pick<Segment, "scopes">): T; set(segment: Pick<Segment, "scopes">, value: T): void } {
+	const values = new Map<string, T>([["", initial]]);
+	return {
+		get(segment) {
+			for (let n = segment.scopes.length; n >= 0; n--) {
+				const key = segment.scopes.slice(0, n).join(".");
+				if (values.has(key)) return values.get(key) as T;
+			}
+			return initial;
+		},
+		set(segment, value) {
+			values.set(segment.scopes.join("."), value);
+		},
+	};
+}
+
+/** Loop constructs, as `Segment.enclosing` names them: their bodies run more than once. */
+export const LOOPS = new Set(["for_statement", "c_style_for_statement", "while_statement"]);
+
+/**
  * Split a command into its simple commands (see the module header). Returns
  * `parseFailed` with no segments while the grammar is not loaded.
  */
@@ -705,7 +751,7 @@ export function parseCommand(command: string): ParseResult {
 			.map(({ start: _start, ...segment }) => segment);
 		return {
 			segments,
-			parseFailed: tree.rootNode.hasError,
+			parseFailed: tree.rootNode.hasError || walker.failed,
 			unknownQuoting: walker.unknownQuoting,
 			complex: walker.complex,
 			background: walker.background,
