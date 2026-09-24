@@ -102,6 +102,14 @@ export interface Segment {
 	 * after the pipeline; directory tracking treats it as unknown.
 	 */
 	lastInPipeline?: boolean;
+	/**
+	 * True for a command in the last member of a multi-command pipeline in any
+	 * shell, a substitution's or a `( … )`'s included. Under `lastpipe` that
+	 * member runs in the shell around the pipeline, so a `cd` there may move the
+	 * later commands in that same shell. `lastInPipeline` is the subset that can
+	 * move the outer shell.
+	 */
+	pipelineTail?: boolean;
 	/** True when a redirect target's value is only known when bash runs it (`> "$f"`, `< $(ls)`). */
 	unknownTarget?: boolean;
 	/**
@@ -300,6 +308,8 @@ interface Context {
 	substitution?: number;
 	/** Inside the last member of a multi-command pipeline (`Segment.lastInPipeline`). */
 	lastInPipeline?: boolean;
+	/** Inside the last member of a multi-command pipeline in any shell (`Segment.pipelineTail`). */
+	pipelineTail?: boolean;
 	/**
 	 * Inside a context bash always runs in a subshell (`( … )`, a substitution,
 	 * a pipeline member other than the last): nothing here, a later pipeline's
@@ -334,6 +344,7 @@ class Walker {
 			substitution: ctx.substitution,
 			// `( … )` and substitutions are always subshells, whatever pipeline they sit in.
 			lastInPipeline: ALWAYS_SUBSHELL.has(node.type) ? false : ctx.lastInPipeline,
+			pipelineTail: ALWAYS_SUBSHELL.has(node.type) ? false : ctx.pipelineTail,
 			isolated: ctx.isolated || ALWAYS_SUBSHELL.has(node.type),
 		};
 	}
@@ -372,6 +383,7 @@ class Walker {
 					// and only when the pipeline is not itself inside a subshell.
 					const last = index === members.length - 1;
 					member.lastInPipeline = last && !ctx.isolated;
+					member.pipelineTail = last;
 					member.isolated = ctx.isolated || !last;
 					this.statement(child, member);
 				}
@@ -440,6 +452,7 @@ class Walker {
 		const segment: Segment & { start: number } = { tokens: [], redirects: [], inputs: [], raw: "", enclosing: ctx.enclosing, scopes: ctx.scopes, start: at };
 		if (ctx.substitution !== undefined) segment.substitution = ctx.substitution;
 		if (ctx.lastInPipeline) segment.lastInPipeline = true;
+		if (ctx.pipelineTail) segment.pipelineTail = true;
 		if (node?.type === "variable_assignment" || node?.type === "variable_assignments") {
 			// A line that only assigns: `a=1`, `a=1 b=2`.
 			const assignments = node.type === "variable_assignment" ? [node] : node.namedChildren.filter((child) => child.type === "variable_assignment");

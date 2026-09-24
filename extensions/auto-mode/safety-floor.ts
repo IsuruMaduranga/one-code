@@ -269,7 +269,9 @@ export function shellNamesControlFile(
 			return (
 				payload.command !== "cd" ||
 				previous ||
-				!!segment.lastInPipeline ||
+				// A pipeline's last `cd` moves the later commands of its own shell
+				// under lastpipe, inside a substitution too.
+				!!segment.pipelineTail ||
 				segment.enclosing.some((construct) => LOOPS.has(construct)) ||
 				!!target?.dynamic ||
 				!!target?.glob ||

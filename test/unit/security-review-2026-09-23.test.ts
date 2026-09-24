@@ -221,6 +221,8 @@ describe("H3: unmodelled writes reach the floor", () => {
 		expect(shellNamesControlFile("cd .cla*; printf x > settings.json", cwd, home)).toBe("settings.json");
 		// Under `shopt -s lastpipe` the last pipeline member runs in this shell.
 		expect(shellNamesControlFile("shopt -s lastpipe; true | cd .claude; printf x > settings.json", cwd, home)).toBe("settings.json");
+		// Inside a substitution too, for the later commands of that substitution (PR #13 review).
+		expect(shellNamesControlFile('echo "$(shopt -s lastpipe; true | cd .claude; printf x > settings.json)"', cwd, home)).toBe("settings.json");
 		// `cd -` goes to $OLDPWD (PR #12 review).
 		expect(shellNamesControlFile("cd .claude; cd /tmp; cd -; printf x > settings.json", cwd, home)).toBe("settings.json");
 		// Where the directory is known, a same-named file elsewhere is not a control file.

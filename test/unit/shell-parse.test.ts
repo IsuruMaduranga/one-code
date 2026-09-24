@@ -101,6 +101,15 @@ describe("parseCommand on tree-sitter-bash", () => {
 		expect(parseCommand("{ a | cd x; } | b").segments.map((segment) => !!segment.lastInPipeline)).toEqual([false, false, true]);
 	});
 
+	it("marks a pipeline's last member in any shell as its tail", () => {
+		// Under lastpipe it moves the later commands of its own shell (PR #13 review).
+		expect(parseCommand('echo "$(true | cd x; y)"').segments.map((segment) => !!segment.pipelineTail)).toEqual([false, false, true, false]);
+		expect(parseCommand("{ a | cd x; } | b").segments.map((segment) => !!segment.pipelineTail)).toEqual([false, true, true]);
+		// A subshell or substitution inside the last member starts a shell of its own.
+		expect(parseCommand("a | (cd x)").segments.map((segment) => !!segment.pipelineTail)).toEqual([false, false]);
+		expect(parseCommand('a | echo "$(cd x)"').segments.map((segment) => !!segment.pipelineTail)).toEqual([false, true, false]);
+	});
+
 	it("detects only the background operator", () => {
 		expect(parseCommand("a & b").background).toBe(true);
 		expect(parseCommand("a && b 2>&1 &>log |& c").background).toBe(false);

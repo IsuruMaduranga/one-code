@@ -85,6 +85,19 @@ describe("worktree git-isolation guard", () => {
 		expect(guard("shopt -s lastpipe; true | cd /repo; sh -c 'gi\\t status'")).toContain("last command of a pipeline");
 	});
 
+	it("judges a script a shell or eval runs from the directory it starts in (PR #13 review)", () => {
+		expect(guard("bash -c 'cd /repo && git status'")).toContain(`targets ${resolve("/repo")}`);
+		expect(guard("sh -c 'git -C /repo status'")).toContain(`targets ${resolve("/repo")}`);
+		expect(guard("cd /repo && bash -c 'git status'")).toContain(`targets ${resolve("/repo")}`);
+		expect(guard(`cd /tmp && bash -c 'cd ${WT} && git status'`)).toBeUndefined();
+		expect(guard("bash -c 'git stash'")).toContain("stash stack is shared");
+		expect(guard("bash -c 'git status' && git log")).toBeUndefined();
+		// A shell's script runs in a child; eval runs in this shell, so its cd moves later git.
+		expect(guard("bash -c 'cd /repo'; git status")).toBeUndefined();
+		expect(guard("eval 'cd /repo'; git status")).toContain("unverifiable");
+		expect(guard("eval cd /repo '&&' git status")).toContain(`targets ${resolve("/repo")}`);
+	});
+
 	it("treats a globbed cd target as an unknown directory (PR #12 review)", () => {
 		expect(guard("cd /r*po && git status")).toBeDefined();
 		expect(guard("cd /re?o && git stash pop")).toBeDefined();
