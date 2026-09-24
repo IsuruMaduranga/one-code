@@ -54,6 +54,7 @@ describe("/permissions wiring", () => {
 		cwd = join(home, "project");
 		mkdirSync(cwd, { recursive: true });
 		vi.stubEnv("HOME", home);
+		vi.stubEnv("USERPROFILE", home); // os.homedir() reads this one on Windows
 		vi.stubEnv("ONECODE_STATE_DIR", join(home, ".onecode"));
 		vi.stubEnv("PI_CODING_AGENT_DIR", join(home, "agent"));
 		screens = [];

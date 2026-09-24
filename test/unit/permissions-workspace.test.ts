@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { oneCodeProjectSettingsPath } from "../../extensions/lib/one-code-settings.ts";
+import { forwardSlashes } from "../../extensions/lib/paths.ts";
 import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
 import { WORKSPACE_CHANNEL } from "../../extensions/lib/workspace-channel.ts";
 import { decide } from "../../extensions/permissions/matcher.ts";
@@ -25,7 +26,9 @@ let cwd: string;
 let shared: string;
 
 beforeEach(() => {
-	root = realpathSync(mkdtempSync(join(tmpdir(), "perm-ws-")));
+	// The native realpath: on Windows it expands the 8.3 short name %TEMP% has,
+	// as the gate's own realpath does.
+	root = realpathSync.native(mkdtempSync(join(tmpdir(), "perm-ws-")));
 	home = join(root, "home");
 	cwd = join(root, "project");
 	shared = join(root, "shared");
@@ -33,6 +36,7 @@ beforeEach(() => {
 	writeFileSync(join(shared, "notes.md"), "notes");
 	writeFileSync(join(shared, ".ssh", "id_rsa"), "key");
 	vi.stubEnv("HOME", home);
+	vi.stubEnv("USERPROFILE", home); // os.homedir() reads this one on Windows
 	vi.stubEnv("ONECODE_STATE_DIR", join(home, ".onecode"));
 	vi.stubEnv("PI_CODING_AGENT_DIR", join(home, "agent"));
 });
@@ -62,8 +66,9 @@ describe("decide() with workspace directories", () => {
 	});
 
 	it("lets plan mode's read-only bash read there", () => {
-		expect(at("bash", `cat ${join(shared, "notes.md")}`, "plan").decision).toBe("allow");
-		expect(at("bash", `cat ${join(shared, ".ssh", "id_rsa")}`, "plan").decision).not.toBe("allow");
+		// Forward slashes: bash reads an unquoted backslash as an escape, and Git Bash takes C:/… paths.
+		expect(at("bash", `cat ${forwardSlashes(join(shared, "notes.md"))}`, "plan").decision).toBe("allow");
+		expect(at("bash", `cat ${forwardSlashes(join(shared, ".ssh", "id_rsa"))}`, "plan").decision).not.toBe("allow");
 	});
 });
 
