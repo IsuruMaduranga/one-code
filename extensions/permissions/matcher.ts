@@ -248,26 +248,32 @@ function inlineShellScript(args: string[]): string | undefined {
 /**
  * Shell text inside a line that runs as commands of its own: `$(…)`, `<(…)`,
  * `>(…)` and backticks. Parentheses are balanced and single-quoted text is
- * skipped; double quotes do not stop a substitution, as in bash. Until
- * 2026-09-24 none of it became a deny form, so `cat $(rm -f x)` ran past
- * `Bash(rm:*)` (PREGATE-REVIEW-2026-09-23 P7).
+ * skipped. Inside double quotes `$(…)` and backticks still run, while `'`,
+ * `$'` and `<(` are literal characters, so `echo "don't $(rm -f v)"` keeps
+ * its substitution. Until 2026-09-24 none of it became a deny form, so
+ * `cat $(rm -f x)` ran past `Bash(rm:*)` (PREGATE-REVIEW-2026-09-23 P7).
  */
 export function substitutionBodies(command: string): string[] {
 	const bodies: string[] = [];
 	let inSingle = false;
+	let inDouble = false;
 	for (let i = 0; i < command.length; i++) {
 		const ch = command[i];
 		if (ch === "\\" && !inSingle) {
 			i++;
 			continue;
 		}
+		if (ch === '"' && !inSingle) {
+			inDouble = !inDouble;
+			continue;
+		}
 		// `$'…'` escapes its closing quote (`$'it\'s'`), so its `'` is not a
 		// delimiter; decodeAnsiC finds the real end (PREGATE-REVIEW-2026-09-23 A2).
-		if (ch === "$" && command[i + 1] === "'" && !inSingle) {
+		if (ch === "$" && command[i + 1] === "'" && !inSingle && !inDouble) {
 			i = decodeAnsiC(command, i + 2).end - 1;
 			continue;
 		}
-		if (ch === "'") {
+		if (ch === "'" && !inDouble) {
 			inSingle = !inSingle;
 			continue;
 		}
@@ -279,7 +285,7 @@ export function substitutionBodies(command: string): string[] {
 			i = end;
 			continue;
 		}
-		if ((ch === "$" || ch === "<" || ch === ">") && command[i + 1] === "(") {
+		if ((ch === "$" || (!inDouble && (ch === "<" || ch === ">"))) && command[i + 1] === "(") {
 			let depth = 0;
 			let quote: string | undefined;
 			let j = i + 1;

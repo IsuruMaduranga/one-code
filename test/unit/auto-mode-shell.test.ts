@@ -728,6 +728,15 @@ describe("pre-gate review 2026-09-24: attached wrapper values, stdin credentials
 		}
 	});
 
+	it("gives deny rules a substitution inside double quotes, whatever quote characters surround it", () => {
+		for (const command of [`echo "don't $(rm -f v)"`, `echo "$'$(rm -f v)'"`, "echo \"it's `rm -f v`\""]) {
+			expect(bashMatchForms(command).some((form) => form.startsWith("rm -f v")), command).toBe(true);
+		}
+		// Inside double quotes `<(` is literal text, and single quotes still hide a substitution.
+		expect(bashMatchForms('echo "<(rm -f v)"').some((form) => form.startsWith("rm "))).toBe(false);
+		expect(bashMatchForms("echo '\"$(rm -f v)\"'").some((form) => form.startsWith("rm "))).toBe(false);
+	});
+
 	it("escalates TZ set to an absolute path", () => {
 		expect(analyze("TZ=/etc/localtime date").verdict).toBe("escalate");
 		expect(analyze("TZ= date").verdict).toBe("safe");
