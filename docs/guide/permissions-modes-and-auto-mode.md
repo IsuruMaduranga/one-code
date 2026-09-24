@@ -24,7 +24,9 @@ For each tool call, the gate checks the following in order:
 3. **`ask` rules.** A matching `ask` rule prompts you, even in a mode that
    would otherwise approve the call.
 4. **`allow` rules.** A matching `allow` rule approves the call without a
-   prompt.
+   prompt. A shell rule doesn't cover the command's redirects outside the
+   working directory: with `Bash(echo:*)`, `echo x >> ~/.zshrc` still
+   prompts you, and in auto mode it goes to the classifier.
 5. **The mode's default.** Anything no rule covers is decided by the current
    permission mode.
 
