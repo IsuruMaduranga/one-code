@@ -83,6 +83,7 @@ describe("worktree git-isolation guard", () => {
 		// git in a script a shell runs counts (PR #13 review).
 		expect(guard("shopt -s lastpipe; true | cd /repo; bash -c 'git status'")).toContain("last command of a pipeline");
 		expect(guard("shopt -s lastpipe; true | cd /repo; sh -c 'gi\\t status'")).toContain("last command of a pipeline");
+		expect(guard("x=$(echo | cd /repo; git status)")).toContain("last command of a pipeline");
 	});
 
 	it("refuses git behind a wrapper that can move it", () => {

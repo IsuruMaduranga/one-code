@@ -101,13 +101,13 @@ export interface Segment {
 	 */
 	lastInPipeline?: boolean;
 	/**
-	 * True for a command in the last member of a multi-command pipeline in any
-	 * shell, a substitution's or a `( … )`'s included. Under `lastpipe` that
-	 * member runs in the shell around the pipeline, so a `cd` there may move the
-	 * later commands in that same shell. `lastInPipeline` is the subset that can
-	 * move the outer shell.
+	 * Set for a command in the last member of a multi-command pipeline in any
+	 * shell, a substitution's or a `( … )`'s included: the scopes (as in
+	 * `scopes`) of the shell that member runs in under `lastpipe`, the one
+	 * around the pipeline. A `cd` there may move the later commands of that
+	 * shell. `lastInPipeline` is the subset that can move the outer shell.
 	 */
-	pipelineTail?: boolean;
+	pipelineShell?: number[];
 	/**
 	 * True when the command may not run even though the line reaches it: the
 	 * right side of `&&` or `||`, a branch of `if` or `case`, a loop body, a
@@ -315,8 +315,8 @@ interface Context {
 	substitution?: number;
 	/** Inside the last member of a multi-command pipeline (`Segment.lastInPipeline`). */
 	lastInPipeline?: boolean;
-	/** Inside the last member of a multi-command pipeline in any shell (`Segment.pipelineTail`). */
-	pipelineTail?: boolean;
+	/** Inside the last member of a multi-command pipeline in any shell: the shell it runs in (`Segment.pipelineShell`). */
+	pipelineShell?: number[];
 	/** Inside something that may not run (`Segment.conditional`). */
 	conditional?: boolean;
 	/**
@@ -353,7 +353,7 @@ class Walker {
 			substitution: ctx.substitution,
 			// `( … )` and substitutions are always subshells, whatever pipeline they sit in.
 			lastInPipeline: ALWAYS_SUBSHELL.has(node.type) ? false : ctx.lastInPipeline,
-			pipelineTail: ALWAYS_SUBSHELL.has(node.type) ? false : ctx.pipelineTail,
+			pipelineShell: ALWAYS_SUBSHELL.has(node.type) ? undefined : ctx.pipelineShell,
 			conditional: ctx.conditional || CONDITIONAL.has(node.type),
 			isolated: ctx.isolated || ALWAYS_SUBSHELL.has(node.type),
 		};
@@ -404,7 +404,8 @@ class Walker {
 					// and only when the pipeline is not itself inside a subshell.
 					const last = index === members.length - 1;
 					member.lastInPipeline = last && !ctx.isolated;
-					member.pipelineTail = last;
+					// A tail inside another tail runs, under lastpipe, where that one does.
+					member.pipelineShell = last ? (ctx.pipelineShell ?? ctx.scopes) : undefined;
 					member.isolated = ctx.isolated || !last;
 					this.statement(child, member);
 				}
@@ -473,7 +474,7 @@ class Walker {
 		const segment: Segment & { start: number } = { tokens: [], redirects: [], inputs: [], raw: "", enclosing: ctx.enclosing, scopes: ctx.scopes, start: at };
 		if (ctx.substitution !== undefined) segment.substitution = ctx.substitution;
 		if (ctx.lastInPipeline) segment.lastInPipeline = true;
-		if (ctx.pipelineTail) segment.pipelineTail = true;
+		if (ctx.pipelineShell) segment.pipelineShell = ctx.pipelineShell;
 		if (ctx.conditional) segment.conditional = true;
 		if (node?.type === "variable_assignment" || node?.type === "variable_assignments") {
 			// A line that only assigns: `a=1`, `a=1 b=2`.
@@ -641,6 +642,7 @@ class Walker {
 					enclosing: [...scope.enclosing, ...segment.enclosing],
 					scopes: [...scope.scopes, ...segment.scopes],
 					substitution: scope.substitution,
+					...(segment.pipelineShell ? { pipelineShell: [...scope.scopes, ...segment.pipelineShell] } : {}),
 					...(scope.conditional || segment.conditional ? { conditional: true } : {}),
 					start: body.startIndex + i,
 				});

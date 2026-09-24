@@ -271,7 +271,7 @@ export function shellNamesControlFile(
 				previous ||
 				// A pipeline's last `cd` moves the later commands of its own shell
 				// under lastpipe, inside a substitution too.
-				!!segment.pipelineTail ||
+				!!segment.pipelineShell ||
 				// `false && cd x` may or may not move the commands after it.
 				!!segment.conditional ||
 				segment.enclosing.some((construct) => LOOPS.has(construct)) ||

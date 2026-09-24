@@ -167,8 +167,13 @@ function guardScript(
 	// The last member of a pipeline runs in the current shell under `shopt -s
 	// lastpipe`, so its `cd` may move every later command.
 	// Only a git command after such a `cd` can be moved by it.
-	const pipeMove = segments.findIndex((seg) => seg.lastInPipeline && movesDirectory(seg));
-	if (pipeMove >= 0 && segments.slice(pipeMove + 1).some(runsGit)) {
+	// Inside a substitution too (`$(echo | cd /repo; git status)`), but only for
+	// git later in the shell that tail runs in.
+	const inShell = (seg: (typeof segments)[number], shell: number[]) => shell.every((scope, depth) => seg.scopes[depth] === scope);
+	const pipeMoved = segments.some(
+		(cd, index) => cd.pipelineShell && movesDirectory(cd) && segments.slice(index + 1).some((seg) => inShell(seg, cd.pipelineShell!) && runsGit(seg)),
+	);
+	if (pipeMoved) {
 		return {
 			reason: isolated(
 				worktreePath,
