@@ -1041,10 +1041,14 @@ export function decide(params: DecideInput): Decision {
 	 * a glob, `~user`, or a relative target after a `cd`).
 	 */
 	const redirectEscapes = (command: string): boolean => {
-		const { segments } = parseCommand(command.trim());
-		const moved = segments.some(movesDirectory);
+		const { segments, parseFailed } = parseCommand(command.trim());
+		// A line that did not parse may hide a redirect the segments dropped.
+		if (parseFailed) return /[<>]/.test(command);
 		const home = homedir();
+		// Only a `cd` before a redirect moves where its relative target lands.
+		let moved = false;
 		for (const segment of segments) {
+			if (movesDirectory(segment)) moved = true;
 			const targets = [...segment.redirects, ...segment.inputs.map((token) => token.value)];
 			if (targets.length > 0 && segment.unknownTarget) return true;
 			for (const target of targets) {

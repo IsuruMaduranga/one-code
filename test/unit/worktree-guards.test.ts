@@ -87,7 +87,7 @@ describe("worktree git-isolation guard", () => {
 	});
 
 	it("refuses git behind a wrapper that can move it", () => {
-		for (const command of ["exec git -C /repo reset --hard", "sudo git -C /repo reset --hard", "env -C /repo git reset --hard", "env --chdir=/repo git status", "busybox git status", "busybox sh -c 'git -C /repo reset --hard'", "sudo bash -c 'git status'", "flock /tmp/l -c 'git -C /repo status'"]) {
+		for (const command of ["exec git -C /repo reset --hard", "sudo git -C /repo reset --hard", "env -C /repo git reset --hard", "env --chdir=/repo git status", "busybox git status", "busybox sh -c 'git -C /repo reset --hard'", "sudo bash -c 'git status'", "sudo eval 'git -C /repo reset --hard'", "flock /tmp/l -c 'git -C /repo status'"]) {
 			expect(guard(command), command).toContain("runs git through");
 		}
 		expect(guard("env git status")).toBeUndefined();

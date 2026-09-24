@@ -925,10 +925,13 @@ describe("an allow rule never covers a redirect outside the working space (PR #1
 		expect(at('echo x > "$OUT"').decision).toBe("ask");
 		expect(at("echo x > ~root/f").decision).toBe("ask");
 		expect(at("cd sub && echo x > out.txt").decision).toBe("ask");
+		// A line that did not parse may have swallowed its redirect.
+		const bare = parseRules(["Bash"]);
+		expect(decide({ toolName: "bash", subject: 'echo "unterminated > /etc/passwd', cwd, resolvedCwd: cwd, mode: "default", deny: [], ask: [], allow: bare }).decision).toBe("ask");
 	});
 
 	it("still allows redirects inside the working space and to devices", () => {
-		for (const command of ["echo x > out.txt", "npm test > logs/test.log 2>&1", "npm test 2>/dev/null", "echo x >&2", "cat < README.md", `echo x > ${forwardSlashes(join(cwd, "a.txt"))}`]) {
+		for (const command of ["echo x > out.txt", "npm test > logs/test.log 2>&1", "npm test 2>/dev/null", "echo x >&2", "cat < README.md", "npm test > out.log && cd dist", `echo x > ${forwardSlashes(join(cwd, "a.txt"))}`]) {
 			expect(at(command).decision, command).toBe("allow");
 		}
 	});
