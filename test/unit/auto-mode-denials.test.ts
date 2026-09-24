@@ -52,6 +52,15 @@ describe("DenialStore", () => {
 		expect(store.takeGrant("k1")).toBe(false);
 	});
 
+	it("keeps a grant for each approved denial of the same call", () => {
+		const store = new DenialStore();
+		const ids = [store.record(denial("k1")).id, store.record(denial("k1")).id];
+		store.approve(new Set(ids));
+		expect(store.takeGrant("k1")).toBe(true);
+		expect(store.takeGrant("k1")).toBe(true);
+		expect(store.takeGrant("k1")).toBe(false);
+	});
+
 	it("drops a denial when the same call later goes through", () => {
 		const store = new DenialStore();
 		store.record(denial("k1"));

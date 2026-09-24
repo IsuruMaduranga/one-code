@@ -64,7 +64,8 @@ export function denialInputKey(toolName: string, input: Record<string, unknown>,
 
 export class DenialStore {
 	private denials: AutoModeDenial[] = [];
-	private readonly grants = new Set<string>();
+	/** Unspent grants per exact call: two approved denials of one call allow two retries. */
+	private readonly grants = new Map<string, number>();
 	private nextId = 1;
 
 	/** Record a classifier denial, newest first, keeping the last `MAX_DENIALS`. */
@@ -85,14 +86,18 @@ export class DenialStore {
 	 */
 	approve(ids: ReadonlySet<number>): AutoModeDenial[] {
 		const approved = this.denials.filter((denial) => ids.has(denial.id));
-		for (const denial of approved) this.grants.add(denial.inputKey);
+		for (const denial of approved) this.grants.set(denial.inputKey, (this.grants.get(denial.inputKey) ?? 0) + 1);
 		this.denials = this.denials.filter((denial) => !ids.has(denial.id));
 		return approved;
 	}
 
-	/** Spend the grant for this exact call. True once per approval. */
+	/** Spend one grant for this exact call. True once per approval. */
 	takeGrant(inputKey: string): boolean {
-		return this.grants.delete(inputKey);
+		const left = this.grants.get(inputKey);
+		if (!left) return false;
+		if (left === 1) this.grants.delete(inputKey);
+		else this.grants.set(inputKey, left - 1);
+		return true;
 	}
 
 	/** A call that went through another way drops its earlier denials (Claude Code does the same). */
