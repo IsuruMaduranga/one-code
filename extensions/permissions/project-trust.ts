@@ -81,7 +81,7 @@ export function describeProjectAllow(rules: readonly string[], firing: TrustFiri
 	};
 	const parts = [
 		...(rules.length > 0 ? [`pre-approve ${rules.length} permission rule(s):\n${list(rules)}`] : []),
-		...(dirs.length > 0 ? [`add ${dirs.length} workspace director${dirs.length === 1 ? "y" : "ies"}, whose files would be read without a prompt:\n${list(dirs)}`] : []),
+		...(dirs.length > 0 ? [`add ${dirs.length} workspace director${dirs.length === 1 ? "y" : "ies"}, whose files would be read without a prompt and, in accept-edits mode, edited without one:\n${list(dirs)}`] : []),
 	];
 	return {
 		title: dirs.length > 0 ? "Trust this repository's permission settings?" : "Trust this repository's allow rules?",

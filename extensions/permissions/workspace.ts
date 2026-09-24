@@ -14,7 +14,7 @@
 
 import { statSync } from "node:fs";
 import { delimiter, parse, resolve } from "node:path";
-import { comparablePath, expandTilde, tryRealpath } from "../lib/paths.ts";
+import { expandTilde, tryRealpath } from "../lib/paths.ts";
 import { isWithin } from "../auto-mode/paths.ts";
 
 export type ValidatedDirectory = { path: string } | { error: string };
@@ -51,14 +51,15 @@ export function validateWorkspaceDirectory(input: string, cwd: string, home: str
 
 /**
  * Why a directory is too broad to be a workspace directory, or undefined: the
- * filesystem root and the home directory itself would make almost every read
- * on the machine a working-space read. Every source is checked, settings files
+ * filesystem root, the home directory and any directory above it would make
+ * almost every read on the machine a working-space read. Every source is checked, settings files
  * included. `path` is judged as given, so resolve it first.
  */
 export function tooBroadForWorkspace(path: string, home: string): string | undefined {
 	if (parse(path).root === path) return "The filesystem root cannot be a workspace directory. Add a narrower directory.";
-	if (comparablePath(path) === comparablePath(tryRealpath(home) ?? resolve(home))) {
-		return "Your home directory cannot be a workspace directory. Add a narrower directory.";
+	// The home directory itself, or a directory above it (`/Users`, `C:\Users`).
+	if (isWithin(path, tryRealpath(home) ?? resolve(home))) {
+		return "Your home directory, or a directory that contains it, cannot be a workspace directory. Add a narrower directory.";
 	}
 	return undefined;
 }

@@ -165,8 +165,10 @@ describe("/permissions wiring", () => {
 	it("does not offer a block that judged nothing", async () => {
 		completeMock.mockResolvedValue({ stopReason: "error", errorMessage: "boom", content: [] } as never);
 		expect((await bash(`rm -rf ${outside()}`))?.block).toBe(true);
-		await openPanel();
-		expect(screens.join("\n")).not.toContain("Recently denied ]");
+		expect(notices().some((n) => n.includes("denied by auto mode"))).toBe(false);
+		// Nothing was denied, so the panel opens on Allow; Recently denied is one tab left, and empty.
+		await openPanel(LEFT);
+		expect(screens[0]).toContain("No recent denials.");
 	});
 
 	it("adds and deletes a rule in One Code's project file, and leaves Claude Code's files alone", async () => {
@@ -228,6 +230,19 @@ describe("/permissions wiring", () => {
 			await openPanel(LEFT, LEFT, LEFT, DOWN, DOWN, DOWN, ENTER, "d", ENTER, "y", ENTER);
 			expect(settings()).toEqual({ other: 1 });
 			expect(JSON.parse(readFileSync(join(home, ".claude", "settings.json"), "utf-8")).autoMode.allow).toEqual(["$defaults", "CC Rule: from Claude Code"]);
+		});
+
+		it("keeps $defaults when the environment it extends is edited", async () => {
+			mkdirSync(join(home, ".onecode"), { recursive: true });
+			writeFileSync(join(home, ".onecode", "settings.json"), JSON.stringify({ autoMode: { environment: ["$defaults", "- Trusted host: x"] } }));
+			let prefilled = "";
+			editorReply = (prefill) => {
+				prefilled = prefill;
+				return `${prefill}\n- Trusted host: y`;
+			};
+			await openPanel(LEFT, LEFT, LEFT, PAGE_DOWN, PAGE_DOWN, ENTER);
+			expect(prefilled).toBe("- Trusted host: x");
+			expect(settings().autoMode.environment).toEqual(["$defaults", "- Trusted host: x", "- Trusted host: y"]);
 		});
 
 		it("edits the environment through the editor, starting from the built-in default", async () => {

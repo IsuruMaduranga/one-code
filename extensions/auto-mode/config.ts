@@ -420,6 +420,12 @@ export function listAutoModeEntries(home: string): SourcedAutoModeEntry[] {
 	return entries;
 }
 
+/** Whether One Code's own `autoMode.environment` keeps the built-in default through `"$defaults"`. */
+export function oneCodeEnvironmentExtendsDefault(home: string): boolean {
+	const block = asRecord(readFile(oneCodeSettingsPath(home), [])?.autoMode);
+	return (stringArray(block?.environment) ?? []).some((text) => text.trim() === DEFAULTS_TOKEN);
+}
+
 /**
  * Rewrite one auto-mode list in One Code's own settings file. An emptied list
  * is removed (for the environment, that restores the built-in default), and so

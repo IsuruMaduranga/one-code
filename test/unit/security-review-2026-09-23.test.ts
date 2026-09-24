@@ -217,6 +217,8 @@ describe("H3: unmodelled writes reach the floor", () => {
 		// A loop body runs more than once, so the read before the `cd` also runs after it.
 		expect(shellNamesControlFile("for i in 1 2; do printf x > settings.json; cd .claude; done", cwd, home)).toBe("settings.json");
 		expect(shellNamesControlFile('cd "$D"; printf x > settings.json', cwd, home)).toBe("settings.json");
+		// A script run in this shell may cd (PR #15 review).
+		expect(shellNamesControlFile('eval "cd .claude"; printf x > settings.json', cwd, home)).toBe("settings.json");
 		// A cd that may not run leaves the directory unknown too.
 		expect(shellNamesControlFile("cd .claude; false && cd /tmp; printf x > settings.json", cwd, home)).toBe("settings.json");
 		expect(shellNamesControlFile("cd .claude; echo hi <> settings.json", cwd, home)).toBe("settings.json");

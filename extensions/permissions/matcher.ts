@@ -319,7 +319,10 @@ export function bashMatchForms(command: string, depth = 0): string[] {
 		// `eval` runs its arguments joined into one command line.
 		if (payload.command === "eval") nested.push(args.join(" "));
 		// `trap 'cmd' EXIT` runs its first argument later, as a command line.
-		if (payload.command === "trap" && args[0] && !args[0].startsWith("-")) nested.push(args[0]);
+		if (payload.command === "trap") {
+			const handler = args[args[0] === "--" ? 1 : 0];
+			if (handler && !handler.startsWith("-")) nested.push(handler);
+		}
 		// `find … -exec cmd {} ;` runs cmd on every match.
 		if (payload.command === "find") {
 			for (const [index, arg] of args.entries()) {
@@ -1018,7 +1021,7 @@ export function decide(params: DecideInput): Decision {
 	 * directory, the harness's session dirs, the plan file, and the workspace
 	 * directories except for the credentials in them.
 	 */
-	const workingSpaceHolds = (spelled: string, target: string): boolean => {
+	const workingSpaceHolds = (spelled: string, target: string, workspace = true): boolean => {
 		const roots = [cwd, params.resolvedCwd, params.memoryDirPath, params.scratchpadDirPath, params.resultsDirPath, params.sessionDirPath];
 		if (roots.some((dir) => dir && isAtOrInsideDir(target, dir, cwd))) return true;
 		// A workspace directory is working space except for the credentials in it:
@@ -1026,7 +1029,7 @@ export function decide(params: DecideInput): Decision {
 		// Judged on the spelling and on where it resolves, so a symlink cannot
 		// launder a credential in either direction.
 		const sensitive = [spelled, target].some((candidate) => isSensitivePath(toAbsolute(cwd, candidate, homedir())));
-		if (!sensitive && (params.workspaceDirs ?? []).some((dir) => isAtOrInsideDir(target, dir, cwd))) return true;
+		if (workspace && !sensitive && (params.workspaceDirs ?? []).some((dir) => isAtOrInsideDir(target, dir, cwd))) return true;
 		return params.planFilePath ? isPlanFilePath(target, params.planFilePath, cwd) : false;
 	};
 	const outsideWorkingDir = (): Decision => {
@@ -1049,15 +1052,17 @@ export function decide(params: DecideInput): Decision {
 		let moved = false;
 		for (const segment of segments) {
 			if (movesDirectory(segment)) moved = true;
-			const targets = [...segment.redirects, ...segment.inputs.map((token) => token.value)];
+			const targets = [...segment.redirects.map((value) => ({ value, write: true })), ...segment.inputs.map((token) => ({ value: token.value, write: false }))];
 			if (targets.length > 0 && segment.unknownTarget) return true;
-			for (const target of targets) {
+			for (const { value: target, write } of targets) {
 				if (DEVICE_TARGETS.has(target) || target.startsWith("/dev/fd/")) continue;
 				if (isUnknownTilde(target) || /[*?[]/.test(target)) return true;
 				if (moved && !isAbsolute(target) && !target.startsWith("~")) return true;
 				const absolute = toAbsoluteBash(cwd, target, home);
 				const resolved = resolveForContainment(absolute) ?? absolute;
-				if (!workingSpaceHolds(target, resolved)) return true;
+				// Auto mode's unclassified writes stay in the working directory, a
+				// workspace directory's included (decisions/modes.md).
+				if (!workingSpaceHolds(target, resolved, !(write && mode === "auto"))) return true;
 				if (isProtected(absolute, resolved)) return true;
 			}
 		}

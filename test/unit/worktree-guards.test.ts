@@ -122,6 +122,11 @@ describe("worktree git-isolation guard", () => {
 
 		// fish is a shell too, and a script built at runtime cannot be checked.
 		expect(guard("fish -c 'git -C /repo reset --hard'")).toContain(`targets ${resolve("/repo")}`);
+		// Only the -c script runs; the words after it are $0, $1 (PR #15 review).
+		expect(guard("bash -c 'echo ok' 'git -C /repo status'")).toBeUndefined();
+		expect(guard("bash -o pipefail -lc 'git -C /repo status' x")).toContain(`targets ${resolve("/repo")}`);
+		// An eval in a loop may cd on the next pass.
+		expect(guard("for i in 1 2; do git status; eval cd /repo; done")).toContain("inside a loop");
 		expect(guard("source <(echo git -C /repo reset --hard)")).toContain("too complex to verify");
 		expect(guard("source .venv/bin/activate && git status")).toBeUndefined();
 		// Past three levels of nesting, git anywhere in the script is refused.

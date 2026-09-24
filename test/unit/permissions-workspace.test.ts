@@ -85,6 +85,8 @@ describe("validateWorkspaceDirectory", () => {
 		expect(validateWorkspaceDirectory(join(shared, "sub"), cwd, home, [shared])).toMatchObject({ error: expect.stringContaining("already in the workspace") });
 		expect(validateWorkspaceDirectory("/", cwd, home, [])).toMatchObject({ error: expect.stringContaining("filesystem root") });
 		expect(validateWorkspaceDirectory("~", cwd, home, [])).toMatchObject({ error: expect.stringContaining("home directory") });
+		// A directory above the home directory covers it (PR #15 review).
+		expect(validateWorkspaceDirectory(root, cwd, home, [])).toMatchObject({ error: expect.stringContaining("contains it") });
 	});
 
 	it("splits --add-dir like PATH", () => {
@@ -145,7 +147,7 @@ describe("workspace directories in the gate", () => {
 		expect((await read(join(home, "notes.md")))?.block).toBe(true);
 		const warning = (ctx._notified as Array<{ message: string }>).find((n) => n.message.startsWith("Ignored permissions.additionalDirectories"));
 		expect(warning?.message).toContain("The filesystem root cannot be a workspace directory");
-		expect(warning?.message).toContain("Your home directory cannot be a workspace directory");
+		expect(warning?.message).toContain("Your home directory, or a directory that contains it, cannot be a workspace directory");
 	});
 
 	it("asks to trust the repository's directories before applying them", async () => {

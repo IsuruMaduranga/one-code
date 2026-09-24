@@ -791,6 +791,7 @@ describe("PERMISSIONS-REVIEW-2026-09-05 medium findings", () => {
 				"busybox rm -rf x",
 				"watch -n 5 rm -rf x",
 				"trap 'rm -rf x' EXIT",
+				"trap -- 'rm -rf x' EXIT",
 				"find . -name '*.log' -exec rm {} +",
 				"find . -execdir rm -f {} ';'",
 			]) {
@@ -928,6 +929,17 @@ describe("an allow rule never covers a redirect outside the working space (PR #1
 		// A line that did not parse may have swallowed its redirect.
 		const bare = parseRules(["Bash"]);
 		expect(decide({ toolName: "bash", subject: 'echo "unterminated > /etc/passwd', cwd, resolvedCwd: cwd, mode: "default", deny: [], ask: [], allow: bare }).decision).toBe("ask");
+	});
+
+	it("sends an auto-mode write into a workspace directory to the classifier, and allows a read there", () => {
+		const shared = realpathSync.native(mkdtempSync(join(tmpdir(), "redirects-ws-")));
+		const inWorkspace = (command: string, mode: "default" | "auto") =>
+			decide({ toolName: "bash", subject: command, cwd, resolvedCwd: cwd, mode, deny: [], ask: [], allow, workspaceDirs: [shared] }).decision;
+		const file = forwardSlashes(join(shared, "build.sh"));
+		expect(inWorkspace(`echo x > ${file}`, "auto")).toBe("classify");
+		expect(inWorkspace(`echo x > ${file}`, "default")).toBe("allow");
+		expect(inWorkspace(`cat < ${file}`, "auto")).toBe("allow");
+		rmSync(shared, { recursive: true, force: true });
 	});
 
 	it("still allows redirects inside the working space and to devices", () => {

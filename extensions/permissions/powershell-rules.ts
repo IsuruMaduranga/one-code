@@ -240,7 +240,7 @@ function splitStatements(command: string): string[] | undefined {
 			i += 2;
 			continue;
 		}
-		if (ch === "#") {
+		if (ch === "#" && startsComment(text, i)) {
 			// Line comment runs to end of line.
 			const eol = text.indexOf("\n", i);
 			i = eol === -1 ? text.length : eol;
@@ -277,6 +277,15 @@ function splitStatements(command: string): string[] | undefined {
 }
 
 /**
+ * Whether the `#` at `i` starts a comment: only at the start of a token. In
+ * `x#(Set-Content f y)` it is part of the word, and the parenthesis after it
+ * still runs.
+ */
+function startsComment(text: string, i: number): boolean {
+	return i === 0 || /[\s;|&(){}]/.test(text[i - 1]);
+}
+
+/**
  * Whether the line has a `(` outside quotes. PowerShell evaluates a grouping
  * expression in argument position before calling the command, so
  * `Write-Output (Set-Content f x)` writes `f` behind a read-only cmdlet
@@ -304,7 +313,7 @@ function hasGroupingExpression(command: string): boolean {
 			continue;
 		}
 		if (ch === "`") i++;
-		else if (ch === "#") {
+		else if (ch === "#" && startsComment(command, i)) {
 			const eol = command.indexOf("\n", i);
 			i = eol === -1 ? command.length : eol;
 		} else if (ch === "@" && (command[i + 1] === "'" || command[i + 1] === '"')) {
@@ -503,24 +512,58 @@ export interface PowerShellReadOnlyOptions {
 	readableRoots?: string[];
 }
 
-/** A PowerShell wildcard component (`*`, `?`, `[a-c]`) as a case-insensitive RegExp, or undefined. */
-function wildcardRegex(pattern: string): RegExp | undefined {
-	let source = "";
+type WildcardPart = { star: true } | { star: false; matches: (ch: string) => boolean };
+
+/**
+ * A PowerShell wildcard component (`*`, `?`, `[a-c]`) as a case-insensitive
+ * matcher, or undefined. Matched without a regex over the whole name: the
+ * model writes the pattern, and `*a*a*a…z` would backtrack polynomially
+ * against every directory entry on the permission-gate path.
+ */
+function wildcardMatcher(pattern: string): ((name: string) => boolean) | undefined {
+	const parts: WildcardPart[] = [];
 	for (let i = 0; i < pattern.length; i++) {
 		const ch = pattern[i];
 		const close = ch === "[" ? pattern.indexOf("]", i + 1) : -1;
-		if (ch === "*") source += ".*";
-		else if (ch === "?") source += ".";
+		if (ch === "*") {
+			if (!parts.at(-1)?.star) parts.push({ star: true });
+		} else if (ch === "?") parts.push({ star: false, matches: () => true });
 		else if (close > i + 1) {
-			source += `[${pattern.slice(i + 1, close).replace(/[\\\]^]/g, "\\$&")}]`;
+			let set: RegExp;
+			try {
+				set = new RegExp(`^[${pattern.slice(i + 1, close).replace(/[\\\]^]/g, "\\$&")}]$`, "i");
+			} catch {
+				return undefined;
+			}
+			parts.push({ star: false, matches: (c) => set.test(c) });
 			i = close;
-		} else source += ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+		} else {
+			const lower = ch.toLowerCase();
+			parts.push({ star: false, matches: (c) => c.toLowerCase() === lower });
+		}
 	}
-	try {
-		return new RegExp(`^${source}$`, "is");
-	} catch {
-		return undefined;
-	}
+	// Greedy match that backtracks only to the last `*`: O(name × pattern).
+	return (name) => {
+		let p = 0;
+		let t = 0;
+		let starAt = -1;
+		let resumeAt = 0;
+		while (t < name.length) {
+			const part = parts[p];
+			if (part && !part.star && part.matches(name[t])) {
+				p++;
+				t++;
+			} else if (part?.star) {
+				starAt = p++;
+				resumeAt = t;
+			} else if (starAt >= 0) {
+				p = starAt + 1;
+				t = ++resumeAt;
+			} else return false;
+		}
+		while (parts[p]?.star) p++;
+		return p === parts.length;
+	};
 }
 
 /**
@@ -531,8 +574,8 @@ function wildcardRegex(pattern: string): RegExp | undefined {
  */
 function wildcardTargets(absolute: string): string[] | undefined {
 	const dir = dirname(absolute);
-	const regex = wildcardRegex(basename(absolute));
-	if (/[*?[]/.test(dir) || !regex) return undefined;
+	const matches = wildcardMatcher(basename(absolute));
+	if (/[*?[]/.test(dir) || !matches) return undefined;
 	let entries: string[];
 	try {
 		entries = readdirSync(dir);
@@ -540,7 +583,7 @@ function wildcardTargets(absolute: string): string[] | undefined {
 		return [dir];
 	}
 	if (entries.length > 2_000) return undefined;
-	return [dir, ...entries.filter((entry) => regex.test(entry)).map((entry) => join(dir, entry))];
+	return [dir, ...entries.filter((entry) => matches(entry)).map((entry) => join(dir, entry))];
 }
 
 /**

@@ -95,6 +95,32 @@ export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: W
 /** Builtins that run a script in this shell. */
 const SCRIPT_RUNNERS: ReadonlySet<string> = new Set(["eval", "source", "."]);
 
+/** Shell options that take the next word as their value. */
+const SHELL_VALUE_OPTIONS = new Set(["-o", "+o", "-O", "+O", "--rcfile", "--init-file"]);
+
+/**
+ * The arguments of a shell invocation that are scripts: with `-c` (alone or
+ * in a cluster such as `-lc`), only the first operand; the words after it are
+ * `$0`, `$1`, … (`bash -c 'echo ok' 'git status'` runs no git). Without `-c`,
+ * every argument, since which one is a script file is not known.
+ */
+function shellScripts(args: Token[]): Token[] {
+	let command = false;
+	let i = 0;
+	for (; i < args.length; i++) {
+		const value = args[i].value;
+		if (value === "--" || value === "-") {
+			i++;
+			break;
+		}
+		if (!/^[-+]/.test(value)) break;
+		if (SHELL_VALUE_OPTIONS.has(value)) i++;
+		else if (/^-[A-Za-z]+$/.test(value) && value.includes("c")) command = true;
+	}
+	if (!command) return args;
+	return args[i] ? [args[i]] : [];
+}
+
 /** Whether git appears as a word in `text`, read with quotes and backslashes removed (`gi\t`, `g"it"`). */
 const mentionsGit = (text: string): boolean => /\bgit\b/.test(text.replace(/[\\'"]/g, ""));
 
@@ -159,7 +185,9 @@ function guardScript(
 	};
 	// A loop body runs more than once, so a `cd` in it moves every git command
 	// in the loop after the first pass; the segments show one pass only.
-	const movesInLoop = segments.some((seg) => seg.enclosing.some((construct) => LOOPS.has(construct)) && movesDirectory(seg));
+	// An `eval` there may `cd` too.
+	const movesOrEvals = (seg: (typeof segments)[number]) => movesDirectory(seg) || resolvePayload(leadTokens(seg)).command === "eval";
+	const movesInLoop = segments.some((seg) => seg.enclosing.some((construct) => LOOPS.has(construct)) && movesOrEvals(seg));
 	if (movesInLoop && segments.some(runsGit)) {
 		return {
 			reason: isolated(
@@ -241,7 +269,7 @@ function guardScript(
 		// in this shell, so a `cd` in it moves the commands after it.
 		// Past three levels a script is judged as one the guard cannot follow.
 		if (INLINE_SCRIPT_SHELLS.has(cmd) || cmd === "eval") {
-			const scripts = cmd === "eval" ? [args.map((arg) => arg.value).join(" ")] : args.map((arg) => arg.value);
+			const scripts = cmd === "eval" ? [args.map((arg) => arg.value).join(" ")] : shellScripts(args).map((arg) => arg.value);
 			for (const script of scripts) {
 				const nested = depth < 3 ? guardScript(script, worktreePath, sharedRoot, dir, depth + 1) : unverifiedScript(script, worktreePath, true);
 				if (nested.reason) return nested.reason;

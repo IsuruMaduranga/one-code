@@ -31,6 +31,7 @@ import {
 	autoModeSettingsPaths,
 	listAutoModeEntries,
 	loadAutoModeConfig,
+	oneCodeEnvironmentExtendsDefault,
 	type SourcedAutoModeEntry,
 	updateOneCodeAutoModeList,
 	claudeUserPermissionAllow,
@@ -1523,15 +1524,27 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		const listed = listAutoModeEntries(home).filter((e) => e.key === "environment");
 		const own = listed.filter((e) => e.source === "onecode-user").map((e) => e.text);
 		const others = listed.length - own.length;
-		const start = own.length > 0 ? own : others > 0 ? [] : DEFAULT_ENVIRONMENT;
+		// `"$defaults"` in the list: the user's lines extend the built-in default,
+		// which stays out of the editor and is kept on save.
+		const extendsDefault = oneCodeEnvironmentExtendsDefault(home);
+		const start = own.length > 0 ? own : others > 0 || extendsDefault ? [] : DEFAULT_ENVIRONMENT;
 		const title =
 			"Auto mode environment: one entry per line, `### ` lines are section headers. Save it empty to restore the built-in default." +
+			(extendsDefault ? " These lines are added to the built-in default." : "") +
 			(others > 0 ? ` These lines are added to the ${others} entries from Claude Code's user or managed settings.` : "");
 		const edited = await ctx.ui.editor(title, start.join("\n"));
 		if (edited === undefined) return undefined;
 		const lines = edited.split("\n").map((line) => line.trimEnd()).filter((line) => line.trim().length > 0);
 		if (lines.join("\n") === start.join("\n")) return undefined;
-		updateOneCodeAutoModeList("environment", () => lines, home);
+		updateOneCodeAutoModeList(
+			"environment",
+			(entries) => {
+				const at = entries.findIndex((entry) => entry.trim() === "$defaults");
+				if (at < 0 || lines.length === 0) return lines;
+				return [...lines.slice(0, at), entries[at], ...lines.slice(at)];
+			},
+			home,
+		);
 		autoConfig = undefined;
 		return lines.length > 0 ? `Saved your auto mode environment to ${tildify(oneCodeSettingsPath(home), home)}` : "Restored the built-in auto mode environment";
 	};

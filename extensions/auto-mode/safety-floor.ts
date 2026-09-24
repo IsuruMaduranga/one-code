@@ -261,8 +261,10 @@ export function shellNamesControlFile(
 	const unknownDir =
 		parseFailed ||
 		segments.some((segment) => {
-			if (!movesDirectory(segment)) return false;
 			const payload = resolvePayload(segment.tokens);
+			// A script run in this shell (`eval "cd .claude"`, `source f`) may `cd` too.
+			if (["eval", "source", "."].includes(payload.command)) return true;
+			if (!movesDirectory(segment)) return false;
 			const target = payload.args.find((token) => !token.value.startsWith("-"));
 			// `cd -` goes to $OLDPWD.
 			const previous = payload.args.some((token) => token.value === "-");

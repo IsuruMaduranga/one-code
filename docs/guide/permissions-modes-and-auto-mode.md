@@ -286,8 +286,8 @@ stay tighter than the working directory, on purpose. A credential file
 inside a workspace directory, such as a key under `.ssh`, still prompts.
 And in auto mode, every write or delete there still goes to the classifier.
 
-The filesystem root and your home directory can't be added; add something
-narrower. If a settings file lists one of them, One Code ignores it and warns
+The filesystem root, your home directory, and any directory that contains
+it (such as `/Users`) can't be added; add something narrower. If a settings file lists one of them, One Code ignores it and warns
 you. Directories listed in the repository's own `.claude` settings apply
 only after you trust the repository (see [Trusting a project](#trusting-a-project)).
 The system prompt lists the workspace directories that were in force when

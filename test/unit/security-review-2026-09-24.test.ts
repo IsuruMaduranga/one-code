@@ -82,10 +82,17 @@ describe("H2: PowerShell grouping expressions run their own command", () => {
 			"Get-Content -Path (Remove-Item x)",
 			"Write-Output @(Set-Content f x)",
 			"Get-ChildItem;(Set-Content f x)",
+			// A `#` inside a word is not a comment (PR #15 review).
+			"Write-Output x#(Set-Content f y)",
 		]) {
 			expect(powershellReadOnly(command, { cwd, home }).readOnly, command).toBe(false);
 			expect(powershellInjectionSyntax(command), command).toMatch(/grouping/);
 		}
+	});
+
+	it("still reads a # at the start of a word as a comment", () => {
+		expect(powershellInjectionSyntax("Get-ChildItem # (not run)")).toBeUndefined();
+		expect(powershellReadOnly("Get-ChildItem #(x)", { cwd, home }).readOnly).toBe(true);
 	});
 
 	it("keeps quoted parentheses literal", () => {
@@ -245,5 +252,13 @@ describe("M4: PowerShell resolves relative paths before vouching for them", () =
 		for (const command of ["Get-Content a.txt", "Get-ChildItem src", "Get-Content src\\b.ts", "Get-ChildItem *.txt", "Get-Content missing.txt"]) {
 			expect(powershellReadOnly(command, { cwd, home }).readOnly, command).toBe(true);
 		}
+	});
+
+	it("matches a wildcard leaf without backtracking (PR #15 review)", () => {
+		// A regex for this pattern backtracks polynomially against every entry.
+		const started = performance.now();
+		expect(powershellReadOnly(`Get-Content ${"*a".repeat(30)}z`, { cwd, home }).readOnly).toBe(true);
+		expect(performance.now() - started).toBeLessThan(500);
+		expect(powershellReadOnly("Get-Content A.T?T", { cwd, home }).readOnly).toBe(true);
 	});
 });
