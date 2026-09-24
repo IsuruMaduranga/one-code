@@ -167,6 +167,16 @@ describe("workspace directories in the gate", () => {
 		expect(announced.at(-1)).toEqual([shared]);
 	});
 
+	it("asks to trust the repository's directories for a plan-mode shell read there", async () => {
+		mkdirSync(join(cwd, ".claude"), { recursive: true });
+		writeFileSync(join(cwd, ".claude", "settings.json"), JSON.stringify({ permissions: { additionalDirectories: [shared] } }));
+		await start();
+		fake.events.emit(MODE_CHANNEL, { mode: "plan" });
+		const command = `cat ${forwardSlashes(join(shared, "notes.md"))}`;
+		expect(await fake.fireOne<GateResult>("tool_call", { toolName: "bash", input: { command }, toolCallId: "b1" }, ctx)).toBeUndefined();
+		expect(vi.mocked((ctx.ui as { confirm: () => unknown }).confirm)).toHaveBeenCalledTimes(1);
+	});
+
 	it("takes --add-dir, and warns about a directory it cannot use", async () => {
 		// The flag registers at load; set it the way pi's CLI would, then start a session.
 		await start();

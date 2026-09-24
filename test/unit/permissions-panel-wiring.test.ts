@@ -177,6 +177,10 @@ describe("/permissions wiring", () => {
 		const target = oneCodeProjectSettingsPath(cwd, home);
 		expect(JSON.parse(readFileSync(target, "utf-8")).permissions.allow).toEqual(["Bash(npm test:*)"]);
 		expect(reminders.some((r) => r.includes("<local-command-stdout>Added allow rule Bash(npm test:*) to "))).toBe(true);
+		// The same rule again is refused, not reported as added.
+		await openPanel(ENTER, ..."Bash(npm test:*)".split(""), ENTER, ENTER);
+		expect(screens.join("\n")).toContain("That allow rule is already in ");
+		expect(JSON.parse(readFileSync(target, "utf-8")).permissions.allow).toEqual(["Bash(npm test:*)"]);
 
 		// Rows now: Add a new rule…, Bash(npm test:*), Read (read-only).
 		await openPanel(DOWN, DOWN, ENTER);

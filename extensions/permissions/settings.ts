@@ -253,10 +253,11 @@ export function listPermissionRules(cwd: string, home: string): SourcedRule[] {
  * Append a rule to a One Code settings file, creating it if needed.
  * Strict read + atomic write, like the other `~/.onecode` writers: a malformed
  * file is not silently clobbered (it may also hold classifierModel/subagentModel),
- * and a half-written file is never visible to a concurrent reader.
+ * and a half-written file is never visible to a concurrent reader. Returns
+ * false, writing nothing, when the file already holds the rule.
  */
-export function persistPermissionRule(behavior: RuleBehavior, rule: string, filePath: string): void {
-	addToPermissionsList(behavior, rule, filePath);
+export function persistPermissionRule(behavior: RuleBehavior, rule: string, filePath: string): boolean {
+	return addToPermissionsList(behavior, rule, filePath);
 }
 
 /** `persistPermissionRule` for an allow rule (`/allow`). */
@@ -276,11 +277,14 @@ export function removePermissionRule(behavior: RuleBehavior, rule: string, fileP
 /** A string list under `permissions` that One Code edits in its own files. */
 type PermissionsList = RuleBehavior | "additionalDirectories";
 
-function addToPermissionsList(field: PermissionsList, value: string, filePath: string): void {
+/** False, writing nothing, when the list already holds `value`. */
+function addToPermissionsList(field: PermissionsList, value: string, filePath: string): boolean {
 	const file = readSettingsForWrite(filePath) as ClaudeSettingsFile;
 	const list = ((file.permissions ??= {})[field] ??= []);
-	if (!list.includes(value)) list.push(value);
+	if (list.includes(value)) return false;
+	list.push(value);
 	writeSettings(filePath, file as Record<string, unknown>);
+	return true;
 }
 
 function removeFromPermissionsList(field: PermissionsList, value: string, filePath: string): boolean {

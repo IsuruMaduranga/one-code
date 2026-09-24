@@ -1040,7 +1040,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				await trustProject(withRules, { rule: withRules.rule.raw });
 			} else if (repoDirs.length > 0) {
 				const withDirs = decideWith([...allow, ...activeSessionAllows()], [...workspaceDirs, ...repoDirs.map((dir) => resolvedOrSelf(dir.path))]);
-				if (withDirs.decision === "allow" && (withDirs.cause === "tier" || withDirs.cause === "mode")) {
+				// A read tool's allow is "tier" or "mode"; a plan-mode shell read's is "plan-readonly".
+				if (withDirs.decision === "allow" && (withDirs.cause === "tier" || withDirs.cause === "mode" || withDirs.cause === "plan-readonly")) {
 					const target = resolvedSubject ?? toAbsolute(callCwd, matchSubject, os.homedir());
 					const firing = repoDirs.find((dir) => isWithin(resolvedOrSelf(dir.path), target))?.raw ?? repoDirs[0].raw;
 					await trustProject(withDirs, { dir: firing });
@@ -1593,7 +1594,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			status: panelStatus,
 			addRule: (behavior, rule, destination) => {
 				const target = destination === "onecode-user" ? oneCodeSettingsPath(home) : oneCodeProjectSettingsPath(ctx.cwd, home);
-				persistPermissionRule(behavior, rule, target);
+				if (!persistPermissionRule(behavior, rule, target)) throw new Error(`That ${behavior} rule is already in ${tildify(target, home)}.`);
 				reloadRules(ctx);
 				return `Added ${behavior} rule ${rule} to ${tildify(target, home)}`;
 			},
