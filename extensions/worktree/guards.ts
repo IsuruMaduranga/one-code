@@ -113,10 +113,15 @@ export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: W
 	const scopeDirs = scopedTracker<string | undefined>(worktreePath);
 
 	const moves = (seg: (typeof segments)[number]) => ["cd", "pushd", "popd"].includes(resolvePayload(leadTokens(seg)).command);
-	// A git command as the parse sees it, spelled any way (`gi\t`, `env git`, `xargs git`, `parallel git`).
+	// A git command as the parse sees it, spelled any way (`gi\t`, `env git`,
+	// `xargs git`, `parallel git`), or anywhere in the script a shell or `eval`
+	// runs (`bash -c '…'`), read as text with quotes and backslashes removed so
+	// a script too complex to parse still counts.
 	const runsGit = (seg: (typeof segments)[number]) => {
 		const { command: cmd, args } = resolvePayload(leadTokens(seg));
-		return cmd === "git" || (cmd === "parallel" && args.some((arg) => arg.value === "git"));
+		if (cmd === "git" || (cmd === "parallel" && args.some((arg) => arg.value === "git"))) return true;
+		if (!["sh", "bash", "zsh", "dash", "ksh", "eval", "source", "."].includes(cmd)) return false;
+		return args.some((arg) => /\bgit\b/.test(arg.value.replace(/[\\'"]/g, "")));
 	};
 	// A loop body runs more than once, so a `cd` in it moves every git command
 	// in the loop after the first pass; the segments show one pass only.

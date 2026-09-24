@@ -300,6 +300,12 @@ interface Context {
 	substitution?: number;
 	/** Inside the last member of a multi-command pipeline (`Segment.lastInPipeline`). */
 	lastInPipeline?: boolean;
+	/**
+	 * Inside a context bash always runs in a subshell (`( … )`, a substitution,
+	 * a pipeline member other than the last): nothing here, a later pipeline's
+	 * last member included, can move the outer shell.
+	 */
+	isolated?: boolean;
 }
 
 class Walker {
@@ -328,6 +334,7 @@ class Walker {
 			substitution: ctx.substitution,
 			// `( … )` and substitutions are always subshells, whatever pipeline they sit in.
 			lastInPipeline: ALWAYS_SUBSHELL.has(node.type) ? false : ctx.lastInPipeline,
+			isolated: ctx.isolated || ALWAYS_SUBSHELL.has(node.type),
 		};
 	}
 
@@ -361,8 +368,11 @@ class Walker {
 						continue;
 					}
 					const member = this.enter(ctx, node, true);
-					// Only the last member can run in the current shell (`lastpipe`).
-					member.lastInPipeline = index === members.length - 1;
+					// Only the last member can run in the current shell (`lastpipe`),
+					// and only when the pipeline is not itself inside a subshell.
+					const last = index === members.length - 1;
+					member.lastInPipeline = last && !ctx.isolated;
+					member.isolated = ctx.isolated || !last;
 					this.statement(child, member);
 				}
 				return;
