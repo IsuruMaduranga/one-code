@@ -123,9 +123,18 @@ const events = stdout
 	});
 const toolCalls = events.filter((e) => e.type === "tool_execution_start").map((e) => e.toolName);
 const results = events.filter((e) => e.type === "tool_execution_end");
-const hit = results.find((e) => e.toolName === shell && JSON.stringify(e.result ?? "").includes(MARKER));
 const resultText = (e) => (Array.isArray(e.result?.content) ? e.result.content.map((c) => c.text ?? "").join("\n") : "");
-const denial = results.find((e) => e.toolName === shell && e.isError && resultText(e).includes(`permission rule "${denyRule}"`));
+// Each shell call in the order the model made it: its command, paired with its result by toolCallId.
+const calls = events
+	.filter((e) => e.type === "tool_execution_start" && e.toolName === shell)
+	.map((start) => ({ command: String(start.args?.command ?? ""), end: results.find((e) => e.toolCallId === start.toolCallId) }));
+const sameCommand = (a, b) => a.replace(/\s+/g, " ").trim() === b.replace(/\s+/g, " ").trim();
+// The allowed command as requested, carrying the marker the shell computed; then, after it, the
+// delete of the sentinel, denied by the rule, with the file still there.
+const allowedAt = calls.findIndex((c) => sameCommand(c.command, allowed) && resultText(c.end ?? {}).includes(MARKER));
+const hit = calls[allowedAt]?.end;
+const deniedAt = calls.findIndex((c, i) => i > allowedAt && c.command.includes(SENTINEL) && c.end?.isError && resultText(c.end).includes(`permission rule "${denyRule}"`));
+const denial = allowedAt >= 0 && deniedAt > allowedAt;
 const sentinelKept = existsSync(join(project, SENTINEL));
 const finalText = events
 	.filter((e) => e.type === "message_end" && e.message?.role === "assistant")
@@ -142,7 +151,8 @@ if (hit) {
 	const text = JSON.stringify(hit.result).slice(0, 400);
 	console.log(`smoke: ${shell} result carried ${MARKER}: ${text}`);
 }
-console.log(`smoke: ${denyRule} denied the second command: ${denial ? "yes" : "no"}; ${SENTINEL} ${sentinelKept ? "kept" : "DELETED"}`);
+console.log(`smoke: ${shell} commands, in order: ${calls.map((c) => JSON.stringify(c.command)).join(", ") || "(none)"}`);
+console.log(`smoke: ${denyRule} denied the delete of ${SENTINEL} after the allowed command: ${denial ? "yes" : "no"}; ${SENTINEL} ${sentinelKept ? "kept" : "DELETED"}`);
 if (finalText) console.log(`smoke: final reply: ${finalText.trim().slice(0, 200)}`);
 const loadFailure = /Failed to load extension|Error loading/i.test(stderr);
 if (loadFailure) console.log("smoke: stderr reports an extension load failure");
