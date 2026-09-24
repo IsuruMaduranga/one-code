@@ -4,9 +4,12 @@
  * and check that the model drove the requested shell tool end to end — the
  * bash tool (Git Bash on Windows) or the PowerShell tool
  * (`CLAUDE_CODE_USE_POWERSHELL_TOOL=1`) — and that the shell's own output came
- * back in the tool result. The one check the unit suite cannot make: the
- * shell spawn, the permission gate and the provider round trip together, on
- * the machine that runs it. `.github/workflows/live-smoke.yml` runs both
+ * back in the tool result. A second command, which a project deny rule
+ * covers, must come back denied with its target file untouched: both of the
+ * permission gate's outcomes, in the default mode, with no
+ * `--dangerously-skip-permissions`. The one check the unit suite cannot make:
+ * the shell spawn, the permission gate and the provider round trip together,
+ * on the machine that runs it. `.github/workflows/live-smoke.yml` runs both
  * shells on windows-latest (working-docs/features/windows/plan.md, Phase 3 item 7).
  *
  *   node test/e2e/live-smoke.mjs --shell bash|powershell [--model <provider/model>] [--timeout <seconds>]
@@ -52,6 +55,16 @@ mkdirSync(project, { recursive: true });
 mkdirSync(agentDir, { recursive: true });
 execFileSync("git", ["init", "-q"], { cwd: project });
 writeFileSync(join(project, "CLAUDE.md"), "# Smoke\n\nThrowaway project for the live smoke.\n");
+// The blocked half: a deny rule for the delete command, and the file it would
+// remove. It reads as disposable and is committed, so a cautious model issues
+// the delete instead of questioning it.
+const SENTINEL = "stale.log";
+writeFileSync(join(project, SENTINEL), "old build output\n");
+execFileSync("git", ["add", SENTINEL], { cwd: project });
+execFileSync("git", ["-c", "user.name=smoke", "-c", "user.email=smoke@example.invalid", "commit", "-qm", "init"], { cwd: project });
+mkdirSync(join(project, ".claude"), { recursive: true });
+const denyRule = shell === "bash" ? "Bash(rm:*)" : "PowerShell(Remove-Item:*)";
+writeFileSync(join(project, ".claude", "settings.json"), JSON.stringify({ permissions: { deny: [denyRule] } }, null, "\t"));
 // An isolated pi agent dir with ONLY this repo registered as a package.
 writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ packages: [REPO] }, null, "\t"));
 const realAgentDir = process.env.PI_CODING_AGENT_DIR ?? join(homedir(), ".pi", "agent");
@@ -61,10 +74,11 @@ if (!hasKey && existsSync(join(realAgentDir, "auth.json"))) copyFileSync(join(re
 // The shell computes the marker, so a result carrying it came from a real run, not from the prompt.
 const [A, B] = [6, 7];
 const MARKER = `smoke-${A * B}`;
-const prompt =
+const [allowed, blocked] =
 	shell === "bash"
-		? `Use the bash tool to run exactly this command, then reply with the single word done: echo smoke-$((${A}*${B})) from-$(uname -s)`
-		: `Use the powershell tool to run exactly this command, then reply with the single word done: Write-Output ('smoke-' + (${A}*${B})); Write-Output $PSVersionTable.PSEdition`;
+		? [`echo smoke-$((${A}*${B})) from-$(uname -s)`, `echo second; rm -f ${SENTINEL}`]
+		: [`Write-Output ('smoke-' + (${A}*${B})); Write-Output $PSVersionTable.PSEdition`, `Remove-Item ${SENTINEL}`];
+const prompt = `Use the ${shell} tool to run exactly these two commands, one tool call each and in this order, then reply with the single word done. First: ${allowed} Second: ${blocked}`;
 
 const env = { ...process.env, PI_CODING_AGENT_DIR: agentDir };
 if (shell === "powershell") env.CLAUDE_CODE_USE_POWERSHELL_TOOL = "1";
@@ -110,6 +124,9 @@ const events = stdout
 const toolCalls = events.filter((e) => e.type === "tool_execution_start").map((e) => e.toolName);
 const results = events.filter((e) => e.type === "tool_execution_end");
 const hit = results.find((e) => e.toolName === shell && JSON.stringify(e.result ?? "").includes(MARKER));
+const resultText = (e) => (Array.isArray(e.result?.content) ? e.result.content.map((c) => c.text ?? "").join("\n") : "");
+const denial = results.find((e) => e.toolName === shell && e.isError && resultText(e).includes(`permission rule "${denyRule}"`));
+const sentinelKept = existsSync(join(project, SENTINEL));
 const finalText = events
 	.filter((e) => e.type === "message_end" && e.message?.role === "assistant")
 	.map((e) => (Array.isArray(e.message.content) ? e.message.content.filter((c) => c.type === "text").map((c) => c.text).join("") : ""))
@@ -125,11 +142,12 @@ if (hit) {
 	const text = JSON.stringify(hit.result).slice(0, 400);
 	console.log(`smoke: ${shell} result carried ${MARKER}: ${text}`);
 }
+console.log(`smoke: ${denyRule} denied the second command: ${denial ? "yes" : "no"}; ${SENTINEL} ${sentinelKept ? "kept" : "DELETED"}`);
 if (finalText) console.log(`smoke: final reply: ${finalText.trim().slice(0, 200)}`);
 const loadFailure = /Failed to load extension|Error loading/i.test(stderr);
 if (loadFailure) console.log("smoke: stderr reports an extension load failure");
 
-if (hit && !timedOut && !loadFailure) {
+if (hit && denial && sentinelKept && !timedOut && !loadFailure) {
 	console.log("smoke: PASS");
 	process.exit(0);
 }
