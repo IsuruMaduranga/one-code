@@ -78,10 +78,16 @@ expanded, and the command word is reduced to its lowercased basename, so
 
 `allow` rules are matched against the literal spelling only, and a compound
 command line is allowed only when an `allow` rule covers every one of its
-subcommands, or when an exact rule matches the whole line. A line that
-contains command substitution (`$(…)` or backticks), `eval`, `exec`, a pipe
-into an interpreter, or a base64 decode is never covered by a prefix or
-wildcard `allow` rule.
+subcommands, or when an exact rule matches the whole line. `eval`, `sh`, and
+`xargs` are subcommands like any other, so each needs a rule of its own.
+
+The commands inside a command substitution (`$(…)` or backticks) or a
+process substitution (`<(…)`) must be covered too, because they run. A rule
+can cover them, or One Code covers the whole substitution when it can prove
+the substitution only reads files inside the project. So
+`Bash(git commit:*)` allows `git commit -m "$(cat <<'EOF' … EOF)"`, but it
+doesn't allow `npm test $(curl …)`. A line containing a subshell, a loop, or
+a function is never covered by a prefix or wildcard `allow` rule.
 
 ### PowerShell rule patterns
 
@@ -334,8 +340,11 @@ classifier.
 ### What is approved without a classifier call
 
 - Actions a deterministic analysis proves safe. Read-only shell commands
-  inside the working directory are the common case. This analysis can only
-  ever conclude "safe"; anything it can't parse or recognize goes to the
+  inside the working directory are the common case, including multi-line
+  commands, heredocs, and substitutions whose own commands are read-only
+  (`diff <(git show HEAD:a) a`). This analysis can only ever conclude
+  "safe"; anything it can't parse or recognize, or a value that only exists
+  when the command runs (an environment variable, say), goes to the
   classifier rather than through.
 - Edits and writes to files inside the project that are not credential
   files, not protected paths, and not files that run code on their own

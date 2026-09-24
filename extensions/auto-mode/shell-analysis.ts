@@ -347,38 +347,14 @@ const NETWORK_COMMANDS = new Set([
 const GIT_GLOBAL_VALUE_FLAGS = new Set(["-C", "--git-dir", "--work-tree", "--namespace", "--exec-path"]);
 
 /**
- * Syntax through which a command can run something other than what its
- * visible words say. The permission matcher refuses to let a prefix/wildcard
- * allow rule cover a command carrying any of it (the user approved `npm test
- * …`, not whatever `$(…)` evaluates to), and the pre-gate escalates on it.
+ * Commands that only print their arguments, so a command substitution among
+ * them is safe once the substituted command is: its output is printed, not
+ * read as an option, a path or a program (`echo "built $(date)"`).
  */
-export function hasInjectionSyntax(command: string): string | undefined {
-	if (/\$\(/.test(command)) return "uses command substitution $( )";
-	if (/(^|[^\\])`/.test(command)) return "uses backtick command substitution";
-	if (/[<>]\(/.test(command)) return "uses process substitution";
-	if (/\beval\b|\bexec\b/.test(command)) return "uses eval/exec";
-	if (/\|\s*(bash|sh|zsh|python|perl|node|ruby)\b/.test(command)) return "pipes into an interpreter";
-	if (/base64\s+(-d|--decode)/.test(command)) return "decodes base64, which can hide the real command";
-	return undefined;
-}
+const PURE_OUTPUT = new Set(["echo", "printf"]);
 
-/** Syntax we do not model at all; its presence alone forces escalation. */
-export function hasUnmodelledSyntax(command: string): string | undefined {
-	if (command.includes("\n")) return "spans multiple lines";
-	const injection = hasInjectionSyntax(command);
-	if (injection) return injection;
-	if (/<<</.test(command)) return "uses a here-string";
-	if (/<</.test(command)) return "uses a heredoc";
-	// Brace expansion resolves to paths we cannot enumerate (review finding N3).
-	if (/\{[^{}]*,[^{}]*\}/.test(command)) return "uses brace expansion, whose expanded paths cannot be checked";
-	if (/\$\{?[A-Za-z_]/.test(command)) return "references environment variables, whose values are unknown here";
-	// `$@`, `$1`, `$!` are empty in a `bash -c` line and `$-`, `$$`, `$#` are
-	// not, so `cat $@/etc/passwd` read as a path under the working directory.
-	// The braced spelling (`${1}`, `${@}`) is the same parameter.
-	if (/\$\{?[0-9@*#?$!-]/.test(command)) return "references a shell special parameter ($1, $@, $$, …), whose value is unknown here";
-	if (/\$\[/.test(command)) return "uses $[ ] arithmetic expansion";
-	return undefined;
-}
+/** A parameter bash sets itself (`$1`, `$@`, `$$`, `${#}`), as opposed to an environment variable. */
+const SPECIAL_PARAMETER = /\$\{?[0-9@*#?$!-]/;
 
 export interface Payload {
 	command: string;
@@ -813,9 +789,6 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 	const trimmed = command.trim();
 	if (!trimmed) return { ...evidence, verdict: "escalate", notes: ["empty command"] };
 
-	const unmodelled = hasUnmodelledSyntax(trimmed);
-	if (unmodelled) escalate(unmodelled);
-
 	const { segments, parseFailed, unavailable, unknownQuoting, complex } = parseCommand(trimmed);
 	if (parseFailed) {
 		escalate(unavailable ? `could not be parsed: ${unavailable}` : "could not be parsed as bash, so nothing about it is known");
@@ -941,6 +914,23 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 			}
 			checkRead(word);
 		}
+		if (segment.unknownTarget) escalate("redirects to or from a path an expansion computes, which cannot be resolved here");
+		// `cat <<< "$TOKEN"` prints the environment's value as surely as `echo $TOKEN`.
+		if (segment.expandsIntoInput) escalate("expands a parameter into the command's input, whose value is unknown here");
+
+		// A word bash computes at run time. A parameter's value comes from the
+		// environment (`$@` is empty in a `bash -c` line, so `cat $@/etc/passwd`
+		// read as an in-project path); a substitution's output can be any words,
+		// options included. The substituted commands are segments of their own
+		// and judged below like any other.
+		const dynamicKinds = new Set(segment.tokens.map((token) => token.dynamic).filter((kind) => kind !== undefined));
+		if (dynamicKinds.has("variable")) {
+			escalate(
+				segment.tokens.some((token) => token.dynamic === "variable" && SPECIAL_PARAMETER.test(token.value))
+					? "references a shell special parameter ($1, $@, $$, …), whose value is unknown here"
+					: "references environment variables, whose values are unknown here",
+			);
+		}
 
 		// A leading `NAME=value` changes what the command runs or reads: git takes
 		// its repository and configuration from GIT_* variables (the same
@@ -955,6 +945,13 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		}
 
 		const { command: name, args, peeled, pathNamed } = resolvePayload(segment.tokens);
+		if (dynamicKinds.has("substitution") && !PURE_OUTPUT.has(name)) {
+			escalate(`passes a command substitution's output to ${name || "the shell"}, and its words are unknown here`);
+		}
+		// `diff <(git show HEAD:a) a`: bash hands a read-only command a pipe from a command judged on its own.
+		if (dynamicKinds.has("process-input") && !READ_ONLY_COMMANDS.has(name) && name !== "find") {
+			escalate(`passes a <( ) pipe to ${name || "the shell"}, which is not a read-only command`);
+		}
 		if (!name) {
 			// A wrapper with nothing to wrap is a command of its own: a bare `env`
 			// (or `env -i`, `nice`) prints the whole process environment / state.

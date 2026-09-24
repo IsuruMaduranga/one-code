@@ -30,6 +30,25 @@ import { bashParserUnavailable, parseBash } from "../lib/bash-parser.ts";
 
 type SyntaxNode = NonNullable<ReturnType<NonNullable<ReturnType<typeof parseBash>>["rootNode"]["child"]>>;
 
+/**
+ * What makes a word's value unknown until bash runs it, most telling first:
+ * a parameter or arithmetic expansion (`$HOME`, `$1`, `$((…))`), whose value
+ * comes from the environment; a command substitution (`$(…)`, a backtick,
+ * `>(…)`), whose value is its command's output; or a whole word that is one
+ * input process substitution (`<(cmd)`), which bash replaces with a pipe
+ * path the command reads.
+ */
+export type Dynamic = "variable" | "substitution" | "process-input";
+
+const DYNAMIC_RANK: Record<Dynamic, number> = { variable: 3, substitution: 2, "process-input": 1 };
+
+/** The more telling of two kinds (see {@link Dynamic}). */
+function mergeDynamic(a: Dynamic | undefined, b: Dynamic | undefined): Dynamic | undefined {
+	if (!a) return b;
+	if (!b) return a;
+	return DYNAMIC_RANK[a] >= DYNAMIC_RANK[b] ? a : b;
+}
+
 export interface Token {
 	/** The word with quotes removed, escapes applied and `$'…'` decoded; expansions keep their source text (`$HOME`). */
 	value: string;
@@ -37,6 +56,8 @@ export interface Token {
 	hadExpansion: boolean;
 	/** True when an unquoted, unescaped `*`, `?` or `[` makes the token a glob bash expands. */
 	glob?: boolean;
+	/** Set when part of the value is only known when bash runs it. */
+	dynamic?: Dynamic;
 }
 
 export interface Segment {
@@ -69,6 +90,18 @@ export interface Segment {
 	 * later commands only in its own scope.
 	 */
 	scopes: number[];
+	/**
+	 * Set for a command inside a command or process substitution: the index,
+	 * in `ParseResult.substitutions`, of the outermost substitution around it.
+	 */
+	substitution?: number;
+	/** True when a redirect target's value is only known when bash runs it (`> "$f"`, `< $(ls)`). */
+	unknownTarget?: boolean;
+	/**
+	 * True when a heredoc with an unquoted delimiter or a here-string expands a
+	 * parameter into the command's input (`cat <<< "$TOKEN"`).
+	 */
+	expandsIntoInput?: boolean;
 }
 
 export interface ParseResult {
@@ -93,6 +126,11 @@ export interface ParseResult {
 	complex?: string;
 	/** True when a command runs in the background (`cmd &`). */
 	background: boolean;
+	/**
+	 * The command text of each outermost substitution (inside `$(…)`, the
+	 * backticks or `<(…)`), indexed by `Segment.substitution`.
+	 */
+	substitutions: string[];
 }
 
 const ANSI_C_SIMPLE: Record<string, string> = {
@@ -242,6 +280,8 @@ const LOCALE_QUOTING = 'uses $"…" locale quoting, whose translation this check
 interface Context {
 	enclosing: string[];
 	scopes: number[];
+	/** The outermost substitution the walk is inside, as an index into `Walker.substitutions`. */
+	substitution?: number;
 }
 
 class Walker {
@@ -249,6 +289,7 @@ class Walker {
 	unknownQuoting: string | undefined;
 	complex: string | undefined;
 	background = false;
+	readonly substitutions: string[] = [];
 	private nextScope = 1;
 	private readonly source: string;
 
@@ -264,7 +305,18 @@ class Walker {
 		return {
 			enclosing: ENCLOSING.has(node.type) ? [...ctx.enclosing, node.type] : ctx.enclosing,
 			scopes: subshell ? [...ctx.scopes, this.nextScope++] : ctx.scopes,
+			substitution: ctx.substitution,
 		};
+	}
+
+	/** Enter a command or process substitution whose command text is `body`. */
+	private enterSubstitution(ctx: Context, type: string, body: string): Context {
+		const inner = this.enter(ctx, { type } as SyntaxNode, true);
+		if (inner.substitution === undefined) {
+			inner.substitution = this.substitutions.length;
+			this.substitutions.push(body);
+		}
+		return inner;
 	}
 
 	/** Walk a node that holds commands. */
@@ -345,6 +397,7 @@ class Walker {
 	 */
 	private simple(node: SyntaxNode | undefined, outerRedirects: SyntaxNode[], ctx: Context, at = node?.startIndex ?? 0): void {
 		const segment: Segment & { start: number } = { tokens: [], redirects: [], inputs: [], raw: "", enclosing: ctx.enclosing, scopes: ctx.scopes, start: at };
+		if (ctx.substitution !== undefined) segment.substitution = ctx.substitution;
 		if (node?.type === "variable_assignment" || node?.type === "variable_assignments") {
 			// A line that only assigns: `a=1`, `a=1 b=2`.
 			const assignments = node.type === "variable_assignment" ? [node] : node.namedChildren.filter((child) => child.type === "variable_assignment");
@@ -369,7 +422,7 @@ class Walker {
 					continue;
 				}
 				if (child.type === "herestring_redirect") {
-					for (const part of child.namedChildren) this.word(part, ctx);
+					this.redirect(child, segment, ctx);
 					continue;
 				}
 				if (child.type === "variable_assignment") {
@@ -419,7 +472,7 @@ class Walker {
 		const name = node.childForFieldName("name")?.text ?? "";
 		if (!value) return { value: `${name}${operator?.type ?? "="}`, hadExpansion: false };
 		const word = this.word(value, ctx);
-		return { value: `${name}${operator?.type ?? "="}${word.value}`, hadExpansion: word.hadExpansion, glob: word.glob };
+		return { value: `${name}${operator?.type ?? "="}${word.value}`, hadExpansion: word.hadExpansion, glob: word.glob, dynamic: word.dynamic };
 	}
 
 	private redirect(node: SyntaxNode, segment: Segment, ctx: Context): void {
@@ -428,7 +481,7 @@ class Walker {
 			return;
 		}
 		if (node.type === "herestring_redirect") {
-			for (const part of node.namedChildren) this.word(part, ctx);
+			for (const part of node.namedChildren) if (this.word(part, ctx).dynamic === "variable") segment.expandsIntoInput = true;
 			return;
 		}
 		if (node.type !== "file_redirect") {
@@ -443,6 +496,7 @@ class Walker {
 		for (const word of rest) segment.tokens.push(this.word(word, ctx));
 		if (!target) return; // `>&-`, `<&-`: close a descriptor.
 		const word = this.word(target, ctx);
+		if (word.dynamic) segment.unknownTarget = true;
 		// `>&2`, `<&3`, `>&-`: descriptor duplication, no file involved.
 		const duplication = (operator === ">&" || operator === "<&") && /^[0-9]*-?$/.test(word.value) && word.value !== "";
 		if (duplication) return;
@@ -458,7 +512,9 @@ class Walker {
 			if (child.type === "heredoc_start" || child.type === "heredoc_end") continue;
 			if (child.type === "heredoc_body") {
 				if (literal) continue;
-				for (const part of child.namedChildren) if (part.type !== "heredoc_content") this.word(part, ctx);
+				for (const part of child.namedChildren) {
+					if (part.type !== "heredoc_content" && this.word(part, ctx).dynamic === "variable") segment.expandsIntoInput = true;
+				}
 				this.heredocBackticks(child, ctx);
 				continue;
 			}
@@ -494,9 +550,15 @@ class Walker {
 			let end = i + 1;
 			while (end < text.length && text[end] !== "`") end += text[end] === "\\" ? 2 : 1;
 			const inner = parseCommand(text.slice(i + 1, end));
-			const scope = this.enter(ctx, { type: "command_substitution" } as SyntaxNode, true);
+			const scope = this.enterSubstitution(ctx, "command_substitution", text.slice(i + 1, end));
 			for (const segment of inner.segments) {
-				this.segments.push({ ...segment, enclosing: [...scope.enclosing, ...segment.enclosing], scopes: [...scope.scopes, ...segment.scopes], start: body.startIndex + i });
+				this.segments.push({
+					...segment,
+					enclosing: [...scope.enclosing, ...segment.enclosing],
+					scopes: [...scope.scopes, ...segment.scopes],
+					substitution: scope.substitution,
+					start: body.startIndex + i,
+				});
 			}
 			this.unknownQuoting ??= inner.unknownQuoting;
 			this.complex ??= inner.complex;
@@ -524,17 +586,25 @@ class Walker {
 			}
 			case "string": {
 				let value = "";
+				let dynamic: Dynamic | undefined;
 				for (const child of node.children) {
 					if (child.type === '"') continue;
-					if (child.type === "string_content") value += doubleQuoted(child.text);
-					else value += this.word(child, ctx).value;
+					if (child.type === "string_content") {
+						value += doubleQuoted(child.text);
+						continue;
+					}
+					const piece = this.word(child, ctx);
+					value += piece.value;
+					// Quoted, `"<(x)"` is the literal text, never a pipe path.
+					dynamic = mergeDynamic(dynamic, piece.dynamic === "process-input" ? undefined : piece.dynamic);
 				}
-				return { value, hadExpansion: false };
+				return { value, hadExpansion: false, dynamic };
 			}
 			case "concatenation": {
 				let value = "";
 				let glob = false;
 				let hadExpansion = false;
+				let dynamic: Dynamic | undefined;
 				let locale = false;
 				const pieces = node.children;
 				for (const child of pieces) {
@@ -554,32 +624,39 @@ class Walker {
 					value += piece.value;
 					glob ||= !!piece.glob;
 					hadExpansion ||= piece.hadExpansion;
+					// Joined to other text, a process substitution's pipe path is part of an unknown word.
+					dynamic = mergeDynamic(dynamic, piece.dynamic === "process-input" ? "substitution" : piece.dynamic);
 				}
 				if (locale) value += "$";
 				// `{a,b}` is three plain words to the grammar; bash expands it.
 				if (pieces.some((child) => child.type === "word" && child.text === "{") && pieces.some((child) => child.type === "word" && child.text.includes(","))) {
 					this.markComplex("brace_expression");
 				}
-				return { value, hadExpansion, glob: glob || undefined };
+				return { value, hadExpansion, glob: glob || undefined, dynamic };
 			}
 			case "command_substitution":
-			case "process_substitution":
-				this.container(node, this.enter(ctx, node, true));
-				return { value: node.text, hadExpansion: false };
+			case "process_substitution": {
+				// The command text between `$(`/`<(`/`>(` or a backtick and the close.
+				const opener = node.text.startsWith("`") ? 1 : 2;
+				this.container(node, this.enterSubstitution(ctx, node.type, node.text.slice(opener, -1)));
+				const dynamic: Dynamic = node.type === "process_substitution" && node.text.startsWith("<(") ? "process-input" : "substitution";
+				return { value: node.text, hadExpansion: false, dynamic };
+			}
 			case "simple_expansion":
 			case "expansion":
 			case "variable_name":
 			case "special_variable_name":
 				// `${x:-$(cmd)}`: the default's command still runs.
 				for (const child of node.namedChildren) if (child.type !== "variable_name" && child.type !== "special_variable_name") this.word(child, ctx);
-				return { value: node.text, hadExpansion: false };
+				return { value: node.text, hadExpansion: false, dynamic: "variable" };
 			default:
+				// Arithmetic, brace expansion and anything unrecognised: unknown value.
 				this.markComplex(node.type);
 				for (const child of node.namedChildren) {
 					if (STATEMENTS.has(child.type)) this.statement(child, ctx);
 					else this.word(child, ctx);
 				}
-				return { value: node.text, hadExpansion: false };
+				return { value: node.text, hadExpansion: false, dynamic: "variable" };
 		}
 	}
 }
@@ -618,7 +695,7 @@ function doubleQuoted(text: string): string {
  */
 export function parseCommand(command: string): ParseResult {
 	const tree = parseBash(command);
-	if (!tree) return { segments: [], parseFailed: true, unavailable: bashParserUnavailable(), background: false };
+	if (!tree) return { segments: [], parseFailed: true, unavailable: bashParserUnavailable(), background: false, substitutions: [] };
 	try {
 		const walker = new Walker(command);
 		walker.statement(tree.rootNode, { enclosing: [], scopes: [] });
@@ -632,6 +709,7 @@ export function parseCommand(command: string): ParseResult {
 			unknownQuoting: walker.unknownQuoting,
 			complex: walker.complex,
 			background: walker.background,
+			substitutions: walker.substitutions,
 		};
 	} finally {
 		tree.delete();

