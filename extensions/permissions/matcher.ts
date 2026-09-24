@@ -1001,13 +1001,13 @@ export function decide(params: DecideInput): Decision {
 	// Protected-path writes are checked *before* allow rules, so an
 	// `Edit(.claude/**)` entry cannot pre-approve reconfiguring the agent's own
 	// permissions or planting a git hook. In auto mode they go to the classifier.
-	const protectedTarget = () =>
-		[subject, params.resolvedSubject].some(
+	const isProtected = (...candidates: (string | undefined)[]) =>
+		candidates.some(
 			(candidate) =>
 				candidate &&
 				(isProtectedPath(candidate, cwd) || (params.protectedDirs ?? []).some((dir) => isInsideDir(candidate, dir, cwd))),
 		);
-	if (isWritingTool(tool) && subject && protectedTarget()) {
+	if (isWritingTool(tool) && subject && isProtected(subject, params.resolvedSubject)) {
 		if (mode === "dontAsk") return { decision: "deny", cause: "protected-path" };
 		if (mode === "auto") return { decision: "classify", cause: "protected-path" };
 		return { decision: "ask", cause: "protected-path" };
@@ -1054,7 +1054,7 @@ export function decide(params: DecideInput): Decision {
 				const absolute = toAbsoluteBash(cwd, target, home);
 				const resolved = resolveForContainment(absolute) ?? absolute;
 				if (!workingSpaceHolds(target, resolved)) return true;
-				if ([absolute, resolved].some((path) => isProtectedPath(path, cwd) || (params.protectedDirs ?? []).some((dir) => isInsideDir(path, dir, cwd)))) return true;
+				if (isProtected(absolute, resolved)) return true;
 			}
 		}
 		return false;

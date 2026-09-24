@@ -92,14 +92,16 @@ export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: W
  * known). Returns the refusal, if any, and whether the script can change the
  * directory of the shell it runs in (what an `eval` of it would do).
  */
+/** Whether git appears as a word in `text`, read with quotes and backslashes removed (`gi\t`, `g"it"`). */
+const mentionsGit = (text: string): boolean => /\bgit\b/.test(text.replace(/[\\'"]/g, ""));
+
 /**
  * A script the guard cannot follow (it failed to parse, or is nested too deep):
  * refused if git appears anywhere in it, and a `cd` in it leaves the directory
  * unknown.
  */
 function unverifiedScript(command: string, worktreePath: string, mayMove: boolean): { reason?: string; moves?: boolean } {
-	// Quotes and backslashes removed first: `gi\t` and `g"it"` are git too.
-	if (!/\bgit\b/.test(command.replace(/[\\'"]/g, ""))) return { moves: mayMove && /\b(?:cd|pushd|popd)\b/.test(command) };
+	if (!mentionsGit(command)) return { moves: mayMove && /\b(?:cd|pushd|popd)\b/.test(command) };
 	return {
 		reason: isolated(
 			worktreePath,
@@ -150,7 +152,7 @@ function guardScript(
 		const { command: cmd, args } = resolvePayload(leadTokens(seg));
 		if (cmd === "git" || (cmd === "parallel" && args.some((arg) => arg.value === "git"))) return true;
 		if (!INLINE_SCRIPT_SHELLS.has(cmd) && !["eval", "source", "."].includes(cmd)) return false;
-		return args.some((arg) => /\bgit\b/.test(arg.value.replace(/[\\'"]/g, "")));
+		return args.some((arg) => mentionsGit(arg.value));
 	};
 	// A loop body runs more than once, so a `cd` in it moves every git command
 	// in the loop after the first pass; the segments show one pass only.
@@ -219,7 +221,6 @@ function guardScript(
 		// A shell or `eval` in command position is followed below instead.
 		if (cmd !== "git" && cmd !== "eval" && !INLINE_SCRIPT_SHELLS.has(cmd)) {
 			const wide = resolvePayload(tokens, "wide");
-			const mentionsGit = (text: string) => /\bgit\b/.test(text.replace(/[\\'"]/g, ""));
 			const shellScript = INLINE_SCRIPT_SHELLS.has(wide.command) && wide.args.some((arg) => mentionsGit(arg.value));
 			if (wide.command === "git" || shellScript || wide.scripts.some(mentionsGit)) {
 				return isolated(
