@@ -211,9 +211,12 @@ function guardScript(
 		// Git behind a wrapper the strict reading does not peel (`sudo`, `exec`,
 		// `env -C /repo`): the wrapper may have moved it, so its target cannot be
 		// read off the command.
-		if (cmd !== "git") {
+		// A shell or `eval` in command position is followed below instead.
+		if (cmd !== "git" && cmd !== "eval" && !INLINE_SCRIPT_SHELLS.has(cmd)) {
 			const wide = resolvePayload(tokens, "wide");
-			if (wide.command === "git" || wide.scripts.some((script) => /\bgit\b/.test(script.replace(/[\\'"]/g, "")))) {
+			const mentionsGit = (text: string) => /\bgit\b/.test(text.replace(/[\\'"]/g, ""));
+			const shellScript = INLINE_SCRIPT_SHELLS.has(wide.command) && wide.args.some((arg) => mentionsGit(arg.value));
+			if (wide.command === "git" || shellScript || wide.scripts.some(mentionsGit)) {
 				return isolated(
 					worktreePath,
 					`this command runs git through ${rawLead}, which can change the repository it targets`,
