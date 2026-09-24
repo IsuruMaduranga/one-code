@@ -162,16 +162,77 @@ export function resolveStartupMode(
 	return { bypassRefused };
 }
 
+export type RuleBehavior = "allow" | "ask" | "deny";
+
+/** Where a permission rule was read from, for the `/permissions` panel. */
+export type RuleSource = "claude-user" | "onecode-user" | "project" | "project-local" | "onecode-project" | "managed";
+
+export interface SourcedRule {
+	behavior: RuleBehavior;
+	raw: string;
+	source: RuleSource;
+	/** The settings file the rule is in. */
+	path: string;
+}
+
 /**
- * Append an allow rule to a One Code settings file, creating it if needed.
+ * Every permission rule with the file it came from, in load order (the order
+ * `loadPermissionSettings` merges them). The panel lists them and can delete a
+ * rule from One Code's own files only: One Code never edits Claude Code's
+ * files, the repository's or managed policy.
+ */
+export function listPermissionRules(cwd: string, home: string): SourcedRule[] {
+	const paths = settingsPaths(cwd, home);
+	const sources: Array<[RuleSource, string]> = [
+		["claude-user", paths.user],
+		["onecode-user", oneCodeSettingsPath(home)],
+		["project", paths.project],
+		["project-local", paths.local],
+		["onecode-project", oneCodeProjectSettingsPath(cwd, home)],
+		...managedSettingsPaths().map((path): [RuleSource, string] => ["managed", path]),
+	];
+	const rules: SourcedRule[] = [];
+	for (const [source, path] of sources) {
+		const perms = readSettingsFile(path)?.permissions;
+		if (!perms) continue;
+		for (const behavior of ["allow", "ask", "deny"] as const) {
+			const list = perms[behavior];
+			if (!Array.isArray(list)) continue;
+			for (const raw of list) if (typeof raw === "string") rules.push({ behavior, raw, source, path });
+		}
+	}
+	return rules;
+}
+
+/**
+ * Append a rule to a One Code settings file, creating it if needed.
  * Strict read + atomic write, like the other `~/.onecode` writers: a malformed
  * file is not silently clobbered (it may also hold classifierModel/subagentModel),
  * and a half-written file is never visible to a concurrent reader.
  */
-export function persistAllowRule(rule: string, filePath: string): void {
+export function persistPermissionRule(behavior: RuleBehavior, rule: string, filePath: string): void {
 	const file = readSettingsForWrite(filePath) as ClaudeSettingsFile;
 	const permissions = (file.permissions ??= {});
-	const allow = (permissions.allow ??= []);
-	if (!allow.includes(rule)) allow.push(rule);
+	const list = (permissions[behavior] ??= []);
+	if (!list.includes(rule)) list.push(rule);
 	writeSettings(filePath, file as Record<string, unknown>);
+}
+
+/** `persistPermissionRule` for an allow rule (`/allow`). */
+export function persistAllowRule(rule: string, filePath: string): void {
+	persistPermissionRule("allow", rule, filePath);
+}
+
+/**
+ * Remove every copy of a rule from a One Code settings file. Returns false,
+ * writing nothing, when the file does not hold it. An emptied list is kept as
+ * `[]`, and the file's other keys are preserved.
+ */
+export function removePermissionRule(behavior: RuleBehavior, rule: string, filePath: string): boolean {
+	const file = readSettingsForWrite(filePath) as ClaudeSettingsFile;
+	const list = file.permissions?.[behavior];
+	if (!Array.isArray(list) || !list.includes(rule)) return false;
+	file.permissions![behavior] = list.filter((entry) => entry !== rule);
+	writeSettings(filePath, file as Record<string, unknown>);
+	return true;
 }

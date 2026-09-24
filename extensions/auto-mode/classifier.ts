@@ -192,7 +192,7 @@ function notifyOnce(deps: ClassifierDeps, key: string, message: string, level: "
 export async function classify(request: ClassifyRequest, deps: ClassifierDeps): Promise<ClassifyVerdict> {
 	const { candidates, notices } = remainingCandidates(deps);
 	if (candidates.length === 0) {
-		return { decision: "block", reason: "No model is available to run the auto-mode classifier.", tier: "unmatched" };
+		return { decision: "block", reason: "No model is available to run the auto-mode classifier.", tier: "unmatched", noVerdict: true };
 	}
 
 	// Selection notices (a configured model unavailable or overridden as stale, a
@@ -208,6 +208,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 			decision: "block",
 			reason: `This call is ${actionChars} characters, more than the ${MAX_ACTION_CHARS} the auto-mode classifier reviews in full. Split it into smaller calls.`,
 			tier: "unmatched",
+			noVerdict: true,
 		};
 	}
 
@@ -397,7 +398,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 			lastError = error instanceof Error ? error.message : String(error);
 
 			if (kind === "cancelled") {
-				return { decision: "block", reason: "Auto-mode classification was cancelled.", tier: "unmatched" };
+				return { decision: "block", reason: "Auto-mode classification was cancelled.", tier: "unmatched", noVerdict: true };
 			}
 			if (kind === "truncated") {
 				if (debug) process.stderr.write(`[auto-mode] ${key} ${request.toolName} → verdict truncated at maxTokens\n`);
@@ -406,6 +407,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 					reason:
 						"The approval classifier's reply was cut off by its output limit before the verdict completed. If this keeps happening, pin a stronger classifier model with /auto-mode model.",
 					tier: "unmatched",
+					noVerdict: true,
 				};
 			}
 			if (kind === "error") {
@@ -426,7 +428,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 				}
 				// A substantive, non-transient failure that is not "model unusable here":
 				// surface it rather than papering over something about to clear.
-				return { decision: "block", reason: `Auto-mode classifier could not be reached (${lastError}).`, tier: "unmatched" };
+				return { decision: "block", reason: `Auto-mode classifier could not be reached (${lastError}).`, tier: "unmatched", noVerdict: true };
 			}
 			if (kind === "timeout") {
 				// Transient — do NOT reject the model, it may be fine next call. Step to
@@ -463,6 +465,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 		return {
 			decision: "block",
 			tier: "timeout",
+			noVerdict: true,
 			reason:
 				`Auto mode could not screen this ${request.toolName} call in time — the approval classifier${model ? ` (${model})` : ""} ` +
 				"is temporarily unavailable (timed out), so the call was not judged either way.",
@@ -474,5 +477,6 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 		decision: "block",
 		reason: `No usable auto-mode classifier model (last error: ${lastError}). Set autoMode.classifierModel in ~/.onecode/settings.json.`,
 		tier: "unmatched",
+		noVerdict: true,
 	};
 }

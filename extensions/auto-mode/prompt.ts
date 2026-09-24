@@ -61,6 +61,12 @@ export interface ClassifyVerdict {
 	ruleId?: string;
 	/** The model's own wording, kept for diagnosis and shown attributed to it. */
 	raw?: string;
+	/**
+	 * Set when no classifier verdict was reached (no model, a failure, a
+	 * timeout, an action too large to send): the block judged nothing, so it is
+	 * not offered for approval in `/permissions` (Claude Code's `noVerdict`).
+	 */
+	noVerdict?: true;
 }
 
 /**
@@ -220,6 +226,7 @@ export function parseStage2(text: string, index: RuleIndex, userMessages: string
 			reason: "The approval classifier's reply carried no severity, so the verdict could not be read.",
 			tier: "unmatched",
 			raw,
+			noVerdict: true,
 		};
 	}
 

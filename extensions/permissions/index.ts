@@ -47,6 +47,7 @@ import { loadProjectInstructions } from "../auto-mode/instructions.ts";
 import { classifierCandidates, describeCandidate, findConfigured } from "../auto-mode/model-select.ts";
 import { modelIdentity } from "../lib/model-policy.ts";
 import { conflictingPathArguments, isWithin, resolveForContainment, toAbsolute } from "../auto-mode/paths.ts";
+import { DenialStore, denialInputKey, permissionGrantedMessage } from "../auto-mode/denials.ts";
 import { PauseTracker } from "../auto-mode/pause.ts";
 import { checkRecoverability } from "../auto-mode/recoverability.ts";
 import { safetyControlWrite } from "../auto-mode/safety-floor.ts";
@@ -78,14 +79,27 @@ import { trackOriginalCommands } from "../lib/original-command.ts";
 import { MODE_CHANNEL, PLAN_FILE_CHANNEL } from "../lib/plan-mode-channels.ts";
 import { isWritingTool } from "./protected-paths.ts";
 import { denyRuleLines } from "./rule-prose.ts";
-import { loadPermissionSettings, normalizePermissionMode, persistAllowRule, resolveStartupMode } from "./settings.ts";
+import {
+	listPermissionRules,
+	loadPermissionSettings,
+	normalizePermissionMode,
+	persistAllowRule,
+	persistPermissionRule,
+	removePermissionRule,
+	resolveStartupMode,
+	type RuleSource,
+	type SourcedRule,
+} from "./settings.ts";
 import { MODE_ENV, resolvedOrSelf, runtimeProtectedDirs } from "../lib/permission-gate.ts";
 import { CLASSIFIER_SETTING_CHANGED_CHANNEL } from "../lib/settings-channels.ts";
 import { describeProjectAllow, persistProjectAllowApproval, projectAllowApproved } from "./project-trust.ts";
 import { findProjectRoot } from "../lib/git.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
-import { registerLocalCommand } from "../lib/local-command.ts";
+import { announceLocalCommand, registerLocalCommand } from "../lib/local-command.ts";
+import { tildify } from "../lib/paths.ts";
+import { openPermissionsPanel } from "./panel/host.ts";
+import { type Destination, RULE_TABS, type RuleRow, type RuleTab } from "./panel/state.ts";
 
 const DENIED_BY_USER =
 	"The user doesn't want to proceed with this tool use. The tool use was rejected. Adjust your approach based on the user's feedback instead of retrying the same call.";
@@ -126,6 +140,11 @@ const DENIED_BY_RULE = (rule: string) =>
 	`This tool call is denied by the permission rule "${rule}" in the user's settings. The rule is the user's standing decision about this class of action: do not retry it, and do not achieve the same effect another way (a different command, a script, or another tool). Continue with work that does not depend on it, and tell the user what was denied and by which rule.`;
 
 /** Truncate a subject for a permission prompt — shared by the main gate and the subagent bridge. */
+/** Claude Code's denial notification: the tool, the reason cut to 80 columns, and where to act on it. */
+/** The hidden message a /permissions retry starts its turn with. */
+const PERMISSION_RETRY_TYPE = "one-code:permission-retry";
+const deniedNotice = (toolName: string, reason: string): string =>
+	`${toolName} denied by auto mode · ${reason.length > 80 ? `${reason.slice(0, 79)}…` : reason} · /permissions`;
 const previewSubject = (subject: string) => (subject.length > 200 ? `${subject.slice(0, 200)}…` : subject);
 
 /**
@@ -353,6 +372,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		return projectInstructionsByCwd.get(cwd);
 	};
 	const pauseTracker = new PauseTracker();
+	/** Classifier denials this session, and the one-shot grants `/permissions` mints from them. */
+	const denials = new DenialStore();
 	/**
 	 * Which model the classifier settled on. Held here so the choice is pinned for
 	 * the session rather than re-resolved per call, and so a model that turns out
@@ -658,7 +679,12 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		}
 	};
 
-	const reloadSettings = (ctx: ExtensionContext) => {
+	/**
+	 * Re-read the permission rules only: what a rule edit in /permissions needs.
+	 * The mode, a declined project-rule prompt and auto mode's cached config are
+	 * left alone (reloadSettings resets those for a new session).
+	 */
+	const reloadRules = (ctx: ExtensionContext) => {
 		const settings = loadPermissionSettings(ctx.cwd, os.homedir());
 		const parsed = {
 			deny: parseRulesReport(settings.deny),
@@ -674,7 +700,6 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// A linked worktree shares its main checkout's consent (findProjectRoot).
 		projectRoot = findProjectRoot(ctx.cwd) ?? ctx.cwd;
 		projectAllowTrusted = projectAllowApproved(projectRoot, projectAllowRaw);
-		projectAllowDeclined = false;
 		// A rule that fails to parse is a rule the user believes is in force and is
 		// not. Say so (once per distinct set) and list them in /permissions.
 		unparsableRules = [...parsed.deny.dropped, ...parsed.ask.dropped, ...parsed.allow.dropped, ...parsed.projectAllow.dropped];
@@ -686,6 +711,12 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				"warning",
 			);
 		}
+		return settings;
+	};
+
+	const reloadSettings = (ctx: ExtensionContext) => {
+		const settings = reloadRules(ctx);
+		projectAllowDeclined = false;
 		// Dropped so edited autoMode rules and instruction files are picked up on
 		// reload rather than staying cached for the life of the process.
 		autoConfig = undefined;
@@ -739,6 +770,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			transcript.length = 0;
 			userMessages.length = 0;
 			pauseTracker.reset();
+			denials.reset();
 		}
 		memoryDirPath = projectMemoryDir(ctx.cwd);
 		scratchpadDirPath = sessionScratchpadDir(ctx.cwd, ctx.sessionManager.getSessionId());
@@ -967,6 +999,20 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			}
 			logDecision(ctx, { tool: event.toolName, subject, outcome: "prompt", source: "floor", reason: floorReason });
 		} else if (result.decision === "classify") {
+			// The exact call the user approved in /permissions after the classifier
+			// denied it runs once without the classifier (auto-mode/denials.ts). Deny
+			// rules and the safety floor were checked above, so no grant reaches them.
+			const inputKey = denialInputKey(
+				normalizedTool,
+				original !== undefined ? { command: original.command } : (event.input as Record<string, unknown>),
+				callCwd,
+				isShellTool(normalizedTool),
+			);
+			if (denials.takeGrant(inputKey)) {
+				logDecision(ctx, { tool: event.toolName, subject: matchSubject, outcome: "allow", source: "user", reason: "approved in /permissions" });
+				pauseTracker.recordAllow();
+				return undefined;
+			}
 			// Auto mode is for unattended runs: a block is returned to the MODEL so it
 			// can try a safe alternative — it is never raised as a per-action user
 			// prompt. The one exception is the loop-breaker: after repeated blocks the
@@ -987,6 +1033,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				);
 				if (outcome.decision === "allow") {
 					pauseTracker.recordAllow();
+					denials.settle(inputKey);
 					return undefined;
 				}
 
@@ -1006,6 +1053,18 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 					ruleId: outcome.ruleId,
 					raw: outcome.raw,
 				});
+				// A verdict, not a failure to reach one, can be approved in /permissions.
+				if (!outcome.noVerdict) {
+					denials.record({
+						toolName: normalizedTool,
+						display: `${event.toolName}(${previewSubject(matchSubject)})`,
+						inputKey,
+						reason: outcome.reason,
+						...(outcome.ruleId ? { rule: outcome.ruleId } : {}),
+						timestamp: Date.now(),
+					});
+					if (ctx.hasUI) ctx.ui.notify(deniedNotice(event.toolName, outcome.reason), "warning");
+				}
 				if (tripped) {
 					const { lifetime } = pauseTracker.stats();
 					ctx.ui.notify(
@@ -1234,42 +1293,149 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		};
 	};
 
-	registerLocalCommand(pi, "permissions", {
-		description: "Show permission mode and loaded rules",
-		handler: async (args, ctx) => {
-			const fmt = (rules: PermissionRule[]) => (rules.length ? rules.map((r) => r.raw).join(", ") : "(none)");
-			const denials = pauseTracker.recentDenials();
-			const autoLines =
-				mode === "auto" || denials.length > 0
-					? [
-							`auto mode: ${pauseTracker.isPaused() ? "paused (approve a prompt to resume)" : "active"}, ${
-								pauseTracker.stats().lifetime
-							} blocked this session`,
-							...(denials.length > 0
-								? [
-										"recently denied:",
-										...denials.map((d) => `  ${d.toolName}(${d.subject.slice(0, 60)}) — ${d.reason}`),
-									]
-								: []),
-						]
-					: [];
-			ctx.ui.notify(
-				[
-					`mode: ${mode}`,
-					`deny: ${fmt(deny)}`,
-					`ask: ${fmt(ask)}`,
-					`allow: ${fmt(allow)}`,
-					...(projectAllow.length > 0
-						? [
-								`project allow (${projectAllowTrusted ? "trusted" : projectAllowDeclined ? "declined this session" : "awaiting consent"}): ${fmt(projectAllow)}`,
-							]
-						: []),
-					`session allows: ${fmt(sessionAllows)}`,
-					...(unparsableRules.length > 0 ? [`unparsable rules (ignored): ${unparsableRules.join(", ")}`] : []),
-					...autoLines,
-				].join("\n"),
-				"info",
-			);
+	/** Where a rule came from, and why the panel cannot edit it when it cannot. */
+	const describeSource = (rule: SourcedRule, home: string): { label: string; editable: boolean; note?: string } => {
+		const where = tildify(rule.path, home);
+		const readOnly = (label: string, note: string) => ({ label: `From ${label}`, editable: false, note });
+		switch (rule.source) {
+			case "onecode-user":
+				return { label: `From One Code user settings (${where})`, editable: true };
+			case "onecode-project":
+				return { label: `From One Code project settings (${where})`, editable: true };
+			case "claude-user":
+				return readOnly(`Claude Code user settings (${where})`, `One Code does not edit Claude Code's files. Change this rule in ${where}.`);
+			case "project":
+			case "project-local": {
+				const file = rule.source === "project" ? ".claude/settings.json" : ".claude/settings.local.json";
+				const consent =
+					rule.behavior !== "allow" ? "" : projectAllowTrusted ? " You trusted this repository's allow rules." : projectAllowDeclined ? " Its allow rules are off this session." : " Its allow rules apply only after you trust them.";
+				return readOnly(`the repository's ${file}`, `This rule ships with the repository. Change it in ${file}.${consent}`);
+			}
+			case "managed":
+				return readOnly("managed settings", "This rule is configured by managed settings and cannot be modified. Contact your system administrator for more information.");
+		}
+	};
+
+	const ruleRows = (cwd: string, home: string): Record<RuleTab, RuleRow[]> => {
+		const rows: Record<RuleTab, RuleRow[]> = { allow: [], ask: [], deny: [] };
+		for (const rule of listPermissionRules(cwd, home)) {
+			const source = describeSource(rule, home);
+			rows[rule.behavior].push({
+				key: `${rule.source}\0${rule.path}\0${rule.raw}`,
+				behavior: rule.behavior,
+				raw: rule.raw,
+				sourceLabel: source.label,
+				editable: source.editable,
+				...(source.note ? { readOnlyNote: source.note } : {}),
+			});
+		}
+		// "Don't ask again" grants live in memory for this session; deleting one ends it.
+		for (const grant of sessionAllows) {
+			rows.allow.push({ key: `session\0\0${grant.raw}`, behavior: "allow", raw: grant.raw, sourceLabel: "From this session (don't ask again)", editable: true });
+		}
+		for (const tab of RULE_TABS) rows[tab].sort((a, b) => a.raw.toLowerCase().localeCompare(b.raw.toLowerCase()));
+		return rows;
+	};
+
+	const ruleDestinations = (cwd: string, home: string): Destination[] => [
+		{ id: "onecode-project", label: "One Code project settings", description: `Saved in ${tildify(oneCodeProjectSettingsPath(cwd, home), home)}, for this project only` },
+		{ id: "onecode-user", label: "One Code user settings", description: `Saved in ${tildify(oneCodeSettingsPath(home), home)}, for every project` },
+	];
+
+	/** The status line under the panel's tabs. */
+	const panelStatus = (): string => {
+		const parts = [`Mode: ${mode}`];
+		if (mode === "auto" || pauseTracker.stats().lifetime > 0) {
+			parts.push(`${pauseTracker.stats().lifetime} blocked by auto mode this session`);
+			if (pauseTracker.isPaused()) parts.push("auto mode paused (approve a prompt to resume)");
+		}
+		if (unparsableRules.length > 0) parts.push(`${unparsableRules.length} rule(s) could not be parsed and are ignored`);
+		return parts.join(" · ");
+	};
+
+	/** The text summary /permissions prints where no panel can open. */
+	const permissionsSummary = (): string => {
+		const fmt = (rules: PermissionRule[]) => (rules.length ? rules.map((r) => r.raw).join(", ") : "(none)");
+		return [
+			`mode: ${mode}`,
+			`deny: ${fmt(deny)}`,
+			`ask: ${fmt(ask)}`,
+			`allow: ${fmt(allow)}`,
+			...(projectAllow.length > 0
+				? [`project allow (${projectAllowTrusted ? "trusted" : projectAllowDeclined ? "declined this session" : "awaiting consent"}): ${fmt(projectAllow)}`]
+				: []),
+			`session allows: ${fmt(sessionAllows)}`,
+			...(unparsableRules.length > 0 ? [`unparsable rules (ignored): ${unparsableRules.join(", ")}`] : []),
+			...(denials.list().length > 0 ? ["recently denied:", ...denials.list().map((d) => `  ${d.display} — ${d.reason}`)] : []),
+		].join("\n");
+	};
+
+	/**
+	 * /permissions — Claude Code's panel (findings §33): approve or retry calls
+	 * the classifier denied, and list, add or delete rules. Registered plainly,
+	 * not through registerLocalCommand: the breadcrumb carries what the panel
+	 * did, so it is announced after the panel closes, not before it opens.
+	 */
+	pi.registerCommand("permissions", {
+		description: "Review recently denied calls and manage allow, ask and deny rules",
+		handler: async (args: string, ctx: ExtensionContext) => {
+			const home = os.homedir();
+			if (!ctx.hasUI) {
+				announceLocalCommand(pi, { name: "permissions", args });
+				ctx.ui.notify(permissionsSummary(), "info");
+				return;
+			}
+			const result = await openPermissionsPanel(ctx, {
+				view: () => ({
+					denials: denials.list().map((d) => ({ id: d.id, display: d.display, ...(d.rule ? { rule: d.rule } : {}) })),
+					rules: ruleRows(ctx.cwd, home),
+					destinations: ruleDestinations(ctx.cwd, home),
+					ruleError: (raw) =>
+						parseRule(raw) ? undefined : `Could not parse "${raw}". A rule is a tool name, optionally followed by a pattern in parentheses: Bash(npm test:*).`,
+				}),
+				status: panelStatus,
+				addRule: (behavior, rule, destination) => {
+					const target = destination === "onecode-user" ? oneCodeSettingsPath(home) : oneCodeProjectSettingsPath(ctx.cwd, home);
+					persistPermissionRule(behavior, rule, target);
+					reloadRules(ctx);
+					return `Added ${behavior} rule ${rule} to ${tildify(target, home)}`;
+				},
+				deleteRule: (behavior, key) => {
+					const [source, path, raw] = key.split("\0");
+					if (source === "session") {
+						const index = sessionAllows.findIndex((grant) => grant.raw === raw);
+						if (index >= 0) sessionAllows.splice(index, 1);
+					} else if (source === ("onecode-user" satisfies RuleSource) || source === ("onecode-project" satisfies RuleSource)) {
+						if (!removePermissionRule(behavior, raw, path)) throw new Error(`${raw} is no longer in ${tildify(path, home)}.`);
+						reloadRules(ctx);
+					} else {
+						throw new Error(`One Code can only delete rules from its own settings files; ${raw} is in ${tildify(path, home)}.`);
+					}
+					return `Deleted ${behavior} rule ${raw}`;
+				},
+			});
+
+			// Approving is what mints the grants, so it happens once, on close,
+			// as in Claude Code: a row toggled on and off again grants nothing.
+			const approved = denials.approve(result.approved);
+			const retried = approved.filter((d) => result.retry.has(d.id));
+			const displays = approved.map((d) => d.display);
+			if (retried.length > 0) {
+				// Claude Code's retry: the command's own output is empty, a banner
+				// says what was allowed, and a turn starts with the grant message.
+				announceLocalCommand(pi, { name: "permissions", args, stdout: result.changes.join("\n") });
+				ctx.ui.notify(`Allowed ${retried.map((d) => d.display).join(", ")}`, "info");
+				pi.sendMessage(
+					{ customType: PERMISSION_RETRY_TYPE, content: permissionGrantedMessage(displays), display: false },
+					ctx.isIdle() ? { triggerTurn: true } : { deliverAs: "followUp", triggerTurn: true },
+				);
+				return;
+			}
+			if (approved.length === 0 && result.changes.length === 0) return;
+			const stdout = [...(approved.length > 0 ? [`Approved ${displays.join(", ")}`] : []), ...result.changes].join("\n");
+			announceLocalCommand(pi, { name: "permissions", args, stdout });
+			// The grant message rides with the breadcrumb on the next prompt; no turn starts.
+			if (approved.length > 0) pi.events.emit(REMINDER_CHANNEL, { text: `${permissionGrantedMessage(displays)}\n`, placement: "user-prepend", raw: true });
 		},
 	});
 
