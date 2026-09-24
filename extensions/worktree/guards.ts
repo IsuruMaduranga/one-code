@@ -95,6 +95,23 @@ export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: W
  * known). Returns the refusal, if any, and whether the script can change the
  * directory of the shell it runs in (what an `eval` of it would do).
  */
+/**
+ * A script the guard cannot follow (it failed to parse, or is nested too deep):
+ * refused if git appears anywhere in it, and a `cd` in it leaves the directory
+ * unknown.
+ */
+function unverifiedScript(command: string, worktreePath: string, mayMove: boolean): { reason?: string; moves?: boolean } {
+	// Quotes and backslashes removed first: `gi\t` and `g"it"` are git too.
+	if (!/\bgit\b/.test(command.replace(/[\\'"]/g, ""))) return { moves: mayMove && /\b(?:cd|pushd|popd)\b/.test(command) };
+	return {
+		reason: isolated(
+			worktreePath,
+			"this command is too complex to verify that its git operations stay inside the worktree",
+			`Break it into plain, separate git commands with literal paths and run them from ${worktreePath}.`,
+		),
+	};
+}
+
 function guardScript(
 	command: string,
 	worktreePath: string,
@@ -103,17 +120,7 @@ function guardScript(
 	depth: number,
 ): { reason?: string; moves?: boolean } {
 	const { segments, parseFailed } = parseCommand(command);
-	if (parseFailed || segments.length === 0) {
-		// Quotes and backslashes removed first: `gi\t` and `g"it"` are git too.
-		if (!/\bgit\b/.test(command.replace(/[\\'"]/g, ""))) return { moves: parseFailed && /\b(?:cd|pushd|popd)\b/.test(command) };
-		return {
-			reason: isolated(
-				worktreePath,
-				"this command is too complex to verify that its git operations stay inside the worktree",
-				`Break it into plain, separate git commands with literal paths and run them from ${worktreePath}.`,
-			),
-		};
-	}
+	if (parseFailed || segments.length === 0) return unverifiedScript(command, worktreePath, parseFailed);
 
 	// Claude Code's exact refusal for stdin-fed git (one static string for
 	// both mechanisms) — keep it byte-identical to the capture.
@@ -204,10 +211,11 @@ function guardScript(
 		// starting where this command runs: `bash -c 'cd /repo && git status'`
 		// runs git in /repo. A shell's script runs in a child, but `eval` runs
 		// in this shell, so a `cd` in it moves the commands after it.
-		if (depth < 3 && (SHELLS.has(cmd) || cmd === "eval")) {
+		// Past three levels a script is judged as one the guard cannot follow.
+		if (SHELLS.has(cmd) || cmd === "eval") {
 			const scripts = cmd === "eval" ? [args.map((arg) => arg.value).join(" ")] : args.map((arg) => arg.value);
 			for (const script of scripts) {
-				const nested = guardScript(script, worktreePath, sharedRoot, dir, depth + 1);
+				const nested = depth < 3 ? guardScript(script, worktreePath, sharedRoot, dir, depth + 1) : unverifiedScript(script, worktreePath, true);
 				if (nested.reason) return nested.reason;
 				if (cmd === "eval" && nested.moves) dir = undefined;
 			}

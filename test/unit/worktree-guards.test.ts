@@ -96,6 +96,11 @@ describe("worktree git-isolation guard", () => {
 		expect(guard("bash -c 'cd /repo'; git status")).toBeUndefined();
 		expect(guard("eval 'cd /repo'; git status")).toContain("unverifiable");
 		expect(guard("eval cd /repo '&&' git status")).toContain(`targets ${resolve("/repo")}`);
+
+		// Past three levels of nesting, git anywhere in the script is refused.
+		expect(guard("eval eval eval git -C /repo status")).toContain(`targets ${resolve("/repo")}`);
+		expect(guard("eval eval eval eval git -C /repo status")).toContain("too complex to verify");
+		expect(guard("eval eval eval eval echo hi")).toBeUndefined();
 	});
 
 	it("treats a globbed cd target as an unknown directory (PR #12 review)", () => {
