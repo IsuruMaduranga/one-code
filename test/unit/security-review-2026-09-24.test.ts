@@ -260,5 +260,8 @@ describe("M4: PowerShell resolves relative paths before vouching for them", () =
 		expect(powershellReadOnly(`Get-Content ${"*a".repeat(30)}z`, { cwd, home }).readOnly).toBe(true);
 		expect(performance.now() - started).toBeLessThan(500);
 		expect(powershellReadOnly("Get-Content A.T?T", { cwd, home }).readOnly).toBe(true);
+		// `?` is judged as matching none too, so a credential it could reach is found.
+		writeFileSync(join(cwd, "auth.json"), "{}");
+		expect(powershellReadOnly("Get-Content ?auth.json", { cwd, home }).readOnly).toBe(false);
 	});
 });

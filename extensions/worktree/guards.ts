@@ -99,12 +99,13 @@ const SCRIPT_RUNNERS: ReadonlySet<string> = new Set(["eval", "source", "."]);
 const SHELL_VALUE_OPTIONS = new Set(["-o", "+o", "-O", "+O", "--rcfile", "--init-file"]);
 
 /**
- * The arguments of a shell invocation that are scripts: with `-c` (alone or
- * in a cluster such as `-lc`), only the first operand; the words after it are
- * `$0`, `$1`, … (`bash -c 'echo ok' 'git status'` runs no git). Without `-c`,
- * every argument, since which one is a script file is not known.
+ * The command lines a shell invocation runs: with `-c` (alone or in a cluster
+ * such as `-lc`), the first operand; the words after it are `$0`, `$1`, …
+ * (`bash -c 'echo ok' 'git status'` runs no git), unless the script expands
+ * them (`bash -c '"$@"' _ git status`), when they are a command line too.
+ * Without `-c`, every argument, since which one is a script file is not known.
  */
-function shellScripts(args: Token[]): Token[] {
+function shellScripts(args: Token[]): string[] {
 	let command = false;
 	let i = 0;
 	for (; i < args.length; i++) {
@@ -117,8 +118,13 @@ function shellScripts(args: Token[]): Token[] {
 		if (SHELL_VALUE_OPTIONS.has(value)) i++;
 		else if (/^-[A-Za-z]+$/.test(value) && value.includes("c")) command = true;
 	}
-	if (!command) return args;
-	return args[i] ? [args[i]] : [];
+	const values = args.map((arg) => arg.value);
+	if (!command) return values;
+	const [script, ...positional] = values.slice(i);
+	if (script === undefined) return [];
+	// `$0`…`$9`, `$@`, `$*`, `${1}`, `${@}`: read both from `$0` and from `$1`.
+	if (!/\$(?:[0-9@*]|\{[0-9@*])/.test(script) || positional.length === 0) return [script];
+	return [script, positional.join(" "), positional.slice(1).join(" ")];
 }
 
 /** Whether git appears as a word in `text`, read with quotes and backslashes removed (`gi\t`, `g"it"`). */
@@ -269,7 +275,7 @@ function guardScript(
 		// in this shell, so a `cd` in it moves the commands after it.
 		// Past three levels a script is judged as one the guard cannot follow.
 		if (INLINE_SCRIPT_SHELLS.has(cmd) || cmd === "eval") {
-			const scripts = cmd === "eval" ? [args.map((arg) => arg.value).join(" ")] : shellScripts(args).map((arg) => arg.value);
+			const scripts = cmd === "eval" ? [args.map((arg) => arg.value).join(" ")] : shellScripts(args);
 			for (const script of scripts) {
 				const nested = depth < 3 ? guardScript(script, worktreePath, sharedRoot, dir, depth + 1) : unverifiedScript(script, worktreePath, true);
 				if (nested.reason) return nested.reason;
@@ -280,9 +286,13 @@ function guardScript(
 
 		// `source <(…)`, `. "$f"`: the script is only known at runtime, so git in
 		// its source text cannot be checked.
+		// It runs in this shell, so a `cd` in it would move later git: the
+		// directory is unknown after it. A literal file (`source .venv/bin/activate`)
+		// keeps it: its text is not the guard's to read.
 		if ((cmd === "source" || cmd === ".") && args.some((arg) => arg.dynamic)) {
 			const unverified = unverifiedScript(seg.raw, worktreePath, false);
 			if (unverified.reason) return unverified.reason;
+			dir = undefined;
 		}
 
 		// Git whose arguments are assembled at runtime — the repository it will

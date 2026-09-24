@@ -124,6 +124,11 @@ describe("worktree git-isolation guard", () => {
 		expect(guard("fish -c 'git -C /repo reset --hard'")).toContain(`targets ${resolve("/repo")}`);
 		// Only the -c script runs; the words after it are $0, $1 (PR #15 review).
 		expect(guard("bash -c 'echo ok' 'git -C /repo status'")).toBeUndefined();
+		// …unless the script runs them (PR #15 review).
+		expect(guard(`bash -c '"$@"' _ git -C /repo status`)).toContain(`targets ${resolve("/repo")}`);
+		expect(guard("bash -c '$0 \"$@\"' git -C /repo status")).toContain(`targets ${resolve("/repo")}`);
+		// A script sourced from a substitution may cd; a literal file keeps the directory.
+		expect(guard("source <(echo cd /repo); git status")).toContain("unverifiable");
 		expect(guard("bash -o pipefail -lc 'git -C /repo status' x")).toContain(`targets ${resolve("/repo")}`);
 		// An eval in a loop may cd on the next pass.
 		expect(guard("for i in 1 2; do git status; eval cd /repo; done")).toContain("inside a loop");

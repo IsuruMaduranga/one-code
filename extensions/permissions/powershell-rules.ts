@@ -516,7 +516,7 @@ type WildcardPart = { star: true } | { star: false; matches: (ch: string) => boo
 
 /**
  * A PowerShell wildcard component (`*`, `?`, `[a-c]`) as a case-insensitive
- * matcher, or undefined. Matched without a regex over the whole name: the
+ * matcher that matches a superset of what PowerShell does, or undefined. Matched without a regex over the whole name: the
  * model writes the pattern, and `*a*a*a…z` would backtrack polynomially
  * against every directory entry on the permission-gate path.
  */
@@ -527,7 +527,11 @@ function wildcardMatcher(pattern: string): ((name: string) => boolean) | undefin
 		const close = ch === "[" ? pattern.indexOf("]", i + 1) : -1;
 		if (ch === "*") {
 			if (!parts.at(-1)?.star) parts.push({ star: true });
-		} else if (ch === "?") parts.push({ star: false, matches: () => true });
+		} else if (ch === "?") {
+			// Read as `*`: a superset of what `?` matches (one character, or none
+			// at the end of a name on some filesystem APIs), so no match escapes.
+			if (!parts.at(-1)?.star) parts.push({ star: true });
+		}
 		else if (close > i + 1) {
 			let set: RegExp;
 			try {
