@@ -279,8 +279,10 @@ export function substitutionBodies(command: string): string[] {
 		}
 		if (inSingle) continue;
 		if (ch === "`") {
-			const end = command.indexOf("`", i + 1);
-			if (end === -1) break;
+			// A backslash escapes a backtick inside the body (`` `echo \`id\`` ``).
+			let end = i + 1;
+			while (end < command.length && command[end] !== "`") end += command[end] === "\\" ? 2 : 1;
+			if (end >= command.length) break;
 			bodies.push(command.slice(i + 1, end));
 			i = end;
 			continue;
@@ -291,6 +293,12 @@ export function substitutionBodies(command: string): string[] {
 			let j = i + 1;
 			for (; j < command.length; j++) {
 				const c = command[j];
+				// An escaped character never opens or closes anything: bash runs
+				// the `rm` in `"$(printf \); rm x)"`. Single quotes take no escapes.
+				if (c === "\\" && quote !== "'") {
+					j++;
+					continue;
+				}
 				if (quote) {
 					if (c === quote) quote = undefined;
 					continue;

@@ -732,6 +732,9 @@ describe("pre-gate review 2026-09-24: attached wrapper values, stdin credentials
 		for (const command of [`echo "don't $(rm -f v)"`, `echo "$'$(rm -f v)'"`, "echo \"it's `rm -f v`\""]) {
 			expect(bashMatchForms(command).some((form) => form.startsWith("rm -f v")), command).toBe(true);
 		}
+		// An escaped `)` or backtick does not end the substitution.
+		expect(bashMatchForms('echo "$(printf \\); rm -f v)"')).toContain("rm -f v");
+		expect(bashMatchForms("echo `echo \\`id\\`; rm -f v`")).toContain("rm -f v");
 		// Inside double quotes `<(` is literal text, and single quotes still hide a substitution.
 		expect(bashMatchForms('echo "<(rm -f v)"').some((form) => form.startsWith("rm "))).toBe(false);
 		expect(bashMatchForms("echo '\"$(rm -f v)\"'").some((form) => form.startsWith("rm "))).toBe(false);
