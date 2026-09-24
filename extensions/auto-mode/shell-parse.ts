@@ -276,6 +276,9 @@ const COMPLEX: Record<string, string> = {
 	brace_expression: "uses brace expansion, whose expanded paths cannot be checked",
 };
 
+/** Constructs bash always runs in a subshell. */
+const ALWAYS_SUBSHELL = new Set(["subshell", "command_substitution", "process_substitution"]);
+
 /** Constructs recorded in `Segment.enclosing`. */
 const ENCLOSING = new Set([
 	...Object.keys(COMPLEX),
@@ -323,7 +326,8 @@ class Walker {
 			enclosing: ENCLOSING.has(node.type) ? [...ctx.enclosing, node.type] : ctx.enclosing,
 			scopes: subshell ? [...ctx.scopes, this.nextScope++] : ctx.scopes,
 			substitution: ctx.substitution,
-			lastInPipeline: ctx.lastInPipeline,
+			// `( … )` and substitutions are always subshells, whatever pipeline they sit in.
+			lastInPipeline: ALWAYS_SUBSHELL.has(node.type) ? false : ctx.lastInPipeline,
 		};
 	}
 
@@ -357,7 +361,8 @@ class Walker {
 						continue;
 					}
 					const member = this.enter(ctx, node, true);
-					if (index === members.length - 1) member.lastInPipeline = true;
+					// Only the last member can run in the current shell (`lastpipe`).
+					member.lastInPipeline = index === members.length - 1;
 					this.statement(child, member);
 				}
 				return;

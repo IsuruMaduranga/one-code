@@ -71,6 +71,12 @@ describe("worktree git-isolation guard", () => {
 	it("refuses git after a cd in the last pipeline member, which lastpipe runs in this shell", () => {
 		expect(guard("shopt -s lastpipe; true | cd /repo; git status")).toContain("last command of a pipeline");
 		expect(guard("true | cd /repo")).toBeUndefined();
+		// Only git after the pipeline, spelled any way, and never a cd inside a subshell (PR #13 review).
+		expect(guard("shopt -s lastpipe; true | cd /repo; gi\\t status")).toContain("last command of a pipeline");
+		expect(guard("git status; true | cd /tmp")).toBeUndefined();
+		expect(guard("true | cd /tmp; echo git")).toBeUndefined();
+		expect(guard('true | echo "$(cd /repo)"; git status')).toBeUndefined();
+		expect(guard("true | (cd /repo); git status")).toBeUndefined();
 	});
 
 	it("treats a globbed cd target as an unknown directory (PR #12 review)", () => {

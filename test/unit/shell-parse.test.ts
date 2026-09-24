@@ -93,6 +93,9 @@ describe("parseCommand on tree-sitter-bash", () => {
 	it("marks the commands of a pipeline's last member", () => {
 		const { segments } = parseCommand("a | b | { c; d; }; e");
 		expect(segments.map((segment) => !!segment.lastInPipeline)).toEqual([false, false, true, true, false]);
+		// A subshell or substitution inside the last member is still a subshell.
+		expect(parseCommand('a | echo "$(cd x)"').segments.map((segment) => !!segment.lastInPipeline)).toEqual([false, true, false]);
+		expect(parseCommand("a | (cd x)").segments.map((segment) => !!segment.lastInPipeline)).toEqual([false, false]);
 	});
 
 	it("detects only the background operator", () => {
