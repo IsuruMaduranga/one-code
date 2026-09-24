@@ -66,16 +66,30 @@ export function persistProjectAllowApproval(projectRoot: string, rules: readonly
 	}
 }
 
-/** The consent dialog's text: what the repository wants pre-approved, and which rule fired now. */
-export function describeProjectAllow(rules: readonly string[], firing: string): { title: string; message: string } {
-	const shown = rules.slice(0, 8);
-	const more = rules.length > shown.length ? `\n… and ${rules.length - shown.length} more` : "";
+/**
+ * The consent dialog's text: what the repository wants pre-approved (allow
+ * rules, and workspace directories whose files it wants readable), and what
+ * the current call would use. `firing` is the rule the call matches, or a
+ * phrase naming the directory it reads.
+ */
+export function describeProjectAllow(rules: readonly string[], firing: string, dirs: readonly string[] = []): { title: string; message: string } {
+	const list = (items: readonly string[]) => {
+		const shown = items.slice(0, 8);
+		return `${shown.join("\n")}${items.length > shown.length ? `\n… and ${items.length - shown.length} more` : ""}`;
+	};
+	const parts = [
+		...(rules.length > 0 ? [`pre-approve ${rules.length} permission rule(s):\n${list(rules)}`] : []),
+		...(dirs.length > 0 ? [`add ${dirs.length} workspace director${dirs.length === 1 ? "y" : "ies"}, whose files would be read without a prompt:\n${list(dirs)}`] : []),
+	];
 	return {
-		title: "Trust this repository's allow rules?",
+		title: dirs.length > 0 ? "Trust this repository's permission settings?" : "Trust this repository's allow rules?",
 		message:
-			`This repository's .claude settings pre-approve ${rules.length} permission rule(s):\n${shown.join("\n")}${more}\n\n` +
-			`The current call matches "${firing}" and would run without a prompt` +
+			`This repository's .claude settings ${parts.join("\n\nand ")}\n\n` +
+			`The current call ${firing.startsWith("the workspace directory") ? `reads inside ${firing}` : `matches "${firing}"`} and would run without a prompt` +
 			" (in auto mode, without the classifier). Whoever committed the file granted this, not you." +
-			" Approval is remembered until the rules change; declining keeps them off for this session.",
+			" Approval is remembered until these settings change; declining keeps them off for this session.",
 	};
 }
+
+/** How a repository's workspace directory enters the consent list: distinct from any rule, and hashed with them. */
+export const projectDirectoryConsentEntry = (raw: string): string => `additionalDirectories: ${raw}`;

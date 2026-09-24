@@ -10,7 +10,8 @@
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
 import { analyzeShellCommand, leadTokens, parseCommand, resolvePayload } from "../auto-mode/shell-analysis.ts";
-import { pathArgument, resolveForContainment } from "../auto-mode/paths.ts";
+import { pathArgument, resolveForContainment, toAbsolute } from "../auto-mode/paths.ts";
+import { isSensitivePath } from "../auto-mode/sensitive.ts";
 import { isProtectedPath, isWritingTool } from "./protected-paths.ts";
 import {
 	canonicalCommandName,
@@ -788,6 +789,14 @@ export interface DecideInput {
 	 * (PERMISSIONS-REVIEW-2026-09-05 M7).
 	 */
 	protectedDirs?: string[];
+	/**
+	 * The workspace directories in force (permissions/workspace.ts), absolute and
+	 * resolved. A read inside one is a working-space read, and acceptEdits may
+	 * write inside one, as in Claude Code; a credential path inside one is not
+	 * working space. Auto mode's unclassified writes stay confined to the working
+	 * directory (the classifier's containment fast path never sees these).
+	 */
+	workspaceDirs?: string[];
 }
 
 export interface Decision {
@@ -885,9 +894,15 @@ export function isBroadExecutionRule(rule: PermissionRule): boolean {
 
 export function decide(params: DecideInput): Decision {
 	const { toolName, subject, cwd, mode, deny, ask, allow } = params;
-	/** The harness's readable session dirs, realpath'd, as the auto-mode pre-gate sees them (permissions/index.ts `readableRoots`). */
-	const sessionReadableRoots = () =>
-		[params.memoryDirPath, params.scratchpadDirPath, params.resultsDirPath, params.sessionDirPath].filter((d): d is string => !!d).map((d) => resolveForContainment(d) ?? d);
+	/**
+	 * The harness's readable session dirs and the workspace directories,
+	 * realpath'd, as the auto-mode pre-gate sees them (permissions/index.ts
+	 * `readableRoots`).
+	 */
+	const sessionReadableRoots = () => [
+		...[params.memoryDirPath, params.scratchpadDirPath, params.resultsDirPath, params.sessionDirPath].filter((d): d is string => !!d).map((d) => resolveForContainment(d) ?? d),
+		...(params.workspaceDirs ?? []),
+	];
 	/** The pre-gate's proof that a command only reads inside the project, for a substitution in an allowed command. */
 	const readOnlyShell = (command: string): boolean => {
 		const evidence = analyzeShellCommand({ command, cwd, home: homedir(), protectedDirs: params.protectedDirs, readableRoots: sessionReadableRoots() });
@@ -1028,6 +1043,12 @@ export function decide(params: DecideInput): Decision {
 		const target = params.resolvedSubject ?? subject;
 		const roots = [cwd, params.resolvedCwd, params.memoryDirPath, params.scratchpadDirPath, params.resultsDirPath, params.sessionDirPath];
 		if (roots.some((dir) => dir && isAtOrInsideDir(target, dir, cwd))) return true;
+		// A workspace directory is working space except for the credentials in it:
+		// adding a directory must not make its keys readable without a prompt.
+		// Judged on the spelling and on where it resolves, so a symlink cannot
+		// launder a credential in either direction.
+		const sensitive = [subject, target].some((candidate) => isSensitivePath(toAbsolute(cwd, candidate, homedir())));
+		if (!sensitive && (params.workspaceDirs ?? []).some((dir) => isAtOrInsideDir(target, dir, cwd))) return true;
 		return params.planFilePath ? isPlanFilePath(target, params.planFilePath, cwd) : false;
 	};
 	const outsideWorkingDir = (): Decision => {

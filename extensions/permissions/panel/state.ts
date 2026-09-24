@@ -13,6 +13,8 @@
  *   rule…`, or a rule's detail). Typing any printable key except `j k m i r`
  *   and space starts a search with that key, `/` starts an empty one; `j`/`k`
  *   move the cursor. Backspace edits the search, Esc clears it.
+ * - Workspace: Enter on a directory offers to remove it, on `Add directory…`
+ *   asks for a path, then whether to keep it for this session or remember it.
  * - ←/→ and Tab switch tabs everywhere outside a dialog; Esc closes the panel.
  *
  * The Auto mode tab differs from Claude Code's in one way: the built-in rules
@@ -22,8 +24,8 @@
 
 import type { PanelKey } from "./keys.ts";
 
-export type Tab = "recent" | "allow" | "ask" | "deny" | "automode";
-export const TABS: Tab[] = ["recent", "allow", "ask", "deny", "automode"];
+export type Tab = "recent" | "allow" | "ask" | "deny" | "automode" | "workspace";
+export const TABS: Tab[] = ["recent", "allow", "ask", "deny", "automode", "workspace"];
 export type RuleTab = "allow" | "ask" | "deny";
 export const RULE_TABS: RuleTab[] = ["allow", "ask", "deny"];
 /** Tabs with a search box. */
@@ -78,6 +80,16 @@ export interface AutoModeView {
 	};
 }
 
+export interface WorkspaceDirRow extends Sourced {
+	path: string;
+}
+
+export interface WorkspaceView {
+	/** The session's original working directory, always in the workspace. */
+	cwd: string;
+	dirs: WorkspaceDirRow[];
+}
+
 export interface Destination {
 	id: string;
 	label: string;
@@ -89,6 +101,9 @@ export interface PanelView {
 	/** Each tab's rules, already sorted. */
 	rules: Record<RuleTab, RuleRow[]>;
 	autoMode: AutoModeView;
+	workspace: WorkspaceView;
+	/** Check a typed directory: its absolute path, or why it cannot be added. */
+	validateDir: (input: string) => { path: string } | { error: string };
 	/** Where a new permission rule can be saved, first one first. */
 	destinations: Destination[];
 	/** Why a typed permission rule cannot be saved, or undefined when it parses. */
@@ -106,7 +121,11 @@ export type Dialog =
 	| { kind: "autoRuleDetail"; key: string; cursor: number }
 	| { kind: "autoRuleDelete"; key: string; cursor: number }
 	| { kind: "builtinsInfo"; section: AutoSection }
-	| { kind: "envConfirm"; cursor: number };
+	| { kind: "envConfirm"; cursor: number }
+	| { kind: "addDir"; draft: string }
+	/** For this session, remember it, or cancel. */
+	| { kind: "rememberDir"; path: string; cursor: number }
+	| { kind: "removeDir"; key: string; cursor: number };
 
 export interface PanelState {
 	tab: Tab;
@@ -129,16 +148,19 @@ export type PanelEffect =
 	| { kind: "addAutoRule"; section: AutoSection; text: string }
 	| { kind: "editAutoRule"; key: string; text: string }
 	| { kind: "deleteAutoRule"; key: string }
-	| { kind: "editEnvironment" };
+	| { kind: "editEnvironment" }
+	| { kind: "addDir"; path: string; remember: boolean }
+	| { kind: "removeDir"; key: string };
 
 export type RuleListRow = { kind: "add" } | { kind: "rule"; rule: RuleRow };
+export type WorkspaceListRow = { kind: "dir"; dir: WorkspaceDirRow } | { kind: "add" };
 export type AutoListRow = { kind: "add" } | { kind: "builtins"; section: AutoSection } | { kind: "entry"; entry: AutoEntryRow } | { kind: "environment" };
 
 export function initialPanelState(hasDenials: boolean): PanelState {
 	return {
 		// Claude Code opens on Recently denied when there is something to act on.
 		tab: hasDenials ? "recent" : "allow",
-		cursor: { recent: 0, allow: 0, ask: 0, deny: 0, automode: 0 },
+		cursor: { recent: 0, allow: 0, ask: 0, deny: 0, automode: 0, workspace: 0 },
 		search: { allow: "", ask: "", deny: "", automode: "" },
 		searching: false,
 		approved: new Set(),
@@ -147,7 +169,12 @@ export function initialPanelState(hasDenials: boolean): PanelState {
 }
 
 export const isRuleTab = (tab: Tab): tab is RuleTab => (RULE_TABS as Tab[]).includes(tab);
-const isSearchTab = (tab: Tab): tab is SearchTab => tab !== "recent";
+const isSearchTab = (tab: Tab): tab is SearchTab => tab !== "recent" && tab !== "workspace";
+
+/** The Workspace tab's rows: the added directories, then `Add directory…` (Claude Code's order). */
+export function workspaceListRows(view: PanelView): WorkspaceListRow[] {
+	return [...view.workspace.dirs.map((dir): WorkspaceListRow => ({ kind: "dir", dir })), { kind: "add" }];
+}
 
 /** A rule tab's rows: `Add a new rule…` (hidden while a query filters the list), then the matching rules. */
 export function ruleListRows(state: PanelState, view: PanelView, tab: RuleTab): RuleListRow[] {
@@ -178,6 +205,7 @@ export function autoListRows(state: PanelState, view: PanelView): AutoListRow[] 
 function rowCount(state: PanelState, view: PanelView): number {
 	if (state.tab === "recent") return view.denials.length;
 	if (state.tab === "automode") return autoListRows(state, view).length;
+	if (state.tab === "workspace") return workspaceListRows(view).length;
 	return ruleListRows(state, view, state.tab).length;
 }
 
@@ -192,7 +220,10 @@ function dialogOptions(dialog: Dialog, view: PanelView): number {
 		case "autoRuleDetail":
 		case "autoRuleDelete":
 		case "envConfirm":
+		case "removeDir":
 			return 2;
+		case "rememberDir":
+			return 3;
 		default:
 			return 0;
 	}
@@ -208,6 +239,11 @@ export function clampPanelState(state: PanelState, view: PanelView): void {
 /** The rule a detail dialog shows, resolved against the current view (it may have been reloaded). */
 export function detailRule(dialog: Extract<Dialog, { kind: "ruleDetail" }>, view: PanelView): RuleRow | undefined {
 	return view.rules[dialog.behavior].find((rule) => rule.key === dialog.key);
+}
+
+/** The workspace directory a dialog names, resolved against the current view. */
+export function workspaceDir(key: string, view: PanelView): WorkspaceDirRow | undefined {
+	return view.workspace.dirs.find((dir) => dir.key === key);
 }
 
 /** The auto-mode entry a dialog names, resolved against the current view. */
@@ -350,6 +386,42 @@ function applyDialogKey(state: PanelState, dialog: Dialog, key: PanelKey, view: 
 			}
 			return undefined;
 		}
+		case "addDir": {
+			if (editDraft(dialog, key)) return undefined;
+			if (key.kind === "back") shut();
+			else if (key.kind === "enter" && dialog.draft.trim()) {
+				const checked = view.validateDir(dialog.draft);
+				if ("error" in checked) state.notice = checked.error;
+				else state.dialog = { kind: "rememberDir", path: checked.path, cursor: 0 };
+			}
+			return undefined;
+		}
+		case "rememberDir": {
+			if (key.kind === "back") {
+				state.dialog = { kind: "addDir", draft: dialog.path };
+				return undefined;
+			}
+			moveDialogCursor(dialog, key, 3);
+			if (key.kind === "enter") {
+				shut();
+				if (dialog.cursor < 2) return { kind: "addDir", path: dialog.path, remember: dialog.cursor === 1 };
+			}
+			return undefined;
+		}
+		case "removeDir": {
+			const dir = workspaceDir(dialog.key, view);
+			if (!dir || key.kind === "back" || (!dir.editable && key.kind === "enter")) {
+				shut();
+				return undefined;
+			}
+			if (!dir.editable) return undefined;
+			moveDialogCursor(dialog, key, 2);
+			if (key.kind === "enter") {
+				shut();
+				if (dialog.cursor === 0) return { kind: "removeDir", key: dialog.key };
+			}
+			return undefined;
+		}
 	}
 }
 
@@ -434,6 +506,12 @@ export function applyPanelKey(state: PanelState, key: PanelKey, view: PanelView)
 				return undefined;
 			}
 			if (tab === "automode") return openAutoRow(state, view);
+			if (tab === "workspace") {
+				const row = workspaceListRows(view)[state.cursor.workspace];
+				if (row?.kind === "add") state.dialog = { kind: "addDir", draft: "" };
+				else if (row?.kind === "dir") state.dialog = { kind: "removeDir", key: row.dir.key, cursor: 1 };
+				return undefined;
+			}
 			const row = ruleListRows(state, view, tab)[state.cursor[tab]];
 			state.searching = false;
 			if (row?.kind === "add") state.dialog = { kind: "addRule", behavior: tab, draft: "" };
@@ -444,6 +522,11 @@ export function applyPanelKey(state: PanelState, key: PanelKey, view: PanelView)
 			if (tab === "recent") {
 				const denial = view.denials[state.cursor.recent];
 				if (denial && key.text.toLowerCase() === "r" && toggle(state.retry, denial.id)) state.approved.add(denial.id);
+				return undefined;
+			}
+			if (tab === "workspace") {
+				if (key.text === "j") move(1);
+				else if (key.text === "k") move(-1);
 				return undefined;
 			}
 			if (state.searching) {

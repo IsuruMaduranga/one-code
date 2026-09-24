@@ -24,6 +24,8 @@ import {
 	type RuleTab,
 	TABS,
 	type Tab,
+	workspaceDir,
+	workspaceListRows,
 } from "./state.ts";
 
 export interface PanelPaint {
@@ -47,7 +49,12 @@ const TAB_TITLES: Record<Tab, string> = {
 	ask: "Ask",
 	deny: "Deny",
 	automode: "Auto mode",
+	workspace: "Workspace",
 };
+
+const WORKSPACE_SUBTITLE = "One Code can read files in the workspace, and make edits when auto-accept edits is on.";
+/** Claude Code's three answers when a directory is added. */
+const REMEMBER_OPTIONS = ["Yes, for this session", "Yes, and remember this directory", "No"];
 
 const SUBTITLES: Record<RuleTab | "automode", string> = {
 	allow: "One Code won't ask before using allowed tools.",
@@ -165,6 +172,17 @@ function autoBlocks(input: PanelRenderInput, paint: PanelPaint): Block[] {
 	});
 	if (rows.length === 0) blocks.push({ lines: [paint.fg("dim", "  No rules match the search")], selectable: false });
 	return blocks;
+}
+
+function workspaceBlocks(input: PanelRenderInput, paint: PanelPaint): Block[] {
+	const { state, view, width } = input;
+	return workspaceListRows(view).map((row, index) => {
+		const isCursor = index === state.cursor.workspace;
+		if (row.kind === "add") return { lines: [listLine("Add directory…", isCursor, paint, width)], selectable: true };
+		const path = cutPlainText(row.dir.path, width - 3);
+		const tail = sourceTail(row.dir, visibleWidth(path), width);
+		return { lines: [`${listLine(path, isCursor, paint, width)}${tail ? paint.fg("dim", tail) : ""}`], selectable: true };
+	});
 }
 
 function ruleSummary(raw: string, paint: PanelPaint, width: number): string[] {
@@ -317,6 +335,43 @@ function dialogLines(dialog: Dialog, input: PanelRenderInput, paint: PanelPaint)
 				],
 				footer: "↑↓ to choose · Enter to confirm · Esc to go back",
 			};
+		case "addDir":
+			return {
+				lines: [paint.fg("accent", paint.bold(text("Add directory to workspace"))), "", text("Enter the path to the directory:"), ...draftBox(dialog.draft, "Directory path…")],
+				footer: "Enter to submit · Esc to cancel",
+			};
+		case "rememberDir":
+			return {
+				lines: [
+					paint.fg("accent", paint.bold(text("Add directory to workspace"))),
+					"",
+					`   ${paint.fg("accent", cutPlainText(dialog.path, width - 4))}`,
+					...wrapped("One Code will be able to read files in this directory and make edits when auto-accept edits is on. Auto mode still judges every write there."),
+					"",
+					...REMEMBER_OPTIONS.map((option, index) => listLine(option, index === dialog.cursor, paint, width)),
+					paint.fg("dim", text("Remembered directories are saved to One Code's project settings.")),
+				],
+				footer: "↑↓ to choose · Enter to confirm · Esc to go back",
+			};
+		case "removeDir": {
+			const dir = workspaceDir(dialog.key, view);
+			if (!dir) return gone;
+			const details = [`   ${paint.bold(cutPlainText(dir.path, width - 4))}`, paint.fg("dim", cutPlainText(`   ${dir.sourceLabel}`, width - 1))];
+			if (!dir.editable) {
+				return { lines: [paint.bold(text("Workspace directory")), "", ...details, "", ...(dir.readOnlyNote ? wrapped(dir.readOnlyNote) : [])], footer: "Enter or Esc to go back" };
+			}
+			return {
+				lines: [
+					paint.fg("error", paint.bold(text("Remove directory from workspace?"))),
+					"",
+					...details,
+					"",
+					text("One Code will no longer have access to files in this directory."),
+					...choiceLines(["Yes", "No"], dialog.cursor, paint, width),
+				],
+				footer: "↑↓ to choose · Enter to confirm · Esc to go back",
+			};
+		}
 	}
 }
 
@@ -342,6 +397,7 @@ function footerFor(state: PanelState, view: PanelView): string[] {
 		const pending = state.approved.size > 0 ? ["Approvals apply when you close the panel."] : [];
 		return ["Enter to approve · r to retry · ↑↓ to navigate · ←/→ to switch tabs · Esc to close", ...pending];
 	}
+	if (state.tab === "workspace") return ["↑↓ to navigate · Enter to select · ←/→ to switch tabs · Esc to close"];
 	if (state.searching) return ["Type to filter · Enter to select · Backspace to edit · Esc to clear"];
 	return ["↑↓ to navigate · Enter to select · Type to search · ←/→ to switch tabs · Esc to close"];
 }
@@ -367,6 +423,10 @@ export function renderPanel(input: PanelRenderInput, paint: PanelPaint): string[
 				out.push(cutPlainText(" Commands recently denied by the auto mode classifier.", width - 1), "");
 				blocks = recentBlocks(input, paint);
 			}
+		} else if (state.tab === "workspace") {
+			out.push(...wrapPlainText(WORKSPACE_SUBTITLE, Math.max(10, width - 2)).map((line) => ` ${line}`), "");
+			out.push(`   -  ${cutPlainText(view.workspace.cwd, Math.max(8, width - 32))}${paint.fg("dim", "  (Original working directory)")}`);
+			blocks = workspaceBlocks(input, paint);
 		} else {
 			out.push(...wrapPlainText(SUBTITLES[state.tab], Math.max(10, width - 2)).map((line) => ` ${line}`));
 			const placeholder = state.searching ? "Search…" : "Type to search…";

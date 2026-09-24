@@ -21,6 +21,8 @@ export interface EnvironmentInfo {
 	modelLine: string;
 	/** Per-project auto-memory directory; the memory extension guarantees it exists. */
 	memoryDir: string;
+	/** The workspace directories as the session started (lib/workspace-channel.ts); listed only when there are some. */
+	workspaceDirs?: string[];
 }
 
 /**

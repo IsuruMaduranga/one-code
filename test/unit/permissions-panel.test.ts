@@ -30,6 +30,14 @@ const view = (overrides: Partial<PanelView> = {}): PanelView => ({
 		entries: [autoEntry("allow", "Staging Deploys: deploys to the staging cluster"), autoEntry("soft_deny", "Prod DB: any write to the production database", false)],
 		environment: { lines: ["### Org-wide", "a", "b", "c", "d", "e"], summary: "Built-in default", isDefault: true },
 	},
+	workspace: {
+		cwd: "/work/project",
+		dirs: [
+			{ key: "session\0\0/work/shared", path: "/work/shared", sourceLabel: "Added for this session", editable: true },
+			{ key: "claude-user\0x\0/work/libs", path: "/work/libs", sourceLabel: "From Claude Code user settings (~/.claude/settings.json)", editable: false, readOnlyNote: "One Code does not edit Claude Code's files." },
+		],
+	},
+	validateDir: (input) => (input.startsWith("/") ? { path: input } : { error: `${input} does not exist.` }),
 	denials: [
 		{ id: 1, display: "bash(rm -rf ../elsewhere)", rule: "Irreversible Local Destruction" },
 		{ id: 2, display: "write(/etc/hosts)", rule: "Security Weaken" },
@@ -90,12 +98,12 @@ describe("/permissions panel state", () => {
 		expect(state.tab).toBe("allow");
 		press(state, v, "\t", "\t");
 		expect(state.tab).toBe("deny");
-		press(state, v, RIGHT);
-		expect(state.tab).toBe("automode");
+		press(state, v, RIGHT, RIGHT);
+		expect(state.tab).toBe("workspace");
 		press(state, v, RIGHT);
 		expect(state.tab).toBe("recent");
 		press(state, v, LEFT);
-		expect(state.tab).toBe("automode");
+		expect(state.tab).toBe("workspace");
 		expect(press(state, v, ESC)).toEqual([{ kind: "close" }]);
 		expect(press(initialPanelState(true), v, "\x03")).toEqual([{ kind: "close" }]);
 	});
@@ -163,7 +171,7 @@ describe("/permissions panel state", () => {
 describe("/permissions panel Auto mode tab", () => {
 	const onAutoMode = (v: PanelView) => {
 		const state = initialPanelState(false);
-		press(state, v, LEFT, LEFT);
+		press(state, v, LEFT, LEFT, LEFT);
 		expect(state.tab).toBe("automode");
 		return state;
 	};
@@ -236,6 +244,57 @@ describe("/permissions panel Auto mode tab", () => {
 		expect(text).toContain("Environment  Built-in default · enter to edit");
 		expect(text).toContain("… (+2 more lines)");
 		for (const width of [30, 60]) for (const line of renderPanel({ state, view: v, width, height: 40 }, paint)) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+	});
+});
+
+describe("/permissions panel Workspace tab", () => {
+	const onWorkspace = (v: PanelView) => {
+		const state = initialPanelState(false);
+		press(state, v, LEFT, LEFT);
+		expect(state.tab).toBe("workspace");
+		return state;
+	};
+
+	it("adds a directory for the session or remembered, after checking it", () => {
+		const v = view();
+		const state = onWorkspace(v);
+		// Rows: /work/shared, /work/libs, Add directory…
+		press(state, v, DOWN, DOWN, ENTER);
+		expect(state.dialog).toEqual({ kind: "addDir", draft: "" });
+		press(state, v, ..."nope".split(""), ENTER);
+		expect(state.notice).toBe("nope does not exist.");
+		for (let i = 0; i < 4; i++) press(state, v, "\x7f");
+		press(state, v, ..."/work/other".split(""), ENTER);
+		expect(state.dialog).toEqual({ kind: "rememberDir", path: "/work/other", cursor: 0 });
+		expect(press(state, v, DOWN, ENTER)).toEqual([{ kind: "addDir", path: "/work/other", remember: true }]);
+		press(state, v, ENTER, ..."/work/x".split(""), ENTER);
+		expect(press(state, v, ENTER)).toEqual([{ kind: "addDir", path: "/work/x", remember: false }]);
+		// No: nothing is added.
+		press(state, v, ENTER, ..."/work/y".split(""), ENTER);
+		expect(press(state, v, DOWN, DOWN, ENTER)).toEqual([]);
+	});
+
+	it("removes a session directory only on Yes, and explains a read-only one", () => {
+		const v = view();
+		const state = onWorkspace(v);
+		press(state, v, ENTER);
+		expect(state.dialog).toEqual({ kind: "removeDir", key: "session\0\0/work/shared", cursor: 1 });
+		expect(press(state, v, ENTER)).toEqual([]);
+		expect(press(state, v, ENTER, "y", ENTER)).toEqual([{ kind: "removeDir", key: "session\0\0/work/shared" }]);
+		press(state, v, DOWN, ENTER);
+		const text = renderPanel({ state, view: v, width: 100, height: 30 }, paint).join("\n");
+		expect(text).toContain("One Code does not edit Claude Code's files.");
+		expect(press(state, v, "y", ENTER)).toEqual([]);
+	});
+
+	it("shows the working directory first, then the directories and where they come from", () => {
+		const v = view();
+		const text = renderPanel({ state: onWorkspace(v), view: v, width: 120, height: 30 }, paint).join("\n");
+		expect(text).toContain("One Code can read files in the workspace, and make edits when auto-accept edits is on.");
+		expect(text).toContain("   -  /work/project  (Original working directory)");
+		expect(text).toContain("❯ /work/shared");
+		expect(text).toContain("  /work/libs  · Claude Code user settings (~/.claude/settings.json)");
+		expect(text).toContain("  Add directory…");
 	});
 });
 

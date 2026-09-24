@@ -26,6 +26,8 @@ import {
 	readSettingsForWrite,
 	writeSettings,
 } from "../lib/one-code-settings.ts";
+import { resolve } from "node:path";
+import { expandTilde } from "../lib/paths.ts";
 import type { PermissionMode } from "./matcher.ts";
 
 export { settingsPaths };
@@ -58,6 +60,7 @@ interface ClaudeSettingsFile {
 		allow?: string[];
 		deny?: string[];
 		ask?: string[];
+		additionalDirectories?: string[];
 		defaultMode?: string;
 		disableBypassPermissionsMode?: string;
 	};
@@ -175,15 +178,10 @@ export interface SourcedRule {
 	path: string;
 }
 
-/**
- * Every permission rule with the file it came from, in load order (the order
- * `loadPermissionSettings` merges them). The panel lists them and can delete a
- * rule from One Code's own files only: One Code never edits Claude Code's
- * files, the repository's or managed policy.
- */
-export function listPermissionRules(cwd: string, home: string): SourcedRule[] {
+/** Every settings file permissions are read from, lowest precedence first, with its source. */
+function permissionSources(cwd: string, home: string): Array<[RuleSource, string]> {
 	const paths = settingsPaths(cwd, home);
-	const sources: Array<[RuleSource, string]> = [
+	return [
 		["claude-user", paths.user],
 		["onecode-user", oneCodeSettingsPath(home)],
 		["project", paths.project],
@@ -191,8 +189,64 @@ export function listPermissionRules(cwd: string, home: string): SourcedRule[] {
 		["onecode-project", oneCodeProjectSettingsPath(cwd, home)],
 		...managedSettingsPaths().map((path): [RuleSource, string] => ["managed", path]),
 	];
+}
+
+export interface SourcedDirectory {
+	/** As written in the settings file. */
+	raw: string;
+	/** Absolute: `~` expanded, a relative entry resolved against the working directory. */
+	path: string;
+	source: RuleSource;
+	/** The settings file it is in. */
+	settingsPath: string;
+}
+
+/**
+ * Claude Code's `permissions.additionalDirectories`, from every source, with
+ * the file each came from. The caller decides which sources are trusted: a
+ * repository's own files are applied only after the user trusts them.
+ */
+export function listWorkspaceDirectories(cwd: string, home: string): SourcedDirectory[] {
+	const dirs: SourcedDirectory[] = [];
+	for (const [source, settingsPath] of permissionSources(cwd, home)) {
+		const list = readSettingsFile(settingsPath)?.permissions?.additionalDirectories;
+		if (!Array.isArray(list)) continue;
+		for (const raw of list) {
+			if (typeof raw !== "string" || !raw.trim()) continue;
+			dirs.push({ raw, path: resolve(cwd, expandTilde(raw.trim(), home)), source, settingsPath });
+		}
+	}
+	return dirs;
+}
+
+/** Add a directory to a One Code settings file's `permissions.additionalDirectories`. */
+export function persistWorkspaceDirectory(dir: string, filePath: string): void {
+	const file = readSettingsForWrite(filePath) as ClaudeSettingsFile;
+	const permissions = (file.permissions ??= {});
+	const list = (permissions.additionalDirectories ??= []);
+	if (!list.includes(dir)) list.push(dir);
+	writeSettings(filePath, file as Record<string, unknown>);
+}
+
+/** Remove a directory, as written, from a One Code settings file. False when it is not there. */
+export function removeWorkspaceDirectory(raw: string, filePath: string): boolean {
+	const file = readSettingsForWrite(filePath) as ClaudeSettingsFile;
+	const list = file.permissions?.additionalDirectories;
+	if (!Array.isArray(list) || !list.includes(raw)) return false;
+	file.permissions!.additionalDirectories = list.filter((entry) => entry !== raw);
+	writeSettings(filePath, file as Record<string, unknown>);
+	return true;
+}
+
+/**
+ * Every permission rule with the file it came from, in load order (the order
+ * `loadPermissionSettings` merges them). The panel lists them and can delete a
+ * rule from One Code's own files only: One Code never edits Claude Code's
+ * files, the repository's or managed policy.
+ */
+export function listPermissionRules(cwd: string, home: string): SourcedRule[] {
 	const rules: SourcedRule[] = [];
-	for (const [source, path] of sources) {
+	for (const [source, path] of permissionSources(cwd, home)) {
 		const perms = readSettingsFile(path)?.permissions;
 		if (!perms) continue;
 		for (const behavior of ["allow", "ask", "deny"] as const) {

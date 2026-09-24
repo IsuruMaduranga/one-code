@@ -32,6 +32,10 @@ export interface PermissionsPanelHost {
 	/** Replace an auto-mode entry, by its row key. */
 	editAutoRule: (key: string, text: string) => string;
 	deleteAutoRule: (key: string) => string;
+	/** Add a validated directory, for this session or remembered. */
+	addDir: (path: string, remember: boolean) => string;
+	/** Remove a workspace directory, by its row key. */
+	removeDir: (key: string) => string;
 }
 
 export interface PermissionsPanelSession {
@@ -42,10 +46,19 @@ export interface PermissionsPanelSession {
 	editEnvironment?: boolean;
 }
 
-/** Open the panel. Pass the previous session to reopen it where it was. */
-export async function openPermissionsPanel(ctx: ExtensionContext, host: PermissionsPanelHost, previous?: PermissionsPanelSession): Promise<PermissionsPanelSession> {
+/**
+ * Open the panel. Pass the previous session to reopen it where it was, or
+ * `prepare` to adjust a fresh state first (`/add-dir` opens on its dialog).
+ */
+export async function openPermissionsPanel(
+	ctx: ExtensionContext,
+	host: PermissionsPanelHost,
+	previous?: PermissionsPanelSession,
+	prepare?: (state: PanelState) => void,
+): Promise<PermissionsPanelSession> {
 	const first = host.view();
 	const session: PermissionsPanelSession = { state: previous?.state ?? initialPanelState(first.denials.length > 0), changes: previous?.changes ?? [] };
+	if (!previous) prepare?.(session.state);
 	const { state, changes } = session;
 
 	await ctx.ui.custom<null>((tui, theme, _keybindings, done) => {
@@ -67,6 +80,10 @@ export async function openPermissionsPanel(ctx: ExtensionContext, host: Permissi
 					return host.editAutoRule(effect.key, effect.text);
 				case "deleteAutoRule":
 					return host.deleteAutoRule(effect.key);
+				case "addDir":
+					return host.addDir(effect.path, effect.remember);
+				case "removeDir":
+					return host.removeDir(effect.key);
 			}
 		};
 

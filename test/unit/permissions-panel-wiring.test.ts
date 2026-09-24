@@ -199,8 +199,8 @@ describe("/permissions wiring", () => {
 		const settings = () => JSON.parse(readFileSync(join(home, ".onecode", "settings.json"), "utf-8"));
 
 		it("adds a rule to One Code's user settings, and the next classifier call is sent it", async () => {
-			// Allow → Auto mode is two tabs left; Add a new rule…, Soft deny, type, save.
-			await openPanel(LEFT, LEFT, ENTER, DOWN, ENTER, ..."Build Cache: deleting ~/.cache/build is fine".split(""), ENTER);
+			// Allow → Auto mode is three tabs left; Add a new rule…, Soft deny, type, save.
+			await openPanel(LEFT, LEFT, LEFT, ENTER, DOWN, ENTER, ..."Build Cache: deleting ~/.cache/build is fine".split(""), ENTER);
 			expect(settings().autoMode.soft_deny).toEqual(["Build Cache: deleting ~/.cache/build is fine"]);
 			expect(reminders.some((r) => r.includes("Added auto mode soft deny rule: Build Cache"))).toBe(true);
 
@@ -216,11 +216,11 @@ describe("/permissions wiring", () => {
 			mkdirSync(join(home, ".onecode"), { recursive: true });
 			writeFileSync(join(home, ".onecode", "settings.json"), JSON.stringify({ autoMode: { allow: ["Mine: my rule"] }, other: 1 }));
 			// Rows: add, allow built-ins, CC Rule (read-only), Mine, …
-			await openPanel(LEFT, LEFT, DOWN, DOWN, ENTER);
-			expect(screens[4]).toContain("One Code does not edit Claude Code's files.");
-			await openPanel(LEFT, LEFT, DOWN, DOWN, DOWN, ENTER, ENTER, "!", ENTER);
+			await openPanel(LEFT, LEFT, LEFT, DOWN, DOWN, ENTER);
+			expect(screens[5]).toContain("One Code does not edit Claude Code's files.");
+			await openPanel(LEFT, LEFT, LEFT, DOWN, DOWN, DOWN, ENTER, ENTER, "!", ENTER);
 			expect(settings().autoMode.allow).toEqual(["Mine: my rule!"]);
-			await openPanel(LEFT, LEFT, DOWN, DOWN, DOWN, ENTER, "d", ENTER, "y", ENTER);
+			await openPanel(LEFT, LEFT, LEFT, DOWN, DOWN, DOWN, ENTER, "d", ENTER, "y", ENTER);
 			expect(settings()).toEqual({ other: 1 });
 			expect(JSON.parse(readFileSync(join(home, ".claude", "settings.json"), "utf-8")).autoMode.allow).toEqual(["$defaults", "CC Rule: from Claude Code"]);
 		});
@@ -228,7 +228,7 @@ describe("/permissions wiring", () => {
 		it("edits the environment through the editor, starting from the built-in default", async () => {
 			editorReply = (prefill) => `${prefill}\n- Trusted host: build.internal.example`;
 			// Environment is the last row; confirm replacing the default, then the editor runs.
-			await openPanel(LEFT, LEFT, PAGE_DOWN, PAGE_DOWN, ENTER, ENTER);
+			await openPanel(LEFT, LEFT, LEFT, PAGE_DOWN, PAGE_DOWN, ENTER, ENTER);
 			const env = settings().autoMode.environment as string[];
 			expect(env.at(-1)).toBe("- Trusted host: build.internal.example");
 			expect(env.length).toBeGreaterThan(10);
@@ -238,7 +238,7 @@ describe("/permissions wiring", () => {
 
 			// Saving it empty restores the default.
 			editorReply = () => "";
-			await openPanel(LEFT, LEFT, PAGE_DOWN, PAGE_DOWN, ENTER);
+			await openPanel(LEFT, LEFT, LEFT, PAGE_DOWN, PAGE_DOWN, ENTER);
 			expect(existsSync(join(home, ".onecode", "settings.json")) ? settings().autoMode?.environment : undefined).toBeUndefined();
 		});
 	});
