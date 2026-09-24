@@ -130,10 +130,10 @@ const calls = events
 	.map((start) => ({ command: String(start.args?.command ?? ""), end: results.find((e) => e.toolCallId === start.toolCallId) }));
 const sameCommand = (a, b) => a.replace(/\s+/g, " ").trim() === b.replace(/\s+/g, " ").trim();
 // The allowed command as requested, carrying the marker the shell computed; then, after it, the
-// delete of the sentinel, denied by the rule, with the file still there.
+// requested delete of the sentinel, denied by the rule, with the file still there.
 const allowedAt = calls.findIndex((c) => sameCommand(c.command, allowed) && resultText(c.end ?? {}).includes(MARKER));
 const hit = calls[allowedAt]?.end;
-const deniedAt = calls.findIndex((c, i) => i > allowedAt && c.command.includes(SENTINEL) && c.end?.isError && resultText(c.end).includes(`permission rule "${denyRule}"`));
+const deniedAt = calls.findIndex((c, i) => i > allowedAt && sameCommand(c.command, blocked) && c.end?.isError && resultText(c.end).includes(`permission rule "${denyRule}"`));
 const denial = allowedAt >= 0 && deniedAt > allowedAt;
 const sentinelKept = existsSync(join(project, SENTINEL));
 const finalText = events
