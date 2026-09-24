@@ -46,7 +46,7 @@ import { appendDecision, type DecisionEntry, decisionEntry } from "../auto-mode/
 import { loadProjectInstructions } from "../auto-mode/instructions.ts";
 import { classifierCandidates, describeCandidate, findConfigured } from "../auto-mode/model-select.ts";
 import { modelIdentity } from "../lib/model-policy.ts";
-import { isWithin, resolveForContainment, toAbsolute } from "../auto-mode/paths.ts";
+import { conflictingPathArguments, isWithin, resolveForContainment, toAbsolute } from "../auto-mode/paths.ts";
 import { PauseTracker } from "../auto-mode/pause.ts";
 import { checkRecoverability } from "../auto-mode/recoverability.ts";
 import { safetyControlWrite } from "../auto-mode/safety-floor.ts";
@@ -485,7 +485,6 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	 */
 	const runClassifier = async (
 		toolName: string,
-		input: Record<string, unknown>,
 		subject: string,
 		ctx: ExtensionContext,
 		/**
@@ -554,10 +553,11 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			// wrappers, CI workflows, editor auto-run config) are excluded exactly as
 			// the bash pre-gate excludes them — being in-project does not make a file
 			// that runs later without further approval safe to write unclassified.
-			const raw = input.file_path ?? input.path;
-			const target = typeof raw === "string" ? raw : undefined;
-			if (target) {
-				const absolute = toAbsolute(cwd, target, home);
+			// `subject` is pathArgument's pick, the field every other gate judged;
+			// picking a field again here once approved a different file from the
+			// one written (AUTO-MODE-SECURITY-REVIEW-2026-09-24 H1).
+			if (subject) {
+				const absolute = toAbsolute(cwd, subject, home);
 				const resolved = resolveForContainment(absolute);
 				const root = resolveForContainment(cwd) ?? cwd;
 				if (resolved && isWithin(root, resolved) && !isSensitivePath(absolute) && !isExecutionPrimitivePath(absolute)) {
@@ -837,6 +837,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// command unparseable, which escalates or prompts.
 		await bashParserReady();
 		const normalizedTool = normalizeToolName(event.toolName);
+		const conflict = isPathSubjectTool(normalizedTool) ? conflictingPathArguments(event.input as Record<string, unknown>) : undefined;
+		if (conflict) return { block: true, reason: conflict };
 		const subject = extractSubject(normalizedTool, event.input as Record<string, unknown>);
 		// Resolved through symlinks so the protected-path and working-directory
 		// checks see where a write lands or a read comes from, not how the path
@@ -974,7 +976,6 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			if (!pauseTracker.isPaused()) {
 				const outcome = await runClassifier(
 					event.toolName,
-					event.input as Record<string, unknown>,
 					matchSubject,
 					ctx,
 					// Protected paths must always be judged; everything else may be cleared
@@ -1096,6 +1097,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		const ctx = lastReviewCtx;
 		const { toolName, input, cwd } = call;
 		const normalizedTool = normalizeToolName(toolName);
+		const conflict = isPathSubjectTool(normalizedTool) ? conflictingPathArguments(input) : undefined;
+		if (conflict) return { block: true, reason: conflict };
 		const subject = extractSubject(normalizedTool, input);
 		const resolvedSubject =
 			isPathSubjectTool(normalizedTool) && subject
@@ -1161,7 +1164,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				tool: normalizedTool,
 				input: isShellTool(normalizedTool) ? { command: subject } : input,
 			};
-			const outcome = await runClassifier(toolName, input, subject, ctx, result.cause !== "protected-path", {
+			const outcome = await runClassifier(toolName, subject, ctx, result.cause !== "protected-path", {
 				cwd,
 				appendEntry,
 				// The child's own turn signal, so an aborted child turn cancels the

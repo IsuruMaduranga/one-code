@@ -78,8 +78,23 @@ function renderEntry(entry: TranscriptEntry, maxField: number): string {
 	return JSON.stringify({ [name]: clipInput(entry.input, maxField) });
 }
 
+/**
+ * The most characters of the action under review the classifier is sent. That
+ * action is never clipped: the tool runs the whole input, so a classifier that
+ * saw only its first 2,000 characters cleared a suffix it never read
+ * (AUTO-MODE-SECURITY-REVIEW-2026-09-24 M1). A larger action is refused with
+ * its size named (classifier.ts), as Claude Code sends the action whole.
+ */
+export const MAX_ACTION_CHARS = 100_000;
+
+/** The rendered length of the action under review, the last entry, unclipped. */
+export function actionLength(entries: readonly TranscriptEntry[]): number {
+	const action = entries.at(-1);
+	return action ? renderEntry(action, Number.POSITIVE_INFINITY).length : 0;
+}
+
 export interface RenderOptions {
-	/** Max chars per string field. */
+	/** Max chars per string field of an earlier entry; the action under review is never clipped. */
 	maxField?: number;
 	/** Max chars for the whole rendered transcript; oldest entries drop first. */
 	maxChars?: number;
@@ -88,14 +103,14 @@ export interface RenderOptions {
 /**
  * Render the ordered entries into a `<transcript>…</transcript>` block. When the
  * rendered lines exceed `maxChars`, the oldest are dropped and a marker records
- * it — the action under review (the last entry) is always kept. The full user
+ * it — the action under review (the last entry) is always kept, whole. The full user
  * messages are carried separately for intent verification, so dropping old lines
  * here never weakens that check.
  */
 export function renderTranscript(entries: TranscriptEntry[], options: RenderOptions = {}): string {
 	const maxField = options.maxField ?? 2000;
 	const maxChars = options.maxChars ?? 60_000;
-	const lines = entries.map((entry) => renderEntry(entry, maxField));
+	const lines = entries.map((entry, i) => renderEntry(entry, i === entries.length - 1 ? Number.POSITIVE_INFINITY : maxField));
 
 	// Keep the newest lines that fit the budget, walking from the end in one pass
 	// (the last line — the action under review — is always kept). +1 per line for

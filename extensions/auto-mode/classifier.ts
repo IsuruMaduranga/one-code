@@ -44,6 +44,7 @@ import {
 	replyText,
 	withAuthBaseUrl,
 } from "./model-select.ts";
+import { actionLength, MAX_ACTION_CHARS } from "./transcript.ts";
 
 /** A slow classifier stalls every tool call, so the wait is capped per stage. */
 export const CLASSIFIER_TIMEOUT_MS = 30_000;
@@ -198,6 +199,17 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 	// cross-provider setting honored) — surfaced once each at their own level, keyed
 	// by their text so an informational "honored" line is not shown as a warning.
 	for (const notice of notices) notifyOnce(deps, notice.text, notice.text, notice.level);
+
+	// The action is sent whole (transcript.ts MAX_ACTION_CHARS); one too large for
+	// that is refused with its size, never judged from a prefix.
+	const actionChars = deps.reviewOnly ? 0 : actionLength(request.transcript);
+	if (actionChars > MAX_ACTION_CHARS) {
+		return {
+			decision: "block",
+			reason: `This call is ${actionChars} characters, more than the ${MAX_ACTION_CHARS} the auto-mode classifier reviews in full. Split it into smaller calls.`,
+			tier: "unmatched",
+		};
+	}
 
 	// buildPayload builds the ~110KB ruleset once and returns the grounding index
 	// derived from it, so the ruleset is not rebuilt/re-parsed a second time here.

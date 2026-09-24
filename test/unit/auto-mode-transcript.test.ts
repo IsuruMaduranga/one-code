@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ccToolName, renderTranscript, type TranscriptEntry } from "../../extensions/auto-mode/transcript.ts";
+import { actionLength, ccToolName, MAX_ACTION_CHARS, renderTranscript, type TranscriptEntry } from "../../extensions/auto-mode/transcript.ts";
 
 describe("ccToolName", () => {
 	it("maps native snake_case names to Claude Code's PascalCase", () => {
@@ -44,12 +44,26 @@ describe("renderTranscript", () => {
 		expect(out).not.toContain("result");
 	});
 
-	it("clips an oversized field so one argument cannot dominate", () => {
-		const out = renderTranscript([{ kind: "tool", tool: "bash", input: { command: "x".repeat(50_000) } }], {
-			maxField: 100,
-		});
+	it("clips an oversized field of an earlier entry so one argument cannot dominate", () => {
+		const out = renderTranscript(
+			[
+				{ kind: "tool", tool: "bash", input: { command: "x".repeat(50_000) } },
+				{ kind: "tool", tool: "bash", input: { command: "ls" } },
+			],
+			{ maxField: 100 },
+		);
 		expect(out).toContain("truncated");
 		expect(out.length).toBeLessThan(1000);
+	});
+
+	// AUTO-MODE-SECURITY-REVIEW-2026-09-24 M1: the tool runs the whole input, so
+	// a suffix past the clip ran unseen by the classifier.
+	it("never clips the action under review", () => {
+		const command = `python3 -c "${"# pad\n".repeat(400)}print('HIDDEN_ACTION')"`;
+		const out = renderTranscript([{ kind: "tool", tool: "bash", input: { command } }], { maxField: 100 });
+		expect(out).not.toContain("truncated");
+		expect(out).toContain("HIDDEN_ACTION");
+		expect(actionLength([{ kind: "tool", tool: "bash", input: { command } }])).toBeGreaterThan(MAX_ACTION_CHARS / 100);
 	});
 
 	it("drops oldest entries past the char budget but always keeps the action under review", () => {
@@ -80,7 +94,13 @@ describe("rule denials", () => {
 	});
 
 	it("clips a long denied subject like every other field", () => {
-		const out = renderTranscript([{ kind: "denied", tool: "bash", subject: "x".repeat(5000), rule: "Bash(rm:*)" }], { maxField: 50 });
+		const out = renderTranscript(
+			[
+				{ kind: "denied", tool: "bash", subject: "x".repeat(5000), rule: "Bash(rm:*)" },
+				{ kind: "tool", tool: "bash", input: { command: "ls" } },
+			],
+			{ maxField: 50 },
+		);
 		expect(out).toContain("truncated");
 	});
 });

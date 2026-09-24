@@ -41,6 +41,19 @@ export function pathArgument(input: Record<string, unknown> | undefined): string
 	return typeof path === "string" ? path : undefined;
 }
 
+/**
+ * The fix to name when a call spells its target in two path fields with
+ * different values (`path` and `file_path`), undefined otherwise. The tool
+ * validator keeps both and the tool reads only one, so a gate that picked the
+ * other judged a file the call never touches
+ * (AUTO-MODE-SECURITY-REVIEW-2026-09-24 H1).
+ */
+export function conflictingPathArguments(input: Record<string, unknown> | undefined): string | undefined {
+	const fields = ["path", "file_path", "notebook_path"].filter((key) => input?.[key] !== undefined);
+	if (new Set(fields.map((key) => input?.[key])).size < 2) return undefined;
+	return `This call names its target in ${fields.map((key) => `\`${key}\``).join(" and ")} with different values. Pass the target once, in the field the tool's schema defines.`;
+}
+
 /** The shared comparison form (lib/paths.ts): `/` separators, case-folded on darwin/win32. */
 const normalize = comparablePath;
 

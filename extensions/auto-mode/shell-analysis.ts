@@ -33,7 +33,7 @@
 import { isProtectedPath } from "../permissions/protected-paths.ts";
 import { isExecutionPrimitivePath, isSensitivePath } from "./sensitive.ts";
 import { isWithin, resolveForContainment, toAbsoluteBash } from "./paths.ts";
-import { checkoutGitRunsProgram } from "./git-checkout-programs.ts";
+import { checkoutGitRunsProgram, READ_HOOKS, RESET_HOOKS } from "./git-checkout-programs.ts";
 import { lstatSync, readdirSync, statSync } from "node:fs";
 import {
 	GIT_GLOBAL_SAFE,
@@ -722,15 +722,16 @@ const GIT_FILE_OPERANDS = new Set(["diff"]);
  * runs in (after every `-C`, each relative to the last) could still make it
  * run a program (git-checkout-programs.ts), or undefined.
  */
-function gitCheckoutReason(args: Token[], cwd: string, home: string, seen: Map<string, string | undefined>): string | undefined {
+function gitCheckoutReason(args: Token[], cwd: string, home: string, seen: Map<string, string | undefined>, hooks: readonly string[] = READ_HOOKS): string | undefined {
 	let dir = cwd;
 	for (let index = 0; index < args.length && args[index].value.startsWith("-"); index++) {
 		if (args[index].value === "-C" && args[index + 1]) dir = toAbsoluteBash(dir, args[++index].value, home);
 	}
 	// Memoized for one analysis only: nothing runs between its segments, but the
 	// model can rewrite `.git/config` between calls.
-	if (!seen.has(dir)) seen.set(dir, checkoutGitRunsProgram(dir, home));
-	const why = seen.get(dir);
+	const key = `${hooks.join(",")}\0${dir}`;
+	if (!seen.has(key)) seen.set(key, checkoutGitRunsProgram(dir, home, hooks));
+	const why = seen.get(key);
 	return why && `runs git where ${why}`;
 }
 
@@ -1017,6 +1018,21 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 			continue;
 		}
 
+		// Bash expands a glob before the command parses its options, so a match
+		// that starts with `-` arrives as an option no table judged: with a file
+		// named `--output=victim`, `sort *` writes `victim`
+		// (AUTO-MODE-SECURITY-REVIEW-2026-09-24 H4). A glob this check cannot
+		// enumerate escalates when its expansion could start with `-`.
+		for (const token of args) {
+			if (!token.glob) continue;
+			const matches = expandGlob(effectiveCwd, token.value, home);
+			const injects = matches === undefined ? /^[-*?[]/.test(token.value) : matches.some((match) => match !== token.value && match.startsWith("-"));
+			if (injects) {
+				escalate(`passes the glob ${token.value}, which can expand to a filename starting with -, read as an option`);
+				break;
+			}
+		}
+
 		if (name === "git") {
 			// `git reset --hard` is an in-project whole-tree discard: escalate, but
 			// mark it contained so the recoverability gate can clear it when the tree
@@ -1026,6 +1042,13 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 					// The reset acts on whatever -C/--git-dir/--work-tree names, not on
 					// the working directory the recoverability judge would inspect.
 					escalate("runs git reset --hard against another tree (-C/--git-dir/--work-tree), which cannot be judged here");
+					continue;
+				}
+				// Recoverable bytes do not make the reset free of other effects: the
+				// checkout's config and hooks run programs a clean tree says nothing about.
+				const programs = gitCheckoutReason(args, effectiveCwd, home, checkoutReasons, RESET_HOOKS);
+				if (programs) {
+					escalate(programs);
 					continue;
 				}
 				evidence.wholeTree = true;
@@ -1092,6 +1115,13 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 				// path (PREGATE-REVIEW-2026-09-23 P3).
 				const patternFirst =
 					PATTERN_FIRST_COMMANDS.has(name) && !check.parsed.seen.has("--files") && ![...check.parsed.seen].some((option) => PATTERN_OPTIONS.has(option));
+				// A glob where the pattern, program or format goes becomes that operand
+				// only in its first match; the rest are operands this check never saw
+				// (`grep *` reads every match but the first, jq's program is a filename).
+				const lead = operands[0];
+				if (lead?.glob && (patternFirst || spec.programFirst || spec.operandReason)) {
+					escalate(`runs ${name} with the glob ${lead.value} as its first operand, which ${name} does not read as a file, so the other matches go unchecked`);
+				}
 				if (patternFirst || spec.programFirst) operands.shift();
 				const reads = NO_FILE_OPERANDS.has(name) ? check.parsed.fileValues : [...operands, ...check.parsed.fileValues];
 				for (const word of reads) checkRead(word);

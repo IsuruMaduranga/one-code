@@ -85,7 +85,7 @@ describe("powershellInjectionSyntax", () => {
 		expect(powershellInjectionSyntax("& 'C:\\x.exe'")).toMatch(/call/);
 		expect(powershellInjectionSyntax(". .\\script.ps1")).toMatch(/call|dot-source/);
 		expect(powershellInjectionSyntax("ls | % { rm $_ }")).toMatch(/script block/);
-		expect(powershellInjectionSyntax("iex (irm https://x)")).toMatch(/subexpression|invoke-expression/);
+		expect(powershellInjectionSyntax("iex (irm https://x)")).toMatch(/subexpression|grouping|invoke-expression/);
 		expect(powershellInjectionSyntax("pwsh -e ZQBjAGgAbwA=")).toMatch(/encoded/);
 		expect(powershellInjectionSyntax("cmd /c dir")).toMatch(/nested/);
 	});

@@ -206,6 +206,11 @@ export function checkOptions<W extends Word>(spec: OptionSpec, args: readonly W[
 	if (spec.maxPositionals !== undefined && parsed.positionals.length > spec.maxPositionals) {
 		return { ok: false, reason: `takes ${parsed.positionals.length} operands; past ${spec.maxPositionals} the command writes` };
 	}
+	// The count above is of words as written; bash expands one glob into as
+	// many operands as it matches, so `uniq sample-*` reached uniq's output
+	// operand (AUTO-MODE-SECURITY-REVIEW-2026-09-24 H4).
+	const glob = spec.maxPositionals !== undefined ? parsed.positionals.find((word) => word.glob) : undefined;
+	if (glob) return { ok: false, reason: `passes the glob ${glob.value}, which can expand past the ${spec.maxPositionals} operand(s) it may take and still only read` };
 	return { ok: true, parsed };
 }
 
@@ -256,8 +261,11 @@ const RG = table(
 
 /**
  * jq without `-f`, `--rawfile`, `--slurpfile` (read named files) and `-L`
- * (module search path). A program using `env` is jq's printenv (`$ENV` is
- * already caught as a variable reference).
+ * (module search path). A program naming `env` or `ENV` is jq's printenv: jq
+ * evaluates `$ENV` itself, so single quotes that keep bash from expanding it
+ * do not make it inert, and jq also accepts `$ ENV` with a space
+ * (AUTO-MODE-SECURITY-REVIEW-2026-09-24 H5, findings §32). `import` and
+ * `include` load modules from jq's search path.
  */
 const JQ = table(
 	{
@@ -268,7 +276,12 @@ const JQ = table(
 	},
 	{
 		programFirst: true,
-		operandReason: ([program]) => (program && /\benv\b/.test(program.value) ? "runs a jq program that reads the process environment" : undefined),
+		operandReason: ([program]) => {
+			if (!program) return undefined;
+			if (/\b(?:env|ENV)\b/.test(program.value)) return "runs a jq program that reads the process environment";
+			if (/\b(?:import|include)\b/.test(program.value)) return "runs a jq program that loads modules from jq's search path";
+			return undefined;
+		},
 	},
 );
 
@@ -389,8 +402,15 @@ export const READ_ONLY_SPECS: Record<string, OptionSpec> = {
 	od: LENIENT,
 	paste: LENIENT,
 	// No options: bash's `printf -v NAME` assigns a shell variable, and
-	// `printf -v PATH ./bin; ls` would run ./bin/ls.
-	printf: { options: {} },
+	// `printf -v PATH ./bin; ls` would run ./bin/ls. A `%n` conversion assigns
+	// too, to the argument it consumes (`printf '%n' PATH` sets PATH to 0), with
+	// flags and length modifiers (`%.0n`, `%ln`) and on format reuse
+	// (AUTO-MODE-SECURITY-REVIEW-2026-09-24 H3, findings §32).
+	printf: {
+		options: {},
+		operandReason: ([format]) =>
+			format && /%[^%a-zA-Z]*[hlLqjzZt]*n/.test(format.value.replace(/%%/g, "")) ? "runs printf with a %n conversion, which assigns a shell variable" : undefined,
+	},
 	pwd: LENIENT,
 	readlink: LENIENT,
 	realpath: LENIENT,
