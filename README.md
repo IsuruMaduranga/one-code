@@ -246,8 +246,8 @@ Press **ctrl+q**, or **alt+m** on Windows and WSL, to cycle through manual,
 accept-edits, plan, and auto modes. In plan mode, the agent investigates and
 writes a plan file before you approve implementation.
 
-Use `/permissions` to inspect rules and `/auto-mode` to configure the
-classifier.
+Use `/permissions` to manage rules and approve calls auto mode blocked, and
+`/auto-mode` to configure the classifier.
 
 The permission system provides application-level controls. For operating
 system isolation, run One Code inside a container. See

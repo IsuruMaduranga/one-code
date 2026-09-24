@@ -116,10 +116,31 @@ Add `global` at the end to save it for every repository instead:
 /allow Bash(npm test:*) global
 ```
 
-To review the current mode and every loaded rule, including which project
-rules are trusted and which rules couldn't be parsed, run `/permissions`.
-
 Rules One Code adds are saved under `~/.onecode`, never under `~/.claude`.
+
+### Manage permissions in the panel
+
+Run `/permissions` to open the permissions panel. It has the same tabs as
+Claude Code's:
+
+- **Recently denied**: calls the auto-mode classifier blocked in this
+  session. See [Approve a call auto mode denied](#approve-a-call-auto-mode-denied).
+- **Allow**, **Ask**, and **Deny**: every rule, with the file it came from.
+  Type to filter the list. Choose **Add a new rule…** to add one, and pick
+  whether it's saved for this project or for every project.
+- **Auto mode**: the classifier's own rules and environment. See
+  [Configure auto mode](#configure-auto-mode).
+- **Workspace**: the working directory and any extra directories. See
+  [Workspace directories](#workspace-directories).
+
+Use ←/→ to switch tabs, ↑/↓ to move, Enter to open a row, and Esc to close.
+The footer always shows the keys that work where you are.
+
+The panel only changes One Code's own files and this session's grants. A
+rule from Claude Code's settings, the repository's `.claude` files, or
+managed settings is listed but read-only, and its detail view names the file
+to change instead. Whatever you change is passed to the model when the panel
+closes, so it knows a rule is gone.
 
 ## Permission modes
 
@@ -244,6 +265,31 @@ Reads and edits are confined to the working directory by default:
 Paths are compared after resolving symlinks, so a symlink inside the project
 that points outside it counts as outside.
 
+### Workspace directories
+
+To let One Code read another directory without asking, add it to the
+workspace. It works like Claude Code's additional working directories:
+
+- Run `/add-dir PATH`, then choose **Yes, for this session** or **Yes, and
+  remember this directory**. A remembered directory is saved to this
+  project's One Code settings.
+- Start One Code with `--add-dir PATH`. To add several, separate them with
+  `:` (`;` on Windows).
+- List them under `permissions.additionalDirectories` in your settings.
+- Add or remove them in the **Workspace** tab of `/permissions`.
+
+Reading inside a workspace directory then works like reading inside the
+working directory, and accept-edits mode can edit files there. Two things
+stay tighter than the working directory, on purpose. A credential file
+inside a workspace directory, such as a key under `.ssh`, still prompts.
+And in auto mode, every write or delete there still goes to the classifier.
+
+The filesystem root and your home directory can't be added; add something
+narrower. Directories listed in the repository's own `.claude` settings apply
+only after you trust the repository (see [Trusting a project](#trusting-a-project)).
+The system prompt lists the workspace directories that were in force when
+the session started.
+
 In auto mode, a shell command that reads outside the working directory, a
 bare `env`, or a `printenv` is never treated as safe by the deterministic
 check and always goes to the classifier.
@@ -292,6 +338,7 @@ current session only.
 | Hooks in `.claude/settings.json` or `.claude/settings.local.json` | At startup: "Run this project's hooks?", listing each command. | `~/.onecode/hooks/project-approvals.json` |
 | MCP servers in `.mcp.json` | At startup, for each new server. See [MCP servers](skills-plugins-and-mcp.md#mcp-servers). | `~/.onecode/mcp/project-approvals.json` |
 | `permissions.allow` rules in the project's settings files | The first time such a rule would decide a call: "Trust this repository's allow rules?" | `~/.onecode/permissions/project-allow-approvals.json` |
+| `permissions.additionalDirectories` in the project's settings files | The first time a read inside one of them would skip a prompt. The same question covers the project's allow rules. | `~/.onecode/permissions/project-allow-approvals.json` |
 
 `deny` and `ask` rules from a project never prompt; they only tighten the
 gate. Hooks and servers from your user settings, managed settings, or an
@@ -381,6 +428,21 @@ a safer route. You're not prompted per action while auto mode runs. After
 repeated blocks in a row, auto mode pauses and the next action prompts you;
 approving it resumes auto mode.
 
+### Approve a call auto mode denied
+
+When the classifier blocks a call, a notice says so and points to
+`/permissions`. If the block was wrong, open the **Recently denied** tab:
+
+- Press Enter on the call to approve it. The model is told it may retry.
+- Press `r` to approve it and have the model retry right away.
+
+Approvals apply when you close the panel. An approval covers that exact call
+once: the same tool, the same input, and the same directory. The retry then
+runs without the classifier, and the next call is judged as usual. Deny
+rules and the safety floor still apply to it. Claude Code handles this
+differently: it tells the model permission was granted, but judges the
+retry again.
+
 Allow rules that are broad enough to pre-approve arbitrary execution, such
 as `Bash(*)`, a wildcarded interpreter, or a rule that allows delegation to
 subagents, are suspended in auto mode so they can't bypass the classifier.
@@ -418,6 +480,13 @@ is blocked in a non-interactive one:
 Run `/auto-mode` (or `/auto-mode config`) to see the effective
 configuration: the files it was read from, the environment description,
 any extra rules, and which classifier model is in use.
+
+The **Auto mode** tab of `/permissions` edits the same configuration. It
+lists each section's built-in rules and your own, and you can add a rule
+as a plain sentence, edit it, or delete it. The environment opens in an
+editor. Changes are saved to `~/.onecode/settings.json` and apply from the
+next classifier call. The built-in rules are always in effect. Unlike Claude
+Code's panel, this one has no switch to turn a section's built-ins off.
 
 Run `/auto-mode setup` to have a model draft a configuration for your
 environment. It asks how you use One Code here, offers to scan recent shell

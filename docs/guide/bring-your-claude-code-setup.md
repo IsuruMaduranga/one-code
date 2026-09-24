@@ -78,6 +78,7 @@ The keys One Code honors:
 | `permissions.allow`, `permissions.deny`, `permissions.ask` | All | Project allow rules need one-time approval. See [Permissions](permissions-modes-and-auto-mode.md#permission-rules). |
 | `permissions.defaultMode` | All | A project file can't select `auto` or `bypassPermissions`. |
 | `permissions.disableBypassPermissionsMode` | All | `"disable"` refuses bypass mode from any source. |
+| `permissions.additionalDirectories` | All | Project directories need one-time approval. See [Workspace directories](permissions-modes-and-auto-mode.md#workspace-directories). |
 | `autoMode.*` | User, managed | Never read from project files. See [Configure auto mode](permissions-modes-and-auto-mode.md#configure-auto-mode). |
 | `hooks` | All | Project hooks need one-time approval. See [Hooks](hooks.md). |
 | `env.CLAUDE_CODE_SUBAGENT_MODEL` | User, managed | The only `env` key read. |
@@ -85,7 +86,7 @@ The keys One Code honors:
 | `enabledMcpjsonServers`, `disabledMcpjsonServers`, `enableAllProjectMcpServers` | User, untracked local | Never from a checked-in project file. |
 | `mcpServers` | `~/.claude.json`, `.claude/settings.local.json` | |
 
-Not honored: `permissions.additionalDirectories`, other `env` keys,
+Not honored: other `env` keys,
 `includeCoAuthoredBy`, `apiKeyHelper`, `forceLoginMethod`,
 `cleanupPeriodDays`, and `spinnerTipsEnabled`. Run `/doctor report` to see,
 for every file found, which keys were used, ignored, or refused.

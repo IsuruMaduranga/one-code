@@ -35,7 +35,8 @@ that explains it.
 | `/plugins` | Browse, install, and toggle plugins and marketplaces. | [Plugins](skills-plugins-and-mcp.md#plugins) |
 | `/mcp` | Manage MCP servers: status, reconnect, authenticate, enable, disable. | [MCP servers](skills-plugins-and-mcp.md#manage-servers) |
 | `/lsp` | Show language-server status. | [Language servers](configuration.md#language-server-diagnostics) |
-| `/permissions` | Show the permission mode and every loaded rule. | [Permissions](permissions-modes-and-auto-mode.md) |
+| `/permissions` | Open the permissions panel: approve calls auto mode denied, and manage rules, auto-mode rules, and workspace directories. | [Manage permissions in the panel](permissions-modes-and-auto-mode.md#manage-permissions-in-the-panel) |
+| `/add-dir [path]` | Add a workspace directory, for this session or remembered. | [Workspace directories](permissions-modes-and-auto-mode.md#workspace-directories) |
 | `/allow <rule> [global]` | Save an allow rule for this repository, or for every repository with `global`. | [Add a rule](permissions-modes-and-auto-mode.md#add-a-rule-during-a-session) |
 | `/auto-mode`, `/auto-mode config` | Show the effective auto-mode configuration. | [Auto mode](permissions-modes-and-auto-mode.md#configure-auto-mode) |
 | `/auto-mode setup` | Draft and save an auto-mode configuration for this environment. | |
@@ -139,6 +140,7 @@ extension install, use `pi` in place of `onecode`.
 | `--no-session` | Do not save this session. |
 | `--permission-mode <mode>` | Start in `default`, `acceptEdits`, `plan`, `auto`, `bypassPermissions`, or `dontAsk`. |
 | `--dangerously-skip-permissions` | Start in bypass mode. |
+| `--add-dir <paths>` | Add workspace directories for this run, separated by `:` (`;` on Windows). |
 | `--model <provider/id>` | Start on a model. Add `:<level>` to set thinking. |
 | `--thinking <level>` | Start at a thinking level. |
 | `--provider <name>`, `--api-key <key>` | Choose a provider and supply a key for this run. |

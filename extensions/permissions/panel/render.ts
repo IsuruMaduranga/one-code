@@ -318,7 +318,7 @@ function dialogLines(dialog: Dialog, input: PanelRenderInput, paint: PanelPaint)
 						`The ${view.autoMode.builtins[dialog.section]} built-in ${SECTION_LABEL[dialog.section].toLowerCase()} rules are always in effect in One Code. Your own rules are added after them and never replace them, so a rule can tighten or carve out, but not switch the built-ins off.`,
 					),
 					"",
-					...wrapped("Run /auto-mode defaults to print them."),
+					...wrapped("They are Claude Code's own classifier rules, embedded verbatim."),
 				],
 				footer: "Enter or Esc to go back",
 			};
