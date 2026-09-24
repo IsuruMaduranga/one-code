@@ -285,7 +285,8 @@ inside a workspace directory, such as a key under `.ssh`, still prompts.
 And in auto mode, every write or delete there still goes to the classifier.
 
 The filesystem root and your home directory can't be added; add something
-narrower. Directories listed in the repository's own `.claude` settings apply
+narrower. If a settings file lists one of them, One Code ignores it and warns
+you. Directories listed in the repository's own `.claude` settings apply
 only after you trust the repository (see [Trusting a project](#trusting-a-project)).
 The system prompt lists the workspace directories that were in force when
 the session started.

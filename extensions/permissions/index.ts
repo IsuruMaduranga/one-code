@@ -101,7 +101,7 @@ import {
 import { MODE_ENV, resolvedOrSelf, runtimeProtectedDirs } from "../lib/permission-gate.ts";
 import { CLASSIFIER_SETTING_CHANGED_CHANNEL } from "../lib/settings-channels.ts";
 import { describeProjectAllow, persistProjectAllowApproval, projectAllowApproved, projectDirectoryConsentEntry } from "./project-trust.ts";
-import { parseAddDirFlag, validateWorkspaceDirectory } from "./workspace.ts";
+import { parseAddDirFlag, tooBroadForWorkspace, validateWorkspaceDirectory } from "./workspace.ts";
 import { WORKSPACE_CHANNEL, type WorkspaceAnnouncement } from "../lib/workspace-channel.ts";
 import { findProjectRoot } from "../lib/git.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
@@ -280,6 +280,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	const activeSessionAllows = () => (mode === "auto" ? [] : sessionAllows);
 	let unparsableRules: string[] = [];
 	let warnedUnparsable = "";
+	let warnedTooBroad = "";
 	/** Plan mode's one writable file, announced by the plan-mode extension. */
 	let planFilePath: string | undefined;
 	/**
@@ -749,7 +750,19 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		projectAllowRaw = settings.projectAllow;
 		// A linked worktree shares its main checkout's consent (findProjectRoot).
 		projectRoot = findProjectRoot(ctx.cwd) ?? ctx.cwd;
-		settingsWorkspaceDirs = listWorkspaceDirectories(ctx.cwd, os.homedir());
+		// A settings file is held to what /add-dir and --add-dir refuse: `/` or `~`
+		// there would make almost the whole disk working space.
+		const tooBroad: string[] = [];
+		settingsWorkspaceDirs = listWorkspaceDirectories(ctx.cwd, os.homedir()).filter((dir) => {
+			const refusal = tooBroadForWorkspace(tryRealpath(dir.path) ?? dir.path, os.homedir());
+			if (refusal) tooBroad.push(`${dir.raw} in ${tildify(dir.settingsPath, os.homedir())}: ${refusal}`);
+			return !refusal;
+		});
+		const tooBroadSignature = tooBroad.join("\n");
+		if (tooBroad.length > 0 && ctx.hasUI && tooBroadSignature !== warnedTooBroad) {
+			warnedTooBroad = tooBroadSignature;
+			ctx.ui.notify(`Ignored permissions.additionalDirectories entries: ${tooBroad.join("; ")}`, "warning");
+		}
 		projectAllowTrusted = projectAllowApproved(projectRoot, projectTrustList());
 		refreshWorkspace();
 		// A rule that fails to parse is a rule the user believes is in force and is

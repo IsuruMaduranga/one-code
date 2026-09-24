@@ -41,14 +41,26 @@ export function validateWorkspaceDirectory(input: string, cwd: string, home: str
 		return { error: `${path} does not exist.` };
 	}
 	if (!isDirectory) return { error: `${path} is not a directory.` };
-	if (parse(path).root === path) return { error: "The filesystem root cannot be a workspace directory. Add a narrower directory." };
-	if (comparablePath(path) === comparablePath(tryRealpath(home) ?? resolve(home))) {
-		return { error: "Your home directory cannot be a workspace directory. Add a narrower directory." };
-	}
+	const tooBroad = tooBroadForWorkspace(path, home);
+	if (tooBroad) return { error: tooBroad };
 	if (isWithin(tryRealpath(cwd) ?? resolve(cwd), path)) return { error: `${path} is already inside the working directory.` };
 	const covering = existing.find((dir) => isWithin(dir, path));
 	if (covering) return { error: `${path} is already in the workspace (${covering}).` };
 	return { path };
+}
+
+/**
+ * Why a directory is too broad to be a workspace directory, or undefined: the
+ * filesystem root and the home directory itself would make almost every read
+ * on the machine a working-space read. Every source is checked, settings files
+ * included. `path` is judged as given, so resolve it first.
+ */
+export function tooBroadForWorkspace(path: string, home: string): string | undefined {
+	if (parse(path).root === path) return "The filesystem root cannot be a workspace directory. Add a narrower directory.";
+	if (comparablePath(path) === comparablePath(tryRealpath(home) ?? resolve(home))) {
+		return "Your home directory cannot be a workspace directory. Add a narrower directory.";
+	}
+	return undefined;
 }
 
 /**

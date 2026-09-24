@@ -137,6 +137,17 @@ describe("workspace directories in the gate", () => {
 		expect(announced).toEqual([[shared]]);
 	});
 
+	it("ignores the filesystem root and the home directory in settings, and says so", async () => {
+		mkdirSync(join(home, ".claude"), { recursive: true });
+		writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ permissions: { additionalDirectories: ["/", "~", "../shared"] } }));
+		await start();
+		expect(announced).toEqual([[shared]]);
+		expect((await read(join(home, "notes.md")))?.block).toBe(true);
+		const warning = (ctx._notified as Array<{ message: string }>).find((n) => n.message.startsWith("Ignored permissions.additionalDirectories"));
+		expect(warning?.message).toContain("The filesystem root cannot be a workspace directory");
+		expect(warning?.message).toContain("Your home directory cannot be a workspace directory");
+	});
+
 	it("asks to trust the repository's directories before applying them", async () => {
 		mkdirSync(join(cwd, ".claude"), { recursive: true });
 		writeFileSync(join(cwd, ".claude", "settings.json"), JSON.stringify({ permissions: { additionalDirectories: [shared] } }));
