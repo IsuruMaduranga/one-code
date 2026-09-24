@@ -9,8 +9,8 @@
 
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
-import { analyzeShellCommand, INLINE_SCRIPT_SHELLS, leadTokens, movesDirectory, parseCommand, resolvePayload } from "../auto-mode/shell-analysis.ts";
-import { pathArgument, resolveForContainment, toAbsolute } from "../auto-mode/paths.ts";
+import { analyzeShellCommand, INLINE_SCRIPT_SHELLS, isUnknownTilde, leadTokens, movesDirectory, parseCommand, resolvePayload } from "../auto-mode/shell-analysis.ts";
+import { pathArgument, resolveForContainment, toAbsolute, toAbsoluteBash } from "../auto-mode/paths.ts";
 import { isSensitivePath } from "../auto-mode/sensitive.ts";
 import { isProtectedPath, isWritingTool } from "./protected-paths.ts";
 import {
@@ -237,6 +237,9 @@ export function bashSubcommands(command: string): string[] | undefined {
 	if (parseFailed || complex) return undefined;
 	return segments.filter((seg) => seg.substitution === undefined).map((seg) => seg.raw).filter((raw) => raw.length > 0);
 }
+
+/** Redirect targets that are devices, never files: always fine under an allow rule. */
+const DEVICE_TARGETS = new Set(["/dev/null", "/dev/stdout", "/dev/stderr", "/dev/tty"]);
 
 /** The script a `sh -c '…'` / `bash -lc '…'` invocation runs, if any. */
 function inlineShellScript(args: string[]): string | undefined {
@@ -1010,6 +1013,53 @@ export function decide(params: DecideInput): Decision {
 		return { decision: "ask", cause: "protected-path" };
 	}
 
+	/**
+	 * Whether `target` (where `spelled` resolves) is working space: the working
+	 * directory, the harness's session dirs, the plan file, and the workspace
+	 * directories except for the credentials in them.
+	 */
+	const workingSpaceHolds = (spelled: string, target: string): boolean => {
+		const roots = [cwd, params.resolvedCwd, params.memoryDirPath, params.scratchpadDirPath, params.resultsDirPath, params.sessionDirPath];
+		if (roots.some((dir) => dir && isAtOrInsideDir(target, dir, cwd))) return true;
+		// A workspace directory is working space except for the credentials in it:
+		// adding a directory must not make its keys readable without a prompt.
+		// Judged on the spelling and on where it resolves, so a symlink cannot
+		// launder a credential in either direction.
+		const sensitive = [spelled, target].some((candidate) => isSensitivePath(toAbsolute(cwd, candidate, homedir())));
+		if (!sensitive && (params.workspaceDirs ?? []).some((dir) => isAtOrInsideDir(target, dir, cwd))) return true;
+		return params.planFilePath ? isPlanFilePath(target, params.planFilePath, cwd) : false;
+	};
+	const outsideWorkingDir = (): Decision => {
+		if (mode === "auto") return { decision: "classify", cause: "working-dir" };
+		if (mode === "dontAsk") return { decision: "deny", cause: "working-dir" };
+		return { decision: "ask", cause: "working-dir" };
+	};
+
+	/**
+	 * Whether a redirect on the line reads or writes outside the working space,
+	 * onto a protected path, or somewhere only known at runtime (an expansion,
+	 * a glob, `~user`, or a relative target after a `cd`).
+	 */
+	const redirectEscapes = (command: string): boolean => {
+		const { segments } = parseCommand(command.trim());
+		const moved = segments.some(movesDirectory);
+		const home = homedir();
+		for (const segment of segments) {
+			const targets = [...segment.redirects, ...segment.inputs.map((token) => token.value)];
+			if (targets.length > 0 && segment.unknownTarget) return true;
+			for (const target of targets) {
+				if (DEVICE_TARGETS.has(target) || target.startsWith("/dev/fd/")) continue;
+				if (isUnknownTilde(target) || /[*?[]/.test(target)) return true;
+				if (moved && !isAbsolute(target) && !target.startsWith("~")) return true;
+				const absolute = toAbsoluteBash(cwd, target, home);
+				const resolved = resolveForContainment(absolute) ?? absolute;
+				if (!workingSpaceHolds(target, resolved)) return true;
+				if ([absolute, resolved].some((path) => isProtectedPath(path, cwd) || (params.protectedDirs ?? []).some((dir) => isInsideDir(path, dir, cwd)))) return true;
+			}
+		}
+		return false;
+	};
+
 	const usableAllow =
 		mode === "auto"
 			? allow.filter((rule) => {
@@ -1026,7 +1076,13 @@ export function decide(params: DecideInput): Decision {
 				? findBashAllowRule(usableAllow, subject, tool, { readOnly: readOnlyShell })
 				: undefined
 			: usableAllow.find((r) => ruleMatches(r, toolName, subject, cwd));
-	if (allowRule) return { decision: "allow", rule: allowRule, cause: "rule" };
+	if (allowRule) {
+		// Claude Code's path constraints, checked before any allow rule: a rule
+		// for the command never covers a redirect outside the working space
+		// (`Bash(echo:*)` and `echo … >> ~/.zshrc`), or onto a protected path.
+		if (subjectKind(tool) === "command" && subject && normalizeToolName(tool) !== "powershell" && redirectEscapes(subject)) return outsideWorkingDir();
+		return { decision: "allow", rule: allowRule, cause: "rule" };
+	}
 
 	if (mode === "auto" && DELEGATION_TOOLS.has(tool)) {
 		return { decision: "classify", cause: "mode" };
@@ -1044,24 +1100,7 @@ export function decide(params: DecideInput): Decision {
 	 * was allowed in every mode including auto and plan, and acceptEdits wrote
 	 * anywhere on disk (PERMISSIONS-REVIEW-2026-09-05 H1, H2).
 	 */
-	const inWorkingSpace = (): boolean => {
-		const target = params.resolvedSubject ?? subject;
-		const roots = [cwd, params.resolvedCwd, params.memoryDirPath, params.scratchpadDirPath, params.resultsDirPath, params.sessionDirPath];
-		if (roots.some((dir) => dir && isAtOrInsideDir(target, dir, cwd))) return true;
-		// A workspace directory is working space except for the credentials in it:
-		// adding a directory must not make its keys readable without a prompt.
-		// Judged on the spelling and on where it resolves, so a symlink cannot
-		// launder a credential in either direction.
-		const sensitive = [subject, target].some((candidate) => isSensitivePath(toAbsolute(cwd, candidate, homedir())));
-		if (!sensitive && (params.workspaceDirs ?? []).some((dir) => isAtOrInsideDir(target, dir, cwd))) return true;
-		return params.planFilePath ? isPlanFilePath(target, params.planFilePath, cwd) : false;
-	};
-	const outsideWorkingDir = (): Decision => {
-		if (mode === "auto") return { decision: "classify", cause: "working-dir" };
-		if (mode === "dontAsk") return { decision: "deny", cause: "working-dir" };
-		return { decision: "ask", cause: "working-dir" };
-	};
-
+	const inWorkingSpace = (): boolean => workingSpaceHolds(subject, params.resolvedSubject ?? subject);
 	if (tier === "safe") {
 		// No path argument (grep/find/ls default to the cwd) is an in-project read.
 		if (!subject || inWorkingSpace()) return { decision: "allow", cause: "tier" };
