@@ -9,7 +9,7 @@
 
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
-import { analyzeShellCommand, decodeAnsiC, hasInjectionSyntax, leadTokens, parseCommand, resolvePayload } from "../auto-mode/shell-analysis.ts";
+import { analyzeShellCommand, hasInjectionSyntax, leadTokens, parseCommand, resolvePayload } from "../auto-mode/shell-analysis.ts";
 import { pathArgument, resolveForContainment } from "../auto-mode/paths.ts";
 import { isProtectedPath, isWritingTool } from "./protected-paths.ts";
 import {
@@ -225,12 +225,14 @@ export function matchesBashPattern(pattern: string, command: string): boolean {
 /**
  * The separately-executing subcommands of a bash command line — what `&&`,
  * `||`, `;`, `|`, `&`, and unquoted newlines separate — or undefined when the
- * line cannot be parsed (unbalanced quotes). A single simple command comes
+ * line cannot be parsed or uses a construct the pre-gate does not model (a
+ * subshell, a loop, a function): an allow rule covers the commands its author
+ * wrote, not `(npm test)` or a loop around them. A single simple command comes
  * back as itself.
  */
 export function bashSubcommands(command: string): string[] | undefined {
-	const { segments, parseFailed } = parseCommand(command.trim());
-	if (parseFailed) return undefined;
+	const { segments, parseFailed, complex } = parseCommand(command.trim());
+	if (parseFailed || complex) return undefined;
 	return segments.map((seg) => seg.raw).filter((raw) => raw.length > 0);
 }
 
@@ -246,79 +248,23 @@ function inlineShellScript(args: string[]): string | undefined {
 }
 
 /**
- * Shell text inside a line that runs as commands of its own: `$(…)`, `<(…)`,
- * `>(…)` and backticks. Parentheses are balanced and single-quoted text is
- * skipped. Inside double quotes `$(…)` and backticks still run, while `'`,
- * `$'` and `<(` are literal characters, so `echo "don't $(rm -f v)"` keeps
- * its substitution. Until 2026-09-24 none of it became a deny form, so
- * `cat $(rm -f x)` ran past `Bash(rm:*)` (PREGATE-REVIEW-2026-09-23 P7).
+ * The pieces of a line the grammar could not parse, split at every separator
+ * and substitution opener, for the deny forms only. Rough on purpose: a deny
+ * form may only widen, and `cat <<EOF; rm y` (a heredoc whose body comes later
+ * on the line) must still meet `Bash(rm:*)`.
  */
-export function substitutionBodies(command: string): string[] {
-	const bodies: string[] = [];
-	let inSingle = false;
-	let inDouble = false;
-	for (let i = 0; i < command.length; i++) {
-		const ch = command[i];
-		if (ch === "\\" && !inSingle) {
-			i++;
-			continue;
-		}
-		if (ch === '"' && !inSingle) {
-			inDouble = !inDouble;
-			continue;
-		}
-		// `$'…'` escapes its closing quote (`$'it\'s'`), so its `'` is not a
-		// delimiter; decodeAnsiC finds the real end (PREGATE-REVIEW-2026-09-23 A2).
-		if (ch === "$" && command[i + 1] === "'" && !inSingle && !inDouble) {
-			i = decodeAnsiC(command, i + 2).end - 1;
-			continue;
-		}
-		if (ch === "'" && !inDouble) {
-			inSingle = !inSingle;
-			continue;
-		}
-		if (inSingle) continue;
-		if (ch === "`") {
-			// A backslash escapes a backtick inside the body (`` `echo \`id\`` ``).
-			let end = i + 1;
-			while (end < command.length && command[end] !== "`") end += command[end] === "\\" ? 2 : 1;
-			if (end >= command.length) break;
-			bodies.push(command.slice(i + 1, end));
-			i = end;
-			continue;
-		}
-		if ((ch === "$" || (!inDouble && (ch === "<" || ch === ">"))) && command[i + 1] === "(") {
-			let depth = 0;
-			let quote: string | undefined;
-			let j = i + 1;
-			for (; j < command.length; j++) {
-				const c = command[j];
-				// An escaped character never opens or closes anything: bash runs
-				// the `rm` in `"$(printf \); rm x)"`. Single quotes take no escapes.
-				if (c === "\\" && quote !== "'") {
-					j++;
-					continue;
-				}
-				if (quote) {
-					if (c === quote) quote = undefined;
-					continue;
-				}
-				if (c === "'" || c === '"') quote = c;
-				else if (c === "(") depth++;
-				else if (c === ")" && --depth === 0) break;
-			}
-			bodies.push(command.slice(i + 2, j));
-			i = j;
-		}
-	}
-	return bodies;
+function roughPieces(line: string): string[] {
+	return line
+		.split(/[;&|\n()`]|\$\(|[<>]\(/)
+		.map((piece) => piece.trim())
+		.filter((piece) => piece && piece !== line);
 }
 
 /**
  * Every spelling of a command line a deny/ask pattern is tested against: the
  * raw line, each subcommand, and each subcommand's *payload form* — transparent
- * wrappers peeled (`env`, `command`, `nice`, `timeout`, `xargs`, …), subshell
- * and group punctuation stripped, the command word reduced to its lowercased
+ * wrappers peeled (`env`, `command`, `nice`, `timeout`, `xargs`, …), the
+ * commands inside subshells, groups and substitutions, the command word reduced to its lowercased
  * basename (`/bin/rm`, `\rm`, `RM` → `rm`), and a `sh|bash|zsh -c '…'` script
  * expanded recursively. Claude Code strips the same wrappers before its deny
  * check (`bashPermissions.ts stripSafeWrappers`); until 2026-09-05 `env rm -f
@@ -334,29 +280,29 @@ export function bashMatchForms(command: string, depth = 0): string[] {
 	forms.add(trimmed);
 	if (depth > 4) return [...forms];
 	const nested: string[] = [];
+	// The commands inside `$(…)`, backticks and `<(…)` are segments of their
+	// own. A line that did not parse still gives its best-effort segments, and
+	// its rough pieces besides.
 	const { segments, parseFailed } = parseCommand(trimmed);
-	if (!parseFailed) {
-		for (const segment of segments) {
-			if (segment.raw) forms.add(segment.raw);
-			const tokens = leadTokens(segment);
-			if (tokens.length === 0) continue;
-			// The wide reading also peels sudo/doas and returns the command lines
-			// wrapper options carry (`flock -c`, `env -S`).
-			const payload = resolvePayload(tokens, "wide");
-			nested.push(...payload.scripts);
-			if (!payload.command) continue;
-			const args = payload.args.map((token) => token.value);
-			forms.add([payload.command, ...args].join(" "));
-			if (SHELL_INTERPRETERS.has(payload.command)) {
-				const script = inlineShellScript(args);
-				if (script) nested.push(script);
-			}
-			// `eval` runs its arguments joined into one command line.
-			if (payload.command === "eval") nested.push(args.join(" "));
+	if (parseFailed) nested.push(...roughPieces(trimmed));
+	for (const segment of segments) {
+		if (segment.raw) forms.add(segment.raw);
+		const tokens = leadTokens(segment);
+		if (tokens.length === 0) continue;
+		// The wide reading also peels sudo/doas and returns the command lines
+		// wrapper options carry (`flock -c`, `env -S`).
+		const payload = resolvePayload(tokens, "wide");
+		nested.push(...payload.scripts);
+		if (!payload.command) continue;
+		const args = payload.args.map((token) => token.value);
+		forms.add([payload.command, ...args].join(" "));
+		if (SHELL_INTERPRETERS.has(payload.command)) {
+			const script = inlineShellScript(args);
+			if (script) nested.push(script);
 		}
+		// `eval` runs its arguments joined into one command line.
+		if (payload.command === "eval") nested.push(args.join(" "));
 	}
-	// Substitutions run even when the line as a whole does not parse here.
-	nested.push(...substitutionBodies(trimmed));
 	for (const script of nested) for (const form of bashMatchForms(script, depth + 1)) forms.add(form);
 	return [...forms];
 }

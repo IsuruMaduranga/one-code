@@ -52,6 +52,7 @@ import { checkRecoverability } from "../auto-mode/recoverability.ts";
 import { safetyControlWrite } from "../auto-mode/safety-floor.ts";
 import { isExecutionPrimitivePath, isSensitivePath } from "../auto-mode/sensitive.ts";
 import { analyzeShellCommand, type ShellEvidence } from "../auto-mode/shell-analysis.ts";
+import { bashParserReady, bashParserUnavailable } from "../lib/bash-parser.ts";
 import { powershellReadOnly } from "./powershell-rules.ts";
 import { isShellTool } from "./matcher.ts";
 import { gitStatusOutput } from "../lib/git.ts";
@@ -723,6 +724,12 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		badgeCtx = ctx;
 		lastReviewCtx = ctx;
 		sessionEpoch++;
+		// Not awaited: the grammar loads in a few milliseconds, and the gate
+		// awaits it per call. Only a failed load is worth telling the user about.
+		void bashParserReady().then(() => {
+			const why = bashParserUnavailable();
+			if (why && ctx.hasUI) ctx.ui.notify(`One Code: ${why}. Every bash command will be escalated or prompted.`, "error");
+		});
 		// A new session (`/clear`, `/resume`, a fork) starts with a clean gate: the
 		// previous conversation's user messages are not intent evidence for this
 		// one, its "don't ask again" grants and its pause state do not carry over
@@ -826,6 +833,9 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 
 	pi.on("tool_call", async (event, ctx) => {
 		lastReviewCtx = ctx;
+		// Settled long before the first call; a failed load leaves every bash
+		// command unparseable, which escalates or prompts.
+		await bashParserReady();
 		const normalizedTool = normalizeToolName(event.toolName);
 		const subject = extractSubject(normalizedTool, event.input as Record<string, unknown>);
 		// Resolved through symlinks so the protected-path and working-directory

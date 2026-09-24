@@ -543,8 +543,10 @@ describe("pre-gate review 2026-09-23: redirects, quoting, symlink-following opti
 		expect(bashMatchForms("< /dev/null rm -rf x")).toContain("rm -rf x");
 	});
 
-	it("treats <> as a write that creates its target", () => {
-		expect(parseCommand("echo hi <> new.txt").segments[0].redirects).toEqual(["new.txt"]);
+	it("escalates <>, which opens its target read-write and creates it", () => {
+		// tree-sitter-bash has no `<>`, so the line does not parse and nothing about it is trusted.
+		expect(parseCommand("echo hi <> new.txt").parseFailed).toBe(true);
+		expect(analyze("echo hi <> new.txt").verdict).toBe("escalate");
 		expect(analyze(`echo hi <> ${sh(join(outside, "new"))}`).verdict).toBe("escalate");
 	});
 

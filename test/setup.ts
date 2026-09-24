@@ -1,6 +1,7 @@
 import { beforeEach } from "vitest";
 import { setCapabilitySnapshotForTest } from "../extensions/lib/capability-index.ts";
 import { setModelFactsForTest } from "../extensions/lib/model-facts.ts";
+import { bashParserReady } from "../extensions/lib/bash-parser.ts";
 
 // Hermetic by default: no bundled model facts (see vitest.config.ts). A test
 // that wants the real table calls `setModelFactsForTest(undefined)` itself and
@@ -12,3 +13,7 @@ beforeEach(() => setModelFactsForTest({}));
 // "unscored" unless a test pins one with setCapabilitySnapshotForTest.
 setCapabilitySnapshotForTest(undefined);
 beforeEach(() => setCapabilitySnapshotForTest(undefined));
+
+// The bash grammar loads asynchronously; every shell parse after this is
+// synchronous, as it is once a session's hooks have awaited it.
+await bashParserReady();

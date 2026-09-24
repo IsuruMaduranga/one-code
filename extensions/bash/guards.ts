@@ -37,18 +37,14 @@ import {
 export const clip = (text: string, max = 200): string => (text.length > max ? `${text.slice(0, max)}…` : text);
 
 export function bashGuardReason(command: string, opts: { background: boolean }): string | undefined {
-	// A heredoc/here-string body is data, but parseCommand tokenizes it as live
-	// shell — every guard would misfire on body text (a literal `vim` or
-	// `while … sleep` inside a document). Judge only the command that PRECEDES
-	// the first `<<`: `sleep 600 <<< ""` is still a sleep (review T14), while a
-	// `cat <<EOF` body is never read.
-	const lead = command.split(/<</)[0];
-	if (lead !== command && !lead.trim()) return undefined;
-	const { segments, parseFailed } = parseCommand(lead);
-	if (parseFailed || segments.length === 0) return undefined;
+	// A heredoc body is data to the grammar, so a literal `vim` or `while …
+	// sleep` inside a document never trips a guard (review T14).
+	const parsed = parseCommand(command);
+	if (parsed.parseFailed || parsed.segments.length === 0) return undefined;
+	const { segments } = parsed;
 	const interactive = interactiveReason(segments);
 	if (interactive || opts.background) return interactive;
-	return waitReason(segments) ?? pollLoopReason(lead, segments) ?? orphanReason(lead, segments);
+	return waitReason(segments) ?? pollLoopReason(command, segments) ?? orphanReason(parsed.background, segments);
 }
 
 // ---------------------------------------------------------------------------
@@ -123,15 +119,14 @@ function waitReason(segments: Segment[]): string | undefined {
 // ---------------------------------------------------------------------------
 // Poll-loop guard
 
+const LOOPS = new Set(["for_statement", "c_style_for_statement", "while_statement"]);
+
+const inLoop = (seg: Segment) => seg.enclosing.some((construct) => LOOPS.has(construct));
+
 function pollLoopReason(command: string, segments: Segment[]): string | undefined {
-	const first = leadTokens(segments[0])[0]?.value;
-	if (first !== "while" && first !== "until" && first !== "for") return undefined;
-	// `sleep` counts only in command position (segment lead, or right after a
-	// `do`/`then`/`else` keyword) — `echo sleep` is data, not a wait.
-	const sleeps = segments.some((seg) => {
-		const { command: cmd } = resolvePayload(leadTokens(seg));
-		return cmd === "sleep";
-	});
+	if (!inLoop(segments[0])) return undefined;
+	// `sleep` counts only as a command inside the loop: `echo sleep` is data.
+	const sleeps = segments.some((seg) => inLoop(seg) && resolvePayload(leadTokens(seg)).command === "sleep");
 	if (!sleeps) return undefined;
 	return (
 		`Blocked: a foreground polling loop (\`${clip(command, 160)}\`). It occupies the whole session while it spins. ` +
@@ -143,54 +138,7 @@ function pollLoopReason(command: string, segments: Segment[]): string | undefine
 // ---------------------------------------------------------------------------
 // Orphan guard
 
-/** True when the command backgrounds something with a top-level unquoted `&`. */
-export function hasBackgroundAmp(command: string): boolean {
-	let inSingle = false;
-	let inDouble = false;
-	let inAnsiC = false; // $'…' honors backslash-escaped quotes, unlike '…'
-	let escape = false;
-	for (let i = 0; i < command.length; i++) {
-		const ch = command[i];
-		if (escape) {
-			escape = false;
-			continue;
-		}
-		if (inAnsiC) {
-			if (ch === "\\") escape = true;
-			else if (ch === "'") inAnsiC = false;
-			continue;
-		}
-		if (ch === "'" && !inSingle && !inDouble && command[i - 1] === "$") {
-			inAnsiC = true;
-			continue;
-		}
-		if (ch === "\\" && !inSingle) {
-			escape = true;
-			continue;
-		}
-		if (ch === "'" && !inDouble) {
-			inSingle = !inSingle;
-			continue;
-		}
-		if (ch === '"' && !inSingle) {
-			inDouble = !inDouble;
-			continue;
-		}
-		if (inSingle || inDouble || ch !== "&") continue;
-		const prev = command[i - 1];
-		const next = command[i + 1];
-		if (next === "&") {
-			i++; // logical &&
-			continue;
-		}
-		if (next === ">") continue; // &> redirect
-		if (prev === ">" || prev === "|") continue; // 2>&1 fd duplication, |& pipe
-		return true;
-	}
-	return false;
-}
-
-function orphanReason(command: string, segments: Segment[]): string | undefined {
+function orphanReason(background: boolean, segments: Segment[]): string | undefined {
 	const message = (via: string) =>
 		`Blocked: this command detaches a process with ${via}, leaving an orphan this session cannot manage — its output and exit status would be lost. ` +
 		"Run it with run_in_background: true instead: it returns a task id immediately, completion arrives as a task notification, output stays readable with task_output, and it can be stopped with task_stop. " +
@@ -204,7 +152,7 @@ function orphanReason(command: string, segments: Segment[]): string | undefined 
 	// Only a `wait` that comes LAST reaps the children — `wait; job &` still
 	// orphans the job it precedes.
 	const lastCmd = resolvePayload(leadTokens(segments[segments.length - 1])).command;
-	if (hasBackgroundAmp(command) && lastCmd !== "wait") return message("`&`");
+	if (background && lastCmd !== "wait") return message("`&`");
 	return undefined;
 }
 

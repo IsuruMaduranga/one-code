@@ -103,11 +103,21 @@ export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: W
 			`Run the equivalent from ${worktreePath} without the redirect.`,
 		);
 
-	/** Directory later segments run in; undefined = not statically known. */
+	/** Directory the current segment runs in; undefined = not statically known. */
 	let dir: string | undefined = worktreePath;
-	/** Subshell nesting: a `cd` inside `(...)` must not leak past the `)`. */
-	let depth = 0;
-	let dirBeforeSubshell: { dir: string | undefined } | undefined;
+	/**
+	 * The directory of each subshell scope (`Segment.scopes`, joined): a `cd`
+	 * inside `( … )`, a substitution or a pipeline member does not leak out. A
+	 * scope starts in its parent's directory.
+	 */
+	const scopeDirs = new Map<string, string | undefined>([["", worktreePath]]);
+	const dirOf = (scopes: number[]): string | undefined => {
+		for (let n = scopes.length; n >= 0; n--) {
+			const key = scopes.slice(0, n).join(".");
+			if (scopeDirs.has(key)) return scopeDirs.get(key);
+		}
+		return worktreePath;
+	};
 
 	const checkSegment = (seg: (typeof segments)[number]): string | undefined => {
 		const tokens = leadTokens(seg);
@@ -216,26 +226,10 @@ export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: W
 	};
 
 	for (const seg of segments) {
-		// Subshell bookkeeping reads the RAW tokens — leadTokens strips the very
-		// parens being counted. A `cd` between `(` and `)` is scoped: the tracked
-		// directory is restored when the subshell closes.
-		const first = seg.tokens[0]?.value ?? "";
-		const opens = (/^\(+/.exec(first)?.[0] ?? "").length;
-		if (opens > 0 && depth === 0) dirBeforeSubshell = { dir };
-		depth += opens;
-
+		dir = dirOf(seg.scopes);
 		const reason = checkSegment(seg);
 		if (reason) return reason;
-
-		const last = seg.tokens[seg.tokens.length - 1]?.value ?? "";
-		const closes = (/\)+$/.exec(last)?.[0] ?? "").length;
-		if (closes > 0 && depth > 0) {
-			depth = Math.max(0, depth - closes);
-			if (depth === 0 && dirBeforeSubshell) {
-				dir = dirBeforeSubshell.dir;
-				dirBeforeSubshell = undefined;
-			}
-		}
+		scopeDirs.set(seg.scopes.join("."), dir);
 	}
 	return undefined;
 }
