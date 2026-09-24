@@ -187,9 +187,12 @@ interface WrapperSpec {
 const WRAPPERS: Record<string, WrapperSpec> = {
 	// `builtin cd x` runs the builtin `cd` (PR #12 review: it hid a `cd` from the worktree guard).
 	builtin: { contained: true },
+	// Runs its argument as the command of that name (`busybox rm x`).
+	busybox: { contained: false, denyFormsOnly: true },
 	caffeinate: { values: ["-t", "-w"], contained: true, denyFormsOnly: true },
 	command: { contained: true },
 	doas: { values: ["-u", "-a"], unsafeValues: ["-C"], contained: false, denyFormsOnly: true },
+	exec: { values: ["-a"], contained: false, denyFormsOnly: true },
 	env: { values: ["-u", "--unset"], unsafeValues: ["-C", "--chdir"], scripts: ["-S", "--split-string"], contained: true },
 	flock: { values: ["-w", "--timeout", "-E", "--conflict-exit-code"], scripts: ["-c", "--command"], fileFirst: true, contained: false },
 	ionice: { values: ["-c", "--class", "-n", "--classdata"], contained: true },
@@ -212,6 +215,7 @@ const WRAPPERS: Record<string, WrapperSpec> = {
 	},
 	time: { values: ["-f", "--format"], unsafeValues: ["-o", "--output"], contained: true },
 	timeout: { values: ["-s", "--signal", "-k", "--kill-after"], durationFirst: true, contained: true },
+	watch: { values: ["-n", "--interval", "-q", "--equexit"], contained: false, denyFormsOnly: true },
 	xargs: {
 		values: ["-I", "-L", "-n", "-P", "-s", "-E", "-d", "--delimiter", "--max-args", "--max-procs", "--max-chars", "--max-lines", "--eof"],
 		unsafeValues: ["-a", "--arg-file"],

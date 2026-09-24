@@ -786,13 +786,20 @@ describe("PERMISSIONS-REVIEW-2026-09-05 medium findings", () => {
 				"nice -n 10 rm -rf x",
 				"xargs rm -rf",
 				'sh -c "ls && env rm -rf x"',
+				// Commands that run another (PR #12 review).
+				"exec rm -rf x",
+				"busybox rm -rf x",
+				"watch -n 5 rm -rf x",
+				"trap 'rm -rf x' EXIT",
+				"find . -name '*.log' -exec rm {} +",
+				"find . -execdir rm -f {} ';'",
 			]) {
 				expect(denied(command), command).toBe("deny");
 			}
 		});
 
 		it("does not over-match unrelated commands", () => {
-			for (const command of ["git rm --cached a", "echo rm", "grep rm README.md", "ls"]) {
+			for (const command of ["git rm --cached a", "echo rm", "grep rm README.md", "ls", "find . -name rm", "trap - EXIT"]) {
 				expect(denied(command), command).not.toBe("deny");
 			}
 		});

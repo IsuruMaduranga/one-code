@@ -264,8 +264,9 @@ function roughPieces(line: string): string[] {
  * raw line, each subcommand, and each subcommand's *payload form* — transparent
  * wrappers peeled (`env`, `command`, `nice`, `timeout`, `xargs`, …), the
  * commands inside subshells, groups and substitutions, the command word reduced to its lowercased
- * basename (`/bin/rm`, `\rm`, `RM` → `rm`), and a `sh|bash|zsh -c '…'` script
- * expanded recursively. Claude Code strips the same wrappers before its deny
+ * basename (`/bin/rm`, `\rm`, `RM` → `rm`), and a `sh|bash|zsh -c '…'` script,
+ * an `eval` line, a `trap` handler and a `find -exec` command expanded
+ * recursively. Claude Code strips the same wrappers before its deny
  * check (`bashPermissions.ts stripSafeWrappers`); until 2026-09-05 `env rm -f
  * x` ran past `Bash(rm:*)` here after a plain "Allow bash?" prompt
  * (PERMISSIONS-REVIEW-2026-09-05 M1). Deny/ask only — an allow rule keeps
@@ -314,6 +315,16 @@ export function bashMatchForms(command: string, depth = 0): string[] {
 		}
 		// `eval` runs its arguments joined into one command line.
 		if (payload.command === "eval") nested.push(args.join(" "));
+		// `trap 'cmd' EXIT` runs its first argument later, as a command line.
+		if (payload.command === "trap" && args[0] && !args[0].startsWith("-")) nested.push(args[0]);
+		// `find … -exec cmd {} ;` runs cmd on every match.
+		if (payload.command === "find") {
+			for (const [index, arg] of args.entries()) {
+				if (!["-exec", "-execdir", "-ok", "-okdir"].includes(arg)) continue;
+				const end = args.findIndex((word, at) => at > index && (word === ";" || word === "+"));
+				nested.push(args.slice(index + 1, end < 0 ? undefined : end).join(" "));
+			}
+		}
 	}
 	for (const script of nested) for (const form of bashMatchForms(script, depth + 1)) forms.add(form);
 	return [...forms];
