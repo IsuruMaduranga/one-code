@@ -137,9 +137,11 @@ export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: W
 			let j = 0;
 			while (j < leadArgs.length && leadArgs[j].value.startsWith("-") && !["-", "--"].includes(leadArgs[j].value)) j++;
 			if (leadArgs[j]?.value === "--") j++;
-			const target = leadArgs[j]?.value;
+			const targetToken = leadArgs[j];
+			const target = targetToken?.value;
 			if (!target) dir = homedir();
-			else if (hasExpansion(target) || target === "-") dir = undefined;
+			// A glob (`cd /r*po`) or an expansion lands wherever bash expands it.
+			else if (hasExpansion(target) || target === "-" || targetToken.glob || targetToken.dynamic) dir = undefined;
 			// An absolute (or ~) destination re-anchors the tracked directory
 			// even when it was unknown — later git commands become checkable again.
 			else if (isAbsolute(target) || target === "~" || target.startsWith("~/")) dir = toAbsoluteBash("/", target, homedir());

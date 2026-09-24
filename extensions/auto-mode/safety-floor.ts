@@ -266,7 +266,14 @@ export function shellNamesControlFile(
 			const target = payload.args.find((token) => !token.value.startsWith("-"));
 			// `cd -` goes to $OLDPWD.
 			const previous = payload.args.some((token) => token.value === "-");
-			return payload.command !== "cd" || previous || segment.enclosing.some((construct) => LOOPS.has(construct)) || !!target?.dynamic || (!!target && isUnknownTilde(target.value));
+			return (
+				payload.command !== "cd" ||
+				previous ||
+				segment.enclosing.some((construct) => LOOPS.has(construct)) ||
+				!!target?.dynamic ||
+				!!target?.glob ||
+				(!!target && isUnknownTilde(target.value))
+			);
 		});
 	// Lowercased on every platform: a false positive costs one stop.
 	const baseName = (path: string) => path.slice(path.replace(/\\/g, "/").lastIndexOf("/") + 1).toLowerCase();

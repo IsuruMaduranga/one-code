@@ -218,6 +218,7 @@ describe("H3: unmodelled writes reach the floor", () => {
 		expect(shellNamesControlFile("for i in 1 2; do printf x > settings.json; cd .claude; done", cwd, home)).toBe("settings.json");
 		expect(shellNamesControlFile('cd "$D"; printf x > settings.json', cwd, home)).toBe("settings.json");
 		expect(shellNamesControlFile("cd .claude; echo hi <> settings.json", cwd, home)).toBe("settings.json");
+		expect(shellNamesControlFile("cd .cla*; printf x > settings.json", cwd, home)).toBe("settings.json");
 		// `cd -` goes to $OLDPWD (PR #12 review).
 		expect(shellNamesControlFile("cd .claude; cd /tmp; cd -; printf x > settings.json", cwd, home)).toBe("settings.json");
 		// Where the directory is known, a same-named file elsewhere is not a control file.

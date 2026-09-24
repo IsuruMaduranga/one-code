@@ -68,6 +68,11 @@ describe("worktree git-isolation guard", () => {
 		expect(guard("for d in a b; do cd $d; done")).toBeUndefined();
 	});
 
+	it("treats a globbed cd target as an unknown directory (PR #12 review)", () => {
+		expect(guard("cd /r*po && git status")).toBeDefined();
+		expect(guard("cd /re?o && git stash pop")).toBeDefined();
+	});
+
 	it("follows a wrapped cd (PR #12 review)", () => {
 		expect(guard("builtin cd /repo && git status")).toBeDefined();
 		expect(guard("command cd /repo && git status")).toBeDefined();
