@@ -1,14 +1,30 @@
 /**
  * /permissions panel rendering (pure).
  *
- * Returns lines already cut to width; the wiring wraps them in a memoized
- * component and applies a final ANSI-aware truncate (pi-tui crashes on
- * overwide lines, so both layers guard). Wording follows Claude Code's panel
- * (findings §33), naming One Code where Claude Code names itself.
+ * Returns lines already cut to terminal columns (pi-tui crashes on an
+ * overwide line). Wording follows Claude Code's panel (findings §33), naming
+ * One Code where Claude Code names itself.
  */
 
-import { cutPlainText, panelTopRule, type RenderBlock as Block, searchBoxLines, truncateLine, visibleWidth, windowBlocks } from "../../lib/tui-render.ts";
-import { clampPanelState, detailRule, isRuleTab, type PanelState, type PanelView, ruleListRows, type RuleTab, TABS, type Tab } from "./state.ts";
+import { cutPlainText, panelTopRule, type RenderBlock as Block, searchBoxLines, truncateLine, visibleWidth, windowBlocks, wrapPlainText } from "../../lib/tui-render.ts";
+import {
+	AUTO_SECTION_LABELS,
+	AUTO_SECTIONS,
+	type AutoEntryRow,
+	type AutoSection,
+	autoEntry,
+	autoListRows,
+	clampPanelState,
+	detailRule,
+	type Dialog,
+	isRuleTab,
+	type PanelState,
+	type PanelView,
+	ruleListRows,
+	type RuleTab,
+	TABS,
+	type Tab,
+} from "./state.ts";
 
 export interface PanelPaint {
 	fg: (color: string, text: string) => string;
@@ -30,19 +46,35 @@ const TAB_TITLES: Record<Tab, string> = {
 	allow: "Allow",
 	ask: "Ask",
 	deny: "Deny",
+	automode: "Auto mode",
 };
 
-const SUBTITLES: Record<RuleTab, string> = {
+const SUBTITLES: Record<RuleTab | "automode", string> = {
 	allow: "One Code won't ask before using allowed tools.",
 	ask: "One Code will always ask for confirmation before using these tools.",
 	deny: "One Code will always reject requests to use denied tools.",
+	automode: "Extra rules for the auto mode classifier. Rules are plain sentences; new rules are saved to your user settings.",
 };
 
 const BEHAVIOR_LABEL: Record<RuleTab, string> = { allow: "allowed", ask: "ask", deny: "denied" };
 
+const SECTION_LABEL = AUTO_SECTION_LABELS;
+/** Claude Code's section colors. */
+const SECTION_COLOR: Record<AutoSection, string> = { allow: "success", soft_deny: "warning", hard_deny: "error" };
+/** Claude Code's section descriptions, from its "What kind of rule is this?" picker. */
+const SECTION_DESCRIPTION: Record<AutoSection, string> = {
+	allow: "Actions the classifier lets run without blocking",
+	soft_deny: "Actions the classifier blocks, unless a soft allow rule or your explicit direction applies",
+	hard_deny: "Actions the classifier always blocks; soft allow rules cannot override",
+};
+/** Wide enough for the longest section label, "Environment". */
+const LABEL_COLUMNS = 13;
+/** Environment lines the Auto mode tab shows before `… (+N more lines)`. */
+const ENVIRONMENT_PREVIEW = 4;
+
 const EMPTY_DENIALS = "No recent denials. Commands denied by the auto mode classifier will appear here.";
 
-function tabBar(state: PanelState, paint: PanelPaint, width: number): string {
+function tabBar(state: PanelState, paint: PanelPaint): string {
 	const chips = TABS.map((tab) => (tab === state.tab ? paint.inverse(` ${TAB_TITLES[tab]} `) : ` ${TAB_TITLES[tab]} `));
 	return ` ${paint.bold("Permissions")} ${chips.join(" ")}`;
 }
@@ -51,6 +83,11 @@ function tabBar(state: PanelState, paint: PanelPaint, width: number): string {
 function listLine(text: string, isCursor: boolean, paint: PanelPaint, width: number): string {
 	const line = cutPlainText(`${isCursor ? "❯" : " "} ${text}`, width - 1);
 	return isCursor ? paint.fg("accent", line) : line;
+}
+
+/** A dim ` · <source>` tail naming where an uneditable entry lives, cut to what is left of the row. */
+function sourceTail(entry: { editable: boolean; sourceLabel: string }, used: number, width: number): string {
+	return entry.editable ? "" : cutPlainText(`  · ${entry.sourceLabel.replace(/^From /, "")}`, Math.max(0, width - 3 - used));
 }
 
 function recentBlocks(input: PanelRenderInput, paint: PanelPaint): Block[] {
@@ -79,13 +116,54 @@ function ruleBlocks(input: PanelRenderInput, paint: PanelPaint, tab: RuleTab): B
 	const blocks: Block[] = rows.map((row, index) => {
 		const isCursor = index === state.cursor[tab];
 		if (row.kind === "add") return { lines: [listLine("Add a new rule…", isCursor, paint, width)], selectable: true };
-		// A rule One Code cannot edit names where it lives, dim, when it fits.
 		const raw = cutPlainText(row.rule.raw, width - 3);
-		const tail = row.rule.editable ? "" : cutPlainText(`  · ${row.rule.sourceLabel.replace(/^From /, "")}`, Math.max(0, width - 3 - visibleWidth(raw)));
+		const tail = sourceTail(row.rule, visibleWidth(raw), width);
 		return { lines: [`${listLine(raw, isCursor, paint, width)}${tail ? paint.fg("dim", tail) : ""}`], selectable: true };
 	});
 	if (view.rules[tab].length === 0) blocks.push({ lines: [paint.fg("dim", `  No ${tab} rules`)], selectable: false });
 	else if (rows.length === 0) blocks.push({ lines: [paint.fg("dim", "  No rules match the search")], selectable: false });
+	return blocks;
+}
+
+/** `  Soft deny    ` in the section's color: the fixed-width label column of an Auto mode row. */
+function sectionLabel(label: string, color: string | undefined, paint: PanelPaint): string {
+	const padded = label.padEnd(LABEL_COLUMNS);
+	return color ? paint.fg(color, padded) : padded;
+}
+
+function autoBlocks(input: PanelRenderInput, paint: PanelPaint): Block[] {
+	const { state, view, width } = input;
+	const rows = autoListRows(state, view);
+	const auto = view.autoMode;
+	const room = Math.max(8, width - 4 - LABEL_COLUMNS);
+	const marker = (isCursor: boolean) => (isCursor ? paint.fg("accent", "❯") : " ");
+	const body = (text: string, isCursor: boolean) => (isCursor ? paint.fg("accent", text) : text);
+	const blocks: Block[] = rows.map((row, index) => {
+		const isCursor = index === state.cursor.automode;
+		switch (row.kind) {
+			case "add":
+				return { lines: [listLine("Add a new rule…", isCursor, paint, width)], selectable: true };
+			case "builtins": {
+				const text = cutPlainText(`Built-in rules · ${auto.builtins[row.section]} · always in effect`, room);
+				return { lines: [`${marker(isCursor)} ${sectionLabel(SECTION_LABEL[row.section], SECTION_COLOR[row.section], paint)}${body(text, isCursor)}`], selectable: true };
+			}
+			case "entry": {
+				const text = cutPlainText(row.entry.text, room);
+				const tail = sourceTail(row.entry, LABEL_COLUMNS + visibleWidth(text), width);
+				const label = sectionLabel(SECTION_LABEL[row.entry.section], SECTION_COLOR[row.entry.section], paint);
+				return { lines: [`${marker(isCursor)} ${label}${body(text, isCursor)}${tail ? paint.fg("dim", tail) : ""}`], selectable: true };
+			}
+			case "environment": {
+				const env = auto.environment;
+				const head = cutPlainText(`${env.summary} · enter to edit`, room);
+				const indent = " ".repeat(2 + LABEL_COLUMNS);
+				const preview = env.lines.slice(0, ENVIRONMENT_PREVIEW).map((line) => paint.fg("dim", `${indent}${cutPlainText(line, room)}`));
+				const more = env.lines.length > ENVIRONMENT_PREVIEW ? [paint.fg("dim", `${indent}… (+${env.lines.length - ENVIRONMENT_PREVIEW} more lines)`)] : [];
+				return { lines: [`${marker(isCursor)} ${sectionLabel("Environment", undefined, paint)}${body(head, isCursor)}`, ...preview, ...more], selectable: true };
+			}
+		}
+	});
+	if (rows.length === 0) blocks.push({ lines: [paint.fg("dim", "  No rules match the search")], selectable: false });
 	return blocks;
 }
 
@@ -96,64 +174,150 @@ function ruleSummary(raw: string, paint: PanelPaint, width: number): string[] {
 	return lines;
 }
 
-/** The body and footer of an open dialog. */
-function dialogLines(input: PanelRenderInput, paint: PanelPaint): { lines: string[]; footer: string } | undefined {
-	const { state, view, width } = input;
-	const dialog = state.dialog;
-	if (!dialog) return undefined;
-	const text = (line: string) => cutPlainText(` ${line}`, width - 1);
+/** Yes/No or Edit/Delete: two cursor-marked options. */
+function choiceLines(options: [string, string], cursor: number, paint: PanelPaint, width: number): string[] {
+	return options.map((option, index) => listLine(option, cursor === index, paint, width));
+}
 
-	if (dialog.kind === "addRule") {
-		return {
-			lines: [
+/** An auto-mode entry's text wrapped under a heading, with where it lives. */
+function autoEntrySummary(entry: AutoEntryRow, paint: PanelPaint, width: number): string[] {
+	return [
+		paint.fg(SECTION_COLOR[entry.section], cutPlainText(`   ${SECTION_LABEL[entry.section]}`, width - 1)),
+		...wrapPlainText(entry.text, Math.max(10, width - 6)).map((line) => `   ${paint.bold(line)}`),
+		paint.fg("dim", cutPlainText(`   ${entry.sourceLabel}`, width - 1)),
+	];
+}
+
+/** The body and footer of an open dialog. */
+function dialogLines(dialog: Dialog, input: PanelRenderInput, paint: PanelPaint): { lines: string[]; footer: string } {
+	const { view, width } = input;
+	const text = (line: string) => cutPlainText(` ${line}`, width - 1);
+	const wrapped = (line: string) => wrapPlainText(line, Math.max(10, width - 2)).map((part) => ` ${part}`);
+	const gone = { lines: [paint.fg("dim", text("(this entry is no longer in the list)"))], footer: "Esc to go back" };
+	const draftBox = (draft: string, placeholder: string) => searchBoxLines(draft, placeholder, paint.fg, width).map((line) => line.replace("⌕ ", ""));
+
+	switch (dialog.kind) {
+		case "addRule":
+			return {
+				lines: [
+					paint.fg("accent", paint.bold(text(`Add ${dialog.behavior} permission rule`))),
+					"",
+					text("Permission rules are a tool name, optionally followed by a specifier in parentheses."),
+					text("e.g., WebFetch or Bash(ls:*)"),
+					"",
+					...draftBox(dialog.draft, "Enter permission rule…"),
+				],
+				footer: "Enter to submit · Esc to cancel",
+			};
+		case "saveRule": {
+			const lines = [
 				paint.fg("accent", paint.bold(text(`Add ${dialog.behavior} permission rule`))),
 				"",
-				text("Permission rules are a tool name, optionally followed by a specifier in parentheses."),
-				text("e.g., WebFetch or Bash(ls:*)"),
+				...ruleSummary(dialog.rule, paint, width),
 				"",
-				...searchBoxLines(dialog.draft, "Enter permission rule…", paint.fg, width).map((line) => line.replace("⌕ ", "")),
-			],
-			footer: "Enter to submit · Esc to cancel",
-		};
+				text("Where should this rule be saved?"),
+			];
+			view.destinations.forEach((destination, index) => {
+				lines.push(listLine(`${index + 1}. ${destination.label}`, index === dialog.cursor, paint, width));
+				lines.push(paint.fg("dim", cutPlainText(`     ${destination.description}`, width - 1)));
+			});
+			return { lines, footer: "↑↓ to choose · Enter to save · Esc to go back" };
+		}
+		case "ruleDetail": {
+			const rule = detailRule(dialog, view);
+			if (!rule) return gone;
+			const details = [...ruleSummary(rule.raw, paint, width), paint.fg("dim", cutPlainText(`   ${rule.sourceLabel}`, width - 1))];
+			if (!rule.editable) {
+				return { lines: [paint.bold(text("Rule details")), "", ...details, "", ...(rule.readOnlyNote ? wrapped(rule.readOnlyNote) : [])], footer: "Enter or Esc to go back" };
+			}
+			return {
+				lines: [
+					paint.fg("error", paint.bold(text(`Delete ${BEHAVIOR_LABEL[dialog.behavior]} tool?`))),
+					"",
+					...details,
+					"",
+					text("Are you sure you want to delete this permission rule?"),
+					...choiceLines(["Yes", "No"], dialog.cursor, paint, width),
+				],
+				footer: "↑↓ to choose · Enter to confirm · Esc to go back",
+			};
+		}
+		case "pickSection": {
+			const lines = [paint.fg("accent", paint.bold(text("Add auto mode rule"))), "", text("What kind of rule is this?")];
+			AUTO_SECTIONS.forEach((section, index) => {
+				lines.push(listLine(`${index + 1}. ${SECTION_LABEL[section]}`, index === dialog.cursor, paint, width));
+				lines.push(paint.fg("dim", cutPlainText(`     ${SECTION_DESCRIPTION[section]}`, width - 1)));
+			});
+			return { lines, footer: "↑↓ to choose · Enter to select · Esc to cancel" };
+		}
+		case "autoRuleInput":
+			return {
+				lines: [
+					paint.fg("accent", paint.bold(text(`${dialog.editKey ? "Edit" : "Add"} ${SECTION_LABEL[dialog.section].toLowerCase()} rule`))),
+					"",
+					...wrapped("Write the rule as a plain sentence. A short label up front helps, e.g., Database Writes: UPDATE statements against the local dev database."),
+					"",
+					...draftBox(dialog.draft, "Enter rule…"),
+					paint.fg("dim", text("Saved to your One Code user settings, for every project.")),
+				],
+				footer: "Enter to save · Esc to cancel",
+			};
+		case "autoRuleDetail": {
+			const entry = autoEntry(dialog.key, view);
+			if (!entry) return gone;
+			if (!entry.editable) {
+				return { lines: [paint.bold(text("Auto mode rule")), "", ...autoEntrySummary(entry, paint, width), "", ...(entry.readOnlyNote ? wrapped(entry.readOnlyNote) : [])], footer: "Enter or Esc to go back" };
+			}
+			return {
+				lines: [paint.bold(text("Auto mode rule")), "", ...autoEntrySummary(entry, paint, width), "", ...choiceLines(["Edit", "Delete"], dialog.cursor, paint, width)],
+				footer: "↑↓ to choose · Enter to confirm · e to edit · d to delete · Esc to go back",
+			};
+		}
+		case "autoRuleDelete": {
+			const entry = autoEntry(dialog.key, view);
+			if (!entry) return gone;
+			const last = view.autoMode.entries.filter((other) => other.section === entry.section && other.editable).length === 1;
+			return {
+				lines: [
+					paint.fg("error", paint.bold(text("Delete auto mode rule?"))),
+					"",
+					...autoEntrySummary(entry, paint, width),
+					"",
+					...wrapped(
+						`Are you sure you want to delete this rule? The classifier stops applying it on your next request.${last ? " This is your last rule in this section; the built-in rules still apply." : ""}`,
+					),
+					...choiceLines(["Yes", "No"], dialog.cursor, paint, width),
+				],
+				footer: "↑↓ to choose · Enter to confirm · Esc to go back",
+			};
+		}
+		case "builtinsInfo":
+			return {
+				lines: [
+					paint.fg(SECTION_COLOR[dialog.section], paint.bold(text(`${SECTION_LABEL[dialog.section]} · built-in rules`))),
+					"",
+					...wrapped(
+						`The ${view.autoMode.builtins[dialog.section]} built-in ${SECTION_LABEL[dialog.section].toLowerCase()} rules are always in effect in One Code. Your own rules are added after them and never replace them, so a rule can tighten or carve out, but not switch the built-ins off.`,
+					),
+					"",
+					...wrapped("Run /auto-mode defaults to print them."),
+				],
+				footer: "Enter or Esc to go back",
+			};
+		case "envConfirm":
+			return {
+				lines: [
+					paint.fg("warning", paint.bold(text("Replace the built-in environment?"))),
+					"",
+					...wrapped(
+						"Writing your own environment replaces the built-in default document: the classifier context that defines trusted hosts, sensitive targets, and repository scope. The editor starts from the full default text so you can edit rather than rewrite; deleting all your environment entries later restores the default.",
+					),
+					"",
+					...choiceLines(["Yes, edit the environment", "No"], dialog.cursor, paint, width),
+				],
+				footer: "↑↓ to choose · Enter to confirm · Esc to go back",
+			};
 	}
-
-	if (dialog.kind === "saveRule") {
-		const lines = [
-			paint.fg("accent", paint.bold(text(`Add ${dialog.behavior} permission rule`))),
-			"",
-			...ruleSummary(dialog.rule, paint, width),
-			"",
-			text("Where should this rule be saved?"),
-		];
-		view.destinations.forEach((destination, index) => {
-			const isCursor = index === dialog.cursor;
-			lines.push(listLine(`${index + 1}. ${destination.label}`, isCursor, paint, width));
-			lines.push(paint.fg("dim", cutPlainText(`     ${destination.description}`, width - 1)));
-		});
-		return { lines, footer: "↑↓ to choose · Enter to save · Esc to go back" };
-	}
-
-	const rule = detailRule(dialog, view);
-	if (!rule) return { lines: [paint.fg("dim", text("(this rule is no longer in the list)"))], footer: "Esc to go back" };
-	const details = [...ruleSummary(rule.raw, paint, width), paint.fg("dim", cutPlainText(`   ${rule.sourceLabel}`, width - 1))];
-	if (!rule.editable) {
-		return {
-			lines: [paint.bold(text("Rule details")), "", ...details, "", ...(rule.readOnlyNote ? [text(rule.readOnlyNote)] : [])],
-			footer: "Enter or Esc to go back",
-		};
-	}
-	return {
-		lines: [
-			paint.fg("error", paint.bold(text(`Delete ${BEHAVIOR_LABEL[dialog.behavior]} tool?`))),
-			"",
-			...details,
-			"",
-			text("Are you sure you want to delete this permission rule?"),
-			listLine("Yes", dialog.cursor === 0, paint, width),
-			listLine("No", dialog.cursor === 1, paint, width),
-		],
-		footer: "↑↓ to choose · Enter to confirm · Esc to go back",
-	};
 }
 
 /**
@@ -186,27 +350,28 @@ export function renderPanel(input: PanelRenderInput, paint: PanelPaint): string[
 	const { state, view, width, height } = input;
 	clampPanelState(state, view);
 
-	const out: string[] = [panelTopRule(paint.fg, width), tabBar(state, paint, width)];
+	const out: string[] = [panelTopRule(paint.fg, width), tabBar(state, paint)];
 	if (input.status) out.push(paint.fg("dim", cutPlainText(` ${input.status}`, width - 1)));
 	out.push("");
 
 	let footer: string[];
-	const dialog = dialogLines(input, paint);
-	if (dialog) {
+	if (state.dialog) {
+		const dialog = dialogLines(state.dialog, input, paint);
 		out.push(...dialog.lines);
 		footer = [dialog.footer];
 	} else {
 		let blocks: Block[];
-		if (isRuleTab(state.tab)) {
-			out.push(cutPlainText(` ${SUBTITLES[state.tab]}`, width - 1));
+		if (state.tab === "recent") {
+			if (view.denials.length === 0) blocks = [{ lines: [paint.fg("dim", cutPlainText(` ${EMPTY_DENIALS}`, width - 1))], selectable: false }];
+			else {
+				out.push(cutPlainText(" Commands recently denied by the auto mode classifier.", width - 1), "");
+				blocks = recentBlocks(input, paint);
+			}
+		} else {
+			out.push(...wrapPlainText(SUBTITLES[state.tab], Math.max(10, width - 2)).map((line) => ` ${line}`));
 			const placeholder = state.searching ? "Search…" : "Type to search…";
 			out.push(...searchBoxLines(state.search[state.tab], placeholder, paint.fg, width));
-			blocks = ruleBlocks(input, paint, state.tab);
-		} else if (view.denials.length === 0) {
-			blocks = [{ lines: [paint.fg("dim", cutPlainText(` ${EMPTY_DENIALS}`, width - 1))], selectable: false }];
-		} else {
-			out.push(cutPlainText(" Commands recently denied by the auto mode classifier.", width - 1), "");
-			blocks = recentBlocks(input, paint);
+			blocks = isRuleTab(state.tab) ? ruleBlocks(input, paint, state.tab) : autoBlocks(input, paint);
 		}
 		footer = footerFor(state, view);
 		const budget = Math.max(3, height - out.length - 2 - footer.length - (state.notice ? 1 : 0));

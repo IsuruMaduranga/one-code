@@ -29,7 +29,10 @@ import { classify, createClassifierState } from "../auto-mode/classifier.ts";
 import {
 	type AutoModeConfig,
 	autoModeSettingsPaths,
+	listAutoModeEntries,
 	loadAutoModeConfig,
+	type SourcedAutoModeEntry,
+	updateOneCodeAutoModeList,
 	claudeUserPermissionAllow,
 	loadAutoModeConfigWithDiagnostics,
 	oneCodePermissionAllow,
@@ -41,6 +44,7 @@ import { auditPermissionAllow, renderProposal, settingsPatch } from "../auto-mod
 import { draftSetup, gatherFacts } from "../auto-mode/setup-run.ts";
 import { modelPickerComponent, type PickerEntry, pickerSpec, toPickerEntries } from "../auto-mode/model-picker.ts";
 import { DEFAULT_ENVIRONMENT } from "../auto-mode/defaults.ts";
+import { buildRuleset } from "../auto-mode/classifier-prompt.ts";
 import type { TranscriptEntry } from "../auto-mode/transcript.ts";
 import { appendDecision, type DecisionEntry, decisionEntry } from "../auto-mode/decision-log.ts";
 import { loadProjectInstructions } from "../auto-mode/instructions.ts";
@@ -98,8 +102,9 @@ import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code
 import { recordUsage } from "../lib/usage-bus.ts";
 import { announceLocalCommand, registerLocalCommand } from "../lib/local-command.ts";
 import { tildify } from "../lib/paths.ts";
-import { openPermissionsPanel } from "./panel/host.ts";
-import { type Destination, RULE_TABS, type RuleRow, type RuleTab } from "./panel/state.ts";
+import { openPermissionsPanel, type PermissionsPanelHost } from "./panel/host.ts";
+import { AUTO_SECTION_LABELS, AUTO_SECTIONS, type AutoEntryRow, type AutoModeView, type Destination, RULE_TABS, type RuleRow, type RuleTab } from "./panel/state.ts";
+import { builtinRuleCounts } from "../auto-mode/rules.ts";
 
 const DENIED_BY_USER =
 	"The user doesn't want to proceed with this tool use. The tool use was rejected. Adjust your approach based on the user's feedback instead of retrying the same call.";
@@ -1370,14 +1375,90 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		].join("\n");
 	};
 
+	/** Built-in rules per auto-mode section, counted once from the embedded ruleset. */
+	let builtinCounts: ReturnType<typeof builtinRuleCounts> | undefined;
+
+	const autoSource = (entry: SourcedAutoModeEntry, home: string): { label: string; editable: boolean; note?: string } => {
+		const where = tildify(entry.path, home);
+		if (entry.source === "onecode-user") return { label: `From One Code user settings (${where})`, editable: true };
+		if (entry.source === "claude-user") {
+			return { label: `From Claude Code user settings (${where})`, editable: false, note: `One Code does not edit Claude Code's files. Change this entry in ${where}; it stays in effect here.` };
+		}
+		return { label: "From managed settings", editable: false, note: "This entry is configured by managed settings and cannot be modified. Contact your system administrator for more information." };
+	};
+
+	const autoModeView = (home: string): AutoModeView => {
+		const listed = listAutoModeEntries(home);
+		const entries: AutoEntryRow[] = [];
+		for (const section of AUTO_SECTIONS) {
+			for (const entry of listed.filter((e) => e.key === section)) {
+				const source = autoSource(entry, home);
+				entries.push({
+					key: `${entry.source}\0${entry.path}\0${section}\0${entry.text}`,
+					section,
+					text: entry.text,
+					sourceLabel: source.label,
+					editable: source.editable,
+					...(source.note ? { readOnlyNote: source.note } : {}),
+				});
+			}
+		}
+		const environment = loadAutoModeConfig(home).environment;
+		const envSources = [...new Set(listed.filter((e) => e.key === "environment").map((e) => autoSource(e, home).label.replace(/^From /, "").replace(/ \(.*\)$/, "")))];
+		const isDefault = envSources.length === 0;
+		const extendsDefault = !isDefault && DEFAULT_ENVIRONMENT.every((line) => environment.includes(line));
+		builtinCounts ??= builtinRuleCounts(buildRuleset(DEFAULT_ENVIRONMENT));
+		return {
+			builtins: builtinCounts,
+			entries,
+			environment: {
+				lines: environment,
+				summary: isDefault ? "Built-in default" : `${extendsDefault ? "Extends" : "Replaces"} the built-in default · from ${envSources.join(" and ")}`,
+				isDefault,
+			},
+		};
+	};
+
+	/** A panel row key for an auto-mode entry: source, file, section, text. */
+	const parseAutoKey = (key: string) => {
+		const [source, path, section, text] = key.split("\0");
+		if (source !== "onecode-user") throw new Error(`One Code can only change auto mode rules in its own settings file; this one is in ${tildify(path, os.homedir())}.`);
+		return { section: section as (typeof AUTO_SECTIONS)[number], text };
+	};
+	const autoLabel = (section: (typeof AUTO_SECTIONS)[number]) => AUTO_SECTION_LABELS[section].toLowerCase();
+
+	/**
+	 * Edit One Code's own `autoMode.environment` in pi's editor. It starts from
+	 * One Code's entries, or from the built-in default when nothing else sets
+	 * one (Claude Code starts from the full default text too). Saving it empty
+	 * removes the key, which restores the default. Returns the change line.
+	 */
+	const editEnvironment = async (ctx: ExtensionContext, home: string): Promise<string | undefined> => {
+		const listed = listAutoModeEntries(home).filter((e) => e.key === "environment");
+		const own = listed.filter((e) => e.source === "onecode-user").map((e) => e.text);
+		const others = listed.length - own.length;
+		const start = own.length > 0 ? own : others > 0 ? [] : DEFAULT_ENVIRONMENT;
+		const title =
+			"Auto mode environment: one entry per line, `### ` lines are section headers. Save it empty to restore the built-in default." +
+			(others > 0 ? ` These lines are added to the ${others} entries from Claude Code's user or managed settings.` : "");
+		const edited = await ctx.ui.editor(title, start.join("\n"));
+		if (edited === undefined) return undefined;
+		const lines = edited.split("\n").map((line) => line.trimEnd()).filter((line) => line.trim().length > 0);
+		if (lines.join("\n") === start.join("\n")) return undefined;
+		updateOneCodeAutoModeList("environment", () => lines, home);
+		autoConfig = undefined;
+		return lines.length > 0 ? `Saved your auto mode environment to ${tildify(oneCodeSettingsPath(home), home)}` : "Restored the built-in auto mode environment";
+	};
+
 	/**
 	 * /permissions — Claude Code's panel (findings §33): approve or retry calls
-	 * the classifier denied, and list, add or delete rules. Registered plainly,
-	 * not through registerLocalCommand: the breadcrumb carries what the panel
-	 * did, so it is announced after the panel closes, not before it opens.
+	 * the classifier denied, list, add or delete permission rules, and manage
+	 * auto mode's own rules and environment. Registered plainly, not through
+	 * registerLocalCommand: the breadcrumb carries what the panel did, so it is
+	 * announced after the panel closes, not before it opens.
 	 */
 	pi.registerCommand("permissions", {
-		description: "Review recently denied calls and manage allow, ask and deny rules",
+		description: "Review recently denied calls and manage permission and auto mode rules",
 		handler: async (args: string, ctx: ExtensionContext) => {
 			const home = os.homedir();
 			if (!ctx.hasUI) {
@@ -1385,10 +1466,11 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				ctx.ui.notify(permissionsSummary(), "info");
 				return;
 			}
-			const result = await openPermissionsPanel(ctx, {
+			const host: PermissionsPanelHost = {
 				view: () => ({
 					denials: denials.list().map((d) => ({ id: d.id, display: d.display, ...(d.rule ? { rule: d.rule } : {}) })),
 					rules: ruleRows(ctx.cwd, home),
+					autoMode: autoModeView(home),
 					destinations: ruleDestinations(ctx.cwd, home),
 					ruleError: (raw) =>
 						parseRule(raw) ? undefined : `Could not parse "${raw}". A rule is a tool name, optionally followed by a pattern in parentheses: Bash(npm test:*).`,
@@ -1413,17 +1495,73 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 					}
 					return `Deleted ${behavior} rule ${raw}`;
 				},
-			});
+				// Auto mode rules go to One Code's user settings: autoMode is never read
+				// from project settings (decisions/modes.md). The cached config is dropped
+				// so the next classifier call reads the change.
+				addAutoRule: (section, text) => {
+					updateOneCodeAutoModeList(
+						section,
+						(entries) => {
+							if (entries.includes(text)) throw new Error(`That ${autoLabel(section)} rule is already in your settings.`);
+							return [...entries, text];
+						},
+						home,
+					);
+					autoConfig = undefined;
+					return `Added auto mode ${autoLabel(section)} rule: ${text}`;
+				},
+				editAutoRule: (key, text) => {
+					const { section, text: old } = parseAutoKey(key);
+					updateOneCodeAutoModeList(
+						section,
+						(entries) => {
+							const index = entries.indexOf(old);
+							if (index < 0) throw new Error("That rule is no longer in your settings.");
+							return entries.map((entry, i) => (i === index ? text : entry));
+						},
+						home,
+					);
+					autoConfig = undefined;
+					return `Updated auto mode ${autoLabel(section)} rule: ${text}`;
+				},
+				deleteAutoRule: (key) => {
+					const { section, text } = parseAutoKey(key);
+					updateOneCodeAutoModeList(
+						section,
+						(entries) => {
+							if (!entries.includes(text)) throw new Error("That rule is no longer in your settings.");
+							return entries.filter((entry) => entry !== text);
+						},
+						home,
+					);
+					autoConfig = undefined;
+					return `Deleted auto mode ${autoLabel(section)} rule: ${text}`;
+				},
+			};
+
+			// The environment editor cannot open over the panel: close, edit, reopen.
+			let session = await openPermissionsPanel(ctx, host);
+			while (session.editEnvironment) {
+				session.editEnvironment = false;
+				try {
+					const change = await editEnvironment(ctx, home);
+					if (change) session.changes.push(change);
+				} catch (error) {
+					session.state.notice = `Could not save the environment: ${(error as Error).message}`;
+				}
+				session = await openPermissionsPanel(ctx, host, session);
+			}
+			const { state, changes } = session;
 
 			// Approving is what mints the grants, so it happens once, on close,
 			// as in Claude Code: a row toggled on and off again grants nothing.
-			const approved = denials.approve(result.approved);
-			const retried = approved.filter((d) => result.retry.has(d.id));
+			const approved = denials.approve(state.approved);
+			const retried = approved.filter((d) => state.retry.has(d.id));
 			const displays = approved.map((d) => d.display);
 			if (retried.length > 0) {
-				// Claude Code's retry: the command's own output is empty, a banner
-				// says what was allowed, and a turn starts with the grant message.
-				announceLocalCommand(pi, { name: "permissions", args, stdout: result.changes.join("\n") });
+				// Claude Code's retry: a banner says what was allowed, and a turn
+				// starts with the grant message.
+				announceLocalCommand(pi, { name: "permissions", args, stdout: changes.join("\n") });
 				ctx.ui.notify(`Allowed ${retried.map((d) => d.display).join(", ")}`, "info");
 				pi.sendMessage(
 					{ customType: PERMISSION_RETRY_TYPE, content: permissionGrantedMessage(displays), display: false },
@@ -1431,8 +1569,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				);
 				return;
 			}
-			if (approved.length === 0 && result.changes.length === 0) return;
-			const stdout = [...(approved.length > 0 ? [`Approved ${displays.join(", ")}`] : []), ...result.changes].join("\n");
+			if (approved.length === 0 && changes.length === 0) return;
+			const stdout = [...(approved.length > 0 ? [`Approved ${displays.join(", ")}`] : []), ...changes].join("\n");
 			announceLocalCommand(pi, { name: "permissions", args, stdout });
 			// The grant message rides with the breadcrumb on the next prompt; no turn starts.
 			if (approved.length > 0) pi.events.emit(REMINDER_CHANNEL, { text: `${permissionGrantedMessage(displays)}\n`, placement: "user-prepend", raw: true });

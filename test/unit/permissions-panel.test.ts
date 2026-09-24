@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { visibleWidth } from "../../extensions/lib/text-width.ts";
 import { decodePanelKey, type PanelKey } from "../../extensions/permissions/panel/keys.ts";
 import { describeRule, type PanelPaint, renderPanel } from "../../extensions/permissions/panel/render.ts";
-import { applyPanelKey, initialPanelState, type PanelEffect, type PanelState, type PanelView, type RuleRow } from "../../extensions/permissions/panel/state.ts";
+import { type AutoEntryRow, applyPanelKey, initialPanelState, type PanelEffect, type PanelState, type PanelView, type RuleRow } from "../../extensions/permissions/panel/state.ts";
 
 const paint: PanelPaint = { fg: (_color, text) => text, bold: (text) => text, inverse: (text) => `[${text}]` };
 
@@ -15,7 +15,21 @@ const rule = (raw: string, editable = true, behavior: "allow" | "ask" | "deny" =
 	...(editable ? {} : { readOnlyNote: "One Code does not edit Claude Code's files." }),
 });
 
+const autoEntry = (section: AutoEntryRow["section"], text: string, editable = true): AutoEntryRow => ({
+	key: `src\0${section}\0${text}`,
+	section,
+	text,
+	sourceLabel: editable ? "From One Code user settings (~/.onecode/settings.json)" : "From Claude Code user settings (~/.claude/settings.json)",
+	editable,
+	...(editable ? {} : { readOnlyNote: "One Code does not edit Claude Code's files." }),
+});
+
 const view = (overrides: Partial<PanelView> = {}): PanelView => ({
+	autoMode: {
+		builtins: { allow: 17, soft_deny: 69, hard_deny: 1 },
+		entries: [autoEntry("allow", "Staging Deploys: deploys to the staging cluster"), autoEntry("soft_deny", "Prod DB: any write to the production database", false)],
+		environment: { lines: ["### Org-wide", "a", "b", "c", "d", "e"], summary: "Built-in default", isDefault: true },
+	},
 	denials: [
 		{ id: 1, display: "bash(rm -rf ../elsewhere)", rule: "Irreversible Local Destruction" },
 		{ id: 2, display: "write(/etc/hosts)", rule: "Security Weaken" },
@@ -77,9 +91,11 @@ describe("/permissions panel state", () => {
 		press(state, v, "\t", "\t");
 		expect(state.tab).toBe("deny");
 		press(state, v, RIGHT);
+		expect(state.tab).toBe("automode");
+		press(state, v, RIGHT);
 		expect(state.tab).toBe("recent");
 		press(state, v, LEFT);
-		expect(state.tab).toBe("deny");
+		expect(state.tab).toBe("automode");
 		expect(press(state, v, ESC)).toEqual([{ kind: "close" }]);
 		expect(press(initialPanelState(true), v, "\x03")).toEqual([{ kind: "close" }]);
 	});
@@ -117,7 +133,7 @@ describe("/permissions panel state", () => {
 		// Esc goes back to the draft.
 		press(state, v, ESC);
 		expect(state.dialog).toEqual({ kind: "addRule", behavior: "allow", draft: "Bash()" });
-		expect(press(state, v, ENTER, DOWN, DOWN, ENTER)).toEqual([{ kind: "addRule", behavior: "allow", rule: "Bash()", destination: "onecode-user" }]);
+		expect(press(state, v, ENTER, DOWN, ENTER)).toEqual([{ kind: "addRule", behavior: "allow", rule: "Bash()", destination: "onecode-user" }]);
 		expect(state.dialog).toBeUndefined();
 	});
 
@@ -141,6 +157,85 @@ describe("/permissions panel state", () => {
 		press(state, v, "R", "e");
 		press(state, v, ENTER);
 		expect(state.dialog).toMatchObject({ kind: "ruleDetail", key: "src\0Read" });
+	});
+});
+
+describe("/permissions panel Auto mode tab", () => {
+	const onAutoMode = (v: PanelView) => {
+		const state = initialPanelState(false);
+		press(state, v, LEFT, LEFT);
+		expect(state.tab).toBe("automode");
+		return state;
+	};
+
+	it("adds a rule to the section picked, and refuses $defaults", () => {
+		const v = view();
+		const state = onAutoMode(v);
+		press(state, v, ENTER);
+		expect(state.dialog).toEqual({ kind: "pickSection", cursor: 0 });
+		press(state, v, DOWN, DOWN, ENTER);
+		expect(state.dialog).toMatchObject({ kind: "autoRuleInput", section: "hard_deny" });
+		press(state, v, ..."$defaults".split(""), ENTER);
+		expect(state.notice).toContain("built-in rules always apply");
+		for (let i = 0; i < 9; i++) press(state, v, "\x7f");
+		expect(press(state, v, ..."No prod".split(""), ENTER)).toEqual([{ kind: "addAutoRule", section: "hard_deny", text: "No prod" }]);
+	});
+
+	it("explains that built-in rules are always on, with no toggle", () => {
+		const v = view();
+		const state = onAutoMode(v);
+		press(state, v, DOWN, ENTER);
+		expect(state.dialog).toEqual({ kind: "builtinsInfo", section: "allow" });
+		const text = renderPanel({ state, view: v, width: 100, height: 30 }, paint).join("\n");
+		expect(text).toContain("always in effect in One Code");
+		expect(text).not.toMatch(/Disable built-in/);
+		expect(press(state, v, ENTER)).toEqual([]);
+		expect(state.dialog).toBeUndefined();
+	});
+
+	it("edits or deletes an editable entry, and only shows a read-only one", () => {
+		const v = view();
+		const state = onAutoMode(v);
+		// Rows: add, allow built-ins, allow entry, soft built-ins, soft entry, hard built-ins, environment.
+		press(state, v, DOWN, DOWN, ENTER);
+		expect(state.dialog).toMatchObject({ kind: "autoRuleDetail", cursor: 0 });
+		press(state, v, ENTER);
+		expect(state.dialog).toMatchObject({ kind: "autoRuleInput", section: "allow", draft: "Staging Deploys: deploys to the staging cluster" });
+		press(state, v, "!");
+		expect(press(state, v, ENTER)).toEqual([{ kind: "editAutoRule", key: "src\0allow\0Staging Deploys: deploys to the staging cluster", text: "Staging Deploys: deploys to the staging cluster!" }]);
+		press(state, v, ENTER, "d", ENTER);
+		expect(state.dialog).toMatchObject({ kind: "autoRuleDelete", cursor: 1 });
+		expect(press(state, v, "y", ENTER)).toEqual([{ kind: "deleteAutoRule", key: "src\0allow\0Staging Deploys: deploys to the staging cluster" }]);
+		press(state, v, DOWN, DOWN, ENTER);
+		expect(state.dialog).toMatchObject({ kind: "autoRuleDetail", key: "src\0soft_deny\0Prod DB: any write to the production database" });
+		expect(press(state, v, "d", ENTER)).toEqual([]);
+		expect(state.dialog).toBeUndefined();
+	});
+
+	it("confirms before replacing the built-in environment, and edits a custom one directly", () => {
+		const v = view();
+		const state = onAutoMode(v);
+		press(state, v, "\x1b[6~");
+		press(state, v, ENTER);
+		expect(state.dialog).toEqual({ kind: "envConfirm", cursor: 0 });
+		expect(press(state, v, ENTER)).toEqual([{ kind: "editEnvironment" }]);
+		const custom = view({ autoMode: { ...view().autoMode, environment: { lines: ["x"], summary: "Replaces the built-in default · from One Code user settings", isDefault: false } } });
+		const state2 = onAutoMode(custom);
+		press(state2, custom, "\x1b[6~");
+		expect(press(state2, custom, ENTER)).toEqual([{ kind: "editEnvironment" }]);
+	});
+
+	it("renders sections, sources and the environment preview within the width", () => {
+		const v = view();
+		const state = onAutoMode(v);
+		const text = renderPanel({ state, view: v, width: 120, height: 40 }, paint).join("\n");
+		expect(text).toContain("Extra rules for the auto mode classifier.");
+		expect(text).toContain("Soft allow   Built-in rules · 17 · always in effect");
+		expect(text).toContain("Soft deny    Prod DB: any write to the production database  · Claude Code user settings");
+		expect(text).toContain("Hard deny    Built-in rules · 1 · always in effect");
+		expect(text).toContain("Environment  Built-in default · enter to edit");
+		expect(text).toContain("… (+2 more lines)");
+		for (const width of [30, 60]) for (const line of renderPanel({ state, view: v, width, height: 40 }, paint)) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
 	});
 });
 

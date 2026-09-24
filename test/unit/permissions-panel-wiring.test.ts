@@ -29,6 +29,8 @@ const ENTER = "\r";
 const ESC = "\x1b";
 const RIGHT = "\x1b[C";
 const DOWN = "\x1b[B";
+const LEFT = "\x1b[D";
+const PAGE_DOWN = "\x1b[6~";
 
 type GateResult = { block?: boolean; reason?: string } | undefined;
 
@@ -41,6 +43,8 @@ describe("/permissions wiring", () => {
 	/** The keys the next panel open presses, then it closes with Esc unless they closed it. */
 	let keys: string[];
 	const reminders: string[] = [];
+	/** What the fake environment editor returns, given its prefill. */
+	let editorReply: (prefill: string) => string | undefined = (prefill) => prefill;
 
 	const model = { provider: "anthropic", id: "claude-sonnet-5", name: "Sonnet", cost: { input: 3, output: 15 } };
 
@@ -54,6 +58,7 @@ describe("/permissions wiring", () => {
 		vi.stubEnv("PI_CODING_AGENT_DIR", join(home, "agent"));
 		screens = [];
 		keys = [];
+		editorReply = (prefill) => prefill;
 		reminders.length = 0;
 		fake = createFakePi();
 		fake.events.on(REMINDER_CHANNEL, (data) => void reminders.push((data as { text: string }).text));
@@ -66,12 +71,16 @@ describe("/permissions wiring", () => {
 			modelRegistry: { getAvailable: () => [model], getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "k" }) },
 			sessionManager: { getSessionId: () => "s1", getSessionDir: () => join(home, "session"), getBranch: () => [] },
 			ui: {
+				editor: vi.fn(async (_title: string, prefill: string) => editorReply(prefill)),
 				custom: vi.fn(async (factory: (...args: unknown[]) => { render(w: number): string[]; handleInput(d: string): void }) => {
 					let closed = false;
 					const component = factory({ terminal: { rows: 40 }, requestRender: () => {} }, {}, {}, () => {
 						closed = true;
 					});
-					for (const key of [...keys, ESC]) {
+					// A reopened panel (after the environment editor) gets no replay of the keys.
+					const pressing = keys;
+					keys = [];
+					for (const key of [...pressing, ESC]) {
 						if (closed) break;
 						component.handleInput(key);
 						screens.push(component.render(200).join("\n"));
@@ -184,5 +193,53 @@ describe("/permissions wiring", () => {
 		expect(screens[0]).toContain("One Code won't ask before using allowed tools.");
 		expect(screens[1]).toContain("One Code will always ask for confirmation before using these tools.");
 		expect(screens[2]).toContain("One Code will always reject requests to use denied tools.");
+	});
+
+	describe("Auto mode tab", () => {
+		const settings = () => JSON.parse(readFileSync(join(home, ".onecode", "settings.json"), "utf-8"));
+
+		it("adds a rule to One Code's user settings, and the next classifier call is sent it", async () => {
+			// Allow → Auto mode is two tabs left; Add a new rule…, Soft deny, type, save.
+			await openPanel(LEFT, LEFT, ENTER, DOWN, ENTER, ..."Build Cache: deleting ~/.cache/build is fine".split(""), ENTER);
+			expect(settings().autoMode.soft_deny).toEqual(["Build Cache: deleting ~/.cache/build is fine"]);
+			expect(reminders.some((r) => r.includes("Added auto mode soft deny rule: Build Cache"))).toBe(true);
+
+			blockOnce();
+			await bash(`rm -rf ${outside()}`);
+			const system = JSON.stringify((completeMock.mock.calls[0][1] as { systemPrompt?: unknown }).systemPrompt);
+			expect(system).toContain("Build Cache: deleting ~/.cache/build is fine");
+		});
+
+		it("edits and deletes One Code's rules, and leaves Claude Code's read-only", async () => {
+			mkdirSync(join(home, ".claude"), { recursive: true });
+			writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ autoMode: { allow: ["$defaults", "CC Rule: from Claude Code"] } }));
+			mkdirSync(join(home, ".onecode"), { recursive: true });
+			writeFileSync(join(home, ".onecode", "settings.json"), JSON.stringify({ autoMode: { allow: ["Mine: my rule"] }, other: 1 }));
+			// Rows: add, allow built-ins, CC Rule (read-only), Mine, …
+			await openPanel(LEFT, LEFT, DOWN, DOWN, ENTER);
+			expect(screens[4]).toContain("One Code does not edit Claude Code's files.");
+			await openPanel(LEFT, LEFT, DOWN, DOWN, DOWN, ENTER, ENTER, "!", ENTER);
+			expect(settings().autoMode.allow).toEqual(["Mine: my rule!"]);
+			await openPanel(LEFT, LEFT, DOWN, DOWN, DOWN, ENTER, "d", ENTER, "y", ENTER);
+			expect(settings()).toEqual({ other: 1 });
+			expect(JSON.parse(readFileSync(join(home, ".claude", "settings.json"), "utf-8")).autoMode.allow).toEqual(["$defaults", "CC Rule: from Claude Code"]);
+		});
+
+		it("edits the environment through the editor, starting from the built-in default", async () => {
+			editorReply = (prefill) => `${prefill}\n- Trusted host: build.internal.example`;
+			// Environment is the last row; confirm replacing the default, then the editor runs.
+			await openPanel(LEFT, LEFT, PAGE_DOWN, PAGE_DOWN, ENTER, ENTER);
+			const env = settings().autoMode.environment as string[];
+			expect(env.at(-1)).toBe("- Trusted host: build.internal.example");
+			expect(env.length).toBeGreaterThan(10);
+			expect(reminders.some((r) => r.includes("Saved your auto mode environment"))).toBe(true);
+			// The panel reopened after the editor, on the same tab.
+			expect(vi.mocked((ctx.ui as { custom: () => unknown }).custom)).toHaveBeenCalledTimes(2);
+
+			// Saving it empty restores the default.
+			editorReply = () => "";
+			await openPanel(LEFT, LEFT, PAGE_DOWN, PAGE_DOWN, ENTER);
+			expect(existsSync(join(home, ".onecode", "settings.json")) ? settings().autoMode?.environment : undefined).toBeUndefined();
+		});
 	});
 });
