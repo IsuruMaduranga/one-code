@@ -16,6 +16,7 @@
 import { AUTONOMOUS_PREAMBLE, AUTONOMOUS_PREAMBLE_PERSISTENT } from "./loop-preamble.ts";
 import { LOOP_FILE_DYNAMIC_SENTINEL, LOOP_FILE_SENTINEL, AUTONOMOUS_LOOP, AUTONOMOUS_LOOP_DYNAMIC, type LoopFile } from "./loop-fire.ts";
 import { RECURRING_MAX_AGE_DAYS as Ofe } from "./cron.ts";
+import { envFlag } from "./wakeup.ts";
 
 const yl = "schedule_wakeup";
 const ky = "cron_create";
@@ -39,9 +40,9 @@ export const LOOP_SKILL = {
 	argumentHint: "[interval] [prompt]",
 } as const;
 
-/** The autonomous-loop instructions: the persistent variant with `CLAUDE_CODE_LOOP_PERSISTENT` set. */
+/** The autonomous-loop instructions: the persistent variant with `CLAUDE_CODE_LOOP_PERSISTENT` on. */
 export function autonomousPreamble(env: NodeJS.ProcessEnv = process.env): string {
-	return env.CLAUDE_CODE_LOOP_PERSISTENT ? AUTONOMOUS_PREAMBLE_PERSISTENT : AUTONOMOUS_PREAMBLE;
+	return envFlag(env.CLAUDE_CODE_LOOP_PERSISTENT, false) ? AUTONOMOUS_PREAMBLE_PERSISTENT : AUTONOMOUS_PREAMBLE;
 }
 
 const INTERVAL_ONLY=/^\d+[smhd]$/;

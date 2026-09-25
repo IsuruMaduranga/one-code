@@ -19,7 +19,7 @@ import backgroundExtension from "../../extensions/background/index.ts";
 import { MONITOR_BATCH_MAX_LINES } from "../../extensions/background/monitor-batch.ts";
 import { DEFAULT_COALESCE_MS, NOTIFICATION_ID_KEY } from "../../extensions/lib/notifications.ts";
 import { SESSION_WORK_CHANNEL, type SessionWorkQuery } from "../../extensions/lib/session-work.ts";
-import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest } from "../../extensions/lib/agent-cron.ts";
+import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, agentOwnsCronJobs } from "../../extensions/lib/agent-cron.ts";
 import { SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../../extensions/lib/skill-body.ts";
 import { BUNDLED_SKILLS_DIR } from "../../extensions/lib/skill-scan.ts";
 import { join } from "node:path";
@@ -397,6 +397,9 @@ describe("background wiring: cron tools", () => {
 
 		expect(ask({ op: "list", agentId: "a1" }).text).toBe(`${jobId} — Every day at 12:01 PM (one-shot) [session-only]: agent check`);
 		expect(ask({ op: "list", agentId: "a2" }).text).toBe("No scheduled jobs.");
+		// What keeps the agent resident (subagents' reaper).
+		expect(agentOwnsCronJobs(fake.events, "a1")).toBe(true);
+		expect(agentOwnsCronJobs(fake.events, "a2")).toBe(false);
 		// The main session sees every job.
 		expect((await cronCall(fake, "cron_list", {}, ctx)).content[0].text.split("\n")).toHaveLength(2);
 		expect(ask({ op: "delete", agentId: "a2", id: jobId })).toEqual({ text: `Cannot delete cron job '${jobId}': owned by another agent`, isError: true });
@@ -407,6 +410,32 @@ describe("background wiring: cron tools", () => {
 		expect(fires).toMatchObject([{ agentId: "a1", jobId, prompt: "agent check" }]);
 		// Nothing reached the main conversation.
 		expect(cronFires(fake)).toHaveLength(0);
+	});
+
+	it("tracks each recipient's /loop delivery apart: a subagent gets the full instructions on its own first fire", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(2026, 8, 25, 12, 0, 0));
+		const fake = mount();
+		const ctx = liveSessionCtx();
+		const agentTexts: string[] = [];
+		fake.events.on(AGENT_CRON_FIRE_CHANNEL, (data) => {
+			const fire = data as AgentCronFire;
+			fire.delivered = true;
+			agentTexts.push(fire.prompt);
+		});
+		await cronCall(fake, "cron_create", { cron: "1 12 * * *", prompt: "<<autonomous-loop>>", recurring: false }, ctx);
+		for (const minute of [2, 3]) {
+			fake.events.emit(AGENT_CRON_CHANNEL, { op: "create", agentId: "a1", cwd: "/project", cron: `${minute} 12 * * *`, prompt: "<<autonomous-loop>>", recurring: false } satisfies AgentCronRequest);
+		}
+		const confirmPending = confirmer(fake);
+		await vi.advanceTimersByTimeAsync(60_000 + DEFAULT_COALESCE_MS);
+		await confirmPending();
+		await vi.advanceTimersByTimeAsync(2 * 60_000);
+		const mainText = (cronFires(fake)[0].message.content as Array<{ text: string }>)[0].text;
+		expect(mainText.startsWith("# Autonomous loop check")).toBe(true);
+		expect(agentTexts).toHaveLength(2);
+		expect(agentTexts[0].startsWith("# Autonomous loop check")).toBe(true);
+		expect(agentTexts[1].startsWith("# Autonomous loop tick")).toBe(true);
 	});
 
 	it("resolves a fired prompt in its owner's directory: the agent's, the main worktree, or the session's", async () => {

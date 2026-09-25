@@ -67,7 +67,7 @@ available through the `commit-commands` plugin when installed.
 
 ## Skills that are not bundled
 
-One Code bundles four of Claude Code's built-in skills: `simplify`,
+One Code bundles five of Claude Code's built-in skills: `loop`, `simplify`,
 `code-review`, `security-review`, and `fewer-permission-prompts`. It does
 not bundle the skills that need Claude Code's hosted or desktop surfaces
 (`design`, `dataviz`, the `artifact-*` guides, and the publishers), the

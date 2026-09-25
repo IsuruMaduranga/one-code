@@ -17,7 +17,7 @@
  */
 
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
-import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, agentCronTools } from "../lib/agent-cron.ts";
+import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, agentCronTools, agentOwnsCronJobs } from "../lib/agent-cron.ts";
 import os from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1531,7 +1531,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		// After RESIDENT_IDLE_MS idle the session is released quietly; the
 		// agent stays reachable — SendMessage resumes it from its session
 		// file. Worktree residents are exempt: release would remove the
-		// worktree a resume still needs. Armed from every turn end.
+		// worktree a resume still needs. So is one that owns a cron job, which
+		// fires only to a live agent (lib/agent-cron.ts). Armed from every turn end.
 		let reaper: ReturnType<typeof setTimeout> | undefined;
 		const armReaper = () => {
 			if (worktree) return;
@@ -1539,7 +1540,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			reaper = setTimeout(() => {
 				reaper = undefined;
 				if (handle.exited()) return;
-				if (handle.busy()) {
+				if (handle.busy() || agentOwnsCronJobs(pi.events, p.record.taskId)) {
 					armReaper();
 					return;
 				}

@@ -52,6 +52,30 @@ describe("DynamicLoop (Claude Code's loop core, 2.1.282)", () => {
 		expect(loop.schedule(1800, "other", now)).not.toBeNull();
 	});
 
+	it("stop forgets the age of the prompts it cancels and the one in flight, so a restart starts a new loop", () => {
+		const min = 60_000;
+		const store = new CronStore({ jitter: false });
+		const loop = new DynamicLoop(store, 120 * min);
+		const start = at(12, 0);
+		const runFor = (prompt: string) => {
+			for (let t = 0; t <= 90; t += 30) loop.schedule(1800, prompt, start + t * min);
+		};
+		// A pending wakeup's prompt: without the reset, the restart would keep
+		// the old start and age out at 12:00 + 2 h.
+		runFor("pending");
+		loop.stop();
+		loop.schedule(1800, "pending", start + 100 * min);
+		expect(loop.schedule(1800, "pending", start + 130 * min)).not.toBeNull();
+
+		// The prompt whose tick is running (its wakeup already fired).
+		runFor("running");
+		store.deleteWhere((job) => job.prompt === "running");
+		loop.inFlight = "running";
+		loop.stop();
+		loop.schedule(1800, "running", start + 100 * min);
+		expect(loop.schedule(1800, "running", start + 130 * min)).not.toBeNull();
+	});
+
 	it("keepalive: one fallback after a wakeup turn that scheduled nothing, then the loop ends", () => {
 		const { store, loop } = newLoop();
 		loop.inFlight = "tick";

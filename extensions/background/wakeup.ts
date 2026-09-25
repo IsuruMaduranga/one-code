@@ -25,11 +25,15 @@ export function clampDelaySeconds(delay: number): number {
 	return Math.min(MAX_DELAY_SECONDS, Math.max(MIN_DELAY_SECONDS, Math.round(delay)));
 }
 
+/** An env flag as Claude Code reads a boolean: unset is `fallback`, a false-like value is off. */
+export function envFlag(value: string | undefined, fallback: boolean): boolean {
+	if (value === undefined) return fallback;
+	return !["", "0", "false", "no", "off"].includes(value.trim().toLowerCase());
+}
+
 /** Keepalive is on unless `CLAUDE_CODE_LOOP_KEEPALIVE` turns it off. */
 export function keepaliveEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-	const value = env.CLAUDE_CODE_LOOP_KEEPALIVE;
-	if (value === undefined) return true;
-	return !["", "0", "false", "no", "off"].includes(value.trim().toLowerCase());
+	return envFlag(env.CLAUDE_CODE_LOOP_KEEPALIVE, true);
 }
 
 export interface WakeupSchedule {
@@ -84,12 +88,18 @@ export class DynamicLoop {
 		return { scheduledFor, clampedDelaySeconds: clamped, wasClamped };
 	}
 
-	/** `stop: true`: cancel every pending wakeup; the count is the result's. */
+	/**
+	 * `stop: true`: cancel every pending wakeup; the count is the result's.
+	 * The cancelled prompts and the one in flight forget their age, so a
+	 * restarted loop gets a fresh 7 days (Claude Code's `forgetChainStart`).
+	 */
 	stop(): number {
-		const cancelled = this.store.deleteWhere((job) => job.source === "wakeup").length;
+		const cancelled = this.store.deleteWhere((job) => job.source === "wakeup");
+		for (const job of cancelled) this.ages.delete(job.prompt);
+		if (this.inFlight !== null) this.ages.delete(this.inFlight);
 		this.inFlight = null;
 		this.misses = 0;
-		return cancelled;
+		return cancelled.length;
 	}
 
 	/**

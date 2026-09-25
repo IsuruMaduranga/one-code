@@ -68,6 +68,7 @@ describe("loopSkillPrompt (Claude Code's /loop skill, 2.1.282)", () => {
 	it("picks the persistent instructions with CLAUDE_CODE_LOOP_PERSISTENT", () => {
 		expect(autonomousPreamble({})).toBe(AUTONOMOUS_PREAMBLE);
 		expect(autonomousPreamble({ CLAUDE_CODE_LOOP_PERSISTENT: "1" })).toBe(AUTONOMOUS_PREAMBLE_PERSISTENT);
+		for (const off of ["0", "false", "No", " off ", ""]) expect(autonomousPreamble({ CLAUDE_CODE_LOOP_PERSISTENT: off })).toBe(AUTONOMOUS_PREAMBLE);
 		expect(AUTONOMOUS_PREAMBLE.startsWith("# Autonomous loop check\n")).toBe(true);
 	});
 });

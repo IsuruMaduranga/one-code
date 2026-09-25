@@ -63,6 +63,17 @@ interface Emitter {
 	emit(channel: string, data: unknown): unknown;
 }
 
+/**
+ * Whether `agentId` owns a pending job in the main session's store (its
+ * `cron_list` count). The subagents extension keeps such an agent resident,
+ * since a fire reaches only a live one.
+ */
+export function agentOwnsCronJobs(events: Emitter, agentId: string): boolean {
+	const request: AgentCronRequest = { op: "list", agentId };
+	events.emit(AGENT_CRON_CHANNEL, request);
+	return ((request.result?.details?.jobCount as number | undefined) ?? 0) > 0;
+}
+
 /** Where a child's cron tools live: only a `resident` (background) run can receive a fire. */
 export interface AgentCronOwner {
 	agentId: string;
