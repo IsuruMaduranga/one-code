@@ -4,6 +4,7 @@ import {
 	economicalContainedCandidates,
 	pickEconomicalContainedModel,
 	resolveModelTier,
+	taskToolsEnabled,
 	tierOverride,
 } from "../../extensions/lib/model-tier.ts";
 
@@ -18,6 +19,20 @@ describe("resolveModelTier", () => {
 		for (const id of ["claude-opus-4-7", "claude-opus-4-8", "claude-opus-5", "claude-fable-5"]) {
 			expect(resolveModelTier(model(id, "anthropic"), noEnv)).toBe("frontier");
 		}
+	});
+
+	it("classifies first-party OpenAI Astra/Sol ≥6 as frontier", () => {
+		for (const provider of ["openai", "openai-codex", "azure-openai-responses"]) {
+			for (const id of ["gpt-6-astra", "gpt-6-sol", "gpt-6.1-sol-pro", "gpt-7-astra"]) {
+				expect(resolveModelTier(model(id, provider, 2), noEnv)).toBe("frontier");
+			}
+		}
+		// Below the line: GPT-5.x Sol and Terra, every Luna, and gateway copies.
+		expect(resolveModelTier(model("gpt-5.6-sol", "openai", 4), noEnv)).toBe("workhorse");
+		expect(resolveModelTier(model("gpt-5.6-terra", "openai", 2), noEnv)).toBe("workhorse");
+		expect(resolveModelTier(model("gpt-6-luna", "openai", 0.1), noEnv)).toBe("cheap");
+		expect(resolveModelTier(model("openai/gpt-6-sol", "openrouter", 2), noEnv)).not.toBe("frontier");
+		expect(resolveModelTier(model("gpt-6-sol", "github-copilot", 2), noEnv)).not.toBe("frontier");
 	});
 
 	it("does NOT put Sonnet in frontier — it is workhorse", () => {
@@ -46,9 +61,8 @@ describe("resolveModelTier", () => {
 		expect(resolveModelTier(model("gpt-5-mini", "openai", 0.25), noEnv)).toBe("cheap");
 		// GPT-5.6-Luna is OpenAI's cheap line despite a high benchmark → cheap, not workhorse.
 		expect(resolveModelTier(model("gpt-5.6-luna", "openai", 1), noEnv)).toBe("cheap");
-		// GPT-6 Luna is the same line at half the price; its Sol and Astra siblings stay workhorse.
+		// GPT-6 Luna is the same line at half the price; its Sol and Astra siblings are frontier.
 		expect(resolveModelTier(model("gpt-6-luna", "openai", 0.1), noEnv)).toBe("cheap");
-		expect(resolveModelTier(model("gpt-6-sol", "openai", 2), noEnv)).toBe("workhorse");
 		// GPT-5-nano stays tiny.
 		expect(resolveModelTier(model("gpt-5-nano", "openai", 0.15), noEnv)).toBe("tiny");
 		// o3 family → cheap; prior-gen GPT-4x → tiny.
@@ -234,5 +248,46 @@ describe("tierOverride", () => {
 		expect(tierOverride({ CC_PROMPT_TIER: "mid" } as unknown as NodeJS.ProcessEnv)).toBeUndefined(); // retired name
 		expect(tierOverride({ CC_PROMPT_TIER: "auto" } as unknown as NodeJS.ProcessEnv)).toBeUndefined();
 		expect(tierOverride({} as NodeJS.ProcessEnv)).toBeUndefined();
+	});
+});
+
+describe("taskToolsEnabled (Claude Code's model gate for the task tools)", () => {
+	it("withholds them from frontier models and Sonnet 5 or later", () => {
+		for (const [id, provider] of [
+			["claude-fable-5-1", "anthropic"],
+			["claude-opus-5-5", "anthropic"],
+			["claude-sonnet-5", "anthropic"],
+			["claude-sonnet-5-2", "anthropic"],
+			["gpt-6-astra", "openai"],
+			["gpt-6-sol", "openai-codex"],
+		]) {
+			expect(taskToolsEnabled(model(id, provider, 2), noEnv), id).toBe(false);
+		}
+	});
+
+	it("keeps them for older and third-party models, and an unknown model", () => {
+		for (const [id, provider] of [
+			["claude-sonnet-4-6", "anthropic"],
+			["claude-haiku-4-5", "anthropic"],
+			["gpt-5.6-sol", "openai"],
+			["gpt-6-luna", "openai"],
+			["deepseek/deepseek-v4.1-flash", "openrouter"],
+			["anthropic/claude-opus-5.5", "openrouter"],
+		]) {
+			expect(taskToolsEnabled(model(id, provider, 2), noEnv), id).toBe(true);
+		}
+		expect(taskToolsEnabled(undefined, noEnv)).toBe(true);
+	});
+
+	it("turns them back on with CLAUDE_CODE_ENABLE_TODO_TOOLS", () => {
+		const opus = model("claude-opus-5-5", "anthropic");
+		for (const value of ["1", "true", "YES", "on"]) {
+			expect(taskToolsEnabled(opus, { CLAUDE_CODE_ENABLE_TODO_TOOLS: value } as NodeJS.ProcessEnv)).toBe(true);
+		}
+		expect(taskToolsEnabled(opus, { CLAUDE_CODE_ENABLE_TODO_TOOLS: "0" } as NodeJS.ProcessEnv)).toBe(false);
+	});
+
+	it("follows a forced tier", () => {
+		expect(taskToolsEnabled(model("deepseek/deepseek-v4.1-flash", "openrouter", 0.15), { CC_PROMPT_TIER: "frontier" } as NodeJS.ProcessEnv)).toBe(false);
 	});
 });

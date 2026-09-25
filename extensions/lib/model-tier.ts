@@ -40,7 +40,16 @@ import {
 	scoreFor,
 } from "./capability-index.ts";
 import { isPriorGeneration, lacksToolCalls, modelGeneration } from "./model-facts.ts";
-import { baseModelId, isDatedDuplicate, modelIdentity, modelsContainedToSession, modelSpec, pricedInput, supportsImageInput } from "./model-policy.ts";
+import {
+	BUILTIN_PROVIDER_POLICIES,
+	baseModelId,
+	isDatedDuplicate,
+	modelIdentity,
+	modelsContainedToSession,
+	modelSpec,
+	pricedInput,
+	supportsImageInput,
+} from "./model-policy.ts";
 import { oneCodeStateDir } from "./paths.ts";
 
 export type PromptTier = "frontier" | "workhorse" | "cheap" | "tiny";
@@ -85,6 +94,21 @@ function isAnthropicFrontier(model: Model<Api>): boolean {
 	if (!version) return false;
 	if (version.family === "sonnet") return false; // Sonnet is workhorse, never frontier
 	return version.major > 4 || (version.major === 4 && version.minor >= 7);
+}
+
+/**
+ * OpenAI first-party frontier gate: the GPT-6 Astra and Sol lines and later
+ * majors (`gpt-6-astra`, `gpt-6-sol`, `gpt-6.1-sol-pro`), served by OpenAI
+ * itself (the `openai`, `openai-codex` and `azure-openai-responses` providers).
+ * GPT-5.x Sol and Terra, and every Luna, stay below it (decided 2026-09-25:
+ * Astra and Sol 6 are the OpenAI models comparable to Fable and Opus 5). A
+ * gateway-proxied copy can't be verified, the same rule as Claude above.
+ */
+function isOpenAIFrontier(model: Model<Api>): boolean {
+	const policy = BUILTIN_PROVIDER_POLICIES[model.provider];
+	if (policy?.kind !== "direct" || policy.profile !== "openai") return false;
+	const match = model.id.match(/^gpt-(\d+)(?:\.\d+)?-(?:astra|sol)(?:-|$)/);
+	return match !== null && Number(match[1]) >= 6;
 }
 
 /**
@@ -268,6 +292,7 @@ function classifyByName(model: Model<Api> | undefined, env: NodeJS.ProcessEnv): 
 	if (!model) return { tier: "tiny", reason: "no model" }; // unknown model → maximum scaffolding
 
 	if (isAnthropicFrontier(model)) return { tier: "frontier", reason: "anthropic frontier allowlist" };
+	if (isOpenAIFrontier(model)) return { tier: "frontier", reason: "openai frontier allowlist" };
 	if (model.provider === "anthropic") {
 		// First-party non-frontier: Haiku → cheap; Sonnet / Opus 4.1–4.6 / other →
 		// workhorse. Version-named ids already encode generation, and the tiny
@@ -307,6 +332,26 @@ function classifyByName(model: Model<Api> | undefined, env: NodeJS.ProcessEnv): 
 
 export function resolveModelTier(model: Model<Api> | undefined, env: NodeJS.ProcessEnv = process.env): PromptTier {
 	return classifyModelTier(model, env).tier;
+}
+
+const TRUTHY_ENV = new Set(["1", "true", "yes", "on"]);
+
+/**
+ * Whether the session model gets the task tools (`task_create` and family),
+ * Claude Code's model gate for a foreground session: its current models run
+ * without a task list, which `CLAUDE_CODE_ENABLE_TODO_TOOLS` turns back on
+ * (findings §31). Off for the frontier tier and first-party Sonnet 5 or later;
+ * on for everything else, including an unknown model (Claude Code keeps the
+ * tools for a model it does not recognise). Claude Code also turns them on in
+ * a backgrounded session, which One Code does not have.
+ */
+export function taskToolsEnabled(model: Model<Api> | undefined, env: NodeJS.ProcessEnv = process.env): boolean {
+	if (TRUTHY_ENV.has(env.CLAUDE_CODE_ENABLE_TODO_TOOLS?.trim().toLowerCase() ?? "")) return true;
+	if (!model) return true;
+	if (resolveModelTier(model, env) === "frontier") return false;
+	if (model.provider !== "anthropic") return true;
+	const version = parseClaudeVersion(model.id);
+	return !(version?.family === "sonnet" && version.major >= 5);
 }
 
 

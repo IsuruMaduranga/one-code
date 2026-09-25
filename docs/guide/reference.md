@@ -185,6 +185,7 @@ The `CC_` prefix is historical; `ONECODE_`-prefixed aliases are planned.
 | `CC_TOTAL_TOKENS=0` | Remove the `<total_tokens>` budget line. |
 | `CC_TOTAL_TOKENS_BUDGET` | The per-turn budget the line counts down from (default 15000000). |
 | `CC_PROMPT_TIER=frontier\|workhorse\|cheap\|tiny` | Force a system-prompt tier. |
+| `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` | Give frontier models and Sonnet 5 or later the task tools, which they run without by default. |
 | `CC_HOOKS_DEBUG=1` | Print hook dispatches to stderr and log decisions. |
 | `CC_AUTO_MODE_DEBUG=1` | Print classifier verdicts to stderr. `2` is more verbose. |
 | `CC_VERSION` | The version shown in the banner (set by the app). |

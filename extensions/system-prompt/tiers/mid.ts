@@ -21,6 +21,8 @@ import {
 	URL_BAN,
 } from "./common.ts";
 
+export const MID_TASK_LINE = ` - Use \`task_create\` (deferred — load it with \`tool_search select:task_create,task_update\`) to plan and track multi-step work; mark each item done as soon as it's done, rather than batching.`;
+
 export const DOING_TASKS = `# Doing tasks
  - When given an unclear or generic instruction, interpret it in the context of software-engineering work and the current directory. If asked to change "methodName" to snake case, find the method in the code and edit it — don't just reply with "method_name".
  - Do not propose changes to code you haven't read. If the user asks about or wants you to modify a file, read it first.
@@ -30,7 +32,7 @@ export const DOING_TASKS = `# Doing tasks
  - Be careful not to introduce security vulnerabilities (command injection, XSS, SQL injection, and the rest of the OWASP top 10). If you notice you wrote insecure code, fix it immediately.
  - Default to writing no comments. Add one only when the WHY is non-obvious — a hidden constraint, a subtle invariant, a workaround. Don't explain WHAT the code does; well-named identifiers already do that.
  - Prefer the dedicated tools over the shell: read/edit/write instead of cat/sed/echo. Reserve the shell for operations that genuinely need it.
- - Use \`task_create\` (deferred — load it with \`tool_search select:task_create,task_update\`) to plan and track multi-step work; mark each item done as soon as it's done, rather than batching.`;
+${MID_TASK_LINE}`;
 
 // Sibling texts (same delegation policy, separately tuned registers — keep
 // aligned when editing): DELEGATE_STRICT in low.ts (tiny prompt) and
@@ -66,4 +68,5 @@ export const midBundle: PromptBundle = {
 	lead: [IDENTITY, SECURITY, URL_BAN, HARNESS_VERBOSE, STYLE, DOING_TASKS, DELEGATING_WORK, EXECUTING_CARE, TEXT_OUTPUT, TONE_STYLE],
 	tail: [CONTEXT_MANAGEMENT, DELIVERING_WORK, CORRECTIONS],
 	verboseMemory: true,
+	taskLines: [MID_TASK_LINE],
 };

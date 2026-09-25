@@ -9,7 +9,10 @@ wake-ups, and how the results of background work reach the model.
 ## The task list
 
 For multi-step work the model keeps a structured task list, using the
-`task_create`, `task_get`, `task_list`, and `task_update` tools. Each task
+`task_create`, `task_get`, `task_list`, and `task_update` tools. Frontier
+models and Sonnet 5 or later run without them, as in Claude Code, unless you
+set `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` ([Providers and
+models](providers-and-models.md#prompting-adapts-to-the-model)). Each task
 has a subject, a description, a status (pending, in progress, or
 completed), an optional owner, and dependencies on other tasks.
 

@@ -20,7 +20,7 @@ import {
 	STYLE,
 	URL_BAN,
 } from "./common.ts";
-import { DOING_TASKS, EXECUTING_CARE, TEXT_OUTPUT, TONE_STYLE } from "./mid.ts";
+import { DOING_TASKS, EXECUTING_CARE, MID_TASK_LINE, TEXT_OUTPUT, TONE_STYLE } from "./mid.ts";
 
 export const MAKE_CHANGES_WITH_TOOLS = `# Make changes with tools, not prose
 Code, edits, or commands that appear only in your text reply are NOT applied — they are not saved to the filesystem and do not run. Never treat showing code as a substitute for making the change. To change a file, call the edit or write tool; to run something, call the shell tool. If a request needs a change to the workspace, your turn is not done until you have made it with a tool.`;
@@ -32,9 +32,11 @@ Decide up front which the request needs:
 - When it could be read either way → treat it as a task and act.
 Do the work rather than asking permission to start; ask the user only when you genuinely cannot proceed without an answer.`;
 
+const LOW_TASK_LINE = ` - Break multi-step work down with \`task_create\` (deferred — load it with \`tool_search select:task_create,task_update\`) and keep it updated as you go.`;
+
 export const USING_TOOLS = `# Using your tools
  - Prefer the dedicated tools over the shell: use read to read files (not cat/head/tail/sed), edit to change them (not sed/awk), write to create them (not echo redirection), and the search tools to find files or content (not find/grep/ls). Reserve the shell for commands that genuinely need it.
- - Break multi-step work down with \`task_create\` (deferred — load it with \`tool_search select:task_create,task_update\`) and keep it updated as you go.
+${LOW_TASK_LINE}
  - When a skill fits the task, use it — invoke it with the skill tool instead of redoing the same work by hand. Skills are set up on purpose; reach for the matching one rather than improvising.
  - You can call multiple independent tools in one response — do so when the calls don't depend on each other.`;
 
@@ -78,4 +80,6 @@ export const lowBundle: PromptBundle = {
 	],
 	tail: [STAYING_ON_TRACK, STYLE, CONTEXT_MANAGEMENT, DELIVERING_WORK, CORRECTIONS],
 	verboseMemory: true,
+	// DOING_TASKS is mid's, so it carries mid's task line too.
+	taskLines: [LOW_TASK_LINE, MID_TASK_LINE],
 };

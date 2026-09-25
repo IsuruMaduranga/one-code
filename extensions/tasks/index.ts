@@ -19,7 +19,8 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { restoreLatestDetails } from "../lib/branch-restore.ts";
-import { DEFER_CHANNEL } from "../lib/deferred.ts";
+import { DEFER_CHANNEL, WITHHOLD_CHANNEL } from "../lib/deferred.ts";
+import { taskToolsEnabled } from "../lib/model-tier.ts";
 import { ccToolRenderers, linesComponent, safeThemeBold, safeThemePaint, strike } from "../lib/tui-render.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import {
@@ -41,6 +42,7 @@ interface TaskDetails {
 }
 
 const TASK_TOOLS = new Set(["task_create", "task_get", "task_list", "task_update"]);
+const TASK_KEYWORDS = ["task", "todo", "plan", "progress", "dependencies", "tracking"];
 
 export default function tasksExtension(pi: ExtensionAPI) {
 	const store = new TaskStore();
@@ -97,8 +99,27 @@ export default function tasksExtension(pi: ExtensionAPI) {
 		updateWidget(ctx);
 	};
 
-	pi.on("session_start", (_event, ctx) => reconstructState(ctx));
+	// Claude Code's model gate: frontier models and Sonnet 5+ run without the
+	// task tools unless CLAUDE_CODE_ENABLE_TODO_TOOLS is set (lib/model-tier.ts
+	// taskToolsEnabled). Re-applied on a model change, so switching to a model
+	// that has them brings them back through the deferred listing.
+	let withheld = false;
+	const applyModelGate = (model: Parameters<typeof taskToolsEnabled>[0]) => {
+		const enabled = taskToolsEnabled(model);
+		if (enabled === !withheld) return;
+		withheld = !enabled;
+		for (const name of TASK_TOOLS) {
+			if (withheld) pi.events.emit(WITHHOLD_CHANNEL, { name });
+			else pi.events.emit(DEFER_CHANNEL, { name, keywords: TASK_KEYWORDS });
+		}
+	};
+
+	pi.on("session_start", (_event, ctx) => {
+		reconstructState(ctx);
+		applyModelGate(ctx.model);
+	});
 	pi.on("session_tree", (_event, ctx) => reconstructState(ctx));
+	pi.on("model_select", (event) => applyModelGate(event.model));
 	pi.on("session_shutdown", () => cancelClear());
 
 	// Claude Code's periodic task_reminder (TODO_REMINDER_CONFIG): a gentle
@@ -115,6 +136,8 @@ export default function tasksExtension(pi: ExtensionAPI) {
 	let turnsSinceReminder = TURNS_BETWEEN_REMINDERS;
 
 	pi.on("turn_end", () => {
+		// Claude Code's reminder needs TaskUpdate in the tool list.
+		if (withheld) return;
 		turnsSinceTaskUse++;
 		turnsSinceReminder++;
 		if (turnsSinceTaskUse < TURNS_SINCE_WRITE || turnsSinceReminder < TURNS_BETWEEN_REMINDERS) return;
@@ -217,7 +240,7 @@ export default function tasksExtension(pi: ExtensionAPI) {
 	});
 
 	for (const name of TASK_TOOLS) {
-		pi.events.emit(DEFER_CHANNEL, { name, keywords: ["task", "todo", "plan", "progress", "dependencies", "tracking"] });
+		pi.events.emit(DEFER_CHANNEL, { name, keywords: TASK_KEYWORDS });
 	}
 
 	registerLocalCommand(pi, "tasks", {

@@ -42,6 +42,7 @@ import {
 	supportsToolReferences,
 	toolNotFoundName,
 	toolSearchLoads,
+	WITHHOLD_CHANNEL,
 } from "../lib/deferred.ts";
 import { looksLikeAnthropicRequest } from "../lib/anthropic-payload.ts";
 import { MCP_TOOLS_CHANNEL, type McpToolsPayload } from "../lib/mcp-share.ts";
@@ -196,6 +197,18 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 			// only the standing listing waits.
 			scheduleAnnounce();
 		}
+	});
+
+	pi.events.on(WITHHOLD_CHANNEL, (data) => {
+		const name = (data as { name?: string } | undefined)?.name;
+		if (!name || !deferredRegistry.remove(name)) return;
+		if (!alive()) return;
+		const active = pi.getActiveTools();
+		if (active.includes(name)) pi.setActiveTools(active.filter((n) => n !== name));
+		// Before the first request the listing is still free to change: rewrite it
+		// now, synchronously, so a request going out right after session_start
+		// never names the withheld tool. After it the frozen listing stands.
+		if (sessionStarted && !requestSent) announce();
 	});
 
 	pi.on("session_start", (_event, ctx) => {
