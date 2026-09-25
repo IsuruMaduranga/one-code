@@ -43,6 +43,7 @@ import {
 	toolNotFoundName,
 	toolSearchLoads,
 	WITHHOLD_CHANNEL,
+	withheldMissReminderText,
 } from "../lib/deferred.ts";
 import { looksLikeAnthropicRequest } from "../lib/anthropic-payload.ts";
 import { MCP_TOOLS_CHANNEL, type McpToolsPayload } from "../lib/mcp-share.ts";
@@ -59,6 +60,12 @@ const ANNOUNCE_DEBOUNCE_MS = 100;
 export default function toolSearchExtension(pi: ExtensionAPI) {
 	// Owned here (see lib/deferred.ts): the only instance, fed over DEFER_CHANNEL.
 	const deferredRegistry = new DeferredRegistry();
+	// Names WITHHOLD_CHANNEL removed from the registry, kept only so a direct
+	// call to one still gets an explanation (tool_execution_end below) instead
+	// of a bare "not found": the registry itself can't answer that, since
+	// removal is what makes the name stop being deferred (searchable/loadable).
+	// A re-defer (a model change bringing it back) clears the name from here.
+	const withheldNames = new Set<string>();
 	let sessionStarted = false;
 	// The deferred-tools listing is a first-prepend reminder on message 1, part of
 	// the cached prefix of every later request. Before the first request nothing
@@ -184,6 +191,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	pi.events.on(DEFER_CHANNEL, (data) => {
 		const request = data as DeferRequest;
 		deferredRegistry.add(request);
+		if (request?.name) withheldNames.delete(request.name);
 		// A defer arriving after the session_start pass (MCP servers connect
 		// asynchronously and register their tools then) would otherwise leave the
 		// tool eager AND unlisted in the reminder. Deactivate it (unless the
@@ -202,6 +210,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	pi.events.on(WITHHOLD_CHANNEL, (data) => {
 		const name = (data as { name?: string } | undefined)?.name;
 		if (!name || !deferredRegistry.remove(name)) return;
+		withheldNames.add(name);
 		if (!alive()) return;
 		const active = pi.getActiveTools();
 		if (active.includes(name)) pi.setActiveTools(active.filter((n) => n !== name));
@@ -241,12 +250,23 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		// Map a Claude Code spelling (a direct `NotebookEdit` call) to our name so
 		// the miss is recognised and the steer names the loadable tool (M1).
 		const name = raw ? normalizeToolName(raw) : undefined;
-		if (!name || !deferredRegistry.has(name)) return;
-		pi.events.emit(REMINDER_CHANNEL, {
-			scope: "next-turn",
-			key: `deferred-miss-${name}`,
-			text: deferredMissReminderText(name),
-		});
+		if (!name) return;
+		if (deferredRegistry.has(name)) {
+			pi.events.emit(REMINDER_CHANNEL, {
+				scope: "next-turn",
+				key: `deferred-miss-${name}`,
+				text: deferredMissReminderText(name),
+			});
+		} else if (withheldNames.has(name)) {
+			// A withheld tool is gone from the registry too (WITHHOLD_CHANNEL), so
+			// the ordinary steer above would send the model to tool_search for a
+			// name that will not be found there either.
+			pi.events.emit(REMINDER_CHANNEL, {
+				scope: "next-turn",
+				key: `deferred-miss-${name}`,
+				text: withheldMissReminderText(name),
+			});
+		}
 	});
 
 	pi.registerTool({

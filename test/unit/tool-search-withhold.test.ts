@@ -66,4 +66,28 @@ describe("tool-search withhold", () => {
 		await vi.advanceTimersByTimeAsync(150);
 		expect(fake.reminders.filter((r) => r.text === deferredAddendumText(["task_create"]))).toHaveLength(1);
 	});
+
+	it("steers a miss on a withheld tool differently from an ordinary deferred miss", () => {
+		// task_create was active (addDeferred started it active); the model
+		// switches models mid-session and it's withdrawn out from under it.
+		fake.pi.events.emit(WITHHOLD_CHANNEL, { name: "task_create" });
+		fake.reminders.length = 0;
+
+		fake.pi.fire("tool_execution_end", {
+			isError: true,
+			result: { content: [{ type: "text", text: "Tool task_create not found" }] },
+		});
+		const withheldMiss = fake.reminders.find((r) => r.key === "deferred-miss-task_create");
+		expect(withheldMiss?.text).toContain("withdrawn");
+		// Must not repeat the ordinary "load it with tool_search" advice — retrying
+		// through tool_search would fail again, since the name is gone from the registry.
+		expect(withheldMiss?.text).not.toContain("select:task_create");
+
+		fake.pi.fire("tool_execution_end", {
+			isError: true,
+			result: { content: [{ type: "text", text: "Tool web_fetch not found" }] },
+		});
+		const ordinaryMiss = fake.reminders.find((r) => r.key === "deferred-miss-web_fetch");
+		expect(ordinaryMiss?.text).toContain("select:web_fetch");
+	});
 });

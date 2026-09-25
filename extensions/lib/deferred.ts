@@ -341,6 +341,17 @@ export function deferredMissReminderText(name: string): string {
 	].join(" ");
 }
 
+/**
+ * The correction for a tool WITHHOLD_CHANNEL took away (the task tools on a
+ * frontier or Sonnet 5+ model): unlike an ordinary deferred miss, `tool_search`
+ * cannot load it — the name is gone from the registry, not merely inactive —
+ * so the steer must NOT repeat `deferredMissReminderText`'s "load it with
+ * tool_search" advice, which would just fail again.
+ */
+export function withheldMissReminderText(name: string): string {
+	return `\`${name}\` failed with "Tool ${name} not found" because it was withdrawn for the current model — it is not a deferred tool you can load with tool_search. Do not retry it; continue without it.`;
+}
+
 export interface SearchMatch {
 	name: string;
 	score: number;
