@@ -397,6 +397,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 
 	registerLocalCommand(pi, "workflows", {
 		description: "Open the workflow viewer; list, stop, or inspect runs",
+		argumentHint: "[list|log <run-id>|stop <run-id>]",
 		getArgumentCompletions: (prefix) => {
 			const items = ["stop ", "log ", "list"].filter((c) => c.startsWith(prefix));
 			return items.length ? items.map((c) => ({ value: c, label: c.trim() })) : null;

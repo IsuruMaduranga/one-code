@@ -505,12 +505,12 @@ export interface TaskNotifierOptions {
 
 /**
  * Custom types that are a turn's INPUT rather than a harness frame (a fired
- * wakeup or loop tick delivers the model's prompt verbatim). Such a message is
+ * wakeup or cron job delivers the model's prompt verbatim). Such a message is
  * never merged with frames — it goes out on its own, in arrival order — or the
  * prompt would abut a `<task-notification>` with nothing marking the switch,
  * and the wrong renderer would draw the pair.
  */
-export const REINVOCATION_TYPES: ReadonlySet<string> = new Set(["wakeup", "loop", "loop-start"]);
+export const REINVOCATION_TYPES: ReadonlySet<string> = new Set(["wakeup", "cron"]);
 
 /** Default coalescing window (ms). */
 export const DEFAULT_COALESCE_MS = 250;

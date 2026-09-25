@@ -108,7 +108,8 @@ See [Subagents and workflows](subagents-and-workflows.md).
 | `task_create`, `task_get`, `task_list`, `task_update` | Maintain the structured task list shown in the pinned widget. Deferred. |
 | `monitor` | Watches a long-running command or a WebSocket and reports each output line as an event. Deferred. |
 | `task_output`, `task_stop` | Read the output of a background task or stop it. Deferred. |
-| `schedule_wakeup` | Schedules a prompt for later; the mechanism behind self-paced `/loop`. Deferred. |
+| `schedule_wakeup` | Schedules the next iteration of a self-paced `/loop`. The pending wake-up shows in `cron_list`. Deferred. |
+| `cron_create`, `cron_list`, `cron_delete` | Schedule a prompt on a cron expression within the session, list the jobs, or cancel one. A fixed-interval `/loop` uses them. Deferred. |
 
 See [Tasks and background work](tasks-and-background-work.md).
 
@@ -151,7 +152,7 @@ In `-p` and `--mode json` runs the process exits when the turn settles, so
 nothing can run in the background. Tools that would detach work run to
 completion instead and return the output in their result: `bash` and
 `powershell` with `run_in_background`, `Agent`, `monitor`, and `workflow`. Timers such as
-`schedule_wakeup` and `/loop` never fire in these modes.
+`schedule_wakeup`, `cron_create`, and `/loop` never fire in these modes.
 
 Give a scripted run its own deadline. One Code has no idle timeout on a
 provider response, so a stream that stalls mid-reply keeps the process
@@ -190,6 +191,7 @@ matchers, and mapped to One Code's names. Case is ignored.
 | `TaskOutput`, `TaskStop` | `task_output`, `task_stop` |
 | `Monitor` | `monitor` |
 | `ScheduleWakeup` | `schedule_wakeup` |
+| `CronCreate`, `CronList`, `CronDelete` | `cron_create`, `cron_list`, `cron_delete` |
 | `EnterWorktree`, `ExitWorktree` | `enter_worktree`, `exit_worktree` |
 | `LSP` | `lsp_diagnostics` |
 | `ListMcpResourcesTool`, `ReadMcpResourceTool`, `ReadMcpResourceDirTool` | `list_mcp_resources`, `read_mcp_resource`, `read_mcp_resource_dir` |

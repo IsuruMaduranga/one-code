@@ -42,6 +42,14 @@ the result on an indented `⎿` line. Thinking is collapsed behind
 Set `CC_NO_INPUT_MARKER=1` or `CC_NO_ASSISTANT_MARKER=1` to remove either
 marker.
 
+When you type a slash command that takes an argument followed by a space, a
+dim placeholder after the cursor shows what goes there, as in Claude Code:
+`/loop ` shows `[interval] [prompt]`, and `/add-dir ` shows `<path>`. It
+disappears once you start typing the argument. Skills and custom commands
+get theirs from an `argument-hint` line in their frontmatter. A custom
+command that lists `arguments` instead shows the names you haven't typed
+yet, one space at a time.
+
 ## The working indicator
 
 While the model works, a spinner shows a random verb, the elapsed time, and

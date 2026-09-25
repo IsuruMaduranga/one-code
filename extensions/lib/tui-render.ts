@@ -786,9 +786,9 @@ export function formatFireTime(ms: number): string {
  * `✻ Running scheduled task (Sep 11 12:03pm)` line, the prompt itself under it
  * on ctrl+o (the prompt is the turn's input, verbatim — findings §21).
  */
-export function scheduledTaskComponent(theme: ThemeLike, prompt: string, firedAt: number, expanded: boolean): TuiComponent {
+export function scheduledTaskComponent(theme: ThemeLike, prompt: string, firedAt: number, expanded: boolean, label = "Running scheduled task", suffix = ""): TuiComponent {
 	const lines = prompt.trim().split("\n");
-	const headline = `Running scheduled task (${formatFireTime(firedAt)})`;
+	const headline = `${label} (${formatFireTime(firedAt)})${suffix}`;
 	return linesComponent(() => {
 		if (!expanded) {
 			return [`${theme.fg("dim", "✻")} ${theme.fg("dim", headline)}${theme.fg("dim", ` (+${lines.length} lines, ${EXPAND_HINT})`)}`];

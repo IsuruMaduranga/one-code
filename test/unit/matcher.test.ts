@@ -901,6 +901,28 @@ describe("PERMISSIONS-REVIEW-2026-09-05 medium findings", () => {
 			expect(decide({ ...base, mode: "auto", toolName: "SendMessage", subject: "", allow: parseRules(["SendMessage"]) }).decision).toBe("classify");
 		});
 	});
+
+	describe("session cron: Claude Code's gating", () => {
+		it("classifies cron_create and schedule_wakeup in auto mode only, under either name", () => {
+			for (const toolName of ["cron_create", "CronCreate", "schedule_wakeup", "ScheduleWakeup"]) {
+				expect(decide({ ...base, mode: "auto", toolName, subject: "" }).decision).toBe("classify");
+				expect(decide({ ...base, toolName, subject: "" }).decision).toBe("allow");
+				expect(decide({ ...base, mode: "plan", toolName, subject: "" }).decision).toBe("allow");
+				expect(decide({ ...base, mode: "dontAsk", toolName, subject: "" }).decision).toBe("allow");
+			}
+		});
+		it("honours a CronCreate allow rule in auto mode, and a deny rule everywhere", () => {
+			expect(isBroadExecutionRule(parseRule("CronCreate")!)).toBe(false);
+			expect(decide({ ...base, mode: "auto", toolName: "cron_create", subject: "", allow: parseRules(["CronCreate"]) }).decision).toBe("allow");
+			expect(decide({ ...base, toolName: "cron_create", subject: "", deny: parseRules(["CronCreate"]) }).decision).toBe("deny");
+		});
+		it("allows listing and cancelling jobs in every mode", () => {
+			for (const mode of ["auto", "default", "plan"] as const) {
+				expect(decide({ ...base, mode, toolName: "CronList", subject: "" }).decision).toBe("allow");
+				expect(decide({ ...base, mode, toolName: "cron_delete", subject: "" }).decision).toBe("allow");
+			}
+		});
+	});
 });
 
 describe("an allow rule never covers a redirect outside the working space (PR #12 review)", () => {

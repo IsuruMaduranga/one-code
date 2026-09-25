@@ -196,6 +196,7 @@ export default function effortExtension(pi: ExtensionAPI) {
 
 	registerLocalCommand(pi, "effort", {
 		description: `Set reasoning effort (shift+tab cycles the plain levels): /effort [${EFFORT_CHOICES.join("|")}] — ultracode is ${ULTRACODE_LEVEL} + workflows`,
+		argumentHint: `[${EFFORT_CHOICES.join("|")}]`,
 		getArgumentCompletions: (prefix) => {
 			const matches = acceptedEffortArgs().filter((value) => value.startsWith(prefix.trim().toLowerCase()));
 			return matches.length ? matches.map((value) => ({ value, label: value })) : null;

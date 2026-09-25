@@ -29,6 +29,7 @@
  * memory, not written to the session file as CC does — a `--resume` drops them.
  */
 
+import { announceArgumentHint, type HintEmitter } from "./argument-hints.ts";
 import { REMINDER_CHANNEL, type ReminderPayload } from "./reminders.ts";
 
 /** The slice of pi's ExtensionAPI the announcer needs (its event bus). */
@@ -95,15 +96,18 @@ type CommandOptions = { handler: (args: string, ctx: any) => Promise<void> | voi
  * `pi.registerCommand` for a One Code local command: the breadcrumb is
  * announced before the handler runs, so no command can forget it. `/clear`
  * is the one exception — it announces from the NEW session's `session_start`
- * (see clear/index.ts) and registers plainly.
+ * (see clear/index.ts) and registers plainly. `argumentHint` is the prompt's
+ * dim placeholder for the command's argument (lib/argument-hints.ts).
  */
 export function registerLocalCommand<O extends CommandOptions>(
-	pi: ReminderEmitter & { registerCommand(name: string, options: O): void },
+	pi: ReminderEmitter & HintEmitter & { registerCommand(name: string, options: O): void },
 	name: string,
-	options: O,
+	options: O & { argumentHint?: string },
 ): void {
+	const { argumentHint, ...rest } = options;
+	if (argumentHint) announceArgumentHint(pi, name, argumentHint);
 	pi.registerCommand(name, {
-		...options,
+		...(rest as O),
 		handler: (args: string, ctx: unknown) => {
 			announceLocalCommand(pi, { name, args });
 			return options.handler(args, ctx);

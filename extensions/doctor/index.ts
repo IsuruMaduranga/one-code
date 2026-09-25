@@ -47,6 +47,7 @@ import { computePresets, describePresetChanges, findPreset, PRESET_NAMES, preset
 import { type DoctorReport, renderDoctorReport, renderDoctorText, renderSection } from "./report.ts";
 import { lookupLatestVersion } from "./update-lookup.ts";
 import { applyDoctorKey, decodeDoctorKey, renderDoctorViewer, visibleBodyRows } from "./viewer.ts";
+import { announceArgumentHint } from "../lib/argument-hints.ts";
 
 /** Rows the panel may take; the terminal's own height caps it (boundedDockHeight). */
 export const DOCTOR_PANEL_MAX_HEIGHT = 40;
@@ -263,6 +264,7 @@ export default function doctorExtension(pi: ExtensionAPI) {
 		{ value: "preset quality", description: "Apply: the strongest model for the main session and its subagents" },
 	];
 
+	announceArgumentHint(pi, "doctor", "[report|presets|preset <name>]");
 	pi.registerCommand("doctor", {
 		description:
 			"Health-check your setup and fix what's wrong (Claude Code's checkup, run by the model). Subcommands: report (the measured report only), presets, preset <economical|balanced|quality>",

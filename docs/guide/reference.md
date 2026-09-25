@@ -45,9 +45,9 @@ that explains it.
 | `/memory` | Open an instruction file or the memory folder. | [Memory](sessions-and-context.md#memory) |
 | `/tasks`, `/tasks hide`, `/tasks show` | Print the task list, or hide and show its widget. | [Tasks](tasks-and-background-work.md#the-task-list) |
 | `/background` | List background tasks. | [Background](tasks-and-background-work.md#the-background-list) |
-| `/loop <interval> <task>` | Repeat a task at a fixed interval (`30s`, `5m`, `1h`). | [Loops](tasks-and-background-work.md#scheduled-wake-ups-and-loops) |
+| `/loop <interval> <task>` | Repeat a task at a fixed interval (`5m`, `2h`, `1d`, or `… every 20m`). Ask the model to stop it. | [Loops](tasks-and-background-work.md#scheduled-wake-ups-and-loops) |
 | `/loop <task>` | Repeat a task, letting the model choose the pace. | |
-| `/loop status`, `/loop stop` | Report or end the loop. | |
+| `/loop`, `/loop <interval>` | Run the autonomous check, or the tasks in `.claude/loop.md`, on a loop. | |
 | `/tools-deferred` | List deferred tools and whether each is loaded. | [Tools](tools.md#eager-and-deferred-tools) |
 | `/init` | Have the model write a `CLAUDE.md` for the project. | [CLAUDE.md](bring-your-claude-code-setup.md#project-instructions-claudemd) |
 | `/clear` | Start a new session (pi's `/new`); the model is told. | [Sessions](sessions-and-context.md#start-over) |
