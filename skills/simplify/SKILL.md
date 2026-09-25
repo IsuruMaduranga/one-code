@@ -4,6 +4,7 @@ description: >
   Review the changed code for reuse, simplification, efficiency, and altitude
   cleanups, then apply the fixes. Quality only — it does not hunt for bugs; use
   code-review for that.
+argument-hint: "[<target>]"
 ---
 
 `/simplify → 4 cleanup agents in parallel → apply the fixes`

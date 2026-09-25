@@ -23,6 +23,7 @@ import { promisify } from "node:util";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readFavorites, toggleFavorite } from "../lib/favorites.ts";
+import { announceArgumentHint, type CommandHint, frontmatterCommandHint } from "../lib/argument-hints.ts";
 import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } from "../lib/mcp-status.ts";
 import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { setOverride } from "../lib/plugin-overrides.ts";
@@ -549,19 +550,20 @@ export default function pluginsExtension(pi: ExtensionAPI) {
 
 function registerPluginCommand(pi: ExtensionAPI, plugin: Plugin, name: string, path: string): void {
 	let description = `Command from the ${plugin.name} plugin`;
-	let argumentHint: string | undefined;
+	let argumentHint: CommandHint | undefined;
 	try {
 		const { frontmatter } = parseFrontmatterLoosely(readFileSync(path, "utf-8")) as {
 			frontmatter?: Record<string, unknown>;
 		};
 		if (typeof frontmatter?.description === "string") description = frontmatter.description;
-		if (typeof frontmatter?.["argument-hint"] === "string") argumentHint = frontmatter["argument-hint"];
+		argumentHint = frontmatterCommandHint(frontmatter);
 	} catch {
 		// Fall back to the generic description.
 	}
 
+	if (argumentHint) announceArgumentHint(pi, name, argumentHint);
 	pi.registerCommand(name, {
-		description: argumentHint ? `${description} (${argumentHint})` : description,
+		description: argumentHint?.hint ? `${description} (${argumentHint.hint})` : description,
 		handler: async (args, ctx) => {
 			let body: string;
 			try {

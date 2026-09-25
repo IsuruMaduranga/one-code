@@ -123,6 +123,7 @@ import {
 	type WorkspaceDirRow,
 } from "./panel/state.ts";
 import { builtinRuleCounts } from "../auto-mode/rules.ts";
+import { announceArgumentHint } from "../lib/argument-hints.ts";
 
 const DENIED_BY_USER =
 	"The user doesn't want to proceed with this tool use. The tool use was rejected. Adjust your approach based on the user's feedback instead of retrying the same call.";
@@ -1753,6 +1754,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	 * whether to keep it for this session or remember it; without one it opens
 	 * the panel's Workspace tab on the path input.
 	 */
+	announceArgumentHint(pi, "add-dir", "<path>");
 	pi.registerCommand("add-dir", {
 		description: "Add a workspace directory: /add-dir <path>",
 		handler: async (args: string, ctx: ExtensionContext) => {
@@ -2096,6 +2098,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 
 	registerLocalCommand(pi, "auto-mode", {
 		description: "Auto-mode classifier: /auto-mode [setup|defaults|config|model [provider/model-id|clear]]",
+		argumentHint: "[setup|defaults|config|model [provider/model-id|clear]]",
 		getArgumentCompletions: () =>
 			[
 				{ value: "setup", label: "analyze this environment and draft the config" },
@@ -2182,6 +2185,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 
 	registerLocalCommand(pi, "allow", {
 		description: 'Persist an allow rule: /allow Bash(npm test:*) [global]',
+		argumentHint: "<rule> [global]",
 		handler: async (args, ctx) => {
 			const global = /\s+global$/.test(args.trim());
 			const raw = args.trim().replace(/\s+global$/, "");

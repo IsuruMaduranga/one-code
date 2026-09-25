@@ -408,6 +408,7 @@ export default function lspExtension(pi: ExtensionAPI) {
 
 	registerLocalCommand(pi, "lsp", {
 		description: "Show language server status: /lsp [trust]",
+		argumentHint: "[trust]",
 		getArgumentCompletions: () => [
 			{ value: "trust", label: "let servers that run this project's code start here (rust-analyzer, jdtls)" },
 		],

@@ -5,7 +5,7 @@
  * the sanctioned base for a replacement (it already wires every app keybinding
  * through handleInput, which we leave untouched). We only reserve a two-column
  * left gutter and paint the marker into it — see prompt-marker.ts for why that
- * is cursor-safe — and draw a bare command's argument hint after the cursor
+ * is cursor-safe — and draw a slash command's argument hint after the cursor
  * (lib/argument-hints.ts). Registered via `ctx.ui.setEditorComponent`; this file is thin
  * wiring over the pure `applyPromptMarker`.
  */
@@ -22,7 +22,7 @@ type EditorArgs = ConstructorParameters<typeof CustomEditor>;
 export class PromptEditor extends CustomEditor {
 	/** Re-read per render so the marker follows live theme changes. */
 	#renderMarker: () => string;
-	/** The painted argument placeholder for the current input, if it is a bare hinted command. */
+	/** The painted argument placeholder for the current input, if it is a hinted command. */
 	#renderHint: (text: string) => string | undefined;
 
 	constructor(

@@ -6,6 +6,7 @@ description: >
   findings as inline PR comments, or --fix to apply the findings to the working
   tree after the review. Raise the reasoning effort (/effort) for broader,
   recall-biased coverage; lower it for fewer, high-confidence findings.
+argument-hint: "[--fix] [--comment] [<pr#>|<branch>|<path>]"
 ---
 
 `medium effort → 3+5 angles × 6 candidates → 1-vote verify → ≤8 findings`
