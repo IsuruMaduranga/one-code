@@ -21,7 +21,16 @@ import { restoreLatestDetails } from "../lib/branch-restore.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { ccToolRenderers, linesComponent, safeThemeBold, safeThemePaint, strike } from "../lib/tui-render.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
-import { formatTaskDetails, formatTaskLine, formatTaskList, formatTaskWidget, nudgeMessage, type TaskSnapshot, TaskStore } from "./store.ts";
+import {
+	FINISHED_LIST_CLEAR_MS,
+	formatTaskDetails,
+	formatTaskLine,
+	formatTaskList,
+	formatTaskWidget,
+	nudgeMessage,
+	type TaskSnapshot,
+	TaskStore,
+} from "./store.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 
 interface TaskDetails {
@@ -48,7 +57,30 @@ export default function tasksExtension(pi: ExtensionAPI) {
 		});
 	};
 
+	// Claude Code clears a finished list (every task completed) 5 s after it
+	// gets there, and the panel goes with it; reopening or adding a task first
+	// cancels the clear. Only where there is a widget: a one-shot run keeps its
+	// list. The timer is unref'd and cancelled on shutdown, so it never holds
+	// the process or fires into a disposed session.
+	let clearTimer: ReturnType<typeof setTimeout> | undefined;
+	const cancelClear = () => {
+		if (clearTimer) clearTimeout(clearTimer);
+		clearTimer = undefined;
+	};
+	const scheduleClear = (ctx: ExtensionContext) => {
+		if (!ctx.hasUI || !store.isFinished()) return cancelClear();
+		if (clearTimer) return;
+		clearTimer = setTimeout(() => {
+			clearTimer = undefined;
+			if (!store.isFinished()) return;
+			store.clear();
+			updateWidget(ctx);
+		}, FINISHED_LIST_CLEAR_MS);
+		clearTimer.unref?.();
+	};
+
 	const reconstructState = (ctx: ExtensionContext) => {
+		cancelClear();
 		const details = restoreLatestDetails<TaskDetails>(ctx.sessionManager.getBranch(), TASK_TOOLS, (d) => Boolean(d?.taskSnapshot));
 		store.restore(details?.taskSnapshot);
 		updateWidget(ctx);
@@ -56,6 +88,7 @@ export default function tasksExtension(pi: ExtensionAPI) {
 
 	pi.on("session_start", (_event, ctx) => reconstructState(ctx));
 	pi.on("session_tree", (_event, ctx) => reconstructState(ctx));
+	pi.on("session_shutdown", () => cancelClear());
 
 	// Claude Code's periodic task_reminder (TODO_REMINDER_CONFIG): a gentle
 	// nudge once the task tools have gone unused for TURNS_SINCE_WRITE turns,
@@ -86,6 +119,7 @@ export default function tasksExtension(pi: ExtensionAPI) {
 
 	const result = (text: string, ctx: ExtensionContext, isError = false) => {
 		updateWidget(ctx);
+		scheduleClear(ctx);
 		return {
 			content: [{ type: "text" as const, text }],
 			details: { taskSnapshot: store.snapshot() } satisfies TaskDetails,

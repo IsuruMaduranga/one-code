@@ -133,14 +133,41 @@ export class TaskStore {
 		return { nextId: this.nextId, tasks: this.list().map((t) => ({ ...t, metadata: { ...t.metadata }, blocks: [...t.blocks], blockedBy: [...t.blockedBy] })) };
 	}
 
+	/**
+	 * A non-empty list with every task completed: the state Claude Code clears
+	 * itself from, 5 s after it is reached (`FINISHED_LIST_CLEAR_MS`).
+	 */
+	isFinished(): boolean {
+		const tasks = this.list();
+		return tasks.length > 0 && tasks.every((t) => t.status === "completed");
+	}
+
+	/**
+	 * Drop every task and keep the id counter, as Claude Code's reset does (it
+	 * records the high-water mark before deleting), so a task created after a
+	 * clear never reuses an id the transcript already mentions.
+	 */
+	clear(): void {
+		this.tasks.clear();
+	}
+
+	/**
+	 * A finished snapshot restores as empty: the clear runs on a timer and never
+	 * lands in a tool result, so without this rule `/resume` or a `/tree` switch
+	 * would bring back a list Claude Code would already have cleared.
+	 */
 	restore(snapshot: TaskSnapshot | undefined): void {
 		this.tasks.clear();
 		this.nextId = snapshot?.nextId ?? 1;
 		for (const task of snapshot?.tasks ?? []) {
 			this.tasks.set(task.id, { ...task, metadata: { ...task.metadata }, blocks: [...task.blocks], blockedBy: [...task.blockedBy] });
 		}
+		if (this.isFinished()) this.clear();
 	}
 }
+
+/** How long a finished list stays on screen before it clears (Claude Code's 5000 ms). */
+export const FINISHED_LIST_CLEAR_MS = 5_000;
 
 const STATUS_MARK: Record<TaskStatus, string> = { pending: " ", in_progress: "▸", completed: "x" };
 

@@ -136,4 +136,44 @@ describe("TaskStore", () => {
 		expect(formatTaskDetails(store, store.get(a.id)!)).toContain("Description: the thing");
 		expect(formatTaskList(new TaskStore())).toBe("No tasks.");
 	});
+
+	it("is finished only when non-empty and every task is completed", () => {
+		const store = new TaskStore();
+		expect(store.isFinished()).toBe(false);
+		const a = store.create({ subject: "A", description: "" });
+		const b = store.create({ subject: "B", description: "" });
+		store.update(a.id, { status: "completed" });
+		expect(store.isFinished()).toBe(false);
+		store.update(b.id, { status: "completed" });
+		expect(store.isFinished()).toBe(true);
+	});
+
+	it("keeps the id counter across a clear, as Claude Code's reset does", () => {
+		const store = new TaskStore();
+		store.create({ subject: "A", description: "" });
+		store.create({ subject: "B", description: "" });
+		store.clear();
+		expect(store.list()).toEqual([]);
+		expect(store.create({ subject: "C", description: "" }).id).toBe("3");
+	});
+
+	it("restores a finished snapshot as empty, keeping the id counter", () => {
+		const store = new TaskStore();
+		const a = store.create({ subject: "A", description: "" });
+		store.update(a.id, { status: "completed" });
+		const restored = new TaskStore();
+		restored.restore(store.snapshot());
+		expect(restored.list()).toEqual([]);
+		expect(restored.create({ subject: "B", description: "" }).id).toBe("2");
+	});
+
+	it("restores an unfinished snapshot as it was", () => {
+		const store = new TaskStore();
+		const a = store.create({ subject: "A", description: "" });
+		store.create({ subject: "B", description: "" });
+		store.update(a.id, { status: "completed" });
+		const restored = new TaskStore();
+		restored.restore(store.snapshot());
+		expect(restored.list().map((t) => t.status)).toEqual(["completed", "pending"]);
+	});
 });
