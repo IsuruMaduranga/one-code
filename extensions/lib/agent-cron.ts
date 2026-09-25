@@ -28,7 +28,7 @@ export const AGENT_CRON_CHANNEL = "one-code:agent-cron";
 export const AGENT_CRON_FIRE_CHANNEL = "one-code:agent-cron-fire";
 
 export type AgentCronRequest =
-	| { op: "create"; agentId: string; cron: string; prompt: string; recurring?: boolean; result?: AgentCronResult }
+	| { op: "create"; agentId: string; cwd: string; cron: string; prompt: string; recurring?: boolean; result?: AgentCronResult }
 	| { op: "list"; agentId: string; result?: AgentCronResult }
 	| { op: "delete"; agentId: string; id: string; result?: AgentCronResult };
 
@@ -46,6 +46,14 @@ export interface AgentCronFire {
 	delivered?: boolean;
 }
 
+/**
+ * cron_create's refusal in an agent that runs to completion (a nested spawn,
+ * or any spawn in a one-shot run): a fire reaches only a background agent,
+ * and this one ends first.
+ */
+export const BLOCKING_RUN_REFUSAL =
+	"Nothing was scheduled: this agent runs until its task is done and then ends, so a job it schedules could never fire. Do the work now, or report back so the main session can schedule it.";
+
 /** Claude Code's refusal when an agent deletes a job it does not own. */
 export function formatNotOwner(id: string): string {
 	return `Cannot delete cron job '${id}': owned by another agent`;
@@ -55,16 +63,28 @@ interface Emitter {
 	emit(channel: string, data: unknown): unknown;
 }
 
+/** Where a child's cron tools live: only a `resident` (background) run can receive a fire. */
+export interface AgentCronOwner {
+	agentId: string;
+	cwd: string;
+	resident: boolean;
+}
+
 /**
- * The three cron tools for a child session, bound to `agentId` and to the
- * MAIN session's bus. Same names, schemas and descriptions as the main
- * session's (background/index.ts).
+ * The three cron tools for a child session, bound to its owner and the MAIN
+ * session's bus. Same names, schemas and descriptions as the main session's
+ * (background/index.ts). A run that is not resident keeps all three, as in
+ * Claude Code, but its cron_create refuses.
  */
-export function agentCronTools(events: Emitter, agentId: string) {
+export function agentCronTools(events: Emitter, { agentId, cwd, resident }: AgentCronOwner) {
+	const toolResult = (result: AgentCronResult) => ({
+		content: [{ type: "text" as const, text: result.text }],
+		details: result.details ?? {},
+		...(result.isError ? { isError: true } : {}),
+	});
 	const ask = (request: AgentCronRequest) => {
 		events.emit(AGENT_CRON_CHANNEL, request);
-		const result = request.result ?? { text: "The session's cron store is not loaded; nothing was scheduled.", isError: true };
-		return { content: [{ type: "text" as const, text: result.text }], details: result.details ?? {}, ...(result.isError ? { isError: true } : {}) };
+		return toolResult(request.result ?? { text: "The session's cron store is not loaded; nothing was scheduled.", isError: true });
 	};
 	return [
 		{
@@ -73,7 +93,8 @@ export function agentCronTools(events: Emitter, agentId: string) {
 			description: CRON_CREATE_DESCRIPTION,
 			parameters: CRON_CREATE_PARAMETERS,
 			async execute(_id: string, params: { cron: string; prompt: string; recurring?: boolean; durable?: boolean }) {
-				return ask({ op: "create", agentId, cron: params.cron, prompt: params.prompt, recurring: params.recurring });
+				if (!resident) return toolResult({ text: BLOCKING_RUN_REFUSAL, isError: true });
+				return ask({ op: "create", agentId, cwd, cron: params.cron, prompt: params.prompt, recurring: params.recurring });
 			},
 		},
 		{

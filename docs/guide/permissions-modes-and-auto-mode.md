@@ -36,8 +36,9 @@ A handful of tools are always allowed because other tools sit behind them:
 tools, `cron_list`, `cron_delete`, and the plan-mode tools. The tool calls
 these tools make in turn (a subagent's own edits, for example) are still
 gated. `cron_create` and `schedule_wakeup` are allowed too, except in auto
-mode, where the classifier reviews what the scheduled prompt asks for, as in
-Claude Code.
+mode, where the classifier reviews what the scheduled prompt asks for unless an
+allow rule names the tool, as in Claude Code. A fired prompt's own tool calls
+go through the usual checks.
 
 ## Permission rules
 

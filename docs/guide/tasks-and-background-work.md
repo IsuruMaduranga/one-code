@@ -119,7 +119,10 @@ stay visible above in the terminal.
 A background subagent can schedule its own jobs with the same tools. It sees
 and cancels only its own, a job it made fires into that agent while it is
 still running, and the job is dropped once the agent has ended. The main
-session's `cron_list` shows every job.
+session's `cron_list` shows every job. A subagent that runs until its task is
+done, such as one another subagent starts or any subagent in a `-p` run, can't
+schedule a job: nothing would be left to receive it, so its `cron_create`
+returns an error.
 
 To stop a loop, ask the model to stop it, as in Claude Code. It cancels the
 job with `cron_delete`, or ends a self-paced loop with `schedule_wakeup`.

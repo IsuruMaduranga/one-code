@@ -1323,12 +1323,13 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	 * The spawn tool a run is entitled to. THE one depth gate: it reads the
 	 * record's own depth (set once at creation), so every handout site —
 	 * fresh spawn, background resident, SendMessage resume — enforces
-	 * MAX_SPAWN_DEPTH identically. A resumed grandchild stays capped.
+	 * MAX_SPAWN_DEPTH identically. A resumed grandchild stays capped. Only a
+	 * `resident` run can receive a cron fire, so any other run's cron_create refuses.
 	 */
-	const spawnToolsFor = (record: AgentRunRecord): ToolDefinition[] => {
+	const spawnToolsFor = (record: AgentRunRecord, { resident = false } = {}): ToolDefinition[] => {
 		const depth = record.depth ?? 0;
 		// The child's cron tools reach this session's store (lib/agent-cron.ts).
-		const cron = agentCronTools(pi.events, record.taskId) as unknown as ToolDefinition[];
+		const cron = agentCronTools(pi.events, { agentId: record.taskId, cwd: record.cwd, resident }) as unknown as ToolDefinition[];
 		return depth < MAX_SPAWN_DEPTH ? [childAgentTool(record, depth), ...cron] : cron;
 	};
 
@@ -1577,7 +1578,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			},
 			sink: live.sink,
 			onMessageToMain: (message) => notifyAgentMessage(p.record.taskId, p.record.name, message),
-			extraTools: spawnToolsFor(p.record),
+			extraTools: spawnToolsFor(p.record, { resident: true }),
 			onTurnEnd: (outcome) => {
 				registry.sessionFileFor(p.record);
 				live.settle();

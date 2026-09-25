@@ -23,6 +23,7 @@ import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type A
 import { SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../../extensions/lib/skill-body.ts";
 import { BUNDLED_SKILLS_DIR } from "../../extensions/lib/skill-scan.ts";
 import { join } from "node:path";
+import { WORKTREE_CHANNEL } from "../../extensions/lib/worktree-channel.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
 function mount(): FakePi {
@@ -389,7 +390,7 @@ describe("background wiring: cron tools", () => {
 			fake.events.emit(AGENT_CRON_CHANNEL, request);
 			return request.result!;
 		};
-		const created = ask({ op: "create", agentId: "a1", cron: "1 12 * * *", prompt: "agent check", recurring: false });
+		const created = ask({ op: "create", agentId: "a1", cwd: "/project", cron: "1 12 * * *", prompt: "agent check", recurring: false });
 		expect(created.text).toMatch(/^Scheduled one-shot task [0-9a-f]{8} /);
 		const jobId = created.details!.jobId as string;
 		await cronCall(fake, "cron_create", { cron: "*/10 * * * *", prompt: "main job" }, ctx);
@@ -408,11 +409,35 @@ describe("background wiring: cron tools", () => {
 		expect(cronFires(fake)).toHaveLength(0);
 	});
 
+	it("resolves a fired prompt in its owner's directory: the agent's, the main worktree, or the session's", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(2026, 8, 25, 12, 0, 0));
+		const fake = mount();
+		await fake.fire("session_start", {}, liveSessionCtx({ cwd: "/project" }));
+		const cwds: Record<string, string> = {};
+		fake.events.on(SLASH_EXPAND_CHANNEL, (data) => {
+			const query = data as SlashExpandQuery;
+			cwds[query.text] = query.cwd;
+		});
+		const ctx = liveSessionCtx({ cwd: "/project" });
+		await cronCall(fake, "cron_create", { cron: "1 12 * * *", prompt: "/main-before", recurring: false }, ctx);
+		fake.events.emit(AGENT_CRON_CHANNEL, { op: "create", agentId: "a1", cwd: "/agent-tree", cron: "1 12 * * *", prompt: "/agent", recurring: false } satisfies AgentCronRequest);
+		await cronCall(fake, "cron_create", { cron: "2 12 * * *", prompt: "/main-in-worktree", recurring: false }, ctx);
+		await cronCall(fake, "cron_create", { cron: "3 12 * * *", prompt: "/main-after", recurring: false }, ctx);
+
+		await vi.advanceTimersByTimeAsync(60_000 + DEFAULT_COALESCE_MS);
+		fake.events.emit(WORKTREE_CHANNEL, { path: "/project-wt", branch: "wt" });
+		await vi.advanceTimersByTimeAsync(60_000);
+		fake.events.emit(WORKTREE_CHANNEL, null);
+		await vi.advanceTimersByTimeAsync(60_000);
+		expect(cwds).toEqual({ "/main-before": "/project", "/agent": "/agent-tree", "/main-in-worktree": "/project-wt", "/main-after": "/project" });
+	});
+
 	it("drops a recurring job whose agent has ended", async () => {
 		vi.useFakeTimers();
 		vi.setSystemTime(new Date(2026, 8, 25, 12, 0, 0));
 		const fake = mount();
-		const request: AgentCronRequest = { op: "create", agentId: "gone", cron: "*/10 * * * *", prompt: "tick" };
+		const request: AgentCronRequest = { op: "create", agentId: "gone", cwd: "/project", cron: "*/10 * * * *", prompt: "tick" };
 		fake.events.emit(AGENT_CRON_CHANNEL, request);
 		await vi.advanceTimersByTimeAsync(10 * 60_000 + DEFAULT_COALESCE_MS);
 		const list: AgentCronRequest = { op: "list", agentId: "gone" };

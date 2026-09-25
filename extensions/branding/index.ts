@@ -327,11 +327,15 @@ export default function brandingExtension(pi: ExtensionAPI) {
 	// `argument-hint` frontmatter. pi lists them only once a turn resolves them,
 	// so the template folders are scanned at session_start (the skill extension
 	// announces `/skill:` hints from its own scan) and pi's list read each turn.
+	// pi runs a built-in or extension command before a command file of the same
+	// name, so such a file's hint is never read.
 	const hintedFiles = new Set<string>();
-	const readFileHints = (files: { name: string; path: string }[]) => {
+	const readFileHints = (files: { name: string; path: string }[], commands = pi.getCommands()) => {
+		const extensionCommands = new Set(commands.filter((c) => c.source === "extension").map((c) => c.name));
 		for (const { name, path } of files) {
 			if (hintedFiles.has(path)) continue;
 			hintedFiles.add(path);
+			if (Object.hasOwn(PI_BUILTIN_HINTS, name) || extensionCommands.has(name)) continue;
 			try {
 				const hint = frontmatterCommandHint(parseFrontmatterLoosely(readFileSync(path, "utf-8")).frontmatter);
 				if (hint) argumentHints.set(name, hint);
@@ -342,7 +346,11 @@ export default function brandingExtension(pi: ExtensionAPI) {
 	};
 	pi.on("before_agent_start", () => {
 		try {
-			readFileHints(pi.getCommands().filter((c) => c.source !== "extension").map((c) => ({ name: c.name, path: c.sourceInfo.path })));
+			const commands = pi.getCommands();
+			readFileHints(
+				commands.filter((c) => c.source !== "extension").map((c) => ({ name: c.name, path: c.sourceInfo.path })),
+				commands,
+			);
 		} catch {
 			// Not bound (a torn-down session): the next turn looks again.
 		}
@@ -355,7 +363,11 @@ export default function brandingExtension(pi: ExtensionAPI) {
 		setTimeout(() => retitle(ctx), 0).unref?.();
 		ctx.ui.setHiddenThinkingLabel(THINKING_LABEL);
 		installPromptMarker(ctx as unknown as { hasUI: boolean; mode: string; ui: BrandingEditorUI }, argumentHints);
-		readFileHints(promptTemplateFiles(ctx.cwd, os.homedir(), getAgentDir()));
+		try {
+			readFileHints(promptTemplateFiles(ctx.cwd, os.homedir(), getAgentDir()));
+		} catch {
+			// Commands not bound: nothing was marked read, so the next turn reads pi's list.
+		}
 		// Soft drift guard: warn once at startup when the hosting pi is outside
 		// the range this release was tested against (see lib/pi-version.ts).
 		const versionWarning = piVersionWarning(PI_VERSION);

@@ -54,6 +54,7 @@ import {
 	CRON_LIST_PARAMETERS,
 	CronStore,
 	type CronFire,
+	type CronJob,
 	describeCadence,
 	formatCannotFire,
 	formatCreateResult,
@@ -90,6 +91,7 @@ import { SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type Sla
 import { BUNDLED_SKILLS_DIR } from "../lib/skill-scan.ts";
 import { join, resolve } from "node:path";
 import { SESSION_WORK_CHANNEL, sessionBackgroundTask, sessionCron, type SessionWorkQuery } from "../lib/session-work.ts";
+import { WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
 
 const OUTPUT_CAP = 30_000;
 const STORED_OUTPUT_CAP = 200_000;
@@ -146,6 +148,11 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	// What the no-prompt /loop sentinels already delivered; compaction resets it (loop-fire.ts).
 	let loopDelivery = freshDeliveryState();
 	let sessionCwd = process.cwd();
+	// The main session's worktree while it is in one (enter_worktree), where its fires resolve.
+	let worktreeCwd: string | undefined;
+	pi.events.on(WORKTREE_CHANNEL, (data) => {
+		worktreeCwd = (data as WorktreeLocation | null)?.path;
+	});
 	let cronTimer: NodeJS.Timeout | undefined;
 	// True between agent_start and agent_settled, so a due cron job waits for the
 	// turn to end instead of injecting one mid-run. agent_settled, not agent_end:
@@ -159,7 +166,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	pi.events.on(AGENT_CRON_CHANNEL, (data) => {
 		const request = data as AgentCronRequest;
 		if (request.op === "create") {
-			const created = cron.create({ cron: request.cron, prompt: request.prompt, recurring: request.recurring, agentId: request.agentId }, Date.now());
+			const created = cron.create({ cron: request.cron, prompt: request.prompt, recurring: request.recurring, agentId: request.agentId, cwd: request.cwd }, Date.now());
 			request.result = created.ok
 				? { text: formatCreateResult(created.job), details: { jobId: created.job.id } }
 				: { text: created.error, isError: true };
@@ -221,12 +228,15 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	 * The text a fired prompt delivers, as Claude Code's queue would run it: a
 	 * no-prompt /loop sentinel expands (loop-fire.ts), and a slash command that
 	 * names a skill runs that skill (lib/skill-body.ts); anything else is the
-	 * prompt verbatim.
+	 * prompt verbatim. Both resolve in the job owner's directory: a subagent's
+	 * own, or the main session's worktree while it is in one.
 	 */
-	const fireText = (prompt: string): string => {
-		const resolved = resolveLoopFire(loopDelivery, prompt, sessionCwd, autonomousPreamble());
+	const fireText = (job: CronJob): string => {
+		const { prompt } = job;
+		const cwd = job.cwd ?? worktreeCwd ?? sessionCwd;
+		const resolved = resolveLoopFire(loopDelivery, prompt, cwd, autonomousPreamble());
 		if (resolved !== prompt || !prompt.startsWith("/")) return resolved;
-		const query: SlashExpandQuery = { text: prompt, cwd: sessionCwd };
+		const query: SlashExpandQuery = { text: prompt, cwd };
 		pi.events.emit(SLASH_EXPAND_CHANNEL, query);
 		return query.expanded ?? prompt;
 	};
@@ -245,14 +255,14 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		const { job, final } = fire;
 		if (job.agentId !== undefined) {
 			// A subagent's job goes to that agent, or is dropped once it has ended.
-			const delivery: AgentCronFire = { agentId: job.agentId, jobId: job.id, prompt: fireText(job.prompt) };
+			const delivery: AgentCronFire = { agentId: job.agentId, jobId: job.id, prompt: fireText(job) };
 			pi.events.emit(AGENT_CRON_FIRE_CHANNEL, delivery);
 			if (!delivery.delivered) cron.delete(job.id);
 			return;
 		}
 		const fold = job.source === "wakeup" ? foldDetails() : {};
 		if (job.source === "wakeup") dynamicLoop.inFlight = job.prompt;
-		notify(job.source === "wakeup" ? "wakeup" : "cron", fireText(job.prompt), { jobId: job.id, cron: job.cron, source: job.source, final, ...fold });
+		notify(job.source === "wakeup" ? "wakeup" : "cron", fireText(job), { jobId: job.id, cron: job.cron, source: job.source, final, ...fold });
 	};
 	/** Fire every due job (only while idle), then arm the one timer to the next fire. */
 	const runCron = () => {

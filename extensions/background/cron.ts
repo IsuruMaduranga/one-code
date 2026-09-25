@@ -244,6 +244,8 @@ export interface CronJob {
 	source: CronSource;
 	/** A subagent's task id when the job is that agent's (lib/agent-cron.ts). */
 	agentId?: string;
+	/** A subagent job's working directory, where its fire resolves loop.md and skills. */
+	cwd?: string;
 	createdAt: number;
 	/** Epoch ms of the next fire. */
 	nextFireAt: number;
@@ -292,7 +294,7 @@ export class CronStore {
 	 * wakeup fires `delaySeconds` from now, its cron (`M H * * *`) only naming
 	 * that minute for cron_list, as in Claude Code.
 	 */
-	create(input: { cron: string; prompt: string; recurring?: boolean; source?: CronSource; fireAt?: number; agentId?: string }, now: number): CreateResult {
+	create(input: { cron: string; prompt: string; recurring?: boolean; source?: CronSource; fireAt?: number; agentId?: string; cwd?: string }, now: number): CreateResult {
 		const fields = parseCron(input.cron);
 		if (!fields) return { ok: false, error: `Invalid cron expression '${input.cron}'. Expected 5 fields: M H DoM Mon DoW.` };
 		if (!nextMatch(fields, new Date(now))) return { ok: false, error: `Cron expression '${input.cron}' does not match any calendar date in the next year.` };
@@ -306,6 +308,7 @@ export class CronStore {
 			prompt: input.prompt,
 			source: input.source ?? "model",
 			...(input.agentId !== undefined && { agentId: input.agentId }),
+			...(input.cwd !== undefined && { cwd: input.cwd }),
 			createdAt: now,
 			nextFireAt: input.fireAt ?? this.fireAfter(base, now)!,
 		};
