@@ -17,6 +17,7 @@
  */
 
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, agentCronTools } from "../lib/agent-cron.ts";
 import os from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1322,12 +1323,28 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	 * The spawn tool a run is entitled to. THE one depth gate: it reads the
 	 * record's own depth (set once at creation), so every handout site —
 	 * fresh spawn, background resident, SendMessage resume — enforces
-	 * MAX_SPAWN_DEPTH identically. A resumed grandchild stays capped.
+	 * MAX_SPAWN_DEPTH identically. A resumed grandchild stays capped. Only a
+	 * `resident` run can receive a cron fire, so any other run's cron_create refuses.
 	 */
-	const spawnToolsFor = (record: AgentRunRecord): ToolDefinition[] => {
+	const spawnToolsFor = (record: AgentRunRecord, { resident = false } = {}): ToolDefinition[] => {
 		const depth = record.depth ?? 0;
-		return depth < MAX_SPAWN_DEPTH ? [childAgentTool(record, depth)] : [];
+		// The child's cron tools reach this session's store (lib/agent-cron.ts).
+		const cron = agentCronTools(pi.events, { agentId: record.taskId, cwd: record.cwd, resident }) as unknown as ToolDefinition[];
+		return depth < MAX_SPAWN_DEPTH ? [childAgentTool(record, depth), ...cron] : cron;
 	};
+
+	// A fired cron job of a subagent's: to that agent while it lives (Claude
+	// Code's task-notification delivery); otherwise the background extension drops it.
+	pi.events.on(AGENT_CRON_FIRE_CHANNEL, (data) => {
+		const fire = data as AgentCronFire;
+		const resident = residents.get(fire.agentId);
+		if (!resident || resident.handle.exited()) return;
+		fire.delivered = true;
+		// A send that fails after all ends the job, as a fire to an ended agent does.
+		void resident.handle.send(fire.prompt).catch(() => {
+			pi.events.emit(AGENT_CRON_CHANNEL, { op: "delete", agentId: fire.agentId, id: fire.jobId } satisfies AgentCronRequest);
+		});
+	});
 
 	/**
 	 * The text a child's first turn is prompted with: a fork gets the inherited-
@@ -1561,7 +1578,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			},
 			sink: live.sink,
 			onMessageToMain: (message) => notifyAgentMessage(p.record.taskId, p.record.name, message),
-			extraTools: spawnToolsFor(p.record),
+			extraTools: spawnToolsFor(p.record, { resident: true }),
 			onTurnEnd: (outcome) => {
 				registry.sessionFileFor(p.record);
 				live.settle();
@@ -2476,6 +2493,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
 	registerLocalCommand(pi, "subagent", {
 		description: "Set the default model for subagent/workflow runs: /subagent [provider/model-id|inherit|status|clear]",
+		argumentHint: "[provider/model-id|inherit|status|clear]",
 		getArgumentCompletions: (prefix) =>
 			["inherit", "status", "clear"]
 				.filter((value) => value.startsWith(prefix.trim().toLowerCase()))

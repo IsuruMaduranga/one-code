@@ -177,6 +177,7 @@ export default function tasksExtension(pi: ExtensionAPI) {
 
 	registerLocalCommand(pi, "tasks", {
 		description: "Show the structured task list; 'hide'/'show' toggles the widget",
+		argumentHint: "[hide|show]",
 		handler: async (args, ctx) => {
 			const arg = args?.trim().toLowerCase();
 			if (arg === "hide" || arg === "show") {

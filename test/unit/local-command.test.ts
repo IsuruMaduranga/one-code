@@ -10,6 +10,7 @@ import {
 } from "../../extensions/lib/local-command.ts";
 import { modelSwitchStdout } from "../../extensions/model-default/index.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
+import { ARGUMENT_HINT_CHANNEL } from "../../extensions/lib/argument-hints.ts";
 
 describe("local-command breadcrumbs (CC 2.1.278 capture)", () => {
 	it("reproduces the /model trio byte for byte", () => {
@@ -60,5 +61,17 @@ describe("registerLocalCommand", () => {
 		expect(registered.get("effort")?.description).toBe("d");
 		await registered.get("effort")!.handler(" high", {});
 		expect(order).toEqual(["emit:<local-command", "emit:<command-name>", "emit:<local-command", "handler: high"]);
+	});
+
+	it("announces an argumentHint instead of passing it to pi", () => {
+		const emitted: unknown[] = [];
+		const registered = new Map<string, Record<string, unknown>>();
+		const pi = {
+			events: { emit: (channel: string, data: unknown) => emitted.push([channel, data]) },
+			registerCommand: (name: string, options: Record<string, unknown>) => registered.set(name, options),
+		};
+		registerLocalCommand(pi, "loop", { description: "d", argumentHint: "[interval] [prompt]", handler: () => {} });
+		expect(emitted).toEqual([[ARGUMENT_HINT_CHANNEL, { command: "loop", hint: "[interval] [prompt]" }]]);
+		expect(registered.get("loop")).not.toHaveProperty("argumentHint");
 	});
 });

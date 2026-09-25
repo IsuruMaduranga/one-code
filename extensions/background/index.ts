@@ -1,13 +1,21 @@
 /**
  * background extension — Claude Code's background-task surface:
- * monitor, task_output, task_stop, schedule_wakeup.
+ * monitor, task_output, task_stop, schedule_wakeup, cron_create, cron_list,
+ * cron_delete, and /loop.
  *
  * Owns the BackgroundRegistry. Other extensions (subagents) register their
  * long-running work over TASK_REGISTER_CHANNEL at runtime, so task_output and
  * task_stop address every background task in the session regardless of which
  * extension started it. Events and completions are delivered as steered
  * task notifications (lib/notifications.ts), never as user input; a fired
- * wakeup or loop tick re-invokes the session with its prompt verbatim.
+ * wakeup or cron job re-invokes the session with its prompt verbatim.
+ *
+ * Every scheduled prompt lives in one CronStore (cron.ts): cron_create jobs
+ * and schedule_wakeup's one-shot wakeups (wakeup.ts). One timer is armed to
+ * the store's next fire; jobs fire only while the agent is idle, so a job
+ * that came due during a turn fires once at agent_settled. `/loop` is
+ * Claude Code's skill (skills/loop, its body built by loop-skill.ts): the
+ * model schedules the loop itself.
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -18,7 +26,7 @@ import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { detachedSpawnOptions, KILL_GRACE_MS, stopProcessTree, waitForChildExit } from "../lib/process-tree.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
 import { bashSpawn, spawnShellCommand } from "../lib/shell-spawn.ts";
-import { ccToolRenderers, customMessageText, liveUiCtx, notificationComponent, scheduledTaskComponent } from "../lib/tui-render.ts";
+import { ccToolRenderers, customMessageText, formatFireTime, liveUiCtx, notificationComponent, scheduledTaskComponent } from "../lib/tui-render.ts";
 import {
 	type BackgroundTask,
 	BackgroundRegistry,
@@ -27,15 +35,33 @@ import {
 	TASK_REGISTER_CHANNEL,
 } from "./registry.ts";
 import {
-	buildDynamicLoopPrompt,
-	buildLoopMessage,
-	buildWakeupMessage,
-	clampDelaySeconds,
-	describeSchedule,
-	MAX_DELAY_SECONDS,
-	MIN_DELAY_SECONDS,
-	parseLoopArgs,
+	AGED_OUT_RESULT,
+	DynamicLoop,
+	formatScheduled,
+	formatStopped,
+	SCHEDULE_WAKEUP_DESCRIPTION,
+	SCHEDULE_WAKEUP_PARAMS,
+	WAKEUP_ERRORS,
 } from "./wakeup.ts";
+import { freshDeliveryState, readLoopFile, resolveLoopFire } from "./loop-fire.ts";
+import { autonomousPreamble, loopSkillPrompt } from "./loop-skill.ts";
+import {
+	CRON_CREATE_DESCRIPTION,
+	CRON_CREATE_PARAMETERS,
+	CRON_DELETE_DESCRIPTION,
+	CRON_DELETE_PARAMETERS,
+	CRON_LIST_DESCRIPTION,
+	CRON_LIST_PARAMETERS,
+	CronStore,
+	type CronFire,
+	type CronJob,
+	describeCadence,
+	formatCannotFire,
+	formatCreateResult,
+	formatDeleteResult,
+	formatJobList,
+	formatUnknownJob,
+} from "./cron.ts";
 import {
 	createTaskNotifier,
 	monitorEndedSummary,
@@ -58,12 +84,22 @@ import {
 	pushEvent,
 } from "./monitor-batch.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
+import { applyNoopFolds, decideFold, type FoldDetails, type FoldEntry, foldSuffix } from "./noop-fold.ts";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, formatNotOwner } from "../lib/agent-cron.ts";
+import { SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../lib/skill-body.ts";
+import { BUNDLED_SKILLS_DIR } from "../lib/skill-scan.ts";
+import { join, resolve } from "node:path";
+import { SESSION_WORK_CHANNEL, sessionBackgroundTask, sessionCron, type SessionWorkQuery } from "../lib/session-work.ts";
+import { WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
 
 const OUTPUT_CAP = 30_000;
 const STORED_OUTPUT_CAP = 200_000;
 const DEFAULT_MONITOR_TIMEOUT_MS = 300_000;
 const MAX_MONITOR_TIMEOUT_MS = 3_600_000;
 const MAX_BLOCK_TIMEOUT_MS = 600_000;
+/** setTimeout's longest delay; a later fire re-arms when this one wakes. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
 function tail(text: string, cap: number): string {
 	return text.length <= cap ? text : `… (earlier output truncated)\n${text.slice(-cap)}`;
 }
@@ -79,6 +115,25 @@ function tail(text: string, cap: number): string {
  */
 let pendingShutdownNotice: string | undefined;
 
+/** A session entry as the no-op fold reads it (noop-fold.ts). */
+function foldEntry(entry: { type: string; timestamp?: string; customType?: string; details?: unknown; message?: unknown }): FoldEntry {
+	if (entry.type === "compaction") return { kind: "compaction" };
+	if (entry.type === "custom_message") {
+		if (entry.customType === "wakeup") return { kind: "wakeup", timestamp: Date.parse(entry.timestamp ?? "") || 0, details: entry.details as FoldDetails | undefined };
+		return entry.customType === "cron" ? { kind: "fire" } : { kind: "other" };
+	}
+	if (entry.type !== "message") return { kind: "other" };
+	const message = entry.message as { role?: string; content?: unknown; stopReason?: string; toolCallId?: string };
+	if (message.role === "user") return { kind: "user" };
+	if (message.role === "toolResult") return { kind: "toolResult", toolCallId: message.toolCallId ?? "" };
+	if (message.role === "assistant") {
+		const blocks = Array.isArray(message.content) ? (message.content as Array<{ type?: string; id?: string; name?: string; arguments?: { noop?: unknown } }>) : [];
+		const toolCalls = blocks.filter((b) => b.type === "toolCall").map((b) => ({ id: b.id ?? "", name: b.name ?? "", noop: b.arguments?.noop }));
+		return { kind: "assistant", toolCalls, aborted: message.stopReason === "aborted" };
+	}
+	return { kind: "other" };
+}
+
 export default function backgroundExtension(pi: ExtensionAPI) {
 	// After session_shutdown the captured ctx throws on every access and the
 	// notifier is inert; a monitor whose command ends later (its shell was
@@ -88,21 +143,53 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	const alive = sessionAlive(pi);
 	const registry = new BackgroundRegistry();
 	let lastCtx: ExtensionContext | undefined;
-	let wakeup: { timer: NodeJS.Timeout; prompt: string; reason: string } | undefined;
-	// Fixed-interval /loop (harness-driven, auto-re-arming — distinct from the
-	// model-driven `wakeup` used by dynamic /loop). One at a time, like wakeup.
-	let loop: { timer: NodeJS.Timeout; intervalSeconds: number; task: string } | undefined;
-	// True between agent_start and agent_settled, so a fixed-interval tick can skip
-	// (not queue) while the previous tick's turn is still running — no backlog.
-	// agent_settled, not agent_end: agent_end can precede an internal retry /
-	// auto-compaction / queued continuation, and a tick landing in that gap would
-	// inject a turn while the prior one is still about to resume.
+	const cron = new CronStore();
+	const dynamicLoop = new DynamicLoop(cron);
+	// What the no-prompt /loop sentinels already delivered; compaction resets it (loop-fire.ts).
+	let loopDelivery = freshDeliveryState();
+	let sessionCwd = process.cwd();
+	// The main session's worktree while it is in one (enter_worktree), where its fires resolve.
+	let worktreeCwd: string | undefined;
+	pi.events.on(WORKTREE_CHANNEL, (data) => {
+		worktreeCwd = (data as WorktreeLocation | null)?.path;
+	});
+	let cronTimer: NodeJS.Timeout | undefined;
+	// True between agent_start and agent_settled, so a due cron job waits for the
+	// turn to end instead of injecting one mid-run. agent_settled, not agent_end:
+	// agent_end can precede an internal retry / auto-compaction / queued
+	// continuation, and a fire landing in that gap would inject a turn while the
+	// prior one is still about to resume.
 	let agentBusy = false;
-	// Set when a dynamic /loop force-activated schedule_wakeup, so /loop stop can
-	// restore the lean tool surface it changed.
-	let activatedWakeupTool = false;
 
 	pi.events.on(TASK_REGISTER_CHANNEL, (task) => registry.register(task as BackgroundTask));
+	// A subagent's cron tools (lib/agent-cron.ts): its jobs, its view, its deletes.
+	pi.events.on(AGENT_CRON_CHANNEL, (data) => {
+		const request = data as AgentCronRequest;
+		if (request.op === "create") {
+			const created = cron.create({ cron: request.cron, prompt: request.prompt, recurring: request.recurring, agentId: request.agentId, cwd: request.cwd }, Date.now());
+			request.result = created.ok
+				? { text: formatCreateResult(created.job), details: { jobId: created.job.id } }
+				: { text: created.error, isError: true };
+			if (created.ok) runCron();
+		} else if (request.op === "list") {
+			request.result = { text: formatJobList(cron.list().filter((job) => job.agentId === request.agentId)) };
+		} else {
+			const job = cron.get(request.id);
+			if (!job) request.result = { text: formatUnknownJob(request.id), isError: true };
+			else if (job.agentId !== request.agentId) request.result = { text: formatNotOwner(request.id), isError: true };
+			else {
+				cron.delete(request.id);
+				runCron();
+				request.result = { text: formatDeleteResult(request.id) };
+			}
+		}
+	});
+	// The Stop hook's session_crons / background_tasks (lib/session-work.ts).
+	pi.events.on(SESSION_WORK_CHANNEL, (data) => {
+		const query = data as SessionWorkQuery;
+		query.crons.push(...cron.list().map(sessionCron));
+		query.tasks.push(...registry.running().map(sessionBackgroundTask));
+	});
 
 	const updateWidget = () => {
 		// liveUiCtx: a stale ctx (session replaced) reads as "no UI", never a throw;
@@ -123,19 +210,72 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	pi.registerMessageRenderer("task-notification", (message, { expanded }, theme) =>
 		notificationComponent(theme, customMessageText(message.content), expanded),
 	);
-	for (const customType of ["wakeup", "loop"]) {
-		pi.registerMessageRenderer(customType, (message, { expanded }, theme) =>
-			scheduledTaskComponent(theme, customMessageText(message.content), (message as { timestamp?: number }).timestamp ?? Date.now(), expanded),
-		);
+	for (const customType of ["wakeup", "cron"]) {
+		// Claude Code: "Claude resuming /loop wakeup (…)" for a wakeup; the model here may not be Claude.
+		const label = customType === "wakeup" ? "Resuming /loop wakeup" : undefined;
+		pi.registerMessageRenderer(customType, (message, { expanded }, theme) => {
+			const fold = message.details as FoldDetails | undefined;
+			const suffix = fold?.noOpStreak ? foldSuffix(fold.noOpStreak, formatFireTime(fold.streakStartedAt ?? Date.now())) : "";
+			return scheduledTaskComponent(theme, customMessageText(message.content), (message as { timestamp?: number }).timestamp ?? Date.now(), expanded, label, suffix);
+		});
 	}
-	// The dynamic /loop's opening turn is the user's command, not a fired task.
-	pi.registerMessageRenderer("loop-start", (message, { expanded }, theme) =>
-		notificationComponent(theme, customMessageText(message.content), expanded),
-	);
 
 	// A monitor's end the model already read through task_output is withdrawn
 	// like a shell's (lib/notifications.ts).
 	const notify = createTaskNotifier(pi, { withdrawOnDelivery: true });
+
+	/**
+	 * The text a fired prompt delivers, as Claude Code's queue would run it: a
+	 * no-prompt /loop sentinel expands (loop-fire.ts), and a slash command that
+	 * names a skill runs that skill (lib/skill-body.ts); anything else is the
+	 * prompt verbatim. Both resolve in the job owner's directory: a subagent's
+	 * own, or the main session's worktree while it is in one.
+	 */
+	const fireText = (job: CronJob): string => {
+		const { prompt } = job;
+		const cwd = job.cwd ?? worktreeCwd ?? sessionCwd;
+		const resolved = resolveLoopFire(loopDelivery, prompt, cwd, autonomousPreamble());
+		if (resolved !== prompt || !prompt.startsWith("/")) return resolved;
+		const query: SlashExpandQuery = { text: prompt, cwd };
+		pi.events.emit(SLASH_EXPAND_CHANNEL, query);
+		return query.expanded ?? prompt;
+	};
+	/** Claude Code's no-op fold for the wakeup firing now (noop-fold.ts), read off the session branch. */
+	const foldDetails = (): FoldDetails => {
+		let entries: FoldEntry[];
+		try {
+			entries = (lastCtx?.sessionManager.getBranch() ?? []).map(foldEntry);
+		} catch {
+			return {};
+		}
+		const decision = decideFold(entries);
+		return decision.kind === "fold" ? { noOpStreak: decision.priorStreak + 1, streakStartedAt: decision.since } : {};
+	};
+	const fireCron = (fire: CronFire) => {
+		const { job, final } = fire;
+		if (job.agentId !== undefined) {
+			// A subagent's job goes to that agent, or is dropped once it has ended.
+			const delivery: AgentCronFire = { agentId: job.agentId, jobId: job.id, prompt: fireText(job) };
+			pi.events.emit(AGENT_CRON_FIRE_CHANNEL, delivery);
+			if (!delivery.delivered) cron.delete(job.id);
+			return;
+		}
+		const fold = job.source === "wakeup" ? foldDetails() : {};
+		if (job.source === "wakeup") dynamicLoop.inFlight = job.prompt;
+		notify(job.source === "wakeup" ? "wakeup" : "cron", fireText(job), { jobId: job.id, cron: job.cron, source: job.source, final, ...fold });
+	};
+	/** Fire every due job (only while idle), then arm the one timer to the next fire. */
+	const runCron = () => {
+		if (cronTimer) clearTimeout(cronTimer);
+		cronTimer = undefined;
+		// A busy agent re-runs this at agent_settled; a dead session never does.
+		if (!alive() || agentBusy) return;
+		for (const fire of cron.takeDue(Date.now())) fireCron(fire);
+		const next = cron.nextFireAt();
+		if (next === undefined) return;
+		cronTimer = setTimeout(runCron, Math.min(Math.max(0, next - Date.now()), MAX_TIMER_MS));
+		cronTimer.unref?.();
+	};
 
 	pi.registerTool({
 		name: "monitor",
@@ -478,53 +618,80 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		...ccToolRenderers<{ delaySeconds?: number; stop?: boolean }>("Schedule Wakeup", {
 			title: (a) => (a?.stop ? "stop" : a?.delaySeconds !== undefined ? `${a.delaySeconds}s` : undefined),
 		}),
-		description:
-			"Schedule when to resume work on a self-paced recurring task — the dynamic mode of the /loop command. After `delaySeconds` (clamped to [60, 3600]) the harness re-invokes you with the given prompt, verbatim, as the next turn's input. One wakeup is pending at a time — scheduling again replaces it; {stop: true} ends the loop and cancels any pending wakeup.\n\nPass the same task back via `prompt` each turn so the next firing repeats it. Set `noop: true` when nothing changed this tick (you checked and there's nothing to report); `noop: false` when something happened worth keeping. Pick `delaySeconds` from what you're actually waiting for: poll external state (a CI run, a deploy) at the rate it changes; for a quiet idle heartbeat prefer a long delay (1200s+). Do NOT schedule a short wakeup just to poll background work you started here — its completion already notifies you.",
+		description: SCHEDULE_WAKEUP_DESCRIPTION,
 		parameters: Type.Object({
-			delaySeconds: Type.Optional(Type.Number({ description: "Seconds from now to wake up, clamped to [60, 3600]. Required unless stop is true" })),
-			prompt: Type.Optional(Type.String({ description: "The task to continue when the wakeup fires. Required unless stop is true" })),
-			reason: Type.Optional(Type.String({ description: "One short sentence explaining the chosen delay; shown to the user. Required unless stop is true" })),
-			noop: Type.Optional(Type.Boolean({ description: "true when nothing changed this tick (quiet hold); false when something happened worth keeping" })),
-			stop: Type.Optional(Type.Boolean({ description: "End the loop: cancel any pending wakeup and schedule nothing" })),
+			delaySeconds: Type.Optional(Type.Number({ description: SCHEDULE_WAKEUP_PARAMS.delaySeconds })),
+			reason: Type.Optional(Type.String({ description: SCHEDULE_WAKEUP_PARAMS.reason })),
+			prompt: Type.Optional(Type.String({ description: SCHEDULE_WAKEUP_PARAMS.prompt })),
+			stop: Type.Optional(Type.Boolean({ description: SCHEDULE_WAKEUP_PARAMS.stop })),
+			noop: Type.Optional(Type.Boolean({ description: SCHEDULE_WAKEUP_PARAMS.noop })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			lastCtx = ctx;
-			const clearPending = () => {
-				if (wakeup) {
-					clearTimeout(wakeup.timer);
-					wakeup = undefined;
-				}
+			const fail = (text: string) => ({ content: [{ type: "text" as const, text }], details: {}, isError: true });
+			if (params.stop === true) {
+				const cancelled = dynamicLoop.stop();
+				runCron();
+				return { content: [{ type: "text", text: formatStopped(cancelled) }], details: { stopped: true, cancelledWakeups: cancelled } };
+			}
+			if (params.delaySeconds === undefined || params.reason === undefined) return fail(WAKEUP_ERRORS.delayAndReason);
+			if (params.prompt === undefined) return fail(WAKEUP_ERRORS.prompt);
+			if (params.noop === undefined) return fail(WAKEUP_ERRORS.noop);
+			const now = Date.now();
+			const scheduled = dynamicLoop.schedule(params.delaySeconds, params.prompt, now);
+			runCron();
+			if (!scheduled) return { content: [{ type: "text", text: AGED_OUT_RESULT }], details: { scheduledFor: 0 } };
+			const text = formatScheduled(scheduled, now);
+			return {
+				content: [{ type: "text", text: sessionOutlivesTurn(ctx.mode) ? text : `${text} ${formatCannotFire()}` }],
+				details: { ...scheduled, reason: params.reason, noop: params.noop },
 			};
-			if (params.stop) {
-				clearPending();
-				return { content: [{ type: "text", text: "Wakeup loop stopped; no further wakeups will fire." }], details: {} };
-			}
-			// Validate BEFORE touching the pending wakeup: clearing it up front meant
-			// a malformed reschedule silently killed a running /loop with no signal.
-			if (params.delaySeconds === undefined || !params.prompt || !params.reason) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: `delaySeconds, prompt, and reason are all required unless stop is true.${wakeup ? " Your previous wakeup is still pending — this call was rejected and left it untouched." : ""}`,
-						},
-					],
-					details: {},
-					isError: true,
-				};
-			}
-			// Valid reschedule — now it is safe to replace any pending wakeup.
-			clearPending();
+		},
+	});
 
-			const request = { delaySeconds: params.delaySeconds, prompt: params.prompt, reason: params.reason, noop: params.noop };
-			const delayMs = clampDelaySeconds(params.delaySeconds) * 1000;
-			const timer = setTimeout(() => {
-				wakeup = undefined;
-				notify("wakeup", buildWakeupMessage(request), { reason: request.reason, noop: request.noop ?? false });
-			}, delayMs);
-			timer.unref?.();
-			wakeup = { timer, prompt: params.prompt, reason: params.reason };
-			return { content: [{ type: "text", text: describeSchedule(request) }], details: { delayMs, noop: params.noop ?? false } };
+	pi.registerTool({
+		name: "cron_create",
+		label: "Cron Create",
+		...ccToolRenderers<{ cron?: string }>("Cron Create", { title: (a) => a?.cron }),
+		description: CRON_CREATE_DESCRIPTION,
+		parameters: CRON_CREATE_PARAMETERS,
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			lastCtx = ctx;
+			const created = cron.create({ cron: params.cron, prompt: params.prompt, recurring: params.recurring }, Date.now());
+			if (!created.ok) return { content: [{ type: "text", text: created.error }], details: {}, isError: true };
+			runCron();
+			const text = formatCreateResult(created.job);
+			return {
+				content: [{ type: "text", text: sessionOutlivesTurn(ctx.mode) ? text : `${text} ${formatCannotFire()}` }],
+				details: { jobId: created.job.id, cron: created.job.cron, recurring: created.job.recurring, nextFireAt: created.job.nextFireAt },
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "cron_list",
+		label: "Cron List",
+		...ccToolRenderers("Cron List"),
+		description: CRON_LIST_DESCRIPTION,
+		parameters: CRON_LIST_PARAMETERS,
+		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+			lastCtx = ctx;
+			const jobs = cron.list();
+			return { content: [{ type: "text", text: formatJobList(jobs) }], details: { count: jobs.length } };
+		},
+	});
+
+	pi.registerTool({
+		name: "cron_delete",
+		label: "Cron Delete",
+		...ccToolRenderers<{ id?: string }>("Cron Delete", { title: (a) => a?.id }),
+		description: CRON_DELETE_DESCRIPTION,
+		parameters: CRON_DELETE_PARAMETERS,
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			lastCtx = ctx;
+			if (!cron.delete(params.id)) return { content: [{ type: "text", text: formatUnknownJob(params.id) }], details: {}, isError: true };
+			runCron();
+			return { content: [{ type: "text", text: formatDeleteResult(params.id) }], details: { jobId: params.id } };
 		},
 	});
 
@@ -533,6 +700,9 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		task_output: ["task", "background", "output", "status", "wait"],
 		task_stop: ["task", "background", "stop", "kill", "cancel"],
 		schedule_wakeup: ["wakeup", "loop", "schedule", "timer", "recurring", "later"],
+		cron_create: ["cron", "schedule", "recurring", "remind", "timer", "every", "later"],
+		cron_list: ["cron", "schedule", "list", "jobs", "scheduled"],
+		cron_delete: ["cron", "schedule", "cancel", "delete", "stop"],
 	})) {
 		pi.events.emit(DEFER_CHANNEL, { name, keywords });
 	}
@@ -545,96 +715,19 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	const clearLoop = () => {
-		if (loop) {
-			clearInterval(loop.timer);
-			loop = undefined;
-		}
-	};
-	const clearWakeup = () => {
-		if (wakeup) {
-			clearTimeout(wakeup.timer);
-			wakeup = undefined;
-		}
-	};
-
-	registerLocalCommand(pi, "loop", {
-		description: "Repeat a task on a loop: `/loop 5m <task>` (fixed interval) or `/loop <task>` (self-paced). `/loop stop` ends it.",
-		handler: async (args, ctx) => {
-			lastCtx = ctx;
-			const raw = (args ?? "").trim();
-			const keyword = raw.toLowerCase();
-
-			if (keyword === "stop") {
-				const had = Boolean(loop || wakeup);
-				clearLoop();
-				clearWakeup();
-				if (activatedWakeupTool) {
-					const active = pi.getActiveTools();
-					if (active.includes("schedule_wakeup")) pi.setActiveTools(active.filter((t) => t !== "schedule_wakeup"));
-					activatedWakeupTool = false;
-				}
-				ctx.ui.notify(had ? "Loop stopped; no further iterations will fire." : "No loop was running.", "info");
-				return;
-			}
-			if (raw === "" || keyword === "status") {
-				const parts: string[] = [];
-				if (loop) parts.push(`fixed interval every ${loop.intervalSeconds}s — ${loop.task}`);
-				if (wakeup) parts.push(`self-paced wakeup pending — ${wakeup.reason}`);
-				ctx.ui.notify(
-					parts.length
-						? `Running:\n- ${parts.join("\n- ")}\nStop with /loop stop.`
-						: "No loop running. Start with `/loop [interval] <task>`, e.g. `/loop 5m check the build`.",
-					"info",
-				);
-				return;
-			}
-
-			const parsed = parseLoopArgs(raw);
-			if (!parsed.task) {
-				ctx.ui.notify("Give a task to loop, e.g. `/loop 10m check for new PRs` or `/loop watch the deploy`.", "info");
-				return;
-			}
-
-			// One loop at a time — replace any existing interval loop or pending wakeup.
-			clearLoop();
-			clearWakeup();
-
-			if (parsed.intervalSeconds !== undefined) {
-				// Fixed interval, harness-driven: re-arm automatically and fire the first tick now.
-				const seconds = clampDelaySeconds(parsed.intervalSeconds);
-				const adjusted =
-					seconds !== parsed.intervalSeconds
-						? ` (adjusted from ${parsed.intervalSeconds}s; allowed range ${MIN_DELAY_SECONDS}-${MAX_DELAY_SECONDS}s)`
-						: "";
-				// Skip (don't queue) a tick while the previous tick's turn is still
-				// running, so a slow task can't build a backlog of stale iterations.
-				const tick = () => {
-					if (agentBusy) return;
-					notify("loop", buildLoopMessage(parsed.task), { intervalSeconds: seconds });
-				};
-				const timer = setInterval(tick, seconds * 1000);
-				timer.unref?.();
-				loop = { timer, intervalSeconds: seconds, task: parsed.task };
-				ctx.ui.notify(`Looping every ${seconds}s${adjusted}: ${parsed.task}. Stop with /loop stop.`, "info");
-				tick(); // fire the first iteration now
-				return;
-			}
-
-			// Dynamic (self-paced): the model drives schedule_wakeup, so make sure it is
-			// active — remembering we did, so /loop stop can restore the lean surface.
-			const active = pi.getActiveTools();
-			if (!active.includes("schedule_wakeup")) {
-				pi.setActiveTools([...active, "schedule_wakeup"]);
-				activatedWakeupTool = true;
-			}
-			ctx.ui.notify(`Self-paced loop started: ${parsed.task}. Stop with /loop stop.`, "info");
-			notify("loop-start", buildDynamicLoopPrompt(parsed.task), {});
-		},
+	// `/loop` is a bundled skill whose body depends on its arguments; build it
+	// for the skill extension (lib/skill-body.ts). Only our own SKILL.md: a
+	// project skill named "loop" keeps its file's body.
+	const loopSkillPath = join(BUNDLED_SKILLS_DIR, "loop", "SKILL.md");
+	pi.events.on(SKILL_BODY_CHANNEL, (data) => {
+		const query = data as SkillBodyQuery;
+		if (query.skill !== "loop" || resolve(query.path) !== loopSkillPath) return;
+		query.body = loopSkillPrompt(query.args, readLoopFile(query.cwd));
 	});
 
 	pi.on("session_start", (_event, ctx) => {
 		lastCtx = ctx;
+		sessionCwd = ctx.cwd;
 		if (pendingShutdownNotice) {
 			const notice = pendingShutdownNotice;
 			pendingShutdownNotice = undefined;
@@ -646,6 +739,18 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	});
 	pi.on("agent_settled", () => {
 		agentBusy = false;
+		// Claude Code's keepalive: a wakeup's turn that scheduled no next one gets one fallback.
+		dynamicLoop.settle(Date.now());
+		runCron();
+	});
+	// Folded no-op ticks leave the model's context (noop-fold.ts); the note stands in for them.
+	pi.on("context", (event) => {
+		const messages = applyNoopFolds(event.messages as Array<AgentMessage & { role: string }>, (text, timestamp) => ({ role: "user", content: [{ type: "text", text }], timestamp }) as AgentMessage & { role: string });
+		return messages ? { messages } : undefined;
+	});
+	// The first fire after a compaction resends the full loop instructions, as in Claude Code.
+	pi.on("session_compact", () => {
+		loopDelivery = freshDeliveryState();
 	});
 
 	pi.on("session_shutdown", (event) => {
@@ -654,14 +759,25 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		// on it — and the replacement is told (see pendingShutdownNotice); a quit
 		// needs no note. A reload keeps the conversation, so its note says so.
 		const running = registry.running();
-		if (running.length > 0 && event.reason !== "quit") {
-			const names = running.map((t) => `${t.id} (${t.description})`).join(", ");
+		const jobs = cron.list();
+		if ((running.length > 0 || jobs.length > 0) && event.reason !== "quit") {
 			const when = event.reason === "reload" ? "on reload" : "with the previous session";
-			pendingShutdownNotice = `Stopped ${running.length} background task${running.length === 1 ? "" : "s"} ${when}: ${names}.`;
+			const notices: string[] = [];
+			if (running.length > 0) {
+				const names = running.map((t) => `${t.id} (${t.description})`).join(", ");
+				notices.push(`Stopped ${running.length} background task${running.length === 1 ? "" : "s"} ${when}: ${names}.`);
+			}
+			if (jobs.length > 0) {
+				const names = jobs.map((j) => `${j.id} (${describeCadence(j.cron)})`).join(", ");
+				notices.push(`Cancelled ${jobs.length} scheduled job${jobs.length === 1 ? "" : "s"} ${when}: ${names}.`);
+			}
+			pendingShutdownNotice = notices.join(" ");
 		}
 		registry.stopAll();
-		clearWakeup();
-		clearLoop();
+		cron.clear();
+		dynamicLoop.clear();
+		if (cronTimer) clearTimeout(cronTimer);
+		cronTimer = undefined;
 		lastCtx = undefined;
 	});
 }

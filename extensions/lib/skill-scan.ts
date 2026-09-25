@@ -86,7 +86,12 @@ export function scanSkills(
  * this pre-scan lets the registration skip those names.
  */
 export function promptTemplateNames(cwd: string, home: string, agentDir: string): string[] {
-	const names = new Set<string>();
+	return [...new Set(promptTemplateFiles(cwd, home, agentDir).map((file) => file.name))];
+}
+
+/** Every prompt-template file pi will resolve, with the command name each gives. */
+export function promptTemplateFiles(cwd: string, home: string, agentDir: string): { name: string; path: string }[] {
+	const files: { name: string; path: string }[] = [];
 	for (const dir of [join(claudeUserDir(home), "commands"), join(cwd, ".claude", "commands"), join(agentDir, "prompts")]) {
 		if (!existsSync(dir)) continue;
 		let entries: string[];
@@ -95,9 +100,9 @@ export function promptTemplateNames(cwd: string, home: string, agentDir: string)
 		} catch {
 			continue;
 		}
-		for (const entry of entries) if (entry.endsWith(".md")) names.add(entry.slice(0, -3));
+		for (const entry of entries) if (entry.endsWith(".md")) files.push({ name: entry.slice(0, -3), path: join(dir, entry) });
 	}
-	return [...names];
+	return files;
 }
 
 /** Rough token estimate from the SKILL.md byte size (~4 bytes/token). */

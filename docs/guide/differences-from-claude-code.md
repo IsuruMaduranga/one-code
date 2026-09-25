@@ -50,9 +50,9 @@ so nothing surprises you.
 These Claude Code tools depend on Anthropic-hosted or desktop services and
 have no equivalent here: `Artifact`, `ReportFindings`,
 `ShareOnboardingGuide`, `PushNotification`, `RemoteTrigger`, `DesignSync`,
-`CronCreate`, `CronList`, `CronDelete`, `EndConversation`, and
-`SendFeedback`. Scheduling within a session is available through `/loop`
-and `schedule_wakeup`; scheduled cloud sessions aren't.
+`EndConversation`, and `SendFeedback`. Scheduling within a session is
+available through the cron tools, `/loop`, and `schedule_wakeup`;
+scheduled cloud sessions aren't.
 
 The `Agent` tool's remote isolation option isn't implemented.
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { BackgroundRegistry, type BackgroundTask, generateTaskId } from "../../extensions/background/registry.ts";
-import { buildWakeupMessage, clampDelaySeconds, describeSchedule } from "../../extensions/background/wakeup.ts";
+import { clampDelaySeconds } from "../../extensions/background/wakeup.ts";
 
 function makeTask(id: string, status: BackgroundTask["status"] = "running"): BackgroundTask & { stopped: boolean } {
 	const task = {
@@ -57,16 +57,5 @@ describe("schedule_wakeup helpers", () => {
 		expect(clampDelaySeconds(600)).toBe(600);
 		expect(clampDelaySeconds(999999)).toBe(3600);
 		expect(clampDelaySeconds(Number.NaN)).toBe(60);
-	});
-
-	it("delivers the fired prompt verbatim — the harness re-invokes with it, as Claude Code does", () => {
-		const message = buildWakeupMessage({ delaySeconds: 120, prompt: "check the deploy", reason: "deploy takes ~2min" });
-		expect(message).toBe("check the deploy");
-	});
-
-	it("says so when the requested delay was clamped", () => {
-		expect(describeSchedule({ delaySeconds: 5, prompt: "p", reason: "r" })).toContain("adjusted from 5s");
-		expect(describeSchedule({ delaySeconds: 999999, prompt: "p", reason: "r" })).toContain("adjusted from 999999s");
-		expect(describeSchedule({ delaySeconds: 600, prompt: "p", reason: "r" })).not.toContain("adjusted");
 	});
 });

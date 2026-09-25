@@ -14,7 +14,9 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { ARGUMENT_HINT_CHANNEL, type ArgumentHint, hintForInput } from "../lib/argument-hints.ts";
+import { ARGUMENT_HINT_CHANNEL, type ArgumentHint, type CommandHint, frontmatterCommandHint, hintForInput, PI_BUILTIN_HINTS } from "../lib/argument-hints.ts";
+import { parseFrontmatterLoosely } from "../lib/frontmatter.ts";
+import { promptTemplateFiles } from "../lib/skill-scan.ts";
 import { modeCycleKey } from "../lib/keys.ts";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
@@ -214,7 +216,7 @@ interface BrandingEditorUI {
  * a pi-tui render change ever makes the marker misplace (cosmetic only — typing
  * is never affected; see prompt-marker.ts).
  */
-function installPromptMarker(ctx: { hasUI: boolean; mode: string; ui: BrandingEditorUI }, argumentHints: ReadonlyMap<string, string>): void {
+function installPromptMarker(ctx: { hasUI: boolean; mode: string; ui: BrandingEditorUI }, argumentHints: ReadonlyMap<string, CommandHint>): void {
 	if (process.env.CC_NO_INPUT_MARKER === "1") return;
 	if (!ctx.hasUI || ctx.mode !== "tui") return;
 	const ui = ctx.ui;
@@ -316,10 +318,42 @@ export default function brandingExtension(pi: ExtensionAPI) {
 
 	// Commands' argument placeholders (lib/argument-hints.ts), drawn by the prompt editor.
 	// Declared before the CC_NO_BANNER return below: session_start reads it.
-	const argumentHints = new Map<string, string>();
+	const argumentHints = new Map<string, CommandHint>(Object.entries(PI_BUILTIN_HINTS).map(([command, hint]) => [command, { hint }]));
 	pi.events.on(ARGUMENT_HINT_CHANNEL, (data) => {
-		const { command, hint } = data as ArgumentHint;
+		const { command, ...hint } = data as ArgumentHint;
 		argumentHints.set(command, hint);
+	});
+	// pi's prompt templates and `/skill:` commands carry their file's
+	// `argument-hint` frontmatter. pi lists them only once a turn resolves them,
+	// so the template folders are scanned at session_start (the skill extension
+	// announces `/skill:` hints from its own scan) and pi's list read each turn.
+	// pi runs a built-in or extension command before a command file of the same
+	// name, so such a file's hint is never read.
+	const hintedFiles = new Set<string>();
+	const readFileHints = (files: { name: string; path: string }[], commands = pi.getCommands()) => {
+		const extensionCommands = new Set(commands.filter((c) => c.source === "extension").map((c) => c.name));
+		for (const { name, path } of files) {
+			if (hintedFiles.has(path)) continue;
+			hintedFiles.add(path);
+			if (Object.hasOwn(PI_BUILTIN_HINTS, name) || extensionCommands.has(name)) continue;
+			try {
+				const hint = frontmatterCommandHint(parseFrontmatterLoosely(readFileSync(path, "utf-8")).frontmatter);
+				if (hint) argumentHints.set(name, hint);
+			} catch {
+				// Unreadable: no hint, as for a command without one.
+			}
+		}
+	};
+	pi.on("before_agent_start", () => {
+		try {
+			const commands = pi.getCommands();
+			readFileHints(
+				commands.filter((c) => c.source !== "extension").map((c) => ({ name: c.name, path: c.sourceInfo.path })),
+				commands,
+			);
+		} catch {
+			// Not bound (a torn-down session): the next turn looks again.
+		}
 	});
 	pi.on("session_start", (_event, ctx) => {
 		// pi's own write lands after this handler, so only the deferred write
@@ -329,6 +363,11 @@ export default function brandingExtension(pi: ExtensionAPI) {
 		setTimeout(() => retitle(ctx), 0).unref?.();
 		ctx.ui.setHiddenThinkingLabel(THINKING_LABEL);
 		installPromptMarker(ctx as unknown as { hasUI: boolean; mode: string; ui: BrandingEditorUI }, argumentHints);
+		try {
+			readFileHints(promptTemplateFiles(ctx.cwd, os.homedir(), getAgentDir()));
+		} catch {
+			// Commands not bound: nothing was marked read, so the next turn reads pi's list.
+		}
 		// Soft drift guard: warn once at startup when the hosting pi is outside
 		// the range this release was tested against (see lib/pi-version.ts).
 		const versionWarning = piVersionWarning(PI_VERSION);

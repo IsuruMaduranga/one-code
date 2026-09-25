@@ -3,13 +3,27 @@
  * child process, no fake timers needed — a monitor whose command finishes
  * flushes its pending batch synchronously, so the cap/overflow reporting is
  * observable without waiting out MONITOR_BATCH_IDLE_MS), task_stop/task_output
- * around a still-running task, and the /loop + schedule_wakeup timers (fake
- * timers, no external process).
+ * around a still-running task, and the /loop, schedule_wakeup and cron
+ * timers (fake timers, no external process).
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+// Cron job ids feed Claude Code's jitter (cron.ts JITTER); ids whose first 8 hex
+// digits are ~0 keep these fire times exact. The jitter itself is cron.test.ts's.
+vi.mock("node:crypto", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("node:crypto")>();
+	let n = 0;
+	return { ...actual, randomUUID: () => `${(++n).toString(16).padStart(8, "0")}-0000-4000-8000-000000000000` };
+});
 import backgroundExtension from "../../extensions/background/index.ts";
 import { MONITOR_BATCH_MAX_LINES } from "../../extensions/background/monitor-batch.ts";
 import { DEFAULT_COALESCE_MS, NOTIFICATION_ID_KEY } from "../../extensions/lib/notifications.ts";
+import { SESSION_WORK_CHANNEL, type SessionWorkQuery } from "../../extensions/lib/session-work.ts";
+import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest } from "../../extensions/lib/agent-cron.ts";
+import { SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../../extensions/lib/skill-body.ts";
+import { BUNDLED_SKILLS_DIR } from "../../extensions/lib/skill-scan.ts";
+import { join } from "node:path";
+import { WORKTREE_CHANNEL } from "../../extensions/lib/worktree-channel.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
 function mount(): FakePi {
@@ -130,104 +144,327 @@ describe("background wiring: monitor batching", () => {
 	});
 });
 
-describe("background wiring: /loop and schedule_wakeup timers", () => {
+describe("background wiring: schedule_wakeup (Claude Code's dynamic loop)", () => {
 	afterEach(() => {
 		vi.useRealTimers();
 	});
 
-	it("schedule_wakeup fires the prompt after the (clamped) delay, and stop cancels it", async () => {
-		vi.useFakeTimers();
-		const fake = mount();
-		const ctx = createFakeCtx({ hasUI: true });
-		const schedule = fake.tools.get("schedule_wakeup")!;
+	const wake = (fake: FakePi, params: Record<string, unknown>, ctx: unknown) =>
+		fake.tools.get("schedule_wakeup")!.execute("c", params, undefined, undefined, ctx) as Promise<{ content: Array<{ text: string }>; isError?: boolean; details: Record<string, unknown> }>;
+	const wakeups = (fake: FakePi) => fake.sentMessages.filter((m) => m.message.customType === "wakeup");
 
-		const scheduled = (await schedule.execute(
-			"c1",
-			{ delaySeconds: 5, prompt: "check the build", reason: "quick poll" },
-			undefined,
-			undefined,
-			ctx,
-		)) as { content: Array<{ text: string }> };
-		// 5s is below the 60s floor, so it is clamped and the tool says so.
-		expect(scheduled.content[0].text).toContain("adjusted from 5s");
+	it("fires the prompt verbatim after the clamped delay, lists as a one-shot job, and says when it was clamped", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(2026, 8, 25, 12, 0, 0));
+		const fake = mount();
+		const ctx = liveSessionCtx();
+		const scheduled = await wake(fake, { delaySeconds: 5, prompt: "check the build", reason: "quick poll", noop: false }, ctx);
+		expect(scheduled.content[0].text).toMatch(
+			/^Next wakeup scheduled for 12:01:00 \(in 60s\) \(clamped to 60s from your requested value\)\. Nothing more to do this turn — the harness re-invokes you when the wakeup fires or a task-notification arrives\.$/,
+		);
+		const listed = await fake.tools.get("cron_list")!.execute("c", {}, undefined, undefined, ctx) as { content: Array<{ text: string }> };
+		expect(listed.content[0].text).toMatch(/^[0-9a-f]{8} — Every day at 12:01 PM \(one-shot\) \[session-only\]: check the build$/);
 
 		await vi.advanceTimersByTimeAsync(60_000 + DEFAULT_COALESCE_MS);
-		const wakeup = fake.sentMessages.find((m) => m.message.customType === "wakeup");
-		expect(wakeup).toBeDefined();
-		// The prompt, verbatim: a wakeup re-invokes the session with it (findings §21).
-		expect((wakeup!.message.content as Array<{ text: string }>)[0].text).toBe("check the build");
-		expect((wakeup!.message.details as Record<string, unknown>).reason).toBe("quick poll");
-
-		// Scheduling again and then stopping must cancel the pending timer.
-		fake.sentMessages.length = 0;
-		await schedule.execute("c2", { delaySeconds: 60, prompt: "again", reason: "r" }, undefined, undefined, ctx);
-		await schedule.execute("c3", { stop: true }, undefined, undefined, ctx);
-		await vi.advanceTimersByTimeAsync(120_000);
-		expect(fake.sentMessages.find((m) => m.message.customType === "wakeup")).toBeUndefined();
+		expect(wakeups(fake)).toHaveLength(1);
+		expect((wakeups(fake)[0].message.content as Array<{ text: string }>)[0].text).toBe("check the build");
 	});
 
-	it("rejects an incomplete reschedule without touching a pending wakeup", async () => {
+	it("rejects a call missing a field with Claude Code's errors, and keeps a pending wakeup", async () => {
 		vi.useFakeTimers();
 		const fake = mount();
-		const ctx = createFakeCtx({ hasUI: true });
-		const schedule = fake.tools.get("schedule_wakeup")!;
-
-		await schedule.execute("c1", { delaySeconds: 120, prompt: "task", reason: "r" }, undefined, undefined, ctx);
-		const rejected = (await schedule.execute("c2", { delaySeconds: 60 }, undefined, undefined, ctx)) as {
-			isError: boolean;
-			content: Array<{ text: string }>;
-		};
-		expect(rejected.isError).toBe(true);
-		expect(rejected.content[0].text).toContain("previous wakeup is still pending");
-
-		// The original schedule is untouched: it still fires.
+		const ctx = liveSessionCtx();
+		await wake(fake, { delaySeconds: 120, prompt: "task", reason: "r", noop: true }, ctx);
+		const noReason = await wake(fake, { delaySeconds: 60, prompt: "p", noop: true }, ctx);
+		expect(noReason).toMatchObject({ isError: true, content: [{ text: "`delaySeconds` and `reason` are required when `stop` is not true." }] });
+		const noPrompt = await wake(fake, { delaySeconds: 60, reason: "r", noop: true }, ctx);
+		expect(noPrompt.content[0].text).toBe("`prompt` is required when `stop` is not true.");
+		const noNoop = await wake(fake, { delaySeconds: 60, reason: "r", prompt: "p" }, ctx);
+		expect(noNoop.content[0].text).toBe("`noop` is required when `stop` is not true.");
 		await vi.advanceTimersByTimeAsync(120_000 + DEFAULT_COALESCE_MS);
-		expect(fake.sentMessages.find((m) => m.message.customType === "wakeup")).toBeDefined();
+		expect(wakeups(fake)).toHaveLength(1);
 	});
 
-	it("a fixed-interval /loop fires immediately, skips a tick while the agent is busy, and /loop stop clears it", async () => {
+	it("keeps one wakeup pending (a new one supersedes it) and stop cancels it with Claude Code's text", async () => {
 		vi.useFakeTimers();
 		const fake = mount();
-		const notify = vi.fn();
-		const ctx = createFakeCtx({ ui: { notify } });
-		const loop = fake.commands.get("loop")!;
+		const ctx = liveSessionCtx();
+		await wake(fake, { delaySeconds: 60, prompt: "first", reason: "r", noop: false }, ctx);
+		await wake(fake, { delaySeconds: 120, prompt: "second", reason: "r", noop: false }, ctx);
+		const stopped = await wake(fake, { stop: true }, ctx);
+		expect(stopped.content[0].text).toBe(
+			"Loop stopped — cancelled 1 pending wakeup(s); no further dynamic-loop wakeups scheduled. If you armed a monitor for this loop, task_stop it now; otherwise nothing more to do this turn.",
+		);
+		const again = await wake(fake, { stop: true }, ctx);
+		expect(again.content[0].text).toContain("there was no pending wakeup to cancel. If you are running a fixed-interval /loop (a recurring cron), it is NOT stopped by this call — cancel it with cron_delete.");
+		await vi.advanceTimersByTimeAsync(300_000);
+		expect(wakeups(fake)).toHaveLength(0);
+	});
 
-		// notifications.ts resends anything still "pending" (no matching
-		// message_end) on agent_settled — confirm each one as it lands, the way
-		// pi's real delivery loop does, so agent_settled below tests the loop's
-		// own tick-skip logic and not a delivery resend.
-		let confirmed = 0;
-		const confirmPending = async () => {
-			for (; confirmed < fake.sentMessages.length; confirmed++) {
-				const details = fake.sentMessages[confirmed].message.details as Record<string, unknown> | undefined;
-				if (details?.[NOTIFICATION_ID_KEY]) await fake.fireOne("message_end", { message: { role: "custom", details } });
-			}
-		};
+	it("folds a no-op tick into the next wakeup: the streak rides the message, the context drops the tick", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(2026, 8, 25, 12, 0, 0));
+		const fake = mount();
+		const firstFire = Date.UTC(2026, 8, 25, 6, 29, 0);
+		const branch = [
+			{ type: "custom_message", customType: "wakeup", timestamp: new Date(firstFire).toISOString(), details: {} },
+			{ type: "message", message: { role: "assistant", stopReason: "toolUse", content: [{ type: "toolCall", id: "c1", name: "schedule_wakeup", arguments: { noop: true } }] } },
+			{ type: "message", message: { role: "toolResult", toolCallId: "c1", content: [] } },
+		];
+		const ctx = liveSessionCtx({ sessionManager: { getBranch: () => branch } });
+		await wake(fake, { delaySeconds: 60, prompt: "/loop poll", reason: "r", noop: true }, ctx);
+		await vi.advanceTimersByTimeAsync(60_000 + DEFAULT_COALESCE_MS);
+		const fired = wakeups(fake)[0];
+		expect(fired.message.details).toMatchObject({ noOpStreak: 1, streakStartedAt: firstFire });
 
-		await loop.handler("1m check the deploy", ctx);
-		// The first tick is queued at once; the notifier's coalescing window is the only delay.
+		const context = [
+			{ role: "user", content: "start", timestamp: 1 },
+			{ role: "custom", customType: "wakeup", content: "/loop poll", details: {}, timestamp: 2 },
+			{ role: "assistant", content: [], timestamp: 3 },
+			{ role: "custom", customType: "wakeup", content: "/loop poll", details: { noOpStreak: 1 }, timestamp: 4 },
+		];
+		const [answer] = await fake.fire<{ messages: Array<{ role: string; content: unknown }> }>("context", { messages: context });
+		expect(answer.messages.map((m) => m.role)).toEqual(["user", "user", "custom"]);
+		expect(answer.messages[1].content).toEqual([{ type: "text", text: "[1 prior /loop wakeup found nothing actionable; loop is healthy.]" }]);
+	});
+
+	it("keepalive: a wakeup's turn that schedules nothing gets one 1200 s fallback; a second miss ends the loop", async () => {
+		vi.useFakeTimers();
+		const fake = mount();
+		const ctx = liveSessionCtx();
+		const confirmPending = confirmer(fake);
+		await wake(fake, { delaySeconds: 60, prompt: "/loop check the deploy", reason: "r", noop: false }, ctx);
+		await vi.advanceTimersByTimeAsync(60_000 + DEFAULT_COALESCE_MS);
+		await confirmPending();
+		expect(wakeups(fake)).toHaveLength(1);
+
+		// The fired turn runs and ends without calling schedule_wakeup.
+		await fake.fireOne("agent_start", {});
+		await fake.fireOne("agent_settled", {});
+		await vi.advanceTimersByTimeAsync(1_199_000);
+		expect(wakeups(fake)).toHaveLength(1);
+		await vi.advanceTimersByTimeAsync(1_000 + DEFAULT_COALESCE_MS);
+		await confirmPending();
+		expect(wakeups(fake)).toHaveLength(2);
+
+		// It misses again: the budget is spent, nothing is re-armed.
+		await fake.fireOne("agent_start", {});
+		await fake.fireOne("agent_settled", {});
+		await vi.advanceTimersByTimeAsync(3_600_000);
+		expect(wakeups(fake)).toHaveLength(2);
+	});
+});
+
+/** Confirm each notification as it lands, as pi's delivery loop does, so agent_settled tests the scheduler and not a resend. */
+function confirmer(fake: FakePi) {
+	let confirmed = 0;
+	return async () => {
+		for (; confirmed < fake.sentMessages.length; confirmed++) {
+			const details = fake.sentMessages[confirmed].message.details as Record<string, unknown> | undefined;
+			if (details?.[NOTIFICATION_ID_KEY]) await fake.fireOne("message_end", { message: { role: "custom", details } });
+		}
+	};
+}
+
+type ToolResult = { content: Array<{ text: string }>; details: Record<string, unknown>; isError?: boolean };
+
+describe("background wiring: cron tools", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	const cronCall = (fake: FakePi, name: string, params: Record<string, unknown>, ctx: unknown) =>
+		fake.tools.get(name)!.execute("c", params, undefined, undefined, ctx) as Promise<ToolResult>;
+	const cronFires = (fake: FakePi) => fake.sentMessages.filter((m) => m.message.customType === "cron");
+
+	it("a one-shot fires its prompt verbatim at the match while idle, then is gone", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(2026, 8, 25, 14, 28, 0));
+		const fake = mount();
+		const ctx = liveSessionCtx();
+		const created = await cronCall(fake, "cron_create", { cron: "30 14 25 9 *", prompt: "check the deploy", recurring: false }, ctx);
+		expect(created.content[0].text).toMatch(
+			/^Scheduled one-shot task [0-9a-f]{8} \(30 14 25 9 \*\)\. Session-only \(not written to disk, dies when this session ends\)\. It will fire once then auto-delete\.$/,
+		);
+
+		await vi.advanceTimersByTimeAsync(60_000);
+		expect(cronFires(fake)).toHaveLength(0);
+		await vi.advanceTimersByTimeAsync(60_000 + DEFAULT_COALESCE_MS);
+		expect(cronFires(fake)).toHaveLength(1);
+		const fire = cronFires(fake)[0];
+		expect((fire.message.content as Array<{ text: string }>)[0].text).toBe("check the deploy");
+		expect(fire.message.details).toMatchObject({ jobId: created.details.jobId, final: true, source: "model" });
+
+		expect((await cronCall(fake, "cron_list", {}, ctx)).content[0].text).toBe("No scheduled jobs.");
+	});
+
+	it("a recurring job due during a turn fires once at settle, and re-arms for its next match", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(2026, 8, 25, 12, 0, 0));
+		const fake = mount();
+		const ctx = liveSessionCtx();
+		const confirmPending = confirmer(fake);
+		const created = await cronCall(fake, "cron_create", { cron: "*/10 * * * *", prompt: "poll ci" }, ctx);
+		expect(created.content[0].text).toContain("(Every 10 minutes). Session-only");
+		expect(created.content[0].text).toContain("Auto-expires after 7 days. Use cron_delete to cancel sooner.");
+
+		await fake.fireOne("agent_start", {});
+		await vi.advanceTimersByTimeAsync(16 * 60_000);
+		expect(cronFires(fake)).toHaveLength(0);
+		await fake.fireOne("agent_settled", {});
 		await vi.advanceTimersByTimeAsync(DEFAULT_COALESCE_MS);
 		await confirmPending();
-		// Fires the first iteration immediately.
-		expect(fake.sentMessages.filter((m) => m.message.customType === "loop")).toHaveLength(1);
-		expect((fake.sentMessages[0].message.content as Array<{ text: string }>)[0].text).toContain("check the deploy");
+		expect(cronFires(fake)).toHaveLength(1);
 
-		// While the agent is mid-turn, a tick must be skipped, not queued.
-		await fake.fireOne("agent_start", {});
-		await vi.advanceTimersByTimeAsync(60_000);
-		await confirmPending();
-		expect(fake.sentMessages.filter((m) => m.message.customType === "loop")).toHaveLength(1);
+		// Next match is 12:20; nothing fires before it.
+		await vi.advanceTimersByTimeAsync(3 * 60_000);
+		expect(cronFires(fake)).toHaveLength(1);
+		await vi.advanceTimersByTimeAsync(60_000 + DEFAULT_COALESCE_MS);
+		expect(cronFires(fake)).toHaveLength(2);
+	});
 
-		// Once settled, the next tick fires again.
-		await fake.fireOne("agent_settled", {});
+	it("errors fail loud: a bad expression, an unknown id", async () => {
+		const fake = mount();
+		const ctx = liveSessionCtx();
+		const bad = await cronCall(fake, "cron_create", { cron: "every 5 minutes", prompt: "x" }, ctx);
+		expect(bad.isError).toBe(true);
+		expect(bad.content[0].text).toBe("Invalid cron expression 'every 5 minutes'. Expected 5 fields: M H DoM Mon DoW.");
+		const unknown = await cronCall(fake, "cron_delete", { id: "deadbeef" }, ctx);
+		expect(unknown.isError).toBe(true);
+		expect(unknown.content[0].text).toBe("No scheduled job with id 'deadbeef'");
+	});
+
+	it("in a one-shot mode the job is created but the result says it can never fire", async () => {
+		const fake = mount();
+		const created = await cronCall(fake, "cron_create", { cron: "*/5 * * * *", prompt: "x" }, createFakeCtx({ mode: "print" }));
+		expect(created.isError).toBeFalsy();
+		expect(created.content[0].text).toContain("This is a one-shot session: it ends when this turn does, so the job will never fire.");
+	});
+
+	it("accepts `durable` and ignores it, as Claude Code does with its durable mode off", async () => {
+		const fake = mount();
+		const schema = fake.tools.get("cron_create")!.parameters as { properties: Record<string, { description?: string }> };
+		expect(schema.properties.durable.description).toBe("Has no effect — durable persistence is not available. All jobs are session-only (in-memory, gone when this session ends).");
+		const created = await cronCall(fake, "cron_create", { cron: "*/10 * * * *", prompt: "x", durable: true }, liveSessionCtx());
+		expect(created.content[0].text).toContain("Session-only (not written to disk, dies when this session ends)");
+	});
+
+	it("builds /loop's body for our bundled SKILL.md only", () => {
+		const fake = mount();
+		const ours: SkillBodyQuery = { skill: "loop", path: join(BUNDLED_SKILLS_DIR, "loop", "SKILL.md"), args: "5m check CI", cwd: "/nowhere" };
+		fake.events.emit(SKILL_BODY_CHANNEL, ours);
+		expect(ours.body).toContain("# /loop — schedule a recurring or self-paced prompt");
+		expect(ours.body?.endsWith("## Input\n\n5m check CI")).toBe(true);
+		const theirs: SkillBodyQuery = { skill: "loop", path: "/project/.claude/skills/loop/SKILL.md", args: "x", cwd: "/nowhere" };
+		fake.events.emit(SKILL_BODY_CHANNEL, theirs);
+		expect(theirs.body).toBeUndefined();
+	});
+
+	it("runs a fired slash command as the skill it names, and expands a no-prompt sentinel", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(2026, 8, 25, 12, 0, 0));
+		const fake = mount();
+		fake.events.on(SLASH_EXPAND_CHANNEL, (data) => {
+			const query = data as SlashExpandQuery;
+			if (query.text === "/babysit-prs") query.expanded = "<skill name=\"babysit-prs\">…</skill>";
+		});
+		const ctx = liveSessionCtx();
+		await cronCall(fake, "cron_create", { cron: "1 12 * * *", prompt: "/babysit-prs", recurring: false }, ctx);
+		await cronCall(fake, "cron_create", { cron: "2 12 * * *", prompt: "<<autonomous-loop>>", recurring: false }, ctx);
+		const confirmPending = confirmer(fake);
 		await vi.advanceTimersByTimeAsync(60_000 + DEFAULT_COALESCE_MS);
 		await confirmPending();
-		expect(fake.sentMessages.filter((m) => m.message.customType === "loop")).toHaveLength(2);
+		await vi.advanceTimersByTimeAsync(60_000 + DEFAULT_COALESCE_MS);
+		const texts = cronFires(fake).map((m) => (m.message.content as Array<{ text: string }>)[0].text);
+		expect(texts[0]).toBe('<skill name="babysit-prs">…</skill>');
+		expect(texts[1].startsWith("# Autonomous loop check")).toBe(true);
+		expect(texts[1]).toContain("\n\n---\n\n# Autonomous loop tick");
+	});
 
-		await loop.handler("stop", ctx);
-		await vi.advanceTimersByTimeAsync(120_000);
-		expect(fake.sentMessages.filter((m) => m.message.customType === "loop")).toHaveLength(2);
-		expect(notify).toHaveBeenCalledWith(expect.stringContaining("Loop stopped"), "info");
+	it("keeps a subagent's jobs its own: tagged, listed and deletable only by it, fired to it or dropped", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(2026, 8, 25, 12, 0, 0));
+		const fake = mount();
+		const ctx = liveSessionCtx();
+		const ask = (request: AgentCronRequest) => {
+			fake.events.emit(AGENT_CRON_CHANNEL, request);
+			return request.result!;
+		};
+		const created = ask({ op: "create", agentId: "a1", cwd: "/project", cron: "1 12 * * *", prompt: "agent check", recurring: false });
+		expect(created.text).toMatch(/^Scheduled one-shot task [0-9a-f]{8} /);
+		const jobId = created.details!.jobId as string;
+		await cronCall(fake, "cron_create", { cron: "*/10 * * * *", prompt: "main job" }, ctx);
+
+		expect(ask({ op: "list", agentId: "a1" }).text).toBe(`${jobId} — Every day at 12:01 PM (one-shot) [session-only]: agent check`);
+		expect(ask({ op: "list", agentId: "a2" }).text).toBe("No scheduled jobs.");
+		// The main session sees every job.
+		expect((await cronCall(fake, "cron_list", {}, ctx)).content[0].text.split("\n")).toHaveLength(2);
+		expect(ask({ op: "delete", agentId: "a2", id: jobId })).toEqual({ text: `Cannot delete cron job '${jobId}': owned by another agent`, isError: true });
+
+		const fires: AgentCronFire[] = [];
+		fake.events.on(AGENT_CRON_FIRE_CHANNEL, (data) => fires.push(data as AgentCronFire));
+		await vi.advanceTimersByTimeAsync(60_000 + DEFAULT_COALESCE_MS);
+		expect(fires).toMatchObject([{ agentId: "a1", jobId, prompt: "agent check" }]);
+		// Nothing reached the main conversation.
+		expect(cronFires(fake)).toHaveLength(0);
+	});
+
+	it("resolves a fired prompt in its owner's directory: the agent's, the main worktree, or the session's", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(2026, 8, 25, 12, 0, 0));
+		const fake = mount();
+		await fake.fire("session_start", {}, liveSessionCtx({ cwd: "/project" }));
+		const cwds: Record<string, string> = {};
+		fake.events.on(SLASH_EXPAND_CHANNEL, (data) => {
+			const query = data as SlashExpandQuery;
+			cwds[query.text] = query.cwd;
+		});
+		const ctx = liveSessionCtx({ cwd: "/project" });
+		await cronCall(fake, "cron_create", { cron: "1 12 * * *", prompt: "/main-before", recurring: false }, ctx);
+		fake.events.emit(AGENT_CRON_CHANNEL, { op: "create", agentId: "a1", cwd: "/agent-tree", cron: "1 12 * * *", prompt: "/agent", recurring: false } satisfies AgentCronRequest);
+		await cronCall(fake, "cron_create", { cron: "2 12 * * *", prompt: "/main-in-worktree", recurring: false }, ctx);
+		await cronCall(fake, "cron_create", { cron: "3 12 * * *", prompt: "/main-after", recurring: false }, ctx);
+
+		await vi.advanceTimersByTimeAsync(60_000 + DEFAULT_COALESCE_MS);
+		fake.events.emit(WORKTREE_CHANNEL, { path: "/project-wt", branch: "wt" });
+		await vi.advanceTimersByTimeAsync(60_000);
+		fake.events.emit(WORKTREE_CHANNEL, null);
+		await vi.advanceTimersByTimeAsync(60_000);
+		expect(cwds).toEqual({ "/main-before": "/project", "/agent": "/agent-tree", "/main-in-worktree": "/project-wt", "/main-after": "/project" });
+	});
+
+	it("drops a recurring job whose agent has ended", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(2026, 8, 25, 12, 0, 0));
+		const fake = mount();
+		const request: AgentCronRequest = { op: "create", agentId: "gone", cwd: "/project", cron: "*/10 * * * *", prompt: "tick" };
+		fake.events.emit(AGENT_CRON_CHANNEL, request);
+		await vi.advanceTimersByTimeAsync(10 * 60_000 + DEFAULT_COALESCE_MS);
+		const list: AgentCronRequest = { op: "list", agentId: "gone" };
+		fake.events.emit(AGENT_CRON_CHANNEL, list);
+		expect(list.result!.text).toBe("No scheduled jobs.");
+	});
+
+	it("answers the Stop hook's query with its pending jobs", async () => {
+		const fake = mount();
+		const created = await cronCall(fake, "cron_create", { cron: "*/10 * * * *", prompt: "poll" }, liveSessionCtx());
+		const query: SessionWorkQuery = { crons: [], tasks: [] };
+		fake.events.emit(SESSION_WORK_CHANNEL, query);
+		expect(query.crons).toEqual([{ id: created.details.jobId, schedule: "*/10 * * * *", recurring: true, prompt: "poll" }]);
+		expect(query.tasks).toEqual([]);
+	});
+
+	it("/clear cancels every job and says so in the next session; nothing fires afterwards", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(2026, 8, 25, 12, 0, 0));
+		const fake = mount();
+		const ctx = liveSessionCtx();
+		const created = await cronCall(fake, "cron_create", { cron: "*/5 * * * *", prompt: "x" }, ctx);
+		await fake.fire("session_shutdown", { reason: "new" }, ctx);
+		await vi.advanceTimersByTimeAsync(10 * 60_000);
+		expect(cronFires(fake)).toHaveLength(0);
+		const notify = await freshSessionNotify("new");
+		expect(notify.mock.calls[0][0]).toBe(`Cancelled 1 scheduled job with the previous session: ${created.details.jobId} (Every 5 minutes).`);
 	});
 });
 

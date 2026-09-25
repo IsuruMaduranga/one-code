@@ -69,21 +69,65 @@ permission gate treats it like `bash`.
 
 ## Scheduled wake-ups and loops
 
-`/loop` runs a task repeatedly. Two forms exist:
+The model can schedule prompts for itself within a session. Ask it to
+"check CI every 10 minutes" or "remind me at 2:30pm to look at the deploy",
+and it calls `cron_create` with a five-field cron expression in your local
+time. A recurring job fires on every match. A one-shot job fires once and
+deletes itself. `cron_list` shows the session's jobs, and `cron_delete`
+cancels one. A session holds up to 50 jobs.
 
-- **Fixed interval.** `/loop 5m check whether the deploy finished` runs the
-  task every five minutes. Intervals accept `s`, `m`, and `h`, and are
-  clamped between one minute and one hour. The first run happens
-  immediately. A tick that arrives while the model is still busy is
-  skipped, not queued.
+A scheduled prompt fires only while the model is idle. A job that comes due
+during a turn waits for the turn to end, then fires once, however many
+times it matched in the meantime. Like Claude Code, the scheduler spreads
+jobs out with a fixed per-job delay: a recurring job fires up to half its
+period late (at most 30 minutes), and a one-shot set for :00 or :30 fires
+up to 90 seconds early. A prompt that's a slash command, such as
+`/babysit-prs`, runs that skill when it fires. When it fires, the transcript shows a dim
+`Running scheduled task` line and the model gets the prompt as its next
+input. Recurring jobs expire after seven days: they fire one last time and
+are deleted. Nothing is written to disk, so jobs end with the session;
+`/clear` cancels them and tells you which ones it cancelled.
+
+`/loop` runs a task repeatedly. It's Claude Code's `/loop` skill: One Code
+hands your input to the model, and the model sets up the loop itself.
+
+- **Fixed interval.** `/loop 5m check whether the deploy finished`, or
+  `/loop check the deploy every 20m`, makes the model convert the interval
+  to a cron expression, create a recurring job with `cron_create`, confirm
+  it with the job id, and run the task right away. An interval that
+  doesn't divide its unit evenly is rounded, and the model says what it
+  rounded to.
 - **Self-paced.** `/loop watch the CI run` with no interval lets the model
-  choose when to check next. It uses the `schedule_wakeup` tool, which
-  schedules one wake-up at a time between one minute and one hour ahead.
-  The model is told to pick a delay that matches what it's waiting for,
-  and to stop the loop when the task is done.
+  choose when to check next. It runs the task, then calls
+  `schedule_wakeup` with a delay between one minute and one hour. When
+  the wake-up fires, the same `/loop` input runs again. If the model ends a
+  turn without scheduling the next one, One Code schedules a 20-minute
+  fallback once; if that turn also schedules nothing, the loop ends. A
+  self-paced loop also ends after seven days.
+- **No prompt.** A bare `/loop` runs an autonomous check that keeps your
+  current work moving (CI, review threads, unfinished steps), self-paced.
+  `/loop 30m` runs the same check on a cron. If `.claude/loop.md` exists in
+  the project (or `~/loop.md`), its tasks replace the autonomous check, and
+  the model sees the file again whenever you edit it.
 
-`/loop status` (or a bare `/loop`) reports the current loop. `/loop stop`
-ends it. Only one loop runs at a time, and loops end with the session.
+When a self-paced tick finds nothing to do (the model reports `noop: true`),
+the next wake-up line counts the streak, for example `Resuming /loop wakeup
+(2:04pm) · 2 no-op ticks since 2:02pm`, and those quiet ticks leave the
+model's context, replaced by one line saying the loop is healthy. The ticks
+stay visible above in the terminal.
+
+A background subagent can schedule its own jobs with the same tools. It sees
+and cancels only its own, a job it made fires into that agent while it is
+still running, and the job is dropped once the agent has ended. The main
+session's `cron_list` shows every job. A subagent that runs until its task is
+done, such as one another subagent starts or any subagent in a `-p` run, can't
+schedule a job: nothing would be left to receive it, so its `cron_create`
+returns an error.
+
+To stop a loop, ask the model to stop it, as in Claude Code. It cancels the
+job with `cron_delete`, or ends a self-paced loop with `schedule_wakeup`.
+Several loops can run at once. Set `CLAUDE_CODE_LOOP_KEEPALIVE=0` to turn
+off the fallback wake-up.
 
 ## The background list
 
@@ -110,4 +154,6 @@ Background work reports back through notifications:
 In `-p` and `--mode json` runs nothing can run in the background, because
 the process exits when the turn settles. Background shells, monitors,
 subagents, and workflows run to completion and return their output
-directly. `/loop` and `schedule_wakeup` don't fire.
+directly. `/loop`, `schedule_wakeup`, and scheduled prompts don't fire;
+`cron_create` still creates the job, and its result says the job can never
+fire.

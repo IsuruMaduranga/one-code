@@ -47,8 +47,10 @@ directory, never in the skill files.
 
 ### Bundled skills
 
-Four of Claude Code's built-in skills ship with One Code:
+Five of Claude Code's built-in skills ship with One Code:
 
+- `loop`: run a prompt on an interval, or let the model self-pace it. See
+  [Scheduled wake-ups and loops](tasks-and-background-work.md#scheduled-wake-ups-and-loops).
 - `simplify`: clean up recently changed code for clarity.
 - `code-review`: review changes for correctness bugs.
 - `security-review`: review changes for security issues.
@@ -68,7 +70,7 @@ doesn't have:
 | Run-skill generation | `run` and `run-skill-generator`. Use project-local run skills instead. |
 | API reference | `claude-api`. |
 
-One Code provides `/init` and `/loop` itself. Commit and pull-request
+One Code provides `/init` itself. Commit and pull-request
 workflows are available through the `commit-commands` plugin.
 
 You can add your own skills under `.claude/skills/`. A skill that requires a
