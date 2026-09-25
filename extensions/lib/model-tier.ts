@@ -41,13 +41,13 @@ import {
 } from "./capability-index.ts";
 import { isPriorGeneration, lacksToolCalls, modelGeneration } from "./model-facts.ts";
 import {
-	BUILTIN_PROVIDER_POLICIES,
 	baseModelId,
 	isDatedDuplicate,
 	modelIdentity,
 	modelsContainedToSession,
 	modelSpec,
 	pricedInput,
+	providerPolicy,
 	supportsImageInput,
 } from "./model-policy.ts";
 import { oneCodeStateDir } from "./paths.ts";
@@ -105,8 +105,8 @@ function isAnthropicFrontier(model: Model<Api>): boolean {
  * gateway-proxied copy can't be verified, the same rule as Claude above.
  */
 function isOpenAIFrontier(model: Model<Api>): boolean {
-	const policy = BUILTIN_PROVIDER_POLICIES[model.provider];
-	if (policy?.kind !== "direct" || policy.profile !== "openai") return false;
+	const policy = providerPolicy(model.provider);
+	if (policy.kind !== "direct" || policy.profile !== "openai") return false;
 	const match = model.id.match(/^gpt-(\d+)(?:\.\d+)?-(?:astra|sol)(?:-|$)/);
 	return match !== null && Number(match[1]) >= 6;
 }
@@ -345,10 +345,15 @@ const TRUTHY_ENV = new Set(["1", "true", "yes", "on"]);
  * tools for a model it does not recognise). Claude Code also turns them on in
  * a backgrounded session, which One Code does not have.
  */
-export function taskToolsEnabled(model: Model<Api> | undefined, env: NodeJS.ProcessEnv = process.env): boolean {
+export function taskToolsEnabled(
+	model: Model<Api> | undefined,
+	env: NodeJS.ProcessEnv = process.env,
+	/** The model's tier when the caller already resolved it (the prompt hook does, every turn). */
+	tier?: PromptTier,
+): boolean {
 	if (TRUTHY_ENV.has(env.CLAUDE_CODE_ENABLE_TODO_TOOLS?.trim().toLowerCase() ?? "")) return true;
 	if (!model) return true;
-	if (resolveModelTier(model, env) === "frontier") return false;
+	if ((tier ?? resolveModelTier(model, env)) === "frontier") return false;
 	if (model.provider !== "anthropic") return true;
 	const version = parseClaudeVersion(model.id);
 	return !(version?.family === "sonnet" && version.major >= 5);

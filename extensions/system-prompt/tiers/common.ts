@@ -13,11 +13,11 @@ export interface PromptBundle {
 	/** Whether the `# Memory` section uses the long weak-model spec. */
 	verboseMemory: boolean;
 	/**
-	 * The bullets that steer to `task_create`, dropped from the prompt when the
-	 * session model does not get the task tools (Claude Code writes its TaskCreate
-	 * line only when the tool is enabled). Each must appear verbatim in `lead`.
+	 * `lead` without the bullets that steer to `task_create`, for a session model
+	 * that runs without the task tools (Claude Code writes its TaskCreate line
+	 * only when the tool is enabled). Absent when `lead` has no such bullet.
 	 */
-	taskLines?: string[];
+	leadWithoutTaskTools?: string[];
 }
 
 export const IDENTITY = `You are One Code, an interactive agent that helps users with software engineering tasks, running on the pi agent harness.`;

@@ -86,7 +86,7 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 				scratchpad,
 				gitStatus,
 				totalTokensLine,
-				taskToolsEnabled(model),
+				taskToolsEnabled(model, process.env, tier),
 			),
 		};
 	});
