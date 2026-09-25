@@ -47,6 +47,8 @@ import { decodeSkillsKey } from "./panel/keys.ts";
 import { skillListingText } from "./listing.ts";
 import { renderSkillsPanel, type SkillsPaint } from "./panel/render.ts";
 import { applySkillsKey, initialSkillsState, type SkillsRow, visibleRows } from "./panel/state.ts";
+import { announceArgumentHint, type CommandHint, frontmatterCommandHint } from "../lib/argument-hints.ts";
+import { parseSlashCommand, SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../lib/skill-body.ts";
 import { parseFrontmatterLoosely } from "../lib/frontmatter.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 
@@ -69,7 +71,23 @@ export default function skillExtension(pi: ExtensionAPI) {
 	/** Session cwd, so project-level enabledPlugins settings apply to plugin skills. */
 	let sessionCwd: string | undefined;
 
+	/**
+	 * True once a `prompt()` has run (the only path that emits
+	 * before_agent_start). Until then an idle skill delivery goes out as a user
+	 * message: pi's `sendMessage(…, {triggerTurn})` skips that preamble, so a
+	 * session opening with `/loop …` or `/simplify` ran its first request
+	 * without our system prompt (lib/notifications.ts, "First turn of a
+	 * session"; upstream_prs.md #17).
+	 */
+	let prompted = false;
+
+	// A factory re-run builds each session's instance, so this is belt and braces
+	// (lib/notifications.ts resets its twin the same way).
+	pi.on("session_start", () => {
+		prompted = false;
+	});
 	pi.on("before_agent_start", (event, ctx) => {
+		prompted = true;
 		sessionCwd = ctx.cwd;
 		const skills = event.systemPromptOptions.skills ?? [];
 		piSkills = skills.map((skill) => {
@@ -105,23 +123,26 @@ export default function skillExtension(pi: ExtensionAPI) {
 	 * stable for the session anyway (the listing must stay byte-stable for the
 	 * cache prefix).
 	 */
-	const descriptionCache = new Map<string, string | undefined>();
-	const readDescription = (path: string): string | undefined => {
-		if (descriptionCache.has(path)) return descriptionCache.get(path);
-		const description = readDescriptionUncached(path);
-		descriptionCache.set(path, description);
-		return description;
-	};
-	const readDescriptionUncached = (path: string): string | undefined => {
+	const frontmatterCache = new Map<string, Record<string, unknown> | undefined>();
+	/** A SKILL.md's frontmatter, read once per path: the description and the argument hint come from it. */
+	const readFrontmatter = (path: string): Record<string, unknown> | undefined => {
+		if (frontmatterCache.has(path)) return frontmatterCache.get(path);
+		let frontmatter: Record<string, unknown> | undefined;
 		try {
-			const { frontmatter } = parseFrontmatterLoosely(readFileSync(path, "utf-8")) as {
-				frontmatter?: { description?: unknown };
-			};
-			return typeof frontmatter?.description === "string" ? frontmatter.description : undefined;
+			frontmatter = parseFrontmatterLoosely(readFileSync(path, "utf-8")).frontmatter;
 		} catch {
-			return undefined;
+			frontmatter = undefined;
 		}
+		frontmatterCache.set(path, frontmatter);
+		return frontmatter;
 	};
+	const readDescription = (path: string): string | undefined => {
+		const description = readFrontmatter(path)?.description;
+		return typeof description === "string" ? description : undefined;
+	};
+
+	/** A SKILL.md's `argument-hint`, the prompt's placeholder after its command (lib/argument-hints.ts). */
+	const readArgumentHint = (path: string): CommandHint | undefined => frontmatterCommandHint(readFrontmatter(path));
 
 	// Per-skill availability comes from the skill-overrides store (the /skills
 	// panel cycles it, the /plugins panel manages plugin skills). The listing
@@ -186,7 +207,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 			args: Type.Optional(Type.String({ description: "Arguments to pass through to the skill" })),
 			list: Type.Optional(Type.Boolean({ description: "List available skills instead of invoking one" })),
 		}),
-		async execute(_toolCallId, params) {
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			// `list`, or a bare call with no invoke signal, browses the catalog. A
 			// call that passed `args` but no `skill` is an invocation that forgot to
 			// name the skill — fail loudly rather than silently returning the
@@ -247,7 +268,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 			let body: string;
 			try {
 				const parsed = parseFrontmatterLoosely(readFileSync(found.path, "utf-8")) as { body: string };
-				body = parsed.body.trim();
+				body = skillBody(found, parsed.body.trim(), params.args ?? "", ctx.cwd).body;
 			} catch (error) {
 				return {
 					content: [{ type: "text", text: `Could not read skill "${found.name}": ${(error as Error).message}` }],
@@ -287,6 +308,35 @@ export default function skillExtension(pi: ExtensionAPI) {
 	 * regardless of `display`), but nothing renders. Shared by the `/skill:<name>`
 	 * interception and the bare `/<name>` commands.
 	 */
+	/**
+	 * A skill's body and the arguments still to append: a generated body
+	 * (lib/skill-body.ts, `/loop`) carries its arguments, a file's does not.
+	 */
+	const skillBody = (found: IndexedSkill, fileBody: string, args: string, cwd: string): { body: string; args: string } => {
+		const query: SkillBodyQuery = { skill: found.name, path: found.path, args, cwd };
+		pi.events.emit(SKILL_BODY_CHANNEL, query);
+		return query.body !== undefined ? { body: query.body, args: "" } : { body: fileBody, args };
+	};
+
+	// A fired scheduled prompt that is a skill's slash command runs that skill,
+	// as Claude Code's queue runs a fired `/babysit-prs` (lib/skill-body.ts).
+	pi.events.on(SLASH_EXPAND_CHANNEL, (data) => {
+		const query = data as SlashExpandQuery;
+		const command = parseSlashCommand(query.text);
+		if (!command) return;
+		const found = resolveSkill(index(query.cwd), command.name.replace(/^skill:/, ""));
+		if (!found || found.state === "off") return;
+		let fileBody: string;
+		try {
+			fileBody = stripFrontmatter(readFileSync(found.path, "utf-8")).trim();
+		} catch {
+			return;
+		}
+		recordUsage(pluginRoot(getAgentDir()), "skill", found.name);
+		const { body, args } = skillBody(found, fileBody, command.args, query.cwd);
+		query.expanded = buildSkillBlock({ name: found.name, filePath: found.path }, body, args);
+	});
+
 	const deliverSkill = async (
 		found: IndexedSkill,
 		args: string,
@@ -298,16 +348,22 @@ export default function skillExtension(pi: ExtensionAPI) {
 			notifyOrPrint(ctx, `Skill "${found.name}" is turned off — enable it from ${where} to run it.`, "warning");
 			return "handled";
 		}
-		let body: string;
+		let fileBody: string;
 		try {
-			body = stripFrontmatter(readFileSync(found.path, "utf-8")).trim();
+			fileBody = stripFrontmatter(readFileSync(found.path, "utf-8")).trim();
 		} catch {
 			return "unavailable";
 		}
 		recordUsage(pluginRoot(getAgentDir()), "skill", found.name);
-		const block = buildSkillBlock({ name: found.name, filePath: found.path }, body, args);
+		const { body, args: blockArgs } = skillBody(found, fileBody, args, ctx.cwd);
+		const block = buildSkillBlock({ name: found.name, filePath: found.path }, body, blockArgs);
 		// Carry any attached images alongside the block, as pi's native path would.
 		const content = extra.images?.length ? [{ type: "text" as const, text: block }, ...extra.images] : block;
+		if (!prompted && !extra.streamingBehavior) {
+			pi.sendUserMessage(content);
+			await awaitOneShotTurn(ctx);
+			return "handled";
+		}
 		pi.sendMessage(
 			{
 				customType: SKILL_INVOCATION_TYPE,
@@ -364,7 +420,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 	// be unregistered, so the handler resolves the skill afresh at invocation:
 	// a skill deleted or turned off since registration is refused, never run.
 	const registeredSkillCommands = new Set<string>();
-	const registerSkillCommands = (cwd: string | undefined) => {
+	const registerSkillCommands = (cwd: string | undefined, skills: IndexedSkill[] = index(cwd)) => {
 		let taken: string[];
 		try {
 			taken = pi.getCommands().map((command) => command.name);
@@ -372,8 +428,10 @@ export default function skillExtension(pi: ExtensionAPI) {
 			return; // not bound yet (load time) — session_start retries
 		}
 		const templates = promptTemplateNames(cwd ?? process.cwd(), os.homedir(), getAgentDir());
-		for (const skill of skillCommandCandidates(index(cwd), [...taken, ...templates, ...registeredSkillCommands])) {
+		for (const skill of skillCommandCandidates(skills, [...taken, ...templates, ...registeredSkillCommands])) {
 			registeredSkillCommands.add(skill.name);
+			const hint = readArgumentHint(skill.path);
+			if (hint) announceArgumentHint(pi, skill.name, hint);
 			pi.registerCommand(skill.name, {
 				description: skill.description ? `${skill.description} (skill)` : `Run the ${skill.name} skill`,
 				handler: async (args, ctx) => {
@@ -385,7 +443,15 @@ export default function skillExtension(pi: ExtensionAPI) {
 			});
 		}
 	};
-	pi.on("session_start", (_event, ctx) => registerSkillCommands(ctx.cwd));
+	pi.on("session_start", (_event, ctx) => {
+		const skills = index(ctx.cwd);
+		registerSkillCommands(ctx.cwd, skills);
+		// pi's own `/skill:<name>` form, which pi lists only after the first turn.
+		for (const skill of skills) {
+			const hint = skill.source === "plugin" ? undefined : readArgumentHint(skill.path);
+			if (hint) announceArgumentHint(pi, `skill:${skill.name}`, hint);
+		}
+	});
 	// pi's per-turn resolution (frontmatter `name`, description required) can
 	// surface skills the pre-turn disk scan missed; late registrations still
 	// execute (autocomplete lists them after a /reload). Gated on an unseen

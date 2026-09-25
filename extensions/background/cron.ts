@@ -5,25 +5,80 @@
  * Claude Code's cron is a session-only, in-memory schedule of prompts, each
  * re-invoking the session verbatim when its 5-field local-time expression
  * matches (findings §21). This module holds the parts with no timers: the
- * expression parser, the next-match search, the human cadence text, the
- * interval-to-cron conversion /loop uses, and the store's due/expiry
- * bookkeeping. The extension owns the single timer and decides WHEN to call
+ * expression parser, the next-match search, the human cadence text, and the
+ * store's due/expiry bookkeeping. The extension owns the single timer and decides WHEN to call
  * `takeDue` (only while idle), so a job due mid-turn fires once at settle.
  *
  * Parsing, matching and cadence text follow Claude Code 2.1.281 exactly:
  * numeric fields only (`*`, `* /n`, `a`, `a-b`, `a-b/n`, lists), day-of-week 7
  * is Sunday, day-of-month and day-of-week OR together when both are
  * restricted, and a job whose expression matches nothing within a year is
- * rejected.
+ * rejected. Fire times carry Claude Code's deterministic jitter (`JITTER`).
  */
 
 import { randomUUID } from "node:crypto";
+import { Type } from "typebox";
+import { sliceColumns, visibleWidth } from "../lib/text-width.ts";
 
 /** Claude Code's per-session job cap. */
 export const MAX_JOBS = 50;
 /** Recurring jobs expire after 7 days: they fire one final time, then are deleted. */
 export const RECURRING_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 export const RECURRING_MAX_AGE_DAYS = RECURRING_MAX_AGE_MS / 86_400_000;
+/**
+ * Claude Code's jitter constants (2.1.282; findings §21). The tool
+ * description tells the model "up to 10% of their period late (max 15 min)";
+ * the code fires up to 50% late, capped at 30 minutes. We match the code.
+ */
+export const JITTER = {
+	recurringFrac: 0.5,
+	recurringCapMs: 1_800_000,
+	oneShotMaxMs: 90_000,
+	oneShotFloorMs: 0,
+	oneShotMinuteMod: 30,
+	/** A plain every-5-minutes job fires this much before the period ends, as Claude Code's does. */
+	cacheLeadMs: 15_000,
+} as const;
+const FIVE_MINUTES_MS = 300_000;
+const PLAIN_STEP_MINUTES = /^\*\/\d+ \* \* \* \*$/;
+
+/** A job's fixed jitter fraction in [0, 1): its id's first 8 hex digits over 2^32. */
+export function jitterFraction(id: string): number {
+	const value = Number.parseInt(id.slice(0, 8), 16) / 4_294_967_296;
+	return Number.isFinite(value) ? value : 0;
+}
+
+/**
+ * A recurring job's next fire after `from`, as Claude Code computes it: the next
+ * match plus up to half the period (capped), by the job's fraction. A plain
+ * `*\/N` job whose period is exactly 5 minutes (to within the lead) fires 15 s
+ * before the period ends instead, measured from `from`.
+ */
+export function nextRecurringFire(cron: string, fields: CronFields, from: number, id: string): number | null {
+	const first = nextMatch(fields, new Date(from));
+	if (!first) return null;
+	const second = nextMatch(fields, first);
+	if (!second) return first.getTime();
+	const period = second.getTime() - first.getTime();
+	const lead = JITTER.cacheLeadMs;
+	if (PLAIN_STEP_MINUTES.test(cron.trim()) && lead > 0 && lead < period && period >= FIVE_MINUTES_MS && period - lead < FIVE_MINUTES_MS) {
+		return from + period - lead;
+	}
+	return first.getTime() + Math.min(jitterFraction(id) * JITTER.recurringFrac * period, JITTER.recurringCapMs);
+}
+
+/**
+ * A one-shot job's fire, as Claude Code computes it: its match, or up to 90 s
+ * earlier when the match falls on :00 or :30, never before it was created.
+ */
+export function oneShotFire(fields: CronFields, createdAt: number, id: string): number | null {
+	const match = nextMatch(fields, new Date(createdAt));
+	if (!match) return null;
+	if (match.getMinutes() % JITTER.oneShotMinuteMod !== 0) return match.getTime();
+	const early = JITTER.oneShotFloorMs + jitterFraction(id) * (JITTER.oneShotMaxMs - JITTER.oneShotFloorMs);
+	return Math.max(match.getTime() - early, createdAt);
+}
+
 /** The next-match search walks at most one leap year of minutes. */
 const SEARCH_LIMIT_MINUTES = 366 * 24 * 60;
 
@@ -178,50 +233,8 @@ export function describeCadence(expr: string): string {
 	return expr;
 }
 
-/**
- * A `/loop` interval token (`5m`, `2h`, `1d`) as the cron expression Claude
- * Code's loop skill converts it to. Seconds round up to whole minutes (cron's
- * granularity). An interval that does not divide its unit evenly (`7m`, `90m`,
- * `5h`) rounds to the nearest one that does, ties going to the longer, and
- * `rounded` names what it became so the caller can tell the user.
- */
-export function intervalToCron(token: string): { cron: string; rounded?: string } | { error: string } {
-	const m = token.trim().match(/^(\d+)\s*([smhd])$/i);
-	if (!m) return { error: `"${token}" is not an interval. Use a number with s, m, h or d, e.g. 5m, 2h, 1d.` };
-	const exact = Number.parseInt(m[1], 10) * { s: 1 / 60, m: 1, h: 60, d: 1440 }[m[2].toLowerCase() as "s" | "m" | "h" | "d"];
-	if (exact <= 0) return { error: "The interval must be at least 1 minute." };
-	const minutes = Math.ceil(exact);
-	let cron: string;
-	let actual: string;
-	if (minutes < 60) {
-		const n = nearest(minutes, [1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30]);
-		cron = n === 1 ? "* * * * *" : `*/${n} * * * *`;
-		actual = `${n}m`;
-	} else if (minutes < 1440) {
-		const n = nearest(minutes / 60, [1, 2, 3, 4, 6, 8, 12]);
-		cron = n === 1 ? "0 * * * *" : `0 */${n} * * *`;
-		actual = `${n}h`;
-	} else {
-		const n = Math.round(minutes / 1440);
-		if (n > 28) return { error: `Every ${n}d is longer than cron's day-of-month step can express. Use at most 28d.` };
-		cron = n === 1 ? "0 0 * * *" : `0 0 */${n} * *`;
-		actual = `${n}d`;
-	}
-	return toMinutes(actual) === exact ? { cron } : { cron, rounded: actual };
-}
-
-function nearest(value: number, choices: number[]): number {
-	let best = choices[0];
-	for (const c of choices) if (Math.abs(c - value) <= Math.abs(best - value)) best = c;
-	return best;
-}
-
-function toMinutes(interval: string): number {
-	const n = Number.parseInt(interval, 10);
-	return interval.endsWith("d") ? n * 1440 : interval.endsWith("h") ? n * 60 : n;
-}
-
-export type CronSource = "model" | "loop";
+/** Who made the job: the model (cron_create, /loop's fixed interval included) or schedule_wakeup (a one-shot, as in Claude Code). */
+export type CronSource = "model" | "wakeup";
 
 export interface CronJob {
 	id: string;
@@ -229,6 +242,8 @@ export interface CronJob {
 	prompt: string;
 	recurring: boolean;
 	source: CronSource;
+	/** A subagent's task id when the job is that agent's (lib/agent-cron.ts). */
+	agentId?: string;
 	createdAt: number;
 	/** Epoch ms of the next fire. */
 	nextFireAt: number;
@@ -246,6 +261,8 @@ export interface CronStoreOptions {
 	maxJobs?: number;
 	maxAgeMs?: number;
 	newId?: () => string;
+	/** false fires on the exact match (tests); Claude Code's jitter otherwise. */
+	jitter?: boolean;
 }
 
 /** The session's jobs, keyed by id, with no timers of its own. */
@@ -254,31 +271,43 @@ export class CronStore {
 	private readonly maxJobs: number;
 	private readonly maxAgeMs: number;
 	private readonly newId: () => string;
+	private readonly jitter: boolean;
 
 	constructor(options: CronStoreOptions = {}) {
 		this.maxJobs = options.maxJobs ?? MAX_JOBS;
 		this.maxAgeMs = options.maxAgeMs ?? RECURRING_MAX_AGE_MS;
 		this.newId = options.newId ?? (() => randomUUID().slice(0, 8));
+		this.jitter = options.jitter ?? true;
+	}
+
+	/** The fire after `from`: the exact next match without jitter, Claude Code's jittered time with it. */
+	private fireAfter(job: { id: string; cron: string; recurring: boolean; fields: CronFields }, from: number): number | null {
+		if (!this.jitter) return nextMatch(job.fields, new Date(from))?.getTime() ?? null;
+		return job.recurring ? nextRecurringFire(job.cron, job.fields, from, job.id) : oneShotFire(job.fields, from, job.id);
 	}
 
 	/** Validate and add a job, with Claude Code's error wording. */
-	create(input: { cron: string; prompt: string; recurring?: boolean; source?: CronSource }, now: number): CreateResult {
+	/**
+	 * `fireAt` pins the first fire to an exact time instead of the next match: a
+	 * wakeup fires `delaySeconds` from now, its cron (`M H * * *`) only naming
+	 * that minute for cron_list, as in Claude Code.
+	 */
+	create(input: { cron: string; prompt: string; recurring?: boolean; source?: CronSource; fireAt?: number; agentId?: string }, now: number): CreateResult {
 		const fields = parseCron(input.cron);
 		if (!fields) return { ok: false, error: `Invalid cron expression '${input.cron}'. Expected 5 fields: M H DoM Mon DoW.` };
-		const next = nextMatch(fields, new Date(now));
-		if (!next) return { ok: false, error: `Cron expression '${input.cron}' does not match any calendar date in the next year.` };
-		if (this.jobs.size >= this.maxJobs) return { ok: false, error: `Too many scheduled jobs (max ${this.maxJobs}). Cancel one first.` };
+		if (!nextMatch(fields, new Date(now))) return { ok: false, error: `Cron expression '${input.cron}' does not match any calendar date in the next year.` };
+		// The cap is cron_create's check, as in Claude Code; a wakeup is never refused.
+		if (input.source !== "wakeup" && this.jobs.size >= this.maxJobs) return { ok: false, error: `Too many scheduled jobs (max ${this.maxJobs}). Cancel one first.` };
 		let id = this.newId();
 		while (this.jobs.has(id)) id = this.newId();
+		const base = { id, cron: input.cron.trim(), recurring: input.recurring ?? true, fields };
 		const job = {
-			id,
-			cron: input.cron.trim(),
+			...base,
 			prompt: input.prompt,
-			recurring: input.recurring ?? true,
 			source: input.source ?? "model",
+			...(input.agentId !== undefined && { agentId: input.agentId }),
 			createdAt: now,
-			nextFireAt: next.getTime(),
-			fields,
+			nextFireAt: input.fireAt ?? this.fireAfter(base, now)!,
 		};
 		this.jobs.set(id, job);
 		return { ok: true, job: publicJob(job) };
@@ -319,12 +348,12 @@ export class CronStore {
 		const fires: CronFire[] = [];
 		for (const job of this.jobs.values()) {
 			if (job.nextFireAt > now) continue;
-			const next = job.recurring ? nextMatch(job.fields, new Date(now)) : null;
+			const next = job.recurring ? this.fireAfter(job, now) : null;
 			const expired = job.recurring && now - job.createdAt >= this.maxAgeMs;
 			const final = !job.recurring || expired || next === null;
 			fires.push({ job: publicJob(job), final });
 			if (final) this.jobs.delete(job.id);
-			else job.nextFireAt = next!.getTime();
+			else job.nextFireAt = next!;
 		}
 		return fires;
 	}
@@ -363,8 +392,29 @@ export function formatCreateResult(job: CronJob): string {
 		: `Scheduled one-shot task ${job.id} (${cadence}). ${SESSION_ONLY}. It will fire once then auto-delete.`;
 }
 
+/**
+ * Claude Code's `CronList` clip of a prompt (its `truncate(text, 80, true)`):
+ * a multi-line prompt shows its first line plus "…", and a line wider than
+ * 80 columns is cut to 79 plus "…". Loosened no-truncation rule:
+ * decisions/tools.md, "Model-facing text is persisted past its cap".
+ */
+export function clipPrompt(prompt: string, max = 80): string {
+	const newline = prompt.indexOf("\n");
+	if (newline !== -1) {
+		const first = prompt.slice(0, newline);
+		return visibleWidth(first) + 1 > max ? cutToWidth(`${first}…`, max) : `${first}…`;
+	}
+	return visibleWidth(prompt) <= max ? prompt : cutToWidth(prompt, max);
+}
+
+/** Claude Code's cut: the text to `max - 1` columns plus "…". */
+function cutToWidth(text: string, max: number): string {
+	if (visibleWidth(text) <= max) return text;
+	return max <= 1 ? "…" : `${sliceColumns(text, max - 1).text}…`;
+}
+
 export function formatJobLine(job: CronJob): string {
-	return `${job.id} — ${describeCadence(job.cron)} (${job.recurring ? "recurring" : "one-shot"}) [session-only]: ${job.prompt}`;
+	return `${job.id} — ${describeCadence(job.cron)} (${job.recurring ? "recurring" : "one-shot"}) [session-only]: ${clipPrompt(job.prompt)}`;
 }
 
 export function formatJobList(jobs: CronJob[]): string {
@@ -376,5 +426,87 @@ export function formatDeleteResult(id: string): string {
 }
 
 export function formatUnknownJob(id: string): string {
-	return `No scheduled job with id '${id}'.`;
+	return `No scheduled job with id '${id}'`;
 }
+
+export function formatCannotFire(): string {
+	return "This is a one-shot session: it ends when this turn does, so the job will never fire.";
+}
+
+/**
+ * Claude Code's descriptions with the durable feature off, the names swapped
+ * to ours and "Claude" read as "this session" (the model behind One Code may
+ * be any). The jitter sentence is Claude Code's own, understating its code.
+ */
+export const CRON_CREATE_DESCRIPTION = `Schedule a prompt to be enqueued at a future time. Use for both recurring schedules and one-shot reminders.
+
+Uses standard 5-field cron in the user's local timezone: minute hour day-of-month month day-of-week. "0 9 * * *" means 9am local — no timezone conversion needed.
+
+## One-shot tasks (recurring: false)
+
+For "remind me at X" or "at <time>, do Y" requests — fire once then auto-delete.
+Pin minute/hour/day-of-month/month to specific values:
+  "remind me at 2:30pm today to check the deploy" → cron: "30 14 <today_dom> <today_month> *", recurring: false
+  "tomorrow morning, run the smoke test" → cron: "57 8 <tomorrow_dom> <tomorrow_month> *", recurring: false
+
+## Recurring jobs (recurring: true, the default)
+
+For "every N minutes" / "every hour" / "weekdays at 9am" requests:
+  "*/5 * * * *" (every 5 min), "0 * * * *" (hourly), "0 9 * * 1-5" (weekdays at 9am local)
+
+## Avoid the :00 and :30 minute marks when the task allows it
+
+Every user who asks for "9am" gets \`0 9\`, and every user who asks for "hourly" gets \`0 *\` — which means requests from across the planet land on the API at the same instant. When the user's request is approximate, pick a minute that is NOT 0 or 30:
+  "every morning around 9" → "57 8 * * *" or "3 9 * * *" (not "0 9 * * *")
+  "hourly" → "7 * * * *" (not "0 * * * *")
+  "in an hour or so, remind me to..." → pick whatever minute you land on, don't round
+
+Only use minute 0 or 30 when the user names that exact time and clearly means it ("at 9:00 sharp", "at half past", coordinating with a meeting). When in doubt, nudge a few minutes early or late — the user will not notice, and the fleet will.
+
+## Session-only
+
+Jobs live only in this session — nothing is written to disk, and the job is gone when the session ends.
+
+## Not for live watching
+
+cron_create re-runs a prompt at fixed wall-clock intervals. To watch a log file, process, or command output and be notified the moment something changes, use the monitor tool instead — monitor streams events as they happen; cron polls on a schedule.
+
+## Runtime behavior
+
+Jobs only fire while the REPL is idle (not mid-query). The scheduler adds a small deterministic jitter on top of whatever you pick: recurring tasks fire up to 10% of their period late (max 15 min); one-shot tasks landing on :00 or :30 fire up to 90 s early. Picking an off-minute is still the bigger lever.
+
+Recurring tasks auto-expire after ${RECURRING_MAX_AGE_DAYS} days — they fire one final time, then are deleted. This bounds session lifetime. Tell the user about the ${RECURRING_MAX_AGE_DAYS}-day limit when scheduling recurring jobs.
+
+Returns a job ID you can pass to cron_delete.`;
+
+export const CRON_CREATE_PARAMS = {
+	cron: 'Standard 5-field cron expression in local time: "M H DoM Mon DoW" (e.g. "*/5 * * * *" = every 5 minutes, "30 14 28 2 *" = Feb 28 at 2:30pm local once).',
+	prompt: "The prompt to enqueue at each fire time.",
+	/** Claude Code's text with its durable mode off, as on the account One Code matches (decisions/tools.md, "Session cron"). */
+	durable: "Has no effect — durable persistence is not available. All jobs are session-only (in-memory, gone when this session ends).",
+	recurring: `true (default) = fire on every cron match until deleted or auto-expired after ${RECURRING_MAX_AGE_DAYS} days. false = fire once at the next match, then auto-delete. Use false for "remind me at X" one-shot requests with pinned minute/hour/dom/month.`,
+};
+
+export const CRON_LIST_DESCRIPTION = "List all cron jobs scheduled via cron_create in this session.";
+
+/**
+ * The three tools' parameters, shared by the main session's tools and a
+ * subagent's proxies (lib/agent-cron.ts). `durable` is accepted and ignored,
+ * as in Claude Code with its durable mode off; cron_list and cron_delete stay
+ * open to stray fields like our other tools (deepseek sends `query` to an
+ * empty schema; decisions/tools.md, "Session cron").
+ */
+export const CRON_CREATE_PARAMETERS = Type.Object(
+	{
+		cron: Type.String({ description: CRON_CREATE_PARAMS.cron }),
+		prompt: Type.String({ description: CRON_CREATE_PARAMS.prompt }),
+		recurring: Type.Optional(Type.Boolean({ description: CRON_CREATE_PARAMS.recurring })),
+		durable: Type.Optional(Type.Boolean({ description: CRON_CREATE_PARAMS.durable })),
+	},
+	{ additionalProperties: false },
+);
+export const CRON_LIST_PARAMETERS = Type.Object({});
+
+export const CRON_DELETE_DESCRIPTION = "Cancel a cron job previously scheduled with cron_create. Removes it from the in-memory session store.";
+export const CRON_DELETE_ID_DESCRIPTION = "Job ID returned by cron_create.";
+export const CRON_DELETE_PARAMETERS = Type.Object({ id: Type.String({ description: CRON_DELETE_ID_DESCRIPTION }) });

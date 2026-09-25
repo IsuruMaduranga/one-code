@@ -33,8 +33,11 @@ For each tool call, the gate checks the following in order:
 A handful of tools are always allowed because other tools sit behind them:
 `tool_search`, `skill`, `Agent`, `SendMessage`, `list_agents`, `workflow`,
 `ask_user_question`, `lsp_diagnostics`, `list_mcp_resources`, the task-list
-tools, `schedule_wakeup`, and the plan-mode tools. The tool calls these
-tools make in turn (a subagent's own edits, for example) are still gated.
+tools, `cron_list`, `cron_delete`, and the plan-mode tools. The tool calls
+these tools make in turn (a subagent's own edits, for example) are still
+gated. `cron_create` and `schedule_wakeup` are allowed too, except in auto
+mode, where the classifier reviews what the scheduled prompt asks for, as in
+Claude Code.
 
 ## Permission rules
 

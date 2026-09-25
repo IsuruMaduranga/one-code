@@ -1,12 +1,15 @@
 import { afterAll, describe, expect, it } from "vitest";
 import {
+	clipPrompt,
 	CronStore,
+	jitterFraction,
+	nextRecurringFire,
+	oneShotFire,
 	describeCadence,
 	formatCreateResult,
 	formatDeleteResult,
 	formatJobList,
 	formatUnknownJob,
-	intervalToCron,
 	MAX_JOBS,
 	nextMatch,
 	parseCron,
@@ -152,37 +155,6 @@ describe("describeCadence", () => {
 	});
 });
 
-describe("intervalToCron", () => {
-	it("converts clean intervals the way Claude Code's loop skill does", () => {
-		expect(intervalToCron("1m")).toEqual({ cron: "* * * * *" });
-		expect(intervalToCron("5m")).toEqual({ cron: "*/5 * * * *" });
-		expect(intervalToCron("60m")).toEqual({ cron: "0 * * * *" });
-		expect(intervalToCron("120m")).toEqual({ cron: "0 */2 * * *" });
-		expect(intervalToCron("2h")).toEqual({ cron: "0 */2 * * *" });
-		expect(intervalToCron("24h")).toEqual({ cron: "0 0 * * *" });
-		expect(intervalToCron("1d")).toEqual({ cron: "0 0 * * *" });
-		expect(intervalToCron("3d")).toEqual({ cron: "0 0 */3 * *" });
-		expect(intervalToCron("120s")).toEqual({ cron: "*/2 * * * *" });
-	});
-
-	it("rounds an uneven interval to the nearest clean one and says so", () => {
-		expect(intervalToCron("30s")).toEqual({ cron: "* * * * *", rounded: "1m" });
-		expect(intervalToCron("90s")).toEqual({ cron: "*/2 * * * *", rounded: "2m" });
-		expect(intervalToCron("7m")).toEqual({ cron: "*/6 * * * *", rounded: "6m" });
-		expect(intervalToCron("25m")).toEqual({ cron: "*/30 * * * *", rounded: "30m" });
-		expect(intervalToCron("90m")).toEqual({ cron: "0 */2 * * *", rounded: "2h" });
-		expect(intervalToCron("5h")).toEqual({ cron: "0 */6 * * *", rounded: "6h" });
-		expect(intervalToCron("36h")).toEqual({ cron: "0 0 */2 * *", rounded: "2d" });
-	});
-
-	it("refuses what cron cannot express", () => {
-		expect(intervalToCron("0m")).toHaveProperty("error");
-		expect(intervalToCron("29d")).toHaveProperty("error");
-		expect(intervalToCron("5x")).toHaveProperty("error");
-		expect(intervalToCron("five")).toHaveProperty("error");
-	});
-});
-
 describe("CronStore", () => {
 	const now = local(2026, 9, 24, 10, 0).getTime();
 	const ids = (...list: string[]) => {
@@ -191,7 +163,7 @@ describe("CronStore", () => {
 	};
 
 	it("creates recurring jobs by default and lists them in creation order", () => {
-		const store = new CronStore({ newId: ids("aaaa1111", "bbbb2222") });
+		const store = new CronStore({ jitter: false, newId: ids("aaaa1111", "bbbb2222") });
 		const a = store.create({ cron: "*/5 * * * *", prompt: "ping" }, now);
 		const b = store.create({ cron: "3 9 28 12 *", prompt: "remind", recurring: false }, now);
 		expect(a).toMatchObject({ ok: true, job: { id: "aaaa1111", recurring: true, source: "model", nextFireAt: local(2026, 9, 24, 10, 5).getTime() } });
@@ -201,19 +173,19 @@ describe("CronStore", () => {
 	});
 
 	it("uses the first 8 hex characters of a UUID as the default id", () => {
-		const res = new CronStore().create({ cron: "* * * * *", prompt: "x" }, now);
+		const res = new CronStore({ jitter: false }).create({ cron: "* * * * *", prompt: "x" }, now);
 		expect(res.ok && res.job.id).toMatch(/^[0-9a-f]{8}$/);
 	});
 
 	it("draws a new id on collision", () => {
-		const store = new CronStore({ newId: ids("same0000", "same0000", "other000") });
+		const store = new CronStore({ jitter: false, newId: ids("same0000", "same0000", "other000") });
 		store.create({ cron: "* * * * *", prompt: "x" }, now);
 		const second = store.create({ cron: "* * * * *", prompt: "y" }, now);
 		expect(second.ok && second.job.id).toBe("other000");
 	});
 
 	it("rejects with Claude Code's wording", () => {
-		const store = new CronStore({ maxJobs: 1 });
+		const store = new CronStore({ jitter: false, maxJobs: 1 });
 		expect(store.create({ cron: "* * *", prompt: "x" }, now)).toEqual({
 			ok: false,
 			error: "Invalid cron expression '* * *'. Expected 5 fields: M H DoM Mon DoW.",
@@ -230,13 +202,13 @@ describe("CronStore", () => {
 	});
 
 	it("caps a session at 50 jobs by default", () => {
-		const store = new CronStore();
+		const store = new CronStore({ jitter: false });
 		for (let i = 0; i < MAX_JOBS; i++) expect(store.create({ cron: "* * * * *", prompt: `${i}` }, now).ok).toBe(true);
 		expect(store.create({ cron: "* * * * *", prompt: "one more" }, now).ok).toBe(false);
 	});
 
 	it("reports the earliest pending fire", () => {
-		const store = new CronStore();
+		const store = new CronStore({ jitter: false });
 		expect(store.nextFireAt()).toBeUndefined();
 		store.create({ cron: "0 12 * * *", prompt: "noon" }, now);
 		store.create({ cron: "*/15 * * * *", prompt: "quarter" }, now);
@@ -244,13 +216,13 @@ describe("CronStore", () => {
 	});
 
 	it("fires nothing before a job is due", () => {
-		const store = new CronStore();
+		const store = new CronStore({ jitter: false });
 		store.create({ cron: "*/5 * * * *", prompt: "ping" }, now);
 		expect(store.takeDue(now + 4 * 60_000)).toEqual([]);
 	});
 
 	it("fires a recurring job once and re-arms it past `now`", () => {
-		const store = new CronStore({ newId: ids("r0000000") });
+		const store = new CronStore({ jitter: false, newId: ids("r0000000") });
 		store.create({ cron: "*/5 * * * *", prompt: "ping" }, now);
 		const at = local(2026, 9, 24, 10, 5).getTime();
 		expect(store.takeDue(at)).toEqual([{ job: expect.objectContaining({ id: "r0000000", prompt: "ping" }), final: false }]);
@@ -258,7 +230,7 @@ describe("CronStore", () => {
 	});
 
 	it("collapses matches missed during a long turn into one fire", () => {
-		const store = new CronStore();
+		const store = new CronStore({ jitter: false });
 		store.create({ cron: "* * * * *", prompt: "tick" }, now);
 		const late = now + 17 * 60_000 + 20_000;
 		expect(store.takeDue(late)).toHaveLength(1);
@@ -267,14 +239,14 @@ describe("CronStore", () => {
 	});
 
 	it("deletes a one-shot job when it fires", () => {
-		const store = new CronStore({ newId: ids("once0000") });
+		const store = new CronStore({ jitter: false, newId: ids("once0000") });
 		store.create({ cron: "30 10 24 9 *", prompt: "remind", recurring: false }, now);
 		expect(store.takeDue(local(2026, 9, 24, 10, 30).getTime())).toEqual([{ job: expect.objectContaining({ id: "once0000" }), final: true }]);
 		expect(store.size).toBe(0);
 	});
 
 	it("gives a recurring job past its 7-day age one final fire", () => {
-		const store = new CronStore();
+		const store = new CronStore({ jitter: false });
 		store.create({ cron: "7 * * * *", prompt: "hourly" }, now);
 		const beforeExpiry = now + RECURRING_MAX_AGE_MS - 53 * 60_000; // an :07 a little under 7 days in
 		expect(store.takeDue(beforeExpiry)[0].final).toBe(false);
@@ -284,12 +256,12 @@ describe("CronStore", () => {
 	});
 
 	it("deletes by id and by predicate", () => {
-		const store = new CronStore({ newId: ids("m0000000", "l0000000", "l1111111") });
+		const store = new CronStore({ jitter: false, newId: ids("m0000000", "l0000000", "l1111111") });
 		store.create({ cron: "* * * * *", prompt: "model" }, now);
-		store.create({ cron: "* * * * *", prompt: "loop a", source: "loop" }, now);
-		store.create({ cron: "* * * * *", prompt: "loop b", source: "loop" }, now);
+		store.create({ cron: "* * * * *", prompt: "wake a", source: "wakeup" }, now);
+		store.create({ cron: "* * * * *", prompt: "wake b", source: "wakeup" }, now);
 		expect(store.delete("nope")).toBe(false);
-		expect(store.deleteWhere((j) => j.source === "loop").map((j) => j.id)).toEqual(["l0000000", "l1111111"]);
+		expect(store.deleteWhere((j) => j.source === "wakeup").map((j) => j.id)).toEqual(["l0000000", "l1111111"]);
 		expect(store.delete("m0000000")).toBe(true);
 		expect(store.size).toBe(0);
 	});
@@ -310,6 +282,64 @@ describe("model-facing text", () => {
 		);
 		expect(formatJobList([])).toBe("No scheduled jobs.");
 		expect(formatDeleteResult("2427a4e2")).toBe("Cancelled job 2427a4e2.");
-		expect(formatUnknownJob("nope")).toBe("No scheduled job with id 'nope'.");
+		expect(formatUnknownJob("nope")).toBe("No scheduled job with id 'nope'");
+	});
+});
+
+describe("Claude Code's jitter (2.1.282 code, not its description)", () => {
+	const at = (h: number, m: number, sec = 0) => new Date(2026, 8, 25, h, m, sec).getTime();
+
+	it("derives a fixed fraction from the id's first 8 hex digits", () => {
+		expect(jitterFraction("00000000")).toBe(0);
+		expect(jitterFraction("80000000")).toBe(0.5);
+		expect(jitterFraction("zzzzzzzz")).toBe(0);
+	});
+
+	it("fires a recurring job up to half its period late, capped at 30 minutes", () => {
+		const hourly = parseCron("7 * * * *")!;
+		// fraction 0.5 → 0.5 × 0.5 × 60 min = 15 min late.
+		expect(nextRecurringFire("7 * * * *", hourly, at(12, 0), "80000000")).toBe(at(12, 22));
+		const daily = parseCron("3 9 * * *")!;
+		// 0.25 of a day would be 6 h; the cap holds it at 30 min.
+		expect(nextRecurringFire("3 9 * * *", daily, at(8, 0), "80000000")).toBe(at(9, 33));
+	});
+
+	it("fires a plain every-5-minutes job 15 s before its period ends, from the last fire", () => {
+		const five = parseCron("*/5 * * * *")!;
+		expect(nextRecurringFire("*/5 * * * *", five, at(12, 1, 10), "ffffffff")).toBe(at(12, 5, 55));
+		// Not for */10, nor for a list that happens to be 5 minutes apart.
+		expect(nextRecurringFire("*/10 * * * *", parseCron("*/10 * * * *")!, at(12, 1), "00000000")).toBe(at(12, 10));
+	});
+
+	it("fires a one-shot on :00 or :30 up to 90 s early, never before it was made", () => {
+		const half = parseCron("30 14 25 9 *")!;
+		expect(oneShotFire(half, at(14, 0), "80000000")).toBe(at(14, 29, 15));
+		expect(oneShotFire(half, at(14, 29, 50), "ffffffff")).toBe(at(14, 29, 50));
+		const odd = parseCron("31 14 25 9 *")!;
+		expect(oneShotFire(odd, at(14, 0), "ffffffff")).toBe(at(14, 31));
+	});
+
+	it("applies it in the store by default", () => {
+		const store = new CronStore({ newId: () => "80000000" });
+		const created = store.create({ cron: "7 * * * *", prompt: "x" }, at(12, 0));
+		expect(created.ok && created.job.nextFireAt).toBe(at(12, 22));
+	});
+});
+
+describe("clipPrompt (CronList's 80-column clip)", () => {
+	it("keeps a short single line, cuts a long one to 79 columns plus an ellipsis", () => {
+		expect(clipPrompt("check the build")).toBe("check the build");
+		const long = "x".repeat(100);
+		expect(clipPrompt(long)).toBe(`${"x".repeat(79)}…`);
+		expect(clipPrompt("x".repeat(80))).toBe("x".repeat(80));
+	});
+
+	it("shows only the first line of a multi-line prompt, always marked", () => {
+		expect(clipPrompt("first\nsecond")).toBe("first…");
+		expect(clipPrompt(`${"y".repeat(90)}\nmore`)).toBe(`${"y".repeat(79)}…`);
+	});
+
+	it("measures terminal columns, not code units", () => {
+		expect(clipPrompt("界".repeat(50))).toBe(`${"界".repeat(39)}…`);
 	});
 });

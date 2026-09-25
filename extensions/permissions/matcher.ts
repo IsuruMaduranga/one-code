@@ -63,6 +63,9 @@ const CC_TOOL_NAMES: Record<string, string> = {
 	taskstop: "task_stop",
 	monitor: "monitor",
 	schedulewakeup: "schedule_wakeup",
+	croncreate: "cron_create",
+	cronlist: "cron_list",
+	crondelete: "cron_delete",
 	sendmessage: "SendMessage",
 	send_message: "SendMessage", // pre-rename internal name
 	listagents: "list_agents",
@@ -718,8 +721,13 @@ export const AUTO_ALLOWED_TOOLS = new Set<string>([
 	// Inspecting/stopping background work this session already started.
 	"task_output",
 	"task_stop",
-	// A timer that replays a prompt; no side effects outside the session.
+	// The session's cron store: timers that replay a prompt, and listing and
+	// cancelling them. (schedule_wakeup and cron_create are here for every mode
+	// but auto, where CLASSIFY_IN_AUTO_TOOLS sends them to the classifier.)
 	"schedule_wakeup",
+	"cron_list",
+	"cron_delete",
+	"cron_create",
 	// Resumes/messages an agent — same reasoning as Agent: the child enforces its
 	// own tool permissions. (monitor and enter/exit_worktree stay gated: they
 	// run arbitrary shell commands / mutate the filesystem.)
@@ -848,6 +856,16 @@ const PLAN_READ_ONLY_TOOLS = new Set(["web_fetch", "web_search", "list_mcp_resou
  * (PERMISSIONS-REVIEW-2026-09-05 L4).
  */
 const DELEGATION_TOOLS = new Set(["Agent", "workflow", "SendMessage"]);
+
+/**
+ * Allowed in every mode but auto, where the classifier reviews them: Claude
+ * Code's `CronCreate` and `ScheduleWakeup` (findings §21: "Scheduling a cron
+ * prompt requires classifier review", "Scheduling a /loop wakeup requires
+ * classifier review"). A scheduled prompt replays later with nobody watching,
+ * so the classifier judges what it asks for. Unlike DELEGATION_TOOLS, an allow
+ * rule for one still applies in auto mode.
+ */
+const CLASSIFY_IN_AUTO_TOOLS = new Set(["cron_create", "schedule_wakeup"]);
 
 /**
  * Interpreters and runners whose arguments are code, so a wildcarded rule over
@@ -1093,7 +1111,7 @@ export function decide(params: DecideInput): Decision {
 		return { decision: "allow", rule: allowRule, cause: "rule" };
 	}
 
-	if (mode === "auto" && DELEGATION_TOOLS.has(tool)) {
+	if (mode === "auto" && (DELEGATION_TOOLS.has(tool) || CLASSIFY_IN_AUTO_TOOLS.has(tool))) {
 		return { decision: "classify", cause: "mode" };
 	}
 
