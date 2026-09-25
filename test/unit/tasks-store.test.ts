@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatTaskDetails, formatTaskList, formatTaskWidget, nudgeMessage, TaskStore } from "../../extensions/tasks/store.ts";
+import { formatHiddenTaskWidget, formatTaskDetails, formatTaskList, formatTaskWidget, nudgeMessage, TaskStore } from "../../extensions/tasks/store.ts";
 
 describe("TaskStore", () => {
 	it("creates tasks with incrementing ids and pending status", () => {
@@ -175,5 +175,14 @@ describe("TaskStore", () => {
 		const restored = new TaskStore();
 		restored.restore(store.snapshot());
 		expect(restored.list().map((t) => t.status)).toEqual(["completed", "pending"]);
+	});
+
+	it("appends the toggle hint to the summary line, and hides to one line that names the key", () => {
+		const store = new TaskStore();
+		expect(formatHiddenTaskWidget(store, "alt+t to show")).toEqual([]);
+		store.create({ subject: "A", description: "" });
+		store.create({ subject: "B", description: "" });
+		expect(formatTaskWidget(store, 12, undefined, "alt+t to hide")[0]).toBe("  2 tasks (0 done, 0 in progress, 2 open) · alt+t to hide");
+		expect(formatHiddenTaskWidget(store, "alt+t to show")).toEqual(["  2 tasks hidden · alt+t to show"]);
 	});
 });

@@ -220,7 +220,7 @@ function taskRow(task: TaskItem, { paint, bold, strike }: WidgetStyle): string {
  * past `maxTasks` so the widget cannot swallow the screen (Claude Code's
  * cutoff is unverified).
  */
-export function formatTaskWidget(store: TaskStore, maxTasks = 12, style: WidgetStyle = PLAIN_STYLE): string[] {
+export function formatTaskWidget(store: TaskStore, maxTasks = 12, style: WidgetStyle = PLAIN_STYLE, hint?: string): string[] {
 	const { paint, bold } = style;
 	const tasks = store.list();
 	if (tasks.length === 0) return [];
@@ -230,11 +230,21 @@ export function formatTaskWidget(store: TaskStore, maxTasks = 12, style: WidgetS
 	const dim = (text: string) => paint("dim", text);
 	const count = (n: number) => bold(dim(String(n)));
 	const lines = [
-		`  ${count(tasks.length)}${dim(` ${tasks.length === 1 ? "task" : "tasks"} (`)}${count(done)}${dim(" done, ")}${count(inProgress)}${dim(" in progress, ")}${count(open)}${dim(" open)")}`,
+		`  ${count(tasks.length)}${dim(` ${tasks.length === 1 ? "task" : "tasks"} (`)}${count(done)}${dim(" done, ")}${count(inProgress)}${dim(" in progress, ")}${count(open)}${dim(" open)")}${hint ? dim(` · ${hint}`) : ""}`,
 	];
 	for (const t of tasks.slice(0, maxTasks)) lines.push(`  ${taskRow(t, style)}`);
 	if (tasks.length > maxTasks) lines.push(`  ${dim(`… +${tasks.length - maxTasks} more`)}`);
 	return lines;
+}
+
+/**
+ * The one line left when the user hides the list, so the key that brings it
+ * back stays on screen (Claude Code shows "ctrl+t to show tasks" in its footer).
+ */
+export function formatHiddenTaskWidget(store: TaskStore, hint: string, style: WidgetStyle = PLAIN_STYLE): string[] {
+	const n = store.list().length;
+	if (n === 0) return [];
+	return [`  ${style.paint("dim", `${n} ${n === 1 ? "task" : "tasks"} hidden · ${hint}`)}`];
 }
 
 /**

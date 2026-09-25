@@ -25,6 +25,14 @@ export function modeCycleKey(platform: string = process.platform, env: NodeJS.Pr
 }
 
 /**
+ * The key that shows or hides the pinned task list. Claude Code uses ctrl+t,
+ * which pi reserves for its thinking-block toggle (an extension shortcut on a
+ * reserved key is skipped), so One Code uses alt+t, free in pi's key tables
+ * on every platform.
+ */
+export const TASKS_TOGGLE_KEY = "alt+t";
+
+/**
  * The footer badge's pause icon. Claude Code's is U+23F8 (⏸); Windows Terminal
  * draws that code point with its emoji font, two cells wide and coloured,
  * while pi measures one cell, so the icon overlapped the mode name — and the

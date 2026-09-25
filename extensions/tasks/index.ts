@@ -11,7 +11,8 @@
  *
  * The widget mirrors Claude Code's pinned task list (summary line + ✔/◼/◻
  * rows). Claude Code toggles it with ctrl+t, but pi reserves that key for
- * thinking blocks — `/tasks hide` / `/tasks show` covers it instead.
+ * thinking blocks, so alt+t (`TASKS_TOGGLE_KEY`) and `/tasks hide` / `/tasks
+ * show` toggle it here; the key's hint is always on screen.
  */
 
 import { StringEnum } from "@earendil-works/pi-ai";
@@ -23,6 +24,7 @@ import { ccToolRenderers, linesComponent, safeThemeBold, safeThemePaint, strike 
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import {
 	FINISHED_LIST_CLEAR_MS,
+	formatHiddenTaskWidget,
 	formatTaskDetails,
 	formatTaskLine,
 	formatTaskList,
@@ -32,6 +34,7 @@ import {
 	TaskStore,
 } from "./store.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
+import { TASKS_TOGGLE_KEY } from "../lib/keys.ts";
 
 interface TaskDetails {
 	taskSnapshot: TaskSnapshot;
@@ -45,7 +48,7 @@ export default function tasksExtension(pi: ExtensionAPI) {
 
 	const updateWidget = (ctx: ExtensionContext) => {
 		if (!ctx.hasUI) return;
-		if (widgetHidden || store.list().length === 0) {
+		if (store.list().length === 0) {
 			ctx.ui.setWidget("cc-tasks", undefined);
 			return;
 		}
@@ -53,8 +56,16 @@ export default function tasksExtension(pi: ExtensionAPI) {
 		// unbounded model text, and pi-tui crashes on an over-wide line.
 		ctx.ui.setWidget("cc-tasks", (_tui, theme) => {
 			const style = { paint: safeThemePaint(theme), bold: safeThemeBold(theme), strike };
-			return linesComponent(() => formatTaskWidget(store, 12, style));
+			return linesComponent(() =>
+				widgetHidden
+					? formatHiddenTaskWidget(store, `${TASKS_TOGGLE_KEY} to show`, style)
+					: formatTaskWidget(store, 12, style, `${TASKS_TOGGLE_KEY} to hide`),
+			);
 		});
+	};
+	const setWidgetHidden = (hidden: boolean, ctx: ExtensionContext) => {
+		widgetHidden = hidden;
+		updateWidget(ctx);
 	};
 
 	// Claude Code clears a finished list (every task completed) 5 s after it
@@ -215,11 +226,15 @@ export default function tasksExtension(pi: ExtensionAPI) {
 		handler: async (args, ctx) => {
 			const arg = args?.trim().toLowerCase();
 			if (arg === "hide" || arg === "show") {
-				widgetHidden = arg === "hide";
-				updateWidget(ctx);
+				setWidgetHidden(arg === "hide", ctx);
 				return;
 			}
 			ctx.ui.notify(formatTaskList(store), "info");
 		},
+	});
+
+	pi.registerShortcut(TASKS_TOGGLE_KEY, {
+		description: "Show or hide the task list",
+		handler: (ctx) => setWidgetHidden(!widgetHidden, ctx),
 	});
 }

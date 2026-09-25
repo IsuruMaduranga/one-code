@@ -80,4 +80,23 @@ describe("tasks: the finished list clears after 5 s", () => {
 		expect(t.setWidget.mock.calls.length).toBe(widgetCalls);
 		expect(vi.getTimerCount()).toBe(0);
 	});
+
+	it("toggles the list with alt+t and always shows the key", async () => {
+		const t = setup();
+		const register = t.fake.pi.registerShortcut as ReturnType<typeof vi.fn>;
+		const call = register.mock.calls.find(([key]) => key === "alt+t");
+		expect(call).toBeDefined();
+		const toggle = (call![1] as { handler: (ctx: unknown) => void }).handler;
+		const rendered = () => {
+			const factory = t.setWidget.mock.calls.at(-1)?.[1] as ((tui: unknown, theme: unknown) => { render(width: number): string[] }) | undefined;
+			return factory ? factory({}, {}).render(120).join("\n") : "";
+		};
+		await t.create({ subject: "A", description: "" });
+		expect(rendered()).toContain("alt+t to hide");
+		toggle(t.ctx);
+		expect(rendered()).toContain("1 task hidden · alt+t to show");
+		expect(rendered()).not.toContain("A");
+		toggle(t.ctx);
+		expect(rendered()).toContain("alt+t to hide");
+	});
 });
