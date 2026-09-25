@@ -6,6 +6,7 @@
  */
 
 import { isAppendedReminderText } from "../lib/reminders.ts";
+import type { SessionBackgroundTask, SessionCron } from "../lib/session-work.ts";
 
 /** The contiguous run of reminder/countdown blocks at the tail of a tool result (review M3). */
 function trailingReminderBlocks<T extends { type: string }>(content: readonly T[]): T[] {
@@ -51,6 +52,10 @@ export interface HookStdinPayload {
 	tool_response?: { content: unknown; is_error: boolean };
 	prompt?: string;
 	stop_hook_active?: boolean;
+	/** Stop: in-flight background work (Claude Code's `background_tasks`). */
+	background_tasks?: SessionBackgroundTask[];
+	/** Stop: jobs that will wake the session later (Claude Code's `session_crons`). */
+	session_crons?: SessionCron[];
 	trigger?: "manual" | "auto";
 	/** PreCompact: the `/compact <instructions>` text, empty when none (Claude Code sends the string as is). */
 	custom_instructions?: string;

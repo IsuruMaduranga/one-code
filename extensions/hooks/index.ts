@@ -41,6 +41,7 @@
 import { contentText } from "@earendil-works/pi-ai";
 import { getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { RunOutcomeLatch } from "../lib/interrupt.ts";
+import { SESSION_WORK_CHANNEL, type SessionWorkQuery } from "../lib/session-work.ts";
 import { claudeConfigDir } from "../lib/paths.ts";
 import { defaultDiscoverRoots } from "../lib/plugins.ts";
 import { appendHookLog, formatDebugLine, hooksDebugEnabled, hooksLogPath } from "./debug.ts";
@@ -548,7 +549,16 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		// loop returns on the abort signal before the stop-hook step). An empty latch
 		// means no run ended in this turn, which is not a response to stop on either.
 		if (stopOutcome.take() !== "ok") return;
-		const payload: HookStdinPayload = { ...basePayload(ctx, "Stop"), stop_hook_active: stopHookActive };
+		// Claude Code's two lists of what will wake the session later, filled by the
+		// background extension (lib/session-work.ts); empty arrays when none.
+		const work: SessionWorkQuery = { crons: [], tasks: [] };
+		pi.events.emit(SESSION_WORK_CHANNEL, work);
+		const payload: HookStdinPayload = {
+			...basePayload(ctx, "Stop"),
+			stop_hook_active: stopHookActive,
+			background_tasks: work.tasks,
+			session_crons: work.crons,
+		};
 		const outcome = await dispatch(ctx, "Stop", { ignoreMatcher: true }, payload);
 		if (!outcome.block) return;
 		stopHookActive = true;
