@@ -26,7 +26,15 @@ import { readFileSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { buildClaudeMdBlock, buildOneCodeBlock, discoverContextFiles, discoverOneCodeFiles } from "../lib/claude-context.ts";
+import {
+	buildClaudeMdBlock,
+	buildOneCodeBlock,
+	type ContextFile,
+	dateChangeReminder,
+	discoverContextFiles,
+	discoverOneCodeFiles,
+	localDate,
+} from "../lib/claude-context.ts";
 import { projectMemoryDir, truncateIndex } from "../lib/memory.ts";
 import { claudeConfigDir, oneCodeStateDir } from "../lib/paths.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
@@ -59,25 +67,18 @@ function readMemoryIndex(cwd: string): { path: string; content: string } | null 
 }
 
 export default function claudeContextExtension(pi: ExtensionAPI) {
-	pi.on("session_start", (_event, ctx) => {
-		// The # claudeMd block carries the CLAUDE.md family, falling back to a
-		// directory's AGENTS.md when it has no CLAUDE.md (CLAUDE.md > AGENTS.md). It
-		// stays byte-exact with Claude Code wherever CLAUDE.md is present, since
-		// AGENTS.md only fills in for a missing one. ONECODE.md rides its own
-		// higher-precedence block below.
-		const inner = buildClaudeMdBlock({
-			contextFiles: discoverContextFiles({
-				cwd: ctx.cwd,
-				homeClaudeDir: claudeConfigDir(),
-				agentsFallback: true,
-				home: os.homedir(),
-			}),
-			memoryIndex: readMemoryIndex(ctx.cwd),
-			email: resolveEmail(ctx.cwd),
-			// Per-session date, matching the cached Environment section; Claude Code's
-			// block changes only across days too.
-			date: new Date().toISOString().slice(0, 10),
-		});
+	/** What the block was built from at session start, so a compaction can rebuild it with a new date. */
+	let blockInputs: { contextFiles: ContextFile[]; memoryIndex: { path: string; content: string } | null; email: string | null } | undefined;
+	/** The date the `# currentDate` line carries. */
+	let blockDate = "";
+	/** The date the model was last told: the block's, or a later date-change notice's. */
+	let shownDate = "";
+
+	const emitClaudeMd = (date: string) => {
+		if (!blockInputs) return;
+		blockDate = date;
+		shownDate = date;
+		const inner = buildClaudeMdBlock({ ...blockInputs, date });
 		if (inner) {
 			pi.events.emit(REMINDER_CHANNEL, {
 				text: inner,
@@ -89,6 +90,27 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 				suffix: "\n\n",
 			});
 		}
+	};
+
+	pi.on("session_start", (_event, ctx) => {
+		// The # claudeMd block carries the CLAUDE.md family, falling back to a
+		// directory's AGENTS.md when it has no CLAUDE.md (CLAUDE.md > AGENTS.md). It
+		// stays byte-exact with Claude Code wherever CLAUDE.md is present, since
+		// AGENTS.md only fills in for a missing one. ONECODE.md rides its own
+		// higher-precedence block below.
+		blockInputs = {
+			contextFiles: discoverContextFiles({
+				cwd: ctx.cwd,
+				homeClaudeDir: claudeConfigDir(),
+				agentsFallback: true,
+				home: os.homedir(),
+			}),
+			memoryIndex: readMemoryIndex(ctx.cwd),
+			email: resolveEmail(ctx.cwd),
+		};
+		// The user's local date, taken once: the block is frozen after the first
+		// request, so a later date rides a one-shot (before_agent_start below).
+		emitClaudeMd(localDate());
 
 		// One Code's own instructions ride in a separate block AFTER # claudeMd, so
 		// they take precedence over CLAUDE.md (higher order = closer to the user text).
@@ -105,5 +127,23 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 				suffix: "\n\n",
 			});
 		}
+	});
+
+	// A session that crosses local midnight learns the new date on its next
+	// turn, as a one-shot on that turn's prompt (Claude Code's notice), so the
+	// frozen block on message 1 and the cached prefix stay as they are.
+	pi.on("before_agent_start", () => {
+		if (!blockInputs) return;
+		const today = localDate();
+		if (today === shownDate) return;
+		shownDate = today;
+		pi.events.emit(REMINDER_CHANNEL, { text: dateChangeReminder(today) });
+	});
+
+	// A compaction starts a new prefix, and the notice may have ridden a message
+	// it folded away: rebuild the block with today's date while it costs nothing.
+	pi.on("session_compact", () => {
+		const today = localDate();
+		if (today !== blockDate) emitClaudeMd(today);
 	});
 }

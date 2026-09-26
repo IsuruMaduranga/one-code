@@ -393,6 +393,25 @@ export function buildOneCodeBlock(files: ContextFile[]): string | null {
 export const AGENTS_DESCRIPTOR = "cross-tool agent instructions, AGENTS.md standard";
 
 /**
+ * The `# currentDate` value: the user's LOCAL calendar date as YYYY-MM-DD, the
+ * date their own clock shows (a UTC date is a day off every evening west of
+ * UTC and every early morning east of it).
+ */
+export function localDate(now: Date = new Date()): string {
+	const pad = (n: number) => String(n).padStart(2, "0");
+	return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+/**
+ * Claude Code's notice when the local date moves on mid-session. The block
+ * carrying `# currentDate` is frozen after the first request, so the new date
+ * rides a one-shot where the model reads next, the way Claude Code does.
+ */
+export function dateChangeReminder(date: string): string {
+	return `The date has changed. Today's date is now ${date}. No need to announce the new date \u2014 the user's own clock shows it.`;
+}
+
+/**
  * Assemble the block's inner text (the `<system-reminder>` wrapper is added by
  * lib/reminders.ts). Byte-exact rule reverse-engineered from opus-4-8.json:
  *

@@ -21,7 +21,8 @@ it would there. The block contains, in order:
    from the repository's memory folder. See [Memory](#memory).
 3. **Your email**, from `git config user.email` (or `GIT_AUTHOR_EMAIL` or
    `EMAIL`), for attribution.
-4. **Today's date.**
+4. **Today's date**, as your own clock shows it. If a session runs past
+   midnight, the model hears the new date on its next turn.
 
 `@path` references inside a `CLAUDE.md` are expanded in place, up to five
 levels deep, so a file that imports shared instructions keeps working.
