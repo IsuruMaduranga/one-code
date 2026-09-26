@@ -32,6 +32,7 @@ import { readSettingsFile, settingsPaths } from "../lib/claude-settings.ts";
 import { boundConsentItems } from "../lib/consent-preview.ts";
 import { consentStorePath } from "../lib/consent-stores.ts";
 import type { McpServer } from "./config.ts";
+import { escapeControlText } from "../lib/terminal-text.ts";
 
 interface ProjectApprovals {
 	/** "Use this and all future MCP servers in this project" was chosen. */
@@ -192,7 +193,7 @@ export const CHOICE_NO = "No";
 /** Claude Code's dialog title for one or several newly found servers. */
 export function promptTitle(names: string[]): string {
 	return names.length === 1
-		? `New MCP server found in .mcp.json: ${names[0]}`
+		? `New MCP server found in .mcp.json: ${escapeControlText(names[0])}`
 		: `${names.length} new MCP servers found in .mcp.json`;
 }
 

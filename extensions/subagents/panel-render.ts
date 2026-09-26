@@ -8,6 +8,7 @@
 
 import { cutPlainText as cut, formatDuration, splitCell, splitRow, visibleWidth, wrapProse } from "../lib/tui-render.ts";
 import { formatTokenCount } from "./usage.ts";
+import { sanitizeDisplayText } from "../lib/terminal-text.ts";
 import { type LiveRun, type LiveStatus, streamingText, type TranscriptBlock } from "./live-runs.ts";
 
 export interface Paint {
@@ -245,7 +246,7 @@ export function renderTranscript(input: TranscriptInput, paint: Paint): Transcri
 	// the default view follows streaming like Claude Code.
 	const bodyRows = Math.max(0, input.height - out.length - 1);
 	const blockLines = run.blocks.flatMap((block) => blockToLines(block, width, paint, prose));
-	const partial = streamingText(run.streaming).trimEnd();
+	const partial = sanitizeDisplayText(streamingText(run.streaming)).trimEnd();
 	if (partial) for (const line of prose(`stream:${run.taskId}`, partial, width)) blockLines.push(line);
 	while (blockLines.length && blockLines.at(-1) === "") blockLines.pop();
 	const maxScroll = Math.max(0, blockLines.length - bodyRows);
