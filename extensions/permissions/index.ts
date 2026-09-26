@@ -22,6 +22,7 @@ import { join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { type ChildAction, SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../auto-mode/actions.ts";
+import { guideDocsDirs } from "../lib/guide-docs.ts";
 import type { HandBackVerdict } from "../lib/notifications.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent } from "../lib/model-unusable.ts";
 
@@ -310,6 +311,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	let protectedDirs: string[] = [];
 	/** The harness's readable session dirs, resolved at session start; `readableRoots` adds the workspace to them. */
 	let harnessReadableRoots: string[] = [];
+	/** The shipped docs the `one-code-guide` agent reads (lib/guide-docs.ts): readable, never writable. */
+	let docsDirPaths: string[] = [];
 	/**
 	 * Workspace directories (workspace.ts): from settings, where the
 	 * repository's own files apply only once the user trusts them, from
@@ -330,7 +333,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		const trusted = settingsWorkspaceDirs.filter((dir) => projectAllowTrusted || !isRepoSource(dir.source)).map((dir) => dir.path);
 		workspacePaths = [...new Set([...trusted, ...flagWorkspaceDirs, ...sessionWorkspaceDirs].map((dir) => tryRealpath(dir) ?? dir))];
 		workspaceDirs = [...new Set(workspacePaths.map(resolvedOrSelf))];
-		readableRoots = [...harnessReadableRoots, ...workspaceDirs];
+		readableRoots = [...harnessReadableRoots, ...docsDirPaths, ...workspaceDirs];
 	};
 
 	/**
@@ -846,6 +849,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		resultsDirPath = resolvedOrSelf(sessionResultsDir(ctx));
 		sessionDirPath = resolvedOrSelf(ctx.sessionManager.getSessionDir());
 		harnessReadableRoots = [memoryDirPath, scratchpadDirPath, resultsDirPath, sessionDirPath].filter((d): d is string => !!d).map(resolvedOrSelf);
+		docsDirPaths = guideDocsDirs().map(resolvedOrSelf);
 		// `--add-dir`: each directory is validated like one added in the panel.
 		flagWorkspaceDirs = [];
 		for (const entry of parseAddDirFlag(pi.getFlag("add-dir") as string | undefined)) {
@@ -1014,6 +1018,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				sessionDirPath,
 				protectedDirs,
 				workspaceDirs: dirs,
+				readOnlyDirs: docsDirPaths,
 			});
 		let result = decideWith([...allow, ...activeSessionAllows(), ...(projectAllowTrusted ? projectAllow : [])]);
 
@@ -1278,6 +1283,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			sessionDirPath,
 			protectedDirs,
 			workspaceDirs,
+			readOnlyDirs: docsDirPaths,
 		});
 
 		// A child's cwd can be a worktree (different project → different per-repo

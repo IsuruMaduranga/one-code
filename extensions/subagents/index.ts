@@ -16,7 +16,7 @@
  * children persist their sessions per run to make that possible).
  */
 
-import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, writeFileSync, readFileSync } from "node:fs";
 import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, agentCronTools, agentOwnsCronJobs } from "../lib/agent-cron.ts";
 import os from "node:os";
 import { dirname, join } from "node:path";
@@ -41,6 +41,10 @@ import {
 } from "./model-select.ts";
 import { modelPickerComponent, pickerSpec, toPickerEntries, type PickerEntry } from "../auto-mode/model-picker.ts";
 import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
+import { guideDocs } from "../lib/guide-docs.ts";
+import { extensionVersion } from "../lib/package-version.ts";
+import { scanSkills } from "../lib/skill-scan.ts";
+import { GUIDE_AGENT, guideAgentDefinition, settingsSetup } from "./guide-agent.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { BTW_FORK_CHANNEL, btwForkName, btwForkReminder, type BtwForkRequest, type BtwForkResult } from "../lib/btw-fork.ts";
 import { MCP_TOOLS_CHANNEL, type McpToolsPayload } from "../lib/mcp-share.ts";
@@ -89,7 +93,9 @@ import { createMarkdownProse } from "./prose.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 
 /** The catalog shipped in this package: <package>/agents. */
-const BUNDLED_AGENTS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "agents");
+/** This package's root (the `one-code-extension` directory). */
+const PACKAGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const BUNDLED_AGENTS_DIR = join(PACKAGE_ROOT, "agents");
 
 interface RunRequest {
 	agent: string;
@@ -392,15 +398,63 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			},
 		));
 
+	/**
+	 * The code-defined `one-code-guide` (guide-agent.ts), with the user's live
+	 * setup in its prompt: custom skills and agents, enabled plugins, MCP
+	 * servers, installed pi packages and extensions, and pi's settings keys.
+	 */
+	const guideAgent = (cwd: string, found: AgentDefinition[], plugins: ReturnType<typeof discoverPlugins>): AgentDefinition => {
+		const agentDir = getAgentDir();
+		const home = os.homedir();
+		let settingsText: string | undefined;
+		try {
+			settingsText = readFileSync(join(agentDir, "settings.json"), "utf-8");
+		} catch {
+			// No settings file yet: no packages or keys to list.
+		}
+		let extensions: string[] = [];
+		try {
+			extensions = readdirSync(join(agentDir, "extensions")).filter((entry) => !entry.startsWith("."));
+		} catch {
+			// No user extensions directory.
+		}
+		const mcpServers = [
+			...new Set(
+				pi
+					.getAllTools()
+					.map((tool) => tool.name)
+					.filter((name) => name.startsWith("mcp__"))
+					.map((name) => name.split("__")[1] ?? ""),
+			),
+		].filter(Boolean);
+		return guideAgentDefinition({
+			docs: guideDocs(),
+			install: {
+				shape: process.env.ONECODE_INSTALL_METHOD ? "app" : "extension",
+				method: process.env.ONECODE_INSTALL_METHOD,
+				agentDir,
+				version: process.env.CC_VERSION ?? extensionVersion(),
+			},
+			setup: {
+				skills: scanSkills(cwd, home, agentDir, plugins.skills).map((skill) => skill.name),
+				agents: found.filter((agent) => !agent.source.startsWith(BUNDLED_AGENTS_DIR)).map((agent) => agent.name),
+				plugins: plugins.enabledPlugins.map((plugin) => plugin.name),
+				mcpServers,
+				extensions,
+				...settingsSetup(settingsText, PACKAGE_ROOT),
+			},
+		});
+	};
+
 	const loadAgents = (cwd: string) => {
 		// Plugin agents sit between bundled and user definitions, and are exposed
 		// namespaced (`<plugin>:<agent>`) so two plugins can ship the same name.
-		const sources: Array<string | AgentSource> = [
-			BUNDLED_AGENTS_DIR,
-			...discoverPlugins(defaultDiscoverRoots(getAgentDir(), cwd)).agentDirs,
-			...agentDirs(cwd, os.homedir()),
-		];
-		return discoverAgents(sources);
+		const plugins = discoverPlugins(defaultDiscoverRoots(getAgentDir(), cwd));
+		const sources: Array<string | AgentSource> = [BUNDLED_AGENTS_DIR, ...plugins.agentDirs, ...agentDirs(cwd, os.homedir())];
+		const found = discoverAgents(sources);
+		// The guide ranks below every agent file: one of the same name replaces it.
+		if (found.some((agent) => agent.name === GUIDE_AGENT)) return found;
+		return [...found, guideAgent(cwd, found, plugins)].sort((a, b) => a.name.localeCompare(b.name));
 	};
 
 	// Claude Code closes every catalog row with a tools clause — "(Tools: *)",

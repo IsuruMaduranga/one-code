@@ -816,6 +816,14 @@ export interface DecideInput {
 	 * directory (the classifier's containment fast path never sees these).
 	 */
 	workspaceDirs?: string[];
+	/**
+	 * Documentation the harness ships and reads (lib/guide-docs.ts: One Code's
+	 * user guide, the running pi's docs and examples), absolute and resolved.
+	 * A read inside one is allowed like a working-directory read, on every model
+	 * tier, so the `one-code-guide` agent reads them without a prompt. Never a
+	 * write root: only the read tier consults it.
+	 */
+	readOnlyDirs?: string[];
 }
 
 export interface Decision {
@@ -930,6 +938,7 @@ export function decide(params: DecideInput): Decision {
 	 */
 	const sessionReadableRoots = () => [
 		...[params.memoryDirPath, params.scratchpadDirPath, params.resultsDirPath, params.sessionDirPath].filter((d): d is string => !!d).map((d) => resolveForContainment(d) ?? d),
+		...(params.readOnlyDirs ?? []),
 		...(params.workspaceDirs ?? []),
 	];
 	/** The pre-gate's proof that a command only reads inside the project, for a substitution in an allowed command. */
@@ -1128,9 +1137,13 @@ export function decide(params: DecideInput): Decision {
 	 * anywhere on disk (PERMISSIONS-REVIEW-2026-09-05 H1, H2).
 	 */
 	const inWorkingSpace = (): boolean => workingSpaceHolds(subject, params.resolvedSubject ?? subject);
+	const inReadOnlyDocs = (): boolean => {
+		const target = params.resolvedSubject ?? subject;
+		return (params.readOnlyDirs ?? []).some((dir) => isAtOrInsideDir(target, dir, cwd));
+	};
 	if (tier === "safe") {
 		// No path argument (grep/find/ls default to the cwd) is an in-project read.
-		if (!subject || inWorkingSpace()) return { decision: "allow", cause: "tier" };
+		if (!subject || inWorkingSpace() || inReadOnlyDocs()) return { decision: "allow", cause: "tier" };
 		return outsideWorkingDir();
 	}
 	if (AUTO_ALLOWED_TOOLS.has(tool)) return { decision: "allow", cause: "tier" };
