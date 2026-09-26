@@ -240,7 +240,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 	const connectOne = async (server: McpServer): Promise<void> => {
 		failures = failures.filter((f) => f.server.name !== server.name);
 		oauthNeeded.delete(server.name);
-		const provider = server.kind === "http" && hasStoredTokens(server.name) ? silentProvider(server.name) : undefined;
+		const provider = server.kind === "http" && hasStoredTokens(server) ? silentProvider(server) : undefined;
 		try {
 			const connection = await connect(server, provider);
 			if (!alive()) {
@@ -625,7 +625,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 				// honestly from whether tokens are stored — not just "failed http".
 				const authState =
 					status === "failed" && server.kind === "http"
-						? hasStoredTokens(server.name)
+						? hasStoredTokens(server)
 							? ("authenticated" as const)
 							: ("notAuthenticated" as const)
 						: undefined;

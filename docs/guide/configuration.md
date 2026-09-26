@@ -51,7 +51,7 @@ Setting one doesn't move the others.
 | `hooks/project-approvals.json` | Which projects' hooks you approved. |
 | `mcp/project-approvals.json` | Which projects' MCP servers you approved. |
 | `permissions/project-allow-approvals.json` | Which projects' allow rules you trusted. |
-| `mcp-auth/<server>.json` | OAuth tokens for MCP servers, owner-readable only. |
+| `mcp-auth/<server>-<hash>.json` | OAuth tokens for MCP servers, one file per server name, URL and headers, owner-readable only. |
 | `cache/artificial-analysis.json` | The cached model-capability snapshot, when a key is set. |
 | `hooks/hooks-decisions.jsonl` | A hook decision log, written only while `CC_HOOKS_DEBUG` is set. |
 

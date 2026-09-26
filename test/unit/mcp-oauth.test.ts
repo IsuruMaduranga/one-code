@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -9,6 +9,8 @@ import { McpOAuthProvider } from "../../extensions/mcp/oauth/provider.ts";
 
 let home: string;
 const env: NodeJS.ProcessEnv = {}; // no ONECODE_STATE_DIR → <home>/.onecode
+const server = (name: string, url = "https://mcp.example.com/mcp", headers?: Record<string, string>) => ({ name, url, headers });
+const srv = server("srv");
 
 beforeEach(() => {
 	home = mkdtempSync(join(tmpdir(), "onecode-mcp-"));
@@ -46,25 +48,56 @@ describe("mcp-overrides", () => {
 
 describe("oauth store", () => {
 	it("returns an empty record for an unknown server", () => {
-		expect(readAuth("nope", home, env)).toEqual({});
-		expect(hasStoredTokens("nope", home, env)).toBe(false);
+		expect(readAuth(server("nope"), home, env)).toEqual({});
+		expect(hasStoredTokens(server("nope"), home, env)).toBe(false);
 	});
 
 	it("writes, merges, and reports stored tokens", () => {
-		writeAuth("srv", { codeVerifier: "v1" }, home, env);
-		updateAuth("srv", { tokens: { access_token: "tok", token_type: "bearer" } }, home, env);
-		const stored = readAuth("srv", home, env);
+		writeAuth(server("srv"), { codeVerifier: "v1" }, home, env);
+		updateAuth(server("srv"), { tokens: { access_token: "tok", token_type: "bearer" } }, home, env);
+		const stored = readAuth(server("srv"), home, env);
 		expect(stored.codeVerifier).toBe("v1"); // preserved by the merge
 		expect(stored.tokens?.access_token).toBe("tok");
-		expect(hasStoredTokens("srv", home, env)).toBe(true);
+		expect(hasStoredTokens(server("srv"), home, env)).toBe(true);
+	});
+
+	it("binds a record to the server's URL and headers, not its name", () => {
+		const user = server("github", "https://api.githubcopilot.com/mcp/");
+		writeAuth(user, { tokens: { access_token: "user-token", token_type: "bearer" } }, home, env);
+		expect(hasStoredTokens(user, home, env)).toBe(true);
+		// A project server that reuses the name at another URL gets nothing.
+		const shadow = server("github", "https://evil.example.com/mcp");
+		expect(hasStoredTokens(shadow, home, env)).toBe(false);
+		expect(readAuth(shadow, home, env)).toEqual({});
+		// Nor at the same URL with other headers.
+		expect(hasStoredTokens(server("github", user.url, { "X-Tenant": "other" }), home, env)).toBe(false);
+		// Header order does not change the key.
+		const withHeaders = server("h", "https://h.example.com/mcp", { A: "1", B: "2" });
+		writeAuth(withHeaders, { codeVerifier: "v" }, home, env);
+		expect(readAuth(server("h", withHeaders.url, { B: "2", A: "1" }), home, env).codeVerifier).toBe("v");
+	});
+
+	it("never offers a record whose recorded URL differs from the server's", () => {
+		const a = server("s", "https://a.example.com/mcp");
+		writeAuth(a, { tokens: { access_token: "t", token_type: "bearer" } }, home, env);
+		const file = readdirSync(join(home, ".onecode", "mcp-auth"))[0];
+		const path = join(home, ".onecode", "mcp-auth", file);
+		writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, "utf8")), serverUrl: "https://b.example.com/mcp" }));
+		expect(hasStoredTokens(a, home, env)).toBe(false);
+	});
+
+	it("does not read a record written under the old name-only key", () => {
+		mkdirSync(join(home, ".onecode", "mcp-auth"), { recursive: true });
+		writeFileSync(join(home, ".onecode", "mcp-auth", "github-0badc0de.json"), JSON.stringify({ tokens: { access_token: "old", token_type: "bearer" } }));
+		expect(hasStoredTokens(server("github"), home, env)).toBe(false);
 	});
 
 	it("sanitizes the server name into a distinct file (no collision/escape)", () => {
-		writeAuth("a/b", { codeVerifier: "x" }, home, env);
-		writeAuth("a_b", { codeVerifier: "y" }, home, env);
+		writeAuth(server("a/b"), { codeVerifier: "x" }, home, env);
+		writeAuth(server("a_b"), { codeVerifier: "y" }, home, env);
 		// Distinct slugs — the second must not overwrite the first.
-		expect(readAuth("a/b", home, env).codeVerifier).toBe("x");
-		expect(readAuth("a_b", home, env).codeVerifier).toBe("y");
+		expect(readAuth(server("a/b"), home, env).codeVerifier).toBe("x");
+		expect(readAuth(server("a_b"), home, env).codeVerifier).toBe("y");
 	});
 });
 
@@ -107,7 +140,7 @@ describe("startCallbackServer", () => {
 describe("McpOAuthProvider", () => {
 	const make = (opts: { redirectUrl?: string; opener?: (url: URL) => void } = {}) =>
 		new McpOAuthProvider({
-			serverName: "srv",
+			server: srv,
 			redirectUrl: opts.redirectUrl,
 			openAuthorization: opts.opener,
 			home,
@@ -151,15 +184,15 @@ describe("McpOAuthProvider", () => {
 		provider.saveCodeVerifier("v");
 		provider.invalidateCredentials("tokens");
 		expect(provider.tokens()).toBeUndefined();
-		expect(readAuth("srv", home, env).codeVerifier).toBe("v"); // untouched
+		expect(readAuth(server("srv"), home, env).codeVerifier).toBe("v"); // untouched
 		provider.invalidateCredentials("all");
-		expect(readAuth("srv", home, env)).toEqual({});
+		expect(readAuth(server("srv"), home, env)).toEqual({ serverUrl: srv.url });
 	});
 });
 
 describe("OAuth state (M9)", () => {
 	it("issues one state per provider and echoes it back through the callback", async () => {
-		const provider = new McpOAuthProvider({ serverName: "srv", redirectUrl: "http://127.0.0.1:1/callback", home, env });
+		const provider = new McpOAuthProvider({ server: srv, redirectUrl: "http://127.0.0.1:1/callback", home, env });
 		const state = provider.state();
 		expect(state).toMatch(/^[0-9a-f]{32}$/);
 		expect(provider.state()).toBe(state);

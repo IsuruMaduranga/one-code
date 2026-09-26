@@ -182,6 +182,9 @@ plugin), each with its status, tool and resource counts, and any warnings.
   **Enable** reverses it.
 - **Authenticate** appears for HTTP servers that need OAuth. It opens your
   browser for sign-in; tokens are stored under `~/.onecode/mcp-auth/` with
-  owner-only permissions.
+  owner-only permissions. Tokens belong to the server's URL and headers, not
+  only its name: another server with the same name never receives them, and
+  a server whose URL or headers change asks you to sign in again. Only an
+  `https` sign-in page (or `http` on your own machine) is opened.
 
 Press the action's number to run it, or **Esc** to go back.

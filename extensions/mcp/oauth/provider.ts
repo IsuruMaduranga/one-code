@@ -20,10 +20,11 @@ import type {
 } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { randomBytes } from "node:crypto";
 import type { OAuthClientProvider, OAuthDiscoveryState } from "@modelcontextprotocol/sdk/client/auth.js";
-import { readAuth, type StoredAuth, writeAuth } from "./store.ts";
+import { type OAuthServer, readAuth, type StoredAuth, writeAuth } from "./store.ts";
 
 export interface McpOAuthProviderOptions {
-	serverName: string;
+	/** The server the credentials are bound to (name, URL and headers). */
+	server: OAuthServer;
 	/** Loopback redirect_uri; required for an interactive flow, omitted for silent reconnect. */
 	redirectUrl?: string;
 	/** Sends the user to the authorization URL (opens a browser). Interactive flows only. */
@@ -33,7 +34,7 @@ export interface McpOAuthProviderOptions {
 }
 
 export class McpOAuthProvider implements OAuthClientProvider {
-	private readonly serverName: string;
+	private readonly server: OAuthServer;
 	private readonly _redirectUrl?: string;
 	private readonly openAuthorization?: (url: URL) => void;
 	private readonly home?: string;
@@ -47,7 +48,7 @@ export class McpOAuthProvider implements OAuthClientProvider {
 	private issuedState?: string;
 
 	constructor(options: McpOAuthProviderOptions) {
-		this.serverName = options.serverName;
+		this.server = options.server;
 		this._redirectUrl = options.redirectUrl;
 		this.openAuthorization = options.openAuthorization;
 		this.home = options.home;
@@ -55,13 +56,13 @@ export class McpOAuthProvider implements OAuthClientProvider {
 	}
 
 	private load(): StoredAuth {
-		return (this.cache ??= readAuth(this.serverName, this.home, this.env));
+		return (this.cache ??= readAuth(this.server, this.home, this.env));
 	}
 
 	/** Merge a patch into the cached store and persist it. */
 	private save(patch: Partial<StoredAuth>): void {
 		this.cache = { ...this.load(), ...patch };
-		writeAuth(this.serverName, this.cache, this.home, this.env);
+		writeAuth(this.server, this.cache, this.home, this.env);
 	}
 
 	get redirectUrl(): string | URL | undefined {
@@ -113,7 +114,7 @@ export class McpOAuthProvider implements OAuthClientProvider {
 
 	redirectToAuthorization(authorizationUrl: URL): void {
 		if (!this.openAuthorization) {
-			throw new Error(`MCP server "${this.serverName}" needs authentication; run /mcp and choose Authenticate.`);
+			throw new Error(`MCP server "${this.server.name}" needs authentication; run /mcp and choose Authenticate.`);
 		}
 		this.openAuthorization(authorizationUrl);
 	}
