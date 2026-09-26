@@ -14,9 +14,15 @@
  * The producer spawns `detached` (own process group; `detachedSpawnOptions`)
  * and stops it with `killProcessTree`, which signals the negative pid — the
  * whole group — falling back to the child alone when the group is already gone.
- * `stopProcessTree` adds the grace period: SIGTERM now, SIGKILL if the leader
- * has not exited by then (a command that ignores SIGTERM still closes late,
- * which is exactly the late callback the shutdown paths guard against).
+ * `stopProcessTree` adds the grace period: SIGTERM now, SIGKILL to the group
+ * when it ends, whether or not the leader is still alive. The leader is often
+ * only the `bash -c` wrapper, which dies on TERM at once while the command it
+ * forked (a dev server in its graceful-shutdown handler) keeps the group and
+ * its port; a leader-only check skipped the SIGKILL exactly then
+ * (LIFECYCLE-BACKGROUND-REVIEW-2026-09-26 M1, measured). A group whose SIGKILL
+ * is still pending when the process exits (pi's quit calls `process.exit`,
+ * and the grace timer is unref'd) is SIGKILLed from a `process.on("exit")`
+ * hook, so nothing One Code stopped outlives it.
  *
  * `waitForChildExit` is the counterpart on the waiting side: it settles on
  * `exit` plus a short stdio grace, never on `close` alone — a descendant the
@@ -96,19 +102,43 @@ export function killProcessTree(child: ChildProcess, signal: NodeJS.Signals = "S
 }
 
 /**
- * SIGTERM the tree, then SIGKILL it after `graceMs` unless the leader exited.
- * The timer is unref'd: it must never be what keeps a one-shot process alive.
+ * Trees sent SIGTERM whose SIGKILL has not run yet, by pid. Per module
+ * instance on purpose (each extension force-kills its own children); one
+ * `exit` listener per instance, installed on first use.
+ */
+const pendingKills = new Map<number, ChildProcess>();
+let exitHookInstalled = false;
+
+/** The process is exiting: the grace timers will never fire, so force-kill every tree still pending. */
+function killPendingAtExit(): void {
+	for (const child of pendingKills.values()) killProcessTree(child, "SIGKILL");
+	pendingKills.clear();
+}
+
+/**
+ * SIGTERM the tree, then SIGKILL the whole group after `graceMs`, whatever
+ * the leader's state: a group already gone makes that an ESRCH, and a live
+ * group keeps its id reserved, so the id cannot name anyone else. The timer
+ * is unref'd (it must never be what keeps a one-shot process alive); a
+ * process exit before it fires runs the SIGKILL from the `exit` hook.
  */
 export function stopProcessTree(child: ChildProcess, graceMs: number): void {
 	killProcessTree(child, "SIGTERM");
 	// taskkill /F is already forceful; there is no gentler first signal to grace.
 	if (process.platform === "win32") return;
-	if (child.exitCode !== null || child.signalCode !== null) return;
+	const pid = child.pid;
+	if (pid == null || pendingKills.has(pid)) return;
+	pendingKills.set(pid, child);
+	if (!exitHookInstalled) {
+		exitHookInstalled = true;
+		process.on("exit", killPendingAtExit);
+	}
 	const timer = setTimeout(() => {
-		if (child.exitCode === null && child.signalCode === null) killProcessTree(child, "SIGKILL");
+		if (pendingKills.get(pid) !== child) return;
+		pendingKills.delete(pid);
+		killProcessTree(child, "SIGKILL");
 	}, graceMs);
 	timer.unref?.();
-	child.once("exit", () => clearTimeout(timer));
 }
 
 export interface ChildExit {

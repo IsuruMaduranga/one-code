@@ -11,7 +11,8 @@
  * same test process — so there the assertions time `waitForChildExit`, which
  * is what every task and hook waits on (findings §22, 2026-09-19 addendum).
  */
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { detachedSpawnOptions, EXIT_STDIO_MAX_MS, killProcessTree, stopProcessTree, waitForChildExit } from "../../extensions/lib/process-tree.ts";
 import { bashSpawnOrThrow } from "../../extensions/lib/shell-spawn.ts";
@@ -101,6 +102,69 @@ describe("stopProcessTree", () => {
 		const elapsed = await closed;
 		expect(elapsed).toBeGreaterThanOrEqual(250);
 		expect(elapsed).toBeLessThan(4000);
+	});
+
+	/** Whether any process is left in the group `pgid`. */
+	const groupAlive = (pgid: number) => {
+		try {
+			process.kill(-pgid, 0);
+			return true;
+		} catch (error) {
+			return (error as NodeJS.ErrnoException).code !== "ESRCH";
+		}
+	};
+	const waitUntilGone = async (pgid: number, limitMs: number) => {
+		for (let waited = 0; groupAlive(pgid) && waited < limitMs; waited += 50) await new Promise((r) => setTimeout(r, 50));
+		return !groupAlive(pgid);
+	};
+	/** A group whose leader dies on TERM while a member it forked ignores TERM (the `bash -c` wrapper around a dev server). */
+	const leaderDiesMemberResists = `sh -c 'trap "" TERM; while :; do sleep 0.2; done' & wait`;
+
+	it.skipIf(win32)("SIGKILLs the group after the grace even when the leader died on SIGTERM and a member did not (A3-M1)", async () => {
+		const child = spawn(bash.shell, ["-c", leaderDiesMemberResists], { ...detachedSpawnOptions(), stdio: "ignore" });
+		const pgid = child.pid!;
+		try {
+			await new Promise((r) => setTimeout(r, 200)); // let the member start and set its trap
+			const exited = new Promise((r) => child.once("exit", r));
+			stopProcessTree(child, 300);
+			await exited; // the leader goes at once
+			expect(await waitUntilGone(pgid, 3000)).toBe(true);
+		} finally {
+			try {
+				process.kill(-pgid, "SIGKILL");
+			} catch {
+				// Already gone.
+			}
+		}
+	});
+
+	it.skipIf(win32)("force-kills a stopped tree at process exit, before its grace timer could fire (A3-M1, the quit path)", async () => {
+		// A throwaway node process stops its own TERM-resistant group and exits 50 ms
+		// later, as pi's quit does (dispose, then process.exit).
+		const moduleUrl = new URL(`file://${resolve("extensions/lib/process-tree.ts")}`).href;
+		const script = [
+			`import { spawn } from "node:child_process";`,
+			`import { detachedSpawnOptions, stopProcessTree } from ${JSON.stringify(moduleUrl)};`,
+			`const child = spawn(${JSON.stringify(bash.shell)}, ["-c", ${JSON.stringify(leaderDiesMemberResists)}], { ...detachedSpawnOptions(), stdio: "ignore" });`,
+			`child.unref();`,
+			`process.stdout.write(String(child.pid));`,
+			`setTimeout(() => { stopProcessTree(child, 2000); setTimeout(() => process.exit(0), 50); }, 200);`,
+		].join("\n");
+		const stdout = await new Promise<string>((done, fail) =>
+			execFile(process.execPath, ["--input-type=module", "-e", script], (error, out) => (error ? fail(error) : done(out))),
+		);
+		const pgid = Number(stdout.trim());
+		expect(pgid).toBeGreaterThan(0);
+		try {
+			// Well inside the 2 s grace: only the exit hook can have killed it.
+			expect(await waitUntilGone(pgid, 1000)).toBe(true);
+		} finally {
+			try {
+				process.kill(-pgid, "SIGKILL");
+			} catch {
+				// Already gone.
+			}
+		}
 	});
 
 	it("ends the tree at once where there is no gentler signal to grace (Windows)", async () => {
