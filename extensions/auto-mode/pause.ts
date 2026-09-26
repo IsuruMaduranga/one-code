@@ -12,6 +12,27 @@
 export const CONSECUTIVE_BLOCK_LIMIT = 3;
 export const TOTAL_BLOCK_LIMIT = 20;
 
+/**
+ * How long a timed resume prompt waits before denying the call, as Claude
+ * Code's denial-limit fallback does (2.1.282: 120 s, overridden by
+ * `CLAUDE_CODE_TICKLISH_WHISPER_TIMEOUT_MS`), so an unattended session is not
+ * held by a prompt nobody will answer.
+ */
+export const UNATTENDED_PROMPT_TIMEOUT_MS = 120_000;
+
+export function unattendedPromptTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+	const value = Number(env.CLAUDE_CODE_TICKLISH_WHISPER_TIMEOUT_MS);
+	return Number.isFinite(value) && value > 0 ? value : UNATTENDED_PROMPT_TIMEOUT_MS;
+}
+
+/** Claude Code's warning line on a timed prompt, in its "about N minutes" form (the dialog adds a live countdown). */
+export function unattendedPromptNotice(timeoutMs: number): string {
+	const minutes = Math.round(timeoutMs / 60_000);
+	const seconds = Math.max(1, Math.round(timeoutMs / 1000));
+	const left = timeoutMs >= 60_000 ? `about ${minutes} ${minutes === 1 ? "minute" : "minutes"}` : `about ${seconds} ${seconds === 1 ? "second" : "seconds"}`;
+	return `⚠ One Code will automatically deny this request in ${left}, to avoid blocking progress on an unattended session`;
+}
+
 export interface Denial {
 	toolName: string;
 	/** The command or path the call targeted, for the /permissions listing. */
@@ -33,6 +54,10 @@ export class PauseTracker {
 	private consecutive = 0;
 	private total = 0;
 	private paused = false;
+	/** Which limit tripped the current pause. */
+	private trippedBy: "consecutive" | "total" | undefined;
+	/** The timed resume prompt was shown in this block streak (Claude Code's `timedFallbackShown`). */
+	private timedShown = false;
 	private readonly denials: Denial[] = [];
 
 	/** Record a classifier block. Returns true if this one tripped the pause. */
@@ -44,10 +69,12 @@ export class PauseTracker {
 
 		if (this.consecutive >= CONSECUTIVE_BLOCK_LIMIT) {
 			this.paused = true;
+			this.trippedBy = "consecutive";
 			return true;
 		}
 		if (this.total >= TOTAL_BLOCK_LIMIT) {
 			this.paused = true;
+			this.trippedBy = "total";
 			// The total counter resets when it is what triggered the fallback.
 			// Without this, resuming leaves it at the limit and the very next block
 			// re-pauses immediately, making the resume single-use.
@@ -57,9 +84,33 @@ export class PauseTracker {
 		return false;
 	}
 
-	/** A classifier approval breaks a consecutive-block run. */
-	recordAllow(): void {
+	/**
+	 * Any allowed call in auto mode breaks a consecutive-block run, as in Claude
+	 * Code, whose denial count resets on every allow in auto mode (2.1.282).
+	 * Claude Code has no pause state: a block falls back to a prompt only while
+	 * the count is at the limit, so an allow ends a pause the consecutive limit
+	 * tripped. A 20-total pause still waits for the user. Returns true when this
+	 * allow ended a pause.
+	 */
+	recordAllow(): boolean {
 		this.consecutive = 0;
+		this.timedShown = false;
+		if (!this.paused || this.trippedBy !== "consecutive") return false;
+		this.paused = false;
+		this.trippedBy = undefined;
+		return true;
+	}
+
+	/**
+	 * Whether this resume prompt auto-denies after `unattendedPromptTimeoutMs`,
+	 * and marks it shown. As in Claude Code, only a pause the consecutive limit
+	 * tripped is timed, and only once until the streak breaks: the next prompt
+	 * in the same streak waits for the user. A 20-total pause always waits.
+	 */
+	takeTimedPrompt(): boolean {
+		if (!this.paused || this.trippedBy !== "consecutive" || this.timedShown) return false;
+		this.timedShown = true;
+		return true;
 	}
 
 	/**
@@ -70,6 +121,8 @@ export class PauseTracker {
 	resume(): void {
 		this.paused = false;
 		this.consecutive = 0;
+		this.trippedBy = undefined;
+		this.timedShown = false;
 	}
 
 	isPaused(): boolean {
@@ -81,6 +134,8 @@ export class PauseTracker {
 		this.consecutive = 0;
 		this.total = 0;
 		this.paused = false;
+		this.trippedBy = undefined;
+		this.timedShown = false;
 		this.denials.length = 0;
 	}
 

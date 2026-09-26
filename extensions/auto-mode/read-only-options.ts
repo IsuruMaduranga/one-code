@@ -84,7 +84,7 @@ function words(list: string): string[] {
 }
 
 /** Build a table from space-separated option lists, one per arity. */
-function table(arities: Partial<Record<Arity, string>>, extra: Omit<OptionSpec, "options"> = {}): OptionSpec {
+export function table(arities: Partial<Record<Arity, string>>, extra: Omit<OptionSpec, "options"> = {}): OptionSpec {
 	const options: Record<string, Arity> = {};
 	for (const [arity, list] of Object.entries(arities) as [Arity, string][]) {
 		for (const option of words(list)) options[option] = arity;

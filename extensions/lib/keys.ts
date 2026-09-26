@@ -28,9 +28,14 @@ export function modeCycleKey(platform: string = process.platform, env: NodeJS.Pr
  * The key that shows or hides the pinned task list. Claude Code uses ctrl+t,
  * which pi reserves for its thinking-block toggle (an extension shortcut on a
  * reserved key is skipped), so One Code uses alt+t, free in pi's key tables
- * on every platform.
+ * on every platform. macOS terminals send option+t as the typed character †
+ * unless "Use Option as Meta" is on, so alt+t never arrives there; macOS gets
+ * ctrl+\ instead, a control byte every terminal passes through, free in pi's
+ * tables (ctrl+] and ctrl+- are taken, and no ctrl+letter is left).
  */
-export const TASKS_TOGGLE_KEY = "alt+t";
+export function taskToggleKey(platform: string = process.platform): "alt+t" | "ctrl+\\" {
+	return platform === "darwin" ? "ctrl+\\" : "alt+t";
+}
 
 /**
  * The footer badge's pause icon. Claude Code's is U+23F8 (⏸); Windows Terminal

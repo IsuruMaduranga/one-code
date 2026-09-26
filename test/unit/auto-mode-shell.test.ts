@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -395,20 +395,20 @@ describe("analyzeShellCommand write-target gaps (whole-codebase review)", () => 
 	});
 });
 
-describe("containment signal for the recoverability gate (Phase 2)", () => {
+describe("containment signal: Claude Code's acceptEdits file commands on the working space", () => {
 	it("marks an in-project rm of a bare-name file as contained, capturing the target", () => {
 		const ev = analyze("rm notes.txt");
 		expect(ev.verdict).toBe("escalate");
 		expect(ev.containedNonNetwork).toBe(true);
-		expect(ev.wholeTree).toBe(false);
 		expect(ev.writes.some((w) => w.token === "notes.txt" && !w.outsideCwd)).toBe(true);
 	});
 
-	it("marks git reset --hard as a contained whole-tree op", () => {
-		const ev = analyze("git reset --hard HEAD");
-		expect(ev.verdict).toBe("escalate");
-		expect(ev.containedNonNetwork).toBe(true);
-		expect(ev.wholeTree).toBe(true);
+	it("escalates git reset --hard uncontained (it is always classified, as in Claude Code)", () => {
+		for (const cmd of ["git reset --hard HEAD", "git reset --hard"]) {
+			const ev = analyze(cmd);
+			expect(ev.verdict, cmd).toBe("escalate");
+			expect(ev.containedNonNetwork, cmd).toBe(false);
+		}
 	});
 
 	it("does NOT mark an rm outside the project as contained", () => {
@@ -426,10 +426,10 @@ describe("containment signal for the recoverability gate (Phase 2)", () => {
 		expect(ev.containedNonNetwork).toBe(false);
 	});
 
-	it("does NOT mark a non-delete mutation (cp) as contained", () => {
-		const ev = analyze("cp a.txt b.txt");
-		expect(ev.verdict).toBe("escalate");
-		expect(ev.containedNonNetwork).toBe(false);
+	it("does NOT mark a mutation outside Claude Code's acceptEdits list as contained", () => {
+		for (const cmd of ["tar -xf a.tar", "ln -s a b", "dd if=a of=b", "truncate -s 0 a.txt", "sed -i '' s/a/b/ a.txt"]) {
+			expect(analyze(cmd).containedNonNetwork, cmd).toBe(false);
+		}
 	});
 
 	it("does NOT mark rm as contained when the command also reaches the network", () => {
@@ -448,7 +448,7 @@ describe("containment signal for the recoverability gate (Phase 2)", () => {
 		expect(ev.containedNonNetwork).toBe(false);
 	});
 
-	it("does not treat a reset --hard aimed at another tree as a contained whole-tree op", () => {
+	it("escalates a reset --hard aimed at another tree, uncontained", () => {
 		for (const cmd of [
 			"git --work-tree=/other --git-dir=/other/.git reset --hard",
 			"git --work-tree /other reset --hard HEAD",
@@ -457,7 +457,6 @@ describe("containment signal for the recoverability gate (Phase 2)", () => {
 		]) {
 			const ev = analyze(cmd);
 			expect(ev.verdict, cmd).toBe("escalate");
-			expect(ev.wholeTree, cmd).toBe(false);
 			expect(ev.containedNonNetwork, cmd).toBe(false);
 		}
 	});
@@ -494,17 +493,10 @@ describe("containment signal for the recoverability gate (Phase 2)", () => {
 		expect(ev.verdict).toBe("safe");
 	});
 
-	it("still marks a bare git reset --hard (no ref) as whole-tree contained", () => {
-		const ev = analyze("git reset --hard");
-		expect(ev.containedNonNetwork).toBe(true);
-		expect(ev.wholeTree).toBe(true);
-	});
-
 	// A delete target the classifier's fast path cannot enumerate must never be
 	// treated as a concrete in-project literal — otherwise `rm -rf "$VAR"` would
-	// resolve to a nonexistent `cwd/$VAR`, the recoverability check would find
-	// nothing to lose, and it would auto-approve while $VAR expands to anything at
-	// runtime. These must stay uncontained so the classifier judges them.
+	// resolve to a nonexistent `cwd/$VAR` and a contained-delete fast path would
+	// approve it while $VAR expands to anything at runtime. These must stay uncontained so the classifier judges them.
 	it("does NOT mark rm of a dynamic/unenumerable target as contained", () => {
 		for (const command of ['rm -rf "$VAR"', "rm -rf ${DIR:-fallback}", "rm -rf $HOME/x", "rm -rf {a,b}.txt"]) {
 			const ev = analyze(command);
@@ -638,7 +630,7 @@ describe("pre-gate review 2026-09-23: redirects, quoting, symlink-following opti
 		for (const command of ["./cat a.txt", "bin/ls", "/bin/cat a.txt", "command ./cat a.txt"]) {
 			expect(analyze(command).verdict, command).toBe("escalate");
 		}
-		// Was a contained delete the recoverability gate could clear, running ./timeout.
+		// Was a contained delete a fast path could clear, running ./timeout.
 		expect(analyze("./timeout 5 rm a.txt").containedNonNetwork).toBe(false);
 	});
 });
@@ -690,7 +682,7 @@ describe("PREGATE-REVIEW-2026-09-23 second pass", () => {
 		for (const command of ["time { rm -f v; }", "! rm -f v", "script -q /dev/null rm -f v", "flock a.txt rm -f v", "stdbuf -o 1M rm -f v", "setsid -c rm -f v", "sudo -u root rm -f v"]) {
 			expect(bashMatchForms(command), command).toContain("rm -f v");
 		}
-		// flock and script write the file they are given, so they never reach the recoverability gate.
+		// flock and script write the file they are given, so they are never contained.
 		expect(analyze("flock lock rm -f a.txt").containedNonNetwork).toBe(false);
 		expect(analyze("script log rm -f a.txt").containedNonNetwork).toBe(false);
 		expect(analyze("timeout 5 rm -f a.txt").containedNonNetwork).toBe(true);
@@ -792,5 +784,74 @@ describe("pre-gate review 2026-09-24: attached wrapper values, stdin credentials
 	it("escalates TZ set to an absolute path", () => {
 		expect(analyze("TZ=/etc/localtime date").verdict).toBe("escalate");
 		expect(analyze("TZ= date").verdict).toBe("safe");
+	});
+});
+
+describe("Claude Code's acceptEdits file commands (findings §36)", () => {
+	it("marks a line made only of mkdir, touch, cp, mv, rm and rmdir on the project as contained", () => {
+		writeFileSync(join(cwd, "README.md"), "x\n");
+		for (const cmd of [
+			"mkdir -p build && touch build/x && cp README.md build/r.md && mv build/r.md build/s.md",
+			"rm -rf build",
+			"rmdir -p build/sub",
+			"cp -r src dist",
+			"mv -- -odd.txt odd.txt",
+		]) {
+			const ev = analyze(cmd);
+			expect(ev.verdict, cmd).toBe("escalate");
+			expect(ev.containedNonNetwork, cmd).toBe(true);
+		}
+	});
+
+	it("leaves an option it does not model uncontained, a value-carrying one included", () => {
+		for (const cmd of ["cp -t /tmp a.txt", "cp --target-directory=/tmp a.txt", "mkdir -m 777 d", "cp -L link b", "touch -r ref a", "rm --no-preserve-root x"]) {
+			expect(analyze(cmd).containedNonNetwork, cmd).toBe(false);
+		}
+	});
+
+	it("reads a cp or mv source: one outside the working space or a credential is uncontained", () => {
+		writeFileSync(join(home, "secret.txt"), "s\n");
+		expect(analyze(`cp ${sh(join(home, "secret.txt"))} copied.txt`).containedNonNetwork).toBe(false);
+		writeFileSync(join(cwd, ".env"), "K=v\n");
+		expect(analyze("cp .env backup.txt").containedNonNetwork).toBe(false);
+		expect(analyze(`mv notes.txt ${sh(join(home, "notes.txt"))}`).containedNonNetwork).toBe(false);
+	});
+
+	it("never contains removing or moving a working root, a .git, or a repository", () => {
+		mkdirSync(join(cwd, ".git"));
+		mkdirSync(join(cwd, "vendor", "lib", ".git"), { recursive: true });
+		for (const cmd of ["rm -rf .", `rm -rf ${sh(cwd)}`, "rm -rf .git", "rm -rf .git/objects", "rm -rf vendor/lib", "rm -rf vendor", "mv vendor old-vendor", "mv .git old-git", "rmdir ."]) {
+			expect(analyze(cmd).containedNonNetwork, cmd).toBe(false);
+		}
+		mkdirSync(join(cwd, "build", "out"), { recursive: true });
+		expect(analyze("rm -rf build").containedNonNetwork).toBe(true);
+	});
+
+	it("guards what lands beneath a directory operand: cp or mv into one, and removing or moving one", () => {
+		writeFileSync(join(cwd, "settings.json"), "{}\n");
+		mkdirSync(join(cwd, ".claude"));
+		mkdirSync(join(cwd, ".husky"));
+		writeFileSync(join(cwd, ".husky", "pre-commit"), "#!/bin/sh\n");
+		mkdirSync(join(cwd, "evil", ".claude"), { recursive: true });
+		writeFileSync(join(cwd, "evil", ".claude", "settings.json"), "{}\n");
+		for (const cmd of ["cp settings.json .claude", "cp settings.json .claude/", "mv settings.json .claude", "rm -rf .husky", "mv .husky old-husky", "cp -r evil/.claude .", "rm -rf evil"]) {
+			expect(analyze(cmd).containedNonNetwork, cmd).toBe(false);
+		}
+		// A plain directory still takes a copy, and goes, without the classifier.
+		mkdirSync(join(cwd, "build"));
+		expect(analyze("cp settings.json build").containedNonNetwork).toBe(true);
+		expect(analyze("cp -r build dist").containedNonNetwork).toBe(true);
+		expect(analyze("rm -rf build").containedNonNetwork).toBe(true);
+	});
+
+	it("counts a workspace directory as working space for writes only when the caller passes it", () => {
+		const extra = join(cwd, "..", "extra");
+		mkdirSync(extra);
+		const cmd = `touch ${sh(join(extra, "x"))}`;
+		expect(analyze(cmd).containedNonNetwork).toBe(false);
+		expect(analyzeShellCommand({ command: cmd, cwd, home, writableRoots: [realpathSync.native(extra)] }).containedNonNetwork).toBe(true);
+		const redirect = `echo hi > ${sh(join(extra, "y"))}`;
+		expect(analyze(redirect).verdict).toBe("escalate");
+		expect(analyzeShellCommand({ command: redirect, cwd, home, writableRoots: [realpathSync.native(extra)] }).verdict).toBe("safe");
 	});
 });

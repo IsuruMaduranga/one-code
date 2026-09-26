@@ -154,6 +154,11 @@ The tier is derived from the model's name, release date, and price. You
 don't configure it; set `CC_PROMPT_TIER` to force one when you want to
 experiment. `/doctor report` shows the tier in use.
 
+The tier also decides which permission shortcuts apply in auto and
+accept-edits modes (see [What is approved without a classifier
+call](permissions-modes-and-auto-mode.md#what-is-approved-without-a-classifier-call)).
+`CC_PROMPT_TIER` never changes the permission checks.
+
 Like Claude Code, One Code gives frontier models and Sonnet 5 or later no
 task list: the `task_create` family is left out, along with the prompt line
 that points at it. Set `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` to turn the task

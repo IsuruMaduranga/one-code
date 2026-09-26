@@ -444,6 +444,17 @@ export function atLeastTier(tier: PromptTier, floor: PromptTier): boolean {
 }
 
 /**
+ * Whether the permission gate gives `model`'s calls Claude Code's fast paths.
+ * Frontier and workhorse do; cheap and tiny keep One Code's stricter gate
+ * (working-docs/decisions/auto-mode.md, "Two gates by model tier"). Judged on
+ * the intrinsic tier, so `CC_PROMPT_TIER` can never loosen the gate; no model
+ * gets the stricter gate.
+ */
+export function usesClaudeCodeFastPaths(model: Model<Api> | undefined): boolean {
+	return !!model && atLeastTier(intrinsicTier(model), "workhorse");
+}
+
+/**
  * The budget-gated form the automatic secondary-model pickers all share: same as
  * `economicalContainedCandidates`, minus the session model itself and anything
  * dearer than it. `strict` requires *strictly* cheaper (subagents never upgrade a

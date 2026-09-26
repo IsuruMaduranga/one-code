@@ -11,8 +11,8 @@
  *
  * The widget mirrors Claude Code's pinned task list (summary line + ✔/◼/◻
  * rows). Claude Code toggles it with ctrl+t, but pi reserves that key for
- * thinking blocks, so alt+t (`TASKS_TOGGLE_KEY`) and `/tasks hide` / `/tasks
- * show` toggle it here; the key's hint is always on screen.
+ * thinking blocks, so alt+t (ctrl+\ on macOS; `taskToggleKey`) and `/tasks
+ * hide` / `/tasks show` toggle it here; the key's hint is always on screen.
  */
 
 import { StringEnum } from "@earendil-works/pi-ai";
@@ -35,7 +35,7 @@ import {
 	TaskStore,
 } from "./store.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
-import { TASKS_TOGGLE_KEY } from "../lib/keys.ts";
+import { taskToggleKey } from "../lib/keys.ts";
 
 interface TaskDetails {
 	taskSnapshot: TaskSnapshot;
@@ -46,6 +46,7 @@ const TASK_KEYWORDS = ["task", "todo", "plan", "progress", "dependencies", "trac
 
 export default function tasksExtension(pi: ExtensionAPI) {
 	const store = new TaskStore();
+	const toggleKey = taskToggleKey();
 	let widgetHidden = false;
 
 	const updateWidget = (ctx: ExtensionContext) => {
@@ -60,8 +61,8 @@ export default function tasksExtension(pi: ExtensionAPI) {
 			const style = { paint: safeThemePaint(theme), bold: safeThemeBold(theme), strike };
 			return linesComponent(() =>
 				widgetHidden
-					? formatHiddenTaskWidget(store, `${TASKS_TOGGLE_KEY} to show`, style)
-					: formatTaskWidget(store, 12, style, `${TASKS_TOGGLE_KEY} to hide`),
+					? formatHiddenTaskWidget(store, `${toggleKey} to show`, style)
+					: formatTaskWidget(store, 12, style, `${toggleKey} to hide`),
 			);
 		});
 	};
@@ -256,7 +257,7 @@ export default function tasksExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	pi.registerShortcut(TASKS_TOGGLE_KEY, {
+	pi.registerShortcut(toggleKey, {
 		description: "Show or hide the task list",
 		handler: (ctx) => setWidgetHidden(!widgetHidden, ctx),
 	});

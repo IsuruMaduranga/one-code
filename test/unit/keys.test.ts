@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { modeCycleKey, pauseGlyph, useWindowsKeybindings } from "../../extensions/lib/keys.ts";
+import { modeCycleKey, pauseGlyph, taskToggleKey, useWindowsKeybindings } from "../../extensions/lib/keys.ts";
 import { installHint } from "../../extensions/lsp/install-hints.ts";
 
 describe("useWindowsKeybindings (pi's rule, copied)", () => {
@@ -22,6 +22,16 @@ describe("modeCycleKey", () => {
 	it("is alt+m on Windows and WSL, where pi binds ctrl+q to queue-follow-up", () => {
 		expect(modeCycleKey("win32", {})).toBe("alt+m");
 		expect(modeCycleKey("linux", { WSL_DISTRO_NAME: "Ubuntu" })).toBe("alt+m");
+	});
+});
+
+describe("taskToggleKey", () => {
+	it("is ctrl+\\ on macOS, where option+t types a character instead of alt+t", () => {
+		expect(taskToggleKey("darwin")).toBe("ctrl+\\");
+	});
+	it("is alt+t on Linux and Windows", () => {
+		expect(taskToggleKey("linux")).toBe("alt+t");
+		expect(taskToggleKey("win32")).toBe("alt+t");
 	});
 });
 

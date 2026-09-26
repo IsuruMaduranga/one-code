@@ -53,6 +53,12 @@ export interface PermissionSettings {
 	 * may set it — the repo included.
 	 */
 	disableBypassPermissionsMode?: boolean;
+	/**
+	 * Claude Code's `permissions.blockReadsOutsideWorkingDirectories: true` seen
+	 * in any source: the read tools refuse a path outside the working
+	 * directories, in every mode. A restriction, so every scope may set it.
+	 */
+	blockReadsOutsideWorkingDirectories?: boolean;
 }
 
 interface ClaudeSettingsFile {
@@ -63,6 +69,7 @@ interface ClaudeSettingsFile {
 		additionalDirectories?: string[];
 		defaultMode?: string;
 		disableBypassPermissionsMode?: string;
+		blockReadsOutsideWorkingDirectories?: boolean;
 	};
 	[key: string]: unknown;
 }
@@ -127,6 +134,7 @@ export function loadPermissionSettings(cwd: string, home: string): PermissionSet
 		if (Array.isArray(perms.deny)) merged.deny.push(...perms.deny.filter((r) => typeof r === "string"));
 		if (Array.isArray(perms.ask)) merged.ask.push(...perms.ask.filter((r) => typeof r === "string"));
 		if (perms.disableBypassPermissionsMode === "disable") merged.disableBypassPermissionsMode = true;
+		if (perms.blockReadsOutsideWorkingDirectories === true) merged.blockReadsOutsideWorkingDirectories = true;
 		if (path === oneCodeGlobal || path === oneCodeProject) continue;
 		const defaultMode = normalizePermissionMode(perms.defaultMode);
 		// The modes a repo may not grant itself (MODES_NEVER_FROM_PROJECT) are
@@ -272,6 +280,37 @@ export function persistAllowRule(rule: string, filePath: string): void {
  */
 export function removePermissionRule(behavior: RuleBehavior, rule: string, filePath: string): boolean {
 	return removeFromPermissionsList(behavior, rule, filePath);
+}
+
+/**
+ * The "Block" answer to the first outside-read prompt: Claude Code writes
+ * `permissions.blockReadsOutsideWorkingDirectories: true` to its user
+ * settings; One Code writes it to its own (`filePath`, the One Code global
+ * file), since it never writes `~/.claude`.
+ */
+export function persistBlockOutsideReads(filePath: string): void {
+	const file = readSettingsForWrite(filePath) as ClaudeSettingsFile;
+	(file.permissions ??= {}).blockReadsOutsideWorkingDirectories = true;
+	writeSettings(filePath, file as Record<string, unknown>);
+}
+
+/**
+ * Whether the first outside-read prompt was answered on this machine: One
+ * Code's own flag in its global settings, or Claude Code's
+ * `hasSeenAutoModeOutsideReadPrompt` in `~/.claude.json` (read only), so a
+ * user who answered it in Claude Code is not asked again.
+ */
+export function outsideReadPromptSeen(oneCodeSettings: string, claudeJson: string): boolean {
+	const seen = (path: string) => (readClaudeSettingsFile(path) as { hasSeenAutoModeOutsideReadPrompt?: unknown } | undefined)?.hasSeenAutoModeOutsideReadPrompt === true;
+	return seen(oneCodeSettings) || seen(claudeJson);
+}
+
+/** Record that the first outside-read prompt was answered (Claude Code's key, in One Code's file). */
+export function markOutsideReadPromptSeen(oneCodeSettings: string): void {
+	const file = readSettingsForWrite(oneCodeSettings);
+	if (file.hasSeenAutoModeOutsideReadPrompt === true) return;
+	file.hasSeenAutoModeOutsideReadPrompt = true;
+	writeSettings(oneCodeSettings, file);
 }
 
 /** A string list under `permissions` that One Code edits in its own files. */

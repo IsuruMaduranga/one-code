@@ -13,6 +13,7 @@ vi.mock("@earendil-works/pi-ai/compat", () => ({ completeSimple: vi.fn() }));
 
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { oneCodeProjectSettingsPath } from "../../extensions/lib/one-code-settings.ts";
+import { forwardSlashes } from "../../extensions/lib/paths.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
@@ -106,7 +107,21 @@ describe("/permissions wiring", () => {
 		await fake.commands.get("permissions")!.handler("", ctx);
 	};
 	const notices = () => (ctx._notified as Array<{ message: string }>).map((n) => n.message);
-	const outside = () => join(home, "elsewhere");
+	/** Forward-slashed: bash reads a Windows backslash as an escape, which would make the path relative. */
+	const outside = () => forwardSlashes(join(home, "elsewhere"));
+
+	it("an allowed call ends a consecutive-limit pause, so the next call is classified again", async () => {
+		for (let i = 0; i < 3; i++) {
+			blockOnce();
+			expect((await bash(`rm -rf ${outside()}`))?.block).toBe(true);
+		}
+		expect(completeMock).toHaveBeenCalledTimes(6);
+		// A read-only command is allowed without the classifier, and breaks the streak.
+		expect(await bash("ls")).toBeUndefined();
+		blockOnce();
+		expect((await bash(`rm -rf ${outside()}`))?.block).toBe(true);
+		expect(completeMock).toHaveBeenCalledTimes(8);
+	});
 
 	it("records a denial, and approving it lets that exact call run once", async () => {
 		blockOnce();

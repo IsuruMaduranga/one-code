@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import tasksExtension from "../../extensions/tasks/index.ts";
 import { FINISHED_LIST_CLEAR_MS } from "../../extensions/tasks/store.ts";
+import { taskToggleKey } from "../../extensions/lib/keys.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 /**
@@ -81,10 +82,10 @@ describe("tasks: the finished list clears after 5 s", () => {
 		expect(vi.getTimerCount()).toBe(0);
 	});
 
-	it("toggles the list with alt+t and always shows the key", async () => {
+	it("toggles the list with the platform key and always shows it", async () => {
 		const t = setup();
 		const register = t.fake.pi.registerShortcut as ReturnType<typeof vi.fn>;
-		const call = register.mock.calls.find(([key]) => key === "alt+t");
+		const call = register.mock.calls.find(([key]) => key === taskToggleKey());
 		expect(call).toBeDefined();
 		const toggle = (call![1] as { handler: (ctx: unknown) => void }).handler;
 		const rendered = () => {
@@ -92,11 +93,11 @@ describe("tasks: the finished list clears after 5 s", () => {
 			return factory ? factory({}, {}).render(120).join("\n") : "";
 		};
 		await t.create({ subject: "A", description: "" });
-		expect(rendered()).toContain("alt+t to hide");
+		expect(rendered()).toContain(`${taskToggleKey()} to hide`);
 		toggle(t.ctx);
-		expect(rendered()).toContain("1 task hidden · alt+t to show");
+		expect(rendered()).toContain(`1 task hidden · ${taskToggleKey()} to show`);
 		expect(rendered()).not.toContain("A");
 		toggle(t.ctx);
-		expect(rendered()).toContain("alt+t to hide");
+		expect(rendered()).toContain(`${taskToggleKey()} to hide`);
 	});
 });

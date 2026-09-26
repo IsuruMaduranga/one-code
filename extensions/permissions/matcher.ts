@@ -9,7 +9,7 @@
 
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
-import { analyzeShellCommand, INLINE_SCRIPT_SHELLS, isUnknownTilde, leadTokens, movesDirectory, parseCommand, resolvePayload } from "../auto-mode/shell-analysis.ts";
+import { analyzeShellCommand, INLINE_SCRIPT_SHELLS, isUnknownTilde, leadTokens, movesDirectory, parseCommand, resolvePayload, type ShellEvidence } from "../auto-mode/shell-analysis.ts";
 import { pathArgument, resolveForContainment, toAbsolute, toAbsoluteBash } from "../auto-mode/paths.ts";
 import { isSensitivePath } from "../auto-mode/sensitive.ts";
 import { isProtectedPath, isWritingTool } from "./protected-paths.ts";
@@ -816,6 +816,17 @@ export interface DecideInput {
 	 * directory (the classifier's containment fast path never sees these).
 	 */
 	workspaceDirs?: string[];
+	/**
+	 * The calling model is frontier or workhorse tier, so its calls get Claude
+	 * Code's fast paths (`lib/model-tier.ts usesClaudeCodeFastPaths`). Absent is
+	 * the stricter gate cheap and tiny models keep.
+	 */
+	claudeCodeFastPaths?: boolean;
+	/**
+	 * Claude Code's `permissions.blockReadsOutsideWorkingDirectories`: the read
+	 * tools refuse a path outside the working space, in every mode.
+	 */
+	blockReadsOutsideWorkingDirectories?: boolean;
 }
 
 export interface Decision {
@@ -833,6 +844,12 @@ export interface Decision {
 		| "mode"
 		| "tier"
 		| "protected-path"
+		/** A shell command the read-only check proves reads only inside the working space. */
+		| "read-only"
+		/** A read tool outside the working space, allowed unclassified in auto mode (Claude Code's safe allowlist). */
+		| "outside-read"
+		/** A read tool outside the working space, refused by `blockReadsOutsideWorkingDirectories`. */
+		| "blocked-outside-read"
 		/** A read, or an acceptEdits write, whose path is outside the working directory. */
 		| "working-dir";
 }
@@ -932,11 +949,13 @@ export function decide(params: DecideInput): Decision {
 		...[params.memoryDirPath, params.scratchpadDirPath, params.resultsDirPath, params.sessionDirPath].filter((d): d is string => !!d).map((d) => resolveForContainment(d) ?? d),
 		...(params.workspaceDirs ?? []),
 	];
+	/** The auto-mode pre-gate's evidence for a shell command, as the permissions extension's pre-gate sees it. */
+	const shellEvidence = (command: string, writableRoots?: string[]): ShellEvidence =>
+		analyzeShellCommand({ command, cwd, home: homedir(), protectedDirs: params.protectedDirs, readableRoots: sessionReadableRoots(), writableRoots });
+	/** A safe verdict with no writes is exactly read-only: a safe line may still redirect inside the project. */
+	const isReadOnly = (evidence: ShellEvidence): boolean => evidence.verdict === "safe" && evidence.writes.length === 0;
 	/** The pre-gate's proof that a command only reads inside the project, for a substitution in an allowed command. */
-	const readOnlyShell = (command: string): boolean => {
-		const evidence = analyzeShellCommand({ command, cwd, home: homedir(), protectedDirs: params.protectedDirs, readableRoots: sessionReadableRoots() });
-		return evidence.verdict === "safe" && evidence.writes.length === 0;
-	};
+	const readOnlyShell = (command: string): boolean => isReadOnly(shellEvidence(command));
 
 	// In dontAsk mode anything that would prompt is denied instead — including
 	// explicit ask rules: there is no user to put the question to.
@@ -973,8 +992,8 @@ export function decide(params: DecideInput): Decision {
 		// transcripts is a read like any other.
 		const readableRoots = sessionReadableRoots();
 		if (tool === "bash" && subject) {
-			const evidence = analyzeShellCommand({ command: subject, cwd, home: homedir(), protectedDirs: params.protectedDirs, readableRoots });
-			if (evidence.verdict === "safe" && evidence.writes.length === 0) return { decision: "allow", cause: "plan-readonly" };
+			const evidence = shellEvidence(subject);
+			if (isReadOnly(evidence)) return { decision: "allow", cause: "plan-readonly" };
 			// Read-only, but of a path outside the working directory: still a read,
 			// so it is put to the user rather than refused as a plan-mode mutation
 			// (the read tools ask for the same path below).
@@ -985,6 +1004,29 @@ export function decide(params: DecideInput): Decision {
 		if (tool === "powershell" && subject && powershellReadOnly(subject, { cwd, home: homedir(), readableRoots }).readOnly) return { decision: "allow", cause: "plan-readonly" };
 		if (PLAN_READ_ONLY_TOOLS.has(tool)) return { decision: "allow", cause: "plan-readonly" };
 		return { decision: "deny", cause: "plan-mode" };
+	}
+
+	/**
+	 * Whether `target` (where `spelled` resolves) is working space: the working
+	 * directory, the harness's session dirs, the plan file, and the workspace
+	 * directories except for the credentials in them.
+	 */
+	const workingSpaceHolds = (spelled: string, target: string, workspace = true): boolean => {
+		const roots = [cwd, params.resolvedCwd, params.memoryDirPath, params.scratchpadDirPath, params.resultsDirPath, params.sessionDirPath];
+		if (roots.some((dir) => dir && isAtOrInsideDir(target, dir, cwd))) return true;
+		// A workspace directory is working space except for the credentials in it:
+		// adding a directory must not make its keys readable without a prompt.
+		// Judged on the spelling and on where it resolves, so a symlink cannot
+		// launder a credential in either direction.
+		const sensitive = [spelled, target].some((candidate) => isSensitivePath(toAbsolute(cwd, candidate, homedir())));
+		if (workspace && !sensitive && (params.workspaceDirs ?? []).some((dir) => isAtOrInsideDir(target, dir, cwd))) return true;
+		return params.planFilePath ? isPlanFilePath(target, params.planFilePath, cwd) : false;
+	};
+	// Claude Code's blockReadsOutsideWorkingDirectories refuses a read tool's
+	// outside path before any ask or allow rule can prompt for it or allow it
+	// (bypass mode returned above).
+	if (params.blockReadsOutsideWorkingDirectories && tier === "safe" && subject && !workingSpaceHolds(subject, params.resolvedSubject ?? subject)) {
+		return { decision: "deny", cause: "blocked-outside-read" };
 	}
 
 	// An explicit ask rule is the user's stated intent to be prompted, so it wins
@@ -1034,22 +1076,6 @@ export function decide(params: DecideInput): Decision {
 		return { decision: "ask", cause: "protected-path" };
 	}
 
-	/**
-	 * Whether `target` (where `spelled` resolves) is working space: the working
-	 * directory, the harness's session dirs, the plan file, and the workspace
-	 * directories except for the credentials in them.
-	 */
-	const workingSpaceHolds = (spelled: string, target: string, workspace = true): boolean => {
-		const roots = [cwd, params.resolvedCwd, params.memoryDirPath, params.scratchpadDirPath, params.resultsDirPath, params.sessionDirPath];
-		if (roots.some((dir) => dir && isAtOrInsideDir(target, dir, cwd))) return true;
-		// A workspace directory is working space except for the credentials in it:
-		// adding a directory must not make its keys readable without a prompt.
-		// Judged on the spelling and on where it resolves, so a symlink cannot
-		// launder a credential in either direction.
-		const sensitive = [spelled, target].some((candidate) => isSensitivePath(toAbsolute(cwd, candidate, homedir())));
-		if (workspace && !sensitive && (params.workspaceDirs ?? []).some((dir) => isAtOrInsideDir(target, dir, cwd))) return true;
-		return params.planFilePath ? isPlanFilePath(target, params.planFilePath, cwd) : false;
-	};
 	const outsideWorkingDir = (): Decision => {
 		if (mode === "auto") return { decision: "classify", cause: "working-dir" };
 		if (mode === "dontAsk") return { decision: "deny", cause: "working-dir" };
@@ -1111,6 +1137,37 @@ export function decide(params: DecideInput): Decision {
 		return { decision: "allow", rule: allowRule, cause: "rule" };
 	}
 
+	/**
+	 * The shell tools' own read-only check, in every mode, as Claude Code's Bash
+	 * and PowerShell tools approve a provably read-only command themselves before
+	 * any mode logic runs (findings §36, "Where Claude Code's pre-gate sits"). The
+	 * proof is the auto-mode pre-gate's, so its plugs for Claude Code's gaps
+	 * (symlink-following options, glob operands) hold here too. A safe verdict
+	 * that writes (an in-project redirect) is not read-only: it takes the mode's
+	 * path, where auto mode's pre-gate may still clear it. A read-only command
+	 * that reads outside the working space is judged like the read tools' outside
+	 * read. Plan mode has its own branch above.
+	 *
+	 * A model that gets Claude Code's fast paths also gets acceptEdits' shell
+	 * half, in acceptEdits mode and in auto mode (which skips the classifier for
+	 * anything acceptEdits would allow): a line made only of Claude Code's
+	 * acceptEdits file commands on the working space (`containedNonNetwork`), or
+	 * a safe line whose redirects land there. Workspace directories count as
+	 * working space for its writes. Cheap and tiny models keep the stricter path.
+	 */
+	const fastPaths = params.claudeCodeFastPaths === true;
+	if (subject && tool === "bash") {
+		const evidence = shellEvidence(subject, fastPaths ? params.workspaceDirs : undefined);
+		if (isReadOnly(evidence)) return { decision: "allow", cause: "read-only" };
+		if (evidence.readOnlyOutside && evidence.writes.length === 0) return outsideWorkingDir();
+		if (fastPaths && (mode === "acceptEdits" || mode === "auto") && (evidence.verdict === "safe" || evidence.containedNonNetwork)) {
+			return { decision: "allow", cause: "mode" };
+		}
+	}
+	if (subject && tool === "powershell" && powershellReadOnly(subject, { cwd, home: homedir(), readableRoots: sessionReadableRoots() }).readOnly) {
+		return { decision: "allow", cause: "read-only" };
+	}
+
 	if (mode === "auto" && (DELEGATION_TOOLS.has(tool) || CLASSIFY_IN_AUTO_TOOLS.has(tool))) {
 		return { decision: "classify", cause: "mode" };
 	}
@@ -1131,10 +1188,22 @@ export function decide(params: DecideInput): Decision {
 	if (tier === "safe") {
 		// No path argument (grep/find/ls default to the cwd) is an in-project read.
 		if (!subject || inWorkingSpace()) return { decision: "allow", cause: "tier" };
+		// Claude Code's auto mode reads outside the working directories without
+		// the classifier (the read tools are on its safe allowlist); the caller
+		// raises its one-time first-read prompt. A credential path is still
+		// judged: our plug, as in the shell pre-gate.
+		const target = toAbsolute(cwd, params.resolvedSubject ?? subject, homedir());
+		if (mode === "auto" && fastPaths && !isSensitivePath(target) && !isSensitivePath(toAbsolute(cwd, subject, homedir()))) {
+			return { decision: "allow", cause: "outside-read" };
+		}
 		return outsideWorkingDir();
 	}
 	if (AUTO_ALLOWED_TOOLS.has(tool)) return { decision: "allow", cause: "tier" };
-	if (tier === "edit" && mode === "acceptEdits") {
+	// Auto mode skips the classifier for an edit acceptEdits would allow, on a
+	// model that gets Claude Code's fast paths: anywhere in the working space,
+	// workspace directories and execution-primitive files included. Outside it
+	// the edit is still classified.
+	if (tier === "edit" && (mode === "acceptEdits" || (mode === "auto" && fastPaths))) {
 		if (subject && inWorkingSpace()) return { decision: "allow", cause: "mode" };
 		return outsideWorkingDir();
 	}
