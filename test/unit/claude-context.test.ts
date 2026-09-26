@@ -16,6 +16,7 @@ import {
 	PROJECT_DESCRIPTOR,
 } from "../../extensions/lib/claude-context.ts";
 import { wrapReminder } from "../../extensions/lib/reminders.ts";
+import { truncateIndex } from "../../extensions/lib/memory.ts";
 
 describe("buildClaudeMdBlock", () => {
 	it("assembles the block byte-for-byte per Claude Code's join rule", () => {
@@ -80,6 +81,21 @@ describe("buildClaudeMdBlock", () => {
 		});
 		expect(inner).not.toContain("MEMORY.md");
 		expect(inner).toContain("Contents of /p/CLAUDE.md");
+	});
+
+	it("never glues a header onto the last line of a file or a cut index", () => {
+		const cut = truncateIndex(Array.from({ length: 230 }, (_, i) => `- [entry ${i + 1}](e${i + 1}.md) — one line`).join("\n"));
+		const inner = buildClaudeMdBlock({
+			contextFiles: [{ path: "/p/CLAUDE.md", content: "Use tabs.", descriptor: PROJECT_DESCRIPTOR }],
+			memoryIndex: { path: "/m/MEMORY.md", content: cut },
+			email: "a@b.com",
+			date: "2026-09-27",
+		});
+		expect(inner).toContain("Use tabs.\n\nContents of /m/MEMORY.md");
+		expect(inner).toContain("- [entry 200](e200.md) — one line\n\n> WARNING: MEMORY.md is 230 lines (limit: 200).");
+		expect(inner).toContain("move detail into topic files.\n# userEmail\nThe user's email address is a@b.com.\n");
+		const oneCode = buildOneCodeBlock([{ path: "/p/ONECODE.md", content: "Be brief.", descriptor: ONECODE_DESCRIPTOR }, { path: "/q/ONECODE.md", content: "x\n", descriptor: ONECODE_DESCRIPTOR }]);
+		expect(oneCode).toContain("Be brief.\n\nContents of /q/ONECODE.md");
 	});
 
 	it("returns null when there is nothing to inject", () => {

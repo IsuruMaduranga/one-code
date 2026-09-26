@@ -17,8 +17,10 @@ it would there. The block contains, in order:
    working directory. In a directory that has no `CLAUDE.md`, an
    `AGENTS.md` is used instead. A `CLAUDE.local.md` next to either is
    included as your private, uncommitted instructions.
-2. **The auto-memory index.** The first 200 lines or 25 KB of `MEMORY.md`
-   from the repository's memory folder. See [Memory](#memory).
+2. **The auto-memory index.** The first 200 lines or 25,000 characters of
+   `MEMORY.md` from the repository's memory folder. When the index is
+   longer, a warning line after it tells the model how much was cut. See
+   [Memory](#memory).
 3. **Your email**, from `git config user.email` (or `GIT_AUTHOR_EMAIL` or
    `EMAIL`), for attribution.
 4. **Today's date**, as your own clock shows it. If a session runs past
@@ -66,7 +68,7 @@ one place One Code writes under `~/.claude`, so a real Claude Code session
 on the same repository reads the same memories.
 
 The model writes one file per memory and keeps an index in `MEMORY.md`.
-When the index grows near its limit (200 lines or 25 KB), the model is
+When the index grows near its limit (200 lines or 25,000 characters), the model is
 warned; past the limit, a write to it still succeeds but returns an error
 so the model trims the index.
 
