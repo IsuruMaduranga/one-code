@@ -37,6 +37,10 @@ const PROTECTED_DIRS = [
 	"library/launchagents",
 	".config/fish",
 	".local/bin",
+	// SSH keys, config and authorized_keys: a write there adds a login or a
+	// ProxyCommand that runs on the next connection. Sensitive for reads too
+	// (auto-mode/sensitive.ts).
+	".ssh",
 ];
 
 /**

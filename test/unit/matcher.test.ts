@@ -533,11 +533,13 @@ describe("decide", () => {
 			for (const subject of ["a.ts", "./src/a.ts", `${CWD}/docs/x.md`]) {
 				expect(decide({ ...accept, toolName: "write", subject }).decision, subject).toBe("allow");
 			}
-			for (const subject of ["~/x.txt", "/etc/hosts", "../sibling/a.ts", `${CWD}/../other/a.ts`, "/home/user/.ssh/authorized_keys"]) {
+			for (const subject of ["~/x.txt", "/etc/hosts", "../sibling/a.ts", `${CWD}/../other/a.ts`]) {
 				const d = decide({ ...accept, toolName: "write", subject });
 				expect(d.decision, subject).toBe("ask");
 				expect(d.cause, subject).toBe("working-dir");
 			}
+			// `.ssh` is a protected directory, judged before containment.
+			expect(decide({ ...accept, toolName: "write", subject: "/home/user/.ssh/authorized_keys" })).toMatchObject({ decision: "ask", cause: "protected-path" });
 			// dontAsk denies where acceptEdits would ask; bypass still allows.
 			expect(decide({ ...base, mode: "dontAsk", toolName: "write", subject: "~/x.txt" }).decision).toBe("deny");
 			expect(decide({ ...base, mode: "bypassPermissions", toolName: "write", subject: "~/x.txt" }).decision).toBe("allow");

@@ -242,7 +242,8 @@ and these choices:
   - A file inside the working directory: that tool anywhere in the working
     directory.
   - A file outside the working directory: that tool within the file's
-    directory only.
+    directory only. For a file directly in your home directory, only that
+    file.
   - A URL: that host.
 - **No, tell the agent what to do differently.** Deny it, with an optional
   note that is passed to the model as the reason.
@@ -327,7 +328,7 @@ Protected directories, including everything inside them:
 
 `.git`, `.config/git`, `.vscode`, `.idea`, `.husky`, `.cargo`,
 `.devcontainer`, `.yarn`, `.mvn`, `.claude`, `.onecode`,
-`Library/LaunchAgents`, `.config/fish`, `.local/bin`.
+`Library/LaunchAgents`, `.config/fish`, `.local/bin`, `.ssh`.
 
 `.claude/worktrees` and `.onecode/plans` are ordinary working space and are
 exempt.
