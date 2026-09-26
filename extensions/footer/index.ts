@@ -24,7 +24,7 @@ import { ULTRACODE_STATUS_KEY } from "../effort/slider.ts";
 import { USAGE_CHANNEL } from "../lib/usage-bus.ts";
 import { buildFooterLines, computeMainUsage, footerLocation, type FooterData } from "./footer-line.ts";
 import { WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
-import { fetchPrNumber } from "./pr.ts";
+import { fetchPrNumber, nextPrPollDelay, PR_SLOW_LOOKUP_MS } from "./pr.ts";
 
 export default function footerExtension(pi: ExtensionAPI) {
 	if (process.env.CC_FOOTER === "0") return;
@@ -38,6 +38,27 @@ export default function footerExtension(pi: ExtensionAPI) {
 	let pr: number | undefined;
 	/** Bumped per branch change so a slow gh lookup for an old branch is ignored. */
 	let prToken = 0;
+	/**
+	 * The PR is looked up again once a minute while the session is in use, so a
+	 * PR merged or closed mid-session disappears (pr.ts nextPrPollDelay). A slow
+	 * or missing `gh` turns polling off; branch changes still look up.
+	 */
+	const prPoll = { lastLookupAt: 0, lastInputAt: Date.now(), disabled: false };
+	let prPollTimer: ReturnType<typeof setTimeout> | undefined;
+	const stopPrPoll = () => {
+		clearTimeout(prPollTimer);
+		prPollTimer = undefined;
+	};
+	const schedulePrPoll = () => {
+		stopPrPoll();
+		const delay = nextPrPollDelay(prPoll, Date.now());
+		if (delay === undefined) return;
+		prPollTimer = setTimeout(() => {
+			prPollTimer = undefined;
+			refreshLocation();
+		}, delay);
+		prPollTimer.unref?.();
+	};
 
 	/** Invalidate the memoized line and repaint; set once the footer mounts. */
 	let repaint = () => {};
@@ -71,17 +92,37 @@ export default function footerExtension(pi: ExtensionAPI) {
 
 	const refreshPr = (cwd: string, branch: string | null) => {
 		const token = ++prToken;
+		stopPrPoll();
 		if (!branch) {
 			pr = undefined;
 			repaint();
 			return;
 		}
+		const startedAt = Date.now();
+		prPoll.lastLookupAt = startedAt;
 		void fetchPrNumber(cwd, branch).then((found) => {
 			if (token !== prToken) return; // a newer branch superseded this lookup
-			pr = found;
+			if (found.ghMissing || Date.now() - startedAt > PR_SLOW_LOOKUP_MS) prPoll.disabled = true;
+			pr = found.pr;
 			repaint();
+			schedulePrPoll();
 		});
 	};
+
+	// Input keeps polling alive; after an hour without any, the next input
+	// resumes it. A turn boundary asks again, never sooner than a minute after
+	// the last lookup.
+	pi.on("input", () => {
+		prPoll.lastInputAt = Date.now();
+		if (!prPollTimer) schedulePrPoll();
+	});
+	pi.on("agent_settled", () => {
+		if (!prPollTimer) schedulePrPoll();
+	});
+	pi.on("session_shutdown", () => {
+		stopPrPoll();
+		prToken++;
+	});
 
 	pi.on("session_start", (_event, ctx) => {
 		recomputeMain(ctx);
@@ -144,6 +185,7 @@ export default function footerExtension(pi: ExtensionAPI) {
 			return Object.assign(component, {
 				dispose: () => {
 					stopFollowingBranch();
+					stopPrPoll();
 					repaint = () => {};
 					refreshLocation = () => {};
 				},

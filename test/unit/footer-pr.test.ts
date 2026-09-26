@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parsePrNumber } from "../../extensions/footer/pr.ts";
+import { nextPrPollDelay, parsePrNumber, PR_IDLE_STOP_MS, PR_POLL_INTERVAL_MS } from "../../extensions/footer/pr.ts";
 
 describe("parsePrNumber", () => {
 	it("returns the first PR number from gh pr list --json output", () => {
@@ -20,5 +20,24 @@ describe("parsePrNumber", () => {
 		expect(parsePrNumber('{"number":7}')).toBeUndefined(); // object, not the list shape
 		expect(parsePrNumber('[{"number":"7"}]')).toBeUndefined();
 		expect(parsePrNumber("[{}]")).toBeUndefined();
+	});
+});
+
+describe("nextPrPollDelay", () => {
+	const now = 10_000_000;
+
+	it("waits a minute from the last lookup, never less", () => {
+		expect(nextPrPollDelay({ lastLookupAt: now, lastInputAt: now, disabled: false }, now)).toBe(PR_POLL_INTERVAL_MS);
+		expect(nextPrPollDelay({ lastLookupAt: now - 45_000, lastInputAt: now, disabled: false }, now)).toBe(15_000);
+		expect(nextPrPollDelay({ lastLookupAt: now - 5 * 60_000, lastInputAt: now, disabled: false }, now)).toBe(0);
+	});
+
+	it("stops after an hour without input", () => {
+		expect(nextPrPollDelay({ lastLookupAt: now, lastInputAt: now - PR_IDLE_STOP_MS, disabled: false }, now)).toBeUndefined();
+		expect(nextPrPollDelay({ lastLookupAt: now, lastInputAt: now - PR_IDLE_STOP_MS + 1, disabled: false }, now)).toBe(PR_POLL_INTERVAL_MS);
+	});
+
+	it("stays off once a slow or missing gh turned it off", () => {
+		expect(nextPrPollDelay({ lastLookupAt: 0, lastInputAt: now, disabled: true }, now)).toBeUndefined();
 	});
 });

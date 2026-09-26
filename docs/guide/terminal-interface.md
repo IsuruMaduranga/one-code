@@ -65,7 +65,9 @@ Set `CC_TURN_DURATION=0` to turn it off.
 The footer replaces pi's status line with One Code's own:
 
 - **Left:** the working directory, the git branch, and the open pull
-  request number for that branch when the GitHub CLI is installed.
+  request number for that branch when the GitHub CLI is installed. The pull
+  request is checked again every minute while you're using the session, so
+  one merged or closed mid-session drops off, and a new one appears.
 - **Right:** context usage as `used/window (percent)`, the session cost,
   the cache-hit rate of the latest turn, the model, and the reasoning
   effort. When ultracode is armed, the effort reads `✦ ultracode`.
