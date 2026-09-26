@@ -2373,10 +2373,16 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			};
 			pi.events.emit(TASK_REGISTER_CHANNEL, task);
 
-			void handle.result.then((outcome) => {
+			void handle.result.then(async (outcome) => {
 				runningIds.delete(record.taskId);
+				// Read before the review: a stop or resume during it must not change this turn's outcome.
 				const stopped = stoppedTaskIds.has(record.taskId);
 				live.finish(stopped ? "stopped" : Boolean(outcome.failed));
+				// Auto mode reviews this turn's actions before the reply goes out, as it
+				// does for a resident's turn; a resumed turn once skipped it
+				// (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 M2). The task settles after the
+				// review, so task_output never returns the reply ahead of its verdict.
+				const review = await awaitHandBackReview(pi.events, record, outcome.actions);
 				task.status = stopped ? "stopped" : outcome.failed ? "failed" : "completed";
 				task.finishedAt = Date.now();
 				finish();
@@ -2389,7 +2395,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					stopped,
 					startedAt: task.startedAt,
 					report: `${relocationNote}${bounded(outcome.output, `${taskId}-reply`, OUTPUT_CAP)}`,
-					review: undefined,
+					review,
 				});
 			});
 

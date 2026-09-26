@@ -2023,11 +2023,14 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// we answer `onReview`, so the verdict travels with the report. Answer
 		// synchronously when no review will run, so the report is never delayed
 		// for nothing. A review that throws fails closed: the report goes out
-		// flagged, not clean.
+		// flagged, not clean. A pause does not skip it: the pause is about the
+		// main loop's blocks, and a child already running when it tripped still
+		// hands back a sequence nobody judged whole (PERMISSIONS-AUTOMODE-REVIEW
+		// -2026-09-26 L1).
 		const respond = payload.onReview;
 		if (!respond) return; // every background emitter supplies the callback (hand-back-review.ts)
 		const ctx = lastReviewCtx;
-		if (mode !== "auto" || payload.actions.length === 0 || pauseTracker.isPaused() || !ctx) {
+		if (mode !== "auto" || payload.actions.length === 0 || !ctx) {
 			respond(undefined);
 			return;
 		}
@@ -2047,7 +2050,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		lastReviewCtx = ctx;
 		const actions = childActions.get(event.toolCallId);
 		if (actions) childActions.delete(event.toolCallId);
-		if (mode !== "auto" || !actions?.length || pauseTracker.isPaused()) return undefined;
+		// Reviewed while paused too, as the background path above is.
+		if (mode !== "auto" || !actions?.length) return undefined;
 		const reason = await reviewCompletedRun(actions, ctx, "completed run", ctx.signal);
 		if (!reason) return undefined;
 		return { content: [{ type: "text" as const, text: reviewFlagged(reason) }, ...event.content] };
