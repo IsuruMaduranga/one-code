@@ -69,7 +69,9 @@ the `explore` agent". What happens next:
   too.
 - **A finished agent can be messaged later.** The `SendMessage` tool
   reaches a running agent live, or resumes a finished one from its saved
-  session. `list_agents` lists the session's agents and their status.
+  session. In a `-p` or `--mode json` run, a resumed agent's turn runs to
+  completion and the reply is returned inline. `list_agents` lists the
+  session's agents and their status.
 
 Two options change how a subagent runs:
 

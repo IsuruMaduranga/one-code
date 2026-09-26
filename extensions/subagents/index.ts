@@ -2148,7 +2148,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			message: Type.String({ description: "Plain text message for the agent" }),
 			summary: Type.Optional(Type.String({ description: "5-10 word preview shown in the UI" })),
 		}),
-		async execute(toolCallId, params, _signal, _onUpdate, ctx) {
+		async execute(toolCallId, params, signal, _onUpdate, ctx) {
 			if (params.to === "main") {
 				// The main conversation's SendMessage only addresses spawned agents; the
 				// "main" recipient exists only on a subagent's own injected SendMessage.
@@ -2337,6 +2337,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				model: record.model,
 				thinking: record.thinking,
 			});
+			// One-shot modes (`-p`, `--mode json`) exit when the turn settles, so the
+			// resumed turn runs blocking there and the reply is the tool result, as a
+			// spawn's report is (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 M3).
+			const oneShot = !sessionOutlivesTurn(ctx.mode);
 			const runtime = await getRuntime(ctx);
 			const handle = runtime.run({
 				name: record.name,
@@ -2345,6 +2349,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				cwd: record.cwd,
 				sessionFile,
 				parentSystemPrompt: forkPrompt,
+				// Blocking, so the call's own abort stops it; a background turn is stopped by task_stop.
+				signal: oneShot ? signal : undefined,
 				model: record.model,
 				// Resume degrades to the session model if the recorded model has become
 				// unavailable since the original run, rather than failing the resume
@@ -2359,6 +2365,26 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				extraTools: spawnToolsFor(record),
 			});
 			liveHandles.set(record.taskId, handle);
+
+			if (oneShot) {
+				const outcome = await handle.result;
+				runningIds.delete(record.taskId);
+				live.finish(stoppedTaskIds.has(record.taskId) ? "stopped" : Boolean(outcome.failed));
+				// Auto mode reviews the turn's actions; the gate attaches the verdict to this tool result.
+				pi.events.emit(SUBAGENT_ACTIONS_CHANNEL, { toolCallId, actions: outcome.actions } satisfies SubagentActionsPayload);
+				return {
+					content: [
+						{
+							type: "text",
+							text:
+								`${record.name}: ${oneShotNote("agent's turn")} Its reply follows here; there is no background task to poll.\n\n` +
+								`${relocationNote}${bounded(outcome.output, `${taskId}-reply`, OUTPUT_CAP)}\n\n(${formatStats(outcome.toolCalls, outcome.usage)})`,
+						},
+					],
+					details: { agentRuns: [record] },
+					isError: outcome.failed ?? false,
+				};
+			}
 
 			const task: BackgroundTask = {
 				id: taskId,

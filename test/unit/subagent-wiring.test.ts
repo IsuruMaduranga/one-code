@@ -237,6 +237,28 @@ describe("subagent resumed turns", () => {
 		await vi.advanceTimersByTimeAsync(DEFAULT_COALESCE_MS + 1);
 		expect(h.messages()).toContain("SECURITY WARNING: auto mode blocked this subagent's report. Reason: sent .env off the machine");
 	});
+
+	it("blocks in a one-shot session and returns the reply inline, reviewed at the tool result (M3)", async () => {
+		const finish = blockingRun();
+		const h = await mount([resumable()], session, "print");
+		const reviews: SubagentActionsPayload[] = [];
+		h.fake.events.on(SUBAGENT_ACTIONS_CHANNEL, (payload) => reviews.push(payload as SubagentActionsPayload));
+		let settled = false;
+		const pending = h.call("SendMessage", { to: "worker", message: "Continue" }).then((result) => {
+			settled = true;
+			return result as { content: Array<{ text: string }>; isError?: boolean };
+		});
+		await vi.advanceTimersByTimeAsync(0);
+		expect(settled).toBe(false); // waits for the turn, never detaches it
+		finish({ ...outcome(), output: "The follow-up answer", actions: risky });
+		const result = await pending;
+		expect(result.content[0].text).toContain("This is a one-shot session, so the agent's turn ran to completion instead of in the background.");
+		expect(result.content[0].text).toContain("The follow-up answer");
+		expect(result.content[0].text).not.toContain("task notification");
+		expect(result.isError).toBe(false);
+		expect(reviews).toEqual([{ toolCallId: "call", actions: risky }]);
+		expect(h.tasks.size).toBe(0);
+	});
 });
 
 // SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 M1: a long report is persisted with a
