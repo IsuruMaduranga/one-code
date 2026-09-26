@@ -53,6 +53,7 @@
 			"extensions/footer/index.ts",
 			"extensions/turn-duration/index.ts",
 			"extensions/interrupted/index.ts",
+			"extensions/send-now/index.ts",
 			"extensions/recap/index.ts",
 			"extensions/btw/index.ts",
 			"extensions/session-title/index.ts",
