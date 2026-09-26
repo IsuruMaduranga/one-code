@@ -367,7 +367,9 @@ export default function mcpExtension(pi: ExtensionAPI) {
 		// Warnings from servers that did connect are shown in /mcp, not as failures.
 		const failed = failures.filter((f) => !connections.has(f.server.name));
 		if (ctx.hasUI) {
-			for (const text of mcpStartupNotices(new Set(failed.map((f) => f.server.name)).size, oauthNeeded.size)) ctx.ui.notify(text, "warning");
+			// Needs auth: an OAuth sign-in, or a credential variable that is not set (never attempted).
+			const needsAuth = new Set([...oauthNeeded, ...servers.filter((server) => !disabledNames.has(server.name) && server.missingEnv?.length).map((server) => server.name)]).size;
+			for (const text of mcpStartupNotices(new Set(failed.map((f) => f.server.name)).size, needsAuth)) ctx.ui.notify(text, "warning");
 		} else if (failed.length > 0) {
 			// Headless runs have no /mcp, so they keep each server's error on stderr.
 			process.stderr.write(`${failed.map((f) => `MCP server "${f.server.name}" failed: ${f.error}`).join("\n")}\n`);

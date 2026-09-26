@@ -5,10 +5,11 @@
  * response and its tool calls finish. `ctrl+x ctrl+s` (chord.ts) delivers it
  * at once: the running turn is aborted, which makes pi move every queued
  * message and the draft back into the editor (its abort handler), and once the
- * session is idle that text is sent as the next prompt. Running tools are
- * cancelled, as in Claude Code before 2.1.283, which moves them to the
- * background instead. A dim `ctrl+x ctrl+s to send now` line sits above the
- * editor while anything is queued.
+ * session is idle the editor is submitted as Enter would submit it,
+ * attachments included (pi restores queued messages as text only, as on Esc).
+ * Running tools are cancelled, as in Claude Code before 2.1.283, which moves
+ * them to the background instead. A dim `ctrl+x ctrl+s to send now` line sits
+ * above the editor while anything is queued.
  *
  * pi binds `ctrl+x` alone to copy, so a `ctrl+x` is held only while send now
  * applies and replayed through the TUI's input path when the chord does not
@@ -79,8 +80,14 @@ export default function sendNowExtension(pi: ExtensionAPI) {
 					});
 				}
 				if (!current() || !turnCtx.isIdle()) return;
+				if (!turnCtx.ui.getEditorText().trim()) return;
+				// Submit the editor as Enter would, so a pasted image goes with the
+				// text; without the TUI's input path, send the text alone.
+				if (typeof tui?.handleTerminalInput === "function") {
+					replay("\r");
+					return;
+				}
 				const text = turnCtx.ui.getEditorText().trim();
-				if (!text) return;
 				turnCtx.ui.setEditorText("");
 				pi.sendUserMessage(text);
 			} finally {

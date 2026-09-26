@@ -45,7 +45,8 @@ import { guideDocs } from "../lib/guide-docs.ts";
 import { extensionVersion } from "../lib/package-version.ts";
 import { scanSkills } from "../lib/skill-scan.ts";
 import { type GuideInput, guideAgentDefinition, settingsSetup } from "./guide-agent.ts";
-import { parseNamespacedToolName } from "../mcp/schema.ts";
+import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpServerStatus, type McpStatusEvent, type McpStatusKind } from "../lib/mcp-status.ts";
+
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { BTW_FORK_CHANNEL, btwForkName, btwForkReminder, type BtwForkRequest, type BtwForkResult } from "../lib/btw-fork.ts";
 import { MCP_TOOLS_CHANNEL, type McpToolsPayload } from "../lib/mcp-share.ts";
@@ -92,6 +93,15 @@ import { reduceShellKey } from "./shell-panel.ts";
 import { trackShellTasks } from "../lib/shell-tasks.ts";
 import { createMarkdownProse } from "./prose.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
+
+/** How the guide's setup list names a server that is not connected. */
+const MCP_STATUS_LABELS: Record<McpStatusKind, string | undefined> = {
+	connected: undefined,
+	failed: "failed to connect",
+	authNeeded: "needs authentication",
+	connecting: "connecting",
+	disabled: "disabled",
+};
 
 /** The catalog shipped in this package: <package>/agents. */
 /** This package's root (the `one-code-extension` directory). */
@@ -399,6 +409,18 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			},
 		));
 
+	// The mcp extension answers a status request synchronously on the bus.
+	let mcpStatus: McpServerStatus[] | undefined;
+	pi.events.on(MCP_STATUS_CHANNEL, (data) => {
+		mcpStatus = (data as McpStatusEvent).servers;
+	});
+	/** The configured servers now; empty when the mcp extension is not loaded. */
+	const requestMcpStatus = (): McpServerStatus[] => {
+		mcpStatus = undefined;
+		pi.events.emit(MCP_STATUS_REQUEST_CHANNEL, {});
+		return (mcpStatus as McpServerStatus[] | undefined) ?? [];
+	};
+
 	/**
 	 * What the code-defined `one-code-guide`'s prompt lists (guide-agent.ts): the
 	 * user's custom skills and agents, enabled plugins, MCP servers, installed pi
@@ -419,12 +441,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		} catch {
 			// No user extensions directory.
 		}
-		const mcpServers = new Set(
-			pi
-				.getAllTools()
-				.map((tool) => parseNamespacedToolName(tool.name)?.server)
-				.filter((server): server is string => !!server),
-		);
+		// Every configured server, from the mcp extension's status snapshot: a
+		// failed, disabled or resource-only server registers no tools.
+		const mcpServers = requestMcpStatus().map((server) => ({ name: server.name, status: MCP_STATUS_LABELS[server.status] }));
 		return {
 			docs: guideDocs(),
 			install: {
@@ -437,7 +456,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				skills: scanSkills(cwd, os.homedir(), agentDir, plugins.skills).map((skill) => skill.name),
 				agents: catalog.filter((agent) => agent.source !== "built-in" && !agent.source.startsWith(BUNDLED_AGENTS_DIR)).map((agent) => agent.name),
 				plugins: plugins.enabledPlugins.map((plugin) => plugin.name),
-				mcpServers: [...mcpServers],
+				mcpServers,
 				extensions,
 				...settingsSetup(settingsText, PACKAGE_ROOT),
 			},

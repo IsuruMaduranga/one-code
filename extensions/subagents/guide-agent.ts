@@ -51,7 +51,8 @@ export interface GuideSetup {
 	skills: string[];
 	agents: string[];
 	plugins: string[];
-	mcpServers: string[];
+	/** Every configured MCP server, with its status when it is not connected. */
+	mcpServers: { name: string; status?: string }[];
 	/** Extensions dropped into the user's pi extensions directory. */
 	extensions: string[];
 	/** pi packages the user installed, One Code's own entry excluded. */
@@ -95,15 +96,29 @@ function installSection({ shape, method, agentDir, version }: GuideInstall): str
 	return `This session runs One Code as an extension on the user's own pi installation${v ? ` (One Code${v})` : ""}. pi's agent directory is \`${agentDir}\`; \`pi install <source>\`, \`pi remove <source>\` and \`pi list\` manage packages there.`;
 }
 
+/**
+ * Whether a repository-supplied name may be listed in the guide's system
+ * prompt: an identifier (letters, digits, `_ . : @ -`, at most 64), never free
+ * text a cloned repo could use to smuggle instructions in.
+ */
+export function listableName(name: string): boolean {
+	return /^[A-Za-z0-9_.:@-]{1,64}$/.test(name);
+}
+
 function setupSection(setup: GuideSetup): string | undefined {
 	const rows: string[] = [];
 	const list = (label: string, items: string[]) => {
 		if (items.length > 0) rows.push(`**${label}:** ${items.join(", ")}`);
 	};
-	list("Custom skills", setup.skills);
-	list("Custom agents", setup.agents);
+	// Skill folders, agent files and .mcp.json servers can come from a cloned
+	// repository, so only identifier-shaped names reach the system prompt.
+	list("Custom skills", setup.skills.filter(listableName));
+	list("Custom agents", setup.agents.filter(listableName));
 	list("Enabled plugins", setup.plugins);
-	list("Configured MCP servers", setup.mcpServers);
+	list(
+		"Configured MCP servers",
+		setup.mcpServers.filter((server) => listableName(server.name)).map((server) => (server.status ? `${server.name} (${server.status})` : server.name)),
+	);
 	list("Installed pi packages", setup.packages);
 	list("Extensions in the user extensions directory", setup.extensions);
 	list("Settings keys configured (values omitted)", setup.settingsKeys);

@@ -31,9 +31,10 @@ tools.
 
 Ask "can One Code…?" or "how do I…?" and the model hands the question to
 `one-code-guide`, the way Claude Code uses its `claude-code-guide`. The guide
-answers from this user guide and pi's own docs, both of which are installed
-with One Code, so the answer matches the version you run. It never answers
-from memory, and it cites the page each fact came from.
+answers from this user guide, installed with One Code, and from the docs of
+the pi you run, so the answer matches your versions. If pi's docs aren't on
+disk, it reads pi's published docs, which may describe a newer pi. It never
+answers from memory, and it cites the page each fact came from.
 
 It knows your setup too: your custom skills and agents, plugins, MCP
 servers, installed pi packages, and which settings you've changed. When One
