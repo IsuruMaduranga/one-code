@@ -21,6 +21,7 @@ import { createTaskNotifier, oneShotNote, sessionOutlivesTurn, shellSummary, typ
 import { commandToEvaluate, trackOriginalCommands } from "./original-command.ts";
 import { persistIfLarge, sessionResultsDir } from "./persisted-output.ts";
 import type { ShellSpawn } from "./shell-spawn.ts";
+import { keepSpillReadable } from "./spill-file.ts";
 import { ccWrapBuiltinRenderers, linesComponent, resultLines } from "./tui-render.ts";
 
 // The completion notification carries status + exit code + where the output is,
@@ -169,7 +170,12 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 					: undefined;
 
 			if (!params.run_in_background) {
-				return spec.foreground(ctx.cwd).execute(toolCallId, { command: params.command, timeout: timeoutSeconds }, signal, onUpdate, ctx);
+				// pi spills a long output to os.tmpdir(), outside every readable root;
+				// move it where the model's read of it is a working-space read.
+				return keepSpillReadable(
+					() => spec.foreground(ctx.cwd).execute(toolCallId, { command: params.command, timeout: timeoutSeconds }, signal, onUpdate, ctx),
+					sessionResultsDir(ctx),
+				);
 			}
 
 			const shell = spec.backgroundShell();
