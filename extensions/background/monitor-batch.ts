@@ -58,3 +58,56 @@ export function formatMonitorEvents(id: string, batch: MonitorBatch): string {
 	const more = hidden > 0 ? `\n… +${hidden} more line(s) not shown — task_output ${id} has the full stream` : "";
 	return `${lines.join("\n")}${more}`;
 }
+
+/** The longest line kept waiting for its newline; past it the text so far goes out as an event. */
+export const MONITOR_MAX_LINE_CHARS = 16_000;
+
+/**
+ * A carriage return overwrites the line, as a terminal shows it: keep the text
+ * after the last `\r` that has anything after it (a trailing `\r`, as in
+ * `\r\n`, is dropped first).
+ */
+function overwriteLine(text: string): string {
+	const trimmed = text.replace(/\r+$/, "");
+	const at = trimmed.lastIndexOf("\r");
+	return at === -1 ? trimmed : trimmed.slice(at + 1);
+}
+
+/**
+ * Splits a monitor's stdout into event lines, bounded. Complete lines come out
+ * as they arrive; `end()` returns the last line when the stream stopped
+ * without a newline (a `curl` body, a `printf 'READY'`), which the monitor
+ * used to drop and then report "no output". A `\r` progress meter never grows
+ * the buffer past its latest segment, and a line longer than
+ * MONITOR_MAX_LINE_CHARS goes out at the cap instead of waiting forever.
+ */
+export class MonitorLineSplitter {
+	private buffer = "";
+
+	push(text: string): string[] {
+		this.buffer += text;
+		const lines: string[] = [];
+		let idx: number;
+		while ((idx = this.buffer.indexOf("\n")) !== -1) {
+			const line = overwriteLine(this.buffer.slice(0, idx)).trimEnd();
+			this.buffer = this.buffer.slice(idx + 1);
+			if (line) lines.push(line);
+		}
+		// Only the latest `\r` segment can still show; a lone trailing `\r` may be half of `\r\n`.
+		const cr = this.buffer.lastIndexOf("\r", this.buffer.length - 2);
+		if (cr !== -1) this.buffer = this.buffer.slice(cr + 1);
+		if (this.buffer.length > MONITOR_MAX_LINE_CHARS) {
+			const line = overwriteLine(this.buffer).trimEnd();
+			this.buffer = "";
+			if (line) lines.push(line);
+		}
+		return lines;
+	}
+
+	/** The stream ended: the unterminated last line, if any. */
+	end(): string[] {
+		const line = overwriteLine(this.buffer).trimEnd();
+		this.buffer = "";
+		return line ? [line] : [];
+	}
+}

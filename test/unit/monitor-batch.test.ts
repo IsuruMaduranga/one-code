@@ -5,6 +5,8 @@ import {
 	formatMonitorEvents,
 	MONITOR_BATCH_MAX_CHARS,
 	MONITOR_BATCH_MAX_LINES,
+	MONITOR_MAX_LINE_CHARS,
+	MonitorLineSplitter,
 	pushEvent,
 } from "../../extensions/background/monitor-batch.ts";
 
@@ -33,5 +35,32 @@ describe("monitor batching", () => {
 		pushEvent(batch, "a");
 		pushEvent(batch, "b");
 		expect(formatMonitorEvents("m3", batch)).toBe("a\nb");
+	});
+});
+
+describe("MonitorLineSplitter (A3-M2)", () => {
+	it("returns complete lines as they arrive and the unterminated last line at end", () => {
+		const lines = new MonitorLineSplitter();
+		expect(lines.push("first\nRE")).toEqual(["first"]);
+		expect(lines.push("ADY")).toEqual([]);
+		expect(lines.end()).toEqual(["READY"]);
+		expect(lines.end()).toEqual([]);
+	});
+
+	it("keeps only the latest carriage-return segment, so a progress meter never grows the buffer", () => {
+		const lines = new MonitorLineSplitter();
+		for (let i = 0; i < 10_000; i++) expect(lines.push(`\r${i}% done`)).toEqual([]);
+		expect(lines.push("\r100% done\n")).toEqual(["100% done"]);
+		// A CRLF split across chunks keeps the text before it.
+		expect(lines.push("READY\r")).toEqual([]);
+		expect(lines.push("\n")).toEqual(["READY"]);
+	});
+
+	it("sends a line longer than the cap at the cap instead of holding it", () => {
+		const lines = new MonitorLineSplitter();
+		const out = lines.push("x".repeat(MONITOR_MAX_LINE_CHARS + 1));
+		expect(out).toHaveLength(1);
+		expect(out[0]).toHaveLength(MONITOR_MAX_LINE_CHARS + 1);
+		expect(lines.end()).toEqual([]);
 	});
 });

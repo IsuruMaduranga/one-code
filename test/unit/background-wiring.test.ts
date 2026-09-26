@@ -639,6 +639,34 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 		expect(fake.sentMessages).toHaveLength(0);
 	});
 
+	it("A3-M2: a last line without a newline is an event, one-shot and interactive; a silent monitor says it saw nothing", async () => {
+		const fake = mount();
+		const oneShot = (await fake.tools.get("monitor")!.execute(
+			"c1",
+			{ command: "printf 'first\\nREADY'", description: "health" },
+			undefined,
+			undefined,
+			createFakeCtx({ mode: "print" }),
+		)) as { content: Array<{ text: string }> };
+		expect(oneShot.content[0].text).toContain("completed after 2 event(s)");
+		expect(oneShot.content[0].text).toContain("first\nREADY");
+
+		const ctx = liveSessionCtx();
+		const output = async (command: string) => {
+			const start = (await fake.tools.get("monitor")!.execute("c2", { command, description: "tail" }, undefined, undefined, ctx)) as {
+				details: { taskId: string };
+			};
+			const out = (await fake.tools.get("task_output")!.execute("c3", { task_id: start.details.taskId, block: true, timeout: 5000 }, undefined, undefined, ctx)) as {
+				content: Array<{ text: string }>;
+			};
+			return out.content[0].text;
+		};
+		expect(await output("printf 'READY'")).toContain("READY");
+		const silent = await output("true");
+		expect(silent).toContain("(no output — the monitor received no events and nothing on stderr)");
+		expect(silent).not.toContain("(no output yet)");
+	});
+
 	it("M3: a one-shot monitor stops when the tool call is aborted and says so", async () => {
 		const fake = mount();
 		const controller = new AbortController();

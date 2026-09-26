@@ -81,6 +81,7 @@ import {
 	MONITOR_BATCH_MAX_CHARS,
 	MONITOR_BATCH_IDLE_MS,
 	type MonitorBatch,
+	MonitorLineSplitter,
 	pushEvent,
 } from "./monitor-batch.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
@@ -98,6 +99,8 @@ const STORED_OUTPUT_CAP = 200_000;
 const DEFAULT_MONITOR_TIMEOUT_MS = 300_000;
 const MAX_MONITOR_TIMEOUT_MS = 3_600_000;
 const MAX_BLOCK_TIMEOUT_MS = 600_000;
+/** A finished monitor that saw nothing says so, never a blank a model reads as "still running" (bash's EMPTY_OUTPUT_MARKER). */
+const MONITOR_EMPTY_OUTPUT = "(no output — the monitor received no events and nothing on stderr)";
 /** setTimeout's longest delay; a later fire re-arms when this one wakes. */
 const MAX_TIMER_MS = 2 ** 31 - 1;
 function tail(text: string, cap: number): string {
@@ -423,27 +426,27 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 					...detachedSpawnOptions(),
 					stdio: ["ignore", "pipe", "pipe"],
 				});
-				let buffer = "";
+				const lines = new MonitorLineSplitter();
 				child.stdout?.on("data", (chunk: Buffer) => {
-					buffer += chunk.toString();
-					let idx: number;
-					while ((idx = buffer.indexOf("\n")) !== -1) {
-						const line = buffer.slice(0, idx).trimEnd();
-						buffer = buffer.slice(idx + 1);
-						if (line) onEvent(line);
-					}
+					for (const line of lines.push(chunk.toString())) onEvent(line);
 				});
 				child.stderr?.on("data", (chunk: Buffer) => {
 					stored = tail(`${stored}${chunk.toString()}`, STORED_OUTPUT_CAP);
 				});
 				// Exit plus a short stdio grace, not `close` (lib/process-tree.ts).
+				// The last line may have no newline; it is an event all the same.
+				const drain = () => {
+					for (const line of lines.end()) onEvent(line);
+				};
 				waitForChildExit(child).then(
-					({ code }) =>
-						end(
-							stopRequested ? "stopped" : code === 0 ? "completed" : "failed",
-							code !== null && code !== 0 ? `exit code ${code}` : undefined,
-						),
-					(error: Error) => end("failed", error.message),
+					({ code }) => {
+						drain();
+						end(stopRequested ? "stopped" : code === 0 ? "completed" : "failed", code !== null && code !== 0 ? `exit code ${code}` : undefined);
+					},
+					(error: Error) => {
+						drain();
+						end("failed", error.message);
+					},
 				);
 				stop = () => {
 					stopRequested = true;
@@ -482,7 +485,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				description: params.description,
 				status,
 				startedAt: Date.now(),
-				output: () => stored,
+				output: () => stored || (task.status === "running" ? "" : MONITOR_EMPTY_OUTPUT),
 				stop,
 				finished,
 			};
