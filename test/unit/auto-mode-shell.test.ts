@@ -827,6 +827,23 @@ describe("Claude Code's acceptEdits file commands (findings §36)", () => {
 		expect(analyze("rm -rf build").containedNonNetwork).toBe(true);
 	});
 
+	it("guards what lands beneath a directory operand: cp or mv into one, and removing or moving one", () => {
+		writeFileSync(join(cwd, "settings.json"), "{}\n");
+		mkdirSync(join(cwd, ".claude"));
+		mkdirSync(join(cwd, ".husky"));
+		writeFileSync(join(cwd, ".husky", "pre-commit"), "#!/bin/sh\n");
+		mkdirSync(join(cwd, "evil", ".claude"), { recursive: true });
+		writeFileSync(join(cwd, "evil", ".claude", "settings.json"), "{}\n");
+		for (const cmd of ["cp settings.json .claude", "cp settings.json .claude/", "mv settings.json .claude", "rm -rf .husky", "mv .husky old-husky", "cp -r evil/.claude .", "rm -rf evil"]) {
+			expect(analyze(cmd).containedNonNetwork, cmd).toBe(false);
+		}
+		// A plain directory still takes a copy, and goes, without the classifier.
+		mkdirSync(join(cwd, "build"));
+		expect(analyze("cp settings.json build").containedNonNetwork).toBe(true);
+		expect(analyze("cp -r build dist").containedNonNetwork).toBe(true);
+		expect(analyze("rm -rf build").containedNonNetwork).toBe(true);
+	});
+
 	it("counts a workspace directory as working space for writes only when the caller passes it", () => {
 		const extra = join(cwd, "..", "extra");
 		mkdirSync(extra);

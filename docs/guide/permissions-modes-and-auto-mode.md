@@ -275,6 +275,9 @@ Reads and edits are confined to the working directory by default:
   of `mkdir`, `touch`, `cp`, `mv`, `rm`, and `rmdir` whose paths all stay
   inside, as Claude Code does. Removing or moving the working directory
   itself, a `.git` directory, or a directory that holds one still prompts.
+  So does any of these commands that would remove, overwrite, or create a
+  protected path or a credential file, even inside a directory it names
+  (`cp settings.json .claude`, `rm -rf .husky`).
 - The harness's own session directories count as inside: the auto-memory
   folder, the session scratchpad, persisted tool output, the plan file, and
   this project's own session transcripts (with auto mode's decision log next

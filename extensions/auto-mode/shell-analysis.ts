@@ -555,27 +555,36 @@ export function isUnknownTilde(value: string): boolean {
 }
 
 /**
- * Whether `dir` holds a `.git` at any depth, walking at most `budget`
- * directory entries without following symlinks. A walk that runs out of
- * budget counts as holding one, so the removal is judged, not cleared.
+ * Whether moving, copying or removing `source` touches a path `guarded`
+ * flags beneath it: walks `source` without following symlinks, at most
+ * `budget` entries, and tests each entry's counterpart under `target` (the
+ * same path for a removal). A walk that runs out of budget counts as touching
+ * one, so the command is judged, not cleared. A file source walks nothing.
  */
-function holdsGitRepository(dir: string, budget = 5_000): boolean {
-	const stack = [dir];
+function touchesGuardedPath(source: string, target: string, guarded: (path: string) => boolean, budget = 5_000): boolean {
+	const stack = [""];
 	let seen = 0;
 	while (stack.length > 0) {
-		const current = stack.pop() as string;
+		const relative = stack.pop() as string;
 		let entries;
 		try {
-			entries = readdirSync(current, { withFileTypes: true });
+			entries = readdirSync(join(source, relative), { withFileTypes: true });
 		} catch {
 			continue;
 		}
 		for (const entry of entries) {
-			if (++seen > budget || entry.name === ".git") return true;
-			if (entry.isDirectory()) stack.push(join(current, entry.name));
+			const child = join(relative, entry.name);
+			if (++seen > budget || guarded(join(target, child))) return true;
+			if (entry.isDirectory()) stack.push(child);
 		}
 	}
 	return false;
+}
+
+/** The last component of a bash path word, trailing slashes dropped (`a/b/` is `b`). */
+function bashBasename(word: string): string {
+	const trimmed = word.replace(/\/+$/, "");
+	return trimmed.slice(trimmed.lastIndexOf("/") + 1);
 }
 
 /** Whether a directory entry exists at `absolute` (a dangling symlink counts). */
@@ -1173,19 +1182,25 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 			// Every operand is a path, bare names included. cp and mv write their
 			// last operand and read the rest, so a source outside the working space
 			// (or a credential) is an outside read and leaves the line uncontained.
-			const reads = name === "cp" || name === "mv" ? fileOperands.slice(0, -1) : [];
-			const writes = name === "cp" || name === "mv" ? fileOperands.slice(-1) : fileOperands;
-			// Removing or moving a working root itself, a `.git`, or a directory
-			// holding one at any depth destroys history git cannot give back
-			// (`rm -rf .`, `mv .git x`, `rm -rf vendor` over `vendor/lib/.git`),
+			const copies = name === "cp" || name === "mv";
+			const reads = copies ? fileOperands.slice(0, -1) : [];
+			// The paths the write checks guard, beneath a directory operand as well
+			// as at it: they protect the files, not the directory holding them.
+			const guarded = (path: string) =>
+				isProtectedPath(path, effectiveCwd) || protectedDirs.some((dir) => isWithin(dir, path)) || isSensitivePath(path) || isExecutionPrimitivePath(path);
+			// Removing or moving away a working root, a `.git`, a directory holding
+			// one at any depth, or a guarded path or a directory holding one loses
+			// what git or the gate would keep (`rm -rf .`, `mv .git x`, `rm -rf
+			// vendor` over `vendor/lib/.git`, `rm -rf .claude`, `mv .husky old`),
 			// whatever else is contained.
-			if (name === "rm" || name === "rmdir" || name === "mv") {
-				for (const token of name === "mv" ? reads : fileOperands) {
-					const resolved = resolveForContainment(toAbsoluteBash(effectiveCwd, token.value, home));
-					if (resolved === undefined) continue;
-					const root = resolved === containmentRoot || writableRoots.includes(resolved);
-					const repository = resolved.split(/[\\/]/).includes(".git") || holdsGitRepository(resolved);
-					if (root || repository) escalate(`${name === "mv" ? "moves" : "removes"} ${token.value}, which is a working root or holds a git repository`);
+			const lost = (path: string) => path.split(/[\\/]/).includes(".git") || guarded(path);
+			for (const token of name === "mv" ? reads : name === "rm" || name === "rmdir" ? fileOperands : []) {
+				const absolute = toAbsoluteBash(effectiveCwd, token.value, home);
+				const resolved = resolveForContainment(absolute);
+				if (resolved === undefined) continue;
+				const root = resolved === containmentRoot || writableRoots.includes(resolved);
+				if (root || lost(absolute) || lost(resolved) || touchesGuardedPath(resolved, resolved, lost)) {
+					escalate(`${name === "mv" ? "moves" : "removes"} ${token.value}, which is a working root, or is or holds a git repository or a protected, credential or execution-primitive path`);
 				}
 			}
 			for (const token of reads) {
@@ -1195,7 +1210,25 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 				}
 				checkRead(token);
 			}
-			writeTokens.push(...writes.map((token) => token.value));
+			const destination = copies ? fileOperands.at(-1) : undefined;
+			if (destination === undefined) {
+				writeTokens.push(...fileOperands.map((token) => token.value));
+			} else if (reads.length === 0) {
+				writeTokens.push(destination.value);
+			} else {
+				// Into an existing directory, each source lands beneath it (`cp
+				// settings.json .claude` writes `.claude/settings.json`), and a
+				// directory source brings its whole tree along.
+				const intoDirectory = destination.value.endsWith("/") || isDirectory(toAbsoluteBash(effectiveCwd, destination.value, home));
+				for (const source of reads) {
+					const target = intoDirectory ? `${destination.value.replace(/\/+$/, "")}/${bashBasename(source.value)}` : destination.value;
+					writeTokens.push(target);
+					const sourceResolved = resolveForContainment(toAbsoluteBash(effectiveCwd, source.value, home));
+					if (sourceResolved !== undefined && touchesGuardedPath(sourceResolved, toAbsoluteBash(effectiveCwd, target, home), guarded)) {
+						escalate(`${name === "cp" ? "copies" : "moves"} ${source.value} to ${target}, which puts files on a protected, credential or execution-primitive path`);
+					}
+				}
+			}
 		} else if (isDelete) {
 			// A delete's targets are every non-flag positional, bare names included
 			// (`rm notes.txt` has no slash but is still a real target that
