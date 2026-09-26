@@ -6,13 +6,13 @@
 
 import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
-import { isAbsolute, resolve } from "node:path";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 import { applyEdit, type EditMode, type Notebook, notebookErrorHint, parseNotebook } from "./notebook.ts";
+import { resolveToolPath } from "../lib/tool-path.ts";
 
 export default function notebookExtension(pi: ExtensionAPI) {
 	pi.registerTool({
@@ -52,7 +52,8 @@ export default function notebookExtension(pi: ExtensionAPI) {
 				};
 			}
 			const editMode = (params.edit_mode ?? "replace") as EditMode;
-			const path = isAbsolute(rawPath) ? rawPath : resolve(ctx.cwd, rawPath);
+			// The file tracker guards this path with the same resolution (lib/tool-path.ts).
+			const path = resolveToolPath(rawPath, ctx.cwd);
 			// Held outside the try so a failure raised AFTER the parse can name the
 			// ids the notebook actually has — a bare "cell_id is required" left both
 			// weak tiers patching ids in by hand with bash (review M4).

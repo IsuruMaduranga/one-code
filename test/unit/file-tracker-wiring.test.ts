@@ -7,7 +7,8 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { pathToFileURL } from "node:url";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fileTrackerExtension from "../../extensions/file-tracker/index.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
@@ -36,6 +37,32 @@ describe("file-tracker wiring", () => {
 		);
 		expect(result?.block).toBe(true);
 		expect(result?.reason).toContain("has not been read");
+	});
+
+	it("guards every spelling pi's tools resolve (`~/`, `@`, `file://`), both for the unread and the stale case (A6-M1)", async () => {
+		vi.stubEnv("HOME", dir);
+		try {
+			const file = path("config.json");
+			writeFileSync(file, "the user's config");
+			const spellings = ["~/config.json", "@config.json", pathToFileURL(file).href];
+			for (const spelling of spellings) {
+				for (const toolName of ["write", "edit"]) {
+					const result = await fake.fireOne<{ block?: boolean; reason?: string }>("tool_call", { toolName, input: { path: spelling } }, ctx());
+					expect(result?.block, `${toolName} ${spelling}`).toBe(true);
+					expect(result?.reason).toContain(file);
+				}
+			}
+			// A read spelled one way counts for the others, and a later change makes each spelling stale.
+			await fake.fireOne("tool_result", { toolName: "read", input: { path: "@config.json" }, isError: false }, ctx());
+			expect(await fake.fireOne("tool_call", { toolName: "edit", input: { path: "~/config.json" } }, ctx())).toBeUndefined();
+			writeFileSync(file, "changed by the user");
+			for (const spelling of spellings) {
+				const stale = await fake.fireOne<{ block?: boolean; reason?: string }>("tool_call", { toolName: "write", input: { path: spelling } }, ctx());
+				expect(stale?.reason, spelling).toContain("has changed on disk");
+			}
+		} finally {
+			vi.unstubAllEnvs();
+		}
 	});
 
 	it("allows the edit once the file has been read, then observes the write", async () => {
