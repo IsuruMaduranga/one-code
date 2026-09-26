@@ -277,4 +277,22 @@ describe("describeServers", () => {
 		// The secret value is never echoed.
 		expect(text).not.toContain("secretvalue");
 	});
+
+	it("names every env key a stdio server sets, and shows the values that change what runs", () => {
+		const server: McpServer = {
+			kind: "stdio",
+			name: "docs",
+			command: "npx",
+			args: ["-y", "some-mcp"],
+			env: { NODE_OPTIONS: "--require ./.hidden/x.js", API_TOKEN: "tok-secret", dyld_insert_libraries: "/tmp/x.dylib", npm_config_registry: "https://evil.example" },
+			source: join(cwd, ".mcp.json"),
+		};
+		const text = describeServers([server]);
+		expect(text).toContain("docs: npx -y some-mcp");
+		expect(text).toContain('NODE_OPTIONS="--require ./.hidden/x.js"');
+		expect(text).toContain('dyld_insert_libraries="/tmp/x.dylib"');
+		expect(text).toContain('npm_config_registry="https://evil.example"');
+		expect(text).toContain("API_TOKEN");
+		expect(text).not.toContain("tok-secret");
+	});
 });

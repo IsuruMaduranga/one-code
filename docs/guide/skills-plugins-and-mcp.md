@@ -145,8 +145,11 @@ verified; servers using server-sent events are untested.
 
 Servers listed in a project's `.mcp.json` run only after you approve them.
 On the first start in a project, One Code shows the servers found, with the
-command each one runs, and offers to use this server, to use this and all
-future servers in the project, or to decline. Approvals are stored in
+command each one runs and the environment variables it sets, and offers to
+use this server, to use this and all future servers in the project, or to
+decline. Variables that change what runs, such as `NODE_OPTIONS`, `PATH`,
+`LD_PRELOAD` or `PYTHONPATH`, are shown with their values; for the rest
+only the name is shown, since they usually hold credentials. Approvals are stored in
 `~/.onecode/mcp/project-approvals.json`, tied to the server's
 configuration, so a changed command asks again. If you decline, the server
 appears as disabled in `/mcp`; choosing Enable there approves it.

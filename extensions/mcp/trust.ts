@@ -197,12 +197,55 @@ export function promptTitle(names: string[]): string {
 }
 
 /**
+ * Environment variables that change what a stdio server's command runs, or
+ * where it loads code from: an interpreter's preload and search paths, the
+ * dynamic loader's, `PATH`, and npm's config. Matched case-insensitively
+ * (Windows environment names are). The consent dialog shows these values in
+ * full, because `npx -y some-mcp` with `NODE_OPTIONS=--require ./x.js` is not
+ * the command it looks like.
+ */
+const EXECUTION_ENV = new Set([
+	"PATH",
+	"NODE_OPTIONS",
+	"NODE_PATH",
+	"LD_PRELOAD",
+	"LD_LIBRARY_PATH",
+	"LD_AUDIT",
+	"PYTHONPATH",
+	"PYTHONSTARTUP",
+	"PYTHONHOME",
+	"PERL5OPT",
+	"PERL5LIB",
+	"RUBYOPT",
+	"RUBYLIB",
+	"BASH_ENV",
+	"ENV",
+	"JAVA_TOOL_OPTIONS",
+	"_JAVA_OPTIONS",
+	"JDK_JAVA_OPTIONS",
+	"ELECTRON_RUN_AS_NODE",
+	"GIT_SSH_COMMAND",
+	"GIT_EXEC_PATH",
+	"COMSPEC",
+	"PATHEXT",
+]);
+const EXECUTION_ENV_PREFIXES = ["DYLD_", "NPM_CONFIG_"];
+
+/** Whether an env key changes what a server's command executes (`EXECUTION_ENV`). */
+export function changesExecution(key: string): boolean {
+	const upper = key.toUpperCase();
+	return EXECUTION_ENV.has(upper) || EXECUTION_ENV_PREFIXES.some((prefix) => upper.startsWith(prefix));
+}
+
+/**
  * One line per server naming what would run, for the dialog body. Commands and
- * URLs are shown in full (a truncated one hides where a padded attack lives),
- * env values are never echoed, but the variable NAMES a server's
- * command/args/env/headers reference are listed (from `referencedEnv`, captured
- * before expansion) — approving a URL should not silently ship a credential the
- * header interpolates (review M5).
+ * URLs are shown in full (a truncated one hides where a padded attack lives).
+ * Every `env` key a stdio server sets is named; the values of the keys that
+ * change what executes (`changesExecution`) are shown in full, quoted, and the
+ * rest are not echoed, since they are usually credentials. The variable NAMES
+ * a server's command/args/env/headers reference are listed too (from
+ * `referencedEnv`, captured before expansion) — approving a URL should not
+ * silently ship a credential the header interpolates (review M5).
  */
 export function describeServers(servers: McpServer[]): string {
 	const lines = servers.map((server) => {
@@ -212,7 +255,9 @@ export function describeServers(servers: McpServer[]): string {
 				: `${server.name}: ${server.url}`;
 		const vars = server.referencedEnv ?? [];
 		const headerNames = server.kind === "http" ? Object.keys(server.headers ?? {}) : [];
+		const env = server.kind === "stdio" ? Object.entries(server.env ?? {}) : [];
 		const notes = [
+			env.length ? `env: ${env.map(([key, value]) => (changesExecution(key) ? `${key}=${JSON.stringify(value)}` : key)).join(", ")}` : "",
 			vars.length ? `uses ${vars.map((v) => `$${v}`).join(", ")}` : "",
 			headerNames.length ? `headers: ${headerNames.join(", ")}` : "",
 		].filter(Boolean);
