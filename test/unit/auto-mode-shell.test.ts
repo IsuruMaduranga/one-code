@@ -832,9 +832,9 @@ describe("Claude Code's acceptEdits file commands (findings §36)", () => {
 		mkdirSync(extra);
 		const cmd = `touch ${sh(join(extra, "x"))}`;
 		expect(analyze(cmd).containedNonNetwork).toBe(false);
-		expect(analyzeShellCommand({ command: cmd, cwd, home, writableRoots: [realpathSync(extra)] }).containedNonNetwork).toBe(true);
+		expect(analyzeShellCommand({ command: cmd, cwd, home, writableRoots: [realpathSync.native(extra)] }).containedNonNetwork).toBe(true);
 		const redirect = `echo hi > ${sh(join(extra, "y"))}`;
 		expect(analyze(redirect).verdict).toBe("escalate");
-		expect(analyzeShellCommand({ command: redirect, cwd, home, writableRoots: [realpathSync(extra)] }).verdict).toBe("safe");
+		expect(analyzeShellCommand({ command: redirect, cwd, home, writableRoots: [realpathSync.native(extra)] }).verdict).toBe("safe");
 	});
 });

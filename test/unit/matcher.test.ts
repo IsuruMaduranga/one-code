@@ -499,7 +499,8 @@ describe("decide", () => {
 
 		it("counts a workspace directory for a shell write only on the fast-path tiers", () => {
 			// Real directories: the shell analysis judges where a path resolves.
-			const root = realpathSync(mkdtempSync(join(tmpdir(), "oc-ws-")));
+			// The native realpath, as production resolves workspace directories: plain realpathSync keeps a Windows 8.3 short name.
+			const root = realpathSync.native(mkdtempSync(join(tmpdir(), "oc-ws-")));
 			try {
 				const project = join(root, "project");
 				const workspace = join(root, "extra");
