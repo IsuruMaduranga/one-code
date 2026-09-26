@@ -667,6 +667,19 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 		expect(silent).not.toContain("(no output yet)");
 	});
 
+	it("A6-L2: a monitor keeps a UTF-8 character split across two reads whole", async () => {
+		const fake = mount();
+		const result = (await fake.tools.get("monitor")!.execute(
+			"c1",
+			{ command: "printf '\\342\\202'; sleep 0.2; printf '\\254 ok\\n'", description: "utf8" },
+			undefined,
+			undefined,
+			createFakeCtx({ mode: "print" }),
+		)) as { content: Array<{ text: string }> };
+		expect(result.content[0].text).toContain("€ ok");
+		expect(result.content[0].text).not.toContain("\uFFFD");
+	});
+
 	it("M3: a one-shot monitor stops when the tool call is aborted and says so", async () => {
 		const fake = mount();
 		const controller = new AbortController();

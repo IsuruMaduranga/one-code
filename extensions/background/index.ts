@@ -91,6 +91,7 @@ import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type A
 import { SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../lib/skill-body.ts";
 import { BUNDLED_SKILLS_DIR } from "../lib/skill-scan.ts";
 import { join, resolve } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { SESSION_WORK_CHANNEL, sessionBackgroundTask, sessionCron, type SessionWorkQuery } from "../lib/session-work.ts";
 import { WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
 
@@ -427,16 +428,21 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 					stdio: ["ignore", "pipe", "pipe"],
 				});
 				const lines = new MonitorLineSplitter();
+				// Streaming decoders: a UTF-8 character split across reads stays whole.
+				const stdoutText = new StringDecoder("utf8");
+				const stderrText = new StringDecoder("utf8");
 				child.stdout?.on("data", (chunk: Buffer) => {
-					for (const line of lines.push(chunk.toString())) onEvent(line);
+					for (const line of lines.push(stdoutText.write(chunk))) onEvent(line);
 				});
 				child.stderr?.on("data", (chunk: Buffer) => {
-					stored = tail(`${stored}${chunk.toString()}`, STORED_OUTPUT_CAP);
+					stored = tail(`${stored}${stderrText.write(chunk)}`, STORED_OUTPUT_CAP);
 				});
 				// Exit plus a short stdio grace, not `close` (lib/process-tree.ts).
 				// The last line may have no newline; it is an event all the same.
 				const drain = () => {
-					for (const line of lines.end()) onEvent(line);
+					for (const line of [...lines.push(stdoutText.end()), ...lines.end()]) onEvent(line);
+					const rest = stderrText.end();
+					if (rest) stored = tail(`${stored}${rest}`, STORED_OUTPUT_CAP);
 				};
 				waitForChildExit(child).then(
 					({ code }) => {
