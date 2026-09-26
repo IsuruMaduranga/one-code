@@ -260,6 +260,7 @@ export class WorkflowRunManager {
 				unusableModels: options.unusableModels,
 				onModelUnusable: options.onModelUnusable,
 				getMcpTools: options.getMcpTools,
+				resultsDir: handle.runDir,
 			});
 
 			const { globals, state } = createScriptGlobals({

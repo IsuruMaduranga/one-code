@@ -12,7 +12,7 @@
  */
 
 import { recordAction, type ChildAction } from "../auto-mode/actions.ts";
-import { type ChildOutcome, OUTPUT_CAP } from "./outcome.ts";
+import type { ChildOutcome } from "./outcome.ts";
 import { addUsage, emptyUsage, type UsageTotals } from "./usage.ts";
 
 /** The subset of AgentSession events this tracker reads. */
@@ -103,16 +103,20 @@ export class SessionTurnTracker {
  * Shape a run/turn's collected state into a ChildOutcome, matching the spawned
  * child's messages. `aborted` (a reason) wins over everything: an aborted turn's
  * partial text is reported as terminated and failed, never as the answer.
+ *
+ * The text is kept whole. Every consumer bounds it with `persistIfLarge`, which
+ * saves an oversized report to a file and points at it; a cut here left the
+ * persist step nothing over its limit, so a long report lost its end with no
+ * marker (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 M1).
  */
 export function finishOutcome(
-	rawOutput: string,
+	output: string,
 	providerError: string | undefined,
 	toolCalls: number,
 	usage: UsageTotals,
 	actions: ChildAction[],
 	aborted?: string,
 ): ChildOutcome {
-	const output = rawOutput.slice(0, OUTPUT_CAP);
 	if (aborted) {
 		return {
 			output: output.trim() ? `${output}\n\n[${aborted}]` : `Subagent ${aborted}.`,

@@ -10,7 +10,7 @@
  * the tools each agent would have had on its first request are recorded and no
  * request is sent.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentSession, type ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -62,6 +62,29 @@ async function toolsOf(opts: { agentType?: string; schema?: Record<string, unkno
 	);
 	return { first: seen[0], error };
 }
+
+// SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 M1 (A9-F1): the answer was cut at
+// 50,000 characters with no marker.
+describe("workflow agent() answers past the cap", () => {
+	it("saves a long answer to the run directory and hands the script a pointer, never a cut", async () => {
+		const answer = `${"row\n".repeat(17_500)}Verdict: the migration is safe.`;
+		vi.spyOn(AgentSession.prototype, "prompt").mockImplementation(async function (this: AgentSession) {
+			this.messages.push({ role: "assistant", content: [{ type: "text", text: answer }] } as never);
+		});
+		const resultsDir = mkdtempSync(join(tmpdir(), "wf-agent-session-run-"));
+		try {
+			const runner = await AgentRunner.create({ cwd, defaultModel: undefined, resultsDir });
+			const { value } = await runner.run("tabulate", {}, new AbortController().signal);
+			expect(value).toContain("<persisted-output>");
+			expect(value).not.toContain("Verdict:");
+			const path = /Full output saved to: (\S+\.txt)/.exec(value as string)?.[1];
+			expect(path?.startsWith(join(resultsDir, "tool-results"))).toBe(true);
+			expect(readFileSync(path!, "utf-8")).toBe(answer);
+		} finally {
+			rmSync(resultsDir, { recursive: true, force: true });
+		}
+	});
+});
 
 describe("workflow agent() sessions", () => {
 	it("keeps structured_output for a schema'd agentType whose file has a tools list (H3)", async () => {

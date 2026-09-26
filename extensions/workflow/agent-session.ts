@@ -14,12 +14,14 @@
  * `extensionFactories`, which DefaultResourceLoader always loads.
  */
 
+import { randomBytes } from "node:crypto";
 import os from "node:os";
 import { getAgentDir, type ModelRuntime, SessionManager, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { whenAborted } from "../lib/abort.ts";
+import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { createSharedModelRuntime, finalAssistantText, openChildSession } from "../lib/agent-loader.ts";
 import { modelSpec as modelSpecOf, supportsImageInput } from "../lib/model-policy.ts";
 import { isModelUnavailableError } from "../auto-mode/model-select.ts";
@@ -71,6 +73,8 @@ export interface AgentRunnerOptions {
 	 * as custom tools over the parent's connections, as the subagent runner does.
 	 */
 	getMcpTools?: () => ToolDefinition[] | Promise<ToolDefinition[]>;
+	/** Where an answer past OUTPUT_CAP is saved (`<dir>/tool-results/`): the run's directory. */
+	resultsDir?: string;
 }
 
 /**
@@ -353,7 +357,14 @@ export class AgentRunner {
 				if (typeof value !== "string" || !value.trim()) {
 					throw new Error("subagent produced no output");
 				}
-				value = (value as string).slice(0, OUTPUT_CAP);
+				// Never cut: a long answer is saved to the run directory and the script
+				// gets Claude Code's <persisted-output> block naming the file, which a
+				// later agent can read (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 M1).
+				value = persistIfLarge(value as string, {
+					dir: this.options.resultsDir ?? sessionResultsDir(undefined),
+					id: `agent-${randomBytes(4).toString("hex")}`,
+					maxBytes: OUTPUT_CAP,
+				});
 			}
 
 			const stats = session.getSessionStats();

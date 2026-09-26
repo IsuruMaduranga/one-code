@@ -1362,7 +1362,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					content: [
 						{
 							type: "text" as const,
-							text: `${notes.length ? `${notes.join("\n")}\n\n` : ""}${result.output}\n\n(${formatStats(result.toolCalls, result.usage)})`,
+							text: `${notes.length ? `${notes.join("\n")}\n\n` : ""}${bounded(result.output, `${record.taskId}-report`, OUTPUT_CAP)}\n\n(${formatStats(result.toolCalls, result.usage)})`,
 						},
 					],
 					details: { agentRuns: [record] },
@@ -2104,7 +2104,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					content: [
 						{
 							type: "text",
-							text: `${notes.length ? `${notes.join("\n")}\n\n` : ""}${inlineNote}\n\n${result.output}${worktreeNote}\n\n(${stats})`,
+							text: `${notes.length ? `${notes.join("\n")}\n\n` : ""}${inlineNote}\n\n${bounded(result.output, `${prepared[0].record.taskId}-report`, OUTPUT_CAP)}${worktreeNote}\n\n(${stats})`,
 						},
 					],
 					details: { results: [result], agentRuns: records },

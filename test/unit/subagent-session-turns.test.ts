@@ -10,6 +10,19 @@ const assistantEnd = (text: string, usage?: unknown, stopReason?: string, errorM
 const settled = { type: "agent_settled" };
 
 describe("SessionTurnTracker", () => {
+	// SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 M1: the outcome was cut at 50,000
+	// characters, so the consumers' persistIfLarge never saw anything to persist.
+	it("keeps a report past 50,000 characters whole, for the consumers to persist", () => {
+		const report = `${"row\n".repeat(17_500)}Verdict: the migration is safe.`;
+		const t = new SessionTurnTracker();
+		t.beginTurn();
+		t.process(assistantEnd(report));
+		t.process(settled);
+		expect(report.length).toBeGreaterThan(70_000);
+		expect(t.turnOutcome().output).toBe(report);
+		expect(t.turnOutcome().failed).toBeUndefined();
+	});
+
 	it("tracks a full turn: tool count, usage, final text, and settle", () => {
 		const t = new SessionTurnTracker();
 		t.beginTurn();

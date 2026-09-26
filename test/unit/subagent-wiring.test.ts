@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -6,6 +6,7 @@ import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../ext
 import backgroundExtension from "../../extensions/background/index.ts";
 import { type BackgroundTask, TASK_REGISTER_CHANNEL } from "../../extensions/background/registry.ts";
 import { DEFAULT_COALESCE_MS } from "../../extensions/lib/notifications.ts";
+import { SUBAGENT_GATE_CHANNEL } from "../../extensions/permissions/subagent-gate.ts";
 import * as defaults from "../../extensions/subagents/default-model.ts";
 import subagentsExtension from "../../extensions/subagents/index.ts";
 import type { ChildOutcome } from "../../extensions/subagents/outcome.ts";
@@ -36,7 +37,7 @@ afterEach(() => {
 	rmSync(dir, { recursive: true, force: true });
 });
 
-async function mount(records: AgentRunRecord[] = [], sessionModel = session) {
+async function mount(records: AgentRunRecord[] = [], sessionModel = session, mode = "tui") {
 	const fake = createFakePi();
 	const tasks = new Map<string, BackgroundTask>();
 	fake.events.on(TASK_REGISTER_CHANNEL, (task) => {
@@ -46,7 +47,7 @@ async function mount(records: AgentRunRecord[] = [], sessionModel = session) {
 	backgroundExtension(fake.pi as never);
 	subagentsExtension(fake.pi as never);
 	const ctx = createFakeCtx({
-		cwd: dir, mode: "tui", model: sessionModel,
+		cwd: dir, mode, model: sessionModel,
 		modelRegistry: {
 			getAvailable: () => [session, textOnly, vision],
 			getApiKeyAndHeaders: vi.fn(async () => ({ ok: true, apiKey: "test" })),
@@ -201,14 +202,66 @@ describe("subagent task_stop", () => {
 	});
 });
 
+// SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 M1: a long report is persisted with a
+// pointer at every delivery site, never cut.
+describe("subagent reports past the cap", () => {
+	const longReport = `${"row\n".repeat(17_500)}Verdict: the migration is safe.`;
+	const longOutcome = (): ChildOutcome => ({ ...outcome(), output: longReport });
+	/** The persisted file a <persisted-output> block names, read back. */
+	const persistedText = (text: string) => {
+		const path = /Full output saved to: (\S+\.txt)/.exec(text)?.[1];
+		expect(path).toBeDefined();
+		return readFileSync(path!, "utf-8");
+	};
+
+	it("persists a one-shot run's inline report", async () => {
+		vi.spyOn(SubagentRuntime, "create").mockResolvedValue({
+			run: () => ({ result: Promise.resolve(longOutcome()), kill: vi.fn(), snapshot: () => ({ text: "", toolCalls: 0, usage: emptyUsage() }) }),
+		} as unknown as SubagentRuntime);
+		const h = await mount([], session, "print");
+		const result = (await h.call("Agent", { subagent_type: "general-purpose", task: "Tabulate" })) as { content: Array<{ text: string }> };
+		const text = result.content[0].text;
+		expect(text).toContain("<persisted-output>");
+		expect(text).not.toContain("Verdict:");
+		expect(persistedText(text)).toBe(longReport);
+	});
+
+	it("persists a resident's hand-back report", async () => {
+		const runtime = fakeResident();
+		const h = await mount();
+		await h.call("Agent", { subagent_type: "general-purpose", task: "Tabulate" });
+		runtime.finish([], longReport);
+		await vi.advanceTimersByTimeAsync(DEFAULT_COALESCE_MS + 1);
+		const textOf = (content: unknown) =>
+			typeof content === "string" ? content : (content as Array<{ text?: string }>).map((block) => block.text ?? "").join("");
+		const handBack = h.fake.sentMessages.map((m) => textOf(m.message.content)).find((text) => text.includes("<persisted-output>"));
+		expect(handBack).toBeDefined();
+		expect(persistedText(handBack!)).toBe(longReport);
+	});
+
+	it("persists a nested run's report", async () => {
+		const runtime = fakeResident();
+		runtime.runner.run.mockReturnValue({ result: Promise.resolve(longOutcome()), kill: vi.fn(), snapshot: () => ({ text: "", toolCalls: 0, usage: emptyUsage() }) });
+		const h = await mount();
+		h.fake.events.emit(SUBAGENT_GATE_CHANNEL, { decide: async () => undefined });
+		await h.call("Agent", { subagent_type: "general-purpose", task: "Delegate the table" });
+		const nested = runtime.options().extraTools?.find((tool) => tool.name === "Agent");
+		const result = (await nested!.execute("nested-call", { subagent_type: "explore", task: "Tabulate" }, undefined, undefined, h.ctx as never)) as {
+			content: Array<{ text: string }>;
+		};
+		expect(result.content[0].text).toContain("<persisted-output>");
+		expect(persistedText(result.content[0].text)).toBe(longReport);
+	});
+});
+
 function fakeResident(failed = false, stoppedActions: ChildOutcome["actions"] = []) {
 	let options: Parameters<SubagentRuntime["runResident"]>[0];
 	let busy = false;
 	let exited = false;
-	const finish = (actions: ChildOutcome["actions"] = []) => {
+	const finish = (actions: ChildOutcome["actions"] = [], output?: string) => {
 		if (!busy) return;
 		busy = false;
-		options.onTurnEnd?.({ ...outcome(failed), actions });
+		options.onTurnEnd?.({ ...outcome(failed), actions, ...(output === undefined ? {} : { output }) });
 	};
 	const handle = {
 		send: vi.fn(async () => { busy = true; return "started" as const; }),
@@ -223,5 +276,5 @@ function fakeResident(failed = false, stoppedActions: ChildOutcome["actions"] = 
 		run: vi.fn<SubagentRuntime["run"]>(),
 	};
 	vi.spyOn(SubagentRuntime, "create").mockResolvedValue(runner as unknown as SubagentRuntime);
-	return { handle, finish, runner };
+	return { handle, finish, runner, options: () => options };
 }
