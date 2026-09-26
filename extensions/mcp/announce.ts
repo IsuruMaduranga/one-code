@@ -97,3 +97,16 @@ export function mcpChangeNotices(delta: McpDelta): string[] {
 	}
 	return notices;
 }
+
+/**
+ * The user's startup notices, Claude Code's wording (`useMcpConnectivityStatus`):
+ * `2 MCP servers failed · /mcp` and `1 MCP server needs auth · /mcp`, with each
+ * server's error left to /mcp. Printing every server's raw error ("fetch
+ * failed" per remote server when offline) buried the prompt.
+ */
+export function mcpStartupNotices(failedServers: number, needsAuth: number): string[] {
+	const out: string[] = [];
+	if (failedServers > 0) out.push(`${failedServers} MCP ${failedServers === 1 ? "server" : "servers"} failed · /mcp`);
+	if (needsAuth > 0) out.push(`${needsAuth} MCP ${needsAuth === 1 ? "server needs" : "servers need"} auth · /mcp`);
+	return out;
+}

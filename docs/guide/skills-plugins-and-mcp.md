@@ -167,6 +167,11 @@ A permission rule naming `mcp__<server>` covers every tool of that server.
 
 ### Manage servers
 
+When servers fail to connect at startup, for example with no network, One
+Code shows a single line such as `2 MCP servers failed · /mcp`, and
+`1 MCP server needs auth · /mcp` for servers waiting on sign-in. Each
+server's error is in `/mcp`.
+
 `/mcp` opens the server manager: servers grouped by source (user, project,
 plugin), each with its status, tool and resource counts, and any warnings.
 **Enter** on a server shows its details and a numbered action list:
