@@ -128,7 +128,8 @@ export interface ResidentRunOptions extends Omit<ChildSessionSpec, "sessionFile"
 	onProgress: (toolCalls: number, lastText: string, usage: UsageTotals) => void;
 	/** Fires at the end of EVERY turn (initial task and later messages alike). */
 	onTurnEnd: (outcome: ChildOutcome) => void;
-	onExit?: () => void;
+	/** Fires once when the resident exits; a returned promise (worktree cleanup) is part of kill()'s settle. */
+	onExit?: () => void | Promise<unknown>;
 	/** Optional live sink for the subagent panel (activity + transcript blocks). */
 	sink?: LiveSink;
 }
@@ -660,13 +661,14 @@ export class SubagentRuntime {
 				finishTurn(tracker.turnOutcome());
 				// onExit only after the abort settles: it triggers worktree cleanup,
 				// which must not race an aborting session still writing files. The
-				// returned promise lets session_shutdown wait for exactly that.
+				// returned promise settles after that cleanup too, so session_shutdown
+				// waits for exactly that.
 				return session
 					.abort()
 					.catch(() => undefined)
-					.finally(() => {
+					.then(async () => {
 						discard();
-						options.onExit?.();
+						await Promise.resolve(options.onExit?.()).catch(() => undefined);
 					});
 			},
 			release: () => {

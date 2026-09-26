@@ -1712,7 +1712,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				live.finish(stoppedTaskIds.has(p.record.taskId) ? "stopped" : false);
 				if (residents.get(p.record.taskId) === resident) residents.delete(p.record.taskId);
 				liveHandles.delete(p.record.taskId);
-				if (worktree) void cleanupWorktree(parentCwd, worktree);
+				// Returned, not voided: kill() settles after the cleanup, so the
+				// session_shutdown grace covers it.
+				if (worktree) return cleanupWorktree(parentCwd, worktree);
+				return undefined;
 			},
 		}).catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))));
 		if (started instanceof Error) {
