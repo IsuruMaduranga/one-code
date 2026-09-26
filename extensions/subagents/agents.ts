@@ -67,23 +67,64 @@ function collectMarkdownFiles(dir: string, out: string[] = []): string[] {
 }
 
 /**
+ * Split one frontmatter tool string the way Claude Code does: on commas and
+ * spaces, except inside a rule's parentheses, so `Bash(git push:*), Write` is
+ * two entries and `Agent(worker, researcher)` is one.
+ */
+function splitToolSpecs(text: string): string[] {
+	const specs: string[] = [];
+	let current = "";
+	let inParens = false;
+	for (const char of text) {
+		if (char === "(") inParens = true;
+		else if (char === ")") inParens = false;
+		else if ((char === "," || /\s/.test(char)) && !inParens) {
+			if (current.trim()) specs.push(current.trim());
+			current = "";
+			continue;
+		}
+		current += char;
+	}
+	if (current.trim()) specs.push(current.trim());
+	return specs;
+}
+
+/**
+ * The tool a spec names. A rule-shaped entry (`Bash(git push:*)`) names its
+ * whole tool: Claude Code grants or removes the entire tool for it in an agent
+ * file, never only the rule's commands, so `disallowedTools: Bash(git push:*)`
+ * removes `bash`. Anything that is not `Name(…)` is taken as a plain name.
+ */
+function specToolName(spec: string): string {
+	const open = spec.indexOf("(");
+	return open > 0 && spec.endsWith(")") ? spec.slice(0, open) : spec;
+}
+
+/**
  * A frontmatter tool list (comma string or YAML list) as pi tool names: Claude
  * Code spellings map through the alias table (`Glob` → `find`, `WebFetch` →
  * `web_fetch`, `Task` → `Agent`, …), pi names and `mcp__*` pass through,
- * duplicates collapse. Exported for tests.
+ * rule-shaped entries reduce to their tool, duplicates collapse. A list that
+ * contains `*` returns `["*"]`; `parseAgentFile` reads that as "all tools".
+ * Exported for tests.
  */
 export function parseToolList(raw: unknown): string[] | undefined {
-	const list =
-		typeof raw === "string"
-			? raw
-					.split(",")
-					.map((t) => t.trim())
-					.filter(Boolean)
-			: Array.isArray(raw)
-				? raw.filter((t): t is string => typeof t === "string").map((t) => t.trim()).filter(Boolean)
-				: undefined;
-	if (!list || list.length === 0) return undefined;
-	return [...new Set(list.map(normalizeToolName))];
+	const entries =
+		typeof raw === "string" ? [raw] : Array.isArray(raw) ? raw.filter((t): t is string => typeof t === "string") : undefined;
+	const specs = entries?.flatMap(splitToolSpecs);
+	if (!specs || specs.length === 0) return undefined;
+	if (specs.includes("*")) return ["*"];
+	return [...new Set(specs.map((spec) => normalizeToolName(specToolName(spec))))];
+}
+
+/**
+ * An agent file's `tools` allowlist. Claude Code reads a list containing `*`
+ * as "all tools", the same as no list; kept as `["*"]` the allowlist matched
+ * no tool and every spawn failed.
+ */
+function parseAllowlist(raw: unknown): string[] | undefined {
+	const tools = parseToolList(raw);
+	return tools?.includes("*") ? undefined : tools;
 }
 
 export function parseAgentFile(path: string, content: string): AgentDefinition | undefined {
@@ -98,7 +139,7 @@ export function parseAgentFile(path: string, content: string): AgentDefinition |
 	return {
 		name,
 		description: typeof fm.description === "string" ? fm.description : "",
-		tools: parseToolList(fm.tools),
+		tools: parseAllowlist(fm.tools),
 		excludeTools: disallowed.length > 0 ? [...new Set(disallowed)] : undefined,
 		// "inherit" is Claude Code's way of saying "use the session model".
 		model: typeof fm.model === "string" && fm.model !== "inherit" ? fm.model : undefined,

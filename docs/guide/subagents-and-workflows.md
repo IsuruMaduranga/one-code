@@ -20,7 +20,9 @@ main conversation.
 - Markdown definitions in `.claude/agents/` (project) and
   `~/.claude/agents/` (user), each setting an agent's model, tools, and
   system prompt. A project definition wins over a user definition of the
-  same name.
+  same name. The `tools` and `disallowedTools` lists read as they do in
+  Claude Code: `tools: "*"` means every tool, and an entry written as a
+  rule, such as `Bash(git push:*)`, grants or removes the whole tool.
 - Plugins can add agents, namespaced by plugin.
 - `fork`, a synthetic type that copies the current conversation.
 
