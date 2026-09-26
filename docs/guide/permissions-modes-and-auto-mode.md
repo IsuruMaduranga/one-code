@@ -157,7 +157,7 @@ stops risky ones, so you're not prompted for every step.
 | Mode | Badge | What it does |
 |---|---|---|
 | Manual | `⏸ manual mode on` | Prompts for anything not already allowed. The `--permission-mode` value is `default`. |
-| Accept edits | `⏵⏵ accept edits on` | File edits inside the working directory run without a prompt. Everything else still prompts. The flag value is `acceptEdits`. |
+| Accept edits | `⏵⏵ accept edits on` | File edits inside the working directory run without a prompt. With a frontier or workhorse model, so do in-project `mkdir`, `touch`, `cp`, `mv`, `rm`, and `rmdir` commands. Everything else still prompts. The flag value is `acceptEdits`. |
 | Plan | `⏸ plan mode on` | Read-only investigation plus one plan file. See [Plan mode](#plan-mode). The flag value is `plan`. |
 | Auto | `⏵⏵ auto mode on` | A classifier screens each action. See [Auto mode](#auto-mode). The flag value is `auto`. |
 | Bypass permissions | `⏵⏵ bypass permissions on` | Runs everything without prompts, including writes to protected paths. The flag value is `bypassPermissions`; `--dangerously-skip-permissions` also selects it. |
@@ -259,9 +259,22 @@ action that would have prompted is denied and the model is told why.
 Reads and edits are confined to the working directory by default:
 
 - Reading a file inside the working directory is allowed in every mode.
-  Reading outside it prompts in manual mode, goes to the classifier in auto
-  mode, and is denied in don't-ask mode.
-- Accept-edits mode approves edits only inside the working directory.
+  Reading outside it prompts in manual mode and is denied in don't-ask
+  mode. In auto mode it runs without the classifier with a frontier or
+  workhorse model, after a one-time question (see [Reads outside the
+  working directories](#reads-outside-the-working-directories)), and goes
+  to the classifier with a cheap or tiny model.
+- A shell command that only reads inside the working directory (`ls`,
+  `git status`, `head README.md`) runs without a prompt in every mode, the
+  way Claude Code's shell tools approve one themselves. The same analysis
+  auto mode uses decides it, so a command it can't prove read-only prompts,
+  and one that reads outside the working directory is treated like an
+  outside read.
+- Accept-edits mode approves edits only inside the working directory. With
+  a frontier or workhorse model it also approves a command line made only
+  of `mkdir`, `touch`, `cp`, `mv`, `rm`, and `rmdir` whose paths all stay
+  inside, as Claude Code does. Removing or moving the working directory
+  itself, a `.git` directory, or a directory that holds one still prompts.
 - The harness's own session directories count as inside: the auto-memory
   folder, the session scratchpad, persisted tool output, the plan file, and
   this project's own session transcripts (with auto mode's decision log next
@@ -285,10 +298,11 @@ workspace. It works like Claude Code's additional working directories:
 - Add or remove them in the **Workspace** tab of `/permissions`.
 
 Reading inside a workspace directory then works like reading inside the
-working directory, and accept-edits mode can edit files there. Two things
-stay tighter than the working directory, on purpose. A credential file
-inside a workspace directory, such as a key under `.ssh`, still prompts.
-And in auto mode, every write or delete there still goes to the classifier.
+working directory, and accept-edits mode can edit files there. A
+credential file inside a workspace directory, such as a key under `.ssh`,
+still prompts. With a cheap or tiny model, auto mode also sends every write
+or delete in a workspace directory to the classifier; with a frontier or
+workhorse model it treats them like writes in the working directory.
 
 The filesystem root, your home directory, and any directory that contains
 it (such as `/Users`) can't be added; add something narrower. If a settings file lists one of them, One Code ignores it and warns
@@ -394,27 +408,72 @@ classifier.
 
 ### What is approved without a classifier call
 
+Which actions skip the classifier depends on the tier of the model making
+the call (see [Prompting adapts to the
+model](providers-and-models.md#prompting-adapts-to-the-model)). Frontier
+and workhorse models get Claude Code's shortcuts. Cheap and tiny models
+get a stricter set: Claude Code doesn't run auto mode on Haiku-class
+models at all, and smaller models are the likeliest to take a risky
+action nobody asked for.
+
+With every model:
+
 - Actions a deterministic analysis proves safe. Read-only shell commands
-  inside the working directory are the common case, including multi-line
+  inside the working directory are the common case (they run without a
+  prompt in every mode, see [the working directory
+  boundary](#the-working-directory-boundary)), including multi-line
   commands, heredocs, and substitutions whose own commands are read-only
-  (`diff <(git show HEAD:a) a`). This analysis can only ever conclude
+  (`diff <(git show HEAD:a) a`). An in-project redirect such as
+  `echo hi > notes.txt` counts too. This analysis can only ever conclude
   "safe"; anything it can't parse or recognize, or a value that only exists
   when the command runs (an environment variable, say), goes to the
   classifier rather than through.
 - Edits and writes to files inside the project that are not credential
   files, not protected paths, and not files that run code on their own
   (build wrappers, CI workflows, editor auto-run configuration).
-- Deleting or resetting files inside the project **when git can recover
-  them**. A tracked, committed file can be restored, so removing it is
-  approved. An untracked or modified file can't, so removing it goes to
-  the classifier. Claude Code trusts the whole project directory here; One
-  Code checks recoverability first.
+
+With a frontier or workhorse model, also everything accept-edits mode
+would approve, as in Claude Code:
+
+- Edits and writes anywhere in the working directory and the workspace
+  directories, including CI workflows and build wrappers. Protected paths
+  are still judged.
+- Command lines made only of `mkdir`, `touch`, `cp`, `mv`, `rm`, and
+  `rmdir` whose paths all stay inside. `sed` isn't included; it goes to the
+  classifier.
+- Reads outside the working directories, except credential files (see
+  [Reads outside the working directories](#reads-outside-the-working-directories)).
+
+A subagent's calls are judged by the subagent's own model, so a subagent
+on a cheaper model gets the stricter set. When you switch the session to a
+model on the other side of this line, One Code shows a notice.
 
 ### What goes to the classifier
 
-Everything else: destructive commands git can't undo, anything that
-reaches outside the project, network-affecting commands, writes to
-protected paths, and reads outside the working directory.
+Everything else: `git reset --hard` and other destructive commands,
+deleting files with a cheap or tiny model, anything that reaches outside
+the project other than the reads described earlier, network-affecting
+commands, and writes to protected paths.
+
+### Reads outside the working directories
+
+With a frontier or workhorse model, the first time auto mode reads a file
+outside the working directories, One Code asks once, as Claude Code does:
+
+- **Yes, keep allowing reads outside the working directories** allows the
+  read and doesn't ask again.
+- **No, block reads outside the working directories from now on** refuses
+  the read and saves `permissions.blockReadsOutsideWorkingDirectories: true`
+  to `~/.onecode/settings.json`. From then on the read tools refuse any path
+  outside the working directories, in every mode except bypass and in every
+  project.
+- **No, ask again next time** refuses this read and asks again on the next.
+
+The question isn't asked in a one-shot run, or when you already answered
+it in One Code or in Claude Code. To undo **Block**, remove the setting.
+You can also set it yourself in any settings file. Reading a credential
+file outside the working directories, such as a key under `~/.ssh`, still
+goes to the classifier.
 
 The classifier is Claude Code's two-stage ruleset, embedded verbatim:
 
@@ -433,7 +492,12 @@ consult its classifier approves nothing.
 A blocked action is reported to the model with the reason so it can choose
 a safer route. You're not prompted per action while auto mode runs. After
 repeated blocks in a row, auto mode pauses and the next action prompts you;
-approving it resumes auto mode.
+approving it resumes auto mode. So that an unattended session isn't held
+indefinitely, the first of these prompts after three blocks in a row denies
+the action if nobody answers within two minutes, as Claude Code does, and
+shows a countdown. A later prompt in the same run of blocks waits for you.
+To change the wait, set `CLAUDE_CODE_TICKLISH_WHISPER_TIMEOUT_MS`, Claude
+Code's variable for it, to a number of milliseconds.
 
 ### Approve a call auto mode denied
 

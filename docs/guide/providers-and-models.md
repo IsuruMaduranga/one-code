@@ -154,6 +154,11 @@ The tier is derived from the model's name, release date, and price. You
 don't configure it; set `CC_PROMPT_TIER` to force one when you want to
 experiment. `/doctor report` shows the tier in use.
 
+The tier also decides which permission shortcuts apply in auto and
+accept-edits modes (see [What is approved without a classifier
+call](permissions-modes-and-auto-mode.md#what-is-approved-without-a-classifier-call)).
+`CC_PROMPT_TIER` changes only the prompt, never the permission checks.
+
 ## Web search on providers without a search API
 
 Web search uses your provider's own search when it has one (Anthropic,
