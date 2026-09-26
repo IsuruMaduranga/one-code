@@ -65,7 +65,7 @@ import { gitStatusOutput } from "../lib/git.ts";
 import { gitStatusMeta, gitStatusMetaArgs, reachesIgnoredFiles, wantsGitStatusMeta } from "../auto-mode/git-status-meta.ts";
 import { projectMemoryDir } from "../lib/memory.ts";
 import { sessionResultsDir } from "../lib/persisted-output.ts";
-import { sessionScratchpadDir } from "../lib/scratchpad.ts";
+import { privateSessionScratchpadDir } from "../lib/scratchpad.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import {
 	decide,
@@ -863,7 +863,9 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			sessionWorkspaceDirs.length = 0;
 		}
 		memoryDirPath = projectMemoryDir(ctx.cwd);
-		scratchpadDirPath = sessionScratchpadDir(ctx.cwd, ctx.sessionManager.getSessionId());
+		// Working space only when it is private to this user: another local user
+		// who owns the directory on a shared /tmp could swap what is written there.
+		scratchpadDirPath = privateSessionScratchpadDir(ctx.cwd, ctx.sessionManager.getSessionId());
 		// Resolved like the subjects compared against it (a symlinked parent, macOS /var).
 		resultsDirPath = resolvedOrSelf(sessionResultsDir(ctx));
 		sessionDirPath = resolvedOrSelf(ctx.sessionManager.getSessionDir());

@@ -38,7 +38,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { claudeConfigDir, claudeJsonPath, oneCodeStateDir } from "./paths.ts";
 import { sessionResultsDir } from "./persisted-output.ts";
-import { sessionScratchpadDir } from "./scratchpad.ts";
+import { isPrivateScratchpad, sessionScratchpadDir } from "./scratchpad.ts";
 import { decide, extractSubject, isPathSubjectTool, normalizeToolName, type PermissionMode, parseRules } from "../permissions/matcher.ts";
 import { projectAllowApproved } from "../permissions/project-trust.ts";
 import { loadPermissionSettings, normalizePermissionMode } from "../permissions/settings.ts";
@@ -175,7 +175,10 @@ export function permissionGateFactory(
 					return { block: true, reason: `Permission bridge failed (${(error as Error).message}); denied to fail safe.` };
 				}
 
-				if (!scratchpadDirPath && sessionId) scratchpadDirPath = sessionScratchpadDir(runCwd, sessionId);
+				if (!scratchpadDirPath && sessionId) {
+					const candidate = sessionScratchpadDir(runCwd, sessionId);
+					if (isPrivateScratchpad(candidate)) scratchpadDirPath = candidate;
+				}
 				const tool = normalizeToolName(event.toolName);
 				const subject = extractSubject(tool, event.input as Record<string, unknown>);
 				// Path tools (writers and the read tier) are judged by where the path

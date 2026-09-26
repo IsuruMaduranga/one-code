@@ -13,24 +13,46 @@
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { oneCodeStateDir } from "./paths.ts";
+import { privateSessionTempDir } from "./scratchpad.ts";
 
 /**
  * Where a session's oversized outputs are persisted — the session dir,
  * matching Claude Code's `<session-dir>/tool-results/<id>.txt`. A session-less
- * run (`--no-session`) has no such dir, so a temp folder serves; the model gets
- * the path either way. Shared by every producer that would otherwise truncate:
- * cutting text loses context, a file keeps it one `read` away.
+ * run (`--no-session`, every workflow agent, a subagent of a session-less
+ * parent) has no such dir, so the session's own private temp dir serves
+ * (`<tmp>/onecode-<uid>/<project-slug>/<session-id>`, 0700, beside its
+ * scratchpad). Until 2026-09-27 that fallback was one shared
+ * `<tmp>/one-code` with no uid or session in its name, which the gate then
+ * treated as working space: every session-less run on the machine, any
+ * project and any user, read the others' outputs with no prompt. When the
+ * temp dir cannot be made private, `~/.onecode/tmp/<session-id>` serves. The
+ * model gets the path either way. Shared by every producer that would
+ * otherwise truncate: cutting text loses context, a file keeps it one `read`
+ * away.
  */
-export function sessionResultsDir(ctx: { sessionManager?: { getSessionDir?: () => string | undefined } } | undefined): string {
+export function sessionResultsDir(
+	ctx: { cwd?: string; sessionManager?: { getSessionDir?: () => string | undefined; getSessionId?: () => string } } | undefined,
+): string {
+	let sessionId: string | undefined;
 	try {
 		const dir = ctx?.sessionManager?.getSessionDir?.();
 		if (dir) return dir;
+		sessionId = ctx?.sessionManager?.getSessionId?.();
 	} catch {
-		// fall through to the temp folder
+		// fall through to the private temp folder
 	}
-	return join(tmpdir(), "one-code");
+	const id = (sessionId || `process-${process.pid}`).replace(/[^A-Za-z0-9._-]/g, "_");
+	const temp = privateSessionTempDir(ctx?.cwd ?? process.cwd(), id);
+	if (temp) return temp;
+	const fallback = join(oneCodeStateDir(), "tmp", id);
+	try {
+		mkdirSync(fallback, { recursive: true, mode: 0o700 });
+	} catch {
+		// persistIfLarge names the failed write in its own result.
+	}
+	return fallback;
 }
 
 /** Claude Code persists around this size; pi's bash truncation uses 50KB too. */

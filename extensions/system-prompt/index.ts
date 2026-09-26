@@ -8,10 +8,9 @@
  * derived at session_start, constant within the session.
  */
 
-import { mkdirSync } from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { resolveModelTier, taskToolsEnabled } from "../lib/model-tier.ts";
-import { sessionScratchpadDir } from "../lib/scratchpad.ts";
+import { privateSessionScratchpadDir } from "../lib/scratchpad.ts";
 import { collectEnvironment, type EnvironmentInfo } from "./environment.ts";
 import { collectGitStatus } from "./git-status.ts";
 import { totalTokensBlock, turnTokenBudget } from "../context-budget/budget.ts";
@@ -42,13 +41,9 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 		// The prompt section promises a usable directory, so the extension that
 		// makes the promise creates it. Failure (unwritable /tmp) drops the
 		// section rather than promising a directory writes will error on.
-		const candidate = sessionScratchpadDir(ctx.cwd, ctx.sessionManager.getSessionId());
-		try {
-			mkdirSync(candidate, { recursive: true });
-			scratchpad = candidate;
-		} catch {
-			scratchpad = undefined;
-		}
+		// On a shared /tmp it must also be private to this user
+		// (lib/scratchpad.ts ensurePrivateScratchpad); otherwise the section is dropped.
+		scratchpad = privateSessionScratchpadDir(ctx.cwd, ctx.sessionManager.getSessionId());
 
 		gitStatus = null;
 		gitStatusReady = false;
