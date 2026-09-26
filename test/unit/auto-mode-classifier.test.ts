@@ -320,6 +320,24 @@ describe("PauseTracker", () => {
 		expect(tracker.isPaused()).toBe(false);
 	});
 
+	it("ends a consecutive-limit pause on an allow, as Claude Code's reset does, but not a total-limit one", () => {
+		const tracker = new PauseTracker();
+		for (let i = 0; i < CONSECUTIVE_BLOCK_LIMIT; i++) tracker.recordBlock(denial);
+		expect(tracker.recordAllow()).toBe(true);
+		expect(tracker.isPaused()).toBe(false);
+		expect(tracker.recordBlock(denial)).toBe(false);
+		expect(tracker.recordAllow()).toBe(false);
+
+		const total = new PauseTracker();
+		for (let i = 0; i < TOTAL_BLOCK_LIMIT; i++) {
+			total.recordBlock(denial);
+			if (!total.isPaused()) total.recordAllow();
+		}
+		expect(total.isPaused()).toBe(true);
+		expect(total.recordAllow()).toBe(false);
+		expect(total.isPaused()).toBe(true);
+	});
+
 	it("pauses on the total limit even when blocks are never consecutive", () => {
 		const tracker = new PauseTracker();
 		let tripped = false;

@@ -84,10 +84,21 @@ export class PauseTracker {
 		return false;
 	}
 
-	/** A classifier approval breaks a consecutive-block run. */
-	recordAllow(): void {
+	/**
+	 * Any allowed call in auto mode breaks a consecutive-block run, as in Claude
+	 * Code, whose denial count resets on every allow in auto mode (2.1.282).
+	 * Claude Code has no pause state: a block falls back to a prompt only while
+	 * the count is at the limit, so an allow ends a pause the consecutive limit
+	 * tripped. A 20-total pause still waits for the user. Returns true when this
+	 * allow ended a pause.
+	 */
+	recordAllow(): boolean {
 		this.consecutive = 0;
 		this.timedShown = false;
+		if (!this.paused || this.trippedBy !== "consecutive") return false;
+		this.paused = false;
+		this.trippedBy = undefined;
+		return true;
 	}
 
 	/**

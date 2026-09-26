@@ -1029,6 +1029,16 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		return answer === "allow" ? undefined : answer === "block" ? DENIED_CHOSE_BLOCK_OUTSIDE_READS : DENIED_BY_USER;
 	};
 
+	/**
+	 * An allowed call in auto mode breaks the block streak and ends a
+	 * consecutive-limit pause (`PauseTracker.recordAllow`), whatever allowed
+	 * it: a rule, a read, a fast path, the classifier or a /permissions grant.
+	 * A subagent's calls never touch the streak, as its blocks never count.
+	 */
+	const noteAllow = () => {
+		if (pauseTracker.recordAllow()) applyBadge();
+	};
+
 	pi.on("tool_call", async (event, ctx) => {
 		lastReviewCtx = ctx;
 		// Settled long before the first call; a failed load leaves every bash
@@ -1167,12 +1177,9 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		}
 
 		if (result.decision === "allow" && !floorReason) {
-			// These allows skip the classifier, as the pre-gate's and the
-			// containment fast path's used to, and like those they break an
-			// auto-mode block streak (Claude Code resets it on any allow).
-			if (mode === "auto" && (result.cause === "read-only" || result.cause === "mode" || result.cause === "outside-read")) {
+			if (mode === "auto") {
 				if (result.cause === "read-only") logDecision(ctx, { tool: event.toolName, subject: matchSubject, outcome: "allow", source: "pre-gate" });
-				pauseTracker.recordAllow();
+				noteAllow();
 			}
 			return undefined;
 		}
@@ -1206,7 +1213,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			);
 			if (denials.takeGrant(inputKey)) {
 				logDecision(ctx, { tool: event.toolName, subject: matchSubject, outcome: "allow", source: "user", reason: "approved in /permissions" });
-				pauseTracker.recordAllow();
+				noteAllow();
 				return undefined;
 			}
 			// Auto mode is for unattended runs: a block is returned to the MODEL so it
@@ -1228,7 +1235,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 					original?.cwd ? { cwd: original.cwd } : undefined,
 				);
 				if (outcome.decision === "allow") {
-					pauseTracker.recordAllow();
+					noteAllow();
 					denials.settle(inputKey);
 					return undefined;
 				}

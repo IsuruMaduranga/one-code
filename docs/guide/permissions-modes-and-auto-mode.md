@@ -495,8 +495,10 @@ consult its classifier approves nothing.
 A blocked action is reported to the model with the reason so it can choose
 a safer route. You're not prompted per action while auto mode runs. After
 repeated blocks in a row, auto mode pauses and the next action prompts you;
-approving it resumes auto mode. So that an unattended session isn't held
-indefinitely, the first of these prompts after three blocks in a row denies
+approving it resumes auto mode. As in Claude Code, any action that runs
+without a block, such as a read, also breaks the run and resumes auto mode.
+A pause after 20 blocks in total waits for your approval. So that an
+unattended session isn't held indefinitely, the first of these prompts after three blocks in a row denies
 the action if nobody answers within two minutes, as Claude Code does, and
 shows a countdown. A later prompt in the same run of blocks waits for you.
 To change the wait, set `CLAUDE_CODE_TICKLISH_WHISPER_TIMEOUT_MS`, Claude

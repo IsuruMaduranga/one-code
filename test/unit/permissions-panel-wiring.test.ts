@@ -110,6 +110,19 @@ describe("/permissions wiring", () => {
 	/** Forward-slashed: bash reads a Windows backslash as an escape, which would make the path relative. */
 	const outside = () => forwardSlashes(join(home, "elsewhere"));
 
+	it("an allowed call ends a consecutive-limit pause, so the next call is classified again", async () => {
+		for (let i = 0; i < 3; i++) {
+			blockOnce();
+			expect((await bash(`rm -rf ${outside()}`))?.block).toBe(true);
+		}
+		expect(completeMock).toHaveBeenCalledTimes(6);
+		// A read-only command is allowed without the classifier, and breaks the streak.
+		expect(await bash("ls")).toBeUndefined();
+		blockOnce();
+		expect((await bash(`rm -rf ${outside()}`))?.block).toBe(true);
+		expect(completeMock).toHaveBeenCalledTimes(8);
+	});
+
 	it("records a denial, and approving it lets that exact call run once", async () => {
 		blockOnce();
 		const denied = await bash(`rm -rf ${outside()}`);
