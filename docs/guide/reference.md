@@ -118,7 +118,7 @@ The ones you will use most; `/hotkeys` shows all of them.
 | **ctrl+g** | Edit the prompt in your external editor. |
 | **ctrl+v** | Paste an image or text. |
 | **shift+enter**, **ctrl+j** | Insert a newline. |
-| **ctrl+x** | Copy the last reply. |
+| **ctrl+x** | Copy the last reply. While the model works with a message queued or typed, it starts **ctrl+x ctrl+s** instead. |
 | **PgUp**, **PgDn**, **Home**, **End** | Scroll the transcript in full-screen mode. |
 | **ctrl+shift+f** | Search the transcript in full-screen mode. |
 | **!** at the start of a line | Run a shell command yourself. |
