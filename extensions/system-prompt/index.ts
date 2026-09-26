@@ -56,8 +56,11 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 		if (event.systemPromptOptions.customPrompt) return;
 
 		if (!gitStatusReady) {
-			// First turn = the conversation start CC snapshots at.
-			gitStatus = collectGitStatus(ctx.cwd);
+			// First turn = the conversation start CC snapshots at. The clip note
+			// names the shell tool the model has (PowerShell only without bash).
+			const tools = event.systemPromptOptions.selectedTools ?? [];
+			const shellTool = tools.includes("powershell") && !tools.includes("bash") ? "powershell" : "bash";
+			gitStatus = collectGitStatus(ctx.cwd, undefined, shellTool);
 			gitStatusReady = true;
 		}
 

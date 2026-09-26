@@ -51,7 +51,9 @@ The system prompt is an adaptation of Claude Code's, chosen by the
 capability of the model in use. Stronger models receive a terse prompt;
 smaller models receive more guidance and, on the smallest tier, extra
 search tools. It ends with a git status snapshot (branch, main branch, user,
-working-tree status, recent commits) taken once per session. See
+working-tree status, recent commits) taken once per session. A status
+longer than 2,000 characters is cut there, with a note telling the model
+to run `git status` itself, as Claude Code does. See
 [Prompting adapts to the model](providers-and-models.md#prompting-adapts-to-the-model).
 
 ## Memory
