@@ -15,6 +15,7 @@ import {
 	validateImageData,
 } from "../../extensions/mcp/schema.ts";
 import { createTailBuffer } from "../../extensions/mcp/client.ts";
+import { TINY_GIF, TINY_JPEG, TINY_PNG, TINY_WEBP } from "./helpers/tiny-images.ts";
 
 describe("expandEnv", () => {
 	it("expands both $VAR and ${VAR}", () => {
@@ -174,7 +175,7 @@ describe("describeContent", () => {
 	});
 
 	it("collects a decodable image, deriving the mime type from its bytes", () => {
-		const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]).toString("base64");
+		const png = TINY_PNG;
 		const result = describeContent([{ type: "image", data: png, mimeType: "image/gif" }]);
 		// mimeType comes from the magic bytes (png), not the server's claim (gif).
 		expect(result.images).toEqual([{ data: png, mimeType: "image/png" }]);
@@ -201,12 +202,36 @@ describe("describeContent", () => {
 
 describe("validateImageData", () => {
 	const b64 = (bytes: number[]) => Buffer.from(bytes).toString("base64");
-	it("accepts png/jpeg/gif/webp by magic bytes and reports the true mime", () => {
-		expect(validateImageData(b64([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), "x")).toEqual({ ok: true, mimeType: "image/png" });
-		expect(validateImageData(b64([0xff, 0xd8, 0xff, 0x00]), "x")).toEqual({ ok: true, mimeType: "image/jpeg" });
-		expect(validateImageData(b64([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]), "x")).toEqual({ ok: true, mimeType: "image/gif" });
-		const webp = Buffer.concat([Buffer.from("RIFF"), Buffer.from([0, 0, 0, 0]), Buffer.from("WEBP")]).toString("base64");
-		expect(validateImageData(webp, "x")).toEqual({ ok: true, mimeType: "image/webp" });
+	it("accepts whole png/jpeg/gif/webp images and reports the true mime", () => {
+		expect(validateImageData(TINY_PNG, "x")).toEqual({ ok: true, mimeType: "image/png" });
+		expect(validateImageData(TINY_JPEG, "x")).toEqual({ ok: true, mimeType: "image/jpeg" });
+		expect(validateImageData(TINY_GIF, "x")).toEqual({ ok: true, mimeType: "image/gif" });
+		expect(validateImageData(TINY_WEBP, "x")).toEqual({ ok: true, mimeType: "image/webp" });
+	});
+	it("rejects a valid signature with a corrupt or truncated body (a poisoned-session shape)", () => {
+		const bytes = (value: string) => Buffer.from(value, "base64");
+		const withGarbage = Buffer.concat([bytes(TINY_PNG).subarray(0, 8), Buffer.from("ASCII garbage after the signature")]).toString("base64");
+		expect(validateImageData(withGarbage, "image/png")).toMatchObject({ ok: false });
+		for (const [name, image] of [["png", TINY_PNG], ["jpeg", TINY_JPEG], ["gif", TINY_GIF], ["webp", TINY_WEBP]] as const) {
+			const full = bytes(image);
+			const truncated = full.subarray(0, full.length - 6).toString("base64");
+			expect(validateImageData(truncated, "x"), `${name} truncated`).toMatchObject({ ok: false });
+		}
+		// A flipped byte inside a PNG chunk fails its checksum.
+		const flipped = Buffer.from(bytes(TINY_PNG));
+		flipped[45] ^= 0xff;
+		expect(validateImageData(flipped.toString("base64"), "x")).toMatchObject({ ok: false, reason: expect.stringContaining("checksum") });
+		// The signature-only fixtures the sniff alone used to accept.
+		expect(validateImageData(b64([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), "x").ok).toBe(false);
+		expect(validateImageData(b64([0xff, 0xd8, 0xff, 0x00]), "x").ok).toBe(false);
+		expect(validateImageData(b64([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]), "x").ok).toBe(false);
+		expect(validateImageData(Buffer.concat([Buffer.from("RIFF"), Buffer.from([0, 0, 0, 0]), Buffer.from("WEBP")]).toString("base64"), "x").ok).toBe(false);
+	});
+	it("turns a corrupt image into a text note in describeContent", () => {
+		const withGarbage = Buffer.concat([Buffer.from(TINY_PNG, "base64").subarray(0, 8), Buffer.from("garbage")]).toString("base64");
+		const result = describeContent([{ type: "image", data: withGarbage, mimeType: "image/png" }], "stub");
+		expect(result.images).toEqual([]);
+		expect(result.text).toContain("could not be decoded");
 	});
 	it("rejects unrecognised and empty data", () => {
 		expect(validateImageData(Buffer.from("nope").toString("base64"), "image/png").ok).toBe(false);
