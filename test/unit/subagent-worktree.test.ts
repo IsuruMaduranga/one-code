@@ -1,10 +1,10 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { cleanupWorktree, createWorktree, keptWorktreeNote, type Worktree } from "../../extensions/subagents/worktree.ts";
-import { releaseWorktreeIsolation } from "../../extensions/lib/worktree-isolation.ts";
+import { releaseWorktreeIsolation, worktreeIsolationFor } from "../../extensions/lib/worktree-isolation.ts";
 
 // Every repository here lives in a temp directory, never in a real checkout.
 const git = (cwd: string, ...args: string[]) =>
@@ -73,6 +73,21 @@ describe("isolation worktree cleanup", () => {
 		writeFileSync(join(worktree.path, "a.txt"), "edited\n");
 		expect(await cleanupWorktree(repo, worktree)).toBe(false);
 		expect(existsSync(worktree.path)).toBe(true);
+	});
+
+	it("branches from an entered worktree's HEAD and guards the main checkout as shared", async () => {
+		const entered = join(repo, ".claude", "worktrees", "feature");
+		git(repo, "worktree", "add", "-q", "-b", "feature", entered, "HEAD");
+		writeFileSync(join(entered, "c.txt"), "c\n");
+		git(entered, "add", "c.txt");
+		git(entered, "commit", "-qm", "session work");
+
+		worktree = await createWorktree(entered, "agent");
+		expect(worktree.baseCommit).toBe(git(entered, "rev-parse", "HEAD"));
+		expect(existsSync(join(worktree.path, "c.txt"))).toBe(true);
+		expect(worktreeIsolationFor(worktree.path)?.sharedRoot).toBe(realpathSync(repo));
+		expect(await cleanupWorktree(entered, worktree)).toBe(true);
+		expect(branches()).toBe("");
 	});
 
 	it("names the branch in the kept-worktree note", () => {

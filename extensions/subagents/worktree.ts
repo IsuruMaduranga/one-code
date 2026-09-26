@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { registerWorktreeIsolation, releaseWorktreeIsolation } from "../lib/worktree-isolation.ts";
-import { HARNESS_GIT_CONFIG } from "../lib/git.ts";
+import { findProjectRoot, HARNESS_GIT_CONFIG } from "../lib/git.ts";
 
 const run = promisify(execFile);
 
@@ -46,10 +46,13 @@ export async function createWorktree(cwd: string, label: string): Promise<Worktr
 	const branch = `cc-subagent/${safeLabel}-${Date.now().toString(36)}`;
 	await git(["worktree", "add", "-b", branch, path, "HEAD"], cwd);
 	// Register for the child permission gate's git-isolation guard. The shared
-	// checkout's ROOT, not cwd — the spawn may run from a subdirectory.
+	// checkout's ROOT, not cwd — the spawn may run from a subdirectory — and the
+	// MAIN checkout's root when it runs from a linked worktree (an entered
+	// `enter_worktree` session), so git into either is refused.
 	let sharedRoot = cwd;
 	try {
-		sharedRoot = await git(["rev-parse", "--show-toplevel"], cwd);
+		const top = await git(["rev-parse", "--show-toplevel"], cwd);
+		sharedRoot = findProjectRoot(top) ?? top;
 	} catch {
 		// Keep cwd as the best available anchor.
 	}

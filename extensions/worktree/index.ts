@@ -70,7 +70,7 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 
 	const applyState = (next: WorktreeState | undefined) => {
 		state = next;
-		const location: WorktreeLocation | null = next ? { path: next.path, branch: next.branch } : null;
+		const location: WorktreeLocation | null = next ? { path: next.path, branch: next.branch, sharedRoot: next.sharedRoot } : null;
 		pi.events.emit(WORKTREE_CHANNEL, location);
 		if (next) {
 			pi.events.emit(REMINDER_CHANNEL, {

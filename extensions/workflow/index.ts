@@ -57,6 +57,8 @@ import {
 } from "./viewer.ts";
 import { WorkflowWidget } from "./widget.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
+import { sessionWorkCwd } from "../lib/worktree-channel.ts";
+import { followEnteredWorktree } from "../lib/worktree-isolation.ts";
 
 /**
  * Claude Code's own arming reminder, verbatim in intent: the keyword is a
@@ -213,6 +215,8 @@ export default function workflowExtension(pi: ExtensionAPI) {
 		unusableModels.add((data as ModelUnusableEvent).model);
 	});
 	const notifyTask = createTaskNotifier(pi);
+	// After `enter_worktree`, workflow agents run in the worktree (and are guarded there).
+	const enteredWorktree = followEnteredWorktree(pi.events);
 	const manager = new WorkflowRunManager();
 	let lastCtx: ExtensionContext | undefined;
 	const widget = new WorkflowWidget(manager, () => lastCtx);
@@ -321,7 +325,8 @@ export default function workflowExtension(pi: ExtensionAPI) {
 					args: params.args,
 					tokenBudget: params.tokenBudget ?? null,
 					resumeFromRunId: params.resumeFromRunId,
-					cwd: ctx.cwd,
+					// Where the session works: the entered worktree, if any (pi keeps ctx.cwd at the original checkout).
+					cwd: sessionWorkCwd(enteredWorktree(), ctx.cwd),
 					sessionDir,
 					defaultModel: ctx.model,
 					configuredDefault,

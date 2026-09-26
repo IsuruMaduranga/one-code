@@ -62,8 +62,9 @@ import { type AgentRunRecord, freeRunName, resolveRunName, RunRegistry } from ".
 import { SubagentRuntime } from "./runner.ts";
 import { emptyUsage, formatStats, type UsageTotals } from "./usage.ts";
 import { cleanupWorktree, createWorktree, isGitRepo, keptWorktreeNote, type Worktree } from "./worktree.ts";
-import { findGitRoot } from "../lib/git.ts";
-import { registerWorktreeIsolation } from "../lib/worktree-isolation.ts";
+import { findProjectRoot } from "../lib/git.ts";
+import { followEnteredWorktree, registerWorktreeIsolation } from "../lib/worktree-isolation.ts";
+import { sessionWorkCwd } from "../lib/worktree-channel.ts";
 import {
 	AGENT_NOTE,
 	agentMessage,
@@ -385,6 +386,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		if (rememberUnusable(event.model) && lastCtx) emitModelStatus(lastCtx);
 	});
 
+	// After `enter_worktree` the session works in the worktree, but pi keeps
+	// ctx.cwd at the original checkout: spawns start where the session works.
+	const enteredWorktree = followEnteredWorktree(pi.events);
+	const workCwd = (ctx: ExtensionContext) => sessionWorkCwd(enteredWorktree(), ctx.cwd);
+
 	/** The in-process runner, built lazily on first run and shared across all runs. */
 	let runtimePromise: Promise<SubagentRuntime> | undefined;
 	const getRuntime = (ctx: ExtensionContext) =>
@@ -520,7 +526,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				if (record.worktree && !worktreesSeen.has(record.cwd)) {
 					worktreesSeen.add(record.cwd);
 					if (!existsSync(record.cwd)) continue;
-					sharedRoot ??= findGitRoot(ctx.cwd) ?? ctx.cwd;
+					sharedRoot ??= findProjectRoot(ctx.cwd) ?? ctx.cwd;
 					registerWorktreeIsolation(record.cwd, sharedRoot);
 				}
 			}
@@ -1431,8 +1437,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		request.fork ? forkTaskMessage(request.task, worktree ? { worktreePath: worktree.path, parentCwd } : undefined) : request.task;
 
 	/** Create a run's isolation worktree and point its record at it (both spawn paths). */
-	const isolateInWorktree = async (ctx: ExtensionContext, record: AgentRunRecord, name: string): Promise<Worktree> => {
-		const worktree = await createWorktree(ctx.cwd, name);
+	const isolateInWorktree = async (base: string, record: AgentRunRecord, name: string): Promise<Worktree> => {
+		const worktree = await createWorktree(base, name);
 		record.cwd = worktree.path;
 		record.worktree = true;
 		return worktree;
@@ -1456,11 +1462,13 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		onProgress?: (toolCalls: number, text: string, usage: UsageTotals) => void,
 	): Promise<TaskResult> => {
 		const { request, record, agentDef } = prepared;
+		// The session's working directory: the entered worktree, if any.
+		const base = workCwd(ctx);
 
 		let worktree: Worktree | undefined;
 		if (request.worktree) {
 			try {
-				worktree = await isolateInWorktree(ctx, record, request.name);
+				worktree = await isolateInWorktree(base, record, request.name);
 			} catch (error) {
 				return {
 					agent: request.agent,
@@ -1481,7 +1489,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		const handle = runtime.run({
 			name: request.name,
 			agent: agentDef,
-			task: frameTask(request, worktree, ctx.cwd),
+			task: frameTask(request, worktree, base),
 			cwd: record.cwd,
 			forkFrom: request.fork ? forkFrom : undefined,
 			parentSystemPrompt: request.fork ? ctx.getSystemPrompt() : undefined,
@@ -1507,7 +1515,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			live.finish(Boolean(outcome.failed));
 			let worktreeKept: boolean | undefined;
 			if (worktree) {
-				worktreeKept = !(await cleanupWorktree(ctx.cwd, worktree));
+				worktreeKept = !(await cleanupWorktree(base, worktree));
 			}
 			return {
 				agent: request.agent,
@@ -1523,7 +1531,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			live.finish(true);
 			// A failed run can still have committed or edited in its worktree:
 			// a kept one is reported like a finished run's.
-			const worktreeKept = worktree ? !(await cleanupWorktree(ctx.cwd, worktree)) : undefined;
+			const worktreeKept = worktree ? !(await cleanupWorktree(base, worktree)) : undefined;
 			return {
 				agent: request.agent,
 				name: request.name,
@@ -1557,10 +1565,13 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		runtime: SubagentRuntime,
 		{ sessionFile, toolCallId, forkMessages }: { sessionFile?: string; toolCallId?: string; forkMessages?: Message[] },
 	): Promise<{ launched: boolean; line: string }> => {
+		// Captured as a string: onExit runs from a `.finally` long after this
+		// turn's ctx may be stale (review S5). The entered worktree, if any.
+		const parentCwd = workCwd(ctx);
 		let worktree: Worktree | undefined;
 		if (p.request.worktree) {
 			try {
-				worktree = await isolateInWorktree(ctx, p.record, p.request.name);
+				worktree = await isolateInWorktree(parentCwd, p.record, p.request.name);
 			} catch (error) {
 				return { launched: false, line: `✗ ${p.record.name}: could not create a worktree: ${(error as Error).message}` };
 			}
@@ -1630,9 +1641,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			}, RESIDENT_IDLE_MS);
 			reaper.unref?.();
 		};
-		// Captured as a string: onExit runs from a `.finally` long after this
-		// turn's ctx may be stale (review S5).
-		const parentCwd = ctx.cwd;
 		const forkPrompt = p.request.fork ? ctx.getSystemPrompt() : undefined;
 		if (forkPrompt !== undefined) persistForkPrompt(p.record, forkPrompt);
 		// No `signal` here on purpose: a resident outlives the spawning turn and
@@ -1771,7 +1779,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				thinking: pi.getThinkingLevel(),
 			},
 			agentDef: undefined,
-			record: { name, agent: FORK_AGENT, taskId, sessionSearchDir: runSessionDir(ctx, taskId) ?? "", cwd: ctx.cwd, depth: 0 },
+			record: { name, agent: FORK_AGENT, taskId, sessionSearchDir: runSessionDir(ctx, taskId) ?? "", cwd: workCwd(ctx), depth: 0 },
 		};
 		registry.add(prepared.record);
 		// The session can be torn down while the runtime or the child starts; a
@@ -1949,7 +1957,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				};
 			}
 
-			if (requested.some((r) => r.worktree) && !(await isGitRepo(ctx.cwd))) {
+			if (requested.some((r) => r.worktree) && !(await isGitRepo(workCwd(ctx)))) {
 				return {
 					content: [{ type: "text", text: 'isolation: "worktree" needs a git repository; this directory is not one.' }],
 					details: {},
@@ -1967,7 +1975,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						agent: request.agent,
 						taskId,
 						sessionSearchDir: runSessionDir(ctx, taskId) ?? "",
-						cwd: ctx.cwd,
+						cwd: workCwd(ctx),
 						model: request.model,
 						thinking: request.thinking,
 						depth: 0,
@@ -2334,8 +2342,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			// reply, and fix the record so later messages don't repeat the note (M2).
 			let relocationNote = "";
 			if (!existsSync(record.cwd)) {
-				relocationNote = `[${record.name}'s working directory ${record.cwd} no longer exists${record.worktree ? " (its isolation worktree was removed when the run left no changes)" : ""}; this turn ran in ${ctx.cwd}.]\n\n`;
-				record.cwd = ctx.cwd;
+				const cwd = workCwd(ctx);
+				relocationNote = `[${record.name}'s working directory ${record.cwd} no longer exists${record.worktree ? " (its isolation worktree was removed when the run left no changes)" : ""}; this turn ran in ${cwd}.]\n\n`;
+				record.cwd = cwd;
 				record.worktree = undefined;
 			}
 

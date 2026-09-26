@@ -78,8 +78,9 @@ Two options change how a subagent runs:
   one more, but no further.
 - **Worktree isolation.** The subagent gets its own git worktree, branched
   from `HEAD`, so it can edit files without colliding with your working
-  tree or other agents. A worktree the agent left unchanged is removed;
-  otherwise it's kept and its path reported.
+  tree or other agents. A worktree the agent left unchanged is removed.
+  If the agent edited files or made commits there, the worktree is kept
+  and its path and branch are reported, so no work is lost.
 
 ### Choose the subagent model
 
@@ -140,7 +141,9 @@ and relative path then resolves there, and your main working tree stays
 untouched until `exit_worktree` leaves the worktree, keeping or removing
 it. Removal is refused while there is uncommitted or unmerged work. Ask for
 this when a task will make sweeping changes you want to review before
-merging.
+merging. Subagents and workflow agents started while the session is in the
+worktree run there too, and an isolated subagent's own worktree branches
+from the worktree's `HEAD`.
 
 ## Ultracode workflows
 
