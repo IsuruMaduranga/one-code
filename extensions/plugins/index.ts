@@ -16,10 +16,8 @@
  * ~/.claude is read-only here, always.
  */
 
-import { execFile } from "node:child_process";
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { readFavorites, toggleFavorite } from "../lib/favorites.ts";
@@ -63,49 +61,17 @@ import { decodePanelKey } from "./panel/keys.ts";
 import { type DiscoverDetail, renderPanel, type PanelPaint } from "./panel/render.ts";
 import { buildDiscoverRows, buildInstalledRows, buildMarketplaceRows, type DiscoverRow } from "./panel/rows.ts";
 import { applyPanelKey, initialPanelState, type PanelEffect, type PanelView } from "./panel/state.ts";
-import { findShellPlaceholders, replaceShellPlaceholders, substituteArguments } from "./template.ts";
+import { expandTemplate } from "./shell-expand.ts";
 import { parseFrontmatterLoosely } from "../lib/frontmatter.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 
-const run = promisify(execFile);
-const SHELL_TIMEOUT_MS = 30_000;
 
 // The panel is a bounded dock like Claude Code's /plugins, NOT a full-screen
 // takeover: it swaps the editor container and leaves the transcript visible
 // above it. Cap the height so the conversation stays on screen; smaller
 // terminals still shrink to fit. ~6 discover rows show at this cap.
 const PANEL_MAX_HEIGHT = 22;
-
-async function expandTemplate(body: string, args: string, cwd: string, persist?: { dir: string; name: string }): Promise<string> {
-	const withArgs = substituteArguments(body, args);
-	const commands = [...new Set(findShellPlaceholders(withArgs))];
-	if (commands.length === 0) return withArgs;
-
-	const outputs = new Map<string, string>();
-	await Promise.all(
-		commands.map(async (command, index) => {
-			let text: string;
-			try {
-				const { stdout, stderr } = await run(command, {
-					cwd,
-					shell: true,
-					timeout: SHELL_TIMEOUT_MS,
-					maxBuffer: 2 * 1024 * 1024,
-				});
-				text = (stdout || stderr || "").trim();
-			} catch (error) {
-				const detail = error as { stdout?: string; stderr?: string; message?: string };
-				text = (detail.stdout || detail.stderr || detail.message || "command failed").trim();
-			}
-			// A `!`command's output (a `git diff` of a large change) lands in the
-			// user turn bounded only by maxBuffer — persist it past the cap so the
-			// model gets a preview plus the path, never a wall of text (review L3).
-			outputs.set(command, persist ? persistIfLarge(text, { dir: persist.dir, id: `plugin-cmd-${persist.name}-${index}` }) : text);
-		}),
-	);
-	return replaceShellPlaceholders(withArgs, outputs);
-}
 
 /** An empty discovery result — the fallback when a scan throws. */
 function emptyDiscovered(): DiscoveredPlugins {
@@ -573,7 +539,13 @@ function registerPluginCommand(pi: ExtensionAPI, plugin: Plugin, name: string, p
 				ctx.ui.notify(`Could not read ${path}: ${(error as Error).message}`, "error");
 				return;
 			}
-			const expanded = await expandTemplate(body, args, ctx.cwd, { dir: sessionResultsDir(ctx), name });
+			// A `!`command's output (a `git diff` of a large change) lands in the
+			// user turn: persist it past the cap so the model gets a preview plus
+			// the path, never a wall of text (review L3).
+			const dir = sessionResultsDir(ctx);
+			const expanded = await expandTemplate(body, args, ctx.cwd, {
+				persist: (text, index) => persistIfLarge(text, { dir, id: `plugin-cmd-${name}-${index}` }),
+			});
 			recordUsage(pluginRoot(getAgentDir()), "command", name);
 			// Deliver as a user turn, which is how Claude Code runs a command template.
 			pi.sendUserMessage(expanded);

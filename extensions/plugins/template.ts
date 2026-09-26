@@ -1,5 +1,5 @@
 /**
- * Claude Code command-template expansion (pure apart from the shell hook).
+ * Claude Code command-template expansion (pure; `shell-expand.ts` runs the commands).
  *
  * A command markdown file has frontmatter (`description`, `allowed-tools`,
  * `argument-hint`) and a body that may contain:
@@ -17,26 +17,48 @@ export interface CommandTemplate {
 	body: string;
 }
 
-export function substituteArguments(body: string, args: string): string {
+/**
+ * Replace `$ARGUMENTS`, `$@` and `$1`… with the invocation's arguments. With
+ * `quote`, each argument word is passed through it (a shell placeholder's
+ * command gets them as quoted words), so `$ARGUMENTS` stays one word per
+ * argument and no argument can add shell syntax.
+ */
+export function substituteArguments(body: string, args: string, quote?: (word: string) => string): string {
 	const parts = args.trim().length > 0 ? args.trim().split(/\s+/) : [];
+	const all = quote ? parts.map(quote).join(" ") : args.trim();
 	return body
-		.replace(/\$ARGUMENTS\b/g, args.trim())
-		.replace(/\$@/g, args.trim())
-		.replace(/\$(\d+)/g, (_match, index) => parts[Number(index) - 1] ?? "");
+		.replace(/\$ARGUMENTS\b/g, () => all)
+		.replace(/\$@/g, () => all)
+		.replace(/\$(\d+)/g, (_match, index) => {
+			const part = parts[Number(index) - 1];
+			return quote ? quote(part ?? "") : (part ?? "");
+		});
 }
 
-/** Finds each !`command` occurrence so the caller can run them. */
-export function findShellPlaceholders(body: string): string[] {
-	const found: string[] = [];
+/** A POSIX shell single-quoted word: the text exactly, whatever it holds. */
+export function shellQuote(word: string): string {
+	return `'${word.replace(/'/g, "'\\''")}'`;
+}
+
+export type TemplatePiece = { kind: "text"; text: string } | { kind: "shell"; command: string };
+
+/**
+ * A template body split into text and `` !`command` `` placeholders, found in
+ * the body as written: an argument substituted later can never become a
+ * placeholder. Until 2026-09-27 the arguments went in first, so an argument
+ * holding `` !`…` `` ran as a command of its own.
+ */
+export function splitShellPlaceholders(body: string): TemplatePiece[] {
+	const pieces: TemplatePiece[] = [];
 	const pattern = /!`([^`]+)`/g;
+	let last = 0;
 	let match = pattern.exec(body);
 	while (match) {
-		found.push(match[1]);
+		if (match.index > last) pieces.push({ kind: "text", text: body.slice(last, match.index) });
+		pieces.push({ kind: "shell", command: match[1] });
+		last = match.index + match[0].length;
 		match = pattern.exec(body);
 	}
-	return found;
-}
-
-export function replaceShellPlaceholders(body: string, outputs: Map<string, string>): string {
-	return body.replace(/!`([^`]+)`/g, (_match, command: string) => outputs.get(command) ?? "");
+	if (last < body.length) pieces.push({ kind: "text", text: body.slice(last) });
+	return pieces;
 }

@@ -16,8 +16,8 @@ import {
 import { setOverride } from "../../extensions/lib/plugin-overrides.ts";
 import { setSkillOverride, skillOverrideKey } from "../../extensions/lib/skill-overrides.ts";
 import {
-	findShellPlaceholders,
-	replaceShellPlaceholders,
+	shellQuote,
+	splitShellPlaceholders,
 	substituteArguments,
 } from "../../extensions/plugins/template.ts";
 
@@ -310,22 +310,23 @@ describe("command template expansion", () => {
 		expect(substituteArguments("[$1][$2]", "only")).toBe("[only][]");
 	});
 
-	it("finds and replaces shell placeholders", () => {
-		const body = "status:\n!`git status`\ndiff:\n!`git diff`\nagain:\n!`git status`";
-		expect(findShellPlaceholders(body)).toEqual(["git status", "git diff", "git status"]);
-		const replaced = replaceShellPlaceholders(
-			body,
-			new Map([
-				["git status", "clean"],
-				["git diff", "no changes"],
-			]),
-		);
-		expect(replaced).toContain("status:\nclean");
-		expect(replaced).toContain("diff:\nno changes");
-		expect(replaced).not.toContain("!`");
+	it("splits a body into text and shell placeholders", () => {
+		const body = "status:\n!`git status`\ndiff:\n!`git diff`";
+		expect(splitShellPlaceholders(body)).toEqual([
+			{ kind: "text", text: "status:\n" },
+			{ kind: "shell", command: "git status" },
+			{ kind: "text", text: "\ndiff:\n" },
+			{ kind: "shell", command: "git diff" },
+		]);
 	});
 
 	it("handles a body with no placeholders", () => {
-		expect(findShellPlaceholders("plain body")).toEqual([]);
+		expect(splitShellPlaceholders("plain body")).toEqual([{ kind: "text", text: "plain body" }]);
+	});
+
+	it("quotes arguments word by word inside a command", () => {
+		expect(substituteArguments("git log $ARGUMENTS", "--oneline -5", shellQuote)).toBe("git log '--oneline' '-5'");
+		expect(substituteArguments("grep $1 x", "it's", shellQuote)).toBe("grep 'it'\\''s' x");
+		expect(substituteArguments("echo [$2]", "one", shellQuote)).toBe("echo ['']");
 	});
 });
