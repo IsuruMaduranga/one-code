@@ -92,10 +92,13 @@ export function buildClaudeCodeSystemPrompt(
 	 * snapshot. Constant for the session, so it stays cache-stable.
 	 */
 	totalTokensLine?: string | null,
+	/** False when the session model runs without the task tools (`lib/model-tier.ts taskToolsEnabled`). */
+	taskTools = true,
 ): string {
 	const bundle = BUNDLES[tier];
+	const lead = taskTools ? bundle.lead : (bundle.leadWithoutTaskTools ?? bundle.lead);
 	const sections = [
-		...bundle.lead,
+		...lead,
 		buildToolsSection(options),
 		// Claude Code orders Memory just before Environment; workhorse/cheap/tiny use the long spec.
 		memoryPromptSection(env.memoryDir, bundle.verboseMemory),

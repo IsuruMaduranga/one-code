@@ -115,7 +115,7 @@ export interface ModelIdentity {
 	confidence: "exact" | "family" | "opaque";
 }
 
-const providerPolicy = (provider: string): ProviderPolicy => BUILTIN_PROVIDER_POLICIES[provider] ?? opaque();
+export const providerPolicy = (provider: string): ProviderPolicy => BUILTIN_PROVIDER_POLICIES[provider] ?? opaque();
 
 function canonicalVendor(value: string): string | undefined {
 	return VENDOR_ALIASES[value.toLowerCase()];

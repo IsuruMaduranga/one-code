@@ -43,7 +43,7 @@ that explains it.
 | `/auto-mode defaults` | Show the built-in environment description. | |
 | `/auto-mode model [provider/model-id\|clear]` | Choose or clear the classifier model. | |
 | `/memory` | Open an instruction file or the memory folder. | [Memory](sessions-and-context.md#memory) |
-| `/tasks`, `/tasks hide`, `/tasks show` | Print the task list, or hide and show its widget. | [Tasks](tasks-and-background-work.md#the-task-list) |
+| `/tasks`, `/tasks hide`, `/tasks show` | Print the task list, or hide and show its widget (also **alt+t**). | [Tasks](tasks-and-background-work.md#the-task-list) |
 | `/background` | List background tasks. | [Background](tasks-and-background-work.md#the-background-list) |
 | `/loop <interval> <task>` | Repeat a task at a fixed interval (`5m`, `2h`, `1d`, or `… every 20m`). Ask the model to stop it. | [Loops](tasks-and-background-work.md#scheduled-wake-ups-and-loops) |
 | `/loop <task>` | Repeat a task, letting the model choose the pace. | |
@@ -104,6 +104,7 @@ The ones you will use most; `/hotkeys` shows all of them.
 |---|---|
 | **shift+tab** | Cycle the thinking level. |
 | **ctrl+t** | Show or hide thinking blocks. |
+| **alt+t** | Show or hide the task list. |
 | **ctrl+o** | Expand or collapse a tool's output. |
 | **ctrl+p**, **shift+ctrl+p** | Cycle models forward or backward. |
 | **ctrl+l** | Open the model picker. |
@@ -184,6 +185,7 @@ The `CC_` prefix is historical; `ONECODE_`-prefixed aliases are planned.
 | `CC_TOTAL_TOKENS=0` | Remove the `<total_tokens>` budget line. |
 | `CC_TOTAL_TOKENS_BUDGET` | The per-turn budget the line counts down from (default 15000000). |
 | `CC_PROMPT_TIER=frontier\|workhorse\|cheap\|tiny` | Force a system-prompt tier. |
+| `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` | Give frontier models and Sonnet 5 or later the task tools, which they run without by default. |
 | `CC_HOOKS_DEBUG=1` | Print hook dispatches to stderr and log decisions. |
 | `CC_AUTO_MODE_DEBUG=1` | Print classifier verdicts to stderr. `2` is more verbose. |
 | `CC_VERSION` | The version shown in the banner (set by the app). |

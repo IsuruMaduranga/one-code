@@ -11,24 +11,38 @@
  *
  * The widget mirrors Claude Code's pinned task list (summary line + ✔/◼/◻
  * rows). Claude Code toggles it with ctrl+t, but pi reserves that key for
- * thinking blocks — `/tasks hide` / `/tasks show` covers it instead.
+ * thinking blocks, so alt+t (`TASKS_TOGGLE_KEY`) and `/tasks hide` / `/tasks
+ * show` toggle it here; the key's hint is always on screen.
  */
 
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { restoreLatestDetails } from "../lib/branch-restore.ts";
-import { DEFER_CHANNEL } from "../lib/deferred.ts";
+import { DEFER_CHANNEL, WITHHOLD_CHANNEL } from "../lib/deferred.ts";
+import { taskToolsEnabled } from "../lib/model-tier.ts";
 import { ccToolRenderers, linesComponent, safeThemeBold, safeThemePaint, strike } from "../lib/tui-render.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
-import { formatTaskDetails, formatTaskLine, formatTaskList, formatTaskWidget, nudgeMessage, type TaskSnapshot, TaskStore } from "./store.ts";
+import {
+	FINISHED_LIST_CLEAR_MS,
+	formatHiddenTaskWidget,
+	formatTaskDetails,
+	formatTaskLine,
+	formatTaskList,
+	formatTaskWidget,
+	nudgeMessage,
+	type TaskSnapshot,
+	TaskStore,
+} from "./store.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
+import { TASKS_TOGGLE_KEY } from "../lib/keys.ts";
 
 interface TaskDetails {
 	taskSnapshot: TaskSnapshot;
 }
 
 const TASK_TOOLS = new Set(["task_create", "task_get", "task_list", "task_update"]);
+const TASK_KEYWORDS = ["task", "todo", "plan", "progress", "dependencies", "tracking"];
 
 export default function tasksExtension(pi: ExtensionAPI) {
 	const store = new TaskStore();
@@ -36,7 +50,7 @@ export default function tasksExtension(pi: ExtensionAPI) {
 
 	const updateWidget = (ctx: ExtensionContext) => {
 		if (!ctx.hasUI) return;
-		if (widgetHidden || store.list().length === 0) {
+		if (store.list().length === 0) {
 			ctx.ui.setWidget("cc-tasks", undefined);
 			return;
 		}
@@ -44,18 +58,69 @@ export default function tasksExtension(pi: ExtensionAPI) {
 		// unbounded model text, and pi-tui crashes on an over-wide line.
 		ctx.ui.setWidget("cc-tasks", (_tui, theme) => {
 			const style = { paint: safeThemePaint(theme), bold: safeThemeBold(theme), strike };
-			return linesComponent(() => formatTaskWidget(store, 12, style));
+			return linesComponent(() =>
+				widgetHidden
+					? formatHiddenTaskWidget(store, `${TASKS_TOGGLE_KEY} to show`, style)
+					: formatTaskWidget(store, 12, style, `${TASKS_TOGGLE_KEY} to hide`),
+			);
 		});
+	};
+	const setWidgetHidden = (hidden: boolean, ctx: ExtensionContext) => {
+		widgetHidden = hidden;
+		updateWidget(ctx);
+	};
+
+	// Claude Code clears a finished list (every task completed) 5 s after it
+	// gets there, and the panel goes with it; reopening or adding a task first
+	// cancels the clear. Only where there is a widget: a one-shot run keeps its
+	// list. The timer is unref'd and cancelled on shutdown, so it never holds
+	// the process or fires into a disposed session.
+	let clearTimer: ReturnType<typeof setTimeout> | undefined;
+	const cancelClear = () => {
+		if (clearTimer) clearTimeout(clearTimer);
+		clearTimer = undefined;
+	};
+	const scheduleClear = (ctx: ExtensionContext) => {
+		if (!ctx.hasUI || !store.isFinished()) return cancelClear();
+		if (clearTimer) return;
+		clearTimer = setTimeout(() => {
+			clearTimer = undefined;
+			if (!store.isFinished()) return;
+			store.clear();
+			updateWidget(ctx);
+		}, FINISHED_LIST_CLEAR_MS);
+		clearTimer.unref?.();
 	};
 
 	const reconstructState = (ctx: ExtensionContext) => {
+		cancelClear();
 		const details = restoreLatestDetails<TaskDetails>(ctx.sessionManager.getBranch(), TASK_TOOLS, (d) => Boolean(d?.taskSnapshot));
 		store.restore(details?.taskSnapshot);
 		updateWidget(ctx);
 	};
 
-	pi.on("session_start", (_event, ctx) => reconstructState(ctx));
+	// Claude Code's model gate: frontier models and Sonnet 5+ run without the
+	// task tools unless CLAUDE_CODE_ENABLE_TODO_TOOLS is set (lib/model-tier.ts
+	// taskToolsEnabled). Re-applied on a model change, so switching to a model
+	// that has them brings them back through the deferred listing.
+	let withheld = false;
+	const applyModelGate = (model: Parameters<typeof taskToolsEnabled>[0]) => {
+		const enabled = taskToolsEnabled(model);
+		if (enabled === !withheld) return;
+		withheld = !enabled;
+		for (const name of TASK_TOOLS) {
+			if (withheld) pi.events.emit(WITHHOLD_CHANNEL, { name });
+			else pi.events.emit(DEFER_CHANNEL, { name, keywords: TASK_KEYWORDS });
+		}
+	};
+
+	pi.on("session_start", (_event, ctx) => {
+		reconstructState(ctx);
+		applyModelGate(ctx.model);
+	});
 	pi.on("session_tree", (_event, ctx) => reconstructState(ctx));
+	pi.on("model_select", (event) => applyModelGate(event.model));
+	pi.on("session_shutdown", () => cancelClear());
 
 	// Claude Code's periodic task_reminder (TODO_REMINDER_CONFIG): a gentle
 	// nudge once the task tools have gone unused for TURNS_SINCE_WRITE turns,
@@ -71,6 +136,8 @@ export default function tasksExtension(pi: ExtensionAPI) {
 	let turnsSinceReminder = TURNS_BETWEEN_REMINDERS;
 
 	pi.on("turn_end", () => {
+		// Claude Code's reminder needs TaskUpdate in the tool list.
+		if (withheld) return;
 		turnsSinceTaskUse++;
 		turnsSinceReminder++;
 		if (turnsSinceTaskUse < TURNS_SINCE_WRITE || turnsSinceReminder < TURNS_BETWEEN_REMINDERS) return;
@@ -86,6 +153,7 @@ export default function tasksExtension(pi: ExtensionAPI) {
 
 	const result = (text: string, ctx: ExtensionContext, isError = false) => {
 		updateWidget(ctx);
+		scheduleClear(ctx);
 		return {
 			content: [{ type: "text" as const, text }],
 			details: { taskSnapshot: store.snapshot() } satisfies TaskDetails,
@@ -172,7 +240,7 @@ export default function tasksExtension(pi: ExtensionAPI) {
 	});
 
 	for (const name of TASK_TOOLS) {
-		pi.events.emit(DEFER_CHANNEL, { name, keywords: ["task", "todo", "plan", "progress", "dependencies", "tracking"] });
+		pi.events.emit(DEFER_CHANNEL, { name, keywords: TASK_KEYWORDS });
 	}
 
 	registerLocalCommand(pi, "tasks", {
@@ -181,11 +249,15 @@ export default function tasksExtension(pi: ExtensionAPI) {
 		handler: async (args, ctx) => {
 			const arg = args?.trim().toLowerCase();
 			if (arg === "hide" || arg === "show") {
-				widgetHidden = arg === "hide";
-				updateWidget(ctx);
+				setWidgetHidden(arg === "hide", ctx);
 				return;
 			}
 			ctx.ui.notify(formatTaskList(store), "info");
 		},
+	});
+
+	pi.registerShortcut(TASKS_TOGGLE_KEY, {
+		description: "Show or hide the task list",
+		handler: (ctx) => setWidgetHidden(!widgetHidden, ctx),
 	});
 }
