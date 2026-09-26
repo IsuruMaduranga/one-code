@@ -33,7 +33,7 @@ import type { SubagentDefault } from "../subagents/default-model.ts";
 import { expensiveModelGate, resolveSubagentModel, subagentModelMenu } from "../subagents/model-select.ts";
 import { withoutUnusable } from "../lib/model-unusable.ts";
 import { cleanupWorktree, createWorktree, isGitRepo, type Worktree } from "../subagents/worktree.ts";
-import type { AgentCallOptions, AgentCallResult, AgentEffort, AgentRunUpdate } from "./types.ts";
+import type { AgentCallOptions, AgentCallResult, AgentEffort, AgentRunUpdate, KeptWorktree } from "./types.ts";
 import { WorkflowScriptError } from "./types.ts";
 
 const MAX_SCHEMA_RETRIES = 2;
@@ -245,6 +245,9 @@ export class AgentRunner {
 
 		await this.judgeDelegation(prompt, opts, agentDef, signal);
 
+		// Before the worktree exists: a malformed schema would otherwise leak it.
+		if (opts.schema) assertObjectSchema(opts.schema);
+
 		let worktree: Worktree | undefined;
 		let cwd = this.options.cwd;
 		if (opts.isolation === "worktree") {
@@ -277,6 +280,11 @@ export class AgentRunner {
 				sessionManager: SessionManager.inMemory(cwd),
 			},
 			onError: (error) => this.options.onNotice?.(`${opts.label ?? "agent"}: extension error in ${error.event}: ${error.error}`),
+		}).catch(async (error: unknown) => {
+			// Not yet under the prompt's try/finally: a session that fails to open
+			// must not leak the worktree and its branch.
+			if (worktree) await this.settleWorktree(worktree, opts.label, error);
+			throw error;
 		});
 
 		const unhookAbort = whenAborted(signal, () => void session.abort());
@@ -310,6 +318,7 @@ export class AgentRunner {
 			prefixWarmKey(agentPromptIdentity(agentDef?.name), cwd, model ? modelSpecOf(model) : undefined),
 			session,
 		);
+		let failure: unknown;
 		try {
 			await session.prompt(this.buildPrompt(prompt, Boolean(opts.schema)));
 			if (signal.aborted) throw new WorkflowScriptError("aborted");
@@ -326,19 +335,23 @@ export class AgentRunner {
 			}
 
 			const stats = session.getSessionStats();
-			// cleanupWorktree keeps trees holding uncommitted changes; report those.
-			let worktreePath: string | undefined;
+			// cleanupWorktree keeps trees holding uncommitted changes or commits; report those.
+			let kept: Worktree | undefined;
 			if (worktree) {
 				const removed = await cleanupWorktree(this.options.cwd, worktree);
-				if (!removed) worktreePath = worktree.path;
+				if (!removed) kept = worktree;
 				worktree = undefined;
 			}
 			return {
 				value,
 				tokens: { input: stats.tokens.input, output: stats.tokens.output, total: stats.tokens.total },
 				cost: stats.cost,
-				worktreePath,
+				worktreePath: kept?.path,
+				worktreeBranch: kept?.branch,
 			};
+		} catch (error) {
+			failure = error;
+			throw error;
 		} finally {
 			// Whatever the outcome — success, failure, or an abort (a user stop, or
 			// the run finishing with this agent un-awaited) — the provider was
@@ -349,8 +362,23 @@ export class AgentRunner {
 			unsubscribe?.();
 			unhookAbort();
 			session.dispose();
-			if (worktree) await cleanupWorktree(this.options.cwd, worktree);
+			// A failed or aborted agent can still have edited or committed in its
+			// worktree: settled after the session is gone, before the error reaches
+			// the caller, so the kept path rides on it.
+			if (worktree) await this.settleWorktree(worktree, opts.label, failure);
 		}
+	}
+
+	/**
+	 * Remove a failed agent's worktree, or keep it when it holds changes or
+	 * commits: then the run log names it, and the kept path rides on `error`
+	 * (`keptWorktreeOf`) so the agent's end event and the run report list it.
+	 */
+	private async settleWorktree(worktree: Worktree, label: string | undefined, error: unknown): Promise<void> {
+		if (await cleanupWorktree(this.options.cwd, worktree)) return;
+		const kept: KeptWorktree = { path: worktree.path, branch: worktree.branch };
+		this.options.onNotice?.(`${label ?? "agent"}: worktree kept at ${kept.path} (branch ${kept.branch}) with its changes or commits`);
+		if (error instanceof Error) (error as Error & { keptWorktree?: KeptWorktree }).keptWorktree = kept;
 	}
 
 	private judgeDelegation(prompt: string, opts: AgentCallOptions, agentDef: AgentDefinition | undefined, signal: AbortSignal): Promise<void> {
@@ -398,9 +426,7 @@ export class AgentRunner {
 
 /** Terminating tool capturing schema-validated output (pi validates params pre-execute). */
 function buildStructuredOutputTool(schema: Record<string, unknown>, capture: { called: boolean; value: unknown }): ToolDefinition {
-	if (schema.type !== "object" || typeof schema.properties !== "object") {
-		throw new WorkflowScriptError("agent() schema must be a JSON Schema with top-level type \"object\" and properties");
-	}
+	assertObjectSchema(schema);
 	return {
 		name: "structured_output",
 		label: "Structured Output",
@@ -416,6 +442,13 @@ function buildStructuredOutputTool(schema: Record<string, unknown>, capture: { c
 			};
 		},
 	} as ToolDefinition;
+}
+
+/** A structured_output schema must be an object schema with properties. */
+function assertObjectSchema(schema: Record<string, unknown>): void {
+	if (schema.type !== "object" || typeof schema.properties !== "object") {
+		throw new WorkflowScriptError("agent() schema must be a JSON Schema with top-level type \"object\" and properties");
+	}
 }
 
 /** Pull the first parseable JSON object/array out of free text (```json fences first). */

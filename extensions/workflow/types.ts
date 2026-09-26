@@ -47,8 +47,25 @@ export interface AgentCallResult {
 	value: unknown;
 	tokens: AgentTokens;
 	cost: number;
-	/** Path of a kept worktree (uncommitted changes were left behind), if any. */
+	/** Path of a kept worktree (the agent left uncommitted changes or commits there), if any. */
 	worktreePath?: string;
+	/** The kept worktree's branch, which holds the agent's commits. */
+	worktreeBranch?: string;
+}
+
+/** An `isolation: 'worktree'` agent's worktree, kept because it holds the agent's work. */
+export interface KeptWorktree {
+	path: string;
+	branch?: string;
+}
+
+/**
+ * The worktree a failed agent call kept, carried on the error it threw (the
+ * call returns no result to put it on), so the run still reports it.
+ */
+export function keptWorktreeOf(error: unknown): KeptWorktree | undefined {
+	const kept = (error as { keptWorktree?: KeptWorktree } | undefined)?.keptWorktree;
+	return kept && typeof kept.path === "string" ? kept : undefined;
 }
 
 /** One tool call an agent made, kept structured so the viewer owns the formatting. */
@@ -122,6 +139,8 @@ export type RunProgressEvent = (
 			preview?: string;
 			/** Failure message; presence means the agent failed. */
 			text?: string;
+			/** The agent's isolation worktree, kept because it holds changes or commits. */
+			worktree?: KeptWorktree;
 	  } & AgentEventBase)
 ) & { source?: string };
 
@@ -147,6 +166,8 @@ export interface AgentRecord {
 	outcome?: string;
 	/** Failure message when status === "failed". */
 	error?: string;
+	/** The agent's kept isolation worktree, where its changes or commits wait to be merged. */
+	worktree?: KeptWorktree;
 }
 
 /** A saved workflow discovered in .claude/workflows/ or ~/.claude/workflows/. */

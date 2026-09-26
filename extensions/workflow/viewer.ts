@@ -350,6 +350,10 @@ export function buildDetail(
 	} else {
 		section("Outcome", record.outcome ? wrapPlainText(record.outcome, width - 2) : ["Still running…"], record.outcome ? undefined : "dim");
 	}
+	if (record.worktree) {
+		const { path, branch } = record.worktree;
+		section("Worktree kept", wrapPlainText(`${path}${branch ? ` (branch ${branch})` : ""}`, width - 2));
+	}
 	return lines;
 }
 

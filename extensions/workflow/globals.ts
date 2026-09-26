@@ -25,7 +25,7 @@ import type {
 	JournalEntry,
 	RunProgressEvent,
 } from "./types.ts";
-import { WorkflowScriptError } from "./types.ts";
+import { keptWorktreeOf, type KeptWorktree, WorkflowScriptError } from "./types.ts";
 import type { ReplayCursor } from "./journal.ts";
 
 export const MAX_AGENTS_PER_RUN = 1000;
@@ -186,6 +186,7 @@ export function createScriptGlobals(options: ScriptGlobalsOptions): { globals: S
 				replayed: true,
 				prompt,
 				preview: previewValue(replayed.value),
+				...keptWorktreeField(replayed.worktreePath, replayed.worktreeBranch),
 			});
 			return replayed.value;
 		}
@@ -216,13 +217,14 @@ export function createScriptGlobals(options: ScriptGlobalsOptions): { globals: S
 					tokens: result.tokens,
 					cost: result.cost,
 					preview: previewValue(result.value),
+					...keptWorktreeField(result.worktreePath, result.worktreeBranch),
 				});
 				return result.value;
 			} catch (error) {
 				if (options.signal.aborted) {
 					// Close the record: the viewer would otherwise show a completed or
 					// stopped run with this agent still "running".
-					options.onEvent({ type: "agentEnd", callIndex, label, phase, text: "aborted" });
+					options.onEvent({ type: "agentEnd", callIndex, label, phase, text: "aborted", ...keptWorktreeField(keptWorktreeOf(error)?.path, keptWorktreeOf(error)?.branch) });
 					throw new WorkflowScriptError("Workflow run was aborted");
 				}
 				// A script-authoring mistake (bad agentType/model, worktree without a
@@ -233,7 +235,14 @@ export function createScriptGlobals(options: ScriptGlobalsOptions): { globals: S
 				if (error instanceof WorkflowScriptError) throw error;
 				// A failed agent resolves to null (Claude Code semantics); the
 				// failure is surfaced as a progress event, not an exception.
-				options.onEvent({ type: "agentEnd", callIndex, label, phase, text: `failed: ${(error as Error).message}` });
+				options.onEvent({
+					type: "agentEnd",
+					callIndex,
+					label,
+					phase,
+					text: `failed: ${(error as Error).message}`,
+					...keptWorktreeField(keptWorktreeOf(error)?.path, keptWorktreeOf(error)?.branch),
+				});
 				return null;
 			}
 		});
@@ -271,4 +280,9 @@ export function createScriptGlobals(options: ScriptGlobalsOptions): { globals: S
 	};
 
 	return { globals, state };
+}
+
+/** The `worktree` field of an agentEnd event, present only for a kept worktree. */
+function keptWorktreeField(path: string | undefined, branch: string | undefined): { worktree?: KeptWorktree } {
+	return path ? { worktree: branch ? { path, branch } : { path } } : {};
 }

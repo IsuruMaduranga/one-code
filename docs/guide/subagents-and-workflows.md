@@ -181,6 +181,11 @@ armed.
   frontier model.
 - In a `-p` or `--mode json` run, the workflow runs to completion and
   returns its result inline.
+- An agent the script runs with `isolation: 'worktree'` gets its own
+  worktree, like a subagent. If the agent leaves changes or commits there,
+  even when it fails, the worktree is kept: its path shows in the progress
+  strip and the agent's detail pane, and the final report lists every kept
+  worktree with its branch.
 
 ### The run viewer
 
