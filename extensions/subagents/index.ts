@@ -61,7 +61,7 @@ import { type ChildOutcome, forkTaskMessage, OUTPUT_CAP, type RpcChildHandle } f
 import { type AgentRunRecord, freeRunName, resolveRunName, RunRegistry } from "./runs.ts";
 import { SubagentRuntime } from "./runner.ts";
 import { emptyUsage, formatStats, type UsageTotals } from "./usage.ts";
-import { cleanupWorktree, createWorktree, isGitRepo, type Worktree } from "./worktree.ts";
+import { cleanupWorktree, createWorktree, isGitRepo, keptWorktreeNote, type Worktree } from "./worktree.ts";
 import { findGitRoot } from "../lib/git.ts";
 import { registerWorktreeIsolation } from "../lib/worktree-isolation.ts";
 import {
@@ -153,6 +153,8 @@ interface TaskResult {
 	usage: UsageTotals;
 	failed?: boolean;
 	worktreePath?: string;
+	/** The kept worktree's branch, which holds any commits the agent made. */
+	worktreeBranch?: string;
 	worktreeKept?: boolean;
 	/** What the child did, for auto mode's return review. */
 	actions?: ChildAction[];
@@ -1514,11 +1516,14 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				task: request.task,
 				...outcome,
 				worktreePath: worktreeKept ? worktree?.path : undefined,
+				worktreeBranch: worktreeKept ? worktree?.branch : undefined,
 				worktreeKept,
 			};
 		} catch (error) {
 			live.finish(true);
-			if (worktree) await cleanupWorktree(ctx.cwd, worktree);
+			// A failed run can still have committed or edited in its worktree:
+			// a kept one is reported like a finished run's.
+			const worktreeKept = worktree ? !(await cleanupWorktree(ctx.cwd, worktree)) : undefined;
 			return {
 				agent: request.agent,
 				name: request.name,
@@ -1528,6 +1533,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				toolCalls: 0,
 				usage: emptyUsage(),
 				failed: true,
+				worktreePath: worktreeKept ? worktree?.path : undefined,
+				worktreeBranch: worktreeKept ? worktree?.branch : undefined,
+				worktreeKept,
 			};
 		} finally {
 			runningIds.delete(record.taskId);
@@ -1578,7 +1586,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		const live = trackLiveRun(p.record, p.request);
 		const resident: Resident = { handle: undefined as never, startedAt: Date.now(), turnHandlers: [] };
 		const worktreeNote = worktree
-			? `\n\n(Running in worktree ${worktree.path} — kept while the agent stays resident.)`
+			? `\n\n(Running in worktree ${worktree.path} on branch ${worktree.branch} — kept while the agent stays resident, and after it exits if it holds uncommitted changes or commits.)`
 			: "";
 		resident.turnHandlers.push((outcome, review, stopped) => {
 			task.status = stopped ? "stopped" : outcome.failed ? "failed" : "completed";
@@ -2098,7 +2106,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					actions: result.actions ?? [],
 				} satisfies SubagentActionsPayload);
 				const stats = formatStats(result.toolCalls, result.usage);
-				const worktreeNote = result.worktreePath ? `\n\n(Changes left in worktree ${result.worktreePath} — review or merge them.)` : "";
+				const worktreeNote = result.worktreePath ? `\n\n${keptWorktreeNote(result.worktreePath, result.worktreeBranch)}` : "";
 				// The report arrives inline with no frame, no task id and no note, so a
 				// model told to "retrieve the result with task_output" chased an id that
 				// was never registered (WEAK-MODEL-REVIEW-2026-09-06 M3). Say it up
