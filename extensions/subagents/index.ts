@@ -374,7 +374,13 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	const enteredWorktree = followEnteredWorktree(pi.events);
 	const workCwd = (ctx: ExtensionContext) => sessionWorkCwd(enteredWorktree(), ctx.cwd);
 
-	/** The in-process runner, built lazily on first run and shared across all runs. */
+	/**
+	 * The in-process runner, built lazily on first run and shared across all runs.
+	 * A failed build (a malformed models.json or auth.json) is forgotten, so the
+	 * next spawn tries again instead of every later spawn failing on the same
+	 * rejected promise; callers await it before they mark a run as running
+	 * (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 L8).
+	 */
 	let runtimePromise: Promise<SubagentRuntime> | undefined;
 	const getRuntime = (ctx: ExtensionContext) =>
 		(runtimePromise ??= SubagentRuntime.create(
@@ -398,7 +404,13 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				live?.ui.notify(`Subagent model ${model} is not usable on this account (${reason}); automatic selection skips it from now on.`, "warning");
 				if (lastCtx) emitModelStatus(lastCtx);
 			},
-		));
+		).catch((error: unknown) => {
+			runtimePromise = undefined;
+			throw error;
+		}));
+	/** The runtime, or the build error as a message a failed run can report. */
+	const runtimeOrError = (ctx: ExtensionContext): Promise<SubagentRuntime | string> =>
+		getRuntime(ctx).catch((error: unknown) => `could not start the subagent runtime: ${error instanceof Error ? error.message : String(error)}`);
 
 	// The mcp extension answers a status request synchronously on the bus.
 	let mcpStatus: McpServerStatus[] | undefined;
@@ -1448,6 +1460,13 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		// The session's working directory: the entered worktree, if any.
 		const base = workCwd(ctx);
 
+		// Before anything marks the run as running: a failed build must not leave
+		// the task id in runningIds, where SendMessage would call it "still running".
+		const runtime = await runtimeOrError(ctx);
+		if (typeof runtime === "string") {
+			return { agent: request.agent, name: request.name, taskId: record.taskId, task: request.task, output: `Subagent failed: ${runtime}`, toolCalls: 0, usage: emptyUsage(), failed: true };
+		}
+
 		let worktree: Worktree | undefined;
 		if (request.worktree) {
 			try {
@@ -1468,7 +1487,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
 		runningIds.add(record.taskId);
 		const live = trackLiveRun(record, request, parent);
-		const runtime = await getRuntime(ctx);
 		const handle = runtime.run({
 			name: request.name,
 			agent: agentDef,
@@ -1772,7 +1790,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		registry.add(prepared.record);
 		// The session can be torn down while the runtime or the child starts; a
 		// fork launched after shutdown's stop-all sweep would outlive it.
-		const runtime = await getRuntime(ctx);
+		const runtime = await runtimeOrError(ctx);
+		if (typeof runtime === "string") {
+			registry.remove(taskId);
+			return { error: `Cannot fork: ${runtime}` };
+		}
 		if (shuttingDown) return { error: "The session ended before the fork started." };
 		const { launched, line } = await launchResident(prepared, ctx, runtime, { sessionFile, forkMessages: request.messages });
 		if (shuttingDown) {
@@ -2132,7 +2154,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			// steered system notification, and the child stays resident so
 			// SendMessage can reach it live (steer mid-turn, prompt when idle).
 			const lines: string[] = [...renamed, ...modelNotes];
-			const runtime = await getRuntime(ctx);
+			const runtime = await runtimeOrError(ctx);
+			if (typeof runtime === "string") {
+				// Nothing launched: forget the runs so list_agents and SendMessage never offer them.
+				for (const p of prepared) registry.remove(p.record.taskId);
+				return { content: [{ type: "text", text: `Could not start the agent: ${runtime}` }], details: {}, isError: true };
+			}
 			for (const p of prepared) {
 				const { launched, line } = await launchResident(p, ctx, runtime, { sessionFile: sessionFile ?? undefined, toolCallId });
 				if (launched) spawnedThisLoop.add(p.record.taskId);
@@ -2336,6 +2363,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				record.worktree = undefined;
 			}
 
+			// Before the run is marked running (L8, as in executeRun).
+			const runtime = await runtimeOrError(ctx);
+			if (typeof runtime === "string") {
+				return { content: [{ type: "text", text: `Could not resume ${record.name}: ${runtime}` }], details: {}, isError: true };
+			}
+
 			const taskId = generateTaskId();
 			let finish!: () => void;
 			const finished = new Promise<void>((resolve) => {
@@ -2356,7 +2389,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			// resumed turn runs blocking there and the reply is the tool result, as a
 			// spawn's report is (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 M3).
 			const oneShot = !sessionOutlivesTurn(ctx.mode);
-			const runtime = await getRuntime(ctx);
 			const handle = runtime.run({
 				name: record.name,
 				agent: loadAgents(ctx.cwd).find((a) => a.name === record.agent),

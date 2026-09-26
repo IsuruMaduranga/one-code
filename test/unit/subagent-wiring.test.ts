@@ -203,6 +203,42 @@ describe("subagent task_stop", () => {
 	});
 });
 
+// SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 L8: a failed runtime build (a malformed
+// models.json) stranded the task id in runningIds and poisoned every later spawn.
+describe("subagent runtime build failure", () => {
+	const failOnce = (then: SubagentRuntime) =>
+		vi.spyOn(SubagentRuntime, "create").mockRejectedValueOnce(new Error("models.json: Unexpected token")).mockResolvedValue(then);
+	const statusOf = async (h: Awaited<ReturnType<typeof mount>>, name: string) => {
+		const listed = (await h.call("list_agents", {})) as { details: { agents: Array<{ name: string; status: string }> } };
+		return listed.details.agents.find((a) => a.name === name)?.status;
+	};
+
+	it("fails a resume loud, leaves the agent resumable, and retries the build on the next call", async () => {
+		const sessionFile = join(dir, "child.jsonl");
+		writeFileSync(sessionFile, "");
+		const record: AgentRunRecord = { taskId: "persistent-id", name: "worker", agent: "general-purpose", cwd: dir, sessionFile, sessionSearchDir: dir };
+		const run = vi.fn(() => ({ result: new Promise<ChildOutcome>(() => {}), kill: vi.fn(), snapshot: () => ({ text: "", toolCalls: 0, usage: emptyUsage() }) }));
+		failOnce({ run } as unknown as SubagentRuntime);
+		const h = await mount([record]);
+		const first = (await h.call("SendMessage", { to: "worker", message: "Continue" })) as { content: Array<{ text: string }>; isError?: boolean };
+		expect(first.isError).toBe(true);
+		expect(first.content[0].text).toContain("could not start the subagent runtime: models.json: Unexpected token");
+		expect(await statusOf(h, "worker")).toBe("finished (resume with SendMessage)");
+		const second = (await h.call("SendMessage", { to: "worker", message: "Continue" })) as { isError?: boolean };
+		expect(second.isError).toBeUndefined();
+		expect(run).toHaveBeenCalledOnce();
+	});
+
+	it("forgets a background spawn that could not start", async () => {
+		failOnce({} as SubagentRuntime);
+		const h = await mount();
+		const result = (await h.call("Agent", { subagent_type: "general-purpose", task: "Count the files" })) as { content: Array<{ text: string }>; isError?: boolean };
+		expect(result.isError).toBe(true);
+		expect(result.content[0].text).toContain("could not start the subagent runtime");
+		expect(await statusOf(h, "general-purpose-1")).toBeUndefined();
+	});
+});
+
 // SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 M4: the pending-claim backstop (cheap
 // and tiny tiers) fires only for an agent whose report has not gone out.
 describe("subagent pending-claim backstop", () => {
