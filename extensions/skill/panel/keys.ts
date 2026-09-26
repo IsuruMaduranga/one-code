@@ -1,41 +1,40 @@
 /**
- * Raw-byte key decoding for the /skills panel (pure).
+ * Key decoding for the /skills panel (pure), named through
+ * `lib/key-input.ts` so every terminal encoding of a key decodes alike.
  *
- * Same control-byte map as the /plugins panel; kept local so the skill
+ * Same key map as the /plugins panel; kept local so the skill
  * extension carries no dependency on another extension's internals. Printable
  * input is a `text` intent the state layer routes (into the search box, or as a
  * single-letter action when search is inactive). Skill names never contain
  * spaces, so Space is always the cycle action, never typed.
  */
 
+import { keyId, keyText } from "../../lib/key-input.ts";
+
 export type SkillsKey =
 	| { kind: "up" | "down" | "enter" | "space" | "back" | "backspace" | "close" }
 	| { kind: "text"; text: string };
 
 export function decodeSkillsKey(data: string): SkillsKey | undefined {
-	switch (data) {
-		case "\x1b[A":
-		case "\x1bOA":
+	switch (keyId(data)) {
+		case "up":
 			return { kind: "up" };
-		case "\x1b[B":
-		case "\x1bOB":
+		case "down":
 			return { kind: "down" };
-		case "\r":
-		case "\n":
+		case "enter":
 			return { kind: "enter" };
-		case " ":
+		case "space":
 			return { kind: "space" };
-		case "\x1b":
+		case "escape":
 			return { kind: "back" };
-		case "\x7f":
-		case "\b":
+		case "backspace":
+		case "ctrl+backspace":
 			return { kind: "backspace" };
-		case "\x03":
+		case "ctrl+c":
 			return { kind: "close" };
 		default:
 			break;
 	}
-	if (data.startsWith("\x1b")) return undefined;
-	const text = [...data].filter((ch) => ch >= " " && ch !== "\x7f").join("");
+	const text = keyText(data);
 	return text ? { kind: "text", text } : undefined;
 }

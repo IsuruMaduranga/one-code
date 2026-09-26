@@ -89,7 +89,8 @@ import { recordUsage } from "../lib/usage-bus.ts";
 import { SUBAGENT_DEFAULT_CHANGED_CHANNEL } from "../lib/settings-channels.ts";
 import { SubagentWidget } from "./panel-widget.ts";
 import { type ProseRenderer, renderTranscript } from "./panel-render.ts";
-import { decodeStripKey, type StripKey } from "./panel-keys.ts";
+import { decodeStripKey, editorYieldsDown, isStripEntryKey, type StripKey } from "./panel-keys.ts";
+import { isKeyRelease } from "../lib/key-input.ts";
 import { reduceShellKey } from "./shell-panel.ts";
 import { trackShellTasks } from "../lib/shell-tasks.ts";
 import { createMarkdownProse } from "./prose.ts";
@@ -899,7 +900,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			leave();
 			return undefined;
 		};
-		const DOWN_KEYS = new Set(["\x1b[B", "\x1bOB"]);
 		/** Keys the agents branch owns; any other decode (typing, shell-only keys
 		 * like left/space) drops focus and passes through — stated positively so a
 		 * future StripKey addition is foreign here by default. */
@@ -958,6 +958,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		};
 		try {
 			registerCtx.ui.onTerminalInput((data) => {
+				// pi-tui calls input listeners before it filters key releases, and a
+				// kitty terminal sends one after every press: a release is never a
+				// key here (it used to read as typing and drop focus).
+				if (isKeyRelease(data)) return undefined;
 				const ctx = lastCtx ?? registerCtx;
 				// Enter focus: down-arrow while the editor holds real focus. Unlike the
 				// workflow strip we do NOT require the editor to be idle — the whole
@@ -967,7 +971,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				// plain typing. Claude Code's order: the FIRST ↓ lands on the shells
 				// chip when shells are running; the next ↓ moves into the agent rows.
 				if (panel.focusIndex === undefined && panel.shellFocus === undefined) {
-					if (!DOWN_KEYS.has(data) || !panel.editorFocused()) return undefined;
+					if (!isStripEntryKey(data) || !panel.editorFocused()) return undefined;
+					// In a draft, ↓ first moves the cursor, walks recalled history or the
+					// autocomplete list; the strip takes it only past the draft's last line.
+					if (!editorYieldsDown(panel.editorBaseline)) return undefined;
 					if (panel.shellChipAvailable()) {
 						panel.setShellFocus({ stage: "chip" });
 						return { consume: true };

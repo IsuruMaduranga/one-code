@@ -1,52 +1,49 @@
 /**
- * Raw-byte key decoding for the /plugins panel (pure).
+ * Key decoding for the /plugins panel (pure), named through
+ * `lib/key-input.ts` so every terminal encoding of a key decodes alike.
  *
- * Navigation bytes are always controls; any other printable input is a `text`
+ * Navigation keys are always controls; any other printable input is a `text`
  * intent the state layer routes (search box, Add Marketplace draft, or a
  * single-letter action where the active view has no text field). Unrecognized
  * escape sequences are swallowed so they never leak into a draft.
  */
+
+import { keyId, keyText } from "../../lib/key-input.ts";
 
 export type PanelKey =
 	| { kind: "up" | "down" | "pageUp" | "pageDown" | "nextTab" | "prevTab" | "enter" | "back" | "space" | "backspace" | "close" }
 	| { kind: "text"; text: string };
 
 export function decodePanelKey(data: string): PanelKey | undefined {
-	switch (data) {
-		case "\x1b[A":
-		case "\x1bOA":
+	switch (keyId(data)) {
+		case "up":
 			return { kind: "up" };
-		case "\x1b[B":
-		case "\x1bOB":
+		case "down":
 			return { kind: "down" };
-		case "\x1b[5~":
+		case "pageUp":
 			return { kind: "pageUp" };
-		case "\x1b[6~":
+		case "pageDown":
 			return { kind: "pageDown" };
-		case "\x1b[C":
-		case "\x1bOC":
-		case "\t":
+		case "right":
+		case "tab":
 			return { kind: "nextTab" };
-		case "\x1b[D":
-		case "\x1bOD":
-		case "\x1b[Z":
+		case "left":
+		case "shift+tab":
 			return { kind: "prevTab" };
-		case "\r":
-		case "\n":
+		case "enter":
 			return { kind: "enter" };
-		case "\x1b":
+		case "escape":
 			return { kind: "back" };
-		case " ":
+		case "space":
 			return { kind: "space" };
-		case "\x7f":
-		case "\b":
+		case "backspace":
+		case "ctrl+backspace":
 			return { kind: "backspace" };
-		case "\x03": // ctrl+c
+		case "ctrl+c":
 			return { kind: "close" };
 		default:
 			break;
 	}
-	if (data.startsWith("\x1b")) return undefined;
-	const text = [...data].filter((ch) => ch >= " " && ch !== "\x7f").join("");
+	const text = keyText(data);
 	return text ? { kind: "text", text } : undefined;
 }

@@ -1,5 +1,6 @@
 /**
- * Raw-byte key decoding for the /mcp panel (pure).
+ * Key decoding for the /mcp panel (pure), named through `lib/key-input.ts`
+ * so every terminal encoding of a key decodes alike.
  *
  * The panel is a two-level menu (server list → server detail with a numbered
  * action list), navigated with the arrows and Enter, Esc to go back/close. A
@@ -7,28 +8,28 @@
  * other printable input is ignored.
  */
 
+import { keyId } from "../../lib/key-input.ts";
+
 export type McpKey =
 	| { kind: "up" | "down" | "enter" | "back" | "close" }
 	| { kind: "digit"; value: number };
 
 export function decodeMcpKey(data: string): McpKey | undefined {
-	switch (data) {
-		case "\x1b[A":
-		case "\x1bOA":
+	const id = keyId(data);
+	switch (id) {
+		case "up":
 			return { kind: "up" };
-		case "\x1b[B":
-		case "\x1bOB":
+		case "down":
 			return { kind: "down" };
-		case "\r":
-		case "\n":
+		case "enter":
 			return { kind: "enter" };
-		case "\x1b":
+		case "escape":
 			return { kind: "back" };
-		case "\x03": // ctrl+c
+		case "ctrl+c":
 			return { kind: "close" };
 		default:
 			break;
 	}
-	if (data.length === 1 && data >= "1" && data <= "9") return { kind: "digit", value: Number(data) };
+	if (id && id.length === 1 && id >= "1" && id <= "9") return { kind: "digit", value: Number(id) };
 	return undefined;
 }

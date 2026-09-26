@@ -15,6 +15,7 @@
  */
 
 import type { BtwExchange } from "./prompt.ts";
+import { keyId, keyText } from "../lib/key-input.ts";
 import { panelTopRule, safeThemeBold, safeThemePaint, truncateLine, wrapPlainText } from "../lib/tui-render.ts";
 
 export const BTW_MAX_HEIGHT = 24;
@@ -56,35 +57,43 @@ export type BtwKey =
 	| { kind: "browse"; direction: "older" | "newer"; wrap: boolean };
 
 export function decodeBtwKey(data: string): BtwKey | undefined {
-	switch (data) {
-		case "\x1b[A":
-		case "\x1bOA":
-		case "\x10": // ctrl+p
+	switch (keyId(data)) {
+		case "up":
+		case "ctrl+p":
 			return { kind: "up" };
-		case "\x1b[B":
-		case "\x1bOB":
-		case "\x0e": // ctrl+n
+		case "down":
+		case "ctrl+n":
 			return { kind: "down" };
-		case "\x1b[5~":
+		case "pageUp":
 			return { kind: "pageUp" };
-		case "\x1b[6~":
+		case "pageDown":
 			return { kind: "pageDown" };
-		case "\x1b[H":
-		case "\x1bOH":
+		case "home":
 			return { kind: "top" };
-		case "\x1b[F":
-		case "\x1bOF":
+		case "end":
 			return { kind: "bottom" };
-		case "\x1b[1;2D": // shift+left
+		case "shift+left":
+			return { kind: "browse", direction: "older", wrap: false };
+		case "shift+right":
+			return { kind: "browse", direction: "newer", wrap: false };
+		case "tab":
+			return { kind: "browse", direction: "older", wrap: true };
+		case "shift+tab":
+			return { kind: "browse", direction: "newer", wrap: true };
+		case "escape":
+		case "ctrl+c":
+		case "ctrl+d":
+		case "enter":
+		case "space":
+			return { kind: "close" };
+		default:
+			break;
+	}
+	switch (keyText(data)) {
 		case "[":
 			return { kind: "browse", direction: "older", wrap: false };
-		case "\x1b[1;2C": // shift+right
 		case "]":
 			return { kind: "browse", direction: "newer", wrap: false };
-		case "\t":
-			return { kind: "browse", direction: "older", wrap: true };
-		case "\x1b[Z": // shift+tab
-			return { kind: "browse", direction: "newer", wrap: true };
 		case "c":
 		case "C":
 			return { kind: "copy" };
@@ -94,11 +103,6 @@ export function decodeBtwKey(data: string): BtwKey | undefined {
 		case "x":
 		case "X":
 			return { kind: "clear" };
-		case "\x1b":
-		case "\x03": // ctrl+c
-		case "\x04": // ctrl+d
-		case "\r":
-		case " ":
 		case "q":
 			return { kind: "close" };
 		default:

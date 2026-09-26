@@ -14,6 +14,7 @@
 import { cutPlainText as cut, formatDuration, padPlainText, splitCell, splitRow, visibleWidth, wrapPlainText } from "../lib/tui-render.ts";
 import { formatTokenCount } from "../subagents/usage.ts";
 import type { AgentRecord, RunStatus } from "./types.ts";
+import { keyId, keyText } from "../lib/key-input.ts";
 
 /** Theme access the renderer needs: fg tokens ("accent", "dim", "error", …) and bold. */
 export interface ViewerPaint {
@@ -76,24 +77,27 @@ export type ViewerKey =
 	| { kind: "close" };
 
 export function decodeViewerKey(data: string): ViewerKey | undefined {
-	switch (data) {
-		case "\x1b[A":
-		case "\x1bOA":
+	switch (keyId(data)) {
+		case "up":
 			return { kind: "up" };
-		case "\x1b[B":
-		case "\x1bOB":
+		case "down":
 			return { kind: "down" };
-		case "\x1b[5~":
+		case "pageUp":
 			return { kind: "pageUp" };
-		case "\x1b[6~":
+		case "pageDown":
 			return { kind: "pageDown" };
-		case "\t":
+		case "tab":
 			return { kind: "nextRun" };
-		case "\r":
-		case "\n":
+		case "enter":
 			return { kind: "enter" };
-		case "\x1b":
+		case "escape":
 			return { kind: "back" };
+		case "ctrl+c": // close from anywhere, like q
+			return { kind: "close" };
+		default:
+			break;
+	}
+	switch (keyText(data)) {
 		case "x":
 		case "X":
 			return { kind: "stop" };
@@ -101,7 +105,6 @@ export function decodeViewerKey(data: string): ViewerKey | undefined {
 		case "S":
 			return { kind: "save" };
 		case "q":
-		case "\x03": // ctrl+c — close from anywhere, like q
 			return { kind: "close" };
 		default:
 			return undefined;

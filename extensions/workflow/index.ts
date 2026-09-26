@@ -60,6 +60,7 @@ import { WorkflowWidget } from "./widget.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 import { sessionWorkCwd } from "../lib/worktree-channel.ts";
 import { followEnteredWorktree } from "../lib/worktree-isolation.ts";
+import { isKeyRelease, keyId } from "../lib/key-input.ts";
 
 /**
  * Claude Code's own arming reminder, verbatim in intent: the keyword is a
@@ -482,13 +483,15 @@ export default function workflowExtension(pi: ExtensionAPI) {
 	// consume is guarded by "the core editor really has focus" (identity
 	// against the captured baseline) to never steal keys from dialogs.
 	let inputHookRegistered = false;
-	const DOWN_KEYS = new Set(["\x1b[B", "\x1bOB"]);
 	const registerInputHook = (registerCtx: ExtensionContext) => {
 		if (inputHookRegistered || !registerCtx.hasUI) return;
 		inputHookRegistered = true;
 		const leave = () => widget.setFocus(undefined);
 		try {
 			registerCtx.ui.onTerminalInput((data) => {
+				// pi-tui calls input listeners before it filters key releases, and a
+				// kitty terminal sends one after every press: never a key here.
+				if (isKeyRelease(data)) return undefined;
 				// Session switches replace the ExtensionContext; the hook registers
 				// once, so it must act through the freshest ctx, not its closure.
 				const ctx = lastCtx ?? registerCtx;
@@ -497,7 +500,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 					return undefined;
 				}
 				if (widget.focusIndex === undefined) {
-					if (!DOWN_KEYS.has(data) || !widget.editorFocusedAndIdle(ctx)) return undefined;
+					if (keyId(data) !== "down" || !widget.editorFocusedAndIdle(ctx)) return undefined;
 					widget.setFocus(0);
 					return { consume: true };
 				}
