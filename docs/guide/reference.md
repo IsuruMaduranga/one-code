@@ -163,6 +163,7 @@ Set these before launching.
 | Variable | Effect |
 |---|---|
 | `ONECODE_STATE_DIR` | Where One Code keeps its state (default `~/.onecode`). Independent of pi's agent directory. |
+| `ONECODE_AGENT_DIR` | pi's agent directory under the bundled app (default `~/.onecode/agent`). |
 | `ONECODE_NO_UPDATE_CHECK=1` | Skip the daily update check. |
 | `ONECODE_DEBUG=1` | Report when a pi-internal patch in the bundled app didn't apply. |
 | `AA_API_KEY` | Artificial Analysis key for measured model selection. |
@@ -190,14 +191,14 @@ The `CC_` prefix is historical; `ONECODE_`-prefixed aliases are planned.
 | `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` | Give frontier models and Sonnet 5 or later the task tools, which they run without by default. |
 | `CC_HOOKS_DEBUG=1` | Print hook dispatches to stderr and log decisions. |
 | `CC_AUTO_MODE_DEBUG=1` | Print classifier verdicts to stderr. `2` is more verbose. |
-| `CC_VERSION` | The version shown in the banner (set by the app). |
+| `CC_VERSION` | The version shown in the banner (set by the app, and not passed on to the commands it runs). |
 | `CC_PERMISSION_MODE` | Set by One Code to the live mode for child processes. Not an input; use `--permission-mode`. |
 
 ### pi and Claude Code variables honored
 
 | Variable | Effect |
 |---|---|
-| `PI_CODING_AGENT_DIR` | pi's agent directory. The app sets `~/.onecode/agent`. |
+| `PI_CODING_AGENT_DIR` | pi's agent directory on your own pi. The bundled app ignores it and uses `ONECODE_AGENT_DIR`; commands the app runs get your own value back. |
 | `PI_CACHE_RETENTION` | pi's prompt-cache lifetime. One Code sets `long` for interactive sessions unless you set it yourself. |
 | `PI_OFFLINE=1` | Same as `--offline`. |
 | `CLAUDE_CONFIG_DIR` | Where Claude Code's user configuration is read from. |

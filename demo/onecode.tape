@@ -17,7 +17,7 @@
 # `provider/model`, e.g. `Type "openai luna"`) to land on your funded one.
 #
 # The /model choice is persisted into pi's settings by the app. To record
-# without changing your own default, point PI_CODING_AGENT_DIR at a copy of
+# without changing your own default, point ONECODE_AGENT_DIR at a copy of
 # ~/.onecode/agent (auth.json + settings.json) before running vhs.
 #
 # What the clip shows, in order: launch, the permission modes (auto is the

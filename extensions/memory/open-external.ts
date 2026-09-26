@@ -14,6 +14,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { childProcessEnv } from "../lib/app-launch.mjs";
 import { commandLaunch } from "../lib/command-launch.ts";
 
 export interface OpenPlan {
@@ -80,8 +81,11 @@ export function openPath(path: string, kind: "file" | "folder"): Promise<OpenRes
 		let child: ReturnType<typeof spawn>;
 		try {
 			// `$EDITOR=code` is VS Code's `code.cmd` shim on Windows, which a bare spawn cannot start.
-			const launch = commandLaunch(command, args, process.env);
-			child = spawn(launch.command, launch.args, { stdio: "ignore", detached: true, windowsVerbatimArguments: launch.windowsVerbatimArguments });
+			// The user's own environment under the bundled app (lib/app-launch.mjs): an
+			// editor with a terminal must not hand the app's pi state to a `pi` run there.
+			const env = childProcessEnv(process.env);
+			const launch = commandLaunch(command, args, env);
+			child = spawn(launch.command, launch.args, { env, stdio: "ignore", detached: true, windowsVerbatimArguments: launch.windowsVerbatimArguments });
 		} catch (error) {
 			finish({ message: `Could not open ${path}: ${error instanceof Error ? error.message : error}`, ok: false });
 			return;

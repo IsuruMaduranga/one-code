@@ -5,8 +5,10 @@
  * A thin launcher around the pinned pi harness in this package's dependency
  * tree. It does four things before handing argv to pi's `main()`:
  *
- * 1. Isolates all state under ~/.onecode (PI_CODING_AGENT_DIR), so an
- *    existing `pi` install on the same machine is never touched.
+ * 1. Isolates all state under ~/.onecode (PI_CODING_AGENT_DIR, set
+ *    unconditionally; ONECODE_AGENT_DIR relocates it), so an existing `pi`
+ *    install on the same machine is never touched, and spawned commands get
+ *    the user's own environment back (extensions/lib/app-launch.mjs).
  * 2. Registers the one-code-extension package (from our own node_modules)
  *    in the isolated settings, so pi's package manager loads the extensions,
  *    themes, and bundled agents exactly as a `pi install` would.
@@ -46,23 +48,24 @@ const appDir = dirname(fileURLToPath(import.meta.url));
 const appVersion = JSON.parse(readFileSync(join(appDir, "package.json"), "utf8")).version;
 
 // --- 1. Isolated state ----------------------------------------------------
-process.env.PI_CODING_AGENT_DIR ||= join(homedir(), ".onecode", "agent");
-process.env.PI_SKIP_VERSION_CHECK = "1"; // One Code ships its own update check
-process.env.CC_VERSION ||= appVersion; // the banner shows the app version
-const agentDir = process.env.PI_CODING_AGENT_DIR;
+// The environment rules live in the extension package (app-launch.mjs), next to
+// the spawn helper that undoes them for child processes.
+const corePath = dirname(require.resolve("one-code-extension/package.json"));
+const { applyLauncherEnv, installMethodFor } = await import(
+	pathToFileURL(join(corePath, "extensions", "lib", "app-launch.mjs")).href
+);
 // Where the bin lives says how it was installed. Published before any fast
 // path (the doctor CLI exits early): the doctor's update lookup and the update
 // notice read it (lib/update-check.mjs minReleaseAgeFor) — under Homebrew a
 // release counts as available only a day after its npm publish.
-const brewPrefixes = ["/opt/homebrew/", "/usr/local/Cellar/", "/home/linuxbrew/"];
-let installedViaBrew = false;
+let binRealPath;
 try {
-	const binPath = realpathSync(process.argv[1] ?? "");
-	installedViaBrew = brewPrefixes.some((prefix) => binPath.startsWith(prefix));
+	binRealPath = realpathSync(process.argv[1] ?? "");
 } catch {
-	// Unresolvable argv[1] (unusual embedding): assume npm.
+	// Unresolvable argv[1] (unusual embedding): installMethodFor reads it as npm.
 }
-process.env.ONECODE_INSTALL_METHOD ||= installedViaBrew ? "brew" : "npm";
+const installMethod = installMethodFor(binRealPath);
+const agentDir = applyLauncherEnv(process.env, { home: homedir(), appVersion, installMethod });
 
 // --- fast path: --version reports the app, not the harness ----------------
 const argv = process.argv.slice(2);
@@ -93,7 +96,6 @@ const runDoctor = argv[0] === "doctor";
 // the path tracks node_modules content. The entry is re-ensured every launch:
 // npm may relocate node_modules (different Node/prefix), and a stale path
 // from a previous install must be replaced, not accumulated.
-const corePath = dirname(require.resolve("one-code-extension/package.json"));
 const settingsPath = join(agentDir, "settings.json");
 try {
 	mkdirSync(agentDir, { recursive: true });
@@ -357,7 +359,7 @@ await main(argv, {
 			factory: createUpdateCheck({
 				currentVersion: appVersion,
 				stampPath: join(agentDir, "last-update-check"),
-				upgradeHint: installedViaBrew ? UPGRADE_COMMANDS.brew : UPGRADE_COMMANDS.npm,
+				upgradeHint: UPGRADE_COMMANDS[installMethod],
 				minReleaseAgeMs: minReleaseAgeFor(),
 			}),
 		},

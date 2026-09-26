@@ -26,3 +26,17 @@ declare module "*/lib/update-check.mjs" {
 		minReleaseAgeMs?: number;
 	}): (pi: unknown) => void;
 }
+
+/** Types for the plain-JS launcher-environment module (extensions/lib/app-launch.mjs). */
+declare module "*/app-launch.mjs" {
+	export const APP_AGENT_DIR_VAR: string;
+	export const LAUNCHER_ENV_VAR: string;
+	export const LAUNCHER_VARS: readonly string[];
+	export function appAgentDir(env?: Record<string, string | undefined>, home?: string): string;
+	export function installMethodFor(binRealPath: string | undefined): "brew" | "npm";
+	export function applyLauncherEnv(
+		env: Record<string, string | undefined>,
+		options: { home?: string; appVersion: string; installMethod: "brew" | "npm" },
+	): string;
+	export function childProcessEnv(env?: NodeJS.ProcessEnv, platform?: NodeJS.Platform): NodeJS.ProcessEnv;
+}

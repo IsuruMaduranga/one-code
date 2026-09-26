@@ -17,11 +17,13 @@
  * detaches.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { createBashToolDefinition } from "@earendil-works/pi-coding-agent";
+import { join } from "node:path";
+import type { BashSpawnContext, ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { createBashToolDefinition, createLocalBashOperations, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { childProcessEnv, LAUNCHER_ENV_VAR } from "../lib/app-launch.mjs";
 import { perCwd } from "../lib/per-cwd.ts";
-import { bashSpawn } from "../lib/shell-spawn.ts";
+import { bashSpawn, piShellEnv, withChildProcessEnv } from "../lib/shell-spawn.ts";
 import { registerShellTool } from "../lib/shell-tool.ts";
 import { bashGuardReason } from "./guards.ts";
 
@@ -56,7 +58,10 @@ export default function bashExtension(pi: ExtensionAPI) {
 	// is re-created per working directory because it closes over cwd (worktree
 	// switches change ctx.cwd mid-session). The same bash drives pi's foreground
 	// executor, so the override applies there too.
-	const base = createBashToolDefinition(process.cwd(), { shellPath });
+	// Every command the model runs gets the user's own environment back under
+	// the bundled app (lib/app-launch.mjs), so a `pi` it starts is the user's pi.
+	const spawnHook = (context: BashSpawnContext): BashSpawnContext => ({ ...context, env: childProcessEnv(context.env) });
+	const base = createBashToolDefinition(process.cwd(), { shellPath, spawnHook });
 	// pi's base sentence is "Optionally provide a timeout in seconds." — but the
 	// `timeout` parameter and the execute path both use milliseconds (Claude
 	// Code's Bash unit; the executor divides by 1000). The two must not
@@ -74,8 +79,17 @@ export default function bashExtension(pi: ExtensionAPI) {
 		description: `${baseDescription} Pass run_in_background: true for long-running commands (builds, servers, watches): it returns a task id immediately so you can keep working, completion arrives as a task notification, and the output is retrievable with task_output / stoppable with task_stop (both deferred — load them with tool_search; in a one-shot print/json session the call runs to completion within the foreground timeout and returns the output directly). Foreground \`sleep\` is blocked; to wait on a condition use the monitor tool (deferred — load it with tool_search select:monitor) with an until-loop.`,
 		parameters: BashParams,
 		base,
-		foreground: perCwd((cwd: string) => createBashToolDefinition(cwd, { shellPath })),
+		foreground: perCwd((cwd: string) => createBashToolDefinition(cwd, { shellPath, spawnHook })),
 		guard: bashGuardReason,
 		backgroundShell: () => bash.spawn,
+	});
+
+	// The user's own `!` commands, under the bundled app only: pi runs them with
+	// its full process environment, so they get the same restore. Outside the app
+	// pi's default path runs untouched. They run in the session's bash, the one
+	// the bash tool uses.
+	pi.on("user_bash", () => {
+		if (process.env[LAUNCHER_ENV_VAR] === undefined) return undefined;
+		return { operations: withChildProcessEnv(createLocalBashOperations({ shellPath }), () => piShellEnv(join(getAgentDir(), "bin"))) };
 	});
 }
