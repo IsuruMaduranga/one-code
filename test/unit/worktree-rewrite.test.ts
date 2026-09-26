@@ -1,6 +1,8 @@
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { rewriteToolInput, shellQuote, validateWorktreeName } from "../../extensions/worktree/rewrite.ts";
+// pi's own resolver, reached by file path (its package root does not export it), to pin the vendored copy to it.
+import { resolveToCwd } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/tools/path-utils.js";
+import { normalizeToolPath, rewriteToolInput, shellQuote, validateWorktreeName } from "../../extensions/worktree/rewrite.ts";
 
 const WT = "/repo/.claude/worktrees/fix";
 
@@ -87,5 +89,40 @@ describe("validateWorktreeName", () => {
 		expect(validateWorktreeName("a/../b")).toBeDefined();
 		expect(validateWorktreeName("x".repeat(65))).toBeDefined();
 		expect(validateWorktreeName("")).toBeDefined();
+	});
+});
+
+describe("rewriteToolInput reads paths the way pi's tools do", () => {
+	it("leaves ~ and file:// paths absolute instead of nesting them in the worktree", () => {
+		const tilde: Record<string, unknown> = { path: "~/proj/src/new.ts" };
+		rewriteToolInput("write", tilde, WT);
+		expect(tilde.path).toBe("~/proj/src/new.ts");
+
+		const url: Record<string, unknown> = { path: "file:///x/y.ts" };
+		rewriteToolInput("read", url, WT);
+		expect(url.path).toBe("file:///x/y.ts");
+	});
+
+	it("drops a leading @ before resolving a relative path against the worktree", () => {
+		const at: Record<string, unknown> = { path: "@src/new.ts" };
+		rewriteToolInput("write", at, WT);
+		expect(at.path).toBe(resolve(WT, "src/new.ts"));
+	});
+
+	it("lands every spelling where pi's resolveToCwd would, relative to the worktree", () => {
+		for (const spelling of ["src/a.ts", "@src/a.ts", "~/a.ts", "~", "@/abs/a.ts", "file:///x/y.ts", "/abs/b.ts", "a\u2003b.ts"]) {
+			const normalized = normalizeToolPath(spelling);
+			expect(resolve(WT, normalized)).toBe(resolveToCwd(spelling, WT));
+		}
+	});
+
+	it("normalizes like pi's resolveToCwd", () => {
+		expect(normalizeToolPath("~", "/home/u", "linux")).toBe("/home/u");
+		expect(normalizeToolPath("~/a", "/home/u", "linux")).toBe("/home/u/a");
+		expect(normalizeToolPath("@/abs/a", "/home/u", "linux")).toBe("/abs/a");
+		expect(normalizeToolPath("a\u00A0b.ts", "/home/u", "linux")).toBe("a b.ts");
+		expect(normalizeToolPath("file:///x/y.ts", "/home/u", "linux")).toBe("/x/y.ts");
+		expect(normalizeToolPath("/c/proj/a.ts", "C:\\Users\\u", "win32")).toBe("C:\\proj\\a.ts");
+		expect(normalizeToolPath("/c/proj/a.ts", "/home/u", "linux")).toBe("/c/proj/a.ts");
 	});
 });

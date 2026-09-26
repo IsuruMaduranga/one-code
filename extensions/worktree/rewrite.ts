@@ -9,7 +9,9 @@
  * and explicit.
  */
 
-import { isAbsolute, resolve } from "node:path";
+import { homedir } from "node:os";
+import { isAbsolute, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 /** Tools whose `path` argument is relative to the session cwd. */
 const PATH_TOOLS = new Set(["read", "edit", "write", "notebook_edit", "grep", "find", "ls", "lsp_diagnostics"]);
@@ -76,12 +78,37 @@ export function rewriteToolInput(
 		(field) => typeof input[field] === "string" && (input[field] as string).length > 0,
 	);
 	if (pathField) {
-		const value = input[pathField] as string;
-		if (!isAbsolute(value)) input[pathField] = resolve(worktreePath, value);
+		// Read the value the way pi's tools will (`~`, `@`, `file://`): judged
+		// raw, `~/x` and `@src/x` looked relative and became literal `~` and `@src`
+		// directories inside the worktree.
+		const normalized = normalizeToolPath(input[pathField] as string);
+		if (!isAbsolute(normalized)) input[pathField] = resolve(worktreePath, normalized);
 	} else if (DEFAULTS_TO_CWD.has(toolName)) {
 		input.path = worktreePath;
 	}
 	return {};
+}
+
+const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
+
+/**
+ * A path argument as pi's file tools read it before resolving it against the
+ * session cwd (pi-coding-agent `resolveToCwd`, not exported from its package
+ * root, so vendored): unicode spaces become plain spaces, a leading `@` is
+ * dropped, a Git Bash drive path becomes a Windows one on win32, `~` expands,
+ * and a `file://` URL becomes its path. Exported for tests.
+ */
+export function normalizeToolPath(value: string, home = homedir(), platform: NodeJS.Platform = process.platform): string {
+	let path = value.replace(UNICODE_SPACES, " ");
+	if (path.startsWith("@")) path = path.slice(1);
+	if (platform === "win32" && path.startsWith("/") && !path.startsWith("//") && !path.includes("\\")) {
+		const drive = /^\/(?:mnt\/|cygdrive\/)?([a-z])(?:\/(.*))?$/i.exec(path);
+		if (drive) path = `${drive[1].toUpperCase()}:\\${drive[2]?.replaceAll("/", "\\") ?? ""}`;
+	}
+	if (path === "~") return home;
+	if (path.startsWith("~/") || (platform === "win32" && path.startsWith("~\\"))) return join(home, path.slice(2));
+	if (/^file:\/\//.test(path)) return fileURLToPath(path);
+	return path;
 }
 
 /** Validates an EnterWorktree name: /-separated segments of [A-Za-z0-9._-], ≤64 chars total. */
