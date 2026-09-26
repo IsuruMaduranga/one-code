@@ -31,7 +31,7 @@ import { basename, dirname, join } from "node:path";
 import { readSettingsFile, settingsPaths } from "../lib/claude-settings.ts";
 import { boundConsentItems } from "../lib/consent-preview.ts";
 import { HARNESS_GIT_CONFIG } from "../lib/git.ts";
-import { oneCodeStateDir } from "../lib/paths.ts";
+import { consentStorePath } from "../lib/consent-stores.ts";
 import type { McpServer } from "./config.ts";
 
 const execFileAsync = promisify(execFile);
@@ -48,7 +48,7 @@ interface ApprovalStore {
 }
 
 export function approvalStorePath(): string {
-	return join(oneCodeStateDir(), "mcp", "project-approvals.json");
+	return consentStorePath("mcp");
 }
 
 /**

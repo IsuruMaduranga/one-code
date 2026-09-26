@@ -550,6 +550,11 @@ is blocked in a non-interactive one:
 - `~/.onecode/settings.json` and any `~/.onecode/projects/<slug>/settings.json`
 - `~/.claude.json`
 - Managed settings files
+- The files that record which projects you approved:
+  `~/.onecode/hooks/project-approvals.json`,
+  `~/.onecode/mcp/project-approvals.json`,
+  `~/.onecode/permissions/project-allow-approvals.json` and
+  `~/.onecode/lsp/trusted-projects.json`
 
 ### Configure auto mode
 

@@ -17,6 +17,10 @@
  * complete to be sound — a `sed -i` on settings.json that the shell evidence
  * does not model as a write is the classifier's to catch, as today.
  *
+ * The consent stores (`lib/consent-stores.ts`) are gate controls too: an
+ * entry in one approves a repository's hooks, MCP servers, allow rules or
+ * language servers for every later session.
+ *
  * The target list is deliberately exact files, not directories: ~/.claude also
  * holds memory and skills that the agent writes routinely, and a floor that
  * fires on routine work teaches the user to approve without reading.
@@ -24,6 +28,7 @@
 
 import { analyzeShellCommand, globComponentRegex, isUnknownTilde, LOOPS, movesDirectory, parseCommand, resolvePayload, scopedTracker } from "./shell-analysis.ts";
 import { autoModeSettingsPaths } from "./config.ts";
+import { CONSENT_STORE_TAIL, consentStorePaths } from "../lib/consent-stores.ts";
 import { oneCodeProjectSettingsPath } from "../lib/one-code-settings.ts";
 import { claudeJsonPath, comparablePath } from "../lib/paths.ts";
 import { isWritingTool, resolveForContainment, toAbsolute, toAbsoluteBash } from "./paths.ts";
@@ -62,6 +67,9 @@ function safetyControlFiles(home: string, oneCodeProjectSettings?: string): stri
 		// tail regex catches it under a literal `.onecode`; this catches it when
 		// ONECODE_STATE_DIR relocated the state root (review L2).
 		...(oneCodeProjectSettings ? [oneCodeProjectSettings] : []),
+		// The consent stores: an entry approves a repository's hooks, MCP
+		// servers, allow rules or language servers for every later session.
+		...consentStorePaths(home),
 	];
 }
 
@@ -90,7 +98,7 @@ function controlFileForms(home: string, oneCodeProjectSettings?: string): Set<st
 
 function matchesControlFile(resolved: string, forms: ReadonlySet<string>): boolean {
 	const target = fold(resolved);
-	return SETTINGS_TAIL.test(target) || ONECODE_SETTINGS_TAIL.test(target) || forms.has(target);
+	return SETTINGS_TAIL.test(target) || ONECODE_SETTINGS_TAIL.test(target) || CONSENT_STORE_TAIL.test(target) || forms.has(target);
 }
 
 const GLOB_CHARS = /[*?[]/;

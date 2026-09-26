@@ -18,8 +18,8 @@
 
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { oneCodeStateDir } from "../lib/paths.ts";
+import { dirname } from "node:path";
+import { consentStorePath } from "../lib/consent-stores.ts";
 
 interface ApprovalStore {
 	version: 1;
@@ -27,7 +27,7 @@ interface ApprovalStore {
 }
 
 export function projectAllowStorePath(): string {
-	return join(oneCodeStateDir(), "permissions", "project-allow-approvals.json");
+	return consentStorePath("projectAllow");
 }
 
 /** Order-insensitive: the same rules in another order are one consent. */
