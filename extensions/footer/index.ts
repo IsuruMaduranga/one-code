@@ -126,6 +126,9 @@ export default function footerExtension(pi: ExtensionAPI) {
 
 	pi.on("session_start", (_event, ctx) => {
 		recomputeMain(ctx);
+		// A slow or missing gh turns polling off for one session, not the process.
+		prPoll.disabled = false;
+		prPoll.lastInputAt = Date.now();
 		if (!ctx.hasUI) return;
 
 		ctx.ui.setFooter((tui: unknown, theme: unknown, footerData: unknown) => {

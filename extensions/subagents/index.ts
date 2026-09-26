@@ -405,7 +405,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	 * packages and extensions, and pi's settings keys. Read only when a spawn
 	 * reads the guide's prompt.
 	 */
-	const guideInput = (cwd: string, fileSources: Array<string | AgentSource>, plugins: ReturnType<typeof discoverPlugins>): GuideInput => {
+	const guideInput = (cwd: string, catalog: readonly AgentDefinition[], plugins: ReturnType<typeof discoverPlugins>): GuideInput => {
 		const agentDir = getAgentDir();
 		let settingsText: string | undefined;
 		try {
@@ -435,9 +435,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			},
 			setup: {
 				skills: scanSkills(cwd, os.homedir(), agentDir, plugins.skills).map((skill) => skill.name),
-				agents: discoverAgents(fileSources)
-					.filter((agent) => !agent.source.startsWith(BUNDLED_AGENTS_DIR))
-					.map((agent) => agent.name),
+				agents: catalog.filter((agent) => agent.source !== "built-in" && !agent.source.startsWith(BUNDLED_AGENTS_DIR)).map((agent) => agent.name),
 				plugins: plugins.enabledPlugins.map((plugin) => plugin.name),
 				mcpServers: [...mcpServers],
 				extensions,
@@ -453,8 +451,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		// name replaces it.
 		const plugins = discoverPlugins(defaultDiscoverRoots(getAgentDir(), cwd));
 		const fileSources: Array<string | AgentSource> = [BUNDLED_AGENTS_DIR, ...plugins.agentDirs, ...agentDirs(cwd, os.homedir())];
-		const guide = guideAgentDefinition(() => guideInput(cwd, fileSources, plugins));
-		return discoverAgents([{ agents: [guide] }, ...fileSources]);
+		// The prompt is built from the catalog it sits in, when a spawn reads it.
+		let catalog: AgentDefinition[] = [];
+		const guide = guideAgentDefinition(() => guideInput(cwd, catalog, plugins));
+		catalog = discoverAgents([{ agents: [guide] }, ...fileSources]);
+		return catalog;
 	};
 
 	// Claude Code closes every catalog row with a tools clause — "(Tools: *)",

@@ -42,6 +42,13 @@ describe("SendNowChord", () => {
 		expect(chord.feed("\x1b[115;5u", true)).toEqual({ kind: "send" });
 	});
 
+	it("stays armed through a repeat of the held ctrl+x", () => {
+		const chord = new SendNowChord();
+		expect(chord.feed("\x1b[120;5u", true)).toEqual({ kind: "hold" });
+		expect(chord.feed("\x1b[120;5:2u", true)).toEqual({ kind: "hold" });
+		expect(chord.feed("\x1b[115;5u", true)).toEqual({ kind: "send" });
+	});
+
 	it("hands the held ctrl+x back ahead of any other key", () => {
 		const chord = new SendNowChord();
 		chord.feed("\x1b[120;5u", true);

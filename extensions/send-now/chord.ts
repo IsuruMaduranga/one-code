@@ -50,6 +50,11 @@ export class SendNowChord {
 		if (key === "release") return { kind: "pass" };
 		const held = this.held;
 		this.held = undefined;
+		// A second ctrl+x, or the kitty protocol's auto-repeat of a held one, keeps the chord armed.
+		if (held !== undefined && key === "ctrl+x") {
+			this.held = held;
+			return { kind: "hold" };
+		}
 		if (held !== undefined) return key === "ctrl+s" && active ? { kind: "send" } : { kind: "replay", held };
 		if (key === "ctrl+x" && active) {
 			this.held = data;

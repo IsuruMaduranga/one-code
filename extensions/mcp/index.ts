@@ -364,13 +364,13 @@ export default function mcpExtension(pi: ExtensionAPI) {
 
 		if (!alive()) return;
 
-		// Headless runs have no /mcp, so they keep each server's error on stderr.
-		if (failures.length > 0 && !ctx.hasUI) {
-			process.stderr.write(`${failures.map((f) => `MCP server "${f.server.name}" failed: ${f.error}`).join("\n")}\n`);
-		}
+		// Warnings from servers that did connect are shown in /mcp, not as failures.
+		const failed = failures.filter((f) => !connections.has(f.server.name));
 		if (ctx.hasUI) {
-			const failedServers = new Set(failures.filter((f) => !connections.has(f.server.name)).map((f) => f.server.name)).size;
-			for (const text of mcpStartupNotices(failedServers, oauthNeeded.size)) ctx.ui.notify(text, "warning");
+			for (const text of mcpStartupNotices(new Set(failed.map((f) => f.server.name)).size, oauthNeeded.size)) ctx.ui.notify(text, "warning");
+		} else if (failed.length > 0) {
+			// Headless runs have no /mcp, so they keep each server's error on stderr.
+			process.stderr.write(`${failed.map((f) => `MCP server "${f.server.name}" failed: ${f.error}`).join("\n")}\n`);
 		}
 
 		emitInstructions();
