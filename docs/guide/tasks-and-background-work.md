@@ -73,7 +73,10 @@ noisy process doesn't flood the conversation.
 
 A monitor runs until its command exits or its timeout passes (five minutes
 by default, one hour at most), or for the whole session when started as
-persistent. The model can stop it with `task_stop`.
+persistent. The model can stop it with `task_stop`. The whole stream is
+also written to a log file under the session directory, like a background
+shell's. When `task_output` has more than it can show, it returns the most
+recent part and names that file.
 
 A monitor isn't auto-approved, because it runs a shell command; the
 permission gate treats it like `bash`.

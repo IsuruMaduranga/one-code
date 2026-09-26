@@ -17,11 +17,14 @@ vi.mock("node:crypto", async (importOriginal) => {
 });
 import backgroundExtension from "../../extensions/background/index.ts";
 import { MONITOR_BATCH_MAX_LINES } from "../../extensions/background/monitor-batch.ts";
+import { TASK_REGISTER_CHANNEL } from "../../extensions/background/registry.ts";
 import { DEFAULT_COALESCE_MS, NOTIFICATION_ID_KEY } from "../../extensions/lib/notifications.ts";
 import { SESSION_WORK_CHANNEL, type SessionWorkQuery } from "../../extensions/lib/session-work.ts";
 import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, agentOwnsCronJobs } from "../../extensions/lib/agent-cron.ts";
 import { SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../../extensions/lib/skill-body.ts";
 import { BUNDLED_SKILLS_DIR } from "../../extensions/lib/skill-scan.ts";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WORKTREE_CHANNEL } from "../../extensions/lib/worktree-channel.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
@@ -678,6 +681,64 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 		)) as { content: Array<{ text: string }> };
 		expect(result.content[0].text).toContain("€ ok");
 		expect(result.content[0].text).not.toContain("\uFFFD");
+	});
+
+	it("A3-L3: task_output clips a long stream behind a header naming the monitor's spool file, which holds it all", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "monitor-spool-"));
+		try {
+			const fake = mount();
+			const ctx = liveSessionCtx({ sessionManager: { getSessionDir: () => dir } });
+			const start = (await fake.tools.get("monitor")!.execute(
+				"c1",
+				{ command: "for i in $(seq 1 4000); do echo line-$i-padding-padding; done", description: "long" },
+				undefined,
+				undefined,
+				ctx,
+			)) as { details: { taskId: string } };
+			const out = (await fake.tools.get("task_output")!.execute("c2", { task_id: start.details.taskId, block: true, timeout: 5000 }, undefined, undefined, ctx)) as {
+				content: Array<{ text: string }>;
+				details: { logPath?: string };
+			};
+			const logPath = join(dir, "monitor", start.details.taskId, "output.log");
+			expect(out.details.logPath).toBe(logPath);
+			const body = out.content[0].text.split("\n\n").slice(1).join("\n\n");
+			expect(body.startsWith(`[Truncated. Full output: ${logPath}]`)).toBe(true);
+			expect(body.length).toBeLessThanOrEqual(32_000);
+			expect(body).toContain("line-4000-");
+			await new Promise((resolve) => setTimeout(resolve, 100)); // the spool's end() flushes
+			const spooled = readFileSync(logPath, "utf8");
+			expect(spooled.startsWith("line-1-padding-padding\n")).toBe(true);
+			expect(spooled).toContain("line-4000-padding-padding\n");
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("A3-L3: a long output with no spool file is persisted whole, never cut", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "task-output-persist-"));
+		try {
+			const fake = mount();
+			const ctx = liveSessionCtx({ sessionManager: { getSessionDir: () => dir } });
+			const report = `${"start of the report\n"}${"x".repeat(60_000)}\nend of the report`;
+			fake.events.emit(TASK_REGISTER_CHANNEL, {
+				id: "bagent01",
+				kind: "agent",
+				description: "explore",
+				status: "completed",
+				startedAt: Date.now(),
+				output: () => report,
+				stop: () => {},
+				finished: Promise.resolve(),
+			});
+			const out = (await fake.tools.get("task_output")!.execute("c1", { task_id: "bagent01" }, undefined, undefined, ctx)) as { content: Array<{ text: string }> };
+			const text = out.content[0].text;
+			expect(text).toContain("<persisted-output>");
+			const file = text.match(/Full output saved to: (\S+)/)?.[1];
+			expect(file).toBeDefined();
+			expect(readFileSync(file!, "utf8")).toBe(report);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 
 	it("M3: a one-shot monitor stops when the tool call is aborted and says so", async () => {
