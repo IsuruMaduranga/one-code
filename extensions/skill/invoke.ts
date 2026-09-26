@@ -214,3 +214,15 @@ export function skillCommandCandidates<T extends { name: string; source: string 
 	}
 	return out;
 }
+
+/**
+ * The `/` suggestions without pi's `/skill:<name>` entry for a skill that also
+ * has its bare `/<name>` command, so each skill is listed once, as in Claude
+ * Code. Kept when the user is typing `/skill:` themselves, and for a skill
+ * whose bare name was skipped (a collision), where `/skill:` is its only form.
+ * Typed `/skill:<name>` still runs either way: this only trims the list.
+ */
+export function withoutDuplicateSkillCommands<T extends { value: string }>(items: T[], prefix: string, bareSkills: ReadonlySet<string>): T[] {
+	if (!prefix.startsWith("/") || prefix.startsWith("/skill:")) return items;
+	return items.filter((item) => !(item.value.startsWith("skill:") && bareSkills.has(item.value.slice("skill:".length))));
+}

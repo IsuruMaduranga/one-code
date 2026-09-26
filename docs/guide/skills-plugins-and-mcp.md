@@ -24,6 +24,8 @@ command, as in Claude Code: `/simplify`, `/code-review`, or any skill from
 `.claude/skills/`. Anything after the name is passed to the skill as
 arguments. Plugin skills keep their plugin prefix and are run as
 `/skill:<plugin>:<name>`. pi's `/skill:<name>` form works for every skill.
+The `/` list shows each skill once, by its bare name; type `/skill:` to list
+the `/skill:` forms.
 
 A skill's slash command isn't created when the name is already taken by a
 built-in command, a `.claude/commands/` template, or another skill.

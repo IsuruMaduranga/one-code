@@ -9,6 +9,7 @@ import {
 	redactOffSkillText,
 	resolveSkill,
 	skillCommandCandidates,
+	withoutDuplicateSkillCommands,
 } from "../../extensions/skill/invoke.ts";
 
 describe("parseSkillCommand", () => {
@@ -173,5 +174,22 @@ describe("bare skill commands", () => {
 
 	it("keeps pi's literal-matched built-ins out of the alias set", () => {
 		for (const name of ["model", "new", "compact", "quit", "reload"]) expect(PI_BUILTIN_COMMANDS.has(name)).toBe(true);
+	});
+});
+
+describe("withoutDuplicateSkillCommands", () => {
+	const items = [{ value: "simplify" }, { value: "skill:simplify" }, { value: "skill:clashing" }, { value: "model" }];
+	const bare = new Set(["simplify"]);
+
+	it("drops /skill:<name> where the bare command exists", () => {
+		expect(withoutDuplicateSkillCommands(items, "/si", bare).map((item) => item.value)).toEqual(["simplify", "skill:clashing", "model"]);
+	});
+
+	it("keeps every /skill: entry while the user types /skill: themselves", () => {
+		expect(withoutDuplicateSkillCommands(items, "/skill:s", bare)).toEqual(items);
+	});
+
+	it("leaves non-command suggestions alone", () => {
+		expect(withoutDuplicateSkillCommands([{ value: "skill:simplify" }], "@src", bare)).toEqual([{ value: "skill:simplify" }]);
 	});
 });

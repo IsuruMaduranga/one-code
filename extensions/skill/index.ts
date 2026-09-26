@@ -43,6 +43,7 @@ import {
 	SKILL_INVOCATION_TYPE,
 	type SkillInvocationDetails,
 	skillCommandCandidates,
+	withoutDuplicateSkillCommands,
 } from "./invoke.ts";
 import { decodeSkillsKey } from "./panel/keys.ts";
 import { skillListingText } from "./listing.ts";
@@ -454,6 +455,21 @@ export default function skillExtension(pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
 		const skills = index(ctx.cwd);
 		registerSkillCommands(ctx.cwd, skills);
+		// pi lists every skill a second time as `/skill:<name>`; drop that entry
+		// where the bare command exists (withoutDuplicateSkillCommands).
+		if (ctx.hasUI && ctx.mode === "tui") {
+			ctx.ui.addAutocompleteProvider((current) => ({
+				...current,
+				getSuggestions: async (lines, cursorLine, cursorCol, options) => {
+					const suggestions = await current.getSuggestions(lines, cursorLine, cursorCol, options);
+					if (!suggestions) return suggestions;
+					const items = withoutDuplicateSkillCommands(suggestions.items, suggestions.prefix, registeredSkillCommands);
+					return items.length > 0 ? { ...suggestions, items } : null;
+				},
+				applyCompletion: (...args) => current.applyCompletion(...args),
+				...(current.shouldTriggerFileCompletion ? { shouldTriggerFileCompletion: (...args) => current.shouldTriggerFileCompletion!(...args) } : {}),
+			}));
+		}
 		// pi's own `/skill:<name>` form, which pi lists only after the first turn.
 		for (const skill of skills) {
 			const hint = skill.source === "plugin" ? undefined : readArgumentHint(skill.path);
