@@ -145,7 +145,7 @@ the system prompt to match:
 
 | Tier | Models | Prompt |
 |---|---|---|
-| Frontier | Opus and Fable, current generation. | Claude Code's terse prompt. |
+| Frontier | Opus and Fable, current generation, and OpenAI's GPT-6 Astra and Sol, served by OpenAI itself. | Claude Code's terse prompt. |
 | Workhorse | Sonnet-class models and comparable third-party models. | Claude Code's full prompt. |
 | Cheap | Haiku-class models and comparable "flash", "mini", or "small" models. | The verbose prompt Claude Code gives Haiku. |
 | Tiny | Sub-Haiku models. | The verbose prompt plus extra scaffolding and the `grep`, `find`, and `ls` tools. |
@@ -157,7 +157,12 @@ experiment. `/doctor report` shows the tier in use.
 The tier also decides which permission shortcuts apply in auto and
 accept-edits modes (see [What is approved without a classifier
 call](permissions-modes-and-auto-mode.md#what-is-approved-without-a-classifier-call)).
-`CC_PROMPT_TIER` changes only the prompt, never the permission checks.
+`CC_PROMPT_TIER` never changes the permission checks.
+
+Like Claude Code, One Code gives frontier models and Sonnet 5 or later no
+task list: the `task_create` family is left out, along with the prompt line
+that points at it. Set `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` to turn the task
+tools back on for them.
 
 ## Web search on providers without a search API
 

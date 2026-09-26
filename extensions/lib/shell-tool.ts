@@ -207,19 +207,24 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 				};
 			}
 
+			// No timeoutSeconds here: Claude Code clears a command's timeout the
+			// moment it goes to the background, so a detached shell has no
+			// deadline (findings §31). Models habitually send `timeout: 600000`
+			// next to `run_in_background`, which used to kill a dev server at
+			// exactly 10 minutes. The one-shot path above keeps the timeout
+			// because there the command holds the turn.
 			const task = startBackgroundBash({
 				id,
 				command,
 				description,
 				cwd: ctx.cwd,
-				timeoutSeconds,
 				logPath,
 				shell,
 				onFinished: (finishedTask, summary) => {
 					// Claude Code's shell completion names the output file and nothing
 					// else — the model reads it (or task_output) when it needs the text.
 					// Without a spool file the tail rides `<result>` so nothing is lost.
-					const { status, detail } = shellFinish(summary, timeoutSeconds);
+					const { status, detail } = shellFinish(summary);
 					notify(
 						taskNotification({
 							kind: "shell",

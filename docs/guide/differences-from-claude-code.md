@@ -29,7 +29,7 @@ so nothing surprises you.
 | Models | Anthropic models. | Any provider pi supports, switchable mid-session, with a different model per role. |
 | Tool names on the wire | PascalCase (`Read`, `Bash`). | snake_case (`read`, `bash`); `Agent` and `SendMessage` keep their names. Claude Code names still work in rules and hook matchers. |
 | Permission-mode key | shift+tab. | ctrl+q; alt+m on Windows and WSL. pi reserves shift+tab for the reasoning-effort dial and, on Windows, ctrl+q for queuing a follow-up. |
-| Task-list key | ctrl+t. | `/tasks show` and `/tasks hide`. pi reserves ctrl+t for thinking blocks. |
+| Task-list key | ctrl+t. | alt+t, or `/tasks show` and `/tasks hide`. pi reserves ctrl+t for thinking blocks. |
 | Where auto mode's classifier runs | On Anthropic's API server, through a request field the endpoint must support; the local classifier is a fallback only until about October 23, 2026 ([LiteLLM's notes](https://docs.litellm.ai/blog/claude-code-server-side-auto-mode)). | In the harness, on a model from your own provider, so auto mode works with any provider. |
 | Permission shortcuts by model | One set for every model; auto mode needs a Sonnet- or Opus-class model. | Claude Code's shortcuts for frontier and workhorse models. Cheap and tiny models, which Claude Code can't run in auto mode, get stricter checks. |
 | Deleting files in auto mode | An in-project `rm` runs without the classifier; `git reset --hard` is classified. | The same with frontier and workhorse models. With cheap and tiny models, every delete goes to the classifier. |
@@ -69,7 +69,7 @@ available through the `commit-commands` plugin when installed.
 
 ## Skills that are not bundled
 
-One Code bundles four of Claude Code's built-in skills: `simplify`,
+One Code bundles five of Claude Code's built-in skills: `loop`, `simplify`,
 `code-review`, `security-review`, and `fewer-permission-prompts`. It does
 not bundle the skills that need Claude Code's hosted or desktop surfaces
 (`design`, `dataviz`, the `artifact-*` guides, and the publishers), the

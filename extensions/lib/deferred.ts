@@ -17,6 +17,17 @@ import { normalizeToolName } from "../permissions/matcher.ts";
 
 export const DEFER_CHANNEL = "one-code:defer-tool";
 
+/**
+ * Take a deferred tool out of this session's surface (`{ name }`): it leaves the
+ * deferred registry and the active set, so no request carries it and
+ * `tool_search` cannot load it. An extension withholds its own tool when the
+ * session model must not have it (the task tools on frontier models) and
+ * re-emits DEFER_CHANNEL to bring it back after a model change. Before the
+ * first request the standing listing is rewritten without it; after that the
+ * listing stays frozen and a load reports "not found" (tool-search/announce.ts).
+ */
+export const WITHHOLD_CHANNEL = "one-code:withhold-tool";
+
 export interface DeferRequest {
 	name: string;
 	/** Extra search terms beyond the tool's name and description. */
@@ -48,6 +59,10 @@ export class DeferredRegistry {
 
 	has(name: string): boolean {
 		return this.entries.has(name);
+	}
+
+	remove(name: string): boolean {
+		return this.entries.delete(name);
 	}
 }
 
@@ -324,6 +339,17 @@ export function deferredMissReminderText(name: string): string {
 		`\`${name}\` is a deferred tool — its schema is not loaded, so that call failed with "Tool ${name} not found".`,
 		`Load it first with tool_search (\`select:${name}\`), then reissue the call. It stays callable for the rest of the session once loaded.`,
 	].join(" ");
+}
+
+/**
+ * The correction for a tool WITHHOLD_CHANNEL took away (the task tools on a
+ * frontier or Sonnet 5+ model): unlike an ordinary deferred miss, `tool_search`
+ * cannot load it — the name is gone from the registry, not merely inactive —
+ * so the steer must NOT repeat `deferredMissReminderText`'s "load it with
+ * tool_search" advice, which would just fail again.
+ */
+export function withheldMissReminderText(name: string): string {
+	return `\`${name}\` failed with "Tool ${name} not found" because it was withdrawn for the current model — it is not a deferred tool you can load with tool_search. Do not retry it; continue without it.`;
 }
 
 export interface SearchMatch {

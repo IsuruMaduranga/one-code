@@ -20,7 +20,7 @@ import {
 	STYLE,
 	URL_BAN,
 } from "./common.ts";
-import { DOING_TASKS, EXECUTING_CARE, TEXT_OUTPUT, TONE_STYLE } from "./mid.ts";
+import { DOING_TASKS, DOING_TASKS_WITHOUT_TASK_TOOLS, EXECUTING_CARE, TEXT_OUTPUT, TONE_STYLE } from "./mid.ts";
 
 export const MAKE_CHANGES_WITH_TOOLS = `# Make changes with tools, not prose
 Code, edits, or commands that appear only in your text reply are NOT applied — they are not saved to the filesystem and do not run. Never treat showing code as a substitute for making the change. To change a file, call the edit or write tool; to run something, call the shell tool. If a request needs a change to the workspace, your turn is not done until you have made it with a tool.`;
@@ -32,11 +32,15 @@ Decide up front which the request needs:
 - When it could be read either way → treat it as a task and act.
 Do the work rather than asking permission to start; ask the user only when you genuinely cannot proceed without an answer.`;
 
-export const USING_TOOLS = `# Using your tools
- - Prefer the dedicated tools over the shell: use read to read files (not cat/head/tail/sed), edit to change them (not sed/awk), write to create them (not echo redirection), and the search tools to find files or content (not find/grep/ls). Reserve the shell for commands that genuinely need it.
- - Break multi-step work down with \`task_create\` (deferred — load it with \`tool_search select:task_create,task_update\`) and keep it updated as you go.
+const LOW_TASK_LINE = ` - Break multi-step work down with \`task_create\` (deferred — load it with \`tool_search select:task_create,task_update\`) and keep it updated as you go.`;
+
+/** Built with or without the task bullet: the session model may run without the task tools. */
+const usingTools = (taskTools: boolean) => `# Using your tools
+ - Prefer the dedicated tools over the shell: use read to read files (not cat/head/tail/sed), edit to change them (not sed/awk), write to create them (not echo redirection), and the search tools to find files or content (not find/grep/ls). Reserve the shell for commands that genuinely need it.${taskTools ? `\n${LOW_TASK_LINE}` : ""}
  - When a skill fits the task, use it — invoke it with the skill tool instead of redoing the same work by hand. Skills are set up on purpose; reach for the matching one rather than improvising.
  - You can call multiple independent tools in one response — do so when the calls don't depend on each other.`;
+
+export const USING_TOOLS = usingTools(true);
 
 // Sibling texts (same delegation policy, separately tuned registers — keep
 // aligned when editing): DELEGATING_WORK in mid.ts and DELEGATION_STEER in
@@ -60,22 +64,25 @@ Avoid failing in either direction:
 - Don't over-reach. Keep it simple, do only what was asked, and never hand the user more than they wanted — no extra features, refactors, or files they didn't ask for.
 Think about the best approach, then act decisively; verify what you build by running it, not by assuming it works.`;
 
+const lowLead = (taskTools: boolean) => [
+	IDENTITY,
+	SECURITY,
+	URL_BAN,
+	HARNESS_VERBOSE,
+	MAKE_CHANGES_WITH_TOOLS,
+	ANSWER_OR_ACT,
+	usingTools(taskTools),
+	DELEGATE_STRICT,
+	taskTools ? DOING_TASKS : DOING_TASKS_WITHOUT_TASK_TOOLS,
+	PLAYBOOKS,
+	EXECUTING_CARE,
+	TEXT_OUTPUT,
+	TONE_STYLE,
+];
+
 export const lowBundle: PromptBundle = {
-	lead: [
-		IDENTITY,
-		SECURITY,
-		URL_BAN,
-		HARNESS_VERBOSE,
-		MAKE_CHANGES_WITH_TOOLS,
-		ANSWER_OR_ACT,
-		USING_TOOLS,
-		DELEGATE_STRICT,
-		DOING_TASKS,
-		PLAYBOOKS,
-		EXECUTING_CARE,
-		TEXT_OUTPUT,
-		TONE_STYLE,
-	],
+	lead: lowLead(true),
+	leadWithoutTaskTools: lowLead(false),
 	tail: [STAYING_ON_TRACK, STYLE, CONTEXT_MANAGEMENT, DELIVERING_WORK, CORRECTIONS],
 	verboseMemory: true,
 };

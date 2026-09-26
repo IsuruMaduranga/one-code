@@ -334,13 +334,13 @@ export default function brandingExtension(pi: ExtensionAPI) {
 		const extensionCommands = new Set(commands.filter((c) => c.source === "extension").map((c) => c.name));
 		for (const { name, path } of files) {
 			if (hintedFiles.has(path)) continue;
-			hintedFiles.add(path);
 			if (Object.hasOwn(PI_BUILTIN_HINTS, name) || extensionCommands.has(name)) continue;
 			try {
 				const hint = frontmatterCommandHint(parseFrontmatterLoosely(readFileSync(path, "utf-8")).frontmatter);
 				if (hint) argumentHints.set(name, hint);
+				hintedFiles.add(path);
 			} catch {
-				// Unreadable: no hint, as for a command without one.
+				// Unreadable (mid-replace, say): no hint now; a later scan retries it.
 			}
 		}
 	};

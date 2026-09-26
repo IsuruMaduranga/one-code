@@ -55,4 +55,27 @@ describe("branding argument hints", () => {
 		expect(renderHint!("/model ")).toBe("[model]");
 		expect(renderHint!("/onecode-hint-file ")).toBe("[mine]");
 	});
+
+	it("retries a command file it could not read on a later turn", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "branding-hints-"));
+		dirs.push(dir);
+		vi.stubEnv("PI_CODING_AGENT_DIR", dir);
+		vi.stubEnv("CC_NO_BANNER", "1");
+		const path = join(dir, "onecode-hint-late.md");
+		const fake = createFakePi();
+		(fake.pi as { getCommands: () => unknown[] }).getCommands = () => [{ name: "onecode-hint-late", source: "prompt", sourceInfo: { path } }];
+		brandingExtension(fake.pi as never);
+		let factory: ((tui: unknown, theme: unknown, keybindings: unknown) => unknown) | undefined;
+		const ctx = createFakeCtx({ hasUI: true, mode: "tui", cwd: dir });
+		(ctx.ui as { setEditorComponent: unknown }).setEditorComponent = (f: typeof factory) => (factory = f);
+		await fake.fire("session_start", {}, ctx);
+		factory!(undefined, undefined, undefined);
+
+		// Missing (mid-replace): no hint yet.
+		await fake.fire("before_agent_start", {}, ctx);
+		expect(renderHint!("/onecode-hint-late ")).toBeUndefined();
+		writeFileSync(path, `---\nargument-hint: "[later]"\n---\nbody\n`);
+		await fake.fire("before_agent_start", {}, ctx);
+		expect(renderHint!("/onecode-hint-late ")).toBe("[later]");
+	});
 });

@@ -43,7 +43,7 @@ import {
 	SCHEDULE_WAKEUP_PARAMS,
 	WAKEUP_ERRORS,
 } from "./wakeup.ts";
-import { freshDeliveryState, readLoopFile, resolveLoopFire } from "./loop-fire.ts";
+import { freshDeliveryState, type LoopDeliveryState, readLoopFile, resolveLoopFire } from "./loop-fire.ts";
 import { autonomousPreamble, loopSkillPrompt } from "./loop-skill.ts";
 import {
 	CRON_CREATE_DESCRIPTION,
@@ -145,8 +145,16 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	let lastCtx: ExtensionContext | undefined;
 	const cron = new CronStore();
 	const dynamicLoop = new DynamicLoop(cron);
-	// What the no-prompt /loop sentinels already delivered; compaction resets it (loop-fire.ts).
-	let loopDelivery = freshDeliveryState();
+	// What the no-prompt /loop sentinels already delivered, per recipient (the
+	// main session, or a subagent by task id): each conversation has its own
+	// record. The main session's compaction resets its own (loop-fire.ts).
+	const MAIN_OWNER = "main";
+	const loopDelivery = new Map<string, LoopDeliveryState>();
+	const deliveryFor = (owner: string): LoopDeliveryState => {
+		let state = loopDelivery.get(owner);
+		if (!state) loopDelivery.set(owner, (state = freshDeliveryState()));
+		return state;
+	};
 	let sessionCwd = process.cwd();
 	// The main session's worktree while it is in one (enter_worktree), where its fires resolve.
 	let worktreeCwd: string | undefined;
@@ -172,7 +180,8 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				: { text: created.error, isError: true };
 			if (created.ok) runCron();
 		} else if (request.op === "list") {
-			request.result = { text: formatJobList(cron.list().filter((job) => job.agentId === request.agentId)) };
+			const jobs = cron.list().filter((job) => job.agentId === request.agentId);
+			request.result = { text: formatJobList(jobs), details: { jobCount: jobs.length } };
 		} else {
 			const job = cron.get(request.id);
 			if (!job) request.result = { text: formatUnknownJob(request.id), isError: true };
@@ -234,7 +243,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	const fireText = (job: CronJob): string => {
 		const { prompt } = job;
 		const cwd = job.cwd ?? worktreeCwd ?? sessionCwd;
-		const resolved = resolveLoopFire(loopDelivery, prompt, cwd, autonomousPreamble());
+		const resolved = resolveLoopFire(deliveryFor(job.agentId ?? MAIN_OWNER), prompt, cwd, autonomousPreamble());
 		if (resolved !== prompt || !prompt.startsWith("/")) return resolved;
 		const query: SlashExpandQuery = { text: prompt, cwd };
 		pi.events.emit(SLASH_EXPAND_CHANNEL, query);
@@ -257,7 +266,11 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 			// A subagent's job goes to that agent, or is dropped once it has ended.
 			const delivery: AgentCronFire = { agentId: job.agentId, jobId: job.id, prompt: fireText(job) };
 			pi.events.emit(AGENT_CRON_FIRE_CHANNEL, delivery);
-			if (!delivery.delivered) cron.delete(job.id);
+			if (!delivery.delivered) {
+				// The agent has ended: its job and what it was sent go with it.
+				cron.delete(job.id);
+				loopDelivery.delete(job.agentId);
+			}
 			return;
 		}
 		const fold = job.source === "wakeup" ? foldDetails() : {};
@@ -750,7 +763,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	});
 	// The first fire after a compaction resends the full loop instructions, as in Claude Code.
 	pi.on("session_compact", () => {
-		loopDelivery = freshDeliveryState();
+		loopDelivery.delete(MAIN_OWNER);
 	});
 
 	pi.on("session_shutdown", (event) => {

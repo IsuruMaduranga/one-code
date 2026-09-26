@@ -9,28 +9,37 @@ wake-ups, and how the results of background work reach the model.
 ## The task list
 
 For multi-step work the model keeps a structured task list, using the
-`task_create`, `task_get`, `task_list`, and `task_update` tools. Each task
+`task_create`, `task_get`, `task_list`, and `task_update` tools. Frontier
+models and Sonnet 5 or later run without them, as in Claude Code, unless you
+set `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` ([Providers and
+models](providers-and-models.md#prompting-adapts-to-the-model)). Each task
 has a subject, a description, a status (pending, in progress, or
 completed), an optional owner, and dependencies on other tasks.
 
 While the list has entries, a pinned widget below the transcript shows a
 summary line and up to 12 tasks: `✔` for completed, `◼` for in progress,
-`◻` for pending.
+`◻` for pending. Once every task is completed, the list clears itself about
+five seconds later and the widget goes away. A new task starts a fresh list,
+and its numbering carries on from the old one.
 
-| Command | What it does |
+| Key or command | What it does |
 |---|---|
+| **alt+t** | Hides the widget down to one line, or shows it again. |
 | `/tasks` | Prints the full list. |
 | `/tasks hide` | Hides the widget. |
 | `/tasks show` | Shows it again. |
 
 The list is stored inside the session, so it survives a resume and follows
-the branch you're on in `/tree`. If the model hasn't touched the list for
+the branch you're on in `/tree`. A list that was already finished comes back
+empty. If the model hasn't touched the list for
 a while during a long task, it's reminded that the list exists.
 
 ## Background shells
 
 When the model runs a command with `run_in_background`, the command starts
-detached and the model gets a task id at once. Output spools to a log file
+detached and the model gets a task id at once. A background command has no
+time limit: it runs until it exits or is stopped, even if the model passed a
+`timeout`, so a dev server started this way keeps running. Output spools to a log file
 under the session directory. When the command finishes, the model is
 notified with the result, and it can read the output at any time with
 `task_output` or stop the command with `task_stop`.

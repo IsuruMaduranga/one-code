@@ -9,7 +9,7 @@
 #
 # From a sandboxed assistant shell, run it inside tmux (findings §10). Costs one
 # short three-request session (~25k tokens on a Claude model, mostly cache write).
-# The prompt exercises the deferred-tool path (tool_search → task_list), the one
+# The prompt exercises the deferred-tool path (tool_search → cron_list), the one
 # that regressed in H2.
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -24,7 +24,7 @@ mkdir -p "$PROJECT"
 git -C "$PROJECT" init -q
 printf '# Probe\n\nThrowaway project for the prompt-cache probe.\n' > "$PROJECT/CLAUDE.md"
 
-PROMPT='First call tool_search with query select:task_list. Then call task_list once. Then reply with exactly the word done.'
+PROMPT='First call tool_search with query select:cron_list. Then call cron_list once. Then reply with exactly the word done.'
 echo "model:   $MODEL"
 echo "workdir: $WORK"
 (
