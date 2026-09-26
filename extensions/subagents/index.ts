@@ -240,6 +240,19 @@ interface Resident {
 	 * ahead of the report in its notification.
 	 */
 	turnHandlers: Array<(outcome: ChildOutcome, review: HandBackVerdict | undefined, stopped: boolean) => void>;
+	/** Finished turns whose hand-back is still waiting on auto mode's review, so not yet delivered. */
+	reviewing: number;
+}
+
+/**
+ * Whether a resident has a report still to deliver: a turn is running, a turn's
+ * handler is queued, or a finished turn waits on its review. A resident that
+ * has delivered stays alive and idle for SendMessage; counting it as pending
+ * told a cheap-tier model to retract an answer the agent really gave
+ * (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 M4).
+ */
+function residentPending(resident: Resident): boolean {
+	return !resident.handle.exited() && (resident.handle.busy() || resident.turnHandlers.length > 0 || resident.reviewing > 0);
 }
 
 export default function subagentsExtension(pi: ExtensionAPI) {
@@ -627,7 +640,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		const pending = spawned
 			.filter((taskId) => {
 				const resident = residents.get(taskId);
-				return (resident !== undefined && !resident.handle.exited()) || runningIds.has(taskId);
+				return (resident !== undefined && residentPending(resident)) || runningIds.has(taskId);
 			})
 			.map((taskId) => registry.resolve(taskId))
 			.filter((record): record is AgentRunRecord => record !== undefined)
@@ -1565,7 +1578,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		// the same way a SendMessage task returns one reply (review S12).
 		let firstTurnOutput: string | undefined;
 		const live = trackLiveRun(p.record, p.request);
-		const resident: Resident = { handle: undefined as never, startedAt: Date.now(), turnHandlers: [] };
+		const resident: Resident = { handle: undefined as never, startedAt: Date.now(), turnHandlers: [], reviewing: 0 };
 		const worktreeNote = worktree
 			? `\n\n(Running in worktree ${worktree.path} on branch ${worktree.branch} — kept while the agent stays resident, and after it exits if it holds uncommitted changes or commits.)`
 			: "";
@@ -1655,7 +1668,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				// A stop or resume during review must not change this turn's outcome.
 				const stopped = stoppedTaskIds.has(p.record.taskId);
 				armReaper();
+				resident.reviewing++;
 				void awaitHandBackReview(pi.events, p.record, outcome.actions).then((review) => {
+					resident.reviewing--;
 					if (handler) {
 						handler(outcome, review, stopped);
 					} else {

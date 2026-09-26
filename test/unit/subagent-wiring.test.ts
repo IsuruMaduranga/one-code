@@ -7,6 +7,7 @@ import backgroundExtension from "../../extensions/background/index.ts";
 import { type BackgroundTask, TASK_REGISTER_CHANNEL } from "../../extensions/background/registry.ts";
 import { DEFAULT_COALESCE_MS } from "../../extensions/lib/notifications.ts";
 import { SUBAGENT_GATE_CHANNEL } from "../../extensions/permissions/subagent-gate.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import * as defaults from "../../extensions/subagents/default-model.ts";
 import subagentsExtension from "../../extensions/subagents/index.ts";
 import type { ChildOutcome } from "../../extensions/subagents/outcome.ts";
@@ -199,6 +200,50 @@ describe("subagent task_stop", () => {
 		expect(h.tasks.get(reply.details.taskId)?.status).toBe("stopped");
 		expect(h.messages()).toContain("<status>killed</status>");
 		expect(h.messages()).not.toContain("[Subagent hand-back]");
+	});
+});
+
+// SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 M4: the pending-claim backstop (cheap
+// and tiny tiers) fires only for an agent whose report has not gone out.
+describe("subagent pending-claim backstop", () => {
+	const cheap = model("gpt-5.6-luna", ["text"], 0.1);
+	const pendingReminders = (h: Awaited<ReturnType<typeof mount>>) => {
+		const texts: string[] = [];
+		h.fake.events.on(REMINDER_CHANNEL, (data) => {
+			const reminder = data as { text?: string; key?: string };
+			if (reminder.text && !reminder.key) texts.push(reminder.text);
+		});
+		return texts;
+	};
+
+	it("stays quiet for an agent that reported inside the loop", async () => {
+		const runtime = fakeResident();
+		const h = await mount([], cheap);
+		const reminders = pendingReminders(h);
+		await h.fake.fire("agent_start", {}, h.ctx);
+		await h.call("Agent", { subagent_type: "general-purpose", task: "Count the files" });
+		runtime.finish();
+		await vi.advanceTimersByTimeAsync(DEFAULT_COALESCE_MS + 1);
+		await h.fake.fire("agent_end", {}, h.ctx);
+		expect(reminders).toEqual([]);
+	});
+
+	it("fires for an agent still running, or whose report still waits on its review", async () => {
+		const runtime = fakeResident();
+		const h = await mount([], cheap);
+		const reminders = pendingReminders(h);
+		await h.fake.fire("agent_start", {}, h.ctx);
+		await h.call("Agent", { subagent_type: "general-purpose", task: "Count the files" });
+		await h.fake.fire("agent_end", {}, h.ctx);
+		expect(reminders.join("")).toContain("still running");
+
+		reminders.length = 0;
+		await h.fake.fire("agent_start", {}, h.ctx);
+		await h.call("SendMessage", { to: "general-purpose-1", message: "And the folders?" });
+		// Finished, but nobody answers the review yet, so the report has not gone out.
+		runtime.finish([{ toolName: "bash", subject: "ls" }]);
+		await h.fake.fire("agent_end", {}, h.ctx);
+		expect(reminders.join("")).toContain("still running");
 	});
 });
 
