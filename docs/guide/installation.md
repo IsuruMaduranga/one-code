@@ -149,7 +149,8 @@ A Homebrew install sees the notice a day after the npm release, because
 Homebrew refuses packages younger than that and `brew upgrade` would find
 nothing sooner. Set `ONECODE_NO_UPDATE_CHECK=1` to skip the check;
 `--offline` skips it too.
-On your own pi, update with `pi update --extensions`.
+On your own pi, update the extension with `pi update npm:one-code-extension`.
+A bare `pi update` updates pi itself and skips extensions.
 
 Both packages are released together with the same version number.
 

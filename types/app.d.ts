@@ -8,6 +8,7 @@ declare module "*/lib/update-check.mjs" {
 	export const EXTENSION_PACKAGE: string;
 	export const HOMEBREW_FORMULA: string;
 	export const UPGRADE_COMMANDS: { npm: string; brew: string; "pi-package": string };
+	export function upgradeCommandFor(install: "app" | "pi-package", env?: Record<string, string | undefined>): string;
 	export function registryPackumentUrl(name: string): string;
 	export const CHECK_INTERVAL_MS: number;
 	export const HOMEBREW_MIN_RELEASE_AGE_MS: number;

@@ -112,6 +112,15 @@ describe("buildDoctorReport", () => {
 		expect(renderDoctorText(report, 200)).toContain("Updates: 0.3.0 is available (you have 0.2.1) — npm install -g @one-ai/one-code");
 	});
 
+	it("names each install's own upgrade command", () => {
+		const behind = { status: "behind", version: "0.3.0" } as const;
+		const text = (overrides: Partial<DoctorEnvironment>) =>
+			renderDoctorText(buildDoctorReport({ env: environment({ latest: behind, ...overrides }), registry: registry(anthropic), session: { model: anthropic[1], modelSource: "session" } }), 200);
+		expect(text({ env: { PATH: join(home, "empty-bin"), HOME: home, ONECODE_INSTALL_METHOD: "brew" } })).toContain("— brew upgrade onecode");
+		// A bare `pi update` updates pi and skips packages; the package is named.
+		expect(text({ install: "pi-package" })).toContain("— pi update npm:one-code-extension");
+	});
+
 	it("flags a tiny-tier main model and an unpriced one", () => {
 		const tiny = model("groq", "llama-3.3-8b", 0.05, "openai-completions");
 		const report = buildDoctorReport({ env: environment(), registry: registry([tiny]), session: { model: tiny, modelSource: "session" } });

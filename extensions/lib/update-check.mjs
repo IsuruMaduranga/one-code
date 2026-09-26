@@ -23,12 +23,25 @@ export const APP_PACKAGE = "@one-ai/one-code";
 export const EXTENSION_PACKAGE = "one-code-extension";
 /** The Homebrew formula (IsuruMaduranga/homebrew-one-ai), renamed from one-code at 0.3.0. */
 export const HOMEBREW_FORMULA = "onecode";
-/** How each install method upgrades the app; the doctor and the update notice quote these. */
+/**
+ * How each install method upgrades One Code; the doctor and the update notice
+ * quote these. On the user's own pi a bare `pi update` updates pi itself and
+ * skips packages, so the package is named.
+ */
 export const UPGRADE_COMMANDS = {
 	npm: `npm install -g ${APP_PACKAGE}`,
 	brew: `brew upgrade ${HOMEBREW_FORMULA}`,
-	"pi-package": "pi update",
+	"pi-package": `pi update npm:${EXTENSION_PACKAGE}`,
 };
+
+/**
+ * The upgrade command for a running install: the pi package's, or the app's by
+ * the install method the launcher published (`ONECODE_INSTALL_METHOD`).
+ */
+export function upgradeCommandFor(install, env = process.env) {
+	if (install !== "app") return UPGRADE_COMMANDS["pi-package"];
+	return env.ONECODE_INSTALL_METHOD === "brew" ? UPGRADE_COMMANDS.brew : UPGRADE_COMMANDS.npm;
+}
 
 /**
  * The registry packument for a package (scoped slash percent-encoded). The
