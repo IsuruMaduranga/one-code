@@ -9,7 +9,7 @@
 
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
-import { analyzeShellCommand, INLINE_SCRIPT_SHELLS, isUnknownTilde, leadTokens, movesDirectory, parseCommand, resolvePayload } from "../auto-mode/shell-analysis.ts";
+import { analyzeShellCommand, INLINE_SCRIPT_SHELLS, isUnknownTilde, leadTokens, movesDirectory, parseCommand, resolvePayload, type ShellEvidence } from "../auto-mode/shell-analysis.ts";
 import { pathArgument, resolveForContainment, toAbsolute, toAbsoluteBash } from "../auto-mode/paths.ts";
 import { isSensitivePath } from "../auto-mode/sensitive.ts";
 import { isProtectedPath, isWritingTool } from "./protected-paths.ts";
@@ -833,6 +833,8 @@ export interface Decision {
 		| "mode"
 		| "tier"
 		| "protected-path"
+		/** A shell command the read-only check proves reads only inside the working space. */
+		| "read-only"
 		/** A read, or an acceptEdits write, whose path is outside the working directory. */
 		| "working-dir";
 }
@@ -932,11 +934,13 @@ export function decide(params: DecideInput): Decision {
 		...[params.memoryDirPath, params.scratchpadDirPath, params.resultsDirPath, params.sessionDirPath].filter((d): d is string => !!d).map((d) => resolveForContainment(d) ?? d),
 		...(params.workspaceDirs ?? []),
 	];
+	/** The auto-mode pre-gate's evidence for a shell command, as the permissions extension's pre-gate sees it. */
+	const shellEvidence = (command: string): ShellEvidence =>
+		analyzeShellCommand({ command, cwd, home: homedir(), protectedDirs: params.protectedDirs, readableRoots: sessionReadableRoots() });
+	/** A safe verdict with no writes is exactly read-only: a safe line may still redirect inside the project. */
+	const isReadOnly = (evidence: ShellEvidence): boolean => evidence.verdict === "safe" && evidence.writes.length === 0;
 	/** The pre-gate's proof that a command only reads inside the project, for a substitution in an allowed command. */
-	const readOnlyShell = (command: string): boolean => {
-		const evidence = analyzeShellCommand({ command, cwd, home: homedir(), protectedDirs: params.protectedDirs, readableRoots: sessionReadableRoots() });
-		return evidence.verdict === "safe" && evidence.writes.length === 0;
-	};
+	const readOnlyShell = (command: string): boolean => isReadOnly(shellEvidence(command));
 
 	// In dontAsk mode anything that would prompt is denied instead — including
 	// explicit ask rules: there is no user to put the question to.
@@ -973,8 +977,8 @@ export function decide(params: DecideInput): Decision {
 		// transcripts is a read like any other.
 		const readableRoots = sessionReadableRoots();
 		if (tool === "bash" && subject) {
-			const evidence = analyzeShellCommand({ command: subject, cwd, home: homedir(), protectedDirs: params.protectedDirs, readableRoots });
-			if (evidence.verdict === "safe" && evidence.writes.length === 0) return { decision: "allow", cause: "plan-readonly" };
+			const evidence = shellEvidence(subject);
+			if (isReadOnly(evidence)) return { decision: "allow", cause: "plan-readonly" };
 			// Read-only, but of a path outside the working directory: still a read,
 			// so it is put to the user rather than refused as a plan-mode mutation
 			// (the read tools ask for the same path below).
@@ -1109,6 +1113,26 @@ export function decide(params: DecideInput): Decision {
 		// (`Bash(echo:*)` and `echo … >> ~/.zshrc`), or onto a protected path.
 		if (subjectKind(tool) === "command" && subject && normalizeToolName(tool) !== "powershell" && redirectEscapes(subject)) return outsideWorkingDir();
 		return { decision: "allow", rule: allowRule, cause: "rule" };
+	}
+
+	/**
+	 * The shell tools' own read-only check, in every mode, as Claude Code's Bash
+	 * and PowerShell tools approve a provably read-only command themselves before
+	 * any mode logic runs (findings §36, "Where Claude Code's pre-gate sits"). The
+	 * proof is the auto-mode pre-gate's, so its plugs for Claude Code's gaps
+	 * (symlink-following options, glob operands) hold here too. A safe verdict
+	 * that writes (an in-project redirect) is not read-only: it takes the mode's
+	 * path, where auto mode's pre-gate may still clear it. A read-only command
+	 * that reads outside the working space is judged like the read tools' outside
+	 * read. Plan mode has its own branch above.
+	 */
+	if (subject && tool === "bash") {
+		const evidence = shellEvidence(subject);
+		if (isReadOnly(evidence)) return { decision: "allow", cause: "read-only" };
+		if (evidence.readOnlyOutside && evidence.writes.length === 0) return outsideWorkingDir();
+	}
+	if (subject && tool === "powershell" && powershellReadOnly(subject, { cwd, home: homedir(), readableRoots: sessionReadableRoots() }).readOnly) {
+		return { decision: "allow", cause: "read-only" };
 	}
 
 	if (mode === "auto" && (DELEGATION_TOOLS.has(tool) || CLASSIFY_IN_AUTO_TOOLS.has(tool))) {

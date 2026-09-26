@@ -554,8 +554,10 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	/**
 	 * Run the deterministic pre-gate, then the classifier. The pre-gate may only
 	 * ever conclude "safe" (see auto-mode/shell-analysis.ts); when it does, the
-	 * classifier call is skipped entirely, which is what keeps read-heavy work
-	 * from paying classifier latency on every call.
+	 * classifier call is skipped entirely. A read-only command never gets here:
+	 * `decide()` allows it as the shell tools' own check, in every mode. What the
+	 * pre-gate still clears here is a safe line that writes inside the project
+	 * (a redirect).
 	 */
 	const runClassifier = async (
 		toolName: string,
@@ -1042,8 +1044,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				await trustProject(withRules, { rule: withRules.rule.raw });
 			} else if (repoDirs.length > 0) {
 				const withDirs = decideWith([...allow, ...activeSessionAllows()], [...workspaceDirs, ...repoDirs.map((dir) => resolvedOrSelf(dir.path))]);
-				// A read tool's allow is "tier" or "mode"; a plan-mode shell read's is "plan-readonly".
-				if (withDirs.decision === "allow" && (withDirs.cause === "tier" || withDirs.cause === "mode" || withDirs.cause === "plan-readonly")) {
+				// A read tool's allow is "tier" or "mode"; a shell read's is "read-only" ("plan-readonly" in plan mode).
+				if (withDirs.decision === "allow" && (withDirs.cause === "tier" || withDirs.cause === "mode" || withDirs.cause === "read-only" || withDirs.cause === "plan-readonly")) {
 					const target = resolvedSubject ?? toAbsolute(callCwd, matchSubject, os.homedir());
 					const firing = repoDirs.find((dir) => isWithin(resolvedOrSelf(dir.path), target))?.raw ?? repoDirs[0].raw;
 					await trustProject(withDirs, { dir: firing });
@@ -1071,7 +1073,15 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 					})
 				: undefined;
 
-		if (result.decision === "allow" && !floorReason) return undefined;
+		if (result.decision === "allow" && !floorReason) {
+			// A read-only allow skips the classifier, as the pre-gate's used to, and
+			// like it breaks an auto-mode block streak (Claude Code resets it on any allow).
+			if (mode === "auto" && result.cause === "read-only") {
+				logDecision(ctx, { tool: event.toolName, subject: matchSubject, outcome: "allow", source: "pre-gate" });
+				pauseTracker.recordAllow();
+			}
+			return undefined;
+		}
 
 		// (dontAsk is the only mode that denies rather than allows unmatched calls.)
 		if (result.decision === "deny") {

@@ -298,7 +298,7 @@ describe("decide", () => {
 	});
 
 	it("asks for bash and edits by default", () => {
-		expect(decide({ ...base, toolName: "bash", subject: "ls" }).decision).toBe("ask");
+		expect(decide({ ...base, toolName: "bash", subject: "npm install" }).decision).toBe("ask");
 		expect(decide({ ...base, toolName: "write", subject: "a.ts" }).decision).toBe("ask");
 	});
 
@@ -401,7 +401,48 @@ describe("decide", () => {
 
 	it("acceptEdits allows edit-tier but still asks for bash", () => {
 		expect(decide({ ...base, mode: "acceptEdits", toolName: "edit", subject: "a.ts" }).decision).toBe("allow");
-		expect(decide({ ...base, mode: "acceptEdits", toolName: "bash", subject: "ls" }).decision).toBe("ask");
+		expect(decide({ ...base, mode: "acceptEdits", toolName: "bash", subject: "npm install" }).decision).toBe("ask");
+	});
+
+	describe("the shell tools' own read-only check runs in every mode (findings §36)", () => {
+		const modes = ["default", "acceptEdits", "dontAsk", "auto"] as const;
+
+		it("allows a provably read-only in-project command without a prompt", () => {
+			for (const mode of modes) {
+				for (const subject of ["ls -la && head -c 100 README.md", "git status --short && git log --oneline -1 | cat"]) {
+					const d = decide({ ...base, mode, toolName: "bash", subject });
+					expect(d, `${mode}: ${subject}`).toMatchObject({ decision: "allow", cause: "read-only" });
+				}
+			}
+		});
+
+		it("judges a read-only command outside the working space like an outside read", () => {
+			const subject = "cat /etc/hosts";
+			expect(decide({ ...base, toolName: "bash", subject })).toMatchObject({ decision: "ask", cause: "working-dir" });
+			expect(decide({ ...base, mode: "acceptEdits", toolName: "bash", subject })).toMatchObject({ decision: "ask", cause: "working-dir" });
+			expect(decide({ ...base, mode: "dontAsk", toolName: "bash", subject })).toMatchObject({ decision: "deny", cause: "working-dir" });
+			expect(decide({ ...base, mode: "auto", toolName: "bash", subject })).toMatchObject({ decision: "classify", cause: "working-dir" });
+		});
+
+		it("does not treat an in-project redirect write as read-only", () => {
+			expect(decide({ ...base, toolName: "bash", subject: "git log > notes.txt" }).decision).toBe("ask");
+			expect(decide({ ...base, mode: "auto", toolName: "bash", subject: "git log > notes.txt" }).decision).toBe("classify");
+		});
+
+		it("keeps the pre-gate's plugs for Claude Code's gaps", () => {
+			// Claude Code's read-only gate accepts symlink-following recursion (findings §30).
+			expect(decide({ ...base, toolName: "bash", subject: "grep -R secret ." }).decision).toBe("ask");
+		});
+
+		it("an ask rule still wins, and a deny rule still denies", () => {
+			expect(decide({ ...base, toolName: "bash", subject: "ls -la", ask: rules(["Bash(ls:*)"]) })).toMatchObject({ decision: "ask", cause: "rule" });
+			expect(decide({ ...base, toolName: "bash", subject: "ls -la", deny: rules(["Bash(ls:*)"]) })).toMatchObject({ decision: "deny", cause: "rule" });
+		});
+
+		it("covers PowerShell's read-only cmdlets", () => {
+			expect(decide({ ...base, toolName: "powershell", subject: "Get-ChildItem" })).toMatchObject({ decision: "allow", cause: "read-only" });
+			expect(decide({ ...base, toolName: "powershell", subject: "Remove-Item a.txt" }).decision).toBe("ask");
+		});
 	});
 
 	describe("working-directory containment (PERMISSIONS-REVIEW-2026-09-05 H1, H2)", () => {
@@ -549,7 +590,7 @@ describe("decide", () => {
 	});
 
 	it("dontAsk denies whatever would prompt, ask rules included", () => {
-		const d = decide({ ...base, mode: "dontAsk", toolName: "bash", subject: "ls" });
+		const d = decide({ ...base, mode: "dontAsk", toolName: "bash", subject: "npm install" });
 		expect(d.decision).toBe("deny");
 		expect(d.cause).toBe("mode");
 		const askRuled = decide({
