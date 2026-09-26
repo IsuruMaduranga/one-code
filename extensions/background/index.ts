@@ -341,9 +341,16 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				finish = resolve;
 			});
 
-			const flush = () => {
+			const flush = (force = false) => {
 				flushTimer = undefined;
 				if (batchSize(pending) === 0) return;
+				if (!force && notify.holding()) {
+					// Held after an interrupt: one bounded batch accumulates (its
+					// overflow counted) instead of one held message per flush, and
+					// goes out once the next turn starts.
+					flushTimer = setTimeout(() => flush(), MONITOR_BATCH_IDLE_MS);
+					return;
+				}
 				const batch = pending;
 				pending = emptyBatch();
 				// CC's mid-run monitor batch: no status, the lines in `<event>`.
@@ -362,7 +369,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				// Bounded batches, and a wider window mid-turn so a chatty stream
 				// coalesces instead of steering one notification per second
 				// (monitor-batch.ts).
-				flushTimer ??= setTimeout(flush, agentBusy ? MONITOR_BATCH_BUSY_MS : MONITOR_BATCH_IDLE_MS);
+				flushTimer ??= setTimeout(() => flush(), agentBusy ? MONITOR_BATCH_BUSY_MS : MONITOR_BATCH_IDLE_MS);
 			};
 
 			const end = (finalStatus: BackgroundTask["status"], note?: string) => {
@@ -376,7 +383,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				// after shutdown (H1) or inside a one-shot run reports through
 				// `finished` alone.
 				if (!alive() || oneShot) return;
-				flush();
+				flush(true);
 				updateWidget();
 				// CC's monitor end: the recent tail rides `<event>` under the ended summary.
 				const ccStatus = taskStatusOf(finalStatus);

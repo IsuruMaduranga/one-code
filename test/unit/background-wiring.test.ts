@@ -323,6 +323,24 @@ describe("background wiring: cron tools", () => {
 		expect(cronFires(fake)).toHaveLength(2);
 	});
 
+	it("a recurring job keeps firing, each fire opening its turn, after a tick settles on a provider error or an Esc (A3-H1)", async () => {
+		for (const stopReason of ["error", "aborted"]) {
+			vi.useFakeTimers();
+			vi.setSystemTime(new Date(2026, 8, 25, 12, 0, 0));
+			const fake = mount();
+			const ctx = liveSessionCtx();
+			await cronCall(fake, "cron_create", { cron: "*/5 * * * *", prompt: "check CI" }, ctx);
+			await fake.fire("agent_start", {});
+			await fake.fire("agent_end", { messages: [{ role: "assistant", stopReason }] });
+			await fake.fire("agent_settled", {});
+			await vi.advanceTimersByTimeAsync(3 * 60 * 60_000);
+			const fires = cronFires(fake);
+			expect(fires.length).toBeGreaterThanOrEqual(35);
+			expect(fires.every((m) => m.options?.triggerTurn === true && m.options?.deliverAs === "steer")).toBe(true);
+			vi.useRealTimers();
+		}
+	});
+
 	it("errors fail loud: a bad expression, an unknown id", async () => {
 		const fake = mount();
 		const ctx = liveSessionCtx();
@@ -542,6 +560,34 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 		expect(setWidget).toHaveBeenCalledTimes(1); // no repaint after shutdown
 		expect(fake.sentMessages).toHaveLength(0); // no completion notification
 	});
+
+	it("A3-H1: after an Esc a monitor keeps one bounded batch while held, and sends it once the next turn starts", async () => {
+		const fake = mount();
+		const ctx = liveSessionCtx();
+		await fake.fire("agent_start", {}, ctx);
+		const start = (await fake.tools.get("monitor")!.execute(
+			"c1",
+			{ command: "while true; do echo tick; sleep 0.05; done", description: "ticker" },
+			undefined,
+			undefined,
+			ctx,
+		)) as { details: { taskId: string } };
+		await fake.fire("agent_end", { messages: [{ role: "assistant", stopReason: "aborted" }] }, ctx);
+		await fake.fire("agent_settled", {}, ctx);
+		fake.sentMessages.length = 0;
+		// Several idle flush windows pass while held: nothing is queued, one batch accumulates.
+		await new Promise((resolve) => setTimeout(resolve, 3_500));
+		expect(fake.sentMessages).toHaveLength(0);
+		// The user's next prompt ends the hold; the next flush tick sends the one batch.
+		await fake.fire("before_agent_start", {}, ctx);
+		for (let waited = 0; fake.sentMessages.length === 0 && waited < 3_000; waited += 50) {
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		}
+		await fake.tools.get("task_stop")!.execute("c2", { task_id: start.details.taskId }, undefined, undefined, ctx);
+		const batches = fake.sentMessages.filter((m) => ((m.message.content as Array<{ text: string }>)[0]?.text ?? "").includes("Monitor event"));
+		expect(batches).toHaveLength(1);
+		expect((batches[0].message.content as Array<{ text: string }>)[0].text).toMatch(/\+\d+ more line\(s\) not shown/);
+	}, 10_000);
 
 	it("M2: task_stop ends the monitored command itself (a `cmd; echo` sequence), so the task finishes at once", async () => {
 		const fake = mount();

@@ -288,6 +288,7 @@ describe("createTaskNotifier coalescing (M1)", () => {
 		fire("agent_end", { messages: [{ role: "assistant", stopReason: "aborted" }] });
 		fire("agent_settled");
 		notify("task-notification", shellDone("3"), { taskId: "3" });
+		fire("before_agent_start");
 		const held = sent.at(-1)!;
 		expect(held.options).toEqual({ deliverAs: "nextTurn" });
 		expect((held.message.content as Array<{ text: string }>)[0].text).toBe(frameForDelivery(shellDone("3"), "with-user-prompt"));
@@ -370,6 +371,7 @@ describe("createTaskNotifier coalescing (M1)", () => {
 });
 
 describe("createTaskNotifier after an interrupted turn (M2)", () => {
+	afterEach(() => vi.useRealTimers());
 	const aborted = { messages: [{ role: "assistant", stopReason: "aborted" }] };
 	const errored = { messages: [{ role: "assistant", stopReason: "error" }] };
 	const clean = { messages: [{ role: "assistant", stopReason: "stop" }] };
@@ -384,9 +386,11 @@ describe("createTaskNotifier after an interrupted turn (M2)", () => {
 		// Esc: pi clears its queues (no message_end for our steer) and the run ends aborted.
 		fire("agent_end", aborted);
 		fire("agent_settled");
+		expect(sent).toHaveLength(1);
+		fire("before_agent_start");
 		expect(sent).toHaveLength(2);
 		expect(sent[1].options).toEqual({ deliverAs: "nextTurn" });
-		expect(sent[1].message.content).toEqual(sent[0].message.content);
+		expect((sent[1].message.content as Array<{ text: string }>)[0].text).toBe(frameForDelivery("report", "with-user-prompt"));
 	});
 
 	it("holds new notifications arriving while idle after the interrupt, until the user's next prompt", () => {
@@ -397,11 +401,12 @@ describe("createTaskNotifier after an interrupted turn (M2)", () => {
 		fire("agent_end", aborted);
 		fire("agent_settled");
 		notify("task-notification", "bash finished after the interrupt");
+		expect(sent).toHaveLength(0);
+
+		// The user prompts again: the held notification rides that prompt, and later idle notifications start turns as before.
+		fire("before_agent_start");
 		expect(sent).toHaveLength(1);
 		expect(sent[0].options).toEqual({ deliverAs: "nextTurn" });
-
-		// The user prompts again: the hold ends and later idle notifications start turns as before.
-		fire("before_agent_start");
 		fire("agent_start");
 		fire("agent_end", clean);
 		fire("agent_settled");
@@ -417,8 +422,93 @@ describe("createTaskNotifier after an interrupted turn (M2)", () => {
 		fire("agent_start");
 		fire("agent_end", errored);
 		fire("agent_settled");
-		notify("wakeup", "tick");
+		notify("task-notification", "done");
+		expect(sent).toHaveLength(0);
+		fire("before_agent_start");
 		expect(sent[0].options).toEqual({ deliverAs: "nextTurn" });
+	});
+
+	it("a scheduled fire still opens its turn after an Esc or a provider error, and that turn ends the hold (A3-H1)", () => {
+		for (const settle of [aborted, errored]) {
+			const { pi, sent, fire, deliver, primed } = fakePi();
+			const notify = createTaskNotifier(pi, { coalesceMs: 0 });
+			primed();
+			fire("agent_start");
+			fire("agent_end", settle);
+			fire("agent_settled");
+			notify("task-notification", "held while idle");
+			expect(sent).toHaveLength(0);
+			for (const type of ["cron", "wakeup"]) {
+				notify(type, "check CI");
+				expect(sent.at(-1)!.message.customType).toBe(type);
+				expect(sent.at(-1)!.options).toEqual({ deliverAs: "steer", triggerTurn: true });
+				// The fire's turn starts: what was held steers into it, and the hold is over.
+				fire("agent_start");
+				sent.forEach((_, i) => deliver(i));
+				fire("agent_end", clean);
+				fire("agent_settled");
+			}
+			expect(sent.filter((s) => s.message.customType === "task-notification").map((s) => s.options)).toEqual([{ deliverAs: "steer", triggerTurn: true }]);
+			notify("task-notification", "later");
+			expect(sent.at(-1)!.options).toEqual({ deliverAs: "steer", triggerTurn: true });
+		}
+	});
+
+	it("a turn started without a typed prompt (a typed skill such as /loop) ends the hold, so later fires and completions are not held (A3-H1)", () => {
+		const { pi, sent, fire, primed } = fakePi();
+		const notify = createTaskNotifier(pi, { coalesceMs: 0 });
+		primed();
+		fire("agent_start");
+		fire("agent_end", aborted);
+		fire("agent_settled");
+		notify("task-notification", "held");
+		// The skill turn: sendMessage(triggerTurn) runs it, so no before_agent_start.
+		fire("agent_start");
+		expect(sent).toHaveLength(1);
+		expect(sent[0].options).toEqual({ deliverAs: "steer", triggerTurn: true });
+		expect((sent[0].message.content as Array<{ text: string }>)[0].text).toBe("held");
+		fire("agent_end", clean);
+		fire("agent_settled");
+		notify("task-notification", "completion after the skill turn");
+		expect(sent.at(-1)!.options).toEqual({ deliverAs: "steer", triggerTurn: true });
+	});
+
+	it("keeps one merged message however many notifications arrive during the hold, re-sends included (A3-H1)", () => {
+		vi.useFakeTimers();
+		const { pi, sent, fire, primed } = fakePi();
+		const notify = createTaskNotifier(pi, { coalesceMs: 250 });
+		primed();
+		fire("agent_start");
+		notify("task-notification", shellDone("0"), { taskId: "0" });
+		vi.advanceTimersByTime(250);
+		// Esc drops the steer: the re-send is held with the rest.
+		fire("agent_end", aborted);
+		fire("agent_settled");
+		for (let i = 1; i <= 40; i++) {
+			notify("task-notification", shellDone(String(i)), { taskId: String(i) });
+			vi.advanceTimersByTime(1_000);
+		}
+		expect(sent).toHaveLength(1);
+		fire("before_agent_start");
+		expect(sent).toHaveLength(2);
+		const held = sent[1];
+		expect(held.options).toEqual({ deliverAs: "nextTurn" });
+		const texts = Array.from({ length: 41 }, (_, i) => shellDone(String(i)));
+		expect((held.message.content as Array<{ text: string }>)[0].text).toBe(frameForDelivery(mergeNotificationTexts(texts), "with-user-prompt"));
+		expect((held.message.details as Record<string, unknown[]>)[NOTIFICATION_BATCH_KEY]).toHaveLength(41);
+	});
+
+	it("reports holding() only while idle behind an interrupt", () => {
+		const { pi, fire, primed } = fakePi();
+		const notify = createTaskNotifier(pi, { coalesceMs: 0 });
+		primed();
+		expect(notify.holding()).toBe(false);
+		fire("agent_start");
+		fire("agent_end", aborted);
+		fire("agent_settled");
+		expect(notify.holding()).toBe(true);
+		fire("agent_start");
+		expect(notify.holding()).toBe(false);
 	});
 
 	it("a mid-turn notification during a later run still steers (the hold applies to idle delivery only)", () => {

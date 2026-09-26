@@ -1096,7 +1096,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	// so the message and its pointer would only repeat it (see decisions).
 	const notifier = createTaskNotifier(pi, { withdrawOnDelivery: true });
 	/** Every subagent notification; silent during shutdown (a teardown kill is not news). */
-	const notify: typeof notifier = (customType, text, details) => {
+	const notify = (...[customType, text, details]: Parameters<typeof notifier>) => {
 		if (shuttingDown) return;
 		notifier(customType, text, details);
 	};

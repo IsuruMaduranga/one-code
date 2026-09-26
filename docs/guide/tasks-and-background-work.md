@@ -153,8 +153,12 @@ Background work reports back through notifications:
   batch of tool calls, or starts a new turn if the model is idle.
 - Notifications that arrive within a quarter of a second of each other are
   merged into one message.
-- After you interrupt a turn, notifications are held and attached to your
-  next prompt instead of starting a turn on their own.
+- After you interrupt a turn, or a turn ends on a provider error,
+  notifications are held instead of starting a turn on their own. The held
+  notifications ride your next prompt as one message, or go to the next turn
+  that starts some other way, such as a skill you type. A monitor keeps a
+  single batch while it waits. Scheduled prompts from `/loop` and
+  `cron_create` are not held: they keep firing on schedule.
 - Each notification is framed as an automated event, so the model doesn't
   mistake it for something you said or approved.
 
