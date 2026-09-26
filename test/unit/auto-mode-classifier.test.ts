@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { loadAutoModeConfig } from "../../extensions/auto-mode/config.ts";
-import { CONSECUTIVE_BLOCK_LIMIT, PauseTracker, TOTAL_BLOCK_LIMIT } from "../../extensions/auto-mode/pause.ts";
+import {
+	CONSECUTIVE_BLOCK_LIMIT,
+	PauseTracker,
+	TOTAL_BLOCK_LIMIT,
+	UNATTENDED_PROMPT_TIMEOUT_MS,
+	unattendedPromptNotice,
+	unattendedPromptTimeoutMs,
+} from "../../extensions/auto-mode/pause.ts";
 import {
 	buildPayload,
 	type ClassifyRequest,
@@ -397,5 +404,41 @@ describe("buildRuleset rule-extra injection (CC 2.1.233 injection points)", () =
 	it("injects nothing for empty or missing lists", () => {
 		expect(buildRuleset(config.environment, {})).toBe(buildRuleset(config.environment));
 		expect(buildRuleset(config.environment, { allow: [] })).toBe(buildRuleset(config.environment));
+	});
+});
+
+describe("the timed resume prompt (Claude Code's denial-limit fallback timing)", () => {
+	const block = { toolName: "bash", subject: "x", reason: "r" };
+	const trip = (tracker: PauseTracker, n: number) => {
+		for (let i = 0; i < n; i++) tracker.recordBlock(block);
+	};
+
+	it("times only the first prompt after a consecutive-limit pause, until the streak breaks", () => {
+		const tracker = new PauseTracker();
+		expect(tracker.takeTimedPrompt()).toBe(false);
+		trip(tracker, CONSECUTIVE_BLOCK_LIMIT);
+		expect(tracker.takeTimedPrompt()).toBe(true);
+		expect(tracker.takeTimedPrompt()).toBe(false);
+		tracker.resume();
+		trip(tracker, CONSECUTIVE_BLOCK_LIMIT);
+		expect(tracker.takeTimedPrompt()).toBe(true);
+	});
+
+	it("never times a pause the total limit tripped", () => {
+		const tracker = new PauseTracker();
+		for (let i = 0; i < TOTAL_BLOCK_LIMIT; i++) {
+			tracker.recordBlock(block);
+			if (i % 2 === 0) tracker.recordAllow();
+		}
+		expect(tracker.isPaused()).toBe(true);
+		expect(tracker.takeTimedPrompt()).toBe(false);
+	});
+
+	it("waits 120 s unless CLAUDE_CODE_TICKLISH_WHISPER_TIMEOUT_MS says otherwise, and words it as Claude Code does", () => {
+		expect(unattendedPromptTimeoutMs({} as NodeJS.ProcessEnv)).toBe(UNATTENDED_PROMPT_TIMEOUT_MS);
+		expect(unattendedPromptTimeoutMs({ CLAUDE_CODE_TICKLISH_WHISPER_TIMEOUT_MS: "30000" } as unknown as NodeJS.ProcessEnv)).toBe(30_000);
+		expect(unattendedPromptTimeoutMs({ CLAUDE_CODE_TICKLISH_WHISPER_TIMEOUT_MS: "soon" } as unknown as NodeJS.ProcessEnv)).toBe(UNATTENDED_PROMPT_TIMEOUT_MS);
+		expect(unattendedPromptNotice(120_000)).toBe("⚠ One Code will automatically deny this request in about 2 minutes, to avoid blocking progress on an unattended session");
+		expect(unattendedPromptNotice(30_000)).toContain("in about 30 seconds,");
 	});
 });

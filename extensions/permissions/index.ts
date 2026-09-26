@@ -53,7 +53,7 @@ import { classifierCandidates, describeCandidate, findConfigured } from "../auto
 import { modelIdentity } from "../lib/model-policy.ts";
 import { conflictingPathArguments, isWithin, resolveForContainment, toAbsolute } from "../auto-mode/paths.ts";
 import { DenialStore, denialInputKey, permissionGrantedMessage } from "../auto-mode/denials.ts";
-import { PauseTracker } from "../auto-mode/pause.ts";
+import { PauseTracker, unattendedPromptNotice, unattendedPromptTimeoutMs } from "../auto-mode/pause.ts";
 import { safetyControlWrite } from "../auto-mode/safety-floor.ts";
 import { isExecutionPrimitivePath, isSensitivePath } from "../auto-mode/sensitive.ts";
 import { analyzeShellCommand } from "../auto-mode/shell-analysis.ts";
@@ -142,6 +142,9 @@ const DENIED_DONT_ASK =
 	"Permission mode is dontAsk: anything that would normally prompt the user is denied instead. Only pre-approved tools can run; work within those, or tell the user which allow rule would unblock you.";
 const DENIED_PROTECTED_PATH =
 	"That path is protected: it configures the user's tooling or this agent itself, so writes to it are never auto-approved and allow rules do not cover them. Achieve the goal another way, or ask the user to make the change.";
+/** A timed resume prompt nobody answered (Claude Code's denial-limit fallback timing). */
+const DENIED_UNANSWERED_RESUME =
+	"Auto mode is paused after repeated blocks, and nobody answered the approval prompt for this call in time, so it was denied to avoid blocking an unattended session. Do not retry it; continue with work that does not need it, or stop and wait for the user.";
 /** Claude Code's refusal when `blockReadsOutsideWorkingDirectories` is set. */
 const DENIED_BLOCKED_OUTSIDE_READ =
 	"That path is outside the working directories; the permissions.blockReadsOutsideWorkingDirectories setting blocks reads outside the working directories. Ask the user to add the directory with /add-dir, or to remove that setting.";
@@ -968,6 +971,30 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	};
 
 	/**
+	 * Show an ask prompt through `queue`, timed when it is a paused-auto-mode
+	 * resume prompt that Claude Code's denial-limit fallback times (the first
+	 * after a consecutive-limit pause). pi shows a live countdown and resolves
+	 * an expired dialog as dismissed, so `unanswered` tells the two apart,
+	 * measured from when the dialog showed (not when it queued); the caller
+	 * then denies the call without asking for feedback. Shared by both gate paths.
+	 */
+	const askMaybeTimed = async (
+		pausedResume: boolean,
+		title: string,
+		queue: (show: () => Promise<string | undefined>) => Promise<string | undefined>,
+		select: (title: string, timeout: number | undefined) => Promise<string | undefined>,
+	): Promise<{ choice: string | undefined; unanswered: boolean }> => {
+		if (!pausedResume || !pauseTracker.takeTimedPrompt()) return { choice: await queue(() => select(title, undefined)), unanswered: false };
+		const timeout = unattendedPromptTimeoutMs();
+		let shownAt: number | undefined;
+		const choice = await queue(() => {
+			shownAt = Date.now();
+			return select(`${title}\n\n${unattendedPromptNotice(timeout)}`, timeout);
+		});
+		return { choice, unanswered: choice === undefined && shownAt !== undefined && Date.now() - shownAt >= timeout - Math.min(1500, timeout / 10) };
+	};
+
+	/**
 	 * Claude Code's one-time prompt before auto mode's first read outside the
 	 * working directories (2.1.282, findings §33): raised only in an interactive
 	 * session that has not answered it, on this machine or in Claude Code. Yes
@@ -1271,7 +1298,13 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			floor: floorReason !== undefined,
 			home: os.homedir(),
 		});
-		const choice = await serializePrompt(() => ctx.ui.select(title, askOptions(grant)));
+		const { choice, unanswered } = await askMaybeTimed(pausedResume, title, serializePrompt, (text, timeout) =>
+			ctx.ui.select(text, askOptions(grant), timeout ? { timeout } : undefined),
+		);
+		if (unanswered) {
+			logDecision(ctx, { tool: event.toolName, subject: matchSubject, outcome: "block", source: "user", reason: "resume prompt unanswered" });
+			return { block: true, reason: DENIED_UNANSWERED_RESUME };
+		}
 
 		// The user's answer is itself a gate decision worth recording — it is the
 		// ground truth a drifting classifier gets calibrated against.
@@ -1442,8 +1475,14 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		const childPrompt = <T>(show: () => Promise<T>): Promise<T | undefined> =>
 			serializePrompt(() => (call.signal?.aborted ? Promise.resolve(undefined) : show()));
 		const grant = sessionGrant({ toolName: normalizedTool, subject, cwd, mode, cause: result.cause, home: os.homedir() });
-		const choice = await childPrompt(() => ctx.ui.select(title, askOptions(grant), { signal: call.signal }));
+		const { choice, unanswered } = await askMaybeTimed(pausedResume, title, childPrompt, (text, timeout) =>
+			ctx.ui.select(text, askOptions(grant), { signal: call.signal, timeout }),
+		);
 		if (call.signal?.aborted) return { block: true, reason: "The agent was stopped while waiting for the user's approval." };
+		if (unanswered) {
+			logDecision(ctx, { tool: toolName, subject, outcome: "block", source: "user", reason: "resume prompt unanswered" });
+			return { block: true, reason: DENIED_UNANSWERED_RESUME };
+		}
 
 		if (pausedResume) {
 			logDecision(ctx, {
