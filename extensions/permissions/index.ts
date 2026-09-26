@@ -77,7 +77,8 @@ import {
 	isPathSubjectTool,
 } from "./matcher.ts";
 import { type SessionGrant, sessionGrant } from "./session-grant.ts";
-import { modeBadge, nextMode, PERMISSION_STATUS_CHANNEL, type PermissionStatus, CYCLE_KEY } from "./modes.ts";
+import { formatModel, modeBadge, nextMode, PERMISSION_STATUS_CHANNEL, type PermissionStatus, CYCLE_KEY } from "./modes.ts";
+import { intrinsicTier, usesClaudeCodeFastPaths } from "../lib/model-tier.ts";
 import { type ChildToolCall, type ChildGateDecision, SUBAGENT_GATE_CHANNEL } from "./subagent-gate.ts";
 import { trackOriginalCommands } from "../lib/original-command.ts";
 import { MODE_CHANNEL, PLAN_FILE_CHANNEL } from "../lib/plan-mode-channels.ts";
@@ -255,6 +256,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	// `defaultMode` (or `--permission-mode`) still overrides this; `auto` from a
 	// project file is still refused. See working-docs/decisions/auto-mode.md.
 	let mode: PermissionMode = "auto";
+	/** Whether the session model gets Claude Code's fast paths, for the model-switch notice. */
+	let gateFastPaths: boolean | undefined;
 	// Worktree-wrapped bash calls publish the model's original command here,
 	// keyed by pi's toolCallId (never read from `event.input` — model-writable).
 	const originalCommands = trackOriginalCommands(pi);
@@ -805,6 +808,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		badgeCtx = ctx;
 		lastReviewCtx = ctx;
 		sessionEpoch++;
+		gateFastPaths = usesClaudeCodeFastPaths(ctx.model);
 		// Not awaited: the grammar loads in a few milliseconds, and the gate
 		// awaits it per call. Only a failed load is worth telling the user about.
 		void bashParserReady().then(() => {
@@ -854,6 +858,19 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		lastReviewCtx = ctx;
 		autoInCycle = ctx.modelRegistry.getAvailable().length > 0;
 		resetClassifierChoice(event.model);
+		// The gate reads the model's tier on every call, so a switch takes effect
+		// on the next one; a switch across the workhorse/cheap line says so.
+		const fastPaths = usesClaudeCodeFastPaths(event.model);
+		if (gateFastPaths !== undefined && fastPaths !== gateFastPaths && event.model) {
+			const name = `${formatModel(event.model.provider, event.model.id)} (${intrinsicTier(event.model)} tier)`;
+			ctx.ui.notify(
+				fastPaths
+					? `${name}: permissions now follow Claude Code's fast paths.`
+					: `${name}: permissions now use One Code's stricter checks, so more calls prompt or go to the auto-mode classifier.`,
+				"info",
+			);
+		}
+		gateFastPaths = fastPaths;
 	});
 
 	// The badge carries "· esc to interrupt" only while the model works (CC's
@@ -996,6 +1013,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				sessionDirPath,
 				protectedDirs,
 				workspaceDirs: dirs,
+				claudeCodeFastPaths: usesClaudeCodeFastPaths(ctx.model),
 			});
 		let result = decideWith([...allow, ...activeSessionAllows(), ...(projectAllowTrusted ? projectAllow : [])]);
 
@@ -1268,6 +1286,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			sessionDirPath,
 			protectedDirs,
 			workspaceDirs,
+			// The child's own model: a cheaper subagent gets the stricter gate.
+			claudeCodeFastPaths: usesClaudeCodeFastPaths(call.model),
 		});
 
 		// A child's cwd can be a worktree (different project → different per-repo

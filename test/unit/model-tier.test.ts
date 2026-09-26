@@ -5,6 +5,7 @@ import {
 	pickEconomicalContainedModel,
 	resolveModelTier,
 	tierOverride,
+	usesClaudeCodeFastPaths,
 } from "../../extensions/lib/model-tier.ts";
 
 /** Minimal fake — resolveModelTier only reads id/provider/cost. */
@@ -234,5 +235,25 @@ describe("tierOverride", () => {
 		expect(tierOverride({ CC_PROMPT_TIER: "mid" } as unknown as NodeJS.ProcessEnv)).toBeUndefined(); // retired name
 		expect(tierOverride({ CC_PROMPT_TIER: "auto" } as unknown as NodeJS.ProcessEnv)).toBeUndefined();
 		expect(tierOverride({} as NodeJS.ProcessEnv)).toBeUndefined();
+	});
+});
+
+describe("usesClaudeCodeFastPaths (decisions/auto-mode.md, \"Two gates by model tier\")", () => {
+	it("gives frontier and workhorse Claude Code's fast paths, and cheap, tiny or no model the stricter gate", () => {
+		expect(usesClaudeCodeFastPaths(model("claude-opus-5", "anthropic"))).toBe(true);
+		expect(usesClaudeCodeFastPaths(model("claude-sonnet-5", "anthropic"))).toBe(true);
+		expect(usesClaudeCodeFastPaths(model("claude-haiku-4-5", "anthropic"))).toBe(false);
+		expect(usesClaudeCodeFastPaths(undefined)).toBe(false);
+	});
+
+	it("ignores CC_PROMPT_TIER, so a forced register never loosens the gate", () => {
+		const prev = process.env.CC_PROMPT_TIER;
+		process.env.CC_PROMPT_TIER = "frontier";
+		try {
+			expect(usesClaudeCodeFastPaths(model("claude-haiku-4-5", "anthropic"))).toBe(false);
+		} finally {
+			if (prev === undefined) delete process.env.CC_PROMPT_TIER;
+			else process.env.CC_PROMPT_TIER = prev;
+		}
 	});
 });

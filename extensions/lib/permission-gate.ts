@@ -33,6 +33,7 @@ import { getAgentDir, type InlineExtension } from "@earendil-works/pi-coding-age
 import { bashParserReady } from "./bash-parser.ts";
 import { findProjectRoot } from "./git.ts";
 import { memoryDir } from "./memory.ts";
+import { usesClaudeCodeFastPaths } from "./model-tier.ts";
 import { claudeConfigDir, oneCodeStateDir } from "./paths.ts";
 import { sessionResultsDir } from "./persisted-output.ts";
 import { sessionScratchpadDir } from "./scratchpad.ts";
@@ -139,6 +140,7 @@ export function permissionGateFactory(
 							cwd: runCwd,
 							signal: ctx?.signal,
 							sessionId,
+							model: ctx?.model,
 						});
 					}
 				} catch (error) {
@@ -175,6 +177,7 @@ export function permissionGateFactory(
 					// the subject (the tmpdir fallback sits under a symlinked /var on macOS).
 					resultsDirPath: resolvedOrSelf(sessionResultsDir(ctx)),
 					protectedDirs,
+					claudeCodeFastPaths: usesClaudeCodeFastPaths(ctx?.model),
 				});
 				if (result.decision === "allow") return undefined;
 				const ruleNote = result.rule ? ` (rule: ${result.rule.raw})` : "";

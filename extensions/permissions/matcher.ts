@@ -816,6 +816,12 @@ export interface DecideInput {
 	 * directory (the classifier's containment fast path never sees these).
 	 */
 	workspaceDirs?: string[];
+	/**
+	 * The calling model is frontier or workhorse tier, so its calls get Claude
+	 * Code's fast paths (`lib/model-tier.ts usesClaudeCodeFastPaths`). Absent is
+	 * the stricter gate cheap and tiny models keep.
+	 */
+	claudeCodeFastPaths?: boolean;
 }
 
 export interface Decision {
