@@ -19,6 +19,7 @@
  * same shape as `MCP_TOOLS_CHANNEL` sharing tool definitions).
  */
 
+import type { Api, Model } from "@earendil-works/pi-ai";
 import { type BridgeWatchApi, watchBridge } from "../lib/bridge-watch.ts";
 
 export const SUBAGENT_GATE_CHANNEL = "one-code:subagent-permission-gate";
@@ -37,6 +38,11 @@ export interface ChildToolCall {
 	signal?: AbortSignal;
 	/** The child session's id (what the gate can see); the runner maps it to `agent`. */
 	sessionId?: string;
+	/**
+	 * The child's own model (its session state, never the model's to write). The
+	 * gate judges a child's call by this model's tier, not the parent's.
+	 */
+	model?: Model<Api>;
 	/** The run name of the asking agent, for the prompt title — set by the runner, not the gate. */
 	agent?: string;
 }

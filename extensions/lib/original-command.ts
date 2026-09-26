@@ -22,10 +22,10 @@ export interface OriginalCommandRecord {
 	toolCallId: string;
 	command: string;
 	/**
-	 * The directory the wrapper `cd`s into (the worktree). The pre-gate and the
-	 * recoverability judge run on the original command against THIS cwd, so a
-	 * worktree session keeps the containment fast path and the prompt shows the
-	 * command the model wrote, not `cd '…' && (…)` (PERMISSIONS-REVIEW-2026-09-05 L3).
+	 * The directory the wrapper `cd`s into (the worktree). The pre-gate runs on
+	 * the original command against THIS cwd, so a worktree session keeps the
+	 * containment fast path and the prompt shows the command the model wrote,
+	 * not `cd '…' && (…)` (PERMISSIONS-REVIEW-2026-09-05 L3).
 	 */
 	cwd?: string;
 }

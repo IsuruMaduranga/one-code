@@ -33,8 +33,9 @@
 import { isProtectedPath } from "../permissions/protected-paths.ts";
 import { isExecutionPrimitivePath, isSensitivePath } from "./sensitive.ts";
 import { isWithin, resolveForContainment, toAbsoluteBash } from "./paths.ts";
-import { checkoutGitRunsProgram, READ_HOOKS, RESET_HOOKS } from "./git-checkout-programs.ts";
+import { checkoutGitRunsProgram, READ_HOOKS } from "./git-checkout-programs.ts";
 import { lstatSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 import {
 	GIT_GLOBAL_SAFE,
 	GIT_SUBCOMMAND_SPECS,
@@ -43,6 +44,8 @@ import {
 	checkFind,
 	checkOptions,
 	gitOperandsAllowed,
+	table,
+	type OptionSpec,
 } from "./read-only-options.ts";
 import { parseCommand, scopedTracker, type Segment, type Token } from "./shell-parse.ts";
 
@@ -93,21 +96,15 @@ export interface ShellEvidence {
 	 */
 	readOnlyOutside: boolean;
 	/**
-	 * True when the ONLY reason this escalated is an in-project filesystem
-	 * mutation/deletion — every path is inside the working directory and resolved,
+	 * True when the ONLY reason this escalated is Claude Code's acceptEdits file
+	 * commands (`ACCEPT_EDITS_OPTIONS`) on the working space — every path is
+	 * inside the working directory (or a `writableRoots` entry) and resolved,
 	 * nothing touches the network, no credential/execution-primitive path, no
-	 * unknown command, interpreter, glob, xargs, `cd`, or unmodelled syntax. The
-	 * containment gate uses this to decide whether a git-recoverability check may
-	 * clear the command (see auto-mode/recoverability.ts). Never true when the
-	 * verdict is "safe" (nothing escalated) — it only qualifies an escalation.
+	 * unknown command, interpreter, glob, xargs, `cd`, or unmodelled syntax.
+	 * Never true when the verdict is "safe" (nothing escalated) — it only
+	 * qualifies an escalation.
 	 */
 	containedNonNetwork: boolean;
-	/**
-	 * True for a whole-working-tree destructive git op (`git reset --hard`), whose
-	 * recoverability is judged against the whole tree's cleanliness rather than
-	 * named paths.
-	 */
-	wholeTree: boolean;
 }
 
 /**
@@ -166,8 +163,8 @@ interface WrapperSpec {
 	/** The first operand is a duration (`timeout 30 cmd`). */
 	durationFirst?: boolean;
 	/**
-	 * Whether an in-project payload stays contained for the recoverability
-	 * gate. xargs takes its targets from stdin, and flock and script write the
+	 * Whether an in-project payload stays contained (`containedNonNetwork`).
+	 * xargs takes its targets from stdin, and flock and script write the
 	 * file they are given, which nothing write-checks.
 	 */
 	contained: boolean;
@@ -252,44 +249,42 @@ const MUTATION_COMMANDS = new Set([
 	"zip",
 ]);
 
-/**
- * The delete/truncate commands whose blast radius is exactly their (in-project,
- * resolved, concrete) path arguments, so an in-project use may be cleared by the
- * containment + git-recoverability gate rather than always reaching the
- * classifier. This is an *allowlist* for the "provably contained" conclusion —
- * omission is safe (the command still escalates to the classifier via the generic
- * mutation path). Overwrite/copy tools (cp, mv, dd, tee) are deliberately left
- * out for now: their destination semantics are subtler, so they keep classifying.
- * Membership here does not clear anything on its own: every target must resolve
- * inside the working directory and the recoverability check must pass.
- */
+/** The delete/truncate commands whose targets are every positional, bare names included. */
 const DELETE_COMMANDS = new Set(["rm", "rmdir", "shred", "truncate"]);
+
+/**
+ * Claude Code's acceptEdits file commands (2.1.282, findings §36), with the
+ * options this check models; the only mutations that can be marked contained.
+ * Any other option, one carrying a value included (`cp -t dir`,
+ * `--target-directory=dir`, `mkdir -m`), leaves the command uncontained, as do
+ * symlink-following `cp -L`/`-H`. `sed` is on Claude Code's list but left out
+ * until its program is checked the way Claude Code checks it; Claude Code
+ * classified `sed -i '' …` anyway. This is an *allowlist* for the "provably
+ * contained" conclusion: omission only sends a command to the classifier.
+ */
+const ACCEPT_EDITS_OPTIONS: Record<string, OptionSpec> = {
+	rm: table({ none: "-f -R -r -i -v -I -d --force --recursive --verbose --dir --interactive" }),
+	rmdir: table({ none: "-p -v --parents --verbose" }),
+	mkdir: table({ none: "-p -v --parents --verbose" }),
+	touch: table({ none: "-a -c -m --no-create" }),
+	cp: table({ none: "-r -R -f -i -n -p -v -a -P --recursive --force --interactive --no-clobber --verbose --archive --no-dereference" }),
+	mv: table({ none: "-f -i -n -v --force --interactive --no-clobber --verbose" }),
+};
+
+/**
+ * The operands of an acceptEdits file command, or undefined when it carries an
+ * option `ACCEPT_EDITS_OPTIONS` does not model. After `--` every word is an operand.
+ */
+function acceptEditsOperands(name: string, args: Token[]): Token[] | undefined {
+	const spec = ACCEPT_EDITS_OPTIONS[name];
+	if (!spec) return undefined;
+	const check = checkOptions(spec, args);
+	return check.ok ? check.parsed.positionals : undefined;
+}
 
 /** Glob/other shell metacharacters we cannot enumerate, so a target carrying one is not "concrete". */
 function hasGlob(token: string): boolean {
 	return /[*?\[\]]/.test(token);
-}
-
-/** `git reset --hard [ref]` — a whole-working-tree discard of uncommitted changes. */
-function isWholeTreeGitReset(args: Token[]): boolean {
-	const positionals = args.filter((token) => !token.value.startsWith("-"));
-	return positionals[0]?.value === "reset" && args.some((token) => token.value === "--hard");
-}
-
-/**
- * Whether git is being pointed at another repository or tree (`-C dir`,
- * `--git-dir[=]…`, `--work-tree[=]…`, `--namespace`, `--exec-path`). A
- * whole-tree op carrying one of these acts on THAT tree, so judging it against
- * the working directory would clear a reset of some other checkout.
- */
-function hasGitRetargetFlag(args: Token[]): boolean {
-	return args.some((token) => {
-		const value = token.value;
-		if (!value.startsWith("-")) return false;
-		if (GIT_GLOBAL_VALUE_FLAGS.has(value)) return true;
-		const eq = value.indexOf("=");
-		return eq > 0 && GIT_GLOBAL_VALUE_FLAGS.has(value.slice(0, eq));
-	});
 }
 
 /**
@@ -559,6 +554,30 @@ export function isUnknownTilde(value: string): boolean {
 	return value.startsWith("~") && value !== "~" && !value.startsWith("~/");
 }
 
+/**
+ * Whether `dir` holds a `.git` at any depth, walking at most `budget`
+ * directory entries without following symlinks. A walk that runs out of
+ * budget counts as holding one, so the removal is judged, not cleared.
+ */
+function holdsGitRepository(dir: string, budget = 5_000): boolean {
+	const stack = [dir];
+	let seen = 0;
+	while (stack.length > 0) {
+		const current = stack.pop() as string;
+		let entries;
+		try {
+			entries = readdirSync(current, { withFileTypes: true });
+		} catch {
+			continue;
+		}
+		for (const entry of entries) {
+			if (++seen > budget || entry.name === ".git") return true;
+			if (entry.isDirectory()) stack.push(join(current, entry.name));
+		}
+	}
+	return false;
+}
+
 /** Whether a directory entry exists at `absolute` (a dangling symlink counts). */
 function entryExists(absolute: string): boolean {
 	try {
@@ -769,12 +788,19 @@ export interface AnalyzeInput {
 	 * only; the write and delete checks never consult this list.
 	 */
 	readableRoots?: string[];
+	/**
+	 * REALPATH-resolved directories a write may land in besides the working
+	 * directory without leaving the working space: the workspace directories,
+	 * passed only for a model that gets Claude Code's fast paths
+	 * (permissions/matcher.ts `DecideInput.claudeCodeFastPaths`).
+	 */
+	writableRoots?: string[];
 }
 
 /**
  * Classify a shell command. Never denies — see the module contract above.
  */
-export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], readableRoots = [] }: AnalyzeInput): ShellEvidence {
+export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], readableRoots = [], writableRoots = [] }: AnalyzeInput): ShellEvidence {
 	const checkoutReasons = new Map<string, string | undefined>();
 	const evidence: ShellEvidence = {
 		verdict: "safe",
@@ -788,13 +814,12 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		outsideReads: [],
 		readOnlyOutside: false,
 		containedNonNetwork: false,
-		wholeTree: false,
 	};
 	/**
 	 * Set by any escalation reason that is NOT a bare in-project mutation — i.e.
 	 * anything meaning the command reaches outside the project or cannot be fully
 	 * accounted for. When it stays false through an escalation, the only blocker
-	 * was in-project mutation, and the containment gate may consult recoverability.
+	 * was in-project mutation (`containedNonNetwork`).
 	 */
 	let uncontained = false;
 	/** Set by any escalation that is not an outside-cwd read (see readOnlyOutside). */
@@ -848,7 +873,7 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		}
 		const absolute = toAbsoluteBash(effectiveCwd, token, home);
 		const resolved = resolveForContainment(absolute);
-		const outsideCwd = resolved === undefined || !isWithin(containmentRoot, resolved);
+		const outsideCwd = resolved === undefined || !(isWithin(containmentRoot, resolved) || writableRoots.some((root) => isWithin(root, resolved)));
 		evidence.writes.push({ token, absolute, resolved, outsideCwd });
 		if (resolved === undefined) {
 			escalate(`writes to ${token}, which could not be resolved to a real path`);
@@ -1049,29 +1074,6 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		}
 
 		if (name === "git") {
-			// `git reset --hard` is an in-project whole-tree discard: escalate, but
-			// mark it contained so the recoverability gate can clear it when the tree
-			// is clean. Any other non-read-only git subcommand is uncontained.
-			if (isWholeTreeGitReset(args)) {
-				if (hasGitRetargetFlag(args)) {
-					// The reset acts on whatever -C/--git-dir/--work-tree names, not on
-					// the working directory the recoverability judge would inspect.
-					escalate("runs git reset --hard against another tree (-C/--git-dir/--work-tree), which cannot be judged here");
-					continue;
-				}
-				// Recoverable bytes do not make the reset free of other effects: the
-				// checkout's config and hooks run programs a clean tree says nothing about.
-				const programs = gitCheckoutReason(args, effectiveCwd, home, checkoutReasons, RESET_HOOKS);
-				if (programs) {
-					escalate(programs);
-					continue;
-				}
-				evidence.wholeTree = true;
-				escalate("runs git reset --hard, which discards uncommitted changes in the working tree", {
-					contained: true,
-				});
-				continue;
-			}
 			const fileReads: Token[] = [];
 			const reason =
 				gitEscalationReason(
@@ -1100,10 +1102,11 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 
 		const isMutation = MUTATION_COMMANDS.has(name);
 		const isDelete = DELETE_COMMANDS.has(name);
-		// A delete confined to in-project paths is what the containment gate exists
-		// to clear (subject to recoverability); any other mutation (cp/mv/tar/…)
-		// stays uncontained and reaches the classifier as before.
-		if (isMutation) escalate(`runs ${name}, which modifies the filesystem`, { contained: isDelete });
+		// Claude Code's acceptEdits file commands with modelled options are the
+		// contained mutations, their targets checked below; any other mutation
+		// (tar/dd/ln/…) stays uncontained.
+		const fileOperands = acceptEditsOperands(name, args);
+		if (isMutation) escalate(`runs ${name}, which modifies the filesystem`, { contained: fileOperands !== undefined });
 
 
 		// A read-only command is proved read-only by its options, not its name:
@@ -1166,10 +1169,37 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		// The positional destinations of writing commands are the paths that get
 		// written. (Redirections were already handled at the top of the loop.)
 		const writeTokens: string[] = [];
-		if (isDelete) {
+		if (fileOperands !== undefined) {
+			// Every operand is a path, bare names included. cp and mv write their
+			// last operand and read the rest, so a source outside the working space
+			// (or a credential) is an outside read and leaves the line uncontained.
+			const reads = name === "cp" || name === "mv" ? fileOperands.slice(0, -1) : [];
+			const writes = name === "cp" || name === "mv" ? fileOperands.slice(-1) : fileOperands;
+			// Removing or moving a working root itself, a `.git`, or a directory
+			// holding one at any depth destroys history git cannot give back
+			// (`rm -rf .`, `mv .git x`, `rm -rf vendor` over `vendor/lib/.git`),
+			// whatever else is contained.
+			if (name === "rm" || name === "rmdir" || name === "mv") {
+				for (const token of name === "mv" ? reads : fileOperands) {
+					const resolved = resolveForContainment(toAbsoluteBash(effectiveCwd, token.value, home));
+					if (resolved === undefined) continue;
+					const root = resolved === containmentRoot || writableRoots.includes(resolved);
+					const repository = resolved.split(/[\\/]/).includes(".git") || holdsGitRepository(resolved);
+					if (root || repository) escalate(`${name === "mv" ? "moves" : "removes"} ${token.value}, which is a working root or holds a git repository`);
+				}
+			}
+			for (const token of reads) {
+				if (isSensitivePath(toAbsoluteBash(effectiveCwd, token.value, home))) {
+					if (!evidence.sensitivePaths.includes(token.value)) evidence.sensitivePaths.push(token.value);
+					escalate(`copies or moves ${token.value}, a credential or secret path`);
+				}
+				checkRead(token);
+			}
+			writeTokens.push(...writes.map((token) => token.value));
+		} else if (isDelete) {
 			// A delete's targets are every non-flag positional, bare names included
-			// (`rm notes.txt` has no slash but is still a real target the
-			// recoverability gate must see). A glob target cannot be enumerated, so
+			// (`rm notes.txt` has no slash but is still a real target that
+			// must be resolved). A glob target cannot be enumerated, so
 			// it drops out of containment — the command then reaches the classifier.
 			for (const token of args) {
 				if (token.value.startsWith("-")) continue;
@@ -1208,9 +1238,8 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		for (const token of writeTokens) checkWriteTarget(token);
 	}
 
-	// The command escalated, but every reason was an in-project delete/whole-tree
-	// reset — nothing reached outside the project, the network, or the unknown. The
-	// containment gate may now consult git-recoverability (auto-mode/recoverability).
+	// The command escalated, but every reason was an acceptEdits file command on
+	// the working space: nothing reached outside it, the network, or the unknown.
 	evidence.containedNonNetwork = evidence.verdict === "escalate" && !uncontained;
 	evidence.readOnlyOutside = evidence.verdict === "escalate" && !escalatedBeyondReads;
 

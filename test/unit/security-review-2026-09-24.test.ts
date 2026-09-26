@@ -12,7 +12,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { conflictingPathArguments } from "../../extensions/auto-mode/paths.ts";
-import { checkRecoverability } from "../../extensions/auto-mode/recoverability.ts";
 import { analyzeShellCommand } from "../../extensions/auto-mode/shell-analysis.ts";
 import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
@@ -181,50 +180,25 @@ function repo(): void {
 	execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"], { cwd });
 }
 
-describe("M2: a recoverable reset still runs the checkout's programs", () => {
-	it("escalates git reset --hard, uncontained, when the checkout configures a hooks path", () => {
+describe("M2, M3: git reset --hard is never contained", () => {
+	// The fix for M2 (a recoverable reset ran a configured hook unclassified) and
+	// M3 (a clean status hid unrecoverable bytes) was the recoverability judge;
+	// with the judge removed, every reset is classified whatever the tree holds.
+	it("escalates a reset uncontained, with or without a hooks path or flagged files", () => {
 		repo();
+		expect(analyze("git reset --hard HEAD").containedNonNetwork).toBe(false);
 		mkdirSync(join(cwd, "hooks"));
 		writeFileSync(join(cwd, "hooks", "post-index-change"), "#!/bin/sh\ntouch hook-ran\n", { mode: 0o755 });
 		execFileSync("git", ["config", "core.hooksPath", "hooks"], { cwd });
 		const evidence = analyze("git reset --hard HEAD");
 		expect(evidence.verdict).toBe("escalate");
 		expect(evidence.containedNonNetwork).toBe(false);
-		expect(evidence.notes.join("\n")).toMatch(/hook/);
 	});
 
-	it("escalates a reference-transaction hook too, which only a ref update runs", () => {
+	it("a reference-transaction hook does not stop a read", () => {
 		repo();
 		writeFileSync(join(cwd, ".git", "hooks", "reference-transaction"), "#!/bin/sh\n", { mode: 0o755 });
-		expect(analyze("git reset --hard HEAD").containedNonNetwork).toBe(false);
-		// A read does not update refs, so the same hook does not stop it.
 		expect(verdict("git status")).toBe("safe");
-	});
-
-	it("keeps a plain clean reset contained", () => {
-		repo();
-		const evidence = analyze("git reset --hard HEAD");
-		expect(evidence.containedNonNetwork).toBe(true);
-		expect(evidence.wholeTree).toBe(true);
-	});
-});
-
-describe("M3: a clean status does not prove recoverable bytes", () => {
-	for (const flag of ["--assume-unchanged", "--skip-worktree"]) {
-		it(`calls a ${flag} file with unique bytes unrecoverable, for a delete and a reset`, () => {
-			repo();
-			writeFileSync(join(cwd, "a.txt"), "uncommitted unique fixture\n");
-			execFileSync("git", ["update-index", flag, "a.txt"], { cwd });
-			expect(execFileSync("git", ["status", "--porcelain"], { cwd, encoding: "utf8" })).toBe("");
-			expect(checkRecoverability(cwd, { targets: [join(cwd, "a.txt")], wholeTree: false }).verdict).toBe("unrecoverable");
-			expect(checkRecoverability(cwd, { targets: [], wholeTree: true }).verdict).toBe("unrecoverable");
-		});
-	}
-
-	it("still clears a tracked, clean, unflagged file", () => {
-		repo();
-		expect(checkRecoverability(cwd, { targets: [join(cwd, "a.txt")], wholeTree: false }).verdict).toBe("recoverable");
-		expect(checkRecoverability(cwd, { targets: [], wholeTree: true }).verdict).toBe("recoverable");
 	});
 });
 

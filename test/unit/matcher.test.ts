@@ -1,4 +1,4 @@
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -298,7 +298,7 @@ describe("decide", () => {
 	});
 
 	it("asks for bash and edits by default", () => {
-		expect(decide({ ...base, toolName: "bash", subject: "ls" }).decision).toBe("ask");
+		expect(decide({ ...base, toolName: "bash", subject: "npm install" }).decision).toBe("ask");
 		expect(decide({ ...base, toolName: "write", subject: "a.ts" }).decision).toBe("ask");
 	});
 
@@ -401,7 +401,117 @@ describe("decide", () => {
 
 	it("acceptEdits allows edit-tier but still asks for bash", () => {
 		expect(decide({ ...base, mode: "acceptEdits", toolName: "edit", subject: "a.ts" }).decision).toBe("allow");
-		expect(decide({ ...base, mode: "acceptEdits", toolName: "bash", subject: "ls" }).decision).toBe("ask");
+		expect(decide({ ...base, mode: "acceptEdits", toolName: "bash", subject: "npm install" }).decision).toBe("ask");
+	});
+
+	describe("the shell tools' own read-only check runs in every mode (findings §36)", () => {
+		const modes = ["default", "acceptEdits", "dontAsk", "auto"] as const;
+
+		it("allows a provably read-only in-project command without a prompt", () => {
+			for (const mode of modes) {
+				for (const subject of ["ls -la && head -c 100 README.md", "git status --short && git log --oneline -1 | cat"]) {
+					const d = decide({ ...base, mode, toolName: "bash", subject });
+					expect(d, `${mode}: ${subject}`).toMatchObject({ decision: "allow", cause: "read-only" });
+				}
+			}
+		});
+
+		it("judges a read-only command outside the working space like an outside read", () => {
+			const subject = "cat /etc/hosts";
+			expect(decide({ ...base, toolName: "bash", subject })).toMatchObject({ decision: "ask", cause: "working-dir" });
+			expect(decide({ ...base, mode: "acceptEdits", toolName: "bash", subject })).toMatchObject({ decision: "ask", cause: "working-dir" });
+			expect(decide({ ...base, mode: "dontAsk", toolName: "bash", subject })).toMatchObject({ decision: "deny", cause: "working-dir" });
+			expect(decide({ ...base, mode: "auto", toolName: "bash", subject })).toMatchObject({ decision: "classify", cause: "working-dir" });
+		});
+
+		it("does not treat an in-project redirect write as read-only", () => {
+			expect(decide({ ...base, toolName: "bash", subject: "git log > notes.txt" }).decision).toBe("ask");
+			expect(decide({ ...base, mode: "auto", toolName: "bash", subject: "git log > notes.txt" }).decision).toBe("classify");
+		});
+
+		it("keeps the pre-gate's plugs for Claude Code's gaps", () => {
+			// Claude Code's read-only gate accepts symlink-following recursion (findings §30).
+			expect(decide({ ...base, toolName: "bash", subject: "grep -R secret ." }).decision).toBe("ask");
+		});
+
+		it("an ask rule still wins, and a deny rule still denies", () => {
+			expect(decide({ ...base, toolName: "bash", subject: "ls -la", ask: rules(["Bash(ls:*)"]) })).toMatchObject({ decision: "ask", cause: "rule" });
+			expect(decide({ ...base, toolName: "bash", subject: "ls -la", deny: rules(["Bash(ls:*)"]) })).toMatchObject({ decision: "deny", cause: "rule" });
+		});
+
+		it("covers PowerShell's read-only cmdlets", () => {
+			expect(decide({ ...base, toolName: "powershell", subject: "Get-ChildItem" })).toMatchObject({ decision: "allow", cause: "read-only" });
+			expect(decide({ ...base, toolName: "powershell", subject: "Remove-Item a.txt" }).decision).toBe("ask");
+		});
+	});
+
+	describe("Claude Code's fast paths for frontier and workhorse models (decisions/auto-mode.md, \"Two gates by model tier\")", () => {
+		const capable = { ...base, claudeCodeFastPaths: true };
+		const fsLine = "mkdir -p build && touch build/x && cp README.md build/r.md && mv build/r.md build/s.md";
+		const extra = "/home/user/extra";
+
+		it("allows Claude Code's acceptEdits file commands and in-project redirects in acceptEdits and auto mode", () => {
+			for (const mode of ["acceptEdits", "auto"] as const) {
+				for (const subject of [fsLine, "rm -f scratch.log", "echo hi > notes.txt"]) {
+					expect(decide({ ...capable, mode, toolName: "bash", subject }), `${mode}: ${subject}`).toMatchObject({ decision: "allow", cause: "mode" });
+				}
+			}
+			// Manual mode still asks, as in Claude Code.
+			expect(decide({ ...capable, toolName: "bash", subject: fsLine }).decision).toBe("ask");
+		});
+
+		it("keeps the stricter gate for cheap and tiny models", () => {
+			expect(decide({ ...base, mode: "acceptEdits", toolName: "bash", subject: fsLine }).decision).toBe("ask");
+			expect(decide({ ...base, mode: "auto", toolName: "bash", subject: fsLine }).decision).toBe("classify");
+			expect(decide({ ...base, mode: "auto", toolName: "write", subject: `${extra}/a.txt`, workspaceDirs: [extra] }).decision).toBe("classify");
+		});
+
+		it("still classifies what Claude Code classifies: git reset --hard, sed, and anything reaching outside", () => {
+			for (const subject of ["git reset --hard", "sed -i '' s/a/b/ README.md", "cp /etc/hosts copied.txt", "rm -rf /tmp/x"]) {
+				expect(decide({ ...capable, mode: "auto", toolName: "bash", subject }).decision, subject).toBe("classify");
+			}
+		});
+
+		it("in auto mode, allows an edit anywhere acceptEdits would: workspace directories and CI files included", () => {
+			expect(decide({ ...capable, mode: "auto", toolName: "write", subject: `${extra}/a.txt`, workspaceDirs: [extra] })).toMatchObject({ decision: "allow", cause: "mode" });
+			expect(decide({ ...capable, mode: "auto", toolName: "write", subject: ".github/workflows/ci.yml" })).toMatchObject({ decision: "allow", cause: "mode" });
+			expect(decide({ ...capable, mode: "auto", toolName: "write", subject: "/home/user/elsewhere/a.txt" }).decision).toBe("classify");
+			// A protected path is judged before any fast path.
+			expect(decide({ ...capable, mode: "auto", toolName: "write", subject: ".git/hooks/pre-commit" })).toMatchObject({ decision: "classify", cause: "protected-path" });
+		});
+
+		it("in auto mode, reads outside the working space without the classifier, except a credential path", () => {
+			expect(decide({ ...capable, mode: "auto", toolName: "read", subject: "/etc/hosts" })).toMatchObject({ decision: "allow", cause: "outside-read" });
+			expect(decide({ ...capable, mode: "auto", toolName: "grep", subject: "/etc" })).toMatchObject({ decision: "allow", cause: "outside-read" });
+			expect(decide({ ...capable, mode: "auto", toolName: "read", subject: "~/.ssh/id_rsa" }).decision).toBe("classify");
+			// Only auto mode: manual and acceptEdits still ask, cheap and tiny still classify.
+			expect(decide({ ...capable, toolName: "read", subject: "/etc/hosts" }).decision).toBe("ask");
+			expect(decide({ ...capable, mode: "acceptEdits", toolName: "read", subject: "/etc/hosts" }).decision).toBe("ask");
+			expect(decide({ ...base, mode: "auto", toolName: "read", subject: "/etc/hosts" }).decision).toBe("classify");
+		});
+
+		it("blockReadsOutsideWorkingDirectories refuses an outside read in every mode and tier, never an inside one", () => {
+			for (const call of [{ ...capable, mode: "auto" as const }, { ...base, mode: "auto" as const }, { ...base }, { ...base, mode: "plan" as const }]) {
+				expect(decide({ ...call, toolName: "read", subject: "/etc/hosts", blockReadsOutsideWorkingDirectories: true })).toMatchObject({ decision: "deny", cause: "blocked-outside-read" });
+				expect(decide({ ...call, toolName: "read", subject: "src/a.ts", blockReadsOutsideWorkingDirectories: true }).decision).toBe("allow");
+			}
+		});
+
+		it("counts a workspace directory for a shell write only on the fast-path tiers", () => {
+			// Real directories: the shell analysis judges where a path resolves.
+			const root = realpathSync(mkdtempSync(join(tmpdir(), "oc-ws-")));
+			try {
+				const project = join(root, "project");
+				const workspace = join(root, "extra");
+				mkdirSync(project);
+				mkdirSync(workspace);
+				const call = { ...base, cwd: project, mode: "auto" as const, toolName: "bash", subject: `touch ${join(workspace, "x")}`, workspaceDirs: [workspace] };
+				expect(decide({ ...call, claudeCodeFastPaths: true }).decision).toBe("allow");
+				expect(decide(call).decision).toBe("classify");
+			} finally {
+				rmSync(root, { recursive: true, force: true });
+			}
+		});
 	});
 
 	describe("working-directory containment (PERMISSIONS-REVIEW-2026-09-05 H1, H2)", () => {
@@ -549,7 +659,7 @@ describe("decide", () => {
 	});
 
 	it("dontAsk denies whatever would prompt, ask rules included", () => {
-		const d = decide({ ...base, mode: "dontAsk", toolName: "bash", subject: "ls" });
+		const d = decide({ ...base, mode: "dontAsk", toolName: "bash", subject: "npm install" });
 		expect(d.decision).toBe("deny");
 		expect(d.cause).toBe("mode");
 		const askRuled = decide({

@@ -146,14 +146,6 @@ function submoduleGitDirs(root: string, commonDir: string): string[] | undefined
 export const READ_HOOKS = ["post-index-change"] as const;
 
 /**
- * The hooks `git reset --hard` can run: the index rewrite, and the ref update
- * when it moves HEAD. A clean tree made the reset recoverable, but a
- * recoverable reset still ran a configured hook unclassified
- * (AUTO-MODE-SECURITY-REVIEW-2026-09-24 M2).
- */
-export const RESET_HOOKS = ["post-index-change", "reference-transaction"] as const;
-
-/**
  * Why a git command in `dir` could run a program the checkout names, or
  * undefined when its repository-scoped configuration names none (or `dir` is
  * in no checkout). `hooks` are the hook names the command can run; `home`

@@ -31,10 +31,12 @@ so nothing surprises you.
 | Permission-mode key | shift+tab. | ctrl+q; alt+m on Windows and WSL. pi reserves shift+tab for the reasoning-effort dial and, on Windows, ctrl+q for queuing a follow-up. |
 | Task-list key | ctrl+t. | alt+t, or `/tasks show` and `/tasks hide`. pi reserves ctrl+t for thinking blocks. |
 | Where auto mode's classifier runs | On Anthropic's API server, through a request field the endpoint must support; the local classifier is a fallback only until about October 23, 2026 ([LiteLLM's notes](https://docs.litellm.ai/blog/claude-code-server-side-auto-mode)). | In the harness, on a model from your own provider, so auto mode works with any provider. |
-| Deleting files in auto mode | The whole project directory is trusted. | A delete is approved only when git can recover the file; otherwise the classifier decides. |
+| Permission shortcuts by model | One set for every model; auto mode needs a Sonnet- or Opus-class model. | Claude Code's shortcuts for frontier and workhorse models. Cheap and tiny models, which Claude Code can't run in auto mode, get stricter checks. |
+| Deleting files in auto mode | An in-project `rm` runs without the classifier; `git reset --hard` is classified. | The same with frontier and workhorse models. With cheap and tiny models, every delete goes to the classifier. |
+| Reading outside the working directories in auto mode | Runs without the classifier after a one-time question. | The same with frontier and workhorse models, except credential files, which are classified. With cheap and tiny models, the classifier decides. |
 | Approving a call auto mode denied | `/permissions` tells the model permission was granted; the retry is judged again. | The approval lets that exact call run once without the classifier. |
 | Auto-mode built-in rules | A section's built-in rules can be switched off. | Always in effect; your rules only add to them. |
-| Workspace directories | Reads, edits in accept-edits mode, and auto-mode writes. | Reads and accept-edits edits. Auto-mode writes there go to the classifier, and credential files there still prompt. |
+| Workspace directories | Reads, edits in accept-edits mode, and auto-mode writes. | The same, except that credential files there still prompt. With cheap and tiny models, auto-mode writes there go to the classifier. |
 | Bypass mode | Protected paths stay protected. | Bypass mode bypasses everything, including protected paths. |
 | First-run consent for auto mode | Asked once. | Not asked. Auto mode is on from the first session. |
 | OS sandbox | Paired with auto mode. | None. Run One Code in a container for OS-level isolation. |
@@ -112,8 +114,7 @@ every model. The content is the same; only the placement differs.
   Code's own text. What differs: One Code has no PowerShell command parser
   yet, so in auto mode every PowerShell command that isn't on Claude Code's
   read-only cmdlet list goes to the classifier (Claude Code auto-approves
-  more in-project work), and the git-recoverability shortcut for in-project
-  deletes is bash-only. Verified on CI runners and through a `pwsh` on
+  more in-project work). Verified on CI runners and through a `pwsh` on
   macOS; a real Windows desktop has not been driven end to end yet. See
   [Windows](windows.md).
 

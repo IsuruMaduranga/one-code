@@ -53,11 +53,10 @@ import { classifierCandidates, describeCandidate, findConfigured } from "../auto
 import { modelIdentity } from "../lib/model-policy.ts";
 import { conflictingPathArguments, isWithin, resolveForContainment, toAbsolute } from "../auto-mode/paths.ts";
 import { DenialStore, denialInputKey, permissionGrantedMessage } from "../auto-mode/denials.ts";
-import { PauseTracker } from "../auto-mode/pause.ts";
-import { checkRecoverability } from "../auto-mode/recoverability.ts";
+import { PauseTracker, unattendedPromptNotice, unattendedPromptTimeoutMs } from "../auto-mode/pause.ts";
 import { safetyControlWrite } from "../auto-mode/safety-floor.ts";
 import { isExecutionPrimitivePath, isSensitivePath } from "../auto-mode/sensitive.ts";
-import { analyzeShellCommand, type ShellEvidence } from "../auto-mode/shell-analysis.ts";
+import { analyzeShellCommand } from "../auto-mode/shell-analysis.ts";
 import { bashParserReady, bashParserUnavailable } from "../lib/bash-parser.ts";
 import { powershellReadOnly } from "./powershell-rules.ts";
 import { isShellTool } from "./matcher.ts";
@@ -78,7 +77,8 @@ import {
 	isPathSubjectTool,
 } from "./matcher.ts";
 import { type SessionGrant, sessionGrant } from "./session-grant.ts";
-import { modeBadge, nextMode, PERMISSION_STATUS_CHANNEL, type PermissionStatus, CYCLE_KEY } from "./modes.ts";
+import { formatModel, modeBadge, nextMode, PERMISSION_STATUS_CHANNEL, type PermissionStatus, CYCLE_KEY } from "./modes.ts";
+import { intrinsicTier, usesClaudeCodeFastPaths } from "../lib/model-tier.ts";
 import { type ChildToolCall, type ChildGateDecision, SUBAGENT_GATE_CHANNEL } from "./subagent-gate.ts";
 import { trackOriginalCommands } from "../lib/original-command.ts";
 import { MODE_CHANNEL, PLAN_FILE_CHANNEL } from "../lib/plan-mode-channels.ts";
@@ -88,7 +88,10 @@ import {
 	listPermissionRules,
 	listWorkspaceDirectories,
 	loadPermissionSettings,
+	markOutsideReadPromptSeen,
 	normalizePermissionMode,
+	outsideReadPromptSeen,
+	persistBlockOutsideReads,
 	persistAllowRule,
 	persistPermissionRule,
 	removePermissionRule,
@@ -108,7 +111,7 @@ import { findProjectRoot } from "../lib/git.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
 import { announceLocalCommand, registerLocalCommand } from "../lib/local-command.ts";
-import { tildify, tryRealpath } from "../lib/paths.ts";
+import { claudeJsonPath, tildify, tryRealpath } from "../lib/paths.ts";
 import { openPermissionsPanel, type PermissionsPanelHost } from "./panel/host.ts";
 import {
 	AUTO_SECTION_LABELS,
@@ -139,6 +142,26 @@ const DENIED_DONT_ASK =
 	"Permission mode is dontAsk: anything that would normally prompt the user is denied instead. Only pre-approved tools can run; work within those, or tell the user which allow rule would unblock you.";
 const DENIED_PROTECTED_PATH =
 	"That path is protected: it configures the user's tooling or this agent itself, so writes to it are never auto-approved and allow rules do not cover them. Achieve the goal another way, or ask the user to make the change.";
+/** A timed resume prompt nobody answered (Claude Code's denial-limit fallback timing). */
+const DENIED_UNANSWERED_RESUME =
+	"Auto mode is paused after repeated blocks, and nobody answered the approval prompt for this call in time, so it was denied to avoid blocking an unattended session. Do not retry it; continue with work that does not need it, or stop and wait for the user.";
+/** Claude Code's refusal when `blockReadsOutsideWorkingDirectories` is set. */
+const DENIED_BLOCKED_OUTSIDE_READ =
+	"That path is outside the working directories; the permissions.blockReadsOutsideWorkingDirectories setting blocks reads outside the working directories. Ask the user to add the directory with /add-dir, or to remove that setting.";
+/** Claude Code's refusal right after the user picks "block" in the first-read prompt. */
+const DENIED_CHOSE_BLOCK_OUTSIDE_READS =
+	"The user chose to block reads outside the working directories (permissions.blockReadsOutsideWorkingDirectories). Ask the user to add the directory with /add-dir, or to remove that setting.";
+/** Claude Code's first outside-read prompt in auto mode (2.1.282): title, question, answers. */
+const OUTSIDE_READ_TITLE = "Read outside the working directories";
+const OUTSIDE_READ_QUESTION = "Allow reads outside the working directories?";
+const OUTSIDE_READ_ANSWERS = {
+	allow: "Yes, keep allowing reads outside the working directories",
+	block: "No, block reads outside the working directories from now on",
+	ask_again: "No, ask again next time",
+} as const;
+/** Claude Code's explainer, without its sandbox sentences (One Code has no sandbox) and with One Code's settings file. */
+const OUTSIDE_READ_EXPLAINER = (settingsFile: string) =>
+	`Auto mode reads outside the working directories without asking. Yes or Block settles this question; Ask again asks on the next outside read. Block: the file tools refuse reads outside the working directories in every project. To undo, remove permissions.blockReadsOutsideWorkingDirectories from ${settingsFile}.`;
 const DENIED_OUTSIDE_WORKING_DIR =
 	"That path is outside the working directory, which needs the user's approval, and permission mode is dontAsk (anything that would prompt is denied instead). Work inside the project, or tell the user which allow rule (e.g. Read(~/dir/**)) would unblock you.";
 // Returned to the MODEL, not the user: auto mode exists to run unattended, so a
@@ -185,16 +208,22 @@ const askTitle = (actor: string, preview: string, cause: string, pausedResume: b
 };
 
 /** Map a `decide()` deny result to its model-facing reason — shared by both gate paths. */
-const denyReason = (result: { cause?: string; rule?: { raw?: string } }): string =>
-	result.cause === "plan-mode"
-		? DENIED_PLAN_MODE
-		: result.cause === "protected-path"
-			? DENIED_PROTECTED_PATH
-			: result.cause === "working-dir"
-				? DENIED_OUTSIDE_WORKING_DIR
-				: result.cause === "mode"
-					? DENIED_DONT_ASK
-					: DENIED_BY_RULE(result.rule?.raw ?? "deny");
+const denyReason = (result: { cause?: string; rule?: { raw?: string } }): string => {
+	switch (result.cause) {
+		case "plan-mode":
+			return DENIED_PLAN_MODE;
+		case "protected-path":
+			return DENIED_PROTECTED_PATH;
+		case "blocked-outside-read":
+			return DENIED_BLOCKED_OUTSIDE_READ;
+		case "working-dir":
+			return DENIED_OUTSIDE_WORKING_DIR;
+		case "mode":
+			return DENIED_DONT_ASK;
+		default:
+			return DENIED_BY_RULE(result.rule?.raw ?? "deny");
+	}
+};
 
 /** Ask-prompt option labels — shared by both gate paths. */
 /**
@@ -246,12 +275,18 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	// an OS sandbox for outside-cwd reads; One Code flips the default directly and
 	// has no sandbox yet (reads outside the working directory are still
 	// classified/asked, never auto-read). The auto-mode safety architecture still
-	// holds — the deterministic safety floor, classifier-verdicts-verified, the
-	// git-recoverability gate, and the classifier tier floor — and with no
+	// holds — the deterministic safety floor, classifier-verdicts-verified and
+	// the classifier tier floor — and with no
 	// classifier model reachable the classifier fails closed. A user or project
 	// `defaultMode` (or `--permission-mode`) still overrides this; `auto` from a
 	// project file is still refused. See working-docs/decisions/auto-mode.md.
 	let mode: PermissionMode = "auto";
+	/** Whether the session model gets Claude Code's fast paths, for the model-switch notice. */
+	let gateFastPaths: boolean | undefined;
+	/** `permissions.blockReadsOutsideWorkingDirectories` from any settings source. */
+	let blockOutsideReads = false;
+	/** The first outside-read prompt was answered on this machine (read once, then kept). */
+	let outsideReadSeen: boolean | undefined;
 	// Worktree-wrapped bash calls publish the model's original command here,
 	// keyed by pi's toolCallId (never read from `event.input` — model-writable).
 	const originalCommands = trackOriginalCommands(pi);
@@ -554,8 +589,10 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	/**
 	 * Run the deterministic pre-gate, then the classifier. The pre-gate may only
 	 * ever conclude "safe" (see auto-mode/shell-analysis.ts); when it does, the
-	 * classifier call is skipped entirely, which is what keeps read-heavy work
-	 * from paying classifier latency on every call.
+	 * classifier call is skipped entirely. A read-only command never gets here:
+	 * `decide()` allows it as the shell tools' own check, in every mode. What the
+	 * pre-gate still clears here is a safe line that writes inside the project
+	 * (a redirect).
 	 */
 	const runClassifier = async (
 		toolName: string,
@@ -583,36 +620,16 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		const home = os.homedir();
 		const allow = () => ({ decision: "allow" as const, reason: "", tier: undefined });
 
-		let evidence: ShellEvidence | undefined;
 		if (normalizeToolName(toolName) === "bash" && subject) {
-			evidence = analyzeShellCommand({ command: subject, cwd, home, protectedDirs, readableRoots });
-			if (evidence.verdict === "safe") {
+			if (analyzeShellCommand({ command: subject, cwd, home, protectedDirs, readableRoots }).verdict === "safe") {
 				logDecision(ctx, { tool: toolName, subject, outcome: "allow", source: "pre-gate" });
 				return allow();
-			}
-			// The command's only risk is an in-project delete or whole-tree reset.
-			// Auto mode trusts the project as the agent's sandbox — but, unlike Claude
-			// Code, only when git can put the bytes back. A recoverable destruction
-			// runs unattended with no classifier call; an unrecoverable one (untracked,
-			// dirty, not a repo) still reaches the classifier.
-			if (containmentEligible && evidence.containedNonNetwork) {
-				const targets = evidence.writes.filter((w) => !w.outsideCwd && w.resolved).map((w) => w.resolved as string);
-				// The same cwd the evidence resolved against — for a worktree-isolated
-				// child that is the worktree, not the parent checkout (ctx.cwd).
-				const rec = checkRecoverability(cwd, { targets, wholeTree: evidence.wholeTree });
-				if (rec.verdict === "recoverable") {
-					logDecision(ctx, { tool: toolName, subject, outcome: "allow", source: "pre-gate", reason: rec.reason });
-					return allow();
-				}
-				evidence.notes.push(`git recoverability: ${rec.reason}`);
 			}
 		} else if (normalizeToolName(toolName) === "powershell" && subject) {
 			// PowerShell has no pre-gate in v1 beyond Claude Code's read-only cmdlet
 			// allowlist (powershell-rules.ts): a read-only line runs unclassified,
 			// everything else — every write, delete or unknown executable — goes to
-			// the classifier. No containment fast path either: the recoverability
-			// judge understands bash deletes, not `Remove-Item`, so PowerShell
-			// destruction is always classified (working-docs/decisions/windows.md).
+			// the classifier (working-docs/decisions/windows.md).
 			if (powershellReadOnly(subject, { cwd, home, readableRoots }).readOnly) {
 				logDecision(ctx, { tool: toolName, subject, outcome: "allow", source: "pre-gate" });
 				return allow();
@@ -621,9 +638,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			// A write/edit whose target is inside the project and not a credential
 			// path is ordinary sandbox work — Claude Code auto-approves it, and so do
 			// we (protected paths never reach here: decide() routes them with
-			// containmentEligible=false). Overwrites are not recoverability-gated the
-			// way deletes are: the file still exists, and edit-then-iterate is the
-			// core of unattended coding autonomy. Execution-primitive paths (build
+			// containmentEligible=false). Edit-then-iterate is the core of
+			// unattended coding autonomy. Execution-primitive paths (build
 			// wrappers, CI workflows, editor auto-run config) are excluded exactly as
 			// the bash pre-gate excludes them — being in-project does not make a file
 			// that runs later without further approval safe to write unclassified.
@@ -642,9 +658,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		}
 
 		// The current call was pushed onto `transcript` by the tool_call handler, so
-		// it is already the last entry — the action under review. `evidence` is used
-		// only for the containment fast-path above; CC's payload carries no separate
-		// static-analysis block, so it is not sent to the classifier.
+		// it is already the last entry — the action under review. The pre-gate's
+		// evidence is not sent: CC's payload carries no separate static-analysis block.
 		const verdict = await classify(
 			{
 				toolName,
@@ -750,6 +765,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		allow = parsed.allow.rules;
 		projectAllow = parsed.projectAllow.rules;
 		projectAllowRaw = settings.projectAllow;
+		blockOutsideReads = settings.blockReadsOutsideWorkingDirectories === true;
 		// A linked worktree shares its main checkout's consent (findProjectRoot).
 		projectRoot = findProjectRoot(ctx.cwd) ?? ctx.cwd;
 		// A settings file is held to what /add-dir and --add-dir refuse: `/` or `~`
@@ -822,6 +838,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		badgeCtx = ctx;
 		lastReviewCtx = ctx;
 		sessionEpoch++;
+		gateFastPaths = usesClaudeCodeFastPaths(ctx.model);
 		// Not awaited: the grammar loads in a few milliseconds, and the gate
 		// awaits it per call. Only a failed load is worth telling the user about.
 		void bashParserReady().then(() => {
@@ -871,6 +888,19 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		lastReviewCtx = ctx;
 		autoInCycle = ctx.modelRegistry.getAvailable().length > 0;
 		resetClassifierChoice(event.model);
+		// The gate reads the model's tier on every call, so a switch takes effect
+		// on the next one; a switch across the workhorse/cheap line says so.
+		const fastPaths = usesClaudeCodeFastPaths(event.model);
+		if (gateFastPaths !== undefined && fastPaths !== gateFastPaths && event.model) {
+			const name = `${formatModel(event.model.provider, event.model.id)} (${intrinsicTier(event.model)} tier)`;
+			ctx.ui.notify(
+				fastPaths
+					? `${name}: permissions now follow Claude Code's fast paths.`
+					: `${name}: permissions now use One Code's stricter checks, so more calls prompt or go to the auto-mode classifier.`,
+				"info",
+			);
+		}
+		gateFastPaths = fastPaths;
 	});
 
 	// The badge carries "· esc to interrupt" only while the model works (CC's
@@ -940,6 +970,65 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		return run;
 	};
 
+	/**
+	 * Show an ask prompt through `queue`, timed when it is a paused-auto-mode
+	 * resume prompt that Claude Code's denial-limit fallback times (the first
+	 * after a consecutive-limit pause). pi shows a live countdown and resolves
+	 * an expired dialog as dismissed, so `unanswered` tells the two apart,
+	 * measured from when the dialog showed (not when it queued); the caller
+	 * then denies the call without asking for feedback. Shared by both gate paths.
+	 */
+	const askMaybeTimed = async (
+		pausedResume: boolean,
+		title: string,
+		queue: (show: () => Promise<string | undefined>) => Promise<string | undefined>,
+		select: (title: string, timeout: number | undefined) => Promise<string | undefined>,
+	): Promise<{ choice: string | undefined; unanswered: boolean }> => {
+		if (!pausedResume || !pauseTracker.takeTimedPrompt()) return { choice: await queue(() => select(title, undefined)), unanswered: false };
+		const timeout = unattendedPromptTimeoutMs();
+		let shownAt: number | undefined;
+		const choice = await queue(() => {
+			shownAt = Date.now();
+			return select(`${title}\n\n${unattendedPromptNotice(timeout)}`, timeout);
+		});
+		return { choice, unanswered: choice === undefined && shownAt !== undefined && Date.now() - shownAt >= timeout - Math.min(1500, timeout / 10) };
+	};
+
+	/**
+	 * Claude Code's one-time prompt before auto mode's first read outside the
+	 * working directories (2.1.282, findings §33): raised only in an interactive
+	 * session that has not answered it, on this machine or in Claude Code. Yes
+	 * and Block settle it for good; Ask again, or dismissing, refuses this read
+	 * and asks on the next. Queued behind other prompts, and re-checked once its
+	 * turn comes, so parallel outside reads ask once.
+	 */
+	const firstOutsideRead = (ctx: ExtensionContext, toolName: string, path: string): Promise<"allow" | "block" | "ask_again"> => {
+		const home = os.homedir();
+		const settled = () => (outsideReadSeen ??= outsideReadPromptSeen(oneCodeSettingsPath(home), claudeJsonPath(home)));
+		if (!ctx.hasUI) return Promise.resolve("allow");
+		// Settled while this call waited (a parallel read's Block included).
+		if (settled()) return Promise.resolve(blockOutsideReads ? "block" : "allow");
+		return serializePrompt(async () => {
+			if (settled()) return blockOutsideReads ? "block" : "allow";
+			const settingsFile = tildify(oneCodeSettingsPath(home), home);
+			const title = `${OUTSIDE_READ_TITLE}\n\n  ${toolName} ${path}\n\n${OUTSIDE_READ_QUESTION}\n\n${OUTSIDE_READ_EXPLAINER(settingsFile)}`;
+			const choice = await ctx.ui.select(title, Object.values(OUTSIDE_READ_ANSWERS));
+			if (choice !== OUTSIDE_READ_ANSWERS.allow && choice !== OUTSIDE_READ_ANSWERS.block) return "ask_again";
+			outsideReadSeen = true;
+			markOutsideReadPromptSeen(oneCodeSettingsPath(home));
+			if (choice === OUTSIDE_READ_ANSWERS.allow) return "allow";
+			persistBlockOutsideReads(oneCodeSettingsPath(home));
+			blockOutsideReads = true;
+			return "block";
+		});
+	};
+
+	/** The block reason for a first-read prompt answered with Block or Ask again; undefined to run the read. */
+	const outsideReadRefusal = async (ctx: ExtensionContext, toolName: string, path: string): Promise<string | undefined> => {
+		const answer = await firstOutsideRead(ctx, toolName, path);
+		return answer === "allow" ? undefined : answer === "block" ? DENIED_CHOSE_BLOCK_OUTSIDE_READS : DENIED_BY_USER;
+	};
+
 	pi.on("tool_call", async (event, ctx) => {
 		lastReviewCtx = ctx;
 		// Settled long before the first call; a failed load leaves every bash
@@ -959,12 +1048,11 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// In a worktree session, worktree's tool_call handler (which runs before this
 		// one) cd-wraps bash commands for execution and publishes the model's
 		// original command — and the worktree it runs in — over the bus under this
-		// call's id. Rule matching, the shell pre-gate, the recoverability judge and
-		// the prompt all evaluate that original against the worktree cwd: matched
-		// against the wrapper every configured Bash rule stopped matching, and
-		// analysed as the wrapper (a `cd` plus a newline) every call escalated to
-		// the classifier and the prompt showed `cd '…' && (…)` (PERMISSIONS-REVIEW-
-		// 2026-09-05 L3). The safety floor keeps reading event.input (the wrapped
+		// call's id. Rule matching, the shell pre-gate and the prompt all evaluate
+		// that original against the worktree cwd: matched against the wrapper
+		// every configured Bash rule stopped matching, and analysed as the wrapper
+		// (a `cd` plus a newline) every call escalated to the classifier and the
+		// prompt showed `cd '…' && (…)` (PERMISSIONS-REVIEW-2026-09-05 L3). The safety floor keeps reading event.input (the wrapped
 		// command that actually runs). The lookup is by toolCallId on purpose: a
 		// value inside `event.input` would be the model's to write, and rules would
 		// match a string of its choosing.
@@ -1014,6 +1102,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				sessionDirPath,
 				protectedDirs,
 				workspaceDirs: dirs,
+				claudeCodeFastPaths: usesClaudeCodeFastPaths(ctx.model),
+				blockReadsOutsideWorkingDirectories: blockOutsideReads,
 			});
 		let result = decideWith([...allow, ...activeSessionAllows(), ...(projectAllowTrusted ? projectAllow : [])]);
 
@@ -1042,8 +1132,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				await trustProject(withRules, { rule: withRules.rule.raw });
 			} else if (repoDirs.length > 0) {
 				const withDirs = decideWith([...allow, ...activeSessionAllows()], [...workspaceDirs, ...repoDirs.map((dir) => resolvedOrSelf(dir.path))]);
-				// A read tool's allow is "tier" or "mode"; a plan-mode shell read's is "plan-readonly".
-				if (withDirs.decision === "allow" && (withDirs.cause === "tier" || withDirs.cause === "mode" || withDirs.cause === "plan-readonly")) {
+				// A read tool's allow is "tier" or "mode"; a shell read's is "read-only" ("plan-readonly" in plan mode).
+				if (withDirs.decision === "allow" && (withDirs.cause === "tier" || withDirs.cause === "mode" || withDirs.cause === "read-only" || withDirs.cause === "plan-readonly")) {
 					const target = resolvedSubject ?? toAbsolute(callCwd, matchSubject, os.homedir());
 					const firing = repoDirs.find((dir) => isWithin(resolvedOrSelf(dir.path), target))?.raw ?? repoDirs[0].raw;
 					await trustProject(withDirs, { dir: firing });
@@ -1071,7 +1161,21 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 					})
 				: undefined;
 
-		if (result.decision === "allow" && !floorReason) return undefined;
+		if (result.decision === "allow" && result.cause === "outside-read") {
+			const refusal = await outsideReadRefusal(ctx, normalizedTool, matchSubject);
+			if (refusal) return { block: true, reason: refusal };
+		}
+
+		if (result.decision === "allow" && !floorReason) {
+			// These allows skip the classifier, as the pre-gate's and the
+			// containment fast path's used to, and like those they break an
+			// auto-mode block streak (Claude Code resets it on any allow).
+			if (mode === "auto" && (result.cause === "read-only" || result.cause === "mode" || result.cause === "outside-read")) {
+				if (result.cause === "read-only") logDecision(ctx, { tool: event.toolName, subject: matchSubject, outcome: "allow", source: "pre-gate" });
+				pauseTracker.recordAllow();
+			}
+			return undefined;
+		}
 
 		// (dontAsk is the only mode that denies rather than allows unmatched calls.)
 		if (result.decision === "deny") {
@@ -1194,7 +1298,13 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			floor: floorReason !== undefined,
 			home: os.homedir(),
 		});
-		const choice = await serializePrompt(() => ctx.ui.select(title, askOptions(grant)));
+		const { choice, unanswered } = await askMaybeTimed(pausedResume, title, serializePrompt, (text, timeout) =>
+			ctx.ui.select(text, askOptions(grant), timeout ? { timeout } : undefined),
+		);
+		if (unanswered) {
+			logDecision(ctx, { tool: event.toolName, subject: matchSubject, outcome: "block", source: "user", reason: "resume prompt unanswered" });
+			return { block: true, reason: DENIED_UNANSWERED_RESUME };
+		}
 
 		// The user's answer is itself a gate decision worth recording — it is the
 		// ground truth a drifting classifier gets calibrated against.
@@ -1278,6 +1388,9 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			sessionDirPath,
 			protectedDirs,
 			workspaceDirs,
+			// The child's own model: a cheaper subagent gets the stricter gate.
+			claudeCodeFastPaths: usesClaudeCodeFastPaths(call.model),
+			blockReadsOutsideWorkingDirectories: blockOutsideReads,
 		});
 
 		// A child's cwd can be a worktree (different project → different per-repo
@@ -1290,6 +1403,12 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				? safetyControlWrite({ toolName: normalizedTool, input, cwd, home: os.homedir() })
 				: undefined;
 
+		// A child's first outside read raises the prompt on the parent's terminal;
+		// with no parent context there is no one to ask, as in a one-shot run.
+		if (result.decision === "allow" && result.cause === "outside-read" && ctx) {
+			const refusal = await outsideReadRefusal(ctx, normalizedTool, subject);
+			if (refusal) return { block: true, reason: refusal };
+		}
 		if (result.decision === "allow" && !floorReason) return undefined;
 
 		if (result.decision === "deny") {
@@ -1356,8 +1475,14 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		const childPrompt = <T>(show: () => Promise<T>): Promise<T | undefined> =>
 			serializePrompt(() => (call.signal?.aborted ? Promise.resolve(undefined) : show()));
 		const grant = sessionGrant({ toolName: normalizedTool, subject, cwd, mode, cause: result.cause, home: os.homedir() });
-		const choice = await childPrompt(() => ctx.ui.select(title, askOptions(grant), { signal: call.signal }));
+		const { choice, unanswered } = await askMaybeTimed(pausedResume, title, childPrompt, (text, timeout) =>
+			ctx.ui.select(text, askOptions(grant), { signal: call.signal, timeout }),
+		);
 		if (call.signal?.aborted) return { block: true, reason: "The agent was stopped while waiting for the user's approval." };
+		if (unanswered) {
+			logDecision(ctx, { tool: toolName, subject, outcome: "block", source: "user", reason: "resume prompt unanswered" });
+			return { block: true, reason: DENIED_UNANSWERED_RESUME };
+		}
 
 		if (pausedResume) {
 			logDecision(ctx, {

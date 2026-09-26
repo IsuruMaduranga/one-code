@@ -2,7 +2,14 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { loadPermissionSettings, persistAllowRule, resolveStartupMode } from "../../extensions/permissions/settings.ts";
+import {
+	loadPermissionSettings,
+	markOutsideReadPromptSeen,
+	outsideReadPromptSeen,
+	persistAllowRule,
+	persistBlockOutsideReads,
+	resolveStartupMode,
+} from "../../extensions/permissions/settings.ts";
 
 let dir: string;
 let home: string;
@@ -181,5 +188,33 @@ describe("resolveStartupMode", () => {
 		expect(resolveStartupMode(["bypassPermissions", "bypassPermissions", "plan"], disabled)).toEqual({ mode: "plan", bypassRefused: true });
 		// Not disabled: bypass wins as requested.
 		expect(resolveStartupMode(["bypassPermissions", undefined, "plan"], {})).toEqual({ mode: "bypassPermissions", bypassRefused: false });
+	});
+});
+
+describe("blockReadsOutsideWorkingDirectories and the first outside-read prompt", () => {
+	it("reads the block setting from any source, the repository's included (it only tightens)", () => {
+		expect(loadPermissionSettings(cwd, home).blockReadsOutsideWorkingDirectories).toBeUndefined();
+		write(join(cwd, ".claude", "settings.json"), { permissions: { blockReadsOutsideWorkingDirectories: true } });
+		expect(loadPermissionSettings(cwd, home).blockReadsOutsideWorkingDirectories).toBe(true);
+	});
+
+	it("persists Block into the given One Code file, keeping its other keys", () => {
+		const file = join(home, ".onecode", "settings.json");
+		mkdirSync(join(home, ".onecode"), { recursive: true });
+		write(file, { permissions: { allow: ["Read"] }, theme: "x" });
+		persistBlockOutsideReads(file);
+		const saved = JSON.parse(readFileSync(file, "utf-8"));
+		expect(saved).toEqual({ permissions: { allow: ["Read"], blockReadsOutsideWorkingDirectories: true }, theme: "x" });
+	});
+
+	it("counts the prompt as answered from One Code's flag or Claude Code's ~/.claude.json", () => {
+		const oneCode = join(home, ".onecode", "settings.json");
+		const claudeJson = join(home, ".claude.json");
+		expect(outsideReadPromptSeen(oneCode, claudeJson)).toBe(false);
+		write(claudeJson, { hasSeenAutoModeOutsideReadPrompt: true });
+		expect(outsideReadPromptSeen(oneCode, claudeJson)).toBe(true);
+		rmSync(claudeJson);
+		markOutsideReadPromptSeen(oneCode);
+		expect(outsideReadPromptSeen(oneCode, claudeJson)).toBe(true);
 	});
 });
