@@ -88,7 +88,10 @@ import {
 	listPermissionRules,
 	listWorkspaceDirectories,
 	loadPermissionSettings,
+	markOutsideReadPromptSeen,
 	normalizePermissionMode,
+	outsideReadPromptSeen,
+	persistBlockOutsideReads,
 	persistAllowRule,
 	persistPermissionRule,
 	removePermissionRule,
@@ -108,7 +111,7 @@ import { findProjectRoot } from "../lib/git.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
 import { announceLocalCommand, registerLocalCommand } from "../lib/local-command.ts";
-import { tildify, tryRealpath } from "../lib/paths.ts";
+import { claudeJsonPath, tildify, tryRealpath } from "../lib/paths.ts";
 import { openPermissionsPanel, type PermissionsPanelHost } from "./panel/host.ts";
 import {
 	AUTO_SECTION_LABELS,
@@ -139,6 +142,23 @@ const DENIED_DONT_ASK =
 	"Permission mode is dontAsk: anything that would normally prompt the user is denied instead. Only pre-approved tools can run; work within those, or tell the user which allow rule would unblock you.";
 const DENIED_PROTECTED_PATH =
 	"That path is protected: it configures the user's tooling or this agent itself, so writes to it are never auto-approved and allow rules do not cover them. Achieve the goal another way, or ask the user to make the change.";
+/** Claude Code's refusal when `blockReadsOutsideWorkingDirectories` is set. */
+const DENIED_BLOCKED_OUTSIDE_READ =
+	"That path is outside the working directories; the permissions.blockReadsOutsideWorkingDirectories setting blocks reads outside the working directories. Ask the user to add the directory with /add-dir, or to remove that setting.";
+/** Claude Code's refusal right after the user picks "block" in the first-read prompt. */
+const DENIED_CHOSE_BLOCK_OUTSIDE_READS =
+	"The user chose to block reads outside the working directories (permissions.blockReadsOutsideWorkingDirectories). Ask the user to add the directory with /add-dir, or to remove that setting.";
+/** Claude Code's first outside-read prompt in auto mode (2.1.282): title, question, answers. */
+const OUTSIDE_READ_TITLE = "Read outside the working directories";
+const OUTSIDE_READ_QUESTION = "Allow reads outside the working directories?";
+const OUTSIDE_READ_ANSWERS = {
+	allow: "Yes, keep allowing reads outside the working directories",
+	block: "No, block reads outside the working directories from now on",
+	ask_again: "No, ask again next time",
+} as const;
+/** Claude Code's explainer, without its sandbox sentences (One Code has no sandbox) and with One Code's settings file. */
+const OUTSIDE_READ_EXPLAINER = (settingsFile: string) =>
+	`Auto mode reads outside the working directories without asking. Yes or Block settles this question; Ask again asks on the next outside read. Block: the file tools refuse reads outside the working directories in every project. To undo, remove permissions.blockReadsOutsideWorkingDirectories from ${settingsFile}.`;
 const DENIED_OUTSIDE_WORKING_DIR =
 	"That path is outside the working directory, which needs the user's approval, and permission mode is dontAsk (anything that would prompt is denied instead). Work inside the project, or tell the user which allow rule (e.g. Read(~/dir/**)) would unblock you.";
 // Returned to the MODEL, not the user: auto mode exists to run unattended, so a
@@ -191,6 +211,8 @@ const denyReason = (result: { cause?: string; rule?: { raw?: string } }): string
 			return DENIED_PLAN_MODE;
 		case "protected-path":
 			return DENIED_PROTECTED_PATH;
+		case "blocked-outside-read":
+			return DENIED_BLOCKED_OUTSIDE_READ;
 		case "working-dir":
 			return DENIED_OUTSIDE_WORKING_DIR;
 		case "mode":
@@ -258,6 +280,10 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	let mode: PermissionMode = "auto";
 	/** Whether the session model gets Claude Code's fast paths, for the model-switch notice. */
 	let gateFastPaths: boolean | undefined;
+	/** `permissions.blockReadsOutsideWorkingDirectories` from any settings source. */
+	let blockOutsideReads = false;
+	/** The first outside-read prompt was answered on this machine (read once, then kept). */
+	let outsideReadSeen: boolean | undefined;
 	// Worktree-wrapped bash calls publish the model's original command here,
 	// keyed by pi's toolCallId (never read from `event.input` — model-writable).
 	const originalCommands = trackOriginalCommands(pi);
@@ -736,6 +762,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		allow = parsed.allow.rules;
 		projectAllow = parsed.projectAllow.rules;
 		projectAllowRaw = settings.projectAllow;
+		blockOutsideReads = settings.blockReadsOutsideWorkingDirectories === true;
 		// A linked worktree shares its main checkout's consent (findProjectRoot).
 		projectRoot = findProjectRoot(ctx.cwd) ?? ctx.cwd;
 		// A settings file is held to what /add-dir and --add-dir refuse: `/` or `~`
@@ -940,6 +967,41 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		return run;
 	};
 
+	/**
+	 * Claude Code's one-time prompt before auto mode's first read outside the
+	 * working directories (2.1.282, findings §33): raised only in an interactive
+	 * session that has not answered it, on this machine or in Claude Code. Yes
+	 * and Block settle it for good; Ask again, or dismissing, refuses this read
+	 * and asks on the next. Queued behind other prompts, and re-checked once its
+	 * turn comes, so parallel outside reads ask once.
+	 */
+	const firstOutsideRead = (ctx: ExtensionContext, toolName: string, path: string): Promise<"allow" | "block" | "ask_again"> => {
+		const home = os.homedir();
+		const settled = () => (outsideReadSeen ??= outsideReadPromptSeen(oneCodeSettingsPath(home), claudeJsonPath(home)));
+		if (!ctx.hasUI) return Promise.resolve("allow");
+		// Settled while this call waited (a parallel read's Block included).
+		if (settled()) return Promise.resolve(blockOutsideReads ? "block" : "allow");
+		return serializePrompt(async () => {
+			if (settled()) return blockOutsideReads ? "block" : "allow";
+			const settingsFile = tildify(oneCodeSettingsPath(home), home);
+			const title = `${OUTSIDE_READ_TITLE}\n\n  ${toolName} ${path}\n\n${OUTSIDE_READ_QUESTION}\n\n${OUTSIDE_READ_EXPLAINER(settingsFile)}`;
+			const choice = await ctx.ui.select(title, Object.values(OUTSIDE_READ_ANSWERS));
+			if (choice !== OUTSIDE_READ_ANSWERS.allow && choice !== OUTSIDE_READ_ANSWERS.block) return "ask_again";
+			outsideReadSeen = true;
+			markOutsideReadPromptSeen(oneCodeSettingsPath(home));
+			if (choice === OUTSIDE_READ_ANSWERS.allow) return "allow";
+			persistBlockOutsideReads(oneCodeSettingsPath(home));
+			blockOutsideReads = true;
+			return "block";
+		});
+	};
+
+	/** The block reason for a first-read prompt answered with Block or Ask again; undefined to run the read. */
+	const outsideReadRefusal = async (ctx: ExtensionContext, toolName: string, path: string): Promise<string | undefined> => {
+		const answer = await firstOutsideRead(ctx, toolName, path);
+		return answer === "allow" ? undefined : answer === "block" ? DENIED_CHOSE_BLOCK_OUTSIDE_READS : DENIED_BY_USER;
+	};
+
 	pi.on("tool_call", async (event, ctx) => {
 		lastReviewCtx = ctx;
 		// Settled long before the first call; a failed load leaves every bash
@@ -1014,6 +1076,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				protectedDirs,
 				workspaceDirs: dirs,
 				claudeCodeFastPaths: usesClaudeCodeFastPaths(ctx.model),
+				blockReadsOutsideWorkingDirectories: blockOutsideReads,
 			});
 		let result = decideWith([...allow, ...activeSessionAllows(), ...(projectAllowTrusted ? projectAllow : [])]);
 
@@ -1071,11 +1134,16 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 					})
 				: undefined;
 
+		if (result.decision === "allow" && result.cause === "outside-read") {
+			const refusal = await outsideReadRefusal(ctx, normalizedTool, matchSubject);
+			if (refusal) return { block: true, reason: refusal };
+		}
+
 		if (result.decision === "allow" && !floorReason) {
 			// These allows skip the classifier, as the pre-gate's and the
 			// containment fast path's used to, and like those they break an
 			// auto-mode block streak (Claude Code resets it on any allow).
-			if (mode === "auto" && (result.cause === "read-only" || result.cause === "mode")) {
+			if (mode === "auto" && (result.cause === "read-only" || result.cause === "mode" || result.cause === "outside-read")) {
 				if (result.cause === "read-only") logDecision(ctx, { tool: event.toolName, subject: matchSubject, outcome: "allow", source: "pre-gate" });
 				pauseTracker.recordAllow();
 			}
@@ -1289,6 +1357,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			workspaceDirs,
 			// The child's own model: a cheaper subagent gets the stricter gate.
 			claudeCodeFastPaths: usesClaudeCodeFastPaths(call.model),
+			blockReadsOutsideWorkingDirectories: blockOutsideReads,
 		});
 
 		// A child's cwd can be a worktree (different project → different per-repo
@@ -1301,6 +1370,12 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				? safetyControlWrite({ toolName: normalizedTool, input, cwd, home: os.homedir() })
 				: undefined;
 
+		// A child's first outside read raises the prompt on the parent's terminal;
+		// with no parent context there is no one to ask, as in a one-shot run.
+		if (result.decision === "allow" && result.cause === "outside-read" && ctx) {
+			const refusal = await outsideReadRefusal(ctx, normalizedTool, subject);
+			if (refusal) return { block: true, reason: refusal };
+		}
 		if (result.decision === "allow" && !floorReason) return undefined;
 
 		if (result.decision === "deny") {

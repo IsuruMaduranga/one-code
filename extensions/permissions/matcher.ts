@@ -822,6 +822,11 @@ export interface DecideInput {
 	 * the stricter gate cheap and tiny models keep.
 	 */
 	claudeCodeFastPaths?: boolean;
+	/**
+	 * Claude Code's `permissions.blockReadsOutsideWorkingDirectories`: the read
+	 * tools refuse a path outside the working space, in every mode.
+	 */
+	blockReadsOutsideWorkingDirectories?: boolean;
 }
 
 export interface Decision {
@@ -841,6 +846,10 @@ export interface Decision {
 		| "protected-path"
 		/** A shell command the read-only check proves reads only inside the working space. */
 		| "read-only"
+		/** A read tool outside the working space, allowed unclassified in auto mode (Claude Code's safe allowlist). */
+		| "outside-read"
+		/** A read tool outside the working space, refused by `blockReadsOutsideWorkingDirectories`. */
+		| "blocked-outside-read"
 		/** A read, or an acceptEdits write, whose path is outside the working directory. */
 		| "working-dir";
 }
@@ -1172,6 +1181,15 @@ export function decide(params: DecideInput): Decision {
 	if (tier === "safe") {
 		// No path argument (grep/find/ls default to the cwd) is an in-project read.
 		if (!subject || inWorkingSpace()) return { decision: "allow", cause: "tier" };
+		if (params.blockReadsOutsideWorkingDirectories) return { decision: "deny", cause: "blocked-outside-read" };
+		// Claude Code's auto mode reads outside the working directories without
+		// the classifier (the read tools are on its safe allowlist); the caller
+		// raises its one-time first-read prompt. A credential path is still
+		// judged: our plug, as in the shell pre-gate.
+		const target = toAbsolute(cwd, params.resolvedSubject ?? subject, homedir());
+		if (mode === "auto" && fastPaths && !isSensitivePath(target) && !isSensitivePath(toAbsolute(cwd, subject, homedir()))) {
+			return { decision: "allow", cause: "outside-read" };
+		}
 		return outsideWorkingDir();
 	}
 	if (AUTO_ALLOWED_TOOLS.has(tool)) return { decision: "allow", cause: "tier" };

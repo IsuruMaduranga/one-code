@@ -480,6 +480,23 @@ describe("decide", () => {
 			expect(decide({ ...capable, mode: "auto", toolName: "write", subject: ".git/hooks/pre-commit" })).toMatchObject({ decision: "classify", cause: "protected-path" });
 		});
 
+		it("in auto mode, reads outside the working space without the classifier, except a credential path", () => {
+			expect(decide({ ...capable, mode: "auto", toolName: "read", subject: "/etc/hosts" })).toMatchObject({ decision: "allow", cause: "outside-read" });
+			expect(decide({ ...capable, mode: "auto", toolName: "grep", subject: "/etc" })).toMatchObject({ decision: "allow", cause: "outside-read" });
+			expect(decide({ ...capable, mode: "auto", toolName: "read", subject: "~/.ssh/id_rsa" }).decision).toBe("classify");
+			// Only auto mode: manual and acceptEdits still ask, cheap and tiny still classify.
+			expect(decide({ ...capable, toolName: "read", subject: "/etc/hosts" }).decision).toBe("ask");
+			expect(decide({ ...capable, mode: "acceptEdits", toolName: "read", subject: "/etc/hosts" }).decision).toBe("ask");
+			expect(decide({ ...base, mode: "auto", toolName: "read", subject: "/etc/hosts" }).decision).toBe("classify");
+		});
+
+		it("blockReadsOutsideWorkingDirectories refuses an outside read in every mode and tier, never an inside one", () => {
+			for (const call of [{ ...capable, mode: "auto" as const }, { ...base, mode: "auto" as const }, { ...base }, { ...base, mode: "plan" as const }]) {
+				expect(decide({ ...call, toolName: "read", subject: "/etc/hosts", blockReadsOutsideWorkingDirectories: true })).toMatchObject({ decision: "deny", cause: "blocked-outside-read" });
+				expect(decide({ ...call, toolName: "read", subject: "src/a.ts", blockReadsOutsideWorkingDirectories: true }).decision).toBe("allow");
+			}
+		});
+
 		it("counts a workspace directory for a shell write only on the fast-path tiers", () => {
 			// Real directories: the shell analysis judges where a path resolves.
 			const root = realpathSync(mkdtempSync(join(tmpdir(), "oc-ws-")));

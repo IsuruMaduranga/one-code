@@ -178,6 +178,7 @@ export function permissionGateFactory(
 					resultsDirPath: resolvedOrSelf(sessionResultsDir(ctx)),
 					protectedDirs,
 					claudeCodeFastPaths: usesClaudeCodeFastPaths(ctx?.model),
+					blockReadsOutsideWorkingDirectories: settings.blockReadsOutsideWorkingDirectories,
 				});
 				if (result.decision === "allow") return undefined;
 				const ruleNote = result.rule ? ` (rule: ${result.rule.raw})` : "";
