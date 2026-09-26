@@ -151,12 +151,14 @@ future servers in the project, or to decline. Approvals are stored in
 configuration, so a changed command asks again. If you decline, the server
 appears as disabled in `/mcp`; choosing Enable there approves it.
 
-Claude Code's `enabledMcpjsonServers`, `disabledMcpjsonServers`, and
-`enableAllProjectMcpServers` settings are honored from
-`~/.claude/settings.json`, and from `.claude/settings.local.json` when that
-file isn't tracked by git. They are never honored from a checked-in
-`.claude/settings.json`, which would let a repository approve its own
-servers.
+Claude Code's `enabledMcpjsonServers` and `enableAllProjectMcpServers`
+settings are honored from `~/.claude/settings.json` only.
+`disabledMcpjsonServers` is honored from there and from
+`.claude/settings.local.json`. A project's own settings files never approve
+its servers: a checked-in file, or a `settings.local.json` that arrived
+with a copied checkout, would let the repository approve itself. If Claude
+Code approved a server in `.claude/settings.local.json`, One Code asks you
+once.
 
 In non-interactive runs, unapproved servers are skipped with a note on
 stderr.
