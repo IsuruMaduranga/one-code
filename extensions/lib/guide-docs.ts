@@ -39,7 +39,7 @@ export function guideDocs(): GuideDocs {
 	return { guide: ONE_CODE_GUIDE_DIR, piDocs: existing(getDocsPath), piExamples: existing(getExamplesPath) };
 }
 
-/** The directories as a list, for the permission gate's read-only roots. */
+/** The directories that exist, for the permission gate's read-only roots. */
 export function guideDocsDirs(docs: GuideDocs = guideDocs()): string[] {
-	return [docs.guide, docs.piDocs, docs.piExamples].filter((dir): dir is string => !!dir && existsSync(dir));
+	return [existsSync(docs.guide) ? docs.guide : undefined, docs.piDocs, docs.piExamples].filter((dir): dir is string => !!dir);
 }

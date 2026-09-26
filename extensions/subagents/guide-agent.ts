@@ -153,12 +153,21 @@ Complete the user's request by providing accurate, documentation-based guidance.
 	return setupText ? `${prompt}\n\n${setupText}` : prompt;
 }
 
-export function guideAgentDefinition(input: GuideInput): AgentDefinition {
+/**
+ * The definition, with the prompt built on first read: the catalog lists the
+ * guide on every agent listing and spawn, and only a spawn of the guide needs
+ * its prompt (the setup it lists costs a settings read and directory scans).
+ */
+export function guideAgentDefinition(input: () => GuideInput): AgentDefinition {
+	let prompt: string | undefined;
 	return {
 		name: GUIDE_AGENT,
 		description: GUIDE_DESCRIPTION,
 		tools: GUIDE_TOOLS,
-		systemPrompt: guideSystemPrompt(input),
+		get systemPrompt() {
+			prompt ??= guideSystemPrompt(input());
+			return prompt;
+		},
 		source: "built-in",
 	};
 }

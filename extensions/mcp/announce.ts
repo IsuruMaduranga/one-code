@@ -10,6 +10,7 @@
  */
 
 import { mcpFailuresReminder, mcpInstructionsReminder } from "./client.ts";
+import { countNoun } from "../lib/tui-render.ts";
 
 export interface McpAnnounced {
 	/** Servers whose instructions the model has been given, with the text it saw. */
@@ -106,7 +107,7 @@ export function mcpChangeNotices(delta: McpDelta): string[] {
  */
 export function mcpStartupNotices(failedServers: number, needsAuth: number): string[] {
 	const out: string[] = [];
-	if (failedServers > 0) out.push(`${failedServers} MCP ${failedServers === 1 ? "server" : "servers"} failed · /mcp`);
-	if (needsAuth > 0) out.push(`${needsAuth} MCP ${needsAuth === 1 ? "server needs" : "servers need"} auth · /mcp`);
+	if (failedServers > 0) out.push(`${countNoun(failedServers, "MCP server")} failed · /mcp`);
+	if (needsAuth > 0) out.push(`${countNoun(needsAuth, "MCP server")} ${needsAuth === 1 ? "needs" : "need"} auth · /mcp`);
 	return out;
 }

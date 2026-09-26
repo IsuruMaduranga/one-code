@@ -9,6 +9,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { guideDocsDirs, ONE_CODE_GUIDE_DIR } from "../../extensions/lib/guide-docs.ts";
 import { forwardSlashes } from "../../extensions/lib/paths.ts";
 import { decide } from "../../extensions/permissions/matcher.ts";
+import { discoverAgents } from "../../extensions/subagents/agents.ts";
 import { GUIDE_AGENT, guideAgentDefinition, guideSystemPrompt, type GuideInput, settingsSetup } from "../../extensions/subagents/guide-agent.ts";
 
 const emptySetup = { skills: [], agents: [], plugins: [], mcpServers: [], packages: [], extensions: [], settingsKeys: [] };
@@ -21,11 +22,45 @@ const input = (over: Partial<GuideInput> = {}): GuideInput => ({
 
 describe("guideAgentDefinition", () => {
 	it("is a read-only agent on the session's subagent model", () => {
-		const agent = guideAgentDefinition(input());
+		const agent = guideAgentDefinition(() => input());
 		expect(agent.name).toBe(GUIDE_AGENT);
 		expect(agent.model).toBeUndefined();
 		expect(agent.tools).toEqual(["bash", "read", "web_fetch", "web_search"]);
 		expect(agent.description).toContain("continue via SendMessage");
+	});
+});
+
+describe("guideAgentDefinition's prompt", () => {
+	it("is built on first read only, and once", () => {
+		let built = 0;
+		const agent = guideAgentDefinition(() => {
+			built++;
+			return input();
+		});
+		expect(built).toBe(0);
+		expect(agent.systemPrompt).toContain("Never answer from memory");
+		expect(agent.systemPrompt).toContain("Never answer from memory");
+		expect(built).toBe(1);
+	});
+});
+
+describe("discoverAgents with a code-defined agent", () => {
+	it("ranks it below agent files, without reading its prompt", () => {
+		const root = mkdtempSync(join(tmpdir(), "guide-agents-"));
+		try {
+			let built = 0;
+			const guide = guideAgentDefinition(() => {
+				built++;
+				return input();
+			});
+			expect(discoverAgents([{ agents: [guide] }, root]).map((agent) => agent.source)).toEqual(["built-in"]);
+			writeFileSync(join(root, "one-code-guide.md"), "---\nname: one-code-guide\ndescription: mine\n---\nMy own guide.\n");
+			const [mine] = discoverAgents([{ agents: [guide] }, root]);
+			expect(mine?.systemPrompt).toBe("My own guide.");
+			expect(built).toBe(0);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
 	});
 });
 

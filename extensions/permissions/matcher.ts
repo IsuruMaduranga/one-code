@@ -1046,10 +1046,11 @@ export function decide(params: DecideInput): Decision {
 	/**
 	 * Whether `target` (where `spelled` resolves) is working space: the working
 	 * directory, the harness's session dirs, the plan file, and the workspace
-	 * directories except for the credentials in them.
+	 * directories except for the credentials in them. For a read (`reads`), the
+	 * shipped docs folders (`readOnlyDirs`) count too; they are never written.
 	 */
-	const workingSpaceHolds = (spelled: string, target: string, workspace = true): boolean => {
-		const roots = [cwd, params.resolvedCwd, params.memoryDirPath, params.scratchpadDirPath, params.resultsDirPath, params.sessionDirPath];
+	const workingSpaceHolds = (spelled: string, target: string, workspace = true, reads = false): boolean => {
+		const roots = [cwd, params.resolvedCwd, params.memoryDirPath, params.scratchpadDirPath, params.resultsDirPath, params.sessionDirPath, ...(reads ? (params.readOnlyDirs ?? []) : [])];
 		if (roots.some((dir) => dir && isAtOrInsideDir(target, dir, cwd))) return true;
 		// A workspace directory is working space except for the credentials in it:
 		// adding a directory must not make its keys readable without a prompt.
@@ -1089,7 +1090,7 @@ export function decide(params: DecideInput): Decision {
 				const resolved = resolveForContainment(absolute) ?? absolute;
 				// Auto mode's unclassified writes stay in the working directory, a
 				// workspace directory's included (decisions/modes.md).
-				if (!workingSpaceHolds(target, resolved, !(write && mode === "auto"))) return true;
+				if (!workingSpaceHolds(target, resolved, !(write && mode === "auto"), !write)) return true;
 				if (isProtected(absolute, resolved)) return true;
 			}
 		}
@@ -1136,14 +1137,10 @@ export function decide(params: DecideInput): Decision {
 	 * was allowed in every mode including auto and plan, and acceptEdits wrote
 	 * anywhere on disk (PERMISSIONS-REVIEW-2026-09-05 H1, H2).
 	 */
-	const inWorkingSpace = (): boolean => workingSpaceHolds(subject, params.resolvedSubject ?? subject);
-	const inReadOnlyDocs = (): boolean => {
-		const target = params.resolvedSubject ?? subject;
-		return (params.readOnlyDirs ?? []).some((dir) => isAtOrInsideDir(target, dir, cwd));
-	};
+	const inWorkingSpace = (reads = false): boolean => workingSpaceHolds(subject, params.resolvedSubject ?? subject, true, reads);
 	if (tier === "safe") {
 		// No path argument (grep/find/ls default to the cwd) is an in-project read.
-		if (!subject || inWorkingSpace() || inReadOnlyDocs()) return { decision: "allow", cause: "tier" };
+		if (!subject || inWorkingSpace(true)) return { decision: "allow", cause: "tier" };
 		return outsideWorkingDir();
 	}
 	if (AUTO_ALLOWED_TOOLS.has(tool)) return { decision: "allow", cause: "tier" };

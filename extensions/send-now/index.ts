@@ -24,9 +24,8 @@ import { SEND_NOW_CHANNEL } from "../lib/send-now-channel.ts";
 import { safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import { SEND_NOW_HINT, SendNowChord } from "./chord.ts";
 
-/** How long send now waits for the aborted turn to wind down before giving up. */
+/** How long send now waits for the aborted turn to settle before giving up. */
 const IDLE_WAIT_MS = 10_000;
-const IDLE_POLL_MS = 25;
 /** How long a held `ctrl+x` waits for its `ctrl+s` before it is replayed as itself. */
 const CHORD_TIMEOUT_MS = 1_000;
 
@@ -35,9 +34,18 @@ export default function sendNowExtension(pi: ExtensionAPI) {
 	// Bumped on every session start and shutdown, so a send now still waiting
 	// for the aborted turn never acts on a replaced or closed session.
 	let epoch = 0;
+	/** Resolves a send now waiting for the aborted turn to settle. */
+	let onSettled: (() => void) | undefined;
+	const wakeSettled = () => {
+		const wake = onSettled;
+		onSettled = undefined;
+		wake?.();
+	};
+	pi.on("agent_settled", wakeSettled);
 
 	pi.on("session_shutdown", () => {
 		epoch++;
+		wakeSettled();
 		unsubscribe?.();
 		unsubscribe = undefined;
 	});
@@ -51,7 +59,7 @@ export default function sendNowExtension(pi: ExtensionAPI) {
 
 		const queued = () => !ctx.isIdle() && ctx.hasPendingMessages();
 		// Claude Code sends the draft too, so a draft alone is enough to send now.
-		const active = () => queued() || (!ctx.isIdle() && ctx.ui.getEditorText().trim() !== "");
+		const active = () => !ctx.isIdle() && (ctx.hasPendingMessages() || ctx.ui.getEditorText().trim() !== "");
 
 		let sending = false;
 		const sendNow = async (turnCtx: ExtensionContext) => {
@@ -60,8 +68,16 @@ export default function sendNowExtension(pi: ExtensionAPI) {
 			try {
 				pi.events.emit(SEND_NOW_CHANNEL, {});
 				turnCtx.abort();
-				const deadline = Date.now() + IDLE_WAIT_MS;
-				while (current() && !turnCtx.isIdle() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, IDLE_POLL_MS));
+				if (!turnCtx.isIdle()) {
+					await new Promise<void>((resolve) => {
+						const fallback = setTimeout(resolve, IDLE_WAIT_MS);
+						fallback.unref?.();
+						onSettled = () => {
+							clearTimeout(fallback);
+							resolve();
+						};
+					});
+				}
 				if (!current() || !turnCtx.isIdle()) return;
 				const text = turnCtx.ui.getEditorText().trim();
 				if (!text) return;
@@ -96,6 +112,7 @@ export default function sendNowExtension(pi: ExtensionAPI) {
 						const held = chord.expire();
 						if (held !== undefined && current()) replay(held);
 					}, CHORD_TIMEOUT_MS);
+					timer.unref?.();
 					return { consume: true };
 				case "send":
 					void sendNow(ctx);
