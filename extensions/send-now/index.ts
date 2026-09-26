@@ -5,15 +5,14 @@
  * response and its tool calls finish. `ctrl+x ctrl+s` (chord.ts) delivers it
  * at once: the running turn is aborted, which makes pi move every queued
  * message and the draft back into the editor (its abort handler), and once the
- * session is idle the editor is submitted as Enter would submit it,
- * attachments included (pi restores queued messages as text only, as on Esc).
- * Running tools are cancelled, as in Claude Code before 2.1.283, which moves
+ * session is idle that text is sent as the next prompt (a pasted image is its
+ * file path in the text, so nothing is lost). Running tools are cancelled, as in Claude Code before 2.1.283, which moves
  * them to the background instead. A dim `ctrl+x ctrl+s to send now` line sits
  * above the editor while anything is queued.
  *
- * pi binds `ctrl+x` alone to copy, so a `ctrl+x` is held only while send now
- * applies and replayed through the TUI's input path when the chord does not
- * complete (another key, or CHORD_TIMEOUT_MS without one).
+ * pi binds `ctrl+x` alone to copy; while send now applies, `ctrl+x` is only the
+ * chord's prefix (chord.ts), and one the chord does not complete (another key,
+ * or CHORD_TIMEOUT_MS without one) is dropped. Only public extension API.
  *
  * pi exposes no read of its queue to extensions, only `hasPendingMessages()`,
  * so the hint asks on every render rather than tracking queue events (a
@@ -27,7 +26,7 @@ import { SEND_NOW_HINT, SendNowChord } from "./chord.ts";
 
 /** How long send now waits for the aborted turn to settle before giving up. */
 const IDLE_WAIT_MS = 10_000;
-/** How long a held `ctrl+x` waits for its `ctrl+s` before it is replayed as itself. */
+/** How long a held `ctrl+x` waits for its `ctrl+s` before the chord is dropped. */
 const CHORD_TIMEOUT_MS = 1_000;
 
 export default function sendNowExtension(pi: ExtensionAPI) {
@@ -80,14 +79,8 @@ export default function sendNowExtension(pi: ExtensionAPI) {
 					});
 				}
 				if (!current() || !turnCtx.isIdle()) return;
-				if (!turnCtx.ui.getEditorText().trim()) return;
-				// Submit the editor as Enter would, so a pasted image goes with the
-				// text; without the TUI's input path, send the text alone.
-				if (typeof tui?.handleTerminalInput === "function") {
-					replay("\r");
-					return;
-				}
 				const text = turnCtx.ui.getEditorText().trim();
+				if (!text) return;
 				turnCtx.ui.setEditorText("");
 				pi.sendUserMessage(text);
 			} finally {
@@ -95,38 +88,18 @@ export default function sendNowExtension(pi: ExtensionAPI) {
 			}
 		};
 
-		// The widget factory hands over the TUI, whose input path replays a held key.
-		let tui: { handleTerminalInput?(data: string): void } | undefined;
-		let replaying = false;
-		const replay = (held: string) => {
-			if (typeof tui?.handleTerminalInput !== "function") return;
-			replaying = true;
-			try {
-				tui.handleTerminalInput(held);
-			} finally {
-				replaying = false;
-			}
-		};
 		const chord = new SendNowChord();
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		const stopUnsubscribe = ctx.ui.onTerminalInput((data) => {
-			if (replaying) return undefined;
 			clearTimeout(timer);
-			const action = chord.feed(data, active());
-			switch (action.kind) {
+			switch (chord.feed(data, active())) {
 				case "hold":
-					timer = setTimeout(() => {
-						const held = chord.expire();
-						if (held !== undefined && current()) replay(held);
-					}, CHORD_TIMEOUT_MS);
+					timer = setTimeout(() => chord.expire(), CHORD_TIMEOUT_MS);
 					timer.unref?.();
 					return { consume: true };
 				case "send":
 					void sendNow(ctx);
 					return { consume: true };
-				case "replay":
-					replay(action.held);
-					return undefined;
 				default:
 					return undefined;
 			}
@@ -136,8 +109,7 @@ export default function sendNowExtension(pi: ExtensionAPI) {
 			stopUnsubscribe();
 		};
 
-		ctx.ui.setWidget("send-now", (widgetTui, theme) => {
-			tui = widgetTui as typeof tui;
+		ctx.ui.setWidget("send-now", (_tui, theme) => {
 			const paint = safeThemePaint(theme);
 			let cache: { key: string; lines: string[] } | undefined;
 			return {

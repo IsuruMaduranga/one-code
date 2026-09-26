@@ -30,45 +30,44 @@ describe("classifyKey", () => {
 describe("SendNowChord", () => {
 	it("holds ctrl+x while active and sends on the ctrl+s that follows", () => {
 		const chord = new SendNowChord();
-		expect(chord.feed("\x18", true)).toEqual({ kind: "hold" });
-		expect(chord.feed("\x13", true)).toEqual({ kind: "send" });
-		expect(chord.feed("\x13", true)).toEqual({ kind: "pass" });
+		expect(chord.feed("\x18", true)).toBe("hold");
+		expect(chord.feed("\x13", true)).toBe("send");
+		expect(chord.feed("\x13", true)).toBe("pass");
 	});
 
 	it("ignores the release that follows each press", () => {
 		const chord = new SendNowChord();
-		expect(chord.feed("\x1b[120;5u", true)).toEqual({ kind: "hold" });
-		expect(chord.feed("\x1b[120;5:3u", true)).toEqual({ kind: "pass" });
-		expect(chord.feed("\x1b[115;5u", true)).toEqual({ kind: "send" });
+		expect(chord.feed("\x1b[120;5u", true)).toBe("hold");
+		expect(chord.feed("\x1b[120;5:3u", true)).toBe("pass");
+		expect(chord.feed("\x1b[115;5u", true)).toBe("send");
 	});
 
 	it("stays armed through a repeat of the held ctrl+x", () => {
 		const chord = new SendNowChord();
-		expect(chord.feed("\x1b[120;5u", true)).toEqual({ kind: "hold" });
-		expect(chord.feed("\x1b[120;5:2u", true)).toEqual({ kind: "hold" });
-		expect(chord.feed("\x1b[115;5u", true)).toEqual({ kind: "send" });
+		expect(chord.feed("\x1b[120;5u", true)).toBe("hold");
+		expect(chord.feed("\x1b[120;5:2u", true)).toBe("hold");
+		expect(chord.feed("\x1b[115;5u", true)).toBe("send");
 	});
 
-	it("hands the held ctrl+x back ahead of any other key", () => {
+	it("drops an unfinished chord: the next key passes, a later ctrl+s does not send", () => {
 		const chord = new SendNowChord();
 		chord.feed("\x1b[120;5u", true);
-		expect(chord.feed("a", true)).toEqual({ kind: "replay", held: "\x1b[120;5u" });
-		expect(chord.feed("\x13", true)).toEqual({ kind: "pass" });
+		expect(chord.feed("a", true)).toBe("pass");
+		expect(chord.feed("\x13", true)).toBe("pass");
 	});
 
-	it("hands it back when the chord times out", () => {
+	it("drops it on timeout", () => {
 		const chord = new SendNowChord();
 		chord.feed("\x18", true);
-		expect(chord.expire()).toBe("\x18");
-		expect(chord.expire()).toBeUndefined();
-		expect(chord.feed("\x13", true)).toEqual({ kind: "pass" });
+		chord.expire();
+		expect(chord.feed("\x13", true)).toBe("pass");
 	});
 
-	it("lets ctrl+x through untouched when there is nothing to send", () => {
+	it("lets ctrl+x through to pi's copy when there is nothing to send", () => {
 		const chord = new SendNowChord();
-		expect(chord.feed("\x18", false)).toEqual({ kind: "pass" });
-		expect(chord.feed("\x13", false)).toEqual({ kind: "pass" });
+		expect(chord.feed("\x18", false)).toBe("pass");
+		expect(chord.feed("\x13", false)).toBe("pass");
 		chord.feed("\x18", true);
-		expect(chord.feed("\x13", false)).toEqual({ kind: "replay", held: "\x18" });
+		expect(chord.feed("\x13", false)).toBe("pass");
 	});
 });

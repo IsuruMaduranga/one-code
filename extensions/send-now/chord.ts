@@ -8,10 +8,11 @@
  * With event types on, a release follows every press, so releases and repeats
  * never change the chord's state.
  *
- * pi binds `ctrl+x` alone to "copy the last assistant message", so the chord
- * holds a `ctrl+x` only while send now applies, and hands it back when the
- * chord does not complete (another key, or the extension's timeout): the
- * extension replays it ahead of that key, so copy still works.
+ * pi binds `ctrl+x` alone to "copy the last assistant message". The chord
+ * takes a `ctrl+x` only while send now applies (a turn runs with something to
+ * send), where it is the chord's prefix as in Claude Code: one the chord does
+ * not complete (another key, or the extension's timeout) is dropped. At every
+ * other time `ctrl+x` reaches pi and copies.
  */
 
 export type ChordKey = "ctrl+x" | "ctrl+s" | "release" | "other";
@@ -36,38 +37,31 @@ export function classifyKey(data: string): ChordKey {
 
 /**
  * What the extension does with a key: let it through, hold it (a `ctrl+x`
- * that may start the chord), send now (consume the `ctrl+s`), or replay the
- * held `ctrl+x` and then let this key through.
+ * that may start the chord, consumed), or send now (the `ctrl+s`, consumed).
  */
-export type ChordAction = { kind: "pass" } | { kind: "hold" } | { kind: "send" } | { kind: "replay"; held: string };
+export type ChordAction = "pass" | "hold" | "send";
 
 export class SendNowChord {
-	private held: string | undefined;
+	private armed = false;
 
 	/** Feed one key; `active` is whether send now applies (a turn is running with something to send). */
 	feed(data: string, active: boolean): ChordAction {
 		const key = classifyKey(data);
-		if (key === "release") return { kind: "pass" };
-		const held = this.held;
-		this.held = undefined;
+		if (key === "release") return "pass";
+		const armed = this.armed;
+		this.armed = false;
 		// A second ctrl+x, or the kitty protocol's auto-repeat of a held one, keeps the chord armed.
-		if (held !== undefined && key === "ctrl+x") {
-			this.held = held;
-			return { kind: "hold" };
-		}
-		if (held !== undefined) return key === "ctrl+s" && active ? { kind: "send" } : { kind: "replay", held };
 		if (key === "ctrl+x" && active) {
-			this.held = data;
-			return { kind: "hold" };
+			this.armed = true;
+			return "hold";
 		}
-		return { kind: "pass" };
+		if (armed && key === "ctrl+s" && active) return "send";
+		return "pass";
 	}
 
-	/** The chord timed out: the held `ctrl+x` to replay, if any. */
-	expire(): string | undefined {
-		const held = this.held;
-		this.held = undefined;
-		return held;
+	/** The chord timed out: its `ctrl+x` is dropped. */
+	expire(): void {
+		this.armed = false;
 	}
 }
 
