@@ -112,8 +112,8 @@ export function checkDependencies(input: DependencyInput): DependencyReport {
 	const which = (command: string) => whichOnPath(command, env, platform);
 
 	const git = which("git");
-	checks.push({ name: "git", found: !!git, path: git, need: "required", reason: "repository detection, auto mode's recoverability check, worktree isolation", hint: "https://git-scm.com/downloads" });
-	if (!git) findings.push({ level: "warn", text: "git is not on PATH: worktree isolation and auto mode's git-recoverability check are unavailable.", fix: "Install git and make sure it is on the PATH used to launch One Code." });
+	checks.push({ name: "git", found: !!git, path: git, need: "required", reason: "repository detection, auto mode's git status line for the classifier, worktree isolation", hint: "https://git-scm.com/downloads" });
+	if (!git) findings.push({ level: "warn", text: "git is not on PATH: worktree isolation and auto mode's git status line for the classifier are unavailable.", fix: "Install git and make sure it is on the PATH used to launch One Code." });
 
 	// pi downloads ripgrep into <agentDir>/bin on first run when PATH has none
 	// and puts that dir on the shell tools' PATH, so a copy there is "found".

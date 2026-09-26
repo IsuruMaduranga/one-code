@@ -395,20 +395,20 @@ describe("analyzeShellCommand write-target gaps (whole-codebase review)", () => 
 	});
 });
 
-describe("containment signal for the recoverability gate (Phase 2)", () => {
+describe("containment signal for in-project deletes", () => {
 	it("marks an in-project rm of a bare-name file as contained, capturing the target", () => {
 		const ev = analyze("rm notes.txt");
 		expect(ev.verdict).toBe("escalate");
 		expect(ev.containedNonNetwork).toBe(true);
-		expect(ev.wholeTree).toBe(false);
 		expect(ev.writes.some((w) => w.token === "notes.txt" && !w.outsideCwd)).toBe(true);
 	});
 
-	it("marks git reset --hard as a contained whole-tree op", () => {
-		const ev = analyze("git reset --hard HEAD");
-		expect(ev.verdict).toBe("escalate");
-		expect(ev.containedNonNetwork).toBe(true);
-		expect(ev.wholeTree).toBe(true);
+	it("escalates git reset --hard uncontained (it is always classified, as in Claude Code)", () => {
+		for (const cmd of ["git reset --hard HEAD", "git reset --hard"]) {
+			const ev = analyze(cmd);
+			expect(ev.verdict, cmd).toBe("escalate");
+			expect(ev.containedNonNetwork, cmd).toBe(false);
+		}
 	});
 
 	it("does NOT mark an rm outside the project as contained", () => {
@@ -448,7 +448,7 @@ describe("containment signal for the recoverability gate (Phase 2)", () => {
 		expect(ev.containedNonNetwork).toBe(false);
 	});
 
-	it("does not treat a reset --hard aimed at another tree as a contained whole-tree op", () => {
+	it("escalates a reset --hard aimed at another tree, uncontained", () => {
 		for (const cmd of [
 			"git --work-tree=/other --git-dir=/other/.git reset --hard",
 			"git --work-tree /other reset --hard HEAD",
@@ -457,7 +457,6 @@ describe("containment signal for the recoverability gate (Phase 2)", () => {
 		]) {
 			const ev = analyze(cmd);
 			expect(ev.verdict, cmd).toBe("escalate");
-			expect(ev.wholeTree, cmd).toBe(false);
 			expect(ev.containedNonNetwork, cmd).toBe(false);
 		}
 	});
@@ -494,17 +493,10 @@ describe("containment signal for the recoverability gate (Phase 2)", () => {
 		expect(ev.verdict).toBe("safe");
 	});
 
-	it("still marks a bare git reset --hard (no ref) as whole-tree contained", () => {
-		const ev = analyze("git reset --hard");
-		expect(ev.containedNonNetwork).toBe(true);
-		expect(ev.wholeTree).toBe(true);
-	});
-
 	// A delete target the classifier's fast path cannot enumerate must never be
 	// treated as a concrete in-project literal — otherwise `rm -rf "$VAR"` would
-	// resolve to a nonexistent `cwd/$VAR`, the recoverability check would find
-	// nothing to lose, and it would auto-approve while $VAR expands to anything at
-	// runtime. These must stay uncontained so the classifier judges them.
+	// resolve to a nonexistent `cwd/$VAR` and a contained-delete fast path would
+	// approve it while $VAR expands to anything at runtime. These must stay uncontained so the classifier judges them.
 	it("does NOT mark rm of a dynamic/unenumerable target as contained", () => {
 		for (const command of ['rm -rf "$VAR"', "rm -rf ${DIR:-fallback}", "rm -rf $HOME/x", "rm -rf {a,b}.txt"]) {
 			const ev = analyze(command);
@@ -638,7 +630,7 @@ describe("pre-gate review 2026-09-23: redirects, quoting, symlink-following opti
 		for (const command of ["./cat a.txt", "bin/ls", "/bin/cat a.txt", "command ./cat a.txt"]) {
 			expect(analyze(command).verdict, command).toBe("escalate");
 		}
-		// Was a contained delete the recoverability gate could clear, running ./timeout.
+		// Was a contained delete a fast path could clear, running ./timeout.
 		expect(analyze("./timeout 5 rm a.txt").containedNonNetwork).toBe(false);
 	});
 });
@@ -690,7 +682,7 @@ describe("PREGATE-REVIEW-2026-09-23 second pass", () => {
 		for (const command of ["time { rm -f v; }", "! rm -f v", "script -q /dev/null rm -f v", "flock a.txt rm -f v", "stdbuf -o 1M rm -f v", "setsid -c rm -f v", "sudo -u root rm -f v"]) {
 			expect(bashMatchForms(command), command).toContain("rm -f v");
 		}
-		// flock and script write the file they are given, so they never reach the recoverability gate.
+		// flock and script write the file they are given, so they are never contained.
 		expect(analyze("flock lock rm -f a.txt").containedNonNetwork).toBe(false);
 		expect(analyze("script log rm -f a.txt").containedNonNetwork).toBe(false);
 		expect(analyze("timeout 5 rm -f a.txt").containedNonNetwork).toBe(true);

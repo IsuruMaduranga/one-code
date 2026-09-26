@@ -2,8 +2,9 @@
 
 /**
  * Global options for every git command the harness runs on its own (startup
- * git status, recoverability, consent checks, worktree bookkeeping). git
- * honours the checkout's own `.git/config`, and `core.fsmonitor` there names a
+ * git status, the classifier's git status line, consent checks, worktree
+ * bookkeeping). git honours the checkout's own `.git/config`, and
+ * `core.fsmonitor` there names a
  * program that `status` and other index reads run — so a directory whose
  * `.git` came from an archive or a copied tree would run it the moment One
  * Code starts in it, before any prompt (SECURITY-REVIEW-2026-09-23 M5).

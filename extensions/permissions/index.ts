@@ -54,10 +54,9 @@ import { modelIdentity } from "../lib/model-policy.ts";
 import { conflictingPathArguments, isWithin, resolveForContainment, toAbsolute } from "../auto-mode/paths.ts";
 import { DenialStore, denialInputKey, permissionGrantedMessage } from "../auto-mode/denials.ts";
 import { PauseTracker } from "../auto-mode/pause.ts";
-import { checkRecoverability } from "../auto-mode/recoverability.ts";
 import { safetyControlWrite } from "../auto-mode/safety-floor.ts";
 import { isExecutionPrimitivePath, isSensitivePath } from "../auto-mode/sensitive.ts";
-import { analyzeShellCommand, type ShellEvidence } from "../auto-mode/shell-analysis.ts";
+import { analyzeShellCommand } from "../auto-mode/shell-analysis.ts";
 import { bashParserReady, bashParserUnavailable } from "../lib/bash-parser.ts";
 import { powershellReadOnly } from "./powershell-rules.ts";
 import { isShellTool } from "./matcher.ts";
@@ -185,16 +184,20 @@ const askTitle = (actor: string, preview: string, cause: string, pausedResume: b
 };
 
 /** Map a `decide()` deny result to its model-facing reason — shared by both gate paths. */
-const denyReason = (result: { cause?: string; rule?: { raw?: string } }): string =>
-	result.cause === "plan-mode"
-		? DENIED_PLAN_MODE
-		: result.cause === "protected-path"
-			? DENIED_PROTECTED_PATH
-			: result.cause === "working-dir"
-				? DENIED_OUTSIDE_WORKING_DIR
-				: result.cause === "mode"
-					? DENIED_DONT_ASK
-					: DENIED_BY_RULE(result.rule?.raw ?? "deny");
+const denyReason = (result: { cause?: string; rule?: { raw?: string } }): string => {
+	switch (result.cause) {
+		case "plan-mode":
+			return DENIED_PLAN_MODE;
+		case "protected-path":
+			return DENIED_PROTECTED_PATH;
+		case "working-dir":
+			return DENIED_OUTSIDE_WORKING_DIR;
+		case "mode":
+			return DENIED_DONT_ASK;
+		default:
+			return DENIED_BY_RULE(result.rule?.raw ?? "deny");
+	}
+};
 
 /** Ask-prompt option labels — shared by both gate paths. */
 /**
@@ -246,8 +249,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	// an OS sandbox for outside-cwd reads; One Code flips the default directly and
 	// has no sandbox yet (reads outside the working directory are still
 	// classified/asked, never auto-read). The auto-mode safety architecture still
-	// holds — the deterministic safety floor, classifier-verdicts-verified, the
-	// git-recoverability gate, and the classifier tier floor — and with no
+	// holds — the deterministic safety floor, classifier-verdicts-verified and
+	// the classifier tier floor — and with no
 	// classifier model reachable the classifier fails closed. A user or project
 	// `defaultMode` (or `--permission-mode`) still overrides this; `auto` from a
 	// project file is still refused. See working-docs/decisions/auto-mode.md.
@@ -585,36 +588,16 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		const home = os.homedir();
 		const allow = () => ({ decision: "allow" as const, reason: "", tier: undefined });
 
-		let evidence: ShellEvidence | undefined;
 		if (normalizeToolName(toolName) === "bash" && subject) {
-			evidence = analyzeShellCommand({ command: subject, cwd, home, protectedDirs, readableRoots });
-			if (evidence.verdict === "safe") {
+			if (analyzeShellCommand({ command: subject, cwd, home, protectedDirs, readableRoots }).verdict === "safe") {
 				logDecision(ctx, { tool: toolName, subject, outcome: "allow", source: "pre-gate" });
 				return allow();
-			}
-			// The command's only risk is an in-project delete or whole-tree reset.
-			// Auto mode trusts the project as the agent's sandbox — but, unlike Claude
-			// Code, only when git can put the bytes back. A recoverable destruction
-			// runs unattended with no classifier call; an unrecoverable one (untracked,
-			// dirty, not a repo) still reaches the classifier.
-			if (containmentEligible && evidence.containedNonNetwork) {
-				const targets = evidence.writes.filter((w) => !w.outsideCwd && w.resolved).map((w) => w.resolved as string);
-				// The same cwd the evidence resolved against — for a worktree-isolated
-				// child that is the worktree, not the parent checkout (ctx.cwd).
-				const rec = checkRecoverability(cwd, { targets, wholeTree: evidence.wholeTree });
-				if (rec.verdict === "recoverable") {
-					logDecision(ctx, { tool: toolName, subject, outcome: "allow", source: "pre-gate", reason: rec.reason });
-					return allow();
-				}
-				evidence.notes.push(`git recoverability: ${rec.reason}`);
 			}
 		} else if (normalizeToolName(toolName) === "powershell" && subject) {
 			// PowerShell has no pre-gate in v1 beyond Claude Code's read-only cmdlet
 			// allowlist (powershell-rules.ts): a read-only line runs unclassified,
 			// everything else — every write, delete or unknown executable — goes to
-			// the classifier. No containment fast path either: the recoverability
-			// judge understands bash deletes, not `Remove-Item`, so PowerShell
-			// destruction is always classified (working-docs/decisions/windows.md).
+			// the classifier (working-docs/decisions/windows.md).
 			if (powershellReadOnly(subject, { cwd, home, readableRoots }).readOnly) {
 				logDecision(ctx, { tool: toolName, subject, outcome: "allow", source: "pre-gate" });
 				return allow();
@@ -623,9 +606,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			// A write/edit whose target is inside the project and not a credential
 			// path is ordinary sandbox work — Claude Code auto-approves it, and so do
 			// we (protected paths never reach here: decide() routes them with
-			// containmentEligible=false). Overwrites are not recoverability-gated the
-			// way deletes are: the file still exists, and edit-then-iterate is the
-			// core of unattended coding autonomy. Execution-primitive paths (build
+			// containmentEligible=false). Edit-then-iterate is the core of
+			// unattended coding autonomy. Execution-primitive paths (build
 			// wrappers, CI workflows, editor auto-run config) are excluded exactly as
 			// the bash pre-gate excludes them — being in-project does not make a file
 			// that runs later without further approval safe to write unclassified.
@@ -644,9 +626,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		}
 
 		// The current call was pushed onto `transcript` by the tool_call handler, so
-		// it is already the last entry — the action under review. `evidence` is used
-		// only for the containment fast-path above; CC's payload carries no separate
-		// static-analysis block, so it is not sent to the classifier.
+		// it is already the last entry — the action under review. The pre-gate's
+		// evidence is not sent: CC's payload carries no separate static-analysis block.
 		const verdict = await classify(
 			{
 				toolName,
@@ -961,12 +942,11 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// In a worktree session, worktree's tool_call handler (which runs before this
 		// one) cd-wraps bash commands for execution and publishes the model's
 		// original command — and the worktree it runs in — over the bus under this
-		// call's id. Rule matching, the shell pre-gate, the recoverability judge and
-		// the prompt all evaluate that original against the worktree cwd: matched
-		// against the wrapper every configured Bash rule stopped matching, and
-		// analysed as the wrapper (a `cd` plus a newline) every call escalated to
-		// the classifier and the prompt showed `cd '…' && (…)` (PERMISSIONS-REVIEW-
-		// 2026-09-05 L3). The safety floor keeps reading event.input (the wrapped
+		// call's id. Rule matching, the shell pre-gate and the prompt all evaluate
+		// that original against the worktree cwd: matched against the wrapper
+		// every configured Bash rule stopped matching, and analysed as the wrapper
+		// (a `cd` plus a newline) every call escalated to the classifier and the
+		// prompt showed `cd '…' && (…)` (PERMISSIONS-REVIEW-2026-09-05 L3). The safety floor keeps reading event.input (the wrapped
 		// command that actually runs). The lookup is by toolCallId on purpose: a
 		// value inside `event.input` would be the model's to write, and rules would
 		// match a string of its choosing.

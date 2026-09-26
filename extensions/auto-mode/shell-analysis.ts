@@ -33,7 +33,7 @@
 import { isProtectedPath } from "../permissions/protected-paths.ts";
 import { isExecutionPrimitivePath, isSensitivePath } from "./sensitive.ts";
 import { isWithin, resolveForContainment, toAbsoluteBash } from "./paths.ts";
-import { checkoutGitRunsProgram, READ_HOOKS, RESET_HOOKS } from "./git-checkout-programs.ts";
+import { checkoutGitRunsProgram, READ_HOOKS } from "./git-checkout-programs.ts";
 import { lstatSync, readdirSync, statSync } from "node:fs";
 import {
 	GIT_GLOBAL_SAFE,
@@ -93,21 +93,14 @@ export interface ShellEvidence {
 	 */
 	readOnlyOutside: boolean;
 	/**
-	 * True when the ONLY reason this escalated is an in-project filesystem
-	 * mutation/deletion — every path is inside the working directory and resolved,
+	 * True when the ONLY reason this escalated is an in-project delete — every
+	 * path is inside the working directory and resolved,
 	 * nothing touches the network, no credential/execution-primitive path, no
-	 * unknown command, interpreter, glob, xargs, `cd`, or unmodelled syntax. The
-	 * containment gate uses this to decide whether a git-recoverability check may
-	 * clear the command (see auto-mode/recoverability.ts). Never true when the
-	 * verdict is "safe" (nothing escalated) — it only qualifies an escalation.
+	 * unknown command, interpreter, glob, xargs, `cd`, or unmodelled syntax.
+	 * Never true when the verdict is "safe" (nothing escalated) — it only
+	 * qualifies an escalation.
 	 */
 	containedNonNetwork: boolean;
-	/**
-	 * True for a whole-working-tree destructive git op (`git reset --hard`), whose
-	 * recoverability is judged against the whole tree's cleanliness rather than
-	 * named paths.
-	 */
-	wholeTree: boolean;
 }
 
 /**
@@ -166,8 +159,8 @@ interface WrapperSpec {
 	/** The first operand is a duration (`timeout 30 cmd`). */
 	durationFirst?: boolean;
 	/**
-	 * Whether an in-project payload stays contained for the recoverability
-	 * gate. xargs takes its targets from stdin, and flock and script write the
+	 * Whether an in-project payload stays contained (`containedNonNetwork`).
+	 * xargs takes its targets from stdin, and flock and script write the
 	 * file they are given, which nothing write-checks.
 	 */
 	contained: boolean;
@@ -254,42 +247,15 @@ const MUTATION_COMMANDS = new Set([
 
 /**
  * The delete/truncate commands whose blast radius is exactly their (in-project,
- * resolved, concrete) path arguments, so an in-project use may be cleared by the
- * containment + git-recoverability gate rather than always reaching the
- * classifier. This is an *allowlist* for the "provably contained" conclusion —
- * omission is safe (the command still escalates to the classifier via the generic
- * mutation path). Overwrite/copy tools (cp, mv, dd, tee) are deliberately left
- * out for now: their destination semantics are subtler, so they keep classifying.
- * Membership here does not clear anything on its own: every target must resolve
- * inside the working directory and the recoverability check must pass.
+ * resolved, concrete) path arguments, so an in-project use can be marked
+ * contained (`containedNonNetwork`). This is an *allowlist* for the "provably
+ * contained" conclusion: omission only sends a command to the classifier.
  */
 const DELETE_COMMANDS = new Set(["rm", "rmdir", "shred", "truncate"]);
 
 /** Glob/other shell metacharacters we cannot enumerate, so a target carrying one is not "concrete". */
 function hasGlob(token: string): boolean {
 	return /[*?\[\]]/.test(token);
-}
-
-/** `git reset --hard [ref]` — a whole-working-tree discard of uncommitted changes. */
-function isWholeTreeGitReset(args: Token[]): boolean {
-	const positionals = args.filter((token) => !token.value.startsWith("-"));
-	return positionals[0]?.value === "reset" && args.some((token) => token.value === "--hard");
-}
-
-/**
- * Whether git is being pointed at another repository or tree (`-C dir`,
- * `--git-dir[=]…`, `--work-tree[=]…`, `--namespace`, `--exec-path`). A
- * whole-tree op carrying one of these acts on THAT tree, so judging it against
- * the working directory would clear a reset of some other checkout.
- */
-function hasGitRetargetFlag(args: Token[]): boolean {
-	return args.some((token) => {
-		const value = token.value;
-		if (!value.startsWith("-")) return false;
-		if (GIT_GLOBAL_VALUE_FLAGS.has(value)) return true;
-		const eq = value.indexOf("=");
-		return eq > 0 && GIT_GLOBAL_VALUE_FLAGS.has(value.slice(0, eq));
-	});
 }
 
 /**
@@ -788,13 +754,12 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		outsideReads: [],
 		readOnlyOutside: false,
 		containedNonNetwork: false,
-		wholeTree: false,
 	};
 	/**
 	 * Set by any escalation reason that is NOT a bare in-project mutation — i.e.
 	 * anything meaning the command reaches outside the project or cannot be fully
 	 * accounted for. When it stays false through an escalation, the only blocker
-	 * was in-project mutation, and the containment gate may consult recoverability.
+	 * was in-project mutation (`containedNonNetwork`).
 	 */
 	let uncontained = false;
 	/** Set by any escalation that is not an outside-cwd read (see readOnlyOutside). */
@@ -1049,29 +1014,6 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		}
 
 		if (name === "git") {
-			// `git reset --hard` is an in-project whole-tree discard: escalate, but
-			// mark it contained so the recoverability gate can clear it when the tree
-			// is clean. Any other non-read-only git subcommand is uncontained.
-			if (isWholeTreeGitReset(args)) {
-				if (hasGitRetargetFlag(args)) {
-					// The reset acts on whatever -C/--git-dir/--work-tree names, not on
-					// the working directory the recoverability judge would inspect.
-					escalate("runs git reset --hard against another tree (-C/--git-dir/--work-tree), which cannot be judged here");
-					continue;
-				}
-				// Recoverable bytes do not make the reset free of other effects: the
-				// checkout's config and hooks run programs a clean tree says nothing about.
-				const programs = gitCheckoutReason(args, effectiveCwd, home, checkoutReasons, RESET_HOOKS);
-				if (programs) {
-					escalate(programs);
-					continue;
-				}
-				evidence.wholeTree = true;
-				escalate("runs git reset --hard, which discards uncommitted changes in the working tree", {
-					contained: true,
-				});
-				continue;
-			}
 			const fileReads: Token[] = [];
 			const reason =
 				gitEscalationReason(
@@ -1100,9 +1042,8 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 
 		const isMutation = MUTATION_COMMANDS.has(name);
 		const isDelete = DELETE_COMMANDS.has(name);
-		// A delete confined to in-project paths is what the containment gate exists
-		// to clear (subject to recoverability); any other mutation (cp/mv/tar/…)
-		// stays uncontained and reaches the classifier as before.
+		// A delete confined to in-project paths is the one contained mutation; any
+		// other mutation (cp/mv/tar/…) stays uncontained.
 		if (isMutation) escalate(`runs ${name}, which modifies the filesystem`, { contained: isDelete });
 
 
@@ -1168,8 +1109,8 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		const writeTokens: string[] = [];
 		if (isDelete) {
 			// A delete's targets are every non-flag positional, bare names included
-			// (`rm notes.txt` has no slash but is still a real target the
-			// recoverability gate must see). A glob target cannot be enumerated, so
+			// (`rm notes.txt` has no slash but is still a real target that
+			// must be resolved). A glob target cannot be enumerated, so
 			// it drops out of containment — the command then reaches the classifier.
 			for (const token of args) {
 				if (token.value.startsWith("-")) continue;
@@ -1208,9 +1149,8 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		for (const token of writeTokens) checkWriteTarget(token);
 	}
 
-	// The command escalated, but every reason was an in-project delete/whole-tree
-	// reset — nothing reached outside the project, the network, or the unknown. The
-	// containment gate may now consult git-recoverability (auto-mode/recoverability).
+	// The command escalated, but every reason was an in-project delete: nothing
+	// reached outside the project, the network, or the unknown.
 	evidence.containedNonNetwork = evidence.verdict === "escalate" && !uncontained;
 	evidence.readOnlyOutside = evidence.verdict === "escalate" && !escalatedBeyondReads;
 
