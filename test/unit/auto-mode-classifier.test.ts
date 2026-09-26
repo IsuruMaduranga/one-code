@@ -99,6 +99,16 @@ describe("parseSeverity", () => {
 		expect(parseSeverity("<thinking>maybe 80? no</thinking>\n<severity>20</severity>")).toBe(20);
 	});
 
+	it("reads nothing from a body that is not a whole number, so stage 1 cannot clear on another scale", () => {
+		for (const reply of ["<severity>0.9</severity>", "<severity>9/10</severity>", "<severity>90%</severity>", "<severity>-5</severity>", "<severity>1e2</severity>", "<severity>low</severity>", "<severity>40 because it reads</severity>", "<severity>1000</severity>"]) {
+			expect(parseSeverity(reply), reply).toBeNull();
+		}
+		// The last tag decides, even when an earlier one was a clean number.
+		expect(parseSeverity("<severity>20</severity> on reflection <severity>0.8</severity>")).toBeNull();
+		expect(parseSeverity("<severity> 35 </severity>\n<reason>x</reason>")).toBe(35);
+		expect(parseSeverity("<severity>40\n<reason>x</reason>")).toBe(40);
+	});
+
 	it("clamps to 0..100 and rejects non-numeric replies", () => {
 		expect(parseSeverity("<severity>250</severity>")).toBe(100);
 		expect(parseSeverity("no severity here")).toBeNull();
