@@ -11,14 +11,16 @@
  *    whose repository is decided at runtime (`xargs`/`parallel`/`find -exec`
  *    feeding it arguments, a `-C "$DIR"` computed from a variable, a `cd`
  *    whose destination cannot be resolved), or that points into the shared
- *    checkout or a sibling worktree (`git -C`, `--git-dir`, `--work-tree`, a
- *    preceding `cd`), is refused with the fix named. Git against an unrelated
+ *    checkout or a sibling worktree (`git -C`, `--git-dir`, `--work-tree`,
+ *    `-c core.worktree=`, a `GIT_DIR`/`GIT_WORK_TREE`/`GIT_COMMON_DIR`
+ *    assignment before git or exported earlier in the line, a preceding
+ *    `cd`), is refused with the fix named. Git against an unrelated
  *    repository elsewhere on disk is left alone — the permission gate and
  *    auto-mode still apply to it.
  * 2. The stash stack is shared by the main checkout and every worktree of the
  *    repository, and parallel sessions can interleave on it. Stash forms that
  *    collide with a concurrent session (untagged push, `pop`, `clear`,
- *    ref-less `drop`) are refused with the tag + apply-by-SHA recipe.
+ *    ref-less `drop` and `branch`) are refused with the tag + apply-by-SHA recipe.
  *
  * Steering, not security: only bash is inspected here, and an unparseable
  * command is refused only when it visibly involves git (fail closed on the
@@ -80,8 +82,22 @@ function stashReason(rest: Token[]): string | undefined {
 			return stashMessage("git stash drop", "a ref-less `drop` deletes whatever is currently stash@{0}, which may be another session's entry");
 		}
 	}
+	if (sub === "branch") {
+		// `git stash branch <name> [<stash>]`: without the stash ref it pops stash@{0}.
+		const operands = words.slice(words.indexOf("branch") + 1).filter((w) => !w.startsWith("-"));
+		if (operands.length < 2) {
+			return stashMessage("git stash branch", "without a stash ref, `branch` pops whatever is currently stash@{0}, which may be another session's entry");
+		}
+	}
 	return undefined;
 }
+
+/** Environment variables that point git at a repository, like `--git-dir` and `--work-tree`. */
+const GIT_REPOSITORY_ENV = /^(GIT_DIR|GIT_WORK_TREE|GIT_COMMON_DIR)=/;
+
+/** `declare -x` / `typeset -gx`: the builtins that export like `export`. */
+const exportsLikeExport = (cmd: string, args: Token[]) =>
+	cmd === "export" || ((cmd === "declare" || cmd === "typeset") && args.some((arg) => /^-[a-zA-Z]*x/.test(arg.value)));
 
 export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: WorktreeGuardContext): string | undefined {
 	return guardScript(command, worktreePath, sharedRoot, worktreePath, 0).reason;
@@ -170,6 +186,15 @@ function guardScript(
 
 	/** Directory the current segment runs in; undefined = not statically known. */
 	let dir: string | undefined = startDir;
+	/**
+	 * Repository variables an earlier `export` in this line set, by name:
+	 * the directory they name, or undefined when it is not statically known.
+	 * Later git in the line runs with them. Subshell scopes are ignored, which
+	 * can only refuse more.
+	 */
+	const exportedGitEnv = new Map<string, string | undefined>();
+	const envTarget = (value: string, token: Token | undefined): string | undefined =>
+		!value || hasExpansion(value) || token?.dynamic || token?.glob || dir === undefined ? undefined : toAbsoluteBash(dir, value, homedir());
 	/**
 	 * The directories a segment may run in, per subshell scope
 	 * (`Segment.scopes`): a `cd` inside `( … )`, a substitution or a pipeline
@@ -311,6 +336,16 @@ function guardScript(
 			);
 		}
 
+		if (exportsLikeExport(cmd, args)) {
+			for (const arg of args) {
+				const name = /^(GIT_DIR|GIT_WORK_TREE|GIT_COMMON_DIR)(=|$)/.exec(arg.value);
+				if (!name) continue;
+				// `export GIT_DIR` (no value) exports whatever it was set to earlier.
+				exportedGitEnv.set(name[1], name[2] ? envTarget(arg.value.slice(name[0].length), arg) : undefined);
+			}
+			return undefined;
+		}
+
 		if (cmd !== "git") return undefined;
 
 		if (dir === undefined) {
@@ -324,10 +359,41 @@ function guardScript(
 		// Effective repository target: the tracked cwd, adjusted by global flags.
 		let effective = dir;
 		const extraTargets: string[] = [];
+		// `GIT_DIR=… git`, `env GIT_WORK_TREE=… git`, and an earlier `export`:
+		// the environment spelling of `--git-dir` / `--work-tree`.
+		const envRefusal = (name: string) =>
+			isolated(
+				worktreePath,
+				`\`${name}\` points git at a repository that is decided at runtime, so it cannot be verified`,
+				`Drop the ${name} setting and run git from ${worktreePath}.`,
+			);
+		const prefix = tokens.slice(0, tokens.length - args.length - 1);
+		const assigned = new Map(exportedGitEnv);
+		for (const token of prefix) {
+			if (!GIT_REPOSITORY_ENV.test(token.value)) continue;
+			const eq = token.value.indexOf("=");
+			assigned.set(token.value.slice(0, eq), envTarget(token.value.slice(eq + 1), token));
+		}
+		for (const [name, target] of assigned) {
+			if (target === undefined) return envRefusal(name);
+			extraTargets.push(target);
+		}
 		let i = 0;
 		while (i < args.length) {
 			const value = args[i].value;
 			if (!value.startsWith("-")) break;
+			// `-c core.worktree=<dir>` is `--work-tree` spelled as config;
+			// `--config-env` takes the value from a variable at runtime.
+			if (value === "-c" && /^core\.worktree=/i.test(args[i + 1]?.value ?? "")) {
+				const raw = args[i + 1].value.slice(args[i + 1].value.indexOf("=") + 1);
+				if (!raw || hasExpansion(raw)) return envRefusal("core.worktree");
+				extraTargets.push(toAbsoluteBash(effective, raw, homedir()));
+				i += 2;
+				continue;
+			}
+			if ((value === "--config-env" && /^core\.worktree=/i.test(args[i + 1]?.value ?? "")) || /^--config-env=core\.worktree=/i.test(value)) {
+				return envRefusal("core.worktree");
+			}
 			const pathFlag = value === "-C" || value === "--git-dir" || value === "--work-tree";
 			const inlined = value.startsWith("--git-dir=") || value.startsWith("--work-tree=");
 			if (pathFlag || inlined) {
