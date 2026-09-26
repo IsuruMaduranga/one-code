@@ -34,7 +34,9 @@ import { bashParserReady } from "./bash-parser.ts";
 import { findProjectRoot } from "./git.ts";
 import { memoryDir } from "./memory.ts";
 import { usesClaudeCodeFastPaths } from "./model-tier.ts";
-import { claudeConfigDir, oneCodeStateDir } from "./paths.ts";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { claudeConfigDir, claudeJsonPath, oneCodeStateDir } from "./paths.ts";
 import { sessionResultsDir } from "./persisted-output.ts";
 import { sessionScratchpadDir } from "./scratchpad.ts";
 import { decide, extractSubject, isPathSubjectTool, normalizeToolName, type PermissionMode, parseRules } from "../permissions/matcher.ts";
@@ -64,6 +66,31 @@ export const resolvedOrSelf = (dir: string) => resolveForContainment(dir) ?? dir
 export function runtimeProtectedDirs(): string[] {
 	const roots = [getAgentDir(), claudeConfigDir(), oneCodeStateDir()];
 	return [...new Set(roots.flatMap((dir) => [dir, resolvedOrSelf(dir)]))];
+}
+
+/**
+ * The harness's own secret stores, files and directories, which a read tool
+ * outside the working space must not read unclassified: One Code's settings
+ * (web search and capability-index API keys) and MCP OAuth token store, pi's
+ * `models.json` (custom-provider `apiKey` values) and `auth.json`, Claude
+ * Code's user settings (`env` keys, `apiKeyHelper`) and `.claude.json`. The
+ * basename denylist (`auto-mode/sensitive.ts`) cannot name these without
+ * flagging every project's `settings.json`. Literal and resolved spelling, as
+ * for `runtimeProtectedDirs`; `DecideInput.secretPaths` is the consumer.
+ */
+export function runtimeSecretPaths(home: string = homedir()): string[] {
+	const stateDir = oneCodeStateDir(process.env, home);
+	const agentDir = getAgentDir();
+	const paths = [
+		join(stateDir, "settings.json"),
+		join(stateDir, "mcp-auth"),
+		join(agentDir, "models.json"),
+		join(agentDir, "auth.json"),
+		join(claudeConfigDir(), "settings.json"),
+		join(claudeConfigDir(), ".credentials.json"),
+		claudeJsonPath(home),
+	];
+	return [...new Set(paths.flatMap((path) => [path, resolvedOrSelf(path)]))];
 }
 
 /** Tools the runtime itself injects; never gate them. */
@@ -110,6 +137,7 @@ export function permissionGateFactory(
 	// harness blocks its own feature (same rationale as in decide()).
 	const memoryDirPath = memoryDir(home, projectRoot);
 	const protectedDirs = runtimeProtectedDirs();
+	const secretPaths = runtimeSecretPaths(home);
 
 	return {
 		name: "agent-permission-gate",
@@ -177,6 +205,7 @@ export function permissionGateFactory(
 					// the subject (the tmpdir fallback sits under a symlinked /var on macOS).
 					resultsDirPath: resolvedOrSelf(sessionResultsDir(ctx)),
 					protectedDirs,
+					secretPaths,
 					claudeCodeFastPaths: usesClaudeCodeFastPaths(ctx?.model),
 					blockReadsOutsideWorkingDirectories: settings.blockReadsOutsideWorkingDirectories,
 				});

@@ -482,7 +482,9 @@ describe("decide", () => {
 
 		it("in auto mode, reads outside the working space without the classifier, except a credential path", () => {
 			expect(decide({ ...capable, mode: "auto", toolName: "read", subject: "/etc/hosts" })).toMatchObject({ decision: "allow", cause: "outside-read" });
-			expect(decide({ ...capable, mode: "auto", toolName: "grep", subject: "/etc" })).toMatchObject({ decision: "allow", cause: "outside-read" });
+			expect(decide({ ...capable, mode: "auto", toolName: "grep", subject: "/etc/hosts" })).toMatchObject({ decision: "allow", cause: "outside-read" });
+			// A search of a directory tree reaches credentials no check of the named path sees.
+			expect(decide({ ...capable, mode: "auto", toolName: "grep", subject: "/etc" }).decision).toBe("classify");
 			expect(decide({ ...capable, mode: "auto", toolName: "read", subject: "~/.ssh/id_rsa" }).decision).toBe("classify");
 			// Only auto mode: manual and acceptEdits still ask, cheap and tiny still classify.
 			expect(decide({ ...capable, toolName: "read", subject: "/etc/hosts" }).decision).toBe("ask");

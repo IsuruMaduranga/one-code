@@ -7,6 +7,7 @@
  * existing ~/.claude/settings.json files work unchanged.
  */
 
+import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, relative, resolve } from "node:path";
 import { analyzeShellCommand, INLINE_SCRIPT_SHELLS, isUnknownTilde, leadTokens, movesDirectory, parseCommand, resolvePayload, type ShellEvidence } from "../auto-mode/shell-analysis.ts";
@@ -617,6 +618,15 @@ export function isInsideDir(candidate: string, dir: string, cwd: string): boolea
 }
 
 /** `isInsideDir`, plus the directory itself (`ls <cwd>` lists the working directory). */
+/** Whether a path is a regular file (after symlinks); false when it is anything else or cannot be read. */
+function isRegularFile(path: string): boolean {
+	try {
+		return statSync(path).isFile();
+	} catch {
+		return false;
+	}
+}
+
 export function isAtOrInsideDir(candidate: string, dir: string, cwd: string): boolean {
 	return toAbsoluteFolded(candidate, cwd) === toAbsoluteFolded(dir, cwd) || isInsideDir(candidate, dir, cwd);
 }
@@ -808,6 +818,15 @@ export interface DecideInput {
 	 * (PERMISSIONS-REVIEW-2026-09-05 M7).
 	 */
 	protectedDirs?: string[];
+	/**
+	 * The harness's own secret stores (`lib/permission-gate.ts
+	 * runtimeSecretPaths`, the sole producer): files, and directories judged
+	 * with everything under them. Absolute, literal and resolved. Outside the
+	 * working space they count as credential paths, like the basename
+	 * denylist: a read tool never reads one unclassified, and a workspace
+	 * directory does not make one working space.
+	 */
+	secretPaths?: string[];
 	/**
 	 * The workspace directories in force (permissions/workspace.ts), absolute and
 	 * resolved. A read inside one is a working-space read, and acceptEdits may
@@ -1016,6 +1035,12 @@ export function decide(params: DecideInput): Decision {
 	}
 
 	/**
+	 * Whether an absolute path is a credential: the basename denylist, or at or
+	 * under one of the harness's own secret stores (`secretPaths`).
+	 */
+	const isCredential = (absolute: string): boolean =>
+		isSensitivePath(absolute) || (params.secretPaths ?? []).some((secret) => isAtOrInsideDir(absolute, secret, cwd));
+	/**
 	 * Whether `target` (where `spelled` resolves) is working space: the working
 	 * directory, the harness's session dirs, the plan file, and the workspace
 	 * directories except for the credentials in them. For a read (`reads`), the
@@ -1028,7 +1053,7 @@ export function decide(params: DecideInput): Decision {
 		// adding a directory must not make its keys readable without a prompt.
 		// Judged on the spelling and on where it resolves, so a symlink cannot
 		// launder a credential in either direction.
-		const sensitive = [spelled, target].some((candidate) => isSensitivePath(toAbsolute(cwd, candidate, homedir())));
+		const sensitive = [spelled, target].some((candidate) => isCredential(toAbsolute(cwd, candidate, homedir())));
 		if (workspace && !sensitive && (params.workspaceDirs ?? []).some((dir) => isAtOrInsideDir(target, dir, cwd))) return true;
 		return params.planFilePath ? isPlanFilePath(target, params.planFilePath, cwd) : false;
 	};
@@ -1201,9 +1226,13 @@ export function decide(params: DecideInput): Decision {
 		// Claude Code's auto mode reads outside the working directories without
 		// the classifier (the read tools are on its safe allowlist); the caller
 		// raises its one-time first-read prompt. A credential path is still
-		// judged: our plug, as in the shell pre-gate.
+		// judged: our plug, as in the shell pre-gate. So is a content search of
+		// anything but one file: pi's grep runs ripgrep with `--hidden`, and a
+		// directory's credentials sit anywhere below it (`grep` on `~` reads
+		// `~/.ssh`), where no check of the named path can see them.
 		const target = toAbsolute(cwd, params.resolvedSubject ?? subject, homedir());
-		if (mode === "auto" && fastPaths && !isSensitivePath(target) && !isSensitivePath(toAbsolute(cwd, subject, homedir()))) {
+		const searchesTree = tool === "grep" && !isRegularFile(target);
+		if (mode === "auto" && fastPaths && !searchesTree && !isCredential(target) && !isCredential(toAbsolute(cwd, subject, homedir()))) {
 			return { decision: "allow", cause: "outside-read" };
 		}
 		return outsideWorkingDir();

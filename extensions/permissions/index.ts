@@ -103,7 +103,7 @@ import {
 	type SourcedDirectory,
 	type SourcedRule,
 } from "./settings.ts";
-import { MODE_ENV, resolvedOrSelf, runtimeProtectedDirs } from "../lib/permission-gate.ts";
+import { MODE_ENV, resolvedOrSelf, runtimeProtectedDirs, runtimeSecretPaths } from "../lib/permission-gate.ts";
 import { CLASSIFIER_SETTING_CHANGED_CHANNEL } from "../lib/settings-channels.ts";
 import { describeProjectAllow, persistProjectAllowApproval, projectAllowApproved, projectDirectoryConsentEntry, type TrustFiring } from "./project-trust.ts";
 import { parseAddDirFlag, tooBroadForWorkspace, validateWorkspaceDirectory } from "./workspace.ts";
@@ -344,6 +344,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	let oneCodeProjectSettingsFile: string | undefined;
 	/** pi's own agent directory, protected like the static list (lib/permission-gate.ts runtimeProtectedDirs). */
 	let protectedDirs: string[] = [];
+	/** The harness's own secret stores, never read unclassified outside the working space (runtimeSecretPaths). */
+	let secretPaths: string[] = [];
 	/** The harness's readable session dirs, resolved at session start; `readableRoots` adds the workspace to them. */
 	let harnessReadableRoots: string[] = [];
 	/** The shipped docs the `one-code-guide` agent reads (lib/guide-docs.ts): readable, never writable. */
@@ -877,6 +879,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		resolvedCwd = resolveForContainment(ctx.cwd);
 		oneCodeProjectSettingsFile = oneCodeProjectSettingsPath(ctx.cwd, os.homedir());
 		protectedDirs = runtimeProtectedDirs();
+		secretPaths = runtimeSecretPaths(os.homedir());
 		reloadSettings(ctx);
 		// The system prompt lists the workspace as the session starts (lib/workspace-channel.ts).
 		pi.events.emit(WORKSPACE_CHANNEL, { dirs: workspacePaths } satisfies WorkspaceAnnouncement);
@@ -1115,6 +1118,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				resultsDirPath,
 				sessionDirPath,
 				protectedDirs,
+				secretPaths,
 				workspaceDirs: dirs,
 				claudeCodeFastPaths: usesClaudeCodeFastPaths(ctx.model),
 				blockReadsOutsideWorkingDirectories: blockOutsideReads,
@@ -1399,6 +1403,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			resultsDirPath,
 			sessionDirPath,
 			protectedDirs,
+			secretPaths,
 			workspaceDirs,
 			// The child's own model: a cheaper subagent gets the stricter gate.
 			claudeCodeFastPaths: usesClaudeCodeFastPaths(call.model),
