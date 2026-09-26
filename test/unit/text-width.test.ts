@@ -8,7 +8,7 @@ import {
 	truncateLine,
 	wrapPlainText,
 } from "../../extensions/lib/tui-render.ts";
-import { graphemeWidth, sliceColumns, visibleWidth } from "../../extensions/lib/text-width.ts";
+import { graphemeWidth, sliceColumns, tailColumns, visibleWidth } from "../../extensions/lib/text-width.ts";
 import { resolvePiTuiEntry } from "../../extensions/subagents/prose.ts";
 
 // pi-tui's own column measure — the authority a rendered line is validated
@@ -167,5 +167,20 @@ describe("visibleWidth agrees with pi-tui for every code point", () => {
 			for (let k = 0; k < len; k++) s += pool[rand(pool.length)];
 			expect(visibleWidth(s), JSON.stringify(s)).toBe(piVisibleWidth(s));
 		}
+	});
+});
+
+describe("tailColumns keeps the end of the text by columns", () => {
+	it("fits the tail on a grapheme boundary", () => {
+		for (const text of [WIDE, EMOJI, MIXED, "~/プロジェクト/ウェブ", "plain/ascii/path"]) {
+			for (const w of [0, 1, 3, 7, 20]) {
+				const r = tailColumns(text, w);
+				expect(text.endsWith(r.text)).toBe(true);
+				expect(piVisibleWidth(r.text)).toBe(r.width);
+				expect(r.width).toBeLessThanOrEqual(w);
+			}
+		}
+		expect(tailColumns("a漢b", 2)).toEqual({ text: "b", width: 1 });
+		expect(tailColumns("a漢b", 3)).toEqual({ text: "漢b", width: 3 });
 	});
 });

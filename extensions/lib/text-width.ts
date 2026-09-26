@@ -212,6 +212,29 @@ export function sliceColumns(text: string, maxCols: number): { text: string; wid
 }
 
 /**
+ * Longest suffix of PLAIN (escape-free) text whose visible width is ≤
+ * `maxCols`, cut on a grapheme boundary: the counterpart of `sliceColumns` for
+ * text that keeps its tail, such as a path whose deepest folders matter most.
+ */
+export function tailColumns(text: string, maxCols: number): { text: string; width: number } {
+	if (maxCols <= 0) return { text: "", width: 0 };
+	if (PRINTABLE_ASCII.test(text)) {
+		const tail = text.slice(Math.max(0, text.length - maxCols));
+		return { text: tail, width: tail.length };
+	}
+	const graphemes = [...graphemeSegmenter.segment(text)].map((s) => s.segment);
+	let width = 0;
+	let start = graphemes.length;
+	while (start > 0) {
+		const w = graphemeWidth(graphemes[start - 1]);
+		if (width + w > maxCols) break;
+		width += w;
+		start--;
+	}
+	return { text: graphemes.slice(start).join(""), width };
+}
+
+/**
  * Hard-wrap text into chunks each ≤ `columns` visible columns, on grapheme
  * boundaries. A single glyph wider than the whole budget occupies its own chunk
  * (nothing can be dropped without losing content). The shared engine behind
