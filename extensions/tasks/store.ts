@@ -133,14 +133,41 @@ export class TaskStore {
 		return { nextId: this.nextId, tasks: this.list().map((t) => ({ ...t, metadata: { ...t.metadata }, blocks: [...t.blocks], blockedBy: [...t.blockedBy] })) };
 	}
 
+	/**
+	 * A non-empty list with every task completed: the state Claude Code clears
+	 * itself from, 5 s after it is reached (`FINISHED_LIST_CLEAR_MS`).
+	 */
+	isFinished(): boolean {
+		const tasks = this.list();
+		return tasks.length > 0 && tasks.every((t) => t.status === "completed");
+	}
+
+	/**
+	 * Drop every task and keep the id counter, as Claude Code's reset does (it
+	 * records the high-water mark before deleting), so a task created after a
+	 * clear never reuses an id the transcript already mentions.
+	 */
+	clear(): void {
+		this.tasks.clear();
+	}
+
+	/**
+	 * A finished snapshot restores as empty: the clear runs on a timer and never
+	 * lands in a tool result, so without this rule `/resume` or a `/tree` switch
+	 * would bring back a list Claude Code would already have cleared.
+	 */
 	restore(snapshot: TaskSnapshot | undefined): void {
 		this.tasks.clear();
 		this.nextId = snapshot?.nextId ?? 1;
 		for (const task of snapshot?.tasks ?? []) {
 			this.tasks.set(task.id, { ...task, metadata: { ...task.metadata }, blocks: [...task.blocks], blockedBy: [...task.blockedBy] });
 		}
+		if (this.isFinished()) this.clear();
 	}
 }
+
+/** How long a finished list stays on screen before it clears (Claude Code's 5000 ms). */
+export const FINISHED_LIST_CLEAR_MS = 5_000;
 
 const STATUS_MARK: Record<TaskStatus, string> = { pending: " ", in_progress: "▸", completed: "x" };
 
@@ -193,7 +220,7 @@ function taskRow(task: TaskItem, { paint, bold, strike }: WidgetStyle): string {
  * past `maxTasks` so the widget cannot swallow the screen (Claude Code's
  * cutoff is unverified).
  */
-export function formatTaskWidget(store: TaskStore, maxTasks = 12, style: WidgetStyle = PLAIN_STYLE): string[] {
+export function formatTaskWidget(store: TaskStore, maxTasks = 12, style: WidgetStyle = PLAIN_STYLE, hint?: string): string[] {
 	const { paint, bold } = style;
 	const tasks = store.list();
 	if (tasks.length === 0) return [];
@@ -203,11 +230,21 @@ export function formatTaskWidget(store: TaskStore, maxTasks = 12, style: WidgetS
 	const dim = (text: string) => paint("dim", text);
 	const count = (n: number) => bold(dim(String(n)));
 	const lines = [
-		`  ${count(tasks.length)}${dim(` ${tasks.length === 1 ? "task" : "tasks"} (`)}${count(done)}${dim(" done, ")}${count(inProgress)}${dim(" in progress, ")}${count(open)}${dim(" open)")}`,
+		`  ${count(tasks.length)}${dim(` ${tasks.length === 1 ? "task" : "tasks"} (`)}${count(done)}${dim(" done, ")}${count(inProgress)}${dim(" in progress, ")}${count(open)}${dim(" open)")}${hint ? dim(` · ${hint}`) : ""}`,
 	];
 	for (const t of tasks.slice(0, maxTasks)) lines.push(`  ${taskRow(t, style)}`);
 	if (tasks.length > maxTasks) lines.push(`  ${dim(`… +${tasks.length - maxTasks} more`)}`);
 	return lines;
+}
+
+/**
+ * The one line left when the user hides the list, so the key that brings it
+ * back stays on screen (Claude Code shows "ctrl+t to show tasks" in its footer).
+ */
+export function formatHiddenTaskWidget(store: TaskStore, hint: string, style: WidgetStyle = PLAIN_STYLE): string[] {
+	const n = store.list().length;
+	if (n === 0) return [];
+	return [`  ${style.paint("dim", `${n} ${n === 1 ? "task" : "tasks"} hidden · ${hint}`)}`];
 }
 
 /**

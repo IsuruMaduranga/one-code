@@ -150,4 +150,19 @@ describe("the per-turn budget line", () => {
 		expect(buildClaudeCodeSystemPrompt(baseOptions, env, "frontier", undefined, null, line).endsWith(`\n\n${line}`)).toBe(true);
 		expect(buildClaudeCodeSystemPrompt(baseOptions, env, "frontier", undefined, git, null).endsWith(`Current working directory: /tmp/project\n\n${git}`)).toBe(true);
 	});
+
+	it("drops the task_create line when the model runs without the task tools", () => {
+		for (const tier of ["workhorse", "cheap", "tiny"] as const) {
+			const withTasks = buildClaudeCodeSystemPrompt(baseOptions, env, tier);
+			const without = buildClaudeCodeSystemPrompt(baseOptions, env, tier, undefined, null, null, false);
+			expect(withTasks, tier).toContain("task_create");
+			expect(without, tier).not.toContain("task_create");
+			// Only the task bullets go (tiny carries two); the rest stays.
+			expect(withTasks.split("\n").length - without.split("\n").length, tier).toBe(tier === "tiny" ? 2 : 1);
+		}
+		// Frontier has no task line either way.
+		expect(buildClaudeCodeSystemPrompt(baseOptions, env, "frontier", undefined, null, null, false)).toBe(
+			buildClaudeCodeSystemPrompt(baseOptions, env, "frontier", undefined, null, null, true),
+		);
+	});
 });

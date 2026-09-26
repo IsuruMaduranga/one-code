@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatTaskDetails, formatTaskList, formatTaskWidget, nudgeMessage, TaskStore } from "../../extensions/tasks/store.ts";
+import { formatHiddenTaskWidget, formatTaskDetails, formatTaskList, formatTaskWidget, nudgeMessage, TaskStore } from "../../extensions/tasks/store.ts";
 
 describe("TaskStore", () => {
 	it("creates tasks with incrementing ids and pending status", () => {
@@ -135,5 +135,54 @@ describe("TaskStore", () => {
 		expect(formatTaskList(store)).toContain("#1 [▸] Build");
 		expect(formatTaskDetails(store, store.get(a.id)!)).toContain("Description: the thing");
 		expect(formatTaskList(new TaskStore())).toBe("No tasks.");
+	});
+
+	it("is finished only when non-empty and every task is completed", () => {
+		const store = new TaskStore();
+		expect(store.isFinished()).toBe(false);
+		const a = store.create({ subject: "A", description: "" });
+		const b = store.create({ subject: "B", description: "" });
+		store.update(a.id, { status: "completed" });
+		expect(store.isFinished()).toBe(false);
+		store.update(b.id, { status: "completed" });
+		expect(store.isFinished()).toBe(true);
+	});
+
+	it("keeps the id counter across a clear, as Claude Code's reset does", () => {
+		const store = new TaskStore();
+		store.create({ subject: "A", description: "" });
+		store.create({ subject: "B", description: "" });
+		store.clear();
+		expect(store.list()).toEqual([]);
+		expect(store.create({ subject: "C", description: "" }).id).toBe("3");
+	});
+
+	it("restores a finished snapshot as empty, keeping the id counter", () => {
+		const store = new TaskStore();
+		const a = store.create({ subject: "A", description: "" });
+		store.update(a.id, { status: "completed" });
+		const restored = new TaskStore();
+		restored.restore(store.snapshot());
+		expect(restored.list()).toEqual([]);
+		expect(restored.create({ subject: "B", description: "" }).id).toBe("2");
+	});
+
+	it("restores an unfinished snapshot as it was", () => {
+		const store = new TaskStore();
+		const a = store.create({ subject: "A", description: "" });
+		store.create({ subject: "B", description: "" });
+		store.update(a.id, { status: "completed" });
+		const restored = new TaskStore();
+		restored.restore(store.snapshot());
+		expect(restored.list().map((t) => t.status)).toEqual(["completed", "pending"]);
+	});
+
+	it("appends the toggle hint to the summary line, and hides to one line that names the key", () => {
+		const store = new TaskStore();
+		expect(formatHiddenTaskWidget(store, "alt+t to show")).toEqual([]);
+		store.create({ subject: "A", description: "" });
+		store.create({ subject: "B", description: "" });
+		expect(formatTaskWidget(store, 12, undefined, "alt+t to hide")[0]).toBe("  2 tasks (0 done, 0 in progress, 2 open) · alt+t to hide");
+		expect(formatHiddenTaskWidget(store, "alt+t to show")).toEqual(["  2 tasks hidden · alt+t to show"]);
 	});
 });

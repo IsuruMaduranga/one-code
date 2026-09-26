@@ -10,7 +10,7 @@
 
 import { mkdirSync } from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { resolveModelTier } from "../lib/model-tier.ts";
+import { resolveModelTier, taskToolsEnabled } from "../lib/model-tier.ts";
 import { sessionScratchpadDir } from "../lib/scratchpad.ts";
 import { collectEnvironment, type EnvironmentInfo } from "./environment.ts";
 import { collectGitStatus } from "./git-status.ts";
@@ -79,7 +79,15 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 		// The same constant the context-budget extension puts on every user message.
 		const totalTokensLine = process.env.CC_TOTAL_TOKENS === "0" ? null : totalTokensBlock(turnTokenBudget());
 		return {
-			systemPrompt: buildClaudeCodeSystemPrompt(event.systemPromptOptions, { ...cachedEnv, workspaceDirs }, tier, scratchpad, gitStatus, totalTokensLine),
+			systemPrompt: buildClaudeCodeSystemPrompt(
+				event.systemPromptOptions,
+				{ ...cachedEnv, workspaceDirs },
+				tier,
+				scratchpad,
+				gitStatus,
+				totalTokensLine,
+				taskToolsEnabled(model, process.env, tier),
+			),
 		};
 	});
 }
