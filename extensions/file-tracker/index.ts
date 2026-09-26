@@ -168,8 +168,10 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 		const detailed: string[] = [];
 		const overflow: string[] = [];
 		for (const path of tracker.tracked) {
+			// Undefined for a file tracked without content (oversized); an empty
+			// file is compared like any other.
 			const previous = tracker.lastSeen(path);
-			if (previous === undefined || previous === "") continue;
+			if (previous === undefined) continue;
 			const stamp = statIfPresent(path);
 			if (stamp && tracker.unchangedOnDisk(path, stamp)) continue;
 			const current = stamp ? readIfPresent(path) : undefined;

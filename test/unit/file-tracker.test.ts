@@ -40,8 +40,18 @@ describe("FileTracker.status", () => {
 	it("does not block edits to files too large to track by content", () => {
 		const tracker = new FileTracker();
 		tracker.observe("/x/big.ts", "x".repeat(600 * 1024), 1);
-		expect(tracker.lastSeen("/x/big.ts")).toBe("");
+		expect(tracker.has("/x/big.ts")).toBe(true);
+		expect(tracker.lastSeen("/x/big.ts")).toBeUndefined();
 		expect(tracker.status("/x/big.ts", "anything at all")).toBe("fresh");
+		expect(tracker.status("/x/big.ts", "")).toBe("fresh");
+	});
+
+	it("treats a file read while empty like any other: filled afterwards, it is stale (A6-M2)", () => {
+		const tracker = new FileTracker();
+		tracker.observe("/x/notes.md", "", 1);
+		expect(tracker.lastSeen("/x/notes.md")).toBe("");
+		expect(tracker.status("/x/notes.md", "")).toBe("fresh");
+		expect(tracker.status("/x/notes.md", "the user's notes")).toBe("stale");
 	});
 
 	it("evicts the oldest entry past the cap", () => {
