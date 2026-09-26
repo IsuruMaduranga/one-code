@@ -27,6 +27,10 @@ arguments. Plugin skills keep their plugin prefix and are run as
 The `/` list shows each skill once, by its bare name; type `/skill:` to list
 the `/skill:` forms.
 
+A skill whose frontmatter sets `disable-model-invocation: true` runs only
+when you type its command. As in Claude Code, the model doesn't see it in
+the skills listing, and the `skill` tool refuses it.
+
 A skill's slash command isn't created when the name is already taken by a
 built-in command, a `.claude/commands/` template, or another skill.
 
