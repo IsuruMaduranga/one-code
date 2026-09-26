@@ -16,14 +16,18 @@
  *   FIRST user message, before the user's text, ordered by `order`, exactly
  *   Claude Code's first-message stack. Byte-stable, so the cached prefix holds.
  * - `sticky-append` — SESSION STATE that switches on and off (auto mode, plan
- *   mode, a worktree session, ultracode). Appended to the user message that
- *   opened the turn during which the state switched on (`since`) and to EVERY
- *   user message after it, so message N carries the block on every later
- *   request too: the prefix stays byte-stable while the state holds, and the
- *   model still sees the reminder on its latest turn. Switching off drops the
- *   blocks (one cache miss, once). The old `last-append` + every-turn
- *   combination re-cached the previous turn on every turn — permanently, in
- *   auto mode.
+ *   mode, a worktree session, ultracode). Appended to EVERY user message
+ *   stamped after the state switched on (`since`), so message N carries the
+ *   block on every later request too: the prefix stays byte-stable while the
+ *   state holds, and the model still sees the reminder on its latest turn.
+ *   When the first request to carry the block has no such message (the state
+ *   came on mid-turn), the turn's latest earlier user message carries it too:
+ *   the `opener`, fixed by the queue on that first request and never
+ *   recomputed. A state switched on between turns therefore rides from the
+ *   next prompt only, and the previous turn's message, already cached, stays
+ *   as it was. Switching off drops the blocks (one cache miss, once). The old
+ *   `last-append` + every-turn combination re-cached the previous turn on
+ *   every turn — permanently, in auto mode.
  * - `last-append` — ONE-SHOT STEERING about what just happened (a deferred tool
  *   miss, a file changed under the model, a mode change). Delivered where the
  *   model reads next, and then KEPT there so the message never changes again:
@@ -115,11 +119,18 @@ export interface ReminderEntry {
 	 */
 	suffix?: string;
 	/**
-	 * `sticky-append` only: when the state switched on. The user message that
-	 * opened the turn in progress at that moment, and every user message after
-	 * it, carry the block.
+	 * `sticky-append` only: when the state switched on. Every user message
+	 * stamped at or after it carries the block.
 	 */
 	since?: number;
+	/**
+	 * `sticky-append` only: the timestamp of the one earlier user message that
+	 * also carries the block (the message that opened the turn the state came on
+	 * in), or null when none does. Fixed the first time the queue places the
+	 * entry (`resolveStickyOpener`); undefined until then, in which case
+	 * injectReminders resolves it from the request it is given.
+	 */
+	opener?: number | null;
 	/** Set on a pinned one-shot: the exact message it rides on every request. */
 	pin?: PinAnchor;
 	/**
@@ -200,10 +211,10 @@ export class ReminderQueue {
 			// move. Different text under the same key is a new fact (plan → auto
 			// under the shared "permission-mode" key) and anchors from now.
 			const previous = opts?.key !== undefined ? this.everyTurn.get(opts.key) : undefined;
-			entry.since =
-				opts?.since ??
-				(previous?.placement === "sticky-append" && previous.text === text ? previous.since : undefined) ??
-				this.now();
+			const same = previous?.placement === "sticky-append" && previous.text === text ? previous : undefined;
+			entry.since = opts?.since ?? same?.since ?? this.now();
+			// The opener was fixed for this anchor; a re-emit must not move it.
+			if (same && same.since === entry.since && same.opener !== undefined) entry.opener = same.opener;
 		}
 		if (opts?.scope === "every-turn") {
 			this.everyTurn.set(opts.key ?? text, entry);
@@ -263,6 +274,15 @@ export class ReminderQueue {
 	 * did exactly that (CACHE-REVIEW-2026-09-04 M3).
 	 */
 	drain(messages: AgentMessage[]): ReminderEntry[] {
+		// A standing block's opener is decided once, on the first request that
+		// places it, and kept: recomputed per request, a steer stamped before the
+		// switch would move it, and a switch made between turns would reach back
+		// onto the previous turn's cached message (lib header, `sticky-append`).
+		for (const entry of this.everyTurn.values()) {
+			if (entry.placement === "sticky-append" && entry.opener === undefined) {
+				entry.opener = resolveStickyOpener(messages, entry.since ?? 0);
+			}
+		}
 		if (this.pinned.length > 0) {
 			const locate = pinLocator(messages);
 			this.pinned = this.pinned.filter((entry) => locate(entry.pin as PinAnchor) !== -1);
@@ -299,6 +319,7 @@ function strip(r: StoredReminder): ReminderEntry {
 	const entry: ReminderEntry = { text: r.text, placement: r.placement, order: r.order, suffix: r.suffix };
 	if (r.raw) entry.raw = true;
 	if (r.since !== undefined) entry.since = r.since;
+	if (r.opener !== undefined) entry.opener = r.opener;
 	if (r.pin !== undefined) entry.pin = r.pin;
 	return entry;
 }
@@ -322,6 +343,26 @@ function pinLocator(messages: AgentMessage[]): (pin: PinAnchor) => number {
 		}
 	});
 	return (pin) => (pin.kind === "toolResult" ? byToolCall.get(pin.toolCallId) : byTimestamp.get(pin.timestamp)) ?? -1;
+}
+
+/**
+ * The opener of a standing block switched on at `since`, judged on the first
+ * request that places it: when the request already holds a user message
+ * stamped at or after `since`, that message and the later ones suffice and
+ * nothing earlier gains the block (null); otherwise the state came on
+ * mid-turn and the latest earlier user message, the one that opened the turn,
+ * carries it as well (its timestamp). Undefined when the request holds no user
+ * message at all, so the decision waits for a request that does.
+ */
+export function resolveStickyOpener(messages: AgentMessage[], since: number): number | null | undefined {
+	let opener: number | undefined;
+	for (const m of messages) {
+		if (!isStickyCarrier(m)) continue;
+		const stamp = (m as { timestamp?: number }).timestamp ?? 0;
+		if (stamp >= since) return null;
+		opener = stamp;
+	}
+	return opener;
 }
 
 /** The anchor a one-shot lands on for this request: the trailing tool result, else the last user-like message. */
@@ -475,20 +516,19 @@ export function injectReminders(messages: AgentMessage[], reminders: Array<strin
 
 	for (const entry of sticky) {
 		const since = entry.since ?? 0;
-		// The block rides the user message that opened the turn during which the
-		// state switched on (the latest user message stamped before `since` — a
-		// standing reminder emitted on before_agent_start is always stamped after
-		// the turn's user message) and every user message after it. The set only
-		// grows while the state holds, so earlier messages never change.
-		let opener = -1;
+		// The block rides every user message stamped since the state switched on,
+		// plus the opener: the message that opened the turn it came on in, when it
+		// came on mid-turn (a standing reminder emitted on before_agent_start is
+		// stamped after the turn's user message). The queue fixes the opener on
+		// the first request; the set only grows while the state holds, so earlier
+		// messages never change.
+		const opener = entry.opener !== undefined ? entry.opener : resolveStickyOpener(messages, since);
 		const carriers: number[] = [];
 		messages.forEach((m, index) => {
 			if (!isStickyCarrier(m)) return;
 			const stamp = (m as { timestamp?: number }).timestamp ?? 0;
-			if (stamp >= since) carriers.push(index);
-			else opener = index;
+			if (stamp >= since || (opener !== null && opener !== undefined && stamp === opener)) carriers.push(index);
 		});
-		if (opener !== -1) carriers.unshift(opener);
 		if (carriers.length === 0) {
 			// No user turn at all (overflow compaction mid-turn): ride the tail.
 			push(after, tailIndex === -1 ? firstUserIndex : tailIndex, [reminderBlock(entry)]);

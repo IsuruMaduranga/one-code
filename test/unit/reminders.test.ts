@@ -167,8 +167,9 @@ describe("injectReminders", () => {
 
 	it("sticky-append rides every user message since its anchor and none before (C2)", () => {
 		const messages = [user("t1", 100), assistant(), user("t2", 200), assistant(), user("t3", 300)];
-		// Switched on while turn t2 was open (stamped after t2, before t3).
-		const entry = { text: "auto mode on", placement: "sticky-append" as const, order: 0, since: 250 };
+		// Switched on while turn t2 was open (stamped after t2, before t3); the
+		// queue fixed t2 as the opener on the first request after the switch.
+		const entry = { text: "auto mode on", placement: "sticky-append" as const, order: 0, since: 250, opener: 200 };
 		const result = injectReminders(messages, [entry]);
 		expect(blockTexts(result[0])).toEqual(["t1"]);
 		expect(blockTexts(result[2])).toEqual(["t2", wrapReminder("auto mode on")]);
@@ -187,10 +188,50 @@ describe("injectReminders", () => {
 		expect(blockTexts(result[0])).toEqual(["t1", wrapReminder("plan on")]);
 		expect(blockTexts(result[2])).toEqual(["ran"]);
 		// Earlier turns stay untouched; only the opener and later turns carry it.
-		const later = injectReminders([user("t0", 50), assistant(), ...messages, assistant(), user("t2", 200)], [entry]);
+		const later = injectReminders([user("t0", 50), assistant(), ...messages, assistant(), user("t2", 200)], [{ ...entry, opener: 100 }]);
 		expect(blockTexts(later[0])).toEqual(["t0"]);
 		expect(blockTexts(later[2])).toEqual(["t1", wrapReminder("plan on")]);
 		expect(blockTexts(later[6])).toEqual(["t2", wrapReminder("plan on")]);
+	});
+
+	it("sticky-append switched on between turns leaves the previous turn's message alone (A4-M1)", () => {
+		let now = 100;
+		const q = new ReminderQueue(() => now);
+		const turn1 = [user("turn 1", 100), assistant()];
+		// Turn 1 ends; the user switches the mode on while idle (t=500).
+		now = 500;
+		q.enqueue("AUTO", { scope: "every-turn", key: "permission-mode", placement: "sticky-append" });
+		const turn2 = [...turn1, user("turn 2", 1000)];
+		const first = injectReminders(turn2, q.drain(turn2));
+		expect(blockTexts(first[0])).toEqual(["turn 1"]);
+		expect(blockTexts(first[2])).toEqual(["turn 2", wrapReminder("AUTO")]);
+		// Later requests keep the earlier messages byte-identical.
+		const turn2b = [...turn2, assistant(), toolResult("ran")];
+		expect(injectReminders(turn2b, q.drain(turn2b)).slice(0, 3)).toEqual(first);
+	});
+
+	it("sticky-append switched on mid-turn keeps its opener once a steer stamped earlier arrives (A4-M1)", () => {
+		let now = 100;
+		const q = new ReminderQueue(() => now);
+		// The turn opened at t=100; a steer typed at t=400 is still queued when
+		// the mode switches on at t=500.
+		const before = [user("turn 1", 100), assistant(), toolResult("ran")];
+		now = 500;
+		q.enqueue("AUTO", { scope: "every-turn", key: "permission-mode", placement: "sticky-append" });
+		const first = injectReminders(before, q.drain(before));
+		expect(blockTexts(first[0])).toEqual(["turn 1", wrapReminder("AUTO")]);
+		// The steer enters the context: the opener stays on the turn's first message.
+		const withSteer = [...before, user("steer", 400), assistant()];
+		const second = injectReminders(withSteer, q.drain(withSteer));
+		expect(second.slice(0, 3)).toEqual(first);
+		expect(blockTexts(second[3])).toEqual(["steer"]);
+		// Plan mode re-emits the same text every turn: the opener must not move.
+		now = 900;
+		q.enqueue("AUTO", { scope: "every-turn", key: "permission-mode", placement: "sticky-append" });
+		const next = [...withSteer, user("turn 2", 1000)];
+		const third = injectReminders(next, q.drain(next));
+		expect(third.slice(0, 5)).toEqual(second);
+		expect(blockTexts(third[5])).toEqual(["turn 2", wrapReminder("AUTO")]);
 	});
 
 	it("a pinned one-shot rides the exact tool result or user turn it first landed on", () => {
