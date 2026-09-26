@@ -811,16 +811,16 @@ describe("Claude Code's acceptEdits file commands (findings §36)", () => {
 
 	it("reads a cp or mv source: one outside the working space or a credential is uncontained", () => {
 		writeFileSync(join(home, "secret.txt"), "s\n");
-		expect(analyze(`cp ${join(home, "secret.txt")} copied.txt`).containedNonNetwork).toBe(false);
+		expect(analyze(`cp ${sh(join(home, "secret.txt"))} copied.txt`).containedNonNetwork).toBe(false);
 		writeFileSync(join(cwd, ".env"), "K=v\n");
 		expect(analyze("cp .env backup.txt").containedNonNetwork).toBe(false);
-		expect(analyze(`mv notes.txt ${join(home, "notes.txt")}`).containedNonNetwork).toBe(false);
+		expect(analyze(`mv notes.txt ${sh(join(home, "notes.txt"))}`).containedNonNetwork).toBe(false);
 	});
 
 	it("never contains removing or moving a working root, a .git, or a repository", () => {
 		mkdirSync(join(cwd, ".git"));
 		mkdirSync(join(cwd, "vendor", "lib", ".git"), { recursive: true });
-		for (const cmd of ["rm -rf .", `rm -rf ${cwd}`, "rm -rf .git", "rm -rf .git/objects", "rm -rf vendor/lib", "rm -rf vendor", "mv vendor old-vendor", "mv .git old-git", "rmdir ."]) {
+		for (const cmd of ["rm -rf .", `rm -rf ${sh(cwd)}`, "rm -rf .git", "rm -rf .git/objects", "rm -rf vendor/lib", "rm -rf vendor", "mv vendor old-vendor", "mv .git old-git", "rmdir ."]) {
 			expect(analyze(cmd).containedNonNetwork, cmd).toBe(false);
 		}
 		mkdirSync(join(cwd, "build", "out"), { recursive: true });
@@ -830,10 +830,10 @@ describe("Claude Code's acceptEdits file commands (findings §36)", () => {
 	it("counts a workspace directory as working space for writes only when the caller passes it", () => {
 		const extra = join(cwd, "..", "extra");
 		mkdirSync(extra);
-		const cmd = `touch ${join(extra, "x")}`;
+		const cmd = `touch ${sh(join(extra, "x"))}`;
 		expect(analyze(cmd).containedNonNetwork).toBe(false);
 		expect(analyzeShellCommand({ command: cmd, cwd, home, writableRoots: [realpathSync(extra)] }).containedNonNetwork).toBe(true);
-		const redirect = `echo hi > ${join(extra, "y")}`;
+		const redirect = `echo hi > ${sh(join(extra, "y"))}`;
 		expect(analyze(redirect).verdict).toBe("escalate");
 		expect(analyzeShellCommand({ command: redirect, cwd, home, writableRoots: [realpathSync(extra)] }).verdict).toBe("safe");
 	});

@@ -505,7 +505,7 @@ describe("decide", () => {
 				const workspace = join(root, "extra");
 				mkdirSync(project);
 				mkdirSync(workspace);
-				const call = { ...base, cwd: project, mode: "auto" as const, toolName: "bash", subject: `touch ${join(workspace, "x")}`, workspaceDirs: [workspace] };
+				const call = { ...base, cwd: project, mode: "auto" as const, toolName: "bash", subject: `touch ${forwardSlashes(join(workspace, "x"))}`, workspaceDirs: [workspace] };
 				expect(decide({ ...call, claudeCodeFastPaths: true }).decision).toBe("allow");
 				expect(decide(call).decision).toBe("classify");
 			} finally {
