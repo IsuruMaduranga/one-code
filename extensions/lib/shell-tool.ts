@@ -32,6 +32,12 @@ export const NOTIFY_OUTPUT_CAP = 2_000;
 export const ONE_SHOT_OUTPUT_CAP = 30_000;
 /** Claude Code's cap; the tools' `timeout` is milliseconds, as CC's is. */
 export const MAX_TIMEOUT_MS = 600_000;
+/**
+ * Claude Code's default for a command that names no `timeout`, which both
+ * tool descriptions promise. pi's executor has no default, so without this a
+ * foreground `npm run dev` ran until Esc, and forever in a `-p` run.
+ */
+export const DEFAULT_TIMEOUT_MS = 120_000;
 
 /** The parameter shape both shell tools share (descriptions differ per tool). */
 export interface ShellToolParams {
@@ -99,6 +105,16 @@ export function finishLine(summary: BashFinishSummary, timeoutSeconds?: number):
 	return `failed (${detail ?? `exit code ${summary.exitCode}`})`;
 }
 
+/**
+ * Why a one-shot `run_in_background` call was stopped: a one-shot session
+ * cannot keep a command running past the run, so the call is held to the
+ * foreground deadline.
+ */
+export function oneShotDeadlineNote(timeoutMs: number, explicit: boolean): string {
+	const which = explicit ? `its ${timeoutMs} ms timeout` : `the default ${timeoutMs} ms timeout (no \`timeout\` was given)`;
+	return `It was stopped at ${which}: a one-shot session cannot keep a background command running after the run ends, so a server or watcher started this way stops at the deadline. Pass a longer \`timeout\` (max ${MAX_TIMEOUT_MS}) for a long build.`;
+}
+
 /** `<sessionDir>/bash/<taskId>/output.log` — one spool location for every shell tool (the shell panel reads it). */
 export function taskLogPath(ctx: ExtensionContext, taskId: string): string | undefined {
 	try {
@@ -163,11 +179,10 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 			if (guardReason) return { content: [{ type: "text" as const, text: guardReason }], isError: true, details: {} };
 			// pi's executor takes seconds; the model-facing unit is milliseconds
 			// (Claude Code's), so a habitual `timeout: 120000` is 2 minutes, not
-			// 33 hours (review T11).
-			const timeoutSeconds =
-				params.timeout !== undefined && Number.isFinite(params.timeout) && params.timeout > 0
-					? Math.min(params.timeout, MAX_TIMEOUT_MS) / 1000
-					: undefined;
+			// 33 hours (review T11). A command that names none gets Claude Code's
+			// default, which is what the descriptions promise.
+			const explicitTimeout = params.timeout !== undefined && Number.isFinite(params.timeout) && params.timeout > 0;
+			const timeoutSeconds = (explicitTimeout ? Math.min(params.timeout!, MAX_TIMEOUT_MS) : DEFAULT_TIMEOUT_MS) / 1000;
 
 			if (!params.run_in_background) {
 				// pi spills a long output to os.tmpdir(), outside every readable root;
@@ -195,15 +210,20 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 			// detached task would be orphaned, and its completion callback would
 			// call sendMessage on the disposed session and crash pi (measured,
 			// STEERING-REVIEW-2026-09-05 H3). Run blocking there — the same rule the
-			// Agent tool applies — and return the output in the result.
+			// Agent tool applies — and return the output in the result. The call
+			// holds the turn like a foreground command, so it gets the foreground
+			// deadline (the model's `timeout`, else the default): with none, a
+			// server started this way hung the run forever. A detached shell below
+			// keeps having no deadline (findings §31).
 			if (!sessionOutlivesTurn(ctx.mode)) {
 				const summary = await runBackgroundBashBlocking({ id, command, description, cwd: ctx.cwd, timeoutSeconds, logPath, shell }, signal);
 				const output = persistIfLarge(summary.output, { dir: sessionResultsDir(ctx), id: `${spec.name}-${id}`, maxBytes: ONE_SHOT_OUTPUT_CAP });
+				const deadline = summary.timedOut ? ` ${oneShotDeadlineNote(timeoutSeconds * 1000, explicitTimeout)}` : "";
 				return {
 					content: [
 						{
 							type: "text" as const,
-							text: `${spec.ccLabel} task ${id} (${description}) ${finishLine(summary, timeoutSeconds)}. ${oneShotNote("command")}${logPath ? ` Log: ${logPath}.` : ""}\n\n${output}`,
+							text: `${spec.ccLabel} task ${id} (${description}) ${finishLine(summary, timeoutSeconds)}. ${oneShotNote("command")}${deadline}${logPath ? ` Log: ${logPath}.` : ""}\n\n${output}`,
 						},
 					],
 					// No taskId: nothing was registered behind task_output/task_stop, and
@@ -213,7 +233,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 				};
 			}
 
-			// No timeoutSeconds here: Claude Code clears a command's timeout the
+			// No timeout here: Claude Code clears a command's timeout the
 			// moment it goes to the background, so a detached shell has no
 			// deadline (findings §31). Models habitually send `timeout: 600000`
 			// next to `run_in_background`, which used to kill a dev server at

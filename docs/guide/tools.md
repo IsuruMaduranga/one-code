@@ -46,7 +46,9 @@ reported as deleted or moved.
 
 ## Shell
 
-`bash` runs a shell command. Its `run_in_background` option starts the
+`bash` runs a shell command. A command in the foreground stops after its
+`timeout` (in milliseconds, at most 600000), or after two minutes when the
+model gives none, as in Claude Code. Its `run_in_background` option starts the
 command detached and returns a task id; output spools to a log file under
 the session directory, and completion is reported to the model as a
 notification. A background shell shows up in the shells section of the
@@ -151,7 +153,10 @@ and the model is steered to `tool_search`.
 In `-p` and `--mode json` runs the process exits when the turn settles, so
 nothing can run in the background. Tools that would detach work run to
 completion instead and return the output in their result: `bash` and
-`powershell` with `run_in_background`, `Agent`, `monitor`, and `workflow`. Timers such as
+`powershell` with `run_in_background`, `Agent`, `monitor`, and `workflow`.
+A shell command run this way holds the run like a foreground command, so it
+stops at the same timeout, two minutes unless the model gives another, and
+the result says so. Timers such as
 `schedule_wakeup`, `cron_create`, and `/loop` never fire in these modes.
 
 Give a scripted run its own deadline. One Code has no idle timeout on a

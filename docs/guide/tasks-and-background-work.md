@@ -39,7 +39,9 @@ a while during a long task, it's reminded that the list exists.
 When the model runs a command with `run_in_background`, the command starts
 detached and the model gets a task id at once. A background command has no
 time limit: it runs until it exits or is stopped, even if the model passed a
-`timeout`, so a dev server started this way keeps running. Output spools to a log file
+`timeout`, so a dev server started this way keeps running. (In a `-p` or
+`--mode json` run, the command runs in the foreground instead and stops at
+its timeout; see [Non-interactive runs](#non-interactive-runs).) Output spools to a log file
 under the session directory. When the command finishes, the model is
 notified with the result, and it can read the output at any time with
 `task_output` or stop the command with `task_stop`.
@@ -167,6 +169,7 @@ Background work reports back through notifications:
 In `-p` and `--mode json` runs nothing can run in the background, because
 the process exits when the turn settles. Background shells, monitors,
 subagents, and workflows run to completion and return their output
-directly. `/loop`, `schedule_wakeup`, and scheduled prompts don't fire;
+directly. A shell command run this way stops at its `timeout`, or after two
+minutes when the model gives none, and its result says why it stopped. `/loop`, `schedule_wakeup`, and scheduled prompts don't fire;
 `cron_create` still creates the job, and its result says the job can never
 fire.
