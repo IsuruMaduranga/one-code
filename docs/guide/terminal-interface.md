@@ -56,7 +56,8 @@ While the model works, a spinner shows a random verb, the elapsed time, and
 the tokens streamed so far, for example `✳ Cogitating… (12s · ↓ 843 tokens)`.
 The clock runs from the start of the turn until it settles, through retries.
 
-After the turn, a dim `✻ Cooked for 5m 12s` line reports the total time.
+After the turn, a dim `✻ Cooked for 5m 12s · done 2:33 PM` line reports the
+total time and when the turn finished.
 Set `CC_TURN_DURATION=0` to turn it off.
 
 ## The status line
