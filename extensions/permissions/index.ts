@@ -1075,7 +1075,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// command that actually runs). The lookup is by toolCallId on purpose: a
 		// value inside `event.input` would be the model's to write, and rules would
 		// match a string of its choosing.
-		const original = isShellTool(normalizedTool) ? originalCommands.get(event.toolCallId) : undefined;
+		// `monitor` is cd-wrapped the same way (worktree/rewrite.ts).
+		const original = isShellTool(normalizedTool) || normalizedTool === "monitor" ? originalCommands.get(event.toolCallId) : undefined;
 		const matchSubject = original?.command ?? subject;
 		const callCwd = original?.cwd ?? ctx.cwd;
 

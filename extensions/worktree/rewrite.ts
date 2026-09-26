@@ -27,8 +27,8 @@ export function powershellQuote(path: string): string {
 
 
 /**
- * Mutates `input` in place so the call runs inside the worktree. For bash,
- * returns the model's ORIGINAL command (pre-`cd`-wrapper) so the caller can
+ * Mutates `input` in place so the call runs inside the worktree. For bash
+ * (and `monitor`, which runs a bash command), returns the model's ORIGINAL command (pre-`cd`-wrapper) so the caller can
  * publish it over `ORIGINAL_COMMAND_CHANNEL` keyed by the call id: the
  * permission matcher evaluates rules against what the model asked for, not
  * the wrapper (which starts with `cd` and matches no Bash rule), while the
@@ -43,7 +43,10 @@ export function rewriteToolInput(
 	input: Record<string, unknown>,
 	worktreePath: string,
 ): { originalCommand?: string } {
-	if (toolName === "bash") {
+	// `monitor` runs its command through the same bash as the `bash` tool
+	// (background/index.ts), so it gets the same `cd` wrapper; a `ws` monitor
+	// has no command and nothing to move.
+	if (toolName === "bash" || toolName === "monitor") {
 		if (typeof input.command === "string") {
 			const originalCommand = input.command;
 			input.command = `cd ${shellQuote(worktreePath)} && (${originalCommand}\n)`;

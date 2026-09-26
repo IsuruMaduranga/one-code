@@ -99,10 +99,11 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 	pi.on("tool_call", async (event) => {
 		if (!state) return;
 		if (["enter_worktree", "exit_worktree", "Agent", "SendMessage", "workflow"].includes(event.toolName)) return;
-		if (event.toolName === "bash") {
+		if (event.toolName === "bash" || event.toolName === "monitor") {
 			// Guard before rewriting (and before the permission prompt — this
 			// extension loads ahead of permissions): git must verifiably target
 			// this worktree, and shared-stash footguns are refused with the recipe.
+			// A monitor's command runs through the same bash, so it is judged the same way.
 			const command = (event.input as Record<string, unknown>).command;
 			if (typeof command === "string") {
 				await bashParserReady();
