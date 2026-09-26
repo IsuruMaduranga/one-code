@@ -42,7 +42,7 @@ import {
 import { modelPickerComponent, pickerSpec, toPickerEntries, type PickerEntry } from "../auto-mode/model-picker.ts";
 import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
-import { BTW_FORK_CHANNEL, btwForkReminder, type BtwForkRequest, type BtwForkResult } from "../lib/btw-fork.ts";
+import { BTW_FORK_CHANNEL, btwForkName, btwForkReminder, type BtwForkRequest, type BtwForkResult } from "../lib/btw-fork.ts";
 import { MCP_TOOLS_CHANNEL, type McpToolsPayload } from "../lib/mcp-share.ts";
 import { resolveModelTier } from "../lib/model-tier.ts";
 import { pendingClaimReminder } from "./pending-claim.ts";
@@ -52,7 +52,7 @@ import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { type BackgroundTask, generateTaskId, TASK_REGISTER_CHANNEL } from "../background/registry.ts";
 import { type ChildAction } from "../auto-mode/actions.ts";
 import { type ChildOutcome, forkTaskMessage, OUTPUT_CAP, type RpcChildHandle } from "./outcome.ts";
-import { type AgentRunRecord, resolveRunName, RunRegistry } from "./runs.ts";
+import { type AgentRunRecord, freeRunName, resolveRunName, RunRegistry } from "./runs.ts";
 import { SubagentRuntime } from "./runner.ts";
 import { emptyUsage, formatStats, type UsageTotals } from "./usage.ts";
 import { cleanupWorktree, createWorktree, isGitRepo, type Worktree } from "./worktree.ts";
@@ -1674,7 +1674,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		// fork framed as inheriting it would confabulate (the Agent tool refuses too).
 		const sessionFile = ctx.sessionManager.getSessionFile();
 		if (!sessionFile) return { error: "Cannot fork: this session is not persisted (started with --no-session), so there is no conversation to clone." };
-		const { name } = resolveRunName(registry, FORK_AGENT, undefined);
+		// Named from the question, as Claude Code names a /btw fork.
+		const name = freeRunName(registry.names(), btwForkName(request.question));
 		const taskId = generateTaskId();
 		// The session's current model and thinking, explicitly: before the first
 		// turn there is no transcript for the fork to restore them from.

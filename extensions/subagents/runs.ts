@@ -47,6 +47,16 @@ export function nextRunName(existing: Iterable<string>, agent: string): string {
 	}
 }
 
+/** `base` when free, else `<base>-<n>` with the lowest n ≥ 2 not taken (Claude Code's fork naming). */
+export function freeRunName(existing: Iterable<string>, base: string): string {
+	const taken = new Set(existing);
+	if (!taken.has(base)) return base;
+	for (let n = 2; ; n++) {
+		const candidate = `${base}-${n}`;
+		if (!taken.has(candidate)) return candidate;
+	}
+}
+
 /**
  * The name a new run gets: the requested one when free, else a fresh
  * `<agent>-<n>`. A run name is an identifier for the whole session, so a reused
