@@ -36,6 +36,7 @@ import { boundedDockHeight, ccToolRenderers, safeThemeBold, safeThemePaint, trun
 import {
 	bareSkillMatches,
 	buildSkillBlock,
+	missingArgumentsNote,
 	parseSkillCommand,
 	redactOffSkillMessages,
 	resolveSkill,
@@ -279,9 +280,16 @@ export default function skillExtension(pi: ExtensionAPI) {
 
 			recordUsage(pluginRoot(getAgentDir()), "skill", found.name);
 
+			// A skill that takes arguments, called without any, returns its
+			// no-argument body; say so, since a model previewing the skill would
+			// otherwise follow it (invoke.ts missingArgumentsNote).
+			const hint = params.args?.trim() ? undefined : readArgumentHint(found.path);
+			const hintText = hint?.hint ?? hint?.argNames?.map((name) => `<${name}>`).join(" ");
+			const note = hintText ? missingArgumentsNote(hintText) : undefined;
 			// Resource paths in a skill are relative to its own directory, so the
 			// model needs to know where it lives to read references/ or scripts/.
 			const header = [
+				note?.before,
 				`Skill: ${found.name}`,
 				`Location: ${found.path}`,
 				params.args ? `Arguments: ${params.args}` : undefined,
@@ -291,7 +299,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 				.join("\n");
 
 			return {
-				content: [{ type: "text", text: `${header}\n\n---\n\n${body}` }],
+				content: [{ type: "text", text: `${header}\n\n---\n\n${body}${note ? `\n\n---\n\n${note.after}` : ""}` }],
 				details: { skill: found.name, path: found.path } as Record<string, unknown>,
 			};
 		},

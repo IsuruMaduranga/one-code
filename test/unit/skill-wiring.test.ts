@@ -16,11 +16,14 @@ const root = mkdtempSync(join(tmpdir(), "skill-wiring-"));
 const cwd = join(root, "project");
 const agentDir = join(root, "agent");
 const skillDir = join(cwd, ".claude", "skills", "demo");
+const argsSkillDir = join(cwd, ".claude", "skills", "every");
 
 beforeAll(() => {
 	mkdirSync(skillDir, { recursive: true });
 	mkdirSync(agentDir, { recursive: true });
 	writeFileSync(join(skillDir, "SKILL.md"), "---\nname: demo\ndescription: A demo skill\n---\nDo the demo.\n");
+	mkdirSync(argsSkillDir, { recursive: true });
+	writeFileSync(join(argsSkillDir, "SKILL.md"), '---\nname: every\ndescription: Repeat a prompt\nargument-hint: "[interval] [prompt]"\n---\nRepeat it.\n');
 	vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
 	vi.stubEnv("HOME", root);
 });
@@ -74,5 +77,29 @@ describe("skill wiring: scheduled work", () => {
 		const unknown: SlashExpandQuery = { text: "/nope", cwd };
 		fake.events.emit(SLASH_EXPAND_CHANNEL, unknown);
 		expect(unknown.expanded).toBeUndefined();
+	});
+});
+
+describe("skill tool: a skill that takes arguments, called without any", () => {
+	async function call(params: { skill: string; args?: string }): Promise<string> {
+		const { fake, ctx } = await mount();
+		// The tool reads the skills pi resolved for the turn.
+		const skills = ["demo", "every"].map((name) => ({ name, filePath: join(cwd, ".claude", "skills", name, "SKILL.md") }));
+		await fake.fire("before_agent_start", { systemPromptOptions: { skills } }, ctx);
+		const result = (await fake.tools.get("skill")!.execute("t1", params, undefined, undefined, ctx)) as { content: { text: string }[] };
+		return result.content[0].text;
+	}
+
+	it("opens the result with a note naming the arguments", async () => {
+		const text = await call({ skill: "every" });
+		expect(text.startsWith("Stop and check before following this. This skill takes arguments ([interval] [prompt])")).toBe(true);
+		expect(text).toContain("Repeat it.");
+		expect(text.endsWith("call the skill again with them in `args` instead of following them.")).toBe(true);
+	});
+
+	it("adds no note when arguments are passed or the skill declares none", async () => {
+		expect(await call({ skill: "every", args: "5m ping" })).toMatch(/^Skill: every\n/);
+		expect(await call({ skill: "every", args: "  " })).toContain("This skill takes arguments ([interval] [prompt])");
+		expect(await call({ skill: "demo" })).toMatch(/^Skill: demo\n/);
 	});
 });
