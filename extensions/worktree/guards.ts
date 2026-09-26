@@ -22,9 +22,10 @@
  *    collide with a concurrent session (untagged push, `pop`, `clear`,
  *    ref-less `drop` and `branch`) are refused with the tag + apply-by-SHA recipe.
  *
- * Steering, not security: only bash is inspected here, and an unparseable
- * command is refused only when it visibly involves git (fail closed on the
- * invariant, fail open on everything else).
+ * Steering, not security: bash (and `monitor`, which runs bash) is inspected
+ * here, PowerShell in powershell-guards.ts, and an unparseable command is
+ * refused only when it visibly involves git (fail closed on the invariant,
+ * fail open on everything else).
  */
 
 import { homedir } from "node:os";
@@ -43,7 +44,7 @@ export interface WorktreeGuardContext {
 /** Expansion syntax the guard cannot resolve statically. */
 const hasExpansion = (value: string) => /[$`]/.test(value);
 
-const isolated = (worktreePath: string, problem: string, fix: string): string =>
+export const isolated = (worktreePath: string, problem: string, fix: string): string =>
 	`This session is isolated in the worktree ${worktreePath}, but ${problem}. ` +
 	`Refusing to run it — a worktree-isolated session's git operations must target its own worktree. ${fix}`;
 
@@ -56,7 +57,7 @@ function stashMessage(form: string, hazard: string): string {
 	);
 }
 
-function stashReason(rest: Token[]): string | undefined {
+export function stashReason(rest: Pick<Token, "value">[]): string | undefined {
 	const words = rest.map((t) => t.value);
 	const sub = words.find((w) => !w.startsWith("-"));
 	// `-m` may ride in a short-flag bundle (`git stash push -um wip`).

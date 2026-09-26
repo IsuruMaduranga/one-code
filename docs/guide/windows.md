@@ -59,7 +59,13 @@ and interactive git are refused because the shell has no console to prompt
 on.
 
 Inside a worktree session, every PowerShell command is prefixed with a
-`Set-Location` into the worktree, the way bash commands get a `cd`.
+`Set-Location` into the worktree, the way bash commands get a `cd`. The
+same git guard applies too: git that would reach your main checkout or
+another worktree (through `Set-Location`, `git -C`, `--git-dir`, or a
+`GIT_DIR` variable) is refused, and so is git inside a script block, a
+call operator or a nested shell, where the guard can't tell which
+repository it would touch. Plain `git` statements in the worktree run as
+usual.
 
 ## Permission rules
 

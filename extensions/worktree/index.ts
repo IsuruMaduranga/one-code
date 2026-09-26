@@ -22,6 +22,7 @@ import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
 import { worktreeBashGuardReason } from "./guards.ts";
+import { worktreePowershellGuardReason } from "./powershell-guards.ts";
 import { bashParserReady } from "../lib/bash-parser.ts";
 import { ORIGINAL_COMMAND_CHANNEL, type OriginalCommandRecord } from "../lib/original-command.ts";
 import { rewriteToolInput, validateWorktreeName } from "./rewrite.ts";
@@ -108,6 +109,14 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 			if (typeof command === "string") {
 				await bashParserReady();
 				const reason = worktreeBashGuardReason({ command, worktreePath: state.path, sharedRoot: state.sharedRoot });
+				if (reason) return { block: true, reason };
+			}
+		}
+		if (event.toolName === "powershell") {
+			// The same invariants for PowerShell, the primary shell on Windows.
+			const command = (event.input as Record<string, unknown>).command;
+			if (typeof command === "string") {
+				const reason = worktreePowershellGuardReason({ command, worktreePath: state.path, sharedRoot: state.sharedRoot });
 				if (reason) return { block: true, reason };
 			}
 		}

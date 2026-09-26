@@ -68,3 +68,19 @@ describe("monitor in a worktree session", () => {
 		expect(input).toEqual({ ws: { url: "wss://example.test" }, description: "socket" });
 	});
 });
+
+describe("powershell in a worktree session", () => {
+	it("refuses git aimed at the shared checkout before rewriting the command", async () => {
+		const input = { command: `Set-Location ${repo}; git reset --hard` };
+		const result = await toolCall("powershell", input);
+		expect(result?.block).toBe(true);
+		expect(result?.reason).toContain("shared checkout");
+		expect(input.command).toBe(`Set-Location ${repo}; git reset --hard`);
+	});
+
+	it("lets worktree git through with the Set-Location prefix", async () => {
+		const input = { command: "git status" };
+		expect(await toolCall("powershell", input)).toBeUndefined();
+		expect(input.command).toBe(`Set-Location -LiteralPath '${worktree}' -ErrorAction Stop; git status`);
+	});
+});
