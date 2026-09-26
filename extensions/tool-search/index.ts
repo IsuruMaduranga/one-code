@@ -294,10 +294,16 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 			const notFound = requested
 				? requested.filter((n) => !matches.some((m) => m.name.toLowerCase() === n))
 				: [];
+			// A withheld name can still sit in the frozen listing (withdrawn by a model
+			// change after the first request), so it gets "do not retry", not a
+			// spelling hint.
+			const withdrawn = notFound.filter((n) => withheldNames.has(n));
+			const missing = notFound.filter((n) => !withheldNames.has(n));
 			const notFoundNote =
-				notFound.length > 0
-					? ` Not found (not deferred tool names — check spelling, or search by keyword instead of \`select:\`): ${notFound.join(", ")}.`
-					: "";
+				(missing.length > 0
+					? ` Not found (not deferred tool names — check spelling, or search by keyword instead of \`select:\`): ${missing.join(", ")}.`
+					: "") +
+				(withdrawn.length > 0 ? ` Withdrawn for the current model (do not retry): ${withdrawn.join(", ")}.` : "");
 
 			if (matches.length === 0) {
 				const names = available.map((t) => t.name).join(", ") || "(none)";

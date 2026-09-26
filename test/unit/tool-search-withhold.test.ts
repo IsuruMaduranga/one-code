@@ -90,4 +90,13 @@ describe("tool-search withhold", () => {
 		const ordinaryMiss = fake.reminders.find((r) => r.key === "deferred-miss-web_fetch");
 		expect(ordinaryMiss?.text).toContain("select:web_fetch");
 	});
+
+	it("reports a withheld name in a select: query as withdrawn, not misspelled", async () => {
+		fake.pi.events.emit(WITHHOLD_CHANNEL, { name: "task_create" });
+		const result = await fake.runTool("tool_search", { query: "select:task_create,web_fetch,task_craete" });
+		const text = result.content[0]?.text ?? "";
+		expect(text).toContain("Withdrawn for the current model (do not retry): task_create.");
+		expect(text).toContain("check spelling, or search by keyword instead of `select:`): task_craete.");
+		expect(text).not.toMatch(/check spelling[^.]*task_create/);
+	});
 });
