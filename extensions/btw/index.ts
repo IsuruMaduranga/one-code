@@ -49,7 +49,7 @@ import { boundedDockHeight, linesComponent, safeThemePaint, truncateLine } from 
 import { recordUsage } from "../lib/usage-bus.ts";
 import type { ProseRenderer } from "../subagents/panel-render.ts";
 import { createMarkdownProse } from "../subagents/prose.ts";
-import { applyBtwKey, type BtwBody, BTW_MAX_HEIGHT, decodeBtwKey, initialBtwState, renderBtwPanel } from "./panel.ts";
+import { applyBtwKey, type BtwBody, BTW_MAX_HEIGHT, copyAnswer, decodeBtwKey, initialBtwState, renderBtwPanel } from "./panel.ts";
 import { type BtwExchange, exchangeMessages, historyMessages, sideQuestionMessage } from "./prompt.ts";
 
 const BTW_MAX_TOKENS = 8192;
@@ -328,12 +328,7 @@ export default function btwExtension(pi: ExtensionAPI) {
 								return;
 							case "copy":
 								// Only offer copy once there is a non-empty answer.
-								if (shown) {
-									void copyToClipboard(shown).then(() => {
-										state.copied = true;
-										repaint();
-									});
-								}
+								if (shown) void copyAnswer(copyToClipboard, shown, state, repaint);
 								return;
 							case "fork":
 								// The current answer only, not one browsed from the history.

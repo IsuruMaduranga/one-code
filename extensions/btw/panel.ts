@@ -44,6 +44,8 @@ export interface BtwPanelState {
 	viewport: number;
 	/** Set for one frame after a copy so the hint can confirm it. */
 	copied: boolean;
+	/** Why the last copy failed (no clipboard route), shown in the hint until the next key. */
+	copyError?: string;
 	/** The earlier exchange on screen (an index into the history), or null for the current question. */
 	selected: number | null;
 }
@@ -133,12 +135,41 @@ function browse(state: BtwPanelState, historyLength: number, direction: "older" 
 }
 
 /**
+ * Copy an answer and report the outcome in the hint line. pi's
+ * `copyToClipboard` rejects when no clipboard route works (Wayland without
+ * `wl-copy`, X11 without `xclip`); unhandled, that rejection ends the process,
+ * so the reason is shown in place of the confirmation instead.
+ */
+export function copyAnswer(copy: (text: string) => Promise<void>, text: string, state: BtwPanelState, repaint: () => void): Promise<void> {
+	let pending: Promise<void>;
+	try {
+		pending = Promise.resolve(copy(text));
+	} catch (error) {
+		pending = Promise.reject(error);
+	}
+	return pending.then(
+		() => {
+			state.copied = true;
+			state.copyError = undefined;
+			repaint();
+		},
+		(error: unknown) => {
+			const reason = error instanceof Error ? error.message : String(error);
+			state.copied = false;
+			state.copyError = `Copy failed: ${reason.split("\n")[0]}`;
+			repaint();
+		},
+	);
+}
+
+/**
  * Apply a key. Returns an effect for the extension to run (copy, fork, clear,
  * close) or undefined for a scroll or browse (repaint only). Offsets clamp to
  * `state.maxOffset` and page by `state.viewport`, both set by the last render.
  */
 export function applyBtwKey(state: BtwPanelState, key: BtwKey, historyLength: number): BtwEffect | undefined {
 	state.copied = false;
+	state.copyError = undefined;
 	switch (key.kind) {
 		case "up":
 			state.offset = Math.max(0, state.offset - SCROLL_STEP);
@@ -262,7 +293,10 @@ export function renderBtwPanel(input: BtwPanelInput, theme?: unknown): string[] 
 		const parts: string[] = [];
 		if (history.length > 0) parts.push(paint("muted", "⇧←/→ to browse"));
 		else if (body.kind !== "loading") parts.push(paint("muted", "↑/↓ to scroll"));
-		if (hasAnswer) parts.push(state.copied ? paint("success", "Copied to clipboard") : paint("muted", "c to copy"));
+		if (hasAnswer) {
+			if (state.copyError) parts.push(paint("error", state.copyError));
+			else parts.push(state.copied ? paint("success", "Copied to clipboard") : paint("muted", "c to copy"));
+		}
 		if (input.canFork && !selected && currentAnswer) parts.push(paint("muted", "f to fork"));
 		if (history.length > 0) parts.push(paint("muted", "x to clear history"));
 		parts.push(paint("muted", "Esc to close"));
