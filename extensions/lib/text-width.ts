@@ -17,6 +17,10 @@
  * 2-vs-1 decision is byte-identical to pi's without importing pi or adding a
  * package. Grapheme segmentation and the mark/emoji classification use V8's
  * built-in `Intl.Segmenter` and Unicode property regexes.
+ *
+ * Synced with pi-tui 0.87.1. `text-width.test.ts` compares this measure with
+ * pi-tui's over every code point to U+3FFFF and over random strings with
+ * escapes, so a pi bump that changes pi-tui's measure fails the suite.
  */
 
 // --- East Asian wide/fullwidth lookup (get-east-asian-width v1.6.0, Unicode 16) ---
@@ -127,6 +131,7 @@ export function graphemeWidth(segment: string): number {
 		} else if (!nonPrintingCharRegex.test(char)) {
 			const c = char.codePointAt(0)!;
 			if (followsMark || (c >= 0xff00 && c <= 0xffef)) width += eastAsianWidth(c);
+			else if (c === 0x0e33 || c === 0x0eb3) width += 1; // Thai SARA AM, Lao AM
 			followsMark = false;
 		}
 	}
@@ -134,35 +139,34 @@ export function graphemeWidth(segment: string): number {
 }
 
 // --- ANSI / OSC / APC escape handling ---
-// A single terminal control sequence starting at index 0 of `s`, or null.
-// Covers CSI (styling/cursor), OSC (hyperlinks, prompt markers, terminated by
-// BEL or ST) and APC (terminated by ST) — the same families pi-tui strips.
+// The length of the terminal control sequence starting at index `i`, or 0.
+// Mirrors pi-tui's `extractAnsiCode` exactly, because pi-tui validates a line
+// with it: a CSI runs to the first `m`, `G`, `K`, `H` or `J`; an OSC or APC
+// runs to BEL or ST; an unterminated sequence, or any other ESC form, is not
+// a sequence, so its bytes count as text. A broader rule here measured such
+// text narrower than pi-tui and could emit a line pi-tui rejects. Display text
+// never carries those forms once `sanitizeDisplayText` has run.
 function escapeAt(s: string, i: number): number {
 	if (s.charCodeAt(i) !== 0x1b) return 0;
 	const next = s[i + 1];
 	if (next === "[") {
-		// CSI: ESC [ ... final byte 0x40–0x7E
 		let j = i + 2;
-		while (j < s.length) {
-			const c = s.charCodeAt(j);
-			j++;
-			if (c >= 0x40 && c <= 0x7e) return j - i;
-		}
-		return s.length - i;
+		while (j < s.length && !CSI_END.test(s[j])) j++;
+		return j < s.length ? j + 1 - i : 0;
 	}
-	if (next === "]" || next === "_" || next === "P" || next === "^") {
-		// OSC / APC / DCS / PM: ESC <intro> ... terminated by BEL or ST (ESC \)
+	if (next === "]" || next === "_") {
 		let j = i + 2;
 		while (j < s.length) {
 			if (s.charCodeAt(j) === 0x07) return j + 1 - i; // BEL
 			if (s.charCodeAt(j) === 0x1b && s[j + 1] === "\\") return j + 2 - i; // ST
 			j++;
 		}
-		return s.length - i;
+		return 0;
 	}
-	// Other two-byte escapes (ESC c, ESC =, …)
-	return next ? 2 : 1;
+	return 0;
 }
+
+const CSI_END = /[mGKHJ]/;
 
 const PRINTABLE_ASCII = /^[\x20-\x7e]*$/;
 
@@ -174,6 +178,9 @@ const PRINTABLE_ASCII = /^[\x20-\x7e]*$/;
 export function visibleWidth(text: string): number {
 	if (text.length === 0) return 0;
 	if (PRINTABLE_ASCII.test(text)) return text.length;
+	// pi-tui expands tabs before segmenting, so a mark after a tab joins the
+	// last space's cluster; doing the same keeps the two measures identical.
+	if (text.includes("\t")) text = text.replace(/\t/g, "   ");
 	let clean = "";
 	for (let i = 0; i < text.length; ) {
 		const esc = escapeAt(text, i);
@@ -253,7 +260,8 @@ export function fitPainted(line: string, maxCols: number): { text: string; width
 			continue;
 		}
 		// Consume the visible run up to the next escape, segment it into graphemes.
-		let end = i;
+		// An ESC that starts no sequence is text (width 0), so the run starts past it.
+		let end = line.charCodeAt(i) === 0x1b ? i + 1 : i;
 		while (end < line.length && line.charCodeAt(end) !== 0x1b) end++;
 		for (const { segment } of graphemeSegmenter.segment(line.slice(i, end))) {
 			const w = graphemeWidth(segment);
