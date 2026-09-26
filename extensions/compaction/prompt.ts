@@ -138,7 +138,7 @@ export function buildCompactionInstruction(options: {
 	 * says so, so the summary covers the part that is actually discarded
 	 * instead of re-telling what the model will still see in full.
 	 */
-	keptTail?: { count: number; opening?: string };
+	keptTail?: { count: number; landmark?: string };
 }): string {
 	const notice =
 		options.reason === "manual"
@@ -155,11 +155,12 @@ export function buildCompactionInstruction(options: {
 
 /**
  * The scope note for pi's kept tail: the summary replaces only what precedes
- * it. Quoting how the first kept message opens gives the model a landmark it
- * can find in the transcript, since a bare count is easy to miscount.
+ * it. Naming the first kept message (how it opens, or the tool it calls) gives
+ * the model a landmark it can find in the transcript, since a bare count is
+ * easy to miscount.
  */
-export function keptTailNote(tail: { count: number; opening?: string }): string {
-	const landmark = tail.opening?.trim() ? `, beginning with the message that opens "${tail.opening.trim()}"` : "";
+export function keptTailNote(tail: { count: number; landmark?: string }): string {
+	const landmark = tail.landmark?.trim() ? `, beginning with ${tail.landmark.trim()}` : "";
 	return ` Only the earlier part of the conversation is being summarized: the final ${tail.count} ${
 		tail.count === 1 ? "message" : "messages"
 	}${landmark}, stay in context verbatim after the summary. Do not summarize them; cover everything before them, and use them only to judge which earlier details still matter.`;
