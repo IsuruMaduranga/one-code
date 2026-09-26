@@ -1072,10 +1072,11 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				: undefined;
 
 		if (result.decision === "allow" && !floorReason) {
-			// A read-only allow skips the classifier, as the pre-gate's used to, and
-			// like it breaks an auto-mode block streak (Claude Code resets it on any allow).
-			if (mode === "auto" && result.cause === "read-only") {
-				logDecision(ctx, { tool: event.toolName, subject: matchSubject, outcome: "allow", source: "pre-gate" });
+			// These allows skip the classifier, as the pre-gate's and the
+			// containment fast path's used to, and like those they break an
+			// auto-mode block streak (Claude Code resets it on any allow).
+			if (mode === "auto" && (result.cause === "read-only" || result.cause === "mode")) {
+				if (result.cause === "read-only") logDecision(ctx, { tool: event.toolName, subject: matchSubject, outcome: "allow", source: "pre-gate" });
 				pauseTracker.recordAllow();
 			}
 			return undefined;

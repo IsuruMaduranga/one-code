@@ -941,8 +941,8 @@ export function decide(params: DecideInput): Decision {
 		...(params.workspaceDirs ?? []),
 	];
 	/** The auto-mode pre-gate's evidence for a shell command, as the permissions extension's pre-gate sees it. */
-	const shellEvidence = (command: string): ShellEvidence =>
-		analyzeShellCommand({ command, cwd, home: homedir(), protectedDirs: params.protectedDirs, readableRoots: sessionReadableRoots() });
+	const shellEvidence = (command: string, writableRoots?: string[]): ShellEvidence =>
+		analyzeShellCommand({ command, cwd, home: homedir(), protectedDirs: params.protectedDirs, readableRoots: sessionReadableRoots(), writableRoots });
 	/** A safe verdict with no writes is exactly read-only: a safe line may still redirect inside the project. */
 	const isReadOnly = (evidence: ShellEvidence): boolean => evidence.verdict === "safe" && evidence.writes.length === 0;
 	/** The pre-gate's proof that a command only reads inside the project, for a substitution in an allowed command. */
@@ -1131,11 +1131,22 @@ export function decide(params: DecideInput): Decision {
 	 * path, where auto mode's pre-gate may still clear it. A read-only command
 	 * that reads outside the working space is judged like the read tools' outside
 	 * read. Plan mode has its own branch above.
+	 *
+	 * A model that gets Claude Code's fast paths also gets acceptEdits' shell
+	 * half, in acceptEdits mode and in auto mode (which skips the classifier for
+	 * anything acceptEdits would allow): a line made only of Claude Code's
+	 * acceptEdits file commands on the working space (`containedNonNetwork`), or
+	 * a safe line whose redirects land there. Workspace directories count as
+	 * working space for its writes. Cheap and tiny models keep the stricter path.
 	 */
+	const fastPaths = params.claudeCodeFastPaths === true;
 	if (subject && tool === "bash") {
-		const evidence = shellEvidence(subject);
+		const evidence = shellEvidence(subject, fastPaths ? params.workspaceDirs : undefined);
 		if (isReadOnly(evidence)) return { decision: "allow", cause: "read-only" };
 		if (evidence.readOnlyOutside && evidence.writes.length === 0) return outsideWorkingDir();
+		if (fastPaths && (mode === "acceptEdits" || mode === "auto") && (evidence.verdict === "safe" || evidence.containedNonNetwork)) {
+			return { decision: "allow", cause: "mode" };
+		}
 	}
 	if (subject && tool === "powershell" && powershellReadOnly(subject, { cwd, home: homedir(), readableRoots: sessionReadableRoots() }).readOnly) {
 		return { decision: "allow", cause: "read-only" };
@@ -1164,7 +1175,11 @@ export function decide(params: DecideInput): Decision {
 		return outsideWorkingDir();
 	}
 	if (AUTO_ALLOWED_TOOLS.has(tool)) return { decision: "allow", cause: "tier" };
-	if (tier === "edit" && mode === "acceptEdits") {
+	// Auto mode skips the classifier for an edit acceptEdits would allow, on a
+	// model that gets Claude Code's fast paths: anywhere in the working space,
+	// workspace directories and execution-primitive files included. Outside it
+	// the edit is still classified.
+	if (tier === "edit" && (mode === "acceptEdits" || (mode === "auto" && fastPaths))) {
 		if (subject && inWorkingSpace()) return { decision: "allow", cause: "mode" };
 		return outsideWorkingDir();
 	}

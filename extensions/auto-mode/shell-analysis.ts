@@ -35,6 +35,7 @@ import { isExecutionPrimitivePath, isSensitivePath } from "./sensitive.ts";
 import { isWithin, resolveForContainment, toAbsoluteBash } from "./paths.ts";
 import { checkoutGitRunsProgram, READ_HOOKS } from "./git-checkout-programs.ts";
 import { lstatSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 import {
 	GIT_GLOBAL_SAFE,
 	GIT_SUBCOMMAND_SPECS,
@@ -43,6 +44,8 @@ import {
 	checkFind,
 	checkOptions,
 	gitOperandsAllowed,
+	table,
+	type OptionSpec,
 } from "./read-only-options.ts";
 import { parseCommand, scopedTracker, type Segment, type Token } from "./shell-parse.ts";
 
@@ -93,8 +96,9 @@ export interface ShellEvidence {
 	 */
 	readOnlyOutside: boolean;
 	/**
-	 * True when the ONLY reason this escalated is an in-project delete — every
-	 * path is inside the working directory and resolved,
+	 * True when the ONLY reason this escalated is Claude Code's acceptEdits file
+	 * commands (`ACCEPT_EDITS_OPTIONS`) on the working space — every path is
+	 * inside the working directory (or a `writableRoots` entry) and resolved,
 	 * nothing touches the network, no credential/execution-primitive path, no
 	 * unknown command, interpreter, glob, xargs, `cd`, or unmodelled syntax.
 	 * Never true when the verdict is "safe" (nothing escalated) — it only
@@ -245,13 +249,38 @@ const MUTATION_COMMANDS = new Set([
 	"zip",
 ]);
 
+/** The delete/truncate commands whose targets are every positional, bare names included. */
+const DELETE_COMMANDS = new Set(["rm", "rmdir", "shred", "truncate"]);
+
 /**
- * The delete/truncate commands whose blast radius is exactly their (in-project,
- * resolved, concrete) path arguments, so an in-project use can be marked
- * contained (`containedNonNetwork`). This is an *allowlist* for the "provably
+ * Claude Code's acceptEdits file commands (2.1.282, findings §36), with the
+ * options this check models; the only mutations that can be marked contained.
+ * Any other option, one carrying a value included (`cp -t dir`,
+ * `--target-directory=dir`, `mkdir -m`), leaves the command uncontained, as do
+ * symlink-following `cp -L`/`-H`. `sed` is on Claude Code's list but left out
+ * until its program is checked the way Claude Code checks it; Claude Code
+ * classified `sed -i '' …` anyway. This is an *allowlist* for the "provably
  * contained" conclusion: omission only sends a command to the classifier.
  */
-const DELETE_COMMANDS = new Set(["rm", "rmdir", "shred", "truncate"]);
+const ACCEPT_EDITS_OPTIONS: Record<string, OptionSpec> = {
+	rm: table({ none: "-f -R -r -i -v -I -d --force --recursive --verbose --dir --interactive" }),
+	rmdir: table({ none: "-p -v --parents --verbose" }),
+	mkdir: table({ none: "-p -v --parents --verbose" }),
+	touch: table({ none: "-a -c -m --no-create" }),
+	cp: table({ none: "-r -R -f -i -n -p -v -a -P --recursive --force --interactive --no-clobber --verbose --archive --no-dereference" }),
+	mv: table({ none: "-f -i -n -v --force --interactive --no-clobber --verbose" }),
+};
+
+/**
+ * The operands of an acceptEdits file command, or undefined when it carries an
+ * option `ACCEPT_EDITS_OPTIONS` does not model. After `--` every word is an operand.
+ */
+function acceptEditsOperands(name: string, args: Token[]): Token[] | undefined {
+	const spec = ACCEPT_EDITS_OPTIONS[name];
+	if (!spec) return undefined;
+	const check = checkOptions(spec, args);
+	return check.ok ? check.parsed.positionals : undefined;
+}
 
 /** Glob/other shell metacharacters we cannot enumerate, so a target carrying one is not "concrete". */
 function hasGlob(token: string): boolean {
@@ -525,6 +554,30 @@ export function isUnknownTilde(value: string): boolean {
 	return value.startsWith("~") && value !== "~" && !value.startsWith("~/");
 }
 
+/**
+ * Whether `dir` holds a `.git` at any depth, walking at most `budget`
+ * directory entries without following symlinks. A walk that runs out of
+ * budget counts as holding one, so the removal is judged, not cleared.
+ */
+function holdsGitRepository(dir: string, budget = 5_000): boolean {
+	const stack = [dir];
+	let seen = 0;
+	while (stack.length > 0) {
+		const current = stack.pop() as string;
+		let entries;
+		try {
+			entries = readdirSync(current, { withFileTypes: true });
+		} catch {
+			continue;
+		}
+		for (const entry of entries) {
+			if (++seen > budget || entry.name === ".git") return true;
+			if (entry.isDirectory()) stack.push(join(current, entry.name));
+		}
+	}
+	return false;
+}
+
 /** Whether a directory entry exists at `absolute` (a dangling symlink counts). */
 function entryExists(absolute: string): boolean {
 	try {
@@ -735,12 +788,19 @@ export interface AnalyzeInput {
 	 * only; the write and delete checks never consult this list.
 	 */
 	readableRoots?: string[];
+	/**
+	 * REALPATH-resolved directories a write may land in besides the working
+	 * directory without leaving the working space: the workspace directories,
+	 * passed only for a model that gets Claude Code's fast paths
+	 * (permissions/matcher.ts `DecideInput.claudeCodeFastPaths`).
+	 */
+	writableRoots?: string[];
 }
 
 /**
  * Classify a shell command. Never denies — see the module contract above.
  */
-export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], readableRoots = [] }: AnalyzeInput): ShellEvidence {
+export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], readableRoots = [], writableRoots = [] }: AnalyzeInput): ShellEvidence {
 	const checkoutReasons = new Map<string, string | undefined>();
 	const evidence: ShellEvidence = {
 		verdict: "safe",
@@ -813,7 +873,7 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		}
 		const absolute = toAbsoluteBash(effectiveCwd, token, home);
 		const resolved = resolveForContainment(absolute);
-		const outsideCwd = resolved === undefined || !isWithin(containmentRoot, resolved);
+		const outsideCwd = resolved === undefined || !(isWithin(containmentRoot, resolved) || writableRoots.some((root) => isWithin(root, resolved)));
 		evidence.writes.push({ token, absolute, resolved, outsideCwd });
 		if (resolved === undefined) {
 			escalate(`writes to ${token}, which could not be resolved to a real path`);
@@ -1042,9 +1102,11 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 
 		const isMutation = MUTATION_COMMANDS.has(name);
 		const isDelete = DELETE_COMMANDS.has(name);
-		// A delete confined to in-project paths is the one contained mutation; any
-		// other mutation (cp/mv/tar/…) stays uncontained.
-		if (isMutation) escalate(`runs ${name}, which modifies the filesystem`, { contained: isDelete });
+		// Claude Code's acceptEdits file commands with modelled options are the
+		// contained mutations, their targets checked below; any other mutation
+		// (tar/dd/ln/…) stays uncontained.
+		const fileOperands = acceptEditsOperands(name, args);
+		if (isMutation) escalate(`runs ${name}, which modifies the filesystem`, { contained: fileOperands !== undefined });
 
 
 		// A read-only command is proved read-only by its options, not its name:
@@ -1107,7 +1169,34 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		// The positional destinations of writing commands are the paths that get
 		// written. (Redirections were already handled at the top of the loop.)
 		const writeTokens: string[] = [];
-		if (isDelete) {
+		if (fileOperands !== undefined) {
+			// Every operand is a path, bare names included. cp and mv write their
+			// last operand and read the rest, so a source outside the working space
+			// (or a credential) is an outside read and leaves the line uncontained.
+			const reads = name === "cp" || name === "mv" ? fileOperands.slice(0, -1) : [];
+			const writes = name === "cp" || name === "mv" ? fileOperands.slice(-1) : fileOperands;
+			// Removing or moving a working root itself, a `.git`, or a directory
+			// holding one at any depth destroys history git cannot give back
+			// (`rm -rf .`, `mv .git x`, `rm -rf vendor` over `vendor/lib/.git`),
+			// whatever else is contained.
+			if (name === "rm" || name === "rmdir" || name === "mv") {
+				for (const token of name === "mv" ? reads : fileOperands) {
+					const resolved = resolveForContainment(toAbsoluteBash(effectiveCwd, token.value, home));
+					if (resolved === undefined) continue;
+					const root = resolved === containmentRoot || writableRoots.includes(resolved);
+					const repository = resolved.split(/[\\/]/).includes(".git") || holdsGitRepository(resolved);
+					if (root || repository) escalate(`${name === "mv" ? "moves" : "removes"} ${token.value}, which is a working root or holds a git repository`);
+				}
+			}
+			for (const token of reads) {
+				if (isSensitivePath(toAbsoluteBash(effectiveCwd, token.value, home))) {
+					if (!evidence.sensitivePaths.includes(token.value)) evidence.sensitivePaths.push(token.value);
+					escalate(`copies or moves ${token.value}, a credential or secret path`);
+				}
+				checkRead(token);
+			}
+			writeTokens.push(...writes.map((token) => token.value));
+		} else if (isDelete) {
 			// A delete's targets are every non-flag positional, bare names included
 			// (`rm notes.txt` has no slash but is still a real target that
 			// must be resolved). A glob target cannot be enumerated, so
@@ -1149,8 +1238,8 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		for (const token of writeTokens) checkWriteTarget(token);
 	}
 
-	// The command escalated, but every reason was an in-project delete: nothing
-	// reached outside the project, the network, or the unknown.
+	// The command escalated, but every reason was an acceptEdits file command on
+	// the working space: nothing reached outside it, the network, or the unknown.
 	evidence.containedNonNetwork = evidence.verdict === "escalate" && !uncontained;
 	evidence.readOnlyOutside = evidence.verdict === "escalate" && !escalatedBeyondReads;
 

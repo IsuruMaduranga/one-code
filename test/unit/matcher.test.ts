@@ -1,4 +1,4 @@
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -442,6 +442,58 @@ describe("decide", () => {
 		it("covers PowerShell's read-only cmdlets", () => {
 			expect(decide({ ...base, toolName: "powershell", subject: "Get-ChildItem" })).toMatchObject({ decision: "allow", cause: "read-only" });
 			expect(decide({ ...base, toolName: "powershell", subject: "Remove-Item a.txt" }).decision).toBe("ask");
+		});
+	});
+
+	describe("Claude Code's fast paths for frontier and workhorse models (decisions/auto-mode.md, \"Two gates by model tier\")", () => {
+		const capable = { ...base, claudeCodeFastPaths: true };
+		const fsLine = "mkdir -p build && touch build/x && cp README.md build/r.md && mv build/r.md build/s.md";
+		const extra = "/home/user/extra";
+
+		it("allows Claude Code's acceptEdits file commands and in-project redirects in acceptEdits and auto mode", () => {
+			for (const mode of ["acceptEdits", "auto"] as const) {
+				for (const subject of [fsLine, "rm -f scratch.log", "echo hi > notes.txt"]) {
+					expect(decide({ ...capable, mode, toolName: "bash", subject }), `${mode}: ${subject}`).toMatchObject({ decision: "allow", cause: "mode" });
+				}
+			}
+			// Manual mode still asks, as in Claude Code.
+			expect(decide({ ...capable, toolName: "bash", subject: fsLine }).decision).toBe("ask");
+		});
+
+		it("keeps the stricter gate for cheap and tiny models", () => {
+			expect(decide({ ...base, mode: "acceptEdits", toolName: "bash", subject: fsLine }).decision).toBe("ask");
+			expect(decide({ ...base, mode: "auto", toolName: "bash", subject: fsLine }).decision).toBe("classify");
+			expect(decide({ ...base, mode: "auto", toolName: "write", subject: `${extra}/a.txt`, workspaceDirs: [extra] }).decision).toBe("classify");
+		});
+
+		it("still classifies what Claude Code classifies: git reset --hard, sed, and anything reaching outside", () => {
+			for (const subject of ["git reset --hard", "sed -i '' s/a/b/ README.md", "cp /etc/hosts copied.txt", "rm -rf /tmp/x"]) {
+				expect(decide({ ...capable, mode: "auto", toolName: "bash", subject }).decision, subject).toBe("classify");
+			}
+		});
+
+		it("in auto mode, allows an edit anywhere acceptEdits would: workspace directories and CI files included", () => {
+			expect(decide({ ...capable, mode: "auto", toolName: "write", subject: `${extra}/a.txt`, workspaceDirs: [extra] })).toMatchObject({ decision: "allow", cause: "mode" });
+			expect(decide({ ...capable, mode: "auto", toolName: "write", subject: ".github/workflows/ci.yml" })).toMatchObject({ decision: "allow", cause: "mode" });
+			expect(decide({ ...capable, mode: "auto", toolName: "write", subject: "/home/user/elsewhere/a.txt" }).decision).toBe("classify");
+			// A protected path is judged before any fast path.
+			expect(decide({ ...capable, mode: "auto", toolName: "write", subject: ".git/hooks/pre-commit" })).toMatchObject({ decision: "classify", cause: "protected-path" });
+		});
+
+		it("counts a workspace directory for a shell write only on the fast-path tiers", () => {
+			// Real directories: the shell analysis judges where a path resolves.
+			const root = realpathSync(mkdtempSync(join(tmpdir(), "oc-ws-")));
+			try {
+				const project = join(root, "project");
+				const workspace = join(root, "extra");
+				mkdirSync(project);
+				mkdirSync(workspace);
+				const call = { ...base, cwd: project, mode: "auto" as const, toolName: "bash", subject: `touch ${join(workspace, "x")}`, workspaceDirs: [workspace] };
+				expect(decide({ ...call, claudeCodeFastPaths: true }).decision).toBe("allow");
+				expect(decide(call).decision).toBe("classify");
+			} finally {
+				rmSync(root, { recursive: true, force: true });
+			}
 		});
 	});
 
