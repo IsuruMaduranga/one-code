@@ -24,7 +24,7 @@ and its numbering carries on from the old one.
 
 | Key or command | What it does |
 |---|---|
-| **alt+t** | Hides the widget down to one line, or shows it again. |
+| **alt+t** (**ctrl+\\** on macOS) | Hides the widget down to one line, or shows it again. |
 | `/tasks` | Prints the full list. |
 | `/tasks hide` | Hides the widget. |
 | `/tasks show` | Shows it again. |
