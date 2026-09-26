@@ -39,3 +39,26 @@ jobs:
           # Log taskkill's verdicts (lib/process-tree.ts) so a kill that misses shows why.
           ONECODE_DEBUG_KILL: ${{ runner.os == 'Windows' && '1' || '' }}
 
+
+  # The extension package rides on the user's own pi, so the oldest pi in the
+  # tested range (TESTED_PI_MIN, extensions/lib/pi-version.ts) must load the
+  # whole extension set and run a turn. A local mock model answers, so no
+  # provider key is needed. The pi the repo develops against runs the same
+  # smoke as the control.
+  pi-floor:
+    name: oldest tested pi
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Install the oldest pi in the tested range
+        run: |
+          min=$(node -e 'const s=require("fs").readFileSync("extensions/lib/pi-version.ts","utf8");process.stdout.write(s.match(/TESTED_PI_MIN = "([^"]+)"/)[1])')
+          echo "TESTED_PI_MIN=$min"
+          npm install --prefix "$RUNNER_TEMP/pi-floor" --no-save --legacy-peer-deps --no-audit --no-fund "@earendil-works/pi-coding-agent@$min"
+      - run: node test/e2e/pi-floor-smoke.mjs "$RUNNER_TEMP/pi-floor/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
+      - run: node test/e2e/pi-floor-smoke.mjs node_modules/@earendil-works/pi-coding-agent/dist/cli.js

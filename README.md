@@ -83,7 +83,7 @@ The [`@one-ai/one-code`](https://www.npmjs.com/package/@one-ai/one-code)
 app package bundles a pinned version of pi and provides the `onecode` command.
 The [`one-code-extension`](https://www.npmjs.com/package/one-code-extension)
 package uses your existing pi installation and is tested against pi versions
-0.83 through 0.86. For the extension package, use `pi` in place of `onecode`.
+0.84.3 through 0.87. For the extension package, use `pi` in place of `onecode`.
 
 The app opens in a full-screen terminal interface by default. See the
 [installation guide](docs/guide/installation.md) for display settings and more

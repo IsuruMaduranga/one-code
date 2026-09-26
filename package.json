@@ -112,6 +112,6 @@
 		"vitest": "^2.1.0"
 	},
 	"peerDependencies": {
-		"@earendil-works/pi-coding-agent": ">=0.83.0"
+		"@earendil-works/pi-coding-agent": ">=0.84.3"
 	}
 }

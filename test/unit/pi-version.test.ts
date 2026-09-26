@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
 	compareVersions,
@@ -37,11 +39,13 @@ describe("compareVersions", () => {
 describe("piVersionWarning", () => {
 	it("is silent inside the tested range", () => {
 		expect(piVersionWarning(TESTED_PI_MIN)).toBeUndefined();
-		expect(piVersionWarning("0.84.1")).toBeUndefined();
+		expect(piVersionWarning("0.85.1")).toBeUndefined();
 	});
 
 	it("warns below and at/above the range", () => {
 		expect(piVersionWarning("0.82.9")).toContain("tested against");
+		// 0.83.0 through 0.84.2 lack createPowerShellToolDefinition: the extension set does not load there.
+		expect(piVersionWarning("0.84.2")).toContain("tested against");
 		expect(piVersionWarning(TESTED_PI_MAX_EXCLUSIVE)).toContain("tested against");
 		expect(piVersionWarning("1.0.0")).toContain("1.0.0");
 	});
@@ -49,5 +53,34 @@ describe("piVersionWarning", () => {
 	it("fails silent on missing or unparseable versions", () => {
 		expect(piVersionWarning(undefined)).toBeUndefined();
 		expect(piVersionWarning("0.84.1-nightly")).toBeUndefined();
+	});
+});
+
+describe("the tested range is the one the package, the guide and CI state", () => {
+	const repoRoot = resolve(import.meta.dirname, "..", "..");
+	const read = (path: string) => readFileSync(join(repoRoot, path), "utf8");
+	const [maxMajor, maxMinor] = TESTED_PI_MAX_EXCLUSIVE.split(".").map(Number);
+	const lastTested = `${maxMajor}.${(maxMinor ?? 0) - 1}`;
+
+	it("the peer range starts at the tested minimum", () => {
+		const pkg = JSON.parse(read("package.json"));
+		expect(pkg.peerDependencies["@earendil-works/pi-coding-agent"]).toBe(`>=${TESTED_PI_MIN}`);
+	});
+
+	it("the pi the repo develops against is inside the range", () => {
+		const pi = JSON.parse(read("node_modules/@earendil-works/pi-coding-agent/package.json")).version;
+		expect(piVersionWarning(pi)).toBeUndefined();
+	});
+
+	it("the README and the installation guide name the same range", () => {
+		for (const path of ["README.md", "docs/guide/installation.md"]) {
+			expect(read(path).replace(/\s+/g, " "), path).toContain(`${TESTED_PI_MIN} through ${lastTested}`);
+		}
+	});
+
+	it("CI runs the floor smoke against the tested minimum", () => {
+		const ci = read(".github/workflows/ci.yml");
+		expect(ci).toContain("test/e2e/pi-floor-smoke.mjs");
+		expect(ci).toContain("TESTED_PI_MIN");
 	});
 });

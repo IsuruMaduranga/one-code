@@ -102,8 +102,9 @@ pi install npm:one-code-extension
 ```
 
 Use `pi` in place of `onecode` for every command in this guide. The
-extension is tested against pi 0.83 through 0.86 and warns at startup when
-your pi is outside that range. Full-screen mode is opt-in on your own pi;
+extension is tested against pi 0.84.3 through 0.87 and warns at startup when
+your pi is outside that range. It doesn't load on a pi older than 0.84.3;
+update pi first with `pi update`. Full-screen mode is opt-in on your own pi;
 see [Full-screen mode and themes](configuration.md#full-screen-mode-and-themes).
 
 A few interface refinements are applied only by the bundled app, because
