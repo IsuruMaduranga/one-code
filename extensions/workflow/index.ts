@@ -34,6 +34,7 @@ import { ULTRACODE_MODE_CHANNEL } from "../effort/slider.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../permissions/modes.ts";
 import { watchPermissionBridge } from "../permissions/subagent-gate.ts";
 import { watchHookBridge } from "../hooks/subagent-bridge.ts";
+import { watchMcpTools } from "../lib/mcp-share.ts";
 import { applicableSubagentDefault, loadSubagentDefault } from "../subagents/default-model.ts";
 import { discoverSavedWorkflows, findSavedWorkflow, workflowDirs } from "./saved-workflows.ts";
 import { buildRunReport, WorkflowRunManager } from "./run-manager.ts";
@@ -227,6 +228,8 @@ export default function workflowExtension(pi: ExtensionAPI) {
 	// subagent runner uses; see AgentRunnerOptions.getPermissionBridge.
 	const getPermissionBridge = watchPermissionBridge(pi);
 	const getHookBridge = watchHookBridge(pi);
+	// The parent's MCP tools, shared into workflow agents as they are into subagents.
+	const getMcpTools = watchMcpTools(pi.events);
 
 	const openViewer = async (ctx: ExtensionContext, opts?: { height?: "full" | "half"; runIndex?: number }) => {
 		if (viewerOpen) return;
@@ -333,6 +336,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 					defaultEffort: ctx.thinkingLevel,
 					getPermissionBridge,
 					getHookBridge,
+					getMcpTools,
 					// Workflow agents run in their own sessions; their spend reaches the footer only through the bus.
 					onUsage: (cost) => recordUsage(pi, "subagent", { cost: { total: cost } }),
 					unusableModels: () => unusableModels,

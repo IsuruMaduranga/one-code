@@ -28,7 +28,8 @@ import type { PermissionBridge } from "../permissions/subagent-gate.ts";
 import { localGateMode, MODE_ENV } from "../lib/permission-gate.ts";
 import type { HookBridge } from "../hooks/subagent-bridge.ts";
 import { summarizeArgs } from "../lib/tui-render.ts";
-import { agentDirs, type AgentDefinition, discoverAgents } from "../subagents/agents.ts";
+import { agentDirs, type AgentDefinition, agentToolOptions, discoverAgents, unusableAllowlistError } from "../subagents/agents.ts";
+import { CHILD_EXTENSION_PATHS } from "../lib/child-extensions.ts";
 import type { SubagentDefault } from "../subagents/default-model.ts";
 import { expensiveModelGate, resolveSubagentModel, subagentModelMenu } from "../subagents/model-select.ts";
 import { withoutUnusable } from "../lib/model-unusable.ts";
@@ -65,6 +66,11 @@ export interface AgentRunnerOptions {
 	getHookBridge?: () => HookBridge | undefined;
 	/** Each finished agent's dollar cost (review S13: workflow agents never reached the footer). */
 	onUsage?: (cost: number) => void;
+	/**
+	 * The parent's live MCP tools (lib/mcp-share.ts `watchMcpTools`), injected
+	 * as custom tools over the parent's connections, as the subagent runner does.
+	 */
+	getMcpTools?: () => ToolDefinition[] | Promise<ToolDefinition[]>;
 }
 
 /**
@@ -259,13 +265,23 @@ export class AgentRunner {
 		}
 
 		const capture: { called: boolean; value: unknown } = { called: false, value: undefined };
-		const customTools: ToolDefinition[] = opts.schema ? [buildStructuredOutputTool(opts.schema, capture)] : [];
+		const customTools: ToolDefinition[] = [
+			...(opts.schema ? [buildStructuredOutputTool(opts.schema, capture)] : []),
+			...((await this.options.getMcpTools?.()) ?? []),
+		];
 
+		// The same child session a subagent gets (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26
+		// H2, H3, M6): the curated child extensions, the parent's MCP tools, and the
+		// agent file's tool lists through the one shared builder, which keeps
+		// `structured_output` on an allowlist and applies `disallowedTools`.
 		const session = await openChildSession({
 			loader: {
 				cwd: this.options.cwd,
 				agentDir: getAgentDir(),
 				systemPrompt: agentDef?.systemPrompt,
+				extraExtensionPaths: CHILD_EXTENSION_PATHS,
+				// claude-context (a child extension) injects # claudeMd itself.
+				noContextFiles: true,
 				getPermissionBridge: this.options.getPermissionBridge,
 				getHookBridge: this.options.getHookBridge,
 			},
@@ -275,7 +291,7 @@ export class AgentRunner {
 				modelRuntime: this.modelRuntime,
 				model: modelSpec.model as never,
 				thinkingLevel: modelSpec.thinkingLevel as never,
-				tools: agentDef?.tools,
+				...agentToolOptions(agentDef),
 				customTools,
 				sessionManager: SessionManager.inMemory(cwd),
 			},
@@ -320,6 +336,12 @@ export class AgentRunner {
 		);
 		let failure: unknown;
 		try {
+			// An allowlist that matched no real tool would run a tool-less agent.
+			const unusable = unusableAllowlistError(
+				agentDef,
+				session.getAllTools().map((t) => t.name),
+			);
+			if (unusable) throw new WorkflowScriptError(unusable);
 			await session.prompt(this.buildPrompt(prompt, Boolean(opts.schema)));
 			if (signal.aborted) throw new WorkflowScriptError("aborted");
 

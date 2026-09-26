@@ -15,6 +15,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { PermissionBridge } from "../permissions/subagent-gate.ts";
 import type { HookBridge } from "../hooks/subagent-bridge.ts";
 import type { SubagentDefault } from "../subagents/default-model.ts";
@@ -53,6 +54,8 @@ export interface StartRunOptions {
 	unusableModels?: () => ReadonlySet<string>;
 	/** An agent's provider refused its model: published so every picker skips it (lib/model-unusable.ts). */
 	onModelUnusable?: (model: string, reason: string) => void;
+	/** The parent's live MCP tools, shared into every workflow agent (see AgentRunnerOptions). */
+	getMcpTools?: () => ToolDefinition[] | Promise<ToolDefinition[]>;
 }
 
 export class RunHandle extends EventEmitter {
@@ -256,6 +259,7 @@ export class WorkflowRunManager {
 				onUsage: options.onUsage,
 				unusableModels: options.unusableModels,
 				onModelUnusable: options.onModelUnusable,
+				getMcpTools: options.getMcpTools,
 			});
 
 			const { globals, state } = createScriptGlobals({

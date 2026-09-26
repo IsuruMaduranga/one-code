@@ -49,7 +49,7 @@ import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpServerStatus, t
 
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { BTW_FORK_CHANNEL, btwForkName, btwForkReminder, type BtwForkRequest, type BtwForkResult } from "../lib/btw-fork.ts";
-import { MCP_TOOLS_CHANNEL, type McpToolsPayload } from "../lib/mcp-share.ts";
+import { watchMcpTools } from "../lib/mcp-share.ts";
 import { resolveModelTier } from "../lib/model-tier.ts";
 import { pendingClaimReminder } from "./pending-claim.ts";
 import { watchPermissionBridge } from "../permissions/subagent-gate.ts";
@@ -323,37 +323,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
 	// Live MCP tool definitions published by the mcp extension; injected into
 	// child sessions so subagents share the parent's open connections (no reconnect).
-	// Empty when no MCP servers are configured, so this is a no-op for most sessions.
-	// The parent's MCP connect runs in the background, so a spawn in the first
-	// seconds of a session waits for the settled publish (capped, so a hung server
-	// can't stall spawns) instead of baking in a still-connecting snapshot.
-	const MCP_SETTLE_CAP_MS = 10_000;
-	let mcpTools: ToolDefinition[] = [];
-	let mcpSettled = false;
-	let resolveMcpSettled: (() => void) | undefined;
-	const mcpSettledPromise = new Promise<void>((resolve) => {
-		resolveMcpSettled = resolve;
-	});
-	pi.events.on(MCP_TOOLS_CHANNEL, (data) => {
-		const payload = data as McpToolsPayload | undefined;
-		mcpTools = payload?.tools ?? [];
-		if (payload?.settled) {
-			mcpSettled = true;
-			resolveMcpSettled?.();
-		}
-	});
-	const awaitMcpTools = async (): Promise<ToolDefinition[]> => {
-		if (!mcpSettled) {
-			await Promise.race([
-				mcpSettledPromise,
-				new Promise<void>((resolve) => {
-					const timer = setTimeout(resolve, MCP_SETTLE_CAP_MS);
-					timer.unref?.();
-				}),
-			]);
-		}
-		return mcpTools;
-	};
+	const awaitMcpTools = watchMcpTools(pi.events);
 
 	// The parent permissions extension's decision closure, used to gate a child's
 	// tool calls through the real pipeline (mode inheritance, classifier, prompts

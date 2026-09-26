@@ -14,8 +14,6 @@
 
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { type AgentSession, type ExtensionError, getAgentDir, SessionManager, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { Api, Message, Model } from "@earendil-works/pi-ai";
 import { whenAborted } from "../lib/abort.ts";
@@ -25,7 +23,8 @@ import type { PermissionBridge } from "../permissions/subagent-gate.ts";
 import type { HookBridge } from "../hooks/subagent-bridge.ts";
 import { findConfigured, modelSpec } from "../lib/model-policy.ts";
 import { isModelUnavailableError } from "../auto-mode/model-select.ts";
-import { type AgentDefinition, childToolAllowlist, usableAllowlistedTools } from "./agents.ts";
+import { type AgentDefinition, agentToolOptions, unusableAllowlistError } from "./agents.ts";
+import { CHILD_EXTENSION_PATHS } from "../lib/child-extensions.ts";
 import type { ChildHandle, ChildOutcome, RpcChildHandle } from "./outcome.ts";
 import { sendToMainTool } from "./send-to-main-tool.ts";
 import { SessionTurnTracker } from "./session-turns.ts";
@@ -59,29 +58,6 @@ const WALL_CLOCK_CAP_MS = 30 * 60 * 1000;
  * tool call the spawned grandchild makes still runs through the real gate.
  */
 const NEVER_GATE = new Set(["structured_output", "SendMessage", "Agent"]);
-
-/**
- * The curated extensions loaded into a subagent session (via additionalExtensionPaths,
- * which the loader loads even under noExtensions). Broadly Claude Code's model — a
- * subagent gets project context + freshness + a working toolset, but NOT the frontier
- * chrome (banner/spinner/recap) or the orchestration EXTENSIONS. Nested spawning
- * (CC parity: subagents spawn subagents) is instead an injected `Agent` custom tool
- * (index.ts childAgentTool, passed via extraTools) that delegates to the PARENT
- * extension's runtime — one registry, one panel, one permission gate — and is
- * depth-capped there.
- *
- * `lsp` is deliberately NOT here (matching CC, findings §17.3): a child session is torn
- * down with the raw AgentSession.dispose(), which never fires session_shutdown, so lsp's
- * cleanup would never run and any language server it started would leak for the life of
- * the parent session. MCP is also not listed: its
- * tools are shared in from the parent as customTools (getMcpTools), not reconnected.
- *
- * Order mirrors the package's load order: reminder/deferral sinks (system-reminder,
- * tool-search) first, before anything emitting on their channels (the bus does not replay).
- */
-const EXTENSIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
-const CHILD_EXTENSIONS = ["system-reminder", "tool-search", "claude-context", "file-tracker", "search-tools", "skill", "web", "web-fetch", "notebook"];
-const CHILD_EXTENSION_PATHS = CHILD_EXTENSIONS.map((name) => join(EXTENSIONS_DIR, name, "index.ts"));
 
 type Session = AgentSession;
 
@@ -378,8 +354,8 @@ export class SubagentRuntime {
 	private async buildChildSession(spec: ChildSessionSpec): Promise<{ session: Session; note?: string }> {
 		const [loader, mcpTools] = await Promise.all([buildAgentLoader(this.childLoaderOptions(spec)), this.getMcpTools()]);
 		const newSessionManager = () => newChildSessionManager(spec);
-		// A fork keeps the parent's toolset; only a named agent carries an allowlist.
-		const allowlist = spec.forkFrom ? undefined : spec.agent?.tools;
+		// A fork keeps the parent's toolset; only a named agent carries tool lists.
+		const agent = spec.forkFrom ? undefined : spec.agent;
 		const make = async (model: string | undefined): Promise<Session> => {
 			const resolvedModel = model ? await this.resolveModel(model) : undefined;
 			const session = await openChildSession({
@@ -390,10 +366,9 @@ export class SubagentRuntime {
 					modelRuntime: this.modelRuntime,
 					model: resolvedModel as never,
 					thinkingLevel: spec.thinking as never,
-					tools: childToolAllowlist(allowlist),
-					// Denylist grants (CC's "All tools except …" shape) — filters built-ins,
-					// extension tools, and injected customTools alike.
-					excludeTools: spec.forkFrom ? undefined : spec.agent?.excludeTools,
+					// The allowlist with the plumbing re-added, and the denylist (CC's "All
+					// tools except …" shape), which filters injected customTools too.
+					...agentToolOptions(agent),
 					customTools: [sendToMainTool((m, s) => spec.onMessageToMain?.(m, s)), ...(spec.extraTools ?? []), ...mcpTools],
 					sessionManager: newSessionManager(),
 				},
@@ -402,18 +377,13 @@ export class SubagentRuntime {
 			});
 			// An allowlist that matched nothing real would run a tool-less agent
 			// (pi drops unknown names silently). Fail loud with the fix named.
-			if (
-				allowlist &&
-				usableAllowlistedTools(
-					session.getAllTools().map((t) => t.name),
-					allowlist,
-				).length === 0
-			) {
+			const unusable = unusableAllowlistError(
+				agent,
+				session.getAllTools().map((t) => t.name),
+			);
+			if (unusable) {
 				this.discard(session);
-				throw new Error(
-					`Agent "${spec.agent?.name}" lists tools (${allowlist.join(", ")}) that match no available tool. ` +
-						"Use Claude Code names (Read, Edit, Write, Bash, Grep, Glob, WebFetch, WebSearch, NotebookEdit, Skill, Agent, SendMessage) or pi names (read, edit, write, bash, grep, find, ls, …) in the agent file's `tools` list.",
-				);
+				throw new Error(unusable);
 			}
 			if (spec.name) this.runNames.set(session.sessionManager.getSessionId(), spec.name);
 			if (spec.agent) this.agentTypes.set(session.sessionManager.getSessionId(), spec.agent.name);

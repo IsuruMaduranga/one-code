@@ -218,3 +218,29 @@ export function usableAllowlistedTools(registered: string[], allowlist: string[]
 	const available = new Set(registered);
 	return allowlist.filter((name) => available.has(name));
 }
+
+/**
+ * pi's session tool options for a named agent: its allowlist with the child's
+ * plumbing re-added, and its denylist. The one builder both runners use (the
+ * subagent runner and the workflow runner), so an agent file means the same
+ * thing wherever it runs; the workflow runner once passed the raw allowlist and
+ * no denylist, which stripped `structured_output` and ignored `disallowedTools`
+ * (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 H2, H3).
+ */
+export function agentToolOptions(agent: AgentDefinition | undefined): { tools?: string[]; excludeTools?: string[] } {
+	return { tools: childToolAllowlist(agent?.tools), excludeTools: agent?.excludeTools };
+}
+
+/**
+ * The fail-loud error for an agent whose `tools` allowlist matched no tool the
+ * session registered, or undefined when the agent is usable. pi drops unknown
+ * names silently, so without this the agent would run with no tools and
+ * "complete" with an excuse.
+ */
+export function unusableAllowlistError(agent: AgentDefinition | undefined, registered: string[]): string | undefined {
+	if (!agent?.tools || usableAllowlistedTools(registered, agent.tools).length > 0) return undefined;
+	return (
+		`Agent "${agent.name}" lists tools (${agent.tools.join(", ")}) that match no available tool. ` +
+		"Use Claude Code names (Read, Edit, Write, Bash, Grep, Glob, WebFetch, WebSearch, NotebookEdit, Skill, Agent, SendMessage) or pi names (read, edit, write, bash, grep, find, ls, …) in the agent file's `tools` list."
+	);
+}

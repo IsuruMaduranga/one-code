@@ -181,6 +181,9 @@ armed.
 - Fan-out agents use the subagent default model, so a cheap subagent tier
   keeps a large run affordable while the main conversation stays on a
   frontier model.
+- Workflow agents get the tools a subagent gets, your MCP servers
+  included. An agent call that names an agent type follows that agent
+  file's `tools` and `disallowedTools`, as a subagent does.
 - In a `-p` or `--mode json` run, the workflow runs to completion and
   returns its result inline.
 - An agent the script runs with `isolation: 'worktree'` gets its own
