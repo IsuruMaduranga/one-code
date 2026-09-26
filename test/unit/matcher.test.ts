@@ -497,6 +497,15 @@ describe("decide", () => {
 			}
 		});
 
+		it("blockReadsOutsideWorkingDirectories wins over allow and ask rules, not over bypass mode", () => {
+			const read = { ...base, toolName: "read", subject: "/etc/hosts" };
+			const etc = rules([`Read(${absPattern("/etc/**")})`]);
+			expect(decide({ ...read, allow: etc }).decision).toBe("allow");
+			expect(decide({ ...read, allow: etc, blockReadsOutsideWorkingDirectories: true })).toMatchObject({ decision: "deny", cause: "blocked-outside-read" });
+			expect(decide({ ...read, ask: etc, blockReadsOutsideWorkingDirectories: true })).toMatchObject({ decision: "deny", cause: "blocked-outside-read" });
+			expect(decide({ ...read, mode: "bypassPermissions", blockReadsOutsideWorkingDirectories: true }).decision).toBe("allow");
+		});
+
 		it("counts a workspace directory for a shell write only on the fast-path tiers", () => {
 			// Real directories: the shell analysis judges where a path resolves.
 			// The native realpath, as production resolves workspace directories: plain realpathSync keeps a Windows 8.3 short name.

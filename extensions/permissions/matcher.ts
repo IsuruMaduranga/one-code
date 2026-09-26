@@ -1006,6 +1006,29 @@ export function decide(params: DecideInput): Decision {
 		return { decision: "deny", cause: "plan-mode" };
 	}
 
+	/**
+	 * Whether `target` (where `spelled` resolves) is working space: the working
+	 * directory, the harness's session dirs, the plan file, and the workspace
+	 * directories except for the credentials in them.
+	 */
+	const workingSpaceHolds = (spelled: string, target: string, workspace = true): boolean => {
+		const roots = [cwd, params.resolvedCwd, params.memoryDirPath, params.scratchpadDirPath, params.resultsDirPath, params.sessionDirPath];
+		if (roots.some((dir) => dir && isAtOrInsideDir(target, dir, cwd))) return true;
+		// A workspace directory is working space except for the credentials in it:
+		// adding a directory must not make its keys readable without a prompt.
+		// Judged on the spelling and on where it resolves, so a symlink cannot
+		// launder a credential in either direction.
+		const sensitive = [spelled, target].some((candidate) => isSensitivePath(toAbsolute(cwd, candidate, homedir())));
+		if (workspace && !sensitive && (params.workspaceDirs ?? []).some((dir) => isAtOrInsideDir(target, dir, cwd))) return true;
+		return params.planFilePath ? isPlanFilePath(target, params.planFilePath, cwd) : false;
+	};
+	// Claude Code's blockReadsOutsideWorkingDirectories refuses a read tool's
+	// outside path before any ask or allow rule can prompt for it or allow it
+	// (bypass mode returned above).
+	if (params.blockReadsOutsideWorkingDirectories && tier === "safe" && subject && !workingSpaceHolds(subject, params.resolvedSubject ?? subject)) {
+		return { decision: "deny", cause: "blocked-outside-read" };
+	}
+
 	// An explicit ask rule is the user's stated intent to be prompted, so it wins
 	// over auto mode too: the classifier never gets to auto-approve a match.
 	const askRule = ask.find((r) => ruleMatches(r, toolName, subject, cwd));
@@ -1053,22 +1076,6 @@ export function decide(params: DecideInput): Decision {
 		return { decision: "ask", cause: "protected-path" };
 	}
 
-	/**
-	 * Whether `target` (where `spelled` resolves) is working space: the working
-	 * directory, the harness's session dirs, the plan file, and the workspace
-	 * directories except for the credentials in them.
-	 */
-	const workingSpaceHolds = (spelled: string, target: string, workspace = true): boolean => {
-		const roots = [cwd, params.resolvedCwd, params.memoryDirPath, params.scratchpadDirPath, params.resultsDirPath, params.sessionDirPath];
-		if (roots.some((dir) => dir && isAtOrInsideDir(target, dir, cwd))) return true;
-		// A workspace directory is working space except for the credentials in it:
-		// adding a directory must not make its keys readable without a prompt.
-		// Judged on the spelling and on where it resolves, so a symlink cannot
-		// launder a credential in either direction.
-		const sensitive = [spelled, target].some((candidate) => isSensitivePath(toAbsolute(cwd, candidate, homedir())));
-		if (workspace && !sensitive && (params.workspaceDirs ?? []).some((dir) => isAtOrInsideDir(target, dir, cwd))) return true;
-		return params.planFilePath ? isPlanFilePath(target, params.planFilePath, cwd) : false;
-	};
 	const outsideWorkingDir = (): Decision => {
 		if (mode === "auto") return { decision: "classify", cause: "working-dir" };
 		if (mode === "dontAsk") return { decision: "deny", cause: "working-dir" };
@@ -1181,7 +1188,6 @@ export function decide(params: DecideInput): Decision {
 	if (tier === "safe") {
 		// No path argument (grep/find/ls default to the cwd) is an in-project read.
 		if (!subject || inWorkingSpace()) return { decision: "allow", cause: "tier" };
-		if (params.blockReadsOutsideWorkingDirectories) return { decision: "deny", cause: "blocked-outside-read" };
 		// Claude Code's auto mode reads outside the working directories without
 		// the classifier (the read tools are on its safe allowlist); the caller
 		// raises its one-time first-read prompt. A credential path is still
