@@ -54,7 +54,7 @@ import { renderMcpPanel, type McpPaint } from "./panel/render.ts";
 import { applyMcpKey, initialMcpState, type McpEffect } from "./panel/state.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
 import { loadServers, type McpServer } from "./config.ts";
-import { approveMcpServers, persistApproval, projectRootOf } from "./trust.ts";
+import { approveMcpServers, type McpTrustDeps, persistApproval, projectRootOf, reconnectRefusal } from "./trust.ts";
 import {
 	capDescription,
 	describeContent,
@@ -314,6 +314,20 @@ export default function mcpExtension(pi: ExtensionAPI) {
 	/** Config files that exist but failed to parse (review M11) — shown at startup and in /mcp. */
 	let configErrors: string[] = [];
 
+	/** How the consent check asks, tells and records a "No", for startup and for Reconnect alike. */
+	const consentDeps = (ctx: ExtensionContext): McpTrustDeps => ({
+		hasUI: ctx.hasUI,
+		select: (title, options) => ctx.ui.select(title, options),
+		notify: (message) => {
+			if (ctx.hasUI) ctx.ui.notify(message, "warning");
+			else process.stderr.write(`${message}\n`);
+		},
+		disable: (server) => {
+			setMcpServerDisabled(server.name, true, "project", ctx.cwd, home);
+			disabledNames.add(server.name);
+		},
+	});
+
 	const connectAll = async (ctx: ExtensionContext) => {
 		const plugins = discoverPlugins(defaultDiscoverRoots(getAgentDir(), ctx.cwd));
 		pluginConfigPaths = new Set(plugins.mcpConfigs);
@@ -336,18 +350,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 		// server needs the user's consent first (trust.ts — a cloned repo must not
 		// run commands at startup). Everything else connects.
 		const candidates = servers.filter((server) => !disabledNames.has(server.name) && !server.missingEnv?.length);
-		const consent = await approveMcpServers(candidates, pluginConfigPaths, ctx.cwd, home, {
-			hasUI: ctx.hasUI,
-			select: (title, options) => ctx.ui.select(title, options),
-			notify: (message) => {
-				if (ctx.hasUI) ctx.ui.notify(message, "warning");
-				else process.stderr.write(`${message}\n`);
-			},
-			disable: (server) => {
-				setMcpServerDisabled(server.name, true, "project", ctx.cwd, home);
-				disabledNames.add(server.name);
-			},
-		});
+		const consent = await approveMcpServers(candidates, pluginConfigPaths, ctx.cwd, home, consentDeps(ctx));
 		if (!alive()) return;
 		withheldNames.clear();
 		for (const { server, reason } of consent.withheld) {
@@ -691,7 +694,24 @@ export default function mcpExtension(pi: ExtensionAPI) {
 			const runReconnect = async (entry: McpEntry) => {
 				const server = servers.find((s) => s.name === entry.name);
 				if (!server || busy.has(entry.name)) return;
+				const refusal = reconnectRefusal(server);
+				if (refusal) {
+					notices = [refusal];
+					syncRepaint();
+					return;
+				}
 				busy.add(entry.name);
+				// Reconnect spawns the command again, so a project server needs the
+				// same consent startup asked for (a stored or session approval
+				// passes without a prompt).
+				const consent = await approveMcpServers([server], pluginConfigPaths, ctx.cwd, home, consentDeps(ctx));
+				if (consent.approved.length === 0) {
+					busy.delete(entry.name);
+					if (!alive()) return;
+					notices = [`"${entry.name}" was not approved, so it was not reconnected.`];
+					syncRepaint();
+					return;
+				}
 				notices = [`Reconnecting to "${entry.name}"…`];
 				syncRepaint();
 				const existing = connections.get(entry.name);

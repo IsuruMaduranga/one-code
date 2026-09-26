@@ -171,6 +171,19 @@ export function persistEnableAll(projectRoot: string, storePath = approvalStoreP
 	writeStore(storePath, store);
 }
 
+/**
+ * Why `/mcp`'s Reconnect must not connect a server, or undefined. A server
+ * whose config references an unset variable is never connected (startup
+ * skips it and never asks for consent), so Reconnect must not either: it
+ * would spawn the command with the variable expanded to nothing, and a
+ * project server would run with no consent.
+ */
+export function reconnectRefusal(server: McpServer): string | undefined {
+	if (!server.missingEnv?.length) return undefined;
+	const names = server.missingEnv.join(", ");
+	return `"${server.name}" needs ${names} set in the environment. Set ${server.missingEnv.length === 1 ? "it" : "them"} and restart One Code.`;
+}
+
 export const CHOICE_ALL = "Use this and all future MCP servers in this project";
 export const CHOICE_THIS = "Use this MCP server";
 export const CHOICE_THESE = "Use these MCP servers";
