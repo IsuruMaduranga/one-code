@@ -38,13 +38,23 @@ export interface AgentRunRecord {
 	inline?: boolean;
 }
 
-/** `<agent>-<n>` with the lowest n not already taken. */
-export function nextRunName(existing: Iterable<string>, agent: string): string {
-	const taken = new Set(existing);
-	for (let n = 1; ; n++) {
-		const candidate = `${agent}-${n}`;
+/** `<base>-<n>` with the lowest n ≥ `from` not in `taken`. */
+function firstFreeSuffixed(taken: ReadonlySet<string>, base: string, from: number): string {
+	for (let n = from; ; n++) {
+		const candidate = `${base}-${n}`;
 		if (!taken.has(candidate)) return candidate;
 	}
+}
+
+/** `<agent>-<n>` with the lowest n not already taken. */
+export function nextRunName(existing: Iterable<string>, agent: string): string {
+	return firstFreeSuffixed(new Set(existing), agent, 1);
+}
+
+/** `base` when free, else `<base>-<n>` with the lowest n ≥ 2 not taken (Claude Code's fork naming). */
+export function freeRunName(existing: Iterable<string>, base: string): string {
+	const taken = new Set(existing);
+	return taken.has(base) ? firstFreeSuffixed(taken, base, 2) : base;
 }
 
 /**

@@ -204,7 +204,9 @@ footer's total. Set `CC_SESSION_TITLE=0` to turn it off.
 
 ## Turn timing
 
-After each turn, a dim line such as `✻ Cooked for 5m 12s` reports how long
-it took, with a random verb, as in Claude Code. When background shells are
-still running, the line adds a count. Set `CC_TURN_DURATION=0` to turn it
-off.
+After each turn, a dim line such as `✻ Churned for 6m 59s · done 2:33 PM`
+reports how long it took and when it finished, with a random verb, as in
+Claude Code. The time follows your locale (`LC_ALL`, `LC_TIME` or `LANG`),
+and gains the weekday, then the date, once the turn is a day or a week old.
+When background shells are still running, the line adds a count, as in
+`· 1 shell still running`. Set `CC_TURN_DURATION=0` to turn it off.

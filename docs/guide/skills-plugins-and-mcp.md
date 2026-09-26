@@ -24,6 +24,8 @@ command, as in Claude Code: `/simplify`, `/code-review`, or any skill from
 `.claude/skills/`. Anything after the name is passed to the skill as
 arguments. Plugin skills keep their plugin prefix and are run as
 `/skill:<plugin>:<name>`. pi's `/skill:<name>` form works for every skill.
+The `/` list shows each skill once, by its bare name; type `/skill:` to list
+the `/skill:` forms.
 
 A skill's slash command isn't created when the name is already taken by a
 built-in command, a `.claude/commands/` template, or another skill.
@@ -164,6 +166,11 @@ also expose resources, which the model can list and read.
 A permission rule naming `mcp__<server>` covers every tool of that server.
 
 ### Manage servers
+
+When servers fail to connect at startup, for example with no network, One
+Code shows a single line such as `2 MCP servers failed · /mcp`, and
+`1 MCP server needs auth · /mcp` for servers waiting on sign-in. Each
+server's error is in `/mcp`.
 
 `/mcp` opens the server manager: servers grouped by source (user, project,
 plugin), each with its status, tool and resource counts, and any warnings.

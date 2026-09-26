@@ -47,7 +47,7 @@ import { readDisabledMcpServers, setMcpServerDisabled } from "../lib/mcp-overrid
 import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import { authenticate as runOAuthFlow, silentProvider } from "./oauth/flow.ts";
 import { hasStoredTokens } from "./oauth/store.ts";
-import { announcedFrom, applyMcpDelta, emptyAnnounced, mcpChangeNotices, mcpDelta, type McpSnapshot } from "./announce.ts";
+import { announcedFrom, applyMcpDelta, emptyAnnounced, mcpChangeNotices, mcpDelta, type McpSnapshot, mcpStartupNotices } from "./announce.ts";
 import { decodeMcpKey } from "./panel/keys.ts";
 import { type McpEntry, type McpEntryStatus } from "./panel/model.ts";
 import { renderMcpPanel, type McpPaint } from "./panel/render.ts";
@@ -364,16 +364,13 @@ export default function mcpExtension(pi: ExtensionAPI) {
 
 		if (!alive()) return;
 
-		if (failures.length > 0) {
-			const text = failures.map((f) => `MCP server "${f.server.name}" failed: ${f.error}`).join("\n") + " (/mcp for status)";
-			if (ctx.hasUI) ctx.ui.notify(text, "warning");
-			else process.stderr.write(`${text}\n`);
-		}
-		if (oauthNeeded.size > 0 && ctx.hasUI) {
-			ctx.ui.notify(
-				`${oauthNeeded.size} MCP server${oauthNeeded.size === 1 ? "" : "s"} need authentication — run /mcp to authenticate.`,
-				"warning",
-			);
+		// Warnings from servers that did connect are shown in /mcp, not as failures.
+		const failed = failures.filter((f) => !connections.has(f.server.name));
+		if (ctx.hasUI) {
+			for (const text of mcpStartupNotices(new Set(failed.map((f) => f.server.name)).size, oauthNeeded.size)) ctx.ui.notify(text, "warning");
+		} else if (failed.length > 0) {
+			// Headless runs have no /mcp, so they keep each server's error on stderr.
+			process.stderr.write(`${failed.map((f) => `MCP server "${f.server.name}" failed: ${f.error}`).join("\n")}\n`);
 		}
 
 		emitInstructions();

@@ -111,6 +111,8 @@ The ones you will use most; `/hotkeys` shows all of them.
 | **Esc** | Interrupt the model. |
 | **ctrl+c** | Clear the editor; press twice to exit. |
 | **ctrl+d** | Exit when the editor is empty. |
+| **Enter** while the model works | Queue a message. It reaches the model once the running tool calls finish. |
+| **ctrl+x ctrl+s** | Send queued messages now: interrupt the running turn and send them, with anything in the editor, as your next prompt. Running tools are cancelled. |
 | **alt+enter** (**ctrl+q** on Windows and WSL) | Queue a follow-up message while the model works. |
 | **alt+↑** | Restore queued messages to the editor. |
 | **ctrl+g** | Edit the prompt in your external editor. |

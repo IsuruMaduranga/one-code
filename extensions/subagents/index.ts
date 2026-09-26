@@ -16,7 +16,7 @@
  * children persist their sessions per run to make that possible).
  */
 
-import { existsSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, writeFileSync, readFileSync } from "node:fs";
 import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, agentCronTools, agentOwnsCronJobs } from "../lib/agent-cron.ts";
 import os from "node:os";
 import { dirname, join } from "node:path";
@@ -41,8 +41,13 @@ import {
 } from "./model-select.ts";
 import { modelPickerComponent, pickerSpec, toPickerEntries, type PickerEntry } from "../auto-mode/model-picker.ts";
 import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
+import { guideDocs } from "../lib/guide-docs.ts";
+import { extensionVersion } from "../lib/package-version.ts";
+import { scanSkills } from "../lib/skill-scan.ts";
+import { type GuideInput, guideAgentDefinition, settingsSetup } from "./guide-agent.ts";
+import { parseNamespacedToolName } from "../mcp/schema.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
-import { BTW_FORK_CHANNEL, btwForkReminder, type BtwForkRequest, type BtwForkResult } from "../lib/btw-fork.ts";
+import { BTW_FORK_CHANNEL, btwForkName, btwForkReminder, type BtwForkRequest, type BtwForkResult } from "../lib/btw-fork.ts";
 import { MCP_TOOLS_CHANNEL, type McpToolsPayload } from "../lib/mcp-share.ts";
 import { resolveModelTier } from "../lib/model-tier.ts";
 import { pendingClaimReminder } from "./pending-claim.ts";
@@ -52,7 +57,7 @@ import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { type BackgroundTask, generateTaskId, TASK_REGISTER_CHANNEL } from "../background/registry.ts";
 import { type ChildAction } from "../auto-mode/actions.ts";
 import { type ChildOutcome, forkTaskMessage, OUTPUT_CAP, type RpcChildHandle } from "./outcome.ts";
-import { type AgentRunRecord, resolveRunName, RunRegistry } from "./runs.ts";
+import { type AgentRunRecord, freeRunName, resolveRunName, RunRegistry } from "./runs.ts";
 import { SubagentRuntime } from "./runner.ts";
 import { emptyUsage, formatStats, type UsageTotals } from "./usage.ts";
 import { cleanupWorktree, createWorktree, isGitRepo, type Worktree } from "./worktree.ts";
@@ -89,7 +94,9 @@ import { createMarkdownProse } from "./prose.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 
 /** The catalog shipped in this package: <package>/agents. */
-const BUNDLED_AGENTS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "agents");
+/** This package's root (the `one-code-extension` directory). */
+const PACKAGE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const BUNDLED_AGENTS_DIR = join(PACKAGE_ROOT, "agents");
 
 interface RunRequest {
 	agent: string;
@@ -392,15 +399,63 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			},
 		));
 
+	/**
+	 * What the code-defined `one-code-guide`'s prompt lists (guide-agent.ts): the
+	 * user's custom skills and agents, enabled plugins, MCP servers, installed pi
+	 * packages and extensions, and pi's settings keys. Read only when a spawn
+	 * reads the guide's prompt.
+	 */
+	const guideInput = (cwd: string, catalog: readonly AgentDefinition[], plugins: ReturnType<typeof discoverPlugins>): GuideInput => {
+		const agentDir = getAgentDir();
+		let settingsText: string | undefined;
+		try {
+			settingsText = readFileSync(join(agentDir, "settings.json"), "utf-8");
+		} catch {
+			// No settings file yet: no packages or keys to list.
+		}
+		let extensions: string[] = [];
+		try {
+			extensions = readdirSync(join(agentDir, "extensions")).filter((entry) => !entry.startsWith("."));
+		} catch {
+			// No user extensions directory.
+		}
+		const mcpServers = new Set(
+			pi
+				.getAllTools()
+				.map((tool) => parseNamespacedToolName(tool.name)?.server)
+				.filter((server): server is string => !!server),
+		);
+		return {
+			docs: guideDocs(),
+			install: {
+				shape: process.env.ONECODE_INSTALL_METHOD ? "app" : "extension",
+				method: process.env.ONECODE_INSTALL_METHOD,
+				agentDir,
+				version: process.env.CC_VERSION ?? extensionVersion(),
+			},
+			setup: {
+				skills: scanSkills(cwd, os.homedir(), agentDir, plugins.skills).map((skill) => skill.name),
+				agents: catalog.filter((agent) => agent.source !== "built-in" && !agent.source.startsWith(BUNDLED_AGENTS_DIR)).map((agent) => agent.name),
+				plugins: plugins.enabledPlugins.map((plugin) => plugin.name),
+				mcpServers: [...mcpServers],
+				extensions,
+				...settingsSetup(settingsText, PACKAGE_ROOT),
+			},
+		};
+	};
+
 	const loadAgents = (cwd: string) => {
 		// Plugin agents sit between bundled and user definitions, and are exposed
 		// namespaced (`<plugin>:<agent>`) so two plugins can ship the same name.
-		const sources: Array<string | AgentSource> = [
-			BUNDLED_AGENTS_DIR,
-			...discoverPlugins(defaultDiscoverRoots(getAgentDir(), cwd)).agentDirs,
-			...agentDirs(cwd, os.homedir()),
-		];
-		return discoverAgents(sources);
+		// The code-defined guide ranks below every agent file, so one of the same
+		// name replaces it.
+		const plugins = discoverPlugins(defaultDiscoverRoots(getAgentDir(), cwd));
+		const fileSources: Array<string | AgentSource> = [BUNDLED_AGENTS_DIR, ...plugins.agentDirs, ...agentDirs(cwd, os.homedir())];
+		// The prompt is built from the catalog it sits in, when a spawn reads it.
+		let catalog: AgentDefinition[] = [];
+		const guide = guideAgentDefinition(() => guideInput(cwd, catalog, plugins));
+		catalog = discoverAgents([{ agents: [guide] }, ...fileSources]);
+		return catalog;
 	};
 
 	// Claude Code closes every catalog row with a tools clause — "(Tools: *)",
@@ -1674,7 +1729,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		// fork framed as inheriting it would confabulate (the Agent tool refuses too).
 		const sessionFile = ctx.sessionManager.getSessionFile();
 		if (!sessionFile) return { error: "Cannot fork: this session is not persisted (started with --no-session), so there is no conversation to clone." };
-		const { name } = resolveRunName(registry, FORK_AGENT, undefined);
+		// Named from the question, as Claude Code names a /btw fork.
+		const name = freeRunName(registry.names(), btwForkName(request.question));
 		const taskId = generateTaskId();
 		// The session's current model and thinking, explicitly: before the first
 		// turn there is no transcript for the fork to restore them from.

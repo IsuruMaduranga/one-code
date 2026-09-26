@@ -42,6 +42,31 @@ export function requestBtwFork(
 }
 
 /**
+ * The fork's base name, Claude Code's rule: the question's first three words,
+ * hyphen-joined, lowercased, cut to `[a-z0-9-]` and 24 characters; `fork`
+ * when nothing is left. "does reading outside project…" becomes
+ * `does-reading-outside`. A taken name is suffixed by the caller.
+ */
+export function btwForkName(question: string): string {
+	const slug = question
+		.trim()
+		.split(/\s+/)
+		.slice(0, 3)
+		.join("-")
+		.toLowerCase()
+		.replace(/[^a-z0-9-]/g, "")
+		.replace(/-+/g, "-")
+		.replace(/^-|-$/g, "")
+		.slice(0, 24);
+	return slug || "fork";
+}
+
+/** Claude Code's transcript line for a started fork: `⑂ forked <name> (<last 4 of the id>)`. */
+export function btwForkedLine(name: string, taskId: string): string {
+	return `⑂ forked ${name} (${taskId.slice(-4)})`;
+}
+
+/**
  * The one-shot reminder the main conversation gets when a fork starts. The
  * side question never entered its context, so without this the fork's report
  * arrives as an answer to nothing the model asked for.

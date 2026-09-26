@@ -36,12 +36,14 @@ import { boundedDockHeight, ccToolRenderers, safeThemeBold, safeThemePaint, trun
 import {
 	bareSkillMatches,
 	buildSkillBlock,
+	missingArgumentsNote,
 	parseSkillCommand,
 	redactOffSkillMessages,
 	resolveSkill,
 	SKILL_INVOCATION_TYPE,
 	type SkillInvocationDetails,
 	skillCommandCandidates,
+	withoutDuplicateSkillCommands,
 } from "./invoke.ts";
 import { decodeSkillsKey } from "./panel/keys.ts";
 import { skillListingText } from "./listing.ts";
@@ -279,9 +281,16 @@ export default function skillExtension(pi: ExtensionAPI) {
 
 			recordUsage(pluginRoot(getAgentDir()), "skill", found.name);
 
+			// A skill that takes arguments, called without any, returns its
+			// no-argument body; say so, since a model previewing the skill would
+			// otherwise follow it (invoke.ts missingArgumentsNote).
+			const hint = params.args?.trim() ? undefined : readArgumentHint(found.path);
+			const hintText = hint?.hint ?? hint?.argNames?.map((name) => `<${name}>`).join(" ");
+			const note = hintText ? missingArgumentsNote(hintText) : undefined;
 			// Resource paths in a skill are relative to its own directory, so the
 			// model needs to know where it lives to read references/ or scripts/.
 			const header = [
+				note?.before,
 				`Skill: ${found.name}`,
 				`Location: ${found.path}`,
 				params.args ? `Arguments: ${params.args}` : undefined,
@@ -291,7 +300,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 				.join("\n");
 
 			return {
-				content: [{ type: "text", text: `${header}\n\n---\n\n${body}` }],
+				content: [{ type: "text", text: `${header}\n\n---\n\n${body}${note ? `\n\n---\n\n${note.after}` : ""}` }],
 				details: { skill: found.name, path: found.path } as Record<string, unknown>,
 			};
 		},
@@ -446,6 +455,21 @@ export default function skillExtension(pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
 		const skills = index(ctx.cwd);
 		registerSkillCommands(ctx.cwd, skills);
+		// pi lists every skill a second time as `/skill:<name>`; drop that entry
+		// where the bare command exists (withoutDuplicateSkillCommands).
+		if (ctx.hasUI && ctx.mode === "tui") {
+			ctx.ui.addAutocompleteProvider((current) => ({
+				...current,
+				getSuggestions: async (lines, cursorLine, cursorCol, options) => {
+					const suggestions = await current.getSuggestions(lines, cursorLine, cursorCol, options);
+					if (!suggestions) return suggestions;
+					const items = withoutDuplicateSkillCommands(suggestions.items, suggestions.prefix, registeredSkillCommands);
+					return items.length > 0 ? { ...suggestions, items } : null;
+				},
+				applyCompletion: (...args) => current.applyCompletion(...args),
+				...(current.shouldTriggerFileCompletion ? { shouldTriggerFileCompletion: (...args) => current.shouldTriggerFileCompletion!(...args) } : {}),
+			}));
+		}
 		// pi's own `/skill:<name>` form, which pi lists only after the first turn.
 		for (const skill of skills) {
 			const hint = skill.source === "plugin" ? undefined : readArgumentHint(skill.path);

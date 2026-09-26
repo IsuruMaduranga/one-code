@@ -29,6 +29,7 @@ so nothing surprises you.
 | Models | Anthropic models. | Any provider pi supports, switchable mid-session, with a different model per role. |
 | Tool names on the wire | PascalCase (`Read`, `Bash`). | snake_case (`read`, `bash`); `Agent` and `SendMessage` keep their names. Claude Code names still work in rules and hook matchers. |
 | Permission-mode key | shift+tab. | ctrl+q; alt+m on Windows and WSL. pi reserves shift+tab for the reasoning-effort dial and, on Windows, ctrl+q for queuing a follow-up. |
+| Send queued messages now (**ctrl+x ctrl+s**) | Running tools move to the background, and **ctrl+enter** works too where the terminal sends it. | Running tools are cancelled, and only **ctrl+x ctrl+s** is bound. |
 | Task-list key | ctrl+t. | alt+t; ctrl+\\ on macOS; or `/tasks show` and `/tasks hide`. pi reserves ctrl+t for thinking blocks, and macOS terminals type a character for option+t. |
 | Where auto mode's classifier runs | On Anthropic's API server, through a request field the endpoint must support; the local classifier is a fallback only until about October 23, 2026 ([LiteLLM's notes](https://docs.litellm.ai/blog/claude-code-server-side-auto-mode)). | In the harness, on a model from your own provider, so auto mode works with any provider. |
 | Permission shortcuts by model | One set for every model; auto mode needs a Sonnet- or Opus-class model. | Claude Code's shortcuts for frontier and workhorse models. Cheap and tiny models, which Claude Code can't run in auto mode, get stricter checks. |
