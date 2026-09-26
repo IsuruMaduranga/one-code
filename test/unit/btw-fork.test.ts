@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterAll, describe, expect, it } from "vitest";
 import { exchangeMessages } from "../../extensions/btw/prompt.ts";
-import { BTW_FORK_CHANNEL, btwForkReminder, type BtwForkRequest, requestBtwFork } from "../../extensions/lib/btw-fork.ts";
+import { BTW_FORK_CHANNEL, btwForkedLine, btwForkName, btwForkReminder, type BtwForkRequest, requestBtwFork } from "../../extensions/lib/btw-fork.ts";
 import { newChildSessionManager } from "../../extensions/subagents/runner.ts";
 
 function bus() {
@@ -31,6 +31,33 @@ describe("requestBtwFork", () => {
 			setTimeout(() => request.respond({ name: `fork-for-${request.question}`, taskId: "t123" }), 1);
 		});
 		expect(await requestBtwFork(events, { ctx: {}, question: "q", messages: [] })).toEqual({ name: "fork-for-q", taskId: "t123" });
+	});
+});
+
+describe("btwForkName", () => {
+	it("joins the question's first three words, as Claude Code names the fork", () => {
+		expect(btwForkName("does reading outside project goes through automode classifier")).toBe("does-reading-outside");
+		expect(btwForkName("  What   number\tdoes value.ts export")).toBe("what-number-does");
+	});
+
+	it("keeps only lowercase letters, digits and single inner dashes", () => {
+		expect(btwForkName("Why -- is `x` failing?")).toBe("why-is");
+		expect(btwForkName("what's in src/lib?")).toBe("whats-in-srclib");
+	});
+
+	it("cuts the name to 24 characters", () => {
+		expect(btwForkName("internationalization localization accessibility")).toBe("internationalization-loc");
+	});
+
+	it("falls back to fork when no word survives", () => {
+		expect(btwForkName("??? !!! ...")).toBe("fork");
+		expect(btwForkName("")).toBe("fork");
+	});
+});
+
+describe("btwForkedLine", () => {
+	it("is Claude Code's line, with the last four characters of the task id", () => {
+		expect(btwForkedLine("does-reading-outside", "bd83d403")).toBe("\u2442 forked does-reading-outside (d403)");
 	});
 });
 

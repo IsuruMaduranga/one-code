@@ -30,14 +30,22 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
-import { convertToLlm, copyToClipboard, type ExtensionAPI, type ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import {
+	convertToLlm,
+	copyToClipboard,
+	type ExtensionAPI,
+	type ExtensionCommandContext,
+	getAgentDir,
+	SettingsManager,
+	UserMessageComponent,
+} from "@earendil-works/pi-coding-agent";
 import { ARGUMENT_HINT_CHANNEL, type ArgumentHint } from "../lib/argument-hints.ts";
-import { requestBtwFork } from "../lib/btw-fork.ts";
+import { btwForkedLine, type BtwForkResult, requestBtwFork } from "../lib/btw-fork.ts";
 import { notifyOrPrint, printAnswer } from "../lib/headless-output.ts";
 import { withReasoningFallback } from "../lib/model-policy.ts";
 import { followLastExchange, replaySideCall } from "../lib/replay-call.ts";
 import { answerText, stripImageBlocks, toolStubs, trimToTurnBoundary, withoutSystemMessages } from "../lib/side-call.ts";
-import { boundedDockHeight, truncateLine } from "../lib/tui-render.ts";
+import { boundedDockHeight, linesComponent, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
 import type { ProseRenderer } from "../subagents/panel-render.ts";
 import { createMarkdownProse } from "../subagents/prose.ts";
@@ -48,8 +56,36 @@ const BTW_MAX_TOKENS = 8192;
 const BTW_TIMEOUT_MS = 120_000;
 /** Description on the name-only tool stubs sent with the side question. */
 const STUB_REASON = "Unavailable during this side question; answer in text.";
+/**
+ * The transcript record of a started fork, Claude Code's `/btw <question>` row
+ * with `⎿  ⑂ forked <name> (<id>)` under it. A display-only session entry: it
+ * never reaches the model, which learns of the fork from a one-shot reminder.
+ */
+const FORK_ENTRY_TYPE = "one-code:btw-fork";
+
+interface BtwForkEntry {
+	question: string;
+	name: string;
+	taskId: string;
+}
 
 export default function btwExtension(pi: ExtensionAPI) {
+	// The fork entry's `/btw` row is drawn as pi draws a user prompt, with the
+	// padding pi read from settings at startup.
+	let outputPad = 1;
+	try {
+		outputPad = SettingsManager.create(process.cwd(), getAgentDir()).getOutputPad();
+	} catch {
+		// Unreadable settings: pi's default padding.
+	}
+	pi.registerEntryRenderer<BtwForkEntry>(FORK_ENTRY_TYPE, (entry, _options, theme) => {
+		const data = entry.data;
+		if (!data) return undefined;
+		const row = new UserMessageComponent(`/btw ${data.question}`, undefined, outputPad);
+		const paint = safeThemePaint(theme);
+		return linesComponent((width) => [...row.render(width), truncateLine(`  ⎿  ${paint("dim", btwForkedLine(data.name, data.taskId))}`, width)]);
+	});
+
 	// The exact request messages the session last sent (after every extension's
 	// mutations), captured like recap and the compaction extension do.
 	let capturedMessages: AgentMessage[] | undefined;
@@ -191,8 +227,13 @@ export default function btwExtension(pi: ExtensionAPI) {
 			const view: { answer?: string; error?: string; forking?: boolean } = {};
 			const bodyState = (): BtwBody =>
 				view.error !== undefined ? { kind: "error", message: view.error } : view.answer !== undefined ? { kind: "answer", text: view.answer } : { kind: "loading" };
-			// Shown after the panel closes: a started fork, or why it could not start.
-			let closingNotice: { text: string; level: "info" | "error" } | undefined;
+			// Reported after the panel closes: a started fork joins the transcript as
+			// Claude Code's `⑂ forked` entry; a failure is an error notice.
+			let forkResult: BtwForkResult | undefined;
+			const reportFork = (result: BtwForkResult) => {
+				if ("error" in result) ctx.ui.notify(result.error, "error");
+				else pi.appendEntry<BtwForkEntry>(FORK_ENTRY_TYPE, { question, name: result.name, taskId: result.taskId });
+			};
 			let panelOpen = true;
 
 			await ctx.ui.custom<null>((tui, theme, _keybindings, done) => {
@@ -233,17 +274,15 @@ export default function btwExtension(pi: ExtensionAPI) {
 					const messages = [...historyMessages(earlier, model), ...exchangeMessages({ question, answer }, model)];
 					void requestBtwFork(pi.events, { ctx, question, messages }).then((result) => {
 						if (epoch !== sessionEpoch) return;
-						const notice =
-							"error" in result ? { text: result.error, level: "error" as const } : { text: `Forked ${result.name} (${result.taskId.slice(-4)})`, level: "info" as const };
 						if (panelOpen) {
 							view.forking = false;
-							closingNotice = notice;
+							forkResult = result;
 							done(null);
 							return;
 						}
 						// The user closed the panel while the fork was starting.
 						try {
-							ctx.ui.notify(notice.text, notice.level);
+							reportFork(result);
 						} catch {}
 					});
 				};
@@ -321,7 +360,7 @@ export default function btwExtension(pi: ExtensionAPI) {
 			panelOpen = false;
 			controller.abort();
 			if (inFlight === controller) inFlight = undefined;
-			if (closingNotice) ctx.ui.notify(closingNotice.text, closingNotice.level);
+			if (forkResult) reportFork(forkResult);
 		},
 	});
 }

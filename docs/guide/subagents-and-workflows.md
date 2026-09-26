@@ -14,8 +14,9 @@ main conversation.
 
 ### Where subagents come from
 
-- Three ship with One Code: `general-purpose` (any task), `explore`
-  (read-only search), and `plan` (design an implementation plan).
+- Four ship with One Code: `general-purpose` (any task), `explore`
+  (read-only search), `plan` (design an implementation plan), and
+  `one-code-guide` (questions about One Code itself; see below).
 - Markdown definitions in `.claude/agents/` (project) and
   `~/.claude/agents/` (user), each setting an agent's model, tools, and
   system prompt. A project definition wins over a user definition of the
@@ -25,6 +26,28 @@ main conversation.
 
 Run `/agents` with no agents running to list the catalog with each agent's
 tools.
+
+### Ask One Code about itself
+
+Ask "can One Code…?" or "how do I…?" and the model hands the question to
+`one-code-guide`, the way Claude Code uses its `claude-code-guide`. The guide
+answers from this user guide, installed with One Code, and from the docs of
+the pi you run, so the answer matches your versions. If pi's docs aren't on
+disk, it reads pi's published docs, which may describe a newer pi. It never
+answers from memory, and it cites the page each fact came from.
+
+It knows your setup too: your custom skills and agents, plugins, MCP
+servers, installed pi packages, and which settings you've changed. When One
+Code can't do what you want, it tells you so and suggests the smallest way
+to get there: an existing setting, a skill, an agent, a hook, an MCP server,
+or a pi extension of your own. For an extension it shows where the file goes
+and how to install it for the way you run One Code, `onecode install` for
+the app or `pi install` on your own pi.
+
+The guide can only read. It uses the shell only for read-only searches,
+never edits anything, and reads its docs without asking. It runs on your
+subagent model. A `one-code-guide.md` in `.claude/agents/` or
+`~/.claude/agents/` replaces it.
 
 ### Run a subagent
 

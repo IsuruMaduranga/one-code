@@ -56,7 +56,8 @@ While the model works, a spinner shows a random verb, the elapsed time, and
 the tokens streamed so far, for example `✳ Cogitating… (12s · ↓ 843 tokens)`.
 The clock runs from the start of the turn until it settles, through retries.
 
-After the turn, a dim `✻ Cooked for 5m 12s` line reports the total time.
+After the turn, a dim `✻ Cooked for 5m 12s · done 2:33 PM` line reports the
+total time and when the turn finished.
 Set `CC_TURN_DURATION=0` to turn it off.
 
 ## The status line
@@ -64,7 +65,9 @@ Set `CC_TURN_DURATION=0` to turn it off.
 The footer replaces pi's status line with One Code's own:
 
 - **Left:** the working directory, the git branch, and the open pull
-  request number for that branch when the GitHub CLI is installed.
+  request number for that branch when the GitHub CLI is installed. The pull
+  request is checked again every minute while you're using the session, so
+  one merged or closed mid-session drops off, and a new one appears.
 - **Right:** context usage as `used/window (percent)`, the session cost,
   the cache-hit rate of the latest turn, the model, and the reasoning
   effort. When ultracode is armed, the effort reads `✦ ultracode`.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { turnDurationText } from "../../extensions/turn-duration/line.ts";
+import { formatDoneAt, timeLocale, turnDurationText } from "../../extensions/turn-duration/line.ts";
 import { TurnSpan } from "../../extensions/turn-duration/span.ts";
 import { pickCompletionVerb, TURN_COMPLETION_VERBS } from "../../extensions/turn-duration/verbs.ts";
 
@@ -111,5 +111,53 @@ describe("TurnSpan", () => {
 		span.runStarted(8_000);
 		span.runEnded(RAN);
 		expect(span.settle(9_500)).toBe(1_500);
+	});
+});
+
+describe("turnDurationText with a done time", () => {
+	it("puts done before the shells tail, as Claude Code does", () => {
+		expect(turnDurationText("Churned", 6 * 60_000 + 59_000, 1, "2:33 PM")).toBe("Churned for 6m 59s · done 2:33 PM · 1 shell still running");
+		expect(turnDurationText("Cooked", 12_000, 0, "2:33 PM")).toBe("Cooked for 12s · done 2:33 PM");
+		expect(turnDurationText("Cooked", 12_000, 0, "")).toBe("Cooked for 12s");
+	});
+});
+
+describe("formatDoneAt", () => {
+	// Intl puts a narrow no-break space before AM/PM on current ICU.
+	const plain = (text: string) => text.replace(/[\u202f\u00a0]/g, " ");
+	const now = new Date(2026, 8, 26, 18, 0);
+
+	it("shows the time alone for today", () => {
+		expect(plain(formatDoneAt(new Date(2026, 8, 26, 14, 33), now, "en-US"))).toBe("2:33 PM");
+	});
+
+	it("adds the weekday within the last week", () => {
+		expect(plain(formatDoneAt(new Date(2026, 8, 25, 9, 5), now, "en-US"))).toBe("Friday 9:05 AM");
+	});
+
+	it("adds the date before that", () => {
+		expect(plain(formatDoneAt(new Date(2026, 8, 12, 14, 33), now, "en-US"))).toBe("Saturday, Sep 12, 2:33 PM");
+	});
+
+	it("uses the locale's hour cycle", () => {
+		expect(formatDoneAt(new Date(2026, 8, 26, 14, 33), now, "en-GB")).toBe("14:33");
+	});
+
+	it("is empty for an invalid date", () => {
+		expect(formatDoneAt(new Date("nope"), now, "en-US")).toBe("");
+	});
+});
+
+describe("timeLocale", () => {
+	it("reads LC_ALL, then LC_TIME, then LANG, as Claude Code does", () => {
+		expect(timeLocale({ LANG: "en_US.UTF-8" })).toBe("en-US");
+		expect(timeLocale({ LC_TIME: "de_DE.UTF-8", LANG: "en_US.UTF-8" })).toBe("de-DE");
+		expect(timeLocale({ LC_ALL: "fr_FR@euro", LC_TIME: "de_DE" })).toBe("fr-FR");
+	});
+
+	it("leaves the default for C, POSIX or nothing", () => {
+		expect(timeLocale({ LANG: "C" })).toBeUndefined();
+		expect(timeLocale({ LANG: "POSIX" })).toBeUndefined();
+		expect(timeLocale({})).toBeUndefined();
 	});
 });

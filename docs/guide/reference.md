@@ -111,12 +111,14 @@ The ones you will use most; `/hotkeys` shows all of them.
 | **Esc** | Interrupt the model. |
 | **ctrl+c** | Clear the editor; press twice to exit. |
 | **ctrl+d** | Exit when the editor is empty. |
+| **Enter** while the model works | Queue a message. It reaches the model once the running tool calls finish. |
+| **ctrl+x ctrl+s** | Send queued messages now: interrupt the running turn and send them, with anything in the editor, as your next prompt. Running tools are cancelled. |
 | **alt+enter** (**ctrl+q** on Windows and WSL) | Queue a follow-up message while the model works. |
 | **alt+↑** | Restore queued messages to the editor. |
 | **ctrl+g** | Edit the prompt in your external editor. |
 | **ctrl+v** | Paste an image or text. |
 | **shift+enter**, **ctrl+j** | Insert a newline. |
-| **ctrl+x** | Copy the last reply. |
+| **ctrl+x** | Copy the last reply. While the model works with a message queued or typed, it starts **ctrl+x ctrl+s** instead. |
 | **PgUp**, **PgDn**, **Home**, **End** | Scroll the transcript in full-screen mode. |
 | **ctrl+shift+f** | Search the transcript in full-screen mode. |
 | **!** at the start of a line | Run a shell command yourself. |

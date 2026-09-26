@@ -122,10 +122,19 @@ export interface AgentSource {
 	namespace?: string;
 }
 
+/** Agents defined in code (`one-code-guide`), taken as they are: never copied, so a lazy prompt stays lazy. */
+export interface CodeAgents {
+	agents: readonly AgentDefinition[];
+}
+
 /** Later sources override earlier ones on name collisions. */
-export function discoverAgents(sources: Array<string | AgentSource>): AgentDefinition[] {
+export function discoverAgents(sources: Array<string | AgentSource | CodeAgents>): AgentDefinition[] {
 	const byName = new Map<string, AgentDefinition>();
 	for (const source of sources) {
+		if (typeof source !== "string" && "agents" in source) {
+			for (const agent of source.agents) byName.set(agent.name, agent);
+			continue;
+		}
 		const { dir, namespace } = typeof source === "string" ? { dir: source, namespace: undefined } : source;
 		for (const file of collectMarkdownFiles(dir)) {
 			try {

@@ -2,13 +2,21 @@ import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { findSessionFile, nextRunName, resolveRunName, RunRegistry } from "../../extensions/subagents/runs.ts";
+import { findSessionFile, freeRunName, nextRunName, resolveRunName, RunRegistry } from "../../extensions/subagents/runs.ts";
 
 describe("nextRunName", () => {
 	it("allocates the lowest free <agent>-<n>", () => {
 		expect(nextRunName([], "explore")).toBe("explore-1");
 		expect(nextRunName(["explore-1", "explore-2"], "explore")).toBe("explore-3");
 		expect(nextRunName(["explore-2"], "explore")).toBe("explore-1");
+	});
+});
+
+describe("freeRunName", () => {
+	it("uses the base name when free, else the lowest free -n from 2", () => {
+		expect(freeRunName([], "what-number-does")).toBe("what-number-does");
+		expect(freeRunName(["what-number-does"], "what-number-does")).toBe("what-number-does-2");
+		expect(freeRunName(["fork", "fork-2", "fork-3"], "fork")).toBe("fork-4");
 	});
 });
 

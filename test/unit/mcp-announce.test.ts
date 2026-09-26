@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { announcedFrom, applyMcpDelta, emptyAnnounced, mcpChangeNotices, mcpDelta } from "../../extensions/mcp/announce.ts";
+import { announcedFrom, applyMcpDelta, emptyAnnounced, mcpChangeNotices, mcpDelta, mcpStartupNotices } from "../../extensions/mcp/announce.ts";
 
 describe("announcedFrom", () => {
 	it("records the instructed and failed servers a fresh message 1 describes", () => {
@@ -109,5 +109,17 @@ describe("mcpChangeNotices", () => {
 		expect(notices[2]).toContain("failed to connect");
 		expect(notices[3]).toContain("old");
 		expect(notices[3]).toContain("disconnected");
+	});
+});
+
+describe("mcpStartupNotices", () => {
+	it("is one line per kind of problem, in Claude Code's words", () => {
+		expect(mcpStartupNotices(2, 0)).toEqual(["2 MCP servers failed · /mcp"]);
+		expect(mcpStartupNotices(1, 1)).toEqual(["1 MCP server failed · /mcp", "1 MCP server needs auth · /mcp"]);
+		expect(mcpStartupNotices(0, 3)).toEqual(["3 MCP servers need auth · /mcp"]);
+	});
+
+	it("says nothing when every server connected", () => {
+		expect(mcpStartupNotices(0, 0)).toEqual([]);
 	});
 });
