@@ -37,7 +37,7 @@ import { watchHookBridge } from "../hooks/subagent-bridge.ts";
 import { watchMcpTools } from "../lib/mcp-share.ts";
 import { applicableSubagentDefault, loadSubagentDefault } from "../subagents/default-model.ts";
 import { discoverSavedWorkflows, findSavedWorkflow, workflowDirs } from "./saved-workflows.ts";
-import { buildRunReport, WorkflowRunManager } from "./run-manager.ts";
+import { buildRunReport, type RunHandle, WorkflowRunManager } from "./run-manager.ts";
 import {
 	ccToolRenderers,
 	customMessageText,
@@ -221,7 +221,6 @@ export default function workflowExtension(pi: ExtensionAPI) {
 	const manager = new WorkflowRunManager();
 	let lastCtx: ExtensionContext | undefined;
 	const widget = new WorkflowWidget(manager, () => lastCtx);
-	const deliveredRuns = new Set<string>();
 	let viewerOpen = false;
 
 	// Parent permission bridge for workflow agents' gates — same bridge the
@@ -241,16 +240,14 @@ export default function workflowExtension(pi: ExtensionAPI) {
 		}
 	};
 
-	/** The tool call that started each background run — the notification's `<tool-use-id>`. */
-	const startedBy = new Map<string, string>();
-	const deliverResult = (runId: string) => {
-		// One delivery per run, so the id is spent here even when the run has
-		// already gone from the manager or was delivered another way.
-		const toolUseId = startedBy.get(runId);
-		startedBy.delete(runId);
-		const handle = manager.get(runId);
-		if (!handle || deliveredRuns.has(runId)) return;
-		deliveredRuns.add(runId);
+	/**
+	 * A background run's result notification, sent once when that run finishes.
+	 * Keyed by the handle, not the run id: a `resumeFromRunId` run reuses its
+	 * original id, and a set of delivered ids swallowed the resumed run's result
+	 * (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 H4). `toolUseId` is the call that
+	 * started this run, the notification's `<tool-use-id>`.
+	 */
+	const deliverResult = (handle: RunHandle, toolUseId: string) => {
 		// CC's kind=workflow task notification; the run report (result or the
 		// failure and how to resume) is its `<result>`. Summary literal: see
 		// workflowSummary — unverified against CC.
@@ -369,7 +366,6 @@ export default function workflowExtension(pi: ExtensionAPI) {
 						unhookAbort();
 						handle.removeListener("progress", onProgress);
 					}
-					deliveredRuns.add(handle.runId); // sync result goes in the tool result, not a followUp
 					const oneShotPrefix = forcedSync ? `${oneShotNote("workflow")}\n\n` : "";
 					return {
 						content: [{ type: "text", text: `${oneShotPrefix}${buildRunReport(handle)}` }],
@@ -378,8 +374,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 					};
 				}
 
-				startedBy.set(handle.runId, toolCallId);
-				void handle.finished.then(() => deliverResult(handle.runId));
+				void handle.finished.then(() => deliverResult(handle, toolCallId));
 				return {
 					content: [
 						{

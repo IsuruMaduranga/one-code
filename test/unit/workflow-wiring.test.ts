@@ -109,6 +109,27 @@ describe("workflow wiring: one-shot modes (LIFECYCLE-REVIEW-2026-09-06 M1)", () 
 		expect(fake.sentUserMessages).toHaveLength(0);
 	});
 
+	// SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 H4: a resume reuses the run id, and a
+	// delivered-id set swallowed the resumed run's notification.
+	it("delivers the result of a background run resumed in the same session", async () => {
+		const fake = createFakePi();
+		workflowExtension(fake.pi as never);
+		const ctx = ctxFor("tui");
+		const workflow = fake.tools.get("workflow")!;
+		const resumable = "export const meta = { name: 'resume-probe', description: 'echoes args' }\nreturn args";
+		// The notifier sends a steer while the parent is busy, a user message when it is idle.
+		const delivered = () => [...fake.sentMessages.map((m) => JSON.stringify(m.message.content)), ...fake.sentUserMessages.map((m) => JSON.stringify(m.content))];
+		const first = (await workflow.execute("c1", { script: resumable, args: "FIRST" }, undefined, undefined, ctx)) as { details: { runId: string } };
+		await vi.waitFor(() => expect(delivered()).toHaveLength(1), { timeout: 5_000 });
+		const second = (await workflow.execute("c2", { resumeFromRunId: first.details.runId, args: "SECOND" }, undefined, undefined, ctx)) as {
+			content: Array<{ text: string }>;
+		};
+		expect(second.content[0].text).toContain("resumed in the background");
+		await vi.waitFor(() => expect(delivered()).toHaveLength(2), { timeout: 5_000 });
+		expect(delivered()[1]).toContain("SECOND");
+		expect(delivered()[1]).toContain("c2");
+	}, 15_000);
+
 	it("in the TUI the same call still goes to the background", async () => {
 		const fake = createFakePi();
 		workflowExtension(fake.pi as never);
