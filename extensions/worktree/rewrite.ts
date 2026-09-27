@@ -10,22 +10,13 @@
  */
 
 import { isAbsolute, resolve } from "node:path";
+import { powershellQuote, shellQuote } from "../lib/shell-quote.ts";
 import { normalizeToolPath } from "../lib/tool-path.ts";
 
 /** Tools whose `path` argument is relative to the session cwd. */
 const PATH_TOOLS = new Set(["read", "edit", "write", "notebook_edit", "grep", "find", "ls", "lsp_diagnostics"]);
 /** Of those, the ones where a missing path means "the cwd itself". */
 const DEFAULTS_TO_CWD = new Set(["grep", "find", "ls"]);
-
-export function shellQuote(path: string): string {
-	return `'${path.replace(/'/g, "'\\''")}'`;
-}
-
-/** PowerShell single-quoted literal: only `'` needs escaping, as `''`. */
-export function powershellQuote(path: string): string {
-	return `'${path.replace(/'/g, "''")}'`;
-}
-
 
 /**
  * Mutates `input` in place so the call runs inside the worktree. For bash

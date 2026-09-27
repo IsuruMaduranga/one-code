@@ -515,7 +515,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				// A kept worktree can host a resumed run in a NEW process, where
 				// createWorktree's registration no longer exists — re-register so the
 				// git-isolation guard survives the restart. A removed worktree's entry
-				// is inert (no session runs there any more). findGitRoot instead of
+				// is inert (no session runs there any more). findProjectRoot instead of
 				// `git rev-parse` because session_start handlers must stay fast
 				// (findings §15); a slightly-off sharedRoot only softens one message —
 				// the worktree containment check itself uses the exact record.cwd.
@@ -1096,7 +1096,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	// so the message and its pointer would only repeat it (see decisions).
 	const notifier = createTaskNotifier(pi, { withdrawOnDelivery: true });
 	/** Every subagent notification; silent during shutdown (a teardown kill is not news). */
-	const notify = (...[customType, text, details]: Parameters<typeof notifier>) => {
+	const notify = (customType: string, text: string, details?: Record<string, unknown>) => {
 		if (shuttingDown) return;
 		notifier(customType, text, details);
 	};

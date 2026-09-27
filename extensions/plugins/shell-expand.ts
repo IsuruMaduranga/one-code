@@ -17,7 +17,8 @@
 import type { ChildProcess } from "node:child_process";
 import { detachedSpawnOptions, killProcessTree, waitForChildExit } from "../lib/process-tree.ts";
 import { bashSpawn, type ShellSpawn, spawnShellCommand } from "../lib/shell-spawn.ts";
-import { shellQuote, splitShellPlaceholders, substituteArguments } from "./template.ts";
+import { shellQuote } from "../lib/shell-quote.ts";
+import { splitShellPlaceholders, substituteArguments } from "./template.ts";
 
 export const SHELL_TIMEOUT_MS = 30_000;
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;

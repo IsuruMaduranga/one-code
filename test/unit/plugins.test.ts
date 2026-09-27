@@ -15,11 +15,8 @@ import {
 } from "../../extensions/lib/plugins.ts";
 import { setOverride } from "../../extensions/lib/plugin-overrides.ts";
 import { setSkillOverride, skillOverrideKey } from "../../extensions/lib/skill-overrides.ts";
-import {
-	shellQuote,
-	splitShellPlaceholders,
-	substituteArguments,
-} from "../../extensions/plugins/template.ts";
+import { shellQuote } from "../../extensions/lib/shell-quote.ts";
+import { splitShellPlaceholders, substituteArguments } from "../../extensions/plugins/template.ts";
 
 describe("entryAppliesToCwd (review L6)", () => {
 	it("user scope and no-projectPath entries apply everywhere; project/local scope is confined", () => {

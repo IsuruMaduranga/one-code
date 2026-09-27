@@ -35,11 +35,6 @@ export function substituteArguments(body: string, args: string, quote?: (word: s
 		});
 }
 
-/** A POSIX shell single-quoted word: the text exactly, whatever it holds. */
-export function shellQuote(word: string): string {
-	return `'${word.replace(/'/g, "'\\''")}'`;
-}
-
 export type TemplatePiece = { kind: "text"; text: string } | { kind: "shell"; command: string };
 
 /**

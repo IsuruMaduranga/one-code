@@ -2,8 +2,9 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 // pi's own resolver, reached by file path (its package root does not export it), to pin the vendored copy to it.
 import { resolveToCwd } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/tools/path-utils.js";
+import { shellQuote } from "../../extensions/lib/shell-quote.ts";
 import { normalizeToolPath } from "../../extensions/lib/tool-path.ts";
-import { rewriteToolInput, shellQuote, validateWorktreeName } from "../../extensions/worktree/rewrite.ts";
+import { rewriteToolInput, validateWorktreeName } from "../../extensions/worktree/rewrite.ts";
 
 const WT = "/repo/.claude/worktrees/fix";
 
