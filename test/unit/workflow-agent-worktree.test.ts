@@ -60,6 +60,19 @@ describe("workflow agent worktrees", () => {
 		expect(branches()).toBe("");
 	});
 
+	it("create no worktree when the MCP tools fail to load", async () => {
+		const runner = await AgentRunner.create({
+			cwd: repo,
+			defaultModel: undefined,
+			getMcpTools: async () => {
+				throw new Error("mcp broke");
+			},
+		});
+		await expect(runner.run("do it", { isolation: "worktree" }, new AbortController().signal)).rejects.toThrow("mcp broke");
+		expect(worktreeCount()).toBe(1);
+		expect(branches()).toBe("");
+	});
+
 	it("keep and report the worktree of a failed agent that committed", async () => {
 		const notices: string[] = [];
 		vi.spyOn(agentLoader, "openChildSession").mockImplementation(async (options) => {

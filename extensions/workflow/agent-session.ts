@@ -258,6 +258,9 @@ export class AgentRunner {
 		// Before the worktree exists: a malformed schema would otherwise leak it.
 		if (opts.schema) assertObjectSchema(opts.schema);
 
+		// Also before the worktree: a rejection here would leak it the same way.
+		const mcpTools = (await this.options.getMcpTools?.()) ?? [];
+
 		let worktree: Worktree | undefined;
 		let cwd = this.options.cwd;
 		if (opts.isolation === "worktree") {
@@ -271,7 +274,7 @@ export class AgentRunner {
 		const capture: { called: boolean; value: unknown } = { called: false, value: undefined };
 		const customTools: ToolDefinition[] = [
 			...(opts.schema ? [buildStructuredOutputTool(opts.schema, capture)] : []),
-			...((await this.options.getMcpTools?.()) ?? []),
+			...mcpTools,
 		];
 
 		// The same child session a subagent gets (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26
