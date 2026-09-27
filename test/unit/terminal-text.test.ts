@@ -109,3 +109,17 @@ describe("consent dialogs show control characters as visible escapes", () => {
 		expect(promptTitle(["srv\x1b[8m"])).toBe("New MCP server found in .mcp.json: srv\\x1b[8m");
 	});
 });
+
+describe("sanitizeDisplayText on hostile input", () => {
+	it("strips many unterminated OSC openers in linear time", () => {
+		// The regex form rescanned to the end from every `ESC ]`: 50,000 took 1.8 s.
+		const text = "\u001b]".repeat(50_000);
+		const started = performance.now();
+		expect(sanitizeDisplayText(text)).toBe("]".repeat(50_000));
+		expect(performance.now() - started).toBeLessThan(500);
+	});
+
+	it("still drops a terminated OSC after unterminated-looking text", () => {
+		expect(sanitizeDisplayText("a\u001b]0;title\u0007b\u001b]52;c;x\u001b\\c")).toBe("abc");
+	});
+});
