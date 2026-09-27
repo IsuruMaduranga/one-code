@@ -165,6 +165,13 @@ describe("permissions session state", () => {
 			const raw = await call("bash", { command: wrap("git status") }, "w4");
 			expect(raw?.block).toBe(true);
 		});
+
+		it("a worktree-wrapped monitor is judged and shown as the model wrote it too", async () => {
+			fake.events.emit(ORIGINAL_COMMAND_CHANNEL, { toolCallId: "m1", command: "env rm -f README.md", cwd: worktree() });
+			expect(await call("monitor", { command: wrap("env rm -f README.md"), description: "watch" }, "m1")).toBeUndefined();
+			expect(prompts[0].title).toContain("env rm -f README.md");
+			expect(prompts[0].title).not.toContain("cd '");
+		});
 	});
 
 	describe("shipped default mode", () => {

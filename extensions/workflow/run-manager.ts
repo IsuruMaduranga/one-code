@@ -15,6 +15,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { PermissionBridge } from "../permissions/subagent-gate.ts";
 import type { HookBridge } from "../hooks/subagent-bridge.ts";
 import type { SubagentDefault } from "../subagents/default-model.ts";
@@ -25,7 +26,7 @@ import { AgentRecordStore, previewValue } from "./records.ts";
 import { findSavedWorkflow } from "./saved-workflows.ts";
 import { parseWorkflowScript } from "./script-source.ts";
 import { runWorkflowScript } from "./vm-runtime.ts";
-import type { RunProgressEvent, RunStatus, WorkflowMeta } from "./types.ts";
+import type { AgentRecord, RunProgressEvent, RunStatus, WorkflowMeta } from "./types.ts";
 import { WorkflowScriptError } from "./types.ts";
 import type { ViewerRunSnapshot } from "./viewer.ts";
 
@@ -53,6 +54,8 @@ export interface StartRunOptions {
 	unusableModels?: () => ReadonlySet<string>;
 	/** An agent's provider refused its model: published so every picker skips it (lib/model-unusable.ts). */
 	onModelUnusable?: (model: string, reason: string) => void;
+	/** The parent's live MCP tools, shared into every workflow agent (see AgentRunnerOptions). */
+	getMcpTools?: () => ToolDefinition[] | Promise<ToolDefinition[]>;
 }
 
 export class RunHandle extends EventEmitter {
@@ -137,9 +140,11 @@ function formatEvent(event: RunProgressEvent): string | undefined {
 			return `— ${event.phase} —`;
 		case "agentStart":
 			return `⏳ ${event.label}${event.phase ? ` [${event.phase}]` : ""}`;
-		case "agentEnd":
-			if (event.text) return `✗ ${event.label}: ${event.text}`;
-			return `✓ ${event.label}${event.replayed ? " (replayed)" : ""}${event.tokens ? ` · ${event.tokens.output} out` : ""}`;
+		case "agentEnd": {
+			const kept = event.worktree ? ` · worktree kept at ${event.worktree.path}` : "";
+			if (event.text) return `✗ ${event.label}: ${event.text}${kept}`;
+			return `✓ ${event.label}${event.replayed ? " (replayed)" : ""}${event.tokens ? ` · ${event.tokens.output} out` : ""}${kept}`;
+		}
 		default:
 			return undefined;
 	}
@@ -254,6 +259,8 @@ export class WorkflowRunManager {
 				onUsage: options.onUsage,
 				unusableModels: options.unusableModels,
 				onModelUnusable: options.onModelUnusable,
+				getMcpTools: options.getMcpTools,
+				resultsDir: handle.runDir,
 			});
 
 			const { globals, state } = createScriptGlobals({
@@ -342,14 +349,27 @@ export function buildRunReport(handle: RunHandle): string {
 		? `${state.agentCount()} agent(s), ${state.outputTokens()} output tokens, $${state.cost().toFixed(4)}, ${duration}s`
 		: `${duration}s`;
 
+	const kept = keptWorktreesSection(handle.agents.list());
 	if (handle.status === "completed") {
 		const resultText =
 			handle.result === undefined
 				? "(script returned no value)"
 				: previewValue(handle.result, RESULT_CAP, "\n… (truncated)");
-		return `Workflow **${handle.meta.name}** (${handle.runId}) completed — ${statsLine}.\n\nResult:\n${resultText}`;
+		return `Workflow **${handle.meta.name}** (${handle.runId}) completed — ${statsLine}.\n\nResult:\n${resultText}${kept}`;
 	}
 
 	const tail = handle.recentEvents.slice(-5).join("\n");
-	return `Workflow **${handle.meta.name}** (${handle.runId}) ${handle.status} — ${statsLine}.\nReason: ${handle.errorMessage ?? "unknown"}${tail ? `\nRecent progress:\n${tail}` : ""}\nCompleted agent calls are journaled; re-invoke the workflow tool with resumeFromRunId: "${handle.runId}" to continue from where it stopped.`;
+	return `Workflow **${handle.meta.name}** (${handle.runId}) ${handle.status} — ${statsLine}.\nReason: ${handle.errorMessage ?? "unknown"}${tail ? `\nRecent progress:\n${tail}` : ""}\nCompleted agent calls are journaled; re-invoke the workflow tool with resumeFromRunId: "${handle.runId}" to continue from where it stopped.${kept}`;
+}
+
+/**
+ * The report's list of isolation worktrees the run's agents left work in:
+ * their edits and commits live only there, so the model must be told where
+ * to review and merge them. Empty when every worktree was removed.
+ */
+function keptWorktreesSection(agents: readonly AgentRecord[]): string {
+	const kept = agents.filter((agent) => agent.worktree);
+	if (kept.length === 0) return "";
+	const lines = kept.map((agent) => `- ${agent.label}: ${agent.worktree!.path}${agent.worktree!.branch ? ` (branch ${agent.worktree!.branch})` : ""}`);
+	return `\n\nWorktrees kept with agents' changes or commits (review or merge them):\n${lines.join("\n")}`;
 }

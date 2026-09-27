@@ -5,8 +5,9 @@
  * server found in .mcp.json" and remembers the answer in
  * `enabledMcpjsonServers` / `disabledMcpjsonServers` /
  * `enableAllProjectMcpServers`. One Code honours those three keys READ-ONLY
- * (user and `.claude/settings.local.json` scopes — never the checked-in
- * project `settings.json`, which would let a repo approve itself) and keeps its
+ * (the approving two from the user's settings only, the disable list from
+ * `.claude/settings.local.json` too — never the checked-in project
+ * `settings.json`, which would let a repo approve itself) and keeps its
  * own answers under `~/.onecode`, keyed to a hash of each server's config so a
  * changed command re-prompts (CC keys by name alone). Servers from
  * `~/.claude.json` and plugins never prompt: the user wrote the first, and
@@ -14,8 +15,9 @@
  * ARE prompted (that file can be checked in — `git clone && onecode` would
  * otherwise spawn its servers with no consent, review H1); CC never reads
  * `mcpServers` from that file at all. Its `enableAll*`/`enabledMcpjsonServers`
- * policy keys are honoured only when the file is not git-tracked, for the same
- * reason, and never approve the servers that same file defines.
+ * policy keys are never honoured, for the same reason: git provenance cannot
+ * tell a user's file from one shipped with a copied checkout
+ * (`readClaudeMcpjsonPolicy`).
  *
  * A "No" is persisted as a project-scope disable (`lib/mcp-overrides.ts`), so
  * the server shows as disabled in `/mcp` and Enable there brings it back —
@@ -23,18 +25,14 @@
  * only. Same shape as `hooks/trust.ts`.
  */
 
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { promisify } from "node:util";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { readSettingsFile, settingsPaths } from "../lib/claude-settings.ts";
 import { boundConsentItems } from "../lib/consent-preview.ts";
-import { HARNESS_GIT_CONFIG } from "../lib/git.ts";
-import { oneCodeStateDir } from "../lib/paths.ts";
+import { consentStorePath } from "../lib/consent-stores.ts";
 import type { McpServer } from "./config.ts";
-
-const execFileAsync = promisify(execFile);
+import { escapeControlText } from "../lib/terminal-text.ts";
 
 interface ProjectApprovals {
 	/** "Use this and all future MCP servers in this project" was chosen. */
@@ -48,7 +46,7 @@ interface ApprovalStore {
 }
 
 export function approvalStorePath(): string {
-	return join(oneCodeStateDir(), "mcp", "project-approvals.json");
+	return consentStorePath("mcp");
 }
 
 /**
@@ -106,45 +104,29 @@ function stringArray(value: unknown): string[] {
 }
 
 /**
- * Whether `.claude/settings.local.json`'s policy keys may be trusted: true ONLY
- * when git ran inside a work tree and reported the file untracked — a file the
- * user wrote in their own checkout, not one a `git clone` shipped. FAILS
- * CLOSED: git missing, a timeout, a tracked file, and "not a git repository"
- * (exit 128) all return false. Until 2026-09-23 exit 128 counted as trusted,
- * so an extracted archive or copied folder carrying its own
- * `settings.local.json` approved the servers it shipped with no prompt
- * (SECURITY-REVIEW-2026-09-23 H4; review H1 before it). Async so it never
- * blocks the event loop from the connect path (findings §15).
+ * Claude Code's answers that One Code honours. The approving keys
+ * (`enableAllProjectMcpServers`, `enabledMcpjsonServers`) count only from the
+ * user's `~/.claude/settings.json`. Until 2026-09-27 they also counted from a
+ * `.claude/settings.local.json` that git reported untracked, but a directory
+ * that carries its own `.git` (a tarball of a working copy, a copied or
+ * synced checkout) makes a shipped file untracked too, so its servers
+ * connected with no prompt, headless included. No check of the local file
+ * can tell who wrote it, so it no longer approves anything: its servers go
+ * through One Code's own dialog and hash-keyed store. Its
+ * `disabledMcpjsonServers` only tightens, so it is still honoured. Async for
+ * its callers; nothing here shells out any more.
  */
-async function localPolicyFileIsTrusted(cwd: string, path: string): Promise<boolean> {
-	try {
-		await execFileAsync("git", [...HARNESS_GIT_CONFIG, "ls-files", "--error-unmatch", "--", path], { cwd, timeout: 5_000 });
-		return false; // exit 0 → tracked → do not trust its policy keys
-	} catch (error) {
-		// execFile rejects with `code` = the numeric exit code on a non-zero exit:
-		// 1 = untracked in a repo (trust), 128 = not a repo (no provenance: do
-		// not trust). A spawn failure or timeout gives a non-numeric code → closed.
-		return (error as { code?: unknown }).code === 1;
-	}
-}
-
 export async function readClaudeMcpjsonPolicy(cwd: string, home: string): Promise<ClaudeMcpjsonPolicy> {
 	const paths = settingsPaths(cwd, home);
 	const policy: ClaudeMcpjsonPolicy = { enableAll: false, enabled: new Set(), disabled: new Set() };
 	// Deliberately not `paths.project`: a checked-in settings.json granting
 	// enableAllProjectMcpServers would be the repo approving its own servers.
-	// The local file is read only when it is provably not git-tracked (an
-	// untracked, user-authored file), for the same reason — a checked-in
-	// settings.local.json would otherwise approve the repo's own .mcp.json
-	// servers (review H1).
-	// `disabledMcpjsonServers` only tightens, so it is honoured from the local
-	// file whatever its provenance; the approving keys need the check.
-	const localTrusted = await localPolicyFileIsTrusted(cwd, paths.local);
+	// The local file is in the checkout too, whatever git says about it.
 	for (const path of [paths.user, paths.local]) {
 		const file = readSettingsFile(path);
 		if (!file) continue;
 		for (const name of stringArray(file.disabledMcpjsonServers)) policy.disabled.add(name);
-		if (path === paths.local && !localTrusted) continue;
+		if (path === paths.local) continue;
 		if (typeof file.enableAllProjectMcpServers === "boolean") policy.enableAll = file.enableAllProjectMcpServers;
 		for (const name of stringArray(file.enabledMcpjsonServers)) policy.enabled.add(name);
 	}
@@ -190,6 +172,19 @@ export function persistEnableAll(projectRoot: string, storePath = approvalStoreP
 	writeStore(storePath, store);
 }
 
+/**
+ * Why `/mcp`'s Reconnect must not connect a server, or undefined. A server
+ * whose config references an unset variable is never connected (startup
+ * skips it and never asks for consent), so Reconnect must not either: it
+ * would spawn the command with the variable expanded to nothing, and a
+ * project server would run with no consent.
+ */
+export function reconnectRefusal(server: McpServer): string | undefined {
+	if (!server.missingEnv?.length) return undefined;
+	const names = server.missingEnv.join(", ");
+	return `"${server.name}" needs ${names} set in the environment. Set ${server.missingEnv.length === 1 ? "it" : "them"} and restart One Code.`;
+}
+
 export const CHOICE_ALL = "Use this and all future MCP servers in this project";
 export const CHOICE_THIS = "Use this MCP server";
 export const CHOICE_THESE = "Use these MCP servers";
@@ -198,17 +193,60 @@ export const CHOICE_NO = "No";
 /** Claude Code's dialog title for one or several newly found servers. */
 export function promptTitle(names: string[]): string {
 	return names.length === 1
-		? `New MCP server found in .mcp.json: ${names[0]}`
+		? `New MCP server found in .mcp.json: ${escapeControlText(names[0])}`
 		: `${names.length} new MCP servers found in .mcp.json`;
 }
 
 /**
+ * Environment variables that change what a stdio server's command runs, or
+ * where it loads code from: an interpreter's preload and search paths, the
+ * dynamic loader's, `PATH`, and npm's config. Matched case-insensitively
+ * (Windows environment names are). The consent dialog shows these values in
+ * full, because `npx -y some-mcp` with `NODE_OPTIONS=--require ./x.js` is not
+ * the command it looks like.
+ */
+const EXECUTION_ENV = new Set([
+	"PATH",
+	"NODE_OPTIONS",
+	"NODE_PATH",
+	"LD_PRELOAD",
+	"LD_LIBRARY_PATH",
+	"LD_AUDIT",
+	"PYTHONPATH",
+	"PYTHONSTARTUP",
+	"PYTHONHOME",
+	"PERL5OPT",
+	"PERL5LIB",
+	"RUBYOPT",
+	"RUBYLIB",
+	"BASH_ENV",
+	"ENV",
+	"JAVA_TOOL_OPTIONS",
+	"_JAVA_OPTIONS",
+	"JDK_JAVA_OPTIONS",
+	"ELECTRON_RUN_AS_NODE",
+	"GIT_SSH_COMMAND",
+	"GIT_EXEC_PATH",
+	"COMSPEC",
+	"PATHEXT",
+]);
+const EXECUTION_ENV_PREFIXES = ["DYLD_", "NPM_CONFIG_"];
+
+/** Whether an env key changes what a server's command executes (`EXECUTION_ENV`). */
+export function changesExecution(key: string): boolean {
+	const upper = key.toUpperCase();
+	return EXECUTION_ENV.has(upper) || EXECUTION_ENV_PREFIXES.some((prefix) => upper.startsWith(prefix));
+}
+
+/**
  * One line per server naming what would run, for the dialog body. Commands and
- * URLs are shown in full (a truncated one hides where a padded attack lives),
- * env values are never echoed, but the variable NAMES a server's
- * command/args/env/headers reference are listed (from `referencedEnv`, captured
- * before expansion) — approving a URL should not silently ship a credential the
- * header interpolates (review M5).
+ * URLs are shown in full (a truncated one hides where a padded attack lives).
+ * Every `env` key a stdio server sets is named; the values of the keys that
+ * change what executes (`changesExecution`) are shown in full, quoted, and the
+ * rest are not echoed, since they are usually credentials. The variable NAMES
+ * a server's command/args/env/headers reference are listed too (from
+ * `referencedEnv`, captured before expansion) — approving a URL should not
+ * silently ship a credential the header interpolates (review M5).
  */
 export function describeServers(servers: McpServer[]): string {
 	const lines = servers.map((server) => {
@@ -218,7 +256,9 @@ export function describeServers(servers: McpServer[]): string {
 				: `${server.name}: ${server.url}`;
 		const vars = server.referencedEnv ?? [];
 		const headerNames = server.kind === "http" ? Object.keys(server.headers ?? {}) : [];
+		const env = server.kind === "stdio" ? Object.entries(server.env ?? {}) : [];
 		const notes = [
+			env.length ? `env: ${env.map(([key, value]) => (changesExecution(key) ? `${key}=${JSON.stringify(value)}` : key)).join(", ")}` : "",
 			vars.length ? `uses ${vars.map((v) => `$${v}`).join(", ")}` : "",
 			headerNames.length ? `headers: ${headerNames.join(", ")}` : "",
 		].filter(Boolean);
@@ -263,9 +303,8 @@ export async function approveMcpServers(
 	const approved: McpServer[] = [];
 	const withheld: McpTrustOutcome["withheld"] = [];
 	const pending: McpServer[] = [];
-	// Reading CC's policy shells out to git (localPolicyFileIsTrusted), so only
-	// do it when a server actually needs consent — a session with only
-	// user-scope or plugin servers must not pay a git spawn at connect.
+	// Reading CC's policy reads two settings files, so only do it when a
+	// server actually needs consent.
 	const anyProjectScoped = servers.some((s) => isProjectScopedServer(s, pluginConfigPaths));
 	const claude: ClaudeMcpjsonPolicy = anyProjectScoped
 		? await readClaudeMcpjsonPolicy(cwd, home)
@@ -311,7 +350,7 @@ export async function approveMcpServers(
 		const fromLocal = pending.some(definedInLocalSettings);
 		const sources = [fromMcpjson && ".mcp.json", fromLocal && ".claude/settings.local.json"].filter(Boolean).join(" and ");
 		deps.notify(
-			`Skipped ${pending.length} MCP server${pending.length === 1 ? "" : "s"} from ${sources} (${pending.map((s) => s.name).join(", ")}): not yet approved and no UI to ask. Approve once in an interactive session${fromMcpjson ? ", or set enabledMcpjsonServers in .claude/settings.local.json" : ""}.`,
+			`Skipped ${pending.length} MCP server${pending.length === 1 ? "" : "s"} from ${sources} (${pending.map((s) => s.name).join(", ")}): not yet approved and no UI to ask. Approve once in an interactive session${fromMcpjson ? ", or set enabledMcpjsonServers in ~/.claude/settings.json" : ""}.`,
 		);
 		return { approved, withheld };
 	}

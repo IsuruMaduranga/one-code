@@ -3,6 +3,7 @@ import os from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { localGateMode } from "../../extensions/lib/permission-gate.ts";
+import { sessionResultsDir } from "../../extensions/lib/persisted-output.ts";
 import { persistProjectAllowApproval } from "../../extensions/permissions/project-trust.ts";
 import { buildGate as buildGateHarness } from "./helpers/permission-gate-harness.ts";
 
@@ -36,9 +37,12 @@ describe("permissionGateFactory", () => {
 
 	it("lets the agent read back its own persisted tool output (sessionResultsDir)", async () => {
 		const { handler } = buildGateHarness({ permissions: {} });
-		// No ctx in this harness → the same tmpdir fallback lib/persisted-output.ts writes to.
-		const persisted = join(os.tmpdir(), "one-code", "tool-results", "abc.txt");
+		// No ctx in this harness → the same private per-process fallback lib/persisted-output.ts writes to.
+		const persisted = join(sessionResultsDir(undefined), "tool-results", "abc.txt");
 		expect(await handler({ toolName: "read", input: { path: persisted } })).toBeUndefined();
+		// The shared temp folder every session-less run once wrote to is not working space.
+		const shared = await handler({ toolName: "read", input: { path: join(os.tmpdir(), "one-code", "tool-results", "abc.txt") } });
+		expect(shared?.block).toBe(true);
 	});
 
 	it("acceptEdits (the default here) writes inside the cwd only (2026-09-05 H1)", async () => {

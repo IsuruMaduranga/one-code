@@ -9,6 +9,7 @@
  */
 
 import type { MemoryEntry } from "./entries.ts";
+import { keyId } from "../lib/key-input.ts";
 
 export const MEMORY_DOCS_URL = "https://github.com/IsuruMaduranga/one-code";
 
@@ -23,20 +24,17 @@ export function initialMemoryState(): MemoryPanelState {
 export type MemoryKey = { kind: "up" | "down" | "enter" | "close" };
 
 export function decodeMemoryKey(data: string): MemoryKey | undefined {
-	switch (data) {
-		case "\x1b[A":
-		case "\x1bOA":
-		case "\x10": // ctrl+p
+	switch (keyId(data)) {
+		case "up":
+		case "ctrl+p":
 			return { kind: "up" };
-		case "\x1b[B":
-		case "\x1bOB":
-		case "\x0e": // ctrl+n
+		case "down":
+		case "ctrl+n":
 			return { kind: "down" };
-		case "\r":
-		case "\n":
+		case "enter":
 			return { kind: "enter" };
-		case "\x1b":
-		case "\x03": // ctrl+c
+		case "escape":
+		case "ctrl+c":
 			return { kind: "close" };
 		default:
 			return undefined;

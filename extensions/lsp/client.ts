@@ -19,6 +19,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import type { LspDiagnostic } from "./format.ts";
+import { childProcessEnv } from "../lib/app-launch.mjs";
 import { commandLaunch } from "../lib/command-launch.ts";
 import { killProcessTree } from "../lib/process-tree.ts";
 import { createReaderState, encodeMessage, type JsonRpcMessage, readMessages } from "./protocol.ts";
@@ -101,7 +102,9 @@ export class LspClient {
 	async start(): Promise<void> {
 		if (this.child) return;
 
-		const env = this.options.env ? { ...process.env, ...this.options.env } : process.env;
+		// The user's own environment under the bundled app (lib/app-launch.mjs).
+		const base = childProcessEnv(process.env);
+		const env = this.options.env ? { ...base, ...this.options.env } : base;
 		// On Windows an npm-installed server is a .cmd shim, which a bare spawn
 		// cannot start (lib/command-launch.ts); failure messages keep naming the command.
 		const launch = commandLaunch(this.config.command, this.config.args, env);

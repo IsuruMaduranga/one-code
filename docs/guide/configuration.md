@@ -35,10 +35,14 @@ atomically; a malformed file is reported rather than overwritten.
 | Variable | Moves |
 |---|---|
 | `ONECODE_STATE_DIR` | One Code's state (default `~/.onecode`). |
-| `PI_CODING_AGENT_DIR` | pi's agent directory. The bundled app sets it to `~/.onecode/agent`. |
+| `ONECODE_AGENT_DIR` | pi's agent directory under the bundled app (default `~/.onecode/agent`). |
+| `PI_CODING_AGENT_DIR` | pi's agent directory on your own pi. The bundled app ignores it, so it never touches your own pi's settings. |
 | `CLAUDE_CONFIG_DIR` | Where Claude Code's user configuration is read from (default `~/.claude`). |
 
-Setting one doesn't move the others.
+Setting one doesn't move the others. Commands the bundled app runs for you
+(the `bash` tool, `!` commands, hooks, MCP servers, and language servers)
+get your own `PI_CODING_AGENT_DIR` back, so a `pi` started from inside a
+session is your own pi, not the app.
 
 ## What is stored under ~/.onecode
 
@@ -51,7 +55,7 @@ Setting one doesn't move the others.
 | `hooks/project-approvals.json` | Which projects' hooks you approved. |
 | `mcp/project-approvals.json` | Which projects' MCP servers you approved. |
 | `permissions/project-allow-approvals.json` | Which projects' allow rules you trusted. |
-| `mcp-auth/<server>.json` | OAuth tokens for MCP servers, owner-readable only. |
+| `mcp-auth/<server>-<hash>.json` | OAuth tokens for MCP servers, one file per server name, URL and headers, owner-readable only. |
 | `cache/artificial-analysis.json` | The cached model-capability snapshot, when a key is set. |
 | `hooks/hooks-decisions.jsonl` | A hook decision log, written only while `CC_HOOKS_DEBUG` is set. |
 

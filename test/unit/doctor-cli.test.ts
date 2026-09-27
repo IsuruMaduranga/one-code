@@ -72,7 +72,7 @@ describe("app/bin.mjs doctor routing (pin against the installed pi)", () => {
 		// day for a release); set after `process.exit()` in the doctor branch it
 		// would never be seen by `onecode doctor`.
 		const source = readFileSync(join(repoRoot, "app", "bin.mjs"), "utf8");
-		const methodAt = source.indexOf("process.env.ONECODE_INSTALL_METHOD ||=");
+		const methodAt = source.indexOf("applyLauncherEnv(process.env, { home: homedir(), appVersion, installMethod })");
 		const doctorRunAt = source.indexOf("if (runDoctor) {");
 		expect(methodAt).toBeGreaterThan(0);
 		expect(doctorRunAt).toBeGreaterThan(methodAt);

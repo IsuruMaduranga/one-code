@@ -15,13 +15,27 @@ vi.mock("node:crypto", async (importOriginal) => {
 	let n = 0;
 	return { ...actual, randomUUID: () => `${(++n).toString(16).padStart(8, "0")}-0000-4000-8000-000000000000` };
 });
+// A monitor spool whose write stream fails: the open targets a directory that does not exist.
+const spool = vi.hoisted(() => ({ fail: false }));
+vi.mock("node:fs", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("node:fs")>();
+	const { dirname, join } = await import("node:path");
+	return {
+		...actual,
+		createWriteStream: ((path: string, options?: unknown) =>
+			actual.createWriteStream(spool.fail ? join(dirname(path), "missing", "output.log") : path, options as never)) as typeof actual.createWriteStream,
+	};
+});
 import backgroundExtension from "../../extensions/background/index.ts";
 import { MONITOR_BATCH_MAX_LINES } from "../../extensions/background/monitor-batch.ts";
+import { TASK_REGISTER_CHANNEL } from "../../extensions/background/registry.ts";
 import { DEFAULT_COALESCE_MS, NOTIFICATION_ID_KEY } from "../../extensions/lib/notifications.ts";
 import { SESSION_WORK_CHANNEL, type SessionWorkQuery } from "../../extensions/lib/session-work.ts";
 import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, agentOwnsCronJobs } from "../../extensions/lib/agent-cron.ts";
 import { SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../../extensions/lib/skill-body.ts";
 import { BUNDLED_SKILLS_DIR } from "../../extensions/lib/skill-scan.ts";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WORKTREE_CHANNEL } from "../../extensions/lib/worktree-channel.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
@@ -323,6 +337,24 @@ describe("background wiring: cron tools", () => {
 		expect(cronFires(fake)).toHaveLength(2);
 	});
 
+	it("a recurring job keeps firing, each fire opening its turn, after a tick settles on a provider error or an Esc (A3-H1)", async () => {
+		for (const stopReason of ["error", "aborted"]) {
+			vi.useFakeTimers();
+			vi.setSystemTime(new Date(2026, 8, 25, 12, 0, 0));
+			const fake = mount();
+			const ctx = liveSessionCtx();
+			await cronCall(fake, "cron_create", { cron: "*/5 * * * *", prompt: "check CI" }, ctx);
+			await fake.fire("agent_start", {});
+			await fake.fire("agent_end", { messages: [{ role: "assistant", stopReason }] });
+			await fake.fire("agent_settled", {});
+			await vi.advanceTimersByTimeAsync(3 * 60 * 60_000);
+			const fires = cronFires(fake);
+			expect(fires.length).toBeGreaterThanOrEqual(35);
+			expect(fires.every((m) => m.options?.triggerTurn === true && m.options?.deliverAs === "steer")).toBe(true);
+			vi.useRealTimers();
+		}
+	});
+
 	it("errors fail loud: a bad expression, an unknown id", async () => {
 		const fake = mount();
 		const ctx = liveSessionCtx();
@@ -543,6 +575,36 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 		expect(fake.sentMessages).toHaveLength(0); // no completion notification
 	});
 
+	it("A3-H1: after an Esc a monitor keeps one bounded batch while held, and sends it once the next turn starts", async () => {
+		const fake = mount();
+		const ctx = liveSessionCtx();
+		await fake.fire("agent_start", {}, ctx);
+		const start = (await fake.tools.get("monitor")!.execute(
+			"c1",
+			// Ten builtin echoes per tick: well past the 50-line batch cap within the
+			// wait even on a slow runner, where each `sleep` fork costs more.
+			{ command: "while true; do for i in 1 2 3 4 5 6 7 8 9 10; do echo tick; done; sleep 0.05; done", description: "ticker" },
+			undefined,
+			undefined,
+			ctx,
+		)) as { details: { taskId: string } };
+		await fake.fire("agent_end", { messages: [{ role: "assistant", stopReason: "aborted" }] }, ctx);
+		await fake.fire("agent_settled", {}, ctx);
+		fake.sentMessages.length = 0;
+		// Several idle flush windows pass while held: nothing is queued, one batch accumulates.
+		await new Promise((resolve) => setTimeout(resolve, 3_500));
+		expect(fake.sentMessages).toHaveLength(0);
+		// The user's next prompt ends the hold; the next flush tick sends the one batch.
+		await fake.fire("before_agent_start", {}, ctx);
+		for (let waited = 0; fake.sentMessages.length === 0 && waited < 3_000; waited += 50) {
+			await new Promise((resolve) => setTimeout(resolve, 50));
+		}
+		await fake.tools.get("task_stop")!.execute("c2", { task_id: start.details.taskId }, undefined, undefined, ctx);
+		const batches = fake.sentMessages.filter((m) => ((m.message.content as Array<{ text: string }>)[0]?.text ?? "").includes("Monitor event"));
+		expect(batches).toHaveLength(1);
+		expect((batches[0].message.content as Array<{ text: string }>)[0].text).toMatch(/\+\d+ more line\(s\) not shown/);
+	}, 10_000);
+
 	it("M2: task_stop ends the monitored command itself (a `cmd; echo` sequence), so the task finishes at once", async () => {
 		const fake = mount();
 		const ctx = liveSessionCtx();
@@ -591,6 +653,208 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 		expect(lookup.content[0].text).toContain("Known tasks: (none)");
 		await new Promise((resolve) => setTimeout(resolve, DEFAULT_COALESCE_MS + 50));
 		expect(fake.sentMessages).toHaveLength(0);
+	});
+
+	it("A3-M2: a last line without a newline is an event, one-shot and interactive; a silent monitor says it saw nothing", async () => {
+		const fake = mount();
+		const oneShot = (await fake.tools.get("monitor")!.execute(
+			"c1",
+			{ command: "printf 'first\\nREADY'", description: "health" },
+			undefined,
+			undefined,
+			createFakeCtx({ mode: "print" }),
+		)) as { content: Array<{ text: string }> };
+		expect(oneShot.content[0].text).toContain("completed after 2 event(s)");
+		expect(oneShot.content[0].text).toContain("first\nREADY");
+
+		const ctx = liveSessionCtx();
+		const output = async (command: string) => {
+			const start = (await fake.tools.get("monitor")!.execute("c2", { command, description: "tail" }, undefined, undefined, ctx)) as {
+				details: { taskId: string };
+			};
+			const out = (await fake.tools.get("task_output")!.execute("c3", { task_id: start.details.taskId, block: true, timeout: 5000 }, undefined, undefined, ctx)) as {
+				content: Array<{ text: string }>;
+			};
+			return out.content[0].text;
+		};
+		expect(await output("printf 'READY'")).toContain("READY");
+		const silent = await output("true");
+		expect(silent).toContain("(no output — the monitor received no events and nothing on stderr)");
+		expect(silent).not.toContain("(no output yet)");
+	});
+
+	it("A6-L2: a monitor keeps a UTF-8 character split across two reads whole", async () => {
+		const fake = mount();
+		const result = (await fake.tools.get("monitor")!.execute(
+			"c1",
+			{ command: "printf '\\342\\202'; sleep 0.2; printf '\\254 ok\\n'", description: "utf8" },
+			undefined,
+			undefined,
+			createFakeCtx({ mode: "print" }),
+		)) as { content: Array<{ text: string }> };
+		expect(result.content[0].text).toContain("€ ok");
+		expect(result.content[0].text).not.toContain("\uFFFD");
+	});
+
+	it("A3-L3: task_output clips a long stream behind a header naming the monitor's spool file, which holds it all", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "monitor-spool-"));
+		try {
+			const fake = mount();
+			const ctx = liveSessionCtx({ sessionManager: { getSessionDir: () => dir } });
+			const start = (await fake.tools.get("monitor")!.execute(
+				"c1",
+				{ command: "for i in $(seq 1 4000); do echo line-$i-padding-padding; done", description: "long" },
+				undefined,
+				undefined,
+				ctx,
+			)) as { details: { taskId: string } };
+			const out = (await fake.tools.get("task_output")!.execute("c2", { task_id: start.details.taskId, block: true, timeout: 5000 }, undefined, undefined, ctx)) as {
+				content: Array<{ text: string }>;
+				details: { logPath?: string };
+			};
+			const logPath = join(dir, "monitor", start.details.taskId, "output.log");
+			expect(out.details.logPath).toBe(logPath);
+			const body = out.content[0].text.split("\n\n").slice(1).join("\n\n");
+			expect(body.startsWith(`[Truncated. Full output: ${logPath}]`)).toBe(true);
+			expect(body.length).toBeLessThanOrEqual(32_000);
+			expect(body).toContain("line-4000-");
+			// Whole the moment the blocking task_output returns: the task finishes after the spool closes.
+			const spooled = readFileSync(logPath, "utf8");
+			expect(spooled.startsWith("line-1-padding-padding\n")).toBe(true);
+			expect(spooled).toContain("line-4000-padding-padding\n");
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("a monitor whose spool fails names no spool file and persists its output instead", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "monitor-spool-fail-"));
+		spool.fail = true;
+		try {
+			const fake = mount();
+			const ctx = liveSessionCtx({ sessionManager: { getSessionDir: () => dir } });
+			const start = (await fake.tools.get("monitor")!.execute(
+				"c1",
+				{ command: "for i in $(seq 1 4000); do echo line-$i-padding-padding; done", description: "long" },
+				undefined,
+				undefined,
+				ctx,
+			)) as { details: { taskId: string } };
+			const out = (await fake.tools.get("task_output")!.execute("c2", { task_id: start.details.taskId, block: true, timeout: 5000 }, undefined, undefined, ctx)) as {
+				content: Array<{ text: string }>;
+				details: { logPath?: string };
+			};
+			expect(out.details.logPath).toBeUndefined();
+			const text = out.content[0].text;
+			expect(text).not.toContain("Full output: ");
+			const file = text.match(/Full output saved to: (\S+)/)?.[1];
+			expect(file).toBeDefined();
+			const saved = readFileSync(file!, "utf8");
+			expect(saved.startsWith("line-1-padding-padding\n")).toBe(true);
+			expect(saved).toContain("line-4000-padding-padding");
+		} finally {
+			spool.fail = false;
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("a one-shot monitor past the in-memory cap persists every line from its spool", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "monitor-oneshot-spool-"));
+		try {
+			const fake = mount();
+			const result = (await fake.tools.get("monitor")!.execute(
+				"c1",
+				{ command: "for i in $(seq 1 12000); do echo line-$i-padding-padding-padding; done", description: "long" },
+				undefined,
+				undefined,
+				createFakeCtx({ mode: "print", sessionManager: { getSessionDir: () => dir } }),
+			)) as { content: Array<{ text: string }> };
+			const text = result.content[0].text;
+			expect(text).toContain("completed after 12000 event(s)");
+			expect(text).toContain("Preview (first 2KB):\nline-1-padding-padding-padding\n");
+			// The spool itself is named: nothing reads it whole or copies it.
+			const file = text.match(/Full output saved to: (\S+)/)?.[1];
+			expect(file?.startsWith(join(dir, "monitor"))).toBe(true);
+			expect(file?.endsWith("output.log")).toBe(true);
+			expect(existsSync(join(dir, "tool-results"))).toBe(false);
+			const saved = readFileSync(file!, "utf8");
+			expect(saved.startsWith("line-1-padding-padding-padding\n")).toBe(true);
+			expect(saved).toContain("line-12000-padding-padding-padding");
+			expect(saved).not.toContain("earlier output truncated");
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("a session-less one-shot monitor past the in-memory cap still spools every line", async () => {
+		const fake = mount();
+		const result = (await fake.tools.get("monitor")!.execute(
+			"c1",
+			{ command: "for i in $(seq 1 12000); do echo line-$i-padding-padding-padding; done", description: "long" },
+			undefined,
+			undefined,
+			createFakeCtx({ mode: "print", sessionManager: { getSessionDir: () => undefined, getSessionId: () => "monitor-sessionless-test" } }),
+		)) as { content: Array<{ text: string }> };
+		const file = result.content[0].text.match(/Full output saved to: (\S+)/)?.[1];
+		expect(file).toBeDefined();
+		try {
+			expect(file!).toContain(join("monitor-sessionless-test", "monitor"));
+			const saved = readFileSync(file!, "utf8");
+			expect(saved.startsWith("line-1-padding-padding-padding\n")).toBe(true);
+			expect(saved).toContain("line-12000-padding-padding-padding");
+		} finally {
+			rmSync(join(file!, "..", "..", ".."), { recursive: true, force: true });
+		}
+	});
+
+	it("a one-shot monitor past the in-memory cap whose spool fails says only the tail was kept", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "monitor-oneshot-spool-fail-"));
+		spool.fail = true;
+		try {
+			const fake = mount();
+			const result = (await fake.tools.get("monitor")!.execute(
+				"c1",
+				{ command: "for i in $(seq 1 12000); do echo line-$i-padding-padding-padding; done", description: "long" },
+				undefined,
+				undefined,
+				createFakeCtx({ mode: "print", sessionManager: { getSessionDir: () => dir } }),
+			)) as { content: Array<{ text: string }> };
+			const text = result.content[0].text;
+			expect(text).toContain("<persisted-output>");
+			expect(text).toContain("[The monitor's spool file could not be written, so only the last 200,000 characters of its output were kept.]");
+			const file = text.match(/Full output saved to: (\S+)/)?.[1];
+			expect(readFileSync(file!, "utf8")).toContain("line-12000-padding-padding-padding");
+		} finally {
+			spool.fail = false;
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("A3-L3: a long output with no spool file is persisted whole, never cut", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "task-output-persist-"));
+		try {
+			const fake = mount();
+			const ctx = liveSessionCtx({ sessionManager: { getSessionDir: () => dir } });
+			const report = `${"start of the report\n"}${"x".repeat(60_000)}\nend of the report`;
+			fake.events.emit(TASK_REGISTER_CHANNEL, {
+				id: "bagent01",
+				kind: "agent",
+				description: "explore",
+				status: "completed",
+				startedAt: Date.now(),
+				output: () => report,
+				stop: () => {},
+				finished: Promise.resolve(),
+			});
+			const out = (await fake.tools.get("task_output")!.execute("c1", { task_id: "bagent01" }, undefined, undefined, ctx)) as { content: Array<{ text: string }> };
+			const text = out.content[0].text;
+			expect(text).toContain("<persisted-output>");
+			const file = text.match(/Full output saved to: (\S+)/)?.[1];
+			expect(file).toBeDefined();
+			expect(readFileSync(file!, "utf8")).toBe(report);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 
 	it("M3: a one-shot monitor stops when the tool call is aborted and says so", async () => {

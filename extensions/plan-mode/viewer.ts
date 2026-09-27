@@ -11,6 +11,7 @@
  */
 
 import { cutPlainText } from "../lib/tui-render.ts";
+import { keyId } from "../lib/key-input.ts";
 
 /** Hard-wrap plain text to `width` columns, preserving blank lines. */
 export { wrapPlainText as wrapPlanText } from "../lib/tui-render.ts";
@@ -32,33 +33,29 @@ export type ViewerKey =
  * classifier model is reachable).
  */
 export function decodeViewerKey(data: string, page: number): ViewerKey | undefined {
-	switch (data) {
-		case "\x1b[A":
-		case "\x1bOA":
+	const id = keyId(data);
+	switch (id) {
+		case "up":
 			return { kind: "scroll", delta: -1 };
-		case "\x1b[B":
-		case "\x1bOB":
+		case "down":
 			return { kind: "scroll", delta: 1 };
-		case "\x1b[5~":
+		case "pageUp":
 			return { kind: "scroll", delta: -page };
-		case "\x1b[6~":
+		case "pageDown":
 			return { kind: "scroll", delta: page };
-		case "\x1b[D":
-		case "\x1bOD":
+		case "left":
 			return { kind: "choice", delta: -1 };
-		case "\x1b[C":
-		case "\x1bOC":
-		case "\t":
+		case "right":
+		case "tab":
 			return { kind: "choice", delta: 1 };
-		case "\r":
-		case "\n":
+		case "enter":
 			return { kind: "confirm" };
-		case "\x1b":
-		case "\x03": // ctrl+c — same intent as escape while the dialog is focused
+		case "escape":
+		case "ctrl+c": // same intent as escape while the dialog is focused
 			return { kind: "cancel" };
 		default:
-			if (data.length === 1 && data >= "1" && data <= "9") {
-				return { kind: "pick", index: Number(data) - 1 };
+			if (id && id.length === 1 && id >= "1" && id <= "9") {
+				return { kind: "pick", index: Number(id) - 1 };
 			}
 			return undefined;
 	}

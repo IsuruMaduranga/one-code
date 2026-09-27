@@ -11,7 +11,7 @@
  * `before_agent_start`'s systemPromptOptions rather than rediscovered here.
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import os from "node:os";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getAgentDir, stripFrontmatter } from "@earendil-works/pi-coding-agent";
@@ -46,7 +46,7 @@ import {
 	withoutDuplicateSkillCommands,
 } from "./invoke.ts";
 import { decodeSkillsKey } from "./panel/keys.ts";
-import { skillListingText } from "./listing.ts";
+import { frontmatterFlag, skillListingText } from "./listing.ts";
 import { renderSkillsPanel, type SkillsPaint } from "./panel/render.ts";
 import { applySkillsKey, initialSkillsState, type SkillsRow, visibleRows } from "./panel/state.ts";
 import { announceArgumentHint, type CommandHint, frontmatterCommandHint } from "../lib/argument-hints.ts";
@@ -62,7 +62,14 @@ interface IndexedSkill {
 	scope: SkillScope;
 	state: SkillState;
 	pluginName?: string;
+	/**
+	 * Frontmatter `disable-model-invocation: true`: only the user starts it (a
+	 * typed `/<name>`); it is left out of the model's listing and the `skill`
+	 * tool refuses it, as Claude Code's Skill tool does.
+	 */
+	disableModelInvocation?: boolean;
 }
+
 
 /** Bounded dock like the /plugins panel — keeps the transcript visible above. */
 const SKILLS_PANEL_MAX_HEIGHT = 24;
@@ -78,8 +85,9 @@ export default function skillExtension(pi: ExtensionAPI) {
 	 * before_agent_start). Until then an idle skill delivery goes out as a user
 	 * message: pi's `sendMessage(…, {triggerTurn})` skips that preamble, so a
 	 * session opening with `/loop …` or `/simplify` ran its first request
-	 * without our system prompt (lib/notifications.ts, "First turn of a
-	 * session"; upstream_prs.md #17).
+	 * without our system prompt or reminder stack (lib/notifications.ts,
+	 * "First turn of a session"; upstream_prs.md #17). Later turns get the
+	 * prompt from system-prompt's context_with_system handler (idle-turn.ts).
 	 */
 	let prompted = false;
 
@@ -93,7 +101,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 		sessionCwd = ctx.cwd;
 		const skills = event.systemPromptOptions.skills ?? [];
 		piSkills = skills.map((skill) => {
-			const record = skill as unknown as { name: string; description?: string; path?: string; filePath?: string };
+			const record = skill as unknown as { name: string; description?: string; path?: string; filePath?: string; disableModelInvocation?: boolean };
 			const path = record.path ?? record.filePath ?? "";
 			return {
 				name: record.name,
@@ -102,6 +110,8 @@ export default function skillExtension(pi: ExtensionAPI) {
 				source: "project" as const,
 				scope: scopeForPath(path, os.homedir(), getAgentDir()),
 				state: "on" as const, // resolved per index() call below
+				// pi reads only a YAML `true`; Claude Code also takes the string "true".
+				disableModelInvocation: record.disableModelInvocation === true || (path ? readModelInvocationDisabled(path) : false),
 			};
 		});
 		// Claude Code lists skills as a <system-reminder> on the first user message
@@ -143,6 +153,32 @@ export default function skillExtension(pi: ExtensionAPI) {
 		return typeof description === "string" ? description : undefined;
 	};
 
+	/**
+	 * A SKILL.md's `disable-model-invocation` flag, read apart from the
+	 * description cache and again whenever the file changes: a flag added
+	 * mid-session must stop the model loading the skill, while the listing's
+	 * descriptions stay byte-stable.
+	 */
+	const invocationFlagCache = new Map<string, { mtimeMs: number; disabled: boolean }>();
+	const readModelInvocationDisabled = (path: string): boolean => {
+		let mtimeMs = -1;
+		try {
+			mtimeMs = statSync(path).mtimeMs;
+		} catch {
+			// Unreadable: parsed (and failed) below, cached under -1.
+		}
+		const cached = invocationFlagCache.get(path);
+		if (cached && cached.mtimeMs === mtimeMs) return cached.disabled;
+		let disabled = false;
+		try {
+			disabled = frontmatterFlag(parseFrontmatterLoosely(readFileSync(path, "utf-8")).frontmatter?.["disable-model-invocation"]);
+		} catch {
+			// No file, no flag.
+		}
+		invocationFlagCache.set(path, { mtimeMs, disabled });
+		return disabled;
+	};
+
 	/** A SKILL.md's `argument-hint`, the prompt's placeholder after its command (lib/argument-hints.ts). */
 	const readArgumentHint = (path: string): CommandHint | undefined => frontmatterCommandHint(readFrontmatter(path));
 
@@ -171,6 +207,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 						source: "project" as const,
 						scope: skill.scope,
 						state: "on" as const,
+						disableModelInvocation: readModelInvocationDisabled(skill.path),
 					}));
 		const project = base.map((skill) => ({
 			...skill,
@@ -187,6 +224,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 			scope: "plugin" as const,
 			state: "on" as const,
 			pluginName: skill.plugin,
+			disableModelInvocation: readModelInvocationDisabled(skill.path),
 		}));
 		return [...project, ...plugin];
 	};
@@ -263,6 +301,16 @@ export default function skillExtension(pi: ExtensionAPI) {
 				return {
 					content: [{ type: "text", text: `Skill "${found.name}" is turned off — the user can re-enable it from ${where}.` }],
 					details: { skill: found.name, state: found.state } as Record<string, unknown>,
+					isError: true,
+				};
+			}
+
+			// Only the user may start a skill marked `disable-model-invocation`
+			// (a typed `/<name>` runs through deliverSkill, not this tool).
+			if (found.disableModelInvocation) {
+				return {
+					content: [{ type: "text", text: `Skill ${wanted} cannot be used with Skill tool due to disable-model-invocation` }],
+					details: { skill: found.name } as Record<string, unknown>,
 					isError: true,
 				};
 			}

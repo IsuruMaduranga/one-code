@@ -84,7 +84,8 @@ The keys One Code honors:
 | `hooks` | All | Project hooks need one-time approval. See [Hooks](hooks.md). |
 | `env.CLAUDE_CODE_SUBAGENT_MODEL` | User, managed | The only `env` key read. |
 | `enabledPlugins` | All | Later scope wins per plugin. |
-| `enabledMcpjsonServers`, `disabledMcpjsonServers`, `enableAllProjectMcpServers` | User, untracked local | Never from a checked-in project file. |
+| `enabledMcpjsonServers`, `enableAllProjectMcpServers` | User | Never from a project file, local included. |
+| `disabledMcpjsonServers` | User, local | |
 | `mcpServers` | `~/.claude.json`, `.claude/settings.local.json` | |
 
 Not honored: other `env` keys,

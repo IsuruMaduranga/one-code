@@ -65,7 +65,7 @@ import { gitStatusOutput } from "../lib/git.ts";
 import { gitStatusMeta, gitStatusMetaArgs, reachesIgnoredFiles, wantsGitStatusMeta } from "../auto-mode/git-status-meta.ts";
 import { projectMemoryDir } from "../lib/memory.ts";
 import { sessionResultsDir } from "../lib/persisted-output.ts";
-import { sessionScratchpadDir } from "../lib/scratchpad.ts";
+import { privateSessionScratchpadDir } from "../lib/scratchpad.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import {
 	decide,
@@ -103,7 +103,7 @@ import {
 	type SourcedDirectory,
 	type SourcedRule,
 } from "./settings.ts";
-import { MODE_ENV, resolvedOrSelf, runtimeProtectedDirs } from "../lib/permission-gate.ts";
+import { MODE_ENV, resolvedOrSelf, runtimeProtectedDirs, runtimeSecretPaths } from "../lib/permission-gate.ts";
 import { CLASSIFIER_SETTING_CHANGED_CHANNEL } from "../lib/settings-channels.ts";
 import { describeProjectAllow, persistProjectAllowApproval, projectAllowApproved, projectDirectoryConsentEntry, type TrustFiring } from "./project-trust.ts";
 import { parseAddDirFlag, tooBroadForWorkspace, validateWorkspaceDirectory } from "./workspace.ts";
@@ -344,6 +344,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	let oneCodeProjectSettingsFile: string | undefined;
 	/** pi's own agent directory, protected like the static list (lib/permission-gate.ts runtimeProtectedDirs). */
 	let protectedDirs: string[] = [];
+	/** The harness's own secret stores, never read unclassified outside the working space (runtimeSecretPaths). */
+	let secretPaths: string[] = [];
 	/** The harness's readable session dirs, resolved at session start; `readableRoots` adds the workspace to them. */
 	let harnessReadableRoots: string[] = [];
 	/** The shipped docs the `one-code-guide` agent reads (lib/guide-docs.ts): readable, never writable. */
@@ -861,7 +863,9 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			sessionWorkspaceDirs.length = 0;
 		}
 		memoryDirPath = projectMemoryDir(ctx.cwd);
-		scratchpadDirPath = sessionScratchpadDir(ctx.cwd, ctx.sessionManager.getSessionId());
+		// Working space only when it is private to this user: another local user
+		// who owns the directory on a shared /tmp could swap what is written there.
+		scratchpadDirPath = privateSessionScratchpadDir(ctx.cwd, ctx.sessionManager.getSessionId());
 		// Resolved like the subjects compared against it (a symlinked parent, macOS /var).
 		resultsDirPath = resolvedOrSelf(sessionResultsDir(ctx));
 		sessionDirPath = resolvedOrSelf(ctx.sessionManager.getSessionDir());
@@ -877,6 +881,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		resolvedCwd = resolveForContainment(ctx.cwd);
 		oneCodeProjectSettingsFile = oneCodeProjectSettingsPath(ctx.cwd, os.homedir());
 		protectedDirs = runtimeProtectedDirs();
+		secretPaths = runtimeSecretPaths(os.homedir());
 		reloadSettings(ctx);
 		// The system prompt lists the workspace as the session starts (lib/workspace-channel.ts).
 		pi.events.emit(WORKSPACE_CHANNEL, { dirs: workspacePaths } satisfies WorkspaceAnnouncement);
@@ -1070,7 +1075,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// command that actually runs). The lookup is by toolCallId on purpose: a
 		// value inside `event.input` would be the model's to write, and rules would
 		// match a string of its choosing.
-		const original = isShellTool(normalizedTool) ? originalCommands.get(event.toolCallId) : undefined;
+		// `monitor` is cd-wrapped the same way (worktree/rewrite.ts).
+		const original = isShellTool(normalizedTool) || normalizedTool === "monitor" ? originalCommands.get(event.toolCallId) : undefined;
 		const matchSubject = original?.command ?? subject;
 		const callCwd = original?.cwd ?? ctx.cwd;
 
@@ -1115,6 +1121,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				resultsDirPath,
 				sessionDirPath,
 				protectedDirs,
+				secretPaths,
 				workspaceDirs: dirs,
 				claudeCodeFastPaths: usesClaudeCodeFastPaths(ctx.model),
 				blockReadsOutsideWorkingDirectories: blockOutsideReads,
@@ -1399,6 +1406,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			resultsDirPath,
 			sessionDirPath,
 			protectedDirs,
+			secretPaths,
 			workspaceDirs,
 			// The child's own model: a cheaper subagent gets the stricter gate.
 			claudeCodeFastPaths: usesClaudeCodeFastPaths(call.model),
@@ -2015,11 +2023,14 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// we answer `onReview`, so the verdict travels with the report. Answer
 		// synchronously when no review will run, so the report is never delayed
 		// for nothing. A review that throws fails closed: the report goes out
-		// flagged, not clean.
+		// flagged, not clean. A pause does not skip it: the pause is about the
+		// main loop's blocks, and a child already running when it tripped still
+		// hands back a sequence nobody judged whole (PERMISSIONS-AUTOMODE-REVIEW
+		// -2026-09-26 L1).
 		const respond = payload.onReview;
 		if (!respond) return; // every background emitter supplies the callback (hand-back-review.ts)
 		const ctx = lastReviewCtx;
-		if (mode !== "auto" || payload.actions.length === 0 || pauseTracker.isPaused() || !ctx) {
+		if (mode !== "auto" || payload.actions.length === 0 || !ctx) {
 			respond(undefined);
 			return;
 		}
@@ -2039,7 +2050,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		lastReviewCtx = ctx;
 		const actions = childActions.get(event.toolCallId);
 		if (actions) childActions.delete(event.toolCallId);
-		if (mode !== "auto" || !actions?.length || pauseTracker.isPaused()) return undefined;
+		// Reviewed while paused too, as the background path above is.
+		if (mode !== "auto" || !actions?.length) return undefined;
 		const reason = await reviewCompletedRun(actions, ctx, "completed run", ctx.signal);
 		if (!reason) return undefined;
 		return { content: [{ type: "text" as const, text: reviewFlagged(reason) }, ...event.content] };

@@ -44,6 +44,7 @@ import {
 import { linesComponent, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import { markAssistantMarkdown } from "./assistant-marker.ts";
 import { PROMPT_PADDING, PromptEditor } from "./prompt-editor.ts";
+import { sanitizeTitle } from "../lib/terminal-text.ts";
 
 export { truncateLine };
 
@@ -305,7 +306,9 @@ export default function brandingExtension(pi: ExtensionAPI) {
 	const retitle = (ctx: { hasUI: boolean; cwd: string; ui: { setTitle(title: string): void } }) => {
 		if (!live || !ctx.hasUI) return;
 		const name = pi.getSessionName?.()?.trim();
-		const title = name ? `${NAME} - ${name} - ${basename(ctx.cwd)}` : NAME;
+		// pi writes the title inside its OSC 0 and strips only CR and LF; a BEL or
+		// ESC in the session name (any source) or the directory would end it early.
+		const title = sanitizeTitle(name ? `${NAME} - ${name} - ${basename(ctx.cwd)}` : NAME);
 		if (title === lastTitle) return; // agent_start fires every turn; write only on change
 		lastTitle = title;
 		ctx.ui.setTitle(title);

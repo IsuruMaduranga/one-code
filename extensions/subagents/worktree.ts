@@ -3,22 +3,26 @@
  *
  * Claude Code's `isolation: "worktree"` gives an agent its own checkout so
  * parallel agents editing files cannot collide, and removes it again if the agent
- * changed nothing.
+ * changed nothing: no uncommitted change and no commit past the HEAD it was
+ * created at. A worktree whose agent committed its work is kept like one with
+ * uncommitted edits, so the commits stay reachable on its branch.
  */
 
 import { execFile } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { registerWorktreeIsolation, releaseWorktreeIsolation } from "../lib/worktree-isolation.ts";
-import { HARNESS_GIT_CONFIG } from "../lib/git.ts";
+import { findProjectRoot, HARNESS_GIT_CONFIG } from "../lib/git.ts";
 
 const run = promisify(execFile);
 
 export interface Worktree {
 	path: string;
 	branch: string;
+	/** The commit the worktree was created at; commits past it are the agent's work. */
+	baseCommit: string;
 }
 
 async function git(args: string[], cwd: string): Promise<string> {
@@ -34,7 +38,7 @@ export async function isGitRepo(cwd: string): Promise<boolean> {
 	}
 }
 
-/** Creates a detached worktree at the current HEAD. */
+/** Creates a worktree on a new throwaway branch at the current HEAD. */
 export async function createWorktree(cwd: string, label: string): Promise<Worktree> {
 	const safeLabel = label.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 24) || "agent";
 	const dir = mkdtempSync(join(tmpdir(), `cc-wt-${safeLabel}-`));
@@ -42,23 +46,45 @@ export async function createWorktree(cwd: string, label: string): Promise<Worktr
 	const branch = `cc-subagent/${safeLabel}-${Date.now().toString(36)}`;
 	await git(["worktree", "add", "-b", branch, path, "HEAD"], cwd);
 	// Register for the child permission gate's git-isolation guard. The shared
-	// checkout's ROOT, not cwd — the spawn may run from a subdirectory.
+	// checkout's ROOT, not cwd — the spawn may run from a subdirectory — and the
+	// MAIN checkout's root when it runs from a linked worktree (an entered
+	// `enter_worktree` session), so git into either is refused.
 	let sharedRoot = cwd;
 	try {
-		sharedRoot = await git(["rev-parse", "--show-toplevel"], cwd);
+		// git prints `C:/…` on Windows; resolve gives the native form.
+		const top = resolve(await git(["rev-parse", "--show-toplevel"], cwd));
+		sharedRoot = findProjectRoot(top) ?? top;
 	} catch {
 		// Keep cwd as the best available anchor.
 	}
 	registerWorktreeIsolation(path, sharedRoot);
-	return { path, branch };
+	let baseCommit: string;
+	try {
+		baseCommit = await git(["rev-parse", "HEAD"], path);
+	} catch (error) {
+		// Without the base, cleanup could not tell the agent's commits apart;
+		// remove the fresh worktree now rather than run in one we cannot judge.
+		await git(["worktree", "remove", "--force", path], cwd).catch(() => undefined);
+		await git(["branch", "-D", branch], cwd).catch(() => undefined);
+		releaseWorktreeIsolation(path);
+		throw error;
+	}
+	return { path, branch, baseCommit };
 }
 
+/**
+ * Whether the worktree holds work: uncommitted changes, or commits reachable
+ * from its HEAD or its branch that the base commit does not contain (an agent
+ * that commits leaves a clean status). Any git failure counts as work.
+ */
 export async function worktreeHasChanges(worktree: Worktree): Promise<boolean> {
 	try {
 		const status = await git(["status", "--porcelain"], worktree.path);
-		return status.length > 0;
+		if (status.length > 0) return true;
+		const ahead = await git(["rev-list", "--count", "HEAD", `refs/heads/${worktree.branch}`, `^${worktree.baseCommit}`], worktree.path);
+		return ahead !== "0";
 	} catch {
-		// If status fails, assume there is something worth keeping.
+		// If git fails, assume there is something worth keeping.
 		return true;
 	}
 }
@@ -71,13 +97,25 @@ export async function cleanupWorktree(cwd: string, worktree: Worktree): Promise<
 	if (await worktreeHasChanges(worktree)) return false;
 	try {
 		await git(["worktree", "remove", "--force", worktree.path], cwd);
-		await git(["branch", "-D", worktree.branch], cwd);
 	} catch {
 		// Leave it behind rather than failing the run.
 		return false;
+	}
+	try {
+		// `-d`, not `-D`: git itself refuses to drop a branch with unmerged work,
+		// a second check behind worktreeHasChanges. A refused delete leaves a
+		// branch at the base commit, which holds none of the agent's work.
+		await git(["branch", "-d", worktree.branch], cwd);
+	} catch {
+		// The worktree is gone; the branch stays for the user to inspect.
 	}
 	// Release only when the worktree is actually gone — a kept worktree can
 	// still host a resumed session (SendMessage), which must stay guarded.
 	releaseWorktreeIsolation(worktree.path);
 	return true;
+}
+
+/** The note a result carries for a worktree kept because it holds the agent's work. */
+export function keptWorktreeNote(path: string, branch: string | undefined): string {
+	return `(Changes or commits left in worktree ${path}${branch ? ` on branch ${branch}` : ""} — review or merge them.)`;
 }

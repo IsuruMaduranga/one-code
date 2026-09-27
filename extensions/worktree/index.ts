@@ -12,7 +12,7 @@
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -22,6 +22,7 @@ import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
 import { worktreeBashGuardReason } from "./guards.ts";
+import { worktreePowershellGuardReason } from "./powershell-guards.ts";
 import { bashParserReady } from "../lib/bash-parser.ts";
 import { ORIGINAL_COMMAND_CHANNEL, type OriginalCommandRecord } from "../lib/original-command.ts";
 import { rewriteToolInput, validateWorktreeName } from "./rewrite.ts";
@@ -70,7 +71,7 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 
 	const applyState = (next: WorktreeState | undefined) => {
 		state = next;
-		const location: WorktreeLocation | null = next ? { path: next.path, branch: next.branch } : null;
+		const location: WorktreeLocation | null = next ? { path: next.path, branch: next.branch, sharedRoot: next.sharedRoot } : null;
 		pi.events.emit(WORKTREE_CHANNEL, location);
 		if (next) {
 			pi.events.emit(REMINDER_CHANNEL, {
@@ -99,14 +100,23 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 	pi.on("tool_call", async (event) => {
 		if (!state) return;
 		if (["enter_worktree", "exit_worktree", "Agent", "SendMessage", "workflow"].includes(event.toolName)) return;
-		if (event.toolName === "bash") {
+		if (event.toolName === "bash" || event.toolName === "monitor") {
 			// Guard before rewriting (and before the permission prompt — this
 			// extension loads ahead of permissions): git must verifiably target
 			// this worktree, and shared-stash footguns are refused with the recipe.
+			// A monitor's command runs through the same bash, so it is judged the same way.
 			const command = (event.input as Record<string, unknown>).command;
 			if (typeof command === "string") {
 				await bashParserReady();
 				const reason = worktreeBashGuardReason({ command, worktreePath: state.path, sharedRoot: state.sharedRoot });
+				if (reason) return { block: true, reason };
+			}
+		}
+		if (event.toolName === "powershell") {
+			// The same invariants for PowerShell, the primary shell on Windows.
+			const command = (event.input as Record<string, unknown>).command;
+			if (typeof command === "string") {
+				const reason = worktreePowershellGuardReason({ command, worktreePath: state.path, sharedRoot: state.sharedRoot });
 				if (reason) return { block: true, reason };
 			}
 		}
@@ -142,7 +152,8 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 
 			let repoRoot: string;
 			try {
-				repoRoot = await git(["rev-parse", "--show-toplevel"], ctx.cwd);
+				// git prints `C:/…` on Windows; resolve gives the native form every path built from it shares.
+				repoRoot = resolve(await git(["rev-parse", "--show-toplevel"], ctx.cwd));
 			} catch {
 				return fail("enter_worktree needs a git repository; this directory is not one.");
 			}

@@ -34,9 +34,10 @@ import { ULTRACODE_MODE_CHANNEL } from "../effort/slider.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../permissions/modes.ts";
 import { watchPermissionBridge } from "../permissions/subagent-gate.ts";
 import { watchHookBridge } from "../hooks/subagent-bridge.ts";
+import { watchMcpTools } from "../lib/mcp-share.ts";
 import { applicableSubagentDefault, loadSubagentDefault } from "../subagents/default-model.ts";
 import { discoverSavedWorkflows, findSavedWorkflow, workflowDirs } from "./saved-workflows.ts";
-import { buildRunReport, WorkflowRunManager } from "./run-manager.ts";
+import { buildRunReport, type RunHandle, WorkflowRunManager } from "./run-manager.ts";
 import {
 	ccToolRenderers,
 	customMessageText,
@@ -57,6 +58,9 @@ import {
 } from "./viewer.ts";
 import { WorkflowWidget } from "./widget.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
+import { sessionWorkCwd } from "../lib/worktree-channel.ts";
+import { followEnteredWorktree } from "../lib/worktree-isolation.ts";
+import { isKeyRelease, keyId } from "../lib/key-input.ts";
 
 /**
  * Claude Code's own arming reminder, verbatim in intent: the keyword is a
@@ -213,16 +217,19 @@ export default function workflowExtension(pi: ExtensionAPI) {
 		unusableModels.add((data as ModelUnusableEvent).model);
 	});
 	const notifyTask = createTaskNotifier(pi);
+	// After `enter_worktree`, workflow agents run in the worktree (and are guarded there).
+	const enteredWorktree = followEnteredWorktree(pi.events);
 	const manager = new WorkflowRunManager();
 	let lastCtx: ExtensionContext | undefined;
 	const widget = new WorkflowWidget(manager, () => lastCtx);
-	const deliveredRuns = new Set<string>();
 	let viewerOpen = false;
 
 	// Parent permission bridge for workflow agents' gates — same bridge the
 	// subagent runner uses; see AgentRunnerOptions.getPermissionBridge.
 	const getPermissionBridge = watchPermissionBridge(pi);
 	const getHookBridge = watchHookBridge(pi);
+	// The parent's MCP tools, shared into workflow agents as they are into subagents.
+	const getMcpTools = watchMcpTools(pi.events);
 
 	const openViewer = async (ctx: ExtensionContext, opts?: { height?: "full" | "half"; runIndex?: number }) => {
 		if (viewerOpen) return;
@@ -234,16 +241,14 @@ export default function workflowExtension(pi: ExtensionAPI) {
 		}
 	};
 
-	/** The tool call that started each background run — the notification's `<tool-use-id>`. */
-	const startedBy = new Map<string, string>();
-	const deliverResult = (runId: string) => {
-		// One delivery per run, so the id is spent here even when the run has
-		// already gone from the manager or was delivered another way.
-		const toolUseId = startedBy.get(runId);
-		startedBy.delete(runId);
-		const handle = manager.get(runId);
-		if (!handle || deliveredRuns.has(runId)) return;
-		deliveredRuns.add(runId);
+	/**
+	 * A background run's result notification, sent once when that run finishes.
+	 * Keyed by the handle, not the run id: a `resumeFromRunId` run reuses its
+	 * original id, and a set of delivered ids swallowed the resumed run's result
+	 * (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 H4). `toolUseId` is the call that
+	 * started this run, the notification's `<tool-use-id>`.
+	 */
+	const deliverResult = (handle: RunHandle, toolUseId: string) => {
 		// CC's kind=workflow task notification; the run report (result or the
 		// failure and how to resume) is its `<result>`. Summary literal: see
 		// workflowSummary — unverified against CC.
@@ -321,13 +326,15 @@ export default function workflowExtension(pi: ExtensionAPI) {
 					args: params.args,
 					tokenBudget: params.tokenBudget ?? null,
 					resumeFromRunId: params.resumeFromRunId,
-					cwd: ctx.cwd,
+					// Where the session works: the entered worktree, if any (pi keeps ctx.cwd at the original checkout).
+					cwd: sessionWorkCwd(enteredWorktree(), ctx.cwd),
 					sessionDir,
 					defaultModel: ctx.model,
 					configuredDefault,
 					defaultEffort: ctx.thinkingLevel,
 					getPermissionBridge,
 					getHookBridge,
+					getMcpTools,
 					// Workflow agents run in their own sessions; their spend reaches the footer only through the bus.
 					onUsage: (cost) => recordUsage(pi, "subagent", { cost: { total: cost } }),
 					unusableModels: () => unusableModels,
@@ -360,7 +367,6 @@ export default function workflowExtension(pi: ExtensionAPI) {
 						unhookAbort();
 						handle.removeListener("progress", onProgress);
 					}
-					deliveredRuns.add(handle.runId); // sync result goes in the tool result, not a followUp
 					const oneShotPrefix = forcedSync ? `${oneShotNote("workflow")}\n\n` : "";
 					return {
 						content: [{ type: "text", text: `${oneShotPrefix}${buildRunReport(handle)}` }],
@@ -369,8 +375,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 					};
 				}
 
-				startedBy.set(handle.runId, toolCallId);
-				void handle.finished.then(() => deliverResult(handle.runId));
+				void handle.finished.then(() => deliverResult(handle, toolCallId));
 				return {
 					content: [
 						{
@@ -478,13 +483,15 @@ export default function workflowExtension(pi: ExtensionAPI) {
 	// consume is guarded by "the core editor really has focus" (identity
 	// against the captured baseline) to never steal keys from dialogs.
 	let inputHookRegistered = false;
-	const DOWN_KEYS = new Set(["\x1b[B", "\x1bOB"]);
 	const registerInputHook = (registerCtx: ExtensionContext) => {
 		if (inputHookRegistered || !registerCtx.hasUI) return;
 		inputHookRegistered = true;
 		const leave = () => widget.setFocus(undefined);
 		try {
 			registerCtx.ui.onTerminalInput((data) => {
+				// pi-tui calls input listeners before it filters key releases, and a
+				// kitty terminal sends one after every press: never a key here.
+				if (isKeyRelease(data)) return undefined;
 				// Session switches replace the ExtensionContext; the hook registers
 				// once, so it must act through the freshest ctx, not its closure.
 				const ctx = lastCtx ?? registerCtx;
@@ -493,7 +500,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 					return undefined;
 				}
 				if (widget.focusIndex === undefined) {
-					if (!DOWN_KEYS.has(data) || !widget.editorFocusedAndIdle(ctx)) return undefined;
+					if (keyId(data) !== "down" || !widget.editorFocusedAndIdle(ctx)) return undefined;
 					widget.setFocus(0);
 					return { consume: true };
 				}

@@ -38,7 +38,8 @@ pins pi itself.
 
 **`Failed to load extension` on startup.** The extension package and the
 pi it runs on are out of step. On the bundled app, reinstall it. On your own
-pi, run `pi update --extensions`.
+pi, run `pi update npm:one-code-extension`, and update pi itself with
+`pi update` if it's older than 0.84.3.
 
 **The stock pi first-run wizard didn't appear.** The bundled app seeds
 pi's settings with the One Code theme, quiet startup, and full-screen mode

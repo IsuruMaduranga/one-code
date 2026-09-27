@@ -274,4 +274,64 @@ describe("mcp wiring", () => {
 		component!.handleInput("\x03"); // ctrl+c: close the panel
 		await panelDone;
 	});
+
+	/** Open /mcp with a UI whose select answers `answer`, and run the first entry's primary action. */
+	const reconnectFirst = async (answer: string | undefined) => {
+		let component: { handleInput: (data: string) => void; render: (w: number) => string[] } | undefined;
+		const selects: string[] = [];
+		const ctx = createFakeCtx({
+			cwd,
+			hasUI: true,
+			ui: {
+				select: vi.fn(async (title: string) => {
+					selects.push(title);
+					return answer;
+				}),
+				custom: vi.fn(
+					(factory: (tui: unknown, theme: unknown, keybindings: unknown, done: (result: unknown) => void) => unknown) =>
+						new Promise((resolve) => {
+							const tui = { requestRender: () => {}, terminal: { rows: 40 } };
+							Promise.resolve(factory(tui, {}, {}, (result: unknown) => resolve(result))).then((built) => {
+								component = built as typeof component;
+							});
+						}),
+				),
+			},
+		});
+		const panelDone = fake.commands.get("mcp")!.handler("", ctx);
+		await vi.waitFor(() => expect(component).toBeDefined());
+		component!.handleInput("\r"); // detail view of the only entry
+		component!.handleInput("\r"); // its primary action
+		return { component: component!, selects, close: async () => { component!.handleInput("\x03"); await panelDone; } };
+	};
+
+	it("Reconnect never spawns a project server whose variable is unset, and names the variable", async () => {
+		writeFileSync(join(cwd, ".mcp.json"), JSON.stringify({ mcpServers: { s: { command: "run-it", env: { TOKEN: "$B1_UNSET_TOKEN_VAR" } } } }));
+		delete process.env.B1_UNSET_TOKEN_VAR;
+		await boot();
+		expect(state.connectCalls).toEqual([]);
+		const panel = await reconnectFirst("Use this MCP server");
+		await vi.waitFor(() => expect(panel.component.render(120).join("\n")).toContain("B1_UNSET_TOKEN_VAR set in the environment"));
+		expect(state.connectCalls).toEqual([]);
+		expect(panel.selects).toEqual([]);
+		await panel.close();
+	});
+
+	it("Reconnect asks for consent before respawning a project server, and a No keeps it off", async () => {
+		writeFileSync(join(cwd, ".mcp.json"), JSON.stringify({ mcpServers: { p: { command: "run-it" } } }));
+		mcpExtension(fake.pi as never);
+		await fake.fireOne("session_start", { reason: "startup" }, createFakeCtx({ cwd, hasUI: true, ui: { select: vi.fn(async () => "Use this MCP server") } }));
+		await vi.waitFor(() => expect(state.connectCalls).toEqual(["p"]));
+		// The approval is gone (the store deleted, a new process): Reconnect must ask again.
+		const { approvalStorePath, resetMcpTrustSessionState } = await import("../../extensions/mcp/trust.ts");
+		expect(approvalStorePath().startsWith(home)).toBe(true); // never the real store
+		rmSync(approvalStorePath(), { force: true });
+		resetMcpTrustSessionState();
+		const panel = await reconnectFirst("No");
+		await vi.waitFor(() => expect(panel.selects).toHaveLength(1));
+		expect(panel.selects[0]).toContain("New MCP server found in .mcp.json: p");
+		await vi.waitFor(() => expect(panel.component.render(120).join("\n")).toContain("was not approved"));
+		expect(state.connectCalls).toEqual(["p"]);
+		await panel.close();
+	});
 });

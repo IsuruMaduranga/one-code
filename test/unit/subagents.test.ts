@@ -63,6 +63,23 @@ You review code.`,
 		]);
 	});
 
+	// SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 M7: Claude Code's "*" and rule-shaped entries.
+	it('reads tools: "*" as all tools, as Claude Code does, instead of an allowlist that matches nothing', () => {
+		expect(parseAgentFile("/x/a.md", '---\ntools: "*"\n---\nbody')?.tools).toBeUndefined();
+		expect(parseAgentFile("/x/b.md", "---\ntools:\n  - Read\n  - \"*\"\n---\nbody")?.tools).toBeUndefined();
+	});
+
+	it("removes the whole tool for a rule-shaped disallowedTools entry, as Claude Code does", () => {
+		const agent = parseAgentFile("/x/deployer.md", '---\ntools: "*"\ndisallowedTools: Bash(git push:*), Write\n---\nbody');
+		expect(agent?.tools).toBeUndefined();
+		expect(agent?.excludeTools).toEqual(["bash", "write"]);
+	});
+
+	it("splits on commas and spaces outside a rule's parentheses, and grants the whole tool a rule names", () => {
+		expect(parseToolList("Read Grep, Bash(npm run test:*), Agent(worker, researcher)")).toEqual(["read", "grep", "bash", "Agent"]);
+		expect(parseToolList(["WebFetch(domain:example.com)", "Edit"])).toEqual(["web_fetch", "edit"]);
+	});
+
 	it("parseToolList collapses duplicates across spellings and trims yaml entries", () => {
 		expect(parseToolList(["Read", " read ", "Glob", "find"])).toEqual(["read", "find"]);
 		expect(parseToolList("")).toBeUndefined();

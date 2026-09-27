@@ -218,3 +218,36 @@ describe.skipIf(process.platform !== "win32")("worktree git-isolation guard: Git
 		expect(guard(`git -C /${drive}/Users/x/other-repo pull`)).toBeUndefined();
 	});
 });
+
+describe("worktree git-isolation guard: environment and config spellings", () => {
+	it("refuses a repository variable that points at the shared checkout", () => {
+		expect(guard("GIT_WORK_TREE=/repo git checkout .")).toContain("shared checkout");
+		expect(guard("env GIT_DIR=/repo/.git git reset --hard")).toContain("shared checkout");
+		expect(guard("export GIT_DIR=/repo/.git; git log")).toContain("shared checkout");
+		expect(guard("declare -x GIT_COMMON_DIR=/repo/.git && git status")).toContain("shared checkout");
+		expect(guard("git -c core.worktree=/repo checkout .")).toContain("shared checkout");
+		expect(guard("git -c Core.WorkTree=/repo checkout .")).toContain("shared checkout");
+	});
+
+	it("refuses a repository variable whose value is only known at runtime", () => {
+		expect(guard('GIT_DIR="$MAIN/.git" git log')).toContain("decided at runtime");
+		expect(guard("export GIT_DIR; git log")).toContain("decided at runtime");
+		expect(guard("git --config-env core.worktree=WT status")).toContain("decided at runtime");
+		expect(guard("git --config-env=core.worktree=WT status")).toContain("decided at runtime");
+	});
+
+	it("leaves the same spellings alone when they stay in the worktree or name unrelated settings", () => {
+		expect(guard(`GIT_WORK_TREE=${WT} git status`)).toBeUndefined();
+		expect(guard("GIT_PAGER=cat git log -1")).toBeUndefined();
+		expect(guard("git -c color.ui=never status")).toBeUndefined();
+		expect(guard("export PATH=/usr/bin; git status")).toBeUndefined();
+		expect(guard("GIT_DIR=/repo/.git; echo not exported")).toBeUndefined();
+	});
+});
+
+describe("worktree shared-stash guard: stash branch", () => {
+	it("refuses a ref-less `stash branch`, which pops stash@{0}", () => {
+		expect(guard("git stash branch tmp")).toContain("stash@{0}");
+		expect(guard("git stash branch tmp stash@{2}")).toBeUndefined();
+	});
+});

@@ -20,7 +20,9 @@ main conversation.
 - Markdown definitions in `.claude/agents/` (project) and
   `~/.claude/agents/` (user), each setting an agent's model, tools, and
   system prompt. A project definition wins over a user definition of the
-  same name.
+  same name. The `tools` and `disallowedTools` lists read as they do in
+  Claude Code: `tools: "*"` means every tool, and an entry written as a
+  rule, such as `Bash(git push:*)`, grants or removes the whole tool.
 - Plugins can add agents, namespaced by plugin.
 - `fork`, a synthetic type that copies the current conversation.
 
@@ -67,7 +69,9 @@ the `explore` agent". What happens next:
   too.
 - **A finished agent can be messaged later.** The `SendMessage` tool
   reaches a running agent live, or resumes a finished one from its saved
-  session. `list_agents` lists the session's agents and their status.
+  session. In a `-p` or `--mode json` run, a resumed agent's turn runs to
+  completion and the reply is returned inline. `list_agents` lists the
+  session's agents and their status.
 
 Two options change how a subagent runs:
 
@@ -78,8 +82,9 @@ Two options change how a subagent runs:
   one more, but no further.
 - **Worktree isolation.** The subagent gets its own git worktree, branched
   from `HEAD`, so it can edit files without colliding with your working
-  tree or other agents. A worktree the agent left unchanged is removed;
-  otherwise it's kept and its path reported.
+  tree or other agents. A worktree the agent left unchanged is removed.
+  If the agent edited files or made commits there, the worktree is kept
+  and its path and branch are reported, so no work is lost.
 
 ### Choose the subagent model
 
@@ -140,7 +145,9 @@ and relative path then resolves there, and your main working tree stays
 untouched until `exit_worktree` leaves the worktree, keeping or removing
 it. Removal is refused while there is uncommitted or unmerged work. Ask for
 this when a task will make sweeping changes you want to review before
-merging.
+merging. Subagents and workflow agents started while the session is in the
+worktree run there too, and an isolated subagent's own worktree branches
+from the worktree's `HEAD`.
 
 ## Ultracode workflows
 
@@ -176,8 +183,16 @@ armed.
 - Fan-out agents use the subagent default model, so a cheap subagent tier
   keeps a large run affordable while the main conversation stays on a
   frontier model.
+- Workflow agents get the tools a subagent gets, your MCP servers
+  included. An agent call that names an agent type follows that agent
+  file's `tools` and `disallowedTools`, as a subagent does.
 - In a `-p` or `--mode json` run, the workflow runs to completion and
   returns its result inline.
+- An agent the script runs with `isolation: 'worktree'` gets its own
+  worktree, like a subagent. If the agent leaves changes or commits there,
+  even when it fails, the worktree is kept: its path shows in the progress
+  strip and the agent's detail pane, and the final report lists every kept
+  worktree with its branch.
 
 ### The run viewer
 

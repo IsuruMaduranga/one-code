@@ -20,6 +20,7 @@ import { collectCompat, importedConfigSection, mcpSection } from "./compat.ts";
 import { checkDependencies, dependenciesSection, type ShellsInput } from "./dependencies.ts";
 import { readSettingsEnv } from "../lib/claude-settings.ts";
 import { resolveBashSpawn, resolvePowerShellSpawn } from "../lib/shell-spawn.ts";
+import { upgradeCommandFor } from "../lib/update-check.mjs";
 import { shellToolPolicy } from "../powershell/policy.ts";
 import { collectModelFacts, modelsSection } from "./models.ts";
 import { computePresets, presetsSection } from "./presets.ts";
@@ -76,7 +77,7 @@ export function installationSection(env: DoctorEnvironment, findings: Finding[])
 				break;
 			case "behind":
 				lines.push({
-					text: `Updates: ${env.latest.version} is available (you have ${env.oneCodeVersion}) — ${env.install === "app" ? "npm install -g @one-ai/one-code" : "pi update"}`,
+					text: `Updates: ${env.latest.version} is available (you have ${env.oneCodeVersion}) — ${upgradeCommandFor(env.install, env.env)}`,
 					level: "warn",
 				});
 				break;

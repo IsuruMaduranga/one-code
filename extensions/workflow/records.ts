@@ -78,6 +78,7 @@ export class AgentRecordStore {
 				if (event.tokens) record.tokens = event.tokens;
 				if (event.cost !== undefined) record.cost = event.cost;
 				if (event.preview !== undefined) record.outcome = event.preview;
+				if (event.worktree) record.worktree = event.worktree;
 				if (event.replayed) {
 					record.status = "replayed";
 				} else if (event.text) {

@@ -163,7 +163,7 @@ export default function compactionExtension(pi: ExtensionAPI) {
 			// Otherwise (no capture yet, an overflow, a nearly full window) the
 			// standalone shape summarizes the doomed span pi isolated. An overflow
 			// never replays, so its replay request is not even built.
-			const replay = capture && event.reason !== "overflow" ? replayRequest(pi, capture, event, wire?.reply) : undefined;
+			const replay = capture && event.reason !== "overflow" ? replayRequest(pi, capture, event, wire?.reply, model.api) : undefined;
 			const replaying = replay !== undefined && replayFits(event.reason, model, replay, maxTokens);
 			const request = replaying
 				? replay
@@ -306,6 +306,7 @@ function replayRequest(
 	captured: { messages: AgentMessage[]; systemPrompt: string },
 	event: SessionBeforeCompactEvent,
 	reply: AgentMessage | undefined,
+	api: string | undefined,
 ): Context {
 	// The reply that answered the captured request is part of the conversation
 	// pi is compacting, and the last message the replayed body gains.
@@ -319,7 +320,7 @@ function replayRequest(
 	const instruction = buildCompactionInstruction({
 		reason: event.reason,
 		customInstructions: event.customInstructions,
-		keptTail: keptTailOf(conversation, event.preparation),
+		keptTail: keptTailOf(conversation, event.preparation, api),
 	});
 	return { systemPrompt: captured.systemPrompt, messages: [...convertToLlm(conversation), instructionMessage(instruction)], tools };
 }
@@ -339,18 +340,35 @@ export function standaloneRequest(model: Model<Api>, preparation: Preparation, i
 const instructionMessage = (instruction: string): Message => ({ role: "user", content: instruction, timestamp: Date.now() });
 
 /**
+ * APIs whose request puts a run of consecutive tool results into ONE user
+ * message (pi-ai's converters: Anthropic and Bedrock require it, Gemini merges
+ * function responses into one turn). The model counts messages on the wire, so
+ * the kept-tail note counts such a run once.
+ */
+const MERGES_TOOL_RESULTS = new Set(["anthropic-messages", "bedrock-converse-stream", "google-generative-ai", "google-vertex"]);
+const GOOGLE_APIS = new Set(["google-generative-ai", "google-vertex"]);
+
+type TailMessage = { role: string; content?: unknown; toolName?: unknown };
+
+/**
  * The verbatim-kept tail of the captured request: everything after the doomed
  * span. pi builds the context as `[compactionSummary?] + one message per entry`
  * (`sessionEntryToContextMessages`) and `prepareCompaction` derives
  * `messagesToSummarize`/`turnPrefixMessages` with the same mapping, so the
  * doomed span is a prefix of the captured array. Alignment is checked role by
  * role; on any mismatch (an extension that inserted a message) no note is made
- * rather than a wrong one. Exported for the unit test.
+ * rather than a wrong one.
+ *
+ * `count` is in the provider's messages (`api`): a parallel batch's results
+ * are one message on Anthropic. `landmark` names the first kept message so the
+ * model need not count: how its text opens, else the tool it calls, else the
+ * tool whose result it is. Exported for the unit test.
  */
 export function keptTailOf(
-	captured: readonly { role: string; content?: unknown }[],
+	captured: readonly TailMessage[],
 	preparation: Preparation,
-): { count: number; opening?: string } | undefined {
+	api?: string,
+): { count: number; landmark?: string } | undefined {
 	const doomed: { role: string }[] = [
 		...(preparation.previousSummary ? [{ role: "compactionSummary" }] : []),
 		...preparation.messagesToSummarize,
@@ -360,22 +378,47 @@ export function keptTailOf(
 	for (let i = 0; i < doomed.length; i++) {
 		if (captured[i].role !== doomed[i].role) return undefined;
 	}
-	const count = captured.length - doomed.length;
-	if (count === 0) return { count };
-	return { count, opening: openingText(captured[doomed.length]) };
+	const tail = captured.slice(doomed.length);
+	if (tail.length === 0) return { count: 0 };
+	// On Google a tool result's image can become a user message of its own,
+	// depending on the model: the count cannot be known, so no note.
+	const imageResult = tail.some((m) => m.role === "toolResult" && Array.isArray(m.content) && (m.content as { type?: string }[]).some((b) => b?.type === "image"));
+	if (imageResult && api !== undefined && GOOGLE_APIS.has(api)) return undefined;
+	const merges = api !== undefined && MERGES_TOOL_RESULTS.has(api);
+	const count = tail.filter((m, i) => !(merges && m.role === "toolResult" && tail[i - 1]?.role === "toolResult")).length;
+	return { count, landmark: landmarkOf(tail[0]) };
 }
 
-/** The first ~80 characters of a message's text, single-line, for the landmark quote. */
-function openingText(message: { content?: unknown }): string | undefined {
-	const content = message.content;
-	const text =
-		typeof content === "string"
-			? content
-			: Array.isArray(content)
-				? (content.find((b) => b && typeof b === "object" && (b as { type?: string }).type === "text") as { text?: string } | undefined)?.text
-				: undefined;
+/** How the note points at the first kept message, or undefined when nothing identifies it. */
+function landmarkOf(message: TailMessage): string | undefined {
+	if (message.role === "toolResult" && typeof message.toolName === "string") return `the result of the ${message.toolName} call`;
+	const content = Array.isArray(message.content) ? (message.content as { type?: string; text?: string; name?: unknown; arguments?: unknown }[]) : [];
+	const text = typeof message.content === "string" ? message.content : content.find((b) => b?.type === "text" && b.text?.trim())?.text;
+	const opening = oneLine(text);
+	if (opening) return `the message that opens "${opening}"`;
+	const call = content.find((b) => b?.type === "toolCall" && typeof b.name === "string");
+	if (message.role === "assistant" && call) {
+		const hint = oneLine(callHint(call.arguments));
+		return `the assistant message that calls ${call.name as string}${hint ? ` (${hint})` : ""}`;
+	}
+	return undefined;
+}
+
+/** The argument that says what a call is about: its path, command or pattern, else its first string argument. */
+function callHint(args: unknown): string | undefined {
+	if (!args || typeof args !== "object") return undefined;
+	const record = args as Record<string, unknown>;
+	for (const key of ["path", "file_path", "command", "pattern", "url", "query"]) {
+		if (typeof record[key] === "string") return record[key] as string;
+	}
+	return Object.values(record).find((value): value is string => typeof value === "string");
+}
+
+/** The first ~80 characters of a text, single-line, for a landmark. */
+function oneLine(text: string | undefined): string | undefined {
 	if (!text) return undefined;
 	const line = text.replace(/\s+/g, " ").trim();
+	if (!line) return undefined;
 	return line.length > 80 ? `${line.slice(0, 80)}…` : line;
 }
 

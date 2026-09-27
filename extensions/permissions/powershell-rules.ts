@@ -12,11 +12,14 @@
  *   case-insensitive. Aliases PowerShell 7 dropped because they collide with
  *   native executables (`sort`, `sc`, `curl`, `wget`) are deliberately absent,
  *   as in CC: mapping `sort` to `Sort-Object` would judge the wrong program.
- * - **Statement split.** A command line is split on `|`, `;`, `&&`, `||` and
- *   unquoted newlines, outside `'…'`, `"…"` and `@'…'@` / `@"…"@` here-strings,
- *   with backtick escapes honoured. For an allow rule every part must match
- *   (CC: "every subcommand must match"); a deny/ask rule fires on any part.
- *   Unbalanced quoting is a parse failure → no allow, the user is asked.
+ * - **Statement split.** A command line is split on `|`, `;`, `&&`, `||`, a
+ *   single (background) `&`, and unquoted line breaks (`\n`, or `\r` on its
+ *   own), outside `'…'`, `"…"` and `@'…'@` / `@"…"@` here-strings (the
+ *   typographic quotes included, as pwsh reads them) and comments, with
+ *   backtick escapes honoured. For an allow rule every part must match (CC:
+ *   "every subcommand must match"); a deny/ask rule fires on any part, and on
+ *   a rough split as well. Unbalanced quoting is a parse failure → no allow,
+ *   the user is asked.
  * - **No AST.** Claude Code parses the command; v1 here is textual and
  *   conservative in the only direction that matters: a wildcard or prefix
  *   allow never covers a line whose meaning is not on its face — `$(…)`
@@ -162,11 +165,12 @@ export function canonicalizeStatement(statement: string): string {
 
 /**
  * The separately executing statements of a PowerShell line — what `|`, `;`,
- * `&&`, `||` and unquoted newlines separate — or undefined when quoting is
- * unbalanced. Single quotes, double quotes, here-strings (`@'…'@`, `@"…"@`,
- * whose closer must start a line) and backtick escapes are honoured; a `|`
- * inside `Where-Object { $_ -match 'a|b' }` still splits, conservatively, so
- * an allow rule over a script block has to cover the pieces.
+ * `&&`, `||`, a single `&` and unquoted line breaks separate — or undefined
+ * when quoting is unbalanced. Single quotes, double quotes, here-strings
+ * (`@'…'@`, `@"…"@`, whose closer must start a line), comments and backtick
+ * escapes are honoured (`lexPowerShell`); a `|` inside `Where-Object { $_
+ * -match 'a|b' }` still splits, conservatively, so an allow rule over a
+ * script block has to cover the pieces.
  */
 export function powershellStatements(command: string): string[] | undefined {
 	// One decision parses the same line from several places (read-only check,
@@ -179,149 +183,180 @@ export function powershellStatements(command: string): string[] | undefined {
 }
 let lastSplit: { command: string; statements: string[] | undefined } | undefined;
 
+/**
+ * PowerShell's quote characters. The tokenizer takes the typographic quotes as
+ * quotes too, interchangeably with the ASCII ones: `'x’ ; Remove-Item y ; ‘z'`
+ * is three statements, not one string. Checked against pwsh 7.6's parser.
+ */
+const SINGLE_QUOTES = new Set(["'", "‘", "’", "‚", "‛"]);
+const DOUBLE_QUOTES = new Set(['"', "“", "”", "„"]);
+
+/**
+ * How the lexer sees one character of a line: unquoted code, where separators
+ * and operators mean what they say; a literal (inside a string or
+ * here-string, or escaped by a backtick); or a comment, which never runs.
+ */
+const CODE = 0;
+const LITERAL = 1;
+const COMMENT = 2;
+type Lex = typeof CODE | typeof LITERAL | typeof COMMENT;
+
+/** A line break as PowerShell reads one: `\n`, and a carriage return on its own too. */
+function isLineBreak(ch: string | undefined): boolean {
+	return ch === "\n" || ch === "\r";
+}
+
+/**
+ * Whether position `i` starts a token, where `#` and `<#` open a comment. In
+ * `x#(Set-Content f y)` the `#` is part of the word, and the parenthesis after
+ * it still runs.
+ */
+function atTokenStart(text: string, i: number): boolean {
+	return i === 0 || /[\s;|&(){}]/.test(text[i - 1]);
+}
+
+/**
+ * Classify every character of a PowerShell line, or undefined when a
+ * string, here-string or block comment never closes. The one lexer the
+ * statement split and the grouping check share, so they cannot disagree about
+ * what is quoted. It follows pwsh's tokenizer on the points that decide where
+ * a statement ends: both quote families, doubled quotes, backtick escapes
+ * (outside quotes and inside double quotes), here-strings whose closer starts
+ * a line (after `\n` or a lone `\r`), and line and block comments at a token
+ * start. It does not follow a `$(…)` inside a double-quoted string; every
+ * consumer refuses or rough-splits a line with `$(` anyway.
+ */
+function lexPowerShell(text: string): Lex[] | undefined {
+	const kinds: Lex[] = new Array(text.length);
+	let i = 0;
+	const mark = (from: number, to: number, kind: Lex) => {
+		for (let k = from; k < to; k++) kinds[k] = kind;
+	};
+	while (i < text.length) {
+		const ch = text[i];
+		const next = text[i + 1];
+		if (ch === "`" && i + 1 < text.length) {
+			kinds[i] = CODE;
+			kinds[i + 1] = LITERAL;
+			i += 2;
+			continue;
+		}
+		if (ch === "#" && atTokenStart(text, i)) {
+			let end = i;
+			while (end < text.length && !isLineBreak(text[end])) end++;
+			mark(i, end, COMMENT);
+			i = end;
+			continue;
+		}
+		if (ch === "<" && next === "#" && atTokenStart(text, i)) {
+			const close = text.indexOf("#>", i + 2);
+			if (close === -1) return undefined;
+			mark(i, close + 2, COMMENT);
+			i = close + 2;
+			continue;
+		}
+		if (ch === "@" && next !== undefined && (SINGLE_QUOTES.has(next) || DOUBLE_QUOTES.has(next))) {
+			// A here-string closes only with a quote of its family and `@` at the start of a line.
+			const family = SINGLE_QUOTES.has(next) ? SINGLE_QUOTES : DOUBLE_QUOTES;
+			let end = i + 2;
+			while (end < text.length && !(isLineBreak(text[end - 1]) && family.has(text[end]) && text[end + 1] === "@")) end++;
+			if (end >= text.length) return undefined;
+			mark(i, end + 2, LITERAL);
+			i = end + 2;
+			continue;
+		}
+		if (SINGLE_QUOTES.has(ch)) {
+			let end = i + 1;
+			for (;;) {
+				if (end >= text.length) return undefined;
+				if (SINGLE_QUOTES.has(text[end])) {
+					if (SINGLE_QUOTES.has(text[end + 1] ?? "")) end += 2; // a doubled quote is a literal quote
+					else break;
+				} else end++;
+			}
+			mark(i, end + 1, LITERAL);
+			i = end + 1;
+			continue;
+		}
+		if (DOUBLE_QUOTES.has(ch)) {
+			let end = i + 1;
+			for (;;) {
+				if (end >= text.length) return undefined;
+				if (text[end] === "`") end += 2;
+				else if (DOUBLE_QUOTES.has(text[end])) {
+					if (DOUBLE_QUOTES.has(text[end + 1] ?? "")) end += 2;
+					else break;
+				} else end++;
+			}
+			mark(i, end + 1, LITERAL);
+			i = end + 1;
+			continue;
+		}
+		kinds[i] = CODE;
+		i++;
+	}
+	return kinds;
+}
+
+/**
+ * Split on the statement separators PowerShell 7 runs: `&&`, `||`, `|`, `;`,
+ * a line break (`\n`, or `\r` on its own), and a single `&`. A single `&`
+ * that starts a statement is the call operator and stays in it; after `>` it
+ * is part of a redirection (`2>&1`); anywhere else it is the background
+ * operator, and the next statement runs at once (`Get-ChildItem & Remove-Item
+ * x` runs both). Comments are dropped.
+ */
 function splitStatements(command: string): string[] | undefined {
+	const kinds = lexPowerShell(command);
+	if (!kinds) return undefined;
 	const parts: string[] = [];
 	let current = "";
-	let i = 0;
-	const text = command;
-	type Quote = "'" | '"' | "@'" | '@"' | undefined;
-	let quote: Quote;
 	const push = () => {
 		const trimmed = current.trim();
 		if (trimmed) parts.push(trimmed);
 		current = "";
 	};
-	while (i < text.length) {
-		const ch = text[i];
-		const next = text[i + 1];
-		if (quote === "@'" || quote === '@"') {
-			// A here-string closes only with its terminator at the start of a line.
-			const closer = quote === "@'" ? "'@" : '"@';
-			if ((i === 0 || text[i - 1] === "\n") && text.startsWith(closer, i)) {
-				current += closer;
-				i += 2;
-				quote = undefined;
-				continue;
-			}
+	for (let i = 0; i < command.length; i++) {
+		const ch = command[i];
+		const kind = kinds[i];
+		if (kind === COMMENT) continue;
+		if (kind === LITERAL) {
 			current += ch;
-			i++;
 			continue;
 		}
-		if (quote === "'") {
-			current += ch;
-			i++;
-			if (ch === "'") {
-				if (next === "'") {
-					current += next;
-					i++; // doubled quote is a literal quote
-				} else quote = undefined;
-			}
-			continue;
-		}
-		if (quote === '"') {
-			current += ch;
-			i++;
-			if (ch === "`" && i < text.length) {
-				current += text[i];
-				i++;
-				continue;
-			}
-			if (ch === '"') {
-				if (next === '"') {
-					current += next;
-					i++;
-				} else quote = undefined;
-			}
-			continue;
-		}
-		// Unquoted.
-		if (ch === "`" && i + 1 < text.length) {
-			current += ch + text[i + 1];
-			i += 2;
-			continue;
-		}
-		if (ch === "#" && startsComment(text, i)) {
-			// Line comment runs to end of line.
-			const eol = text.indexOf("\n", i);
-			i = eol === -1 ? text.length : eol;
-			continue;
-		}
-		if (ch === "@" && (next === "'" || next === '"')) {
-			quote = next === "'" ? "@'" : '@"';
-			current += ch + next;
-			i += 2;
-			continue;
-		}
-		if (ch === "'" || ch === '"') {
-			quote = ch;
-			current += ch;
-			i++;
-			continue;
-		}
+		const next = kinds[i + 1] === CODE ? command[i + 1] : undefined;
 		if ((ch === "&" && next === "&") || (ch === "|" && next === "|")) {
 			push();
-			i += 2;
+			i++;
 			continue;
 		}
-		if (ch === "|" || ch === ";" || ch === "\n") {
+		if (ch === "|" || ch === ";" || isLineBreak(ch)) {
 			push();
-			i++;
+			continue;
+		}
+		if (ch === "&" && current.trim() !== "" && command[i - 1] !== ">") {
+			push();
 			continue;
 		}
 		current += ch;
-		i++;
 	}
-	if (quote !== undefined) return undefined;
 	push();
 	return parts;
 }
 
 /**
- * Whether the `#` at `i` starts a comment: only at the start of a token. In
- * `x#(Set-Content f y)` it is part of the word, and the parenthesis after it
- * still runs.
- */
-function startsComment(text: string, i: number): boolean {
-	return i === 0 || /[\s;|&(){}]/.test(text[i - 1]);
-}
-
-/**
- * Whether the line has a `(` outside quotes. PowerShell evaluates a grouping
- * expression in argument position before calling the command, so
- * `Write-Output (Set-Content f x)` writes `f` behind a read-only cmdlet
- * (AUTO-MODE-SECURITY-REVIEW-2026-09-24 H2); Claude Code's parser marks the
- * same node a subexpression. A quoted `(` is a literal (`"Program Files (x86)"`),
- * and a backtick-escaped one is too.
+ * Whether the line has a `(` outside quotes and comments. PowerShell
+ * evaluates a grouping expression in argument position before calling the
+ * command, so `Write-Output (Set-Content f x)` writes `f` behind a read-only
+ * cmdlet (AUTO-MODE-SECURITY-REVIEW-2026-09-24 H2); Claude Code's parser
+ * marks the same node a subexpression. A quoted `(` is a literal (`"Program
+ * Files (x86)"`), and a backtick-escaped one is too. An unbalanced line
+ * counts as having one: nothing can vouch for it.
  */
 function hasGroupingExpression(command: string): boolean {
-	let quote: "'" | '"' | "@'" | '@"' | undefined;
-	for (let i = 0; i < command.length; i++) {
-		const ch = command[i];
-		if (quote === "@'" || quote === '@"') {
-			if ((i === 0 || command[i - 1] === "\n") && command.startsWith(quote === "@'" ? "'@" : '"@', i)) {
-				quote = undefined;
-				i++;
-			}
-			continue;
-		}
-		if (quote === "'" || quote === '"') {
-			if (quote === '"' && ch === "`") i++;
-			else if (ch === quote) {
-				if (command[i + 1] === quote) i++;
-				else quote = undefined;
-			}
-			continue;
-		}
-		if (ch === "`") i++;
-		else if (ch === "#" && startsComment(command, i)) {
-			const eol = command.indexOf("\n", i);
-			i = eol === -1 ? command.length : eol;
-		} else if (ch === "@" && (command[i + 1] === "'" || command[i + 1] === '"')) {
-			quote = command[i + 1] === "'" ? "@'" : '@"';
-			i++;
-		} else if (ch === "'" || ch === '"') quote = ch;
-		else if (ch === "(") return true;
-	}
+	const kinds = lexPowerShell(command);
+	if (!kinds) return true;
+	for (let i = 0; i < command.length; i++) if (kinds[i] === CODE && command[i] === "(") return true;
 	return false;
 }
 
@@ -343,6 +378,7 @@ export function statementCommand(statement: string): string {
  * user approved) are unaffected. Returns undefined when none is present.
  */
 export function powershellInjectionSyntax(command: string): string | undefined {
+	if (UNRECOGNISED_CONTROL.test(command)) return "a control character";
 	if (/\$\(/.test(command)) return "a $(…) subexpression";
 	if (/`/.test(command)) return "a backtick escape";
 	if (/\{/.test(command)) return "a script block";
@@ -390,8 +426,21 @@ export function powershellMatchForms(command: string, depth = 0): string[] {
 		const nested = nestedShellScript(statement);
 		if (nested) for (const form of powershellMatchForms(nested, depth + 1)) forms.add(form);
 	}
+	// A rough split on every separator and grouping character, quotes ignored:
+	// it catches a statement inside `$(…)`, `(…)` or `{…}`, and every
+	// statement of a line the lexer could not read (bash's counterpart adds
+	// the same rough split for an unparseable line).
+	for (const piece of trimmed.split(ROUGH_SEPARATORS)) {
+		const part = piece.trim();
+		if (!part) continue;
+		forms.add(part);
+		forms.add(canonicalizeStatement(part));
+	}
 	return [...forms];
 }
+
+/** Everything that can end or open a statement, for the deny/ask rough split. */
+const ROUGH_SEPARATORS = /[;|&\r\n(){}]+/;
 
 // ---------------------------------------------------------------------------
 // Read-only allowlist
@@ -438,6 +487,25 @@ export const READ_ONLY_POWERSHELL_COMMANDS = new Set<string>([
 	"format-wide",
 	"format-custom",
 ]);
+
+/**
+ * A control character the lexer does not model: C0 other than tab, line feed
+ * and carriage return, DEL, C1 (NEL included), and the Unicode line and
+ * paragraph separators. pwsh reads some as whitespace and some as part of a
+ * word; the checks here split on neither, so a line with one is never
+ * read-only and never covered by a wildcard or prefix allow rule.
+ */
+const UNRECOGNISED_CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u2028\u2029]/;
+
+/**
+ * The typographic quotes pwsh takes as quotes. The split honours them, but
+ * the token checks below unquote ASCII quotes only, so `‘~/.ssh/id_rsa’` would
+ * be judged as a relative name inside the working directory.
+ */
+const TYPOGRAPHIC_QUOTE = /[\u2018-\u201e]/;
+
+/** The dashes pwsh takes as `-` at the start of a parameter (`–OutFile`). */
+const TYPOGRAPHIC_DASH = /^[\u2013\u2014\u2015]/;
 
 /** Parameters that turn a read-only cmdlet into a write. */
 const WRITING_PARAMETERS = /^-(outfile|filepath|destination)\b/i;
@@ -649,6 +717,8 @@ export function powershellReadOnly(command: string, opts?: PowerShellReadOnlyOpt
 	const statements = powershellStatements(command);
 	if (statements === undefined) return { readOnly: false, reason: "unbalanced quoting" };
 	if (statements.length === 0) return { readOnly: false, reason: "empty command" };
+	if (UNRECOGNISED_CONTROL.test(command)) return { readOnly: false, reason: "a control character" };
+	if (TYPOGRAPHIC_QUOTE.test(command)) return { readOnly: false, reason: "a typographic quote" };
 	if (/[<>]/.test(command)) return { readOnly: false, reason: "redirection" };
 	if (/\$/.test(command)) return { readOnly: false, reason: "a variable or subexpression" };
 	if (/[`{}]/.test(command)) return { readOnly: false, reason: "an escape or script block" };
@@ -659,7 +729,11 @@ export function powershellReadOnly(command: string, opts?: PowerShellReadOnlyOpt
 		if (startsWithCallOperator(statement)) return { readOnly: false, reason: "the call operator" };
 		const cmd = statementCommand(statement);
 		if (!READ_ONLY_POWERSHELL_COMMANDS.has(cmd)) return { readOnly: false, reason: `\`${cmd}\` is not a read-only cmdlet` };
-		const tokens = statement.trim().split(/\s+/).slice(1);
+		const tokens = statement
+			.trim()
+			.split(/\s+/)
+			.slice(1)
+			.map((token) => token.replace(TYPOGRAPHIC_DASH, "-"));
 		for (const token of tokens) {
 			if (WRITING_PARAMETERS.test(token)) return { readOnly: false, reason: `${token.split(":")[0]} writes or forwards` };
 			if (REMOTE_PARAMETER.test(token)) return { readOnly: false, reason: `${token.split(":")[0]} reaches another machine` };

@@ -132,13 +132,20 @@ export function reviewUser(userPrefix: string): string {
 	return `${userPrefix}\n\n${STAGE2_FINAL.trimStart()}${STAGE_REVIEW_ADDENDUM}`;
 }
 
-/** The integer inside the last `<severity>…` tag (closing tag optional). */
+/**
+ * The whole number inside the last `<severity>…` tag (closing tag optional),
+ * or null. The body must be the number and nothing else: a model answering on
+ * another scale (`0.9`, `9/10`, `90%`) gives a body whose leading digits are
+ * not its severity, and reading them cleared stage 1 with no stage 2. Null
+ * falls through to stage 2, and a stage-2 null is a block.
+ */
 export function parseSeverity(text: string): number | null {
-	const matches = [...text.matchAll(/<severity>\s*(\d{1,3})/gi)];
-	if (matches.length === 0) return null;
-	const value = Number.parseInt(matches[matches.length - 1][1], 10);
-	if (Number.isNaN(value)) return null;
-	return Math.max(0, Math.min(100, value));
+	const tags = [...text.matchAll(/<severity>([^<]*)/gi)];
+	const last = tags.at(-1);
+	if (!last) return null;
+	const body = /^\s*(\d{1,3})\s*$/.exec(last[1]);
+	if (!body) return null;
+	return Math.min(100, Number.parseInt(body[1], 10));
 }
 
 /** The content of the last `<tag>…</tag>` (or `<tag>…` unterminated), trimmed. */

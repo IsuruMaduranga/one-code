@@ -17,6 +17,7 @@
 
 import { framesToText, notificationBody, parseNotificationFrames } from "./notifications.ts";
 import { fitPainted, hardWrapColumns, sliceColumns, visibleWidth } from "./text-width.ts";
+import { sanitizeDisplayText } from "./terminal-text.ts";
 export { notificationBody };
 export { visibleWidth } from "./text-width.ts";
 
@@ -371,9 +372,9 @@ const PRIMARY_ARG_KEYS = [
 	"task",
 ] as const;
 
-/** Collapse whitespace/newlines so a summary always fits on one line. */
+/** Collapse whitespace/newlines so a summary always fits on one line (control characters removed). */
 function oneLine(text: string, max = 96): string {
-	const flat = text.replace(/\s+/g, " ").trim();
+	const flat = sanitizeDisplayText(text).replace(/\s+/g, " ").trim();
 	return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
 
@@ -487,16 +488,20 @@ export function callLine(
 	bulletColorOverride?: string,
 ): string {
 	const bullet = theme.fg(bulletColorOverride ?? bulletColor(isPartial, isError), "●");
-	const name = theme.bold(label);
-	return summary ? `${bullet} ${name}(${theme.fg("muted", summary)})` : `${bullet} ${name}`;
+	// A label can carry an MCP server's or tool's own name, a summary the model's arguments.
+	const name = theme.bold(sanitizeDisplayText(label));
+	const shown = sanitizeDisplayText(summary);
+	return shown ? `${bullet} ${name}(${theme.fg("muted", shown)})` : `${bullet} ${name}`;
 }
 
 /**
  * `  ⎿  line…` — the result lines. First line carries the elbow, the rest are
  * aligned under it; a `… +N lines` trailer advertises ctrl+o when collapsed.
+ * The text is a tool's output (a shell, an MCP server, a web page), so its
+ * escape sequences and control characters are removed before it is painted.
  */
 export function resultLines(theme: ThemeLike, text: string, expanded: boolean, isError: boolean, maxCollapsed = 5): string[] {
-	const { lines, hidden } = collapseLines(text, expanded, maxCollapsed);
+	const { lines, hidden } = collapseLines(sanitizeDisplayText(text), expanded, maxCollapsed);
 	const color = isError ? "error" : "muted";
 	const out = lines.map((line, i) => (i === 0 ? `  ⎿  ${theme.fg(color, line)}` : `     ${theme.fg(color, line)}`));
 	if (hidden > 0) out.push(`     ${theme.fg("dim", `… +${hidden} lines (${EXPAND_HINT})`)}`);
@@ -787,7 +792,7 @@ export function formatFireTime(ms: number): string {
  * on ctrl+o (the prompt is the turn's input, verbatim — findings §21).
  */
 export function scheduledTaskComponent(theme: ThemeLike, prompt: string, firedAt: number, expanded: boolean, label = "Running scheduled task", suffix = ""): TuiComponent {
-	const lines = prompt.trim().split("\n");
+	const lines = sanitizeDisplayText(prompt).trim().split("\n");
 	const headline = `${label} (${formatFireTime(firedAt)})${suffix}`;
 	return linesComponent(() => {
 		if (!expanded) {
@@ -808,8 +813,9 @@ export function scheduledTaskComponent(theme: ThemeLike, prompt: string, firedAt
  */
 export function notificationComponent(theme: ThemeLike, text: string, expanded: boolean): TuiComponent {
 	// An agent's completion pointer says nothing the message above it does not;
-	// CC's transcript shows the message alone.
-	const parsed = parseNotificationFrames(text);
+	// CC's transcript shows the message alone. Bodies carry shell output and
+	// agent replies, so control characters are removed before parsing.
+	const parsed = parseNotificationFrames(sanitizeDisplayText(text));
 	const frames = parsed.filter((frame) => !(frame.kind === "task" && frame.pointer));
 	if (frames.length === 0) frames.push({ kind: "text", text: framesToText(parsed) });
 	const dim = (s: string) => theme.fg("dim", s);

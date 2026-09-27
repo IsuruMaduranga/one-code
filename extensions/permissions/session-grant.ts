@@ -78,6 +78,12 @@ export function sessionGrant(input: SessionGrantInput): SessionGrant | undefined
 				return mint(`${tool}(${absoluteDirPattern(cwd)})`, `Yes, and allow ${tool} anywhere in the working directory this session`);
 			}
 			const dir = dirname(absolute);
+			// A file directly in the home directory (or higher) grants itself
+			// only: its directory holds every dot-directory of the user's, so a
+			// grant for `~/.zshrc` would cover `~/.ssh/config` too.
+			if (isAtOrInsideDir(home, dir, cwd)) {
+				return mint(`${tool}(/${escapeLiteral(toPosixPath(resolve(absolute)))})`, `Yes, and allow ${tool} of ${tildify(absolute, home)} this session`);
+			}
 			return mint(`${tool}(${absoluteDirPattern(dir)})`, `Yes, and allow ${tool} under ${tildify(dir, home)} this session`);
 		}
 		case "url": {

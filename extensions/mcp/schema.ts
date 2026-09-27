@@ -7,6 +7,7 @@
  * anything exotic degrades to a permissive object that passes arguments through.
  */
 
+import { crc32 } from "node:zlib";
 import { type TSchema, Type } from "typebox";
 
 /**
@@ -176,6 +177,12 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
  * on every later one, since the block stays in the history. So the bytes are
  * checked against a small magic-number allow-list here and `mimeType` is
  * derived from them, never trusted; a block that fails becomes a text note.
+ * A valid signature is not enough: a PNG signature followed by garbage passed
+ * the sniff and still poisoned the session. So the container is walked to its
+ * end too (`wholeImageProblem`): PNG chunks with their CRCs from IHDR to IEND,
+ * JPEG segments to the scan and the end-of-image marker, the GIF trailer, the
+ * WebP RIFF length. It is not a pixel decode, so a crafted image with a valid
+ * container can still fail at the provider; a corrupt or truncated one cannot.
  */
 /** Base64 length that decodes to just over the byte ceiling (4 base64 chars per 3 bytes). */
 const MAX_IMAGE_BASE64_LENGTH = Math.ceil((MAX_IMAGE_BYTES * 4) / 3);
@@ -197,7 +204,90 @@ export function validateImageData(
 	if (head.length === 0) return { ok: false, reason: "empty after base64 decode", bytes: 0 };
 	const mime = sniffImageMime(head);
 	if (!mime) return { ok: false, reason: `unrecognised image format (claimed ${claimedMime ?? "none"})`, bytes: approxBytes };
+	const bytes = Buffer.from(data, "base64");
+	const problem = wholeImageProblem(bytes, mime);
+	if (problem) return { ok: false, reason: problem, bytes: bytes.length };
 	return { ok: true, mimeType: mime };
+}
+
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+/** A JPEG end-of-image marker. */
+const JPEG_EOI = Buffer.from([0xff, 0xd9]);
+
+/** The end of `buf` with trailing zero padding dropped (some encoders pad after the end marker). */
+function paddedEnd(buf: Buffer): number {
+	let end = buf.length;
+	while (end > 0 && buf[end - 1] === 0x00) end--;
+	return end;
+}
+
+/** Why the image's container is not whole, or undefined when it is. Pure. */
+export function wholeImageProblem(buf: Buffer, mime: string): string | undefined {
+	if (mime === "image/png") {
+		if (buf.length < 8 || !buf.subarray(0, 8).equals(PNG_SIGNATURE)) return "corrupt PNG signature";
+		let offset = 8;
+		let first = true;
+		let sawData = false;
+		for (;;) {
+			if (offset + 12 > buf.length) return "truncated PNG (no IEND chunk)";
+			const length = buf.readUInt32BE(offset);
+			const type = buf.toString("latin1", offset + 4, offset + 8);
+			if (offset + 12 + length > buf.length) return `truncated PNG (the ${type} chunk runs past the data)`;
+			if (crc32(buf.subarray(offset + 4, offset + 8 + length)) !== buf.readUInt32BE(offset + 8 + length)) return `corrupt PNG (bad ${type} chunk checksum)`;
+			if (first) {
+				if (type !== "IHDR" || length !== 13) return "corrupt PNG (IHDR is not the first chunk)";
+				if (buf.readUInt32BE(offset + 8) === 0 || buf.readUInt32BE(offset + 12) === 0) return "corrupt PNG (zero width or height)";
+				first = false;
+			}
+			if (type === "IDAT") sawData = true;
+			offset += 12 + length;
+			if (type === "IEND") return sawData ? undefined : "corrupt PNG (no image data)";
+		}
+	}
+	if (mime === "image/jpeg") {
+		let offset = 2;
+		for (;;) {
+			if (offset + 2 > buf.length) return "truncated JPEG (no image scan)";
+			if (buf[offset] !== 0xff) return "corrupt JPEG (bad segment marker)";
+			const marker = buf[offset + 1];
+			if (marker === 0xff) {
+				offset++; // fill byte
+				continue;
+			}
+			if (marker === 0xda) break; // start of scan: entropy-coded data follows
+			if (marker === 0xd9) return "corrupt JPEG (ends before its image scan)";
+			if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
+				offset += 2;
+				continue;
+			}
+			if (offset + 4 > buf.length) return "truncated JPEG";
+			const length = buf.readUInt16BE(offset + 2);
+			if (length < 2 || offset + 2 + length > buf.length) return "truncated JPEG (a segment runs past the data)";
+			offset += 2 + length;
+		}
+		// The EOI marker anywhere after the scan: scan data escapes every 0xFF, and
+		// bytes after EOI (a vendor trailer, a Motion Photo payload) are allowed.
+		return buf.indexOf(JPEG_EOI, offset + 2) !== -1 ? undefined : "truncated JPEG (no end-of-image marker)";
+	}
+	if (mime === "image/gif") {
+		const header = buf.toString("latin1", 0, 6);
+		if (header !== "GIF87a" && header !== "GIF89a") return "corrupt GIF header";
+		if (buf.length < 14) return "truncated GIF";
+		if (buf.readUInt16LE(6) === 0 || buf.readUInt16LE(8) === 0) return "corrupt GIF (zero width or height)";
+		const end = paddedEnd(buf);
+		return buf[end - 1] === 0x3b ? undefined : "truncated GIF (no trailer)";
+	}
+	if (mime === "image/webp") {
+		if (buf.length < 20) return "truncated WebP";
+		const riffEnd = buf.readUInt32LE(4) + 8;
+		if (riffEnd > buf.length) return "truncated WebP (shorter than its RIFF length)";
+		const chunk = buf.toString("latin1", 12, 16);
+		if (chunk !== "VP8 " && chunk !== "VP8L" && chunk !== "VP8X") return "corrupt WebP (no image chunk)";
+		if (20 + buf.readUInt32LE(16) > riffEnd) return "truncated WebP (its image chunk runs past the data)";
+		return undefined;
+	}
+	return `unsupported image type ${mime}`;
 }
 
 /** Magic-number sniff for the formats Anthropic accepts. Returns undefined for anything else. */

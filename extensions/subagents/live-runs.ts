@@ -12,6 +12,7 @@
 
 import { basename } from "node:path";
 import { cutPlainText, firstNonEmptyLine } from "../lib/tui-render.ts";
+import { sanitizeDisplayText } from "../lib/terminal-text.ts";
 import { normalizeToolName } from "../permissions/matcher.ts";
 import { emptyUsage, sumUsage, type UsageTotals } from "./usage.ts";
 
@@ -163,20 +164,22 @@ export class LiveRunRegistry {
 	}
 
 	register(input: RegisterInput): void {
+		// Display state only: the prompt reaches the terminal, so its control characters go.
+		const task = sanitizeDisplayText(input.task);
 		const run: LiveRun = {
 			taskId: input.taskId,
 			name: input.name,
 			agentType: input.agentType,
 			model: input.model,
 			thinking: input.thinking,
-			label: deriveLabel(input.task, input.name),
+			label: deriveLabel(task, input.name),
 			status: "running",
 			startedAt: input.startedAt,
 			toolCalls: 0,
 			tokens: emptyUsage(),
 			activity: "Starting…",
 			// The child's prompt opens the transcript, like Claude Code's viewer.
-			blocks: input.task.trim() ? [{ kind: "task", text: input.task }] : [],
+			blocks: task.trim() ? [{ kind: "task", text: task }] : [],
 			baseToolCalls: 0,
 			baseTokens: emptyUsage(),
 			parentTaskId: input.parentTaskId,
@@ -229,7 +232,7 @@ export class LiveRunRegistry {
 	setActivity(taskId: string, activity: string): void {
 		const run = this.byId.get(taskId);
 		if (!run) return;
-		run.activity = activity;
+		run.activity = sanitizeDisplayText(activity);
 		this.wake(run);
 		this.changed(taskId);
 	}
@@ -238,7 +241,8 @@ export class LiveRunRegistry {
 	block(taskId: string, block: TranscriptBlock): void {
 		const run = this.byId.get(taskId);
 		if (!run) return;
-		run.blocks.push(block);
+		// Display state only: the text reaches the terminal, so its control characters go.
+		run.blocks.push({ ...block, text: sanitizeDisplayText(block.text) });
 		if (run.blocks.length > MAX_BLOCKS) run.blocks.splice(0, run.blocks.length - MAX_BLOCKS);
 		this.changed(taskId);
 	}

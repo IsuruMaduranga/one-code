@@ -47,13 +47,16 @@ export function projectMemoryDir(cwd: string, home: string = os.homedir()): stri
 }
 
 /**
- * Claude Code loads only the first 200 lines or 25KB of MEMORY.md, whichever
- * comes first; the rest is silently dropped. Mirror that so an overgrown index
- * behaves identically here. The limits are measured against what actually
- * loads: YAML frontmatter and block-level HTML comments are stripped first.
+ * Claude Code loads only the first 200 lines or 25,000 characters of
+ * MEMORY.md, whichever comes first, and tells the model what it cut (see
+ * `truncateIndex`). Mirror that so an overgrown index behaves identically
+ * here. The limits are measured against what actually loads: YAML frontmatter
+ * and block-level HTML comments are stripped first, and surrounding
+ * whitespace does not count. Claude Code measures string length, not UTF-8
+ * bytes.
  */
 export const INDEX_MAX_LINES = 200;
-export const INDEX_MAX_BYTES = 25_000;
+export const INDEX_MAX_CHARS = 25_000;
 
 /** The index content that loads: frontmatter and whole-line HTML comments removed. */
 export function loadableIndexContent(content: string): string {
@@ -68,14 +71,69 @@ export function loadableIndexContent(content: string): string {
 	return out.replace(/^[ \t]*<!--[\s\S]*?-->[ \t]*\n?/gm, "");
 }
 
+/** Line and character counts of the index as the limits measure it. */
+function indexSize(loadable: string): { trimmed: string; lines: number; chars: number } {
+	const trimmed = loadable.trim();
+	return { trimmed, lines: trimmed.split("\n").length, chars: trimmed.length };
+}
+
+/**
+ * The index as it loads. Within the limits it is the loadable content as is.
+ * Past either limit it is cut the way Claude Code cuts it: to the first 200
+ * lines, then back to the last line break within 25,000 characters, followed
+ * by Claude Code's warning line naming what was cut, so the model knows the
+ * index goes on. The result ends in a newline, so the next section of the
+ * context block starts on a line of its own.
+ */
 export function truncateIndex(content: string): string {
-	let out = loadableIndexContent(content).split("\n").slice(0, INDEX_MAX_LINES).join("\n");
-	if (Buffer.byteLength(out, "utf8") > INDEX_MAX_BYTES) {
-		out = Buffer.from(out, "utf8").subarray(0, INDEX_MAX_BYTES).toString("utf8");
-		// A byte cut can split a multi-byte character; drop the replacement char.
-		out = out.replace(/�+$/, "");
+	const loadable = loadableIndexContent(content);
+	const { trimmed, lines, chars } = indexSize(loadable);
+	const overLines = lines > INDEX_MAX_LINES;
+	const overChars = chars > INDEX_MAX_CHARS;
+	if (!overLines && !overChars) return loadable;
+
+	let kept = overLines ? trimmed.split("\n").slice(0, INDEX_MAX_LINES).join("\n") : trimmed;
+	if (kept.length > INDEX_MAX_CHARS) {
+		const lastBreak = kept.lastIndexOf("\n", INDEX_MAX_CHARS);
+		kept = kept.slice(0, lastBreak > 0 ? lastBreak : INDEX_MAX_CHARS);
 	}
-	return out;
+	const keptLines = trimmed[kept.length] === "\n" ? kept.split("\n").length : 0;
+	const nextStart = kept.length + 1;
+	const nextEnd = trimmed.indexOf("\n", nextStart);
+	const nextLine = trimmed.slice(nextStart, nextEnd < 0 ? undefined : nextEnd).trim();
+	const cut =
+		keptLines === 0
+			? `everything after the first ${kept.length} characters of line 1 was cut off`
+			: `${lines - keptLines} of ${lines} lines were cut off, starting at line ${keptLines + 1}${nextLine ? ` ("${shortenLine(nextLine, 80)}")` : ""}`;
+	const size =
+		overChars && !overLines
+			? `${formatSize(chars)} (limit: ${formatSize(INDEX_MAX_CHARS)}) \u2014 index entries are too long`
+			: overLines && !overChars
+				? `${lines} lines (limit: ${INDEX_MAX_LINES})`
+				: `${lines} lines and ${formatSize(chars)}`;
+	return `${kept}\n\n> WARNING: MEMORY.md is ${size}. Only part of it was loaded: ${cut}. Keep index entries to one line under ~200 chars; move detail into topic files.\n`;
+}
+
+/** A size the way Claude Code prints it: `N bytes`, else `N.NKB`/`MB` with a trailing `.0` dropped. */
+function formatSize(n: number): string {
+	const units = ["KB", "MB", "GB"];
+	let value = n / 1024;
+	if (value < 1) return `${n} bytes`;
+	let unit = 0;
+	while (value >= 1024 && unit < units.length - 1) {
+		value /= 1024;
+		unit++;
+	}
+	return `${value.toFixed(1).replace(/\.0$/, "")}${units[unit]}`;
+}
+
+/** Claude Code's quote of the first cut line: at most `max` characters, cut at a word when that keeps over half. */
+function shortenLine(text: string, max: number): string {
+	if (text.length <= max) return text;
+	const head = [...text].slice(0, max - 1).join("");
+	const lastSpace = head.search(/\s\S*$/);
+	const atWord = lastSpace === -1 ? "" : head.slice(0, lastSpace).trimEnd();
+	return `${atWord.length > max / 2 ? atWord : head.trimEnd()}\u2026`;
 }
 
 /**
@@ -85,11 +143,9 @@ export function truncateIndex(content: string): string {
  * itself always succeeds).
  */
 export function indexLimitStatus(content: string): "ok" | "near" | "over" {
-	const loadable = loadableIndexContent(content);
-	const lines = loadable.split("\n").length;
-	const bytes = Buffer.byteLength(loadable, "utf8");
-	if (lines > INDEX_MAX_LINES || bytes > INDEX_MAX_BYTES) return "over";
-	if (lines >= INDEX_MAX_LINES * 0.9 || bytes >= INDEX_MAX_BYTES * 0.9) return "near";
+	const { lines, chars } = indexSize(loadableIndexContent(content));
+	if (lines > INDEX_MAX_LINES || chars > INDEX_MAX_CHARS) return "over";
+	if (lines >= INDEX_MAX_LINES * 0.9 || chars >= INDEX_MAX_CHARS * 0.9) return "near";
 	return "ok";
 }
 

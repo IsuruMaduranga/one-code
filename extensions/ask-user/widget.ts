@@ -16,6 +16,7 @@
 
 import { cutPlainText, padPlainText, truncateLine, visibleWidth, wrapPlainText } from "../lib/tui-render.ts";
 import type { Answer, Question } from "./questions.ts";
+import { keyId, keyText } from "../lib/key-input.ts";
 
 export type Paint = (color: string, text: string) => string;
 export type Bold = (text: string) => string;
@@ -124,35 +125,29 @@ export type WidgetKey =
 	| { kind: "text"; text: string };
 
 export function decodeWidgetKey(data: string): WidgetKey | undefined {
-	switch (data) {
-		case "\x1b[A":
-		case "\x1bOA":
+	switch (keyId(data)) {
+		case "up":
 			return { kind: "up" };
-		case "\x1b[B":
-		case "\x1bOB":
+		case "down":
 			return { kind: "down" };
-		case "\x1b[D":
-		case "\x1bOD":
-		case "\x1b[Z": // shift+tab
+		case "left":
+		case "shift+tab":
 			return { kind: "prevTab" };
-		case "\x1b[C":
-		case "\x1bOC":
-		case "\t":
+		case "right":
+		case "tab":
 			return { kind: "nextTab" };
-		case "\r":
-		case "\n":
+		case "enter":
 			return { kind: "enter" };
-		case "\x1b":
-		case "\x03": // ctrl+c — same intent as escape while the dialog is focused
+		case "escape":
+		case "ctrl+c": // same intent as escape while the dialog is focused
 			return { kind: "esc" };
-		case "\x7f":
-		case "\b":
+		case "backspace":
+		case "ctrl+backspace":
 			return { kind: "backspace" };
 		default: {
-			// Unrecognized escape sequences (home/end/F-keys) must not leak their
-			// tail characters into a text draft.
-			if (data.startsWith("\x1b")) return undefined;
-			const text = [...data].filter((char) => char >= " " && char !== "\x7f").join("");
+			// Unrecognized escape sequences (home/end/F-keys) type nothing, so
+			// their tail characters never leak into a text draft.
+			const text = keyText(data);
 			return text ? { kind: "text", text } : undefined;
 		}
 	}

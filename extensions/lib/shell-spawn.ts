@@ -29,8 +29,9 @@ import { type ChildProcess, spawn, type SpawnOptions } from "node:child_process"
 import { constants, existsSync } from "node:fs";
 import { access } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename } from "node:path";
+import { basename, delimiter } from "node:path";
 import { getPowerShellConfig, getShellConfig } from "@earendil-works/pi-coding-agent";
+import { childProcessEnv } from "./app-launch.mjs";
 import { readSettingsEnv } from "./claude-settings.ts";
 import { detachedSpawnOptions, killProcessTree, waitForChildExit } from "./process-tree.ts";
 import { whichOnPath } from "./which.ts";
@@ -204,16 +205,20 @@ export function powerShellEdition(spawnSpec: ShellSpawn | undefined): "core" | "
  * shell's arguments (`bash -c <cmd>`, `pwsh … -Command <cmd>`); stdin transport
  * writes it to the child's stdin (pi's legacy-WSL bash), which needs stdin
  * piped — callers that must feed their own stdin (hooks) reject that form.
+ * The child's environment is `options.env` (default `process.env`) with the
+ * bundled app's launcher variables put back to the user's own values
+ * (app-launch.mjs childProcessEnv), so a `pi` run from a command is the user's pi.
  */
 export function spawnShellCommand(spec: ShellSpawn, command: string, options: SpawnOptions): ChildProcess {
+	const env = childProcessEnv(options.env ?? process.env);
 	if (spec.commandTransport === "stdin") {
 		const stdio = Array.isArray(options.stdio) ? ["pipe", ...options.stdio.slice(1)] : ["pipe", "pipe", "pipe"];
-		const child = spawn(spec.shell, spec.args, { ...options, stdio: stdio as SpawnOptions["stdio"], windowsHide: true });
+		const child = spawn(spec.shell, spec.args, { ...options, env, stdio: stdio as SpawnOptions["stdio"], windowsHide: true });
 		child.stdin?.on("error", () => {});
 		child.stdin?.end(command);
 		return child;
 	}
-	return spawn(spec.shell, [...spec.args, command], { ...options, windowsHide: true });
+	return spawn(spec.shell, [...spec.args, command], { ...options, env, windowsHide: true });
 }
 
 // ---------------------------------------------------------------------------
@@ -226,6 +231,29 @@ export interface ShellOperations {
 		cwd: string,
 		options: { onData: (data: Buffer) => void; signal?: AbortSignal; timeout?: number; env?: NodeJS.ProcessEnv },
 	) => Promise<{ exitCode: number | null }>;
+}
+
+/**
+ * pi's shell environment (utils/shell.ts `getShellEnv`, not exported): `env`
+ * with pi's managed-tools directory (`<agentDir>/bin`) first on PATH, the PATH
+ * key found in any case.
+ */
+export function piShellEnv(binDir: string, env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+	const pathKey = Object.keys(env).find((key) => key.toLowerCase() === "path") ?? "PATH";
+	const current = env[pathKey] ?? "";
+	if (current.split(delimiter).includes(binDir)) return { ...env };
+	return { ...env, [pathKey]: [binDir, current].filter(Boolean).join(delimiter) };
+}
+
+/**
+ * `operations` with every command's environment passed through
+ * childProcessEnv; `defaultEnv` stands in when the caller passes none (pi's
+ * user `!` commands never do, and its local operations then use its shell env).
+ */
+export function withChildProcessEnv(operations: ShellOperations, defaultEnv: () => NodeJS.ProcessEnv): ShellOperations {
+	return {
+		exec: (command, cwd, options) => operations.exec(command, cwd, { ...options, env: childProcessEnv(options.env ?? defaultEnv()) }),
+	};
 }
 
 const MAX_TIMEOUT_MS = 2_147_483_647;

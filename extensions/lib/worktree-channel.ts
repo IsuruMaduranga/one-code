@@ -4,10 +4,14 @@
  * worktree extension emits on every state change — enter, exit, and the
  * session_start/session_tree restore; the footer shows the worktree's path
  * and branch in place of the process cwd while one is active (Claude Code's
- * footer does the same). The bus does not replay: a late subscriber sees the
- * next change, which is fine here — the footer subscribes at load, and the
- * first emit is the session_start restore.
+ * footer does the same), cron fires and monitors run there, and subagents
+ * and workflow agents are spawned there (`sessionWorkCwd`). The bus does not
+ * replay: a late subscriber sees the next change, which is fine here — every
+ * subscriber subscribes at load, and the first emit is the session_start
+ * restore.
  */
+
+import { existsSync } from "node:fs";
 
 export const WORKTREE_CHANNEL = "one-code:worktree";
 
@@ -15,4 +19,16 @@ export const WORKTREE_CHANNEL = "one-code:worktree";
 export interface WorktreeLocation {
 	path: string;
 	branch?: string;
+	/** Root of the shared checkout the worktree belongs to, for the child sessions' git-isolation guard. */
+	sharedRoot?: string;
+}
+
+/**
+ * Where the session's work happens: the entered worktree while one is active
+ * and still on disk, else the session's own cwd. pi fixes a session's cwd at
+ * creation (handoff trap 10), so a child spawned from `ctx.cwd` would run in
+ * the original checkout the user entered a worktree to protect.
+ */
+export function sessionWorkCwd(entered: WorktreeLocation | null | undefined, sessionCwd: string): string {
+	return entered?.path && existsSync(entered.path) ? entered.path : sessionCwd;
 }

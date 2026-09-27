@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyBtwKey, type BtwPanelInput, decodeBtwKey, initialBtwState, renderBtwPanel, SHOWN_HISTORY } from "../../extensions/btw/panel.ts";
+import { applyBtwKey, type BtwPanelInput, copyAnswer, decodeBtwKey, initialBtwState, renderBtwPanel, SHOWN_HISTORY } from "../../extensions/btw/panel.ts";
 import { visibleWidth } from "../../extensions/lib/tui-render.ts";
 
 describe("decodeBtwKey", () => {
@@ -217,5 +217,33 @@ describe("renderBtwPanel", () => {
 			height: 14,
 		});
 		for (const line of lines) expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+	});
+});
+
+describe("copyAnswer", () => {
+	const render = (state: ReturnType<typeof initialBtwState>) =>
+		renderBtwPanel({ state, history: [], question: "q", body: { kind: "answer", text: "a" }, width: 100, height: 20 }).at(-1);
+
+	it("shows the reason in the hint when no clipboard route works, instead of rejecting", async () => {
+		const state = initialBtwState();
+		let repaints = 0;
+		const failing = () => Promise.reject(new Error("Clipboard unavailable: install `wl-clipboard` (`wl-copy`)\nmore"));
+		await expect(copyAnswer(failing, "answer", state, () => repaints++)).resolves.toBeUndefined();
+		expect(repaints).toBe(1);
+		expect(state.copied).toBe(false);
+		expect(render(state)).toContain("Copy failed: Clipboard unavailable: install `wl-clipboard` (`wl-copy`)");
+		// The next key clears it back to the plain hint.
+		applyBtwKey(state, { kind: "down" }, 0);
+		expect(render(state)).toContain("c to copy");
+	});
+	it("also survives a copy function that throws synchronously", async () => {
+		const state = initialBtwState();
+		await copyAnswer(() => { throw new Error("boom"); }, "answer", state, () => {});
+		expect(state.copyError).toBe("Copy failed: boom");
+	});
+	it("confirms a successful copy", async () => {
+		const state = initialBtwState();
+		await copyAnswer(() => Promise.resolve(), "answer", state, () => {});
+		expect(render(state)).toContain("Copied to clipboard");
 	});
 });

@@ -7,10 +7,12 @@
  * Everything here is pure and paint-injected so it unit-tests with an identity
  * paint. `paint(color, text)` matches `safeThemePaint`; in tests it returns the
  * text unchanged, so assertions see the plain line. Inclusion decisions use
- * plain lengths only, so the painted result (ANSI adds zero display width)
- * always fits the width it was built for.
+ * the plain text's terminal columns (`visibleWidth`, never `.length`, so a CJK
+ * path or branch counts two columns a glyph), so the painted result (ANSI adds
+ * zero display width) always fits the width it was built for.
  */
 
+import { sliceColumns, tailColumns, visibleWidth } from "../lib/text-width.ts";
 import { costOf, usageEntryCost } from "../lib/usage-bus.ts";
 import type { WorktreeLocation } from "../lib/worktree-channel.ts";
 
@@ -73,12 +75,13 @@ function tilde(cwd: string, home: string): string {
 
 /**
  * Fit a path into `max` columns, keeping the tail (the deepest, most specific
- * folders) with a leading `…`. `max <= 1` collapses to just `…`.
+ * folders) with a leading `…`. `max <= 1` collapses to just `…`. Cut by
+ * columns on a grapheme boundary, so a wide glyph or an emoji stays whole.
  */
 function truncatePath(path: string, max: number): string {
-	if (path.length <= max) return path;
+	if (visibleWidth(path) <= max) return path;
 	if (max <= 1) return "…";
-	return `…${path.slice(path.length - (max - 1))}`;
+	return `…${tailColumns(path, max - 1).text}`;
 }
 
 interface Part {
@@ -132,7 +135,7 @@ export function buildFooterLines(data: FooterData, width: number, paint: Paint):
 	// branch (bare-branch fallback), and only when there is no room even for the
 	// bare branch does the whole chunk go, leaving metrics alone. The three
 	// segments paint separately — path dim, branch in accent, PR in the link
-	// colour — but every width/gap decision uses their plain lengths.
+	// colour — but every width/gap decision uses their plain columns.
 	const path = tilde(data.cwd, data.home);
 	const branchSeg = data.branch ? ` ⎇ ${data.branch}` : "";
 	const prSeg = data.branch && typeof data.pr === "number" ? ` ← PR #${data.pr}` : "";
@@ -140,7 +143,7 @@ export function buildFooterLines(data: FooterData, width: number, paint: Paint):
 	// Drop optional right parts (highest priority first) until the metrics fit.
 	let kept = parts.slice();
 	const rightPlain = () => kept.map((p) => p.plain).join(SEP);
-	while (rightPlain().length > width) {
+	while (visibleWidth(rightPlain()) > width) {
 		const droppable = kept
 			.map((p, i) => ({ p, i }))
 			.filter((x) => x.p.dropPriority > 0)
@@ -149,11 +152,11 @@ export function buildFooterLines(data: FooterData, width: number, paint: Paint):
 		kept = kept.filter((_, i) => i !== droppable.i);
 	}
 
-	const rightLen = rightPlain().length;
+	const rightLen = visibleWidth(rightPlain());
 
 	// Even the core overflows: last resort, truncate the plain metrics to width.
 	if (rightLen > width) {
-		return [paint("dim", rightPlain().slice(0, width))];
+		return [paint("dim", sliceColumns(rightPlain(), width).text)];
 	}
 
 	const rightPaintedStr = kept.map((p) => p.painted).join(paint("dim", SEP));
@@ -162,12 +165,12 @@ export function buildFooterLines(data: FooterData, width: number, paint: Paint):
 	// Keep the PR only if the branch+PR both fit; otherwise drop it and keep the
 	// bare branch.
 	const room = width - rightLen - 1;
-	const keptPr = room >= branchSeg.length + prSeg.length + 1 ? prSeg : "";
-	const suffixLen = branchSeg.length + keptPr.length;
+	const keptPr = room >= visibleWidth(branchSeg) + visibleWidth(prSeg) + 1 ? prSeg : "";
+	const suffixLen = visibleWidth(branchSeg) + visibleWidth(keptPr);
 	if (room >= suffixLen + 1) {
 		const shownPath = truncatePath(path, room - suffixLen);
 		const leftPlain = `${shownPath}${branchSeg}${keptPr}`;
-		const gap = " ".repeat(width - leftPlain.length - rightLen);
+		const gap = " ".repeat(Math.max(0, width - visibleWidth(leftPlain) - rightLen));
 		const leftPainted = `${paint("dim", shownPath)}${paint("accent", branchSeg)}${paint("mdLink", keptPr)}`;
 		return [`${leftPainted}${gap}${rightPaintedStr}`];
 	}

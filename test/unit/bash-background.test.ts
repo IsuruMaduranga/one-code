@@ -34,6 +34,15 @@ describe("startBackgroundBash", () => {
 		dir = undefined;
 	});
 
+	it("keeps a UTF-8 character split across two reads whole, in the output and in the log (A6-L2)", async () => {
+		dir = mkdtempSync(join(tmpdir(), "bg-utf8-"));
+		const logPath = join(dir, "output.log");
+		const { task } = start("printf '\\342\\202'; sleep 0.2; printf '\\254 ok\\n'", { logPath });
+		await task.finished;
+		expect(task.output()).toBe("€ ok\n");
+		expect(readFileSync(logPath, "utf8")).toBe("€ ok\n");
+	});
+
 	it("completes with the command's output and exit code", async () => {
 		const { task, summary } = start("echo hello-bg");
 		await task.finished;

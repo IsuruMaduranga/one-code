@@ -2,11 +2,13 @@
  * Claude Code's "send now" chord, `ctrl+x ctrl+s` (its `chat:sendNow` action),
  * read from raw terminal input. Pure: the extension feeds it every key.
  *
- * Keys arrive in either encoding: the legacy control byte (`\x18`, `\x13`) or
- * the kitty keyboard protocol's CSI u form, which pi-tui turns on with flags 7
- * (disambiguate, event types, alternate keys) where the terminal supports it.
- * With event types on, a release follows every press, so releases and repeats
- * never change the chord's state.
+ * Keys arrive in any of three encodings: the legacy control byte (`\x18`,
+ * `\x13`), the kitty keyboard protocol's CSI u form, which pi-tui turns on
+ * with flags 7 (disambiguate, event types, alternate keys) where the terminal
+ * supports it, or xterm's modifyOtherKeys form (`\x1b[27;5;120~`), which
+ * pi-tui turns on otherwise and tmux sends with `extended-keys on`.
+ * `lib/key-input.ts` names all three alike. With event types on, a release
+ * follows every press, so releases never change the chord's state.
  *
  * pi binds `ctrl+x` alone to "copy the last assistant message". The chord
  * takes a `ctrl+x` only while send now applies (a turn runs with something to
@@ -15,23 +17,14 @@
  * other time `ctrl+x` reaches pi and copies.
  */
 
+import { isKeyRelease, keyId } from "../lib/key-input.ts";
+
 export type ChordKey = "ctrl+x" | "ctrl+s" | "release" | "other";
 
-const CTRL = 4;
-/** Caps lock and num lock bits, which the kitty protocol reports as modifiers. */
-const LOCKS = 64 | 128;
-
 export function classifyKey(data: string): ChordKey {
-	if (data === "\x18") return "ctrl+x";
-	if (data === "\x13") return "ctrl+s";
-	const match = data.match(/^\x1b\[(\d+)(?::\d*)?(?::\d+)?;(\d+)(?::(\d+))?u$/);
-	if (!match) return "other";
-	if (match[3] === "3") return "release";
-	const codepoint = Number(match[1]);
-	const modifiers = (Number(match[2]) - 1) & ~LOCKS;
-	if (modifiers !== CTRL) return "other";
-	if (codepoint === 120) return "ctrl+x";
-	if (codepoint === 115) return "ctrl+s";
+	if (isKeyRelease(data)) return "release";
+	const id = keyId(data);
+	if (id === "ctrl+x" || id === "ctrl+s") return id;
 	return "other";
 }
 

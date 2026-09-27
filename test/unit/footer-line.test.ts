@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { visibleWidth } from "../../extensions/lib/text-width.ts";
 import {
 	buildFooterLines,
 	computeMainUsage,
@@ -184,5 +185,35 @@ describe("footerLocation", () => {
 
 	it("hides the branch for a worktree entered by path with a detached HEAD", () => {
 		expect(footerLocation("/repo", "main", { path: "/elsewhere/wt" })).toEqual({ cwd: "/elsewhere/wt", branch: undefined });
+	});
+});
+
+describe("buildFooterLines measures terminal columns", () => {
+	const idPaint = (_c: string, t: string) => t;
+	const cjk = {
+		cwd: "/home/u/プロジェクト/ウェブアプリケーション",
+		home: "/home/u",
+		branch: "機能/ログイン画面",
+		contextTokens: 12000,
+		contextWindow: 200000,
+		contextPercent: 6,
+		cost: 0.1234,
+		cacheHitPercent: 80,
+		model: "(anthropic) claude-sonnet-5",
+		effort: "high",
+	};
+	it("keeps a CJK path and branch inside the width and the effort on the line", () => {
+		for (const width of [80, 100, 140]) {
+			const [line] = buildFooterLines(cjk, width, idPaint);
+			expect(visibleWidth(line), `width ${width}`).toBeLessThanOrEqual(width);
+			expect(line.endsWith("high")).toBe(true);
+		}
+		const [wide] = buildFooterLines(cjk, 140, idPaint);
+		expect(visibleWidth(wide)).toBe(140);
+	});
+	it("never splits an emoji in a head-truncated path", () => {
+		const [line] = buildFooterLines({ ...cjk, cwd: `/home/u/${"📁".repeat(30)}`, branch: undefined }, 80, idPaint);
+		expect(visibleWidth(line)).toBeLessThanOrEqual(80);
+		expect(line).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/);
 	});
 });

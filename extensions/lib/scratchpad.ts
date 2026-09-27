@@ -14,8 +14,9 @@
  * module state — so each re-derives it through `sessionScratchpadDir`.
  */
 
+import { chmodSync, lstatSync, mkdirSync } from "node:fs";
 import os from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { findGitRoot } from "./git.ts";
 import { projectSlug } from "./memory.ts";
 import { tryRealpath } from "./paths.ts";
@@ -50,6 +51,91 @@ function resolveTmpRoot(): string {
 export function sessionScratchpadDir(cwd: string, sessionId: string): string {
 	const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
 	return scratchpadDir(resolveTmpRoot(), uid, findGitRoot(cwd) ?? cwd, sessionId);
+}
+
+/** The owner-level directory of a scratchpad path (`<tmp>/onecode-<uid>`). */
+function ownerDirOf(scratchpad: string): string {
+	return dirname(dirname(dirname(scratchpad)));
+}
+
+/** What `ownerDirProblem` needs from an `lstat`. */
+export interface OwnerDirStat {
+	isSymbolicLink: boolean;
+	isDirectory: boolean;
+	uid: number;
+	mode: number;
+}
+
+/**
+ * Why the owner directory cannot hold this user's scratchpads, or undefined.
+ * On a shared `/tmp` the name is predictable from the uid, so another user
+ * can create it first: a symlink, a directory they own, or one anyone may
+ * write lets them read, rename or replace every session's files under it
+ * (the sticky bit on `/tmp` does not protect entries of their directory).
+ * Pure.
+ */
+export function ownerDirProblem(stat: OwnerDirStat, uid: number): string | undefined {
+	if (stat.isSymbolicLink) return "it is a symlink";
+	if (!stat.isDirectory) return "it is not a directory";
+	if (stat.uid !== uid) return `it is owned by uid ${stat.uid}`;
+	if (stat.mode & 0o022) return "others may write to it";
+	return undefined;
+}
+
+/**
+ * Create the scratchpad private to this user, or return false. The owner
+ * directory is created 0700 and must then be a real directory this user owns
+ * that nobody else may write (`ownerDirProblem`); one created before this
+ * check with a looser mode is tightened to 0700, so other users can neither
+ * list the project paths in it nor read what the model writes. Every level
+ * below is created 0700 too. Windows has no shared temp root (`%TEMP%` is per
+ * user), so there it only creates the directory.
+ */
+export function ensurePrivateScratchpad(dir: string, uid: number | undefined = typeof process.getuid === "function" ? process.getuid() : undefined): boolean {
+	try {
+		if (uid !== undefined) {
+			const owner = ownerDirOf(dir);
+			mkdirSync(owner, { recursive: true, mode: 0o700 });
+			const stat = lstatSync(owner);
+			if (ownerDirProblem({ isSymbolicLink: stat.isSymbolicLink(), isDirectory: stat.isDirectory(), uid: stat.uid, mode: stat.mode }, uid)) return false;
+			if (stat.mode & 0o077) chmodSync(owner, 0o700);
+		}
+		mkdirSync(dir, { recursive: true, mode: 0o700 });
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Whether an existing scratchpad sits under a private owner directory, with
+ * no side effects: for a gate that trusts a scratchpad another extension
+ * created.
+ */
+export function isPrivateScratchpad(dir: string, uid: number | undefined = typeof process.getuid === "function" ? process.getuid() : undefined): boolean {
+	if (uid === undefined) return true;
+	try {
+		const stat = lstatSync(ownerDirOf(dir));
+		return ownerDirProblem({ isSymbolicLink: stat.isSymbolicLink(), isDirectory: stat.isDirectory(), uid: stat.uid, mode: stat.mode }, uid) === undefined && (stat.mode & 0o077) === 0;
+	} catch {
+		return false;
+	}
+}
+
+/** The session's scratchpad, created private to this user, or undefined when it cannot be. */
+export function privateSessionScratchpadDir(cwd: string, sessionId: string): string | undefined {
+	const dir = sessionScratchpadDir(cwd, sessionId);
+	return ensurePrivateScratchpad(dir) ? dir : undefined;
+}
+
+/**
+ * A session's own private temp directory, the scratchpad's parent
+ * (`<tmp>/onecode-<uid>/<project-slug>/<session-id>`), created private to
+ * this user, or undefined when it cannot be.
+ */
+export function privateSessionTempDir(cwd: string, sessionId: string): string | undefined {
+	const scratchpad = sessionScratchpadDir(cwd, sessionId);
+	return ensurePrivateScratchpad(scratchpad) ? dirname(scratchpad) : undefined;
 }
 
 /** Claude Code's Scratchpad Directory prompt section, verbatim (see payload.json). */

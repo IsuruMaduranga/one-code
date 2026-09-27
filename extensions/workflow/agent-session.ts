@@ -14,12 +14,14 @@
  * `extensionFactories`, which DefaultResourceLoader always loads.
  */
 
+import { randomBytes } from "node:crypto";
 import os from "node:os";
 import { getAgentDir, type ModelRuntime, SessionManager, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { whenAborted } from "../lib/abort.ts";
+import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { createSharedModelRuntime, finalAssistantText, openChildSession } from "../lib/agent-loader.ts";
 import { modelSpec as modelSpecOf, supportsImageInput } from "../lib/model-policy.ts";
 import { isModelUnavailableError } from "../auto-mode/model-select.ts";
@@ -28,12 +30,13 @@ import type { PermissionBridge } from "../permissions/subagent-gate.ts";
 import { localGateMode, MODE_ENV } from "../lib/permission-gate.ts";
 import type { HookBridge } from "../hooks/subagent-bridge.ts";
 import { summarizeArgs } from "../lib/tui-render.ts";
-import { agentDirs, type AgentDefinition, discoverAgents } from "../subagents/agents.ts";
+import { agentDirs, type AgentDefinition, agentToolOptions, discoverAgents, unusableAllowlistError } from "../subagents/agents.ts";
+import { CHILD_EXTENSION_PATHS } from "../lib/child-extensions.ts";
 import type { SubagentDefault } from "../subagents/default-model.ts";
 import { expensiveModelGate, resolveSubagentModel, subagentModelMenu } from "../subagents/model-select.ts";
 import { withoutUnusable } from "../lib/model-unusable.ts";
 import { cleanupWorktree, createWorktree, isGitRepo, type Worktree } from "../subagents/worktree.ts";
-import type { AgentCallOptions, AgentCallResult, AgentEffort, AgentRunUpdate } from "./types.ts";
+import type { AgentCallOptions, AgentCallResult, AgentEffort, AgentRunUpdate, KeptWorktree } from "./types.ts";
 import { WorkflowScriptError } from "./types.ts";
 
 const MAX_SCHEMA_RETRIES = 2;
@@ -65,6 +68,13 @@ export interface AgentRunnerOptions {
 	getHookBridge?: () => HookBridge | undefined;
 	/** Each finished agent's dollar cost (review S13: workflow agents never reached the footer). */
 	onUsage?: (cost: number) => void;
+	/**
+	 * The parent's live MCP tools (lib/mcp-share.ts `watchMcpTools`), injected
+	 * as custom tools over the parent's connections, as the subagent runner does.
+	 */
+	getMcpTools?: () => ToolDefinition[] | Promise<ToolDefinition[]>;
+	/** Where an answer past OUTPUT_CAP is saved (`<dir>/tool-results/`): the run's directory. */
+	resultsDir?: string;
 }
 
 /**
@@ -245,6 +255,12 @@ export class AgentRunner {
 
 		await this.judgeDelegation(prompt, opts, agentDef, signal);
 
+		// Before the worktree exists: a malformed schema would otherwise leak it.
+		if (opts.schema) assertObjectSchema(opts.schema);
+
+		// Also before the worktree: a rejection here would leak it the same way.
+		const mcpTools = (await this.options.getMcpTools?.()) ?? [];
+
 		let worktree: Worktree | undefined;
 		let cwd = this.options.cwd;
 		if (opts.isolation === "worktree") {
@@ -256,13 +272,23 @@ export class AgentRunner {
 		}
 
 		const capture: { called: boolean; value: unknown } = { called: false, value: undefined };
-		const customTools: ToolDefinition[] = opts.schema ? [buildStructuredOutputTool(opts.schema, capture)] : [];
+		const customTools: ToolDefinition[] = [
+			...(opts.schema ? [buildStructuredOutputTool(opts.schema, capture)] : []),
+			...mcpTools,
+		];
 
+		// The same child session a subagent gets (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26
+		// H2, H3, M6): the curated child extensions, the parent's MCP tools, and the
+		// agent file's tool lists through the one shared builder, which keeps
+		// `structured_output` on an allowlist and applies `disallowedTools`.
 		const session = await openChildSession({
 			loader: {
 				cwd: this.options.cwd,
 				agentDir: getAgentDir(),
 				systemPrompt: agentDef?.systemPrompt,
+				extraExtensionPaths: CHILD_EXTENSION_PATHS,
+				// claude-context (a child extension) injects # claudeMd itself.
+				noContextFiles: true,
 				getPermissionBridge: this.options.getPermissionBridge,
 				getHookBridge: this.options.getHookBridge,
 			},
@@ -272,11 +298,16 @@ export class AgentRunner {
 				modelRuntime: this.modelRuntime,
 				model: modelSpec.model as never,
 				thinkingLevel: modelSpec.thinkingLevel as never,
-				tools: agentDef?.tools,
+				...agentToolOptions(agentDef),
 				customTools,
 				sessionManager: SessionManager.inMemory(cwd),
 			},
 			onError: (error) => this.options.onNotice?.(`${opts.label ?? "agent"}: extension error in ${error.event}: ${error.error}`),
+		}).catch(async (error: unknown) => {
+			// Not yet under the prompt's try/finally: a session that fails to open
+			// must not leak the worktree and its branch.
+			if (worktree) await this.settleWorktree(worktree, opts.label, error);
+			throw error;
 		});
 
 		const unhookAbort = whenAborted(signal, () => void session.abort());
@@ -310,7 +341,17 @@ export class AgentRunner {
 			prefixWarmKey(agentPromptIdentity(agentDef?.name), cwd, model ? modelSpecOf(model) : undefined),
 			session,
 		);
+		let failure: unknown;
 		try {
+			// An allowlist that matched no real tool would run a tool-less agent.
+			const unusable = unusableAllowlistError(
+				agentDef,
+				session.getAllTools().map((t) => t.name),
+			);
+			if (unusable) throw new WorkflowScriptError(unusable);
+			// A stop during the waits above (MCP tools still connecting, the warm
+			// gate) aborted a session that was idle: never send the first request.
+			if (signal.aborted) throw new WorkflowScriptError("aborted");
 			await session.prompt(this.buildPrompt(prompt, Boolean(opts.schema)));
 			if (signal.aborted) throw new WorkflowScriptError("aborted");
 
@@ -322,23 +363,34 @@ export class AgentRunner {
 				if (typeof value !== "string" || !value.trim()) {
 					throw new Error("subagent produced no output");
 				}
-				value = (value as string).slice(0, OUTPUT_CAP);
+				// Never cut: a long answer is saved to the run directory and the script
+				// gets Claude Code's <persisted-output> block naming the file, which a
+				// later agent can read (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 M1).
+				value = persistIfLarge(value as string, {
+					dir: this.options.resultsDir ?? sessionResultsDir(undefined),
+					id: `agent-${randomBytes(4).toString("hex")}`,
+					maxBytes: OUTPUT_CAP,
+				});
 			}
 
 			const stats = session.getSessionStats();
-			// cleanupWorktree keeps trees holding uncommitted changes; report those.
-			let worktreePath: string | undefined;
+			// cleanupWorktree keeps trees holding uncommitted changes or commits; report those.
+			let kept: Worktree | undefined;
 			if (worktree) {
 				const removed = await cleanupWorktree(this.options.cwd, worktree);
-				if (!removed) worktreePath = worktree.path;
+				if (!removed) kept = worktree;
 				worktree = undefined;
 			}
 			return {
 				value,
 				tokens: { input: stats.tokens.input, output: stats.tokens.output, total: stats.tokens.total },
 				cost: stats.cost,
-				worktreePath,
+				worktreePath: kept?.path,
+				worktreeBranch: kept?.branch,
 			};
+		} catch (error) {
+			failure = error;
+			throw error;
 		} finally {
 			// Whatever the outcome — success, failure, or an abort (a user stop, or
 			// the run finishing with this agent un-awaited) — the provider was
@@ -349,8 +401,23 @@ export class AgentRunner {
 			unsubscribe?.();
 			unhookAbort();
 			session.dispose();
-			if (worktree) await cleanupWorktree(this.options.cwd, worktree);
+			// A failed or aborted agent can still have edited or committed in its
+			// worktree: settled after the session is gone, before the error reaches
+			// the caller, so the kept path rides on it.
+			if (worktree) await this.settleWorktree(worktree, opts.label, failure);
 		}
+	}
+
+	/**
+	 * Remove a failed agent's worktree, or keep it when it holds changes or
+	 * commits: then the run log names it, and the kept path rides on `error`
+	 * (`keptWorktreeOf`) so the agent's end event and the run report list it.
+	 */
+	private async settleWorktree(worktree: Worktree, label: string | undefined, error: unknown): Promise<void> {
+		if (await cleanupWorktree(this.options.cwd, worktree)) return;
+		const kept: KeptWorktree = { path: worktree.path, branch: worktree.branch };
+		this.options.onNotice?.(`${label ?? "agent"}: worktree kept at ${kept.path} (branch ${kept.branch}) with its changes or commits`);
+		if (error instanceof Error) (error as Error & { keptWorktree?: KeptWorktree }).keptWorktree = kept;
 	}
 
 	private judgeDelegation(prompt: string, opts: AgentCallOptions, agentDef: AgentDefinition | undefined, signal: AbortSignal): Promise<void> {
@@ -398,9 +465,7 @@ export class AgentRunner {
 
 /** Terminating tool capturing schema-validated output (pi validates params pre-execute). */
 function buildStructuredOutputTool(schema: Record<string, unknown>, capture: { called: boolean; value: unknown }): ToolDefinition {
-	if (schema.type !== "object" || typeof schema.properties !== "object") {
-		throw new WorkflowScriptError("agent() schema must be a JSON Schema with top-level type \"object\" and properties");
-	}
+	assertObjectSchema(schema);
 	return {
 		name: "structured_output",
 		label: "Structured Output",
@@ -416,6 +481,13 @@ function buildStructuredOutputTool(schema: Record<string, unknown>, capture: { c
 			};
 		},
 	} as ToolDefinition;
+}
+
+/** A structured_output schema must be an object schema with properties. */
+function assertObjectSchema(schema: Record<string, unknown>): void {
+	if (schema.type !== "object" || typeof schema.properties !== "object") {
+		throw new WorkflowScriptError("agent() schema must be a JSON Schema with top-level type \"object\" and properties");
+	}
 }
 
 /** Pull the first parseable JSON object/array out of free text (```json fences first). */

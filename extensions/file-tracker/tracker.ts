@@ -13,8 +13,15 @@
 export type FreshnessStatus = "fresh" | "unread" | "stale" | "absent";
 
 export interface TrackedFile {
-	/** Content as of the last read or write we performed. */
+	/** Content as of the last read or write we performed ("" when `oversized`). */
 	content: string;
+	/**
+	 * Too large to keep: we saw the file but hold no content to compare. An
+	 * explicit flag, never the empty string, so a file read while EMPTY
+	 * compares like any other and cannot be overwritten after someone fills
+	 * it (TOOLS-REVIEW-2026-09-26 M2).
+	 */
+	oversized: boolean;
 	at: number;
 }
 
@@ -54,9 +61,9 @@ export class FileTracker {
 		this.notified.delete(path);
 		if (content.length > MAX_TRACKED_BYTES) {
 			// Too large to diff usefully; remember that we saw it, not its content.
-			this.files.set(path, { content: "", at });
+			this.files.set(path, { content: "", oversized: true, at });
 		} else {
-			this.files.set(path, { content, at });
+			this.files.set(path, { content, oversized: false, at });
 		}
 		if (stamp) this.stamps.set(path, stamp);
 		else this.stamps.delete(path);
@@ -103,8 +110,10 @@ export class FileTracker {
 		return this.files.has(path);
 	}
 
+	/** The content last seen, or undefined when untracked or tracked without content (oversized). */
 	lastSeen(path: string): string | undefined {
-		return this.files.get(path)?.content;
+		const known = this.files.get(path);
+		return known && !known.oversized ? known.content : undefined;
 	}
 
 	get tracked(): string[] {
@@ -123,7 +132,7 @@ export class FileTracker {
 		if (!known) return "unread";
 		// Oversized files are tracked without content; treat them as fresh rather
 		// than blocking edits we cannot reason about.
-		if (known.content === "" && currentContent !== "") return "fresh";
+		if (known.oversized) return "fresh";
 		return known.content === currentContent ? "fresh" : "stale";
 	}
 }

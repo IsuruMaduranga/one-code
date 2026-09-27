@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-	INDEX_MAX_BYTES,
+	INDEX_MAX_CHARS,
 	INDEX_MAX_LINES,
 	indexLimitStatus,
 	loadableIndexContent,
@@ -64,17 +64,37 @@ describe("truncateIndex", () => {
 		expect(truncateIndex("- one\n- two\n")).toBe("- one\n- two\n");
 	});
 
-	it("caps at the line limit", () => {
-		const long = Array.from({ length: INDEX_MAX_LINES + 50 }, (_, i) => `- line ${i}`).join("\n");
-		const out = truncateIndex(long);
-		expect(out.split("\n")).toHaveLength(INDEX_MAX_LINES);
+	it("passes an index of exactly 200 lines through, trailing newline and all", () => {
+		const exact = `${Array.from({ length: INDEX_MAX_LINES }, (_, i) => `- line ${i}`).join("\n")}\n`;
+		expect(truncateIndex(exact)).toBe(exact);
 	});
 
-	it("caps at the byte limit without splitting a multi-byte character", () => {
-		const long = "é".repeat(INDEX_MAX_BYTES); // 2 bytes each, one line
+	it("caps at the line limit and says what was cut, the way Claude Code does", () => {
+		const long = `${Array.from({ length: INDEX_MAX_LINES + 30 }, (_, i) => `- [entry ${i + 1}](e${i + 1}.md) — one line`).join("\n")}\n`;
 		const out = truncateIndex(long);
-		expect(Buffer.byteLength(out, "utf8")).toBeLessThanOrEqual(INDEX_MAX_BYTES);
-		expect(out).not.toContain("�");
+		const kept = long.split("\n").slice(0, INDEX_MAX_LINES).join("\n");
+		expect(out).toBe(
+			`${kept}\n\n> WARNING: MEMORY.md is 230 lines (limit: 200). Only part of it was loaded: 30 of 230 lines were cut off, starting at line 201 ("- [entry 201](e201.md) — one line"). Keep index entries to one line under ~200 chars; move detail into topic files.\n`,
+		);
+	});
+
+	it("caps at the character limit at the last line break, naming both sizes", () => {
+		const line = `- ${"x".repeat(98)}`; // 100 characters
+		const long = Array.from({ length: 150 }, () => `${line}${"y".repeat(100)}`).join("\n"); // 150 lines of 200 chars
+		const out = truncateIndex(long);
+		const [kept, warning] = out.split("\n\n> WARNING: ");
+		expect(kept.length).toBeLessThanOrEqual(INDEX_MAX_CHARS);
+		expect(long.startsWith(kept)).toBe(true);
+		expect(long[kept.length]).toBe("\n");
+		expect(warning).toBe(
+			`MEMORY.md is 29.4KB (limit: 24.4KB) \u2014 index entries are too long. Only part of it was loaded: 26 of 150 lines were cut off, starting at line 125 ("${`${line}${"y".repeat(100)}`.slice(0, 79)}\u2026"). Keep index entries to one line under ~200 chars; move detail into topic files.\n`,
+		);
+	});
+
+	it("cuts a single overlong line at the character limit", () => {
+		const out = truncateIndex("x".repeat(INDEX_MAX_CHARS + 10));
+		expect(out).toContain(`Only part of it was loaded: everything after the first ${INDEX_MAX_CHARS} characters of line 1 was cut off.`);
+		expect(out.endsWith("move detail into topic files.\n")).toBe(true);
 	});
 });
 
@@ -109,7 +129,7 @@ describe("indexLimitStatus", () => {
 		expect(indexLimitStatus(`${fm}${line}`)).toBe("ok");
 	});
 	it("is over past the byte limit", () => {
-		expect(indexLimitStatus("x".repeat(INDEX_MAX_BYTES + 1))).toBe("over");
+		expect(indexLimitStatus("x".repeat(INDEX_MAX_CHARS + 1))).toBe("over");
 	});
 });
 

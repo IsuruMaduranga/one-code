@@ -18,6 +18,7 @@
  */
 
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { keyId, keyText } from "../lib/key-input.ts";
 
 /** The final stop on the track: top reasoning + workflows armed every turn. */
 export const ULTRACODE = "ultracode";
@@ -77,31 +78,32 @@ export type SliderKey = "left" | "right" | "first" | "last" | "confirm" | "cance
 
 /**
  * Decode a raw terminal chunk. `Component.handleInput` hands over bytes, not key
- * names, so the sequences are matched directly: CSI C/D for arrows (plus the
- * older SS3 form some terminals still send), CR/LF to confirm, ESC to cancel.
+ * names; `lib/key-input.ts` names them, so every terminal encoding of a key
+ * (legacy, kitty, modifyOtherKeys) decodes alike.
  */
 export function decodeKey(data: string): SliderKey | undefined {
-	switch (data) {
-		case "\x1b[C":
-		case "\x1bOC":
+	switch (keyId(data)) {
+		case "right":
+			return "right";
+		case "left":
+			return "left";
+		case "home":
+			return "first";
+		case "end":
+			return "last";
+		case "enter":
+			return "confirm";
+		case "escape":
+		case "ctrl+c": // same intent as escape while a picker is focused
+			return "cancel";
+		default:
+			break;
+	}
+	switch (keyText(data)) {
 		case "l":
 			return "right";
-		case "\x1b[D":
-		case "\x1bOD":
 		case "h":
 			return "left";
-		case "\x1b[H":
-		case "\x1b[1~":
-			return "first";
-		case "\x1b[F":
-		case "\x1b[4~":
-			return "last";
-		case "\r":
-		case "\n":
-			return "confirm";
-		case "\x1b":
-		case "\x03": // ctrl+c — same intent as escape while a picker is focused
-			return "cancel";
 		default:
 			return undefined;
 	}

@@ -14,6 +14,7 @@ import { beginInteractiveAuth, type Connection, connect } from "../client.ts";
 import { openBrowser } from "./browser.ts";
 import { startCallbackServer } from "./callback.ts";
 import { McpOAuthProvider } from "./provider.ts";
+import type { OAuthServer } from "./store.ts";
 
 export interface AuthenticateOptions {
 	server: HttpServer;
@@ -25,8 +26,8 @@ export interface AuthenticateOptions {
 }
 
 /** A provider for a silent (non-interactive) connect using already-stored tokens. */
-export function silentProvider(serverName: string, home?: string, env?: NodeJS.ProcessEnv): McpOAuthProvider {
-	return new McpOAuthProvider({ serverName, home, env });
+export function silentProvider(server: OAuthServer, home?: string, env?: NodeJS.ProcessEnv): McpOAuthProvider {
+	return new McpOAuthProvider({ server, home, env });
 }
 
 export async function authenticate(options: AuthenticateOptions): Promise<Connection> {
@@ -34,7 +35,7 @@ export async function authenticate(options: AuthenticateOptions): Promise<Connec
 	const callback = await startCallbackServer();
 	try {
 		const provider = new McpOAuthProvider({
-			serverName: server.name,
+			server,
 			redirectUrl: callback.redirectUrl,
 			openAuthorization: (url) => {
 				const opened = openBrowser(url.toString());
@@ -61,7 +62,7 @@ export async function authenticate(options: AuthenticateOptions): Promise<Connec
 		await started.transport.finishAuth(code);
 
 		// Reconnect fresh: the provider now has stored tokens, so this is silent.
-		return await connect(server, silentProvider(server.name, home, env));
+		return await connect(server, silentProvider(server, home, env));
 	} finally {
 		callback.close();
 	}

@@ -482,7 +482,10 @@ describe("decide", () => {
 
 		it("in auto mode, reads outside the working space without the classifier, except a credential path", () => {
 			expect(decide({ ...capable, mode: "auto", toolName: "read", subject: "/etc/hosts" })).toMatchObject({ decision: "allow", cause: "outside-read" });
-			expect(decide({ ...capable, mode: "auto", toolName: "grep", subject: "/etc" })).toMatchObject({ decision: "allow", cause: "outside-read" });
+			// A grep keeps the fast path only on a regular file that exists: the node binary exists on every platform.
+			expect(decide({ ...capable, mode: "auto", toolName: "grep", subject: process.execPath })).toMatchObject({ decision: "allow", cause: "outside-read" });
+			// A search of a directory tree reaches credentials no check of the named path sees.
+			expect(decide({ ...capable, mode: "auto", toolName: "grep", subject: "/etc" }).decision).toBe("classify");
 			expect(decide({ ...capable, mode: "auto", toolName: "read", subject: "~/.ssh/id_rsa" }).decision).toBe("classify");
 			// Only auto mode: manual and acceptEdits still ask, cheap and tiny still classify.
 			expect(decide({ ...capable, toolName: "read", subject: "/etc/hosts" }).decision).toBe("ask");
@@ -531,11 +534,13 @@ describe("decide", () => {
 			for (const subject of ["a.ts", "./src/a.ts", `${CWD}/docs/x.md`]) {
 				expect(decide({ ...accept, toolName: "write", subject }).decision, subject).toBe("allow");
 			}
-			for (const subject of ["~/x.txt", "/etc/hosts", "../sibling/a.ts", `${CWD}/../other/a.ts`, "/home/user/.ssh/authorized_keys"]) {
+			for (const subject of ["~/x.txt", "/etc/hosts", "../sibling/a.ts", `${CWD}/../other/a.ts`]) {
 				const d = decide({ ...accept, toolName: "write", subject });
 				expect(d.decision, subject).toBe("ask");
 				expect(d.cause, subject).toBe("working-dir");
 			}
+			// `.ssh` is a protected directory, judged before containment.
+			expect(decide({ ...accept, toolName: "write", subject: "/home/user/.ssh/authorized_keys" })).toMatchObject({ decision: "ask", cause: "protected-path" });
 			// dontAsk denies where acceptEdits would ask; bypass still allows.
 			expect(decide({ ...base, mode: "dontAsk", toolName: "write", subject: "~/x.txt" }).decision).toBe("deny");
 			expect(decide({ ...base, mode: "bypassPermissions", toolName: "write", subject: "~/x.txt" }).decision).toBe("allow");

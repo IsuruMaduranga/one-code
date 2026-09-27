@@ -15,6 +15,7 @@
  */
 
 import type { BtwExchange } from "./prompt.ts";
+import { keyId, keyText } from "../lib/key-input.ts";
 import { panelTopRule, safeThemeBold, safeThemePaint, truncateLine, wrapPlainText } from "../lib/tui-render.ts";
 
 export const BTW_MAX_HEIGHT = 24;
@@ -43,6 +44,8 @@ export interface BtwPanelState {
 	viewport: number;
 	/** Set for one frame after a copy so the hint can confirm it. */
 	copied: boolean;
+	/** Why the last copy failed (no clipboard route), shown in the hint until the next key. */
+	copyError?: string;
 	/** The earlier exchange on screen (an index into the history), or null for the current question. */
 	selected: number | null;
 }
@@ -56,35 +59,43 @@ export type BtwKey =
 	| { kind: "browse"; direction: "older" | "newer"; wrap: boolean };
 
 export function decodeBtwKey(data: string): BtwKey | undefined {
-	switch (data) {
-		case "\x1b[A":
-		case "\x1bOA":
-		case "\x10": // ctrl+p
+	switch (keyId(data)) {
+		case "up":
+		case "ctrl+p":
 			return { kind: "up" };
-		case "\x1b[B":
-		case "\x1bOB":
-		case "\x0e": // ctrl+n
+		case "down":
+		case "ctrl+n":
 			return { kind: "down" };
-		case "\x1b[5~":
+		case "pageUp":
 			return { kind: "pageUp" };
-		case "\x1b[6~":
+		case "pageDown":
 			return { kind: "pageDown" };
-		case "\x1b[H":
-		case "\x1bOH":
+		case "home":
 			return { kind: "top" };
-		case "\x1b[F":
-		case "\x1bOF":
+		case "end":
 			return { kind: "bottom" };
-		case "\x1b[1;2D": // shift+left
+		case "shift+left":
+			return { kind: "browse", direction: "older", wrap: false };
+		case "shift+right":
+			return { kind: "browse", direction: "newer", wrap: false };
+		case "tab":
+			return { kind: "browse", direction: "older", wrap: true };
+		case "shift+tab":
+			return { kind: "browse", direction: "newer", wrap: true };
+		case "escape":
+		case "ctrl+c":
+		case "ctrl+d":
+		case "enter":
+		case "space":
+			return { kind: "close" };
+		default:
+			break;
+	}
+	switch (keyText(data)) {
 		case "[":
 			return { kind: "browse", direction: "older", wrap: false };
-		case "\x1b[1;2C": // shift+right
 		case "]":
 			return { kind: "browse", direction: "newer", wrap: false };
-		case "\t":
-			return { kind: "browse", direction: "older", wrap: true };
-		case "\x1b[Z": // shift+tab
-			return { kind: "browse", direction: "newer", wrap: true };
 		case "c":
 		case "C":
 			return { kind: "copy" };
@@ -94,11 +105,6 @@ export function decodeBtwKey(data: string): BtwKey | undefined {
 		case "x":
 		case "X":
 			return { kind: "clear" };
-		case "\x1b":
-		case "\x03": // ctrl+c
-		case "\x04": // ctrl+d
-		case "\r":
-		case " ":
 		case "q":
 			return { kind: "close" };
 		default:
@@ -129,12 +135,41 @@ function browse(state: BtwPanelState, historyLength: number, direction: "older" 
 }
 
 /**
+ * Copy an answer and report the outcome in the hint line. pi's
+ * `copyToClipboard` rejects when no clipboard route works (Wayland without
+ * `wl-copy`, X11 without `xclip`); unhandled, that rejection ends the process,
+ * so the reason is shown in place of the confirmation instead.
+ */
+export function copyAnswer(copy: (text: string) => Promise<void>, text: string, state: BtwPanelState, repaint: () => void): Promise<void> {
+	let pending: Promise<void>;
+	try {
+		pending = Promise.resolve(copy(text));
+	} catch (error) {
+		pending = Promise.reject(error);
+	}
+	return pending.then(
+		() => {
+			state.copied = true;
+			state.copyError = undefined;
+			repaint();
+		},
+		(error: unknown) => {
+			const reason = error instanceof Error ? error.message : String(error);
+			state.copied = false;
+			state.copyError = `Copy failed: ${reason.split("\n")[0]}`;
+			repaint();
+		},
+	);
+}
+
+/**
  * Apply a key. Returns an effect for the extension to run (copy, fork, clear,
  * close) or undefined for a scroll or browse (repaint only). Offsets clamp to
  * `state.maxOffset` and page by `state.viewport`, both set by the last render.
  */
 export function applyBtwKey(state: BtwPanelState, key: BtwKey, historyLength: number): BtwEffect | undefined {
 	state.copied = false;
+	state.copyError = undefined;
 	switch (key.kind) {
 		case "up":
 			state.offset = Math.max(0, state.offset - SCROLL_STEP);
@@ -258,7 +293,10 @@ export function renderBtwPanel(input: BtwPanelInput, theme?: unknown): string[] 
 		const parts: string[] = [];
 		if (history.length > 0) parts.push(paint("muted", "⇧←/→ to browse"));
 		else if (body.kind !== "loading") parts.push(paint("muted", "↑/↓ to scroll"));
-		if (hasAnswer) parts.push(state.copied ? paint("success", "Copied to clipboard") : paint("muted", "c to copy"));
+		if (hasAnswer) {
+			if (state.copyError) parts.push(paint("error", state.copyError));
+			else parts.push(state.copied ? paint("success", "Copied to clipboard") : paint("muted", "c to copy"));
+		}
 		if (input.canFork && !selected && currentAnswer) parts.push(paint("muted", "f to fork"));
 		if (history.length > 0) parts.push(paint("muted", "x to clear history"));
 		parts.push(paint("muted", "Esc to close"));

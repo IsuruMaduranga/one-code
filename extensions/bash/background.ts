@@ -13,6 +13,7 @@
  */
 
 import { createWriteStream } from "node:fs";
+import { StringDecoder } from "node:string_decoder";
 import type { BackgroundTask } from "../background/registry.ts";
 import { whenAborted } from "../lib/abort.ts";
 import { detachedSpawnOptions, KILL_GRACE_MS, stopProcessTree, waitForChildExit } from "../lib/process-tree.ts";
@@ -71,13 +72,16 @@ export function startBackgroundBash(options: StartBackgroundBashOptions): Backgr
 		// Spooling to disk is best-effort; the in-memory tail stays authoritative.
 	});
 
-	const append = (chunk: Buffer) => {
-		const text = chunk.toString();
-		stored = tailCap(stored + text, STORED_OUTPUT_CAP);
-		log?.write(text);
+	// One streaming decoder per stream: a UTF-8 character split across two
+	// reads must not become two U+FFFD. The log gets the raw bytes.
+	const stdoutText = new StringDecoder("utf8");
+	const stderrText = new StringDecoder("utf8");
+	const appender = (decoder: StringDecoder) => (chunk: Buffer) => {
+		stored = tailCap(stored + decoder.write(chunk), STORED_OUTPUT_CAP);
+		log?.write(chunk);
 	};
-	child.stdout?.on("data", append);
-	child.stderr?.on("data", append);
+	child.stdout?.on("data", appender(stdoutText));
+	child.stderr?.on("data", appender(stderrText));
 
 	let finish!: () => void;
 	const finished = new Promise<void>((resolve) => {
@@ -117,6 +121,9 @@ export function startBackgroundBash(options: StartBackgroundBashOptions): Backgr
 		if (ended) return;
 		ended = true;
 		if (timer) clearTimeout(timer);
+		// An incomplete sequence at the very end decodes as U+FFFD, as it would have.
+		const rest = stdoutText.end() + stderrText.end();
+		if (rest) stored = tailCap(stored + rest, STORED_OUTPUT_CAP);
 		task.status = status;
 		task.finishedAt = Date.now();
 		const complete = () => {

@@ -17,9 +17,9 @@
 
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import { boundConsentItems } from "../lib/consent-preview.ts";
-import { oneCodeStateDir } from "../lib/paths.ts";
+import { consentStorePath } from "../lib/consent-stores.ts";
 import type { HooksSource } from "./settings.ts";
 
 interface ApprovalStore {
@@ -28,7 +28,7 @@ interface ApprovalStore {
 }
 
 export function approvalStorePath(): string {
-	return join(oneCodeStateDir(), "hooks", "project-approvals.json");
+	return consentStorePath("hooks");
 }
 
 /** Key order must not change the hash — two spellings of one config are one consent. */

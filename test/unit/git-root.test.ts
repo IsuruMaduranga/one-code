@@ -32,6 +32,16 @@ describe("findProjectRoot (SUBAGENT-REVIEW L3)", () => {
 		expect(linkedWorktreeMainRoot(worktree)).toBe(main);
 	});
 
+	it("returns an absolute gitdir pointer's main checkout in normalized form", () => {
+		// git writes `C:/…` on Windows; the root must come back in the form callers compare.
+		const main = tmp();
+		mkdirSync(join(main, ".git", "worktrees", "wt-2"), { recursive: true });
+		const worktree = join(tmp(), "tree");
+		mkdirSync(worktree, { recursive: true });
+		writeFileSync(join(worktree, ".git"), `gitdir: ${main}/./.git/worktrees/wt-2\n`);
+		expect(linkedWorktreeMainRoot(worktree)).toBe(main);
+	});
+
 	it("accepts a relative gitdir pointer", () => {
 		const base = tmp();
 		mkdirSync(join(base, "main", ".git", "worktrees", "feature"), { recursive: true });

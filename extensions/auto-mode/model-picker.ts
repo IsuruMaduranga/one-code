@@ -16,6 +16,7 @@
  */
 
 import { truncateLine } from "../lib/tui-render.ts";
+import { keyId, keyText } from "../lib/key-input.ts";
 
 export interface PickerEntry {
 	provider: string;
@@ -68,26 +69,23 @@ export type PickerKey =
  * shortcuts: every printable character belongs to the filter query.
  */
 export function decodePickerKey(data: string): PickerKey | undefined {
-	switch (data) {
-		case "\x1b[A":
-		case "\x1bOA":
+	switch (keyId(data)) {
+		case "up":
 			return { kind: "up" };
-		case "\x1b[B":
-		case "\x1bOB":
+		case "down":
 			return { kind: "down" };
-		case "\r":
-		case "\n":
+		case "enter":
 			return { kind: "confirm" };
-		case "\x1b":
-		case "\x03": // ctrl+c — same intent as escape while the picker is focused
+		case "escape":
+		case "ctrl+c": // same intent as escape while the picker is focused
 			return { kind: "cancel" };
-		case "\x7f":
-		case "\b":
+		case "backspace":
+		case "ctrl+backspace":
 			return { kind: "backspace" };
 		default: {
-			// Printable text only (covers paste); control sequences are ignored.
-			const text = [...data].filter((char) => char >= " " && char !== "\x7f").join("");
-			return text.length > 0 && !data.startsWith("\x1b") ? { kind: "type", text } : undefined;
+			// Printable text only (covers paste); control sequences type nothing.
+			const text = keyText(data);
+			return text ? { kind: "type", text } : undefined;
 		}
 	}
 }

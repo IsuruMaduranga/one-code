@@ -7,7 +7,8 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { pathToFileURL } from "node:url";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fileTrackerExtension from "../../extensions/file-tracker/index.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
@@ -36,6 +37,51 @@ describe("file-tracker wiring", () => {
 		);
 		expect(result?.block).toBe(true);
 		expect(result?.reason).toContain("has not been read");
+	});
+
+	it("guards every spelling pi's tools resolve (`~/`, `@`, `file://`), both for the unread and the stale case (A6-M1)", async () => {
+		// os.homedir() reads USERPROFILE on Windows, HOME elsewhere.
+		vi.stubEnv("HOME", dir);
+		vi.stubEnv("USERPROFILE", dir);
+		try {
+			const file = path("config.json");
+			writeFileSync(file, "the user's config");
+			const spellings = ["~/config.json", "@config.json", pathToFileURL(file).href];
+			for (const spelling of spellings) {
+				for (const toolName of ["write", "edit"]) {
+					const result = await fake.fireOne<{ block?: boolean; reason?: string }>("tool_call", { toolName, input: { path: spelling } }, ctx());
+					expect(result?.block, `${toolName} ${spelling}`).toBe(true);
+					expect(result?.reason).toContain(file);
+				}
+			}
+			// A read spelled one way counts for the others, and a later change makes each spelling stale.
+			await fake.fireOne("tool_result", { toolName: "read", input: { path: "@config.json" }, isError: false }, ctx());
+			expect(await fake.fireOne("tool_call", { toolName: "edit", input: { path: "~/config.json" } }, ctx())).toBeUndefined();
+			writeFileSync(file, "changed by the user");
+			for (const spelling of spellings) {
+				const stale = await fake.fireOne<{ block?: boolean; reason?: string }>("tool_call", { toolName: "write", input: { path: spelling } }, ctx());
+				expect(stale?.reason, spelling).toContain("has changed on disk");
+			}
+		} finally {
+			vi.unstubAllEnvs();
+		}
+	});
+
+	it("blocks a write over a file read while empty and filled since, and reports the change (A6-M2)", async () => {
+		const file = path("notes.md");
+		writeFileSync(file, "");
+		await fake.fireOne("tool_result", { toolName: "read", input: { path: file }, isError: false }, ctx());
+		const reminders: string[] = [];
+		fake.events.on(REMINDER_CHANNEL, (data) => reminders.push((data as { text: string }).text));
+		writeFileSync(file, "the user's notes\n");
+		// The change scan runs at the next turn start and reports the new content…
+		await fake.fire("agent_start", {}, ctx());
+		expect(reminders.join("\n")).toContain(`${file} was modified`);
+		expect(reminders.join("\n")).toContain("the user's notes");
+		// …without marking it read: the write that would discard it is refused.
+		const result = await fake.fireOne<{ block?: boolean; reason?: string }>("tool_call", { toolName: "write", input: { path: file } }, ctx());
+		expect(result?.block).toBe(true);
+		expect(result?.reason).toContain("has changed on disk");
 	});
 
 	it("allows the edit once the file has been read, then observes the write", async () => {

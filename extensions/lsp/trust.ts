@@ -15,9 +15,9 @@
  * installing the plugin was the consent.
  */
 
-import { join } from "node:path";
 import { readJsonFile, writeJsonAtomic } from "../lib/atomic-write.ts";
-import { comparablePath, isPathAtOrUnder, oneCodeStateDir } from "../lib/paths.ts";
+import { consentStorePath } from "../lib/consent-stores.ts";
+import { comparablePath, isPathAtOrUnder } from "../lib/paths.ts";
 import { singleFlight } from "../lib/single-flight.ts";
 
 /** Built-in server commands that execute project code. */
@@ -35,7 +35,7 @@ interface TrustStore {
 }
 
 export function lspTrustStorePath(): string {
-	return join(oneCodeStateDir(), "lsp", "trusted-projects.json");
+	return consentStorePath("lsp");
 }
 
 function readStore(storePath: string): TrustStore {

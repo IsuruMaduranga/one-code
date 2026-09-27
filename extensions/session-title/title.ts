@@ -14,6 +14,7 @@
 
 import { LOCAL_COMMAND_TAG_PREFIXES } from "../lib/local-command.ts";
 import { customMessageText } from "../lib/tui-render.ts";
+import { sanitizeTitle } from "../lib/terminal-text.ts";
 
 /** CC's naming instruction (system prompt), verbatim from the 2.1.278 capture. */
 export const SESSION_TITLE_PROMPT =
@@ -86,7 +87,9 @@ function titleFromJson(text: string): string | undefined {
 }
 
 function normalizeTitle(raw: string): string | undefined {
-	const title = raw.replace(/\s+/g, " ").trim();
+	// The title becomes the terminal title inside pi's own OSC 0: an embedded
+	// BEL or ESC would end that sequence and run the rest as terminal output.
+	const title = sanitizeTitle(raw);
 	if (!title || title.length > MAX_TITLE_LENGTH) return undefined;
 	// CC: "Capitalize the first letter of the title."
 	return title[0].toUpperCase() + title.slice(1);

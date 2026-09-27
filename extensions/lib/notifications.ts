@@ -464,7 +464,16 @@ export const NOTIFICATION_ID_KEY = "notificationId";
 export const NOTIFICATION_BATCH_KEY = "notifications";
 
 /** Inject a harness notification (a task/agent completion, a monitor event, a review note) into the conversation. */
-export type TaskNotifier = (customType: string, text: string, details?: Record<string, unknown>) => void;
+export interface TaskNotifier {
+	(customType: string, text: string, details?: Record<string, unknown>): void;
+	/**
+	 * True while notifications are held after an interrupted turn (see
+	 * `createTaskNotifier`). A producer that emits a stream of batches (a
+	 * monitor) keeps accumulating its own bounded batch while this is true,
+	 * instead of adding one held message per flush.
+	 */
+	holding(): boolean;
+}
 
 /**
  * `task_output` announces here that it returned a FINISHED task's output in a
@@ -556,11 +565,27 @@ export const DEFAULT_COALESCE_MS = 250;
  * `triggerTurn` restarted, within milliseconds, the very work the user had just
  * interrupted (review M2). So once a turn has settled `aborted` or `error`
  * (a turn that died on a provider error should not be restarted by a
- * notification either), every notification — the re-sends and
- * any new one arriving while idle — is delivered as `nextTurn`: pi holds it
- * and appends it to the user's next prompt (`_pendingNextTurnMessages`),
- * exactly Claude Code's behaviour after an interrupt. The hold ends at the
- * next `before_agent_start`, i.e. the next prompt the user actually sends.
+ * notification either), every notification — the re-sends and any new one
+ * arriving while idle — is held by the notifier itself, not started as a turn.
+ * The hold is bounded and ends with the next turn, however it starts:
+ *
+ * - The user's next prompt (`before_agent_start`) takes everything held as
+ *   `nextTurn` messages, which pi appends to that prompt
+ *   (`_pendingNextTurnMessages`, filled synchronously before pi reads it),
+ *   exactly Claude Code's behaviour after an interrupt. The held frames merge
+ *   into one message, as a coalescing window would merge them, so a long
+ *   absence costs one message, not one per arrival.
+ * - Any other turn start (`agent_start`: a typed skill such as `/loop`, which
+ *   pi runs through `sendMessage` and never through `prompt()`, or a scheduled
+ *   fire) ends the hold too, and what was held is steered into that turn. A
+ *   turn that then settles cleanly leaves no hold behind; before, only a typed
+ *   prompt ended it, so one Esc early in a session silenced every later
+ *   `/loop` tick.
+ * - A fresh re-invocation (a cron or wakeup fire, `REINVOCATION_TYPES`) is
+ *   never held: it is the turn's input, scheduled by the user or the loop, so
+ *   it opens its turn as it would have without the interrupt. Only a re-send
+ *   of one Esc discarded waits. Producers that stream (a monitor) ask
+ *   `holding()` and keep their own bounded batch meanwhile.
  *
  * Dead sessions: a producer's callback can outlive the session it belongs to
  * (a background shell finishing after `/clear` replaced the session, or after
@@ -579,7 +604,10 @@ export const DEFAULT_COALESCE_MS = 250;
  * no `prompt()` has run in this process, an idle notification is delivered as a
  * user message (`sendUserMessage`, source "extension"), which takes the full
  * prompt path; the cost is that this one notification renders as a user bubble.
- * Every later notification goes the custom-message way. Upstream ask:
+ * Every later notification goes the custom-message way. Its turn skips
+ * `before_agent_start` too, and pi drops a run's prompt when the run settles,
+ * so the system-prompt extension installs the prompt for it from
+ * `context_with_system` (`system-prompt/idle-turn.ts`). Upstream ask:
  * working-docs/upstream_prs.md #17.
  */
 export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOptions = {}): TaskNotifier {
@@ -603,8 +631,10 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 	let prompted = false;
 	/** True between agent_start and agent_settled. */
 	let busy = false;
-	/** True from a turn settling aborted/errored until the user's next prompt: hold, do not start turns. */
+	/** True from a turn settling aborted/errored until the next turn starts: hold, do not start turns. */
 	let interrupted = false;
+	/** What the hold kept, in arrival order; released as one merged message (see the header). */
+	let held: Incoming[] = [];
 	const outcome = new RunOutcomeLatch();
 	/** Notifications waiting for the coalescing window to close. */
 	let batch: Incoming[] = [];
@@ -615,24 +645,16 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 			pending.delete(id);
 			return;
 		}
+		// Held after an interrupt (see the header): kept here, out of reach of
+		// Esc's queue clearing, so it leaves the outbox now; a re-send at a
+		// later settle would duplicate it. A fresh re-invocation is the one
+		// exception: it opens its own turn.
+		if (interrupted && !busy && (entry.resent || !REINVOCATION_TYPES.has(entry.customType))) {
+			pending.delete(id);
+			held.push({ customType: entry.customType, text: entry.text, details: entry.details });
+			return;
+		}
 		try {
-			if (interrupted && !busy) {
-				// Held for the user's next prompt (see the header). pi keeps a nextTurn
-				// message on the session itself, out of reach of Esc's queue clearing,
-				// so it counts as delivered now: a re-send at a later settle would
-				// duplicate it.
-				pending.delete(id);
-				pi.sendMessage(
-					{
-						customType: entry.customType,
-						content: [{ type: "text", text: frameForDelivery(entry.text, "with-user-prompt") }],
-						display: true,
-						details: { ...entry.details, [NOTIFICATION_ID_KEY]: id },
-					},
-					{ deliverAs: "nextTurn" },
-				);
-				return;
-			}
 			if (!prompted && !busy) {
 				// No confirmation possible for a user-role message (no details), and
 				// prompt() cannot be cleared by Esc before it starts: count it delivered.
@@ -656,48 +678,92 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 		}
 	};
 
-	/** One outbox entry: a lone notification as it came, several merged under one text. */
+	/** One entry for a group: a lone notification as it came, several merged under one text. */
+	const merge = (group: Incoming[]): Incoming =>
+		group.length === 1
+			? group[0]
+			: {
+					customType: group[0].customType,
+					text: mergeNotificationTexts(group.map((n) => n.text)),
+					// A held entry can itself be a merged one: keep the list flat.
+					details: {
+						[NOTIFICATION_BATCH_KEY]: group.flatMap(
+							(n) => (n.details[NOTIFICATION_BATCH_KEY] as unknown[] | undefined) ?? [{ customType: n.customType, details: n.details }],
+						),
+					},
+				};
+
+	/** One outbox entry per group. */
 	const enqueue = (group: Incoming[]) => {
 		if (group.length === 0) return;
 		const id = `${++seq}-${Date.now().toString(36)}`;
-		const entry: Pending =
-			group.length === 1
-				? { ...group[0], resent: false }
-				: {
-						customType: group[0].customType,
-						text: mergeNotificationTexts(group.map((n) => n.text)),
-						details: { [NOTIFICATION_BATCH_KEY]: group.map((n) => ({ customType: n.customType, details: n.details })) },
-						resent: false,
-					};
+		const entry: Pending = { ...merge(group), resent: false };
 		pending.set(id, entry);
 		dispatch(id, entry);
 	};
 
 	/**
-	 * Close the coalescing window: frames that arrived in it merge into one
-	 * entry, a standalone (turn-input) message goes out on its own, and arrival
-	 * order is kept across the two.
+	 * Split arrivals into delivery groups: frames merge, a standalone
+	 * (turn-input) message stands alone, arrival order is kept across the two.
 	 */
-	const flush = () => {
-		batchTimer = undefined;
-		const incoming = batch;
-		batch = [];
+	const groups = (incoming: Incoming[]): Incoming[][] => {
+		const out: Incoming[][] = [];
 		let frames: Incoming[] = [];
 		for (const item of incoming) {
 			if (!REINVOCATION_TYPES.has(item.customType)) {
 				frames.push(item);
 				continue;
 			}
-			enqueue(frames);
+			if (frames.length > 0) out.push(frames);
 			frames = [];
-			enqueue([item]);
+			out.push([item]);
 		}
-		enqueue(frames);
+		if (frames.length > 0) out.push(frames);
+		return out;
+	};
+
+	/** Close the coalescing window. */
+	const flush = () => {
+		batchTimer = undefined;
+		const incoming = batch;
+		batch = [];
+		for (const group of groups(incoming)) enqueue(group);
 	};
 	const clearBatch = () => {
 		if (batchTimer !== undefined) clearTimeout(batchTimer);
 		batchTimer = undefined;
 		batch = [];
+	};
+
+	/** End the hold. `withPrompt`: the user's prompt is being built, so ride it as nextTurn; else steer into the turn that started. */
+	const release = (withPrompt: boolean) => {
+		interrupted = false;
+		const released = held;
+		held = [];
+		if (!active || released.length === 0) return;
+		for (const group of groups(released)) {
+			if (!withPrompt) {
+				enqueue(group);
+				continue;
+			}
+			const entry = merge(group);
+			try {
+				// Synchronous up to pi's push onto `_pendingNextTurnMessages`, which
+				// the prompt being built reads right after this hook; pi keeps it out
+				// of reach of Esc's queue clearing, so no outbox entry.
+				pi.sendMessage(
+					{
+						customType: entry.customType,
+						content: [{ type: "text", text: frameForDelivery(entry.text, "with-user-prompt") }],
+						display: true,
+						details: { ...entry.details, [NOTIFICATION_ID_KEY]: `${++seq}-${Date.now().toString(36)}` },
+					},
+					{ deliverAs: "nextTurn" },
+				);
+			} catch {
+				// Disposed under us (see dispatch).
+			}
+		}
 	};
 
 	pi.on("message_end", (event) => {
@@ -724,15 +790,19 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 	});
 	pi.on("agent_start", () => {
 		busy = true;
+		// A turn the user did not type (a skill such as /loop, a scheduled fire):
+		// the session is working again, so what was held steers into it.
+		if (interrupted) release(false);
 	});
 	pi.on("before_agent_start", () => {
 		prompted = true;
-		interrupted = false;
+		release(true);
 	});
 	// A replaced session (/clear, /new, resume) has no use for the old one's undelivered notices.
 	pi.on("session_start", () => {
 		pending.clear();
 		clearBatch();
+		held = [];
 		active = true;
 		prompted = false;
 		busy = false;
@@ -741,16 +811,18 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 	pi.on("session_shutdown", () => {
 		active = false;
 		clearBatch();
+		held = [];
 	});
 	if (options.withdrawOnDelivery) {
 		pi.events?.on(TASK_OUTPUT_DELIVERED_CHANNEL, (data) => {
 			const taskId = (data as TaskOutputDelivered | undefined)?.taskId;
 			if (taskId === undefined) return;
 			batch = batch.filter((item) => item.details.taskId !== taskId);
+			held = held.filter((item) => item.details.taskId !== taskId);
 		});
 	}
 
-	return (customType, text, details = {}) => {
+	const notify = (customType: string, text: string, details: Record<string, unknown> = {}) => {
 		if (!active) return;
 		batch.push({ customType, text, details });
 		if (coalesceMs <= 0) {
@@ -762,6 +834,7 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 			(batchTimer as { unref?: () => void }).unref?.();
 		}
 	};
+	return Object.assign(notify, { holding: () => active && interrupted && !busy });
 }
 
 /**

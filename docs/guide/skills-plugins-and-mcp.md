@@ -27,6 +27,10 @@ arguments. Plugin skills keep their plugin prefix and are run as
 The `/` list shows each skill once, by its bare name; type `/skill:` to list
 the `/skill:` forms.
 
+A skill whose frontmatter sets `disable-model-invocation: true` runs only
+when you type its command. As in Claude Code, the model doesn't see it in
+the skills listing, and the `skill` tool refuses it.
+
 A skill's slash command isn't created when the name is already taken by a
 built-in command, a `.claude/commands/` template, or another skill.
 
@@ -141,18 +145,23 @@ verified; servers using server-sent events are untested.
 
 Servers listed in a project's `.mcp.json` run only after you approve them.
 On the first start in a project, One Code shows the servers found, with the
-command each one runs, and offers to use this server, to use this and all
-future servers in the project, or to decline. Approvals are stored in
+command each one runs and the environment variables it sets, and offers to
+use this server, to use this and all future servers in the project, or to
+decline. Variables that change what runs, such as `NODE_OPTIONS`, `PATH`,
+`LD_PRELOAD` or `PYTHONPATH`, are shown with their values; for the rest
+only the name is shown, since they usually hold credentials. Approvals are stored in
 `~/.onecode/mcp/project-approvals.json`, tied to the server's
 configuration, so a changed command asks again. If you decline, the server
 appears as disabled in `/mcp`; choosing Enable there approves it.
 
-Claude Code's `enabledMcpjsonServers`, `disabledMcpjsonServers`, and
-`enableAllProjectMcpServers` settings are honored from
-`~/.claude/settings.json`, and from `.claude/settings.local.json` when that
-file isn't tracked by git. They are never honored from a checked-in
-`.claude/settings.json`, which would let a repository approve its own
-servers.
+Claude Code's `enabledMcpjsonServers` and `enableAllProjectMcpServers`
+settings are honored from `~/.claude/settings.json` only.
+`disabledMcpjsonServers` is honored from there and from
+`.claude/settings.local.json`. A project's own settings files never approve
+its servers: a checked-in file, or a `settings.local.json` that arrived
+with a copied checkout, would let the repository approve itself. If Claude
+Code approved a server in `.claude/settings.local.json`, One Code asks you
+once.
 
 In non-interactive runs, unapproved servers are skipped with a note on
 stderr.
@@ -182,6 +191,9 @@ plugin), each with its status, tool and resource counts, and any warnings.
   **Enable** reverses it.
 - **Authenticate** appears for HTTP servers that need OAuth. It opens your
   browser for sign-in; tokens are stored under `~/.onecode/mcp-auth/` with
-  owner-only permissions.
+  owner-only permissions. Tokens belong to the server's URL and headers, not
+  only its name: another server with the same name never receives them, and
+  a server whose URL or headers change asks you to sign in again. Only an
+  `https` sign-in page (or `http` on your own machine) is opened.
 
 Press the action's number to run it, or **Esc** to go back.

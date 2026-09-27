@@ -48,6 +48,24 @@ describe("sessionGrant", () => {
 		expect(decide({ ...base, toolName: "read", subject: "/home/user/.ssh/id_rsa", deny: [], ask: [], allow }).decision).toBe("ask");
 	});
 
+	it("grants only the file itself when it sits directly in the home directory", () => {
+		const grant = sessionGrant({ ...base, toolName: "write", subject: "~/.zshrc.local", cause: "working-dir" })!;
+		expect(grant.rule.raw).toBe(`write(/${toPosixPath(resolve(HOME, ".zshrc.local"))})`);
+		expect(grant.label).toBe("Yes, and allow write of ~/.zshrc.local this session");
+		const allow = [grant.rule];
+		expect(decide({ ...base, toolName: "write", subject: "/home/user/.zshrc.local", deny: [], ask: [], allow }).decision).toBe("allow");
+		expect(decide({ ...base, toolName: "write", subject: "/home/user/.ssh/config", deny: [], ask: [], allow }).decision).toBe("ask");
+		expect(decide({ ...base, toolName: "write", subject: "/home/user/notes.txt", deny: [], ask: [], allow }).decision).toBe("ask");
+		// A file at the filesystem root is no broader.
+		expect(sessionGrant({ ...base, toolName: "write", subject: "/x.txt", cause: "working-dir" })!.rule.raw).toBe(`write(/${toPosixPath(resolve("/x.txt"))})`);
+	});
+
+	it("keeps ~/.ssh a protected write path, so no grant or rule covers it", () => {
+		const grant = sessionGrant({ ...base, toolName: "write", subject: "~/work/a.txt", cause: "working-dir" })!;
+		expect(decide({ ...base, toolName: "write", subject: "/home/user/.ssh/config", deny: [], ask: [], allow: [grant.rule] })).toMatchObject({ cause: "protected-path" });
+		expect(decide({ ...base, toolName: "write", subject: "/home/user/.ssh/authorized_keys", mode: "acceptEdits", deny: [], ask: [], allow: [] }).decision).toBe("ask");
+	});
+
 	it("scopes web_fetch to the URL's host, as Claude Code's WebFetch(domain:…) does", () => {
 		const grant = sessionGrant({ ...base, toolName: "web_fetch", subject: "https://Example.com/docs/a?x=1" })!;
 		expect(grant.rule.raw).toBe("web_fetch(domain:example.com)");

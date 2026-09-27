@@ -5,6 +5,7 @@
  */
 
 import { panelTopRule } from "../lib/tui-render.ts";
+import { keyId, keyText } from "../lib/key-input.ts";
 
 export interface DoctorViewerState {
 	offset: number;
@@ -21,38 +22,43 @@ export type DoctorViewerKey =
 	| { kind: "close" };
 
 export function decodeDoctorKey(data: string): DoctorViewerKey | undefined {
-	switch (data) {
-		case "\x1b[A":
-		case "\x1bOA":
+	switch (keyId(data)) {
+		case "up":
+			return { kind: "up" };
+		case "down":
+			return { kind: "down" };
+		case "pageUp":
+		case "ctrl+b":
+			return { kind: "pageUp" };
+		case "pageDown":
+		case "ctrl+f":
+		case "space":
+			return { kind: "pageDown" };
+		case "home":
+			return { kind: "home" };
+		case "end":
+			return { kind: "end" };
+		case "escape":
+		case "ctrl+c":
+		case "enter":
+			return { kind: "close" };
+		default:
+			break;
+	}
+	switch (keyText(data)) {
 		case "k":
 			return { kind: "up" };
-		case "\x1b[B":
-		case "\x1bOB":
 		case "j":
 			return { kind: "down" };
-		case "\x1b[5~":
-		case "\x02": // ctrl+b
 		case "b":
 			return { kind: "pageUp" };
-		case "\x1b[6~":
-		case "\x06": // ctrl+f
-		case " ":
-			return { kind: "pageDown" };
-		case "\x1b[H":
-		case "\x1b[1~":
 		case "g":
 			return { kind: "home" };
-		case "\x1b[F":
-		case "\x1b[4~":
 		case "G":
 			return { kind: "end" };
 		case "f":
 			return { kind: "fix" };
-		case "\x1b":
-		case "\x03": // ctrl+c
 		case "q":
-		case "\r":
-		case "\n":
 			return { kind: "close" };
 		default:
 			return undefined;

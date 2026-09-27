@@ -10,25 +10,17 @@
  */
 
 import { isAbsolute, resolve } from "node:path";
+import { powershellQuote, shellQuote } from "../lib/shell-quote.ts";
+import { normalizeToolPath } from "../lib/tool-path.ts";
 
 /** Tools whose `path` argument is relative to the session cwd. */
 const PATH_TOOLS = new Set(["read", "edit", "write", "notebook_edit", "grep", "find", "ls", "lsp_diagnostics"]);
 /** Of those, the ones where a missing path means "the cwd itself". */
 const DEFAULTS_TO_CWD = new Set(["grep", "find", "ls"]);
 
-export function shellQuote(path: string): string {
-	return `'${path.replace(/'/g, "'\\''")}'`;
-}
-
-/** PowerShell single-quoted literal: only `'` needs escaping, as `''`. */
-export function powershellQuote(path: string): string {
-	return `'${path.replace(/'/g, "''")}'`;
-}
-
-
 /**
- * Mutates `input` in place so the call runs inside the worktree. For bash,
- * returns the model's ORIGINAL command (pre-`cd`-wrapper) so the caller can
+ * Mutates `input` in place so the call runs inside the worktree. For bash
+ * (and `monitor`, which runs a bash command), returns the model's ORIGINAL command (pre-`cd`-wrapper) so the caller can
  * publish it over `ORIGINAL_COMMAND_CHANNEL` keyed by the call id: the
  * permission matcher evaluates rules against what the model asked for, not
  * the wrapper (which starts with `cd` and matches no Bash rule), while the
@@ -43,7 +35,10 @@ export function rewriteToolInput(
 	input: Record<string, unknown>,
 	worktreePath: string,
 ): { originalCommand?: string } {
-	if (toolName === "bash") {
+	// `monitor` runs its command through the same bash as the `bash` tool
+	// (background/index.ts), so it gets the same `cd` wrapper; a `ws` monitor
+	// has no command and nothing to move.
+	if (toolName === "bash" || toolName === "monitor") {
 		if (typeof input.command === "string") {
 			const originalCommand = input.command;
 			input.command = `cd ${shellQuote(worktreePath)} && (${originalCommand}\n)`;
@@ -73,8 +68,11 @@ export function rewriteToolInput(
 		(field) => typeof input[field] === "string" && (input[field] as string).length > 0,
 	);
 	if (pathField) {
-		const value = input[pathField] as string;
-		if (!isAbsolute(value)) input[pathField] = resolve(worktreePath, value);
+		// Read the value the way pi's tools will (`~`, `@`, `file://`): judged
+		// raw, `~/x` and `@src/x` looked relative and became literal `~` and `@src`
+		// directories inside the worktree.
+		const normalized = normalizeToolPath(input[pathField] as string);
+		if (!isAbsolute(normalized)) input[pathField] = resolve(worktreePath, normalized);
 	} else if (DEFAULTS_TO_CWD.has(toolName)) {
 		input.path = worktreePath;
 	}

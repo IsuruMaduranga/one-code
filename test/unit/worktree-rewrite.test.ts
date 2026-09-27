@@ -1,6 +1,11 @@
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
-import { rewriteToolInput, shellQuote, validateWorktreeName } from "../../extensions/worktree/rewrite.ts";
+// pi's own resolver, reached by file path (its package root does not export it), to pin the vendored copy to it.
+import { resolveToCwd } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/tools/path-utils.js";
+import { shellQuote } from "../../extensions/lib/shell-quote.ts";
+import { normalizeToolPath } from "../../extensions/lib/tool-path.ts";
+import { rewriteToolInput, validateWorktreeName } from "../../extensions/worktree/rewrite.ts";
 
 const WT = "/repo/.claude/worktrees/fix";
 
@@ -87,5 +92,31 @@ describe("validateWorktreeName", () => {
 		expect(validateWorktreeName("a/../b")).toBeDefined();
 		expect(validateWorktreeName("x".repeat(65))).toBeDefined();
 		expect(validateWorktreeName("")).toBeDefined();
+	});
+});
+
+describe("rewriteToolInput reads paths the way pi's tools do", () => {
+	it("leaves ~ and file:// paths absolute instead of nesting them in the worktree", () => {
+		const tilde: Record<string, unknown> = { path: "~/proj/src/new.ts" };
+		rewriteToolInput("write", tilde, WT);
+		expect(tilde.path).toBe("~/proj/src/new.ts");
+
+		const href = pathToFileURL(resolve("/x/y.ts")).href;
+		const url: Record<string, unknown> = { path: href };
+		rewriteToolInput("read", url, WT);
+		expect(url.path).toBe(href);
+	});
+
+	it("drops a leading @ before resolving a relative path against the worktree", () => {
+		const at: Record<string, unknown> = { path: "@src/new.ts" };
+		rewriteToolInput("write", at, WT);
+		expect(at.path).toBe(resolve(WT, "src/new.ts"));
+	});
+
+	it("lands every spelling where pi's resolveToCwd would, relative to the worktree", () => {
+		for (const spelling of ["src/a.ts", "@src/a.ts", "~/a.ts", "~", "@/abs/a.ts", pathToFileURL(resolve("/x/y.ts")).href, "/abs/b.ts", "a\u2003b.ts"]) {
+			const normalized = normalizeToolPath(spelling);
+			expect(resolve(WT, normalized)).toBe(resolveToCwd(spelling, WT));
+		}
 	});
 });

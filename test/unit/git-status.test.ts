@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { collectGitStatus, formatGitStatus, type GitRunner } from "../../extensions/system-prompt/git-status.ts";
+import { collectGitStatus, formatGitStatus, GIT_STATUS_MAX_CHARS, type GitRunner } from "../../extensions/system-prompt/git-status.ts";
 
 /** A fake git runner keyed by the space-joined argv. */
 function fakeRunner(map: Record<string, string>): GitRunner {
@@ -79,7 +79,37 @@ describe("collectGitStatus", () => {
 		const noUser = { ...base };
 		delete (noUser as Record<string, string>)["config user.name"];
 		const block = collectGitStatus("/x", fakeRunner(noUser));
-		expect(block).toContain("Git user: \n");
+		// An empty user name drops the line, as Claude Code does.
+		expect(block).not.toContain("Git user:");
+		expect(block).toContain("PRs): feature/x\n\nStatus:\nM a.ts\n");
+	});
+
+	it("says (clean) for a clean tree", () => {
+		const block = collectGitStatus("/x", fakeRunner({ ...base, "status --porcelain": "" }));
+		expect(block).toContain("\n\nStatus:\n(clean)\n\nRecent commits:\n");
+	});
+
+	it("drops the block when git status fails or times out, rather than claiming a clean tree", () => {
+		const noStatus = { ...base };
+		delete (noStatus as Record<string, string>)["status --porcelain"];
+		expect(collectGitStatus("/x", fakeRunner(noStatus))).toBeNull();
+	});
+
+	it("clips a long status at 2,000 characters with Claude Code's note", () => {
+		const lines = Array.from({ length: 5000 }, (_, i) => `?? generated/file-${i}.txt`);
+		const status = lines.join("\n");
+		const block = collectGitStatus("/x", fakeRunner({ ...base, "status --porcelain": status })) ?? "";
+		const note =
+			'\n... (truncated because it exceeds 2k characters. If you need more information, run "git status" using bash)';
+		expect(block).toContain(`Status:\n${status.substring(0, GIT_STATUS_MAX_CHARS)}${note}\n\nRecent commits:\nabc First`);
+		expect(block.length).toBeLessThan(2600);
+		// The note names the shell tool the model has.
+		expect(collectGitStatus("/x", fakeRunner({ ...base, "status --porcelain": status }), "powershell")).toContain(
+			'run "git status" using powershell)',
+		);
+		// At the limit exactly, nothing is cut.
+		const exact = "x".repeat(GIT_STATUS_MAX_CHARS);
+		expect(collectGitStatus("/x", fakeRunner({ ...base, "status --porcelain": exact }))).toContain(`Status:\n${exact}\n\nRecent`);
 	});
 });
 

@@ -386,11 +386,40 @@ const ONECODE_PREAMBLE =
  */
 export function buildOneCodeBlock(files: ContextFile[]): string | null {
 	if (files.length === 0) return null;
-	const sections = files.map((s) => `Contents of ${s.path} (${s.descriptor}):\n\n${s.content}`).join("\n");
+	const sections = files.map(section).join("\n");
 	return `${ONECODE_PREAMBLE}\n\n${sections}`;
 }
 
 export const AGENTS_DESCRIPTOR = "cross-tool agent instructions, AGENTS.md standard";
+
+/**
+ * One file's section. Its content is raw, but always ends in a newline: the
+ * join rule relies on it, and a file without one would glue the next section,
+ * or the `# userEmail` / `# currentDate` header, onto its last line.
+ */
+function section(file: ContextFile): string {
+	const content = file.content.endsWith("\n") ? file.content : `${file.content}\n`;
+	return `Contents of ${file.path} (${file.descriptor}):\n\n${content}`;
+}
+
+/**
+ * The `# currentDate` value: the user's LOCAL calendar date as YYYY-MM-DD, the
+ * date their own clock shows (a UTC date is a day off every evening west of
+ * UTC and every early morning east of it).
+ */
+export function localDate(now: Date = new Date()): string {
+	const pad = (n: number) => String(n).padStart(2, "0");
+	return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+/**
+ * Claude Code's notice when the local date moves on mid-session. The block
+ * carrying `# currentDate` is frozen after the first request, so the new date
+ * rides a one-shot where the model reads next, the way Claude Code does.
+ */
+export function dateChangeReminder(date: string): string {
+	return `The date has changed. Today's date is now ${date}. No need to announce the new date \u2014 the user's own clock shows it.`;
+}
 
 /**
  * Assemble the block's inner text (the `<system-reminder>` wrapper is added by
@@ -406,6 +435,7 @@ export const AGENTS_DESCRIPTOR = "cross-tool agent instructions, AGENTS.md stand
  * `content` keeps its own trailing newline (files are read raw, never trimmed —
  * a file ending in "\n" plus the join "\n" is the "\n\n" seen between sections;
  * the last section's own trailing "\n" is the single "\n" before `# userEmail`).
+ * A file that does not end in "\n" gets one, so no header lands on its last line.
  *
  * `memoryIndex`, when present, is appended as a final context section with the
  * memory descriptor. Returns null when there is nothing at all to inject.
@@ -428,7 +458,7 @@ export function buildClaudeMdBlock(opts: {
 	if (sections.length === 0 && !opts.email) return null;
 
 	let inner = `${PREAMBLE}\n\n`;
-	inner += sections.map((s) => `Contents of ${s.path} (${s.descriptor}):\n\n${s.content}`).join("\n");
+	inner += sections.map(section).join("\n");
 	if (opts.email) {
 		inner += `# userEmail\nThe user's email address is ${opts.email}.\n`;
 	}

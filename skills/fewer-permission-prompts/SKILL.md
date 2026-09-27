@@ -16,7 +16,7 @@ Then, add these to One Code's per-repo settings at `~/.onecode/projects/<slug>/s
 
 ## Steps
 
-1. **Locate transcripts.** One Code / pi session transcripts live under the agent state dir at `~/.onecode/agent/sessions/<sanitized-cwd>/*.jsonl` (the base honours `PI_CODING_AGENT_DIR`, which the bundled app sets to `~/.onecode/agent`; a stock pi install uses its own agent dir). Each line is a JSON object. Tool calls appear as assistant messages whose content carries tool-call entries: a tool name (e.g. `Bash`, `mcp__slack__slack_read_thread`) and, for a shell tool, the command string in its input.
+1. **Locate transcripts.** One Code / pi session transcripts live under the agent state dir at `~/.onecode/agent/sessions/<sanitized-cwd>/*.jsonl` (the bundled app's agent dir is `~/.onecode/agent`, or `ONECODE_AGENT_DIR` when set; a stock pi install uses its own agent dir, `PI_CODING_AGENT_DIR` or `~/.pi/agent`). Each line is a JSON object. Tool calls appear as assistant messages whose content carries tool-call entries: a tool name (e.g. `Bash`, `mcp__slack__slack_read_thread`) and, for a shell tool, the command string in its input.
 
    Scan the recent transcripts across the sessions dir — not just the current project — so the allowlist reflects your actual usage. Cap the scan at a reasonable number of recent sessions (e.g. 50 most-recently-modified JSONL files) so this stays fast.
 

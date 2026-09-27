@@ -23,3 +23,49 @@ export interface McpToolsPayload {
 	 */
 	settled?: boolean;
 }
+
+/** How long a child spawned while MCP is still connecting waits for the settled set. */
+export const MCP_SETTLE_CAP_MS = 10_000;
+
+/** The events slice `watchMcpTools` needs. */
+export interface McpToolsEvents {
+	on(channel: string, handler: (data: unknown) => void): unknown;
+}
+
+/**
+ * Track the parent's live MCP tool definitions for in-process children (the
+ * subagent runner and the workflow runner). Subscribe at extension load; the
+ * getter resolves to the current set. The parent's MCP connect runs in the
+ * background, so a child spawned in the first seconds of a session waits for
+ * the settled publish, capped so a hung server cannot stall spawns, instead of
+ * baking in a still-connecting (possibly empty) snapshot. Empty when no MCP
+ * servers are configured.
+ */
+export function watchMcpTools(events: McpToolsEvents, settleCapMs = MCP_SETTLE_CAP_MS): () => Promise<ToolDefinition[]> {
+	let tools: ToolDefinition[] = [];
+	let settled = false;
+	let resolveSettled: (() => void) | undefined;
+	const settledPromise = new Promise<void>((resolve) => {
+		resolveSettled = resolve;
+	});
+	events.on(MCP_TOOLS_CHANNEL, (data) => {
+		const payload = data as McpToolsPayload | undefined;
+		tools = payload?.tools ?? [];
+		if (payload?.settled) {
+			settled = true;
+			resolveSettled?.();
+		}
+	});
+	return async () => {
+		if (!settled) {
+			await Promise.race([
+				settledPromise,
+				new Promise<void>((resolve) => {
+					const timer = setTimeout(resolve, settleCapMs);
+					timer.unref?.();
+				}),
+			]);
+		}
+		return tools;
+	};
+}

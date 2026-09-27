@@ -8,7 +8,7 @@ import {
 	truncateLine,
 	wrapPlainText,
 } from "../../extensions/lib/tui-render.ts";
-import { graphemeWidth, sliceColumns, visibleWidth } from "../../extensions/lib/text-width.ts";
+import { graphemeWidth, sliceColumns, tailColumns, visibleWidth } from "../../extensions/lib/text-width.ts";
 import { resolvePiTuiEntry } from "../../extensions/subagents/prose.ts";
 
 // pi-tui's own column measure — the authority a rendered line is validated
@@ -114,5 +114,73 @@ describe("sliceColumns keeps graphemes whole", () => {
 		const r = sliceColumns("a漢b", 2); // 'a'(1) + '漢'(2) = 3 > 2, so only 'a'
 		expect(r.text).toBe("a");
 		expect(r.width).toBe(1);
+	});
+});
+
+// pi-tui is the authority: its measure decides whether a rendered line crashes
+// regular mode. These sweeps make a pi bump that changes the measure fail here
+// instead of in a user's session (a copied measure drifted once already).
+describe("visibleWidth agrees with pi-tui for every code point", () => {
+	const THAI = "ภาษาไทยสำหรับการทำงาน กำ น้ำ จำ";
+	const LAO = "ນຳ ຄຳ ລາວ";
+	it("measures the Thai and Lao AM vowels as pi-tui does", () => {
+		expect(visibleWidth("กำ")).toBe(piVisibleWidth("กำ"));
+		expect(visibleWidth("ນຳ")).toBe(piVisibleWidth("ນຳ"));
+		expect(visibleWidth(THAI)).toBe(piVisibleWidth(THAI));
+		expect(visibleWidth(LAO)).toBe(piVisibleWidth(LAO));
+		const line = truncateLine(`  ⎿  ${"กำ".repeat(60)}`, 80);
+		expect(piVisibleWidth(line)).toBeLessThanOrEqual(80);
+		expect(piVisibleWidth(cutPlainText("กำ".repeat(60), 80))).toBeLessThanOrEqual(80);
+	});
+
+	it("sweeps U+0000 to U+3FFFF alone and after a base letter", () => {
+		const bases = ["", "a", "ก", "ນ", "क", "漢"];
+		const mismatches: string[] = [];
+		for (let cp = 0; cp <= 0x3ffff; cp++) {
+			if (cp >= 0xd800 && cp <= 0xdfff) continue; // lone surrogates are not text
+			const ch = String.fromCodePoint(cp);
+			for (const base of bases) {
+				const s = base + ch;
+				if (visibleWidth(s) !== piVisibleWidth(s)) mismatches.push(`${base}U+${cp.toString(16)}`);
+			}
+			if (mismatches.length > 20) break;
+		}
+		expect(mismatches).toEqual([]);
+	}, 60_000);
+
+	it("agrees on random strings of marks, scripts, emoji and escape sequences", () => {
+		// Seeded LCG so a failure reproduces.
+		let seed = 0x5eed;
+		const rand = (n: number) => {
+			seed = (seed * 1103515245 + 12345) >>> 0;
+			return seed % n;
+		};
+		const pool = [
+			"a", " ", "\t", "é", "́", "ः", "क", "ि", "्", "ก", "ำ", "้", "ນ", "ຳ", "漢", "ｱ", "ｆ",
+			"👋", "🏽", "‍", "️", "🇯", "🇵", "​", "­", "\x07", "\x1b", "\r", "\x7f", "\u0085",
+			"\x1b[31m", "\x1b[0m", "\x1b[2K", "\x1b[1A", "\x1b[?25l", "\x1b]8;;https://x\x07", "\x1b]8;;\x1b\\",
+			"\x1b]0;title\x07", "\x1b_pi:c\x07", "\x1bP1$r\x1b\\", "\x1bc", "\x1b[", "\x1b]52;c;aGk=",
+		];
+		for (let n = 0; n < 20_000; n++) {
+			let s = "";
+			const len = 1 + rand(12);
+			for (let k = 0; k < len; k++) s += pool[rand(pool.length)];
+			expect(visibleWidth(s), JSON.stringify(s)).toBe(piVisibleWidth(s));
+		}
+	});
+});
+
+describe("tailColumns keeps the end of the text by columns", () => {
+	it("fits the tail on a grapheme boundary", () => {
+		for (const text of [WIDE, EMOJI, MIXED, "~/プロジェクト/ウェブ", "plain/ascii/path"]) {
+			for (const w of [0, 1, 3, 7, 20]) {
+				const r = tailColumns(text, w);
+				expect(text.endsWith(r.text)).toBe(true);
+				expect(piVisibleWidth(r.text)).toBe(r.width);
+				expect(r.width).toBeLessThanOrEqual(w);
+			}
+		}
+		expect(tailColumns("a漢b", 2)).toEqual({ text: "b", width: 1 });
+		expect(tailColumns("a漢b", 3)).toEqual({ text: "漢b", width: 3 });
 	});
 });

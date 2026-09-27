@@ -102,8 +102,9 @@ pi install npm:one-code-extension
 ```
 
 Use `pi` in place of `onecode` for every command in this guide. The
-extension is tested against pi 0.83 through 0.86 and warns at startup when
-your pi is outside that range. Full-screen mode is opt-in on your own pi;
+extension is tested against pi 0.84.3 through 0.87 and warns at startup when
+your pi is outside that range. It doesn't load on a pi older than 0.84.3;
+update pi first with `pi update`. Full-screen mode is opt-in on your own pi;
 see [Full-screen mode and themes](configuration.md#full-screen-mode-and-themes).
 
 A few interface refinements are applied only by the bundled app, because
@@ -149,7 +150,8 @@ A Homebrew install sees the notice a day after the npm release, because
 Homebrew refuses packages younger than that and `brew upgrade` would find
 nothing sooner. Set `ONECODE_NO_UPDATE_CHECK=1` to skip the check;
 `--offline` skips it too.
-On your own pi, update with `pi update --extensions`.
+On your own pi, update the extension with `pi update npm:one-code-extension`.
+A bare `pi update` updates pi itself and skips extensions.
 
 Both packages are released together with the same version number.
 

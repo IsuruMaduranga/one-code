@@ -10,13 +10,17 @@
  * truth the user should read before approving anything this large).
  */
 
+import { escapeControlText } from "./terminal-text.ts";
+
 const PER_ITEM_CAP = 2000;
 const TOTAL_CAP = 4000;
 
 export function boundConsentItems(items: string[], moreHint: string): string {
 	const shown: string[] = [];
 	let used = 0;
-	for (const item of items) {
+	// Control characters are shown as visible escapes: an SGR conceal or a
+	// cursor move in a command could otherwise hide the part the user approves.
+	for (const item of items.map(escapeControlText)) {
 		const capped = item.length > PER_ITEM_CAP ? `${item.slice(0, PER_ITEM_CAP)}… [truncated, ${item.length} chars]` : item;
 		// Always show the first item (so an empty modal never happens); stop once
 		// the budget is spent.

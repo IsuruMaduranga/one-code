@@ -9,8 +9,10 @@
  * child loaders are cached and shared across runs with different cwds.
  * createWorktree/cleanupWorktree (subagents/worktree.ts) register and release
  * entries; reconstructed run records re-register kept worktrees after a
- * process restart (subagents/index.ts); the guard resolves each bash call's
- * cwd against them.
+ * process restart (subagents/index.ts); the worktree the main session entered
+ * with `enter_worktree` is registered too (`followEnteredWorktree`), so a child
+ * spawned there is guarded like an isolated one; the guard resolves each bash
+ * call's cwd against them.
  *
  * Module state is deliberate and safe despite jiti isolation: registration
  * (worktree creation) and lookup (the guard factory) always happen inside the
@@ -22,6 +24,8 @@
 import { homedir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
+import { findProjectRoot } from "./git.ts";
+import { WORKTREE_CHANNEL, type WorktreeLocation } from "./worktree-channel.ts";
 import { isWithin, isWritingTool, pathArgument, resolveForContainment, toAbsolute } from "../auto-mode/paths.ts";
 import { analyzeShellCommand } from "../auto-mode/shell-analysis.ts";
 import { worktreeBashGuardReason } from "../worktree/guards.ts";
@@ -59,6 +63,24 @@ export function registerWorktreeIsolation(worktreePath: string, sharedRoot: stri
 
 export function releaseWorktreeIsolation(worktreePath: string): void {
 	active.delete(worktreePath);
+}
+
+/**
+ * Follow the main session's `enter_worktree` state over `WORKTREE_CHANNEL`
+ * and return a getter for it. The entered worktree is registered in this
+ * extension's registry, so a child spawned there gets the git-isolation and
+ * write guards. The entry stays after the session exits the worktree: a child
+ * started there may still be running, and a registration for a directory no
+ * later child runs in is inert.
+ */
+export function followEnteredWorktree(events: { on(channel: string, handler: (data: unknown) => void): unknown }): () => WorktreeLocation | undefined {
+	let entered: WorktreeLocation | undefined;
+	events.on(WORKTREE_CHANNEL, (data) => {
+		const location = data as WorktreeLocation | null | undefined;
+		entered = location?.path ? location : undefined;
+		if (entered) registerWorktreeIsolation(entered.path, entered.sharedRoot ?? findProjectRoot(entered.path) ?? entered.path);
+	});
+	return () => entered;
 }
 
 /** The registered isolation worktree `cwd` lives in, if any. */

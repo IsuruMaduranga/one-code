@@ -49,7 +49,7 @@ import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpServerStatus, t
 
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { BTW_FORK_CHANNEL, btwForkName, btwForkReminder, type BtwForkRequest, type BtwForkResult } from "../lib/btw-fork.ts";
-import { MCP_TOOLS_CHANNEL, type McpToolsPayload } from "../lib/mcp-share.ts";
+import { watchMcpTools } from "../lib/mcp-share.ts";
 import { resolveModelTier } from "../lib/model-tier.ts";
 import { pendingClaimReminder } from "./pending-claim.ts";
 import { watchPermissionBridge } from "../permissions/subagent-gate.ts";
@@ -61,9 +61,10 @@ import { type ChildOutcome, forkTaskMessage, OUTPUT_CAP, type RpcChildHandle } f
 import { type AgentRunRecord, freeRunName, resolveRunName, RunRegistry } from "./runs.ts";
 import { SubagentRuntime } from "./runner.ts";
 import { emptyUsage, formatStats, type UsageTotals } from "./usage.ts";
-import { cleanupWorktree, createWorktree, isGitRepo, type Worktree } from "./worktree.ts";
-import { findGitRoot } from "../lib/git.ts";
-import { registerWorktreeIsolation } from "../lib/worktree-isolation.ts";
+import { cleanupWorktree, createWorktree, isGitRepo, keptWorktreeNote, type Worktree } from "./worktree.ts";
+import { findProjectRoot } from "../lib/git.ts";
+import { followEnteredWorktree, registerWorktreeIsolation } from "../lib/worktree-isolation.ts";
+import { sessionWorkCwd } from "../lib/worktree-channel.ts";
 import {
 	AGENT_NOTE,
 	agentMessage,
@@ -88,7 +89,8 @@ import { recordUsage } from "../lib/usage-bus.ts";
 import { SUBAGENT_DEFAULT_CHANGED_CHANNEL } from "../lib/settings-channels.ts";
 import { SubagentWidget } from "./panel-widget.ts";
 import { type ProseRenderer, renderTranscript } from "./panel-render.ts";
-import { decodeStripKey, type StripKey } from "./panel-keys.ts";
+import { decodeStripKey, editorYieldsDown, isStripEntryKey, type StripKey } from "./panel-keys.ts";
+import { isKeyRelease } from "../lib/key-input.ts";
 import { reduceShellKey } from "./shell-panel.ts";
 import { trackShellTasks } from "../lib/shell-tasks.ts";
 import { createMarkdownProse } from "./prose.ts";
@@ -153,6 +155,8 @@ interface TaskResult {
 	usage: UsageTotals;
 	failed?: boolean;
 	worktreePath?: string;
+	/** The kept worktree's branch, which holds any commits the agent made. */
+	worktreeBranch?: string;
 	worktreeKept?: boolean;
 	/** What the child did, for auto mode's return review. */
 	actions?: ChildAction[];
@@ -237,6 +241,19 @@ interface Resident {
 	 * ahead of the report in its notification.
 	 */
 	turnHandlers: Array<(outcome: ChildOutcome, review: HandBackVerdict | undefined, stopped: boolean) => void>;
+	/** Finished turns whose hand-back is still waiting on auto mode's review, so not yet delivered. */
+	reviewing: number;
+}
+
+/**
+ * Whether a resident has a report still to deliver: a turn is running, a turn's
+ * handler is queued, or a finished turn waits on its review. A resident that
+ * has delivered stays alive and idle for SendMessage; counting it as pending
+ * told a cheap-tier model to retract an answer the agent really gave
+ * (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 M4).
+ */
+function residentPending(resident: Resident): boolean {
+	return !resident.handle.exited() && (resident.handle.busy() || resident.turnHandlers.length > 0 || resident.reviewing > 0);
 }
 
 export default function subagentsExtension(pi: ExtensionAPI) {
@@ -320,37 +337,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
 	// Live MCP tool definitions published by the mcp extension; injected into
 	// child sessions so subagents share the parent's open connections (no reconnect).
-	// Empty when no MCP servers are configured, so this is a no-op for most sessions.
-	// The parent's MCP connect runs in the background, so a spawn in the first
-	// seconds of a session waits for the settled publish (capped, so a hung server
-	// can't stall spawns) instead of baking in a still-connecting snapshot.
-	const MCP_SETTLE_CAP_MS = 10_000;
-	let mcpTools: ToolDefinition[] = [];
-	let mcpSettled = false;
-	let resolveMcpSettled: (() => void) | undefined;
-	const mcpSettledPromise = new Promise<void>((resolve) => {
-		resolveMcpSettled = resolve;
-	});
-	pi.events.on(MCP_TOOLS_CHANNEL, (data) => {
-		const payload = data as McpToolsPayload | undefined;
-		mcpTools = payload?.tools ?? [];
-		if (payload?.settled) {
-			mcpSettled = true;
-			resolveMcpSettled?.();
-		}
-	});
-	const awaitMcpTools = async (): Promise<ToolDefinition[]> => {
-		if (!mcpSettled) {
-			await Promise.race([
-				mcpSettledPromise,
-				new Promise<void>((resolve) => {
-					const timer = setTimeout(resolve, MCP_SETTLE_CAP_MS);
-					timer.unref?.();
-				}),
-			]);
-		}
-		return mcpTools;
-	};
+	const awaitMcpTools = watchMcpTools(pi.events);
 
 	// The parent permissions extension's decision closure, used to gate a child's
 	// tool calls through the real pipeline (mode inheritance, classifier, prompts
@@ -383,7 +370,18 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		if (rememberUnusable(event.model) && lastCtx) emitModelStatus(lastCtx);
 	});
 
-	/** The in-process runner, built lazily on first run and shared across all runs. */
+	// After `enter_worktree` the session works in the worktree, but pi keeps
+	// ctx.cwd at the original checkout: spawns start where the session works.
+	const enteredWorktree = followEnteredWorktree(pi.events);
+	const workCwd = (ctx: ExtensionContext) => sessionWorkCwd(enteredWorktree(), ctx.cwd);
+
+	/**
+	 * The in-process runner, built lazily on first run and shared across all runs.
+	 * A failed build (a malformed models.json or auth.json) is forgotten, so the
+	 * next spawn tries again instead of every later spawn failing on the same
+	 * rejected promise; callers await it before they mark a run as running
+	 * (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 L8).
+	 */
 	let runtimePromise: Promise<SubagentRuntime> | undefined;
 	const getRuntime = (ctx: ExtensionContext) =>
 		(runtimePromise ??= SubagentRuntime.create(
@@ -407,7 +405,13 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				live?.ui.notify(`Subagent model ${model} is not usable on this account (${reason}); automatic selection skips it from now on.`, "warning");
 				if (lastCtx) emitModelStatus(lastCtx);
 			},
-		));
+		).catch((error: unknown) => {
+			runtimePromise = undefined;
+			throw error;
+		}));
+	/** The runtime, or the build error as a message a failed run can report. */
+	const runtimeOrError = (ctx: ExtensionContext): Promise<SubagentRuntime | string> =>
+		getRuntime(ctx).catch((error: unknown) => `could not start the subagent runtime: ${error instanceof Error ? error.message : String(error)}`);
 
 	// The mcp extension answers a status request synchronously on the bus.
 	let mcpStatus: McpServerStatus[] | undefined;
@@ -511,14 +515,14 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				// A kept worktree can host a resumed run in a NEW process, where
 				// createWorktree's registration no longer exists — re-register so the
 				// git-isolation guard survives the restart. A removed worktree's entry
-				// is inert (no session runs there any more). findGitRoot instead of
+				// is inert (no session runs there any more). findProjectRoot instead of
 				// `git rev-parse` because session_start handlers must stay fast
 				// (findings §15); a slightly-off sharedRoot only softens one message —
 				// the worktree containment check itself uses the exact record.cwd.
 				if (record.worktree && !worktreesSeen.has(record.cwd)) {
 					worktreesSeen.add(record.cwd);
 					if (!existsSync(record.cwd)) continue;
-					sharedRoot ??= findGitRoot(ctx.cwd) ?? ctx.cwd;
+					sharedRoot ??= findProjectRoot(ctx.cwd) ?? ctx.cwd;
 					registerWorktreeIsolation(record.cwd, sharedRoot);
 				}
 			}
@@ -649,7 +653,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		const pending = spawned
 			.filter((taskId) => {
 				const resident = residents.get(taskId);
-				return (resident !== undefined && !resident.handle.exited()) || runningIds.has(taskId);
+				return (resident !== undefined && residentPending(resident)) || runningIds.has(taskId);
 			})
 			.map((taskId) => registry.resolve(taskId))
 			.filter((record): record is AgentRunRecord => record !== undefined)
@@ -896,7 +900,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			leave();
 			return undefined;
 		};
-		const DOWN_KEYS = new Set(["\x1b[B", "\x1bOB"]);
 		/** Keys the agents branch owns; any other decode (typing, shell-only keys
 		 * like left/space) drops focus and passes through — stated positively so a
 		 * future StripKey addition is foreign here by default. */
@@ -955,6 +958,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		};
 		try {
 			registerCtx.ui.onTerminalInput((data) => {
+				// pi-tui calls input listeners before it filters key releases, and a
+				// kitty terminal sends one after every press: a release is never a
+				// key here (it used to read as typing and drop focus).
+				if (isKeyRelease(data)) return undefined;
 				const ctx = lastCtx ?? registerCtx;
 				// Enter focus: down-arrow while the editor holds real focus. Unlike the
 				// workflow strip we do NOT require the editor to be idle — the whole
@@ -964,7 +971,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				// plain typing. Claude Code's order: the FIRST ↓ lands on the shells
 				// chip when shells are running; the next ↓ moves into the agent rows.
 				if (panel.focusIndex === undefined && panel.shellFocus === undefined) {
-					if (!DOWN_KEYS.has(data) || !panel.editorFocused()) return undefined;
+					if (!isStripEntryKey(data) || !panel.editorFocused()) return undefined;
+					// In a draft, ↓ first moves the cursor, walks recalled history or the
+					// autocomplete list; the strip takes it only past the draft's last line.
+					if (!editorYieldsDown(panel.editorBaseline)) return undefined;
 					if (panel.shellChipAvailable()) {
 						panel.setShellFocus({ stage: "chip" });
 						return { consume: true };
@@ -1086,7 +1096,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	// so the message and its pointer would only repeat it (see decisions).
 	const notifier = createTaskNotifier(pi, { withdrawOnDelivery: true });
 	/** Every subagent notification; silent during shutdown (a teardown kill is not news). */
-	const notify: typeof notifier = (customType, text, details) => {
+	const notify = (customType: string, text: string, details?: Record<string, unknown>) => {
 		if (shuttingDown) return;
 		notifier(customType, text, details);
 	};
@@ -1384,7 +1394,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					content: [
 						{
 							type: "text" as const,
-							text: `${notes.length ? `${notes.join("\n")}\n\n` : ""}${result.output}\n\n(${formatStats(result.toolCalls, result.usage)})`,
+							text: `${notes.length ? `${notes.join("\n")}\n\n` : ""}${bounded(result.output, `${record.taskId}-report`, OUTPUT_CAP)}\n\n(${formatStats(result.toolCalls, result.usage)})`,
 						},
 					],
 					details: { agentRuns: [record] },
@@ -1429,8 +1439,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		request.fork ? forkTaskMessage(request.task, worktree ? { worktreePath: worktree.path, parentCwd } : undefined) : request.task;
 
 	/** Create a run's isolation worktree and point its record at it (both spawn paths). */
-	const isolateInWorktree = async (ctx: ExtensionContext, record: AgentRunRecord, name: string): Promise<Worktree> => {
-		const worktree = await createWorktree(ctx.cwd, name);
+	const isolateInWorktree = async (base: string, record: AgentRunRecord, name: string): Promise<Worktree> => {
+		const worktree = await createWorktree(base, name);
 		record.cwd = worktree.path;
 		record.worktree = true;
 		return worktree;
@@ -1454,11 +1464,20 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		onProgress?: (toolCalls: number, text: string, usage: UsageTotals) => void,
 	): Promise<TaskResult> => {
 		const { request, record, agentDef } = prepared;
+		// The session's working directory: the entered worktree, if any.
+		const base = workCwd(ctx);
+
+		// Before anything marks the run as running: a failed build must not leave
+		// the task id in runningIds, where SendMessage would call it "still running".
+		const runtime = await runtimeOrError(ctx);
+		if (typeof runtime === "string") {
+			return { agent: request.agent, name: request.name, taskId: record.taskId, task: request.task, output: `Subagent failed: ${runtime}`, toolCalls: 0, usage: emptyUsage(), failed: true };
+		}
 
 		let worktree: Worktree | undefined;
 		if (request.worktree) {
 			try {
-				worktree = await isolateInWorktree(ctx, record, request.name);
+				worktree = await isolateInWorktree(base, record, request.name);
 			} catch (error) {
 				return {
 					agent: request.agent,
@@ -1475,11 +1494,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
 		runningIds.add(record.taskId);
 		const live = trackLiveRun(record, request, parent);
-		const runtime = await getRuntime(ctx);
 		const handle = runtime.run({
 			name: request.name,
 			agent: agentDef,
-			task: frameTask(request, worktree, ctx.cwd),
+			task: frameTask(request, worktree, base),
 			cwd: record.cwd,
 			forkFrom: request.fork ? forkFrom : undefined,
 			parentSystemPrompt: request.fork ? ctx.getSystemPrompt() : undefined,
@@ -1505,7 +1523,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			live.finish(Boolean(outcome.failed));
 			let worktreeKept: boolean | undefined;
 			if (worktree) {
-				worktreeKept = !(await cleanupWorktree(ctx.cwd, worktree));
+				worktreeKept = !(await cleanupWorktree(base, worktree));
 			}
 			return {
 				agent: request.agent,
@@ -1514,11 +1532,14 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				task: request.task,
 				...outcome,
 				worktreePath: worktreeKept ? worktree?.path : undefined,
+				worktreeBranch: worktreeKept ? worktree?.branch : undefined,
 				worktreeKept,
 			};
 		} catch (error) {
 			live.finish(true);
-			if (worktree) await cleanupWorktree(ctx.cwd, worktree);
+			// A failed run can still have committed or edited in its worktree:
+			// a kept one is reported like a finished run's.
+			const worktreeKept = worktree ? !(await cleanupWorktree(base, worktree)) : undefined;
 			return {
 				agent: request.agent,
 				name: request.name,
@@ -1528,6 +1549,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				toolCalls: 0,
 				usage: emptyUsage(),
 				failed: true,
+				worktreePath: worktreeKept ? worktree?.path : undefined,
+				worktreeBranch: worktreeKept ? worktree?.branch : undefined,
+				worktreeKept,
 			};
 		} finally {
 			runningIds.delete(record.taskId);
@@ -1549,10 +1573,13 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		runtime: SubagentRuntime,
 		{ sessionFile, toolCallId, forkMessages }: { sessionFile?: string; toolCallId?: string; forkMessages?: Message[] },
 	): Promise<{ launched: boolean; line: string }> => {
+		// Captured as a string: onExit runs from a `.finally` long after this
+		// turn's ctx may be stale (review S5). The entered worktree, if any.
+		const parentCwd = workCwd(ctx);
 		let worktree: Worktree | undefined;
 		if (p.request.worktree) {
 			try {
-				worktree = await isolateInWorktree(ctx, p.record, p.request.name);
+				worktree = await isolateInWorktree(parentCwd, p.record, p.request.name);
 			} catch (error) {
 				return { launched: false, line: `✗ ${p.record.name}: could not create a worktree: ${(error as Error).message}` };
 			}
@@ -1576,9 +1603,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		// the same way a SendMessage task returns one reply (review S12).
 		let firstTurnOutput: string | undefined;
 		const live = trackLiveRun(p.record, p.request);
-		const resident: Resident = { handle: undefined as never, startedAt: Date.now(), turnHandlers: [] };
+		const resident: Resident = { handle: undefined as never, startedAt: Date.now(), turnHandlers: [], reviewing: 0 };
 		const worktreeNote = worktree
-			? `\n\n(Running in worktree ${worktree.path} — kept while the agent stays resident.)`
+			? `\n\n(Running in worktree ${worktree.path} on branch ${worktree.branch} — kept while the agent stays resident, and after it exits if it holds uncommitted changes or commits.)`
 			: "";
 		resident.turnHandlers.push((outcome, review, stopped) => {
 			task.status = stopped ? "stopped" : outcome.failed ? "failed" : "completed";
@@ -1622,9 +1649,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			}, RESIDENT_IDLE_MS);
 			reaper.unref?.();
 		};
-		// Captured as a string: onExit runs from a `.finally` long after this
-		// turn's ctx may be stale (review S5).
-		const parentCwd = ctx.cwd;
 		const forkPrompt = p.request.fork ? ctx.getSystemPrompt() : undefined;
 		if (forkPrompt !== undefined) persistForkPrompt(p.record, forkPrompt);
 		// No `signal` here on purpose: a resident outlives the spawning turn and
@@ -1669,7 +1693,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				// A stop or resume during review must not change this turn's outcome.
 				const stopped = stoppedTaskIds.has(p.record.taskId);
 				armReaper();
+				resident.reviewing++;
 				void awaitHandBackReview(pi.events, p.record, outcome.actions).then((review) => {
+					resident.reviewing--;
 					if (handler) {
 						handler(outcome, review, stopped);
 					} else {
@@ -1696,7 +1722,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				live.finish(stoppedTaskIds.has(p.record.taskId) ? "stopped" : false);
 				if (residents.get(p.record.taskId) === resident) residents.delete(p.record.taskId);
 				liveHandles.delete(p.record.taskId);
-				if (worktree) void cleanupWorktree(parentCwd, worktree);
+				// Returned, not voided: kill() settles after the cleanup, so the
+				// session_shutdown grace covers it.
+				if (worktree) return cleanupWorktree(parentCwd, worktree);
+				return undefined;
 			},
 		}).catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))));
 		if (started instanceof Error) {
@@ -1763,12 +1792,16 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				thinking: pi.getThinkingLevel(),
 			},
 			agentDef: undefined,
-			record: { name, agent: FORK_AGENT, taskId, sessionSearchDir: runSessionDir(ctx, taskId) ?? "", cwd: ctx.cwd, depth: 0 },
+			record: { name, agent: FORK_AGENT, taskId, sessionSearchDir: runSessionDir(ctx, taskId) ?? "", cwd: workCwd(ctx), depth: 0 },
 		};
 		registry.add(prepared.record);
 		// The session can be torn down while the runtime or the child starts; a
 		// fork launched after shutdown's stop-all sweep would outlive it.
-		const runtime = await getRuntime(ctx);
+		const runtime = await runtimeOrError(ctx);
+		if (typeof runtime === "string") {
+			registry.remove(taskId);
+			return { error: `Cannot fork: ${runtime}` };
+		}
 		if (shuttingDown) return { error: "The session ended before the fork started." };
 		const { launched, line } = await launchResident(prepared, ctx, runtime, { sessionFile, forkMessages: request.messages });
 		if (shuttingDown) {
@@ -1941,7 +1974,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				};
 			}
 
-			if (requested.some((r) => r.worktree) && !(await isGitRepo(ctx.cwd))) {
+			if (requested.some((r) => r.worktree) && !(await isGitRepo(workCwd(ctx)))) {
 				return {
 					content: [{ type: "text", text: 'isolation: "worktree" needs a git repository; this directory is not one.' }],
 					details: {},
@@ -1959,7 +1992,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						agent: request.agent,
 						taskId,
 						sessionSearchDir: runSessionDir(ctx, taskId) ?? "",
-						cwd: ctx.cwd,
+						cwd: workCwd(ctx),
 						model: request.model,
 						thinking: request.thinking,
 						depth: 0,
@@ -2098,7 +2131,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					actions: result.actions ?? [],
 				} satisfies SubagentActionsPayload);
 				const stats = formatStats(result.toolCalls, result.usage);
-				const worktreeNote = result.worktreePath ? `\n\n(Changes left in worktree ${result.worktreePath} — review or merge them.)` : "";
+				const worktreeNote = result.worktreePath ? `\n\n${keptWorktreeNote(result.worktreePath, result.worktreeBranch)}` : "";
 				// The report arrives inline with no frame, no task id and no note, so a
 				// model told to "retrieve the result with task_output" chased an id that
 				// was never registered (WEAK-MODEL-REVIEW-2026-09-06 M3). Say it up
@@ -2115,7 +2148,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					content: [
 						{
 							type: "text",
-							text: `${notes.length ? `${notes.join("\n")}\n\n` : ""}${inlineNote}\n\n${result.output}${worktreeNote}\n\n(${stats})`,
+							text: `${notes.length ? `${notes.join("\n")}\n\n` : ""}${inlineNote}\n\n${bounded(result.output, `${prepared[0].record.taskId}-report`, OUTPUT_CAP)}${worktreeNote}\n\n(${stats})`,
 						},
 					],
 					details: { results: [result], agentRuns: records },
@@ -2128,7 +2161,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			// steered system notification, and the child stays resident so
 			// SendMessage can reach it live (steer mid-turn, prompt when idle).
 			const lines: string[] = [...renamed, ...modelNotes];
-			const runtime = await getRuntime(ctx);
+			const runtime = await runtimeOrError(ctx);
+			if (typeof runtime === "string") {
+				// Nothing launched: forget the runs so list_agents and SendMessage never offer them.
+				for (const p of prepared) registry.remove(p.record.taskId);
+				return { content: [{ type: "text", text: `Could not start the agent: ${runtime}` }], details: {}, isError: true };
+			}
 			for (const p of prepared) {
 				const { launched, line } = await launchResident(p, ctx, runtime, { sessionFile: sessionFile ?? undefined, toolCallId });
 				if (launched) spawnedThisLoop.add(p.record.taskId);
@@ -2159,7 +2197,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			message: Type.String({ description: "Plain text message for the agent" }),
 			summary: Type.Optional(Type.String({ description: "5-10 word preview shown in the UI" })),
 		}),
-		async execute(toolCallId, params, _signal, _onUpdate, ctx) {
+		async execute(toolCallId, params, signal, _onUpdate, ctx) {
 			if (params.to === "main") {
 				// The main conversation's SendMessage only addresses spawned agents; the
 				// "main" recipient exists only on a subagent's own injected SendMessage.
@@ -2326,9 +2364,16 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			// reply, and fix the record so later messages don't repeat the note (M2).
 			let relocationNote = "";
 			if (!existsSync(record.cwd)) {
-				relocationNote = `[${record.name}'s working directory ${record.cwd} no longer exists${record.worktree ? " (its isolation worktree was removed when the run left no changes)" : ""}; this turn ran in ${ctx.cwd}.]\n\n`;
-				record.cwd = ctx.cwd;
+				const cwd = workCwd(ctx);
+				relocationNote = `[${record.name}'s working directory ${record.cwd} no longer exists${record.worktree ? " (its isolation worktree was removed when the run left no changes)" : ""}; this turn ran in ${cwd}.]\n\n`;
+				record.cwd = cwd;
 				record.worktree = undefined;
+			}
+
+			// Before the run is marked running (L8, as in executeRun).
+			const runtime = await runtimeOrError(ctx);
+			if (typeof runtime === "string") {
+				return { content: [{ type: "text", text: `Could not resume ${record.name}: ${runtime}` }], details: {}, isError: true };
 			}
 
 			const taskId = generateTaskId();
@@ -2347,7 +2392,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				model: record.model,
 				thinking: record.thinking,
 			});
-			const runtime = await getRuntime(ctx);
+			// One-shot modes (`-p`, `--mode json`) exit when the turn settles, so the
+			// resumed turn runs blocking there and the reply is the tool result, as a
+			// spawn's report is (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 M3).
+			const oneShot = !sessionOutlivesTurn(ctx.mode);
 			const handle = runtime.run({
 				name: record.name,
 				agent: loadAgents(ctx.cwd).find((a) => a.name === record.agent),
@@ -2355,6 +2403,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				cwd: record.cwd,
 				sessionFile,
 				parentSystemPrompt: forkPrompt,
+				// Blocking, so the call's own abort stops it; a background turn is stopped by task_stop.
+				signal: oneShot ? signal : undefined,
 				model: record.model,
 				// Resume degrades to the session model if the recorded model has become
 				// unavailable since the original run, rather than failing the resume
@@ -2370,6 +2420,26 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			});
 			liveHandles.set(record.taskId, handle);
 
+			if (oneShot) {
+				const outcome = await handle.result;
+				runningIds.delete(record.taskId);
+				live.finish(stoppedTaskIds.has(record.taskId) ? "stopped" : Boolean(outcome.failed));
+				// Auto mode reviews the turn's actions; the gate attaches the verdict to this tool result.
+				pi.events.emit(SUBAGENT_ACTIONS_CHANNEL, { toolCallId, actions: outcome.actions } satisfies SubagentActionsPayload);
+				return {
+					content: [
+						{
+							type: "text",
+							text:
+								`${record.name}: ${oneShotNote("agent's turn")} Its reply follows here; there is no background task to poll.\n\n` +
+								`${relocationNote}${bounded(outcome.output, `${taskId}-reply`, OUTPUT_CAP)}\n\n(${formatStats(outcome.toolCalls, outcome.usage)})`,
+						},
+					],
+					details: { agentRuns: [record] },
+					isError: outcome.failed ?? false,
+				};
+			}
+
 			const task: BackgroundTask = {
 				id: taskId,
 				kind: "subagent",
@@ -2383,10 +2453,16 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			};
 			pi.events.emit(TASK_REGISTER_CHANNEL, task);
 
-			void handle.result.then((outcome) => {
+			void handle.result.then(async (outcome) => {
 				runningIds.delete(record.taskId);
+				// Read before the review: a stop or resume during it must not change this turn's outcome.
 				const stopped = stoppedTaskIds.has(record.taskId);
 				live.finish(stopped ? "stopped" : Boolean(outcome.failed));
+				// Auto mode reviews this turn's actions before the reply goes out, as it
+				// does for a resident's turn; a resumed turn once skipped it
+				// (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 M2). The task settles after the
+				// review, so task_output never returns the reply ahead of its verdict.
+				const review = await awaitHandBackReview(pi.events, record, outcome.actions);
 				task.status = stopped ? "stopped" : outcome.failed ? "failed" : "completed";
 				task.finishedAt = Date.now();
 				finish();
@@ -2399,7 +2475,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					stopped,
 					startedAt: task.startedAt,
 					report: `${relocationNote}${bounded(outcome.output, `${taskId}-reply`, OUTPUT_CAP)}`,
-					review: undefined,
+					review,
 				});
 			});
 

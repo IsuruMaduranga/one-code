@@ -1,6 +1,8 @@
 /**
  * system-prompt extension — replaces pi's default system prompt with the
- * adapted Claude Code prompt on every turn via before_agent_start.
+ * adapted Claude Code prompt on every turn via before_agent_start, and on a
+ * turn opened from idle (which skips that hook) via context_with_system
+ * (idle-turn.ts).
  *
  * The environment block is cached per (cwd, model) so the generated prompt is
  * byte-stable across turns and provider prompt caching stays effective. The
@@ -8,13 +10,14 @@
  * derived at session_start, constant within the session.
  */
 
-import { mkdirSync } from "node:fs";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { getCurrentSystemMessage } from "@earendil-works/pi-ai";
+import type { BuildSystemPromptOptions, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { resolveModelTier, taskToolsEnabled } from "../lib/model-tier.ts";
-import { sessionScratchpadDir } from "../lib/scratchpad.ts";
+import { privateSessionScratchpadDir } from "../lib/scratchpad.ts";
 import { collectEnvironment, type EnvironmentInfo } from "./environment.ts";
 import { collectGitStatus } from "./git-status.ts";
 import { totalTokensBlock, turnTokenBudget } from "../context-budget/budget.ts";
+import { optionsForIdleTurn, withSystemHead } from "./idle-turn.ts";
 import { buildClaudeCodeSystemPrompt } from "./template.ts";
 import { WORKSPACE_CHANNEL, type WorkspaceAnnouncement } from "../lib/workspace-channel.ts";
 
@@ -33,6 +36,8 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 	// extension announces them from its own session_start, which runs before
 	// this one (load order), so this handler does not reset them.
 	let workspaceDirs: string[] = [];
+	/** The options the last before_agent_start saw; a turn opened from idle rebuilds from them. */
+	let lastOptions: BuildSystemPromptOptions | undefined;
 	pi.events.on(WORKSPACE_CHANNEL, (data) => {
 		const dirs = (data as WorkspaceAnnouncement | undefined)?.dirs;
 		workspaceDirs = Array.isArray(dirs) ? dirs.filter((dir): dir is string => typeof dir === "string") : [];
@@ -42,27 +47,24 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 		// The prompt section promises a usable directory, so the extension that
 		// makes the promise creates it. Failure (unwritable /tmp) drops the
 		// section rather than promising a directory writes will error on.
-		const candidate = sessionScratchpadDir(ctx.cwd, ctx.sessionManager.getSessionId());
-		try {
-			mkdirSync(candidate, { recursive: true });
-			scratchpad = candidate;
-		} catch {
-			scratchpad = undefined;
-		}
+		// On a shared /tmp it must also be private to this user
+		// (lib/scratchpad.ts ensurePrivateScratchpad); otherwise the section is dropped.
+		scratchpad = privateSessionScratchpadDir(ctx.cwd, ctx.sessionManager.getSessionId());
 
 		gitStatus = null;
 		gitStatusReady = false;
+		// Another session's options (a named agent's customPrompt, its tool set)
+		// must not shape this one's idle turns.
+		lastOptions = undefined;
 	});
 
-	pi.on("before_agent_start", (event, ctx) => {
-		// A named agent (or a `--system-prompt` launch) supplies its own prompt via
-		// customPrompt. Return nothing so pi's own builder uses it verbatim, rather
-		// than clobbering it with the tiered One Code prompt.
-		if (event.systemPromptOptions.customPrompt) return;
-
+	const buildPrompt = (options: BuildSystemPromptOptions, ctx: ExtensionContext): string => {
 		if (!gitStatusReady) {
-			// First turn = the conversation start CC snapshots at.
-			gitStatus = collectGitStatus(ctx.cwd);
+			// First turn = the conversation start CC snapshots at. The clip note
+			// names the shell tool the model has (PowerShell only without bash).
+			const tools = options.selectedTools ?? [];
+			const shellTool = tools.includes("powershell") && !tools.includes("bash") ? "powershell" : "bash";
+			gitStatus = collectGitStatus(ctx.cwd, undefined, shellTool);
 			gitStatusReady = true;
 		}
 
@@ -78,16 +80,36 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 
 		// The same constant the context-budget extension puts on every user message.
 		const totalTokensLine = process.env.CC_TOTAL_TOKENS === "0" ? null : totalTokensBlock(turnTokenBudget());
-		return {
-			systemPrompt: buildClaudeCodeSystemPrompt(
-				event.systemPromptOptions,
-				{ ...cachedEnv, workspaceDirs },
-				tier,
-				scratchpad,
-				gitStatus,
-				totalTokensLine,
-				taskToolsEnabled(model, process.env, tier),
-			),
-		};
+		return buildClaudeCodeSystemPrompt(
+			options,
+			{ ...cachedEnv, workspaceDirs },
+			tier,
+			scratchpad,
+			gitStatus,
+			totalTokensLine,
+			taskToolsEnabled(model, process.env, tier),
+		);
+	};
+
+	pi.on("before_agent_start", (event, ctx) => {
+		// A copy: pi goes on mutating this object after the handlers return
+		// (forceSystemPrompt, the live selectedTools).
+		const options = event.systemPromptOptions;
+		lastOptions = { ...options, selectedTools: options.selectedTools && [...options.selectedTools] };
+		// A named agent (or a `--system-prompt` launch) supplies its own prompt via
+		// customPrompt. Return nothing so pi's own builder uses it verbatim, rather
+		// than clobbering it with the tiered One Code prompt.
+		if (event.systemPromptOptions.customPrompt) return;
+		return { systemPrompt: buildPrompt(event.systemPromptOptions, ctx) };
+	});
+
+	// A turn opened from idle (a cron tick, a background completion) skips
+	// before_agent_start and would run on pi's default prompt (idle-turn.ts).
+	// In a prompt() run pi's forced-prompt projection runs after this and
+	// installs the same text, so the head is rebuilt on every request.
+	pi.on("context_with_system", (event, ctx) => {
+		if (!lastOptions || lastOptions.customPrompt) return;
+		const prompt = buildPrompt(optionsForIdleTurn(lastOptions, pi.getActiveTools()), ctx);
+		return { messages: withSystemHead(event.messages, prompt, getCurrentSystemMessage(event.messages)) };
 	});
 }

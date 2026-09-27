@@ -13,10 +13,10 @@
  */
 
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { isAbsolute, resolve } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { pathArgument } from "../auto-mode/paths.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
+import { resolveToolPath } from "../lib/tool-path.ts";
 import { pathsReadOnBranch } from "./replay.ts";
 import {
 	describeChanges,
@@ -71,7 +71,9 @@ function pathOf(input: unknown, cwd: string): string | undefined {
 	// read-before-write guard (code-review).
 	const raw = pathArgument(input as Record<string, unknown> | undefined);
 	if (typeof raw !== "string" || !raw.trim()) return undefined;
-	return isAbsolute(raw) ? raw : resolve(cwd, raw);
+	// pi's own resolution (`~`, `@`, `file://`, …): the guard must check the
+	// file the tool will actually touch (lib/tool-path.ts).
+	return resolveToolPath(raw, cwd);
 }
 
 export default function fileTrackerExtension(pi: ExtensionAPI) {
@@ -95,7 +97,7 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 			return;
 		}
 		for (const raw of pathsReadOnBranch(entries)) {
-			observeFromDisk(tracker, isAbsolute(raw) ? raw : resolve(ctx.cwd, raw));
+			observeFromDisk(tracker, resolveToolPath(raw, ctx.cwd));
 		}
 	};
 	pi.on("session_start", (_event, ctx) => reconstruct(ctx));
@@ -166,8 +168,10 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 		const detailed: string[] = [];
 		const overflow: string[] = [];
 		for (const path of tracker.tracked) {
+			// Undefined for a file tracked without content (oversized); an empty
+			// file is compared like any other.
 			const previous = tracker.lastSeen(path);
-			if (previous === undefined || previous === "") continue;
+			if (previous === undefined) continue;
 			const stamp = statIfPresent(path);
 			if (stamp && tracker.unchangedOnDisk(path, stamp)) continue;
 			const current = stamp ? readIfPresent(path) : undefined;

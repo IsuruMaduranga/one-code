@@ -22,7 +22,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import { whenAborted } from "../lib/abort.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
-import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
+import { PREVIEW_BYTES, persistedFileBlock, persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { detachedSpawnOptions, KILL_GRACE_MS, stopProcessTree, waitForChildExit } from "../lib/process-tree.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
 import { bashSpawn, spawnShellCommand } from "../lib/shell-spawn.ts";
@@ -81,6 +81,7 @@ import {
 	MONITOR_BATCH_MAX_CHARS,
 	MONITOR_BATCH_IDLE_MS,
 	type MonitorBatch,
+	MonitorLineSplitter,
 	pushEvent,
 } from "./monitor-batch.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
@@ -89,15 +90,22 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, formatNotOwner } from "../lib/agent-cron.ts";
 import { SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../lib/skill-body.ts";
 import { BUNDLED_SKILLS_DIR } from "../lib/skill-scan.ts";
+import { closeSync, createWriteStream, mkdirSync, openSync, readSync, statSync, type WriteStream } from "node:fs";
 import { join, resolve } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { SESSION_WORK_CHANNEL, sessionBackgroundTask, sessionCron, type SessionWorkQuery } from "../lib/session-work.ts";
 import { WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
 
-const OUTPUT_CAP = 30_000;
+/** Claude Code's `task_output` limit (`TASK_MAX_OUTPUT_DEFAULT`). */
+const TASK_OUTPUT_MAX_CHARS = 32_000;
 const STORED_OUTPUT_CAP = 200_000;
 const DEFAULT_MONITOR_TIMEOUT_MS = 300_000;
 const MAX_MONITOR_TIMEOUT_MS = 3_600_000;
 const MAX_BLOCK_TIMEOUT_MS = 600_000;
+/** A finished monitor that saw nothing says so, never a blank a model reads as "still running" (bash's EMPTY_OUTPUT_MARKER). */
+const MONITOR_EMPTY_OUTPUT = "(no output — the monitor received no events and nothing on stderr)";
+/** Heads a monitor's output when the start is gone: past the in-memory cap with no spool file to hold it. */
+const SPOOL_LOST_NOTE = `[The monitor's spool file could not be written, so only the last ${STORED_OUTPUT_CAP.toLocaleString("en-US")} characters of its output were kept.]\n`;
 /** setTimeout's longest delay; a later fire re-arms when this one wakes. */
 const MAX_TIMER_MS = 2 ** 31 - 1;
 function tail(text: string, cap: number): string {
@@ -114,6 +122,60 @@ function tail(text: string, cap: number): string {
  * only thing that survives the swap (LIFECYCLE-REVIEW-2026-09-06 L3).
  */
 let pendingShutdownNotice: string | undefined;
+
+/**
+ * `<sessionDir>/monitor/<taskId>/output.log`, beside background shells'
+ * `bash/<taskId>/`. A session-less run spools under the session's private
+ * results dir (`sessionResultsDir`), so its output is never kept only as the
+ * in-memory tail. Undefined when the folder cannot be made.
+ */
+function monitorLogPath(ctx: ExtensionContext, taskId: string): string | undefined {
+	try {
+		const dir = join(sessionResultsDir(ctx), "monitor", taskId);
+		mkdirSync(dir, { recursive: true });
+		return join(dir, "output.log");
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * A finished monitor's spool as a persisted-output block: the file itself is
+ * the full output, so only its size and the first `PREVIEW_BYTES` are read.
+ * Undefined when the file cannot be read.
+ */
+function spoolBlock(path: string): string | undefined {
+	let fd: number | undefined;
+	try {
+		const { size } = statSync(path);
+		fd = openSync(path, "r");
+		const head = Buffer.alloc(Math.min(size, PREVIEW_BYTES));
+		const read = readSync(fd, head, 0, head.length, 0);
+		// The decoder holds back a character split at the preview's end.
+		return persistedFileBlock(path, size, new StringDecoder("utf8").write(head.subarray(0, read)));
+	} catch {
+		return undefined;
+	} finally {
+		if (fd !== undefined) closeSync(fd);
+	}
+}
+
+/**
+ * `task_output`'s body. Past `TASK_OUTPUT_MAX_CHARS` a task with a spool file
+ * gets Claude Code's clip, `[Truncated. Full output: <path>]` and the tail
+ * that fits, since the file holds the full text; a task without one (a
+ * subagent's report) is persisted whole to the session's tool-results
+ * folder, never cut (decisions/tools.md).
+ */
+function taskOutputBody(task: BackgroundTask, ctx: ExtensionContext): string {
+	const output = task.output();
+	if (output.length <= TASK_OUTPUT_MAX_CHARS) return output;
+	if (task.logPath) {
+		const header = `[Truncated. Full output: ${task.logPath}]\n\n`;
+		return `${header}${output.slice(-(TASK_OUTPUT_MAX_CHARS - header.length))}`;
+	}
+	return persistIfLarge(output, { dir: sessionResultsDir(ctx), id: `task-output-${task.id}`, maxBytes: TASK_OUTPUT_MAX_CHARS });
+}
 
 /** A session entry as the no-op fold reads it (noop-fold.ts). */
 function foldEntry(entry: { type: string; timestamp?: string; customType?: string; details?: unknown; message?: unknown }): FoldEntry {
@@ -333,6 +395,32 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 			const id = generateTaskId();
 			let status: BackgroundTask["status"] = "running";
 			let stored = "";
+			// The whole stream, spooled like a background shell's, so the batches'
+			// "task_output has the full stream" and task_output's clip header point
+			// at something true, and a one-shot result past the in-memory cap can
+			// still persist every line. Opened on the first output.
+			let log: WriteStream | undefined;
+			let spoolFailed = false;
+			let overflowed = false;
+			const record = (text: string) => {
+				if (stored.length + text.length > STORED_OUTPUT_CAP) overflowed = true;
+				stored = tail(`${stored}${text}`, STORED_OUTPUT_CAP);
+				if (!text || spoolFailed) return;
+				if (!log) {
+					const path = monitorLogPath(ctx, id);
+					if (!path) return;
+					log = createWriteStream(path, { flags: "a" });
+					log.on("error", () => {
+						// Best-effort, as bash's spool: the in-memory tail stays
+						// authoritative, and nothing names a missing or partial file as
+						// the full output any more.
+						spoolFailed = true;
+						task.logPath = undefined;
+					});
+					task.logPath = path;
+				}
+				log.write(text);
+			};
 			let eventCount = 0;
 			let pending: MonitorBatch = emptyBatch();
 			let flushTimer: NodeJS.Timeout | undefined;
@@ -341,9 +429,16 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				finish = resolve;
 			});
 
-			const flush = () => {
+			const flush = (force = false) => {
 				flushTimer = undefined;
 				if (batchSize(pending) === 0) return;
+				if (!force && notify.holding()) {
+					// Held after an interrupt: one bounded batch accumulates (its
+					// overflow counted) instead of one held message per flush, and
+					// goes out once the next turn starts.
+					flushTimer = setTimeout(() => flush(), MONITOR_BATCH_IDLE_MS);
+					return;
+				}
 				const batch = pending;
 				pending = emptyBatch();
 				// CC's mid-run monitor batch: no status, the lines in `<event>`.
@@ -356,13 +451,13 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 
 			const onEvent = (line: string) => {
 				eventCount++;
-				stored = tail(`${stored}${line}\n`, STORED_OUTPUT_CAP);
+				record(`${line}\n`);
 				if (oneShot) return; // collected into the tool result instead
 				pushEvent(pending, line);
 				// Bounded batches, and a wider window mid-turn so a chatty stream
 				// coalesces instead of steering one notification per second
 				// (monitor-batch.ts).
-				flushTimer ??= setTimeout(flush, agentBusy ? MONITOR_BATCH_BUSY_MS : MONITOR_BATCH_IDLE_MS);
+				flushTimer ??= setTimeout(() => flush(), agentBusy ? MONITOR_BATCH_BUSY_MS : MONITOR_BATCH_IDLE_MS);
 			};
 
 			const end = (finalStatus: BackgroundTask["status"], note?: string) => {
@@ -371,12 +466,30 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				task.status = finalStatus;
 				task.finishedAt = Date.now();
 				if (flushTimer) clearTimeout(flushTimer);
-				finish();
+				if (log) {
+					// `finished` resolves once the spool is on disk, so a blocking
+					// task_output never names a log still being written. `close` follows
+					// a clean end and an error alike; the timer covers a stream that hangs.
+					if (log.closed) {
+						// A failed spool has already closed.
+						finish();
+					} else {
+						const fallback = setTimeout(finish, 1_000);
+						fallback.unref?.();
+						log.once("close", () => {
+							clearTimeout(fallback);
+							finish();
+						});
+						log.end();
+					}
+				} else {
+					finish();
+				}
 				// Past this point everything touches the session: a monitor ending
 				// after shutdown (H1) or inside a one-shot run reports through
 				// `finished` alone.
 				if (!alive() || oneShot) return;
-				flush();
+				flush(true);
 				updateWidget();
 				// CC's monitor end: the recent tail rides `<event>` under the ended summary.
 				const ccStatus = taskStatusOf(finalStatus);
@@ -416,27 +529,31 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 					...detachedSpawnOptions(),
 					stdio: ["ignore", "pipe", "pipe"],
 				});
-				let buffer = "";
+				const lines = new MonitorLineSplitter();
+				// Streaming decoders: a UTF-8 character split across reads stays whole.
+				const stdoutText = new StringDecoder("utf8");
+				const stderrText = new StringDecoder("utf8");
 				child.stdout?.on("data", (chunk: Buffer) => {
-					buffer += chunk.toString();
-					let idx: number;
-					while ((idx = buffer.indexOf("\n")) !== -1) {
-						const line = buffer.slice(0, idx).trimEnd();
-						buffer = buffer.slice(idx + 1);
-						if (line) onEvent(line);
-					}
+					for (const line of lines.push(stdoutText.write(chunk))) onEvent(line);
 				});
 				child.stderr?.on("data", (chunk: Buffer) => {
-					stored = tail(`${stored}${chunk.toString()}`, STORED_OUTPUT_CAP);
+					record(stderrText.write(chunk));
 				});
 				// Exit plus a short stdio grace, not `close` (lib/process-tree.ts).
+				// The last line may have no newline; it is an event all the same.
+				const drain = () => {
+					for (const line of [...lines.push(stdoutText.end()), ...lines.end()]) onEvent(line);
+					record(stderrText.end());
+				};
 				waitForChildExit(child).then(
-					({ code }) =>
-						end(
-							stopRequested ? "stopped" : code === 0 ? "completed" : "failed",
-							code !== null && code !== 0 ? `exit code ${code}` : undefined,
-						),
-					(error: Error) => end("failed", error.message),
+					({ code }) => {
+						drain();
+						end(stopRequested ? "stopped" : code === 0 ? "completed" : "failed", code !== null && code !== 0 ? `exit code ${code}` : undefined);
+					},
+					(error: Error) => {
+						drain();
+						end("failed", error.message);
+					},
 				);
 				stop = () => {
 					stopRequested = true;
@@ -475,7 +592,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				description: params.description,
 				status,
 				startedAt: Date.now(),
-				output: () => stored,
+				output: () => (overflowed && !task.logPath ? `${SPOOL_LOST_NOTE}${stored}` : stored || (task.status === "running" ? "" : MONITOR_EMPTY_OUTPUT)),
 				stop,
 				finished,
 			};
@@ -502,7 +619,11 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				} finally {
 					unhook();
 				}
-				const output = persistIfLarge(stored.trim() || "(no events)", { dir: sessionResultsDir(ctx), id: `monitor-${id}` });
+				// Past the in-memory cap the spool holds every line: point at it rather
+				// than persist the tail. Without one, say what was lost.
+				const spooled = overflowed && task.logPath ? spoolBlock(task.logPath) : undefined;
+				const kept = overflowed && !spooled ? `${SPOOL_LOST_NOTE}${stored.trim()}` : stored.trim() || "(no events)";
+				const output = spooled ?? persistIfLarge(kept, { dir: sessionResultsDir(ctx), id: `monitor-${id}` });
 				const finalStatus = task.status;
 				let how: string = finalStatus;
 				if (finalStatus === "stopped") {
@@ -575,7 +696,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 
 			updateWidget();
 			const header = formatTaskLine(task);
-			const body = tail(task.output(), OUTPUT_CAP) || "(no output yet)";
+			const body = taskOutputBody(task, ctx) || "(no output yet)";
 			// The model now holds a finished task's output: a completion notification
 			// still waiting to go out for it is redundant (lib/notifications.ts).
 			if (task.status !== "running") pi.events.emit(TASK_OUTPUT_DELIVERED_CHANNEL, { taskId: task.id } satisfies TaskOutputDelivered);
