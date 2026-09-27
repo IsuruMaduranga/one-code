@@ -39,6 +39,15 @@ describe("keptTailOf (C6)", () => {
 		).toBeUndefined();
 	});
 
+	it("makes no claim on Google when a kept tool result carries an image", () => {
+		const image = { role: "toolResult", toolName: "read", content: [{ type: "image", data: "AA==", mimeType: "image/png" }] };
+		const captured = [user("a"), assistant(), assistant(), image, user("b")];
+		const prep = { messagesToSummarize: captured.slice(0, 2) as never, turnPrefixMessages: [], isSplitTurn: false, previousSummary: undefined };
+		expect(keptTailOf(captured, prep, "google-generative-ai")).toBeUndefined();
+		// Anthropic keeps an image inside its tool result: the count stands.
+		expect(keptTailOf(captured, prep, "anthropic-messages")?.count).toBe(3);
+	});
+
 	it("shortens a long opening to a single 80-character line", () => {
 		const long = `${"word ".repeat(40)}\nsecond line`;
 		const captured = [user("a"), assistant(), user(long)];

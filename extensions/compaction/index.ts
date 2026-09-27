@@ -346,6 +346,7 @@ const instructionMessage = (instruction: string): Message => ({ role: "user", co
  * the kept-tail note counts such a run once.
  */
 const MERGES_TOOL_RESULTS = new Set(["anthropic-messages", "bedrock-converse-stream", "google-generative-ai", "google-vertex"]);
+const GOOGLE_APIS = new Set(["google-generative-ai", "google-vertex"]);
 
 type TailMessage = { role: string; content?: unknown; toolName?: unknown };
 
@@ -379,6 +380,10 @@ export function keptTailOf(
 	}
 	const tail = captured.slice(doomed.length);
 	if (tail.length === 0) return { count: 0 };
+	// On Google a tool result's image can become a user message of its own,
+	// depending on the model: the count cannot be known, so no note.
+	const imageResult = tail.some((m) => m.role === "toolResult" && Array.isArray(m.content) && (m.content as { type?: string }[]).some((b) => b?.type === "image"));
+	if (imageResult && api !== undefined && GOOGLE_APIS.has(api)) return undefined;
 	const merges = api !== undefined && MERGES_TOOL_RESULTS.has(api);
 	const count = tail.filter((m, i) => !(merges && m.role === "toolResult" && tail[i - 1]?.role === "toolResult")).length;
 	return { count, landmark: landmarkOf(tail[0]) };
