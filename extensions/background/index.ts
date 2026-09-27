@@ -90,7 +90,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, formatNotOwner } from "../lib/agent-cron.ts";
 import { SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../lib/skill-body.ts";
 import { BUNDLED_SKILLS_DIR } from "../lib/skill-scan.ts";
-import { createWriteStream, mkdirSync, type WriteStream } from "node:fs";
+import { createWriteStream, mkdirSync, readFileSync, type WriteStream } from "node:fs";
 import { join, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { SESSION_WORK_CHANNEL, sessionBackgroundTask, sessionCron, type SessionWorkQuery } from "../lib/session-work.ts";
@@ -127,6 +127,15 @@ function monitorLogPath(ctx: ExtensionContext, taskId: string): string | undefin
 		const dir = join(ctx.sessionManager.getSessionDir(), "monitor", taskId);
 		mkdirSync(dir, { recursive: true });
 		return join(dir, "output.log");
+	} catch {
+		return undefined;
+	}
+}
+
+/** A finished monitor's spool, or undefined when it cannot be read (the caller falls back to the in-memory tail). */
+function readSpool(path: string): string | undefined {
+	try {
+		return readFileSync(path, "utf-8");
 	} catch {
 		return undefined;
 	}
@@ -369,18 +378,25 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 			let stored = "";
 			// The whole stream, spooled like a background shell's, so the batches'
 			// "task_output has the full stream" and task_output's clip header point
-			// at something true. Opened on the first output; a one-shot monitor
-			// returns everything in its result instead.
+			// at something true, and a one-shot result past the in-memory cap can
+			// still persist every line. Opened on the first output.
 			let log: WriteStream | undefined;
+			let spoolFailed = false;
+			let overflowed = false;
 			const record = (text: string) => {
+				if (stored.length + text.length > STORED_OUTPUT_CAP) overflowed = true;
 				stored = tail(`${stored}${text}`, STORED_OUTPUT_CAP);
-				if (oneShot || !text) return;
+				if (!text || spoolFailed) return;
 				if (!log) {
 					const path = monitorLogPath(ctx, id);
 					if (!path) return;
 					log = createWriteStream(path, { flags: "a" });
 					log.on("error", () => {
-						// Best-effort, as bash's spool: the in-memory tail stays authoritative.
+						// Best-effort, as bash's spool: the in-memory tail stays
+						// authoritative, and nothing names a missing or partial file as
+						// the full output any more.
+						spoolFailed = true;
+						task.logPath = undefined;
 					});
 					task.logPath = path;
 				}
@@ -435,13 +451,18 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 					// `finished` resolves once the spool is on disk, so a blocking
 					// task_output never names a log still being written. `close` follows
 					// a clean end and an error alike; the timer covers a stream that hangs.
-					const fallback = setTimeout(finish, 1_000);
-					fallback.unref?.();
-					log.once("close", () => {
-						clearTimeout(fallback);
+					if (log.closed) {
+						// A failed spool has already closed.
 						finish();
-					});
-					log.end();
+					} else {
+						const fallback = setTimeout(finish, 1_000);
+						fallback.unref?.();
+						log.once("close", () => {
+							clearTimeout(fallback);
+							finish();
+						});
+						log.end();
+					}
 				} else {
 					finish();
 				}
@@ -579,7 +600,9 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				} finally {
 					unhook();
 				}
-				const output = persistIfLarge(stored.trim() || "(no events)", { dir: sessionResultsDir(ctx), id: `monitor-${id}` });
+				// Past the in-memory cap the spool holds every line; persist that, not the tail.
+				const full = overflowed && task.logPath ? readSpool(task.logPath) : undefined;
+				const output = persistIfLarge((full ?? stored).trim() || "(no events)", { dir: sessionResultsDir(ctx), id: `monitor-${id}` });
 				const finalStatus = task.status;
 				let how: string = finalStatus;
 				if (finalStatus === "stopped") {

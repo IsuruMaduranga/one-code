@@ -15,6 +15,17 @@ vi.mock("node:crypto", async (importOriginal) => {
 	let n = 0;
 	return { ...actual, randomUUID: () => `${(++n).toString(16).padStart(8, "0")}-0000-4000-8000-000000000000` };
 });
+// A monitor spool whose write stream fails: the open targets a directory that does not exist.
+const spool = vi.hoisted(() => ({ fail: false }));
+vi.mock("node:fs", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("node:fs")>();
+	const { dirname, join } = await import("node:path");
+	return {
+		...actual,
+		createWriteStream: ((path: string, options?: unknown) =>
+			actual.createWriteStream(spool.fail ? join(dirname(path), "missing", "output.log") : path, options as never)) as typeof actual.createWriteStream,
+	};
+});
 import backgroundExtension from "../../extensions/background/index.ts";
 import { MONITOR_BATCH_MAX_LINES } from "../../extensions/background/monitor-batch.ts";
 import { TASK_REGISTER_CHANNEL } from "../../extensions/background/registry.ts";
@@ -711,6 +722,61 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 			const spooled = readFileSync(logPath, "utf8");
 			expect(spooled.startsWith("line-1-padding-padding\n")).toBe(true);
 			expect(spooled).toContain("line-4000-padding-padding\n");
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("a monitor whose spool fails names no spool file and persists its output instead", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "monitor-spool-fail-"));
+		spool.fail = true;
+		try {
+			const fake = mount();
+			const ctx = liveSessionCtx({ sessionManager: { getSessionDir: () => dir } });
+			const start = (await fake.tools.get("monitor")!.execute(
+				"c1",
+				{ command: "for i in $(seq 1 4000); do echo line-$i-padding-padding; done", description: "long" },
+				undefined,
+				undefined,
+				ctx,
+			)) as { details: { taskId: string } };
+			const out = (await fake.tools.get("task_output")!.execute("c2", { task_id: start.details.taskId, block: true, timeout: 5000 }, undefined, undefined, ctx)) as {
+				content: Array<{ text: string }>;
+				details: { logPath?: string };
+			};
+			expect(out.details.logPath).toBeUndefined();
+			const text = out.content[0].text;
+			expect(text).not.toContain("Full output: ");
+			const file = text.match(/Full output saved to: (\S+)/)?.[1];
+			expect(file).toBeDefined();
+			const saved = readFileSync(file!, "utf8");
+			expect(saved.startsWith("line-1-padding-padding\n")).toBe(true);
+			expect(saved).toContain("line-4000-padding-padding");
+		} finally {
+			spool.fail = false;
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("a one-shot monitor past the in-memory cap persists every line from its spool", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "monitor-oneshot-spool-"));
+		try {
+			const fake = mount();
+			const result = (await fake.tools.get("monitor")!.execute(
+				"c1",
+				{ command: "for i in $(seq 1 12000); do echo line-$i-padding-padding-padding; done", description: "long" },
+				undefined,
+				undefined,
+				createFakeCtx({ mode: "print", sessionManager: { getSessionDir: () => dir } }),
+			)) as { content: Array<{ text: string }> };
+			const text = result.content[0].text;
+			expect(text).toContain("completed after 12000 event(s)");
+			const file = text.match(/Full output saved to: (\S+)/)?.[1];
+			expect(file).toBeDefined();
+			const saved = readFileSync(file!, "utf8");
+			expect(saved.startsWith("line-1-padding-padding-padding\n")).toBe(true);
+			expect(saved).toContain("line-12000-padding-padding-padding");
+			expect(saved).not.toContain("earlier output truncated");
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
