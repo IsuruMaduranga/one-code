@@ -13,7 +13,7 @@
  */
 import { execFile, spawn } from "node:child_process";
 import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { detachedSpawnOptions, EXIT_STDIO_MAX_MS, killProcessTree, stopProcessTree, waitForChildExit } from "../../extensions/lib/process-tree.ts";
 import { bashSpawnOrThrow } from "../../extensions/lib/shell-spawn.ts";
 
@@ -119,6 +119,20 @@ describe("stopProcessTree", () => {
 	};
 	/** A group whose leader dies on TERM while a member it forked ignores TERM (the `bash -c` wrapper around a dev server). */
 	const leaderDiesMemberResists = `sh -c 'trap "" TERM; while :; do sleep 0.2; done' & wait`;
+
+	it.skipIf(win32)("schedules the SIGKILL of a new child that reuses a pending child's pid", async () => {
+		// A pid no system hands out, so the group kill fails with ESRCH and falls
+		// back to each fake child's own kill(): nothing real is signalled.
+		const pid = 2_147_483_000;
+		const fake = () => ({ pid, kill: vi.fn() }) as unknown as ReturnType<typeof spawn>;
+		const first = fake();
+		const second = fake();
+		stopProcessTree(first, 30);
+		stopProcessTree(second, 30);
+		await new Promise((r) => setTimeout(r, 120));
+		expect(first.kill).toHaveBeenCalledWith("SIGKILL");
+		expect(second.kill).toHaveBeenCalledWith("SIGKILL");
+	});
 
 	it.skipIf(win32)("SIGKILLs the group after the grace even when the leader died on SIGTERM and a member did not (A3-M1)", async () => {
 		const child = spawn(bash.shell, ["-c", leaderDiesMemberResists], { ...detachedSpawnOptions(), stdio: "ignore" });

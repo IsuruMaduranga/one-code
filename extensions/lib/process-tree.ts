@@ -102,16 +102,18 @@ export function killProcessTree(child: ChildProcess, signal: NodeJS.Signals = "S
 }
 
 /**
- * Trees sent SIGTERM whose SIGKILL has not run yet, by pid. Per module
- * instance on purpose (each extension force-kills its own children); one
- * `exit` listener per instance, installed on first use.
+ * Trees sent SIGTERM whose SIGKILL has not run yet. Keyed by the child, not
+ * its pid, so a pid the OS hands to a new child during the grace does not
+ * make that child look already scheduled. Per module instance on purpose
+ * (each extension force-kills its own children); one `exit` listener per
+ * instance, installed on first use.
  */
-const pendingKills = new Map<number, ChildProcess>();
+const pendingKills = new Set<ChildProcess>();
 let exitHookInstalled = false;
 
 /** The process is exiting: the grace timers will never fire, so force-kill every tree still pending. */
 function killPendingAtExit(): void {
-	for (const child of pendingKills.values()) killProcessTree(child, "SIGKILL");
+	for (const child of pendingKills) killProcessTree(child, "SIGKILL");
 	pendingKills.clear();
 }
 
@@ -126,16 +128,14 @@ export function stopProcessTree(child: ChildProcess, graceMs: number): void {
 	killProcessTree(child, "SIGTERM");
 	// taskkill /F is already forceful; there is no gentler first signal to grace.
 	if (process.platform === "win32") return;
-	const pid = child.pid;
-	if (pid == null || pendingKills.has(pid)) return;
-	pendingKills.set(pid, child);
+	if (child.pid == null || pendingKills.has(child)) return;
+	pendingKills.add(child);
 	if (!exitHookInstalled) {
 		exitHookInstalled = true;
 		process.on("exit", killPendingAtExit);
 	}
 	const timer = setTimeout(() => {
-		if (pendingKills.get(pid) !== child) return;
-		pendingKills.delete(pid);
+		if (!pendingKills.delete(child)) return;
 		killProcessTree(child, "SIGKILL");
 	}, graceMs);
 	timer.unref?.();
