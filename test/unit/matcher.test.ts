@@ -39,6 +39,7 @@ describe("normalizeToolName", () => {
 		expect(normalizeToolName("Bash")).toBe("bash");
 		expect(normalizeToolName("Glob")).toBe("find");
 		expect(normalizeToolName("NotebookEdit")).toBe("notebook_edit");
+		expect(normalizeToolName("Artifact")).toBe("artifact");
 		expect(normalizeToolName("WebFetch")).toBe("web_fetch");
 		expect(normalizeToolName("Task")).toBe("Agent");
 	});

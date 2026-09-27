@@ -1,25 +1,16 @@
 /**
- * Open a URL in the user's default browser (no dependency — platform command).
- *
- * Detached and unref'd so the auth flow never blocks on the browser process,
- * and errors are swallowed to a boolean: a headless box has no browser, in which
- * case the caller falls back to printing the URL for manual paste.
+ * Open a sign-in URL in the user's default browser (`lib/open-browser.ts`),
+ * falling back to printing the URL for manual paste when no browser starts.
  *
  * The authorization URL is the server's choice (its metadata names the
- * endpoint, the SDK appends `&`-joined parameters), so two things hold for
- * every URL opened here. Only `https:`, or `http:` on a loopback host, is
- * opened: `open` and `xdg-open` hand any other scheme (`file:`, a custom
- * handler) to whatever the desktop registered for it. And on Windows the URL
- * never passes through `cmd.exe`: `cmd /c start "" <url>` cut the URL at its
- * first `&`, breaking every sign-in, and handed the rest to cmd's parser as
- * further commands. `rundll32 url.dll,FileProtocolHandler` takes the URL as
- * one argument, by its System32 path so no PATH entry can stand in for it.
+ * endpoint, the SDK appends `&`-joined parameters), so only `https:`, or
+ * `http:` on a loopback host, is opened: `open` and `xdg-open` hand any other
+ * scheme (`file:`, a custom handler) to whatever the desktop registered for it.
  */
 
-import { spawn } from "node:child_process";
-import { system32Path } from "../../lib/paths.ts";
+import { launchOpener, type OpenerPlan, openerPlan } from "../../lib/open-browser.ts";
 
-export type BrowserPlan = { command: string; args: string[] } | { refused: string };
+export type BrowserPlan = OpenerPlan | { refused: string };
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
@@ -40,9 +31,7 @@ export function refuseAuthorizationUrl(url: string): string | undefined {
 export function browserOpenPlan(url: string, platform: NodeJS.Platform = process.platform, env: Record<string, string | undefined> = process.env): BrowserPlan {
 	const refused = refuseAuthorizationUrl(url);
 	if (refused) return { refused };
-	if (platform === "darwin") return { command: "open", args: [url] };
-	if (platform === "win32") return { command: system32Path("rundll32.exe", env), args: ["url.dll,FileProtocolHandler", url] };
-	return { command: "xdg-open", args: [url] };
+	return openerPlan(url, platform, env);
 }
 
 /**
@@ -53,12 +42,5 @@ export function browserOpenPlan(url: string, platform: NodeJS.Platform = process
 export function openBrowser(url: string): boolean {
 	const plan = browserOpenPlan(url);
 	if ("refused" in plan) throw new Error(`refusing to open the authorization URL: ${plan.refused}`);
-	try {
-		const child = spawn(plan.command, plan.args, { stdio: "ignore", detached: true });
-		child.on("error", () => {});
-		child.unref();
-		return true;
-	} catch {
-		return false;
-	}
+	return launchOpener(plan);
 }

@@ -51,9 +51,13 @@ so nothing surprises you.
 ## Tools that are not provided
 
 These Claude Code tools depend on Anthropic-hosted or desktop services and
-have no equivalent here: `Artifact`, `ReportFindings`,
-`ShareOnboardingGuide`, `PushNotification`, `RemoteTrigger`, `DesignSync`,
-`EndConversation`, and `SendFeedback`. Scheduling within a session is
+have no equivalent here: `ReportFindings`, `ShareOnboardingGuide`,
+`PushNotification`, `RemoteTrigger`, `DesignSync`, `EndConversation`, and
+`SendFeedback`. `Artifact` is local: One Code saves the page on your
+machine and opens it in your browser instead of publishing it to claude.ai.
+The page has no runtime capabilities (no shared data, comments, or calls
+back to the model), and there are no artifact types such as slide decks.
+See [Artifacts](tools.md#artifacts). Scheduling within a session is
 available through the cron tools, `/loop`, and `schedule_wakeup`;
 scheduled cloud sessions aren't.
 
@@ -70,10 +74,11 @@ available through the `commit-commands` plugin when installed.
 
 ## Skills that are not bundled
 
-One Code bundles five of Claude Code's built-in skills: `loop`, `simplify`,
-`code-review`, `security-review`, and `fewer-permission-prompts`. It does
-not bundle the skills that need Claude Code's hosted or desktop surfaces
-(`design`, `dataviz`, the `artifact-*` guides, and the publishers), the
+One Code bundles six of Claude Code's built-in skills: `loop`, `simplify`,
+`code-review`, `security-review`, `fewer-permission-prompts`, and
+`artifact-design` (adapted to local artifacts). It does not bundle the skills
+that need Claude Code's hosted or desktop surfaces (`design`, `dataviz`,
+`artifact-capabilities`, `artifact-diagramming`, and the publishers), the
 account and desktop skills (`update-config`, `keybindings-help`,
 `claude-in-chrome`, `debug`, `usage`, `schedule`, `batch`,
 `claude-code-guide`), the run-skill generators, or the `claude-api`

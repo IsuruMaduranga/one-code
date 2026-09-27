@@ -40,6 +40,7 @@ const CC_TOOL_NAMES: Record<string, string> = {
 	glob: "find",
 	find: "find",
 	ls: "ls",
+	artifact: "artifact",
 	notebookedit: "notebook_edit",
 	notebook_edit: "notebook_edit",
 	webfetch: "web_fetch",
