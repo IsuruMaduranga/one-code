@@ -1302,7 +1302,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			}) as never,
 			async execute(_toolCallId: string, params: unknown, signal?: AbortSignal) {
 				const ctx = lastCtx;
-				const p = (params ?? {}) as { subagent_type?: unknown; task?: unknown; prompt?: unknown; name?: unknown };
+				const p = (params ?? {}) as { subagent_type?: unknown; task?: unknown; prompt?: unknown; name?: unknown; description?: unknown };
+				const description = typeof p.description === "string" && p.description.trim() ? p.description.trim() : undefined;
 				const agentName = typeof p.subagent_type === "string" ? p.subagent_type : "";
 				const taskInput = typeof p.task === "string" ? p.task : typeof p.prompt === "string" ? p.prompt : "";
 				const task = taskInput.trim();
@@ -1345,6 +1346,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					model: resolved,
 					thinking: undefined,
 					depth: parentDepth + 1,
+					...(description ? { description } : {}),
 				};
 				registry.add(record); // SendMessage from main can reach the nested run too
 
@@ -1380,6 +1382,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 							agent: agentDef.name,
 							task,
 							name,
+							description,
 							model: resolved,
 							fallbackModel: spawnFallbackModel(resolved, resolution.source, ctx.model),
 						},
@@ -2579,6 +2582,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		let selected = 0;
 		// Rebuilt when a run or shell changes, not per frame or keystroke.
 		let snapshot = build();
+		// The rows on screen: keys act on what the user sees, even when a change
+		// has rebuilt the snapshot and its render is still pending.
+		let shown = tasksItems(snapshot);
 		const chosen = await ctx.ui.custom<TasksItem | null>((tui, theme, _keybindings, done) => {
 			const paint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme) };
 			const refresh = () => {
@@ -2594,12 +2600,13 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			};
 			return {
 				render: (width: number) => {
-					selected = Math.max(0, Math.min(selected, tasksItems(snapshot).length - 1));
+					shown = tasksItems(snapshot);
+					selected = Math.max(0, Math.min(selected, shown.length - 1));
 					return ["", ...renderTasksDialog({ ...snapshot, selected, width }, paint), ""].map((line) => truncateLine(line, width));
 				},
 				handleInput: (data: string) => {
 					if (isKeyRelease(data)) return;
-					const items = tasksItems(snapshot);
+					const items = shown;
 					const id = keyId(data);
 					if (id === "escape") return finish(null);
 					if (id === "up" || id === "down") {
