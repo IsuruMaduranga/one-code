@@ -25,6 +25,7 @@
 
 import { randomUUID } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { uptime } from "node:os";
 import { basename, extname, join, posix, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { readJsonFile, writeTextAtomic } from "../lib/atomic-write.ts";
@@ -211,10 +212,20 @@ export function publishArtifact(root: string, input: PublishInput): PublishResul
 		found = getArtifact(root, input.id);
 		if (!found) throw new Error(`No artifact has the id "${input.id}". Run the artifact tool with action "list" to see the ids.`);
 	} else {
+		// The lookup and a creation are one step under a store-wide lock, so two
+		// first publishes of one file cannot both miss and make two artifacts.
 		const key = comparablePath(sourcePath);
-		found = listArtifacts(root).find((meta) => comparablePath(meta.sourcePath) === key);
+		mkdirSync(root, { recursive: true });
+		const outcome = withLock(join(root, ".create-lock"), "Another session is creating an artifact. Publish again in a moment.", () => {
+			const match = listArtifacts(root).find((meta) => comparablePath(meta.sourcePath) === key);
+			return match ? { match } : { created: createArtifact(root, input, sourcePath) };
+		});
+		if (outcome.created) {
+			writeGallery(root);
+			return outcome.created;
+		}
+		found = outcome.match;
 	}
-	if (!found) return createArtifact(root, input, sourcePath);
 	const id = found.id;
 	// Re-read under the lock: another session may have published a version since.
 	const result = withLock(join(root, id, ".lock"), `Another session is publishing the artifact "${id}". Publish again in a moment.`, (held) => {
@@ -245,7 +256,6 @@ function createArtifact(root: string, input: PublishInput, sourcePath: string): 
 		rmSync(join(root, id), { recursive: true, force: true });
 		throw error;
 	}
-	writeGallery(root);
 	return { meta, created: true };
 }
 
@@ -382,13 +392,20 @@ function processAlive(pid: number): boolean {
 
 /**
  * Whether the lock at `lock` was left by a holder that can no longer act on
- * it: its owner process has exited, or it is this process (a lock body is
+ * it: it predates this boot (its pid may name an unrelated process now), its
+ * owner process has exited, or it is this process (a lock body is
  * synchronous, so this process cannot be inside one while it asks), or it has
  * had no owner for 30 s. A lock whose owner is alive is never taken, however
  * old: a paused holder resumes into its commit, and no check before a rename
  * could fence it.
  */
 function lockAbandoned(lock: string): boolean {
+	// A lock from before this boot is abandoned whatever its pid now names.
+	try {
+		if (statSync(lock).mtimeMs < Date.now() - uptime() * 1000) return true;
+	} catch {
+		return false; // released meanwhile
+	}
 	let token: string;
 	try {
 		token = readFileSync(join(lock, "owner"), "utf-8");
@@ -451,12 +468,19 @@ export function withLock<T>(lock: string, busy: string, fn: (held: () => boolean
 	}
 }
 
-/** Remove an artifact and every version of it. False when there was nothing to remove. */
+/**
+ * Remove an artifact and every version of it, under its publish lock so a
+ * publish in flight finishes first. False when there was nothing to remove.
+ */
 export function deleteArtifact(root: string, id: string): boolean {
 	if (!getArtifact(root, id)) return false;
-	rmSync(join(root, id), { recursive: true, force: true });
-	writeGallery(root);
-	return true;
+	const removed = withLock(join(root, id, ".lock"), `Another session is publishing the artifact "${id}". Delete it again in a moment.`, () => {
+		if (!getArtifact(root, id)) return false;
+		rmSync(join(root, id), { recursive: true, force: true });
+		return true;
+	});
+	if (removed) writeGallery(root);
+	return removed;
 }
 
 /**

@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, uptime } from "node:os";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -144,13 +144,27 @@ describe("publishArtifact", () => {
 		mkdirSync(lock);
 		writeFileSync(join(lock, "owner"), `${dead}-gone`);
 		expect(withLock(lock, "busy", () => "ran")).toBe("ran");
-		// The parent process is alive: its lock is waited on, then refused, however old.
+		// The parent process is alive: its lock is waited on, then refused, however
+		// old within this boot.
 		mkdirSync(lock);
 		writeFileSync(join(lock, "owner"), `${process.ppid}-alive`);
-		const old = new Date(Date.now() - 3_600_000);
-		utimesSync(lock, old, old);
+		const sameBoot = new Date(Date.now() - Math.min(60_000, uptime() * 500));
+		utimesSync(lock, sameBoot, sameBoot);
 		expect(() => withLock(lock, "busy", () => "ran", 100)).toThrow(LockBusyError);
 		expect(readFileSync(join(lock, "owner"), "utf-8")).toBe(`${process.ppid}-alive`);
+		// From before this boot, the same pid names some other process: reclaimed.
+		const preBoot = new Date(Date.now() - (uptime() + 3_600) * 1000);
+		utimesSync(lock, preBoot, preBoot);
+		expect(withLock(lock, "busy", () => "ran", 100)).toBe("ran");
+	});
+
+	it("deletes past a lock its crashed owner left behind", () => {
+		const { meta } = publish("a.html", page("Orphaned"));
+		const dead = spawnSync(process.execPath, ["-e", ""]).pid;
+		mkdirSync(join(root, meta.id, ".lock"));
+		writeFileSync(join(root, meta.id, ".lock", "owner"), `${dead}-gone`);
+		expect(deleteArtifact(root, meta.id)).toBe(true);
+		expect(existsSync(join(root, meta.id))).toBe(false);
 	});
 
 	it("takes over a lock a crashed session left behind", () => {
