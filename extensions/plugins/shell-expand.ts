@@ -21,7 +21,8 @@ import { shellQuote } from "../lib/shell-quote.ts";
 import { splitShellPlaceholders, substituteArguments } from "./template.ts";
 
 export const SHELL_TIMEOUT_MS = 30_000;
-const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
+/** A placeholder output past this many characters stops being collected, and says so. */
+const MAX_OUTPUT_CHARS = 2 * 1024 * 1024;
 
 /**
  * Run one placeholder command in bash and return its stdout (stderr when
@@ -31,7 +32,7 @@ const MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 export async function runPlaceholderCommand(
 	command: string,
 	cwd: string,
-	opts: { spec?: ShellSpawn; timeoutMs?: number } = {},
+	opts: { spec?: ShellSpawn; timeoutMs?: number; maxOutputChars?: number } = {},
 ): Promise<string> {
 	const spec = opts.spec ?? bashSpawn().spawn;
 	if (!spec) return `command failed: ${bashSpawn().error ?? "no bash shell found"}`;
@@ -41,12 +42,15 @@ export async function runPlaceholderCommand(
 	} catch (error) {
 		return `command failed: ${error instanceof Error ? error.message : String(error)}`;
 	}
+	const maxChars = opts.maxOutputChars ?? MAX_OUTPUT_CHARS;
 	let stdout = "";
 	let stderr = "";
+	const cut = { stdout: false, stderr: false };
 	const capture = (sink: "stdout" | "stderr") => (chunk: string) => {
 		const current = sink === "stdout" ? stdout : stderr;
-		if (current.length >= MAX_OUTPUT_BYTES) return;
-		const next = current + chunk.slice(0, MAX_OUTPUT_BYTES - current.length);
+		if (current.length + chunk.length > maxChars) cut[sink] = true;
+		if (current.length >= maxChars) return;
+		const next = current + chunk.slice(0, maxChars - current.length);
 		if (sink === "stdout") stdout = next;
 		else stderr = next;
 	};
@@ -68,7 +72,9 @@ export async function runPlaceholderCommand(
 	} finally {
 		clearTimeout(timer);
 	}
-	const text = (stdout || stderr).trim();
+	// The model must know an output is incomplete (a `git diff` cut mid-file).
+	const shown = stdout ? "stdout" : "stderr";
+	const text = `${(stdout || stderr).trim()}${cut[shown] ? `\n[output cut after ${maxChars} characters]` : ""}`;
 	if (timedOut) return `${text ? `${text}\n` : ""}command timed out after ${Math.round(timeoutMs / 1000)} seconds`;
 	return text;
 }

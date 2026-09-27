@@ -44,6 +44,11 @@ describe("runPlaceholderCommand", () => {
 		expect(await runPlaceholderCommand("echo $BASH_VERSION | cut -c1", cwd)).toMatch(/^\d$/);
 	});
 
+	it("says when an output was cut at the collection cap", async () => {
+		expect(await runPlaceholderCommand("printf 'abcdefghij'", cwd, { maxOutputChars: 4 })).toBe("abcd\n[output cut after 4 characters]");
+		expect(await runPlaceholderCommand("printf 'abcd'", cwd, { maxOutputChars: 4 })).toBe("abcd");
+	});
+
 	it("returns the error text for a failing command and stops at the timeout", async () => {
 		if (process.platform === "win32") return;
 		expect(await runPlaceholderCommand("echo oops >&2; exit 3", cwd)).toBe("oops");
