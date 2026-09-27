@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterAll, describe, expect, it } from "vitest";
 import { exchangeMessages } from "../../extensions/btw/prompt.ts";
-import { BTW_FORK_CHANNEL, btwForkedLine, btwForkName, btwForkReminder, type BtwForkRequest, requestBtwFork } from "../../extensions/lib/btw-fork.ts";
+import { BTW_FORK_CHANNEL, btwForkedLine, btwForkName, btwForkRecord, btwForkTaskId, type BtwForkRequest, requestBtwFork } from "../../extensions/lib/btw-fork.ts";
 import { newChildSessionManager } from "../../extensions/subagents/runner.ts";
 
 function bus() {
@@ -61,12 +61,18 @@ describe("btwForkedLine", () => {
 	});
 });
 
-describe("btwForkReminder", () => {
-	it("tells the main conversation which question the fork answers", () => {
-		const text = btwForkReminder("fork-1", "abcd1234", 'what is "x"?');
-		expect(text).toContain("background agent fork-1 (task abcd1234)");
-		expect(text).toContain('"what is \\"x\\"?"');
-		expect(text).toContain("not a task you delegated");
+describe("btwForkRecord", () => {
+	it("is Claude Code's /btw breadcrumb and forked line, with no caveat (findings §40)", () => {
+		expect(btwForkRecord("what-word-is", "awhat-word-is-477c2d9e80467f14", " what word is in the file? ")).toEqual([
+			"<command-name>/btw</command-name>\n            <command-message>btw</command-message>\n            <command-args>what word is in the file?</command-args>\n",
+			"<local-command-stdout>\u2442 forked what-word-is (7f14)</local-command-stdout>\n",
+		]);
+	});
+});
+
+describe("btwForkTaskId", () => {
+	it("is a<name>-<16 hex>", () => {
+		expect(btwForkTaskId("what-word-is")).toMatch(/^awhat-word-is-[0-9a-f]{16}$/);
 	});
 });
 

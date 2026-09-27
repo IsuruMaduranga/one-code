@@ -10,6 +10,7 @@ import { cutPlainText as cut, formatDuration, splitCell, splitRow, visibleWidth,
 import { formatTokenCount } from "./usage.ts";
 import { sanitizeDisplayText } from "../lib/terminal-text.ts";
 import { type LiveRun, type LiveStatus, streamingText, type TranscriptBlock } from "./live-runs.ts";
+import { FORK_AGENT } from "./runs.ts";
 
 export interface Paint {
 	fg(color: string, text: string): string;
@@ -31,27 +32,33 @@ export interface PanelRow {
 }
 
 /**
- * A finished run stays in the strip this long (its "Completed"/"Failed" beat),
- * then drops out — Claude Code's tree only tracks live work. The run itself
- * stays in the registry: the viewer, /agents, and SendMessage still reach it.
+ * How long the strip says `/tasks to see subagents` after a run it was showing
+ * finishes. Claude Code 2.1.283 drops a finished agent from the strip at once
+ * and shows that hint in the footer for a few seconds (findings §40); the run
+ * stays in the registry, where `/tasks`, `/agents` and SendMessage reach it.
  */
 export const STRIP_LINGER_MS = 5000;
+
+/** The strip's short notice after a run leaves it. */
+export const TASKS_NOTICE = "/tasks to see subagents";
+
+/** A row's left label: a fork's name, any other agent's type (Claude Code's strip). */
+export function rowLabel(run: Pick<LiveRun, "agentType" | "name">): string {
+	return run.agentType === FORK_AGENT ? run.name : run.agentType;
+}
 
 /**
  * Build the row list: `main` first, then the live children as a TREE — roots
  * newest-first, each root followed by its nested spawns (a child's own Agent
  * calls) in spawn order, indented one level (CC's `└` rows). `mainBusy` drives
- * main's dot. Running children always show; settled ones — done, failed, or an
- * idle resident whose turn ended — only within STRIP_LINGER_MS of finishing
- * (finishedAt is stamped by finish() AND settle()). A nested run whose parent
- * already left the strip surfaces at root level rather than vanishing.
- *
- * `pinnedId` keeps one settled run in the strip past its linger window — the
- * run whose transcript is currently open. Without it a finished child drops out
- * from under an open viewer, the strip empties, and the panel clears focus,
- * orphaning the overlay (no key then reaches read mode to close it).
+ * main's dot. Running children always show; a settled one (done, failed, or
+ * an idle resident whose turn ended) leaves at once, as in Claude Code, unless
+ * it is `pinnedId`: the run whose transcript is open stays, shown `idle`, until
+ * the user switches back (findings §40). Without the pin a finished child
+ * would drop out from under an open viewer and orphan the overlay. A nested
+ * run whose parent already left the strip surfaces at root level.
  */
-export function buildRows(runs: LiveRun[], mainBusy: boolean, now: number, pinnedId?: string): PanelRow[] {
+export function buildRows(runs: LiveRun[], mainBusy: boolean, pinnedId?: string): PanelRow[] {
 	const rows: PanelRow[] = [
 		{
 			label: "main",
@@ -62,9 +69,7 @@ export function buildRows(runs: LiveRun[], mainBusy: boolean, now: number, pinne
 		},
 	];
 	// `runs` arrives newest-first; children under a parent read best in spawn order.
-	const visible = runs.filter(
-		(run) => run.status === "running" || run.taskId === pinnedId || (run.finishedAt ?? now) > now - STRIP_LINGER_MS,
-	);
+	const visible = runs.filter((run) => run.status === "running" || run.taskId === pinnedId);
 	const visibleIds = new Set(visible.map((run) => run.taskId));
 	const byParent = new Map<string, LiveRun[]>();
 	const roots: LiveRun[] = [];
@@ -80,8 +85,8 @@ export function buildRows(runs: LiveRun[], mainBusy: boolean, now: number, pinne
 	const emit = (run: LiveRun, depth: number) => {
 		rows.push({
 			run,
-			label: run.agentType,
-			activity: run.activity,
+			label: rowLabel(run),
+			activity: run.label,
 			status: run.status,
 			startedAt: run.startedAt,
 			finishedAt: run.finishedAt,
@@ -95,18 +100,14 @@ export function buildRows(runs: LiveRun[], mainBusy: boolean, now: number, pinne
 }
 
 /**
- * The agent taskId after `taskId` in strip order, wrapping to the first and
- * skipping the synthetic `main` row; undefined when there are no agent rows.
- * Tab-to-next-agent in read mode uses this against the FULL row list, anchored
- * to the viewed run — not the windowed strip selection, which `anchor()` can
- * reassign once the viewed run scrolls past MAX_STRIP_ROWS (else Tab/x would
- * act on the wrong agent).
+ * Whether the strip should say `/tasks to see subagents`: a run spawned by
+ * main left it within the last STRIP_LINGER_MS (it settled and is not the
+ * viewed one).
  */
-export function nextAgentTaskId(rows: PanelRow[], taskId: string | undefined): string | undefined {
-	const ids = rows.filter((row) => row.run).map((row) => row.run!.taskId);
-	if (ids.length === 0) return undefined;
-	const at = taskId ? ids.indexOf(taskId) : -1;
-	return ids[(at + 1) % ids.length];
+export function recentlyLeftStrip(runs: LiveRun[], now: number, pinnedId?: string): boolean {
+	return runs.some(
+		(run) => run.depth === 0 && run.status !== "running" && run.taskId !== pinnedId && run.finishedAt !== undefined && run.finishedAt > now - STRIP_LINGER_MS,
+	);
 }
 
 const STATUS_ROW_STYLE: Partial<Record<LiveStatus, string>> = { failed: "error" };
@@ -128,42 +129,52 @@ export interface StripInput {
 	rows: PanelRow[];
 	/** Soft-focused row index; undefined when the strip is not focused. */
 	selected?: number;
-	/** A transcript view is open → the strip is in "read" mode (scroll hints). */
-	viewOpen?: boolean;
+	/** The run whose transcript is open; undefined when the main transcript shows. */
+	viewedId?: string;
 	width: number;
 	now: number;
 }
 
 /**
- * One line per row: `mark  agentType  activity   elapsed · ↓ tokens`. The
- * selected row is bold and marked `❯` (Claude Code's selection caret); others
- * are unmarked. A focus hint precedes the list (only while focused) — its keys
- * reflect the mode: navigating the strip vs. reading an open transcript, where
- * `←` returns to selection so a different agent can be picked. Overflow past
- * MAX_STRIP_ROWS collapses to "+N more".
+ * The focused strip's hint, Claude Code's (findings §40): `↑/↓ to select`
+ * while an agent is viewed, `Enter to view` when the selected row is not the
+ * one on screen, `x to stop` on a running agent.
+ */
+export function stripHint(rows: PanelRow[], selected: number, viewedId: string | undefined): string {
+	const row = rows[selected];
+	const parts: string[] = [];
+	if (viewedId !== undefined) parts.push("↑/↓ to select");
+	if ((row?.run?.taskId ?? "main") !== (viewedId ?? "main")) parts.push("Enter to view");
+	if (row?.run?.status === "running") parts.push("x to stop");
+	return parts.length ? parts.join(" · ") : "↑/↓ to select";
+}
+
+/**
+ * One line per row, Claude Code's: `❯ ◯ label  description   elapsed · ↓
+ * tokens`. The caret marks the selected row, the filled dot the one on screen
+ * (`main` when no transcript is open), and a settled viewed run reads `idle`.
+ * A focus hint precedes the list while focused. Overflow past MAX_STRIP_ROWS
+ * collapses to "+N more".
  */
 export function renderStrip(input: StripInput, paint: Paint): string[] {
 	const width = Math.max(20, input.width);
 	const out: string[] = [];
-	if (input.selected !== undefined) {
-		const hint = input.viewOpen
-			? "↑/↓ scroll · PgUp/PgDn page · ← agents · ⇥ next · x stop · esc back"
-			: "↑/↓ select · ⏎ view · x stop · ctrl+x ctrl+k stop all · esc back";
-		out.push(paint.fg("dim", cut(hint, width)));
-	}
+	if (input.selected !== undefined) out.push(paint.fg("dim", cut(stripHint(input.rows, input.selected, input.viewedId), width)));
+	const current = input.viewedId ?? "main";
 	const shown = input.rows.slice(0, MAX_STRIP_ROWS);
 	for (const [index, row] of shown.entries()) {
 		const selected = input.selected === index;
-		const mark = selected ? "❯" : " ";
-		const stats = [
-			formatDuration(row.startedAt, row.finishedAt, input.now),
-			row.tokens ? `↓ ${formatTokenCount(row.tokens)} tokens` : "",
-		]
-			.filter(Boolean)
-			.join(" · ");
+		const caret = selected ? "❯" : " ";
+		const dot = (row.run?.taskId ?? "main") === current ? "⏺" : "◯";
+		const stats =
+			row.run && row.status !== "running"
+				? "idle"
+				: [formatDuration(row.startedAt, row.finishedAt, input.now), row.tokens ? `↓ ${formatTokenCount(row.tokens)} tokens` : ""]
+						.filter(Boolean)
+						.join(" · ");
 		const elbow = row.depth > 0 ? `${"  ".repeat(row.depth - 1)}└ ` : "";
-		const left = `${elbow}${mark} ${row.label}${row.activity ? `  ${row.activity}` : ""}`;
-		const line = splitCell(left, stats, width);
+		const left = `${caret} ${elbow}${dot} ${row.label}${row.activity ? `  ${row.activity}` : ""}`;
+		const line = splitCell(left, row.run ? stats : "", width);
 		if (selected) out.push(paint.fg("accent", paint.bold(line)));
 		else if (STATUS_ROW_STYLE[row.status]) out.push(paint.fg(STATUS_ROW_STYLE[row.status]!, line));
 		else out.push(row.run ? line : paint.fg("dim", line));
@@ -245,7 +256,8 @@ export function renderTranscript(input: TranscriptInput, paint: Paint): Transcri
 	// windowed ANCHORED TO THE TAIL — scroll counts lines back from the end, so
 	// the default view follows streaming like Claude Code.
 	const bodyRows = Math.max(0, input.height - out.length - 1);
-	const blockLines = run.blocks.flatMap((block) => blockToLines(block, width, paint, prose));
+	const fork = run.agentType === FORK_AGENT;
+	const blockLines = run.blocks.flatMap((block) => blockToLines(block, width, paint, prose, fork));
 	const partial = sanitizeDisplayText(streamingText(run.streaming)).trimEnd();
 	if (partial) for (const line of prose(`stream:${run.taskId}`, partial, width)) blockLines.push(line);
 	while (blockLines.length && blockLines.at(-1) === "") blockLines.pop();
@@ -260,7 +272,7 @@ export function renderTranscript(input: TranscriptInput, paint: Paint): Transcri
 	// discoverable right where the reader is looking (key hints otherwise live in
 	// the strip). splitPaint fuses to the left alone when the hint is "" (body
 	// fits) or the row is too narrow.
-	const scrollHint = maxScroll > 0 ? "↑/↓ scroll" : "";
+	const scrollHint = maxScroll > 0 ? "PgUp/PgDn scroll" : "";
 	const bottomRow = (text: string, color: string): string => splitPaint(paint, color, text, scrollHint, width, undefined, "dim", false);
 	if (run.status === "running") {
 		const verb = spinnerVerb(run.startedAt, input.now);
@@ -284,8 +296,12 @@ export function renderTranscript(input: TranscriptInput, paint: Paint): Transcri
  * a trailing blank for paragraph spacing. Call/result stay one line each, a
  * blank after the result so tool groups read like the main transcript.
  */
-function blockToLines(block: TranscriptBlock, width: number, paint: Paint, prose: ProseRenderer): string[] {
+function blockToLines(block: TranscriptBlock, width: number, paint: Paint, prose: ProseRenderer, fork: boolean): string[] {
+	// A fork's directive opens its view as Claude Code's `⑂ <question>` row.
+	if (block.kind === "task" && fork) return [...wrapProse(`⑂ ${block.text}`, width).map((l) => paint.fg("dim", l)), ""];
 	if (block.kind === "task") return [...wrapProse(block.text, width).map((l) => paint.fg("dim", l)), ""];
+	// A message the user typed at the agent, Claude Code's `❯ <text>` row.
+	if (block.kind === "user") return [...wrapProse(`❯ ${block.text}`, width), ""];
 	if (block.kind === "text") return [...prose(block, block.text, width), ""];
 	if (block.kind === "call") return [`${paint.fg("accent", "●")} ${cut(`${block.tool}(${block.text})`, width - 2)}`];
 	const body = cut(block.text, width - 4);

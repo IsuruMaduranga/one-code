@@ -119,20 +119,37 @@ agent.
 
 ### Follow agents live
 
-While agents run, the panel below the editor shows a tree: `main` first,
-then each agent with its type, what it's doing right now ("Reading
-src/index.ts", "Running a command"), its elapsed time, and its token count.
-Nested agents appear under their parent. A finished agent stays for a few
-seconds.
+While agents run, the panel below the editor shows a list: `main` first,
+then each agent with its type (or its name, for a fork), its description,
+its elapsed time and its token count. Nested agents appear under their
+parent. A finished agent leaves the list, and the panel says
+`/tasks to see subagents` for a few seconds.
 
 - Press **↓** from an empty editor to focus the rows (after the shells
   chip, if background shells exist).
-- **↑** and **↓** select an agent. **Enter** opens its live transcript.
+- **↑** and **↓** select an agent. **Enter** views it.
 - **x** stops the selected agent. **ctrl+x** then **ctrl+k** stops all of
   them.
-- In the transcript: **↑** and **↓** scroll, **PgUp** and **PgDn** page,
-  **Tab** moves to the next agent, **←** returns to the rows, **Enter**
-  closes the view.
+- **Esc** puts you back in the editor and keeps the agent on screen.
+
+### Talk to an agent
+
+Viewing an agent points the editor at it. The editor's border shows the
+agent, the empty editor reads `Message @<agent>…`, and whatever you send
+goes to that agent. If it's working, it picks the message up mid-turn. If
+it's idle, it starts a new turn. Either way, its reply reaches the main
+conversation as a notification, the same as its first report did. The
+agent stays in the panel, marked `idle`, while you have it open. **PgUp**
+and **PgDn** scroll its transcript. To get back, select `main` and press
+**Enter**, or press **Esc** in an empty editor. Slash commands and `!`
+lines still go to the main conversation.
+
+This is also what `f` in the `/btw` panel is for: it turns a side answer
+into a forked agent you can keep talking to.
+
+`/tasks` lists what's running in the background: shells, agents, and the
+finished agents you've viewed. **Enter** opens one, **x** stops a running
+one, **Esc** closes the list.
 
 `/agents` opens the panel on the newest agent.
 

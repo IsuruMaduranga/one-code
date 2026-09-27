@@ -89,13 +89,14 @@ when there isn't.
 - Press **↓** from an empty editor to focus it. If background shells exist,
   the first **↓** lands on the shells chip; a second **↓** moves to the
   subagent rows. Otherwise the first **↓** lands on the first subagent.
-- In the subagent rows, **↑** and **↓** select, **Enter** opens the
-  selected agent's live transcript, **x** stops it, **ctrl+x** then
-  **ctrl+k** stops every agent, and **Esc** leaves the panel. Typing any
-  other key returns to the editor.
-- Inside a transcript, **↑** and **↓** scroll, **PgUp** and **PgDn** page,
-  **Tab** switches to the next agent, **←** returns to the row list, and
-  **Enter** closes the view.
+- In the subagent rows, **↑** and **↓** select, **Enter** views the
+  selected agent (or `main`), **x** stops it, **ctrl+x** then **ctrl+k**
+  stops every agent, and **Esc** hands focus back to the editor. Typing
+  any other key does the same, with the key included.
+- While you view an agent, the editor talks to it: the border shows which
+  agent, and what you send goes to that agent instead of the main
+  conversation. **PgUp** and **PgDn** scroll its transcript, and **Esc** in
+  an empty editor takes you back to `main`.
 
 The panel's own footer names the keys that apply at each stage. Mouse-wheel
 scrolling deliberately isn't enabled in the transcript view, because

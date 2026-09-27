@@ -7,6 +7,7 @@ import backgroundExtension from "../../extensions/background/index.ts";
 import { type BackgroundTask, TASK_REGISTER_CHANNEL } from "../../extensions/background/registry.ts";
 import { DEFAULT_COALESCE_MS } from "../../extensions/lib/notifications.ts";
 import { SUBAGENT_GATE_CHANNEL } from "../../extensions/permissions/subagent-gate.ts";
+import { PERMISSION_STATUS_CHANNEL } from "../../extensions/permissions/modes.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import * as defaults from "../../extensions/subagents/default-model.ts";
 import subagentsExtension from "../../extensions/subagents/index.ts";
@@ -418,3 +419,43 @@ function fakeResident(failed = false, stoppedActions: ChildOutcome["actions"] = 
 	vi.spyOn(SubagentRuntime, "create").mockResolvedValue(runner as unknown as SubagentRuntime);
 	return { handle, finish, runner, options: () => options };
 }
+
+// Claude Code 2.1.283 (findings §40): one inline notification for a fork in
+// every mode and for every agent outside auto mode; the two-message hand-back
+// only for a non-fork agent in auto mode.
+describe("hand-back shape by permission mode", () => {
+	const textOf = (content: unknown) =>
+		typeof content === "string" ? content : (content as Array<{ text?: string }>).map((block) => block.text ?? "").join("");
+	/** Everything sent, joined: the notifier may coalesce a round into one message. */
+	const sent = (h: Awaited<ReturnType<typeof mount>>) => h.fake.sentMessages.map((m) => textOf(m.message.content)).join("\n");
+	const run = async (mode: string, agent: string) => {
+		const runtime = fakeResident();
+		const h = await mount();
+		const sessionFile = join(dir, "session.jsonl");
+		writeFileSync(sessionFile, "");
+		(h.ctx.sessionManager as { getSessionFile: () => string | undefined }).getSessionFile = () => sessionFile;
+		h.fake.events.emit(PERMISSION_STATUS_CHANNEL, { mode, paused: false });
+		await h.call("Agent", { subagent_type: agent, task: "Tabulate" });
+		runtime.finish([], "The table is done.");
+		await vi.advanceTimersByTimeAsync(DEFAULT_COALESCE_MS + 1);
+		return sent(h);
+	};
+
+	it("sends the report inline in one notification outside auto mode", async () => {
+		const out = await run("default", "general-purpose");
+		expect(out).toMatch(/<result>The table is done\.<\/result>/);
+		expect(out).not.toContain("[Subagent hand-back]");
+	});
+
+	it("keeps the two-message hand-back for a non-fork agent in auto mode", async () => {
+		const out = await run("auto", "general-purpose");
+		expect(out).toContain("[Subagent hand-back]");
+		expect(out).toContain("This agent's report was delivered to you as a message from");
+	});
+
+	it("sends a fork's report inline even in auto mode", async () => {
+		const out = await run("auto", "fork");
+		expect(out).toMatch(/<result>The table is done\.<\/result>/);
+		expect(out).not.toContain("[Subagent hand-back]");
+	});
+});

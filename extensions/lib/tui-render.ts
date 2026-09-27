@@ -832,6 +832,11 @@ export function scheduledTaskComponent(theme: ThemeLike, prompt: string, firedAt
  * wire frames (`<task-notification>`, the agent-message envelope) are
  * model-only; `parseNotificationFrames` takes them apart for display.
  */
+/** An agent task's `<summary>`: `Agent "<description>" finished` / `failed: …` / `was stopped…` (findings §24). */
+function isAgentCompletion(summary: string): boolean {
+	return summary.startsWith('Agent "');
+}
+
 export function notificationComponent(theme: ThemeLike, text: string, expanded: boolean): TuiComponent {
 	// An agent's completion pointer says nothing the message above it does not;
 	// CC's transcript shows the message alone. Bodies carry shell output and
@@ -856,6 +861,16 @@ export function notificationComponent(theme: ThemeLike, text: string, expanded: 
 				const bodyLines = frame.body.split("\n");
 				if (expanded) out.push(dim(`› Message from ${frame.from}`), ...body(bodyLines));
 				else out.push(dim(`› Message from @${frame.from}`) + hint(bodyLines));
+				continue;
+			}
+			if (frame.kind === "task" && isAgentCompletion(frame.summary)) {
+				// Claude Code 2.1.283's line for an agent's turn: `⏺ Agent "<desc>"
+				// finished · 3s`, the dot tinted by outcome, no expand hint (findings
+				// §40). ctrl+o still shows the report under it.
+				const dot = theme.fg(frame.status === "failed" ? "error" : frame.status === "completed" ? "success" : "dim", "●");
+				const took = frame.durationMs === undefined ? "" : dim(` · ${formatDuration(0, frame.durationMs)}`);
+				out.push(`${dot} ${oneLine(frame.summary)}${took}`);
+				if (expanded && frame.body) out.push(...body(frame.body.split("\n")));
 				continue;
 			}
 			const headline = frame.kind === "task" ? frame.summary : oneLine(frame.text.split("\n")[0] ?? "");

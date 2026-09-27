@@ -244,19 +244,8 @@ export default function tasksExtension(pi: ExtensionAPI) {
 		pi.events.emit(DEFER_CHANNEL, { name, keywords: TASK_KEYWORDS });
 	}
 
-	registerLocalCommand(pi, "tasks", {
-		description: "Show the structured task list; 'hide'/'show' toggles the widget",
-		argumentHint: "[hide|show]",
-		handler: async (args, ctx) => {
-			const arg = args?.trim().toLowerCase();
-			if (arg === "hide" || arg === "show") {
-				setWidgetHidden(arg === "hide", ctx);
-				return;
-			}
-			ctx.ui.notify(formatTaskList(store), "info");
-		},
-	});
-
+	// `/tasks` is Claude Code's Background dialog (the subagents extension, findings
+	// §40); the task list toggles with its key only, as Claude Code's does.
 	pi.registerShortcut(toggleKey, {
 		description: "Show or hide the task list",
 		handler: (ctx) => setWidgetHidden(!widgetHidden, ctx),

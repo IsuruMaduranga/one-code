@@ -11,7 +11,9 @@
  */
 
 import { CustomEditor } from "@earendil-works/pi-coding-agent";
+import { applyBorderBadge, fitBadge } from "../lib/agent-view.ts";
 import { applyArgumentHint } from "../lib/argument-hints.ts";
+import { visibleWidth } from "../lib/text-width.ts";
 import { applyPromptMarker } from "./prompt-marker.ts";
 
 /** Width of the left gutter, and therefore the visible width the marker must fill. */
@@ -24,6 +26,10 @@ export class PromptEditor extends CustomEditor {
 	#renderMarker: () => string;
 	/** The painted argument placeholder for the current input, if it is a hinted command. */
 	#renderHint: (text: string) => string | undefined;
+	/** The viewed agent's top-border label (plain text), or undefined on main (lib/agent-view.ts). */
+	#badge: () => string | undefined;
+	/** Paints the fitted badge label as a chip, one space of padding on each side. */
+	#paintBadge: (label: string) => string;
 
 	constructor(
 		tui: EditorArgs[0],
@@ -31,10 +37,14 @@ export class PromptEditor extends CustomEditor {
 		keybindings: EditorArgs[2],
 		renderMarker: () => string,
 		renderHint: (text: string) => string | undefined = () => undefined,
+		badge: () => string | undefined = () => undefined,
+		paintBadge: (label: string) => string = (label) => label,
 	) {
 		super(tui, theme, keybindings, { paddingX: PROMPT_PADDING, embedWorkingStatus: true });
 		this.#renderMarker = renderMarker;
 		this.#renderHint = renderHint;
+		this.#badge = badge;
+		this.#paintBadge = paintBadge;
 	}
 
 	/**
@@ -48,8 +58,11 @@ export class PromptEditor extends CustomEditor {
 	}
 
 	render(width: number): string[] {
-		const lines = applyPromptMarker(super.render(width), PROMPT_PADDING, this.#renderMarker());
+		let lines = applyPromptMarker(super.render(width), PROMPT_PADDING, this.#renderMarker());
 		const hint = this.#renderHint(this.getText());
-		return hint ? applyArgumentHint(lines, hint) : lines;
+		if (hint) lines = applyArgumentHint(lines, hint);
+		const label = this.#badge();
+		const fitted = label ? fitBadge(label, width) : "";
+		return fitted ? applyBorderBadge(lines, this.#paintBadge(fitted), visibleWidth(fitted) + 2, this.borderColor("─")) : lines;
 	}
 }
