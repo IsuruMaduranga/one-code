@@ -303,14 +303,14 @@ describe("renderStrip", () => {
 		expect(unfocused[0]).toContain("⏺ main");
 
 		const focused = renderStrip({ rows, selected: 1, width: 80, now: 5000 }, paint).map(strip);
-		expect(focused[0]).toBe("Enter to view · x to stop");
+		expect(focused[0]).toBe("Enter to view · x to stop · ctrl+x ctrl+k stop all · esc back");
 		const agentRow = focused.find((l) => l.includes("general-purpose"))!;
 		expect(agentRow).toMatch(/^❯ ◯ general-purpose {2}/);
 		expect(agentRow).toContain("58.8k");
 
 		// Viewing the agent: ↑/↓ selects, and the viewed row carries the filled dot.
 		const viewing = renderStrip({ rows, selected: 0, viewedId: "a", width: 80, now: 5000 }, paint).map(strip);
-		expect(viewing[0]).toBe("↑/↓ to select · Enter to view");
+		expect(viewing[0]).toBe("↑/↓ to select · Enter to view · ctrl+x ctrl+k stop all · esc back");
 		expect(viewing.find((l) => l.includes("general-purpose"))).toContain("⏺ general-purpose");
 		expect(viewing.find((l) => l.includes("main"))).toContain("◯ main");
 	});

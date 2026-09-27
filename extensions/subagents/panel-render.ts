@@ -136,17 +136,21 @@ export interface StripInput {
 }
 
 /**
- * The focused strip's hint, Claude Code's (findings §40): `↑/↓ to select`
+ * The focused strip's hint. Claude Code's part (findings §40): `↑/↓ to select`
  * while an agent is viewed, `Enter to view` when the selected row is not the
- * one on screen, `x to stop` on a running agent.
+ * one on screen, `x to stop` on a running agent. One Code adds the keys
+ * Claude Code leaves unhinted, so every panel key is discoverable: `esc back`,
+ * and `ctrl+x ctrl+k stop all` while any agent runs.
  */
 export function stripHint(rows: PanelRow[], selected: number, viewedId: string | undefined): string {
 	const row = rows[selected];
 	const parts: string[] = [];
-	if (viewedId !== undefined) parts.push("↑/↓ to select");
+	if (viewedId !== undefined || (row?.run?.taskId ?? "main") === "main") parts.push("↑/↓ to select");
 	if ((row?.run?.taskId ?? "main") !== (viewedId ?? "main")) parts.push("Enter to view");
 	if (row?.run?.status === "running") parts.push("x to stop");
-	return parts.length ? parts.join(" · ") : "↑/↓ to select";
+	if (rows.some((r) => r.run?.status === "running")) parts.push("ctrl+x ctrl+k stop all");
+	parts.push("esc back");
+	return parts.join(" · ");
 }
 
 /**
