@@ -87,6 +87,18 @@ describe("system-prompt on a turn opened from idle", () => {
 		expect(await fake.fireOne("context_with_system", idleContext(), ctx)).toBeUndefined();
 	});
 
+	it("forgets the last session's options when a new session starts", async () => {
+		const { fake, ctx } = setup();
+		await fake.fire("session_start", { type: "session_start" }, ctx);
+		await fake.fire("before_agent_start", { type: "before_agent_start", systemPromptOptions: { cwd: ctx.cwd, customPrompt: "Agent prompt" } }, ctx);
+		await fake.fire("session_start", { type: "session_start" }, ctx);
+		await fake.fire("before_agent_start", { type: "before_agent_start", systemPromptOptions: { cwd: ctx.cwd } }, ctx);
+		const result = await fake.fireOne<{ messages: Array<Record<string, unknown>> }>("context_with_system", idleContext(), ctx);
+		expect(String(result?.messages[0].content)).toContain("You are One Code");
+		await fake.fire("session_start", { type: "session_start" }, ctx);
+		expect(await fake.fireOne("context_with_system", idleContext(), ctx)).toBeUndefined();
+	});
+
 	it("does nothing before any typed turn has run", async () => {
 		const { fake, ctx } = setup();
 		await fake.fire("session_start", { type: "session_start" }, ctx);

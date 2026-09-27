@@ -36,6 +36,8 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 	// extension announces them from its own session_start, which runs before
 	// this one (load order), so this handler does not reset them.
 	let workspaceDirs: string[] = [];
+	/** The options the last before_agent_start saw; a turn opened from idle rebuilds from them. */
+	let lastOptions: BuildSystemPromptOptions | undefined;
 	pi.events.on(WORKSPACE_CHANNEL, (data) => {
 		const dirs = (data as WorkspaceAnnouncement | undefined)?.dirs;
 		workspaceDirs = Array.isArray(dirs) ? dirs.filter((dir): dir is string => typeof dir === "string") : [];
@@ -51,10 +53,10 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 
 		gitStatus = null;
 		gitStatusReady = false;
+		// Another session's options (a named agent's customPrompt, its tool set)
+		// must not shape this one's idle turns.
+		lastOptions = undefined;
 	});
-
-	/** The options the last before_agent_start saw; a turn opened from idle rebuilds from them. */
-	let lastOptions: BuildSystemPromptOptions | undefined;
 
 	const buildPrompt = (options: BuildSystemPromptOptions, ctx: ExtensionContext): string => {
 		if (!gitStatusReady) {
