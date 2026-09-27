@@ -38,11 +38,14 @@ export async function authenticate(options: AuthenticateOptions): Promise<Connec
 			server,
 			redirectUrl: callback.redirectUrl,
 			openAuthorization: (url) => {
-				const opened = openBrowser(url.toString());
-				onPrompt?.(
-					opened
-						? `Opened your browser to authorize "${server.name}". If it didn't open, visit:\n${url}`
-						: `Open this URL to authorize "${server.name}":\n${url}`,
+				// A refused URL throws here, before any launch; the prompt waits
+				// for the opener to report whether it started.
+				void openBrowser(url.toString()).then((opened) =>
+					onPrompt?.(
+						opened
+							? `Opened your browser to authorize "${server.name}". If it didn't open, visit:\n${url}`
+							: `Open this URL to authorize "${server.name}":\n${url}`,
+					),
 				);
 			},
 			home,

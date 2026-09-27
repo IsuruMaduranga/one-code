@@ -532,6 +532,12 @@ export interface CcRenderSpec<TArgs = unknown, TDetails = unknown> {
 	) => string | undefined;
 	/** Lines shown before the `… +N lines` trailer kicks in. Default 5. */
 	maxCollapsedLines?: number;
+	/**
+	 * Already-painted text (an OSC 8 hyperlink, say) appended to the first
+	 * result line after the result is sanitized. Build it only from values the
+	 * tool controls, never from its output: nothing strips its escapes.
+	 */
+	link?: (result: { details?: TDetails }, isError: boolean) => string | undefined;
 }
 
 /**
@@ -579,7 +585,22 @@ export function ccToolRenderers<TArgs = any, TDetails = any>(
 			}
 			text ??= textContent(stripReminderBlocks(result));
 			if (!text) return linesComponent(() => []);
-			return linesComponent(() => resultLines(theme, text, options.expanded, context.isError, spec.maxCollapsedLines));
+			let link: string | undefined;
+			try {
+				link = spec.link?.(result, context.isError);
+			} catch {
+				link = undefined;
+			}
+			return linesComponent((width) => {
+				const lines = resultLines(theme, text, options.expanded, context.isError, spec.maxCollapsedLines);
+				if (link && lines.length > 0) {
+					// Truncation drops a cut link's closing escape and leaves the
+					// hyperlink open, so a link that does not fit goes in as plain text.
+					const joined = `${lines[0]} ${link}`;
+					lines[0] = visibleWidth(joined) <= width ? joined : `${lines[0]} ${sanitizeDisplayText(link)}`;
+				}
+				return lines;
+			});
 		},
 	};
 }

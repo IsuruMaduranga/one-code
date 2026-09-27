@@ -265,11 +265,13 @@ hook configuration.
 | Long sessions | Per-repository memory, a session scratchpad, and context compaction. |
 | Task tracking | A pinned progress widget, background monitors, and scheduled wake-ups. |
 | Tool discovery | Tools loaded on demand to reduce prompt overhead. |
+| Artifacts | HTML pages the model writes (reports, dashboards, small tools), saved in `~/.onecode/artifacts/` with every version kept, and opened in your browser. |
 | Reasoning and appearance | `/effort` or **shift+tab** to set reasoning effort; `onecode` and `onecode-light` themes. |
 | Customization | pi extensions, themes, and settings. |
 
-Bundled skills include `simplify`, `code-review`, `security-review`, and
-`fewer-permission-prompts`. A project skill with the same name takes precedence.
+Bundled skills include `simplify`, `code-review`, `security-review`,
+`fewer-permission-prompts`, and `artifact-design`. A project skill with the
+same name takes precedence.
 
 For scripting and session management:
 

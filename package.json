@@ -63,6 +63,7 @@
 			"extensions/tasks/index.ts",
 			"extensions/plan-mode/index.ts",
 			"extensions/notebook/index.ts",
+			"extensions/artifacts/index.ts",
 			"extensions/web/index.ts",
 			"extensions/web-fetch/index.ts",
 			"extensions/lsp/index.ts",

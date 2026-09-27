@@ -163,6 +163,29 @@ describe("ccToolRenderers", () => {
 		expect(custom.renderCall({ query: "q" }, theme, context).render(120)[0]).toContain("(<muted>q</>)");
 	});
 
+	it("appends a painted link after the sanitized first line, never on an error", () => {
+		const linked = ccToolRenderers<unknown, { path?: string }>("Artifact", {
+			result: () => "Published",
+			link: (result, isError) => (isError ? undefined : `<link:${result.details?.path}>`),
+		});
+		const result = { content: [{ type: "text", text: "ignored" }], details: { path: "/a/view.html" } };
+		expect(linked.renderResult(result, { expanded: false, isPartial: false }, theme, context).render(120)).toEqual([
+			"  ⎿  <muted>Published</> <link:/a/view.html>",
+		]);
+		const failed = linked.renderResult(result, { expanded: false, isPartial: false }, theme, { ...context, isError: true }).render(120);
+		expect(failed[0]).not.toContain("<link:");
+	});
+
+	it("puts a link that does not fit in as plain text, so truncation never leaves it open", () => {
+		const osc = "\x1b]8;;file:///a/view.html\x1b\\~/a/view.html\x1b]8;;\x1b\\";
+		const linked = ccToolRenderers<unknown, unknown>("Artifact", { result: () => "Published", link: () => osc });
+		const result = { content: [{ type: "text", text: "x" }] };
+		const wide = linked.renderResult(result, { expanded: false, isPartial: false }, theme, context).render(120);
+		expect(wide[0]).toContain(osc);
+		const narrow = linked.renderResult(result, { expanded: false, isPartial: false }, theme, context).render(24);
+		expect(narrow[0]).not.toContain("\x1b]8");
+	});
+
 	it("truncates every rendered line to the terminal width", () => {
 		const result = { content: [{ type: "text", text: "y".repeat(500) }] };
 		const lines = renderers.renderResult(result, { expanded: true, isPartial: false }, theme, context).render(40);

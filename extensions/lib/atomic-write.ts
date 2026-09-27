@@ -1,5 +1,5 @@
 /**
- * Atomic JSON file writes (pure fs, no pi imports).
+ * Atomic JSON and text file writes (pure fs, no pi imports).
  *
  * Write to a temp sibling, then rename over the target — a reader never sees a
  * partially written file, and a crash mid-write leaves the target untouched.
@@ -14,9 +14,13 @@ import { dirname } from "node:path";
 let sequence = 0;
 
 export function writeJsonAtomic(path: string, data: unknown, options: { mode?: number } = {}): void {
+	writeTextAtomic(path, `${JSON.stringify(data, null, 2)}\n`, options);
+}
+
+export function writeTextAtomic(path: string, text: string, options: { mode?: number } = {}): void {
 	mkdirSync(dirname(path), { recursive: true });
 	const tmp = `${path}.tmp-${process.pid}-${++sequence}`;
-	writeFileSync(tmp, `${JSON.stringify(data, null, 2)}\n`, options.mode !== undefined ? { mode: options.mode } : undefined);
+	writeFileSync(tmp, text, options.mode !== undefined ? { mode: options.mode } : undefined);
 	renameSync(tmp, path);
 }
 

@@ -103,6 +103,39 @@ See [Subagents and workflows](subagents-and-workflows.md).
 | `ask_user_question` | Asks you up to four structured questions in a tabbed dialog. See [The terminal interface](terminal-interface.md#the-question-dialog). |
 | `skill` | Runs a skill by name. See [Skills](skills-plugins-and-mcp.md#skills). |
 
+## Artifacts
+
+`artifact` saves a self-contained HTML page the model wrote (a report, a
+dashboard, a visual explainer, a small tool) and opens it in your default
+browser. Claude Code publishes these pages to claude.ai; One Code keeps them
+on your machine under `~/.onecode/artifacts/`, so nothing is uploaded.
+Before writing a page, the model loads the bundled `artifact-design` skill,
+which holds the page rules: a real title, light and dark themes, and a
+layout that works at phone width.
+
+The page opens under a slim bar. The home icon goes to the gallery, and
+**Download** saves the page as an HTML file. The title opens a menu with the
+version and update time, Download HTML, Copy file path, Reload, the page
+without the bar, the list of versions, and All artifacts. Claude Code's
+Share and Chat buttons are left out, since there is no server behind a local
+artifact.
+
+When the model publishes the same file again with changed contents, the
+artifact is updated in place as a new version, and every earlier version is
+kept. Publishing unchanged contents keeps the current version. Pick an earlier
+version from the title menu to view or download it. The browser tab does not
+reload by itself, so refresh it to see the update.
+
+`~/.onecode/artifacts/index.html` is a gallery of every artifact, newest
+first, with links to each earlier version and a Download button. Run `/artifacts` to pick one and open it, save a copy to
+`~/Downloads`, show its path, or delete it. To stop the browser opening on
+each new artifact, set `artifacts.autoOpen` to `false` (see
+[Settings reference](configuration.md#settings-reference)). Over SSH, or on
+a machine with no display, the model gives you the file path instead.
+
+Publishing passes through the permission gate like any other tool, and in
+plan mode it is refused. Deleting always asks you first. Deferred.
+
 ## Tasks and background work
 
 | Tool | What it does |
@@ -183,6 +216,7 @@ matchers, and mapped to One Code's names. Case is ignored.
 | `Read`, `Write`, `Edit` | `read`, `write`, `edit` |
 | `Grep`, `Glob`, `LS` | `grep`, `find`, `ls` |
 | `NotebookEdit` | `notebook_edit` |
+| `Artifact` | `artifact` |
 | `WebFetch`, `WebSearch` | `web_fetch`, `web_search` |
 | `Task`, `Agent` | `Agent` |
 | `SendMessage` | `SendMessage` |

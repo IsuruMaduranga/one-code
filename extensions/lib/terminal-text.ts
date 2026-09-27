@@ -86,6 +86,16 @@ export function sanitizeDisplayText(text: string): string {
 }
 
 /**
+ * `label` as an OSC 8 hyperlink to `url` (pi-tui's `hyperlink`). Terminals
+ * without OSC 8, and tmux without its `hyperlinks` feature, show the label
+ * alone, so the label must read on its own. Both parts are sanitized, so
+ * neither can end the sequence early.
+ */
+export function terminalLink(label: string, url: string): string {
+	return `\x1b]8;;${sanitizeDisplayText(url)}\x1b\\${sanitizeDisplayText(label)}\x1b]8;;\x1b\\`;
+}
+
+/**
  * Every control character other than `\n` and `\t` shown as a visible
  * `\xHH` escape (`\x1b[8m` for an SGR conceal), so nothing in the text can
  * act on the terminal or hide part of itself.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { boundConsentItems } from "../../extensions/lib/consent-preview.ts";
-import { escapeControlText, sanitizeDisplayText, sanitizeTitle } from "../../extensions/lib/terminal-text.ts";
+import { escapeControlText, sanitizeDisplayText, sanitizeTitle, terminalLink } from "../../extensions/lib/terminal-text.ts";
 import {
 	callLine,
 	ccToolRenderers,
@@ -121,5 +121,16 @@ describe("sanitizeDisplayText on hostile input", () => {
 
 	it("still drops a terminated OSC after unterminated-looking text", () => {
 		expect(sanitizeDisplayText("a\u001b]0;title\u0007b\u001b]52;c;x\u001b\\c")).toBe("abc");
+	});
+});
+
+describe("terminalLink", () => {
+	it("wraps the label in one OSC 8 hyperlink", () => {
+		expect(terminalLink("~/a/view.html", "file:///Users/u/a/view.html")).toBe("\x1b]8;;file:///Users/u/a/view.html\x1b\\~/a/view.html\x1b]8;;\x1b\\");
+	});
+
+	it("keeps an escape in either part from ending the sequence early", () => {
+		const link = terminalLink("x\x1b]0;title\x07", "file:///a\x1b\\b");
+		expect(link.match(/\x1b/g)).toHaveLength(4);
 	});
 });

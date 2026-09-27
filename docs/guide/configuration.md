@@ -52,6 +52,7 @@ session is your own pi, not the app.
 | `projects/<slug>/settings.json` | Per-repository settings. |
 | `agent/` | pi's own state under the bundled app: credentials, model catalog, sessions, pi's settings, and One Code's plugin directory (`agent/plugins/`). |
 | `plans/<name>.md` | Plan files from plan mode. |
+| `artifacts/` | Pages published with the `artifact` tool: `index.html` is the gallery; each `<id>/` holds the current page, its details, and `versions/` with every earlier version. |
 | `hooks/project-approvals.json` | Which projects' hooks you approved. |
 | `mcp/project-approvals.json` | Which projects' MCP servers you approved. |
 | `permissions/project-allow-approvals.json` | Which projects' allow rules you trusted. |
@@ -80,6 +81,7 @@ appear in `projects/<slug>/settings.json`.
 | `webSearch.order` | string array | By hand | Order of the fallback search backends: `brave`, `tavily`, `exa-free`. |
 | `capabilityIndex.artificialAnalysisApiKey` | string | By hand | Artificial Analysis key for measured model selection. |
 | `disabledMcpServers` | string array | `/mcp` (user or per repository) | MCP servers kept disabled. |
+| `artifacts.autoOpen` | boolean | By hand | `false` stops the browser opening when the model publishes a new artifact. Defaults to `true`. |
 
 Two keys are stamped alongside model choices (`subagentModelSetFor`,
 `autoMode.classifierModelSetFor`) to record the provider a choice was made

@@ -43,6 +43,7 @@ that explains it.
 | `/auto-mode defaults` | Show the built-in environment description. | |
 | `/auto-mode model [provider/model-id\|clear]` | Choose or clear the classifier model. | |
 | `/memory` | Open an instruction file or the memory folder. | [Memory](sessions-and-context.md#memory) |
+| `/artifacts` | Pick a saved artifact to open, save to `~/Downloads`, or delete, or open the gallery. | [Artifacts](tools.md#artifacts) |
 | `/tasks`, `/tasks hide`, `/tasks show` | Print the task list, or hide and show its widget (also **alt+t**, or **ctrl+\\** on macOS). | [Tasks](tasks-and-background-work.md#the-task-list) |
 | `/background` | List background tasks. | [Background](tasks-and-background-work.md#the-background-list) |
 | `/loop <interval> <task>` | Repeat a task at a fixed interval (`5m`, `2h`, `1d`, or `… every 20m`). Ask the model to stop it. | [Loops](tasks-and-background-work.md#scheduled-wake-ups-and-loops) |

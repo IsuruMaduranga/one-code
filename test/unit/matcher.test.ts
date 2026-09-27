@@ -39,6 +39,7 @@ describe("normalizeToolName", () => {
 		expect(normalizeToolName("Bash")).toBe("bash");
 		expect(normalizeToolName("Glob")).toBe("find");
 		expect(normalizeToolName("NotebookEdit")).toBe("notebook_edit");
+		expect(normalizeToolName("Artifact")).toBe("artifact");
 		expect(normalizeToolName("WebFetch")).toBe("web_fetch");
 		expect(normalizeToolName("Task")).toBe("Agent");
 	});
@@ -498,6 +499,20 @@ describe("decide", () => {
 				expect(decide({ ...call, toolName: "read", subject: "/etc/hosts", blockReadsOutsideWorkingDirectories: true })).toMatchObject({ decision: "deny", cause: "blocked-outside-read" });
 				expect(decide({ ...call, toolName: "read", subject: "src/a.ts", blockReadsOutsideWorkingDirectories: true }).decision).toBe("allow");
 			}
+		});
+
+		it("judges artifact's source as a read: refused by blockReadsOutsideWorkingDirectories, never pre-approved outside", () => {
+			const publish = { ...base, toolName: "artifact", subject: "/etc/page.html" };
+			const bare = rules(["Artifact"]);
+			// Inside the working space a bare rule allows it; outside, the mode decides.
+			expect(decide({ ...publish, subject: "site/page.html", allow: bare }).decision).toBe("allow");
+			expect(decide({ ...publish, allow: bare })).toMatchObject({ decision: "ask", cause: "working-dir" });
+			expect(decide({ ...publish, mode: "auto", allow: bare })).toMatchObject({ decision: "classify", cause: "working-dir" });
+			expect(decide({ ...publish, blockReadsOutsideWorkingDirectories: true })).toMatchObject({ decision: "deny", cause: "blocked-outside-read" });
+			// Still a gated tool inside the working space, with no rule.
+			expect(decide({ ...publish, subject: "site/page.html" }).decision).toBe("ask");
+			expect(extractSubject("Artifact", { file_path: "/x/p.html" })).toBe("/x/p.html");
+			expect(extractSubject("Artifact", { action: "open", id: "p-1" })).toBe('{"action":"open","id":"p-1"}');
 		});
 
 		it("blockReadsOutsideWorkingDirectories wins over allow and ask rules, not over bypass mode", () => {

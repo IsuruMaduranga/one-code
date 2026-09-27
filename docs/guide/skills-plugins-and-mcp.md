@@ -53,7 +53,7 @@ directory, never in the skill files.
 
 ### Bundled skills
 
-Five of Claude Code's built-in skills ship with One Code:
+Six of Claude Code's built-in skills ship with One Code:
 
 - `loop`: run a prompt on an interval, or let the model self-pace it. See
   [Scheduled wake-ups and loops](tasks-and-background-work.md#scheduled-wake-ups-and-loops).
@@ -61,6 +61,8 @@ Five of Claude Code's built-in skills ship with One Code:
 - `code-review`: review changes for correctness bugs.
 - `security-review`: review changes for security issues.
 - `fewer-permission-prompts`: scan your usage and propose an allowlist.
+- `artifact-design`: the page rules the model follows before publishing an
+  artifact. See [Artifacts](tools.md#artifacts).
 
 A skill of the same name in your own `.claude/skills/` takes precedence.
 
@@ -71,7 +73,7 @@ doesn't have:
 
 | Group | Skills omitted |
 |---|---|
-| Hosted artifacts and design | `design`, `design-sync`, `dataviz`, the `artifact-*` guides, and the dashboard, report, table, explainer, plan, and whiteboard publishers. |
+| Hosted artifacts and design | `design`, `design-sync`, `dataviz`, `artifact-capabilities`, `artifact-diagramming`, and the dashboard, report, table, explainer, plan, and whiteboard publishers. |
 | Claude Code configuration, account, and desktop workflows | `update-config`, `keybindings-help`, `claude-in-chrome`, `debug`, `usage`, `explain-usage`, `setup-cowork`, `schedule` cloud routines, `batch`, and `claude-code-guide`. |
 | Run-skill generation | `run` and `run-skill-generator`. Use project-local run skills instead. |
 | API reference | `claude-api`. |
