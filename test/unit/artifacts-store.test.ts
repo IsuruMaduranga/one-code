@@ -115,6 +115,27 @@ describe("publishArtifact", () => {
 		expect(existsSync(other)).toBe(false);
 	});
 
+	it("rolls every replaced file back when a rename fails partway", () => {
+		const first = publish("r.html", page("Rolled", "one"));
+		const payloadBefore = readFileSync(join(root, first.meta.id, "download.js"), "utf-8");
+		// The viewer, renamed last, is blocked by a non-empty directory in its place.
+		const view = viewerPath(root, first.meta.id);
+		rmSync(view);
+		mkdirSync(view);
+		writeFileSync(join(view, "x"), "");
+		expect(() => publish("r.html", page("Rolled", "two"))).toThrow();
+		expect(getArtifact(root, first.meta.id)?.version).toBe(1);
+		expect(readFileSync(pagePath(root, first.meta.id), "utf-8")).toBe(page("Rolled", "one"));
+		expect(readFileSync(join(root, first.meta.id, "download.js"), "utf-8")).toBe(payloadBefore);
+		expect(readdirSync(join(root, first.meta.id)).filter((name) => name.includes(".next-"))).toEqual([]);
+	});
+
+	it("renames the download when a republish of the same bytes changes the fallback title", () => {
+		const first = publish("untitled.html", "<p>same</p>", { title: "First Name" });
+		publish("untitled.html", "<p>same</p>", { title: "Second Name" });
+		expect(readFileSync(join(root, first.meta.id, "download.js"), "utf-8")).toContain('"filename":"second-name.html"');
+	});
+
 	it("takes over a lock a crashed session left behind", () => {
 		const first = publish("r.html", page("Locked", "one"));
 		const lock = join(root, first.meta.id, ".lock");
@@ -321,7 +342,8 @@ describe("viewer", () => {
 	it("embeds the file paths as JSON a page path cannot break out of", () => {
 		const html = renderViewer(meta, "/s/</script><script>x()</script>");
 		expect(html).not.toContain("</script><script>x()");
-		expect(html).toContain("\\u003c/script>");
+		// The separator may be \\ (Windows `join`), so only the escaped `<` is certain.
+		expect(html).toContain("\\u003c");
 	});
 });
 

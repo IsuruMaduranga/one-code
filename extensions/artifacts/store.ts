@@ -257,24 +257,40 @@ function updateArtifact(root: string, existing: ArtifactMeta, input: PublishInpu
 	// A size match first, so a changed page (the usual case) is never read back.
 	if (existsSync(current) && statSync(current).size === Buffer.byteLength(input.html) && readFileSync(current, "utf-8") === input.html) {
 		// Same bytes: refresh the details without a version that differs from nothing.
+		// The payload is rewritten too: it names the download after the title.
 		const meta: ArtifactMeta = { ...existing, title, description, sourcePath, updatedAt: now };
-		commitFiles([metaFile(root, meta), viewerFile(root, meta)]);
+		const payload = pageFiles(root, meta, input.html)[1];
+		commitFiles([metaFile(root, meta), payload, viewerFile(root, meta)], { beforeReplace: () => assertHeld(held, existing.id) });
 		return { meta, created: false };
 	}
 	const meta: ArtifactMeta = { ...existing, title, description, sourcePath, updatedAt: now, version: existing.version + 1 };
-	// meta.json first: once it names the new version, the old page is already
-	// archived, so a failure partway through can repeat a version but never lose one.
-	commitFiles([metaFile(root, meta), ...pageFiles(root, meta, input.html), viewerFile(root, meta)], () => {
-		if (!existsSync(current)) return;
-		mkdirSync(join(root, existing.id, "versions"), { recursive: true });
-		copyFileSync(current, versionPath(root, existing.id, existing.version));
-		const payload = join(root, existing.id, "download.js");
-		if (existsSync(payload)) copyFileSync(payload, join(root, existing.id, "versions", `v${existing.version}.js`));
-		// Last check before live files change: a session that took the lock over
-		// while this one was paused owns the next version now.
-		if (!held()) throw new Error(`Another session took over publishing the artifact "${existing.id}". Publish again.`);
+	const archivedPage = versionPath(root, existing.id, existing.version);
+	const livePayload = join(root, existing.id, "download.js");
+	const archivedPayload = join(root, existing.id, "versions", `v${existing.version}.js`);
+	commitFiles([metaFile(root, meta), ...pageFiles(root, meta, input.html), viewerFile(root, meta)], {
+		beforeReplace: () => {
+			// Checked before the archive is touched: a session that took the lock
+			// over while this one was paused owns version N and N+1 now.
+			assertHeld(held, existing.id);
+			if (!existsSync(current)) return;
+			mkdirSync(join(root, existing.id, "versions"), { recursive: true });
+			copyFileSync(current, archivedPage);
+			if (existsSync(livePayload)) copyFileSync(livePayload, archivedPayload);
+			assertHeld(held, existing.id);
+		},
+		// A rename failed partway: put every live file back as version N had it.
+		rollback: [
+			() => writeTextAtomic(join(root, existing.id, "meta.json"), metaFile(root, existing)[1]),
+			() => existsSync(archivedPage) && copyFileSync(archivedPage, current),
+			() => existsSync(archivedPayload) && copyFileSync(archivedPayload, livePayload),
+			() => writeTextAtomic(viewerPath(root, existing.id), viewerFile(root, existing)[1]),
+		],
 	});
 	return { meta, created: false };
+}
+
+function assertHeld(held: () => boolean, id: string): void {
+	if (!held()) throw new Error(`Another session took over publishing the artifact "${id}". Publish again.`);
 }
 
 type StoreFile = [target: string, text: string];
@@ -295,25 +311,42 @@ function metaFile(root: string, meta: ArtifactMeta): StoreFile {
 }
 
 /**
- * Write every file to a temp sibling first, run `beforeReplace` (the version
- * archive), then rename them into place in the given order. A failure while
- * staging or archiving removes the temps and leaves the artifact untouched;
- * only the renames, which do not fail on a healthy disk, touch live files.
+ * Write every file to a temp sibling first, run `beforeReplace` (the lock
+ * check and the version archive), then rename them into place in the given
+ * order. A failure while staging or archiving removes the temps and leaves
+ * the artifact untouched. A failed rename removes the remaining temps and runs
+ * every `rollback` step, each on its own: the file whose rename failed was
+ * never replaced, and its restore failing must not stop the others.
  */
-function commitFiles(files: StoreFile[], beforeReplace?: () => void): void {
+function commitFiles(files: StoreFile[], hooks: { beforeReplace?: () => void; rollback?: Array<() => unknown> } = {}): void {
 	const staged: Array<[tmp: string, target: string]> = [];
+	const discard = () => {
+		for (const [tmp] of staged) rmSync(tmp, { force: true });
+	};
 	try {
 		for (const [target, text] of files) {
 			const tmp = `${target}.next-${process.pid}`;
 			writeFileSync(tmp, text);
 			staged.push([tmp, target]);
 		}
-		beforeReplace?.();
+		hooks.beforeReplace?.();
 	} catch (error) {
-		for (const [tmp] of staged) rmSync(tmp, { force: true });
+		discard();
 		throw error;
 	}
-	for (const [tmp, target] of staged) renameSync(tmp, target);
+	try {
+		for (const [tmp, target] of staged) renameSync(tmp, target);
+	} catch (error) {
+		discard();
+		for (const step of hooks.rollback ?? []) {
+			try {
+				step();
+			} catch {
+				// The rest still run; the original error is the one reported.
+			}
+		}
+		throw error;
+	}
 }
 
 /** Another session held the lock past the wait. */
@@ -395,8 +428,10 @@ export function deleteArtifact(root: string, id: string): boolean {
 export function writeGallery(root: string): void {
 	mkdirSync(root, { recursive: true });
 	try {
-		withLock(join(root, ".gallery-lock"), "The artifact gallery is locked by another session.", () => {
-			writeTextAtomic(galleryPath(root), renderGallery(listArtifacts(root)));
+		withLock(join(root, ".gallery-lock"), "The artifact gallery is locked by another session.", (held) => {
+			const html = renderGallery(listArtifacts(root));
+			// A session that took the lock over while this one was paused has a newer snapshot.
+			if (held()) writeTextAtomic(galleryPath(root), html);
 		});
 	} catch (error) {
 		if (!(error instanceof LockBusyError)) throw error;
