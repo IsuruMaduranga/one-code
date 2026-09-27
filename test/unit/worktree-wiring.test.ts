@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ORIGINAL_COMMAND_CHANNEL, type OriginalCommandRecord } from "../../extensions/lib/original-command.ts";
+import { shellQuote } from "../../extensions/lib/shell-quote.ts";
 import { WORKTREE_CHANNEL, type WorktreeLocation } from "../../extensions/lib/worktree-channel.ts";
 import worktreeExtension from "../../extensions/worktree/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
@@ -58,7 +59,8 @@ describe("monitor in a worktree session", () => {
 	});
 
 	it("refuses git aimed at the shared checkout, like bash", async () => {
-		const result = await toolCall("monitor", { command: `git -C ${repo} log -1`, description: "watch" });
+		// Quoted: bash reads a Windows path's backslashes as escapes otherwise.
+		const result = await toolCall("monitor", { command: `git -C ${shellQuote(repo)} log -1`, description: "watch" });
 		expect(result?.block).toBe(true);
 		expect(result?.reason).toContain(`isolated in the worktree ${worktree}`);
 	});

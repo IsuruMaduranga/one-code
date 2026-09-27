@@ -74,7 +74,8 @@ export function gitdirFileTarget(root: string): string | undefined {
 		if (!statSync(dotGit).isFile()) return undefined;
 		const match = /^gitdir:\s*(.+?)\s*$/m.exec(readFileSync(dotGit, "utf-8"));
 		if (!match) return undefined;
-		return isAbsolute(match[1]) ? match[1] : resolve(root, match[1]);
+		// resolve in both cases: git writes `C:/…` on Windows, and callers compare native paths.
+		return isAbsolute(match[1]) ? resolve(match[1]) : resolve(root, match[1]);
 	} catch {
 		return undefined;
 	}
