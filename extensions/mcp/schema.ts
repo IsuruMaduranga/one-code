@@ -212,6 +212,9 @@ export function validateImageData(
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
+/** A JPEG end-of-image marker. */
+const JPEG_EOI = Buffer.from([0xff, 0xd9]);
+
 /** The end of `buf` with trailing zero padding dropped (some encoders pad after the end marker). */
 function paddedEnd(buf: Buffer): number {
 	let end = buf.length;
@@ -263,8 +266,9 @@ export function wholeImageProblem(buf: Buffer, mime: string): string | undefined
 			if (length < 2 || offset + 2 + length > buf.length) return "truncated JPEG (a segment runs past the data)";
 			offset += 2 + length;
 		}
-		const end = paddedEnd(buf);
-		return end >= 2 && buf[end - 2] === 0xff && buf[end - 1] === 0xd9 ? undefined : "truncated JPEG (no end-of-image marker)";
+		// The EOI marker anywhere after the scan: scan data escapes every 0xFF, and
+		// bytes after EOI (a vendor trailer, a Motion Photo payload) are allowed.
+		return buf.indexOf(JPEG_EOI, offset + 2) !== -1 ? undefined : "truncated JPEG (no end-of-image marker)";
 	}
 	if (mime === "image/gif") {
 		const header = buf.toString("latin1", 0, 6);

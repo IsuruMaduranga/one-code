@@ -207,6 +207,9 @@ describe("validateImageData", () => {
 		expect(validateImageData(TINY_JPEG, "x")).toEqual({ ok: true, mimeType: "image/jpeg" });
 		expect(validateImageData(TINY_GIF, "x")).toEqual({ ok: true, mimeType: "image/gif" });
 		expect(validateImageData(TINY_WEBP, "x")).toEqual({ ok: true, mimeType: "image/webp" });
+		// Bytes after a JPEG's end-of-image marker (a vendor trailer, a Motion Photo payload) are allowed.
+		const trailed = Buffer.concat([Buffer.from(TINY_JPEG, "base64"), Buffer.from("MotionPhoto_Data")]).toString("base64");
+		expect(validateImageData(trailed, "x")).toEqual({ ok: true, mimeType: "image/jpeg" });
 	});
 	it("rejects a valid signature with a corrupt or truncated body (a poisoned-session shape)", () => {
 		const bytes = (value: string) => Buffer.from(value, "base64");
