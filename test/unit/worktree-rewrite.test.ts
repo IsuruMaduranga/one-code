@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 // pi's own resolver, reached by file path (its package root does not export it), to pin the vendored copy to it.
 import { resolveToCwd } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/tools/path-utils.js";
@@ -100,9 +101,10 @@ describe("rewriteToolInput reads paths the way pi's tools do", () => {
 		rewriteToolInput("write", tilde, WT);
 		expect(tilde.path).toBe("~/proj/src/new.ts");
 
-		const url: Record<string, unknown> = { path: "file:///x/y.ts" };
+		const href = pathToFileURL(resolve("/x/y.ts")).href;
+		const url: Record<string, unknown> = { path: href };
 		rewriteToolInput("read", url, WT);
-		expect(url.path).toBe("file:///x/y.ts");
+		expect(url.path).toBe(href);
 	});
 
 	it("drops a leading @ before resolving a relative path against the worktree", () => {
@@ -112,7 +114,7 @@ describe("rewriteToolInput reads paths the way pi's tools do", () => {
 	});
 
 	it("lands every spelling where pi's resolveToCwd would, relative to the worktree", () => {
-		for (const spelling of ["src/a.ts", "@src/a.ts", "~/a.ts", "~", "@/abs/a.ts", "file:///x/y.ts", "/abs/b.ts", "a\u2003b.ts"]) {
+		for (const spelling of ["src/a.ts", "@src/a.ts", "~/a.ts", "~", "@/abs/a.ts", pathToFileURL(resolve("/x/y.ts")).href, "/abs/b.ts", "a\u2003b.ts"]) {
 			const normalized = normalizeToolPath(spelling);
 			expect(resolve(WT, normalized)).toBe(resolveToCwd(spelling, WT));
 		}

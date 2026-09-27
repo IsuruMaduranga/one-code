@@ -482,7 +482,8 @@ describe("decide", () => {
 
 		it("in auto mode, reads outside the working space without the classifier, except a credential path", () => {
 			expect(decide({ ...capable, mode: "auto", toolName: "read", subject: "/etc/hosts" })).toMatchObject({ decision: "allow", cause: "outside-read" });
-			expect(decide({ ...capable, mode: "auto", toolName: "grep", subject: "/etc/hosts" })).toMatchObject({ decision: "allow", cause: "outside-read" });
+			// A grep keeps the fast path only on a regular file that exists: the node binary exists on every platform.
+			expect(decide({ ...capable, mode: "auto", toolName: "grep", subject: process.execPath })).toMatchObject({ decision: "allow", cause: "outside-read" });
 			// A search of a directory tree reaches credentials no check of the named path sees.
 			expect(decide({ ...capable, mode: "auto", toolName: "grep", subject: "/etc" }).decision).toBe("classify");
 			expect(decide({ ...capable, mode: "auto", toolName: "read", subject: "~/.ssh/id_rsa" }).decision).toBe("classify");

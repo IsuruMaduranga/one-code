@@ -45,11 +45,15 @@ describe("normalizeToolPath", () => {
 	it("normalizes like pi's resolveToCwd without resolving", () => {
 		const linux = { home: "/home/u", platform: "linux" as const };
 		expect(normalizeToolPath("~", linux)).toBe("/home/u");
-		expect(normalizeToolPath("~/a", linux)).toBe("/home/u/a");
+		// pi joins with the host's path module, so the separator is the host's.
+		expect(normalizeToolPath("~/a", linux)).toBe(join("/home/u", "a"));
 		expect(normalizeToolPath("@/abs/a", linux)).toBe("/abs/a");
 		expect(normalizeToolPath("@src/a", linux)).toBe("src/a");
 		expect(normalizeToolPath("a\u00A0b.ts", linux)).toBe("a b.ts");
-		expect(normalizeToolPath("file:///x/y.ts", linux)).toBe("/x/y.ts");
+		// fileURLToPath maps a URL for the host platform.
+		expect(normalizeToolPath(pathToFileURL(resolve("/x/y.ts")).href, linux)).toBe(resolve("/x/y.ts"));
+		// A URL the host cannot map stays as written instead of throwing.
+		if (process.platform === "win32") expect(normalizeToolPath("file:///x/y.ts")).toBe("file:///x/y.ts");
 		expect(normalizeToolPath("/c/proj/a.ts", { home: "C:\\Users\\u", platform: "win32" })).toBe("C:\\proj\\a.ts");
 		expect(normalizeToolPath("/c/proj/a.ts", linux)).toBe("/c/proj/a.ts");
 	});

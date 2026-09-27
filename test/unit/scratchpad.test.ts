@@ -54,8 +54,11 @@ describe("the scratchpad on a shared temp root (a pre-created owner dir)", () =>
 	afterAll(() => rmSync(root, { recursive: true, force: true }));
 	const uid = process.getuid?.() ?? 0;
 	const dirFor = (owner: string) => join(root, owner, "-proj", "session-1", "scratchpad");
+	// POSIX owners and mode bits: Windows has neither (process.getuid is absent
+	// there, so One Code passes no uid and skips the check).
+	const posix = process.platform !== "win32";
 
-	it("creates every level private to the user", () => {
+	it.runIf(posix)("creates every level private to the user", () => {
 		const dir = dirFor("fresh");
 		expect(ensurePrivateScratchpad(dir, uid)).toBe(true);
 		expect(statSync(join(root, "fresh")).mode & 0o777).toBe(0o700);
@@ -63,7 +66,7 @@ describe("the scratchpad on a shared temp root (a pre-created owner dir)", () =>
 		expect(isPrivateScratchpad(dir, uid)).toBe(true);
 	});
 
-	it("tightens an owner dir this user made before with a readable mode", () => {
+	it.runIf(posix)("tightens an owner dir this user made before with a readable mode", () => {
 		mkdirSync(join(root, "loose"), { mode: 0o755 });
 		chmodSync(join(root, "loose"), 0o755);
 		expect(isPrivateScratchpad(dirFor("loose"), uid)).toBe(false);

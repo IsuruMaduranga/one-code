@@ -85,7 +85,7 @@ describe("isolation worktree cleanup", () => {
 		worktree = await createWorktree(entered, "agent");
 		expect(worktree.baseCommit).toBe(git(entered, "rev-parse", "HEAD"));
 		expect(existsSync(join(worktree.path, "c.txt"))).toBe(true);
-		expect(worktreeIsolationFor(worktree.path)?.sharedRoot).toBe(realpathSync(repo));
+		expect(worktreeIsolationFor(worktree.path)?.sharedRoot).toBe(realpathSync.native(repo));
 		expect(await cleanupWorktree(entered, worktree)).toBe(true);
 		expect(branches()).toBe("");
 	});

@@ -21,7 +21,8 @@ let worktree: string;
 const originals: OriginalCommandRecord[] = [];
 
 beforeEach(async () => {
-	repo = realpathSync(mkdtempSync(join(tmpdir(), "worktree-wiring-")));
+	// .native expands a Windows 8.3 short name (RUNNER~1) the way git reports the path.
+	repo = realpathSync.native(mkdtempSync(join(tmpdir(), "worktree-wiring-")));
 	const git = (...args: string[]) => execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd: repo, encoding: "utf8" });
 	git("init", "-q");
 	writeFileSync(join(repo, "a.txt"), "a\n");

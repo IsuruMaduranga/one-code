@@ -40,7 +40,9 @@ describe("file-tracker wiring", () => {
 	});
 
 	it("guards every spelling pi's tools resolve (`~/`, `@`, `file://`), both for the unread and the stale case (A6-M1)", async () => {
+		// os.homedir() reads USERPROFILE on Windows, HOME elsewhere.
 		vi.stubEnv("HOME", dir);
+		vi.stubEnv("USERPROFILE", dir);
 		try {
 			const file = path("config.json");
 			writeFileSync(file, "the user's config");

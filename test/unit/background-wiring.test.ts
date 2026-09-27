@@ -570,7 +570,9 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 		await fake.fire("agent_start", {}, ctx);
 		const start = (await fake.tools.get("monitor")!.execute(
 			"c1",
-			{ command: "while true; do echo tick; sleep 0.05; done", description: "ticker" },
+			// Ten builtin echoes per tick: well past the 50-line batch cap within the
+			// wait even on a slow runner, where each `sleep` fork costs more.
+			{ command: "while true; do for i in 1 2 3 4 5 6 7 8 9 10; do echo tick; done; sleep 0.05; done", description: "ticker" },
 			undefined,
 			undefined,
 			ctx,

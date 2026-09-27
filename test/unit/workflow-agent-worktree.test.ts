@@ -6,7 +6,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as agentLoader from "../../extensions/lib/agent-loader.ts";
 import { AgentRunner } from "../../extensions/workflow/agent-session.ts";
@@ -31,7 +31,9 @@ afterEach(() => {
 	vi.unstubAllEnvs();
 	for (const line of git(repo, "worktree", "list", "--porcelain").split("\n")) {
 		const path = line.startsWith("worktree ") ? line.slice("worktree ".length) : undefined;
-		if (path && !path.endsWith(repo.split("/").pop()!)) rmSync(join(path, ".."), { recursive: true, force: true });
+		// Everything but the main checkout (git prints `C:/…` on Windows, so compare base names):
+		// removing the main checkout's parent would remove the whole temp directory.
+		if (path && basename(path) !== basename(repo)) rmSync(join(path, ".."), { recursive: true, force: true });
 	}
 	rmSync(repo, { recursive: true, force: true });
 	rmSync(agentDir, { recursive: true, force: true });
