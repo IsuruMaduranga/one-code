@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir, uptime } from "node:os";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
@@ -79,6 +79,14 @@ describe("publishArtifact", () => {
 		expect(existsSync(join(root, meta.id, "download.js"))).toBe(true);
 		expect(readFileSync(viewerPath(root, meta.id), "utf-8")).toContain('<iframe id="page" src="index.html" title="Build Times">');
 		expect(readFileSync(galleryPath(root), "utf-8")).toContain("Build Times");
+	});
+
+	it.skipIf(process.platform === "win32")("keeps the store private to the user, tightening a loose one", () => {
+		publish("a.html", page("Private"));
+		expect(statSync(root).mode & 0o777).toBe(0o700);
+		chmodSync(root, 0o755);
+		publish("b.html", page("Still Private"));
+		expect(statSync(root).mode & 0o777).toBe(0o700);
 	});
 
 	it("falls back to the title parameter, then the file name, for a page with no <title>", () => {

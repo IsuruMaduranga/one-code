@@ -24,7 +24,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, constants as fsConstants, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { uptime } from "node:os";
 import { basename, extname, join, posix, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -81,6 +81,17 @@ export function galleryPath(root: string): string {
 
 export function fileUrl(path: string): string {
 	return pathToFileURL(path).href;
+}
+
+/**
+ * Create the store private to this user (0700), tightening one created
+ * looser, so other users on the machine cannot read the pages, which carry
+ * project code and data. Windows keeps the profile's own ACLs.
+ */
+function ensureStore(root: string): void {
+	mkdirSync(root, { recursive: true, mode: 0o700 });
+	if (process.platform === "win32") return;
+	if (statSync(root).mode & 0o077) chmodSync(root, 0o700);
 }
 
 /** A lowercase, hyphenated slug of `text`, at most 40 characters; "page" when nothing survives. */
@@ -207,6 +218,7 @@ export function publishProblem(root: string, sourcePath: string, bytes: number):
 /** Store a page: a new artifact, or a new version of an existing one. */
 export function publishArtifact(root: string, input: PublishInput): PublishResult {
 	const sourcePath = resolve(input.sourcePath);
+	ensureStore(root);
 	let found: ArtifactMeta | undefined;
 	if (input.id !== undefined) {
 		found = getArtifact(root, input.id);
@@ -215,7 +227,6 @@ export function publishArtifact(root: string, input: PublishInput): PublishResul
 		// The lookup and a creation are one step under a store-wide lock, so two
 		// first publishes of one file cannot both miss and make two artifacts.
 		const key = comparablePath(sourcePath);
-		mkdirSync(root, { recursive: true });
 		const outcome = withLock(join(root, ".create-lock"), "Another session is creating an artifact. Publish again in a moment.", () => {
 			const match = listArtifacts(root).find((meta) => comparablePath(meta.sourcePath) === key);
 			return match ? { match } : { created: createArtifact(root, input, sourcePath) };
@@ -391,40 +402,44 @@ function processAlive(pid: number): boolean {
 }
 
 /**
- * Whether the lock at `lock` was left by a holder that can no longer act on
- * it: it predates this boot (its pid may name an unrelated process now), its
+ * The owner token of the lock at `lock` ("" for none) when it was left by a
+ * holder that can no longer act on it, else undefined: it predates this boot (its pid may name an unrelated process now), its
  * owner process has exited, or it is this process (a lock body is
  * synchronous, so this process cannot be inside one while it asks), or it has
  * had no owner for 30 s. A lock whose owner is alive is never taken, however
  * old: a paused holder resumes into its commit, and no check before a rename
  * could fence it.
  */
-function lockAbandoned(lock: string): boolean {
+function abandonedToken(lock: string): string | undefined {
+	let mtime: number;
+	try {
+		mtime = statSync(lock).mtimeMs;
+	} catch {
+		return undefined; // released meanwhile
+	}
+	const token = readOwner(lock);
 	// A lock from before this boot is abandoned whatever its pid now names.
-	try {
-		if (statSync(lock).mtimeMs < Date.now() - uptime() * 1000) return true;
-	} catch {
-		return false; // released meanwhile
-	}
-	let token: string;
-	try {
-		token = readFileSync(join(lock, "owner"), "utf-8");
-	} catch {
-		try {
-			return Date.now() - statSync(lock).mtimeMs > LOCK_ORPHAN_MS;
-		} catch {
-			return false; // released meanwhile
-		}
-	}
+	if (mtime < Date.now() - uptime() * 1000) return token;
+	if (token === "") return Date.now() - mtime > LOCK_ORPHAN_MS ? token : undefined;
 	const pid = ownerPid(token);
-	return pid === undefined || pid === process.pid || !processAlive(pid);
+	return pid === undefined || pid === process.pid || !processAlive(pid) ? token : undefined;
+}
+
+/** A lock's owner token, or "" when it has none (yet). */
+function readOwner(lock: string): string {
+	try {
+		return readFileSync(join(lock, "owner"), "utf-8");
+	} catch {
+		return "";
+	}
 }
 
 /**
  * Run `fn` holding the lock at `lock`: a directory (`mkdir` is atomic across
  * processes on one machine, which the store under `~/.onecode` is) holding an
  * `owner` file with this holder's `<pid>-<uuid>` token. An abandoned lock
- * (`lockAbandoned`) is claimed by renaming it aside, so only one taker wins; a
+ * (`abandonedToken`) is claimed by renaming it aside, so only one taker wins,
+ * and put back if what moved turns out to be a newer lock; a
  * live holder's lock is waited on for 5 s, then the call fails with
  * `LockBusyError`. `fn` gets `held()`, and the lock is released only while it
  * is still this holder's.
@@ -440,13 +455,24 @@ export function withLock<T>(lock: string, busy: string, fn: (held: () => boolean
 			break;
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-			if (lockAbandoned(lock)) {
+			const judged = abandonedToken(lock);
+			if (judged !== undefined) {
 				const aside = `${lock}.stale-${token}`;
 				try {
 					renameSync(lock, aside);
-					rmSync(aside, { recursive: true, force: true });
 				} catch {
-					// Another session claimed it first; wait on theirs.
+					continue; // another session claimed it first; wait on theirs
+				}
+				// Between the judgement and the rename another session may have
+				// reclaimed the lock and made a new one here: if what moved is not
+				// the lock judged abandoned, put it back for its live owner.
+				if (readOwner(aside) === judged) rmSync(aside, { recursive: true, force: true });
+				else {
+					try {
+						renameSync(aside, lock);
+					} catch {
+						rmSync(aside, { recursive: true, force: true });
+					}
 				}
 				continue;
 			}
@@ -491,7 +517,7 @@ export function deleteArtifact(root: string, id: string): boolean {
  * rewrites it, so a publish that already landed does not report failure.
  */
 export function writeGallery(root: string): void {
-	mkdirSync(root, { recursive: true });
+	ensureStore(root);
 	try {
 		withLock(join(root, ".gallery-lock"), "The artifact gallery is locked by another session.", (held) => {
 			const html = renderGallery(listArtifacts(root));
@@ -518,8 +544,14 @@ export function exportArtifact(root: string, meta: ArtifactMeta, home: string): 
 	const downloads = join(home, "Downloads");
 	const dir = existsSync(downloads) ? downloads : home;
 	const base = slugify(meta.title);
-	let target = join(dir, `${base}.html`);
-	for (let n = 2; existsSync(target); n++) target = join(dir, `${base}-${n}.html`);
-	copyFileSync(pagePath(root, meta.id), target);
-	return target;
+	// An exclusive copy, so two exports of one name cannot both take it.
+	for (let n = 1; ; n++) {
+		const target = join(dir, n === 1 ? `${base}.html` : `${base}-${n}.html`);
+		try {
+			copyFileSync(pagePath(root, meta.id), target, fsConstants.COPYFILE_EXCL);
+			return target;
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+		}
+	}
 }
