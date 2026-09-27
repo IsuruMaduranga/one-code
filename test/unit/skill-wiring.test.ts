@@ -4,7 +4,7 @@
  * replaces the file's (lib/skill-body.ts, `/loop`), and a fired slash command
  * expands to the skill it names.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -150,6 +150,24 @@ describe("skill tool: disable-model-invocation", () => {
 			expect(result.content[0].text).toBe(`Skill ${name.replace(/^\//, "")} cannot be used with Skill tool due to disable-model-invocation`);
 			expect(result.content[0].text).not.toContain("Deploy it.");
 		}
+	});
+
+	it("refuses a skill from the turn after its flag was added", async () => {
+		const lateDir = join(cwd, ".claude", "skills", "late");
+		mkdirSync(lateDir, { recursive: true });
+		const file = join(lateDir, "SKILL.md");
+		writeFileSync(file, "---\nname: late\ndescription: Added later\n---\nLate body.\n");
+		const { fake, ctx } = await mount();
+		await fake.fire("before_agent_start", { systemPromptOptions: { skills: [{ name: "late", filePath: file }] } }, ctx);
+		const call = async () =>
+			(await fake.tools.get("skill")!.execute("t1", { skill: "late" }, undefined, undefined, ctx)) as { content: { text: string }[]; isError?: boolean };
+		expect((await call()).isError).toBeFalsy();
+		writeFileSync(file, '---\nname: late\ndescription: Added later\ndisable-model-invocation: "true"\n---\nLate body.\n');
+		const later = new Date(Date.now() + 5_000);
+		utimesSync(file, later, later);
+		// The next turn re-reads the flag (the old cache kept the first read for the session).
+		await fake.fire("before_agent_start", { systemPromptOptions: { skills: [{ name: "late", filePath: file }] } }, ctx);
+		expect((await call()).content[0].text).toBe("Skill late cannot be used with Skill tool due to disable-model-invocation");
 	});
 
 	it("still runs when the user types the command", async () => {

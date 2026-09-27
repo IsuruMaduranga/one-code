@@ -11,7 +11,7 @@
  * `before_agent_start`'s systemPromptOptions rather than rediscovered here.
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import os from "node:os";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getAgentDir, stripFrontmatter } from "@earendil-works/pi-coding-agent";
@@ -153,8 +153,31 @@ export default function skillExtension(pi: ExtensionAPI) {
 		return typeof description === "string" ? description : undefined;
 	};
 
-	/** A SKILL.md's `disable-model-invocation` flag. */
-	const readModelInvocationDisabled = (path: string): boolean => frontmatterFlag(readFrontmatter(path)?.["disable-model-invocation"]);
+	/**
+	 * A SKILL.md's `disable-model-invocation` flag, read apart from the
+	 * description cache and again whenever the file changes: a flag added
+	 * mid-session must stop the model loading the skill, while the listing's
+	 * descriptions stay byte-stable.
+	 */
+	const invocationFlagCache = new Map<string, { mtimeMs: number; disabled: boolean }>();
+	const readModelInvocationDisabled = (path: string): boolean => {
+		let mtimeMs = -1;
+		try {
+			mtimeMs = statSync(path).mtimeMs;
+		} catch {
+			// Unreadable: parsed (and failed) below, cached under -1.
+		}
+		const cached = invocationFlagCache.get(path);
+		if (cached && cached.mtimeMs === mtimeMs) return cached.disabled;
+		let disabled = false;
+		try {
+			disabled = frontmatterFlag(parseFrontmatterLoosely(readFileSync(path, "utf-8")).frontmatter?.["disable-model-invocation"]);
+		} catch {
+			// No file, no flag.
+		}
+		invocationFlagCache.set(path, { mtimeMs, disabled });
+		return disabled;
+	};
 
 	/** A SKILL.md's `argument-hint`, the prompt's placeholder after its command (lib/argument-hints.ts). */
 	const readArgumentHint = (path: string): CommandHint | undefined => frontmatterCommandHint(readFrontmatter(path));
