@@ -41,7 +41,8 @@ import {
 	shouldDefaultHideThinking,
 	type StartupSection,
 } from "./startup.ts";
-import { linesComponent, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
+import { linesComponent, safeThemeInverse, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
+import { AGENT_VIEW_CHANNEL, type AgentViewAnnouncement, type AgentViewTarget } from "../lib/agent-view.ts";
 import { markAssistantMarkdown } from "./assistant-marker.ts";
 import { PROMPT_PADDING, PromptEditor } from "./prompt-editor.ts";
 import { sanitizeTitle } from "../lib/terminal-text.ts";
@@ -217,7 +218,11 @@ interface BrandingEditorUI {
  * a pi-tui render change ever makes the marker misplace (cosmetic only — typing
  * is never affected; see prompt-marker.ts).
  */
-function installPromptMarker(ctx: { hasUI: boolean; mode: string; ui: BrandingEditorUI }, argumentHints: ReadonlyMap<string, CommandHint>): void {
+function installPromptMarker(
+	ctx: { hasUI: boolean; mode: string; ui: BrandingEditorUI },
+	argumentHints: ReadonlyMap<string, CommandHint>,
+	agentView: { target?: AgentViewTarget },
+): void {
 	if (process.env.CC_NO_INPUT_MARKER === "1") return;
 	if (!ctx.hasUI || ctx.mode !== "tui") return;
 	const ui = ctx.ui;
@@ -228,11 +233,15 @@ function installPromptMarker(ctx: { hasUI: boolean; mode: string; ui: BrandingEd
 		return `\x1b[1m${safeThemePaint(ui.theme)("accent", PROMPT_GLYPH)}\x1b[0m${" ".repeat(PROMPT_PADDING - 1)}`;
 	};
 	const renderHint = (text: string) => {
-		const placeholder = hintForInput(text, argumentHints);
+		// While an agent is viewed the empty editor addresses it (lib/agent-view.ts).
+		const placeholder = text === "" && agentView.target ? agentView.target.placeholder : hintForInput(text, argumentHints);
 		return placeholder === undefined ? undefined : safeThemePaint(ui.theme)("dim", placeholder);
 	};
+	const badge = () => agentView.target?.badge;
+	const paintBadge = (label: string) => safeThemeInverse(ui.theme)(safeThemePaint(ui.theme)("accent", ` ${label} `));
 	ui.setEditorComponent(
-		(tui: unknown, theme: unknown, keybindings: unknown) => new PromptEditor(tui as never, theme as never, keybindings as never, renderMarker, renderHint),
+		(tui: unknown, theme: unknown, keybindings: unknown) =>
+			new PromptEditor(tui as never, theme as never, keybindings as never, renderMarker, renderHint, badge, paintBadge),
 	);
 }
 
@@ -322,6 +331,11 @@ export default function brandingExtension(pi: ExtensionAPI) {
 	// Commands' argument placeholders (lib/argument-hints.ts), drawn by the prompt editor.
 	// Declared before the CC_NO_BANNER return below: session_start reads it.
 	const argumentHints = new Map<string, CommandHint>(Object.entries(PI_BUILTIN_HINTS).map(([command, hint]) => [command, { hint }]));
+	// The agent the user is viewing, if any: the editor then targets it (lib/agent-view.ts).
+	const agentView: { target?: AgentViewTarget } = {};
+	pi.events.on(AGENT_VIEW_CHANNEL, (data) => {
+		agentView.target = (data as AgentViewAnnouncement | undefined)?.target;
+	});
 	pi.events.on(ARGUMENT_HINT_CHANNEL, (data) => {
 		const { command, ...hint } = data as ArgumentHint;
 		argumentHints.set(command, hint);
@@ -365,7 +379,7 @@ export default function brandingExtension(pi: ExtensionAPI) {
 		live = true;
 		setTimeout(() => retitle(ctx), 0).unref?.();
 		ctx.ui.setHiddenThinkingLabel(THINKING_LABEL);
-		installPromptMarker(ctx as unknown as { hasUI: boolean; mode: string; ui: BrandingEditorUI }, argumentHints);
+		installPromptMarker(ctx as unknown as { hasUI: boolean; mode: string; ui: BrandingEditorUI }, argumentHints, agentView);
 		try {
 			readFileHints(promptTemplateFiles(ctx.cwd, os.homedir(), getAgentDir()));
 		} catch {

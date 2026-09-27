@@ -362,6 +362,8 @@ const TAG_RE = {
 	summary: /<summary>([\s\S]*?)<\/summary>/,
 	result: /<result>([\s\S]*?)<\/result>/,
 	event: /<event>([\s\S]*?)<\/event>/,
+	status: /<status>([\s\S]*?)<\/status>/,
+	durationMs: /<duration_ms>(\d+)<\/duration_ms>/,
 };
 
 function tagBody(block: string, tag: keyof typeof TAG_RE): string | undefined {
@@ -371,7 +373,16 @@ function tagBody(block: string, tag: keyof typeof TAG_RE): string | undefined {
 /** One frame of a notification's wire text, for display. */
 export type NotificationFrame =
 	| { kind: "agent-message"; from: string; body: string; handBack: boolean }
-	| { kind: "task"; summary: string; body: string; pointer: boolean }
+	| {
+			kind: "task";
+			summary: string;
+			body: string;
+			pointer: boolean;
+			/** `<status>`, when the frame has one (an agent or shell completion). */
+			status?: string;
+			/** `<usage>`'s `<duration_ms>`: an agent frame's run time. */
+			durationMs?: number;
+	  }
 	| { kind: "text"; text: string };
 
 /**
@@ -393,11 +404,14 @@ export function parseNotificationFrames(wire: string): NotificationFrame[] {
 			const block = match[1];
 			const body = tagBody(block, "result") ?? tagBody(block, "event");
 			const result = body === undefined ? "" : unescapeTaskText(body).trim();
+			const durationMs = tagBody(block, "durationMs");
 			frames.push({
 				kind: "task",
 				summary: unescapeTaskText(tagBody(block, "summary") ?? ""),
 				body: result,
 				pointer: result.startsWith(HAND_BACK_POINTER_PREFIX),
+				status: tagBody(block, "status"),
+				durationMs: durationMs === undefined ? undefined : Number(durationMs),
 			});
 		} else {
 			frames.push({ kind: "agent-message", from: match[2], body: match[3], handBack: match[3].includes(HAND_BACK_PREAMBLE) });

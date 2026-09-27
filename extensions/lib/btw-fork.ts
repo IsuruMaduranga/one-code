@@ -10,7 +10,10 @@
  * fork still starting; `respond` settles the request once.
  */
 
+import { randomBytes } from "node:crypto";
 import type { Message } from "@earendil-works/pi-ai";
+import { commandInputBlock, commandStdoutBlock } from "./local-command.ts";
+import { cutPlainText } from "./tui-render.ts";
 
 export const BTW_FORK_CHANNEL = "one-code:btw-fork";
 
@@ -67,10 +70,24 @@ export function btwForkedLine(name: string, taskId: string): string {
 }
 
 /**
- * The one-shot reminder the main conversation gets when a fork starts. The
- * side question never entered its context, so without this the fork's report
- * arrives as an answer to nothing the model asked for.
+ * A fork's task description, Claude Code's rule (findings §29): the question
+ * with whitespace collapsed, cut to 49 characters plus `…` past 50.
  */
-export function btwForkReminder(name: string, taskId: string, question: string): string {
-	return `The user forked a /btw side question into background agent ${name} (task ${taskId}). The question was: ${JSON.stringify(question)}. Its report will arrive as a task notification and answers that question; it is not a task you delegated.`;
+export function btwForkDescription(question: string): string {
+	return cutPlainText(question.trim().replace(/\s+/g, " "), 50);
+}
+
+/**
+ * What the main conversation is told when a fork starts: Claude Code's
+ * local-command breadcrumb for `/btw <question>` and its stdout, the forked
+ * line (findings §40), as two bare text blocks on the next user message. No
+ * caveat block precedes them, unlike other local commands.
+ */
+export function btwForkRecord(name: string, taskId: string, question: string): string[] {
+	return [commandInputBlock("btw", question.trim()), commandStdoutBlock(btwForkedLine(name, taskId))];
+}
+
+/** A fork's task id, Claude Code's shape: `a<name>-<16 hex>` (`awhat-word-is-477c2d9e80467f14`). */
+export function btwForkTaskId(name: string): string {
+	return `a${name}-${randomBytes(8).toString("hex")}`;
 }

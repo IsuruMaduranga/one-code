@@ -22,12 +22,12 @@ summary line and up to 12 tasks: `✔` for completed, `◼` for in progress,
 five seconds later and the widget goes away. A new task starts a fresh list,
 and its numbering carries on from the old one.
 
-| Key or command | What it does |
+| Key | What it does |
 |---|---|
 | **alt+t** (**ctrl+\\** on macOS) | Hides the widget down to one line, or shows it again. |
-| `/tasks` | Prints the full list. |
-| `/tasks hide` | Hides the widget. |
-| `/tasks show` | Shows it again. |
+
+`/tasks` isn't about this list. As in Claude Code, it opens the background
+tasks: see [Talk to an agent](subagents-and-workflows.md#talk-to-an-agent).
 
 The list is stored inside the session, so it survives a resume and follows
 the branch you're on in `/tree`. A list that was already finished comes back

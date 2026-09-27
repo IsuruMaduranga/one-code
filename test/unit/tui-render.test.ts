@@ -226,6 +226,31 @@ describe("notificationBody / notificationComponent", () => {
 	});
 });
 
+describe("notificationComponent: an agent's inline completion (Claude Code 2.1.283)", () => {
+	const inline = taskNotification({
+		kind: "agent",
+		taskId: "awhat-word-is-477c2d9e80467f14",
+		status: "completed",
+		summary: 'Agent "what word is in the file?" finished',
+		result: 'The word is "hello".',
+		usage: { subagentTokens: 58538, toolUses: 0, durationMs: 3762 },
+	});
+
+	it("draws one `● Agent \"…\" finished · <duration>` line with no expand hint", () => {
+		const lines = notificationComponent(theme, frameForDelivery(inline, "opens-turn"), false).render(200);
+		expect(lines).toHaveLength(1);
+		expect(lines[0]).toContain("<success>●</>");
+		expect(lines[0]).toContain('Agent "what word is in the file?" finished');
+		expect(lines[0]).toContain(" · 4s");
+		expect(lines[0]).not.toContain("ctrl+o");
+	});
+
+	it("shows the report under the line when expanded", () => {
+		const lines = notificationComponent(theme, frameForDelivery(inline, "opens-turn"), true).render(200);
+		expect(lines.at(-1)).toContain('The word is "hello".');
+	});
+});
+
 describe("notificationComponent: agent messages, Claude Code's transcript look", () => {
 	const report = agentMessage({ from: "a94a90cbdda8038c4", body: "ALTITUDE review — 3 findings.\n\n1. first", handBack: true });
 	const pointer = taskNotification({ kind: "agent", taskId: "a94a90cbdda8038c4", status: "completed", summary: 'Agent "explore-2" finished', result: handBackPointer("a94a90cbdda8038c4", false) });

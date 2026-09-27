@@ -23,11 +23,11 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { Api, Message, Model } from "@earendil-works/pi-ai";
-import { getAgentDir, type ExtensionAPI, type ExtensionContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { defineTool, getAgentDir, type ExtensionAPI, type ExtensionContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../auto-mode/actions.ts";
 import { type AgentDefinition, type AgentSource, agentDirs, discoverAgents } from "./agents.ts";
-import { modelIdentity, modelSpec, supportsImageInput } from "../lib/model-policy.ts";
+import { findConfigured, modelIdentity, modelSpec, supportsImageInput } from "../lib/model-policy.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent, withoutUnusable } from "../lib/model-unusable.ts";
 import { applicableSubagentDefault, loadSubagentDefault, persistSubagentModel, type SubagentDefault } from "./default-model.ts";
 import {
@@ -48,17 +48,17 @@ import { type GuideInput, guideAgentDefinition, settingsSetup } from "./guide-ag
 import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpServerStatus, type McpStatusEvent, type McpStatusKind } from "../lib/mcp-status.ts";
 
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
-import { BTW_FORK_CHANNEL, btwForkName, btwForkReminder, type BtwForkRequest, type BtwForkResult } from "../lib/btw-fork.ts";
+import { BTW_FORK_CHANNEL, btwForkDescription, btwForkName, btwForkRecord, btwForkTaskId, type BtwForkRequest, type BtwForkResult } from "../lib/btw-fork.ts";
 import { watchMcpTools } from "../lib/mcp-share.ts";
 import { resolveModelTier } from "../lib/model-tier.ts";
 import { pendingClaimReminder } from "./pending-claim.ts";
 import { watchPermissionBridge } from "../permissions/subagent-gate.ts";
 import { watchHookBridge } from "../hooks/subagent-bridge.ts";
-import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL, type ReminderPayload } from "../lib/reminders.ts";
 import { type BackgroundTask, generateTaskId, TASK_REGISTER_CHANNEL } from "../background/registry.ts";
 import { type ChildAction } from "../auto-mode/actions.ts";
 import { type ChildOutcome, forkTaskMessage, OUTPUT_CAP, type RpcChildHandle } from "./outcome.ts";
-import { type AgentRunRecord, freeRunName, resolveRunName, RunRegistry } from "./runs.ts";
+import { type AgentRunRecord, FORK_AGENT, freeRunName, resolveRunName, RunRegistry } from "./runs.ts";
 import { SubagentRuntime } from "./runner.ts";
 import { emptyUsage, formatStats, type UsageTotals } from "./usage.ts";
 import { cleanupWorktree, createWorktree, isGitRepo, keptWorktreeNote, type Worktree } from "./worktree.ts";
@@ -90,7 +90,10 @@ import { SUBAGENT_DEFAULT_CHANGED_CHANNEL } from "../lib/settings-channels.ts";
 import { SubagentWidget } from "./panel-widget.ts";
 import { type ProseRenderer, renderTranscript } from "./panel-render.ts";
 import { decodeStripKey, editorYieldsDown, isStripEntryKey, type StripKey } from "./panel-keys.ts";
-import { isKeyRelease } from "../lib/key-input.ts";
+import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../permissions/modes.ts";
+import { AGENT_VIEW_CHANNEL, type AgentViewAnnouncement, agentViewTarget, userMessageForAgent } from "../lib/agent-view.ts";
+import { isKeyRelease, keyId, keyText } from "../lib/key-input.ts";
+import { moveTasksSelection, renderTasksDialog, type TasksItem, tasksItems } from "./tasks-dialog.ts";
 import { reduceShellKey } from "./shell-panel.ts";
 import { trackShellTasks } from "../lib/shell-tasks.ts";
 import { createMarkdownProse } from "./prose.ts";
@@ -126,6 +129,8 @@ interface RunRequest {
 	fallbackModel?: string;
 	thinking?: string;
 	worktree?: boolean;
+	/** Claude Code's `description`: the run's title (AgentRunRecord.description). */
+	description?: string;
 }
 
 /**
@@ -209,7 +214,6 @@ const SubagentParams = Type.Object({
 	),
 });
 
-export const FORK_AGENT = "fork";
 
 /**
  * The anti-fabrication sentence, carried by the tool RESULT of a background
@@ -258,6 +262,16 @@ function residentPending(resident: Resident): boolean {
 
 export default function subagentsExtension(pi: ExtensionAPI) {
 	const registry = new RunRegistry();
+	/**
+	 * The session's permission mode as the permissions extension last announced
+	 * it; auto (the shipped default) until the first announcement. It picks the
+	 * hand-back's shape (notifyHandBack).
+	 */
+	let permissionMode = "auto";
+	pi.events.on(PERMISSION_STATUS_CHANNEL, (data) => {
+		const mode = (data as Partial<PermissionStatus> | undefined)?.mode;
+		if (typeof mode === "string") permissionMode = mode;
+	});
 	/**
 	 * Task ids with a blocking child (nested spawn or SendMessage resume) currently
 	 * running (SendMessage must wait for these). Keyed by task id, like `residents`:
@@ -309,6 +323,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			liveRuns.register({
 				taskId: record.taskId,
 				name: record.name,
+				description: record.description,
 				agentType: request.agent,
 				model: request.model,
 				thinking: request.thinking,
@@ -789,6 +804,18 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		return panel.rowCount() + (shellLines ? shellLines + 1 : 0) + 9;
 	};
 
+	/**
+	 * Tell the editor which agent it now addresses (lib/agent-view.ts), or that
+	 * it is back on main. Viewing a run also puts it on `/tasks`' Completed list
+	 * once it settles, as Claude Code keeps a viewed agent (findings §40).
+	 */
+	const announceView = (taskId: string | undefined) => {
+		const run = taskId === undefined ? undefined : liveRuns.get(taskId);
+		if (run) liveRuns.markViewed(run.taskId);
+		const announcement: AgentViewAnnouncement = run ? { target: agentViewTarget(run, run.agentType === FORK_AGENT) } : {};
+		pi.events.emit(AGENT_VIEW_CHANNEL, announcement);
+	};
+
 	const openView = (ctx: ExtensionContext, taskId: string) => {
 		if (view) return view.retarget(taskId);
 		let currentId = taskId;
@@ -803,6 +830,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				currentId = id;
 				scroll = 0;
 				panel.setView(id);
+				announceView(id);
 				repaintFn?.();
 			},
 			scrollBy(delta: number) {
@@ -814,11 +842,13 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				closed = true;
 				if (view === entry) view = undefined;
 				panel.setView(undefined);
+				announceView(undefined);
 				doneFn?.(null);
 			},
 		};
 		view = entry;
 		panel.setView(currentId);
+		announceView(currentId);
 		void (async () => {
 			const prose = await getProse(ctx);
 			if (closed) return;
@@ -870,10 +900,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		if (panelHookRegistered || !registerCtx.hasUI) return;
 		panelHookRegistered = true;
 		let chordArmed = false;
+		// Leaving the strip hands focus back to the editor and keeps any open view,
+		// as Claude Code's Esc does: the editor then addresses the viewed agent.
 		const leave = () => {
 			panel.setFocus(undefined);
-			closeView();
 		};
+		const editorEmpty = () => (panel.editorBaseline as { getText?(): string } | undefined)?.getText?.() === "";
 		type KeyResult = { consume: boolean } | undefined;
 		// Actions shared by both key modes (browse and read), declared once so the
 		// two switches below never drift. esc consumes only when idle — a streaming
@@ -894,7 +926,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			return { consume: true };
 		};
 		/** Unrecognized key: ctrl+x keeps the stop-all chord armed, else drop focus
-		 * (closing any open view) and let the byte resume in the editor. */
+		 * (any open view stays) and let the byte resume in the editor. */
 		const closeAndPassthrough = (): KeyResult => {
 			if (chordArmed) return { consume: true };
 			leave();
@@ -971,6 +1003,19 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				// plain typing. Claude Code's order: the FIRST ↓ lands on the shells
 				// chip when shells are running; the next ↓ moves into the agent rows.
 				if (panel.focusIndex === undefined && panel.shellFocus === undefined) {
+					// Viewing an agent with the editor focused: the page keys scroll the
+					// view, and Esc in an empty editor goes back to main.
+					if (view && panel.editorFocused()) {
+						const id = keyId(data);
+						if (id === "pageUp" || id === "pageDown") {
+							view.scrollBy(id === "pageUp" ? 10 : -10);
+							return { consume: true };
+						}
+						if (id === "escape" && editorEmpty()) {
+							closeView();
+							return { consume: true };
+						}
+					}
 					if (!isStripEntryKey(data) || !panel.editorFocused()) return undefined;
 					// In a draft, ↓ first moves the cursor, walks recalled history or the
 					// autocomplete list; the strip takes it only past the draft's last line.
@@ -996,53 +1041,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				}
 				const decoded = decodeStripKey(data, chordArmed);
 				chordArmed = decoded.chordArmed;
-				// Read mode: while a transcript view is open the arrows/page keys
-				// scroll IT (the natural gesture — pi's main screen has no mouse
-				// wheel, so PageUp/PageDown alone were the only path and few reach
-				// for them), Tab retargets to the next agent, Enter/esc close, and
-				// ← closes the transcript but keeps the panel focused on that agent
-				// (setView parked the highlight there) so ↑/↓ can pick a different
-				// agent and Enter reopens — Claude Code's back-to-selection gesture.
-				if (view) {
-					switch (decoded.key) {
-						case "up":
-							view.scrollBy(1);
-							return { consume: true };
-						case "down":
-							view.scrollBy(-1);
-							return { consume: true };
-						case "pageUp":
-							view.scrollBy(10);
-							return { consume: true };
-						case "pageDown":
-							view.scrollBy(-10);
-							return { consume: true };
-						case "left":
-							closeView();
-							return { consume: true };
-						case "switch": {
-							// Retarget to the next agent, anchored to the VIEWED run in the
-							// full row list (not the windowed selection) so it stays correct
-							// once the viewed run scrolls past MAX_STRIP_ROWS; setView then
-							// moves the strip highlight to it when it is in-window.
-							const nextId = panel.nextAgentAfter(panel.viewedTaskId());
-							if (nextId) openView(ctx, nextId);
-							return { consume: true };
-						}
-						case "open": // Enter toggles the view shut, mirroring Enter-to-open.
-							closeView();
-							return { consume: true };
-						case "leave":
-							return doLeave(ctx);
-						case "stop":
-							// Stop the agent whose transcript is open, not the strip selection.
-							return doStop(panel.viewedTaskId());
-						case "stopAll":
-							return doStopAll();
-						default:
-							return closeAndPassthrough(); // typing closes the view and resumes in the editor
-					}
-				}
 				if (!decoded.key || !AGENT_KEYS.has(decoded.key)) return closeAndPassthrough();
 				switch (decoded.key) {
 					case "up":
@@ -1073,8 +1071,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						return doStopAll();
 					case "pageUp":
 					case "pageDown":
-						// No transcript open → nothing to scroll; swallow so the page
-						// keys never leak into the editor while the strip holds focus.
+						// Scroll an open view; with none open, swallow so the page keys
+						// never leak into the editor while the strip holds focus.
+						view?.scrollBy(decoded.key === "pageUp" ? 10 : -10);
 						return { consume: true };
 				}
 			});
@@ -1152,15 +1151,17 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		record.sessionSearchDir ? join(record.sessionSearchDir, "output.log") : undefined;
 
 	/**
-	 * Claude Code's two-message hand-back for a resident agent's finished turn
-	 * (its first report, an update, a reply): the report goes out as an
-	 * `<agent-message>` from the agent — the preamble, every line indented, auto
-	 * mode's review flag above it — and the agent's own `<task-notification>`
-	 * follows, its `<result>` a pointer at that message, never the report again.
-	 * A turn that failed or was stopped delivered no report, so it is one
-	 * notification with the output (and any flag) inline in `<result>`. Both go
-	 * through the same notifier, in this order, so a coalesced round keeps the
-	 * report ahead of the pointer.
+	 * The hand-back for a resident agent's finished turn (its first report, an
+	 * update, a reply). Claude Code 2.1.283 sends one `<task-notification>` with
+	 * the report inline in `<result>` for a fork in every mode and for every agent
+	 * outside auto mode (findings §40). In auto mode a non-fork agent keeps the
+	 * two-message form: the report goes out as an `<agent-message>` from the
+	 * agent — the preamble, every line indented, auto mode's review flag above it
+	 * — and the agent's own `<task-notification>` follows, its `<result>` a
+	 * pointer at that message, never the report again. A turn that failed or was
+	 * stopped delivered no report, so it is always one notification with the
+	 * output (and any flag) inline. Both go through the same notifier, in this
+	 * order, so a coalesced round keeps the report ahead of the pointer.
 	 */
 	const notifyHandBack = (opts: {
 		/** The agent's persistent id: `from=` on the message, the SendMessage address. */
@@ -1183,6 +1184,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	}) => {
 		const status: TaskStatus = opts.stopped ? "killed" : opts.outcome.failed ? "failed" : "completed";
 		const warning = opts.review ? handBackWarning(opts.review) : undefined;
+		const record = registry.resolve(opts.from);
 		const details = { ...opts.details, taskId: opts.taskId, name: opts.name, failed: status === "failed", reviewed: opts.review !== undefined };
 		const envelope = (result: string) =>
 			taskNotification({
@@ -1191,12 +1193,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				toolUseId: opts.toolUseId,
 				outputFile: opts.outputFile,
 				status,
-				summary: agentSummary(opts.name, status),
+				summary: agentSummary(record?.description ?? opts.name, status),
 				note: AGENT_NOTE,
 				result,
 				usage: { subagentTokens: opts.outcome.usage.total, toolUses: opts.outcome.toolCalls, durationMs: Date.now() - opts.startedAt },
 			});
-		if (status !== "completed") {
+		if (status !== "completed" || record?.agent === FORK_AGENT || permissionMode !== "auto") {
 			notify("subagent-result", envelope(withReview(opts.report, warning)), details);
 			return;
 		}
@@ -1300,7 +1302,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			}) as never,
 			async execute(_toolCallId: string, params: unknown, signal?: AbortSignal) {
 				const ctx = lastCtx;
-				const p = (params ?? {}) as { subagent_type?: unknown; task?: unknown; prompt?: unknown; name?: unknown };
+				const p = (params ?? {}) as { subagent_type?: unknown; task?: unknown; prompt?: unknown; name?: unknown; description?: unknown };
+				const description = typeof p.description === "string" && p.description.trim() ? p.description.trim() : undefined;
 				const agentName = typeof p.subagent_type === "string" ? p.subagent_type : "";
 				const taskInput = typeof p.task === "string" ? p.task : typeof p.prompt === "string" ? p.prompt : "";
 				const task = taskInput.trim();
@@ -1343,6 +1346,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					model: resolved,
 					thinking: undefined,
 					depth: parentDepth + 1,
+					...(description ? { description } : {}),
 				};
 				registry.add(record); // SendMessage from main can reach the nested run too
 
@@ -1378,6 +1382,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 							agent: agentDef.name,
 							task,
 							name,
+							description,
 							model: resolved,
 							fallbackModel: spawnFallbackModel(resolved, resolution.source, ctx.model),
 						},
@@ -1701,11 +1706,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					} else {
 						// A turn nobody is waiting on (e.g. a steer that raced past its
 						// target turn and ran on its own) must still surface.
+						// Only the launch's notification names its tool call; a later
+						// turn's notifies without one, as Claude Code's do (findings §40).
 						notifyHandBack({
 							from: p.record.taskId,
 							taskId: p.record.taskId,
 							name: p.record.name,
-							toolUseId: toolCallId,
 							outputFile: logPath,
 							outcome,
 							stopped,
@@ -1779,7 +1785,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		if (!sessionFile) return { error: "Cannot fork: this session is not persisted (started with --no-session), so there is no conversation to clone." };
 		// Named from the question, as Claude Code names a /btw fork.
 		const name = freeRunName(registry.names(), btwForkName(request.question));
-		const taskId = generateTaskId();
+		const taskId = btwForkTaskId(name);
 		// The session's current model and thinking, explicitly: before the first
 		// turn there is no transcript for the fork to restore them from.
 		const prepared: PreparedRun = {
@@ -1787,12 +1793,21 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				agent: FORK_AGENT,
 				task: request.question,
 				name,
+				description: btwForkDescription(request.question),
 				fork: true,
 				model: ctx.model ? modelSpec(ctx.model) : undefined,
 				thinking: pi.getThinkingLevel(),
 			},
 			agentDef: undefined,
-			record: { name, agent: FORK_AGENT, taskId, sessionSearchDir: runSessionDir(ctx, taskId) ?? "", cwd: workCwd(ctx), depth: 0 },
+			record: {
+				name,
+				agent: FORK_AGENT,
+				taskId,
+				sessionSearchDir: runSessionDir(ctx, taskId) ?? "",
+				cwd: workCwd(ctx),
+				depth: 0,
+				description: btwForkDescription(request.question),
+			},
 		};
 		registry.add(prepared.record);
 		// The session can be torn down while the runtime or the child starts; a
@@ -1809,7 +1824,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			return { error: "The session ended before the fork started." };
 		}
 		if (!launched) return { error: line };
-		pi.events.emit(REMINDER_CHANNEL, { text: btwForkReminder(name, taskId, request.question) });
+		for (const text of btwForkRecord(name, taskId, request.question)) {
+			pi.events.emit(REMINDER_CHANNEL, { text, placement: "user-prepend", raw: true } satisfies ReminderPayload);
+		}
 		return { name, taskId };
 	};
 	pi.events.on(BTW_FORK_CHANNEL, (data) => {
@@ -1922,6 +1939,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					agent: entry.agent,
 					task: entry.task,
 					name,
+					description: params.description?.trim() || undefined,
 					fork: entry.agent === FORK_AGENT,
 					model: params.model,
 					thinking: params.thinking,
@@ -1996,6 +2014,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 						model: request.model,
 						thinking: request.thinking,
 						depth: 0,
+						...(request.description ? { description: request.description } : {}),
 					},
 				};
 			});
@@ -2184,7 +2203,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		},
 	});
 
-	pi.registerTool({
+	const sendMessageTool = defineTool({
 		name: "SendMessage",
 		label: "Send Message",
 		...ccToolRenderers<{ to?: string; summary?: string; message?: string }>("Send Message", {
@@ -2490,6 +2509,128 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				details: { agentRuns: [record], taskId },
 			};
 		},
+	});
+	pi.registerTool(sendMessageTool);
+
+	/**
+	 * What the user submits while viewing an agent goes to that agent, as in
+	 * Claude Code (findings §40): Claude Code's mid-turn wrapper, steered into a
+	 * running turn or starting one on an idle resident, whose reply notifies
+	 * under the agent's own task id. A released or finished agent resumes
+	 * through SendMessage's path. Slash commands, skills and `!` shell lines
+	 * keep their main-conversation meaning.
+	 */
+	const deliverFromView = async (ctx: ExtensionContext, taskId: string, text: string) => {
+		const record = registry.resolve(taskId);
+		const fail = (reason: string) => ctx.ui.notify(`Could not send the message to ${record?.name ?? "the agent"}: ${reason}`, "error");
+		if (!record) return fail("the agent is gone.");
+		const wrapped = userMessageForAgent(text);
+		const resident = residents.get(record.taskId);
+		if (resident && !resident.handle.exited()) {
+			liveRuns.block(record.taskId, { kind: "user", text });
+			try {
+				await resident.handle.send(wrapped);
+			} catch (error) {
+				fail((error as Error).message);
+			}
+			return;
+		}
+		const result = (await sendMessageTool.execute(`view-${Date.now()}`, { to: record.taskId, message: wrapped }, undefined, undefined, ctx)) as {
+			content: Array<{ type: string; text?: string }>;
+			isError?: boolean;
+		};
+		if (result.isError) fail(result.content.map((block) => block.text ?? "").join(" "));
+	};
+	pi.on("input", (event, ctx) => {
+		const taskId = view ? panel.viewedTaskId() : undefined;
+		if (!taskId || event.source !== "interactive") return undefined;
+		const text = event.text.trim();
+		if (!text || text.startsWith("/") || text.startsWith("!")) return undefined;
+		void deliverFromView(ctx, taskId, event.text).catch((error: unknown) => {
+			ctx.ui.notify(`Could not send the message: ${error instanceof Error ? error.message : String(error)}`, "error");
+		});
+		return { action: "handled" as const };
+	});
+
+	/** A run's model as Claude Code names it in `/tasks` (`Sonnet 5`), else its spec. */
+	const modelLabel = (ctx: ExtensionContext, spec: string | undefined): string | undefined => {
+		if (!spec) return undefined;
+		try {
+			return findConfigured(ctx.modelRegistry.getAvailable(), spec)?.name ?? spec;
+		} catch {
+			return spec; // no registry (a torn-down session)
+		}
+	};
+
+	/**
+	 * `/tasks`: Claude Code's Background dialog (findings §40): running shells,
+	 * running agents, and the finished agents the user viewed. Enter views an
+	 * agent (or opens a shell's details below the editor), x stops the selected
+	 * running task, Esc closes.
+	 */
+	const openTasksDialog = async (ctx: ExtensionContext) => {
+		if (!ctx.hasUI) return;
+		const build = () => {
+			const runs = liveRuns.list().filter((run) => run.depth === 0);
+			const shells = shellTasks.running().map((task) => ({ kind: "shell" as const, id: task.id, text: task.command ?? task.description, running: true }));
+			const agents = [
+				...runs.filter((run) => run.status === "running"),
+				...runs.filter((run) => run.status !== "running" && run.viewed),
+			].map((run) => ({ kind: "agent" as const, taskId: run.taskId, text: run.label, model: modelLabel(ctx, run.model), running: run.status === "running" }));
+			return { shells, agents };
+		};
+		let selected = 0;
+		// Rebuilt when a run or shell changes, not per frame or keystroke.
+		let snapshot = build();
+		// The rows on screen: keys act on what the user sees, even when a change
+		// has rebuilt the snapshot and its render is still pending.
+		let shown = tasksItems(snapshot);
+		const chosen = await ctx.ui.custom<TasksItem | null>((tui, theme, _keybindings, done) => {
+			const paint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme) };
+			const refresh = () => {
+				snapshot = build();
+				tui.requestRender();
+			};
+			const unsubscribe = liveRuns.subscribe(refresh);
+			const unsubscribeShells = shellTasks.subscribe(refresh);
+			const finish = (value: TasksItem | null) => {
+				unsubscribe();
+				unsubscribeShells();
+				done(value);
+			};
+			return {
+				render: (width: number) => {
+					shown = tasksItems(snapshot);
+					selected = Math.max(0, Math.min(selected, shown.length - 1));
+					return ["", ...renderTasksDialog({ ...snapshot, selected, width }, paint), ""].map((line) => truncateLine(line, width));
+				},
+				handleInput: (data: string) => {
+					if (isKeyRelease(data)) return;
+					const items = shown;
+					const id = keyId(data);
+					if (id === "escape") return finish(null);
+					if (id === "up" || id === "down") {
+						selected = moveTasksSelection(selected, id, items.length);
+						tui.requestRender();
+						return;
+					}
+					const item = items[selected];
+					if (id === "enter") return item ? finish(item) : undefined;
+					if (keyText(data)?.toLowerCase() === "x" && item?.running) {
+						if (item.kind === "agent") void stopAgent(item.taskId);
+						else shellTasks.running().find((task) => task.id === item.id)?.stop();
+						tui.requestRender();
+					}
+				},
+				invalidate: () => {},
+			};
+		});
+		if (chosen?.kind === "agent") openView(ctx, chosen.taskId);
+		else if (chosen?.kind === "shell") panel.setShellFocus({ stage: "details", selectedId: chosen.id });
+	};
+	registerLocalCommand(pi, "tasks", {
+		description: "List background tasks: shells, running agents, and the agents you viewed",
+		handler: async (_args, ctx) => openTasksDialog(ctx as ExtensionContext),
 	});
 	pi.events.emit(DEFER_CHANNEL, { name: "SendMessage", keywords: ["message", "agent", "resume", "continue", "teammate"] });
 

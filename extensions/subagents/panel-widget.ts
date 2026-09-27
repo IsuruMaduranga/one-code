@@ -13,7 +13,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { BackgroundTask } from "../background/registry.ts";
 import type { ShellTaskTracker } from "../lib/shell-tasks.ts";
 import { linesComponent, liveUiCtx, safeThemeBold, safeThemeInverse, safeThemePaint } from "../lib/tui-render.ts";
-import { buildRows, MAX_STRIP_ROWS, nextAgentTaskId, renderStrip, type PanelRow } from "./panel-render.ts";
+import { buildRows, MAX_STRIP_ROWS, recentlyLeftStrip, renderStrip, TASKS_NOTICE, type PanelRow } from "./panel-render.ts";
 import type { LiveRunRegistry } from "./live-runs.ts";
 import {
 	anchorShellFocus,
@@ -84,7 +84,7 @@ export class SubagentWidget {
 		} catch {
 			mainBusy = false;
 		}
-		return buildRows(this.registry.list(), mainBusy, Date.now(), this.viewedId);
+		return buildRows(this.registry.list(), mainBusy, this.viewedId);
 	}
 
 	rowCount(): number {
@@ -128,12 +128,6 @@ export class SubagentWidget {
 	 * actions (stop, next-agent) anchor to this, not the windowed selection. */
 	viewedTaskId(): string | undefined {
 		return this.viewedId;
-	}
-
-	/** The agent to retarget to on Tab, relative to the viewed run in the FULL
-	 * row list (see nextAgentTaskId — avoids the windowed-selection desync). */
-	nextAgentAfter(taskId: string | undefined): string | undefined {
-		return nextAgentTaskId(this.rows(), taskId);
 	}
 
 	// --- Shell-manager state (Claude Code's ↓-to-manage flow) ---
@@ -265,6 +259,7 @@ export class SubagentWidget {
 			this.syncTicker(false);
 			return;
 		}
+		const now = Date.now();
 		const rows = this.rows();
 		const shellVisible = this.shellVisible();
 		// The chip is time-invariant while every shell runs (count changes arrive
@@ -273,11 +268,13 @@ export class SubagentWidget {
 		// shells are lingering, whose expiry is what hides the section.
 		const shellStage = this.shellFocus?.stage;
 		const lingering = shellVisible && this.shellTasks().length > this.runningShellCount();
-		this.syncTicker(rows.length > 1 || shellStage === "list" || shellStage === "details" || lingering);
+		// A run that just left the strip leaves Claude Code's `/tasks` pointer behind for a moment.
+		const notice = rows.length <= 1 && recentlyLeftStrip(this.registry.list(), now, this.viewedId);
+		this.syncTicker(rows.length > 1 || notice || shellStage === "list" || shellStage === "details" || lingering);
 		// Only the synthetic `main` row exists and no shells → nothing to show yet.
 		// Never tear down while a transcript view is open (viewedId set): clearing
 		// focus here would orphan the overlay with no key path to close it.
-		if (rows.length <= 1 && !shellVisible && this.viewedId === undefined) {
+		if (rows.length <= 1 && !shellVisible && !notice && this.viewedId === undefined) {
 			ctx.ui.setWidget(WIDGET_KEY, undefined);
 			this.focusIndex = undefined;
 			this.focusId = undefined;
@@ -288,7 +285,6 @@ export class SubagentWidget {
 		if (this.shellFocus) this.shellFocus = anchorShellFocus(this.shellFocus, this.shellIds());
 		const selected = this.focusIndex;
 		const showStrip = rows.length > 1;
-		const now = Date.now();
 		ctx.ui.setWidget(
 			WIDGET_KEY,
 			(tui, theme) => {
@@ -300,7 +296,8 @@ export class SubagentWidget {
 				const paint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme), inverse: safeThemeInverse(theme) };
 				return linesComponent((width) => {
 					const lines: string[] = [];
-					if (showStrip) lines.push(...renderStrip({ rows, selected, viewOpen: this.viewedId !== undefined, width: width - 1, now }, paint));
+					if (showStrip) lines.push(...renderStrip({ rows, selected, viewedId: this.viewedId, width: width - 1, now }, paint));
+					else if (notice) lines.push(paint.fg("dim", TASKS_NOTICE));
 					if (shellVisible) {
 						if (lines.length) lines.push("");
 						lines.push(...this.shellSectionLines(width - 1, paint));

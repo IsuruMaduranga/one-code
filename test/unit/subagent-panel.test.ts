@@ -10,12 +10,15 @@ import {
 import {
 	buildRows,
 	MAX_STRIP_ROWS,
-	nextAgentTaskId,
+	recentlyLeftStrip,
 	renderStrip,
 	renderTranscript,
+	rowLabel,
 	spinnerVerb,
 	STRIP_LINGER_MS,
+	TASKS_NOTICE,
 } from "../../extensions/subagents/panel-render.ts";
+import { userMessageForAgent } from "../../extensions/lib/agent-view.ts";
 import { wrapProse } from "../../extensions/lib/tui-render.ts";
 import { decodeStripKey } from "../../extensions/subagents/panel-keys.ts";
 import { resolvePiTuiEntry } from "../../extensions/subagents/prose.ts";
@@ -176,11 +179,11 @@ describe("LiveRunRegistry", () => {
 		expect(run.activity).toBe("Stopped");
 		const finishedAt = run.finishedAt!;
 		expect(finishedAt).toBeGreaterThan(0);
-		// The strip shows "Stopped", and it is not painted with the error token
-		// (STATUS_ROW_STYLE only maps failed → error).
-		const rows = buildRows(reg.list(), false, finishedAt);
-		const lines = renderStrip({ rows, width: 60, now: finishedAt }, paint);
-		expect(lines.some((line) => strip(line).includes("Stopped"))).toBe(true);
+		// A stopped run leaves the strip; viewed (pinned) it reads `idle`, and it
+		// is not painted with the error token (STATUS_ROW_STYLE maps failed → error).
+		expect(buildRows(reg.list(), false).map((r) => r.run?.taskId)).toEqual([undefined]);
+		const lines = renderStrip({ rows: buildRows(reg.list(), false, id), viewedId: id, width: 60, now: finishedAt }, paint);
+		expect(lines.some((line) => strip(line).includes("idle"))).toBe(true);
 		expect(lines.every((line) => !line.includes("fg:error"))).toBe(true);
 	});
 
@@ -196,12 +199,12 @@ describe("buildRows", () => {
 	it("prepends a synthetic main row reflecting main-busy", () => {
 		const reg = new LiveRunRegistry();
 		register(reg, { taskId: "a" });
-		const rows = buildRows(reg.list(), true, 5000);
+		const rows = buildRows(reg.list(), true);
 		expect(rows[0].run).toBeUndefined();
 		expect(rows[0].label).toBe("main");
 		expect(rows[0].status).toBe("running");
 		expect(rows[1].run?.taskId).toBe("a");
-		expect(buildRows(reg.list(), false, 5000)[0].status).toBe("idle");
+		expect(buildRows(reg.list(), false)[0].status).toBe("idle");
 	});
 
 	it("nests a child-spawned run under its parent in spawn order (CC's tree)", () => {
@@ -210,7 +213,7 @@ describe("buildRows", () => {
 		reg.register({ taskId: "kid1", name: "kid1", agentType: "explore", task: "t", startedAt: 2000, parentTaskId: "parent", depth: 1 });
 		reg.register({ taskId: "kid2", name: "kid2", agentType: "explore", task: "t", startedAt: 3000, parentTaskId: "parent", depth: 1 });
 		register(reg, { taskId: "other", name: "other" });
-		const rows = buildRows(reg.list(), false, 5000);
+		const rows = buildRows(reg.list(), false);
 		expect(rows.map((r) => [r.run?.taskId, r.depth])).toEqual([
 			[undefined, 0], // main
 			["other", 0], // roots newest-first
@@ -226,14 +229,14 @@ describe("buildRows", () => {
 		reg.register({ taskId: "kid", name: "kid", agentType: "explore", task: "t", startedAt: 2000, parentTaskId: "parent", depth: 1 });
 		reg.finish("parent", false);
 		reg.get("parent")!.finishedAt = 1000; // linger long expired
-		const rows = buildRows(reg.list(), false, 1000 + STRIP_LINGER_MS + 1);
+		const rows = buildRows(reg.list(), false);
 		expect(rows.map((r) => [r.run?.taskId, r.depth])).toEqual([
 			[undefined, 0],
 			["kid", 0], // orphan promoted, not vanished
 		]);
 	});
 
-	it("drops settled runs (done AND idle residents) after the linger window; keeps running ones", () => {
+	it("drops settled runs (done AND idle residents) at once, as Claude Code does; keeps running ones", () => {
 		const reg = new LiveRunRegistry();
 		register(reg, { taskId: "done1", name: "done1" });
 		register(reg, { taskId: "idle1", name: "idle1" });
@@ -242,15 +245,22 @@ describe("buildRows", () => {
 		reg.finish("done1", false);
 		reg.get("done1")!.finishedAt = 10_000;
 		reg.get("idle1")!.finishedAt = 10_000;
-		// Within the linger window the settled rows still show their final beat…
-		const during = buildRows(reg.list(), false, 10_000 + STRIP_LINGER_MS - 1).map((r) => r.run?.taskId);
-		expect(during).toEqual([undefined, "live1", "idle1", "done1"]);
-		// …after it, only running work remains; the runs stay in the registry
-		// (viewer, /agents, SendMessage still reach them).
-		const after = buildRows(reg.list(), false, 10_000 + STRIP_LINGER_MS + 1).map((r) => r.run?.taskId);
-		expect(after).toEqual([undefined, "live1"]);
+		expect(buildRows(reg.list(), false).map((r) => r.run?.taskId)).toEqual([undefined, "live1"]);
+		// The runs stay in the registry (the viewer, /tasks, /agents and SendMessage reach them).
 		expect(reg.get("done1")).toBeDefined();
 		expect(reg.get("idle1")).toBeDefined();
+	});
+
+	it("says `/tasks to see subagents` for a moment after a run leaves the strip", () => {
+		const reg = new LiveRunRegistry();
+		register(reg, { taskId: "done1", name: "done1" });
+		reg.finish("done1", false);
+		reg.get("done1")!.finishedAt = 10_000;
+		expect(recentlyLeftStrip(reg.list(), 10_000 + STRIP_LINGER_MS - 1)).toBe(true);
+		expect(recentlyLeftStrip(reg.list(), 10_000 + STRIP_LINGER_MS + 1)).toBe(false);
+		// The viewed run has not left the strip.
+		expect(recentlyLeftStrip(reg.list(), 10_001, "done1")).toBe(false);
+		expect(TASKS_NOTICE).toBe("/tasks to see subagents");
 	});
 
 	it("a woken idle resident rejoins the strip (finishedAt cleared)", () => {
@@ -259,7 +269,7 @@ describe("buildRows", () => {
 		reg.settle("r1");
 		reg.get("r1")!.finishedAt = 10_000;
 		reg.setActivity("r1", "Reading store.ts"); // steered into a new turn
-		const rows = buildRows(reg.list(), false, 10_000 + STRIP_LINGER_MS + 1).map((r) => r.run?.taskId);
+		const rows = buildRows(reg.list(), false).map((r) => r.run?.taskId);
 		expect(rows).toEqual([undefined, "r1"]);
 		expect(reg.get("r1")!.status).toBe("running");
 		expect(reg.get("r1")!.finishedAt).toBeUndefined();
@@ -272,9 +282,9 @@ describe("buildRows", () => {
 		reg.get("viewed")!.finishedAt = 10_000;
 		const now = 10_000 + STRIP_LINGER_MS + 1;
 		// Lingered out normally…
-		expect(buildRows(reg.list(), false, now).map((r) => r.run?.taskId)).toEqual([undefined]);
+		expect(buildRows(reg.list(), false).map((r) => r.run?.taskId)).toEqual([undefined]);
 		// …but stays while its transcript is the pinned (open) one.
-		expect(buildRows(reg.list(), false, now, "viewed").map((r) => r.run?.taskId)).toEqual([undefined, "viewed"]);
+		expect(buildRows(reg.list(), false, "viewed").map((r) => r.run?.taskId)).toEqual([undefined, "viewed"]);
 	});
 });
 
@@ -283,46 +293,49 @@ describe("renderStrip", () => {
 	register(reg, { taskId: "a", agentType: "general-purpose" });
 	reg.setActivity("a", "Reading tui-render.ts");
 	reg.stats("a", 2, { input: 0, output: 58800, cacheRead: 0, cacheWrite: 0, total: 0, cost: 0 });
-	const rows = buildRows(reg.list(), false, 5000);
+	const rows = buildRows(reg.list(), false);
 
-	it("shows a focus hint only when focused, and marks the selection ❯", () => {
+	it("shows Claude Code's focus hint only when focused, and marks the selection ❯", () => {
 		const unfocused = renderStrip({ rows, width: 80, now: 5000 }, paint).map(strip);
-		expect(unfocused.some((l) => l.includes("⏎ view"))).toBe(false);
-		// Unfocused: no selection caret on any row.
+		expect(unfocused.some((l) => l.includes("Enter to view"))).toBe(false);
+		// Unfocused: no selection caret on any row; main is the row on screen.
 		expect(unfocused.some((l) => l.includes("❯"))).toBe(false);
-		expect(unfocused[0]).toContain("main");
+		expect(unfocused[0]).toContain("⏺ main");
 
 		const focused = renderStrip({ rows, selected: 1, width: 80, now: 5000 }, paint).map(strip);
-		expect(focused[0]).toContain("⏎ view");
-		expect(focused[0]).toContain("x stop");
-
-		// With a transcript open the hint switches to read-mode keys, including ←
-		// back to selection (scroll/agents/switch/close).
-		const reading = renderStrip({ rows, selected: 1, viewOpen: true, width: 80, now: 5000 }, paint).map(strip);
-		expect(reading[0]).toContain("↑/↓ scroll");
-		expect(reading[0]).toContain("PgUp/PgDn page");
-		expect(reading[0]).toContain("← agents");
-		expect(reading[0]).toContain("⇥ next");
-		expect(reading[0]).not.toContain("⏎ view");
+		expect(focused[0]).toBe("Enter to view · x to stop · ctrl+x ctrl+k stop all · esc back");
 		const agentRow = focused.find((l) => l.includes("general-purpose"))!;
-		expect(agentRow).toContain("❯");
-		expect(agentRow).toContain("Reading tui-render.ts");
+		expect(agentRow).toMatch(/^❯ ◯ general-purpose {2}/);
 		expect(agentRow).toContain("58.8k");
+
+		// Viewing the agent: ↑/↓ selects, and the viewed row carries the filled dot.
+		const viewing = renderStrip({ rows, selected: 0, viewedId: "a", width: 80, now: 5000 }, paint).map(strip);
+		expect(viewing[0]).toBe("↑/↓ to select · Enter to view · ctrl+x ctrl+k stop all · esc back");
+		expect(viewing.find((l) => l.includes("general-purpose"))).toContain("⏺ general-purpose");
+		expect(viewing.find((l) => l.includes("main"))).toContain("◯ main");
+	});
+
+	it("labels a fork by its name and any other run by its type, then its description", () => {
+		const reg = new LiveRunRegistry();
+		reg.register({ taskId: "f", name: "what-word-is", agentType: "fork", task: "what word is in the file?", description: "what word is in the file?", startedAt: 1000 });
+		const out = renderStrip({ rows: buildRows(reg.list(), false), width: 100, now: 5000 }, paint).map(strip);
+		expect(out.find((l) => l.includes("what-word-is"))).toMatch(/◯ what-word-is {2}what word is in the file\?/);
+		expect(rowLabel({ agentType: "general-purpose", name: "general-purpose-1" })).toBe("general-purpose");
 	});
 
 	it("indents nested rows with the └ elbow", () => {
 		const reg = new LiveRunRegistry();
 		register(reg, { taskId: "p", name: "p", agentType: "code-review" });
 		reg.register({ taskId: "k", name: "k", agentType: "general-purpose", task: "verify widget", startedAt: 2000, parentTaskId: "p", depth: 1 });
-		const out = renderStrip({ rows: buildRows(reg.list(), false, 5000), width: 100, now: 5000 }, paint).map(strip);
+		const out = renderStrip({ rows: buildRows(reg.list(), false), width: 100, now: 5000 }, paint).map(strip);
 		expect(out.find((l) => l.includes("code-review"))).not.toContain("└");
-		expect(out.find((l) => l.includes("general-purpose"))).toMatch(/└\s+general-purpose/);
+		expect(out.find((l) => l.includes("general-purpose"))).toMatch(/└ ◯ general-purpose/);
 	});
 
 	it("collapses overflow past MAX_STRIP_ROWS", () => {
 		const big = new LiveRunRegistry();
 		for (let i = 0; i < MAX_STRIP_ROWS + 3; i++) register(big, { taskId: `t${i}`, name: `n${i}` });
-		const out = renderStrip({ rows: buildRows(big.list(), false, 5000), width: 80, now: 5000 }, paint).map(strip);
+		const out = renderStrip({ rows: buildRows(big.list(), false), width: 80, now: 5000 }, paint).map(strip);
 		expect(out.some((l) => l.includes("more — /agents"))).toBe(true);
 	});
 
@@ -396,12 +409,23 @@ describe("renderTranscript", () => {
 		const tall = new LiveRunRegistry();
 		const tid = register(tall, { task: "" });
 		for (let i = 0; i < 40; i++) tall.block(tid, { kind: "call", tool: "Read", text: `f${i}.ts` });
-		// Overflowing body → a "↑/↓ scroll" affordance on the bottom row.
+		// Overflowing body → a "PgUp/PgDn scroll" affordance on the bottom row (↑/↓ select agents).
 		const overflowing = renderTranscript({ run: tall.get(tid)!, width: 80, height: 14, scroll: 0, now: 4000 }, paint).lines.map(strip);
-		expect(overflowing.at(-1)).toContain("↑/↓ scroll");
+		expect(overflowing.at(-1)).toContain("PgUp/PgDn scroll");
 		// A short transcript that fits shows no scroll affordance.
 		const short = renderTranscript({ run: reg.get(id)!, width: 80, height: 40, scroll: 0, now: 4000 }, paint).lines.map(strip);
-		expect(short.some((l) => l.includes("↑/↓ scroll"))).toBe(false);
+		expect(short.some((l) => l.includes("PgUp/PgDn scroll"))).toBe(false);
+	});
+
+	it("opens a fork's view with `⑂ <question>` and shows the user's messages as `❯` rows", () => {
+		const forks = new LiveRunRegistry();
+		forks.register({ taskId: "f", name: "what-word-is", agentType: "fork", task: "what word is in the file?", startedAt: 1000 });
+		forks.settle("f");
+		forks.reactivate("f", userMessageForAgent("now give it a title"), 2000);
+		const out = renderTranscript({ run: forks.get("f")!, width: 80, height: 20, scroll: 0, now: 3000 }, paint).lines.map(strip);
+		expect(out).toContain("⑂ what word is in the file?");
+		expect(out).toContain("❯ now give it a title");
+		expect(out.join("\n")).not.toContain("The user sent a new message");
 	});
 
 	it("fills to exactly `height` lines with the live status at the bottom edge (overlay must paint every row)", () => {
@@ -441,23 +465,6 @@ describe("renderTranscript", () => {
 	});
 });
 
-describe("nextAgentTaskId", () => {
-	it("cycles through agent rows (skipping main), wrapping, anchored to the given run", () => {
-		const reg = new LiveRunRegistry();
-		register(reg, { taskId: "a", name: "a" });
-		register(reg, { taskId: "b", name: "b" });
-		register(reg, { taskId: "c", name: "c" });
-		const rows = buildRows(reg.list(), false, 5000); // [main, c, b, a] (newest-first)
-		expect(nextAgentTaskId(rows, "c")).toBe("b");
-		expect(nextAgentTaskId(rows, "a")).toBe("c"); // wraps past the end to the first agent
-		expect(nextAgentTaskId(rows, undefined)).toBe("c"); // no anchor → first agent
-		expect(nextAgentTaskId(rows, "gone")).toBe("c"); // stale id → first agent
-	});
-	it("returns undefined when there are no agent rows", () => {
-		expect(nextAgentTaskId(buildRows([], false, 0), "x")).toBeUndefined();
-	});
-});
-
 describe("spinnerVerb", () => {
 	it("advances over time and is stable within a 3s window", () => {
 		expect(spinnerVerb(0, 0)).toBe(spinnerVerb(0, 2000));
@@ -487,7 +494,7 @@ describe("decodeStripKey", () => {
 		// open (retarget to the next agent); with no view open the agents branch
 		// treats it like typing. Right still decodes to nothing; left and space
 		// decode (the shell stages use them).
-		expect(decodeStripKey("\t", false).key).toBe("switch");
+		expect(decodeStripKey("\t", false).key).toBeUndefined(); // Tab is typing (no next-agent key)
 		expect(decodeStripKey("\x1b[C", false).key).toBeUndefined();
 		expect(decodeStripKey("\x1b[D", false).key).toBe("left");
 		expect(decodeStripKey(" ", false).key).toBe("space");

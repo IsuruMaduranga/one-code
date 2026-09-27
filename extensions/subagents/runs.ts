@@ -10,6 +10,9 @@
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
+/** The synthetic agent type of a run that clones the calling conversation. */
+export const FORK_AGENT = "fork";
+
 export interface AgentRunRecord {
 	name: string;
 	agent: string;
@@ -23,6 +26,12 @@ export interface AgentRunRecord {
 	worktree?: boolean;
 	model?: string;
 	thinking?: string;
+	/**
+	 * The run's short title, Claude Code's `description`: the Agent call's
+	 * `description`, or a `/btw` fork's question. The strip, `/tasks` and the
+	 * notification summary show it (findings §40); absent, they show the name.
+	 */
+	description?: string;
 	/**
 	 * Nesting level: 0 = spawned by main, 1 = spawned by a child's own Agent
 	 * tool. Set once at creation and read by every spawn-tool handout (the

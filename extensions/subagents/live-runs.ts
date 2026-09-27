@@ -11,6 +11,7 @@
  */
 
 import { basename } from "node:path";
+import { unwrapUserMessage } from "../lib/agent-view.ts";
 import { cutPlainText, firstNonEmptyLine } from "../lib/tui-render.ts";
 import { sanitizeDisplayText } from "../lib/terminal-text.ts";
 import { normalizeToolName } from "../permissions/matcher.ts";
@@ -23,7 +24,7 @@ export type FinishOutcome = boolean | "stopped";
 
 /** One rendered block of a child's transcript, mirroring the main-session marks. */
 export interface TranscriptBlock {
-	kind: "task" | "text" | "call" | "result";
+	kind: "task" | "text" | "call" | "result" | "user";
 	/** For a call: the tool name; for a result: the tool it belongs to. */
 	tool?: string;
 	/** Rendered short content (args summary, result summary, or assistant text). */
@@ -80,6 +81,8 @@ export interface LiveRun {
 	parentTaskId?: string;
 	/** Nesting level: 0 = spawned by main, 1 = spawned by a child (CC's `└` rows). */
 	depth: number;
+	/** The user opened this run's view: `/tasks` then lists it under Completed (findings §40). */
+	viewed?: boolean;
 }
 
 /** Keep memory bounded for long/chatty children; the viewer scrolls the tail. */
@@ -130,6 +133,8 @@ export function deriveActivity(toolName: string | undefined, args: unknown, last
 export interface RegisterInput {
 	taskId: string;
 	name: string;
+	/** Claude Code's `description` (AgentRunRecord.description): the row and chip label when set. */
+	description?: string;
 	agentType: string;
 	model?: string;
 	thinking?: string;
@@ -172,7 +177,7 @@ export class LiveRunRegistry {
 			agentType: input.agentType,
 			model: input.model,
 			thinking: input.thinking,
-			label: deriveLabel(task, input.name),
+			label: input.description ? cutPlainText(sanitizeDisplayText(input.description), 60) : deriveLabel(task, input.name),
 			status: "running",
 			startedAt: input.startedAt,
 			toolCalls: 0,
@@ -206,7 +211,10 @@ export class LiveRunRegistry {
 		// stats() keeps them instead of regressing the displayed cost.
 		run.baseToolCalls = run.toolCalls;
 		run.baseTokens = { ...run.tokens };
-		if (task.trim()) this.block(taskId, { kind: "task", text: task });
+		// A message the user typed in the agent's view is its `❯` row, not a task.
+		const typed = unwrapUserMessage(task);
+		if (typed !== undefined) this.block(taskId, { kind: "user", text: typed });
+		else if (task.trim()) this.block(taskId, { kind: "task", text: task });
 		this.changed(taskId);
 		return true;
 	}
@@ -244,6 +252,14 @@ export class LiveRunRegistry {
 		// Display state only: the text reaches the terminal, so its control characters go.
 		run.blocks.push({ ...block, text: sanitizeDisplayText(block.text) });
 		if (run.blocks.length > MAX_BLOCKS) run.blocks.splice(0, run.blocks.length - MAX_BLOCKS);
+		this.changed(taskId);
+	}
+
+	/** The user opened this run's view (it joins `/tasks`' Completed list once settled). */
+	markViewed(taskId: string): void {
+		const run = this.byId.get(taskId);
+		if (!run || run.viewed) return;
+		run.viewed = true;
 		this.changed(taskId);
 	}
 
