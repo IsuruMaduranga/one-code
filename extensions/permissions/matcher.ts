@@ -558,6 +558,9 @@ export function extractSubject(toolName: string, input: Record<string, unknown>)
 		case "read_mcp_resource":
 		case "read_mcp_resource_dir":
 			return str("uri") ?? "";
+		case "artifact":
+			// publish names its source; list, open and delete show their arguments.
+			return pathArgument(input) ?? compactArguments(input);
 	}
 	if (isPathSubjectTool(name)) return pathArgument(input) ?? "";
 	return pathArgument(input) ?? compactArguments(input);
@@ -693,8 +696,17 @@ export function toolTier(toolName: string): ToolTier {
  */
 export function isPathSubjectTool(toolName: string): boolean {
 	const name = normalizeToolName(toolName);
-	return isWritingTool(name) || toolTier(name) === "safe";
+	return isWritingTool(name) || toolTier(name) === "safe" || READS_A_PATH.has(name);
 }
+
+/**
+ * Custom-tier tools that read the file their path argument names: `artifact`
+ * copies its source page into the store and opens it in the browser. They stay
+ * gated like any custom tool, and the read-path rules apply on top:
+ * `blockReadsOutsideWorkingDirectories` refuses an outside path, and no allow
+ * rule covers one (the mode decides).
+ */
+const READS_A_PATH = new Set(["artifact"]);
 
 /**
  * Tools that never need approval: they change no state outside the session and
@@ -1061,7 +1073,8 @@ export function decide(params: DecideInput): Decision {
 	// Claude Code's blockReadsOutsideWorkingDirectories refuses a read tool's
 	// outside path before any ask or allow rule can prompt for it or allow it
 	// (bypass mode returned above).
-	if (params.blockReadsOutsideWorkingDirectories && tier === "safe" && subject && !workingSpaceHolds(subject, params.resolvedSubject ?? subject, true, true)) {
+	const readsPath = tier === "safe" || READS_A_PATH.has(tool);
+	if (params.blockReadsOutsideWorkingDirectories && readsPath && subject && !workingSpaceHolds(subject, params.resolvedSubject ?? subject, true, true)) {
 		return { decision: "deny", cause: "blocked-outside-read" };
 	}
 
@@ -1148,6 +1161,10 @@ export function decide(params: DecideInput): Decision {
 		}
 		return false;
 	};
+
+	// A custom tool's read outside the working space is never pre-approved by an
+	// allow rule: a bare `Artifact` rule is for publishing the project's pages.
+	if (READS_A_PATH.has(tool) && subject && !workingSpaceHolds(subject, params.resolvedSubject ?? subject, true, true)) return outsideWorkingDir();
 
 	const usableAllow =
 		mode === "auto"

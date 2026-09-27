@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runInNewContext } from "node:vm";
@@ -81,6 +81,32 @@ describe("publishArtifact", () => {
 	it("falls back to the title parameter, then the file name, for a page with no <title>", () => {
 		expect(publish("a.html", "<p>a</p>", { title: "Given Title" }).meta.title).toBe("Given Title");
 		expect(publish("plain-notes.html", "<p>b</p>").meta.title).toBe("plain-notes");
+		// A blank title parameter is no title.
+		expect(publish("blank.html", "<p>c</p>", { title: "   " }).meta).toMatchObject({ title: "blank", id: "blank-s3" });
+	});
+
+	it("leaves the artifact untouched when a write fails partway", () => {
+		const first = publish("r.html", page("Sturdy", "one"));
+		// A directory where the payload's temp file goes makes that write fail.
+		mkdirSync(join(root, first.meta.id, `download.js.next-${process.pid}`));
+		expect(() => publish("r.html", page("Sturdy", "two"))).toThrow();
+		expect(getArtifact(root, first.meta.id)?.version).toBe(1);
+		expect(readFileSync(pagePath(root, first.meta.id), "utf-8")).toBe(page("Sturdy", "one"));
+		expect(existsSync(join(root, first.meta.id, "versions"))).toBe(false);
+		expect(readdirSync(join(root, first.meta.id)).filter((name) => name.includes(".next-") && name !== `download.js.next-${process.pid}`)).toEqual([]);
+		// Once the obstacle is gone, the same publish goes through as version 2.
+		rmSync(join(root, first.meta.id, `download.js.next-${process.pid}`), { recursive: true });
+		expect(publish("r.html", page("Sturdy", "two")).meta.version).toBe(2);
+	});
+
+	it("takes over a lock a crashed session left behind", () => {
+		const first = publish("r.html", page("Locked", "one"));
+		const lock = join(root, first.meta.id, ".lock");
+		mkdirSync(lock);
+		const old = new Date(Date.now() - 60_000);
+		utimesSync(lock, old, old);
+		expect(publish("r.html", page("Locked", "two")).meta.version).toBe(2);
+		expect(existsSync(lock)).toBe(false);
 	});
 
 	it("republishing the same source makes a new version and keeps the old one", () => {

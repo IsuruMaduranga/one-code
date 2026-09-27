@@ -80,21 +80,21 @@ function autoOpenEnabled(): boolean {
 }
 
 /** Open a page the store built: why it was not opened, or undefined when it was. */
-function showInBrowser(path: string): string | undefined {
+async function showInBrowser(path: string): Promise<string | undefined> {
 	const reason = noDisplayReason();
 	if (reason) return reason;
-	return launchOpener(openerPlan(fileUrl(path))) ? undefined : "the browser could not be started";
+	return (await launchOpener(openerPlan(fileUrl(path)))) ? undefined : "the browser could not be started";
 }
 
 /** The tool result's line about the browser. */
-function browserNote(path: string): string {
-	const failed = showInBrowser(path);
+async function browserNote(path: string): Promise<string> {
+	const failed = await showInBrowser(path);
 	return failed ? `No browser was opened: ${failed}. Give the user the link.` : "Opened it in the user's default browser.";
 }
 
 /** The /artifacts status line after opening `path`. */
-function notifyOpened(ctx: ExtensionContext, path: string, name: string): void {
-	const failed = showInBrowser(path);
+async function notifyOpened(ctx: ExtensionContext, path: string, name: string): Promise<void> {
+	const failed = await showInBrowser(path);
 	if (failed) ctx.ui.notify(`No browser was opened (${failed}): ${path}`, "warning");
 	else ctx.ui.notify(`Opened ${name}`, "info");
 }
@@ -164,9 +164,9 @@ export default function artifactsExtension(pi: ExtensionAPI) {
 			if (action === "open") {
 				if (!resolved) {
 					writeGallery(root);
-					return textResult(`Gallery: ${fileUrl(galleryPath(root))}\n${browserNote(galleryPath(root))}`);
+					return textResult(`Gallery: ${fileUrl(galleryPath(root))}\n${await browserNote(galleryPath(root))}`);
 				}
-				return textResult(`${fileUrl(viewerPath(root, resolved))}\n${browserNote(viewerPath(root, resolved))}`);
+				return textResult(`${fileUrl(viewerPath(root, resolved))}\n${await browserNote(viewerPath(root, resolved))}`);
 			}
 
 			if (action === "delete") {
@@ -221,7 +221,7 @@ export default function artifactsExtension(pi: ExtensionAPI) {
 			];
 			if (!created) lines.push("The browser was not reopened: tell the user to refresh the tab that shows it.");
 			else if (!autoOpenEnabled()) lines.push(`Opening the browser is off (artifacts.autoOpen is false in ${tildify(oneCodeSettingsPath(homedir()), homedir())}). Give the user the link.`);
-			else lines.push(browserNote(viewer));
+			else lines.push(await browserNote(viewer));
 			lines.push(`Gallery of all artifacts: ${fileUrl(galleryPath(root))}`);
 			const details: PublishDetails = { id: meta.id, version: meta.version, path: viewer, created };
 			return textResult(lines.join("\n"), details);
@@ -246,7 +246,7 @@ export default function artifactsExtension(pi: ExtensionAPI) {
 			if (!picked) return;
 			if (picked === GALLERY) {
 				writeGallery(root);
-				notifyOpened(ctx, galleryPath(root), "the artifact gallery");
+				await notifyOpened(ctx, galleryPath(root), "the artifact gallery");
 				return;
 			}
 			const meta = labels.get(picked);
@@ -257,7 +257,7 @@ export default function artifactsExtension(pi: ExtensionAPI) {
 			const DELETE = "Delete";
 			const choice = await ctx.ui.select(meta.title, [OPEN, EXPORT, PATH, DELETE]);
 			if (choice === OPEN) {
-				notifyOpened(ctx, viewerPath(root, meta.id), meta.title);
+				await notifyOpened(ctx, viewerPath(root, meta.id), meta.title);
 			} else if (choice === EXPORT) {
 				try {
 					ctx.ui.notify(`Saved ${tildify(exportArtifact(root, meta, homedir()), homedir())}`, "info");

@@ -35,11 +35,12 @@ export function browserOpenPlan(url: string, platform: NodeJS.Platform = process
 }
 
 /**
- * Open `url`, or throw when it is refused: a sign-in the server pointed at a
- * non-web scheme is a hostile or broken server, and the error names why.
- * Returns false when the opener could not start (no browser on the box).
+ * Open `url`, or throw (synchronously) when it is refused: a sign-in the
+ * server pointed at a non-web scheme is a hostile or broken server, and the
+ * error names why. Resolves false when the opener could not start (no browser
+ * on the box).
  */
-export function openBrowser(url: string): boolean {
+export function openBrowser(url: string): Promise<boolean> {
 	const plan = browserOpenPlan(url);
 	if ("refused" in plan) throw new Error(`refusing to open the authorization URL: ${plan.refused}`);
 	return launchOpener(plan);

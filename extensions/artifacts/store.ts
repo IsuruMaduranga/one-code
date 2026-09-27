@@ -14,17 +14,19 @@
  *
  * The meta files are the only source of truth; the gallery is regenerated from
  * them, so two sessions publishing at once cannot leave it naming a missing
- * page for longer than the next write.
+ * page for longer than the next write. A publish stages every file before it
+ * replaces any (commitFiles), and an update holds the artifact's `.lock`, so
+ * a failed write or a concurrent publish never loses a version.
  *
  * Publishing the same source file again updates that artifact in place, as
  * Claude Code's republish-by-path does; an artifact from an earlier session is
  * updated by passing its id.
  */
 
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, extname, join, posix, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { readJsonFile, writeJsonAtomic, writeTextAtomic } from "../lib/atomic-write.ts";
+import { readJsonFile, writeTextAtomic } from "../lib/atomic-write.ts";
 import { comparablePath, isPathAtOrUnder, oneCodeStateDir, tildify } from "../lib/paths.ts";
 import { renderDownloadPayload, renderGallery } from "./gallery.ts";
 import { renderViewer } from "./viewer.ts";
@@ -203,55 +205,151 @@ export function publishProblem(root: string, sourcePath: string, bytes: number):
 /** Store a page: a new artifact, or a new version of an existing one. */
 export function publishArtifact(root: string, input: PublishInput): PublishResult {
 	const sourcePath = resolve(input.sourcePath);
-	let existing: ArtifactMeta | undefined;
+	let found: ArtifactMeta | undefined;
 	if (input.id !== undefined) {
-		existing = getArtifact(root, input.id);
-		if (!existing) throw new Error(`No artifact has the id "${input.id}". Run the artifact tool with action "list" to see the ids.`);
+		found = getArtifact(root, input.id);
+		if (!found) throw new Error(`No artifact has the id "${input.id}". Run the artifact tool with action "list" to see the ids.`);
 	} else {
 		const key = comparablePath(sourcePath);
-		existing = listArtifacts(root).find((meta) => comparablePath(meta.sourcePath) === key);
+		found = listArtifacts(root).find((meta) => comparablePath(meta.sourcePath) === key);
 	}
-
-	const title = pageTitle(input.html) ?? input.title?.trim() ?? existing?.title ?? basename(sourcePath, extname(sourcePath));
-	const description = input.description?.trim() || existing?.description;
-	const now = input.now.toISOString();
-	let meta: ArtifactMeta;
-	if (existing) {
-		const current = pagePath(root, existing.id);
-		// A size match first, so a changed page (the usual case) is never read back.
-		const unchanged = existsSync(current) && statSync(current).size === Buffer.byteLength(input.html) && readFileSync(current, "utf-8") === input.html;
-		if (unchanged) {
-			// Same bytes: refresh the details without a version that differs from nothing.
-			meta = { ...existing, title, description, sourcePath, updatedAt: now };
-			writeDetails(root, meta);
-			return { meta, created: false };
-		}
-		// Copy, never move: the current page stays in place until the atomic
-		// writes below replace it, so a failed write leaves the artifact whole.
-		if (existsSync(current)) {
-			mkdirSync(join(root, existing.id, "versions"), { recursive: true });
-			copyFileSync(current, versionPath(root, existing.id, existing.version));
-			const payload = join(root, existing.id, "download.js");
-			if (existsSync(payload)) copyFileSync(payload, join(root, existing.id, "versions", `v${existing.version}.js`));
-		}
-		meta = { ...existing, title, description, sourcePath, updatedAt: now, version: existing.version + 1 };
-	} else {
-		let id = `${slugify(title)}-${input.suffix()}`;
-		while (existsSync(join(root, id))) id = `${slugify(title)}-${input.suffix()}`;
-		meta = { id, title, description, sourcePath, project: input.project, createdAt: now, updatedAt: now, version: 1 };
-	}
-
-	writeTextAtomic(pagePath(root, meta.id), input.html);
-	writeTextAtomic(join(root, meta.id, "download.js"), renderDownloadPayload(`${slugify(meta.title)}.html`, input.html));
-	writeDetails(root, meta);
-	return { meta, created: !existing };
+	if (!found) return createArtifact(root, input, sourcePath);
+	const id = found.id;
+	// Re-read under the lock: another session may have published a version since.
+	const result = withArtifactLock(root, id, () => {
+		const existing = getArtifact(root, id);
+		if (!existing) throw new Error(`The artifact "${id}" was deleted while this publish ran. Publish again to create a new one.`);
+		return updateArtifact(root, existing, input, sourcePath);
+	});
+	writeGallery(root);
+	return result;
 }
 
-/** Write an artifact's meta file and viewer page, then the gallery. */
-function writeDetails(root: string, meta: ArtifactMeta): void {
-	writeJsonAtomic(join(root, meta.id, "meta.json"), meta);
-	writeTextAtomic(viewerPath(root, meta.id), renderViewer(meta, join(root, meta.id)));
+/** The page's `<title>`, else a non-blank `title` parameter, else the earlier title, else the file name. */
+function titleFor(input: PublishInput, sourcePath: string, existing?: ArtifactMeta): string {
+	return pageTitle(input.html) ?? (input.title?.trim() || undefined) ?? existing?.title ?? basename(sourcePath, extname(sourcePath));
+}
+
+function createArtifact(root: string, input: PublishInput, sourcePath: string): PublishResult {
+	const title = titleFor(input, sourcePath);
+	const now = input.now.toISOString();
+	let id = `${slugify(title)}-${input.suffix()}`;
+	while (existsSync(join(root, id))) id = `${slugify(title)}-${input.suffix()}`;
+	const meta: ArtifactMeta = { id, title, description: input.description?.trim() || undefined, sourcePath, project: input.project, createdAt: now, updatedAt: now, version: 1 };
+	mkdirSync(join(root, id), { recursive: true });
+	try {
+		// meta.json last: until it lands, the folder is not an artifact.
+		commitFiles([...pageFiles(root, meta, input.html), viewerFile(root, meta), metaFile(root, meta)]);
+	} catch (error) {
+		rmSync(join(root, id), { recursive: true, force: true });
+		throw error;
+	}
 	writeGallery(root);
+	return { meta, created: true };
+}
+
+function updateArtifact(root: string, existing: ArtifactMeta, input: PublishInput, sourcePath: string): PublishResult {
+	const title = titleFor(input, sourcePath, existing);
+	const description = input.description?.trim() || existing.description;
+	const now = input.now.toISOString();
+	const current = pagePath(root, existing.id);
+	// A size match first, so a changed page (the usual case) is never read back.
+	if (existsSync(current) && statSync(current).size === Buffer.byteLength(input.html) && readFileSync(current, "utf-8") === input.html) {
+		// Same bytes: refresh the details without a version that differs from nothing.
+		const meta: ArtifactMeta = { ...existing, title, description, sourcePath, updatedAt: now };
+		commitFiles([metaFile(root, meta), viewerFile(root, meta)]);
+		return { meta, created: false };
+	}
+	const meta: ArtifactMeta = { ...existing, title, description, sourcePath, updatedAt: now, version: existing.version + 1 };
+	// meta.json first: once it names the new version, the old page is already
+	// archived, so a failure partway through can repeat a version but never lose one.
+	commitFiles([metaFile(root, meta), ...pageFiles(root, meta, input.html), viewerFile(root, meta)], () => {
+		if (!existsSync(current)) return;
+		mkdirSync(join(root, existing.id, "versions"), { recursive: true });
+		copyFileSync(current, versionPath(root, existing.id, existing.version));
+		const payload = join(root, existing.id, "download.js");
+		if (existsSync(payload)) copyFileSync(payload, join(root, existing.id, "versions", `v${existing.version}.js`));
+	});
+	return { meta, created: false };
+}
+
+type StoreFile = [target: string, text: string];
+
+function pageFiles(root: string, meta: ArtifactMeta, html: string): StoreFile[] {
+	return [
+		[pagePath(root, meta.id), html],
+		[join(root, meta.id, "download.js"), renderDownloadPayload(`${slugify(meta.title)}.html`, html)],
+	];
+}
+
+function viewerFile(root: string, meta: ArtifactMeta): StoreFile {
+	return [viewerPath(root, meta.id), renderViewer(meta, join(root, meta.id))];
+}
+
+function metaFile(root: string, meta: ArtifactMeta): StoreFile {
+	return [join(root, meta.id, "meta.json"), `${JSON.stringify(meta, null, 2)}\n`];
+}
+
+/**
+ * Write every file to a temp sibling first, run `beforeReplace` (the version
+ * archive), then rename them into place in the given order. A failure while
+ * staging or archiving removes the temps and leaves the artifact untouched;
+ * only the renames, which do not fail on a healthy disk, touch live files.
+ */
+function commitFiles(files: StoreFile[], beforeReplace?: () => void): void {
+	const staged: Array<[tmp: string, target: string]> = [];
+	try {
+		for (const [target, text] of files) {
+			const tmp = `${target}.next-${process.pid}`;
+			writeFileSync(tmp, text);
+			staged.push([tmp, target]);
+		}
+		beforeReplace?.();
+	} catch (error) {
+		for (const [tmp] of staged) rmSync(tmp, { force: true });
+		throw error;
+	}
+	for (const [tmp, target] of staged) renameSync(tmp, target);
+}
+
+/** How long a publish waits for another session's lock, and when a lock counts as abandoned. */
+const LOCK_WAIT_MS = 5_000;
+const LOCK_STALE_MS = 30_000;
+
+/**
+ * Run `fn` holding the artifact's lock, a `.lock` directory (`mkdir` is atomic
+ * across processes), so two sessions updating one artifact cannot both claim
+ * the next version number. A lock older than 30 s is from a crashed session and
+ * is taken over.
+ */
+function withArtifactLock<T>(root: string, id: string, fn: () => T): T {
+	const lock = join(root, id, ".lock");
+	const deadline = Date.now() + LOCK_WAIT_MS;
+	for (;;) {
+		try {
+			mkdirSync(lock);
+			break;
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+			let age = Number.POSITIVE_INFINITY;
+			try {
+				age = Date.now() - statSync(lock).mtimeMs;
+			} catch {
+				continue; // released between the two calls
+			}
+			if (age > LOCK_STALE_MS) {
+				rmSync(lock, { recursive: true, force: true });
+				continue;
+			}
+			if (Date.now() > deadline) throw new Error(`Another session is publishing the artifact "${id}". Publish again in a moment.`);
+			Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+		}
+	}
+	try {
+		return fn();
+	} finally {
+		rmSync(lock, { recursive: true, force: true });
+	}
 }
 
 /** Remove an artifact and every version of it. False when there was nothing to remove. */

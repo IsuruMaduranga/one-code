@@ -120,8 +120,9 @@ without the bar, the list of versions, and All artifacts. Claude Code's
 Share and Chat buttons are left out, since there is no server behind a local
 artifact.
 
-When the model publishes the same file again, the artifact is updated in
-place as a new version, and every earlier version is kept. Pick an earlier
+When the model publishes the same file again with changed contents, the
+artifact is updated in place as a new version, and every earlier version is
+kept. Publishing unchanged contents keeps the current version. Pick an earlier
 version from the title menu to view or download it. The browser tab does not
 reload by itself, so refresh it to see the update.
 

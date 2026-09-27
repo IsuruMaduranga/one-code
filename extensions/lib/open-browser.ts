@@ -4,9 +4,9 @@
  * screens the URL it is given) and the artifact viewer (`extensions/artifacts`,
  * which only ever opens `file:` URLs it built itself).
  *
- * The child is detached and unref'd so the caller never blocks on the browser
- * process, and a launch failure is swallowed to a boolean: a box with no
- * browser falls back to printing the target. On Windows the URL never passes
+ * The child is detached and unref'd once it starts, so the caller never
+ * blocks on the browser process. A launch failure resolves to false: a box
+ * with no browser falls back to printing the target. On Windows the URL never passes
  * through `cmd.exe`: `cmd /c start "" <url>` cut a URL at its first `&` and
  * handed the rest to cmd's parser as further commands. `rundll32
  * url.dll,FileProtocolHandler` takes the URL as one argument, by its System32
@@ -39,14 +39,25 @@ export function noDisplayReason(platform: NodeJS.Platform = process.platform, en
 	return undefined;
 }
 
-/** Start `plan` detached. False when the opener could not start. */
-export function launchOpener(plan: OpenerPlan): boolean {
-	try {
-		const child = spawn(plan.command, plan.args, { stdio: "ignore", detached: true });
-		child.on("error", () => {});
-		child.unref();
-		return true;
-	} catch {
-		return false;
-	}
+/**
+ * Start `plan` detached. Resolves true once the opener has started, false when
+ * it could not: a missing `xdg-open` is reported by an `error` event after
+ * `spawn` returns, so success waits for the `spawn` event. The child stays
+ * ref'd until then, so a one-shot run cannot exit mid-launch.
+ */
+export function launchOpener(plan: OpenerPlan): Promise<boolean> {
+	return new Promise((resolve) => {
+		let child: ReturnType<typeof spawn>;
+		try {
+			child = spawn(plan.command, plan.args, { stdio: "ignore", detached: true });
+		} catch {
+			resolve(false);
+			return;
+		}
+		child.once("error", () => resolve(false));
+		child.once("spawn", () => {
+			child.unref();
+			resolve(true);
+		});
+	});
 }
