@@ -431,8 +431,20 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				task.status = finalStatus;
 				task.finishedAt = Date.now();
 				if (flushTimer) clearTimeout(flushTimer);
-				log?.end();
-				finish();
+				if (log) {
+					// `finished` resolves once the spool is on disk, so a blocking
+					// task_output never names a log still being written. `close` follows
+					// a clean end and an error alike; the timer covers a stream that hangs.
+					const fallback = setTimeout(finish, 1_000);
+					fallback.unref?.();
+					log.once("close", () => {
+						clearTimeout(fallback);
+						finish();
+					});
+					log.end();
+				} else {
+					finish();
+				}
 				// Past this point everything touches the session: a monitor ending
 				// after shutdown (H1) or inside a one-shot run reports through
 				// `finished` alone.

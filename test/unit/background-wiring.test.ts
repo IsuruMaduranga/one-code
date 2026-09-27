@@ -707,7 +707,7 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 			expect(body.startsWith(`[Truncated. Full output: ${logPath}]`)).toBe(true);
 			expect(body.length).toBeLessThanOrEqual(32_000);
 			expect(body).toContain("line-4000-");
-			await new Promise((resolve) => setTimeout(resolve, 100)); // the spool's end() flushes
+			// Whole the moment the blocking task_output returns: the task finishes after the spool closes.
 			const spooled = readFileSync(logPath, "utf8");
 			expect(spooled.startsWith("line-1-padding-padding\n")).toBe(true);
 			expect(spooled).toContain("line-4000-padding-padding\n");
