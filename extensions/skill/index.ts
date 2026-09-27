@@ -85,8 +85,9 @@ export default function skillExtension(pi: ExtensionAPI) {
 	 * before_agent_start). Until then an idle skill delivery goes out as a user
 	 * message: pi's `sendMessage(…, {triggerTurn})` skips that preamble, so a
 	 * session opening with `/loop …` or `/simplify` ran its first request
-	 * without our system prompt (lib/notifications.ts, "First turn of a
-	 * session"; upstream_prs.md #17).
+	 * without our system prompt or reminder stack (lib/notifications.ts,
+	 * "First turn of a session"; upstream_prs.md #17). Later turns get the
+	 * prompt from system-prompt's context_with_system handler (idle-turn.ts).
 	 */
 	let prompted = false;
 

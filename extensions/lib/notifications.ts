@@ -604,7 +604,10 @@ export const DEFAULT_COALESCE_MS = 250;
  * no `prompt()` has run in this process, an idle notification is delivered as a
  * user message (`sendUserMessage`, source "extension"), which takes the full
  * prompt path; the cost is that this one notification renders as a user bubble.
- * Every later notification goes the custom-message way. Upstream ask:
+ * Every later notification goes the custom-message way. Its turn skips
+ * `before_agent_start` too, and pi drops a run's prompt when the run settles,
+ * so the system-prompt extension installs the prompt for it from
+ * `context_with_system` (`system-prompt/idle-turn.ts`). Upstream ask:
  * working-docs/upstream_prs.md #17.
  */
 export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOptions = {}): TaskNotifier {
