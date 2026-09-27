@@ -98,6 +98,19 @@ export function persistIfLarge(text: string, options: PersistOptions): string {
 		saved = `Output too large (${formatSize(size)}) and could not be saved to ${file}: ${(error as Error).message}. Only this preview survives — re-run with a narrower query if more is needed.`;
 	}
 
+	return persistedBlock(saved, preview, previewBytes);
+}
+
+/**
+ * The block for output already whole in a file (a monitor's spool): its path,
+ * its size and a preview, the same shape `persistIfLarge` returns, without
+ * reading or copying the file.
+ */
+export function persistedFileBlock(file: string, size: number, preview: string, previewBytes: number = PREVIEW_BYTES): string {
+	return persistedBlock(`Output too large (${formatSize(size)}). Full output saved to: ${file}`, preview, previewBytes);
+}
+
+function persistedBlock(saved: string, preview: string, previewBytes: number): string {
 	return [
 		"<persisted-output>",
 		saved,

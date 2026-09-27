@@ -34,7 +34,7 @@ import { SESSION_WORK_CHANNEL, type SessionWorkQuery } from "../../extensions/li
 import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, agentOwnsCronJobs } from "../../extensions/lib/agent-cron.ts";
 import { SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../../extensions/lib/skill-body.ts";
 import { BUNDLED_SKILLS_DIR } from "../../extensions/lib/skill-scan.ts";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WORKTREE_CHANNEL } from "../../extensions/lib/worktree-channel.ts";
@@ -771,13 +771,61 @@ describe("background wiring: monitor lifecycle (LIFECYCLE-REVIEW-2026-09-06)", (
 			)) as { content: Array<{ text: string }> };
 			const text = result.content[0].text;
 			expect(text).toContain("completed after 12000 event(s)");
+			expect(text).toContain("Preview (first 2KB):\nline-1-padding-padding-padding\n");
+			// The spool itself is named: nothing reads it whole or copies it.
 			const file = text.match(/Full output saved to: (\S+)/)?.[1];
-			expect(file).toBeDefined();
+			expect(file?.startsWith(join(dir, "monitor"))).toBe(true);
+			expect(file?.endsWith("output.log")).toBe(true);
+			expect(existsSync(join(dir, "tool-results"))).toBe(false);
 			const saved = readFileSync(file!, "utf8");
 			expect(saved.startsWith("line-1-padding-padding-padding\n")).toBe(true);
 			expect(saved).toContain("line-12000-padding-padding-padding");
 			expect(saved).not.toContain("earlier output truncated");
 		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it("a session-less one-shot monitor past the in-memory cap still spools every line", async () => {
+		const fake = mount();
+		const result = (await fake.tools.get("monitor")!.execute(
+			"c1",
+			{ command: "for i in $(seq 1 12000); do echo line-$i-padding-padding-padding; done", description: "long" },
+			undefined,
+			undefined,
+			createFakeCtx({ mode: "print", sessionManager: { getSessionDir: () => undefined, getSessionId: () => "monitor-sessionless-test" } }),
+		)) as { content: Array<{ text: string }> };
+		const file = result.content[0].text.match(/Full output saved to: (\S+)/)?.[1];
+		expect(file).toBeDefined();
+		try {
+			expect(file!).toContain(join("monitor-sessionless-test", "monitor"));
+			const saved = readFileSync(file!, "utf8");
+			expect(saved.startsWith("line-1-padding-padding-padding\n")).toBe(true);
+			expect(saved).toContain("line-12000-padding-padding-padding");
+		} finally {
+			rmSync(join(file!, "..", "..", ".."), { recursive: true, force: true });
+		}
+	});
+
+	it("a one-shot monitor past the in-memory cap whose spool fails says only the tail was kept", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "monitor-oneshot-spool-fail-"));
+		spool.fail = true;
+		try {
+			const fake = mount();
+			const result = (await fake.tools.get("monitor")!.execute(
+				"c1",
+				{ command: "for i in $(seq 1 12000); do echo line-$i-padding-padding-padding; done", description: "long" },
+				undefined,
+				undefined,
+				createFakeCtx({ mode: "print", sessionManager: { getSessionDir: () => dir } }),
+			)) as { content: Array<{ text: string }> };
+			const text = result.content[0].text;
+			expect(text).toContain("<persisted-output>");
+			expect(text).toContain("[The monitor's spool file could not be written, so only the last 200,000 characters of its output were kept.]");
+			const file = text.match(/Full output saved to: (\S+)/)?.[1];
+			expect(readFileSync(file!, "utf8")).toContain("line-12000-padding-padding-padding");
+		} finally {
+			spool.fail = false;
 			rmSync(dir, { recursive: true, force: true });
 		}
 	});

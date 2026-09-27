@@ -22,7 +22,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import { whenAborted } from "../lib/abort.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
-import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
+import { PREVIEW_BYTES, persistedFileBlock, persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { detachedSpawnOptions, KILL_GRACE_MS, stopProcessTree, waitForChildExit } from "../lib/process-tree.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
 import { bashSpawn, spawnShellCommand } from "../lib/shell-spawn.ts";
@@ -90,7 +90,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, formatNotOwner } from "../lib/agent-cron.ts";
 import { SKILL_BODY_CHANNEL, type SkillBodyQuery, SLASH_EXPAND_CHANNEL, type SlashExpandQuery } from "../lib/skill-body.ts";
 import { BUNDLED_SKILLS_DIR } from "../lib/skill-scan.ts";
-import { createWriteStream, mkdirSync, readFileSync, type WriteStream } from "node:fs";
+import { closeSync, createWriteStream, mkdirSync, openSync, readSync, statSync, type WriteStream } from "node:fs";
 import { join, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { SESSION_WORK_CHANNEL, sessionBackgroundTask, sessionCron, type SessionWorkQuery } from "../lib/session-work.ts";
@@ -104,6 +104,8 @@ const MAX_MONITOR_TIMEOUT_MS = 3_600_000;
 const MAX_BLOCK_TIMEOUT_MS = 600_000;
 /** A finished monitor that saw nothing says so, never a blank a model reads as "still running" (bash's EMPTY_OUTPUT_MARKER). */
 const MONITOR_EMPTY_OUTPUT = "(no output — the monitor received no events and nothing on stderr)";
+/** Heads a monitor's output when the start is gone: past the in-memory cap with no spool file to hold it. */
+const SPOOL_LOST_NOTE = `[The monitor's spool file could not be written, so only the last ${STORED_OUTPUT_CAP.toLocaleString("en-US")} characters of its output were kept.]\n`;
 /** setTimeout's longest delay; a later fire re-arms when this one wakes. */
 const MAX_TIMER_MS = 2 ** 31 - 1;
 function tail(text: string, cap: number): string {
@@ -121,10 +123,15 @@ function tail(text: string, cap: number): string {
  */
 let pendingShutdownNotice: string | undefined;
 
-/** `<sessionDir>/monitor/<taskId>/output.log`, beside background shells' `bash/<taskId>/`; undefined without a session dir. */
+/**
+ * `<sessionDir>/monitor/<taskId>/output.log`, beside background shells'
+ * `bash/<taskId>/`. A session-less run spools under the session's private
+ * results dir (`sessionResultsDir`), so its output is never kept only as the
+ * in-memory tail. Undefined when the folder cannot be made.
+ */
 function monitorLogPath(ctx: ExtensionContext, taskId: string): string | undefined {
 	try {
-		const dir = join(ctx.sessionManager.getSessionDir(), "monitor", taskId);
+		const dir = join(sessionResultsDir(ctx), "monitor", taskId);
 		mkdirSync(dir, { recursive: true });
 		return join(dir, "output.log");
 	} catch {
@@ -132,12 +139,24 @@ function monitorLogPath(ctx: ExtensionContext, taskId: string): string | undefin
 	}
 }
 
-/** A finished monitor's spool, or undefined when it cannot be read (the caller falls back to the in-memory tail). */
-function readSpool(path: string): string | undefined {
+/**
+ * A finished monitor's spool as a persisted-output block: the file itself is
+ * the full output, so only its size and the first `PREVIEW_BYTES` are read.
+ * Undefined when the file cannot be read.
+ */
+function spoolBlock(path: string): string | undefined {
+	let fd: number | undefined;
 	try {
-		return readFileSync(path, "utf-8");
+		const { size } = statSync(path);
+		fd = openSync(path, "r");
+		const head = Buffer.alloc(Math.min(size, PREVIEW_BYTES));
+		const read = readSync(fd, head, 0, head.length, 0);
+		// The decoder holds back a character split at the preview's end.
+		return persistedFileBlock(path, size, new StringDecoder("utf8").write(head.subarray(0, read)));
 	} catch {
 		return undefined;
+	} finally {
+		if (fd !== undefined) closeSync(fd);
 	}
 }
 
@@ -573,7 +592,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				description: params.description,
 				status,
 				startedAt: Date.now(),
-				output: () => stored || (task.status === "running" ? "" : MONITOR_EMPTY_OUTPUT),
+				output: () => (overflowed && !task.logPath ? `${SPOOL_LOST_NOTE}${stored}` : stored || (task.status === "running" ? "" : MONITOR_EMPTY_OUTPUT)),
 				stop,
 				finished,
 			};
@@ -600,9 +619,11 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				} finally {
 					unhook();
 				}
-				// Past the in-memory cap the spool holds every line; persist that, not the tail.
-				const full = overflowed && task.logPath ? readSpool(task.logPath) : undefined;
-				const output = persistIfLarge((full ?? stored).trim() || "(no events)", { dir: sessionResultsDir(ctx), id: `monitor-${id}` });
+				// Past the in-memory cap the spool holds every line: point at it rather
+				// than persist the tail. Without one, say what was lost.
+				const spooled = overflowed && task.logPath ? spoolBlock(task.logPath) : undefined;
+				const kept = overflowed && !spooled ? `${SPOOL_LOST_NOTE}${stored.trim()}` : stored.trim() || "(no events)";
+				const output = spooled ?? persistIfLarge(kept, { dir: sessionResultsDir(ctx), id: `monitor-${id}` });
 				const finalStatus = task.status;
 				let how: string = finalStatus;
 				if (finalStatus === "stopped") {
