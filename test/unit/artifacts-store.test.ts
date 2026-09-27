@@ -22,6 +22,7 @@ import {
 	slugify,
 	versionPath,
 	viewerPath,
+	withLock,
 } from "../../extensions/artifacts/store.ts";
 import { renderViewer } from "../../extensions/artifacts/viewer.ts";
 import { noDisplayReason, openerPlan } from "../../extensions/lib/open-browser.ts";
@@ -97,6 +98,21 @@ describe("publishArtifact", () => {
 		// Once the obstacle is gone, the same publish goes through as version 2.
 		rmSync(join(root, first.meta.id, `download.js.next-${process.pid}`), { recursive: true });
 		expect(publish("r.html", page("Sturdy", "two")).meta.version).toBe(2);
+	});
+
+	it("releases a lock only while it is still the holder's", () => {
+		const lock = join(base, "lock");
+		withLock(lock, "busy", (held) => {
+			expect(held()).toBe(true);
+			// Another session took it over (its token now in the owner file).
+			writeFileSync(join(lock, "owner"), "someone-else");
+			expect(held()).toBe(false);
+		});
+		expect(readFileSync(join(lock, "owner"), "utf-8")).toBe("someone-else");
+		// A released lock is gone.
+		const other = join(base, "other-lock");
+		withLock(other, "busy", () => {});
+		expect(existsSync(other)).toBe(false);
 	});
 
 	it("takes over a lock a crashed session left behind", () => {

@@ -23,6 +23,7 @@
  * updated by passing its id.
  */
 
+import { randomUUID } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, extname, join, posix, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -216,10 +217,10 @@ export function publishArtifact(root: string, input: PublishInput): PublishResul
 	if (!found) return createArtifact(root, input, sourcePath);
 	const id = found.id;
 	// Re-read under the lock: another session may have published a version since.
-	const result = withArtifactLock(root, id, () => {
+	const result = withLock(join(root, id, ".lock"), `Another session is publishing the artifact "${id}". Publish again in a moment.`, (held) => {
 		const existing = getArtifact(root, id);
 		if (!existing) throw new Error(`The artifact "${id}" was deleted while this publish ran. Publish again to create a new one.`);
-		return updateArtifact(root, existing, input, sourcePath);
+		return updateArtifact(root, existing, input, sourcePath, held);
 	});
 	writeGallery(root);
 	return result;
@@ -248,7 +249,7 @@ function createArtifact(root: string, input: PublishInput, sourcePath: string): 
 	return { meta, created: true };
 }
 
-function updateArtifact(root: string, existing: ArtifactMeta, input: PublishInput, sourcePath: string): PublishResult {
+function updateArtifact(root: string, existing: ArtifactMeta, input: PublishInput, sourcePath: string, held: () => boolean): PublishResult {
 	const title = titleFor(input, sourcePath, existing);
 	const description = input.description?.trim() || existing.description;
 	const now = input.now.toISOString();
@@ -269,6 +270,9 @@ function updateArtifact(root: string, existing: ArtifactMeta, input: PublishInpu
 		copyFileSync(current, versionPath(root, existing.id, existing.version));
 		const payload = join(root, existing.id, "download.js");
 		if (existsSync(payload)) copyFileSync(payload, join(root, existing.id, "versions", `v${existing.version}.js`));
+		// Last check before live files change: a session that took the lock over
+		// while this one was paused owns the next version now.
+		if (!held()) throw new Error(`Another session took over publishing the artifact "${existing.id}". Publish again.`);
 	});
 	return { meta, created: false };
 }
@@ -312,43 +316,64 @@ function commitFiles(files: StoreFile[], beforeReplace?: () => void): void {
 	for (const [tmp, target] of staged) renameSync(tmp, target);
 }
 
+/** Another session held the lock past the wait. */
+export class LockBusyError extends Error {}
+
 /** How long a publish waits for another session's lock, and when a lock counts as abandoned. */
 const LOCK_WAIT_MS = 5_000;
 const LOCK_STALE_MS = 30_000;
 
 /**
- * Run `fn` holding the artifact's lock, a `.lock` directory (`mkdir` is atomic
- * across processes), so two sessions updating one artifact cannot both claim
- * the next version number. A lock older than 30 s is from a crashed session and
- * is taken over.
+ * Run `fn` holding the lock at `lock`: a directory (`mkdir` is atomic across
+ * processes) holding an `owner` file with this holder's token. A lock older
+ * than 30 s is from a crashed or long-paused session: it is claimed by
+ * renaming it aside (only one taker's rename succeeds), never by deleting it
+ * in place. `fn` gets `held()`, true while the lock is still this holder's, and
+ * the lock is released only if it still is, so a holder that paused past the
+ * takeover can neither free nor overwrite its successor.
  */
-function withArtifactLock<T>(root: string, id: string, fn: () => T): T {
-	const lock = join(root, id, ".lock");
+export function withLock<T>(lock: string, busy: string, fn: (held: () => boolean) => T): T {
+	const token = `${process.pid}-${randomUUID()}`;
+	const owner = join(lock, "owner");
 	const deadline = Date.now() + LOCK_WAIT_MS;
 	for (;;) {
 		try {
 			mkdirSync(lock);
+			writeFileSync(owner, token);
 			break;
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-			let age = Number.POSITIVE_INFINITY;
+			let age: number;
 			try {
 				age = Date.now() - statSync(lock).mtimeMs;
 			} catch {
 				continue; // released between the two calls
 			}
 			if (age > LOCK_STALE_MS) {
-				rmSync(lock, { recursive: true, force: true });
+				const aside = `${lock}.stale-${token}`;
+				try {
+					renameSync(lock, aside);
+					rmSync(aside, { recursive: true, force: true });
+				} catch {
+					// Another session claimed it first; wait on theirs.
+				}
 				continue;
 			}
-			if (Date.now() > deadline) throw new Error(`Another session is publishing the artifact "${id}". Publish again in a moment.`);
+			if (Date.now() > deadline) throw new LockBusyError(busy);
 			Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
 		}
 	}
+	const held = () => {
+		try {
+			return readFileSync(owner, "utf-8") === token;
+		} catch {
+			return false;
+		}
+	};
 	try {
-		return fn();
+		return fn(held);
 	} finally {
-		rmSync(lock, { recursive: true, force: true });
+		if (held()) rmSync(lock, { recursive: true, force: true });
 	}
 }
 
@@ -360,9 +385,22 @@ export function deleteArtifact(root: string, id: string): boolean {
 	return true;
 }
 
-/** Rewrite the gallery page from the meta files. */
+/**
+ * Rewrite the gallery page from the meta files. The snapshot is taken and
+ * written under a store-wide lock, so a slower session cannot put an older
+ * snapshot over a newer one. A gallery still locked after the wait is left to
+ * that session: the gallery is derived, and the next change or `open`
+ * rewrites it, so a publish that already landed does not report failure.
+ */
 export function writeGallery(root: string): void {
-	writeTextAtomic(galleryPath(root), renderGallery(listArtifacts(root)));
+	mkdirSync(root, { recursive: true });
+	try {
+		withLock(join(root, ".gallery-lock"), "The artifact gallery is locked by another session.", () => {
+			writeTextAtomic(galleryPath(root), renderGallery(listArtifacts(root)));
+		});
+	} catch (error) {
+		if (!(error instanceof LockBusyError)) throw error;
+	}
 }
 
 /** One artifact as a line of the tool's `list` output and the non-interactive /artifacts. */
