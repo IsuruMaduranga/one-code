@@ -32,7 +32,7 @@ export class PromptEditor extends CustomEditor {
 		renderMarker: () => string,
 		renderHint: (text: string) => string | undefined = () => undefined,
 	) {
-		super(tui, theme, keybindings, { paddingX: PROMPT_PADDING });
+		super(tui, theme, keybindings, { paddingX: PROMPT_PADDING, embedWorkingStatus: true });
 		this.#renderMarker = renderMarker;
 		this.#renderHint = renderHint;
 	}
