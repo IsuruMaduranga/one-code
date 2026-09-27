@@ -12,7 +12,7 @@
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -152,7 +152,8 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 
 			let repoRoot: string;
 			try {
-				repoRoot = await git(["rev-parse", "--show-toplevel"], ctx.cwd);
+				// git prints `C:/…` on Windows; resolve gives the native form every path built from it shares.
+				repoRoot = resolve(await git(["rev-parse", "--show-toplevel"], ctx.cwd));
 			} catch {
 				return fail("enter_worktree needs a git repository; this directory is not one.");
 			}

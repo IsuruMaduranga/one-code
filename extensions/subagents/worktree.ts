@@ -11,7 +11,7 @@
 import { execFile } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { registerWorktreeIsolation, releaseWorktreeIsolation } from "../lib/worktree-isolation.ts";
 import { findProjectRoot, HARNESS_GIT_CONFIG } from "../lib/git.ts";
@@ -51,7 +51,8 @@ export async function createWorktree(cwd: string, label: string): Promise<Worktr
 	// `enter_worktree` session), so git into either is refused.
 	let sharedRoot = cwd;
 	try {
-		const top = await git(["rev-parse", "--show-toplevel"], cwd);
+		// git prints `C:/…` on Windows; resolve gives the native form.
+		const top = resolve(await git(["rev-parse", "--show-toplevel"], cwd));
 		sharedRoot = findProjectRoot(top) ?? top;
 	} catch {
 		// Keep cwd as the best available anchor.

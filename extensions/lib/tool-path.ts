@@ -47,7 +47,15 @@ export function normalizeToolPath(raw: string, options: ToolPathOptions = {}): s
 	if (platform === "win32") path = windowsShellPath(path);
 	if (path === "~") return home;
 	if (path.startsWith("~/") || (platform === "win32" && path.startsWith("~\\"))) return join(home, path.slice(2));
-	if (/^file:\/\//.test(path)) return fileURLToPath(path);
+	if (/^file:\/\//.test(path)) {
+		// A URL this platform cannot map (`file:///x` on Windows has no drive)
+		// stays as written: pi's tool then fails on it, and a guard must not throw.
+		try {
+			return fileURLToPath(path);
+		} catch {
+			return path;
+		}
+	}
 	return path;
 }
 
