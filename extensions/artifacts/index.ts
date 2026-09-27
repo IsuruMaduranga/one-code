@@ -22,7 +22,7 @@ import { registerLocalCommand } from "../lib/local-command.ts";
 import { oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 import { launchOpener, noDisplayReason, openerPlan } from "../lib/open-browser.ts";
 import { tildify } from "../lib/paths.ts";
-import { terminalLink } from "../lib/terminal-text.ts";
+import { sanitizeDisplayText, terminalLink } from "../lib/terminal-text.ts";
 import { resolveToolPath } from "../lib/tool-path.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 import {
@@ -103,10 +103,18 @@ function textResult(text: string, details: object = {}, isError = false) {
 	return { content: [{ type: "text" as const, text }], details, ...(isError ? { isError: true } : {}) };
 }
 
+/**
+ * The title for a terminal menu or notice. Titles are sanitized when stored;
+ * this also guards a meta.json edited by hand.
+ */
+function uiTitle(meta: ArtifactMeta): string {
+	return sanitizeDisplayText(meta.title);
+}
+
 /** Ask the user before deleting `meta`; the tool and /artifacts share the wording. */
 function confirmDelete(ctx: ExtensionContext, meta: ArtifactMeta): Promise<boolean> {
 	const versions = meta.version === 1 ? "its only version" : `all ${meta.version} versions`;
-	return ctx.ui.confirm(`Delete the artifact "${meta.title}"?`, `This permanently removes ${meta.id} and ${versions}.`);
+	return ctx.ui.confirm(`Delete the artifact "${uiTitle(meta)}"?`, `This permanently removes ${meta.id} and ${versions}.`);
 }
 
 export default function artifactsExtension(pi: ExtensionAPI) {
@@ -241,7 +249,7 @@ export default function artifactsExtension(pi: ExtensionAPI) {
 			}
 			const GALLERY = "Open the gallery in the browser";
 			const labels = new Map<string, ArtifactMeta>();
-			for (const meta of all) labels.set(`${meta.title}  (v${meta.version}, ${meta.id})`, meta);
+			for (const meta of all) labels.set(`${uiTitle(meta)}  (v${meta.version}, ${meta.id})`, meta);
 			const picked = await ctx.ui.select(all.length ? `${all.length} artifact${all.length === 1 ? "" : "s"}` : "No artifacts yet", [GALLERY, ...labels.keys()]);
 			if (!picked) return;
 			if (picked === GALLERY) {
@@ -255,9 +263,9 @@ export default function artifactsExtension(pi: ExtensionAPI) {
 			const EXPORT = "Save a copy to Downloads";
 			const PATH = "Show the file path";
 			const DELETE = "Delete";
-			const choice = await ctx.ui.select(meta.title, [OPEN, EXPORT, PATH, DELETE]);
+			const choice = await ctx.ui.select(uiTitle(meta), [OPEN, EXPORT, PATH, DELETE]);
 			if (choice === OPEN) {
-				await notifyOpened(ctx, viewerPath(root, meta.id), meta.title);
+				await notifyOpened(ctx, viewerPath(root, meta.id), uiTitle(meta));
 			} else if (choice === EXPORT) {
 				try {
 					ctx.ui.notify(`Saved ${tildify(exportArtifact(root, meta, homedir()), homedir())}`, "info");
@@ -269,7 +277,7 @@ export default function artifactsExtension(pi: ExtensionAPI) {
 			} else if (choice === DELETE) {
 				if (await confirmDelete(ctx, meta)) {
 					deleteArtifact(root, meta.id);
-					ctx.ui.notify(`Deleted ${meta.title}`, "info");
+					ctx.ui.notify(`Deleted ${uiTitle(meta)}`, "info");
 				}
 			}
 		},

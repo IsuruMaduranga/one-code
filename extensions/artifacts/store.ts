@@ -30,6 +30,7 @@ import { basename, extname, join, posix, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { readJsonFile, writeTextAtomic } from "../lib/atomic-write.ts";
 import { comparablePath, isPathAtOrUnder, oneCodeStateDir, tildify } from "../lib/paths.ts";
+import { sanitizeDisplayText } from "../lib/terminal-text.ts";
 import { renderDownloadPayload, renderGallery } from "./gallery.ts";
 import { renderViewer } from "./viewer.ts";
 
@@ -250,7 +251,9 @@ export function publishArtifact(root: string, input: PublishInput): PublishResul
 
 /** The page's `<title>`, else a non-blank `title` parameter, else the earlier title, else the file name. */
 function titleFor(input: PublishInput, sourcePath: string, existing?: ArtifactMeta): string {
-	return pageTitle(input.html) ?? (input.title?.trim() || undefined) ?? existing?.title ?? basename(sourcePath, extname(sourcePath));
+	const title = pageTitle(input.html) ?? (input.title?.trim() || undefined) ?? existing?.title ?? basename(sourcePath, extname(sourcePath));
+	// The title reaches terminal menus: no escape sequence or control character survives.
+	return sanitizeDisplayText(title).replace(/\s+/g, " ").trim() || basename(sourcePath, extname(sourcePath));
 }
 
 function createArtifact(root: string, input: PublishInput, sourcePath: string): PublishResult {
@@ -382,6 +385,12 @@ export class LockBusyError extends Error {}
 const LOCK_WAIT_MS = 5_000;
 /** How long an ownerless lock (a crash between `mkdir` and writing the owner) is left alone. */
 const LOCK_ORPHAN_MS = 30_000;
+/**
+ * Past this age a lock is abandoned even if its pid is alive: a crashed
+ * holder's pid may have been reused. A publish holds its lock for
+ * milliseconds, so only a holder asleep this long could still resume.
+ */
+const LOCK_MAX_AGE_MS = 10 * 60_000;
 
 /**
  * The process id in a lock's owner token (`<pid>-<uuid>`), or undefined.
@@ -418,8 +427,9 @@ function abandonedToken(lock: string): string | undefined {
 		return undefined; // released meanwhile
 	}
 	const token = readOwner(lock);
-	// A lock from before this boot is abandoned whatever its pid now names.
-	if (mtime < Date.now() - uptime() * 1000) return token;
+	// A lock from before this boot, or older than any real publish, is
+	// abandoned whatever its pid now names.
+	if (mtime < Date.now() - uptime() * 1000 || Date.now() - mtime > LOCK_MAX_AGE_MS) return token;
 	if (token === "") return Date.now() - mtime > LOCK_ORPHAN_MS ? token : undefined;
 	const pid = ownerPid(token);
 	return pid === undefined || pid === process.pid || !processAlive(pid) ? token : undefined;
@@ -466,12 +476,15 @@ export function withLock<T>(lock: string, busy: string, fn: (held: () => boolean
 				// Between the judgement and the rename another session may have
 				// reclaimed the lock and made a new one here: if what moved is not
 				// the lock judged abandoned, put it back for its live owner.
+				// If the put-back fails (yet another lock is there now), the moved one
+				// is left aside, never removed: its owner's held() turns false and
+				// its publish aborts before touching live files.
 				if (readOwner(aside) === judged) rmSync(aside, { recursive: true, force: true });
 				else {
 					try {
 						renameSync(aside, lock);
 					} catch {
-						rmSync(aside, { recursive: true, force: true });
+						// left aside on purpose
 					}
 				}
 				continue;

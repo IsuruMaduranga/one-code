@@ -96,6 +96,14 @@ describe("publishArtifact", () => {
 		expect(publish("blank.html", "<p>c</p>", { title: "   " }).meta).toMatchObject({ title: "blank", id: "blank-s3" });
 	});
 
+	it("strips terminal controls from a title, entity-encoded ones included", () => {
+		const { meta } = publish("t.html", "<title>Report&#27;]52;c;ZXZpbA==&#7; &#x1b;[2J Now</title>");
+		expect(meta.title).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
+		expect(meta.title).toContain("Report");
+		// Nothing printable survives: the file name stands in.
+		expect(publish("blank-title.html", "<title>&#27;&#7;</title>").meta.title).toBe("blank-title");
+	});
+
 	it("leaves the artifact untouched when a write fails partway", () => {
 		const first = publish("r.html", page("Sturdy", "one"));
 		// A directory where the payload's temp file goes makes that write fail.
@@ -173,6 +181,15 @@ describe("publishArtifact", () => {
 		writeFileSync(join(root, meta.id, ".lock", "owner"), `${dead}-gone`);
 		expect(deleteArtifact(root, meta.id)).toBe(true);
 		expect(existsSync(join(root, meta.id))).toBe(false);
+	});
+
+	it("treats a lock older than any real publish as abandoned, even with a live pid", () => {
+		const lock = join(base, "lock");
+		mkdirSync(lock);
+		writeFileSync(join(lock, "owner"), `${process.ppid}-reused`);
+		const old = new Date(Date.now() - 11 * 60_000); // abandoned by age, or as pre-boot on a fresh machine
+		utimesSync(lock, old, old);
+		expect(withLock(lock, "busy", () => "ran", 100)).toBe("ran");
 	});
 
 	it("takes over a lock a crashed session left behind", () => {
