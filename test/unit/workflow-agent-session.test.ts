@@ -87,6 +87,21 @@ describe("workflow agent() answers past the cap", () => {
 });
 
 describe("workflow agent() sessions", () => {
+	it("sends no request when the workflow stops while MCP tools are still connecting", async () => {
+		const prompt = vi.spyOn(AgentSession.prototype, "prompt").mockImplementation(async () => {});
+		const controller = new AbortController();
+		const runner = await AgentRunner.create({
+			cwd,
+			defaultModel: undefined,
+			getMcpTools: async () => {
+				controller.abort();
+				return [mcpTool];
+			},
+		});
+		await expect(runner.run("do it", {}, controller.signal)).rejects.toThrow("aborted");
+		expect(prompt).not.toHaveBeenCalled();
+	});
+
 	it("keeps structured_output for a schema'd agentType whose file has a tools list (H3)", async () => {
 		const { first } = await toolsOf({ agentType: "b4-reader", schema: { type: "object", properties: { answer: { type: "string" } } } });
 		expect(first.active).toContain("structured_output");

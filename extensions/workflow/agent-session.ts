@@ -346,6 +346,9 @@ export class AgentRunner {
 				session.getAllTools().map((t) => t.name),
 			);
 			if (unusable) throw new WorkflowScriptError(unusable);
+			// A stop during the waits above (MCP tools still connecting, the warm
+			// gate) aborted a session that was idle: never send the first request.
+			if (signal.aborted) throw new WorkflowScriptError("aborted");
 			await session.prompt(this.buildPrompt(prompt, Boolean(opts.schema)));
 			if (signal.aborted) throw new WorkflowScriptError("aborted");
 
