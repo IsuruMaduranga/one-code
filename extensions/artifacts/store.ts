@@ -259,8 +259,13 @@ function updateArtifact(root: string, existing: ArtifactMeta, input: PublishInpu
 		// Same bytes: refresh the details without a version that differs from nothing.
 		// The payload is rewritten too: it names the download after the title.
 		const meta: ArtifactMeta = { ...existing, title, description, sourcePath, updatedAt: now };
-		const payload = pageFiles(root, meta, input.html)[1];
-		commitFiles([metaFile(root, meta), payload, viewerFile(root, meta)], { beforeReplace: () => assertHeld(held, existing.id) });
+		const files = [metaFile(root, meta), pageFiles(root, meta, input.html)[1], viewerFile(root, meta)];
+		// The same three files as version N had them, for a rename that fails partway.
+		const before = [metaFile(root, existing), pageFiles(root, existing, input.html)[1], viewerFile(root, existing)];
+		commitFiles(files, {
+			beforeReplace: () => assertHeld(held, existing.id),
+			rollback: before.map(([target, text]) => () => writeTextAtomic(target, text)),
+		});
 		return { meta, created: false };
 	}
 	const meta: ArtifactMeta = { ...existing, title, description, sourcePath, updatedAt: now, version: existing.version + 1 };
@@ -352,23 +357,65 @@ function commitFiles(files: StoreFile[], hooks: { beforeReplace?: () => void; ro
 /** Another session held the lock past the wait. */
 export class LockBusyError extends Error {}
 
-/** How long a publish waits for another session's lock, and when a lock counts as abandoned. */
+/** How long a publish waits for another session's lock. */
 const LOCK_WAIT_MS = 5_000;
-const LOCK_STALE_MS = 30_000;
+/** How long an ownerless lock (a crash between `mkdir` and writing the owner) is left alone. */
+const LOCK_ORPHAN_MS = 30_000;
+
+/**
+ * The process id in a lock's owner token (`<pid>-<uuid>`), or undefined.
+ */
+function ownerPid(token: string): number | undefined {
+	const pid = Number.parseInt(token.split("-")[0] ?? "", 10);
+	return Number.isInteger(pid) && pid > 0 ? pid : undefined;
+}
+
+/** Whether a process with this id is running (EPERM: it runs as another user). */
+function processAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (error) {
+		return (error as NodeJS.ErrnoException).code === "EPERM";
+	}
+}
+
+/**
+ * Whether the lock at `lock` was left by a holder that can no longer act on
+ * it: its owner process has exited, or it is this process (a lock body is
+ * synchronous, so this process cannot be inside one while it asks), or it has
+ * had no owner for 30 s. A lock whose owner is alive is never taken, however
+ * old: a paused holder resumes into its commit, and no check before a rename
+ * could fence it.
+ */
+function lockAbandoned(lock: string): boolean {
+	let token: string;
+	try {
+		token = readFileSync(join(lock, "owner"), "utf-8");
+	} catch {
+		try {
+			return Date.now() - statSync(lock).mtimeMs > LOCK_ORPHAN_MS;
+		} catch {
+			return false; // released meanwhile
+		}
+	}
+	const pid = ownerPid(token);
+	return pid === undefined || pid === process.pid || !processAlive(pid);
+}
 
 /**
  * Run `fn` holding the lock at `lock`: a directory (`mkdir` is atomic across
- * processes) holding an `owner` file with this holder's token. A lock older
- * than 30 s is from a crashed or long-paused session: it is claimed by
- * renaming it aside (only one taker's rename succeeds), never by deleting it
- * in place. `fn` gets `held()`, true while the lock is still this holder's, and
- * the lock is released only if it still is, so a holder that paused past the
- * takeover can neither free nor overwrite its successor.
+ * processes on one machine, which the store under `~/.onecode` is) holding an
+ * `owner` file with this holder's `<pid>-<uuid>` token. An abandoned lock
+ * (`lockAbandoned`) is claimed by renaming it aside, so only one taker wins; a
+ * live holder's lock is waited on for 5 s, then the call fails with
+ * `LockBusyError`. `fn` gets `held()`, and the lock is released only while it
+ * is still this holder's.
  */
-export function withLock<T>(lock: string, busy: string, fn: (held: () => boolean) => T): T {
+export function withLock<T>(lock: string, busy: string, fn: (held: () => boolean) => T, waitMs = LOCK_WAIT_MS): T {
 	const token = `${process.pid}-${randomUUID()}`;
 	const owner = join(lock, "owner");
-	const deadline = Date.now() + LOCK_WAIT_MS;
+	const deadline = Date.now() + waitMs;
 	for (;;) {
 		try {
 			mkdirSync(lock);
@@ -376,13 +423,7 @@ export function withLock<T>(lock: string, busy: string, fn: (held: () => boolean
 			break;
 		} catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-			let age: number;
-			try {
-				age = Date.now() - statSync(lock).mtimeMs;
-			} catch {
-				continue; // released between the two calls
-			}
-			if (age > LOCK_STALE_MS) {
+			if (lockAbandoned(lock)) {
 				const aside = `${lock}.stale-${token}`;
 				try {
 					renameSync(lock, aside);

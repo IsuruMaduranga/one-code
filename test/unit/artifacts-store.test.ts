@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,6 +22,7 @@ import {
 	resolveArtifactRef,
 	slugify,
 	versionPath,
+	LockBusyError,
 	viewerPath,
 	withLock,
 } from "../../extensions/artifacts/store.ts";
@@ -134,6 +136,21 @@ describe("publishArtifact", () => {
 		const first = publish("untitled.html", "<p>same</p>", { title: "First Name" });
 		publish("untitled.html", "<p>same</p>", { title: "Second Name" });
 		expect(readFileSync(join(root, first.meta.id, "download.js"), "utf-8")).toContain('"filename":"second-name.html"');
+	});
+
+	it("reclaims a lock whose owner process has exited, never one whose owner is alive", () => {
+		const dead = spawnSync(process.execPath, ["-e", ""]).pid;
+		const lock = join(base, "lock");
+		mkdirSync(lock);
+		writeFileSync(join(lock, "owner"), `${dead}-gone`);
+		expect(withLock(lock, "busy", () => "ran")).toBe("ran");
+		// The parent process is alive: its lock is waited on, then refused, however old.
+		mkdirSync(lock);
+		writeFileSync(join(lock, "owner"), `${process.ppid}-alive`);
+		const old = new Date(Date.now() - 3_600_000);
+		utimesSync(lock, old, old);
+		expect(() => withLock(lock, "busy", () => "ran", 100)).toThrow(LockBusyError);
+		expect(readFileSync(join(lock, "owner"), "utf-8")).toBe(`${process.ppid}-alive`);
 	});
 
 	it("takes over a lock a crashed session left behind", () => {
