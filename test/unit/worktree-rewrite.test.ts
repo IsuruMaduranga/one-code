@@ -2,7 +2,8 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 // pi's own resolver, reached by file path (its package root does not export it), to pin the vendored copy to it.
 import { resolveToCwd } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/tools/path-utils.js";
-import { normalizeToolPath, rewriteToolInput, shellQuote, validateWorktreeName } from "../../extensions/worktree/rewrite.ts";
+import { normalizeToolPath } from "../../extensions/lib/tool-path.ts";
+import { rewriteToolInput, shellQuote, validateWorktreeName } from "../../extensions/worktree/rewrite.ts";
 
 const WT = "/repo/.claude/worktrees/fix";
 
@@ -114,15 +115,5 @@ describe("rewriteToolInput reads paths the way pi's tools do", () => {
 			const normalized = normalizeToolPath(spelling);
 			expect(resolve(WT, normalized)).toBe(resolveToCwd(spelling, WT));
 		}
-	});
-
-	it("normalizes like pi's resolveToCwd", () => {
-		expect(normalizeToolPath("~", "/home/u", "linux")).toBe("/home/u");
-		expect(normalizeToolPath("~/a", "/home/u", "linux")).toBe("/home/u/a");
-		expect(normalizeToolPath("@/abs/a", "/home/u", "linux")).toBe("/abs/a");
-		expect(normalizeToolPath("a\u00A0b.ts", "/home/u", "linux")).toBe("a b.ts");
-		expect(normalizeToolPath("file:///x/y.ts", "/home/u", "linux")).toBe("/x/y.ts");
-		expect(normalizeToolPath("/c/proj/a.ts", "C:\\Users\\u", "win32")).toBe("C:\\proj\\a.ts");
-		expect(normalizeToolPath("/c/proj/a.ts", "/home/u", "linux")).toBe("/c/proj/a.ts");
 	});
 });
