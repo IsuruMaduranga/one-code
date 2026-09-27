@@ -326,4 +326,11 @@ describe("command template expansion", () => {
 		expect(substituteArguments("grep $1 x", "it's", shellQuote)).toBe("grep 'it'\\''s' x");
 		expect(substituteArguments("echo [$2]", "one", shellQuote)).toBe("echo ['']");
 	});
+
+	it("never substitutes inside an argument it already inserted", () => {
+		// A second pass turned the quoted `'$1'` into an unquoted first argument.
+		expect(substituteArguments("run $ARGUMENTS", "x;touch${IFS}p $1", shellQuote)).toBe("run 'x;touch${IFS}p' '$1'");
+		expect(substituteArguments("echo $@", "a $1", shellQuote)).toBe("echo 'a' '$1'");
+		expect(substituteArguments("cost $ARGUMENTS", "cost $1")).toBe("cost cost $1");
+	});
 });

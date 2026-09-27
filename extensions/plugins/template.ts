@@ -26,13 +26,13 @@ export interface CommandTemplate {
 export function substituteArguments(body: string, args: string, quote?: (word: string) => string): string {
 	const parts = args.trim().length > 0 ? args.trim().split(/\s+/) : [];
 	const all = quote ? parts.map(quote).join(" ") : args.trim();
-	return body
-		.replace(/\$ARGUMENTS\b/g, () => all)
-		.replace(/\$@/g, () => all)
-		.replace(/\$(\d+)/g, (_match, index) => {
-			const part = parts[Number(index) - 1];
-			return quote ? quote(part ?? "") : (part ?? "");
-		});
+	// One pass: a second pass would substitute inside argument text the first
+	// one inserted (an argument holding `$1`), unquoting it.
+	return body.replace(/\$ARGUMENTS\b|\$@|\$(\d+)/g, (_match, index: string | undefined) => {
+		if (index === undefined) return all;
+		const part = parts[Number(index) - 1];
+		return quote ? quote(part ?? "") : (part ?? "");
+	});
 }
 
 export type TemplatePiece = { kind: "text"; text: string } | { kind: "shell"; command: string };
