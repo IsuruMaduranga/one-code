@@ -268,7 +268,10 @@ export function forkRequestPayload(capture: RequestCapture, child: Record<string
 	const tools = forkTools(capture.payload.tools, child.tools, baseline, tail);
 	if (tools) out.tools = tools;
 	const capKey = MAX_TOKEN_KEYS[capture.api].find((k) => typeof capture.payload[k] === "number");
-	const room = forkOutputRoom(capture, tail);
+	// Appended tool schemas spend room too; the parent's own tools are already in its cap.
+	const appended = Array.isArray(tools) && Array.isArray(capture.payload.tools) ? tools.slice(capture.payload.tools.length) : [];
+	const tailRoom = forkOutputRoom(capture, tail);
+	const room = tailRoom === undefined ? undefined : tailRoom - (appended.length > 0 ? Math.ceil(JSON.stringify(appended).length / 4) : 0);
 	if (capKey && room !== undefined) {
 		// Never above the room: the fork chose the fallback before this when too little was left.
 		const own = typeof child[capKey] === "number" ? (child[capKey] as number) : room;

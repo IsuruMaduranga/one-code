@@ -307,6 +307,11 @@ describe("forks: output room", () => {
 		const out = forkRequestPayload(capture, { messages: tail, max_tokens: 64000 }, new Set());
 		expect(out.max_tokens).toBe(room);
 		expect(forkOutputRoom({ ...capture, payload: { messages: [] } }, tail)).toBeUndefined();
+		// A tool appended after the first request spends room as well.
+		const loaded = { name: "mcp__x__y", description: "d".repeat(2000) };
+		const roomy = { ...capture, payload: { ...capture.payload, max_tokens: 8000 } } as RequestCapture;
+		const withTool = forkRequestPayload(roomy, { messages: tail, tools: [loaded], max_tokens: 64000 }, new Set());
+		expect(withTool.max_tokens).toBe((forkOutputRoom(roomy, tail) as number) - Math.ceil(JSON.stringify([loaded]).length / 4));
 	});
 });
 
