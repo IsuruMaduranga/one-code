@@ -25,6 +25,8 @@ import { findConfigured, modelSpec } from "../lib/model-policy.ts";
 import { isModelUnavailableError } from "../auto-mode/model-select.ts";
 import { type AgentDefinition, agentToolOptions, unusableAllowlistError } from "./agents.ts";
 import { CHILD_EXTENSION_PATHS } from "../lib/child-extensions.ts";
+import type { RequestCapture } from "../lib/request-replay.ts";
+import { forkCacheExtension } from "./fork-cache.ts";
 import type { ChildHandle, ChildOutcome, RpcChildHandle } from "./outcome.ts";
 import { sendToMainTool } from "./send-to-main-tool.ts";
 import { SessionTurnTracker } from "./session-turns.ts";
@@ -73,6 +75,11 @@ interface ChildSessionSpec {
 	forkMessages?: Message[];
 	/** The parent's current system prompt, applied to a fork so it continues as the parent. */
 	parentSystemPrompt?: string;
+	/**
+	 * The parent's last provider request, for a fork: every fork request is
+	 * built from it so the fork reads the parent's prompt cache (fork-cache.ts).
+	 */
+	parentRequest?: RequestCapture;
 	/** Existing persisted session to resume (SendMessage to a finished agent). */
 	sessionFile?: string;
 	/** Where a new run's persisted session lands; falls back to an in-memory session. */
@@ -243,6 +250,8 @@ export class SubagentRuntime {
 			systemPrompt,
 			neverGate: NEVER_GATE,
 			extraExtensionPaths: CHILD_EXTENSION_PATHS,
+			// Inline extensions load after the paths above, so this one sees the final body.
+			...(SubagentRuntime.isFork(spec) && spec.parentRequest ? { extraFactories: [forkCacheExtension(spec.parentRequest)] } : {}),
 			// claude-context (above) injects # claudeMd on the child's session_start;
 			// pi must not append the same files to the system prompt as well.
 			noContextFiles: true,

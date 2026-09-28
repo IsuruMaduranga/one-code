@@ -47,6 +47,14 @@ export interface RequestCapture {
 	provider: string;
 	modelId: string;
 	payload: Record<string, unknown>;
+	/** The last message of the context the body was built from: where a fork's own messages start. */
+	covers?: CoveredThrough;
+}
+
+/** A transcript message named by what survives a session fork: its role and timestamp. */
+export interface CoveredThrough {
+	role: string;
+	timestamp: number;
 }
 
 interface ModelRef {
@@ -56,11 +64,26 @@ interface ModelRef {
 }
 
 /** A capture of `payload` for `model`, or undefined when its API cannot be replayed. */
-export function captureRequest(model: ModelRef | undefined, payload: unknown): RequestCapture | undefined {
+export function captureRequest(model: ModelRef | undefined, payload: unknown, covers?: CoveredThrough): RequestCapture | undefined {
 	const api = model?.api;
 	if (api !== "anthropic-messages" && api !== "openai-completions" && api !== "openai-responses") return undefined;
 	if (!model?.provider || !model.id || !isRecord(payload) || !Array.isArray(payload[LIST_KEY[api]])) return undefined;
-	return { api, provider: model.provider, modelId: model.id, payload };
+	return { api, provider: model.provider, modelId: model.id, payload, ...(covers ? { covers } : {}) };
+}
+
+/** The last non-system message of a context, as a fork will find it again; undefined without one. */
+export function lastCovered(messages: readonly { role: string; timestamp?: number }[]): CoveredThrough | undefined {
+	for (let index = messages.length - 1; index >= 0; index--) {
+		const { role, timestamp } = messages[index];
+		if (role === "system") continue;
+		return typeof timestamp === "number" ? { role, timestamp } : undefined;
+	}
+	return undefined;
+}
+
+/** True when `model` is the one `capture` went to: a different model has a different cache. */
+export function captureMatches(capture: RequestCapture, model: ModelRef | undefined): boolean {
+	return capture.api === model?.api && capture.provider === model?.provider && capture.modelId === model?.id;
 }
 
 interface MessageLike {
@@ -161,6 +184,152 @@ export function replayOutputCap(capture: RequestCapture, tail: readonly Message[
 	const room = captured === undefined ? (limit ?? DEFAULT_REPLAY_OUTPUT_TOKENS) : captured - tail.reduce((sum, message) => sum + estimateMessageTokens(message), 0);
 	const cap = limit === undefined ? room : Math.min(limit, room);
 	return cap >= MIN_REPLAY_OUTPUT_TOKENS ? cap : undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Forks: every request of a child session that inherits the transcript
+// ---------------------------------------------------------------------------
+
+/**
+ * A fork's context with the messages its parent's captured request already
+ * carries removed: everything up to and including `covers`, system messages
+ * kept (pi requires the leading one). What is left is the fork's own tail: the
+ * reply that answered the capture, the fork's task, and its own turns. A
+ * session fork copies the entries with their timestamps, so the boundary is
+ * found by role and timestamp; undefined when it is not there (the fork
+ * compacted, or the capture belongs to another branch).
+ */
+export function uncoveredMessages<M extends { role: string; timestamp?: number }>(messages: readonly M[], covers: CoveredThrough): M[] | undefined {
+	const boundary = messages.findLastIndex((message) => message.role === covers.role && message.timestamp === covers.timestamp);
+	if (boundary === -1) return undefined;
+	return [...messages.slice(0, boundary + 1).filter((message) => message.role === "system"), ...messages.slice(boundary + 1)];
+}
+
+/** Anthropic's limit on `cache_control` breakpoints in one request. */
+export const MAX_CACHE_MARKERS = 4;
+
+/**
+ * A fork's request: the parent's captured body byte for byte (system prompt,
+ * tools, messages, `prompt_cache_key`, every other field), then the fork's own
+ * tail from `child` (pi's body for the fork's uncovered messages), so the fork
+ * reads the prefix the parent cached (decisions/caching.md, "A call that
+ * inherits the session's context reads the session's cache").
+ *
+ * - Tools stay the parent's. A tool the fork gained after its first request
+ *   (not in `baseline`, the first request's names), or one a tail
+ *   `tool_reference` names, is appended so it stays callable; that breaks the
+ *   cache from there on, as the same load does in the parent.
+ * - The output cap is the smaller of the fork's and the parent's cap less the
+ *   tail, since pi clamped the fork's to a context without the prefix.
+ * - Cache markers: the parent's stay where the parent wrote its entry, the
+ *   tail's mark the fork's own entry, and the earliest are dropped past four.
+ */
+export function forkRequestPayload(capture: RequestCapture, child: Record<string, unknown>, baseline: ReadonlySet<string>): Record<string, unknown> {
+	const key = LIST_KEY[capture.api];
+	const base = capture.payload[key] as unknown[];
+	const tail = (Array.isArray(child[key]) ? (child[key] as WireMessage[]) : []).filter((entry) => entry.role !== "system" && entry.role !== "developer");
+	const out: Record<string, unknown> = { ...capture.payload, [key]: capture.api === "anthropic-messages" ? joinUserTurns(base, tail) : [...base, ...tail] };
+	const tools = forkTools(capture.payload.tools, child.tools, baseline, tail);
+	if (tools) out.tools = tools;
+	const capKey = MAX_TOKEN_KEYS[capture.api].find((k) => typeof capture.payload[k] === "number");
+	if (capKey) {
+		const room = (capture.payload[capKey] as number) - Math.ceil(JSON.stringify(tail).length / 4);
+		const own = typeof child[capKey] === "number" ? (child[capKey] as number) : room;
+		out[capKey] = Math.max(MIN_REPLAY_OUTPUT_TOKENS, Math.min(own, room));
+	}
+	capCacheMarkers(out, key);
+	return out;
+}
+
+/** The names a body's tool list declares (Anthropic, Chat Completions and Responses shapes). */
+export function toolNames(tools: unknown): string[] {
+	return Array.isArray(tools) ? tools.map(toolName).filter((name): name is string => name !== undefined) : [];
+}
+
+function toolName(tool: unknown): string | undefined {
+	if (!isRecord(tool)) return undefined;
+	if (typeof tool.name === "string") return tool.name;
+	return isRecord(tool.function) && typeof tool.function.name === "string" ? tool.function.name : undefined;
+}
+
+function forkTools(parent: unknown, child: unknown, baseline: ReadonlySet<string>, tail: unknown[]): unknown[] | undefined {
+	if (!Array.isArray(parent)) return Array.isArray(child) ? (withoutCacheControl(child) as unknown[]) : undefined;
+	const declared = new Set(toolNames(parent));
+	const referenced = referencedTools(tail);
+	const extra = (Array.isArray(child) ? child : []).filter((tool) => {
+		const name = toolName(tool);
+		return name !== undefined && !declared.has(name) && (!baseline.has(name) || referenced.has(name));
+	});
+	return extra.length > 0 ? [...parent, ...(withoutCacheControl(extra) as unknown[])] : parent;
+}
+
+/** Tool names the tail's `tool_reference` blocks load (Anthropic tool search). */
+function referencedTools(value: unknown, found = new Set<string>()): Set<string> {
+	if (Array.isArray(value)) for (const entry of value) referencedTools(entry, found);
+	else if (isRecord(value)) {
+		if (value.type === "tool_reference" && typeof value.tool_name === "string") found.add(value.tool_name);
+		for (const entry of Object.values(value)) referencedTools(entry, found);
+	}
+	return found;
+}
+
+/** Anthropic needs alternating roles: a tail that opens with a user turn joins the captured last one. */
+function joinUserTurns(base: unknown[], tail: unknown[]): unknown[] {
+	const last = base.at(-1) as WireMessage | undefined;
+	const first = tail[0] as WireMessage | undefined;
+	if (last?.role === "user" && first?.role === "user") {
+		return [...base.slice(0, -1), { ...last, content: [...blocksOf(last.content), ...blocksOf(first.content)] }, ...tail.slice(1)];
+	}
+	return [...base, ...tail];
+}
+
+/**
+ * Drop the earliest `cache_control` markers (tools, then system, then
+ * messages) past the limit. Copy-on-write: the captured body is shared by
+ * every fork, so only the path to a dropped marker is copied.
+ */
+function capCacheMarkers(payload: Record<string, unknown>, listKey: string): void {
+	const keys = ["tools", "system", listKey].filter((key) => key in payload);
+	const total = keys.reduce((sum, key) => sum + countMarkers(payload[key]), 0);
+	const budget = { drop: total - MAX_CACHE_MARKERS };
+	for (const key of keys) {
+		if (budget.drop <= 0) break;
+		payload[key] = dropFirstMarkers(payload[key], budget);
+	}
+}
+
+function countMarkers(value: unknown): number {
+	if (Array.isArray(value)) return value.reduce((sum: number, entry) => sum + countMarkers(entry), 0);
+	if (!isRecord(value)) return 0;
+	let count = "cache_control" in value ? 1 : 0;
+	for (const [key, entry] of Object.entries(value)) if (key !== "cache_control") count += countMarkers(entry);
+	return count;
+}
+
+function dropFirstMarkers(value: unknown, budget: { drop: number }): unknown {
+	if (budget.drop <= 0) return value;
+	if (Array.isArray(value)) {
+		let changed = false;
+		const out = value.map((entry) => {
+			const next = dropFirstMarkers(entry, budget);
+			if (next !== entry) changed = true;
+			return next;
+		});
+		return changed ? out : value;
+	}
+	if (!isRecord(value)) return value;
+	let out: Record<string, unknown> | undefined;
+	if ("cache_control" in value) {
+		const { cache_control: _, ...rest } = value;
+		out = rest;
+		budget.drop--;
+	}
+	for (const [key, entry] of Object.entries(out ?? value)) {
+		if (budget.drop <= 0) break;
+		const next = dropFirstMarkers(entry, budget);
+		if (next !== entry) out = { ...(out ?? value), [key]: next };
+	}
+	return out ?? value;
 }
 
 type Block = Record<string, unknown>;
