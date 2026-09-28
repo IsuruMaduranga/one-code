@@ -561,7 +561,7 @@ export function isUnknownTilde(value: string): boolean {
  * same path for a removal). A walk that runs out of budget counts as touching
  * one, so the command is judged, not cleared. A file source walks nothing.
  */
-function touchesGuardedPath(source: string, target: string, guarded: (path: string) => boolean, budget = 5_000): boolean {
+export function touchesGuardedPath(source: string, target: string, guarded: (path: string) => boolean, budget = 5_000): boolean {
 	const stack = [""];
 	let seen = 0;
 	while (stack.length > 0) {

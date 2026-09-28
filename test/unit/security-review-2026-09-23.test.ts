@@ -16,7 +16,7 @@ import { configRunsProgram } from "../../extensions/auto-mode/git-checkout-progr
 import { gitStatusMeta, gitStatusMetaArgs } from "../../extensions/auto-mode/git-status-meta.ts";
 import { gitStatusOutput, HARNESS_GIT_CONFIG } from "../../extensions/lib/git.ts";
 import { createLspTrustGate, isLspRootTrusted, persistLspTrust } from "../../extensions/lsp/trust.ts";
-import { powershellReadOnly } from "../../extensions/permissions/powershell-rules.ts";
+import { HAVE_POWERSHELL, psReadOnly } from "./helpers/powershell-parse.ts";
 
 let root: string;
 let cwd: string;
@@ -277,24 +277,24 @@ describe("M3: jq's env builtin", () => {
 
 describe("H5: PowerShell colon-bound values", () => {
 	const opts = () => ({ cwd, home, readableRoots: [] });
-	it("checks a -Param:value path like a positional", () => {
+	it.skipIf(!HAVE_POWERSHELL)("checks a -Param:value path like a positional", async () => {
 		for (const command of [
 			"Get-Content -Path:/etc/hosts",
 			"Get-Content -Path:~/.ssh/id_rsa",
 			"Get-Content -LiteralPath:\\\\host\\share\\x",
 			"Get-Content -Path:..\\x",
 		]) {
-			expect(powershellReadOnly(command, opts()).readOnly, command).toBe(false);
+			expect((await psReadOnly(command, opts())).readOnly, command).toBe(false);
 		}
-		expect(powershellReadOnly("Get-Content -Path:a.txt", opts()).readOnly).toBe(true);
+		expect((await psReadOnly("Get-Content -Path:a.txt", opts())).readOnly).toBe(true);
 	});
 
-	it("refuses credential paths and remote computers", () => {
-		expect(powershellReadOnly("Get-Content .env", opts()).readOnly).toBe(false);
-		expect(powershellReadOnly("Get-Process -ComputerName host", opts()).readOnly).toBe(false);
-		expect(powershellReadOnly("Get-Service -Comp host", opts()).readOnly).toBe(false);
-		expect(powershellReadOnly("Get-Service -Cn:host", opts()).readOnly).toBe(false);
-		expect(powershellReadOnly("Get-Process -Name node", opts()).readOnly).toBe(true);
+	it.skipIf(!HAVE_POWERSHELL)("refuses credential paths and remote computers", async () => {
+		expect((await psReadOnly("Get-Content .env", opts())).readOnly).toBe(false);
+		expect((await psReadOnly("Get-Process -ComputerName host", opts())).readOnly).toBe(false);
+		expect((await psReadOnly("Get-Service -Comp host", opts())).readOnly).toBe(false);
+		expect((await psReadOnly("Get-Service -Cn:host", opts())).readOnly).toBe(false);
+		expect((await psReadOnly("Get-Process -Name node", opts())).readOnly).toBe(true);
 	});
 });
 
@@ -384,11 +384,11 @@ describe("PR #8 review follow-ups", () => {
 		expect(floor("echo x > .claude/[z-a]")).toBeUndefined();
 	});
 
-	it("refuses the -C abbreviation of -ComputerName", () => {
+	it.skipIf(!HAVE_POWERSHELL)("refuses the -C abbreviation of -ComputerName", async () => {
 		const opts = { cwd, home, readableRoots: [] };
-		expect(powershellReadOnly("Get-Process -C host", opts).readOnly).toBe(false);
-		expect(powershellReadOnly("Get-Service -C:host", opts).readOnly).toBe(false);
-		expect(powershellReadOnly("Get-Process -Name node", opts).readOnly).toBe(true);
+		expect((await psReadOnly("Get-Process -C host", opts)).readOnly).toBe(false);
+		expect((await psReadOnly("Get-Service -C:host", opts)).readOnly).toBe(false);
+		expect((await psReadOnly("Get-Process -Name node", opts)).readOnly).toBe(true);
 	});
 
 	it("keys LSP session trust by the server's project, not the session's cwd", async () => {

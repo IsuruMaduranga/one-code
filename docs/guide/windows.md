@@ -94,35 +94,52 @@ counterparts. Hook matchers accept `PowerShell`, `Bash|PowerShell`, and
 
 ## Auto mode and plan mode
 
-Claude Code's read-only cmdlets run without a prompt or a classifier call:
-`Get-ChildItem`, `Get-Content`, `Get-Item`, `Test-Path`, `Resolve-Path`,
-`Select-String`, `Get-Location`, `Get-Process`, `Get-Service`,
-`Get-FileHash`, `Get-Acl`, `Format-Hex`, `findstr`, `where.exe`, plus
-`Write-Output` and `Write-Host`. One Code adds the pure pipeline cmdlets
-those are usually piped through, `Select-Object`, `Sort-Object`,
-`Measure-Object`, `Group-Object`, `ConvertFrom-Json`, `Out-String` and the
-`Format-*` family, so `Select-String … | Measure-Object` counts as read-only
-too; `Where-Object` and `ForEach-Object` do not, because they take script
-blocks. The check is textual and strict: no
-redirection, no variables, no script blocks, and every path inside the
-project or one of the harness's own session directories (auto-memory, the
-scratchpad, persisted tool output, this project's transcripts). A relative
-path is inside by construction; an absolute or drive-lettered path is
-resolved and checked, so `Select-String -Path C:\src\app\notes.md` runs
-unprompted while `Get-Content C:\Users\you\.ssh\id_rsa` does not. A UNC
-path, `~`, a registry or environment drive, or `..` always takes the
-ordinary route.
+One Code judges a PowerShell command the way PowerShell itself reads it. It
+keeps one PowerShell process running in the background and asks PowerShell's
+own parser what the command does: which commands it runs, how each argument
+binds to a parameter, and what every alias really points to on your machine.
+That process is the same PowerShell the tool runs, so the check and the
+command can't disagree about quotes, backticks, or a stray `–` dash. If the
+parser can't answer (it's still starting, it crashed, or your machine runs
+PowerShell in Constrained Language Mode), nothing gets a shortcut and the
+command takes the ordinary route.
 
-Everything else goes to the auto-mode classifier. One Code has no PowerShell
-command parser yet, so unlike bash there is no deterministic shortcut for
-in-project deletes: a `Remove-Item` inside the repository is classified, not
-auto-approved. The safety floor still applies. Any PowerShell line that
-names a permission settings file (`.claude/settings.json`,
-`~/.onecode/settings.json`, `.claude.json`, managed settings) stops for you,
-whether it reads or writes.
+Read-only commands run without a prompt or a classifier call. These are
+Claude Code's read-only cmdlets, `Get-ChildItem`, `Get-Content`, `Get-Item`,
+`Test-Path`, `Resolve-Path`, `Select-String`, `Get-Location`, `Get-Process`,
+`Get-Service`, `Get-FileHash`, `Get-Acl`, `Format-Hex`, `findstr`,
+`where.exe`, `Write-Output` and `Write-Host`, plus the pipeline cmdlets
+they're usually piped through: `Select-Object`, `Sort-Object`,
+`Measure-Object`, `Group-Object`, `ConvertFrom-Json`, `Out-String`,
+`Out-Null` and the `Format-*` family. `Where-Object` and `ForEach-Object`
+count too when their script block only reads `$_` and compares, like
+`Where-Object { $_.Length -gt 1kb }`. Each cmdlet is checked parameter by
+parameter, so `Get-Content -Wait` or `Get-ChildItem -FollowSymlink` doesn't
+qualify. Every path has to land inside the project or one of the harness's
+own session directories (auto-memory, the scratchpad, persisted tool output,
+this project's transcripts), judged where it resolves, so a symlink out of
+the project counts as outside. A UNC path, `~`, a registry or environment
+drive, a provider path, or `..` always takes the ordinary route. So does a
+cmdlet that takes paths from the pipeline, like `Get-Content list.txt |
+Get-Item`, because it reads whatever the list names.
 
-Plan mode allows the read-only cmdlets above and refuses the rest, as it
-does for bash.
+On a frontier or workhorse model in auto or acceptEdits mode, Claude Code's
+acceptEdits cmdlets skip the classifier too: `Set-Content`, `Add-Content`,
+`Remove-Item` and `Clear-Content` on paths inside the working directories.
+The same limits as the bash file commands apply. A wildcard target, a path
+outside, a credential or protected file, or removing the project root or a
+`.git` goes to the classifier. So does a recursive `Remove-Item` over a
+folder with a link inside, because Windows PowerShell 5.1 follows it.
+`New-Item`, `Copy-Item` and `Move-Item` are always classified, as Claude Code
+always asks about them. On cheaper models every write is classified.
+
+Everything else goes to the auto-mode classifier. The safety floor still
+applies. Any PowerShell line that names a permission settings file
+(`.claude/settings.json`, `~/.onecode/settings.json`, `.claude.json`,
+managed settings) stops for you, whether it reads or writes.
+
+Plan mode allows the read-only commands and refuses the rest, as it does for
+bash.
 
 ## Hooks
 
@@ -189,7 +206,9 @@ is the same.
 
 ## Not provided
 
-- No PowerShell command parser or pre-gate beyond the read-only list.
+- No shortcut for PowerShell's native commands (`git`, `npm`, `rg`): they
+  always go to the classifier in auto mode, where the bash tool fast-paths
+  the read-only ones.
 - No sandbox on Windows. Claude Code has none there either.
 - `defaultShell` for the user's own `!` prefix is pi's to handle; One Code
   does not read it.

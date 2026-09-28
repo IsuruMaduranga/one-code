@@ -15,9 +15,10 @@ import { conflictingPathArguments } from "../../extensions/auto-mode/paths.ts";
 import { analyzeShellCommand } from "../../extensions/auto-mode/shell-analysis.ts";
 import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
-import { powershellInjectionSyntax, powershellReadOnly } from "../../extensions/permissions/powershell-rules.ts";
+import { powershellInjectionSyntax } from "../../extensions/permissions/powershell-rules.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
+import { HAVE_POWERSHELL, psReadOnly } from "./helpers/powershell-parse.ts";
 
 let root: string;
 let cwd: string;
@@ -75,7 +76,7 @@ describe("H1: one target per file-tool call", () => {
 });
 
 describe("H2: PowerShell grouping expressions run their own command", () => {
-	it("is not read-only and is not covered by a wildcard allow rule", () => {
+	it.skipIf(!HAVE_POWERSHELL)("is not read-only and is not covered by a wildcard allow rule", async () => {
 		for (const command of [
 			"Write-Output (Set-Content audit-ps.txt nested-write)",
 			"Get-Content -Path (Remove-Item x)",
@@ -84,19 +85,19 @@ describe("H2: PowerShell grouping expressions run their own command", () => {
 			// A `#` inside a word is not a comment (PR #15 review).
 			"Write-Output x#(Set-Content f y)",
 		]) {
-			expect(powershellReadOnly(command, { cwd, home }).readOnly, command).toBe(false);
+			expect((await psReadOnly(command, { cwd, home })).readOnly, command).toBe(false);
 			expect(powershellInjectionSyntax(command), command).toMatch(/grouping/);
 		}
 	});
 
-	it("still reads a # at the start of a word as a comment", () => {
+	it.skipIf(!HAVE_POWERSHELL)("still reads a # at the start of a word as a comment", async () => {
 		expect(powershellInjectionSyntax("Get-ChildItem # (not run)")).toBeUndefined();
-		expect(powershellReadOnly("Get-ChildItem #(x)", { cwd, home }).readOnly).toBe(true);
+		expect((await psReadOnly("Get-ChildItem #(x)", { cwd, home })).readOnly).toBe(true);
 	});
 
-	it("keeps quoted parentheses literal", () => {
-		expect(powershellReadOnly(`Get-ChildItem "Program Files (x86)"`, { cwd, home }).readOnly).toBe(true);
-		expect(powershellReadOnly("Select-String -Pattern 'f(x)' -Path a.txt", { cwd, home }).readOnly).toBe(true);
+	it.skipIf(!HAVE_POWERSHELL)("keeps quoted parentheses literal", async () => {
+		expect((await psReadOnly(`Get-ChildItem "Program Files (x86)"`, { cwd, home })).readOnly).toBe(true);
+		expect((await psReadOnly("Select-String -Pattern 'f(x)' -Path a.txt", { cwd, home })).readOnly).toBe(true);
 		expect(powershellInjectionSyntax(`Get-ChildItem "Program Files (x86)"`)).toBeUndefined();
 	});
 });
@@ -203,39 +204,39 @@ describe("M2, M3: git reset --hard is never contained", () => {
 });
 
 describe("M4: PowerShell resolves relative paths before vouching for them", () => {
-	posixOnly("refuses a relative name that is a symlink out of the project", () => {
+	(HAVE_POWERSHELL ? posixOnly : it.skip)("refuses a relative name that is a symlink out of the project", async () => {
 		mkdirSync(join(root, "outside"));
 		writeFileSync(join(root, "outside", "data.txt"), "synthetic-outside-data\n");
 		symlinkSync(join(root, "outside", "data.txt"), join(cwd, "notes.txt"));
 		mkdirSync(join(cwd, "sub"));
 		symlinkSync(join(root, "outside"), join(cwd, "sub", "link"));
 		for (const command of ["Get-Content notes.txt", "Get-Content -Path:notes.txt", "Get-Content *.txt", "Get-ChildItem sub\\link", "Get-Content sub/link/data.txt"]) {
-			expect(powershellReadOnly(command, { cwd, home }).readOnly, command).toBe(false);
+			expect((await psReadOnly(command, { cwd, home })).readOnly, command).toBe(false);
 		}
 	});
 
-	posixOnly("refuses a relative link to an in-project credential file", () => {
+	(HAVE_POWERSHELL ? posixOnly : it.skip)("refuses a relative link to an in-project credential file", async () => {
 		writeFileSync(join(cwd, ".env"), "TOKEN=x\n");
 		symlinkSync(join(cwd, ".env"), join(cwd, "notes.txt"));
-		expect(powershellReadOnly("Get-Content notes.txt", { cwd, home })).toEqual({ readOnly: false, reason: "a credential or secret path" });
+		expect((await psReadOnly("Get-Content notes.txt", { cwd, home }))).toEqual({ readOnly: false, reason: "a credential or secret path" });
 	});
 
-	it("keeps ordinary in-project reads read-only", () => {
+	it.skipIf(!HAVE_POWERSHELL)("keeps ordinary in-project reads read-only", async () => {
 		mkdirSync(join(cwd, "src"));
 		writeFileSync(join(cwd, "src", "b.ts"), "b\n");
 		for (const command of ["Get-Content a.txt", "Get-ChildItem src", "Get-Content src\\b.ts", "Get-ChildItem *.txt", "Get-Content missing.txt"]) {
-			expect(powershellReadOnly(command, { cwd, home }).readOnly, command).toBe(true);
+			expect((await psReadOnly(command, { cwd, home })).readOnly, command).toBe(true);
 		}
 	});
 
-	it("matches a wildcard leaf without backtracking (PR #15 review)", () => {
+	it.skipIf(!HAVE_POWERSHELL)("matches a wildcard leaf without backtracking (PR #15 review)", async () => {
 		// A regex for this pattern backtracks polynomially against every entry.
 		const started = performance.now();
-		expect(powershellReadOnly(`Get-Content ${"*a".repeat(30)}z`, { cwd, home }).readOnly).toBe(true);
+		expect((await psReadOnly(`Get-Content ${"*a".repeat(30)}z`, { cwd, home })).readOnly).toBe(true);
 		expect(performance.now() - started).toBeLessThan(500);
-		expect(powershellReadOnly("Get-Content A.T?T", { cwd, home }).readOnly).toBe(true);
+		expect((await psReadOnly("Get-Content A.T?T", { cwd, home })).readOnly).toBe(true);
 		// `?` is judged as matching none too, so a credential it could reach is found.
 		writeFileSync(join(cwd, "auth.json"), "{}");
-		expect(powershellReadOnly("Get-Content ?auth.json", { cwd, home }).readOnly).toBe(false);
+		expect((await psReadOnly("Get-Content ?auth.json", { cwd, home })).readOnly).toBe(false);
 	});
 });

@@ -43,6 +43,16 @@ $ErrorActionPreference = 'Stop'
 $utf8 = New-Object System.Text.UTF8Encoding $false
 $out = [Console]::Out
 
+# Command lookup must never load or run a module: autoloading is off, and the
+# built-in modules the gate's cmdlets live in are imported from $PSHOME by
+# path, so a same-named module earlier on PSModulePath cannot stand in.
+$PSModuleAutoLoadingPreference = 'None'
+foreach ($module in 'Microsoft.PowerShell.Management', 'Microsoft.PowerShell.Utility', 'Microsoft.PowerShell.Security') {
+	$manifest = "$PSHOME/Modules/$module"
+	if ([System.IO.Directory]::Exists($manifest)) { try { Import-Module -Name $manifest } catch {} }
+}
+$binderType = 'System.Management.Automation.Language.StaticParameterBinder' -as [type]
+
 function Send-Record($record) {
 	$json = ConvertTo-Json -InputObject $record -Depth 5 -Compress
 	$out.WriteLine([Convert]::ToBase64String($utf8.GetBytes($json)))
@@ -93,6 +103,7 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
 		$all = @($ast.FindAll({ $true }, $true))
 		$index = New-Object 'System.Collections.Generic.Dictionary[System.Object,int]'
 		$nodes = New-Object System.Collections.ArrayList
+		$asts = New-Object System.Collections.ArrayList
 		foreach ($node in $all) {
 			if ($index.ContainsKey($node)) { continue }
 			$parent = -1
@@ -104,6 +115,58 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
 			$record.end = $node.Extent.EndOffset
 			$index[$node] = $nodes.Count
 			[void]$nodes.Add($record)
+			[void]$asts.Add($node)
+		}
+		# Second pass, once every node has its index: what each static command
+		# name resolves to in this PowerShell, and for a cmdlet how PowerShell's
+		# own binder assigns its arguments to parameters.
+		for ($i = 0; $i -lt $nodes.Count; $i++) {
+			if ($nodes[$i].type -ne 'CommandAst' -or $null -eq $nodes[$i].name) { continue }
+			$command = $asts[$i]
+			$info = $null
+			try { $info = $ExecutionContext.InvokeCommand.GetCommand($nodes[$i].name, 'All') } catch {}
+			if ($null -eq $info) { continue }
+			if ($info -is [System.Management.Automation.AliasInfo]) {
+				$nodes[$i].alias = $true
+				$info = $info.ResolvedCommand
+				if ($null -eq $info) { continue }
+			}
+			$nodes[$i].commandType = [string]$info.CommandType
+			$nodes[$i].resolvedName = $info.Name
+			if ($info -is [System.Management.Automation.ApplicationInfo]) { $nodes[$i].resolvedName = $info.Path }
+			$nodes[$i].module = [string]$info.ModuleName
+			if ($info -isnot [System.Management.Automation.CmdletInfo]) { continue }
+			if ($null -eq $binderType) { $nodes[$i].bindingUnavailable = $true; continue }
+			try {
+				$bound = $binderType::BindCommand($command, $true)
+				$nodes[$i].bindings = @(foreach ($key in $bound.BoundParameters.Keys) {
+					$result = $bound.BoundParameters[$key]
+					$record = @{ parameter = [string]$key; value = -1 }
+					if ($null -ne $result.Value) {
+						if ($index.ContainsKey($result.Value)) {
+							$record.value = $index[$result.Value]
+						} else {
+							# A remaining-arguments parameter (Write-Output a b) is bound to a
+							# synthetic array of copies; map each copy back to the argument
+							# with the same extent and type. -2 marks a value not in the tree.
+							$record.value = -2
+							if ($result.Value -is [System.Management.Automation.Language.ArrayLiteralAst]) {
+								$record.elements = @(foreach ($element in $result.Value.Elements) {
+									$match = -1
+									foreach ($argument in $command.CommandElements) {
+										if ($argument.Extent.StartOffset -eq $element.Extent.StartOffset -and $argument.Extent.EndOffset -eq $element.Extent.EndOffset -and $argument.GetType() -eq $element.GetType() -and $index.ContainsKey($argument)) { $match = $index[$argument] }
+									}
+									$match
+								})
+							}
+						}
+					}
+					$record
+				})
+				$nodes[$i].bindingErrors = @(foreach ($key in $bound.BindingExceptions.Keys) { [string]$key })
+			} catch {
+				$nodes[$i].bindingUnavailable = $true
+			}
 		}
 		Send-Record @{ id = $id; nodes = @($nodes); errors = @($parseErrors | ForEach-Object { $_.ErrorId }) }
 	} catch {

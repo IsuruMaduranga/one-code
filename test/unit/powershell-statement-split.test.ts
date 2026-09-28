@@ -12,9 +12,9 @@ import { decide, findBashAllowRule, parseRules, ruleMatches } from "../../extens
 import {
 	powershellInjectionSyntax,
 	powershellMatchForms,
-	powershellReadOnly,
 	powershellStatements,
 } from "../../extensions/permissions/powershell-rules.ts";
+import { HAVE_POWERSHELL, psParse, psReadOnly } from "./helpers/powershell-parse.ts";
 
 const cwd = "/proj";
 
@@ -59,27 +59,30 @@ describe("powershellStatements", () => {
 });
 
 describe("the read-only check", () => {
-	it.each(HIDDEN_WRITES)("is not read-only with %s", (_label, line) => {
-		expect(powershellReadOnly(line, { cwd, home: "/home/u" }).readOnly).toBe(false);
+	it.skipIf(!HAVE_POWERSHELL).each(HIDDEN_WRITES)("is not read-only with %s", async (_label, line) => {
+		expect((await psReadOnly(line, { cwd, home: "/home/u" })).readOnly).toBe(false);
 	});
 
-	it("refuses an unrecognised control character", () => {
-		for (const ch of ["\u0000", "\u000b", "\u000c", "\u001b", "\u007f", "\u0085", " ", " "]) {
-			expect(powershellReadOnly(`Get-ChildItem${ch}x`, { cwd, home: "/home/u" })).toMatchObject({ readOnly: false });
+	it.skipIf(!HAVE_POWERSHELL)("reads a control character as PowerShell does: never read-only with a writer behind it", async () => {
+		// PowerShell's parse is exact: a character it reads as whitespace leaves
+		// one command, and one it reads as a separator makes `Remove-Item` a
+		// command of its own, which is not read-only.
+		for (const ch of ["\u000b", "\u000c", "\u001b", "\u007f", "\u0085", "\u2028", "\u2029", "\u00a0"]) {
+			const line = `Get-ChildItem${ch}Remove-Item x`;
+			const commands = (await psParse(line)).nodes.filter((n) => n.type === "CommandAst").map((n) => n.name);
+			const { readOnly } = await psReadOnly(line, { cwd, home: "/home/u" });
+			expect(readOnly && commands.includes("Remove-Item"), JSON.stringify(ch)).toBe(false);
 		}
-		expect(powershellReadOnly("Get-ChildItem\tsrc", { cwd, home: "/home/u" }).readOnly).toBe(true);
+		expect((await psReadOnly("Get-ChildItem\tsrc", { cwd, home: "/home/u" })).readOnly).toBe(true);
 	});
 
-	it("refuses a typographic quote, which it cannot unquote for the path check", () => {
-		expect(powershellReadOnly("Get-Content ‘~/.ssh/id_rsa’", { cwd, home: "/home/u" })).toMatchObject({
-			readOnly: false,
-			reason: "a typographic quote",
-		});
+	it.skipIf(!HAVE_POWERSHELL)("judges the path inside typographic quotes, which PowerShell unquotes", async () => {
+		expect(await psReadOnly("Get-Content ‘~/.ssh/id_rsa’", { cwd, home: "/home/u" })).toMatchObject({ readOnly: false, reason: "a credential or secret path" });
 	});
 
-	it("reads a typographic dash as a parameter dash", () => {
-		expect(powershellReadOnly("Get-Process –ComputerName h", { cwd, home: "/home/u" }).readOnly).toBe(false);
-		expect(powershellReadOnly("Get-Process —cn h", { cwd, home: "/home/u" }).readOnly).toBe(false);
+	it.skipIf(!HAVE_POWERSHELL)("reads a typographic dash as a parameter dash", async () => {
+		expect((await psReadOnly("Get-Process –ComputerName h", { cwd, home: "/home/u" })).readOnly).toBe(false);
+		expect((await psReadOnly("Get-Process —cn h", { cwd, home: "/home/u" })).readOnly).toBe(false);
 	});
 
 	it("does not approve the line in any mode through decide()", () => {

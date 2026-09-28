@@ -5,28 +5,16 @@
  * parse"). The lines are the ones tree-sitter got wrong (findings §41), so
  * each assertion is a place where the model must show what PowerShell runs.
  *
- * Runs against `pwsh` on PATH (or `ONECODE_TEST_PWSH`), and on Windows also
- * against Windows PowerShell 5.1; CI has both. Skips when neither exists.
+ * Runs against the local PowerShell (helpers/local-pwsh.ts), and on Windows
+ * also against Windows PowerShell 5.1; CI has both. Skips when neither exists.
  */
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { type PowerShellAstNode, type PowerShellParse, PowerShellParser } from "../../extensions/lib/powershell-parser.ts";
-import { POWERSHELL_ARGS, spawnShellCommand } from "../../extensions/lib/shell-spawn.ts";
-import { whichOnPath } from "../../extensions/lib/which.ts";
+import { POWERSHELL_UTF8_PREFIX, type ShellSpawn, spawnShellCommand } from "../../extensions/lib/shell-spawn.ts";
+import { localPwsh, windowsPowerShell } from "./helpers/local-pwsh.ts";
+import { testParser } from "./helpers/powershell-parse.ts";
 
-function executables(): string[] {
-	const found: string[] = [];
-	const pwsh = process.env.ONECODE_TEST_PWSH ?? whichOnPath("pwsh", process.env, process.platform);
-	if (pwsh) found.push(pwsh);
-	if (process.platform === "win32") {
-		const desktop = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
-		if (existsSync(desktop)) found.push(desktop);
-	}
-	return found;
-}
-
-const EXECUTABLES = executables();
+const EXECUTABLES = [localPwsh(), windowsPowerShell()].filter((spec): spec is ShellSpawn => spec !== undefined);
 const parsers: PowerShellParser[] = [];
 
 afterAll(() => {
@@ -42,14 +30,10 @@ function ofType(parse: PowerShellParse, type: string): PowerShellAstNode[] {
 }
 
 describe.skipIf(EXECUTABLES.length === 0)("PowerShell parse server (live)", () => {
-	for (const executable of EXECUTABLES) {
-		describe(executable, () => {
-			const parser = new PowerShellParser({
-				spawnServer: (bootstrap) => spawnShellCommand({ shell: executable, args: [...POWERSHELL_ARGS] }, bootstrap, { stdio: ["pipe", "pipe", "pipe"] }),
-				// A cold start on a CI runner can be slow; production uses 5 s.
-				startTimeoutMs: 60_000,
-				requestTimeoutMs: 20_000,
-			});
+	for (const spec of EXECUTABLES) {
+		describe(spec.shell, () => {
+			// A cold start on a CI runner can be slow; production uses 5 s.
+			const parser = testParser(spec);
 			parsers.push(parser);
 
 			const parse = async (command: string): Promise<PowerShellParse> => {
@@ -143,6 +127,43 @@ describe.skipIf(EXECUTABLES.length === 0)("PowerShell parse server (live)", () =
 				const dotnet = await parse("[IO.File]::Delete('x')");
 				expect(ofType(dotnet, "InvokeMemberExpressionAst")[0]).toMatchObject({ static: true });
 				expect(ofType(dotnet, "TypeExpressionAst")[0].name).toBe("IO.File");
+			});
+
+			it("resolves each command in this PowerShell and binds a cmdlet's arguments", { timeout: 90_000 }, async () => {
+				const result = await parse("gci -r src | Select-String TODO -Ca; NoSuchCommand-xyz -a");
+				const [gci, sls, unknown] = ofType(result, "CommandAst");
+				expect(gci).toMatchObject({ alias: true, commandType: "Cmdlet", resolvedName: "Get-ChildItem", module: "Microsoft.PowerShell.Management" });
+				expect(gci.bindings?.map((b) => b.parameter).sort()).toEqual(["Path", "Recurse"]);
+				expect(sls.bindings?.map((b) => b.parameter).sort()).toEqual(["CaseSensitive", "Pattern"]);
+				expect(unknown.commandType).toBeUndefined();
+				const surplus = ofType(await parse("Get-Content a b"), "CommandAst")[0];
+				expect(surplus.bindingErrors).toEqual(["b"]);
+				const collected = ofType(await parse("Write-Output a 'b c'"), "CommandAst")[0];
+				expect(collected.bindings).toHaveLength(1);
+				expect(collected.bindings?.[0]).toMatchObject({ parameter: "InputObject", value: -2 });
+				expect(collected.bindings?.[0].elements?.every((i) => i > 0)).toBe(true);
+			});
+
+			it("the tool's spawn delivers a line to PowerShell byte for byte, so the parse is of what runs", { timeout: 90_000 }, async () => {
+				// The gate parses the command over base64; the tool passes it on the
+				// command line. Each line rides inside a here-string (data, never
+				// run) and PowerShell reports the script it received.
+				const lines = [
+					'Write-Output "a \\"q\\" b" \'c "d" e\'',
+					'x\\ "y\\\\" z\\',
+					"‘curly’ “double” –dash —em  nbsp\ttab",
+					"%PATH% ^& | ; && || `$x $(y) @(z)",
+					"日本語 ✓ 😀",
+					"line one\r\nline two\nline three",
+				];
+				for (const line of lines) {
+					const script = `$null = @'\n${line}\n'@\n[Console]::Out.Write([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($MyInvocation.MyCommand.ScriptBlock.ToString())))`;
+					const child = spawnShellCommand(spec, `${POWERSHELL_UTF8_PREFIX}${script}`, { stdio: ["ignore", "pipe", "pipe"] });
+					let out = "";
+					child.stdout?.on("data", (chunk) => (out += chunk));
+					await new Promise((resolve) => child.on("close", resolve));
+					expect(Buffer.from(out.trim(), "base64").toString("utf8"), JSON.stringify(line)).toBe(`${POWERSHELL_UTF8_PREFIX}${script}`);
+				}
 			});
 
 			it("answers a line of only whitespace, and restarts after stop()", { timeout: 90_000 }, async () => {

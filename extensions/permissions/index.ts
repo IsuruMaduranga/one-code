@@ -59,6 +59,9 @@ import { safetyControlWrite } from "../auto-mode/safety-floor.ts";
 import { isExecutionPrimitivePath, isSensitivePath } from "../auto-mode/sensitive.ts";
 import { analyzeShellCommand } from "../auto-mode/shell-analysis.ts";
 import { bashParserReady, bashParserUnavailable } from "../lib/bash-parser.ts";
+import type { PowerShellParse } from "../lib/powershell-parser.ts";
+import { powerShellParser } from "../lib/shell-spawn.ts";
+import { withKeepAlive } from "../lsp/keep-alive.ts";
 import { powershellReadOnly } from "./powershell-rules.ts";
 import { isShellTool } from "./matcher.ts";
 import { gitStatusOutput } from "../lib/git.ts";
@@ -592,6 +595,21 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	});
 
 	/**
+	 * PowerShell's own parse of a command line, from the process-wide parse
+	 * server on the tool's own executable (lib/powershell-parser.ts), or
+	 * undefined when it cannot answer (no PowerShell, a timeout, a crash,
+	 * Constrained Language Mode): the gate then clears nothing and the line is
+	 * classified or prompted. The server's child is unref'd, so the await holds
+	 * the event loop open itself (a one-shot run would otherwise exit mid-parse).
+	 */
+	const parsePowerShell = async (command: string): Promise<PowerShellParse | undefined> => {
+		const parser = powerShellParser();
+		if (!parser) return undefined;
+		const outcome = await withKeepAlive(() => parser.parse(command));
+		return outcome.ok ? outcome.parse : undefined;
+	};
+
+	/**
 	 * Run the deterministic pre-gate, then the classifier. The pre-gate may only
 	 * ever conclude "safe" (see auto-mode/shell-analysis.ts); when it does, the
 	 * classifier call is skipped entirely. A read-only command never gets here:
@@ -617,7 +635,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		 * aborted). All default to the parent's own values, so the main path is
 		 * unchanged.
 		 */
-		opts?: { cwd?: string; appendEntry?: TranscriptEntry; signal?: AbortSignal },
+		opts?: { cwd?: string; appendEntry?: TranscriptEntry; signal?: AbortSignal; powershellParse?: PowerShellParse },
 	) => {
 		const cwd = opts?.cwd ?? ctx.cwd;
 		autoConfig ??= loadAutoModeConfig(os.homedir());
@@ -631,11 +649,11 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				return allow();
 			}
 		} else if (normalizeToolName(toolName) === "powershell" && subject) {
-			// PowerShell has no pre-gate in v1 beyond Claude Code's read-only cmdlet
-			// allowlist (powershell-rules.ts): a read-only line runs unclassified,
-			// everything else — every write, delete or unknown executable — goes to
-			// the classifier (working-docs/decisions/windows.md).
-			if (powershellReadOnly(subject, { cwd, home, readableRoots }).readOnly) {
+			// A line PowerShell's own parse proves read-only runs unclassified;
+			// contained edits were cleared in decide() where the model's tier allows
+			// them, and everything else goes to the classifier
+			// (decisions/windows.md "The PowerShell pre-gate reads PowerShell's own parse").
+			if (powershellReadOnly({ parse: opts?.powershellParse, cwd, home, readableRoots }).readOnly) {
 				logDecision(ctx, { tool: toolName, subject, outcome: "allow", source: "pre-gate" });
 				return allow();
 			}
@@ -919,6 +937,9 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		lastReviewCtx = ctx;
 		streaming = true;
 		applyBadge();
+		// Start the PowerShell parser before the first PowerShell call needs it,
+		// never awaited: its first start can take seconds on Windows.
+		if (mode !== "bypassPermissions" && pi.getActiveTools().includes("powershell")) void powerShellParser()?.parse("");
 	});
 	// Settle, not agent_end: `agent_end` fires per run, so flipping there made
 	// the badge's "· esc to interrupt" suffix flicker off and back on across a
@@ -1079,6 +1100,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		const original = isShellTool(normalizedTool) || normalizedTool === "monitor" ? originalCommands.get(event.toolCallId) : undefined;
 		const matchSubject = original?.command ?? subject;
 		const callCwd = original?.cwd ?? ctx.cwd;
+		const powershellParse = normalizedTool === "powershell" && matchSubject && mode !== "bypassPermissions" ? await parsePowerShell(matchSubject) : undefined;
 
 		// Record every tool call into the classifier transcript (inputs only). In
 		// auto mode this is the running <transcript> the classifier reads, and this
@@ -1126,6 +1148,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				claudeCodeFastPaths: usesClaudeCodeFastPaths(ctx.model),
 				blockReadsOutsideWorkingDirectories: blockOutsideReads,
 				readOnlyDirs: docsDirPaths,
+				powershellParse,
 			});
 		let result = decideWith([...allow, ...activeSessionAllows(), ...(projectAllowTrusted ? projectAllow : [])]);
 
@@ -1244,7 +1267,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 					result.cause !== "protected-path",
 					// A worktree-wrapped command is analysed as the model wrote it, in the
 					// worktree it runs in (the classifier transcript already holds it).
-					original?.cwd ? { cwd: original.cwd } : undefined,
+					{ cwd: original?.cwd, powershellParse },
 				);
 				if (outcome.decision === "allow") {
 					noteAllow();
@@ -1384,6 +1407,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			isPathSubjectTool(normalizedTool) && subject
 				? resolveForContainment(toAbsolute(cwd, subject, os.homedir()))
 				: undefined;
+		const powershellParse = normalizedTool === "powershell" && subject && mode !== "bypassPermissions" ? await parsePowerShell(subject) : undefined;
 
 		const result = decide({
 			toolName,
@@ -1412,6 +1436,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			claudeCodeFastPaths: usesClaudeCodeFastPaths(call.model),
 			blockReadsOutsideWorkingDirectories: blockOutsideReads,
 			readOnlyDirs: docsDirPaths,
+			powershellParse,
 		});
 
 		// A child's cwd can be a worktree (different project → different per-repo
@@ -1463,6 +1488,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				// classifier call; a fresh (never-aborted) signal only if the child
 				// didn't supply one, so classify() still gets the signal it expects.
 				signal: call.signal ?? new AbortController().signal,
+				powershellParse,
 			});
 			if (outcome.decision === "allow") return undefined;
 			if (outcome.tier === "timeout") return { block: true, reason: BLOCKED_BY_TIMEOUT(outcome.reason) };

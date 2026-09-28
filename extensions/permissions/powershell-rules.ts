@@ -20,24 +20,20 @@
  *   "every subcommand must match"); a deny/ask rule fires on any part, and on
  *   a rough split as well. Unbalanced quoting is a parse failure → no allow,
  *   the user is asked.
- * - **No AST.** Claude Code parses the command; v1 here is textual and
- *   conservative in the only direction that matters: a wildcard or prefix
- *   allow never covers a line whose meaning is not on its face — `$(…)`
- *   subexpressions, backtick escapes, the `&`/`.` call operators,
- *   `Invoke-Expression`, `-EncodedCommand`, script blocks.
+ * - **Textual rule matching.** Rule matching stays on this split, which
+ *   matches more forms than the tree, never fewer; it is conservative in the
+ *   only direction that matters: a wildcard or prefix allow never covers a
+ *   line whose meaning is not on its face — `$(…)` subexpressions, backtick
+ *   escapes, the `&`/`.` call operators, `Invoke-Expression`,
+ *   `-EncodedCommand`, script blocks.
  *
- * `powershellReadOnly` ports the read-only allowlist Claude Code uses to skip
- * approval — the cmdlet sets from the 2.1.276 binary — and adds path
- * containment by shape: a read of an absolute, `~`, drive-lettered, UNC or
- * `..` path is not auto-cleared (UNC paths always ask in CC). Anything the
- * check cannot vouch for is simply "not read-only", which costs a classifier
- * call or a prompt, never a bypass — working-docs/decisions/windows.md.
+ * `powershellReadOnly`, the read-only verdict the gate skips approval on, is
+ * judged from PowerShell's own parse instead (`powershell-tree.ts`,
+ * decisions/windows.md "The PowerShell pre-gate reads PowerShell's own parse").
  */
 
-import { isSensitivePath } from "../auto-mode/sensitive.ts";
-import { readdirSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, sep } from "node:path";
-import { isWithin, resolveForContainment, toAbsolute } from "../auto-mode/paths.ts";
+import type { PowerShellParse } from "../lib/powershell-parser.ts";
+import { type PowerShellTreeOptions, powershellTreeReadOnly } from "./powershell-tree.ts";
 
 /** Claude Code's `COMMON_ALIASES` (utils/powershell/parser.ts), alias → canonical cmdlet. */
 export const POWERSHELL_ALIASES: Readonly<Record<string, string>> = Object.freeze({
@@ -373,6 +369,15 @@ export function statementCommand(statement: string): string {
 }
 
 /**
+ * A control character the lexer does not model: C0 other than tab, line feed
+ * and carriage return, DEL, C1 (NEL included), and the Unicode line and
+ * paragraph separators. pwsh reads some as whitespace and some as part of a
+ * word; the split here honours neither, so a line with one is never covered
+ * by a wildcard or prefix allow rule.
+ */
+const UNRECOGNISED_CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u2028\u2029]/;
+
+/**
  * Why a wildcard or prefix allow rule must not cover this line: constructs
  * whose effect is not what the words say. Exact rules (the literal string the
  * user approved) are unaffected. Returns undefined when none is present.
@@ -443,260 +448,11 @@ export function powershellMatchForms(command: string, depth = 0): string[] {
 const ROUGH_SEPARATORS = /[;|&\r\n(){}]+/;
 
 // ---------------------------------------------------------------------------
-// Read-only allowlist
+// Read-only
 
-/**
- * The read-only cmdlet sets in the 2.1.276 binary (findings §22), plus the
- * neutral output pair, plus — One Code's addition (2026-09-19, user decision,
- * working-docs/decisions/windows.md) — the pure in-process pipeline cmdlets a
- * read-only line is piped through: they shape objects already in memory and
- * touch neither disk nor network. `Where-Object`/`ForEach-Object` are NOT
- * here: they take script blocks, which the check refuses anyway. Claude Code's
- * captured list has no pipeline cmdlets at all, so `Select-String … |
- * Measure-Object` (the /doctor transcript scan) always went to the classifier.
- */
-export const READ_ONLY_POWERSHELL_COMMANDS = new Set<string>([
-	// search
-	"select-string",
-	"get-childitem",
-	"findstr",
-	"where.exe",
-	// read
-	"get-content",
-	"get-item",
-	"test-path",
-	"resolve-path",
-	"get-process",
-	"get-service",
-	"get-location",
-	"get-filehash",
-	"get-acl",
-	"format-hex",
-	// neutral output
-	"write-output",
-	"write-host",
-	// pure pipeline transforms (One Code's addition)
-	"select-object",
-	"sort-object",
-	"measure-object",
-	"group-object",
-	"convertfrom-json",
-	"out-string",
-	"format-table",
-	"format-list",
-	"format-wide",
-	"format-custom",
-]);
-
-/**
- * A control character the lexer does not model: C0 other than tab, line feed
- * and carriage return, DEL, C1 (NEL included), and the Unicode line and
- * paragraph separators. pwsh reads some as whitespace and some as part of a
- * word; the checks here split on neither, so a line with one is never
- * read-only and never covered by a wildcard or prefix allow rule.
- */
-const UNRECOGNISED_CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u2028\u2029]/;
-
-/**
- * The typographic quotes pwsh takes as quotes. The split honours them, but
- * the token checks below unquote ASCII quotes only, so `‘~/.ssh/id_rsa’` would
- * be judged as a relative name inside the working directory.
- */
-const TYPOGRAPHIC_QUOTE = /[\u2018-\u201e]/;
-
-/** The dashes pwsh takes as `-` at the start of a parameter (`–OutFile`). */
-const TYPOGRAPHIC_DASH = /^[\u2013\u2014\u2015]/;
-
-/** Parameters that turn a read-only cmdlet into a write. */
-const WRITING_PARAMETERS = /^-(outfile|filepath|destination)\b/i;
-
-/**
- * `-ComputerName` (and its `-Cn` alias, and any abbreviation PowerShell
- * accepts for it) sends `Get-Process`/`Get-Service` to another machine.
- */
-const REMOTE_PARAMETER = /^-(cn|c(o(m(p(u(t(e(r(n(a(m(e)?)?)?)?)?)?)?)?)?)?)?)(:|$)/i;
-
-/**
- * Whether a token names a path this check will not vouch for by shape: UNC
- * (`\\server`), home (`~`), a PSDrive outside the filesystem (`HKLM:`,
- * `env:`), or one that climbs (`..`). An absolute or drive-lettered path is
- * judged by `pathProblem` when roots are known, and refused otherwise.
- */
-function pathUnvouchable(value: string): boolean {
-	if (!value) return false;
-	if (value.startsWith("\\\\") || value.startsWith("//")) return true;
-	if (/^[A-Za-z][A-Za-z0-9]+:/.test(value)) return true; // HKLM:, env:, cert: (a drive is one letter)
-	// Drive-relative (`C:foo.txt`, no separator after the colon) means "foo.txt
-	// relative to PowerShell's current directory ON C:", which need not be the
-	// tool's cwd; `path.isAbsolute` does not call it absolute, so `toAbsolute`
-	// would join it onto the cwd and vouch for the wrong file. Refuse by shape.
-	if (/^[A-Za-z]:(?![\\/])/.test(value)) return true;
-	if (value.startsWith("~")) return true;
-	if (/(^|[\\/])\.\.([\\/]|$)/.test(value)) return true;
-	return false;
-}
-
-/**
- * PowerShell's array syntax splits an argument on commas — outside quotes.
- * `"a,b.txt"` is one path with a comma in its name; `a,"b,c"` is two.
- */
-export function splitPowerShellList(token: string): string[] {
-	const parts: string[] = [];
-	let current = "";
-	let quote: string | undefined;
-	for (const ch of token) {
-		if (quote) {
-			if (ch === quote) quote = undefined;
-			else current += ch;
-		} else if (ch === '"' || ch === "'") {
-			quote = ch;
-		} else if (ch === ",") {
-			parts.push(current);
-			current = "";
-		} else {
-			current += ch;
-		}
-	}
-	parts.push(current);
-	return parts;
-}
-
-/** An absolute path by Windows or POSIX spelling: `C:\x`, `C:/x`, `/x`, `\x`. */
-function isAbsoluteSpelling(value: string): boolean {
-	return /^[A-Za-z]:/.test(value) || value.startsWith("/") || value.startsWith("\\");
-}
-
-export interface PowerShellReadOnlyOptions {
-	/** The working directory the command runs in. */
-	cwd: string;
-	/** The user's home, for `toAbsolute`. */
-	home: string;
-	/**
-	 * REALPATH-resolved directories an absolute path may point into besides the
-	 * working directory: the harness's own session dirs (memory, scratchpad,
-	 * persisted results, this project's transcripts — matcher.ts `DecideInput`),
-	 * resolved once per session by the caller.
-	 */
-	readableRoots?: string[];
-}
-
-type WildcardPart = { star: true } | { star: false; matches: (ch: string) => boolean };
-
-/**
- * A PowerShell wildcard component (`*`, `?`, `[a-c]`) as a case-insensitive
- * matcher that matches a superset of what PowerShell does, or undefined. Matched without a regex over the whole name: the
- * model writes the pattern, and `*a*a*a…z` would backtrack polynomially
- * against every directory entry on the permission-gate path.
- */
-function wildcardMatcher(pattern: string): ((name: string) => boolean) | undefined {
-	const parts: WildcardPart[] = [];
-	for (let i = 0; i < pattern.length; i++) {
-		const ch = pattern[i];
-		const close = ch === "[" ? pattern.indexOf("]", i + 1) : -1;
-		if (ch === "*") {
-			if (!parts.at(-1)?.star) parts.push({ star: true });
-		} else if (ch === "?") {
-			// Read as `*`: a superset of what `?` matches (one character, or none
-			// at the end of a name on some filesystem APIs), so no match escapes.
-			if (!parts.at(-1)?.star) parts.push({ star: true });
-		}
-		else if (close > i + 1) {
-			let set: RegExp;
-			try {
-				set = new RegExp(`^[${pattern.slice(i + 1, close).replace(/[\\\]^]/g, "\\$&")}]$`, "i");
-			} catch {
-				return undefined;
-			}
-			parts.push({ star: false, matches: (c) => set.test(c) });
-			i = close;
-		} else {
-			const lower = ch.toLowerCase();
-			parts.push({ star: false, matches: (c) => c.toLowerCase() === lower });
-		}
-	}
-	// Greedy match that backtracks only to the last `*`: O(name × pattern).
-	return (name) => {
-		let p = 0;
-		let t = 0;
-		let starAt = -1;
-		let resumeAt = 0;
-		while (t < name.length) {
-			const part = parts[p];
-			if (part && !part.star && part.matches(name[t])) {
-				p++;
-				t++;
-			} else if (part?.star) {
-				starAt = p++;
-				resumeAt = t;
-			} else if (starAt >= 0) {
-				p = starAt + 1;
-				t = ++resumeAt;
-			} else return false;
-		}
-		while (parts[p]?.star) p++;
-		return p === parts.length;
-	};
-}
-
-/**
- * The paths a wildcard in the last component names, or undefined when they
- * cannot be enumerated (a wildcard in a directory component, an unreadable
- * or huge directory). Matched case-insensitively and with hidden entries, a
- * superset of what PowerShell reads, so every match that could be read is judged.
- */
-function wildcardTargets(absolute: string): string[] | undefined {
-	const dir = dirname(absolute);
-	const matches = wildcardMatcher(basename(absolute));
-	if (/[*?[]/.test(dir) || !matches) return undefined;
-	let entries: string[];
-	try {
-		entries = readdirSync(dir);
-	} catch {
-		return [dir];
-	}
-	if (entries.length > 2_000) return undefined;
-	return [dir, ...entries.filter((entry) => matches(entry)).map((entry) => join(dir, entry))];
-}
-
-/**
- * Why a path token must not be vouched for, or undefined. Each comma-separated
- * part (PowerShell's array syntax, `-Path a,b`; commas inside quotes are part
- * of the name) is judged on its own: refused by shape when unvouchable, then
- * resolved through `resolveForContainment`, relative parts included. A
- * relative name is not inside by construction: an in-project `notes.txt` can
- * be a symlink out of it (AUTO-MODE-SECURITY-REVIEW-2026-09-24 M4). A
- * wildcard leaf is judged match by match. Every target must lie inside a root
- * and resolve to no credential path. With no roots (no options) an absolute
- * part is refused and a relative one passes, the pre-2026-09-19 behaviour.
- */
-function pathProblem(value: string, opts: PowerShellReadOnlyOptions | undefined, roots: string[]): string | undefined {
-	const outside = "a path outside the working directory";
-	for (const part of splitPowerShellList(value)) {
-		const trimmed = part.trim();
-		if (!trimmed) continue;
-		if (pathUnvouchable(trimmed)) return outside;
-		const absoluteSpelling = isAbsoluteSpelling(trimmed);
-		if (!opts) {
-			if (absoluteSpelling) return outside;
-			continue;
-		}
-		// Resolve only what THIS platform's path module calls absolute: on a POSIX
-		// host `C:\x` is not, and `toAbsolute` would join it onto the cwd and
-		// vouch for a file the shell would never touch. Refuse it by shape there.
-		if (absoluteSpelling && !isAbsolute(trimmed)) return outside;
-		// PowerShell on macOS and Linux takes `\` as a separator too, so `sub\link`
-		// is `sub/link` there, not one file named with a backslash.
-		const spelled = sep === "/" ? trimmed.replaceAll("\\", "/") : trimmed;
-		const absolute = toAbsolute(opts.cwd, spelled, opts.home);
-		const targets = /[*?[]/.test(spelled) ? wildcardTargets(absolute) : [absolute];
-		if (targets === undefined) return outside;
-		for (const target of targets) {
-			const resolved = resolveForContainment(target);
-			if (resolved === undefined || !roots.some((root) => isWithin(root, resolved))) return outside;
-			if (isSensitivePath(resolved)) return "a credential or secret path";
-		}
-	}
-	return undefined;
+export interface PowerShellReadOnlyOptions extends PowerShellTreeOptions {
+	/** PowerShell's own parse of the line (lib/powershell-parser.ts); without one nothing is read-only. */
+	parse?: PowerShellParse;
 }
 
 export interface PowerShellReadOnlyVerdict {
@@ -706,58 +462,15 @@ export interface PowerShellReadOnlyVerdict {
 }
 
 /**
- * Whether every statement of the line is a read-only cmdlet (or `where.exe`)
- * with arguments the check can see through: no redirection, no variables or
- * subexpressions, no script blocks, no writing parameters, no path outside
- * the working directory by shape. Positive proof only; anything else is not
- * read-only and takes the ordinary route (classifier in auto mode, a prompt
- * elsewhere).
+ * Whether every statement of the line provably only reads inside the working
+ * directory and the readable roots, judged from PowerShell's own parse
+ * (`powershell-tree.ts`). Positive proof only; without a parse, or with
+ * anything the tree check does not model, the line is not read-only and takes
+ * the ordinary route (the classifier in auto mode, a prompt elsewhere) —
+ * decisions/windows.md "The PowerShell pre-gate reads PowerShell's own parse".
  */
-export function powershellReadOnly(command: string, opts?: PowerShellReadOnlyOptions): PowerShellReadOnlyVerdict {
-	const statements = powershellStatements(command);
-	if (statements === undefined) return { readOnly: false, reason: "unbalanced quoting" };
-	if (statements.length === 0) return { readOnly: false, reason: "empty command" };
-	if (UNRECOGNISED_CONTROL.test(command)) return { readOnly: false, reason: "a control character" };
-	if (TYPOGRAPHIC_QUOTE.test(command)) return { readOnly: false, reason: "a typographic quote" };
-	if (/[<>]/.test(command)) return { readOnly: false, reason: "redirection" };
-	if (/\$/.test(command)) return { readOnly: false, reason: "a variable or subexpression" };
-	if (/[`{}]/.test(command)) return { readOnly: false, reason: "an escape or script block" };
-	if (hasGroupingExpression(command)) return { readOnly: false, reason: "a (…) grouping expression, which runs its own command" };
-	// The cwd's realpath once per command (the roots arrive resolved), not once per token.
-	const roots = opts ? [resolveForContainment(opts.cwd) ?? opts.cwd, ...(opts.readableRoots ?? [])] : [];
-	for (const statement of statements) {
-		if (startsWithCallOperator(statement)) return { readOnly: false, reason: "the call operator" };
-		const cmd = statementCommand(statement);
-		if (!READ_ONLY_POWERSHELL_COMMANDS.has(cmd)) return { readOnly: false, reason: `\`${cmd}\` is not a read-only cmdlet` };
-		const tokens = statement
-			.trim()
-			.split(/\s+/)
-			.slice(1)
-			.map((token) => token.replace(TYPOGRAPHIC_DASH, "-"));
-		for (const token of tokens) {
-			if (WRITING_PARAMETERS.test(token)) return { readOnly: false, reason: `${token.split(":")[0]} writes or forwards` };
-			if (REMOTE_PARAMETER.test(token)) return { readOnly: false, reason: `${token.split(":")[0]} reaches another machine` };
-			// `-Path:value` binds its value in the same word; until 2026-09-23 the
-			// whole word was skipped as a parameter name, so `Get-Content
-			// -Path:~/.ssh/id_rsa` and a UNC `-LiteralPath:\\host\share` passed
-			// (SECURITY-REVIEW-2026-09-23 H5). The bound value is a path like any other.
-			const colon = token.startsWith("-") ? token.indexOf(":") : -1;
-			const value = token.startsWith("-") ? (colon > 0 ? token.slice(colon + 1) : "") : token;
-			if (!value) continue;
-			const unquoted = value.replace(/^["']|["']$/g, "");
-			if (splitPowerShellList(unquoted).some((part) => isSensitivePath(part.trim()))) {
-				return { readOnly: false, reason: "a credential or secret path" };
-			}
-			// By shape (UNC, ~, PSDrive, ..) a token is never vouched for. An absolute
-			// path is read-only only when it resolves inside the working directory or
-			// a harness session dir (2026-09-19: /doctor's transcript scan on Windows
-			// spelled `<agentDir>\sessions\…` and was classified —
-			// working-docs/decisions/auto-mode.md); a comma list is judged part by part.
-			const problem = pathProblem(value, opts, roots);
-			if (problem) return { readOnly: false, reason: problem };
-		}
-	}
-	return { readOnly: true };
+export function powershellReadOnly(opts: PowerShellReadOnlyOptions): PowerShellReadOnlyVerdict {
+	if (!opts.parse) return { readOnly: false, reason: "PowerShell's own parse of the line is not available" };
+	const verdict = powershellTreeReadOnly(opts.parse, opts);
+	return verdict.ok ? { readOnly: true } : { readOnly: false, reason: verdict.reason };
 }
-
-

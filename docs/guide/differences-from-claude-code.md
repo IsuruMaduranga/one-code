@@ -117,10 +117,10 @@ every model. The content is the same; only the placement differs.
   default on Windows, `CLAUDE_CODE_USE_POWERSHELL_TOOL=0` turns it off), and
   your `PowerShell(...)` rules, `CLAUDE_CODE_GIT_BASH_PATH`, and per-hook
   `shell` field work unchanged. The PowerShell tool's description is Claude
-  Code's own text. What differs: One Code has no PowerShell command parser
-  yet, so in auto mode every PowerShell command that isn't on Claude Code's
-  read-only cmdlet list goes to the classifier (Claude Code auto-approves
-  more in-project work). Verified on CI runners and through a `pwsh` on
+  Code's own text. PowerShell commands are judged from PowerShell's own
+  parse, as in Claude Code. What differs: native commands run from
+  PowerShell (`git status`, `npm test`) always go to the classifier in auto
+  mode, where Claude Code approves some of them itself. Verified on CI runners and through a `pwsh` on
   macOS; a real Windows desktop has not been driven end to end yet. See
   [Windows](windows.md).
 

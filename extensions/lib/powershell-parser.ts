@@ -58,6 +58,26 @@ export interface PowerShellAstNode {
 	background?: boolean;
 	/** Member access: `::`. */
 	static?: boolean;
+	/** CommandAst with a static name that resolves in this PowerShell: the resolved command's type (`Cmdlet`, `Application`, `Function`, …), after an alias. */
+	commandType?: string;
+	/** CommandAst: the name was an alias. */
+	alias?: boolean;
+	/** CommandAst: the resolved cmdlet's name, or an application's full path. */
+	resolvedName?: string;
+	/** CommandAst: the resolved command's module (empty for an application). */
+	module?: string;
+	/**
+	 * CommandAst of a cmdlet: PowerShell's static parameter binding. `value` is
+	 * the bound argument's node index, -1 for a switch given alone, and -2 for a
+	 * value the binder built itself: the arguments a remaining-arguments
+	 * parameter collects (`Write-Output a b`), whose node indices are
+	 * `elements` (-1 for one that matched no argument).
+	 */
+	bindings?: Array<{ parameter: string; value: number; elements?: number[] }>;
+	/** CommandAst of a cmdlet: the arguments or parameters the binder could not bind (an unknown or ambiguous name, a surplus positional, a repeat). */
+	bindingErrors?: string[];
+	/** CommandAst of a cmdlet: the static binder is missing or threw. */
+	bindingUnavailable?: boolean;
 }
 
 export interface PowerShellParse {

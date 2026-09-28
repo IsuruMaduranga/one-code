@@ -14,6 +14,8 @@ import { analyzeShellCommand, INLINE_SCRIPT_SHELLS, isUnknownTilde, leadTokens, 
 import { pathArgument, resolveForContainment, toAbsolute, toAbsoluteBash } from "../auto-mode/paths.ts";
 import { isSensitivePath } from "../auto-mode/sensitive.ts";
 import { isProtectedPath, isWritingTool } from "./protected-paths.ts";
+import { powershellTreeContainedEdits } from "./powershell-tree.ts";
+import type { PowerShellParse } from "../lib/powershell-parser.ts";
 import {
 	canonicalCommandName,
 	canonicalizeStatement,
@@ -855,6 +857,12 @@ export interface DecideInput {
 	 */
 	claudeCodeFastPaths?: boolean;
 	/**
+	 * PowerShell's own parse of a `powershell` subject (lib/powershell-parser.ts),
+	 * made by the caller before deciding. Absent, no PowerShell line is read-only
+	 * or a contained edit here: the gate clears nothing it has not parsed.
+	 */
+	powershellParse?: PowerShellParse;
+	/**
 	 * Claude Code's `permissions.blockReadsOutsideWorkingDirectories`: the read
 	 * tools refuse a path outside the working space, in every mode.
 	 */
@@ -1042,7 +1050,7 @@ export function decide(params: DecideInput): Decision {
 		}
 		// The PowerShell counterpart: Claude Code's read-only cmdlet allowlist,
 		// with in-project paths by shape (powershell-rules.ts).
-		if (tool === "powershell" && subject && powershellReadOnly(subject, { cwd, home: homedir(), readableRoots }).readOnly) return { decision: "allow", cause: "plan-readonly" };
+		if (tool === "powershell" && subject && powershellReadOnly({ parse: params.powershellParse, cwd, home: homedir(), readableRoots }).readOnly) return { decision: "allow", cause: "plan-readonly" };
 		if (PLAN_READ_ONLY_TOOLS.has(tool)) return { decision: "allow", cause: "plan-readonly" };
 		return { decision: "deny", cause: "plan-mode" };
 	}
@@ -1217,8 +1225,19 @@ export function decide(params: DecideInput): Decision {
 			return { decision: "allow", cause: "mode" };
 		}
 	}
-	if (subject && tool === "powershell" && powershellReadOnly(subject, { cwd, home: homedir(), readableRoots: sessionReadableRoots() }).readOnly) {
-		return { decision: "allow", cause: "read-only" };
+	if (subject && tool === "powershell" && params.powershellParse) {
+		if (powershellReadOnly({ parse: params.powershellParse, cwd, home: homedir(), readableRoots: sessionReadableRoots() }).readOnly) {
+			return { decision: "allow", cause: "read-only" };
+		}
+		// Claude Code's acceptEdits PowerShell cmdlets on the working space, the
+		// PowerShell half of the bash file-command fast path above.
+		if (
+			fastPaths &&
+			(mode === "acceptEdits" || mode === "auto") &&
+			powershellTreeContainedEdits(params.powershellParse, { cwd, home: homedir(), writableRoots: params.workspaceDirs, protectedDirs: params.protectedDirs }).ok
+		) {
+			return { decision: "allow", cause: "mode" };
+		}
 	}
 
 	if (mode === "auto" && (DELEGATION_TOOLS.has(tool) || CLASSIFY_IN_AUTO_TOOLS.has(tool))) {
