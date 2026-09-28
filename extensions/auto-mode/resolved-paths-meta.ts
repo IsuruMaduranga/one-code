@@ -18,6 +18,7 @@
  * on their own; decisions/auto-mode.md "The resolvedPaths line").
  */
 
+import { comparablePath } from "../lib/paths.ts";
 import type { PowerShellParse } from "../lib/powershell-parser.ts";
 import { isPathSubjectTool } from "../permissions/matcher.ts";
 import { powershellSeparators, powershellUnescaped } from "../permissions/powershell-paths.ts";
@@ -38,8 +39,10 @@ export const RESOLVED_PATHS_NOTE =
 
 /** The most words one action has resolved: a huge command must not stall the gate. */
 const MAX_CANDIDATES = 256;
-/** A word longer than this is not a path worth resolving. */
-const MAX_WORD = 4_096;
+/** A word longer than this is not a path worth resolving; it also bounds the line, whose words the agent wrote. */
+const MAX_WORD = 1_024;
+/** The most paths the line reports: enough to show the action escapes, bounded so it cannot swell the classifier's prompt. */
+const MAX_FACTS = 16;
 
 /** The constant words of a bash command line: every known token value and redirect target, and the value of `--opt=value`. */
 export function bashPathCandidates(command: string): string[] {
@@ -93,7 +96,7 @@ export function resolvedPathFacts(words: readonly string[], opts: ResolvedPathsO
 	const facts: ResolvedPathFact[] = [];
 	const seen = new Set<string>();
 	for (const word of words) {
-		if (seen.size >= MAX_CANDIDATES) break;
+		if (seen.size >= MAX_CANDIDATES || facts.length >= MAX_FACTS) break;
 		if (!word || word.length > MAX_WORD || word.includes("\0") || seen.has(word)) continue;
 		seen.add(word);
 		const lexical =
@@ -101,9 +104,9 @@ export function resolvedPathFacts(words: readonly string[], opts: ResolvedPathsO
 				? toAbsoluteBash(cwd, word, opts.home)
 				: toAbsolute(cwd, opts.spelling === "powershell" ? powershellSeparators(word) : word, opts.home);
 		if (!roots.some((root) => isWithin(root, lexical))) continue;
-		const resolved = resolveForContainment(lexical);
-		if (resolved === undefined || roots.some((root) => isWithin(root, resolved))) continue;
-		facts.push({ path: word, resolvesTo: resolveThroughLinks(lexical) ?? resolved });
+		const resolvesTo = resolveThroughLinks(lexical);
+		if (resolvesTo === undefined || roots.some((root) => isWithin(root, comparablePath(resolvesTo)))) continue;
+		facts.push({ path: word, resolvesTo });
 	}
 	return facts.length > 0 ? facts : undefined;
 }

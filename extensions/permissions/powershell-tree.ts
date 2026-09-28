@@ -500,7 +500,7 @@ function checkSelectStringSources(upstream: CheckedCommand[], opts: PowerShellTr
 			// `-LiteralPath 'sub[1]'` and `-Path 'sub`[1`]'` list the directory
 			// `sub[1]` itself: judge the entries of both spellings, whichever exists.
 			const absolute = powershellPathAbsolute(directory, opts);
-			if (absolute === undefined) refuse("Select-String over a directory with an entry outside the working directory");
+			if (absolute === undefined) refuse(`Select-String over ${directory}, a directory this check cannot resolve`);
 			for (const spelling of new Set([absolute, powershellUnescaped(absolute)])) {
 				const resolved = resolveForContainment(spelling);
 				if (resolved === undefined || !entriesInside(resolved, roots)) refuse("Select-String over a directory with an entry outside the working directory");

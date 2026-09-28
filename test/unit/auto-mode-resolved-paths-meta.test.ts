@@ -85,3 +85,24 @@ describe("the rendered line", () => {
 		]);
 	});
 });
+
+describe("the line's bounds", () => {
+	it("is kept with a large action that pushes older entries out of the transcript", () => {
+		const big = `echo ${"x".repeat(70_000)} >> ' leading.txt'`;
+		const lines = renderTranscript([
+			{ kind: "user", text: "older" },
+			{ kind: "meta", gitStatus: { clean: true } },
+			{ kind: "resolved-paths", resolvedPaths: [{ path: " leading.txt", resolvesTo: secret }] },
+			{ kind: "tool", tool: "bash", input: { command: big } },
+		]).split("\n");
+		expect(lines[1]).toContain("1 earlier transcript entry omitted");
+		expect(lines[2]).toBe('{"meta":{"gitStatus":{"clean":true}}}');
+		expect(lines[3]).toContain('"resolvedPaths"');
+		expect(lines[4]).toContain(big);
+	});
+
+	it("reports at most 16 paths", () => {
+		const many = Array.from({ length: 40 }, (_, i) => `out/f${i}.txt`);
+		expect(resolvedPathFacts(many, opts)).toHaveLength(16);
+	});
+});

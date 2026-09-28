@@ -111,7 +111,8 @@ export interface RenderOptions {
 /**
  * Render the ordered entries into a `<transcript>…</transcript>` block. When the
  * rendered lines exceed `maxChars`, the oldest are dropped and a marker records
- * it — the action under review (the last entry) is always kept, whole. The full user
+ * it — the action under review (the last entry) is always kept, whole, with the
+ * ground-truth lines directly above it. The full user
  * messages are carried separately for intent verification, so dropping old lines
  * here never weakens that check.
  */
@@ -120,14 +121,18 @@ export function renderTranscript(entries: TranscriptEntry[], options: RenderOpti
 	const maxChars = options.maxChars ?? 60_000;
 	const lines = entries.map((entry, i) => renderEntry(entry, i === entries.length - 1 ? Number.POSITIVE_INFINITY : maxField));
 
-	// Keep the newest lines that fit the budget, walking from the end in one pass
-	// (the last line — the action under review — is always kept). +1 per line for
-	// the joining "\n".
+	// Keep the newest lines that fit the budget, walking from the end in one pass.
+	// The action under review is always kept, with the harness's ground-truth
+	// lines directly above it (gitStatus, resolvedPaths): they describe that
+	// action, and a large action must not push them out. +1 per line for the
+	// joining "\n".
+	let attached = entries.length - 1;
+	while (attached > 0 && (entries[attached - 1].kind === "meta" || entries[attached - 1].kind === "resolved-paths")) attached--;
 	let firstKept = lines.length;
 	let running = 0;
 	for (let i = lines.length - 1; i >= 0; i--) {
 		running += lines[i].length + 1;
-		if (i < lines.length - 1 && running > maxChars) break;
+		if (i < attached && running > maxChars) break;
 		firstKept = i;
 	}
 	const kept = lines.slice(firstKept);

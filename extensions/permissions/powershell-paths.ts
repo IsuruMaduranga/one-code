@@ -178,7 +178,7 @@ function wildcardTargets(absolute: string): string[] | undefined {
 export function powershellPathProblem(value: string, opts: PowerShellPathOptions, roots: string[]): string | undefined {
 	const outside = "a path outside the working directory";
 	if (!value) return undefined;
-	if (isSensitivePath(value.trim())) return "a credential or secret path";
+	if (isSensitivePath(value)) return "a credential or secret path";
 	const absolute = powershellPathAbsolute(value, opts);
 	if (absolute === undefined) return outside;
 	// The value's own wildcard, not one in the working directory's name. The
