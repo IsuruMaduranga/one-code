@@ -620,7 +620,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		 * aborted). All default to the parent's own values, so the main path is
 		 * unchanged.
 		 */
-		opts?: { cwd?: string; appendEntries?: TranscriptEntry[]; signal?: AbortSignal; powershellParse?: PowerShellParse },
+		opts?: { cwd?: string; appendEntry?: TranscriptEntry; signal?: AbortSignal; powershellParse?: PowerShellParse },
 	) => {
 		const cwd = opts?.cwd ?? ctx.cwd;
 		autoConfig ??= loadAutoModeConfig(os.homedir());
@@ -666,12 +666,17 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		}
 
 		// The current call was pushed onto `transcript` by the tool_call handler, so
-		// it is already the last entry — the action under review. The pre-gate's
-		// evidence is not sent: CC's payload carries no separate static-analysis block.
+		// it is already the last entry — the action under review (a bridged child's
+		// is `appendEntry`). The pre-gate's evidence is not sent: CC's payload
+		// carries no separate static-analysis block. What is sent is where a path
+		// the action names lands when a symlink takes it out of the working
+		// directory, directly above the action (resolved-paths-meta.ts).
+		const [history, action] = opts?.appendEntry ? [transcript, opts.appendEntry] : [transcript.slice(0, -1), transcript.at(-1)];
+		const resolvedPaths = actionResolvedPaths(normalizeToolName(toolName), subject, opts?.powershellParse, { cwd, home, roots: [cwd, ...workspaceDirs] });
 		const verdict = await classify(
 			{
 				toolName,
-				transcript: [...transcript, ...(opts?.appendEntries ?? [])],
+				transcript: [...history, ...(resolvedPaths ? [{ kind: "resolved-paths" as const, resolvedPaths }] : []), ...(action ? [action] : [])],
 				userMessages: [...userMessages],
 				claudeMd: instructionsFor(cwd),
 				username: classifierUsername,
@@ -1106,14 +1111,6 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				const gitStatus = porcelain === undefined ? undefined : gitStatusMeta(porcelain);
 				if (gitStatus) transcript.push({ kind: "meta", gitStatus });
 			}
-			// A path the call names inside the working directory that a symlink
-			// takes outside it: the classifier reads text, so it is told where the
-			// path lands (resolved-paths-meta.ts).
-			const resolvedPaths = actionResolvedPaths(
-				{ tool: normalizedTool, command: recordedCommand, subject: isPathSubjectTool(normalizedTool) ? subject : undefined, powershellParse },
-				{ cwd: callCwd, home: os.homedir(), roots: [callCwd, ...workspaceDirs] },
-			);
-			if (resolvedPaths) transcript.push({ kind: "meta", resolvedPaths });
 			transcript.push({ kind: "tool", tool: normalizedTool, input: recordedInput });
 			capTranscript();
 		}
@@ -1469,17 +1466,14 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// user, and child work must not continue through it unattended.
 		if (!floorReason && result.decision === "classify" && !pauseTracker.isPaused()) {
 			if (!ctx) return { block: true, reason: DENIED_NON_INTERACTIVE };
-			const resolvedPaths = actionResolvedPaths(
-				{ tool: normalizedTool, command: isShellTool(normalizedTool) || normalizedTool === "monitor" ? subject : undefined, subject: isPathSubjectTool(normalizedTool) ? subject : undefined, powershellParse },
-				{ cwd, home: os.homedir(), roots: [cwd, ...workspaceDirs] },
-			);
-			const appendEntries: TranscriptEntry[] = [
-				...(resolvedPaths ? [{ kind: "meta" as const, resolvedPaths }] : []),
-				{ kind: "tool", tool: normalizedTool, input: isShellTool(normalizedTool) ? { command: subject } : input },
-			];
+			const appendEntry: TranscriptEntry = {
+				kind: "tool",
+				tool: normalizedTool,
+				input: isShellTool(normalizedTool) ? { command: subject } : input,
+			};
 			const outcome = await runClassifier(toolName, subject, ctx, result.cause !== "protected-path", {
 				cwd,
-				appendEntries,
+				appendEntry,
 				// The child's own turn signal, so an aborted child turn cancels the
 				// classifier call; a fresh (never-aborted) signal only if the child
 				// didn't supply one, so classify() still gets the signal it expects.

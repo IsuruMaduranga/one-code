@@ -46,23 +46,24 @@ describe("resolvedPathFacts", () => {
 describe("actionResolvedPaths per tool", () => {
 	it("bash: every constant word, redirect target and --opt=value", () => {
 		expect(bashPathCandidates("cat ' leading.txt' --file=out/x > out/y")).toEqual(expect.arrayContaining([" leading.txt", "out/x", "out/y"]));
-		expect(actionResolvedPaths({ tool: "bash", command: "echo hi > ' leading.txt'" }, opts)).toEqual([{ path: " leading.txt", resolvesTo: secret }]);
-		expect(actionResolvedPaths({ tool: "bash", command: "cat src/a.txt | grep a" }, opts)).toBeUndefined();
+		expect(actionResolvedPaths("bash", "echo hi > ' leading.txt'", undefined, opts)).toEqual([{ path: " leading.txt", resolvesTo: secret }]);
+		expect(actionResolvedPaths("bash", "cat src/a.txt | grep a", undefined, opts)).toBeUndefined();
 	});
 
-	it("a file tool: its path argument", () => {
-		expect(actionResolvedPaths({ tool: "write", subject: "out/evil.sh" }, opts)).toEqual([{ path: "out/evil.sh", resolvesTo: join(outside, "evil.sh") }]);
-		expect(actionResolvedPaths({ tool: "write", subject: "src/b.txt" }, opts)).toBeUndefined();
+	it("a path tool: its path argument; any other tool: nothing", () => {
+		expect(actionResolvedPaths("write", "out/evil.sh", undefined, opts)).toEqual([{ path: "out/evil.sh", resolvesTo: join(outside, "evil.sh") }]);
+		expect(actionResolvedPaths("write", "src/b.txt", undefined, opts)).toBeUndefined();
+		expect(actionResolvedPaths("web_fetch", "out/evil.sh", undefined, opts)).toBeUndefined();
 	});
 
 	it("powershell without a parse reports nothing", () => {
-		expect(actionResolvedPaths({ tool: "powershell", command: "Set-Content ' leading.txt' x" }, opts)).toBeUndefined();
+		expect(actionResolvedPaths("powershell", "Set-Content ' leading.txt' x", undefined, opts)).toBeUndefined();
 	});
 });
 
 describe.skipIf(!HAVE_POWERSHELL)("actionResolvedPaths on PowerShell's parse", { timeout: POWERSHELL_TEST_TIMEOUT }, () => {
 	it("reports PowerShell's own value, and the spelling -Path unescapes", async () => {
-		const at = async (command: string) => actionResolvedPaths({ tool: "powershell", command, powershellParse: await psParse(command) }, opts);
+		const at = async (command: string) => actionResolvedPaths("powershell", command, await psParse(command), opts);
 		expect(await at("Set-Content -LiteralPath ' leading.txt' -Value x")).toEqual([{ path: " leading.txt", resolvesTo: secret }]);
 		expect(await at("Set-Content -Path 'link``name.txt' -Value x")).toEqual([{ path: "link`name.txt", resolvesTo: secret }]);
 		expect(await at("Set-Content out\\x.txt y")).toEqual([{ path: "out\\x.txt", resolvesTo: join(outside, "x.txt") }]);
@@ -73,7 +74,7 @@ describe.skipIf(!HAVE_POWERSHELL)("actionResolvedPaths on PowerShell's parse", {
 describe("the rendered line", () => {
 	it("sits above the action with its explanation", () => {
 		const text = renderTranscript([
-			{ kind: "meta", resolvedPaths: [{ path: " leading.txt", resolvesTo: secret }] },
+			{ kind: "resolved-paths", resolvedPaths: [{ path: " leading.txt", resolvesTo: secret }] },
 			{ kind: "tool", tool: "powershell", input: { command: "Set-Content ' leading.txt' x" } },
 		]);
 		expect(text.split("\n")).toEqual([

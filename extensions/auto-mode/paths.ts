@@ -63,10 +63,19 @@ const normalize = comparablePath;
  * resolved — callers must not treat that as contained.
  */
 export function resolveForContainment(target: string): string | undefined {
+	const resolved = resolveThroughLinks(target);
+	return resolved === undefined ? undefined : normalize(resolved);
+}
+
+/**
+ * {@link resolveForContainment} in the filesystem's own spelling (not
+ * case-folded), for showing where a path lands.
+ */
+export function resolveThroughLinks(target: string): string | undefined {
 	const absolute = resolve(target);
 
 	const direct = tryRealpath(absolute);
-	if (direct) return normalize(direct);
+	if (direct) return direct;
 
 	// The leaf may be a dangling symlink: realpath fails on it, but writes still
 	// follow it. Read the link and resolve its target instead of assuming the
@@ -77,7 +86,7 @@ export function resolveForContainment(target: string): string | undefined {
 			const linkTarget = readlinkSync(absolute);
 			const resolvedTarget = isAbsolute(linkTarget) ? linkTarget : resolve(dirname(absolute), linkTarget);
 			// One hop is enough: the target's own realpath covers the rest of a chain.
-			return resolveForContainment(resolvedTarget) ?? normalize(resolvedTarget);
+			return resolveThroughLinks(resolvedTarget) ?? resolvedTarget;
 		}
 	} catch {
 		// Does not exist yet — fall through to ancestor resolution below.
@@ -92,7 +101,7 @@ export function resolveForContainment(target: string): string | undefined {
 		if (parent === cursor) return undefined;
 		tail.unshift(basename(cursor));
 		const realParent = tryRealpath(parent);
-		if (realParent) return normalize(join(realParent, ...tail));
+		if (realParent) return join(realParent, ...tail);
 		cursor = parent;
 	}
 }

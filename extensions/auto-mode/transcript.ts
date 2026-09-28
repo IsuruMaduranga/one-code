@@ -47,7 +47,7 @@ export type TranscriptEntry =
 	 * the working directory which resolves outside it through a symlink
 	 * (auto-mode/resolved-paths-meta.ts). Not a Claude Code line.
 	 */
-	| { kind: "meta"; resolvedPaths: ResolvedPathFact[] };
+	| { kind: "resolved-paths"; resolvedPaths: ResolvedPathFact[] };
 
 /** Truncate one field so a single huge argument cannot dominate the transcript. */
 export function clip(value: string, max: number): string {
@@ -71,11 +71,8 @@ function clipInput(input: Record<string, unknown>, max: number): Record<string, 
  */
 function renderEntry(entry: TranscriptEntry, maxField: number): string {
 	if (entry.kind === "user") return JSON.stringify({ user: clip(entry.text, maxField) });
-	if (entry.kind === "meta") {
-		return "gitStatus" in entry
-			? JSON.stringify({ meta: { gitStatus: entry.gitStatus } })
-			: JSON.stringify({ meta: { resolvedPaths: entry.resolvedPaths, note: RESOLVED_PATHS_NOTE } });
-	}
+	if (entry.kind === "meta") return JSON.stringify({ meta: { gitStatus: entry.gitStatus } });
+	if (entry.kind === "resolved-paths") return JSON.stringify({ meta: { resolvedPaths: entry.resolvedPaths, note: RESOLVED_PATHS_NOTE } });
 	if (entry.kind === "denied") {
 		return JSON.stringify({
 			denied_by_permission_rule: { tool: ccToolName(entry.tool), attempted: clip(entry.subject, maxField), rule: entry.rule },

@@ -18,17 +18,17 @@
  * on their own; decisions/auto-mode.md "The resolvedPaths line").
  */
 
-import { lstatSync, readlinkSync, realpathSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import type { PowerShellParse } from "../lib/powershell-parser.ts";
-import { isWithin, resolveForContainment, toAbsolute, toAbsoluteBash } from "./paths.ts";
+import { isPathSubjectTool } from "../permissions/matcher.ts";
+import { powershellSeparators, powershellUnescaped } from "../permissions/powershell-paths.ts";
+import { isWithin, resolveForContainment, resolveThroughLinks, toAbsolute, toAbsoluteBash } from "./paths.ts";
 import { parseCommand } from "./shell-parse.ts";
 
 /** One path the action names that resolves outside every working directory. */
 export interface ResolvedPathFact {
 	/** The word as the call spells it (quotes and escapes resolved). */
 	path: string;
-	/** Where it resolves through symlinks. */
+	/** Where it resolves through symlinks, in the filesystem's own spelling. */
 	resolvesTo: string;
 }
 
@@ -66,7 +66,7 @@ export function powershellPathCandidates(parse: PowerShellParse): string[] {
 	for (const node of parse.nodes) {
 		if (typeof node.value !== "string") continue;
 		words.push(node.value);
-		const unescaped = node.value.replace(/`([*?[\]`])/g, "$1");
+		const unescaped = powershellUnescaped(node.value);
 		if (unescaped !== node.value) words.push(unescaped);
 	}
 	return words;
@@ -78,11 +78,8 @@ export interface ResolvedPathsOptions {
 	home: string;
 	/** Every working directory (the cwd and any added workspace directories). */
 	roots: readonly string[];
-	/**
-	 * How the words spell a path: `bash` (Git Bash's `/c/…` on Windows),
-	 * `powershell` (`\` separates on macOS and Linux too), or the platform's own.
-	 */
-	spelling?: "bash" | "powershell" | "native";
+	/** How the words spell a path: `bash` (Git Bash's `/c/…` on Windows), `powershell` (`\` separates on macOS and Linux too), else the platform's own. */
+	spelling?: "bash" | "powershell";
 }
 
 /**
@@ -102,58 +99,29 @@ export function resolvedPathFacts(words: readonly string[], opts: ResolvedPathsO
 		const lexical =
 			opts.spelling === "bash"
 				? toAbsoluteBash(cwd, word, opts.home)
-				: toAbsolute(cwd, opts.spelling === "powershell" && sep === "/" ? word.replaceAll("\\", "/") : word, opts.home);
+				: toAbsolute(cwd, opts.spelling === "powershell" ? powershellSeparators(word) : word, opts.home);
 		if (!roots.some((root) => isWithin(root, lexical))) continue;
 		const resolved = resolveForContainment(lexical);
 		if (resolved === undefined || roots.some((root) => isWithin(root, resolved))) continue;
-		facts.push({ path: word, resolvesTo: displayResolved(lexical) ?? resolved });
+		facts.push({ path: word, resolvesTo: resolveThroughLinks(lexical) ?? resolved });
 	}
 	return facts.length > 0 ? facts : undefined;
 }
 
 /**
- * Where `path` resolves, in the filesystem's own spelling (resolveForContainment
- * returns a case-folded comparison form): the realpath, else a dangling link's
- * target, else the nearest existing ancestor's realpath with the rest re-attached.
+ * The facts for one action under review, or undefined: a shell command's
+ * constant words (`bash` and `monitor` from the bash parse, `powershell` from
+ * PowerShell's own parse, none without one), or a path tool's path argument.
+ * `subject` is the command line or the path, as the permission gate extracts it.
  */
-function displayResolved(path: string, hops = 0): string | undefined {
-	try {
-		return realpathSync.native(path);
-	} catch {}
-	try {
-		if (hops < 8 && lstatSync(path).isSymbolicLink()) {
-			const target = readlinkSync(path);
-			return displayResolved(isAbsolute(target) ? target : resolve(dirname(path), target), hops + 1);
-		}
-	} catch {}
-	const parent = dirname(path);
-	if (parent === path) return undefined;
-	const base = displayResolved(parent, hops);
-	return base === undefined ? undefined : join(base, basename(path));
-}
-
-export interface ActionPathInput {
-	/** The normalized tool name. */
-	tool: string;
-	/** A shell tool's command line, as recorded for the classifier. */
-	command?: string;
-	/** A file tool's path argument. */
-	subject?: string;
-	/** PowerShell's own parse of a `powershell` command, when it answered. */
-	powershellParse?: PowerShellParse;
-}
-
-/**
- * The facts for one action, or undefined: a shell command's constant words
- * (bash and `monitor` from the bash parse, `powershell` from PowerShell's own
- * parse, none without one), or a file tool's path argument.
- */
-export function actionResolvedPaths(input: ActionPathInput, opts: Omit<ResolvedPathsOptions, "spelling">): ResolvedPathFact[] | undefined {
-	if (input.tool === "bash" || input.tool === "monitor") {
-		return input.command ? resolvedPathFacts(bashPathCandidates(input.command), { ...opts, spelling: "bash" }) : undefined;
-	}
-	if (input.tool === "powershell") {
-		return input.powershellParse ? resolvedPathFacts(powershellPathCandidates(input.powershellParse), { ...opts, spelling: "powershell" }) : undefined;
-	}
-	return input.subject ? resolvedPathFacts([input.subject], opts) : undefined;
+export function actionResolvedPaths(
+	tool: string,
+	subject: string,
+	powershellParse: PowerShellParse | undefined,
+	opts: Omit<ResolvedPathsOptions, "spelling">,
+): ResolvedPathFact[] | undefined {
+	if (!subject) return undefined;
+	if (tool === "bash" || tool === "monitor") return resolvedPathFacts(bashPathCandidates(subject), { ...opts, spelling: "bash" });
+	if (tool === "powershell") return powershellParse ? resolvedPathFacts(powershellPathCandidates(powershellParse), { ...opts, spelling: "powershell" }) : undefined;
+	return isPathSubjectTool(tool) ? resolvedPathFacts([subject], opts) : undefined;
 }

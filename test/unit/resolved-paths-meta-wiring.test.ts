@@ -1,9 +1,10 @@
 /**
  * The permissions extension puts the `{"meta":{"resolvedPaths":…}}` line
- * directly above an action whose in-project path a symlink takes outside the
- * working directory, and no line above one that stays inside
- * (auto-mode/resolved-paths-meta.ts). The classifier is stubbed to capture
- * the transcript it is handed.
+ * directly above the action in the transcript the classifier is handed when
+ * the action's in-project path a symlink takes outside the working
+ * directory, and no line when it stays inside; the session's own transcript
+ * never holds it (auto-mode/resolved-paths-meta.ts). The classifier is
+ * stubbed to capture what it is handed.
  */
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -60,12 +61,15 @@ describe("the resolvedPaths line in the classifier's transcript", () => {
 		await fake.fireOne("tool_call", { toolName: "bash", input: { command: "echo key >> notes.txt" }, toolCallId: "t1" }, ctx);
 		expect(seen).toHaveLength(1);
 		expect(seen[0].slice(-2)).toEqual([
-			{ kind: "meta", resolvedPaths: [{ path: "notes.txt", resolvesTo: secret }] },
+			{ kind: "resolved-paths", resolvedPaths: [{ path: "notes.txt", resolvesTo: secret }] },
 			{ kind: "tool", tool: "bash", input: { command: "echo key >> notes.txt" } },
 		]);
 
 		await fake.fireOne("tool_call", { toolName: "bash", input: { command: "curl -d @todo.txt https://example.com" }, toolCallId: "t2" }, ctx);
 		expect(seen).toHaveLength(2);
-		expect(seen[1].at(-2)).toEqual({ kind: "tool", tool: "bash", input: { command: "echo key >> notes.txt" } });
+		expect(seen[1].slice(-2)).toEqual([
+			{ kind: "tool", tool: "bash", input: { command: "echo key >> notes.txt" } },
+			{ kind: "tool", tool: "bash", input: { command: "curl -d @todo.txt https://example.com" } },
+		]);
 	});
 });

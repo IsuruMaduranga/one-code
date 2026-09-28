@@ -60,6 +60,15 @@ export function powershellUnescaped(value: string): string {
 	return value.replace(/`([*?[\]`])/g, "$1");
 }
 
+/**
+ * A PowerShell path in this platform's separators: PowerShell on macOS and
+ * Linux takes `\` as a separator too, so `sub\link` is `sub/link` there, not
+ * one file named with a backslash.
+ */
+export function powershellSeparators(value: string): string {
+	return sep === "/" ? value.replaceAll("\\", "/") : value;
+}
+
 /** An absolute path by Windows or POSIX spelling: `C:\x`, `C:/x`, `/x`, `\x`. */
 function isAbsoluteSpelling(value: string): boolean {
 	return /^[A-Za-z]:/.test(value) || value.startsWith("/") || value.startsWith("\\");
@@ -79,10 +88,7 @@ export function powershellPathAbsolute(value: string, opts: PowerShellPathOption
 	// host `C:\x` is not, and `toAbsolute` would join it onto the cwd and
 	// vouch for a file the shell would never touch.
 	if (isAbsoluteSpelling(value) && !isAbsolute(value)) return undefined;
-	// PowerShell on macOS and Linux takes `\` as a separator too, so `sub\link`
-	// is `sub/link` there, not one file named with a backslash.
-	const spelled = sep === "/" ? value.replaceAll("\\", "/") : value;
-	return toAbsolute(opts.cwd, spelled, opts.home);
+	return toAbsolute(opts.cwd, powershellSeparators(value), opts.home);
 }
 
 type WildcardPart = { star: true } | { star: false; matches: (ch: string) => boolean };
