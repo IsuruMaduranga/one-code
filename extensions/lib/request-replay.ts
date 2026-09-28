@@ -49,6 +49,8 @@ export interface RequestCapture {
 	payload: Record<string, unknown>;
 	/** The last message of the context the body was built from: where a fork's own messages start. */
 	covers?: CoveredThrough;
+	/** The session the body went out for: its id is the routing affinity a fork must send too. */
+	sessionId?: string;
 }
 
 /** A transcript message named by what survives a session fork: its role and timestamp. */
@@ -64,11 +66,45 @@ interface ModelRef {
 }
 
 /** A capture of `payload` for `model`, or undefined when its API cannot be replayed. */
-export function captureRequest(model: ModelRef | undefined, payload: unknown, covers?: CoveredThrough): RequestCapture | undefined {
+export function captureRequest(model: ModelRef | undefined, payload: unknown, covers?: CoveredThrough, sessionId?: string): RequestCapture | undefined {
 	const api = model?.api;
 	if (api !== "anthropic-messages" && api !== "openai-completions" && api !== "openai-responses") return undefined;
 	if (!model?.provider || !model.id || !isRecord(payload) || !Array.isArray(payload[LIST_KEY[api]])) return undefined;
-	return { api, provider: model.provider, modelId: model.id, payload, ...(covers ? { covers } : {}) };
+	return { api, provider: model.provider, modelId: model.id, payload, ...(covers ? { covers } : {}), ...(sessionId ? { sessionId } : {}) };
+}
+
+/** The model fields pi-ai reads to choose its session-affinity headers. */
+export interface AffinityModel extends ModelRef {
+	baseUrl?: string;
+	compat?: { sendSessionAffinityHeaders?: boolean; sessionAffinityFormat?: string };
+}
+
+/**
+ * The session-affinity headers pi-ai sends with `sessionId` for `model`, so a
+ * fork can send its parent's: a gateway routes on them (OpenRouter spreads a
+ * model across hosts, each with its own cache), and the fork is a different
+ * session. Extension headers merge after pi-ai's, so these override. A copy
+ * of pi-ai 0.87.1's `createClient` rules for the three replayable APIs
+ * (re-check at a pi bump: features/pi-adaptation/plan.md §3 step 9).
+ */
+export function affinityHeaders(model: AffinityModel | undefined, sessionId: string): Record<string, string> {
+	if (!model) return {};
+	const openRouter = model.provider === "openrouter" || (model.baseUrl ?? "").includes("openrouter.ai");
+	const send = model.compat?.sendSessionAffinityHeaders ?? openRouter;
+	if (model.api === "anthropic-messages") {
+		if (!send) return {};
+		const format = model.compat?.sessionAffinityFormat ?? (openRouter ? "openrouter" : undefined);
+		return { [format === "openrouter" ? "x-session-id" : "x-session-affinity"]: sessionId };
+	}
+	if (model.api !== "openai-completions" && model.api !== "openai-responses") return {};
+	if (model.api === "openai-completions" && !send) return {};
+	const format = model.compat?.sessionAffinityFormat ?? (openRouter ? "openrouter" : "openai");
+	if (format === "openrouter") return { "x-session-id": sessionId };
+	return {
+		...(format === "openai" ? { session_id: sessionId } : {}),
+		"x-client-request-id": sessionId,
+		...(model.api === "openai-completions" ? { "x-session-affinity": sessionId } : {}),
+	};
 }
 
 /** The last non-system message of a context, as a fork will find it again; undefined without one. */
@@ -232,13 +268,25 @@ export function forkRequestPayload(capture: RequestCapture, child: Record<string
 	const tools = forkTools(capture.payload.tools, child.tools, baseline, tail);
 	if (tools) out.tools = tools;
 	const capKey = MAX_TOKEN_KEYS[capture.api].find((k) => typeof capture.payload[k] === "number");
-	if (capKey) {
-		const room = (capture.payload[capKey] as number) - Math.ceil(JSON.stringify(tail).length / 4);
+	const room = forkOutputRoom(capture, tail);
+	if (capKey && room !== undefined) {
+		// Never above the room: the fork chose the fallback before this when too little was left.
 		const own = typeof child[capKey] === "number" ? (child[capKey] as number) : room;
-		out[capKey] = Math.max(MIN_REPLAY_OUTPUT_TOKENS, Math.min(own, room));
+		out[capKey] = Math.max(1, Math.min(own, room));
 	}
 	capCacheMarkers(out, key, capture, tail);
 	return out;
+}
+
+/**
+ * The output room a fork request leaves: the captured cap (pi clamped it to
+ * what the parent's context left of the window) less a rough size of `tail`.
+ * Undefined when the capture names no cap. A fork whose room is below
+ * `MIN_REPLAY_OUTPUT_TOKENS` must not be spliced: it goes out whole instead.
+ */
+export function forkOutputRoom(capture: RequestCapture, tail: unknown): number | undefined {
+	const capKey = MAX_TOKEN_KEYS[capture.api].find((k) => typeof capture.payload[k] === "number");
+	return capKey === undefined ? undefined : (capture.payload[capKey] as number) - Math.ceil(JSON.stringify(tail).length / 4);
 }
 
 /** The names a body's tool list declares (Anthropic, Chat Completions and Responses shapes). */

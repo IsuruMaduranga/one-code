@@ -16,7 +16,7 @@
  * children persist their sessions per run to make that possible).
  */
 
-import { existsSync, mkdirSync, readdirSync, writeFileSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, renameSync, writeFileSync, readFileSync } from "node:fs";
 import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, agentCronTools, agentOwnsCronJobs } from "../lib/agent-cron.ts";
 import os from "node:os";
 import { dirname, join } from "node:path";
@@ -1250,7 +1250,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				const body = JSON.stringify(capture);
 				name = `${createHash("sha256").update(body).digest("hex").slice(0, 24)}.json`;
 				mkdirSync(dir, { recursive: true });
-				if (!existsSync(join(dir, name))) writeFileSync(join(dir, name), body);
+				if (!existsSync(join(dir, name))) {
+					// Atomic: a partial file would be skipped as present by every later fork.
+					const temp = join(dir, `${name}.${process.pid}.tmp`);
+					writeFileSync(temp, body);
+					renameSync(temp, join(dir, name));
+				}
 				persistedCaptures.set(capture, name);
 			}
 			writeFileSync(join(record.sessionSearchDir, FORK_REQUEST_FILE), name);

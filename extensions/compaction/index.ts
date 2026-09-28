@@ -114,7 +114,7 @@ export default function compactionExtension(pi: ExtensionAPI) {
 	pi.on("before_provider_request", (event, ctx) => {
 		// The context this body was built from ends where a fork's own messages start.
 		const covers = captured ? lastCovered(captured.messages as { role: string; timestamp?: number }[]) : undefined;
-		publish(captureRequest(ctx.model as { api?: string; provider?: string; id?: string } | undefined, event.payload, covers));
+		publish(captureRequest(ctx.model as { api?: string; provider?: string; id?: string } | undefined, event.payload, covers, ctx.sessionManager.getSessionId()));
 	});
 	pi.on("message_end", (event) => {
 		exchange.noteMessage(event.message as AgentMessage & { role: string });

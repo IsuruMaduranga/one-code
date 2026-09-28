@@ -13,20 +13,31 @@
  *   messages the capture carries, leaving pi to convert only the fork's tail;
  * - `before_provider_request` (inline extensions load after the path ones, so
  *   tool-search has already edited the body) replaces everything but the tail
- *   with the captured body (`forkRequestPayload`).
+ *   with the captured body (`forkRequestPayload`);
+ * - `before_provider_headers` sends the parent's session-affinity headers, so a
+ *   gateway such as OpenRouter routes the fork to the host holding the cache.
  *
  * Both steps check the same thing first (the capture's model and its boundary
- * message in this context); when either fails, the request goes out the
- * ordinary way, whole, and uncached. That happens only for a fork that
- * compacted its own history away or runs on another model.
+ * message in this context); when either fails, or the tail leaves less than
+ * `MIN_REPLAY_OUTPUT_TOKENS` of the captured output room, the request goes out
+ * the ordinary way, whole, and uncached. That happens only for a fork that
+ * compacted its own history away, runs on another model, or has nearly
+ * filled the window.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { captureMatches, forkRequestPayload, type RequestCapture, toolNames, uncoveredMessages } from "../lib/request-replay.ts";
+import { DEFER_CHANNEL } from "../lib/deferred.ts";
+import { type AffinityModel, affinityHeaders, captureMatches, forkOutputRoom, forkRequestPayload, MIN_REPLAY_OUTPUT_TOKENS, type RequestCapture, toolNames, uncoveredMessages } from "../lib/request-replay.ts";
 
 type ModelRef = { api?: string; provider?: string; id?: string };
 
 export function forkCacheExtension(capture: RequestCapture) {
 	return (pi: ExtensionAPI) => {
+		// The fork advertises the parent's tools, where SendMessage is deferred
+		// (subagents/index.ts). Defer the fork's own SendMessage the same way, so a
+		// tool_search load reaches it: on a model without tool references the load
+		// appends it, and elsewhere the parent's compatible schema (to: "main")
+		// already declares it. Inline extensions load after tool-search.
+		pi.events.emit(DEFER_CHANNEL, { name: "SendMessage", keywords: ["message", "main", "report", "progress"] });
 		/** Set by the context step for the request it shaped; the payload step splices only then. */
 		let shaped = false;
 		/** The tool names of the fork's first request: anything added later was loaded during the run. */
@@ -38,8 +49,20 @@ export function forkCacheExtension(capture: RequestCapture) {
 			if (!covers || !captureMatches(capture, ctx.model as ModelRef | undefined)) return undefined;
 			const tail = uncoveredMessages(event.messages as { role: string; timestamp?: number }[], covers);
 			if (!tail) return undefined;
+			// Too little output room left after the prefix: send the fork whole
+			// (pi's overflow handling then compacts it) rather than a splice the
+			// window cannot hold. The messages' JSON overstates the wire tail.
+			const room = forkOutputRoom(capture, tail.filter((message) => message.role !== "system"));
+			if (room !== undefined && room < MIN_REPLAY_OUTPUT_TOKENS) return undefined;
 			shaped = true;
 			return { messages: tail as typeof event.messages };
+		});
+
+		// Route to the parent's host: a gateway picks it by the session-affinity
+		// headers, and the parent's cache lives there. Harmless on a whole request.
+		pi.on("before_provider_headers", (event, ctx) => {
+			if (!capture.sessionId || !captureMatches(capture, ctx.model as ModelRef | undefined)) return;
+			Object.assign(event.headers, affinityHeaders(ctx.model as AffinityModel, capture.sessionId));
 		});
 
 		pi.on("before_provider_request", (event, ctx) => {

@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+	affinityHeaders,
 	captureMatches,
 	captureRequest,
 	extendPayload,
+	forkOutputRoom,
 	forkRequestPayload,
 	lastCovered,
 	toolNames,
@@ -293,5 +295,33 @@ describe("forks: the parent's captured request, then the fork's own tail", () =>
 		const responses = captureRequest({ ...anthropic, api: "openai-responses" }, { input: [{ role: "developer", content: "parent" }, { role: "user", content: "hi" }] }, covers) as RequestCapture;
 		const outResponses = forkRequestPayload(responses, { input: [{ role: "developer", content: "fork" }, { type: "function_call", name: "read" }] }, new Set());
 		expect(outResponses.input).toEqual([{ role: "developer", content: "parent" }, { role: "user", content: "hi" }, { type: "function_call", name: "read" }]);
+	});
+});
+
+describe("forks: output room", () => {
+	it("never raises the cap above what the tail leaves, and reports the room to fall back on", () => {
+		const capture = { ...anthropicCapture(), payload: { ...anthropicCapture().payload, max_tokens: 2000 } } as RequestCapture;
+		const tail = [{ role: "user", content: [{ type: "text", text: "x".repeat(6000) }] }];
+		const room = forkOutputRoom(capture, tail) as number;
+		expect(room).toBeLessThan(MIN_REPLAY_OUTPUT_TOKENS);
+		const out = forkRequestPayload(capture, { messages: tail, max_tokens: 64000 }, new Set());
+		expect(out.max_tokens).toBe(room);
+		expect(forkOutputRoom({ ...capture, payload: { messages: [] } }, tail)).toBeUndefined();
+	});
+});
+
+describe("affinityHeaders: pi-ai's session-affinity headers, for a fork to send its parent's", () => {
+	const or = { provider: "openrouter", baseUrl: "https://openrouter.ai/api/v1" };
+	it("OpenRouter routes on x-session-id for every API", () => {
+		for (const api of ["openai-completions", "openai-responses", "anthropic-messages"]) {
+			expect(affinityHeaders({ ...or, api, id: "m" }, "S")).toEqual({ "x-session-id": "S" });
+		}
+	});
+	it("elsewhere follows pi-ai: Responses always, Completions and Anthropic only when the compat asks", () => {
+		expect(affinityHeaders({ api: "openai-responses", provider: "openai", baseUrl: "https://api.openai.com/v1", id: "m" }, "S")).toEqual({ session_id: "S", "x-client-request-id": "S" });
+		expect(affinityHeaders({ api: "openai-completions", provider: "deepseek", baseUrl: "https://api.deepseek.com", id: "m" }, "S")).toEqual({});
+		expect(affinityHeaders({ api: "openai-completions", provider: "x", baseUrl: "https://x", id: "m", compat: { sendSessionAffinityHeaders: true } }, "S")).toEqual({ session_id: "S", "x-client-request-id": "S", "x-session-affinity": "S" });
+		expect(affinityHeaders({ api: "anthropic-messages", provider: "anthropic", baseUrl: "https://api.anthropic.com", id: "m" }, "S")).toEqual({});
+		expect(affinityHeaders({ api: "anthropic-messages", provider: "x", baseUrl: "https://x", id: "m", compat: { sendSessionAffinityHeaders: true } }, "S")).toEqual({ "x-session-affinity": "S" });
 	});
 });
