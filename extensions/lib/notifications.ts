@@ -32,6 +32,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { RunOutcomeLatch } from "./interrupt.ts";
 import { escapeXml } from "./local-command.ts";
+import { PROMPT_OPTIONS_CHANNEL } from "./prompt-options.ts";
 import { wrapReminder } from "./reminders.ts";
 
 /** pi's session-mode union, derived from the context (the package root does not export ExtensionMode itself). */
@@ -477,6 +478,11 @@ export const NOTIFICATION_ID_KEY = "notificationId";
 /** `details` key on a coalesced message: the `{customType, details}` of each notification it carries, in arrival order. */
 export const NOTIFICATION_BATCH_KEY = "notifications";
 
+/** True for the `details` of a message the notifier sent (one notification or a coalesced batch). */
+export function isNotificationDetails(details: unknown): boolean {
+	return typeof details === "object" && details !== null && (NOTIFICATION_ID_KEY in details || NOTIFICATION_BATCH_KEY in details);
+}
+
 /** Inject a harness notification (a task/agent completion, a monitor event, a review note) into the conversation. */
 export interface TaskNotifier {
 	(customType: string, text: string, details?: Record<string, unknown>): void;
@@ -617,8 +623,12 @@ export const DEFAULT_COALESCE_MS = 250;
  * pi's stock system prompt with no reminder stack (review H1, measured). Until
  * no `prompt()` has run in this process, an idle notification is delivered as a
  * user message (`sendUserMessage`, source "extension"), which takes the full
- * prompt path; the cost is that this one notification renders as a user bubble.
- * Every later notification goes the custom-message way. Its turn skips
+ * prompt path; the cost is that this one notification renders as a user bubble
+ * (the background extension's markdown transformer shows only its headline).
+ * The usual first-turn case avoids it: the command that started the work (the
+ * `/btw` fork) announces pi's prompt options (lib/prompt-options.ts), which
+ * system-prompt builds from, and the notification goes the custom-message way
+ * with Claude Code's one-line render. Every later notification goes that way. Its turn skips
  * `before_agent_start` too, and pi drops a run's prompt when the run settles,
  * so the system-prompt extension installs the prompt for it from
  * `context_with_system` (`system-prompt/idle-turn.ts`). Upstream ask:
@@ -643,6 +653,8 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 	let active = true;
 	/** True once `prompt()` has run in this process (the only path that emits before_agent_start). */
 	let prompted = false;
+	/** True once a command announced pi's prompt options, so an idle turn can be built without `prompt()`. */
+	let primed = false;
 	/** True between agent_start and agent_settled. */
 	let busy = false;
 	/** True from a turn settling aborted/errored until the next turn starts: hold, do not start turns. */
@@ -669,7 +681,7 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 			return;
 		}
 		try {
-			if (!prompted && !busy) {
+			if (!prompted && !primed && !busy) {
 				// No confirmation possible for a user-role message (no details), and
 				// prompt() cannot be cleared by Esc before it starts: count it delivered.
 				pending.delete(id);
@@ -812,6 +824,9 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 		prompted = true;
 		release(true);
 	});
+	pi.events?.on(PROMPT_OPTIONS_CHANNEL, () => {
+		primed = true;
+	});
 	// A replaced session (/clear, /new, resume) has no use for the old one's undelivered notices.
 	pi.on("session_start", () => {
 		pending.clear();
@@ -819,6 +834,7 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 		held = [];
 		active = true;
 		prompted = false;
+		primed = false;
 		busy = false;
 		interrupted = false;
 	});

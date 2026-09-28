@@ -20,6 +20,7 @@ import { totalTokensBlock, turnTokenBudget } from "../context-budget/budget.ts";
 import { optionsForIdleTurn, withSystemHead } from "./idle-turn.ts";
 import { buildClaudeCodeSystemPrompt } from "./template.ts";
 import { WORKSPACE_CHANNEL, type WorkspaceAnnouncement } from "../lib/workspace-channel.ts";
+import { PROMPT_OPTIONS_CHANNEL, type PromptOptionsAnnouncement, SYSTEM_PROMPT_REQUEST_CHANNEL, type SystemPromptRequest } from "../lib/prompt-options.ts";
 
 export default function systemPromptExtension(pi: ExtensionAPI) {
 	let cachedEnv: EnvironmentInfo | undefined;
@@ -91,11 +92,23 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 		);
 	};
 
+	// A copy: pi goes on mutating this object after the handlers return
+	// (forceSystemPrompt, the live selectedTools).
+	const copyOptions = (options: BuildSystemPromptOptions): BuildSystemPromptOptions => ({
+		...options,
+		selectedTools: options.selectedTools && [...options.selectedTools],
+	});
+
+	// A command that starts background work before any prompt announces pi's
+	// options (lib/prompt-options.ts), so the turn its completion opens is built
+	// like a typed one. A typed prompt's own options always win.
+	pi.events.on(PROMPT_OPTIONS_CHANNEL, (data) => {
+		const options = (data as PromptOptionsAnnouncement | undefined)?.options;
+		if (!lastOptions && options && typeof options === "object") lastOptions = copyOptions(options as BuildSystemPromptOptions);
+	});
+
 	pi.on("before_agent_start", (event, ctx) => {
-		// A copy: pi goes on mutating this object after the handlers return
-		// (forceSystemPrompt, the live selectedTools).
-		const options = event.systemPromptOptions;
-		lastOptions = { ...options, selectedTools: options.selectedTools && [...options.selectedTools] };
+		lastOptions = copyOptions(event.systemPromptOptions);
 		// A named agent (or a `--system-prompt` launch) supplies its own prompt via
 		// customPrompt. Return nothing so pi's own builder uses it verbatim, rather
 		// than clobbering it with the tiered One Code prompt.
@@ -107,9 +120,20 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 	// before_agent_start and would run on pi's default prompt (idle-turn.ts).
 	// In a prompt() run pi's forced-prompt projection runs after this and
 	// installs the same text, so the head is rebuilt on every request.
+	/** The prompt the session's next request carries; undefined when pi's own builder supplies it. */
+	const nextRequestPrompt = (ctx: ExtensionContext): string | undefined =>
+		!lastOptions || lastOptions.customPrompt ? undefined : buildPrompt(optionsForIdleTurn(lastOptions, pi.getActiveTools()), ctx);
+
 	pi.on("context_with_system", (event, ctx) => {
-		if (!lastOptions || lastOptions.customPrompt) return;
-		const prompt = buildPrompt(optionsForIdleTurn(lastOptions, pi.getActiveTools()), ctx);
+		const prompt = nextRequestPrompt(ctx);
+		if (prompt === undefined) return;
 		return { messages: withSystemHead(event.messages, prompt, getCurrentSystemMessage(event.messages)) };
+	});
+
+	// A fork inherits this prompt, not pi's (lib/prompt-options.ts).
+	pi.events.on(SYSTEM_PROMPT_REQUEST_CHANNEL, (data) => {
+		const request = data as SystemPromptRequest;
+		const prompt = nextRequestPrompt(request.ctx as ExtensionContext);
+		if (prompt !== undefined) request.prompt = prompt;
 	});
 }

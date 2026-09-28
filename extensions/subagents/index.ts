@@ -48,6 +48,7 @@ import { type GuideInput, guideAgentDefinition, settingsSetup } from "./guide-ag
 import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpServerStatus, type McpStatusEvent, type McpStatusKind } from "../lib/mcp-status.ts";
 
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
+import { announcePromptOptions, requestSystemPrompt } from "../lib/prompt-options.ts";
 import { BTW_FORK_CHANNEL, btwForkDescription, btwForkName, btwForkRecord, btwForkTaskId, type BtwForkRequest, type BtwForkResult } from "../lib/btw-fork.ts";
 import { watchMcpTools } from "../lib/mcp-share.ts";
 import { resolveModelTier } from "../lib/model-tier.ts";
@@ -1208,6 +1209,14 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		notify("subagent-result", envelope(handBackPointer(opts.from, opts.review !== undefined)), details);
 	};
 
+	/**
+	 * The prompt a fork inherits: the one this session's next request carries.
+	 * pi's `getSystemPrompt()` is its own stock prompt between turns, before the
+	 * first prompt and in a turn opened from idle, so it is only the fallback
+	 * for a prompt pi builds itself (a named agent's).
+	 */
+	const forkSystemPrompt = (ctx: ExtensionContext): string => requestSystemPrompt(pi.events, ctx) ?? ctx.getSystemPrompt();
+
 	/** A fork's system prompt is persisted beside its session so a later resume can restore it (review S6). */
 	const FORK_PROMPT_FILE = "system-prompt.md";
 	const persistForkPrompt = (record: AgentRunRecord, prompt: string) => {
@@ -1505,7 +1514,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			task: frameTask(request, worktree, base),
 			cwd: record.cwd,
 			forkFrom: request.fork ? forkFrom : undefined,
-			parentSystemPrompt: request.fork ? ctx.getSystemPrompt() : undefined,
+			parentSystemPrompt: request.fork ? forkSystemPrompt(ctx) : undefined,
 			sessionDir: record.sessionSearchDir || undefined,
 			model: request.model,
 			fallbackModel: request.fallbackModel,
@@ -1654,7 +1663,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			}, RESIDENT_IDLE_MS);
 			reaper.unref?.();
 		};
-		const forkPrompt = p.request.fork ? ctx.getSystemPrompt() : undefined;
+		const forkPrompt = p.request.fork ? forkSystemPrompt(ctx) : undefined;
 		if (forkPrompt !== undefined) persistForkPrompt(p.record, forkPrompt);
 		// No `signal` here on purpose: a resident outlives the spawning turn and
 		// is stopped through task_stop / the panel, not by the turn ending (S15).
@@ -1818,6 +1827,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			return { error: `Cannot fork: ${runtime}` };
 		}
 		if (shuttingDown) return { error: "The session ended before the fork started." };
+		// The fork's completion may open the session's first turn; the panel's
+		// command context carries the prompt options that turn is built from.
+		announcePromptOptions(pi.events, request.ctx);
 		const { launched, line } = await launchResident(prepared, ctx, runtime, { sessionFile, forkMessages: request.messages });
 		if (shuttingDown) {
 			void stopAgent(taskId);

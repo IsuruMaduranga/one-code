@@ -26,7 +26,7 @@ import { PREVIEW_BYTES, persistedFileBlock, persistIfLarge, sessionResultsDir } 
 import { detachedSpawnOptions, KILL_GRACE_MS, stopProcessTree, waitForChildExit } from "../lib/process-tree.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
 import { bashSpawn, spawnShellCommand } from "../lib/shell-spawn.ts";
-import { ccToolRenderers, customMessageText, formatFireTime, liveUiCtx, notificationComponent, scheduledTaskComponent } from "../lib/tui-render.ts";
+import { ccToolRenderers, customMessageText, formatFireTime, liveUiCtx, notificationComponent, notificationUserMarkdown, scheduledTaskComponent } from "../lib/tui-render.ts";
 import {
 	type BackgroundTask,
 	BackgroundRegistry,
@@ -280,6 +280,13 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	// prompt verbatim, shown behind Claude Code's "Running scheduled task" line.
 	pi.registerMessageRenderer("task-notification", (message, { expanded }, theme) =>
 		notificationComponent(theme, customMessageText(message.content), expanded),
+	);
+	// A notification that opens the session's first turn is a user message
+	// (lib/notifications.ts, "First turn of a session"); pi draws those as
+	// markdown, so the same headline replaces the frames here. Every notifier's
+	// messages pass through this one transformer.
+	pi.registerMarkdownTransformer((markdown, context) =>
+		context.messageType === "user" ? (notificationUserMarkdown(markdown) ?? markdown) : markdown,
 	);
 	for (const customType of ["wakeup", "cron"]) {
 		// Claude Code: "Claude resuming /loop wakeup (…)" for a wakeup; the model here may not be Claude.

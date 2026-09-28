@@ -63,6 +63,7 @@ import { type ChildHookCall, type ChildHookResult, type HookBridge, SUBAGENT_HOO
 import { projectHooksApproved } from "./trust.ts";
 import { QueuedDelivery } from "../lib/queued-delivery.ts";
 import { SKILL_INVOCATION_TYPE, type SkillInvocationDetails } from "../skill/invoke.ts";
+import { isNotificationDetails } from "../lib/notifications.ts";
 
 /** Claude Code's `hook_additional_context` attachment text (utils/messages.ts). */
 export function hookContextText(event: CcHookEvent, text: string): string {
@@ -116,6 +117,8 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	const queuedPromptContext = new QueuedDelivery<string>();
 	/** The last context seen, for bridged child calls (dispatched parent-side). */
 	let lastCtx: ExtensionContext | undefined;
+	/** True once a prompt opened a turn in this session (before_agent_start). */
+	let prompted = false;
 	/**
 	 * The in-flight SessionStart hook dispatch. It runs OFF the `session_start`
 	 * path so the editor opens immediately (a slow hook used to hold the prompt
@@ -364,7 +367,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	// pi awaits this before the request that carries the delivered message, so a
 	// one-shot emitted here is pinned to that message: after the prompt, as the
 	// before_agent_start message is for a prompt that opens a turn.
-	pi.on("message_start", (event) => {
+	pi.on("message_start", async (event) => {
 		const message = event.message;
 		const emit = (text: string) => pi.events.emit(REMINDER_CHANNEL, { text, placement: "last-append" });
 		if (message.role === "user") {
@@ -377,7 +380,13 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		// message, carrying the typed text. It opens the turn when the command
 		// was idle, through a sendMessage that never reaches before_agent_start,
 		// so the prompt context waiting there rides this message too.
-		if (message.role !== "custom" || message.customType !== SKILL_INVOCATION_TYPE) return;
+		if (message.role !== "custom") return;
+		// A background completion that opens the session's first turn
+		// (lib/prompt-options.ts) skips before_agent_start as well, so the
+		// SessionStart context a typed first prompt would carry rides it.
+		const opensFirstTurn = !prompted && isNotificationDetails(message.details);
+		if (message.customType !== SKILL_INVOCATION_TYPE && !opensFirstTurn) return;
+		if (opensFirstTurn) await drainSessionStart();
 		const input = (message.details as Partial<SkillInvocationDetails> | undefined)?.input;
 		const queued = typeof input === "string" ? queuedPromptContext.release(input) : undefined;
 		if (queued) emit(queued);
@@ -392,6 +401,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 	// landed it BEFORE the prompt (pi appends first, then adds the user message).
 	pi.on("before_agent_start", async (_event, ctx) => {
 		lastCtx = ctx;
+		prompted = true;
 		// The SessionStart dispatch runs in the background from session_start; the
 		// first turn must wait for it so its additionalContext is present (and, on
 		// first run, so its approval dialog gates execution before the model runs).
@@ -431,6 +441,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		pendingPromptContext = [];
 		queuedPromptContext.clear();
 		sessionStartPending = undefined;
+		prompted = false;
 		// Publish the child hook bridge (subagent-bridge.ts). The closures read
 		// live parent state per call, so once per session start is enough.
 		pi.events.emit(SUBAGENT_HOOK_CHANNEL, { bridge: childHookBridge } satisfies SubagentHookPayload);
