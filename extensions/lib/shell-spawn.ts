@@ -33,6 +33,7 @@ import { basename, delimiter } from "node:path";
 import { getPowerShellConfig, getShellConfig } from "@earendil-works/pi-coding-agent";
 import { childProcessEnv } from "./app-launch.mjs";
 import { readSettingsEnv } from "./claude-settings.ts";
+import { PowerShellParser, sharedPowerShellParser } from "./powershell-parser.ts";
 import { detachedSpawnOptions, killProcessTree, waitForChildExit } from "./process-tree.ts";
 import { whichOnPath } from "./which.ts";
 
@@ -186,6 +187,19 @@ let cachedPowerShell: { spawn: ShellSpawn | undefined } | undefined;
 export function powerShellSpawn(): ShellSpawn | undefined {
 	cachedPowerShell ??= { spawn: resolvePowerShellSpawn() };
 	return cachedPowerShell.spawn;
+}
+
+/**
+ * PowerShell's own parser, served by the same executable and arguments the
+ * PowerShell tool runs (lib/powershell-parser.ts), one server per process.
+ * Undefined when no PowerShell resolves.
+ */
+export function powerShellParser(spec: ShellSpawn | undefined = powerShellSpawn()): PowerShellParser | undefined {
+	if (!spec) return undefined;
+	return sharedPowerShellParser(
+		spec.shell,
+		() => new PowerShellParser({ spawnServer: (bootstrap) => spawnShellCommand(spec, bootstrap, { stdio: ["pipe", "pipe", "pipe"] }) }),
+	);
 }
 
 /** Whether the resolved PowerShell is Windows PowerShell 5.1 (`powershell.exe`) or PowerShell 7+ (`pwsh`). */
