@@ -651,10 +651,12 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 	let seq = 0;
 	/** False once the session this notifier belongs to has shut down. */
 	let active = true;
-	/** True once `prompt()` has run in this process (the only path that emits before_agent_start). */
+	/**
+	 * True once an idle turn can be built without `prompt()`: a prompt has run
+	 * (the only path that emits before_agent_start), or a command announced
+	 * pi's prompt options.
+	 */
 	let prompted = false;
-	/** True once a command announced pi's prompt options, so an idle turn can be built without `prompt()`. */
-	let primed = false;
 	/** True between agent_start and agent_settled. */
 	let busy = false;
 	/** True from a turn settling aborted/errored until the next turn starts: hold, do not start turns. */
@@ -681,7 +683,7 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 			return;
 		}
 		try {
-			if (!prompted && !primed && !busy) {
+			if (!prompted && !busy) {
 				// No confirmation possible for a user-role message (no details), and
 				// prompt() cannot be cleared by Esc before it starts: count it delivered.
 				pending.delete(id);
@@ -825,7 +827,7 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 		release(true);
 	});
 	pi.events?.on(PROMPT_OPTIONS_CHANNEL, () => {
-		primed = true;
+		prompted = true;
 	});
 	// A replaced session (/clear, /new, resume) has no use for the old one's undelivered notices.
 	pi.on("session_start", () => {
@@ -834,7 +836,6 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 		held = [];
 		active = true;
 		prompted = false;
-		primed = false;
 		busy = false;
 		interrupted = false;
 	});

@@ -847,6 +847,8 @@ function isAgentCompletion(summary: string): boolean {
  * is not wholly harness frames, so a real prompt renders as typed.
  */
 export function notificationUserMarkdown(text: string): string | undefined {
+	// Every user message renders through here: a typed prompt skips the parse.
+	if (!text.includes("<task-notification>") && !text.includes("<agent-message ")) return undefined;
 	const parsed = parseNotificationFrames(sanitizeDisplayText(text));
 	if (parsed.length === 0 || parsed.some((frame) => frame.kind === "text")) return undefined;
 	const frames = parsed.filter((frame) => !(frame.kind === "task" && frame.pointer));

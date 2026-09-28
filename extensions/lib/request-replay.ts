@@ -237,7 +237,7 @@ export function forkRequestPayload(capture: RequestCapture, child: Record<string
 		const own = typeof child[capKey] === "number" ? (child[capKey] as number) : room;
 		out[capKey] = Math.max(MIN_REPLAY_OUTPUT_TOKENS, Math.min(own, room));
 	}
-	capCacheMarkers(out, key);
+	capCacheMarkers(out, key, capture, tail);
 	return out;
 }
 
@@ -288,14 +288,27 @@ function joinUserTurns(base: unknown[], tail: unknown[]): unknown[] {
  * messages) past the limit. Copy-on-write: the captured body is shared by
  * every fork, so only the path to a dropped marker is copied.
  */
-function capCacheMarkers(payload: Record<string, unknown>, listKey: string): void {
+function capCacheMarkers(payload: Record<string, unknown>, listKey: string, base: RequestCapture, tail: unknown[]): void {
 	const keys = ["tools", "system", listKey].filter((key) => key in payload);
-	const total = keys.reduce((sum, key) => sum + countMarkers(payload[key]), 0);
+	// Appended tools carry no markers, so the body holds the capture's and the tail's.
+	const total = captureMarkers(base) + countMarkers(tail);
 	const budget = { drop: total - MAX_CACHE_MARKERS };
 	for (const key of keys) {
 		if (budget.drop <= 0) break;
 		payload[key] = dropFirstMarkers(payload[key], budget);
 	}
+}
+
+/** The captured body's marker count, walked once per capture: the list can hold a 1M-token transcript. */
+const capturedMarkerCounts = new WeakMap<RequestCapture, number>();
+function captureMarkers(capture: RequestCapture): number {
+	let count = capturedMarkerCounts.get(capture);
+	if (count === undefined) {
+		const payload = capture.payload;
+		count = countMarkers(payload.tools) + countMarkers(payload.system) + countMarkers(payload[LIST_KEY[capture.api]]);
+		capturedMarkerCounts.set(capture, count);
+	}
+	return count;
 }
 
 function countMarkers(value: unknown): number {

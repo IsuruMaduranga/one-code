@@ -49,7 +49,7 @@ import { type GuideInput, guideAgentDefinition, settingsSetup } from "./guide-ag
 import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpServerStatus, type McpStatusEvent, type McpStatusKind } from "../lib/mcp-status.ts";
 
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
-import { announcePromptOptions, requestSystemPrompt } from "../lib/prompt-options.ts";
+import { requestSystemPrompt } from "../lib/prompt-options.ts";
 import { captureMatches, LAST_REQUEST_CHANNEL, type RequestCapture } from "../lib/request-replay.ts";
 import { BTW_FORK_CHANNEL, btwForkDescription, btwForkName, btwForkRecord, btwForkTaskId, type BtwForkRequest, type BtwForkResult } from "../lib/btw-fork.ts";
 import { watchMcpTools } from "../lib/mcp-share.ts";
@@ -1239,15 +1239,20 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	 */
 	const FORK_REQUEST_FILE = "parent-request";
 	const forkRequestsDir = (sessionSearchDir: string) => join(dirname(sessionSearchDir), "parent-requests");
+	/** Each capture is serialized and hashed once, however many forks share it. */
+	const persistedCaptures = new WeakMap<RequestCapture, string>();
 	const persistForkRequest = (record: AgentRunRecord, capture: RequestCapture) => {
 		if (!record.sessionSearchDir) return;
 		try {
-			const body = JSON.stringify(capture);
-			const hash = createHash("sha256").update(body).digest("hex").slice(0, 24);
 			const dir = forkRequestsDir(record.sessionSearchDir);
-			mkdirSync(dir, { recursive: true });
-			const name = `${hash}.json`;
-			if (!existsSync(join(dir, name))) writeFileSync(join(dir, name), body);
+			let name = persistedCaptures.get(capture);
+			if (!name || !existsSync(join(dir, name))) {
+				const body = JSON.stringify(capture);
+				name = `${createHash("sha256").update(body).digest("hex").slice(0, 24)}.json`;
+				mkdirSync(dir, { recursive: true });
+				if (!existsSync(join(dir, name))) writeFileSync(join(dir, name), body);
+				persistedCaptures.set(capture, name);
+			}
 			writeFileSync(join(record.sessionSearchDir, FORK_REQUEST_FILE), name);
 		} catch {
 			// The run still reads the cache; only a later resume re-reads uncached.
@@ -1877,9 +1882,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			return { error: `Cannot fork: ${runtime}` };
 		}
 		if (shuttingDown) return { error: "The session ended before the fork started." };
-		// The fork's completion may open the session's first turn; the panel's
-		// command context carries the prompt options that turn is built from.
-		announcePromptOptions(pi.events, request.ctx);
 		const { launched, line } = await launchResident(prepared, ctx, runtime, { sessionFile, forkMessages: request.messages });
 		if (shuttingDown) {
 			void stopAgent(taskId);
