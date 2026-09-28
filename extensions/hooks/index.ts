@@ -323,16 +323,21 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		return { content, isError: event.isError };
 	});
 
-	/** Await the backgrounded SessionStart dispatch once, if one is pending. */
+	/**
+	 * Await the backgrounded SessionStart dispatch, if one is pending. Every
+	 * caller awaits the same dispatch, and it is forgotten only once it settles:
+	 * a notification opening the first turn and a prompt typed meanwhile both
+	 * wait for it, rather than the second returning at once.
+	 */
 	const drainSessionStart = async () => {
-		if (!sessionStartPending) return;
 		const pending = sessionStartPending;
-		sessionStartPending = undefined;
+		if (!pending) return;
 		try {
 			await pending;
 		} catch {
 			// dispatch already reports its own failures; never block the turn on one.
 		}
+		if (sessionStartPending === pending) sessionStartPending = undefined;
 	};
 
 	// ---- UserPromptSubmit ---------------------------------------------------

@@ -96,6 +96,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 	// (lib/notifications.ts resets its twin the same way).
 	pi.on("session_start", () => {
 		prompted = false;
+		announcedSkills = false;
 	});
 	/** Index the skills pi resolved for this turn and list them for the model. */
 	const adoptPiSkills = (skills: unknown[], cwd: string) => {
@@ -133,10 +134,14 @@ export default function skillExtension(pi: ExtensionAPI) {
 	});
 	// The first turn a background completion opens (lib/prompt-options.ts)
 	// carries the same listing a typed first prompt would.
+	// The first announcement wins, as in system-prompt: both describe one turn.
+	let announcedSkills = false;
 	pi.events.on(PROMPT_OPTIONS_CHANNEL, (data) => {
 		const announced = data as PromptOptionsAnnouncement | undefined;
 		const skills = (announced?.options as { skills?: unknown[] } | undefined)?.skills;
-		if (!prompted && announced?.cwd && Array.isArray(skills)) adoptPiSkills(skills, announced.cwd);
+		if (prompted || announcedSkills || !announced?.cwd || !Array.isArray(skills)) return;
+		announcedSkills = true;
+		adoptPiSkills(skills, announced.cwd);
 	});
 
 	/**

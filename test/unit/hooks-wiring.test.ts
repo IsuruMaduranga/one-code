@@ -449,6 +449,27 @@ describe("hooks wiring", () => {
 		expect(Date.now() - t1).toBeGreaterThanOrEqual(300);
 		expect(readFileSync(seen, "utf-8").trim()).not.toBe("");
 	});
+
+	it("a notification opening the first turn and a prompt typed meanwhile both wait for a slow SessionStart hook", async () => {
+		const hook = script("hook-slow-context.sh", `#!/bin/sh\ncat >/dev/null\nsleep 0.4\necho '{"hookSpecificOutput":{"additionalContext":"session context"}}'\n`);
+		writeUserHooks({ SessionStart: [{ hooks: [{ type: "command", command: hook }] }] });
+		mount();
+		const reminders: string[] = [];
+		fake.events.on(REMINDER_CHANNEL, (data) => reminders.push((data as { text: string }).text));
+		await fake.fireOne("session_start", { reason: "startup" }, ctx());
+		const t0 = Date.now();
+		const notification = fake.fireOne(
+			"message_start",
+			{ message: { role: "custom", customType: "subagent-result", content: [], details: { notificationId: "1-a" } } },
+			ctx(),
+		);
+		const typedAfter = fake.fireOne("input", { text: "hi", source: "interactive" }, ctx()).then(() => Date.now() - t0);
+		await notification;
+		// The typed prompt's handler did not return before the hook finished.
+		expect(await typedAfter).toBeGreaterThanOrEqual(300);
+		// The hook's context rode the notification's turn, the first one.
+		expect(reminders).toContain(hookContextText("SessionStart", "session context"));
+	});
 });
 
 describe("hooks wiring: SessionEnd (LIFECYCLE-REVIEW-2026-09-06 M4)", () => {
