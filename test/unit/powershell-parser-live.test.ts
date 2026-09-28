@@ -8,11 +8,14 @@
  * Runs against the local PowerShell (helpers/local-pwsh.ts), and on Windows
  * also against Windows PowerShell 5.1; CI has both. Skips when neither exists.
  */
-import { afterAll, describe, expect, it } from "vitest";
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { type PowerShellAstNode, type PowerShellParse, PowerShellParser } from "../../extensions/lib/powershell-parser.ts";
-import { POWERSHELL_UTF8_PREFIX, type ShellSpawn, spawnShellCommand } from "../../extensions/lib/shell-spawn.ts";
+import { POWERSHELL_UTF8_PREFIX, powerShellParser, type ShellSpawn, spawnShellCommand } from "../../extensions/lib/shell-spawn.ts";
 import { localPwsh, windowsPowerShell } from "./helpers/local-pwsh.ts";
-import { testParser } from "./helpers/powershell-parse.ts";
+import { POWERSHELL_TEST_TIMEOUT, testParser } from "./helpers/powershell-parse.ts";
 
 const EXECUTABLES = [localPwsh(), windowsPowerShell()].filter((spec): spec is ShellSpawn => spec !== undefined);
 const parsers: PowerShellParser[] = [];
@@ -188,4 +191,24 @@ describe.skipIf(EXECUTABLES.length === 0)("PowerShell parse server (live)", () =
 			});
 		});
 	}
+});
+
+// The PowerShell tool runs with pi's managed-tools directory first on PATH, so
+// the shared parser must resolve names there too, or a program in it passes
+// for Windows' own (PR-24-POWERSHELL-REVIEW-2026-09-28 M1).
+describe.skipIf(EXECUTABLES.length === 0 || process.platform === "win32")("the shared parser resolves on the PowerShell tool's PATH", () => {
+	it("finds a program in <agentDir>/bin ahead of PATH", { timeout: POWERSHELL_TEST_TIMEOUT }, async () => {
+		const agentDir = mkdtempSync(join(tmpdir(), "ps-agent-dir-"));
+		const program = join(agentDir, "bin", "onecode-shadow-probe");
+		mkdirSync(join(agentDir, "bin"));
+		writeFileSync(program, "#!/bin/sh\n");
+		chmodSync(program, 0o755);
+		vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
+		const parser = powerShellParser(EXECUTABLES[0]);
+		if (!parser) throw new Error("no parser");
+		parsers.push(parser);
+		const outcome = await parser.parse("onecode-shadow-probe");
+		vi.unstubAllEnvs();
+		expect(outcome.ok && outcome.parse.nodes.find((n) => n.type === "CommandAst")?.resolvedName).toBe(program);
+	});
 });

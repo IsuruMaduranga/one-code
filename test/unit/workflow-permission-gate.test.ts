@@ -3,9 +3,11 @@ import os from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { localGateMode } from "../../extensions/lib/permission-gate.ts";
+import { powerShellSpawn } from "../../extensions/lib/shell-spawn.ts";
 import { sessionResultsDir } from "../../extensions/lib/persisted-output.ts";
 import { persistProjectAllowApproval } from "../../extensions/permissions/project-trust.ts";
 import { buildGate as buildGateHarness } from "./helpers/permission-gate-harness.ts";
+import { POWERSHELL_TEST_TIMEOUT } from "./helpers/powershell-parse.ts";
 
 const buildGate = (...args: Parameters<typeof buildGateHarness>) => buildGateHarness(...args).handler;
 
@@ -164,6 +166,20 @@ describe("permissionGateFactory — mode, ask rules, project consent (P8/P10)", 
 function captureAfterConsent(cwd: string, home: string) {
 	return buildGateHarness.rebuild(cwd, home);
 }
+
+describe.skipIf(!powerShellSpawn())("permissionGateFactory without a bridge judges PowerShell from its parse (PR-24-POWERSHELL-REVIEW-2026-09-28 M2)", { timeout: POWERSHELL_TEST_TIMEOUT }, () => {
+	afterEach(() => vi.unstubAllEnvs());
+
+	it("allows a read-only line in plan and acceptEdits mode, and still denies what it cannot clear", async () => {
+		for (const mode of ["plan", "acceptEdits"]) {
+			vi.stubEnv("CC_PERMISSION_MODE", mode);
+			const handler = buildGate({ permissions: {} });
+			expect(await handler({ toolName: "powershell", input: { command: "Get-ChildItem" } }), mode).toBeUndefined();
+			expect((await handler({ toolName: "powershell", input: { command: "Remove-Item -Recurse /" } }))?.block, mode).toBe(true);
+			expect((await handler({ toolName: "powershell", input: { command: "Get-ChildItem {" } }))?.block, mode).toBe(true); // no parse clears nothing
+		}
+	});
+});
 
 describe("permissionGateFactory — what the bridge call carries (SUBAGENT-REVIEW M5)", () => {
 	it("passes the child's session id and turn signal so the parent can name the agent and dismiss its prompt", async () => {

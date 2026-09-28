@@ -6,8 +6,8 @@
  *
  * A path is refused by shape when it is UNC (`\\server`), home-relative
  * (`~`), drive-relative (`C:foo`), provider-qualified (`HKLM:`, `Env:`,
- * `FileSystem::…`, `Microsoft.PowerShell.Core\FileSystem::…`) or climbs
- * (`..`); otherwise it is resolved through symlinks and judged where it
+ * `FileSystem::…`, `Microsoft.PowerShell.Core\FileSystem::…`), climbs
+ * (`..`) or has a space at either end; otherwise it is resolved through symlinks and judged where it
  * lands, with a wildcard in the last component judged match by match.
  */
 
@@ -51,6 +51,15 @@ export function hasPowerShellWildcard(value: string): boolean {
 	return /[*?[]/.test(value);
 }
 
+/**
+ * A path with the backtick escapes `-Path` drops (`` `[ `` to `[`, ``` `` ``` to
+ * `` ` ``); `-LiteralPath` keeps them, so a check that does not know which
+ * parameter bound the value judges both spellings.
+ */
+export function powershellUnescaped(value: string): string {
+	return value.replace(/`([*?[\]`])/g, "$1");
+}
+
 /** An absolute path by Windows or POSIX spelling: `C:\x`, `C:/x`, `/x`, `\x`. */
 function isAbsoluteSpelling(value: string): boolean {
 	return /^[A-Za-z]:/.test(value) || value.startsWith("/") || value.startsWith("\\");
@@ -62,15 +71,17 @@ function isAbsoluteSpelling(value: string): boolean {
  * absolute (`C:\x` on macOS).
  */
 export function powershellPathAbsolute(value: string, opts: PowerShellPathOptions): string | undefined {
-	const trimmed = value.trim();
-	if (!trimmed || pathUnvouchable(trimmed)) return undefined;
+	// The value is PowerShell's own, so a space at either end is part of the
+	// name (`' leading.txt'`): trimming it would judge another file. Windows
+	// drops a trailing space where macOS and Linux keep it, so refuse either.
+	if (!value || value !== value.trim() || pathUnvouchable(value)) return undefined;
 	// Resolve only what THIS platform's path module calls absolute: on a POSIX
 	// host `C:\x` is not, and `toAbsolute` would join it onto the cwd and
 	// vouch for a file the shell would never touch.
-	if (isAbsoluteSpelling(trimmed) && !isAbsolute(trimmed)) return undefined;
+	if (isAbsoluteSpelling(value) && !isAbsolute(value)) return undefined;
 	// PowerShell on macOS and Linux takes `\` as a separator too, so `sub\link`
 	// is `sub/link` there, not one file named with a backslash.
-	const spelled = sep === "/" ? trimmed.replaceAll("\\", "/") : trimmed;
+	const spelled = sep === "/" ? value.replaceAll("\\", "/") : value;
 	return toAbsolute(opts.cwd, spelled, opts.home);
 }
 
@@ -160,7 +171,7 @@ function wildcardTargets(absolute: string): string[] | undefined {
  */
 export function powershellPathProblem(value: string, opts: PowerShellPathOptions, roots: string[]): string | undefined {
 	const outside = "a path outside the working directory";
-	if (!value.trim()) return undefined;
+	if (!value) return undefined;
 	if (isSensitivePath(value.trim())) return "a credential or secret path";
 	const absolute = powershellPathAbsolute(value, opts);
 	if (absolute === undefined) return outside;
@@ -170,8 +181,7 @@ export function powershellPathProblem(value: string, opts: PowerShellPathOptions
 	// `-Path 'n`[1`].txt'` once PowerShell drops the escaping backticks.
 	const matches = hasPowerShellWildcard(value) ? wildcardTargets(absolute) : [];
 	if (matches === undefined) return outside;
-	const unescaped = absolute.replace(/`([*?[\]`])/g, "$1");
-	const targets = [...new Set([absolute, unescaped, ...matches])];
+	const targets = [...new Set([absolute, powershellUnescaped(absolute), ...matches])];
 	for (const target of targets) {
 		const resolved = resolveForContainment(target);
 		if (resolved === undefined || !roots.some((root) => isWithin(root, resolved))) return outside;

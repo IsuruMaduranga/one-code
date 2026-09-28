@@ -29,8 +29,8 @@ import { type ChildProcess, spawn, type SpawnOptions } from "node:child_process"
 import { constants, existsSync } from "node:fs";
 import { access } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, delimiter } from "node:path";
-import { getPowerShellConfig, getShellConfig } from "@earendil-works/pi-coding-agent";
+import { basename, delimiter, join } from "node:path";
+import { getAgentDir, getPowerShellConfig, getShellConfig } from "@earendil-works/pi-coding-agent";
 import { childProcessEnv } from "./app-launch.mjs";
 import { readSettingsEnv } from "./claude-settings.ts";
 import { PowerShellParser, sharedPowerShellParser } from "./powershell-parser.ts";
@@ -192,13 +192,21 @@ export function powerShellSpawn(): ShellSpawn | undefined {
 /**
  * PowerShell's own parser, served by the same executable and arguments the
  * PowerShell tool runs (lib/powershell-parser.ts), one server per process.
- * Undefined when no PowerShell resolves.
+ * Undefined when no PowerShell resolves. It resolves command names on the
+ * foreground tool's PATH, pi's managed-tools directory first (piShellEnv):
+ * a `findstr.exe` there shadows Windows' own where the command runs. The
+ * background spawn's PATH lacks that directory, so a name resolved to
+ * System32 here resolves there too.
  */
 export function powerShellParser(spec: ShellSpawn | undefined = powerShellSpawn()): PowerShellParser | undefined {
 	if (!spec) return undefined;
 	return sharedPowerShellParser(
 		spec.shell,
-		() => new PowerShellParser({ spawnServer: (bootstrap) => spawnShellCommand(spec, bootstrap, { stdio: ["pipe", "pipe", "pipe"] }) }),
+		() =>
+			new PowerShellParser({
+				spawnServer: (bootstrap) =>
+					spawnShellCommand(spec, bootstrap, { env: piShellEnv(join(getAgentDir(), "bin")), stdio: ["pipe", "pipe", "pipe"] }),
+			}),
 	);
 }
 

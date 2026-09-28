@@ -61,7 +61,6 @@ import { analyzeShellCommand } from "../auto-mode/shell-analysis.ts";
 import { bashParserReady, bashParserUnavailable } from "../lib/bash-parser.ts";
 import type { PowerShellParse } from "../lib/powershell-parser.ts";
 import { powerShellParser } from "../lib/shell-spawn.ts";
-import { withKeepAlive } from "../lsp/keep-alive.ts";
 import { powershellReadOnly } from "./powershell-rules.ts";
 import { isShellTool } from "./matcher.ts";
 import { gitStatusOutput } from "../lib/git.ts";
@@ -106,7 +105,7 @@ import {
 	type SourcedDirectory,
 	type SourcedRule,
 } from "./settings.ts";
-import { MODE_ENV, resolvedOrSelf, runtimeProtectedDirs, runtimeSecretPaths } from "../lib/permission-gate.ts";
+import { MODE_ENV, parsePowerShell, resolvedOrSelf, runtimeProtectedDirs, runtimeSecretPaths } from "../lib/permission-gate.ts";
 import { CLASSIFIER_SETTING_CHANGED_CHANNEL } from "../lib/settings-channels.ts";
 import { describeProjectAllow, persistProjectAllowApproval, projectAllowApproved, projectDirectoryConsentEntry, type TrustFiring } from "./project-trust.ts";
 import { parseAddDirFlag, tooBroadForWorkspace, validateWorkspaceDirectory } from "./workspace.ts";
@@ -593,23 +592,6 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		transcript.push({ kind: "user", text });
 		capTranscript();
 	});
-
-	/**
-	 * PowerShell's own parse of a `powershell` call's command line (none in
-	 * bypassPermissions mode, where nothing is judged), from the process-wide parse
-	 * server on the tool's own executable (lib/powershell-parser.ts), or
-	 * undefined when it cannot answer (no PowerShell, a timeout, a crash,
-	 * Constrained Language Mode): the gate then clears nothing and the line is
-	 * classified or prompted. The server's child is unref'd, so the await holds
-	 * the event loop open itself (a one-shot run would otherwise exit mid-parse).
-	 */
-	const parsePowerShell = async (tool: string, command: string | undefined): Promise<PowerShellParse | undefined> => {
-		if (tool !== "powershell" || !command || mode === "bypassPermissions") return undefined;
-		const parser = powerShellParser();
-		if (!parser) return undefined;
-		const outcome = await withKeepAlive(() => parser.parse(command));
-		return outcome.ok ? outcome.parse : undefined;
-	};
 
 	/**
 	 * Run the deterministic pre-gate, then the classifier. The pre-gate may only
@@ -1102,7 +1084,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		const original = isShellTool(normalizedTool) || normalizedTool === "monitor" ? originalCommands.get(event.toolCallId) : undefined;
 		const matchSubject = original?.command ?? subject;
 		const callCwd = original?.cwd ?? ctx.cwd;
-		const powershellParse = await parsePowerShell(normalizedTool, matchSubject);
+		const powershellParse = await parsePowerShell(normalizedTool, matchSubject, mode);
 
 		// Record every tool call into the classifier transcript (inputs only). In
 		// auto mode this is the running <transcript> the classifier reads, and this
@@ -1409,7 +1391,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			isPathSubjectTool(normalizedTool) && subject
 				? resolveForContainment(toAbsolute(cwd, subject, os.homedir()))
 				: undefined;
-		const powershellParse = await parsePowerShell(normalizedTool, subject);
+		const powershellParse = await parsePowerShell(normalizedTool, subject, mode);
 
 		const result = decide({
 			toolName,

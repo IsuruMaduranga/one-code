@@ -30,14 +30,17 @@
  */
 
 import { getAgentDir, type InlineExtension } from "@earendil-works/pi-coding-agent";
+import { withKeepAlive } from "../lsp/keep-alive.ts";
 import { bashParserReady } from "./bash-parser.ts";
 import { findProjectRoot } from "./git.ts";
 import { memoryDir } from "./memory.ts";
+import type { PowerShellParse } from "./powershell-parser.ts";
 import { usesClaudeCodeFastPaths } from "./model-tier.ts";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { claudeConfigDir, claudeJsonPath, oneCodeStateDir } from "./paths.ts";
 import { sessionResultsDir } from "./persisted-output.ts";
+import { powerShellParser } from "./shell-spawn.ts";
 import { isPrivateScratchpad, sessionScratchpadDir } from "./scratchpad.ts";
 import { decide, extractSubject, isPathSubjectTool, normalizeToolName, type PermissionMode, parseRules } from "../permissions/matcher.ts";
 import { projectAllowApproved } from "../permissions/project-trust.ts";
@@ -105,6 +108,24 @@ export const MODE_ENV = "CC_PERMISSION_MODE";
  */
 export function localGateMode(envValue: string | undefined, defaultMode: PermissionMode | undefined): PermissionMode {
 	return normalizePermissionMode(envValue) ?? defaultMode ?? "acceptEdits";
+}
+
+/**
+ * PowerShell's own parse of a `powershell` call's command line, for decide(),
+ * from the process-wide parse server on the tool's own executable
+ * (lib/powershell-parser.ts). Undefined for another tool, in
+ * bypassPermissions (nothing is judged), or when the parser cannot answer (no
+ * PowerShell, a timeout, a crash, Constrained Language Mode): the gate then
+ * clears nothing and the line is classified, prompted or denied. The server's
+ * child is unref'd, so the await holds the event loop open itself (a one-shot
+ * run would otherwise exit mid-parse).
+ */
+export async function parsePowerShell(tool: string, command: string | undefined, mode: PermissionMode): Promise<PowerShellParse | undefined> {
+	if (tool !== "powershell" || !command || mode === "bypassPermissions") return undefined;
+	const parser = powerShellParser();
+	if (!parser) return undefined;
+	const outcome = await withKeepAlive(() => parser.parse(command));
+	return outcome.ok ? outcome.parse : undefined;
 }
 
 export function permissionGateFactory(
@@ -191,6 +212,9 @@ export function permissionGateFactory(
 				// No classifier is reachable without the bridge, so auto mode is judged
 				// as acceptEdits — which decide() confines to the working directory.
 				const mode = liveMode === "auto" ? "acceptEdits" : liveMode;
+				// PowerShell is judged from its own parse, as in the parent's gate;
+				// without one it clears nothing and the call is denied here.
+				const powershellParse = await parsePowerShell(tool, subject, mode);
 				const result = decide({
 					toolName: event.toolName,
 					subject,
@@ -211,6 +235,7 @@ export function permissionGateFactory(
 					secretPaths,
 					claudeCodeFastPaths: usesClaudeCodeFastPaths(ctx?.model),
 					blockReadsOutsideWorkingDirectories: settings.blockReadsOutsideWorkingDirectories,
+					powershellParse,
 				});
 				if (result.decision === "allow") return undefined;
 				const ruleNote = result.rule ? ` (rule: ${result.rule.raw})` : "";

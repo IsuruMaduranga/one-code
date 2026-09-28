@@ -220,3 +220,37 @@ describe("the read-only applications' switches (findstr, where.exe)", () => {
 		expect(applicationArgument("findstr", "TODO")).toBe("path");
 	});
 });
+
+describe.skipIf(!HAVE_POWERSHELL)("paths judged as PowerShell spells them (PR-24-POWERSHELL-REVIEW-2026-09-28)", { timeout: POWERSHELL_TEST_TIMEOUT }, () => {
+	it("refuses a path with a space at either end, which names another file than the trimmed one (H1)", async () => {
+		symlinkSync(join(outside, "secret.txt"), join(cwd, " leading.txt"));
+		expect((await edits("Set-Content -LiteralPath ' leading.txt' -Value x")).ok).toBe(false);
+		expect((await reads("Get-Content -LiteralPath ' leading.txt'")).ok).toBe(false);
+		expect((await edits("Set-Content -LiteralPath 'notes.txt ' -Value x")).ok).toBe(false);
+		expect((await reads("Get-Content -LiteralPath ' '")).ok).toBe(false);
+		expect(await edits("Set-Content -LiteralPath 'two words.txt' -Value x")).toEqual({ ok: true });
+	});
+
+	it("refuses a write target with a backtick, which -Path unescapes and -LiteralPath keeps (H2)", async () => {
+		symlinkSync(join(outside, "secret.txt"), join(cwd, "link`name.txt"));
+		expect((await edits("Set-Content -Path 'link``name.txt' -Value x")).ok).toBe(false);
+		expect((await edits("Set-Content -LiteralPath 'link``name.txt' -Value x")).ok).toBe(false);
+	});
+
+	it("judges the entries of a bracketed directory listed literally before Select-String reads them (H3)", async () => {
+		mkdirSync(join(cwd, "sub[1]"));
+		symlinkSync(join(outside, "secret.txt"), join(cwd, "sub[1]", "f.txt"));
+		mkdirSync(join(cwd, "safe[1]"));
+		writeFileSync(join(cwd, "safe[1]", "a.txt"), "a\n");
+		expect((await reads("Get-ChildItem -LiteralPath 'sub[1]' | Select-String s")).ok).toBe(false);
+		expect((await reads("Get-ChildItem -Path 'sub`[1`]' | Select-String s")).ok).toBe(false);
+		expect(await reads("Get-ChildItem -LiteralPath 'safe[1]' | Select-String a")).toEqual({ ok: true });
+		expect(await reads("Get-ChildItem src/*.txt | Select-String a")).toEqual({ ok: true });
+	});
+
+	it("refuses a background job inside a script block (L1)", async () => {
+		expect((await reads("Get-ChildItem | ForEach-Object { $_ & }")).ok).toBe(false);
+		expect((await reads("Get-ChildItem | ForEach-Object { ($_ &) }")).ok).toBe(false);
+		expect(await reads("Get-ChildItem | ForEach-Object { $_ }")).toEqual({ ok: true });
+	});
+});

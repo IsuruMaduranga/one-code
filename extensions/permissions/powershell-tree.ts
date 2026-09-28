@@ -41,7 +41,7 @@ import {
 	WRITE_CMDLETS,
 	WRITE_TAILS,
 } from "./powershell-cmdlets.ts";
-import { hasPowerShellWildcard, powershellPathAbsolute, powershellPathProblem } from "./powershell-paths.ts";
+import { hasPowerShellWildcard, powershellPathAbsolute, powershellPathProblem, powershellUnescaped } from "./powershell-paths.ts";
 import { comparablePath, system32Path } from "../lib/paths.ts";
 
 export interface PowerShellTreeOptions {
@@ -188,6 +188,8 @@ function checkExpressionStatement(tree: Tree, i: number): void {
 	if (nodes[i].type !== "PipelineAst" || children[i].length !== 1 || nodes[children[i][0]].type !== "CommandExpressionAst") {
 		refuse("a script block that runs a command");
 	}
+	// `{ $_ & }` starts a background job per input object, the job the top-level check refuses.
+	if (nodes[i].background) refuse("a background job (`&`) inside a script block");
 	const expression = children[i][0];
 	if (children[expression].length !== 1) refuse("a redirection inside a script block");
 	tree.approved.add(i).add(expression);
@@ -494,10 +496,15 @@ function checkSelectStringSources(upstream: CheckedCommand[], opts: PowerShellTr
 		}
 		const directories = source.paths.length > 0 ? source.paths : ["."];
 		for (const directory of directories) {
-			if (hasPowerShellWildcard(directory)) continue; // a wildcard lists its matches, each judged as a path already
+			// A wildcard lists its matches, each judged as a path already, but
+			// `-LiteralPath 'sub[1]'` and `-Path 'sub`[1`]'` list the directory
+			// `sub[1]` itself: judge the entries of both spellings, whichever exists.
 			const absolute = powershellPathAbsolute(directory, opts);
-			const resolved = absolute === undefined ? undefined : resolveForContainment(absolute);
-			if (resolved === undefined || !entriesInside(resolved, roots)) refuse("Select-String over a directory with an entry outside the working directory");
+			if (absolute === undefined) refuse("Select-String over a directory with an entry outside the working directory");
+			for (const spelling of new Set([absolute, powershellUnescaped(absolute)])) {
+				const resolved = resolveForContainment(spelling);
+				if (resolved === undefined || !entriesInside(resolved, roots)) refuse("Select-String over a directory with an entry outside the working directory");
+			}
 		}
 	}
 }
@@ -535,6 +542,8 @@ export function powershellTreeContainedEdits(parse: PowerShellParse, opts: Power
  */
 function checkWriteTarget(value: string, removes: boolean, recurses: boolean, opts: PowerShellTreeOptions, writable: string[]): void {
 	if (hasPowerShellWildcard(value)) refuse(`writes to ${value}, a wildcard whose matches this check does not judge`);
+	// `-Path` drops a backtick escape (`a``b` writes `a`b`) and `-LiteralPath` keeps it.
+	if (value.includes("`")) refuse(`writes to ${value}, whose backtick escapes this check does not judge`);
 	const absolute = powershellPathAbsolute(value, opts);
 	if (absolute === undefined) refuse(`writes to ${value}, a path this check cannot resolve`);
 	const resolved = resolveForContainment(absolute);
