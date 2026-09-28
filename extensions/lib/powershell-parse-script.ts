@@ -140,9 +140,9 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
 			if ($info -isnot [System.Management.Automation.CmdletInfo]) { continue }
 			if ($null -eq $binderType) { $nodes[$i].bindingUnavailable = $true; continue }
 			try {
-				# Windows PowerShell 5.1's binder does not follow an alias to its
-				# cmdlet, so an aliased command is bound as a copy spelled with the
-				# cmdlet's name, and each bound value is mapped back by extent.
+				# An aliased command is bound as a copy spelled with the cmdlet's name,
+				# so the binding never depends on how an edition's binder treats an
+				# alias; each bound value is mapped back by extent.
 				$bindAst = $command
 				$origin = 0
 				$nameEnd = 0
