@@ -25,11 +25,12 @@
 
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
-import { isExecutionPrimitivePath, isSensitivePath } from "../auto-mode/sensitive.ts";
-import { isWithin, resolveForContainment } from "../auto-mode/paths.ts";
-import { touchesGuardedPath } from "../auto-mode/shell-analysis.ts";
+import { isSensitivePath } from "../auto-mode/sensitive.ts";
+import { isWithin, resolveForContainment, touchesGuardedPath } from "../auto-mode/paths.ts";
+import { isGuardedWritePath, removalLoses } from "../auto-mode/shell-analysis.ts";
 import type { PowerShellAstNode, PowerShellParse } from "../lib/powershell-parser.ts";
 import {
+	applicationArgument,
 	type CmdletSpec,
 	parameterKind,
 	READ_APPLICATIONS,
@@ -39,7 +40,6 @@ import {
 	WRITE_CMDLETS,
 	WRITE_TAILS,
 } from "./powershell-cmdlets.ts";
-import { isProtectedPath } from "./protected-paths.ts";
 import { powershellPathAbsolute, powershellPathProblem } from "./powershell-paths.ts";
 
 export interface PowerShellTreeOptions {
@@ -270,13 +270,17 @@ function checkCommand(tree: Tree, i: number, specFor: SpecFor, applications: boo
 
 	for (const element of elements.slice(1)) checkRedirection(tree, element);
 
-	if (node.commandType === "Application" && applications && READ_APPLICATIONS.has(shown.toLowerCase())) {
+	if (node.commandType === "Application" && applications && READ_APPLICATIONS[shown.toLowerCase()]) {
 		const paths: string[] = [];
 		for (const element of elements.slice(1)) {
 			if (nodes[element].type.endsWith("RedirectionAst")) continue;
 			const values = constantValues(tree, element);
 			if (values === undefined) refuse(`an argument to ${shown} this check cannot read`);
-			paths.push(...values);
+			for (const value of values) {
+				const kind = applicationArgument(shown, value);
+				if (kind === "refused") refuse(`${value} is not a switch this check clears for ${shown}`);
+				if (kind === "path") paths.push(value);
+			}
 		}
 		return { name: shown.toLowerCase(), paths, bound: new Set() };
 	}
@@ -366,47 +370,34 @@ function requireAllApproved(tree: Tree): void {
 	}
 }
 
-function verdict(judge: () => void): PowerShellTreeVerdict {
+/**
+ * Verdicts already reached for a parse. One tool call asks the same question
+ * of its parse several times (decide() runs up to three times, then the
+ * classifier's pre-gate), and each answer costs a tree walk and filesystem
+ * reads; a parse lives for one call, so the answers cannot go stale.
+ */
+const judged = new WeakMap<PowerShellParse, Map<string, PowerShellTreeVerdict>>();
+
+function verdict(parse: PowerShellParse, kind: "read" | "edit", opts: PowerShellTreeOptions, judge: () => void): PowerShellTreeVerdict {
+	const key = JSON.stringify([kind, opts.cwd, opts.home, opts.readableRoots, opts.writableRoots, opts.protectedDirs]);
+	let answers = judged.get(parse);
+	if (!answers) judged.set(parse, (answers = new Map()));
+	const known = answers.get(key);
+	if (known) return known;
+	let answer: PowerShellTreeVerdict;
 	try {
 		judge();
-		return { ok: true };
+		answer = { ok: true };
 	} catch (error) {
-		if (error instanceof Refusal) return { ok: false, reason: error.message };
-		throw error;
+		if (!(error instanceof Refusal)) throw error;
+		answer = { ok: false, reason: error.message };
 	}
+	answers.set(key, answer);
+	return answer;
 }
 
 /** The most entries a directory may hold for its entries to be checked one by one. */
 const ENTRY_LIMIT = 2_000;
-
-/** The most entries a recursive walk looks at before it gives up (and the caller refuses). */
-const WALK_LIMIT = 5_000;
-
-/**
- * Whether the tree under `directory` holds a symbolic link or junction, or
- * is too large to walk. Windows PowerShell 5.1's recursive `Get-ChildItem`
- * and `Remove-Item` follow them (PowerShell 7's do not), so a link deep in
- * the tree lists or deletes what it points at, which the target's own
- * containment check never sees.
- */
-function linkInTree(directory: string): boolean {
-	const stack = [directory];
-	let seen = 0;
-	while (stack.length > 0) {
-		const current = stack.pop() as string;
-		let entries;
-		try {
-			entries = readdirSync(current, { withFileTypes: true });
-		} catch {
-			continue;
-		}
-		for (const entry of entries) {
-			if (++seen > WALK_LIMIT || entry.isSymbolicLink()) return true;
-			if (entry.isDirectory()) stack.push(join(current, entry.name));
-		}
-	}
-	return false;
-}
 
 /** Whether every entry of `directory` (not recursing) resolves inside a root and to no credential path. */
 function entriesInside(directory: string, roots: string[]): boolean {
@@ -425,11 +416,22 @@ function entriesInside(directory: string, roots: string[]): boolean {
 }
 
 /**
+ * Whether the tree under `directory` holds a symbolic link or junction, or
+ * is too large to walk. Windows PowerShell 5.1's recursive `Get-ChildItem`
+ * and `Remove-Item` follow them (PowerShell 7's do not), so a link deep in
+ * the tree lists or deletes what it points at, which the target's own
+ * containment check never sees.
+ */
+function linkInTree(directory: string): boolean {
+	return touchesGuardedPath(directory, directory, (_path, entry) => entry.isSymbolicLink());
+}
+
+/**
  * Whether every statement of the line only reads inside the working directory
  * and the readable roots. See the module header.
  */
 export function powershellTreeReadOnly(parse: PowerShellParse, opts: PowerShellTreeOptions): PowerShellTreeVerdict {
-	return verdict(() => {
+	return verdict(parse, "read", opts, () => {
 		if (parse.errors.length > 0) refuse("PowerShell could not parse the line");
 		const tree = buildTree(parse);
 		const roots = readRoots(opts);
@@ -487,7 +489,7 @@ function checkSelectStringSources(upstream: CheckedCommand[], opts: PowerShellTr
  * tail. See the module header.
  */
 export function powershellTreeContainedEdits(parse: PowerShellParse, opts: PowerShellTreeOptions): PowerShellTreeVerdict {
-	return verdict(() => {
+	return verdict(parse, "edit", opts, () => {
 		if (parse.errors.length > 0) refuse("PowerShell could not parse the line");
 		const tree = buildTree(parse);
 		const root = resolveForContainment(opts.cwd) ?? opts.cwd;
@@ -498,7 +500,7 @@ export function powershellTreeContainedEdits(parse: PowerShellParse, opts: Power
 				if (position > 0) return;
 				if (current.paths.length === 0) refuse(`${tree.nodes[command].resolvedName} without a path`);
 				const removes = current.name === "remove-item";
-				for (const path of current.paths) checkWriteTarget(path, removes, removes && current.bound.has("recurse"), opts, root, writable);
+				for (const path of current.paths) checkWriteTarget(path, removes, removes && current.bound.has("recurse"), opts, writable);
 			});
 		}
 		requireAllApproved(tree);
@@ -512,21 +514,15 @@ export function powershellTreeContainedEdits(parse: PowerShellParse, opts: Power
  * a working root, a `.git`, or a directory holding one or a guarded path,
  * and a recursive removal must not reach a link.
  */
-function checkWriteTarget(value: string, removes: boolean, recurses: boolean, opts: PowerShellTreeOptions, root: string, writable: string[]): void {
+function checkWriteTarget(value: string, removes: boolean, recurses: boolean, opts: PowerShellTreeOptions, writable: string[]): void {
 	if (/[*?[\]]/.test(value)) refuse(`writes to ${value}, a wildcard whose matches this check does not judge`);
 	const absolute = powershellPathAbsolute(value, opts);
 	if (absolute === undefined) refuse(`writes to ${value}, a path this check cannot resolve`);
 	const resolved = resolveForContainment(absolute);
 	if (resolved === undefined || !writable.some((dir) => isWithin(dir, resolved))) refuse(`writes to ${value}, which is outside the working directory`);
-	const guarded = (path: string) =>
-		isSensitivePath(path) ||
-		isExecutionPrimitivePath(path) ||
-		isProtectedPath(path, opts.cwd) ||
-		(opts.protectedDirs ?? []).some((dir) => isWithin(dir, path));
-	if ([absolute, resolved].some(guarded)) refuse(`writes to ${value}, a credential, execution-primitive or protected path`);
+	if ([absolute, resolved].some((path) => isGuardedWritePath(path, opts.cwd, opts.protectedDirs))) refuse(`writes to ${value}, a credential, execution-primitive or protected path`);
 	if (!removes) return;
-	const lost = (path: string) => path.split(/[\\/]/).includes(".git") || guarded(path);
-	if (resolved === root || writable.includes(resolved) || lost(absolute) || lost(resolved) || touchesGuardedPath(resolved, resolved, lost)) {
+	if (removalLoses(absolute, resolved, writable, opts.cwd, opts.protectedDirs)) {
 		refuse(`removes ${value}, which is a working root, or is or holds a git repository or a protected, credential or execution-primitive path`);
 	}
 	if (recurses && linkInTree(resolved)) refuse(`removes ${value} recursively, and a link inside it would be followed by Windows PowerShell 5.1`);

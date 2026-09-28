@@ -29,6 +29,7 @@
 
 import type { ChildProcess } from "node:child_process";
 import { POWERSHELL_PARSE_BOOTSTRAP, POWERSHELL_PARSE_WALKER } from "./powershell-parse-script.ts";
+import { unrefHandle } from "./process-tree.ts";
 
 /** One syntax-tree node, as the walker reports it (powershell-parse-script.ts). */
 export interface PowerShellAstNode {
@@ -125,10 +126,6 @@ interface Server {
 
 const encode = (text: string) => Buffer.from(text, "utf8").toString("base64");
 
-function unref(handle: unknown): void {
-	(handle as { unref?: () => void } | null | undefined)?.unref?.();
-}
-
 export class PowerShellParser {
 	private readonly options: Required<PowerShellParserOptions>;
 	private server: Server | undefined;
@@ -174,7 +171,7 @@ export class PowerShellParser {
 				resolve({ ok: false, reason: `the PowerShell parser did not answer within ${timeoutMs} ms` });
 				this.crashed(server, `the PowerShell parser timed out after ${timeoutMs} ms`);
 			}, timeoutMs);
-			unref(timer);
+			unrefHandle(timer);
 			server.pending.set(id, { resolve, timer });
 			server.child.stdin?.write(`${id} ${encode(command)}\n`);
 		});
@@ -204,10 +201,10 @@ export class PowerShellParser {
 		child.stderr?.on("data", () => {});
 		child.on("error", (error) => this.crashed(server, `PowerShell could not start: ${message(error)}`));
 		child.on("exit", (code, signal) => this.crashed(server, `the PowerShell parser exited (${signal ?? `code ${code}`})`));
-		unref(child);
-		unref(child.stdin);
-		unref(child.stdout);
-		unref(child.stderr);
+		unrefHandle(child);
+		unrefHandle(child.stdin);
+		unrefHandle(child.stdout);
+		unrefHandle(child.stderr);
 		child.stdin?.write(`${encode(POWERSHELL_PARSE_WALKER)}\n`);
 		return server;
 	}
@@ -287,7 +284,7 @@ export class PowerShellParser {
 	private touch(): void {
 		this.clearIdle();
 		this.idleTimer = setTimeout(() => this.stop(), this.options.idleMs);
-		unref(this.idleTimer);
+		unrefHandle(this.idleTimer);
 	}
 
 	private clearIdle(): void {

@@ -15,7 +15,7 @@
  *    and every caller treats that as "not provably contained".
  */
 
-import { lstatSync, readlinkSync } from "node:fs";
+import { type Dirent, lstatSync, readdirSync, readlinkSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { comparablePath, expandTilde, gitBashPathToNative, isPathAtOrUnder, tryRealpath } from "../lib/paths.ts";
 
@@ -129,4 +129,32 @@ export function toAbsolute(cwd: string, token: string, home: string): string {
  */
 export function toAbsoluteBash(cwd: string, token: string, home: string): string {
 	return toAbsolute(cwd, gitBashPathToNative(token), home);
+}
+
+/**
+ * Whether moving, copying or removing `source` touches a path `guarded`
+ * flags beneath it: walks `source` without following symlinks, at most
+ * `budget` entries, and tests each entry's counterpart under `target` (the
+ * same path for a removal). A walk that runs out of budget counts as touching
+ * one, so the command is judged, not cleared. A file source walks nothing.
+ * `guarded` also gets the source's directory entry (a symbolic link is one).
+ */
+export function touchesGuardedPath(source: string, target: string, guarded: (path: string, entry: Dirent) => boolean, budget = 5_000): boolean {
+	const stack = [""];
+	let seen = 0;
+	while (stack.length > 0) {
+		const relative = stack.pop() as string;
+		let entries;
+		try {
+			entries = readdirSync(join(source, relative), { withFileTypes: true });
+		} catch {
+			continue;
+		}
+		for (const entry of entries) {
+			const child = join(relative, entry.name);
+			if (++seen > budget || guarded(join(target, child), entry)) return true;
+			if (entry.isDirectory()) stack.push(child);
+		}
+	}
+	return false;
 }

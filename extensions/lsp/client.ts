@@ -21,7 +21,7 @@ import { pathToFileURL } from "node:url";
 import type { LspDiagnostic } from "./format.ts";
 import { childProcessEnv } from "../lib/app-launch.mjs";
 import { commandLaunch } from "../lib/command-launch.ts";
-import { killProcessTree } from "../lib/process-tree.ts";
+import { killProcessTree, unrefHandle } from "../lib/process-tree.ts";
 import { createReaderState, encodeMessage, type JsonRpcMessage, readMessages } from "./protocol.ts";
 
 const INITIALIZE_TIMEOUT_MS = 15_000;
@@ -56,10 +56,6 @@ export function configurationResponse(settings: unknown, params: unknown): unkno
 	const items = (params as { items?: unknown[] } | undefined)?.items;
 	const count = Array.isArray(items) && items.length > 0 ? items.length : 1;
 	return Array.from({ length: count }, () => settings ?? {});
-}
-
-function unrefStream(stream: unknown): void {
-	(stream as { unref?: () => void } | null | undefined)?.unref?.();
 }
 
 interface OpenDocument {
@@ -121,9 +117,9 @@ export class LspClient {
 		// are sockets at runtime, so they carry unref() even though the stream
 		// types don't declare it.
 		child.unref();
-		unrefStream(child.stdout);
-		unrefStream(child.stderr);
-		unrefStream(child.stdin);
+		unrefHandle(child.stdout);
+		unrefHandle(child.stderr);
+		unrefHandle(child.stdin);
 
 		let stderr = "";
 		child.stderr?.on("data", (chunk: Buffer) => {

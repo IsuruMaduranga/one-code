@@ -595,14 +595,16 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	});
 
 	/**
-	 * PowerShell's own parse of a command line, from the process-wide parse
+	 * PowerShell's own parse of a `powershell` call's command line (none in
+	 * bypassPermissions mode, where nothing is judged), from the process-wide parse
 	 * server on the tool's own executable (lib/powershell-parser.ts), or
 	 * undefined when it cannot answer (no PowerShell, a timeout, a crash,
 	 * Constrained Language Mode): the gate then clears nothing and the line is
 	 * classified or prompted. The server's child is unref'd, so the await holds
 	 * the event loop open itself (a one-shot run would otherwise exit mid-parse).
 	 */
-	const parsePowerShell = async (command: string): Promise<PowerShellParse | undefined> => {
+	const parsePowerShell = async (tool: string, command: string | undefined): Promise<PowerShellParse | undefined> => {
+		if (tool !== "powershell" || !command || mode === "bypassPermissions") return undefined;
 		const parser = powerShellParser();
 		if (!parser) return undefined;
 		const outcome = await withKeepAlive(() => parser.parse(command));
@@ -1100,7 +1102,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		const original = isShellTool(normalizedTool) || normalizedTool === "monitor" ? originalCommands.get(event.toolCallId) : undefined;
 		const matchSubject = original?.command ?? subject;
 		const callCwd = original?.cwd ?? ctx.cwd;
-		const powershellParse = normalizedTool === "powershell" && matchSubject && mode !== "bypassPermissions" ? await parsePowerShell(matchSubject) : undefined;
+		const powershellParse = await parsePowerShell(normalizedTool, matchSubject);
 
 		// Record every tool call into the classifier transcript (inputs only). In
 		// auto mode this is the running <transcript> the classifier reads, and this
@@ -1407,7 +1409,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			isPathSubjectTool(normalizedTool) && subject
 				? resolveForContainment(toAbsolute(cwd, subject, os.homedir()))
 				: undefined;
-		const powershellParse = normalizedTool === "powershell" && subject && mode !== "bypassPermissions" ? await parsePowerShell(subject) : undefined;
+		const powershellParse = await parsePowerShell(normalizedTool, subject);
 
 		const result = decide({
 			toolName,

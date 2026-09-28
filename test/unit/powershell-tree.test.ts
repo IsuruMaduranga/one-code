@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { resolveForContainment } from "../../extensions/auto-mode/paths.ts";
 import { decide } from "../../extensions/permissions/matcher.ts";
+import { applicationArgument } from "../../extensions/permissions/powershell-cmdlets.ts";
 import { powershellTreeContainedEdits, powershellTreeReadOnly } from "../../extensions/permissions/powershell-tree.ts";
 import { HAVE_POWERSHELL, psParse } from "./helpers/powershell-parse.ts";
 
@@ -188,5 +189,19 @@ describe.skipIf(!HAVE_POWERSHELL)("the read-only verdict reads PowerShell's bind
 		]) {
 			expect((await reads(command)).ok, command).toBe(false);
 		}
+	});
+});
+
+describe("the read-only applications' switches (findstr, where.exe)", () => {
+	it("clears their non-recursive switches, refuses the rest, and judges other arguments as paths", () => {
+		expect(applicationArgument("findstr", "/i")).toBe("switch");
+		expect(applicationArgument("FINDSTR.EXE", "/N")).toBe("switch");
+		expect(applicationArgument("findstr", "/C:two words")).toBe("switch");
+		expect(applicationArgument("findstr", "/S")).toBe("refused"); // recurses
+		expect(applicationArgument("findstr", "/G:list.txt")).toBe("refused"); // names more files
+		expect(applicationArgument("where.exe", "/q")).toBe("switch");
+		expect(applicationArgument("where.exe", "/R")).toBe("refused");
+		expect(applicationArgument("findstr", "src\\a.txt")).toBe("path");
+		expect(applicationArgument("findstr", "TODO")).toBe("path");
 	});
 });

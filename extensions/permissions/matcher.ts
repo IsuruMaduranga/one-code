@@ -1048,8 +1048,8 @@ export function decide(params: DecideInput): Decision {
 			// (the read tools ask for the same path below).
 			if (evidence.readOnlyOutside && evidence.writes.length === 0) return { decision: "ask", cause: "working-dir" };
 		}
-		// The PowerShell counterpart: Claude Code's read-only cmdlet allowlist,
-		// with in-project paths by shape (powershell-rules.ts).
+		// The PowerShell counterpart: read-only cmdlets on in-project paths,
+		// judged from PowerShell's own parse (powershell-tree.ts).
 		if (tool === "powershell" && subject && powershellReadOnly({ parse: params.powershellParse, cwd, home: homedir(), readableRoots }).readOnly) return { decision: "allow", cause: "plan-readonly" };
 		if (PLAN_READ_ONLY_TOOLS.has(tool)) return { decision: "allow", cause: "plan-readonly" };
 		return { decision: "deny", cause: "plan-mode" };

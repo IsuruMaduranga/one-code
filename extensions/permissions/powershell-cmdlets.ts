@@ -145,8 +145,27 @@ export const WRITE_TAILS = new Set(["out-null", "out-string", "format-table", "f
  */
 export const SELECT_STRING_SOURCES = new Set(["get-content", "get-childitem", "get-item", "select-string", "where-object", "sort-object", "select-object", "out-string"]);
 
-/** Native commands the read-only list names (Windows): every argument is judged as a path. */
-export const READ_APPLICATIONS = new Set(["findstr", "findstr.exe", "where.exe"]);
+/**
+ * Native commands the read-only list names (Windows), and the `/X` switches
+ * each may take (`c:` takes a value, as in `/C:text`); every other argument
+ * is judged as a path. Left out: findstr's `/S` and where.exe's `/R`, which
+ * recurse, and findstr's `/F:`, `/G:` and `/D:`, which name more files.
+ */
+const FINDSTR_SWITCHES = new Set(["b", "e", "l", "r", "i", "x", "v", "n", "m", "o", "p", "off", "offline", "a:", "c:"]);
+export const READ_APPLICATIONS: Readonly<Record<string, ReadonlySet<string>>> = Object.freeze({
+	findstr: FINDSTR_SWITCHES,
+	"findstr.exe": FINDSTR_SWITCHES,
+	"where.exe": new Set(["q", "f", "t"]),
+});
+
+/** How one argument to a read-only application reads: a switch it may take, one it may not, or a path. */
+export function applicationArgument(application: string, argument: string): "switch" | "refused" | "path" {
+	const switches = READ_APPLICATIONS[application.toLowerCase()];
+	const flag = /^\/([A-Za-z]+)(:.*)?$/s.exec(argument);
+	if (!switches || !flag) return "path";
+	const name = flag[1].toLowerCase();
+	return switches.has(flag[2] === undefined ? name : `${name}:`) ? "switch" : "refused";
+}
 
 /** The modules a cleared cmdlet must come from: PowerShell's own. */
 export const TRUSTED_MODULES = new Set([
