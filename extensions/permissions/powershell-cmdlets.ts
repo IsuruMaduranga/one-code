@@ -118,7 +118,7 @@ export const READ_CMDLETS: Readonly<Record<string, CmdletSpec>> = Object.freeze(
 	"out-null": { tail: true },
 });
 
-/** Claude Code's acceptEdits PowerShell cmdlets and their parameters (modeValidation.ts, pathValidation.ts). */
+/** The PowerShell cmdlets Claude Code allows in acceptEdits mode, and their parameters. */
 export const WRITE_CMDLETS: Readonly<Record<string, CmdletSpec>> = Object.freeze({
 	"set-content": {
 		paths: ["Path", "LiteralPath"],
