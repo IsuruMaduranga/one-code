@@ -164,9 +164,14 @@ export function powershellPathProblem(value: string, opts: PowerShellPathOptions
 	if (isSensitivePath(value.trim())) return "a credential or secret path";
 	const absolute = powershellPathAbsolute(value, opts);
 	if (absolute === undefined) return outside;
-	// The value's own wildcard, not one in the working directory's name.
-	const targets = hasPowerShellWildcard(value) ? wildcardTargets(absolute) : [absolute];
-	if (targets === undefined) return outside;
+	// The value's own wildcard, not one in the working directory's name. The
+	// literal path is judged too: `-LiteralPath 'n[1].txt'` reads the file of
+	// that name, which a bracket set does not match, and so does
+	// `-Path 'n`[1`].txt'` once PowerShell drops the escaping backticks.
+	const matches = hasPowerShellWildcard(value) ? wildcardTargets(absolute) : [];
+	if (matches === undefined) return outside;
+	const unescaped = absolute.replace(/`([*?[\]`])/g, "$1");
+	const targets = [...new Set([absolute, unescaped, ...matches])];
 	for (const target of targets) {
 		const resolved = resolveForContainment(target);
 		if (resolved === undefined || !roots.some((root) => isWithin(root, resolved))) return outside;

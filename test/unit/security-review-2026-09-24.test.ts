@@ -215,6 +215,15 @@ describe("M4: PowerShell resolves relative paths before vouching for them", () =
 		}
 	});
 
+	(HAVE_POWERSHELL ? posixOnly : it.skip)("judges the literal path of a name with brackets, however it is spelled (PR #24 review)", async () => {
+		mkdirSync(join(root, "outside"), { recursive: true });
+		writeFileSync(join(root, "outside", "data.txt"), "synthetic-outside-data\n");
+		symlinkSync(join(root, "outside", "data.txt"), join(cwd, "n[1].txt"));
+		for (const command of ["Get-Content -LiteralPath 'n[1].txt'", "Get-Content 'n`[1`].txt'", "Get-Content n[1].txt"]) {
+			expect((await psReadOnly(command, { cwd, home })).readOnly, command).toBe(false);
+		}
+	});
+
 	(HAVE_POWERSHELL ? posixOnly : it.skip)("refuses a relative link to an in-project credential file", async () => {
 		writeFileSync(join(cwd, ".env"), "TOKEN=x\n");
 		symlinkSync(join(cwd, ".env"), join(cwd, "notes.txt"));

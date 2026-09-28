@@ -24,7 +24,7 @@
  */
 
 import { readdirSync } from "node:fs";
-import { join } from "node:path";
+import { delimiter, isAbsolute, join } from "node:path";
 import { isSensitivePath } from "../auto-mode/sensitive.ts";
 import { isWithin, resolveForContainment, touchesGuardedPath } from "../auto-mode/paths.ts";
 import { isGuardedWritePath, removalLoses } from "../auto-mode/shell-analysis.ts";
@@ -277,6 +277,10 @@ function checkCommand(tree: Tree, i: number, specFor: SpecFor, applications: boo
 		// earlier on PATH than Windows' own is some other program.
 		const expected = system32Path(shown.toLowerCase().endsWith(".exe") ? shown : `${shown}.exe`);
 		if (!node.resolvedName || comparablePath(node.resolvedName) !== comparablePath(expected)) refuse(`\`${shown}\` resolves to ${node.resolvedName ?? "no program"}, not Windows' own`);
+		// The parse server resolved the name in its own directory; a relative
+		// PATH entry (`.`, `bin`) resolves against the call's, where it can name
+		// another program.
+		if (pathHasRelativeEntry(process.env)) refuse(`PATH has a relative entry, so \`${shown}\` may resolve to another program where it runs`);
 		const paths: string[] = [];
 		for (const element of elements.slice(1)) {
 			if (nodes[element].type.endsWith("RedirectionAst")) continue;
@@ -349,6 +353,12 @@ function collectedValues(tree: Tree, elements: number[] | undefined): string[] |
 		values.push(...inner);
 	}
 	return values;
+}
+
+/** Whether any PATH entry is relative, so a command name resolves differently in another directory. */
+function pathHasRelativeEntry(env: NodeJS.ProcessEnv): boolean {
+	const key = Object.keys(env).find((name) => name.toLowerCase() === "path") ?? "PATH";
+	return (env[key] ?? "").split(delimiter).some((entry) => entry.trim() !== "" && !isAbsolute(entry.trim()));
 }
 
 /** A stream merge (`2>&1`) and a redirection to `$null` write no file; any other redirection is not cleared. */

@@ -249,7 +249,7 @@ export class PowerShellParser {
 			pending.resolve({ ok: false, reason: `the PowerShell parser failed: ${record.failure}` });
 			return;
 		}
-		pending.resolve({ ok: true, parse: { nodes: asArray(record.nodes) as PowerShellAstNode[], errors: asArray(record.errors).map(String) } });
+		pending.resolve({ ok: true, parse: { nodes: asArray(record.nodes).map(normalizeNode), errors: asArray(record.errors).map(String) } });
 	}
 
 	/** The server is gone or unusable: settle what waits on it and count the failure. */
@@ -291,6 +291,26 @@ export class PowerShellParser {
 		if (this.idleTimer) clearTimeout(this.idleTimer);
 		this.idleTimer = undefined;
 	}
+}
+
+/**
+ * A node with its list fields made lists: ConvertTo-Json may write a
+ * one-element list as the element. A binding list that is not one after
+ * that marks the binding unavailable, which the gate refuses.
+ */
+function normalizeNode(value: unknown): PowerShellAstNode {
+	const node = { ...(value as PowerShellAstNode) };
+	if (node.bindingErrors !== undefined) node.bindingErrors = asArray(node.bindingErrors).map(String);
+	if (node.bindings !== undefined) {
+		const bindings = asArray(node.bindings) as Array<{ parameter?: unknown; value?: unknown; elements?: unknown }>;
+		if (bindings.every((b) => b !== null && typeof b === "object" && typeof b.parameter === "string" && typeof b.value === "number")) {
+			node.bindings = bindings.map((b) => ({ parameter: b.parameter as string, value: b.value as number, ...(b.elements === undefined ? {} : { elements: asArray(b.elements).map(Number) }) }));
+		} else {
+			delete node.bindings;
+			node.bindingUnavailable = true;
+		}
+	}
+	return node;
 }
 
 function asArray(value: unknown): unknown[] {

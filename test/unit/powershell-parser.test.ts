@@ -117,6 +117,23 @@ describe("PowerShellParser protocol", () => {
 		expect(await parser.parse("")).toEqual({ ok: true, parse: { nodes: [{ type: "ScriptBlockAst", parent: -1, start: 0, end: 0 }], errors: [] } });
 	});
 
+	it("makes a node's lists lists, and marks malformed bindings unavailable", async () => {
+		const fake = fakeSpawner({
+			answer: () => ({
+				nodes: [
+					{ type: "CommandAst", parent: -1, start: 0, end: 1, bindings: { parameter: "Path", value: 2, elements: 3 }, bindingErrors: "b" },
+					{ type: "CommandAst", parent: 0, start: 0, end: 1, bindings: [{ parameter: "Path" }] },
+				],
+				errors: [],
+			}),
+		});
+		const parser = new PowerShellParser({ spawnServer: fake.spawnServer });
+		const outcome = await parser.parse("x");
+		expect(outcome.ok && outcome.parse.nodes[0]).toMatchObject({ bindings: [{ parameter: "Path", value: 2, elements: [3] }], bindingErrors: ["b"] });
+		expect(outcome.ok && outcome.parse.nodes[1]).toMatchObject({ bindingUnavailable: true });
+		expect(outcome.ok && outcome.parse.nodes[1].bindings).toBeUndefined();
+	});
+
 	it("passes a parse with errors through as PowerShell's answer", async () => {
 		const fake = fakeSpawner({ answer: () => ({ nodes: [], errors: ["TerminatorExpectedAtEndOfString"] }) });
 		const parser = new PowerShellParser({ spawnServer: fake.spawnServer });
