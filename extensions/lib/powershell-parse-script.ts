@@ -45,7 +45,9 @@ $out = [Console]::Out
 
 # Command lookup must never load or run a module: autoloading is off, and the
 # built-in modules the gate's cmdlets live in are imported from $PSHOME by
-# path, so a same-named module earlier on PSModulePath cannot stand in.
+# path, so a same-named module earlier on PSModulePath cannot stand in. The
+# walker only reports what a name resolves to (type, module, path); the gate
+# enforces which of those it trusts (powershell-tree.ts).
 $PSModuleAutoLoadingPreference = 'None'
 foreach ($module in 'Microsoft.PowerShell.Management', 'Microsoft.PowerShell.Utility', 'Microsoft.PowerShell.Security') {
 	$manifest = "$PSHOME/Modules/$module"

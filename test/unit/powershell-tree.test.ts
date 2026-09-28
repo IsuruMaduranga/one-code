@@ -170,8 +170,23 @@ describe.skipIf(!HAVE_POWERSHELL)("the read-only verdict reads PowerShell's bind
 
 	it("allows a switch set to $true or $false, and nothing else", async () => {
 		expect((await reads("Get-ChildItem -Recurse:$false src")).ok).toBe(true);
+		expect((await reads("Get-ChildItem -Rec:$false src")).ok).toBe(true);
 		expect((await reads("Get-ChildItem -Recurse:$true src")).ok).toBe(true);
 		expect((await reads("Get-ChildItem -Recurse:$x src")).ok).toBe(false);
+		expect(await edits("Remove-Item src/a.txt -Confirm:$false")).toEqual({ ok: true });
+	});
+
+	it("still names-checks a switch the binder drops for being $false", async () => {
+		// PowerShell's binder leaves `-X:$false` out of its bindings, so the
+		// spelling itself must be one of the cmdlet's switches.
+		expect(await reads("Get-ChildItem -FollowSymlink:$false src")).toMatchObject({ ok: false, reason: expect.stringMatching(/FollowSymlink/) });
+		expect((await reads("Get-Content -Wait:$false src/a.txt")).ok).toBe(false);
+	});
+
+	it.skipIf(process.platform !== "win32")("clears findstr and where.exe with their switches when they are Windows' own", async () => {
+		expect(await reads("findstr /i /n TODO src\\a.txt")).toEqual({ ok: true });
+		expect(await reads("where.exe /q git")).toEqual({ ok: true });
+		expect((await reads("findstr /s TODO *.txt")).ok).toBe(false);
 	});
 
 	it("allows only an expression over $_ in a script block", async () => {

@@ -46,6 +46,11 @@ function pathUnvouchable(value: string): boolean {
 	return false;
 }
 
+/** Whether a PowerShell path holds a wildcard (`*`, `?`, `[…]`), which `-Path` expands. */
+export function hasPowerShellWildcard(value: string): boolean {
+	return /[*?[]/.test(value);
+}
+
 /** An absolute path by Windows or POSIX spelling: `C:\x`, `C:/x`, `/x`, `\x`. */
 function isAbsoluteSpelling(value: string): boolean {
 	return /^[A-Za-z]:/.test(value) || value.startsWith("/") || value.startsWith("\\");
@@ -134,7 +139,7 @@ function wildcardMatcher(pattern: string): ((name: string) => boolean) | undefin
 function wildcardTargets(absolute: string): string[] | undefined {
 	const dir = dirname(absolute);
 	const matches = wildcardMatcher(basename(absolute));
-	if (/[*?[]/.test(dir) || !matches) return undefined;
+	if (hasPowerShellWildcard(dir) || !matches) return undefined;
 	let entries: string[];
 	try {
 		entries = readdirSync(dir);
@@ -160,7 +165,7 @@ export function powershellPathProblem(value: string, opts: PowerShellPathOptions
 	const absolute = powershellPathAbsolute(value, opts);
 	if (absolute === undefined) return outside;
 	// The value's own wildcard, not one in the working directory's name.
-	const targets = /[*?[]/.test(value) ? wildcardTargets(absolute) : [absolute];
+	const targets = hasPowerShellWildcard(value) ? wildcardTargets(absolute) : [absolute];
 	if (targets === undefined) return outside;
 	for (const target of targets) {
 		const resolved = resolveForContainment(target);

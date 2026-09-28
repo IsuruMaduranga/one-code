@@ -100,7 +100,10 @@ export const READ_CMDLETS: Readonly<Record<string, CmdletSpec>> = Object.freeze(
 	"format-wide": { switches: [...FORMAT_SWITCHES, "AutoSize"], values: ["Property", "Column", "GroupBy", "View"], tail: true },
 	"format-custom": { switches: [...FORMAT_SWITCHES], values: ["Property", "Depth", "GroupBy", "View"], tail: true },
 	// A script block that reads `$_` and compares; `-MemberName` is left out:
-	// `ForEach-Object Delete` calls the input's Delete() method.
+	// `ForEach-Object Delete` calls the input's Delete() method. Their safety
+	// rests on powershell-tree.ts `checkScriptBlock`, which every
+	// `scriptBlocks` parameter goes through: a new parameter here that takes
+	// code or names a member must be one it checks.
 	"where-object": {
 		switches: [
 			"EQ", "NE", "GT", "GE", "LT", "LE", "Like", "NotLike", "Match", "NotMatch", "Contains", "NotContains", "In", "NotIn",
@@ -175,7 +178,16 @@ export const TRUSTED_MODULES = new Set([
 	"microsoft.powershell.security",
 ]);
 
-/** Whether `parameter` may appear on `spec` with a value (true), alone (false), or not at all (undefined). */
+/**
+ * Whether `spelled` (as typed, without its dash) names one of `spec`'s
+ * switches by PowerShell's rule: the whole name or a prefix of it.
+ */
+export function isSwitchSpelling(spec: CmdletSpec, spelled: string): boolean {
+	const lower = spelled.toLowerCase();
+	return lower.length > 0 && [...(spec.switches ?? []), ...COMMON_SWITCHES].some((name) => name.toLowerCase().startsWith(lower));
+}
+
+/** How `parameter` may appear on `spec`: as a path, a script block, a switch or a value; undefined when not at all. */
 export function parameterKind(spec: CmdletSpec, parameter: string): "path" | "switch" | "value" | "scriptBlock" | undefined {
 	const has = (list: readonly string[] | undefined) => list?.some((name) => name.toLowerCase() === parameter.toLowerCase()) ?? false;
 	if (has(spec.paths)) return "path";

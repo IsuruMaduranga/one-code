@@ -32,6 +32,7 @@ import type { PowerShellAstNode, PowerShellParse } from "../lib/powershell-parse
 import {
 	applicationArgument,
 	type CmdletSpec,
+	isSwitchSpelling,
 	parameterKind,
 	READ_APPLICATIONS,
 	READ_CMDLETS,
@@ -40,7 +41,8 @@ import {
 	WRITE_CMDLETS,
 	WRITE_TAILS,
 } from "./powershell-cmdlets.ts";
-import { powershellPathAbsolute, powershellPathProblem } from "./powershell-paths.ts";
+import { hasPowerShellWildcard, powershellPathAbsolute, powershellPathProblem } from "./powershell-paths.ts";
+import { comparablePath, system32Path } from "../lib/paths.ts";
 
 export interface PowerShellTreeOptions {
 	/** The working directory the command runs in. */
@@ -271,6 +273,10 @@ function checkCommand(tree: Tree, i: number, specFor: SpecFor, applications: boo
 	for (const element of elements.slice(1)) checkRedirection(tree, element);
 
 	if (node.commandType === "Application" && applications && READ_APPLICATIONS[shown.toLowerCase()]) {
+		// The program PowerShell will run, not the name typed: a `findstr.exe`
+		// earlier on PATH than Windows' own is some other program.
+		const expected = system32Path(shown.toLowerCase().endsWith(".exe") ? shown : `${shown}.exe`);
+		if (!node.resolvedName || comparablePath(node.resolvedName) !== comparablePath(expected)) refuse(`\`${shown}\` resolves to ${node.resolvedName ?? "no program"}, not Windows' own`);
 		const paths: string[] = [];
 		for (const element of elements.slice(1)) {
 			if (nodes[element].type.endsWith("RedirectionAst")) continue;
@@ -317,14 +323,17 @@ function checkCommand(tree: Tree, i: number, specFor: SpecFor, applications: boo
 		if (values === undefined) refuse(`-${binding.parameter} given a value computed at run time`);
 		if (kind === "path") paths.push(...values);
 	}
-	// A parameter given `$false` binds nothing (the binder drops it, as
-	// PowerShell does: the switch is off); its argument is still a constant.
+	// A switch given `$false` binds nothing (the binder drops it, as
+	// PowerShell does: the switch is off), so its name was never checked
+	// against the table; it must still spell one of the cmdlet's switches.
 	for (const element of elements.slice(1)) {
 		if (nodes[element].type !== "CommandParameterAst") continue;
 		tree.approved.add(element);
 		for (const argument of children[element]) {
 			const value = nodes[argument];
-			if (!tree.approved.has(argument) && value.type === "VariableExpressionAst" && (value.name ?? "").toLowerCase() === "false") tree.approved.add(argument);
+			if (tree.approved.has(argument) || value.type !== "VariableExpressionAst" || (value.name ?? "").toLowerCase() !== "false") continue;
+			if (!isSwitchSpelling(spec, nodes[element].name ?? "")) refuse(`-${nodes[element].name}:$false is not a switch this check clears for ${node.resolvedName}`);
+			tree.approved.add(argument);
 		}
 	}
 	return { name, paths, bound };
@@ -444,7 +453,7 @@ export function powershellTreeReadOnly(parse: PowerShellParse, opts: PowerShellT
 				if (position > 0 && current.name === "select-string") checkSelectStringSources(checked, opts, roots);
 				if (current.name === "get-childitem" && (current.bound.has("recurse") || current.bound.has("depth"))) {
 					for (const directory of current.paths.length > 0 ? current.paths : ["."]) {
-						const absolute = /[*?[]/.test(directory) ? undefined : powershellPathAbsolute(directory, opts);
+						const absolute = hasPowerShellWildcard(directory) ? undefined : powershellPathAbsolute(directory, opts);
 						const resolved = absolute === undefined ? undefined : resolveForContainment(absolute);
 						if (resolved === undefined || linkInTree(resolved)) refuse("a recursive Get-ChildItem over a tree with a link in it, which Windows PowerShell 5.1 follows");
 					}
@@ -475,7 +484,7 @@ function checkSelectStringSources(upstream: CheckedCommand[], opts: PowerShellTr
 		}
 		const directories = source.paths.length > 0 ? source.paths : ["."];
 		for (const directory of directories) {
-			if (/[*?[]/.test(directory)) continue; // a wildcard lists its matches, each judged as a path already
+			if (hasPowerShellWildcard(directory)) continue; // a wildcard lists its matches, each judged as a path already
 			const absolute = powershellPathAbsolute(directory, opts);
 			const resolved = absolute === undefined ? undefined : resolveForContainment(absolute);
 			if (resolved === undefined || !entriesInside(resolved, roots)) refuse("Select-String over a directory with an entry outside the working directory");
@@ -515,7 +524,7 @@ export function powershellTreeContainedEdits(parse: PowerShellParse, opts: Power
  * and a recursive removal must not reach a link.
  */
 function checkWriteTarget(value: string, removes: boolean, recurses: boolean, opts: PowerShellTreeOptions, writable: string[]): void {
-	if (/[*?[\]]/.test(value)) refuse(`writes to ${value}, a wildcard whose matches this check does not judge`);
+	if (hasPowerShellWildcard(value)) refuse(`writes to ${value}, a wildcard whose matches this check does not judge`);
 	const absolute = powershellPathAbsolute(value, opts);
 	if (absolute === undefined) refuse(`writes to ${value}, a path this check cannot resolve`);
 	const resolved = resolveForContainment(absolute);
