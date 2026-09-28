@@ -65,6 +65,7 @@ import { powershellReadOnly } from "./powershell-rules.ts";
 import { isShellTool } from "./matcher.ts";
 import { gitStatusOutput } from "../lib/git.ts";
 import { gitStatusMeta, gitStatusMetaArgs, reachesIgnoredFiles, wantsGitStatusMeta } from "../auto-mode/git-status-meta.ts";
+import { actionResolvedPaths } from "../auto-mode/resolved-paths-meta.ts";
 import { projectMemoryDir } from "../lib/memory.ts";
 import { sessionResultsDir } from "../lib/persisted-output.ts";
 import { privateSessionScratchpadDir } from "../lib/scratchpad.ts";
@@ -619,7 +620,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		 * aborted). All default to the parent's own values, so the main path is
 		 * unchanged.
 		 */
-		opts?: { cwd?: string; appendEntry?: TranscriptEntry; signal?: AbortSignal; powershellParse?: PowerShellParse },
+		opts?: { cwd?: string; appendEntries?: TranscriptEntry[]; signal?: AbortSignal; powershellParse?: PowerShellParse },
 	) => {
 		const cwd = opts?.cwd ?? ctx.cwd;
 		autoConfig ??= loadAutoModeConfig(os.homedir());
@@ -670,7 +671,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		const verdict = await classify(
 			{
 				toolName,
-				transcript: opts?.appendEntry ? [...transcript, opts.appendEntry] : [...transcript],
+				transcript: [...transcript, ...(opts?.appendEntries ?? [])],
 				userMessages: [...userMessages],
 				claudeMd: instructionsFor(cwd),
 				username: classifierUsername,
@@ -1105,6 +1106,14 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				const gitStatus = porcelain === undefined ? undefined : gitStatusMeta(porcelain);
 				if (gitStatus) transcript.push({ kind: "meta", gitStatus });
 			}
+			// A path the call names inside the working directory that a symlink
+			// takes outside it: the classifier reads text, so it is told where the
+			// path lands (resolved-paths-meta.ts).
+			const resolvedPaths = actionResolvedPaths(
+				{ tool: normalizedTool, command: recordedCommand, subject: isPathSubjectTool(normalizedTool) ? subject : undefined, powershellParse },
+				{ cwd: callCwd, home: os.homedir(), roots: [callCwd, ...workspaceDirs] },
+			);
+			if (resolvedPaths) transcript.push({ kind: "meta", resolvedPaths });
 			transcript.push({ kind: "tool", tool: normalizedTool, input: recordedInput });
 			capTranscript();
 		}
@@ -1460,14 +1469,17 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// user, and child work must not continue through it unattended.
 		if (!floorReason && result.decision === "classify" && !pauseTracker.isPaused()) {
 			if (!ctx) return { block: true, reason: DENIED_NON_INTERACTIVE };
-			const appendEntry: TranscriptEntry = {
-				kind: "tool",
-				tool: normalizedTool,
-				input: isShellTool(normalizedTool) ? { command: subject } : input,
-			};
+			const resolvedPaths = actionResolvedPaths(
+				{ tool: normalizedTool, command: isShellTool(normalizedTool) || normalizedTool === "monitor" ? subject : undefined, subject: isPathSubjectTool(normalizedTool) ? subject : undefined, powershellParse },
+				{ cwd, home: os.homedir(), roots: [cwd, ...workspaceDirs] },
+			);
+			const appendEntries: TranscriptEntry[] = [
+				...(resolvedPaths ? [{ kind: "meta" as const, resolvedPaths }] : []),
+				{ kind: "tool", tool: normalizedTool, input: isShellTool(normalizedTool) ? { command: subject } : input },
+			];
 			const outcome = await runClassifier(toolName, subject, ctx, result.cause !== "protected-path", {
 				cwd,
-				appendEntry,
+				appendEntries,
 				// The child's own turn signal, so an aborted child turn cancels the
 				// classifier call; a fresh (never-aborted) signal only if the child
 				// didn't supply one, so classify() still gets the signal it expects.
