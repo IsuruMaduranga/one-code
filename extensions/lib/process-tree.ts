@@ -44,6 +44,16 @@ export const EXIT_STDIO_GRACE_MS = 200;
 export const EXIT_STDIO_MAX_MS = 2_000;
 
 /**
+ * Unref a child process, one of its stdio streams or a timer, so it never
+ * holds the event loop open on its own (a finished one-shot run can exit);
+ * a caller awaiting it holds its own ref. Child pipes are sockets at run
+ * time and carry `unref()` even though their stream types do not declare it.
+ */
+export function unrefHandle(handle: unknown): void {
+	(handle as { unref?: () => void } | null | undefined)?.unref?.();
+}
+
+/**
  * `detached` everywhere but Windows, where process groups do not exist — except
  * for a child that must outlive an exiting parent (a fire-and-forget hook),
  * which is what `detached: true` means on Windows (Node's documented use); the

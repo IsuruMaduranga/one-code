@@ -35,6 +35,7 @@ so nothing surprises you.
 | Permission shortcuts by model | One set for every model; auto mode needs a Sonnet- or Opus-class model. | Claude Code's shortcuts for frontier and workhorse models. Cheap and tiny models, which Claude Code can't run in auto mode, get stricter checks. |
 | Deleting files in auto mode | An in-project `rm` runs without the classifier; `git reset --hard` is classified. | The same with frontier and workhorse models. With cheap and tiny models, every delete goes to the classifier. |
 | Reading outside the working directories in auto mode | Runs without the classifier after a one-time question. | The same with frontier and workhorse models, except credential files, which are classified. With cheap and tiny models, the classifier decides. |
+| A path in the project that is a symlink to somewhere outside it, in auto mode | The classifier judges the command as written. | The classifier is also told where the path really leads, so a write to `notes.txt` that lands in `~/.ssh/authorized_keys` is judged as that write. |
 | Approving a call auto mode denied | `/permissions` tells the model permission was granted; the retry is judged again. | The approval lets that exact call run once without the classifier. |
 | Auto-mode built-in rules | A section's built-in rules can be switched off. | Always in effect; your rules only add to them. |
 | Workspace directories | Reads, edits in accept-edits mode, and auto-mode writes. | The same, except that credential files there still prompt. With cheap and tiny models, auto-mode writes there go to the classifier. |
@@ -117,10 +118,11 @@ every model. The content is the same; only the placement differs.
   default on Windows, `CLAUDE_CODE_USE_POWERSHELL_TOOL=0` turns it off), and
   your `PowerShell(...)` rules, `CLAUDE_CODE_GIT_BASH_PATH`, and per-hook
   `shell` field work unchanged. The PowerShell tool's description is Claude
-  Code's own text. What differs: One Code has no PowerShell command parser
-  yet, so in auto mode every PowerShell command that isn't on Claude Code's
-  read-only cmdlet list goes to the classifier (Claude Code auto-approves
-  more in-project work). Verified on CI runners and through a `pwsh` on
+  Code's own text. PowerShell commands are judged from PowerShell's own
+  parse, as in Claude Code. What differs: native commands run from
+  PowerShell (`git status`, `npm test`) always go to the classifier in auto
+  mode, where Claude Code approves some of them itself. Read-only uses of
+  Windows' own `findstr` and `where.exe` are the exceptions. Verified on CI runners and through a `pwsh` on
   macOS; a real Windows desktop has not been driven end to end yet. See
   [Windows](windows.md).
 

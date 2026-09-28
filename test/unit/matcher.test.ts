@@ -22,6 +22,7 @@ import {
 	unescapeLiteral,
 } from "../../extensions/permissions/matcher.ts";
 import { isProtectedPath } from "../../extensions/permissions/protected-paths.ts";
+import { HAVE_POWERSHELL, psParse, POWERSHELL_TEST_TIMEOUT } from "./helpers/powershell-parse.ts";
 
 const CWD = "/home/user/project";
 
@@ -440,9 +441,11 @@ describe("decide", () => {
 			expect(decide({ ...base, toolName: "bash", subject: "ls -la", deny: rules(["Bash(ls:*)"]) })).toMatchObject({ decision: "deny", cause: "rule" });
 		});
 
-		it("covers PowerShell's read-only cmdlets", () => {
-			expect(decide({ ...base, toolName: "powershell", subject: "Get-ChildItem" })).toMatchObject({ decision: "allow", cause: "read-only" });
-			expect(decide({ ...base, toolName: "powershell", subject: "Remove-Item a.txt" }).decision).toBe("ask");
+		it.skipIf(!HAVE_POWERSHELL)("covers PowerShell's read-only cmdlets, judged from PowerShell's own parse", { timeout: POWERSHELL_TEST_TIMEOUT }, async () => {
+			const powershell = async (subject: string) => decide({ ...base, toolName: "powershell", subject, powershellParse: await psParse(subject) });
+			expect(await powershell("Get-ChildItem")).toMatchObject({ decision: "allow", cause: "read-only" });
+			expect((await powershell("Remove-Item a.txt")).decision).toBe("ask");
+			expect(decide({ ...base, toolName: "powershell", subject: "Get-ChildItem" }).decision).toBe("ask"); // unparsed
 		});
 	});
 

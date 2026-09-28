@@ -19,6 +19,7 @@ import { ccToolName } from "../hooks/matcher.ts";
 // The shell tools render as `{"<Tool>":"<command>"}` (lib/shell-tools.ts is the one list).
 import { SHELL_TOOLS } from "../lib/shell-tools.ts";
 import type { GitStatusMeta } from "./git-status-meta.ts";
+import { RESOLVED_PATHS_NOTE, type ResolvedPathFact } from "./resolved-paths-meta.ts";
 
 export { ccToolName };
 
@@ -40,7 +41,13 @@ export type TranscriptEntry =
 	 * destroy uncommitted work (auto-mode/git-status-meta.ts): the classifier
 	 * reads the tree's real state, not the model's account of it.
 	 */
-	| { kind: "meta"; gitStatus: GitStatusMeta };
+	| { kind: "meta"; gitStatus: GitStatusMeta }
+	/**
+	 * Harness ground truth, directly above an action that names a path inside
+	 * the working directory which resolves outside it through a symlink
+	 * (auto-mode/resolved-paths-meta.ts). Not a Claude Code line.
+	 */
+	| { kind: "resolved-paths"; resolvedPaths: ResolvedPathFact[] };
 
 /** Truncate one field so a single huge argument cannot dominate the transcript. */
 export function clip(value: string, max: number): string {
@@ -65,6 +72,7 @@ function clipInput(input: Record<string, unknown>, max: number): Record<string, 
 function renderEntry(entry: TranscriptEntry, maxField: number): string {
 	if (entry.kind === "user") return JSON.stringify({ user: clip(entry.text, maxField) });
 	if (entry.kind === "meta") return JSON.stringify({ meta: { gitStatus: entry.gitStatus } });
+	if (entry.kind === "resolved-paths") return JSON.stringify({ meta: { resolvedPaths: entry.resolvedPaths, note: RESOLVED_PATHS_NOTE } });
 	if (entry.kind === "denied") {
 		return JSON.stringify({
 			denied_by_permission_rule: { tool: ccToolName(entry.tool), attempted: clip(entry.subject, maxField), rule: entry.rule },
@@ -103,7 +111,8 @@ export interface RenderOptions {
 /**
  * Render the ordered entries into a `<transcript>…</transcript>` block. When the
  * rendered lines exceed `maxChars`, the oldest are dropped and a marker records
- * it — the action under review (the last entry) is always kept, whole. The full user
+ * it — the action under review (the last entry) is always kept, whole, with the
+ * ground-truth lines directly above it. The full user
  * messages are carried separately for intent verification, so dropping old lines
  * here never weakens that check.
  */
@@ -112,14 +121,18 @@ export function renderTranscript(entries: TranscriptEntry[], options: RenderOpti
 	const maxChars = options.maxChars ?? 60_000;
 	const lines = entries.map((entry, i) => renderEntry(entry, i === entries.length - 1 ? Number.POSITIVE_INFINITY : maxField));
 
-	// Keep the newest lines that fit the budget, walking from the end in one pass
-	// (the last line — the action under review — is always kept). +1 per line for
-	// the joining "\n".
+	// Keep the newest lines that fit the budget, walking from the end in one pass.
+	// The action under review is always kept, with the harness's ground-truth
+	// lines directly above it (gitStatus, resolvedPaths): they describe that
+	// action, and a large action must not push them out. +1 per line for the
+	// joining "\n".
+	let attached = entries.length - 1;
+	while (attached > 0 && (entries[attached - 1].kind === "meta" || entries[attached - 1].kind === "resolved-paths")) attached--;
 	let firstKept = lines.length;
 	let running = 0;
 	for (let i = lines.length - 1; i >= 0; i--) {
 		running += lines[i].length + 1;
-		if (i < lines.length - 1 && running > maxChars) break;
+		if (i < attached && running > maxChars) break;
 		firstKept = i;
 	}
 	const kept = lines.slice(firstKept);

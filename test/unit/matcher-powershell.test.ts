@@ -20,6 +20,7 @@ import {
 	toolTier,
 } from "../../extensions/permissions/matcher.ts";
 import { sessionGrant } from "../../extensions/permissions/session-grant.ts";
+import { HAVE_POWERSHELL, psParse, POWERSHELL_TEST_TIMEOUT } from "./helpers/powershell-parse.ts";
 
 const cwd = "/proj";
 const rule = (raw: string) => parseRule(raw)!;
@@ -90,10 +91,15 @@ describe("decide()", () => {
 		}
 	});
 
-	it("plan mode allows read-only cmdlets and denies the rest", () => {
-		expect(decide({ ...base, subject: "Get-ChildItem -Recurse src", mode: "plan" })).toMatchObject({ decision: "allow", cause: "plan-readonly" });
-		expect(decide({ ...base, subject: "git status", mode: "plan" })).toMatchObject({ decision: "deny", cause: "plan-mode" });
-		expect(decide({ ...base, subject: "Get-Content C:\\secrets.txt", mode: "plan" })).toMatchObject({ decision: "deny", cause: "plan-mode" });
+	it.skipIf(!HAVE_POWERSHELL)("plan mode allows read-only cmdlets and denies the rest", { timeout: POWERSHELL_TEST_TIMEOUT }, async () => {
+		const plan = async (subject: string) => decide({ ...base, subject, mode: "plan", powershellParse: await psParse(subject) });
+		expect(await plan("Get-ChildItem -Recurse src")).toMatchObject({ decision: "allow", cause: "plan-readonly" });
+		expect(await plan("git status")).toMatchObject({ decision: "deny", cause: "plan-mode" });
+		expect(await plan("Get-Content C:\\secrets.txt")).toMatchObject({ decision: "deny", cause: "plan-mode" });
+	});
+
+	it("plan mode denies even a read-only line PowerShell has not parsed", () => {
+		expect(decide({ ...base, subject: "Get-ChildItem -Recurse src", mode: "plan" })).toMatchObject({ decision: "deny", cause: "plan-mode" });
 	});
 
 	it("auto mode classifies a PowerShell call, suspends broad allow rules, honours narrow ones", () => {
