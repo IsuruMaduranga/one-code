@@ -140,26 +140,56 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
 			if ($info -isnot [System.Management.Automation.CmdletInfo]) { continue }
 			if ($null -eq $binderType) { $nodes[$i].bindingUnavailable = $true; continue }
 			try {
-				$bound = $binderType::BindCommand($command, $true)
+				# Windows PowerShell 5.1's binder does not follow an alias to its
+				# cmdlet, so an aliased command is bound as a copy spelled with the
+				# cmdlet's name, and each bound value is mapped back by extent.
+				$bindAst = $command
+				$origin = 0
+				$nameEnd = 0
+				$delta = 0
+				if ($nodes[$i].alias) {
+					$nameExtent = $command.CommandElements[0].Extent
+					$relative = $nameExtent.StartOffset - $command.Extent.StartOffset
+					$text = $command.Extent.Text
+					$copy = $text.Substring(0, $relative) + $info.Name + $text.Substring($relative + $nameExtent.Text.Length)
+					$bindAst = [System.Management.Automation.Language.Parser]::ParseInput($copy, [ref]$null, [ref]$null).Find({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $false)
+					$origin = $command.Extent.StartOffset
+					$nameEnd = $relative + $info.Name.Length
+					$delta = $info.Name.Length - $nameExtent.Text.Length
+				}
+				# The node of the original command a bound value stands for, or -1:
+				# the value itself, or the node with the same (mapped) extent and type.
+				# The binder builds values of its own for a remaining-arguments
+				# parameter (Write-Output a b: an array of copies).
+				$original = {
+					param($ast)
+					if ([object]::ReferenceEquals($bindAst, $command) -and $index.ContainsKey($ast)) { return $index[$ast] }
+					$start = $ast.Extent.StartOffset
+					$end = $ast.Extent.EndOffset
+					if (-not [object]::ReferenceEquals($bindAst, $command)) {
+						if ($start -ge $nameEnd) { $start -= $delta }
+						if ($end -ge $nameEnd) { $end -= $delta }
+						$start += $origin
+						$end += $origin
+					}
+					$type = $ast.GetType().Name
+					for ($j = $i + 1; $j -lt $nodes.Count -and $nodes[$j].start -lt $command.Extent.EndOffset; $j++) {
+						if ($nodes[$j].start -eq $start -and $nodes[$j].end -eq $end -and $nodes[$j].type -eq $type) { return $j }
+					}
+					return -1
+				}
+				$bound = $binderType::BindCommand($bindAst, $true)
 				$nodes[$i].bindings = @(foreach ($key in $bound.BoundParameters.Keys) {
 					$result = $bound.BoundParameters[$key]
 					$record = @{ parameter = [string]$key; value = -1 }
 					if ($null -ne $result.Value) {
-						if ($index.ContainsKey($result.Value)) {
-							$record.value = $index[$result.Value]
-						} else {
-							# A remaining-arguments parameter (Write-Output a b) is bound to a
-							# synthetic array of copies; map each copy back to the argument
-							# with the same extent and type. -2 marks a value not in the tree.
+						$record.value = & $original $result.Value
+						# -2 marks a value the binder built: its elements, if an array,
+						# are mapped one by one.
+						if ($record.value -lt 0) {
 							$record.value = -2
 							if ($result.Value -is [System.Management.Automation.Language.ArrayLiteralAst]) {
-								$record.elements = @(foreach ($element in $result.Value.Elements) {
-									$match = -1
-									foreach ($argument in $command.CommandElements) {
-										if ($argument.Extent.StartOffset -eq $element.Extent.StartOffset -and $argument.Extent.EndOffset -eq $element.Extent.EndOffset -and $argument.GetType() -eq $element.GetType() -and $index.ContainsKey($argument)) { $match = $index[$argument] }
-									}
-									$match
-								})
+								$record.elements = @(foreach ($element in $result.Value.Elements) { & $original $element })
 							}
 						}
 					}

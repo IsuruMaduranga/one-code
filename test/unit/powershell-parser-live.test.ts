@@ -134,6 +134,17 @@ describe.skipIf(EXECUTABLES.length === 0)("PowerShell parse server (live)", () =
 				const [gci, sls, unknown] = ofType(result, "CommandAst");
 				expect(gci).toMatchObject({ alias: true, commandType: "Cmdlet", resolvedName: "Get-ChildItem", module: "Microsoft.PowerShell.Management" });
 				expect(gci.bindings?.map((b) => b.parameter).sort()).toEqual(["Path", "Recurse"]);
+				// An alias is bound as a copy spelled with its cmdlet (5.1's binder does
+				// not follow aliases); its values still point at this tree's nodes.
+				const path = gci.bindings?.find((b) => b.parameter === "Path");
+				expect(result.nodes[path?.value ?? -1]).toMatchObject({ type: "StringConstantExpressionAst", value: "src" });
+				const aliased = await parse("ls -Path a,b; % { $_ } ; echo x 'y z'");
+				const [ls, foreach, echo] = ofType(aliased, "CommandAst");
+				if (ls.alias) expect(aliased.nodes[ls.bindings?.find((b) => b.parameter === "Path")?.value ?? -1].type).toBe("ArrayLiteralAst");
+				expect(aliased.nodes[foreach.bindings?.find((b) => b.parameter === "Process")?.value ?? -1].type).toBe("ScriptBlockExpressionAst");
+				const collectedEcho = echo.bindings?.find((b) => b.parameter === "InputObject");
+				expect(collectedEcho?.value).toBe(-2);
+				expect(collectedEcho?.elements?.map((i) => aliased.nodes[i]?.value)).toEqual(["x", "y z"]);
 				expect(sls.bindings?.map((b) => b.parameter).sort()).toEqual(["CaseSensitive", "Pattern"]);
 				expect(unknown.commandType).toBeUndefined();
 				const surplus = ofType(await parse("Get-Content a b"), "CommandAst")[0];
