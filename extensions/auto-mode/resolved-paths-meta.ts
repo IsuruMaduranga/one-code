@@ -92,7 +92,10 @@ export interface ResolvedPathsOptions {
  */
 export function resolvedPathFacts(words: readonly string[], opts: ResolvedPathsOptions): ResolvedPathFact[] | undefined {
 	const roots = opts.roots.map((root) => resolveForContainment(root) ?? root);
-	const cwd = resolveForContainment(opts.cwd) ?? opts.cwd;
+	// A word may spell a root through the alias it was given as (`/var/…` for
+	// `/private/var/…`): it names a path inside when it sits under either spelling.
+	const spelledRoots = [...opts.roots, ...roots];
+	const { cwd } = opts;
 	const facts: ResolvedPathFact[] = [];
 	const seen = new Set<string>();
 	for (const word of words) {
@@ -103,7 +106,7 @@ export function resolvedPathFacts(words: readonly string[], opts: ResolvedPathsO
 			opts.spelling === "bash"
 				? toAbsoluteBash(cwd, word, opts.home)
 				: toAbsolute(cwd, opts.spelling === "powershell" ? powershellSeparators(word) : word, opts.home);
-		if (!roots.some((root) => isWithin(root, lexical))) continue;
+		if (!spelledRoots.some((root) => isWithin(root, lexical))) continue;
 		const resolvesTo = resolveThroughLinks(lexical);
 		if (resolvesTo === undefined || roots.some((root) => isWithin(root, comparablePath(resolvesTo)))) continue;
 		facts.push({ path: word, resolvesTo });

@@ -38,6 +38,16 @@ describe("resolvedPathFacts", () => {
 		]);
 	});
 
+	it("reports a path spelled through the alias the working directory was given as", () => {
+		const alias = join(root, "alias");
+		symlinkSync(cwd, alias);
+		const aliased = { cwd: alias, home: root, roots: [alias] };
+		expect(resolvedPathFacts([join(alias, " leading.txt"), " leading.txt"], aliased)).toEqual([
+			{ path: join(alias, " leading.txt"), resolvesTo: secret },
+			{ path: " leading.txt", resolvesTo: secret },
+		]);
+	});
+
 	it("reports nothing for paths that stay inside, lead into a workspace directory, or are outside as spelled", () => {
 		expect(resolvedPathFacts(["src/a.txt", "inner/a.txt", "ws/x.txt", "missing.txt", "-Value", secret, "../outside/secret.txt", ""], opts)).toBeUndefined();
 	});
