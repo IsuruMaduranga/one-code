@@ -20,7 +20,7 @@ import {
 	toolTier,
 } from "../../extensions/permissions/matcher.ts";
 import { sessionGrant } from "../../extensions/permissions/session-grant.ts";
-import { HAVE_POWERSHELL, psParse } from "./helpers/powershell-parse.ts";
+import { HAVE_POWERSHELL, psParse, POWERSHELL_TEST_TIMEOUT } from "./helpers/powershell-parse.ts";
 
 const cwd = "/proj";
 const rule = (raw: string) => parseRule(raw)!;
@@ -91,7 +91,7 @@ describe("decide()", () => {
 		}
 	});
 
-	it.skipIf(!HAVE_POWERSHELL)("plan mode allows read-only cmdlets and denies the rest", async () => {
+	it.skipIf(!HAVE_POWERSHELL)("plan mode allows read-only cmdlets and denies the rest", { timeout: POWERSHELL_TEST_TIMEOUT }, async () => {
 		const plan = async (subject: string) => decide({ ...base, subject, mode: "plan", powershellParse: await psParse(subject) });
 		expect(await plan("Get-ChildItem -Recurse src")).toMatchObject({ decision: "allow", cause: "plan-readonly" });
 		expect(await plan("git status")).toMatchObject({ decision: "deny", cause: "plan-mode" });

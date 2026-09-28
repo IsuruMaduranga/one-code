@@ -18,7 +18,7 @@ import permissionsExtension from "../../extensions/permissions/index.ts";
 import { powershellInjectionSyntax } from "../../extensions/permissions/powershell-rules.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
-import { HAVE_POWERSHELL, psReadOnly } from "./helpers/powershell-parse.ts";
+import { HAVE_POWERSHELL, psReadOnly, POWERSHELL_TEST_TIMEOUT } from "./helpers/powershell-parse.ts";
 
 let root: string;
 let cwd: string;
@@ -76,7 +76,7 @@ describe("H1: one target per file-tool call", () => {
 });
 
 describe("H2: PowerShell grouping expressions run their own command", () => {
-	it.skipIf(!HAVE_POWERSHELL)("is not read-only and is not covered by a wildcard allow rule", async () => {
+	it.skipIf(!HAVE_POWERSHELL)("is not read-only and is not covered by a wildcard allow rule", { timeout: POWERSHELL_TEST_TIMEOUT }, async () => {
 		for (const command of [
 			"Write-Output (Set-Content audit-ps.txt nested-write)",
 			"Get-Content -Path (Remove-Item x)",
@@ -90,12 +90,12 @@ describe("H2: PowerShell grouping expressions run their own command", () => {
 		}
 	});
 
-	it.skipIf(!HAVE_POWERSHELL)("still reads a # at the start of a word as a comment", async () => {
+	it.skipIf(!HAVE_POWERSHELL)("still reads a # at the start of a word as a comment", { timeout: POWERSHELL_TEST_TIMEOUT }, async () => {
 		expect(powershellInjectionSyntax("Get-ChildItem # (not run)")).toBeUndefined();
 		expect((await psReadOnly("Get-ChildItem #(x)", { cwd, home })).readOnly).toBe(true);
 	});
 
-	it.skipIf(!HAVE_POWERSHELL)("keeps quoted parentheses literal", async () => {
+	it.skipIf(!HAVE_POWERSHELL)("keeps quoted parentheses literal", { timeout: POWERSHELL_TEST_TIMEOUT }, async () => {
 		expect((await psReadOnly(`Get-ChildItem "Program Files (x86)"`, { cwd, home })).readOnly).toBe(true);
 		expect((await psReadOnly("Select-String -Pattern 'f(x)' -Path a.txt", { cwd, home })).readOnly).toBe(true);
 		expect(powershellInjectionSyntax(`Get-ChildItem "Program Files (x86)"`)).toBeUndefined();
@@ -204,7 +204,7 @@ describe("M2, M3: git reset --hard is never contained", () => {
 });
 
 describe("M4: PowerShell resolves relative paths before vouching for them", () => {
-	(HAVE_POWERSHELL ? posixOnly : it.skip)("refuses a relative name that is a symlink out of the project", async () => {
+	(HAVE_POWERSHELL ? posixOnly : it.skip)("refuses a relative name that is a symlink out of the project", { timeout: POWERSHELL_TEST_TIMEOUT }, async () => {
 		mkdirSync(join(root, "outside"));
 		writeFileSync(join(root, "outside", "data.txt"), "synthetic-outside-data\n");
 		symlinkSync(join(root, "outside", "data.txt"), join(cwd, "notes.txt"));
@@ -215,7 +215,7 @@ describe("M4: PowerShell resolves relative paths before vouching for them", () =
 		}
 	});
 
-	(HAVE_POWERSHELL ? posixOnly : it.skip)("judges the literal path of a name with brackets, however it is spelled (PR #24 review)", async () => {
+	(HAVE_POWERSHELL ? posixOnly : it.skip)("judges the literal path of a name with brackets, however it is spelled (PR #24 review)", { timeout: POWERSHELL_TEST_TIMEOUT }, async () => {
 		mkdirSync(join(root, "outside"), { recursive: true });
 		writeFileSync(join(root, "outside", "data.txt"), "synthetic-outside-data\n");
 		symlinkSync(join(root, "outside", "data.txt"), join(cwd, "n[1].txt"));
@@ -224,13 +224,13 @@ describe("M4: PowerShell resolves relative paths before vouching for them", () =
 		}
 	});
 
-	(HAVE_POWERSHELL ? posixOnly : it.skip)("refuses a relative link to an in-project credential file", async () => {
+	(HAVE_POWERSHELL ? posixOnly : it.skip)("refuses a relative link to an in-project credential file", { timeout: POWERSHELL_TEST_TIMEOUT }, async () => {
 		writeFileSync(join(cwd, ".env"), "TOKEN=x\n");
 		symlinkSync(join(cwd, ".env"), join(cwd, "notes.txt"));
 		expect((await psReadOnly("Get-Content notes.txt", { cwd, home }))).toEqual({ readOnly: false, reason: "a credential or secret path" });
 	});
 
-	it.skipIf(!HAVE_POWERSHELL)("keeps ordinary in-project reads read-only", async () => {
+	it.skipIf(!HAVE_POWERSHELL)("keeps ordinary in-project reads read-only", { timeout: POWERSHELL_TEST_TIMEOUT }, async () => {
 		mkdirSync(join(cwd, "src"));
 		writeFileSync(join(cwd, "src", "b.ts"), "b\n");
 		for (const command of ["Get-Content a.txt", "Get-ChildItem src", "Get-Content src\\b.ts", "Get-ChildItem *.txt", "Get-Content missing.txt"]) {
@@ -238,7 +238,7 @@ describe("M4: PowerShell resolves relative paths before vouching for them", () =
 		}
 	});
 
-	it.skipIf(!HAVE_POWERSHELL)("matches a wildcard leaf without backtracking (PR #15 review)", async () => {
+	it.skipIf(!HAVE_POWERSHELL)("matches a wildcard leaf without backtracking (PR #15 review)", { timeout: POWERSHELL_TEST_TIMEOUT }, async () => {
 		// A regex for this pattern backtracks polynomially against every entry.
 		const started = performance.now();
 		expect((await psReadOnly(`Get-Content ${"*a".repeat(30)}z`, { cwd, home })).readOnly).toBe(true);

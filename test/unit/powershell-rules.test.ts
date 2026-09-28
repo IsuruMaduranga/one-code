@@ -12,7 +12,7 @@ import {
 	powershellStatements,
 	statementCommand,
 } from "../../extensions/permissions/powershell-rules.ts";
-import { HAVE_POWERSHELL, psReadOnly, WINDOWS_ONLY_ALIAS } from "./helpers/powershell-parse.ts";
+import { HAVE_POWERSHELL, psReadOnly, WINDOWS_ONLY_ALIAS, POWERSHELL_TEST_TIMEOUT } from "./helpers/powershell-parse.ts";
 
 describe("canonicalCommandName", () => {
 	it("resolves Claude Code's aliases, case-insensitively", () => {
@@ -101,7 +101,7 @@ describe("powershellReadOnly without a parse", () => {
 	});
 });
 
-describe.skipIf(!HAVE_POWERSHELL)("powershellReadOnly", () => {
+describe.skipIf(!HAVE_POWERSHELL)("powershellReadOnly", { timeout: POWERSHELL_TEST_TIMEOUT }, () => {
 	it("clears Claude Code's read-only cmdlets on in-project paths", async () => {
 		expect((await psReadOnly("Get-ChildItem -Recurse src")).readOnly).toBe(true);
 		expect((await psReadOnly("Get-ChildItem; Get-Content package.json -TotalCount 5")).readOnly).toBe(true);
@@ -144,7 +144,7 @@ describe.skipIf(!HAVE_POWERSHELL)("powershellReadOnly", () => {
 	});
 });
 
-describe.skipIf(!HAVE_POWERSHELL)("powershellReadOnly pipeline cmdlets (One Code's addition to CC's list, 2026-09-19)", () => {
+describe.skipIf(!HAVE_POWERSHELL)("powershellReadOnly pipeline cmdlets (One Code's addition to CC's list, 2026-09-19)", { timeout: POWERSHELL_TEST_TIMEOUT }, () => {
 	it("a read-only line piped through pure transforms stays read-only", async () => {
 		for (const command of [
 			"Select-String -Pattern toolCall -Path .\\a.jsonl | Measure-Object | Select-Object -ExpandProperty Count",
@@ -178,7 +178,7 @@ describe.skipIf(!HAVE_POWERSHELL)("powershellReadOnly pipeline cmdlets (One Code
 	});
 });
 
-describe.skipIf(!HAVE_POWERSHELL)("powershellReadOnly with roots (absolute paths judged by containment, 2026-09-19)", () => {
+describe.skipIf(!HAVE_POWERSHELL)("powershellReadOnly with roots (absolute paths judged by containment, 2026-09-19)", { timeout: POWERSHELL_TEST_TIMEOUT }, () => {
 	const root = mkdtempSync(join(tmpdir(), "ps-ro-"));
 	const cwd = join(root, "project");
 	const sessions = join(root, "agent", "sessions", "C--project");

@@ -11,6 +11,9 @@ import { powershellReadOnly, type PowerShellReadOnlyOptions } from "../../../ext
 import { localPwsh } from "./local-pwsh.ts";
 
 export const LOCAL_POWERSHELL = localPwsh();
+
+/** Per-test timeout for tests that parse: the first parse in a file starts PowerShell, which a cold CI runner takes seconds to do. */
+export const POWERSHELL_TEST_TIMEOUT = 60_000;
 export const HAVE_POWERSHELL = LOCAL_POWERSHELL !== undefined;
 
 /**

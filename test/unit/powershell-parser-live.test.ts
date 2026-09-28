@@ -133,7 +133,9 @@ describe.skipIf(EXECUTABLES.length === 0)("PowerShell parse server (live)", () =
 				const result = await parse("gci -r src | Select-String TODO -Ca; NoSuchCommand-xyz -a");
 				const [gci, sls, unknown] = ofType(result, "CommandAst");
 				expect(gci).toMatchObject({ alias: true, commandType: "Cmdlet", resolvedName: "Get-ChildItem", module: "Microsoft.PowerShell.Management" });
-				expect(gci.bindings?.map((b) => b.parameter).sort()).toEqual(["Path", "Recurse"]);
+				const canonical = ofType(await parse("Get-ChildItem -Recurse src"), "CommandAst")[0];
+				expect(canonical.bindings?.map((b) => b.parameter).sort(), JSON.stringify(canonical)).toEqual(["Path", "Recurse"]);
+				expect(gci.bindings?.map((b) => b.parameter).sort(), JSON.stringify(gci)).toEqual(["Path", "Recurse"]);
 				// An alias is bound as a copy spelled with its cmdlet (5.1's binder does
 				// not follow aliases); its values still point at this tree's nodes.
 				const path = gci.bindings?.find((b) => b.parameter === "Path");

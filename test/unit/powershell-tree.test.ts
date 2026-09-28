@@ -13,7 +13,7 @@ import { resolveForContainment } from "../../extensions/auto-mode/paths.ts";
 import { decide } from "../../extensions/permissions/matcher.ts";
 import { applicationArgument } from "../../extensions/permissions/powershell-cmdlets.ts";
 import { powershellTreeContainedEdits, powershellTreeReadOnly } from "../../extensions/permissions/powershell-tree.ts";
-import { HAVE_POWERSHELL, psParse } from "./helpers/powershell-parse.ts";
+import { HAVE_POWERSHELL, psParse, POWERSHELL_TEST_TIMEOUT } from "./helpers/powershell-parse.ts";
 
 const root = resolveForContainment(mkdtempSync(join(tmpdir(), "ps-tree-"))) as string;
 const cwd = join(root, "project");
@@ -32,7 +32,7 @@ const opts = { cwd, home };
 const edits = async (command: string) => powershellTreeContainedEdits(await psParse(command), opts);
 const reads = async (command: string) => powershellTreeReadOnly(await psParse(command), opts);
 
-describe.skipIf(!HAVE_POWERSHELL)("contained edits: Claude Code's acceptEdits cmdlets on the working space", () => {
+describe.skipIf(!HAVE_POWERSHELL)("contained edits: Claude Code's acceptEdits cmdlets on the working space", { timeout: POWERSHELL_TEST_TIMEOUT }, () => {
 	it("clears Set-Content, Add-Content, Remove-Item and Clear-Content inside the working directory", async () => {
 		for (const command of [
 			"Set-Content -Path src/b.txt -Value hello",
@@ -116,7 +116,7 @@ describe.skipIf(!HAVE_POWERSHELL)("contained edits: Claude Code's acceptEdits cm
 	});
 });
 
-describe.skipIf(!HAVE_POWERSHELL)("contained edits through decide(): capable tiers in acceptEdits and auto only", () => {
+describe.skipIf(!HAVE_POWERSHELL)("contained edits through decide(): capable tiers in acceptEdits and auto only", { timeout: POWERSHELL_TEST_TIMEOUT }, () => {
 	const base = { toolName: "powershell", cwd, deny: [], ask: [], allow: [] };
 	const at = async (subject: string, mode: "default" | "acceptEdits" | "auto" | "plan", claudeCodeFastPaths: boolean) =>
 		decide({ ...base, subject, mode, claudeCodeFastPaths, powershellParse: await psParse(subject) });
@@ -150,7 +150,7 @@ describe.skipIf(!HAVE_POWERSHELL)("contained edits through decide(): capable tie
 	});
 });
 
-describe.skipIf(!HAVE_POWERSHELL)("the read-only verdict reads PowerShell's binding", () => {
+describe.skipIf(!HAVE_POWERSHELL)("the read-only verdict reads PowerShell's binding", { timeout: POWERSHELL_TEST_TIMEOUT }, () => {
 	it("judges the parameter PowerShell binds, however it is spelled", async () => {
 		expect((await reads("Get-Content -pa src/a.txt")).ok).toBe(true); // -Path abbreviated
 		expect((await reads("Get-Content -LP src/a.txt")).ok).toBe(true); // -LiteralPath's alias

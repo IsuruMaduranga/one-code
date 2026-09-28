@@ -14,7 +14,7 @@ import {
 	powershellMatchForms,
 	powershellStatements,
 } from "../../extensions/permissions/powershell-rules.ts";
-import { HAVE_POWERSHELL, psParse, psReadOnly } from "./helpers/powershell-parse.ts";
+import { HAVE_POWERSHELL, psParse, psReadOnly, POWERSHELL_TEST_TIMEOUT } from "./helpers/powershell-parse.ts";
 
 const cwd = "/proj";
 
@@ -58,12 +58,12 @@ describe("powershellStatements", () => {
 	});
 });
 
-describe("the read-only check", () => {
+describe("the read-only check", { timeout: POWERSHELL_TEST_TIMEOUT }, () => {
 	it.skipIf(!HAVE_POWERSHELL).each(HIDDEN_WRITES)("is not read-only with %s", async (_label, line) => {
 		expect((await psReadOnly(line, { cwd, home: "/home/u" })).readOnly).toBe(false);
 	});
 
-	it.skipIf(!HAVE_POWERSHELL)("reads a control character as PowerShell does: never read-only with a writer behind it", async () => {
+	it.skipIf(!HAVE_POWERSHELL)("reads a control character as PowerShell does: never read-only with a writer behind it", { timeout: POWERSHELL_TEST_TIMEOUT }, async () => {
 		// PowerShell's parse is exact: a character it reads as whitespace leaves
 		// one command, and one it reads as a separator makes `Remove-Item` a
 		// command of its own, which is not read-only.
@@ -76,11 +76,11 @@ describe("the read-only check", () => {
 		expect((await psReadOnly("Get-ChildItem\tsrc", { cwd, home: "/home/u" })).readOnly).toBe(true);
 	});
 
-	it.skipIf(!HAVE_POWERSHELL)("judges the path inside typographic quotes, which PowerShell unquotes", async () => {
+	it.skipIf(!HAVE_POWERSHELL)("judges the path inside typographic quotes, which PowerShell unquotes", { timeout: POWERSHELL_TEST_TIMEOUT }, async () => {
 		expect(await psReadOnly("Get-Content ‘~/.ssh/id_rsa’", { cwd, home: "/home/u" })).toMatchObject({ readOnly: false, reason: "a credential or secret path" });
 	});
 
-	it.skipIf(!HAVE_POWERSHELL)("reads a typographic dash as a parameter dash", async () => {
+	it.skipIf(!HAVE_POWERSHELL)("reads a typographic dash as a parameter dash", { timeout: POWERSHELL_TEST_TIMEOUT }, async () => {
 		expect((await psReadOnly("Get-Process –ComputerName h", { cwd, home: "/home/u" })).readOnly).toBe(false);
 		expect((await psReadOnly("Get-Process —cn h", { cwd, home: "/home/u" })).readOnly).toBe(false);
 	});

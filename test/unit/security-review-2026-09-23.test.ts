@@ -16,7 +16,7 @@ import { configRunsProgram } from "../../extensions/auto-mode/git-checkout-progr
 import { gitStatusMeta, gitStatusMetaArgs } from "../../extensions/auto-mode/git-status-meta.ts";
 import { gitStatusOutput, HARNESS_GIT_CONFIG } from "../../extensions/lib/git.ts";
 import { createLspTrustGate, isLspRootTrusted, persistLspTrust } from "../../extensions/lsp/trust.ts";
-import { HAVE_POWERSHELL, psReadOnly } from "./helpers/powershell-parse.ts";
+import { HAVE_POWERSHELL, psReadOnly, POWERSHELL_TEST_TIMEOUT } from "./helpers/powershell-parse.ts";
 
 let root: string;
 let cwd: string;
@@ -277,7 +277,7 @@ describe("M3: jq's env builtin", () => {
 
 describe("H5: PowerShell colon-bound values", () => {
 	const opts = () => ({ cwd, home, readableRoots: [] });
-	it.skipIf(!HAVE_POWERSHELL)("checks a -Param:value path like a positional", async () => {
+	it.skipIf(!HAVE_POWERSHELL)("checks a -Param:value path like a positional", { timeout: POWERSHELL_TEST_TIMEOUT }, async () => {
 		for (const command of [
 			"Get-Content -Path:/etc/hosts",
 			"Get-Content -Path:~/.ssh/id_rsa",
@@ -289,7 +289,7 @@ describe("H5: PowerShell colon-bound values", () => {
 		expect((await psReadOnly("Get-Content -Path:a.txt", opts())).readOnly).toBe(true);
 	});
 
-	it.skipIf(!HAVE_POWERSHELL)("refuses credential paths and remote computers", async () => {
+	it.skipIf(!HAVE_POWERSHELL)("refuses credential paths and remote computers", { timeout: POWERSHELL_TEST_TIMEOUT }, async () => {
 		expect((await psReadOnly("Get-Content .env", opts())).readOnly).toBe(false);
 		expect((await psReadOnly("Get-Process -ComputerName host", opts())).readOnly).toBe(false);
 		expect((await psReadOnly("Get-Service -Comp host", opts())).readOnly).toBe(false);
@@ -384,7 +384,7 @@ describe("PR #8 review follow-ups", () => {
 		expect(floor("echo x > .claude/[z-a]")).toBeUndefined();
 	});
 
-	it.skipIf(!HAVE_POWERSHELL)("refuses the -C abbreviation of -ComputerName", async () => {
+	it.skipIf(!HAVE_POWERSHELL)("refuses the -C abbreviation of -ComputerName", { timeout: POWERSHELL_TEST_TIMEOUT }, async () => {
 		const opts = { cwd, home, readableRoots: [] };
 		expect((await psReadOnly("Get-Process -C host", opts)).readOnly).toBe(false);
 		expect((await psReadOnly("Get-Service -C:host", opts)).readOnly).toBe(false);
