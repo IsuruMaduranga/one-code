@@ -120,7 +120,8 @@ every model. The content is the same; only the placement differs.
   Code's own text. PowerShell commands are judged from PowerShell's own
   parse, as in Claude Code. What differs: native commands run from
   PowerShell (`git status`, `npm test`) always go to the classifier in auto
-  mode, where Claude Code approves some of them itself. Verified on CI runners and through a `pwsh` on
+  mode, where Claude Code approves some of them itself. Read-only uses of
+  Windows' own `findstr` and `where.exe` are the exceptions. Verified on CI runners and through a `pwsh` on
   macOS; a real Windows desktop has not been driven end to end yet. See
   [Windows](windows.md).
 

@@ -206,9 +206,11 @@ is the same.
 
 ## Not provided
 
-- No shortcut for PowerShell's native commands (`git`, `npm`, `rg`): they
-  always go to the classifier in auto mode, where the bash tool fast-paths
-  the read-only ones.
+- No shortcut for most of PowerShell's native commands (`git`, `npm`, `rg`):
+  they always go to the classifier in auto mode, where the bash tool
+  fast-paths the read-only ones. Windows' own `findstr` and `where.exe` are
+  the exceptions: a read-only use inside the project runs without the
+  classifier, and plan mode allows it.
 - No sandbox on Windows. Claude Code has none there either.
 - `defaultShell` for the user's own `!` prefix is pi's to handle; One Code
   does not read it.
