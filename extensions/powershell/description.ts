@@ -10,9 +10,11 @@
  * (identical in the reconstructed `PowerShellTool/prompt.ts`). The
  * "Developer tools verified on this machine's PATH" list Claude Code can add
  * sits behind a remote flag that was off in the capture, so it is not
- * reproduced. One Code appends its own short note about the deferred task
- * tools and the `Start-Sleep` guard, after the captured text, the way the
- * bash tool does.
+ * reproduced. The shipped text corrects the captured working-directory
+ * sentence (`CC_CWD_SENTENCE`), drops the Glob/Grep lines
+ * (`CC_SEARCH_LINES`) and appends One
+ * Code's own short note about the deferred task tools and the `Start-Sleep`
+ * guard, after the captured text, the way the bash tool does.
  */
 
 export type PowerShellEditionName = "core" | "desktop" | "unknown";
@@ -133,7 +135,32 @@ export function claudeCodePowerShellDescription(edition: PowerShellEditionName):
 	return TEMPLATE.replace("{{EDITION}}", EDITION_SECTIONS[edition]);
 }
 
-/** The description the `powershell` tool ships: Claude Code's text plus One Code's addendum. */
+/**
+ * Claude Code's shell keeps its working directory between calls; pi's
+ * PowerShell tool spawns a fresh process per call in the session's directory,
+ * so a `Set-Location` ends with its command. A model that trusts the captured
+ * sentence would `cd` in one call and resolve relative paths against the
+ * wrong folder in the next, so the shipped text swaps it.
+ */
+export const CC_CWD_SENTENCE = "Working directory persists between commands; shell state (variables, functions) does not.";
+export const ONE_CODE_CWD_SENTENCE =
+	"Each command starts in the session's working directory; neither a directory change (`cd`, `Set-Location`) nor shell state (variables, functions) carries over to the next command.";
+
+/**
+ * Claude Code's PowerShell prompt names Glob and Grep even in its native
+ * builds, which ship neither (their Bash prompt drops the same two lines).
+ * One Code ships no search tools outside the tiny tier, so the lines would
+ * forbid the only search route left (`Get-ChildItem -Recurse`,
+ * `Select-String`); they are dropped on every tier. A tiny model still sees
+ * `find` and `grep` in its tool list.
+ */
+export const CC_SEARCH_LINES =
+	"    - File search: Use Glob (NOT Get-ChildItem -Recurse)\n    - Content search: Use Grep (NOT Select-String)\n";
+
+/** The description the `powershell` tool ships: Claude Code's text with the corrections above, plus One Code's addendum. */
 export function powerShellToolDescription(edition: PowerShellEditionName): string {
-	return `${claudeCodePowerShellDescription(edition)}${ONE_CODE_ADDENDUM}`;
+	const text = claudeCodePowerShellDescription(edition)
+		.replace(CC_CWD_SENTENCE, ONE_CODE_CWD_SENTENCE)
+		.replace(CC_SEARCH_LINES, "");
+	return `${text}${ONE_CODE_ADDENDUM}`;
 }

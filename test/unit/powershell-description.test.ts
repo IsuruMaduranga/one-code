@@ -8,9 +8,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+	CC_CWD_SENTENCE,
+	CC_SEARCH_LINES,
 	claudeCodePowerShellDescription,
 	EDITION_SECTIONS,
 	ONE_CODE_ADDENDUM,
+	ONE_CODE_CWD_SENTENCE,
 	powerShellToolDescription,
 } from "../../extensions/powershell/description.ts";
 
@@ -20,7 +23,27 @@ describe("powerShellToolDescription", () => {
 	it.skipIf(!existsSync(CAPTURE))("reproduces the 2.1.276 capture byte for byte for the pwsh-7 edition", () => {
 		const captured = JSON.parse(readFileSync(CAPTURE, "utf8")) as { description: string };
 		expect(claudeCodePowerShellDescription("core")).toBe(captured.description);
-		expect(powerShellToolDescription("core")).toBe(`${captured.description}${ONE_CODE_ADDENDUM}`);
+		expect(powerShellToolDescription("core")).toBe(
+			`${captured.description.replace(CC_CWD_SENTENCE, ONE_CODE_CWD_SENTENCE).replace(CC_SEARCH_LINES, "")}${ONE_CODE_ADDENDUM}`,
+		);
+	});
+
+	it("drops the Glob/Grep lines, which name tools One Code does not ship", () => {
+		for (const edition of ["core", "desktop", "unknown"] as const) {
+			expect(claudeCodePowerShellDescription(edition)).toContain(CC_SEARCH_LINES);
+			const text = powerShellToolDescription(edition);
+			expect(text).not.toMatch(/\bGlob\b|\bGrep\b/);
+			expect(text).toContain("    - Read files: Use Read (NOT Get-Content)");
+		}
+	});
+
+	it("never tells the model the working directory persists (each call is a fresh process)", () => {
+		for (const edition of ["core", "desktop", "unknown"] as const) {
+			expect(claudeCodePowerShellDescription(edition)).toContain(CC_CWD_SENTENCE);
+			const text = powerShellToolDescription(edition);
+			expect(text).not.toContain("persists");
+			expect(text).toContain(ONE_CODE_CWD_SENTENCE);
+		}
 	});
 
 	it("swaps only the edition section", () => {
