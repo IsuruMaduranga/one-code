@@ -42,6 +42,7 @@ import {
 import { ARGUMENT_HINT_CHANNEL, type ArgumentHint } from "../lib/argument-hints.ts";
 import { btwForkedLine, type BtwForkResult, requestBtwFork } from "../lib/btw-fork.ts";
 import { notifyOrPrint, printAnswer } from "../lib/headless-output.ts";
+import { announcePromptOptions } from "../lib/prompt-options.ts";
 import { withReasoningFallback } from "../lib/model-policy.ts";
 import { followLastExchange, replaySideCall } from "../lib/replay-call.ts";
 import { answerText, stripImageBlocks, toolStubs, trimToTurnBoundary, withoutSystemMessages } from "../lib/side-call.ts";
@@ -201,6 +202,10 @@ export default function btwExtension(pi: ExtensionAPI) {
 				ctx.ui.notify("Ask a side question: /btw <question>", "info");
 				return;
 			}
+			// The panel can fork a background agent whose completion opens the
+			// session's first turn; this context carries the options that turn
+			// is built from (lib/prompt-options.ts).
+			announcePromptOptions(pi.events, ctx);
 
 			// Headless (-p / --mode json): no panel — answer and print it. The
 			// handler blocks to completion, so the process does not exit early.

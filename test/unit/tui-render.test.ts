@@ -12,6 +12,7 @@ import {
 	linesComponent,
 	notificationBody,
 	notificationComponent,
+	notificationUserMarkdown,
 	resultLines,
 	SPINNER_COLORS,
 	SPINNER_INTERVAL_MS,
@@ -291,6 +292,35 @@ describe("notificationComponent: agent messages, Claude Code's transcript look",
 	it("keeps the ✳ summary line for a task notification and shows its body when expanded", () => {
 		const shell = frameForDelivery(taskNotification({ kind: "shell", taskId: "b1", status: "completed", summary: 'Background command "build" completed (exit code 0)' }), "opens-turn");
 		expect(notificationComponent(theme, shell, false).render(200)).toEqual([expect.stringContaining('✳</> <muted><i>Background command "build" completed (exit code 0)')]);
+	});
+});
+
+describe("notificationUserMarkdown: a notification that opened the first turn as a user message", () => {
+	it("reduces a /btw fork's inline completion to its headline, preamble and wrapper dropped", () => {
+		const inline = taskNotification({
+			kind: "agent",
+			taskId: "ahave-we-completed-788bc7ebbbe04cb8",
+			status: "completed",
+			summary: 'Agent "have we completed the shell implementation" finished',
+			result: "**No**, the feature is still active.\n\nWhat remains: F5.",
+			usage: { subagentTokens: 160547, toolUses: 6, durationMs: 50699 },
+		});
+		expect(notificationUserMarkdown(frameForDelivery(inline, "opens-turn"))).toBe('● Agent "have we completed the shell implementation" finished · 51s');
+	});
+
+	it("gives one paragraph per frame and hides a hand-back's pointer", () => {
+		const report = agentMessage({ from: "a94a90cbdda8038c4", body: "report", handBack: true });
+		const pointer = taskNotification({ kind: "agent", taskId: "a94a90cbdda8038c4", status: "completed", summary: 'Agent "explore" finished', result: handBackPointer("a94a90cbdda8038c4", false) });
+		const shell = taskNotification({ kind: "shell", taskId: "b1", status: "completed", summary: 'Background command "build" completed (exit code 0)', result: "ok" });
+		expect(notificationUserMarkdown(frameForDelivery(`${report}\n\n${pointer}\n\n${shell}`, "opens-turn"))).toBe(
+			'› Message from @a94a90cbdda8038c4\n\n✳ Background command "build" completed (exit code 0)',
+		);
+	});
+
+	it("leaves a real prompt alone, including one that quotes a frame", () => {
+		const shell = taskNotification({ kind: "shell", taskId: "b1", status: "completed", summary: "done" });
+		expect(notificationUserMarkdown("have we completed the shell implementation")).toBeUndefined();
+		expect(notificationUserMarkdown(`why did this arrive?\n\n${shell}`)).toBeUndefined();
 	});
 });
 

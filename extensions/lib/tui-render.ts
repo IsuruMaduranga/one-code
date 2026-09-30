@@ -837,6 +837,33 @@ function isAgentCompletion(summary: string): boolean {
 	return summary.startsWith('Agent "');
 }
 
+/**
+ * A notification that opens a session's first turn goes out as a user message
+ * (lib/notifications.ts, "First turn of a session"), and pi draws a user
+ * message as markdown with no per-message renderer, so the wire frames would
+ * show in full. This is that message's display text: the headlines
+ * `notificationComponent` shows collapsed, one paragraph per frame, without
+ * the expand hint (a user message does not expand). `undefined` when the text
+ * is not wholly harness frames, so a real prompt renders as typed.
+ */
+export function notificationUserMarkdown(text: string): string | undefined {
+	// Every user message renders through here: a typed prompt skips the parse.
+	if (!text.includes("<task-notification>") && !text.includes("<agent-message ")) return undefined;
+	const parsed = parseNotificationFrames(sanitizeDisplayText(text));
+	if (parsed.length === 0 || parsed.some((frame) => frame.kind === "text")) return undefined;
+	const frames = parsed.filter((frame) => !(frame.kind === "task" && frame.pointer));
+	return (frames.length > 0 ? frames : parsed)
+		.map((frame) => {
+			if (frame.kind === "agent-message") return `› Message from @${frame.from}`;
+			if (frame.kind === "task" && isAgentCompletion(frame.summary)) {
+				const took = frame.durationMs === undefined ? "" : ` · ${formatDuration(0, frame.durationMs)}`;
+				return `● ${oneLine(frame.summary)}${took}`;
+			}
+			return frame.kind === "task" ? `✳ ${oneLine(frame.summary)}` : "";
+		})
+		.join("\n\n");
+}
+
 export function notificationComponent(theme: ThemeLike, text: string, expanded: boolean): TuiComponent {
 	// An agent's completion pointer says nothing the message above it does not;
 	// CC's transcript shows the message alone. Bodies carry shell output and

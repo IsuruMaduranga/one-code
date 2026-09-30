@@ -16,10 +16,11 @@
  * children persist their sessions per run to make that possible).
  */
 
-import { existsSync, mkdirSync, readdirSync, writeFileSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, renameSync, writeFileSync, readFileSync } from "node:fs";
 import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, agentCronTools, agentOwnsCronJobs } from "../lib/agent-cron.ts";
 import os from "node:os";
 import { dirname, join } from "node:path";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { Api, Message, Model } from "@earendil-works/pi-ai";
@@ -48,6 +49,8 @@ import { type GuideInput, guideAgentDefinition, settingsSetup } from "./guide-ag
 import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpServerStatus, type McpStatusEvent, type McpStatusKind } from "../lib/mcp-status.ts";
 
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
+import { requestSystemPrompt } from "../lib/prompt-options.ts";
+import { captureMatches, LAST_REQUEST_CHANNEL, type RequestCapture } from "../lib/request-replay.ts";
 import { BTW_FORK_CHANNEL, btwForkDescription, btwForkName, btwForkRecord, btwForkTaskId, type BtwForkRequest, type BtwForkResult } from "../lib/btw-fork.ts";
 import { watchMcpTools } from "../lib/mcp-share.ts";
 import { resolveModelTier } from "../lib/model-tier.ts";
@@ -1208,6 +1211,68 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		notify("subagent-result", envelope(handBackPointer(opts.from, opts.review !== undefined)), details);
 	};
 
+	/**
+	 * The prompt a fork inherits: the one this session's next request carries.
+	 * pi's `getSystemPrompt()` is its own stock prompt between turns, before the
+	 * first prompt and in a turn opened from idle, so it is only the fallback
+	 * for a prompt pi builds itself (a named agent's).
+	 */
+	const forkSystemPrompt = (ctx: ExtensionContext): string => requestSystemPrompt(pi.events, ctx) ?? ctx.getSystemPrompt();
+
+	/**
+	 * The parent's last provider request (the compaction extension publishes
+	 * each one). A fork's requests are built from it so the fork reads the
+	 * parent's prompt cache (fork-cache.ts; decisions/caching.md). None before
+	 * the first request, or for another model: that fork has no cache to read.
+	 */
+	let lastRequest: RequestCapture | undefined;
+	pi.events.on(LAST_REQUEST_CHANNEL, (data) => {
+		lastRequest = data as RequestCapture | undefined;
+	});
+	const forkRequest = (ctx: ExtensionContext): RequestCapture | undefined =>
+		lastRequest?.covers && captureMatches(lastRequest, ctx.model as { api?: string; provider?: string; id?: string } | undefined) ? lastRequest : undefined;
+
+	/**
+	 * The capture is persisted too, so a resumed fork still reads the cache its
+	 * earlier turns wrote. One file per distinct capture (a fan-out of forks
+	 * shares one), named by its hash, beside the fork session directories.
+	 */
+	const FORK_REQUEST_FILE = "parent-request";
+	const forkRequestsDir = (sessionSearchDir: string) => join(dirname(sessionSearchDir), "parent-requests");
+	/** Each capture is serialized and hashed once, however many forks share it. */
+	const persistedCaptures = new WeakMap<RequestCapture, string>();
+	const persistForkRequest = (record: AgentRunRecord, capture: RequestCapture) => {
+		if (!record.sessionSearchDir) return;
+		try {
+			const dir = forkRequestsDir(record.sessionSearchDir);
+			let name = persistedCaptures.get(capture);
+			if (!name || !existsSync(join(dir, name))) {
+				const body = JSON.stringify(capture);
+				name = `${createHash("sha256").update(body).digest("hex").slice(0, 24)}.json`;
+				mkdirSync(dir, { recursive: true });
+				if (!existsSync(join(dir, name))) {
+					// Atomic: a partial file would be skipped as present by every later fork.
+					const temp = join(dir, `${name}.${process.pid}.tmp`);
+					writeFileSync(temp, body);
+					renameSync(temp, join(dir, name));
+				}
+				persistedCaptures.set(capture, name);
+			}
+			writeFileSync(join(record.sessionSearchDir, FORK_REQUEST_FILE), name);
+		} catch {
+			// The run still reads the cache; only a later resume re-reads uncached.
+		}
+	};
+	const readForkRequest = (record: AgentRunRecord): RequestCapture | undefined => {
+		if (!record.sessionSearchDir) return undefined;
+		try {
+			const name = readFileSync(join(record.sessionSearchDir, FORK_REQUEST_FILE), "utf-8").trim();
+			return JSON.parse(readFileSync(join(forkRequestsDir(record.sessionSearchDir), name), "utf-8")) as RequestCapture;
+		} catch {
+			return undefined;
+		}
+	};
+
 	/** A fork's system prompt is persisted beside its session so a later resume can restore it (review S6). */
 	const FORK_PROMPT_FILE = "system-prompt.md";
 	const persistForkPrompt = (record: AgentRunRecord, prompt: string) => {
@@ -1505,7 +1570,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			task: frameTask(request, worktree, base),
 			cwd: record.cwd,
 			forkFrom: request.fork ? forkFrom : undefined,
-			parentSystemPrompt: request.fork ? ctx.getSystemPrompt() : undefined,
+			parentSystemPrompt: request.fork ? forkSystemPrompt(ctx) : undefined,
+			parentRequest: request.fork ? forkRequest(ctx) : undefined,
 			sessionDir: record.sessionSearchDir || undefined,
 			model: request.model,
 			fallbackModel: request.fallbackModel,
@@ -1654,8 +1720,10 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			}, RESIDENT_IDLE_MS);
 			reaper.unref?.();
 		};
-		const forkPrompt = p.request.fork ? ctx.getSystemPrompt() : undefined;
+		const forkPrompt = p.request.fork ? forkSystemPrompt(ctx) : undefined;
 		if (forkPrompt !== undefined) persistForkPrompt(p.record, forkPrompt);
+		const parentRequest = p.request.fork ? forkRequest(ctx) : undefined;
+		if (parentRequest) persistForkRequest(p.record, parentRequest);
 		// No `signal` here on purpose: a resident outlives the spawning turn and
 		// is stopped through task_stop / the panel, not by the turn ending (S15).
 		const started = await runtime.runResident({
@@ -1665,6 +1733,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			forkFrom: p.request.fork ? sessionFile : undefined,
 			forkMessages: p.request.fork ? forkMessages : undefined,
 			parentSystemPrompt: forkPrompt,
+			parentRequest,
 			sessionDir: p.record.sessionSearchDir || undefined,
 			model: p.request.model,
 			fallbackModel: p.request.fallbackModel,
@@ -2422,6 +2491,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				cwd: record.cwd,
 				sessionFile,
 				parentSystemPrompt: forkPrompt,
+				parentRequest: record.agent === FORK_AGENT ? readForkRequest(record) : undefined,
 				// Blocking, so the call's own abort stops it; a background turn is stopped by task_stop.
 				signal: oneShot ? signal : undefined,
 				model: record.model,

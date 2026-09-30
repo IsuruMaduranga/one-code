@@ -48,7 +48,7 @@ import {
 } from "../context-management/index.ts";
 import { looksLikeAnthropicRequest } from "../lib/anthropic-payload.ts";
 import { forcedReasoningLevel } from "../lib/model-policy.ts";
-import { captureRequest, extendPayload, LAST_REQUEST_CHANNEL, LastExchange, type RequestCapture, replayOutputCap } from "../lib/request-replay.ts";
+import { captureRequest, extendPayload, LAST_REQUEST_CHANNEL, LastExchange, lastCovered, type RequestCapture, replayOutputCap } from "../lib/request-replay.ts";
 import { withoutSystemMessages } from "../lib/side-call.ts";
 import { fitToBudget, replayFits, withoutUsage } from "./fit.ts";
 import { buildCompactionInstruction, COMPACTION_MAX_TOKENS, continuationSummary, extractSummary } from "./prompt.ts";
@@ -112,7 +112,9 @@ export default function compactionExtension(pi: ExtensionAPI) {
 		pi.events.emit(LAST_REQUEST_CHANNEL, capture);
 	};
 	pi.on("before_provider_request", (event, ctx) => {
-		publish(captureRequest(ctx.model as { api?: string; provider?: string; id?: string } | undefined, event.payload));
+		// The context this body was built from ends where a fork's own messages start.
+		const covers = captured ? lastCovered(captured.messages as { role: string; timestamp?: number }[]) : undefined;
+		publish(captureRequest(ctx.model as { api?: string; provider?: string; id?: string } | undefined, event.payload, covers, ctx.sessionManager.getSessionId()));
 	});
 	pi.on("message_end", (event) => {
 		exchange.noteMessage(event.message as AgentMessage & { role: string });

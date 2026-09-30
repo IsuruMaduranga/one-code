@@ -6,6 +6,7 @@ import {
 	frameForDelivery,
 	TASK_OUTPUT_DELIVERED_CHANNEL,
 	handBackPointer,
+	isNotificationDetails,
 	mergeNotificationTexts,
 	NOTIFICATION_BATCH_KEY,
 	NOTIFICATION_ID_KEY,
@@ -14,6 +15,7 @@ import {
 	shellSummary,
 	taskNotification,
 } from "../../extensions/lib/notifications.ts";
+import { announcePromptOptions, PROMPT_OPTIONS_CHANNEL } from "../../extensions/lib/prompt-options.ts";
 
 /** A kind=shell notification for a finished background command. */
 const shellDone = (id: string, tail?: string) =>
@@ -216,6 +218,44 @@ describe("createTaskNotifier before the first prompt (H1)", () => {
 		notify("subagent-result", "later report");
 		expect(sent.filter((s) => s.message.content && JSON.stringify(s.message.content).includes("later report"))).toHaveLength(1);
 		expect(sentAsUser).toHaveLength(0);
+	});
+});
+
+describe("announcePromptOptions and the first turn a completion opens", () => {
+	it("a command's announced prompt options send the first idle notification as a custom message", () => {
+		const { pi, sent, sentAsUser, emit, fire } = fakePi({ prompted: false });
+		const notify = createTaskNotifier(pi, { coalesceMs: 0 });
+		announcePromptOptions({ emit }, { cwd: "/p", getSystemPromptOptions: () => ({ selectedTools: ["read"] }) });
+		notify("subagent-result", "fork done");
+		expect(sentAsUser).toHaveLength(0);
+		expect(sent).toHaveLength(1);
+		expect(sent[0].options).toEqual({ deliverAs: "steer", triggerTurn: true });
+		// A replaced session is unprimed again.
+		fire("session_start");
+		notify("subagent-result", "next session");
+		expect(sentAsUser).toEqual(["next session"]);
+	});
+
+	it("announces nothing from a context without getSystemPromptOptions, or one that throws", () => {
+		const seen: unknown[] = [];
+		const events = { emit: (channel: string, data: unknown) => seen.push({ channel, data }) };
+		announcePromptOptions(events, { cwd: "/p" });
+		announcePromptOptions(events, undefined);
+		announcePromptOptions(events, {
+			getSystemPromptOptions: () => {
+				throw new Error("inactive");
+			},
+		});
+		expect(seen).toEqual([]);
+		announcePromptOptions(events, { cwd: "/p", getSystemPromptOptions: () => ({ skills: [] }) });
+		expect(seen).toEqual([{ channel: PROMPT_OPTIONS_CHANNEL, data: { options: { skills: [] }, cwd: "/p" } }]);
+	});
+
+	it("isNotificationDetails recognises one notification and a coalesced batch, nothing else", () => {
+		expect(isNotificationDetails({ [NOTIFICATION_ID_KEY]: "1-a" })).toBe(true);
+		expect(isNotificationDetails({ [NOTIFICATION_BATCH_KEY]: [] })).toBe(true);
+		expect(isNotificationDetails({ taskId: "t" })).toBe(false);
+		expect(isNotificationDetails(undefined)).toBe(false);
 	});
 });
 

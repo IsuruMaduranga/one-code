@@ -20,6 +20,7 @@ import { notifyOrPrint } from "../lib/headless-output.ts";
 import { pluginRoot } from "../lib/plugin-root.ts";
 import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
 import { awaitOneShotTurn } from "../lib/notifications.ts";
+import { PROMPT_OPTIONS_CHANNEL, type PromptOptionsAnnouncement } from "../lib/prompt-options.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
 import {
 	nextSkillState,
@@ -95,11 +96,11 @@ export default function skillExtension(pi: ExtensionAPI) {
 	// (lib/notifications.ts resets its twin the same way).
 	pi.on("session_start", () => {
 		prompted = false;
+		announcedSkills = false;
 	});
-	pi.on("before_agent_start", (event, ctx) => {
-		prompted = true;
-		sessionCwd = ctx.cwd;
-		const skills = event.systemPromptOptions.skills ?? [];
+	/** Index the skills pi resolved for this turn and list them for the model. */
+	const adoptPiSkills = (skills: unknown[], cwd: string) => {
+		sessionCwd = cwd;
 		piSkills = skills.map((skill) => {
 			const record = skill as unknown as { name: string; description?: string; path?: string; filePath?: string; disableModelInvocation?: boolean };
 			const path = record.path ?? record.filePath ?? "";
@@ -126,6 +127,21 @@ export default function skillExtension(pi: ExtensionAPI) {
 				order: CONTEXT_ORDER.skills,
 			});
 		}
+	};
+	pi.on("before_agent_start", (event, ctx) => {
+		prompted = true;
+		adoptPiSkills(event.systemPromptOptions.skills ?? [], ctx.cwd);
+	});
+	// The first turn a background completion opens (lib/prompt-options.ts)
+	// carries the same listing a typed first prompt would.
+	// The first announcement wins, as in system-prompt: both describe one turn.
+	let announcedSkills = false;
+	pi.events.on(PROMPT_OPTIONS_CHANNEL, (data) => {
+		const announced = data as PromptOptionsAnnouncement | undefined;
+		const skills = (announced?.options as { skills?: unknown[] } | undefined)?.skills;
+		if (prompted || announcedSkills || !announced?.cwd || !Array.isArray(skills)) return;
+		announcedSkills = true;
+		adoptPiSkills(skills, announced.cwd);
 	});
 
 	/**

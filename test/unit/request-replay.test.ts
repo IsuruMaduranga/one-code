@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+	affinityHeaders,
+	captureMatches,
 	captureRequest,
 	extendPayload,
+	forkOutputRoom,
+	forkRequestPayload,
+	lastCovered,
+	toolNames,
+	uncoveredMessages,
 	LastExchange,
 	MIN_REPLAY_OUTPUT_TOKENS,
 	type RequestCapture,
@@ -171,5 +178,155 @@ describe("replayTail / replayOutputCap", () => {
 		expect(replayOutputCap(capture, tail, 8000)).toBe(8000);
 		const tight = { ...capture, payload: { ...capture.payload, max_tokens: MIN_REPLAY_OUTPUT_TOKENS + 10 } };
 		expect(replayOutputCap(tight, tail)).toBeUndefined();
+	});
+});
+
+describe("forks: the parent's captured request, then the fork's own tail", () => {
+	const covers = { role: "user", timestamp: 30 };
+	const withCovers = (capture: RequestCapture): RequestCapture => ({ ...capture, covers });
+
+	it("lastCovered names the last non-system message; captureMatches needs the same api, provider and model", () => {
+		expect(lastCovered([{ role: "user", timestamp: 1 }, { role: "assistant", timestamp: 2 }, { role: "system", timestamp: 3 }])).toEqual({ role: "assistant", timestamp: 2 });
+		expect(lastCovered([{ role: "user" }])).toBeUndefined();
+		expect(captureRequest(anthropic, { messages: [] }, covers)?.covers).toEqual(covers);
+		const capture = anthropicCapture();
+		expect(captureMatches(capture, anthropic)).toBe(true);
+		expect(captureMatches(capture, { ...anthropic, id: "claude-opus-5-5" })).toBe(false);
+		expect(captureMatches(capture, { ...anthropic, api: "openai-completions" })).toBe(false);
+	});
+
+	it("uncoveredMessages drops everything through the boundary but the system messages, or finds nothing", () => {
+		const messages = [
+			{ role: "system", timestamp: 0 },
+			{ role: "user", timestamp: 10 },
+			{ role: "assistant", timestamp: 20 },
+			{ role: "user", timestamp: 30 },
+			{ role: "assistant", timestamp: 40 },
+			{ role: "user", timestamp: 50 },
+		];
+		expect(uncoveredMessages(messages, covers)).toEqual([messages[0], messages[4], messages[5]]);
+		expect(uncoveredMessages(messages, { role: "assistant", timestamp: 30 })).toBeUndefined();
+		expect(uncoveredMessages(messages.slice(4), covers)).toBeUndefined();
+	});
+
+	it("keeps the parent's system, tools, messages and fields byte for byte and appends the tail (Anthropic)", () => {
+		const capture = withCovers(anthropicCapture());
+		const child = {
+			model: "claude-sonnet-5",
+			system: [{ type: "text", text: "the fork's own prompt", cache_control: marker }],
+			tools: [{ name: "read" }, { name: "SendMessage", cache_control: marker }],
+			messages: [
+				{ role: "assistant", content: [{ type: "text", text: "done" }] },
+				{ role: "user", content: [{ type: "text", text: "fork task", cache_control: marker }] },
+			],
+			max_tokens: 128000,
+			thinking: { type: "enabled" },
+		};
+		const out = forkRequestPayload(capture, child, new Set(toolNames(child.tools)));
+		expect(out.system).toBe(capture.payload.system);
+		expect(out.tools).toBe(capture.payload.tools);
+		expect(out.thinking).toBe(capture.payload.thinking);
+		const messages = out.messages as unknown[];
+		expect(messages.slice(0, 3)).toEqual((capture.payload.messages as unknown[]).slice(0, 3));
+		expect(messages.slice(3)).toEqual(child.messages);
+		// The parent's cap less the tail, never the fork's larger one.
+		expect(out.max_tokens).toBeLessThan(64000);
+		expect(out.max_tokens).toBeGreaterThan(63000);
+		expect(markers(out)).toBeLessThanOrEqual(4);
+	});
+
+	it("drops the earliest markers past four without touching the shared capture", () => {
+		const capture = withCovers(anthropicCapture());
+		const system = [
+			{ type: "text", text: "a", cache_control: marker },
+			{ type: "text", text: "b", cache_control: marker },
+		];
+		const shared: RequestCapture = { ...capture, payload: { ...capture.payload, system } };
+		const child = { messages: [{ role: "assistant", content: [{ type: "text", text: "ok", cache_control: marker }] }] };
+		const out = forkRequestPayload(shared, child, new Set());
+		// tools 1 + system 2 + parent message 1 + tail 1 = 5: the tools marker goes first.
+		expect(markers(out)).toBe(4);
+		expect(markers(out.tools)).toBe(0);
+		expect(markers(out.system)).toBe(2);
+		expect(markers(shared.payload.tools)).toBe(1);
+		const messages = out.messages as { content: Record<string, unknown>[] }[];
+		expect(messages[2].content[0].cache_control).toEqual(marker);
+		expect(messages[3].content[0].cache_control).toEqual(marker);
+	});
+
+	it("joins a tail that opens with a user turn onto the captured last user message", () => {
+		const capture = withCovers(anthropicCapture());
+		const out = forkRequestPayload(capture, { messages: [{ role: "user", content: [{ type: "text", text: "btw q" }] }] }, new Set());
+		const messages = out.messages as { role: string; content: Record<string, unknown>[] }[];
+		expect(messages).toHaveLength(3);
+		expect(messages[2].content.map((block) => block.text)).toEqual(["read it", "btw q"]);
+	});
+
+	it("keeps the parent's tools and appends only a tool the fork loaded later or a tool_reference names", () => {
+		const capture = withCovers(anthropicCapture());
+		const baseline = new Set(["read", "SendMessage", "cron_list"]);
+		const later = {
+			tools: [{ name: "read" }, { name: "SendMessage" }, { name: "cron_list" }, { name: "mcp__x__y", cache_control: marker }],
+			messages: [{ role: "assistant", content: [{ type: "text", text: "x" }] }],
+		};
+		expect(toolNames(forkRequestPayload(capture, later, baseline).tools)).toEqual(["read", "mcp__x__y"]);
+		expect(markers(forkRequestPayload(capture, later, baseline).tools)).toBe(1);
+		const referencing = {
+			tools: [{ name: "read" }, { name: "cron_list" }],
+			messages: [{ role: "user", content: [{ type: "tool_result", content: [{ type: "tool_reference", tool_name: "cron_list" }] }] }],
+		};
+		expect(toolNames(forkRequestPayload(capture, referencing, baseline).tools)).toEqual(["read", "cron_list"]);
+	});
+
+	it("drops the fork's own system and developer entries on Completions and Responses, keeping prompt_cache_key", () => {
+		const completions = captureRequest(
+			{ ...anthropic, api: "openai-completions" },
+			{ messages: [{ role: "system", content: "parent" }, { role: "user", content: "hi" }], tools: [{ type: "function", function: { name: "read" } }], prompt_cache_key: "parent-session", max_completion_tokens: 32000 },
+			covers,
+		) as RequestCapture;
+		const out = forkRequestPayload(
+			completions,
+			{ messages: [{ role: "system", content: "fork" }, { role: "assistant", content: "ok" }, { role: "user", content: "task" }], tools: [{ type: "function", function: { name: "read" } }] },
+			new Set(["read"]),
+		);
+		expect(out.messages).toEqual([{ role: "system", content: "parent" }, { role: "user", content: "hi" }, { role: "assistant", content: "ok" }, { role: "user", content: "task" }]);
+		expect(out.prompt_cache_key).toBe("parent-session");
+		expect(out.tools).toBe(completions.payload.tools);
+		const responses = captureRequest({ ...anthropic, api: "openai-responses" }, { input: [{ role: "developer", content: "parent" }, { role: "user", content: "hi" }] }, covers) as RequestCapture;
+		const outResponses = forkRequestPayload(responses, { input: [{ role: "developer", content: "fork" }, { type: "function_call", name: "read" }] }, new Set());
+		expect(outResponses.input).toEqual([{ role: "developer", content: "parent" }, { role: "user", content: "hi" }, { type: "function_call", name: "read" }]);
+	});
+});
+
+describe("forks: output room", () => {
+	it("never raises the cap above what the tail leaves, and reports the room to fall back on", () => {
+		const capture = { ...anthropicCapture(), payload: { ...anthropicCapture().payload, max_tokens: 2000 } } as RequestCapture;
+		const tail = [{ role: "user", content: [{ type: "text", text: "x".repeat(6000) }] }];
+		const room = forkOutputRoom(capture, tail) as number;
+		expect(room).toBeLessThan(MIN_REPLAY_OUTPUT_TOKENS);
+		const out = forkRequestPayload(capture, { messages: tail, max_tokens: 64000 }, new Set());
+		expect(out.max_tokens).toBe(room);
+		expect(forkOutputRoom({ ...capture, payload: { messages: [] } }, tail)).toBeUndefined();
+		// A tool appended after the first request spends room as well.
+		const loaded = { name: "mcp__x__y", description: "d".repeat(2000) };
+		const roomy = { ...capture, payload: { ...capture.payload, max_tokens: 8000 } } as RequestCapture;
+		const withTool = forkRequestPayload(roomy, { messages: tail, tools: [loaded], max_tokens: 64000 }, new Set());
+		expect(withTool.max_tokens).toBe((forkOutputRoom(roomy, tail) as number) - Math.ceil(JSON.stringify([loaded]).length / 4));
+	});
+});
+
+describe("affinityHeaders: pi-ai's session-affinity headers, for a fork to send its parent's", () => {
+	const or = { provider: "openrouter", baseUrl: "https://openrouter.ai/api/v1" };
+	it("OpenRouter routes on x-session-id for every API", () => {
+		for (const api of ["openai-completions", "openai-responses", "anthropic-messages"]) {
+			expect(affinityHeaders({ ...or, api, id: "m" }, "S")).toEqual({ "x-session-id": "S" });
+		}
+	});
+	it("elsewhere follows pi-ai: Responses always, Completions and Anthropic only when the compat asks", () => {
+		expect(affinityHeaders({ api: "openai-responses", provider: "openai", baseUrl: "https://api.openai.com/v1", id: "m" }, "S")).toEqual({ session_id: "S", "x-client-request-id": "S" });
+		expect(affinityHeaders({ api: "openai-completions", provider: "deepseek", baseUrl: "https://api.deepseek.com", id: "m" }, "S")).toEqual({});
+		expect(affinityHeaders({ api: "openai-completions", provider: "x", baseUrl: "https://x", id: "m", compat: { sendSessionAffinityHeaders: true } }, "S")).toEqual({ session_id: "S", "x-client-request-id": "S", "x-session-affinity": "S" });
+		expect(affinityHeaders({ api: "anthropic-messages", provider: "anthropic", baseUrl: "https://api.anthropic.com", id: "m" }, "S")).toEqual({});
+		expect(affinityHeaders({ api: "anthropic-messages", provider: "x", baseUrl: "https://x", id: "m", compat: { sendSessionAffinityHeaders: true } }, "S")).toEqual({ "x-session-affinity": "S" });
 	});
 });

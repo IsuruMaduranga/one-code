@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import systemPromptExtension from "../../extensions/system-prompt/index.ts";
 import { optionsForIdleTurn, withSystemHead } from "../../extensions/system-prompt/idle-turn.ts";
+import { announcePromptOptions, requestSystemPrompt } from "../../extensions/lib/prompt-options.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 const PI_DEFAULT = "You are an expert coding assistant operating inside pi, a coding agent harness.";
@@ -103,5 +104,40 @@ describe("system-prompt on a turn opened from idle", () => {
 		const { fake, ctx } = setup();
 		await fake.fire("session_start", { type: "session_start" }, ctx);
 		expect(await fake.fireOne("context_with_system", idleContext(), ctx)).toBeUndefined();
+	});
+
+	it("builds from a command's announced options before any typed turn, and a typed turn's options win", async () => {
+		const { fake, ctx } = setup();
+		fake.setActiveTools(["read", "bash"]);
+		await fake.fire("session_start", { type: "session_start" }, ctx);
+		const options = { cwd: ctx.cwd, selectedTools: ["read", "bash"], toolSnippets: { read: "Read a file", bash: "Run a command" } };
+		announcePromptOptions(fake.events, { cwd: ctx.cwd, getSystemPromptOptions: () => options });
+		const idle = await fake.fireOne<{ messages: Array<Record<string, unknown>> }>("context_with_system", idleContext(), ctx);
+		const typed = await fake.fireOne<{ systemPrompt: string }>("before_agent_start", { type: "before_agent_start", systemPromptOptions: options }, ctx);
+		expect(idle?.messages[0].content).toBe(typed?.systemPrompt);
+		// A later announcement does not replace the typed turn's options.
+		announcePromptOptions(fake.events, { cwd: ctx.cwd, getSystemPromptOptions: () => ({ cwd: ctx.cwd, customPrompt: "Other" }) });
+		const later = await fake.fireOne<{ messages: Array<Record<string, unknown>> }>("context_with_system", idleContext(), ctx);
+		expect(later?.messages[0].content).toBe(typed?.systemPrompt);
+	});
+
+	it("answers a fork's request with the prompt the next request carries, never pi's own", async () => {
+		const { fake, ctx } = setup();
+		await fake.fire("session_start", { type: "session_start" }, ctx);
+		expect(requestSystemPrompt(fake.events, ctx)).toBeUndefined();
+		const options = { cwd: ctx.cwd, selectedTools: ["read"] };
+		announcePromptOptions(fake.events, { cwd: ctx.cwd, getSystemPromptOptions: () => options });
+		const forked = requestSystemPrompt(fake.events, ctx);
+		expect(forked).toContain("You are One Code");
+		expect(forked).not.toContain(PI_DEFAULT);
+		const idle = await fake.fireOne<{ messages: Array<Record<string, unknown>> }>("context_with_system", idleContext(), ctx);
+		expect(idle?.messages[0].content).toBe(forked);
+	});
+
+	it("leaves a named agent's fork on pi's prompt (no answer)", async () => {
+		const { fake, ctx } = setup();
+		await fake.fire("session_start", { type: "session_start" }, ctx);
+		await fake.fire("before_agent_start", { type: "before_agent_start", systemPromptOptions: { cwd: ctx.cwd, customPrompt: "Agent prompt" } }, ctx);
+		expect(requestSystemPrompt(fake.events, ctx)).toBeUndefined();
 	});
 });
