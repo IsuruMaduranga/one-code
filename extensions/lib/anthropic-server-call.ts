@@ -38,7 +38,7 @@ export interface ServerCallAuth {
 	baseUrl?: string;
 }
 
-export interface ServerCallReply {
+interface ServerCallReply {
 	result: ServerCallResult;
 	/** pi's usage shape with the cost filled in, searches included. */
 	usage: Usage;
@@ -109,7 +109,7 @@ interface RegistryLike {
 	): Promise<{ ok: true; apiKey?: string; headers?: HeaderMap; baseUrl?: string } | { ok: false; error: string }>;
 }
 
-export type NativeWebTarget = { ok: true; model: Model<Api>; auth: ServerCallAuth } | { ok: false; reason: string };
+type NativeWebTarget = { ok: true; model: Model<Api>; auth: ServerCallAuth } | { ok: false; reason: string };
 
 /**
  * Whether this session runs the native web tools, and on which model with
@@ -169,7 +169,7 @@ export async function tryNativeWeb(
 		request.onUsage(reply.usage);
 		const outcome = request.outcome(reply.result);
 		return outcome.ok
-			? { kind: "answered", text: outcome.text, cutOff: outcome.cutOff === true, spec, result: reply.result }
+			? { kind: "answered", text: outcome.text, cutOff: outcome.cutOff, spec, result: reply.result }
 			: { kind: "fell-back", reason: outcome.reason };
 	} catch (error) {
 		if (request.signal?.aborted) return { kind: "cancelled" };

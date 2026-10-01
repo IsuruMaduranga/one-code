@@ -26,7 +26,7 @@ import { withReasoningFallback } from "../lib/model-policy.ts";
 import { htmlToMarkdown, isSameHost, normalizeUrl, paginate } from "./extract.ts";
 import { pickReaderModel, READER_MAX_TOKENS, readerMessages } from "./summarize.ts";
 import { tryNativeWeb } from "../lib/anthropic-server-call.ts";
-import { fetchOutcome, isPrivateOrLocalUrl, nativeFetchBody, type ThinkingFields } from "../lib/anthropic-server-tools.ts";
+import { CUT_OFF_NOTE, fetchOutcome, isPrivateOrLocalUrl, nativeFetchBody, type ThinkingFields } from "../lib/anthropic-server-tools.ts";
 import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 
@@ -289,7 +289,7 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 						`Source: ${target}`,
 						normalizeNote,
 						`Answered by ${native.spec} with Anthropic's server-side web fetch (dynamic filtering). Refetch without \`prompt\` for the raw content.`,
-						native.cutOff ? "(The answer was cut off at the output limit and may be incomplete.)" : undefined,
+						native.cutOff ? CUT_OFF_NOTE : undefined,
 					]
 						.filter(Boolean)
 						.join("\n");

@@ -257,7 +257,7 @@ describe("parseSseBuffer", () => {
 
 describe("fetchOutcome: answer or fall back to the local fetch", () => {
 	it("answers from a successful fetch", () => {
-		expect(fetchOutcome(fold(fetchStream({ type: "web_fetch_result", url: "u" })))).toEqual({ ok: true, text: "v24.21.0" });
+		expect(fetchOutcome(fold(fetchStream({ type: "web_fetch_result", url: "u" })))).toEqual({ ok: true, text: "v24.21.0", cutOff: false });
 	});
 
 	it.each(Object.keys(FETCH_ERROR_REASONS))("falls back on %s, naming the code", (code) => {
@@ -293,7 +293,7 @@ describe("fetchOutcome: answer or fall back to the local fetch", () => {
 				{ type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { server_tool_use: { web_fetch_requests: 1 } } },
 			]),
 		);
-		expect(outcome).toEqual({ ok: true, text: "24.21.0" });
+		expect(outcome).toEqual({ ok: true, text: "24.21.0", cutOff: false });
 	});
 
 	it("falls back when the call stops early, returns no text, or errors", () => {
@@ -323,7 +323,7 @@ describe("searchOutcome / searchSources", () => {
 
 	it("answers from real results and lists cited sources first, each once", () => {
 		const result = search([hit("https://a.example/"), hit("https://b.example/")]);
-		expect(searchOutcome(result)).toEqual({ ok: true, text: "Node 26.8.2 is current." });
+		expect(searchOutcome(result)).toEqual({ ok: true, text: "Node 26.8.2 is current.", cutOff: false });
 		expect(searchSources(result).map((source) => source.url)).toEqual(["https://b.example/", "https://a.example/"]);
 	});
 
@@ -385,7 +385,7 @@ describe("runServerCall", () => {
 		expect(headers["x-api-key"]).toBe("sk-ant-api03-x");
 		expect("x-drop" in headers).toBe(false);
 		expect(fetchMock.mock.calls[0][0]).toBe("https://api.anthropic.com/v1/messages");
-		expect(fetchOutcome(reply.result)).toEqual({ ok: true, text: "v24.21.0" });
+		expect(fetchOutcome(reply.result)).toEqual({ ok: true, text: "v24.21.0", cutOff: false });
 	});
 
 	it("remembers the retried fields, so the next call on that model sends them first", async () => {

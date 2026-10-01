@@ -36,7 +36,7 @@ import { getProviderKind } from "pi-web-search/src/api.ts";
 import { webSearch as nativeWebSearch } from "pi-web-search/src/web_search.ts";
 import { getWebSearchModel } from "pi-web-search/src/utils.ts";
 import { tryNativeWeb } from "../lib/anthropic-server-call.ts";
-import { nativeSearchBody, searchOutcome, searchSources, sourceLine, type ThinkingFields } from "../lib/anthropic-server-tools.ts";
+import { CUT_OFF_NOTE, nativeSearchBody, searchOutcome, searchSources, sourceLine, type ThinkingFields } from "../lib/anthropic-server-tools.ts";
 import { readJsonFile } from "../lib/atomic-write.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
@@ -129,7 +129,7 @@ export default function webExtension(pi: ExtensionAPI) {
 					const filtered = Boolean(params.allowed_domains?.length || params.blocked_domains?.length);
 					const text = [
 						native.text,
-						...(native.cutOff ? ["", "(The answer was cut off at the output limit and may be incomplete.)"] : []),
+						...(native.cutOff ? ["", CUT_OFF_NOTE] : []),
 						"",
 						"Sources:",
 						...sources.map(sourceLine),

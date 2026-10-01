@@ -64,7 +64,7 @@ export function isFirstPartyAnthropic(model: Pick<Model<Api>, "provider" | "api"
 	}
 }
 
-export type Eligibility = { ok: true } | { ok: false; reason: string };
+type Eligibility = { ok: true } | { ok: false; reason: string };
 
 /**
  * Whether the session may use the native tools at all. OAuth is excluded
@@ -390,8 +390,11 @@ function fetchErrorReason(code: string): string {
 	return FETCH_ERROR_REASONS[code] ?? `Anthropic's fetcher returned ${code}`;
 }
 
-/** `cutOff`: the answer hit the output limit and may be incomplete; the caller says so. */
-export type Outcome = { ok: true; text: string; cutOff?: true } | { ok: false; reason: string };
+/** `cutOff`: the answer hit the output limit and may be incomplete; the caller says so with `CUT_OFF_NOTE`. */
+export type Outcome = { ok: true; text: string; cutOff: boolean } | { ok: false; reason: string };
+
+/** The note a native answer cut off at the output limit carries. */
+export const CUT_OFF_NOTE = "(The answer was cut off at the output limit and may be incomplete.)";
 
 /**
  * The checks every call shares once its tool succeeded: a non-empty answer
@@ -404,7 +407,7 @@ function finished(result: ServerCallResult): Outcome {
 		return { ok: false, reason: `the call stopped early (${result.stopReason ?? "no stop reason"})` };
 	}
 	if (!result.text) return { ok: false, reason: "the model returned no answer" };
-	return result.stopReason === "max_tokens" ? { ok: true, text: result.text, cutOff: true } : { ok: true, text: result.text };
+	return { ok: true, text: result.text, cutOff: result.stopReason === "max_tokens" };
 }
 
 /**
