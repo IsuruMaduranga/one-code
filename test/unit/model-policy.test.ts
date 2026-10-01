@@ -240,6 +240,15 @@ describe("isReasoningMandatoryError", () => {
 		expect(isReasoningMandatoryError("thinking cannot be disabled for this model")).toBe(true);
 		expect(isReasoningMandatoryError("reasoning must be enabled")).toBe(true);
 		expect(isReasoningMandatoryError("Thinking is required for gemini-3.7-flash")).toBe(true);
+		// Anthropic's Opus 5.5 and Sonnet 5.5 400s, verbatim (findings §43).
+		expect(
+			isReasoningMandatoryError(
+				'"thinking.type.disabled" is not supported for this model. Use "thinking.type.adaptive" and "output_config.effort" to control thinking behavior.',
+			),
+		).toBe(true);
+		expect(
+			isReasoningMandatoryError('To turn thinking off on this model, send "thinking": {"type": "between_tools"} instead of {"type": "disabled"}.'),
+		).toBe(true);
 	});
 
 	it("does not match unrelated provider errors", () => {

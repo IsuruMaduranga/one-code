@@ -9,6 +9,11 @@
  * windowed markdown with a note saying so — the original reason this feature
  * was deferred was that a summariser failing *silently* degrades quality
  * invisibly, so the fallback is loud, never silent.
+ *
+ * On a first-party Anthropic API-key session, `prompt` goes to Anthropic's
+ * server-side web fetch first (lib/anthropic-server-tools.ts); it falls back
+ * to the local fetch and reader above, with a note, whenever it does not
+ * answer from a successful fetch.
  */
 
 import type { Api, Model, ThinkingLevel } from "@earendil-works/pi-ai";
@@ -20,6 +25,9 @@ import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { withReasoningFallback } from "../lib/model-policy.ts";
 import { htmlToMarkdown, isSameHost, normalizeUrl, paginate } from "./extract.ts";
 import { pickReaderModel, READER_MAX_TOKENS, readerMessages } from "./summarize.ts";
+import { tryNativeWeb } from "../lib/anthropic-server-call.ts";
+import { CUT_OFF_NOTE, fetchOutcome, isPrivateOrLocalUrl, nativeFetchBody, type ThinkingFields } from "../lib/anthropic-server-tools.ts";
+import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 
 const DEFAULT_MAX_CHARS = 30_000;
@@ -46,6 +54,8 @@ interface FetchDetails {
 	nextOffset?: number;
 	/** `provider/id` of the model that answered `prompt`, when one did. */
 	reader?: string;
+	/** Which fetch answered: Anthropic's server-side tool or the local client. */
+	path?: "native" | "local";
 }
 
 interface CacheEntry {
@@ -73,7 +83,7 @@ async function answerFromPage(
 	learnedReasoning: Map<string, ThinkingLevel>,
 	/** Report the reader call's usage for the all-in footer cost. */
 	recordCall: (usage: unknown) => void,
-): Promise<{ answer?: string; reader?: string; truncated?: boolean; error?: string }> {
+): Promise<{ answer?: string; reader?: string; truncated?: boolean; cutOff?: boolean; error?: string }> {
 	const choice = pickReaderModel(ctx.modelRegistry.getAvailable(), ctx.model);
 	if (!choice) return { error: "no model available to read the page" };
 	const reader = `${choice.model.provider}/${choice.model.id}`;
@@ -116,7 +126,7 @@ async function answerFromPage(
 			.join("\n")
 			.trim();
 		if (!answer) return { error: `${reader} returned no text` };
-		return { answer, reader, truncated: messages.truncated };
+		return { answer, reader, truncated: messages.truncated, cutOff: result.stopReason === "length" };
 	} catch (error) {
 		return { error: `${reader}: ${(error as Error).message}` };
 	}
@@ -149,6 +159,8 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 	const cache = new Map<string, CacheEntry>();
 	// Per-session: a reader model's learned required thinking level (see answerFromPage).
 	const learnedReasoning = new Map<string, ThinkingLevel>();
+	// Per-session: the thinking-off fields a native-call model turned out to need.
+	const learnedNativeThinking = new Map<string, ThinkingFields>();
 
 	const load = async (url: string, signal: AbortSignal | undefined, redirects = 0): Promise<CacheEntry> => {
 		const cached = cache.get(url);
@@ -222,7 +234,7 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 		label: "Web Fetch",
 		...ccToolRenderers("Web Fetch"),
 		description:
-			"Fetch a URL and return its readable content as markdown. Navigation and boilerplate are stripped. Pass `prompt` to have a small fast model answer it from the full page instead of returning the page itself — prefer that for long pages. Without `prompt`, long pages are windowed; pass `offset` to continue reading. Responses are cached for 15 minutes. Cross-host redirects are reported instead of followed; call again with the new URL to follow one.",
+			"Fetch a URL and return its readable content as markdown. Navigation and boilerplate are stripped. Pass `prompt` to have a small fast model answer it from the full page instead of returning the page itself — prefer that for long pages (on an Anthropic API-key session, Anthropic's server-side fetch answers it). Without `prompt`, long pages are windowed; pass `offset` to continue reading. Responses are cached for 15 minutes. Cross-host redirects are reported instead of followed; call again with the new URL to follow one.",
 		parameters: Type.Object({
 			url: Type.String({ description: "URL to fetch (http is upgraded to https)" }),
 			prompt: Type.Optional(
@@ -238,7 +250,7 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 				Type.Integer({ minimum: 1000, maximum: 100_000, description: `Characters to return (default ${DEFAULT_MAX_CHARS})` }),
 			),
 		}),
-		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+		async execute(toolCallId, params, signal, _onUpdate, ctx) {
 			let target: string;
 			let normalizeNote: string | undefined;
 			try {
@@ -251,6 +263,42 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 					details: {} as FetchDetails,
 					isError: true,
 				};
+			}
+
+			// With `prompt` on a first-party Anthropic API-key session, Anthropic's
+			// server-side fetch answers it with dynamic filtering. Anything short of
+			// an answer from a successful fetch falls through to the local path,
+			// with a note saying why (lib/anthropic-server-tools.ts fetchOutcome).
+			// Without `prompt` the local path always answers: it pages with
+			// `offset`, which the server tool cannot.
+			let nativeNote: string | undefined;
+			if (params.prompt && !isPrivateOrLocalUrl(target)) {
+				const prompt = params.prompt;
+				const native = await tryNativeWeb(ctx, {
+					body: (model) => nativeFetchBody({ model, url: target, prompt }),
+					outcome: fetchOutcome,
+					onUsage: (usage) => recordUsage(pi, "web-fetch", usage),
+					learned: learnedNativeThinking,
+					signal,
+				});
+				if (native.kind === "cancelled") {
+					return { content: [{ type: "text", text: `Fetch of ${target} was cancelled.` }], details: { url: target }, isError: true };
+				}
+				if (native.kind === "answered") {
+					const header = [
+						`Source: ${target}`,
+						normalizeNote,
+						`Answered by ${native.spec} with Anthropic's server-side web fetch (dynamic filtering). Refetch without \`prompt\` for the raw content.`,
+						native.cutOff ? CUT_OFF_NOTE : undefined,
+					]
+						.filter(Boolean)
+						.join("\n");
+					const text = persistIfLarge(`${header}\n\n${native.text}`, { dir: sessionResultsDir(ctx), id: toolCallId });
+					return { content: [{ type: "text", text }], details: { url: target, reader: native.spec, path: "native" } };
+				}
+				if (native.kind === "fell-back") {
+					nativeNote = `Anthropic's server-side fetch did not answer (${native.reason}); fetched the page locally instead.`;
+				}
 			}
 
 			try {
@@ -268,15 +316,17 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 							entry.title ? `# ${entry.title}` : undefined,
 							`Source: ${target}`,
 							normalizeNote,
+							nativeNote,
 							entry.note,
 							answered.truncated ? "(The page exceeded the reader's window; its tail was not read.)" : undefined,
 							`Answered by ${answered.reader} from the full page (${entry.markdown.length} chars). Refetch without \`prompt\` for the raw content.`,
+							answered.cutOff ? "(The answer was cut off at the reader's output limit and may be incomplete.)" : undefined,
 						]
 							.filter(Boolean)
 							.join("\n");
 						return {
 							content: [{ type: "text", text: `${header}\n\n${answered.answer}` }],
-							details: { url: target, totalChars: entry.markdown.length, reader: answered.reader },
+							details: { url: target, totalChars: entry.markdown.length, reader: answered.reader, path: "local" },
 						};
 					}
 					readerNote = `Could not answer \`prompt\` (${answered.error}); returning the raw page content instead.`;
@@ -288,6 +338,7 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 					entry.title ? `# ${entry.title}` : undefined,
 					`Source: ${target}`,
 					normalizeNote,
+					nativeNote,
 					entry.note,
 					readerNote,
 					page.truncated
@@ -304,6 +355,7 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 						totalChars: page.totalChars,
 						truncated: page.truncated,
 						nextOffset: page.nextOffset,
+						path: "local",
 					},
 				};
 			} catch (error) {

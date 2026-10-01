@@ -344,7 +344,12 @@ export function forcedReasoningLevel(model: Model<Api>): ThinkingLevel | undefin
  * A false positive only costs one retry with minimal thinking.
  */
 export function isReasoningMandatoryError(message: string): boolean {
-	return /(reasoning|thinking)[^.]*\b(mandatory|cannot be disabled|can't be disabled|must be enabled|is required)\b/i.test(message);
+	return (
+		/(reasoning|thinking)[^.]*\b(mandatory|cannot be disabled|can't be disabled|must be enabled|is required)\b/i.test(message) ||
+		// Anthropic's: Opus 5.5 ("\"thinking.type.disabled\" is not supported for this model")
+		// and Sonnet 5.5 ("To turn thinking off on this model, send … between_tools"), findings §43.
+		/thinking\.type\.disabled\W+is not supported|to turn thinking off on this model/i.test(message)
+	);
 }
 
 /** The level to retry with after isReasoningMandatoryError: the lowest real level the model supports. */

@@ -219,7 +219,7 @@ interface BrandingEditorUI {
  * is never affected; see prompt-marker.ts).
  */
 function installPromptMarker(
-	ctx: { hasUI: boolean; mode: string; ui: BrandingEditorUI },
+	ctx: { hasUI: boolean; mode: string; ui: BrandingEditorUI; isIdle(): boolean; hasPendingMessages(): boolean },
 	argumentHints: ReadonlyMap<string, CommandHint>,
 	agentView: { target?: AgentViewTarget },
 ): void {
@@ -239,9 +239,18 @@ function installPromptMarker(
 	};
 	const badge = () => agentView.target?.badge;
 	const paintBadge = (label: string) => safeThemeInverse(ui.theme)(safeThemePaint(ui.theme)("accent", ` ${label} `));
+	// The editor can outlive this context across a session replacement; a stale
+	// context throws, and ↑ must still reach the editor then.
+	const queued = () => {
+		try {
+			return !ctx.isIdle() && ctx.hasPendingMessages();
+		} catch {
+			return false;
+		}
+	};
 	ui.setEditorComponent(
 		(tui: unknown, theme: unknown, keybindings: unknown) =>
-			new PromptEditor(tui as never, theme as never, keybindings as never, renderMarker, renderHint, badge, paintBadge),
+			new PromptEditor(tui as never, theme as never, keybindings as never, renderMarker, renderHint, badge, paintBadge, queued),
 	);
 }
 
@@ -379,7 +388,7 @@ export default function brandingExtension(pi: ExtensionAPI) {
 		live = true;
 		setTimeout(() => retitle(ctx), 0).unref?.();
 		ctx.ui.setHiddenThinkingLabel(THINKING_LABEL);
-		installPromptMarker(ctx as unknown as { hasUI: boolean; mode: string; ui: BrandingEditorUI }, argumentHints, agentView);
+		installPromptMarker(ctx as unknown as Parameters<typeof installPromptMarker>[0], argumentHints, agentView);
 		try {
 			readFileHints(promptTemplateFiles(ctx.cwd, os.homedir(), getAgentDir()));
 		} catch {
