@@ -4,6 +4,11 @@
  * `web_search` is registered here with Claude Code's schema (`query`,
  * `allowed_domains`, `blocked_domains`) and routes by what the session can do:
  *
+ *   0. Anthropic's server-side `web_search` with dynamic filtering, in our own
+ *      nested call, on a first-party Anthropic API-key session with a Claude
+ *      4.6+ model available (lib/anthropic-server-tools.ts). pi-web-search's
+ *      Anthropic call uses the older `web_search_20250305`, so it is the next
+ *      step down, not this one.
  *   1. Provider-native search through the community `pi-web-search` package
  *      when the current model's provider has one (Anthropic, OpenAI/Codex,
  *      Gemini, xAI) — no third-party key, and as close to Claude Code's
@@ -30,7 +35,10 @@ import webSearchPackage from "pi-web-search/src/index.ts";
 import { getProviderKind } from "pi-web-search/src/api.ts";
 import { webSearch as nativeWebSearch } from "pi-web-search/src/web_search.ts";
 import { getWebSearchModel } from "pi-web-search/src/utils.ts";
+import { tryNativeWeb } from "../lib/anthropic-server-call.ts";
+import { nativeSearchBody, searchOutcome, searchSources, sourceLine, type ThinkingFields } from "../lib/anthropic-server-tools.ts";
 import { readJsonFile } from "../lib/atomic-write.ts";
+import { recordUsage } from "../lib/usage-bus.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
@@ -68,6 +76,8 @@ export default function webExtension(pi: ExtensionAPI) {
 
 	// Once per session: the user is told the first time a search goes keyless.
 	let keylessNoticeShown = false;
+	// Per-session: the thinking-off fields a native-call model turned out to need.
+	const learnedNativeThinking = new Map<string, ThinkingFields>();
 
 	pi.registerTool({
 		name: "web_search",
@@ -85,6 +95,58 @@ export default function webExtension(pi: ExtensionAPI) {
 		}),
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			const filters = { allowed: params.allowed_domains, blocked: params.blocked_domains };
+
+			// 0. Anthropic's server-side search with dynamic filtering, on a
+			// first-party Anthropic API-key session. The domain filters are enforced
+			// by the search itself; it takes one list or the other, so a call with
+			// both goes down the paths below. Anything short of an answer from real
+			// results falls through, with a note saying why.
+			let nativeNote: string | undefined;
+			const bothFilters = Boolean(params.allowed_domains?.length && params.blocked_domains?.length);
+			if (!bothFilters) {
+				const native = await tryNativeWeb(ctx, {
+					body: (model) =>
+						nativeSearchBody({ model, query: params.query, allowedDomains: params.allowed_domains, blockedDomains: params.blocked_domains }),
+					outcome: searchOutcome,
+					onUsage: (usage) => recordUsage(pi, "web-search", usage),
+					learned: learnedNativeThinking,
+					onStart: () =>
+						onUpdate?.({
+							content: [{ type: "text", text: `Searching with Anthropic's web search for "${params.query}"...` }],
+							details: { query: params.query } as SearchDetails,
+						}),
+					signal,
+				});
+				if (native.kind === "cancelled") {
+					return {
+						content: [{ type: "text", text: `Search for "${params.query}" was cancelled.` }],
+						details: { query: params.query } as SearchDetails,
+						isError: true,
+					};
+				}
+				if (native.kind === "answered") {
+					const sources = searchSources(native.result);
+					const filtered = Boolean(params.allowed_domains?.length || params.blocked_domains?.length);
+					const text = [
+						native.text,
+						...(native.cutOff ? ["", "(The answer was cut off at the output limit and may be incomplete.)"] : []),
+						"",
+						"Sources:",
+						...sources.map(sourceLine),
+						"",
+						`(Searched with Anthropic's server-side web search with dynamic filtering, on ${native.spec}${filtered ? "; the domain filters were enforced by the search" : ""}.)`,
+					].join("\n");
+					return {
+						content: [{ type: "text", text: persistIfLarge(text, { dir: sessionResultsDir(ctx), id: toolCallId }) }],
+						details: { query: params.query, native: true, backend: `anthropic web_search via ${native.spec}`, resultCount: sources.length } as SearchDetails,
+					};
+				}
+				if (native.kind === "fell-back") {
+					nativeNote = `(Anthropic's server-side web search did not answer (${native.reason}); the results below come from the next search route.)`;
+				}
+			}
+			const withNativeNote = <T extends { type: string }>(content: T[]) =>
+				nativeNote ? [...content, { type: "text" as const, text: nativeNote }] : content;
 
 			// 1. Provider-native search (pi-web-search) when the current model — or a
 			// web-search.json model — supports it. Its result text is passed through;
@@ -104,13 +166,14 @@ export default function webExtension(pi: ExtensionAPI) {
 				// answer (nothing to post-filter), so the filters ride as `site:`
 				// operators only — say so, rather than let the model assume enforcement.
 				const hasFilters = Boolean(params.allowed_domains?.length || params.blocked_domains?.length);
-				const content =
+				const content = withNativeNote(
 					hasFilters && !result.details?.error
 						? [
 								...result.content,
 								{ type: "text" as const, text: "(Domain filters were applied as `site:` operators in the query — best-effort with provider-native search; verify the sources' hosts.)" },
 							]
-						: result.content;
+						: result.content,
+				);
 				return {
 					...result,
 					content,
@@ -135,7 +198,7 @@ export default function webExtension(pi: ExtensionAPI) {
 				// "Fell back after") or long snippets can still be large: persist, never slice.
 				const text = persistIfLarge(formatSearchResults(params.query, outcome), { dir: sessionResultsDir(ctx), id: toolCallId });
 				return {
-					content: [{ type: "text", text }],
+					content: withNativeNote([{ type: "text" as const, text }]),
 					details: {
 						query: params.query,
 						backend: outcome.backend.name,
@@ -151,7 +214,7 @@ export default function webExtension(pi: ExtensionAPI) {
 					{ dir: sessionResultsDir(ctx), id: toolCallId },
 				);
 				return {
-					content: [{ type: "text", text }],
+					content: withNativeNote([{ type: "text" as const, text }]),
 					details: { query: params.query, error: message } as SearchDetails,
 					isError: true,
 				};
