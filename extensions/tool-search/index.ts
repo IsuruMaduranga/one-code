@@ -38,7 +38,10 @@ import {
 	resultText,
 	searchTools,
 	selectedNames,
+	type ResponsesToolLoadModel,
 	stabilizeDeferredTools,
+	stabilizeResponsesToolLoads,
+	responsesToolLoadCompat,
 	supportsToolReferences,
 	toolNotFoundName,
 	toolSearchLoads,
@@ -171,7 +174,14 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	// demoted back to deferred and loaded through `tool_reference` blocks in the
 	// tool_search result that activated it (lib/deferred.ts stabilizeDeferredTools
 	// has the rules; working-docs/decisions/caching.md the measurements).
+	// On OpenAI Responses models with native tool loading (GPT-5.4 and newer on
+	// openai and openai-codex) a loaded tool leaves `tools` for pi-ai's own
+	// load item at the tool_search result instead (stabilizeResponsesToolLoads).
 	pi.on("before_provider_request", (event, ctx) => {
+		const toolLoadCompat = responsesToolLoadCompat(ctx.model as ResponsesToolLoadModel | undefined);
+		if (toolLoadCompat) {
+			return stabilizeResponsesToolLoads(event.payload as Record<string, unknown>, (name) => deferredRegistry.has(name), loads, toolLoadCompat);
+		}
 		if (!supportsToolReferences(ctx.model as { provider?: string; id?: string } | undefined)) return undefined;
 		if (!looksLikeAnthropicRequest(event.payload)) return undefined;
 		return stabilizeDeferredTools(event.payload as Record<string, unknown>, pi.getAllTools(), (name) => deferredRegistry.has(name), loads);

@@ -4,11 +4,16 @@
  *
  * Reads the requests `dump-requests.ts` wrote (one JSON payload per line) and
  * the `--mode json` event stream of the same run, and asserts what a healthy
- * prefix looks like:
+ * prefix looks like. Three request shapes: Anthropic Messages (`system`,
+ * `messages`), OpenAI Responses (`instructions`, `input`) and Chat
+ * Completions (`messages` opening with a system message). Only the session's
+ * own requests count: the model of the first request with tools; side
+ * calls (the auto-mode classifier, a reader model) are dumped too and skipped.
  *
- *   1. `system` is byte-identical across every request of the run.
- *   2. `messages[0]` (the first user message with its reminder stack) is
- *      byte-identical across every request — the H2 regression rewrote it.
+ *   1. `system`/`instructions` is byte-identical across every request.
+ *   2. The head of the conversation, every item up to and including the first
+ *      user message (its reminder stack), is byte-identical across every
+ *      request — the H2 regression rewrote it.
  *      pi's `cache_control` markers are stripped first: the breakpoint sits on
  *      the last user block in request 1 and moves to the tool result after,
  *      which is placement, not content.
@@ -18,7 +23,11 @@
  *      grows the array (findings §7).
  *   4. Request N+1 reads at least what request N had cached:
  *      cacheRead[N+1] >= cacheRead[N] + cacheWrite[N] - slack (default 0; the
- *      probe numbers in the review were exact).
+ *      probe numbers in the review were exact). A provider that caches
+ *      implicitly reports no writes (DeepSeek through OpenRouter); when no
+ *      request of the run reports one, the floor is everything request N sent,
+ *      input + cacheRead, less one cache block (IMPLICIT_BLOCK) for the
+ *      provider's rounding.
  *
  * Usage: node test/e2e/cache-probe.mjs <wire.jsonl> <events.jsonl> [--slack N] [--eager-load-ok]
  * Exit 1 on any failed check. `cache-probe.sh` produces both inputs.
@@ -41,10 +50,27 @@ const lines = (path) =>
 		.filter((l) => l.trim().length > 0)
 		.map((l) => JSON.parse(l));
 
-const requests = lines(positional[0]);
+const dumped = lines(positional[0]);
+const hasTools = (p) => Array.isArray(p?.tools) && p.tools.length > 0;
+const sessionModel = dumped.find(hasTools)?.model;
+const isSession = (p) => hasTools(p) && p.model === sessionModel;
+const requests = dumped.filter(isSession);
+const skipped = dumped.length - requests.length;
 const usages = lines(positional[1])
 	.filter((e) => e.type === "message_end" && e.message?.role === "assistant" && e.message.usage)
 	.map((e) => e.message.usage);
+
+/** Implicit caches store whole blocks (OpenAI 128 tokens, DeepSeek 64); allow one partial block of 256. */
+const IMPLICIT_BLOCK = 256;
+/**
+ * A provider caches implicitly when no request of the run reports a write.
+ * Decided for the whole run: one explicit-cache request that happens to write
+ * nothing must not switch to the implicit floor.
+ */
+const implicitCache = usages.every((u) => (u.cacheWrite ?? 0) === 0);
+/** The cached tokens request `i` must read, from what request `i - 1` sent. */
+const readFloor = (prev) =>
+	implicitCache ? (prev.input ?? 0) + (prev.cacheRead ?? 0) - IMPLICIT_BLOCK - slack : (prev.cacheRead ?? 0) + (prev.cacheWrite ?? 0) - slack;
 
 const failures = [];
 const warnings = [];
@@ -63,8 +89,13 @@ const withoutCacheControl = (value) => {
 	}
 	return value;
 };
-const systemText = (p) => JSON.stringify(withoutCacheControl(p.system ?? null));
-const firstMessage = (p) => JSON.stringify(withoutCacheControl(p.messages?.[0] ?? null));
+const systemText = (p) => JSON.stringify(withoutCacheControl(p.system ?? p.instructions ?? null));
+/** Every item up to and including the first user message: the cached head of the conversation. */
+const conversationHead = (p) => {
+	const items = p.messages ?? p.input ?? [];
+	const firstUser = items.findIndex((item) => item?.role === "user");
+	return JSON.stringify(withoutCacheControl(firstUser === -1 ? null : items.slice(0, firstUser + 1)));
+};
 const eagerTools = (p) => JSON.stringify(withoutCacheControl((p.tools ?? []).filter((t) => t?.defer_loading !== true)));
 
 /** Index of the first differing char, for a readable pointer into a long string. */
@@ -90,9 +121,10 @@ const checkStable = (label, pick, downgrade = false) => {
 };
 
 checkStable("system", systemText);
-checkStable("messages[0]", firstMessage);
+checkStable("conversation head (to the first user message)", conversationHead);
 checkStable("eager tools", eagerTools, eagerLoadOk);
 
+if (skipped > 0) console.log(`(${skipped} side-call request${skipped === 1 ? "" : "s"} skipped)`);
 if (usages.length !== requests.length) {
 	warnings.push(`${requests.length} requests dumped but ${usages.length} assistant usages seen (retry or a request that did not complete?)`);
 }
@@ -100,14 +132,14 @@ if (usages.length !== requests.length) {
 console.log("request  input  cacheRead  cacheWrite  expected>=");
 for (let i = 0; i < usages.length; i++) {
 	const u = usages[i];
-	const expected = i === 0 ? "-" : String((usages[i - 1].cacheRead ?? 0) + (usages[i - 1].cacheWrite ?? 0) - slack);
+	const expected = i === 0 ? "-" : String(readFloor(usages[i - 1]));
 	console.log(
 		`${String(i + 1).padStart(7)}  ${String(u.input ?? 0).padStart(5)}  ${String(u.cacheRead ?? 0).padStart(9)}  ${String(u.cacheWrite ?? 0).padStart(10)}  ${expected.padStart(10)}`,
 	);
 	if (i > 0) {
-		const need = (usages[i - 1].cacheRead ?? 0) + (usages[i - 1].cacheWrite ?? 0) - slack;
+		const need = readFloor(usages[i - 1]);
 		if ((u.cacheRead ?? 0) < need) {
-			failures.push(`request ${i + 1} read ${u.cacheRead ?? 0} cached tokens; request ${i} had cached ${need + slack} (miss of ${need - (u.cacheRead ?? 0)} tokens)`);
+			failures.push(`request ${i + 1} read ${u.cacheRead ?? 0} cached tokens; it should have read at least ${need} of what request ${i} sent (miss of ${need - (u.cacheRead ?? 0)} tokens)`);
 		}
 	}
 }

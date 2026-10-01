@@ -34,7 +34,7 @@ execFileSync("git", ["config", "user.email", "e@x.com"], { cwd: workdir });
 execFileSync("git", ["config", "user.name", "e"], { cwd: workdir });
 
 // DEFAULT (manual) permission mode — NOT auto, NOT skip-permissions.
-const child = spawn("pi", ["--mode", "rpc", "--session-dir", sessionDir, "--model", MODEL], {
+const child = spawn("pi", ["--mode", "rpc", "--permission-mode", "default", "--session-dir", sessionDir, "--model", MODEL], {
 	cwd: workdir,
 	stdio: ["pipe", "pipe", "inherit"],
 });
@@ -103,7 +103,7 @@ function finish() {
 const script = [
 	"export const meta = { name: 'perm-probe', description: 'one agent runs a marker command', phases: [{ title: 'Probe' }] }",
 	"phase('Probe')",
-	"const out = await agent('Run exactly this bash command: echo WORKFLOW_BASH_RAN — then report its raw output as your final message.')",
+	"const out = await agent('Run exactly this bash command: touch workflow-ran.txt && echo WORKFLOW_BASH_RAN — then report its raw output as your final message.')",
 	"return { out }",
 ].join("\n");
 

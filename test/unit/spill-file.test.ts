@@ -1,9 +1,11 @@
 /**
  * pi's foreground shell spills a long output to os.tmpdir(), outside every
  * readable root. The wrapper moves the file into the session's results dir
- * and rewrites the path, on success and on the error pi throws for a failing
- * command, so reading the full output is a working-space read in every mode.
+ * and rewrites the path, on success, on the error result pi 0.99 returns for a
+ * failing command and on the error older pi throws, so reading the full
+ * output is a working-space read in every mode.
  */
+import { randomBytes } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -35,14 +37,27 @@ describe("keepSpillReadable", () => {
 		expect(text).not.toContain(tmpdir() + "/pi-bash-");
 	});
 
-	it("rewrites the path in the error pi throws for a failing command", async () => {
-		const failure = await run("seq 1 6000; exit 3").catch((error: Error) => error);
-		expect(failure).toBeInstanceOf(Error);
-		const message = (failure as Error).message;
-		expect(message).toContain("Command exited with code 3");
-		const path = /Full output: ([^\]]+)\]/.exec(message)?.[1];
+	it("rewrites the path in the error result pi returns for a failing command", async () => {
+		const result = (await run("seq 1 6000; exit 3")) as { content: Array<{ type: string; text?: string }>; isError?: boolean };
+		expect(result.isError).toBe(true);
+		const text = result.content[0].text ?? "";
+		expect(text).toContain("Command exited with code 3");
+		const path = /Full output: ([^\]]+)\]/.exec(text)?.[1];
 		expect(path?.startsWith(resultsDir)).toBe(true);
 		expect(existsSync(path!)).toBe(true);
+	});
+
+	it("rewrites the path in the error pi before 0.99 throws for a failing command", async () => {
+		const spill = (await run("seq 1 6000")).content[0].text ?? "";
+		// Recreate a spill file in the temp dir, as pi 0.87 names it in the error it throws.
+		const piPath = join(tmpdir(), `pi-bash-${randomBytes(8).toString("hex")}.log`);
+		writeFileSync(piPath, spill);
+		const failure = await keepSpillReadable(() => Promise.reject(new Error(`out\n\nCommand exited with code 3 [Full output: ${piPath}]`)), resultsDir).catch((error: Error) => error);
+		expect(failure).toBeInstanceOf(Error);
+		const path = /Full output: ([^\]]+)\]/.exec((failure as Error).message)?.[1];
+		expect(path?.startsWith(resultsDir)).toBe(true);
+		expect(existsSync(path!)).toBe(true);
+		expect(existsSync(piPath)).toBe(false);
 	});
 
 	it("leaves a short output alone", async () => {

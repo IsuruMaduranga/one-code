@@ -1,9 +1,10 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import brandingExtension from "../../extensions/branding/index.ts";
 import { ARGUMENT_HINT_CHANNEL } from "../../extensions/lib/argument-hints.ts";
+import { TURN_OFF_YES } from "../../extensions/lib/replaced-builtins.mjs";
 
 function fakePi() {
 	const handlers = new Map<string, ((event: unknown, ctx: unknown) => void)[]>();
@@ -18,8 +19,8 @@ function fakePi() {
 		},
 		getSessionName: () => undefined,
 	};
-	const fire = (event: string, ctx: unknown) => {
-		for (const fn of handlers.get(event) ?? []) fn({}, ctx);
+	const fire = (event: string, ctx: unknown, payload: unknown = {}) => {
+		for (const fn of handlers.get(event) ?? []) fn(payload, ctx);
 	};
 	return { pi, fire };
 }
@@ -49,5 +50,54 @@ describe("branding session_start", () => {
 		expect(typeof factory).toBe("function");
 		// The hint listener exists even though the banner code never ran.
 		expect(() => pi.events.emit(ARGUMENT_HINT_CHANNEL, { command: "btw", hint: "[question]" })).not.toThrow();
+	});
+});
+
+describe("branding: pi's built-in tool search and MCP at startup", () => {
+	const dirs: string[] = [];
+	afterEach(() => {
+		vi.unstubAllEnvs();
+		for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+	});
+
+	/** A user's own pi (no app) whose settings leave both built-ins on, and a session context that answers the question. */
+	const setup = (projectExtensions?: string[]) => {
+		const root = mkdtempSync(join(tmpdir(), "branding-builtins-"));
+		dirs.push(root);
+		const agentDir = join(root, "agent");
+		const cwd = join(root, "project");
+		mkdirSync(agentDir, { recursive: true });
+		mkdirSync(join(cwd, ".pi"), { recursive: true });
+		if (projectExtensions) writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({ extensions: projectExtensions }));
+		vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
+		vi.stubEnv("HOME", root);
+		vi.stubEnv("CC_VERSION", "");
+		vi.stubEnv("CC_NO_BANNER", "1");
+		const select = vi.fn(async () => TURN_OFF_YES);
+		const notify = vi.fn();
+		const ctx = { hasUI: true, mode: "tui", cwd, ui: { setHiddenThinkingLabel: () => {}, setEditorComponent: () => {}, notify, setTitle: () => {}, select } };
+		const { pi, fire } = fakePi();
+		brandingExtension(pi as never);
+		return { agentDir, ctx, fire, select, notify };
+	};
+	const settled = () => new Promise((resolve) => setTimeout(resolve, 50));
+
+	it("asks at startup, but not again on /new, resume or fork", async () => {
+		const { ctx, fire, select } = setup();
+		for (const reason of ["new", "resume", "fork"]) fire("session_start", ctx, { reason });
+		await settled();
+		expect(select).not.toHaveBeenCalled();
+		fire("session_start", ctx, { reason: "startup" });
+		await settled();
+		expect(select).toHaveBeenCalledTimes(1);
+	});
+
+	it("after a yes, names the built-in the project's settings keep on", async () => {
+		const { agentDir, ctx, fire, notify } = setup(["+builtin:mcp"]);
+		fire("session_start", ctx, { reason: "startup" });
+		await settled();
+		expect(JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf8")).extensions).toEqual(["-builtin:tool-search"]);
+		const texts = notify.mock.calls.map(([text]) => String(text));
+		expect(texts.some((text) => text.includes("Turned off pi's built-in tool-search") && text.includes("This project's settings keep mcp on"))).toBe(true);
 	});
 });

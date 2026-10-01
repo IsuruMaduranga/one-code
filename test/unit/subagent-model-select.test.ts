@@ -14,6 +14,7 @@ import {
 	resolveSubagentModel,
 	subagentModelMenu,
 	subagentModelNotes,
+	refusedModelNote,
 	subagentModelsReminder,
 	subagentStatusModel,
 } from "../../extensions/subagents/model-select.ts";
@@ -963,5 +964,14 @@ describe("resolveSubagentModel — image modality gate", () => {
 		expect(resolveSubagentModel({ requested: "haiku", sessionModel: session, available }).model?.id).toBe("gpt-5-flash-text");
 		// Gated, it is auto-upgraded to the image-capable cheap model.
 		expect(resolveSubagentModel({ requested: "haiku", sessionModel: session, available, requireImageInput: true }).model?.id).toBe("gpt-5-flash-vision");
+	});
+});
+
+describe("refusedModelNote", () => {
+	it("names the refused model and the default it leaves", () => {
+		expect(refusedModelNote("openai/gpt-5-chat-latest", model("openai", "gpt-5.2", 1.75))).toBe(
+			"Model openai/gpt-5-chat-latest is not usable on this account, so automatic selection skips it and the subagent/workflow `model` field should not name it. The subagent default is now openai/gpt-5.2.",
+		);
+		expect(refusedModelNote("openai/gpt-5-chat-latest", undefined)).toContain("The subagent default is now this session's model.");
 	});
 });

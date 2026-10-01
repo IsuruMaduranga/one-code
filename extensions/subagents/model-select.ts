@@ -567,6 +567,18 @@ export function settingOverrideNotice({ sessionModel, defaultModel, defaultSourc
 	);
 }
 
+/**
+ * The one-shot that corrects the menu once message 1 is frozen: a model this
+ * account refused, and the subagent default it leaves (undefined: the
+ * session's own model).
+ */
+export function refusedModelNote(refused: string, defaultModel: Model<Api> | undefined): string {
+	return (
+		`Model ${refused} is not usable on this account, so automatic selection skips it and the subagent/workflow \`model\` field should not name it. ` +
+		`The subagent default is now ${defaultModel ? spec(defaultModel) : "this session's model"}.`
+	);
+}
+
 /** The every-turn reminder body. Kept short: its tokens are paid on every call. */
 export function subagentModelsReminder(options: MenuOptions): string {
 	const menu = subagentModelMenu(options);

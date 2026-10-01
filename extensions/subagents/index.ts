@@ -24,8 +24,8 @@ import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { Api, Message, Model } from "@earendil-works/pi-ai";
-import { defineTool, getAgentDir, type ExtensionAPI, type ExtensionContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import { type AgentToolResult, defineTool, getAgentDir, type ExtensionAPI, type ExtensionContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { type Static, Type } from "typebox";
 import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../auto-mode/actions.ts";
 import { type AgentDefinition, type AgentSource, agentDirs, discoverAgents } from "./agents.ts";
 import { findConfigured, modelIdentity, modelSpec, supportsImageInput } from "../lib/model-policy.ts";
@@ -37,6 +37,7 @@ import {
 	type SubagentModelResolution,
 	SUBAGENT_STATUS_CHANNEL,
 	subagentModelNotes,
+	refusedModelNote,
 	subagentModelsReminder,
 	subagentStatusModel,
 } from "./model-select.ts";
@@ -385,7 +386,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		// The default may have been that model: recompute and republish the
 		// reminder/banner so the next request already names the replacement.
 		const event = data as ModelUnusableEvent;
-		if (rememberUnusable(event.model) && lastCtx) emitModelStatus(lastCtx);
+		if (rememberUnusable(event.model) && lastCtx) emitModelStatus(lastCtx, lastCtx.model, event.model);
 	});
 
 	// After `enter_worktree` the session works in the worktree, but pi keeps
@@ -421,7 +422,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				pi.events.emit(MODEL_UNUSABLE_CHANNEL, { model, reason } satisfies ModelUnusableEvent);
 				const live = liveUiCtx(lastCtx);
 				live?.ui.notify(`Subagent model ${model} is not usable on this account (${reason}); automatic selection skips it from now on.`, "warning");
-				if (lastCtx) emitModelStatus(lastCtx);
+				if (lastCtx) emitModelStatus(lastCtx, lastCtx.model, model);
 			},
 		).catch((error: unknown) => {
 			runtimePromise = undefined;
@@ -584,17 +585,33 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		return resolution;
 	};
 
+	// Message 1 is frozen once a request has gone out (decisions/caching.md):
+	// after that, a model the account refused is corrected by a one-shot, not by
+	// rewriting the menu and re-caching the conversation. A user's /model or
+	// /subagent still rewrites it.
+	let requestSent = false;
+	pi.on("context", () => {
+		requestSent = true;
+	});
+
 	/**
 	 * The every-turn menu reminder and the banner's subagent-default status.
 	 * Every-turn because reminders are transient per-request injections — that
 	 * scope survives compaction by construction — and keyed so a model change
 	 * replaces it: the very next LLM call, even mid-turn, carries the update.
+	 * `refused` names a model the account just refused: once a request has gone
+	 * out, that change rides a one-shot instead.
 	 */
-	const emitModelStatus = (ctx: ExtensionContext, sessionModel = ctx.model) => {
+	const emitModelStatus = (ctx: ExtensionContext, sessionModel = ctx.model, refused?: string) => {
 		const available = usableModels(ctx);
 		const configured = applicableSubagentDefault(loadSubagentDefault(os.homedir()), sessionModel);
 		const resolution = resolveAutoDefault(sessionModel, available, configured);
 		for (const notice of resolution.notices) notifyModelOnce(ctx, notice);
+		if (refused !== undefined && requestSent) {
+			pi.events.emit(REMINDER_CHANNEL, { text: refusedModelNote(refused, resolution.model) });
+			pi.events.emit(SUBAGENT_STATUS_CHANNEL, subagentStatusModel(configured, resolution));
+			return;
+		}
 		pi.events.emit(REMINDER_CHANNEL, {
 			text: subagentModelsReminder({
 				available,
@@ -2272,6 +2289,312 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		},
 	});
 
+	const SendMessageParams = Type.Object({
+		to: Type.String({ description: "Agent name (or task id) from a previous Agent run" }),
+		message: Type.String({ description: "Plain text message for the agent" }),
+		summary: Type.Optional(Type.String({ description: "5-10 word preview shown in the UI" })),
+	});
+
+	/**
+	 * SendMessage's body, typed on the plain extension context: the agent view
+	 * also sends from an input handler, which has no tool context (pi 0.99's
+	 * `ExtensionToolContext` adds nested tool calls this never makes).
+	 */
+	const sendMessage = async (toolCallId: string, params: Static<typeof SendMessageParams>, signal: AbortSignal | undefined, ctx: ExtensionContext): Promise<AgentToolResult<unknown>> => {
+		if (params.to === "main") {
+			// The main conversation's SendMessage only addresses spawned agents; the
+			// "main" recipient exists only on a subagent's own injected SendMessage.
+			return {
+				content: [{ type: "text", text: 'You are the main conversation — "main" is only a valid recipient from inside a subagent.' }],
+				details: {},
+				isError: true,
+			};
+		}
+
+		const record = registry.resolve(params.to);
+		if (!record) {
+			const known = registry.names().join(", ") || "(none)";
+			return {
+				content: [
+					{
+						type: "text",
+						text: `No run named "${params.to}". SendMessage only reaches agent runs already started this session — address them by their run name or task id, not by a catalog agent name. Start one with the Agent tool first if you haven't. Known runs: ${known}.`,
+					},
+				],
+				details: {},
+				isError: true,
+			};
+		}
+		// Resident background agent: reach its in-process session live.
+		const resident = residents.get(record.taskId);
+		if (resident && !resident.handle.exited()) {
+			if (resident.handle.busy()) {
+				let delivery: "started" | "steered";
+				try {
+					delivery = await resident.handle.send(params.message);
+				} catch (error) {
+					return {
+						content: [{ type: "text", text: `Could not deliver the message to ${record.name}: ${(error as Error).message}` }],
+						details: {},
+						isError: true,
+					};
+				}
+				if (delivery === "steered") {
+					return {
+						content: [
+							{
+								type: "text",
+								text: `Message steered into ${record.name}'s running turn — it will be taken into account before the turn completes, and the turn's completion notification will reflect it.`,
+							},
+						],
+						details: { agentRuns: [record], steered: true },
+					};
+				}
+				// The turn had just ended (settle window): the message rides the next
+				// turn, whose reply nobody has claimed yet — announce it as an update.
+				spawnedThisLoop.add(record.taskId); // arm the anti-fabrication backstop (WEAK-MODEL-REVIEW H1)
+				return {
+					content: [
+						{
+							type: "text",
+							text: `${record.name}'s turn had just finished; the message starts its next turn. The reply will arrive as a task notification from ${record.name}. ${PENDING_RESULT_PROHIBITION}`,
+						},
+					],
+					details: { agentRuns: [record] },
+				};
+			}
+
+			const taskId = generateTaskId();
+			let finish!: () => void;
+			const finished = new Promise<void>((resolve) => {
+				finish = resolve;
+			});
+			// This task is ONE turn of the resident agent. Its output must be that
+			// turn's reply — the same text the reply notification carries — not the
+			// resident's whole multi-turn transcript, or task_output and the
+			// notification disagree (superset), which weak models conflate.
+			let replyOutput = "";
+			const task: BackgroundTask = {
+				id: taskId,
+				kind: "subagent",
+				ownUI: true, // rendered live by the subagents panel's agent strip
+				description: `message to ${record.name}${params.summary ? `: ${params.summary}` : ""}`,
+				status: "running",
+				startedAt: Date.now(),
+				output: () => replyOutput || resident.handle.snapshot().text,
+				stop: () => stopAgent(record.taskId, resident.handle),
+				resident: () => !resident.handle.exited(),
+				finished,
+			};
+			resident.turnHandlers.push((outcome, review, stopped) => {
+				task.status = stopped ? "stopped" : outcome.failed ? "failed" : "completed";
+				task.finishedAt = Date.now();
+				replyOutput = outcome.output;
+				finish();
+				// `<task-id>` is this message's task (what task_output resolves); `from=`
+				// stays the agent's id, the address a further SendMessage uses. The
+				// tracker's tokens and tool uses span the resident's life, so the
+				// duration does too.
+				notifyHandBack({
+					from: record.taskId,
+					taskId,
+					name: record.name,
+					toolUseId: toolCallId,
+					outputFile: outputLogPath(record),
+					outcome,
+					stopped,
+					startedAt: resident.startedAt,
+					report: bounded(outcome.output, `${taskId}-reply`, OUTPUT_CAP),
+					review,
+				});
+			});
+			pi.events.emit(TASK_REGISTER_CHANNEL, task);
+			void resident.handle.send(params.message);
+			// Same anti-fabrication guard as a fresh spawn (WEAK-MODEL-REVIEW H1):
+			// the reply arrives as a notification, so forbid predicting it and arm
+			// the agent_end backstop (keyed by the agent's persistent id).
+			spawnedThisLoop.add(record.taskId);
+			return {
+				content: [
+					{
+						type: "text",
+						text: `Message sent to resident agent ${record.name} (task ${taskId}). The reply will arrive as a task notification on its own; inspect with task_output. ${PENDING_RESULT_PROHIBITION}`,
+					},
+				],
+				details: { agentRuns: [record], taskId },
+			};
+		}
+
+		if (runningIds.has(record.taskId)) {
+			return {
+				content: [
+					{ type: "text", text: `Agent ${record.name} is still running — wait for its completion notification, then resend.` },
+				],
+				details: {},
+				isError: true,
+			};
+		}
+		const sessionFile = registry.sessionFileFor(record);
+		// A fork has no agent definition: its identity is the parent's prompt at
+		// spawn time, persisted beside its session. Without it a resume would run
+		// on pi's stock prompt and default tools — refuse instead (review S6).
+		const forkPrompt = record.agent === FORK_AGENT ? readForkPrompt(record) : undefined;
+		if (record.agent === FORK_AGENT && forkPrompt === undefined) {
+			return {
+				content: [
+					{
+						type: "text",
+						text: `Agent ${record.name} is a fork whose system prompt was not persisted (it ran before fork resume was supported, or its files were removed), so it cannot be resumed faithfully. Start a fresh run instead.`,
+					},
+				],
+				details: {},
+				isError: true,
+			};
+		}
+		if (!sessionFile) {
+			return {
+				content: [
+					{ type: "text", text: `Agent ${record.name} has no persisted session to resume (it may have run before session persistence, or its files were removed).` },
+				],
+				details: {},
+				isError: true,
+			};
+		}
+
+		// A worktree run whose agent left no changes had its worktree removed at
+		// exit, but the record (persisted in the tool result) still points there.
+		// Resume in the parent cwd instead of a deleted directory, say so in the
+		// reply, and fix the record so later messages don't repeat the note (M2).
+		let relocationNote = "";
+		if (!existsSync(record.cwd)) {
+			const cwd = workCwd(ctx);
+			relocationNote = `[${record.name}'s working directory ${record.cwd} no longer exists${record.worktree ? " (its isolation worktree was removed when the run left no changes)" : ""}; this turn ran in ${cwd}.]\n\n`;
+			record.cwd = cwd;
+			record.worktree = undefined;
+		}
+
+		// Before the run is marked running (L8, as in executeRun).
+		const runtime = await runtimeOrError(ctx);
+		if (typeof runtime === "string") {
+			return { content: [{ type: "text", text: `Could not resume ${record.name}: ${runtime}` }], details: {}, isError: true };
+		}
+
+		const taskId = generateTaskId();
+		let finish!: () => void;
+		const finished = new Promise<void>((resolve) => {
+			finish = resolve;
+		});
+
+		runningIds.add(record.taskId);
+		// Re-enter the panel: the finished run's entry flips back to running (or
+		// registers fresh after a session resume) and streams this turn live.
+		const live = trackLiveRun(record, {
+			agent: record.agent,
+			name: record.name,
+			task: params.message,
+			model: record.model,
+			thinking: record.thinking,
+		});
+		// One-shot modes (`-p`, `--mode json`) exit when the turn settles, so the
+		// resumed turn runs blocking there and the reply is the tool result, as a
+		// spawn's report is (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 M3).
+		const oneShot = !sessionOutlivesTurn(ctx.mode);
+		const handle = runtime.run({
+			name: record.name,
+			agent: loadAgents(ctx.cwd).find((a) => a.name === record.agent),
+			task: params.message,
+			cwd: record.cwd,
+			sessionFile,
+			parentSystemPrompt: forkPrompt,
+			parentRequest: record.agent === FORK_AGENT ? readForkRequest(record) : undefined,
+			// Blocking, so the call's own abort stops it; a background turn is stopped by task_stop.
+			signal: oneShot ? signal : undefined,
+			model: record.model,
+			// Resume degrades to the session model if the recorded model has become
+			// unavailable since the original run, rather than failing the resume
+			// outright (the note surfaces the swap). Undefined for a fork (record.model
+			// unset — it inherits) or when the record already is the session model.
+			fallbackModel:
+				record.model && ctx.model && record.model !== modelSpec(ctx.model) ? modelSpec(ctx.model) : undefined,
+			thinking: record.thinking,
+			onProgress: (toolCalls, _text, usage) => live.progress(toolCalls, usage),
+			sink: live.sink,
+			onMessageToMain: (message) => notifyAgentMessage(record.taskId, record.name, message),
+			extraTools: spawnToolsFor(record),
+		});
+		liveHandles.set(record.taskId, handle);
+
+		if (oneShot) {
+			const outcome = await handle.result;
+			runningIds.delete(record.taskId);
+			live.finish(stoppedTaskIds.has(record.taskId) ? "stopped" : Boolean(outcome.failed));
+			// Auto mode reviews the turn's actions; the gate attaches the verdict to this tool result.
+			pi.events.emit(SUBAGENT_ACTIONS_CHANNEL, { toolCallId, actions: outcome.actions } satisfies SubagentActionsPayload);
+			return {
+				content: [
+					{
+						type: "text",
+						text:
+							`${record.name}: ${oneShotNote("agent's turn")} Its reply follows here; there is no background task to poll.\n\n` +
+							`${relocationNote}${bounded(outcome.output, `${taskId}-reply`, OUTPUT_CAP)}\n\n(${formatStats(outcome.toolCalls, outcome.usage)})`,
+					},
+				],
+				details: { agentRuns: [record] },
+				isError: outcome.failed ?? false,
+			};
+		}
+
+		const task: BackgroundTask = {
+			id: taskId,
+			kind: "subagent",
+			ownUI: true, // rendered live by the subagents panel's agent strip
+			description: `message to ${record.name}${params.summary ? `: ${params.summary}` : ""}`,
+			status: "running",
+			startedAt: Date.now(),
+			output: () => handle.snapshot().text,
+			stop: () => stopAgent(record.taskId, handle),
+			finished,
+		};
+		pi.events.emit(TASK_REGISTER_CHANNEL, task);
+
+		void handle.result.then(async (outcome) => {
+			runningIds.delete(record.taskId);
+			// Read before the review: a stop or resume during it must not change this turn's outcome.
+			const stopped = stoppedTaskIds.has(record.taskId);
+			live.finish(stopped ? "stopped" : Boolean(outcome.failed));
+			// Auto mode reviews this turn's actions before the reply goes out, as it
+			// does for a resident's turn; a resumed turn once skipped it
+			// (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 M2). The task settles after the
+			// review, so task_output never returns the reply ahead of its verdict.
+			const review = await awaitHandBackReview(pi.events, record, outcome.actions);
+			task.status = stopped ? "stopped" : outcome.failed ? "failed" : "completed";
+			task.finishedAt = Date.now();
+			finish();
+			notifyHandBack({
+				from: record.taskId,
+				taskId,
+				name: record.name,
+				toolUseId: toolCallId,
+				outcome,
+				stopped,
+				startedAt: task.startedAt,
+				report: `${relocationNote}${bounded(outcome.output, `${taskId}-reply`, OUTPUT_CAP)}`,
+				review,
+			});
+		});
+
+		spawnedThisLoop.add(record.taskId); // arm the anti-fabrication backstop (WEAK-MODEL-REVIEW H1)
+		return {
+			content: [
+				{
+					type: "text",
+					text: `Message sent to ${record.name} (task ${taskId}). The reply will arrive as a task notification on its own; inspect with task_output. ${PENDING_RESULT_PROHIBITION}`,
+				},
+			],
+			details: { agentRuns: [record], taskId },
+		};
+	};
+
 	const sendMessageTool = defineTool({
 		name: "SendMessage",
 		label: "Send Message",
@@ -2280,305 +2603,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		}),
 		description:
 			'Send a message to a previously spawned agent, addressed by the name from its spawn result (or its task id). To discover the names of running or finished agents, use list_agents (deferred — load it with tool_search select:list_agents). A resident background agent is reached live (mid-turn the message is steered into its current work; when idle it starts a new turn); a finished agent is resumed from its session with full context. Replies arrive as task notifications. (A subagent reporting back to the main conversation uses its own SendMessage with to: "main".)',
-		parameters: Type.Object({
-			to: Type.String({ description: "Agent name (or task id) from a previous Agent run" }),
-			message: Type.String({ description: "Plain text message for the agent" }),
-			summary: Type.Optional(Type.String({ description: "5-10 word preview shown in the UI" })),
-		}),
-		async execute(toolCallId, params, signal, _onUpdate, ctx) {
-			if (params.to === "main") {
-				// The main conversation's SendMessage only addresses spawned agents; the
-				// "main" recipient exists only on a subagent's own injected SendMessage.
-				return {
-					content: [{ type: "text", text: 'You are the main conversation — "main" is only a valid recipient from inside a subagent.' }],
-					details: {},
-					isError: true,
-				};
-			}
-
-			const record = registry.resolve(params.to);
-			if (!record) {
-				const known = registry.names().join(", ") || "(none)";
-				return {
-					content: [
-						{
-							type: "text",
-							text: `No run named "${params.to}". SendMessage only reaches agent runs already started this session — address them by their run name or task id, not by a catalog agent name. Start one with the Agent tool first if you haven't. Known runs: ${known}.`,
-						},
-					],
-					details: {},
-					isError: true,
-				};
-			}
-			// Resident background agent: reach its in-process session live.
-			const resident = residents.get(record.taskId);
-			if (resident && !resident.handle.exited()) {
-				if (resident.handle.busy()) {
-					let delivery: "started" | "steered";
-					try {
-						delivery = await resident.handle.send(params.message);
-					} catch (error) {
-						return {
-							content: [{ type: "text", text: `Could not deliver the message to ${record.name}: ${(error as Error).message}` }],
-							details: {},
-							isError: true,
-						};
-					}
-					if (delivery === "steered") {
-						return {
-							content: [
-								{
-									type: "text",
-									text: `Message steered into ${record.name}'s running turn — it will be taken into account before the turn completes, and the turn's completion notification will reflect it.`,
-								},
-							],
-							details: { agentRuns: [record], steered: true },
-						};
-					}
-					// The turn had just ended (settle window): the message rides the next
-					// turn, whose reply nobody has claimed yet — announce it as an update.
-					spawnedThisLoop.add(record.taskId); // arm the anti-fabrication backstop (WEAK-MODEL-REVIEW H1)
-					return {
-						content: [
-							{
-								type: "text",
-								text: `${record.name}'s turn had just finished; the message starts its next turn. The reply will arrive as a task notification from ${record.name}. ${PENDING_RESULT_PROHIBITION}`,
-							},
-						],
-						details: { agentRuns: [record] },
-					};
-				}
-
-				const taskId = generateTaskId();
-				let finish!: () => void;
-				const finished = new Promise<void>((resolve) => {
-					finish = resolve;
-				});
-				// This task is ONE turn of the resident agent. Its output must be that
-				// turn's reply — the same text the reply notification carries — not the
-				// resident's whole multi-turn transcript, or task_output and the
-				// notification disagree (superset), which weak models conflate.
-				let replyOutput = "";
-				const task: BackgroundTask = {
-					id: taskId,
-					kind: "subagent",
-					ownUI: true, // rendered live by the subagents panel's agent strip
-					description: `message to ${record.name}${params.summary ? `: ${params.summary}` : ""}`,
-					status: "running",
-					startedAt: Date.now(),
-					output: () => replyOutput || resident.handle.snapshot().text,
-					stop: () => stopAgent(record.taskId, resident.handle),
-					resident: () => !resident.handle.exited(),
-					finished,
-				};
-				resident.turnHandlers.push((outcome, review, stopped) => {
-					task.status = stopped ? "stopped" : outcome.failed ? "failed" : "completed";
-					task.finishedAt = Date.now();
-					replyOutput = outcome.output;
-					finish();
-					// `<task-id>` is this message's task (what task_output resolves); `from=`
-					// stays the agent's id, the address a further SendMessage uses. The
-					// tracker's tokens and tool uses span the resident's life, so the
-					// duration does too.
-					notifyHandBack({
-						from: record.taskId,
-						taskId,
-						name: record.name,
-						toolUseId: toolCallId,
-						outputFile: outputLogPath(record),
-						outcome,
-						stopped,
-						startedAt: resident.startedAt,
-						report: bounded(outcome.output, `${taskId}-reply`, OUTPUT_CAP),
-						review,
-					});
-				});
-				pi.events.emit(TASK_REGISTER_CHANNEL, task);
-				void resident.handle.send(params.message);
-				// Same anti-fabrication guard as a fresh spawn (WEAK-MODEL-REVIEW H1):
-				// the reply arrives as a notification, so forbid predicting it and arm
-				// the agent_end backstop (keyed by the agent's persistent id).
-				spawnedThisLoop.add(record.taskId);
-				return {
-					content: [
-						{
-							type: "text",
-							text: `Message sent to resident agent ${record.name} (task ${taskId}). The reply will arrive as a task notification on its own; inspect with task_output. ${PENDING_RESULT_PROHIBITION}`,
-						},
-					],
-					details: { agentRuns: [record], taskId },
-				};
-			}
-
-			if (runningIds.has(record.taskId)) {
-				return {
-					content: [
-						{ type: "text", text: `Agent ${record.name} is still running — wait for its completion notification, then resend.` },
-					],
-					details: {},
-					isError: true,
-				};
-			}
-			const sessionFile = registry.sessionFileFor(record);
-			// A fork has no agent definition: its identity is the parent's prompt at
-			// spawn time, persisted beside its session. Without it a resume would run
-			// on pi's stock prompt and default tools — refuse instead (review S6).
-			const forkPrompt = record.agent === FORK_AGENT ? readForkPrompt(record) : undefined;
-			if (record.agent === FORK_AGENT && forkPrompt === undefined) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: `Agent ${record.name} is a fork whose system prompt was not persisted (it ran before fork resume was supported, or its files were removed), so it cannot be resumed faithfully. Start a fresh run instead.`,
-						},
-					],
-					details: {},
-					isError: true,
-				};
-			}
-			if (!sessionFile) {
-				return {
-					content: [
-						{ type: "text", text: `Agent ${record.name} has no persisted session to resume (it may have run before session persistence, or its files were removed).` },
-					],
-					details: {},
-					isError: true,
-				};
-			}
-
-			// A worktree run whose agent left no changes had its worktree removed at
-			// exit, but the record (persisted in the tool result) still points there.
-			// Resume in the parent cwd instead of a deleted directory, say so in the
-			// reply, and fix the record so later messages don't repeat the note (M2).
-			let relocationNote = "";
-			if (!existsSync(record.cwd)) {
-				const cwd = workCwd(ctx);
-				relocationNote = `[${record.name}'s working directory ${record.cwd} no longer exists${record.worktree ? " (its isolation worktree was removed when the run left no changes)" : ""}; this turn ran in ${cwd}.]\n\n`;
-				record.cwd = cwd;
-				record.worktree = undefined;
-			}
-
-			// Before the run is marked running (L8, as in executeRun).
-			const runtime = await runtimeOrError(ctx);
-			if (typeof runtime === "string") {
-				return { content: [{ type: "text", text: `Could not resume ${record.name}: ${runtime}` }], details: {}, isError: true };
-			}
-
-			const taskId = generateTaskId();
-			let finish!: () => void;
-			const finished = new Promise<void>((resolve) => {
-				finish = resolve;
-			});
-
-			runningIds.add(record.taskId);
-			// Re-enter the panel: the finished run's entry flips back to running (or
-			// registers fresh after a session resume) and streams this turn live.
-			const live = trackLiveRun(record, {
-				agent: record.agent,
-				name: record.name,
-				task: params.message,
-				model: record.model,
-				thinking: record.thinking,
-			});
-			// One-shot modes (`-p`, `--mode json`) exit when the turn settles, so the
-			// resumed turn runs blocking there and the reply is the tool result, as a
-			// spawn's report is (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 M3).
-			const oneShot = !sessionOutlivesTurn(ctx.mode);
-			const handle = runtime.run({
-				name: record.name,
-				agent: loadAgents(ctx.cwd).find((a) => a.name === record.agent),
-				task: params.message,
-				cwd: record.cwd,
-				sessionFile,
-				parentSystemPrompt: forkPrompt,
-				parentRequest: record.agent === FORK_AGENT ? readForkRequest(record) : undefined,
-				// Blocking, so the call's own abort stops it; a background turn is stopped by task_stop.
-				signal: oneShot ? signal : undefined,
-				model: record.model,
-				// Resume degrades to the session model if the recorded model has become
-				// unavailable since the original run, rather than failing the resume
-				// outright (the note surfaces the swap). Undefined for a fork (record.model
-				// unset — it inherits) or when the record already is the session model.
-				fallbackModel:
-					record.model && ctx.model && record.model !== modelSpec(ctx.model) ? modelSpec(ctx.model) : undefined,
-				thinking: record.thinking,
-				onProgress: (toolCalls, _text, usage) => live.progress(toolCalls, usage),
-				sink: live.sink,
-				onMessageToMain: (message) => notifyAgentMessage(record.taskId, record.name, message),
-				extraTools: spawnToolsFor(record),
-			});
-			liveHandles.set(record.taskId, handle);
-
-			if (oneShot) {
-				const outcome = await handle.result;
-				runningIds.delete(record.taskId);
-				live.finish(stoppedTaskIds.has(record.taskId) ? "stopped" : Boolean(outcome.failed));
-				// Auto mode reviews the turn's actions; the gate attaches the verdict to this tool result.
-				pi.events.emit(SUBAGENT_ACTIONS_CHANNEL, { toolCallId, actions: outcome.actions } satisfies SubagentActionsPayload);
-				return {
-					content: [
-						{
-							type: "text",
-							text:
-								`${record.name}: ${oneShotNote("agent's turn")} Its reply follows here; there is no background task to poll.\n\n` +
-								`${relocationNote}${bounded(outcome.output, `${taskId}-reply`, OUTPUT_CAP)}\n\n(${formatStats(outcome.toolCalls, outcome.usage)})`,
-						},
-					],
-					details: { agentRuns: [record] },
-					isError: outcome.failed ?? false,
-				};
-			}
-
-			const task: BackgroundTask = {
-				id: taskId,
-				kind: "subagent",
-				ownUI: true, // rendered live by the subagents panel's agent strip
-				description: `message to ${record.name}${params.summary ? `: ${params.summary}` : ""}`,
-				status: "running",
-				startedAt: Date.now(),
-				output: () => handle.snapshot().text,
-				stop: () => stopAgent(record.taskId, handle),
-				finished,
-			};
-			pi.events.emit(TASK_REGISTER_CHANNEL, task);
-
-			void handle.result.then(async (outcome) => {
-				runningIds.delete(record.taskId);
-				// Read before the review: a stop or resume during it must not change this turn's outcome.
-				const stopped = stoppedTaskIds.has(record.taskId);
-				live.finish(stopped ? "stopped" : Boolean(outcome.failed));
-				// Auto mode reviews this turn's actions before the reply goes out, as it
-				// does for a resident's turn; a resumed turn once skipped it
-				// (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 M2). The task settles after the
-				// review, so task_output never returns the reply ahead of its verdict.
-				const review = await awaitHandBackReview(pi.events, record, outcome.actions);
-				task.status = stopped ? "stopped" : outcome.failed ? "failed" : "completed";
-				task.finishedAt = Date.now();
-				finish();
-				notifyHandBack({
-					from: record.taskId,
-					taskId,
-					name: record.name,
-					toolUseId: toolCallId,
-					outcome,
-					stopped,
-					startedAt: task.startedAt,
-					report: `${relocationNote}${bounded(outcome.output, `${taskId}-reply`, OUTPUT_CAP)}`,
-					review,
-				});
-			});
-
-			spawnedThisLoop.add(record.taskId); // arm the anti-fabrication backstop (WEAK-MODEL-REVIEW H1)
-			return {
-				content: [
-					{
-						type: "text",
-						text: `Message sent to ${record.name} (task ${taskId}). The reply will arrive as a task notification on its own; inspect with task_output. ${PENDING_RESULT_PROHIBITION}`,
-					},
-				],
-				details: { agentRuns: [record], taskId },
-			};
-		},
+		parameters: SendMessageParams,
+		execute: (toolCallId, params, signal, _onUpdate, ctx) => sendMessage(toolCallId, params, signal, ctx),
 	});
 	pi.registerTool(sendMessageTool);
 
@@ -2605,11 +2631,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			}
 			return;
 		}
-		const result = (await sendMessageTool.execute(`view-${Date.now()}`, { to: record.taskId, message: wrapped }, undefined, undefined, ctx)) as {
-			content: Array<{ type: string; text?: string }>;
-			isError?: boolean;
-		};
-		if (result.isError) fail(result.content.map((block) => block.text ?? "").join(" "));
+		const result = await sendMessage(`view-${Date.now()}`, { to: record.taskId, message: wrapped }, undefined, ctx);
+		if (result.isError) fail(result.content.map((block) => (block.type === "text" ? block.text : "")).join(" "));
 	};
 	pi.on("input", (event, ctx) => {
 		const taskId = view ? panel.viewedTaskId() : undefined;

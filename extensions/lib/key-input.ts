@@ -10,13 +10,13 @@
  * and with event types on, every press is followed by a release such as
  * `\x1b[1;1:3B`. A decoder that compares legacy bytes misses all of those.
  *
- * `parseKey` is pi-tui 0.87.1's own parser (`dist/keys.js`, MIT), ported
- * verbatim so every panel names a key exactly as pi-tui and pi's keybindings
- * do. It stays here because `lib/` modules import nothing from pi, and the
- * bare `@earendil-works/pi-tui` specifier resolves to a different pi-tui in
- * tests than at runtime. `key-input.test.ts` compares this port with the
- * installed pi-tui over every encoding, so a pi bump that changes the parser
- * fails the suite.
+ * `parseKey` is pi-tui's own parser (`dist/keys.js`, MIT, unchanged from
+ * 0.87.1 to 0.99.2), ported verbatim so every panel names a key exactly as
+ * pi-tui and pi's keybindings do. It stays here because `lib/` modules
+ * import nothing from pi, and the bare `@earendil-works/pi-tui` specifier
+ * resolves to a different pi-tui in tests than at runtime.
+ * `key-input.test.ts` compares this port with the installed pi-tui over
+ * every encoding, so a pi bump that changes the parser fails the suite.
  *
  * Decoders switch on `keyId(data)` (pi-tui's key ids: `escape`, `ctrl+c`,
  * `shift+tab`, `up`, `pageDown`, `x`) and read typed text with `keyText`.
@@ -266,7 +266,7 @@ function isWindowsTerminalSession(env: NodeJS.ProcessEnv = process.env): boolean
 	return Boolean(env.WT_SESSION) && !env.SSH_CONNECTION && !env.SSH_CLIENT && !env.SSH_TTY;
 }
 
-/** pi-tui 0.87.1's `parseKey`: the key id of one input chunk, or undefined. Releases parse like presses. */
+/** pi-tui's `parseKey` (0.87.1 to 0.99.2): the key id of one input chunk, or undefined. Releases parse like presses. */
 export function parseKey(data: string, options: ParseKeyOptions = {}): string | undefined {
 	const kitty = options.kittyActive ?? false;
 	const kittySeq = parseKittySequence(data);

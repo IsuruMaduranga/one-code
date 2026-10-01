@@ -137,6 +137,15 @@ resources to the model. One Code reads server definitions from:
 - `~/.claude.json` (the `mcpServers` key)
 - `.claude/settings.local.json`
 - Installed plugins
+- pi's own `mcp.json` files: `~/.pi/agent/mcp.json` and the project's
+  `.pi/mcp.json`
+
+One Code takes the place of pi's built-in MCP, so it reads pi's files too.
+If a server has the same name in one of them and in a Claude Code file, the
+Claude Code one wins and One Code tells you. pi's `enabled: false`, a stdio
+server's `cwd` and a leading `~/` work as they do in pi. A server whose `env`
+or `headers` value runs a command (`"!…"`) is skipped with a note, and pi's
+`oauth`, `auth`, `exposure` and `description` settings are ignored.
 
 Definitions may reference environment variables as `$VAR` or `${VAR}` in
 the command, arguments, environment, URL, and headers; an unset variable
@@ -145,7 +154,8 @@ verified; servers using server-sent events are untested.
 
 ### Approve a project's servers
 
-Servers listed in a project's `.mcp.json` run only after you approve them.
+Servers listed in a project's `.mcp.json` or `.pi/mcp.json` run only after
+you approve them.
 On the first start in a project, One Code shows the servers found, with the
 command each one runs and the environment variables it sets, and offers to
 use this server, to use this and all future servers in the project, or to

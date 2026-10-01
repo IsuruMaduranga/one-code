@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { McpServer } from "../../extensions/mcp/config.ts";
+import type { McpServer, StdioServer } from "../../extensions/mcp/config.ts";
 import {
 	approveMcpServers,
 	CHOICE_ALL,
@@ -79,6 +79,9 @@ describe("isProjectScopedServer", () => {
 		expect(isProjectScopedServer(stdio("l", join(cwd, ".claude", "settings.local.json")), plugins)).toBe(true);
 		expect(isProjectScopedServer(stdio("p", join(root, "plugin", ".mcp.json")), plugins)).toBe(false);
 		expect(isProjectScopedServer(stdio("u", join(home, ".claude.json")), plugins)).toBe(false);
+		// pi's files: the project's is gated like .mcp.json, the user's agent-dir file is not.
+		expect(isProjectScopedServer({ ...stdio("pp", join(cwd, ".pi", "mcp.json")), piOrigin: "project" }, plugins)).toBe(true);
+		expect(isProjectScopedServer({ ...stdio("pu", join(home, ".pi", "agent", "mcp.json")), piOrigin: "user" }, plugins)).toBe(false);
 	});
 });
 
@@ -152,6 +155,23 @@ describe("approveMcpServers", () => {
 		const again = await approveMcpServers([a, b], new Set(), cwd, home, d.deps);
 		expect(again.approved).toHaveLength(2);
 		expect(d.selections).toHaveLength(1);
+	});
+
+	it("asks for pi's project servers by their file, and Claude Code's answers do not approve them", async () => {
+		writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify({ enableAllProjectMcpServers: true }));
+		const d = deps();
+		const pi: McpServer = { ...stdio("pp", join(cwd, ".pi", "mcp.json")), piOrigin: "project" };
+		const out = await approveMcpServers([pi, projectServer("a")], new Set(), cwd, home, d.deps);
+		expect(out.approved.map((s) => s.name).sort()).toEqual(["a", "pp"]);
+		expect(d.selections).toHaveLength(1);
+		expect(d.selections[0].split("\n")[0]).toBe("New MCP server found in .pi/mcp.json: pp");
+	});
+
+	it("puts a stdio cwd into the approval hash and the dialog, and keeps hashes without one unchanged", () => {
+		const plain = projectServer("a") as StdioServer;
+		expect(hashServerConfig({ ...plain, cwd: "/elsewhere" })).not.toBe(hashServerConfig(plain));
+		expect(hashServerConfig({ ...plain, cwd: undefined })).toBe(hashServerConfig(plain));
+		expect(describeServers([{ ...plain, cwd: "/elsewhere" }])).toContain("cwd: /elsewhere");
 	});
 
 	it("re-prompts when an approved server's command changes", async () => {

@@ -19,7 +19,7 @@
  * session_start/model_select and removes them for frontier models.
  */
 
-import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionToolContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
 	createEditToolDefinition,
 	createFindToolDefinition,
@@ -76,7 +76,7 @@ export default function toolStyleExtension(pi: ExtensionAPI) {
 			prepareArguments: base.prepareArguments,
 			constrainedSampling: base.constrainedSampling,
 			...ccWrapBuiltinRenderers(spec.label, base, { title: spec.title, keepBaseCall: spec.keepBaseCall }),
-			async execute(toolCallId, params, signal, onUpdate, ctx: ExtensionContext) {
+			async execute(toolCallId, params, signal, onUpdate, ctx: ExtensionToolContext) {
 				return forCwd(ctx.cwd).execute(toolCallId, params as never, signal, onUpdate, ctx);
 			},
 		} as ToolDefinition);

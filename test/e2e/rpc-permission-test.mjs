@@ -2,20 +2,26 @@
 /**
  * E2E: drive pi in RPC mode, answer the permission prompt programmatically.
  *
- * Usage: node rpc-permission-test.mjs <answer> <workdir>
+ * Usage: node rpc-permission-test.mjs [answer] [workdir]
  *   answer: "Yes" | the scoped grant label (starts "Yes, and …", see
  *           extensions/permissions/session-grant.ts) | "No, tell the agent what to do differently"
+ *   workdir: defaults to a new temp dir. pi runs in default permission mode,
+ *           so the write asks.
  *
  * Prints PROMPT_SEEN when the permission select arrives, then ANSWERED,
  * then AGENT_DONE when the turn completes. Exits 0 on success.
  */
 
 import { spawn } from "node:child_process";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const answer = process.argv[2] ?? "Yes";
-const workdir = process.argv[3] ?? process.cwd();
+// A throwaway dir by default: the approved write must not land in the checkout.
+const workdir = process.argv[3] ?? mkdtempSync(join(tmpdir(), "rpc-permission-"));
 
-const child = spawn("pi", ["--mode", "rpc", "--no-session"], {
+const child = spawn("pi", ["--mode", "rpc", "--permission-mode", "default", "--no-session"], {
 	cwd: workdir,
 	stdio: ["pipe", "pipe", "inherit"],
 });

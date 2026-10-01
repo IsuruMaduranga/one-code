@@ -10,6 +10,7 @@
  * `{ name, keywords? }` while extensions are loading (before session_start).
  */
 
+import { createHash } from "node:crypto";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { toolResultsOnBranch } from "./branch-restore.ts";
 import { parseClaudeVersion } from "./model-tier.ts";
@@ -235,16 +236,7 @@ export function stabilizeDeferredTools(
 				}
 			}
 		});
-		// The earliest on-wire load of each tool.
-		const loaderOf = new Map<string, { callId: string; at: number }>();
-		for (const [callId, names] of loads) {
-			const at = resultAt.get(callId);
-			if (at === undefined) continue;
-			for (const name of names) {
-				const current = loaderOf.get(name);
-				if (current === undefined || at < current.at) loaderOf.set(name, { callId, at });
-			}
-		}
+		const loaderOf = earliestLoads(loads, (callId) => resultAt.get(callId));
 		for (const tool of eager) {
 			if (!isDeferred(tool.name)) continue;
 			const loader = loaderOf.get(tool.name);
@@ -306,6 +298,127 @@ function withToolReferences(message: WireMessage, referencesAt: ReadonlyMap<stri
 		}
 	}
 	return { ...message, content: withBreakpointOnLast([...blocks, ...siblings], movedBreakpoint) };
+}
+
+/**
+ * The earliest on-wire load of each tool: the `tool_search` call whose result
+ * sits first in the conversation (`resultAt` is its index, undefined when it is
+ * not on the wire).
+ */
+function earliestLoads(loads: ToolSearchLoads, resultAt: (callId: string) => number | undefined): Map<string, { callId: string; at: number }> {
+	const loaderOf = new Map<string, { callId: string; at: number }>();
+	for (const [callId, names] of loads) {
+		const at = resultAt(callId);
+		if (at === undefined) continue;
+		for (const name of names) {
+			const current = loaderOf.get(name);
+			if (current === undefined || at < current.at) loaderOf.set(name, { callId, at });
+		}
+	}
+	return loaderOf;
+}
+
+/** pi-ai's Responses APIs: requests carry `input` items and flat `{ type, name }` tools. */
+const RESPONSES_APIS = new Set(["openai-responses", "openai-codex-responses", "azure-openai-responses"]);
+
+/** How a Responses model takes a mid-conversation tool load (pi-ai's model `compat` fields). */
+export interface ToolLoadCompat {
+	supportsAdditionalTools?: boolean;
+	supportsToolSearch?: boolean;
+}
+
+/** The model fields that say whether, and how, a Responses request can add a tool mid-conversation. */
+export interface ResponsesToolLoadModel {
+	api?: string;
+	compat?: ToolLoadCompat;
+}
+
+/**
+ * The model's tool-load compat when it takes a mid-conversation tool load in
+ * pi-ai's native Responses shape, else undefined.
+ */
+export function responsesToolLoadCompat(model: ResponsesToolLoadModel | undefined): ToolLoadCompat | undefined {
+	if (!model?.api || !RESPONSES_APIS.has(model.api)) return undefined;
+	const compat = model.compat;
+	return compat?.supportsAdditionalTools === true || compat?.supportsToolSearch === true ? compat : undefined;
+}
+
+type WireItem = Record<string, unknown>;
+
+/**
+ * A Responses request whose `tools` array stays request 1's whatever
+ * `tool_search` has loaded since: the OpenAI side of
+ * {@link stabilizeDeferredTools}. pi 0.86 and later put a loaded tool into
+ * `tools` for One Code (its forced system prompt collapses tool changes into
+ * the head, findings §7), so every load re-cached the whole conversation (0
+ * cached tokens on the request after a load on `openai-codex`, findings §45).
+ *
+ * A loaded registry tool leaves `tools` and enters the input right before the
+ * `function_call_output` of the `tool_search` call that loaded it, in pi-ai's
+ * own native shape (`convertResponsesMessages` `appendSystemToolAdditions`):
+ * an `additional_tools` developer item when the model supports one, else a
+ * `tool_search_call` + `tool_search_output` pair whose tools carry
+ * `defer_loading: true`. A tool the model called before that output, or whose
+ * loading output is not on the wire, stays in `tools`.
+ *
+ * Returns undefined (leave the payload alone) when nothing moves. Never
+ * mutates its input.
+ */
+export function stabilizeResponsesToolLoads(
+	payload: Record<string, unknown>,
+	isDeferred: (name: string) => boolean,
+	loads: ToolSearchLoads,
+	compat: ToolLoadCompat,
+): Record<string, unknown> | undefined {
+	const tools = payload.tools;
+	const input = payload.input;
+	if (!Array.isArray(tools) || !Array.isArray(input) || loads.size === 0) return undefined;
+
+	// Input index of each tool output and of each tool's first call. pi sends a
+	// call id as `<call_id>|<item_id>`; the wire's `call_id` is the first part.
+	const outputAt = new Map<string, number>();
+	const firstUse = new Map<string, number>();
+	(input as WireItem[]).forEach((item, index) => {
+		if (item?.type === "function_call_output" && typeof item.call_id === "string") outputAt.set(item.call_id, index);
+		else if ((item?.type === "function_call" || item?.type === "custom_tool_call") && typeof item.name === "string" && !firstUse.has(item.name)) {
+			firstUse.set(item.name, index);
+		}
+	});
+	const loaderOf = earliestLoads(loads, (callId) => outputAt.get(callId.split("|")[0]));
+
+	const movedAt = new Map<number, WireItem[]>();
+	const kept: unknown[] = [];
+	for (const raw of tools) {
+		const tool = raw as WireItem | null;
+		const name = typeof tool?.name === "string" ? tool.name : undefined;
+		const at = name !== undefined && isDeferred(name) ? loaderOf.get(name)?.at : undefined;
+		const use = name !== undefined ? firstUse.get(name) : undefined;
+		if (at === undefined || (use !== undefined && use < at)) {
+			kept.push(raw);
+			continue;
+		}
+		movedAt.set(at, [...(movedAt.get(at) ?? []), tool as WireItem]);
+	}
+	if (movedAt.size === 0) return undefined;
+
+	const nextInput: unknown[] = [];
+	(input as WireItem[]).forEach((item, index) => {
+		const moved = movedAt.get(index);
+		if (moved) nextInput.push(...toolLoadItems(moved, String(item.call_id), compat));
+		nextInput.push(item);
+	});
+	return { ...payload, tools: kept, input: nextInput };
+}
+
+/** pi-ai's native items for tools added at one point of a Responses conversation. */
+function toolLoadItems(tools: WireItem[], loaderCallId: string, compat: ToolLoadCompat): WireItem[] {
+	if (compat.supportsAdditionalTools) return [{ type: "additional_tools", role: "developer", tools }];
+	const names = tools.map((tool) => String(tool.name));
+	const callId = `pi_tool_load_${createHash("sha256").update(`${loaderCallId}:${names.join(",")}`).digest("hex").slice(0, 16)}`;
+	return [
+		{ type: "tool_search_call", call_id: callId, execution: "client", status: "completed", arguments: { query: names.join(" "), limit: names.length } },
+		{ type: "tool_search_output", call_id: callId, execution: "client", status: "completed", tools: tools.map((tool) => ({ ...tool, defer_loading: true })) },
+	];
 }
 
 /**

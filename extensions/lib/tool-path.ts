@@ -8,11 +8,11 @@
  * `file:///…`, a non-breaking space, Git Bash's `/c/…` on Windows) slips past
  * the guard (TOOLS-REVIEW-2026-09-26 M1). Pure: no pi imports.
  *
- * Mirrors pi 0.87.1: Unicode spaces fold to a plain space, one leading `@` is
- * dropped, on Windows a Git Bash/MSYS/Cygwin/WSL drive path becomes `C:\…`,
- * `~` and `~/` expand to the home directory (and `~\` on Windows), a
- * `file://` URL becomes its path, and a relative result resolves against
- * `cwd`.
+ * Mirrors pi 0.87.1 to 0.99.2: Unicode spaces fold to a plain space, one
+ * leading `@` is dropped, on Windows a Git Bash/MSYS/Cygwin/WSL drive path
+ * becomes `C:\…`, `~` and `~/` expand to the home directory (and `~\` on
+ * Windows), a `file://` URL becomes its path, and a relative result resolves
+ * against `cwd`.
  */
 
 import { homedir } from "node:os";

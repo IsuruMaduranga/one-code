@@ -50,15 +50,33 @@ export function approvalStorePath(): string {
 }
 
 /**
- * A server whose config a repository can ship (a project `.mcp.json` or a
- * checked-in `.claude/settings.local.json`) — so it is consent-gated. A
- * plugin's `.mcp.json` (also named `.mcp.json`) is excluded: installing the
- * plugin was the consent.
+ * A server whose config a repository can ship (a project `.mcp.json`, a
+ * checked-in `.claude/settings.local.json`, or pi's project `.pi/mcp.json`) —
+ * so it is consent-gated. A plugin's `.mcp.json` (also named `.mcp.json`) is
+ * excluded: installing the plugin was the consent. pi's user file
+ * (`<agentDir>/mcp.json`) is the user's own, like `~/.claude.json`.
  */
 export function isProjectScopedServer(server: McpServer, pluginConfigPaths: ReadonlySet<string>): boolean {
 	if (pluginConfigPaths.has(server.source)) return false;
 	const base = basename(server.source);
-	return base === ".mcp.json" || base === "settings.local.json";
+	return base === ".mcp.json" || base === "settings.local.json" || server.piOrigin === "project";
+}
+
+/** A server from a project `.mcp.json`: the only kind Claude Code's own answers approve. */
+function definedInMcpjson(server: McpServer): boolean {
+	return basename(server.source) === ".mcp.json";
+}
+
+/** The project file a consent-gated server comes from, as the dialog names it. */
+function configLabel(server: McpServer): string {
+	if (definedInLocalSettings(server)) return ".claude/settings.local.json";
+	// pi's project file is `<dir>/<pi's config dir>/mcp.json`, `.pi/mcp.json` unless pi is rebranded.
+	return server.piOrigin === "project" ? `${basename(dirname(server.source))}/mcp.json` : ".mcp.json";
+}
+
+/** "a and b" for the distinct config files of `servers`. */
+function configLabels(servers: McpServer[]): string {
+	return [...new Set(servers.map(configLabel))].join(" and ");
 }
 
 /** A server defined in `.claude/settings.local.json` rather than a `.mcp.json`. */
@@ -83,11 +101,14 @@ function canonicalize(value: unknown): unknown {
 	return value;
 }
 
-/** Everything that decides what the server runs or talks to; `source`/`missingEnv` are not part of it. */
+/**
+ * Everything that decides what the server runs or talks to; `source`/`missingEnv` are not part of it.
+ * A stdio `cwd` (pi's files only) joins the material only when set, so existing approvals keep their hash.
+ */
 export function hashServerConfig(server: McpServer): string {
 	const material =
 		server.kind === "stdio"
-			? { kind: "stdio", command: server.command, args: server.args, env: server.env ?? {} }
+			? { kind: "stdio", command: server.command, args: server.args, env: server.env ?? {}, ...(server.cwd ? { cwd: server.cwd } : {}) }
 			: { kind: "http", url: server.url, headers: server.headers ?? {} };
 	return createHash("sha256").update(JSON.stringify(canonicalize(material))).digest("hex");
 }
@@ -190,11 +211,11 @@ export const CHOICE_THIS = "Use this MCP server";
 export const CHOICE_THESE = "Use these MCP servers";
 export const CHOICE_NO = "No";
 
-/** Claude Code's dialog title for one or several newly found servers. */
-export function promptTitle(names: string[]): string {
+/** Claude Code's dialog title for one or several newly found servers; `file` names where they were found. */
+export function promptTitle(names: string[], file = ".mcp.json"): string {
 	return names.length === 1
-		? `New MCP server found in .mcp.json: ${escapeControlText(names[0])}`
-		: `${names.length} new MCP servers found in .mcp.json`;
+		? `New MCP server found in ${file}: ${escapeControlText(names[0])}`
+		: `${names.length} new MCP servers found in ${file}`;
 }
 
 /**
@@ -258,6 +279,7 @@ export function describeServers(servers: McpServer[]): string {
 		const headerNames = server.kind === "http" ? Object.keys(server.headers ?? {}) : [];
 		const env = server.kind === "stdio" ? Object.entries(server.env ?? {}) : [];
 		const notes = [
+			server.kind === "stdio" && server.cwd ? `cwd: ${server.cwd}` : "",
 			env.length ? `env: ${env.map(([key, value]) => (changesExecution(key) ? `${key}=${JSON.stringify(value)}` : key)).join(", ")}` : "",
 			vars.length ? `uses ${vars.map((v) => `$${v}`).join(", ")}` : "",
 			headerNames.length ? `headers: ${headerNames.join(", ")}` : "",
@@ -321,9 +343,10 @@ export async function approveMcpServers(
 		}
 		// Claude Code's own answers approve `.mcp.json` servers only. A server
 		// DEFINED in settings.local.json must never be approved by that same
-		// file's `enableAllProjectMcpServers` (SECURITY-REVIEW-2026-09-23 H4): it
-		// goes through One Code's hash-keyed consent below, like any other.
-		if (!definedInLocalSettings(server) && (claude.enableAll || claude.enabled.has(server.name))) {
+		// file's `enableAllProjectMcpServers` (SECURITY-REVIEW-2026-09-23 H4), and
+		// one from pi's `.pi/mcp.json` is not a file those answers were about: both
+		// go through One Code's hash-keyed consent below, like any other.
+		if (definedInMcpjson(server) && (claude.enableAll || claude.enabled.has(server.name))) {
 			approved.push(server);
 			continue;
 		}
@@ -346,9 +369,8 @@ export async function approveMcpServers(
 		for (const server of pending) withheld.push({ server, reason: "not-approved" });
 		// enabledMcpjsonServers approves `.mcp.json` servers only (above), so the
 		// hint names it only when one of those is waiting.
-		const fromMcpjson = pending.some((server) => !definedInLocalSettings(server));
-		const fromLocal = pending.some(definedInLocalSettings);
-		const sources = [fromMcpjson && ".mcp.json", fromLocal && ".claude/settings.local.json"].filter(Boolean).join(" and ");
+		const fromMcpjson = pending.some(definedInMcpjson);
+		const sources = configLabels(pending);
 		deps.notify(
 			`Skipped ${pending.length} MCP server${pending.length === 1 ? "" : "s"} from ${sources} (${pending.map((s) => s.name).join(", ")}): not yet approved and no UI to ask. Approve once in an interactive session${fromMcpjson ? ", or set enabledMcpjsonServers in ~/.claude/settings.json" : ""}.`,
 		);
@@ -362,7 +384,7 @@ export async function approveMcpServers(
 	if (!prompt) {
 		const useLabel = pending.length === 1 ? CHOICE_THIS : CHOICE_THESE;
 		prompt = deps
-			.select(`${promptTitle(names)}\n\n${describeServers(pending)}\n\nThese run on your machine.`, [CHOICE_ALL, useLabel, CHOICE_NO])
+			.select(`${promptTitle(names, configLabels(pending))}\n\n${describeServers(pending)}\n\nThese run on your machine.`, [CHOICE_ALL, useLabel, CHOICE_NO])
 			.finally(() => pendingPrompts.delete(key));
 		pendingPrompts.set(key, prompt);
 	}
@@ -384,7 +406,7 @@ export async function approveMcpServers(
 		}
 	}
 	if (choice !== CHOICE_ALL && choice !== CHOICE_THIS && choice !== CHOICE_THESE) {
-		deps.notify(`MCP server${pending.length === 1 ? "" : "s"} from .mcp.json not connected (${names.join(", ")}); enable in /mcp.`);
+		deps.notify(`MCP server${pending.length === 1 ? "" : "s"} from ${configLabels(pending)} not connected (${names.join(", ")}); enable in /mcp.`);
 	}
 	return { approved, withheld };
 }

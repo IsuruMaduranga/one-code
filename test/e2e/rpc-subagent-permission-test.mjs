@@ -35,7 +35,7 @@ execFileSync("git", ["config", "user.email", "e@x.com"], { cwd: workdir });
 execFileSync("git", ["config", "user.name", "e"], { cwd: workdir });
 
 // DEFAULT (manual) permission mode — NOT auto, NOT skip-permissions.
-const child = spawn("pi", ["--mode", "rpc", "--session-dir", sessionDir, "--model", MODEL], {
+const child = spawn("pi", ["--mode", "rpc", "--permission-mode", "default", "--session-dir", sessionDir, "--model", MODEL], {
 	cwd: workdir,
 	stdio: ["pipe", "pipe", "inherit"],
 });
@@ -105,5 +105,5 @@ send({
 	id: "req-1",
 	type: "prompt",
 	message:
-		"Use the Agent tool with subagent_type 'general-purpose' and task: \"Run exactly this bash command: echo SUBAGENT_BASH_RAN — then report its output.\" Do not run the command yourself. When the agent returns, tell me what it output.",
+		"Use the Agent tool with subagent_type 'general-purpose' and task: \"Run exactly this bash command: touch subagent-ran.txt && echo SUBAGENT_BASH_RAN — then report its output.\" Do not run the command yourself. When the agent returns, tell me what it output.",
 });

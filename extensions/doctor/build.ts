@@ -21,6 +21,8 @@ import { checkDependencies, dependenciesSection, type ShellsInput } from "./depe
 import { readSettingsEnv } from "../lib/claude-settings.ts";
 import { resolveBashSpawn, resolvePowerShellSpawn } from "../lib/shell-spawn.ts";
 import { upgradeCommandFor } from "../lib/update-check.mjs";
+import { replacedBuiltinsFix } from "../lib/replaced-builtins.mjs";
+import { configCommand } from "./builtins.ts";
 import { shellToolPolicy } from "../powershell/policy.ts";
 import { collectModelFacts, modelsSection } from "./models.ts";
 import { computePresets, presetsSection } from "./presets.ts";
@@ -69,6 +71,7 @@ export function installationSection(env: DoctorEnvironment, findings: Finding[])
 		lines.push({ text: `pi ${env.piVersion} is outside the tested range ${TESTED_PI_MIN} – <${TESTED_PI_MAX_EXCLUSIVE}`, level: "warn" });
 		findings.push({ level: "warn", text: versionWarning, fix: env.install === "app" ? "Upgrade One Code (it pins a tested pi)." : "Update one-code-extension, or pin pi inside the tested range." });
 	}
+	replacedBuiltinsLines(env, lines, findings);
 
 	if (env.latest) {
 		switch (env.latest.status) {
@@ -89,6 +92,23 @@ export function installationSection(env: DoctorEnvironment, findings: Finding[])
 		}
 	}
 	return { title: "Installation", lines };
+}
+
+/** pi 0.99's built-in tool search and MCP, which ours replace: off, or still loaded with the fix. */
+function replacedBuiltinsLines(env: DoctorEnvironment, lines: ReportLine[], findings: Finding[]): void {
+	const view = env.replacedBuiltins;
+	if (!view) return;
+	if (view.left.length === 0) {
+		lines.push({ text: "pi's built-in tool-search and mcp: off (One Code provides its own)", level: "dim" });
+		return;
+	}
+	const names = view.left.map((builtin) => builtin.name).join(" and ");
+	lines.push({ text: `pi's built-in ${names}: still on, so pi warns at every start`, level: "warn" });
+	findings.push({
+		level: "warn",
+		text: `pi skips its built-in ${names} because One Code provides its own, and warns about it at every start, advising you to remove One Code. Keep One Code; turning the built-in off silences the warning.`,
+		fix: replacedBuiltinsFix(view.left, view.paths, configCommand(env.install)),
+	});
 }
 
 export interface ProviderSummary {
@@ -179,7 +199,15 @@ export function buildDoctorReport({ env, registry, session }: BuildInput): Docto
 	const presets = computePresets(registry.available, session.model);
 	sections.push(presetsSection(presets, session.model));
 
-	const compat = collectCompat({ cwd: env.cwd, home: env.home, agentDir: env.agentDir, env: env.env, bundledAgentsDir: BUNDLED_AGENTS_DIR });
+	const compat = collectCompat({
+		cwd: env.cwd,
+		home: env.home,
+		agentDir: env.agentDir,
+		env: env.env,
+		bundledAgentsDir: BUNDLED_AGENTS_DIR,
+		piConfigDirName: env.piConfigDirName,
+		registeredMcpServers: env.registeredMcpServers,
+	});
 	findings.push(...compat.findings);
 	sections.push(importedConfigSection(compat, env.home));
 	sections.push(mcpSection(compat, session, env.home));

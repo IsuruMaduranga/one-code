@@ -41,3 +41,26 @@ declare module "*/app-launch.mjs" {
 	): string;
 	export function childProcessEnv(env?: NodeJS.ProcessEnv, platform?: NodeJS.Platform): NodeJS.ProcessEnv;
 }
+
+/** Types for the plain-JS replaced-built-ins module (extensions/lib/replaced-builtins.mjs). */
+declare module "*/replaced-builtins.mjs" {
+	export interface ReplacedBuiltin {
+		name: string;
+		ours: string;
+	}
+	export interface BuiltinLeftOn extends ReplacedBuiltin {
+		/** Which setting keeps it on: the project's `+builtin:<name>`, else the user's (no `-` entry). */
+		scope: "user" | "project";
+	}
+	export const REPLACED_BUILTINS: readonly ReplacedBuiltin[];
+	export const BUILTIN_EXTENSIONS_PI: string;
+	export function builtinEnabled(name: string, userExtensions: unknown, projectExtensions: unknown): boolean;
+	export function builtinsLeftOn(userExtensions: unknown, projectExtensions: unknown): BuiltinLeftOn[];
+	export function withReplacedBuiltinsOff(userExtensions: unknown): { extensions: unknown[]; changed: boolean };
+	export function replacedBuiltinsNotice(left: readonly BuiltinLeftOn[], configCommand?: string): string | undefined;
+	export function replacedBuiltinsFix(left: readonly BuiltinLeftOn[], paths: { user: string; project: string }, configCommand?: string): string;
+	export function withBuiltinsTurnedOff(userExtensions: unknown, names: readonly string[]): unknown[];
+	export const TURN_OFF_YES: string;
+	export const TURN_OFF_NO: string;
+	export function turnOffPrompt(left: readonly BuiltinLeftOn[], settingsPath: string, configCommand?: string): string;
+}

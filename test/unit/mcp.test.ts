@@ -93,6 +93,78 @@ describe("loadServers", () => {
 		expect(loadServers(project, home, {})[0]).toMatchObject({ command: "personal" });
 	});
 
+	describe("pi's own mcp.json files", () => {
+		const piConfigs = () => ({ user: join(home, ".pi", "agent", "mcp.json"), project: join(project, ".pi", "mcp.json") });
+		const writePi = (path: string, servers: Record<string, unknown>) => {
+			mkdirSync(join(path, ".."), { recursive: true });
+			write(path, servers);
+		};
+
+		it("reads both in pi's format: ~/ and a relative cwd resolved, enabled: false skipped, project over user", () => {
+			const { user, project: projectFile } = piConfigs();
+			writePi(user, { tools: { command: "~/bin/tools", args: ["~/data"], cwd: "work" }, off: { command: "x", enabled: false }, shared: { url: "https://user.example/mcp" } });
+			writePi(projectFile, { shared: { url: "https://project.example/mcp" } });
+			const servers = loadServers(project, home, {}, [], { piConfigs: piConfigs() });
+			expect(servers.map((s) => s.name)).toEqual(["shared", "tools"]);
+			expect(servers.find((s) => s.name === "tools")).toMatchObject({ command: join(home, "bin", "tools"), args: [join(home, "data")], cwd: join(project, "work"), source: user, piOrigin: "user" });
+			expect(servers.find((s) => s.name === "shared")).toMatchObject({ url: "https://project.example/mcp", source: projectFile, piOrigin: "project" });
+		});
+
+		it("lets a Claude Code file win a name, with a note", () => {
+			const { user } = piConfigs();
+			writePi(user, { shared: { command: "from-pi" } });
+			write(join(project, ".mcp.json"), { shared: { command: "from-claude" } });
+			const notes: string[] = [];
+			const servers = loadServers(project, home, {}, [], { piConfigs: piConfigs(), onNote: (m) => notes.push(m) });
+			expect(servers).toEqual([expect.objectContaining({ name: "shared", command: "from-claude" })]);
+			expect(servers[0]).not.toHaveProperty("piOrigin");
+			expect(notes).toEqual([`MCP server "shared" in ${user} is overridden by the one in ${join(project, ".mcp.json")}.`]);
+		});
+
+		it("overrides an identical server without a note", () => {
+			writePi(piConfigs().user, { shared: { command: "same", args: ["-y"] } });
+			write(join(project, ".mcp.json"), { shared: { command: "same", args: ["-y"] } });
+			const notes: string[] = [];
+			const servers = loadServers(project, home, {}, [], { piConfigs: piConfigs(), onNote: (m) => notes.push(m) });
+			expect(servers).toEqual([expect.objectContaining({ name: "shared", source: join(project, ".mcp.json") })]);
+			expect(notes).toEqual([]);
+		});
+
+		it("skips a server with a !command value, with a note, and ignores cwd and enabled outside pi's files", () => {
+			const { user } = piConfigs();
+			writePi(user, { gh: { url: "https://api.example/mcp", headers: { Authorization: "!echo Bearer $(gh auth token)" } } });
+			write(join(project, ".mcp.json"), { plain: { command: "x", cwd: "elsewhere", enabled: false } });
+			const notes: string[] = [];
+			const servers = loadServers(project, home, {}, [], { piConfigs: piConfigs(), onNote: (m) => notes.push(m) });
+			expect(servers).toEqual([expect.objectContaining({ name: "plain", command: "x" })]);
+			expect(servers[0]).not.toHaveProperty("cwd");
+			expect(notes).toEqual([`MCP server "gh" in ${user} is skipped: a \`!command\` value in env or headers is not supported.`]);
+		});
+
+		it("reads servers other extensions registered, below every file, with the extension as the source", () => {
+			const { user } = piConfigs();
+			writePi(user, { shared: { command: "from-pi" } });
+			const registered = [
+				{ name: "jira", config: { url: "https://mcp.example.com/jira" }, extensionPath: "/ext/jira.ts" },
+				{ name: "shared", config: { command: "from-extension" }, extensionPath: "/ext/other.ts" },
+				{ name: "bad", config: { url: "https://x", headers: { A: "!cmd" } }, extensionPath: "/ext/bad.ts" },
+			];
+			const notes: string[] = [];
+			const servers = loadServers(project, home, {}, [], { piConfigs: piConfigs(), registered, onNote: (m) => notes.push(m) });
+			expect(servers.map((s) => [s.name, s.source])).toEqual([
+				["jira", "/ext/jira.ts"],
+				["shared", user],
+			]);
+			expect(servers[0].piOrigin).toBe("extension");
+			expect(notes).toEqual(['MCP server "bad" registered by /ext/bad.ts is skipped: a `!command` value in env or headers is not supported.']);
+		});
+
+		it("reads neither file unless asked", () => {
+			writePi(piConfigs().user, { tools: { command: "x" } });
+			expect(loadServers(project, home, {})).toEqual([]);
+		});
+	});
+
 	it("lets a disabled entry remove an inherited server", () => {
 		write(join(home, ".claude.json"), { gone: { command: "user" } });
 		write(join(project, ".mcp.json"), { gone: { command: "user", disabled: true } });

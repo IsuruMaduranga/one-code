@@ -127,6 +127,15 @@ describe("collectCompat: content", () => {
 		const liveSection = mcpSection(compat, { modelSource: "none", mcp: { settled: true, servers: [{ name: "local", status: "connected", toolCount: 4 }] } }, home);
 		expect(liveSection.lines.some((l) => l.text.includes("local — stdio: my-mcp · connected · 4 tools"))).toBe(true);
 	});
+
+	it("loads what the session loads: registered servers, and pi's project mcp.json under its config dir name", () => {
+		write(join(cwd, ".rebranded", "mcp.json"), { mcpServers: { piproject: { command: "pi-mcp" } } });
+		write(join(cwd, ".pi", "mcp.json"), { mcpServers: { ignored: { command: "x" } } });
+		const registered = [{ name: "jira", config: { url: "https://mcp.example.com/${JIRA_TOKEN}" }, extensionPath: "/ext/jira.ts" }];
+		const compat = collectCompat({ ...input(), piConfigDirName: ".rebranded", registeredMcpServers: registered });
+		expect(compat.mcp.servers.map((s) => s.name)).toEqual(["jira", "piproject"]);
+		expect(compat.findings.some((f) => f.text.includes("unset environment variable JIRA_TOKEN (from /ext/jira.ts)"))).toBe(true);
+	});
 });
 
 describe("dependencies", () => {
