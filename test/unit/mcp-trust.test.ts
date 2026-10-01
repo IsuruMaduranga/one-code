@@ -315,4 +315,11 @@ describe("describeServers", () => {
 		expect(text).toContain("API_TOKEN");
 		expect(text).not.toContain("tok-secret");
 	});
+
+	it("points a preview too long to show at the file the hidden servers come from", () => {
+		const many = (source: string, extra: Partial<McpServer> = {}) =>
+			Array.from({ length: 40 }, (_, i) => ({ ...stdio(`s${i}`, source, "npx", ["-y", "x".repeat(200)]), ...extra }) as McpServer);
+		expect(describeServers(many(join(cwd, ".pi", "mcp.json"), { piOrigin: "project" }))).toMatch(/more not shown — review \.pi\/mcp\.json before approving$/);
+		expect(describeServers(many(join(cwd, ".mcp.json")))).toMatch(/more not shown — review \.mcp\.json before approving$/);
+	});
 });

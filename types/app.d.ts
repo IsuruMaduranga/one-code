@@ -54,8 +54,11 @@ declare module "*/replaced-builtins.mjs" {
 	}
 	export const REPLACED_BUILTINS: readonly ReplacedBuiltin[];
 	export const BUILTIN_EXTENSIONS_PI: string;
-	export function builtinEnabled(name: string, userExtensions: unknown, projectExtensions: unknown): boolean;
-	export function builtinsLeftOn(userExtensions: unknown, projectExtensions: unknown): BuiltinLeftOn[];
+	/** How a `!` override entry's glob is matched: pi's minimatch, or the module's port. */
+	export type GlobMatcher = (pattern: string, path: string) => boolean;
+	export const globMatches: GlobMatcher;
+	export function builtinEnabled(name: string, userExtensions: unknown, projectExtensions: unknown, matches?: GlobMatcher): boolean;
+	export function builtinsLeftOn(userExtensions: unknown, projectExtensions: unknown, matches?: GlobMatcher): BuiltinLeftOn[];
 	export function withReplacedBuiltinsOff(userExtensions: unknown): { extensions: unknown[]; changed: boolean };
 	export function replacedBuiltinsNotice(left: readonly BuiltinLeftOn[], configCommand?: string): string | undefined;
 	export function replacedBuiltinsFix(left: readonly BuiltinLeftOn[], paths: { user: string; project: string }, configCommand?: string): string;

@@ -127,6 +127,14 @@ describe("replacedBuiltinsView", () => {
 		});
 	});
 
+	it("reads a ! entry with pi's own minimatch, extglobs included", () => {
+		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ extensions: ["!builtin:@(mcp|tool-search)"] }));
+		writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({}));
+		expect(replacedBuiltinsView("0.99.2", () => SettingsManager.create(cwd, agentDir), { agentDir, cwd })?.left).toEqual([]);
+		// The port alone does not read extglobs; pi's matcher is what makes this right.
+		expect(builtinsLeftOn(["!builtin:@(mcp|tool-search)"], [])).toHaveLength(2);
+	});
+
 	it("is undefined before pi 0.99 and when the settings cannot be read", () => {
 		expect(replacedBuiltinsView("0.87.1", () => SettingsManager.create(cwd, agentDir), { agentDir, cwd })).toBeUndefined();
 		const broken = () => {

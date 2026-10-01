@@ -31,11 +31,13 @@ function entriesOf(extensions) {
 }
 
 /**
- * pi's `!` patterns are minimatch globs. A built-in path has no `/`, so this
- * covers the forms that can match one: `*`, `?`, `[...]` (`[!...]` negated) and
- * `{a,b}` alternatives, nested.
+ * pi's `!` patterns are minimatch globs. Callers that can reach pi's own
+ * minimatch pass it as `matches` (doctor/builtins.ts); this port is the
+ * fallback. A built-in path has no `/`, so it covers `*`, `?`, `[...]`
+ * (`[!...]` negated) and `{a,b}` alternatives, nested, but not extglobs such
+ * as `@(a|b)`.
  */
-function globMatches(pattern, path) {
+export function globMatches(pattern, path) {
 	let source = "";
 	let depth = 0;
 	for (let i = 0; i < pattern.length; i++) {
@@ -66,10 +68,10 @@ function globMatches(pattern, path) {
  * or leave it alone (undefined), in pi's order: `!glob` off, then an exact
  * `+path` on, then an exact `-path` off (`isEnabledByOverrides`).
  */
-function overrideFor(path, entries) {
+function overrideFor(path, entries, matches) {
 	let result;
 	for (const entry of entries) {
-		if (entry.startsWith("!") && globMatches(entry.slice(1), path)) result = false;
+		if (entry.startsWith("!") && matches(entry.slice(1), path)) result = false;
 	}
 	if (entries.includes(`+${path}`)) result = true;
 	if (entries.includes(`-${path}`)) result = false;
@@ -82,25 +84,25 @@ function overrideFor(path, entries) {
  * matching entry in the project's setting winning (pi's package manager, the
  * `builtinExtensions` loop).
  */
-function builtinState(name, userExtensions, projectExtensions) {
+function builtinState(name, userExtensions, projectExtensions, matches) {
 	const path = `${PREFIX}${name}`;
-	const project = overrideFor(path, entriesOf(projectExtensions));
-	return { enabled: project ?? overrideFor(path, entriesOf(userExtensions)) ?? true, byProject: project === true };
+	const project = overrideFor(path, entriesOf(projectExtensions), matches);
+	return { enabled: project ?? overrideFor(path, entriesOf(userExtensions), matches) ?? true, byProject: project === true };
 }
 
-/** Whether pi loads built-in `name` (`builtinState`). */
-export function builtinEnabled(name, userExtensions, projectExtensions) {
-	return builtinState(name, userExtensions, projectExtensions).enabled;
+/** Whether pi loads built-in `name` (`builtinState`); `matches(pattern, path)` reads a `!` glob. */
+export function builtinEnabled(name, userExtensions, projectExtensions, matches = globMatches) {
+	return builtinState(name, userExtensions, projectExtensions, matches).enabled;
 }
 
 /**
  * The replaced built-ins pi still loads, each with the scope that keeps it on:
  * `project` when the project's setting turns it on, else `user`.
  */
-export function builtinsLeftOn(userExtensions, projectExtensions) {
+export function builtinsLeftOn(userExtensions, projectExtensions, matches = globMatches) {
 	const left = [];
 	for (const { name, ours } of REPLACED_BUILTINS) {
-		const { enabled, byProject } = builtinState(name, userExtensions, projectExtensions);
+		const { enabled, byProject } = builtinState(name, userExtensions, projectExtensions, matches);
 		if (enabled) left.push({ name, ours, scope: byProject ? "project" : "user" });
 	}
 	return left;

@@ -5,10 +5,27 @@
  * session and from `onecode doctor`.
  */
 
+import { createRequire } from "node:module";
 import { join } from "node:path";
-import { CONFIG_DIR_NAME, type SettingsManager } from "@earendil-works/pi-coding-agent";
+import { CONFIG_DIR_NAME, getPackageDir, type SettingsManager } from "@earendil-works/pi-coding-agent";
 import { piHasBuiltinExtensions } from "../lib/pi-version.ts";
-import { BUILTIN_EXTENSIONS_PI, type BuiltinLeftOn, builtinsLeftOn } from "../lib/replaced-builtins.mjs";
+import { BUILTIN_EXTENSIONS_PI, type BuiltinLeftOn, builtinsLeftOn, type GlobMatcher, globMatches } from "../lib/replaced-builtins.mjs";
+
+/**
+ * pi's own minimatch, the matcher its `!` override entries go through, loaded
+ * from pi's install so every glob form (extglobs included) reads as pi reads
+ * it. Falls back to the module's port when that copy cannot be loaded (a
+ * compiled pi binary, an unusual layout).
+ */
+function piGlobMatcher(): GlobMatcher {
+	try {
+		const { minimatch } = createRequire(join(getPackageDir(), "package.json"))("minimatch") as { minimatch?: unknown };
+		if (typeof minimatch === "function") return (pattern, path) => (minimatch as (path: string, pattern: string) => boolean)(path, pattern);
+	} catch {
+		// pi's copy is not reachable: use the port.
+	}
+	return globMatches;
+}
 
 export interface ReplacedBuiltinsView {
 	/** The replaced built-ins pi still loads; empty when the settings turn them all off. */
@@ -30,7 +47,7 @@ export function replacedBuiltinsView(
 	try {
 		const manager = settings();
 		return {
-			left: builtinsLeftOn(manager.getGlobalSettings().extensions, manager.getProjectSettings().extensions),
+			left: builtinsLeftOn(manager.getGlobalSettings().extensions, manager.getProjectSettings().extensions, piGlobMatcher()),
 			paths: { user: join(paths.agentDir, "settings.json"), project: join(paths.cwd, CONFIG_DIR_NAME, "settings.json") },
 		};
 	} catch {

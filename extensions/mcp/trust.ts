@@ -287,7 +287,7 @@ export function describeServers(servers: McpServer[]): string {
 		return notes.length ? `${what}\n    (${notes.join("; ")})` : what;
 	});
 	// Bound the modal: a very long command/url or many servers cannot flood it.
-	return boundConsentItems(lines, "review .mcp.json before approving");
+	return boundConsentItems(lines, `review ${configLabels(servers)} before approving`);
 }
 
 export interface McpTrustDeps {
