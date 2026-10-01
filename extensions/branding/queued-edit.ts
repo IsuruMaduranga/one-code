@@ -9,20 +9,23 @@
  * own dequeue action, so the alt+up binding keeps working alongside.
  */
 
+import { visibleWidth } from "../lib/text-width.ts";
+
 export interface QueueEditEditor {
 	getCursor(): { line: number; col: number };
+	getLines(): string[];
 	isShowingAutocomplete(): boolean;
-	/**
-	 * pi's own top-row test, which its history navigation uses: the first
-	 * visual row, so ↑ on a wrapped first line still moves the cursor. Private
-	 * in pi's editor; the logical first line stands in when it is missing.
-	 */
-	isOnFirstVisualLine?(): boolean;
 }
 
-/** Whether a plain ↑ restores the queued messages rather than reaching the editor. */
-export function upEditsQueue(editor: QueueEditEditor, queued: boolean): boolean {
+/**
+ * Whether a plain ↑ restores the queued messages rather than reaching the
+ * editor. Only on a first line that fits one row of `layoutWidth`: pi's
+ * public API does not say which visual row the cursor is on, so on a wrapped
+ * first line ↑ is left to pi (it moves the cursor) and alt+up restores.
+ */
+export function upEditsQueue(editor: QueueEditEditor, queued: boolean, layoutWidth: number): boolean {
 	if (!queued) return false;
 	if (editor.isShowingAutocomplete()) return false;
-	return editor.isOnFirstVisualLine ? editor.isOnFirstVisualLine() : editor.getCursor().line === 0;
+	if (editor.getCursor().line !== 0) return false;
+	return visibleWidth(editor.getLines()[0] ?? "") <= layoutWidth;
 }

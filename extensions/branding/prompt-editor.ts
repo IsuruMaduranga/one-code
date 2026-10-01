@@ -34,6 +34,8 @@ export class PromptEditor extends CustomEditor {
 	/** Whether a message waits in pi's queue mid-turn (queued-edit.ts). */
 	#queued: () => boolean;
 	#keys: EditorArgs[2];
+	/** The width pi wraps the text at, from the last render (pi's own formula). */
+	#layoutWidth = Number.POSITIVE_INFINITY;
 
 	constructor(
 		tui: EditorArgs[0],
@@ -54,20 +56,10 @@ export class PromptEditor extends CustomEditor {
 		this.#keys = keybindings;
 	}
 
-	/** The editor as `upEditsQueue` reads it, with pi's private visual-row test when present. */
-	#queueView() {
-		const firstVisual = (this as unknown as { isOnFirstVisualLine?: () => boolean }).isOnFirstVisualLine;
-		return {
-			getCursor: () => this.getCursor(),
-			isShowingAutocomplete: () => this.isShowingAutocomplete(),
-			isOnFirstVisualLine: typeof firstVisual === "function" ? () => firstVisual.call(this) : undefined,
-		};
-	}
-
 	/** ↑ on the first line restores queued messages, as in Claude Code (queued-edit.ts). */
 	handleInput(data: string): void {
 		const dequeue = this.actionHandlers.get("app.message.dequeue");
-		if (dequeue && this.#keys.matches(data, "tui.editor.cursorUp") && upEditsQueue(this.#queueView(), this.#queued())) {
+		if (dequeue && this.#keys.matches(data, "tui.editor.cursorUp") && upEditsQueue(this, this.#queued(), this.#layoutWidth)) {
 			dequeue();
 			return;
 		}
@@ -85,6 +77,8 @@ export class PromptEditor extends CustomEditor {
 	}
 
 	render(width: number): string[] {
+		const paddingX = Math.min(PROMPT_PADDING, Math.max(0, Math.floor((width - 1) / 2)));
+		this.#layoutWidth = Math.max(1, width - paddingX * 2 - (paddingX ? 0 : 1));
 		let lines = applyPromptMarker(super.render(width), PROMPT_PADDING, this.#renderMarker());
 		const hint = this.#renderHint(this.getText());
 		if (hint) lines = applyArgumentHint(lines, hint);

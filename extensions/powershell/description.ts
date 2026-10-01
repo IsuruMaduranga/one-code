@@ -157,10 +157,15 @@ export const ONE_CODE_CWD_SENTENCE =
 export const CC_SEARCH_LINES =
 	"    - File search: Use Glob (NOT Get-ChildItem -Recurse)\n    - Content search: Use Grep (NOT Select-String)\n";
 
+/** The same reason takes searching out of the file operations the tool is told to leave alone. */
+export const CC_FILE_OPERATIONS = "(reading, writing, editing, searching, finding files)";
+export const ONE_CODE_FILE_OPERATIONS = "(reading, writing, editing files)";
+
 /** The description the `powershell` tool ships: Claude Code's text with the corrections above, plus One Code's addendum. */
 export function powerShellToolDescription(edition: PowerShellEditionName): string {
 	const text = claudeCodePowerShellDescription(edition)
 		.replace(CC_CWD_SENTENCE, ONE_CODE_CWD_SENTENCE)
-		.replace(CC_SEARCH_LINES, "");
+		.replace(CC_SEARCH_LINES, "")
+		.replace(CC_FILE_OPERATIONS, ONE_CODE_FILE_OPERATIONS);
 	return `${text}${ONE_CODE_ADDENDUM}`;
 }
