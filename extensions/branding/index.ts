@@ -239,7 +239,15 @@ function installPromptMarker(
 	};
 	const badge = () => agentView.target?.badge;
 	const paintBadge = (label: string) => safeThemeInverse(ui.theme)(safeThemePaint(ui.theme)("accent", ` ${label} `));
-	const queued = () => !ctx.isIdle() && ctx.hasPendingMessages();
+	// The editor can outlive this context across a session replacement; a stale
+	// context throws, and ↑ must still reach the editor then.
+	const queued = () => {
+		try {
+			return !ctx.isIdle() && ctx.hasPendingMessages();
+		} catch {
+			return false;
+		}
+	};
 	ui.setEditorComponent(
 		(tui: unknown, theme: unknown, keybindings: unknown) =>
 			new PromptEditor(tui as never, theme as never, keybindings as never, renderMarker, renderHint, badge, paintBadge, queued),

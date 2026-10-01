@@ -121,6 +121,9 @@ describe("isPrivateOrLocalUrl", () => {
 		"http://192.0.0.8/",
 		"http://224.0.0.1/",
 		"http://255.255.255.255/",
+		"http://localhost./",
+		"http://printer.local./",
+		"http://intranet./",
 	])("%s is private", (url) => {
 		expect(isPrivateOrLocalUrl(url)).toBe(true);
 	});
@@ -303,10 +306,15 @@ describe("fetchOutcome: answer or fall back to the local fetch", () => {
 		expect(fetchOutcome(fold([{ type: "error", error: { message: "Overloaded" } }]))).toEqual({ ok: false, reason: "the call failed: Overloaded" });
 	});
 
-	it("keeps an answer cut off at the output limit, marked, but not an empty one", () => {
+	it("keeps a long answer cut off at the output limit, marked, but not narration or an empty one", () => {
 		const cut = (text?: string) =>
 			fetchStream({ type: "web_fetch_result", url: "u" }, text).map((event: any) => (event.type === "message_delta" ? { ...event, delta: { stop_reason: "max_tokens" } } : event));
-		expect(fetchOutcome(fold(cut()))).toEqual({ ok: true, text: "v24.21.0", cutOff: true });
+		const long = "The release table lists every line. ".repeat(40);
+		expect(fetchOutcome(fold(cut(long)))).toEqual({ ok: true, text: long.trim(), cutOff: true });
+		expect(fetchOutcome(fold(cut("The first page lacks it; trying the linked page.")))).toEqual({
+			ok: false,
+			reason: "the call reached the output limit before it answered",
+		});
 		expect(fetchOutcome(fold(cut("")))).toEqual({ ok: false, reason: "the model returned no answer" });
 	});
 });
@@ -327,10 +335,11 @@ describe("searchOutcome / searchSources", () => {
 		expect(searchSources(result).map((source) => source.url)).toEqual(["https://b.example/", "https://a.example/"]);
 	});
 
-	it("keeps a search answer cut off at the output limit, marked", () => {
-		const cut = search([hit("https://a.example/")]);
+	it("keeps a long search answer cut off at the output limit, marked", () => {
+		const long = "Node 26.8.2 is current. ".repeat(50).trim();
+		const cut = search([hit("https://a.example/")], long);
 		cut.stopReason = "max_tokens";
-		expect(searchOutcome(cut)).toEqual({ ok: true, text: "Node 26.8.2 is current.", cutOff: true });
+		expect(searchOutcome(cut)).toEqual({ ok: true, text: long, cutOff: true });
 	});
 
 	it("falls back on an error or empty results", () => {
@@ -403,6 +412,36 @@ describe("runServerCall", () => {
 		await runServerCall(model, { apiKey: "k" }, {}, undefined, learned);
 		await runServerCall(model, { apiKey: "k" }, {}, undefined, learned);
 		expect(bodies.map((body) => body.thinking?.type)).toEqual(["disabled", "between_tools", "between_tools"]);
+	});
+
+	it("remembers retried fields only once the model accepts them", async () => {
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(async () => new Response(JSON.stringify({ error: { message: 'send "thinking": {"type": "between_tools"}' } }), { status: 400 })),
+		);
+		const learned = new Map();
+		await expect(runServerCall(claude("claude-sonnet-5-5", 3), { apiKey: "k" }, {}, undefined, learned)).rejects.toThrow("Anthropic API error (400)");
+		expect(learned.size).toBe(0);
+	});
+
+	it("reports the usage a stream had streamed before it broke", async () => {
+		const start = `data: ${JSON.stringify({ type: "message_start", message: { usage: { input_tokens: 900, output_tokens: 5 } } })}\n\n`;
+		let reads = 0;
+		const body = new ReadableStream({
+			pull(controller) {
+				if (reads++ === 0) controller.enqueue(new TextEncoder().encode(start));
+				else controller.error(new Error("socket hang up"));
+			},
+		});
+		vi.stubGlobal("fetch", vi.fn(async () => new Response(body, { status: 200 })));
+		const onUsage = vi.fn();
+		const attempt = await tryNativeWeb(
+			{ model: claude("claude-sonnet-5", 3), modelRegistry: { getAvailable: () => [claude("claude-sonnet-5", 3)], getApiKeyAndHeaders: async () => ({ ok: true as const, apiKey: "sk-ant-api03-x" }) } },
+			{ body: () => ({}), outcome: fetchOutcome, onUsage, signal: undefined },
+		);
+		expect(attempt).toEqual({ kind: "fell-back", reason: "the call failed: socket hang up" });
+		expect(onUsage).toHaveBeenCalledOnce();
+		expect(onUsage.mock.calls[0][0]).toMatchObject({ input: 900, output: 5 });
 	});
 
 	it("throws on any other error status", async () => {

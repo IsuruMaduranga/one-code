@@ -19,6 +19,11 @@ describe("upEditsQueue", () => {
 		expect(upEditsQueue(editor(2), true)).toBe(false);
 	});
 
+	it("uses pi's visual-row test when the editor has it, so ↑ moves within a wrapped first line", () => {
+		expect(upEditsQueue({ ...editor(0), isOnFirstVisualLine: () => false }, true)).toBe(false);
+		expect(upEditsQueue({ ...editor(0), isOnFirstVisualLine: () => true }, true)).toBe(true);
+	});
+
 	it("leaves ↑ to an open autocomplete list", () => {
 		expect(upEditsQueue(editor(0, true), true)).toBe(false);
 	});

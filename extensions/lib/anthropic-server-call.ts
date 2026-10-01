@@ -91,12 +91,21 @@ export async function runServerCall(
 			const retry = response.status === 400 && attempt === 0 ? thinkingRetry(message) : undefined;
 			if (retry) {
 				thinking = retry;
-				learned?.set(key, retry);
 				continue;
 			}
 			throw new Error(`Anthropic API error (${response.status}): ${message}`);
 		}
-		const result = await readStream(response);
+		// Remembered only once the model accepted them, so an unrelated 400 that
+		// happens to name a switch cannot pin wrong fields for the session.
+		if (attempt > 0) learned?.set(key, thinking);
+		const accumulator = createServerCallAccumulator();
+		try {
+			await readStream(response, accumulator);
+		} catch (error) {
+			// The tokens and searches streamed before the break were still billed.
+			throw new ServerCallError((error as Error).message, serverCallUsage(model, accumulator.result()), error);
+		}
+		const result = accumulator.result();
 		return { result, usage: serverCallUsage(model, result) };
 	}
 }
@@ -172,6 +181,7 @@ export async function tryNativeWeb(
 			? { kind: "answered", text: outcome.text, cutOff: outcome.cutOff, spec, result: reply.result }
 			: { kind: "fell-back", reason: outcome.reason };
 	} catch (error) {
+		if (error instanceof ServerCallError && error.usage.totalTokens > 0) request.onUsage(error.usage);
 		if (request.signal?.aborted) return { kind: "cancelled" };
 		return { kind: "fell-back", reason: `the call failed: ${(error as Error).message}` };
 	}
@@ -186,8 +196,18 @@ function errorMessage(body: string): string {
 	}
 }
 
-async function readStream(response: Response): Promise<ServerCallResult> {
-	const accumulator = createServerCallAccumulator();
+/** A stream that broke after it started, with the usage it had reported by then. */
+class ServerCallError extends Error {
+	constructor(
+		message: string,
+		readonly usage: Usage,
+		cause: unknown,
+	) {
+		super(message, { cause });
+	}
+}
+
+async function readStream(response: Response, accumulator: ReturnType<typeof createServerCallAccumulator>): Promise<void> {
 	const reader = response.body?.getReader();
 	if (!reader) throw new Error("Anthropic API returned no response body");
 	const decoder = new TextDecoder();
@@ -200,5 +220,4 @@ async function readStream(response: Response): Promise<ServerCallResult> {
 		for (const event of events) accumulator.push(event);
 		if (done) break;
 	}
-	return accumulator.result();
 }

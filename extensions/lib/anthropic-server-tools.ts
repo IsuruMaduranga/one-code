@@ -110,6 +110,8 @@ export function isPrivateOrLocalUrl(url: string): boolean {
 		return false;
 	}
 	if (host.startsWith("[") && host.endsWith("]")) host = host.slice(1, -1);
+	// A fully qualified name (`localhost.`, `printer.local.`) is the same host.
+	host = host.replace(/\.+$/, "");
 	if (host === "localhost" || /\.(localhost|local|internal|lan|home\.arpa)$/.test(host)) return true;
 	const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
 	if (v4) return isPrivateIPv4(v4.slice(1).map(Number));
@@ -397,17 +399,27 @@ export type Outcome = { ok: true; text: string; cutOff: boolean } | { ok: false;
 export const CUT_OFF_NOTE = "(The answer was cut off at the output limit and may be incomplete.)";
 
 /**
+ * The least text a cut-off answer must have to count. A complete short answer
+ * ends with `end_turn`; a short text at the limit means the budget went on
+ * code and tool calls, and the text is the model's narration between them.
+ */
+const CUT_OFF_MIN_CHARS = 1_000;
+
+/**
  * The checks every call shares once its tool succeeded: a non-empty answer
  * and a normal end. An answer cut off at the output limit still counts,
- * marked `cutOff`: falling back would throw away a mostly finished answer and
- * read the page a second time.
+ * marked `cutOff`, when it is long enough to be the answer rather than
+ * narration: falling back would throw away a mostly finished answer and read
+ * the page a second time.
  */
 function finished(result: ServerCallResult): Outcome {
 	if (result.stopReason !== "end_turn" && result.stopReason !== "max_tokens") {
 		return { ok: false, reason: `the call stopped early (${result.stopReason ?? "no stop reason"})` };
 	}
 	if (!result.text) return { ok: false, reason: "the model returned no answer" };
-	return { ok: true, text: result.text, cutOff: result.stopReason === "max_tokens" };
+	const cutOff = result.stopReason === "max_tokens";
+	if (cutOff && result.text.length < CUT_OFF_MIN_CHARS) return { ok: false, reason: "the call reached the output limit before it answered" };
+	return { ok: true, text: result.text, cutOff };
 }
 
 /**

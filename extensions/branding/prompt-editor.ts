@@ -54,10 +54,20 @@ export class PromptEditor extends CustomEditor {
 		this.#keys = keybindings;
 	}
 
+	/** The editor as `upEditsQueue` reads it, with pi's private visual-row test when present. */
+	#queueView() {
+		const firstVisual = (this as unknown as { isOnFirstVisualLine?: () => boolean }).isOnFirstVisualLine;
+		return {
+			getCursor: () => this.getCursor(),
+			isShowingAutocomplete: () => this.isShowingAutocomplete(),
+			isOnFirstVisualLine: typeof firstVisual === "function" ? () => firstVisual.call(this) : undefined,
+		};
+	}
+
 	/** ↑ on the first line restores queued messages, as in Claude Code (queued-edit.ts). */
 	handleInput(data: string): void {
 		const dequeue = this.actionHandlers.get("app.message.dequeue");
-		if (dequeue && this.#keys.matches(data, "tui.editor.cursorUp") && upEditsQueue(this, this.#queued())) {
+		if (dequeue && this.#keys.matches(data, "tui.editor.cursorUp") && upEditsQueue(this.#queueView(), this.#queued())) {
 			dequeue();
 			return;
 		}
