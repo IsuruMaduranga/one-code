@@ -18,6 +18,8 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { tildify } from "../lib/paths.ts";
 import type { McpStatusEvent } from "../lib/mcp-status.ts";
+import type { ReplacedBuiltinsView } from "./builtins.ts";
+import type { RegisteredServer } from "../mcp/config.ts";
 import { wrapProse } from "../lib/tui-render.ts";
 import { countNoun } from "../lib/tui-render.ts";
 export { countNoun };
@@ -71,6 +73,12 @@ export interface DoctorEnvironment {
 	/** How One Code was launched: the bundled `onecode` app or the extension on the user's own pi. */
 	install: "app" | "pi-package";
 	piVersion?: string;
+	/** pi's built-ins One Code replaces and whether pi still loads them; undefined before pi 0.99 (doctor/builtins.ts). */
+	replacedBuiltins?: ReplacedBuiltinsView;
+	/** pi's `CONFIG_DIR_NAME`, the project folder its own `mcp.json` sits in (`.pi` when absent). */
+	piConfigDirName?: string;
+	/** MCP servers other extensions registered in this session (`pi.getMcpServers()`); the CLI has none. */
+	registeredMcpServers?: RegisteredServer[];
 	/** Result of the registry lookup for the newest release, when one was attempted. */
 	latest?: { status: "current" | "behind" | "unknown" | "skipped"; version?: string; reason?: string };
 }

@@ -11,7 +11,8 @@
  *    the user's own environment back (extensions/lib/app-launch.mjs).
  * 2. Registers the one-code-extension package (from our own node_modules)
  *    in the isolated settings, so pi's package manager loads the extensions,
- *    themes, and bundled agents exactly as a `pi install` would.
+ *    themes, and bundled agents exactly as a `pi install` would, and turns
+ *    off pi's built-in tool search and MCP, which ours replace.
  * 3. Rewrites the few plain-stdout lines where pi prints its own command
  *    name (the resume hint, --help usage) — under isolation `pi --session
  *    <id>` would not just be mis-branded but broken, since stock pi cannot
@@ -54,6 +55,7 @@ const corePath = dirname(require.resolve("one-code-extension/package.json"));
 const { applyLauncherEnv, installMethodFor } = await import(
 	pathToFileURL(join(corePath, "extensions", "lib", "app-launch.mjs")).href
 );
+const { withReplacedBuiltinsOff } = await import(pathToFileURL(join(corePath, "extensions", "lib", "replaced-builtins.mjs")).href);
 // Where the bin lives says how it was installed. Published before any fast
 // path (the doctor CLI exits early): the doctor's update lookup and the update
 // notice read it (lib/update-check.mjs minReleaseAgeFor) — under Homebrew a
@@ -133,9 +135,16 @@ try {
 	};
 	const kept = packages.filter((entry) => !isOurs(entry) && sourceOf(entry) !== corePath);
 	const next = [...kept, corePath];
+	// pi's built-in tool search and MCP give way to ours, with a warning at
+	// every start that advises removing One Code; turned off here instead,
+	// unless the user has an entry of their own for one
+	// (extensions/lib/replaced-builtins.mjs).
+	const builtins = withReplacedBuiltinsOff(settings.extensions);
+	if (builtins.changed) settings.extensions = builtins.extensions;
 	const changed =
 		firstRun ||
 		backfillExitOutput ||
+		builtins.changed ||
 		packages.length !== next.length ||
 		packages.some((p, i) => sourceOf(p) !== sourceOf(next[i]));
 	if (changed) {

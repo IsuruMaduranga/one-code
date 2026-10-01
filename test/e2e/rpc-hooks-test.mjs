@@ -47,7 +47,7 @@ function makeProject(name) {
 
 function runScenario({ name, workdir, approve, stateDir }) {
 	return new Promise((resolve) => {
-		const child = spawn("pi", ["--mode", "rpc", "--no-session"], {
+		const child = spawn("pi", ["--mode", "rpc", "--permission-mode", "default", "--no-session"], {
 			cwd: workdir,
 			stdio: ["pipe", "pipe", "inherit"],
 			env: { ...process.env, ONECODE_STATE_DIR: stateDir },
@@ -81,7 +81,7 @@ function runScenario({ name, workdir, approve, stateDir }) {
 					send({ type: "extension_ui_response", id: event.id, confirmed: approve });
 				} else if (event.type === "extension_ui_request" && event.method === "select") {
 					state.permissionPrompts += 1;
-					// Approve the harmless echo; we only care that the gate asked.
+					// Approve the harmless touch; we only care that the gate asked.
 					send({ type: "extension_ui_response", id: event.id, value: "Yes" });
 				} else if (event.type === "agent_end") {
 					clearTimeout(timeout);
@@ -94,7 +94,7 @@ function runScenario({ name, workdir, approve, stateDir }) {
 		send({
 			id: "req-1",
 			type: "prompt",
-			message: "Use the bash tool to run exactly: echo hello. If the call is blocked or rejected, do not retry it in any form; reply exactly: DONE",
+			message: "Use the bash tool to run exactly: touch hello.txt && echo hello. If the call is blocked or rejected, do not retry it in any form; reply exactly: DONE",
 		});
 	});
 }

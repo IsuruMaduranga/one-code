@@ -149,6 +149,7 @@ function buildTransport(
 			args: server.args,
 			// The user's own environment under the bundled app (lib/app-launch.mjs), then the server's.
 			env: { ...(childProcessEnv(process.env) as Record<string, string>), ...(server.env ?? {}) },
+			...(server.cwd ? { cwd: server.cwd } : {}),
 			stderr: "pipe",
 		});
 		// The PassThrough exists before start(); drain it from the first byte.

@@ -3,8 +3,9 @@
  *
  * When a foreground `bash` or `powershell` run prints more than pi keeps, pi
  * writes the whole output to `<os.tmpdir()>/pi-<shell>-<16 hex>.log` and ends
- * the text with `[… Full output: <path>]`, on success and in the error it
- * throws for a non-zero exit, a timeout or an abort. `os.tmpdir()` is outside
+ * the text with `[… Full output: <path>]`, on success and on a failure: a
+ * non-zero exit is an error result from pi 0.99 on and a thrown error before
+ * it, and a timeout or an abort is always thrown. `os.tmpdir()` is outside
  * every root the permission gate treats as readable, so the "full output is
  * one read away" promise held only where outside reads skip the gate. So the
  * file is moved into the session's persisted-results dir (a readable root)

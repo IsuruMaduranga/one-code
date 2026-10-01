@@ -3,20 +3,37 @@
 # project, dump every request, and check the prefix stayed stable
 # (test/e2e/cache-probe.mjs; CACHE-REVIEW-2026-09-04 L3).
 #
-#   test/e2e/cache-probe.sh [model] [extra cache-probe.mjs flags…]
+#   test/e2e/cache-probe.sh [model] [--no-load] [extra cache-probe.mjs flags…]
 #   e.g. test/e2e/cache-probe.sh anthropic/claude-sonnet-5
-#        test/e2e/cache-probe.sh openrouter/deepseek/deepseek-v4-flash --eager-load-ok
+#        test/e2e/cache-probe.sh openai/gpt-6.1-sol
+#        test/e2e/cache-probe.sh openrouter/deepseek/deepseek-v4.1-flash --no-load
 #
 # From a sandboxed assistant shell, run it inside tmux (findings §10). Costs one
 # short three-request session (~25k tokens on a Claude model, mostly cache write).
-# The prompt exercises the deferred-tool path (tool_search → cron_list), the one
-# that regressed in H2.
+# The default prompt exercises the deferred-tool path (tool_search → cron_list),
+# the one that regressed in H2. `--no-load` runs two read-only bash calls
+# instead, for a provider with no native tool loading (OpenRouter), where a
+# load re-caches the conversation by design (findings §7).
+#
+# It runs the repo's own pi (node_modules), the version One Code ships against,
+# not whatever `pi` is first on PATH; PI_BIN overrides that.
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 MODEL="${1:-anthropic/claude-sonnet-5}"
 shift || true
 NODE_BIN=/Users/isuruWij/.nvm/versions/node/v26.3.1/bin
 [ -d "$NODE_BIN" ] && export PATH="$NODE_BIN:$PATH"
+PI_BIN="${PI_BIN:-$REPO/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js}"
+
+PROMPT='First call tool_search with query select:cron_list. Then call cron_list once. Then reply with exactly the word done.'
+CHECK_ARGS=()
+for arg in "$@"; do
+	if [ "$arg" = "--no-load" ]; then
+		PROMPT='Run echo probe-one with the bash tool. Then run echo probe-two with the bash tool. Then reply with exactly the word done.'
+	else
+		CHECK_ARGS+=("$arg")
+	fi
+done
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/cache-probe.XXXXXX")"
 PROJECT="$WORK/project"
@@ -24,12 +41,12 @@ mkdir -p "$PROJECT"
 git -C "$PROJECT" init -q
 printf '# Probe\n\nThrowaway project for the prompt-cache probe.\n' > "$PROJECT/CLAUDE.md"
 
-PROMPT='First call tool_search with query select:cron_list. Then call cron_list once. Then reply with exactly the word done.'
 echo "model:   $MODEL"
+echo "pi:      $(node "$PI_BIN" --version 2>/dev/null | tail -1)"
 echo "workdir: $WORK"
 (
 	cd "$PROJECT"
-	WIRE_DUMP="$WORK/wire.jsonl" pi -e "$REPO/test/e2e/dump-requests.ts" --model "$MODEL" --mode json -p "$PROMPT" > "$WORK/events.jsonl" 2> "$WORK/stderr.log"
+	WIRE_DUMP="$WORK/wire.jsonl" node "$PI_BIN" -e "$REPO/test/e2e/dump-requests.ts" --model "$MODEL" --mode json -p "$PROMPT" > "$WORK/events.jsonl" 2> "$WORK/stderr.log"
 ) || echo "pi exited non-zero (see $WORK/stderr.log)"
 
-node "$REPO/test/e2e/cache-probe.mjs" "$WORK/wire.jsonl" "$WORK/events.jsonl" "$@"
+node "$REPO/test/e2e/cache-probe.mjs" "$WORK/wire.jsonl" "$WORK/events.jsonl" ${CHECK_ARGS[@]+"${CHECK_ARGS[@]}"}

@@ -84,8 +84,9 @@ export interface AffinityModel extends ModelRef {
  * fork can send its parent's: a gateway routes on them (OpenRouter spreads a
  * model across hosts, each with its own cache), and the fork is a different
  * session. Extension headers merge after pi-ai's, so these override. A copy
- * of pi-ai 0.87.1's `createClient` rules for the three replayable APIs
- * (re-check at a pi bump: features/pi-adaptation/plan.md §3 step 9).
+ * of pi-ai's `createClient` rules for the three replayable APIs, unchanged
+ * from 0.87.1 to 0.99.2 (re-check at a pi bump:
+ * features/pi-adaptation/plan.md §3 step 9).
  */
 export function affinityHeaders(model: AffinityModel | undefined, sessionId: string): Record<string, string> {
 	if (!model) return {};

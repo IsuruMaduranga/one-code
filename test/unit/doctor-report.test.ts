@@ -102,9 +102,38 @@ describe("buildDoctorReport", () => {
 	});
 
 	it("warns when the hosting pi is outside the tested range", () => {
-		const report = buildDoctorReport({ env: environment({ install: "pi-package", piVersion: "0.90.0" }), registry: registry(anthropic), session: { model: anthropic[1], modelSource: "session" } });
+		const report = buildDoctorReport({ env: environment({ install: "pi-package", piVersion: "0.100.0" }), registry: registry(anthropic), session: { model: anthropic[1], modelSource: "session" } });
 		expect(report.findings.some((f) => f.text.includes("tested against pi"))).toBe(true);
-		expect(renderDoctorText(report, 200)).toContain("Running: one-code-extension 0.2.1 on your own pi · pi 0.90.0");
+		expect(renderDoctorText(report, 200)).toContain("Running: one-code-extension 0.2.1 on your own pi · pi 0.100.0");
+	});
+
+	it("reports pi's built-in tool search and MCP still on, with the settings fix", () => {
+		const left = [
+			{ name: "tool-search", ours: "tool search", scope: "user" as const },
+			{ name: "mcp", ours: "MCP", scope: "user" as const },
+		];
+		const paths = { user: join(home, ".pi", "agent", "settings.json"), project: join(cwd, ".pi", "settings.json") };
+		const report = buildDoctorReport({
+			env: environment({ install: "pi-package", piVersion: "0.99.2", replacedBuiltins: { left, paths } }),
+			registry: registry(anthropic),
+			session: { model: anthropic[1], modelSource: "session" },
+		});
+		expect(renderDoctorText(report, 200)).toContain("pi's built-in tool-search and mcp: still on, so pi warns at every start");
+		const finding = report.findings.find((f) => f.text.includes("built-in tool-search and mcp"));
+		expect(finding?.fix).toContain(`"-builtin:tool-search" and "-builtin:mcp" to the "extensions" array in ${paths.user}`);
+		expect(finding?.fix).toContain("run `pi config`");
+	});
+
+	it("says the built-ins are off when the settings turn them off, and nothing before pi 0.99", () => {
+		const off = buildDoctorReport({
+			env: environment({ piVersion: "0.99.2", replacedBuiltins: { left: [], paths: { user: "u", project: "p" } } }),
+			registry: registry(anthropic),
+			session: { model: anthropic[1], modelSource: "session" },
+		});
+		expect(renderDoctorText(off, 200)).toContain("pi's built-in tool-search and mcp: off (One Code provides its own)");
+		expect(off.findings.some((f) => f.text.includes("built-in"))).toBe(false);
+		const old = buildDoctorReport({ env: environment(), registry: registry(anthropic), session: { model: anthropic[1], modelSource: "session" } });
+		expect(renderDoctorText(old, 200)).not.toContain("pi's built-in");
 	});
 
 	it("shows the newer version and the upgrade command when behind", () => {

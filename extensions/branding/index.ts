@@ -24,6 +24,7 @@ import { basename, dirname, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getAgentDir, SettingsManager, VERSION as PI_VERSION } from "@earendil-works/pi-coding-agent";
 import { piVersionWarning } from "../lib/pi-version.ts";
+import { handleReplacedBuiltins } from "./replaced-builtins.ts";
 import { extensionVersion } from "../lib/package-version.ts";
 import {
 	formatModel,
@@ -381,7 +382,7 @@ export default function brandingExtension(pi: ExtensionAPI) {
 			// Not bound (a torn-down session): the next turn looks again.
 		}
 	});
-	pi.on("session_start", (_event, ctx) => {
+	pi.on("session_start", (event, ctx) => {
 		// pi's own write lands after this handler, so only the deferred write
 		// sticks; a new session may carry a name (resume), so forget the last.
 		lastTitle = undefined;
@@ -398,6 +399,14 @@ export default function brandingExtension(pi: ExtensionAPI) {
 		// the range this release was tested against (see lib/pi-version.ts).
 		const versionWarning = piVersionWarning(PI_VERSION);
 		if (versionWarning) ctx.ui.notify(versionWarning, "warning");
+		// pi 0.99 skips its built-in tool search and MCP for ours and warns at
+		// every start, advising the user to remove One Code: offer to turn them
+		// off once, else answer with the notice (replaced-builtins.ts). Only
+		// when pi resolves its built-ins again (startup, /reload), not on a
+		// /new, resume or fork, which re-run this handler too. Not awaited: a
+		// dialog must not hold up startup.
+		const reason = (event as { reason?: string }).reason ?? "startup";
+		if (reason === "startup" || reason === "reload") void handleReplacedBuiltins(ctx);
 	});
 
 	if (process.env.CC_NO_BANNER === "1") return;

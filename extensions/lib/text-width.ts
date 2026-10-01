@@ -18,7 +18,7 @@
  * package. Grapheme segmentation and the mark/emoji classification use V8's
  * built-in `Intl.Segmenter` and Unicode property regexes.
  *
- * Synced with pi-tui 0.87.1. `text-width.test.ts` compares this measure with
+ * Synced with pi-tui 0.99.2. `text-width.test.ts` compares this measure with
  * pi-tui's over every code point to U+3FFFF and over random strings with
  * escapes, so a pi bump that changes pi-tui's measure fails the suite.
  */

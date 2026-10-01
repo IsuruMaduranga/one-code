@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { stabilizeDeferredTools, supportsToolReferences, toolSearchLoads } from "../../extensions/lib/deferred.ts";
+import {
+	stabilizeDeferredTools,
+	stabilizeResponsesToolLoads,
+	responsesToolLoadCompat,
+	supportsToolReferences,
+	toolSearchLoads,
+} from "../../extensions/lib/deferred.ts";
 
 describe("supportsToolReferences", () => {
 	it("mirrors pi's rule: first-party Claude 4.5+, never Haiku", () => {
@@ -228,6 +234,70 @@ describe("stabilizeDeferredTools", () => {
 		expect(stabilizeDeferredTools({ tools: [], messages: [] }, registry, deferred)).toBeUndefined();
 		expect(stabilizeDeferredTools({ tools: [{ name: "Read" }, { name: "ToolSearch" }], messages: [] }, registry, deferred)).toBeUndefined();
 		expect(stabilizeDeferredTools({ tools: [{ input_schema: {} }], messages: [] }, registry, deferred)).toBeUndefined();
+	});
+});
+
+describe("responsesToolLoadCompat", () => {
+	it("needs a Responses API and pi-ai's tool-load compat flag", () => {
+		expect(responsesToolLoadCompat({ api: "openai-responses", compat: { supportsAdditionalTools: true } })).toEqual({ supportsAdditionalTools: true });
+		expect(responsesToolLoadCompat({ api: "openai-codex-responses", compat: { supportsToolSearch: true } })).toEqual({ supportsToolSearch: true });
+		expect(responsesToolLoadCompat({ api: "openai-responses", compat: {} })).toBeUndefined();
+		expect(responsesToolLoadCompat({ api: "openai-completions", compat: { supportsAdditionalTools: true } })).toBeUndefined();
+		expect(responsesToolLoadCompat(undefined)).toBeUndefined();
+	});
+});
+
+describe("stabilizeResponsesToolLoads", () => {
+	const fn = (name: string) => ({ type: "function", name, description: `${name} tool`, parameters: { type: "object" }, strict: false });
+	const eager = [fn("read"), fn("bash"), fn("tool_search")];
+	const deferred = new Set(["cron_list", "web_search"]);
+	const isDeferred = (name: string) => deferred.has(name);
+	const loadCall = { type: "function_call", id: "fc_1", call_id: "call_1", name: "tool_search", arguments: "{}" };
+	const loadOutput = { type: "function_call_output", call_id: "call_1", output: "Loaded cron_list." };
+	const payload = (input: unknown[]) => ({ model: "gpt-6.1-sol", tools: [...eager, fn("cron_list")], input: [{ role: "user", content: "go" }, ...input] });
+	const loads = new Map([["call_1|fc_1", ["cron_list"]]]);
+
+	it("moves a loaded tool from tools into an additional_tools item before the loading output", () => {
+		const out = stabilizeResponsesToolLoads(payload([loadCall, loadOutput]), isDeferred, loads, { supportsAdditionalTools: true, supportsToolSearch: true });
+		expect(out?.tools).toEqual(eager);
+		expect(out?.input).toEqual([
+			{ role: "user", content: "go" },
+			loadCall,
+			{ type: "additional_tools", role: "developer", tools: [fn("cron_list")] },
+			loadOutput,
+		]);
+	});
+
+	it("uses a tool_search_call/output pair with defer_loading when additional_tools is unsupported", () => {
+		const out = stabilizeResponsesToolLoads(payload([loadCall, loadOutput]), isDeferred, loads, { supportsToolSearch: true });
+		const items = out?.input as Array<Record<string, unknown>>;
+		expect(items[2]).toMatchObject({ type: "tool_search_call", execution: "client", status: "completed", arguments: { query: "cron_list", limit: 1 } });
+		expect(items[3]).toMatchObject({ type: "tool_search_output", call_id: items[2].call_id, tools: [{ ...fn("cron_list"), defer_loading: true }] });
+		expect(items[4]).toEqual(loadOutput);
+		// Deterministic, so every later request repeats the same bytes.
+		expect(stabilizeResponsesToolLoads(payload([loadCall, loadOutput]), isDeferred, loads, { supportsToolSearch: true })).toEqual(out);
+	});
+
+	it("keeps the item in place as the conversation grows, and the tool usable after it", () => {
+		const use = { type: "function_call", id: "fc_2", call_id: "call_2", name: "cron_list", arguments: "{}" };
+		const out = stabilizeResponsesToolLoads(payload([loadCall, loadOutput, use, { type: "function_call_output", call_id: "call_2", output: "none" }]), isDeferred, loads, { supportsAdditionalTools: true });
+		expect(out?.tools).toEqual(eager);
+		expect((out?.input as Array<Record<string, unknown>>).map((item) => item.type ?? item.role)).toEqual(["user", "function_call", "additional_tools", "function_call_output", "function_call", "function_call_output"]);
+	});
+
+	it("leaves a tool called before its loading output, a load whose output is gone, and non-registry tools alone", () => {
+		const early = { type: "function_call", id: "fc_0", call_id: "call_0", name: "cron_list", arguments: "{}" };
+		expect(stabilizeResponsesToolLoads(payload([early, loadCall, loadOutput]), isDeferred, loads, { supportsAdditionalTools: true })).toBeUndefined();
+		expect(stabilizeResponsesToolLoads(payload([]), isDeferred, loads, { supportsAdditionalTools: true })).toBeUndefined();
+		expect(stabilizeResponsesToolLoads(payload([loadCall, loadOutput]), () => false, loads, { supportsAdditionalTools: true })).toBeUndefined();
+		expect(stabilizeResponsesToolLoads(payload([loadCall, loadOutput]), isDeferred, new Map(), { supportsAdditionalTools: true })).toBeUndefined();
+	});
+
+	it("never mutates its input", () => {
+		const body = payload([loadCall, loadOutput]);
+		const copy = structuredClone(body);
+		stabilizeResponsesToolLoads(body, isDeferred, loads, { supportsAdditionalTools: true });
+		expect(body).toEqual(copy);
 	});
 });
 

@@ -102,10 +102,30 @@ pi install npm:one-code-extension
 ```
 
 Use `pi` in place of `onecode` for every command in this guide. The
-extension is tested against pi 0.84.3 through 0.87 and warns at startup when
+extension is tested against pi 0.84.3 through 0.99 and warns at startup when
 your pi is outside that range. It doesn't load on a pi older than 0.84.3;
 update pi first with `pi update`. Full-screen mode is opt-in on your own pi;
 see [Full-screen mode and themes](configuration.md#full-screen-mode-and-themes).
+
+pi 0.99 and later ship their own tool search and MCP as built-in
+extensions. One Code brings its own versions of both, so pi skips the
+built-ins and prints a warning about each at every start. The warnings tell
+you to remove the extension that replaced them. Don't: that's One Code. To
+hide them, run `pi config` and turn off `tool-search` and `mcp` under
+Built-in, or add this to `~/.pi/agent/settings.json`:
+
+```json
+{
+  "extensions": ["-builtin:tool-search", "-builtin:mcp"]
+}
+```
+
+On the first start where the built-ins are still on, One Code asks whether
+to turn them off for you and explains why. Say yes and it adds those two
+entries to your settings; the warnings stop from the next start. Say no and
+it won't ask again, but it shows a short notice under pi's warnings, and
+`/doctor` can still make the change. The bundled app turns both off on its
+own.
 
 A few interface refinements are applied only by the bundled app, because
 they patch pi internals the extension API can't reach: a clean exit that

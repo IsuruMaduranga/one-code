@@ -23,10 +23,12 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import * as os from "node:os";
 import { join } from "node:path";
 import {
+	CONFIG_DIR_NAME,
 	type ExtensionAPI,
 	type ExtensionCommandContext,
 	type ExtensionContext,
 	getAgentDir,
+	SettingsManager,
 	VERSION as PI_VERSION,
 } from "@earendil-works/pi-coding-agent";
 import { loadAutoModeConfig, persistClassifierModel } from "../auto-mode/config.ts";
@@ -42,12 +44,14 @@ import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../permissions/modes.ts";
 import { persistSubagentModel } from "../subagents/default-model.ts";
 import { buildDoctorReport, oneCodeVersion } from "./build.ts";
+import { installKind, replacedBuiltinsView } from "./builtins.ts";
 import { doctorFixPrompt } from "./fix-prompt.ts";
 import { computePresets, describePresetChanges, findPreset, PRESET_NAMES, presetsSection } from "./presets.ts";
 import { type DoctorReport, renderDoctorReport, renderDoctorText, renderSection } from "./report.ts";
 import { lookupLatestVersion } from "./update-lookup.ts";
 import { applyDoctorKey, decodeDoctorKey, renderDoctorViewer, visibleBodyRows } from "./viewer.ts";
 import { announceArgumentHint } from "../lib/argument-hints.ts";
+import { registeredMcpServers } from "../mcp/config.ts";
 
 /** Rows the panel may take; the terminal's own height caps it (boundedDockHeight). */
 export const DOCTOR_PANEL_MAX_HEIGHT = 40;
@@ -78,8 +82,6 @@ export default function doctorExtension(pi: ExtensionAPI) {
 		}
 		return snapshot;
 	};
-
-	const install = (): "app" | "pi-package" => (process.env.CC_VERSION ? "app" : "pi-package");
 
 	// The Artificial Analysis snapshot behind the measured capability floor
 	// (lib/capability-index.ts): refreshed at most daily, only from a session
@@ -114,7 +116,7 @@ export default function doctorExtension(pi: ExtensionAPI) {
 		// Two unrelated endpoints (npm registry, Artificial Analysis): overlap them.
 		// The snapshot refresh is a no-op when fresh or keyless, bounded by FETCH_TIMEOUT_MS.
 		const [latest] = options.network
-			? await Promise.all([lookupLatestVersion({ install: install(), current: version, env: process.env }), refreshCapability(ctx, home)])
+			? await Promise.all([lookupLatestVersion({ install: installKind(), current: version, env: process.env }), refreshCapability(ctx, home)])
 			: [undefined];
 		return buildDoctorReport({
 			env: {
@@ -127,8 +129,11 @@ export default function doctorExtension(pi: ExtensionAPI) {
 				arch: process.arch,
 				nodeVersion: process.versions.node,
 				oneCodeVersion: version,
-				install: install(),
+				install: installKind(),
 				piVersion: PI_VERSION,
+				replacedBuiltins: replacedBuiltinsView(PI_VERSION, () => SettingsManager.create(ctx.cwd, getAgentDir()), { agentDir: getAgentDir(), cwd: ctx.cwd }),
+				piConfigDirName: CONFIG_DIR_NAME,
+				registeredMcpServers: registeredMcpServers(pi),
 				latest,
 			},
 			registry: {
@@ -157,7 +162,7 @@ export default function doctorExtension(pi: ExtensionAPI) {
 		const home = os.homedir();
 		const prompt = doctorFixPrompt({
 			reportText: renderDoctorText(report, 100),
-			install: install(),
+			install: installKind(),
 			oneCodeVersion: oneCodeVersion(),
 			sessionsDir: join(getAgentDir(), "sessions"),
 			sessionDir: ctx.sessionManager.getSessionDir(),

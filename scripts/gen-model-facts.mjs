@@ -33,10 +33,13 @@ const res = await fetch("https://models.dev/api.json", {
 if (!res.ok) throw new Error(`models.dev responded ${res.status}`);
 const modelsDev = await res.json();
 
+// pi providers models.dev lists under another name.
+const MODELS_DEV_PROVIDER = { "vercel-ai-gateway": "vercel" };
+
 const facts = {};
 let total = 0;
 for (const [provider, rows] of Object.entries(MODELS)) {
-	const known = modelsDev[provider]?.models ?? {};
+	const known = modelsDev[MODELS_DEV_PROVIDER[provider] ?? provider]?.models ?? {};
 	for (const model of Object.values(rows)) {
 		total++;
 		const row = known[model.id];

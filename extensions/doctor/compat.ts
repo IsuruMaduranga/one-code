@@ -31,7 +31,7 @@ import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code
 import { parseFrontmatterLoosely } from "../lib/frontmatter.ts";
 import { defaultDiscoverRoots, discoverPlugins, type DiscoveredPlugins } from "../lib/plugins.ts";
 import { BUNDLED_SKILLS_DIR, promptTemplateNames, scanSkills } from "../lib/skill-scan.ts";
-import { loadServers, type McpServer } from "../mcp/config.ts";
+import { loadServers, type McpServer, piMcpConfigPaths, type RegisteredServer } from "../mcp/config.ts";
 import type { PermissionMode } from "../permissions/matcher.ts";
 import { MODES_NEVER_FROM_PROJECT } from "../permissions/settings.ts";
 import { agentDirs, parseAgentFile } from "../subagents/agents.ts";
@@ -283,6 +283,10 @@ export interface CompatInput {
 	env: NodeJS.ProcessEnv;
 	/** `<package>/agents`, so bundled agents are counted. */
 	bundledAgentsDir?: string;
+	/** pi's `CONFIG_DIR_NAME` (`.pi` when absent): where the project's pi `mcp.json` is. */
+	piConfigDirName?: string;
+	/** MCP servers other extensions registered, as the session loads them. */
+	registeredMcpServers?: readonly RegisteredServer[];
 }
 
 export function collectCompat(input: CompatInput): CompatReport {
@@ -415,11 +419,16 @@ export function collectCompat(input: CompatInput): CompatReport {
 
 	// MCP.
 	const configErrors: string[] = [];
+	const configNotes: string[] = [];
 	const servers = loadServers(cwd, home, env, discovered?.mcpConfigs ?? [], {
 		pluginNames: discovered?.mcpConfigPlugins,
 		onError: (path, message) => configErrors.push(`${shortenHome(path, home)}: ${message}`),
+		piConfigs: piMcpConfigPaths(agentDir, cwd, input.piConfigDirName),
+		onNote: (message) => configNotes.push(message),
+		registered: input.registeredMcpServers,
 	});
 	for (const error of configErrors) findings.push({ level: "error", text: `MCP config ${error} — its servers are not loaded.`, fix: "Fix the JSON and run /mcp reconnect." });
+	for (const note of configNotes) findings.push({ level: "warn", text: note });
 	for (const server of servers) {
 		if (server.missingEnv?.length) {
 			findings.push({

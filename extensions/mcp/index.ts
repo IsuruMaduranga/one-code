@@ -16,7 +16,7 @@
  */
 
 import os from "node:os";
-import { getAgentDir, type ExtensionAPI, type ExtensionContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { CONFIG_DIR_NAME, getAgentDir, type ExtensionAPI, type ExtensionContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { MCP_TOOLS_CHANNEL } from "../lib/mcp-share.ts";
@@ -53,7 +53,7 @@ import { type McpEntry, type McpEntryStatus } from "./panel/model.ts";
 import { renderMcpPanel, type McpPaint } from "./panel/render.ts";
 import { applyMcpKey, initialMcpState, type McpEffect } from "./panel/state.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
-import { loadServers, type McpServer } from "./config.ts";
+import { loadServers, type McpServer, piMcpConfigPaths, registeredMcpServers } from "./config.ts";
 import { approveMcpServers, type McpTrustDeps, persistApproval, projectRootOf, reconnectRefusal } from "./trust.ts";
 import {
 	capDescription,
@@ -78,6 +78,9 @@ function unknownServerError(name: string) {
 	};
 }
 
+/** pi's own `mcp.json` files, read because our `/mcp` replaces pi 0.99's built-in MCP (config.ts). */
+const piMcpConfigs = (cwd: string) => piMcpConfigPaths(getAgentDir(), cwd, CONFIG_DIR_NAME);
+
 export default function mcpExtension(pi: ExtensionAPI) {
 	const connections = new Map<string, Connection>();
 	let failures: FailedConnection[] = [];
@@ -93,6 +96,13 @@ export default function mcpExtension(pi: ExtensionAPI) {
 	const withheldNames = new Map<string, string>();
 	// Config file paths contributed by plugins, so the panel can group them.
 	let pluginConfigPaths = new Set<string>();
+	// pi 0.99's registry of servers other extensions register; absent on older pi.
+	// Registered after the session started: our servers are read once per session.
+	pi.on("mcp_servers_change", (_event, ctx) => {
+		const text = "An extension changed its MCP servers; run /reload to connect the change.";
+		if (ctx.hasUI) ctx.ui.notify(text, "info");
+		else process.stderr.write(`${text}\n`);
+	});
 	const home = os.homedir();
 	// Live tool definitions, shared with in-process subagents so they reach MCP
 	// through these same open connections instead of connecting their own.
@@ -332,12 +342,19 @@ export default function mcpExtension(pi: ExtensionAPI) {
 		const plugins = discoverPlugins(defaultDiscoverRoots(getAgentDir(), ctx.cwd));
 		pluginConfigPaths = new Set(plugins.mcpConfigs);
 		configErrors = [];
+		const configNotes: string[] = [];
 		servers = loadServers(ctx.cwd, home, process.env, [...pluginConfigPaths], {
 			pluginNames: plugins.mcpConfigPlugins,
 			onError: (path, message) => configErrors.push(`${path}: ${message}`),
+			piConfigs: piMcpConfigs(ctx.cwd),
+			onNote: (message) => configNotes.push(message),
+			registered: registeredMcpServers(pi),
 		});
-		if (configErrors.length > 0) {
-			const text = `MCP config could not be parsed (ignored): ${configErrors.join("; ")}`;
+		const configWarnings = [
+			...(configErrors.length > 0 ? [`MCP config could not be parsed (ignored): ${configErrors.join("; ")}`] : []),
+			...configNotes,
+		];
+		for (const text of configWarnings) {
 			if (ctx.hasUI) ctx.ui.notify(text, "warning");
 			else process.stderr.write(`${text}\n`);
 		}
@@ -602,11 +619,17 @@ export default function mcpExtension(pi: ExtensionAPI) {
 		if (pluginConfigPaths.has(server.source)) {
 			return { rank: 3, group: "Plugin MCPs", configLocation: "Plugin configuration", scope: "project" };
 		}
-		if (server.source === join(home, ".claude.json")) {
+		if (server.source === join(home, ".claude.json") || server.piOrigin === "user") {
 			return { rank: 0, group: `User MCPs (${shorten(server.source)})`, configLocation: shorten(server.source), scope: "user" };
 		}
 		if (server.source.endsWith(join(".claude", "settings.local.json"))) {
 			return { rank: 2, group: "Project MCPs (.claude/settings.local.json)", configLocation: shorten(server.source), scope: "project" };
+		}
+		if (server.piOrigin === "extension") {
+			return { rank: 3, group: "Extension MCPs", configLocation: shorten(server.source), scope: "user" };
+		}
+		if (server.piOrigin === "project") {
+			return { rank: 1, group: `Project MCPs (${join(CONFIG_DIR_NAME, "mcp.json")})`, configLocation: shorten(server.source), scope: "project" };
 		}
 		return { rank: 1, group: `Project MCPs (${shorten(server.source)})`, configLocation: shorten(server.source), scope: "project" };
 	};

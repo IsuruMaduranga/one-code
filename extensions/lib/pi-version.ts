@@ -18,7 +18,7 @@
 
 /** Inclusive minimum and exclusive maximum pi version this release is tested against. */
 export const TESTED_PI_MIN = "0.84.3";
-export const TESTED_PI_MAX_EXCLUSIVE = "0.88.0";
+export const TESTED_PI_MAX_EXCLUSIVE = "0.100.0";
 
 /** Dotted-numeric parse; undefined for anything that is not plain x.y.z numbers. */
 export function parseVersion(version: string): number[] | undefined {
@@ -57,4 +57,17 @@ export function piVersionWarning(runningPiVersion: string | undefined): string |
 		`Things may still work, but if tools or settings misbehave, update one-code-extension ` +
 		`(or pin pi inside the tested range).`
 	);
+}
+
+/**
+ * Whether the running pi ships built-in extensions that can replace ours'
+ * names (`builtin:tool-search`, `builtin:mcp`; lib/replaced-builtins.mjs).
+ * A version check, not a feature test: nothing an extension can see tells a
+ * pi with the built-ins from one without, and an unparseable version reads
+ * as no.
+ */
+export function piHasBuiltinExtensions(runningPiVersion: string | undefined, firstVersion: string): boolean {
+	if (!runningPiVersion) return false;
+	const order = compareVersions(runningPiVersion, firstVersion);
+	return order !== undefined && order >= 0;
 }
