@@ -336,5 +336,26 @@ describe("file-tracker wiring", () => {
 		expect(result?.block).toBe(true);
 		expect(result?.reason).not.toContain("has not been read");
 	});
+
+	it("keeps a kept turn's file eligible for the next compaction's restore", async () => {
+		const kept = path("kept-twice.ts");
+		writeFileSync(kept, "kept text");
+		await fake.fireOne("tool_result", { toolName: "read", input: { path: kept }, isError: false }, ctx());
+		const read = [
+			{ type: "message", id: "a1", message: { role: "assistant", content: [{ type: "toolCall", id: "1", name: "read", arguments: { path: kept } }] } },
+			{ type: "message", id: "r1", message: { role: "toolResult", toolCallId: "1", isError: false } },
+		];
+		const first = [...read, { type: "compaction", id: "c1", firstKeptEntryId: "a1", timestamp: new Date().toISOString() }];
+		const emitted: string[] = [];
+		fake.events.on(REMINDER_CHANNEL, (data) => emitted.push((data as { text: string }).text));
+		await fake.fire("session_compact", { compactionEntry: first[2], fromExtension: true, reason: "manual", willRetry: false }, createFakeCtx({ cwd: dir, sessionManager: { getSessionId: () => "s", getBranch: () => first } }));
+		// The first compaction keeps the read verbatim, so nothing is restored.
+		expect(emitted).toEqual([]);
+		// A second compaction summarizes that turn away: the file comes back without another read.
+		const second = [...first, { type: "message", id: "a2", message: { role: "assistant", content: [{ type: "text", text: "done" }] } }, { type: "compaction", id: "c2", firstKeptEntryId: "a2", timestamp: new Date().toISOString() }];
+		await fake.fire("session_compact", { compactionEntry: second[4], fromExtension: true, reason: "manual", willRetry: false }, createFakeCtx({ cwd: dir, sessionManager: { getSessionId: () => "s", getBranch: () => second } }));
+		expect(emitted).toContain(`Called the read tool with the following input: ${JSON.stringify({ path: kept })}`);
+		expect(await fake.fireOne("tool_call", { toolName: "edit", input: { path: kept } }, ctx())).toBeUndefined();
+	});
 });
 
