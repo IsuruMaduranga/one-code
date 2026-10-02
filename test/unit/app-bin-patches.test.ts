@@ -48,6 +48,14 @@ describe("app/bin.mjs pi-internal patch points (A3)", () => {
 		expect(source).toContain("fullscreenExitOutput");
 	});
 
+	it("bin.mjs backfills the compaction keep window, and pi still reads that setting", () => {
+		const bin = readFileSync(new URL("../../app/bin.mjs", import.meta.url), "utf8");
+		expect(bin).toContain('"compaction-keep.mjs"');
+		expect(bin).toContain("withCompactionKeepBackfilled(settings)");
+		const source = readFileSync(join(piDist, "core", "settings-manager.d.ts"), "utf8");
+		expect(source).toContain("keepRecentTokens");
+	});
+
 	it("updateContent still keys the abort line off stopReason", () => {
 		const source = readFileSync(join(piDist, "modes", "interactive", "components", "assistant-message.js"), "utf8");
 		expect(source).toContain("updateContent");

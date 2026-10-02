@@ -9,6 +9,7 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import { CONFIG_DIR_NAME, getPackageDir, type SettingsManager } from "@earendil-works/pi-coding-agent";
 import { piHasBuiltinExtensions } from "../lib/pi-version.ts";
+import { type CompactionKeepView, compactionKeepView } from "../lib/compaction-keep.mjs";
 import { BUILTIN_EXTENSIONS_PI, type BuiltinLeftOn, builtinsLeftOn, type GlobMatcher, globMatches } from "../lib/replaced-builtins.mjs";
 
 /**
@@ -48,6 +49,23 @@ export function replacedBuiltinsView(
 		const manager = settings();
 		return {
 			left: builtinsLeftOn(manager.getGlobalSettings().extensions, manager.getProjectSettings().extensions, piGlobMatcher()),
+			paths: { user: join(paths.agentDir, "settings.json"), project: join(paths.cwd, CONFIG_DIR_NAME, "settings.json") },
+		};
+	} catch {
+		return undefined;
+	}
+}
+
+/** pi's compaction keep window and the settings files that set it, or undefined when they cannot be read. */
+export function keepView(
+	settings: () => Pick<SettingsManager, "getGlobalSettings" | "getProjectSettings">,
+	paths: { agentDir: string; cwd: string },
+	modelKey?: string,
+): (CompactionKeepView & { paths: { user: string; project: string } }) | undefined {
+	try {
+		const manager = settings();
+		return {
+			...compactionKeepView(manager.getGlobalSettings(), manager.getProjectSettings(), modelKey),
 			paths: { user: join(paths.agentDir, "settings.json"), project: join(paths.cwd, CONFIG_DIR_NAME, "settings.json") },
 		};
 	} catch {

@@ -34,10 +34,8 @@ import { buildPlanModeReminder } from "./reminder.ts";
 import { randomSlug } from "./slug.ts";
 import { clampOffset, decodeViewerKey, initialPlanChoice, type PlanChoice, renderPlanViewer, wrapPlanText } from "./viewer.ts";
 
-import { MODE_CHANNEL, PLAN_FILE_CHANNEL } from "../lib/plan-mode-channels.ts";
+import { MODE_CHANNEL, PLAN_FILE_CHANNEL, PLAN_FILE_ENTRY, planFileOnBranch } from "../lib/plan-mode-channels.ts";
 export { MODE_CHANNEL, PLAN_FILE_CHANNEL };
-/** Session entry type persisting the allocated path across resume/branch. */
-const PLAN_FILE_ENTRY = "one-code:plan-mode-file";
 
 const PLANS_DIR = () => join(oneCodeStateDir(), "plans");
 
@@ -69,11 +67,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
 	const ensurePlanFile = (ctx: ExtensionContext): string => {
 		if (planFilePath) return planFilePath;
 
-		for (const entry of ctx.sessionManager.getBranch()) {
-			if (entry.type !== "custom" || entry.customType !== PLAN_FILE_ENTRY) continue;
-			const path = (entry.data as { path?: unknown } | undefined)?.path;
-			if (typeof path === "string") planFilePath = path;
-		}
+		planFilePath = planFileOnBranch(ctx.sessionManager.getBranch());
 		if (planFilePath) return planFilePath;
 
 		let path = join(PLANS_DIR(), `${randomSlug()}.md`);

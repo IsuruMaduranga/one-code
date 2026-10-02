@@ -11,6 +11,8 @@
  * guard still catches anything that changes from this point on.
  */
 
+import { pathArgument } from "../auto-mode/paths.ts";
+
 const READ_TOOLS = new Set(["read", "notebook_edit"]);
 const WRITE_TOOLS = new Set(["edit", "write", "notebook_edit"]);
 
@@ -21,26 +23,61 @@ interface ToolCallBlock {
 	arguments?: Record<string, unknown>;
 }
 
-/** Paths (as written in the tool input) of every successful read/edit/write on the branch, in order, deduplicated. */
-export function pathsReadOnBranch(entries: unknown[]): string[] {
+type BranchMessage = { role?: string; content?: unknown; toolCallId?: string; isError?: boolean; timestamp?: number };
+
+/**
+ * Every tool call on the branch that names a path (`path`, `file_path` or
+ * `notebook_path`, as the gates read it) and got a successful result, in
+ * result order, with the result message's time.
+ */
+export function* successfulPathCalls(entries: readonly unknown[]): Generator<{ name: string; path: string; timestamp: number | undefined }> {
 	const calls = new Map<string, { name: string; path: string }>();
-	const seen: string[] = [];
 	for (const entry of entries) {
-		const e = entry as { type?: string; message?: { role?: string; content?: unknown; toolCallId?: string; toolName?: string; isError?: boolean } };
+		const e = entry as { type?: string; message?: BranchMessage };
 		if (e?.type !== "message" || !e.message) continue;
 		const m = e.message;
 		if (m.role === "assistant" && Array.isArray(m.content)) {
 			for (const block of m.content as ToolCallBlock[]) {
 				if (block?.type !== "toolCall" || !block.id) continue;
-				const path = block.arguments?.path;
-				if (typeof path === "string" && path.trim()) calls.set(block.id, { name: block.name, path });
+				const path = pathArgument(block.arguments);
+				if (path?.trim()) calls.set(block.id, { name: block.name, path });
 			}
 		} else if (m.role === "toolResult" && m.toolCallId && !m.isError) {
 			const call = calls.get(m.toolCallId);
-			if (!call) continue;
-			if (!READ_TOOLS.has(call.name) && !WRITE_TOOLS.has(call.name)) continue;
-			if (!seen.includes(call.path)) seen.push(call.path);
+			if (call) yield { ...call, timestamp: m.timestamp };
 		}
 	}
-	return seen;
+}
+
+const touchesFile = (name: string) => READ_TOOLS.has(name) || WRITE_TOOLS.has(name);
+
+/** Paths (as written in the tool input) of every successful read/edit/write on the branch, in order, deduplicated. */
+export function pathsReadOnBranch(entries: readonly unknown[]): string[] {
+	const seen = new Set<string>();
+	for (const call of successfulPathCalls(entries)) if (touchesFile(call.name)) seen.add(call.path);
+	return [...seen];
+}
+
+/**
+ * Each path (as written in the tool input) a successful read/edit/write on the
+ * branch touched, with the time of its last such result message: the order
+ * the post-compaction file restore uses after a resume, when the modification
+ * times stat'ed at those reads are gone (Claude Code uses the transcript time
+ * the same way).
+ */
+export function lastTouchesOnBranch(entries: readonly unknown[]): Map<string, number> {
+	const touches = new Map<string, number>();
+	for (const call of successfulPathCalls(entries)) {
+		if (touchesFile(call.name) && call.timestamp !== undefined) touches.set(call.path, call.timestamp);
+	}
+	return touches;
+}
+
+/**
+ * The paths (as written in the tool input) that a successful `read` in the
+ * kept turns returned: those files are in context already, so the
+ * post-compaction restore skips them.
+ */
+export function keptReadPaths(kept: readonly unknown[]): string[] {
+	return [...successfulPathCalls(kept)].filter((call) => call.name === "read").map((call) => call.path);
 }

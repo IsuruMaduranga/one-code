@@ -56,6 +56,7 @@ const { applyLauncherEnv, installMethodFor } = await import(
 	pathToFileURL(join(corePath, "extensions", "lib", "app-launch.mjs")).href
 );
 const { withReplacedBuiltinsOff } = await import(pathToFileURL(join(corePath, "extensions", "lib", "replaced-builtins.mjs")).href);
+const { withCompactionKeepBackfilled } = await import(pathToFileURL(join(corePath, "extensions", "lib", "compaction-keep.mjs")).href);
 // Where the bin lives says how it was installed. Published before any fast
 // path (the doctor CLI exits early): the doctor's update lookup and the update
 // notice read it (lib/update-check.mjs minReleaseAgeFor) — under Homebrew a
@@ -141,10 +142,16 @@ try {
 	// (extensions/lib/replaced-builtins.mjs).
 	const builtins = withReplacedBuiltinsOff(settings.extensions);
 	if (builtins.changed) settings.extensions = builtins.extensions;
+	// One Code keeps only the last reply after a compaction, so pi's keep
+	// window only stops /compact on a short session: 0 unless the user set a
+	// value (extensions/lib/compaction-keep.mjs).
+	const keep = withCompactionKeepBackfilled(settings);
+	if (keep.changed) settings = keep.settings;
 	const changed =
 		firstRun ||
 		backfillExitOutput ||
 		builtins.changed ||
+		keep.changed ||
 		packages.length !== next.length ||
 		packages.some((p, i) => sourceOf(p) !== sourceOf(next[i]));
 	if (changed) {

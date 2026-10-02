@@ -131,6 +131,13 @@ export interface ReminderEntry {
 	 * injectReminders resolves it from the request it is given.
 	 */
 	opener?: number | null;
+	/**
+	 * `sticky-append` only: the message the block rode on a request that had no
+	 * user message to carry it (an overflow compaction keeps only the last
+	 * reply and retries mid-turn), kept so it stays there on every later
+	 * request instead of moving off it. Fixed by the queue like `opener`.
+	 */
+	tailPin?: PinAnchor;
 	/** Set on a pinned one-shot: the exact message it rides on every request. */
 	pin?: PinAnchor;
 	/**
@@ -213,8 +220,9 @@ export class ReminderQueue {
 			const previous = opts?.key !== undefined ? this.everyTurn.get(opts.key) : undefined;
 			const same = previous?.placement === "sticky-append" && previous.text === text ? previous : undefined;
 			entry.since = opts?.since ?? same?.since ?? this.now();
-			// The opener was fixed for this anchor; a re-emit must not move it.
+			// The opener and tail pin were fixed for this anchor; a re-emit must not move them.
 			if (same && same.since === entry.since && same.opener !== undefined) entry.opener = same.opener;
+			if (same && same.since === entry.since && same.tailPin !== undefined) entry.tailPin = same.tailPin;
 		}
 		if (opts?.scope === "every-turn") {
 			this.everyTurn.set(opts.key ?? text, entry);
@@ -278,15 +286,16 @@ export class ReminderQueue {
 		// places it, and kept: recomputed per request, a steer stamped before the
 		// switch would move it, and a switch made between turns would reach back
 		// onto the previous turn's cached message (lib header, `sticky-append`).
+		const locate = pinLocator(messages);
 		for (const entry of this.everyTurn.values()) {
-			if (entry.placement === "sticky-append" && entry.opener === undefined) {
-				entry.opener = resolveStickyOpener(messages, entry.since ?? 0);
-			}
+			if (entry.placement !== "sticky-append") continue;
+			if (entry.opener === undefined) entry.opener = resolveStickyOpener(messages, entry.since ?? 0);
+			// A block with no carrier rides the tail; that message keeps it from
+			// then on. A pin whose message left the context is looked for again.
+			if (entry.tailPin && locate(entry.tailPin) === -1) entry.tailPin = undefined;
+			if (entry.tailPin === undefined && !hasStickyCarrier(messages, entry.since ?? 0, entry.opener)) entry.tailPin = tailAnchor(messages);
 		}
-		if (this.pinned.length > 0) {
-			const locate = pinLocator(messages);
-			this.pinned = this.pinned.filter((entry) => locate(entry.pin as PinAnchor) !== -1);
-		}
+		if (this.pinned.length > 0) this.pinned = this.pinned.filter((entry) => locate(entry.pin as PinAnchor) !== -1);
 		const { matching: held, rest: pending } = partition(this.nextTurn, (r) => r.placement === "user-prepend");
 		this.nextTurn = held;
 		return [...[...this.everyTurn.values()].map(strip), ...this.pinned.map(strip), ...pending.map(strip)];
@@ -320,6 +329,7 @@ function strip(r: StoredReminder): ReminderEntry {
 	if (r.raw) entry.raw = true;
 	if (r.since !== undefined) entry.since = r.since;
 	if (r.opener !== undefined) entry.opener = r.opener;
+	if (r.tailPin) entry.tailPin = r.tailPin;
 	if (r.pin !== undefined) entry.pin = r.pin;
 	return entry;
 }
@@ -363,6 +373,15 @@ export function resolveStickyOpener(messages: AgentMessage[], since: number): nu
 		opener = stamp;
 	}
 	return opener;
+}
+
+/** Whether a user-like message in `messages` carries a standing block switched on at `since` with this opener. */
+function hasStickyCarrier(messages: AgentMessage[], since: number, opener: number | null | undefined): boolean {
+	return messages.some((m) => {
+		if (!isStickyCarrier(m)) return false;
+		const stamp = (m as { timestamp?: number }).timestamp ?? 0;
+		return stamp >= since || (opener !== null && opener !== undefined && stamp === opener);
+	});
 }
 
 /** The anchor a one-shot lands on for this request: the trailing tool result, else the last user-like message. */
@@ -529,12 +548,16 @@ export function injectReminders(messages: AgentMessage[], reminders: Array<strin
 			const stamp = (m as { timestamp?: number }).timestamp ?? 0;
 			if (stamp >= since || (opener !== null && opener !== undefined && stamp === opener)) carriers.push(index);
 		});
+		// A request with no user turn (overflow compaction mid-turn) put the block
+		// on its tail; the queue pinned that message, which keeps it.
+		const pinned = entry.tailPin ? pinLocator(messages)(entry.tailPin) : -1;
+		if (pinned !== -1 && !carriers.includes(pinned)) carriers.unshift(pinned);
 		if (carriers.length === 0) {
-			// No user turn at all (overflow compaction mid-turn): ride the tail.
+			// No user turn and no pin yet (a caller without the queue): ride the tail.
 			push(after, tailIndex === -1 ? firstUserIndex : tailIndex, [reminderBlock(entry)]);
 			continue;
 		}
-		for (const index of carriers) push(after, index, [reminderBlock(entry)]);
+		for (const index of carriers.sort((a, b) => a - b)) push(after, index, [reminderBlock(entry)]);
 	}
 
 	push(after, tailIndex === -1 ? firstUserIndex : tailIndex, lastAppend.map(reminderBlock));

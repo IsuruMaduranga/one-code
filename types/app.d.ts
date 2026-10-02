@@ -67,3 +67,20 @@ declare module "*/replaced-builtins.mjs" {
 	export const TURN_OFF_NO: string;
 	export function turnOffPrompt(left: readonly BuiltinLeftOn[], settingsPath: string, configCommand?: string): string;
 }
+
+/** Types for the plain-JS compaction keep-window module (extensions/lib/compaction-keep.mjs). */
+declare module "*/compaction-keep.mjs" {
+	export interface CompactionKeepView {
+		value: number;
+		source: "project" | "user" | "default";
+		/** The `provider/id` whose `compaction.modelOverrides` entry supplied the value. */
+		model?: string;
+	}
+	export const ONE_CODE_KEEP_RECENT_TOKENS: number;
+	export function withCompactionKeepBackfilled<S extends Record<string, unknown>>(settings: S): { settings: S; changed: boolean };
+	export function compactionKeepView(userSettings: unknown, projectSettings: unknown, modelKey?: string): CompactionKeepView;
+	export const KEEP_YES: string;
+	export const KEEP_NO: string;
+	export function keepWindowPrompt(settingsPath: string): string;
+	export function keepWindowFix(settingsPath: string, model?: string): string;
+}

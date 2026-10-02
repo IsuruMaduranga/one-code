@@ -24,6 +24,7 @@ import { basename, dirname, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getAgentDir, SettingsManager, VERSION as PI_VERSION } from "@earendil-works/pi-coding-agent";
 import { piVersionWarning } from "../lib/pi-version.ts";
+import { handleCompactionKeep } from "./compaction-keep.ts";
 import { handleReplacedBuiltins } from "./replaced-builtins.ts";
 import { extensionVersion } from "../lib/package-version.ts";
 import {
@@ -404,9 +405,10 @@ export default function brandingExtension(pi: ExtensionAPI) {
 		// off once, else answer with the notice (replaced-builtins.ts). Only
 		// when pi resolves its built-ins again (startup, /reload), not on a
 		// /new, resume or fork, which re-run this handler too. Not awaited: a
-		// dialog must not hold up startup.
+		// dialog must not hold up startup. The compaction keep-window question
+		// (compaction-keep.ts) follows it, so the two dialogs never overlap.
 		const reason = (event as { reason?: string }).reason ?? "startup";
-		if (reason === "startup" || reason === "reload") void handleReplacedBuiltins(ctx);
+		if (reason === "startup" || reason === "reload") void handleReplacedBuiltins(ctx).then(() => handleCompactionKeep(ctx));
 	});
 
 	if (process.env.CC_NO_BANNER === "1") return;

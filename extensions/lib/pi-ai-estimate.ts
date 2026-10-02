@@ -73,7 +73,8 @@ function estimateTextAndImageContentChars(content: string | Array<TextContent | 
 	return chars;
 }
 
-function estimateTextTokens(text: string): number {
+/** pi-ai's chars-per-token estimate for plain text. */
+export function estimateTextTokens(text: string): number {
 	return Math.ceil(text.length / CHARS_PER_TOKEN);
 }
 

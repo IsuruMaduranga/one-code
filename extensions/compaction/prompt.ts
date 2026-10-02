@@ -7,12 +7,13 @@
  * surviving context. Auto-compaction uses the same prompt.
  *
  * Claude Code runs the call on the *session's own model* with max_tokens
- * 32000, keeping the system prompt, tools, and message prefix intact — so the
- * provider prompt cache pays for most of the compaction call. The extension
- * does the same.
+ * 128000 (findings §47), keeping the system prompt, tools, and message
+ * prefix intact — so the provider prompt cache pays for most of the compaction
+ * call. The extension does the same; the cap is lowered to the model's output
+ * limit and to the room the context window leaves.
  */
 
-export const COMPACTION_MAX_TOKENS = 32_000;
+export const COMPACTION_MAX_TOKENS = 128_000;
 
 export const COMPACTION_INSTRUCTION = `CRITICAL: Respond with TEXT ONLY. Do NOT call any tools.
 

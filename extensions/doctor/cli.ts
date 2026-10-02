@@ -12,7 +12,7 @@
 
 import { join } from "node:path";
 import { CONFIG_DIR_NAME, ModelRegistry, ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
-import { replacedBuiltinsView } from "./builtins.ts";
+import { keepView, replacedBuiltinsView } from "./builtins.ts";
 import { oneCodeStateDir } from "../lib/paths.ts";
 import { loadPermissionSettings } from "../permissions/settings.ts";
 import { buildDoctorReport } from "./build.ts";
@@ -77,6 +77,7 @@ export async function collectDoctorCliReport(options: DoctorCliOptions): Promise
 			install: options.install,
 			piVersion: options.piVersion,
 			replacedBuiltins: replacedBuiltinsView(options.piVersion, () => settings, { agentDir, cwd }),
+			compactionKeep: keepView(() => settings, { agentDir, cwd }),
 			piConfigDirName: CONFIG_DIR_NAME,
 			latest,
 		},
