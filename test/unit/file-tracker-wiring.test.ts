@@ -238,4 +238,65 @@ describe("file-tracker wiring", () => {
 		);
 		expect(result?.block).toBe(true);
 	});
+
+	it("after a compaction restores a small file, notes a large one, and clears what was read, as Claude Code does", async () => {
+		const small = path("small.txt");
+		const big = path("big.txt");
+		const other = path("other.txt");
+		writeFileSync(other, "read long ago");
+		writeFileSync(small, "one\ntwo\n");
+		writeFileSync(big, "row of garden text\n".repeat(2_000));
+		for (const file of [other, small, big]) await fake.fireOne("tool_result", { toolName: "read", input: { path: file }, isError: false }, ctx());
+		const emitted: Array<{ text: string; placement?: string }> = [];
+		fake.events.on(REMINDER_CHANNEL, (data) => emitted.push(data as { text: string; placement?: string }));
+
+		const branch = [{ type: "compaction", id: "c1", firstKeptEntryId: "c1" }];
+		await fake.fire(
+			"session_compact",
+			{ compactionEntry: branch[0], fromExtension: true, reason: "manual", willRetry: false },
+			createFakeCtx({ cwd: dir, sessionManager: { getSessionId: () => "s", getBranch: () => branch } }),
+		);
+
+		expect(emitted.every((r) => r.placement === "user-prepend")).toBe(true);
+		const texts = emitted.map((r) => r.text);
+		expect(texts.find((t) => t.startsWith(`Note: ${big} was read before`))).toBeDefined();
+		expect(texts).toContain(`Called the read tool with the following input: ${JSON.stringify({ path: small })}`);
+		expect(texts.find((t) => t.startsWith("Result of calling the read tool:\none\ntwo"))).toBeDefined();
+
+		const edit = (file: string) => fake.fireOne<{ block?: boolean }>("tool_call", { toolName: "edit", input: { path: file } }, ctx());
+		expect(await edit(small)).toBeUndefined();
+		expect((await edit(big))?.block).toBe(true);
+	});
+
+	it("on resume counts only the reads still in context after the latest compaction", async () => {
+		const before = path("before.ts");
+		const kept = path("kept.ts");
+		writeFileSync(before, "x");
+		writeFileSync(kept, "y");
+		const read = (id: string, file: string) => [
+			{ type: "message", id: `a${id}`, message: { role: "assistant", content: [{ type: "toolCall", id, name: "read", arguments: { path: file } }] } },
+			{ type: "message", id: `r${id}`, message: { role: "toolResult", toolCallId: id, isError: false } },
+		];
+		const branch = [...read("1", before), ...read("2", kept), { type: "compaction", id: "c", firstKeptEntryId: "a2" }];
+		await fake.fireOne("session_start", { reason: "resume" }, createFakeCtx({ cwd: dir, sessionManager: { getSessionId: () => "s2", getBranch: () => branch } }));
+		const edit = (file: string) => fake.fireOne<{ block?: boolean }>("tool_call", { toolName: "edit", input: { path: file } }, ctx());
+		expect((await edit(before))?.block).toBe(true);
+		expect(await edit(kept)).toBeUndefined();
+	});
+
+	it("keeps a file a kept turn read as read after a compaction", async () => {
+		const kept = path("kept.ts");
+		const other = path("other.ts");
+		writeFileSync(kept, "k");
+		writeFileSync(other, "o");
+		for (const file of [kept, other]) await fake.fireOne("tool_result", { toolName: "read", input: { path: file }, isError: false }, ctx());
+		const branch = [
+			{ type: "message", id: "a1", message: { role: "assistant", content: [{ type: "toolCall", id: "1", name: "read", arguments: { path: kept } }] } },
+			{ type: "message", id: "r1", message: { role: "toolResult", toolCallId: "1", isError: false } },
+			{ type: "compaction", id: "c", firstKeptEntryId: "a1", timestamp: new Date().toISOString() },
+		];
+		await fake.fire("session_compact", { compactionEntry: branch[2], fromExtension: true, reason: "manual", willRetry: false }, createFakeCtx({ cwd: dir, sessionManager: { getSessionId: () => "s", getBranch: () => branch } }));
+		const edit = (file: string) => fake.fireOne<{ block?: boolean }>("tool_call", { toolName: "edit", input: { path: file } }, ctx());
+		expect(await edit(kept)).toBeUndefined();
+	});
 });

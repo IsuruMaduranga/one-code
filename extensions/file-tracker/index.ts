@@ -7,17 +7,31 @@
  *   cannot overwrite someone else's change.
  * - Files that change out of band are reported in a `<system-reminder>` with the
  *   new content around the change, line-numbered.
+ * - After a compaction, the files read or written most recently come back as
+ *   Claude Code brings them back: the contents of a small one, a note to read
+ *   a large one again (`restore.ts`), and the read state is cleared.
  *
  * Tracking is by content, not by tool call, which is what makes it catch writes
  * that went through bash and never touched an intercepted tool.
  */
 
 import { existsSync, readFileSync, statSync } from "node:fs";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import { createReadToolDefinition, type ExtensionAPI, type ExtensionContext, type SessionCompactEvent } from "@earendil-works/pi-coding-agent";
 import { pathArgument } from "../auto-mode/paths.ts";
-import { REMINDER_CHANNEL } from "../lib/reminders.ts";
+import { collectImportedPaths, discoverContextFilePaths } from "../lib/claude-context.ts";
+import { inContextEntries, latestCompaction } from "../lib/compaction-boundary.ts";
+import { projectMemoryDir } from "../lib/memory.ts";
+import { comparablePath, claudeConfigDir } from "../lib/paths.ts";
+import { estimateTextTokens } from "../lib/pi-ai-estimate.ts";
+import { planFileOnBranch } from "../lib/plan-mode-channels.ts";
+import { REMINDER_CHANNEL, type ReminderPayload } from "../lib/reminders.ts";
 import { resolveToolPath } from "../lib/tool-path.ts";
-import { pathsReadOnBranch } from "./replay.ts";
+import { parseRules, ruleMatches } from "../permissions/matcher.ts";
+import { loadPermissionSettings } from "../permissions/settings.ts";
+import { keptReadPaths, lastTouchesOnBranch, pathsReadOnBranch } from "./replay.ts";
+import { type RestoredRead, restoreBlocks, restoreCandidates } from "./restore.ts";
 import {
 	describeChanges,
 	EXTERNAL_CHANGE_REMINDER,
@@ -56,12 +70,13 @@ function statIfPresent(path: string): FileStamp | undefined {
 	}
 }
 
-/** Observe a file's current content together with the stamp it was read at. */
-function observeFromDisk(tracker: FileTracker, path: string): void {
+/** Observe a file's current content together with the stamp it was read at, and return that stamp. */
+function observeFromDisk(tracker: FileTracker, path: string): FileStamp | undefined {
 	const stamp = statIfPresent(path);
 	const current = readIfPresent(path);
 	if (current === undefined) tracker.forget(path);
 	else tracker.observe(path, current, Date.now(), stamp);
+	return stamp;
 }
 
 function pathOf(input: unknown, cwd: string): string | undefined {
@@ -76,14 +91,68 @@ function pathOf(input: unknown, cwd: string): string | undefined {
 	return resolveToolPath(raw, cwd);
 }
 
+/**
+ * The files the context still shows after a compaction, as comparable paths:
+ * the context stack (the CLAUDE.md family as claude-context discovers it, what
+ * they `@`-import, and the auto-memory index), the plan file, and the files a
+ * `read` in the kept turns returned. Claude Code's restore skips them; they
+ * stay read.
+ */
+function inContextFiles(ctx: ExtensionContext, branch: readonly { type: string; customType?: string; data?: unknown }[], kept: string[]): Set<string> {
+	const home = homedir();
+	const stack = discoverContextFilePaths({ cwd: ctx.cwd, homeClaudeDir: claudeConfigDir(), agentsFallback: true }).map((file) => file.path);
+	const imported = stack.flatMap((path) => {
+		const content = readIfPresent(path);
+		return content === undefined ? [] : [...collectImportedPaths(content, dirname(path), { home })];
+	});
+	return new Set(
+		[...stack, ...imported, join(projectMemoryDir(ctx.cwd, home), "MEMORY.md"), planFileOnBranch(branch), ...kept.map((path) => resolveToolPath(path, ctx.cwd))]
+			.filter((path): path is string => typeof path === "string")
+			.map(comparablePath),
+	);
+}
+
+/** Whether a read deny rule covers a file now; every file when the settings cannot be read (the gate reports them). */
+function readDenied(ctx: ExtensionContext): (path: string) => boolean {
+	try {
+		const deny = parseRules(loadPermissionSettings(ctx.cwd, homedir()).deny);
+		return (path) => deny.some((rule) => ruleMatches(rule, "read", path, ctx.cwd));
+	} catch {
+		return () => true;
+	}
+}
+
+/** A file read again through pi's own read tool, as the model would see it; undefined when gone, unreadable or an image. */
+async function readAgain(read: ReturnType<typeof createReadToolDefinition>, path: string, ctx: ExtensionContext): Promise<string | undefined> {
+	try {
+		const result = await read.execute("restore", { path }, undefined, undefined, ctx as never);
+		if (result.content.some((block) => block.type !== "text")) return undefined;
+		return result.content.map((block) => (block as { text: string }).text).join("\n");
+	} catch {
+		return undefined;
+	}
+}
+
 export default function fileTrackerExtension(pi: ExtensionAPI) {
 	let tracker = new FileTracker();
 	let sessionId: string | undefined;
+	/**
+	 * Every file a read or write touched on this branch, with its modification
+	 * time as stat'ed then (the transcript time for one replayed after a resume):
+	 * the post-compaction restore's order.
+	 */
+	let touched = new Map<string, number>();
+	/** Observe a file the model read or wrote, and record it as touched at its current modification time. */
+	const touch = (path: string) => {
+		const stamp = observeFromDisk(tracker, path);
+		if (stamp) touched.set(path, stamp.mtimeMs);
+	};
 
 	// A resumed session (or a session_tree switch) carries reads the model did
-	// earlier in the transcript; rebuild the tracker from the branch so post-
-	// resume edits are not refused as "never read" (replay.ts). A new session id
-	// starts from an empty tracker.
+	// earlier in the transcript; rebuild the tracker from the part of the branch
+	// still in context (since the latest compaction's kept tail) so post-resume
+	// edits are not refused as "never read" (replay.ts). A new session id starts
+	// from an empty tracker.
 	const reconstruct = (ctx: ExtensionContext) => {
 		const id = ctx.sessionManager.getSessionId?.() ?? undefined;
 		if (id !== sessionId) {
@@ -92,13 +161,14 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 		}
 		let entries: unknown[] = [];
 		try {
-			entries = ctx.sessionManager.getBranch() as unknown[];
+			entries = inContextEntries(ctx.sessionManager.getBranch() as unknown[]);
 		} catch {
 			return;
 		}
 		for (const raw of pathsReadOnBranch(entries)) {
 			observeFromDisk(tracker, resolveToolPath(raw, ctx.cwd));
 		}
+		touched = new Map([...lastTouchesOnBranch(entries)].map(([raw, at]) => [resolveToolPath(raw, ctx.cwd), at]));
 	};
 	pi.on("session_start", (_event, ctx) => reconstruct(ctx));
 	pi.on("session_tree", (_event, ctx) => reconstruct(ctx));
@@ -126,8 +196,47 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 
 		// After a read we know the file; after our own write we know it again, so a
 		// successful edit does not make the file look stale to the next edit.
-		observeFromDisk(tracker, path);
+		touch(path);
 		return undefined;
+	});
+
+	/**
+	 * Claude Code's post-compaction file restore (`restore.ts`). The
+	 * blocks open the next user message (`user-prepend`); an overflow compaction
+	 * that retries the turn has no such message, so they ride the request's tail
+	 * instead.
+	 *
+	 * Like Claude Code, the compaction also clears what the session has read:
+	 * the summary no longer holds those files, so an edit needs a fresh read.
+	 * A file the context still shows stays read (a kept turn's read, the
+	 * context stack, the plan file), and a restored file counts as read and as
+	 * touched for the next compaction's restore; a note never marks its file
+	 * read.
+	 */
+	pi.on("session_compact", async (event: SessionCompactEvent, ctx) => {
+		if (process.env.CC_COMPACTION === "0") return;
+		const previous = tracker;
+		const before = touched;
+		tracker = new FileTracker();
+		touched = new Map();
+		try {
+			const branch = ctx.sessionManager.getBranch();
+			const compaction = latestCompaction(branch);
+			const kept = compaction ? keptReadPaths(branch.slice(compaction.keptStart, compaction.index)) : [];
+			const inContext = inContextFiles(ctx, branch, kept);
+			for (const path of previous.tracked) if (inContext.has(comparablePath(path))) observeFromDisk(tracker, path);
+			if (before.size === 0) return;
+			const denied = readDenied(ctx);
+			const candidates = restoreCandidates(before, (path) => inContext.has(comparablePath(path)) || denied(path));
+			const read = createReadToolDefinition(ctx.cwd);
+			const reads: RestoredRead[] = await Promise.all(candidates.map(async (path) => ({ path, text: await readAgain(read, path, ctx) })));
+			const { blocks, restored } = restoreBlocks(reads, estimateTextTokens);
+			const placement = event.willRetry ? "last-append" : "user-prepend";
+			for (const text of blocks) pi.events.emit(REMINDER_CHANNEL, { text, placement } satisfies ReminderPayload);
+			for (const path of restored) touch(path);
+		} catch {
+			// The restore is best effort: nothing comes back, and an edit needs a fresh read.
+		}
 	});
 
 	/**
