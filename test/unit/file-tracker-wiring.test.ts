@@ -312,8 +312,10 @@ describe("file-tracker wiring", () => {
 			fake.events.on(REMINDER_CHANNEL, (data) => emitted.push((data as { text: string }).text));
 			const branch = [{ type: "compaction", id: "c1", firstKeptEntryId: "c1" }];
 			await fake.fire("session_compact", { compactionEntry: branch[0], fromExtension: true, reason: "manual", willRetry: false }, createFakeCtx({ cwd: dir, sessionManager: { getSessionId: () => "s", getBranch: () => branch } }));
-			expect(emitted.some((t) => t.includes(inside))).toBe(true);
-			expect(emitted.some((t) => t.includes(outside) || t.includes("outside text"))).toBe(false);
+			// The read call block carries the path JSON-encoded (escaped backslashes on Windows).
+			expect(emitted.some((t) => t.includes(JSON.stringify({ path: inside })))).toBe(true);
+			expect(emitted.some((t) => t.includes("inside text"))).toBe(true);
+			expect(emitted.some((t) => t.includes(JSON.stringify({ path: outside })) || t.includes(outside) || t.includes("outside text"))).toBe(false);
 		} finally {
 			rmSync(outsideDir, { recursive: true, force: true });
 		}
