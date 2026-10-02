@@ -267,6 +267,20 @@ describe("injectReminders", () => {
 		expect(blockTexts(result[2])).toEqual(["ran", wrapReminder("plan on")]);
 	});
 
+	it("keeps a standing block on the tail it rode when the next request gains a user turn (overflow retry)", () => {
+		// The overflow retry after a compaction that kept only the last reply: no user turn.
+		const q = new ReminderQueue();
+		q.enqueue("<total_tokens>15000000 tokens left</total_tokens>", { scope: "every-turn", key: "budget", placement: "sticky-append", raw: true, since: 0 });
+		const retry = [compaction("s", 5), assistant(), toolResult("ran")];
+		const first = injectReminders(retry, q.drain(retry));
+		expect(blockTexts(first[2])).toEqual(["ran", "<total_tokens>15000000 tokens left</total_tokens>"]);
+		// The next turn adds the model's reply and a prompt: the tool result must not change.
+		const next = [...retry, assistant(), user("go on", 200)];
+		const second = injectReminders(next, q.drain(next));
+		expect(second[2]).toEqual(first[2]);
+		expect(blockTexts(second[4])).toEqual(["go on", "<total_tokens>15000000 tokens left</total_tokens>"]);
+	});
+
 	it("anchors the first-prepend stack to a compaction summary when no user turn survived (C7)", () => {
 		const messages = [compaction("summary text", 5), assistant(), toolResult("ran")];
 		const result = injectReminders(messages, [

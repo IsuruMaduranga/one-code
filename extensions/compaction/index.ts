@@ -2,9 +2,9 @@
  * compaction extension — replaces pi's summarizer with Claude Code's.
  *
  * Hooks `session_before_compact` (manual /compact, threshold, and overflow
- * alike), reuses pi's already-computed cut point, and sends Claude Code's
- * compaction instruction; only the <summary> block of the reply survives as
- * context.
+ * alike), moves pi's cut point to the last assistant reply (`cut.ts`), and
+ * sends Claude Code's compaction instruction; only the <summary> block of the
+ * reply survives as context, followed by that reply.
  *
  * The call is built to hit the provider prompt cache, which is why Claude
  * Code compacts on the *session model* rather than something cheaper: it
@@ -38,7 +38,13 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Context, Message, Model, Tool } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
-import { convertToLlm, type ExtensionAPI, type SessionBeforeCompactEvent } from "@earendil-works/pi-coding-agent";
+import {
+	convertToLlm,
+	type ExtensionAPI,
+	type SessionBeforeCompactEvent,
+	type SessionEntry,
+	sessionEntryToContextMessages,
+} from "@earendil-works/pi-coding-agent";
 import {
 	type AnthropicModelCompat,
 	clearThinkingApplies,
@@ -50,7 +56,9 @@ import { looksLikeAnthropicRequest } from "../lib/anthropic-payload.ts";
 import { forcedReasoningLevel } from "../lib/model-policy.ts";
 import { captureRequest, extendPayload, LAST_REQUEST_CHANNEL, LastExchange, lastCovered, type RequestCapture, replayOutputCap } from "../lib/request-replay.ts";
 import { withoutSystemMessages } from "../lib/side-call.ts";
+import { claudeCodeCut, type CutEntry, doomedMessages } from "./cut.ts";
 import { fitToBudget, replayFits, withoutUsage } from "./fit.ts";
+import { withoutThinking } from "./kept-thinking.ts";
 import { buildCompactionInstruction, COMPACTION_MAX_TOKENS, continuationSummary, extractSummary } from "./prompt.ts";
 
 /** Compaction reads a whole context window; give it more room than the classifier's 30s. */
@@ -151,6 +159,9 @@ export default function compactionExtension(pi: ExtensionAPI) {
 		const capture =
 			captured && captured.model === modelKey(model) ? { ...captured, messages: withoutSystemMessages(captured.messages) } : undefined;
 		const wire = exchange.forModel(model);
+		// Claude Code's cut: keep only the last assistant reply, and summarize
+		// exactly what lies before it (cut.ts).
+		const { preparation, firstKeptEntryId } = claudeCodeCut(event.branchEntries as (SessionEntry & CutEntry)[], event.preparation, sessionEntryToContextMessages);
 
 		try {
 			const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
@@ -165,13 +176,13 @@ export default function compactionExtension(pi: ExtensionAPI) {
 			// Otherwise (no capture yet, an overflow, a nearly full window) the
 			// standalone shape summarizes the doomed span pi isolated. An overflow
 			// never replays, so its replay request is not even built.
-			const replay = capture && event.reason !== "overflow" ? replayRequest(pi, capture, event, wire?.reply, model.api) : undefined;
+			const replay = capture && event.reason !== "overflow" ? replayRequest(pi, capture, event, preparation, wire?.reply, model.api) : undefined;
 			const replaying = replay !== undefined && replayFits(event.reason, model, replay, maxTokens);
 			const request = replaying
 				? replay
 				: standaloneRequest(
 						model,
-						event.preparation,
+						preparation,
 						buildCompactionInstruction({ reason: event.reason, customInstructions: event.customInstructions }),
 						maxTokens,
 					);
@@ -258,7 +269,7 @@ export default function compactionExtension(pi: ExtensionAPI) {
 				compaction: {
 					// Undefined in --no-session runs; the pointer line is dropped.
 					summary: continuationSummary(summary, ctx.sessionManager.getSessionFile()),
-					firstKeptEntryId: event.preparation.firstKeptEntryId,
+					firstKeptEntryId,
 					tokensBefore: event.preparation.tokensBefore,
 					usage: result.usage,
 				},
@@ -296,9 +307,9 @@ function wirePlan(
  * come first) still matches; a mismatch costs cache hits, never correctness —
  * the captured request verbatim, and the instruction as one more user message.
  *
- * pi keeps the tail after the cut point verbatim (keepRecentTokens, ~20k
- * tokens); the captured request still carries that tail, so the instruction
- * names it (`keptTailOf`). Cutting the tail off the request instead was
+ * The kept tail (the last assistant reply and anything after it, `cut.ts`)
+ * stays verbatim after the summary; the captured request still carries it, so
+ * the instruction names it (`keptTailOf`). Cutting the tail off the request instead was
  * rejected: Anthropic checks cache hits only ~20 blocks back from the
  * breakpoint, so a request ending well before the last cached block misses
  * the cache the whole replay exists to hit.
@@ -307,6 +318,7 @@ function replayRequest(
 	pi: ExtensionAPI,
 	captured: { messages: AgentMessage[]; systemPrompt: string },
 	event: SessionBeforeCompactEvent,
+	preparation: Preparation,
 	reply: AgentMessage | undefined,
 	api: string | undefined,
 ): Context {
@@ -322,20 +334,22 @@ function replayRequest(
 	const instruction = buildCompactionInstruction({
 		reason: event.reason,
 		customInstructions: event.customInstructions,
-		keptTail: keptTailOf(conversation, event.preparation, api),
+		keptTail: keptTailOf(conversation, preparation, api),
 	});
 	return { systemPrompt: captured.systemPrompt, messages: [...convertToLlm(conversation), instructionMessage(instruction)], tools };
 }
 
 /**
  * The standalone shape: the doomed span reconstructed from session entries,
- * its assistant usage zeroed and its largest tool results cleared until pi's
- * clamp leaves room for the summary (`fit.ts`), no tools, a one-line system
- * prompt. Gets no kept-tail note: it holds only the doomed span. If it fails,
+ * its assistant usage zeroed, its signed thinking removed (it would fail the
+ * check under this system prompt; `kept-thinking.ts`), and its largest tool
+ * results cleared until pi's clamp leaves room for the summary (`fit.ts`), no
+ * tools, a one-line system prompt. Gets no kept-tail note: it holds only the doomed span. If it fails,
  * pi's own compaction serves. Exported for the unit test.
  */
 export function standaloneRequest(model: Model<Api>, preparation: Preparation, instruction: string, maxTokens: number): Context {
-	const messages = [...withoutUsage(convertToLlm(reconstructFromEntries(preparation))), instructionMessage(instruction)];
+	const span = withoutThinking(withoutUsage(convertToLlm(reconstructFromEntries(preparation))), model.api);
+	const messages = [...span, instructionMessage(instruction)];
 	return fitToBudget(model, { systemPrompt: STANDALONE_SYSTEM_PROMPT, messages }, maxTokens).request;
 }
 
@@ -371,11 +385,7 @@ export function keptTailOf(
 	preparation: Preparation,
 	api?: string,
 ): { count: number; landmark?: string } | undefined {
-	const doomed: { role: string }[] = [
-		...(preparation.previousSummary ? [{ role: "compactionSummary" }] : []),
-		...preparation.messagesToSummarize,
-		...(preparation.isSplitTurn ? preparation.turnPrefixMessages : []),
-	];
+	const doomed: { role: string }[] = [...(preparation.previousSummary ? [{ role: "compactionSummary" }] : []), ...doomedMessages(preparation)];
 	if (doomed.length === 0 || doomed.length > captured.length) return undefined;
 	for (let i = 0; i < doomed.length; i++) {
 		if (captured[i].role !== doomed[i].role) return undefined;
@@ -436,9 +446,7 @@ function oneLine(text: string | undefined): string | undefined {
  * summarized with the rest.
  */
 function reconstructFromEntries(preparation: Preparation): AgentMessage[] {
-	const doomed = preparation.isSplitTurn
-		? [...preparation.messagesToSummarize, ...preparation.turnPrefixMessages]
-		: preparation.messagesToSummarize;
+	const doomed = doomedMessages(preparation);
 	return preparation.previousSummary
 		? [
 				{
