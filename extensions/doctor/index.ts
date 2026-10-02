@@ -44,7 +44,7 @@ import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../permissions/modes.ts";
 import { persistSubagentModel } from "../subagents/default-model.ts";
 import { buildDoctorReport, oneCodeVersion } from "./build.ts";
-import { installKind, replacedBuiltinsView } from "./builtins.ts";
+import { installKind, keepView, replacedBuiltinsView } from "./builtins.ts";
 import { doctorFixPrompt } from "./fix-prompt.ts";
 import { computePresets, describePresetChanges, findPreset, PRESET_NAMES, presetsSection } from "./presets.ts";
 import { type DoctorReport, renderDoctorReport, renderDoctorText, renderSection } from "./report.ts";
@@ -118,6 +118,11 @@ export default function doctorExtension(pi: ExtensionAPI) {
 		const [latest] = options.network
 			? await Promise.all([lookupLatestVersion({ install: installKind(), current: version, env: process.env }), refreshCapability(ctx, home)])
 			: [undefined];
+		// One read of pi's settings serves both views; made inside their own
+		// try, since a malformed settings file throws.
+		const piPaths = { agentDir: getAgentDir(), cwd: ctx.cwd };
+		let manager: SettingsManager | undefined;
+		const piSettings = () => (manager ??= SettingsManager.create(ctx.cwd, piPaths.agentDir));
 		return buildDoctorReport({
 			env: {
 				cwd: ctx.cwd,
@@ -131,7 +136,8 @@ export default function doctorExtension(pi: ExtensionAPI) {
 				oneCodeVersion: version,
 				install: installKind(),
 				piVersion: PI_VERSION,
-				replacedBuiltins: replacedBuiltinsView(PI_VERSION, () => SettingsManager.create(ctx.cwd, getAgentDir()), { agentDir: getAgentDir(), cwd: ctx.cwd }),
+				replacedBuiltins: replacedBuiltinsView(PI_VERSION, piSettings, piPaths),
+				compactionKeep: keepView(piSettings, piPaths),
 				piConfigDirName: CONFIG_DIR_NAME,
 				registeredMcpServers: registeredMcpServers(pi),
 				latest,

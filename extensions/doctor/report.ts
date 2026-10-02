@@ -19,6 +19,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import { tildify } from "../lib/paths.ts";
 import type { McpStatusEvent } from "../lib/mcp-status.ts";
 import type { ReplacedBuiltinsView } from "./builtins.ts";
+import type { CompactionKeepView } from "../lib/compaction-keep.mjs";
 import type { RegisteredServer } from "../mcp/config.ts";
 import { wrapProse } from "../lib/tui-render.ts";
 import { countNoun } from "../lib/tui-render.ts";
@@ -75,6 +76,8 @@ export interface DoctorEnvironment {
 	piVersion?: string;
 	/** pi's built-ins One Code replaces and whether pi still loads them; undefined before pi 0.99 (doctor/builtins.ts). */
 	replacedBuiltins?: ReplacedBuiltinsView;
+	/** pi's compaction keep window and where it is set (lib/compaction-keep.mjs); undefined when the settings could not be read. */
+	compactionKeep?: CompactionKeepView & { paths: { user: string; project: string } };
 	/** pi's `CONFIG_DIR_NAME`, the project folder its own `mcp.json` sits in (`.pi` when absent). */
 	piConfigDirName?: string;
 	/** MCP servers other extensions registered in this session (`pi.getMcpServers()`); the CLI has none. */

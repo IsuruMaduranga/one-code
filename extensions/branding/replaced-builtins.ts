@@ -15,25 +15,12 @@
 import os from "node:os";
 import { type ExtensionContext, getAgentDir, SettingsManager, VERSION as PI_VERSION } from "@earendil-works/pi-coding-agent";
 import { configCommand, installKind, replacedBuiltinsView } from "../doctor/builtins.ts";
-import { oneCodeSettingsPath, readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
 import { tildify } from "../lib/paths.ts";
+import { declined, recordDeclined } from "./declined.ts";
 import { replacedBuiltinsNotice, TURN_OFF_NO, TURN_OFF_YES, turnOffPrompt, withBuiltinsTurnedOff } from "../lib/replaced-builtins.mjs";
 
 /** `~/.onecode/settings.json` key: the user answered "No" to the question. */
 export const DECLINED_KEY = "piBuiltinsTurnOffDeclined";
-
-function declined(): boolean {
-	try {
-		return readSettingsForWrite(oneCodeSettingsPath(os.homedir()))[DECLINED_KEY] === true;
-	} catch {
-		return false;
-	}
-}
-
-function recordDeclined(): void {
-	const path = oneCodeSettingsPath(os.homedir());
-	writeSettings(path, { ...readSettingsForWrite(path), [DECLINED_KEY]: true });
-}
 
 /** Ask, or show the notice, for the built-ins the settings leave on. Never throws. */
 export async function handleReplacedBuiltins(ctx: ExtensionContext): Promise<void> {
@@ -51,7 +38,7 @@ export async function handleReplacedBuiltins(ctx: ExtensionContext): Promise<voi
 		};
 		// Only the user's own file is ours to offer: a project's `+builtin` entry stays.
 		const userScoped = view.left.filter((builtin) => builtin.scope === "user");
-		if (install === "app" || !ctx.hasUI || userScoped.length === 0 || declined()) return notice();
+		if (install === "app" || !ctx.hasUI || userScoped.length === 0 || declined(DECLINED_KEY)) return notice();
 
 		const shown = tildify(view.paths.user, os.homedir());
 		const choice = await ctx.ui.select(turnOffPrompt(userScoped, shown, command), [TURN_OFF_YES, TURN_OFF_NO]);
@@ -69,7 +56,7 @@ export async function handleReplacedBuiltins(ctx: ExtensionContext): Promise<voi
 			ctx.ui.notify(`${turnedOff} ${rest}`, "info");
 			return;
 		}
-		if (choice === TURN_OFF_NO) recordDeclined();
+		if (choice === TURN_OFF_NO) recordDeclined(DECLINED_KEY);
 		notice();
 	} catch (error) {
 		try {

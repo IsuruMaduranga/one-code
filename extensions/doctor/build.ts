@@ -22,6 +22,7 @@ import { readSettingsEnv } from "../lib/claude-settings.ts";
 import { resolveBashSpawn, resolvePowerShellSpawn } from "../lib/shell-spawn.ts";
 import { upgradeCommandFor } from "../lib/update-check.mjs";
 import { replacedBuiltinsFix } from "../lib/replaced-builtins.mjs";
+import { keepWindowFix } from "../lib/compaction-keep.mjs";
 import { configCommand } from "./builtins.ts";
 import { shellToolPolicy } from "../powershell/policy.ts";
 import { collectModelFacts, modelsSection } from "./models.ts";
@@ -72,6 +73,7 @@ export function installationSection(env: DoctorEnvironment, findings: Finding[])
 		findings.push({ level: "warn", text: versionWarning, fix: env.install === "app" ? "Upgrade One Code (it pins a tested pi)." : "Update one-code-extension, or pin pi inside the tested range." });
 	}
 	replacedBuiltinsLines(env, lines, findings);
+	compactionKeepLines(env, lines, findings);
 
 	if (env.latest) {
 		switch (env.latest.status) {
@@ -108,6 +110,23 @@ function replacedBuiltinsLines(env: DoctorEnvironment, lines: ReportLine[], find
 		level: "warn",
 		text: `pi skips its built-in ${names} because One Code provides its own, and warns about it at every start, advising you to remove One Code. Keep One Code; turning the built-in off silences the warning.`,
 		fix: replacedBuiltinsFix(view.left, view.paths, configCommand(env.install)),
+	});
+}
+
+/** pi's compaction keep window: 0, or above 0 with the fix (lib/compaction-keep.mjs). */
+function compactionKeepLines(env: DoctorEnvironment, lines: ReportLine[], findings: Finding[]): void {
+	const view = env.compactionKeep;
+	if (!view) return;
+	if (view.value === 0) {
+		lines.push({ text: "pi's compaction keep window: 0 (One Code keeps the last reply, as Claude Code does)", level: "dim" });
+		return;
+	}
+	const where = view.source === "default" ? "pi's default" : `set in the ${view.source} settings`;
+	lines.push({ text: `pi's compaction keep window: ${view.value} tokens (${where}), so /compact refuses shorter sessions`, level: "warn" });
+	findings.push({
+		level: "warn",
+		text: `One Code keeps only the last reply after a compaction, so pi's keep window of ${view.value} tokens only stops /compact on a session shorter than that.`,
+		fix: keepWindowFix(shortenHome(view.source === "project" ? view.paths.project : view.paths.user, env.home)),
 	});
 }
 
