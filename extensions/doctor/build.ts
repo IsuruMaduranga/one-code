@@ -121,12 +121,12 @@ function compactionKeepLines(env: DoctorEnvironment, lines: ReportLine[], findin
 		lines.push({ text: "pi's compaction keep window: 0 (One Code keeps the last reply, as Claude Code does)", level: "dim" });
 		return;
 	}
-	const where = view.source === "default" ? "pi's default" : `set in the ${view.source} settings`;
+	const where = view.source === "default" ? "pi's default" : `set in the ${view.source} settings${view.model ? ` for ${view.model}` : ""}`;
 	lines.push({ text: `pi's compaction keep window: ${view.value} tokens (${where}), so /compact refuses shorter sessions`, level: "warn" });
 	findings.push({
 		level: "warn",
 		text: `One Code keeps only the last reply after a compaction, so pi's keep window of ${view.value} tokens only stops /compact on a session shorter than that.`,
-		fix: keepWindowFix(shortenHome(view.source === "project" ? view.paths.project : view.paths.user, env.home)),
+		fix: keepWindowFix(shortenHome(view.source === "project" ? view.paths.project : view.paths.user, env.home), view.model),
 	});
 }
 

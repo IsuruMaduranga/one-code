@@ -59,9 +59,9 @@ export function claudeCodeCut<E extends CutEntry, M extends { role: string }, P 
  * in context, or pi already cut at the reply.
  *
  * An assistant message that ended in an error or an abort never reaches the
- * provider (pi-ai's `transformMessages` drops it), one with no text or tool
- * call is skipped by its converter, and one a context edit omits is not in
- * the context, so none of them is a reply to keep. A reply an
+ * provider (pi-ai's `transformMessages` drops it), and one whose content (as
+ * a context edit leaves it) has no text or tool call is omitted or skipped by
+ * its converter, so none of them is a reply to keep. A reply an
  * earlier compaction already summarized is out of reach.
  */
 export function lastReplyCut<E extends CutEntry>(
@@ -70,14 +70,17 @@ export function lastReplyCut<E extends CutEntry>(
 ): { firstKeptEntryId: string; span: E[]; later: boolean } | undefined {
 	const piIndex = entries.findIndex((entry) => entry.id === piFirstKeptEntryId);
 	if (piIndex < 0) return undefined;
-	const omitted = new Set(entries.filter((entry) => entry.type === "context_edit" && entry.replacement === null).map((entry) => entry.targetId));
+	const edits = contextEdits(entries);
 	const start = latestCompaction(entries)?.keptStart ?? 0;
 	let replyIndex = -1;
 	for (let i = entries.length - 1; i >= start; i--) {
 		const entry = entries[i];
 		const message = entry.message;
-		if (entry.type !== "message" || message?.role !== "assistant" || omitted.has(entry.id)) continue;
-		if (message.stopReason === "error" || message.stopReason === "aborted" || !sendsContent(message.content)) continue;
+		if (entry.type !== "message" || message?.role !== "assistant") continue;
+		if (message.stopReason === "error" || message.stopReason === "aborted") continue;
+		// The content the provider gets: a context edit's replacement, or none when it omits the message.
+		const content = edits.has(entry.id) ? edits.get(entry.id)?.content : message.content;
+		if (!sendsContent(content)) continue;
 		replyIndex = i;
 		break;
 	}
@@ -88,6 +91,13 @@ export function lastReplyCut<E extends CutEntry>(
 		span: later ? entries.slice(piIndex, replyIndex) : entries.slice(replyIndex, piIndex),
 		later,
 	};
+}
+
+/** Each edited entry's replacement (null when the edit omits it), the latest edit winning, as in pi's projection. */
+function contextEdits(entries: readonly CutEntry[]): Map<string, CutEntry["replacement"]> {
+	const edits = new Map<string, CutEntry["replacement"]>();
+	for (const entry of entries) if (entry.type === "context_edit" && entry.targetId) edits.set(entry.targetId, entry.replacement);
+	return edits;
 }
 
 /** Whether an assistant message carries text or a tool call (thinking alone is not a reply). */
@@ -107,8 +117,7 @@ function sendsContent(content: unknown): boolean {
  * compaction's summary is context).
  */
 export function spanMessages<E extends CutEntry, M extends { role: string }>(span: readonly E[], all: readonly E[], toMessages: (entry: E) => M[]): M[] {
-	const edits = new Map<string, CutEntry["replacement"]>();
-	for (const entry of all) if (entry.type === "context_edit" && entry.targetId) edits.set(entry.targetId, entry.replacement);
+	const edits = contextEdits(all);
 	return span.flatMap((entry) => {
 		if (entry.type === "compaction" || entry.type === "context_edit") return [];
 		const messages = toMessages(entry);

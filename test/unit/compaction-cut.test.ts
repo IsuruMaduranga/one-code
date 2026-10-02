@@ -36,6 +36,17 @@ describe("lastReplyCut", () => {
 		expect(lastReplyCut(entries, "u1")?.firstKeptEntryId).toBe("a1");
 	});
 
+	it("judges a reply by the content a context edit leaves it", () => {
+		const entries = [
+			msg("u1", "user"),
+			msg("a1", "assistant"),
+			msg("u2", "user"),
+			msg("a2", "assistant"),
+			{ id: "e1", type: "context_edit", targetId: "a2", replacement: { content: [] } },
+		];
+		expect(lastReplyCut(entries, "u1")?.firstKeptEntryId).toBe("a1");
+	});
+
 	it("never keeps an assistant message with nothing the provider would send", () => {
 		const entries = [msg("u1", "user"), msg("a1", "assistant"), msg("u2", "user"), { id: "a2", type: "message", message: { role: "assistant", content: [{ type: "thinking", thinking: "x" }] } }];
 		expect(lastReplyCut(entries, "u2")).toMatchObject({ firstKeptEntryId: "a1", later: false });

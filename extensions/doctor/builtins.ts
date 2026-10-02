@@ -60,11 +60,12 @@ export function replacedBuiltinsView(
 export function keepView(
 	settings: () => Pick<SettingsManager, "getGlobalSettings" | "getProjectSettings">,
 	paths: { agentDir: string; cwd: string },
+	modelKey?: string,
 ): (CompactionKeepView & { paths: { user: string; project: string } }) | undefined {
 	try {
 		const manager = settings();
 		return {
-			...compactionKeepView(manager.getGlobalSettings(), manager.getProjectSettings()),
+			...compactionKeepView(manager.getGlobalSettings(), manager.getProjectSettings(), modelKey),
 			paths: { user: join(paths.agentDir, "settings.json"), project: join(paths.cwd, CONFIG_DIR_NAME, "settings.json") },
 		};
 	} catch {

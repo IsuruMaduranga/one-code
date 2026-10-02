@@ -37,7 +37,8 @@ export async function handleCompactionKeep(ctx: ExtensionContext): Promise<void>
 		if (declined(KEEP_DECLINED_KEY)) return;
 		const agentDir = getAgentDir();
 		const manager = SettingsManager.create(ctx.cwd, agentDir);
-		if (compactionKeepView(manager.getGlobalSettings(), manager.getProjectSettings()).source !== "default") return;
+		const modelKey = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
+		if (compactionKeepView(manager.getGlobalSettings(), manager.getProjectSettings(), modelKey).source !== "default") return;
 
 		const userPath = join(agentDir, "settings.json");
 		const choice = await ctx.ui.select(keepWindowPrompt(tildify(userPath, os.homedir())), [KEEP_YES, KEEP_NO]);

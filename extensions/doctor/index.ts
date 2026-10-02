@@ -137,7 +137,7 @@ export default function doctorExtension(pi: ExtensionAPI) {
 				install: installKind(),
 				piVersion: PI_VERSION,
 				replacedBuiltins: replacedBuiltinsView(PI_VERSION, piSettings, piPaths),
-				compactionKeep: keepView(piSettings, piPaths),
+				compactionKeep: keepView(piSettings, piPaths, ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined),
 				piConfigDirName: CONFIG_DIR_NAME,
 				registeredMcpServers: registeredMcpServers(pi),
 				latest,

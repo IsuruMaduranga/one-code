@@ -26,6 +26,10 @@ describe("compactionKeepView", () => {
 		expect(compactionKeepView({ compaction: { keepRecentTokens: 0 } }, {})).toEqual({ value: 0, source: "user" });
 		expect(compactionKeepView({ compaction: { keepRecentTokens: 0 } }, { compaction: { keepRecentTokens: 5000 } })).toEqual({ value: 5000, source: "project" });
 		expect(keepWindowFix("/p/.pi/settings.json")).toBe('Set "compaction": { "keepRecentTokens": 0 } in /p/.pi/settings.json, then restart.');
+		const overrides = { compaction: { keepRecentTokens: 0, modelOverrides: { "anthropic/claude-opus-5-5": { keepRecentTokens: 30000 } } } };
+		expect(compactionKeepView(overrides, {}, "anthropic/claude-opus-5-5")).toEqual({ value: 30000, source: "user", model: "anthropic/claude-opus-5-5" });
+		expect(compactionKeepView(overrides, {}, "openai/gpt-6.1-sol")).toEqual({ value: 0, source: "user" });
+		expect(keepWindowFix("~/s.json", "anthropic/claude-opus-5-5")).toContain('"modelOverrides": { "anthropic/claude-opus-5-5": { "keepRecentTokens": 0 } }');
 	});
 });
 

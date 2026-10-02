@@ -299,4 +299,40 @@ describe("file-tracker wiring", () => {
 		const edit = (file: string) => fake.fireOne<{ block?: boolean }>("tool_call", { toolName: "edit", input: { path: file } }, ctx());
 		expect(await edit(kept)).toBeUndefined();
 	});
+
+	it("restores contents only for files the gate would pass without a question: inside the project", async () => {
+		const outsideDir = mkdtempSync(join(tmpdir(), "file-tracker-outside-"));
+		try {
+			const outside = join(outsideDir, "secret.txt");
+			const inside = path("inside.txt");
+			writeFileSync(outside, "outside text");
+			writeFileSync(inside, "inside text");
+			for (const file of [outside, inside]) await fake.fireOne("tool_result", { toolName: "read", input: { path: file }, isError: false }, ctx());
+			const emitted: string[] = [];
+			fake.events.on(REMINDER_CHANNEL, (data) => emitted.push((data as { text: string }).text));
+			const branch = [{ type: "compaction", id: "c1", firstKeptEntryId: "c1" }];
+			await fake.fire("session_compact", { compactionEntry: branch[0], fromExtension: true, reason: "manual", willRetry: false }, createFakeCtx({ cwd: dir, sessionManager: { getSessionId: () => "s", getBranch: () => branch } }));
+			expect(emitted.some((t) => t.includes(inside))).toBe(true);
+			expect(emitted.some((t) => t.includes(outside) || t.includes("outside text"))).toBe(false);
+		} finally {
+			rmSync(outsideDir, { recursive: true, force: true });
+		}
+	});
+
+	it("keeps a kept file stale when it changed on disk, so the edit guard still holds", async () => {
+		const kept = path("kept-stale.ts");
+		writeFileSync(kept, "seen by the model");
+		await fake.fireOne("tool_result", { toolName: "read", input: { path: kept }, isError: false }, ctx());
+		writeFileSync(kept, "changed after the read, longer than before");
+		const branch = [
+			{ type: "message", id: "a1", message: { role: "assistant", content: [{ type: "toolCall", id: "1", name: "read", arguments: { path: kept } }] } },
+			{ type: "message", id: "r1", message: { role: "toolResult", toolCallId: "1", isError: false } },
+			{ type: "compaction", id: "c", firstKeptEntryId: "a1", timestamp: new Date().toISOString() },
+		];
+		await fake.fire("session_compact", { compactionEntry: branch[2], fromExtension: true, reason: "manual", willRetry: false }, createFakeCtx({ cwd: dir, sessionManager: { getSessionId: () => "s", getBranch: () => branch } }));
+		const result = await fake.fireOne<{ block?: boolean; reason?: string }>("tool_call", { toolName: "edit", input: { path: kept } }, ctx());
+		expect(result?.block).toBe(true);
+		expect(result?.reason).not.toContain("has not been read");
+	});
 });
+

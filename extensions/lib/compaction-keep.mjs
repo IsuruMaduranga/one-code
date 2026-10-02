@@ -38,19 +38,29 @@ export function withCompactionKeepBackfilled(settings) {
 }
 
 /**
- * The keep window pi will use, and where it comes from: the project's settings
- * win over the user's, as in pi's own merge; `default` when neither sets it.
+ * The keep window pi will use for `modelKey` (`provider/id`), and where it
+ * comes from, as pi resolves it: the model's `compaction.modelOverrides` entry
+ * first, then the ordinary setting; the project's settings win over the
+ * user's in each; `default` when nothing sets it. `model` names the override
+ * that supplied the value.
  */
-export function compactionKeepView(userSettings, projectSettings) {
+export function compactionKeepView(userSettings, projectSettings, modelKey) {
 	// Set means defined, as for the backfill; pi itself rejects a non-integer.
-	const of = (settings) => {
-		const value = settings?.compaction?.keepRecentTokens;
-		return value === undefined ? undefined : Number(value);
-	};
-	const project = of(projectSettings);
-	if (project !== undefined) return { value: project, source: "project" };
-	const user = of(userSettings);
-	if (user !== undefined) return { value: user, source: "user" };
+	const read = (value) => (value === undefined ? undefined : Number(value));
+	const scopes = [
+		["project", projectSettings],
+		["user", userSettings],
+	];
+	if (modelKey !== undefined) {
+		for (const [source, settings] of scopes) {
+			const value = read(settings?.compaction?.modelOverrides?.[modelKey]?.keepRecentTokens);
+			if (value !== undefined) return { value, source, model: modelKey };
+		}
+	}
+	for (const [source, settings] of scopes) {
+		const value = read(settings?.compaction?.keepRecentTokens);
+		if (value !== undefined) return { value, source };
+	}
 	return { value: PI_DEFAULT_KEEP_RECENT_TOKENS, source: "default" };
 }
 
@@ -66,7 +76,8 @@ export function keepWindowPrompt(settingsPath) {
 	].join("\n");
 }
 
-/** The fix /doctor names for a keep window above 0, in the settings file that sets it. */
-export function keepWindowFix(settingsPath) {
-	return `Set "compaction": { "keepRecentTokens": 0 } in ${settingsPath}, then restart.`;
+/** The fix /doctor names for a keep window above 0, in the settings file (and model override) that sets it. */
+export function keepWindowFix(settingsPath, model) {
+	const key = model === undefined ? `"keepRecentTokens": 0` : `"modelOverrides": { "${model}": { "keepRecentTokens": 0 } }`;
+	return `Set "compaction": { ${key} } in ${settingsPath}, then restart.`;
 }

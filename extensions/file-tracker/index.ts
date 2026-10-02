@@ -23,7 +23,7 @@ import { pathArgument } from "../auto-mode/paths.ts";
 import { collectImportedPaths, discoverContextFilePaths } from "../lib/claude-context.ts";
 import { inContextEntries, latestCompaction } from "../lib/compaction-boundary.ts";
 import { projectMemoryDir } from "../lib/memory.ts";
-import { comparablePath, claudeConfigDir } from "../lib/paths.ts";
+import { claudeConfigDir, comparablePath, isPathAtOrUnder, tryRealpath } from "../lib/paths.ts";
 import { estimateTextTokens } from "../lib/pi-ai-estimate.ts";
 import { planFileOnBranch } from "../lib/plan-mode-channels.ts";
 import { REMINDER_CHANNEL, type ReminderPayload } from "../lib/reminders.ts";
@@ -112,13 +112,26 @@ function inContextFiles(ctx: ExtensionContext, branch: readonly { type: string; 
 	);
 }
 
-/** Whether a read deny rule covers a file now; every file when the settings cannot be read (the gate reports them). */
-function readDenied(ctx: ExtensionContext): (path: string) => boolean {
+/**
+ * Whether a file's contents may come back without the permission gate that a
+ * `read` call passes: only a file that resolves (symlinks followed) inside the
+ * working directory and that no read deny or ask rule covers now. Any other
+ * file, one read outside the project after a question, say, is not restored;
+ * the model reads it again through the gate if it needs it. Nothing passes
+ * when the settings cannot be read (the gate reports them).
+ */
+function restoreAllowed(ctx: ExtensionContext): (path: string) => boolean {
 	try {
-		const deny = parseRules(loadPermissionSettings(ctx.cwd, homedir()).deny);
-		return (path) => deny.some((rule) => ruleMatches(rule, "read", path, ctx.cwd));
+		const settings = loadPermissionSettings(ctx.cwd, homedir());
+		const rules = parseRules([...settings.deny, ...settings.ask]);
+		const root = tryRealpath(ctx.cwd) ?? ctx.cwd;
+		return (path) => {
+			const real = tryRealpath(path);
+			if (!real || !isPathAtOrUnder(real, root)) return false;
+			return !rules.some((rule) => ruleMatches(rule, "read", path, ctx.cwd) || ruleMatches(rule, "read", real, ctx.cwd));
+		};
 	} catch {
-		return () => true;
+		return () => false;
 	}
 }
 
@@ -211,23 +224,26 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 	 * A file the context still shows stays read (a kept turn's read, the
 	 * context stack, the plan file), and a restored file counts as read and as
 	 * touched for the next compaction's restore; a note never marks its file
-	 * read.
+	 * read. Contents come back only for a file the gate would let through
+	 * without a question (`restoreAllowed`).
 	 */
 	pi.on("session_compact", async (event: SessionCompactEvent, ctx) => {
 		if (process.env.CC_COMPACTION === "0") return;
-		const previous = tracker;
 		const before = touched;
-		tracker = new FileTracker();
-		touched = new Map();
 		try {
 			const branch = ctx.sessionManager.getBranch();
 			const compaction = latestCompaction(branch);
 			const kept = compaction ? keptReadPaths(branch.slice(compaction.keptStart, compaction.index)) : [];
 			const inContext = inContextFiles(ctx, branch, kept);
-			for (const path of previous.tracked) if (inContext.has(comparablePath(path))) observeFromDisk(tracker, path);
+			const shown = (path: string) => inContext.has(comparablePath(path));
+			// A file the context still shows keeps its read state (what the model
+			// saw, not what is on disk now, so the stale-edit guard still holds)
+			// and its touch time, for the next compaction's restore.
+			for (const path of tracker.tracked) if (!shown(path)) tracker.forget(path);
+			touched = new Map([...before].filter(([path]) => shown(path)));
 			if (before.size === 0) return;
-			const denied = readDenied(ctx);
-			const candidates = restoreCandidates(before, (path) => inContext.has(comparablePath(path)) || denied(path));
+			const allowed = restoreAllowed(ctx);
+			const candidates = restoreCandidates(before, (path) => shown(path) || !allowed(path));
 			const read = createReadToolDefinition(ctx.cwd);
 			const reads: RestoredRead[] = await Promise.all(candidates.map(async (path) => ({ path, text: await readAgain(read, path, ctx) })));
 			const { blocks, restored } = restoreBlocks(reads, estimateTextTokens);
@@ -236,6 +252,8 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 			for (const path of restored) touch(path);
 		} catch {
 			// The restore is best effort: nothing comes back, and an edit needs a fresh read.
+			tracker = new FileTracker();
+			touched = new Map();
 		}
 	});
 
