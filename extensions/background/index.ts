@@ -839,11 +839,11 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		},
 	});
 
+	// schedule_wakeup stays eager, as Claude Code's ScheduleWakeup is.
 	for (const [name, keywords] of Object.entries({
 		monitor: ["monitor", "watch", "background", "tail", "events", "stream", "websocket"],
 		task_output: ["task", "background", "output", "status", "wait"],
 		task_stop: ["task", "background", "stop", "kill", "cancel"],
-		schedule_wakeup: ["wakeup", "loop", "schedule", "timer", "recurring", "later"],
 		cron_create: ["cron", "schedule", "recurring", "remind", "timer", "every", "later"],
 		cron_list: ["cron", "schedule", "list", "jobs", "scheduled"],
 		cron_delete: ["cron", "schedule", "cancel", "delete", "stop"],
