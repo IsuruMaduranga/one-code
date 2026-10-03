@@ -9,7 +9,6 @@ const env: EnvironmentInfo = {
 	platform: "darwin",
 	osVersion: "Darwin 24.2.0",
 	shell: "zsh",
-	modelLine: "claude-opus-5 (anthropic)",
 	memoryDir: "/home/u/.claude/projects/-tmp-project/memory",
 };
 
@@ -27,28 +26,19 @@ describe("buildClaudeCodeSystemPrompt", () => {
 		expect(prompt).toContain("Current working directory: /tmp/project");
 	});
 
-	it("renders the environment block", () => {
-		const prompt = buildClaudeCodeSystemPrompt(baseOptions, env, "frontier");
-		expect(prompt).toContain("Working directory: /tmp/project");
-		expect(prompt).toContain("Is a git repository: yes");
-		expect(prompt).toContain("Model: claude-opus-5 (anthropic)");
+	it("leaves the environment, model line, scratchpad and git snapshot to the first-message context", () => {
+		for (const tier of TIERS) {
+			const prompt = buildClaudeCodeSystemPrompt(baseOptions, env, tier);
+			expect(prompt, tier).not.toContain("Primary working directory");
+			expect(prompt, tier).not.toContain("You are powered by the model");
+			expect(prompt, tier).not.toContain("# Scratchpad Directory");
+			expect(prompt, tier).not.toContain("gitStatus");
+		}
 	});
 
-	it("includes the scratchpad section after the environment block, only when a dir exists", () => {
-		const scratchpad = "/private/tmp/onecode-501/-tmp-project/abc-123/scratchpad";
-		const prompt = buildClaudeCodeSystemPrompt(baseOptions, env, "frontier", scratchpad);
-		expect(prompt).toContain("# Scratchpad Directory");
-		expect(prompt).toContain(scratchpad);
-		expect(prompt.indexOf("# Environment")).toBeLessThan(prompt.indexOf("# Scratchpad Directory"));
-		// An unwritable /tmp drops the section rather than promising a dead dir.
-		expect(buildClaudeCodeSystemPrompt(baseOptions, env, "frontier")).not.toContain("# Scratchpad Directory");
-	});
-
-	it("includes the memory section just before the environment block", () => {
+	it("includes the memory section", () => {
 		const prompt = buildClaudeCodeSystemPrompt(baseOptions, env, "frontier");
-		expect(prompt).toContain("# Memory");
 		expect(prompt).toContain("/home/u/.claude/projects/-tmp-project/memory/");
-		expect(prompt.indexOf("# Memory")).toBeLessThan(prompt.indexOf("# Environment"));
 	});
 
 	it("lists tools that have snippets and appends guidelines", () => {
@@ -129,40 +119,28 @@ describe("buildClaudeCodeSystemPrompt", () => {
 		expect(new Set(outputs).size).toBe(3);
 	});
 
-	it("varying only the model line within a tier changes only the Model line", () => {
-		const strip = (s: string) => s.replace(/- Model: .*/, "- Model:");
-		for (const tier of TIERS) {
-			const a = buildClaudeCodeSystemPrompt(baseOptions, env, tier);
-			const b = buildClaudeCodeSystemPrompt(baseOptions, { ...env, modelLine: "gpt-5 (openai)" }, tier);
-			expect(a).not.toBe(b);
-			expect(strip(a)).toBe(strip(b));
-		}
-	});
+
 });
 
 describe("the per-turn budget line", () => {
-	it("sits after the cwd line and before the git snapshot, and is absent when not given", () => {
+	it("closes the prompt after the cwd line, and is absent when not given", () => {
 		const line = "<total_tokens>15000000 tokens left</total_tokens>";
-		const git = "gitStatus: This is the git status at the start of the conversation.";
-		const prompt = buildClaudeCodeSystemPrompt(baseOptions, env, "frontier", undefined, git, line);
-		expect(prompt.endsWith(`Current working directory: /tmp/project\n\n${line}\n\n${git}`)).toBe(true);
-		// No git repo: the line closes the prompt.
-		expect(buildClaudeCodeSystemPrompt(baseOptions, env, "frontier", undefined, null, line).endsWith(`\n\n${line}`)).toBe(true);
-		expect(buildClaudeCodeSystemPrompt(baseOptions, env, "frontier", undefined, git, null).endsWith(`Current working directory: /tmp/project\n\n${git}`)).toBe(true);
+		expect(buildClaudeCodeSystemPrompt(baseOptions, env, "frontier", line).endsWith(`Current working directory: /tmp/project\n\n${line}`)).toBe(true);
+		expect(buildClaudeCodeSystemPrompt(baseOptions, env, "frontier", null).endsWith("Current working directory: /tmp/project")).toBe(true);
 	});
 
 	it("drops the task_create line when the model runs without the task tools", () => {
 		for (const tier of ["workhorse", "cheap", "tiny"] as const) {
 			const withTasks = buildClaudeCodeSystemPrompt(baseOptions, env, tier);
-			const without = buildClaudeCodeSystemPrompt(baseOptions, env, tier, undefined, null, null, false);
+			const without = buildClaudeCodeSystemPrompt(baseOptions, env, tier, null, false);
 			expect(withTasks, tier).toContain("task_create");
 			expect(without, tier).not.toContain("task_create");
 			// Only the task bullets go (tiny carries two); the rest stays.
 			expect(withTasks.split("\n").length - without.split("\n").length, tier).toBe(tier === "tiny" ? 2 : 1);
 		}
 		// Frontier has no task line either way.
-		expect(buildClaudeCodeSystemPrompt(baseOptions, env, "frontier", undefined, null, null, false)).toBe(
-			buildClaudeCodeSystemPrompt(baseOptions, env, "frontier", undefined, null, null, true),
+		expect(buildClaudeCodeSystemPrompt(baseOptions, env, "frontier", null, false)).toBe(
+			buildClaudeCodeSystemPrompt(baseOptions, env, "frontier", null, true),
 		);
 	});
 });

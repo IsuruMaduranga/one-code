@@ -6,18 +6,30 @@
  * stay transient: the session file never contains them. This extension owns
  * the one queue instance; every other extension reaches it over
  * `one-code:system-reminder` (lib/reminders.ts has the placement contract).
+ *
+ * On a model that takes a mid-conversation system message (lib/system-role.ts),
+ * its `before_provider_request` hook then lifts the session-fact blocks off the
+ * first user message into one system message after it, Claude Code's layout.
+ * It loads before tool-search and compaction, so replays and forks inherit it.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { withBetas } from "../lib/anthropic-payload.ts";
 import {
 	appendReminderBlocks,
+	framedReminderText,
 	injectReminders,
+	movesToSystemRole,
 	openingUserAnchor,
 	REMINDER_CHANNEL,
 	ReminderQueue,
 	type ReminderPayload,
 	tailAnchor,
 } from "../lib/reminders.ts";
+import { instructionRole, type MovedBlock, systemRoleLayout, withSystemRoleContext } from "../lib/system-role.ts";
+
+/** Anthropic's beta for a `role: "system"` message after the first one, sent first-party as Claude Code does. */
+const MID_CONVERSATION_SYSTEM_BETA = "mid-conversation-system-2026-04-07";
 
 /**
  * Roles a reminder can be attached to (see injectReminders). `custom` is a
@@ -30,6 +42,8 @@ const ANCHOR_ROLES = new Set(["user", "toolResult", "compactionSummary", "custom
 
 export default function systemReminderExtension(pi: ExtensionAPI) {
 	const reminderQueue = new ReminderQueue();
+	/** The blocks the last `context` pass placed for the system message; the payload hook moves them. */
+	let moved: MovedBlock[] = [];
 
 	pi.events.on(REMINDER_CHANNEL, (data) => {
 		const payload = data as ReminderPayload;
@@ -44,6 +58,7 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 				order: payload.order,
 				suffix: payload.suffix,
 				raw: payload.raw,
+				systemRoleOnly: payload.systemRoleOnly,
 				since: payload.since,
 				once: payload.once,
 				toolCallId: payload.toolCallId,
@@ -66,7 +81,8 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 		return { content: appendReminderBlocks(event.content, entries) };
 	});
 
-	pi.on("context", (event) => {
+	pi.on("context", (event, ctx) => {
+		moved = [];
 		if (reminderQueue.size === 0) return;
 		// injectReminders is a no-op when there is nothing to attach to. Only
 		// consume the queue once there is somewhere to put the reminders, so they
@@ -86,7 +102,25 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 			const anchor = openingUserAnchor(event.messages);
 			if (anchor) reminderQueue.pin(anchor, "user-prepend");
 		}
-		const reminders = reminderQueue.drain(event.messages);
+		const layout = systemRoleLayout(ctx.model);
+		// A block meant only for the system message is left out where there is none.
+		const reminders = reminderQueue.drain(event.messages).filter((entry) => layout || !entry.systemRoleOnly);
+		if (layout) {
+			moved = reminders
+				.filter((entry) => entry.placement === "first-prepend" && movesToSystemRole(entry.order))
+				.map((entry, index) => ({ entry, index }))
+				.sort((a, b) => a.entry.order - b.entry.order || a.index - b.index)
+				.map(({ entry }) => ({ framed: framedReminderText(entry), inner: entry.text }));
+		}
 		return { messages: injectReminders(event.messages, reminders) };
+	});
+
+	pi.on("before_provider_request", (event, ctx) => {
+		const model = ctx.model;
+		const layout = systemRoleLayout(model);
+		if (!model || !layout || moved.length === 0) return undefined;
+		const payload = withSystemRoleContext(event.payload as Record<string, unknown>, layout, moved, instructionRole(layout, model));
+		if (!payload) return undefined;
+		return layout === "anthropic" && model.provider === "anthropic" ? withBetas(payload, [MID_CONVERSATION_SYSTEM_BETA]) : payload;
 	});
 }

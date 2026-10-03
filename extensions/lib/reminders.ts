@@ -86,11 +86,16 @@ export type PinAnchor = { kind: "toolResult"; toolCallId: string } | { kind: "us
 
 /**
  * `order` values for the `first-prepend` context stack, matching Claude Code's
- * fixed sequence on the first user message: deferred tools → agent catalog → MCP
- * instructions → skills → the `# claudeMd` block (last, just before the user's
- * text). Gaps leave room for One Code-specific reminders (e.g. subagent models).
+ * fixed sequence on the first user message: environment → model line → deferred
+ * tools → agent catalog → MCP instructions → skills → the instructions block →
+ * the context block → the date (just before the user's text). Gaps leave room
+ * for One Code-specific reminders (e.g. subagent models). On a model that takes
+ * a mid-conversation system message, everything below `claudeMd`, and the date,
+ * moves into that message instead (`movesToSystemRole`, lib/system-role.ts).
  */
 export const CONTEXT_ORDER = {
+	environment: 1,
+	modelLine: 2,
 	deferredTools: 10,
 	subagentModels: 20,
 	agents: 21,
@@ -98,14 +103,30 @@ export const CONTEXT_ORDER = {
 	delegation: 22,
 	mcp: 30,
 	skills: 40,
+	/** Claude Code's auto-mode note; only in the system message (`systemRoleOnly`). */
+	autoModeNote: 45,
 	// CLAUDE.md-family (with AGENTS.md as a per-directory fallback when a directory
 	// has no CLAUDE.md) — CLAUDE.md > AGENTS.md.
 	claudeMd: 50,
-	// One Code's own instructions ride in their own block AFTER the # claudeMd
+	// One Code's own instructions ride in their own block AFTER the instructions
 	// block (higher `order` = closer to the user text = higher precedence), so
 	// ONECODE.md takes precedence over CLAUDE.md/AGENTS.md. Not part of CC.
-	oneCodeMd: 60,
+	oneCodeMd: 52,
+	/** The user's email and the git snapshot. */
+	context: 54,
+	date: 56,
 } as const;
+
+/**
+ * Whether a `first-prepend` block of this order leaves the first user message
+ * for the mid-conversation system message on a model that takes one: the
+ * session facts below the instructions block, and the date, which Claude Code
+ * puts last in that message. The instructions, One Code's own block and the
+ * context block stay in the user message.
+ */
+export function movesToSystemRole(order: number): boolean {
+	return order < CONTEXT_ORDER.claudeMd || order === CONTEXT_ORDER.date;
+}
 
 /** A drained reminder with everything the injector needs to place it. */
 export interface ReminderEntry {
@@ -146,6 +167,12 @@ export interface ReminderEntry {
 	 * result. Defaults to false.
 	 */
 	raw?: boolean;
+	/**
+	 * `first-prepend` only: sent only inside the mid-conversation system
+	 * message, never on the user message of a model without one (Claude Code's
+	 * auto-mode note).
+	 */
+	systemRoleOnly?: boolean;
 }
 
 export interface ReminderPayload {
@@ -163,6 +190,8 @@ export interface ReminderPayload {
 	suffix?: string;
 	/** Emit the text bare, with no `<system-reminder>` frame. */
 	raw?: boolean;
+	/** `first-prepend` only: sent only inside the mid-conversation system message (see ReminderEntry). */
+	systemRoleOnly?: boolean;
 	/** `user-prepend` only: skip when the same text is already pending (the shared caveat). */
 	once?: boolean;
 	/**
@@ -192,6 +221,7 @@ type EnqueueOptions = {
 	order?: number;
 	suffix?: string;
 	raw?: boolean;
+	systemRoleOnly?: boolean;
 	/** Test seam / explicit anchor for `sticky-append`; defaults to now. */
 	since?: number;
 	/** `user-prepend` only: skip when the same text is already pending. */
@@ -223,6 +253,7 @@ export class ReminderQueue {
 			raw: opts?.raw,
 			toolCallId: opts?.toolCallId,
 		};
+		if (opts?.systemRoleOnly) entry.systemRoleOnly = true;
 		if (placement === "sticky-append") {
 			// A standing reminder re-emitted with the SAME text (plan mode re-emits
 			// every turn) keeps its anchor, so the blocks on earlier messages do not
@@ -342,6 +373,7 @@ function partition<T>(items: T[], test: (item: T) => boolean): { matching: T[]; 
 function strip(r: StoredReminder): ReminderEntry {
 	const entry: ReminderEntry = { text: r.text, placement: r.placement, order: r.order, suffix: r.suffix };
 	if (r.raw) entry.raw = true;
+	if (r.systemRoleOnly) entry.systemRoleOnly = true;
 	if (r.since !== undefined) entry.since = r.since;
 	if (r.opener !== undefined) entry.opener = r.opener;
 	if (r.tailPin) entry.tailPin = r.tailPin;
@@ -462,8 +494,13 @@ function toBlocks(content: string | ContentBlock[]): ContentBlock[] {
 	return typeof content === "string" ? [{ type: "text", text: content }] : [...content];
 }
 
+/** A reminder's text exactly as it rides a message: framed (unless raw), then its suffix. */
+export function framedReminderText(entry: Pick<ReminderEntry, "text" | "raw" | "suffix">): string {
+	return (entry.raw ? entry.text : wrapReminder(entry.text)) + (entry.suffix ?? "");
+}
+
 function reminderBlock(entry: ReminderEntry): TextContent {
-	return { type: "text", text: (entry.raw ? entry.text : wrapReminder(entry.text)) + (entry.suffix ?? "") };
+	return { type: "text", text: framedReminderText(entry) };
 }
 
 /**

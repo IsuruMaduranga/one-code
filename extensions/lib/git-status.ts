@@ -1,6 +1,7 @@
 /**
- * Claude Code's `gitStatus:` block — appended to the very end of the system
- * prompt in a git repo, identical across model tiers, and a one-time snapshot:
+ * Claude Code's `# gitStatus` section — part of the context reminder on the
+ * first user message (lib/claude-context.ts buildContextBlock) in a git repo,
+ * identical across model tiers, and a one-time snapshot:
  * CC states it is "the git status at the start of the conversation" and "will not
  * update during the conversation", so it is computed once per session and frozen.
  *
@@ -22,7 +23,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { HARNESS_GIT_CONFIG } from "../lib/git.ts";
+import { HARNESS_GIT_CONFIG } from "./git.ts";
 
 export interface GitSnapshot {
 	branch: string;
@@ -35,7 +36,7 @@ export interface GitSnapshot {
 }
 
 const HEADER =
-	"gitStatus: This is the git status at the start of the conversation. " +
+	"# gitStatus\nThis is the git status at the start of the conversation. " +
 	"Note that this status is a snapshot in time, and will not update during the conversation.";
 
 /** Claude Code's limit on the status inside the block, in characters. */

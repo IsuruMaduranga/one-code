@@ -32,3 +32,82 @@ export function systemRoleLayout(model: SystemRoleModel | undefined): SystemRole
 	if (model.api === "openai-completions") return "completions";
 	return undefined;
 }
+
+/** One context block that moves: its text as injected on the user message, and its text inside the system message. */
+export interface MovedBlock {
+	/** The block exactly as the user message carries it (`<system-reminder>` frame and suffix included). */
+	framed: string;
+	/** The unwrapped text, as Claude Code's system message joins it. */
+	inner: string;
+}
+
+/**
+ * The role a system message takes on the OpenAI APIs: pi's own rule per API
+ * (`developer` for a reasoning model that accepts it, else `system`).
+ */
+export function instructionRole(layout: SystemRoleLayout, model: { reasoning?: boolean; compat?: unknown }): "system" | "developer" {
+	if (layout === "anthropic") return "system";
+	const developer = (model.compat as { supportsDeveloperRole?: boolean } | undefined)?.supportsDeveloperRole;
+	const accepts = layout === "responses" ? developer !== false : developer === true;
+	return model.reasoning && accepts ? "developer" : "system";
+}
+
+type WireMessage = { role?: unknown; content?: unknown };
+type WirePart = { type?: unknown; text?: unknown; cache_control?: unknown };
+
+/**
+ * The payload with the moved context blocks lifted off the user message that
+ * carries them and joined, unwrapped and a blank line apart, into one system
+ * message placed right after it, in the API's own shape (Claude Code's layout,
+ * `decisions/tools.md`). Blocks are found by their exact text, never by
+ * position: a fork's request drops the parent's first message, and then nothing
+ * moves. On Anthropic, when the new message ends the request, the cache mark
+ * moves from the user message onto it, as Claude Code marks its system message.
+ * Undefined when nothing changes.
+ */
+export function withSystemRoleContext(
+	payload: Record<string, unknown>,
+	layout: SystemRoleLayout,
+	moved: readonly MovedBlock[],
+	role: "system" | "developer",
+): Record<string, unknown> | undefined {
+	if (moved.length === 0) return undefined;
+	const key = layout === "responses" ? "input" : "messages";
+	const messages = payload[key];
+	if (!Array.isArray(messages)) return undefined;
+	const wanted = new Set(moved.map((block) => block.framed));
+	const index = messages.findIndex(
+		(message: WireMessage) => message?.role === "user" && Array.isArray(message.content) && (message.content as WirePart[]).some((part) => wanted.has(part?.text as string)),
+	);
+	if (index === -1) return undefined;
+
+	const carrier = messages[index] as WireMessage & { content: WirePart[] };
+	const found = new Set<string>();
+	const kept = carrier.content.filter((part) => {
+		const text = part?.text;
+		if (typeof text !== "string" || !wanted.has(text) || found.has(text)) return true;
+		found.add(text);
+		return false;
+	});
+	const text = moved
+		.filter((block) => found.has(block.framed))
+		.map((block) => block.inner)
+		.join("\n\n");
+
+	const last = index === messages.length - 1;
+	let user: WireMessage = { ...carrier, content: kept };
+	let system: Record<string, unknown>;
+	if (layout === "anthropic") {
+		const block: Record<string, unknown> = { type: "text", text };
+		const tail = kept[kept.length - 1];
+		if (last && tail?.cache_control !== undefined) {
+			const { cache_control, ...unmarked } = tail;
+			block.cache_control = cache_control;
+			user = { ...carrier, content: [...kept.slice(0, -1), unmarked] };
+		}
+		system = { role: "system", content: [block] };
+	} else {
+		system = { role, content: text };
+	}
+	return { ...payload, [key]: [...messages.slice(0, index), user, system, ...messages.slice(index + 1)] };
+}

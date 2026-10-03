@@ -15,7 +15,7 @@ import { decide } from "../../extensions/permissions/matcher.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { listWorkspaceDirectories } from "../../extensions/permissions/settings.ts";
 import { parseAddDirFlag, validateWorkspaceDirectory } from "../../extensions/permissions/workspace.ts";
-import { buildClaudeCodeSystemPrompt } from "../../extensions/system-prompt/template.ts";
+import { environmentBlock } from "../../extensions/lib/environment-block.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 
@@ -205,11 +205,11 @@ describe("workspace directories in the gate", () => {
 	});
 });
 
-describe("the system prompt", () => {
-	const env = { cwd: "/p", isGitRepo: true, platform: "darwin", osVersion: "x", shell: "zsh", modelLine: "m", memoryDir: "/m" };
+describe("the environment block", () => {
+	const env = { cwd: "/p", isGitRepo: true, platform: "darwin", osVersion: "x", shell: "zsh" };
 	it("lists workspace directories the way Claude Code's environment block does, and nothing when there are none", () => {
-		const withDirs = buildClaudeCodeSystemPrompt({} as never, { ...env, workspaceDirs: ["/a", "/b"] }, "frontier");
-		expect(withDirs).toContain(" - Working directory: /p\n - Additional working directories:\n  - /a\n  - /b\n - Is a git repository: yes");
-		expect(buildClaudeCodeSystemPrompt({} as never, env, "frontier")).toContain(" - Working directory: /p\n - Is a git repository: yes");
+		const withDirs = environmentBlock({ ...env, workspaceDirs: ["/a", "/b"] });
+		expect(withDirs).toContain(" - Primary working directory: /p\n - Is a git repository: true\n - Additional working directories:\n  - /a\n  - /b\n - Platform: darwin");
+		expect(environmentBlock(env)).toContain(" - Is a git repository: true\n - Platform: darwin");
 	});
 });

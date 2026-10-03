@@ -1,7 +1,7 @@
 /**
- * The `# currentDate` line carries the user's local date, and a session that
- * crosses local midnight hears of the new date as a one-shot, so the frozen
- * block on message 1 never changes mid-session.
+ * The date reminder carries the user's local date, and a session that crosses
+ * local midnight hears of the new date as a one-shot, so the frozen reminder on
+ * message 1 never changes mid-session.
  */
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -56,16 +56,19 @@ describe("claude-context date wiring", () => {
 		rmSync(dir, { recursive: true, force: true });
 	});
 
-	const block = () => reminders.filter((r) => r.key === "claude-context");
+	const block = () => reminders.filter((r) => r.key === "claude-context-date");
+	/** Everything but the instructions block, which session_start queues once. */
+	const datesAndNotices = () => reminders.filter((r) => r.key !== "claude-context");
 
 	it("stamps the local date and announces a date change as a one-shot, leaving the block alone", async () => {
 		await fake.fireOne("session_start", {}, createFakeCtx({ cwd: dir }));
 		expect(block()).toHaveLength(1);
-		expect(block()[0].text).toContain("# currentDate\nToday's date is 2026-09-26.\n");
+		expect(block()[0].text).toBe("Today's date is 2026-09-26.");
+		expect(reminders.find((r) => r.key === "claude-context")?.text).toContain("Project rules.");
 
 		// Same day: nothing more.
 		await fake.fireOne("before_agent_start", {}, createFakeCtx({ cwd: dir }));
-		expect(reminders).toHaveLength(1);
+		expect(datesAndNotices()).toHaveLength(1);
 
 		// Past local midnight: one one-shot, the block untouched.
 		vi.setSystemTime(new Date(2026, 8, 27, 0, 10));
@@ -79,7 +82,7 @@ describe("claude-context date wiring", () => {
 
 		// Announced once, not on every later turn.
 		await fake.fireOne("before_agent_start", {}, createFakeCtx({ cwd: dir }));
-		expect(reminders).toHaveLength(2);
+		expect(datesAndNotices()).toHaveLength(2);
 	});
 
 	it("rebuilds the block with the new date after a compaction, when the prefix is new anyway", async () => {
