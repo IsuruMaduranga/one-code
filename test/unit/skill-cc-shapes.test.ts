@@ -14,13 +14,15 @@ import { invalidatePluginsCache } from "../../extensions/lib/plugins.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { BUNDLED_SKILLS_DIR } from "../../extensions/lib/skill-scan.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { stubHome } from "./helpers/home.ts";
 
 const root = mkdtempSync(join(tmpdir(), "skill-cc-shapes-"));
 const cwd = join(root, "project");
 const demoDir = join(cwd, ".claude", "skills", "demo");
 const pluginDir = join(root, ".claude", "plugins", "cache", "market", "kit", "1.0.0");
 const codeReviewFile = join(BUNDLED_SKILLS_DIR, "code-review", "SKILL.md");
-const cell = (name: string) => readFileSync(join(BUNDLED_SKILLS_DIR, "code-review", "cells", `${name}.md`), "utf-8").trimEnd();
+// A Windows checkout may carry CRLF; the selector reads the cells with LF, as Claude Code's text is.
+const cell = (name: string) => readFileSync(join(BUNDLED_SKILLS_DIR, "code-review", "cells", `${name}.md`), "utf-8").replace(/\r\n/g, "\n").trimEnd();
 
 const write = (path: string, text: string) => {
 	mkdirSync(join(path, ".."), { recursive: true });
@@ -39,7 +41,7 @@ beforeAll(() => {
 	);
 	mkdirSync(join(root, "agent"), { recursive: true });
 	vi.stubEnv("PI_CODING_AGENT_DIR", join(root, "agent"));
-	vi.stubEnv("HOME", root);
+	stubHome(root);
 });
 beforeEach(() => invalidatePluginsCache());
 afterAll(() => {
