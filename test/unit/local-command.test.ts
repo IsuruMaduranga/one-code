@@ -63,6 +63,32 @@ describe("registerLocalCommand", () => {
 		expect(order).toEqual(["emit:<local-command", "emit:<command-name>", "emit:<local-command", "handler: high"]);
 	});
 
+	/** A pi that records each emitted block's text, in order, and keeps the registered handlers. */
+	function fakePi(log: string[] = []) {
+		const registered = new Map<string, { handler: (args: string, ctx: unknown) => unknown }>();
+		const pi = {
+			events: { emit: (_channel: string, data: unknown) => log.push((data as { text: string }).text) },
+			registerCommand: (name: string, options: { handler: (args: string, ctx: unknown) => unknown }) => registered.set(name, options),
+		};
+		return { pi, log, run: (name: string) => registered.get(name)!.handler("", {}) };
+	}
+
+	it("with reportsResult, announces after the handler with its returned text as the stdout", async () => {
+		const { pi, log, run } = fakePi();
+		registerLocalCommand(pi, "memory", { reportsResult: true, handler: async () => (log.push("handler"), "Cancelled memory editing") });
+		await run("memory");
+		expect(log).toEqual(["handler", ...localCommandBlocks({ name: "memory", stdout: "Cancelled memory editing" })]);
+	});
+
+	it("with reportsResult, still announces (empty stdout) when the handler returns nothing or throws", async () => {
+		const { pi, log, run } = fakePi();
+		registerLocalCommand(pi, "quiet", { reportsResult: true, handler: () => {} });
+		registerLocalCommand(pi, "boom", { reportsResult: true, handler: async () => { throw new Error("x"); } });
+		await run("quiet");
+		await expect(run("boom")).rejects.toThrow("x");
+		expect(log).toEqual([...localCommandBlocks({ name: "quiet" }), ...localCommandBlocks({ name: "boom" })]);
+	});
+
 	it("announces an argumentHint instead of passing it to pi", () => {
 		const emitted: unknown[] = [];
 		const registered = new Map<string, Record<string, unknown>>();

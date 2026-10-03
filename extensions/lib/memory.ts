@@ -18,8 +18,8 @@
 
 import os from "node:os";
 import { join } from "node:path";
+import { userConfigDir } from "./config-mode.ts";
 import { findProjectRoot } from "./git.ts";
-import { claudeUserDir } from "./paths.ts";
 
 /** Claude Code's project-directory slug: every char outside [A-Za-z0-9-] becomes "-". */
 export function projectSlug(projectRoot: string): string {
@@ -27,12 +27,13 @@ export function projectSlug(projectRoot: string): string {
 }
 
 /**
- * `~/.claude/projects/<slug>/memory` — the same location Claude Code uses.
+ * `~/.claude/projects/<slug>/memory` — the same location Claude Code uses —
+ * or, in independent mode (lib/config-mode.ts), `~/.onecode/projects/<slug>/memory`.
  * `projectRoot` must be the git repository root when there is one (all
  * worktrees and subdirectories share one memory directory), else the cwd.
  */
 export function memoryDir(home: string, projectRoot: string): string {
-	return join(claudeUserDir(home), "projects", projectSlug(projectRoot), "memory");
+	return join(userConfigDir(home), "projects", projectSlug(projectRoot), "memory");
 }
 
 /**

@@ -2,8 +2,8 @@
  * Open a memory file or folder in the user's editor / OS opener, matching Claude
  * Code's `/memory`: a file goes to `$VISUAL`/`$EDITOR` (or the OS default), a
  * folder to the OS file manager. The child is detached and unref'd so the TUI is
- * never blocked (as the MCP OAuth browser open does). Returns the status line and
- * the editor hint to print, matching CC's "Opened <path>" + the $EDITOR nudge.
+ * never blocked (as the MCP OAuth browser open does). The caller words the
+ * result (`memoryDisplayPath`, `editorHint`), matching CC's `/memory`.
  *
  * Limitation: a terminal editor (vim/nano) needs the controlling tty, which the
  * pi TUI owns, so it cannot run detached — this suits GUI editors (code, subl)
@@ -14,8 +14,10 @@
  */
 
 import { spawn } from "node:child_process";
+import { relative } from "node:path";
 import { childProcessEnv } from "../lib/app-launch.mjs";
 import { commandLaunch } from "../lib/command-launch.ts";
+import { forwardSlashes, isRelativeInside, tildify } from "../lib/paths.ts";
 
 export interface OpenPlan {
 	command: string;
@@ -53,14 +55,28 @@ export function resolveOpen(
 	return { command: "xdg-open", args: [path] };
 }
 
-export interface OpenResult {
-	message: string;
-	hint?: string;
-	ok: boolean;
+export type OpenResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * CC's display path for `/memory`'s result: `~/…` under the home directory,
+ * `./…` under the working directory, the shorter when both apply, else as is.
+ */
+export function memoryDisplayPath(path: string, cwd: string, home: string): string {
+	const tilde = tildify(path, home);
+	const underHome = tilde !== path;
+	const rel = relative(cwd, path);
+	const dot = isRelativeInside(rel) ? `./${forwardSlashes(rel)}` : undefined;
+	if (underHome && dot) return tilde.length <= dot.length ? tilde : dot;
+	return underHome ? tilde : (dot ?? path);
 }
 
-/** The editor hint CC prints under an opened file. */
-export const EDITOR_HINT = "To use a different editor, set the $EDITOR or $VISUAL environment variable.";
+/** CC's editor hint under an opened file, naming the variable it used. */
+export function editorHint(env: Record<string, string | undefined> = process.env): string {
+	const used = env.VISUAL ? `Using $VISUAL="${env.VISUAL}".` : env.EDITOR ? `Using $EDITOR="${env.EDITOR}".` : "";
+	return used
+		? `> ${used} To change editor, set $EDITOR or $VISUAL environment variable.`
+		: "> To use a different editor, set the $EDITOR or $VISUAL environment variable.";
+}
 
 /**
  * Spawn the opener/editor detached, resolving once the child either spawns
@@ -87,18 +103,13 @@ export function openPath(path: string, kind: "file" | "folder"): Promise<OpenRes
 			const launch = commandLaunch(command, args, env);
 			child = spawn(launch.command, launch.args, { env, stdio: "ignore", detached: true, windowsVerbatimArguments: launch.windowsVerbatimArguments });
 		} catch (error) {
-			finish({ message: `Could not open ${path}: ${error instanceof Error ? error.message : error}`, ok: false });
+			finish({ ok: false, error: error instanceof Error ? error.message : String(error) });
 			return;
 		}
-		child.on("error", (error) => finish({ message: `Could not open ${path}: ${error.message}`, ok: false }));
+		child.on("error", (error) => finish({ ok: false, error: error.message }));
 		child.on("spawn", () => {
 			child.unref();
-			finish({
-				message: `Opened ${path}`,
-				// CC shows the hint on file opens (even when $EDITOR handled it); folders don't.
-				hint: kind === "file" ? EDITOR_HINT : undefined,
-				ok: true,
-			});
+			finish({ ok: true });
 		});
 	});
 }

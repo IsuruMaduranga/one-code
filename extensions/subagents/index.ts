@@ -57,6 +57,7 @@ import { watchMcpTools } from "../lib/mcp-share.ts";
 import { resolveModelTier } from "../lib/model-tier.ts";
 import { type DescriptionForm, followDescriptionForm, registerVariantTool } from "../lib/tool-variants.ts";
 import { agentDescription } from "./agent-description.ts";
+import { projectConfigDirName } from "../lib/config-mode.ts";
 import { pendingClaimReminder } from "./pending-claim.ts";
 import { watchPermissionBridge } from "../permissions/subagent-gate.ts";
 import { watchHookBridge } from "../hooks/subagent-bridge.ts";
@@ -1935,7 +1936,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		...ccToolRenderers<{ subagent_type?: string; task?: string; prompt?: string; description?: string; action?: string }>("Agent", {
 			title: (a) => (a ? [a.subagent_type, a.description ?? a.task ?? a.prompt ?? a.action].filter(Boolean).join(": ") || undefined : undefined),
 		}),
-		description: agentDescription("short"),
+		description: agentDescription("short", projectConfigDirName()),
 		promptSnippet: "Delegate scoped work to a specialist agent in its own context",
 		parameters: SubagentParams,
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
@@ -2275,7 +2276,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			};
 		},
 	});
-	const setAgentForm = registerVariantTool<DescriptionForm>(pi, "short", (form) => ({ ...agentTool, description: agentDescription(form) }));
+	const setAgentForm = registerVariantTool<DescriptionForm>(pi, "short", (form) => ({ ...agentTool, description: agentDescription(form, projectConfigDirName()) }));
 	followDescriptionForm(pi, setAgentForm);
 
 	const SendMessageParams = Type.Object({

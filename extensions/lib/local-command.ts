@@ -24,8 +24,10 @@
  * event fires and handles its own built-ins (`/model`, `/name`, …) before
  * either, so there is no single interception point — every One Code local
  * command is registered through `registerLocalCommand`, which announces before
- * the handler runs, and `/model` is announced from the `model_select` event by
- * the extension that persists the choice. pi built-ins we cannot see
+ * the handler runs (or, with `reportsResult`, after it, carrying the handler's
+ * returned text as the stdout, as CC's `onDone(result)` does), and `/model` is
+ * announced from the `model_select` event by the extension that persists the
+ * choice. pi built-ins we cannot see
  * (`/compact`, `/settings`, …) stay silent. The blocks are pinned in process
  * memory, not written to the session file as CC does — a `--resume` drops them.
  */
@@ -95,8 +97,21 @@ export function announceLocalCommand(pi: ReminderEmitter, command: LocalCommand)
 type CommandOptions = { handler: (args: string, ctx: any) => Promise<void> | void } & Record<string, unknown>;
 
 /**
+ * What a local command passes: pi's options, plus `reportsResult` when its
+ * handler returns the stdout (a returned string is never silently dropped).
+ */
+type LocalCommandOptions<O extends CommandOptions> = Omit<O, "handler"> & { argumentHint?: string } & (
+		| { reportsResult: true; handler: (args: string, ctx: Parameters<O["handler"]>[1]) => Promise<string | void> | string | void }
+		| { reportsResult?: false; handler: (args: string, ctx: Parameters<O["handler"]>[1]) => Promise<void> | void }
+	);
+
+/**
  * `pi.registerCommand` for a One Code local command: the breadcrumb is
- * announced before the handler runs, so no command can forget it. `/clear`
+ * announced before the handler runs, so no command can forget it. With
+ * `reportsResult`, it is announced once the handler settles instead, its
+ * stdout the string the handler returned (CC's `onDone(result)`; "" for none
+ * or a throw). Only a command that never starts a turn of its own may opt in:
+ * a breadcrumb queued after `sendUserMessage` would miss that message. `/clear`
  * is the one exception — it announces from the NEW session's `session_start`
  * (see clear/index.ts) and registers plainly. `argumentHint` is the prompt's
  * dim placeholder for the command's argument (lib/argument-hints.ts).
@@ -104,15 +119,24 @@ type CommandOptions = { handler: (args: string, ctx: any) => Promise<void> | voi
 export function registerLocalCommand<O extends CommandOptions>(
 	pi: ReminderEmitter & HintEmitter & { registerCommand(name: string, options: O): void },
 	name: string,
-	options: O & { argumentHint?: string },
+	options: LocalCommandOptions<O>,
 ): void {
-	const { argumentHint, ...rest } = options;
+	const { argumentHint, reportsResult, ...rest } = options;
 	if (argumentHint) announceArgumentHint(pi, name, argumentHint);
 	pi.registerCommand(name, {
-		...(rest as O),
-		handler: (args: string, ctx: unknown) => {
-			announceLocalCommand(pi, { name, args });
-			return options.handler(args, ctx);
+		...(rest as unknown as O),
+		handler: async (args: string, ctx: Parameters<O["handler"]>[1]) => {
+			if (!reportsResult) {
+				announceLocalCommand(pi, { name, args });
+				await options.handler(args, ctx);
+				return;
+			}
+			let stdout = "";
+			try {
+				stdout = (await options.handler(args, ctx)) ?? "";
+			} finally {
+				announceLocalCommand(pi, { name, args, stdout });
+			}
 		},
 	});
 }

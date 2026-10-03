@@ -32,6 +32,7 @@ import {
 	discoverContextFiles,
 	discoverOneCodeFiles,
 	localDate,
+	instructionRule,
 } from "../lib/claude-context.ts";
 import { collectGitStatus, GIT_SNAPSHOT_OWNER_CHANNEL } from "../lib/git-status.ts";
 import { projectMemoryDir, truncateIndex } from "../lib/memory.ts";
@@ -100,16 +101,16 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	};
 
 	pi.on("session_start", (_event, ctx) => {
-		// The instructions block carries the CLAUDE.md family, falling back to a
-		// directory's AGENTS.md when it has no CLAUDE.md (CLAUDE.md > AGENTS.md). It
-		// stays byte-exact with Claude Code wherever CLAUDE.md is present, since
-		// AGENTS.md only fills in for a missing one. ONECODE.md rides its own
-		// higher-precedence block below.
+		// The instructions block carries the instruction files the mode and Claude
+		// Code's instructionFiles pick (lib/claude-context.ts instructionRule): by
+		// default the CLAUDE.md family, or the project's AGENTS.md files when it
+		// has no CLAUDE.md, byte-exact with Claude Code either way. ONECODE.md
+		// rides its own higher-precedence block below.
 		const instructions = buildClaudeMdBlock({
 			contextFiles: discoverContextFiles({
 				cwd: ctx.cwd,
 				homeClaudeDir: claudeConfigDir(),
-				agentsFallback: true,
+				rule: instructionRule(os.homedir()),
 				home: os.homedir(),
 			}),
 			memoryIndex: readMemoryIndex(ctx.cwd),

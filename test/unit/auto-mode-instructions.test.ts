@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadProjectInstructions } from "../../extensions/auto-mode/instructions.ts";
+import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
 
 let root: string;
 let repo: string;
@@ -26,6 +27,43 @@ afterEach(() => {
 describe("loadProjectInstructions", () => {
 	it("returns undefined when there are no instruction files", () => {
 		expect(loadProjectInstructions(repo, home)).toBeUndefined();
+	});
+
+	it("reads AGENTS.md beside CLAUDE.md in compatible mode, whatever instructionFiles picks for the agent", () => {
+		writeFileSync(join(repo, "CLAUDE.md"), "claude rule");
+		writeFileSync(join(repo, "AGENTS.md"), "never push to main");
+		const text = loadProjectInstructions(repo, home) ?? "";
+		expect(text).toContain("claude rule");
+		expect(text).toContain("never push to main");
+	});
+
+	it("reads the project's and the global ONECODE.md in both modes", () => {
+		writeFileSync(join(repo, "ONECODE.md"), "never deploy from here");
+		const state = join(root, "state");
+		mkdirSync(state, { recursive: true });
+		writeFileSync(join(state, "ONECODE.md"), "global one code rule");
+		process.env.ONECODE_STATE_DIR = state;
+		try {
+			for (const mode of ["claude-compatible", "independent"] as const) {
+				resetConfigModeForTest(mode);
+				const text = loadProjectInstructions(repo, home) ?? "";
+				expect(text).toContain("never deploy from here");
+				expect(text).toContain("global one code rule");
+			}
+		} finally {
+			delete process.env.ONECODE_STATE_DIR;
+		}
+	});
+
+	it("reads only AGENTS.md in independent mode", () => {
+		writeFileSync(join(repo, "CLAUDE.md"), "claude rule");
+		writeFileSync(join(repo, "AGENTS.md"), "agents rule");
+		writeFileSync(join(home, ".claude", "CLAUDE.md"), "global rule");
+		resetConfigModeForTest("independent");
+		const text = loadProjectInstructions(repo, home) ?? "";
+		expect(text).toContain("agents rule");
+		expect(text).not.toContain("claude rule");
+		expect(text).not.toContain("global rule");
 	});
 
 	it("reads CLAUDE.md from the working directory", () => {

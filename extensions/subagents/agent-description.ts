@@ -126,7 +126,8 @@ export const AGENT_HOW_AGENTS_RUN = `## How agents run
 - Give a complete, self-contained task: the agent cannot ask follow-up questions.
 - Each run gets a name — SendMessage reaches it live while it runs and continues it after it finishes. \`action: "list"\` re-prints the agent catalog.`;
 
-export function agentDescription(form: DescriptionForm): string {
+/** The Agent description for a form, naming the mode's agent folder (`.onecode` in independent mode, lib/config-mode.ts). */
+export function agentDescription(form: DescriptionForm, configDir = ".claude"): string {
 	const base = form === "long" ? AGENT_LONG_DESCRIPTION : AGENT_SHORT_DESCRIPTION;
-	return `${base.trimEnd()}\n\n${AGENT_HOW_AGENTS_RUN}`;
+	return `${base.trimEnd()}\n\n${AGENT_HOW_AGENTS_RUN}`.replaceAll("`.claude/agents/*.md`", `\`${configDir}/agents/*.md\``);
 }

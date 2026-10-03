@@ -14,7 +14,7 @@
 
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { claudeUserSettingsPath, readSettingsFile } from "../lib/claude-settings.ts";
@@ -24,8 +24,10 @@ import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import type { AutoModeConfig } from "./config.ts";
 import { classifierCandidates, replyText, withAuthBaseUrl } from "./model-select.ts";
 import { buildSetupPrompt, parseGitRemotes, redactSecrets, type SetupDraft, parseSetupDraft, type SetupFacts } from "./setup.ts";
-import { claudeUserDir } from "../lib/paths.ts";
+import { claudeSourcesOn } from "../lib/config-mode.ts";
+import { claudeUserDir, oneCodeStateDir } from "../lib/paths.ts";
 import { HARNESS_GIT_CONFIG } from "../lib/git.ts";
+import { firstOneCodeFile } from "../lib/claude-context.ts";
 
 const PROBE_TIMEOUT_MS = 10_000;
 /** Drafting reads a big fact dump and writes a full slot list — give it room. */
@@ -133,9 +135,10 @@ export async function gatherFacts(options: GatherOptions): Promise<SetupFacts> {
 	// the borrowed `.claude` file (read-only) and One Code's own file are gathered:
 	// a broad rule in either bypasses the classifier, and the audit later splits
 	// them (One Code's are removable; Claude Code's it can only warn about).
+	// Independent mode (lib/config-mode.ts) reads One Code's file alone.
 	const claudeUserPath = claudeUserSettingsPath(home);
 	const permissionsAllow: string[] = [];
-	for (const path of [claudeUserPath, oneCodeSettingsPath(home)]) {
+	for (const path of claudeSourcesOn() ? [claudeUserPath, oneCodeSettingsPath(home)] : [oneCodeSettingsPath(home)]) {
 		const file = readSettingsFile(path) as { permissions?: { allow?: unknown } } | undefined;
 		// Present-but-unreadable is not the same as absent (readIfPresent's rule):
 		// a malformed `.claude` file must land in notes so the drafting evidence
@@ -148,6 +151,12 @@ export async function gatherFacts(options: GatherOptions): Promise<SetupFacts> {
 		if (Array.isArray(allow)) permissionsAllow.push(...allow.filter((entry): entry is string => typeof entry === "string"));
 	}
 
+	// Independent mode (lib/config-mode.ts) reads no CLAUDE.md: the project's
+	// AGENTS.md and the global ONECODE.md stand in.
+	const instructions = claudeSourcesOn()
+		? { project: "CLAUDE.md", global: join(claudeUserDir(home), "CLAUDE.md") }
+		: { project: "AGENTS.md", global: firstOneCodeFile(oneCodeStateDir(process.env, home)) ?? undefined };
+
 	return {
 		cwd,
 		username: options.username,
@@ -158,8 +167,8 @@ export async function gatherFacts(options: GatherOptions): Promise<SetupFacts> {
 		repoVisibility,
 		repoNameWithOwner,
 		defaultBranch,
-		claudeMdProject: readIfPresent(join(gitRoot || cwd, "CLAUDE.md"), CLAUDE_MD_LIMIT, notes, "project CLAUDE.md"),
-		claudeMdGlobal: readIfPresent(join(claudeUserDir(home), "CLAUDE.md"), CLAUDE_MD_LIMIT, notes, "global CLAUDE.md"),
+		claudeMdProject: readIfPresent(join(gitRoot || cwd, instructions.project), CLAUDE_MD_LIMIT, notes, `project ${instructions.project}`),
+		claudeMdGlobal: instructions.global ? readIfPresent(instructions.global, CLAUDE_MD_LIMIT, notes, `global ${basename(instructions.global)}`) : undefined,
 		shellHistory,
 		permissionsAllow,
 		gatherNotes: notes,

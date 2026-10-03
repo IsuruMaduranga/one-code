@@ -44,11 +44,12 @@ const PROTECTED_DIRS = [
 ];
 
 /**
- * `.claude/worktrees` is where the agent keeps its own git worktrees, and
+ * `.claude/worktrees` is where the agent keeps its own git worktrees
+ * (`.onecode/worktrees` in independent mode, lib/config-mode.ts), and
  * `.onecode/plans` holds plan-mode documents (rendered to the user, never
  * executed) — ordinary working space rather than configuration.
  */
-const PROTECTED_DIR_EXCEPTIONS = [".claude/worktrees", ".onecode/plans"];
+const PROTECTED_DIR_EXCEPTIONS = [".claude/worktrees", ".onecode/worktrees", ".onecode/plans"];
 
 const PROTECTED_FILES = new Set([
 	// A `.git` FILE is a gitlink (`gitdir: <path>`): written into a subdirectory

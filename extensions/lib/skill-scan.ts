@@ -18,6 +18,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { PluginSkill } from "./plugins.ts";
 import type { SkillScope } from "./skill-overrides.ts";
+import { claudeSourcesOn, projectConfigDir, userConfigDir } from "./config-mode.ts";
 import { claudeUserDir } from "./paths.ts";
 
 /** The skill catalog shipped in this package: `<package>/skills` (Claude Code's self-contained built-in skills). */
@@ -38,6 +39,28 @@ export interface ScannedSkill {
 export function scopeForPath(path: string, home: string, agentDir: string): SkillScope {
 	if (path.startsWith(join(claudeUserDir(home), "skills")) || path.startsWith(join(agentDir, "skills"))) return "user";
 	return "project";
+}
+
+/**
+ * The skill folders One Code adds to pi's own (`<agentDir>/skills`, which pi
+ * scans itself), in load order: Claude Code's two only in Claude-compatible
+ * mode (lib/config-mode.ts), the cross-tool `.agents` pair in both. `claudeDir`
+ * defaults to `~/.claude` (`CLAUDE_CONFIG_DIR`); `~/.agents` is never moved.
+ */
+export function skillSourceDirs(cwd: string, home: string, claudeDir: string = claudeUserDir(home)): Array<{ dir: string; scope: SkillScope }> {
+	const claude = claudeSourcesOn();
+	const dirs: Array<{ dir: string; scope: SkillScope } | false> = [
+		claude && { dir: join(claudeDir, "skills"), scope: "user" },
+		{ dir: join(home, ".agents", "skills"), scope: "user" },
+		claude && { dir: join(cwd, ".claude", "skills"), scope: "project" },
+		{ dir: join(cwd, ".agents", "skills"), scope: "project" },
+	];
+	return dirs.filter((d): d is { dir: string; scope: SkillScope } => d !== false);
+}
+
+/** The prompt-template folders: `~/.claude/commands` and `.claude/commands`, or their `.onecode` twins in independent mode. */
+export function commandDirs(cwd: string, home: string, claudeDir: string = claudeUserDir(home)): string[] {
+	return [join(claudeSourcesOn() ? claudeDir : userConfigDir(home), "commands"), join(projectConfigDir(cwd), "commands")];
 }
 
 function scanDir(dir: string, scope: SkillScope, into: Map<string, ScannedSkill>): void {
@@ -65,10 +88,7 @@ export function scanSkills(
 	bundledSkillsDir?: string,
 ): ScannedSkill[] {
 	const skills = new Map<string, ScannedSkill>();
-	scanDir(join(claudeUserDir(home), "skills"), "user", skills);
-	scanDir(join(home, ".agents", "skills"), "user", skills);
-	scanDir(join(cwd, ".claude", "skills"), "project", skills);
-	scanDir(join(cwd, ".agents", "skills"), "project", skills);
+	for (const { dir, scope } of skillSourceDirs(cwd, home)) scanDir(dir, scope, skills);
 	scanDir(join(agentDir, "skills"), "user", skills);
 	if (bundledSkillsDir) scanDir(bundledSkillsDir, scopeForPath(bundledSkillsDir, home, agentDir), skills);
 	for (const skill of pluginSkills) {
@@ -80,7 +100,8 @@ export function scanSkills(
 /**
  * Names of the `.claude/commands` prompt templates (`<name>.md`) pi will expose
  * as `/<name>` — the same dirs claude-compat feeds pi (`~/.claude/commands`,
- * `<cwd>/.claude/commands`) plus pi's own `<agentDir>/prompts`. pi resolves
+ * `<cwd>/.claude/commands`, or their `.onecode` twins in independent mode)
+ * plus pi's own `<agentDir>/prompts`. pi resolves
  * templates per turn, after `session_start`, so a bare skill command registered
  * then would silently shadow a same-named template for the whole session;
  * this pre-scan lets the registration skip those names.
@@ -92,7 +113,7 @@ export function promptTemplateNames(cwd: string, home: string, agentDir: string)
 /** Every prompt-template file pi will resolve, with the command name each gives. */
 export function promptTemplateFiles(cwd: string, home: string, agentDir: string): { name: string; path: string }[] {
 	const files: { name: string; path: string }[] = [];
-	for (const dir of [join(claudeUserDir(home), "commands"), join(cwd, ".claude", "commands"), join(agentDir, "prompts")]) {
+	for (const dir of [...commandDirs(cwd, home), join(agentDir, "prompts")]) {
 		if (!existsSync(dir)) continue;
 		let entries: string[];
 		try {

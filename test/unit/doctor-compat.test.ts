@@ -1,11 +1,12 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { collectCompat, importedConfigSection, mcpSection } from "../../extensions/doctor/compat.ts";
 import { checkDependencies, projectLanguages, providerHasNativeSearch, webSearchRoute } from "../../extensions/doctor/dependencies.ts";
 import { whichOnPath } from "../../extensions/lib/which.ts";
 import { invalidatePluginsCache } from "../../extensions/lib/plugins.ts";
+import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
 import { resetHookSettingsCache } from "../../extensions/hooks/settings.ts";
 
 let home: string;
@@ -87,13 +88,21 @@ describe("collectCompat: settings files", () => {
 });
 
 describe("collectCompat: content", () => {
+	it("opens no Claude Code settings file in independent mode", () => {
+		write(join(home, ".claude", "settings.json"), "{not json");
+		resetConfigModeForTest("independent");
+		const compat = collectCompat(input());
+		expect(compat.files.map((f) => f.scope)).toEqual(["onecode-user", "onecode-project"]);
+		expect(compat.findings.some((f) => f.text.includes(".claude"))).toBe(false);
+	});
+
 	it("sizes the instruction files and warns over the 40k soft limit", () => {
 		write(join(cwd, "CLAUDE.md"), "x".repeat(41_000));
-		write(join(cwd, "sub", "AGENTS.md"), "agents");
+		write(join(cwd, "sub", "CLAUDE.local.md"), "local");
 		const compat = collectCompat({ ...input(), cwd: join(cwd, "sub") });
-		expect(compat.contextFiles.map((f) => [f.path.endsWith("CLAUDE.md") ? "CLAUDE.md" : "AGENTS.md", f.overLimit])).toEqual([
+		expect(compat.contextFiles.map((f) => [basename(f.path), f.overLimit])).toEqual([
 			["CLAUDE.md", true],
-			["AGENTS.md", false],
+			["CLAUDE.local.md", false],
 		]);
 		expect(compat.findings.some((f) => f.text.includes("over the 40.0k-char limit"))).toBe(true);
 	});

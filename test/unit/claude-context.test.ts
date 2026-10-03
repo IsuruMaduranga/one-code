@@ -233,25 +233,65 @@ describe("ONECODE.md discovery", () => {
 		expect(paths.some((p) => p.path.includes("ONECODE"))).toBe(false);
 	});
 
-	it("falls back to AGENTS.md only when a directory has no CLAUDE.md (agentsFallback)", () => {
+	it("claude-md-or-agents-md: a project with any CLAUDE.md loads no AGENTS.md (CC decides per project)", () => {
 		mkdirSync(join(root, "proj", "sub"), { recursive: true });
-		// Ancestor has CLAUDE.md (its AGENTS.md must be ignored); cwd has only AGENTS.md.
 		const ancestorClaude = write("proj/CLAUDE.md", "c\n");
 		write("proj/AGENTS.md", "ignored\n");
-		const cwdAgents = write("proj/sub/AGENTS.md", "used\n");
-		const paths = discoverContextFilePaths({
-			cwd: join(root, "proj", "sub"),
-			homeClaudeDir: join(root, "home-claude"),
-			agentsFallback: true,
-		});
-		const projectPaths = paths.filter((p) => p.path.startsWith(join(root, "proj")));
-		expect(projectPaths).toEqual([
-			{ path: ancestorClaude, descriptor: PROJECT_DESCRIPTOR },
-			{ path: cwdAgents, descriptor: AGENTS_DESCRIPTOR },
+		write("proj/sub/AGENTS.md", "also ignored\n");
+		const paths = discoverContextFilePaths({ cwd: join(root, "proj", "sub"), homeClaudeDir: join(root, "home-claude"), rule: "claude-md-or-agents-md" });
+		expect(paths.filter((p) => p.path.startsWith(join(root, "proj")))).toEqual([{ path: ancestorClaude, descriptor: PROJECT_DESCRIPTOR }]);
+	});
+
+	it("claude-md-or-agents-md: a project with no CLAUDE.md loads every AGENTS.md and .claude/AGENTS.md, keeping the global CLAUDE.md", () => {
+		mkdirSync(join(root, "proj", "sub", ".claude"), { recursive: true });
+		const global = write("home-claude/CLAUDE.md", "g\n");
+		const top = write("proj/AGENTS.md", "top\n");
+		const sub = write("proj/sub/AGENTS.md", "sub\n");
+		const dotClaude = write("proj/sub/.claude/AGENTS.md", "dot\n");
+		const paths = discoverContextFilePaths({ cwd: join(root, "proj", "sub"), homeClaudeDir: join(root, "home-claude"), rule: "claude-md-or-agents-md" });
+		expect(paths).toEqual([
+			expect.objectContaining({ path: global }),
+			{ path: top, descriptor: AGENTS_DESCRIPTOR },
+			{ path: sub, descriptor: AGENTS_DESCRIPTOR },
+			{ path: dotClaude, descriptor: AGENTS_DESCRIPTOR },
 		]);
 	});
 
-	it("never lists AGENTS.md without agentsFallback set", () => {
+	it("claude-md-and-agents-md: AGENTS.md loads beside CLAUDE.md, skipping one CLAUDE.md imports or repeats", () => {
+		mkdirSync(join(root, "proj", "sub"), { recursive: true });
+		write("proj/CLAUDE.md", "@AGENTS.md\n");
+		write("proj/AGENTS.md", "imported\n");
+		write("proj/sub/CLAUDE.md", "same\n");
+		write("proj/sub/AGENTS.md", "same\n");
+		const opts = { cwd: join(root, "proj", "sub"), homeClaudeDir: join(root, "home-claude"), rule: "claude-md-and-agents-md" as const };
+		expect(discoverContextFilePaths(opts).filter((p) => p.descriptor === AGENTS_DESCRIPTOR)).toHaveLength(2);
+		const files = discoverContextFiles({ ...opts, home: root });
+		expect(files.filter((f) => f.descriptor === AGENTS_DESCRIPTOR)).toEqual([]);
+	});
+
+	it("managed-only drops the user's and the project's files", () => {
+		write("home-claude/CLAUDE.md", "g\n");
+		write("proj/CLAUDE.md", "p\n");
+		write("proj/AGENTS.md", "a\n");
+		expect(discoverContextFilePaths({ cwd: join(root, "proj"), homeClaudeDir: join(root, "home-claude"), rule: "managed-only" })).toEqual([]);
+	});
+
+	it("agents-md (independent mode) reads every AGENTS.md and no Claude Code file", () => {
+		mkdirSync(join(root, "proj", ".claude"), { recursive: true });
+		write("home-claude/CLAUDE.md", "g\n");
+		write("proj/CLAUDE.md", "p\n");
+		write("proj/CLAUDE.local.md", "l\n");
+		write("proj/.claude/AGENTS.md", "dot\n");
+		const agents = write("proj/AGENTS.md", "a\n");
+		const oneCode = write("proj/ONECODE.md", "o\n");
+		const paths = discoverContextFilePaths({ cwd: join(root, "proj"), homeClaudeDir: join(root, "home-claude"), homeOneCodeDir: join(root, "home-onecode"), rule: "agents-md" });
+		expect(paths).toEqual([
+			{ path: agents, descriptor: AGENTS_DESCRIPTOR },
+			{ path: oneCode, descriptor: ONECODE_DESCRIPTOR },
+		]);
+	});
+
+	it("never lists AGENTS.md under claude-md, the default rule", () => {
 		mkdirSync(join(root, "proj"), { recursive: true });
 		write("proj/AGENTS.md", "a\n");
 		const paths = discoverContextFilePaths({ cwd: join(root, "proj"), homeClaudeDir: join(root, "home-claude") });

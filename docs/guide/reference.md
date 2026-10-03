@@ -42,7 +42,7 @@ that explains it.
 | `/auto-mode setup` | Draft and save an auto-mode configuration for this environment. | |
 | `/auto-mode defaults` | Show the built-in environment description. | |
 | `/auto-mode model [provider/model-id\|clear]` | Choose or clear the classifier model. | |
-| `/memory` | Open an instruction file or the memory folder. | [Memory](sessions-and-context.md#memory) |
+| `/memory` | Open an instruction file or the memory folder, or switch config sources. | [Memory](sessions-and-context.md#memory) |
 | `/artifacts` | Pick a saved artifact to open, save to `~/Downloads`, or delete, or open the gallery. | [Artifacts](tools.md#artifacts) |
 | `/tasks` | List background shells, running agents and the agents you've viewed; open or stop one. | [Talk to an agent](subagents-and-workflows.md#talk-to-an-agent) |
 | `/background` | List background tasks. | [Background](tasks-and-background-work.md#the-background-list) |
@@ -203,6 +203,7 @@ The `CC_` prefix is historical; `ONECODE_`-prefixed aliases are planned.
 | `PI_CACHE_RETENTION` | pi's prompt-cache lifetime. One Code sets `long` for interactive sessions unless you set it yourself. |
 | `PI_OFFLINE=1` | Same as `--offline`. |
 | `CLAUDE_CONFIG_DIR` | Where Claude Code's user configuration is read from. |
+| `ONECODE_CONFIG_MODE` | `claude-compatible` or `independent`, overriding the mode saved by `/memory`. See [Run One Code on its own setup](bring-your-claude-code-setup.md#run-one-code-on-its-own-setup). |
 | `CLAUDE_CODE_USE_POWERSHELL_TOOL` | `1` turns the `powershell` tool on (the default on Windows), `0` turns it off. Off Windows it needs a `pwsh` on PATH. See [Windows](windows.md). |
 | `CLAUDE_CODE_GIT_BASH_PATH` | The bash that drives the `bash` tool, hooks, and background shells. Also read from the `env` block of `~/.claude/settings.json`; a non-bash binary is ignored with a warning. |
 | `CLAUDE_CODE_SUBAGENT_MODEL` | Default subagent model on a Claude session. |
@@ -219,8 +220,10 @@ hook's environment, `CC_PERMISSION_MODE` for child tool gates.
 |---|---|
 | `~/.onecode/` | One Code's state. See [What is stored under ~/.onecode](configuration.md#what-is-stored-under-onecode). |
 | `~/.onecode/agent/` | pi's state under the bundled app: credentials, sessions, pi's settings, plugins. |
-| `~/.claude/` | Claude Code's configuration, read only, except `projects/<slug>/memory/`. |
+| `~/.claude/` | Claude Code's configuration, read only, except `projects/<slug>/memory/`. Not read in independent mode. |
 | `~/.claude/projects/<slug>/memory/` | Per-repository memory, shared with Claude Code. |
+| `~/.onecode/projects/<slug>/memory/` | Per-repository memory in independent mode. |
+| `.onecode/` | Project `commands/`, `agents/`, `workflows/` and `worktrees/` in independent mode. |
 | `.claude/` | Project configuration: `settings.json`, `settings.local.json`, `skills/`, `commands/`, `agents/`, `workflows/`, `worktrees/`. |
 | `.mcp.json` | Project MCP servers. |
 | `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `ONECODE.md` | Instruction files. |

@@ -115,6 +115,7 @@ import { findProjectRoot } from "../lib/git.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
 import { announceLocalCommand, registerLocalCommand } from "../lib/local-command.ts";
+import { claudeSourcesOn } from "../lib/config-mode.ts";
 import { claudeJsonPath, tildify, tryRealpath } from "../lib/paths.ts";
 import { openPermissionsPanel, type PermissionsPanelHost } from "./panel/host.ts";
 import {
@@ -1044,7 +1045,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	 */
 	const firstOutsideRead = (ctx: ExtensionContext, toolName: string, path: string): Promise<"allow" | "block" | "ask_again"> => {
 		const home = os.homedir();
-		const settled = () => (outsideReadSeen ??= outsideReadPromptSeen(oneCodeSettingsPath(home), claudeJsonPath(home)));
+		const settled = () => (outsideReadSeen ??= outsideReadPromptSeen(oneCodeSettingsPath(home), claudeSourcesOn() ? claudeJsonPath(home) : undefined));
 		if (!ctx.hasUI) return Promise.resolve("allow");
 		// Settled while this call waited (a parallel read's Block included).
 		if (settled()) return Promise.resolve(blockOutsideReads ? "block" : "allow");
@@ -2245,7 +2246,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// must appear in both lists (removing the One Code copy alone would leave the
 		// exposure and a false "fixed" impression).
 		const oneCodeAllow = new Set(oneCodePermissionAllow(os.homedir()));
-		const claudeAllow = new Set(claudeUserPermissionAllow(os.homedir()));
+		// Independent mode reads no ~/.claude rule, so none of them is in force.
+		const claudeAllow = new Set(claudeSourcesOn() ? claudeUserPermissionAllow(os.homedir()) : []);
 		const removable = flagged.filter((entry) => oneCodeAllow.has(entry.rule));
 		const claudeSide = flagged.filter((entry) => claudeAllow.has(entry.rule));
 

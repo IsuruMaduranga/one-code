@@ -2,7 +2,8 @@
  * worktree extension — Claude Code's EnterWorktree/ExitWorktree.
  *
  * enter_worktree creates (or switches into) a git worktree under
- * `.claude/worktrees/` and "moves" the session there. pi fixes a session's cwd
+ * `.claude/worktrees/` (`.onecode/worktrees/` in independent mode) and "moves"
+ * the session there. pi fixes a session's cwd
  * at creation, so the move is enforced on the tool_call hook: bash commands
  * are prefixed with `cd`, relative paths resolve against the worktree (see
  * rewrite.ts), and an every-turn reminder keeps the model oriented. State
@@ -25,10 +26,11 @@ import { worktreeBashGuardReason } from "./guards.ts";
 import { worktreePowershellGuardReason } from "./powershell-guards.ts";
 import { bashParserReady } from "../lib/bash-parser.ts";
 import { ORIGINAL_COMMAND_CHANNEL, type OriginalCommandRecord } from "../lib/original-command.ts";
-import { ENTER_WORKTREE_DESCRIPTION, ENTER_WORKTREE_PARAMS, EXIT_WORKTREE_DESCRIPTION, EXIT_WORKTREE_PARAMS } from "./descriptions.ts";
+import { enterWorktreeDescription, ENTER_WORKTREE_PARAMS, EXIT_WORKTREE_DESCRIPTION, EXIT_WORKTREE_PARAMS } from "./descriptions.ts";
 import { rewriteToolInput, validateWorktreeName } from "./rewrite.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 import { HARNESS_GIT_CONFIG } from "../lib/git.ts";
+import { projectConfigDir, projectConfigDirName } from "../lib/config-mode.ts";
 
 const run = promisify(execFile);
 const REMINDER_KEY = "cc-worktree-session";
@@ -132,7 +134,7 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 		name: "enter_worktree",
 		label: "Enter Worktree",
 		...ccToolRenderers("Enter Worktree"),
-		description: ENTER_WORKTREE_DESCRIPTION,
+		description: enterWorktreeDescription(projectConfigDirName()),
 		parameters: Type.Object({
 			name: Type.Optional(Type.String({ description: ENTER_WORKTREE_PARAMS.name })),
 			path: Type.Optional(Type.String({ description: ENTER_WORKTREE_PARAMS.path })),
@@ -189,7 +191,8 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 			const nameError = validateWorktreeName(name);
 			if (nameError) return fail(`Invalid worktree name "${name}": ${nameError}`);
 
-			const worktreesDir = join(repoRoot, ".claude", "worktrees");
+			// `.onecode/worktrees` in independent mode (lib/config-mode.ts).
+			const worktreesDir = join(projectConfigDir(repoRoot), "worktrees");
 			mkdirSync(worktreesDir, { recursive: true });
 			// Self-ignoring directory: worktrees never show up as untracked files.
 			const ignorePath = join(worktreesDir, ".gitignore");

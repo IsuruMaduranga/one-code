@@ -3,7 +3,10 @@
  *
  * Claude Code's classifier reads the same CLAUDE.md the agent does, so an
  * instruction like "never force push" steers both at once. This collects the
- * same files: cwd upward to the git root, plus the user's global file.
+ * same files: cwd upward to the git root, plus the user's global file. It
+ * reads every file any `instructionFiles` value could load, whatever the rule,
+ * plus the ONECODE.md files, since an instruction here can only tighten. In
+ * independent mode only AGENTS.md and ONECODE.md files load.
  *
  * These files are checked in, so they are untrusted input in a way the user's
  * own messages are not — the classifier prompt tells the model they may tighten
@@ -13,9 +16,11 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { claudeUserDir } from "../lib/paths.ts";
+import { firstOneCodeFile } from "../lib/claude-context.ts";
+import { claudeSourcesOn } from "../lib/config-mode.ts";
+import { findGitRoot } from "../lib/git.ts";
+import { claudeUserDir, oneCodeStateDir } from "../lib/paths.ts";
 
-const FILE_NAMES = ["CLAUDE.md", "CLAUDE.local.md", "AGENTS.md"];
 
 /** Per-file and total caps, so a large instruction file cannot crowd out rules. */
 const PER_FILE_LIMIT = 6_000;
@@ -32,22 +37,22 @@ function readCapped(path: string): string | undefined {
 	}
 }
 
-function findGitRoot(from: string): string | undefined {
-	let dir = from;
-	for (;;) {
-		if (existsSync(join(dir, ".git"))) return dir;
-		const parent = dirname(dir);
-		if (parent === dir) return undefined;
-		dir = parent;
-	}
-}
+/**
+ * Every instruction file a directory may hold, for the classifier: the union of
+ * what any `instructionFiles` value could load, since an instruction here can
+ * only tighten. Independent mode (lib/config-mode.ts) reads no Claude Code file.
+ */
+const CLAUDE_COMPATIBLE_NAMES = ["CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", join(".claude", "AGENTS.md")];
+const INDEPENDENT_NAMES = ["AGENTS.md"];
 
 /**
- * Concatenated instruction files, nearest first, or undefined when there are
- * none. Each is labelled with its path so the classifier can tell project
- * convention from user-global preference.
+ * Concatenated instruction files, nearest first, the user's global file last,
+ * or undefined when there are none. Each is labelled with its path so the
+ * classifier can tell project convention from user-global preference.
  */
 export function loadProjectInstructions(cwd: string, home: string): string | undefined {
+	const claude = claudeSourcesOn();
+	const names = claude ? CLAUDE_COMPATIBLE_NAMES : INDEPENDENT_NAMES;
 	const stop = findGitRoot(cwd) ?? cwd;
 	const parts: string[] = [];
 	let total = 0;
@@ -63,13 +68,18 @@ export function loadProjectInstructions(cwd: string, home: string): string | und
 
 	let dir = cwd;
 	for (;;) {
-		for (const name of FILE_NAMES) add(join(dir, name));
+		for (const name of names) add(join(dir, name));
+		// The agent's ONECODE.md, which outranks the files above, in both modes.
+		const oneCode = firstOneCodeFile(dir);
+		if (oneCode) add(oneCode);
 		if (dir === stop) break;
 		const parent = dirname(dir);
 		if (parent === dir) break;
 		dir = parent;
 	}
-	add(join(claudeUserDir(home), "CLAUDE.md"));
+	if (claude) add(join(claudeUserDir(home), "CLAUDE.md"));
+	const globalOneCode = firstOneCodeFile(oneCodeStateDir(process.env, home));
+	if (globalOneCode) add(globalOneCode);
 
 	return parts.length > 0 ? parts.join("\n\n") : undefined;
 }

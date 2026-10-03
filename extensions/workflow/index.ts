@@ -8,7 +8,8 @@
  * and the result arrives later as a follow-up message. Scripts and per-call
  * journals persist under the session dir, so `resumeFromRunId` replays the
  * unchanged prefix of an edited or interrupted run. Saved workflows live in
- * `.claude/workflows/` (project) and `~/.claude/workflows/` (user).
+ * `.claude/workflows/` (project) and `~/.claude/workflows/` (user), or their
+ * `.onecode` twins in independent mode (lib/config-mode.ts).
  *
  * The description is Claude Code's (description.ts); the authoring reference
  * it points to is the bundled `workflow-authoring` skill. `enableWorkflows`,
@@ -68,6 +69,7 @@ import { registerLocalCommand } from "../lib/local-command.ts";
 import { sessionWorkCwd } from "../lib/worktree-channel.ts";
 import { followEnteredWorktree } from "../lib/worktree-isolation.ts";
 import { isKeyRelease, keyId } from "../lib/key-input.ts";
+import { projectConfigDirName } from "../lib/config-mode.ts";
 
 /**
  * Claude Code's own arming reminder, verbatim in intent: the keyword is a
@@ -87,7 +89,7 @@ const WorkflowParams = Type.Object({
 		}),
 	),
 	name: Type.Optional(
-		Type.String({ description: "Name of a saved workflow from .claude/workflows/ or ~/.claude/workflows/. Resolves to a self-contained script." }),
+		Type.String({ description: `Name of a saved workflow from ${projectConfigDirName()}/workflows/ or ~/${projectConfigDirName()}/workflows/. Resolves to a self-contained script.` }),
 	),
 	args: Type.Optional(
 		Type.Any({
@@ -381,7 +383,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 				lines.push("Saved workflows:");
 				for (const w of saved) lines.push(`  ${w.name} (${w.source}) — ${w.meta?.description ?? w.path}`);
 			}
-			if (!lines.length) lines.push("No workflow runs yet and no saved workflows found (.claude/workflows/).");
+			if (!lines.length) lines.push(`No workflow runs yet and no saved workflows found (${projectConfigDirName()}/workflows/).`);
 			lines.push("Usage: /workflows [stop <runId> | log <runId>]");
 			ctx.ui.notify(lines.join("\n"), "info");
 		},

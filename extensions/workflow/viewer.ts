@@ -15,6 +15,7 @@ import { cutPlainText as cut, formatDuration, padPlainText, splitCell, splitRow,
 import { formatTokenCount } from "../subagents/usage.ts";
 import type { AgentRecord, RunStatus } from "./types.ts";
 import { keyId, keyText } from "../lib/key-input.ts";
+import { projectConfigDirName } from "../lib/config-mode.ts";
 
 /** Theme access the renderer needs: fg tokens ("accent", "dim", "error", …) and bold. */
 export interface ViewerPaint {
@@ -140,7 +141,7 @@ export function planSave(input: {
 	sameContent: boolean;
 	confirmed: boolean;
 }): { action: "write" | "confirm" | "noop"; notice: string } {
-	const target = `.claude/workflows/${input.name}.js`;
+	const target = `${projectConfigDirName()}/workflows/${input.name}.js`;
 	if (!input.exists || input.sameContent) return { action: "write", notice: `saved to ${target}` };
 	if (input.confirmed) return { action: "write", notice: `overwrote ${target}` };
 	return { action: "confirm", notice: `${target} exists and differs — press s again to overwrite` };

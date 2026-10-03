@@ -10,7 +10,9 @@
  * clearing on exit. Tool names are One Code's.
  */
 
-export const ENTER_WORKTREE_DESCRIPTION = `Use this tool ONLY when explicitly instructed to work in a worktree — either by the user directly, or by project instructions (CLAUDE.md / memory). This tool creates an isolated git worktree and switches the current session into it.
+/** Claude Code's EnterWorktree description, naming the mode's config directory (`.onecode` in independent mode, lib/config-mode.ts). */
+export function enterWorktreeDescription(configDir = ".claude"): string {
+	return `Use this tool ONLY when explicitly instructed to work in a worktree — either by the user directly, or by project instructions (CLAUDE.md / memory). This tool creates an isolated git worktree and switches the current session into it.
 
 ## When to Use
 
@@ -30,7 +32,7 @@ export const ENTER_WORKTREE_DESCRIPTION = `Use this tool ONLY when explicitly in
 
 ## Behavior
 
-- In a git repository: creates a new git worktree inside \`.claude/worktrees/\` on a new branch from your current local HEAD
+- In a git repository: creates a new git worktree inside \`${configDir}/worktrees/\` on a new branch from your current local HEAD
 - Switches the session's working directory to the new worktree
 - Use exit_worktree to leave the worktree mid-session (keep or remove)
 
@@ -45,6 +47,9 @@ Switching with \`path\` also works when the session is already in a worktree (th
 - \`name\` (optional): A name for a new worktree. If neither \`name\` nor \`path\` is provided, a random name is generated.
 - \`path\` (optional): Path to an existing worktree of the current repository to enter instead of creating one. Mutually exclusive with \`name\`.
 `;
+}
+
+export const ENTER_WORKTREE_DESCRIPTION = enterWorktreeDescription();
 
 export const EXIT_WORKTREE_DESCRIPTION = `Exit a worktree session created by enter_worktree and return the session to the original working directory.
 

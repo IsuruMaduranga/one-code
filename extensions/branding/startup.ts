@@ -13,10 +13,13 @@
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { basename, dirname, join, relative } from "node:path";
-import { findGitRoot } from "../lib/git.ts";
+import { basename, join, relative } from "node:path";
+import os from "node:os";
+import { projectInstructionFiles } from "../lib/claude-context.ts";
+import { projectConfigDir, userConfigDir } from "../lib/config-mode.ts";
+import { scanSkills } from "../lib/skill-scan.ts";
 import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
-import { claudeUserDir } from "../lib/paths.ts";
+import { oneCodeStateDir } from "../lib/paths.ts";
 
 export interface StartupSection {
 	label: string;
@@ -25,69 +28,28 @@ export interface StartupSection {
 
 /**
  * The project context files One Code actually gathers, from cwd up to the git
- * root (or just cwd outside a repo), for the startup banner. Mirrors what the
- * blocks send: a directory's CLAUDE.md, or its AGENTS.md when it has no CLAUDE.md
- * (CLAUDE.md > AGENTS.md), plus CLAUDE.local.md and ONECODE.md when present — so
- * AGENTS.md is listed only when it's really in play, not whenever it exists.
+ * root (or just cwd outside a repo), nearest directory first, for the startup
+ * banner. The same discovery and rule the blocks use (lib/claude-context.ts),
+ * so an AGENTS.md is listed only when it is really in play.
  */
-export function contextFileNames(cwd: string): string[] {
-	const stop = findGitRoot(cwd) ?? cwd;
-	const found: string[] = [];
-	let dir = cwd;
-	while (true) {
-		const rel = (name: string) => relative(cwd, join(dir, name)) || name;
-		const present = (name: string) => existsSync(join(dir, name));
-		// CLAUDE.md is primary; AGENTS.md stands in only when there is no CLAUDE.md.
-		if (present("CLAUDE.md")) found.push(rel("CLAUDE.md"));
-		else if (present("AGENTS.md")) found.push(rel("AGENTS.md"));
-		if (present("CLAUDE.local.md")) found.push(rel("CLAUDE.local.md"));
-		for (const name of ["ONECODE.md", "onecode.md", "One Code.md"]) {
-			if (present(name)) {
-				found.push(rel(name));
-				break;
-			}
-		}
-		if (dir === stop) break;
-		const parent = dirname(dir);
-		if (parent === dir) break;
-		dir = parent;
-	}
-	return found;
+export function contextFileNames(cwd: string, home: string = os.homedir()): string[] {
+	return projectInstructionFiles({ cwd, home, homeOneCodeDir: oneCodeStateDir(process.env, home) }).map((path) => relative(cwd, path) || basename(path));
 }
 
 /**
- * Skills across the same sources our extensions feed to pi: project/user
- * Claude Code dirs, pi's own user dir, and installed plugins. An entry counts
- * when <dir>/<name>/SKILL.md exists — existsSync follows symlinked skill
- * directories, which readdir's isDirectory() would miss.
+ * Skills across the same sources our extensions feed to pi (lib/skill-scan.ts
+ * scanSkills: the mode's skill folders, pi's own user dir, installed plugins),
+ * each name once.
  */
 export function skillNames(cwd: string, home: string, agentDir: string): string[] {
-	const dirs = [
-		join(cwd, ".claude", "skills"),
-		join(claudeUserDir(home), "skills"),
-		join(agentDir, "skills"),
-	];
-	const names = new Set<string>();
-	for (const dir of dirs) {
-		if (!existsSync(dir)) continue;
-		try {
-			for (const entry of readdirSync(dir)) {
-				if (existsSync(join(dir, entry, "SKILL.md"))) names.add(entry);
-			}
-		} catch {
-			// Unreadable dir: skip, same as pi would.
-		}
-	}
-	for (const skill of discoverPlugins(defaultDiscoverRoots(agentDir, cwd, home)).skills) {
-		names.add(skill.name);
-	}
-	return [...names].sort((a, b) => a.localeCompare(b));
+	const plugins = discoverPlugins(defaultDiscoverRoots(agentDir, cwd, home)).skills;
+	return [...new Set(scanSkills(cwd, home, agentDir, plugins).map((skill) => skill.name))].sort((a, b) => a.localeCompare(b));
 }
 
-/** Saved workflow names from the Claude Code layout dirs (project shadows user). */
+/** Saved workflow names from the mode's workflow dirs (project shadows user). */
 export function workflowNames(cwd: string, home: string): string[] {
 	const names = new Set<string>();
-	for (const dir of [join(cwd, ".claude", "workflows"), join(claudeUserDir(home), "workflows")]) {
+	for (const dir of [join(projectConfigDir(cwd), "workflows"), join(userConfigDir(home), "workflows")]) {
 		if (!existsSync(dir)) continue;
 		try {
 			for (const entry of readdirSync(dir)) {
@@ -162,7 +124,7 @@ export function quietStartupEnabled(piSettingsPath: string): boolean {
 
 export function collectStartupSections(cwd: string, home: string, packageThemesDir: string, agentDir: string): StartupSection[] {
 	const sections: StartupSection[] = [
-		{ label: "context", items: contextFileNames(cwd) },
+		{ label: "context", items: contextFileNames(cwd, home) },
 		{ label: "skills", items: skillNames(cwd, home, agentDir) },
 		{ label: "workflows", items: workflowNames(cwd, home) },
 		{ label: "themes", items: themeNames(packageThemesDir) },
