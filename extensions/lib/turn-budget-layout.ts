@@ -71,6 +71,8 @@ export interface TurnBudgetOptions {
 	left: ReadonlyMap<string, number>;
 	/** Send Claude Code's `clear_at` nudge after a tool result's budget message (first-party Fable). */
 	nudge?: boolean;
+	/** False when the budget is off: no prompt carries a marker, so a user's own tag stays text. */
+	markers?: boolean;
 }
 
 /** The call ids a wire message answers: Anthropic `tool_result` blocks, an OpenAI output item or tool message. */
@@ -95,9 +97,11 @@ export function withTurnBudgetMessages(payload: Record<string, unknown>, opts: T
 		let message = messages[i] as WireMessage;
 		const after: WireMessage[] = [];
 		// A later prompt's marker: a system message after it, or the framed block before its text.
-		if (message?.role === "user" && Array.isArray(message.content)) {
+		// The marker comes after the user's text, so the last match is it: a
+		// prompt that is itself such a tag stays the user's.
+		if (opts.markers !== false && message?.role === "user" && Array.isArray(message.content)) {
 			const parts = message.content as WirePart[];
-			const at = parts.findIndex((part) => typeof part?.text === "string" && LINE.test(part.text));
+			const at = parts.findLastIndex((part) => typeof part?.text === "string" && LINE.test(part.text));
 			// The marker ends the message, so it carries pi's cache mark; withoutParts keeps it.
 			const rest = at === -1 ? undefined : withoutParts(parts, (_, index) => index === at);
 			if (rest) {

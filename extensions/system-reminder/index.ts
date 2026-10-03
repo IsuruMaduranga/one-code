@@ -141,7 +141,8 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 		// gets its clear_at nudge after each tool result.
 		const firstParty = model.provider === "anthropic";
 		const nudge = layout === "anthropic" && firstParty && claudeFamily(model.id) === "fable";
-		payload = withTurnBudgetMessages(payload, { shape, systemRole: layout !== undefined, role, left: countdowns, nudge }) ?? payload;
+		const markers = process.env.CC_TOTAL_TOKENS !== "0";
+		payload = withTurnBudgetMessages(payload, { shape, systemRole: layout !== undefined, role, left: countdowns, nudge, markers }) ?? payload;
 		if (payload === event.payload) return undefined;
 		if (shape === "anthropic") {
 			const key = messagesKey(shape);

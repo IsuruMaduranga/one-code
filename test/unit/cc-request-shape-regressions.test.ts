@@ -79,3 +79,12 @@ describe("a fork's hand-back reminder", () => {
 		expect(texts[0].startsWith(`${SUBAGENT_HANDBACK_LOAD_FIRST}\n`)).toBe(true);
 	});
 });
+
+describe("a user's own <total_tokens> text", () => {
+	it("stays the user's: the marker is the last match, and with the budget off nothing is taken", () => {
+		const body = () => ({ messages: [{ role: "user", content: [{ type: "text", text: BUDGET }, { type: "text", text: BUDGET }] }] });
+		const out = withTurnBudgetMessages(body(), { shape: "anthropic", systemRole: true, role: "system", left: new Map() }) as { messages: Array<{ content: unknown[] }> };
+		expect(out.messages[0].content).toEqual([{ type: "text", text: BUDGET }]);
+		expect(withTurnBudgetMessages({ messages: [{ role: "user", content: [{ type: "text", text: BUDGET }] }] }, { shape: "anthropic", systemRole: true, role: "system", left: new Map(), markers: false })).toBeUndefined();
+	});
+});
