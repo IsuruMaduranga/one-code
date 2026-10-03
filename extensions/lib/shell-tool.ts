@@ -20,6 +20,7 @@ import { type BashFinishSummary, runBackgroundBashBlocking, startBackgroundBash,
 import { createTaskNotifier, oneShotNote, sessionOutlivesTurn, shellSummary, type TaskStatus, taskNotification } from "./notifications.ts";
 import { commandToEvaluate, trackOriginalCommands } from "./original-command.ts";
 import { persistIfLarge, sessionResultsDir } from "./persisted-output.ts";
+import { withClaudeCodeShellText } from "./shell-result.ts";
 import type { ShellSpawn } from "./shell-spawn.ts";
 import { keepSpillReadable } from "./spill-file.ts";
 import { ccWrapBuiltinRenderers, linesComponent, resultLines } from "./tui-render.ts";
@@ -193,10 +194,12 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 			if (!params.run_in_background) {
 				// pi spills a long output to os.tmpdir(), outside every readable root;
 				// move it where the model's read of it is a working-space read.
-				return keepSpillReadable(
+				// Then Claude Code's result text (`Exit code N` first, trimmed output).
+				const result = await keepSpillReadable(
 					() => spec.foreground(ctx.cwd).execute(toolCallId, { command: params.command, timeout: timeoutSeconds }, signal, onUpdate, ctx),
 					sessionResultsDir(ctx),
 				);
+				return withClaudeCodeShellText(result, spec.name);
 			}
 
 			const shell = spec.backgroundShell();

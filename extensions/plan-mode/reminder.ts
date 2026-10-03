@@ -1,30 +1,98 @@
 /**
- * Plan-mode reminder text (pure). Byte-identical for a given plan-file path,
- * whether or not the file exists yet: the block is a sticky-append reminder
- * carried by every user message since plan mode came on, and the queue keeps
- * that anchor only while the re-emitted text is unchanged. A text that flipped
- * when the file appeared re-anchored the block and re-cached every message
- * between entering plan mode and the first write (CACHE-REVIEW-2026-09-04 M2).
+ * Plan-mode reminder text (pure): Claude Code's plan-mode instructions, the
+ * five-phase workflow, with One Code's tool and agent names. The block is a
+ * sticky-append reminder carried by every user message since plan mode came
+ * on, and the queue keeps that anchor only while the re-emitted text is
+ * unchanged, so the text must not flip while the mode lasts: a text that
+ * flipped when the file appeared re-anchored the block and re-cached every
+ * message between entering plan mode and the first write
+ * (CACHE-REVIEW-2026-09-04 M2). Claude Code's own "Plan File Info" line
+ * depends on whether the plan file exists; the caller decides that once, when
+ * plan mode comes on (`planExists`), and keeps it until the mode ends.
  *
- * Adapted from Claude Code's plan-mode system message: the plan lives in a
- * file the model builds incrementally — the one writable path in plan mode —
- * and exit_plan_mode reads that file rather than taking the plan as a
- * parameter. Claude Code's own text does vary with the file's existence; ours
- * folds both states into one sentence so the cached prefix survives.
+ * Claude Code puts this text in a system message on the models that take one
+ * and in a reminder elsewhere; One Code delivers it through the reminder
+ * queue's plan-mode placement either way.
  */
 
-export function buildPlanModeReminder(filePath: string): string {
-	const fileLine = `Build your plan at ${filePath} with the write/edit tools — create it if it does not exist yet, then edit it incrementally rather than rewriting it from scratch. Do not present the plan as chat text.`;
+/** Claude Code's "Plan File Info" line, for a plan file that exists or not yet. */
+export function planFileInfo(filePath: string, planExists: boolean): string {
+	return planExists
+		? `A plan file already exists at ${filePath}. You can read it and make incremental edits using the edit tool.`
+		: `No plan file exists yet. You should create your plan at ${filePath} using the write tool.`;
+}
+
+export function buildPlanModeReminder(filePath: string, planExists = false): string {
+	const fileInfo = planFileInfo(filePath, planExists);
 	return [
-		`Plan mode is active. You may only use read-only tools; edit and write are blocked everywhere except one file. ${fileLine}`,
+		"Plan mode is active. The user indicated that they do not want you to execute yet -- you MUST NOT make any edits (with the exception of the plan file mentioned below), run any non-readonly tools (including changing configs or making commits), or otherwise make any changes to the system. This supercedes any other instructions you have received.",
 		"",
-		"Workflow:",
-		'1. Explore: delegate broad reconnaissance to the `Agent` tool with `subagent_type: "explore"` (up to 3 in parallel) rather than reading everything yourself.',
-		'2. Design: delegate the implementation strategy to the `Agent` tool with `subagent_type: "plan"` once exploration has mapped the ground.',
-		"3. Review the critical files yourself, and call `ask_user_question` for any decision you cannot make on the user's behalf.",
-		`4. Write the final plan to ${filePath}: a Context section explaining why, your recommended approach (not several options), the critical files named, existing utilities to reuse, and a verification section.`,
-		"5. Call `exit_plan_mode` to ask the user to approve the plan. It reads the plan file directly — you do not pass the plan as a parameter. If `exit_plan_mode` is not in your active tools, load it first with tool_search (`select:exit_plan_mode`).",
+		"## Plan File Info:",
+		fileInfo,
+		"You should build your plan incrementally by writing to or editing this file. NOTE that this is the only file you are allowed to edit - other than this you are only allowed to take READ-ONLY actions.",
 		"",
-		"End every plan-mode turn with either `ask_user_question` or `exit_plan_mode`. Never ask for plan approval in chat text.",
+		"## Plan Workflow",
+		"",
+		"### Phase 1: Initial Understanding",
+		"Goal: Gain a comprehensive understanding of the user's request by reading through code and asking them questions. Critical: In this phase you should only use the explore subagent type.",
+		"",
+		"1. Focus on understanding the user's request and the code associated with their request. Actively search for existing functions, utilities, and patterns that can be reused — avoid proposing new code when suitable implementations already exist.",
+		"",
+		"2. **Launch up to 3 explore agents IN PARALLEL** (single message, multiple tool calls) to efficiently explore the codebase.",
+		"   - Use 1 agent when the task is isolated to known files, the user provided specific file paths, or you're making a small targeted change.",
+		"   - Use multiple agents when: the scope is uncertain, multiple areas of the codebase are involved, or you need to understand existing patterns before planning.",
+		"   - Quality over quantity - 3 agents maximum, but you should try to use the minimum number of agents necessary (usually just 1)",
+		"   - If using multiple agents: Provide each agent with a specific search focus or area to explore. Example: One agent searches for existing implementations, another explores related components, a third investigating testing patterns",
+		"",
+		"### Phase 2: Design",
+		"Goal: Design an implementation approach.",
+		"",
+		"Launch plan agent(s) to design the implementation based on the user's intent and your exploration results from Phase 1.",
+		"",
+		"You can launch up to 3 agent(s) in parallel.",
+		"",
+		"**Guidelines:**",
+		"- **Default**: Launch at least 1 plan agent for most tasks - it helps validate your understanding and consider alternatives",
+		"- **Skip agents**: Only for truly trivial tasks (typo fixes, single-line changes, simple renames)",
+		"- **Multiple agents**: Use up to 3 agents for complex tasks that benefit from different perspectives",
+		"",
+		"Examples of when to use multiple agents:",
+		"- The task touches multiple parts of the codebase",
+		"- It's a large refactor or architectural change",
+		"- There are many edge cases to consider",
+		"- You'd benefit from exploring different approaches",
+		"",
+		"Example perspectives by task type:",
+		"- New feature: simplicity vs performance vs maintainability",
+		"- Bug fix: root cause vs workaround vs prevention",
+		"- Refactoring: minimal change vs clean architecture",
+		"",
+		"In the agent prompt:",
+		"- Provide comprehensive background context from Phase 1 exploration including filenames and code path traces",
+		"- Describe requirements and constraints",
+		"- Request a detailed implementation plan",
+		"",
+		"### Phase 3: Review",
+		"Goal: Review the plan(s) from Phase 2 and ensure alignment with the user's intentions.",
+		"1. Read the critical files you identified during exploration to deepen your understanding",
+		"2. Ensure that the plans align with the user's original request",
+		"3. Use ask_user_question to clarify any remaining questions with the user",
+		"",
+		"### Phase 4: Final Plan",
+		"Goal: Write your final plan to the plan file (the only file you can edit).",
+		"- Begin with a **Context** section: explain why this change is being made — the problem or need it addresses, what prompted it, and the intended outcome",
+		"- Include only your recommended approach, not all alternatives",
+		"- Ensure that the plan file is concise enough to scan quickly, but detailed enough to execute effectively",
+		"- Name the critical files to be modified. For changes that repeat a pattern across many files, describe the pattern once and list a few representative paths — do not enumerate every file or line number",
+		"- Reference existing functions and utilities you found that should be reused, with their file paths",
+		"- Include a verification section describing how to test the changes end-to-end (run the code, use MCP tools, run tests)",
+		"",
+		"### Phase 5: Call exit_plan_mode",
+		"At the very end of your turn, once you have asked the user questions and are happy with your final plan file - you should always call exit_plan_mode to indicate to the user that you are done planning.",
+		"This is critical - your turn should only end with either using the ask_user_question tool OR calling exit_plan_mode. Do not stop unless it's for these 2 reasons",
+		"",
+		"**Important:** Use ask_user_question ONLY to clarify requirements or choose between approaches. Use exit_plan_mode to request plan approval. Do NOT ask about plan approval in any other way - no text questions, no ask_user_question. Phrases like \"Is this plan okay?\", \"Should I proceed?\", \"How does this plan look?\", \"Any changes before we start?\", or similar MUST use exit_plan_mode.",
+		"",
+		"NOTE: At any point in time through this workflow you should feel free to ask the user questions or clarifications using the ask_user_question tool. Don't make large assumptions about user intent. The goal is to present a well researched plan to the user, and tie any loose ends before implementation begins.",
 	].join("\n");
 }

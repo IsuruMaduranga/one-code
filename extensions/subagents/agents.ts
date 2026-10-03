@@ -195,11 +195,12 @@ export function discoverAgents(sources: Array<string | AgentSource | CodeAgents>
  * Tools a child cannot function without, re-added when an agent file's `tools`
  * allowlist omits them: pi's allowlist filters built-ins, extension tools AND
  * injected custom tools by exact name, so a CC-style `tools: Read, Grep` would
- * otherwise also strip the child's report channel (`SendMessage` → main), its
- * deferred-tool loader and the runtime's `structured_output`. Claude Code's
- * allowlist never strips its own plumbing either.
+ * otherwise also strip the child's report channels (`SendMessage` → main and
+ * the final `SubagentHandback`), its deferred-tool loader and the runtime's
+ * `structured_output`. Claude Code's allowlist never strips its own plumbing
+ * either.
  */
-const ALLOWLIST_ESSENTIALS = ["SendMessage", "tool_search", "structured_output"];
+const ALLOWLIST_ESSENTIALS = ["SendMessage", "SubagentHandback", "tool_search", "structured_output"];
 
 /** Apply an agent's allowlist to pi's `tools` option, keeping the essentials. */
 export function childToolAllowlist(tools: string[] | undefined): string[] | undefined {

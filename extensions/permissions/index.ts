@@ -132,9 +132,8 @@ import {
 import { builtinRuleCounts } from "../auto-mode/rules.ts";
 import { autoModeSystemNote } from "../auto-mode/system-note.ts";
 import { announceArgumentHint } from "../lib/argument-hints.ts";
+import { userDenialText } from "../lib/user-denial.ts";
 
-const DENIED_BY_USER =
-	"The user doesn't want to proceed with this tool use. The tool use was rejected. Adjust your approach based on the user's feedback instead of retrying the same call.";
 const DENIED_NON_INTERACTIVE =
 	"Permission required but this session is non-interactive, so the user cannot approve the call. It was blocked. Only pre-approved tools can run here; work within those, or ask the user to re-run interactively or with an allow rule / --dangerously-skip-permissions.";
 // Must agree with the plan-mode reminder (plan-mode/reminder.ts): the plan is
@@ -1067,7 +1066,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	/** The block reason for a first-read prompt answered with Block or Ask again; undefined to run the read. */
 	const outsideReadRefusal = async (ctx: ExtensionContext, toolName: string, path: string): Promise<string | undefined> => {
 		const answer = await firstOutsideRead(ctx, toolName, path);
-		return answer === "allow" ? undefined : answer === "block" ? DENIED_CHOSE_BLOCK_OUTSIDE_READS : DENIED_BY_USER;
+		return answer === "allow" ? undefined : answer === "block" ? DENIED_CHOSE_BLOCK_OUTSIDE_READS : userDenialText();
 	};
 
 	/**
@@ -1389,7 +1388,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		const feedback = await serializePrompt(() => ctx.ui.input("What should the agent do instead?", "Optional — press Esc to skip"));
 		return {
 			block: true,
-			reason: feedback?.trim() ? `${DENIED_BY_USER}\n\nThe user said: ${feedback.trim()}` : DENIED_BY_USER,
+			reason: userDenialText(feedback),
 		};
 	});
 
@@ -1565,7 +1564,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		const feedback = await childPrompt(() => ctx.ui.input("What should the agent do instead?", "Optional — press Esc to skip", { signal: call.signal }));
 		return {
 			block: true,
-			reason: feedback?.trim() ? `${DENIED_BY_USER}\n\nThe user said: ${feedback.trim()}` : DENIED_BY_USER,
+			reason: userDenialText(feedback),
 		};
 	};
 

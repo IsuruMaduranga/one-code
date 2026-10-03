@@ -97,7 +97,7 @@ export function runtimeSecretPaths(home: string = homedir()): string[] {
 }
 
 /** Tools the runtime itself injects; never gate them. */
-const DEFAULT_INTERNAL_TOOLS = new Set(["structured_output"]);
+const DEFAULT_INTERNAL_TOOLS = new Set(["structured_output", "SubagentHandback"]);
 
 /** The parent permissions extension publishes its live mode here (in-process children read it). */
 export const MODE_ENV = "CC_PERMISSION_MODE";

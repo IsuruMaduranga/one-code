@@ -24,7 +24,7 @@ import type { ChildHookCall, HookBridge } from "../hooks/subagent-bridge.ts";
 import { REMINDER_CHANNEL } from "./reminders.ts";
 
 /** Tools the runtime itself injects; never run hooks for them. */
-const DEFAULT_INTERNAL_TOOLS = new Set(["structured_output"]);
+const DEFAULT_INTERNAL_TOOLS = new Set(["structured_output", "SubagentHandback"]);
 
 export interface HookGateOptions {
 	/** The child's agent type for the payload's `agent_type`, resolved per session id by the runner. */

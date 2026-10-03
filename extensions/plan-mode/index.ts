@@ -25,13 +25,23 @@ import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
+import { resolveModelTier } from "../lib/model-tier.ts";
 import { oneCodeStateDir } from "../lib/paths.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { ccToolRenderers, safeThemePaint } from "../lib/tui-render.ts";
+import { userDenialText } from "../lib/user-denial.ts";
 import type { PermissionMode } from "../permissions/matcher.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../permissions/modes.ts";
 import { buildPlanModeReminder } from "./reminder.ts";
 import { randomSlug } from "./slug.ts";
+import {
+	approvedPlanText,
+	ENTER_PLAN_MODE_DESCRIPTION,
+	enteredPlanModeText,
+	enterPlanModeDescription,
+	EXIT_PLAN_MODE_DESCRIPTION,
+	exitedPlanModeText,
+} from "./texts.ts";
 import { clampOffset, decodeViewerKey, initialPlanChoice, type PlanChoice, renderPlanViewer, wrapPlanText } from "./viewer.ts";
 
 import { MODE_CHANNEL, PLAN_FILE_CHANNEL, PLAN_FILE_ENTRY, planFileOnBranch } from "../lib/plan-mode-channels.ts";
@@ -62,6 +72,13 @@ export default function planModeExtension(pi: ExtensionAPI) {
 	 */
 	let modeBeforePlan: PermissionMode | undefined;
 	let planFilePath: string | undefined;
+	/**
+	 * Whether the plan file existed when plan mode came on, which picks Claude
+	 * Code's "Plan File Info" line. Fixed for the mode's whole run, so the sticky
+	 * block stays byte-identical turn after turn (plan-mode/reminder.ts);
+	 * cleared when the mode ends.
+	 */
+	let planExistedAtEntry: boolean | undefined;
 
 	/** Restore the branch's plan file, else allocate a fresh slug. */
 	const ensurePlanFile = (ctx: ExtensionContext): string => {
@@ -82,9 +99,10 @@ export default function planModeExtension(pi: ExtensionAPI) {
 	/** Re-announce path + reminder; every-turn re-emits replace by key. */
 	const refresh = (ctx: ExtensionContext) => {
 		const path = ensurePlanFile(ctx);
+		planExistedAtEntry ??= existsSync(path);
 		pi.events.emit(PLAN_FILE_CHANNEL, { path });
 		pi.events.emit(REMINDER_CHANNEL, {
-			text: buildPlanModeReminder(path),
+			text: buildPlanModeReminder(path, planExistedAtEntry),
 			scope: "every-turn",
 			key: "permission-mode",
 			placement: "sticky-append",
@@ -100,6 +118,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
 		const previous = currentMode;
 		currentMode = status.mode;
 		if (currentMode === "plan" && previous !== "plan") modeBeforePlan = previous as PermissionMode | undefined;
+		if (currentMode !== "plan") planExistedAtEntry = undefined;
 		// Entering plan mode mid-turn: permissions' setMode has just dropped the
 		// shared "permission-mode" key (before broadcasting this status, so this
 		// re-add is not undone) and will announce the change on the next tool
@@ -111,6 +130,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
 
 	pi.on("session_start", (_event, ctx) => {
 		lastCtx = ctx;
+		fitEnterPlanModeToModel(ctx.model);
 	});
 
 	pi.on("before_agent_start", (_event, ctx) => {
@@ -118,40 +138,48 @@ export default function planModeExtension(pi: ExtensionAPI) {
 		if (currentMode === "plan") refresh(ctx);
 	});
 
-	pi.registerTool({
-		name: "enter_plan_mode",
-		label: "Enter plan mode",
-		...ccToolRenderers("Enter plan mode"),
-		description:
-			"Enter plan mode: read-only investigation to design an approach before changing anything. Most tasks do not need it.\n" +
-			"For a small or clearly-scoped change, act directly instead. Enter plan mode only for multi-file work whose design is genuinely unclear, or when the user asks for a plan. In plan mode only read-only tools are available, plus one writable file: the plan file whose path you are told, where you build the plan incrementally.",
-		parameters: Type.Object({}),
-		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-			pi.events.emit(MODE_CHANNEL, { mode: "plan" });
-			// setMode broadcasts synchronously over the status channel, so the
-			// listener above has already installed the block and announced the
-			// path (or the mode was plan already and both stand); name the file in
-			// the tool result too so the model can start writing this same turn.
-			const path = ensurePlanFile(ctx);
-			return {
-				content: [
-					{
-						type: "text",
-						text: `Entered plan mode. Only read-only tools are available, except for your plan file at ${path} — build your plan there incrementally, then call exit_plan_mode to request approval.`,
-					},
-				],
-				details: { planFilePath: path },
-			};
-		},
-	});
+	/**
+	 * enter_plan_mode's description follows the model's tier: Claude Code's,
+	 * which prefers plan mode, on frontier and workhorse, and One Code's, which
+	 * says most tasks do not need it, on cheap and tiny (`texts.ts`). The tool is
+	 * registered again only when the tier's text differs, so within one model
+	 * the definition never changes; a re-registration keeps the tool's active
+	 * state, so a deferred tool stays deferred. The tool is deferred and sets no
+	 * prompt snippet, so the system prompt never moves with it.
+	 */
+	let enterDescription: string | undefined;
+	const registerEnterPlanMode = (description: string) => {
+		if (description === enterDescription) return;
+		enterDescription = description;
+		pi.registerTool({
+			name: "enter_plan_mode",
+			label: "Enter plan mode",
+			...ccToolRenderers("Enter plan mode"),
+			description,
+			parameters: Type.Object({}),
+			async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+				pi.events.emit(MODE_CHANNEL, { mode: "plan" });
+				// setMode broadcasts synchronously over the status channel, so the
+				// listener above has already installed the block and announced the
+				// path (or the mode was plan already and both stand); name the file in
+				// the tool result too so the model can start writing this same turn.
+				const path = ensurePlanFile(ctx);
+				return {
+					content: [{ type: "text", text: enteredPlanModeText(path) }],
+					details: { planFilePath: path },
+				};
+			},
+		});
+	};
+	const fitEnterPlanModeToModel = (model: ExtensionContext["model"]) => registerEnterPlanMode(enterPlanModeDescription(resolveModelTier(model)));
+	registerEnterPlanMode(ENTER_PLAN_MODE_DESCRIPTION);
+	pi.on("model_select", (event, ctx) => fitEnterPlanModeToModel(event.model ?? ctx.model));
 
 	pi.registerTool({
 		name: "exit_plan_mode",
 		label: "Exit plan mode",
 		...ccToolRenderers("Exit plan mode"),
-		description:
-			"Signal that planning is complete and ask the user to approve the plan.\n" +
-			"Takes no parameters: the plan is read from the plan file named in the plan-mode reminder, which you must have written before calling this. The user reviews that file's contents.",
+		description: EXIT_PLAN_MODE_DESCRIPTION,
 		parameters: Type.Object({}),
 		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
 			// Guard the out-of-sequence call: without this, a cold exit_plan_mode
@@ -272,25 +300,21 @@ export default function planModeExtension(pi: ExtensionAPI) {
 			const picked = choice != null ? options[choice] : undefined;
 			if (picked?.mode) {
 				pi.events.emit(MODE_CHANNEL, { mode: picked.mode });
+				// Claude Code's exit reminder, queued from execute so it is written
+				// into this result after the mode notice.
+				pi.events.emit(REMINDER_CHANNEL, { text: exitedPlanModeText(path) });
 				return {
-					content: [
-						{
-							type: "text",
-							text: `Plan approved by the user. You may now implement it. The approved plan stays at ${path} for reference.`,
-						},
-					],
+					content: [{ type: "text", text: approvedPlanText(path, plan) }],
 					details: { plan, approved: true },
 				};
 			}
 
+			// Kept planning or dismissed: Claude Code's rejection, which stops the
+			// model until the user says how to proceed.
 			return {
-				content: [
-					{
-						type: "text",
-						text: "The user did not approve the plan. Stay in plan mode; refine the plan file based on their feedback.",
-					},
-				],
+				content: [{ type: "text", text: userDenialText() }],
 				details: { plan, approved: false },
+				isError: true,
 			};
 		},
 	});
