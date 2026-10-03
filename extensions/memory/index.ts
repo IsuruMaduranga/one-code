@@ -33,7 +33,7 @@ import {
 	projectMemoryDir,
 	stampFrontmatter,
 } from "../lib/memory.ts";
-import { type ConfigMode, CONFIG_MODE_KEY, configMode, MODE_LABELS, savedConfigMode } from "../lib/config-mode.ts";
+import { type ConfigMode, CONFIG_MODE_KEY, configMode, configModeFromEnv, MODE_LABELS, savedConfigMode } from "../lib/config-mode.ts";
 import { oneCodeSettingsPath, readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
 import { claudeConfigDir, oneCodeStateDir } from "../lib/paths.ts";
 import { tryReadFile } from "../lib/plugins.ts";
@@ -160,7 +160,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
 				ctx.ui.notify(`Memory / CLAUDE.md files:\n${lines.join("\n")}`, "info");
 				return undefined;
 			}
-			const mode: ModeView = { running: configMode(), saved: savedConfigMode() };
+			const mode: ModeView = { running: configMode(), saved: savedConfigMode(), fromEnv: configModeFromEnv() !== undefined };
 			const savedBefore = mode.saved;
 			const chosen = await openMemoryPanel(ctx, entries, mode);
 			// The mode row is One Code's own; its line leads CC's result when it changed.
@@ -219,6 +219,11 @@ function openMemoryPanel(ctx: ExtensionContext, entries: MemoryEntry[], mode: Mo
 				const key = decodeMemoryKey(data);
 				if (!key) return;
 				const effect = applyMemoryKey(state, key, entries);
+				if (effect?.kind === "toggle-mode" && mode.fromEnv) {
+					// The variable outranks the saved setting, so a write here would never apply.
+					ctx.ui.notify("Config sources are set by ONECODE_CONFIG_MODE. Unset it to switch here.", "info");
+					return;
+				}
 				if (effect?.kind === "toggle-mode") {
 					const next: ConfigMode = mode.saved === "independent" ? "claude-compatible" : "independent";
 					try {

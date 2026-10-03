@@ -37,7 +37,7 @@ import { type InstructionFiles, readInstructionFiles } from "./claude-settings.t
 import { claudeSourcesOn } from "./config-mode.ts";
 import { findGitRoot } from "./git.ts";
 import { tryReadFile } from "./plugins.ts";
-import { absoluteFrom, claudeUserDir, expandTilde, isPathAtOrUnder } from "./paths.ts";
+import { absoluteFrom, claudeUserDir, expandTilde, isPathAtOrUnder, tryRealpath } from "./paths.ts";
 
 /** One CLAUDE.md-family file as it appears in the block. `content` is raw (untrimmed). */
 export interface ContextFile {
@@ -360,22 +360,20 @@ export function discoverContextFilePaths(opts: {
 }
 
 /**
- * The instruction files in play for this project under the running rule
- * (`instructionRule`): the project's own from cwd up to the git root (or just
- * cwd outside a repo), nearest directory first, and the user's global
- * CLAUDE.md apart. With `homeOneCodeDir`, ONECODE.md files join the project
- * list. The startup banner and the auto-mode classifier both read this.
+ * The project's own instruction files in play under the running rule
+ * (`instructionRule`), from cwd up to the git root (or just cwd outside a
+ * repo), nearest directory first; with `homeOneCodeDir`, its ONECODE.md files
+ * too. The startup banner lists these.
  */
-export function projectInstructionFiles(opts: { cwd: string; home: string; homeOneCodeDir?: string }): { project: string[]; global?: string } {
+export function projectInstructionFiles(opts: { cwd: string; home: string; homeOneCodeDir?: string }): string[] {
 	const stop = findGitRoot(opts.cwd) ?? opts.cwd;
 	const files = discoverContextFilePaths({ cwd: opts.cwd, homeClaudeDir: claudeUserDir(opts.home), homeOneCodeDir: opts.homeOneCodeDir, rule: instructionRule(opts.home) });
 	// The directory a file belongs to: `.claude/AGENTS.md` counts as its parent's.
 	const owner = (path: string) => (basename(dirname(path)) === ".claude" ? dirname(dirname(path)) : dirname(path));
-	const project = files
+	return files
 		.filter(({ path, descriptor }) => descriptor !== GLOBAL_DESCRIPTOR && descriptor !== ONECODE_GLOBAL_DESCRIPTOR && isPathAtOrUnder(path, stop))
 		.map(({ path }) => path)
 		.sort((a, b) => owner(b).length - owner(a).length);
-	return { project, global: files.find(({ descriptor }) => descriptor === GLOBAL_DESCRIPTOR)?.path };
 }
 
 export function discoverContextFiles(opts: {
@@ -399,8 +397,9 @@ export function discoverContextFiles(opts: {
 		if (content === null) continue;
 		if (dedupe) {
 			const trimmed = content.trim();
-			if (descriptor === AGENTS_DESCRIPTOR && (imported.has(path) || (trimmed !== "" && contents.has(trimmed)))) continue;
-			for (const p of collectImportedPaths(content, dirname(path), { home: opts.home })) imported.add(p);
+			// Compared by real path, so a `./`-spelled or symlinked import still matches.
+			if (descriptor === AGENTS_DESCRIPTOR && (imported.has(tryRealpath(path) ?? path) || (trimmed !== "" && contents.has(trimmed)))) continue;
+			for (const p of collectImportedPaths(content, dirname(path), { home: opts.home })) imported.add(tryRealpath(p) ?? p);
 			contents.add(trimmed);
 		}
 		files.push({ path, content: expandImports(content, dirname(path), { home: opts.home }), descriptor });
@@ -437,11 +436,16 @@ export function discoverOneCodeFiles(opts: { cwd: string; homeOneCodeDir: string
 	return files;
 }
 
-const ONECODE_PREAMBLE =
-	"# oneCodeMd\n" +
-	"The following are One Code-specific instructions, read only by One Code and not by other tools. " +
-	"IMPORTANT: they take precedence over the CLAUDE.md instructions above and over any default behavior — " +
-	"where they conflict with CLAUDE.md, follow these. Follow them exactly as written.";
+/** The block's preamble, naming the files above it: AGENTS.md in independent mode (lib/config-mode.ts). */
+function oneCodePreamble(): string {
+	const above = claudeSourcesOn() ? "CLAUDE.md" : "AGENTS.md";
+	return (
+		"# oneCodeMd\n" +
+		"The following are One Code-specific instructions, read only by One Code and not by other tools. " +
+		`IMPORTANT: they take precedence over the ${above} instructions above and over any default behavior — ` +
+		`where they conflict with ${above}, follow these. Follow them exactly as written.`
+	);
+}
 
 /**
  * Assemble the `# oneCodeMd` block's inner text (wrapper added by lib/reminders.ts):
@@ -452,7 +456,7 @@ const ONECODE_PREAMBLE =
 export function buildOneCodeBlock(files: ContextFile[]): string | null {
 	if (files.length === 0) return null;
 	const sections = files.map(section).join("\n");
-	return `${ONECODE_PREAMBLE}\n\n${sections}`;
+	return `${oneCodePreamble()}\n\n${sections}`;
 }
 
 export const AGENTS_DESCRIPTOR = "cross-tool agent instructions, AGENTS.md standard";

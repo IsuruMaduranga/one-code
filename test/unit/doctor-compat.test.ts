@@ -6,6 +6,7 @@ import { collectCompat, importedConfigSection, mcpSection } from "../../extensio
 import { checkDependencies, projectLanguages, providerHasNativeSearch, webSearchRoute } from "../../extensions/doctor/dependencies.ts";
 import { whichOnPath } from "../../extensions/lib/which.ts";
 import { invalidatePluginsCache } from "../../extensions/lib/plugins.ts";
+import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
 import { resetHookSettingsCache } from "../../extensions/hooks/settings.ts";
 
 let home: string;
@@ -87,6 +88,14 @@ describe("collectCompat: settings files", () => {
 });
 
 describe("collectCompat: content", () => {
+	it("opens no Claude Code settings file in independent mode", () => {
+		write(join(home, ".claude", "settings.json"), "{not json");
+		resetConfigModeForTest("independent");
+		const compat = collectCompat(input());
+		expect(compat.files.map((f) => f.scope)).toEqual(["onecode-user", "onecode-project"]);
+		expect(compat.findings.some((f) => f.text.includes(".claude"))).toBe(false);
+	});
+
 	it("sizes the instruction files and warns over the 40k soft limit", () => {
 		write(join(cwd, "CLAUDE.md"), "x".repeat(41_000));
 		write(join(cwd, "sub", "CLAUDE.local.md"), "local");

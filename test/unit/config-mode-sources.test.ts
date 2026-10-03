@@ -122,3 +122,11 @@ describe("the /memory picker in independent mode", () => {
 		]);
 	});
 });
+
+describe("the /memory picker and .claude/AGENTS.md", () => {
+	it("offers a .claude/AGENTS.md the fallback loads", () => {
+		touch(join(cwd, ".claude", "AGENTS.md"));
+		const entries = buildMemoryEntries({ cwd, home, homeClaudeDir: join(home, ".claude"), homeOneCodeDir: join(home, ".onecode"), memoryDir: join(home, "mem") });
+		expect(entries.map((e) => e.path)).toContain(join(cwd, ".claude", "AGENTS.md"));
+	});
+});

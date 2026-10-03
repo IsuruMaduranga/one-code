@@ -148,6 +148,9 @@ export function buildMemoryEntries(opts: {
 				exists: true,
 			});
 		}
+		// `.claude/AGENTS.md`, which the AGENTS.md fallback loads too.
+		const dotClaudeAgents = found.get(`${AGENTS_DESCRIPTOR}\0${join(d, ".claude")}`);
+		if (dotClaudeAgents) add({ title: disp(dotClaudeAgents), path: dotClaudeAgents, kind: "file", exists: true });
 
 		const oneCode = found.get(`${ONECODE_DESCRIPTOR}\0${d}`);
 		if (oneCode) {

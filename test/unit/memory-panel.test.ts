@@ -112,6 +112,11 @@ describe("config-sources row", () => {
 		expect(pending.some((l) => l.startsWith("❯ Config sources: Independent (from next start)"))).toBe(true);
 		expect(pending.some((l) => l.startsWith("❯ 1."))).toBe(false);
 	});
+
+	it("shows the running mode and its source when ONECODE_CONFIG_MODE sets it", () => {
+		const lines = renderMemoryPanel({ state: initialMemoryState(), entries, width: 100, height: 20, mode: { running: "independent", saved: "claude-compatible", fromEnv: true } }, plainPaint);
+		expect(lines.some((l) => l.startsWith("  Config sources: Independent (set by ONECODE_CONFIG_MODE)"))).toBe(true);
+	});
 });
 
 describe("renderMemoryPanel", () => {

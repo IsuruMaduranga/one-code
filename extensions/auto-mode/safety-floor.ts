@@ -27,9 +27,9 @@
  */
 
 import { analyzeShellCommand, globComponentRegex, isUnknownTilde, LOOPS, movesDirectory, parseCommand, resolvePayload, scopedTracker } from "./shell-analysis.ts";
-import { autoModeSettingsPaths } from "./config.ts";
+import { claudeUserSettingsPath, managedSettingsPaths } from "../lib/claude-settings.ts";
 import { CONSENT_STORE_TAIL, consentStorePaths } from "../lib/consent-stores.ts";
-import { oneCodeProjectSettingsPath } from "../lib/one-code-settings.ts";
+import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 import { claudeJsonPath, comparablePath } from "../lib/paths.ts";
 import { isWritingTool, resolveForContainment, toAbsolute, toAbsoluteBash } from "./paths.ts";
 
@@ -58,8 +58,13 @@ const ONECODE_SETTINGS_TAIL = /\/\.onecode\/(projects\/[^/]+\/)?settings\.json$/
 function safetyControlFiles(home: string, oneCodeProjectSettings?: string): string[] {
 	return [
 		// autoMode + user permission rules, and the managed-settings paths (the
-		// global ~/.onecode/settings.json here honours ONECODE_STATE_DIR).
-		...autoModeSettingsPaths(home),
+		// global ~/.onecode/settings.json here honours ONECODE_STATE_DIR). Spelled
+		// out, not the mode-aware autoModeSettingsPaths: independent mode reads no
+		// Claude Code file, but one written there would take effect the moment
+		// the user switches back, so the floor guards it in both modes.
+		claudeUserSettingsPath(home),
+		oneCodeSettingsPath(home),
+		...managedSettingsPaths(),
 		// Claude Code's global state file also carries permission configuration;
 		// claudeJsonPath honours CLAUDE_CONFIG_DIR so a relocated file is still caught.
 		claudeJsonPath(home),

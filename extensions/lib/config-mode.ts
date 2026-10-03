@@ -51,9 +51,13 @@ function isConfigMode(value: unknown): value is ConfigMode {
  * the default (fail toward today's behaviour); an unknown env value is ignored.
  */
 export function readConfigMode(home: string = os.homedir(), env: Record<string, string | undefined> = process.env): ConfigMode {
-	const fromEnv = env[CONFIG_MODE_ENV];
-	if (isConfigMode(fromEnv)) return fromEnv;
-	return savedConfigMode(home, env);
+	return configModeFromEnv(env) ?? savedConfigMode(home, env);
+}
+
+/** The mode `ONECODE_CONFIG_MODE` sets, or undefined when it is unset or unknown. */
+export function configModeFromEnv(env: Record<string, string | undefined> = process.env): ConfigMode | undefined {
+	const value = env[CONFIG_MODE_ENV];
+	return isConfigMode(value) ? value : undefined;
 }
 
 /**

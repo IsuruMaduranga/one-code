@@ -27,6 +27,7 @@ const CHECKED: Record<string, string> = {
 	"permissions/index.ts": ".claude.json flag and the ~/.claude allow warning gated",
 	"auto-mode/config.ts": "autoModeSettingsPaths reads One Code's file only in independent mode",
 	"auto-mode/safety-floor.ts": "protection: gate-control files stay on the floor in both modes",
+	"auto-mode/instructions.ts": "the classifier reads the union in compatible mode, AGENTS.md only in independent",
 	"auto-mode/setup-run.ts": "AGENTS.md and ONECODE.md in independent mode",
 	"claude-compat/index.ts": "Claude Code skill and command folders only in compatible mode",
 	"claude-context/index.ts": "passes the instruction rule",

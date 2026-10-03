@@ -26,10 +26,11 @@ export function initialMemoryState(): MemoryPanelState {
 	return { cursor: 0 };
 }
 
-/** The mode this process runs in and the one saved for the next start. */
+/** The mode this process runs in, the one saved for the next start, and whether `ONECODE_CONFIG_MODE` sets it. */
 export interface ModeView {
 	running: ConfigMode;
 	saved: ConfigMode;
+	fromEnv?: boolean;
 }
 
 const MODE_DESCRIPTIONS: Record<ConfigMode, string> = {
@@ -114,12 +115,16 @@ export function renderMemoryPanel(
 	return [...header, ...rows, ...footer];
 }
 
-/** "Config sources: <saved>", with "(from next start)" while it differs from the running mode. */
+/**
+ * "Config sources: <saved>", with "(from next start)" while it differs from the
+ * running mode; under `ONECODE_CONFIG_MODE`, the running mode and that it is set there.
+ */
 function renderModeRow(mode: ModeView, selected: boolean, paint: PanelPaint): string {
-	const pending = mode.saved !== mode.running ? " (from next start)" : "";
-	const left = `${selected ? "❯ " : "  "}Config sources: ${MODE_LABELS[mode.saved]}${pending}`;
+	const shown = mode.fromEnv ? mode.running : mode.saved;
+	const note = mode.fromEnv ? " (set by ONECODE_CONFIG_MODE)" : mode.saved !== mode.running ? " (from next start)" : "";
+	const left = `${selected ? "❯ " : "  "}Config sources: ${MODE_LABELS[shown]}${note}`;
 	const pad = " ".repeat(Math.max(2, DESC_COL + 12 - left.length));
-	const description = MODE_DESCRIPTIONS[mode.saved];
+	const description = MODE_DESCRIPTIONS[shown];
 	return selected ? `${paint.fg("accent", left)}${pad}${paint.fg("accent", description)}` : `${left}${pad}${paint.fg("muted", description)}`;
 }
 

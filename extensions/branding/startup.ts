@@ -33,8 +33,7 @@ export interface StartupSection {
  * so an AGENTS.md is listed only when it is really in play.
  */
 export function contextFileNames(cwd: string, home: string = os.homedir()): string[] {
-	const { project } = projectInstructionFiles({ cwd, home, homeOneCodeDir: oneCodeStateDir(process.env, home) });
-	return project.map((path) => relative(cwd, path) || basename(path));
+	return projectInstructionFiles({ cwd, home, homeOneCodeDir: oneCodeStateDir(process.env, home) }).map((path) => relative(cwd, path) || basename(path));
 }
 
 /**
