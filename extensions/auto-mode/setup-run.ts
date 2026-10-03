@@ -14,7 +14,7 @@
 
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { claudeUserSettingsPath, readSettingsFile } from "../lib/claude-settings.ts";
@@ -27,6 +27,7 @@ import { buildSetupPrompt, parseGitRemotes, redactSecrets, type SetupDraft, pars
 import { claudeSourcesOn } from "../lib/config-mode.ts";
 import { claudeUserDir, oneCodeStateDir } from "../lib/paths.ts";
 import { HARNESS_GIT_CONFIG } from "../lib/git.ts";
+import { firstOneCodeFile } from "../lib/claude-context.ts";
 
 const PROBE_TIMEOUT_MS = 10_000;
 /** Drafting reads a big fact dump and writes a full slot list — give it room. */
@@ -149,6 +150,12 @@ export async function gatherFacts(options: GatherOptions): Promise<SetupFacts> {
 		if (Array.isArray(allow)) permissionsAllow.push(...allow.filter((entry): entry is string => typeof entry === "string"));
 	}
 
+	// Independent mode (lib/config-mode.ts) reads no CLAUDE.md: the project's
+	// AGENTS.md and the global ONECODE.md stand in.
+	const instructions = claudeSourcesOn()
+		? { project: "CLAUDE.md", global: join(claudeUserDir(home), "CLAUDE.md") }
+		: { project: "AGENTS.md", global: firstOneCodeFile(oneCodeStateDir(process.env, home)) ?? undefined };
+
 	return {
 		cwd,
 		username: options.username,
@@ -159,14 +166,8 @@ export async function gatherFacts(options: GatherOptions): Promise<SetupFacts> {
 		repoVisibility,
 		repoNameWithOwner,
 		defaultBranch,
-		// Independent mode (lib/config-mode.ts) reads no CLAUDE.md: the project's
-		// AGENTS.md and the global ONECODE.md stand in.
-		claudeMdProject: claudeSourcesOn()
-			? readIfPresent(join(gitRoot || cwd, "CLAUDE.md"), CLAUDE_MD_LIMIT, notes, "project CLAUDE.md")
-			: readIfPresent(join(gitRoot || cwd, "AGENTS.md"), CLAUDE_MD_LIMIT, notes, "project AGENTS.md"),
-		claudeMdGlobal: claudeSourcesOn()
-			? readIfPresent(join(claudeUserDir(home), "CLAUDE.md"), CLAUDE_MD_LIMIT, notes, "global CLAUDE.md")
-			: readIfPresent(join(oneCodeStateDir(process.env, home), "ONECODE.md"), CLAUDE_MD_LIMIT, notes, "global ONECODE.md"),
+		claudeMdProject: readIfPresent(join(gitRoot || cwd, instructions.project), CLAUDE_MD_LIMIT, notes, `project ${instructions.project}`),
+		claudeMdGlobal: instructions.global ? readIfPresent(instructions.global, CLAUDE_MD_LIMIT, notes, `global ${basename(instructions.global)}`) : undefined,
 		shellHistory,
 		permissionsAllow,
 		gatherNotes: notes,

@@ -94,12 +94,14 @@ export function announceLocalCommand(pi: ReminderEmitter, command: LocalCommand)
 
 type CommandOptions = { handler: (args: string, ctx: any) => Promise<void> | void } & Record<string, unknown>;
 
-/** What a local command passes: pi's options, its handler free to return the stdout. */
-type LocalCommandOptions<O extends CommandOptions> = Omit<O, "handler"> & {
-	handler: (args: string, ctx: Parameters<O["handler"]>[1]) => Promise<string | void> | string | void;
-	argumentHint?: string;
-	reportsResult?: boolean;
-};
+/**
+ * What a local command passes: pi's options, plus `reportsResult` when its
+ * handler returns the stdout (a returned string is never silently dropped).
+ */
+type LocalCommandOptions<O extends CommandOptions> = Omit<O, "handler"> & { argumentHint?: string } & (
+		| { reportsResult: true; handler: (args: string, ctx: Parameters<O["handler"]>[1]) => Promise<string | void> | string | void }
+		| { reportsResult?: false; handler: (args: string, ctx: Parameters<O["handler"]>[1]) => Promise<void> | void }
+	);
 
 /**
  * `pi.registerCommand` for a One Code local command: the breadcrumb is

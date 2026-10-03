@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { instructionRule } from "../../extensions/lib/claude-context.ts";
 import { readInstructionFiles } from "../../extensions/lib/claude-settings.ts";
+import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
 
 /** A temp home whose ~/.claude/settings.json holds `settings` (CLAUDE_CONFIG_DIR unset in tests). */
 function homeWith(settings: Record<string, unknown> | undefined): string {
@@ -42,7 +43,8 @@ describe("readInstructionFiles (findings §57)", () => {
 describe("instructionRule", () => {
 	it("is agents-md in independent mode, whatever Claude Code's settings say", () => {
 		const home = homeWith({ projectInstructions: "claude" });
-		expect(instructionRule(home, "independent")).toBe("agents-md");
-		expect(instructionRule(home, "claude-compatible")).toBe("claude-md");
+		expect(instructionRule(home)).toBe("claude-md");
+		resetConfigModeForTest("independent");
+		expect(instructionRule(home)).toBe("agents-md");
 	});
 });

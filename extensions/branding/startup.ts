@@ -13,13 +13,13 @@
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { basename, dirname, join, relative } from "node:path";
+import { basename, join, relative } from "node:path";
 import os from "node:os";
-import { discoverContextFilePaths, GLOBAL_DESCRIPTOR, instructionRule, ONECODE_GLOBAL_DESCRIPTOR } from "../lib/claude-context.ts";
-import { claudeSourcesOn, projectConfigDir, userConfigDir } from "../lib/config-mode.ts";
-import { findGitRoot } from "../lib/git.ts";
+import { projectInstructionFiles } from "../lib/claude-context.ts";
+import { projectConfigDir, userConfigDir } from "../lib/config-mode.ts";
+import { scanSkills } from "../lib/skill-scan.ts";
 import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
-import { claudeUserDir, isPathAtOrUnder, oneCodeStateDir } from "../lib/paths.ts";
+import { oneCodeStateDir } from "../lib/paths.ts";
 
 export interface StartupSection {
 	label: string;
@@ -33,49 +33,21 @@ export interface StartupSection {
  * so an AGENTS.md is listed only when it is really in play.
  */
 export function contextFileNames(cwd: string, home: string = os.homedir()): string[] {
-	const stop = findGitRoot(cwd) ?? cwd;
-	const files = discoverContextFilePaths({
-		cwd,
-		homeClaudeDir: claudeUserDir(home),
-		homeOneCodeDir: oneCodeStateDir(process.env, home),
-		rule: instructionRule(home),
-	}).filter(({ path, descriptor }) => descriptor !== GLOBAL_DESCRIPTOR && descriptor !== ONECODE_GLOBAL_DESCRIPTOR && isPathAtOrUnder(path, stop));
-	// The directory a file belongs to: `.claude/AGENTS.md` counts as its parent's.
-	const owner = (path: string) => (basename(dirname(path)) === ".claude" ? dirname(dirname(path)) : dirname(path));
-	return files
-		.map(({ path }) => path)
-		.sort((a, b) => owner(b).length - owner(a).length)
-		.map((path) => relative(cwd, path) || basename(path));
+	const { project } = projectInstructionFiles({ cwd, home, homeOneCodeDir: oneCodeStateDir(process.env, home) });
+	return project.map((path) => relative(cwd, path) || basename(path));
 }
 
 /**
- * Skills across the same sources our extensions feed to pi: project/user
- * Claude Code dirs (in Claude-compatible mode), pi's own user dir, and
- * installed plugins. An entry counts
- * when <dir>/<name>/SKILL.md exists — existsSync follows symlinked skill
- * directories, which readdir's isDirectory() would miss.
+ * Skills across the same sources our extensions feed to pi (lib/skill-scan.ts
+ * scanSkills: the mode's skill folders, pi's own user dir, installed plugins),
+ * each name once.
  */
 export function skillNames(cwd: string, home: string, agentDir: string): string[] {
-	// Independent mode (lib/config-mode.ts) reads no Claude Code skill folder.
-	const dirs = [...(claudeSourcesOn() ? [join(cwd, ".claude", "skills"), join(claudeUserDir(home), "skills")] : []), join(agentDir, "skills")];
-	const names = new Set<string>();
-	for (const dir of dirs) {
-		if (!existsSync(dir)) continue;
-		try {
-			for (const entry of readdirSync(dir)) {
-				if (existsSync(join(dir, entry, "SKILL.md"))) names.add(entry);
-			}
-		} catch {
-			// Unreadable dir: skip, same as pi would.
-		}
-	}
-	for (const skill of discoverPlugins(defaultDiscoverRoots(agentDir, cwd, home)).skills) {
-		names.add(skill.name);
-	}
-	return [...names].sort((a, b) => a.localeCompare(b));
+	const plugins = discoverPlugins(defaultDiscoverRoots(agentDir, cwd, home)).skills;
+	return [...new Set(scanSkills(cwd, home, agentDir, plugins).map((skill) => skill.name))].sort((a, b) => a.localeCompare(b));
 }
 
-/** Saved workflow names from the Claude Code layout dirs (project shadows user). */
+/** Saved workflow names from the mode's workflow dirs (project shadows user). */
 export function workflowNames(cwd: string, home: string): string[] {
 	const names = new Set<string>();
 	for (const dir of [join(projectConfigDir(cwd), "workflows"), join(userConfigDir(home), "workflows")]) {

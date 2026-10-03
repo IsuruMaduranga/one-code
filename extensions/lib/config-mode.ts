@@ -22,21 +22,26 @@
  * applies from the next start.
  */
 
-import { readFileSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
+import { readJsonFile } from "./atomic-write.ts";
 import { claudeUserDir, oneCodeStateDir } from "./paths.ts";
 
 export type ConfigMode = "claude-compatible" | "independent";
 
-export const CONFIG_MODES: readonly ConfigMode[] = ["claude-compatible", "independent"];
-export const DEFAULT_CONFIG_MODE: ConfigMode = "claude-compatible";
+const DEFAULT_CONFIG_MODE: ConfigMode = "claude-compatible";
+
+/** How each mode is named to the user (`/memory`, `/doctor`). */
+export const MODE_LABELS: Record<ConfigMode, string> = {
+	"claude-compatible": "Claude-compatible",
+	independent: "Independent",
+};
 
 /** The key in `~/.onecode/settings.json`. */
 export const CONFIG_MODE_KEY = "configMode";
-export const CONFIG_MODE_ENV = "ONECODE_CONFIG_MODE";
+const CONFIG_MODE_ENV = "ONECODE_CONFIG_MODE";
 
-export function isConfigMode(value: unknown): value is ConfigMode {
+function isConfigMode(value: unknown): value is ConfigMode {
 	return value === "claude-compatible" || value === "independent";
 }
 
@@ -51,15 +56,14 @@ export function readConfigMode(home: string = os.homedir(), env: Record<string, 
 	return savedConfigMode(home, env);
 }
 
-/** `configMode` in `~/.onecode/settings.json` alone, ignoring the env override. */
+/**
+ * `configMode` in `~/.onecode/settings.json` alone, ignoring the env override.
+ * The path is spelled out: importing `oneCodeSettingsPath` would cycle through
+ * `one-code-settings.ts` and `memory.ts`.
+ */
 export function savedConfigMode(home: string = os.homedir(), env: Record<string, string | undefined> = process.env): ConfigMode {
-	try {
-		const parsed = JSON.parse(readFileSync(join(oneCodeStateDir(env, home), "settings.json"), "utf8")) as unknown;
-		const value = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>)[CONFIG_MODE_KEY] : undefined;
-		return isConfigMode(value) ? value : DEFAULT_CONFIG_MODE;
-	} catch {
-		return DEFAULT_CONFIG_MODE;
-	}
+	const value = readJsonFile<Record<string, unknown>>(join(oneCodeStateDir(env, home), "settings.json"))?.[CONFIG_MODE_KEY];
+	return isConfigMode(value) ? value : DEFAULT_CONFIG_MODE;
 }
 
 const MODE_SLOT = Symbol.for("one-code:config-mode");
@@ -80,20 +84,25 @@ export function resetConfigModeForTest(mode?: ConfigMode): void {
 }
 
 /** Whether Claude Code's own locations are read: `~/.claude`, `.claude/`, `CLAUDE.md`, `~/.claude.json`. */
-export function claudeSourcesOn(mode: ConfigMode = configMode()): boolean {
-	return mode === "claude-compatible";
+export function claudeSourcesOn(): boolean {
+	return configMode() === "claude-compatible";
 }
 
 /**
- * The user-level folder that holds agents, commands and workflows:
- * `~/.claude` (`CLAUDE_CONFIG_DIR`) in Claude-compatible mode, `~/.onecode`
- * (`ONECODE_STATE_DIR`) in independent mode.
+ * The user-level folder that holds agents, commands, workflows and the user
+ * settings file: `~/.claude` (`CLAUDE_CONFIG_DIR`) in Claude-compatible mode,
+ * `~/.onecode` (`ONECODE_STATE_DIR`) in independent mode.
  */
-export function userConfigDir(home: string, mode: ConfigMode = configMode(), env: Record<string, string | undefined> = process.env): string {
-	return claudeSourcesOn(mode) ? claudeUserDir(home, env) : oneCodeStateDir(env, home);
+export function userConfigDir(home: string, env: Record<string, string | undefined> = process.env): string {
+	return claudeSourcesOn() ? claudeUserDir(home, env) : oneCodeStateDir(env, home);
 }
 
-/** The project-level counterpart: `<cwd>/.claude`, or `<cwd>/.onecode` in independent mode. */
-export function projectConfigDir(cwd: string, mode: ConfigMode = configMode()): string {
-	return join(cwd, claudeSourcesOn(mode) ? ".claude" : ".onecode");
+/** The project-level folder's name: `.claude`, or `.onecode` in independent mode. */
+export function projectConfigDirName(): string {
+	return claudeSourcesOn() ? ".claude" : ".onecode";
+}
+
+/** The project-level counterpart of `userConfigDir`: `<cwd>/.claude` or `<cwd>/.onecode`. */
+export function projectConfigDir(cwd: string): string {
+	return join(cwd, projectConfigDirName());
 }

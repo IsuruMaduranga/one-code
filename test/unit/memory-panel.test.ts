@@ -13,6 +13,7 @@ import {
 } from "../../extensions/memory/panel.ts";
 
 const plainPaint: PanelPaint = { fg: (_c, t) => t, bold: (t) => t };
+const MODE = { running: "claude-compatible", saved: "claude-compatible" } as const;
 
 const entries: MemoryEntry[] = [
 	{ title: "User instructions", description: "Saved in ~/.claude/CLAUDE.md", path: "/h/.claude/CLAUDE.md", kind: "file", exists: true },
@@ -77,8 +78,10 @@ describe("memory panel navigation", () => {
 
 	it("clamps the cursor and opens the selected entry", () => {
 		const state = initialMemoryState();
+		applyMemoryKey(state, { kind: "up" }, entries);
 		expect(applyMemoryKey(state, { kind: "up" }, entries)).toBeUndefined();
-		expect(state.cursor).toBe(0); // clamped at top
+		expect(state.cursor).toBe(-1); // clamped at the config-sources row
+		applyMemoryKey(state, { kind: "down" }, entries);
 		applyMemoryKey(state, { kind: "down" }, entries);
 		applyMemoryKey(state, { kind: "down" }, entries);
 		applyMemoryKey(state, { kind: "down" }, entries); // clamps at bottom
@@ -91,18 +94,12 @@ describe("memory panel navigation", () => {
 describe("config-sources row", () => {
 	it("is reached by ↑ from the first entry, toggles on Enter, and ↓ returns to the list", () => {
 		const state = initialMemoryState();
-		applyMemoryKey(state, { kind: "up" }, entries, true);
-		expect(state.onModeRow).toBe(true);
-		expect(applyMemoryKey(state, { kind: "enter" }, entries, true)).toEqual({ kind: "toggle-mode" });
-		applyMemoryKey(state, { kind: "down" }, entries, true);
-		expect(state).toEqual({ cursor: 0, onModeRow: false });
-		expect(applyMemoryKey(state, { kind: "enter" }, entries, true)).toEqual({ kind: "open", entry: entries[0] });
-	});
-
-	it("stays out of reach without the row", () => {
-		const state = initialMemoryState();
 		applyMemoryKey(state, { kind: "up" }, entries);
-		expect(state.onModeRow).toBe(false);
+		expect(state.cursor).toBe(-1);
+		expect(applyMemoryKey(state, { kind: "enter" }, entries)).toEqual({ kind: "toggle-mode" });
+		applyMemoryKey(state, { kind: "down" }, entries);
+		expect(state.cursor).toBe(0);
+		expect(applyMemoryKey(state, { kind: "enter" }, entries)).toEqual({ kind: "open", entry: entries[0] });
 	});
 
 	it("renders the saved mode, marks a pending change, and names the key", () => {
@@ -110,7 +107,7 @@ describe("config-sources row", () => {
 		const same = renderMemoryPanel({ state, entries, width: 100, height: 20, mode: { running: "claude-compatible", saved: "claude-compatible" } }, plainPaint);
 		expect(same.some((l) => l.startsWith("  Config sources: Claude-compatible") && l.includes("~/.claude, CLAUDE.md"))).toBe(true);
 		expect(same.join("\n")).toContain("↑ for config sources");
-		state.onModeRow = true;
+		state.cursor = -1;
 		const pending = renderMemoryPanel({ state, entries, width: 100, height: 20, mode: { running: "claude-compatible", saved: "independent" } }, plainPaint);
 		expect(pending.some((l) => l.startsWith("❯ Config sources: Independent (from next start)"))).toBe(true);
 		expect(pending.some((l) => l.startsWith("❯ 1."))).toBe(false);
@@ -119,7 +116,7 @@ describe("config-sources row", () => {
 
 describe("renderMemoryPanel", () => {
 	it("renders the title, status, entries, and learn-more link", () => {
-		const lines = renderMemoryPanel({ state: initialMemoryState(), entries, width: 80, height: 20 }, plainPaint);
+		const lines = renderMemoryPanel({ state: initialMemoryState(), entries, width: 80, height: 20, mode: MODE }, plainPaint);
 		const text = lines.join("\n");
 		expect(text).toContain("Memory");
 		expect(text).toContain("Auto-memory: on");
@@ -127,13 +124,13 @@ describe("renderMemoryPanel", () => {
 		expect(text).toContain("Saved in ~/.claude/CLAUDE.md");
 		expect(text).toContain("3. Open auto-memory folder");
 		expect(text).toContain(`Learn more: ${MEMORY_DOCS_URL}`);
-		expect(text).toContain("Enter to open · Esc to close");
+		expect(text).toContain("Enter to open or switch · ↑ for config sources · Esc to close");
 	});
 
 	it("marks the selected row with the ❯ cursor", () => {
 		const state = initialMemoryState();
 		state.cursor = 1;
-		const lines = renderMemoryPanel({ state, entries, width: 80, height: 20 }, plainPaint);
+		const lines = renderMemoryPanel({ state, entries, width: 80, height: 20, mode: MODE }, plainPaint);
 		expect(lines.some((l) => l.startsWith("❯ 2. Project instructions"))).toBe(true);
 		expect(lines.some((l) => l.startsWith("  1. User instructions"))).toBe(true);
 	});
@@ -147,7 +144,7 @@ describe("renderMemoryPanel", () => {
 		}));
 		const state = initialMemoryState();
 		state.cursor = 25;
-		const lines = renderMemoryPanel({ state, entries: many, width: 80, height: 12 }, plainPaint);
+		const lines = renderMemoryPanel({ state, entries: many, width: 80, height: 12, mode: MODE }, plainPaint);
 		expect(lines.some((l) => l.includes("❯ 26. Entry 26"))).toBe(true);
 	});
 });

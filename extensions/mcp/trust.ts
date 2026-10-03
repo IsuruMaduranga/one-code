@@ -28,9 +28,8 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { readSettingsFile, settingsPaths } from "../lib/claude-settings.ts";
-import { type ConfigMode, claudeSourcesOn, configMode } from "../lib/config-mode.ts";
-import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
+import { readSettingsFile, type SettingsSource, settingsSources } from "../lib/claude-settings.ts";
+import { claudeSourcesOn } from "../lib/config-mode.ts";
 import { boundConsentItems } from "../lib/consent-preview.ts";
 import { consentStorePath } from "../lib/consent-stores.ts";
 import type { McpServer } from "./config.ts";
@@ -139,21 +138,22 @@ function stringArray(value: unknown): string[] {
  * `disabledMcpjsonServers` only tightens, so it is still honoured. Async for
  * its callers; nothing here shells out any more.
  */
-export async function readClaudeMcpjsonPolicy(cwd: string, home: string, mode: ConfigMode = configMode()): Promise<ClaudeMcpjsonPolicy> {
+export async function readClaudeMcpjsonPolicy(cwd: string, home: string): Promise<ClaudeMcpjsonPolicy> {
 	// Independent mode (lib/config-mode.ts) reads the same keys from One Code's
 	// user file, and only the tightening one from its per-repo file.
-	const paths = claudeSourcesOn(mode)
-		? settingsPaths(cwd, home)
-		: { user: oneCodeSettingsPath(home), local: oneCodeProjectSettingsPath(cwd, home) };
+	const claude = claudeSourcesOn();
+	const userScope: SettingsSource = claude ? "claude-user" : "onecode-user";
+	const localScope: SettingsSource = claude ? "project-local" : "onecode-project";
 	const policy: ClaudeMcpjsonPolicy = { enableAll: false, enabled: new Set(), disabled: new Set() };
-	// Deliberately not `paths.project`: a checked-in settings.json granting
+	// Deliberately not the project file: a checked-in settings.json granting
 	// enableAllProjectMcpServers would be the repo approving its own servers.
 	// The local file is in the checkout too, whatever git says about it.
-	for (const path of [paths.user, paths.local]) {
+	for (const [source, path] of settingsSources(cwd, home)) {
+		if (source !== userScope && source !== localScope) continue;
 		const file = readSettingsFile(path);
 		if (!file) continue;
 		for (const name of stringArray(file.disabledMcpjsonServers)) policy.disabled.add(name);
-		if (path === paths.local) continue;
+		if (source === localScope) continue;
 		if (typeof file.enableAllProjectMcpServers === "boolean") policy.enableAll = file.enableAllProjectMcpServers;
 		for (const name of stringArray(file.enabledMcpjsonServers)) policy.enabled.add(name);
 	}

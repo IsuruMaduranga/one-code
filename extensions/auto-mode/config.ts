@@ -47,7 +47,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { claudeUserSettingsPath, managedSettingsPaths } from "../lib/claude-settings.ts";
-import { type ConfigMode, claudeSourcesOn, configMode } from "../lib/config-mode.ts";
+import { claudeSourcesOn } from "../lib/config-mode.ts";
 import { oneCodeSettingsPath, readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
 import { DEFAULT_ENVIRONMENT, slotName } from "./defaults.ts";
 
@@ -92,8 +92,6 @@ interface AutoModeSettingsFile {
 
 const DEFAULTS_TOKEN = "$defaults";
 
-export { managedSettingsPaths };
-
 /**
  * The files `autoMode` is read from, lowest precedence first. One Code's own
  * auto-mode keys (`classifierModel`, `classifierModelSetFor`) are deliberately
@@ -101,10 +99,10 @@ export { managedSettingsPaths };
  * define them, and One Code once wrote them there, so a stale value must not
  * survive the move to `~/.onecode` (see the read guard in the loader).
  */
-export function autoModeSettingsPaths(home: string, mode: ConfigMode = configMode()): string[] {
+export function autoModeSettingsPaths(home: string): string[] {
 	// Independent mode (lib/config-mode.ts) reads One Code's file alone; the
 	// built-in rules apply regardless, since settings only append to them.
-	if (!claudeSourcesOn(mode)) return [oneCodeSettingsPath(home)];
+	if (!claudeSourcesOn()) return [oneCodeSettingsPath(home)];
 	return [claudeUserSettingsPath(home), oneCodeSettingsPath(home), ...managedSettingsPaths()];
 }
 

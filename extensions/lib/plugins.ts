@@ -245,10 +245,8 @@ export function findPluginCommands(plugin: Pick<Plugin, "name">, commandsDir: st
 
 /** The two roots + settings locations discovery reads from. */
 export interface DiscoverRoots {
-	/** Claude Code's plugins dir (`~/.claude/plugins`) — read-only. */
-	claudePluginsDir: string;
-	/** False in independent mode (lib/config-mode.ts): Claude Code's installs are not read. */
-	readClaudePlugins?: boolean;
+	/** Claude Code's plugins dir (`~/.claude/plugins`) — read-only; unset in independent mode (lib/config-mode.ts). */
+	claudePluginsDir?: string;
 	/** One Code's plugin root (`<agentDir>/plugins`) — ours to write. */
 	oneCodeRoot: string;
 	cwd: string;
@@ -258,8 +256,7 @@ export interface DiscoverRoots {
 /** The standard roots; wiring passes `getAgentDir()` (pure modules can't). */
 export function defaultDiscoverRoots(agentDir: string, cwd: string = process.cwd(), home: string = os.homedir()): DiscoverRoots {
 	return {
-		claudePluginsDir: join(claudeUserDir(home), "plugins"),
-		readClaudePlugins: claudeSourcesOn(),
+		claudePluginsDir: claudeSourcesOn() ? join(claudeUserDir(home), "plugins") : undefined,
 		oneCodeRoot: pluginRoot(agentDir),
 		cwd,
 		home,
@@ -334,21 +331,23 @@ export function invalidatePluginsCache(): void {
 }
 
 export function discoverPlugins(roots: DiscoverRoots): DiscoveredPlugins {
-	const readClaude = roots.readClaudePlugins !== false;
-	const key = [readClaude ? roots.claudePluginsDir : "", roots.oneCodeRoot, roots.cwd, roots.home].join("\n");
+	const claudeDir = roots.claudePluginsDir;
+	const key = [claudeDir ?? "", roots.oneCodeRoot, roots.cwd, roots.home].join("\n");
 	if (box.current?.key === key) return box.current.result;
 
-	const ccEnabled = readEnabledPlugins(roots.cwd, roots.home);
+	const ccEnabled = claudeDir ? readEnabledPlugins(roots.cwd, roots.home) : {};
 	const overrides = readOverrides(roots.oneCodeRoot);
 	const skillOverrides = readSkillStates(roots.oneCodeRoot);
 
-	const claudePlugins: Plugin[] = (readClaude ? loadInstalledPlugins(roots.claudePluginsDir, roots.cwd) : []).map((p) => ({
-		...p,
-		originRoot: "claude" as const,
-		enabled: claudePluginEnabled(p.id, ccEnabled, overrides),
-		overridden: p.id in overrides,
-		dataRoot: join(roots.claudePluginsDir, "data"),
-	}));
+	const claudePlugins: Plugin[] = claudeDir
+		? loadInstalledPlugins(claudeDir, roots.cwd).map((p) => ({
+				...p,
+				originRoot: "claude" as const,
+				enabled: claudePluginEnabled(p.id, ccEnabled, overrides),
+				overridden: p.id in overrides,
+				dataRoot: join(claudeDir, "data"),
+			}))
+		: [];
 
 	const oneCodePlugins: Plugin[] = loadInstalledPlugins(roots.oneCodeRoot, roots.cwd).map((p) => ({
 		...p,

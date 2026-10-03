@@ -17,9 +17,8 @@
 import { readFileSync, statSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
-import { managedSettingsPaths } from "../lib/claude-settings.ts";
-import { type ConfigMode, claudeSourcesOn, configMode } from "../lib/config-mode.ts";
-import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
+import { managedSettingsPaths, settingsSources } from "../lib/claude-settings.ts";
+import { claudeSourcesOn } from "../lib/config-mode.ts";
 import { CC_HOOK_EVENTS, type CcHookEvent } from "./protocol.ts";
 
 /** Claude Code's per-hook `shell` field: which interpreter runs the command string. */
@@ -59,25 +58,14 @@ export interface LoadedHooks {
 	diagnostics: string[];
 }
 
-
 /**
  * The settings files hooks are read from, lowest authority first. Independent
  * mode (lib/config-mode.ts) reads One Code's user file and its per-repo file
  * under `~/.onecode/projects/<slug>/` instead; neither ships in a repository,
  * so both are user scope and need no project-trust prompt.
  */
-export function hookSettingsPaths(
-	claudeDir: string,
-	cwd: string,
-	home: string = os.homedir(),
-	mode: ConfigMode = configMode(),
-): Array<{ scope: HookScope; path: string }> {
-	if (!claudeSourcesOn(mode)) {
-		return [
-			{ scope: "user", path: oneCodeSettingsPath(home) },
-			{ scope: "user", path: oneCodeProjectSettingsPath(cwd, home) },
-		];
-	}
+export function hookSettingsPaths(claudeDir: string, cwd: string, home: string = os.homedir()): Array<{ scope: HookScope; path: string }> {
+	if (!claudeSourcesOn()) return settingsSources(cwd, home).map(([, path]) => ({ scope: "user" as const, path }));
 	return [
 		{ scope: "user", path: join(claudeDir, "settings.json") },
 		...managedSettingsPaths().map((path) => ({ scope: "managed" as const, path })),

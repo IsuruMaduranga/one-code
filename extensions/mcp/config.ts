@@ -29,7 +29,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { type ConfigMode, claudeSourcesOn, configMode } from "../lib/config-mode.ts";
+import { claudeSourcesOn } from "../lib/config-mode.ts";
 import { claudeJsonPath, expandTilde } from "../lib/paths.ts";
 import { hashServerConfig } from "./trust.ts";
 
@@ -233,8 +233,8 @@ export function piMcpConfigPaths(agentDir: string, cwd: string, configDirName = 
 }
 
 /** Claude Code's MCP files; none in independent mode (lib/config-mode.ts), where pi's two `mcp.json` files remain. */
-export function configPaths(cwd: string, home: string, mode: ConfigMode = configMode()): string[] {
-	if (!claudeSourcesOn(mode)) return [];
+export function configPaths(cwd: string, home: string): string[] {
+	if (!claudeSourcesOn()) return [];
 	return [claudeJsonPath(home), ...findProjectConfigs(cwd), join(cwd, ".claude", "settings.local.json")];
 }
 

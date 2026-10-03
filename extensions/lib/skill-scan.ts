@@ -41,6 +41,28 @@ export function scopeForPath(path: string, home: string, agentDir: string): Skil
 	return "project";
 }
 
+/**
+ * The skill folders One Code adds to pi's own (`<agentDir>/skills`, which pi
+ * scans itself), in load order: Claude Code's two only in Claude-compatible
+ * mode (lib/config-mode.ts), the cross-tool `.agents` pair in both. `claudeDir`
+ * defaults to `~/.claude` (`CLAUDE_CONFIG_DIR`); `~/.agents` is never moved.
+ */
+export function skillSourceDirs(cwd: string, home: string, claudeDir: string = claudeUserDir(home)): Array<{ dir: string; scope: SkillScope }> {
+	const claude = claudeSourcesOn();
+	const dirs: Array<{ dir: string; scope: SkillScope } | false> = [
+		claude && { dir: join(claudeDir, "skills"), scope: "user" },
+		{ dir: join(home, ".agents", "skills"), scope: "user" },
+		claude && { dir: join(cwd, ".claude", "skills"), scope: "project" },
+		{ dir: join(cwd, ".agents", "skills"), scope: "project" },
+	];
+	return dirs.filter((d): d is { dir: string; scope: SkillScope } => d !== false);
+}
+
+/** The prompt-template folders: `~/.claude/commands` and `.claude/commands`, or their `.onecode` twins in independent mode. */
+export function commandDirs(cwd: string, home: string, claudeDir: string = claudeUserDir(home)): string[] {
+	return [join(claudeSourcesOn() ? claudeDir : userConfigDir(home), "commands"), join(projectConfigDir(cwd), "commands")];
+}
+
 function scanDir(dir: string, scope: SkillScope, into: Map<string, ScannedSkill>): void {
 	if (!existsSync(dir)) return;
 	let entries: string[];
@@ -66,12 +88,7 @@ export function scanSkills(
 	bundledSkillsDir?: string,
 ): ScannedSkill[] {
 	const skills = new Map<string, ScannedSkill>();
-	// Independent mode (lib/config-mode.ts) reads no Claude Code skill folder.
-	const claude = claudeSourcesOn();
-	if (claude) scanDir(join(claudeUserDir(home), "skills"), "user", skills);
-	scanDir(join(home, ".agents", "skills"), "user", skills);
-	if (claude) scanDir(join(cwd, ".claude", "skills"), "project", skills);
-	scanDir(join(cwd, ".agents", "skills"), "project", skills);
+	for (const { dir, scope } of skillSourceDirs(cwd, home)) scanDir(dir, scope, skills);
 	scanDir(join(agentDir, "skills"), "user", skills);
 	if (bundledSkillsDir) scanDir(bundledSkillsDir, scopeForPath(bundledSkillsDir, home, agentDir), skills);
 	for (const skill of pluginSkills) {
@@ -96,7 +113,7 @@ export function promptTemplateNames(cwd: string, home: string, agentDir: string)
 /** Every prompt-template file pi will resolve, with the command name each gives. */
 export function promptTemplateFiles(cwd: string, home: string, agentDir: string): { name: string; path: string }[] {
 	const files: { name: string; path: string }[] = [];
-	for (const dir of [join(userConfigDir(home), "commands"), join(projectConfigDir(cwd), "commands"), join(agentDir, "prompts")]) {
+	for (const dir of [...commandDirs(cwd, home), join(agentDir, "prompts")]) {
 		if (!existsSync(dir)) continue;
 		let entries: string[];
 		try {

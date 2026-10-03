@@ -29,7 +29,7 @@ import { ORIGINAL_COMMAND_CHANNEL, type OriginalCommandRecord } from "../lib/ori
 import { rewriteToolInput, validateWorktreeName } from "./rewrite.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 import { HARNESS_GIT_CONFIG } from "../lib/git.ts";
-import { claudeSourcesOn, projectConfigDir } from "../lib/config-mode.ts";
+import { projectConfigDir, projectConfigDirName } from "../lib/config-mode.ts";
 
 const run = promisify(execFile);
 const REMINDER_KEY = "cc-worktree-session";
@@ -134,7 +134,7 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 		label: "Enter Worktree",
 		...ccToolRenderers("Enter Worktree"),
 		description:
-			"Create an isolated git worktree under " + (claudeSourcesOn() ? ".claude" : ".onecode") + "/worktrees/ (branched from the current HEAD) and switch this session into it — subsequent commands and relative paths run there. Use ONLY when the user or project instructions explicitly ask for a worktree. Pass `name` to name the new worktree, or `path` to switch into an existing worktree instead (mutually exclusive). Leave with exit_worktree.",
+			"Create an isolated git worktree under " + projectConfigDirName() + "/worktrees/ (branched from the current HEAD) and switch this session into it — subsequent commands and relative paths run there. Use ONLY when the user or project instructions explicitly ask for a worktree. Pass `name` to name the new worktree, or `path` to switch into an existing worktree instead (mutually exclusive). Leave with exit_worktree.",
 		parameters: Type.Object({
 			name: Type.Optional(
 				Type.String({ description: "Name for a new worktree (segments of letters/digits/._-, max 64 chars). Random if omitted" }),

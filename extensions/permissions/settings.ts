@@ -18,16 +18,10 @@
  * Unknown keys in the files are preserved on write.
  */
 
-import { managedSettingsPaths } from "../auto-mode/config.ts";
-import { readSettingsFile as readClaudeSettingsFile, settingsPaths } from "../lib/claude-settings.ts";
-import {
-	oneCodeProjectSettingsPath,
-	oneCodeSettingsPath,
-	readSettingsForWrite,
-	writeSettings,
-} from "../lib/one-code-settings.ts";
+import { readSettingsFile as readClaudeSettingsFile, type SettingsSource, settingsPaths, settingsSources } from "../lib/claude-settings.ts";
+import { readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
 import { resolve } from "node:path";
-import { type ConfigMode, claudeSourcesOn, configMode } from "../lib/config-mode.ts";
+import { claudeSourcesOn } from "../lib/config-mode.ts";
 import { expandTilde } from "../lib/paths.ts";
 import type { PermissionMode } from "./matcher.ts";
 
@@ -111,18 +105,15 @@ function readSettingsFile(path: string): ClaudeSettingsFile | undefined {
 	return readClaudeSettingsFile(path) as ClaudeSettingsFile | undefined;
 }
 
-export function loadPermissionSettings(cwd: string, home: string, mode: ConfigMode = configMode()): PermissionSettings {
+export function loadPermissionSettings(cwd: string, home: string): PermissionSettings {
 	const merged: PermissionSettings = { allow: [], projectAllow: [], deny: [], ask: [] };
-	const independent = !claudeSourcesOn(mode);
-
-	// One Code writes the rules it records (via /allow, the auto-mode setup) to its
-	// own files, never into Claude Code's — so its own files are read alongside the
-	// borrowed `.claude` ladder. They contribute allow/deny/ask rules only;
-	// `defaultMode` stays sourced from the `.claude` files (nothing here writes it,
-	// and keeping the auto-mode reasoning to one place avoids a second `auto` path).
-	// Independent mode reads no `.claude` file, so there One Code's user file,
-	// the same user scope, carries `defaultMode` too.
-	for (const [source, path] of permissionSources(cwd, home, mode)) {
+	// `defaultMode` comes from the user-scope file Claude Code's keys live in
+	// (`~/.claude/settings.json`, or One Code's own in independent mode,
+	// lib/config-mode.ts), project files and managed settings. One Code's other
+	// file only adds the rules it records (via /allow, the auto-mode setup),
+	// keeping the auto-mode reasoning to one place.
+	const userScope = claudeSourcesOn() ? "claude-user" : "onecode-user";
+	for (const [source, path] of settingsSources(cwd, home)) {
 		const file = readSettingsFile(path);
 		const perms = file?.permissions;
 		if (!perms) continue;
@@ -133,7 +124,7 @@ export function loadPermissionSettings(cwd: string, home: string, mode: ConfigMo
 		if (Array.isArray(perms.ask)) merged.ask.push(...perms.ask.filter((r) => typeof r === "string"));
 		if (perms.disableBypassPermissionsMode === "disable") merged.disableBypassPermissionsMode = true;
 		if (perms.blockReadsOutsideWorkingDirectories === true) merged.blockReadsOutsideWorkingDirectories = true;
-		if (source === "onecode-project" || (source === "onecode-user" && !independent)) continue;
+		if (source.startsWith("onecode-") && source !== userScope) continue;
 		const defaultMode = normalizePermissionMode(perms.defaultMode);
 		// The modes a repo may not grant itself (MODES_NEVER_FROM_PROJECT) are
 		// honoured from user and managed scope only.
@@ -173,7 +164,7 @@ export function resolveStartupMode(
 export type RuleBehavior = "allow" | "ask" | "deny";
 
 /** Where a permission rule was read from, for the `/permissions` panel. */
-export type RuleSource = "claude-user" | "onecode-user" | "project" | "project-local" | "onecode-project" | "managed";
+export type RuleSource = SettingsSource;
 
 export interface SourcedRule {
 	behavior: RuleBehavior;
@@ -181,32 +172,6 @@ export interface SourcedRule {
 	source: RuleSource;
 	/** The settings file the rule is in. */
 	path: string;
-}
-
-/**
- * Every settings file permissions are read from, lowest precedence first, with
- * its source. Managed settings last: Claude Code's organisation policy outranks
- * every user/project file, for rules and for defaultMode alike (review P14).
- * Independent mode (lib/config-mode.ts) reads One Code's own two files only,
- * managed settings included in what it drops (the user's choice, recorded in
- * decisions/memory-state.md).
- */
-function permissionSources(cwd: string, home: string, mode: ConfigMode = configMode()): Array<[RuleSource, string]> {
-	if (!claudeSourcesOn(mode)) {
-		return [
-			["onecode-user", oneCodeSettingsPath(home)],
-			["onecode-project", oneCodeProjectSettingsPath(cwd, home)],
-		];
-	}
-	const paths = settingsPaths(cwd, home);
-	return [
-		["claude-user", paths.user],
-		["onecode-user", oneCodeSettingsPath(home)],
-		["project", paths.project],
-		["project-local", paths.local],
-		["onecode-project", oneCodeProjectSettingsPath(cwd, home)],
-		...managedSettingsPaths().map((path): [RuleSource, string] => ["managed", path]),
-	];
 }
 
 export interface SourcedDirectory {
@@ -226,7 +191,7 @@ export interface SourcedDirectory {
  */
 export function listWorkspaceDirectories(cwd: string, home: string): SourcedDirectory[] {
 	const dirs: SourcedDirectory[] = [];
-	for (const [source, settingsPath] of permissionSources(cwd, home)) {
+	for (const [source, settingsPath] of settingsSources(cwd, home)) {
 		const list = readSettingsFile(settingsPath)?.permissions?.additionalDirectories;
 		if (!Array.isArray(list)) continue;
 		for (const raw of list) {
@@ -255,7 +220,7 @@ export function removeWorkspaceDirectory(raw: string, filePath: string): boolean
  */
 export function listPermissionRules(cwd: string, home: string): SourcedRule[] {
 	const rules: SourcedRule[] = [];
-	for (const [source, path] of permissionSources(cwd, home)) {
+	for (const [source, path] of settingsSources(cwd, home)) {
 		const perms = readSettingsFile(path)?.permissions;
 		if (!perms) continue;
 		for (const behavior of ["allow", "ask", "deny"] as const) {

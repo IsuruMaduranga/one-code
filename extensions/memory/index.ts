@@ -33,7 +33,7 @@ import {
 	projectMemoryDir,
 	stampFrontmatter,
 } from "../lib/memory.ts";
-import { type ConfigMode, CONFIG_MODE_KEY, configMode, savedConfigMode } from "../lib/config-mode.ts";
+import { type ConfigMode, CONFIG_MODE_KEY, configMode, MODE_LABELS, savedConfigMode } from "../lib/config-mode.ts";
 import { oneCodeSettingsPath, readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
 import { claudeConfigDir, oneCodeStateDir } from "../lib/paths.ts";
 import { tryReadFile } from "../lib/plugins.ts";
@@ -41,7 +41,7 @@ import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import { buildMemoryEntries, entryName, type MemoryEntry } from "./entries.ts";
 import { editorHint, memoryDisplayPath, openPath } from "./open-external.ts";
-import { applyMemoryKey, decodeMemoryKey, initialMemoryState, MODE_LABELS, type ModeView, renderMemoryPanel } from "./panel.ts";
+import { applyMemoryKey, decodeMemoryKey, initialMemoryState, type ModeView, renderMemoryPanel } from "./panel.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 
 const MEMORY_PANEL_MAX_HEIGHT = 20;
@@ -169,8 +169,8 @@ export default function memoryExtension(pi: ExtensionAPI) {
 					? ""
 					: `Set config sources to ${MODE_LABELS[mode.saved]}${mode.saved === mode.running ? "" : "; applies from the next start"}\n\n`;
 			if (!chosen) {
-				ctx.ui.notify("Cancelled memory editing", "info");
-				return `${modeLine}Cancelled memory editing`;
+				ctx.ui.notify(CANCELLED, "info");
+				return `${modeLine}${CANCELLED}`;
 			}
 			const shown = memoryDisplayPath(chosen.path, ctx.cwd, os.homedir());
 			const result = await openPath(chosen.path, "file");
@@ -180,6 +180,9 @@ export default function memoryExtension(pi: ExtensionAPI) {
 		},
 	});
 }
+
+/** Claude Code's `/memory` result when the panel closes without a pick. */
+const CANCELLED = "Cancelled memory editing";
 
 /** Save `configMode` to One Code's user settings; the running process keeps its mode. */
 function saveConfigMode(next: ConfigMode): void {
@@ -215,7 +218,7 @@ function openMemoryPanel(ctx: ExtensionContext, entries: MemoryEntry[], mode: Mo
 			handleInput: (data: string) => {
 				const key = decodeMemoryKey(data);
 				if (!key) return;
-				const effect = applyMemoryKey(state, key, entries, true);
+				const effect = applyMemoryKey(state, key, entries);
 				if (effect?.kind === "toggle-mode") {
 					const next: ConfigMode = mode.saved === "independent" ? "claude-compatible" : "independent";
 					try {

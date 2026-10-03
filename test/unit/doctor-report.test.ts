@@ -47,6 +47,7 @@ function environment(overrides: Partial<DoctorEnvironment> = {}): DoctorEnvironm
 		home,
 		agentDir: join(home, ".onecode", "agent"),
 		stateDir: join(home, ".onecode"),
+		configMode: "claude-compatible",
 		// A clean env: no provider keys, no CLAUDE_CONFIG_DIR, a PATH with nothing on it.
 		env: { PATH: join(home, "empty-bin"), HOME: home },
 		platform: "darwin",

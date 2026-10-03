@@ -56,7 +56,8 @@ describe("configMode", () => {
 describe("memoryDir by mode", () => {
 	it("moves auto-memory under ~/.onecode in independent mode", () => {
 		const home = join("/", "Users", "u");
-		expect(memoryDir(home, "/tmp/project", "claude-compatible")).toBe(join(home, ".claude", "projects", "-tmp-project", "memory"));
-		expect(memoryDir(home, "/tmp/project", "independent")).toBe(join(home, ".onecode", "projects", "-tmp-project", "memory"));
+		expect(memoryDir(home, "/tmp/project")).toBe(join(home, ".claude", "projects", "-tmp-project", "memory"));
+		resetConfigModeForTest("independent");
+		expect(memoryDir(home, "/tmp/project")).toBe(join(home, ".onecode", "projects", "-tmp-project", "memory"));
 	});
 });

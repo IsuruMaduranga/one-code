@@ -19,6 +19,7 @@
  */
 
 import type { AgentDefinition } from "./agents.ts";
+import { claudeSourcesOn, projectConfigDirName } from "../lib/config-mode.ts";
 
 export const GUIDE_AGENT = "one-code-guide";
 
@@ -145,7 +146,7 @@ export function guideSystemPrompt({ docs, install, setup }: GuideInput): string 
 1. Read the One Code guide's index and pick the pages that cover the question
 2. Read those pages; search the docs with \`grep\` and \`find\` through the shell when the index does not name the topic
 3. For customization and extension questions, read pi's docs and examples too
-4. Read the user's own configuration (settings files, CLAUDE.md, \`.claude/\`) when it bears on the answer
+4. Read the user's own configuration (settings files, ${claudeSourcesOn() ? "CLAUDE.md" : "AGENTS.md, ONECODE.md"}, \`${projectConfigDirName()}/\`) when it bears on the answer
 5. Provide clear, actionable guidance based on the documentation, citing the file each fact came from
 
 **When One Code does not do what the user wants,** say so plainly, then suggest the smallest change that gets them there, in this order:

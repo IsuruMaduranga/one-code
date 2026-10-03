@@ -19,11 +19,10 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
-import { managedSettingsPaths } from "../auto-mode/config.ts";
 import { loadPluginHooks } from "../hooks/plugin-hooks.ts";
 import { type HooksSource, loadHookSettings } from "../hooks/settings.ts";
 import { claudeJsonPath, claudeUserDir } from "../lib/paths.ts";
-import { claudeUserSettingsPath, settingsPaths } from "../lib/claude-settings.ts";
+import { claudeUserSettingsPath, managedSettingsPaths, settingsPaths } from "../lib/claude-settings.ts";
 import { discoverContextFilePaths, instructionRule } from "../lib/claude-context.ts";
 import { CLAUDE_MD_CHAR_LIMIT, claudeMdLimitWarning, indexLimitStatus, projectMemoryDir } from "../lib/memory.ts";
 import { readDisabledMcpServers } from "../lib/mcp-overrides.ts";

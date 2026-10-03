@@ -32,11 +32,12 @@
  */
 
 import { existsSync, readdirSync, statSync } from "node:fs";
-import { dirname, isAbsolute, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { type InstructionFiles, readInstructionFiles } from "./claude-settings.ts";
-import { type ConfigMode, claudeSourcesOn, configMode } from "./config-mode.ts";
+import { claudeSourcesOn } from "./config-mode.ts";
+import { findGitRoot } from "./git.ts";
 import { tryReadFile } from "./plugins.ts";
-import { absoluteFrom, expandTilde } from "./paths.ts";
+import { absoluteFrom, claudeUserDir, expandTilde, isPathAtOrUnder } from "./paths.ts";
 
 /** One CLAUDE.md-family file as it appears in the block. `content` is raw (untrimmed). */
 export interface ContextFile {
@@ -103,7 +104,7 @@ function isPresentFile(path: string): boolean {
  * costs a few stats and never lists the directory. Only when a probe hits do we
  * read the directory once to recover the real casing.
  */
-function firstOneCodeFile(dir: string): string | null {
+export function firstOneCodeFile(dir: string): string | null {
 	if (!ONECODE_NAMES.some((n) => isPresentFile(join(dir, n)))) return null;
 	let entries: string[];
 	try {
@@ -276,8 +277,8 @@ export function ancestorDirs(cwd: string): string[] {
 export type InstructionRule = InstructionFiles | "agents-md";
 
 /** The rule One Code runs under: independent mode's own, else Claude Code's `instructionFiles`. */
-export function instructionRule(home: string, mode: ConfigMode = configMode()): InstructionRule {
-	return claudeSourcesOn(mode) ? readInstructionFiles(home) : "agents-md";
+export function instructionRule(home: string): InstructionRule {
+	return claudeSourcesOn() ? readInstructionFiles(home) : "agents-md";
 }
 
 /**
@@ -315,15 +316,22 @@ export function discoverContextFilePaths(opts: {
 	const seen = new Set<string>();
 	const includeOneCode = opts.homeOneCodeDir !== undefined;
 	const rule = opts.rule ?? "claude-md";
-	const claudeFiles = rule === "claude-md" || rule === "claude-md-or-agents-md" || rule === "claude-md-and-agents-md";
+	const claudeFiles = rule !== "agents-md" && rule !== "managed-only";
 	const dirs = ancestorDirs(opts.cwd);
-	const projectHasClaude = () => dirs.some((d) => isPresentFile(join(d, "CLAUDE.md")) || isPresentFile(join(d, "CLAUDE.local.md")));
+	// Each path is checked once per call: the per-project test and the walk share it.
+	const presence = new Map<string, boolean>();
+	const present = (path: string): boolean => {
+		let found = presence.get(path);
+		if (found === undefined) presence.set(path, (found = isPresentFile(path)));
+		return found;
+	};
+	const projectHasClaude = () => dirs.some((d) => present(join(d, "CLAUDE.md")) || present(join(d, "CLAUDE.local.md")));
 	const agentsFiles =
 		rule === "agents-md" || rule === "claude-md-and-agents-md" || (rule === "claude-md-or-agents-md" && !projectHasClaude());
 
 	/** Adds the path if present. */
 	const push = (path: string, descriptor: string): void => {
-		if (seen.has(path) || !isPresentFile(path)) return;
+		if (seen.has(path) || !present(path)) return;
 		paths.push({ path, descriptor });
 		seen.add(path);
 	};
@@ -339,7 +347,7 @@ export function discoverContextFilePaths(opts: {
 		if (agentsFiles) {
 			push(join(d, "AGENTS.md"), AGENTS_DESCRIPTOR);
 			// `.claude/AGENTS.md` is a Claude Code location; independent mode reads none.
-			if (rule !== "agents-md") push(join(d, ".claude", "AGENTS.md"), AGENTS_DESCRIPTOR);
+			if (claudeFiles) push(join(d, ".claude", "AGENTS.md"), AGENTS_DESCRIPTOR);
 		}
 		if (claudeFiles) push(join(d, "CLAUDE.local.md"), LOCAL_DESCRIPTOR);
 		if (includeOneCode) {
@@ -349,6 +357,25 @@ export function discoverContextFilePaths(opts: {
 	}
 
 	return paths;
+}
+
+/**
+ * The instruction files in play for this project under the running rule
+ * (`instructionRule`): the project's own from cwd up to the git root (or just
+ * cwd outside a repo), nearest directory first, and the user's global
+ * CLAUDE.md apart. With `homeOneCodeDir`, ONECODE.md files join the project
+ * list. The startup banner and the auto-mode classifier both read this.
+ */
+export function projectInstructionFiles(opts: { cwd: string; home: string; homeOneCodeDir?: string }): { project: string[]; global?: string } {
+	const stop = findGitRoot(opts.cwd) ?? opts.cwd;
+	const files = discoverContextFilePaths({ cwd: opts.cwd, homeClaudeDir: claudeUserDir(opts.home), homeOneCodeDir: opts.homeOneCodeDir, rule: instructionRule(opts.home) });
+	// The directory a file belongs to: `.claude/AGENTS.md` counts as its parent's.
+	const owner = (path: string) => (basename(dirname(path)) === ".claude" ? dirname(dirname(path)) : dirname(path));
+	const project = files
+		.filter(({ path, descriptor }) => descriptor !== GLOBAL_DESCRIPTOR && descriptor !== ONECODE_GLOBAL_DESCRIPTOR && isPathAtOrUnder(path, stop))
+		.map(({ path }) => path)
+		.sort((a, b) => owner(b).length - owner(a).length);
+	return { project, global: files.find(({ descriptor }) => descriptor === GLOBAL_DESCRIPTOR)?.path };
 }
 
 export function discoverContextFiles(opts: {

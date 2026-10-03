@@ -177,6 +177,7 @@ export default function doctorExtension(pi: ExtensionAPI) {
 			oneCodeSettingsPath: oneCodeSettingsPath(home),
 			oneCodeProjectSettingsPath: oneCodeProjectSettingsPath(ctx.cwd, home),
 			decisionLogEnabled: loadAutoModeConfig(home).logDecisions,
+			independent: configMode() === "independent",
 		});
 		pi.sendUserMessage(prompt, { deliverAs: "followUp" });
 		return true;

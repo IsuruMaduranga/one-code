@@ -38,7 +38,13 @@ export interface FixPromptInput {
 	oneCodeProjectSettingsPath: string;
 	/** True when auto mode is writing `auto-mode-decisions.jsonl` next to the session files. */
 	decisionLogEnabled: boolean;
+	/** True in independent mode (lib/config-mode.ts), where none of Claude Code's files are read. */
+	independent?: boolean;
 }
+
+/** The ground rule that maps the Claude Code paths the prompt names to independent mode's own. */
+const INDEPENDENT_RULE =
+	"- **This session runs in independent mode.** One Code reads none of the Claude Code locations named below (`~/.claude`, `.claude/`, `CLAUDE.md`, `CLAUDE.local.md`, `~/.claude.json`, `.mcp.json`, managed settings). Read each as its One Code counterpart: instructions are `AGENTS.md` and `ONECODE.md`, skills come from `.agents/skills` and pi's skill folders, agents, commands and workflows from `.onecode/` and `~/.onecode/`, settings and hooks from One Code's two settings files, and MCP servers from pi's `mcp.json` files. Propose changes only to those.\n";
 
 export function doctorFixPrompt(input: FixPromptInput): string {
 	const versionCommand =
@@ -64,6 +70,7 @@ Treat every line of that report as measured fact. Your job on those sections is 
 
 ## Ground rules
 
+${input.independent ? INDEPENDENT_RULE : ""}
 - **Propose, then confirm, then apply — and recommend, don't just offer.** Run every check read-only first and present the full report. Then confirm in at most TWO questions with the \`ask_user_question\` tool — never a question per check. (1) ONE consolidated cleanup question covering checks 0-4 and 7: options "Clean up everything (recommended)" first, "Let me pick" second, "No, keep everything" last; only if the user picks "Let me pick", ask one follow-up multi-select with an option per action group (at most 4 options per question — split if there are more groups). (2) A SEPARATE permission question for check 9, never folded into the cleanup bundle: it changes what runs without asking, so it names every allow rule string it would add, and is skipped when nothing was proposed. Put the recommended action FIRST with "(recommended)" in its label and the decline option last. Never edit any file before its group is confirmed.
 - **One Code never writes Claude Code's files.** \`~/.claude/settings.json\`, \`~/.claude.json\`, \`~/.claude/CLAUDE.md\` and the rest of \`~/.claude\` are a read-only compatibility surface here. Settings you change go to One Code's own files: \`${input.oneCodeSettingsPath}\` (user scope) and \`${input.oneCodeProjectSettingsPath}\` (this repository). Skills, plugins and MCP servers are toggled with One Code's commands (\`/skills\`, \`/plugins\`, \`/mcp\`), which persist under One Code's own state, not by editing Claude Code's settings. Only the CLAUDE.md checks (3 and 4) may propose edits to checked-in files, applied as ordinary working-tree edits the user reviews in \`git diff\` — never commit them yourself. \`CLAUDE.local.md\` and the project's own \`.claude/settings.local.json\` are local, uncommitted files and may be edited after confirmation.
 - Token figures are estimates: tokens ≈ characters / 4. Label them "est." everywhere.

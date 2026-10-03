@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadProjectInstructions } from "../../extensions/auto-mode/instructions.ts";
+import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
 
 let root: string;
 let repo: string;
@@ -32,7 +33,8 @@ describe("loadProjectInstructions", () => {
 		writeFileSync(join(repo, "CLAUDE.md"), "claude rule");
 		writeFileSync(join(repo, "AGENTS.md"), "agents rule");
 		writeFileSync(join(home, ".claude", "CLAUDE.md"), "global rule");
-		const text = loadProjectInstructions(repo, home, "independent") ?? "";
+		resetConfigModeForTest("independent");
+		const text = loadProjectInstructions(repo, home) ?? "";
 		expect(text).toContain("agents rule");
 		expect(text).not.toContain("claude rule");
 		expect(text).not.toContain("global rule");

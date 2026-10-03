@@ -117,23 +117,15 @@ export function buildMemoryEntries(opts: {
 	for (const d of ancestorDirs(cwd)) {
 		const isCwd = d === cwd;
 		const claude = join(d, "CLAUDE.md");
-		if (isCwd && independent) {
-			const agents = join(d, "AGENTS.md");
+		if (isCwd) {
+			// Project instructions — always offered (created on save): AGENTS.md in independent mode.
+			const [name, descriptor] = independent ? ["AGENTS.md", AGENTS_DESCRIPTOR] : ["CLAUDE.md", PROJECT_DESCRIPTOR];
 			add({
 				title: "Project instructions",
-				description: `Checked in at ${disp(agents)}`,
-				path: agents,
+				description: `Checked in at ${disp(join(d, name))}`,
+				path: join(d, name),
 				kind: "file",
-				exists: found.has(`${AGENTS_DESCRIPTOR}\0${d}`),
-			});
-		} else if (isCwd) {
-			// Project instructions — always offered (created on save).
-			add({
-				title: "Project instructions",
-				description: `Checked in at ${disp(claude)}`,
-				path: claude,
-				kind: "file",
-				exists: found.has(`${PROJECT_DESCRIPTOR}\0${d}`),
+				exists: found.has(`${descriptor}\0${d}`),
 			});
 		} else if (found.has(`${PROJECT_DESCRIPTOR}\0${d}`)) {
 			add({ title: disp(claude), path: claude, kind: "file", exists: true });
