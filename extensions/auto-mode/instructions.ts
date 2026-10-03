@@ -5,8 +5,8 @@
  * instruction like "never force push" steers both at once. This collects the
  * same files: cwd upward to the git root, plus the user's global file. It
  * reads every file any `instructionFiles` value could load, whatever the rule,
- * since an instruction here can only tighten. In independent mode only
- * AGENTS.md files load.
+ * plus the ONECODE.md files, since an instruction here can only tighten. In
+ * independent mode only AGENTS.md and ONECODE.md files load.
  *
  * These files are checked in, so they are untrusted input in a way the user's
  * own messages are not — the classifier prompt tells the model they may tighten
@@ -16,9 +16,10 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { firstOneCodeFile } from "../lib/claude-context.ts";
 import { claudeSourcesOn } from "../lib/config-mode.ts";
 import { findGitRoot } from "../lib/git.ts";
-import { claudeUserDir } from "../lib/paths.ts";
+import { claudeUserDir, oneCodeStateDir } from "../lib/paths.ts";
 
 
 /** Per-file and total caps, so a large instruction file cannot crowd out rules. */
@@ -68,12 +69,17 @@ export function loadProjectInstructions(cwd: string, home: string): string | und
 	let dir = cwd;
 	for (;;) {
 		for (const name of names) add(join(dir, name));
+		// The agent's ONECODE.md, which outranks the files above, in both modes.
+		const oneCode = firstOneCodeFile(dir);
+		if (oneCode) add(oneCode);
 		if (dir === stop) break;
 		const parent = dirname(dir);
 		if (parent === dir) break;
 		dir = parent;
 	}
 	if (claude) add(join(claudeUserDir(home), "CLAUDE.md"));
+	const globalOneCode = firstOneCodeFile(oneCodeStateDir(process.env, home));
+	if (globalOneCode) add(globalOneCode);
 
 	return parts.length > 0 ? parts.join("\n\n") : undefined;
 }

@@ -37,6 +37,24 @@ describe("loadProjectInstructions", () => {
 		expect(text).toContain("never push to main");
 	});
 
+	it("reads the project's and the global ONECODE.md in both modes", () => {
+		writeFileSync(join(repo, "ONECODE.md"), "never deploy from here");
+		const state = join(root, "state");
+		mkdirSync(state, { recursive: true });
+		writeFileSync(join(state, "ONECODE.md"), "global one code rule");
+		process.env.ONECODE_STATE_DIR = state;
+		try {
+			for (const mode of ["claude-compatible", "independent"] as const) {
+				resetConfigModeForTest(mode);
+				const text = loadProjectInstructions(repo, home) ?? "";
+				expect(text).toContain("never deploy from here");
+				expect(text).toContain("global one code rule");
+			}
+		} finally {
+			delete process.env.ONECODE_STATE_DIR;
+		}
+	});
+
 	it("reads only AGENTS.md in independent mode", () => {
 		writeFileSync(join(repo, "CLAUDE.md"), "claude rule");
 		writeFileSync(join(repo, "AGENTS.md"), "agents rule");

@@ -135,9 +135,10 @@ export async function gatherFacts(options: GatherOptions): Promise<SetupFacts> {
 	// the borrowed `.claude` file (read-only) and One Code's own file are gathered:
 	// a broad rule in either bypasses the classifier, and the audit later splits
 	// them (One Code's are removable; Claude Code's it can only warn about).
+	// Independent mode (lib/config-mode.ts) reads One Code's file alone.
 	const claudeUserPath = claudeUserSettingsPath(home);
 	const permissionsAllow: string[] = [];
-	for (const path of [claudeUserPath, oneCodeSettingsPath(home)]) {
+	for (const path of claudeSourcesOn() ? [claudeUserPath, oneCodeSettingsPath(home)] : [oneCodeSettingsPath(home)]) {
 		const file = readSettingsFile(path) as { permissions?: { allow?: unknown } } | undefined;
 		// Present-but-unreadable is not the same as absent (readIfPresent's rule):
 		// a malformed `.claude` file must land in notes so the drafting evidence
