@@ -20,7 +20,7 @@
  */
 
 import { spawn, execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -80,7 +80,11 @@ child.stdout.on("data", (chunk) => {
 			// Any other UI request (e.g. input) — answer to not hang.
 			send({ type: "extension_ui_response", id: event.id, value: "Yes", confirmed: true });
 		} else if (event.type === "agent_end") {
-			finish();
+			// Agent runs in the background in rpc mode: the first agent_end is the
+			// main turn handing off, before the child has called bash. Finish only
+			// once the prompt was answered and the child's command has run (its
+			// completion notification starts a later turn); the timeout covers failure.
+			if (answered && existsSync(join(workdir, "subagent-ran.txt"))) finish();
 		}
 	}
 });
@@ -90,7 +94,8 @@ function finish() {
 	if (done) return;
 	done = true;
 	clearTimeout(timeout);
-	const markerRan = raw.includes("SUBAGENT_BASH_RAN");
+	// Not the stream: the prompt itself echoes the marker in a user message_start.
+	const markerRan = existsSync(join(workdir, "subagent-ran.txt"));
 	const ok = sawSubagentPrompt && answered;
 	console.log(`${sawSubagentPrompt ? "PASS" : "FAIL"} subagent permission prompt bubbled to main session${promptTitle ? ` — "${promptTitle}"` : ""}`);
 	console.log(`${answered ? "PASS" : "FAIL"} prompt was answerable over rpc`);

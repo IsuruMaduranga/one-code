@@ -56,6 +56,10 @@ child.stdout.on("data", (chunk) => {
 			console.log(`PROMPT_SEEN: ${String(event.title).split("\n")[0]}`);
 			send({ type: "extension_ui_response", id: event.id, value: answer });
 			console.log("ANSWERED");
+		} else if (event.type === "extension_ui_request" && event.method === "input") {
+			// A "No" answer asks what to do instead; skip it (Esc) so the denial lands.
+			console.log(`INPUT_SEEN: ${event.title}`);
+			send({ type: "extension_ui_response", id: event.id, cancelled: true });
 		} else if (event.type === "agent_end") {
 			console.log(`AGENT_DONE prompt_seen=${sawPrompt}`);
 			clearTimeout(timeout);
