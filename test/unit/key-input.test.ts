@@ -3,7 +3,7 @@ import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { decodePrintableKey, isKeyRelease, isKeyRepeat, keyId, keyText, parseKey } from "../../extensions/lib/key-input.ts";
 import { resolvePiTuiEntry } from "../../extensions/subagents/prose.ts";
 
-// pi's own pi-tui (the nested 0.87.1 pi loads, not a hoisted copy) is the
+// pi's own pi-tui (the copy pi loads, nested or hoisted) is the
 // authority on key names: pi's components and keybindings use its parser.
 interface PiKeys {
 	parseKey(data: string): string | undefined;

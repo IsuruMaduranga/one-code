@@ -3,8 +3,7 @@
  *
  * pi's own startup listing has no per-section switch — hiding the noisy
  * [Extensions] block (20 internal module names) means `quietStartup`, which
- * hides the whole listing (`true`, or pi 1.0's `"header"`, which keeps only
- * pi's header). So when quiet startup is on, the banner shows its
+ * hides the whole listing. So when quiet startup is on, the banner shows its
  * own compact versions of the sections that ARE useful. pi's resourceLoader
  * is not exposed to extensions, so these are re-derived the same way our
  * other extensions derive them (claude-compat's skill dirs, pi's git-root

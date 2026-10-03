@@ -108,7 +108,8 @@ To keep the terminal's normal screen and scrollback instead, use
 
 For a persistent setting, merge these keys into pi's settings file (the
 first two rows of the table under [Where settings live](#where-settings-live)),
-preserving its other keys such as `packages`:
+preserving its other keys such as `packages`. On pi 1.0 and later you can
+leave out `tuiMode`, since full-screen is already the default:
 
 ```json
 {

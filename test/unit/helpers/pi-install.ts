@@ -7,9 +7,9 @@
  * package by path rather than by resolution. Shared here so the spelling lives
  * in one place — two test files had grown their own variants.
  */
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolvePiTuiEntry } from "../../../extensions/subagents/prose.ts";
 
 /** This repo's root. */
 export const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
@@ -20,6 +20,5 @@ export const piRoot = join(repoRoot, "node_modules", "@earendil-works", "pi-codi
 /** Its compiled, unbundled output — the tree a library consumer loads. */
 export const piDist = join(piRoot, "dist");
 
-/** pi-tui's compiled output: nested under pi by its shrinkwrap before 1.0.1, hoisted since. */
-const nestedPiTuiDist = join(piRoot, "node_modules", "@earendil-works", "pi-tui", "dist");
-export const piTuiDist = existsSync(nestedPiTuiDist) ? nestedPiTuiDist : join(repoRoot, "node_modules", "@earendil-works", "pi-tui", "dist");
+/** pi-tui's compiled output: the copy pi loads, nested under it or hoisted. */
+export const piTuiDist = dirname(resolvePiTuiEntry());

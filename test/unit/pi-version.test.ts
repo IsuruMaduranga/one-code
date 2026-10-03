@@ -46,8 +46,8 @@ describe("piVersionWarning", () => {
 		expect(piVersionWarning("0.82.9")).toContain("tested against");
 		// 0.83.0 through 0.84.2 lack createPowerShellToolDefinition: the extension set does not load there.
 		expect(piVersionWarning("0.84.2")).toContain("tested against");
-		expect(piVersionWarning(TESTED_PI_MAX_EXCLUSIVE)).toContain("tested against");
-		expect(piVersionWarning("2.0.0")).toContain("2.0.0");
+		expect(piVersionWarning(TESTED_PI_MAX_EXCLUSIVE)).toContain(`tested against pi ${TESTED_PI_MIN}`);
+		expect(piVersionWarning(TESTED_PI_MAX_EXCLUSIVE)).toContain(`running pi ${TESTED_PI_MAX_EXCLUSIVE}`);
 	});
 
 	it("fails silent on missing or unparseable versions", () => {
