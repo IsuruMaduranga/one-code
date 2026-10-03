@@ -196,8 +196,8 @@ describe("namespaced discovery", () => {
 
 describe("child tool allowlist (CC agent files)", () => {
 	it("keeps the child's plumbing when an allowlist omits it", () => {
-		expect(childToolAllowlist(["read", "grep"])).toEqual(["read", "grep", "SendMessage", "tool_search", "structured_output"]);
-		expect(childToolAllowlist(["read", "SendMessage"])).toEqual(["read", "SendMessage", "tool_search", "structured_output"]);
+		expect(childToolAllowlist(["read", "grep"])).toEqual(["read", "grep", "SendMessage", "SubagentHandback", "tool_search", "structured_output"]);
+		expect(childToolAllowlist(["read", "SendMessage"])).toEqual(["read", "SendMessage", "SubagentHandback", "tool_search", "structured_output"]);
 		expect(childToolAllowlist(undefined)).toBeUndefined();
 	});
 

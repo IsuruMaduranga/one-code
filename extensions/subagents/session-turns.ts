@@ -12,6 +12,7 @@
  */
 
 import { recordAction, type ChildAction } from "../auto-mode/actions.ts";
+import type { HandbackSlot } from "../lib/subagent-handback.ts";
 import type { ChildOutcome } from "./outcome.ts";
 import { addUsage, emptyUsage, type UsageTotals } from "./usage.ts";
 
@@ -23,7 +24,12 @@ interface TrackedEvent {
 	message?: { role?: string; content?: unknown; usage?: unknown; stopReason?: string; errorMessage?: string };
 }
 
-export class SessionTurnTracker {
+/**
+ * The tracker is also the run's `HandbackSlot`: a `SubagentHandback` call
+ * records the turn's report here, and the turn's outcome is that report, or
+ * the turn's final assistant text when the child never called the tool.
+ */
+export class SessionTurnTracker implements HandbackSlot {
 	toolCalls = 0;
 	/** What the child did this turn, for auto mode's return review. */
 	actions: ChildAction[] = [];
@@ -43,12 +49,15 @@ export class SessionTurnTracker {
 	aborted: string | undefined;
 	/** Every turn's final text joined, for task_output on a resident agent. */
 	transcript = "";
+	/** The report this turn handed back through SubagentHandback, if it did. */
+	handback: string | undefined;
 
 	/** Call when a new turn is started (a prompt sent while idle). */
 	beginTurn(): void {
 		this.turnText = "";
 		this.providerError = undefined;
 		this.aborted = undefined;
+		this.handback = undefined;
 		// Per turn, not per session: the review that reads this judges the turn just finished.
 		this.actions = [];
 	}
@@ -58,6 +67,17 @@ export class SessionTurnTracker {
 		// First reason wins: a wall-clock cap followed by a shutdown kill in the same
 		// abort-settling window keeps the more specific explanation.
 		this.aborted ??= reason;
+	}
+
+	recordHandback(message: string): boolean {
+		if (this.handback !== undefined) return false;
+		this.handback = message;
+		return true;
+	}
+
+	/** What the turn returns: the handed-back report, else the final assistant text. */
+	private get result(): string {
+		return this.handback ?? this.turnText;
 	}
 
 	/** Feed one subscribed event. Returns true when a turn just settled. */
@@ -83,8 +103,8 @@ export class SessionTurnTracker {
 				return false;
 			}
 			case "agent_settled": {
-				if (this.turnText.trim()) {
-					this.transcript = this.transcript ? `${this.transcript}\n\n---\n\n${this.turnText}` : this.turnText;
+				if (this.result.trim()) {
+					this.transcript = this.transcript ? `${this.transcript}\n\n---\n\n${this.result}` : this.result;
 				}
 				return true;
 			}
@@ -95,7 +115,7 @@ export class SessionTurnTracker {
 
 	/** The outcome of the turn that just settled. */
 	turnOutcome(): ChildOutcome {
-		return finishOutcome(this.turnText, this.providerError, this.toolCalls, this.usage, this.actions, this.aborted);
+		return finishOutcome(this.result, this.providerError, this.toolCalls, this.usage, this.actions, this.aborted);
 	}
 }
 
