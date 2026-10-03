@@ -11,8 +11,7 @@
  * that takes one, as in Claude Code.
  *
  * For a fixed tier this function must be pure and deterministic: same inputs,
- * byte-identical output (prompt-cache stability). The frontier bundle reproduces
- * the pre-tiering prompt exactly.
+ * byte-identical output (prompt-cache stability).
  */
 
 import type { BuildSystemPromptOptions } from "@earendil-works/pi-coding-agent";
@@ -25,13 +24,11 @@ import { lowBundle } from "./tiers/low.ts";
 import { midBundle } from "./tiers/mid.ts";
 
 /**
- * Four tiers, three register texts. `workhorse` and `cheap` share the verbose
- * `midBundle`: CC's own Sonnet and Haiku system prompts differ only in
- * boilerplate + a single planning-steer line the verbose register already
- * carries, so splitting the text would invent a distinction CC doesn't make. The
- * tiers stay separate for tool-surface (search tools at `tiny` only) and model
- * routing, and can diverge later without reclassifying models. `tiny` = the
- * max-scaffolding `lowBundle`. See `working-docs/decisions/model-tiers.md`.
+ * Four tiers, three register texts. `workhorse` and `cheap` share Claude Code's
+ * long register (`midBundle`), as Claude Code sends one text to Haiku 4.5,
+ * Sonnet 4.x and Opus 4.5 to 4.7; the two tiers differ in their tool
+ * descriptions. `tiny` = the long register plus the weak-model scaffolding
+ * (`lowBundle`). See `working-docs/decisions/model-tiers.md`.
  */
 const BUNDLES: Record<PromptTier, PromptBundle> = {
 	frontier: frontierBundle,

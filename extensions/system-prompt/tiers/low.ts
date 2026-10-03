@@ -1,26 +1,25 @@
 /**
- * Tiny tier — sub-Haiku small/cheap/local models. The most explicit register,
- * bespoke for weak models: it layers the scaffolding that opencode's small-model
- * prompts use (text≠action, an act-vs-answer rule, per-task playbooks, symmetric
- * anti-over/under-action closers) onto Claude Code v2.1.81's tool discipline and
- * an explicit skill nudge — the "small models miss skills" concern that motivated
- * tiering, since the skill tool's own description is not tiered. Uses the long
- * memory spec. Shared sections come from common.ts; verbose ones are reused from
- * the mid tier.
+ * Tiny tier — sub-Haiku small/cheap/local models. The long register (mid.ts)
+ * with the weak-model scaffolding layered on: the scaffolding that opencode's
+ * small-model prompts use (text≠action, an act-vs-answer rule, per-task
+ * playbooks, symmetric anti-over/under-action closers), tool discipline that
+ * names the search tools only this tier has, and an explicit skill nudge — the
+ * "small models miss skills" concern that motivated tiering, since the skill
+ * tool's own description is not tiered. Its `# Using your tools` takes the
+ * place of the long register's. Uses the long memory spec.
  */
 
+import { CONTEXT_MANAGEMENT, type PromptBundle } from "./common.ts";
 import {
-	CONTEXT_MANAGEMENT,
-	CORRECTIONS,
-	DELIVERING_WORK,
-	HARNESS_VERBOSE,
-	IDENTITY,
-	type PromptBundle,
-	SECURITY,
-	STYLE,
-	URL_BAN,
-} from "./common.ts";
-import { DOING_TASKS, DOING_TASKS_WITHOUT_TASK_TOOLS, EXECUTING_CARE, TEXT_OUTPUT, TONE_STYLE } from "./mid.ts";
+	DOING_TASKS,
+	EXECUTING_CARE,
+	OPENING_LONG,
+	SAFETY,
+	SESSION_GUIDANCE_LONG,
+	SYSTEM,
+	TEXT_OUTPUT,
+	TONE_STYLE,
+} from "./mid.ts";
 
 export const MAKE_CHANGES_WITH_TOOLS = `# Make changes with tools, not prose
 Code, edits, or commands that appear only in your text reply are NOT applied — they are not saved to the filesystem and do not run. Never treat showing code as a substitute for making the change. To change a file, call the edit or write tool; to run something, call the shell tool. If a request needs a change to the workspace, your turn is not done until you have made it with a tool.`;
@@ -65,24 +64,24 @@ Avoid failing in either direction:
 Think about the best approach, then act decisively; verify what you build by running it, not by assuming it works.`;
 
 const lowLead = (taskTools: boolean) => [
-	IDENTITY,
-	SECURITY,
-	URL_BAN,
-	HARNESS_VERBOSE,
+	OPENING_LONG,
+	SAFETY,
+	SYSTEM,
 	MAKE_CHANGES_WITH_TOOLS,
 	ANSWER_OR_ACT,
-	usingTools(taskTools),
-	DELEGATE_STRICT,
-	taskTools ? DOING_TASKS : DOING_TASKS_WITHOUT_TASK_TOOLS,
+	DOING_TASKS,
 	PLAYBOOKS,
 	EXECUTING_CARE,
-	TEXT_OUTPUT,
+	usingTools(taskTools),
+	DELEGATE_STRICT,
 	TONE_STYLE,
+	TEXT_OUTPUT,
+	SESSION_GUIDANCE_LONG,
 ];
 
 export const lowBundle: PromptBundle = {
 	lead: lowLead(true),
 	leadWithoutTaskTools: lowLead(false),
-	tail: [STAYING_ON_TRACK, STYLE, CONTEXT_MANAGEMENT, DELIVERING_WORK, CORRECTIONS],
+	tail: [STAYING_ON_TRACK, CONTEXT_MANAGEMENT],
 	verboseMemory: true,
 };
