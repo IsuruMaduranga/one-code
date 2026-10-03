@@ -88,6 +88,35 @@ describe("memory panel navigation", () => {
 	});
 });
 
+describe("config-sources row", () => {
+	it("is reached by ↑ from the first entry, toggles on Enter, and ↓ returns to the list", () => {
+		const state = initialMemoryState();
+		applyMemoryKey(state, { kind: "up" }, entries, true);
+		expect(state.onModeRow).toBe(true);
+		expect(applyMemoryKey(state, { kind: "enter" }, entries, true)).toEqual({ kind: "toggle-mode" });
+		applyMemoryKey(state, { kind: "down" }, entries, true);
+		expect(state).toEqual({ cursor: 0, onModeRow: false });
+		expect(applyMemoryKey(state, { kind: "enter" }, entries, true)).toEqual({ kind: "open", entry: entries[0] });
+	});
+
+	it("stays out of reach without the row", () => {
+		const state = initialMemoryState();
+		applyMemoryKey(state, { kind: "up" }, entries);
+		expect(state.onModeRow).toBe(false);
+	});
+
+	it("renders the saved mode, marks a pending change, and names the key", () => {
+		const state = initialMemoryState();
+		const same = renderMemoryPanel({ state, entries, width: 100, height: 20, mode: { running: "claude-compatible", saved: "claude-compatible" } }, plainPaint);
+		expect(same.some((l) => l.startsWith("  Config sources: Claude-compatible") && l.includes("~/.claude, CLAUDE.md"))).toBe(true);
+		expect(same.join("\n")).toContain("↑ for config sources");
+		state.onModeRow = true;
+		const pending = renderMemoryPanel({ state, entries, width: 100, height: 20, mode: { running: "claude-compatible", saved: "independent" } }, plainPaint);
+		expect(pending.some((l) => l.startsWith("❯ Config sources: Independent (from next start)"))).toBe(true);
+		expect(pending.some((l) => l.startsWith("❯ 1."))).toBe(false);
+	});
+});
+
 describe("renderMemoryPanel", () => {
 	it("renders the title, status, entries, and learn-more link", () => {
 		const lines = renderMemoryPanel({ state: initialMemoryState(), entries, width: 80, height: 20 }, plainPaint);

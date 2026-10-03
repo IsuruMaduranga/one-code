@@ -33,13 +33,15 @@ import {
 	projectMemoryDir,
 	stampFrontmatter,
 } from "../lib/memory.ts";
+import { type ConfigMode, CONFIG_MODE_KEY, configMode, savedConfigMode } from "../lib/config-mode.ts";
+import { oneCodeSettingsPath, readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
 import { claudeConfigDir, oneCodeStateDir } from "../lib/paths.ts";
 import { tryReadFile } from "../lib/plugins.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import { buildMemoryEntries, entryName, type MemoryEntry } from "./entries.ts";
 import { editorHint, memoryDisplayPath, openPath } from "./open-external.ts";
-import { applyMemoryKey, decodeMemoryKey, initialMemoryState, renderMemoryPanel } from "./panel.ts";
+import { applyMemoryKey, decodeMemoryKey, initialMemoryState, MODE_LABELS, type ModeView, renderMemoryPanel } from "./panel.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 
 const MEMORY_PANEL_MAX_HEIGHT = 20;
@@ -158,22 +160,39 @@ export default function memoryExtension(pi: ExtensionAPI) {
 				ctx.ui.notify(`Memory / CLAUDE.md files:\n${lines.join("\n")}`, "info");
 				return undefined;
 			}
-			const chosen = await openMemoryPanel(ctx, entries);
+			const mode: ModeView = { running: configMode(), saved: savedConfigMode() };
+			const savedBefore = mode.saved;
+			const chosen = await openMemoryPanel(ctx, entries, mode);
+			// The mode row is One Code's own; its line leads CC's result when it changed.
+			const modeLine =
+				mode.saved === savedBefore
+					? ""
+					: `Set config sources to ${MODE_LABELS[mode.saved]}${mode.saved === mode.running ? "" : "; applies from the next start"}\n\n`;
 			if (!chosen) {
 				ctx.ui.notify("Cancelled memory editing", "info");
-				return "Cancelled memory editing";
+				return `${modeLine}Cancelled memory editing`;
 			}
 			const shown = memoryDisplayPath(chosen.path, ctx.cwd, os.homedir());
 			const result = await openPath(chosen.path, "file");
 			const stdout = result.ok ? `Opened ${shown}\n\n${editorHint()}` : `Couldn't open ${shown}: ${result.error}`;
 			ctx.ui.notify(stdout, result.ok ? "info" : "error");
-			return stdout;
+			return `${modeLine}${stdout}`;
 		},
 	});
 }
 
-/** Show the Memory panel as a focused overlay; resolve to the chosen entry or null. */
-function openMemoryPanel(ctx: ExtensionContext, entries: MemoryEntry[]): Promise<MemoryEntry | null> {
+/** Save `configMode` to One Code's user settings; the running process keeps its mode. */
+function saveConfigMode(next: ConfigMode): void {
+	const path = oneCodeSettingsPath(os.homedir());
+	writeSettings(path, { ...readSettingsForWrite(path), [CONFIG_MODE_KEY]: next });
+}
+
+/**
+ * Show the Memory panel as a focused overlay; resolve to the chosen entry or
+ * null. Enter on the config-sources row saves the other mode into `mode.saved`
+ * and keeps the panel up.
+ */
+function openMemoryPanel(ctx: ExtensionContext, entries: MemoryEntry[], mode: ModeView): Promise<MemoryEntry | null> {
 	return ctx.ui.custom<MemoryEntry | null>((tui, theme, _keybindings, done) => {
 		const paint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme) };
 		const state = initialMemoryState();
@@ -187,7 +206,7 @@ function openMemoryPanel(ctx: ExtensionContext, entries: MemoryEntry[]): Promise
 				if (cache?.width === width) return cache.lines;
 				const termRows = (tui as { terminal: { rows: number } }).terminal.rows;
 				const height = boundedDockHeight(termRows, MEMORY_PANEL_MAX_HEIGHT);
-				const lines = renderMemoryPanel({ state, entries, width, height }, paint).map((line) =>
+				const lines = renderMemoryPanel({ state, entries, width, height, mode }, paint).map((line) =>
 					truncateLine(line, width),
 				);
 				cache = { width, lines };
@@ -196,7 +215,18 @@ function openMemoryPanel(ctx: ExtensionContext, entries: MemoryEntry[]): Promise
 			handleInput: (data: string) => {
 				const key = decodeMemoryKey(data);
 				if (!key) return;
-				const effect = applyMemoryKey(state, key, entries);
+				const effect = applyMemoryKey(state, key, entries, true);
+				if (effect?.kind === "toggle-mode") {
+					const next: ConfigMode = mode.saved === "independent" ? "claude-compatible" : "independent";
+					try {
+						saveConfigMode(next);
+						mode.saved = next;
+					} catch (error) {
+						ctx.ui.notify(`Couldn't save the config sources setting: ${error instanceof Error ? error.message : error}`, "error");
+					}
+					repaint();
+					return;
+				}
 				if (effect?.kind === "close") {
 					done(null);
 					return;
