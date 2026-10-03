@@ -82,6 +82,9 @@ appear in `projects/<slug>/settings.json`.
 | `capabilityIndex.artificialAnalysisApiKey` | string | By hand | Artificial Analysis key for measured model selection. |
 | `disabledMcpServers` | string array | `/mcp` (user or per repository) | MCP servers kept disabled. |
 | `artifacts.autoOpen` | boolean | By hand | `false` stops the browser opening when the model publishes a new artifact. Defaults to `true`. |
+| `enableWorkflows` | boolean | By hand (user or per repository) | `false` turns the `workflow` tool off. Defaults to `true`. |
+| `disableWorkflows` | boolean | By hand (user or per repository) | `true` turns the `workflow` tool off, whatever `enableWorkflows` says. |
+| `workflowSizeGuideline` | string | By hand (user or per repository) | How big the model keeps a workflow: `small` (under 5 agents), `medium` (under 10, the default), `large` (under 50) or `unrestricted`. A guideline, not a limit. |
 
 Two keys are stamped alongside model choices (`subagentModelSetFor`,
 `autoMode.classifierModelSetFor`) to record the provider a choice was made

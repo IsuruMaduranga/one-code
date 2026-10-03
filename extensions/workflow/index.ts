@@ -10,6 +10,10 @@
  * unchanged prefix of an edited or interrupted run. Saved workflows live in
  * `.claude/workflows/` (project) and `~/.claude/workflows/` (user).
  *
+ * The description is Claude Code's (description.ts); the authoring reference
+ * it points to is the bundled `workflow-authoring` skill. `enableWorkflows`,
+ * `disableWorkflows` and `workflowSizeGuideline` come from One Code's settings.
+ *
  * Orchestration is opt-in, like Claude Code: the tool description gates it,
  * and the literal keyword "ultracode" in a user message arms the turn via a
  * system reminder (skipped while `/effort ultracode` has the standing block
@@ -22,9 +26,12 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
 import { contentText } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { defineTool, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { recordUsage } from "../lib/usage-bus.ts";
+import { readWorkflowSettings } from "../lib/one-code-settings.ts";
+import { registerVariantTool } from "../lib/tool-variants.ts";
+import { workflowDescription } from "./description.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent } from "../lib/model-unusable.ts";
 import { whenAborted } from "../lib/abort.ts";
 import { createTaskNotifier, oneShotNote, sessionOutlivesTurn, taskNotification, taskStatusOf, workflowSummary } from "../lib/notifications.ts";
@@ -70,132 +77,35 @@ import { isKeyRelease, keyId } from "../lib/key-input.ts";
 const ULTRACODE_REMINDER =
 	'The user included the keyword "ultracode", opting this turn into multi-agent orchestration — use the workflow tool to fulfill the request.';
 
-/**
- * Ported from Claude Code's Workflow tool description, adapted to this harness
- * (runId + follow-up message instead of a task id + task-notification,
- * `/workflows stop` instead of TaskStop, `Agent` as the single-agent
- * alternative). The authoring guidance is the substantive part: it is what
- * makes the model reach for pipeline() over barriers and pick sane fan-out
- * sizes, so it is kept rather than trimmed.
- */
-const WORKFLOW_TOOL_DESCRIPTION = `Execute a workflow script that orchestrates multiple subagents deterministically. Workflows run in the background — this tool returns immediately with a runId, and a follow-up message arrives when the workflow completes. Use /workflows to watch live progress.
-
-A workflow structures work across many agents — to be comprehensive (decompose and cover in parallel), to be confident (independent perspectives and adversarial checks before committing), or to take on scale one context can't hold (migrations, audits, broad sweeps). The script is where you encode that structure: what fans out, what verifies, what synthesizes.
-
-ONLY call this tool when the user has explicitly opted into multi-agent orchestration. Workflows can spawn dozens of agents and consume a large amount of tokens; the user must request that scale, not have it inferred. Explicit opt-in means one of:
-- The user included the keyword "ultracode" in their prompt (you'll see a system-reminder confirming it).
-- Ultracode is on for the session (a system-reminder confirms it), which makes the opt-in standing for every turn until it is turned off.
-- The user directly asked you to run a workflow or use multi-agent orchestration in their own words ("use a workflow", "run a workflow", "fan out agents", "orchestrate this with subagents"). The ask must be in the user's words — a task that would merely benefit from a workflow does not count.
-- The user invoked a skill or slash command whose instructions tell you to call Workflow.
-- The user asked you to run a specific named or saved workflow.
-
-For any other task — even one that would clearly benefit from parallelism — do NOT call this tool. Use the \`Agent\` tool for individual subagents, or briefly describe what a multi-agent workflow could do and how much it would roughly cost, and ask the user whether to run it.
-
-When you do call it, the right move is often **hybrid**: scout inline first (list the files, find the targets, scope the diff) to discover the work-list, then call workflow to pipeline over it. You don't need to know the shape before the *task* — only before the *orchestration step*.
-
-Common single-phase workflows you can chain across turns:
-- **Understand** — parallel readers over relevant subsystems → structured map
-- **Design** — judge panel of N independent approaches → scored synthesis
-- **Review** — dimensions → find → adversarially verify (example below)
-- **Research** — multi-modal sweep → deep-read → synthesize
-- **Migrate** — discover sites → transform each (worktree isolation) → verify
-
-Pass the script inline via \`script\`. Every invocation persists its script under the run directory and returns the path in the tool result. To iterate on a workflow, edit that file and re-invoke with \`{scriptPath, resumeFromRunId}\` instead of resending the full script.
-
-Every script must begin with \`export const meta = {...}\`:
-  export const meta = {
-    name: 'find-flaky-tests',
-    description: 'Find flaky tests and propose fixes',   // one-line summary
-    phases: [                                            // one entry per phase() call
-      { title: 'Scan', detail: 'grep test logs for retries' },
-      { title: 'Fix', detail: 'one agent per flaky test' },
-    ],
-  }
-  // script body starts here — use agent()/parallel()/pipeline()/phase()/log()
-  phase('Scan')
-  const flaky = await agent('grep CI logs for retry markers', {schema: FLAKY_SCHEMA})
-  ...
-
-The \`meta\` object must be a PURE LITERAL — no variables, function calls, spreads, or template interpolation. Required fields: \`name\`, \`description\`. Optional: \`whenToUse\`, \`phases\`. Use the SAME phase titles in meta.phases as in phase() calls.
-
-Script body hooks:
-- agent(prompt: string, opts?: {label?, phase?, schema?, model?, allowExpensive?, effort?, isolation?: 'worktree', agentType?}): Promise<any> — spawn a subagent. Without schema, returns its final text as a string. With schema (a JSON Schema object), the subagent is forced to call a structured_output tool and agent() returns the validated object — no parsing needed. Returns null if the subagent fails (filter with .filter(Boolean)). opts.label overrides the display label. opts.phase explicitly assigns this agent to a progress group (use this inside pipeline()/parallel() stages to avoid races on the global phase() state). opts.model overrides the model — default to omitting it, the agent uses the effective /subagent default (configured, automatic smaller profile, then session fallback); a model costing more than the session model is rejected unless opts.allowExpensive is true (set it only when the user explicitly asked for that model). opts.effort overrides reasoning effort ('off' | 'minimal' | 'low' | 'medium' | 'high'). opts.isolation: 'worktree' runs the agent in a fresh git worktree — use ONLY when agents mutate files in parallel and would otherwise conflict. opts.agentType uses a named agent from .claude/agents/.
-- parallel(thunks: Array<() => Promise<any>>): Promise<any[]> — run tasks concurrently. This is a BARRIER: awaits all thunks before returning. A thunk that throws resolves to \`null\` — the call itself never rejects, so \`.filter(Boolean)\` before using the results. Use ONLY when you genuinely need all results together.
-- pipeline(items, stage1, stage2, ...): Promise<any[]> — run each item through all stages independently, NO barrier between stages. Item A can be in stage 3 while item B is still in stage 1. This is the DEFAULT for multi-stage work. Wall-clock = slowest single-item chain, not sum-of-slowest-per-stage. Every stage callback receives (prevResult, originalItem, index). A stage that throws drops that item to \`null\` and skips its remaining stages.
-- log(message: string): void — emit a progress message to the user.
-- phase(title: string): void — start a new phase; subsequent agent() calls are grouped under it.
-- args: any — the value passed as this tool's \`args\` input, verbatim. Pass arrays/objects as actual JSON values, NOT as a JSON-encoded string.
-- budget: {total: number|null, spent(): number, remaining(): number} — the run's output-token target from \`tokenBudget\`, shared with nested workflows. \`total\` is null if none was set. Once spent() reaches total, new and queued agent() calls throw before starting. Already-running agents may finish above the target; this is not a hard cap on provider usage. Use for dynamic loops: \`while (budget.total && budget.remaining() > 50_000) { ... }\`.
-- workflow(nameOrRef: string | {scriptPath: string}, args?: any): Promise<any> — run another workflow inline as a sub-step. Nesting is one level only.
-
-DEFAULT TO pipeline(). Only reach for a barrier (parallel between stages) when you genuinely need ALL prior-stage results together — dedup/merge across the full result set, early-exit on a zero count, or a prompt that references "the other findings". A barrier is NOT justified by "I need to flatten/map/filter first" (do it inside a pipeline stage) or "the stages are conceptually separate".
-
-Smell test: if you wrote
-  const a = await parallel(...)
-  const b = transform(a)        // flatten, map, filter — no cross-item dependency
-  const c = await parallel(b.map(...))
-that middle transform doesn't need the barrier. Rewrite as a pipeline with the transform inside a stage. When in doubt: pipeline.
-
-Concurrent agent() calls are capped at min(16, cpu cores - 2) per workflow — excess calls queue and run as slots free up. Total agent count across a run is capped at 1000. A single parallel()/pipeline() call accepts at most 4096 items.
-
-The canonical multi-stage pattern — pipeline by default, each dimension verifies as soon as its review completes:
-  export const meta = {
-    name: 'review-changes',
-    description: 'Review changed files across dimensions, verify each finding',
-    phases: [{ title: 'Review' }, { title: 'Verify' }],
-  }
-  const DIMENSIONS = [{key: 'bugs', prompt: '...'}, {key: 'perf', prompt: '...'}]
-  const results = await pipeline(
-    DIMENSIONS,
-    d => agent(d.prompt, {label: \`review:\${d.key}\`, phase: 'Review', schema: FINDINGS_SCHEMA}),
-    review => parallel(review.findings.map(f => () =>
-      agent(\`Adversarially verify: \${f.title}\`, {label: \`verify:\${f.file}\`, phase: 'Verify', schema: VERDICT_SCHEMA})
-        .then(v => ({...f, verdict: v}))
-    ))
-  )
-  return { confirmed: results.flat().filter(Boolean).filter(f => f.verdict?.isReal) }
-
-Quality patterns — common shapes; pick by task and compose freely:
-- Adversarial verify: spawn N independent skeptics per finding, each prompted to REFUTE. Kill if ≥majority refute. Prevents plausible-but-wrong findings from surviving.
-- Perspective-diverse verify: when a finding can fail in more than one way, give each verifier a distinct lens (correctness, security, perf, does-it-reproduce) instead of N identical refuters.
-- Judge panel: generate N independent attempts from different angles, score with parallel judges, synthesize from the winner while grafting the best ideas from runners-up.
-- Loop-until-dry: for unknown-size discovery, keep spawning finders until K consecutive rounds return nothing new. Dedup against everything seen, not just what was confirmed, or it never converges.
-- Multi-modal sweep: parallel agents each searching a different way (by-container, by-content, by-entity, by-time).
-- Completeness critic: a final agent that asks "what's missing — modality not run, claim unverified, source unread?"
-- No silent caps: if a workflow bounds coverage (top-N, no-retry, sampling), log() what was dropped.
-
-Scale to what the user asked for. "find any bugs" → a few finders, single-vote verify. "thoroughly audit this" → larger finder pool, 3–5 vote adversarial pass, synthesis stage. Keep workflows under 15 agents unless the user's prompt calls for a different scale.
-
-Scripts are plain JavaScript, NOT TypeScript — type annotations, interfaces, and generics fail to parse. The script body runs in an async context — use await directly, and a bare top-level \`return\` sets the workflow's result. Standard JS built-ins are available — EXCEPT \`Date.now()\`/\`Math.random()\`/argless \`new Date()\`, which throw (they would break resume); pass timestamps in via \`args\`, and for randomness vary the agent prompt/label by index. No filesystem or shell access from the script itself — only via spawned agents.
-
-Resume: to continue after a stop, kill, or script edit, relaunch with \`{scriptPath, resumeFromRunId}\` — the longest unchanged prefix of agent() calls returns cached results instantly; the first edited/new call and everything after it runs live. Same script + same args → 100% cache hit. Stop a live run first (\`/workflows stop <runId>\`) before resuming it. Background runs do not survive a session switch or /reload — resume them instead.
-
-Run a saved workflow from \`.claude/workflows/\` (project) or \`~/.claude/workflows/\` (personal) by passing its \`name\`.`;
-
+// Claude Code's parameter texts, with One Code's tool names; `name` also
+// names the personal directory, and a run is stopped with /workflows stop.
 const WorkflowParams = Type.Object({
 	script: Type.Optional(
 		Type.String({
 			description:
-				"Self-contained workflow script. Must begin with `export const meta = { name, description, phases? }` (pure literal), followed by plain JavaScript using agent()/parallel()/pipeline()/phase()/log()/args/budget",
+				"Self-contained workflow script. Must begin with `export const meta = { name, description, phases }` (pure literal, no computed values) followed by the script body using agent()/parallel()/pipeline()/phase().",
+		}),
+	),
+	name: Type.Optional(
+		Type.String({ description: "Name of a saved workflow from .claude/workflows/ or ~/.claude/workflows/. Resolves to a self-contained script." }),
+	),
+	args: Type.Optional(
+		Type.Any({
+			description:
+				"Optional input value exposed to the script as the global `args`, verbatim. Pass arrays/objects as actual JSON values, NOT as a JSON-encoded string — a stringified list breaks `args.filter`/`args.map` in the script. Use for parameterized named workflows (e.g. a research question).",
 		}),
 	),
 	scriptPath: Type.Optional(
 		Type.String({
 			description:
-				"Path to a workflow script file on disk. Every run persists its script and returns the path — edit it and re-invoke with scriptPath (+ resumeFromRunId) to iterate",
+				"Path to a workflow script file on disk. Every workflow invocation persists its script under the session directory and returns the path in the tool result. To iterate, edit that file with write/edit and re-invoke workflow with the same `scriptPath` instead of re-sending the full script. Takes precedence over `script` and `name`.",
 		}),
-	),
-	name: Type.Optional(
-		Type.String({ description: "Name of a saved workflow from .claude/workflows/ or ~/.claude/workflows/" }),
-	),
-	args: Type.Optional(
-		Type.Any({ description: "Value exposed to the script as the global `args`, verbatim. Pass real JSON values, not stringified JSON" }),
 	),
 	resumeFromRunId: Type.Optional(
 		Type.String({
 			pattern: "^wf_[a-z0-9-]{6,}$",
 			description:
-				"Run ID of a prior workflow invocation to resume from. Completed agent() calls with unchanged (prompt, opts) return their cached results instantly; only edited or new calls re-run. Stop the prior run first (/workflows stop) before resuming",
+				"Run ID of a prior workflow invocation to resume from. Completed agent() calls with unchanged (prompt, opts) return their cached results instantly; only edited or new calls re-run. Same-session only. Stop the prior run first (/workflows stop) before resuming.",
 		}),
 	),
 	tokenBudget: Type.Optional(
@@ -271,7 +181,10 @@ export default function workflowExtension(pi: ExtensionAPI) {
 		notificationComponent(theme, customMessageText(message.content), expanded),
 	);
 
-	pi.registerTool({
+	// The description carries the session's size guideline (description.ts);
+	// it is read from One Code's settings at session start and the tool is
+	// registered again only when the line changes.
+	const workflowTool = defineTool({
 		name: "workflow",
 		label: "Workflow",
 		...ccToolRenderers<
@@ -286,19 +199,21 @@ export default function workflowExtension(pi: ExtensionAPI) {
 					? `Running in background · /workflows to monitor and save · ${result.details.runId ?? ""}`.trimEnd()
 					: undefined,
 		}),
-		description: WORKFLOW_TOOL_DESCRIPTION,
+		description: workflowDescription("medium", false),
 		promptSnippet: "Run a script that orchestrates many subagents (opt-in ultracode mode)",
 		parameters: WorkflowParams,
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			lastCtx = ctx;
 			const sessionDir = ctx.sessionManager.getSessionDir();
 
-			let script: string | undefined = params.script;
+			let script: string | undefined;
 			try {
-				if (!script && params.scriptPath) {
+				// `scriptPath` takes precedence over `script` and `name`, as in Claude Code.
+				if (params.scriptPath) {
 					if (!existsSync(params.scriptPath)) throw new WorkflowScriptError(`scriptPath ${params.scriptPath} does not exist`);
 					script = readFileSync(params.scriptPath, "utf8");
 				}
+				script ??= params.script;
 				if (!script && params.name) {
 					const saved = findSavedWorkflow(ctx.cwd, os.homedir(), params.name);
 					if (!saved) {
@@ -399,6 +314,27 @@ export default function workflowExtension(pi: ExtensionAPI) {
 			}
 		},
 	});
+	const setWorkflowDescription = registerVariantTool<string>(pi, workflowTool.description, (description) => ({ ...workflowTool, description }));
+
+	// `enableWorkflows`/`disableWorkflows` and `workflowSizeGuideline` from One
+	// Code's settings, read once per session so the description stays
+	// byte-stable within it. Turned off, the tool leaves the active set (and
+	// comes back if a later session turns it on) and the keyword arms nothing.
+	let workflowsEnabled = true;
+	let workflowWithheld = false;
+	const applyWorkflowSettings = (cwd: string) => {
+		const settings = readWorkflowSettings(cwd, os.homedir());
+		workflowsEnabled = settings.enabled;
+		setWorkflowDescription(workflowDescription(settings.sizeGuideline, settings.sizeConfigured));
+		const active = pi.getActiveTools();
+		if (!settings.enabled && active.includes("workflow")) {
+			pi.setActiveTools(active.filter((name) => name !== "workflow"));
+			workflowWithheld = true;
+		} else if (settings.enabled && workflowWithheld) {
+			if (!active.includes("workflow")) pi.setActiveTools([...active, "workflow"]);
+			workflowWithheld = false;
+		}
+	};
 
 	registerLocalCommand(pi, "workflows", {
 		description: "Open the workflow viewer; list, stop, or inspect runs",
@@ -464,7 +400,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 	});
 	const queuedKeyword = new QueuedDelivery<true>();
 	pi.on("input", (event) => {
-		if (ultracodeMode || !/\bultracode\b/i.test(event.text)) return undefined;
+		if (!workflowsEnabled || ultracodeMode || !/\bultracode\b/i.test(event.text)) return undefined;
 		if (event.streamingBehavior) queuedKeyword.hold(event.text, true);
 		else pi.events.emit(REMINDER_CHANNEL, { text: ULTRACODE_REMINDER, scope: "next-turn" });
 		return undefined;
@@ -549,6 +485,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
 		lastCtx = ctx;
 		queuedKeyword.clear();
+		applyWorkflowSettings(ctx.cwd);
 		registerInputHook(ctx);
 	});
 
