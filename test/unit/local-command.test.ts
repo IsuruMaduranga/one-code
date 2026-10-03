@@ -63,6 +63,32 @@ describe("registerLocalCommand", () => {
 		expect(order).toEqual(["emit:<local-command", "emit:<command-name>", "emit:<local-command", "handler: high"]);
 	});
 
+	it("with reportsResult, announces after the handler with its returned text as the stdout", async () => {
+		const order: string[] = [];
+		const registered = new Map<string, { handler: (args: string, ctx: unknown) => unknown }>();
+		const pi = {
+			events: { emit: (_channel: string, data: unknown) => order.push(`emit:${(data as { text: string }).text}`) },
+			registerCommand: (name: string, options: { handler: (args: string, ctx: unknown) => unknown }) => registered.set(name, options),
+		};
+		registerLocalCommand(pi, "memory", { reportsResult: true, handler: async () => (order.push("handler"), "Cancelled memory editing") });
+		await registered.get("memory")!.handler("", {});
+		expect(order).toEqual(["handler", ...localCommandBlocks({ name: "memory", stdout: "Cancelled memory editing" }).map((t) => `emit:${t}`)]);
+	});
+
+	it("with reportsResult, still announces (empty stdout) when the handler returns nothing or throws", async () => {
+		const emitted: string[] = [];
+		const registered = new Map<string, { handler: (args: string, ctx: unknown) => unknown }>();
+		const pi = {
+			events: { emit: (_channel: string, data: unknown) => emitted.push((data as { text: string }).text) },
+			registerCommand: (name: string, options: { handler: (args: string, ctx: unknown) => unknown }) => registered.set(name, options),
+		};
+		registerLocalCommand(pi, "quiet", { reportsResult: true, handler: () => {} });
+		registerLocalCommand(pi, "boom", { reportsResult: true, handler: async () => { throw new Error("x"); } });
+		await registered.get("quiet")!.handler("", {});
+		await expect(registered.get("boom")!.handler("", {})).rejects.toThrow("x");
+		expect(emitted).toEqual([...localCommandBlocks({ name: "quiet" }), ...localCommandBlocks({ name: "boom" })]);
+	});
+
 	it("announces an argumentHint instead of passing it to pi", () => {
 		const emitted: unknown[] = [];
 		const registered = new Map<string, Record<string, unknown>>();

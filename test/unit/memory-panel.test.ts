@@ -1,7 +1,8 @@
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { claudeMdLimitWarning, combinedLimitWarning } from "../../extensions/lib/memory.ts";
 import type { MemoryEntry } from "../../extensions/memory/entries.ts";
-import { EDITOR_HINT, resolveOpen } from "../../extensions/memory/open-external.ts";
+import { editorHint, memoryDisplayPath, resolveOpen } from "../../extensions/memory/open-external.ts";
 import {
 	applyMemoryKey,
 	decodeMemoryKey,
@@ -122,8 +123,24 @@ describe("renderMemoryPanel", () => {
 	});
 });
 
-describe("EDITOR_HINT", () => {
-	it("matches CC's wording", () => {
-		expect(EDITOR_HINT).toBe("To use a different editor, set the $EDITOR or $VISUAL environment variable.");
+describe("editorHint (CC 2.1.288 /memory)", () => {
+	it("names the variable in use, $VISUAL first, else the default nudge", () => {
+		expect(editorHint({})).toBe("> To use a different editor, set the $EDITOR or $VISUAL environment variable.");
+		expect(editorHint({ EDITOR: "vim" })).toBe('> Using $EDITOR="vim". To change editor, set $EDITOR or $VISUAL environment variable.');
+		expect(editorHint({ VISUAL: "code -w", EDITOR: "vim" })).toBe('> Using $VISUAL="code -w". To change editor, set $EDITOR or $VISUAL environment variable.');
+	});
+});
+
+describe("memoryDisplayPath (CC 2.1.288 /memory)", () => {
+	const home = join("/", "Users", "me");
+	const cwd = join(home, "proj");
+	it("shows ~/… under home and ./… under the working directory, the shorter when both apply", () => {
+		expect(memoryDisplayPath(join(home, ".claude", "CLAUDE.md"), cwd, home)).toBe("~/.claude/CLAUDE.md");
+		expect(memoryDisplayPath(join(cwd, "CLAUDE.md"), cwd, home)).toBe("./CLAUDE.md");
+		expect(memoryDisplayPath(join(cwd, "a", "b", "CLAUDE.md"), cwd, home)).toBe("./a/b/CLAUDE.md");
+	});
+	it("leaves a path outside both as is", () => {
+		const elsewhere = join("/", "etc", "CLAUDE.md");
+		expect(memoryDisplayPath(elsewhere, cwd, home)).toBe(elsewhere);
 	});
 });

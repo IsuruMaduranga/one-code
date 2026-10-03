@@ -38,7 +38,7 @@ import { tryReadFile } from "../lib/plugins.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import { buildMemoryEntries, entryName, type MemoryEntry } from "./entries.ts";
-import { openPath } from "./open-external.ts";
+import { editorHint, memoryDisplayPath, openPath } from "./open-external.ts";
 import { applyMemoryKey, decodeMemoryKey, initialMemoryState, renderMemoryPanel } from "./panel.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 
@@ -144,23 +144,30 @@ export default function memoryExtension(pi: ExtensionAPI) {
 
 	// ---- /memory: Claude Code's Memory picker --------------------------------
 	// Pick a memory-related file (or the auto-memory folder) and open it in the
-	// external editor, matching CC. Pure panel logic lives in ./panel.ts.
+	// external editor, matching CC. Pure panel logic lives in ./panel.ts. The
+	// returned text is the model's `<local-command-stdout>`, worded as CC's.
 	registerLocalCommand(pi, "memory", {
 		description: "View or edit CLAUDE.md and memory files",
-		handler: async (args, ctx) => {
+		reportsResult: true,
+		handler: async (_args, ctx): Promise<string | undefined> => {
 			const entries = memoryEntriesFor(ctx.cwd);
 			if (!ctx.hasUI) {
 				const lines = entries.map(
 					(e, i) => `${i + 1}. ${e.title}${e.description ? ` — ${e.description}` : ""}  [${e.path}]`,
 				);
 				ctx.ui.notify(`Memory / CLAUDE.md files:\n${lines.join("\n")}`, "info");
-				return;
+				return undefined;
 			}
 			const chosen = await openMemoryPanel(ctx, entries);
-			if (!chosen) return;
-			const result = await openPath(chosen.path, chosen.kind);
-			ctx.ui.notify(result.message, result.ok ? "info" : "error");
-			if (result.ok && result.hint) ctx.ui.notify(result.hint, "info");
+			if (!chosen) {
+				ctx.ui.notify("Cancelled memory editing", "info");
+				return "Cancelled memory editing";
+			}
+			const shown = memoryDisplayPath(chosen.path, ctx.cwd, os.homedir());
+			const result = await openPath(chosen.path, "file");
+			const stdout = result.ok ? `Opened ${shown}\n\n${editorHint()}` : `Couldn't open ${shown}: ${result.error}`;
+			ctx.ui.notify(stdout, result.ok ? "info" : "error");
+			return stdout;
 		},
 	});
 }
@@ -192,6 +199,14 @@ function openMemoryPanel(ctx: ExtensionContext, entries: MemoryEntry[]): Promise
 				const effect = applyMemoryKey(state, key, entries);
 				if (effect?.kind === "close") {
 					done(null);
+					return;
+				}
+				if (effect?.kind === "open" && effect.entry.kind === "folder") {
+					// CC opens the folder and keeps the picker up; only a file or Esc ends it.
+					const { path } = effect.entry;
+					void openPath(path, "folder").then((result) => {
+						if (!result.ok) ctx.ui.notify(`Couldn't open ${memoryDisplayPath(path, ctx.cwd, os.homedir())}: ${result.error}`, "error");
+					});
 					return;
 				}
 				if (effect?.kind === "open") {
