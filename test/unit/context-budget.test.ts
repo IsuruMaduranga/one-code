@@ -104,6 +104,7 @@ describe("context-budget wiring", () => {
 				placement: "sticky-append",
 				raw: true,
 				since: 0,
+				skipStackCarrier: true,
 			},
 		]);
 	});

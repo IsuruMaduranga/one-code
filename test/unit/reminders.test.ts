@@ -487,3 +487,29 @@ describe("user-prepend (local-command breadcrumbs)", () => {
 		expect(blockTexts(out[2])).toEqual(["second"]);
 	});
 });
+
+describe("sticky-append with skipStackCarrier", () => {
+	it("rides every later user message but never the one carrying the context stack", () => {
+		const messages = [
+			{ role: "user", content: [{ type: "text", text: "first" }], timestamp: 1 },
+			{ role: "assistant", content: [{ type: "text", text: "ok" }], timestamp: 2 },
+			{ role: "user", content: [{ type: "text", text: "second" }], timestamp: 3 },
+		] as never[];
+		const out = injectReminders(messages, [
+			{ text: "stack", placement: "first-prepend", order: 1 },
+			{ text: "marker", placement: "sticky-append", order: 0, raw: true, since: 0, skipStackCarrier: true },
+		]) as Array<{ content: Array<{ text: string }> }>;
+		expect(out[0].content.map((b) => b.text)).toEqual([wrapReminder("stack"), "first"]);
+		expect(out[2].content.map((b) => b.text)).toEqual(["second", "marker"]);
+	});
+
+	it("puts nothing anywhere while the first prompt is the only user message", () => {
+		const messages = [
+			{ role: "user", content: [{ type: "text", text: "first" }], timestamp: 1 },
+			{ role: "toolResult", toolCallId: "t", content: [{ type: "text", text: "out" }], timestamp: 2 },
+		] as never[];
+		const out = injectReminders(messages, [{ text: "marker", placement: "sticky-append", order: 0, raw: true, since: 0, skipStackCarrier: true }]) as Array<{ content: Array<{ text: string }> }>;
+		expect(out[1].content.map((b) => b.text)).toEqual(["out"]);
+		expect(out[0].content.map((b) => b.text)).toEqual(["first"]);
+	});
+});

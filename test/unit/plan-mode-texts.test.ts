@@ -8,6 +8,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
+import { descriptionForm } from "../../extensions/lib/tool-variants.ts";
 import { userDenialText } from "../../extensions/lib/user-denial.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../../extensions/permissions/modes.ts";
 import planModeExtension from "../../extensions/plan-mode/index.ts";
@@ -27,10 +28,9 @@ const HAIKU = { provider: "anthropic", id: "claude-haiku-4-5", api: "anthropic-m
 
 describe("plan-mode tool descriptions", () => {
 	it("enter_plan_mode carries Claude Code's description on frontier and workhorse, One Code's on cheap and tiny", () => {
-		expect(enterPlanModeDescription("frontier")).toBe(ENTER_PLAN_MODE_DESCRIPTION);
-		expect(enterPlanModeDescription("workhorse")).toBe(ENTER_PLAN_MODE_DESCRIPTION);
-		expect(enterPlanModeDescription("cheap")).toBe(ENTER_PLAN_MODE_DESCRIPTION_WEAK);
-		expect(enterPlanModeDescription("tiny")).toBe(ENTER_PLAN_MODE_DESCRIPTION_WEAK);
+		for (const tier of ["frontier", "workhorse", "cheap", "tiny"] as const) {
+			expect(enterPlanModeDescription(descriptionForm(tier)), tier).toBe(tier === "cheap" || tier === "tiny" ? ENTER_PLAN_MODE_DESCRIPTION_WEAK : ENTER_PLAN_MODE_DESCRIPTION);
+		}
 	});
 
 	it("Claude Code's enter_plan_mode text prefers plan mode, with One Code's tool names", () => {

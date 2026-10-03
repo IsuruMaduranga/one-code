@@ -49,7 +49,7 @@ import {
 	withheldMissReminderText,
 } from "../lib/deferred.ts";
 import { looksLikeAnthropicRequest, withBetas } from "../lib/anthropic-payload.ts";
-import { addendumNamesOnBranch, supportsToolAdditions, TOOL_ADDITION_BETAS, withToolAdditions } from "../lib/tool-additions.ts";
+import { addendumNamesOnBranch, liftAddenda, supportsToolAdditions, TOOL_ADDITION_BETAS, withToolAdditions } from "../lib/tool-additions.ts";
 import { MCP_TOOLS_CHANNEL, type McpToolsPayload } from "../lib/mcp-share.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
@@ -157,8 +157,15 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		}
 	});
 
-	pi.on("context", () => {
+	/** The addenda the last `context` pass lifted off tool results, by call id (lib/tool-additions.ts). */
+	let addendaByCall = new Map<string, string[]>();
+	pi.on("context", (event, ctx) => {
 		requestSent = true;
+		addendaByCall = new Map();
+		if (!supportsToolAdditions(ctx?.model) || !Array.isArray(event?.messages)) return undefined;
+		const lifted = liftAddenda(event.messages);
+		addendaByCall = lifted.byCall;
+		return lifted.messages === event.messages ? undefined : { messages: lifted.messages };
 	});
 
 	// Every tool_search load of this session (call id → names), seeded from the
@@ -197,7 +204,7 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		const isDeferred = (name: string) => deferredRegistry.has(name);
 		// A tool that arrived mid-session goes out as Claude Code's tool_addition
 		// where the model takes one (lib/tool-additions.ts), declared deferred.
-		const lifted = supportsToolAdditions(ctx.model) ? withToolAdditions(event.payload as Record<string, unknown>) : undefined;
+		const lifted = supportsToolAdditions(ctx.model) ? withToolAdditions(event.payload as Record<string, unknown>, addendaByCall) : undefined;
 		const payload = lifted?.payload ?? (event.payload as Record<string, unknown>);
 		const stable = stabilizeDeferredTools(payload, pi.getAllTools(), isDeferred, loads, new Set(lifted?.names ?? []));
 		// Renamed (OAuth) tools: leave the request alone, additions included.

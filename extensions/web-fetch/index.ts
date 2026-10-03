@@ -29,7 +29,7 @@ import { tryNativeWeb } from "../lib/anthropic-server-call.ts";
 import { CUT_OFF_NOTE, fetchOutcome, isPrivateOrLocalUrl, nativeFetchBody, type ThinkingFields } from "../lib/anthropic-server-tools.ts";
 import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
-import { type DescriptionForm, followDescriptionForm, registerVariantTool } from "../lib/tool-variants.ts";
+import { registerFormTool } from "../lib/tool-variants.ts";
 import { webFetchDescription } from "./description.ts";
 
 const DEFAULT_MAX_CHARS = 30_000;
@@ -393,7 +393,7 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 			}
 		},
 	});
-	followDescriptionForm(pi, registerVariantTool<DescriptionForm>(pi, "short", (form) => ({ ...tool, description: webFetchDescription(form) })));
+	registerFormTool(pi, tool, webFetchDescription);
 
 	pi.events.emit(DEFER_CHANNEL, {
 		name: "web_fetch",

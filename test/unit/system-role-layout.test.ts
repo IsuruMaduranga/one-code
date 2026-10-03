@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vitest";
 import systemReminderExtension from "../../extensions/system-reminder/index.ts";
 import { CONTEXT_ORDER, movesToSystemRole, REMINDER_CHANNEL, wrapReminder } from "../../extensions/lib/reminders.ts";
+import { reseatMessageMark } from "../../extensions/lib/anthropic-payload.ts";
 import { instructionRole, withSystemRoleContext } from "../../extensions/lib/system-role.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
@@ -44,7 +45,7 @@ describe("withSystemRoleContext", () => {
 	it("lifts the blocks into one system message after the user message, unwrapped and a blank line apart", () => {
 		const payload = anthropicPayload();
 		payload.messages.push({ role: "assistant", content: [{ type: "text", text: "ok" }] } as never);
-		const out = withSystemRoleContext(payload, "anthropic", [ENV, DATE], "system")?.payload as { messages: unknown[] };
+		const out = withSystemRoleContext(payload, "anthropic", [ENV, DATE], "system") as { messages: unknown[] };
 		expect(out.messages).toEqual([
 			{
 				role: "user",
@@ -59,26 +60,28 @@ describe("withSystemRoleContext", () => {
 		]);
 	});
 
-	it("moves the cache mark onto the system message when only pi's empty effort messages follow", () => {
-		const payload = anthropicPayload();
-		const out = withSystemRoleContext(payload, "anthropic", [ENV], "system")?.payload as { messages: Array<{ content: Array<Record<string, unknown>> }> };
-		expect(out.messages[0].content.at(-1)).toEqual({ type: "text", text: "hello" });
-		expect(out.messages[1].content[0].cache_control).toEqual({ type: "ephemeral", ttl: "1h" });
+	it("reseats pi's mark onto the context message when only pi's empty effort messages follow", () => {
+		const out = withSystemRoleContext(anthropicPayload(), "anthropic", [ENV], "system") as { messages: Array<{ content: Array<Record<string, unknown>> }> };
+		const messages = reseatMessageMark(out.messages);
+		expect(messages[0].content.at(-1)).toEqual({ type: "text", text: "hello" });
+		expect(messages[1].content[0].cache_control).toEqual({ type: "ephemeral", ttl: "1h" });
+		// Already seated: nothing moves again.
+		expect(reseatMessageMark(messages)).toBe(messages);
 	});
 
 	it("changes nothing when the blocks are not there (a fork's tail), and runs once", () => {
 		const tail = { messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }] };
 		expect(withSystemRoleContext(tail, "anthropic", [ENV], "system")).toBeUndefined();
-		const once = withSystemRoleContext(anthropicPayload(), "anthropic", [ENV, DATE], "system")?.payload as Record<string, unknown>;
+		const once = withSystemRoleContext(anthropicPayload(), "anthropic", [ENV, DATE], "system") as Record<string, unknown>;
 		expect(withSystemRoleContext(once, "anthropic", [ENV, DATE], "system")).toBeUndefined();
 	});
 
 	it("writes the OpenAI shapes with the API's role", () => {
 		const responses = { input: [{ role: "developer", content: "prompt" }, { role: "user", content: [{ type: "input_text", text: ENV.framed }, { type: "input_text", text: "hi" }] }] };
-		const out = withSystemRoleContext(responses, "responses", [ENV], "developer")?.payload as { input: unknown[] };
+		const out = withSystemRoleContext(responses, "responses", [ENV], "developer") as { input: unknown[] };
 		expect(out.input.slice(1)).toEqual([{ role: "user", content: [{ type: "input_text", text: "hi" }] }, { role: "developer", content: ENV.inner }]);
 		const completions = { messages: [{ role: "system", content: "prompt" }, { role: "user", content: [{ type: "text", text: ENV.framed }, { type: "text", text: "hi" }] }] };
-		expect((withSystemRoleContext(completions, "completions", [ENV], "system")?.payload as { messages: unknown[] }).messages[2]).toEqual({ role: "system", content: ENV.inner });
+		expect((withSystemRoleContext(completions, "completions", [ENV], "system") as { messages: unknown[] }).messages[2]).toEqual({ role: "system", content: ENV.inner });
 	});
 
 	it("picks the role pi gives a system message on each API", () => {

@@ -121,6 +121,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => {
 		prompted = false;
 		announcedSkills = false;
+		sessionUsage = undefined;
 		sessionModel = ctx.model;
 	});
 	pi.on("model_select", (event) => {
@@ -244,7 +245,8 @@ export default function skillExtension(pi: ExtensionAPI) {
 	//
 	// The order is Claude Code's: project and user skills, then plugin commands
 	// and plugin skills, then the bundled catalog.
-	const index = (cwd = sessionCwd): IndexedSkill[] => {
+	/** Every listable entry; `withCommands: false` leaves out plugin commands (and their frontmatter reads). */
+	const index = (cwd = sessionCwd, withCommands = true): IndexedSkill[] => {
 		const agentDir = getAgentDir();
 		const home = os.homedir();
 		const states = readSkillStates(pluginRoot(agentDir));
@@ -282,7 +284,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 			disableModelInvocation: readModelInvocationDisabled(skill.path),
 		}));
 		// A plugin command is listed when it describes itself, as in Claude Code.
-		const commands = discovered.commands.flatMap((command) => {
+		const commands = !withCommands ? [] : discovered.commands.flatMap((command) => {
 			const description = readDescription(command.path);
 			const whenToUse = readWhenToUse(command.path);
 			if (!description?.trim() && !whenToUse) return [];
@@ -304,12 +306,19 @@ export default function skillExtension(pi: ExtensionAPI) {
 		return [...project.filter((skill) => !isBundled(skill.path)), ...commands, ...plugin, ...project.filter((skill) => isBundled(skill.path))];
 	};
 	/** Skills proper: the /skills panel and the typed forms leave plugin commands to the plugins extension. */
-	const skillsOnly = (cwd = sessionCwd): IndexedSkill[] => index(cwd).filter((skill) => skill.kind !== "command");
+	const skillsOnly = (cwd = sessionCwd): IndexedSkill[] => index(cwd, false);
+
+	/**
+	 * Usage as the session found it: read once, so the listing's ranking (and
+	 * with it message 1 of the cached prefix) does not move when a skill is
+	 * used mid-session or a day's decay crosses a threshold.
+	 */
+	let sessionUsage: { usage: ReturnType<typeof readUsage>; now: Date } | undefined;
 
 	/** The listing, within Claude Code's budget for the session model's context window. */
 	const describe = () => {
-		const usage = readUsage(pluginRoot(getAgentDir()));
-		const now = new Date();
+		sessionUsage ??= { usage: readUsage(pluginRoot(getAgentDir())), now: new Date() };
+		const { usage, now } = sessionUsage;
 		const skills = index().map((skill) => ({
 			...skill,
 			bundled: isBundled(skill.path),
@@ -550,9 +559,11 @@ export default function skillExtension(pi: ExtensionAPI) {
 	// `skill`; it is expanded here too, as Claude Code expands it. Only an exact
 	// plugin-skill name is taken; anything else stays the user's text.
 	pi.on("input", async (event, ctx) => {
-		const cmd = parseSkillCommand(event.text) ?? typedPluginSkill(event.text);
+		const typed = parseSkillCommand(event.text);
+		const plugin = typed ? undefined : typedPluginSkill(event.text);
+		const cmd = typed ?? plugin?.command;
 		if (!cmd) return { action: "continue" };
-		const found = resolveSkill(skillsOnly(), cmd.name);
+		const found = plugin?.skill ?? resolveSkill(skillsOnly(), cmd.name);
 		if (!found) return { action: "continue" };
 		const outcome = await deliverSkill(found, cmd.args, ctx, {
 			images: event.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined,
@@ -562,12 +573,13 @@ export default function skillExtension(pi: ExtensionAPI) {
 		return { action: outcome === "handled" ? "handled" : "continue" };
 	});
 
-	/** A typed `/<plugin>:<skill> [args]` naming a plugin skill exactly. */
-	const typedPluginSkill = (text: string): { name: string; args: string } | undefined => {
+	/** A typed `/<plugin>:<skill> [args]` naming a plugin skill exactly, and that skill. */
+	const typedPluginSkill = (text: string): { command: { name: string; args: string }; skill: IndexedSkill } | undefined => {
 		if (!text.startsWith("/")) return undefined;
 		const command = parseSlashCommand(text);
 		if (!command?.name.includes(":")) return undefined;
-		return skillsOnly().some((skill) => skill.source === "plugin" && skill.name === command.name) ? command : undefined;
+		const skill = skillsOnly().find((candidate) => candidate.source === "plugin" && candidate.name === command.name);
+		return skill ? { command, skill } : undefined;
 	};
 
 	// Claude Code invokes a user/project skill as a bare `/<name>` (only plugin

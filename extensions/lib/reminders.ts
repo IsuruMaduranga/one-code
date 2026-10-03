@@ -175,6 +175,11 @@ export interface ReminderEntry {
 	 * auto-mode note).
 	 */
 	systemRoleOnly?: boolean;
+	/**
+	 * `sticky-append` only: never on the message that carries the context
+	 * stack, which already says the same (the first prompt's `<total_tokens>`).
+	 */
+	skipStackCarrier?: boolean;
 }
 
 export interface ReminderPayload {
@@ -194,6 +199,8 @@ export interface ReminderPayload {
 	raw?: boolean;
 	/** `first-prepend` only: sent only inside the mid-conversation system message (see ReminderEntry). */
 	systemRoleOnly?: boolean;
+	/** `sticky-append` only: never on the message that carries the context stack (see ReminderEntry). */
+	skipStackCarrier?: boolean;
 	/** `user-prepend` only: skip when the same text is already pending (the shared caveat). */
 	once?: boolean;
 	/**
@@ -224,6 +231,7 @@ type EnqueueOptions = {
 	suffix?: string;
 	raw?: boolean;
 	systemRoleOnly?: boolean;
+	skipStackCarrier?: boolean;
 	/** Test seam / explicit anchor for `sticky-append`; defaults to now. */
 	since?: number;
 	/** `user-prepend` only: skip when the same text is already pending. */
@@ -256,6 +264,7 @@ export class ReminderQueue {
 			toolCallId: opts?.toolCallId,
 		};
 		if (opts?.systemRoleOnly) entry.systemRoleOnly = true;
+		if (opts?.skipStackCarrier) entry.skipStackCarrier = true;
 		if (placement === "sticky-append") {
 			// A standing reminder re-emitted with the SAME text (plan mode re-emits
 			// every turn) keeps its anchor, so the blocks on earlier messages do not
@@ -376,6 +385,7 @@ function strip(r: StoredReminder): ReminderEntry {
 	const entry: ReminderEntry = { text: r.text, placement: r.placement, order: r.order, suffix: r.suffix };
 	if (r.raw) entry.raw = true;
 	if (r.systemRoleOnly) entry.systemRoleOnly = true;
+	if (r.skipStackCarrier) entry.skipStackCarrier = true;
 	if (r.since !== undefined) entry.since = r.since;
 	if (r.opener !== undefined) entry.opener = r.opener;
 	if (r.tailPin) entry.tailPin = r.tailPin;
@@ -606,6 +616,10 @@ export function injectReminders(messages: AgentMessage[], reminders: Array<strin
 		// on its tail; the queue pinned that message, which keeps it.
 		const pinned = entry.tailPin ? pinLocator(messages)(entry.tailPin) : -1;
 		if (pinned !== -1 && !carriers.includes(pinned)) carriers.unshift(pinned);
+		if (entry.skipStackCarrier && carriers.includes(firstUserIndex)) {
+			for (const index of carriers.filter((index) => index !== firstUserIndex).sort((a, b) => a - b)) push(after, index, [reminderBlock(entry)]);
+			continue;
+		}
 		if (carriers.length === 0) {
 			// No user turn and no pin yet (a caller without the queue): ride the tail.
 			push(after, tailIndex === -1 ? firstUserIndex : tailIndex, [reminderBlock(entry)]);

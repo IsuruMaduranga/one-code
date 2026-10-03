@@ -291,7 +291,7 @@ export class AgentRunner {
 				agentDir: getAgentDir(),
 				systemPrompt: agentDef?.systemPrompt,
 				extraExtensionPaths: CHILD_EXTENSION_PATHS,
-				// claude-context (a child extension) injects # claudeMd itself.
+				// claude-context (a child extension) injects the CLAUDE.md instructions itself.
 				noContextFiles: true,
 				...(handback ? { extraFactories: [subagentHandbackExtension(handback)] } : {}),
 				getPermissionBridge: this.options.getPermissionBridge,

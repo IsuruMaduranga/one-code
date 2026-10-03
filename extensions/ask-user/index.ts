@@ -14,7 +14,7 @@
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { ccToolRenderers, safeThemeBold, safeThemeInverse, safeThemePaint } from "../lib/tui-render.ts";
-import { type DescriptionForm, followDescriptionForm, registerVariantTool } from "../lib/tool-variants.ts";
+import { registerFormTool } from "../lib/tool-variants.ts";
 import { ASK_PARAMS, askDescription } from "./description.ts";
 import { type Answer, answerPairs, formatAnswers, formatDecline, type Question } from "./questions.ts";
 import { applyWidgetKey, createWidgetState, decodeWidgetKey, renderWidget, type WidgetResult } from "./widget.ts";
@@ -113,5 +113,5 @@ export default function askUserExtension(pi: ExtensionAPI) {
 			};
 		},
 	});
-	followDescriptionForm(pi, registerVariantTool<DescriptionForm>(pi, "short", (form) => ({ ...tool, description: askDescription(form) })));
+	registerFormTool(pi, tool, askDescription);
 }

@@ -39,6 +39,9 @@ const HEADER =
 	"# gitStatus\nThis is the git status at the start of the conversation. " +
 	"Note that this status is a snapshot in time, and will not update during the conversation.";
 
+/** The main session's system-prompt extension claims the snapshot on this channel; a child session never does. */
+export const GIT_SNAPSHOT_OWNER_CHANNEL = "one-code:git-snapshot-owner";
+
 /** Claude Code's limit on the status inside the block, in characters. */
 export const GIT_STATUS_MAX_CHARS = 2000;
 

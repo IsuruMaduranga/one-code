@@ -14,6 +14,7 @@ import { createHash } from "node:crypto";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { toolResultsOnBranch } from "./branch-restore.ts";
 import { parseClaudeVersion } from "./model-tier.ts";
+import { RESPONSES_APIS } from "./system-role.ts";
 import { ADDENDUM_HEAD } from "./tool-additions.ts";
 import { normalizeToolName } from "../permissions/matcher.ts";
 
@@ -341,8 +342,6 @@ function earliestLoads(loads: ToolSearchLoads, resultAt: (callId: string) => num
 	return loaderOf;
 }
 
-/** pi-ai's Responses APIs: requests carry `input` items and flat `{ type, name }` tools. */
-const RESPONSES_APIS = new Set(["openai-responses", "openai-codex-responses", "azure-openai-responses"]);
 
 /** How a Responses model takes a mid-conversation tool load (pi-ai's model `compat` fields). */
 export interface ToolLoadCompat {

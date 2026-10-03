@@ -260,7 +260,7 @@ export class SubagentRuntime {
 				subagentHandbackExtension(handback, { deferred: fork }),
 				...(fork && spec.parentRequest ? [forkCacheExtension(spec.parentRequest)] : []),
 			],
-			// claude-context (above) injects # claudeMd on the child's session_start;
+			// claude-context (above) injects the CLAUDE.md instructions on the child's session_start;
 			// pi must not append the same files to the system prompt as well.
 			noContextFiles: true,
 			getPermissionBridge: this.getPermissionBridge,
@@ -289,7 +289,7 @@ export class SubagentRuntime {
 	/**
 	 * Hold a run until a sibling with the same request prefix has started
 	 * streaming (see `warmGate`): same prompt identity, same cwd (the child's
-	 * `# claudeMd` block names its paths) and same model. Resolves to the release
+	 * instructions block names its paths) and same model. Resolves to the release
 	 * for the caller's `finally`.
 	 */
 	private admitPrefix(spec: Pick<ChildSessionSpec, "cwd" | "forkFrom" | "parentSystemPrompt" | "agent">, session: Session): Promise<Release> {

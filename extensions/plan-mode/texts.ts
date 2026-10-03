@@ -5,7 +5,7 @@
  * file-based"); only the wording follows Claude Code.
  */
 
-import type { PromptTier } from "../lib/model-tier.ts";
+import type { DescriptionForm } from "../lib/tool-variants.ts";
 
 /**
  * Claude Code's EnterPlanMode description, which prefers plan mode for any
@@ -110,9 +110,9 @@ export const ENTER_PLAN_MODE_DESCRIPTION_WEAK =
 	"Enter plan mode: read-only investigation to design an approach before changing anything. Most tasks do not need it.\n" +
 	"For a small or clearly-scoped change, act directly instead. Enter plan mode only for multi-file work whose design is genuinely unclear, or when the user asks for a plan. In plan mode only read-only tools are available, plus one writable file: the plan file whose path you are told, where you build the plan incrementally.";
 
-/** The enter_plan_mode description a model of `tier` gets. */
-export function enterPlanModeDescription(tier: PromptTier): string {
-	return tier === "cheap" || tier === "tiny" ? ENTER_PLAN_MODE_DESCRIPTION_WEAK : ENTER_PLAN_MODE_DESCRIPTION;
+/** The enter_plan_mode description for a description form: Claude Code's short form, ours as the long one. */
+export function enterPlanModeDescription(form: DescriptionForm): string {
+	return form === "long" ? ENTER_PLAN_MODE_DESCRIPTION_WEAK : ENTER_PLAN_MODE_DESCRIPTION;
 }
 
 /** Claude Code's ExitPlanMode description. */

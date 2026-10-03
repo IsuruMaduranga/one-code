@@ -72,18 +72,18 @@ export function skillListingText(skills: ReadonlyArray<ListedSkill>, budget = Nu
 		const visibility = skillListingVisibility(skill.state);
 		if (visibility === "hidden") return [];
 		const short = `- ${skill.name}`;
-		if (visibility === "name") return [{ skill, short, full: short, nameOnly: true }];
+		if (visibility === "name") return [{ skill, short, full: short }];
 		const text = listingDescription(skill);
-		return [{ skill, short, full: text ? `${short}: ${text}` : short, nameOnly: false }];
+		return [{ skill, short, full: text ? `${short}: ${text}` : short }];
 	});
 	if (listed.length === 0) return "(no skills available)";
 	const separators = listed.length - 1;
 	const whole = listed.reduce((sum, line) => sum + line.full.length, 0) + separators;
 	if (whole <= budget) return listed.map((line) => line.full).join("\n");
 
-	const kept = new Set(listed.filter((line) => line.nameOnly || line.skill.bundled));
+	// A name-only line's full form is its short form, so it needs no place in `kept`.
+	const kept = new Set(listed.filter((line) => line.skill.bundled));
 	const ranked = listed.filter((line) => !kept.has(line));
-	if (ranked.length === 0) return listed.map((line) => line.full).join("\n");
 	let left = budget - (listed.reduce((sum, line) => sum + (kept.has(line) ? line.full.length : line.short.length), 0) + separators);
 	// A stable sort: equal scores keep the listing's order.
 	for (const line of [...ranked].sort((a, b) => (b.skill.usage ?? 0) - (a.skill.usage ?? 0))) {

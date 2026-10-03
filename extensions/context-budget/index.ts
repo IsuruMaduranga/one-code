@@ -8,7 +8,7 @@
  * - the first prompt: the constant budget in the first-message context stack
  *   (CONTEXT_ORDER.totalTokens), so it joins the mid-conversation system
  *   message where there is one;
- * - every user message: the constant budget as a raw marker, a `sticky-append`
+ * - every later user message: the constant budget as a raw marker, a `sticky-append`
  *   reminder keyed once per session (`since: 0`, so a resumed session's earlier
  *   user messages carry it too — byte-identical to what they carried before);
  * - every tool result: the countdown, a RAW `last-append` one-shot queued at
@@ -59,6 +59,8 @@ export default function contextBudgetExtension(pi: ExtensionAPI) {
 			placement: "sticky-append",
 			raw: true,
 			since: 0,
+			// The first prompt carries the line in the context stack instead.
+			skipStackCarrier: true,
 		} satisfies ReminderPayload);
 	});
 

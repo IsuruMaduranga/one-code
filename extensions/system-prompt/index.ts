@@ -16,6 +16,7 @@
 import { getCurrentSystemMessage } from "@earendil-works/pi-ai";
 import type { BuildSystemPromptOptions, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { environmentBlock, modelLine } from "../lib/environment-block.ts";
+import { GIT_SNAPSHOT_OWNER_CHANNEL } from "../lib/git-status.ts";
 import { resolveModelTier, taskToolsEnabled } from "../lib/model-tier.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { privateSessionScratchpadDir } from "../lib/scratchpad.ts";
@@ -42,12 +43,14 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("session_start", (_event, ctx) => {
-		// The prompt section promises a usable directory, so the extension that
-		// makes the promise creates it. Failure (unwritable /tmp) drops the
-		// section rather than promising a directory writes will error on.
-		// On a shared /tmp it must also be private to this user
-		// (lib/scratchpad.ts ensurePrivateScratchpad); otherwise the section is dropped.
+		// The environment block's scratchpad line promises a usable directory, so
+		// the extension that makes the promise creates it. Failure (unwritable
+		// /tmp) drops the line rather than promising a directory writes will error
+		// on. On a shared /tmp it must also be private to this user
+		// (lib/scratchpad.ts ensurePrivateScratchpad); otherwise the line is dropped.
 		scratchpad = privateSessionScratchpadDir(ctx.cwd, ctx.sessionManager.getSessionId());
+		// The main session's context block carries Claude Code's git snapshot (claude-context).
+		pi.events.emit(GIT_SNAPSHOT_OWNER_CHANNEL, {});
 
 		// Another session's options (a named agent's customPrompt, its tool set)
 		// must not shape this one's idle turns.

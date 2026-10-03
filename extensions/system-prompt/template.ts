@@ -75,7 +75,7 @@ export function buildClaudeCodeSystemPrompt(
 	const sections = [
 		...lead,
 		buildToolsSection(options),
-		// Claude Code orders Memory just before Environment; workhorse/cheap/tiny use the long spec.
+		// Workhorse, cheap and tiny use the long memory spec.
 		memoryPromptSection(env.memoryDir, bundle.verboseMemory),
 		...bundle.tail,
 	];
@@ -84,7 +84,7 @@ export function buildClaudeCodeSystemPrompt(
 
 	// Mirror pi's own custom-prompt assembly: append text, skills, and the
 	// trailing cwd line. CLAUDE.md / AGENTS.md context files are NOT put here —
-	// Claude Code injects them as the `# claudeMd` <system-reminder> on the first
+	// Claude Code sends them as the instructions <system-reminder> on the first
 	// user message (extensions/claude-context), not in the system prompt.
 	if (options.appendSystemPrompt) {
 		prompt += `\n\n${options.appendSystemPrompt}`;

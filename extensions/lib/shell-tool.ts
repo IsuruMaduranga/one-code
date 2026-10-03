@@ -24,6 +24,7 @@ import { withClaudeCodeShellText } from "./shell-result.ts";
 import type { ShellSpawn } from "./shell-spawn.ts";
 import { keepSpillReadable } from "./spill-file.ts";
 import { ccWrapBuiltinRenderers, linesComponent, resultLines } from "./tui-render.ts";
+import { registerVariantTool } from "./tool-variants.ts";
 
 // The completion notification carries status + exit code + where the output is,
 // plus only a short tail: a finished build used to push 30 KB (~8k tokens) into
@@ -289,11 +290,5 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 			};
 		},
 	} as ToolDefinition<P>;
-	pi.registerTool(definition);
-	let current = spec.description;
-	return (description: string) => {
-		if (description === current) return;
-		current = description;
-		pi.registerTool({ ...definition, description });
-	};
+	return registerVariantTool(pi, spec.description, (description) => ({ ...definition, description }) as unknown as ToolDefinition);
 }

@@ -5,6 +5,8 @@
  * system prompt, which keeps only what never varies per session.
  */
 
+import { parseClaudeId } from "./model-tier.ts";
+
 export interface EnvironmentFacts {
 	cwd: string;
 	isGitRepo: boolean;
@@ -51,17 +53,12 @@ const CLAUDE_CUTOFFS: Record<string, string> = {
 	"fable 5.1": "June 2026",
 };
 
-/**
- * A Claude model's name as Claude Code says it ("Opus 5.5", "Haiku 4.5"),
- * from an id in any provider's spelling: `claude-opus-5-5`,
- * `claude-haiku-4-5-20251001`, `anthropic/claude-opus-5.5`. Undefined for
- * anything else; a dated suffix is never read as the minor version.
- */
+/** A Claude model's name as Claude Code says it ("Opus 5.5", "Haiku 4.5"), from an id in any provider's spelling. */
 export function claudeDisplayName(id: string): string | undefined {
-	const match = id.match(/(?:^|[/.])claude-(opus|sonnet|haiku|fable)-(\d+)(?:[-.](\d{1,2}))?(?=$|[-@:[])/);
-	if (!match) return undefined;
-	const family = match[1][0].toUpperCase() + match[1].slice(1);
-	return match[3] ? `${family} ${match[2]}.${match[3]}` : `${family} ${match[2]}`;
+	const claude = parseClaudeId(id);
+	if (!claude) return undefined;
+	const family = claude.family[0].toUpperCase() + claude.family.slice(1);
+	return claude.minor === undefined ? `${family} ${claude.major}` : `${family} ${claude.major}.${claude.minor}`;
 }
 
 /**

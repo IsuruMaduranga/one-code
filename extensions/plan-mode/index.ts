@@ -22,10 +22,10 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { defineTool, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { registerFormTool } from "../lib/tool-variants.ts";
 import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
-import { resolveModelTier } from "../lib/model-tier.ts";
 import { oneCodeStateDir } from "../lib/paths.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { ccToolRenderers, safeThemePaint } from "../lib/tui-render.ts";
@@ -130,7 +130,6 @@ export default function planModeExtension(pi: ExtensionAPI) {
 
 	pi.on("session_start", (_event, ctx) => {
 		lastCtx = ctx;
-		fitEnterPlanModeToModel(ctx.model);
 	});
 
 	pi.on("before_agent_start", (_event, ctx) => {
@@ -141,21 +140,18 @@ export default function planModeExtension(pi: ExtensionAPI) {
 	/**
 	 * enter_plan_mode's description follows the model's tier: Claude Code's,
 	 * which prefers plan mode, on frontier and workhorse, and One Code's, which
-	 * says most tasks do not need it, on cheap and tiny (`texts.ts`). The tool is
-	 * registered again only when the tier's text differs, so within one model
-	 * the definition never changes; a re-registration keeps the tool's active
-	 * state, so a deferred tool stays deferred. The tool is deferred and sets no
-	 * prompt snippet, so the system prompt never moves with it.
+	 * says most tasks do not need it, on cheap and tiny (`texts.ts`, through the
+	 * shared lib/tool-variants.ts). A re-registration keeps the tool's active
+	 * state, so the deferred tool stays deferred, and it sets no prompt snippet,
+	 * so the system prompt never moves with it.
 	 */
-	let enterDescription: string | undefined;
-	const registerEnterPlanMode = (description: string) => {
-		if (description === enterDescription) return;
-		enterDescription = description;
-		pi.registerTool({
+	registerFormTool(
+		pi,
+		defineTool({
 			name: "enter_plan_mode",
 			label: "Enter plan mode",
 			...ccToolRenderers("Enter plan mode"),
-			description,
+			description: ENTER_PLAN_MODE_DESCRIPTION,
 			parameters: Type.Object({}),
 			async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
 				pi.events.emit(MODE_CHANNEL, { mode: "plan" });
@@ -169,11 +165,9 @@ export default function planModeExtension(pi: ExtensionAPI) {
 					details: { planFilePath: path },
 				};
 			},
-		});
-	};
-	const fitEnterPlanModeToModel = (model: ExtensionContext["model"]) => registerEnterPlanMode(enterPlanModeDescription(resolveModelTier(model)));
-	registerEnterPlanMode(ENTER_PLAN_MODE_DESCRIPTION);
-	pi.on("model_select", (event, ctx) => fitEnterPlanModeToModel(event.model ?? ctx.model));
+		}),
+		enterPlanModeDescription,
+	);
 
 	pi.registerTool({
 		name: "exit_plan_mode",

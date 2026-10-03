@@ -33,7 +33,7 @@ import {
 	discoverOneCodeFiles,
 	localDate,
 } from "../lib/claude-context.ts";
-import { collectGitStatus } from "../lib/git-status.ts";
+import { collectGitStatus, GIT_SNAPSHOT_OWNER_CHANNEL } from "../lib/git-status.ts";
 import { projectMemoryDir, truncateIndex } from "../lib/memory.ts";
 import { claudeConfigDir, oneCodeStateDir } from "../lib/paths.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
@@ -72,6 +72,16 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	let email: string | null = null;
 	/** Claude Code's git snapshot, taken once at the conversation's first turn; undefined until then. */
 	let gitStatus: string | null | undefined;
+	/**
+	 * Only the main session takes the snapshot, as before it moved here: its
+	 * system-prompt extension (never loaded in a child) claims it at session
+	 * start. A subagent or workflow agent would otherwise run its own git
+	 * commands, synchronously on the shared event loop, for every child.
+	 */
+	let takesGitSnapshot = false;
+	pi.events.on(GIT_SNAPSHOT_OWNER_CHANNEL, () => {
+		takesGitSnapshot = true;
+	});
 	/** The date the date reminder carries. */
 	let blockDate = "";
 	/** The date the model was last told: the reminder's, or a later date-change notice's. */
@@ -144,7 +154,7 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		if (gitStatus !== undefined) return;
 		const tools = pi.getActiveTools();
 		const shellTool = tools.includes("powershell") && !tools.includes("bash") ? "powershell" : "bash";
-		gitStatus = collectGitStatus(ctx.cwd, undefined, shellTool);
+		gitStatus = takesGitSnapshot ? collectGitStatus(ctx.cwd, undefined, shellTool) : null;
 		const context = buildContextBlock({ email, gitStatus });
 		if (!context) return;
 		pi.events.emit(REMINDER_CHANNEL, {

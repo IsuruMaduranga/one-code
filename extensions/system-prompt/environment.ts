@@ -9,19 +9,14 @@
  */
 
 import os from "node:os";
+import type { EnvironmentFacts } from "../lib/environment-block.ts";
 import { findGitRoot } from "../lib/git.ts";
 import { projectMemoryDir } from "../lib/memory.ts";
 
-export interface EnvironmentInfo {
-	cwd: string;
-	isGitRepo: boolean;
-	platform: string;
-	osVersion: string;
-	shell: string;
+/** The facts the environment block shows, plus the memory directory the system prompt names. */
+export interface EnvironmentInfo extends Omit<EnvironmentFacts, "scratchpadDir" | "workspaceDirs"> {
 	/** Per-project auto-memory directory; the memory extension guarantees it exists. */
 	memoryDir: string;
-	/** The workspace directories as the session started (lib/workspace-channel.ts); listed only when there are some. */
-	workspaceDirs?: string[];
 }
 
 /**

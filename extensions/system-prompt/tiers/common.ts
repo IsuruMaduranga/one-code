@@ -2,7 +2,7 @@
  * Prompt sections shared across tiers.
  *
  * A `PromptBundle` is the tier's static text: `lead` sections come before the
- * dynamic tools/memory/environment/scratchpad blocks, `tail` sections after.
+ * dynamic tools and memory blocks, `tail` sections after.
  * `template.ts` owns the dynamic-block placement and is tier-agnostic.
  *
  * Every register is Claude Code's text for the models in its tier, with One

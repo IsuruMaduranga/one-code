@@ -14,8 +14,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { totalTokensBlock, turnTokenBudget } from "../context-budget/budget.ts";
-import { withBetas } from "../lib/anthropic-payload.ts";
+import { CLEAR_AT_BETA, MID_CONVERSATION_SYSTEM_BETA, reseatMessageMark, withBetas } from "../lib/anthropic-payload.ts";
 import {
 	appendReminderBlocks,
 	framedReminderText,
@@ -27,32 +26,9 @@ import {
 	type ReminderPayload,
 	tailAnchor,
 } from "../lib/reminders.ts";
-import { instructionRole, type MovedBlock, type SystemRoleLayout, systemRoleLayout, withSystemRoleContext } from "../lib/system-role.ts";
-import { framedTotalTokens, withTurnBudgetMessages } from "../lib/turn-budget-layout.ts";
-
-/** Anthropic's beta for a `role: "system"` message after the first one, sent first-party as Claude Code does. */
-const MID_CONVERSATION_SYSTEM_BETA = "mid-conversation-system-2026-04-07";
-/** Anthropic's beta for a system message's `clear_at`, which Claude Code's Fable nudge carries. */
-const CLEAR_AT_BETA = "mid-conversation-system-clear-at-2026-08-21";
-
-/** The wire shape of a model's API, for the shapes the per-turn budget placements handle. */
-function wireShape(api: string): SystemRoleLayout | undefined {
-	if (api === "anthropic-messages") return "anthropic";
-	if (api === "openai-responses" || api === "azure-openai-responses" || api === "openai-codex-responses") return "responses";
-	if (api === "openai-completions") return "completions";
-	return undefined;
-}
-
-/** The index of the first user message carrying the context stack's framed `<total_tokens>` block, on a model without the system role. */
-function stackCarrier(messages: unknown, line: string): number | undefined {
-	if (!Array.isArray(messages)) return undefined;
-	const framed = framedTotalTokens(line);
-	const index = messages.findIndex(
-		(message: { role?: unknown; content?: unknown }) =>
-			message?.role === "user" && Array.isArray(message.content) && message.content.some((part: { text?: unknown }) => part?.text === framed),
-	);
-	return index === -1 ? undefined : index;
-}
+import { claudeFamily } from "../lib/model-tier.ts";
+import { instructionRole, messagesKey, type MovedBlock, systemRoleLayout, wireShape, withSystemRoleContext } from "../lib/system-role.ts";
+import { resolveCountdowns, withTurnBudgetMessages } from "../lib/turn-budget-layout.ts";
 
 /**
  * Roles a reminder can be attached to (see injectReminders). `custom` is a
@@ -67,8 +43,8 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 	const reminderQueue = new ReminderQueue();
 	/** The blocks the last `context` pass placed for the system message; the payload hook moves them. */
 	let moved: MovedBlock[] = [];
-	/** The `<total_tokens>` line of the context stack, which the first prompt carries in place of its marker. */
-	const firstPromptLine = totalTokensBlock(turnTokenBudget());
+	/** The tool results' countdowns the last `context` pass lifted, by call id (lib/turn-budget-layout.ts). */
+	let countdowns = new Map<string, number>();
 
 	pi.events.on(REMINDER_CHANNEL, (data) => {
 		const payload = data as ReminderPayload;
@@ -84,6 +60,7 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 				suffix: payload.suffix,
 				raw: payload.raw,
 				systemRoleOnly: payload.systemRoleOnly,
+				skipStackCarrier: payload.skipStackCarrier,
 				since: payload.since,
 				once: payload.once,
 				toolCallId: payload.toolCallId,
@@ -108,6 +85,7 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 
 	pi.on("context", (event, ctx) => {
 		moved = [];
+		countdowns = new Map();
 		if (reminderQueue.size === 0) return;
 		// injectReminders is a no-op when there is nothing to attach to. Only
 		// consume the queue once there is somewhere to put the reminders, so they
@@ -133,11 +111,16 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 		if (layout) {
 			moved = reminders
 				.filter((entry) => entry.placement === "first-prepend" && movesToSystemRole(entry.order))
-				.map((entry, index) => ({ entry, index }))
-				.sort((a, b) => a.entry.order - b.entry.order || a.index - b.index)
-				.map(({ entry }) => ({ framed: framedReminderText(entry), inner: entry.text }));
+				.sort((a, b) => a.order - b.order)
+				.map((entry) => ({ framed: framedReminderText(entry), inner: entry.text }));
 		}
-		return { messages: injectReminders(event.messages, reminders) };
+		const messages = injectReminders(event.messages, reminders);
+		// Each tool result's <total_tokens> countdown, while its blocks are still
+		// separate: lifted for a system message or framed (lib/turn-budget-layout.ts).
+		if (!ctx.model || !wireShape(ctx.model.api)) return { messages };
+		const resolved = resolveCountdowns(messages, layout !== undefined);
+		countdowns = resolved.left;
+		return { messages: resolved.messages };
 	});
 
 	pi.on("before_provider_request", (event, ctx) => {
@@ -147,19 +130,17 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 		const layout = systemRoleLayout(model);
 		const role = instructionRole(shape, model);
 		let payload = event.payload as Record<string, unknown>;
-		let carrier: number | undefined;
-		if (layout) {
-			const lifted = withSystemRoleContext(payload, layout, moved, role);
-			if (lifted) ({ payload, carrier } = lifted);
-		} else {
-			carrier = stackCarrier(payload[shape === "responses" ? "input" : "messages"], firstPromptLine);
-		}
-		// Claude Code's per-turn <total_tokens> shapes (lib/turn-budget-layout.ts);
-		// first-party Fable also gets its clear_at nudge after each tool result.
+		if (layout) payload = withSystemRoleContext(payload, layout, moved, role) ?? payload;
+		// Claude Code's per-turn <total_tokens> shapes; first-party Fable also
+		// gets its clear_at nudge after each tool result.
 		const firstParty = model.provider === "anthropic";
-		const nudge = layout === "anthropic" && firstParty && /(?:^|[/.])claude-fable-/.test(model.id);
-		payload = withTurnBudgetMessages(payload, { shape, systemRole: layout !== undefined, role, carrier, nudge }) ?? payload;
+		const nudge = layout === "anthropic" && firstParty && claudeFamily(model.id) === "fable";
+		payload = withTurnBudgetMessages(payload, { shape, systemRole: layout !== undefined, role, left: countdowns, nudge }) ?? payload;
 		if (payload === event.payload) return undefined;
+		if (shape === "anthropic") {
+			const key = messagesKey(shape);
+			payload = { ...payload, [key]: reseatMessageMark(payload[key] as Array<{ role?: unknown; content?: unknown }>) };
+		}
 		if (layout !== "anthropic" || !firstParty) return payload;
 		return withBetas(payload, nudge ? [MID_CONVERSATION_SYSTEM_BETA, CLEAR_AT_BETA] : [MID_CONVERSATION_SYSTEM_BETA]);
 	});

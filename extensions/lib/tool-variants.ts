@@ -55,6 +55,15 @@ export function registerVariantTool<V>(pi: ExtensionAPI, initial: V, define: (va
 }
 
 /**
+ * Register `tool` with the description `describe` gives the session model's
+ * form, following it through the session: the one call each tool with a
+ * short and a long form makes.
+ */
+export function registerFormTool(pi: ExtensionAPI, tool: AnyToolDefinition, describe: (form: DescriptionForm) => string): void {
+	followDescriptionForm(pi, registerVariantTool<DescriptionForm>(pi, "short", (form) => ({ ...tool, description: describe(form) })));
+}
+
+/**
  * Call `apply` with the session model's description form at session start, on
  * a model change, and before each prompt (a turn opened another way still
  * carries the right text).

@@ -7,6 +7,8 @@
  * reminder carries every later change (decisions/tools.md).
  */
 
+import { claudeFamily } from "../lib/model-tier.ts";
+
 const OPUS_NOTE =
 	"While auto mode is active:\n\n" +
 	"You can do much of your work through the bash tool when it is the simpler route: read files with cat, head, or sed -n, search with grep and find, and make small, mechanical file changes with sed, heredocs, or short scripts instead of the dedicated read, edit, or write tools. " +
@@ -18,5 +20,5 @@ const FABLE_NOTE =
 	"Fall back to a dedicated tool only when bash genuinely cannot do the job.";
 
 export function autoModeSystemNote(modelId: string): string {
-	return /(?:^|[/.])claude-fable-/.test(modelId) ? FABLE_NOTE : OPUS_NOTE;
+	return claudeFamily(modelId) === "fable" ? FABLE_NOTE : OPUS_NOTE;
 }

@@ -32,7 +32,7 @@ import {
 	createWriteToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { perCwd } from "../lib/per-cwd.ts";
-import { type DescriptionForm, followDescriptionForm, registerVariantTool } from "../lib/tool-variants.ts";
+import { type DescriptionForm, registerFormTool } from "../lib/tool-variants.ts";
 import { ccWrapBuiltinRenderers } from "../lib/tui-render.ts";
 import { writeDescription } from "./write-description.ts";
 
@@ -92,6 +92,6 @@ export default function toolStyleExtension(pi: ExtensionAPI) {
 			pi.registerTool(definition);
 			continue;
 		}
-		followDescriptionForm(pi, registerVariantTool<DescriptionForm>(pi, "short", (form) => ({ ...definition, description: describe(form) })));
+		registerFormTool(pi, definition, describe);
 	}
 }

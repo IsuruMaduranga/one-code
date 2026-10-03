@@ -18,6 +18,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { parseFrontmatterLoosely } from "../lib/frontmatter.ts";
 import { claudeUserDir } from "../lib/paths.ts";
+import { SUBAGENT_HANDBACK } from "../lib/subagent-handback.ts";
 import { normalizeToolName } from "../permissions/matcher.ts";
 
 export interface AgentDefinition {
@@ -200,7 +201,7 @@ export function discoverAgents(sources: Array<string | AgentSource | CodeAgents>
  * `structured_output`. Claude Code's allowlist never strips its own plumbing
  * either.
  */
-const ALLOWLIST_ESSENTIALS = ["SendMessage", "SubagentHandback", "tool_search", "structured_output"];
+const ALLOWLIST_ESSENTIALS = ["SendMessage", SUBAGENT_HANDBACK, "tool_search", "structured_output"];
 
 /** Apply an agent's allowlist to pi's `tools` option, keeping the essentials. */
 export function childToolAllowlist(tools: string[] | undefined): string[] | undefined {

@@ -43,7 +43,7 @@ import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
-import { type DescriptionForm, followDescriptionForm, registerVariantTool } from "../lib/tool-variants.ts";
+import { registerFormTool } from "../lib/tool-variants.ts";
 import { webSearchDescription } from "./description.ts";
 import {
 	DEFAULT_MAX_RESULTS,
@@ -220,7 +220,7 @@ export default function webExtension(pi: ExtensionAPI) {
 			}
 		},
 	});
-	followDescriptionForm(pi, registerVariantTool<DescriptionForm>(pi, "short", (form) => ({ ...tool, description: webSearchDescription(form) })));
+	registerFormTool(pi, tool, webSearchDescription);
 
 	// url_context reports failures ("Failed: …" text, details.error set) without
 	// isError. Stamp it here rather than patching the vendor package.
