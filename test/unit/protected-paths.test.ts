@@ -48,6 +48,13 @@ describe("isProtectedPath", () => {
 		}
 	});
 
+	it("exempts .onecode/worktrees, independent mode's worktree folder, and nothing else under .onecode", () => {
+		expect(isProtectedPath(".onecode/worktrees/feature/src/a.ts")).toBe(false);
+		expect(isProtectedPath(".onecode/worktrees/fix/.git")).toBe(true);
+		expect(isProtectedPath(".onecode/agents/reviewer.md")).toBe(true);
+		expect(isProtectedPath(".onecode/settings.json")).toBe(true);
+	});
+
 	it("exempts .claude/worktrees, which is the agent's own working space", () => {
 		expect(isProtectedPath(".claude/worktrees/feature/src/a.ts")).toBe(false);
 		expect(isProtectedPath(".claude/settings.local.json")).toBe(true);

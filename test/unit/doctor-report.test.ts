@@ -102,6 +102,16 @@ describe("buildDoctorReport", () => {
 		expect(report.summary).toMatch(/^Ready\. Main model anthropic\/claude-opus-5, subagents on anthropic\/claude-sonnet-5, auto-mode classifier anthropic\/claude-sonnet-5\./);
 	});
 
+	it("names the config sources mode, and says ~/.claude is not read in independent mode", () => {
+		const compatible = renderDoctorText(buildDoctorReport({ env: environment(), registry: registry(anthropic), session: { model: anthropic[1], modelSource: "session" } }), 200);
+		expect(compatible).toContain("Config sources: Claude-compatible (switch in /memory)");
+		expect(compatible).toContain("Claude Code config read from:");
+		const independent = renderDoctorText(buildDoctorReport({ env: environment({ configMode: "independent" }), registry: registry(anthropic), session: { model: anthropic[1], modelSource: "session" } }), 200);
+		expect(independent).toContain("Config sources: Independent (switch in /memory)");
+		expect(independent).toContain("Claude Code config: not read");
+		expect(independent).not.toContain("Claude Code config read from:");
+	});
+
 	it("warns when the hosting pi is outside the tested range", () => {
 		const report = buildDoctorReport({ env: environment({ install: "pi-package", piVersion: TESTED_PI_MAX_EXCLUSIVE }), registry: registry(anthropic), session: { model: anthropic[1], modelSource: "session" } });
 		expect(report.findings.some((f) => f.text.includes("tested against pi"))).toBe(true);

@@ -52,6 +52,7 @@ import { lookupLatestVersion } from "./update-lookup.ts";
 import { applyDoctorKey, decodeDoctorKey, renderDoctorViewer, visibleBodyRows } from "./viewer.ts";
 import { announceArgumentHint } from "../lib/argument-hints.ts";
 import { registeredMcpServers } from "../mcp/config.ts";
+import { configMode } from "../lib/config-mode.ts";
 
 /** Rows the panel may take; the terminal's own height caps it (boundedDockHeight). */
 export const DOCTOR_PANEL_MAX_HEIGHT = 40;
@@ -129,6 +130,7 @@ export default function doctorExtension(pi: ExtensionAPI) {
 				home,
 				agentDir: getAgentDir(),
 				stateDir: oneCodeStateDir(process.env, home),
+				configMode: configMode(),
 				env: process.env,
 				platform: process.platform,
 				arch: process.arch,
