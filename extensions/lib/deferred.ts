@@ -103,16 +103,18 @@ export function deferredAddendumText(added: readonly string[]): string {
 }
 
 /**
- * Whether Anthropic accepts client-side `tool_reference` blocks for this model —
- * pi-ai's `defaultSupportsToolReferences` rule, with the model's own compat flag
- * winning: first-party Anthropic, not Haiku, Claude 4.5 or newer.
+ * Whether Anthropic accepts client-side `tool_reference` blocks for this model,
+ * with the model's own compat flag winning: first-party Anthropic, Claude 4.5
+ * or newer, and Haiku 4.5 (it takes references with no beta, and an eager
+ * append there rewrites the whole cache, findings §55 P4). Other Haikus stay out.
  */
 export function supportsToolReferences(
 	model: { provider?: string; id?: string; compat?: { supportsToolReferences?: boolean } } | undefined,
 ): boolean {
 	if (!model) return false;
 	if (typeof model.compat?.supportsToolReferences === "boolean") return model.compat.supportsToolReferences;
-	if (model.provider !== "anthropic" || !model.id || model.id.includes("haiku")) return false;
+	if (model.provider !== "anthropic" || !model.id) return false;
+	if (model.id.includes("haiku")) return /^claude-haiku-4-5(?:-|$)/.test(model.id);
 	const version = parseClaudeVersion(model.id);
 	return version !== undefined && (version.major > 4 || (version.major === 4 && version.minor >= 5));
 }
@@ -246,6 +248,11 @@ export function stabilizeDeferredTools(
 			demoted.add(tool.name);
 			referencesAt.set(loader.callId, [...(referencesAt.get(loader.callId) ?? []), tool.name]);
 		}
+		// References in the order the query named them, as Claude Code lists them.
+		for (const [callId, names] of referencesAt) {
+			const order = loads.get(callId) ?? [];
+			referencesAt.set(callId, [...names].sort((a, b) => order.indexOf(a) - order.indexOf(b)));
+		}
 	}
 
 	// pi puts the tools breakpoint on the last eager tool; if that one is demoted
@@ -292,12 +299,24 @@ function withToolReferences(message: WireMessage, referencesAt: ReadonlyMap<stri
 		if (cache_control !== undefined) movedBreakpoint = cache_control;
 		blocks.push({ ...rest, content: names.map((name) => ({ type: "tool_reference", tool_name: name })) });
 		if (typeof original === "string") {
-			if (original.trim().length > 0) siblings.push({ type: "text", text: original });
+			if (original.trim().length > 0) siblings.push({ type: "text", text: withClaudeCodeLoadText(original) });
 		} else if (Array.isArray(original)) {
 			siblings.push(...(original as WireBlock[]));
 		}
 	}
 	return { ...message, content: withBreakpointOnLast([...blocks, ...siblings], movedBreakpoint) };
+}
+
+/** `tool_search`'s plain success sentence, which the references stand in for. */
+const LOADED_SENTENCE = /^Loaded [^\n]*\. These tools are now callable\.(?=\n|$)/;
+
+/**
+ * The text beside the references: Claude Code's "Tool loaded." in place of the
+ * plain success sentence, which names what the references already carry. A
+ * sentence with a not-found note, and anything after it, stays as it was.
+ */
+function withClaudeCodeLoadText(text: string): string {
+	return text.replace(LOADED_SENTENCE, "Tool loaded.");
 }
 
 /**
