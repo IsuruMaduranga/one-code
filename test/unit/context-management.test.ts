@@ -83,7 +83,7 @@ describe("anthropicBetas", () => {
 		expect(declared.length).toBeGreaterThan(0);
 		// pi sends the tool-changes beta only on its native tool_addition path, which
 		// never engages while One Code forces the system prompt (findings §7).
-		const skipped = new Set(["mid-conversation-tool-changes-2026-07-01"]);
+		const skipped = new Set(["inline-tools-2026-09-15"]);
 		const mirrored = new Set(
 			anthropicBetas(true, {
 				supportsEagerToolInputStreaming: false,

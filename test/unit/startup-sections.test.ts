@@ -95,10 +95,12 @@ describe("workflowNames", () => {
 });
 
 describe("quietStartupEnabled", () => {
-	it("is true only when the setting is exactly true", () => {
+	it("is true when the setting is true or \"header\", and false otherwise", () => {
 		const dir = scratch();
 		const path = join(dir, "settings.json");
 		writeFileSync(path, JSON.stringify({ quietStartup: true }));
+		expect(quietStartupEnabled(path)).toBe(true);
+		writeFileSync(path, JSON.stringify({ quietStartup: "header" }));
 		expect(quietStartupEnabled(path)).toBe(true);
 		writeFileSync(path, JSON.stringify({ quietStartup: false }));
 		expect(quietStartupEnabled(path)).toBe(false);

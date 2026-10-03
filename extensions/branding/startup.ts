@@ -2,8 +2,8 @@
  * Compact startup sections for the banner: Context, Skills, Themes.
  *
  * pi's own startup listing has no per-section switch — hiding the noisy
- * [Extensions] block (20 internal module names) means `quietStartup: true`,
- * which hides everything. So when quiet startup is on, the banner shows its
+ * [Extensions] block (20 internal module names) means `quietStartup`, which
+ * hides the whole listing. So when quiet startup is on, the banner shows its
  * own compact versions of the sections that ARE useful. pi's resourceLoader
  * is not exposed to extensions, so these are re-derived the same way our
  * other extensions derive them (claude-compat's skill dirs, pi's git-root
@@ -146,11 +146,15 @@ export function shouldDefaultFlushOutputPad(settingsRaw: string | undefined): bo
 	}
 }
 
-/** True when pi's own startup listing is silenced, so ours should render instead. */
+/**
+ * True when pi's own startup listing is silenced, so ours should render instead:
+ * `quietStartup: true`, or pi 1.0's `"header"`, which keeps pi's header and
+ * still hides the listing.
+ */
 export function quietStartupEnabled(piSettingsPath: string): boolean {
 	try {
 		const settings = JSON.parse(readFileSync(piSettingsPath, "utf8"));
-		return settings?.quietStartup === true;
+		return settings?.quietStartup === true || settings?.quietStartup === "header";
 	} catch {
 		return false;
 	}

@@ -20,7 +20,7 @@
  */
 
 import { spawn, execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -28,6 +28,8 @@ const scratch = process.argv[2] ?? mkdtempSync(join(tmpdir(), "cc-subperm-e2e-")
 const MODEL = process.env.MODEL ?? "anthropic/claude-haiku-4-5";
 const workdir = join(scratch, "work");
 const sessionDir = join(scratch, "sessions");
+// The child's command creates this file; the stream is no evidence, since the prompt echoes it.
+const marker = join(workdir, "subagent-ran.txt");
 mkdirSync(workdir, { recursive: true });
 mkdirSync(sessionDir, { recursive: true });
 execFileSync("git", ["init", "-q"], { cwd: workdir });
@@ -42,25 +44,25 @@ const child = spawn("pi", ["--mode", "rpc", "--permission-mode", "default", "--s
 const send = (obj) => child.stdin.write(`${JSON.stringify(obj)}\n`);
 
 let buffer = "";
-let raw = "";
 let sawSubagentPrompt = false;
 let promptTitle = "";
 let answered = false;
+let sawCompletion = false;
 
 const timeout = setTimeout(() => {
 	console.error("TIMEOUT");
-	try { child.kill(); } catch {}
-	process.exit(1);
+	finish(true);
 }, 240_000);
 
 child.stdout.on("data", (chunk) => {
-	raw += chunk.toString();
 	buffer += chunk.toString();
 	let idx;
 	while ((idx = buffer.indexOf("\n")) !== -1) {
 		const line = buffer.slice(0, idx);
 		buffer = buffer.slice(idx + 1);
 		if (!line.trim()) continue;
+		// The prompt never contains this tag, so only the harness's frame can match.
+		if (line.includes("<task-notification>")) sawCompletion = true;
 		let event;
 		try {
 			event = JSON.parse(line);
@@ -80,30 +82,33 @@ child.stdout.on("data", (chunk) => {
 			// Any other UI request (e.g. input) — answer to not hang.
 			send({ type: "extension_ui_response", id: event.id, value: "Yes", confirmed: true });
 		} else if (event.type === "agent_end") {
-			finish();
+			// Agent runs in the background in rpc mode: the first agent_end is the
+			// main turn handing off, before the child has called bash. Finish on the
+			// turn its completion notification starts.
+			if (sawCompletion) finish();
 		}
 	}
 });
 
 let done = false;
-function finish() {
+function finish(timedOut = false) {
 	if (done) return;
 	done = true;
 	clearTimeout(timeout);
-	const markerRan = raw.includes("SUBAGENT_BASH_RAN");
-	const ok = sawSubagentPrompt && answered;
+	const markerRan = existsSync(marker);
+	const ok = !timedOut && sawSubagentPrompt && answered && markerRan;
 	console.log(`${sawSubagentPrompt ? "PASS" : "FAIL"} subagent permission prompt bubbled to main session${promptTitle ? ` — "${promptTitle}"` : ""}`);
 	console.log(`${answered ? "PASS" : "FAIL"} prompt was answerable over rpc`);
-	console.log(`${markerRan ? "PASS" : "INFO"} approved child command ran (marker ${markerRan ? "seen" : "not seen — model may not have relayed it"})`);
+	console.log(`${markerRan ? "PASS" : "FAIL"} approved child command ran (marker file ${markerRan ? "created" : "missing"})`);
 	console.log(`\n${ok ? "ALL PASS" : "FAILED"}`);
 	console.log(`scratch: ${scratch}`);
 	try { child.kill(); } catch {}
-	process.exit(ok ? 0 : 2);
+	process.exit(timedOut ? 1 : ok ? 0 : 2);
 }
 
 send({
 	id: "req-1",
 	type: "prompt",
 	message:
-		"Use the Agent tool with subagent_type 'general-purpose' and task: \"Run exactly this bash command: touch subagent-ran.txt && echo SUBAGENT_BASH_RAN — then report its output.\" Do not run the command yourself. When the agent returns, tell me what it output.",
+		"Use the Agent tool with subagent_type 'general-purpose' and task: \"Run exactly this bash command: touch subagent-ran.txt — then report that it ran.\" Do not run the command yourself. When the agent returns, tell me what it output.",
 });

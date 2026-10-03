@@ -147,8 +147,8 @@ extension install, use `pi` in place of `onecode`.
 | `--add-dir <paths>` | Add workspace directories for this run, separated by `:` (`;` on Windows). |
 | `--model <provider/id>` | Start on a model. Add `:<level>` to set thinking. |
 | `--thinking <level>` | Start at a thinking level. |
-| `--provider <name>`, `--api-key <key>` | Choose a provider and supply a key for this run. |
-| `--tui-mode fullscreen` | Full-screen interface (the default under the app). |
+| `--provider <name>`, `--api-key <key>` | Choose a provider and supply a key for this run. On pi 1.0 and later, `--provider` needs `--model` too. |
+| `--tui-mode fullscreen`, `--tui-mode regular` | Full-screen interface (the default under the app and on pi 1.0 and later), or the terminal's normal screen with its scrollback. |
 | `--tools <list>` | Restrict the tools available. |
 | `-e <source>` | Load an extra extension. |
 | `--offline` | Skip network checks, including the update check. |

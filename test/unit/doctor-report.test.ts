@@ -8,6 +8,7 @@ import { collectModelFacts, modelsSection } from "../../extensions/doctor/models
 import { type DoctorEnvironment, type Finding, type RegistryView, renderDoctorReport, renderDoctorText } from "../../extensions/doctor/report.ts";
 import { setCapabilitySnapshotForTest, snapshotFromResponse } from "../../extensions/lib/capability-index.ts";
 import { setModelFactsForTest } from "../../extensions/lib/model-facts.ts";
+import { TESTED_PI_MAX_EXCLUSIVE } from "../../extensions/lib/pi-version.ts";
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 
@@ -102,9 +103,9 @@ describe("buildDoctorReport", () => {
 	});
 
 	it("warns when the hosting pi is outside the tested range", () => {
-		const report = buildDoctorReport({ env: environment({ install: "pi-package", piVersion: "0.100.0" }), registry: registry(anthropic), session: { model: anthropic[1], modelSource: "session" } });
+		const report = buildDoctorReport({ env: environment({ install: "pi-package", piVersion: TESTED_PI_MAX_EXCLUSIVE }), registry: registry(anthropic), session: { model: anthropic[1], modelSource: "session" } });
 		expect(report.findings.some((f) => f.text.includes("tested against pi"))).toBe(true);
-		expect(renderDoctorText(report, 200)).toContain("Running: one-code-extension 0.2.1 on your own pi · pi 0.100.0");
+		expect(renderDoctorText(report, 200)).toContain(`Running: one-code-extension 0.2.1 on your own pi · pi ${TESTED_PI_MAX_EXCLUSIVE}`);
 	});
 
 	it("reports pi's built-in tool search and MCP still on, with the settings fix", () => {

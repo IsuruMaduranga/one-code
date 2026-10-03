@@ -152,8 +152,8 @@ them for its own scrollback; use the keys the panel's footer names.
 ## Full-screen mode
 
 The bundled app runs in pi's full-screen mode, on the terminal's alternate
-screen, and restores your terminal when you exit. On a plain pi
-installation full-screen mode is opt-in; see
+screen, and restores your terminal when you exit. pi 1.0 and later start
+in full-screen mode too; on an older pi it's opt-in. See
 [Full-screen mode and themes](configuration.md#full-screen-mode-and-themes).
 
 ## Themes
