@@ -18,6 +18,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { PluginSkill } from "./plugins.ts";
 import type { SkillScope } from "./skill-overrides.ts";
+import { claudeSourcesOn, projectConfigDir, userConfigDir } from "./config-mode.ts";
 import { claudeUserDir } from "./paths.ts";
 
 /** The skill catalog shipped in this package: `<package>/skills` (Claude Code's self-contained built-in skills). */
@@ -65,9 +66,11 @@ export function scanSkills(
 	bundledSkillsDir?: string,
 ): ScannedSkill[] {
 	const skills = new Map<string, ScannedSkill>();
-	scanDir(join(claudeUserDir(home), "skills"), "user", skills);
+	// Independent mode (lib/config-mode.ts) reads no Claude Code skill folder.
+	const claude = claudeSourcesOn();
+	if (claude) scanDir(join(claudeUserDir(home), "skills"), "user", skills);
 	scanDir(join(home, ".agents", "skills"), "user", skills);
-	scanDir(join(cwd, ".claude", "skills"), "project", skills);
+	if (claude) scanDir(join(cwd, ".claude", "skills"), "project", skills);
 	scanDir(join(cwd, ".agents", "skills"), "project", skills);
 	scanDir(join(agentDir, "skills"), "user", skills);
 	if (bundledSkillsDir) scanDir(bundledSkillsDir, scopeForPath(bundledSkillsDir, home, agentDir), skills);
@@ -80,7 +83,8 @@ export function scanSkills(
 /**
  * Names of the `.claude/commands` prompt templates (`<name>.md`) pi will expose
  * as `/<name>` — the same dirs claude-compat feeds pi (`~/.claude/commands`,
- * `<cwd>/.claude/commands`) plus pi's own `<agentDir>/prompts`. pi resolves
+ * `<cwd>/.claude/commands`, or their `.onecode` twins in independent mode)
+ * plus pi's own `<agentDir>/prompts`. pi resolves
  * templates per turn, after `session_start`, so a bare skill command registered
  * then would silently shadow a same-named template for the whole session;
  * this pre-scan lets the registration skip those names.
@@ -92,7 +96,7 @@ export function promptTemplateNames(cwd: string, home: string, agentDir: string)
 /** Every prompt-template file pi will resolve, with the command name each gives. */
 export function promptTemplateFiles(cwd: string, home: string, agentDir: string): { name: string; path: string }[] {
 	const files: { name: string; path: string }[] = [];
-	for (const dir of [join(claudeUserDir(home), "commands"), join(cwd, ".claude", "commands"), join(agentDir, "prompts")]) {
+	for (const dir of [join(userConfigDir(home), "commands"), join(projectConfigDir(cwd), "commands"), join(agentDir, "prompts")]) {
 		if (!existsSync(dir)) continue;
 		let entries: string[];
 		try {

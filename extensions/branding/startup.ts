@@ -16,6 +16,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
 import os from "node:os";
 import { discoverContextFilePaths, GLOBAL_DESCRIPTOR, instructionRule, ONECODE_GLOBAL_DESCRIPTOR } from "../lib/claude-context.ts";
+import { claudeSourcesOn, projectConfigDir, userConfigDir } from "../lib/config-mode.ts";
 import { findGitRoot } from "../lib/git.ts";
 import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
 import { claudeUserDir, isPathAtOrUnder, oneCodeStateDir } from "../lib/paths.ts";
@@ -49,16 +50,14 @@ export function contextFileNames(cwd: string, home: string = os.homedir()): stri
 
 /**
  * Skills across the same sources our extensions feed to pi: project/user
- * Claude Code dirs, pi's own user dir, and installed plugins. An entry counts
+ * Claude Code dirs (in Claude-compatible mode), pi's own user dir, and
+ * installed plugins. An entry counts
  * when <dir>/<name>/SKILL.md exists — existsSync follows symlinked skill
  * directories, which readdir's isDirectory() would miss.
  */
 export function skillNames(cwd: string, home: string, agentDir: string): string[] {
-	const dirs = [
-		join(cwd, ".claude", "skills"),
-		join(claudeUserDir(home), "skills"),
-		join(agentDir, "skills"),
-	];
+	// Independent mode (lib/config-mode.ts) reads no Claude Code skill folder.
+	const dirs = [...(claudeSourcesOn() ? [join(cwd, ".claude", "skills"), join(claudeUserDir(home), "skills")] : []), join(agentDir, "skills")];
 	const names = new Set<string>();
 	for (const dir of dirs) {
 		if (!existsSync(dir)) continue;
@@ -79,7 +78,7 @@ export function skillNames(cwd: string, home: string, agentDir: string): string[
 /** Saved workflow names from the Claude Code layout dirs (project shadows user). */
 export function workflowNames(cwd: string, home: string): string[] {
 	const names = new Set<string>();
-	for (const dir of [join(cwd, ".claude", "workflows"), join(claudeUserDir(home), "workflows")]) {
+	for (const dir of [join(projectConfigDir(cwd), "workflows"), join(userConfigDir(home), "workflows")]) {
 		if (!existsSync(dir)) continue;
 		try {
 			for (const entry of readdirSync(dir)) {

@@ -25,7 +25,7 @@
 import { readFileSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
-import { oneCodeStateDir } from "./paths.ts";
+import { claudeUserDir, oneCodeStateDir } from "./paths.ts";
 
 export type ConfigMode = "claude-compatible" | "independent";
 
@@ -82,4 +82,18 @@ export function resetConfigModeForTest(mode?: ConfigMode): void {
 /** Whether Claude Code's own locations are read: `~/.claude`, `.claude/`, `CLAUDE.md`, `~/.claude.json`. */
 export function claudeSourcesOn(mode: ConfigMode = configMode()): boolean {
 	return mode === "claude-compatible";
+}
+
+/**
+ * The user-level folder that holds agents, commands and workflows:
+ * `~/.claude` (`CLAUDE_CONFIG_DIR`) in Claude-compatible mode, `~/.onecode`
+ * (`ONECODE_STATE_DIR`) in independent mode.
+ */
+export function userConfigDir(home: string, mode: ConfigMode = configMode(), env: Record<string, string | undefined> = process.env): string {
+	return claudeSourcesOn(mode) ? claudeUserDir(home, env) : oneCodeStateDir(env, home);
+}
+
+/** The project-level counterpart: `<cwd>/.claude`, or `<cwd>/.onecode` in independent mode. */
+export function projectConfigDir(cwd: string, mode: ConfigMode = configMode()): string {
+	return join(cwd, claudeSourcesOn(mode) ? ".claude" : ".onecode");
 }

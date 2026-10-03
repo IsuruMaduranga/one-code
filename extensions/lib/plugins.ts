@@ -36,6 +36,7 @@ import { readEnabledPlugins } from "./claude-settings.ts";
 import { readOverrides } from "./plugin-overrides.ts";
 import { pluginRoot } from "./plugin-root.ts";
 import { isSkillEnabled, readSkillStates, skillOverrideKey } from "./skill-overrides.ts";
+import { claudeSourcesOn } from "./config-mode.ts";
 import { claudeUserDir } from "./paths.ts";
 
 export interface PluginManifest {
@@ -246,6 +247,8 @@ export function findPluginCommands(plugin: Pick<Plugin, "name">, commandsDir: st
 export interface DiscoverRoots {
 	/** Claude Code's plugins dir (`~/.claude/plugins`) — read-only. */
 	claudePluginsDir: string;
+	/** False in independent mode (lib/config-mode.ts): Claude Code's installs are not read. */
+	readClaudePlugins?: boolean;
 	/** One Code's plugin root (`<agentDir>/plugins`) — ours to write. */
 	oneCodeRoot: string;
 	cwd: string;
@@ -256,6 +259,7 @@ export interface DiscoverRoots {
 export function defaultDiscoverRoots(agentDir: string, cwd: string = process.cwd(), home: string = os.homedir()): DiscoverRoots {
 	return {
 		claudePluginsDir: join(claudeUserDir(home), "plugins"),
+		readClaudePlugins: claudeSourcesOn(),
 		oneCodeRoot: pluginRoot(agentDir),
 		cwd,
 		home,
@@ -330,14 +334,15 @@ export function invalidatePluginsCache(): void {
 }
 
 export function discoverPlugins(roots: DiscoverRoots): DiscoveredPlugins {
-	const key = [roots.claudePluginsDir, roots.oneCodeRoot, roots.cwd, roots.home].join("\n");
+	const readClaude = roots.readClaudePlugins !== false;
+	const key = [readClaude ? roots.claudePluginsDir : "", roots.oneCodeRoot, roots.cwd, roots.home].join("\n");
 	if (box.current?.key === key) return box.current.result;
 
 	const ccEnabled = readEnabledPlugins(roots.cwd, roots.home);
 	const overrides = readOverrides(roots.oneCodeRoot);
 	const skillOverrides = readSkillStates(roots.oneCodeRoot);
 
-	const claudePlugins: Plugin[] = loadInstalledPlugins(roots.claudePluginsDir, roots.cwd).map((p) => ({
+	const claudePlugins: Plugin[] = (readClaude ? loadInstalledPlugins(roots.claudePluginsDir, roots.cwd) : []).map((p) => ({
 		...p,
 		originRoot: "claude" as const,
 		enabled: claudePluginEnabled(p.id, ccEnabled, overrides),
