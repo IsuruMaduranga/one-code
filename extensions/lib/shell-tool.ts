@@ -126,7 +126,13 @@ export function taskLogPath(ctx: ExtensionContext, taskId: string): string | und
 	}
 }
 
-export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: ShellToolSpec<P>): void {
+/**
+ * Register the shell tool; the returned setter registers it again with a new
+ * description (a no-op when the text is unchanged), for a description that
+ * follows the session (lib/tool-variants.ts). Everything else — the notifier,
+ * the original-command tracker, execute — is built once.
+ */
+export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: ShellToolSpec<P>): (description: string) => void {
 	// A completion whose output task_output just returned is withdrawn (CC's
 	// delivered_as_tool_result) — the model already has it.
 	const notifyTask = createTaskNotifier(pi, { withdrawOnDelivery: true });
@@ -141,7 +147,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 	// "Took Ns" that counted permission-prompt wait disappears.
 	const wrapped = ccWrapBuiltinRenderers<{ command?: string }>(spec.ccLabel, spec.base, { title: (a) => a?.command });
 
-	pi.registerTool({
+	const definition = {
 		name: spec.name,
 		label: spec.base.label,
 		description: spec.description,
@@ -279,5 +285,12 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 				details: { taskId: id, logPath },
 			};
 		},
-	} as ToolDefinition<P>);
+	} as ToolDefinition<P>;
+	pi.registerTool(definition);
+	let current = spec.description;
+	return (description: string) => {
+		if (description === current) return;
+		current = description;
+		pi.registerTool({ ...definition, description });
+	};
 }

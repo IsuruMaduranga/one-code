@@ -25,6 +25,7 @@ import { worktreeBashGuardReason } from "./guards.ts";
 import { worktreePowershellGuardReason } from "./powershell-guards.ts";
 import { bashParserReady } from "../lib/bash-parser.ts";
 import { ORIGINAL_COMMAND_CHANNEL, type OriginalCommandRecord } from "../lib/original-command.ts";
+import { ENTER_WORKTREE_DESCRIPTION, ENTER_WORKTREE_PARAMS, EXIT_WORKTREE_DESCRIPTION, EXIT_WORKTREE_PARAMS } from "./descriptions.ts";
 import { rewriteToolInput, validateWorktreeName } from "./rewrite.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 import { HARNESS_GIT_CONFIG } from "../lib/git.ts";
@@ -131,13 +132,10 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 		name: "enter_worktree",
 		label: "Enter Worktree",
 		...ccToolRenderers("Enter Worktree"),
-		description:
-			"Create an isolated git worktree under .claude/worktrees/ (branched from the current HEAD) and switch this session into it — subsequent commands and relative paths run there. Use ONLY when the user or project instructions explicitly ask for a worktree. Pass `name` to name the new worktree, or `path` to switch into an existing worktree instead (mutually exclusive). Leave with exit_worktree.",
+		description: ENTER_WORKTREE_DESCRIPTION,
 		parameters: Type.Object({
-			name: Type.Optional(
-				Type.String({ description: "Name for a new worktree (segments of letters/digits/._-, max 64 chars). Random if omitted" }),
-			),
-			path: Type.Optional(Type.String({ description: "Existing worktree (from `git worktree list`) to switch into instead of creating one" })),
+			name: Type.Optional(Type.String({ description: ENTER_WORKTREE_PARAMS.name })),
+			path: Type.Optional(Type.String({ description: ENTER_WORKTREE_PARAMS.path })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const fail = (text: string) => ({ content: [{ type: "text" as const, text }], details: {} as WorktreeDetails, isError: true });
@@ -227,11 +225,10 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 		name: "exit_worktree",
 		label: "Exit Worktree",
 		...ccToolRenderers("Exit Worktree"),
-		description:
-			'End the worktree session started by enter_worktree and return to the original directory. action: "keep" leaves the worktree and branch on disk; "remove" deletes both — refused (listing the changes) if there are uncommitted files or commits not on the original branch, unless discard_changes is true. No-op when no worktree session is active.',
+		description: EXIT_WORKTREE_DESCRIPTION,
 		parameters: Type.Object({
-			action: StringEnum(["keep", "remove"] as const, { description: '"keep" preserves the worktree on disk; "remove" deletes it and its branch' }),
-			discard_changes: Type.Optional(Type.Boolean({ description: "Required true to remove a worktree with uncommitted files or unmerged commits" })),
+			action: StringEnum(["keep", "remove"] as const, { description: EXIT_WORKTREE_PARAMS.action }),
+			discard_changes: Type.Optional(Type.Boolean({ description: EXIT_WORKTREE_PARAMS.discard_changes })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			if (!state) {

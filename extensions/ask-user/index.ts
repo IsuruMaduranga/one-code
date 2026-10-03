@@ -11,50 +11,48 @@
  * pulled in a second, conflicting TypeBox.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { ccToolRenderers, safeThemeBold, safeThemeInverse, safeThemePaint } from "../lib/tui-render.ts";
+import { type DescriptionForm, followDescriptionForm, registerVariantTool } from "../lib/tool-variants.ts";
+import { ASK_PARAMS, askDescription } from "./description.ts";
 import { type Answer, formatAnswers, formatDecline, type Question } from "./questions.ts";
 import { applyWidgetKey, createWidgetState, decodeWidgetKey, renderWidget, type WidgetResult } from "./widget.ts";
 
 const NON_INTERACTIVE =
 	"This session has no interactive UI, so the user cannot be shown a dialog. Ask your question in your reply instead and stop, or proceed under a stated assumption.";
 
+const AskParams = Type.Object({
+	questions: Type.Array(
+		Type.Object({
+			question: Type.String({ description: ASK_PARAMS.question }),
+			header: Type.String({ description: ASK_PARAMS.header }),
+			options: Type.Array(
+				Type.Object({
+					label: Type.String({ description: ASK_PARAMS.label }),
+					description: Type.Optional(Type.String({ description: ASK_PARAMS.optionDescription })),
+					preview: Type.Optional(Type.String({ description: ASK_PARAMS.preview })),
+				}),
+				{ minItems: 2, maxItems: 4, description: ASK_PARAMS.options },
+			),
+			multiSelect: Type.Optional(Type.Boolean({ description: ASK_PARAMS.multiSelect })),
+		}),
+		{ minItems: 1, maxItems: 4, description: ASK_PARAMS.questions },
+	),
+});
+
 export default function askUserExtension(pi: ExtensionAPI) {
-	pi.registerTool({
+	// Claude Code's AskUserQuestion text, short or long by the model's tier
+	// (description.ts, lib/tool-variants.ts); registered again when the form changes.
+	const tool = defineTool({
 		name: "ask_user_question",
 		label: "Ask User",
 		...ccToolRenderers<{ questions?: Array<{ question?: string }> }>("Ask User", {
 			title: (a) => a?.questions?.[0]?.question,
 		}),
-		description:
-			"Ask the user to choose between options when you are blocked on a decision that is genuinely theirs — one you cannot resolve from the request, the code, or a sensible default. Ask up to four questions in one call; the user answers them in one tabbed dialog and can decline into a chat discussion instead. Options on single-select questions may carry a `preview` — an ASCII mockup, diagram, or code snippet rendered beside the list while the user compares choices; use previews when seeing the alternatives helps (UI layouts, code style variants), never for plain preference questions. Non-preview questions get a free-text 'Other' row automatically, so never add an 'Other' option yourself. If you recommend a specific option, make it the first in the list and end its label with '(Recommended)'. To switch into plan mode use enter_plan_mode (not this tool); once in plan mode, use this tool only to clarify requirements or choose between approaches before finalizing the plan. Do not use this tool for choices with an obvious default or for facts you can verify yourself.",
+		description: askDescription("short"),
 		promptSnippet: "Ask the user to decide between options when genuinely blocked",
-		parameters: Type.Object({
-			questions: Type.Array(
-				Type.Object({
-					question: Type.String({ description: "The question, ending in a question mark" }),
-					header: Type.String({ description: "Very short label for the question (a few words)" }),
-					multiSelect: Type.Optional(
-						Type.Boolean({ description: "Allow choosing several options (default false)" }),
-					),
-					options: Type.Array(
-						Type.Object({
-							label: Type.String({ description: "Short choice text" }),
-							description: Type.Optional(Type.String({ description: "What choosing this means" })),
-							preview: Type.Optional(
-								Type.String({
-									description:
-										"Preview shown beside the options while this option is focused: an ASCII mockup, diagram, or code snippet that helps the user compare choices. Single-select questions only.",
-								}),
-							),
-						}),
-						{ minItems: 2, maxItems: 4 },
-					),
-				}),
-				{ minItems: 1, maxItems: 4, description: "Questions to ask (1-4)" },
-			),
-		}),
+		parameters: AskParams,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			if (!ctx.hasUI) {
 				return { content: [{ type: "text", text: NON_INTERACTIVE }], details: {}, isError: true };
@@ -115,4 +113,5 @@ export default function askUserExtension(pi: ExtensionAPI) {
 			};
 		},
 	});
+	followDescriptionForm(pi, registerVariantTool<DescriptionForm>(pi, "short", (form) => ({ ...tool, description: askDescription(form) })));
 }

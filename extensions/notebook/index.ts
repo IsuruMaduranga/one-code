@@ -1,5 +1,5 @@
 /**
- * notebook extension — Claude Code's NotebookEdit, deferred behind tool_search
+ * notebook extension — Claude Code's NotebookEdit (its text: description.ts), deferred behind tool_search
  * (most sessions never touch a notebook, so its schema stays out of the prompt
  * until needed).
  */
@@ -13,14 +13,14 @@ import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 import { applyEdit, type EditMode, type Notebook, notebookErrorHint, parseNotebook } from "./notebook.ts";
 import { resolveToolPath } from "../lib/tool-path.ts";
+import { NOTEBOOK_EDIT_DESCRIPTION } from "./description.ts";
 
 export default function notebookExtension(pi: ExtensionAPI) {
 	pi.registerTool({
 		name: "notebook_edit",
 		label: "Notebook Edit",
 		...ccToolRenderers("Notebook Edit"),
-		description:
-			"Edit a Jupyter notebook (.ipynb): replace a cell's source, insert or append a new cell, or delete a cell. Read the notebook first — like the other file tools, this one refuses to edit a file you have not read. Cells are addressed by their `id` or, for a notebook whose cells have none, by position — `cell-0` is the first cell. Use edit_mode `append` to add a cell at the end without naming one. Editing a code cell clears its outputs.",
+		description: NOTEBOOK_EDIT_DESCRIPTION,
 		parameters: Type.Object({
 			path: Type.Optional(Type.String({ description: "Absolute or workspace-relative path to the .ipynb file" })),
 			// Claude Code's NotebookEdit spells the path `notebook_path` and defaults
