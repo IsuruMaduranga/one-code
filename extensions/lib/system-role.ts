@@ -53,6 +53,11 @@ export function instructionRole(layout: SystemRoleLayout, model: { reasoning?: b
 }
 
 type WireMessage = { role?: unknown; content?: unknown };
+
+/** pi's directive-only effort message: a system message with no content, which cannot carry a cache mark. */
+function isEmptySystemMessage(message: WireMessage): boolean {
+	return message?.role === "system" && Array.isArray(message.content) && message.content.length === 0;
+}
 type WirePart = { type?: unknown; text?: unknown; cache_control?: unknown };
 
 /**
@@ -61,8 +66,10 @@ type WirePart = { type?: unknown; text?: unknown; cache_control?: unknown };
  * message placed right after it, in the API's own shape (Claude Code's layout,
  * `decisions/tools.md`). Blocks are found by their exact text, never by
  * position: a fork's request drops the parent's first message, and then nothing
- * moves. On Anthropic, when the new message ends the request, the cache mark
- * moves from the user message onto it, as Claude Code marks its system message.
+ * moves. On Anthropic, when the new message ends the request's content (only
+ * pi's empty effort messages follow), the cache mark moves from the user
+ * message onto it, as Claude Code marks its system message, so the first
+ * request caches the context too.
  * Undefined when nothing changes.
  */
 export function withSystemRoleContext(
@@ -94,7 +101,7 @@ export function withSystemRoleContext(
 		.map((block) => block.inner)
 		.join("\n\n");
 
-	const last = index === messages.length - 1;
+	const last = messages.slice(index + 1).every(isEmptySystemMessage);
 	let user: WireMessage = { ...carrier, content: kept };
 	let system: Record<string, unknown>;
 	if (layout === "anthropic") {
