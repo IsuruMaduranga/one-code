@@ -24,7 +24,8 @@ import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import type { AutoModeConfig } from "./config.ts";
 import { classifierCandidates, replyText, withAuthBaseUrl } from "./model-select.ts";
 import { buildSetupPrompt, parseGitRemotes, redactSecrets, type SetupDraft, parseSetupDraft, type SetupFacts } from "./setup.ts";
-import { claudeUserDir } from "../lib/paths.ts";
+import { claudeSourcesOn } from "../lib/config-mode.ts";
+import { claudeUserDir, oneCodeStateDir } from "../lib/paths.ts";
 import { HARNESS_GIT_CONFIG } from "../lib/git.ts";
 
 const PROBE_TIMEOUT_MS = 10_000;
@@ -158,8 +159,14 @@ export async function gatherFacts(options: GatherOptions): Promise<SetupFacts> {
 		repoVisibility,
 		repoNameWithOwner,
 		defaultBranch,
-		claudeMdProject: readIfPresent(join(gitRoot || cwd, "CLAUDE.md"), CLAUDE_MD_LIMIT, notes, "project CLAUDE.md"),
-		claudeMdGlobal: readIfPresent(join(claudeUserDir(home), "CLAUDE.md"), CLAUDE_MD_LIMIT, notes, "global CLAUDE.md"),
+		// Independent mode (lib/config-mode.ts) reads no CLAUDE.md: the project's
+		// AGENTS.md and the global ONECODE.md stand in.
+		claudeMdProject: claudeSourcesOn()
+			? readIfPresent(join(gitRoot || cwd, "CLAUDE.md"), CLAUDE_MD_LIMIT, notes, "project CLAUDE.md")
+			: readIfPresent(join(gitRoot || cwd, "AGENTS.md"), CLAUDE_MD_LIMIT, notes, "project AGENTS.md"),
+		claudeMdGlobal: claudeSourcesOn()
+			? readIfPresent(join(claudeUserDir(home), "CLAUDE.md"), CLAUDE_MD_LIMIT, notes, "global CLAUDE.md")
+			: readIfPresent(join(oneCodeStateDir(process.env, home), "ONECODE.md"), CLAUDE_MD_LIMIT, notes, "global ONECODE.md"),
 		shellHistory,
 		permissionsAllow,
 		gatherNotes: notes,

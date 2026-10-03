@@ -29,6 +29,8 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { readSettingsFile, settingsPaths } from "../lib/claude-settings.ts";
+import { type ConfigMode, claudeSourcesOn, configMode } from "../lib/config-mode.ts";
+import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 import { boundConsentItems } from "../lib/consent-preview.ts";
 import { consentStorePath } from "../lib/consent-stores.ts";
 import type { McpServer } from "./config.ts";
@@ -137,8 +139,12 @@ function stringArray(value: unknown): string[] {
  * `disabledMcpjsonServers` only tightens, so it is still honoured. Async for
  * its callers; nothing here shells out any more.
  */
-export async function readClaudeMcpjsonPolicy(cwd: string, home: string): Promise<ClaudeMcpjsonPolicy> {
-	const paths = settingsPaths(cwd, home);
+export async function readClaudeMcpjsonPolicy(cwd: string, home: string, mode: ConfigMode = configMode()): Promise<ClaudeMcpjsonPolicy> {
+	// Independent mode (lib/config-mode.ts) reads the same keys from One Code's
+	// user file, and only the tightening one from its per-repo file.
+	const paths = claudeSourcesOn(mode)
+		? settingsPaths(cwd, home)
+		: { user: oneCodeSettingsPath(home), local: oneCodeProjectSettingsPath(cwd, home) };
 	const policy: ClaudeMcpjsonPolicy = { enableAll: false, enabled: new Set(), disabled: new Set() };
 	// Deliberately not `paths.project`: a checked-in settings.json granting
 	// enableAllProjectMcpServers would be the repo approving its own servers.

@@ -27,6 +27,7 @@ import {
 	writeSettings,
 } from "../lib/one-code-settings.ts";
 import { resolve } from "node:path";
+import { type ConfigMode, claudeSourcesOn, configMode } from "../lib/config-mode.ts";
 import { expandTilde } from "../lib/paths.ts";
 import type { PermissionMode } from "./matcher.ts";
 
@@ -110,36 +111,32 @@ function readSettingsFile(path: string): ClaudeSettingsFile | undefined {
 	return readClaudeSettingsFile(path) as ClaudeSettingsFile | undefined;
 }
 
-export function loadPermissionSettings(cwd: string, home: string): PermissionSettings {
-	const paths = settingsPaths(cwd, home);
+export function loadPermissionSettings(cwd: string, home: string, mode: ConfigMode = configMode()): PermissionSettings {
 	const merged: PermissionSettings = { allow: [], projectAllow: [], deny: [], ask: [] };
+	const independent = !claudeSourcesOn(mode);
 
 	// One Code writes the rules it records (via /allow, the auto-mode setup) to its
 	// own files, never into Claude Code's — so its own files are read alongside the
 	// borrowed `.claude` ladder. They contribute allow/deny/ask rules only;
 	// `defaultMode` stays sourced from the `.claude` files (nothing here writes it,
 	// and keeping the auto-mode reasoning to one place avoids a second `auto` path).
-	const oneCodeGlobal = oneCodeSettingsPath(home);
-	const oneCodeProject = oneCodeProjectSettingsPath(cwd, home);
-
-	// Managed settings last: Claude Code's organisation policy outranks every
-	// user/project file, for rules and for defaultMode alike (review P14).
-	const managed = managedSettingsPaths();
-	for (const path of [paths.user, oneCodeGlobal, paths.project, paths.local, oneCodeProject, ...managed]) {
+	// Independent mode reads no `.claude` file, so there One Code's user file,
+	// the same user scope, carries `defaultMode` too.
+	for (const [source, path] of permissionSources(cwd, home, mode)) {
 		const file = readSettingsFile(path);
 		const perms = file?.permissions;
 		if (!perms) continue;
-		const allowTarget = path === paths.project || path === paths.local ? merged.projectAllow : merged.allow;
+		const fromProject = source === "project" || source === "project-local";
+		const allowTarget = fromProject ? merged.projectAllow : merged.allow;
 		if (Array.isArray(perms.allow)) allowTarget.push(...perms.allow.filter((r) => typeof r === "string"));
 		if (Array.isArray(perms.deny)) merged.deny.push(...perms.deny.filter((r) => typeof r === "string"));
 		if (Array.isArray(perms.ask)) merged.ask.push(...perms.ask.filter((r) => typeof r === "string"));
 		if (perms.disableBypassPermissionsMode === "disable") merged.disableBypassPermissionsMode = true;
 		if (perms.blockReadsOutsideWorkingDirectories === true) merged.blockReadsOutsideWorkingDirectories = true;
-		if (path === oneCodeGlobal || path === oneCodeProject) continue;
+		if (source === "onecode-project" || (source === "onecode-user" && !independent)) continue;
 		const defaultMode = normalizePermissionMode(perms.defaultMode);
 		// The modes a repo may not grant itself (MODES_NEVER_FROM_PROJECT) are
 		// honoured from user and managed scope only.
-		const fromProject = path === paths.project || path === paths.local;
 		if (defaultMode && !(fromProject && MODES_NEVER_FROM_PROJECT.has(defaultMode))) {
 			merged.defaultMode = defaultMode;
 		}
@@ -186,8 +183,21 @@ export interface SourcedRule {
 	path: string;
 }
 
-/** Every settings file permissions are read from, lowest precedence first, with its source. */
-function permissionSources(cwd: string, home: string): Array<[RuleSource, string]> {
+/**
+ * Every settings file permissions are read from, lowest precedence first, with
+ * its source. Managed settings last: Claude Code's organisation policy outranks
+ * every user/project file, for rules and for defaultMode alike (review P14).
+ * Independent mode (lib/config-mode.ts) reads One Code's own two files only,
+ * managed settings included in what it drops (the user's choice, recorded in
+ * decisions/memory-state.md).
+ */
+function permissionSources(cwd: string, home: string, mode: ConfigMode = configMode()): Array<[RuleSource, string]> {
+	if (!claudeSourcesOn(mode)) {
+		return [
+			["onecode-user", oneCodeSettingsPath(home)],
+			["onecode-project", oneCodeProjectSettingsPath(cwd, home)],
+		];
+	}
 	const paths = settingsPaths(cwd, home);
 	return [
 		["claude-user", paths.user],
@@ -300,9 +310,10 @@ export function persistBlockOutsideReads(filePath: string): void {
  * `hasSeenAutoModeOutsideReadPrompt` in `~/.claude.json` (read only), so a
  * user who answered it in Claude Code is not asked again.
  */
-export function outsideReadPromptSeen(oneCodeSettings: string, claudeJson: string): boolean {
+/** Whether the first outside-read prompt was answered; `claudeJson` is undefined in independent mode. */
+export function outsideReadPromptSeen(oneCodeSettings: string, claudeJson: string | undefined): boolean {
 	const seen = (path: string) => (readClaudeSettingsFile(path) as { hasSeenAutoModeOutsideReadPrompt?: unknown } | undefined)?.hasSeenAutoModeOutsideReadPrompt === true;
-	return seen(oneCodeSettings) || seen(claudeJson);
+	return seen(oneCodeSettings) || (claudeJson !== undefined && seen(claudeJson));
 }
 
 /** Record that the first outside-read prompt was answered (Claude Code's key, in One Code's file). */

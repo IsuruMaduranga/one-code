@@ -3,7 +3,8 @@
  *
  * Sources, lowest authority first: user ~/.claude/settings.json, managed
  * settings (Claude Code's platform paths), project .claude/settings.json,
- * project .claude/settings.local.json. Project and local sources are
+ * project .claude/settings.local.json (independent mode: One Code's user and
+ * per-repo settings, `hookSettingsPaths`). Project and local sources are
  * *returned flagged, not filtered* — whether they run is a trust decision
  * (hooks are arbitrary code execution) that index.ts applies via trust.ts;
  * this module stays pure.
@@ -14,7 +15,11 @@
  */
 
 import { readFileSync, statSync } from "node:fs";
+import os from "node:os";
 import { join } from "node:path";
+import { managedSettingsPaths } from "../lib/claude-settings.ts";
+import { type ConfigMode, claudeSourcesOn, configMode } from "../lib/config-mode.ts";
+import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 import { CC_HOOK_EVENTS, type CcHookEvent } from "./protocol.ts";
 
 /** Claude Code's per-hook `shell` field: which interpreter runs the command string. */
@@ -54,17 +59,28 @@ export interface LoadedHooks {
 	diagnostics: string[];
 }
 
-/** Managed-settings locations — Claude Code's exact per-platform paths. */
-export function managedSettingsPath(platform: NodeJS.Platform = process.platform): string {
-	if (platform === "darwin") return "/Library/Application Support/ClaudeCode/managed-settings.json";
-	if (platform === "win32") return "C:\\ProgramData\\ClaudeCode\\managed-settings.json";
-	return "/etc/claude-code/managed-settings.json";
-}
 
-export function hookSettingsPaths(claudeDir: string, cwd: string): Array<{ scope: HookScope; path: string }> {
+/**
+ * The settings files hooks are read from, lowest authority first. Independent
+ * mode (lib/config-mode.ts) reads One Code's user file and its per-repo file
+ * under `~/.onecode/projects/<slug>/` instead; neither ships in a repository,
+ * so both are user scope and need no project-trust prompt.
+ */
+export function hookSettingsPaths(
+	claudeDir: string,
+	cwd: string,
+	home: string = os.homedir(),
+	mode: ConfigMode = configMode(),
+): Array<{ scope: HookScope; path: string }> {
+	if (!claudeSourcesOn(mode)) {
+		return [
+			{ scope: "user", path: oneCodeSettingsPath(home) },
+			{ scope: "user", path: oneCodeProjectSettingsPath(cwd, home) },
+		];
+	}
 	return [
 		{ scope: "user", path: join(claudeDir, "settings.json") },
-		{ scope: "managed", path: managedSettingsPath() },
+		...managedSettingsPaths().map((path) => ({ scope: "managed" as const, path })),
 		{ scope: "project", path: join(cwd, ".claude", "settings.json") },
 		{ scope: "local", path: join(cwd, ".claude", "settings.local.json") },
 	];

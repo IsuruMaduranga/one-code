@@ -77,3 +77,71 @@ describe("independent mode reads no Claude Code folder for skills, commands, age
 		expect(discoverPlugins({ ...defaultDiscoverRoots(join(home, "agent"), scratch(), home), readClaudePlugins: false }).plugins).toEqual([]);
 	});
 });
+
+describe("independent mode reads settings from One Code's files only", () => {
+	it("permissions: rules and defaultMode from One Code's user file, nothing from .claude or managed", async () => {
+		const { loadPermissionSettings } = await import("../../extensions/permissions/settings.ts");
+		const home = scratch();
+		const cwd = scratch();
+		touch(join(home, ".claude", "settings.json"), JSON.stringify({ permissions: { allow: ["Bash(cc:*)"], defaultMode: "plan" } }));
+		touch(join(cwd, ".claude", "settings.json"), JSON.stringify({ permissions: { deny: ["Read(x)"] } }));
+		touch(join(home, ".onecode", "settings.json"), JSON.stringify({ permissions: { allow: ["Bash(oc:*)"], defaultMode: "acceptEdits" } }));
+		process.env.ONECODE_STATE_DIR = join(home, ".onecode");
+		try {
+			const independent = loadPermissionSettings(cwd, home, "independent");
+			expect(independent.allow).toEqual(["Bash(oc:*)"]);
+			expect(independent.deny).toEqual([]);
+			expect(independent.defaultMode).toBe("acceptEdits");
+			const compatible = loadPermissionSettings(cwd, home, "claude-compatible");
+			expect(compatible.allow).toEqual(["Bash(cc:*)", "Bash(oc:*)"]);
+			expect(compatible.deny).toEqual(["Read(x)"]);
+			expect(compatible.defaultMode).toBe("plan");
+		} finally {
+			delete process.env.ONECODE_STATE_DIR;
+		}
+	});
+
+	it("auto mode, hooks, MCP files, the env block and plugin state", async () => {
+		const { autoModeSettingsPaths } = await import("../../extensions/auto-mode/config.ts");
+		const { hookSettingsPaths } = await import("../../extensions/hooks/settings.ts");
+		const { configPaths } = await import("../../extensions/mcp/config.ts");
+		const { readSettingsEnv, readEnabledPlugins } = await import("../../extensions/lib/claude-settings.ts");
+		const home = scratch();
+		const cwd = scratch();
+		process.env.ONECODE_STATE_DIR = join(home, ".onecode");
+		try {
+			const ocUser = join(home, ".onecode", "settings.json");
+			expect(autoModeSettingsPaths(home, "independent")).toEqual([ocUser]);
+			expect(hookSettingsPaths(join(home, ".claude"), cwd, home, "independent").map((s) => [s.scope, s.path.startsWith(join(home, ".onecode"))])).toEqual([
+				["user", true],
+				["user", true],
+			]);
+			touch(join(cwd, ".mcp.json"), "{}");
+			expect(configPaths(cwd, home, "independent")).toEqual([]);
+			expect(configPaths(cwd, home, "claude-compatible")).toContain(join(cwd, ".mcp.json"));
+			touch(join(home, ".claude", "settings.json"), JSON.stringify({ env: { A: "claude" }, enabledPlugins: { "p@m": false } }));
+			touch(ocUser, JSON.stringify({ env: { A: "onecode" } }));
+			expect(readSettingsEnv(home, "independent")).toEqual({ A: "onecode" });
+			expect(readSettingsEnv(home, "claude-compatible")).toEqual({ A: "claude" });
+			expect(readEnabledPlugins(cwd, home, "independent")).toEqual({});
+		} finally {
+			delete process.env.ONECODE_STATE_DIR;
+		}
+	});
+});
+
+describe("the /memory picker in independent mode", () => {
+	it("offers the global ONECODE.md and the project's AGENTS.md, never a CLAUDE.md", async () => {
+		const { buildMemoryEntries } = await import("../../extensions/memory/entries.ts");
+		resetConfigModeForTest("independent");
+		const home = scratch();
+		const cwd = scratch();
+		touch(join(cwd, "CLAUDE.md"));
+		const entries = buildMemoryEntries({ cwd, home, homeClaudeDir: join(home, ".claude"), homeOneCodeDir: join(home, ".onecode"), memoryDir: join(home, "mem") });
+		expect(entries.map((e) => [e.title, e.path])).toEqual([
+			["User instructions", join(home, ".onecode", "ONECODE.md")],
+			["Project instructions", join(cwd, "AGENTS.md")],
+			["Open auto-memory folder", join(home, "mem")],
+		]);
+	});
+});
