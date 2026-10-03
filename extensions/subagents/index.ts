@@ -507,7 +507,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	const toolsClause = (a: AgentDefinition): string => {
 		if (a.tools && a.tools.length > 0) return ` (Tools: ${a.tools.join(", ")})`;
 		if (a.excludeTools && a.excludeTools.length > 0) return ` (Tools: All tools except ${a.excludeTools.join(", ")})`;
-		return " (Tools: *)";
+		// Claude Code writes "*" for its built-in agents and "All tools" for an agent file that lists none.
+		return a.source === "built-in" || a.source.startsWith(BUNDLED_AGENTS_DIR) ? " (Tools: *)" : " (Tools: All tools)";
 	};
 
 	const describeAgents = (cwd: string) => {

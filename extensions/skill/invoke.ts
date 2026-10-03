@@ -1,17 +1,17 @@
 /**
  * User-invoked skill commands (pure). pi registers each skill as a `/skill:<name>`
  * slash command and, on invocation, expands it into a `<skill>` block that it
- * submits as a *user message* — so loading a skill shows up in the transcript as
- * a new user turn. One Code intercepts that command in the `input` hook and
- * re-delivers the same block as a hidden message instead (see index.ts), so the
- * model receives byte-identical content but nothing renders.
+ * submits as a *user message*. One Code intercepts that command (and its own
+ * bare `/<name>` and typed `/<plugin>:<skill>` forms) and delivers the skill
+ * the way Claude Code does: a hidden message holding the command breadcrumb
+ * and the skill's text, so nothing renders and no `skill` call is needed.
+ * A model's `skill` call gets Claude Code's "Launching skill" result with the
+ * same text beside it (see index.ts).
  *
- * These helpers mirror pi's own `_expandSkillCommand`/`formatSkillInvocation`
- * exactly (same `/skill:` prefix, same block template) so the model sees the same
- * bytes it would have without the interception — only the display changes.
+ * pi's own `<skill>` block still reaches a session through pi's native
+ * expansion on older pi (steer/followUp skip the `input` hook there), which
+ * is why the off-skill redaction below still matches it.
  */
-
-import { dirname } from "node:path";
 
 const SKILL_PREFIX = "/skill:";
 
@@ -45,18 +45,61 @@ export function resolveSkill<T extends { name: string }>(all: T[], wanted: strin
 }
 
 /**
- * Rebuild the exact `<skill>` block pi's `/skill:` expansion produces. `body` is
- * the SKILL.md with frontmatter already stripped and trimmed; `filePath` is the
- * skill file (its directory is the base for relative references, as pi does).
+ * Claude Code's breadcrumb for a typed slash command, the first text block of
+ * the message a typed skill becomes. Its arguments ride `<command-args>` only
+ * when there are some.
  */
-export function buildSkillBlock(skill: { name: string; filePath: string }, body: string, args: string): string {
-	const block = `<skill name="${skill.name}" location="${skill.filePath}">
-References are relative to ${dirname(skill.filePath)}.
-
-${body}
-</skill>`;
-	return args ? `${block}\n\n${args}` : block;
+export function commandBreadcrumb(name: string, args: string): string {
+	return `<command-message>${name}</command-message>\n<command-name>/${name}</command-name>${args ? `\n<command-args>${args}</command-args>` : ""}\n`;
 }
+
+/**
+ * Claude Code's argument substitution in a skill's text: `$ARGUMENTS`,
+ * `$ARGUMENTS[n]` and `$n` (both counted from 0) take the arguments, and a
+ * backslash keeps a `$` literal. When nothing was substituted, the arguments
+ * follow the text on an `ARGUMENTS:` line.
+ */
+export function substituteSkillArguments(text: string, args: string): string {
+	if (!args.trim()) return text;
+	const parts = args.trim().split(/\s+/);
+	let used = false;
+	// One pass, so an argument holding `$0` is never substituted again.
+	const out = text.replace(/\\\$(?=\d|ARGUMENTS)|\$ARGUMENTS\[(\d+)\]|\$ARGUMENTS|\$(\d+)(?!\w)/g, (match, listed?: string, positional?: string) => {
+		if (match.startsWith("\\")) return "$";
+		if (match === "$ARGUMENTS") {
+			used = true;
+			return args;
+		}
+		const part = parts[Number(listed ?? positional)];
+		if (part === undefined) return match;
+		used = true;
+		return part;
+	});
+	return used ? out : `${out}\n\nARGUMENTS: ${args}`;
+}
+
+/**
+ * The text a skill hands the model, as Claude Code builds it: the skill's
+ * folder first (`Base directory for this skill: …`, so relative `references/`
+ * and `scripts/` resolve), then the body with its arguments. A skill that
+ * ships inside One Code, like Claude Code's own, names no folder.
+ */
+export function skillPromptText(body: string, args: string, baseDir: string | undefined): string {
+	const text = substituteSkillArguments(body, args);
+	return baseDir ? `Base directory for this skill: ${baseDir}\n\n${text}` : text;
+}
+
+/**
+ * The message a typed skill command becomes, as Claude Code sends it: the
+ * breadcrumb, then the skill's text, each ending in a newline. Arguments a
+ * generated body already carries are not passed again.
+ */
+export function typedSkillContent(name: string, typedArgs: string, promptText: string): [string, string] {
+	return [commandBreadcrumb(name, typedArgs), promptText.endsWith("\n") ? promptText : `${promptText}\n`];
+}
+
+/** Claude Code's result for a model's skill call; the skill's text follows it as a second block. */
+export const launchingSkill = (name: string): string => `Launching skill: ${name}`;
 
 /**
  * The lines that open and close a skill tool result when the model called a

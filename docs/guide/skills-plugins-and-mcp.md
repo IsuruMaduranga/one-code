@@ -58,7 +58,8 @@ Six of Claude Code's built-in skills ship with One Code:
 - `loop`: run a prompt on an interval, or let the model self-pace it. See
   [Scheduled wake-ups and loops](tasks-and-background-work.md#scheduled-wake-ups-and-loops).
 - `simplify`: clean up recently changed code for clarity.
-- `code-review`: review changes for correctness bugs.
+- `code-review`: review changes for correctness bugs. Put a level first
+  (`/code-review high`) or let it follow your `/effort`.
 - `security-review`: review changes for security issues.
 - `fewer-permission-prompts`: scan your usage and propose an allowlist.
 - `artifact-design`: the page rules the model follows before publishing an

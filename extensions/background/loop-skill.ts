@@ -1,12 +1,13 @@
 /**
- * Claude Code's `/loop` bundled skill (2.1.282): the
+ * Claude Code's `/loop` bundled skill (2.1.288): the
  * prompt each form of `/loop` sends the model. The model then schedules the
  * loop itself (cron_create, or schedule_wakeup for self-pacing) and runs the
  * first iteration, as in Claude Code (findings §21).
  *
- * The templates are Claude Code's, verbatim; only the tool names are ours. Dropped branches: the cloud-schedule offer and the
- * "tell the user" addenda (Claude Code gates them on claude.ai features One
- * Code has no counterpart for), and `TaskList`, which becomes task_output
+ * The templates are Claude Code's, verbatim; only the tool names are ours. Dropped branches: the cloud-schedule offer, the
+ * "tell the user" addenda and the confirm-before-arming order (Claude Code
+ * gates them on claude.ai features and a per-model flag One Code has no
+ * counterpart for), and `TaskList`, which becomes task_output
  * (our task_list is the to-do list and shows no monitor; decisions/tools.md,
  * "Session cron").
  *
@@ -32,6 +33,9 @@ const gDe = (): number => 0;
 const Ktn = (ms: number): string => `${ms}ms`;
 /** The interval a bare `/loop` uses. */
 const N = "10m";
+/** The self-paced forms confirm after arming the wakeup, as visible text, and say how a stopped loop ended. */
+const VISIBLE_UPDATE = "This must be ordinary visible response text \u2014 the user cannot see your thinking/reasoning, so an update written only there is invisible to them. Make it the last thing in the turn, then end the turn.";
+const STOP_OUTCOME = "Then write the loop's outcome for the user as ordinary visible response text \u2014 a stopped loop has no next tick to surface it.";
 
 export const LOOP_SKILL = {
 	name: "loop",
@@ -56,15 +60,15 @@ function explicitPrompt(e: string): string {let o=`The user wants you to self-pa
 
 1. **Run the parsed prompt now.** If it's a slash command, invoke it via the skill tool; otherwise act on it directly.
 2. **If the next run is gated on an event** (CI finishing, a log line matching, a file changing, a PR comment) and no ${il} is already running for it: ${armMonitor()}. Its events arrive as \`<task-notification>\` messages and wake this loop immediately \u2014 you do not wait for the ${yl} deadline. ${rearmReminder("iterations")}
-3. **Briefly confirm**: that you're self-pacing, whether a ${il} is the primary wake signal, that you ran the task now, and what fallback delay you're about to pick. Write this as text *before* calling ${yl} \u2014 the turn ends as soon as that tool returns.
-4. **Then, as the last action of this turn, decide whether the loop continues.** If the task needs another iteration, call ${yl} with:
+3. **Decide whether the loop continues.** If the task needs another iteration, call ${yl} with:
    - \`delaySeconds\`: with a ${il} armed this is the **fallback heartbeat** \u2014 how long to wait if no event fires (lean 1200\u20131800s; idle ticks more frequent than the task needs are pure overhead). Without a ${il} this is the cadence \u2014 pick based on what you observed. Read the tool's own description for cache-aware delay guidance.
    - \`reason\`: one short sentence on why you picked that delay.
    - \`prompt\`: the full original /loop input verbatim, prefixed with \`/loop \` so the next firing re-enters this skill and continues the loop. For example, if the user typed \`/loop check the deploy\`, pass \`/loop check the deploy\` as the prompt.
    - \`noop\`: \`true\` if this tick changed nothing ("still waiting", "quiet hold"); \`false\` if it did something worth keeping. Consecutive \`noop: true\` ticks collapse in the terminal.
    If it doesn't need another iteration, stop instead (step 6) \u2014 re-arming is a per-turn choice, not a default.
-5. **If you were woken by a \`<task-notification>\`** rather than this prompt: handle the event in the context of the loop task, then make the same decision. If the loop should continue, call ${yl} again with the same \`prompt\` and the same 1200\u20131800s \`delaySeconds\` from step 4 (the ${il} remains the wake signal; the new wakeup is only the fallback heartbeat). If the event means the work is finished, stop (step 6).
-6. **To stop the loop** \u2014 the task is complete, further iterations can't make progress, or the user asked you to stop \u2014 call ${yl} with \`stop: true\` (no other fields) and ${Um} any ${il} you armed (use ${jb} to find the task ID if it is no longer in context). Stopping is the loop's normal ending \u2014 the user can restart it anytime with /loop.`;return`# /loop \u2014 schedule a recurring or self-paced prompt
+4. **After the wakeup is armed, briefly confirm**: that you're self-pacing, whether a ${il} is the primary wake signal, that you ran the task now, and what fallback delay you picked. ${VISIBLE_UPDATE}
+5. **If you were woken by a \`<task-notification>\`** rather than this prompt: handle the event in the context of the loop task, then make the same decision. If the loop should continue, call ${yl} again with the same \`prompt\` and the same 1200\u20131800s \`delaySeconds\` from the schedule step above (the ${il} remains the wake signal; the new wakeup is only the fallback heartbeat), then write the same brief update as visible text. If the event means the work is finished, stop (step 6).
+6. **To stop the loop** \u2014 the task is complete, further iterations can't make progress, or the user asked you to stop \u2014 call ${yl} with \`stop: true\` (no other fields) and ${Um} any ${il} you armed (use ${jb} to find the task ID if it is no longer in context). ${STOP_OUTCOME} Stopping is the loop's normal ending \u2014 the user can restart it anytime with /loop.`;return`# /loop \u2014 schedule a recurring or self-paced prompt
 
 Parse the input below into \`[interval] <prompt\u2026>\` and schedule it.
 
@@ -108,15 +112,15 @@ The user invoked \`/loop\` with no prompt and no interval and has a loop-tasks f
 
 The user invoked \`/loop\` with no prompt and no interval. Run the autonomous check now, then self-pace the next iteration via ${yl} \u2014 no cron.`,b=e?`that you're running tasks from \`${e.path}\` in dynamic-pacing mode, that you ran the first tick now`:"that this is the autonomous default in dynamic-pacing mode, that you ran the check now",_=`1. **Run ${h} now**, following the instructions inlined below.
 2. **If the next tick is gated on an event** (CI finishing, a PR comment, a log line) and no ${il} is already running for it: ${armMonitor()}. Its events wake this loop immediately \u2014 you do not wait for the ${yl} deadline. ${rearmReminder("ticks")}
-3. **Briefly confirm**: ${b}, whether a ${il} is the primary wake signal, and what fallback delay you're about to pick. Write this as text *before* calling ${yl} \u2014 the turn ends as soon as that tool returns.
-4. **Then, as the last action of this turn, decide whether the loop continues.** If the next check is worth running, call ${yl} with:
+3. **Decide whether the loop continues.** If the next check is worth running, call ${yl} with:
    - \`delaySeconds\`: with a ${il} armed this is the fallback heartbeat (lean 1200\u20131800s). Without one, pick based on what you observed this turn \u2014 quiet branch? wait longer. Lots in flight? wait shorter. Read the tool's own description for cache-aware delay guidance.
    - \`reason\`: one short sentence on why you picked that delay.
    - \`prompt\`: the literal string \`${c}\` \u2014 the dynamic-mode sentinel expands at fire time to the full instructions (first fire / first fire post-compact / loop.md edited) or a dynamic-pacing-specific short reminder (subsequent fires). Do not pass the full instructions; that is handled automatically.
    - \`noop\`: \`true\` if this tick changed nothing ("still waiting", "quiet hold"); \`false\` if it did something worth keeping. Consecutive \`noop: true\` ticks collapse in the terminal.
    If it isn't, stop instead (step 6) \u2014 re-arming is a per-turn choice, not a default.
-5. **If woken by a \`<task-notification>\`** rather than this prompt: handle the event, then make the same decision. If the loop should continue, call ${yl} again with \`${c}\` and the same 1200\u20131800s \`delaySeconds\` (the ${il} remains the wake signal; the new wakeup is only the fallback heartbeat). If the event means the work is finished, stop (step 6).
-6. **To stop the loop** \u2014 the task is complete, further iterations can't make progress, or the user asked you to stop \u2014 call ${yl} with \`stop: true\` (no other fields) and ${Um} any ${il} you armed (use ${jb} to find the task ID if it is no longer in context). Stopping is the loop's normal ending \u2014 the user can restart it anytime with /loop.`;return`${O}
+4. **After the wakeup is armed, briefly confirm**: ${b}, whether a ${il} is the primary wake signal, and what fallback delay you picked. ${VISIBLE_UPDATE}
+5. **If woken by a \`<task-notification>\`** rather than this prompt: handle the event, then make the same decision. If the loop should continue, call ${yl} again with \`${c}\` and the same 1200\u20131800s \`delaySeconds\` (the ${il} remains the wake signal; the new wakeup is only the fallback heartbeat), then write the same brief update as visible text. If the event means the work is finished, stop (step 6).
+6. **To stop the loop** \u2014 the task is complete, further iterations can't make progress, or the user asked you to stop \u2014 call ${yl} with \`stop: true\` (no other fields) and ${Um} any ${il} you armed (use ${jb} to find the task ID if it is no longer in context). ${STOP_OUTCOME} Stopping is the loop's normal ending \u2014 the user can restart it anytime with /loop.`;return`${O}
 
 ## Action
 

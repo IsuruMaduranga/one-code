@@ -1,20 +1,8 @@
----
-name: code-review
-description: >
-  Review the current diff, or a PR number/branch/path target, for correctness
-  bugs (plus reuse/simplification/efficiency cleanups where the model's review
-  recipe covers them) at the given effort level (low/medium: fewer,
-  high-confidence findings; high→max: broader coverage, may include uncertain
-  findings); with no level given, it follows the session's effort (/effort).
-  Pass --comment to post findings as inline PR comments, or --fix to apply the
-  findings to the working tree after the review.
-argument-hint: "[low|medium|high|xhigh|max] [--fix] [--comment] [<pr#>|<branch>|<path>]"
----
+`high effort → 8 inline angles → dedup (no verify) → ≤10 findings`
 
-`medium effort → 3+5 angles × 6 candidates → 1-vote verify → ≤8 findings`
-
-You are reviewing for **precision** at medium effort: every finding you surface
-should be one a maintainer would act on.
+You are reviewing for **recall** at high effort: catch every real bug a careful
+reviewer would catch in one sitting. At this level, catching real bugs matters
+more than avoiding false positives. Err on the side of surfacing.
 
 ## Phase 0 — Gather the diff
 
@@ -27,9 +15,9 @@ review that target instead. Treat this diff as the review scope.
 
 ## Phase 1 — Find candidates (3 correctness angles + 3 cleanup angles + 1 altitude angle + 1 conventions angle, up to 6 each)
 
-Run **8 independent finder angles** via the Agent tool. Each
+Run **8 independent finder angles** in sequence yourself, in THIS context — do NOT spawn subagents for them. Each
 surfaces **up to 6 candidate findings** with `file`, `line`, a one-line
-`summary`, and a concrete `failure_scenario`. If the Agent tool is not available in your current tool set, do not error — perform each angle (and each verification) yourself, sequentially, in this context.
+`summary`, and a concrete `failure_scenario`.
 
 ### Angle A — line-by-line diff scan
 
@@ -105,28 +93,17 @@ is broken) instead of a crash. Correctness bugs always outrank cleanup,
 altitude, and conventions findings when the output cap forces a cut.
 
 Pass every candidate with a nameable failure scenario through — finders that
-silently drop half-believed candidates bypass the verify step and are the
-dominant cause of misses.
+silently drop half-believed candidates are the dominant cause of misses.
 
-## Phase 2 — Verify (1-vote, 3-state)
+## Phase 2 — Dedup only (no verify)
 
-Dedup candidates that point at the same line/mechanism, keeping the one with
-the most concrete failure scenario. For each remaining candidate, run **one
-verifier** via the Agent tool: give it the diff, the relevant
-file(s), and the candidate, and have it return exactly one of:
-
-- **CONFIRMED** — can name the inputs/state that trigger it and the wrong
-  output or crash. Quote the line.
-- **PLAUSIBLE** — mechanism is real, trigger is uncertain (timing, env,
-  config). State what would confirm it.
-- **REFUTED** — factually wrong (code doesn't say that) or guarded elsewhere.
-  Quote the line that proves it.
-
-Keep candidates where the vote is CONFIRMED or PLAUSIBLE.
+Pool all candidates. Dedup near-duplicates only (same defect, same location, same reason → keep one). Do NOT run verifiers; do NOT re-judge. Sort by severity.
 
 ## Output
 
-Return findings as a JSON array of at most 8 objects:
+Target **at least 5 findings**. If fewer genuine findings exist, emit what you have — do not invent to hit the floor.
+
+Return findings as a JSON array of at most 10 objects:
 
 ```json
 [
@@ -139,27 +116,7 @@ Return findings as a JSON array of at most 8 objects:
 ]
 ```
 
-Ranked most-severe first. If more than 8 survive, keep the 8 most
-severe. If nothing survives verification, return `[]`. Do not call the
+Ranked most-severe first. If more than 10 survive, keep the 10 most
+severe. If nothing survives, return `[]`. Do not call the
 ReportFindings tool even if it is available - this review's
 output contract is the JSON block above.
-
-## Arguments and flags
-
-Read the invocation arguments and adjust accordingly:
-
-- **A target** (`<pr#>`, `<branch>`, or `<path>`) replaces "the current diff" as
-  the review scope in Phase 0.
-- **`--comment`** — after producing the findings list, if the review target is a
-  GitHub PR, post each finding as an inline PR comment (one call per finding;
-  include a suggestion block only when it fully fixes the issue). Prefer a
-  GitHub inline-comment MCP tool if one is connected this session; otherwise use
-  `gh api repos/{owner}/{repo}/pulls/{pr}/comments`. If the target is not a PR,
-  print the findings to the terminal and note that `--comment` was ignored.
-- **`--fix`** — after producing the findings list, apply the findings to the
-  working tree instead of stopping at the report: fix each one directly —
-  correctness bugs and reuse/simplification/efficiency cleanups alike. Skip any
-  finding whose fix would change intended behavior, require changes well outside
-  the reviewed diff, or that you judge to be a false positive — note the skip
-  rather than arguing with it. Finish with a brief summary of what was fixed and
-  what was skipped.

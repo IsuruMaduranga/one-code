@@ -2,7 +2,8 @@
  * skill/index.ts wiring for scheduled work: a session's first skill turn goes
  * out as a user message (so pi's prompt preamble runs), a generated body
  * replaces the file's (lib/skill-body.ts, `/loop`), and a fired slash command
- * expands to the skill it names.
+ * expands to the skill it names. Every path delivers Claude Code's typed-skill
+ * message: the command breadcrumb, then the skill's text.
  */
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -46,7 +47,10 @@ describe("skill wiring: scheduled work", () => {
 		const { fake, ctx } = await mount();
 		await fake.commands.get("demo")!.handler("now", ctx);
 		expect(fake.sentUserMessages).toHaveLength(1);
-		expect(String(fake.sentUserMessages[0].content)).toContain('<skill name="demo"');
+		expect(fake.sentUserMessages[0].content).toEqual([
+			{ type: "text", text: "<command-message>demo</command-message>\n<command-name>/demo</command-name>\n<command-args>now</command-args>\n" },
+			{ type: "text", text: `Base directory for this skill: ${skillDir}\n\nDo the demo.\n\nARGUMENTS: now\n` },
+		]);
 		expect(fake.sentMessages).toHaveLength(0);
 
 		await fake.fire("before_agent_start", { systemPromptOptions: { skills: [] } }, ctx);
@@ -62,19 +66,21 @@ describe("skill wiring: scheduled work", () => {
 			if (query.skill === "demo") query.body = `generated for ${query.args}`;
 		});
 		await fake.commands.get("demo")!.handler("5m x", ctx);
-		const block = String(fake.sentUserMessages[0].content);
-		expect(block).toContain("generated for 5m x\n</skill>");
-		expect(block.endsWith("</skill>")).toBe(true);
+		const [breadcrumb, text] = fake.sentUserMessages[0].content as Array<{ text: string }>;
+		expect(breadcrumb.text).toContain("<command-args>5m x</command-args>");
+		expect(text.text).toBe(`Base directory for this skill: ${skillDir}\n\ngenerated for 5m x\n`);
 	});
 
 	it("expands a fired slash command naming a skill, bare or /skill:, and leaves anything else", async () => {
 		const { fake } = await mount();
 		const bare: SlashExpandQuery = { text: "/demo go", cwd };
 		fake.events.emit(SLASH_EXPAND_CHANNEL, bare);
-		expect(bare.expanded).toContain("Do the demo.\n</skill>\n\ngo");
+		expect(bare.expanded).toBe(
+			`<command-message>demo</command-message>\n<command-name>/demo</command-name>\n<command-args>go</command-args>\nBase directory for this skill: ${skillDir}\n\nDo the demo.\n\nARGUMENTS: go\n`,
+		);
 		const prefixed: SlashExpandQuery = { text: "/skill:demo", cwd };
 		fake.events.emit(SLASH_EXPAND_CHANNEL, prefixed);
-		expect(prefixed.expanded).toContain('<skill name="demo"');
+		expect(prefixed.expanded).toContain("<command-name>/demo</command-name>\nBase directory for this skill:");
 		const unknown: SlashExpandQuery = { text: "/nope", cwd };
 		fake.events.emit(SLASH_EXPAND_CHANNEL, unknown);
 		expect(unknown.expanded).toBeUndefined();
@@ -88,20 +94,21 @@ describe("skill tool: a skill that takes arguments, called without any", () => {
 		const skills = ["demo", "every"].map((name) => ({ name, filePath: join(cwd, ".claude", "skills", name, "SKILL.md") }));
 		await fake.fire("before_agent_start", { systemPromptOptions: { skills } }, ctx);
 		const result = (await fake.tools.get("skill")!.execute("t1", params, undefined, undefined, ctx)) as { content: { text: string }[] };
-		return result.content[0].text;
+		expect(result.content[0].text).toBe(`Launching skill: ${params.skill}`);
+		return result.content[1].text;
 	}
 
 	it("opens the result with a note naming the arguments", async () => {
 		const text = await call({ skill: "every" });
 		expect(text.startsWith("Stop and check before following this. This skill takes arguments ([interval] [prompt])")).toBe(true);
-		expect(text).toContain("Repeat it.");
+		expect(text).toContain(`Base directory for this skill: ${argsSkillDir}\n\nRepeat it.`);
 		expect(text.endsWith("call the skill again with them in `args` instead of following them.")).toBe(true);
 	});
 
 	it("adds no note when arguments are passed or the skill declares none", async () => {
-		expect(await call({ skill: "every", args: "5m ping" })).toMatch(/^Skill: every\n/);
+		expect(await call({ skill: "every", args: "5m ping" })).toBe(`Base directory for this skill: ${argsSkillDir}\n\nRepeat it.\n\nARGUMENTS: 5m ping`);
 		expect(await call({ skill: "every", args: "  " })).toContain("This skill takes arguments ([interval] [prompt])");
-		expect(await call({ skill: "demo" })).toMatch(/^Skill: demo\n/);
+		expect(await call({ skill: "demo" })).toBe(`Base directory for this skill: ${skillDir}\n\nDo the demo.`);
 	});
 });
 
