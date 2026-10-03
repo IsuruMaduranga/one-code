@@ -2,9 +2,11 @@
  * skill extension — Claude Code's Skill tool.
  *
  * pi's own mechanism lists skills in the system prompt and expects the model to
- * `read` the SKILL.md path. Claude Code instead exposes a `skill` tool that
- * returns the skill's instructions as a tool result. This adds that tool, so a
- * skill can be invoked by name — including plugin skills as `<plugin>:<skill>`.
+ * `read` the SKILL.md path. Claude Code instead exposes a `skill` tool, which
+ * answers "Launching skill: <name>" with the skill's instructions beside it.
+ * This adds that tool, so a skill can be invoked by name — including plugin
+ * skills as `<plugin>:<skill>` — and expands a skill the user types into its
+ * instructions before the model sees the message, as Claude Code does.
  *
  * Skills discovered by pi (which includes `~/.claude/skills` and
  * `.claude/skills` thanks to the claude-compat extension) are read from
@@ -13,6 +15,8 @@
 
 import { readFileSync, statSync } from "node:fs";
 import os from "node:os";
+import { dirname, join, resolve, sep } from "node:path";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getAgentDir, stripFrontmatter } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -32,11 +36,12 @@ import {
 	skillStateFor,
 } from "../lib/skill-overrides.ts";
 import { BUNDLED_SKILLS_DIR, estimateSkillTokens, promptTemplateNames, scanSkills, scopeForPath } from "../lib/skill-scan.ts";
-import { recordUsage } from "../lib/usage-tracker.ts";
+import { resolveModelTier } from "../lib/model-tier.ts";
+import { readUsage, recordUsage, usageKey } from "../lib/usage-tracker.ts";
 import { boundedDockHeight, ccToolRenderers, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import {
 	bareSkillMatches,
-	buildSkillBlock,
+	launchingSkill,
 	missingArgumentsNote,
 	parseSkillCommand,
 	redactOffSkillMessages,
@@ -44,10 +49,13 @@ import {
 	SKILL_INVOCATION_TYPE,
 	type SkillInvocationDetails,
 	skillCommandCandidates,
+	skillPromptText,
+	typedSkillContent,
 	withoutDuplicateSkillCommands,
 } from "./invoke.ts";
+import { codeReviewBody } from "./code-review.ts";
 import { decodeSkillsKey } from "./panel/keys.ts";
-import { frontmatterFlag, skillListingText } from "./listing.ts";
+import { frontmatterFlag, skillListingBudget, skillListingText, usageScore } from "./listing.ts";
 import { renderSkillsPanel, type SkillsPaint } from "./panel/render.ts";
 import { applySkillsKey, initialSkillsState, type SkillsRow, visibleRows } from "./panel/state.ts";
 import { announceArgumentHint, type CommandHint, frontmatterCommandHint } from "../lib/argument-hints.ts";
@@ -63,6 +71,14 @@ interface IndexedSkill {
 	scope: SkillScope;
 	state: SkillState;
 	pluginName?: string;
+	/** The `when_to_use` frontmatter, which Claude Code lists after the description. */
+	whenToUse?: string;
+	/**
+	 * A plugin command (`<plugin>:<command>`): listed for the model and
+	 * loadable through the tool, as in Claude Code; typed, it stays the
+	 * plugins extension's command.
+	 */
+	kind?: "command";
 	/**
 	 * Frontmatter `disable-model-invocation: true`: only the user starts it (a
 	 * typed `/<name>`); it is left out of the model's listing and the `skill`
@@ -75,11 +91,19 @@ interface IndexedSkill {
 /** Bounded dock like the /plugins panel — keeps the transcript visible above. */
 const SKILLS_PANEL_MAX_HEIGHT = 24;
 
+const BUNDLED_ROOT = resolve(BUNDLED_SKILLS_DIR);
+/** A skill in One Code's own catalog, like one built into Claude Code: listed last, kept whole over budget, no folder named. */
+const isBundled = (path: string): boolean => resolve(path).startsWith(BUNDLED_ROOT + sep);
+const CODE_REVIEW_PATH = join(BUNDLED_ROOT, "code-review", "SKILL.md");
+const CODE_REVIEW_CELLS = join(BUNDLED_ROOT, "code-review", "cells");
+
 export default function skillExtension(pi: ExtensionAPI) {
 	/** pi resolves skills per turn; cache the latest list for the tool to use. */
 	let piSkills: IndexedSkill[] = [];
 	/** Session cwd, so project-level enabledPlugins settings apply to plugin skills. */
 	let sessionCwd: string | undefined;
+	/** The session's model: its context window sizes the listing, its tier picks code-review's body. */
+	let sessionModel: Model<Api> | undefined;
 
 	/**
 	 * True once a `prompt()` has run (the only path that emits
@@ -94,9 +118,13 @@ export default function skillExtension(pi: ExtensionAPI) {
 
 	// A factory re-run builds each session's instance, so this is belt and braces
 	// (lib/notifications.ts resets its twin the same way).
-	pi.on("session_start", () => {
+	pi.on("session_start", (_event, ctx) => {
 		prompted = false;
 		announcedSkills = false;
+		sessionModel = ctx.model;
+	});
+	pi.on("model_select", (event) => {
+		sessionModel = event.model;
 	});
 	/** Index the skills pi resolved for this turn and list them for the model. */
 	const adoptPiSkills = (skills: unknown[], cwd: string) => {
@@ -130,6 +158,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 	};
 	pi.on("before_agent_start", (event, ctx) => {
 		prompted = true;
+		sessionModel = ctx.model ?? sessionModel;
 		adoptPiSkills(event.systemPromptOptions.skills ?? [], ctx.cwd);
 	});
 	// The first turn a background completion opens (lib/prompt-options.ts)
@@ -167,6 +196,10 @@ export default function skillExtension(pi: ExtensionAPI) {
 	const readDescription = (path: string): string | undefined => {
 		const description = readFrontmatter(path)?.description;
 		return typeof description === "string" ? description : undefined;
+	};
+	const readWhenToUse = (path: string): string | undefined => {
+		const whenToUse = readFrontmatter(path)?.when_to_use;
+		return typeof whenToUse === "string" && whenToUse.trim() ? whenToUse : undefined;
 	};
 
 	/**
@@ -208,6 +241,9 @@ export default function skillExtension(pi: ExtensionAPI) {
 	// the /skills command/panel falls back to a disk scan (reading each
 	// SKILL.md's frontmatter for its description) — that's the gap that made a
 	// fresh session's /skills show only plugin skills.
+	//
+	// The order is Claude Code's: project and user skills, then plugin commands
+	// and plugin skills, then the bundled catalog.
 	const index = (cwd = sessionCwd): IndexedSkill[] => {
 		const agentDir = getAgentDir();
 		const home = os.homedir();
@@ -227,14 +263,17 @@ export default function skillExtension(pi: ExtensionAPI) {
 					}));
 		const project = base.map((skill) => ({
 			...skill,
+			whenToUse: readWhenToUse(skill.path),
 			state: skillStateFor(states, skillOverrideKey(skill.scope, skill.name)),
 		}));
 		// Plugin skills from discoverPlugins are already filtered to enabled by
 		// the same store; anything it returns is fully available (plugin skills
 		// aren't governed by skillOverrides — managed via /plugins).
-		const plugin = discoverPlugins(defaultDiscoverRoots(agentDir, cwd, home)).skills.map((skill) => ({
+		const discovered = discoverPlugins(defaultDiscoverRoots(agentDir, cwd, home));
+		const plugin = discovered.skills.map((skill) => ({
 			name: skill.name,
 			description: readDescription(skill.path),
+			whenToUse: readWhenToUse(skill.path),
 			path: skill.path,
 			source: "plugin" as const,
 			scope: "plugin" as const,
@@ -242,17 +281,49 @@ export default function skillExtension(pi: ExtensionAPI) {
 			pluginName: skill.plugin,
 			disableModelInvocation: readModelInvocationDisabled(skill.path),
 		}));
-		return [...project, ...plugin];
+		// A plugin command is listed when it describes itself, as in Claude Code.
+		const commands = discovered.commands.flatMap((command) => {
+			const description = readDescription(command.path);
+			const whenToUse = readWhenToUse(command.path);
+			if (!description?.trim() && !whenToUse) return [];
+			return [
+				{
+					name: command.name,
+					description,
+					whenToUse,
+					path: command.path,
+					source: "plugin" as const,
+					scope: "plugin" as const,
+					state: "on" as const,
+					pluginName: command.plugin,
+					kind: "command" as const,
+					disableModelInvocation: readModelInvocationDisabled(command.path),
+				},
+			];
+		});
+		return [...project.filter((skill) => !isBundled(skill.path)), ...commands, ...plugin, ...project.filter((skill) => isBundled(skill.path))];
 	};
+	/** Skills proper: the /skills panel and the typed forms leave plugin commands to the plugins extension. */
+	const skillsOnly = (cwd = sessionCwd): IndexedSkill[] => index(cwd).filter((skill) => skill.kind !== "command");
 
-	const describe = () => skillListingText(index());
+	/** The listing, within Claude Code's budget for the session model's context window. */
+	const describe = () => {
+		const usage = readUsage(pluginRoot(getAgentDir()));
+		const now = new Date();
+		const skills = index().map((skill) => ({
+			...skill,
+			bundled: isBundled(skill.path),
+			usage: usageScore(usage[usageKey(skill.kind ?? "skill", skill.name)], now),
+		}));
+		return skillListingText(skills, skillListingBudget(sessionModel?.contextWindow));
+	};
 
 	pi.registerTool({
 		name: "skill",
 		label: "Skill",
 		...ccToolRenderers<{ skill?: string; args?: string }>("Skill", {
 			title: (a) => (a ? [a.skill, a.args].filter(Boolean).join(" ") : undefined),
-			// The full instruction text goes to the model; the transcript needs one line.
+			// The skill's text goes to the model; the transcript needs one line.
 			result: (_r, a, isError) => (isError ? undefined : a?.skill ? `Loaded ${a.skill}` : undefined),
 		}),
 		description:
@@ -331,10 +402,11 @@ export default function skillExtension(pi: ExtensionAPI) {
 				};
 			}
 
-			let body: string;
+			let promptText: string;
 			try {
 				const parsed = parseFrontmatterLoosely(readFileSync(found.path, "utf-8")) as { body: string };
-				body = skillBody(found, parsed.body.trim(), params.args ?? "", ctx.cwd).body;
+				const { body, args } = skillBody(found, parsed.body.trim(), params.args?.trim() ?? "", ctx.cwd, ctx.model);
+				promptText = skillPromptText(body, args, baseDirFor(found));
 			} catch (error) {
 				return {
 					content: [{ type: "text", text: `Could not read skill "${found.name}": ${(error as Error).message}` }],
@@ -343,7 +415,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 				};
 			}
 
-			recordUsage(pluginRoot(getAgentDir()), "skill", found.name);
+			recordUsage(pluginRoot(getAgentDir()), found.kind ?? "skill", found.name);
 
 			// A skill that takes arguments, called without any, returns its
 			// no-argument body; say so, since a model previewing the skill would
@@ -351,45 +423,40 @@ export default function skillExtension(pi: ExtensionAPI) {
 			const hint = params.args?.trim() ? undefined : readArgumentHint(found.path);
 			const hintText = hint?.hint ?? hint?.argNames?.map((name) => `<${name}>`).join(" ");
 			const note = hintText ? missingArgumentsNote(hintText) : undefined;
-			// Resource paths in a skill are relative to its own directory, so the
-			// model needs to know where it lives to read references/ or scripts/.
-			const header = [
-				note?.before,
-				`Skill: ${found.name}`,
-				`Location: ${found.path}`,
-				params.args ? `Arguments: ${params.args}` : undefined,
-				"Follow these instructions for the current task.",
-			]
-				.filter(Boolean)
-				.join("\n");
 
+			// Claude Code's shape: the result says the skill is launching, and its
+			// text follows as a block of its own.
 			return {
-				content: [{ type: "text", text: `${header}\n\n---\n\n${body}${note ? `\n\n---\n\n${note.after}` : ""}` }],
+				content: [
+					{ type: "text", text: launchingSkill(found.name) },
+					{ type: "text", text: note ? `${note.before}\n\n${promptText}\n\n${note.after}` : promptText },
+				],
 				details: { skill: found.name, path: found.path } as Record<string, unknown>,
 			};
 		},
 	});
 
 	/**
-	 * Run a resolved skill the way a user-typed command does: refuse an "off"
-	 * skill (in EVERY mode — falling through would hand `/skill:` to pi's native
-	 * expansion, which knows nothing of the overrides store and would run it; a
-	 * one-shot run gets the refusal on stderr instead of a UI notice, never as
-	 * silent execution), else re-deliver pi's exact `<skill>` block as a hidden
-	 * custom message. The model receives the same bytes pi's own expansion would
-	 * submit as a user turn (convertToLlm maps a custom message to a user message
-	 * regardless of `display`), but nothing renders. Shared by the `/skill:<name>`
-	 * interception and the bare `/<name>` commands.
-	 */
-	/**
 	 * A skill's body and the arguments still to append: a generated body
 	 * (lib/skill-body.ts, `/loop`) carries its arguments, a file's does not.
+	 * The bundled code-review picks its body by tier and effort (code-review.ts).
 	 */
-	const skillBody = (found: IndexedSkill, fileBody: string, args: string, cwd: string): { body: string; args: string } => {
+	const skillBody = (found: IndexedSkill, fileBody: string, args: string, cwd: string, model = sessionModel): { body: string; args: string } => {
+		if (found.kind === "command") return { body: fileBody, args };
+		if (resolve(found.path) === CODE_REVIEW_PATH) {
+			try {
+				const review = codeReviewBody(CODE_REVIEW_CELLS, resolveModelTier(model), pi.getThinkingLevel(), args);
+				return { body: review.body, args: review.args };
+			} catch {
+				// A cell file missing from an install: the SKILL.md body (the medium cell) still reviews.
+			}
+		}
 		const query: SkillBodyQuery = { skill: found.name, path: found.path, args, cwd };
 		pi.events.emit(SKILL_BODY_CHANNEL, query);
 		return query.body !== undefined ? { body: query.body, args: "" } : { body: fileBody, args };
 	};
+	/** The folder Claude Code names before a skill's text; none for One Code's own catalog. */
+	const baseDirFor = (found: IndexedSkill): string | undefined => (found.kind === "command" || isBundled(found.path) ? undefined : dirname(found.path));
 
 	// A fired scheduled prompt that is a skill's slash command runs that skill,
 	// as Claude Code's queue runs a fired `/babysit-prs` (lib/skill-body.ts).
@@ -397,7 +464,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 		const query = data as SlashExpandQuery;
 		const command = parseSlashCommand(query.text);
 		if (!command) return;
-		const found = resolveSkill(index(query.cwd), command.name.replace(/^skill:/, ""));
+		const found = resolveSkill(skillsOnly(query.cwd), command.name.replace(/^skill:/, ""));
 		if (!found || found.state === "off") return;
 		let fileBody: string;
 		try {
@@ -407,9 +474,21 @@ export default function skillExtension(pi: ExtensionAPI) {
 		}
 		recordUsage(pluginRoot(getAgentDir()), "skill", found.name);
 		const { body, args } = skillBody(found, fileBody, command.args, query.cwd);
-		query.expanded = buildSkillBlock({ name: found.name, filePath: found.path }, body, args);
+		query.expanded = typedSkillContent(found.name, command.args, skillPromptText(body, args, baseDirFor(found))).join("");
 	});
 
+	/**
+	 * Run a resolved skill the way a user-typed command does: refuse an "off"
+	 * skill (in EVERY mode — falling through would hand `/skill:` to pi's native
+	 * expansion, which knows nothing of the overrides store and would run it; a
+	 * one-shot run gets the refusal on stderr instead of a UI notice, never as
+	 * silent execution), else deliver Claude Code's typed-skill message (the
+	 * command breadcrumb and the skill's text) as a hidden custom message: the
+	 * model receives it as a user message (convertToLlm maps a custom message
+	 * to one regardless of `display`), but nothing renders and no `skill` call
+	 * is needed. Shared by the `/skill:<name>` interception, the typed
+	 * `/<plugin>:<skill>` form and the bare `/<name>` commands.
+	 */
 	const deliverSkill = async (
 		found: IndexedSkill,
 		args: string,
@@ -428,10 +507,11 @@ export default function skillExtension(pi: ExtensionAPI) {
 			return "unavailable";
 		}
 		recordUsage(pluginRoot(getAgentDir()), "skill", found.name);
-		const { body, args: blockArgs } = skillBody(found, fileBody, args, ctx.cwd);
-		const block = buildSkillBlock({ name: found.name, filePath: found.path }, body, blockArgs);
-		// Carry any attached images alongside the block, as pi's native path would.
-		const content = extra.images?.length ? [{ type: "text" as const, text: block }, ...extra.images] : block;
+		const { body, args: bodyArgs } = skillBody(found, fileBody, args, ctx.cwd, ctx.model);
+		// Claude Code's typed-skill message: the command breadcrumb, then the
+		// skill's text; any attached images ride after them.
+		const [breadcrumb, text] = typedSkillContent(found.name, args, skillPromptText(body, bodyArgs, baseDirFor(found)));
+		const content = [{ type: "text" as const, text: breadcrumb }, { type: "text" as const, text }, ...(extra.images ?? [])];
 		if (!prompted && !extra.streamingBehavior) {
 			pi.sendUserMessage(content);
 			await awaitOneShotTurn(ctx);
@@ -464,10 +544,15 @@ export default function skillExtension(pi: ExtensionAPI) {
 	// message queued mid-turn and for RPC steer/followUp (`streamingBehavior` is
 	// set), so an off skill is refused before it enters the queue. On older pi
 	// those paths skip `input`; the context-hook redaction below covers them.
+	//
+	// A typed `/<plugin>:<skill>` has no command of its own (plugin skills get
+	// no bare alias), so it reached the model as text and the model called
+	// `skill`; it is expanded here too, as Claude Code expands it. Only an exact
+	// plugin-skill name is taken; anything else stays the user's text.
 	pi.on("input", async (event, ctx) => {
-		const cmd = parseSkillCommand(event.text);
+		const cmd = parseSkillCommand(event.text) ?? typedPluginSkill(event.text);
 		if (!cmd) return { action: "continue" };
-		const found = resolveSkill(index(), cmd.name);
+		const found = resolveSkill(skillsOnly(), cmd.name);
 		if (!found) return { action: "continue" };
 		const outcome = await deliverSkill(found, cmd.args, ctx, {
 			images: event.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined,
@@ -476,6 +561,14 @@ export default function skillExtension(pi: ExtensionAPI) {
 		});
 		return { action: outcome === "handled" ? "handled" : "continue" };
 	});
+
+	/** A typed `/<plugin>:<skill> [args]` naming a plugin skill exactly. */
+	const typedPluginSkill = (text: string): { name: string; args: string } | undefined => {
+		if (!text.startsWith("/")) return undefined;
+		const command = parseSlashCommand(text);
+		if (!command?.name.includes(":")) return undefined;
+		return skillsOnly().some((skill) => skill.source === "plugin" && skill.name === command.name) ? command : undefined;
+	};
 
 	// Claude Code invokes a user/project skill as a bare `/<name>` (only plugin
 	// skills carry a `<plugin>:` prefix); pi registers `/skill:<name>`. Register
@@ -493,7 +586,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 	// be unregistered, so the handler resolves the skill afresh at invocation:
 	// a skill deleted or turned off since registration is refused, never run.
 	const registeredSkillCommands = new Set<string>();
-	const registerSkillCommands = (cwd: string | undefined, skills: IndexedSkill[] = index(cwd)) => {
+	const registerSkillCommands = (cwd: string | undefined, skills: IndexedSkill[] = skillsOnly(cwd)) => {
 		let taken: string[];
 		try {
 			taken = pi.getCommands().map((command) => command.name);
@@ -508,7 +601,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 			pi.registerCommand(skill.name, {
 				description: skill.description ? `${skill.description} (skill)` : `Run the ${skill.name} skill`,
 				handler: async (args, ctx) => {
-					const found = resolveSkill(index(ctx.cwd), skill.name);
+					const found = resolveSkill(skillsOnly(ctx.cwd), skill.name);
 					if (!found || (await deliverSkill(found, args.trim(), ctx)) === "unavailable") {
 						notifyOrPrint(ctx, `Skill "${skill.name}" is no longer available (its SKILL.md was removed or is unreadable).`, "error");
 					}
@@ -517,7 +610,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 		}
 	};
 	pi.on("session_start", (_event, ctx) => {
-		const skills = index(ctx.cwd);
+		const skills = skillsOnly(ctx.cwd);
 		registerSkillCommands(ctx.cwd, skills);
 		// pi lists every skill a second time as `/skill:<name>`; drop that entry
 		// where the bare command exists (withoutDuplicateSkillCommands).
@@ -572,7 +665,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 	});
 
 	const buildSkillsRows = (cwd: string | undefined): SkillsRow[] =>
-		index(cwd).map((skill) => ({
+		skillsOnly(cwd).map((skill) => ({
 			key: skillOverrideKey(skill.scope, skill.name),
 			name: skill.name,
 			scope: skill.scope,
@@ -653,7 +746,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 				return;
 			}
 			// Non-interactive fallback: a flat listing with each skill's state.
-			const all = index(ctx.cwd);
+			const all = skillsOnly(ctx.cwd);
 			if (all.length === 0) {
 				ctx.ui.notify("No skills available.", "info");
 				return;

@@ -1,20 +1,8 @@
----
-name: code-review
-description: >
-  Review the current diff, or a PR number/branch/path target, for correctness
-  bugs (plus reuse/simplification/efficiency cleanups where the model's review
-  recipe covers them) at the given effort level (low/medium: fewer,
-  high-confidence findings; high→max: broader coverage, may include uncertain
-  findings); with no level given, it follows the session's effort (/effort).
-  Pass --comment to post findings as inline PR comments, or --fix to apply the
-  findings to the working tree after the review.
-argument-hint: "[low|medium|high|xhigh|max] [--fix] [--comment] [<pr#>|<branch>|<path>]"
----
+`high effort → 3+5 angles × 6 candidates → 1-vote verify (recall-biased) → ≤10 findings`
 
-`medium effort → 3+5 angles × 6 candidates → 1-vote verify → ≤8 findings`
-
-You are reviewing for **precision** at medium effort: every finding you surface
-should be one a maintainer would act on.
+You are reviewing for **recall** at high effort: catch every real bug a careful
+reviewer would catch in one sitting. At this level, catching real bugs matters
+more than avoiding false positives. Err on the side of surfacing.
 
 ## Phase 0 — Gather the diff
 
@@ -108,25 +96,29 @@ Pass every candidate with a nameable failure scenario through — finders that
 silently drop half-believed candidates bypass the verify step and are the
 dominant cause of misses.
 
-## Phase 2 — Verify (1-vote, 3-state)
+## Phase 2 — Verify (1-vote, recall-biased)
 
-Dedup candidates that point at the same line/mechanism, keeping the one with
-the most concrete failure scenario. For each remaining candidate, run **one
-verifier** via the Agent tool: give it the diff, the relevant
-file(s), and the candidate, and have it return exactly one of:
+Dedup near-duplicates (same defect, same location, same reason → keep one). For
+each remaining candidate, run **one verifier** via the Agent tool:
+give it the diff, the relevant file(s), and the candidate; it returns exactly
+one of **CONFIRMED / PLAUSIBLE / REFUTED**.
 
-- **CONFIRMED** — can name the inputs/state that trigger it and the wrong
-  output or crash. Quote the line.
-- **PLAUSIBLE** — mechanism is real, trigger is uncertain (timing, env,
-  config). State what would confirm it.
-- **REFUTED** — factually wrong (code doesn't say that) or guarded elsewhere.
-  Quote the line that proves it.
+**PLAUSIBLE by default** — do not refute a candidate for being "speculative" or
+"depends on runtime state" when the state is realistic: concurrency races,
+nil/undefined on a rare-but-reachable path (error handler, cold cache, missing
+optional field), falsy-zero treated as missing, off-by-one on a boundary the
+code does not exclude, retry storms / partial failures, regex/allowlist that
+lost an anchor. These are PLAUSIBLE.
 
-Keep candidates where the vote is CONFIRMED or PLAUSIBLE.
+**REFUTED** only when constructible from the code: factually wrong (quote the
+actual line); provably impossible (type/constant/invariant — show it); already
+handled in this diff (cite the guard); or pure style with no observable effect.
+
+Keep **CONFIRMED and PLAUSIBLE**. Drop REFUTED.
 
 ## Output
 
-Return findings as a JSON array of at most 8 objects:
+Return findings as a JSON array of at most 10 objects:
 
 ```json
 [
@@ -139,27 +131,7 @@ Return findings as a JSON array of at most 8 objects:
 ]
 ```
 
-Ranked most-severe first. If more than 8 survive, keep the 8 most
+Ranked most-severe first. If more than 10 survive, keep the 10 most
 severe. If nothing survives verification, return `[]`. Do not call the
 ReportFindings tool even if it is available - this review's
 output contract is the JSON block above.
-
-## Arguments and flags
-
-Read the invocation arguments and adjust accordingly:
-
-- **A target** (`<pr#>`, `<branch>`, or `<path>`) replaces "the current diff" as
-  the review scope in Phase 0.
-- **`--comment`** — after producing the findings list, if the review target is a
-  GitHub PR, post each finding as an inline PR comment (one call per finding;
-  include a suggestion block only when it fully fixes the issue). Prefer a
-  GitHub inline-comment MCP tool if one is connected this session; otherwise use
-  `gh api repos/{owner}/{repo}/pulls/{pr}/comments`. If the target is not a PR,
-  print the findings to the terminal and note that `--comment` was ignored.
-- **`--fix`** — after producing the findings list, apply the findings to the
-  working tree instead of stopping at the report: fix each one directly —
-  correctness bugs and reuse/simplification/efficiency cleanups alike. Skip any
-  finding whose fix would change intended behavior, require changes well outside
-  the reviewed diff, or that you judge to be a false positive — note the skip
-  rather than arguing with it. Finish with a brief summary of what was fixed and
-  what was skipped.
