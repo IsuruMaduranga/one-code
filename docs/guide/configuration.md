@@ -23,6 +23,10 @@ Code reads but never writes.
 | Claude Code user configuration that One Code reads | `~/.claude/settings.json` |
 | Claude Code project configuration that One Code reads | `.claude/settings.json`, `.claude/settings.local.json` |
 
+In independent mode One Code doesn't read either Claude Code file; Claude
+Code's settings keys, such as `permissions`, `hooks` and `env`, go in One
+Code's two files instead.
+
 The per-repository slug is derived from the repository root, so worktrees
 and subdirectories of one repository share one file.
 
@@ -50,6 +54,8 @@ session is your own pi, not the app.
 |---|---|
 | `settings.json` | User-wide One Code settings. |
 | `projects/<slug>/settings.json` | Per-repository settings. |
+| `projects/<slug>/memory/` | Per-repository memory, in independent mode. |
+| `agents/`, `commands/`, `workflows/` | Your agents, slash commands and saved workflows, in independent mode. |
 | `agent/` | pi's own state under the bundled app: credentials, model catalog, sessions, pi's settings, and One Code's plugin directory (`agent/plugins/`). |
 | `plans/<name>.md` | Plan files from plan mode. |
 | `artifacts/` | Pages published with the `artifact` tool: `index.html` is the gallery; each `<id>/` holds the current page, its details, and `versions/` with every earlier version. |
@@ -82,6 +88,7 @@ appear in `projects/<slug>/settings.json`.
 | `capabilityIndex.artificialAnalysisApiKey` | string | By hand | Artificial Analysis key for measured model selection. |
 | `disabledMcpServers` | string array | `/mcp` (user or per repository) | MCP servers kept disabled. |
 | `artifacts.autoOpen` | boolean | By hand | `false` stops the browser opening when the model publishes a new artifact. Defaults to `true`. |
+| `configMode` | string | `/memory` | `claude-compatible` (the default) or `independent`. Applies from the next start. See [Run One Code on its own setup](bring-your-claude-code-setup.md#run-one-code-on-its-own-setup). |
 
 Two keys are stamped alongside model choices (`subagentModelSetFor`,
 `autoMode.classifierModelSetFor`) to record the provider a choice was made

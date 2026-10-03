@@ -19,12 +19,12 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
-import { managedSettingsPaths } from "../auto-mode/config.ts";
 import { loadPluginHooks } from "../hooks/plugin-hooks.ts";
 import { type HooksSource, loadHookSettings } from "../hooks/settings.ts";
-import { claudeJsonPath, claudeUserDir } from "../lib/paths.ts";
-import { claudeUserSettingsPath, settingsPaths } from "../lib/claude-settings.ts";
-import { discoverContextFilePaths } from "../lib/claude-context.ts";
+import { claudeSourcesOn } from "../lib/config-mode.ts";
+import { claudeJsonPath, claudeUserDir, oneCodeStateDir } from "../lib/paths.ts";
+import { claudeUserSettingsPath, managedSettingsPaths, settingsPaths } from "../lib/claude-settings.ts";
+import { discoverContextFilePaths, instructionRule } from "../lib/claude-context.ts";
 import { CLAUDE_MD_CHAR_LIMIT, claudeMdLimitWarning, indexLimitStatus, projectMemoryDir } from "../lib/memory.ts";
 import { readDisabledMcpServers } from "../lib/mcp-overrides.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
@@ -295,22 +295,38 @@ export function collectCompat(input: CompatInput): CompatReport {
 	const claudeDir = claudeUserDir(home, env);
 	const claude = settingsPaths(cwd, home);
 
+	// Independent mode (lib/config-mode.ts) reads none of Claude Code's files, so
+	// none is opened here; an organisation's policy file it ignores is named.
+	const independent = !claudeSourcesOn();
 	const files: SettingsFileReport[] = [
-		summarizeFile("claude-user", "Claude Code user settings", claudeUserSettingsPath(home), home, findings),
-		summarizeFile("claude-project", "project settings (checked in)", claude.project, home, findings),
-		summarizeFile("claude-local", "project settings (local)", claude.local, home, findings),
-		...managedSettingsPaths().map((path) => summarizeFile("managed", "managed settings (organisation policy)", path, home, findings)),
-		summarizeFile("claude-json", "Claude Code's .claude.json", claudeJsonPath(home, env), home, findings),
+		...(independent
+			? []
+			: [
+					summarizeFile("claude-user", "Claude Code user settings", claudeUserSettingsPath(home), home, findings),
+					summarizeFile("claude-project", "project settings (checked in)", claude.project, home, findings),
+					summarizeFile("claude-local", "project settings (local)", claude.local, home, findings),
+					...managedSettingsPaths().map((path) => summarizeFile("managed", "managed settings (organisation policy)", path, home, findings)),
+					summarizeFile("claude-json", "Claude Code's .claude.json", claudeJsonPath(home, env), home, findings),
+				]),
 		summarizeFile("onecode-user", "One Code user settings", oneCodeSettingsPath(home, env), home, findings),
 		summarizeFile("onecode-project", "One Code per-repository settings", oneCodeProjectSettingsPath(cwd, home, env), home, findings),
 	];
+	if (independent) {
+		for (const path of managedSettingsPaths().filter((managed) => existsSync(managed))) {
+			findings.push({
+				level: "warn",
+				text: `An organisation policy file exists at ${path}, and independent mode does not apply it.`,
+				fix: "Switch config sources to Claude-compatible in /memory if this machine's policy must hold.",
+			});
+		}
+	}
 
 	// Context files, sized — the block every turn pays for.
 	const contextFiles: ContextFileReport[] = discoverContextFilePaths({
 		cwd,
 		homeClaudeDir: claudeDir,
-		homeOneCodeDir: join(home, ".onecode"),
-		agentsFallback: true,
+		homeOneCodeDir: oneCodeStateDir(env, home),
+		rule: instructionRule(home),
 	}).map(({ path, descriptor }) => {
 		let chars = 0;
 		try {

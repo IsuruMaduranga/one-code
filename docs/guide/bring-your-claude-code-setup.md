@@ -7,6 +7,10 @@ existing setup works without changes. There's no import step and nothing
 to convert. Open a project that already has a `.claude/` directory, and One
 Code picks up each of the following as it is.
 
+That's the default, Claude-compatible mode. If you'd rather One Code ignore
+your Claude Code setup entirely, switch to independent mode. See
+[Run One Code on its own setup](#run-one-code-on-its-own-setup).
+
 ## Project instructions: CLAUDE.md
 
 One Code loads `CLAUDE.md` files and includes them in the model's context
@@ -15,9 +19,16 @@ exactly as Claude Code does: your global `~/.claude/CLAUDE.md`, then the
 directory, plus any `CLAUDE.local.md` beside them for private instructions.
 `@path` imports are expanded in place.
 
-If a directory has no `CLAUDE.md`, One Code uses its `AGENTS.md` instead, so
-a repository that standardized on `AGENTS.md` works too. A `CLAUDE.md` takes
-precedence over an `AGENTS.md` in the same directory.
+If the project has no `CLAUDE.md` or `CLAUDE.local.md` anywhere on that
+path, One Code loads its `AGENTS.md` files instead, in the same places, plus
+any `.claude/AGENTS.md`. So a repository that standardized on `AGENTS.md`
+works too. Once a `CLAUDE.md` exists, the `AGENTS.md` files are left out,
+the same rule Claude Code follows.
+
+Claude Code's `instructionFiles` option changes that rule, and One Code
+honours it: `claude-md` never loads `AGENTS.md`, `claude-md-and-agents-md`
+loads it beside `CLAUDE.md`, and `managed-only` drops your own and the
+project's instruction files.
 
 To give One Code instructions that Claude Code shouldn't read, add an
 `ONECODE.md`. See [ONECODE.md](sessions-and-context.md#onecodemd).
@@ -114,6 +125,40 @@ One Code keeps per-repository memory in Claude Code's own folder,
 memories. This is the one place One Code writes under `~/.claude`. Run
 `/memory` to open memory and instruction files. See
 [Memory](sessions-and-context.md#memory).
+
+## Run One Code on its own setup
+
+Maybe you don't use Claude Code at all, or you want One Code's
+instructions, agents and memory kept apart from it. Independent mode does
+that: One Code stops reading anything of Claude Code's. No `~/.claude`, no
+project `.claude/`, no `CLAUDE.md`, no `~/.claude.json` or `.mcp.json`, and
+no managed settings either.
+
+To switch, run `/memory`, press **↑** to reach the **Config sources** row,
+and press **Enter**. The row shows **(from next start)** until you restart
+One Code, because the switch applies to the next session, not the one
+you're in. `/doctor` shows which mode is running.
+
+Here's where each mode looks:
+
+| What | Claude-compatible (default) | Independent |
+|---|---|---|
+| Instructions | `CLAUDE.md` family, or `AGENTS.md` when there's none; `ONECODE.md` | `AGENTS.md` in every directory; `ONECODE.md` |
+| Skills | `.claude/skills/`, `~/.claude/skills/`, `.agents/skills/`, `~/.agents/skills/`, pi's skills | `.agents/skills/`, `~/.agents/skills/`, pi's skills |
+| Commands, agents, workflows | `.claude/` and `~/.claude/` | `.onecode/` and `~/.onecode/` (`commands/`, `agents/`, `workflows/`) |
+| Settings, hooks, permissions | Claude Code's settings files, managed settings, and One Code's files | One Code's files only: `~/.onecode/settings.json` and the per-repository one |
+| MCP servers | `~/.claude.json`, `.mcp.json`, `.claude/settings.local.json`, pi's `mcp.json` files | pi's `mcp.json` files |
+| Memory | `~/.claude/projects/<slug>/memory/` | `~/.onecode/projects/<slug>/memory/` |
+| Worktrees | `.claude/worktrees/` | `.onecode/worktrees/` |
+
+In independent mode, the settings you'd put in `~/.claude/settings.json`
+(permissions, `defaultMode`, hooks, the `env` block, `autoMode`) go in
+`~/.onecode/settings.json` instead, with the same keys. Memories don't move
+between modes, so each mode starts with its own.
+
+Independent mode skips managed settings too. If your organization manages
+Claude Code with a policy file, that policy doesn't apply to One Code in
+this mode.
 
 ## What stays separate
 

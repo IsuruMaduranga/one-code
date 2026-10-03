@@ -65,6 +65,8 @@ import {
 	namespacedToolName,
 } from "./schema.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
+import { claudeSourcesOn } from "../lib/config-mode.ts";
+import { claudeJsonPath } from "../lib/paths.ts";
 
 /** Anthropic's hard limit on a tool name; a longer one fails the whole request. */
 const MAX_TOOL_NAME_LENGTH = 128;
@@ -619,7 +621,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 		if (pluginConfigPaths.has(server.source)) {
 			return { rank: 3, group: "Plugin MCPs", configLocation: "Plugin configuration", scope: "project" };
 		}
-		if (server.source === join(home, ".claude.json") || server.piOrigin === "user") {
+		if (server.source === claudeJsonPath(home) || server.piOrigin === "user") {
 			return { rank: 0, group: `User MCPs (${shorten(server.source)})`, configLocation: shorten(server.source), scope: "user" };
 		}
 		if (server.source.endsWith(join(".claude", "settings.local.json"))) {
@@ -889,7 +891,10 @@ export default function mcpExtension(pi: ExtensionAPI) {
 		description: "Manage MCP servers (status, reconnect, authenticate, enable/disable)",
 		handler: async (args, ctx) => {
 			if (servers.length === 0) {
-				ctx.ui.notify("No MCP servers configured. Add them to .mcp.json or ~/.claude.json.", "info");
+				ctx.ui.notify(
+					claudeSourcesOn() ? "No MCP servers configured. Add them to .mcp.json or ~/.claude.json." : "No MCP servers configured. Add them to .pi/mcp.json or the agent dir's mcp.json.",
+					"info",
+				);
 				return;
 			}
 			if (ctx.hasUI) {

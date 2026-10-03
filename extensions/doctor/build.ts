@@ -39,6 +39,7 @@ import {
 	type SessionView,
 	shortenHome,
 } from "./report.ts";
+import { MODE_LABELS } from "../lib/config-mode.ts";
 
 export const BUNDLED_AGENTS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "agents");
 
@@ -64,8 +65,13 @@ export function installationSection(env: DoctorEnvironment, findings: Finding[])
 	lines.push({ text: `Node ${env.nodeVersion} · ${env.platform}-${env.arch}`, level: "dim" });
 	lines.push({ text: `pi agent dir: ${shortenHome(env.agentDir, env.home)} (auth, models, sessions, pi settings)`, level: "dim" });
 	lines.push({ text: `One Code state: ${shortenHome(env.stateDir, env.home)} (own settings, plans)`, level: "dim" });
-	const claudeDir = env.env.CLAUDE_CONFIG_DIR ? `${env.env.CLAUDE_CONFIG_DIR} (CLAUDE_CONFIG_DIR)` : shortenHome(`${env.home}/.claude`, env.home);
-	lines.push({ text: `Claude Code config read from: ${claudeDir} (never written)`, level: "dim" });
+	lines.push({ text: `Config sources: ${MODE_LABELS[env.configMode]} (switch in /memory)`, level: "dim" });
+	if (env.configMode === "independent") {
+		lines.push({ text: "Claude Code config: not read (~/.claude, .claude/, CLAUDE.md, ~/.claude.json, managed settings)", level: "dim" });
+	} else {
+		const claudeDir = env.env.CLAUDE_CONFIG_DIR ? `${env.env.CLAUDE_CONFIG_DIR} (CLAUDE_CONFIG_DIR)` : shortenHome(`${env.home}/.claude`, env.home);
+		lines.push({ text: `Claude Code config read from: ${claudeDir} (never written)`, level: "dim" });
+	}
 
 	const versionWarning = piVersionWarning(env.piVersion);
 	if (versionWarning) {

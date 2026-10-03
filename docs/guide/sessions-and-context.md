@@ -67,13 +67,19 @@ and subdirectories of one repository share one memory folder. This is the
 one place One Code writes under `~/.claude`, so a real Claude Code session
 on the same repository reads the same memories.
 
+In independent mode the folder is `~/.onecode/projects/<slug>/memory/`
+instead, and Claude Code doesn't see it. See
+[Run One Code on its own setup](bring-your-claude-code-setup.md#run-one-code-on-its-own-setup).
+
 The model writes one file per memory and keeps an index in `MEMORY.md`.
 When the index grows near its limit (200 lines or 25,000 characters), the model is
 warned; past the limit, a write to it still succeeds but returns an error
 so the model trims the index.
 
 Run `/memory` to open the memory folder or any instruction file. Files open
-in `$VISUAL` or `$EDITOR`; folders open in your file manager.
+in `$VISUAL` or `$EDITOR`; folders open in your file manager. The
+**Config sources** row at the top switches between Claude-compatible and
+independent mode, starting with the next session.
 
 ## The context window
 

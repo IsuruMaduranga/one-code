@@ -19,7 +19,7 @@
  */
 
 import { spawn, execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -30,6 +30,7 @@ const sessionDir = join(scratch, "sessions");
 // The child's command creates this file; the stream is no evidence, since the prompt echoes it.
 const marker = join(workdir, "workflow-ran.txt");
 mkdirSync(workdir, { recursive: true });
+rmSync(marker, { force: true }); // a reused scratch dir must not pass on an old run's marker
 mkdirSync(sessionDir, { recursive: true });
 execFileSync("git", ["init", "-q"], { cwd: workdir });
 execFileSync("git", ["config", "user.email", "e@x.com"], { cwd: workdir });

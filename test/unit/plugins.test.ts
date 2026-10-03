@@ -167,7 +167,7 @@ describe("plugin discovery", () => {
 
 describe("discoverPlugins two-root merge", () => {
 	let root: string;
-	let roots: DiscoverRoots;
+	let roots: DiscoverRoots & { claudePluginsDir: string };
 
 	const writePlugin = (base: string, name: string, extra?: { skill?: string }) => {
 		const installPath = join(base, "cache", "market", name, "1.0.0");

@@ -10,6 +10,9 @@
  *   <cwd>/.mcp.json                   (project, checked in — walked up to the repo root)
  *   <cwd>/.claude/settings.local.json (project, personal)
  *
+ * Independent mode (lib/config-mode.ts) reads none of the three Claude Code
+ * files: plugins, registered servers and pi's two files only.
+ *
  * Every file holds an `mcpServers` object. A stdio server has `command` (plus
  * optional `args`, `env`); a remote one has `url` and optional `type`/`headers`.
  *
@@ -26,6 +29,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { claudeSourcesOn } from "../lib/config-mode.ts";
 import { claudeJsonPath, expandTilde } from "../lib/paths.ts";
 import { hashServerConfig } from "./trust.ts";
 
@@ -228,7 +232,9 @@ export function piMcpConfigPaths(agentDir: string, cwd: string, configDirName = 
 	return { user: join(agentDir, "mcp.json"), project: join(cwd, configDirName, "mcp.json") };
 }
 
+/** Claude Code's MCP files; none in independent mode (lib/config-mode.ts), where pi's two `mcp.json` files remain. */
 export function configPaths(cwd: string, home: string): string[] {
+	if (!claudeSourcesOn()) return [];
 	return [claudeJsonPath(home), ...findProjectConfigs(cwd), join(cwd, ".claude", "settings.local.json")];
 }
 

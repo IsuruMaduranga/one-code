@@ -18,6 +18,7 @@ import { loadPermissionSettings } from "../permissions/settings.ts";
 import { buildDoctorReport } from "./build.ts";
 import { type DoctorReport, renderDoctorText, type SessionView } from "./report.ts";
 import { lookupLatestVersion } from "./update-lookup.ts";
+import { configMode } from "../lib/config-mode.ts";
 
 export interface DoctorCliOptions {
 	agentDir: string;
@@ -69,6 +70,7 @@ export async function collectDoctorCliReport(options: DoctorCliOptions): Promise
 			home,
 			agentDir,
 			stateDir: oneCodeStateDir(env, home),
+			configMode: configMode(),
 			env,
 			platform: process.platform,
 			arch: process.arch,

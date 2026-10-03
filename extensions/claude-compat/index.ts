@@ -19,12 +19,10 @@
 
 import { existsSync } from "node:fs";
 import os from "node:os";
-import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { claudeConfigDir } from "../lib/paths.ts";
-import { claudeUserDir } from "../lib/paths.ts";
+import { claudeConfigDir, claudeUserDir } from "../lib/paths.ts";
 
-import { BUNDLED_SKILLS_DIR } from "../lib/skill-scan.ts";
+import { BUNDLED_SKILLS_DIR, commandDirs, skillSourceDirs } from "../lib/skill-scan.ts";
 
 /**
  * `claudeDir` is Claude Code's config dir (honours CLAUDE_CONFIG_DIR), defaulting
@@ -38,19 +36,17 @@ export function claudeResourcePaths(
 	claudeDir: string = claudeUserDir(home),
 	bundledSkillsDir?: string,
 ): { skillPaths: string[]; promptPaths: string[] } {
+	// The folders follow the config mode (lib/skill-scan.ts, lib/config-mode.ts).
 	const candidates = {
 		skillPaths: [
-			join(claudeDir, "skills"),
-			join(home, ".agents", "skills"),
-			join(cwd, ".claude", "skills"),
-			join(cwd, ".agents", "skills"),
+			...skillSourceDirs(cwd, home, claudeDir).map(({ dir }) => dir),
 			// The bundled catalog is listed LAST so it loses a name collision:
 			// pi keeps the first-loaded skill for a given name, so a user or
 			// project skill of the same name wins and the bundled one is the
 			// fallback (see working-docs/decisions/skills-plugins.md).
 			...(bundledSkillsDir ? [bundledSkillsDir] : []),
 		],
-		promptPaths: [join(claudeDir, "commands"), join(cwd, ".claude", "commands")],
+		promptPaths: commandDirs(cwd, home, claudeDir),
 	};
 	return {
 		skillPaths: candidates.skillPaths.filter((p) => existsSync(p)),

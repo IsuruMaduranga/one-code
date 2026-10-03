@@ -456,7 +456,12 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				);
 			};
 
+			// Set by stop(): what the command prints while it is torn down (a shell
+			// running the rest of `sleep 30; echo done` before the SIGKILL grace ends)
+			// is not an event, so the count says what happened before the stop.
+			let stopRequested = false;
 			const onEvent = (line: string) => {
+				if (stopRequested) return;
 				eventCount++;
 				record(`${line}\n`);
 				if (oneShot) return; // collected into the tool result instead
@@ -515,7 +520,6 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 				);
 			};
 
-			let stopRequested = false;
 			let stop: () => void;
 			if (params.command) {
 				// Own process group: stop() must end the COMMAND, not just the `$SHELL -c`

@@ -8,7 +8,8 @@
  * and the result arrives later as a follow-up message. Scripts and per-call
  * journals persist under the session dir, so `resumeFromRunId` replays the
  * unchanged prefix of an edited or interrupted run. Saved workflows live in
- * `.claude/workflows/` (project) and `~/.claude/workflows/` (user).
+ * `.claude/workflows/` (project) and `~/.claude/workflows/` (user), or their
+ * `.onecode` twins in independent mode (lib/config-mode.ts).
  *
  * Orchestration is opt-in, like Claude Code: the tool description gates it,
  * and the literal keyword "ultracode" in a user message arms the turn via a
@@ -61,6 +62,7 @@ import { registerLocalCommand } from "../lib/local-command.ts";
 import { sessionWorkCwd } from "../lib/worktree-channel.ts";
 import { followEnteredWorktree } from "../lib/worktree-isolation.ts";
 import { isKeyRelease, keyId } from "../lib/key-input.ts";
+import { projectConfigDirName } from "../lib/config-mode.ts";
 
 /**
  * Claude Code's own arming reminder, verbatim in intent: the keyword is a
@@ -119,7 +121,7 @@ Every script must begin with \`export const meta = {...}\`:
 The \`meta\` object must be a PURE LITERAL — no variables, function calls, spreads, or template interpolation. Required fields: \`name\`, \`description\`. Optional: \`whenToUse\`, \`phases\`. Use the SAME phase titles in meta.phases as in phase() calls.
 
 Script body hooks:
-- agent(prompt: string, opts?: {label?, phase?, schema?, model?, allowExpensive?, effort?, isolation?: 'worktree', agentType?}): Promise<any> — spawn a subagent. Without schema, returns its final text as a string. With schema (a JSON Schema object), the subagent is forced to call a structured_output tool and agent() returns the validated object — no parsing needed. Returns null if the subagent fails (filter with .filter(Boolean)). opts.label overrides the display label. opts.phase explicitly assigns this agent to a progress group (use this inside pipeline()/parallel() stages to avoid races on the global phase() state). opts.model overrides the model — default to omitting it, the agent uses the effective /subagent default (configured, automatic smaller profile, then session fallback); a model costing more than the session model is rejected unless opts.allowExpensive is true (set it only when the user explicitly asked for that model). opts.effort overrides reasoning effort ('off' | 'minimal' | 'low' | 'medium' | 'high'). opts.isolation: 'worktree' runs the agent in a fresh git worktree — use ONLY when agents mutate files in parallel and would otherwise conflict. opts.agentType uses a named agent from .claude/agents/.
+- agent(prompt: string, opts?: {label?, phase?, schema?, model?, allowExpensive?, effort?, isolation?: 'worktree', agentType?}): Promise<any> — spawn a subagent. Without schema, returns its final text as a string. With schema (a JSON Schema object), the subagent is forced to call a structured_output tool and agent() returns the validated object — no parsing needed. Returns null if the subagent fails (filter with .filter(Boolean)). opts.label overrides the display label. opts.phase explicitly assigns this agent to a progress group (use this inside pipeline()/parallel() stages to avoid races on the global phase() state). opts.model overrides the model — default to omitting it, the agent uses the effective /subagent default (configured, automatic smaller profile, then session fallback); a model costing more than the session model is rejected unless opts.allowExpensive is true (set it only when the user explicitly asked for that model). opts.effort overrides reasoning effort ('off' | 'minimal' | 'low' | 'medium' | 'high'). opts.isolation: 'worktree' runs the agent in a fresh git worktree — use ONLY when agents mutate files in parallel and would otherwise conflict. opts.agentType uses a named agent from ${projectConfigDirName()}/agents/.
 - parallel(thunks: Array<() => Promise<any>>): Promise<any[]> — run tasks concurrently. This is a BARRIER: awaits all thunks before returning. A thunk that throws resolves to \`null\` — the call itself never rejects, so \`.filter(Boolean)\` before using the results. Use ONLY when you genuinely need all results together.
 - pipeline(items, stage1, stage2, ...): Promise<any[]> — run each item through all stages independently, NO barrier between stages. Item A can be in stage 3 while item B is still in stage 1. This is the DEFAULT for multi-stage work. Wall-clock = slowest single-item chain, not sum-of-slowest-per-stage. Every stage callback receives (prevResult, originalItem, index). A stage that throws drops that item to \`null\` and skips its remaining stages.
 - log(message: string): void — emit a progress message to the user.
@@ -170,7 +172,7 @@ Scripts are plain JavaScript, NOT TypeScript — type annotations, interfaces, a
 
 Resume: to continue after a stop, kill, or script edit, relaunch with \`{scriptPath, resumeFromRunId}\` — the longest unchanged prefix of agent() calls returns cached results instantly; the first edited/new call and everything after it runs live. Same script + same args → 100% cache hit. Stop a live run first (\`/workflows stop <runId>\`) before resuming it. Background runs do not survive a session switch or /reload — resume them instead.
 
-Run a saved workflow from \`.claude/workflows/\` (project) or \`~/.claude/workflows/\` (personal) by passing its \`name\`.`;
+Run a saved workflow from \`${projectConfigDirName()}/workflows/\` (project) or \`~/${projectConfigDirName()}/workflows/\` (personal) by passing its \`name\`.`;
 
 const WorkflowParams = Type.Object({
 	script: Type.Optional(
@@ -186,7 +188,7 @@ const WorkflowParams = Type.Object({
 		}),
 	),
 	name: Type.Optional(
-		Type.String({ description: "Name of a saved workflow from .claude/workflows/ or ~/.claude/workflows/" }),
+		Type.String({ description: `Name of a saved workflow from ${projectConfigDirName()}/workflows/ or ~/${projectConfigDirName()}/workflows/` }),
 	),
 	args: Type.Optional(
 		Type.Any({ description: "Value exposed to the script as the global `args`, verbatim. Pass real JSON values, not stringified JSON" }),
@@ -445,7 +447,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 				lines.push("Saved workflows:");
 				for (const w of saved) lines.push(`  ${w.name} (${w.source}) — ${w.meta?.description ?? w.path}`);
 			}
-			if (!lines.length) lines.push("No workflow runs yet and no saved workflows found (.claude/workflows/).");
+			if (!lines.length) lines.push(`No workflow runs yet and no saved workflows found (${projectConfigDirName()}/workflows/).`);
 			lines.push("Usage: /workflows [stop <runId> | log <runId>]");
 			ctx.ui.notify(lines.join("\n"), "info");
 		},

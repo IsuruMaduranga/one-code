@@ -33,13 +33,15 @@ import {
 	projectMemoryDir,
 	stampFrontmatter,
 } from "../lib/memory.ts";
+import { type ConfigMode, CONFIG_MODE_KEY, configMode, configModeFromEnv, MODE_LABELS, savedConfigMode } from "../lib/config-mode.ts";
+import { oneCodeSettingsPath, readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
 import { claudeConfigDir, oneCodeStateDir } from "../lib/paths.ts";
 import { tryReadFile } from "../lib/plugins.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import { buildMemoryEntries, entryName, type MemoryEntry } from "./entries.ts";
-import { openPath } from "./open-external.ts";
-import { applyMemoryKey, decodeMemoryKey, initialMemoryState, renderMemoryPanel } from "./panel.ts";
+import { editorHint, memoryDisplayPath, openPath } from "./open-external.ts";
+import { applyMemoryKey, decodeMemoryKey, initialMemoryState, type ModeView, renderMemoryPanel } from "./panel.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 
 const MEMORY_PANEL_MAX_HEIGHT = 20;
@@ -144,29 +146,56 @@ export default function memoryExtension(pi: ExtensionAPI) {
 
 	// ---- /memory: Claude Code's Memory picker --------------------------------
 	// Pick a memory-related file (or the auto-memory folder) and open it in the
-	// external editor, matching CC. Pure panel logic lives in ./panel.ts.
+	// external editor, matching CC. Pure panel logic lives in ./panel.ts. The
+	// returned text is the model's `<local-command-stdout>`, worded as CC's.
 	registerLocalCommand(pi, "memory", {
 		description: "View or edit CLAUDE.md and memory files",
-		handler: async (args, ctx) => {
+		reportsResult: true,
+		handler: async (_args, ctx): Promise<string | undefined> => {
 			const entries = memoryEntriesFor(ctx.cwd);
 			if (!ctx.hasUI) {
 				const lines = entries.map(
 					(e, i) => `${i + 1}. ${e.title}${e.description ? ` — ${e.description}` : ""}  [${e.path}]`,
 				);
 				ctx.ui.notify(`Memory / CLAUDE.md files:\n${lines.join("\n")}`, "info");
-				return;
+				return undefined;
 			}
-			const chosen = await openMemoryPanel(ctx, entries);
-			if (!chosen) return;
-			const result = await openPath(chosen.path, chosen.kind);
-			ctx.ui.notify(result.message, result.ok ? "info" : "error");
-			if (result.ok && result.hint) ctx.ui.notify(result.hint, "info");
+			const mode: ModeView = { running: configMode(), saved: savedConfigMode(), fromEnv: configModeFromEnv() !== undefined };
+			const savedBefore = mode.saved;
+			const chosen = await openMemoryPanel(ctx, entries, mode);
+			// The mode row is One Code's own; its line leads CC's result when it changed.
+			const modeLine =
+				mode.saved === savedBefore
+					? ""
+					: `Set config sources to ${MODE_LABELS[mode.saved]}${mode.saved === mode.running ? "" : "; applies from the next start"}\n\n`;
+			if (!chosen) {
+				ctx.ui.notify(CANCELLED, "info");
+				return `${modeLine}${CANCELLED}`;
+			}
+			const shown = memoryDisplayPath(chosen.path, ctx.cwd, os.homedir());
+			const result = await openPath(chosen.path, "file");
+			const stdout = result.ok ? `Opened ${shown}\n\n${editorHint()}` : `Couldn't open ${shown}: ${result.error}`;
+			ctx.ui.notify(stdout, result.ok ? "info" : "error");
+			return `${modeLine}${stdout}`;
 		},
 	});
 }
 
-/** Show the Memory panel as a focused overlay; resolve to the chosen entry or null. */
-function openMemoryPanel(ctx: ExtensionContext, entries: MemoryEntry[]): Promise<MemoryEntry | null> {
+/** Claude Code's `/memory` result when the panel closes without a pick. */
+const CANCELLED = "Cancelled memory editing";
+
+/** Save `configMode` to One Code's user settings; the running process keeps its mode. */
+function saveConfigMode(next: ConfigMode): void {
+	const path = oneCodeSettingsPath(os.homedir());
+	writeSettings(path, { ...readSettingsForWrite(path), [CONFIG_MODE_KEY]: next });
+}
+
+/**
+ * Show the Memory panel as a focused overlay; resolve to the chosen entry or
+ * null. Enter on the config-sources row saves the other mode into `mode.saved`
+ * and keeps the panel up.
+ */
+function openMemoryPanel(ctx: ExtensionContext, entries: MemoryEntry[], mode: ModeView): Promise<MemoryEntry | null> {
 	return ctx.ui.custom<MemoryEntry | null>((tui, theme, _keybindings, done) => {
 		const paint = { fg: safeThemePaint(theme), bold: safeThemeBold(theme) };
 		const state = initialMemoryState();
@@ -180,7 +209,7 @@ function openMemoryPanel(ctx: ExtensionContext, entries: MemoryEntry[]): Promise
 				if (cache?.width === width) return cache.lines;
 				const termRows = (tui as { terminal: { rows: number } }).terminal.rows;
 				const height = boundedDockHeight(termRows, MEMORY_PANEL_MAX_HEIGHT);
-				const lines = renderMemoryPanel({ state, entries, width, height }, paint).map((line) =>
+				const lines = renderMemoryPanel({ state, entries, width, height, mode }, paint).map((line) =>
 					truncateLine(line, width),
 				);
 				cache = { width, lines };
@@ -190,8 +219,32 @@ function openMemoryPanel(ctx: ExtensionContext, entries: MemoryEntry[]): Promise
 				const key = decodeMemoryKey(data);
 				if (!key) return;
 				const effect = applyMemoryKey(state, key, entries);
+				if (effect?.kind === "toggle-mode" && mode.fromEnv) {
+					// The variable outranks the saved setting, so a write here would never apply.
+					ctx.ui.notify("Config sources are set by ONECODE_CONFIG_MODE. Unset it to switch here.", "info");
+					return;
+				}
+				if (effect?.kind === "toggle-mode") {
+					const next: ConfigMode = mode.saved === "independent" ? "claude-compatible" : "independent";
+					try {
+						saveConfigMode(next);
+						mode.saved = next;
+					} catch (error) {
+						ctx.ui.notify(`Couldn't save the config sources setting: ${error instanceof Error ? error.message : error}`, "error");
+					}
+					repaint();
+					return;
+				}
 				if (effect?.kind === "close") {
 					done(null);
+					return;
+				}
+				if (effect?.kind === "open" && effect.entry.kind === "folder") {
+					// CC opens the folder and keeps the picker up; only a file or Esc ends it.
+					const { path } = effect.entry;
+					void openPath(path, "folder").then((result) => {
+						if (!result.ok) ctx.ui.notify(`Couldn't open ${memoryDisplayPath(path, ctx.cwd, os.homedir())}: ${result.error}`, "error");
+					});
 					return;
 				}
 				if (effect?.kind === "open") {

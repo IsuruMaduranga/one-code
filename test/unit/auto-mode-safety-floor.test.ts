@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { isSafetyControlTarget, safetyControlWrite } from "../../extensions/auto-mode/safety-floor.ts";
+import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
 import { oneCodeProjectSettingsPath } from "../../extensions/lib/one-code-settings.ts";
 import { claudeJsonPath, forwardSlashes, toPosixPath } from "../../extensions/lib/paths.ts";
 
@@ -127,6 +128,19 @@ describe("isSafetyControlTarget", () => {
 		// either must hit the deterministic floor, not the auto-mode classifier.
 		expect(isSafetyControlTarget("/home/u/.onecode/settings.json", home)).toBe(true);
 		expect(isSafetyControlTarget("/home/u/.onecode/projects/-home-u-repo/settings.json", home)).toBe(true);
+	});
+
+	it("keeps Claude Code's relocated settings file on the floor in independent mode", () => {
+		// Independent mode reads no Claude Code file, but a rule planted there takes
+		// effect when the user switches back, so the floor guards it in both modes.
+		const relocated = join(home, "cfg");
+		process.env.CLAUDE_CONFIG_DIR = relocated;
+		try {
+			resetConfigModeForTest("independent");
+			expect(isSafetyControlTarget(join(relocated, "settings.json"), home)).toBe(true);
+		} finally {
+			delete process.env.CLAUDE_CONFIG_DIR;
+		}
 	});
 
 	it("does not match lookalikes", () => {

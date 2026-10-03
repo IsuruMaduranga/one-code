@@ -44,6 +44,7 @@ describe("/doctor's keep-window line", () => {
 						home,
 						agentDir: join(home, ".pi", "agent"),
 						stateDir: join(home, ".onecode"),
+						configMode: "claude-compatible",
 						env: { PATH: join(home, "empty-bin"), HOME: home },
 						platform: "darwin",
 						arch: "arm64",

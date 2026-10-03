@@ -491,6 +491,8 @@ describe("containment signal: Claude Code's acceptEdits file commands on the wor
 		const ev = analyze("echo x > .claude/worktrees/fix/notes.txt");
 		expect(ev.protectedPaths).toEqual([]);
 		expect(ev.verdict).toBe("safe");
+		// Independent mode's worktree folder (lib/config-mode.ts) is the same space.
+		expect(analyze("echo x > .onecode/worktrees/fix/notes.txt").protectedPaths).toEqual([]);
 	});
 
 	// A delete target the classifier's fast path cannot enumerate must never be

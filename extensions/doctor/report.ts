@@ -23,6 +23,7 @@ import type { CompactionKeepView } from "../lib/compaction-keep.mjs";
 import type { RegisteredServer } from "../mcp/config.ts";
 import { wrapProse } from "../lib/tui-render.ts";
 import { countNoun } from "../lib/tui-render.ts";
+import type { ConfigMode } from "../lib/config-mode.ts";
 export { countNoun };
 
 export type LineLevel = "ok" | "info" | "warn" | "error" | "dim";
@@ -66,6 +67,8 @@ export interface DoctorEnvironment {
 	agentDir: string;
 	/** One Code's own state dir (~/.onecode or ONECODE_STATE_DIR). */
 	stateDir: string;
+	/** Where configuration is read from (lib/config-mode.ts). */
+	configMode: ConfigMode;
 	env: NodeJS.ProcessEnv;
 	platform: string;
 	arch: string;

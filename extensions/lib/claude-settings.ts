@@ -13,6 +13,8 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { claudeSourcesOn, userConfigDir } from "./config-mode.ts";
+import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "./one-code-settings.ts";
 import { claudeUserDir } from "./paths.ts";
 
 export interface ClaudeSettingsFile {
@@ -27,6 +29,76 @@ export interface ClaudeSettingsFile {
  */
 export function claudeUserSettingsPath(home: string): string {
 	return join(claudeUserDir(home), "settings.json");
+}
+
+/** Managed-settings locations, highest authority, matching Claude Code's paths. */
+export function managedSettingsPaths(): string[] {
+	if (process.platform === "darwin") return ["/Library/Application Support/ClaudeCode/managed-settings.json"];
+	if (process.platform === "win32") return ["C:\\ProgramData\\ClaudeCode\\managed-settings.json"];
+	return ["/etc/claude-code/managed-settings.json"];
+}
+
+/** Claude Code's `instructionFiles` values (findings §57); the default is `claude-md-or-agents-md`. */
+export type InstructionFiles = "claude-md" | "claude-md-or-agents-md" | "claude-md-and-agents-md" | "managed-only";
+const INSTRUCTION_FILES: readonly InstructionFiles[] = ["claude-md", "claude-md-or-agents-md", "claude-md-and-agents-md", "managed-only"];
+const LEGACY_PROJECT_INSTRUCTIONS: Record<string, InstructionFiles> = {
+	none: "managed-only",
+	claude: "claude-md",
+	"agents-fallback": "claude-md-or-agents-md",
+	both: "claude-md-and-agents-md",
+};
+/** The AGENTS.md plugin's `pluginConfigs` keys: the id is inferred, so the bare name counts too. */
+const AGENTS_MD_PLUGIN_KEYS = ["cc-plugin-agents-md@builtin", "cc-plugin-agents-md"];
+
+/**
+ * Claude Code's `instructionFiles` (findings §57): the AGENTS.md plugin's option
+ * under `pluginConfigs[<id>].options`, from the user and managed settings
+ * (Claude Code reads no project file for it), managed winning. The legacy
+ * top-level `projectInstructions` applies only while `instructionFiles` is unset,
+ * mapped as Claude Code maps it (an unknown string reads as `claude-md`).
+ */
+export function readInstructionFiles(home: string): InstructionFiles {
+	let instructionFiles: InstructionFiles | undefined;
+	let legacy: InstructionFiles | undefined;
+	for (const path of [claudeUserSettingsPath(home), ...managedSettingsPaths()]) {
+		const file = readSettingsFile(path);
+		if (!file) continue;
+		const configs = file.pluginConfigs as Record<string, { options?: Record<string, unknown> }> | undefined;
+		for (const key of AGENTS_MD_PLUGIN_KEYS) {
+			const value = configs?.[key]?.options?.instructionFiles;
+			if (INSTRUCTION_FILES.includes(value as InstructionFiles)) instructionFiles = value as InstructionFiles;
+		}
+		if (typeof file.projectInstructions === "string") legacy = LEGACY_PROJECT_INSTRUCTIONS[file.projectInstructions] ?? "claude-md";
+	}
+	return instructionFiles ?? legacy ?? "claude-md-or-agents-md";
+}
+
+/** Where a settings file sits: Claude Code's ladder, One Code's two files, or managed policy. */
+export type SettingsSource = "claude-user" | "onecode-user" | "project" | "project-local" | "onecode-project" | "managed";
+
+/**
+ * Every settings file One Code reads Claude Code's keys from, lowest
+ * precedence first, with its source. Managed settings last: Claude Code's
+ * organisation policy outranks every user/project file (review P14).
+ * Independent mode (lib/config-mode.ts) reads One Code's own two files only,
+ * managed settings included in what it drops (decisions/memory-state.md).
+ * Each consumer keeps the sources its keys may come from.
+ */
+export function settingsSources(cwd: string, home: string): Array<[SettingsSource, string]> {
+	const oneCode: Array<[SettingsSource, string]> = [
+		["onecode-user", oneCodeSettingsPath(home)],
+		["onecode-project", oneCodeProjectSettingsPath(cwd, home)],
+	];
+	if (!claudeSourcesOn()) return oneCode;
+	const paths = settingsPaths(cwd, home);
+	return [
+		["claude-user", paths.user],
+		oneCode[0],
+		["project", paths.project],
+		["project-local", paths.local],
+		oneCode[1],
+		...managedSettingsPaths().map((path): [SettingsSource, string] => ["managed", path]),
+	];
 }
 
 export function settingsPaths(cwd: string, home: string): { user: string; project: string; local: string } {
@@ -56,7 +128,8 @@ export function readSettingsFile(path: string): ClaudeSettingsFile | undefined {
  * its project-trust prompt).
  */
 export function readSettingsEnv(home: string): Record<string, string> {
-	const env = readSettingsFile(claudeUserSettingsPath(home))?.env;
+	// The mode's user file: One Code's own in independent mode (lib/config-mode.ts).
+	const env = readSettingsFile(join(userConfigDir(home), "settings.json"))?.env;
 	if (!env || typeof env !== "object" || Array.isArray(env)) return {};
 	const out: Record<string, string> = {};
 	for (const [key, value] of Object.entries(env as Record<string, unknown>)) {
@@ -70,8 +143,8 @@ export function readSettingsEnv(home: string): Record<string, string> {
  * merged across the three settings files — later files win per key.
  */
 export function readEnabledPlugins(cwd: string, home: string): Record<string, boolean> {
-	const paths = settingsPaths(cwd, home);
 	const merged: Record<string, boolean> = {};
+	const paths = settingsPaths(cwd, home);
 	for (const path of [paths.user, paths.project, paths.local]) {
 		const enabled = readSettingsFile(path)?.enabledPlugins;
 		if (!enabled || typeof enabled !== "object") continue;
