@@ -6,7 +6,10 @@
  * same mechanism the bash extension uses). Every model-facing field —
  * description, promptSnippet, promptGuidelines, parameters — is passed through
  * from pi's own definition byte-identical, so the system prompt and tool
- * schemas are unchanged; execution delegates to a per-cwd instance of pi's
+ * schemas are unchanged, with one exception: write carries Claude Code's
+ * description, short or long by the model's tier (write-description.ts,
+ * lib/tool-variants.ts), and is registered again when the form changes.
+ * Execution delegates to a per-cwd instance of pi's
  * real definition (they close over cwd, and enter_worktree moves the session
  * mid-run). Only the TUI renderers differ: a `●` call line, and the base
  * result component indented under a `⎿` elbow so upstream streaming,
@@ -29,7 +32,9 @@ import {
 	createWriteToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { perCwd } from "../lib/per-cwd.ts";
+import { type DescriptionForm, followDescriptionForm, registerVariantTool } from "../lib/tool-variants.ts";
 import { ccWrapBuiltinRenderers } from "../lib/tui-render.ts";
+import { writeDescription } from "./write-description.ts";
 
 // The concrete definitions are each strongly typed to their own schema; this
 // extension treats them uniformly, so the spec is deliberately loose. Every
@@ -41,6 +46,8 @@ interface BuiltinSpec {
 	create: (cwd: string) => BuiltinDefinition;
 	title: (args: Record<string, unknown> | undefined) => string | undefined;
 	keepBaseCall?: boolean;
+	/** A description in place of pi's, by the session's description form. */
+	description?: (form: DescriptionForm) => string;
 }
 
 const asSpecCreate = (create: (cwd: string) => unknown): BuiltinSpec["create"] =>
@@ -48,7 +55,7 @@ const asSpecCreate = (create: (cwd: string) => unknown): BuiltinSpec["create"] =
 
 const BUILTINS: BuiltinSpec[] = [
 	{ label: "Read", create: asSpecCreate(createReadToolDefinition), title: (a) => a?.path as string | undefined },
-	{ label: "Write", create: asSpecCreate(createWriteToolDefinition), title: (a) => a?.path as string | undefined },
+	{ label: "Write", create: asSpecCreate(createWriteToolDefinition), title: (a) => a?.path as string | undefined, description: writeDescription },
 	{
 		label: "Update",
 		create: asSpecCreate(createEditToolDefinition),
@@ -65,7 +72,7 @@ export default function toolStyleExtension(pi: ExtensionAPI) {
 		const base = spec.create(process.cwd());
 		const forCwd = perCwd(spec.create);
 
-		pi.registerTool({
+		const definition = {
 			name: base.name,
 			label: base.label,
 			description: base.description,
@@ -79,6 +86,12 @@ export default function toolStyleExtension(pi: ExtensionAPI) {
 			async execute(toolCallId, params, signal, onUpdate, ctx: ExtensionToolContext) {
 				return forCwd(ctx.cwd).execute(toolCallId, params as never, signal, onUpdate, ctx);
 			},
-		} as ToolDefinition);
+		} as ToolDefinition;
+		const describe = spec.description;
+		if (!describe) {
+			pi.registerTool(definition);
+			continue;
+		}
+		followDescriptionForm(pi, registerVariantTool<DescriptionForm>(pi, "short", (form) => ({ ...definition, description: describe(form) })));
 	}
 }

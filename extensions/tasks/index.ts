@@ -24,6 +24,15 @@ import { taskToolsEnabled } from "../lib/model-tier.ts";
 import { ccToolRenderers, linesComponent, safeThemeBold, safeThemePaint, strike } from "../lib/tui-render.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import {
+	TASK_CREATE_DESCRIPTION,
+	TASK_CREATE_PARAMS,
+	TASK_GET_DESCRIPTION,
+	TASK_GET_PARAMS,
+	TASK_LIST_DESCRIPTION,
+	TASK_UPDATE_DESCRIPTION,
+	TASK_UPDATE_PARAMS,
+} from "./descriptions.ts";
+import {
 	FINISHED_LIST_CLEAR_MS,
 	formatHiddenTaskWidget,
 	formatTaskDetails,
@@ -167,13 +176,12 @@ export default function tasksExtension(pi: ExtensionAPI) {
 		name: "task_create",
 		label: "Create Task",
 		...ccToolRenderers("Create Task"),
-		description:
-			"Add a task to the session's structured task list. Tasks are addressable by id and can carry owners, metadata, and dependencies — use task_update to change status or link tasks, task_list/task_get to read them. Create tasks for multi-step work (3+ steps) so progress is visible, and mark exactly one in_progress while working on it.",
+		description: TASK_CREATE_DESCRIPTION,
 		parameters: Type.Object({
-			subject: Type.String({ description: "A brief title for the task" }),
-			description: Type.String({ description: "What needs to be done" }),
-			activeForm: Type.Optional(Type.String({ description: 'Present continuous form shown while in_progress (e.g. "Running tests")' })),
-			metadata: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: "Arbitrary metadata to attach to the task" })),
+			subject: Type.String({ description: TASK_CREATE_PARAMS.subject }),
+			description: Type.String({ description: TASK_CREATE_PARAMS.description }),
+			activeForm: Type.Optional(Type.String({ description: TASK_CREATE_PARAMS.activeForm })),
+			metadata: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: TASK_CREATE_PARAMS.metadata })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			markUsed();
@@ -186,9 +194,9 @@ export default function tasksExtension(pi: ExtensionAPI) {
 		name: "task_get",
 		label: "Get Task",
 		...ccToolRenderers("Get Task"),
-		description: "Retrieve one task by id: full description, status, owner, and dependency links. Verify blockedBy is empty before starting work on it.",
+		description: TASK_GET_DESCRIPTION,
 		parameters: Type.Object({
-			taskId: Type.String({ description: "The id of the task to retrieve" }),
+			taskId: Type.String({ description: TASK_GET_PARAMS.taskId }),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const task = store.get(params.taskId);
@@ -201,7 +209,7 @@ export default function tasksExtension(pi: ExtensionAPI) {
 		name: "task_list",
 		label: "List Tasks",
 		...ccToolRenderers("List Tasks", { maxCollapsedLines: 12 }),
-		description: "List all tasks: id, subject, status, owner, and open blockers. Prefer working on unblocked pending tasks in id order.",
+		description: TASK_LIST_DESCRIPTION,
 		parameters: Type.Object({}),
 		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
 			return result(formatTaskList(store), ctx);
@@ -212,18 +220,17 @@ export default function tasksExtension(pi: ExtensionAPI) {
 		name: "task_update",
 		label: "Update Task",
 		...ccToolRenderers("Update Task"),
-		description:
-			"Update a task: status (pending/in_progress/completed, or deleted to remove it), subject, description, owner, metadata (merge; null deletes a key), and dependencies via addBlocks/addBlockedBy. Mark a task in_progress before starting it and completed only when fully done.",
+		description: TASK_UPDATE_DESCRIPTION,
 		parameters: Type.Object({
-			taskId: Type.String({ description: "The id of the task to update" }),
-			status: Type.Optional(StringEnum(["pending", "in_progress", "completed", "deleted"] as const)),
-			subject: Type.Optional(Type.String()),
-			description: Type.Optional(Type.String()),
-			activeForm: Type.Optional(Type.String()),
-			owner: Type.Optional(Type.String({ description: "New owner for the task" })),
-			metadata: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: "Metadata keys to merge; a null value deletes the key" })),
-			addBlocks: Type.Optional(Type.Array(Type.String(), { description: "Task ids that cannot start until this one completes" })),
-			addBlockedBy: Type.Optional(Type.Array(Type.String(), { description: "Task ids that must complete before this one" })),
+			taskId: Type.String({ description: TASK_UPDATE_PARAMS.taskId }),
+			subject: Type.Optional(Type.String({ description: TASK_UPDATE_PARAMS.subject })),
+			description: Type.Optional(Type.String({ description: TASK_UPDATE_PARAMS.description })),
+			activeForm: Type.Optional(Type.String({ description: TASK_UPDATE_PARAMS.activeForm })),
+			status: Type.Optional(StringEnum(["pending", "in_progress", "completed", "deleted"] as const, { description: TASK_UPDATE_PARAMS.status })),
+			addBlocks: Type.Optional(Type.Array(Type.String(), { description: TASK_UPDATE_PARAMS.addBlocks })),
+			addBlockedBy: Type.Optional(Type.Array(Type.String(), { description: TASK_UPDATE_PARAMS.addBlockedBy })),
+			owner: Type.Optional(Type.String({ description: TASK_UPDATE_PARAMS.owner })),
+			metadata: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: TASK_UPDATE_PARAMS.metadata })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const { taskId, ...input } = params;

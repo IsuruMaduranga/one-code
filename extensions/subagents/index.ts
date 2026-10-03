@@ -55,6 +55,8 @@ import { captureMatches, LAST_REQUEST_CHANNEL, type RequestCapture } from "../li
 import { BTW_FORK_CHANNEL, btwForkDescription, btwForkName, btwForkRecord, btwForkTaskId, type BtwForkRequest, type BtwForkResult } from "../lib/btw-fork.ts";
 import { watchMcpTools } from "../lib/mcp-share.ts";
 import { resolveModelTier } from "../lib/model-tier.ts";
+import { type DescriptionForm, followDescriptionForm, registerVariantTool } from "../lib/tool-variants.ts";
+import { agentDescription } from "./agent-description.ts";
 import { pendingClaimReminder } from "./pending-claim.ts";
 import { watchPermissionBridge } from "../permissions/subagent-gate.ts";
 import { watchHookBridge } from "../hooks/subagent-bridge.ts";
@@ -1924,32 +1926,16 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		);
 	});
 
-	pi.registerTool({
+	// Claude Code's Agent text, short or long by the model's tier
+	// (agent-description.ts, lib/tool-variants.ts); registered again when the
+	// form changes.
+	const agentTool = defineTool({
 		name: "Agent",
 		label: "Agent",
 		...ccToolRenderers<{ subagent_type?: string; task?: string; prompt?: string; description?: string; action?: string }>("Agent", {
 			title: (a) => (a ? [a.subagent_type, a.description ?? a.task ?? a.prompt ?? a.action].filter(Boolean).join(": ") || undefined : undefined),
 		}),
-		description:
-			'Delegate a task to a specialist agent that runs in its own context window and reports back. The available agents are listed in the "Available agents" system reminder.\n' +
-			"\n" +
-			"## When to use\n" +
-			"- Broad codebase searches or exploration where you need the conclusion, not the file dumps.\n" +
-			"- Self-contained research, reviews, or verification whose intermediate output you won't need again.\n" +
-			"- Independent questions that can run at once — issue multiple Agent tool calls in one message to run them in parallel.\n" +
-			"\n" +
-			"For a single-fact lookup you already know how to run, search directly instead. Once you've delegated work, don't also run it yourself — wait for the result.\n" +
-			"\n" +
-			"## How agents run\n" +
-			"Agents run in the background: the call returns immediately with a task id, and you'll be notified when one completes — the agent's report arrives as a task notification while you keep working, or on its own if you are idle. Never fabricate or predict a pending agent's results — the notification is never something you write yourself; if the user asks before it arrives, say it's still running. Call task_output only if your next step cannot proceed without the result (block=true waits); stop a run with task_stop. Both are deferred — load them with tool_search first. (Exception: in a one-shot print session the call blocks and returns the report directly — no notification follows.)\n" +
-			"\n" +
-			"## Usage notes\n" +
-			"- Give a complete, self-contained task: the agent cannot ask follow-up questions.\n" +
-			"- If an agent's description says it should be used proactively, try your best to use it without the user having to ask first.\n" +
-			'- `subagent_type: "fork"` clones this conversation instead of starting fresh; a fork always runs on this conversation\'s model and reasoning settings. If you are the fork, execute your assigned task directly — don\'t re-delegate.\n' +
-			'- `isolation: "worktree"` gives the agent its own git worktree when it will edit files.\n' +
-			"- Each run gets a name — SendMessage reaches it live while it runs and continues it after it finishes. `action: \"list\"` re-prints the agent catalog.\n" +
-			"- The agent's final report is not shown to the user, so relay what matters.",
+		description: agentDescription("short"),
 		promptSnippet: "Delegate scoped work to a specialist agent in its own context",
 		parameters: SubagentParams,
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
@@ -2289,6 +2275,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			};
 		},
 	});
+	const setAgentForm = registerVariantTool<DescriptionForm>(pi, "short", (form) => ({ ...agentTool, description: agentDescription(form) }));
+	followDescriptionForm(pi, setAgentForm);
 
 	const SendMessageParams = Type.Object({
 		to: Type.String({ description: "Agent name (or task id) from a previous Agent run" }),
@@ -2603,7 +2591,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			title: (a) => (a?.to ? `to ${a.to}${a.summary ? `: ${a.summary}` : ""}` : undefined),
 		}),
 		description:
-			'Send a message to a previously spawned agent, addressed by the name from its spawn result (or its task id). To discover the names of running or finished agents, use list_agents (deferred — load it with tool_search select:list_agents). A resident background agent is reached live (mid-turn the message is steered into its current work; when idle it starts a new turn); a finished agent is resumed from its session with full context. Replies arrive as task notifications. (A subagent reporting back to the main conversation uses its own SendMessage with to: "main".)',
+			'Send a message to a previously spawned agent, addressed by the name from its spawn result (or its task id). To discover the names of running or finished agents, use list_agents. A resident background agent is reached live (mid-turn the message is steered into its current work; when idle it starts a new turn); a finished agent is resumed from its session with full context. Replies arrive as task notifications. (A subagent reporting back to the main conversation uses its own SendMessage with to: "main".)',
 		parameters: SendMessageParams,
 		execute: (toolCallId, params, signal, _onUpdate, ctx) => sendMessage(toolCallId, params, signal, ctx),
 	});
@@ -2765,7 +2753,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			};
 		},
 	});
-	pi.events.emit(DEFER_CHANNEL, { name: "list_agents", keywords: ["agents", "list", "running", "spawned", "subagents", "who"] });
+	// Eager, as Claude Code's ListAgents is: not emitted on the deferral channel.
 
 	registerLocalCommand(pi, "agents", {
 		description: "Open the live subagent panel, or list available agents",

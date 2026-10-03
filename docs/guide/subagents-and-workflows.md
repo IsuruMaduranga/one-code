@@ -171,7 +171,13 @@ from the worktree's `HEAD`.
 For a big job (a broad audit, a migration, a review worth double-checking),
 include the word **`ultracode`** in your message. The model writes a short
 JavaScript script that fans the work out across many agents in parallel,
-then runs it with the `workflow` tool.
+then runs it with the `workflow` tool. Before it writes one, it loads the
+bundled `workflow-authoring` skill, the reference for the script API.
+
+By default the model keeps a workflow under 10 agents unless you ask for
+more. Change that with `workflowSizeGuideline`, or turn workflows off with
+`disableWorkflows`; both go in One Code's settings
+([Configuration](configuration.md#settings-reference)).
 
 The keyword arms the turn it appears in. That includes a message you
 queue while the model is still working: it arms once the model gets to

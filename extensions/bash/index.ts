@@ -11,7 +11,7 @@
  * background registry, a steered completion notification), and this file only
  * supplies what is bash's: pi's definition, the bash the session resolved
  * (lib/shell-spawn.ts — Git Bash on Windows, `CLAUDE_CODE_GIT_BASH_PATH`
- * honoured), the CC-shaped description and the bash guards. The permission
+ * honoured), Claude Code's description (description.ts) and the bash guards. The permission
  * gate and auto-mode classifier run before execute like any bash call — a
  * background command is NOT auto-allowed, and the gate fires before anything
  * detaches.
@@ -25,20 +25,16 @@ import { childProcessEnv, LAUNCHER_ENV_VAR } from "../lib/app-launch.mjs";
 import { perCwd } from "../lib/per-cwd.ts";
 import { bashSpawn, piShellEnv, withChildProcessEnv } from "../lib/shell-spawn.ts";
 import { registerShellTool } from "../lib/shell-tool.ts";
+import { type DescriptionForm, followDescriptionForm } from "../lib/tool-variants.ts";
+import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../permissions/modes.ts";
+import { BASH_PARAMS, bashDescription } from "./description.ts";
 import { bashGuardReason } from "./guards.ts";
 
 const BashParams = Type.Object({
-	command: Type.String({ description: "Bash command to execute" }),
-	timeout: Type.Optional(Type.Number({ description: "Optional timeout in milliseconds (max 600000)" })),
-	run_in_background: Type.Optional(
-		Type.Boolean({
-			description:
-				"Run detached and return a task id immediately instead of waiting. Completion arrives as a task notification; inspect with task_output, stop with task_stop. Use this instead of nohup/'&' — those leave an unmanaged orphan process",
-		}),
-	),
-	description: Type.Optional(
-		Type.String({ description: "5-10 word description of what the command does (shown in notifications)" }),
-	),
+	command: Type.String({ description: BASH_PARAMS.command }),
+	timeout: Type.Optional(Type.Number({ description: BASH_PARAMS.timeout })),
+	description: Type.Optional(Type.String({ description: BASH_PARAMS.description })),
+	run_in_background: Type.Optional(Type.Boolean({ description: BASH_PARAMS.run_in_background })),
 });
 
 export default function bashExtension(pi: ExtensionAPI) {
@@ -54,34 +50,38 @@ export default function bashExtension(pi: ExtensionAPI) {
 		else process.stderr.write(`${bash.warning}\n`);
 	});
 
-	// pi's definition supplies the description and TUI renderers; the executor
-	// is re-created per working directory because it closes over cwd (worktree
-	// switches change ctx.cwd mid-session). The same bash drives pi's foreground
+	// pi's definition supplies the TUI renderers; the executor is re-created
+	// per working directory because it closes over cwd (worktree switches
+	// change ctx.cwd mid-session). The same bash drives pi's foreground
 	// executor, so the override applies there too.
 	// Every command the model runs gets the user's own environment back under
 	// the bundled app (lib/app-launch.mjs), so a `pi` it starts is the user's pi.
 	const spawnHook = (context: BashSpawnContext): BashSpawnContext => ({ ...context, env: childProcessEnv(context.env) });
 	const base = createBashToolDefinition(process.cwd(), { shellPath, spawnHook });
-	// pi's base sentence is "Optionally provide a timeout in seconds." — but the
-	// `timeout` parameter and the execute path both use milliseconds (Claude
-	// Code's Bash unit; the executor divides by 1000). The two must not
-	// contradict, or a model that trusts the description sends `timeout: 120`
-	// and gets a 120 ms deadline (TOOL-FIDELITY-REVIEW-2026-09-07 H3). Swap in
-	// CC's Bash sentence.
-	const baseDescription = base.description.replace(
-		"Optionally provide a timeout in seconds.",
-		"`timeout` is in milliseconds: default 120000, max 600000.",
-	);
 
-	registerShellTool(pi, {
+	// Claude Code's Bash text (description.ts): its form follows the model's
+	// tier, and the short form's "avoid cat/head/…" bullet is left out in auto
+	// mode. Permissions loads first and announces the mode at session start, so
+	// the first request already carries the right text.
+	let form: DescriptionForm = "short";
+	let autoMode = false;
+	const setDescription = registerShellTool(pi, {
 		name: "bash",
 		ccLabel: "Bash",
-		description: `${baseDescription} Pass run_in_background: true for long-running commands (builds, servers, watches): it returns a task id immediately so you can keep working, completion arrives as a task notification, and the output is retrievable with task_output / stoppable with task_stop (both deferred — load them with tool_search; in a one-shot print/json session the call runs to completion within the foreground timeout and returns the output directly). Foreground \`sleep\` is blocked; to wait on a condition use the monitor tool (deferred — load it with tool_search select:monitor) with an until-loop.`,
+		description: bashDescription(form, autoMode),
 		parameters: BashParams,
 		base,
 		foreground: perCwd((cwd: string) => createBashToolDefinition(cwd, { shellPath, spawnHook })),
 		guard: bashGuardReason,
 		backgroundShell: () => bash.spawn,
+	});
+	followDescriptionForm(pi, (next) => {
+		form = next;
+		setDescription(bashDescription(form, autoMode));
+	});
+	pi.events.on(PERMISSION_STATUS_CHANNEL, (data) => {
+		autoMode = (data as PermissionStatus).mode === "auto";
+		setDescription(bashDescription(form, autoMode));
 	});
 
 	// The user's own `!` commands, under the bundled app only: pi runs them with
