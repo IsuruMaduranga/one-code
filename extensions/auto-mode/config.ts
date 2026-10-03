@@ -46,7 +46,7 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { claudeUserSettingsPath } from "../lib/claude-settings.ts";
+import { claudeUserSettingsPath, managedSettingsPaths } from "../lib/claude-settings.ts";
 import { oneCodeSettingsPath, readSettingsForWrite, writeSettings } from "../lib/one-code-settings.ts";
 import { DEFAULT_ENVIRONMENT, slotName } from "./defaults.ts";
 
@@ -91,12 +91,7 @@ interface AutoModeSettingsFile {
 
 const DEFAULTS_TOKEN = "$defaults";
 
-/** Managed-settings locations, highest authority, matching Claude Code's paths. */
-export function managedSettingsPaths(): string[] {
-	if (process.platform === "darwin") return ["/Library/Application Support/ClaudeCode/managed-settings.json"];
-	if (process.platform === "win32") return ["C:\\ProgramData\\ClaudeCode\\managed-settings.json"];
-	return ["/etc/claude-code/managed-settings.json"];
-}
+export { managedSettingsPaths };
 
 /**
  * The files `autoMode` is read from, lowest precedence first. One Code's own

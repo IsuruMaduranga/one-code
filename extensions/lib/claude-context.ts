@@ -33,6 +33,8 @@
 
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
+import { type InstructionFiles, readInstructionFiles } from "./claude-settings.ts";
+import { type ConfigMode, claudeSourcesOn, configMode } from "./config-mode.ts";
 import { tryReadFile } from "./plugins.ts";
 import { absoluteFrom, expandTilde } from "./paths.ts";
 
@@ -266,55 +268,80 @@ export function ancestorDirs(cwd: string): string[] {
 }
 
 /**
- * The ordered CLAUDE.md-family paths that exist, WITHOUT reading their contents:
- * global `~/.claude/CLAUDE.md` first, then project `CLAUDE.md`/`CLAUDE.local.md`
- * from the farthest ancestor down to cwd (`CLAUDE.md` before `CLAUDE.local.md`
- * within a directory). `discoverContextFiles` reads content on top of this;
- * callers that only need paths/descriptors (e.g. `/memory`'s picker) use it
- * directly to avoid loading files they will discard.
+ * Which instruction files load: Claude Code's `instructionFiles` values
+ * (findings §57) in Claude-compatible mode, or `agents-md` in independent mode
+ * (lib/config-mode.ts), where no CLAUDE.md-family file is read and every
+ * directory's `AGENTS.md` loads.
+ */
+export type InstructionRule = InstructionFiles | "agents-md";
+
+/** The rule One Code runs under: independent mode's own, else Claude Code's `instructionFiles`. */
+export function instructionRule(home: string, mode: ConfigMode = configMode()): InstructionRule {
+	return claudeSourcesOn(mode) ? readInstructionFiles(home) : "agents-md";
+}
+
+/**
+ * The ordered instruction-file paths that exist, WITHOUT reading their
+ * contents: global `~/.claude/CLAUDE.md` first, then per directory from the
+ * farthest ancestor down to cwd `CLAUDE.md`, the AGENTS.md files at its
+ * position, and `CLAUDE.local.md`. `discoverContextFiles` reads content on top
+ * of this; callers that only need paths/descriptors (e.g. `/memory`'s picker)
+ * use it directly to avoid loading files they will discard.
+ *
+ * `rule` (default `claude-md`) decides the AGENTS.md files, as Claude Code's
+ * `instructionFiles` does (findings §57): `claude-md-or-agents-md` loads every
+ * ancestor `AGENTS.md` and `.claude/AGENTS.md` only when the project has no
+ * `CLAUDE.md` or `CLAUDE.local.md` anywhere on that path (a per-project
+ * decision, so `# claudeMd` stays byte-exact with CC whenever CLAUDE.md is
+ * present); `claude-md-and-agents-md` loads them beside CLAUDE.md;
+ * `managed-only` drops the user's and the project's files (One Code has no
+ * managed CLAUDE.md); `agents-md` reads only `AGENTS.md`, with no Claude Code
+ * file at all.
  *
  * When `homeOneCodeDir` is given, One Code's own `ONECODE.md` files join the
  * list: the global one from `~/.onecode` right after the global CLAUDE.md, and
- * each directory's after its CLAUDE.md/CLAUDE.local.md. The `/memory` picker passes
- * it (so ONECODE.md is an editable target); the model-facing `# claudeMd` block
- * does NOT — there ONECODE.md rides its own `# oneCodeMd` block via
- * `discoverOneCodeFiles` instead, so `# claudeMd` stays byte-exact with CC.
- *
- * When `agentsFallback` is set, a directory with no `CLAUDE.md` falls back to its
- * `AGENTS.md` (CLAUDE.md > AGENTS.md — the first-match Codex/opencode do, but
- * CLAUDE-preferred for our CC-compat audience). A directory that has a CLAUDE.md
- * ignores its AGENTS.md, so `# claudeMd` stays byte-exact with CC whenever
- * CLAUDE.md is present.
+ * each directory's last. The `/memory` picker passes it (so ONECODE.md is an
+ * editable target); the model-facing `# claudeMd` block does NOT — there
+ * ONECODE.md rides its own `# oneCodeMd` block via `discoverOneCodeFiles`
+ * instead, so `# claudeMd` stays byte-exact with CC.
  */
 export function discoverContextFilePaths(opts: {
 	cwd: string;
 	homeClaudeDir: string;
 	homeOneCodeDir?: string;
-	agentsFallback?: boolean;
+	rule?: InstructionRule;
 }): ContextFilePath[] {
 	const paths: ContextFilePath[] = [];
 	const seen = new Set<string>();
 	const includeOneCode = opts.homeOneCodeDir !== undefined;
+	const rule = opts.rule ?? "claude-md";
+	const claudeFiles = rule === "claude-md" || rule === "claude-md-or-agents-md" || rule === "claude-md-and-agents-md";
+	const dirs = ancestorDirs(opts.cwd);
+	const projectHasClaude = () => dirs.some((d) => isPresentFile(join(d, "CLAUDE.md")) || isPresentFile(join(d, "CLAUDE.local.md")));
+	const agentsFiles =
+		rule === "agents-md" || rule === "claude-md-and-agents-md" || (rule === "claude-md-or-agents-md" && !projectHasClaude());
 
-	/** Adds the path if present; returns whether it was added. */
-	const push = (path: string, descriptor: string): boolean => {
-		if (seen.has(path) || !isPresentFile(path)) return false;
+	/** Adds the path if present. */
+	const push = (path: string, descriptor: string): void => {
+		if (seen.has(path) || !isPresentFile(path)) return;
 		paths.push({ path, descriptor });
 		seen.add(path);
-		return true;
 	};
 
-	push(join(opts.homeClaudeDir, "CLAUDE.md"), GLOBAL_DESCRIPTOR);
+	if (claudeFiles) push(join(opts.homeClaudeDir, "CLAUDE.md"), GLOBAL_DESCRIPTOR);
 	if (includeOneCode && opts.homeOneCodeDir) {
 		const globalOneCode = firstOneCodeFile(opts.homeOneCodeDir);
 		if (globalOneCode) push(globalOneCode, ONECODE_GLOBAL_DESCRIPTOR);
 	}
 
-	for (const d of ancestorDirs(opts.cwd)) {
-		const hasClaude = push(join(d, "CLAUDE.md"), PROJECT_DESCRIPTOR);
-		// AGENTS.md stands in for a missing CLAUDE.md in this directory.
-		if (!hasClaude && opts.agentsFallback) push(join(d, "AGENTS.md"), AGENTS_DESCRIPTOR);
-		push(join(d, "CLAUDE.local.md"), LOCAL_DESCRIPTOR);
+	for (const d of dirs) {
+		if (claudeFiles) push(join(d, "CLAUDE.md"), PROJECT_DESCRIPTOR);
+		if (agentsFiles) {
+			push(join(d, "AGENTS.md"), AGENTS_DESCRIPTOR);
+			// `.claude/AGENTS.md` is a Claude Code location; independent mode reads none.
+			if (rule !== "agents-md") push(join(d, ".claude", "AGENTS.md"), AGENTS_DESCRIPTOR);
+		}
+		if (claudeFiles) push(join(d, "CLAUDE.local.md"), LOCAL_DESCRIPTOR);
 		if (includeOneCode) {
 			const oneCode = firstOneCodeFile(d);
 			if (oneCode) push(oneCode, ONECODE_DESCRIPTOR);
@@ -328,16 +355,27 @@ export function discoverContextFiles(opts: {
 	cwd: string;
 	homeClaudeDir: string;
 	homeOneCodeDir?: string;
-	agentsFallback?: boolean;
+	rule?: InstructionRule;
 	/** Home directory for resolving `~` in `@path` imports. */
 	home: string;
 }): ContextFile[] {
 	const files: ContextFile[] = [];
+	// Under claude-md-and-agents-md an AGENTS.md that a loaded file already
+	// imports, or whose content one already carries, is not loaded twice (CC).
+	const dedupe = opts.rule === "claude-md-and-agents-md";
+	const imported = new Set<string>();
+	const contents = new Set<string>();
 	for (const { path, descriptor } of discoverContextFilePaths(opts)) {
 		// Re-check the read: a file present at enumeration but unreadable now is
 		// omitted, exactly as before (the block must never carry empty entries).
 		const content = readFileIfPresent(path);
 		if (content === null) continue;
+		if (dedupe) {
+			const trimmed = content.trim();
+			if (descriptor === AGENTS_DESCRIPTOR && (imported.has(path) || (trimmed !== "" && contents.has(trimmed)))) continue;
+			for (const p of collectImportedPaths(content, dirname(path), { home: opts.home })) imported.add(p);
+			contents.add(trimmed);
+		}
 		files.push({ path, content: expandImports(content, dirname(path), { home: opts.home }), descriptor });
 	}
 	return files;

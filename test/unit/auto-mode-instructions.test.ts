@@ -28,6 +28,16 @@ describe("loadProjectInstructions", () => {
 		expect(loadProjectInstructions(repo, home)).toBeUndefined();
 	});
 
+	it("reads only AGENTS.md in independent mode", () => {
+		writeFileSync(join(repo, "CLAUDE.md"), "claude rule");
+		writeFileSync(join(repo, "AGENTS.md"), "agents rule");
+		writeFileSync(join(home, ".claude", "CLAUDE.md"), "global rule");
+		const text = loadProjectInstructions(repo, home, "independent") ?? "";
+		expect(text).toContain("agents rule");
+		expect(text).not.toContain("claude rule");
+		expect(text).not.toContain("global rule");
+	});
+
 	it("reads CLAUDE.md from the working directory", () => {
 		writeFileSync(join(repo, "CLAUDE.md"), "Never force push.");
 		const loaded = loadProjectInstructions(repo, home);

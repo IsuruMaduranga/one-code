@@ -20,7 +20,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { createReadToolDefinition, type ExtensionAPI, type ExtensionContext, type SessionCompactEvent } from "@earendil-works/pi-coding-agent";
 import { pathArgument } from "../auto-mode/paths.ts";
-import { collectImportedPaths, discoverContextFilePaths } from "../lib/claude-context.ts";
+import { collectImportedPaths, discoverContextFilePaths, instructionRule } from "../lib/claude-context.ts";
 import { inContextEntries, latestCompaction } from "../lib/compaction-boundary.ts";
 import { projectMemoryDir } from "../lib/memory.ts";
 import { claudeConfigDir, comparablePath, isPathAtOrUnder, tryRealpath } from "../lib/paths.ts";
@@ -100,7 +100,7 @@ function pathOf(input: unknown, cwd: string): string | undefined {
  */
 function inContextFiles(ctx: ExtensionContext, branch: readonly { type: string; customType?: string; data?: unknown }[], kept: string[]): Set<string> {
 	const home = homedir();
-	const stack = discoverContextFilePaths({ cwd: ctx.cwd, homeClaudeDir: claudeConfigDir(), agentsFallback: true }).map((file) => file.path);
+	const stack = discoverContextFilePaths({ cwd: ctx.cwd, homeClaudeDir: claudeConfigDir(), rule: instructionRule(home) }).map((file) => file.path);
 	const imported = stack.flatMap((path) => {
 		const content = readIfPresent(path);
 		return content === undefined ? [] : [...collectImportedPaths(content, dirname(path), { home })];

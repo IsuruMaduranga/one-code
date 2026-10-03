@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
+import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	collectStartupSections,
@@ -22,34 +23,56 @@ afterEach(() => {
 });
 
 describe("contextFileNames", () => {
-	it("collects CLAUDE.md and AGENTS.md from cwd up to the git root", () => {
+	it("collects the files from cwd up to the git root, nearest first", () => {
+		const root = scratch();
+		mkdirSync(join(root, ".git"));
+		mkdirSync(join(root, "sub"));
+		writeFileSync(join(root, "CLAUDE.md"), "root");
+		writeFileSync(join(root, "sub", "CLAUDE.md"), "sub");
+		expect(contextFileNames(join(root, "sub"), scratch())).toEqual(["CLAUDE.md", join("..", "CLAUDE.md")]);
+	});
+
+	it("lists AGENTS.md only when the project has no CLAUDE.md (Claude Code's per-project rule)", () => {
 		const root = scratch();
 		mkdirSync(join(root, ".git"));
 		mkdirSync(join(root, "sub"));
 		writeFileSync(join(root, "CLAUDE.md"), "root");
 		writeFileSync(join(root, "sub", "AGENTS.md"), "sub");
-		expect(contextFileNames(join(root, "sub"))).toEqual(["AGENTS.md", join("..", "CLAUDE.md")]);
+		expect(contextFileNames(join(root, "sub"), scratch())).toEqual([join("..", "CLAUDE.md")]);
+		const bare = scratch();
+		mkdirSync(join(bare, ".git"));
+		writeFileSync(join(bare, "AGENTS.md"), "a");
+		expect(contextFileNames(bare, scratch())).toEqual(["AGENTS.md"]);
+	});
+
+	it("lists only AGENTS.md and ONECODE.md in independent mode", () => {
+		resetConfigModeForTest("independent");
+		const root = scratch();
+		writeFileSync(join(root, "CLAUDE.md"), "c");
+		writeFileSync(join(root, "AGENTS.md"), "a");
+		writeFileSync(join(root, "ONECODE.md"), "o");
+		expect(contextFileNames(root, scratch())).toEqual(["AGENTS.md", "ONECODE.md"]);
 	});
 
 	it("does not walk above cwd outside a git repo", () => {
 		const root = scratch();
 		writeFileSync(join(root, "CLAUDE.md"), "outside");
 		mkdirSync(join(root, "inner"));
-		expect(contextFileNames(join(root, "inner"))).toEqual([]);
+		expect(contextFileNames(join(root, "inner"), scratch())).toEqual([]);
 	});
 
 	it("lists AGENTS.md only as a fallback: CLAUDE.md in a directory hides its AGENTS.md", () => {
 		const root = scratch();
 		writeFileSync(join(root, "CLAUDE.md"), "c");
 		writeFileSync(join(root, "AGENTS.md"), "a");
-		expect(contextFileNames(root)).toEqual(["CLAUDE.md"]);
+		expect(contextFileNames(root, scratch())).toEqual(["CLAUDE.md"]);
 	});
 
 	it("lists ONECODE.md alongside the primary", () => {
 		const root = scratch();
 		writeFileSync(join(root, "CLAUDE.md"), "c");
 		writeFileSync(join(root, "ONECODE.md"), "o");
-		expect(contextFileNames(root)).toEqual(["CLAUDE.md", "ONECODE.md"]);
+		expect(contextFileNames(root, scratch())).toEqual(["CLAUDE.md", "ONECODE.md"]);
 	});
 });
 

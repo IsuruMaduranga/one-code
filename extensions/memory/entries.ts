@@ -24,6 +24,7 @@ import {
 	ONECODE_DESCRIPTOR,
 	ONECODE_GLOBAL_DESCRIPTOR,
 	PROJECT_DESCRIPTOR,
+	instructionRule,
 } from "../lib/claude-context.ts";
 import { forwardSlashes, isRelativeInside, tildify } from "../lib/paths.ts";
 import { tryReadFile } from "../lib/plugins.ts";
@@ -72,9 +73,8 @@ export function buildMemoryEntries(opts: {
 	memoryDir: string;
 }): MemoryEntry[] {
 	const { cwd, home, homeClaudeDir, homeOneCodeDir, memoryDir } = opts;
-	// agentsFallback so a directory's AGENTS.md (when it has no CLAUDE.md) is in the
-	// list, matching what the # claudeMd block sends.
-	const discovered = discoverContextFilePaths({ cwd, homeClaudeDir, homeOneCodeDir, agentsFallback: true });
+	// The same rule the # claudeMd block uses, so the list matches what it sends.
+	const discovered = discoverContextFilePaths({ cwd, homeClaudeDir, homeOneCodeDir, rule: instructionRule(home) });
 	const referenced = referencedImports(discovered, home);
 	// (descriptor, dir) → the discovered path, so per-dir lookups reuse the real
 	// on-disk casing discovery already resolved (no second stat/readdir here).

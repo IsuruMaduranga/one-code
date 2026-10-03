@@ -3,7 +3,9 @@
  *
  * Claude Code's classifier reads the same CLAUDE.md the agent does, so an
  * instruction like "never force push" steers both at once. This collects the
- * same files: cwd upward to the git root, plus the user's global file.
+ * same files: cwd upward to the git root, plus the user's global file. In
+ * independent mode (lib/config-mode.ts) only the AGENTS.md files: no Claude
+ * Code file is read there. Fewer files can only tighten less, never widen.
  *
  * These files are checked in, so they are untrusted input in a way the user's
  * own messages are not — the classifier prompt tells the model they may tighten
@@ -13,9 +15,11 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { type ConfigMode, claudeSourcesOn, configMode } from "../lib/config-mode.ts";
 import { claudeUserDir } from "../lib/paths.ts";
 
 const FILE_NAMES = ["CLAUDE.md", "CLAUDE.local.md", "AGENTS.md"];
+const INDEPENDENT_FILE_NAMES = ["AGENTS.md"];
 
 /** Per-file and total caps, so a large instruction file cannot crowd out rules. */
 const PER_FILE_LIMIT = 6_000;
@@ -47,7 +51,9 @@ function findGitRoot(from: string): string | undefined {
  * none. Each is labelled with its path so the classifier can tell project
  * convention from user-global preference.
  */
-export function loadProjectInstructions(cwd: string, home: string): string | undefined {
+export function loadProjectInstructions(cwd: string, home: string, mode: ConfigMode = configMode()): string | undefined {
+	const claudeFiles = claudeSourcesOn(mode);
+	const names = claudeFiles ? FILE_NAMES : INDEPENDENT_FILE_NAMES;
 	const stop = findGitRoot(cwd) ?? cwd;
 	const parts: string[] = [];
 	let total = 0;
@@ -63,13 +69,13 @@ export function loadProjectInstructions(cwd: string, home: string): string | und
 
 	let dir = cwd;
 	for (;;) {
-		for (const name of FILE_NAMES) add(join(dir, name));
+		for (const name of names) add(join(dir, name));
 		if (dir === stop) break;
 		const parent = dirname(dir);
 		if (parent === dir) break;
 		dir = parent;
 	}
-	add(join(claudeUserDir(home), "CLAUDE.md"));
+	if (claudeFiles) add(join(claudeUserDir(home), "CLAUDE.md"));
 
 	return parts.length > 0 ? parts.join("\n\n") : undefined;
 }

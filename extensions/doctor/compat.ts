@@ -24,7 +24,7 @@ import { loadPluginHooks } from "../hooks/plugin-hooks.ts";
 import { type HooksSource, loadHookSettings } from "../hooks/settings.ts";
 import { claudeJsonPath, claudeUserDir } from "../lib/paths.ts";
 import { claudeUserSettingsPath, settingsPaths } from "../lib/claude-settings.ts";
-import { discoverContextFilePaths } from "../lib/claude-context.ts";
+import { discoverContextFilePaths, instructionRule } from "../lib/claude-context.ts";
 import { CLAUDE_MD_CHAR_LIMIT, claudeMdLimitWarning, indexLimitStatus, projectMemoryDir } from "../lib/memory.ts";
 import { readDisabledMcpServers } from "../lib/mcp-overrides.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
@@ -310,7 +310,7 @@ export function collectCompat(input: CompatInput): CompatReport {
 		cwd,
 		homeClaudeDir: claudeDir,
 		homeOneCodeDir: join(home, ".onecode"),
-		agentsFallback: true,
+		rule: instructionRule(home),
 	}).map(({ path, descriptor }) => {
 		let chars = 0;
 		try {

@@ -14,9 +14,11 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join, relative } from "node:path";
+import os from "node:os";
+import { discoverContextFilePaths, GLOBAL_DESCRIPTOR, instructionRule, ONECODE_GLOBAL_DESCRIPTOR } from "../lib/claude-context.ts";
 import { findGitRoot } from "../lib/git.ts";
 import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
-import { claudeUserDir } from "../lib/paths.ts";
+import { claudeUserDir, isPathAtOrUnder, oneCodeStateDir } from "../lib/paths.ts";
 
 export interface StartupSection {
 	label: string;
@@ -25,34 +27,24 @@ export interface StartupSection {
 
 /**
  * The project context files One Code actually gathers, from cwd up to the git
- * root (or just cwd outside a repo), for the startup banner. Mirrors what the
- * blocks send: a directory's CLAUDE.md, or its AGENTS.md when it has no CLAUDE.md
- * (CLAUDE.md > AGENTS.md), plus CLAUDE.local.md and ONECODE.md when present — so
- * AGENTS.md is listed only when it's really in play, not whenever it exists.
+ * root (or just cwd outside a repo), nearest directory first, for the startup
+ * banner. The same discovery and rule the blocks use (lib/claude-context.ts),
+ * so an AGENTS.md is listed only when it is really in play.
  */
-export function contextFileNames(cwd: string): string[] {
+export function contextFileNames(cwd: string, home: string = os.homedir()): string[] {
 	const stop = findGitRoot(cwd) ?? cwd;
-	const found: string[] = [];
-	let dir = cwd;
-	while (true) {
-		const rel = (name: string) => relative(cwd, join(dir, name)) || name;
-		const present = (name: string) => existsSync(join(dir, name));
-		// CLAUDE.md is primary; AGENTS.md stands in only when there is no CLAUDE.md.
-		if (present("CLAUDE.md")) found.push(rel("CLAUDE.md"));
-		else if (present("AGENTS.md")) found.push(rel("AGENTS.md"));
-		if (present("CLAUDE.local.md")) found.push(rel("CLAUDE.local.md"));
-		for (const name of ["ONECODE.md", "onecode.md", "One Code.md"]) {
-			if (present(name)) {
-				found.push(rel(name));
-				break;
-			}
-		}
-		if (dir === stop) break;
-		const parent = dirname(dir);
-		if (parent === dir) break;
-		dir = parent;
-	}
-	return found;
+	const files = discoverContextFilePaths({
+		cwd,
+		homeClaudeDir: claudeUserDir(home),
+		homeOneCodeDir: oneCodeStateDir(process.env, home),
+		rule: instructionRule(home),
+	}).filter(({ path, descriptor }) => descriptor !== GLOBAL_DESCRIPTOR && descriptor !== ONECODE_GLOBAL_DESCRIPTOR && isPathAtOrUnder(path, stop));
+	// The directory a file belongs to: `.claude/AGENTS.md` counts as its parent's.
+	const owner = (path: string) => (basename(dirname(path)) === ".claude" ? dirname(dirname(path)) : dirname(path));
+	return files
+		.map(({ path }) => path)
+		.sort((a, b) => owner(b).length - owner(a).length)
+		.map((path) => relative(cwd, path) || basename(path));
 }
 
 /**
@@ -162,7 +154,7 @@ export function quietStartupEnabled(piSettingsPath: string): boolean {
 
 export function collectStartupSections(cwd: string, home: string, packageThemesDir: string, agentDir: string): StartupSection[] {
 	const sections: StartupSection[] = [
-		{ label: "context", items: contextFileNames(cwd) },
+		{ label: "context", items: contextFileNames(cwd, home) },
 		{ label: "skills", items: skillNames(cwd, home, agentDir) },
 		{ label: "workflows", items: workflowNames(cwd, home) },
 		{ label: "themes", items: themeNames(packageThemesDir) },
