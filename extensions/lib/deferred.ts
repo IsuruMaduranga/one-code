@@ -14,6 +14,7 @@ import { createHash } from "node:crypto";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { toolResultsOnBranch } from "./branch-restore.ts";
 import { parseClaudeVersion } from "./model-tier.ts";
+import { ADDENDUM_HEAD } from "./tool-additions.ts";
 import { normalizeToolName } from "../permissions/matcher.ts";
 
 export const DEFER_CHANNEL = "one-code:defer-tool";
@@ -96,10 +97,7 @@ export function deferredReminderText(tools: Array<Pick<SearchableTool, "name"> &
  * this rides the tail instead, so the cached prefix holds.
  */
 export function deferredAddendumText(added: readonly string[]): string {
-	return [
-		"Additional deferred tools became available via tool_search since this conversation started (they registered after the first request). Same rules: load with tool_search \"select:<name>\" before calling.",
-		...added,
-	].join("\n");
+	return [ADDENDUM_HEAD, ...added].join("\n");
 }
 
 /**
@@ -189,6 +187,9 @@ function withBreakpointOnLast<T extends Record<string, unknown>>(items: T[], cac
  *   ordinary result content). Demotion happens only when that result is on the
  *   wire and precedes every `tool_use` of the tool; otherwise the tool stays
  *   eager (one accepted cache miss, never a request Anthropic rejects).
+ * - A tool the request adds mid-session by `tool_addition` (`additions`,
+ *   lib/tool-additions.ts) is demoted the same way: its addition block
+ *   references it, so it needs no `tool_search` result.
  * - pi's own deferred entries that are not registry tools (its
  *   `__pi_deferred_placeholder__`) stay in place.
  *
@@ -202,6 +203,7 @@ export function stabilizeDeferredTools(
 	tools: readonly DeferrableToolInfo[],
 	isDeferred: (name: string) => boolean,
 	loads: ToolSearchLoads = new Map(),
+	additions: ReadonlySet<string> = new Set(),
 ): Record<string, unknown> | undefined {
 	const existing = payload.tools;
 	if (!Array.isArray(existing) || existing.length === 0) return undefined;
@@ -254,6 +256,8 @@ export function stabilizeDeferredTools(
 			referencesAt.set(callId, [...names].sort((a, b) => order.indexOf(a) - order.indexOf(b)));
 		}
 	}
+
+	for (const tool of eager) if (additions.has(tool.name) && isDeferred(tool.name)) demoted.add(tool.name);
 
 	// pi puts the tools breakpoint on the last eager tool; if that one is demoted
 	// the breakpoint moves to the new last one, otherwise nothing moves.

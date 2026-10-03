@@ -48,7 +48,8 @@ import {
 	WITHHOLD_CHANNEL,
 	withheldMissReminderText,
 } from "../lib/deferred.ts";
-import { looksLikeAnthropicRequest } from "../lib/anthropic-payload.ts";
+import { looksLikeAnthropicRequest, withBetas } from "../lib/anthropic-payload.ts";
+import { addendumNamesOnBranch, supportsToolAdditions, TOOL_ADDITION_BETAS, withToolAdditions } from "../lib/tool-additions.ts";
 import { MCP_TOOLS_CHANNEL, type McpToolsPayload } from "../lib/mcp-share.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
@@ -88,6 +89,8 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	const alive = sessionAlive(pi);
 	/** Names the model has been told about: the frozen listing plus every addendum. */
 	const announced = new Set<string>();
+	/** The session's model as last seen, for an announcement made outside any hook. */
+	let latestModel: { provider?: string; api?: string; compat?: unknown } | undefined;
 
 	const searchableTools = () =>
 		pi
@@ -115,6 +118,12 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 			// Unkeyed on purpose: a keyed next-turn reminder replaces its
 			// predecessor, and an addendum replaced before delivery would lose names.
 			pi.events.emit(REMINDER_CHANNEL, { text: deferredAddendumText(plan.added) });
+			// Where the request carries it as Claude Code's tool_addition, the model
+			// calls the tool directly, so pi's dispatcher must already accept it.
+			if (supportsToolAdditions(latestModel)) {
+				for (const name of plan.added) loadedBefore.add(name);
+				pi.setActiveTools([...new Set([...pi.getActiveTools(), ...plan.added])]);
+			}
 		}
 		applyAnnouncement(announced, plan);
 	};
@@ -178,13 +187,22 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	// openai and openai-codex) a loaded tool leaves `tools` for pi-ai's own
 	// load item at the tool_search result instead (stabilizeResponsesToolLoads).
 	pi.on("before_provider_request", (event, ctx) => {
+		latestModel = ctx.model;
 		const toolLoadCompat = responsesToolLoadCompat(ctx.model as ResponsesToolLoadModel | undefined);
 		if (toolLoadCompat) {
 			return stabilizeResponsesToolLoads(event.payload as Record<string, unknown>, (name) => deferredRegistry.has(name), loads, toolLoadCompat);
 		}
 		if (!supportsToolReferences(ctx.model as { provider?: string; id?: string } | undefined)) return undefined;
 		if (!looksLikeAnthropicRequest(event.payload)) return undefined;
-		return stabilizeDeferredTools(event.payload as Record<string, unknown>, pi.getAllTools(), (name) => deferredRegistry.has(name), loads);
+		const isDeferred = (name: string) => deferredRegistry.has(name);
+		// A tool that arrived mid-session goes out as Claude Code's tool_addition
+		// where the model takes one (lib/tool-additions.ts), declared deferred.
+		const lifted = supportsToolAdditions(ctx.model) ? withToolAdditions(event.payload as Record<string, unknown>) : undefined;
+		const payload = lifted?.payload ?? (event.payload as Record<string, unknown>);
+		const stable = stabilizeDeferredTools(payload, pi.getAllTools(), isDeferred, loads, new Set(lifted?.names ?? []));
+		// Renamed (OAuth) tools: leave the request alone, additions included.
+		if (!stable) return undefined;
+		return lifted ? withBetas(stable, TOOL_ADDITION_BETAS) : stable;
 	});
 
 
@@ -236,8 +254,12 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		// new_session emits session_start twice, findings §3); deferAll below
 		// announces the fresh one.
 		clearAnnounce();
-		loads = toolSearchLoads(ctx?.sessionManager?.getBranch?.() ?? []);
+		latestModel = ctx?.model;
+		const branch = ctx?.sessionManager?.getBranch?.() ?? [];
+		loads = toolSearchLoads(branch);
 		loadedBefore = new Set([...loads.values()].flat());
+		// Tools added mid-session by tool_addition stay callable after a resume.
+		if (supportsToolAdditions(latestModel)) for (const name of addendumNamesOnBranch(branch)) loadedBefore.add(name);
 		// A new session (/clear, or a resume in a new process) has no cached prefix
 		// yet: its first request gets a freshly written listing.
 		requestSent = false;
