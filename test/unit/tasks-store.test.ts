@@ -20,13 +20,28 @@ describe("TaskStore", () => {
 		expect(updated.metadata).toEqual({ keep: 1, added: true });
 	});
 
+	it("names the fields an update changed, in Claude Code's order, and only those", () => {
+		const store = new TaskStore();
+		const a = store.create({ subject: "A", description: "d" });
+		store.create({ subject: "B", description: "" });
+		expect(store.update(a.id, { subject: "A", description: "new", status: "in_progress", owner: "me", metadata: { k: 1 }, addBlocks: ["2"] }).updatedFields).toEqual([
+			"description",
+			"owner",
+			"metadata",
+			"status",
+			"blocks",
+		]);
+		// The same values again change nothing; a known link is not new.
+		expect(store.update(a.id, { status: "in_progress", owner: "me", addBlocks: ["2"] }).updatedFields).toEqual([]);
+	});
+
 	it("accepts an id written with a leading # (#3 is task 3), in dependency lists too", () => {
 		const store = new TaskStore();
 		const a = store.create({ subject: "A", description: "" });
 		const b = store.create({ subject: "B", description: "" });
 		expect(store.get("#1")).toBe(a);
 		const outcome = store.update("#2", { status: "in_progress", addBlockedBy: ["#1"] });
-		expect(outcome).toEqual({ task: b });
+		expect(outcome).toEqual({ task: b, updatedFields: ["status", "blockedBy"] });
 		expect(b.blockedBy).toEqual(["1"]);
 		expect(a.blocks).toEqual(["2"]);
 		expect(store.update("#1", { addBlocks: ["#1"] }).error).toBe("Task #1 cannot block or be blocked by itself");

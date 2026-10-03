@@ -27,7 +27,6 @@ import {
 	FINISHED_LIST_CLEAR_MS,
 	formatHiddenTaskWidget,
 	formatTaskDetails,
-	formatTaskLine,
 	formatTaskList,
 	formatTaskWidget,
 	normalizeTaskId,
@@ -178,7 +177,7 @@ export default function tasksExtension(pi: ExtensionAPI) {
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			markUsed();
 			const task = store.create(params);
-			return result(`Created task #${task.id}: ${task.subject}`, ctx);
+			return result(`Task #${task.id} created successfully: ${task.subject}`, ctx);
 		},
 	});
 
@@ -230,13 +229,14 @@ export default function tasksExtension(pi: ExtensionAPI) {
 			const outcome = store.update(taskId, input as Parameters<TaskStore["update"]>[1]);
 			if (outcome.deleted) {
 				markUsed();
-				return result(`Deleted task #${normalizeTaskId(taskId)}.`, ctx);
+				return result(`Updated task #${normalizeTaskId(taskId)} deleted`, ctx);
 			}
 			// A failed update (unknown id) is not "using" the tracker — a model
 			// looping on a hallucinated id must not suppress the nudge.
 			if (outcome.error && !outcome.task) return result(outcome.error, ctx, true);
 			markUsed();
-			const line = formatTaskLine(store, outcome.task!);
+			// Claude Code's result names the fields that changed.
+			const line = `Updated task #${outcome.task!.id} ${(outcome.updatedFields ?? []).join(", ")}`;
 			return result(outcome.error ? `${line}\n${outcome.error}` : line, ctx, Boolean(outcome.error));
 		},
 	});

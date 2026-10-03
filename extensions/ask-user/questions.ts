@@ -22,20 +22,45 @@ export interface Answer {
 	selected: string[];
 	/** True when the user typed their own answer instead of picking. */
 	freeform: boolean;
+	/** True when the answer includes text the user typed (the "Other" row), alone or beside picked options. */
+	typed?: boolean;
+	/** The preview of the single option picked, when it carries one. */
+	preview?: string;
 	/** Free-text notes the user attached to this answer. */
 	notes?: string;
 }
 
-export function formatAnswers(answers: Answer[]): string {
-	if (answers.length === 0) return "The user did not answer.";
+/**
+ * Claude Code's answer list: `"question"="answer"` per answered question, with
+ * the picked option's preview and the user's notes, joined by ", ". A question
+ * left unanswered is listed only when it carries notes.
+ */
+export function answerPairs(answers: Answer[]): string {
 	return answers
 		.map((answer) => {
-			const value = answer.selected.length > 0 ? answer.selected.join(", ") : "(no answer)";
-			const typed = answer.freeform ? " (typed by the user)" : "";
-			const notes = answer.notes ? `\n→ notes: ${answer.notes}` : "";
-			return `${answer.question}\n→ ${value}${typed}${notes}`;
+			const answered = answer.selected.length > 0;
+			if (!answered && !answer.notes) return undefined;
+			const parts = [answered ? `"${answer.question}"="${answer.selected.join(", ")}"` : `"${answer.question}"=(no option selected)`];
+			if (answer.preview) parts.push(`selected preview:\n${answer.preview}`);
+			if (answer.notes) parts.push(`notes: ${answer.notes}`);
+			return parts.join(" ");
 		})
-		.join("\n\n");
+		.filter((pair): pair is string => pair !== undefined)
+		.join(", ");
+}
+
+/**
+ * ask_user_question's result, in Claude Code's words. Answers picked from the
+ * offered options are confirmed; an answer the user typed, or one with notes,
+ * may redirect the task, so the model is told to read it carefully.
+ */
+export function formatAnswers(answers: Answer[]): string {
+	const pairs = answerPairs(answers);
+	if (!pairs) return "The user did not answer the questions.";
+	const fromOptions = answers.every((answer) => !answer.notes && !answer.typed && !answer.freeform);
+	return fromOptions
+		? `Your questions have been answered: ${pairs}. You can now continue with these answers in mind.`
+		: `The user answered: ${pairs}. Read the answers carefully — they may request clarification, changes, or that you not proceed — and follow what they actually say.`;
 }
 
 /** Tool result when the user picks "Chat about this" instead of answering. */

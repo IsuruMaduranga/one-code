@@ -14,7 +14,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { ccToolRenderers, safeThemeBold, safeThemeInverse, safeThemePaint } from "../lib/tui-render.ts";
-import { type Answer, formatAnswers, formatDecline, type Question } from "./questions.ts";
+import { type Answer, answerPairs, formatAnswers, formatDecline, type Question } from "./questions.ts";
 import { applyWidgetKey, createWidgetState, decodeWidgetKey, renderWidget, type WidgetResult } from "./widget.ts";
 
 const NON_INTERACTIVE =
@@ -94,7 +94,7 @@ export default function askUserExtension(pi: ExtensionAPI) {
 				const partial = outcome?.kind === "cancel" ? outcome.answers : [];
 				const text =
 					partial.length > 0
-						? `The user cancelled without submitting. They had made these selections before cancelling (NOT submitted — do not treat them as final answers):\n\n${formatAnswers(partial)}`
+						? `The user cancelled without submitting. They had made these selections before cancelling (NOT submitted — do not treat them as final answers): ${answerPairs(partial)}.`
 						: "The user cancelled without answering.";
 				return {
 					content: [{ type: "text", text }],
