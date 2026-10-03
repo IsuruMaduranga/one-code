@@ -19,7 +19,7 @@
  */
 
 import { spawn, execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -27,6 +27,8 @@ const scratch = process.argv[2] ?? mkdtempSync(join(tmpdir(), "cc-wfperm-e2e-"))
 const MODEL = process.env.MODEL ?? "anthropic/claude-haiku-4-5";
 const workdir = join(scratch, "work");
 const sessionDir = join(scratch, "sessions");
+// The child's command creates this file; the stream is no evidence, since the prompt echoes it.
+const marker = join(workdir, "workflow-ran.txt");
 mkdirSync(workdir, { recursive: true });
 mkdirSync(sessionDir, { recursive: true });
 execFileSync("git", ["init", "-q"], { cwd: workdir });
@@ -41,7 +43,6 @@ const child = spawn("pi", ["--mode", "rpc", "--permission-mode", "default", "--s
 const send = (obj) => child.stdin.write(`${JSON.stringify(obj)}\n`);
 
 let buffer = "";
-let raw = "";
 let sawPrompt = false;
 let promptTitle = "";
 let answered = false;
@@ -53,7 +54,6 @@ const timeout = setTimeout(() => {
 }, 240_000);
 
 child.stdout.on("data", (chunk) => {
-	raw += chunk.toString();
 	buffer += chunk.toString();
 	let idx;
 	while ((idx = buffer.indexOf("\n")) !== -1) {
@@ -89,11 +89,11 @@ function finish() {
 	if (done) return;
 	done = true;
 	clearTimeout(timeout);
-	const markerRan = raw.includes("WORKFLOW_BASH_RAN");
+	const markerRan = existsSync(marker);
 	const ok = sawPrompt && answered && markerRan;
 	console.log(`${sawPrompt ? "PASS" : "FAIL"} workflow-agent permission prompt bubbled to main session${promptTitle ? ` — "${promptTitle}"` : ""}`);
 	console.log(`${answered ? "PASS" : "FAIL"} prompt was answerable over rpc`);
-	console.log(`${markerRan ? "PASS" : "FAIL"} approved workflow-agent command ran (marker ${markerRan ? "seen" : "not seen"})`);
+	console.log(`${markerRan ? "PASS" : "FAIL"} approved workflow-agent command ran (marker file ${markerRan ? "created" : "missing"})`);
 	console.log(`\n${ok ? "ALL PASS" : "FAILED"}`);
 	console.log(`scratch: ${scratch}`);
 	try { child.kill(); } catch {}
@@ -103,7 +103,7 @@ function finish() {
 const script = [
 	"export const meta = { name: 'perm-probe', description: 'one agent runs a marker command', phases: [{ title: 'Probe' }] }",
 	"phase('Probe')",
-	"const out = await agent('Run exactly this bash command: touch workflow-ran.txt && echo WORKFLOW_BASH_RAN — then report its raw output as your final message.')",
+	"const out = await agent('Run exactly this bash command: touch workflow-ran.txt — then report that it ran as your final message.')",
 	"return { out }",
 ].join("\n");
 
