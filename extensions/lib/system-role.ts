@@ -69,15 +69,15 @@ type WirePart = { type?: unknown; text?: unknown; cache_control?: unknown };
  * moves. On Anthropic, when the new message ends the request's content (only
  * pi's empty effort messages follow), the cache mark moves from the user
  * message onto it, as Claude Code marks its system message, so the first
- * request caches the context too.
- * Undefined when nothing changes.
+ * request caches the context too. Returns the new payload and the index of
+ * the user message that carried the blocks; undefined when nothing changes.
  */
 export function withSystemRoleContext(
 	payload: Record<string, unknown>,
 	layout: SystemRoleLayout,
 	moved: readonly MovedBlock[],
 	role: "system" | "developer",
-): Record<string, unknown> | undefined {
+): { payload: Record<string, unknown>; carrier: number } | undefined {
 	if (moved.length === 0) return undefined;
 	const key = layout === "responses" ? "input" : "messages";
 	const messages = payload[key];
@@ -116,5 +116,5 @@ export function withSystemRoleContext(
 	} else {
 		system = { role, content: text };
 	}
-	return { ...payload, [key]: [...messages.slice(0, index), user, system, ...messages.slice(index + 1)] };
+	return { payload: { ...payload, [key]: [...messages.slice(0, index), user, system, ...messages.slice(index + 1)] }, carrier: index };
 }

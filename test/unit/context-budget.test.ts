@@ -86,10 +86,17 @@ describe("context-budget wiring", () => {
 		return { fake, reminders };
 	};
 
-	it("puts the constant budget on every user message as a raw sticky block anchored at the session's start", async () => {
+	it("puts the constant budget in the context stack and on every user message as a raw sticky block anchored at the session's start", async () => {
 		const { fake, reminders } = collect();
 		await fake.fireOne("session_start", {}, createFakeCtx());
 		expect(reminders).toEqual([
+			{
+				text: "<total_tokens>15000000 tokens left</total_tokens>",
+				scope: "every-turn",
+				key: "total-tokens-first",
+				placement: "first-prepend",
+				order: 46,
+			},
 			{
 				text: "<total_tokens>15000000 tokens left</total_tokens>",
 				scope: "every-turn",

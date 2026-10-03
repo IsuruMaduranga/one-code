@@ -14,6 +14,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { totalTokensBlock, turnTokenBudget } from "../context-budget/budget.ts";
 import { withBetas } from "../lib/anthropic-payload.ts";
 import {
 	appendReminderBlocks,
@@ -26,10 +27,32 @@ import {
 	type ReminderPayload,
 	tailAnchor,
 } from "../lib/reminders.ts";
-import { instructionRole, type MovedBlock, systemRoleLayout, withSystemRoleContext } from "../lib/system-role.ts";
+import { instructionRole, type MovedBlock, type SystemRoleLayout, systemRoleLayout, withSystemRoleContext } from "../lib/system-role.ts";
+import { framedTotalTokens, withTurnBudgetMessages } from "../lib/turn-budget-layout.ts";
 
 /** Anthropic's beta for a `role: "system"` message after the first one, sent first-party as Claude Code does. */
 const MID_CONVERSATION_SYSTEM_BETA = "mid-conversation-system-2026-04-07";
+/** Anthropic's beta for a system message's `clear_at`, which Claude Code's Fable nudge carries. */
+const CLEAR_AT_BETA = "mid-conversation-system-clear-at-2026-08-21";
+
+/** The wire shape of a model's API, for the shapes the per-turn budget placements handle. */
+function wireShape(api: string): SystemRoleLayout | undefined {
+	if (api === "anthropic-messages") return "anthropic";
+	if (api === "openai-responses" || api === "azure-openai-responses" || api === "openai-codex-responses") return "responses";
+	if (api === "openai-completions") return "completions";
+	return undefined;
+}
+
+/** The index of the first user message carrying the context stack's framed `<total_tokens>` block, on a model without the system role. */
+function stackCarrier(messages: unknown, line: string): number | undefined {
+	if (!Array.isArray(messages)) return undefined;
+	const framed = framedTotalTokens(line);
+	const index = messages.findIndex(
+		(message: { role?: unknown; content?: unknown }) =>
+			message?.role === "user" && Array.isArray(message.content) && message.content.some((part: { text?: unknown }) => part?.text === framed),
+	);
+	return index === -1 ? undefined : index;
+}
 
 /**
  * Roles a reminder can be attached to (see injectReminders). `custom` is a
@@ -44,6 +67,8 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 	const reminderQueue = new ReminderQueue();
 	/** The blocks the last `context` pass placed for the system message; the payload hook moves them. */
 	let moved: MovedBlock[] = [];
+	/** The `<total_tokens>` line of the context stack, which the first prompt carries in place of its marker. */
+	const firstPromptLine = totalTokensBlock(turnTokenBudget());
 
 	pi.events.on(REMINDER_CHANNEL, (data) => {
 		const payload = data as ReminderPayload;
@@ -117,10 +142,25 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 
 	pi.on("before_provider_request", (event, ctx) => {
 		const model = ctx.model;
+		const shape = model ? wireShape(model.api) : undefined;
+		if (!model || !shape) return undefined;
 		const layout = systemRoleLayout(model);
-		if (!model || !layout || moved.length === 0) return undefined;
-		const payload = withSystemRoleContext(event.payload as Record<string, unknown>, layout, moved, instructionRole(layout, model));
-		if (!payload) return undefined;
-		return layout === "anthropic" && model.provider === "anthropic" ? withBetas(payload, [MID_CONVERSATION_SYSTEM_BETA]) : payload;
+		const role = instructionRole(shape, model);
+		let payload = event.payload as Record<string, unknown>;
+		let carrier: number | undefined;
+		if (layout) {
+			const lifted = withSystemRoleContext(payload, layout, moved, role);
+			if (lifted) ({ payload, carrier } = lifted);
+		} else {
+			carrier = stackCarrier(payload[shape === "responses" ? "input" : "messages"], firstPromptLine);
+		}
+		// Claude Code's per-turn <total_tokens> shapes (lib/turn-budget-layout.ts);
+		// first-party Fable also gets its clear_at nudge after each tool result.
+		const firstParty = model.provider === "anthropic";
+		const nudge = layout === "anthropic" && firstParty && /(?:^|[/.])claude-fable-/.test(model.id);
+		payload = withTurnBudgetMessages(payload, { shape, systemRole: layout !== undefined, role, carrier, nudge }) ?? payload;
+		if (payload === event.payload) return undefined;
+		if (layout !== "anthropic" || !firstParty) return payload;
+		return withBetas(payload, nudge ? [MID_CONVERSATION_SYSTEM_BETA, CLEAR_AT_BETA] : [MID_CONVERSATION_SYSTEM_BETA]);
 	});
 }
