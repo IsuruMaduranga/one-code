@@ -1,14 +1,14 @@
 /**
  * Which system-prompt register + tool surface the active model gets. Claude Code
- * ships a capability-tiered prompt — a terse one for Opus, a much longer, more
- * explicit one for Sonnet/Haiku (Anthropic removed 80%+ of the prompt for
- * Claude-5-gen models with no measured loss). One Code serves every provider, so
+ * ships a capability-tiered prompt — a short one for Opus ≥ 4.8, Sonnet ≥ 5.5
+ * and Fable, a much longer, more explicit one for Haiku and the older Sonnets
+ * and Opuses (findings §56). One Code serves every provider, so
  * its non-frontier audience extends *below* Haiku; a single lean prompt
  * under-instructs it. This module maps a model to one of FOUR tiers:
  *
- *   frontier   Opus/Fable only — terse register (cc-opus), bash covers search
- *   workhorse  Sonnet-class + capable third-party — verbose register (cc-sonnet)
- *   cheap      Haiku-class — verbose register (cc-haiku), matches CC exactly
+ *   frontier   Opus ≥ 4.8, Sonnet ≥ 5.5, Fable — the short register, bash covers search
+ *   workhorse  older Sonnet/Opus + capable third-party — the long register
+ *   cheap      Haiku-class — the long register
  *   tiny       sub-Haiku models — verbose + weak-model scaffolding + grep/find/ls
  *
  * `extensions/system-prompt` picks the prompt text from the tier;
@@ -79,10 +79,11 @@ export function tierOverride(env: NodeJS.ProcessEnv = process.env): PromptTier |
 }
 
 /**
- * Anthropic first-party frontier gate: Opus/Fable ≥ 4.7 ONLY (Sonnet is
- * deliberately excluded — CC gives only Opus the terse register, and the
- * intelligence index would wrongly promote flash models to frontier at max
- * effort; see `working-docs/decisions/model-tiers.md`). Adapted from pi-ai's
+ * Anthropic first-party frontier gate: Opus ≥ 4.8, Sonnet ≥ 5.5 and every
+ * Fable — the models Claude Code gives its short prompt and tool forms (Opus
+ * 4.7 and Sonnet 5 get the long ones). Never a score: the intelligence index
+ * would wrongly promote flash models to frontier at max effort; see
+ * `working-docs/decisions/model-tiers.md`. Adapted from pi-ai's
  * `defaultSupportsToolReferences` — never Haiku, and the `length < 8` guard stops
  * a dated suffix (`claude-opus-4-8-20251101`) being read as the minor version.
  * Version parse, not price: `claude-opus-4-1` ($15/M) costs more than
@@ -92,8 +93,9 @@ function isAnthropicFrontier(model: Model<Api>): boolean {
 	if (model.provider !== "anthropic" || model.id.includes("haiku")) return false;
 	const version = parseClaudeVersion(model.id);
 	if (!version) return false;
-	if (version.family === "sonnet") return false; // Sonnet is workhorse, never frontier
-	return version.major > 4 || (version.major === 4 && version.minor >= 7);
+	if (version.family === "fable") return true;
+	if (version.family === "sonnet") return version.major > 5 || (version.major === 5 && version.minor >= 5);
+	return version.major > 4 || (version.major === 4 && version.minor >= 8);
 }
 
 /**

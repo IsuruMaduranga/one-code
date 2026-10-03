@@ -13,3 +13,16 @@ export function looksLikeAnthropicRequest(payload: unknown): boolean {
 	const model = typeof record.model === "string" ? record.model : "";
 	return model.includes("claude") || typeof record.max_tokens === "number";
 }
+
+/**
+ * The payload with `betas` added, each once, after the ones pi set. pi-ai 1.0
+ * sends `payload.betas` as the final `anthropic-beta` header (it wins over a
+ * configured header), so a beta goes here, never into the headers (findings
+ * §54). The payload is returned unchanged when nothing is missing.
+ */
+export function withBetas<T extends Record<string, unknown>>(payload: T, betas: readonly string[]): T {
+	const existing: unknown[] = Array.isArray(payload.betas) ? payload.betas : [];
+	const missing = [...new Set(betas)].filter((beta) => !existing.includes(beta));
+	if (missing.length === 0) return payload;
+	return { ...payload, betas: [...existing, ...missing] };
+}
