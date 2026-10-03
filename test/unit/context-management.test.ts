@@ -81,9 +81,10 @@ describe("anthropicBetas", () => {
 		const source = readFileSync(resolve("node_modules/@earendil-works/pi-ai/dist/api/anthropic-messages.js"), "utf8");
 		const declared = [...source.matchAll(/const [A-Z_]+_BETA = "([^"]+)"/g)].map((match) => match[1]);
 		expect(declared.length).toBeGreaterThan(0);
-		// pi sends the tool-changes beta only on its native tool_addition path, which
-		// never engages while One Code forces the system prompt (findings §7).
-		const skipped = new Set(["mid-conversation-tool-changes-2026-07-01"]);
+		// pi sends the tool-changes beta (`mid-conversation-tool-changes-2026-07-01`
+		// before 1.0.1) only on its native tool_addition path, which never engages
+		// while One Code forces the system prompt (findings §7).
+		const skipped = new Set(["mid-conversation-tool-changes-2026-07-01", "inline-tools-2026-09-15"]);
 		const mirrored = new Set(
 			anthropicBetas(true, {
 				supportsEagerToolInputStreaming: false,

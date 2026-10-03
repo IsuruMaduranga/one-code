@@ -1,7 +1,7 @@
 {
 	"generatedFrom": "https://models.dev/api.json",
-	"piCatalogRows": 1529,
-	"rows": 1211,
+	"piCatalogRows": 1536,
+	"rows": 1221,
 	"facts": {
 		"amazon-bedrock/amazon.nova-2-lite-v1:0": {
 			"releaseDate": "2025-12-02"
@@ -219,6 +219,9 @@
 		"amazon-bedrock/global.openai.gpt-6-sol": {
 			"releaseDate": "2026-09-22"
 		},
+		"amazon-bedrock/global.openai.gpt-6.1-sol": {
+			"releaseDate": "2026-09-29"
+		},
 		"amazon-bedrock/global.xai.grok-4.6": {
 			"releaseDate": "2026-08-12"
 		},
@@ -233,6 +236,15 @@
 		},
 		"amazon-bedrock/google.gemma-4-e2b": {
 			"releaseDate": "2026-04-02"
+		},
+		"amazon-bedrock/in.anthropic.claude-haiku-4-5-20251001-v1:0": {
+			"releaseDate": "2025-10-15"
+		},
+		"amazon-bedrock/in.anthropic.claude-opus-5": {
+			"releaseDate": "2026-07-24"
+		},
+		"amazon-bedrock/in.anthropic.claude-sonnet-5": {
+			"releaseDate": "2026-06-30"
 		},
 		"amazon-bedrock/in.openai.gpt-5.6-luna": {
 			"releaseDate": "2026-07-09"
@@ -1329,6 +1341,12 @@
 		"moonshotai/kimi-k3": {
 			"releaseDate": "2026-07-16"
 		},
+		"nvidia/deepseek-ai/deepseek-v4.1-flash": {
+			"releaseDate": "2026-09-10"
+		},
+		"nvidia/google/diffusiongemma-26b-a4b-it": {
+			"releaseDate": "2026-06-09"
+		},
 		"nvidia/google/gemma-3-12b-it": {
 			"releaseDate": "2025-03-12"
 		},
@@ -1364,9 +1382,6 @@
 		},
 		"nvidia/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning": {
 			"releaseDate": "2026-04-28"
-		},
-		"nvidia/nvidia/nemotron-3-super-120b-a12b": {
-			"releaseDate": "2026-03-11"
 		},
 		"nvidia/nvidia/nemotron-3-ultra-550b-a55b": {
 			"releaseDate": "2026-06-04"
@@ -1659,6 +1674,9 @@
 		"opencode/deepseek-v4.1-flash": {
 			"releaseDate": "2026-09-10"
 		},
+		"opencode/fledge-alpha-free": {
+			"releaseDate": "2026-10-01"
+		},
 		"opencode/gemini-3-flash": {
 			"releaseDate": "2025-12-17"
 		},
@@ -1791,6 +1809,9 @@
 		"opencode/ling-3.0-flash-fin-free": {
 			"releaseDate": "2026-08-27"
 		},
+		"opencode/ling-3.1-flash-free": {
+			"releaseDate": "2026-09-29"
+		},
 		"opencode/longcat-2.5-preview-free": {
 			"releaseDate": "2026-09-25"
 		},
@@ -1910,6 +1931,9 @@
 		},
 		"openrouter/anthropic/claude-sonnet-5.5": {
 			"releaseDate": "2026-09-28"
+		},
+		"openrouter/apodex/apodex-1.1-mini:free": {
+			"releaseDate": "2026-10-01"
 		},
 		"openrouter/arcee-ai/trinity-large-thinking": {
 			"releaseDate": "2026-04-01"
@@ -2075,6 +2099,9 @@
 		},
 		"openrouter/inclusionai/ling-3.0-flash-vl": {
 			"releaseDate": "2026-09-10"
+		},
+		"openrouter/inclusionai/ling-3.1-flash": {
+			"releaseDate": "2026-10-02"
 		},
 		"openrouter/kwaipilot/kat-coder-pro-v2.5": {
 			"releaseDate": "2026-07-10"
@@ -2655,6 +2682,9 @@
 		},
 		"openrouter/unbiased/pareto": {
 			"releaseDate": "2026-09-17"
+		},
+		"openrouter/unbiased/pareto-26.10-preview": {
+			"releaseDate": "2026-10-01"
 		},
 		"openrouter/upstage/solar-mini4": {
 			"releaseDate": "2026-09-23"

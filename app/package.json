@@ -36,7 +36,7 @@
 		"LICENSE"
 	],
 	"dependencies": {
-		"@earendil-works/pi-coding-agent": "0.99.2",
+		"@earendil-works/pi-coding-agent": "1.0.1",
 		"one-code-extension": "0.4.1"
 	}
 }

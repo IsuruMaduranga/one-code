@@ -102,9 +102,9 @@ describe("buildDoctorReport", () => {
 	});
 
 	it("warns when the hosting pi is outside the tested range", () => {
-		const report = buildDoctorReport({ env: environment({ install: "pi-package", piVersion: "0.100.0" }), registry: registry(anthropic), session: { model: anthropic[1], modelSource: "session" } });
+		const report = buildDoctorReport({ env: environment({ install: "pi-package", piVersion: "1.1.0" }), registry: registry(anthropic), session: { model: anthropic[1], modelSource: "session" } });
 		expect(report.findings.some((f) => f.text.includes("tested against pi"))).toBe(true);
-		expect(renderDoctorText(report, 200)).toContain("Running: one-code-extension 0.2.1 on your own pi · pi 0.100.0");
+		expect(renderDoctorText(report, 200)).toContain("Running: one-code-extension 0.2.1 on your own pi · pi 1.1.0");
 	});
 
 	it("reports pi's built-in tool search and MCP still on, with the settings fix", () => {

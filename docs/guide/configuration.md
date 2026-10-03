@@ -96,11 +96,15 @@ The bundled app starts in full-screen mode with the `onecode` theme and
 quiet startup. It sets these on first run in pi's settings and never
 overrides a value you change later.
 
-On your own pi, to use full-screen mode for one session:
+On your own pi, 1.0 and later start in full-screen mode. On an older pi,
+to use full-screen mode for one session:
 
 ```bash
 pi --tui-mode fullscreen
 ```
+
+To keep the terminal's normal screen and scrollback instead, use
+`--tui-mode regular`, or set `"tuiMode": "regular"` in pi's settings.
 
 For a persistent setting, merge these keys into pi's settings file (the
 first two rows of the table under [Where settings live](#where-settings-live)),
