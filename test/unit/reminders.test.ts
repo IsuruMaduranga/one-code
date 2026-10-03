@@ -413,6 +413,17 @@ describe("one-shot delivery guarantees (C3)", () => {
 		expect(q.drain([]).map((e) => e.text).sort()).toEqual(["claudeMd", "mode on"]);
 	});
 
+	it("takeOneShots leaves a one-shot bound to another call's result for that result's hook", () => {
+		const q = new ReminderQueue();
+		q.enqueue("countdown a", { placement: "last-append", raw: true, toolCallId: "a" });
+		q.enqueue("countdown b", { placement: "last-append", raw: true, toolCallId: "b" });
+		q.enqueue("file changed");
+		expect(q.takeOneShots("a").map((e) => e.text)).toEqual(["countdown a", "file changed"]);
+		expect(q.takeOneShots("c")).toEqual([]);
+		expect(q.takeOneShots("b").map((e) => e.text)).toEqual(["countdown b"]);
+		expect(q.hasPendingOneShots).toBe(false);
+	});
+
 	it("a raw entry is injected without the system-reminder frame", () => {
 		const messages = [user("do it"), assistant(), toolResult("ran")];
 		const result = injectReminders(messages, [{ text: "<total_tokens>5 tokens left</total_tokens>", placement: "last-append", order: 0, raw: true }]);

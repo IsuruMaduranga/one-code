@@ -46,6 +46,7 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 				raw: payload.raw,
 				since: payload.since,
 				once: payload.once,
+				toolCallId: payload.toolCallId,
 			});
 		}
 	});
@@ -60,7 +61,8 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 	// applyPostToolUseOutcome / isAppendedReminderText).
 	pi.on("tool_result", (event) => {
 		if (!reminderQueue.hasPendingOneShots) return;
-		const entries = reminderQueue.takeOneShots();
+		const entries = reminderQueue.takeOneShots(event.toolCallId);
+		if (entries.length === 0) return;
 		return { content: appendReminderBlocks(event.content, entries) };
 	});
 

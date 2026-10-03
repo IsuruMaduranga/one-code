@@ -38,6 +38,11 @@ export interface TaskUpdateInput {
 	addBlockedBy?: string[];
 }
 
+/** A task id as the model may write it: tasks show as `#3`, so a leading `#` names task 3. */
+export function normalizeTaskId(id: string): string {
+	return id.startsWith("#") ? id.slice(1) : id;
+}
+
 export class TaskStore {
 	private tasks = new Map<string, TaskItem>();
 	private nextId = 1;
@@ -58,7 +63,7 @@ export class TaskStore {
 	}
 
 	get(id: string): TaskItem | undefined {
-		return this.tasks.get(id);
+		return this.tasks.get(normalizeTaskId(id));
 	}
 
 	list(): TaskItem[] {
@@ -73,9 +78,10 @@ export class TaskStore {
 		});
 	}
 
-	update(id: string, input: TaskUpdateInput): { task?: TaskItem; deleted?: boolean; error?: string } {
+	update(rawId: string, input: TaskUpdateInput): { task?: TaskItem; deleted?: boolean; error?: string } {
+		const id = normalizeTaskId(rawId);
 		const task = this.tasks.get(id);
-		if (!task) return { error: `No task with id "${id}". Use task_list to see ids.` };
+		if (!task) return { error: `No task with id "${rawId}". Use task_list to see ids.` };
 
 		if (input.status === "deleted") {
 			this.tasks.delete(id);
@@ -104,11 +110,11 @@ export class TaskStore {
 		// task id" — sending the model to hunt a typo that isn't there.
 		const unknown: string[] = [];
 		let selfRef = false;
-		for (const other of input.addBlocks ?? []) {
+		for (const other of (input.addBlocks ?? []).map(normalizeTaskId)) {
 			if (other === id) selfRef = true;
 			else if (!this.link(id, other)) unknown.push(other);
 		}
-		for (const other of input.addBlockedBy ?? []) {
+		for (const other of (input.addBlockedBy ?? []).map(normalizeTaskId)) {
 			if (other === id) selfRef = true;
 			else if (!this.link(other, id)) unknown.push(other);
 		}

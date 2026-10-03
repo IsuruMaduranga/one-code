@@ -171,10 +171,18 @@ export interface ReminderPayload {
 	 * brought back (the `<total_tokens>` line rides every user message in CC).
 	 */
 	since?: number;
+	/**
+	 * `last-append` only: the tool call whose result this one-shot belongs to.
+	 * Only that result's `tool_result` hook takes it, so a parallel batch, whose
+	 * hooks interleave, gives each result its own block (the `<total_tokens>`
+	 * countdown) instead of the first result taking every queued copy.
+	 */
+	toolCallId?: string;
 }
 
 interface StoredReminder extends ReminderEntry {
 	key?: string;
+	toolCallId?: string;
 }
 
 type EnqueueOptions = {
@@ -188,6 +196,8 @@ type EnqueueOptions = {
 	since?: number;
 	/** `user-prepend` only: skip when the same text is already pending. */
 	once?: boolean;
+	/** `last-append` only: the tool result whose hook takes it (see ReminderPayload). */
+	toolCallId?: string;
 };
 
 export class ReminderQueue {
@@ -211,6 +221,7 @@ export class ReminderQueue {
 			suffix: opts?.suffix,
 			key: opts?.key,
 			raw: opts?.raw,
+			toolCallId: opts?.toolCallId,
 		};
 		if (placement === "sticky-append") {
 			// A standing reminder re-emitted with the SAME text (plan mode re-emits
@@ -246,11 +257,15 @@ export class ReminderQueue {
 
 	/**
 	 * Take the pending `last-append` one-shots out of the queue — for the
-	 * `tool_result` hook, which writes them into the stored result. Other
+	 * `tool_result` hook, which writes them into the stored result. A one-shot
+	 * bound to another call's result stays queued for that result's hook. Other
 	 * placements stay queued for the next request.
 	 */
-	takeOneShots(): ReminderEntry[] {
-		const { matching, rest } = partition(this.nextTurn, (r) => r.placement === "last-append");
+	takeOneShots(toolCallId?: string): ReminderEntry[] {
+		const { matching, rest } = partition(
+			this.nextTurn,
+			(r) => r.placement === "last-append" && (r.toolCallId === undefined || r.toolCallId === toolCallId),
+		);
 		this.nextTurn = rest;
 		return matching.map(strip);
 	}

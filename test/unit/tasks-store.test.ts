@@ -20,6 +20,21 @@ describe("TaskStore", () => {
 		expect(updated.metadata).toEqual({ keep: 1, added: true });
 	});
 
+	it("accepts an id written with a leading # (#3 is task 3), in dependency lists too", () => {
+		const store = new TaskStore();
+		const a = store.create({ subject: "A", description: "" });
+		const b = store.create({ subject: "B", description: "" });
+		expect(store.get("#1")).toBe(a);
+		const outcome = store.update("#2", { status: "in_progress", addBlockedBy: ["#1"] });
+		expect(outcome).toEqual({ task: b });
+		expect(b.blockedBy).toEqual(["1"]);
+		expect(a.blocks).toEqual(["2"]);
+		expect(store.update("#1", { addBlocks: ["#1"] }).error).toBe("Task #1 cannot block or be blocked by itself");
+		expect(store.update("#1", { status: "deleted" })).toEqual({ deleted: true });
+		expect(store.get("1")).toBeUndefined();
+		expect(b.blockedBy).toEqual([]);
+	});
+
 	it("keeps dependency links reciprocal in both directions", () => {
 		const store = new TaskStore();
 		const a = store.create({ subject: "A", description: "" });

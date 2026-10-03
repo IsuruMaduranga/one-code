@@ -12,7 +12,9 @@
  *   package manifest — pi runs `tool_result` handlers in load order, and the
  *   block must be queued before system-reminder's handler takes the one-shots.
  *   It emits only at runtime, never at load, so the "listeners load first" rule
- *   for the bus is not at stake;
+ *   for the bus is not at stake. The block is bound to its call's id: pi runs a
+ *   parallel batch's `tool_result` hooks concurrently, and unbound, the first
+ *   result would take every queued countdown and the others none;
  * - the system prompt, before the gitStatus block — appended by the
  *   system-prompt extension from the same pure module.
  *
@@ -55,12 +57,13 @@ export default function contextBudgetExtension(pi: ExtensionAPI) {
 		busy = false;
 	});
 
-	pi.on("tool_result", (_event, ctx) => {
+	pi.on("tool_result", (event, ctx) => {
 		if (!enabled()) return;
 		pi.events.emit(REMINDER_CHANNEL, {
 			text: totalTokensBlock(budget.left(ctx.getContextUsage()?.tokens)),
 			placement: "last-append",
 			raw: true,
+			toolCallId: event.toolCallId,
 		} satisfies ReminderPayload);
 	});
 }

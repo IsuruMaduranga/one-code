@@ -30,6 +30,7 @@ import {
 	formatTaskLine,
 	formatTaskList,
 	formatTaskWidget,
+	normalizeTaskId,
 	nudgeMessage,
 	type TaskSnapshot,
 	TaskStore,
@@ -229,7 +230,7 @@ export default function tasksExtension(pi: ExtensionAPI) {
 			const outcome = store.update(taskId, input as Parameters<TaskStore["update"]>[1]);
 			if (outcome.deleted) {
 				markUsed();
-				return result(`Deleted task #${taskId}.`, ctx);
+				return result(`Deleted task #${normalizeTaskId(taskId)}.`, ctx);
 			}
 			// A failed update (unknown id) is not "using" the tracker — a model
 			// looping on a hallucinated id must not suppress the nudge.
