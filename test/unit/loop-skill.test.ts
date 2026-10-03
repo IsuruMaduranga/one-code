@@ -25,7 +25,7 @@ function tempDir(): string {
 	return dir;
 }
 
-describe("loopSkillPrompt (Claude Code's /loop skill, 2.1.282)", () => {
+describe("loopSkillPrompt (Claude Code's /loop skill, 2.1.288)", () => {
 	it("hands an explicit prompt to the model to parse and schedule with our tools", () => {
 		const text = loopSkillPrompt("check the deploy every 20m", null);
 		expect(text.startsWith("# /loop — schedule a recurring or self-paced prompt\n\nParse the input below into `[interval] <prompt…>` and schedule it.")).toBe(true);
@@ -39,6 +39,27 @@ describe("loopSkillPrompt (Claude Code's /loop skill, 2.1.282)", () => {
 		expect(text).not.toContain("Offer cloud first");
 		expect(text).toContain("- `5m` → empty prompt → show usage\n\n## Fixed-interval mode (rules 1 and 2)");
 		expect(text).not.toMatch(/\$\{|TaskList|CronCreate|ScheduleWakeup|Monitor\b/);
+	});
+
+	it("confirms after arming the wakeup, as visible text, and reports a stopped loop's outcome", () => {
+		const visible =
+			"This must be ordinary visible response text — the user cannot see your thinking/reasoning, so an update written only there is invisible to them. Make it the last thing in the turn, then end the turn.";
+		const outcome =
+			"(use task_output to find the task ID if it is no longer in context). Then write the loop's outcome for the user as ordinary visible response text — a stopped loop has no next tick to surface it. Stopping is the loop's normal ending";
+		const explicit = loopSkillPrompt("check the deploy", null);
+		expect(explicit).toContain("3. **Decide whether the loop continues.** If the task needs another iteration, call schedule_wakeup with:");
+		expect(explicit).toContain(
+			`4. **After the wakeup is armed, briefly confirm**: that you're self-pacing, whether a monitor is the primary wake signal, that you ran the task now, and what fallback delay you picked. ${visible}\n5.`,
+		);
+		expect(explicit).toContain("`delaySeconds` from the schedule step above (the monitor remains the wake signal; the new wakeup is only the fallback heartbeat), then write the same brief update as visible text.");
+		expect(explicit).toContain(outcome);
+		const bare = loopSkillPrompt("", null);
+		expect(bare).toContain("3. **Decide whether the loop continues.** If the next check is worth running, call schedule_wakeup with:");
+		expect(bare).toContain(
+			`4. **After the wakeup is armed, briefly confirm**: that this is the autonomous default in dynamic-pacing mode, that you ran the check now, whether a monitor is the primary wake signal, and what fallback delay you picked. ${visible}\n5.`,
+		);
+		expect(bare).toContain(outcome);
+		for (const text of [explicit, bare]) expect(text).not.toContain("before* calling");
 	});
 
 	it("runs the autonomous default with dynamic pacing for a bare /loop", () => {
