@@ -16,7 +16,7 @@
  */
 
 import { MID_CONVERSATION_SYSTEM_BETA, MID_CONVERSATION_TOOL_CHANGES_BETA, reseatMessageMark } from "./anthropic-payload.ts";
-import { systemRoleLayout, type WireMessage, type WirePart } from "./system-role.ts";
+import { byWireCallId, systemRoleLayout, type WireMessage, type WirePart, withoutParts } from "./system-role.ts";
 
 /** The first line of the stored addendum; the names follow, one per line. */
 export const ADDENDUM_HEAD =
@@ -81,9 +81,16 @@ export function liftAddenda<T extends StoredMessage>(messages: T[]): { messages:
  * The Anthropic payload with a tool-addition system message after each user
  * message that answers a call `liftAddenda` lifted an addendum from, or that
  * carries a pinned addendum part (removed). Also returns every name added: they
- * must be declared deferred in `tools`. Undefined when there is none.
+ * must be declared deferred in `tools`. With `references: false` the message
+ * is Claude Code's sentence and names alone, for a request whose tools cannot
+ * be referenced (OAuth renames them): the tools are active, so the model can
+ * still call them. Undefined when there is none.
  */
-export function withToolAdditions(payload: Record<string, unknown>, byCall: ReadonlyMap<string, readonly string[]>): { payload: Record<string, unknown>; names: string[] } | undefined {
+export function withToolAdditions(
+	payload: Record<string, unknown>,
+	byCall: ReadonlyMap<string, readonly string[]>,
+	references = true,
+): { payload: Record<string, unknown>; names: string[] } | undefined {
 	const messages = payload.messages;
 	if (!Array.isArray(messages)) return undefined;
 	const out: WireMessage[] = [];
@@ -96,14 +103,13 @@ export function withToolAdditions(payload: Record<string, unknown>, byCall: Read
 		const names: string[] = [];
 		const parts = message.content as WirePart[];
 		for (const part of parts) {
-			const called = part?.type === "tool_result" && typeof part.tool_use_id === "string" ? byCall.get(part.tool_use_id) : undefined;
+			const called = part?.type === "tool_result" && typeof part.tool_use_id === "string" ? byWireCallId(byCall, part.tool_use_id) : undefined;
 			if (called) names.push(...called);
 		}
-		const kept = parts.filter((part) => {
-			const pinned = part?.type === "text" && typeof part.text === "string" ? addendumNames(part.text) : undefined;
-			if (pinned) names.push(...pinned);
-			return !pinned;
-		});
+		const pinnedNames = (part: WirePart) => (part?.type === "text" && typeof part.text === "string" ? addendumNames(part.text) : undefined);
+		// A pinned addendum part goes, keeping pi's cache mark; a message it would empty keeps it.
+		const kept = withoutParts(parts, (part) => pinnedNames(part) !== undefined) ?? parts;
+		if (kept !== parts) for (const part of parts) names.push(...(pinnedNames(part) ?? []));
 		if (names.length === 0) {
 			out.push(message);
 			continue;
@@ -114,7 +120,7 @@ export function withToolAdditions(payload: Record<string, unknown>, byCall: Read
 			role: "system",
 			content: [
 				{ type: "text", text: [TOOLS_AVAILABLE, ...unique].join("\n") },
-				...unique.map((name) => ({ type: "tool_addition", tool: { type: "tool_reference", name } })),
+				...(references ? unique.map((name) => ({ type: "tool_addition", tool: { type: "tool_reference", name } })) : []),
 			],
 		});
 	}

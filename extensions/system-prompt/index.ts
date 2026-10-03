@@ -75,12 +75,14 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 	};
 
 	// Claude Code's environment block and model line, the first two blocks of the
-	// first-message context, for every turn this extension's prompt serves (a
-	// named agent's own prompt gets neither, as before). Re-queued per turn under
+	// first-message context, on every turn (a named agent's own prompt gets
+	// neither, as before). Re-queued per turn under
 	// fixed keys, so the text changes only when the facts do: a model switch
 	// changes the model line, and the new model reads its own cache anyway.
 	pi.on("turn_start", (_event, ctx) => {
-		if (!lastOptions || lastOptions.customPrompt) return;
+		// A first turn opened from idle has no options yet and still gets them, so
+		// message 1 never gains them later.
+		if (lastOptions?.customPrompt) return;
 		const env = environment(ctx.cwd);
 		pi.events.emit(REMINDER_CHANNEL, {
 			text: environmentBlock({ ...env, scratchpadDir: scratchpad, workspaceDirs }),

@@ -23,7 +23,7 @@
 
 import { reseatMessageMark } from "./anthropic-payload.ts";
 import { wrapReminder } from "./reminders.ts";
-import { messagesKey, type SystemRoleLayout, systemMessage, type WireMessage, type WirePart } from "./system-role.ts";
+import { messagesKey, type SystemRoleLayout, systemMessage, type WireMessage, type WirePart, byWireCallId, withoutParts } from "./system-role.ts";
 
 /** The stored line, exactly. */
 const LINE = /^<total_tokens>(\d+) tokens left<\/total_tokens>$/;
@@ -83,13 +83,6 @@ function answeredCalls(message: WireMessage): string[] {
 	return [];
 }
 
-/** The countdown for a wire call id: pi's OpenAI Responses ids carry the item id after a `|`. */
-function countdownFor(left: ReadonlyMap<string, number>, wireId: string): number | undefined {
-	if (left.has(wireId)) return left.get(wireId);
-	for (const [id, value] of left) if (id.split("|")[0] === wireId) return value;
-	return undefined;
-}
-
 export function withTurnBudgetMessages(payload: Record<string, unknown>, opts: TurnBudgetOptions): Record<string, unknown> | undefined {
 	const key = messagesKey(opts.shape);
 	const messages = payload[key];
@@ -105,9 +98,10 @@ export function withTurnBudgetMessages(payload: Record<string, unknown>, opts: T
 		if (message?.role === "user" && Array.isArray(message.content)) {
 			const parts = message.content as WirePart[];
 			const at = parts.findIndex((part) => typeof part?.text === "string" && LINE.test(part.text));
-			if (at !== -1) {
+			// The marker ends the message, so it carries pi's cache mark; withoutParts keeps it.
+			const rest = at === -1 ? undefined : withoutParts(parts, (_, index) => index === at);
+			if (rest) {
 				const line = parts[at].text as string;
-				const rest = parts.filter((_, index) => index !== at);
 				if (opts.systemRole) {
 					message = { ...message, content: rest };
 					after.push(systemMessage(opts.shape, opts.role, line));
@@ -118,7 +112,7 @@ export function withTurnBudgetMessages(payload: Record<string, unknown>, opts: T
 		}
 		if (opts.systemRole) {
 			for (const id of answeredCalls(message)) {
-				const value = countdownFor(opts.left, id);
+				const value = byWireCallId(opts.left, id);
 				if (value !== undefined) pending = pending === undefined ? value : Math.min(pending, value);
 			}
 			// On the OpenAI APIs a batch of results is a run of items; one message follows the run.

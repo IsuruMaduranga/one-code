@@ -68,6 +68,37 @@ export function instructionRole(layout: SystemRoleLayout, model: { reasoning?: b
 export type WireMessage = { role?: unknown; type?: unknown; content?: unknown; output?: unknown; call_id?: unknown; tool_call_id?: unknown };
 export type WirePart = { type?: unknown; text?: unknown; content?: unknown; tool_use_id?: unknown; cache_control?: unknown };
 
+/**
+ * The parts with those `drop` accepts removed, keeping pi's cache mark: when a
+ * removed part carried it, it moves to the new last part. Undefined when every
+ * part would go (a message cannot be left empty) or nothing is removed.
+ */
+export function withoutParts(parts: readonly WirePart[], drop: (part: WirePart, index: number) => boolean): WirePart[] | undefined {
+	let mark: unknown;
+	const kept = parts.filter((part, index) => {
+		if (!drop(part, index)) return true;
+		if (part?.cache_control !== undefined) mark = part.cache_control;
+		return false;
+	});
+	if (kept.length === parts.length || kept.length === 0) return undefined;
+	if (mark === undefined || kept[kept.length - 1].cache_control !== undefined) return kept;
+	return [...kept.slice(0, -1), { ...kept[kept.length - 1], cache_control: mark }];
+}
+
+/**
+ * The value stored under a pi call id for the id a request carries: the same
+ * id, the Responses call id before pi's `|item` suffix, or the id pi-ai's
+ * Anthropic conversion rewrote (any other character to `_`, at most 64), as it
+ * does for a call made on another provider before a model switch.
+ */
+export function byWireCallId<V>(stored: ReadonlyMap<string, V>, wireId: string): V | undefined {
+	if (stored.has(wireId)) return stored.get(wireId);
+	for (const [id, value] of stored) {
+		if (id.split("|")[0] === wireId || id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64) === wireId) return value;
+	}
+	return undefined;
+}
+
 /** A system message with `text` in the API's own shape. */
 export function systemMessage(layout: SystemRoleLayout, role: "system" | "developer", text: string): WireMessage {
 	return layout === "anthropic" ? { role: "system", content: [{ type: "text", text }] } : { role, content: text };

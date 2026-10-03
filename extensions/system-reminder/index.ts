@@ -83,44 +83,50 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 		return { content: appendReminderBlocks(event.content, entries) };
 	});
 
-	pi.on("context", (event, ctx) => {
-		moved = [];
-		countdowns = new Map();
-		if (reminderQueue.size === 0) return;
+	/** The request's messages with the queued reminders placed, or the input when nothing can be placed. */
+	const withReminders = (messages: Parameters<typeof injectReminders>[0], layout: ReturnType<typeof systemRoleLayout>) => {
+		if (reminderQueue.size === 0) return messages;
 		// injectReminders is a no-op when there is nothing to attach to. Only
 		// consume the queue once there is somewhere to put the reminders, so they
 		// survive to the next eligible request.
-		if (!event.messages.some((m) => ANCHOR_ROLES.has(m.role))) return;
+		if (!messages.some((m) => ANCHOR_ROLES.has(m.role))) return messages;
 		// A one-shot that arrived after the last tool result was stored (a mode
 		// change while idle, a deferred-tool miss whose call had no tool_result
 		// hook) rides this request's tail — and stays pinned there afterwards.
 		if (reminderQueue.hasPendingOneShots) {
-			const anchor = tailAnchor(event.messages);
+			const anchor = tailAnchor(messages);
 			if (anchor) reminderQueue.pin(anchor);
 		}
 		// A local-command breadcrumb rides the prompt that opens a request, before
 		// the user's text (Claude Code's placement), and stays there. Mid-turn —
 		// the request ends in a tool result — it waits for the next prompt.
 		if (reminderQueue.hasPending("user-prepend")) {
-			const anchor = openingUserAnchor(event.messages);
+			const anchor = openingUserAnchor(messages);
 			if (anchor) reminderQueue.pin(anchor, "user-prepend");
 		}
-		const layout = systemRoleLayout(ctx.model);
 		// A block meant only for the system message is left out where there is none.
-		const reminders = reminderQueue.drain(event.messages).filter((entry) => layout || !entry.systemRoleOnly);
+		const reminders = reminderQueue.drain(messages).filter((entry) => layout || !entry.systemRoleOnly);
 		if (layout) {
 			moved = reminders
 				.filter((entry) => entry.placement === "first-prepend" && movesToSystemRole(entry.order))
 				.sort((a, b) => a.order - b.order)
 				.map((entry) => ({ framed: framedReminderText(entry), inner: entry.text }));
 		}
-		const messages = injectReminders(event.messages, reminders);
-		// Each tool result's <total_tokens> countdown, while its blocks are still
-		// separate: lifted for a system message or framed (lib/turn-budget-layout.ts).
-		if (!ctx.model || !wireShape(ctx.model.api)) return { messages };
-		const resolved = resolveCountdowns(messages, layout !== undefined);
-		countdowns = resolved.left;
-		return { messages: resolved.messages };
+		return injectReminders(messages, reminders);
+	};
+
+	pi.on("context", (event, ctx) => {
+		moved = [];
+		countdowns = new Map();
+		const layout = systemRoleLayout(ctx.model);
+		const messages = withReminders(event.messages, layout);
+		// Each tool result's stored <total_tokens> countdown, on every request so
+		// the layout never depends on the queue: lifted for a system message or
+		// framed, while the result's blocks are still separate (lib/turn-budget-layout.ts).
+		const resolved = ctx.model && wireShape(ctx.model.api) ? resolveCountdowns(messages, layout !== undefined) : undefined;
+		if (resolved) countdowns = resolved.left;
+		const out = resolved?.messages ?? messages;
+		return out === event.messages ? undefined : { messages: out };
 	});
 
 	pi.on("before_provider_request", (event, ctx) => {

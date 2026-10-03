@@ -48,7 +48,7 @@ import {
 	WITHHOLD_CHANNEL,
 	withheldMissReminderText,
 } from "../lib/deferred.ts";
-import { looksLikeAnthropicRequest, withBetas } from "../lib/anthropic-payload.ts";
+import { looksLikeAnthropicRequest, MID_CONVERSATION_SYSTEM_BETA, withBetas } from "../lib/anthropic-payload.ts";
 import { addendumNamesOnBranch, liftAddenda, supportsToolAdditions, TOOL_ADDITION_BETAS, withToolAdditions } from "../lib/tool-additions.ts";
 import { MCP_TOOLS_CHANNEL, type McpToolsPayload } from "../lib/mcp-share.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
@@ -199,16 +199,23 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		if (toolLoadCompat) {
 			return stabilizeResponsesToolLoads(event.payload as Record<string, unknown>, (name) => deferredRegistry.has(name), loads, toolLoadCompat);
 		}
-		if (!supportsToolReferences(ctx.model as { provider?: string; id?: string } | undefined)) return undefined;
-		if (!looksLikeAnthropicRequest(event.payload)) return undefined;
+		const original = event.payload as Record<string, unknown>;
+		const additions = supportsToolAdditions(ctx.model) && looksLikeAnthropicRequest(original);
+		// The context step lifted this request's addenda off their tool results;
+		// whatever happens below, they go out (lib/tool-additions.ts).
+		const announceAsText = () => {
+			const text = additions ? withToolAdditions(original, addendaByCall, false) : undefined;
+			return text ? withBetas(text.payload, [MID_CONVERSATION_SYSTEM_BETA]) : undefined;
+		};
+		if (!supportsToolReferences(ctx.model as { provider?: string; id?: string } | undefined) || !looksLikeAnthropicRequest(original)) return announceAsText();
 		const isDeferred = (name: string) => deferredRegistry.has(name);
 		// A tool that arrived mid-session goes out as Claude Code's tool_addition
-		// where the model takes one (lib/tool-additions.ts), declared deferred.
-		const lifted = supportsToolAdditions(ctx.model) ? withToolAdditions(event.payload as Record<string, unknown>, addendaByCall) : undefined;
-		const payload = lifted?.payload ?? (event.payload as Record<string, unknown>);
-		const stable = stabilizeDeferredTools(payload, pi.getAllTools(), isDeferred, loads, new Set(lifted?.names ?? []));
-		// Renamed (OAuth) tools: leave the request alone, additions included.
-		if (!stable) return undefined;
+		// where the model takes one, declared deferred.
+		const lifted = additions ? withToolAdditions(original, addendaByCall) : undefined;
+		const stable = stabilizeDeferredTools(lifted?.payload ?? original, pi.getAllTools(), isDeferred, loads, new Set(lifted?.names ?? []));
+		// Renamed (OAuth) tools cannot be referenced: the active tools stay as pi
+		// rendered them and the addition goes as text.
+		if (!stable) return announceAsText();
 		return lifted ? withBetas(stable, TOOL_ADDITION_BETAS) : stable;
 	});
 

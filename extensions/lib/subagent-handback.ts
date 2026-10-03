@@ -37,6 +37,14 @@ export const SUBAGENT_HANDBACK_DESCRIPTION =
 export const SUBAGENT_HANDBACK_REMINDER =
 	"Your final report is delivered through SubagentHandback: when your work is complete, call SubagentHandback({message: <your full report>}). The call ends your run, so make it your last step. Only a SubagentHandback call reaches your caller as your result; plain text you write at the end is not delivered.";
 
+/**
+ * One Code's line before the reminder in a fork, where the tool is deferred
+ * (the fork sends its parent's tool list): it names the load step, which the
+ * frozen deferred listing it inherits does not.
+ */
+export const SUBAGENT_HANDBACK_LOAD_FIRST =
+	'SubagentHandback is deferred here: load it first with tool_search (query "select:SubagentHandback").';
+
 /** Claude Code's result texts for the call. */
 export const HANDBACK_DELIVERED = "Report delivered to your caller.";
 export const HANDBACK_ALREADY_DELIVERED =
@@ -95,7 +103,7 @@ export function subagentHandbackExtension(slot: HandbackSlot, options: { deferre
 		if (options.deferred) pi.events.emit(DEFER_CHANNEL, { name: SUBAGENT_HANDBACK, keywords: ["handback", "report", "result", "final", "caller"] });
 		pi.on("session_start", () => {
 			pi.events.emit(REMINDER_CHANNEL, {
-				text: SUBAGENT_HANDBACK_REMINDER,
+				text: options.deferred ? `${SUBAGENT_HANDBACK_LOAD_FIRST}\n${SUBAGENT_HANDBACK_REMINDER}` : SUBAGENT_HANDBACK_REMINDER,
 				scope: "every-turn",
 				key: "subagent-handback",
 				placement: "sticky-append",
