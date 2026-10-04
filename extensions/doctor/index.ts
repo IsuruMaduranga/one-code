@@ -35,7 +35,7 @@ import { loadAutoModeConfig, persistClassifierModel } from "../auto-mode/config.
 import { configuredCapabilityKey, loadCapabilitySnapshot, refreshCapabilitySnapshot, snapshotIsStale } from "../lib/capability-index.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent, withoutUnusable } from "../lib/model-unusable.ts";
 import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } from "../lib/mcp-status.ts";
-import { awaitOneShotTurn, sessionOutlivesTurn } from "../lib/notifications.ts";
+import { createUserMessageSender, sessionOutlivesTurn } from "../lib/notifications.ts";
 import { modelSpec } from "../lib/model-policy.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 import { oneCodeStateDir } from "../lib/paths.ts";
@@ -58,6 +58,7 @@ import { configMode } from "../lib/config-mode.ts";
 export const DOCTOR_PANEL_MAX_HEIGHT = 40;
 
 export default function doctorExtension(pi: ExtensionAPI) {
+	const sendUserMessage = createUserMessageSender(pi);
 	// Models the account refused this session (lib/model-unusable.ts): the report
 	// and presets must not recommend a model the session has just learned to avoid.
 	const unusableModels = new Set<string>();
@@ -179,8 +180,7 @@ export default function doctorExtension(pi: ExtensionAPI) {
 			decisionLogEnabled: loadAutoModeConfig(home).logDecisions,
 			independent: configMode() === "independent",
 		});
-		pi.sendUserMessage(prompt, { deliverAs: "followUp" });
-		await awaitOneShotTurn(ctx);
+		await sendUserMessage(ctx, prompt, { deliverAs: "followUp" });
 		return true;
 	};
 

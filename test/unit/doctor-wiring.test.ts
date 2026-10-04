@@ -156,6 +156,10 @@ describe("/doctor wiring", () => {
 		let returned = false;
 		const running = run("", ctx).then(() => { returned = true; });
 		try {
+			await vi.waitFor(() => expect(fake.sentUserMessages).toHaveLength(1));
+			expect(returned).toBe(false);
+			expect(ctx.waitForIdle).not.toHaveBeenCalled();
+			await fake.fire("agent_start", {});
 			await vi.waitFor(() => expect(ctx.waitForIdle).toHaveBeenCalledTimes(1));
 			expect(returned).toBe(false);
 		} finally {
@@ -173,7 +177,7 @@ describe("/doctor wiring", () => {
 	});
 
 	it("bare /doctor with a model sends the report inside the checkup prompt as a user turn", async () => {
-		const withModel = ctxFor(anthropic[1]);
+		const withModel = ctxFor(anthropic[1], "rpc");
 		await run("", withModel.ctx);
 		expect(fake.sentUserMessages).toHaveLength(1);
 		const content = fake.sentUserMessages[0].content as string;

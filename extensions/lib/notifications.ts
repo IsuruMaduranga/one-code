@@ -30,6 +30,7 @@
  * (`createTaskNotifier`, further down) is unchanged by the frame shape.
  */
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { withKeepAlive } from "../lsp/keep-alive.ts";
 import { RunOutcomeLatch } from "./interrupt.ts";
 import { escapeXml } from "./local-command.ts";
 import { PROMPT_OPTIONS_CHANNEL } from "./prompt-options.ts";
@@ -913,6 +914,56 @@ function assertNever(mode: never): never {
 }
 
 /**
+ * Submit a user turn and keep a one-shot command alive through preflight AND
+ * settlement. Create once at extension factory scope, not once per command.
+ *
+ * Unlike sendMessage, sendUserMessage awaits input hooks/auth/before_agent_start
+ * before marking the run active. waitForIdle alone therefore returns too soon.
+ * Arm the start barrier before sending; then waitForIdle covers the whole run,
+ * including tools, follow-ups and retries. TUI/RPC retain fire-and-forget delivery.
+ *
+ * pi's void API reports preflight errors separately, without a completion event.
+ * Bound the start wait so an error or an input hook consuming the prompt cannot
+ * hang a print process forever. The timeout applies only to startup, not the run.
+ */
+export function createUserMessageSender(pi: Pick<ExtensionAPI, "on" | "sendUserMessage">) {
+	const pending = new Set<{ start(): void; stop(): void }>();
+	pi.on("agent_start", () => {
+		for (const waiter of pending) waiter.start();
+	});
+	pi.on("session_shutdown", () => {
+		for (const waiter of pending) waiter.stop();
+		pending.clear();
+	});
+	return async (
+		ctx: Parameters<typeof awaitOneShotTurn>[0],
+		content: Parameters<ExtensionAPI["sendUserMessage"]>[0],
+		options?: Parameters<ExtensionAPI["sendUserMessage"]>[1],
+	): Promise<void> => {
+		if (sessionOutlivesTurn(ctx.mode)) {
+			pi.sendUserMessage(content, options);
+			return;
+		}
+		await withKeepAlive(async () => {
+			let start!: () => void;
+			let fail!: (error: Error) => void;
+			const started = new Promise<void>((resolve, reject) => { start = resolve; fail = reject; });
+			const waiter = { start, stop: () => fail(new Error("Session shut down before the command's user turn started.")) };
+			const timer = setTimeout(() => fail(new Error("Command's user turn did not start within 30 seconds. Check model authentication and extension input hooks, then retry.")), 30_000);
+			pending.add(waiter);
+			try {
+				pi.sendUserMessage(content, options);
+				await started;
+			} finally {
+				clearTimeout(timer);
+				pending.delete(waiter);
+			}
+			await awaitOneShotTurn(ctx);
+		});
+	};
+}
+
+/**
  * Block until the current agent run settles, but only in one-shot modes.
  *
  * A command handler that starts a turn through `pi.sendMessage`/`sendUserMessage`
@@ -925,8 +976,8 @@ function assertNever(mode: never): never {
  *
  * `waitForIdle()` exists on a command context; a plain event-handler context
  * (e.g. the `input` hook) only exposes `isIdle()`, so poll that as the fallback.
- * `pi.sendMessage` marks the run active synchronously, so `isIdle()` already
- * reads false by the time a caller reaches here.
+ * `pi.sendMessage` marks the run active synchronously. `sendUserMessage` does
+ * not: use createUserMessageSender for that API so its preflight finishes first.
  */
 export async function awaitOneShotTurn(ctx: {
 	mode: ExtensionMode;

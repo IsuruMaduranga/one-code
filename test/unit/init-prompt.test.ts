@@ -26,13 +26,18 @@ describe("/init prompt", () => {
 		initExtension(fake.pi as never);
 		let settle!: () => void;
 		const idle = new Promise<void>((resolve) => { settle = resolve; });
-		const waitForIdle = vi.fn(() => {
-			expect(fake.sentUserMessages).toHaveLength(1);
-			return idle;
-		});
+		let active = false;
+		// pi reports idle throughout asynchronous prompt preflight.
+		const waitForIdle = vi.fn(() => active ? idle : Promise.resolve());
 		let returned = false;
 		const run = fake.commands.get("init")!.handler("", createFakeCtx({ mode, waitForIdle })).then(() => { returned = true; });
 		try {
+			await fake.fire("before_agent_start", {});
+			expect(fake.sentUserMessages).toHaveLength(1);
+			expect(returned).toBe(false);
+			expect(waitForIdle).not.toHaveBeenCalled();
+			active = true;
+			await fake.fire("agent_start", {});
 			await vi.waitFor(() => expect(waitForIdle).toHaveBeenCalledTimes(1));
 			expect(returned).toBe(false);
 		} finally {
@@ -54,7 +59,7 @@ describe("/init prompt", () => {
 	it("submits it as a user turn", async () => {
 		const fake = createFakePi();
 		initExtension(fake.pi as never);
-		await fake.commands.get("init")!.handler("", createFakeCtx());
+		await fake.commands.get("init")!.handler("", createFakeCtx({ mode: "tui" }));
 		expect(fake.sentUserMessages).toEqual([{ content: INIT_PROMPT, options: { deliverAs: "followUp" } }]);
 	});
 });
