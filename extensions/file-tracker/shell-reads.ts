@@ -13,6 +13,7 @@
  * stale-edit guard is unchanged, since the file is observed with that content.
  */
 
+import { globComponentRegex } from "../auto-mode/shell-analysis.ts";
 import { parseCommand, type Token } from "../auto-mode/shell-parse.ts";
 
 /** Commands whose file arguments may print a whole file. */
@@ -44,12 +45,39 @@ export function shellReadCandidates(command: string): string[] {
 	// A reader fed from a variable (`for f in a.py b.py; do cat "$f"; done`)
 	// names its files elsewhere in the line. Every plain path-like word is a
 	// candidate then: the full-content check, not the parse, decides.
-	if (reads) for (const word of command.match(PATH_WORD) ?? []) if (candidates.size < MAX_CANDIDATES) candidates.add(word);
+	if (reads) {
+		for (const word of command.match(PATH_WORD) ?? []) if (candidates.size < MAX_CANDIDATES) candidates.add(word);
+		for (const word of command.match(GLOB_WORD) ?? []) if (candidates.size < MAX_CANDIDATES) candidates.add(word);
+	}
 	return [...candidates];
+}
+
+/**
+ * The files a candidate names: itself, or for a glob in its last component
+ * (`src/*.py`, a loop's word list), the matching entries of that directory,
+ * listed through `readdir` (no shell). Globs in a directory component are not
+ * expanded.
+ */
+export function expandCandidate(word: string, readdir: (dir: string) => string[]): string[] {
+	if (!/[*?[]/.test(word)) return [word];
+	const slash = word.lastIndexOf("/");
+	const dir = slash === -1 ? "" : word.slice(0, slash);
+	if (/[*?[]/.test(dir)) return [];
+	const pattern = globComponentRegex(word.slice(slash + 1));
+	if (!pattern) return [];
+	let names: string[];
+	try {
+		names = readdir(dir || ".");
+	} catch {
+		return [];
+	}
+	return names.filter((name) => !name.startsWith(".") && pattern.test(name)).map((name) => (dir ? `${dir}/${name}` : name)).slice(0, MAX_CANDIDATES);
 }
 
 /** A word that could be a file path as written: no quoting, expansion or glob characters. */
 const PATH_WORD = /(?<![\w$\-])[\w.@+~][\w.@+~/,-]*/g;
+/** A word with a glob character, which the shell would expand (`src/*.py`). */
+const GLOB_WORD = /(?<![\w$\-])[\w.@+~/,-]*[*?[][\w.@+~/,*?[\]-]*/g;
 const MAX_CANDIDATES = 50;
 
 function isPlainPath(token: Token): boolean {

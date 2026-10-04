@@ -2,12 +2,13 @@
  * A shell read that showed a whole file counts as a read (file-tracker/shell-reads.ts):
  * candidate extraction, the full-content check, and the bash tool_result wiring.
  */
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import fileTrackerExtension from "../../extensions/file-tracker/index.ts";
-import { shellReadCandidates, shownInFull } from "../../extensions/file-tracker/shell-reads.ts";
+import { expandCandidate, shellReadCandidates, shownInFull } from "../../extensions/file-tracker/shell-reads.ts";
+import { WORKTREE_CHANNEL } from "../../extensions/lib/worktree-channel.ts";
 import { bashParserReady } from "../../extensions/lib/bash-parser.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
@@ -35,6 +36,20 @@ describe("shellReadCandidates", () => {
 		expect(shellReadCandidates("grep -n foo a.py")).toEqual([]);
 		expect(shellReadCandidates("ls src && git diff a.py")).toEqual([]);
 		expect(shellReadCandidates("cat 'unbalanced")).toEqual([]);
+	});
+});
+
+describe("expandCandidate", () => {
+	const readdir = (dir: string) => (dir === "src" ? ["a.py", "b.py", "notes.md", ".hidden.py"] : dir === "." ? ["Makefile", "x.py"] : []);
+
+	it("expands a glob in the last component against that directory", () => {
+		expect(expandCandidate("src/*.py", readdir)).toEqual(["src/a.py", "src/b.py"]);
+		expect(expandCandidate("*.py", readdir)).toEqual(["x.py"]);
+	});
+
+	it("passes a plain word through and expands no glob in a directory component", () => {
+		expect(expandCandidate("src/a.py", readdir)).toEqual(["src/a.py"]);
+		expect(expandCandidate("*/a.py", readdir)).toEqual([]);
 	});
 });
 
@@ -80,6 +95,22 @@ describe("file-tracker: a bash result counts as a read", () => {
 		await bash('for f in a.py b.py; do printf "\\n--- %s ---\\n" "$f"; cat "$f"; done', "\n--- a.py ---\na = 1\n\n--- b.py ---\nb = 2");
 		expect(await edit("a.py")).toBeUndefined();
 		expect(await edit("b.py")).toBeUndefined();
+	});
+
+	it("allows an edit after a loop over a glob printed each file in full", async () => {
+		mkdirSync(join(dir, "src"));
+		writeFileSync(join(dir, "src", "a.py"), "a = 1\n");
+		await bash('for f in src/*.py; do echo "== $f"; cat "$f"; done', "== src/a.py\na = 1");
+		expect(await edit(join("src", "a.py"))).toBeUndefined();
+	});
+
+	it("resolves a shell read in the entered worktree, where the shell ran", async () => {
+		const worktree = join(dir, "wt");
+		mkdirSync(worktree);
+		writeFileSync(join(worktree, "m.py"), "in worktree\n");
+		fake.events.emit(WORKTREE_CHANNEL, { path: worktree });
+		await bash("cat m.py", "in worktree");
+		expect(await edit(join(worktree, "m.py"))).toBeUndefined();
 	});
 
 	it("still refuses after a partial read, and says why", async () => {

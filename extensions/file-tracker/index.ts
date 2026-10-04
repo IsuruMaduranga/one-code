@@ -16,7 +16,7 @@
  * that went through bash and never touched an intercepted tool.
  */
 
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { createReadToolDefinition, type ExtensionAPI, type ExtensionContext, type SessionCompactEvent } from "@earendil-works/pi-coding-agent";
@@ -35,7 +35,8 @@ import { loadPermissionSettings } from "../permissions/settings.ts";
 import { keptReadPaths, lastTouchesOnBranch, pathsReadOnBranch, shellCallsOnBranch } from "./replay.ts";
 import { type RestoredRead, restoreBlocks, restoreCandidates } from "./restore.ts";
 import { fileToolResultContent } from "./results.ts";
-import { shellReadCandidates, shownInFull } from "./shell-reads.ts";
+import { expandCandidate, shellReadCandidates, shownInFull } from "./shell-reads.ts";
+import { sessionWorkCwd, WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
 import {
 	describeChanges,
 	EXTERNAL_CHANGE_REMINDER,
@@ -91,7 +92,8 @@ function textOf(content: unknown): string {
  */
 function observeShellReads(tracker: FileTracker, command: string, output: string, cwd: string): void {
 	if (!command || !output) return;
-	for (const raw of shellReadCandidates(command)) {
+	const words = shellReadCandidates(command).flatMap((word) => expandCandidate(word, (dir) => readdirSync(resolveToolPath(dir, cwd))));
+	for (const raw of new Set(words)) {
 		const path = resolveToolPath(raw, cwd);
 		const stamp = statIfPresent(path);
 		if (!stamp || stamp.size > MAX_SHELL_READ_BYTES) continue;
@@ -181,6 +183,12 @@ async function readAgain(read: ReturnType<typeof createReadToolDefinition>, path
 
 export default function fileTrackerExtension(pi: ExtensionAPI) {
 	let tracker = new FileTracker();
+	/** The entered worktree, where the shell runs while one is active (lib/worktree-channel.ts). */
+	let entered: WorktreeLocation | undefined;
+	pi.events.on(WORKTREE_CHANNEL, (data) => {
+		const location = data as WorktreeLocation | null | undefined;
+		entered = location?.path ? location : undefined;
+	});
 	let sessionId: string | undefined;
 	/**
 	 * Every file a read or write touched on this branch, with its modification
@@ -219,7 +227,7 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 		const shellCalls = [...shellCallsOnBranch(entries)];
 		if (shellCalls.length > 0) {
 			void bashParserReady().then(() => {
-				for (const call of shellCalls) observeShellReads(target, call.command, call.output, ctx.cwd);
+				for (const call of shellCalls) observeShellReads(target, call.command, call.output, sessionWorkCwd(entered, ctx.cwd));
 			});
 		}
 		touched = new Map([...lastTouchesOnBranch(entries)].map(([raw, at]) => [resolveToolPath(raw, ctx.cwd), at]));
@@ -250,7 +258,8 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 		writeTargetExisted.delete(event.toolCallId);
 		if (event.toolName === "bash") {
 			await bashParserReady();
-			observeShellReads(tracker, commandOf(event.input), textOf(event.content), ctx.cwd);
+			// Relative paths in the command resolve where the shell ran: the entered worktree, if any.
+			observeShellReads(tracker, commandOf(event.input), textOf(event.content), sessionWorkCwd(entered, ctx.cwd));
 			return undefined;
 		}
 		if (!READ_TOOLS.has(event.toolName) && !GUARDED_TOOLS.has(event.toolName)) return undefined;
