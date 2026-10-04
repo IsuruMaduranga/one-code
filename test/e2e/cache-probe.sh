@@ -15,6 +15,11 @@
 # instead, for a provider with no native tool loading (OpenRouter), where a
 # load re-caches the conversation by design (findings §7).
 #
+# A second, classifier phase runs four gated network commands in auto mode and
+# checks that the auto-mode classifier's transcript is a cache read from call
+# to call and from stage 1 to stage 2 (test/e2e/cache-probe-classifier.mjs,
+# usage from test/e2e/dump-classifier.ts). `--no-classifier` skips it.
+#
 # It runs the repo's own pi (node_modules), the version One Code ships against,
 # not whatever `pi` is first on PATH; PI_BIN overrides that. CACHE_PROBE_WORK_DIR
 # optionally names a new output directory without changing TMPDIR for test fixtures.
@@ -28,8 +33,11 @@ PI_BIN="${PI_BIN:-$REPO/node_modules/@earendil-works/pi-coding-agent/dist/bundle
 
 PROMPT='First call tool_search with query select:cron_list. Then call cron_list once. Then reply with exactly the word done.'
 CHECK_ARGS=()
+CLASSIFIER=1
 for arg in "$@"; do
-	if [ "$arg" = "--no-load" ]; then
+	if [ "$arg" = "--no-classifier" ]; then
+		CLASSIFIER=0
+	elif [ "$arg" = "--no-load" ]; then
 		PROMPT='Run echo probe-one with the bash tool. Then run echo probe-two with the bash tool. Then reply with exactly the word done.'
 	else
 		CHECK_ARGS+=("$arg")
@@ -55,4 +63,20 @@ echo "workdir: $WORK"
 	WIRE_DUMP="$WORK/wire.jsonl" node "$PI_BIN" -e "$REPO/test/e2e/dump-requests.ts" --model "$MODEL" --mode json -p "$PROMPT" > "$WORK/events.jsonl" 2> "$WORK/stderr.log"
 ) || echo "pi exited non-zero (see $WORK/stderr.log)"
 
-node "$REPO/test/e2e/cache-probe.mjs" "$WORK/wire.jsonl" "$WORK/events.jsonl" ${CHECK_ARGS[@]+"${CHECK_ARGS[@]}"}
+status=0
+node "$REPO/test/e2e/cache-probe.mjs" "$WORK/wire.jsonl" "$WORK/events.jsonl" ${CHECK_ARGS[@]+"${CHECK_ARGS[@]}"} || status=1
+
+if [ "$CLASSIFIER" = 1 ]; then
+	echo "--- classifier phase"
+	CPROJECT="$WORK/classifier-project"
+	mkdir -p "$CPROJECT"
+	git -C "$CPROJECT" init -q
+	CPROMPT='Run each of these four commands in its own separate bash call, one after another (never combine them, never in parallel), then reply with exactly the word done: curl -sI https://example.com ; curl -sI https://example.org ; curl -sI https://www.iana.org ; curl -sI https://httpbin.org/get'
+	(
+		cd "$CPROJECT"
+		CLASSIFIER_DUMP="$WORK/classifier.jsonl" node "$PI_BIN" -e "$REPO/test/e2e/dump-classifier.ts" --model "$MODEL" --mode json --permission-mode auto -p "$CPROMPT" > "$WORK/classifier-events.jsonl" 2> "$WORK/classifier-stderr.log"
+	) || echo "pi exited non-zero in the classifier phase (see $WORK/classifier-stderr.log)"
+	touch "$WORK/classifier.jsonl"
+	node "$REPO/test/e2e/cache-probe-classifier.mjs" "$WORK/classifier.jsonl" || status=1
+fi
+exit $status
