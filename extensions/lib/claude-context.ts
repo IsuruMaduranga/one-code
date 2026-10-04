@@ -39,14 +39,14 @@ import { claudeSourcesOn } from "./config-mode.ts";
 import { findGitRoot } from "./git.ts";
 import { tryReadFile } from "./plugins.ts";
 import { absoluteFrom, claudeManagedDir, claudeUserDir, expandTilde, isPathAtOrUnder, tryRealpath } from "./paths.ts";
-import { discoverRules, readRuleInstructions, type RuleFile, type RuleOptions } from "./claude-rules.ts";
+import { discoverRules, MAX_INSTRUCTION_BYTES, readRuleInstructions, type RuleFile, type RuleOptions } from "./claude-rules.ts";
 
 /** One instruction section. Legacy content stays raw; new parsed files carry CC's trimmed startup body. */
 export interface ContextFile {
 	path: string;
 	content: string;
 	descriptor: string;
-	/** Rule imports are separate sections; do not infer additional shown files from their raw @tokens. */
+	/** Actual inline imports; parsed imports are separate sections and use [] to prevent raw @token inference. */
 	imported?: string[];
 }
 
@@ -80,9 +80,21 @@ const CONTEXT_FOOTER =
 	"One Code attached this context automatically; it isn't part of the user's message. " +
 	"It describes the user's own account and workspace, so they don't need it reported back.";
 
+/** Independent mode excludes Claude locations even when reached through aliases or imports. */
+function isClaudeLocation(path: string, userDir: string): boolean {
+	return [path, tryRealpath(path)].some((candidate) => candidate !== undefined && (
+		/(?:^|[/\\])\.claude(?:[/\\]|$)/i.test(candidate) ||
+		/(?:^|[/\\])CLAUDE(?:\.local)?\.md$/i.test(candidate) ||
+		isPathAtOrUnder(candidate, tryRealpath(userDir) ?? userDir) ||
+		isPathAtOrUnder(candidate, claudeManagedDir())
+	));
+}
+
 function readFileIfPresent(path: string): string | null {
 	try {
-		if (!existsSync(path) || !statSync(path).isFile()) return null;
+		if (!existsSync(path)) return null;
+		const stat = statSync(path);
+		if (!stat.isFile() || stat.size > MAX_INSTRUCTION_BYTES) return null;
 	} catch {
 		return null;
 	}
@@ -355,9 +367,11 @@ function discoverInstructionEntries(
 
 	/** Adds the path if present. */
 	const push = (path: string, descriptor: string): void => {
-		if (seen.has(path) || !present(path)) return;
+		if (!present(path) || (rule === "agents-md" && isClaudeLocation(path, opts.homeClaudeDir))) return;
+		const key = tryRealpath(path) ?? path;
+		if (seen.has(key)) return;
 		paths.push({ path, descriptor });
-		seen.add(path);
+		seen.add(key);
 	};
 
 	if (rule !== "agents-md") {
@@ -458,13 +472,15 @@ export function nestedInstructionFiles(opts: {
 		if (dirname(dir) === dir) break;
 	}
 	// Independent mode reads no Claude Code location, so it never walks into a `.claude` directory.
-	const walked = claudeFiles ? dirs : dirs.filter((dir) => !dir.slice(opts.cwd.length).split(/[\\/]/).includes(".claude"));
+	const userDir = opts.homeClaudeDir ?? claudeUserDir(opts.home);
+	const allowedLocation = (path: string) => opts.rule !== "agents-md" || !isClaudeLocation(path, userDir);
+	const walked = dirs.filter(allowedLocation);
 	// claude-md-or-agents-md is decided per project, as at startup: AGENTS.md only where no CLAUDE.md is in play.
 	const projectHasClaude = () =>
 		[...ancestorDirs(opts.cwd), ...walked].some((dir) => isPresentFile(join(dir, "CLAUDE.md")) || (dirname(dir) !== dir && isPresentFile(join(dir, ".claude", "CLAUDE.md"))) || isPresentFile(join(dir, "CLAUDE.local.md")));
 	const agents = opts.rule === "agents-md" || opts.rule === "claude-md-and-agents-md" || (opts.rule === "claude-md-or-agents-md" && !projectHasClaude());
 	// Imports read only inside the project; anything else stays literal text.
-	const readInProject = (path: string) => (inProject(tryRealpath(path)) ? readFileIfPresent(path) : null);
+	const readInProject = (path: string) => (allowedLocation(path) && inProject(tryRealpath(path)) ? readFileIfPresent(path) : null);
 	const seen = new Set<string>(realTarget ? [realTarget] : []);
 	const files: { path: string; key: string; content: string; imported: string[] }[] = [];
 	const addRules = (rulesDir: string, scope: RuleOptions["scope"], conditional: boolean) => {
@@ -488,7 +504,7 @@ export function nestedInstructionFiles(opts: {
 		if (oneCode) candidates.push(oneCode);
 		for (const path of candidates) {
 			const key = tryRealpath(path);
-			if (!inProject(key) || seen.has(key)) continue;
+			if (!inProject(key) || seen.has(key) || !allowedLocation(path)) continue;
 			if (basename(dirname(path)) === ".claude" && basename(path) === "CLAUDE.md") {
 				for (const file of readRuleInstructions(path, { cwd: opts.cwd, home: opts.home, scope: "Project" })) {
 					if (seen.has(file.key)) continue;
@@ -530,6 +546,12 @@ export function discoverContextFiles(opts: DiscoveryOptions & {
 	const contents = new Set<string>();
 	const emitted = new Set<string>();
 	const parsedShown = new Set<string>();
+	const realCwd = tryRealpath(opts.cwd) ?? opts.cwd;
+	const readAllowedImport = (path: string) => opts.rule !== "agents-md" || !isClaudeLocation(path, opts.homeClaudeDir) ? readFileIfPresent(path) : null;
+	const readProjectImport = (path: string) => {
+		const key = tryRealpath(path);
+		return key && isPathAtOrUnder(key, realCwd) ? readAllowedImport(path) : null;
+	};
 	const appendParsed = (file: RuleFile, descriptor: string) => {
 		if (emitted.has(file.key)) return;
 		emitted.add(file.key);
@@ -565,12 +587,17 @@ export function discoverContextFiles(opts: DiscoveryOptions & {
 			if (descriptor === AGENTS_DESCRIPTOR && (imported.has(tryRealpath(path) ?? path) || (trimmed !== "" && contents.has(trimmed)))) continue;
 			contents.add(trimmed);
 		}
-		for (const p of collectImportedPaths(content, dirname(path), { home: opts.home })) {
+		// Root/local legacy files keep their raw formatting, but imports follow
+		// the same cwd confinement as parsed project instructions (lJ/OO).
+		const projectSource = descriptor === PROJECT_DESCRIPTOR || descriptor === LOCAL_DESCRIPTOR || descriptor === AGENTS_DESCRIPTOR;
+		const importOptions = { home: opts.home, read: projectSource ? readProjectImport : readAllowedImport };
+		const included = [...collectImportedPaths(content, dirname(path), importOptions)];
+		for (const p of included) {
 			const importedKey = tryRealpath(p) ?? p;
 			imported.add(importedKey);
 			emitted.add(importedKey);
 		}
-		files.push({ path, content: expandImports(content, dirname(path), { home: opts.home }), descriptor });
+		files.push({ path, content: expandImports(content, dirname(path), importOptions), descriptor, ...(content.includes("@") ? { imported: included } : {}) });
 		emitted.add(key);
 	}
 	return files;
@@ -585,9 +612,11 @@ function discoverOneCodeFilePaths(opts: { cwd: string; homeOneCodeDir: string })
 	const paths: ContextFilePath[] = [];
 	const seen = new Set<string>();
 	const push = (path: string | null, descriptor: string) => {
-		if (!path || seen.has(path)) return;
+		if (!path) return;
+		const key = tryRealpath(path) ?? path;
+		if (seen.has(key)) return;
 		paths.push({ path, descriptor });
-		seen.add(path);
+		seen.add(key);
 	};
 	push(firstOneCodeFile(opts.homeOneCodeDir), ONECODE_GLOBAL_DESCRIPTOR);
 	for (const d of ancestorDirs(opts.cwd)) push(firstOneCodeFile(d), ONECODE_DESCRIPTOR);
@@ -597,10 +626,14 @@ function discoverOneCodeFilePaths(opts: { cwd: string; homeOneCodeDir: string })
 /** ONECODE.md files with `@import`s expanded, for the `# oneCodeMd` block. */
 export function discoverOneCodeFiles(opts: { cwd: string; homeOneCodeDir: string; home: string }): ContextFile[] {
 	const files: ContextFile[] = [];
+	const allowedLocation = (path: string) => claudeSourcesOn() || !isClaudeLocation(path, claudeUserDir(opts.home));
+	const read = (path: string) => allowedLocation(path) ? readFileIfPresent(path) : null;
 	for (const { path, descriptor } of discoverOneCodeFilePaths(opts)) {
-		const content = readFileIfPresent(path);
+		const content = read(path);
 		if (content === null) continue;
-		files.push({ path, content: expandImports(content, dirname(path), { home: opts.home }), descriptor });
+		const importOptions = { home: opts.home, read };
+		const imported = [...collectImportedPaths(content, dirname(path), importOptions)];
+		files.push({ path, content: expandImports(content, dirname(path), importOptions), descriptor, ...(content.includes("@") ? { imported } : {}) });
 	}
 	return files;
 }

@@ -271,7 +271,7 @@ describe("ONECODE.md discovery", () => {
 		]);
 	});
 
-	it("claude-md-and-agents-md: AGENTS.md loads beside CLAUDE.md, skipping one CLAUDE.md imports or repeats", () => {
+	it("claude-md-and-agents-md: skips repeated AGENTS.md, but not a blocked ancestor import", () => {
 		mkdirSync(join(root, "proj", "sub"), { recursive: true });
 		write("proj/CLAUDE.md", "@AGENTS.md\n");
 		write("proj/AGENTS.md", "imported\n");
@@ -280,7 +280,9 @@ describe("ONECODE.md discovery", () => {
 		const opts = { cwd: join(root, "proj", "sub"), homeClaudeDir: join(root, "home-claude"), rule: "claude-md-and-agents-md" as const };
 		expect(discoverContextFilePaths(opts).filter((p) => p.descriptor === AGENTS_DESCRIPTOR)).toHaveLength(2);
 		const files = discoverContextFiles({ ...opts, home: root });
-		expect(files.filter((f) => f.descriptor === AGENTS_DESCRIPTOR)).toEqual([]);
+		// The ancestor's @AGENTS.md is outside cwd, so it was not actually
+		// imported. Its independently discovered AGENTS.md must still load.
+		expect(files.filter((f) => f.descriptor === AGENTS_DESCRIPTOR).map((f) => f.path)).toEqual([join(root, "proj", "AGENTS.md")]);
 	});
 
 	it("managed-only drops the user's and the project's files", () => {

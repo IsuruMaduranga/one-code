@@ -6,6 +6,9 @@ import { Lexer, type Token } from "marked";
 import { parse as parseYaml } from "yaml";
 import { absoluteFrom, comparablePath, expandTilde, forwardSlashes, isPathAtOrUnder, isRelativeInside, tryRealpath } from "./paths.ts";
 
+/** pO/Oee: instruction files larger than 4 MiB are skipped, never truncated. */
+export const MAX_INSTRUCTION_BYTES = 4_194_304;
+
 export interface RuleFile {
 	path: string;
 	key: string;
@@ -173,7 +176,7 @@ export function readRuleInstructions(path: string, opts: Pick<RuleOptions, "cwd"
 		if (linkedOut && !includeExternal) return [];
 		try {
 			const stat = statSync(key);
-			if (!stat.isFile() || (opts.scope === "User" && !includeExternal && (stat.nlink > 1 || (depth === 0 && isLink(path))))) return [];
+			if (!stat.isFile() || stat.size > MAX_INSTRUCTION_BYTES || (opts.scope === "User" && !includeExternal && (stat.nlink > 1 || (depth === 0 && isLink(path))))) return [];
 			processed.add(comparablePath(key));
 			const ext = extname(path).toLowerCase();
 			if (ext && !TEXT_EXTENSIONS.has(ext)) return [];
