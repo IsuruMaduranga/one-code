@@ -55,7 +55,7 @@ import {
 } from "./invoke.ts";
 import { codeReviewBody } from "./code-review.ts";
 import { decodeSkillsKey } from "./panel/keys.ts";
-import { frontmatterFlag, skillListingBudget, skillListingText, usageScore, withoutPiSkillsBlock } from "./listing.ts";
+import { frontmatterFlag, listingDescription, skillListingBudget, skillListingText, usageScore, withoutPiSkillsBlock } from "./listing.ts";
 import { renderSkillsPanel, type SkillsPaint } from "./panel/render.ts";
 import { applySkillsKey, initialSkillsState, type SkillsRow, visibleRows } from "./panel/state.ts";
 import { announceArgumentHint, type CommandHint, frontmatterCommandHint } from "../lib/argument-hints.ts";
@@ -156,9 +156,15 @@ export default function skillExtension(pi: ExtensionAPI) {
 		});
 		// Claude Code lists skills as a <system-reminder> on the first user message
 		// (its block 3), framed for the Skill tool — not in the system prompt. A
-		// session without that tool (an agent limited to read and bash) keeps
-		// pi's own section instead, which says to read the file.
-		if (!pi.getActiveTools().includes("skill")) return;
+		// session without that tool (an agent limited to read and bash, a main
+		// session started with fewer tools) gets the same block framed for reading
+		// the file, since pi's own section is dropped from every prompt below.
+		const tools = pi.getActiveTools();
+		if (!tools.includes("skill")) {
+			const readable = readableListing(tools.includes("read") ? "the read tool" : "the shell");
+			if (readable) pi.events.emit(REMINDER_CHANNEL, { text: readable, scope: "every-turn", key: "skills", placement: "first-prepend", order: CONTEXT_ORDER.skills });
+			return;
+		}
 		const listing = describe();
 		if (listing !== "(no skills available)") {
 			pi.events.emit(REMINDER_CHANNEL, {
@@ -174,10 +180,10 @@ export default function skillExtension(pi: ExtensionAPI) {
 		prompted = true;
 		sessionModel = ctx.model ?? sessionModel;
 		adoptPiSkills(event.systemPromptOptions.skills ?? [], ctx.cwd);
-		// With the skill tool, the listing above is the one skills instruction:
-		// drop pi's "read the file" section from the prompt (a child agent's own
-		// prompt carries it; the main session's prompt is rebuilt without it).
-		if (!pi.getActiveTools().includes("skill") || typeof event.systemPrompt !== "string") return;
+		// The listing above is the one skills instruction: drop pi's own section
+		// from the prompt (a child agent's own prompt carries it; the main
+		// session's prompt is rebuilt without it).
+		if (typeof event.systemPrompt !== "string") return;
 		const stripped = withoutPiSkillsBlock(event.systemPrompt);
 		return stripped === event.systemPrompt ? undefined : { systemPrompt: stripped };
 	});
@@ -335,6 +341,18 @@ export default function skillExtension(pi: ExtensionAPI) {
 	let sessionUsage: { usage: ReturnType<typeof readUsage>; now: Date } | undefined;
 
 	/** The listing, within Claude Code's budget for the session model's context window. */
+	/** The skills listing for a session without the skill tool: each skill's file, to read. */
+	const readableListing = (reader: string): string | undefined => {
+		const lines = index()
+			.filter((skill) => !skill.kind && !skill.disableModelInvocation && skill.path)
+			.map((skill) => {
+				const text = listingDescription(skill);
+				return `- ${skill.name}${text ? `: ${text}` : ""} (${skill.path})`;
+			});
+		if (lines.length === 0) return undefined;
+		return `The following skills provide specialized instructions for specific tasks. Read a skill's file with ${reader} when the task matches its description:\n\n${lines.join("\n")}`;
+	};
+
 	const describe = () => {
 		sessionUsage ??= { usage: readUsage(pluginRoot(getAgentDir())), now: new Date() };
 		const { usage, now } = sessionUsage;

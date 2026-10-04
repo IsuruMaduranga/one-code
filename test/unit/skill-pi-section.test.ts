@@ -69,9 +69,12 @@ describe("skill extension: one skills instruction per session", () => {
 		expect(result?.systemPrompt).toBe("You are an agent.");
 	});
 
-	it("without the skill tool: keeps pi's section and lists nothing", async () => {
+	it("without the skill tool: strips pi's section and lists each skill's file to read", async () => {
 		const { listings, result } = await turn(["read", "bash"]);
-		expect(listings).toEqual([]);
-		expect(result?.systemPrompt).toBeUndefined();
+		expect(result?.systemPrompt).toBe("You are an agent.");
+		expect(listings).toHaveLength(1);
+		expect(listings[0]).toContain("Read a skill's file with the read tool when the task matches its description");
+		expect(listings[0]).toMatch(/- demo: A demo skill \(.*demo\/SKILL\.md\)/);
+		expect(listings[0]).not.toContain("Skill tool");
 	});
 });
