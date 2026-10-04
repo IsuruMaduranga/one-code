@@ -68,6 +68,7 @@ import {
 import { registerLocalCommand } from "../lib/local-command.ts";
 import { claudeSourcesOn } from "../lib/config-mode.ts";
 import { claudeJsonPath } from "../lib/paths.ts";
+import { consentDialog, startupConsentReady } from "../lib/consent-dialogs.ts";
 
 /** Anthropic's hard limit on a tool name; a longer one fails the whole request. */
 const MAX_TOOL_NAME_LENGTH = 128;
@@ -341,7 +342,7 @@ export default function mcpExtension(pi: ExtensionAPI) {
 	/** How the consent check asks, tells and records a "No", for startup and for Reconnect alike. */
 	const consentDeps = (ctx: ExtensionContext): McpTrustDeps => ({
 		hasUI: ctx.hasUI,
-		select: (title, options) => ctx.ui.select(title, options),
+		select: (title, options) => consentDialog(pi.events, (signal) => ctx.ui.select(title, options, { signal })),
 		notify: (message) => {
 			if (ctx.hasUI) ctx.ui.notify(message, "warning");
 			else process.stderr.write(`${message}\n`);
@@ -388,8 +389,13 @@ export default function mcpExtension(pi: ExtensionAPI) {
 		// server needs the user's consent first (trust.ts — a cloned repo must not
 		// run commands at startup). Everything else connects.
 		const candidates = servers.filter((server) => !disabledNames.has(server.name) && !server.missingEnv?.length);
-		const consent = await approveMcpServers(candidates, pluginConfigPaths, ctx.cwd, home, consentDeps(ctx));
-		if (!alive()) return;
+		// Reserve the modal position before the asynchronous policy read, so the
+		// external-includes dialog cannot jump ahead of MCP's startup consent.
+		const consent = await consentDialog(pi.events, (signal) => approveMcpServers(candidates, pluginConfigPaths, ctx.cwd, home, {
+			...consentDeps(ctx),
+			select: (title, options) => ctx.ui.select(title, options, { signal }),
+		}));
+		if (!consent || !alive()) return;
 		withheldNames.clear();
 		for (const { server, reason } of consent.withheld) {
 			withheldNames.set(
@@ -568,6 +574,9 @@ export default function mcpExtension(pi: ExtensionAPI) {
 			// `failures`, so this only catches setup bugs — surface them loud.
 			if (ctx.hasUI) ctx.ui.notify(`MCP startup failed: ${(error as Error).message}`, "error");
 		});
+		// The external-includes question follows the startup hooks/MCP consent,
+		// but does not wait for slow server connections.
+		startupConsentReady(pi.events);
 		connecting.finally(() => {
 			connectSettled = true;
 			// The session may be gone by now (/clear while a remote server was still

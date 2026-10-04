@@ -1,6 +1,7 @@
 /** Regression probes from the claude-context independent-mode audit. */
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import claudeContextExtension from "../../extensions/claude-context/index.ts";
 import systemReminderExtension from "../../extensions/system-reminder/index.ts";
@@ -12,8 +13,7 @@ import { stubHome } from "./helpers/home.ts";
 
 let root: string;
 beforeEach(() => {
-	mkdirSync(join(process.cwd(), ".scratch"), { recursive: true });
-	root = mkdtempSync(join(process.cwd(), ".scratch", "claude-context-audit-"));
+	root = mkdtempSync(join(tmpdir(), "claude-context-audit-"));
 	stubHome(join(root, "home"));
 	vi.stubEnv("ONECODE_STATE_DIR", join(root, "onecode-state"));
 	resetConfigModeForTest("independent");

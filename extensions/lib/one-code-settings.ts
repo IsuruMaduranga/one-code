@@ -25,7 +25,7 @@ import { join } from "node:path";
 import { readJsonFile, writeJsonAtomic } from "./atomic-write.ts";
 import { findProjectRoot } from "./git.ts";
 import { projectSlug } from "./memory.ts";
-import { oneCodeStateDir } from "./paths.ts";
+import { oneCodeStateDir, tryRealpath } from "./paths.ts";
 
 /** `~/.onecode/settings.json` — One Code's user-scope settings (writable). */
 export function oneCodeSettingsPath(home: string, env: NodeJS.ProcessEnv = process.env): string {
@@ -38,7 +38,8 @@ export function oneCodeSettingsPath(home: string, env: NodeJS.ProcessEnv = proce
  * worktrees and subdirectories), else the cwd — the same slug the memory dir uses.
  */
 export function oneCodeProjectSettingsPath(cwd: string, home: string, env: NodeJS.ProcessEnv = process.env): string {
-	return join(oneCodeStateDir(env, home), "projects", projectSlug(findProjectRoot(cwd) ?? cwd), "settings.json");
+	const root = findProjectRoot(cwd) ?? cwd;
+	return join(oneCodeStateDir(env, home), "projects", projectSlug(tryRealpath(root) ?? root), "settings.json");
 }
 
 /**

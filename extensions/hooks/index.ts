@@ -64,6 +64,7 @@ import { projectHooksApproved } from "./trust.ts";
 import { QueuedDelivery } from "../lib/queued-delivery.ts";
 import { SKILL_INVOCATION_TYPE, type SkillInvocationDetails } from "../skill/invoke.ts";
 import { isNotificationDetails } from "../lib/notifications.ts";
+import { consentDialog } from "../lib/consent-dialogs.ts";
 
 /** Claude Code's `hook_additional_context` attachment text (utils/messages.ts). */
 export function hookContextText(event: CcHookEvent, text: string): string {
@@ -158,7 +159,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 				hasUI: ctx.hasUI,
 				noPrompt: ctx.sessionEnded,
 				signal: ctx.signal,
-				confirm: (title, message) => ctx.ui.confirm(title, message, { signal: ctx.signal }),
+				confirm: (title, message) => consentDialog(pi.events, (signal) => ctx.ui.confirm(title, message, { signal: signal && ctx.signal ? AbortSignal.any([signal, ctx.signal]) : signal ?? ctx.signal })),
 				notify: (message) => notify(ctx, message),
 			});
 		}

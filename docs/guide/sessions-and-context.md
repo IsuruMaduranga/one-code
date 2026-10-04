@@ -26,14 +26,37 @@ it would there. The block contains, in order:
 4. **Today's date**, as your own clock shows it. If a session runs past
    midnight, the model hears the new date on its next turn.
 
-`@path` references inside a `CLAUDE.md` are expanded in place, up to five
-levels deep, so a file that imports shared instructions keeps working.
+`@path` references inside a `CLAUDE.md` load shared instructions recursively.
 Paths resolve relative to the importing file; `~/` resolves to your home
 directory. References inside code spans and fenced blocks are left alone.
 
 A `CLAUDE.md` larger than 40,000 characters, or a set of instruction files
 whose total exceeds that, triggers a warning at startup so you can trim it.
 Run `/memory` to open any of these files.
+
+### External instruction imports
+
+At interactive startup, One Code asks **Allow external CLAUDE.md file imports?**
+when project instructions (including `AGENTS.md`, private local instructions,
+and startup `.claude/rules`) import files outside the working directory.
+**No, disable external imports** is the default; Escape also records No.
+User-global instruction imports do not require this project approval.
+
+Both answers are remembered in `~/.onecode/projects/<slug>/settings.json`,
+never in Claude Code's files or the checkout. Subdirectories, symlink aliases,
+and linked worktrees share their repository's answer; outside Git, it applies
+to the working directory. Yes also covers future external imports. Only allow
+this for projects and imported files you trust, never third-party repositories.
+
+Use `/config` → **External CLAUDE.md includes** to change the answer. The row
+appears when external imports are detected. Changes affect future instruction
+loads (including nested instructions and compaction), not text already in the
+conversation or its frozen first-message block. Starting a new session loads
+the instructions under the saved answer.
+
+Print/JSON runs without a UI never ask and leave unapproved external imports
+out of context without recording a decision. Pi's RPC mode has a dialog UI:
+clients must answer the `extension_ui_request` before the first model request.
 
 ### ONECODE.md
 

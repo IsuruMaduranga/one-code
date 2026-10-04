@@ -1,11 +1,12 @@
 /**
  * Claude Code rules fidelity: the rule scanner is deliberately separate from
  * normal CLAUDE.md import expansion, so exercise its filesystem and wiring
- * contracts together here. All fixtures stay below this checkout's .scratch.
+ * contracts together here. Fixtures use TMPDIR, outside the checkout's instructions.
  */
 import * as fs from "node:fs";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
+import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import claudeContextExtension from "../../extensions/claude-context/index.ts";
 import {
@@ -25,11 +26,8 @@ vi.mock("node:fs", async (load) => {
 	return { ...actual, existsSync: vi.fn(actual.existsSync) };
 });
 
-// Do not use os.tmpdir(): rule containment is significant, and fixtures need
-// to be inside the disposable checkout even when the host's temp directory is
-// elsewhere. Resolve the parent once so every assertion uses canonical paths.
-mkdirSync(join(process.cwd(), ".scratch"), { recursive: true });
-const scratch = realpathSync(join(process.cwd(), ".scratch"));
+// Resolve the parent once so containment assertions use canonical paths.
+const scratch = realpathSync(tmpdir());
 let fixture = "";
 
 function makeFixture(name = "claude-rules-"): string {

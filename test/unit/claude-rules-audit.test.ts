@@ -1,5 +1,6 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { readRuleInstructions } from "../../extensions/lib/claude-rules.ts";
 import { discoverContextFiles } from "../../extensions/lib/claude-context.ts";
@@ -11,8 +12,7 @@ function write(path: string, content: string): string {
 	return path;
 }
 beforeEach(() => {
-	mkdirSync(join(process.cwd(), ".scratch"), { recursive: true });
-	root = realpathSync(mkdtempSync(join(process.cwd(), ".scratch", "rules-audit-")));
+	root = realpathSync(mkdtempSync(join(tmpdir(), "rules-audit-")));
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 

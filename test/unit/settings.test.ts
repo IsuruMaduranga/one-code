@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -131,7 +131,8 @@ describe("loadPermissionSettings", () => {
 		write(join(home, ".claude", "settings.json"), { permissions: { allow: ["Bash(ls:*)"] } });
 		mkdirSync(join(home, ".onecode"), { recursive: true });
 		write(join(home, ".onecode", "settings.json"), { permissions: { allow: ["Read"] } });
-		const projectDir = join(home, ".onecode", "projects", cwd.replace(/[^A-Za-z0-9-]/g, "-"));
+		// The per-repo slug is taken from the resolved root (macOS TMPDIR sits behind a symlink).
+		const projectDir = join(home, ".onecode", "projects", realpathSync(cwd).replace(/[^A-Za-z0-9-]/g, "-"));
 		mkdirSync(projectDir, { recursive: true });
 		write(join(projectDir, "settings.json"), { permissions: { allow: ["Bash(npm test:*)"] } });
 
