@@ -102,3 +102,22 @@ export function skillListingText(skills: ReadonlyArray<ListedSkill>, budget = Nu
 export function frontmatterFlag(value: unknown): boolean {
 	return value === true || value === "true";
 }
+
+/** Where pi's own skills section starts in a rendered system prompt (`formatSkillsForPrompt`). */
+const PI_SKILLS_HEAD = "\n\nThe following skills provide specialized instructions for specific tasks.";
+const PI_SKILLS_TAIL = "</available_skills>";
+
+/**
+ * `prompt` without pi's own skills section ("Use the read tool to load a
+ * skill's file …" and its `<available_skills>` list), unchanged when it has
+ * none. A session with the skill tool lists skills for that tool instead, and
+ * a child agent's prompt (pi appends the section to an agent's own prompt)
+ * otherwise told it both "read the file" and "call the skill tool first".
+ */
+export function withoutPiSkillsBlock(prompt: string): string {
+	const start = prompt.indexOf(PI_SKILLS_HEAD);
+	if (start === -1) return prompt;
+	const end = prompt.indexOf(PI_SKILLS_TAIL, start);
+	if (end === -1) return prompt;
+	return prompt.slice(0, start) + prompt.slice(end + PI_SKILLS_TAIL.length);
+}

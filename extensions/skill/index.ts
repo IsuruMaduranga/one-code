@@ -55,7 +55,7 @@ import {
 } from "./invoke.ts";
 import { codeReviewBody } from "./code-review.ts";
 import { decodeSkillsKey } from "./panel/keys.ts";
-import { frontmatterFlag, skillListingBudget, skillListingText, usageScore } from "./listing.ts";
+import { frontmatterFlag, skillListingBudget, skillListingText, usageScore, withoutPiSkillsBlock } from "./listing.ts";
 import { renderSkillsPanel, type SkillsPaint } from "./panel/render.ts";
 import { applySkillsKey, initialSkillsState, type SkillsRow, visibleRows } from "./panel/state.ts";
 import { announceArgumentHint, type CommandHint, frontmatterCommandHint } from "../lib/argument-hints.ts";
@@ -155,7 +155,10 @@ export default function skillExtension(pi: ExtensionAPI) {
 			};
 		});
 		// Claude Code lists skills as a <system-reminder> on the first user message
-		// (its block 3), framed for the Skill tool — not in the system prompt.
+		// (its block 3), framed for the Skill tool — not in the system prompt. A
+		// session without that tool (an agent limited to read and bash) keeps
+		// pi's own section instead, which says to read the file.
+		if (!pi.getActiveTools().includes("skill")) return;
 		const listing = describe();
 		if (listing !== "(no skills available)") {
 			pi.events.emit(REMINDER_CHANNEL, {
@@ -171,6 +174,12 @@ export default function skillExtension(pi: ExtensionAPI) {
 		prompted = true;
 		sessionModel = ctx.model ?? sessionModel;
 		adoptPiSkills(event.systemPromptOptions.skills ?? [], ctx.cwd);
+		// With the skill tool, the listing above is the one skills instruction:
+		// drop pi's "read the file" section from the prompt (a child agent's own
+		// prompt carries it; the main session's prompt is rebuilt without it).
+		if (!pi.getActiveTools().includes("skill") || typeof event.systemPrompt !== "string") return;
+		const stripped = withoutPiSkillsBlock(event.systemPrompt);
+		return stripped === event.systemPrompt ? undefined : { systemPrompt: stripped };
 	});
 	// The first turn a background completion opens (lib/prompt-options.ts)
 	// carries the same listing a typed first prompt would.
