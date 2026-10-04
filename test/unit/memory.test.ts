@@ -47,13 +47,17 @@ describe("memoryPromptSection", () => {
 		expect(memoryPromptSection(dir, true)).toBe(memoryPromptSection(dir, true));
 	});
 
-	it("verbose mode adds the long weak-model spec and differs from compact", () => {
+	it("verbose mode adds the long spec and differs from compact", () => {
 		const dir = "/Users/u/.claude/projects/-p/memory";
 		const verbose = memoryPromptSection(dir, true);
-		expect(verbose).toContain("# Memory");
+		expect(verbose.startsWith("# auto memory\n")).toBe(true);
+		expect(verbose).toContain("write to it directly with the write tool");
 		expect(verbose).toContain(`${dir}/`);
 		expect(verbose).toContain("## Types of memory");
-		expect(verbose).toContain("## What NOT to save");
+		expect(verbose).toContain("## What NOT to save in memory");
+		expect(verbose).toContain("## How to save memories");
+		expect(verbose).toContain("## Before recommending from memory");
+		expect(verbose).not.toMatch(/\s$/); // the composer adds the blank line after it
 		expect(verbose).toContain("MEMORY.md");
 		expect(verbose).not.toBe(memoryPromptSection(dir, false));
 	});

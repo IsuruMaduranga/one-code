@@ -2,20 +2,19 @@
 name: code-review
 description: >
   Review the current diff, or a PR number/branch/path target, for correctness
-  bugs and reuse/simplification/efficiency cleanups. Pass --comment to post
-  findings as inline PR comments, or --fix to apply the findings to the working
-  tree after the review. Raise the reasoning effort (/effort) for broader,
-  recall-biased coverage; lower it for fewer, high-confidence findings.
-argument-hint: "[--fix] [--comment] [<pr#>|<branch>|<path>]"
+  bugs (plus reuse/simplification/efficiency cleanups where the model's review
+  recipe covers them) at the given effort level (low/medium: fewer,
+  high-confidence findings; high→max: broader coverage, may include uncertain
+  findings); with no level given, it follows the session's effort (/effort).
+  Pass --comment to post findings as inline PR comments, or --fix to apply the
+  findings to the working tree after the review.
+argument-hint: "[low|medium|high|xhigh|max] [--fix] [--comment] [<pr#>|<branch>|<path>]"
 ---
 
 `medium effort → 3+5 angles × 6 candidates → 1-vote verify → ≤8 findings`
 
-You are reviewing for **precision**: every finding you surface should be one a
-maintainer would act on. If the session is running at a higher reasoning effort,
-shift toward **recall** — catch every real bug a careful reviewer would catch in
-one sitting, err on the side of surfacing, and raise the finding cap and the
-number of finder angles accordingly.
+You are reviewing for **precision** at medium effort: every finding you surface
+should be one a maintainer would act on.
 
 ## Phase 0 — Gather the diff
 
@@ -30,9 +29,7 @@ review that target instead. Treat this diff as the review scope.
 
 Run **8 independent finder angles** via the Agent tool. Each
 surfaces **up to 6 candidate findings** with `file`, `line`, a one-line
-`summary`, and a concrete `failure_scenario`. If the Agent tool is not available
-in your current tool set, do not error — perform each angle (and each
-verification) yourself, sequentially, in this context.
+`summary`, and a concrete `failure_scenario`. If the Agent tool is not available in your current tool set, do not error — perform each angle (and each verification) yourself, sequentially, in this context.
 
 ### Angle A — line-by-line diff scan
 
@@ -82,10 +79,11 @@ alternative.
 
 ### Altitude
 
-Check that each change is implemented at the right depth, not as a fragile
-bandaid. Special cases layered on shared infrastructure are a sign the fix
-isn't deep enough — prefer generalizing the underlying mechanism over adding
-special cases.
+Check that each change fixes the root cause at the right depth rather than
+patching a symptom with a fragile bandaid. Special cases layered on shared
+infrastructure are a sign the fix isn't deep enough — prefer the simpler, more
+general change to the underlying mechanism over adding special cases, and name
+that change.
 
 ### Conventions (CLAUDE.md)
 
@@ -128,8 +126,7 @@ Keep candidates where the vote is CONFIRMED or PLAUSIBLE.
 
 ## Output
 
-Return findings as a JSON array of at most 8 objects (raise the cap when running
-at higher effort):
+Return findings as a JSON array of at most 8 objects:
 
 ```json
 [
@@ -142,8 +139,10 @@ at higher effort):
 ]
 ```
 
-Ranked most-severe first. If more than the cap survive, keep the most severe. If
-nothing survives verification, return `[]`.
+Ranked most-severe first. If more than 8 survive, keep the 8 most
+severe. If nothing survives verification, return `[]`. Do not call the
+ReportFindings tool even if it is available - this review's
+output contract is the JSON block above.
 
 ## Arguments and flags
 

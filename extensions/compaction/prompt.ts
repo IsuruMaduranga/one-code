@@ -4,7 +4,8 @@
  * COMPACTION_INSTRUCTION matches Claude Code's: appended as a user text block
  * after the full conversation, the model answers with an <analysis> block
  * followed by a <summary> block, and only the <summary> content becomes the
- * surviving context. Auto-compaction uses the same prompt.
+ * surviving context. Auto-compaction uses the same prompt. Two lines end in a
+ * space, as Claude Code's do; they are written `\x20` so editors keep them.
  *
  * Claude Code runs the call on the *session's own model* with max_tokens
  * 128000 (findings §47), keeping the system prompt, tools, and message
@@ -88,7 +89,7 @@ Here's an example of how your output should be structured:
 5. Problem Solving:
    [Description of solved problems and ongoing troubleshooting]
 
-6. All user messages:
+6. All user messages:\x20
     - [Detailed non tool use user message]
     - [...]
 
@@ -106,7 +107,7 @@ Here's an example of how your output should be structured:
 </summary>
 </example>
 
-Please provide your summary based on the conversation so far, following this structure and ensuring precision and thoroughness in your response.
+Please provide your summary based on the conversation so far, following this structure and ensuring precision and thoroughness in your response.\x20
 
 There may be additional summarization instructions provided in the included context. If so, remember to follow these instructions when creating the above summary. Examples of instructions include:
 <example>

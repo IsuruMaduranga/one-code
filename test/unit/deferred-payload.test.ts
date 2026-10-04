@@ -8,12 +8,16 @@ import {
 } from "../../extensions/lib/deferred.ts";
 
 describe("supportsToolReferences", () => {
-	it("mirrors pi's rule: first-party Claude 4.5+, never Haiku", () => {
+	it("is first-party Claude 4.5+ and Haiku 4.5, not older Haikus or gateways", () => {
 		expect(supportsToolReferences({ provider: "anthropic", id: "claude-sonnet-5" })).toBe(true);
 		expect(supportsToolReferences({ provider: "anthropic", id: "claude-opus-4-5-20251101" })).toBe(true);
 		expect(supportsToolReferences({ provider: "anthropic", id: "claude-fable-5-1" })).toBe(true);
 		expect(supportsToolReferences({ provider: "anthropic", id: "claude-opus-4-1" })).toBe(false);
-		expect(supportsToolReferences({ provider: "anthropic", id: "claude-haiku-4-5" })).toBe(false);
+		expect(supportsToolReferences({ provider: "anthropic", id: "claude-haiku-4-5" })).toBe(true);
+		expect(supportsToolReferences({ provider: "anthropic", id: "claude-haiku-4-5-20251001" })).toBe(true);
+		expect(supportsToolReferences({ provider: "anthropic", id: "claude-haiku-4" })).toBe(false);
+		expect(supportsToolReferences({ provider: "anthropic", id: "claude-3-5-haiku" })).toBe(false);
+		expect(supportsToolReferences({ provider: "openrouter", id: "anthropic/claude-haiku-4.5" })).toBe(false);
 		expect(supportsToolReferences({ provider: "openrouter", id: "anthropic/claude-sonnet-5" })).toBe(false);
 		expect(supportsToolReferences(undefined)).toBe(false);
 	});
@@ -110,12 +114,38 @@ describe("stabilizeDeferredTools", () => {
 			role: "user",
 			content: [
 				{ type: "tool_result", tool_use_id: "toolu_1", is_error: false, content: [{ type: "tool_reference", tool_name: "web_fetch" }] },
-				{ type: "text", text: "Loaded web_fetch. These tools are now callable.", cache_control: breakpoint },
+				{ type: "text", text: "Tool loaded.", cache_control: breakpoint },
 			],
 		});
 		// Never mutates the input.
 		expect(payload.tools[2]).toHaveProperty("cache_control");
 		expect((payload.messages[2] as { content: unknown[] }).content).toHaveLength(1);
+	});
+
+	it("references the tools in the query's order and keeps a not-found note and later blocks beside them", () => {
+		const payload = {
+			tools: [
+				{ name: "read", input_schema: {} },
+				{ name: "tool_search", input_schema: {} },
+				{ name: "lsp_diagnostics", input_schema: {} },
+				{ name: "web_fetch", input_schema: {} },
+			],
+			messages: [
+				{ role: "user", content: [{ type: "text", text: "hi" }] },
+				{ role: "assistant", content: [{ type: "tool_use", id: "toolu_1", name: "tool_search", input: {} }] },
+				{ role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "Loaded web_fetch, lsp_diagnostics. These tools are now callable.\n<total_tokens>9 tokens left</total_tokens>" }] },
+			],
+		};
+		const out = stabilizeDeferredTools(payload, registry, deferred, new Map([["toolu_1", ["web_fetch", "lsp_diagnostics"]]]))!;
+		const message = (out.messages as Array<{ content: Array<Record<string, unknown>> }>)[2];
+		expect(message.content[0].content).toEqual([
+			{ type: "tool_reference", tool_name: "web_fetch" },
+			{ type: "tool_reference", tool_name: "lsp_diagnostics" },
+		]);
+		expect(message.content[1]).toEqual({ type: "text", text: "Tool loaded.\n<total_tokens>9 tokens left</total_tokens>" });
+		const noted = { ...payload, messages: payload.messages.map((m, i) => (i === 2 ? { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "Loaded web_fetch. These tools are now callable. Not found (…): x." }] } : m)) };
+		const kept = stabilizeDeferredTools(noted, registry, deferred, new Map([["toolu_1", ["web_fetch"]]]))!;
+		expect((kept.messages as Array<{ content: Array<{ text?: string }> }>)[2].content[1].text).toContain("Not found");
 	});
 
 	it("keeps the rewritten result stable on later requests, where the breakpoint has moved on", () => {
@@ -133,7 +163,7 @@ describe("stabilizeDeferredTools", () => {
 		const messages = out.messages as Array<{ content: Array<Record<string, unknown>> }>;
 		expect(messages[2].content).toEqual([
 			{ type: "tool_result", tool_use_id: "toolu_1", is_error: false, content: [{ type: "tool_reference", tool_name: "web_fetch" }] },
-			{ type: "text", text: "Loaded web_fetch. These tools are now callable." },
+			{ type: "text", text: "Tool loaded." },
 		]);
 		// The use after the load is untouched, and so is its breakpoint.
 		expect(messages[4].content[0]).toHaveProperty("cache_control");

@@ -20,9 +20,11 @@ import { type BashFinishSummary, runBackgroundBashBlocking, startBackgroundBash,
 import { createTaskNotifier, oneShotNote, sessionOutlivesTurn, shellSummary, type TaskStatus, taskNotification } from "./notifications.ts";
 import { commandToEvaluate, trackOriginalCommands } from "./original-command.ts";
 import { persistIfLarge, sessionResultsDir } from "./persisted-output.ts";
+import { withClaudeCodeShellText } from "./shell-result.ts";
 import type { ShellSpawn } from "./shell-spawn.ts";
 import { keepSpillReadable } from "./spill-file.ts";
 import { ccWrapBuiltinRenderers, linesComponent, resultLines } from "./tui-render.ts";
+import { registerVariantTool } from "./tool-variants.ts";
 
 // The completion notification carries status + exit code + where the output is,
 // plus only a short tail: a finished build used to push 30 KB (~8k tokens) into
@@ -126,7 +128,13 @@ export function taskLogPath(ctx: ExtensionContext, taskId: string): string | und
 	}
 }
 
-export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: ShellToolSpec<P>): void {
+/**
+ * Register the shell tool; the returned setter registers it again with a new
+ * description (a no-op when the text is unchanged), for a description that
+ * follows the session (lib/tool-variants.ts). Everything else — the notifier,
+ * the original-command tracker, execute — is built once.
+ */
+export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: ShellToolSpec<P>): (description: string) => void {
 	// A completion whose output task_output just returned is withdrawn (CC's
 	// delivered_as_tool_result) — the model already has it.
 	const notifyTask = createTaskNotifier(pi, { withdrawOnDelivery: true });
@@ -141,7 +149,7 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 	// "Took Ns" that counted permission-prompt wait disappears.
 	const wrapped = ccWrapBuiltinRenderers<{ command?: string }>(spec.ccLabel, spec.base, { title: (a) => a?.command });
 
-	pi.registerTool({
+	const definition = {
 		name: spec.name,
 		label: spec.base.label,
 		description: spec.description,
@@ -187,10 +195,12 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 			if (!params.run_in_background) {
 				// pi spills a long output to os.tmpdir(), outside every readable root;
 				// move it where the model's read of it is a working-space read.
-				return keepSpillReadable(
+				// Then Claude Code's result text (`Exit code N` first, trimmed output).
+				const result = await keepSpillReadable(
 					() => spec.foreground(ctx.cwd).execute(toolCallId, { command: params.command, timeout: timeoutSeconds }, signal, onUpdate, ctx),
 					sessionResultsDir(ctx),
 				);
+				return withClaudeCodeShellText(result, spec.name);
 			}
 
 			const shell = spec.backgroundShell();
@@ -279,5 +289,6 @@ export function registerShellTool<P extends TObject>(pi: ExtensionAPI, spec: She
 				details: { taskId: id, logPath },
 			};
 		},
-	} as ToolDefinition<P>);
+	} as ToolDefinition<P>;
+	return registerVariantTool(pi, spec.description, (description) => ({ ...definition, description }) as unknown as ToolDefinition);
 }

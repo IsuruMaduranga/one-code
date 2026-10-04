@@ -6,18 +6,29 @@
  * stay transient: the session file never contains them. This extension owns
  * the one queue instance; every other extension reaches it over
  * `one-code:system-reminder` (lib/reminders.ts has the placement contract).
+ *
+ * On a model that takes a mid-conversation system message (lib/system-role.ts),
+ * its `before_provider_request` hook then lifts the session-fact blocks off the
+ * first user message into one system message after it, Claude Code's layout.
+ * It loads before tool-search and compaction, so replays and forks inherit it.
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { CLEAR_AT_BETA, MID_CONVERSATION_SYSTEM_BETA, reseatMessageMark, withBetas } from "../lib/anthropic-payload.ts";
 import {
 	appendReminderBlocks,
+	framedReminderText,
 	injectReminders,
+	movesToSystemRole,
 	openingUserAnchor,
 	REMINDER_CHANNEL,
 	ReminderQueue,
 	type ReminderPayload,
 	tailAnchor,
 } from "../lib/reminders.ts";
+import { claudeFamily } from "../lib/model-tier.ts";
+import { instructionRole, messagesKey, type MovedBlock, systemRoleLayout, wireShape, withSystemRoleContext } from "../lib/system-role.ts";
+import { resolveCountdowns, withTurnBudgetMessages } from "../lib/turn-budget-layout.ts";
 
 /**
  * Roles a reminder can be attached to (see injectReminders). `custom` is a
@@ -30,6 +41,10 @@ const ANCHOR_ROLES = new Set(["user", "toolResult", "compactionSummary", "custom
 
 export default function systemReminderExtension(pi: ExtensionAPI) {
 	const reminderQueue = new ReminderQueue();
+	/** The blocks the last `context` pass placed for the system message; the payload hook moves them. */
+	let moved: MovedBlock[] = [];
+	/** The tool results' countdowns the last `context` pass lifted, by call id (lib/turn-budget-layout.ts). */
+	let countdowns = new Map<string, number>();
 
 	pi.events.on(REMINDER_CHANNEL, (data) => {
 		const payload = data as ReminderPayload;
@@ -44,8 +59,11 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 				order: payload.order,
 				suffix: payload.suffix,
 				raw: payload.raw,
+				systemRoleOnly: payload.systemRoleOnly,
+				skipStackCarrier: payload.skipStackCarrier,
 				since: payload.since,
 				once: payload.once,
+				toolCallId: payload.toolCallId,
 			});
 		}
 	});
@@ -60,31 +78,77 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 	// applyPostToolUseOutcome / isAppendedReminderText).
 	pi.on("tool_result", (event) => {
 		if (!reminderQueue.hasPendingOneShots) return;
-		const entries = reminderQueue.takeOneShots();
+		const entries = reminderQueue.takeOneShots(event.toolCallId);
+		if (entries.length === 0) return;
 		return { content: appendReminderBlocks(event.content, entries) };
 	});
 
-	pi.on("context", (event) => {
-		if (reminderQueue.size === 0) return;
+	/** The request's messages with the queued reminders placed, or the input when nothing can be placed. */
+	const withReminders = (messages: Parameters<typeof injectReminders>[0], layout: ReturnType<typeof systemRoleLayout>) => {
+		if (reminderQueue.size === 0) return messages;
 		// injectReminders is a no-op when there is nothing to attach to. Only
 		// consume the queue once there is somewhere to put the reminders, so they
 		// survive to the next eligible request.
-		if (!event.messages.some((m) => ANCHOR_ROLES.has(m.role))) return;
+		if (!messages.some((m) => ANCHOR_ROLES.has(m.role))) return messages;
 		// A one-shot that arrived after the last tool result was stored (a mode
 		// change while idle, a deferred-tool miss whose call had no tool_result
 		// hook) rides this request's tail — and stays pinned there afterwards.
 		if (reminderQueue.hasPendingOneShots) {
-			const anchor = tailAnchor(event.messages);
+			const anchor = tailAnchor(messages);
 			if (anchor) reminderQueue.pin(anchor);
 		}
 		// A local-command breadcrumb rides the prompt that opens a request, before
 		// the user's text (Claude Code's placement), and stays there. Mid-turn —
 		// the request ends in a tool result — it waits for the next prompt.
 		if (reminderQueue.hasPending("user-prepend")) {
-			const anchor = openingUserAnchor(event.messages);
+			const anchor = openingUserAnchor(messages);
 			if (anchor) reminderQueue.pin(anchor, "user-prepend");
 		}
-		const reminders = reminderQueue.drain(event.messages);
-		return { messages: injectReminders(event.messages, reminders) };
+		// A block meant only for the system message is left out where there is none.
+		const reminders = reminderQueue.drain(messages).filter((entry) => layout || !entry.systemRoleOnly);
+		if (layout) {
+			moved = reminders
+				.filter((entry) => entry.placement === "first-prepend" && movesToSystemRole(entry.order))
+				.sort((a, b) => a.order - b.order)
+				.map((entry) => ({ framed: framedReminderText(entry), inner: entry.text }));
+		}
+		return injectReminders(messages, reminders);
+	};
+
+	pi.on("context", (event, ctx) => {
+		moved = [];
+		countdowns = new Map();
+		const layout = systemRoleLayout(ctx.model);
+		const messages = withReminders(event.messages, layout);
+		// Each tool result's stored <total_tokens> countdown, on every request so
+		// the layout never depends on the queue: lifted for a system message or
+		// framed, while the result's blocks are still separate (lib/turn-budget-layout.ts).
+		const resolved = ctx.model && wireShape(ctx.model.api) ? resolveCountdowns(messages, layout !== undefined) : undefined;
+		if (resolved) countdowns = resolved.left;
+		const out = resolved?.messages ?? messages;
+		return out === event.messages ? undefined : { messages: out };
+	});
+
+	pi.on("before_provider_request", (event, ctx) => {
+		const model = ctx.model;
+		const shape = model ? wireShape(model.api) : undefined;
+		if (!model || !shape) return undefined;
+		const layout = systemRoleLayout(model);
+		const role = instructionRole(shape, model);
+		let payload = event.payload as Record<string, unknown>;
+		if (layout) payload = withSystemRoleContext(payload, layout, moved, role) ?? payload;
+		// Claude Code's per-turn <total_tokens> shapes; first-party Fable also
+		// gets its clear_at nudge after each tool result.
+		const firstParty = model.provider === "anthropic";
+		const nudge = layout === "anthropic" && firstParty && claudeFamily(model.id) === "fable";
+		const markers = process.env.CC_TOTAL_TOKENS !== "0";
+		payload = withTurnBudgetMessages(payload, { shape, systemRole: layout !== undefined, role, left: countdowns, nudge, markers }) ?? payload;
+		if (payload === event.payload) return undefined;
+		if (shape === "anthropic") {
+			const key = messagesKey(shape);
+			payload = { ...payload, [key]: reseatMessageMark(payload[key] as Array<{ role?: unknown; content?: unknown }>) };
+		}
+		if (layout !== "anthropic" || !firstParty) return payload;
+		return withBetas(payload, nudge ? [MID_CONVERSATION_SYSTEM_BETA, CLEAR_AT_BETA] : [MID_CONVERSATION_SYSTEM_BETA]);
 	});
 }

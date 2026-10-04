@@ -69,7 +69,7 @@ import { actionResolvedPaths } from "../auto-mode/resolved-paths-meta.ts";
 import { projectMemoryDir } from "../lib/memory.ts";
 import { sessionResultsDir } from "../lib/persisted-output.ts";
 import { privateSessionScratchpadDir } from "../lib/scratchpad.ts";
-import { REMINDER_CHANNEL } from "../lib/reminders.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL, type ReminderPayload } from "../lib/reminders.ts";
 import {
 	decide,
 	extractSubject,
@@ -131,10 +131,10 @@ import {
 	type WorkspaceDirRow,
 } from "./panel/state.ts";
 import { builtinRuleCounts } from "../auto-mode/rules.ts";
+import { autoModeSystemNote } from "../auto-mode/system-note.ts";
 import { announceArgumentHint } from "../lib/argument-hints.ts";
+import { userDenialText } from "../lib/user-denial.ts";
 
-const DENIED_BY_USER =
-	"The user doesn't want to proceed with this tool use. The tool use was rejected. Adjust your approach based on the user's feedback instead of retrying the same call.";
 const DENIED_NON_INTERACTIVE =
 	"Permission required but this session is non-interactive, so the user cannot approve the call. It was blocked. Only pre-approved tools can run here; work within those, or ask the user to re-run interactively or with an allow rule / --dangerously-skip-permissions.";
 // Must agree with the plan-mode reminder (plan-mode/reminder.ts): the plan is
@@ -299,6 +299,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	let bypassInCycle = false;
 	/** Whether auto mode is a stop on the cycle — only when a classifier model is reachable. */
 	let autoInCycle = false;
+	/** Whether this conversation's first turn has decided on Claude Code's auto-mode note. */
+	let autoNoteDecided = false;
 	let deny: PermissionRule[] = [];
 	let ask: PermissionRule[] = [];
 	let allow: PermissionRule[] = [];
@@ -848,6 +850,23 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		process.env[MODE_ENV] = mode;
 	};
 
+	// Claude Code's auto-mode note joins the mid-conversation system message
+	// when the conversation opens in auto mode, decided once on its first turn
+	// so message 1 never changes later (auto-mode/system-note.ts).
+	pi.on("turn_start", (_event, ctx) => {
+		if (autoNoteDecided) return;
+		autoNoteDecided = true;
+		if (mode !== "auto" || !ctx.model) return;
+		pi.events.emit(REMINDER_CHANNEL, {
+			text: autoModeSystemNote(ctx.model.id),
+			scope: "every-turn",
+			key: "auto-mode-note",
+			placement: "first-prepend",
+			order: CONTEXT_ORDER.autoModeNote,
+			systemRoleOnly: true,
+		} satisfies ReminderPayload);
+	});
+
 	pi.on("session_start", (event, ctx) => {
 		badgeCtx = ctx;
 		lastReviewCtx = ctx;
@@ -864,6 +883,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// one, its "don't ask again" grants and its pause state do not carry over
 		// (PERMISSIONS-REVIEW-2026-09-05 L1). A reload keeps them — same conversation.
 		if (event.reason !== "reload") {
+			autoNoteDecided = false;
 			sessionAllows.length = 0;
 			transcript.length = 0;
 			userMessages.length = 0;
@@ -1047,7 +1067,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	/** The block reason for a first-read prompt answered with Block or Ask again; undefined to run the read. */
 	const outsideReadRefusal = async (ctx: ExtensionContext, toolName: string, path: string): Promise<string | undefined> => {
 		const answer = await firstOutsideRead(ctx, toolName, path);
-		return answer === "allow" ? undefined : answer === "block" ? DENIED_CHOSE_BLOCK_OUTSIDE_READS : DENIED_BY_USER;
+		return answer === "allow" ? undefined : answer === "block" ? DENIED_CHOSE_BLOCK_OUTSIDE_READS : userDenialText();
 	};
 
 	/**
@@ -1369,7 +1389,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		const feedback = await serializePrompt(() => ctx.ui.input("What should the agent do instead?", "Optional — press Esc to skip"));
 		return {
 			block: true,
-			reason: feedback?.trim() ? `${DENIED_BY_USER}\n\nThe user said: ${feedback.trim()}` : DENIED_BY_USER,
+			reason: userDenialText(feedback),
 		};
 	});
 
@@ -1545,7 +1565,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		const feedback = await childPrompt(() => ctx.ui.input("What should the agent do instead?", "Optional — press Esc to skip", { signal: call.signal }));
 		return {
 			block: true,
-			reason: feedback?.trim() ? `${DENIED_BY_USER}\n\nThe user said: ${feedback.trim()}` : DENIED_BY_USER,
+			reason: userDenialText(feedback),
 		};
 	};
 

@@ -38,6 +38,11 @@ export interface TaskUpdateInput {
 	addBlockedBy?: string[];
 }
 
+/** A task id as the model may write it: tasks show as `#3`, so a leading `#` names task 3. */
+export function normalizeTaskId(id: string): string {
+	return id.startsWith("#") ? id.slice(1) : id;
+}
+
 export class TaskStore {
 	private tasks = new Map<string, TaskItem>();
 	private nextId = 1;
@@ -58,7 +63,7 @@ export class TaskStore {
 	}
 
 	get(id: string): TaskItem | undefined {
-		return this.tasks.get(id);
+		return this.tasks.get(normalizeTaskId(id));
 	}
 
 	list(): TaskItem[] {
@@ -73,9 +78,14 @@ export class TaskStore {
 		});
 	}
 
-	update(id: string, input: TaskUpdateInput): { task?: TaskItem; deleted?: boolean; error?: string } {
+	/**
+	 * Apply an update. `updatedFields` names what actually changed, in Claude
+	 * Code's order (its TaskUpdate result lists them).
+	 */
+	update(rawId: string, input: TaskUpdateInput): { task?: TaskItem; deleted?: boolean; error?: string; updatedFields?: string[] } {
+		const id = normalizeTaskId(rawId);
 		const task = this.tasks.get(id);
-		if (!task) return { error: `No task with id "${id}". Use task_list to see ids.` };
+		if (!task) return { error: `No task with id "${rawId}". Use task_list to see ids.` };
 
 		if (input.status === "deleted") {
 			this.tasks.delete(id);
@@ -86,17 +96,33 @@ export class TaskStore {
 			return { deleted: true };
 		}
 
-		if (input.subject !== undefined) task.subject = input.subject;
-		if (input.description !== undefined) task.description = input.description;
-		if (input.activeForm !== undefined) task.activeForm = input.activeForm;
-		if (input.status !== undefined) task.status = input.status;
-		if (input.owner !== undefined) task.owner = input.owner || undefined;
-
+		const updatedFields: string[] = [];
+		if (input.subject !== undefined && input.subject !== task.subject) {
+			task.subject = input.subject;
+			updatedFields.push("subject");
+		}
+		if (input.description !== undefined && input.description !== task.description) {
+			task.description = input.description;
+			updatedFields.push("description");
+		}
+		if (input.activeForm !== undefined && input.activeForm !== task.activeForm) {
+			task.activeForm = input.activeForm;
+			updatedFields.push("activeForm");
+		}
+		if (input.owner !== undefined && (input.owner || undefined) !== task.owner) {
+			task.owner = input.owner || undefined;
+			updatedFields.push("owner");
+		}
 		if (input.metadata) {
 			for (const [key, value] of Object.entries(input.metadata)) {
 				if (value === null) delete task.metadata[key];
 				else task.metadata[key] = value;
 			}
+			updatedFields.push("metadata");
+		}
+		if (input.status !== undefined && input.status !== task.status) {
+			task.status = input.status;
+			updatedFields.push("status");
 		}
 
 		// Separate a self-reference from a genuinely unknown id: link() rejects
@@ -104,19 +130,23 @@ export class TaskStore {
 		// task id" — sending the model to hunt a typo that isn't there.
 		const unknown: string[] = [];
 		let selfRef = false;
-		for (const other of input.addBlocks ?? []) {
+		const blocksBefore = task.blocks.length;
+		for (const other of (input.addBlocks ?? []).map(normalizeTaskId)) {
 			if (other === id) selfRef = true;
 			else if (!this.link(id, other)) unknown.push(other);
 		}
-		for (const other of input.addBlockedBy ?? []) {
+		if (task.blocks.length > blocksBefore) updatedFields.push("blocks");
+		const blockedByBefore = task.blockedBy.length;
+		for (const other of (input.addBlockedBy ?? []).map(normalizeTaskId)) {
 			if (other === id) selfRef = true;
 			else if (!this.link(other, id)) unknown.push(other);
 		}
+		if (task.blockedBy.length > blockedByBefore) updatedFields.push("blockedBy");
 		const errors: string[] = [];
 		if (selfRef) errors.push(`Task #${id} cannot block or be blocked by itself`);
 		if (unknown.length > 0) errors.push(`Unknown task id(s) in dependency list: ${unknown.join(", ")}`);
-		if (errors.length > 0) return { task, error: errors.join(". ") };
-		return { task };
+		if (errors.length > 0) return { task, error: errors.join(". "), updatedFields };
+		return { task, updatedFields };
 	}
 
 	/** Record "blocker blocks blocked" on both sides. False if either id is unknown. */

@@ -1,8 +1,14 @@
 /**
  * context-budget extension — Claude Code's `<total_tokens>N tokens left</total_tokens>`
- * line, in the three places CC puts it (budget.ts says what the number is):
+ * line, in the places CC puts it (budget.ts says what the number is). It
+ * stores the line in One Code's own way; system-reminder's payload hook turns
+ * the stored line into Claude Code's per-model shapes on the wire
+ * (lib/turn-budget-layout.ts):
  *
- * - the end of every user message: the constant budget, a raw `sticky-append`
+ * - the first prompt: the constant budget in the first-message context stack
+ *   (CONTEXT_ORDER.totalTokens), so it joins the mid-conversation system
+ *   message where there is one;
+ * - every later user message: the constant budget as a raw marker, a `sticky-append`
  *   reminder keyed once per session (`since: 0`, so a resumed session's earlier
  *   user messages carry it too — byte-identical to what they carried before);
  * - every tool result: the countdown, a RAW `last-append` one-shot queued at
@@ -12,7 +18,9 @@
  *   package manifest — pi runs `tool_result` handlers in load order, and the
  *   block must be queued before system-reminder's handler takes the one-shots.
  *   It emits only at runtime, never at load, so the "listeners load first" rule
- *   for the bus is not at stake;
+ *   for the bus is not at stake. The block is bound to its call's id: pi runs a
+ *   parallel batch's `tool_result` hooks concurrently, and unbound, the first
+ *   result would take every queued countdown and the others none;
  * - the system prompt, before the gitStatus block — appended by the
  *   system-prompt extension from the same pure module.
  *
@@ -22,10 +30,11 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { REMINDER_CHANNEL, type ReminderPayload } from "../lib/reminders.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL, type ReminderPayload } from "../lib/reminders.ts";
 import { totalTokensBlock, TurnBudget, turnTokenBudget } from "./budget.ts";
 
 const USER_MESSAGE_KEY = "total-tokens";
+const FIRST_PROMPT_KEY = "total-tokens-first";
 
 export default function contextBudgetExtension(pi: ExtensionAPI) {
 	const enabled = () => process.env.CC_TOTAL_TOKENS !== "0";
@@ -39,10 +48,19 @@ export default function contextBudgetExtension(pi: ExtensionAPI) {
 		pi.events.emit(REMINDER_CHANNEL, {
 			text: totalTokensBlock(budget.budget),
 			scope: "every-turn",
+			key: FIRST_PROMPT_KEY,
+			placement: "first-prepend",
+			order: CONTEXT_ORDER.totalTokens,
+		} satisfies ReminderPayload);
+		pi.events.emit(REMINDER_CHANNEL, {
+			text: totalTokensBlock(budget.budget),
+			scope: "every-turn",
 			key: USER_MESSAGE_KEY,
 			placement: "sticky-append",
 			raw: true,
 			since: 0,
+			// The first prompt carries the line in the context stack instead.
+			skipStackCarrier: true,
 		} satisfies ReminderPayload);
 	});
 
@@ -55,12 +73,13 @@ export default function contextBudgetExtension(pi: ExtensionAPI) {
 		busy = false;
 	});
 
-	pi.on("tool_result", (_event, ctx) => {
+	pi.on("tool_result", (event, ctx) => {
 		if (!enabled()) return;
 		pi.events.emit(REMINDER_CHANNEL, {
 			text: totalTokensBlock(budget.left(ctx.getContextUsage()?.tokens)),
 			placement: "last-append",
 			raw: true,
+			toolCallId: event.toolCallId,
 		} satisfies ReminderPayload);
 	});
 }

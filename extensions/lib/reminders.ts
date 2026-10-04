@@ -86,11 +86,16 @@ export type PinAnchor = { kind: "toolResult"; toolCallId: string } | { kind: "us
 
 /**
  * `order` values for the `first-prepend` context stack, matching Claude Code's
- * fixed sequence on the first user message: deferred tools → agent catalog → MCP
- * instructions → skills → the `# claudeMd` block (last, just before the user's
- * text). Gaps leave room for One Code-specific reminders (e.g. subagent models).
+ * fixed sequence on the first user message: environment → model line → deferred
+ * tools → agent catalog → MCP instructions → skills → the instructions block →
+ * the context block → the date (just before the user's text). Gaps leave room
+ * for One Code-specific reminders (e.g. subagent models). On a model that takes
+ * a mid-conversation system message, everything below `claudeMd`, and the date,
+ * moves into that message instead (`movesToSystemRole`, lib/system-role.ts).
  */
 export const CONTEXT_ORDER = {
+	environment: 1,
+	modelLine: 2,
 	deferredTools: 10,
 	subagentModels: 20,
 	agents: 21,
@@ -98,14 +103,32 @@ export const CONTEXT_ORDER = {
 	delegation: 22,
 	mcp: 30,
 	skills: 40,
+	/** Claude Code's auto-mode note; only in the system message (`systemRoleOnly`). */
+	autoModeNote: 45,
+	/** The `<total_tokens>` line the first prompt carries (later prompts: lib/turn-budget-layout.ts). */
+	totalTokens: 46,
 	// CLAUDE.md-family (with AGENTS.md as a per-directory fallback when a directory
 	// has no CLAUDE.md) — CLAUDE.md > AGENTS.md.
 	claudeMd: 50,
-	// One Code's own instructions ride in their own block AFTER the # claudeMd
+	// One Code's own instructions ride in their own block AFTER the instructions
 	// block (higher `order` = closer to the user text = higher precedence), so
 	// ONECODE.md takes precedence over CLAUDE.md/AGENTS.md. Not part of CC.
-	oneCodeMd: 60,
+	oneCodeMd: 52,
+	/** The user's email and the git snapshot. */
+	context: 54,
+	date: 56,
 } as const;
+
+/**
+ * Whether a `first-prepend` block of this order leaves the first user message
+ * for the mid-conversation system message on a model that takes one: the
+ * session facts below the instructions block, and the date, which Claude Code
+ * puts last in that message. The instructions, One Code's own block and the
+ * context block stay in the user message.
+ */
+export function movesToSystemRole(order: number): boolean {
+	return order < CONTEXT_ORDER.claudeMd || order === CONTEXT_ORDER.date;
+}
 
 /** A drained reminder with everything the injector needs to place it. */
 export interface ReminderEntry {
@@ -146,6 +169,17 @@ export interface ReminderEntry {
 	 * result. Defaults to false.
 	 */
 	raw?: boolean;
+	/**
+	 * `first-prepend` only: sent only inside the mid-conversation system
+	 * message, never on the user message of a model without one (Claude Code's
+	 * auto-mode note).
+	 */
+	systemRoleOnly?: boolean;
+	/**
+	 * `sticky-append` only: never on the message that carries the context
+	 * stack, which already says the same (the first prompt's `<total_tokens>`).
+	 */
+	skipStackCarrier?: boolean;
 }
 
 export interface ReminderPayload {
@@ -163,6 +197,10 @@ export interface ReminderPayload {
 	suffix?: string;
 	/** Emit the text bare, with no `<system-reminder>` frame. */
 	raw?: boolean;
+	/** `first-prepend` only: sent only inside the mid-conversation system message (see ReminderEntry). */
+	systemRoleOnly?: boolean;
+	/** `sticky-append` only: never on the message that carries the context stack (see ReminderEntry). */
+	skipStackCarrier?: boolean;
 	/** `user-prepend` only: skip when the same text is already pending (the shared caveat). */
 	once?: boolean;
 	/**
@@ -171,10 +209,18 @@ export interface ReminderPayload {
 	 * brought back (the `<total_tokens>` line rides every user message in CC).
 	 */
 	since?: number;
+	/**
+	 * `last-append` only: the tool call whose result this one-shot belongs to.
+	 * Only that result's `tool_result` hook takes it, so a parallel batch, whose
+	 * hooks interleave, gives each result its own block (the `<total_tokens>`
+	 * countdown) instead of the first result taking every queued copy.
+	 */
+	toolCallId?: string;
 }
 
 interface StoredReminder extends ReminderEntry {
 	key?: string;
+	toolCallId?: string;
 }
 
 type EnqueueOptions = {
@@ -184,10 +230,14 @@ type EnqueueOptions = {
 	order?: number;
 	suffix?: string;
 	raw?: boolean;
+	systemRoleOnly?: boolean;
+	skipStackCarrier?: boolean;
 	/** Test seam / explicit anchor for `sticky-append`; defaults to now. */
 	since?: number;
 	/** `user-prepend` only: skip when the same text is already pending. */
 	once?: boolean;
+	/** `last-append` only: the tool result whose hook takes it (see ReminderPayload). */
+	toolCallId?: string;
 };
 
 export class ReminderQueue {
@@ -211,7 +261,10 @@ export class ReminderQueue {
 			suffix: opts?.suffix,
 			key: opts?.key,
 			raw: opts?.raw,
+			toolCallId: opts?.toolCallId,
 		};
+		if (opts?.systemRoleOnly) entry.systemRoleOnly = true;
+		if (opts?.skipStackCarrier) entry.skipStackCarrier = true;
 		if (placement === "sticky-append") {
 			// A standing reminder re-emitted with the SAME text (plan mode re-emits
 			// every turn) keeps its anchor, so the blocks on earlier messages do not
@@ -246,11 +299,15 @@ export class ReminderQueue {
 
 	/**
 	 * Take the pending `last-append` one-shots out of the queue — for the
-	 * `tool_result` hook, which writes them into the stored result. Other
+	 * `tool_result` hook, which writes them into the stored result. A one-shot
+	 * bound to another call's result stays queued for that result's hook. Other
 	 * placements stay queued for the next request.
 	 */
-	takeOneShots(): ReminderEntry[] {
-		const { matching, rest } = partition(this.nextTurn, (r) => r.placement === "last-append");
+	takeOneShots(toolCallId?: string): ReminderEntry[] {
+		const { matching, rest } = partition(
+			this.nextTurn,
+			(r) => r.placement === "last-append" && (r.toolCallId === undefined || r.toolCallId === toolCallId),
+		);
 		this.nextTurn = rest;
 		return matching.map(strip);
 	}
@@ -327,6 +384,8 @@ function partition<T>(items: T[], test: (item: T) => boolean): { matching: T[]; 
 function strip(r: StoredReminder): ReminderEntry {
 	const entry: ReminderEntry = { text: r.text, placement: r.placement, order: r.order, suffix: r.suffix };
 	if (r.raw) entry.raw = true;
+	if (r.systemRoleOnly) entry.systemRoleOnly = true;
+	if (r.skipStackCarrier) entry.skipStackCarrier = true;
 	if (r.since !== undefined) entry.since = r.since;
 	if (r.opener !== undefined) entry.opener = r.opener;
 	if (r.tailPin) entry.tailPin = r.tailPin;
@@ -447,8 +506,13 @@ function toBlocks(content: string | ContentBlock[]): ContentBlock[] {
 	return typeof content === "string" ? [{ type: "text", text: content }] : [...content];
 }
 
+/** A reminder's text exactly as it rides a message: framed (unless raw), then its suffix. */
+export function framedReminderText(entry: Pick<ReminderEntry, "text" | "raw" | "suffix">): string {
+	return (entry.raw ? entry.text : wrapReminder(entry.text)) + (entry.suffix ?? "");
+}
+
 function reminderBlock(entry: ReminderEntry): TextContent {
-	return { type: "text", text: (entry.raw ? entry.text : wrapReminder(entry.text)) + (entry.suffix ?? "") };
+	return { type: "text", text: framedReminderText(entry) };
 }
 
 /**
@@ -552,6 +616,10 @@ export function injectReminders(messages: AgentMessage[], reminders: Array<strin
 		// on its tail; the queue pinned that message, which keeps it.
 		const pinned = entry.tailPin ? pinLocator(messages)(entry.tailPin) : -1;
 		if (pinned !== -1 && !carriers.includes(pinned)) carriers.unshift(pinned);
+		if (entry.skipStackCarrier && carriers.includes(firstUserIndex)) {
+			for (const index of carriers.filter((index) => index !== firstUserIndex).sort((a, b) => a - b)) push(after, index, [reminderBlock(entry)]);
+			continue;
+		}
 		if (carriers.length === 0) {
 			// No user turn and no pin yet (a caller without the queue): ride the tail.
 			push(after, tailIndex === -1 ? firstUserIndex : tailIndex, [reminderBlock(entry)]);

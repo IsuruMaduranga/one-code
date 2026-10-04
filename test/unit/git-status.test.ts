@@ -1,7 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { collectGitStatus, formatGitStatus, GIT_STATUS_MAX_CHARS, type GitRunner } from "../../extensions/system-prompt/git-status.ts";
+import { collectGitStatus, formatGitStatus, GIT_STATUS_MAX_CHARS, type GitRunner } from "../../extensions/lib/git-status.ts";
 
 /** A fake git runner keyed by the space-joined argv. */
 function fakeRunner(map: Record<string, string>): GitRunner {
@@ -22,7 +20,8 @@ describe("formatGitStatus", () => {
 		});
 		expect(block).toBe(
 			[
-				"gitStatus: This is the git status at the start of the conversation. Note that this status is a snapshot in time, and will not update during the conversation.",
+				"# gitStatus",
+				"This is the git status at the start of the conversation. Note that this status is a snapshot in time, and will not update during the conversation.",
 				"",
 				"Current branch: feature/x",
 				"",
@@ -110,30 +109,5 @@ describe("collectGitStatus", () => {
 		// At the limit exactly, nothing is cut.
 		const exact = "x".repeat(GIT_STATUS_MAX_CHARS);
 		expect(collectGitStatus("/x", fakeRunner({ ...base, "status --porcelain": exact }))).toContain(`Status:\n${exact}\n\nRecent`);
-	});
-});
-
-// Byte-exact validation against a real CC capture (internal-only; skipped where
-// absent, as in the public repo / CI).
-describe("against git-cc-sonnet.json capture", () => {
-	const capturePath = fileURLToPath(new URL("../../git-cc-sonnet.json", import.meta.url));
-	const run = existsSync(capturePath) ? it : it.skip;
-
-	run("formatGitStatus reproduces the captured gitStatus block from its fields", () => {
-		const payload = JSON.parse(readFileSync(capturePath, "utf8"));
-		const sys: string = payload.system
-			.map((b: { text?: string }) => b.text ?? "")
-			.join("\n");
-		const block = sys.slice(sys.indexOf("gitStatus:"));
-		expect(block).toBeTruthy();
-
-		// Parse the fields back out and re-format; equality proves labels + spacing.
-		const branch = /Current branch: (.*)/.exec(block)?.[1] ?? "";
-		const mainBranch = /Main branch \(you will usually use this for PRs\): (.*)/.exec(block)?.[1] ?? "";
-		const user = /Git user: (.*)/.exec(block)?.[1] ?? "";
-		const status = block.slice(block.indexOf("Status:\n") + "Status:\n".length, block.indexOf("\n\nRecent commits:"));
-		const commits = block.slice(block.indexOf("Recent commits:\n") + "Recent commits:\n".length);
-
-		expect(formatGitStatus({ branch, mainBranch, user, status, commits })).toBe(block);
 	});
 });

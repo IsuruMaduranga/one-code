@@ -188,14 +188,14 @@ export const STALE_REASON = (path: string) =>
 	`${path} has changed on disk since you last read it — someone else, a formatter, or a command may have modified it. Read it again before editing, or your change would overwrite theirs.`;
 
 /**
- * Claude Code's `edited_text_file` attachment text, with two additions: the
- * cause list also names a command (our tracker sees bash writes too), and the
- * closing clause tells the model to re-read before editing — CC marks the file
- * as read when it attaches the snippet, we deliberately do not (the stale-edit
- * guard keeps firing), so without that clause the model's next edit is blocked
- * and costs a round trip. The "intentional / don't revert / don't tell the
- * user" steer is CC's: without it a model mid-edit tends to restore its own
- * version and narrate linter noise (STEERING-REVIEW-2026-09-05 M5).
+ * Claude Code's `edited_text_file` attachment text, plus One Code's closing
+ * clause telling the model to re-read before editing: Claude Code marks the
+ * file as read when it attaches the snippet, we deliberately do not (the
+ * stale-edit guard keeps firing), so without that clause the model's next
+ * edit is blocked and costs a round trip. The "take it as the current state
+ * rather than reverting it" steer is Claude Code's: without it a model
+ * mid-edit tends to restore its own version and narrate linter noise
+ * (STEERING-REVIEW-2026-09-05 M5).
  */
 export const EXTERNAL_CHANGE_REMINDER = (path: string, excerpt: ChangeExcerpt) =>
-	`Note: ${path} was modified, either by the user, a linter, or a command, after you last read it. This change was intentional, so make sure to take it into account as you proceed (ie. don't revert it unless the user asks you to). Don't tell the user this, since they are already aware. Here are the relevant changes (shown with line numbers); re-read the file before editing it:\n${excerpt.text}`;
+	`Note: ${path} changed on disk since you last read it. That's usually deliberate, so take it as the current state rather than reverting it; if the change looks wrong, say so rather than undoing it yourself — otherwise no need to call it out. Here are the relevant changes (shown with line numbers); re-read the file before editing it:\n${excerpt.text}`;

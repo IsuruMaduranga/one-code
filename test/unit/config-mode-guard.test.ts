@@ -45,6 +45,8 @@ const CHECKED: Record<string, string> = {
 	"doctor/build.ts": "the mode line names what is read",
 	"doctor/fix-prompt.ts": "an independent-mode ground rule maps every Claude Code path it names",
 	"subagents/guide-agent.ts": "names the mode's own files",
+	"subagents/agent-description.ts": "Claude Code's Agent text; the agent folder it names follows the mode (agentDescription's configDir)",
+	"worktree/descriptions.ts": "Claude Code's EnterWorktree text; the worktree folder it names follows the mode (enterWorktreeDescription)",
 };
 
 /** Source without block and line comments, so a path named in prose is not a reader (`//` after `:` is a URL). */

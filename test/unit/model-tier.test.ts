@@ -16,10 +16,16 @@ function model(id: string, provider: string, inputCost?: number): Model<Api> {
 const noEnv = {} as NodeJS.ProcessEnv;
 
 describe("resolveModelTier", () => {
-	it("classifies first-party Anthropic Opus/Fable ≥4.7 as frontier", () => {
-		for (const id of ["claude-opus-4-7", "claude-opus-4-8", "claude-opus-5", "claude-fable-5"]) {
+	it("classifies first-party Anthropic Opus ≥4.8, Sonnet ≥5.5 and Fable as frontier", () => {
+		for (const id of ["claude-opus-4-8", "claude-opus-5", "claude-opus-5-5", "claude-sonnet-5-5", "claude-sonnet-6", "claude-fable-5", "claude-fable-5-1"]) {
 			expect(resolveModelTier(model(id, "anthropic"), noEnv)).toBe("frontier");
 		}
+	});
+
+	it("keeps Opus 4.7 and Sonnet 5 below frontier, as Claude Code gives them the long prompt", () => {
+		expect(resolveModelTier(model("claude-opus-4-7", "anthropic"), noEnv)).toBe("workhorse");
+		expect(resolveModelTier(model("claude-sonnet-5", "anthropic"), noEnv)).toBe("workhorse");
+		expect(resolveModelTier(model("claude-sonnet-5-5", "openrouter"), noEnv)).not.toBe("frontier");
 	});
 
 	it("classifies first-party OpenAI Astra/Sol ≥6 as frontier", () => {
@@ -34,10 +40,6 @@ describe("resolveModelTier", () => {
 		expect(resolveModelTier(model("gpt-6-luna", "openai", 0.1), noEnv)).toBe("cheap");
 		expect(resolveModelTier(model("openai/gpt-6-sol", "openrouter", 2), noEnv)).not.toBe("frontier");
 		expect(resolveModelTier(model("gpt-6-sol", "github-copilot", 2), noEnv)).not.toBe("frontier");
-	});
-
-	it("does NOT put Sonnet in frontier — it is workhorse", () => {
-		expect(resolveModelTier(model("claude-sonnet-5", "anthropic"), noEnv)).toBe("workhorse");
 	});
 
 	it("does not read a dated suffix as the minor version", () => {
