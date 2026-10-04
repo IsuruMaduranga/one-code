@@ -64,6 +64,13 @@ async function listWorktreePaths(cwd: string): Promise<string[]> {
 		.map((line) => line.slice("worktree ".length));
 }
 
+/**
+ * The worktree git-isolation guard, said when the session enters: before it,
+ * GPT-6 Sol and Astra both ran a read-only `git -C <main checkout> status`
+ * and met the refusal with no warning (2026-10-04 self-test).
+ */
+const ISOLATION_NOTE = "Git commands aimed at the main checkout or another worktree of this repository are refused until you exit.";
+
 export default function worktreeExtension(pi: ExtensionAPI) {
 	let state: WorktreeState | undefined;
 
@@ -175,7 +182,7 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 				const next: WorktreeState = { path: target, branch, createdByUs: false, originalCwd: ctx.cwd, sharedRoot: repoRoot };
 				applyState(next);
 				return {
-					content: [{ type: "text", text: `Switched into existing worktree ${target}${branch ? ` (branch ${branch})` : ""}.${branchNote} All work now happens there; exit_worktree returns to ${ctx.cwd}.` }],
+					content: [{ type: "text", text: `Switched into existing worktree ${target}${branch ? ` (branch ${branch})` : ""}.${branchNote} All work now happens there; exit_worktree returns to ${ctx.cwd}. ${ISOLATION_NOTE}` }],
 					details: { worktreeState: next } satisfies WorktreeDetails,
 				};
 			}
@@ -216,7 +223,7 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 				content: [
 					{
 						type: "text",
-						text: `Created worktree ${path} on branch ${branch} (from HEAD ${baseCommit.slice(0, 8)}). All commands and relative paths now run there; exit_worktree returns to ${ctx.cwd}.`,
+						text: `Created worktree ${path} on branch ${branch} (from HEAD ${baseCommit.slice(0, 8)}). All commands and relative paths now run there; exit_worktree returns to ${ctx.cwd}. ${ISOLATION_NOTE}`,
 					},
 				],
 				details: { worktreeState: next } satisfies WorktreeDetails,
