@@ -54,8 +54,11 @@ In the panel, press **f** to run the checkup on the report you're reading.
 ## Model presets
 
 A preset sets the main model and subagent model from the provider you're
-connected to. The classifier remains automatic. Only current-generation, priced
-models that support tool calls are considered.
+connected to. The classifier stays automatic, and each preset's preview shows
+the classifier its main model would get (see
+[Automatic model selection](providers-and-models.md#automatic-model-selection)).
+Only current-generation, priced models that support tool calls are considered
+for the main model.
 
 | Preset | Main model | Subagents | Classifier |
 |---|---|---|---|

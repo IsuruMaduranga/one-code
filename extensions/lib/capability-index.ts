@@ -28,7 +28,8 @@
  * `~/.claude`); the response is cached under the One Code state dir and
  * refreshed at most once a day, only from an interactive session, never awaited
  * in `session_start`; a one-shot run reads the cache alone. Without a key every
- * verdict is "unscored" and selection keeps its name-class rules.
+ * verdict is "unscored". Below-frontier classifier selection then retains the
+ * session model; other automatic roles keep their name-class rules.
  *
  * ## Matching (the hard part)
  *
@@ -58,8 +59,8 @@ export const SETTINGS_SNIPPET = '{ "capabilityIndex": { "artificialAnalysisApiKe
 /** The advice the doctor gives when no key is configured. */
 export const KEY_ADVICE =
 	`Add a free Artificial Analysis API key (create one at https://artificialanalysis.ai) as ${AA_KEY_ENV} in the environment ` +
-	`or ${SETTINGS_SNIPPET} in ~/.onecode/settings.json. With it, subagent and classifier picks are judged by measured coding ability ` +
-	"instead of model names alone.";
+	`or ${SETTINGS_SNIPPET} in ~/.onecode/settings.json. Confirmed scores can qualify cheaper classifier models below frontier ` +
+	"and judge other automatic picks by measured coding ability instead of model names alone.";
 
 export const REFRESH_AFTER_MS = 24 * 60 * 60 * 1000;
 export const FETCH_TIMEOUT_MS = 20_000;
@@ -425,9 +426,9 @@ export interface FloorVerdict {
  * any of the three lacks a non-reasoning row, all three fall back to the default
  * variant so the comparison stays on one basis. Delegated workers run with
  * thinking, so they are judged on the default variant, at the full floor; only
- * the reader may sit `READER_TOLERANCE` below it. Unscored means the caller
- * applies its name-class rule instead — the score never lowers a floor it
- * cannot measure.
+ * the reader may sit `READER_TOLERANCE` below it. Unscored leaves the decision
+ * to the caller: below-frontier classifiers require a pass for an alternate;
+ * frontier classifiers and other roles can apply their name-class fallback.
  */
 export function capabilityFloor(
 	snapshot: CapabilitySnapshot | undefined,

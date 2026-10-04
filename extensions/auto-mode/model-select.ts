@@ -53,9 +53,11 @@ export interface ClassifierNotice {
 
 /**
  * The ordered fallback chain for the permission classifier. Automatic entries
- * stay on the session provider/route, pass the shared capability floor, and
- * have a known catalog window at least as large as the session's. They are
- * ordered by numeric input cost; the session remains an availability fallback.
+ * stay on the session provider/route, pass the capability floor, and have a
+ * known catalog window at least as large as the session's. Below frontier,
+ * alternates require a measured pass; only frontier sessions may use unscored
+ * alternates by tier. Numeric input cost orders the qualifying models, with
+ * the session retained as an availability fallback.
  */
 export function classifierCandidates({
 	available,
@@ -84,12 +86,19 @@ export function classifierCandidates({
 		return { candidates, notices, fallback };
 	}
 
+	const frontierSession = atLeastTier(intrinsicTier(sessionModel), "frontier");
 	const floor = automaticTierFloor(sessionModel);
 	const snapshot = currentCapabilitySnapshot();
 	const capable = (model: Model<Api>) => {
 		const measured = capabilityFloor(snapshot, model, sessionModel, "classifier").verdict;
-		return measured === "pass" || (measured === "unscored" && atLeastTier(intrinsicTier(model), floor));
+		const isSession = model.provider === sessionModel.provider && model.id === sessionModel.id;
+		// A tier is not evidence that an alternate can match a below-frontier
+		// session. The session itself needs no measurement to remain eligible.
+		return measured === "pass" || (measured === "unscored" && (
+			frontierSession ? atLeastTier(intrinsicTier(model), floor) : isSession
+		));
 	};
+	const belowFrontierFallbackText = `Auto mode is screening calls with ${spec(sessionModel)}, this session's model, because no cheaper same-provider/route model is measured to be at least as capable while containing this session's ${sessionModel.contextWindow}-token catalog context window.`;
 	// `economicalContainedCandidates` supplies the existing containment, variant,
 	// generation, tool-capability, price-known and never-tiny gates. Its own
 	// cheap/workhorse/frontier ordering is deliberately replaced below: this policy
@@ -119,11 +128,15 @@ export function classifierCandidates({
 			const fallback: ClassifierFallback = hasAlternate
 				? {
 					reason: "session-is-cheapest-qualified",
-					text: `Auto mode is screening calls with ${spec(sessionModel)}, this session's model, because it is the cheapest same-provider/route model meeting the capability floor and this session's ${sessionModel.contextWindow}-token catalog context window.`,
+					text: frontierSession
+						? `Auto mode is screening calls with ${spec(sessionModel)}, this session's model, because it is the cheapest same-provider/route model meeting the capability floor and this session's ${sessionModel.contextWindow}-token catalog context window.`
+						: belowFrontierFallbackText,
 				}
 				: {
 					reason: "no-qualifying-model",
-					text: `Auto mode is screening calls with ${spec(sessionModel)}, this session's model, because no other same-provider/route model meets both the capability floor and this session's ${sessionModel.contextWindow}-token catalog context window.`,
+					text: frontierSession
+						? `Auto mode is screening calls with ${spec(sessionModel)}, this session's model, because no other same-provider/route model meets both the capability floor and this session's ${sessionModel.contextWindow}-token catalog context window.`
+						: belowFrontierFallbackText,
 				};
 			notices.push({ level: "info", text: fallback.text, fallbackReason: fallback.reason });
 			return { candidates, notices, fallback };
@@ -137,7 +150,9 @@ export function classifierCandidates({
 
 	const fallback: ClassifierFallback = {
 		reason: "no-qualifying-model",
-		text: `Auto mode is screening calls with ${spec(sessionModel)}, this session's model, because no same-provider/route model meets both the capability floor and this session's ${sessionModel.contextWindow}-token catalog context window.`,
+		text: frontierSession
+			? `Auto mode is screening calls with ${spec(sessionModel)}, this session's model, because no same-provider/route model meets both the capability floor and this session's ${sessionModel.contextWindow}-token catalog context window.`
+			: belowFrontierFallbackText,
 	};
 	push(sessionModel, "session");
 	notices.push({ level: "info", text: fallback.text, fallbackReason: fallback.reason });
@@ -184,7 +199,7 @@ export function describeCandidate(candidate: Candidate): string {
 	const where = modelIdentity(candidate.model).profile ?? candidate.model.provider;
 	switch (candidate.source) {
 		case "economical":
-			return `${name} (cheapest model within ${where} that meets the capability floor and contains the session catalog context window)`;
+			return `${name} (cheapest model within ${where} that meets the capability floor, measured for below-frontier sessions, and contains the session catalog context window)`;
 		case "session":
 			return `${name} (this session's model)`;
 	}

@@ -95,12 +95,26 @@ describe("buildDoctorReport", () => {
 		expect(text).toContain("Subagents and workflow agents: anthropic/claude-sonnet-5 — automatic");
 		// Classifier: workhorse floor on a frontier session → Sonnet, and the live pin is shown.
 		expect(text).toContain("Auto-mode classifier: anthropic/claude-sonnet-5");
+		expect(text).toContain("or an unscored workhorse-or-better model");
 		expect(text).toMatch(/screening this session on\s+anthropic\/claude-sonnet-5/);
 		expect(text).toContain("Permission mode: auto");
 		expect(text).toContain("Updates: up to date (0.2.1 is the latest release)");
 		expect(text).toContain("ANTHROPIC (anthropic): ready — key saved by /login · 3 models");
 		expect(text).toContain("2 more providers without credentials");
 		expect(report.summary).toMatch(/^Ready\. Main model anthropic\/claude-opus-5, subagents on anthropic\/claude-sonnet-5, auto-mode classifier anthropic\/claude-sonnet-5\./);
+	});
+
+	it("explains below-frontier classifier retention without claiming names prove capability", () => {
+		const main = model("openai", "gpt-5.6-sol", 5, "openai-responses");
+		const cheaper = model("openai", "gpt-5.6-terra", 2, "openai-responses");
+		const facts = collectModelFacts([main, cheaper], { model: main, modelSource: "session" }, home, {});
+		expect(facts.classifier.model).toBe(main);
+		const text = modelsSection(facts, { model: main, modelSource: "session" }, []).lines.map((line) => line.text).join("\n");
+		expect(text).toContain("Auto-mode classifier: openai/gpt-5.6-sol (this session's model)");
+		expect(text).toContain("an alternate requires a measured capability pass");
+		expect(text).toContain("no cheaper same-provider/route model is measured to be at least as capable");
+		expect(text).toContain("Capability scores: none — below-frontier classifiers keep the session model");
+		expect(text).not.toContain("Capability scores: none — automatic picks use model names and generations only");
 	});
 
 	it("names the config sources mode, and says ~/.claude is not read in independent mode", () => {

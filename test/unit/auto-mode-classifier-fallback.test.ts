@@ -25,6 +25,8 @@ import {
 import { loadAutoModeConfig } from "../../extensions/auto-mode/config.ts";
 import { isModelUnavailableError } from "../../extensions/auto-mode/model-select.ts";
 import { MAX_ACTION_CHARS } from "../../extensions/auto-mode/transcript.ts";
+import { setCapabilitySnapshotForTest } from "../../extensions/lib/capability-index.ts";
+import { setModelFactsForTest } from "../../extensions/lib/model-facts.ts";
 
 const completeMock = vi.mocked(completeSimple);
 
@@ -52,9 +54,9 @@ const request = {
 };
 
 /**
- * An openai session where the chain is: gpt-5-mini (provider default) → session.
- * The session is itself cheap-tier so the classifier tier floor (M6) admits the
- * cheaper mini; a workhorse session would be screened by a workhorse.
+ * An openai session with a measured-capable cheaper mini, then the session.
+ * Synthetic equal scores keep these tests about provider failures and pinning,
+ * rather than letting the below-frontier measurement gate discard the mini.
  */
 const sessionModel = model("openai", "gpt-5.1-mini", 10);
 const miniModel = model("openai", "gpt-5-mini", 0.25);
@@ -78,9 +80,31 @@ function makeDeps(overrides: Partial<Parameters<typeof classify>[1]> = {}) {
 
 beforeEach(() => {
 	completeMock.mockReset();
+	const releaseDate = "2026-09-01";
+	setModelFactsForTest({
+		"openai/gpt-5.1-mini": { releaseDate },
+		"openai/gpt-5-mini": { releaseDate },
+	});
+	setCapabilitySnapshotForTest({
+		fetchedAt: "2026-10-05T00:00:00Z", source: "test", rows: [
+			{ id: "reference", slug: "claude-sonnet-5", creator: "anthropic", releaseDate, coding: 80 },
+			{ id: "session", slug: "gpt-5-1-mini", creator: "openai", releaseDate, coding: 70 },
+			{ id: "mini", slug: "gpt-5-mini", creator: "openai", releaseDate, coding: 70 },
+		],
+	});
 });
 
 describe("classify: pinning and fallback", () => {
+	it("screens on the below-frontier session and explains why when alternates are unscored", async () => {
+		setCapabilitySnapshotForTest(undefined);
+		completeMock.mockResolvedValue(allowReply());
+		const { deps, notices } = makeDeps();
+		expect((await classify(request, deps)).decision).toBe("allow");
+		expect(deps.state.pinned?.id).toBe(sessionModel.id);
+		expect(completeMock.mock.calls[0]?.[0]).toBe(sessionModel);
+		expect(notices.some((notice) => notice.includes("no cheaper same-provider/route model is measured to be at least as capable"))).toBe(true);
+	});
+
 	it("reports a model the provider refuses as unusable, so the subagent selector can skip it too", async () => {
 		// The Codex "not supported when using Codex with a ChatGPT account" case:
 		// mini is refused, the classifier steps on, and the refusal is published

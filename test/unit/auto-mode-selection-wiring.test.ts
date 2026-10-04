@@ -46,6 +46,19 @@ describe("automatic classifier selection wiring", () => {
 		expect(notify.mock.calls.some(([text]) => /gpt-5.6-terra/.test(text))).toBe(true);
 	});
 
+	it("announces the measured fallback below frontier and replaces it on a frontier switch", async () => {
+		const belowFrontier = model("gpt-5.6-sol", 272_000, 5);
+		ctx.model = belowFrontier;
+		await fake.fire("session_start", { reason: "startup" }, ctx);
+		expect(statuses.at(-1)?.classifier).toBe("openai-codex/gpt-5.6-sol");
+		const notify = (ctx.ui as { notify: ReturnType<typeof vi.fn> }).notify;
+		expect(notify.mock.calls.some(([text]) => /no cheaper same-provider\/route model is measured to be at least as capable/.test(text))).toBe(true);
+		ctx.model = small;
+		await fake.fire("model_select", { model: small }, ctx);
+		expect(statuses.at(-1)?.classifier).toBe("openai-codex/gpt-5.6-terra");
+		await fake.fire("session_shutdown", {}, ctx);
+	});
+
 	it("removes the model command, completion, and setting display without rewriting legacy settings", async () => {
 		const settings = join(home, ".onecode", "settings.json");
 		const legacy = JSON.stringify({ autoMode: { classifierModel: "openai-codex/gpt-5.6-terra" } });

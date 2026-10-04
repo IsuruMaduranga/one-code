@@ -157,6 +157,13 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 		const live = session.permission?.classifier;
 		const pinned = session.permission?.pinned && live ? ` — screening this session on ${live}` : "";
 		lines.push({ text: `Auto-mode classifier: ${classifier.description ?? modelSpec(classifier.model)}${pinned}`, level: "ok" });
+		lines.push({
+			text: facts.sessionTier === "frontier"
+				? "Classifier policy: measured capability pass, or an unscored workhorse-or-better model; cheapest qualifying model first."
+				: "Classifier policy: an alternate requires a measured capability pass; otherwise this session's model screens calls. Cheapest qualifying model first.",
+			indent: 1,
+			level: "dim",
+		});
 	} else {
 		lines.push({ text: "Auto-mode classifier: none — auto mode stays out of the mode cycle until a model is available", level: "warn" });
 	}
@@ -197,7 +204,7 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 	} else if (cap.keyConfigured) {
 		lines.push({ text: "Capability scores: key configured, snapshot not fetched yet — it downloads in the background on the next interactive start", level: "dim" });
 	} else {
-		lines.push({ text: "Capability scores: none — automatic picks use model names and generations only", level: "warn" });
+		lines.push({ text: "Capability scores: none — below-frontier classifiers keep the session model; other automatic picks use model names and generations", level: "warn" });
 		findings.push({ level: "warn", text: "No Artificial Analysis key: subagent and classifier picks cannot be judged by measured coding ability.", fix: KEY_ADVICE });
 	}
 
@@ -210,7 +217,7 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 	if (facts.sessionTier === "tiny") {
 		findings.push({
 			level: "warn",
-			text: `${modelSpec(main)} is classed as a tiny-tier model by the latest capability data; automatic selection excludes tiny models for subagents and the classifier.`,
+			text: `${modelSpec(main)} is classed as a tiny-tier model by the latest capability data; automatic alternatives exclude tiny models, but the session model remains the classifier fallback.`,
 			fix: "For coding work pick a cheap- or workhorse-tier model with /model; see /doctor presets.",
 		});
 	}

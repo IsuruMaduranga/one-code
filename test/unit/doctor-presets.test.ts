@@ -28,7 +28,7 @@ describe("computePresets", () => {
 		expect(byName.balanced.main.id).toBe("claude-sonnet-5");
 		expect(byName.balanced.current).toBe(true);
 		expect(byName.balanced.subagents).toMatchObject({ setting: "auto" });
-		expect(byName.balanced.subagents.model.id).toBe("claude-sonnet-5"); // workhorse floor (shared with the classifier): nothing cheaper qualifies
+		expect(byName.balanced.subagents.model.id).toBe("claude-sonnet-5"); // Subagent tier floor: nothing cheaper qualifies.
 		expect(byName.balanced.classifier?.id).toBe("claude-sonnet-5");
 		expect(byName.quality.main.id).toBe("claude-opus-5");
 		expect(byName.quality.subagents.model.id).toBe("claude-opus-5");
@@ -91,6 +91,19 @@ describe("computePresets", () => {
 		const { presets } = computePresets(catalog, catalog[2]);
 		expect(presets.find((p) => p.name === "quality")?.main.id).toBe("gpt-6-astra"); // not the pricier, prior-generation gpt-5-pro
 		expect(presets.find((p) => p.name === "economical")?.main.id).toBe("gpt-5.6-luna"); // not the tool-less row
+	});
+
+	it("previews a below-frontier main as its classifier rather than an unscored cheaper peer", () => {
+		const main = model("openai", "gpt-5.6-sol", 5, "openai-responses");
+		const cheaper = model("openai", "gpt-5.6-terra", 2, "openai-responses");
+		const result = computePresets([main, cheaper], main);
+		const quality = result.presets.find((preset) => preset.name === "quality")!;
+		expect(quality.main).toBe(main);
+		expect(quality.classifier).toBe(main);
+		expect(describePresetChanges(quality)[2]).toBe("auto-mode classifier stays automatic (picks openai/gpt-5.6-sol)");
+		const text = presetsSection(result, main).lines.map((line) => line.text).join("\n");
+		expect(text).toContain("below frontier, an alternate requires measured capability");
+		expect(text).toContain("Frontier sessions also accept unscored workhorse-or-better models");
 	});
 
 	it("never lands the economical preset on a tiny model while a capable one exists", () => {

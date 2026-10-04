@@ -34,7 +34,7 @@ export const PRESET_LABEL: Record<PresetName, string> = {
 };
 
 export const PRESET_INTENT: Record<PresetName, string> = {
-	economical: "lowest cost — one cheap model for everything",
+	economical: "lowest-cost main model, with subagents inheriting it",
 	balanced: "a capable main model, delegated work on the cheapest model at its floor",
 	quality: "the strongest model for the main session and its subagents",
 };
@@ -163,6 +163,10 @@ export function presetsSection(result: ReturnType<typeof computePresets>, sessio
 		lines.push({ text: "No priced models on this provider, so tiers cannot be told apart and no preset is offered.", level: "dim" });
 		return { title: "Presets", lines };
 	}
+	lines.push({
+		text: "Classifier previews use each preset's main model: below frontier, an alternate requires measured capability; otherwise the main model screens calls. Frontier sessions also accept unscored workhorse-or-better models.",
+		level: "dim",
+	});
 	const family = sessionModel ? sessionModel.provider : "";
 	for (const preset of result.presets) {
 		const sub = preset.subagents.setting === "inherit" ? "same" : shortId(preset.subagents.model);

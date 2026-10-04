@@ -382,8 +382,8 @@ export function taskToolsEnabled(
 
 /**
  * The ordered candidate chain for an automatic *secondary* model — the same
- * mechanism the auto-mode classifier and subagents both consume, so a session
- * screens and delegates on one economical same-provider model.
+ * mechanism the auto-mode classifier and subagents both consume before their
+ * role-specific capability gates decide which models qualify.
  *
  * The chain is:
  *   - **contained** to the session's provider (and route/family on gateways):
@@ -503,11 +503,9 @@ export function cheaperContainedCandidates(
  * The weakest tier an AUTOMATIC pick may run on for a session: workhorse when
  * the session itself is workhorse or frontier (Claude Code's `min(main, sonnet)`
  * classifier rule), cheap otherwise (a cheap session has nothing cheaper and
- * capable; `tiny` is excluded upstream regardless). Shared by the auto-mode
- * classifier and the subagent default since 2026-09-11: a delegated worker
- * writes code and calls tools for many turns, and a weak one spends the saving
- * on retries — so both roles are held to one floor and, on most providers, one
- * model (working-docs/decisions/model-policy.md).
+ * capable; `tiny` is excluded upstream regardless). Used by frontier classifier
+ * sessions and the subagent default. Below-frontier classifiers require a
+ * measured pass for any alternate; a tier alone is not evidence of capability.
  */
 export function automaticTierFloor(sessionModel: Model<Api>): PromptTier {
 	const tier = intrinsicTier(sessionModel);
@@ -515,8 +513,8 @@ export function automaticTierFloor(sessionModel: Model<Api>): PromptTier {
 }
 
 /**
- * The floor-gated form the classifier and the subagent default share: the
- * cheaper contained candidates (`cheaperContainedCandidates`) that either
+ * The subagent default's floor-gated form: the cheaper contained candidates
+ * (`cheaperContainedCandidates`) that either
  * measurably reach the role's capability floor (an Artificial Analysis
  * snapshot, when one exists — `capability-index.ts`) or, unscored, sit at or
  * above `automaticTierFloor(sessionModel)` by name class. Measured failures are

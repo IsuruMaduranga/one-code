@@ -87,14 +87,17 @@ For its side roles, One Code chooses a model from the **same provider** as
 your session; automatic picks never send your data to another provider. The
 choice is the cheapest model that clears a capability floor:
 
-- **Subagents and the classifier** share a capability floor: a Sonnet-class
-  model when your session runs a Sonnet-class or stronger model, and a
-  Haiku-class model otherwise. A subagent is never dearer than your main
-  model; if nothing cheaper qualifies, it runs on the main model.
-- **The classifier** additionally requires a known catalog context window at
-  least as large as your session model's. It chooses the cheapest qualifying
-  model automatically, re-evaluating when you switch models. If no model
-  qualifies, or the session window is unknown, it uses the session model.
+- **Subagents** use a Sonnet-class capability floor for a Sonnet-class or
+  stronger session, and a Haiku-class floor otherwise. A subagent is never
+  dearer than your main model; if nothing cheaper qualifies, it uses the main model.
+- **The classifier** only swaps in a cheaper model when it can show that
+  model is at least as good as yours. If your session runs below frontier
+  tier, that means a measured capability score; a model's name or tier isn't
+  enough. With no score to go on, your own model screens its calls, tiny-tier
+  models included. Frontier sessions can also use an unscored workhorse-tier
+  or better model, so Opus and Sonnet 5.5 screen with Sonnet 5, and GPT-6
+  Astra and Sol with Terra. Whatever gets picked has to fit your session's
+  whole context window, and the pick is redone when you switch models.
 - **The reader** (web fetch answers, recaps) uses the cheapest capable
   model.
 
@@ -104,8 +107,8 @@ otherwise to the matching class within your provider (`haiku` the cheapest
 capable model, `sonnet` the cheapest Sonnet-class model, `opus` and `fable`
 your main model). They never switch providers.
 
-Capability is judged by tier (see the next section). One Code excludes
-models that can't call tools, have no price, or are a generation behind: a
+Where a role accepts unscored models, it judges them by tier (see the next
+section). One Code never picks models that can't call tools, have no price, or are a generation behind: a
 model released more than a year after its vendor's newest drops one tier,
 and one more than two years behind never gets picked automatically.
 Provider aliases such as `:free` or `:online` variants are skipped.
@@ -133,8 +136,10 @@ listing is scored like its OpenAI twin. Set `AA_API_KEY`, or add the key to `~/.
 ```
 
 The snapshot is cached under `~/.onecode/cache/` and refreshed at most once
-a day. Without a key, selection uses tiers alone. The measured index never
-changes the prompt tier itself.
+a day. Without scores, a session below frontier keeps screening with its own
+model, while subagents, the reader and frontier classifiers fall back to
+tiers. The classifier compares scores with thinking off when every model in
+the comparison has one, and default-effort scores otherwise.
 
 `/doctor report` shows the model each role gets and why, and `/doctor
 presets` offers three coordinated presets; see
