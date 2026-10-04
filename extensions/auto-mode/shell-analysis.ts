@@ -801,6 +801,22 @@ export interface AnalyzeInput {
 }
 
 /**
+ * Whether this simple command's words have the pre-gate's read-only proof.
+ * Reuse the entire analyzer, including option/operand rules and git's checkout
+ * checks, rather than treating a command name as a proof. No expansions,
+ * nested commands or stdin scripts are exempted by this narrower predicate.
+ * Redirects are NOT exempted: callers must still scan them independently.
+ * Pure apart from the analyzer's existing filesystem reads.
+ */
+export function hasReadOnlyShellWords(segment: Segment, cwd: string, home: string): boolean {
+	if (segment.substitution !== undefined || segment.stdin?.length || segment.tokens.some((word) => word.dynamic || word.glob)) return false;
+	const { command, peeled, pathNamed } = resolvePayload(segment.tokens);
+	if (peeled.length || pathNamed.length || !(READ_ONLY_COMMANDS.has(command) || command === "git" || command === "find")) return false;
+	const evidence = analyzeShellCommand({ command: segment.raw, cwd, home });
+	return evidence.commands.length === 1 && evidence.writes.length === 0 && (evidence.verdict === "safe" || evidence.readOnlyOutside);
+}
+
+/**
  * Classify a shell command. Never denies — see the module contract above.
  */
 export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], readableRoots = [], writableRoots = [] }: AnalyzeInput): ShellEvidence {

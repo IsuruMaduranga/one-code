@@ -26,7 +26,7 @@
  * fires on routine work teaches the user to approve without reading.
  */
 
-import { analyzeShellCommand, globComponentRegex, isUnknownTilde, LOOPS, movesDirectory, parseCommand, resolvePayload, scopedTracker } from "./shell-analysis.ts";
+import { analyzeShellCommand, globComponentRegex, hasReadOnlyShellWords, isUnknownTilde, LOOPS, movesDirectory, parseCommand, resolvePayload, scopedTracker } from "./shell-analysis.ts";
 import { claudeUserSettingsPath, managedSettingsPaths } from "../lib/claude-settings.ts";
 import { CONSENT_STORE_TAIL, consentStorePaths } from "../lib/consent-stores.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
@@ -181,8 +181,9 @@ export function safetyControlWrite({ toolName, input, cwd, home, oneCodeProjectS
 		// nested script), and until 2026-09-23 such a write reached neither this
 		// floor nor, when the pre-gate wrongly said "safe", the classifier
 		// (SECURITY-REVIEW-2026-09-23 H3). So for those the floor is textual, as
-		// the PowerShell one below: any word naming a gate-control file stops the
-		// call. A proven read (`cat .claude/settings.json`) is not stopped.
+		// the PowerShell one below: any unproven word naming a gate-control file
+		// stops the call. Proven read-only simple commands are excluded even in
+		// an escalated compound line; their redirects and nested code are not.
 		// `readOnlyOutside` means every command was proven read-only by its
 		// options and only the location escalated: a read, not a hidden write.
 		if (evidence.verdict === "escalate" && !evidence.readOnlyOutside) {
@@ -246,7 +247,7 @@ const CONTROL_FILE_TEXT =
 
 /**
  * The first word of a shell line that names a gate-control file, or
- * undefined. Every word counts, read or write, plus the value after an `=`
+ * undefined. Every word not proven read-only counts, plus the value after an `=`
  * (`--output=…`, `of=…`) and the words of a nested `sh -c '…'` script; `cd`
  * is followed, per subshell scope, so a relative name is resolved where the
  * shell would. Where the directory cannot be known (the line does not parse,
@@ -263,12 +264,16 @@ export function shellNamesControlFile(
 	/** Resolved once per top-level call, not once per word. */
 	forms: ReadonlySet<string> = controlFileForms(home, oneCodeProjectSettings),
 ): string | undefined {
-	const text = command.toLowerCase().replace(/\\/g, "/").replace(/\/\.\//g, "/").replace(/\/{2,}/g, "/");
-	const match = CONTROL_FILE_TEXT.exec(text);
-	if (match) return match[2];
-
-	const { segments, parseFailed } = parseCommand(command);
+	const { segments, parseFailed, unknownQuoting, unattributedExpansion } = parseCommand(command);
 	const dirs = scopedTracker(cwd);
+	const ignoredRanges: { start: number; end: number }[] = [];
+	// Functions/eval can replace a read-only command; loop headers and case
+	// subjects can change shell state outside the attributed words. Never use
+	// a partial parse, such a construct, or a nested script to subtract evidence.
+	const canProveWords = depth === 0 && !parseFailed && !unknownQuoting && !unattributedExpansion && !segments.some((segment) =>
+		segment.enclosing.some((construct) => LOOPS.has(construct) || construct === "function_definition" || construct === "case_statement") ||
+		["eval", "source", ".", "alias", "enable", "trap"].includes(resolvePayload(segment.tokens).command),
+	);
 
 	// Decided before the walk: in a loop, a word read before the `cd` runs after it on the next pass.
 	const unknownDir =
@@ -298,10 +303,23 @@ export function shellNamesControlFile(
 	// Lowercased on every platform: a false positive costs one stop.
 	const baseName = (path: string) => path.slice(path.replace(/\\/g, "/").lastIndexOf("/") + 1).toLowerCase();
 	const controlNames = new Set([...forms].map(baseName));
+	let shellChanged = false;
 	for (const segment of segments) {
 		const dir = dirs.get(segment);
 		const payload = resolvePayload(segment.tokens);
-		for (const word of [...segment.tokens.map((token) => token.value), ...segment.redirects, ...segment.inputs.map((token) => token.value)]) {
+		// A previous assignment or stateful builtin can change command lookup
+		// (PATH, a hash entry, shell options, …). Arithmetic commands and
+		// expansions can assign too. A standalone command proof cannot account
+		// for that state. Even inert assignments/expansions forfeit it.
+		shellChanged ||= !!segment.unknownTarget || !!segment.expandsIntoInput ||
+			segment.tokens.some((word) => word.dynamic || /^[A-Za-z_][A-Za-z0-9_]*(\[[^\]]*\])?\+?=/.test(word.value)) ||
+			["read", "readarray", "mapfile", "getopts", "printf", "export", "declare", "typeset", "local", "readonly", "unset", "set", "shopt", "hash", "let"].includes(payload.command);
+		// Pipeline output may itself be a script (`echo '…' | sh`); leave it
+		// textual, along with substitutions and any uncertain directory state.
+		const readOnly = canProveWords && !shellChanged && !unknownDir && segment.scopes.length === 0 &&
+			segment.wordRanges?.length === segment.tokens.length && hasReadOnlyShellWords(segment, dir, home);
+		if (readOnly) ignoredRanges.push(...segment.wordRanges!);
+		for (const word of [...(readOnly ? [] : segment.tokens.map((token) => token.value)), ...segment.redirects, ...segment.inputs.map((token) => token.value)]) {
 			if (depth < 3 && /\s/.test(word)) {
 				const nested = shellNamesControlFile(word, dir, home, oneCodeProjectSettings, depth + 1, forms);
 				if (nested) return nested;
@@ -312,6 +330,12 @@ export function shellNamesControlFile(
 				const resolved = resolveForContainment(toAbsoluteBash(dir, candidate, home));
 				if (resolved && namesControlFile(resolved, forms, true)) return candidate;
 				if (unknownDir && controlNames.has(baseName(candidate))) return candidate;
+				// find matches names beneath its search roots, not the shell's cwd.
+				// An unproven expression may delete/execute on any such match.
+				if (payload.command === "find") {
+					const pattern = globComponentRegex(baseName(candidate));
+					if (pattern && [...controlNames].some((name) => pattern.test(name))) return candidate;
+				}
 			}
 		}
 		if (payload.command === "cd" && !unknownDir) {
@@ -319,5 +343,17 @@ export function shellNamesControlFile(
 			if (target) dirs.set(segment, toAbsoluteBash(dir, target.value, home));
 		}
 	}
-	return undefined;
+	// Keep the raw-text fallback for syntax/words the walker cannot attribute,
+	// heredoc bodies included. Only exact source ranges of proven command
+	// words disappear; never use string replacement (the same text may also
+	// occur in a redirect or in an unproven command).
+	let unproven = "";
+	let at = 0;
+	for (const range of ignoredRanges.sort((a, b) => a.start - b.start)) {
+		unproven += command.slice(at, range.start) + " ";
+		at = range.end;
+	}
+	unproven += command.slice(at);
+	const text = unproven.toLowerCase().replace(/\\/g, "/").replace(/\/\.\//g, "/").replace(/\/{2,}/g, "/");
+	return CONTROL_FILE_TEXT.exec(text)?.[2];
 }
