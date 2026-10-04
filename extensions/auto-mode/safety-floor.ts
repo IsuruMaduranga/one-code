@@ -297,7 +297,7 @@ export function shellNamesControlFile(
 	/** Resolved once per top-level call, not once per word. */
 	forms: ReadonlySet<string> = controlFileForms(home, oneCodeProjectSettings),
 ): string | undefined {
-	const { segments, parseFailed, unknownQuoting, unattributedExpansion } = parseCommand(command);
+	const { segments, parseFailed, unknownQuoting, unattributedExpansion, pipelines } = parseCommand(command);
 	const dirs = scopedTracker(cwd);
 	const ignoredRanges: { start: number; end: number }[] = [];
 	// Functions/eval can replace a read-only command; loop headers and case
@@ -336,8 +336,11 @@ export function shellNamesControlFile(
 	// Lowercased on every platform: a false positive costs one stop.
 	const baseName = (path: string) => path.slice(path.replace(/\\/g, "/").lastIndexOf("/") + 1).toLowerCase();
 	const controlNames = new Set([...forms].map(baseName));
+	// First pass, in order: each segment's directory and whether its words
+	// alone are proven read-only. The cd tracking runs here so the second pass
+	// can look ahead at a whole pipeline.
 	let shellChanged = false;
-	for (const segment of segments) {
+	const facts = segments.map((segment) => {
 		const dir = dirs.get(segment);
 		const payload = resolvePayload(segment.tokens);
 		// A previous assignment or stateful builtin can change command lookup
@@ -347,10 +350,30 @@ export function shellNamesControlFile(
 		shellChanged ||= !!segment.unknownTarget || !!segment.expandsIntoInput ||
 			segment.tokens.some((word) => word.dynamic || /^[A-Za-z_][A-Za-z0-9_]*(\[[^\]]*\])?\+?=/.test(word.value)) ||
 			["read", "readarray", "mapfile", "getopts", "printf", "export", "declare", "typeset", "local", "readonly", "unset", "set", "shopt", "hash", "let"].includes(payload.command);
-		// Pipeline output may itself be a script (`echo '…' | sh`); leave it
-		// textual, along with substitutions and any uncertain directory state.
-		const readOnly = canProveWords && !shellChanged && !unknownDir && segment.scopes.length === 0 &&
+		const proven = canProveWords && !shellChanged && !unknownDir &&
 			segment.wordRanges?.length === segment.tokens.length && hasReadOnlyShellWords(segment, dir, home);
+		if (payload.command === "cd" && !unknownDir) {
+			const target = payload.args.find((token) => !token.value.startsWith("-"));
+			if (target) dirs.set(segment, toAbsoluteBash(dir, target.value, home));
+		}
+		return { dir, payload, proven };
+	});
+	// Pipeline output may itself be a script (`echo '…' | sh`), so a pipeline
+	// member keeps its words out of the scan only when the pipeline sits in the
+	// top-level shell and every member is one proven read-only command: then
+	// no member runs another's output (`find … | sort`). Substitutions and
+	// `( … )` stay textual.
+	const provenPipelineScopes = new Set<number>();
+	for (const members of pipelines) {
+		const inMember = members.map((scope) => segments.flatMap((segment, index) => (segment.scopes.length === 1 && segment.scopes[0] === scope ? [index] : [])));
+		const nested = segments.some((segment) => segment.scopes.length > 1 && members.includes(segment.scopes[0]));
+		if (!nested && inMember.every((indexes) => indexes.length === 1 && facts[indexes[0]].proven)) {
+			for (const scope of members) provenPipelineScopes.add(scope);
+		}
+	}
+	for (const [index, segment] of segments.entries()) {
+		const { dir, payload, proven } = facts[index];
+		const readOnly = proven && (segment.scopes.length === 0 || (segment.scopes.length === 1 && provenPipelineScopes.has(segment.scopes[0])));
 		if (readOnly) ignoredRanges.push(...segment.wordRanges!);
 		// -regex/-iregex match the whole path, which the file-name glob check
 		// cannot model. An unproven find selecting by one stops unless the
@@ -386,10 +409,6 @@ export function shellNamesControlFile(
 					if (pattern && [...controlNames].some((name) => pattern.test(name))) return candidate;
 				}
 			}
-		}
-		if (payload.command === "cd" && !unknownDir) {
-			const target = payload.args.find((token) => !token.value.startsWith("-"));
-			if (target) dirs.set(segment, toAbsoluteBash(dir, target.value, home));
 		}
 	}
 	// Keep the raw-text fallback for syntax/words the walker cannot attribute,

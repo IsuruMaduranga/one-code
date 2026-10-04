@@ -109,6 +109,10 @@ describe("safetyControlWrite: read-only words in escalated compound commands", (
 		`find src -regex '.*\\.orig' -delete`,
 		`find . -iregex '.*/node_modules/.*\\.LOG$' -delete`,
 		`find . -regex '.*/build/' -exec rm -rf {} +`,
+		// A pipeline of proven read-only commands runs no member's output (GPT-6.1 Sol, live).
+		`pwd; ls -la; git status --short; cat Makefile; find . -maxdepth 3 -type f -not -path './.git/*' | sort`,
+		`cat Makefile; find . -path './.git/*' | sort | head -n 5`,
+		`cat Makefile; cat .claude/settings.json | jq .permissions`,
 	])("does not floor proven read-only words: %s", (command) => {
 		expect(analyzeShellCommand({ command, cwd, home }).verdict).toBe("escalate");
 		expect(check("bash", { command })).toBeUndefined();
@@ -142,6 +146,13 @@ describe("safetyControlWrite: read-only words in escalated compound commands", (
 		`rg -g '!**/x/**' slugify . && sh -c 'cat .claude/settings.json'`,
 		`rg -g '!**/x/**' slugify . && echo "$(cat .claude/settings.json)"; exit 0`,
 		`echo 'cp x .claude/settings.json' | sh`,
+		`cat Makefile; find . -path './.git/*' | sh`,
+		`cat Makefile; find . -path './.git/*' | mystery`,
+		`cat Makefile; find . -path './.git/*' -delete | sort`,
+		`cat Makefile; find . -path './.git/*' | { sort; mystery; }`,
+		`cat Makefile; (find . -path './.git/*' | sort)`,
+		`cat Makefile; echo "$(find . -path './.git/*' | sort)"`,
+		`cat Makefile; find . -path "$(mystery)/*" | sort`,
 		`sh <<'EOF'\ncp x .claude/settings.json\nEOF`,
 		`cat <<'EOF' | sh\ncp x .claude/settings.json\nEOF`,
 		`sh <<< 'cp x .claude/settings.json'`,
