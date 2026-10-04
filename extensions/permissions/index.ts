@@ -1326,6 +1326,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 					denials.record({
 						toolName: normalizedTool,
 						display: `${event.toolName}(${previewSubject(matchSubject)})`,
+						fullDisplay: `${event.toolName}(${matchSubject})`,
 						inputKey,
 						reason: outcome.reason,
 						...(outcome.ruleId ? { rule: outcome.ruleId } : {}),
@@ -1913,7 +1914,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 
 		const approved = denials.approve(state.approved);
 		const retried = approved.filter((d) => state.retry.has(d.id));
-		const displays = approved.map((d) => d.display);
+		// Model-facing: never the panel's clipped preview.
+		const displays = approved.map((d) => d.fullDisplay);
 		if (retried.length > 0) {
 			// Claude Code's retry: a banner says what was allowed, and a turn starts
 			// with the grant message.

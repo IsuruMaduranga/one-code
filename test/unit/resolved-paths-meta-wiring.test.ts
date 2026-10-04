@@ -38,6 +38,10 @@ describe("the resolvedPaths line in the classifier's transcript", () => {
 		secret = join(stateDir, "outside", "authorized_keys");
 		writeFileSync(secret, "k\n");
 		symlinkSync(secret, join(project, "notes.txt"));
+		// The user's real settings may list a workspace directory that holds the
+		// temp dir (an additionalDirectories entry under /private/tmp), which
+		// would put the link's target inside the workspace.
+		vi.stubEnv("HOME", stateDir);
 		vi.stubEnv("ONECODE_STATE_DIR", join(stateDir, ".onecode"));
 		vi.stubEnv("PI_CODING_AGENT_DIR", join(stateDir, "agent"));
 		seen.length = 0;

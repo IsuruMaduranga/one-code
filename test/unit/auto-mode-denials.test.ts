@@ -4,6 +4,7 @@ import { DenialStore, MAX_DENIALS, denialInputKey, permissionGrantedMessage } fr
 const denial = (inputKey: string, display = inputKey) => ({
 	toolName: "bash",
 	display,
+	fullDisplay: display,
 	inputKey,
 	reason: "Irreversible Local Destruction",
 	rule: "Irreversible Local Destruction",
