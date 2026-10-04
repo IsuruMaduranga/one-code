@@ -23,14 +23,15 @@ import { recordUsage } from "../lib/usage-bus.ts";
 import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { withReasoningFallback } from "../lib/model-policy.ts";
-import { htmlToMarkdown, isSameHost, normalizeUrl, paginate } from "./extract.ts";
-import { pickReaderModel, READER_MAX_TOKENS, readerMessages } from "./summarize.ts";
+import { CrossHostRedirect, htmlToMarkdown, isSameHost, normalizeUrl, paginate, redirectMessage } from "./extract.ts";
+import { pickReaderModel, READER_MAX_CHARS, READER_MAX_TOKENS, readerMessages } from "./summarize.ts";
 import { tryNativeWeb } from "../lib/anthropic-server-call.ts";
 import { CUT_OFF_NOTE, fetchOutcome, isPrivateOrLocalUrl, nativeFetchBody, type ThinkingFields } from "../lib/anthropic-server-tools.ts";
 import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 import { registerFormTool } from "../lib/tool-variants.ts";
 import { webFetchDescription } from "./description.ts";
+
 
 const DEFAULT_MAX_CHARS = 30_000;
 const CACHE_TTL_MS = 15 * 60 * 1000;
@@ -191,7 +192,7 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 						if (redirects >= MAX_REDIRECTS) throw new Error(`Too many redirects (${MAX_REDIRECTS}); last target ${target}`);
 						return await load(target, signal, redirects + 1);
 					}
-					throw new Error(`Redirects to a different host: ${target}\nCall web_fetch again with that URL if you want it.`);
+					throw new CrossHostRedirect(target, response.status);
 				}
 			}
 
@@ -320,8 +321,9 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 							normalizeNote,
 							nativeNote,
 							entry.note,
-							answered.truncated ? "(The page exceeded the reader's window; its tail was not read.)" : undefined,
-							`Answered by ${answered.reader} from the full page (${entry.markdown.length} chars). Refetch without \`prompt\` for the raw content.`,
+							answered.truncated
+								? `Answered by ${answered.reader} from the first ${READER_MAX_CHARS} of the page's ${entry.markdown.length} chars; the rest was not read. Refetch without \`prompt\` (with \`offset\`) for the raw content.`
+								: `Answered by ${answered.reader} from the full page (${entry.markdown.length} chars). Refetch without \`prompt\` for the raw content.`,
 							answered.cutOff ? "(The answer was cut off at the reader's output limit and may be incomplete.)" : undefined,
 						]
 							.filter(Boolean)
@@ -366,6 +368,9 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 				// in error.cause, and a timeout is indistinguishable from a cancel by
 				// name alone. Unpack all three so the model sees what actually failed
 				// and what to try next.
+				if (error instanceof CrossHostRedirect) {
+					return { content: [{ type: "text", text: redirectMessage(target, error, params.prompt) }], details: { url: target } };
+				}
 				const err = error as Error & { cause?: unknown };
 				const aborted = err.name === "AbortError" || err.name === "TimeoutError";
 				if (aborted && signal?.aborted) {
