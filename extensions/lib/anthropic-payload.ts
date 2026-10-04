@@ -1,7 +1,8 @@
 /**
  * Recognising an Anthropic Messages request body inside a `before_provider_request`
  * payload (pure). Shared by context-management (clear_thinking), compaction
- * (its replayed request) and tool-search (deferred tool definitions).
+ * (its replayed request), tool-search (deferred tool definitions) and
+ * idle-compact (the cache lifetime).
  */
 
 /** Anthropic Messages API shape: `messages` + `max_tokens`, and not an OpenAI `input`. */
@@ -74,4 +75,22 @@ export function reseatMessageMark<T extends Message>(messages: T[]): T[] {
 	copy[from] = { ...source, content: [...sourceBlocks.slice(0, -1), unmarked] };
 	copy[target] = { ...tail, content: [...tailBlocks.slice(0, -1), { ...tailBlocks[tailBlocks.length - 1], cache_control }] };
 	return copy;
+}
+
+/**
+ * Whether a request body caches with a one-hour TTL: a breakpoint on the
+ * system, the tools or a message carries `cache_control.ttl: "1h"` (pi's long
+ * retention on Anthropic, through pi's own compat gating, so the body is the
+ * ground truth). OpenAI bodies have no breakpoints and answer false.
+ */
+export function hasOneHourCache(payload: unknown): boolean {
+	if (!payload || typeof payload !== "object") return false;
+	const body = payload as { system?: unknown; tools?: unknown; messages?: unknown };
+	const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+	const oneHour = (block: unknown) => (block as { cache_control?: { ttl?: unknown } } | null)?.cache_control?.ttl === "1h";
+	return (
+		list(body.system).some(oneHour) ||
+		list(body.tools).some(oneHour) ||
+		list(body.messages).some((message) => oneHour(message) || list((message as { content?: unknown } | null)?.content).some(oneHour))
+	);
 }

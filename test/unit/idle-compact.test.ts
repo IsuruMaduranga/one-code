@@ -2,12 +2,14 @@
  * Idle compaction (extensions/idle-compact): Claude Code 2.1.289's rules for
  * compacting an idle session before its one-hour cache expires: the cache TTL
  * read from the request body, the fire at 90% of the hour, the refusal order,
- * and the wiring that arms on a TUI request and compacts once with the notice.
+ * and the wiring, which follows the compaction extension's capture of the last
+ * request and compacts once with the notice.
  */
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import compactionExtension from "../../extensions/compaction/index.ts";
 import idleCompactExtension from "../../extensions/idle-compact/index.ts";
 import {
 	type ArmedRequest,
@@ -18,26 +20,27 @@ import {
 	idleCompactConfig,
 	idleRefusal,
 	ONE_HOUR_MS,
-	requestCacheTtl,
 } from "../../extensions/idle-compact/policy.ts";
+import { hasOneHourCache } from "../../extensions/lib/anthropic-payload.ts";
+import { unrefTimers } from "../../extensions/lib/timer-ops.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 const FIRE_MS = 54 * 60_000;
 const ephemeral = (ttl?: string) => ({ type: "ephemeral", ...(ttl ? { ttl } : {}) });
+/** An Anthropic body whose system block carries a breakpoint with `ttl`. */
+const body = (ttl?: string) => ({ system: [{ type: "text", text: "s", cache_control: ephemeral(ttl) }], messages: [], max_tokens: 1000 });
 
-describe("requestCacheTtl", () => {
-	it("reads a one-hour breakpoint on the system, the tools or a message block", () => {
-		expect(requestCacheTtl({ system: [{ type: "text", text: "s", cache_control: ephemeral("1h") }], messages: [] })).toBe("1h");
-		expect(requestCacheTtl({ tools: [{ name: "t", cache_control: ephemeral("1h") }], messages: [] })).toBe("1h");
-		expect(
-			requestCacheTtl({ messages: [{ role: "user", content: [{ type: "text", text: "hi", cache_control: ephemeral("1h") }] }] }),
-		).toBe("1h");
+describe("hasOneHourCache", () => {
+	it("finds a one-hour breakpoint on the system, the tools or a message block", () => {
+		expect(hasOneHourCache(body("1h"))).toBe(true);
+		expect(hasOneHourCache({ tools: [{ name: "t", cache_control: ephemeral("1h") }], messages: [] })).toBe(true);
+		expect(hasOneHourCache({ messages: [{ role: "user", content: [{ type: "text", text: "hi", cache_control: ephemeral("1h") }] }] })).toBe(true);
 	});
 
-	it("says 5m for breakpoints without a ttl, and nothing for a body without breakpoints", () => {
-		expect(requestCacheTtl({ system: [{ type: "text", text: "s", cache_control: ephemeral() }], messages: [] })).toBe("5m");
-		expect(requestCacheTtl({ input: [{ role: "user", content: "hi" }], prompt_cache_retention: "24h" })).toBeUndefined();
-		expect(requestCacheTtl(undefined)).toBeUndefined();
+	it("is false for five-minute breakpoints and for a body without any", () => {
+		expect(hasOneHourCache(body())).toBe(false);
+		expect(hasOneHourCache({ input: [{ role: "user", content: "hi" }], prompt_cache_retention: "24h" })).toBe(false);
+		expect(hasOneHourCache(undefined)).toBe(false);
 	});
 });
 
@@ -51,7 +54,7 @@ describe("idleCompactConfig", () => {
 		expect(idleCompactConfig({ CC_IDLE_COMPACT_MIN_TOKENS: "500", CC_IDLE_COMPACT_DELAY_MS: "5000" })).toEqual({ enabled: true, minTokens: 500, delayMs: 5000 });
 	});
 
-	it("ignores a delay under a second or past the cache lifetime, and a nonsense threshold", () => {
+	it("ignores a delay under a second or past the hour, and a nonsense threshold", () => {
 		expect(idleCompactConfig({ CC_IDLE_COMPACT_DELAY_MS: "10" }).delayMs).toBeUndefined();
 		expect(idleCompactConfig({ CC_IDLE_COMPACT_DELAY_MS: String(ONE_HOUR_MS) }).delayMs).toBeUndefined();
 		expect(idleCompactConfig({ CC_IDLE_COMPACT_MIN_TOKENS: "lots" }).minTokens).toBe(DEFAULT_MIN_TOKENS);
@@ -59,7 +62,7 @@ describe("idleCompactConfig", () => {
 });
 
 describe("idleRefusal", () => {
-	const armed: ArmedRequest = { at: 0, ttlMs: ONE_HOUR_MS, model: "anthropic/claude-opus-5-5", thinking: "medium" };
+	const armed: ArmedRequest = { at: 0, model: "anthropic/claude-opus-5-5", thinking: "medium" };
 	const probe = (over: Partial<FireProbe> = {}): FireProbe => ({
 		now: FIRE_MS,
 		dueAt: FIRE_MS,
@@ -69,7 +72,6 @@ describe("idleRefusal", () => {
 		thinking: armed.thinking,
 		warm: true,
 		contextTokens: 250_000,
-		lastRequestAt: 0,
 		rateLimitStatus: undefined,
 		idle: true,
 		lastInteractionAt: undefined,
@@ -81,19 +83,20 @@ describe("idleRefusal", () => {
 		expect(idleRefusal(armed, probe({ rateLimitStatus: "allowed", lastInteractionAt: FIRE_MS - 61_000 }))).toBeNull();
 	});
 
-	it("refuses for each of Claude Code's reasons", () => {
-		expect(idleRefusal(armed, probe({ config: { enabled: false, minTokens: 1 } }))).toBe("disabled");
-		expect(idleRefusal(armed, probe({ compactionOn: false }))).toBe("compaction_off");
-		expect(idleRefusal(armed, probe({ model: "anthropic/claude-sonnet-5-5" }))).toBe("prefix_changed");
-		expect(idleRefusal(armed, probe({ thinking: "high" }))).toBe("prefix_changed");
-		expect(idleRefusal({ ...armed, ttlMs: 5 * 60_000 }, probe())).toBe("not_one_hour");
-		expect(idleRefusal(armed, probe({ now: FIRE_MS + 61_000 }))).toBe("lapsed");
-		expect(idleRefusal(armed, probe({ warm: false }))).toBe("lapsed");
-		expect(idleRefusal(armed, probe({ contextTokens: 199_999 }))).toBe("small");
-		expect(idleRefusal(armed, probe({ lastRequestAt: 1 }))).toBe("newer_request");
-		expect(idleRefusal(armed, probe({ rateLimitStatus: "allowed_warning" }))).toBe("near_limit");
-		expect(idleRefusal(armed, probe({ idle: false }))).toBe("busy");
-		expect(idleRefusal(armed, probe({ lastInteractionAt: FIRE_MS - 59_000 }))).toBe("present");
+	it.each<[string, Partial<FireProbe>]>([
+		["disabled", { config: { enabled: false, minTokens: 1 } }],
+		["compaction_off", { compactionOn: false }],
+		["prefix_changed", { model: "anthropic/claude-sonnet-5-5" }],
+		["prefix_changed", { thinking: "high" }],
+		["lapsed", { now: FIRE_MS + 61_000 }],
+		["lapsed", { warm: false }],
+		["lapsed", { now: ONE_HOUR_MS, dueAt: ONE_HOUR_MS }],
+		["small", { contextTokens: 199_999 }],
+		["near_limit", { rateLimitStatus: "allowed_warning" }],
+		["busy", { idle: false }],
+		["present", { lastInteractionAt: FIRE_MS - 59_000 }],
+	])("refuses with %s", (reason, over) => {
+		expect(idleRefusal(armed, probe(over))).toBe(reason);
 	});
 
 	it("checks them in Claude Code's order", () => {
@@ -109,36 +112,28 @@ describe("IdleCompactTimer", () => {
 
 	const make = (config = idleCompactConfig({})) => {
 		const fired: Array<{ armed: ArmedRequest; dueAt: number }> = [];
-		const timer = new IdleCompactTimer(
-			{ set: (cb, ms) => setTimeout(cb, ms), clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>) },
-			Date.now,
-			() => config,
-			(armed, dueAt) => fired.push({ armed, dueAt }),
-		);
+		const timer = new IdleCompactTimer(unrefTimers, Date.now, () => config, (armed, dueAt) => fired.push({ armed, dueAt }));
 		return { timer, fired };
 	};
-	const request = (at: number, ttlMs = ONE_HOUR_MS): ArmedRequest => ({ at, ttlMs, model: "m", thinking: "off" });
+	const request = (at: number): ArmedRequest => ({ at, model: "m", thinking: "off" });
 
-	it("fires at 90% of the hour after a one-hour request", () => {
+	it("fires at 90% of the hour", () => {
 		const { timer, fired } = make();
-		timer.noteRequest(request(0));
+		timer.arm(request(0));
 		vi.advanceTimersByTime(FIRE_MS - 1);
 		expect(fired).toHaveLength(0);
 		vi.advanceTimersByTime(1);
 		expect(fired).toEqual([{ armed: request(0), dueAt: FIRE_MS }]);
-		expect(timer.pending).toBeUndefined();
+		expect(timer.pending).toBe(false);
 	});
 
-	it("re-arms on each request, and a five-minute request or a cancel clears it", () => {
+	it("re-arms on each request, and a cancel clears it", () => {
 		const { timer, fired } = make();
-		timer.noteRequest(request(0));
+		timer.arm(request(0));
 		vi.advanceTimersByTime(10 * 60_000);
-		timer.noteRequest(request(Date.now()));
+		timer.arm(request(Date.now()));
 		vi.advanceTimersByTime(FIRE_MS - 1);
 		expect(fired).toHaveLength(0);
-		timer.noteRequest(request(Date.now(), 5 * 60_000));
-		expect(timer.pending).toBeUndefined();
-		timer.noteRequest(request(Date.now()));
 		timer.cancel();
 		vi.advanceTimersByTime(2 * ONE_HOUR_MS);
 		expect(fired).toHaveLength(0);
@@ -146,22 +141,22 @@ describe("IdleCompactTimer", () => {
 
 	it("arms nothing when off, and uses the delay override", () => {
 		const off = make(idleCompactConfig({ CC_IDLE_COMPACT: "0" }));
-		off.timer.noteRequest(request(0));
-		expect(off.timer.pending).toBeUndefined();
+		off.timer.arm(request(0));
+		expect(off.timer.pending).toBe(false);
 		const quick = make(idleCompactConfig({ CC_IDLE_COMPACT_DELAY_MS: "5000" }));
-		quick.timer.noteRequest(request(0));
+		quick.timer.arm(request(0));
 		vi.advanceTimersByTime(5000);
 		expect(quick.fired.map((f) => f.dueAt)).toEqual([5000]);
 	});
 });
 
-describe("idle-compact wiring", () => {
+describe("idle-compact wiring, beside the compaction extension's capture", () => {
 	let agentDir: string;
 	beforeEach(() => {
 		vi.useFakeTimers({ now: 1_000_000 });
 		agentDir = mkdtempSync(join(tmpdir(), "idle-compact-agent-"));
 		vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
-		for (const name of ["CC_IDLE_COMPACT", "CC_IDLE_COMPACT_MIN_TOKENS", "CC_IDLE_COMPACT_DELAY_MS", "CC_COMPACTION"]) vi.stubEnv(name, undefined as unknown as string);
+		for (const name of ["CC_IDLE_COMPACT", "CC_IDLE_COMPACT_MIN_TOKENS", "CC_IDLE_COMPACT_DELAY_MS", "CC_COMPACTION"]) vi.stubEnv(name, undefined);
 	});
 	afterEach(() => {
 		vi.useRealTimers();
@@ -169,11 +164,11 @@ describe("idle-compact wiring", () => {
 		rmSync(agentDir, { recursive: true, force: true });
 	});
 
-	const oneHourBody = { system: [{ type: "text", text: "s", cache_control: ephemeral("1h") }], messages: [] };
-	const model = { provider: "anthropic", id: "claude-opus-5-5" };
+	const model = { api: "anthropic-messages", provider: "anthropic", id: "claude-opus-5-5" };
 
 	async function mount(over: Record<string, unknown> = {}) {
 		const fake = createFakePi();
+		compactionExtension(fake.pi as never);
 		idleCompactExtension(fake.pi as never);
 		let onKey: (() => void) | undefined;
 		const ctx = createFakeCtx({
@@ -187,9 +182,9 @@ describe("idle-compact wiring", () => {
 		});
 		await fake.fire("session_start", { reason: "startup" }, ctx);
 		/** One main-session request and its reply. */
-		const turn = async (body: unknown = oneHourBody, usage = { cacheRead: 200_000, cacheWrite: 1_000 }) => {
-			await fake.fire("before_provider_request", { payload: body }, ctx);
-			await fake.fire("message_end", { message: { role: "assistant", usage } }, ctx);
+		const turn = async (payload: unknown = body("1h"), usage = { cacheRead: 200_000, cacheWrite: 1_000 }) => {
+			await fake.fire("before_provider_request", { payload }, ctx);
+			await fake.fire("message_end", { message: { role: "assistant", content: [{ type: "text", text: "ok" }], usage } }, ctx);
 		};
 		return { fake, ctx, turn, compact: ctx.compact as ReturnType<typeof vi.fn>, key: () => onKey?.() };
 	}
@@ -223,48 +218,57 @@ describe("idle-compact wiring", () => {
 		expect(compact).not.toHaveBeenCalled();
 	});
 
-	it("leaves a small, a busy or a near-limit session alone", async () => {
-		const small = await mount({ getContextUsage: () => ({ tokens: 120_000, contextWindow: 1_000_000, percent: 12 }) });
-		await small.turn();
-		const busy = await mount({ isIdle: () => false });
-		await busy.turn();
-		const limited = await mount();
-		await limited.turn();
-		await limited.fake.fire("after_provider_response", { status: 200, headers: { "Anthropic-Ratelimit-Unified-Status": "allowed_warning" } }, limited.ctx);
+	type Run = Awaited<ReturnType<typeof mount>>;
+	it.each<[string, Record<string, unknown>, (run: Run) => Promise<void>]>([
+		["a small session", { getContextUsage: () => ({ tokens: 120_000, contextWindow: 1_000_000, percent: 12 }) }, (run) => run.turn()],
+		["a busy session", { isIdle: () => false }, (run) => run.turn()],
+		[
+			"a session near its rate limit",
+			{},
+			async (run) => {
+				await run.turn();
+				await run.fake.fire("after_provider_response", { status: 200, headers: { "Anthropic-Ratelimit-Unified-Status": "allowed_warning" } }, run.ctx);
+			},
+		],
+		["a five-minute cache", {}, (run) => run.turn(body())],
+		["a cold reply", {}, (run) => run.turn(body("1h"), { cacheRead: 0, cacheWrite: 0 })],
+		["an RPC session", { mode: "rpc" }, (run) => run.turn()],
+		[
+			"a compacted session",
+			{},
+			async (run) => {
+				await run.turn();
+				await run.fake.fire("session_compact", {}, run.ctx);
+			},
+		],
+		[
+			"a branch switch",
+			{},
+			async (run) => {
+				await run.turn();
+				await run.fake.fire("session_tree", {}, run.ctx);
+			},
+		],
+		[
+			"a model switch",
+			{},
+			async (run) => {
+				await run.turn();
+				(run.ctx as { model: unknown }).model = { ...model, id: "claude-sonnet-5-5" };
+			},
+		],
+	])("leaves %s alone", async (_name, over, act) => {
+		const run = await mount(over);
+		await act(run);
 		vi.advanceTimersByTime(FIRE_MS);
-		for (const run of [small, busy, limited]) expect(run.compact).not.toHaveBeenCalled();
-	});
-
-	it("does not arm on a five-minute cache, a cold reply, or outside the TUI", async () => {
-		const short = await mount();
-		await short.turn({ system: [{ type: "text", text: "s", cache_control: ephemeral() }], messages: [] });
-		const cold = await mount();
-		await cold.turn(oneHourBody, { cacheRead: 0, cacheWrite: 0 });
-		const rpc = await mount({ mode: "rpc" });
-		await rpc.turn();
-		vi.advanceTimersByTime(FIRE_MS);
-		for (const run of [short, cold, rpc]) expect(run.compact).not.toHaveBeenCalled();
-	});
-
-	it("drops the timer on a compaction, a branch switch or a model switch", async () => {
-		const compacted = await mount();
-		await compacted.turn();
-		await compacted.fake.fire("session_compact", {}, compacted.ctx);
-		const branched = await mount();
-		await branched.turn();
-		await branched.fake.fire("session_tree", {}, branched.ctx);
-		const switched = await mount();
-		await switched.turn();
-		(switched.ctx as { model: unknown }).model = { provider: "anthropic", id: "claude-sonnet-5-5" };
-		vi.advanceTimersByTime(FIRE_MS);
-		for (const run of [compacted, branched, switched]) expect(run.compact).not.toHaveBeenCalled();
+		expect(run.compact).not.toHaveBeenCalled();
 	});
 
 	it("respects CC_IDLE_COMPACT=0, CC_COMPACTION=0 and pi's compaction.enabled", async () => {
 		vi.stubEnv("CC_IDLE_COMPACT", "0");
 		const off = await mount();
 		await off.turn();
-		vi.stubEnv("CC_IDLE_COMPACT", undefined as unknown as string);
+		vi.stubEnv("CC_IDLE_COMPACT", undefined);
 		vi.stubEnv("CC_COMPACTION", "0");
 		const ours = await mount();
 		await ours.turn();
@@ -272,7 +276,7 @@ describe("idle-compact wiring", () => {
 		expect(off.compact).not.toHaveBeenCalled();
 		expect(ours.compact).not.toHaveBeenCalled();
 
-		vi.stubEnv("CC_COMPACTION", undefined as unknown as string);
+		vi.stubEnv("CC_COMPACTION", undefined);
 		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ compaction: { enabled: false } }));
 		const piOff = await mount();
 		await piOff.turn();

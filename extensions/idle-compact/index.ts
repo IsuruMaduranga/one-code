@@ -2,30 +2,35 @@
  * idle-compact extension — Claude Code's compaction of an idle session before
  * its one-hour prompt cache expires (rules and refusal order: policy.ts).
  *
- * Wiring: every main-session request (`before_provider_request`, TUI only, the
- * mode that runs the one-hour cache) re-arms the timer from its body's cache
- * TTL; the reply's usage says whether the cache was warm; the response headers
- * carry Anthropic's rate-limit status; keystrokes (`onTerminalInput`) mark the
- * user present. A new session, a compaction, a branch switch and shutdown drop
- * the timer, since the compaction extension's capture of the last request,
- * which its cache-reading replay needs, is dropped with them.
+ * Wiring: the timer follows the compaction extension's capture of the
+ * session's last request (`LAST_REQUEST_CHANNEL`), the very request its
+ * cache-reading replay sends. Each capture re-arms it when the body caches for
+ * one hour (`hasOneHourCache`); a cleared capture (a new session, a compaction,
+ * a branch switch) drops it, so the timer is armed only while a replay is
+ * possible. The reply's usage says whether the cache was warm, the response
+ * headers carry Anthropic's rate-limit status, and keystrokes
+ * (`onTerminalInput`) mark the user present.
  *
- * On fire it calls `ctx.compact()`, which runs One Code's compaction (the
- * replay of the session's last request, a cache read); pi's TUI shows its usual
- * "Compacting" indicator, Esc cancels, and on success a display-only entry
- * carries Claude Code's notice. Failures are silent, as in Claude Code.
+ * TUI only: RPC mode also runs the one-hour cache, but its host's input never
+ * reaches `onTerminalInput`, so the presence check could not hold a
+ * compaction off while someone is there.
+ *
+ * On fire it calls `ctx.compact()`; pi's TUI shows its usual "Compacting"
+ * indicator, Esc cancels, and on success a display-only entry carries Claude
+ * Code's notice. Failures are silent, as in Claude Code.
  */
 
 import { type ExtensionAPI, type ExtensionContext, getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
-import { dimMarkedLine } from "../lib/tui-render.ts";
-import { type ArmedRequest, IDLE_COMPACT_NOTICE, IdleCompactTimer, idleCompactConfig, idleRefusal, ONE_HOUR_MS, requestCacheTtl } from "./policy.ts";
+import { hasOneHourCache } from "../lib/anthropic-payload.ts";
+import { modelSpec } from "../lib/model-policy.ts";
+import { LAST_REQUEST_CHANNEL, type RequestCapture } from "../lib/request-replay.ts";
+import { unrefTimers } from "../lib/timer-ops.ts";
+import { dimMarkedLine, liveUiCtx } from "../lib/tui-render.ts";
+import { type ArmedRequest, IDLE_COMPACT_NOTICE, IdleCompactTimer, type IdleCompactConfig, idleCompactConfig, idleRefusal } from "./policy.ts";
 
 const ENTRY_TYPE = "one-code:idle-compact";
 const NOTICE_MARK = "●";
 const RATE_LIMIT_HEADER = "anthropic-ratelimit-unified-status";
-
-/** A model's identity for matching the armed request to the current model. */
-const modelKey = (model: { provider?: string; id?: string } | undefined) => (model ? `${model.provider}/${model.id}` : undefined);
 
 /** pi's auto-compaction setting; unreadable settings mean pi's default, on. */
 function autoCompactionOn(cwd: string): boolean {
@@ -39,40 +44,26 @@ function autoCompactionOn(cwd: string): boolean {
 export default function idleCompactExtension(pi: ExtensionAPI) {
 	pi.registerEntryRenderer(ENTRY_TYPE, (_entry, _options, theme) => dimMarkedLine(theme, NOTICE_MARK, IDLE_COMPACT_NOTICE));
 
-	let lastCtx: ExtensionContext | undefined;
-	let lastRequestAt = 0;
+	let sessionCtx: ExtensionContext | undefined;
 	let warm = false;
 	let rateLimitStatus: string | undefined;
 	let lastInteractionAt: number | undefined;
 	let inputHookRegistered = false;
 
-	const timer = new IdleCompactTimer(
-		{
-			set: (cb, ms) => {
-				const handle = setTimeout(cb, ms);
-				handle.unref?.();
-				return handle;
-			},
-			clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
-		},
-		Date.now,
-		() => idleCompactConfig(process.env),
-		(armed, dueAt) => fire(armed, dueAt),
-	);
+	const timer = new IdleCompactTimer(unrefTimers, Date.now, () => idleCompactConfig(process.env), (armed, dueAt, config) => fire(armed, dueAt, config));
 
-	function fire(armed: ArmedRequest, dueAt: number) {
-		const ctx = lastCtx;
-		if (!ctx?.hasUI) return;
+	function fire(armed: ArmedRequest, dueAt: number, config: IdleCompactConfig) {
+		const ctx = liveUiCtx(sessionCtx);
+		if (!ctx) return;
 		const refusal = idleRefusal(armed, {
 			now: Date.now(),
 			dueAt,
-			config: idleCompactConfig(process.env),
+			config,
 			compactionOn: process.env.CC_COMPACTION !== "0" && autoCompactionOn(ctx.cwd),
-			model: modelKey(ctx.model),
+			model: ctx.model ? modelSpec(ctx.model) : undefined,
 			thinking: pi.getThinkingLevel(),
 			warm,
 			contextTokens: ctx.getContextUsage()?.tokens ?? 0,
-			lastRequestAt,
 			rateLimitStatus,
 			idle: ctx.isIdle() && !ctx.hasPendingMessages(),
 			lastInteractionAt,
@@ -86,13 +77,30 @@ export default function idleCompactExtension(pi: ExtensionAPI) {
 		});
 	}
 
-	const drop = () => timer.cancel();
+	pi.events.on(LAST_REQUEST_CHANNEL, (data) => {
+		const capture = data as RequestCapture | undefined;
+		const ctx = liveUiCtx(sessionCtx);
+		warm = false;
+		if (!capture || ctx?.mode !== "tui" || !hasOneHourCache(capture.payload)) {
+			timer.cancel();
+			return;
+		}
+		timer.arm({ at: Date.now(), model: modelSpec({ provider: capture.provider, id: capture.modelId }), thinking: pi.getThinkingLevel() });
+	});
+
+	pi.on("after_provider_response", (event) => {
+		if (!timer.pending) return;
+		const entry = Object.entries(event.headers ?? {}).find(([name]) => name.toLowerCase() === RATE_LIMIT_HEADER);
+		rateLimitStatus = entry?.[1];
+	});
+
+	pi.on("message_end", (event) => {
+		const message = event.message as { role?: string; usage?: { cacheRead?: number; cacheWrite?: number } };
+		if (message.role === "assistant") warm = (message.usage?.cacheRead ?? 0) + (message.usage?.cacheWrite ?? 0) > 0;
+	});
 
 	pi.on("session_start", (_event, ctx) => {
-		lastCtx = ctx;
-		drop();
-		lastRequestAt = 0;
-		warm = false;
+		sessionCtx = ctx;
 		rateLimitStatus = undefined;
 		lastInteractionAt = undefined;
 		if (!ctx.hasUI || inputHookRegistered) return;
@@ -104,33 +112,8 @@ export default function idleCompactExtension(pi: ExtensionAPI) {
 		});
 	});
 
-	pi.on("before_provider_request", (event, ctx) => {
-		if (ctx.mode !== "tui" || !ctx.hasUI) return undefined;
-		lastCtx = ctx;
-		const at = Date.now();
-		lastRequestAt = at;
-		warm = false;
-		const ttl = requestCacheTtl(event.payload);
-		timer.noteRequest({ at, ttlMs: ttl === "1h" ? ONE_HOUR_MS : 5 * 60_000, model: modelKey(ctx.model), thinking: pi.getThinkingLevel() });
-		return undefined;
+	pi.on("session_shutdown", () => {
+		timer.cancel();
+		sessionCtx = undefined;
 	});
-
-	pi.on("after_provider_response", (event) => {
-		const entry = Object.entries(event.headers ?? {}).find(([name]) => name.toLowerCase() === RATE_LIMIT_HEADER);
-		rateLimitStatus = entry?.[1];
-	});
-
-	pi.on("message_end", (event) => {
-		const message = event.message as { role?: string; usage?: { cacheRead?: number; cacheWrite?: number } };
-		if (message.role !== "assistant" || !timer.pending) return;
-		warm = (message.usage?.cacheRead ?? 0) + (message.usage?.cacheWrite ?? 0) > 0;
-	});
-
-	pi.on("agent_settled", (_event, ctx) => {
-		lastCtx = ctx;
-	});
-
-	pi.on("session_compact", drop);
-	pi.on("session_tree", drop);
-	pi.on("session_shutdown", drop);
 }

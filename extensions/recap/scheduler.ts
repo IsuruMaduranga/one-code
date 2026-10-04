@@ -14,11 +14,9 @@
  * async model call it triggers stays in the extension.
  */
 
-export interface TimerOps {
-	/** Schedule `cb` after `ms`; return a handle for `clear`. */
-	set(cb: () => void, ms: number): unknown;
-	clear(handle: unknown): void;
-}
+import type { TimerOps } from "../lib/timer-ops.ts";
+
+export type { TimerOps };
 
 export class RecapScheduler {
 	private turnRunning = false;

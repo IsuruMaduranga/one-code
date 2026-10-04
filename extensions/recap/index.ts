@@ -35,6 +35,7 @@ import { followLastExchange, replaySideCall } from "../lib/replay-call.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
 import { pickEconomicalContainedModel } from "../lib/model-tier.ts";
 import { answerText, stripImageBlocks, toolStubs, withoutSystemMessages } from "../lib/side-call.ts";
+import { unrefTimers } from "../lib/timer-ops.ts";
 import { dimMarkedLine } from "../lib/tui-render.ts";
 import { RECAP_PROMPT, recapLine, recentForRecap, REFERENCE_MARK } from "./prompt.ts";
 import { RecapScheduler } from "./scheduler.ts";
@@ -82,14 +83,7 @@ export default function recapExtension(pi: ExtensionAPI) {
 	};
 
 	const scheduler = new RecapScheduler(
-		{
-			set: (cb, ms) => {
-				const handle = setTimeout(cb, ms);
-				handle.unref?.();
-				return handle;
-			},
-			clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
-		},
+		unrefTimers,
 		idleMs,
 		() => process.env.CC_RECAP !== "0",
 		() => void generate(),
