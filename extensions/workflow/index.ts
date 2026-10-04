@@ -23,6 +23,7 @@
  * delivers the message. On older pi a queued message does not arm.
  */
 
+import { CHILD_WROTE_CHANNEL, type ChildWrote } from "../lib/child-writes.ts";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
@@ -267,6 +268,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 						unusableModels.add(model);
 						pi.events.emit(MODEL_UNUSABLE_CHANNEL, { model, reason } satisfies ModelUnusableEvent);
 					},
+					onChildWrite: (path, agent) => pi.events.emit(CHILD_WROTE_CHANNEL, { path, ...(agent ? { agent } : {}) } satisfies ChildWrote),
 				});
 				widget.attach(handle);
 

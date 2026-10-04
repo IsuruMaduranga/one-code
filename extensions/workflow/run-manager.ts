@@ -54,6 +54,8 @@ export interface StartRunOptions {
 	unusableModels?: () => ReadonlySet<string>;
 	/** An agent's provider refused its model: published so every picker skips it (lib/model-unusable.ts). */
 	onModelUnusable?: (model: string, reason: string) => void;
+	/** An agent's edit or write changed a file (lib/child-writes.ts). */
+	onChildWrite?: (path: string, agent: string | undefined) => void;
 	/** The parent's live MCP tools, shared into every workflow agent (see AgentRunnerOptions). */
 	getMcpTools?: () => ToolDefinition[] | Promise<ToolDefinition[]>;
 }
@@ -259,6 +261,7 @@ export class WorkflowRunManager {
 				onUsage: options.onUsage,
 				unusableModels: options.unusableModels,
 				onModelUnusable: options.onModelUnusable,
+				onChildWrite: options.onChildWrite,
 				getMcpTools: options.getMcpTools,
 				resultsDir: handle.runDir,
 			});

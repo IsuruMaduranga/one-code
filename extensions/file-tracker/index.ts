@@ -16,6 +16,7 @@
  * that went through bash and never touched an intercepted tool.
  */
 
+import { CHILD_WROTE_CHANNEL, type ChildWrote } from "../lib/child-writes.ts";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -39,7 +40,7 @@ import { expandCandidate, shellReadCandidates, shownInFull } from "./shell-reads
 import { sessionWorkCwd, WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
 import {
 	describeChanges,
-	EXTERNAL_CHANGE_REMINDER,
+	CHILD_CHANGE_REMINDER, EXTERNAL_CHANGE_REMINDER,
 	type FileStamp,
 	FileTracker,
 	STALE_REASON,
@@ -247,7 +248,14 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 	 */
 	let touched = new Map<string, number>();
 	/** Observe a file the model read or wrote, and record it as touched at its current modification time. */
+	/** Files this session's own child agents changed since the parent last saw them (lib/child-writes.ts). */
+	const childWrites = new Map<string, string | undefined>();
+	pi.events.on(CHILD_WROTE_CHANNEL, (data) => {
+		const wrote = data as ChildWrote | undefined;
+		if (wrote?.path) childWrites.set(wrote.path, wrote.agent);
+	});
 	const touch = (path: string) => {
+		childWrites.delete(path);
 		const stamp = observeFromDisk(tracker, path);
 		if (stamp) touched.set(path, stamp.mtimeMs);
 	};
@@ -445,7 +453,9 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 
 			if (detailed.length < DETAILED_CHANGE_REMINDERS_PER_TURN) {
 				const excerpt = describeChanges(previous, current);
-				if (excerpt) detailed.push(EXTERNAL_CHANGE_REMINDER(path, excerpt));
+				const byChild = childWrites.has(path);
+				if (excerpt) detailed.push(byChild ? CHILD_CHANGE_REMINDER(path, childWrites.get(path), excerpt) : EXTERNAL_CHANGE_REMINDER(path, excerpt));
+				childWrites.delete(path);
 			} else {
 				overflow.push(path);
 			}

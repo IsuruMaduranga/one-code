@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import fileTrackerExtension from "../../extensions/file-tracker/index.ts";
+import { CHILD_WROTE_CHANNEL } from "../../extensions/lib/child-writes.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
@@ -164,6 +165,31 @@ describe("file-tracker wiring", () => {
 		emitted.length = 0;
 		await fake.fireOne("agent_start", {}, ctx());
 		expect(emitted).toHaveLength(0);
+	});
+
+	it("names the session's own agent when a subagent changed a file, and only for that change", async () => {
+		const file = path("g.ts");
+		writeFileSync(file, "before");
+		await fake.fireOne("tool_result", { toolName: "read", input: { path: file }, isError: false }, ctx());
+		const emitted: string[] = [];
+		fake.events.on(REMINDER_CHANNEL, (data) => emitted.push((data as { text: string }).text));
+
+		writeFileSync(file, "child edit");
+		fake.events.emit(CHILD_WROTE_CHANNEL, { path: file, agent: "fix the parser" });
+		await fake.fireOne("tool_execution_end", { toolName: "Agent", toolCallId: "a1", isError: false }, ctx());
+		expect(emitted).toHaveLength(1);
+		expect(emitted[0]).toContain(`Note: ${file} was changed by the agent "fix the parser" you started in this session since you last read it.`);
+		expect(emitted[0]).not.toContain("usually deliberate");
+		// Still stale: the parent must re-read before editing.
+		const stale = await fake.fireOne<{ block?: boolean; reason?: string }>("tool_call", { toolName: "edit", input: { path: file } }, ctx());
+		expect(stale?.reason).toContain("has changed on disk");
+
+		// The parent reads it; a later outside change gets the ordinary notice.
+		await fake.fireOne("tool_result", { toolName: "read", input: { path: file }, isError: false }, ctx());
+		writeFileSync(file, "child edit\nformatted");
+		await fake.fireOne("tool_execution_end", { toolName: "bash", toolCallId: "b2", isError: false }, ctx());
+		expect(emitted).toHaveLength(2);
+		expect(emitted[1]).toContain(`Note: ${file} changed on disk since you last read it. That's usually deliberate`);
 	});
 
 	it("reports a change made during the turn at the end of the next tool execution, with Claude Code's steer, and does not report our own writes", async () => {

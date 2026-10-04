@@ -184,6 +184,14 @@ export function describeChanges(
 export const UNREAD_REASON = (path: string, tool: string) =>
 	`Read ${path} before using ${tool} on it. The file exists and has not been read in this conversation, so an edit could silently discard content you have not seen. A shell read counts only when its output showed the whole file (a plain \`cat\`); after a partial one (head, sed -n, a pipe, or output cut off at the size limit), use the read tool.`;
 
+/**
+ * The same notice when one of this session's subagents or workflow agents
+ * changed the file (lib/child-writes.ts): saying "someone else, a formatter or
+ * a command" there sent the model looking for an outside cause.
+ */
+export const CHILD_CHANGE_REMINDER = (path: string, agent: string | undefined, excerpt: ChangeExcerpt) =>
+	`Note: ${path} was changed by ${agent ? `the agent "${agent}"` : "an agent"} you started in this session since you last read it. Take it as the current state. Here are the relevant changes (shown with line numbers); re-read the file before editing it:\n${excerpt.text}`;
+
 export const STALE_REASON = (path: string) =>
 	`${path} has changed on disk since you last read it — someone else, a formatter, or a command may have modified it. Read it again before editing, or your change would overwrite theirs.`;
 

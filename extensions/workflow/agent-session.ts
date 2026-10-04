@@ -14,6 +14,7 @@
  * `extensionFactories`, which DefaultResourceLoader always loads.
  */
 
+import { childWriteWatcher } from "../lib/child-writes.ts";
 import { randomBytes } from "node:crypto";
 import os from "node:os";
 import { getAgentDir, type ModelRuntime, SessionManager, type ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -56,6 +57,8 @@ export interface AgentRunnerOptions {
 	unusableModels?: () => ReadonlySet<string>;
 	/** An agent's provider refused its model as not usable on this account (`isModelUnavailableError`): report it so every picker skips it. */
 	onModelUnusable?: (model: string, reason: string) => void;
+	/** An agent's edit or write changed a file (lib/child-writes.ts), for the parent's file-tracker. */
+	onChildWrite?: (path: string, agent: string | undefined) => void;
 	/**
 	 * The parent permissions extension's decision closure (same bridge the
 	 * subagent runner uses): when present, a workflow agent's tool calls route
@@ -320,8 +323,11 @@ export class AgentRunner {
 		// refusing the agent's model (the same check the subagent runner makes, so
 		// the refusal reaches every automatic picker — lib/model-unusable.ts).
 		// Never let a bad event shape kill the agent.
+		const childWrote = childWriteWatcher(session.sessionManager?.getCwd?.() ?? this.options.cwd);
 		const unsubscribe = session.subscribe((event) => {
 			try {
+				const wrote = childWrote(event as never);
+				if (wrote) this.options.onChildWrite?.(wrote, opts.label);
 				if (event.type === "message_end") {
 					const reply = (event as { message?: { role?: string; stopReason?: string; errorMessage?: string; provider?: string; model?: string } }).message;
 					if (reply?.role === "assistant" && reply.stopReason === "error" && reply.errorMessage && reply.provider && reply.model && isModelUnavailableError(reply.errorMessage)) {

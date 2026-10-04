@@ -16,6 +16,7 @@
  * children persist their sessions per run to make that possible).
  */
 
+import { CHILD_WROTE_CHANNEL, type ChildWrote } from "../lib/child-writes.ts";
 import { existsSync, mkdirSync, readdirSync, renameSync, writeFileSync, readFileSync } from "node:fs";
 import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, agentCronTools, agentOwnsCronJobs } from "../lib/agent-cron.ts";
 import os from "node:os";
@@ -429,6 +430,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				live?.ui.notify(`Subagent model ${model} is not usable on this account (${reason}); automatic selection skips it from now on.`, "warning");
 				if (lastCtx) emitModelStatus(lastCtx, lastCtx.model, model);
 			},
+			(path, agent) => pi.events.emit(CHILD_WROTE_CHANNEL, { path, ...(agent ? { agent } : {}) } satisfies ChildWrote),
 		).catch((error: unknown) => {
 			runtimePromise = undefined;
 			throw error;
