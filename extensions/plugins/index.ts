@@ -23,6 +23,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { readFavorites, toggleFavorite } from "../lib/favorites.ts";
 import { announceArgumentHint, type CommandHint, frontmatterCommandHint } from "../lib/argument-hints.ts";
 import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } from "../lib/mcp-status.ts";
+import { awaitOneShotTurn } from "../lib/notifications.ts";
 import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { setOverride } from "../lib/plugin-overrides.ts";
 import { pathWithinBase, pluginRoot } from "../lib/plugin-root.ts";
@@ -549,6 +550,7 @@ function registerPluginCommand(pi: ExtensionAPI, plugin: Plugin, name: string, p
 			recordUsage(pluginRoot(getAgentDir()), "command", name);
 			// Deliver as a user turn, which is how Claude Code runs a command template.
 			pi.sendUserMessage(expanded);
+			await awaitOneShotTurn(ctx);
 		},
 	});
 }

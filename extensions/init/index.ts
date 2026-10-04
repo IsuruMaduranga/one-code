@@ -12,15 +12,15 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { awaitOneShotTurn } from "../lib/notifications.ts";
 import { INIT_PROMPT } from "./prompt.ts";
 
 export default function initExtension(pi: ExtensionAPI) {
 	pi.registerCommand("init", {
 		description: "Initialize a new CLAUDE.md file with codebase documentation",
-		// sendUserMessage always triggers a turn and returns void; the async
-		// handler satisfies RegisteredCommand's Promise<void> contract.
-		handler: async () => {
+		handler: async (_args, ctx) => {
 			pi.sendUserMessage(INIT_PROMPT, { deliverAs: "followUp" });
+			await awaitOneShotTurn(ctx);
 		},
 	});
 }

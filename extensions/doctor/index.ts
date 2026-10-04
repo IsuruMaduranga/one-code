@@ -35,7 +35,7 @@ import { loadAutoModeConfig, persistClassifierModel } from "../auto-mode/config.
 import { configuredCapabilityKey, loadCapabilitySnapshot, refreshCapabilitySnapshot, snapshotIsStale } from "../lib/capability-index.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent, withoutUnusable } from "../lib/model-unusable.ts";
 import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } from "../lib/mcp-status.ts";
-import { sessionOutlivesTurn } from "../lib/notifications.ts";
+import { awaitOneShotTurn, sessionOutlivesTurn } from "../lib/notifications.ts";
 import { modelSpec } from "../lib/model-policy.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 import { oneCodeStateDir } from "../lib/paths.ts";
@@ -162,7 +162,7 @@ export default function doctorExtension(pi: ExtensionAPI) {
 		});
 	};
 
-	const sendFix = (ctx: ExtensionContext, report: DoctorReport): boolean => {
+	const sendFix = async (ctx: ExtensionCommandContext, report: DoctorReport): Promise<boolean> => {
 		if (!ctx.model) {
 			ctx.ui.notify("No model is available, so the checkup cannot run. Connect a provider with /login first; the report already lists what to fix.", "warning");
 			return false;
@@ -180,6 +180,7 @@ export default function doctorExtension(pi: ExtensionAPI) {
 			independent: configMode() === "independent",
 		});
 		pi.sendUserMessage(prompt, { deliverAs: "followUp" });
+		await awaitOneShotTurn(ctx);
 		return true;
 	};
 
@@ -224,7 +225,7 @@ export default function doctorExtension(pi: ExtensionAPI) {
 				},
 			};
 		});
-		if (wantFix) sendFix(ctx, report);
+		if (wantFix) await sendFix(ctx, report);
 	};
 
 	const applyPreset = async (name: string, ctx: ExtensionCommandContext): Promise<void> => {
@@ -311,7 +312,7 @@ export default function doctorExtension(pi: ExtensionAPI) {
 			const checkup = verb === undefined;
 			const report = await gather(ctx, { network: !checkup });
 			if (checkup && ctx.model) {
-				sendFix(ctx, report);
+				await sendFix(ctx, report);
 				return;
 			}
 			if (checkup) ctx.ui.notify("No model is available, so the checkup cannot run; showing the setup report instead. Connect a provider with /login, then rerun /doctor.", "warning");

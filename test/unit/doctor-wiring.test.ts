@@ -17,7 +17,7 @@ let cwd: string;
 let fake: FakePi;
 let setModel: ReturnType<typeof vi.fn>;
 
-function ctxFor(current: any | undefined, mode: "tui" | "print" = "print") {
+function ctxFor(current: any | undefined, mode: "tui" | "rpc" | "print" | "json" = "print") {
 	const notified: string[] = [];
 	return {
 		notified,
@@ -25,6 +25,7 @@ function ctxFor(current: any | undefined, mode: "tui" | "print" = "print") {
 			cwd,
 			hasUI: mode === "tui",
 			mode,
+			waitForIdle: vi.fn(async () => {}),
 			sessionManager: { getSessionDir: () => join(cwd, ".sessions") },
 			model: current,
 			thinkingLevel: "medium",
@@ -80,6 +81,7 @@ describe("/doctor wiring", () => {
 		expect(notified[0]).toContain("One Code doctor");
 		expect(notified[0]).toContain("Not ready: no model provider has credentials");
 		expect(notified[0]).toContain("Updates: check skipped (ONECODE_NO_UPDATE_CHECK=1)");
+		expect(ctx.waitForIdle).not.toHaveBeenCalled();
 	});
 
 	it("bare /doctor without a model falls back to the report and says why", async () => {
@@ -88,6 +90,7 @@ describe("/doctor wiring", () => {
 		expect(fake.sentUserMessages).toHaveLength(0);
 		expect(notified[0]).toContain("No model is available, so the checkup cannot run");
 		expect(notified[1]).toContain("One Code doctor");
+		expect(ctx.waitForIdle).not.toHaveBeenCalled();
 	});
 
 	it("shows the live permission status it heard on the bus", async () => {
@@ -140,6 +143,33 @@ describe("/doctor wiring", () => {
 		await run("preset", ctx);
 		expect(notified[1]).toContain("Which preset?");
 		expect(setModel).not.toHaveBeenCalled();
+	});
+
+	it.each(["print", "json"] as const)("waits for the checkup turn in %s mode", async (mode) => {
+		const { ctx } = ctxFor(anthropic[1], mode);
+		let settle!: () => void;
+		const idle = new Promise<void>((resolve) => { settle = resolve; });
+		ctx.waitForIdle.mockImplementation(() => {
+			expect(fake.sentUserMessages).toHaveLength(1);
+			return idle;
+		});
+		let returned = false;
+		const running = run("", ctx).then(() => { returned = true; });
+		try {
+			await vi.waitFor(() => expect(ctx.waitForIdle).toHaveBeenCalledTimes(1));
+			expect(returned).toBe(false);
+		} finally {
+			settle();
+			await running;
+		}
+		expect(returned).toBe(true);
+	});
+
+	it.each(["tui", "rpc"] as const)("does not wait for the checkup turn in %s mode", async (mode) => {
+		const { ctx } = ctxFor(anthropic[1], mode);
+		await run("", ctx);
+		expect(fake.sentUserMessages).toHaveLength(1);
+		expect(ctx.waitForIdle).not.toHaveBeenCalled();
 	});
 
 	it("bare /doctor with a model sends the report inside the checkup prompt as a user turn", async () => {
