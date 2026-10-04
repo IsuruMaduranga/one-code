@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import claudeContextExtension from "../../extensions/claude-context/index.ts";
 import { nestedInstructionFiles, nestedInstructionText } from "../../extensions/lib/claude-context.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
+import { WORKTREE_CHANNEL } from "../../extensions/lib/worktree-channel.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 let root: string;
@@ -98,5 +99,29 @@ describe("claude-context: a read attaches nested instructions once", () => {
 		await fake.fire("session_tree", {}, ctx);
 		await read("src/reports/summary.py");
 		expect(texts).toHaveLength(4);
+	});
+});
+
+describe("claude-context: nested instructions in an entered worktree", () => {
+	it("attaches the worktree's subdirectory instructions, not its root file", async () => {
+		const worktree = mkdtempSync(join(tmpdir(), "nested-worktree-"));
+		try {
+			mkdirSync(join(worktree, "src"), { recursive: true });
+			writeFileSync(join(worktree, "CLAUDE.md"), "root copy\n");
+			writeFileSync(join(worktree, "src", "CLAUDE.md"), "Worktree src rules.\n");
+			writeFileSync(join(worktree, "src", "a.ts"), "a\n");
+			const fake = createFakePi();
+			claudeContextExtension(fake.pi as never);
+			const texts: string[] = [];
+			fake.events.on(REMINDER_CHANNEL, (data) => {
+				const payload = data as { text?: string; placement?: string };
+				if (!payload.placement && payload.text) texts.push(payload.text);
+			});
+			fake.events.emit(WORKTREE_CHANNEL, { path: worktree });
+			await fake.fire("tool_result", { toolName: "read", input: { path: join(worktree, "src", "a.ts") }, isError: false, content: [] }, createFakeCtx({ cwd: root }));
+			expect(texts).toEqual([`Contents of ${join(worktree, "src", "CLAUDE.md")}:\n\nWorktree src rules.\n`]);
+		} finally {
+			rmSync(worktree, { recursive: true, force: true });
+		}
 	});
 });

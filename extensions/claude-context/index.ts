@@ -42,6 +42,7 @@ import { projectMemoryDir, truncateIndex } from "../lib/memory.ts";
 import { claudeConfigDir, oneCodeStateDir, tryRealpath } from "../lib/paths.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { resolveToolPath } from "../lib/tool-path.ts";
+import { sessionWorkCwd, WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
 import { pathArgument } from "../auto-mode/paths.ts";
 import { HARNESS_GIT_CONFIG } from "../lib/git.ts";
 
@@ -107,6 +108,12 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	 */
 	let startupShown = new Set<string>();
 	let attachedNested = new Set<string>();
+	/** The entered worktree: reads there resolve below its root, not the session's original directory. */
+	let entered: WorktreeLocation | undefined;
+	pi.events.on(WORKTREE_CHANNEL, (data) => {
+		const location = data as WorktreeLocation | null | undefined;
+		entered = location?.path ? location : undefined;
+	});
 	/** The instruction rule, read with the startup block (it is settings, read once a session). */
 	let rule: ReturnType<typeof instructionRule> | undefined;
 
@@ -229,7 +236,9 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		if (!raw) return;
 		rule ??= instructionRule(os.homedir());
 		const filePath = resolveToolPath(raw, ctx.cwd);
-		const files = nestedInstructionFiles({ filePath, cwd: ctx.cwd, rule, home: os.homedir() });
+		// In a worktree, the directories between are below the worktree's root (its own root files
+		// are the shared checkout's, which the startup block carries).
+		const files = nestedInstructionFiles({ filePath, cwd: sessionWorkCwd(entered, ctx.cwd), rule, home: os.homedir() });
 		// A file the model read itself is in context already.
 		attachedNested.add(tryRealpath(filePath) ?? filePath);
 		for (const file of files) {
