@@ -99,6 +99,15 @@ can't reuse the cached prefix of the conversation.
 
 Set `CC_COMPACTION=0` to use pi's own summary instead.
 
+If you step away from a big session, One Code compacts it before the prompt
+cache runs out. On Claude models the session's cache lasts an hour, and once
+it expires your next message pays to write the whole conversation to the cache
+again. So after 54 idle minutes, a session holding 200,000 tokens or more is
+compacted while reading the cache is still cheap, and you'll see "Compacted
+while idle, before the prompt cache expired". It holds off while a turn is
+running or if you typed in the last minute. Set `CC_IDLE_COMPACT=0` to turn
+it off.
+
 ### The token budget line
 
 Like Claude Code, One Code tells the model how many tokens it has left in
