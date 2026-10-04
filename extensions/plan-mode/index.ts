@@ -42,7 +42,7 @@ import {
 	EXIT_PLAN_MODE_DESCRIPTION,
 	exitedPlanModeText,
 } from "./texts.ts";
-import { clampOffset, decodeViewerKey, initialPlanChoice, type PlanChoice, renderPlanViewer, wrapPlanText } from "./viewer.ts";
+import { clampOffset, decodeViewerKey, initialPlanChoice, type PlanChoice, renderPlanViewer, selectPlanChoice, wrapPlanText } from "./viewer.ts";
 
 import { MODE_CHANNEL, PLAN_FILE_CHANNEL, PLAN_FILE_ENTRY, planFileOnBranch } from "../lib/plan-mode-channels.ts";
 export { MODE_CHANNEL, PLAN_FILE_CHANNEL };
@@ -242,7 +242,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
 			];
 			const choices = options.map((o) => o.label);
 
-			const choice = await ctx.ui.custom<PlanChoice | null>((tui, theme, _keybindings, done) => {
+			const choice = ctx.mode === "rpc" ? await selectPlanChoice(ctx.ui, plan, path, choices) : await ctx.ui.custom<PlanChoice | null>((tui, theme, _keybindings, done) => {
 				const paint = safeThemePaint(theme);
 				const maxVisible = 12;
 				let offset = 0;

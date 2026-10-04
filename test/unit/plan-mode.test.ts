@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildPlanModeReminder } from "../../extensions/plan-mode/reminder.ts";
 import { randomSlug } from "../../extensions/plan-mode/slug.ts";
-import { clampOffset, decodeViewerKey, initialPlanChoice, renderPlanViewer, wrapPlanText } from "../../extensions/plan-mode/viewer.ts";
+import { clampOffset, decodeViewerKey, initialPlanChoice, renderPlanViewer, selectPlanChoice, wrapPlanText } from "../../extensions/plan-mode/viewer.ts";
 
 /** The dialog's default choice list when auto mode is available (auto mode leads). */
 const CHOICES = [
@@ -161,5 +161,24 @@ describe("initialPlanChoice", () => {
 
 	it("falls back to the first option when no manual choice exists", () => {
 		expect(initialPlanChoice([{ mode: "acceptEdits" }, {}])).toBe(0);
+	});
+});
+
+describe("selectPlanChoice (RPC)", () => {
+	const choices = ["Approve — Auto mode", "Approve — Default mode", "Keep planning"];
+	const ui = (reply: string | undefined) => {
+		const seen: Array<{ title: string; options: string[] }> = [];
+		return { seen, select: async (title: string, options: string[]) => (seen.push({ title, options }), reply) };
+	};
+
+	it("asks with the plan in the title and returns the picked index", async () => {
+		const client = ui("Approve — Default mode");
+		expect(await selectPlanChoice(client, "1. Do it", "/plans/x.md", choices)).toBe(1);
+		expect(client.seen).toEqual([{ title: "Plan (/plans/x.md):\n\n1. Do it\n\nApprove the plan?", options: choices }]);
+	});
+
+	it("reads a dismissal or an unknown reply as no choice", async () => {
+		expect(await selectPlanChoice(ui(undefined), "p", "/x.md", choices)).toBeNull();
+		expect(await selectPlanChoice(ui("Approve"), "p", "/x.md", choices)).toBeNull();
 	});
 });
