@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ONE_SHOT_COMMAND_FAILED_CHANNEL } from "../../extensions/lib/interrupt.ts";
 import { createUserMessageSender } from "../../extensions/lib/notifications.ts";
 import { createFakePi } from "./helpers/fake-pi.ts";
 
@@ -56,10 +57,16 @@ describe("createUserMessageSender", () => {
 		vi.useFakeTimers();
 		const fake = createFakePi();
 		const send = createUserMessageSender(fake.pi as never);
+		const failedCommand = vi.fn();
+		fake.events.on(ONE_SHOT_COMMAND_FAILED_CHANNEL, failedCommand);
+		const exitCode = process.exitCode;
 		const ctx = { mode: "json" as const, isIdle: () => true, waitForIdle: vi.fn(async () => {}) };
 		const failed = expect(send(ctx, "consumed")).rejects.toThrow("Check model authentication and extension input hooks");
 		await vi.advanceTimersByTimeAsync(30_000);
 		await failed;
+		expect(failedCommand).toHaveBeenCalledOnce();
+		// A child may use the sender too: only its local bus hears the failure.
+		expect(process.exitCode).toBe(exitCode);
 		expect(ctx.waitForIdle).not.toHaveBeenCalled();
 		expect(vi.getTimerCount()).toBe(0);
 		const running = send(ctx, "next prompt");
@@ -75,9 +82,12 @@ describe("createUserMessageSender", () => {
 		const fake = createFakePi();
 		const send = createUserMessageSender(fake.pi as never);
 		const waitForIdle = vi.fn(async () => {});
+		const failedCommand = vi.fn();
+		fake.events.on(ONE_SHOT_COMMAND_FAILED_CHANNEL, failedCommand);
 		const failed = expect(send({ mode: "print", isIdle: () => true, waitForIdle }, "prompt")).rejects.toThrow("Session shut down");
 		await fake.fire("session_shutdown", {});
 		await failed;
+		expect(failedCommand).not.toHaveBeenCalled();
 		await fake.fire("agent_start", {});
 		expect(waitForIdle).not.toHaveBeenCalled();
 		expect(vi.getTimerCount()).toBe(0);

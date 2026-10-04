@@ -31,7 +31,7 @@
  */
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { withKeepAlive } from "../lsp/keep-alive.ts";
-import { RunOutcomeLatch } from "./interrupt.ts";
+import { ONE_SHOT_COMMAND_FAILED_CHANNEL, RunOutcomeLatch } from "./interrupt.ts";
 import { escapeXml } from "./local-command.ts";
 import { PROMPT_OPTIONS_CHANNEL } from "./prompt-options.ts";
 import { wrapReminder } from "./reminders.ts";
@@ -926,12 +926,14 @@ function assertNever(mode: never): never {
  * Bound the start wait so an error or an input hook consuming the prompt cannot
  * hang a print process forever. The timeout applies only to startup, not the run.
  */
-export function createUserMessageSender(pi: Pick<ExtensionAPI, "on" | "sendUserMessage">) {
+export function createUserMessageSender(pi: Pick<ExtensionAPI, "on" | "sendUserMessage" | "events">) {
 	const pending = new Set<{ start(): void; stop(): void }>();
+	let active = true;
 	pi.on("agent_start", () => {
 		for (const waiter of pending) waiter.start();
 	});
 	pi.on("session_shutdown", () => {
+		active = false;
 		for (const waiter of pending) waiter.stop();
 		pending.clear();
 	});
@@ -959,6 +961,13 @@ export function createUserMessageSender(pi: Pick<ExtensionAPI, "on" | "sendUserM
 				pending.delete(waiter);
 			}
 			await awaitOneShotTurn(ctx);
+		}).catch((error) => {
+			// pi logs command-handler rejections but runPrintMode still returns
+			// success. Tell the session's exit extension without touching the
+			// process-wide code here (a later prompt may succeed, or this may be
+			// a child). A shutdown rejection must not act on a disposed session.
+			if (active) pi.events.emit(ONE_SHOT_COMMAND_FAILED_CHANNEL, {});
+			throw error;
 		});
 	};
 }

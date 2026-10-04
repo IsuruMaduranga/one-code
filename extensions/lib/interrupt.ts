@@ -34,6 +34,9 @@
  * carry the outcome over from the runs' `agent_end`. Findings §3.
  */
 
+/** A one-shot command failed before its user turn could settle (no agent_end to classify). */
+export const ONE_SHOT_COMMAND_FAILED_CHANNEL = "one-code:one-shot-command-failed";
+
 /** How the last assistant message of a run ended. */
 export type RunOutcome = "ok" | "aborted" | "error";
 
