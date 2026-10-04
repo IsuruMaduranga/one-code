@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeChanges, FileTracker, RACY_STAMP_MS } from "../../extensions/file-tracker/tracker.ts";
+import { describeChanges, FileTracker, RACY_STAMP_MS, UNREAD_REASON } from "../../extensions/file-tracker/tracker.ts";
 import { looksLikeAnthropicRequest, withClearThinking } from "../../extensions/context-management/index.ts";
 
 describe("FileTracker.status", () => {
@@ -65,6 +65,14 @@ describe("FileTracker.status", () => {
 
 // The change scan runs after every tool call; the stamp is what lets it skip
 // the full read for every tracked file whose mtime and size have not moved.
+describe("UNREAD_REASON", () => {
+	it("tells the model a cut-off shell output does not count as a read", () => {
+		const text = UNREAD_REASON("/p/a.ts", "edit");
+		expect(text).toContain("a plain `cat`");
+		expect(text).toContain("output cut off at the size limit");
+	});
+});
+
 describe("FileTracker disk stamps", () => {
 	const stamp = { mtimeMs: 1000, size: 5 };
 
