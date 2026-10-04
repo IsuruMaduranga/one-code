@@ -21,6 +21,13 @@ export function claudeConfigDir(env: Record<string, string | undefined> = proces
 	return env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
 }
 
+/** Claude Code's organization-managed instruction root (not the Windows settings registry/store). */
+export function claudeManagedDir(platform: NodeJS.Platform = process.platform): string {
+	if (platform === "darwin") return "/Library/Application Support/ClaudeCode";
+	if (platform === "win32") return "C:\\Program Files\\ClaudeCode";
+	return "/etc/claude-code";
+}
+
 /**
  * The user-scope Claude Code dir for a given `home` — `claudeConfigDir` for
  * callers that thread a `home` (tests, `~`-expansion). `CLAUDE_CONFIG_DIR`

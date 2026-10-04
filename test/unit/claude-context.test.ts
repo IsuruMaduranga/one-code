@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	AGENTS_DESCRIPTOR,
 	buildClaudeMdBlock,
@@ -19,6 +19,20 @@ import {
 } from "../../extensions/lib/claude-context.ts";
 import { wrapReminder } from "../../extensions/lib/reminders.ts";
 import { truncateIndex } from "../../extensions/lib/memory.ts";
+
+// Ancestor instruction files on the host must not affect temporary fixtures,
+// including when TMPDIR is inside a checkout that carries its own CLAUDE.md.
+vi.mock("node:fs", async (load) => {
+	const actual = await load<typeof import("node:fs")>();
+	return {
+		...actual,
+		existsSync: (path: Parameters<typeof actual.existsSync>[0]) => {
+			const name = String(path);
+			if (/(?:CLAUDE(?:\.local)?|AGENTS|ONECODE)\.md$/i.test(name) && !name.startsWith(tmpdir() + sep)) return false;
+			return actual.existsSync(path);
+		},
+	};
+});
 
 describe("buildClaudeMdBlock", () => {
 	it("assembles the instructions block byte-for-byte per Claude Code's join rule", () => {

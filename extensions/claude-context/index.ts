@@ -144,7 +144,7 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		const instructions = buildClaudeMdBlock({ contextFiles, memoryIndex: readMemoryIndex(ctx.cwd) });
 		// A file the startup block carries (or imports) is never attached again on a read.
 		startupShown = new Set(
-			contextFiles.flatMap((file) => [file.path, ...collectImportedPaths(readOrEmpty(file.path), dirname(file.path), { home: os.homedir() })]).map((p) => tryRealpath(p) ?? p),
+			contextFiles.flatMap((file) => [file.path, ...(file.imported ?? collectImportedPaths(readOrEmpty(file.path), dirname(file.path), { home: os.homedir() }))]).map((p) => tryRealpath(p) ?? p),
 		);
 		if (instructions) {
 			pi.events.emit(REMINDER_CHANNEL, {
@@ -225,11 +225,9 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		attachedNested = new Set(startupShown);
 	});
 
-	// Claude Code's nested instructions: reading a file below the working
-	// directory attaches the CLAUDE.md-family files of the directories between,
-	// once each (lib/claude-context.ts nestedInstructionFiles). The startup block
-	// carries only cwd and its ancestors, so a subdirectory's rules ("amounts are
-	// integer cents") were missed until the model happened to read that file.
+	// A successful read attaches nested instruction files and matching path rules
+	// once each. These are one-shots: never replace the frozen first-prepend block.
+	// lib/claude-context.ts owns traversal, matching and source ordering.
 	pi.on("tool_result", (event, ctx) => {
 		if (event.toolName !== "read" || event.isError) return;
 		const raw = pathArgument(event.input);
