@@ -32,6 +32,7 @@
 			"extensions/context-budget/index.ts",
 			"extensions/system-reminder/index.ts",
 			"extensions/claude-context/index.ts",
+			"extensions/tool-call-corruption/index.ts",
 			"extensions/hooks/index.ts",
 			"extensions/tool-search/index.ts",
 			"extensions/search-tools/index.ts",
