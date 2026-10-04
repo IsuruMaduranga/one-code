@@ -6,8 +6,8 @@
  * CONTEXT_ORDER.context, and the date at CONTEXT_ORDER.date, which on a model
  * that takes a mid-conversation system message rides that message instead
  * (system-reminder, lib/system-role.ts). They ride the reminder queue
- * (transient per-request via pi's `context` event), so they never persist to
- * the session and never double up on resume.
+ * (per-request via pi's `context` event). system-reminder persists a hidden
+ * snapshot so a resume retains the original facts without doubling the blocks.
  *
  * When ONECODE.md files exist, this extension also emits a separate `# oneCodeMd`
  * block at CONTEXT_ORDER.oneCodeMd — after the instructions block, so One
@@ -40,7 +40,9 @@ import {
 import { collectGitStatus, GIT_SNAPSHOT_OWNER_CHANNEL } from "../lib/git-status.ts";
 import { projectMemoryDir, truncateIndex } from "../lib/memory.ts";
 import { claudeConfigDir, oneCodeStateDir, tryRealpath } from "../lib/paths.ts";
-import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL, type ReminderEntry } from "../lib/reminders.ts";
+import { CONTEXT_BASELINE_CHANNEL, CONTEXT_FACTS_REFRESH_CHANNEL, restoredContext, type ContextStackSnapshot } from "../lib/context-stack.ts";
+import { compactionGitStatus, contextFactsBaseline, DATE_CHANGE_KEY, legacyResumeFactsNotice, RESUME_FACTS_KEY, resumeFactsNotice, storedFactsBaseline, type ContextFactsBaseline } from "../lib/context-facts.ts";
 import { resolveToolPath } from "../lib/tool-path.ts";
 import { sessionWorkCwd, WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
 import { pathArgument } from "../auto-mode/paths.ts";
@@ -129,23 +131,55 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		});
 	};
 
+	let facts: ContextFactsBaseline | undefined;
+	let pendingResume: ContextStackSnapshot | undefined;
+	const baseline = () => ({ startupShown: [...startupShown], shownDate, facts });
+	const publishBaseline = () => pi.events.emit(CONTEXT_BASELINE_CHANNEL, { key: "claude-context", value: baseline() });
+	const readFiles = (cwd: string) => ({
+		contextFiles: discoverContextFiles({ cwd, homeClaudeDir: claudeConfigDir(), rule: instructionRule(os.homedir()), home: os.homedir() }),
+		memoryIndex: readMemoryIndex(cwd),
+		oneCode: buildOneCodeBlock(discoverOneCodeFiles({ cwd, homeOneCodeDir: oneCodeStateDir(), home: os.homedir() })),
+	});
+	let files: ReturnType<typeof readFiles> | undefined;
+	const adoptFiles = (current: ReturnType<typeof readFiles>) => {
+		files = current;
+		startupShown = new Set(current.contextFiles.flatMap((file) =>
+			[file.path, ...(file.imported ?? collectImportedPaths(readOrEmpty(file.path), dirname(file.path), { home: os.homedir() }))],
+		).map((path) => tryRealpath(path) ?? path));
+		attachedNested = new Set(startupShown);
+		rule = instructionRule(os.homedir());
+	};
+	const snapshotGit = (cwd: string) => {
+		const tools = pi.getActiveTools();
+		const shellTool = tools.includes("powershell") && !tools.includes("bash") ? "powershell" : "bash";
+		return takesGitSnapshot ? collectGitStatus(cwd, undefined, shellTool) : null;
+	};
+
 	pi.on("session_start", (_event, ctx) => {
+		const restored = restoredContext(pi.events);
+		pendingResume = restored;
+		files = undefined;
+		facts = undefined;
+		if (restored) {
+			const baseline = restored.baselines["claude-context"] as { startupShown?: unknown; shownDate?: unknown; facts?: unknown } | undefined;
+			facts = storedFactsBaseline(baseline?.facts);
+			startupShown = new Set(Array.isArray(baseline?.startupShown) ? baseline.startupShown.filter((p): p is string => typeof p === "string") : []);
+			attachedNested = new Set(startupShown);
+			rule = instructionRule(os.homedir());
+			gitStatus = null; // The stored snapshot wins; do not take another one.
+			blockDate = restored.stack.find((entry) => entry.key === DATE_REMINDER_KEY)?.text.match(/^Today's date is (\d{4}-\d{2}-\d{2})\.$/)?.[1] ?? "";
+			shownDate = typeof baseline?.shownDate === "string" ? baseline.shownDate : blockDate;
+			publishBaseline();
+			return;
+		}
 		// The instructions block carries the instruction files the mode and Claude
 		// Code's instructionFiles pick (lib/claude-context.ts instructionRule): by
 		// default the CLAUDE.md family, or the project's AGENTS.md files when it
 		// has no CLAUDE.md, byte-exact with Claude Code either way. ONECODE.md
 		// rides its own higher-precedence block below.
-		const contextFiles = discoverContextFiles({
-			cwd: ctx.cwd,
-			homeClaudeDir: claudeConfigDir(),
-			rule: instructionRule(os.homedir()),
-			home: os.homedir(),
-		});
-		const instructions = buildClaudeMdBlock({ contextFiles, memoryIndex: readMemoryIndex(ctx.cwd) });
-		// A file the startup block carries (or imports) is never attached again on a read.
-		startupShown = new Set(
-			contextFiles.flatMap((file) => [file.path, ...(file.imported ?? collectImportedPaths(readOrEmpty(file.path), dirname(file.path), { home: os.homedir() }))]).map((p) => tryRealpath(p) ?? p),
-		);
+		const current = readFiles(ctx.cwd);
+		adoptFiles(current);
+		const instructions = buildClaudeMdBlock(current);
 		if (instructions) {
 			pi.events.emit(REMINDER_CHANNEL, {
 				text: instructions,
@@ -166,9 +200,7 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 
 		// One Code's own instructions ride in a separate block AFTER the instructions
 		// block, so they take precedence over CLAUDE.md (higher order = closer to the user text).
-		const oneCode = buildOneCodeBlock(
-			discoverOneCodeFiles({ cwd: ctx.cwd, homeOneCodeDir: oneCodeStateDir(), home: os.homedir() }),
-		);
+		const oneCode = current.oneCode;
 		if (oneCode) {
 			pi.events.emit(REMINDER_CHANNEL, {
 				text: oneCode,
@@ -178,6 +210,7 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 				order: CONTEXT_ORDER.oneCodeMd,
 			});
 		}
+		publishBaseline();
 	});
 
 	// Claude Code snapshots git "at the start of the conversation": on the first
@@ -185,10 +218,24 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	// synchronous git spawns never delay the prompt opening (findings §15). The
 	// clip note names the shell tool the model has (PowerShell only without bash).
 	pi.on("turn_start", (_event, ctx) => {
+		// Check only once, just before the first resumed request. No startup git
+		// subprocesses, and no changes to the historical first-message blocks.
+		if (pendingResume) {
+			const restored = pendingResume;
+			pendingResume = undefined;
+			const cwd = sessionWorkCwd(entered, ctx.cwd);
+			const current = readFiles(cwd);
+			const liveGit = snapshotGit(cwd);
+			const liveFacts = contextFactsBaseline({ ...current, gitStatus: liveGit, atCompaction: false });
+			const text = facts ? resumeFactsNotice(facts, liveFacts) : legacyResumeFactsNotice(restored.stack, {
+				instructions: buildClaudeMdBlock(current), email: resolveEmail(cwd), gitStatus: liveGit,
+			});
+			if (text) pi.events.emit(REMINDER_CHANNEL, { key: RESUME_FACTS_KEY, text });
+		}
 		if (gitStatus !== undefined) return;
-		const tools = pi.getActiveTools();
-		const shellTool = tools.includes("powershell") && !tools.includes("bash") ? "powershell" : "bash";
-		gitStatus = takesGitSnapshot ? collectGitStatus(ctx.cwd, undefined, shellTool) : null;
+		gitStatus = snapshotGit(ctx.cwd);
+		if (files) facts = contextFactsBaseline({ ...files, gitStatus, atCompaction: false });
+		publishBaseline();
 		const context = buildContextBlock({ email, gitStatus });
 		if (!context) return;
 		pi.events.emit(REMINDER_CHANNEL, {
@@ -203,21 +250,37 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	// A session that crosses local midnight learns the new date on its next
 	// turn, as a one-shot on that turn's prompt (Claude Code's notice), so the
 	// frozen reminder on message 1 and the cached prefix stay as they are.
-	pi.on("before_agent_start", () => {
+	const announceDate = () => {
 		if (!blockDate) return;
 		const today = localDate();
 		if (today === shownDate) return;
 		shownDate = today;
-		pi.events.emit(REMINDER_CHANNEL, { text: dateChangeReminder(today) });
-	});
+		pi.events.emit(REMINDER_CHANNEL, { key: DATE_CHANGE_KEY, text: dateChangeReminder(today) });
+		publishBaseline();
+	};
+	pi.on("before_agent_start", announceDate);
 
-	// A compaction starts a new prefix, and the notice may have ridden a message
-	// it folded away: rebuild the reminder with today's date while it costs nothing.
-	pi.on("session_compact", () => {
-		const today = localDate();
-		if (today !== blockDate) emitDate(today);
-		// The summary does not carry them: the next read below their directory attaches them again.
-		attachedNested = new Set(startupShown);
+	// All successful compactions (manual, automatic and idle) fire this hook.
+	// The summary starts a new prefix: refresh facts silently, then persist the
+	// replacement even if the process exits before another model request.
+	pi.on("session_compact", (_event, ctx) => {
+		pendingResume = undefined;
+		const cwd = sessionWorkCwd(entered, ctx.cwd);
+		const current = readFiles(cwd);
+		adoptFiles(current);
+		email = resolveEmail(cwd);
+		gitStatus = snapshotGit(cwd);
+		blockDate = shownDate = localDate();
+		facts = contextFactsBaseline({ ...current, gitStatus, atCompaction: true });
+		const entries: ReminderEntry[] = [];
+		const add = (key: string, text: string | null, order: number) => {
+			if (text) entries.push({ key, text, order, placement: "first-prepend" });
+		};
+		add(REMINDER_KEY, buildClaudeMdBlock(current), CONTEXT_ORDER.claudeMd);
+		add(ONECODE_REMINDER_KEY, current.oneCode, CONTEXT_ORDER.oneCodeMd);
+		add(CONTEXT_REMINDER_KEY, buildContextBlock({ email, gitStatus: compactionGitStatus(gitStatus) }), CONTEXT_ORDER.context);
+		add(DATE_REMINDER_KEY, dateBlock(blockDate), CONTEXT_ORDER.date);
+		pi.events.emit(CONTEXT_FACTS_REFRESH_CHANNEL, { entries, baseline: baseline() });
 	});
 
 	// A branch switch leaves the attachments of the branch left behind; the new one may lack them.

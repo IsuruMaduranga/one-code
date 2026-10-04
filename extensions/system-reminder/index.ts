@@ -2,8 +2,8 @@
  * system-reminder extension — injects queued <system-reminder> blocks into the
  * outgoing LLM request (pi `context` event), and writes one-shots into the tool
  * result they follow (pi `tool_result` event) so they persist in the session
- * the way Claude Code's mid-turn reminders do. Standing and context reminders
- * stay transient: the session file never contains them. This extension owns
+ * the way Claude Code's mid-turn reminders do. Context and sticky anchors are
+ * restored from hidden custom entries; rendered messages stay untouched. This extension owns
  * the one queue instance; every other extension reaches it over
  * `one-code:system-reminder` (lib/reminders.ts has the placement contract).
  *
@@ -23,9 +23,16 @@ import {
 	openingUserAnchor,
 	REMINDER_CHANNEL,
 	ReminderQueue,
+	type ReminderEntry,
 	type ReminderPayload,
 	tailAnchor,
 } from "../lib/reminders.ts";
+import {
+	CONTEXT_BASELINE_CHANNEL, CONTEXT_RESTORE_CHANNEL, CONTEXT_STACK_ENTRY, CONTEXT_STATE_ENTRY, CONTEXT_FACTS_REFRESH_CHANNEL,
+	contextStackOnBranch, RESTORED_STACK_KEYS, LIVE_CONTEXT_KEYS,
+	type ContextBaseline, type ContextRestoreRequest, type ContextStackSnapshot, type ContextFactsRefresh,
+} from "../lib/context-stack.ts";
+import { CONTEXT_FACT_KEYS, DATE_CHANGE_KEY, RESUME_FACTS_KEY } from "../lib/context-facts.ts";
 import { claudeFamily } from "../lib/model-tier.ts";
 import { instructionRole, messagesKey, type MovedBlock, systemRoleLayout, wireShape, withSystemRoleContext } from "../lib/system-role.ts";
 import { resolveCountdowns, withTurnBudgetMessages } from "../lib/turn-budget-layout.ts";
@@ -41,6 +48,49 @@ const ANCHOR_ROLES = new Set(["user", "toolResult", "compactionSummary", "custom
 
 export default function systemReminderExtension(pi: ExtensionAPI) {
 	const reminderQueue = new ReminderQueue();
+	let restored: ContextStackSnapshot | undefined;
+	let stored = false;
+	let baselines: Record<string, unknown> = {};
+	let lastState = "";
+	let lastStack = "";
+	pi.events.on(CONTEXT_RESTORE_CHANNEL, (data) => {
+		if (data && restored) (data as ContextRestoreRequest).restored = structuredClone(restored);
+	});
+	pi.events.on(CONTEXT_BASELINE_CHANNEL, (data) => {
+		const baseline = data as ContextBaseline | undefined;
+		if (typeof baseline?.key === "string") baselines[baseline.key] = structuredClone(baseline.value);
+	});
+	pi.on("session_start", (_event, ctx) => {
+		restored = contextStackOnBranch(ctx.sessionManager.getBranch());
+		stored = restored !== undefined;
+		baselines = restored ? structuredClone(restored.baselines) : {};
+		lastState = restored ? JSON.stringify({ version: 1, sticky: restored.sticky, baselines }) : "";
+		lastStack = restored ? JSON.stringify(restored.stack) : "";
+		if (restored) reminderQueue.restore(restored.stack, restored.sticky, RESTORED_STACK_KEYS, LIVE_CONTEXT_KEYS);
+	});
+	const persistSnapshot = (stack: ReminderEntry[] = reminderQueue.persistentEntries("first-prepend")) => {
+		const state = { version: 1 as const, sticky: reminderQueue.persistentEntries("sticky-append"), baselines };
+		const serialized = JSON.stringify(state);
+		const serializedStack = JSON.stringify(stack);
+		if (!stored) {
+			pi.appendEntry(CONTEXT_STACK_ENTRY, structuredClone({ ...state, stack }));
+			stored = true;
+		} else if (serialized !== lastState || serializedStack !== lastStack) {
+			// Compaction and explicit capability switches start a new prefix.
+			pi.appendEntry(CONTEXT_STATE_ENTRY, structuredClone({ ...state, ...(serializedStack !== lastStack ? { stack } : {}) }));
+		}
+		lastState = serialized;
+		lastStack = serializedStack;
+	};
+	pi.events.on(CONTEXT_FACTS_REFRESH_CHANNEL, (data) => {
+		const refresh = data as ContextFactsRefresh;
+		reminderQueue.replaceFirstPrepend(CONTEXT_FACT_KEYS, refresh.entries);
+		reminderQueue.cancelPending([DATE_CHANGE_KEY, RESUME_FACTS_KEY]);
+		baselines["claude-context"] = structuredClone(refresh.baseline);
+		// /compact may be the last action before exit. Persist now, not just on
+		// the next request, so a resume cannot revive the pre-compaction facts.
+		persistSnapshot();
+	});
 	/** The blocks the last `context` pass placed for the system message; the payload hook moves them. */
 	let moved: MovedBlock[] = [];
 	/** The tool results' countdowns the last `context` pass lifted, by call id (lib/turn-budget-layout.ts). */
@@ -85,7 +135,7 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 
 	/** The request's messages with the queued reminders placed, or the input when nothing can be placed. */
 	const withReminders = (messages: Parameters<typeof injectReminders>[0], layout: ReturnType<typeof systemRoleLayout>) => {
-		if (reminderQueue.size === 0) return messages;
+		if (reminderQueue.size === 0 && !stored) return messages;
 		// injectReminders is a no-op when there is nothing to attach to. Only
 		// consume the queue once there is somewhere to put the reminders, so they
 		// survive to the next eligible request.
@@ -104,8 +154,15 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 			const anchor = openingUserAnchor(messages);
 			if (anchor) reminderQueue.pin(anchor, "user-prepend");
 		}
+		// Capture first-prepend before draining (one may be next-turn), then save
+		// after drain resolves sticky anchors. Store logical entries before layout,
+		// including systemRoleOnly blocks even on a model that cannot carry them.
+		reminderQueue.finishRestore();
+		const stack = reminderQueue.persistentEntries("first-prepend");
+		const drained = reminderQueue.drain(messages);
+		persistSnapshot(stack);
 		// A block meant only for the system message is left out where there is none.
-		const reminders = reminderQueue.drain(messages).filter((entry) => layout || !entry.systemRoleOnly);
+		const reminders = drained.filter((entry) => layout || !entry.systemRoleOnly);
 		if (layout) {
 			moved = reminders
 				.filter((entry) => entry.placement === "first-prepend" && movesToSystemRole(entry.order))

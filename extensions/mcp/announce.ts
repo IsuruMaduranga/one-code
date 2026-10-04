@@ -39,13 +39,66 @@ export function emptyAnnounced(): McpAnnounced {
 	return { instructed: new Map(), failed: new Map() };
 }
 
+/**
+ * Store and compare the exact bounded values the reminder puts on the wire.
+ * A changing tail beyond either cap is not a model-visible capability change
+ * and must not become a false resume addendum.
+ */
+function displayedInstructions(name: string, instructions: string): string {
+	const rendered = mcpInstructionsReminder([{ server: { name }, instructions }]);
+	const prefix = "# MCP Server Instructions\n\nThe following MCP servers have provided instructions for how to use their tools and resources:\n\n" + `## ${name}\n`;
+	return rendered?.startsWith(prefix) ? rendered.slice(prefix.length) : instructions;
+}
+function displayedFailure(error: string): string {
+	return error.split("\n")[0].slice(0, 300);
+}
+
+/** Maps are serialized as entry arrays so arbitrary server instructions/errors round-trip exactly. */
+export interface McpAnnouncedBaseline { instructed: Array<[string, string]>; failed: Array<[string, string]> }
+export function serializeMcpAnnounced(announced: McpAnnounced): McpAnnouncedBaseline {
+	return { instructed: [...announced.instructed], failed: [...announced.failed] };
+}
+/** Best-effort compatibility reader for stacks written before structured MCP baselines. */
+export function mcpAnnouncedFromReminders(instructions: string | undefined, failures: string | undefined): McpAnnounced {
+	const announced = emptyAnnounced();
+	const instructionPrefix = "# MCP Server Instructions\n\nThe following MCP servers have provided instructions for how to use their tools and resources:\n\n";
+	if (instructions?.startsWith(instructionPrefix)) {
+		for (const section of instructions.slice(instructionPrefix.length).split("\n\n## ")) {
+			const normalized = section.startsWith("## ") ? section.slice(3) : section;
+			const newline = normalized.indexOf("\n");
+			if (newline > 0) announced.instructed.set(normalized.slice(0, newline), normalized.slice(newline + 1));
+		}
+	}
+	const failurePrefix = "The following MCP servers are configured but failed to connect — their tools (typically named mcp__<server>__*) are unavailable for this session:\n";
+	if (failures?.startsWith(failurePrefix)) {
+		for (const line of failures.slice(failurePrefix.length).split("\n")) {
+			if (!line.startsWith("- ")) break;
+			const colon = line.indexOf(": ", 2);
+			if (colon > 2) announced.failed.set(line.slice(2, colon), line.slice(colon + 2));
+		}
+	}
+	return announced;
+}
+
+export function mcpAnnouncedBaseline(value: unknown): McpAnnounced | undefined {
+	if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+	const input = value as Record<string, unknown>;
+	const pairs = (item: unknown): Array<[string, string]> | undefined =>
+		Array.isArray(item) && item.every((pair) => Array.isArray(pair) && pair.length === 2 && typeof pair[0] === "string" && typeof pair[1] === "string")
+			? item as Array<[string, string]>
+			: undefined;
+	const instructed = pairs(input.instructed);
+	const failed = pairs(input.failed);
+	return instructed && failed ? { instructed: new Map(instructed), failed: new Map(failed) } : undefined;
+}
+
 /** What message 1 says after it was (re)written from `snapshot`, before the first request. */
 export function announcedFrom(snapshot: McpSnapshot): McpAnnounced {
 	return {
 		instructed: new Map(
-			snapshot.connected.filter((c) => c.instructions).map((c) => [c.name, c.instructions as string]),
+			snapshot.connected.filter((c) => c.instructions).map((c) => [c.name, displayedInstructions(c.name, c.instructions as string)]),
 		),
-		failed: new Map(snapshot.failed.map((f) => [f.name, f.error])),
+		failed: new Map(snapshot.failed.map((f) => [f.name, displayedFailure(f.error)])),
 	};
 }
 
@@ -54,9 +107,11 @@ export function mcpDelta(announced: McpAnnounced, snapshot: McpSnapshot): McpDel
 	const failedNames = new Set(snapshot.failed.map((f) => f.name));
 	return {
 		newInstructions: snapshot.connected
-			.filter((c) => c.instructions && announced.instructed.get(c.name) !== c.instructions)
-			.map((c) => ({ name: c.name, instructions: c.instructions as string })),
-		newFailures: snapshot.failed.filter((f) => announced.failed.get(f.name) !== f.error),
+			.filter((c) => c.instructions && announced.instructed.get(c.name) !== displayedInstructions(c.name, c.instructions as string))
+			.map((c) => ({ name: c.name, instructions: displayedInstructions(c.name, c.instructions as string) })),
+		newFailures: snapshot.failed
+			.filter((f) => announced.failed.get(f.name) !== displayedFailure(f.error))
+			.map((f) => ({ name: f.name, error: displayedFailure(f.error) })),
 		recovered: [...announced.failed.keys()].filter((name) => connectedNames.has(name)),
 		dropped: [...announced.instructed.keys()].filter((name) => !connectedNames.has(name) && !failedNames.has(name)),
 	};

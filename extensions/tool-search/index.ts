@@ -55,7 +55,8 @@ import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
 import { normalizeToolName } from "../permissions/matcher.ts";
-import { applyAnnouncement, planAnnouncement } from "./announce.ts";
+import { applyAnnouncement, deferredToolsBaseline, deferredToolsFromReminder, planAnnouncement } from "./announce.ts";
+import { CONTEXT_BASELINE_CHANNEL, restoredContext } from "../lib/context-stack.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
 
 /** Coalesces the burst of per-tool defers one server emits into one listing update. */
@@ -102,10 +103,19 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 				keywords: deferredRegistry.keywordsFor(tool.name),
 			}));
 
+	const publishBaseline = (names: ReadonlySet<string>) => {
+		pi.events.emit(CONTEXT_BASELINE_CHANNEL, { key: "tool-search", value: [...names] });
+	};
 	const announce = () => {
 		if (!alive()) return;
 		const available = searchableTools();
 		const plan = planAnnouncement({ requestSent, announced, available: available.map((t) => t.name) });
+		// Store the post-announcement state before the next context pass can place it.
+		if (plan.kind !== "none") {
+			const next = new Set(announced);
+			applyAnnouncement(next, plan);
+			publishBaseline(next);
+		}
 		if (plan.kind === "rewrite") {
 			pi.events.emit(REMINDER_CHANNEL, {
 				scope: "every-turn",
@@ -274,11 +284,21 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		loadedBefore = new Set([...loads.values()].flat());
 		// Tools added mid-session by tool_addition stay callable after a resume.
 		if (supportsToolAdditions(latestModel)) for (const name of addendumNamesOnBranch(branch)) loadedBefore.add(name);
-		// A new session (/clear, or a resume in a new process) has no cached prefix
-		// yet: its first request gets a freshly written listing.
-		requestSent = false;
+		const restored = restoredContext(pi.events);
+		// A restored stack is already message 1. Seed its announced names so a live
+		// capability change becomes one addendum, not a rewrite or duplicate notice.
+		requestSent = restored !== undefined;
 		announced.clear();
+		const baseline = deferredToolsBaseline(restored?.baselines["tool-search"]);
+		const legacy = deferredToolsFromReminder(restored?.stack.find((entry) => (entry as { key?: string }).key === "deferred-tools")?.text);
+		for (const name of baseline ?? legacy ?? []) announced.add(name);
+		// Native tool_addition entries can outlive an older baseline snapshot; they
+		// already told the model about these names, so merge them before planning.
+		for (const name of addendumNamesOnBranch(branch)) announced.add(name);
 		deferAll();
+		// Even an absent listing is meaningful on resume: preserve that baseline so
+		// the first later deferred tool is a tail notice, not a message-1 rewrite.
+		if (!restored) publishBaseline(announced);
 	});
 
 	pi.on("session_shutdown", clearAnnounce);

@@ -20,6 +20,7 @@ import mcpExtension from "../../extensions/mcp/index.ts";
 import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/mcp-share.ts";
 import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } from "../../extensions/lib/mcp-status.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
+import { CONTEXT_BASELINE_CHANNEL, CONTEXT_RESTORE_CHANNEL } from "../../extensions/lib/context-stack.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
 interface Fixture {
@@ -28,6 +29,8 @@ interface Fixture {
 	instructions?: string;
 	warnings?: string[];
 	connectError?: Error;
+	/** Delays this server's mocked connect so startup-settle behavior is observable. */
+	connectGate?: Promise<void>;
 }
 
 const state = vi.hoisted(() => ({
@@ -51,6 +54,7 @@ vi.mock("../../extensions/mcp/client.ts", async (importOriginal) => {
 		connect: vi.fn(async (server: { name: string }) => {
 			state.connectCalls.push(server.name);
 			const fixture = state.fixtures.get(server.name);
+			await fixture?.connectGate;
 			if (fixture?.connectError) throw fixture.connectError;
 			const client: { onclose?: () => void } = {};
 			return {
@@ -138,6 +142,56 @@ describe("mcp wiring", () => {
 		expect(instructions!.text).toContain("Use foo wisely.");
 		expect(instructions!.placement).toBe("first-prepend");
 		expect(instructions!.order).toBe(CONTEXT_ORDER.mcp);
+	});
+
+	it("a resumed removed MCP configuration stays frozen and announces the dropped server at the tail", async () => {
+		const reminders: Array<{ key?: string; text?: string }> = [];
+		const baselines: unknown[] = [];
+		fake.events.on(CONTEXT_RESTORE_CHANNEL, (request) => {
+			(request as { restored?: unknown }).restored = {
+				version: 1, stack: [], sticky: [],
+				baselines: { mcp: { instructed: [["gone", "Use the old server."]], failed: [] } },
+			};
+		});
+		fake.events.on(REMINDER_CHANNEL, (data) => reminders.push(data as { key?: string; text?: string }));
+		fake.events.on(CONTEXT_BASELINE_CHANNEL, (data) => baselines.push(data));
+
+		await boot(); // no config is deliberately written
+
+		expect(reminders.some((r) => r.key === "mcp-instructions" || r.key === "mcp-failures")).toBe(false);
+		expect(reminders.map((r) => r.text).join("\n")).toContain("gone disconnected");
+		expect(baselines.at(-1)).toMatchObject({ key: "mcp", value: { instructed: [], failed: [] } });
+	});
+
+	it("does not announce a restored server as disconnected while startup connections are still settling", async () => {
+		writeUserServers({ fast: { command: "fast-server" }, slow: { command: "slow-server" } });
+		let releaseSlow!: () => void;
+		state.fixtures.set("fast", { instructions: "Use fast." });
+		state.fixtures.set("slow", {
+			instructions: "Use slow.",
+			connectGate: new Promise<void>((resolve) => { releaseSlow = resolve; }),
+		});
+		const reminders: Array<{ key?: string; text?: string }> = [];
+		fake.events.on(CONTEXT_RESTORE_CHANNEL, (request) => {
+			(request as { restored?: unknown }).restored = {
+				version: 1, stack: [], sticky: [],
+				baselines: { mcp: { instructed: [["slow", "Use slow."]], failed: [] } },
+			};
+		});
+		fake.events.on(REMINDER_CHANNEL, (data) => reminders.push(data as { key?: string; text?: string }));
+		mcpExtension(fake.pi as never);
+		const starting = fake.fireOne("session_start", { reason: "startup" }, createFakeCtx({ cwd, hasUI: false }));
+		await vi.waitFor(() => expect(state.connectCalls).toEqual(expect.arrayContaining(["fast", "slow"])));
+
+		// `fast` has connected but `slow` has not. A partial snapshot would report
+		// the saved slow server as disconnected; no model-facing delta is emitted
+		// until the Promise.all startup barrier has settled.
+		expect(reminders).toEqual([]);
+		releaseSlow();
+		await starting;
+		expect(reminders.some((r) => r.key === "mcp-instructions" || r.key === "mcp-failures")).toBe(false);
+		expect(reminders.map((r) => r.text).join("\n")).not.toContain("slow disconnected");
+		expect(reminders.map((r) => r.text).join("\n")).toContain("fast connected after this conversation started");
 	});
 
 	it("execute() on a registered MCP tool calls through the live connection", async () => {
