@@ -86,12 +86,15 @@ function textOf(content: unknown): string {
 }
 
 /**
- * Count as read each file a shell command printed in full (`shell-reads.ts`).
- * Observed, not touched: the post-compaction restore follows the file tools,
- * as Claude Code's does.
+ * The files a shell command may print, with their content as the command
+ * starts (`shell-reads.ts` candidates, resolved as the shell resolves them).
+ * Taken before the command runs, so a file the command itself rewrites
+ * (`cat x; cp y x`) is not certified with its new content (found by a GPT-6
+ * Sol review, 2026-10-04).
  */
-function observeShellReads(tracker: FileTracker, command: string, output: string, cwd: string): void {
-	if (!command || !output) return;
+function shellReadSnapshot(command: string, cwd: string): Map<string, string> {
+	const snapshot = new Map<string, string>();
+	if (!command) return snapshot;
 	// The shell's own resolution, not the file tools' (`resolveToolPath` strips
 	// a leading `@`, which `cat @x` keeps): `~/` and the shell's directory only.
 	const shellPath = (word: string) => absoluteFrom(cwd, expandTilde(word, homedir()));
@@ -100,8 +103,24 @@ function observeShellReads(tracker: FileTracker, command: string, output: string
 		const path = shellPath(raw);
 		const stamp = statIfPresent(path);
 		if (!stamp || stamp.size > MAX_SHELL_READ_BYTES) continue;
-		const current = readIfPresent(path);
-		if (current !== undefined && shownInFull(output, current)) tracker.observe(path, current, Date.now(), stamp);
+		const content = readIfPresent(path);
+		if (content !== undefined) snapshot.set(path, content);
+	}
+	return snapshot;
+}
+
+/**
+ * Count as read each file the command printed in full and did not change:
+ * its content before and after the command is the same, and the output holds
+ * all of it. Observed, not touched: the post-compaction restore follows the
+ * file tools, as Claude Code's does.
+ */
+function observeShellReads(tracker: FileTracker, before: Map<string, string>, output: string): void {
+	if (!output) return;
+	for (const [path, content] of before) {
+		const stamp = statIfPresent(path);
+		if (!stamp || readIfPresent(path) !== content) continue;
+		if (shownInFull(output, content)) tracker.observe(path, content, Date.now(), stamp);
 	}
 }
 
@@ -230,7 +249,8 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 		const shellCalls = [...shellCallsOnBranch(entries)];
 		if (shellCalls.length > 0) {
 			void bashParserReady().then(() => {
-				for (const call of shellCalls) observeShellReads(target, call.command, call.output, sessionWorkCwd(entered, ctx.cwd));
+				// A replayed result has no before-state: the files as they are now stand in for it.
+				for (const call of shellCalls) observeShellReads(target, shellReadSnapshot(call.command, sessionWorkCwd(entered, ctx.cwd)), call.output);
 			});
 		}
 		touched = new Map([...lastTouchesOnBranch(entries)].map(([raw, at]) => [resolveToolPath(raw, ctx.cwd), at]));
@@ -244,7 +264,15 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 	/** Whether a write's file existed when the call was made, by call id: its result says "created" or "updated". */
 	const writeTargetExisted = new Map<string, boolean>();
 
-	pi.on("tool_call", (event, ctx) => {
+	/** Each running bash call's candidate files as they were when it started (`shellReadSnapshot`). */
+	const shellSnapshots = new Map<string, Map<string, string>>();
+	pi.on("tool_call", async (event, ctx) => {
+		if (event.toolName === "bash") {
+			await bashParserReady();
+			// Relative paths in the command resolve where the shell runs: the entered worktree, if any.
+			shellSnapshots.set(event.toolCallId, shellReadSnapshot(commandOf(event.input), sessionWorkCwd(entered, ctx.cwd)));
+			return undefined;
+		}
 		if (!GUARDED_TOOLS.has(event.toolName)) return undefined;
 		const path = pathOf(event.input, ctx.cwd);
 		if (!path) return undefined;
@@ -263,9 +291,9 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 		const existedBefore = writeTargetExisted.get(event.toolCallId);
 		writeTargetExisted.delete(event.toolCallId);
 		if (event.toolName === "bash") {
-			await bashParserReady();
-			// Relative paths in the command resolve where the shell ran: the entered worktree, if any.
-			observeShellReads(tracker, commandOf(event.input), textOf(event.content), sessionWorkCwd(entered, ctx.cwd));
+			const before = shellSnapshots.get(event.toolCallId);
+			shellSnapshots.delete(event.toolCallId);
+			if (before) observeShellReads(tracker, before, textOf(event.content));
 			return undefined;
 		}
 		if (!READ_TOOLS.has(event.toolName) && !GUARDED_TOOLS.has(event.toolName)) return undefined;

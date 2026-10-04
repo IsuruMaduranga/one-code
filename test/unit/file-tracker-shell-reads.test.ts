@@ -88,8 +88,14 @@ describe("file-tracker: a bash result counts as a read", () => {
 	afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 	const ctx = () => createFakeCtx({ cwd: dir });
-	const bash = (command: string, text: string) =>
-		fake.fireOne("tool_result", { toolName: "bash", input: { command }, content: [{ type: "text", text }], isError: false }, ctx());
+	let callId = 0;
+	/** A bash call as pi runs it: tool_call (the tracker snapshots its candidates), then tool_result. */
+	const bash = async (command: string, text: string, during?: () => void) => {
+		const toolCallId = `b${++callId}`;
+		await fake.fireOne("tool_call", { toolName: "bash", toolCallId, input: { command } }, ctx());
+		during?.();
+		return fake.fireOne("tool_result", { toolName: "bash", toolCallId, input: { command }, content: [{ type: "text", text }], isError: false }, ctx());
+	};
 	const edit = (name: string) => fake.fireOne<{ block?: boolean; reason?: string }>("tool_call", { toolName: "edit", input: { path: name } }, ctx());
 
 	it("allows an edit after a cat that printed the whole file", async () => {
@@ -127,6 +133,15 @@ describe("file-tracker: a bash result counts as a read", () => {
 		writeFileSync(join(dir, "config.txt"), "second line\nother\n");
 		await bash("cat @config.txt", "the at-sign file's own text\nsecond line");
 		expect(await edit(join(dir, "@config.txt"))).toBeUndefined();
+		expect((await edit("config.txt"))?.block).toBe(true);
+	});
+
+	it("does not certify a file the same command rewrote (cat x; cp y x)", async () => {
+		const file = join(dir, "config.txt");
+		writeFileSync(file, "obsolete = yes\nmode = safe and sound\nfooter = yes\n");
+		await bash("cat config.txt; cp replacement.txt config.txt", "obsolete = yes\nmode = safe and sound\nfooter = yes", () =>
+			writeFileSync(file, "mode = safe and sound\nfooter = yes\n"),
+		);
 		expect((await edit("config.txt"))?.block).toBe(true);
 	});
 
