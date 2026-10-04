@@ -87,6 +87,55 @@ describe("skill wiring: scheduled work", () => {
 	});
 });
 
+describe("skill wiring: a typed skill as the session's first prompt", () => {
+	const demoMessage =
+		`<command-message>demo</command-message>\n<command-name>/demo</command-name>\n<command-args>now</command-args>\n\n` +
+		`Base directory for this skill: ${skillDir}\n\nDo the demo.\n\nARGUMENTS: now\n`;
+
+	async function mountIn(mode: "json" | "print" | "tui") {
+		const fake = createFakePi();
+		skillExtension(fake.pi as never);
+		const ctx = createFakeCtx({ cwd, mode, hasUI: mode === "tui" });
+		await fake.fire("session_start", { reason: "startup" }, ctx);
+		return { fake, ctx };
+	}
+	const input = (fake: ReturnType<typeof createFakePi>, ctx: unknown, text: string) =>
+		fake.fireOne<{ action: string; text?: string }>("input", { text, source: "interactive" }, ctx);
+
+	// A one-shot run ends when its prompt returns; a second prompt started from
+	// the hook was still in its preflight then, so the skill never ran.
+	it.each(["json", "print"] as const)("%s: /skill:<name> becomes the prompt's own text, with no second prompt", async (mode) => {
+		const { fake, ctx } = await mountIn(mode);
+		expect(await input(fake, ctx, "/skill:demo now")).toEqual({ action: "transform", text: demoMessage, images: undefined });
+		expect(fake.sentUserMessages).toHaveLength(0);
+		expect(fake.sentMessages).toHaveLength(0);
+	});
+
+	it.each(["json", "print"] as const)("%s: bare /<name> is no command, and the input hook transforms it", async (mode) => {
+		const { fake, ctx } = await mountIn(mode);
+		expect(fake.commands.has("demo")).toBe(false);
+		expect(await input(fake, ctx, "/demo now")).toEqual({ action: "transform", text: demoMessage, images: undefined });
+		expect(fake.sentUserMessages).toHaveLength(0);
+	});
+
+	it("one-shot: a later skill rides the hidden custom message, and other text is left alone", async () => {
+		const { fake, ctx } = await mountIn("json");
+		await fake.fire("before_agent_start", { systemPromptOptions: { skills: [] } }, ctx);
+		expect(await input(fake, ctx, "/demo again")).toEqual({ action: "handled" });
+		expect(fake.sentMessages).toHaveLength(1);
+		expect(await input(fake, ctx, "/nope now")).toEqual({ action: "continue" });
+		expect(await input(fake, ctx, "demo now")).toEqual({ action: "continue" });
+	});
+
+	it("tui: bare /<name> stays a command, and a typed /skill:<name> is transformed the same way", async () => {
+		const { fake, ctx } = await mountIn("tui");
+		expect(fake.commands.has("demo")).toBe(true);
+		expect(await input(fake, ctx, "/demo now")).toEqual({ action: "continue" });
+		expect(await input(fake, ctx, "/skill:demo now")).toEqual({ action: "transform", text: demoMessage, images: undefined });
+		expect(fake.sentUserMessages).toHaveLength(0);
+	});
+});
+
 describe("skill tool: a skill that takes arguments, called without any", () => {
 	async function call(params: { skill: string; args?: string }): Promise<string> {
 		const { fake, ctx } = await mount();

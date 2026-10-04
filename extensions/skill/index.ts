@@ -23,7 +23,7 @@ import { Type } from "typebox";
 import { notifyOrPrint } from "../lib/headless-output.ts";
 import { pluginRoot } from "../lib/plugin-root.ts";
 import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
-import { awaitOneShotTurn } from "../lib/notifications.ts";
+import { awaitOneShotTurn, sessionOutlivesTurn } from "../lib/notifications.ts";
 import { PROMPT_OPTIONS_CHANNEL, type PromptOptionsAnnouncement } from "../lib/prompt-options.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
 import {
@@ -115,11 +115,21 @@ export default function skillExtension(pi: ExtensionAPI) {
 	 * prompt from system-prompt's context_with_system handler (idle-turn.ts).
 	 */
 	let prompted = false;
+	/**
+	 * A one-shot run (`-p`, `--mode json`) ends when its prompt returns, so the
+	 * bare `/<name>` skill forms are taken by the `input` hook there instead of
+	 * registered as commands: a command can only start a second prompt, which
+	 * the run does not wait for.
+	 */
+	let oneShot = false;
+	/** The bare skill names a one-shot run takes in the `input` hook. */
+	const oneShotSkillNames = new Set<string>();
 
 	// A factory re-run builds each session's instance, so this is belt and braces
 	// (lib/notifications.ts resets its twin the same way).
 	pi.on("session_start", (_event, ctx) => {
 		prompted = false;
+		oneShot = !sessionOutlivesTurn(ctx.mode);
 		announcedSkills = false;
 		sessionUsage = undefined;
 		sessionModel = ctx.model;
@@ -486,6 +496,9 @@ export default function skillExtension(pi: ExtensionAPI) {
 		query.expanded = typedSkillContent(found.name, command.args, skillPromptText(body, args, baseDirFor(found))).join("");
 	});
 
+	/** The `input` hook's answer that replaces the typed prompt with the skill's message. */
+	type SkillTransform = { action: "transform"; text: string; images?: Array<{ type: "image"; data: string; mimeType: string }> };
+
 	/**
 	 * Run a resolved skill the way a user-typed command does: refuse an "off"
 	 * skill (in EVERY mode — falling through would hand `/skill:` to pi's native
@@ -502,8 +515,14 @@ export default function skillExtension(pi: ExtensionAPI) {
 		found: IndexedSkill,
 		args: string,
 		ctx: ExtensionContext & { waitForIdle?: () => Promise<void> },
-		extra: { images?: Array<{ type: "image"; data: string; mimeType: string }>; streamingBehavior?: "steer" | "followUp"; input?: string } = {},
-	): Promise<"handled" | "unavailable"> => {
+		extra: {
+			images?: Array<{ type: "image"; data: string; mimeType: string }>;
+			streamingBehavior?: "steer" | "followUp";
+			input?: string;
+			/** Called from the `input` hook, which can hand the message back as the prompt's own text. */
+			fromInput?: boolean;
+		} = {},
+	): Promise<"handled" | "unavailable" | SkillTransform> => {
 		if (found.state === "off") {
 			const where = found.source === "plugin" ? "/plugins" : "/skills";
 			notifyOrPrint(ctx, `Skill "${found.name}" is turned off — enable it from ${where} to run it.`, "warning");
@@ -522,6 +541,12 @@ export default function skillExtension(pi: ExtensionAPI) {
 		const [breadcrumb, text] = typedSkillContent(found.name, args, skillPromptText(body, bodyArgs, baseDirFor(found)));
 		const content = [{ type: "text" as const, text: breadcrumb }, { type: "text" as const, text }, ...(extra.images ?? [])];
 		if (!prompted && !extra.streamingBehavior) {
+			// From the input hook the message becomes the typed prompt's own text
+			// (the same bytes sendUserMessage would send: its text parts joined by a
+			// newline). sendUserMessage starts a second prompt that is still in its
+			// async preflight when this handler returns, so the session looks idle,
+			// and a one-shot run disposed the session before that turn ran.
+			if (extra.fromInput) return { action: "transform", text: `${breadcrumb}\n${text}`, images: extra.images };
 			pi.sendUserMessage(content);
 			await awaitOneShotTurn(ctx);
 			return "handled";
@@ -558,20 +583,33 @@ export default function skillExtension(pi: ExtensionAPI) {
 	// no bare alias), so it reached the model as text and the model called
 	// `skill`; it is expanded here too, as Claude Code expands it. Only an exact
 	// plugin-skill name is taken; anything else stays the user's text.
+	//
+	// In a one-shot run the bare `/<name>` forms are not commands (see
+	// registerSkillCommands) and are taken here too, so the first skill becomes
+	// the prompt's own text and the run waits for its turn.
 	pi.on("input", async (event, ctx) => {
-		const typed = parseSkillCommand(event.text);
+		const typed = parseSkillCommand(event.text) ?? oneShotBareSkill(event.text);
 		const plugin = typed ? undefined : typedPluginSkill(event.text);
 		const cmd = typed ?? plugin?.command;
 		if (!cmd) return { action: "continue" };
-		const found = plugin?.skill ?? resolveSkill(skillsOnly(), cmd.name);
+		const found = plugin?.skill ?? resolveSkill(skillsOnly(ctx.cwd), cmd.name);
 		if (!found) return { action: "continue" };
 		const outcome = await deliverSkill(found, cmd.args, ctx, {
 			images: event.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined,
 			streamingBehavior: event.streamingBehavior,
 			input: event.text,
+			fromInput: true,
 		});
+		if (typeof outcome === "object") return outcome;
 		return { action: outcome === "handled" ? "handled" : "continue" };
 	});
+
+	/** A typed bare `/<name> [args]` naming a skill whose command a one-shot run left unregistered. */
+	const oneShotBareSkill = (text: string): { name: string; args: string } | undefined => {
+		if (!oneShot || !text.startsWith("/")) return undefined;
+		const command = parseSlashCommand(text);
+		return command && oneShotSkillNames.has(command.name) ? command : undefined;
+	};
 
 	/** A typed `/<plugin>:<skill> [args]` naming a plugin skill exactly, and that skill. */
 	const typedPluginSkill = (text: string): { command: { name: string; args: string }; skill: IndexedSkill } | undefined => {
@@ -606,7 +644,11 @@ export default function skillExtension(pi: ExtensionAPI) {
 			return; // not bound yet (load time) — session_start retries
 		}
 		const templates = promptTemplateNames(cwd ?? process.cwd(), os.homedir(), getAgentDir());
-		for (const skill of skillCommandCandidates(skills, [...taken, ...templates, ...registeredSkillCommands])) {
+		for (const skill of skillCommandCandidates(skills, [...taken, ...templates, ...registeredSkillCommands, ...oneShotSkillNames])) {
+			if (oneShot) {
+				oneShotSkillNames.add(skill.name);
+				continue;
+			}
 			registeredSkillCommands.add(skill.name);
 			const hint = readArgumentHint(skill.path);
 			if (hint) announceArgumentHint(pi, skill.name, hint);
@@ -651,7 +693,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 	// name so the steady state costs one Set lookup per skill per turn, not a
 	// re-index (before_agent_start runs every turn).
 	pi.on("before_agent_start", (_event, ctx) => {
-		if (piSkills.some((skill) => !registeredSkillCommands.has(skill.name))) registerSkillCommands(ctx.cwd);
+		if (piSkills.some((skill) => !registeredSkillCommands.has(skill.name) && !oneShotSkillNames.has(skill.name))) registerSkillCommands(ctx.cwd);
 	});
 
 	// FALLBACK for pi < 0.86.0 (plan.md "Fallbacks for older pi"; delete it

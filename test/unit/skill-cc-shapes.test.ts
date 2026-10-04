@@ -95,12 +95,14 @@ describe("skills listing: Claude Code's order and lines", () => {
 describe("typed skills expand in the harness", () => {
 	it("expands a typed /<plugin>:<skill> into the breadcrumb and the skill's text", async () => {
 		const { fake, ctx } = await mount();
-		const [outcome] = await fake.fire<{ action: string }>("input", { text: "/kit:tip do it" }, ctx);
-		expect(outcome.action).toBe("handled");
-		expect(fake.sentUserMessages[0].content).toEqual([
-			{ type: "text", text: "<command-message>kit:tip</command-message>\n<command-name>/kit:tip</command-name>\n<command-args>do it</command-args>\n" },
-			{ type: "text", text: `Base directory for this skill: ${join(pluginDir, "skills", "tip")}\n\nTip body.\n\nARGUMENTS: do it\n` },
-		]);
+		// The session's first prompt: the typed text becomes the skill's message.
+		const [outcome] = await fake.fire<{ action: string; text?: string }>("input", { text: "/kit:tip do it" }, ctx);
+		expect(outcome.action).toBe("transform");
+		expect(outcome.text).toBe(
+			"<command-message>kit:tip</command-message>\n<command-name>/kit:tip</command-name>\n<command-args>do it</command-args>\n\n" +
+				`Base directory for this skill: ${join(pluginDir, "skills", "tip")}\n\nTip body.\n\nARGUMENTS: do it\n`,
+		);
+		expect(fake.sentUserMessages).toHaveLength(0);
 	});
 
 	it("leaves text that only looks like a plugin skill, and a plugin command, to the user and the plugins extension", async () => {
