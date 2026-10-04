@@ -65,6 +65,15 @@ function readIfPresent(path: string): string | undefined {
 	}
 }
 
+/** Whether `path` is a regular file (symlinks followed): never a device, FIFO or directory. */
+function isRegularFile(path: string): boolean {
+	try {
+		return statSync(path).isFile();
+	} catch {
+		return false;
+	}
+}
+
 /** The file's disk stamp, or undefined when it is gone (or not a plain file we could stat). */
 function statIfPresent(path: string): FileStamp | undefined {
 	try {
@@ -101,6 +110,9 @@ function shellReadSnapshot(command: string, cwd: string): Map<string, string> {
 	const words = shellReadCandidates(command).flatMap((word) => expandCandidate(word, (dir) => readdirSync(shellPath(dir))));
 	for (const raw of new Set(words)) {
 		const path = shellPath(raw);
+		// Regular files only: a device or FIFO (`head -c 1 /dev/zero`) reports size 0
+		// and a read of it never ends (found by a GPT-6 Astra review).
+		if (!isRegularFile(path)) continue;
 		const stamp = statIfPresent(path);
 		if (!stamp || stamp.size > MAX_SHELL_READ_BYTES) continue;
 		const content = readIfPresent(path);
@@ -119,7 +131,7 @@ function observeShellReads(tracker: FileTracker, before: Map<string, string>, ou
 	if (!output) return;
 	for (const [path, content] of before) {
 		const stamp = statIfPresent(path);
-		if (!stamp || readIfPresent(path) !== content) continue;
+		if (!stamp || !isRegularFile(path) || readIfPresent(path) !== content) continue;
 		if (shownInFull(output, content)) tracker.observe(path, content, Date.now(), stamp);
 	}
 }

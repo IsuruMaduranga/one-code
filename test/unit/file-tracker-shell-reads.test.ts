@@ -145,6 +145,12 @@ describe("file-tracker: a bash result counts as a read", () => {
 		expect((await edit("config.txt"))?.block).toBe(true);
 	});
 
+	it("never reads a device a command named (head -c 1 /dev/zero)", async () => {
+		// /dev/zero reports size 0; reading it would never end. The test passing at all is the check.
+		await bash("head -c 1 /dev/zero | od -c", "0000000  \\0\n0000001");
+		expect(true).toBe(true);
+	});
+
 	it("still refuses after a partial read, and says why", async () => {
 		writeFileSync(join(dir, "big.py"), "alpha = 1\nbeta = 2\ngamma = 3\n");
 		await bash("cat big.py | head -1", "alpha = 1");
