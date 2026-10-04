@@ -121,6 +121,7 @@ const events = stdout
 			return [];
 		}
 	});
+const assistantErrors = events.filter((e) => e.type === "message_end" && e.message?.role === "assistant" && e.message.stopReason === "error");
 const toolCalls = events.filter((e) => e.type === "tool_execution_start").map((e) => e.toolName);
 const results = events.filter((e) => e.type === "tool_execution_end");
 const resultText = (e) => (Array.isArray(e.result?.content) ? e.result.content.map((c) => c.text ?? "").join("\n") : "");
@@ -147,6 +148,7 @@ writeFileSync(join(work, "stderr.log"), stderr);
 
 console.log(`smoke: pi exited ${exit.code ?? exit.signal ?? exit.error} after ${((Date.now() - started) / 1000).toFixed(1)}s${timedOut ? " (TIMED OUT)" : ""}`);
 console.log(`smoke: tools called: ${toolCalls.length ? toolCalls.join(", ") : "(none)"}`);
+for (const { message } of assistantErrors) console.log(`smoke: assistant error: ${message.errorMessage || "(no errorMessage)"}`);
 if (hit) {
 	const text = JSON.stringify(hit.result).slice(0, 400);
 	console.log(`smoke: ${shell} result carried ${MARKER}: ${text}`);
@@ -157,7 +159,7 @@ if (finalText) console.log(`smoke: final reply: ${finalText.trim().slice(0, 200)
 const loadFailure = /Failed to load extension|Error loading/i.test(stderr);
 if (loadFailure) console.log("smoke: stderr reports an extension load failure");
 
-if (hit && denial && sentinelKept && !timedOut && !loadFailure) {
+if (hit && denial && sentinelKept && !timedOut && !loadFailure && !assistantErrors.length) {
 	console.log("smoke: PASS");
 	process.exit(0);
 }

@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import brandingExtension from "../../extensions/branding/index.ts";
 import { ARGUMENT_HINT_CHANNEL } from "../../extensions/lib/argument-hints.ts";
 import { KEEP_DECLINED_KEY } from "../../extensions/branding/compaction-keep.ts";
@@ -52,6 +53,62 @@ describe("branding session_start", () => {
 		expect(typeof factory).toBe("function");
 		// The hint listener exists even though the banner code never ran.
 		expect(() => pi.events.emit(ARGUMENT_HINT_CHANNEL, { command: "btw", hint: "[question]" })).not.toThrow();
+	});
+});
+
+describe("branding: merged quietStartup settings", () => {
+	const dirs: string[] = [];
+	afterEach(() => {
+		vi.unstubAllEnvs();
+		for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+	});
+
+	it.each([
+		{ global: false, project: true, sections: true },
+		{ global: true, project: false, sections: false },
+		{ global: false, project: "header", sections: true },
+		{ global: "header", project: false, sections: false },
+		{ global: true, project: undefined, sections: true },
+		{ global: "header", project: undefined, sections: true },
+		{ global: false, project: undefined, sections: false },
+		{ global: undefined, project: undefined, sections: false },
+	])("renders sections=$sections with global=$global and project=$project", ({ global, project, sections }) => {
+		const root = mkdtempSync(join(tmpdir(), "branding-quiet-"));
+		dirs.push(root);
+		const agentDir = join(root, "agent");
+		const cwd = join(root, "project");
+		mkdirSync(agentDir);
+		mkdirSync(join(cwd, ".pi"), { recursive: true });
+		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ quietStartup: global, hideThinkingBlock: true, outputPad: 0 }));
+		writeFileSync(join(cwd, ".pi", "settings.json"), JSON.stringify({ quietStartup: project }));
+		vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
+		vi.stubEnv("HOME", root);
+		vi.stubEnv("CLAUDE_CONFIG_DIR", join(root, ".claude"));
+		vi.stubEnv("ONECODE_STATE_DIR", join(root, ".onecode"));
+		vi.stubEnv("CC_NO_BANNER", "0");
+
+		// Back the extension API with the same merged settings pi uses.
+		const settings = SettingsManager.create(cwd, agentDir);
+		const getSettings = vi.fn(() => settings.getSettings());
+		const { pi, fire } = fakePi();
+		brandingExtension({ ...pi, getSettings } as never);
+		expect(getSettings).not.toHaveBeenCalled(); // Unavailable until the runtime is bound.
+		let lines: string[] = [];
+		const ctx = {
+			hasUI: true, mode: "tui", cwd,
+			ui: {
+				setHiddenThinkingLabel: () => {}, setEditorComponent: () => {}, notify: () => {}, setTitle: () => {},
+				setHeader: (factory: (tui: unknown, theme: unknown) => { render(width: number): string[] }) => {
+					lines = factory(undefined, undefined).render(240);
+				},
+			},
+		};
+		// A new session installs the header without launching startup dialogs.
+		fire("session_start", ctx, { reason: "new" });
+		fire("session_shutdown", ctx);
+		expect(getSettings).toHaveBeenCalledTimes(1);
+		expect(lines.join("\n")).toContain("the Claude Code experience");
+		expect(lines.some((line) => line.includes("themes"))).toBe(sections);
 	});
 });
 
