@@ -23,7 +23,7 @@ function ctxFor(current: any | undefined, mode: "tui" | "rpc" | "print" | "json"
 		notified,
 		ctx: {
 			cwd,
-			hasUI: mode === "tui",
+			hasUI: mode === "tui" || mode === "rpc",
 			mode,
 			waitForIdle: vi.fn(async () => {}),
 			sessionManager: { getSessionDir: () => join(cwd, ".sessions") },
@@ -74,8 +74,8 @@ describe("/doctor wiring", () => {
 		expect(all.every((c) => (c.description ?? "").length > 20)).toBe(true);
 	});
 
-	it("`report` prints the report as a notification outside the TUI, marking a missing provider", async () => {
-		const { ctx, notified } = ctxFor(undefined);
+	it.each(["print", "rpc"] as const)("`report` prints the report as a notification in %s, marking a missing provider", async (mode) => {
+		const { ctx, notified } = ctxFor(undefined, mode);
 		await run("report", ctx);
 		expect(notified).toHaveLength(1);
 		expect(notified[0]).toContain("One Code doctor");

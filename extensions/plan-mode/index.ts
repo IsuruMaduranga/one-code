@@ -185,7 +185,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
 		...ccToolRenderers("Exit plan mode"),
 		description: EXIT_PLAN_MODE_DESCRIPTION,
 		parameters: Type.Object({}),
-		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+		async execute(_toolCallId, _params, signal, _onUpdate, ctx) {
 			// Guard the out-of-sequence call: without this, a cold exit_plan_mode
 			// (never entered plan mode) allocates a fresh empty plan file and blames
 			// "the plan file is empty" — a plausible but wrong cause a weak model
@@ -252,7 +252,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
 			];
 			const choices = options.map((o) => o.label);
 
-			const choice = ctx.mode === "rpc" ? await selectPlanChoice(ctx.ui, plan, path, choices) : await ctx.ui.custom<PlanChoice | null>((tui, theme, _keybindings, done) => {
+			const choice = ctx.mode === "rpc" ? await selectPlanChoice(ctx.ui, plan, path, choices, signal) : await ctx.ui.custom<PlanChoice | null>((tui, theme, _keybindings, done) => {
 				const paint = safeThemePaint(theme);
 				const maxVisible = 12;
 				let offset = 0;

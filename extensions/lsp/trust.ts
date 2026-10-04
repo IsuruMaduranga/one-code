@@ -83,7 +83,8 @@ export function createLspTrustGate(deps: {
 		 * Whether a server rooted at `serverRoot` may start. Without `confirm`
 		 * (no UI), or after a "no" for its project, only stored trust counts.
 		 */
-		async allowed(serverRoot: string, confirm?: (projectRoot: string) => Promise<boolean>): Promise<boolean> {
+		async allowed(serverRoot: string, confirm?: (projectRoot: string) => Promise<boolean>, signal?: AbortSignal): Promise<boolean> {
+			if (signal?.aborted) return false;
 			const root = projectRoot(serverRoot);
 			if (sessionTrust.get(root) === true || trustedServerRoots.has(serverRoot)) return true;
 			// The project root is what a "yes" persists; a linked worktree outside
@@ -95,6 +96,8 @@ export function createLspTrustGate(deps: {
 			if (sessionTrust.get(root) !== undefined || !confirm) return false;
 			return askOnce(root, async () => {
 				const ok = await confirm(root);
+				// Aborting the turn neither grants trust nor remembers a refusal.
+				if (signal?.aborted) return false;
 				sessionTrust.set(root, ok);
 				if (ok) persist(root);
 				return ok;

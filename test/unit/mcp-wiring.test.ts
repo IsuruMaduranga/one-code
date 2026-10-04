@@ -289,6 +289,19 @@ describe("mcp wiring", () => {
 		expect(unknown.content[0].text).toContain('No connected MCP server named "not-connected"');
 	});
 
+	it("RPC lists server status and names the TUI-only management limitation", async () => {
+		writeUserServers({ demo: { command: "demo-server" } });
+		state.fixtures.set("demo", { tools: [{ name: "foo" }] });
+		await boot();
+		const ctx = createFakeCtx({ cwd, hasUI: true, mode: "rpc" });
+		await fake.commands.get("mcp")!.handler("", ctx);
+		expect((ctx.ui as { custom: unknown }).custom).not.toHaveBeenCalled();
+		const notices = (ctx._notified as Array<{ message: string }>).map((n) => n.message).join("\n");
+		expect(notices).toMatch(/RPC.*TUI/);
+		expect(notices).toContain("connected");
+		expect(notices).toContain("demo — 1 tools, 0 resources");
+	});
+
 	it("reconnecting through the /mcp panel closes the stale connection and connects a fresh one", async () => {
 		writeUserServers({ demo: { command: "demo-server" } });
 		state.fixtures.set("demo", { tools: [{ name: "foo" }] });

@@ -207,15 +207,22 @@ export default function btwExtension(pi: ExtensionAPI) {
 			// is built from (lib/prompt-options.ts).
 			announcePromptOptions(pi.events, ctx);
 
-			// Headless (-p / --mode json): no panel — answer and print it. The
-			// handler blocks to completion, so the process does not exit early.
-			if (!ctx.hasUI) {
+			// RPC has dialogs but no custom panel. Deliver its answer as a notice,
+			// never a main-conversation message; one-shot runs print it instead.
+			if (!ctx.hasUI || ctx.mode === "rpc") {
+				inFlight?.abort();
+				const controller = new AbortController();
+				inFlight = controller;
 				try {
-					const answer = await ask(ctx, question, history, new AbortController().signal);
+					const answer = await ask(ctx, question, history, controller.signal);
+					if (controller.signal.aborted) return;
 					if (answer) history.push({ question, answer });
-					printAnswer(ctx, answer || "(no answer)");
+					if (ctx.mode === "rpc") ctx.ui.notify(answer || "(no answer)", "info");
+					else printAnswer(ctx, answer || "(no answer)");
 				} catch (error) {
-					notifyOrPrint(ctx, `Side question failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+					if (!controller.signal.aborted) notifyOrPrint(ctx, `Side question failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+				} finally {
+					if (inFlight === controller) inFlight = undefined;
 				}
 				return;
 			}

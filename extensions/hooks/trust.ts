@@ -98,6 +98,7 @@ export interface TrustDecisionDeps {
 	confirm: (title: string, message: string) => Promise<boolean | undefined>;
 	notify: (message: string) => void;
 	storePath?: string;
+	signal?: AbortSignal;
 	/**
 	 * Answer from the remembered/stored approval only: neither prompt nor record
 	 * a decision. For a dispatch at session shutdown — recording "declined" there
@@ -120,6 +121,7 @@ export async function projectHooksApproved(
 	projectSources: HooksSource[],
 	deps: TrustDecisionDeps,
 ): Promise<boolean> {
+	if (deps.signal?.aborted) return false;
 	if (projectSources.length === 0) return true;
 	const configHash = hashProjectHooks(projectSources);
 	const key = `${projectRoot}:${configHash}`;
@@ -145,6 +147,8 @@ export async function projectHooksApproved(
 					"Run this project's hooks?",
 					`This project's .claude settings define ${describeProjectHooks(projectSources)}\n\nThey run as shell commands on your machine. Approval is remembered until the hook config changes.`,
 				)) === true;
+			// An interrupted dialog is no trust decision, even if a reply raced abort.
+			if (deps.signal?.aborted) return false;
 			sessionDecisions.set(key, approved);
 			if (approved) persistApproval(projectRoot, configHash, deps.storePath);
 			else deps.notify("Project hooks disabled for this session (user/managed hooks still run).");

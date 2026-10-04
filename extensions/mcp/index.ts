@@ -920,10 +920,11 @@ export default function mcpExtension(pi: ExtensionAPI) {
 				);
 				return;
 			}
-			if (ctx.hasUI) {
+			if (ctx.hasUI && ctx.mode !== "rpc") {
 				await openMcpPanel(ctx);
 				return;
 			}
+			if (ctx.mode === "rpc") ctx.ui.notify("/mcp in RPC is read-only; use the TUI to reconnect, authenticate, enable or disable servers.", "info");
 			// Non-interactive fallback: a flat status listing, with tool/resource
 			// counts and any warning for connected servers.
 			const lines = servers.map((server) => {

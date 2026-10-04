@@ -491,10 +491,11 @@ export default function pluginsExtension(pi: ExtensionAPI) {
 	registerLocalCommand(pi, "plugins", {
 		description: "Browse, install, and manage Claude Code-compatible plugins and marketplaces",
 		handler: async (args, ctx) => {
-			if (ctx.hasUI) {
+			if (ctx.hasUI && ctx.mode !== "rpc") {
 				await openPanel(ctx);
 				return;
 			}
+			if (ctx.mode === "rpc") ctx.ui.notify("/plugins in RPC is read-only; use the TUI to install or manage plugins and marketplaces.", "info");
 			// Non-interactive fallback: the old text listing.
 			if (discovered.plugins.length === 0) {
 				ctx.ui.notify("No plugins installed.", "info");

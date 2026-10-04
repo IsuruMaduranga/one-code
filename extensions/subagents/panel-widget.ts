@@ -285,6 +285,17 @@ export class SubagentWidget {
 		if (this.shellFocus) this.shellFocus = anchorShellFocus(this.shellFocus, this.shellIds());
 		const selected = this.focusIndex;
 		const showStrip = rows.length > 1;
+		// RPC forwards string-array widgets, not component factories or key handlers.
+		if (ctx.mode === "rpc") {
+			const lines = rows.slice(1, MAX_STRIP_ROWS).map((row) =>
+				`${row.run!.name} (${row.run!.taskId}) — ${row.status}: ${row.activity}`,
+			);
+			if (rows.length > MAX_STRIP_ROWS) lines.push(`${rows.length - MAX_STRIP_ROWS} more agents — /tasks to list all`);
+			if (notice) lines.push(TASKS_NOTICE);
+			if (shellVisible) lines.push(...this.shellTasks().map((task) => `${task.id} [shell] ${task.status}: ${task.command ?? task.description}`));
+			ctx.ui.setWidget(WIDGET_KEY, lines, { placement: "belowEditor" });
+			return;
+		}
 		ctx.ui.setWidget(
 			WIDGET_KEY,
 			(tui, theme) => {

@@ -112,9 +112,10 @@ function uiTitle(meta: ArtifactMeta): string {
 }
 
 /** Ask the user before deleting `meta`; the tool and /artifacts share the wording. */
-function confirmDelete(ctx: ExtensionContext, meta: ArtifactMeta): Promise<boolean> {
+async function confirmDelete(ctx: ExtensionContext, meta: ArtifactMeta, signal?: AbortSignal): Promise<boolean> {
 	const versions = meta.version === 1 ? "its only version" : `all ${meta.version} versions`;
-	return ctx.ui.confirm(`Delete the artifact "${uiTitle(meta)}"?`, `This permanently removes ${meta.id} and ${versions}.`);
+	const approved = await ctx.ui.confirm(`Delete the artifact "${uiTitle(meta)}"?`, `This permanently removes ${meta.id} and ${versions}.`, { signal });
+	return approved === true && !signal?.aborted;
 }
 
 export default function artifactsExtension(pi: ExtensionAPI) {
@@ -151,7 +152,7 @@ export default function artifactsExtension(pi: ExtensionAPI) {
 			url: Type.Optional(Type.String({ description: "Alias of `id` (Claude Code's name for it)." })),
 			limit: Type.Optional(Type.Number({ description: "list: the maximum number of artifacts to return (default 25)." })),
 		}),
-		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			const root = artifactsRoot();
 			const action = params.action ?? "publish";
 			const ref = params.id ?? params.url;
@@ -184,7 +185,9 @@ export default function artifactsExtension(pi: ExtensionAPI) {
 				if (!ctx.hasUI) {
 					return textResult("Deleting an artifact needs the user's confirmation, and this session cannot ask. Tell the user to delete it with /artifacts.", {}, true);
 				}
-				if (!(await confirmDelete(ctx, meta))) return textResult("The user declined; the artifact was not deleted.", {}, true);
+				const approved = await confirmDelete(ctx, meta, signal);
+				if (signal?.aborted) return textResult("The operation was aborted; the artifact was not deleted.", {}, true);
+				if (!approved) return textResult("The user declined; the artifact was not deleted.", {}, true);
 				deleteArtifact(root, resolved);
 				return textResult(`Deleted the artifact ${meta.id} ("${meta.title}").`);
 			}

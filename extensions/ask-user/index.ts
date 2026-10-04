@@ -54,7 +54,7 @@ export default function askUserExtension(pi: ExtensionAPI) {
 		description: askDescription("short"),
 		promptSnippet: "Ask the user to decide between options when genuinely blocked",
 		parameters: AskParams,
-		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
 			if (!ctx.hasUI) {
 				return { content: [{ type: "text", text: NON_INTERACTIVE }], details: {}, isError: true };
 			}
@@ -62,7 +62,7 @@ export default function askUserExtension(pi: ExtensionAPI) {
 			const questions = params.questions as Question[];
 			// RPC has no custom UI (its custom() resolves undefined); ask through the
 			// select/input requests it forwards to the client instead (dialogs.ts).
-			const outcome = ctx.mode === "rpc" ? await askThroughDialogs(questions, ctx.ui) : await ctx.ui.custom<WidgetResult>((tui, theme, _keybindings, done) => {
+			const outcome = ctx.mode === "rpc" ? await askThroughDialogs(questions, ctx.ui, signal) : await ctx.ui.custom<WidgetResult>((tui, theme, _keybindings, done) => {
 				const style = {
 					paint: safeThemePaint(theme),
 					bold: safeThemeBold(theme),

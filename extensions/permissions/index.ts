@@ -1071,8 +1071,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			if (settled()) return blockOutsideReads ? "block" : "allow";
 			const settingsFile = tildify(oneCodeSettingsPath(home), home);
 			const title = `${OUTSIDE_READ_TITLE}\n\n  ${toolName} ${path}\n\n${OUTSIDE_READ_QUESTION}\n\n${OUTSIDE_READ_EXPLAINER(settingsFile)}`;
-			const choice = await ctx.ui.select(title, Object.values(OUTSIDE_READ_ANSWERS));
-			if (choice !== OUTSIDE_READ_ANSWERS.allow && choice !== OUTSIDE_READ_ANSWERS.block) return "ask_again";
+			const choice = await ctx.ui.select(title, Object.values(OUTSIDE_READ_ANSWERS), { signal: ctx.signal });
+			if (ctx.signal?.aborted || (choice !== OUTSIDE_READ_ANSWERS.allow && choice !== OUTSIDE_READ_ANSWERS.block)) return "ask_again";
 			outsideReadSeen = true;
 			markOutsideReadPromptSeen(oneCodeSettingsPath(home));
 			if (choice === OUTSIDE_READ_ANSWERS.allow) return "allow";
@@ -1188,7 +1188,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		const trustProject = async (withProject: typeof result, firing: TrustFiring) => {
 			const repoDirs = repoWorkspaceDirs().map((dir) => dir.raw);
 			const { title, message } = describeProjectAllow(projectAllowRaw, firing, repoDirs);
-			const approved = (await serializePrompt(() => ctx.ui.confirm(title, message))) === true;
+			const approved = (await serializePrompt(() => ctx.ui.confirm(title, message, { signal: ctx.signal }))) === true;
+			if (ctx.signal?.aborted) return;
 			if (approved) {
 				projectAllowTrusted = true;
 				persistProjectAllowApproval(projectRoot, projectTrustList());
@@ -1370,8 +1371,9 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			home: os.homedir(),
 		});
 		const { choice, unanswered } = await askMaybeTimed(pausedResume, title, serializePrompt, (text, timeout) =>
-			ctx.ui.select(text, askOptions(grant), timeout ? { timeout } : undefined),
+			ctx.ui.select(text, askOptions(grant), { signal: ctx.signal, timeout }),
 		);
+		if (ctx.signal?.aborted) return { block: true, reason: "The turn was stopped while waiting for the user's approval." };
 		if (unanswered) {
 			logDecision(ctx, { tool: event.toolName, subject: matchSubject, outcome: "block", source: "user", reason: "resume prompt unanswered" });
 			return { block: true, reason: DENIED_UNANSWERED_RESUME };
@@ -1404,7 +1406,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 
 		// The "tell the agent what to do differently" option has to actually carry
 		// the user's words, or the model is left guessing why it was stopped.
-		const feedback = await serializePrompt(() => ctx.ui.input("What should the agent do instead?", "Optional — press Esc to skip"));
+		const feedback = await serializePrompt(() => ctx.ui.input("What should the agent do instead?", "Optional — press Esc to skip", { signal: ctx.signal }));
 		return {
 			block: true,
 			reason: userDenialText(feedback),
@@ -1941,9 +1943,10 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	pi.registerCommand("permissions", {
 		description: "Review recently denied calls and manage permission rules, auto mode rules and workspace directories",
 		handler: async (args: string, ctx: ExtensionContext) => {
-			if (!ctx.hasUI) {
-				announceLocalCommand(pi, { name: "permissions", args });
-				ctx.ui.notify(permissionsSummary(), "info");
+			if (!ctx.hasUI || ctx.mode === "rpc") {
+				const limitation = ctx.mode === "rpc" ? "/permissions in RPC is read-only; use the TUI to manage rules or approve recently denied calls.\n\n" : "";
+				announceLocalCommand(pi, { name: "permissions", args, stdout: limitation.trim() });
+				ctx.ui.notify(`${limitation}${permissionsSummary()}`, "info");
 				return;
 			}
 			await runPermissionsPanel(ctx, "permissions", args);
@@ -1966,6 +1969,12 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				return;
 			}
 			if (!input) {
+				if (ctx.mode === "rpc") {
+					const message = "The workspace panel is unavailable in RPC. Use /add-dir <path> to add a directory.";
+					announceLocalCommand(pi, { name: "add-dir", args, stdout: message });
+					ctx.ui.notify(message, "info");
+					return;
+				}
 				await runPermissionsPanel(ctx, "add-dir", args, (state) => {
 					state.tab = "workspace";
 					state.dialog = { kind: "addDir", draft: "" };
@@ -1983,8 +1992,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				"Yes, and remember this directory",
 				"No",
 			]);
-			if (!choice || choice === "No") return;
-			const change = addWorkspaceDirectory(ctx, checked.path, choice !== "Yes, for this session");
+			if (choice !== "Yes, for this session" && choice !== "Yes, and remember this directory") return;
+			const change = addWorkspaceDirectory(ctx, checked.path, choice === "Yes, and remember this directory");
 			announceLocalCommand(pi, { name: "add-dir", args, stdout: change });
 			ctx.ui.notify(change, "info");
 		},
