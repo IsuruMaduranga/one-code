@@ -33,11 +33,15 @@ import {
 	discoverOneCodeFiles,
 	localDate,
 	instructionRule,
+	nestedInstructionFiles,
+	nestedInstructionText,
 } from "../lib/claude-context.ts";
 import { collectGitStatus, GIT_SNAPSHOT_OWNER_CHANNEL } from "../lib/git-status.ts";
 import { projectMemoryDir, truncateIndex } from "../lib/memory.ts";
 import { claudeConfigDir, oneCodeStateDir } from "../lib/paths.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
+import { resolveToolPath } from "../lib/tool-path.ts";
+import { pathArgument } from "../auto-mode/paths.ts";
 import { HARNESS_GIT_CONFIG } from "../lib/git.ts";
 
 const REMINDER_KEY = "claude-context";
@@ -87,6 +91,10 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	let blockDate = "";
 	/** The date the model was last told: the reminder's, or a later date-change notice's. */
 	let shownDate = "";
+	/** Nested instruction files already attached since the session (or its last compaction) began. */
+	let attachedNested = new Set<string>();
+	/** The instruction rule, read with the startup block (it is settings, read once a session). */
+	let rule: ReturnType<typeof instructionRule> | undefined;
 
 	const emitDate = (date: string) => {
 		blockDate = date;
@@ -125,6 +133,8 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 			});
 		}
 		email = resolveEmail(ctx.cwd);
+		attachedNested = new Set();
+		rule = instructionRule(os.homedir());
 		// /clear re-fires session_start: the next conversation takes its own snapshot.
 		gitStatus = undefined;
 		// The user's local date, taken once: the reminder is frozen after the first
@@ -183,5 +193,25 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	pi.on("session_compact", () => {
 		const today = localDate();
 		if (today !== blockDate) emitDate(today);
+		// The summary does not carry them: the next read below their directory attaches them again.
+		attachedNested = new Set();
+	});
+
+	// Claude Code's nested instructions: reading a file below the working
+	// directory attaches the CLAUDE.md-family files of the directories between,
+	// once each (lib/claude-context.ts nestedInstructionFiles). The startup block
+	// carries only cwd and its ancestors, so a subdirectory's rules ("amounts are
+	// integer cents") were missed until the model happened to read that file.
+	pi.on("tool_result", (event, ctx) => {
+		if (event.toolName !== "read" || event.isError) return;
+		const raw = pathArgument(event.input);
+		if (!raw) return;
+		rule ??= instructionRule(os.homedir());
+		const files = nestedInstructionFiles({ filePath: resolveToolPath(raw, ctx.cwd), cwd: ctx.cwd, rule, home: os.homedir() });
+		for (const file of files) {
+			if (attachedNested.has(file.path)) continue;
+			attachedNested.add(file.path);
+			pi.events.emit(REMINDER_CHANNEL, { text: nestedInstructionText(file) });
+		}
 	});
 }

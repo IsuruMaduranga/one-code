@@ -27,9 +27,9 @@
  *     block so they take precedence over CLAUDE.md — keeping `# claudeMd` itself
  *     byte-exact with Claude Code.
  *
- * What is NOT yet replicated: enterprise-policy files and nested subtree
- * CLAUDE.md loaded on-demand when a file under them is read (a follow-up needing
- * file-tracker integration; absent from every turn-1 capture we have).
+ * Nested subtree instruction files come later, when a file under them is read
+ * (`nestedInstructionFiles`, attached by the claude-context extension). What
+ * is NOT yet replicated: enterprise-policy files and `.claude/rules/`.
  */
 
 import { existsSync, readdirSync, statSync } from "node:fs";
@@ -380,6 +380,55 @@ export function projectInstructionFiles(opts: { cwd: string; home: string; homeO
 		.filter(({ path, descriptor }) => descriptor !== GLOBAL_DESCRIPTOR && descriptor !== ONECODE_GLOBAL_DESCRIPTOR && isPathAtOrUnder(path, stop))
 		.map(({ path }) => path)
 		.sort((a, b) => owner(b).length - owner(a).length);
+}
+
+/**
+ * The instruction files Claude Code attaches when the model reads a file below
+ * the working directory (its `nested_memory` attachment): for each directory
+ * from just below cwd down to the file's own, `CLAUDE.md`, `.claude/CLAUDE.md`
+ * and `CLAUDE.local.md`, under the same rule as the startup block (AGENTS.md
+ * per `rule`, none of the CLAUDE.md family in independent mode), plus One
+ * Code's ONECODE.md. Directories at or above cwd are left out: the startup
+ * block already carries them. The file being read is never its own attachment.
+ * Not yet replicated: `.claude/rules/*.md` (One Code reads no rules directory).
+ */
+export function nestedInstructionFiles(opts: { filePath: string; cwd: string; rule: InstructionRule; home: string }): { path: string; content: string }[] {
+	const target = absoluteFrom(opts.cwd, opts.filePath);
+	if (!isPathAtOrUnder(target, opts.cwd) || target === absoluteFrom(opts.cwd, ".")) return [];
+	const dirs: string[] = [];
+	for (let dir = dirname(target); isPathAtOrUnder(dir, opts.cwd) && !isPathAtOrUnder(opts.cwd, dir); dir = dirname(dir)) {
+		dirs.unshift(dir);
+		if (dirname(dir) === dir) break;
+	}
+	const claudeFiles = opts.rule !== "agents-md" && opts.rule !== "managed-only";
+	const files: { path: string; content: string }[] = [];
+	for (const dir of dirs) {
+		const candidates: string[] = [];
+		if (claudeFiles) candidates.push(join(dir, "CLAUDE.md"), join(dir, ".claude", "CLAUDE.md"));
+		const agents =
+			opts.rule === "agents-md" ||
+			opts.rule === "claude-md-and-agents-md" ||
+			(opts.rule === "claude-md-or-agents-md" && !isPresentFile(join(dir, "CLAUDE.md")) && !isPresentFile(join(dir, "CLAUDE.local.md")));
+		if (agents) {
+			candidates.push(join(dir, "AGENTS.md"));
+			if (claudeFiles) candidates.push(join(dir, ".claude", "AGENTS.md"));
+		}
+		if (claudeFiles) candidates.push(join(dir, "CLAUDE.local.md"));
+		const oneCode = firstOneCodeFile(dir);
+		if (oneCode) candidates.push(oneCode);
+		for (const path of candidates) {
+			if (path === target) continue;
+			const content = readFileIfPresent(path);
+			if (content === null || content.trim() === "") continue;
+			files.push({ path, content: expandImports(content, dirname(path), { home: opts.home }) });
+		}
+	}
+	return files;
+}
+
+/** Claude Code's `nested_memory` rendering (the reminder queue adds the `<system-reminder>` frame). */
+export function nestedInstructionText(file: { path: string; content: string }): string {
+	return `Contents of ${file.path}:\n\n${file.content}`;
 }
 
 export function discoverContextFiles(opts: {
