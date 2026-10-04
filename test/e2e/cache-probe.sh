@@ -17,8 +17,12 @@
 #
 # A second, classifier phase runs four gated network commands in auto mode and
 # checks that the auto-mode classifier's transcript is a cache read from call
-# to call and from stage 1 to stage 2 (test/e2e/cache-probe-classifier.mjs,
-# usage from test/e2e/dump-classifier.ts). `--no-classifier` skips it.
+# to call and from stage 1 to stage 2 (test/e2e/cache-probe-classifier.mjs over
+# the classifier's own CC_AUTO_MODE_LOG). `--no-classifier` skips it.
+#
+# openai-codex models talk over WebSocket by default, which dump-requests.ts
+# cannot see; the probe project sets `transport: "sse"` and is trusted with
+# --approve so the session's requests go through fetch.
 #
 # It runs the repo's own pi (node_modules), the version One Code ships against,
 # not whatever `pi` is first on PATH; PI_BIN overrides that. CACHE_PROBE_WORK_DIR
@@ -54,13 +58,21 @@ PROJECT="$WORK/project"
 mkdir -p "$PROJECT"
 git -C "$PROJECT" init -q
 printf '# Probe\n\nThrowaway project for the prompt-cache probe.\n' > "$PROJECT/CLAUDE.md"
+APPROVE=()
+case "$MODEL" in
+openai-codex/*)
+	mkdir -p "$PROJECT/.pi"
+	printf '{"transport":"sse"}\n' > "$PROJECT/.pi/settings.json"
+	APPROVE=(--approve)
+	;;
+esac
 
 echo "model:   $MODEL"
 echo "pi:      $(node "$PI_BIN" --version 2>/dev/null | tail -1)"
 echo "workdir: $WORK"
 (
 	cd "$PROJECT"
-	WIRE_DUMP="$WORK/wire.jsonl" node "$PI_BIN" -e "$REPO/test/e2e/dump-requests.ts" --model "$MODEL" --mode json -p "$PROMPT" > "$WORK/events.jsonl" 2> "$WORK/stderr.log"
+	WIRE_DUMP="$WORK/wire.jsonl" node "$PI_BIN" -e "$REPO/test/e2e/dump-requests.ts" ${APPROVE[@]+"${APPROVE[@]}"} --model "$MODEL" --mode json -p "$PROMPT" > "$WORK/events.jsonl" 2> "$WORK/stderr.log"
 ) || echo "pi exited non-zero (see $WORK/stderr.log)"
 
 status=0
@@ -74,7 +86,7 @@ if [ "$CLASSIFIER" = 1 ]; then
 	CPROMPT='Run each of these four commands in its own separate bash call, one after another (never combine them, never in parallel), then reply with exactly the word done: curl -sI https://example.com ; curl -sI https://example.org ; curl -sI https://www.iana.org ; curl -sI https://httpbin.org/get'
 	(
 		cd "$CPROJECT"
-		CLASSIFIER_DUMP="$WORK/classifier.jsonl" node "$PI_BIN" -e "$REPO/test/e2e/dump-classifier.ts" --model "$MODEL" --mode json --permission-mode auto -p "$CPROMPT" > "$WORK/classifier-events.jsonl" 2> "$WORK/classifier-stderr.log"
+		CC_AUTO_MODE_LOG="$WORK/classifier.jsonl" node "$PI_BIN" --model "$MODEL" --mode json --permission-mode auto -p "$CPROMPT" > "$WORK/classifier-events.jsonl" 2> "$WORK/classifier-stderr.log"
 	) || echo "pi exited non-zero in the classifier phase (see $WORK/classifier-stderr.log)"
 	touch "$WORK/classifier.jsonl"
 	node "$REPO/test/e2e/cache-probe-classifier.mjs" "$WORK/classifier.jsonl" || status=1

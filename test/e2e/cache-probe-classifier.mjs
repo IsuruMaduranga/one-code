@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 /**
  * Auto-mode classifier cache check over one pi run (cache-probe.sh's
- * classifier phase). Reads what dump-classifier.ts wrote: each classifier
- * request body with its response usage, in call order (stage 1 and stage 2 of
- * one gated call are consecutive requests).
+ * classifier phase). Reads the log the classifier writes under
+ * CC_AUTO_MODE_LOG (auto-mode/classifier.ts): one line per classifier reply
+ * with its system and user text and pi-ai's normalized usage, in call order
+ * (stage 1 and stage 2 of one gated call are consecutive lines). Being written
+ * by the classifier itself, it covers every transport, Codex's WebSocket
+ * included.
  *
  *   1. The system prompt (the ruleset) is byte-identical across requests.
  *   2. The transcript only grows: each request's text up to its `</transcript>`
@@ -36,26 +39,8 @@ const rows = readFileSync(file, "utf8")
 	.split("\n")
 	.filter((l) => l.trim())
 	.map((l) => JSON.parse(l))
-	.filter((r) => r.status === 200);
+	.filter((r) => r.stopReason !== "error" && r.stopReason !== "aborted");
 
-const withoutCacheControl = (value) => {
-	if (Array.isArray(value)) return value.map(withoutCacheControl);
-	if (value && typeof value === "object") {
-		return Object.fromEntries(Object.entries(value).filter(([k]) => k !== "cache_control").map(([k, v]) => [k, withoutCacheControl(v)]));
-	}
-	return value;
-};
-const textOf = (content) => (typeof content === "string" ? content : Array.isArray(content) ? content.map((c) => c?.text ?? "").join("") : "");
-/** The ruleset and the user text, whatever the request shape. */
-const parts = (body) => {
-	if (body.system !== undefined) return { system: textOf(body.system), user: textOf(body.messages?.at(-1)?.content) };
-	if (body.instructions !== undefined) return { system: textOf(body.instructions), user: textOf(body.input?.at(-1)?.content) };
-	const messages = body.messages ?? [];
-	return {
-		system: messages.filter((m) => m.role === "system" || m.role === "developer").map((m) => textOf(m.content)).join(""),
-		user: textOf(messages.at(-1)?.content),
-	};
-};
 const firstDiff = (a, b) => {
 	let i = 0;
 	while (i < a.length && i < b.length && a[i] === b[i]) i++;
@@ -67,17 +52,14 @@ const warnings = [];
 if (rows.length < 2) failures.push(`only ${rows.length} classifier request(s) recorded; the check needs at least two gated calls`);
 
 const calls = rows.map((r) => {
-	const body = JSON.parse(r.body);
-	const { system, user } = parts(body);
-	const u = r.usage;
-	const explicit = u.cacheWrite != null || u.cacheRead != null;
-	const read = explicit ? (u.cacheRead ?? 0) : (u.cachedTokens ?? 0);
-	const total = explicit ? (u.inputTokens ?? 0) + (u.cacheRead ?? 0) + (u.cacheWrite ?? 0) : (u.promptTokens ?? u.inputTokens ?? 0);
-	return { body: JSON.stringify(withoutCacheControl(body)), system, user, explicit, read, write: u.cacheWrite ?? 0, total };
+	const u = r.usage ?? {};
+	const explicit = r.api === "anthropic-messages";
+	const read = u.cacheRead ?? 0;
+	return { text: r.system + r.user, system: r.system, user: r.user, explicit, read, write: u.cacheWrite ?? 0, total: (u.input ?? 0) + read + (u.cacheWrite ?? 0) };
 });
 const explicit = calls.some((c) => c.explicit);
 
-console.log(`classifier model: ${JSON.parse(rows[0]?.body ?? "{}").model ?? "?"} (${explicit ? "explicit" : "implicit"} cache)`);
+console.log(`classifier model: ${rows[0]?.model ?? "?"} (${explicit ? "explicit" : "implicit"} cache)`);
 console.log("call   total   cacheRead  cacheWrite  expected>=");
 for (let i = 0; i < calls.length; i++) {
 	const cur = calls[i];
@@ -92,7 +74,7 @@ for (let i = 0; i < calls.length; i++) {
 		}
 		need = explicit
 			? prev.read + prev.write - slack
-			: Math.floor((prev.total * firstDiff(prev.body, cur.body)) / prev.body.length) - IMPLICIT_BLOCK - slack;
+			: Math.floor((prev.total * firstDiff(prev.text, cur.text)) / prev.text.length) - IMPLICIT_BLOCK - slack;
 		if (cur.read < need) {
 			const msg = `classifier call ${i + 1} read ${cur.read} cached tokens; it should have read at least ${need} of what call ${i} sent (miss of ${need - cur.read})`;
 			(explicit ? failures : warnings).push(msg);

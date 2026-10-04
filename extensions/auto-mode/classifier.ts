@@ -18,6 +18,7 @@
  * has approved nothing.
  */
 
+import { appendFileSync } from "node:fs";
 import { isContextOverflow, type Model, type Api, type AssistantMessage, type ThinkingLevel } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
@@ -141,6 +142,13 @@ export interface ClassifierDeps {
 	config: AutoModeConfig;
 	signal?: AbortSignal;
 	state: ClassifierState;
+	/**
+	 * A stable key for this session's classifier calls. pi-ai sends it as
+	 * OpenAI's prompt_cache_key (Codex and the OpenAI APIs), which routes the
+	 * calls to the cache that holds the previous call's prefix; without it
+	 * consecutive calls landed on different cache machines and missed.
+	 */
+	cacheKey?: string;
 	/** Tell the user something once — which model is in use, or that theirs is dead. */
 	onNotice?: (message: string, level: "info" | "warning", notice?: ClassifierNotice) => void;
 	/** Report each classifier reply's usage, for the all-in footer cost. Observer
@@ -242,6 +250,10 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 	// left byte-identical to CC's.
 	const afterRuleDenial = request.transcript.some((entry) => entry.kind === "denied");
 	const debug = process.env.CC_AUTO_MODE_DEBUG;
+	// Probe hook (test/e2e/cache-probe.sh): one JSON line per classifier reply with
+	// its text and pi-ai's normalized usage, whatever the transport (Codex runs
+	// over WebSocket, where a fetch wrapper sees nothing). Opt-in, never read back.
+	const usageLog = process.env.CC_AUTO_MODE_LOG;
 
 	// A model already pinned this session is tried first, so the classifier does
 	// not change under the session while the pin is healthy. The rest of the chain
@@ -315,6 +327,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 					signal: deps.signal ? AbortSignal.any([deps.signal, timeout]) : timeout,
 					maxTokens,
 					cacheRetention: "long",
+					...(deps.cacheKey ? { sessionId: deps.cacheKey } : {}),
 					...(model.api === "anthropic-messages" ? {
 						onPayload: (payload: unknown) => {
 							cacheClassifierHistory(payload, [...history, tail, userText.slice(userPrefix.length)], history.length - 1, previousHistoryEnd);
@@ -332,6 +345,13 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 		const call = async (userText: string, base: number, big: number, stage: number): Promise<string> => {
 			const inspect = (reply: AssistantMessage): string | "length" => {
 				deps.onUsage?.(reply.usage);
+				if (usageLog) {
+					try {
+						appendFileSync(usageLog, `${JSON.stringify({ model: key, api: model.api, stage, system, user: userText, usage: reply.usage, stopReason: reply.stopReason })}\n`);
+					} catch {
+						// A probe log that cannot be written must not fail the gate.
+					}
+				}
 				if (deps.signal?.aborted) throw new StepError("cancelled", "cancelled");
 				if (reply.stopReason === "error" || reply.stopReason === "aborted") {
 					const msg = reply.errorMessage ?? reply.stopReason ?? "provider error";
