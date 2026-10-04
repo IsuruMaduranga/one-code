@@ -239,6 +239,16 @@ describe("file-tracker wiring", () => {
 		expect(result?.block).toBe(true);
 	});
 
+	it("starts a fresh tracker on session_tree within the same session: the left branch's reads are gone", async () => {
+		const file = path("branch.ts");
+		writeFileSync(file, "content");
+		const same = () => createFakeCtx({ cwd: dir, sessionManager: { getSessionId: () => "fake-session", getBranch: () => [] } });
+		await fake.fireOne("tool_result", { toolName: "read", input: { path: file }, isError: false }, same());
+		await fake.fireOne("session_tree", {}, same());
+		const result = await fake.fireOne<{ block?: boolean }>("tool_call", { toolName: "edit", input: { path: file } }, same());
+		expect(result?.block).toBe(true);
+	});
+
 	it("after a compaction restores a small file, notes a large one, and clears what was read, as Claude Code does", async () => {
 		const small = path("small.txt");
 		const big = path("big.txt");

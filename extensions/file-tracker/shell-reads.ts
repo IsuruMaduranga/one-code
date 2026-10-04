@@ -85,11 +85,22 @@ function isPlainPath(token: Token): boolean {
 }
 
 /**
- * Whether `output` shows the whole of `content`. An empty file is never
- * counted (nothing in the output proves the model saw it); trailing
- * whitespace is ignored because the shell tool trims it.
+ * Whether `output` shows the whole of `content`. Trailing whitespace is
+ * ignored because the shell tool trims it. A tiny one-line file is never
+ * counted: its text turns up in outputs by chance (an adversarial GPT-6 Astra
+ * run matched `completed` to "(bash completed with no output)", `1` to
+ * "Exit code 1", an error line, a persisted-output tag), so the match would
+ * not show that the file was printed. What the guard protects still holds for
+ * a larger match under another file's name: every byte of the file was in
+ * front of the model, so an edit cannot discard content it has not seen.
  */
 export function shownInFull(output: string, content: string): boolean {
 	const body = content.trimEnd();
-	return body !== "" && output.includes(body);
+	if (body.length < MIN_SHOWN_CHARS && !(body.includes("\n") && body.length >= MIN_SHOWN_LINES_CHARS)) return false;
+	return output.includes(body);
 }
+
+/** A one-line file shorter than this is never counted as shown. */
+const MIN_SHOWN_CHARS = 40;
+/** A multi-line file shorter than this is never counted as shown. */
+const MIN_SHOWN_LINES_CHARS = 16;

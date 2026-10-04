@@ -25,7 +25,7 @@ import { bashParserReady } from "../lib/bash-parser.ts";
 import { collectImportedPaths, discoverContextFilePaths, instructionRule } from "../lib/claude-context.ts";
 import { inContextEntries, latestCompaction } from "../lib/compaction-boundary.ts";
 import { projectMemoryDir } from "../lib/memory.ts";
-import { claudeConfigDir, comparablePath, isPathAtOrUnder, tryRealpath } from "../lib/paths.ts";
+import { absoluteFrom, claudeConfigDir, comparablePath, expandTilde, isPathAtOrUnder, tryRealpath } from "../lib/paths.ts";
 import { estimateTextTokens } from "../lib/pi-ai-estimate.ts";
 import { planFileOnBranch } from "../lib/plan-mode-channels.ts";
 import { REMINDER_CHANNEL, type ReminderPayload } from "../lib/reminders.ts";
@@ -92,9 +92,12 @@ function textOf(content: unknown): string {
  */
 function observeShellReads(tracker: FileTracker, command: string, output: string, cwd: string): void {
 	if (!command || !output) return;
-	const words = shellReadCandidates(command).flatMap((word) => expandCandidate(word, (dir) => readdirSync(resolveToolPath(dir, cwd))));
+	// The shell's own resolution, not the file tools' (`resolveToolPath` strips
+	// a leading `@`, which `cat @x` keeps): `~/` and the shell's directory only.
+	const shellPath = (word: string) => absoluteFrom(cwd, expandTilde(word, homedir()));
+	const words = shellReadCandidates(command).flatMap((word) => expandCandidate(word, (dir) => readdirSync(shellPath(dir))));
 	for (const raw of new Set(words)) {
-		const path = resolveToolPath(raw, cwd);
+		const path = shellPath(raw);
 		const stamp = statIfPresent(path);
 		if (!stamp || stamp.size > MAX_SHELL_READ_BYTES) continue;
 		const current = readIfPresent(path);
@@ -207,9 +210,9 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 	// still in context (since the latest compaction's kept tail) so post-resume
 	// edits are not refused as "never read" (replay.ts). A new session id starts
 	// from an empty tracker.
-	const reconstruct = (ctx: ExtensionContext) => {
+	const reconstruct = (ctx: ExtensionContext, fresh = false) => {
 		const id = ctx.sessionManager.getSessionId?.() ?? undefined;
-		if (id !== sessionId) {
+		if (fresh || id !== sessionId) {
 			sessionId = id;
 			tracker = new FileTracker();
 		}
@@ -233,7 +236,10 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 		touched = new Map([...lastTouchesOnBranch(entries)].map(([raw, at]) => [resolveToolPath(raw, ctx.cwd), at]));
 	};
 	pi.on("session_start", (_event, ctx) => reconstruct(ctx));
-	pi.on("session_tree", (_event, ctx) => reconstruct(ctx));
+	// A branch switch keeps the session id, but the reads of the branch left
+	// behind are not in context any more: start from an empty tracker, as for a
+	// new session (found by an adversarial GPT-6 Astra run, 2026-10-04).
+	pi.on("session_tree", (_event, ctx) => reconstruct(ctx, true));
 
 	/** Whether a write's file existed when the call was made, by call id: its result says "created" or "updated". */
 	const writeTargetExisted = new Map<string, boolean>();

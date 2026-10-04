@@ -55,15 +55,24 @@ describe("expandCandidate", () => {
 
 describe("shownInFull", () => {
 	it("needs the whole content in the output, trailing whitespace aside", () => {
-		expect(shownInFull("line 1\nline 2", "line 1\nline 2\n")).toBe(true);
-		expect(shownInFull("==> a <==\nline 1\nline 2\n\nexit 0", "line 1\nline 2\n")).toBe(true);
-		expect(shownInFull("line 1", "line 1\nline 2\n")).toBe(false);
-		expect(shownInFull("     1\tline 1\n     2\tline 2", "line 1\nline 2\n")).toBe(false);
+		expect(shownInFull("line one\nline two", "line one\nline two\n")).toBe(true);
+		expect(shownInFull("==> a <==\nline one\nline two\n\nexit 0", "line one\nline two\n")).toBe(true);
+		expect(shownInFull("line one", "line one\nline two\n")).toBe(false);
+		expect(shownInFull("     1\tline one\n     2\tline two", "line one\nline two\n")).toBe(false);
 	});
 
-	it("never counts an empty file", () => {
+	it("never counts an empty or tiny one-line file, whose text turns up by chance", () => {
 		expect(shownInFull("anything", "")).toBe(false);
 		expect(shownInFull("anything", "\n")).toBe(false);
+		expect(shownInFull("(bash completed with no output)", "completed\n")).toBe(false);
+		expect(shownInFull("Exit code 1", "1\n")).toBe(false);
+		expect(shownInFull("cat: x: No such file or directory", "No such file or directory\n")).toBe(false);
+	});
+
+	it("counts a short multi-line file and a long one-line file", () => {
+		expect(shownInFull("test:\n\tpython3 t.py", "test:\n\tpython3 t.py\n")).toBe(true);
+		const line = "export const VERSION = '1.2.3'; // bumped by release";
+		expect(shownInFull(line, `${line}\n`)).toBe(true);
 	});
 });
 
@@ -90,32 +99,40 @@ describe("file-tracker: a bash result counts as a read", () => {
 	});
 
 	it("allows an edit after a loop that cat-ed each file in full", async () => {
-		writeFileSync(join(dir, "a.py"), "a = 1\n");
-		writeFileSync(join(dir, "b.py"), "b = 2\n");
-		await bash('for f in a.py b.py; do printf "\\n--- %s ---\\n" "$f"; cat "$f"; done', "\n--- a.py ---\na = 1\n\n--- b.py ---\nb = 2");
+		writeFileSync(join(dir, "a.py"), "alpha = 1\nprint(alpha)\n");
+		writeFileSync(join(dir, "b.py"), "beta = 2\nprint(beta)\n");
+		await bash('for f in a.py b.py; do printf "\\n--- %s ---\\n" "$f"; cat "$f"; done', "\n--- a.py ---\nalpha = 1\nprint(alpha)\n\n--- b.py ---\nbeta = 2\nprint(beta)");
 		expect(await edit("a.py")).toBeUndefined();
 		expect(await edit("b.py")).toBeUndefined();
 	});
 
 	it("allows an edit after a loop over a glob printed each file in full", async () => {
 		mkdirSync(join(dir, "src"));
-		writeFileSync(join(dir, "src", "a.py"), "a = 1\n");
-		await bash('for f in src/*.py; do echo "== $f"; cat "$f"; done', "== src/a.py\na = 1");
+		writeFileSync(join(dir, "src", "a.py"), "alpha = 1\nprint(alpha)\n");
+		await bash('for f in src/*.py; do echo "== $f"; cat "$f"; done', "== src/a.py\nalpha = 1\nprint(alpha)");
 		expect(await edit(join("src", "a.py"))).toBeUndefined();
 	});
 
 	it("resolves a shell read in the entered worktree, where the shell ran", async () => {
 		const worktree = join(dir, "wt");
 		mkdirSync(worktree);
-		writeFileSync(join(worktree, "m.py"), "in worktree\n");
+		writeFileSync(join(worktree, "m.py"), "content that lives in the worktree copy only\n");
 		fake.events.emit(WORKTREE_CHANNEL, { path: worktree });
-		await bash("cat m.py", "in worktree");
+		await bash("cat m.py", "content that lives in the worktree copy only");
 		expect(await edit(join(worktree, "m.py"))).toBeUndefined();
 	});
 
+	it("resolves a shell word as the shell does: cat @x reads the file named @x", async () => {
+		writeFileSync(join(dir, "@config.txt"), "the at-sign file's own text\nsecond line\n");
+		writeFileSync(join(dir, "config.txt"), "second line\nother\n");
+		await bash("cat @config.txt", "the at-sign file's own text\nsecond line");
+		expect(await edit(join(dir, "@config.txt"))).toBeUndefined();
+		expect((await edit("config.txt"))?.block).toBe(true);
+	});
+
 	it("still refuses after a partial read, and says why", async () => {
-		writeFileSync(join(dir, "big.py"), "a = 1\nb = 2\nc = 3\n");
-		await bash("cat big.py | head -1", "a = 1");
+		writeFileSync(join(dir, "big.py"), "alpha = 1\nbeta = 2\ngamma = 3\n");
+		await bash("cat big.py | head -1", "alpha = 1");
 		const result = await edit("big.py");
 		expect(result?.block).toBe(true);
 		expect(result?.reason).toContain("A shell read counts only when its output showed the whole file");
@@ -123,17 +140,17 @@ describe("file-tracker: a bash result counts as a read", () => {
 
 	it("keeps the stale guard: a change after the shell read blocks the edit", async () => {
 		const file = join(dir, "x.txt");
-		writeFileSync(file, "first\n");
-		await bash("cat x.txt", "first");
+		writeFileSync(file, "first version of the notes file\nline two\n");
+		await bash("cat x.txt", "first version of the notes file\nline two");
 		writeFileSync(file, "second\n");
 		expect((await edit("x.txt"))?.reason).toContain("has changed on disk");
 	});
 
 	it("rebuilds shell reads from the transcript on resume", async () => {
-		writeFileSync(join(dir, "r.txt"), "resumed content\n");
+		writeFileSync(join(dir, "r.txt"), "resumed content of the file r.txt\nline 2\n");
 		const branch = [
 			{ type: "message", message: { role: "assistant", content: [{ type: "toolCall", id: "c1", name: "bash", arguments: { command: "cat r.txt" } }] } },
-			{ type: "message", message: { role: "toolResult", toolCallId: "c1", content: [{ type: "text", text: "resumed content" }] } },
+			{ type: "message", message: { role: "toolResult", toolCallId: "c1", content: [{ type: "text", text: "resumed content of the file r.txt\nline 2" }] } },
 		];
 		const resumed = createFakeCtx({ cwd: dir, sessionManager: { getSessionId: () => "s1", getBranch: () => branch } });
 		await fake.fire("session_start", { reason: "resume" }, resumed);
