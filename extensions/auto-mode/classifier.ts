@@ -68,6 +68,23 @@ export function isClassifierTimeout(message: string): boolean {
 }
 
 /**
+ * Whether a failure happened below HTTP: the request never got an answer
+ * (`fetch failed`, a reset or refused connection, a DNS miss). Like a timeout it
+ * says nothing about the call or the model, so it takes the timeout path: one
+ * retry, then a "not judged" block. A provider's own error reply (a 500, a 429)
+ * is not one; it stays a substantive error. Observed 2026-10-04: a few minutes
+ * of `fetch failed` on openai-codex blocked read-only calls as "denied".
+ */
+export function isTransportFailure(message: string): boolean {
+	return /\bfetch failed\b|\beconn(reset|refused|aborted)\b|\benotfound\b|\beai_again\b|\bepipe\b|socket hang up|other side closed|\bund_err_socket\b|network (error|is unreachable)/i.test(
+		message,
+	);
+}
+
+/** Pause before retrying after a transport failure, so a brief network drop can clear. */
+export const TRANSPORT_RETRY_DELAY_MS = 1500;
+
+/**
  * Which model the classifier settled on, and which candidates turned out to be
  * unusable. Owned by the caller so this module stays stateless, and so the
  * choice is *pinned*: re-resolving per call would let a registry refresh swap
@@ -307,7 +324,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 				if (deps.signal?.aborted) throw new StepError("cancelled", "cancelled");
 				if (reply.stopReason === "error" || reply.stopReason === "aborted") {
 					const msg = reply.errorMessage ?? reply.stopReason ?? "provider error";
-					if (isClassifierTimeout(msg)) throw new StepError("timeout", msg);
+					if (isClassifierTimeout(msg) || isTransportFailure(msg)) throw new StepError("timeout", msg);
 					throw new StepError(isModelUnavailableError(msg) ? "unavailable" : "error", msg);
 				}
 				if (reply.stopReason === "length") return "length";
@@ -323,6 +340,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 				// load usually clears on a second try. A user cancel or a substantive
 				// error is not retried.
 				if (error instanceof StepError && error.kind === "timeout") {
+					if (isTransportFailure(error.message)) await new Promise((resolve) => setTimeout(resolve, TRANSPORT_RETRY_DELAY_MS));
 					reply = await runCall(userText, base, stage);
 					seen = inspect(reply);
 				} else {
@@ -462,13 +480,14 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 	// where it can, and only blocks outright when running non-interactively.
 	if (sawTimeout) {
 		const model = timedOutKey ? timedOutKey.split("/").pop() : undefined;
+		const network = isTransportFailure(lastError);
 		return {
 			decision: "block",
 			tier: "timeout",
 			noVerdict: true,
 			reason:
-				`Auto mode could not screen this ${request.toolName} call in time — the approval classifier${model ? ` (${model})` : ""} ` +
-				"is temporarily unavailable (timed out), so the call was not judged either way.",
+				`Auto mode could not screen this ${request.toolName} call${network ? "" : " in time"} — the approval classifier${model ? ` (${model})` : ""} ` +
+				`is temporarily unavailable (${network ? `network error: ${lastError}` : "timed out"}), so the call was not judged either way.`,
 		};
 	}
 
