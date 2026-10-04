@@ -746,7 +746,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 					{
 						type: "text",
 						text: wasResident
-							? `Terminated the resident agent behind ${task.id} (${task.description}); it can no longer be messaged live (send_message will resume it from its session file).`
+							? `Terminated the resident agent behind ${task.id} (${task.description}); it can no longer be messaged live (SendMessage will resume it from its session file).`
 							: `Stop requested for ${task.id} (${task.description}).`,
 					},
 				],

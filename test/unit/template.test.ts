@@ -161,7 +161,9 @@ describe("buildClaudeCodeSystemPrompt", () => {
 		expect(prompt).toContain("# Answer or act");
 		expect(prompt).toContain("# Playbooks");
 		expect(prompt).toContain("skill tool"); // the skills nudge that motivated tiering
-		expect(prompt).toContain("the search tools"); // tiny keeps the grep/find/ls steer
+		expect(prompt).toContain("the grep, find and ls tools"); // tiny keeps the grep/find/ls steer, by tool name
+		expect(prompt).toContain("to run something, call the bash tool.");
+		expect(prompt).not.toContain("a consistency audit"); // the explore agent's description rules audits out
 		// Built on the long register: its sections stay, with one "# Using your tools" (tiny's).
 		for (const section of ["# System\n", "# Doing tasks\n", "# Executing actions with care\n", "# Text output", "# auto memory\n"]) {
 			expect(prompt, section).toContain(section);
@@ -170,6 +172,14 @@ describe("buildClaudeCodeSystemPrompt", () => {
 		expect(prompt).not.toContain("# Delegating to agents"); // tiny has its stricter DELEGATE_STRICT
 		expect(prompt).not.toContain("# Delivering work");
 		expect(prompt).not.toContain("# Corrections");
+	});
+
+	it("names tiny's shell tool from the session's tools", () => {
+		const call = (selectedTools: string[]) => buildClaudeCodeSystemPrompt({ ...baseOptions, selectedTools }, env, "tiny");
+		expect(call(["read", "bash", "edit", "write"])).toContain("to run something, call the bash tool.");
+		expect(call(["read", "powershell", "edit", "write"])).toContain("to run something, call the powershell tool.");
+		expect(call(["read", "bash", "powershell", "edit", "write"])).toContain("to run something, call the bash or powershell tool.");
+		expect(buildClaudeCodeSystemPrompt({ ...baseOptions, selectedTools: ["read", "powershell"] }, env, "tiny", null, false)).toContain("call the powershell tool.");
 	});
 
 	it("is byte-stable across calls with identical inputs, for each tier", () => {

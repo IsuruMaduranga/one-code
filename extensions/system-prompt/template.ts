@@ -71,7 +71,7 @@ export function buildClaudeCodeSystemPrompt(
 	taskTools = true,
 ): string {
 	const bundle = BUNDLES[tier];
-	const lead = taskTools ? bundle.lead : (bundle.leadWithoutTaskTools ?? bundle.lead);
+	const lead = bundle.leadFor?.({ taskTools, tools: options.selectedTools }) ?? (taskTools ? bundle.lead : (bundle.leadWithoutTaskTools ?? bundle.lead));
 	const sections = [
 		...lead,
 		buildToolsSection(options),

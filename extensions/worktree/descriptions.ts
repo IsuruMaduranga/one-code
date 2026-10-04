@@ -55,8 +55,8 @@ export const EXIT_WORKTREE_DESCRIPTION = `Exit a worktree session created by ent
 
 ## Scope
 
-This tool ONLY operates on worktrees created by enter_worktree in this session. It will NOT touch:
-- Worktrees you created manually with \`git worktree add\`
+This tool ONLY operates on the worktree session enter_worktree started in this session. It will NOT touch:
+- Worktrees you created manually with \`git worktree add\` and never entered with enter_worktree (one entered by \`path\` can be left with \`action: "keep"\`, but never removed)
 - Worktrees from a previous session (even if created by enter_worktree then)
 - The directory you're in if enter_worktree was never called
 

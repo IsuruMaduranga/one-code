@@ -62,7 +62,7 @@ describe("the shipped texts", () => {
 		["TaskGet", TASK_GET_DESCRIPTION, 733, "4158d4726eb58d59"],
 		["TaskList", TASK_LIST_DESCRIPTION, 1001, "87e632e37738bf17"],
 		["EnterWorktree", ENTER_WORKTREE_DESCRIPTION, 2179, "58fec66cb2bdb541"],
-		["ExitWorktree", EXIT_WORKTREE_DESCRIPTION, 1650, "9a889c85c157c336"],
+		["ExitWorktree", EXIT_WORKTREE_DESCRIPTION, 1773, "c559deab629a0b43"],
 	])("%s", (_name, text, length, hash) => {
 		expect(text.length).toBe(length);
 		expect(sha(text)).toBe(hash);

@@ -21,21 +21,36 @@ import {
 	TONE_STYLE,
 } from "./mid.ts";
 
-export const MAKE_CHANGES_WITH_TOOLS = `# Make changes with tools, not prose
-Code, edits, or commands that appear only in your text reply are NOT applied — they are not saved to the filesystem and do not run. Never treat showing code as a substitute for making the change. To change a file, call the edit or write tool; to run something, call the shell tool. If a request needs a change to the workspace, your turn is not done until you have made it with a tool.`;
+/**
+ * The shell tool by its name: `bash`, or `powershell` on Windows without Git
+ * Bash, or either when both are present. A tiny model takes "the shell tool"
+ * literally and finds no tool of that name.
+ */
+export function shellToolPhrase(tools: readonly string[] | undefined): string {
+	const bash = !tools || tools.includes("bash");
+	const powershell = !!tools?.includes("powershell");
+	if (bash && powershell) return "the bash or powershell tool";
+	return powershell ? "the powershell tool" : "the bash tool";
+}
+
+export const makeChangesWithTools = (shellTool: string) => `# Make changes with tools, not prose
+Code, edits, or commands that appear only in your text reply are NOT applied — they are not saved to the filesystem and do not run. Never treat showing code as a substitute for making the change. To change a file, call the edit or write tool; to run something, call ${shellTool}. If a request needs a change to the workspace, your turn is not done until you have made it with a tool.`;
+
+export const MAKE_CHANGES_WITH_TOOLS = makeChangesWithTools(shellToolPhrase(undefined));
 
 export const ANSWER_OR_ACT = `# Answer or act
 Decide up front which the request needs:
 - A simple question or greeting that doesn't touch the workspace → answer directly, no tools.
-- Anything that inspects, changes, or runs code in the project → take action with tools; don't just describe what you would do.
+- A request to inspect, change, or run code in the project → take action with tools; don't just describe what you would do.
+- A question that asks for your opinion or options ("how should we…?", "what could we do about X?", "what do you think?") → read what you need, then answer with a recommendation; change nothing until the user agrees.
 - When it could be read either way → treat it as a task and act.
-Do the work rather than asking permission to start; ask the user only when you genuinely cannot proceed without an answer.`;
+Do the work rather than asking permission to start. Ask the user when you genuinely cannot proceed without an answer, and before the risky actions listed under "Executing actions with care".`;
 
 const LOW_TASK_LINE = ` - Break multi-step work down with \`task_create\` (deferred — load it with \`tool_search select:task_create,task_update\`) and keep it updated as you go.`;
 
 /** Built with or without the task bullet: the session model may run without the task tools. */
 const usingTools = (taskTools: boolean) => `# Using your tools
- - Prefer the dedicated tools over the shell: use read to read files (not cat/head/tail/sed), edit to change them (not sed/awk), write to create them (not echo redirection), and the search tools to find files or content (not find/grep/ls). Reserve the shell for commands that genuinely need it.${taskTools ? `\n${LOW_TASK_LINE}` : ""}
+ - Prefer the dedicated tools over the shell: use read to read files (not cat/head/tail/sed), edit to change them (not sed/awk), write to create them (not echo redirection), and the grep, find and ls tools to search for files or content (not the find/grep/ls commands in the shell). Reserve the shell for commands that genuinely need it.${taskTools ? `\n${LOW_TASK_LINE}` : ""}
  - When a skill fits the task, use it — invoke it with the skill tool instead of redoing the same work by hand. Skills are set up on purpose; reach for the matching one rather than improvising.
  - You can call multiple independent tools in one response — do so when the calls don't depend on each other.`;
 
@@ -46,7 +61,7 @@ export const USING_TOOLS = usingTools(true);
 // extensions/subagents/index.ts (the tiny-tier reminder).
 export const DELEGATE_STRICT = `# Delegate broad searches — never sweep the codebase yourself
 Before exploring, classify the request:
-- Needs MANY files (a codebase overview, "find every place where…", a consistency audit, unfamiliar code): make ONE Agent tool call with subagent_type: "explore" and the complete question as the task. Do NOT read the files one by one — that fills your context and degrades your answer. The agent searches in its own separate context and returns just the answer.
+- Needs MANY files (a codebase overview, "find every place where…", unfamiliar code): make ONE Agent tool call with subagent_type: "explore" and the complete question as the task. Do NOT read the files one by one — that fills your context and degrades your answer. The agent searches in its own separate context and returns just the answer.
 - Needs ONE known file or symbol: use the search tools directly.
 If you notice you have already opened several files to answer one broad question, stop and delegate the rest with the Agent tool.
 When the agent has answered, report its answer and move on — do not re-read the files it already covered; the sweep you delegated is the sweep you must not repeat.`;
@@ -63,11 +78,11 @@ Avoid failing in either direction:
 - Don't over-reach. Keep it simple, do only what was asked, and never hand the user more than they wanted — no extra features, refactors, or files they didn't ask for.
 Think about the best approach, then act decisively; verify what you build by running it, not by assuming it works.`;
 
-const lowLead = (taskTools: boolean) => [
+const lowLead = (taskTools: boolean, shellTool = shellToolPhrase(undefined)) => [
 	OPENING_LONG,
 	SAFETY,
 	SYSTEM,
-	MAKE_CHANGES_WITH_TOOLS,
+	makeChangesWithTools(shellTool),
 	ANSWER_OR_ACT,
 	DOING_TASKS,
 	PLAYBOOKS,
@@ -82,6 +97,7 @@ const lowLead = (taskTools: boolean) => [
 export const lowBundle: PromptBundle = {
 	lead: lowLead(true),
 	leadWithoutTaskTools: lowLead(false),
+	leadFor: ({ taskTools, tools }) => lowLead(taskTools, shellToolPhrase(tools)),
 	tail: [STAYING_ON_TRACK, CONTEXT_MANAGEMENT],
 	verboseMemory: true,
 };
