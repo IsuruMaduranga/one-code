@@ -1,14 +1,18 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ONE_SHOT_COMMAND_FAILED_CHANNEL } from "../../extensions/lib/interrupt.ts";
 import { createUserMessageSender } from "../../extensions/lib/notifications.ts";
 import { createFakePi } from "./helpers/fake-pi.ts";
+import { captureUserTurns } from "./helpers/user-turn.ts";
 
-afterEach(() => vi.useRealTimers());
+let exitCode: typeof process.exitCode;
+beforeEach(() => { exitCode = process.exitCode; process.exitCode = undefined; });
+afterEach(() => { vi.useRealTimers(); process.exitCode = exitCode; });
 
 describe("createUserMessageSender", () => {
 	it.each(["print", "json"] as const)("waits through idle preflight and the whole run in %s", async (mode) => {
 		vi.useFakeTimers();
 		const fake = createFakePi();
+		const startTurn = captureUserTurns(fake);
 		const send = createUserMessageSender(fake.pi as never);
 		let active = false;
 		let settle!: () => void;
@@ -21,7 +25,7 @@ describe("createUserMessageSender", () => {
 		expect(returned).toBe(false);
 		expect(waitForIdle).not.toHaveBeenCalled();
 		active = true;
-		await fake.fire("agent_start", {});
+		await startTurn();
 		expect(waitForIdle).toHaveBeenCalledTimes(1);
 		await vi.advanceTimersByTimeAsync(60_000); // The startup timeout must not cap the model/tool run.
 		expect(returned).toBe(false);
@@ -56,6 +60,7 @@ describe("createUserMessageSender", () => {
 	it("bounds a preflight failure or consumed input, clears timers, and can send again", async () => {
 		vi.useFakeTimers();
 		const fake = createFakePi();
+		const startTurn = captureUserTurns(fake);
 		const send = createUserMessageSender(fake.pi as never);
 		const failedCommand = vi.fn();
 		fake.events.on(ONE_SHOT_COMMAND_FAILED_CHANNEL, failedCommand);
@@ -70,7 +75,8 @@ describe("createUserMessageSender", () => {
 		expect(ctx.waitForIdle).not.toHaveBeenCalled();
 		expect(vi.getTimerCount()).toBe(0);
 		const running = send(ctx, "next prompt");
-		await fake.fire("agent_start", {});
+		await vi.advanceTimersByTimeAsync(0);
+		await startTurn();
 		await running;
 		expect(ctx.waitForIdle).toHaveBeenCalledTimes(1);
 		expect(fake.handlers.get("agent_start")).toHaveLength(1);
@@ -105,6 +111,35 @@ describe("createUserMessageSender", () => {
 		await fake.fire("agent_start", {});
 		expect(waitForIdle).not.toHaveBeenCalled();
 		expect(vi.getTimerCount()).toBe(0);
+	});
+
+	it("keeps listener and timer counts constant across many calls", async () => {
+		vi.useFakeTimers();
+		const fake = createFakePi();
+		fake.pi.sendUserMessage = () => { void fake.fire("agent_start", {}); };
+		const send = createUserMessageSender(fake.pi as never);
+		const ctx = { mode: "json" as const, isIdle: () => true, waitForIdle: async () => {} };
+		for (let i = 0; i < 100; i++) await send(ctx, `prompt ${i}`);
+		expect(fake.handlers.get("agent_start")).toHaveLength(1);
+		expect(fake.handlers.get("session_shutdown")).toHaveLength(1);
+		expect(vi.getTimerCount()).toBe(0);
+	});
+
+	it("does not send again after shutdown, even in interactive modes", async () => {
+		const fake = createFakePi();
+		const send = createUserMessageSender(fake.pi as never);
+		await fake.fire("session_shutdown", {});
+		await expect(send({ mode: "rpc", isIdle: () => true }, "late prompt")).rejects.toThrow("Session shut down");
+		expect(fake.sentUserMessages).toEqual([]);
+	});
+
+	it("preserves an existing failure exit status", async () => {
+		const fake = createFakePi();
+		fake.pi.sendUserMessage = () => { throw new Error("send failed"); };
+		const send = createUserMessageSender(fake.pi as never);
+		process.exitCode = 2;
+		await expect(send({ mode: "print", isIdle: () => true }, "prompt")).rejects.toThrow("send failed");
+		expect(process.exitCode).toBe(2);
 	});
 
 	it("cleans up if sending throws synchronously", async () => {

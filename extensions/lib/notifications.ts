@@ -29,6 +29,7 @@
  * by test/unit/notification-fidelity.test.ts. The delivery engine
  * (`createTaskNotifier`, further down) is unchanged by the frame shape.
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { withKeepAlive } from "../lsp/keep-alive.ts";
 import { ONE_SHOT_COMMAND_FAILED_CHANNEL, RunOutcomeLatch } from "./interrupt.ts";
@@ -919,23 +920,39 @@ function assertNever(mode: never): never {
  *
  * Unlike sendMessage, sendUserMessage awaits input hooks/auth/before_agent_start
  * before marking the run active. waitForIdle alone therefore returns too soon.
- * Arm the start barrier before sending; then waitForIdle covers the whole run,
- * including tools, follow-ups and retries. TUI/RPC retain fire-and-forget delivery.
+ * Serialize one-shot commands across extensions and wait out any active run
+ * before sending: a queued message need not emit agent_start. Correlate that
+ * event with the sending async context, never the next unrelated start. Then
+ * waitForIdle covers tools, follow-ups and retries. TUI/RPC stay fire-and-forget.
  *
  * pi's void API reports preflight errors separately, without a completion event.
  * Bound the start wait so an error or an input hook consuming the prompt cannot
  * hang a print process forever. The timeout applies only to startup, not the run.
  */
 export function createUserMessageSender(pi: Pick<ExtensionAPI, "on" | "sendUserMessage" | "events">) {
-	const pending = new Set<{ start(): void; stop(): void }>();
+	type Waiter = { start(): void; stop(): void };
+	const pending = new Set<Waiter>();
+	const sending = new AsyncLocalStorage<Waiter>();
 	let active = true;
+	let previous = Promise.resolve();
+	// Each extension has its own module instance. Reserve the same position in
+	// all senders through the session bus, not shared module state.
+	pi.events.on("one-code:user-turn-queue", (data) => {
+		if (!active) return;
+		const reservation = data as { before: Promise<void>[]; done: Promise<void> };
+		reservation.before.push(previous);
+		previous = reservation.done;
+	});
 	pi.on("agent_start", () => {
-		for (const waiter of pending) waiter.start();
+		// Async preflight preserves the sending call's context, including input
+		// transformations. An unrelated turn must not release this command.
+		sending.getStore()?.start();
 	});
 	pi.on("session_shutdown", () => {
 		active = false;
 		for (const waiter of pending) waiter.stop();
 		pending.clear();
+		sending.disable();
 	});
 	// A replacement session (/new, /resume) reuses this extension instance:
 	// its commands report their failures again.
@@ -947,25 +964,41 @@ export function createUserMessageSender(pi: Pick<ExtensionAPI, "on" | "sendUserM
 		content: Parameters<ExtensionAPI["sendUserMessage"]>[0],
 		options?: Parameters<ExtensionAPI["sendUserMessage"]>[1],
 	): Promise<void> => {
+		if (!active) throw new Error("Session shut down before the command's user turn completed.");
 		if (sessionOutlivesTurn(ctx.mode)) {
 			pi.sendUserMessage(content, options);
 			return;
 		}
+		let release!: () => void;
+		const reservation = { before: [] as Promise<void>[], done: new Promise<void>((resolve) => { release = resolve; }) };
+		pi.events.emit("one-code:user-turn-queue", reservation);
 		await withKeepAlive(async () => {
 			let start!: () => void;
 			let fail!: (error: Error) => void;
-			const started = new Promise<void>((resolve, reject) => { start = resolve; fail = reject; });
-			const waiter = { start, stop: () => fail(new Error("Session shut down before the command's user turn started.")) };
-			const timer = setTimeout(() => fail(new Error("Command's user turn did not start within 30 seconds. Check model authentication and extension input hooks, then retry.")), 30_000);
+			const started = new Promise<void>((resolve) => { start = resolve; });
+			const stopped = new Promise<never>((_resolve, reject) => { fail = reject; });
+			const waiter = { start, stop: () => fail(new Error("Session shut down before the command's user turn completed.")) };
+			let timer: ReturnType<typeof setTimeout> | undefined;
 			pending.add(waiter);
 			try {
-				pi.sendUserMessage(content, options);
-				await started;
+				await Promise.race([Promise.all(reservation.before), stopped]);
+				// A queued user message can be consumed in an existing run without
+				// another agent_start. One-shot commands run after that run settles.
+				if (!ctx.isIdle()) await Promise.race([awaitOneShotTurn(ctx), stopped]);
+				if (!active) throw new Error("Session shut down before the command's user turn completed.");
+				timer = setTimeout(() => fail(new Error("Command's user turn did not start within 30 seconds. Check model authentication and extension input hooks, then retry.")), 30_000);
+				// A raw extension send can still start during preflight. Without a
+				// per-send queue acknowledgement, reject that race rather than run
+				// a queued command we would then incorrectly report as not started.
+				sending.run(waiter, () => pi.sendUserMessage(content, options ? { ...options, deliverAs: undefined } : undefined));
+				await Promise.race([started, stopped]);
+				clearTimeout(timer);
+				await Promise.race([awaitOneShotTurn(ctx), stopped]);
 			} finally {
 				clearTimeout(timer);
 				pending.delete(waiter);
+				release();
 			}
-			await awaitOneShotTurn(ctx);
 		}).catch((error) => {
 			// pi logs command-handler rejections but runPrintMode still returns
 			// success. Tell the session's exit extension without touching the

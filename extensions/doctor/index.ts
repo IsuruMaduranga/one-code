@@ -35,6 +35,7 @@ import { loadAutoModeConfig, persistClassifierModel } from "../auto-mode/config.
 import { configuredCapabilityKey, loadCapabilitySnapshot, refreshCapabilitySnapshot, snapshotIsStale } from "../lib/capability-index.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent, withoutUnusable } from "../lib/model-unusable.ts";
 import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } from "../lib/mcp-status.ts";
+import { notifyOrPrint } from "../lib/headless-output.ts";
 import { createUserMessageSender, sessionOutlivesTurn } from "../lib/notifications.ts";
 import { modelSpec } from "../lib/model-policy.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
@@ -96,7 +97,7 @@ export default function doctorExtension(pi: ExtensionAPI) {
 		if (outcome.status === "failed" && !refreshWarned && !shuttingDown) {
 			refreshWarned = true;
 			try {
-				ctx.ui.notify(`Capability scores not refreshed: ${outcome.error}. Automatic picks keep using the last snapshot, if any.`, "warning");
+				notifyOrPrint(ctx, `Capability scores not refreshed: ${outcome.error}. Automatic picks keep using the last snapshot, if any.`, "warning");
 			} catch {
 				// A UI hiccup must not fail the report that awaits this refresh.
 			}
@@ -165,7 +166,7 @@ export default function doctorExtension(pi: ExtensionAPI) {
 
 	const sendFix = async (ctx: ExtensionCommandContext, report: DoctorReport): Promise<boolean> => {
 		if (!ctx.model) {
-			ctx.ui.notify("No model is available, so the checkup cannot run. Connect a provider with /login first; the report already lists what to fix.", "warning");
+			notifyOrPrint(ctx, "No model is available, so the checkup cannot run. Connect a provider with /login first; the report already lists what to fix.", "warning");
 			return false;
 		}
 		const home = os.homedir();
@@ -232,22 +233,22 @@ export default function doctorExtension(pi: ExtensionAPI) {
 		const available = usableModels(ctx);
 		const { presets, unavailable } = computePresets(available, ctx.model);
 		if (unavailable === "no-model") {
-			ctx.ui.notify("No model is available — connect a provider with /login first.", "warning");
+			notifyOrPrint(ctx, "No model is available — connect a provider with /login first.", "warning");
 			return;
 		}
 		if (unavailable === "no-priced-models") {
-			ctx.ui.notify("No priced models on this provider, so tiers cannot be told apart and no preset can be applied. Pick models by hand with /model, /subagent and /auto-mode model.", "warning");
+			notifyOrPrint(ctx, "No priced models on this provider, so tiers cannot be told apart and no preset can be applied. Pick models by hand with /model, /subagent and /auto-mode model.", "warning");
 			return;
 		}
 		const preset = findPreset(presets, name);
 		if (!preset) {
-			ctx.ui.notify(`Unknown preset "${name}". Choose one of: ${PRESET_NAMES.join(", ")} (see /doctor presets).`, "error");
+			notifyOrPrint(ctx, `Unknown preset "${name}". Choose one of: ${PRESET_NAMES.join(", ")} (see /doctor presets).`, "error");
 			return;
 		}
 		const home = os.homedir();
 		const mainSwitched = !ctx.model || modelSpec(ctx.model) !== modelSpec(preset.main);
 		if (mainSwitched && !(await pi.setModel(preset.main))) {
-			ctx.ui.notify(`Could not switch the main model to ${modelSpec(preset.main)}; nothing was changed.`, "error");
+			notifyOrPrint(ctx, `Could not switch the main model to ${modelSpec(preset.main)}; nothing was changed.`, "error");
 			return;
 		}
 		try {
@@ -255,12 +256,13 @@ export default function doctorExtension(pi: ExtensionAPI) {
 			persistClassifierModel(undefined, home);
 		} catch (error) {
 			const switched = mainSwitched ? ` The main model was already switched to ${modelSpec(preset.main)}; /model switches it back.` : "";
-			ctx.ui.notify(`Could not save settings: ${error instanceof Error ? error.message : String(error)}.${switched}`, "error");
+			notifyOrPrint(ctx, `Could not save settings: ${error instanceof Error ? error.message : String(error)}.${switched}`, "error");
 			return;
 		}
 		pi.events.emit(SUBAGENT_DEFAULT_CHANGED_CHANNEL, {});
 		pi.events.emit(CLASSIFIER_SETTING_CHANGED_CHANNEL, {});
-		ctx.ui.notify(
+		notifyOrPrint(
+			ctx,
 			[
 				`Applied the ${preset.label} preset:`,
 				...describePresetChanges(preset, mainSwitched).map((line) => `  ${line}`),
@@ -291,7 +293,7 @@ export default function doctorExtension(pi: ExtensionAPI) {
 			const [verb, ...rest] = args.trim().split(/\s+/).filter(Boolean);
 			if (verb === "preset") {
 				if (rest.length === 0) {
-					ctx.ui.notify(`Which preset? /doctor preset <${PRESET_NAMES.join("|")}> — /doctor presets shows what each would pick.`, "warning");
+					notifyOrPrint(ctx, `Which preset? /doctor preset <${PRESET_NAMES.join("|")}> — /doctor presets shows what each would pick.`, "warning");
 					return;
 				}
 				await applyPreset(rest.join(" "), ctx);
@@ -299,11 +301,11 @@ export default function doctorExtension(pi: ExtensionAPI) {
 			}
 			if (verb === "presets") {
 				const section = presetsSection(computePresets(usableModels(ctx), ctx.model), ctx.model);
-				ctx.ui.notify(renderSection(section, { width: 100 }).join("\n"), "info");
+				notifyOrPrint(ctx, renderSection(section, { width: 100 }).join("\n"), "info");
 				return;
 			}
 			if (verb && verb !== "report") {
-				ctx.ui.notify(`Unknown /doctor argument "${verb}". Use /doctor, /doctor report, /doctor presets, or /doctor preset <name>.`, "error");
+				notifyOrPrint(ctx, `Unknown /doctor argument "${verb}". Use /doctor, /doctor report, /doctor presets, or /doctor preset <name>.`, "error");
 				return;
 			}
 			// Bare `/doctor` is the checkup (Claude Code parity). Without a model it
@@ -315,12 +317,12 @@ export default function doctorExtension(pi: ExtensionAPI) {
 				await sendFix(ctx, report);
 				return;
 			}
-			if (checkup) ctx.ui.notify("No model is available, so the checkup cannot run; showing the setup report instead. Connect a provider with /login, then rerun /doctor.", "warning");
+			if (checkup) notifyOrPrint(ctx, "No model is available, so the checkup cannot run; showing the setup report instead. Connect a provider with /login, then rerun /doctor.", "warning");
 			if (ctx.hasUI && ctx.mode === "tui") {
 				await showPanel(ctx, report);
 				return;
 			}
-			ctx.ui.notify(renderDoctorText(report, 100), report.ready ? "info" : "warning");
+			notifyOrPrint(ctx, renderDoctorText(report, 100), report.ready ? "info" : "warning");
 		},
 	});
 }

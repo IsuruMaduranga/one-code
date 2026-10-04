@@ -1,4 +1,5 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { ONE_SHOT_COMMAND_FAILED_CHANNEL } from "../../extensions/lib/interrupt.ts";
+import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -6,9 +7,13 @@ import pluginsExtension from "../../extensions/plugins/index.ts";
 import { invalidatePluginsCache } from "../../extensions/lib/plugins.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
+import { captureUserTurns } from "./helpers/user-turn.ts";
 
 let home: string;
+let exitCode: typeof process.exitCode;
 beforeEach(() => {
+	exitCode = process.exitCode;
+	process.exitCode = undefined;
 	home = mkdtempSync(join(tmpdir(), "onecode-plugin-command-"));
 	stubHome(home);
 	vi.stubEnv("PI_CODING_AGENT_DIR", join(home, "agent"));
@@ -22,14 +27,30 @@ beforeEach(() => {
 	invalidatePluginsCache();
 });
 afterEach(() => {
+	process.exitCode = exitCode;
+	vi.restoreAllMocks();
 	invalidatePluginsCache();
 	vi.unstubAllEnvs();
 	rmSync(home, { recursive: true, force: true });
 });
 
 describe("plugin command user turns", () => {
+	it.each(["print", "json"])("reports a vanished command template instead of succeeding silently in %s", async (mode) => {
+		const fake = createFakePi();
+		const failures: unknown[] = [];
+		fake.events.on(ONE_SHOT_COMMAND_FAILED_CHANNEL, (data: unknown) => failures.push(data));
+		pluginsExtension(fake.pi as never);
+		unlinkSync(join(home, "fixture", "commands", "ping.md"));
+		const output = vi.spyOn(console, "error").mockImplementation(() => {});
+		await fake.commands.get("fixture:ping")!.handler("ARGS", createFakeCtx({ mode, cwd: home }));
+		expect(fake.sentUserMessages).toEqual([]);
+		expect(output.mock.calls.flat().join("\n")).toContain("Could not read");
+		expect(failures).toHaveLength(1);
+	});
+
 	it.each(["print", "json"])("waits for startup then settlement in %s", async (mode) => {
 		const fake = createFakePi();
+		const startTurn = captureUserTurns(fake);
 		pluginsExtension(fake.pi as never);
 		let settle!: () => void;
 		const idle = new Promise<void>((resolve) => { settle = resolve; });
@@ -44,7 +65,7 @@ describe("plugin command user turns", () => {
 			expect(fake.sentUserMessages[0].content).toBe("Reply with PLUGIN_OK");
 			expect(returned).toBe(false);
 			expect(waitForIdle).not.toHaveBeenCalled();
-			await fake.fire("agent_start", {});
+			await startTurn();
 			await vi.waitFor(() => expect(waitForIdle).toHaveBeenCalledTimes(1));
 			expect(returned).toBe(false);
 		} finally {
