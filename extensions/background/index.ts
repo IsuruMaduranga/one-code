@@ -34,6 +34,7 @@ import {
 	generateTaskId,
 	TASK_REGISTER_CHANNEL,
 } from "./registry.ts";
+import { SWITCH_CANCEL, SWITCH_STOP, switchWarning, workWidgetLine } from "./switch-guard.ts";
 import {
 	AGED_OUT_RESULT,
 	DynamicLoop,
@@ -210,7 +211,13 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	// prior one is still about to resume.
 	let agentBusy = false;
 
-	pi.events.on(TASK_REGISTER_CHANNEL, (task) => registry.register(task as BackgroundTask));
+	pi.events.on(TASK_REGISTER_CHANNEL, (data) => {
+		const task = data as BackgroundTask;
+		registry.register(task);
+		// Shells and subagent runs count toward the widget's warning line too.
+		updateWidget();
+		task.finished?.then(updateWidget, updateWidget);
+	});
 	// A subagent's cron tools (lib/agent-cron.ts): its jobs, its view, its deletes.
 	pi.events.on(AGENT_CRON_CHANNEL, (data) => {
 		const request = data as AgentCronRequest;
@@ -246,11 +253,10 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		// session_shutdown also drops lastCtx, so a late repaint is a no-op.
 		const live = liveUiCtx(lastCtx);
 		if (!live) return;
-		// A task whose producer gives it first-class panel UI (bash shells and
-		// subagent runs in the subagents panel) is excluded, or this line would
-		// stay permanently lit next to the panel already showing the same work.
-		const running = registry.running().filter((t) => !t.ownUI).length;
-		live.ui.setWidget("cc-background", running > 0 ? [` background tasks: ${running} running`] : undefined);
+		// Every running task and scheduled job, panel-owned ones included: the
+		// line is the warning that /clear or quitting stops them (switch-guard.ts).
+		const line = workWidgetLine(registry.running().length, cron.list().length);
+		live.ui.setWidget("cc-background", line ? [line] : undefined);
 	};
 
 	// The wire frames are model-facing; the transcript shows a compact headline
@@ -330,8 +336,12 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		if (cronTimer) clearTimeout(cronTimer);
 		cronTimer = undefined;
 		// A busy agent re-runs this at agent_settled; a dead session never does.
-		if (!alive() || agentBusy) return;
+		if (!alive() || agentBusy) {
+			updateWidget();
+			return;
+		}
 		for (const fire of cron.takeDue(Date.now())) fireCron(fire);
+		updateWidget();
 		const next = cron.nextFireAt();
 		if (next === undefined) return;
 		cronTimer = setTimeout(runCron, Math.min(Math.max(0, next - Date.now()), MAX_TIMER_MS));
@@ -885,6 +895,24 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 	pi.on("session_compact", () => {
 		loopDelivery.delete(MAIN_OWNER);
 	});
+
+	// A switch stops everything below, so ask first. pi can cancel a switch but
+	// not a quit; the widget line covers quitting (switch-guard.ts).
+	const confirmSwitch = async (ctx: ExtensionContext, action: string): Promise<{ cancel: true } | undefined> => {
+		if (!ctx.hasUI) return undefined;
+		const title = switchWarning(
+			registry.running().map((t) => ({ id: t.id, label: t.description })),
+			cron.list().map((j) => ({ id: j.id, label: describeCadence(j.cron) })),
+			action,
+		);
+		if (!title) return undefined;
+		const choice = await ctx.ui.select(title, [SWITCH_CANCEL, SWITCH_STOP]);
+		return choice === SWITCH_STOP ? undefined : { cancel: true };
+	};
+	pi.on("session_before_switch", (event, ctx) =>
+		confirmSwitch(ctx, event.reason === "resume" ? "Resuming another session" : "Starting a new session"),
+	);
+	pi.on("session_before_fork", (_event, ctx) => confirmSwitch(ctx, "Forking the session"));
 
 	pi.on("session_shutdown", (event) => {
 		// Fires on /clear, /new, /resume and /reload too (findings §8). Everything

@@ -63,6 +63,16 @@ The turn-duration line reports how many shells are still running when a
 turn ends. When a session ends, running shells are stopped and the next
 session is told which ones.
 
+Background work belongs to the session. While a shell, monitor, background
+agent, or scheduled job is active, a line under the prompt counts them and
+reminds you that `/clear` or quitting stops them. Before `/clear`, `/new`,
+`/resume`, or a fork stops anything, One Code lists what's running and asks
+first. **Cancel** is the default (Esc does the same), so you can let the work
+finish or stop it from `/tasks` before switching. Quitting can't be paused,
+so the line under the prompt is the only warning you get there. A process
+that a finished shell left behind, such as a dev server started with `&`,
+keeps running until you quit.
+
 ## Monitors
 
 The `monitor` tool watches a long-running command, or a WebSocket URL, and
@@ -100,7 +110,7 @@ up to 90 seconds early. A prompt that's a slash command, such as
 `Running scheduled task` line and the model gets the prompt as its next
 input. Recurring jobs expire after seven days: they fire one last time and
 are deleted. Nothing is written to disk, so jobs end with the session;
-`/clear` cancels them and tells you which ones it cancelled.
+`/clear` asks before cancelling them, then tells you which ones it cancelled.
 
 `/loop` runs a task repeatedly. It's Claude Code's `/loop` skill: One Code
 hands your input to the model, and the model sets up the loop itself.
