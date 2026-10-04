@@ -19,6 +19,8 @@
 # checks that the auto-mode classifier's transcript is a cache read from call
 # to call and from stage 1 to stage 2 (test/e2e/cache-probe-classifier.mjs over
 # the classifier's own CC_AUTO_MODE_LOG). `--no-classifier` skips it.
+# A third phase repeats a web_fetch reader call against a deterministic page
+# fixture (cache-probe-reader.sh). `--no-reader` skips it.
 #
 # openai-codex models talk over WebSocket by default, which dump-requests.ts
 # cannot see; the probe project sets `transport: "sse"` and is trusted with
@@ -38,9 +40,12 @@ PI_BIN="${PI_BIN:-$REPO/node_modules/@earendil-works/pi-coding-agent/dist/bundle
 PROMPT='First call tool_search with query select:cron_list. Then call cron_list once. Then reply with exactly the word done.'
 CHECK_ARGS=()
 CLASSIFIER=1
+READER=1
 for arg in "$@"; do
 	if [ "$arg" = "--no-classifier" ]; then
 		CLASSIFIER=0
+	elif [ "$arg" = "--no-reader" ]; then
+		READER=0
 	elif [ "$arg" = "--no-load" ]; then
 		PROMPT='Run echo probe-one with the bash tool. Then run echo probe-two with the bash tool. Then reply with exactly the word done.'
 	else
@@ -90,5 +95,9 @@ if [ "$CLASSIFIER" = 1 ]; then
 	) || echo "pi exited non-zero in the classifier phase (see $WORK/classifier-stderr.log)"
 	touch "$WORK/classifier.jsonl"
 	node "$REPO/test/e2e/cache-probe-classifier.mjs" "$WORK/classifier.jsonl" || status=1
+fi
+if [ "$READER" = 1 ]; then
+	echo "--- reader phase"
+	CACHE_PROBE_WORK_DIR="$WORK/reader" bash "$REPO/test/e2e/cache-probe-reader.sh" "$MODEL" || status=1
 fi
 exit $status

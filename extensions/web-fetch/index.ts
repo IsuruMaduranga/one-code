@@ -20,6 +20,7 @@ import type { Api, Model, ThinkingLevel } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { defineTool, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { recordUsage } from "../lib/usage-bus.ts";
+import { logSideCallUsage } from "../lib/side-call-usage.ts";
 import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { withReasoningFallback } from "../lib/model-policy.ts";
@@ -70,7 +71,10 @@ interface CacheEntry {
 
 /**
  * One-shot reader call, the same shape as the auto-mode classifier: no tools,
- * no session, no history — the page and the question in, an answer out.
+ * no agent session or history — the page and the question in, an answer out.
+ * A per-session reader key keeps implicit caches on the same host. Anthropic
+ * already marks the system and user blocks; only the short system repeats
+ * across different pages, below its cache minimum. Never pad it for caching.
  * `reasoning` and `temperature` are deliberately not sent; both fail *closed*
  * on providers that reject them (see the classifier notes), and a reader that
  * errors turns into the raw-content fallback, wasting the fetch.
@@ -97,28 +101,33 @@ async function answerFromPage(
 		const baseUrl = (auth as { baseUrl?: string }).baseUrl;
 
 		const messages = readerMessages({ prompt, markdown: entry.markdown, url, title: entry.title });
+		const sessionId = `${ctx.sessionManager.getSessionId()}:reader`;
+		const context = {
+			systemPrompt: messages.system,
+			messages: [{ role: "user" as const, content: messages.user, timestamp: Date.now() }],
+		};
 		// Thinking off unless the model cannot disable it; withReasoningFallback sends
 		// a level up front for catalog-marked models and retries on the 400 for the
 		// rest, memoizing the result so repeated fetches don't re-pay the failure.
 		const result = await withReasoningFallback(
 			choice.model,
-			(reasoning) => {
+			async (reasoning) => {
 				const timeout = AbortSignal.timeout(READER_TIMEOUT_MS);
-				return completeSimple(
+				const reply = await completeSimple(
 					baseUrl ? ({ ...choice.model, baseUrl } as Model<Api>) : choice.model,
-					{
-						systemPrompt: messages.system,
-						messages: [{ role: "user", content: messages.user, timestamp: Date.now() }],
-					},
+					context,
 					{
 						apiKey: auth.apiKey,
 						headers: auth.headers,
 						env: auth.env,
+						sessionId,
 						signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
 						maxTokens: READER_MAX_TOKENS,
 						...(reasoning ? { reasoning } : {}),
 					},
 				);
+				logSideCallUsage({ kind: "reader", model: choice.model, sessionId, system: messages.system, messages: context.messages }, reply);
+				return reply;
 			},
 			learnedReasoning,
 			recordCall,

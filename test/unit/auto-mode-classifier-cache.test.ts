@@ -250,6 +250,19 @@ describe("Anthropic wire layout", () => {
 		expect(payload.stream).toBe(true);
 	});
 
+	it("uses only free marker slots if pi-ai adds more top-level markers", () => {
+		const message = () => ({ role: "user", content: [{ type: "text", text: "headerhistorynewtailstage", cache_control: cacheControl }] });
+		const system = (n: number) => Array.from({ length: n }, (_, i) => ({ type: "text", text: `s${i}`, cache_control: cacheControl }));
+		const parts = ["header", "history", "new", "tail", "stage"];
+		const three = { system: system(3), messages: [message()] };
+		cacheClassifierHistory(three, parts, 2, 1);
+		expect(three.messages[0].content.filter((block) => block.cache_control).map((block) => block.text)).toEqual(["new"]);
+		const four = { system: system(4), messages: [message()] };
+		const before = structuredClone(four.messages);
+		cacheClassifierHistory(four, parts, 2, 1);
+		expect(four.messages).toEqual(before);
+	});
+
 	it("inherits the provider's cache duration instead of inventing a different one", () => {
 		const short = { type: "ephemeral" };
 		const payload = { messages: [{ role: "user", content: [{ type: "text", text: "historytailstage", cache_control: short }] }] };

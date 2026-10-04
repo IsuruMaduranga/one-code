@@ -47,6 +47,8 @@ import { withReasoningFallback } from "../lib/model-policy.ts";
 import { followLastExchange, replaySideCall } from "../lib/replay-call.ts";
 import { answerText, stripImageBlocks, toolStubs, trimToTurnBoundary, withoutSystemMessages } from "../lib/side-call.ts";
 import { boundedDockHeight, linesComponent, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
+import { cacheSideCallConversation } from "../lib/side-call-cache.ts";
+import { logSideCallUsage } from "../lib/side-call-usage.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
 import type { ProseRenderer } from "../subagents/panel-render.ts";
 import { createMarkdownProse } from "../subagents/prose.ts";
@@ -165,12 +167,13 @@ export default function btwExtension(pi: ExtensionAPI) {
 			...before,
 			{ role: "user" as const, content: sideQuestionMessage(question), timestamp: Date.now() },
 		];
+		const sessionId = `${ctx.sessionManager.getSessionId()}:btw`;
 
 		const result = await withReasoningFallback(
 			model as Model<Api>,
-			(reasoning) => {
+			async (reasoning) => {
 				const timeout = AbortSignal.timeout(BTW_TIMEOUT_MS);
-				return completeSimple(
+				const reply = await completeSimple(
 					baseUrl ? ({ ...model, baseUrl } as Model<Api>) : model,
 					{ systemPrompt: "", messages, tools },
 					{
@@ -179,9 +182,13 @@ export default function btwExtension(pi: ExtensionAPI) {
 						env: auth.env,
 						signal: AbortSignal.any([signal, timeout]),
 						maxTokens: BTW_MAX_TOKENS,
+						sessionId,
+						...(model.api === "anthropic-messages" ? { onPayload: cacheSideCallConversation } : {}),
 						...(reasoning ? { reasoning } : {}),
 					},
 				);
+				logSideCallUsage({ kind: "btw", model, sessionId, system: "", messages }, reply);
+				return reply;
 			},
 			undefined,
 			(usage) => recordUsage(pi, "btw", usage),
