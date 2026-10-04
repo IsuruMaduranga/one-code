@@ -93,13 +93,18 @@ export function withTurnBudgetMessages(payload: Record<string, unknown>, opts: T
 	let changed = false;
 	/** The lowest countdown of the tool results not yet followed by their message. */
 	let pending: number | undefined;
+	/** The first user message carries the context stack, never a marker (context-budget's `skipStackCarrier`). */
+	let stackCarrierSeen = false;
 	for (let i = 0; i < messages.length; i++) {
 		let message = messages[i] as WireMessage;
 		const after: WireMessage[] = [];
+		const stackCarrier = !stackCarrierSeen && message?.role === "user";
+		if (stackCarrier) stackCarrierSeen = true;
 		// A later prompt's marker: a system message after it, or the framed block before its text.
 		// The marker comes after the user's text, so the last match is it: a
-		// prompt that is itself such a tag stays the user's.
-		if (opts.markers !== false && message?.role === "user" && Array.isArray(message.content)) {
+		// prompt that is itself such a tag stays the user's, and so does the
+		// first prompt, which has no marker to find.
+		if (opts.markers !== false && !stackCarrier && message?.role === "user" && Array.isArray(message.content)) {
 			const parts = message.content as WirePart[];
 			const at = parts.findLastIndex((part) => typeof part?.text === "string" && LINE.test(part.text));
 			// The marker ends the message, so it carries pi's cache mark; withoutParts keeps it.

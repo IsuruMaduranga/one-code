@@ -123,7 +123,9 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 		// Each tool result's stored <total_tokens> countdown, on every request so
 		// the layout never depends on the queue: lifted for a system message or
 		// framed, while the result's blocks are still separate (lib/turn-budget-layout.ts).
-		const resolved = ctx.model && wireShape(ctx.model.api) ? resolveCountdowns(messages, layout !== undefined) : undefined;
+		// With the budget off no result carries one, so a tool's own such line stays its output.
+		const budgetOn = process.env.CC_TOTAL_TOKENS !== "0";
+		const resolved = budgetOn && ctx.model && wireShape(ctx.model.api) ? resolveCountdowns(messages, layout !== undefined) : undefined;
 		if (resolved) countdowns = resolved.left;
 		const out = resolved?.messages ?? messages;
 		return out === event.messages ? undefined : { messages: out };

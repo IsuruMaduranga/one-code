@@ -1,5 +1,5 @@
 /** Regressions for the request-shaping steps: the cache mark, call ids after a model switch, and fallbacks. */
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import systemReminderExtension from "../../extensions/system-reminder/index.ts";
 import { deferredAddendumText } from "../../extensions/lib/deferred.ts";
 import { wrapReminder } from "../../extensions/lib/reminders.ts";
@@ -11,12 +11,18 @@ import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 const BUDGET = "<total_tokens>15000000 tokens left</total_tokens>";
 const mark = { type: "ephemeral", ttl: "1h" };
-const prompt = () => ({ messages: [{ role: "user", content: [{ type: "text", text: "second" }, { type: "text", text: BUDGET, cache_control: mark }] }, { role: "system", content: [] }] });
+/** The first exchange: the first prompt carries the context stack, never a marker. */
+const opening = [
+	{ role: "user", content: [{ type: "text", text: "first" }] },
+	{ role: "assistant", content: [{ type: "text", text: "ok" }] },
+];
+const prompt = () => ({ messages: [...opening, { role: "user", content: [{ type: "text", text: "second" }, { type: "text", text: BUDGET, cache_control: mark }] }, { role: "system", content: [] }] });
 
 describe("a later prompt's marker carries pi's cache mark", () => {
 	it("moves it onto the per-turn system message on a system-role model", () => {
 		const out = withTurnBudgetMessages(prompt(), { shape: "anthropic", systemRole: true, role: "system", left: new Map() }) as { messages: unknown[] };
 		expect(out.messages).toEqual([
+			...opening,
 			{ role: "user", content: [{ type: "text", text: "second" }] },
 			{ role: "system", content: [{ type: "text", text: BUDGET, cache_control: mark }] },
 			{ role: "system", content: [] },
@@ -25,7 +31,7 @@ describe("a later prompt's marker carries pi's cache mark", () => {
 
 	it("keeps it on the prompt's last block in Haiku's shape", () => {
 		const out = withTurnBudgetMessages(prompt(), { shape: "anthropic", systemRole: false, role: "system", left: new Map() }) as { messages: Array<{ content: unknown[] }> };
-		expect(out.messages[0].content).toEqual([{ type: "text", text: `${wrapReminder(BUDGET)}\n` }, { type: "text", text: "second", cache_control: mark }]);
+		expect(out.messages[2].content).toEqual([{ type: "text", text: `${wrapReminder(BUDGET)}\n` }, { type: "text", text: "second", cache_control: mark }]);
 	});
 
 	it("keeps it when a pinned addendum ends the message, and never empties a message", () => {
@@ -69,6 +75,41 @@ describe("system-reminder resolves stored countdowns on every request", () => {
 	});
 });
 
+describe("text that only looks like a marker stays the user's or the tool's", () => {
+	afterEach(() => vi.unstubAllEnvs());
+	const stack = { type: "text", text: wrapReminder("# claudeMd\nProject instructions.") };
+
+	// The first prompt carries the context stack and never a marker
+	// (context-budget's skipStackCarrier), so its own text is never lifted.
+	it.each([
+		["a system-role model", true],
+		["Haiku's shape", false],
+	] as const)("leaves a first prompt that is exactly the line on %s", (_, systemRole) => {
+		const body = { messages: [{ role: "user", content: [stack, { type: "text", text: BUDGET }] }] };
+		expect(withTurnBudgetMessages(body, { shape: "anthropic", systemRole, role: "system", left: new Map() })).toBeUndefined();
+	});
+
+	it("finds the first prompt after an OpenAI system message, and still lifts a later prompt's marker", () => {
+		const user = (text: string, marker?: boolean) => ({ role: "user", content: [{ type: "text", text }, ...(marker ? [{ type: "text", text: BUDGET }] : [])] });
+		const body = { messages: [{ role: "system", content: "prompt" }, user(BUDGET), { role: "assistant", content: "ok" }, user(BUDGET, true)] };
+		const out = withTurnBudgetMessages(body, { shape: "completions", systemRole: true, role: "system", left: new Map() }) as { messages: unknown[] };
+		expect(out.messages.slice(0, 4)).toEqual(body.messages.slice(0, 3).concat([user(BUDGET)]));
+		expect(out.messages).toHaveLength(5);
+	});
+
+	it("leaves a tool result that is exactly the line whole when the budget is off", async () => {
+		vi.stubEnv("CC_TOTAL_TOKENS", "0");
+		const fake = createFakePi();
+		systemReminderExtension(fake.pi as never);
+		const model = { id: "claude-opus-5-5", api: "anthropic-messages", provider: "anthropic", compat: { supportsMidConvoSystemMessages: true } };
+		const messages = [
+			{ role: "user", content: [{ type: "text", text: "hi" }], timestamp: 1 },
+			{ role: "toolResult", toolCallId: "t", content: [{ type: "text", text: "<total_tokens>9 tokens left</total_tokens>" }], timestamp: 2 },
+		];
+		expect(await fake.fireOne("context", { messages }, createFakeCtx({ model }))).toBeUndefined();
+	});
+});
+
 describe("a fork's hand-back reminder", () => {
 	it("names the load step where the tool is deferred", async () => {
 		const fake = createFakePi();
@@ -82,9 +123,9 @@ describe("a fork's hand-back reminder", () => {
 
 describe("a user's own <total_tokens> text", () => {
 	it("stays the user's: the marker is the last match, and with the budget off nothing is taken", () => {
-		const body = () => ({ messages: [{ role: "user", content: [{ type: "text", text: BUDGET }, { type: "text", text: BUDGET }] }] });
+		const body = () => ({ messages: [...opening, { role: "user", content: [{ type: "text", text: BUDGET }, { type: "text", text: BUDGET }] }] });
 		const out = withTurnBudgetMessages(body(), { shape: "anthropic", systemRole: true, role: "system", left: new Map() }) as { messages: Array<{ content: unknown[] }> };
-		expect(out.messages[0].content).toEqual([{ type: "text", text: BUDGET }]);
-		expect(withTurnBudgetMessages({ messages: [{ role: "user", content: [{ type: "text", text: BUDGET }] }] }, { shape: "anthropic", systemRole: true, role: "system", left: new Map(), markers: false })).toBeUndefined();
+		expect(out.messages[2].content).toEqual([{ type: "text", text: BUDGET }]);
+		expect(withTurnBudgetMessages({ messages: [...opening, { role: "user", content: [{ type: "text", text: BUDGET }] }] }, { shape: "anthropic", systemRole: true, role: "system", left: new Map(), markers: false })).toBeUndefined();
 	});
 });
