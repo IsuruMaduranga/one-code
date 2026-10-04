@@ -890,6 +890,24 @@ export function sessionOutlivesTurn(mode: ExtensionMode): boolean {
 	}
 }
 
+/**
+ * What a one-shot session (`-p`, `--mode json`) changes for the model, said
+ * before its first call. Without it the tool descriptions promise detached
+ * work, notifications and questions the session cannot deliver, and the model
+ * learns otherwise only from a result: in the 2026-10-04 Codex battery both
+ * GPT-6 models planned around background shells, agents, monitors, cron jobs
+ * and the question dialog, then had to retract. One Code's own text; Claude
+ * Code sends no such block.
+ */
+export function oneShotSessionNote(): string {
+	return [
+		"This is a non-interactive one-shot session: it ends when this turn ends, and nobody can reply before then.",
+		"- Work you start in the background (a shell command, an agent, a monitor) runs to completion before its call returns, and no notification follows. To overlap independent work, issue those calls together in one batch.",
+		"- Scheduled and recurring jobs never fire.",
+		"- No user can answer a question or approve a plan. State your assumption and proceed, or ask in your final reply and stop.",
+	].join("\n");
+}
+
 function assertNever(mode: never): never {
 	throw new Error(`Unhandled session mode: ${String(mode)}`);
 }

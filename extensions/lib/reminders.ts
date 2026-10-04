@@ -96,6 +96,8 @@ export type PinAnchor = { kind: "toolResult"; toolCallId: string } | { kind: "us
 export const CONTEXT_ORDER = {
 	environment: 1,
 	modelLine: 2,
+	/** One Code's note that a `-p`/json run ends with its turn (`lib/notifications.ts oneShotSessionNote`); not Claude Code's. */
+	oneShot: 3,
 	deferredTools: 10,
 	subagentModels: 20,
 	agents: 21,

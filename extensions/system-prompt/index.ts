@@ -17,6 +17,7 @@ import { getCurrentSystemMessage } from "@earendil-works/pi-ai";
 import type { BuildSystemPromptOptions, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { environmentBlock, modelLine } from "../lib/environment-block.ts";
 import { GIT_SNAPSHOT_OWNER_CHANNEL } from "../lib/git-status.ts";
+import { oneShotSessionNote, sessionOutlivesTurn } from "../lib/notifications.ts";
 import { resolveModelTier, taskToolsEnabled } from "../lib/model-tier.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { privateSessionScratchpadDir } from "../lib/scratchpad.ts";
@@ -91,6 +92,15 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 			placement: "first-prepend",
 			order: CONTEXT_ORDER.environment,
 		});
+		if (!sessionOutlivesTurn(ctx.mode)) {
+			pi.events.emit(REMINDER_CHANNEL, {
+				text: oneShotSessionNote(),
+				scope: "every-turn",
+				key: "one-shot",
+				placement: "first-prepend",
+				order: CONTEXT_ORDER.oneShot,
+			});
+		}
 		if (ctx.model) {
 			pi.events.emit(REMINDER_CHANNEL, {
 				text: modelLine(ctx.model),
