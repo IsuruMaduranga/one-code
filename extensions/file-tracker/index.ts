@@ -373,7 +373,7 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 			const current = stamp ? readIfPresent(path) : undefined;
 			if (stamp === undefined || current === undefined) {
 				tracker.forget(path);
-				detailed.push(`${path} no longer exists; it was deleted or moved after you read it.`);
+				detailed.push(`${path} no longer exists; it was deleted or moved after you last read or wrote it.`);
 				continue;
 			}
 			tracker.recordStamp(path, stamp);
