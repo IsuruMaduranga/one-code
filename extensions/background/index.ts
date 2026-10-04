@@ -722,9 +722,12 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		name: "task_stop",
 		label: "Stop Task",
 		...ccToolRenderers("Stop Task"),
-		description: "Stop a running background task (monitor, background subagent, or background bash) by task id.",
+		// Claude Code's TaskStop text without its agent-team and agent-name clauses:
+		// a task is stopped by its id here.
+		description:
+			"\n- Stops a running background task by its ID\n- Takes a task_id parameter identifying the task to stop\n- Returns a success or failure status\n- Use this tool when you need to terminate a long-running task\n",
 		parameters: Type.Object({
-			task_id: Type.String({ description: "The id of the background task to stop" }),
+			task_id: Type.String({ description: "The ID of the background task to stop." }),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			lastCtx = ctx;
@@ -840,11 +843,11 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		},
 	});
 
+	// schedule_wakeup stays eager, as Claude Code's ScheduleWakeup is.
 	for (const [name, keywords] of Object.entries({
 		monitor: ["monitor", "watch", "background", "tail", "events", "stream", "websocket"],
 		task_output: ["task", "background", "output", "status", "wait"],
 		task_stop: ["task", "background", "stop", "kill", "cancel"],
-		schedule_wakeup: ["wakeup", "loop", "schedule", "timer", "recurring", "later"],
 		cron_create: ["cron", "schedule", "recurring", "remind", "timer", "every", "later"],
 		cron_list: ["cron", "schedule", "list", "jobs", "scheduled"],
 		cron_delete: ["cron", "schedule", "cancel", "delete", "stop"],

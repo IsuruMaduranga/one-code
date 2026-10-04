@@ -90,7 +90,7 @@ the model to a better route:
 |---|---|
 | `Agent` | Starts a subagent with its own context window. Runs in the background and returns a task id; the result arrives as a notification. Supports forking the current conversation and isolating the agent in a git worktree. |
 | `SendMessage` | Sends a message to an agent that was started earlier: a running one receives it live, a finished one is resumed from its saved session. Deferred. |
-| `list_agents` | Lists the agents started in this session and their status. Deferred. |
+| `list_agents` | Lists the agents started in this session and their status. |
 | `workflow` | Runs a JavaScript script that coordinates many agents. This is the `ultracode` mechanism. |
 
 See [Subagents and workflows](subagents-and-workflows.md).
@@ -143,7 +143,7 @@ plan mode it is refused. Deleting always asks you first. Deferred.
 | `task_create`, `task_get`, `task_list`, `task_update` | Maintain the structured task list shown in the pinned widget. Deferred. |
 | `monitor` | Watches a long-running command or a WebSocket and reports each output line as an event. Deferred. |
 | `task_output`, `task_stop` | Read the output of a background task or stop it. Deferred. |
-| `schedule_wakeup` | Schedules the next iteration of a self-paced `/loop`. The pending wake-up shows in `cron_list`. Deferred. |
+| `schedule_wakeup` | Schedules the next iteration of a self-paced `/loop`. The pending wake-up shows in `cron_list`. |
 | `cron_create`, `cron_list`, `cron_delete` | Schedule a prompt on a cron expression within the session, list the jobs, or cancel one. A fixed-interval `/loop` uses them. Deferred. |
 
 See [Tasks and background work](tasks-and-background-work.md).

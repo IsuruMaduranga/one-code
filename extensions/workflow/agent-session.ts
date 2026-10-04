@@ -32,6 +32,7 @@ import type { HookBridge } from "../hooks/subagent-bridge.ts";
 import { summarizeArgs } from "../lib/tui-render.ts";
 import { agentDirs, type AgentDefinition, agentToolOptions, discoverAgents, unusableAllowlistError } from "../subagents/agents.ts";
 import { CHILD_EXTENSION_PATHS } from "../lib/child-extensions.ts";
+import { oneTurnHandbackSlot, subagentHandbackExtension } from "../lib/subagent-handback.ts";
 import type { SubagentDefault } from "../subagents/default-model.ts";
 import { expensiveModelGate, resolveSubagentModel, subagentModelMenu } from "../subagents/model-select.ts";
 import { withoutUnusable } from "../lib/model-unusable.ts";
@@ -272,6 +273,9 @@ export class AgentRunner {
 		}
 
 		const capture: { called: boolean; value: unknown } = { called: false, value: undefined };
+		// An agent without a schema hands its answer back through SubagentHandback,
+		// as every child does; with a schema, structured_output is the hand-back.
+		const handback = opts.schema ? undefined : oneTurnHandbackSlot();
 		const customTools: ToolDefinition[] = [
 			...(opts.schema ? [buildStructuredOutputTool(opts.schema, capture)] : []),
 			...mcpTools,
@@ -287,8 +291,9 @@ export class AgentRunner {
 				agentDir: getAgentDir(),
 				systemPrompt: agentDef?.systemPrompt,
 				extraExtensionPaths: CHILD_EXTENSION_PATHS,
-				// claude-context (a child extension) injects # claudeMd itself.
+				// claude-context (a child extension) injects the CLAUDE.md instructions itself.
 				noContextFiles: true,
+				...(handback ? { extraFactories: [subagentHandbackExtension(handback)] } : {}),
 				getPermissionBridge: this.options.getPermissionBridge,
 				getHookBridge: this.options.getHookBridge,
 			},
@@ -359,7 +364,8 @@ export class AgentRunner {
 			if (opts.schema) {
 				value = await this.resolveStructuredOutput(session, capture, signal);
 			} else {
-				value = finalAssistantText(session.messages);
+				// The handed-back report, else the agent's last message.
+				value = handback?.report ?? finalAssistantText(session.messages);
 				if (typeof value !== "string" || !value.trim()) {
 					throw new Error("subagent produced no output");
 				}
@@ -434,7 +440,7 @@ export class AgentRunner {
 
 	private buildPrompt(prompt: string, structured: boolean): string {
 		if (!structured) {
-			return `${prompt}\n\nYour final message is returned verbatim to an orchestration script, not shown to a human — reply with the requested data/report only.`;
+			return `${prompt}\n\nThe report you hand back through SubagentHandback is returned verbatim to an orchestration script, not shown to a human — hand back the requested data/report only.`;
 		}
 		return `${prompt}\n\nWhen you are done, you MUST call the \`structured_output\` tool exactly once with your final result. Its arguments are the only output the caller receives.`;
 	}

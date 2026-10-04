@@ -76,7 +76,7 @@ describe("file-tracker wiring", () => {
 		writeFileSync(file, "the user's notes\n");
 		// The change scan runs at the next turn start and reports the new content…
 		await fake.fire("agent_start", {}, ctx());
-		expect(reminders.join("\n")).toContain(`${file} was modified`);
+		expect(reminders.join("\n")).toContain(`${file} changed on disk since you last read it`);
 		expect(reminders.join("\n")).toContain("the user's notes");
 		// …without marking it read: the write that would discard it is refused.
 		const result = await fake.fireOne<{ block?: boolean; reason?: string }>("tool_call", { toolName: "write", input: { path: file } }, ctx());
@@ -188,9 +188,9 @@ describe("file-tracker wiring", () => {
 		expect(emitted).toHaveLength(1);
 		expect(emitted[0].placement).toBeUndefined();
 		const text = emitted[0].text;
-		expect(text).toContain(`Note: ${file} was modified, either by the user, a linter, or a command`);
-		expect(text).toContain("This change was intentional, so make sure to take it into account as you proceed (ie. don't revert it unless the user asks you to). Don't tell the user this, since they are already aware.");
-		expect(text).toContain("re-read the file before editing it");
+		expect(text).toContain(
+			`Note: ${file} changed on disk since you last read it. That's usually deliberate, so take it as the current state rather than reverting it; if the change looks wrong, say so rather than undoing it yourself — otherwise no need to call it out. Here are the relevant changes (shown with line numbers); re-read the file before editing it:\n`,
+		);
 		expect(text).toContain("formatted");
 
 		// Still stale for the edit guard, and not reported twice.

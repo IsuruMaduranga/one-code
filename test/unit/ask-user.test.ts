@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type Answer, formatAnswers, formatDecline, type Question } from "../../extensions/ask-user/questions.ts";
+import { type Answer, answerPairs, formatAnswers, formatDecline, type Question } from "../../extensions/ask-user/questions.ts";
 import {
 	applyWidgetKey,
 	collectAnswers,
@@ -127,6 +127,10 @@ describe("answer flow", () => {
 				expect.objectContaining({ selected: ["Red"], freeform: false }),
 			],
 		});
+		// The picked option's preview rides the answer; a plain option has none.
+		const answers = (result as { answers: Answer[] }).answers;
+		expect(answers[0].preview).toBe(previewQuestion.options[0].preview);
+		expect(answers[1].preview).toBeUndefined();
 	});
 
 	it("multi-select toggles checkboxes and commits via Next", () => {
@@ -148,7 +152,7 @@ describe("answer flow", () => {
 		press(state, "Teal", enter);
 		expect(state.editing).toBeUndefined();
 		const [answer] = collectAnswers(state);
-		expect(answer).toMatchObject({ selected: ["Teal"], freeform: true });
+		expect(answer).toMatchObject({ selected: ["Teal"], freeform: true, typed: true });
 		expect(state.tab).toBe(1);
 	});
 
@@ -160,7 +164,7 @@ describe("answer flow", () => {
 		expect(state.editing).toBeUndefined();
 		expect(state.tab).toBe(0); // multi-select stays until Next
 		press(state, down, enter); // Next
-		expect(collectAnswers(state)[0]).toMatchObject({ selected: ["Python", "Zig"], freeform: false });
+		expect(collectAnswers(state)[0]).toMatchObject({ selected: ["Python", "Zig"], freeform: false, typed: true });
 	});
 
 	it("notes attach to the answer on preview questions", () => {
@@ -298,33 +302,41 @@ describe("formatAnswers", () => {
 		header: "Database",
 		selected,
 		freeform,
+		...(freeform ? { typed: true } : {}),
 		notes,
 	});
 
-	it("renders one answer", () => {
-		expect(formatAnswers([answer(["Postgres"])])).toBe("Which database?\n→ Postgres");
-	});
-
-	it("joins multi-select answers", () => {
-		expect(formatAnswers([answer(["Postgres", "SQLite"])])).toContain("→ Postgres, SQLite");
-	});
-
-	it("marks a typed answer and appends notes", () => {
-		expect(formatAnswers([answer(["DuckDB"], true)])).toContain("(typed by the user)");
-		expect(formatAnswers([answer(["Postgres"], false, "must stay managed")])).toContain(
-			"→ notes: must stay managed",
+	it("confirms answers picked from the options in Claude Code's words", () => {
+		expect(formatAnswers([answer(["Postgres"])])).toBe(
+			'Your questions have been answered: "Which database?"="Postgres". You can now continue with these answers in mind.',
 		);
 	});
 
-	it("handles no selection and no answers", () => {
-		expect(formatAnswers([answer([])])).toContain("(no answer)");
-		expect(formatAnswers([])).toBe("The user did not answer.");
+	it("joins multi-select answers and several questions", () => {
+		expect(formatAnswers([answer(["Postgres", "SQLite"]), { ...answer(["Yes"]), question: "Run migrations?" }])).toBe(
+			'Your questions have been answered: "Which database?"="Postgres, SQLite", "Run migrations?"="Yes". You can now continue with these answers in mind.',
+		);
 	});
 
-	it("separates several questions", () => {
-		const out = formatAnswers([answer(["Postgres"]), { ...answer(["Yes"]), question: "Run migrations?" }]);
-		expect(out.split("\n\n")).toHaveLength(2);
-		expect(out).toContain("Run migrations?");
+	it("tells the model to read a typed answer or notes carefully", () => {
+		const careful = " Read the answers carefully — they may request clarification, changes, or that you not proceed — and follow what they actually say.";
+		expect(formatAnswers([answer(["DuckDB"], true)])).toBe(`The user answered: "Which database?"="DuckDB".${careful}`);
+		expect(formatAnswers([answer(["Postgres"], false, "must stay managed")])).toBe(
+			`The user answered: "Which database?"="Postgres" notes: must stay managed.${careful}`,
+		);
+		expect(formatAnswers([{ ...answer(["Postgres", "Zig"]), typed: true }])).toBe(`The user answered: "Which database?"="Postgres, Zig".${careful}`);
+	});
+
+	it("carries the picked option's preview", () => {
+		expect(answerPairs([{ ...answer(["Card grid"]), preview: "[ ][ ]\n[ ][ ]" }])).toBe('"Which database?"="Card grid" selected preview:\n[ ][ ]\n[ ][ ]');
+	});
+
+	it("lists an unanswered question only when it carries notes", () => {
+		expect(formatAnswers([answer([])])).toBe("The user did not answer the questions.");
+		expect(formatAnswers([])).toBe("The user did not answer the questions.");
+		expect(answerPairs([answer([], false, "not sure yet"), { ...answer(["Yes"]), question: "Run migrations?" }])).toBe(
+			'"Which database?"=(no option selected) notes: not sure yet, "Run migrations?"="Yes"',
+		);
 	});
 });
 

@@ -298,11 +298,14 @@ function advance(state: WidgetState): void {
 function collectAnswer(question: Question, state: QuestionState): Answer {
 	const labels = [...state.selected].sort((a, b) => a - b).map((index) => question.options[index].label);
 	if (state.otherChosen) labels.push(state.otherText);
+	const picked = !question.multiSelect && state.selected.length === 1 && !state.otherChosen ? question.options[state.selected[0]] : undefined;
 	return {
 		question: question.question,
 		header: question.header,
 		selected: labels,
 		freeform: labels.length > 0 && state.selected.length === 0,
+		...(state.otherChosen ? { typed: true } : {}),
+		...(picked?.preview?.trim() ? { preview: picked.preview } : {}),
 		notes: state.notes || undefined,
 	};
 }

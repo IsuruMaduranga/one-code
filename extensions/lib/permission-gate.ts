@@ -33,6 +33,7 @@ import { getAgentDir, type InlineExtension } from "@earendil-works/pi-coding-age
 import { withKeepAlive } from "../lsp/keep-alive.ts";
 import { bashParserReady } from "./bash-parser.ts";
 import { findProjectRoot } from "./git.ts";
+import { SUBAGENT_HANDBACK } from "./subagent-handback.ts";
 import { memoryDir } from "./memory.ts";
 import type { PowerShellParse } from "./powershell-parser.ts";
 import { usesClaudeCodeFastPaths } from "./model-tier.ts";
@@ -97,7 +98,7 @@ export function runtimeSecretPaths(home: string = homedir()): string[] {
 }
 
 /** Tools the runtime itself injects; never gate them. */
-const DEFAULT_INTERNAL_TOOLS = new Set(["structured_output"]);
+const DEFAULT_INTERNAL_TOOLS = new Set(["structured_output", SUBAGENT_HANDBACK]);
 
 /** The parent permissions extension publishes its live mode here (in-process children read it). */
 export const MODE_ENV = "CC_PERMISSION_MODE";

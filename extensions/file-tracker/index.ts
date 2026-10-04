@@ -7,6 +7,7 @@
  *   cannot overwrite someone else's change.
  * - Files that change out of band are reported in a `<system-reminder>` with the
  *   new content around the change, line-numbered.
+ * - pi's read, write and edit results read as Claude Code's (`results.ts`).
  * - After a compaction, the files read or written most recently come back as
  *   Claude Code brings them back: the contents of a small one, a note to read
  *   a large one again (`restore.ts`), and the read state is cleared.
@@ -32,6 +33,7 @@ import { parseRules, ruleMatches } from "../permissions/matcher.ts";
 import { loadPermissionSettings } from "../permissions/settings.ts";
 import { keptReadPaths, lastTouchesOnBranch, pathsReadOnBranch } from "./replay.ts";
 import { type RestoredRead, restoreBlocks, restoreCandidates } from "./restore.ts";
+import { fileToolResultContent } from "./results.ts";
 import {
 	describeChanges,
 	EXTERNAL_CHANGE_REMINDER,
@@ -186,10 +188,14 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => reconstruct(ctx));
 	pi.on("session_tree", (_event, ctx) => reconstruct(ctx));
 
+	/** Whether a write's file existed when the call was made, by call id: its result says "created" or "updated". */
+	const writeTargetExisted = new Map<string, boolean>();
+
 	pi.on("tool_call", (event, ctx) => {
 		if (!GUARDED_TOOLS.has(event.toolName)) return undefined;
 		const path = pathOf(event.input, ctx.cwd);
 		if (!path) return undefined;
+		if (event.toolName === "write") writeTargetExisted.set(event.toolCallId, existsSync(path));
 
 		const current = readIfPresent(path);
 		const status = tracker.status(path, current);
@@ -201,7 +207,8 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("tool_result", (event, ctx) => {
-		if (event.isError) return undefined;
+		const existedBefore = writeTargetExisted.get(event.toolCallId);
+		writeTargetExisted.delete(event.toolCallId);
 		if (!READ_TOOLS.has(event.toolName) && !GUARDED_TOOLS.has(event.toolName)) return undefined;
 
 		const path = pathOf(event.input, ctx.cwd);
@@ -209,8 +216,17 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 
 		// After a read we know the file; after our own write we know it again, so a
 		// successful edit does not make the file look stale to the next edit.
-		touch(path);
-		return undefined;
+		if (!event.isError) touch(path);
+		const content = fileToolResultContent({
+			toolName: event.toolName,
+			isError: event.isError,
+			content: event.content,
+			path,
+			cwd: ctx.cwd,
+			existedBefore,
+			isEmptyFile: () => statIfPresent(path)?.size === 0,
+		});
+		return content ? { content } : undefined;
 	});
 
 	/**
@@ -343,8 +359,9 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 	pi.on("agent_start", () => {
 		// A turn aborted mid-batch can leave ids behind; each turn starts from a
 		// clean set so the mid-turn scan cannot be wedged off for the rest of the
-		// session.
+		// session. A write blocked before it ran left its existence entry behind.
 		executing.clear();
+		writeTargetExisted.clear();
 		reportExternalChanges();
 		return undefined;
 	});

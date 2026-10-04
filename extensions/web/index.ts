@@ -28,7 +28,7 @@
  * WebFetch lives in `extensions/web-fetch` (our own); this file only owns search.
  */
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { homedir } from "node:os";
 import { Type } from "typebox";
 import webSearchPackage from "pi-web-search/src/index.ts";
@@ -43,6 +43,8 @@ import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
+import { registerFormTool } from "../lib/tool-variants.ts";
+import { webSearchDescription } from "./description.ts";
 import {
 	DEFAULT_MAX_RESULTS,
 	formatSearchResults,
@@ -79,15 +81,12 @@ export default function webExtension(pi: ExtensionAPI) {
 	// Per-session: the thinking-off fields a native-call model turned out to need.
 	const learnedNativeThinking = new Map<string, ThinkingFields>();
 
-	pi.registerTool({
+	// Short or long text by the model's tier (description.ts, lib/tool-variants.ts).
+	const tool = defineTool({
 		name: "web_search",
 		label: "Web Search",
 		...ccToolRenderers<{ query?: string }>("Web Search", { title: (args) => args?.query }),
-		description:
-			"Search the web. Returns result blocks with titles and URLs.\n\n" +
-			"- `allowed_domains` / `blocked_domains` filter results (enforced on Brave/Tavily/Exa; with provider-native search they become `site:` operators in the query, best-effort).\n" +
-			'- After answering from results, end with a "Sources:" list of the URLs you used as markdown links.\n' +
-			"- Uses the model provider's own search when it has one; otherwise a configured search API (Brave, Tavily) or, with no key, a free rate-limited endpoint — the result names which.",
+		description: webSearchDescription("short"),
 		parameters: Type.Object({
 			query: Type.String({ minLength: 2, description: "The search query to use" }),
 			allowed_domains: Type.Optional(Type.Array(Type.String(), { description: "Only include search results from these domains" })),
@@ -221,6 +220,7 @@ export default function webExtension(pi: ExtensionAPI) {
 			}
 		},
 	});
+	registerFormTool(pi, tool, webSearchDescription);
 
 	// url_context reports failures ("Failed: …" text, details.error set) without
 	// isError. Stamp it here rather than patching the vendor package.

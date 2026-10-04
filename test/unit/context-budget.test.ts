@@ -6,6 +6,7 @@ import {
 	turnTokenBudget,
 } from "../../extensions/context-budget/budget.ts";
 import contextBudgetExtension from "../../extensions/context-budget/index.ts";
+import systemReminderExtension from "../../extensions/system-reminder/index.ts";
 import { appendReminderBlocks, REMINDER_CHANNEL, ReminderQueue } from "../../extensions/lib/reminders.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
@@ -85,10 +86,17 @@ describe("context-budget wiring", () => {
 		return { fake, reminders };
 	};
 
-	it("puts the constant budget on every user message as a raw sticky block anchored at the session's start", async () => {
+	it("puts the constant budget in the context stack and on every user message as a raw sticky block anchored at the session's start", async () => {
 		const { fake, reminders } = collect();
 		await fake.fireOne("session_start", {}, createFakeCtx());
 		expect(reminders).toEqual([
+			{
+				text: "<total_tokens>15000000 tokens left</total_tokens>",
+				scope: "every-turn",
+				key: "total-tokens-first",
+				placement: "first-prepend",
+				order: 46,
+			},
 			{
 				text: "<total_tokens>15000000 tokens left</total_tokens>",
 				scope: "every-turn",
@@ -96,6 +104,7 @@ describe("context-budget wiring", () => {
 				placement: "sticky-append",
 				raw: true,
 				since: 0,
+				skipStackCarrier: true,
 			},
 		]);
 	});
@@ -122,6 +131,28 @@ describe("context-budget wiring", () => {
 			"<total_tokens>14999900 tokens left</total_tokens>",
 		]);
 		for (const r of reminders) expect(r).toMatchObject({ placement: "last-append", raw: true });
+	});
+
+	it("gives each of several parallel tool results its own single countdown", async () => {
+		// pi finalizes a parallel batch concurrently, so the results' tool_result
+		// handler chains interleave: the second result's countdown is queued
+		// before the first result's system-reminder hook takes the one-shots.
+		const fake = createFakePi();
+		contextBudgetExtension(fake.pi as never);
+		systemReminderExtension(fake.pi as never);
+		await fake.fireOne("agent_start", {}, createFakeCtx(usage(10_000)));
+		// system-reminder's handler, the second, returns the result's new content.
+		const result = async (toolCallId: string, tokens: number) =>
+			(
+				await fake.fire<{ content: Array<{ text: string }> } | undefined>(
+					"tool_result",
+					{ toolCallId, content: [{ type: "text", text: `ran ${toolCallId}` }] },
+					createFakeCtx(usage(tokens)),
+				)
+			)[1];
+		const [a, b] = await Promise.all([result("call-a", 10_100), result("call-b", 10_200)]);
+		expect(a?.content.map((c) => c.text)).toEqual(["ran call-a", "<total_tokens>14999900 tokens left</total_tokens>"]);
+		expect(b?.content.map((c) => c.text)).toEqual(["ran call-b", "<total_tokens>14999800 tokens left</total_tokens>"]);
 	});
 
 	it("is off entirely under CC_TOTAL_TOKENS=0", async () => {

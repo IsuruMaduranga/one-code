@@ -3,19 +3,20 @@
  *
  * The tier-specific section text lives in `tiers/` (one bundle per tier);
  * this module is the tier-agnostic composer — it places the dynamic blocks
- * (tools, memory, environment, scratchpad, project context, skills, cwd trailer)
- * around the bundle's `lead`/`tail` sections. Sections tied to Anthropic-hosted
- * features are dropped, and the environment block is generated dynamically.
+ * (tools, memory, the cwd trailer, the budget line) around the bundle's
+ * `lead`/`tail` sections. Sections tied to Anthropic-hosted features are
+ * dropped. The environment block, the model line and the git snapshot are not
+ * here: they ride the first-message context (lib/environment-block.ts,
+ * lib/claude-context.ts), or the mid-conversation system message on a model
+ * that takes one, as in Claude Code.
  *
  * For a fixed tier this function must be pure and deterministic: same inputs,
- * byte-identical output (prompt-cache stability). The frontier bundle reproduces
- * the pre-tiering prompt exactly.
+ * byte-identical output (prompt-cache stability).
  */
 
 import type { BuildSystemPromptOptions } from "@earendil-works/pi-coding-agent";
 import { memoryPromptSection } from "../lib/memory.ts";
 import type { PromptTier } from "../lib/model-tier.ts";
-import { scratchpadPromptSection } from "../lib/scratchpad.ts";
 import type { EnvironmentInfo } from "./environment.ts";
 import type { PromptBundle } from "./tiers/common.ts";
 import { frontierBundle } from "./tiers/frontier.ts";
@@ -23,13 +24,11 @@ import { lowBundle } from "./tiers/low.ts";
 import { midBundle } from "./tiers/mid.ts";
 
 /**
- * Four tiers, three register texts. `workhorse` and `cheap` share the verbose
- * `midBundle`: CC's own Sonnet and Haiku system prompts differ only in
- * boilerplate + a single planning-steer line the verbose register already
- * carries, so splitting the text would invent a distinction CC doesn't make. The
- * tiers stay separate for tool-surface (search tools at `tiny` only) and model
- * routing, and can diverge later without reclassifying models. `tiny` = the
- * max-scaffolding `lowBundle`. See `working-docs/decisions/model-tiers.md`.
+ * Four tiers, three register texts. `workhorse` and `cheap` share Claude Code's
+ * long register (`midBundle`), as Claude Code sends one text to Haiku 4.5,
+ * Sonnet 4.x and Opus 4.5 to 4.7; the two tiers differ in their tool
+ * descriptions. `tiny` = the long register plus the weak-model scaffolding
+ * (`lowBundle`). See `working-docs/decisions/model-tiers.md`.
  */
 const BUNDLES: Record<PromptTier, PromptBundle> = {
 	frontier: frontierBundle,
@@ -58,38 +57,14 @@ function buildToolsSection(options: BuildSystemPromptOptions): string {
 	return `# Available tools\n${toolsList}${guidelinesBlock}`;
 }
 
-function buildEnvironmentSection(env: EnvironmentInfo): string {
-	// Claude Code's line and indentation for additional working directories.
-	const workspace = env.workspaceDirs?.length ? `\n - Additional working directories:\n${env.workspaceDirs.map((dir) => `  - ${dir}`).join("\n")}` : "";
-	return `# Environment
- - Working directory: ${env.cwd}${workspace}
- - Is a git repository: ${env.isGitRepo ? "yes" : "no"}
- - Platform: ${env.platform}
- - OS Version: ${env.osVersion}
- - Shell: ${env.shell}
- - Model: ${env.modelLine}`;
-}
-
 export function buildClaudeCodeSystemPrompt(
 	options: BuildSystemPromptOptions,
-	env: EnvironmentInfo,
+	env: Pick<EnvironmentInfo, "cwd" | "memoryDir">,
 	tier: PromptTier,
 	/**
-	 * Per-session (it embeds the session id), so it rides outside the
-	 * (cwd, model, tier)-cached EnvironmentInfo — constant within a session, which
-	 * is all provider prompt caching needs.
-	 */
-	scratchpadDir?: string,
-	/**
-	 * Claude Code's `gitStatus:` block, when in a git repo — a one-time snapshot
-	 * computed at session start and appended last (after the cwd line), matching
-	 * CC. Session-constant, so it too stays outside the EnvironmentInfo cache.
-	 */
-	gitStatus?: string | null,
-	/**
 	 * Claude Code's per-turn budget line (`<total_tokens>N tokens left</total_tokens>`,
-	 * `context-budget/budget.ts`), placed after the cwd line and before the git
-	 * snapshot. Constant for the session, so it stays cache-stable.
+	 * `context-budget/budget.ts`), placed last, after the cwd line. Constant for
+	 * the session, so it stays cache-stable.
 	 */
 	totalTokensLine?: string | null,
 	/** False when the session model runs without the task tools (`lib/model-tier.ts taskToolsEnabled`). */
@@ -100,11 +75,8 @@ export function buildClaudeCodeSystemPrompt(
 	const sections = [
 		...lead,
 		buildToolsSection(options),
-		// Claude Code orders Memory just before Environment; workhorse/cheap/tiny use the long spec.
+		// Workhorse, cheap and tiny use the long memory spec.
 		memoryPromptSection(env.memoryDir, bundle.verboseMemory),
-		buildEnvironmentSection(env),
-		// Claude Code orders Scratchpad between Environment and the tail sections.
-		...(scratchpadDir ? [scratchpadPromptSection(scratchpadDir)] : []),
 		...bundle.tail,
 	];
 
@@ -112,7 +84,7 @@ export function buildClaudeCodeSystemPrompt(
 
 	// Mirror pi's own custom-prompt assembly: append text, skills, and the
 	// trailing cwd line. CLAUDE.md / AGENTS.md context files are NOT put here —
-	// Claude Code injects them as the `# claudeMd` <system-reminder> on the first
+	// Claude Code sends them as the instructions <system-reminder> on the first
 	// user message (extensions/claude-context), not in the system prompt.
 	if (options.appendSystemPrompt) {
 		prompt += `\n\n${options.appendSystemPrompt}`;
@@ -125,13 +97,9 @@ export function buildClaudeCodeSystemPrompt(
 
 	prompt += `\nCurrent working directory: ${env.cwd.replace(/\\/g, "/")}`;
 
-	// Claude Code follows the cwd line with its budget line, then the git
-	// snapshot last, each separated by a blank line.
+	// Claude Code ends its prompt with the budget line, after a blank line.
 	if (totalTokensLine) {
 		prompt += `\n\n${totalTokensLine}`;
-	}
-	if (gitStatus) {
-		prompt += `\n\n${gitStatus}`;
 	}
 
 	return prompt;

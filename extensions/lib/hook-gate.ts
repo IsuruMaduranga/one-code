@@ -22,9 +22,10 @@ import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 import { applyPostToolUseOutcome } from "../hooks/protocol.ts";
 import type { ChildHookCall, HookBridge } from "../hooks/subagent-bridge.ts";
 import { REMINDER_CHANNEL } from "./reminders.ts";
+import { SUBAGENT_HANDBACK } from "./subagent-handback.ts";
 
 /** Tools the runtime itself injects; never run hooks for them. */
-const DEFAULT_INTERNAL_TOOLS = new Set(["structured_output"]);
+const DEFAULT_INTERNAL_TOOLS = new Set(["structured_output", SUBAGENT_HANDBACK]);
 
 export interface HookGateOptions {
 	/** The child's agent type for the payload's `agent_type`, resolved per session id by the runner. */

@@ -22,7 +22,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { writeJsonAtomic } from "./atomic-write.ts";
+import { readJsonFile, writeJsonAtomic } from "./atomic-write.ts";
 import { findProjectRoot } from "./git.ts";
 import { projectSlug } from "./memory.ts";
 import { oneCodeStateDir } from "./paths.ts";
@@ -60,4 +60,44 @@ export function readSettingsForWrite(path: string): Record<string, unknown> {
  * directories as needed — a reader never sees a half-written settings file. */
 export function writeSettings(path: string, file: Record<string, unknown>): void {
 	writeJsonAtomic(path, file);
+}
+
+/** Claude Code's `workflowSizeGuideline` values: under 5, 10 or 50 agents, or no guideline. */
+export type WorkflowSizeGuideline = "small" | "medium" | "large" | "unrestricted";
+
+const WORKFLOW_SIZES: readonly WorkflowSizeGuideline[] = ["small", "medium", "large", "unrestricted"];
+
+export interface WorkflowSettings {
+	/** Whether the workflow tool is offered at all. */
+	enabled: boolean;
+	sizeGuideline: WorkflowSizeGuideline;
+	/** True when a settings file set the guideline (the description says "configured"). */
+	sizeConfigured: boolean;
+}
+
+interface WorkflowSettingsFile {
+	enableWorkflows?: unknown;
+	disableWorkflows?: unknown;
+	workflowSizeGuideline?: unknown;
+}
+
+/**
+ * The workflow settings Claude Code reads, from One Code's own files (user,
+ * then the project file, which wins): `enableWorkflows` (default true),
+ * `disableWorkflows` (true turns workflows off whatever `enableWorkflows`
+ * says, as in Claude Code) and `workflowSizeGuideline` (default "medium"; an
+ * unknown value is ignored). Read leniently: a malformed file is skipped.
+ */
+export function readWorkflowSettings(cwd: string, home: string, env: NodeJS.ProcessEnv = process.env): WorkflowSettings {
+	const files = [oneCodeSettingsPath(home, env), oneCodeProjectSettingsPath(cwd, home, env)].map((path) => readJsonFile<WorkflowSettingsFile>(path));
+	let enable = true;
+	let disable = false;
+	let size: WorkflowSizeGuideline | undefined;
+	for (const file of files) {
+		if (!file || typeof file !== "object") continue;
+		if (typeof file.enableWorkflows === "boolean") enable = file.enableWorkflows;
+		if (file.disableWorkflows === true) disable = true;
+		if (WORKFLOW_SIZES.includes(file.workflowSizeGuideline as WorkflowSizeGuideline)) size = file.workflowSizeGuideline as WorkflowSizeGuideline;
+	}
+	return { enabled: enable && !disable, sizeGuideline: size ?? "medium", sizeConfigured: size !== undefined };
 }

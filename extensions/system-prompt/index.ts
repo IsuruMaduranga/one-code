@@ -4,18 +4,23 @@
  * turn opened from idle (which skips that hook) via context_with_system
  * (idle-turn.ts).
  *
- * The environment block is cached per (cwd, model) so the generated prompt is
- * byte-stable across turns and provider prompt caching stays effective. The
- * scratchpad path embeds the session id, so it lives outside that cache —
- * derived at session_start, constant within the session.
+ * The environment facts are cached per cwd so the generated text is
+ * byte-stable across turns and provider prompt caching stays effective.
+ * Claude Code's `# Environment` block and model line are not in the prompt:
+ * this extension queues them as the first two first-message context blocks,
+ * which a model that takes a mid-conversation system message gets there
+ * instead (system-reminder). The scratchpad path the block names embeds the
+ * session id — derived at session_start, constant within the session.
  */
 
 import { getCurrentSystemMessage } from "@earendil-works/pi-ai";
 import type { BuildSystemPromptOptions, ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { environmentBlock, modelLine } from "../lib/environment-block.ts";
+import { GIT_SNAPSHOT_OWNER_CHANNEL } from "../lib/git-status.ts";
 import { resolveModelTier, taskToolsEnabled } from "../lib/model-tier.ts";
+import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { privateSessionScratchpadDir } from "../lib/scratchpad.ts";
 import { collectEnvironment, type EnvironmentInfo } from "./environment.ts";
-import { collectGitStatus } from "./git-status.ts";
 import { totalTokensBlock, turnTokenBudget } from "../context-budget/budget.ts";
 import { optionsForIdleTurn, withSystemHead } from "./idle-turn.ts";
 import { buildClaudeCodeSystemPrompt } from "./template.ts";
@@ -26,13 +31,6 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 	let cachedEnv: EnvironmentInfo | undefined;
 	let cachedKey = "";
 	let scratchpad: string | undefined;
-	// Claude Code's git snapshot is taken once "at the start of the conversation"
-	// and never updated. It is computed lazily on the first turn (memoized) rather
-	// than in session_start, so its several synchronous git spawns never delay the
-	// prompt opening (findings §15); it resets on /clear (session_start re-fires)
-	// and stays constant across turns, keeping the system prompt cache-stable.
-	let gitStatus: string | null = null;
-	let gitStatusReady = false;
 	// The workspace directories as the session started. The permissions
 	// extension announces them from its own session_start, which runs before
 	// this one (load order), so this handler does not reset them.
@@ -45,52 +43,64 @@ export default function systemPromptExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("session_start", (_event, ctx) => {
-		// The prompt section promises a usable directory, so the extension that
-		// makes the promise creates it. Failure (unwritable /tmp) drops the
-		// section rather than promising a directory writes will error on.
-		// On a shared /tmp it must also be private to this user
-		// (lib/scratchpad.ts ensurePrivateScratchpad); otherwise the section is dropped.
+		// The environment block's scratchpad line promises a usable directory, so
+		// the extension that makes the promise creates it. Failure (unwritable
+		// /tmp) drops the line rather than promising a directory writes will error
+		// on. On a shared /tmp it must also be private to this user
+		// (lib/scratchpad.ts ensurePrivateScratchpad); otherwise the line is dropped.
 		scratchpad = privateSessionScratchpadDir(ctx.cwd, ctx.sessionManager.getSessionId());
+		// The main session's context block carries Claude Code's git snapshot (claude-context).
+		pi.events.emit(GIT_SNAPSHOT_OWNER_CHANNEL, {});
 
-		gitStatus = null;
-		gitStatusReady = false;
 		// Another session's options (a named agent's customPrompt, its tool set)
 		// must not shape this one's idle turns.
 		lastOptions = undefined;
 	});
 
-	const buildPrompt = (options: BuildSystemPromptOptions, ctx: ExtensionContext): string => {
-		if (!gitStatusReady) {
-			// First turn = the conversation start CC snapshots at. The clip note
-			// names the shell tool the model has (PowerShell only without bash).
-			const tools = options.selectedTools ?? [];
-			const shellTool = tools.includes("powershell") && !tools.includes("bash") ? "powershell" : "bash";
-			gitStatus = collectGitStatus(ctx.cwd, undefined, shellTool);
-			gitStatusReady = true;
+	const environment = (cwd: string): EnvironmentInfo => {
+		if (!cachedEnv || cachedKey !== cwd) {
+			cachedEnv = collectEnvironment(cwd);
+			cachedKey = cwd;
 		}
+		return cachedEnv;
+	};
 
+	const buildPrompt = (options: BuildSystemPromptOptions, ctx: ExtensionContext): string => {
 		const model = ctx.model;
-		const modelLine = model ? `${model.id} (${model.provider})` : "unknown";
 		// Re-resolved every turn: the model (and so the tier) can change mid-session.
 		const tier = resolveModelTier(model);
-		const key = `${ctx.cwd}|${modelLine}|${tier}`;
-		if (!cachedEnv || cachedKey !== key) {
-			cachedEnv = collectEnvironment(ctx.cwd, modelLine);
-			cachedKey = key;
-		}
-
 		// The same constant the context-budget extension puts on every user message.
 		const totalTokensLine = process.env.CC_TOTAL_TOKENS === "0" ? null : totalTokensBlock(turnTokenBudget());
-		return buildClaudeCodeSystemPrompt(
-			options,
-			{ ...cachedEnv, workspaceDirs },
-			tier,
-			scratchpad,
-			gitStatus,
-			totalTokensLine,
-			taskToolsEnabled(model, process.env, tier),
-		);
+		return buildClaudeCodeSystemPrompt(options, environment(ctx.cwd), tier, totalTokensLine, taskToolsEnabled(model, process.env, tier));
 	};
+
+	// Claude Code's environment block and model line, the first two blocks of the
+	// first-message context, on every turn (a named agent's own prompt gets
+	// neither, as before). Re-queued per turn under
+	// fixed keys, so the text changes only when the facts do: a model switch
+	// changes the model line, and the new model reads its own cache anyway.
+	pi.on("turn_start", (_event, ctx) => {
+		// A first turn opened from idle has no options yet and still gets them, so
+		// message 1 never gains them later.
+		if (lastOptions?.customPrompt) return;
+		const env = environment(ctx.cwd);
+		pi.events.emit(REMINDER_CHANNEL, {
+			text: environmentBlock({ ...env, scratchpadDir: scratchpad, workspaceDirs }),
+			scope: "every-turn",
+			key: "environment",
+			placement: "first-prepend",
+			order: CONTEXT_ORDER.environment,
+		});
+		if (ctx.model) {
+			pi.events.emit(REMINDER_CHANNEL, {
+				text: modelLine(ctx.model),
+				scope: "every-turn",
+				key: "model-line",
+				placement: "first-prepend",
+				order: CONTEXT_ORDER.modelLine,
+			});
+		}
+	});
 
 	// A copy: pi goes on mutating this object after the handlers return
 	// (forceSystemPrompt, the live selectedTools).

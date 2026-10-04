@@ -1,9 +1,6 @@
 ---
 name: security-review
-description: >
-  Complete a security review of the pending changes on the current branch — a
-  focused, high-confidence hunt for exploitable vulnerabilities newly introduced
-  by the diff, reported as a severity-ranked markdown briefing.
+description: Complete a security review of the pending changes on the current branch
 ---
 
 You are a senior security engineer conducting a focused security review of the changes on this branch.

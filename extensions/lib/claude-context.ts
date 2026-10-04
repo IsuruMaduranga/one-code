@@ -1,13 +1,14 @@
 /**
- * Claude Code's `# claudeMd` context block — the single `<system-reminder>` that
- * carries the CLAUDE.md files, the MEMORY.md index, the user's email, and the
- * date, prepended to the first user message (see extensions/claude-context for
- * the wiring, and lib/reminders.ts for placement).
+ * Claude Code's three first-message context reminders: the instructions block
+ * (the CLAUDE.md files and the MEMORY.md index), the context block (the user's
+ * email and the git snapshot) and the date, each its own `<system-reminder>`
+ * (see extensions/claude-context for the wiring, and lib/reminders.ts for
+ * placement; on a model that takes a mid-conversation system message the date
+ * moves into it, lib/system-role.ts).
  *
- * This module is pure (no pi imports) and byte-exact against real Claude Code
- * captures (opus-4-8.json / latest-haiku.json). The block is identical across
- * model tiers — only the `# Memory` *spec* in the system prompt varies by tier
- * (handled in lib/memory.ts), never this block.
+ * This module is pure (no pi imports) and byte-exact with Claude Code. The
+ * blocks are identical across model tiers — only the `# Memory` *spec* in the
+ * system prompt varies by tier (handled in lib/memory.ts), never these blocks.
  *
  * Discovery mirrors Claude Code, not pi's own loader: global `~/.claude/CLAUDE.md`
  * first, then project `CLAUDE.md` / `CLAUDE.local.md` from the farthest ancestor
@@ -61,14 +62,19 @@ const ONECODE_NAMES = ["ONECODE.md", "onecode.md", "One Code.md"] as const;
 const MAX_IMPORT_DEPTH = 5;
 
 const PREAMBLE =
-	"As you answer the user's questions, you can use the following context:\n" +
-	"# claudeMd\n" +
 	"Codebase and user instructions are shown below. Be sure to adhere to these instructions. " +
 	"IMPORTANT: These instructions OVERRIDE any default behavior and you MUST follow them exactly as written.";
 
-const TRAILER =
-	"      IMPORTANT: this context may or may not be relevant to your tasks. " +
-	"You should not respond to this context unless it is highly relevant to your task.";
+const CONTEXT_PREAMBLE = "As you answer the user's questions, you can use the following context:";
+
+/** Claude Code's sentence after the email, with One Code named as the harness that attached it. */
+const EMAIL_USE =
+	"Use it only to identify the user, such as for authorship, attribution, or filtering their own work. " +
+	"Never send it to an unrelated service, such as in a request header, URL, or payload, unless the user explicitly asks.";
+
+const CONTEXT_FOOTER =
+	"One Code attached this context automatically; it isn't part of the user's message. " +
+	"It describes the user's own account and workspace, so they don't need it reported back.";
 
 function readFileIfPresent(path: string): string | null {
 	try {
@@ -455,8 +461,7 @@ function oneCodePreamble(): string {
  */
 export function buildOneCodeBlock(files: ContextFile[]): string | null {
 	if (files.length === 0) return null;
-	const sections = files.map(section).join("\n");
-	return `${oneCodePreamble()}\n\n${sections}`;
+	return withoutFinalNewline(`${oneCodePreamble()}\n\n${files.map(section).join("\n")}`);
 }
 
 export const AGENTS_DESCRIPTOR = "cross-tool agent instructions, AGENTS.md standard";
@@ -464,7 +469,7 @@ export const AGENTS_DESCRIPTOR = "cross-tool agent instructions, AGENTS.md stand
 /**
  * One file's section. Its content is raw, but always ends in a newline: the
  * join rule relies on it, and a file without one would glue the next section,
- * or the `# userEmail` / `# currentDate` header, onto its last line.
+ * or the next section's header, onto its last line.
  */
 function section(file: ContextFile): string {
 	const content = file.content.endsWith("\n") ? file.content : `${file.content}\n`;
@@ -472,7 +477,7 @@ function section(file: ContextFile): string {
 }
 
 /**
- * The `# currentDate` value: the user's LOCAL calendar date as YYYY-MM-DD, the
+ * The date reminder's value: the user's LOCAL calendar date as YYYY-MM-DD, the
  * date their own clock shows (a UTC date is a day off every evening west of
  * UTC and every early morning east of it).
  */
@@ -483,37 +488,35 @@ export function localDate(now: Date = new Date()): string {
 
 /**
  * Claude Code's notice when the local date moves on mid-session. The block
- * carrying `# currentDate` is frozen after the first request, so the new date
+ * carrying the date is frozen after the first request, so the new date
  * rides a one-shot where the model reads next, the way Claude Code does.
  */
 export function dateChangeReminder(date: string): string {
 	return `The date has changed. Today's date is now ${date}. No need to announce the new date \u2014 the user's own clock shows it.`;
 }
 
+/** The text without one trailing newline: the reminder frame supplies the newline before its closing tag. */
+function withoutFinalNewline(text: string): string {
+	return text.endsWith("\n") ? text.slice(0, -1) : text;
+}
+
 /**
- * Assemble the block's inner text (the `<system-reminder>` wrapper is added by
- * lib/reminders.ts). Byte-exact rule reverse-engineered from opus-4-8.json:
+ * The instructions block's inner text (the `<system-reminder>` wrapper is added
+ * by lib/reminders.ts):
  *
  *   {PREAMBLE}\n\n
- *   {section}\n{section}\n…            ← sections joined by a single "\n"
- *   # userEmail\nThe user's email address is {email}.\n
- *   # currentDate\nToday's date is {date}.\n
- *   \n{TRAILER}
+ *   {section}\n{section}\n…{last section without its final newline}
  *
  * where each section is `Contents of {path} ({descriptor}):\n\n{content}` and
  * `content` keeps its own trailing newline (files are read raw, never trimmed —
- * a file ending in "\n" plus the join "\n" is the "\n\n" seen between sections;
- * the last section's own trailing "\n" is the single "\n" before `# userEmail`).
- * A file that does not end in "\n" gets one, so no header lands on its last line.
- *
- * `memoryIndex`, when present, is appended as a final context section with the
- * memory descriptor. Returns null when there is nothing at all to inject.
+ * a file ending in "\n" plus the join "\n" is the "\n\n" seen between
+ * sections). A file that does not end in "\n" gets one, so no header lands on
+ * its last line. `memoryIndex`, when present, is appended as a final section
+ * with the memory descriptor. Returns null when there is nothing to inject.
  */
 export function buildClaudeMdBlock(opts: {
 	contextFiles: ContextFile[];
 	memoryIndex?: { path: string; content: string } | null;
-	email?: string | null;
-	date: string;
 }): string | null {
 	const sections = [...opts.contextFiles];
 	if (opts.memoryIndex && opts.memoryIndex.content.trim()) {
@@ -523,15 +526,25 @@ export function buildClaudeMdBlock(opts: {
 			descriptor: MEMORY_DESCRIPTOR,
 		});
 	}
+	if (sections.length === 0) return null;
+	return withoutFinalNewline(`${PREAMBLE}\n\n${sections.map(section).join("\n")}`);
+}
 
-	if (sections.length === 0 && !opts.email) return null;
+/**
+ * The context block's inner text: the preamble, `# userEmail` with Claude
+ * Code's use-only-to-identify sentence, the `# gitStatus` snapshot
+ * (lib/git-status.ts), then a blank line and the footer. Null with neither an
+ * email nor a snapshot.
+ */
+export function buildContextBlock(opts: { email?: string | null; gitStatus?: string | null }): string | null {
+	const parts: string[] = [];
+	if (opts.email) parts.push(`# userEmail\nThe user's email address is ${opts.email}. ${EMAIL_USE}`);
+	if (opts.gitStatus) parts.push(opts.gitStatus);
+	if (parts.length === 0) return null;
+	return `${CONTEXT_PREAMBLE}\n${parts.join("\n")}\n\n${CONTEXT_FOOTER}`;
+}
 
-	let inner = `${PREAMBLE}\n\n`;
-	inner += sections.map(section).join("\n");
-	if (opts.email) {
-		inner += `# userEmail\nThe user's email address is ${opts.email}.\n`;
-	}
-	inner += `# currentDate\nToday's date is ${opts.date}.\n`;
-	inner += `\n${TRAILER}`;
-	return inner;
+/** The date reminder's inner text, sent whether or not any CLAUDE.md exists. */
+export function dateBlock(date: string): string {
+	return `Today's date is ${date}.`;
 }

@@ -1,24 +1,21 @@
 /**
- * claude-context extension — assembles Claude Code's `# claudeMd` context block
- * (CLAUDE.md files + MEMORY.md index + userEmail + currentDate) and injects it as
- * a `<system-reminder>` at the front of the first user message, matching Claude
- * Code byte-for-byte (see extensions/lib/claude-context.ts for the format).
- *
- * The block is emitted `first-prepend` at CONTEXT_ORDER.claudeMd — last in Claude
- * Code's context stack (deferred tools → agents → MCP → skills → claudeMd), just
- * before the user's text. It rides the reminder queue (transient per-request via
- * pi's `context` event), so it never persists to the session and never doubles up
- * on resume.
+ * claude-context extension — assembles Claude Code's three first-message context
+ * reminders and queues them `first-prepend` (lib/claude-context.ts has the
+ * formats): the instructions block (CLAUDE.md files + MEMORY.md index) at
+ * CONTEXT_ORDER.claudeMd, the context block (userEmail + the git snapshot) at
+ * CONTEXT_ORDER.context, and the date at CONTEXT_ORDER.date, which on a model
+ * that takes a mid-conversation system message rides that message instead
+ * (system-reminder, lib/system-role.ts). They ride the reminder queue
+ * (transient per-request via pi's `context` event), so they never persist to
+ * the session and never double up on resume.
  *
  * When ONECODE.md files exist, this extension also emits a separate `# oneCodeMd`
- * block at CONTEXT_ORDER.oneCodeMd — after # claudeMd, so One Code-specific
- * instructions take precedence over CLAUDE.md. Keeping them out of # claudeMd
- * leaves that block byte-exact with Claude Code.
+ * block at CONTEXT_ORDER.oneCodeMd — after the instructions block, so One
+ * Code-specific instructions take precedence over CLAUDE.md. Keeping them out
+ * of that block leaves it byte-exact with Claude Code.
  *
  * Paths are re-derived from home/cwd here rather than shared with the memory
- * extension (jiti gives each extension its own module instance). CLAUDE.md is no
- * longer put in the system prompt, and MEMORY.md is no longer a separate reminder
- * — both fold into this one block, as Claude Code does.
+ * extension (jiti gives each extension its own module instance).
  */
 
 import { execFileSync } from "node:child_process";
@@ -28,14 +25,16 @@ import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
 	buildClaudeMdBlock,
+	buildContextBlock,
 	buildOneCodeBlock,
-	type ContextFile,
+	dateBlock,
 	dateChangeReminder,
 	discoverContextFiles,
 	discoverOneCodeFiles,
 	localDate,
 	instructionRule,
 } from "../lib/claude-context.ts";
+import { collectGitStatus, GIT_SNAPSHOT_OWNER_CHANNEL } from "../lib/git-status.ts";
 import { projectMemoryDir, truncateIndex } from "../lib/memory.ts";
 import { claudeConfigDir, oneCodeStateDir } from "../lib/paths.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
@@ -43,6 +42,8 @@ import { HARNESS_GIT_CONFIG } from "../lib/git.ts";
 
 const REMINDER_KEY = "claude-context";
 const ONECODE_REMINDER_KEY = "one-code-context";
+const CONTEXT_REMINDER_KEY = "claude-context-context";
+const DATE_REMINDER_KEY = "claude-context-date";
 
 /** The account email Claude Code stamps as `# userEmail`. git config is our proxy. */
 function resolveEmail(cwd: string): string | null {
@@ -68,38 +69,44 @@ function readMemoryIndex(cwd: string): { path: string; content: string } | null 
 }
 
 export default function claudeContextExtension(pi: ExtensionAPI) {
-	/** What the block was built from at session start, so a compaction can rebuild it with a new date. */
-	let blockInputs: { contextFiles: ContextFile[]; memoryIndex: { path: string; content: string } | null; email: string | null } | undefined;
-	/** The date the `# currentDate` line carries. */
+	/** The account email stand-in, resolved at session start. */
+	let email: string | null = null;
+	/** Claude Code's git snapshot, taken once at the conversation's first turn; undefined until then. */
+	let gitStatus: string | null | undefined;
+	/**
+	 * Only the main session takes the snapshot, as before it moved here: its
+	 * system-prompt extension (never loaded in a child) claims it at session
+	 * start. A subagent or workflow agent would otherwise run its own git
+	 * commands, synchronously on the shared event loop, for every child.
+	 */
+	let takesGitSnapshot = false;
+	pi.events.on(GIT_SNAPSHOT_OWNER_CHANNEL, () => {
+		takesGitSnapshot = true;
+	});
+	/** The date the date reminder carries. */
 	let blockDate = "";
-	/** The date the model was last told: the block's, or a later date-change notice's. */
+	/** The date the model was last told: the reminder's, or a later date-change notice's. */
 	let shownDate = "";
 
-	const emitClaudeMd = (date: string) => {
-		if (!blockInputs) return;
+	const emitDate = (date: string) => {
 		blockDate = date;
 		shownDate = date;
-		const inner = buildClaudeMdBlock({ ...blockInputs, date });
-		if (inner) {
-			pi.events.emit(REMINDER_CHANNEL, {
-				text: inner,
-				scope: "every-turn",
-				key: REMINDER_KEY,
-				placement: "first-prepend",
-				order: CONTEXT_ORDER.claudeMd,
-				// Claude Code's claudeMd block ends `</system-reminder>\n\n` on the wire.
-				suffix: "\n\n",
-			});
-		}
+		pi.events.emit(REMINDER_CHANNEL, {
+			text: dateBlock(date),
+			scope: "every-turn",
+			key: DATE_REMINDER_KEY,
+			placement: "first-prepend",
+			order: CONTEXT_ORDER.date,
+		});
 	};
 
 	pi.on("session_start", (_event, ctx) => {
-		// The # claudeMd block carries the instruction files the mode and Claude
+		// The instructions block carries the instruction files the mode and Claude
 		// Code's instructionFiles pick (lib/claude-context.ts instructionRule): by
 		// default the CLAUDE.md family, or the project's AGENTS.md files when it
 		// has no CLAUDE.md, byte-exact with Claude Code either way. ONECODE.md
 		// rides its own higher-precedence block below.
-		blockInputs = {
+		const instructions = buildClaudeMdBlock({
 			contextFiles: discoverContextFiles({
 				cwd: ctx.cwd,
 				homeClaudeDir: claudeConfigDir(),
@@ -107,14 +114,25 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 				home: os.homedir(),
 			}),
 			memoryIndex: readMemoryIndex(ctx.cwd),
-			email: resolveEmail(ctx.cwd),
-		};
-		// The user's local date, taken once: the block is frozen after the first
+		});
+		if (instructions) {
+			pi.events.emit(REMINDER_CHANNEL, {
+				text: instructions,
+				scope: "every-turn",
+				key: REMINDER_KEY,
+				placement: "first-prepend",
+				order: CONTEXT_ORDER.claudeMd,
+			});
+		}
+		email = resolveEmail(ctx.cwd);
+		// /clear re-fires session_start: the next conversation takes its own snapshot.
+		gitStatus = undefined;
+		// The user's local date, taken once: the reminder is frozen after the first
 		// request, so a later date rides a one-shot (before_agent_start below).
-		emitClaudeMd(localDate());
+		emitDate(localDate());
 
-		// One Code's own instructions ride in a separate block AFTER # claudeMd, so
-		// they take precedence over CLAUDE.md (higher order = closer to the user text).
+		// One Code's own instructions ride in a separate block AFTER the instructions
+		// block, so they take precedence over CLAUDE.md (higher order = closer to the user text).
 		const oneCode = buildOneCodeBlock(
 			discoverOneCodeFiles({ cwd: ctx.cwd, homeOneCodeDir: oneCodeStateDir(), home: os.homedir() }),
 		);
@@ -125,16 +143,35 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 				key: ONECODE_REMINDER_KEY,
 				placement: "first-prepend",
 				order: CONTEXT_ORDER.oneCodeMd,
-				suffix: "\n\n",
 			});
 		}
 	});
 
+	// Claude Code snapshots git "at the start of the conversation": on the first
+	// turn, typed or opened from idle, never in session_start, so the several
+	// synchronous git spawns never delay the prompt opening (findings §15). The
+	// clip note names the shell tool the model has (PowerShell only without bash).
+	pi.on("turn_start", (_event, ctx) => {
+		if (gitStatus !== undefined) return;
+		const tools = pi.getActiveTools();
+		const shellTool = tools.includes("powershell") && !tools.includes("bash") ? "powershell" : "bash";
+		gitStatus = takesGitSnapshot ? collectGitStatus(ctx.cwd, undefined, shellTool) : null;
+		const context = buildContextBlock({ email, gitStatus });
+		if (!context) return;
+		pi.events.emit(REMINDER_CHANNEL, {
+			text: context,
+			scope: "every-turn",
+			key: CONTEXT_REMINDER_KEY,
+			placement: "first-prepend",
+			order: CONTEXT_ORDER.context,
+		});
+	});
+
 	// A session that crosses local midnight learns the new date on its next
 	// turn, as a one-shot on that turn's prompt (Claude Code's notice), so the
-	// frozen block on message 1 and the cached prefix stay as they are.
+	// frozen reminder on message 1 and the cached prefix stay as they are.
 	pi.on("before_agent_start", () => {
-		if (!blockInputs) return;
+		if (!blockDate) return;
 		const today = localDate();
 		if (today === shownDate) return;
 		shownDate = today;
@@ -142,9 +179,9 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	});
 
 	// A compaction starts a new prefix, and the notice may have ridden a message
-	// it folded away: rebuild the block with today's date while it costs nothing.
+	// it folded away: rebuild the reminder with today's date while it costs nothing.
 	pi.on("session_compact", () => {
 		const today = localDate();
-		if (today !== blockDate) emitClaudeMd(today);
+		if (today !== blockDate) emitDate(today);
 	});
 }

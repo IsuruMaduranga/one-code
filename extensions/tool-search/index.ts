@@ -48,7 +48,8 @@ import {
 	WITHHOLD_CHANNEL,
 	withheldMissReminderText,
 } from "../lib/deferred.ts";
-import { looksLikeAnthropicRequest } from "../lib/anthropic-payload.ts";
+import { looksLikeAnthropicRequest, MID_CONVERSATION_SYSTEM_BETA, withBetas } from "../lib/anthropic-payload.ts";
+import { addendumNamesOnBranch, liftAddenda, supportsToolAdditions, TOOL_ADDITION_BETAS, withToolAdditions } from "../lib/tool-additions.ts";
 import { MCP_TOOLS_CHANNEL, type McpToolsPayload } from "../lib/mcp-share.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
@@ -88,6 +89,8 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	const alive = sessionAlive(pi);
 	/** Names the model has been told about: the frozen listing plus every addendum. */
 	const announced = new Set<string>();
+	/** The session's model as last seen, for an announcement made outside any hook. */
+	let latestModel: { provider?: string; api?: string; compat?: unknown } | undefined;
 
 	const searchableTools = () =>
 		pi
@@ -115,6 +118,12 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 			// Unkeyed on purpose: a keyed next-turn reminder replaces its
 			// predecessor, and an addendum replaced before delivery would lose names.
 			pi.events.emit(REMINDER_CHANNEL, { text: deferredAddendumText(plan.added) });
+			// Where the request carries it as Claude Code's tool_addition, the model
+			// calls the tool directly, so pi's dispatcher must already accept it.
+			if (supportsToolAdditions(latestModel)) {
+				for (const name of plan.added) loadedBefore.add(name);
+				pi.setActiveTools([...new Set([...pi.getActiveTools(), ...plan.added])]);
+			}
 		}
 		applyAnnouncement(announced, plan);
 	};
@@ -148,8 +157,15 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		}
 	});
 
-	pi.on("context", () => {
+	/** The addenda the last `context` pass lifted off tool results, by call id (lib/tool-additions.ts). */
+	let addendaByCall = new Map<string, string[]>();
+	pi.on("context", (event, ctx) => {
 		requestSent = true;
+		addendaByCall = new Map();
+		if (!supportsToolAdditions(ctx?.model) || !Array.isArray(event?.messages)) return undefined;
+		const lifted = liftAddenda(event.messages);
+		addendaByCall = lifted.byCall;
+		return lifted.messages === event.messages ? undefined : { messages: lifted.messages };
 	});
 
 	// Every tool_search load of this session (call id → names), seeded from the
@@ -178,13 +194,29 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 	// openai and openai-codex) a loaded tool leaves `tools` for pi-ai's own
 	// load item at the tool_search result instead (stabilizeResponsesToolLoads).
 	pi.on("before_provider_request", (event, ctx) => {
+		latestModel = ctx.model;
 		const toolLoadCompat = responsesToolLoadCompat(ctx.model as ResponsesToolLoadModel | undefined);
 		if (toolLoadCompat) {
 			return stabilizeResponsesToolLoads(event.payload as Record<string, unknown>, (name) => deferredRegistry.has(name), loads, toolLoadCompat);
 		}
-		if (!supportsToolReferences(ctx.model as { provider?: string; id?: string } | undefined)) return undefined;
-		if (!looksLikeAnthropicRequest(event.payload)) return undefined;
-		return stabilizeDeferredTools(event.payload as Record<string, unknown>, pi.getAllTools(), (name) => deferredRegistry.has(name), loads);
+		const original = event.payload as Record<string, unknown>;
+		const additions = supportsToolAdditions(ctx.model) && looksLikeAnthropicRequest(original);
+		// The context step lifted this request's addenda off their tool results;
+		// whatever happens below, they go out (lib/tool-additions.ts).
+		const announceAsText = () => {
+			const text = additions ? withToolAdditions(original, addendaByCall, false) : undefined;
+			return text ? withBetas(text.payload, [MID_CONVERSATION_SYSTEM_BETA]) : undefined;
+		};
+		if (!supportsToolReferences(ctx.model as { provider?: string; id?: string } | undefined) || !looksLikeAnthropicRequest(original)) return announceAsText();
+		const isDeferred = (name: string) => deferredRegistry.has(name);
+		// A tool that arrived mid-session goes out as Claude Code's tool_addition
+		// where the model takes one, declared deferred.
+		const lifted = additions ? withToolAdditions(original, addendaByCall) : undefined;
+		const stable = stabilizeDeferredTools(lifted?.payload ?? original, pi.getAllTools(), isDeferred, loads, new Set(lifted?.names ?? []));
+		// Renamed (OAuth) tools cannot be referenced: the active tools stay as pi
+		// rendered them and the addition goes as text.
+		if (!stable) return announceAsText();
+		return lifted ? withBetas(stable, TOOL_ADDITION_BETAS) : stable;
 	});
 
 
@@ -236,8 +268,12 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 		// new_session emits session_start twice, findings §3); deferAll below
 		// announces the fresh one.
 		clearAnnounce();
-		loads = toolSearchLoads(ctx?.sessionManager?.getBranch?.() ?? []);
+		latestModel = ctx?.model;
+		const branch = ctx?.sessionManager?.getBranch?.() ?? [];
+		loads = toolSearchLoads(branch);
 		loadedBefore = new Set([...loads.values()].flat());
+		// Tools added mid-session by tool_addition stay callable after a resume.
+		if (supportsToolAdditions(latestModel)) for (const name of addendumNamesOnBranch(branch)) loadedBefore.add(name);
 		// A new session (/clear, or a resume in a new process) has no cached prefix
 		// yet: its first request gets a freshly written listing.
 		requestSent = false;

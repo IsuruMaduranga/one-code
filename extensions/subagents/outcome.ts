@@ -30,7 +30,7 @@ export interface ForkIsolation {
  */
 export function forkTaskMessage(task: string, isolation?: ForkIsolation): string {
 	const lines = [
-		"You are a forked subagent. The conversation above is inherited context, for reference only — do NOT continue its open threads, verify its claims, or act on its plans. Do ONLY the task below; your final message is returned to the parent conversation verbatim, as data. You cannot see the parent's background tasks: its task ids are not addressable from here.",
+		"You are a forked subagent. The conversation above is inherited context, for reference only — do NOT continue its open threads, verify its claims, or act on its plans. Do ONLY the task below; the report you hand back through SubagentHandback is returned to the parent conversation verbatim, as data. You cannot see the parent's background tasks: its task ids are not addressable from here.",
 	];
 	if (isolation) {
 		lines.push(

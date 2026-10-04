@@ -18,7 +18,7 @@
 
 import type { Api, Model, ThinkingLevel } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { defineTool, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { recordUsage } from "../lib/usage-bus.ts";
 import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
@@ -29,6 +29,8 @@ import { tryNativeWeb } from "../lib/anthropic-server-call.ts";
 import { CUT_OFF_NOTE, fetchOutcome, isPrivateOrLocalUrl, nativeFetchBody, type ThinkingFields } from "../lib/anthropic-server-tools.ts";
 import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
+import { registerFormTool } from "../lib/tool-variants.ts";
+import { webFetchDescription } from "./description.ts";
 
 const DEFAULT_MAX_CHARS = 30_000;
 const CACHE_TTL_MS = 15 * 60 * 1000;
@@ -229,12 +231,12 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 		}
 	};
 
-	pi.registerTool({
+	// Short or long text by the model's tier (description.ts, lib/tool-variants.ts).
+	const tool = defineTool({
 		name: "web_fetch",
 		label: "Web Fetch",
 		...ccToolRenderers("Web Fetch"),
-		description:
-			"Fetch a URL and return its readable content as markdown. Navigation and boilerplate are stripped. Pass `prompt` to have a small fast model answer it from the full page instead of returning the page itself — prefer that for long pages (on an Anthropic API-key session, Anthropic's server-side fetch answers it). Without `prompt`, long pages are windowed; pass `offset` to continue reading. Responses are cached for 15 minutes. Cross-host redirects are reported instead of followed; call again with the new URL to follow one.",
+		description: webFetchDescription("short"),
 		parameters: Type.Object({
 			url: Type.String({ description: "URL to fetch (http is upgraded to https)" }),
 			prompt: Type.Optional(
@@ -391,6 +393,7 @@ export default function webFetchExtension(pi: ExtensionAPI) {
 			}
 		},
 	});
+	registerFormTool(pi, tool, webFetchDescription);
 
 	pi.events.emit(DEFER_CHANNEL, {
 		name: "web_fetch",

@@ -9,7 +9,6 @@ import {
 	isPrivateScratchpad,
 	ownerDirProblem,
 	scratchpadDir,
-	scratchpadPromptSection,
 	sessionScratchpadDir,
 } from "../../extensions/lib/scratchpad.ts";
 import { isInsideDir } from "../../extensions/permissions/matcher.ts";
@@ -23,17 +22,6 @@ describe("scratchpadDir", () => {
 
 	it("drops the uid suffix where the platform has none", () => {
 		expect(scratchpadDir("/tmp", undefined, "/home/u/proj", "s1")).toBe(join("/tmp", "onecode", "-home-u-proj", "s1", "scratchpad"));
-	});
-});
-
-describe("scratchpadPromptSection", () => {
-	it("carries Claude Code's wording and the concrete path", () => {
-		const section = scratchpadPromptSection("/private/tmp/onecode-501/-p/s/scratchpad");
-		expect(section).toContain("# Scratchpad Directory");
-		expect(section).toContain("`/private/tmp/onecode-501/-p/s/scratchpad`");
-		expect(section).toContain("instead of `/tmp`");
-		expect(section).toContain("Only use `/tmp` if the user explicitly requests it.");
-		expect(section).toContain("without permission prompts");
 	});
 });
 

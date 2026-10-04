@@ -33,10 +33,11 @@ project's instruction files.
 To give One Code instructions that Claude Code shouldn't read, add an
 `ONECODE.md`. See [ONECODE.md](sessions-and-context.md#onecodemd).
 
-To generate a `CLAUDE.md` for a project that lacks one, run `/init`. It has
-the model survey the project (build, test, and lint commands, layout,
-existing AI-tool configuration), ask you about what the code can't answer,
-and write the file. It never overwrites an existing `CLAUDE.md` silently.
+To generate a `CLAUDE.md` for a project that lacks one, run `/init`. It sends
+the prompt Claude Code's `/init` sends: the model reads the project and writes
+down how to build, lint, and test it and the big-picture architecture, folding
+in your README and any Cursor, Copilot, or `AGENTS.md` rules. If the project
+already has a `CLAUDE.md`, it suggests improvements instead.
 
 ## Skills, commands, and agents
 

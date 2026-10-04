@@ -137,22 +137,3 @@ export function privateSessionTempDir(cwd: string, sessionId: string): string | 
 	const scratchpad = sessionScratchpadDir(cwd, sessionId);
 	return ensurePrivateScratchpad(scratchpad) ? dirname(scratchpad) : undefined;
 }
-
-/** Claude Code's Scratchpad Directory prompt section, verbatim (see payload.json). */
-export function scratchpadPromptSection(dir: string): string {
-	return `# Scratchpad Directory
-
-IMPORTANT: Always use this scratchpad directory for temporary files instead of \`/tmp\` or other system temp directories:
-\`${dir}\`
-
-Use this directory for ALL temporary file needs:
-- Storing intermediate results or data during multi-step tasks
-- Writing temporary scripts or configuration files
-- Saving outputs that don't belong in the user's project
-- Creating working files during analysis or processing
-- Any file that would otherwise go to \`/tmp\`
-
-Only use \`/tmp\` if the user explicitly requests it.
-
-The scratchpad directory is session-specific, isolated from the user's project, and can generally be used without permission prompts.`;
-}

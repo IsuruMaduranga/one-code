@@ -25,6 +25,7 @@ import { findConfigured, modelSpec } from "../lib/model-policy.ts";
 import { isModelUnavailableError } from "../auto-mode/model-select.ts";
 import { type AgentDefinition, agentToolOptions, unusableAllowlistError } from "./agents.ts";
 import { CHILD_EXTENSION_PATHS } from "../lib/child-extensions.ts";
+import { type HandbackSlot, SUBAGENT_HANDBACK, subagentHandbackExtension } from "../lib/subagent-handback.ts";
 import type { RequestCapture } from "../lib/request-replay.ts";
 import { forkCacheExtension } from "./fork-cache.ts";
 import type { ChildHandle, ChildOutcome, RpcChildHandle } from "./outcome.ts";
@@ -55,11 +56,12 @@ const WALL_CLOCK_CAP_MS = 30 * 60 * 1000;
 
 /**
  * Tools the runtime injects into a child; the permission gate must never gate
- * them. `Agent` is the injected child-spawn tool (index.ts) — the spawn itself
+ * them. `SubagentHandback` only returns the child's report to its caller.
+ * `Agent` is the injected child-spawn tool (index.ts) — the spawn itself
  * is free (matching the main conversation's auto-allowed Agent tool); every
  * tool call the spawned grandchild makes still runs through the real gate.
  */
-const NEVER_GATE = new Set(["structured_output", "SendMessage", "Agent"]);
+const NEVER_GATE = new Set(["structured_output", "SendMessage", SUBAGENT_HANDBACK, "Agent"]);
 
 type Session = AgentSession;
 
@@ -242,17 +244,23 @@ export class SubagentRuntime {
 	 * prompt and default tools, review S6); a named agent carries its own; a
 	 * plain run gets pi's base prompt. Built fresh per session (agent-loader.ts).
 	 */
-	private childLoaderOptions(spec: ChildSessionSpec): AgentLoaderOptions {
-		const systemPrompt = SubagentRuntime.isFork(spec) ? spec.parentSystemPrompt : spec.agent?.systemPrompt;
+	private childLoaderOptions(spec: ChildSessionSpec, handback: HandbackSlot): AgentLoaderOptions {
+		const fork = SubagentRuntime.isFork(spec);
+		const systemPrompt = fork ? spec.parentSystemPrompt : spec.agent?.systemPrompt;
 		return {
 			cwd: this.baseCwd,
 			agentDir: getAgentDir(),
 			systemPrompt,
 			neverGate: NEVER_GATE,
 			extraExtensionPaths: CHILD_EXTENSION_PATHS,
-			// Inline extensions load after the paths above, so this one sees the final body.
-			...(SubagentRuntime.isFork(spec) && spec.parentRequest ? { extraFactories: [forkCacheExtension(spec.parentRequest)] } : {}),
-			// claude-context (above) injects # claudeMd on the child's session_start;
+			// Every child hands back through SubagentHandback (deferred in a fork,
+			// lib/subagent-handback.ts). Inline extensions load after the paths
+			// above, so the fork-cache one, last, sees the final body.
+			extraFactories: [
+				subagentHandbackExtension(handback, { deferred: fork }),
+				...(fork && spec.parentRequest ? [forkCacheExtension(spec.parentRequest)] : []),
+			],
+			// claude-context (above) injects the CLAUDE.md instructions on the child's session_start;
 			// pi must not append the same files to the system prompt as well.
 			noContextFiles: true,
 			getPermissionBridge: this.getPermissionBridge,
@@ -281,7 +289,7 @@ export class SubagentRuntime {
 	/**
 	 * Hold a run until a sibling with the same request prefix has started
 	 * streaming (see `warmGate`): same prompt identity, same cwd (the child's
-	 * `# claudeMd` block names its paths) and same model. Resolves to the release
+	 * instructions block names its paths) and same model. Resolves to the release
 	 * for the caller's `finally`.
 	 */
 	private admitPrefix(spec: Pick<ChildSessionSpec, "cwd" | "forkFrom" | "parentSystemPrompt" | "agent">, session: Session): Promise<Release> {
@@ -360,8 +368,8 @@ export class SubagentRuntime {
 	 * inherits the parent transcript + system prompt; a fresh named run gets the
 	 * agent's own prompt and toolset.
 	 */
-	private async buildChildSession(spec: ChildSessionSpec): Promise<{ session: Session; note?: string }> {
-		const [loader, mcpTools] = await Promise.all([buildAgentLoader(this.childLoaderOptions(spec)), this.getMcpTools()]);
+	private async buildChildSession(spec: ChildSessionSpec, handback: HandbackSlot): Promise<{ session: Session; note?: string }> {
+		const [loader, mcpTools] = await Promise.all([buildAgentLoader(this.childLoaderOptions(spec, handback)), this.getMcpTools()]);
 		const newSessionManager = () => newChildSessionManager(spec);
 		// A fork keeps the parent's toolset; only a named agent carries tool lists.
 		const agent = spec.forkFrom ? undefined : spec.agent;
@@ -447,7 +455,7 @@ export class SubagentRuntime {
 				// corrupt session file, loader error) must resolve to a failed
 				// outcome, never reject handle.result — call sites like the
 				// SendMessage resume path consume it with a bare .then().
-				const built = await this.buildChildSession(options);
+				const built = await this.buildChildSession(options, tracker);
 				session = built.session;
 				spawnNote = built.note;
 				unsubscribe = this.wireTracker(session, tracker, options.onProgress, undefined, options.sink);
@@ -499,10 +507,10 @@ export class SubagentRuntime {
 	 * while an idle resident lives until task_stop / session shutdown.
 	 */
 	async runResident(options: ResidentRunOptions): Promise<RpcChildHandle> {
-		const built = await this.buildChildSession(options);
+		const tracker = new SessionTurnTracker();
+		const built = await this.buildChildSession(options, tracker);
 		const session = built.session;
 		let spawnNote = built.note;
-		const tracker = new SessionTurnTracker();
 		let exited = false;
 		let turnActive = false;
 		let firstTurn = true;

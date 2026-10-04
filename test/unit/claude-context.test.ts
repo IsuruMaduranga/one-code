@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	AGENTS_DESCRIPTOR,
 	buildClaudeMdBlock,
+	buildContextBlock,
+	dateBlock,
 	buildOneCodeBlock,
 	discoverContextFilePaths,
 	discoverContextFiles,
@@ -19,7 +21,7 @@ import { wrapReminder } from "../../extensions/lib/reminders.ts";
 import { truncateIndex } from "../../extensions/lib/memory.ts";
 
 describe("buildClaudeMdBlock", () => {
-	it("assembles the block byte-for-byte per Claude Code's join rule", () => {
+	it("assembles the instructions block byte-for-byte per Claude Code's join rule", () => {
 		const inner = buildClaudeMdBlock({
 			contextFiles: [
 				{
@@ -34,16 +36,12 @@ describe("buildClaudeMdBlock", () => {
 				},
 			],
 			memoryIndex: { path: "/m/MEMORY.md", content: "# Memory index\n\n- entry\n" },
-			email: "a@b.com",
-			date: "2026-08-09",
 		});
 
 		// Exact bytes: preamble\n\n, sections joined by "\n" (raw content keeps its
-		// trailing "\n", so inter-section gaps are "\n\n"), memory's own trailing
-		// "\n" is the single "\n" before # userEmail, and a 6-space trailer.
+		// trailing "\n", so inter-section gaps are "\n\n"), and the last section
+		// without its final "\n": the reminder frame supplies it.
 		const expected = [
-			"As you answer the user's questions, you can use the following context:",
-			"# claudeMd",
 			"Codebase and user instructions are shown below. Be sure to adhere to these instructions. IMPORTANT: These instructions OVERRIDE any default behavior and you MUST follow them exactly as written.",
 			"",
 			"Contents of /g/CLAUDE.md (user's private global instructions for all projects):",
@@ -59,15 +57,10 @@ describe("buildClaudeMdBlock", () => {
 			"# Memory index",
 			"",
 			"- entry",
-			"# userEmail",
-			"The user's email address is a@b.com.",
-			"# currentDate",
-			"Today's date is 2026-08-09.",
-			"",
-			"      IMPORTANT: this context may or may not be relevant to your tasks. You should not respond to this context unless it is highly relevant to your task.",
 		].join("\n");
 
 		expect(inner).toBe(expected);
+		expect(wrapReminder(inner ?? "").endsWith("- entry\n</system-reminder>")).toBe(true);
 	});
 
 	it("omits the memory section when the index is empty", () => {
@@ -76,8 +69,6 @@ describe("buildClaudeMdBlock", () => {
 				{ path: "/p/CLAUDE.md", content: "Rules.\n", descriptor: "project instructions, checked into the codebase" },
 			],
 			memoryIndex: { path: "/m/MEMORY.md", content: "   \n" },
-			email: "a@b.com",
-			date: "2026-08-09",
 		});
 		expect(inner).not.toContain("MEMORY.md");
 		expect(inner).toContain("Contents of /p/CLAUDE.md");
@@ -88,18 +79,43 @@ describe("buildClaudeMdBlock", () => {
 		const inner = buildClaudeMdBlock({
 			contextFiles: [{ path: "/p/CLAUDE.md", content: "Use tabs.", descriptor: PROJECT_DESCRIPTOR }],
 			memoryIndex: { path: "/m/MEMORY.md", content: cut },
-			email: "a@b.com",
-			date: "2026-09-27",
 		});
 		expect(inner).toContain("Use tabs.\n\nContents of /m/MEMORY.md");
 		expect(inner).toContain("- [entry 200](e200.md) — one line\n\n> WARNING: MEMORY.md is 230 lines (limit: 200).");
-		expect(inner).toContain("move detail into topic files.\n# userEmail\nThe user's email address is a@b.com.\n");
+		expect(inner?.endsWith("move detail into topic files.")).toBe(true);
 		const oneCode = buildOneCodeBlock([{ path: "/p/ONECODE.md", content: "Be brief.", descriptor: ONECODE_DESCRIPTOR }, { path: "/q/ONECODE.md", content: "x\n", descriptor: ONECODE_DESCRIPTOR }]);
 		expect(oneCode).toContain("Be brief.\n\nContents of /q/ONECODE.md");
+		expect(oneCode?.endsWith("x")).toBe(true);
 	});
 
 	it("returns null when there is nothing to inject", () => {
-		expect(buildClaudeMdBlock({ contextFiles: [], memoryIndex: null, email: null, date: "2026-08-09" })).toBeNull();
+		expect(buildClaudeMdBlock({ contextFiles: [], memoryIndex: null })).toBeNull();
+	});
+});
+
+describe("buildContextBlock and dateBlock", () => {
+	it("frames the email and the git snapshot with Claude Code's preamble, sentence and footer", () => {
+		const git = "# gitStatus\nThis is the git status at the start of the conversation.\n\nCurrent branch: main";
+		expect(buildContextBlock({ email: "a@b.com", gitStatus: git })).toBe(
+			[
+				"As you answer the user's questions, you can use the following context:",
+				"# userEmail",
+				"The user's email address is a@b.com. Use it only to identify the user, such as for authorship, attribution, or filtering their own work. Never send it to an unrelated service, such as in a request header, URL, or payload, unless the user explicitly asks.",
+				git,
+				"",
+				"One Code attached this context automatically; it isn't part of the user's message. It describes the user's own account and workspace, so they don't need it reported back.",
+			].join("\n"),
+		);
+	});
+
+	it("keeps whichever part exists, and is null with neither", () => {
+		expect(buildContextBlock({ email: null, gitStatus: "# gitStatus\nx" })).toContain("context:\n# gitStatus\nx\n\nOne Code attached");
+		expect(buildContextBlock({ email: "a@b.com", gitStatus: null })).toContain("unless the user explicitly asks.\n\nOne Code attached");
+		expect(buildContextBlock({ email: null, gitStatus: null })).toBeNull();
+	});
+
+	it("states the date as its own sentence", () => {
+		expect(dateBlock("2026-10-04")).toBe("Today's date is 2026-10-04.");
 	});
 });
 

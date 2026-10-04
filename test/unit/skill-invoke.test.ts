@@ -1,14 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
 	PI_BUILTIN_COMMANDS,
-	buildSkillBlock,
+	commandBreadcrumb,
 	isBareCommandName,
+	launchingSkill,
 	offSkillNotice,
 	parseSkillCommand,
 	redactOffSkillMessages,
 	redactOffSkillText,
 	resolveSkill,
 	skillCommandCandidates,
+	skillPromptText,
+	substituteSkillArguments,
+	typedSkillContent,
 	withoutDuplicateSkillCommands,
 } from "../../extensions/skill/invoke.ts";
 
@@ -70,26 +74,58 @@ describe("resolveSkill", () => {
 	});
 });
 
-describe("buildSkillBlock", () => {
-	it("reproduces pi's skill block with the directory as the reference base", () => {
-		const block = buildSkillBlock({ name: "simplify", filePath: "/skills/simplify/SKILL.md" }, "Do the thing.", "");
-		expect(block).toBe(
-			'<skill name="simplify" location="/skills/simplify/SKILL.md">\n' +
-				"References are relative to /skills/simplify.\n\n" +
-				"Do the thing.\n" +
-				"</skill>",
+describe("Claude Code's skill message", () => {
+	it("writes the typed command's breadcrumb, with the arguments only when there are some", () => {
+		expect(commandBreadcrumb("fixture-kit:kit-skill-02", "")).toBe(
+			"<command-message>fixture-kit:kit-skill-02</command-message>\n<command-name>/fixture-kit:kit-skill-02</command-name>\n",
+		);
+		expect(commandBreadcrumb("loop", "5m check CI")).toBe(
+			"<command-message>loop</command-message>\n<command-name>/loop</command-name>\n<command-args>5m check CI</command-args>\n",
 		);
 	});
 
-	it("appends args after a blank line", () => {
-		const block = buildSkillBlock({ name: "s", filePath: "/a/b/SKILL.md" }, "body", "extra instructions");
-		expect(block.endsWith("</skill>\n\nextra instructions")).toBe(true);
+	it("names the skill's folder before its text, and nothing for One Code's own catalog", () => {
+		expect(skillPromptText("Body of skill 02.", "", "/p/skills/kit-skill-02")).toBe("Base directory for this skill: /p/skills/kit-skill-02\n\nBody of skill 02.");
+		expect(skillPromptText("Review it.", "", undefined)).toBe("Review it.");
+	});
+
+	it("builds the typed message as two blocks, each ending in a newline", () => {
+		const [breadcrumb, text] = typedSkillContent("kit-skill-02", "", skillPromptText("Body of skill 02.", "", "/d"));
+		expect(breadcrumb).toBe("<command-message>kit-skill-02</command-message>\n<command-name>/kit-skill-02</command-name>\n");
+		expect(text).toBe("Base directory for this skill: /d\n\nBody of skill 02.\n");
+		expect(typedSkillContent("x", "", "ends\n")[1]).toBe("ends\n");
+	});
+
+	it("answers a model's call with Claude Code's launch line", () => {
+		expect(launchingSkill("workflow-authoring")).toBe("Launching skill: workflow-authoring");
 	});
 });
 
+describe("substituteSkillArguments (Claude Code's rule)", () => {
+	it("appends the arguments on an ARGUMENTS line when the text has no placeholder", () => {
+		expect(substituteSkillArguments("Do it.", "the parser")).toBe("Do it.\n\nARGUMENTS: the parser");
+		expect(substituteSkillArguments("Do it.", "")).toBe("Do it.");
+	});
+
+	it("fills $ARGUMENTS, $ARGUMENTS[n] and $n, counting from 0", () => {
+		expect(substituteSkillArguments("Review $ARGUMENTS now", "a b")).toBe("Review a b now");
+		expect(substituteSkillArguments("first $0, second $ARGUMENTS[1]", "a b")).toBe("first a, second b");
+	});
+
+	it("keeps a missing index and an escaped dollar literal, and never substitutes inside an argument", () => {
+		expect(substituteSkillArguments("$3 and $ARGUMENTS[4]", "a")).toBe("$3 and $ARGUMENTS[4]\n\nARGUMENTS: a");
+		expect(substituteSkillArguments("cost \\$1 for $ARGUMENTS", "x")).toBe("cost $1 for x");
+		expect(substituteSkillArguments("$ARGUMENTS then $0", "$0")).toBe("$0 then $0");
+	});
+});
+
+/** pi's own `/skill:` expansion, the block the redaction fallback matches. */
+const piSkillBlock = (name: string, filePath: string, body: string): string =>
+	`<skill name="${name}" location="${filePath}">\nReferences are relative to ${filePath.slice(0, filePath.lastIndexOf("/"))}.\n\n${body}\n</skill>`;
+
 describe("redactOffSkillText", () => {
-	const offBlock = buildSkillBlock({ name: "deploy", filePath: "/s/deploy/SKILL.md" }, "secret steps", "");
-	const onBlock = buildSkillBlock({ name: "review", filePath: "/s/review/SKILL.md" }, "review steps", "");
+	const offBlock = piSkillBlock("deploy", "/s/deploy/SKILL.md", "secret steps");
+	const onBlock = piSkillBlock("review", "/s/review/SKILL.md", "review steps");
 	const isOff = (name: string) => name === "deploy";
 
 	it("replaces an off skill's block with the refusal notice", () => {
@@ -116,7 +152,7 @@ describe("redactOffSkillText", () => {
 });
 
 describe("redactOffSkillMessages", () => {
-	const offBlock = buildSkillBlock({ name: "deploy", filePath: "/s/deploy/SKILL.md" }, "secret steps", "");
+	const offBlock = piSkillBlock("deploy", "/s/deploy/SKILL.md", "secret steps");
 	const isOff = (name: string) => name === "deploy";
 
 	it("rewrites user string content and text blocks, leaving other messages alone", () => {
@@ -138,7 +174,7 @@ describe("redactOffSkillMessages", () => {
 	it("returns undefined when no message contains an off skill's block", () => {
 		const messages = [
 			{ role: "user", content: "hello" },
-			{ role: "user", content: buildSkillBlock({ name: "review", filePath: "/s/r/SKILL.md" }, "steps", "") },
+			{ role: "user", content: piSkillBlock("review", "/s/r/SKILL.md", "steps") },
 		];
 		expect(redactOffSkillMessages(messages, isOff)).toBeUndefined();
 	});
