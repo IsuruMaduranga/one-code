@@ -21,12 +21,13 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import os from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
 	buildClaudeMdBlock,
 	buildContextBlock,
 	buildOneCodeBlock,
+	collectImportedPaths,
 	dateBlock,
 	dateChangeReminder,
 	discoverContextFiles,
@@ -38,7 +39,7 @@ import {
 } from "../lib/claude-context.ts";
 import { collectGitStatus, GIT_SNAPSHOT_OWNER_CHANNEL } from "../lib/git-status.ts";
 import { projectMemoryDir, truncateIndex } from "../lib/memory.ts";
-import { claudeConfigDir, oneCodeStateDir } from "../lib/paths.ts";
+import { claudeConfigDir, oneCodeStateDir, tryRealpath } from "../lib/paths.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { resolveToolPath } from "../lib/tool-path.ts";
 import { pathArgument } from "../auto-mode/paths.ts";
@@ -58,6 +59,14 @@ function resolveEmail(cwd: string): string | null {
 		// no git / no config — fall through
 	}
 	return process.env.GIT_AUTHOR_EMAIL?.trim() || process.env.EMAIL?.trim() || null;
+}
+
+function readOrEmpty(path: string): string {
+	try {
+		return readFileSync(path, "utf8");
+	} catch {
+		return "";
+	}
 }
 
 function readMemoryIndex(cwd: string): { path: string; content: string } | null {
@@ -91,7 +100,12 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	let blockDate = "";
 	/** The date the model was last told: the reminder's, or a later date-change notice's. */
 	let shownDate = "";
-	/** Nested instruction files already attached since the session (or its last compaction) began. */
+	/**
+	 * Instruction files in context, by real path: the startup block's files and
+	 * their imports (`startupShown`, fixed for the session), plus nested files
+	 * attached, their imports, and files the model read itself.
+	 */
+	let startupShown = new Set<string>();
 	let attachedNested = new Set<string>();
 	/** The instruction rule, read with the startup block (it is settings, read once a session). */
 	let rule: ReturnType<typeof instructionRule> | undefined;
@@ -114,15 +128,17 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		// default the CLAUDE.md family, or the project's AGENTS.md files when it
 		// has no CLAUDE.md, byte-exact with Claude Code either way. ONECODE.md
 		// rides its own higher-precedence block below.
-		const instructions = buildClaudeMdBlock({
-			contextFiles: discoverContextFiles({
-				cwd: ctx.cwd,
-				homeClaudeDir: claudeConfigDir(),
-				rule: instructionRule(os.homedir()),
-				home: os.homedir(),
-			}),
-			memoryIndex: readMemoryIndex(ctx.cwd),
+		const contextFiles = discoverContextFiles({
+			cwd: ctx.cwd,
+			homeClaudeDir: claudeConfigDir(),
+			rule: instructionRule(os.homedir()),
+			home: os.homedir(),
 		});
+		const instructions = buildClaudeMdBlock({ contextFiles, memoryIndex: readMemoryIndex(ctx.cwd) });
+		// A file the startup block carries (or imports) is never attached again on a read.
+		startupShown = new Set(
+			contextFiles.flatMap((file) => [file.path, ...collectImportedPaths(readOrEmpty(file.path), dirname(file.path), { home: os.homedir() })]).map((p) => tryRealpath(p) ?? p),
+		);
 		if (instructions) {
 			pi.events.emit(REMINDER_CHANNEL, {
 				text: instructions,
@@ -133,7 +149,7 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 			});
 		}
 		email = resolveEmail(ctx.cwd);
-		attachedNested = new Set();
+		attachedNested = new Set(startupShown);
 		rule = instructionRule(os.homedir());
 		// /clear re-fires session_start: the next conversation takes its own snapshot.
 		gitStatus = undefined;
@@ -194,7 +210,12 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		const today = localDate();
 		if (today !== blockDate) emitDate(today);
 		// The summary does not carry them: the next read below their directory attaches them again.
-		attachedNested = new Set();
+		attachedNested = new Set(startupShown);
+	});
+
+	// A branch switch leaves the attachments of the branch left behind; the new one may lack them.
+	pi.on("session_tree", () => {
+		attachedNested = new Set(startupShown);
 	});
 
 	// Claude Code's nested instructions: reading a file below the working
@@ -207,10 +228,14 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		const raw = pathArgument(event.input);
 		if (!raw) return;
 		rule ??= instructionRule(os.homedir());
-		const files = nestedInstructionFiles({ filePath: resolveToolPath(raw, ctx.cwd), cwd: ctx.cwd, rule, home: os.homedir() });
+		const filePath = resolveToolPath(raw, ctx.cwd);
+		const files = nestedInstructionFiles({ filePath, cwd: ctx.cwd, rule, home: os.homedir() });
+		// A file the model read itself is in context already.
+		attachedNested.add(tryRealpath(filePath) ?? filePath);
 		for (const file of files) {
-			if (attachedNested.has(file.path)) continue;
-			attachedNested.add(file.path);
+			if (attachedNested.has(file.key)) continue;
+			attachedNested.add(file.key);
+			for (const imported of file.imported) attachedNested.add(imported);
 			pi.events.emit(REMINDER_CHANNEL, { text: nestedInstructionText(file) });
 		}
 	});

@@ -3,7 +3,7 @@
  * directory attaches the instruction files of the directories in between,
  * once each (lib/claude-context.ts nestedInstructionFiles, claude-context/index.ts).
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -46,6 +46,34 @@ describe("nestedInstructionFiles", () => {
 		expect(files(join(root, "src", "reports", "summary.py"), "agents-md")).toEqual([join(root, "src", "reports", "AGENTS.md")]);
 	});
 
+	it("never reads a file that resolves outside the project, nor an import outside it", () => {
+		const outside = mkdtempSync(join(tmpdir(), "nested-outside-"));
+		try {
+			writeFileSync(join(outside, "secret.txt"), "OUTSIDE-SECRET\n");
+			mkdirSync(join(root, "lib"));
+			writeFileSync(join(root, "lib", "x.ts"), "x\n");
+			symlinkSync(join(outside, "secret.txt"), join(root, "lib", "CLAUDE.md"));
+			expect(files(join(root, "lib", "x.ts"))).toEqual([]);
+			writeFileSync(join(root, "src", "reports", "CLAUDE.md"), `Rules.\n@${join(outside, "secret.txt")}\n`);
+			const [first] = nestedInstructionFiles({ filePath: join(root, "src", "reports", "summary.py"), cwd: root, rule: "claude-md", home: root });
+			expect(first?.content).not.toContain("OUTSIDE-SECRET");
+		} finally {
+			rmSync(outside, { recursive: true, force: true });
+		}
+	});
+
+	it("treats a symlink and its target as one file", () => {
+		rmSync(join(root, "src", "reports", "CLAUDE.local.md"));
+		symlinkSync(join(root, "src", "reports", "CLAUDE.md"), join(root, "src", "reports", "CLAUDE.local.md"));
+		expect(files(join(root, "src", "reports", "summary.py"))).toEqual([join(root, "src", "reports", "CLAUDE.md")]);
+	});
+
+	it("decides the AGENTS.md fallback for the whole project, as at startup", () => {
+		writeFileSync(join(root, "src", "AGENTS.md"), "agents rules\n");
+		// The project root has a CLAUDE.md, so claude-md-or-agents-md loads no AGENTS.md anywhere.
+		expect(nestedInstructionFiles({ filePath: join(root, "src", "a.py"), cwd: root, rule: "claude-md-or-agents-md", home: root })).toEqual([]);
+	});
+
 	it("renders Claude Code's nested_memory text", () => {
 		expect(nestedInstructionText({ path: "/p/src/CLAUDE.md", content: "rule\n" })).toBe("Contents of /p/src/CLAUDE.md:\n\nrule\n");
 	});
@@ -65,5 +93,10 @@ describe("claude-context: a read attaches nested instructions once", () => {
 		await read("src/reports/summary.py");
 		await read("src/reports/deep/x.py");
 		expect(texts).toEqual([`Contents of ${join(root, "src", "reports", "CLAUDE.md")}:\n\nAmounts are integer cents.\n`, `Contents of ${join(root, "src", "reports", "CLAUDE.local.md")}:\n\nlocal note\n`]);
+
+		// A branch switch forgets what the branch left behind carried: the next read attaches again.
+		await fake.fire("session_tree", {}, ctx);
+		await read("src/reports/summary.py");
+		expect(texts).toHaveLength(4);
 	});
 });

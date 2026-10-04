@@ -387,28 +387,50 @@ export function projectInstructionFiles(opts: { cwd: string; home: string; homeO
  * the working directory (its `nested_memory` attachment): for each directory
  * from just below cwd down to the file's own, `CLAUDE.md`, `.claude/CLAUDE.md`
  * and `CLAUDE.local.md`, under the same rule as the startup block (AGENTS.md
- * per `rule`, none of the CLAUDE.md family in independent mode), plus One
+ * per `rule`, decided for the whole project as at startup; none of the
+ * CLAUDE.md family and no `.claude` directory in independent mode), plus One
  * Code's ONECODE.md. Directories at or above cwd are left out: the startup
- * block already carries them. The file being read is never its own attachment.
- * Not yet replicated: `.claude/rules/*.md` (One Code reads no rules directory).
+ * block already carries them. Not yet replicated: `.claude/rules/*.md`.
+ *
+ * Every file is judged by its real path (an adversarial GPT-6 Astra run,
+ * 2026-10-04): one that resolves outside the project is never read, a symlink
+ * and its target are one file (`key`), the file being read is never its own
+ * attachment, and `@` imports reach only files inside the project, as Claude
+ * Code loads nested files without external imports. `imported` lists the real
+ * paths each file's imports pulled in, so the caller can treat them as shown.
  */
-export function nestedInstructionFiles(opts: { filePath: string; cwd: string; rule: InstructionRule; home: string }): { path: string; content: string }[] {
+export function nestedInstructionFiles(opts: {
+	filePath: string;
+	cwd: string;
+	rule: InstructionRule;
+	home: string;
+}): { path: string; key: string; content: string; imported: string[] }[] {
 	const target = absoluteFrom(opts.cwd, opts.filePath);
 	if (!isPathAtOrUnder(target, opts.cwd) || target === absoluteFrom(opts.cwd, ".")) return [];
+	const realCwd = tryRealpath(opts.cwd) ?? opts.cwd;
+	const inProject = (path: string | undefined): path is string => path !== undefined && isPathAtOrUnder(path, realCwd);
+	// The file's directory must really be inside the project too, not only by spelling.
+	if (!inProject(tryRealpath(dirname(target)))) return [];
+	const realTarget = tryRealpath(target);
+	const claudeFiles = opts.rule !== "agents-md" && opts.rule !== "managed-only";
 	const dirs: string[] = [];
 	for (let dir = dirname(target); isPathAtOrUnder(dir, opts.cwd) && !isPathAtOrUnder(opts.cwd, dir); dir = dirname(dir)) {
 		dirs.unshift(dir);
 		if (dirname(dir) === dir) break;
 	}
-	const claudeFiles = opts.rule !== "agents-md" && opts.rule !== "managed-only";
-	const files: { path: string; content: string }[] = [];
-	for (const dir of dirs) {
+	// Independent mode reads no Claude Code location, so it never walks into a `.claude` directory.
+	const walked = claudeFiles ? dirs : dirs.filter((dir) => !dir.slice(opts.cwd.length).split(/[\\/]/).includes(".claude"));
+	// claude-md-or-agents-md is decided per project, as at startup: AGENTS.md only where no CLAUDE.md is in play.
+	const projectHasClaude = () =>
+		[...ancestorDirs(opts.cwd), ...walked].some((dir) => isPresentFile(join(dir, "CLAUDE.md")) || isPresentFile(join(dir, "CLAUDE.local.md")));
+	const agents = opts.rule === "agents-md" || opts.rule === "claude-md-and-agents-md" || (opts.rule === "claude-md-or-agents-md" && !projectHasClaude());
+	// Imports read only inside the project; anything else stays literal text.
+	const readInProject = (path: string) => (inProject(tryRealpath(path)) ? readFileIfPresent(path) : null);
+	const seen = new Set<string>(realTarget ? [realTarget] : []);
+	const files: { path: string; key: string; content: string; imported: string[] }[] = [];
+	for (const dir of walked) {
 		const candidates: string[] = [];
 		if (claudeFiles) candidates.push(join(dir, "CLAUDE.md"), join(dir, ".claude", "CLAUDE.md"));
-		const agents =
-			opts.rule === "agents-md" ||
-			opts.rule === "claude-md-and-agents-md" ||
-			(opts.rule === "claude-md-or-agents-md" && !isPresentFile(join(dir, "CLAUDE.md")) && !isPresentFile(join(dir, "CLAUDE.local.md")));
 		if (agents) {
 			candidates.push(join(dir, "AGENTS.md"));
 			if (claudeFiles) candidates.push(join(dir, ".claude", "AGENTS.md"));
@@ -417,10 +439,14 @@ export function nestedInstructionFiles(opts: { filePath: string; cwd: string; ru
 		const oneCode = firstOneCodeFile(dir);
 		if (oneCode) candidates.push(oneCode);
 		for (const path of candidates) {
-			if (path === target) continue;
+			const key = tryRealpath(path);
+			if (!inProject(key) || seen.has(key)) continue;
 			const content = readFileIfPresent(path);
 			if (content === null || content.trim() === "") continue;
-			files.push({ path, content: expandImports(content, dirname(path), { home: opts.home }) });
+			seen.add(key);
+			const imported = [...collectImportedPaths(content, dirname(path), { home: opts.home, read: readInProject })].map((p) => tryRealpath(p) ?? p);
+			for (const p of imported) seen.add(p);
+			files.push({ path, key, content: expandImports(content, dirname(path), { home: opts.home, read: readInProject }), imported });
 		}
 	}
 	return files;
