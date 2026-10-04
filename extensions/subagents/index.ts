@@ -2303,7 +2303,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
 		const record = registry.resolve(params.to);
 		if (!record) {
-			const known = registry.names().join(", ") || "(none)";
+			// Recorded runs only: a name reserved by a spawn that then failed validation is not addressable.
+			const known = registry.list().map((run) => run.name).join(", ") || "(none)";
 			return {
 				content: [
 					{
