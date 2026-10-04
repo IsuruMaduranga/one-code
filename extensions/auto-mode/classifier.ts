@@ -5,12 +5,11 @@
  *   Stage 1 grades HARM ONLY (maxTokens 64). severity < 50 → allow, no stage 2.
  *   Stage 2 applies intent + ALLOW (maxTokens 8192, <thinking> CoT) → severity +
  *   <category> (+ our verified <intent>). Both stages share one system prompt and
- *   transcript byte-for-byte. Only the system prompt (the ~30k-token ruleset) is
- *   a cache hit across stages and calls: pi-ai marks a breakpoint on the last
- *   user block only, so the <transcript> is re-read uncached
- *   by stage 2 and by every gated call on Anthropic-style providers. Known,
- *   deferred — working-docs/decisions/caching.md "Classifier transcript" and
- *   working-docs/upstream_prs.md #16 (fixable locally via pi-ai's `onPayload`).
+ *   transcript byte-for-byte. On Anthropic Messages, onPayload splits the user
+ *   text at stable history-entry boundaries and moves the user cache marker
+ *   before the pending action and stage instruction (cache.ts). Both stages
+ *   and later gated calls can read that prefix; the system markers stay intact.
+ *   Other APIs keep the single string and their provider's prefix caching.
  *
  * A one-shot `completeSimple` per stage rather than an agent session: no tools,
  * no history beyond the transcript it is handed, nothing to be talked into. Every
@@ -24,6 +23,7 @@ import { completeSimple } from "@earendil-works/pi-ai/compat";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { forcedReasoningLevel, isReasoningMandatoryError, reasoningRetryLevel } from "../lib/model-policy.ts";
 import type { AutoModeConfig } from "./config.ts";
+import { cacheClassifierHistory } from "./cache.ts";
 import {
 	buildPayload,
 	type ClassifyRequest,
@@ -127,6 +127,8 @@ export interface ClassifierState {
 	 * proactively, without an error).
 	 */
 	forcedReasoning: Map<string, ThinkingLevel>;
+	/** Previous Anthropic history boundary, a cache lookup hint only (cache.ts). */
+	cacheHistoryEnd?: number;
 }
 
 export function createClassifierState(): ClassifierState {
@@ -231,7 +233,8 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 
 	// buildPayload builds the ~110KB ruleset once and returns the grounding index
 	// derived from it, so the ruleset is not rebuilt/re-parsed a second time here.
-	const { system, userPrefix, index } = buildPayload(request);
+	const { system, userPrefix, history, tail, index } = buildPayload(request);
+	const previousHistoryEnd = deps.state.cacheHistoryEnd;
 	const stage1Text = stage1User(userPrefix);
 	// A permission rule refused something this turn, so stage 2 gets the extra
 	// instruction that the user's intent does not excuse an equivalent-effect
@@ -312,6 +315,12 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 					signal: deps.signal ? AbortSignal.any([deps.signal, timeout]) : timeout,
 					maxTokens,
 					cacheRetention: "long",
+					...(model.api === "anthropic-messages" ? {
+						onPayload: (payload: unknown) => {
+							cacheClassifierHistory(payload, [...history, tail, userText.slice(userPrefix.length)], history.length - 1, previousHistoryEnd);
+							deps.state.cacheHistoryEnd = history.length - 1;
+						},
+					} : {}),
 					...(reasoning ? { reasoning } : {}),
 				},
 			);
