@@ -16,6 +16,7 @@ import { Type } from "typebox";
 import { ccToolRenderers, safeThemeBold, safeThemeInverse, safeThemePaint } from "../lib/tui-render.ts";
 import { registerFormTool } from "../lib/tool-variants.ts";
 import { ASK_PARAMS, askDescription } from "./description.ts";
+import { askThroughDialogs } from "./dialogs.ts";
 import { type Answer, answerPairs, formatAnswers, formatDecline, type Question } from "./questions.ts";
 import { applyWidgetKey, createWidgetState, decodeWidgetKey, renderWidget, type WidgetResult } from "./widget.ts";
 
@@ -59,7 +60,9 @@ export default function askUserExtension(pi: ExtensionAPI) {
 			}
 
 			const questions = params.questions as Question[];
-			const outcome = await ctx.ui.custom<WidgetResult>((tui, theme, _keybindings, done) => {
+			// RPC has no custom UI (its custom() resolves undefined); ask through the
+			// select/input requests it forwards to the client instead (dialogs.ts).
+			const outcome = ctx.mode === "rpc" ? await askThroughDialogs(questions, ctx.ui) : await ctx.ui.custom<WidgetResult>((tui, theme, _keybindings, done) => {
 				const style = {
 					paint: safeThemePaint(theme),
 					bold: safeThemeBold(theme),
