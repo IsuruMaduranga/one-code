@@ -16,7 +16,7 @@ import { createWriteStream } from "node:fs";
 import { StringDecoder } from "node:string_decoder";
 import type { BackgroundTask } from "../background/registry.ts";
 import { whenAborted } from "../lib/abort.ts";
-import { detachedSpawnOptions, KILL_GRACE_MS, stopProcessTree, waitForChildExit } from "../lib/process-tree.ts";
+import { detachedSpawnOptions, KILL_GRACE_MS, rememberProcessGroup, stopProcessTree, waitForChildExit } from "../lib/process-tree.ts";
 import { bashSpawnOrThrow, type ShellSpawn, spawnShellCommand } from "../lib/shell-spawn.ts";
 
 export const STORED_OUTPUT_CAP = 200_000;
@@ -36,6 +36,8 @@ export interface BashFinishSummary {
 	timedOut: boolean;
 	/** Exactly what task.output() returns — never empty. */
 	output: string;
+	/** The flushed spool, absent if writing it failed. */
+	logPath?: string;
 }
 
 export interface StartBackgroundBashOptions {
@@ -62,14 +64,19 @@ export function startBackgroundBash(options: StartBackgroundBashOptions): Backgr
 		...detachedSpawnOptions(),
 		stdio: ["ignore", "pipe", "pipe"],
 	});
+	rememberProcessGroup(child);
 
 	let stored = "";
+	let overflowed = false;
+	let spoolFailed = false;
 	let ended = false;
 	let stopRequested = false;
 	let timedOut = false;
 	const log = options.logPath ? createWriteStream(options.logPath, { flags: "a" }) : undefined;
 	log?.on("error", () => {
-		// Spooling to disk is best-effort; the in-memory tail stays authoritative.
+		// Never name a missing or partial file as the full output.
+		spoolFailed = true;
+		task.logPath = undefined;
 	});
 
 	// One streaming decoder per stream: a UTF-8 character split across two
@@ -77,8 +84,10 @@ export function startBackgroundBash(options: StartBackgroundBashOptions): Backgr
 	const stdoutText = new StringDecoder("utf8");
 	const stderrText = new StringDecoder("utf8");
 	const appender = (decoder: StringDecoder) => (chunk: Buffer) => {
-		stored = tailCap(stored + decoder.write(chunk), STORED_OUTPUT_CAP);
-		log?.write(chunk);
+		const text = stored + decoder.write(chunk);
+		overflowed ||= text.length > STORED_OUTPUT_CAP;
+		stored = tailCap(text, STORED_OUTPUT_CAP);
+		if (!spoolFailed) log?.write(chunk);
 	};
 	child.stdout?.on("data", appender(stdoutText));
 	child.stderr?.on("data", appender(stderrText));
@@ -98,7 +107,9 @@ export function startBackgroundBash(options: StartBackgroundBashOptions): Backgr
 		startedAt: Date.now(),
 		logPath: options.logPath,
 		ownUI: true, // rendered live by the subagents panel's shell manager
-		output: () => stored || (task.status === "running" ? "" : EMPTY_OUTPUT_MARKER),
+		output: () => overflowed && !task.logPath
+			? `[The command's spool file could not be written, so only the last ${STORED_OUTPUT_CAP.toLocaleString("en-US")} characters of its output were kept.]\n${stored}`
+			: stored || (task.status === "running" ? "" : EMPTY_OUTPUT_MARKER),
 		stop: () => {
 			stopRequested = true;
 			// SIGTERM the tree, SIGKILL after the grace: a command that traps TERM
@@ -124,11 +135,11 @@ export function startBackgroundBash(options: StartBackgroundBashOptions): Backgr
 		// An incomplete sequence at the very end decodes as U+FFFD, as it would have.
 		const rest = stdoutText.end() + stderrText.end();
 		if (rest) stored = tailCap(stored + rest, STORED_OUTPUT_CAP);
-		task.status = status;
-		task.finishedAt = Date.now();
 		const complete = () => {
+			task.status = status;
+			task.finishedAt = Date.now();
 			finish();
-			options.onFinished(task, { exitCode, signal, stopped: stopRequested, timedOut, output: task.output() });
+			options.onFinished(task, { exitCode, signal, stopped: stopRequested, timedOut, output: task.output(), logPath: task.logPath });
 		};
 		// end() flushes asynchronously; `finished` must not resolve while the
 		// log file is still short of what output() returns, or a reader sent to

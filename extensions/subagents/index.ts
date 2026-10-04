@@ -435,9 +435,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			runtimePromise = undefined;
 			throw error;
 		}));
-	/** The runtime, or the build error as a message a failed run can report. */
+	/** The runtime, or the startup error as a message a failed run can report. */
 	const runtimeOrError = (ctx: ExtensionContext): Promise<SubagentRuntime | string> =>
-		getRuntime(ctx).catch((error: unknown) => `could not start the subagent runtime: ${error instanceof Error ? error.message : String(error)}`);
+		getRuntime(ctx)
+			.then((runtime) => shuttingDown ? "the session ended before the agent started" : runtime)
+			.catch((error: unknown) => `could not start the subagent runtime: ${error instanceof Error ? error.message : String(error)}`);
 
 	// The mcp extension answers a status request synchronously on the bus.
 	let mcpStatus: McpServerStatus[] | undefined;
@@ -1697,6 +1699,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		runtime: SubagentRuntime,
 		{ sessionFile, toolCallId, forkMessages }: { sessionFile?: string; toolCallId?: string; forkMessages?: Message[] },
 	): Promise<{ launched: boolean; line: string }> => {
+		const ended = () => {
+			registry.remove(p.record.taskId);
+			return { launched: false, line: `✗ ${p.record.name}: the session ended before the agent started.` };
+		};
+		if (shuttingDown) return ended();
 		// Captured as a string: onExit runs from a `.finally` long after this
 		// turn's ctx may be stale (review S5). The entered worktree, if any.
 		const parentCwd = workCwd(ctx);
@@ -1866,6 +1873,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		}
 		const handle = started;
 		resident.handle = handle;
+		// Construction can finish after shutdown's stop-all sweep. The handle
+		// was not registered then, so dispose it before sending any task now.
+		if (shuttingDown) {
+			await handle.kill();
+			return ended();
+		}
 		residents.set(p.record.taskId, resident);
 		liveHandles.set(p.record.taskId, handle);
 
@@ -2567,6 +2580,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			};
 		}
 
+		let settledOutput: string | undefined;
 		const task: BackgroundTask = {
 			id: taskId,
 			kind: "subagent",
@@ -2574,7 +2588,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			description: `message to ${record.name}${params.summary ? `: ${params.summary}` : ""}`,
 			status: "running",
 			startedAt: Date.now(),
-			output: () => handle.snapshot().text,
+			output: () => settledOutput ?? handle.snapshot().text,
 			stop: () => stopAgent(record.taskId, handle),
 			finished,
 		};
@@ -2590,6 +2604,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			// (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 M2). The task settles after the
 			// review, so task_output never returns the reply ahead of its verdict.
 			const review = await awaitHandBackReview(pi.events, record, outcome.actions);
+			// The outcome includes SubagentHandback and startup/abort errors;
+			// the live snapshot only contains assistant text, not the final report.
+			settledOutput = `${relocationNote}${outcome.output}`;
 			task.status = stopped ? "stopped" : outcome.failed ? "failed" : "completed";
 			task.finishedAt = Date.now();
 			finish();

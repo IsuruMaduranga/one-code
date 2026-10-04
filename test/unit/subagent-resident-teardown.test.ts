@@ -34,6 +34,32 @@ function fakeSession() {
 	};
 }
 
+describe("blocking run startup cancellation", () => {
+	it.each(["build", "prefix"])("does not prompt after kill() during the %s wait", async (wait) => {
+		const runtime = await SubagentRuntime.create(agentDir);
+		const session = { ...fakeSession(), prompt: vi.fn(async () => {}) };
+		let release!: () => void;
+		const pending = new Promise<void>((resolve) => { release = resolve; });
+		const releasePrefix = vi.fn();
+		vi.spyOn(SubagentRuntime.prototype as never, "buildChildSession").mockImplementation(async () => {
+			if (wait === "build") await pending;
+			return { session } as never;
+		});
+		vi.spyOn(SubagentRuntime.prototype as never, "admitPrefix").mockImplementation(async () => {
+			if (wait === "prefix") await pending;
+			return releasePrefix as never;
+		});
+		const handle = runtime.run({ cwd: agentDir, task: "must not run", onProgress: () => {} });
+		await Promise.resolve();
+		handle.kill();
+		release();
+		const result = await handle.result;
+		expect(session.prompt).not.toHaveBeenCalled();
+		expect(session.dispose).toHaveBeenCalledOnce();
+		expect(result.failed).toBe(true);
+	});
+});
+
 describe("resident kill()", () => {
 	it("waits for the onExit cleanup before it settles", async () => {
 		const runtime = await SubagentRuntime.create(agentDir);
@@ -66,6 +92,28 @@ describe("resident kill()", () => {
 		finishCleanup();
 		await killed;
 		expect(cleanedUp).toBe(true);
+		expect(settled).toBe(true);
+	});
+
+	it("a repeated kill still waits for the in-flight cleanup", async () => {
+		const runtime = await SubagentRuntime.create(agentDir);
+		const session = fakeSession();
+		vi.spyOn(SubagentRuntime.prototype as never, "buildChildSession").mockResolvedValue({ session } as never);
+		let finishCleanup!: () => void;
+		const handle = await runtime.runResident({
+			cwd: agentDir,
+			onProgress: () => {},
+			onTurnEnd: () => {},
+			onExit: () => new Promise<void>((resolve) => { finishCleanup = resolve; }),
+		});
+		const first = handle.kill();
+		let settled = false;
+		const second = handle.kill().then(() => { settled = true; });
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		expect(session.dispose).toHaveBeenCalledOnce();
+		expect(settled).toBe(false);
+		finishCleanup();
+		await Promise.all([first, second]);
 		expect(settled).toBe(true);
 	});
 

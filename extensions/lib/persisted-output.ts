@@ -12,7 +12,8 @@
  * The model then reads or greps the file for the parts it actually needs.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, readSync, statSync, writeFileSync } from "node:fs";
+import { StringDecoder } from "node:string_decoder";
 import { join } from "node:path";
 import { oneCodeStateDir } from "./paths.ts";
 import { privateSessionTempDir } from "./scratchpad.ts";
@@ -108,6 +109,22 @@ export function persistIfLarge(text: string, options: PersistOptions): string {
  */
 export function persistedFileBlock(file: string, size: number, preview: string, previewBytes: number = PREVIEW_BYTES): string {
 	return persistedBlock(`Output too large (${formatSize(size)}). Full output saved to: ${file}`, preview, previewBytes);
+}
+
+/** Preview an existing spool without reading or copying the whole output. */
+export function persistedFilePreview(path: string): string | undefined {
+	let fd: number | undefined;
+	try {
+		const { size } = statSync(path);
+		fd = openSync(path, "r");
+		const head = Buffer.alloc(Math.min(size, PREVIEW_BYTES));
+		const read = readSync(fd, head, 0, head.length, 0);
+		return persistedFileBlock(path, size, new StringDecoder("utf8").write(head.subarray(0, read)));
+	} catch {
+		return undefined;
+	} finally {
+		if (fd !== undefined) closeSync(fd);
+	}
 }
 
 function persistedBlock(saved: string, preview: string, previewBytes: number): string {

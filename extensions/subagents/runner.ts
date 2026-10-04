@@ -471,10 +471,10 @@ export class SubagentRuntime {
 				// A resume continues a unique history; only a fresh run shares a prefix.
 				const releasePrefix = options.sessionFile ? undefined : await this.admitPrefix(options, session);
 				try {
-					// The abort listener calls session.abort(), a no-op while nothing runs
-					// yet: a cancellation that landed during the gate wait must stop the
-					// turn from starting at all, not let it run to completion unnoticed.
-					if (options.signal?.aborted) throw new Error("cancelled before the first request was sent");
+					// abort() is a no-op before the prompt starts. Every cancellation
+					// source (signal, kill, wall-clock cap) marks the tracker first,
+					// including one that landed during construction or the prefix wait.
+					if (tracker.aborted) throw new Error("cancelled before the first request was sent");
 					// No template/command expansion: a task starting with "/" is text, not
 					// a command lookup (pi's own sendUserMessage does the same — L2).
 					await session.prompt(options.task, { expandPromptTemplates: false });
@@ -521,6 +521,7 @@ export class SubagentRuntime {
 		const session = built.session;
 		let spawnNote = built.note;
 		let exited = false;
+		let exitPromise: Promise<void> | undefined;
 		let turnActive = false;
 		let firstTurn = true;
 		let turnTimer: ReturnType<typeof setTimeout> | undefined;
@@ -647,7 +648,7 @@ export class SubagentRuntime {
 			busy: () => turnActive || !session.isIdle,
 			exited: () => exited,
 			kill: () => {
-				if (exited) return Promise.resolve();
+				if (exited) return exitPromise ?? Promise.resolve();
 				exited = true;
 				pendingSend = undefined;
 				// Report an in-flight turn as terminated, not as a normal completion:
@@ -659,13 +660,13 @@ export class SubagentRuntime {
 				// which must not race an aborting session still writing files. The
 				// returned promise settles after that cleanup too, so session_shutdown
 				// waits for exactly that.
-				return session
+				return (exitPromise = session
 					.abort()
 					.catch(() => undefined)
 					.then(async () => {
 						discard();
 						await Promise.resolve(options.onExit?.()).catch(() => undefined);
-					});
+					}));
 			},
 			release: () => {
 				if (exited || turnActive || !session.isIdle) return;

@@ -24,6 +24,13 @@
  * and the grace timer is unref'd) is SIGKILLed from a `process.on("exit")`
  * hook, so nothing One Code stopped outlives it.
  *
+ * `rememberProcessGroup` owns a background shell's group for the lifetime of
+ * this process, including descendants left by a successfully exited leader.
+ * Session replacement must not kill those intentionally launched daemons.
+ * Each module instance keeps its own groups through process listeners (never
+ * through a session context or cross-extension module state), reaps empty
+ * groups, and sends TERM synchronously on process exit or termination signals.
+ *
  * `waitForChildExit` is the counterpart on the waiting side: it settles on
  * `exit` plus a short stdio grace, never on `close` alone — a descendant the
  * kill missed (Windows: a process the `taskkill /T` snapshot did not see) can
@@ -109,6 +116,73 @@ export function killProcessTree(child: ChildProcess, signal: NodeJS.Signals = "S
 			// Already gone.
 		}
 	}
+}
+
+/** Groups owned by this producer, retained by process listeners across session replacement. */
+const rememberedGroups = new Set<ChildProcess>();
+let groupReaper: NodeJS.Timeout | undefined;
+const terminationSignals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
+const groupSignalHandlers = new Map<NodeJS.Signals, () => void>();
+
+function groupExists(child: ChildProcess): boolean {
+	if (child.pid == null) return false;
+	try {
+		// Windows has no process groups: retain the live leader for taskkill /T.
+		process.kill(process.platform === "win32" ? child.pid : -child.pid, 0);
+		return true;
+	} catch (error) {
+		return (error as NodeJS.ErrnoException).code !== "ESRCH";
+	}
+}
+
+function releaseGroupListeners(): void {
+	if (groupReaper) clearInterval(groupReaper);
+	groupReaper = undefined;
+	process.removeListener("exit", terminateRememberedGroups);
+	for (const [signal, handler] of groupSignalHandlers) process.removeListener(signal, handler);
+	groupSignalHandlers.clear();
+}
+
+/** Exit handlers cannot await a grace period. Existing explicit stops retain their TERM/KILL escalation below. */
+function terminateRememberedGroups(): void {
+	for (const child of rememberedGroups) {
+		if (groupExists(child)) killProcessTree(child, "SIGTERM");
+	}
+	rememberedGroups.clear();
+	releaseGroupListeners();
+}
+
+/**
+ * Remember a detached background tree from spawn until its group becomes empty.
+ * Register before awaiting its leader, so even immediate process exit covers
+ * running work. The unref'd reaper cannot keep a print run alive. No session
+ * shutdown handler touches this set; process listeners keep its module instance
+ * alive even when jiti builds a new extension instance after /clear.
+ */
+export function rememberProcessGroup(child: ChildProcess): void {
+	if (child.pid == null || rememberedGroups.has(child)) return;
+	rememberedGroups.add(child);
+	if (groupReaper) return;
+	process.on("exit", terminateRememberedGroups);
+	for (const signal of terminationSignals) {
+		const handler = () => {
+			terminateRememberedGroups();
+			// Do not swallow Node's default signal termination when there is no
+			// pi handler. With isolated producers, the last listener re-raises it.
+			if (process.listenerCount(signal) === 0) process.kill(process.pid, signal);
+		};
+		groupSignalHandlers.set(signal, handler);
+		// Run before signal-exit observers: after we remove ourselves they must
+		// still see the original listener count and preserve default termination.
+		process.prependOnceListener(signal, handler);
+	}
+	groupReaper = setInterval(() => {
+		for (const child of rememberedGroups) {
+			if (!groupExists(child)) rememberedGroups.delete(child);
+		}
+		if (rememberedGroups.size === 0) releaseGroupListeners();
+	}, 1_000);
+	groupReaper.unref?.();
 }
 
 /**
