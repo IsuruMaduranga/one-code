@@ -298,6 +298,21 @@ function applyOutputPadDefault(): void {
 }
 
 export default function brandingExtension(pi: ExtensionAPI) {
+	/**
+	 * pi's merged `quietStartup` (global settings with the project's
+	 * `.pi/settings.json` over them), so the banner and pi agree on whether pi
+	 * lists its own startup sections. `pi.getSettings()` is in pi 1.0.1; a pi
+	 * near the 0.84.3 floor without it falls back to the global file alone.
+	 */
+	const effectiveQuietStartup = (agentDir: string): unknown => {
+		if (typeof (pi as { getSettings?: unknown }).getSettings === "function") return pi.getSettings().quietStartup;
+		try {
+			return (JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf8")) as { quietStartup?: unknown }).quietStartup;
+		} catch {
+			return undefined;
+		}
+	};
+
 	applyThinkingDefault();
 	applyOutputPadDefault();
 	// Mark each block of assistant prose with Claude Code's "●" bullet. Only
@@ -453,9 +468,11 @@ export default function brandingExtension(pi: ExtensionAPI) {
 		// instead (minus the internal [Extensions] noise).
 		const home = os.homedir();
 		// Resolve pi's live agent dir (honours PI_CODING_AGENT_DIR) so an
-		// isolated one-code app reads its own settings/skills, never ~/.pi.
+		// isolated one-code app reads its own skills, never ~/.pi.
 		const agentDir = getAgentDir();
-		const sections = quietStartupEnabled(join(agentDir, "settings.json"))
+		// Use pi's effective settings, including project overrides, so the two
+		// listings agree on whether quiet startup is enabled.
+		const sections = quietStartupEnabled(effectiveQuietStartup(agentDir))
 			? collectStartupSections(ctx.cwd, home, join(dirname(fileURLToPath(import.meta.url)), "..", "..", "themes"), agentDir)
 			: undefined;
 
