@@ -11,7 +11,6 @@
 
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { modeCycleKey } from "../lib/keys.ts";
-import { loadAutoModeConfig } from "../auto-mode/config.ts";
 import { classifierCandidates, describeCandidate, type ClassifierNotice } from "../auto-mode/model-select.ts";
 import { ATTRIBUTION, capabilityFloor, configuredCapabilityKey, type FloorRole, type FloorVerdict, KEY_ADVICE, snapshotAgeMs } from "../lib/capability-index.ts";
 import { modelSpec, pricedInput } from "../lib/model-policy.ts";
@@ -37,7 +36,7 @@ export interface ModelFacts {
 	subagentConfigured?: SubagentDefault;
 	/** The configured default exists but does not apply to this session (Claude Code's env var on a non-Claude model). */
 	subagentConfiguredInapplicable: boolean;
-	classifier: { model?: Model<Api>; description?: string; notices: ClassifierNotice[]; configured?: string };
+	classifier: { model?: Model<Api>; description?: string; notices: ClassifierNotice[] };
 	reader?: { model: Model<Api>; via: "tier" | "session" };
 	/**
 	 * The optional Artificial Analysis snapshot behind the measured capability
@@ -65,13 +64,7 @@ export function collectModelFacts(available: Model<Api>[], session: SessionView,
 	const configuredAll = loadSubagentDefault(home, env);
 	const configured = applicableSubagentDefault(configuredAll, sessionModel);
 	const subagent = resolveSubagentModel({ configuredDefault: configured, sessionModel, available });
-	const autoConfig = loadAutoModeConfig(home);
-	const chain = classifierCandidates({
-		available,
-		sessionModel,
-		configured: autoConfig.classifierModel,
-		configuredSetForContainment: autoConfig.classifierModelSetFor,
-	});
+	const chain = classifierCandidates({ available, sessionModel });
 	const first = chain.candidates[0];
 	const reader = pickEconomicalContainedModel(available, sessionModel);
 	const snapshot = currentCapabilitySnapshot();
@@ -97,7 +90,6 @@ export function collectModelFacts(available: Model<Api>[], session: SessionView,
 			model: first?.model,
 			description: first ? describeCandidate(first) : undefined,
 			notices: chain.notices,
-			configured: autoConfig.classifierModel,
 		},
 		reader,
 	};
@@ -170,7 +162,7 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 	for (const notice of classifier.notices) {
 		lines.push({ text: notice.text, indent: 1, level: notice.level === "warning" ? "warn" : "dim" });
 		if (notice.level === "warning") {
-			findings.push({ level: "warn", text: `Classifier: ${notice.text}`, fix: "Pick a model with /auto-mode model, or /auto-mode model clear for the automatic choice." });
+			findings.push({ level: "warn", text: `Classifier: ${notice.text}`, fix: "Check provider authentication and model availability; classifier selection is automatic." });
 		}
 	}
 

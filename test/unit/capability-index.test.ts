@@ -162,7 +162,13 @@ describe("selection with a measured floor", () => {
 	});
 
 	it("lets a measurably capable flash screen its vendor's flagship (the classifier admits by score)", () => {
-		const catalog = [model("deepseek", "deepseek-v4-pro", 0.435), model("deepseek", "deepseek-v4-flash", 0.14)];
+		// Current DeepSeek catalog rows both advertise a 163,840-token window;
+		// selection must still admit Flash because its measured score clears Pro's
+		// classifier floor, not silently fall back for missing fixture metadata.
+		const catalog = [
+			{ ...model("deepseek", "deepseek-v4-pro", 0.435), contextWindow: 163_840 },
+			{ ...model("deepseek", "deepseek-v4-flash", 0.14), contextWindow: 163_840 },
+		];
 		const { candidates } = classifierCandidates({ available: catalog, sessionModel: catalog[0] });
 		expect(candidates.map((c) => `${c.model.id}:${c.source}`)).toEqual(["deepseek-v4-flash:economical", "deepseek-v4-pro:session"]);
 		// Without the snapshot the name-class floor keeps Pro screening itself.

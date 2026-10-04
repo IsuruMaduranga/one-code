@@ -42,7 +42,7 @@ import {
 	subagentModelsReminder,
 	subagentStatusModel,
 } from "./model-select.ts";
-import { modelPickerComponent, pickerSpec, toPickerEntries, type PickerEntry } from "../auto-mode/model-picker.ts";
+import { modelPickerComponent, pickerSpec, toPickerEntries, type PickerEntry } from "../lib/model-picker.ts";
 import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
 import { guideDocs } from "../lib/guide-docs.ts";
 import { extensionVersion } from "../lib/package-version.ts";

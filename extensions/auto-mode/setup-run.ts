@@ -181,7 +181,7 @@ export interface DraftDeps {
 	config: AutoModeConfig;
 	defaultEnvironment: string[];
 	signal?: AbortSignal;
-	/** Surfaces candidate-chain warnings (a stale or cross-provider classifierModel) to the user. */
+	/** Surfaces classifier candidate-chain notices to the user. */
 	onNotice?: (message: string, level: "info" | "warning") => void;
 	/** Reports the drafting call's usage to the all-in footer cost. */
 	onUsage?: (usage: unknown) => void;
@@ -197,12 +197,8 @@ export async function draftSetup(facts: SetupFacts, deps: DraftDeps): Promise<Se
 	const built = classifierCandidates({
 		available: deps.registry.getAvailable(),
 		sessionModel: deps.sessionModel,
-		configured: deps.config.classifierModel,
-		configuredSetForContainment: deps.config.classifierModelSetFor,
 	});
-	// The same warnings runClassifier surfaces during real gating (a stale or
-	// cross-provider classifierModel) — setup is exactly where the user can fix
-	// them, so they must not be dropped here.
+	// Surface the same candidate-chain notices as real gating.
 	for (const notice of built.notices) deps.onNotice?.(notice.text, notice.level);
 	const chain = built.candidates.map((entry) => entry.model);
 	const models: Model<Api>[] = [];

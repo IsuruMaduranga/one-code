@@ -29,8 +29,8 @@ import { MAX_ACTION_CHARS } from "../../extensions/auto-mode/transcript.ts";
 const completeMock = vi.mocked(completeSimple);
 
 /** Minimal structural stand-in; only provider/id/cost are consulted. */
-const model = (provider: string, id: string, input?: number) =>
-	({ provider, id, name: id, cost: input === undefined ? undefined : { input, output: input * 4 } }) as any;
+const model = (provider: string, id: string, input?: number, contextWindow = 200_000) =>
+	({ provider, id, name: id, contextWindow, cost: input === undefined ? undefined : { input, output: input * 4 } }) as any;
 
 // A stage-1 severity below the threshold ⇒ allow with no stage 2, so an allow is
 // a single provider call — which keeps the fallback call-count assertions clean.
@@ -123,7 +123,7 @@ describe("classify: pinning and fallback", () => {
 		expect(notices.some((n) => n.includes("cannot use openai/gpt-5-mini"))).toBe(true);
 	});
 
-	it("caches the candidate chain, rebuilding only when the session model or config changes", async () => {
+	it("caches the candidate chain, rebuilding when the session model or catalog window changes", async () => {
 		// The chain build is O(catalog); the session commits to one classifier, so it
 		// should be ranked once and reused, not rebuilt on every gated call.
 		completeMock.mockResolvedValue(allowReply());
@@ -146,8 +146,8 @@ describe("classify: pinning and fallback", () => {
 		await classify(request, { ...deps, sessionModel: model("openai", "gpt-5-mini", 0.25) });
 		expect(catalogReads).toBe(2);
 
-		// classifierModel config change → rebuild too.
-		await classify(request, { ...deps, config: { ...config, classifierModel: "openai/gpt-5-mini" } });
+		// A catalog-window change changes which candidates are eligible → rebuild too.
+		await classify(request, { ...deps, sessionModel: { ...sessionModel, contextWindow: 300_000 } });
 		expect(catalogReads).toBe(3);
 	});
 

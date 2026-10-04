@@ -10,8 +10,7 @@
  *   not read: both project files live in the repository, and a checked-in `env`
  *   block must not get to pick which provider receives subagent tasks — the
  *   same containment rule as `autoMode` config.
- * - `subagentModel` — One Code's own top-level setting, same shape as
- *   `autoMode.classifierModel`. Wins over the env var when both are set,
+ * - `subagentModel` — One Code's own top-level setting. Wins over the env var when both are set,
  *   because it is the more specific statement of intent. It is One Code's key,
  *   not Claude Code's: it is written to and read from `~/.onecode/settings.json`
  *   (+ managed settings), never from `~/.claude`, where an old One Code build may

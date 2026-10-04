@@ -69,7 +69,7 @@ try {
 		["/plugins", /RPC.*TUI/],
 		["/skills", /RPC.*TUI/],
 		["/effort", /Current effort/],
-		["/auto-mode model", /classifierModel:|No models are available/],
+		["/auto-mode config", /classifier in use:/],
 		["/mcp", /RPC.*TUI/],
 		["/doctor report", /One Code doctor/],
 	]) {

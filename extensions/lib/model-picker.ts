@@ -1,22 +1,12 @@
 /**
- * The `/auto-mode model` picker (pure).
+ * Shared interactive model picker (pure).
  *
- * Filtering, key decoding, selection movement, and rendering for the
- * interactive classifier-model picker, kept free of pi imports so they are
- * unit-testable. The thin `ctx.ui.custom` component in the permissions
- * extension owns nothing but mutable state and repaint calls.
- *
- * A picker exists because the alternative was worse in practice: choosing the
- * classifier automatically took three rounds of fault-fixing against real
- * catalogs, and when auto-selection picks badly the only recourse was
- * hand-editing settings.json with a model id the user has to guess. Naming a
- * model here is the explicit consent `autoMode.classifierModel` stands for —
- * including consent to another provider, which auto-selection must never
- * assume (see model-select.ts).
+ * Filtering, key decoding, selection movement, and rendering stay free of pi
+ * imports so command wiring can own only mutable state and repaint calls.
  */
 
-import { truncateLine } from "../lib/tui-render.ts";
-import { keyId, keyText } from "../lib/key-input.ts";
+import { truncateLine } from "./tui-render.ts";
+import { keyId, keyText } from "./key-input.ts";
 
 export interface PickerEntry {
 	provider: string;
@@ -107,9 +97,9 @@ export interface PickerView {
 	/** The currently configured spec, marked in the listing. */
 	current?: string;
 	maxVisible?: number;
-	/** Picker header; defaults to the auto-mode classifier copy. */
-	title?: string;
-	subtitle?: string;
+	/** Picker header and explanatory subtitle. */
+	title: string;
+	subtitle: string;
 }
 
 const formatPrice = (price?: number): string => (price === undefined ? "" : `$${price}/M in`);
@@ -128,15 +118,13 @@ export function toPickerEntries(models: { provider: string; id: string; cost?: {
 export interface PickerComponentOptions {
 	entries: PickerEntry[];
 	current?: string;
-	title?: string;
-	subtitle?: string;
+	title: string;
+	subtitle: string;
 }
 
 /**
- * The `ctx.ui.custom` component behind `/auto-mode model` and `/subagent`:
- * filter-as-you-type over the entries, enter confirms, esc cancels. Kept here
- * (structurally typed, no pi imports) so both commands share one keyboard
- * loop instead of drifting copies.
+ * A `ctx.ui.custom` model picker: filter-as-you-type over the entries, enter
+ * confirms, esc cancels. Kept here with no pi imports.
  */
 export function modelPickerComponent(
 	options: PickerComponentOptions,
@@ -206,9 +194,6 @@ export function modelPickerComponent(
 
 /** Key hint, kept on its own line so it survives at narrow widths. */
 const PICKER_HINT = "type to filter · ↑/↓ · enter · esc";
-/** Default privacy note for the classifier picker (the key hint rides its own line below). */
-const CLASSIFIER_SUBTITLE = "It reads your prompts and CLAUDE.md — picking another provider sends them there.";
-
 export function renderModelPicker(view: PickerView, paint: Paint, width = Infinity): string[] {
 	const maxVisible = view.maxVisible ?? 10;
 	// Every line is cut to `width` — pi-tui crashes the whole app on a rendered
@@ -216,8 +201,8 @@ export function renderModelPicker(view: PickerView, paint: Paint, width = Infini
 	// lines uncut (truncateLine returns them unchanged) for unit tests.
 	const cut = (line: string): string => truncateLine(line, width);
 	const lines: string[] = [];
-	lines.push(cut(paint("accent", view.title ?? "Select the auto-mode classifier model")));
-	lines.push(cut(paint("dim", view.subtitle ?? CLASSIFIER_SUBTITLE)));
+	lines.push(cut(paint("accent", view.title)));
+	lines.push(cut(paint("dim", view.subtitle)));
 	// The key hint is always its own line, so a narrow terminal never clips the
 	// only place the keys are documented.
 	lines.push(cut(paint("dim", `  ${PICKER_HINT}`)));

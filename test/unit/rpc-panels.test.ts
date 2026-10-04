@@ -90,13 +90,12 @@ describe("RPC commands never silently mount unsupported custom UI", () => {
 		else expect(JSON.parse(readFileSync(settings, "utf8")).permissions.additionalDirectories).toHaveLength(1);
 	});
 
-	it("/auto-mode model already gives usable text instructions in RPC", async () => {
+	it("the retired model subcommand reports an error without opening a picker", async () => {
 		const { fake, ctx, custom, notices } = mount(permissionsExtension);
 		ctx.modelRegistry = { getAvailable: () => [{ provider: "anthropic", id: "claude-sonnet-5" }] };
 		await fake.commands.get("auto-mode")!.handler("model", ctx);
 		expect(custom).not.toHaveBeenCalled();
-		expect(notices()).toContain("classifierModel:");
-		expect(notices()).toContain("Set one with /auto-mode model <provider/model-id>");
+		expect(notices()).toBe('Unknown subcommand "model". Use: /auto-mode setup | defaults | config');
 	});
 
 	it("/plugins lists installed plugins and explains that management needs the TUI", async () => {

@@ -108,16 +108,16 @@ export const CYCLE_KEY_HINT = `${CYCLE_KEY} to cycle`;
  */
 export function modeBadge(
 	mode: PermissionMode,
-	opts?: { paused?: boolean; classifierModel?: string; streaming?: boolean },
+	opts?: { paused?: boolean; classifier?: string; streaming?: boolean },
 ): string {
 	const base = badgeBase(mode, opts);
 	// Claude Code appends the interrupt hint to this line while the model works.
 	return `${base} (${CYCLE_KEY_HINT})${opts?.streaming ? " · esc to interrupt" : ""}`;
 }
 
-function badgeBase(mode: PermissionMode, opts?: { paused?: boolean; classifierModel?: string }): string {
+function badgeBase(mode: PermissionMode, opts?: { paused?: boolean; classifier?: string }): string {
 	if (mode !== "auto") return MODE_BADGES[mode];
-	const suffix = opts?.classifierModel ? ` · ${shortModelName(opts.classifierModel)}` : "";
+	const suffix = opts?.classifier ? ` · ${shortModelName(opts.classifier)}` : "";
 	return opts?.paused ? `${PAUSE} auto mode paused${suffix}` : `${MODE_BADGES.auto}${suffix}`;
 }
 

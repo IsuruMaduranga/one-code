@@ -33,6 +33,8 @@ export { ccToolName };
  */
 export type TranscriptEntry =
 	| { kind: "user"; text: string }
+	/** Model-generated context, not the user's own words for intent verification. */
+	| { kind: "summary"; text: string }
 	| { kind: "tool"; tool: string; input: Record<string, unknown> }
 	| { kind: "denied"; tool: string; subject: string; rule: string }
 	/**
@@ -49,41 +51,33 @@ export type TranscriptEntry =
 	 */
 	| { kind: "resolved-paths"; resolvedPaths: ResolvedPathFact[] };
 
-/** Truncate one field so a single huge argument cannot dominate the transcript. */
+/** Clip a diagnostic field; classifier transcript entries are never clipped. */
 export function clip(value: string, max: number): string {
 	return value.length <= max ? value : `${value.slice(0, max)}… [truncated, ${value.length} chars]`;
-}
-
-/** Clip every string leaf of a tool input, leaving structure intact. */
-function clipInput(input: Record<string, unknown>, max: number): Record<string, unknown> {
-	const out: Record<string, unknown> = {};
-	for (const [key, value] of Object.entries(input)) {
-		out[key] = typeof value === "string" ? clip(value, max) : value;
-	}
-	return out;
 }
 
 /**
  * Render one entry as its compact JSON line. The shell tools render as
  * `{"Bash":"<command>"}` / `{"PowerShell":"<command>"}` (the command string,
- * as Claude Code does); every other tool renders as `{"<Tool>":{…input…}}`
- * with string fields clipped.
+ * as Claude Code does); every other tool renders as `{"<Tool>":{…input…}}`.
+ * Keep the input intact, including earlier commands and file contents.
  */
-function renderEntry(entry: TranscriptEntry, maxField: number): string {
-	if (entry.kind === "user") return JSON.stringify({ user: clip(entry.text, maxField) });
+function renderEntry(entry: TranscriptEntry): string {
+	if (entry.kind === "user") return JSON.stringify({ user: entry.text });
+	if (entry.kind === "summary") return JSON.stringify({ summary: entry.text });
 	if (entry.kind === "meta") return JSON.stringify({ meta: { gitStatus: entry.gitStatus } });
 	if (entry.kind === "resolved-paths") return JSON.stringify({ meta: { resolvedPaths: entry.resolvedPaths, note: RESOLVED_PATHS_NOTE } });
 	if (entry.kind === "denied") {
 		return JSON.stringify({
-			denied_by_permission_rule: { tool: ccToolName(entry.tool), attempted: clip(entry.subject, maxField), rule: entry.rule },
+			denied_by_permission_rule: { tool: ccToolName(entry.tool), attempted: entry.subject, rule: entry.rule },
 		});
 	}
 	const name = ccToolName(entry.tool);
 	const command = entry.input.command;
 	if (SHELL_TOOLS.has(entry.tool) && typeof command === "string") {
-		return JSON.stringify({ [name]: clip(command, maxField) });
+		return JSON.stringify({ [name]: command });
 	}
-	return JSON.stringify({ [name]: clipInput(entry.input, maxField) });
+	return JSON.stringify({ [name]: entry.input });
 }
 
 /**
@@ -98,45 +92,31 @@ export const MAX_ACTION_CHARS = 100_000;
 /** The rendered length of the action under review, the last entry, unclipped. */
 export function actionLength(entries: readonly TranscriptEntry[]): number {
 	const action = entries.at(-1);
-	return action ? renderEntry(action, Number.POSITIVE_INFINITY).length : 0;
+	return action ? renderEntry(action).length : 0;
 }
 
-export interface RenderOptions {
-	/** Max chars per string field of an earlier entry; the action under review is never clipped. */
-	maxField?: number;
-	/** Max chars for the whole rendered transcript; oldest entries drop first. */
-	maxChars?: number;
+/** Claude Code omits these local read/search calls from prior history. */
+const HISTORICAL_READ_TOOLS = new Set([
+	"Read", "Grep", "Glob", "LSP", "ToolSearch", "ListMcpResourcesTool", "ReadMcpResourceTool", "ReadMcpResourceDirTool",
+	"lsp_diagnostics", "tool_search", "list_mcp_resources", "read_mcp_resource", "read_mcp_resource_dir",
+]);
+
+export function isHistoricalRead(entry: TranscriptEntry): boolean {
+	if (entry.kind !== "tool" || !HISTORICAL_READ_TOOLS.has(ccToolName(entry.tool))) return false;
+	// CC retains forwarded reads. We do not infer routing authority from an
+	// input field, but conservatively retain a named remote destination.
+	const host = entry.input._host;
+	return typeof host !== "string" || !host.trim() || host.trim() === "container" || host.trim() === "this-machine";
 }
 
 /**
- * Render the ordered entries into a `<transcript>…</transcript>` block. When the
- * rendered lines exceed `maxChars`, the oldest are dropped and a marker records
- * it — the action under review (the last entry) is always kept, whole, with the
- * ground-truth lines directly above it. The full user
- * messages are carried separately for intent verification, so dropping old lines
- * here never weakens that check.
+ * Render the ordered entries whole, as Claude Code does. A rolling
+ * suffix loses the evidence that a cleanup target was created this session;
+ * clipping an earlier shell command can hide its redirect or copy destination.
+ * If the provider cannot fit the transcript, classification fails closed rather
+ * than judging an action with silently missing history.
  */
-export function renderTranscript(entries: TranscriptEntry[], options: RenderOptions = {}): string {
-	const maxField = options.maxField ?? 2000;
-	const maxChars = options.maxChars ?? 60_000;
-	const lines = entries.map((entry, i) => renderEntry(entry, i === entries.length - 1 ? Number.POSITIVE_INFINITY : maxField));
-
-	// Keep the newest lines that fit the budget, walking from the end in one pass.
-	// The action under review is always kept, with the harness's ground-truth
-	// lines directly above it (gitStatus, resolvedPaths): they describe that
-	// action, and a large action must not push them out. +1 per line for the
-	// joining "\n".
-	let attached = entries.length - 1;
-	while (attached > 0 && (entries[attached - 1].kind === "meta" || entries[attached - 1].kind === "resolved-paths")) attached--;
-	let firstKept = lines.length;
-	let running = 0;
-	for (let i = lines.length - 1; i >= 0; i--) {
-		running += lines[i].length + 1;
-		if (i < attached && running > maxChars) break;
-		firstKept = i;
-	}
-	const kept = lines.slice(firstKept);
-	const dropped = firstKept;
-	const body = dropped > 0 ? [`{"note":"${dropped} earlier transcript entr${dropped === 1 ? "y" : "ies"} omitted for length"}`, ...kept] : kept;
-	return `<transcript>\n${body.join("\n")}\n</transcript>`;
+export function renderTranscript(entries: TranscriptEntry[]): string {
+	const visible = entries.filter((entry, i) => i === entries.length - 1 || !isHistoricalRead(entry));
+	return `<transcript>\n${visible.map(renderEntry).join("\n")}\n</transcript>`;
 }

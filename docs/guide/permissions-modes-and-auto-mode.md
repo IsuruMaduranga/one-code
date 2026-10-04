@@ -535,10 +535,8 @@ measurably weaker boundary; in testing, a Haiku-class classifier scored an
 explicitly requested recursive delete far below the block threshold that a
 Sonnet-class classifier applied to the same command.
 
-To choose the classifier yourself, run `/auto-mode model <provider/model-id>`.
-`/auto-mode model clear` returns to automatic selection. The choice is saved
-to `~/.onecode/settings.json`. When auto mode is active, the banner shows
-the classifier in use.
+The classifier is selected automatically. When auto mode is active, the
+banner shows the classifier in use.
 
 ### The safety floor
 
@@ -586,15 +584,13 @@ The configuration keys, under `autoMode`, follow Claude Code's own schema:
 | `soft_deny` | string array | Extra rules that block unless you explicitly asked for the action. |
 | `allow` | string array | Extra rules that approve. |
 | `classifyAllShell` | boolean | Send every shell command to the classifier, even ones a narrow allow rule covers. |
-| `classifierModel` | string | The classifier model, as `provider/model-id`. |
 | `logDecisions` | boolean | Append every gate decision to `auto-mode-decisions.jsonl` next to the session files. |
 
 One Code reads `autoMode` from `~/.claude/settings.json`,
 `~/.onecode/settings.json`, and managed settings. It never reads `autoMode`
 from a project's `.claude/settings.json` or `.claude/settings.local.json`,
 because a checked-in file must not be able to loosen the classifier for
-whoever clones it. `classifierModel` is read only from `~/.onecode` and
-managed settings.
+whoever clones it.
 
 To see the classifier's verdicts while you work, set `CC_AUTO_MODE_DEBUG=1`
 before launching; each decision is printed to stderr with its stage,

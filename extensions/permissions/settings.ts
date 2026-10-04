@@ -235,7 +235,7 @@ export function listPermissionRules(cwd: string, home: string): SourcedRule[] {
 /**
  * Append a rule to a One Code settings file, creating it if needed.
  * Strict read + atomic write, like the other `~/.onecode` writers: a malformed
- * file is not silently clobbered (it may also hold classifierModel/subagentModel),
+ * file is not silently clobbered (it may also hold a subagent model setting),
  * and a half-written file is never visible to a concurrent reader. Returns
  * false, writing nothing, when the file already holds the rule.
  */

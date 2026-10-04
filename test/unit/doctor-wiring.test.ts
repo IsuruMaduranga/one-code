@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import doctorExtension from "../../extensions/doctor/index.ts";
-import { CLASSIFIER_SETTING_CHANGED_CHANNEL, SUBAGENT_DEFAULT_CHANGED_CHANNEL } from "../../extensions/lib/settings-channels.ts";
+import { SUBAGENT_DEFAULT_CHANGED_CHANNEL } from "../../extensions/lib/settings-channels.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../../extensions/permissions/modes.ts";
 import { createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
@@ -104,7 +104,7 @@ describe("/doctor wiring", () => {
 		const { ctx, notified } = ctxFor(anthropic[0]);
 		await run("report", ctx);
 		expect(notified[0]).toContain("Permission mode: plan");
-		expect(notified[0]).toContain("screening this session on anthropic/claude-sonnet-5");
+		expect(notified[0]).toMatch(/screening this session on\s+anthropic\/claude-sonnet-5/);
 	});
 
 	it("lists the presets on request", async () => {
@@ -115,21 +115,20 @@ describe("/doctor wiring", () => {
 		expect(notified[0]).toContain("← current main model");
 	});
 
-	it("applies a preset: switches the model, writes One Code's settings, and tells the owners", async () => {
+	it("applies a preset without changing a legacy classifier override", async () => {
 		mkdirSync(join(home, ".onecode"), { recursive: true });
 		writeFileSync(join(home, ".onecode", "settings.json"), JSON.stringify({ autoMode: { classifierModel: "anthropic/claude-opus-5", environment: ["x"] }, other: 1 }));
 		const heard: string[] = [];
 		fake.events.on(SUBAGENT_DEFAULT_CHANGED_CHANNEL, () => heard.push("subagent"));
-		fake.events.on(CLASSIFIER_SETTING_CHANGED_CHANNEL, () => heard.push("classifier"));
 		const { ctx, notified } = ctxFor(anthropic[1]);
 		await run("preset quality", ctx);
 		expect(setModel).toHaveBeenCalledTimes(1);
 		expect(setModel.mock.calls[0][0].id).toBe("claude-opus-5");
 		const saved = JSON.parse(readFileSync(join(home, ".onecode", "settings.json"), "utf8"));
 		expect(saved.subagentModel).toBe("inherit");
-		expect(saved.autoMode).toEqual({ environment: ["x"] });
+		expect(saved.autoMode).toEqual({ classifierModel: "anthropic/claude-opus-5", environment: ["x"] });
 		expect(saved.other).toBe(1);
-		expect(heard).toEqual(["subagent", "classifier"]);
+		expect(heard).toEqual(["subagent"]);
 		expect(notified[0]).toContain("Applied the maximum quality preset");
 		expect(notified[0]).toContain("main model → anthropic/claude-opus-5");
 	});

@@ -95,7 +95,7 @@ describe("buildDoctorReport", () => {
 		expect(text).toContain("Subagents and workflow agents: anthropic/claude-sonnet-5 — automatic");
 		// Classifier: workhorse floor on a frontier session → Sonnet, and the live pin is shown.
 		expect(text).toContain("Auto-mode classifier: anthropic/claude-sonnet-5");
-		expect(text).toContain("screening this session on anthropic/claude-sonnet-5");
+		expect(text).toMatch(/screening this session on\s+anthropic\/claude-sonnet-5/);
 		expect(text).toContain("Permission mode: auto");
 		expect(text).toContain("Updates: up to date (0.2.1 is the latest release)");
 		expect(text).toContain("ANTHROPIC (anthropic): ready — key saved by /login · 3 models");
@@ -204,17 +204,18 @@ describe("buildDoctorReport", () => {
 		expect(text).toContain("Scores: Artificial Analysis (https://artificialanalysis.ai)");
 	});
 
-	it("reads the subagent and classifier settings from One Code's own file", () => {
+	it("ignores a legacy classifier override while still reading the subagent setting", () => {
 		mkdirSync(join(home, ".onecode"), { recursive: true });
 		writeFileSync(
 			join(home, ".onecode", "settings.json"),
-			JSON.stringify({ subagentModel: "inherit", autoMode: { classifierModel: "anthropic/claude-haiku-4-5", classifierModelSetFor: "anthropic" } }),
+			JSON.stringify({ subagentModel: "inherit", autoMode: { classifierModel: "anthropic/claude-opus-5", classifierModelSetFor: "anthropic" } }),
 		);
 		const facts = collectModelFacts(anthropic, { model: anthropic[0], modelSource: "session" }, home, {});
 		expect(facts.subagent.source).toBe("session");
 		expect(facts.subagentConfigured?.spec).toBe("inherit");
-		expect(facts.classifier.model?.id).toBe("claude-haiku-4-5");
-		expect(facts.classifier.description).toContain("from autoMode.classifierModel");
+		expect(facts.classifier.model?.id).toBe("claude-sonnet-5");
+		expect(facts.classifier.description).not.toContain("classifierModel");
+		expect(facts.classifier).not.toHaveProperty("configured");
 	});
 });
 

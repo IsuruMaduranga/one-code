@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { decodeWidgetKey } from "../../extensions/ask-user/widget.ts";
-import { decodePickerKey } from "../../extensions/auto-mode/model-picker.ts";
+import { decodePickerKey } from "../../extensions/lib/model-picker.ts";
 import { decodeBtwKey } from "../../extensions/btw/panel.ts";
 import { decodeDoctorKey } from "../../extensions/doctor/viewer.ts";
 import { decodeKey as decodeSliderKey } from "../../extensions/effort/slider.ts";

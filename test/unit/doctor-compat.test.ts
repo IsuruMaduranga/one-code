@@ -74,16 +74,13 @@ describe("collectCompat: settings files", () => {
 		expect(onecode.used).toEqual(['subagentModel "inherit"', "webSearch (keys/order for the search fallback)"]);
 	});
 
-	it("warns about stale One Code keys in ~/.claude/settings.json", () => {
+	it("omits retired classifier overrides from the imported-configuration report", () => {
 		write(join(home, ".claude", "settings.json"), { subagentModel: "sonnet", autoMode: { classifierModel: "anthropic/claude-haiku-4-5", environment: ["x"] } });
 		const compat = collectCompat(input());
 		const user = compat.files.find((f) => f.scope === "claude-user")!;
-		expect(user.refused).toEqual([
-			"autoMode.classifierModel — One Code's own key, read from ~/.onecode/settings.json only",
-			"subagentModel — One Code's own key, read from ~/.onecode/settings.json only",
-		]);
+		expect(user.refused).toEqual(["subagentModel — One Code's own key, read from ~/.onecode/settings.json only"]);
 		expect(user.used).toEqual(["autoMode: environment"]);
-		expect(compat.findings.filter((f) => f.text.includes("now read only from ~/.onecode/settings.json"))).toHaveLength(2);
+		expect(JSON.stringify(compat)).not.toContain("classifierModel");
 	});
 });
 

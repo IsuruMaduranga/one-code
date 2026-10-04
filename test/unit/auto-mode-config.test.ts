@@ -8,7 +8,6 @@ import {
 	loadAutoModeConfig,
 	loadAutoModeConfigWithDiagnostics,
 	oneCodePermissionAllow,
-	persistClassifierModel,
 	spliceDefaults,
 } from "../../extensions/auto-mode/config.ts";
 import { DEFAULT_ENVIRONMENT } from "../../extensions/auto-mode/defaults.ts";
@@ -61,40 +60,22 @@ describe("loadAutoModeConfig", () => {
 		expect(config.environment.length).toBe(DEFAULT_ENVIRONMENT.length + 1);
 	});
 
-	it("reads classifyAllShell from user settings and classifierModel from One Code settings", () => {
-		// classifierModel is One Code's own key, read from ~/.onecode, not ~/.claude.
+	it("preserves supported settings while ignoring legacy classifier overrides", () => {
 		writeUserSettings({ autoMode: { classifyAllShell: true } });
-		writeOneCodeSettings({ autoMode: { classifierModel: "anthropic/claude-haiku-4-5" } });
+		writeOneCodeSettings({ autoMode: { classifierModel: "anthropic/claude-haiku-4-5", classifierModelSetFor: "anthropic" } });
 		const config = loadAutoModeConfig(home);
 		expect(config.classifyAllShell).toBe(true);
-		expect(config.classifierModel).toBe("anthropic/claude-haiku-4-5");
+		expect(config).not.toHaveProperty("classifierModel");
+		expect(config).not.toHaveProperty("classifierModelSetFor");
 	});
 
-	it("ignores a stale classifierModel left in ~/.claude by an older build, and says why", () => {
+	it("ignores legacy classifier settings from every configuration source", () => {
 		writeUserSettings({ autoMode: { classifierModel: "opencode/gemini-3.7-flash" } });
+		writeOneCodeSettings({ autoMode: { classifierModel: "anthropic/claude-haiku-4-5", classifierModelSetFor: "anthropic" } });
 		const { config, diagnostics } = loadAutoModeConfigWithDiagnostics(home);
-		expect(config.classifierModel).toBeUndefined();
-		expect(diagnostics.some((line) => line.includes("classifierModel is ignored"))).toBe(true);
-	});
-
-	it("round-trips classifierModel with its containment stamp", () => {
-		persistClassifierModel("anthropic/claude-haiku-4-5", home, "anthropic");
-		const config = loadAutoModeConfig(home);
-		expect(config.classifierModel).toBe("anthropic/claude-haiku-4-5");
-		expect(config.classifierModelSetFor).toBe("anthropic");
-	});
-
-	it("clears the stamp when set without one, and both on removal", () => {
-		persistClassifierModel("anthropic/claude-haiku-4-5", home, "anthropic");
-		persistClassifierModel("openai/gpt-5-mini", home); // no stamp (hand-edited-equivalent)
-		let config = loadAutoModeConfig(home);
-		expect(config.classifierModel).toBe("openai/gpt-5-mini");
-		expect(config.classifierModelSetFor).toBeUndefined();
-
-		persistClassifierModel(undefined, home);
-		config = loadAutoModeConfig(home);
-		expect(config.classifierModel).toBeUndefined();
-		expect(config.classifierModelSetFor).toBeUndefined();
+		expect(config).not.toHaveProperty("classifierModel");
+		expect(config).not.toHaveProperty("classifierModelSetFor");
+		expect(diagnostics.some((line) => line.includes("classifierModel"))).toBe(false);
 	});
 
 	it("ignores malformed files rather than failing open", () => {

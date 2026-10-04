@@ -30,8 +30,8 @@ Code's two files instead.
 The per-repository slug is derived from the repository root, so worktrees
 and subdirectories of one repository share one file.
 
-Commands such as `/allow`, `/subagent`, `/auto-mode model`, and the
-`/mcp` panel write to One Code's files. Both One Code files are written
+Commands such as `/allow`, `/subagent`, and the `/mcp` panel write to One
+Code's files. Both One Code files are written
 atomically; a malformed file is reported rather than overwritten.
 
 ### Relocating directories
@@ -80,7 +80,6 @@ appear in `projects/<slug>/settings.json`.
 | `permissions.allow` | string array | `/allow` (per repository) or `/allow … global` | Allow rules in Claude Code's format. |
 | `autoMode.environment` | string array | `/auto-mode setup` | Describes your environment to the classifier. |
 | `autoMode.hard_deny`, `autoMode.soft_deny`, `autoMode.allow` | string array | `/auto-mode setup` | Extra classifier rules, appended to the built-ins. |
-| `autoMode.classifierModel` | string | `/auto-mode model` | The classifier model. |
 | `autoMode.classifyAllShell` | boolean | By hand | Send every shell command to the classifier. |
 | `autoMode.logDecisions` | boolean | By hand | Log every gate decision next to the session files. |
 | `webSearch.apiKeys.brave`, `webSearch.apiKeys.tavily` | string | By hand | Search keys when the environment variables are not set. |
@@ -93,9 +92,8 @@ appear in `projects/<slug>/settings.json`.
 | `workflowSizeGuideline` | string | By hand (user or per repository) | How big the model keeps a workflow: `small` (under 5 agents), `medium` (under 10, the default), `large` (under 50) or `unrestricted`. A guideline, not a limit. |
 | `configMode` | string | `/memory` | `claude-compatible` (the default) or `independent`. Applies from the next start. See [Run One Code on its own setup](bring-your-claude-code-setup.md#run-one-code-on-its-own-setup). |
 
-Two keys are stamped alongside model choices (`subagentModelSetFor`,
-`autoMode.classifierModelSetFor`) to record the provider a choice was made
-on; leave them alone.
+`subagentModelSetFor` is stamped alongside the subagent model choice to record
+the provider it was made on; leave it alone.
 
 The main model chosen with `/model` is saved in pi's own settings file as
 `defaultProvider` and `defaultModel`, not in One Code's.
