@@ -210,6 +210,13 @@ export default function workflowExtension(pi: ExtensionAPI) {
 
 			let script: string | undefined;
 			try {
+				// Settings that turn workflows off also refuse a call that reaches
+				// the tool anyway (a later setActiveTools can bring it back).
+				if (!workflowsEnabled) {
+					throw new WorkflowScriptError(
+						"Workflows are turned off: enableWorkflows is false or disableWorkflows is true in One Code's user or project settings. Turn them back on there and start a new session.",
+					);
+				}
 				// `scriptPath` takes precedence over `script` and `name`, as in Claude Code.
 				if (params.scriptPath) {
 					if (!existsSync(params.scriptPath)) throw new WorkflowScriptError(`scriptPath ${params.scriptPath} does not exist`);

@@ -118,6 +118,15 @@ describe("workflow wiring: settings at session start", () => {
 		await fake.fire("input", { text: "ultracode: audit it", source: "interactive" });
 		expect(reminders).toHaveLength(0);
 
+		// A call that reaches the tool anyway is refused, loudly.
+		const ctx = createFakeCtx({ cwd, sessionManager: { getSessionDir: () => cwd } });
+		const refused = (await fake.tools.get("workflow")!.execute("c1", { script: "return 1" }, undefined, undefined, ctx)) as {
+			content: Array<{ text: string }>;
+			isError?: boolean;
+		};
+		expect(refused.isError).toBe(true);
+		expect(refused.content[0].text).toMatch(/^Workflows are turned off/);
+
 		// A later session with workflows on brings the tool back.
 		write(oneCodeProjectSettingsPath(cwd, home, env()), {});
 		await start(fake);
