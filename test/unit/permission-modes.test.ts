@@ -324,6 +324,8 @@ describe("permissionsExtension model_select updates classifier", () => {
 		const reminders = (fake.emitted["one-code:system-reminder"] ?? []) as Array<{ key?: string; text?: string; placement?: string }>;
 		const standing = reminders.find((r) => r.key === "permission-mode" && typeof r.text === "string");
 		expect(standing?.text).toContain("Auto mode is active");
+		// No switch happened, so no "is now" announcement beside the standing block.
+		expect(reminders.some((r) => r.key === "permission-mode-change")).toBe(false);
 		expect(standing?.placement).toBe("sticky-append");
 	});
 

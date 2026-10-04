@@ -719,7 +719,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		return verdict;
 	};
 
-	const setMode = (next: PermissionMode) => {
+	/** `startup`: the session opens in this mode, so there is no switch to announce, only the mode's standing block. */
+	const setMode = (next: PermissionMode, startup = false) => {
 		mode = next;
 		process.env[MODE_ENV] = next;
 		// The standing block of the mode being left goes first, BEFORE the status
@@ -744,10 +745,15 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 					? ` Only read-only tools are available now, plus one writable file: your plan file at ${planFilePath}. Build the plan there, then call exit_plan_mode.`
 					: " Only read-only tools are available now, plus the plan file named in the plan-mode reminder."
 				: "";
-		pi.events.emit(REMINDER_CHANNEL, {
-			text: `The user's permission mode is now "${mode}".${planNote}`,
-			key: "permission-mode-change",
-		});
+		// Not at startup: "is now" beside the mode's own standing block read as a
+		// duplicate to both GPT-6 models in the 2026-10-04 self-test, and Claude
+		// Code announces only a switch.
+		if (!startup) {
+			pi.events.emit(REMINDER_CHANNEL, {
+				text: `The user's permission mode is now "${mode}".${planNote}`,
+				key: "permission-mode-change",
+			});
+		}
 		if (mode === "auto") {
 			pi.events.emit(REMINDER_CHANNEL, {
 				text:
@@ -846,7 +852,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// only emitter of the block; until 2026-09-05 startup called it for plan
 		// alone, so `--permission-mode auto` / `defaultMode: "auto"` sessions ran
 		// with no auto-mode reminder at all (STEERING-REVIEW-2026-09-05 H2).
-		if (STANDING_REMINDER_MODES.has(mode)) setMode(mode);
+		if (STANDING_REMINDER_MODES.has(mode)) setMode(mode, true);
 		process.env[MODE_ENV] = mode;
 	};
 
