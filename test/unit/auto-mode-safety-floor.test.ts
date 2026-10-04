@@ -117,6 +117,10 @@ describe("safetyControlWrite: read-only words in escalated compound commands", (
 		`grep -rnIE "(sk_[A-Za-z0-9_]{8,}|-----BEGIN)" . 2>/dev/null | grep -v node_modules | head -30; echo "=== keys ==="; find . -not -path './.git/*' -not -path './node_modules/*' \\( -name "*.pem" -o -name "*.key" -o -name "*.env*" \\) 2>/dev/null`,
 		`find . -not -path './.git/*' -name '*.pem' && exit 0`,
 		`cat Makefile && find . -path './.git/*' -name Makefile`,
+		// A negated find pattern excludes files; it never selects one (Qwen 3.8 Flash, live).
+		`find . -type f -not -path './.git/*' | head -50 && echo '---' && wc -l $(find . -type f \\( -name '*.py' -o -name '*.ts' \\) -not -path './.git/*' -not -path './node_modules/*')`,
+		`find . ! -path './.git/*' -exec wc -l {} + && exit 0`,
+		`find . -not \\( -path './.git/*' -o -path './node_modules/*' \\) -name '*.py' -exec wc -l {} + && exit 0`,
 	])("does not floor proven read-only words: %s", (command) => {
 		expect(analyzeShellCommand({ command, cwd, home }).verdict).toBe("escalate");
 		expect(check("bash", { command })).toBeUndefined();
@@ -157,8 +161,11 @@ describe("safetyControlWrite: read-only words in escalated compound commands", (
 		`cat Makefile; (find . -path './.git/*' | sort)`,
 		`cat Makefile; echo "$(find . -path './.git/*' | sort)"`,
 		`cat Makefile; find . -path "$(mystery)/*" | sort`,
-		`find . -not -path './.git/*' -name '*.pem' -delete && exit 0`,
 		`find . -path './.git/*' -name '*.key' -exec mystery {} + && exit 0`,
+		`find . -not -path './.git/*' -name 'settings*' -delete && exit 0`,
+		`find . -not \\( -path './x/*' \\) -name '*' -delete && exit 0`,
+		`find . -not -path './x/*' -o -name 'settings.json' -delete && exit 0`,
+		`rm $(find .claude -name 'settings*')`,
 		`sh <<'EOF'\ncp x .claude/settings.json\nEOF`,
 		`cat <<'EOF' | sh\ncp x .claude/settings.json\nEOF`,
 		`sh <<< 'cp x .claude/settings.json'`,

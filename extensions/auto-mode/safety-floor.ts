@@ -133,6 +133,35 @@ function namesControlFile(resolved: string, forms: ReadonlySet<string>, dotRule:
 	return GLOB_CHARS.test(dir) || spelled.some((name) => matchesControlFile(`${dir}/${name}`, forms));
 }
 
+/** find's tests whose operand is a name or path pattern. */
+const FIND_PATTERN_TESTS = new Set(["-name", "-iname", "-path", "-ipath", "-wholename", "-iwholename", "-regex", "-iregex", "-lname", "-ilname"]);
+
+/**
+ * Indexes of find's pattern operands under a negation (`-not -path './.git/*'`,
+ * `! -name x`, `-not ( -path a -o -path b )`): patterns that exclude files
+ * rather than select them.
+ */
+function negatedFindPatterns(words: readonly string[]): Set<number> {
+	const negated = new Set<number>();
+	/** Group depths opened right after a negation. */
+	const negatedGroups: number[] = [];
+	let depth = 0;
+	for (let index = 0; index < words.length; index++) {
+		const word = words[index];
+		const notBefore = index > 0 && (words[index - 1] === "!" || words[index - 1] === "-not");
+		if (word === "(") {
+			depth++;
+			if (notBefore) negatedGroups.push(depth);
+		} else if (word === ")") {
+			if (negatedGroups[negatedGroups.length - 1] === depth) negatedGroups.pop();
+			depth--;
+		} else if (FIND_PATTERN_TESTS.has(word) && index + 1 < words.length && (notBefore || negatedGroups.length > 0)) {
+			negated.add(index + 1);
+		}
+	}
+	return negated;
+}
+
 export interface FloorInput {
 	/** Already-normalized tool name (see permissions/matcher.ts). */
 	toolName: string;
@@ -391,7 +420,12 @@ export function shellNamesControlFile(
 				if (tail === undefined || name === undefined || [...controlNames].some((control) => tail.includes("/") ? control === name : control.endsWith(name))) return pattern.value;
 			}
 		}
-		for (const word of [...(readOnly ? [] : segment.tokens.map((token) => token.value)), ...segment.redirects, ...segment.inputs.map((token) => token.value)]) {
+		const negated = payload.command === "find" ? negatedFindPatterns(segment.tokens.map((token) => token.value)) : new Set<number>();
+		const words = [
+			...(readOnly ? [] : segment.tokens.map((token, index) => ({ value: token.value, negated: negated.has(index) }))),
+			...[...segment.redirects, ...segment.inputs.map((token) => token.value)].map((value) => ({ value, negated: false })),
+		];
+		for (const { value: word, negated: excludes } of words) {
 			if (depth < 3 && /\s/.test(word)) {
 				const nested = shellNamesControlFile(word, dir, home, oneCodeProjectSettings, depth + 1, forms);
 				if (nested) return nested;
@@ -403,8 +437,9 @@ export function shellNamesControlFile(
 				if (resolved && namesControlFile(resolved, forms, true)) return candidate;
 				if (unknownDir && controlNames.has(baseName(candidate))) return candidate;
 				// find matches names beneath its search roots, not the shell's cwd.
-				// An unproven expression may delete/execute on any such match.
-				if (payload.command === "find") {
+				// An unproven expression may delete/execute on any such match. A
+				// negated pattern only excludes files, so it never selects one.
+				if (payload.command === "find" && !excludes) {
 					const pattern = globComponentRegex(baseName(candidate));
 					if (pattern && [...controlNames].some((name) => pattern.test(name))) return candidate;
 				}
