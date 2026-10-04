@@ -172,6 +172,24 @@ describe("buildDoctorReport", () => {
 		expect(section.lines.some((l) => l.text.includes("carries no price"))).toBe(true);
 	});
 
+	it("reports the frozen request tier while intrinsic diagnostics use refreshed scores", () => {
+		const main = model("openai", "gpt-5.1", 2, "openai-responses");
+		setModelFactsForTest({ "openai/gpt-5.1": { releaseDate: "2026-08-01" } });
+		setCapabilitySnapshotForTest({
+			fetchedAt: "2026-10-05T00:00:00Z", source: "test", rows: [
+				{ id: "reference", slug: "claude-sonnet-5", creator: "anthropic", releaseDate: "2026-08-01", coding: 80 },
+				{ id: "main", slug: "gpt-5-1", creator: "openai", releaseDate: "2026-08-01", coding: 20 },
+			],
+		});
+		const session = { model: main, modelSource: "session" as const, promptTier: "workhorse" as const };
+		const facts = collectModelFacts([main], session, home, {});
+		expect(facts.promptTier).toBe("workhorse");
+		expect(facts.sessionTier).toBe("tiny");
+		expect(modelsSection(facts, session, []).lines.some((line) => line.text.startsWith("Prompt register: workhorse"))).toBe(true);
+		// The standalone CLI has no running session and resolves from the latest snapshot.
+		expect(collectModelFacts([main], { model: main, modelSource: "default-setting" }, home, {}).promptTier).toBe("tiny");
+	});
+
 	it("explains the capability floor: a key hint without a snapshot, the measured verdicts with one", () => {
 		// No key, no snapshot → a warning finding with the advice.
 		const findings: Finding[] = [];

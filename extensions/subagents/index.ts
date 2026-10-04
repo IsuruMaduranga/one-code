@@ -55,7 +55,7 @@ import { requestSystemPrompt } from "../lib/prompt-options.ts";
 import { captureMatches, LAST_REQUEST_CHANNEL, type RequestCapture } from "../lib/request-replay.ts";
 import { BTW_FORK_CHANNEL, btwForkDescription, btwForkName, btwForkRecord, btwForkTaskId, type BtwForkRequest, type BtwForkResult } from "../lib/btw-fork.ts";
 import { watchMcpTools } from "../lib/mcp-share.ts";
-import { resolveModelTier } from "../lib/model-tier.ts";
+import { sessionModelTier } from "../lib/session-model-tier.ts";
 import { type DescriptionForm, followDescriptionForm, registerVariantTool } from "../lib/tool-variants.ts";
 import { agentDescription } from "./agent-description.ts";
 import { projectConfigDirName } from "../lib/config-mode.ts";
@@ -271,6 +271,7 @@ function residentPending(resident: Resident): boolean {
 }
 
 export default function subagentsExtension(pi: ExtensionAPI) {
+	const requestTier = sessionModelTier(pi);
 	const registry = new RunRegistry();
 	/**
 	 * The session's permission mode as the permissions extension last announced
@@ -670,8 +671,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		});
 	};
 
-	const emitDelegationSteer = (sessionModel = lastCtx?.model) => {
-		const text = resolveModelTier(sessionModel) === "tiny" ? DELEGATION_STEER : null;
+	const emitDelegationSteer = () => {
+		const text = requestTier() === "tiny" ? DELEGATION_STEER : null;
 		const plan = planSubagentAnnouncement({ restored: restoredSession, baseline: capabilityBaseline, capability: "delegation", text });
 		capabilityBaseline = plan.baseline;
 		if (plan.kind !== "none") publishCapabilityBaseline(capabilityBaseline);
@@ -690,8 +691,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	 * would get the reminder on every delegating turn for nothing, and the
 	 * trigger fires on correct behaviour as readily as on the failure.
 	 */
-	const backstopApplies = (ctx: ExtensionContext | undefined) => {
-		const tier = resolveModelTier(ctx?.model);
+	const backstopApplies = () => {
+		const tier = requestTier();
 		return tier === "cheap" || tier === "tiny";
 	};
 	pi.on("agent_start", () => {
@@ -702,12 +703,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	pi.on("agent_settled", () => {
 		parentBusy = false;
 	});
-	pi.on("agent_end", (_event, ctx) => {
+	pi.on("agent_end", () => {
 		const spawned = [...spawnedThisLoop];
 		spawnedThisLoop.clear();
 		// Tier check first: on a frontier session the backstop never fires, so the
 		// lookups below would be discarded work on every turn that delegated.
-		if (!backstopApplies(ctx)) return undefined;
+		if (!backstopApplies()) return undefined;
 		const pending = spawned
 			.filter((taskId) => {
 				const resident = residents.get(taskId);
@@ -743,12 +744,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		reconstructRuns(ctx);
 		emitModelStatus(ctx);
 		emitAgentCatalog(ctx);
-		emitDelegationSteer(ctx.model);
+		emitDelegationSteer();
 		registerPanelInputHook(ctx);
 	});
 	pi.on("model_select", (event, ctx) => {
 		emitModelStatus(ctx, event.model);
-		emitDelegationSteer(event.model);
+		emitDelegationSteer();
 	});
 	// Another extension wrote `subagentModel` on disk (`/doctor preset`): drop the
 	// cached automatic default and republish the reminder + banner status, the

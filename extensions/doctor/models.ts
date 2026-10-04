@@ -4,9 +4,10 @@
  * The doctor does not re-decide anything: it calls the SAME resolvers the
  * session uses — `resolveSubagentModel` for delegated work, `classifierCandidates`
  * for auto mode's screener, `pickEconomicalContainedModel` for the web-fetch /
- * recap reader, `resolveModelTier` for the prompt register — and reports their
- * answers next to their sources. A user who asks "why did my subagent run on
- * Haiku?" gets the resolver's own notice, not a paraphrase.
+ * recap reader — and reports their answers next to their sources. The prompt
+ * register comes from the session's frozen tier, or `resolveModelTier` in the
+ * CLI. A user who asks "why did my subagent run on Haiku?" gets the resolver's
+ * own notice, not a paraphrase.
  */
 
 import type { Api, Model } from "@earendil-works/pi-ai";
@@ -81,7 +82,7 @@ export function collectModelFacts(available: Model<Api>[], session: SessionView,
 		capability,
 		session: sessionModel,
 		sessionTier: sessionModel ? intrinsicTier(sessionModel) : undefined,
-		promptTier: resolveModelTier(sessionModel, env),
+		promptTier: session.promptTier ?? resolveModelTier(sessionModel, env),
 		promptTierForced: tierOverride(env) !== undefined,
 		subagent,
 		subagentConfigured: configuredAll,
@@ -209,7 +210,7 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 	if (facts.sessionTier === "tiny") {
 		findings.push({
 			level: "warn",
-			text: `${modelSpec(main)} is classed as a tiny-tier model: One Code adds weak-model scaffolding and search tools, and never auto-selects a tiny model for subagents or the classifier.`,
+			text: `${modelSpec(main)} is classed as a tiny-tier model by the latest capability data; automatic selection excludes tiny models for subagents and the classifier.`,
 			fix: "For coding work pick a cheap- or workhorse-tier model with /model; see /doctor presets.",
 		});
 	}

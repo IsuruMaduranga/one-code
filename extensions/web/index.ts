@@ -39,7 +39,7 @@ import { tryNativeWeb } from "../lib/anthropic-server-call.ts";
 import { CUT_OFF_NOTE, nativeSearchBody, searchOutcome, searchSources, sourceLine, type ThinkingFields } from "../lib/anthropic-server-tools.ts";
 import { readJsonFile } from "../lib/atomic-write.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
-import { DEFER_CHANNEL } from "../lib/deferred.ts";
+import { DEFER_CHANNEL, WITHHOLD_CHANNEL } from "../lib/deferred.ts";
 import { oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
@@ -242,20 +242,21 @@ export default function webExtension(pi: ExtensionAPI) {
 	// still advertised it in the names-only reminder (and as a defer_loading
 	// definition) on every provider, so a non-Gemini model would load it and burn
 	// two rounds discovering it cannot run (TOOL-FIDELITY-REVIEW-2026-09-07 M5).
-	// Mirror pi-web-search's gate: register it once the first Gemini model is
-	// seen. The one-shot flag keeps later session_tree/model_select events from
-	// re-emitting (each emit past session_start takes the DEFER handler's
-	// late-arrival path — deactivate + reschedule the listing rewrite — which is a
-	// no-op once url_context is already registered).
+	// Mirror that gate in the deferred registry too: withdraw on leaving Gemini
+	// and re-defer on returning. Emit only when availability changes, since a
+	// repeated defer would deactivate a tool already loaded through tool_search.
+	// The registry owns announcements and keeps the cached listing frozen.
 	let urlContextDeferred = false;
 	const deferUrlContextIfGemini = (model: { provider?: string; api?: string } | undefined) => {
-		// ctx.model is undefined until a model resolves (session_start can fire
-		// first), and getProviderKind dereferences model.provider without a guard —
-		// so an undefined model must short-circuit here, as pi-web-search's own
-		// `!!model && getProviderKind(...)` does.
-		if (urlContextDeferred || !model || getProviderKind(model) !== "google") return;
-		urlContextDeferred = true;
-		pi.events.emit(DEFER_CHANNEL, { name: "url_context", keywords: ["url", "analyze page", "gemini"] });
+		// session_start can run before a model resolves; getProviderKind requires one.
+		const available = !!model && getProviderKind(model) === "google";
+		if (available === urlContextDeferred) return;
+		urlContextDeferred = available;
+		if (available) {
+			pi.events.emit(DEFER_CHANNEL, { name: "url_context", keywords: ["url", "analyze page", "gemini"] });
+		} else {
+			pi.events.emit(WITHHOLD_CHANNEL, { name: "url_context" });
+		}
 	};
 	pi.on("session_start", (_event, ctx) => deferUrlContextIfGemini(ctx.model));
 	pi.on("session_tree", (_event, ctx) => deferUrlContextIfGemini(ctx.model));

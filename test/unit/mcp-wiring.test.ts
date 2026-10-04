@@ -15,6 +15,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { type Tool, validateToolArguments } from "@earendil-works/pi-ai";
 import * as mcpClient from "../../extensions/mcp/client.ts";
 import mcpExtension from "../../extensions/mcp/index.ts";
 import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/mcp-share.ts";
@@ -209,6 +210,39 @@ describe("mcp wiring", () => {
 		};
 		expect(result.isError).toBe(false);
 		expect(result.content[0].text).toBe('demo/foo called with {"x":1}');
+	});
+
+	it("registers nullable arguments and passes explicit nulls through runtime validation to the server", async () => {
+		writeUserServers({ demo: { command: "demo-server" } });
+		state.fixtures.set("demo", {
+			tools: [{
+				name: "clear",
+				inputSchema: {
+					type: "object",
+					properties: {
+						cursor: { type: ["string", "null"] },
+						options: { type: ["object", "null"], properties: { enabled: { type: "boolean" } } },
+						tags: { type: ["array", "null"], items: { type: "string" } },
+						note: { type: ["string", "null"] },
+					},
+					required: ["cursor", "options", "tags"],
+				},
+			}],
+		});
+		const received: unknown[] = [];
+		state.callToolResult = (_server, _tool, params) => {
+			received.push(params);
+			return { content: [{ type: "text", text: "cleared" }] };
+		};
+		await boot();
+
+		const tool = fake.tools.get("mcp__demo__clear")!;
+		const args = { cursor: null, options: null, tags: null, note: null };
+		const validated = validateToolArguments(tool as Tool, { type: "toolCall", id: "clear-1", name: tool.name, arguments: args });
+		expect(validated).toEqual(args);
+		await tool.execute("clear-1", validated, undefined, undefined, createFakeCtx({ cwd }));
+		expect(received).toEqual([args]);
+		expect(() => validateToolArguments(tool as Tool, { type: "toolCall", id: "clear-2", name: tool.name, arguments: {} })).toThrow(/Validation failed/);
 	});
 
 	it("a dropped connection (server closes mid-session) fails the server and drops its instructions reminder", async () => {

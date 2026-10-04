@@ -36,7 +36,7 @@ import {
 	skillStateFor,
 } from "../lib/skill-overrides.ts";
 import { BUNDLED_SKILLS_DIR, estimateSkillTokens, promptTemplateNames, scanSkills, scopeForPath } from "../lib/skill-scan.ts";
-import { resolveModelTier } from "../lib/model-tier.ts";
+import { sessionModelTier } from "../lib/session-model-tier.ts";
 import { readUsage, recordUsage, usageKey } from "../lib/usage-tracker.ts";
 import { boundedDockHeight, ccToolRenderers, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import {
@@ -98,6 +98,7 @@ const CODE_REVIEW_PATH = join(BUNDLED_ROOT, "code-review", "SKILL.md");
 const CODE_REVIEW_CELLS = join(BUNDLED_ROOT, "code-review", "cells");
 
 export default function skillExtension(pi: ExtensionAPI) {
+	const requestTier = sessionModelTier(pi);
 	/** pi resolves skills per turn; cache the latest list for the tool to use. */
 	let piSkills: IndexedSkill[] = [];
 	/** Session cwd, so project-level enabledPlugins settings apply to plugin skills. */
@@ -439,7 +440,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 			let promptText: string;
 			try {
 				const parsed = parseFrontmatterLoosely(readFileSync(found.path, "utf-8")) as { body: string };
-				const { body, args } = skillBody(found, parsed.body.trim(), params.args?.trim() ?? "", ctx.cwd, ctx.model);
+				const { body, args } = skillBody(found, parsed.body.trim(), params.args?.trim() ?? "", ctx.cwd);
 				promptText = skillPromptText(body, args, baseDirFor(found));
 			} catch (error) {
 				return {
@@ -475,11 +476,11 @@ export default function skillExtension(pi: ExtensionAPI) {
 	 * (lib/skill-body.ts, `/loop`) carries its arguments, a file's does not.
 	 * The bundled code-review picks its body by tier and effort (code-review.ts).
 	 */
-	const skillBody = (found: IndexedSkill, fileBody: string, args: string, cwd: string, model = sessionModel): { body: string; args: string } => {
+	const skillBody = (found: IndexedSkill, fileBody: string, args: string, cwd: string): { body: string; args: string } => {
 		if (found.kind === "command") return { body: fileBody, args };
 		if (resolve(found.path) === CODE_REVIEW_PATH) {
 			try {
-				const review = codeReviewBody(CODE_REVIEW_CELLS, resolveModelTier(model), pi.getThinkingLevel(), args);
+				const review = codeReviewBody(CODE_REVIEW_CELLS, requestTier(), pi.getThinkingLevel(), args);
 				return { body: review.body, args: review.args };
 			} catch {
 				// A cell file missing from an install: the SKILL.md body (the medium cell) still reviews.
@@ -550,7 +551,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 			return "unavailable";
 		}
 		recordUsage(pluginRoot(getAgentDir()), "skill", found.name);
-		const { body, args: bodyArgs } = skillBody(found, fileBody, args, ctx.cwd, ctx.model);
+		const { body, args: bodyArgs } = skillBody(found, fileBody, args, ctx.cwd);
 		// Claude Code's typed-skill message: the command breadcrumb, then the
 		// skill's text; any attached images ride after them.
 		const [breadcrumb, text] = typedSkillContent(found.name, args, skillPromptText(body, bodyArgs, baseDirFor(found)));

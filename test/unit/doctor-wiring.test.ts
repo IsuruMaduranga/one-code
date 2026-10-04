@@ -18,6 +18,7 @@ let cwd: string;
 let fake: FakePi;
 let startTurn: () => Promise<void>;
 let setModel: ReturnType<typeof vi.fn>;
+let sessionStarted: boolean;
 
 function ctxFor(current: any | undefined, mode: "tui" | "rpc" | "print" | "json" = "print") {
 	const notified: string[] = [];
@@ -52,7 +53,8 @@ beforeEach(() => {
 	vi.stubEnv("ONECODE_NO_UPDATE_CHECK", "1");
 	vi.stubEnv("CC_VERSION", "");
 	// A clean environment for the checks that read it.
-	for (const key of ["CLAUDE_CODE_SUBAGENT_MODEL", "CC_PROMPT_TIER", "CLAUDE_CONFIG_DIR"]) vi.stubEnv(key, "");
+	for (const key of ["CLAUDE_CODE_SUBAGENT_MODEL", "CC_PROMPT_TIER", "CLAUDE_CONFIG_DIR", "AA_API_KEY"]) vi.stubEnv(key, "");
+	sessionStarted = false;
 	fake = createFakePi();
 	startTurn = captureUserTurns(fake);
 	setModel = vi.fn(async () => true);
@@ -66,7 +68,13 @@ afterEach(() => {
 	rmSync(cwd, { recursive: true, force: true });
 });
 
-const run = (args: string, ctx: unknown) => fake.commands.get("doctor")!.handler(args, ctx);
+const run = async (args: string, ctx: unknown) => {
+	if (!sessionStarted) {
+		sessionStarted = true;
+		await fake.fire("session_start", { reason: "startup" }, ctx);
+	}
+	return fake.commands.get("doctor")!.handler(args, ctx);
+};
 
 describe("/doctor wiring", () => {
 	it("registers the command with argument completions", () => {
@@ -105,6 +113,20 @@ describe("/doctor wiring", () => {
 		await run("report", ctx);
 		expect(notified[0]).toContain("Permission mode: plan");
 		expect(notified[0]).toMatch(/screening this session on\s+anthropic\/claude-sonnet-5/);
+	});
+
+	it("reports the session tier until model_select re-resolves it", async () => {
+		vi.stubEnv("CC_PROMPT_TIER", "workhorse");
+		const { ctx, notified } = ctxFor(anthropic[0]);
+		await run("report", ctx);
+		expect(notified[0]).toContain("Prompt register: workhorse");
+		vi.stubEnv("CC_PROMPT_TIER", "tiny");
+		await run("report", ctx);
+		expect(notified[1]).toContain("Prompt register: workhorse");
+		ctx.model = anthropic[1];
+		await fake.fire("model_select", { model: anthropic[1] }, ctx);
+		await run("report", ctx);
+		expect(notified[2]).toContain("Prompt register: tiny");
 	});
 
 	it("lists the presets on request", async () => {

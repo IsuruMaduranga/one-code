@@ -68,9 +68,8 @@ function descriptionOptions(schema: JsonSchema): Record<string, unknown> {
 
 function convertLeaf(schema: JsonSchema): TSchema | undefined {
 	const options = descriptionOptions(schema);
-	const type = Array.isArray(schema.type) ? schema.type.find((t) => t !== "null") : schema.type;
 
-	switch (type) {
+	switch (schema.type) {
 		case "string":
 			return Type.String(options);
 		case "number":
@@ -79,10 +78,10 @@ function convertLeaf(schema: JsonSchema): TSchema | undefined {
 			return Type.Integer(options);
 		case "boolean":
 			return Type.Boolean(options);
+		case "null":
+			return Type.Null(options);
 		case "array":
 			return Type.Array(schema.items ? jsonSchemaToTypeBox(schema.items) : Type.Unknown(), options);
-		case "object":
-			return jsonSchemaToTypeBox(schema);
 		default:
 			return undefined;
 	}
@@ -109,7 +108,17 @@ export function jsonSchemaToTypeBox(schema: JsonSchema | undefined): TSchema {
 		return Type.Unknown();
 	}
 
-	if (schema.properties || schema.type === "object") {
+	if (Array.isArray(schema.type) && schema.type.length > 0) {
+		if (schema.type.length === 1) return jsonSchemaToTypeBox({ ...schema, type: schema.type[0] });
+		// TypeBox emits anyOf, which pi's provider converters understand. Keep
+		// the description on the union, not on each of its generated branches.
+		return Type.Union(
+			schema.type.map((type) => jsonSchemaToTypeBox({ ...schema, type, description: undefined })),
+			options,
+		);
+	}
+
+	if (schema.type === "object" || (schema.type === undefined && schema.properties)) {
 		const required = new Set(Array.isArray(schema.required) ? schema.required : []);
 		const properties: Record<string, TSchema> = {};
 		for (const [key, value] of Object.entries(schema.properties ?? {})) {

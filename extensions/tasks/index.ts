@@ -21,6 +21,7 @@ import { Type } from "typebox";
 import { restoreLatestDetails } from "../lib/branch-restore.ts";
 import { DEFER_CHANNEL, WITHHOLD_CHANNEL } from "../lib/deferred.ts";
 import { taskToolsEnabled } from "../lib/model-tier.ts";
+import { sessionModelTier } from "../lib/session-model-tier.ts";
 import { ccToolRenderers, linesComponent, safeThemeBold, safeThemePaint, strike } from "../lib/tui-render.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import {
@@ -54,6 +55,7 @@ const TASK_TOOLS = new Set(["task_create", "task_get", "task_list", "task_update
 const TASK_KEYWORDS = ["task", "todo", "plan", "progress", "dependencies", "tracking"];
 
 export default function tasksExtension(pi: ExtensionAPI) {
+	const requestTier = sessionModelTier(pi);
 	const store = new TaskStore();
 	const toggleKey = taskToggleKey();
 	let widgetHidden = false;
@@ -120,7 +122,7 @@ export default function tasksExtension(pi: ExtensionAPI) {
 	// that has them brings them back through the deferred listing.
 	let withheld = false;
 	const applyModelGate = (model: Parameters<typeof taskToolsEnabled>[0]) => {
-		const enabled = taskToolsEnabled(model);
+		const enabled = taskToolsEnabled(model, process.env, requestTier());
 		if (enabled === !withheld) return;
 		withheld = !enabled;
 		for (const name of TASK_TOOLS) {

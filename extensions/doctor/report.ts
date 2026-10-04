@@ -16,6 +16,7 @@
  */
 
 import type { Api, Model } from "@earendil-works/pi-ai";
+import type { PromptTier } from "../lib/model-tier.ts";
 import { tildify } from "../lib/paths.ts";
 import type { McpStatusEvent } from "../lib/mcp-status.ts";
 import type { ReplacedBuiltinsView } from "./builtins.ts";
@@ -102,6 +103,8 @@ export interface RegistryView {
 /** Live session facts; the CLI fills what it can from settings and leaves the rest undefined. */
 export interface SessionView {
 	model?: Model<Api>;
+	/** The running session's frozen register; absent in the standalone CLI. */
+	promptTier?: PromptTier;
 	/** Where `model` came from: the running session, pi's saved default, or nowhere. */
 	modelSource: "session" | "default-setting" | "first-available" | "none";
 	thinkingLevel?: string;

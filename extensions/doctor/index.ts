@@ -38,6 +38,7 @@ import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } f
 import { notifyOrPrint } from "../lib/headless-output.ts";
 import { createUserMessageSender, sessionOutlivesTurn } from "../lib/notifications.ts";
 import { modelSpec } from "../lib/model-policy.ts";
+import { sessionModelTier } from "../lib/session-model-tier.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 import { oneCodeStateDir } from "../lib/paths.ts";
 import { SUBAGENT_DEFAULT_CHANGED_CHANNEL } from "../lib/settings-channels.ts";
@@ -59,6 +60,7 @@ import { configMode } from "../lib/config-mode.ts";
 export const DOCTOR_PANEL_MAX_HEIGHT = 40;
 
 export default function doctorExtension(pi: ExtensionAPI) {
+	const requestTier = sessionModelTier(pi);
 	const sendUserMessage = createUserMessageSender(pi);
 	// Models the account refused this session (lib/model-unusable.ts): the report
 	// and presets must not recommend a model the session has just learned to avoid.
@@ -90,6 +92,8 @@ export default function doctorExtension(pi: ExtensionAPI) {
 	// (lib/capability-index.ts): refreshed at most daily, only from a session
 	// that outlives the turn, never awaited in session_start (findings §15, §19),
 	// inert once the session is shutting down. A failure is logged once.
+	// Request surfaces keep their frozen tier until session_start/model_select;
+	// automatic model selection can use the refreshed scores immediately.
 	let shuttingDown = false;
 	let refreshWarned = false;
 	const refreshCapability = async (ctx: ExtensionContext, home: string): Promise<void> => {
@@ -154,6 +158,7 @@ export default function doctorExtension(pi: ExtensionAPI) {
 			},
 			session: {
 				model: ctx.model,
+				promptTier: requestTier(),
 				modelSource: ctx.model ? "session" : "none",
 				thinkingLevel: ctx.thinkingLevel,
 				permission: permission
