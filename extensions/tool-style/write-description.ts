@@ -7,7 +7,8 @@
  * existing file you haven't read will fail" holds here: the file tracker
  * refuses it (file-tracker/tracker.ts). Read and edit keep pi's descriptions,
  * because Claude Code's describe a different call shape (`file_path`,
- * numbered lines, `old_string`).
+ * numbered lines, `old_string`); edit's gets the read rule appended
+ * (`editDescription`).
  */
 
 import type { DescriptionForm } from "../lib/tool-variants.ts";
@@ -27,4 +28,13 @@ Usage:
 
 export function writeDescription(form: DescriptionForm): string {
 	return form === "long" ? WRITE_LONG_DESCRIPTION : WRITE_SHORT_DESCRIPTION;
+}
+
+/**
+ * pi's edit description plus the rule the file tracker enforces, which pi's
+ * text does not state (write's does). Without it, GPT-6 models read with `cat`
+ * and met the refusal first (2026-10-04 Codex self-test: 16 refused edits).
+ */
+export function editDescription(base: string): string {
+	return `${base} The file must have been read in this conversation, with the read tool or a shell command whose output showed the whole file, or the edit is refused; if it changed on disk since, read it again first.`;
 }

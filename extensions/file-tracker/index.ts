@@ -21,6 +21,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { createReadToolDefinition, type ExtensionAPI, type ExtensionContext, type SessionCompactEvent } from "@earendil-works/pi-coding-agent";
 import { pathArgument } from "../auto-mode/paths.ts";
+import { bashParserReady } from "../lib/bash-parser.ts";
 import { collectImportedPaths, discoverContextFilePaths, instructionRule } from "../lib/claude-context.ts";
 import { inContextEntries, latestCompaction } from "../lib/compaction-boundary.ts";
 import { projectMemoryDir } from "../lib/memory.ts";
@@ -31,9 +32,10 @@ import { REMINDER_CHANNEL, type ReminderPayload } from "../lib/reminders.ts";
 import { resolveToolPath } from "../lib/tool-path.ts";
 import { parseRules, ruleMatches } from "../permissions/matcher.ts";
 import { loadPermissionSettings } from "../permissions/settings.ts";
-import { keptReadPaths, lastTouchesOnBranch, pathsReadOnBranch } from "./replay.ts";
+import { keptReadPaths, lastTouchesOnBranch, pathsReadOnBranch, shellCallsOnBranch } from "./replay.ts";
 import { type RestoredRead, restoreBlocks, restoreCandidates } from "./restore.ts";
 import { fileToolResultContent } from "./results.ts";
+import { shellReadCandidates, shownInFull } from "./shell-reads.ts";
 import {
 	describeChanges,
 	EXTERNAL_CHANGE_REMINDER,
@@ -71,6 +73,35 @@ function statIfPresent(path: string): FileStamp | undefined {
 		return undefined;
 	}
 }
+
+function commandOf(input: unknown): string {
+	const command = (input as { command?: unknown } | undefined)?.command;
+	return typeof command === "string" ? command : "";
+}
+
+function textOf(content: unknown): string {
+	if (!Array.isArray(content)) return "";
+	return content.map((block) => (block as { type?: string; text?: string })?.type === "text" ? ((block as { text?: string }).text ?? "") : "").join("\n");
+}
+
+/**
+ * Count as read each file a shell command printed in full (`shell-reads.ts`).
+ * Observed, not touched: the post-compaction restore follows the file tools,
+ * as Claude Code's does.
+ */
+function observeShellReads(tracker: FileTracker, command: string, output: string, cwd: string): void {
+	if (!command || !output) return;
+	for (const raw of shellReadCandidates(command)) {
+		const path = resolveToolPath(raw, cwd);
+		const stamp = statIfPresent(path);
+		if (!stamp || stamp.size > MAX_SHELL_READ_BYTES) continue;
+		const current = readIfPresent(path);
+		if (current !== undefined && shownInFull(output, current)) tracker.observe(path, current, Date.now(), stamp);
+	}
+}
+
+/** Above this a shell read's output is persisted, not shown, so the file cannot have been seen whole. */
+const MAX_SHELL_READ_BYTES = 256 * 1024;
 
 /** Observe a file's current content together with the stamp it was read at, and return that stamp. */
 function observeFromDisk(tracker: FileTracker, path: string): FileStamp | undefined {
@@ -183,6 +214,14 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 		for (const raw of pathsReadOnBranch(entries)) {
 			observeFromDisk(tracker, resolveToolPath(raw, ctx.cwd));
 		}
+		// Shell reads need the bash grammar, which may still be loading this early.
+		const target = tracker;
+		const shellCalls = [...shellCallsOnBranch(entries)];
+		if (shellCalls.length > 0) {
+			void bashParserReady().then(() => {
+				for (const call of shellCalls) observeShellReads(target, call.command, call.output, ctx.cwd);
+			});
+		}
 		touched = new Map([...lastTouchesOnBranch(entries)].map(([raw, at]) => [resolveToolPath(raw, ctx.cwd), at]));
 	};
 	pi.on("session_start", (_event, ctx) => reconstruct(ctx));
@@ -206,9 +245,14 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 		return { block: true, reason: STALE_REASON(path) };
 	});
 
-	pi.on("tool_result", (event, ctx) => {
+	pi.on("tool_result", async (event, ctx) => {
 		const existedBefore = writeTargetExisted.get(event.toolCallId);
 		writeTargetExisted.delete(event.toolCallId);
+		if (event.toolName === "bash") {
+			await bashParserReady();
+			observeShellReads(tracker, commandOf(event.input), textOf(event.content), ctx.cwd);
+			return undefined;
+		}
 		if (!READ_TOOLS.has(event.toolName) && !GUARDED_TOOLS.has(event.toolName)) return undefined;
 
 		const path = pathOf(event.input, ctx.cwd);
