@@ -6,7 +6,8 @@
  *
  * The registry exists because the association can only resolve at call time:
  * these worktrees live in tmpdirs (not statically recognizable paths), and the
- * child loaders are cached and shared across runs with different cwds.
+ * guard judges each call's `ctx.cwd`, not the cwd its child's loader was built
+ * with (one loader per child session, lib/agent-loader.ts openChildSession).
  * createWorktree/cleanupWorktree (subagents/worktree.ts) register and release
  * entries; reconstructed run records re-register kept worktrees after a
  * process restart (subagents/index.ts); the worktree the main session entered
