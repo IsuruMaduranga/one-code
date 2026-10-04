@@ -7,7 +7,7 @@
  * reader.
  */
 
-/** Request a permission-mode change (`{ mode }`); permissions applies it. */
+/** Request a permission-mode change (`{ mode, toolCallId? }`); permissions applies it and anchors a tool-driven switch to its result. */
 export const MODE_CHANNEL = "one-code:set-permission-mode";
 /** Announces plan mode's one writable file (`{ path }`); the permissions matcher consumes it. */
 export const PLAN_FILE_CHANNEL = "one-code:plan-file-path";

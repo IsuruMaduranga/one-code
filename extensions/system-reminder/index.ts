@@ -64,13 +64,13 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 		restored = contextStackOnBranch(ctx.sessionManager.getBranch());
 		stored = restored !== undefined;
 		baselines = restored ? structuredClone(restored.baselines) : {};
-		lastState = restored ? JSON.stringify({ version: 1, sticky: restored.sticky, baselines }) : "";
+		lastState = restored ? JSON.stringify({ version: 1, sticky: restored.sticky, pinned: restored.pinned ?? [], baselines }) : "";
 		lastStack = restored ? JSON.stringify(restored.stack) : "";
-		if (restored) reminderQueue.restore(restored.stack, restored.sticky, RESTORED_STACK_KEYS, LIVE_CONTEXT_KEYS);
+		if (restored) reminderQueue.restore(restored.stack, restored.sticky, RESTORED_STACK_KEYS, LIVE_CONTEXT_KEYS, restored.pinned);
 		else reminderQueue.releaseRestore();
 	});
 	const persistSnapshot = (stack: ReminderEntry[] = reminderQueue.persistentEntries("first-prepend")) => {
-		const state = { version: 1 as const, sticky: reminderQueue.persistentEntries("sticky-append"), baselines };
+		const state = { version: 1 as const, sticky: reminderQueue.persistentEntries("sticky-append"), pinned: reminderQueue.persistentPins(), baselines };
 		const serialized = JSON.stringify(state);
 		const serializedStack = JSON.stringify(stack);
 		if (!stored) {

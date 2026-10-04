@@ -79,7 +79,7 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 		`${s.branch ? ` (branch ${s.branch})` : ""}, not in ${s.originalCwd}. ` +
 		"Relative paths and bash commands already run there. Use exit_worktree to leave when the user asks.";
 
-	const applyState = (next: WorktreeState | undefined) => {
+	const applyState = (next: WorktreeState | undefined, toolCallId?: string) => {
 		state = next;
 		const location: WorktreeLocation | null = next ? { path: next.path, branch: next.branch, sharedRoot: next.sharedRoot } : null;
 		pi.events.emit(WORKTREE_CHANNEL, location);
@@ -89,6 +89,7 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 				scope: "every-turn",
 				key: REMINDER_KEY,
 				placement: "sticky-append",
+				toolCallId,
 			});
 		} else {
 			pi.events.emit(REMINDER_CHANNEL, { key: REMINDER_KEY, remove: true });
@@ -98,7 +99,12 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 	const reconstructState = (ctx: ExtensionContext) => {
 		const details = restoreLatestDetails<WorktreeDetails>(ctx.sessionManager.getBranch(), WORKTREE_TOOLS, (d) => d?.worktreeState !== undefined);
 		let restored = details?.worktreeState ?? undefined;
-		if (restored && !existsSync(restored.path)) restored = undefined;
+		if (restored && !existsSync(restored.path)) {
+			pi.events.emit(REMINDER_CHANNEL, {
+				text: `Left worktree session; back in ${restored.originalCwd}. The worktree at ${restored.path} no longer exists.`,
+			});
+			restored = undefined;
+		}
 		// Sessions persisted before sharedRoot existed: originalCwd is the best guess.
 		if (restored && !restored.sharedRoot) restored = { ...restored, sharedRoot: restored.originalCwd };
 		applyState(restored);
@@ -154,7 +160,7 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 			name: Type.Optional(Type.String({ description: ENTER_WORKTREE_PARAMS.name })),
 			path: Type.Optional(Type.String({ description: ENTER_WORKTREE_PARAMS.path })),
 		}),
-		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+		async execute(toolCallId, params, _signal, _onUpdate, ctx) {
 			const fail = (text: string) => ({ content: [{ type: "text" as const, text }], details: {} as WorktreeDetails, isError: true });
 
 			if (params.name && params.path) return fail("Pass either `name` or `path`, not both.");
@@ -188,7 +194,7 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 					branchNote = ` Its branch could not be read (${(error as Error).message.split("\n")[0]}).`;
 				}
 				const next: WorktreeState = { path: target, branch, createdByUs: false, originalCwd: ctx.cwd, sharedRoot: repoRoot };
-				applyState(next);
+				applyState(next, toolCallId);
 				return {
 					content: [{ type: "text", text: `Switched into existing worktree ${target}${branch ? ` (branch ${branch})` : ""}.${branchNote} All work now happens there; exit_worktree returns to ${ctx.cwd}. ${ISOLATION_NOTE}` }],
 					details: { worktreeState: next } satisfies WorktreeDetails,
@@ -226,7 +232,7 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 			}
 
 			const next: WorktreeState = { path, branch, baseCommit, createdByUs: true, originalCwd: ctx.cwd, sharedRoot: repoRoot };
-			applyState(next);
+			applyState(next, toolCallId);
 			return {
 				content: [
 					{

@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ORIGINAL_COMMAND_CHANNEL, type OriginalCommandRecord } from "../../extensions/lib/original-command.ts";
+import { REMINDER_CHANNEL, type ReminderPayload } from "../../extensions/lib/reminders.ts";
 import { shellQuote } from "../../extensions/lib/shell-quote.ts";
 import { WORKTREE_CHANNEL, type WorktreeLocation } from "../../extensions/lib/worktree-channel.ts";
 import worktreeExtension from "../../extensions/worktree/index.ts";
@@ -20,6 +21,7 @@ let repo: string;
 let fake: FakePi;
 let worktree: string;
 const originals: OriginalCommandRecord[] = [];
+const stateReminders: ReminderPayload[] = [];
 
 beforeEach(async () => {
 	// .native expands a Windows 8.3 short name (RUNNER~1) the way git reports the path.
@@ -32,6 +34,8 @@ beforeEach(async () => {
 
 	fake = createFakePi();
 	originals.length = 0;
+	stateReminders.length = 0;
+	fake.events.on(REMINDER_CHANNEL, (data) => stateReminders.push(data as ReminderPayload));
 	fake.events.on(ORIGINAL_COMMAND_CHANNEL, (record) => originals.push(record as OriginalCommandRecord));
 	let location: WorktreeLocation | null = null;
 	fake.events.on(WORKTREE_CHANNEL, (data) => {
@@ -51,6 +55,45 @@ afterEach(() => rmSync(repo, { recursive: true, force: true }));
 
 const toolCall = async (toolName: string, input: Record<string, unknown>, toolCallId = "t1") =>
 	(await fake.fireOne<GateResult>("tool_call", { toolName, toolCallId, input })) ?? undefined;
+
+describe("worktree state announcements", () => {
+	it("binds created and existing-worktree activation to the entering tool result", async () => {
+		expect(stateReminders.find((entry) => entry.text?.startsWith("Worktree session active"))).toMatchObject({ toolCallId: "e1" });
+		stateReminders.length = 0;
+		await fake.tools.get("enter_worktree")!.execute("e2", { path: worktree }, undefined, undefined, createFakeCtx({ cwd: repo }));
+		expect(stateReminders.find((entry) => entry.text?.startsWith("Worktree session active"))).toMatchObject({ toolCallId: "e2" });
+	});
+
+	it("announces a restored worktree that disappeared instead of silently clearing its sticky state", async () => {
+		const resumed = createFakePi();
+		const reminders: ReminderPayload[] = [];
+		resumed.events.on(REMINDER_CHANNEL, (data) => reminders.push(data as ReminderPayload));
+		worktreeExtension(resumed.pi as never);
+		const missingPath = join(repo, "missing-worktree");
+		const ctx = createFakeCtx({
+			cwd: repo,
+			sessionManager: { getBranch: () => [{ type: "message", message: {
+				role: "toolResult", toolName: "enter_worktree", toolCallId: "old", content: [], timestamp: 1,
+				details: { worktreeState: { path: missingPath, originalCwd: repo, sharedRoot: repo, createdByUs: false } },
+			} }] },
+		});
+		await resumed.fire("session_start", {}, ctx);
+		expect(reminders).toContainEqual({ key: "cc-worktree-session", remove: true });
+		const notice = reminders.find((entry) => entry.text && entry.scope !== "every-turn");
+		expect(notice?.text).toContain(`back in ${repo}`);
+		expect(notice?.text).toContain(missingPath);
+		expect(notice?.text).toContain("no longer exists");
+	});
+
+	it.each(["keep", "remove"])("exit_worktree %s reports the switch in its result", async (action) => {
+		const result = await fake.tools.get("exit_worktree")!.execute("exit", { action }, undefined, undefined, createFakeCtx({ cwd: repo })) as {
+			content: { text: string }[]; details: { worktreeState: unknown }; isError?: boolean;
+		};
+		expect(result.isError).toBeUndefined();
+		expect(result.details.worktreeState).toBeNull();
+		expect(result.content[0].text).toContain(`back in ${repo}`);
+	});
+});
 
 describe("monitor in a worktree session", () => {
 	it("runs its command in the worktree and publishes the original", async () => {

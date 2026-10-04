@@ -151,8 +151,11 @@ describe("restored context-stack emitters", () => {
 
 	it("keeps a same-auto session's stored sticky anchors", async () => {
 		const restored = await autoSnapshot();
-		const auto = restored.sticky.find((entry) => entry.key === "permission-mode")!;
-		restored.sticky = [sticky("permission-mode", auto.text)];
+		const auto = restored.sticky.find((entry) => entry.key === "permission-mode" && entry.until === undefined)!;
+		restored.sticky = [
+			{ ...sticky("permission-mode", auto.text, 0, 1), until: 4, tailPin: undefined },
+			sticky("permission-mode", auto.text),
+		];
 		const fake = createFakePi();
 		systemReminderExtension(fake.pi as never);
 		permissionsExtension(fake.pi as never);
@@ -160,9 +163,11 @@ describe("restored context-stack emitters", () => {
 		await fake.fire("session_start", {}, ctx);
 		// Force a state write so the serialized sticky entry is observable.
 		fake.events.emit(CONTEXT_BASELINE_CHANNEL, { key: "test-probe", value: true });
-		await fake.fire("context", { messages: [user(5), user(20)] }, ctx);
+		await fake.fire("context", { messages: [user(1), user(5), user(20)] }, ctx);
 		const update = fake.appendedEntries.find((entry) => entry.customType === CONTEXT_STATE_ENTRY)!;
-		const savedAuto = ((update.data as { sticky: ContextStackSnapshot["sticky"] }).sticky.find((entry) => entry.key === "permission-mode"))!;
+		const savedSticky = (update.data as { sticky: ContextStackSnapshot["sticky"] }).sticky;
+		expect(savedSticky.filter((entry) => entry.key === "permission-mode")).toHaveLength(2);
+		const savedAuto = savedSticky.find((entry) => entry.key === "permission-mode" && entry.until === undefined)!;
 		expect(savedAuto).toMatchObject({ since: 10, opener: 5, tailPin: { kind: "user", timestamp: 5 } });
 	});
 
@@ -205,7 +210,7 @@ describe("restored context-stack emitters", () => {
 		await fake.fire("context", { messages: [user(5), user(20)] }, ctx);
 
 		const update = fake.appendedEntries.find((entry) => entry.customType === CONTEXT_STATE_ENTRY)!;
-		const savedPlan = ((update.data as { sticky: ContextStackSnapshot["sticky"] }).sticky.find((entry) => entry.key === "permission-mode"))!;
+		const savedPlan = ((update.data as { sticky: ContextStackSnapshot["sticky"] }).sticky.find((entry) => entry.key === "permission-mode" && entry.until === undefined))!;
 		expect(savedPlan.text).toContain("No plan file exists yet.");
 		expect(savedPlan.text).not.toContain("A plan file already exists");
 		expect(savedPlan).toMatchObject({ since: 10, opener: 5, tailPin: { kind: "user", timestamp: 5 } });

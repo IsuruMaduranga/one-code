@@ -411,7 +411,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		return { classifier: first ? `${first.model.provider}/${first.model.id}` : undefined, pinned: false };
 	};
 
-	const applyBadge = (sessionModel?: Model<Api>) => {
+	const applyBadge = (sessionModel?: Model<Api>, toolCallId?: string) => {
 		// A below-editor widget, not a footer status: Claude Code renders the
 		// mode line directly under the input box, and the workflow status strip
 		// sorts itself below this line by re-setting on the status channel
@@ -436,6 +436,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			paused: pauseTracker.isPaused(),
 			classifier: display.classifier,
 			pinned: display.pinned,
+			...(toolCallId ? { toolCallId } : {}),
 		} satisfies PermissionStatus);
 	};
 
@@ -721,10 +722,11 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	};
 
 	/** `startup`: the session opens in this mode, so there is no switch to announce, only the mode's standing block. */
-	const setMode = (next: PermissionMode, startup = false) => {
+	const setMode = (next: PermissionMode, startup = false, toolCallId?: string) => {
+		const changed = mode !== next;
 		mode = next;
 		process.env[MODE_ENV] = next;
-		// The standing block of the mode being left goes first, BEFORE the status
+		// Close the standing block of the mode being left BEFORE the status
 		// broadcast in applyBadge: the plan-mode extension owns the shared
 		// "permission-mode" key while planning (it knows the plan file) and
 		// re-installs its block synchronously from that broadcast when the mode
@@ -732,18 +734,16 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// leave a turn entered mid-stream with no plan reminder until the next
 		// prompt (STEERING-REVIEW-2026-09-05 M3). Auto installs its own block below.
 		const previousMode = restoredContext(pi.events)?.baselines["permission-mode"];
-		if (mode !== "auto" && !(startup && mode === "plan" && previousMode === "plan")) {
+		if (mode !== "auto" && !(mode === "plan" && (startup ? previousMode === "plan" : !changed))) {
 			pi.events.emit(REMINDER_CHANNEL, { remove: true, key: "permission-mode" });
 		}
 		pi.events.emit(CONTEXT_BASELINE_CHANNEL, { key: "permission-mode", value: mode });
-		applyBadge();
+		applyBadge(undefined, toolCallId);
 		// Every switch is announced once on the tail of the next request (the next
 		// tool result mid-turn, the prompt between turns), so the model learns of
 		// the change where it reads next. The standing block carries the rules
-		// but rides the turn's user message, behind the model's own actions — so
-		// for plan mode the announcement, the one thing guaranteed to land
-		// mid-turn, also names the plan file (published by plan-mode's refresh
-		// inside the applyBadge broadcast above).
+		// from that point forward; the announcement also names the plan file
+		// (published by plan-mode's refresh inside the applyBadge broadcast above).
 		const planNote =
 			mode === "plan"
 				? planFilePath
@@ -757,6 +757,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			pi.events.emit(REMINDER_CHANNEL, {
 				text: `The user's permission mode is now "${mode}".${planNote}`,
 				key: "permission-mode-change",
+				toolCallId,
 			});
 		}
 		if (mode === "auto") {
@@ -770,6 +771,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				// Session state: rides every user message since auto mode came on, so
 				// the cached prefix holds turn to turn (lib/reminders.ts).
 				placement: "sticky-append",
+				toolCallId,
 			});
 		}
 	};
@@ -984,8 +986,9 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	// `/auto-mode model` does after its own write, so the next call re-plans.
 	pi.events.on(CLASSIFIER_SETTING_CHANGED_CHANNEL, () => resetClassifierChoice(badgeCtx?.model));
 	pi.events.on(MODE_CHANNEL, (data) => {
-		const requested = normalizePermissionMode((data as { mode?: unknown })?.mode);
-		if (requested) setMode(requested);
+		const request = data as { mode?: unknown; toolCallId?: unknown } | undefined;
+		const requested = normalizePermissionMode(request?.mode);
+		if (requested) setMode(requested, false, typeof request?.toolCallId === "string" ? request.toolCallId : undefined);
 	});
 
 	// The plan-mode extension announces the plan file on PLAN_FILE_CHANNEL;

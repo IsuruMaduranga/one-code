@@ -12,6 +12,8 @@ export interface ContextStackSnapshot {
 	version: 1;
 	stack: ReminderEntry[];
 	sticky: ReminderEntry[];
+	/** Delivered one-shots/breadcrumbs; absent in older snapshots. */
+	pinned?: ReminderEntry[];
 	/** Emitter-owned announcement baselines, not live configuration. */
 	baselines: Record<string, unknown>;
 }
@@ -44,14 +46,18 @@ function anchor(value: unknown): boolean {
 	return record(value) && ((value.kind === "user" && typeof value.timestamp === "number" && Number.isFinite(value.timestamp)) ||
 		(value.kind === "toolResult" && typeof value.toolCallId === "string"));
 }
-function entries(value: unknown, placement: "first-prepend" | "sticky-append"): value is ReminderEntry[] {
-	return Array.isArray(value) && value.every((e) => record(e) && e.placement === placement && typeof e.text === "string" &&
+function entries(value: unknown, placement: "first-prepend" | "sticky-append" | "pinned"): value is ReminderEntry[] {
+	return Array.isArray(value) && value.every((e) => record(e) &&
+		(placement === "pinned" ? e.placement === "last-append" || e.placement === "user-prepend" : e.placement === placement) && typeof e.text === "string" &&
 		typeof e.order === "number" && Number.isFinite(e.order) &&
 		(e.key === undefined || typeof e.key === "string") && (e.suffix === undefined || typeof e.suffix === "string") &&
+		(e.toolCallId === undefined || placement === "sticky-append" && typeof e.toolCallId === "string") &&
 		["raw", "systemRoleOnly", "skipStackCarrier"].every((key) => e[key] === undefined || typeof e[key] === "boolean") &&
 		(e.since === undefined || typeof e.since === "number" && Number.isFinite(e.since)) &&
+		(e.until === undefined || placement === "sticky-append" && typeof e.until === "number" && Number.isFinite(e.until)) &&
+		(e.userPins === undefined || placement === "sticky-append" && Array.isArray(e.userPins) && e.userPins.every((stamp) => typeof stamp === "number" && Number.isFinite(stamp))) &&
 		(e.opener === undefined || e.opener === null || typeof e.opener === "number" && Number.isFinite(e.opener)) &&
-		(e.tailPin === undefined || anchor(e.tailPin)) && e.pin === undefined);
+		(e.tailPin === undefined || anchor(e.tailPin)) && (placement === "pinned" ? anchor(e.pin) : e.pin === undefined));
 }
 
 /** Read only the selected branch. Malformed/unknown versions are ignored, never partly restored. */
@@ -60,12 +66,14 @@ export function contextStackOnBranch(branch: readonly { type: string; customType
 	for (const entry of branch) {
 		if (entry.type !== "custom" || !record(entry.data) || entry.data.version !== 1) continue;
 		const data = entry.data;
+		if (data.pinned !== undefined && !entries(data.pinned, "pinned")) continue;
 		if (entry.customType === CONTEXT_STACK_ENTRY && entries(data.stack, "first-prepend") && entries(data.sticky, "sticky-append") && record(data.baselines)) {
 			snapshot = structuredClone(data) as unknown as ContextStackSnapshot;
 		} else if (snapshot && entry.customType === CONTEXT_STATE_ENTRY && entries(data.sticky, "sticky-append") && record(data.baselines) &&
 			(data.stack === undefined || entries(data.stack, "first-prepend"))) {
 			if (data.stack !== undefined) snapshot.stack = structuredClone(data.stack) as ReminderEntry[];
 			snapshot.sticky = structuredClone(data.sticky);
+			if (data.pinned !== undefined) snapshot.pinned = structuredClone(data.pinned) as ReminderEntry[];
 			snapshot.baselines = structuredClone(data.baselines);
 		}
 	}

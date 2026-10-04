@@ -40,6 +40,17 @@ describe("context snapshot reader", () => {
 		expect(contextStackOnBranch([custom(original), custom({ ...state, sticky: [{ ...state.sticky[0], since: "yesterday" }] }, CONTEXT_STATE_ENTRY)])).toEqual(original);
 	});
 
+	it("rejects malformed closed boundaries and pin snapshots without partially restoring them", () => {
+		const original = snapshot([block("claude-context")]);
+		const sticky = block("mode", "plan", { placement: "sticky-append", since: 1 });
+		for (const until of ["later", null, Infinity, NaN]) {
+			expect(contextStackOnBranch([custom(original), custom({ version: 1, sticky: [{ ...sticky, until }], baselines: {} }, CONTEXT_STATE_ENTRY)])).toEqual(original);
+		}
+		for (const pinned of [[{ ...sticky, pin: { kind: "user", timestamp: 1 } }], [block("bad", "bad", { placement: "last-append" })], "bad"]) {
+			expect(contextStackOnBranch([custom({ ...original, pinned })])).toBeUndefined();
+		}
+	});
+
 	it("follows real pi fork ancestry and keeps custom metadata out of projected messages", () => {
 		const manager = SessionManager.inMemory();
 		manager.appendMessage(user("first", 1) as never);
@@ -85,8 +96,9 @@ describe("restored reminder queue", () => {
 		queue.enqueue("auto", { scope: "every-turn", key: "permission-mode", placement: "sticky-append" });
 		expect(queue.persistentEntries("sticky-append")[0]).toMatchObject(entry);
 		queue.enqueue("plan", { scope: "every-turn", key: "permission-mode", placement: "sticky-append" });
-		expect(queue.persistentEntries("sticky-append")[0]).toMatchObject({ text: "plan", since: 100 });
-		expect(queue.persistentEntries("sticky-append")[0].opener).toBeUndefined();
+		expect(queue.persistentEntries("sticky-append")[0]).toMatchObject({ ...entry, until: 100 });
+		expect(queue.persistentEntries("sticky-append")[1]).toMatchObject({ text: "plan", since: 100 });
+		expect(queue.persistentEntries("sticky-append")[1].opener).toBeUndefined();
 	});
 });
 
@@ -118,7 +130,8 @@ describe("context snapshot owner", () => {
 		resumed.emit(block("permission-mode", "auto", { placement: "sticky-append" }));
 		const next = await resumed.request([...previous, user("three", 30)]);
 		expect(JSON.stringify(next.slice(0, previous.length))).toBe(JSON.stringify(sent));
-		expect(resumed.fake.appendedEntries).toHaveLength(0);
+		expect(resumed.fake.appendedEntries).toHaveLength(1);
+		expect((resumed.fake.appendedEntries[0].data as ContextStackSnapshot).sticky[0].userPins).toEqual([10, 20, 30]);
 	});
 
 	it("keeps early context-budget emissions without losing their restored anchors", async () => {
@@ -130,7 +143,7 @@ describe("context snapshot owner", () => {
 		expect(resumed.fake.appendedEntries).toHaveLength(0);
 	});
 
-	it("persists sticky replacements and removals, not one-shot pins; baseline snapshots cannot mutate", async () => {
+	it("persists closed sticky lifetimes and their one-shot pins; baseline snapshots cannot mutate", async () => {
 		const run = await start();
 		run.emit(block("permission-mode", "auto", { placement: "sticky-append", since: 0 }));
 		run.fake.events.emit(CONTEXT_BASELINE_CHANNEL, { key: "models", value: ["a"] });
@@ -141,10 +154,11 @@ describe("context snapshot owner", () => {
 		await run.request([user("first", 10), user("second", 20)]);
 		expect((run.fake.appendedEntries[0].data as ContextStackSnapshot).baselines.models).toEqual(["a"]);
 		const restored = contextStackOnBranch(branchOf(run.fake))!;
-		expect(restored.sticky).toEqual([]);
+		expect(restored.sticky).toEqual([expect.objectContaining({ text: "auto", since: 0, until: expect.any(Number) })]);
 		expect(restored.baselines.models).toEqual(["b"]);
 		const resumed = await start(branchOf(run.fake));
-		expect(JSON.stringify(await resumed.request([user("first", 10), user("second", 20)]))).not.toContain("one shot");
+		expect(restored.pinned).toEqual([expect.objectContaining({ text: "one shot", pin: { kind: "user", timestamp: 20 } })]);
+		expect(JSON.stringify(await resumed.request([user("first", 10), user("second", 20)]))).toContain("one shot");
 	});
 
 	it("stores provider-neutral blocks and keeps the stack on a compaction summary", async () => {

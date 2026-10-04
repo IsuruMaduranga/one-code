@@ -16,8 +16,8 @@ import {
 const user = (content: string | Array<{ type: string; text?: string }>, timestamp = 0) =>
 	({ role: "user", content, timestamp }) as any;
 const assistant = () => ({ role: "assistant", content: [], timestamp: 0 }) as any;
-const toolResult = (text = "ok") =>
-	({ role: "toolResult", toolCallId: "c1", toolName: "bash", content: [{ type: "text", text }], timestamp: 0 }) as any;
+const toolResult = (text = "ok", timestamp = 0) =>
+	({ role: "toolResult", toolCallId: "c1", toolName: "bash", content: [{ type: "text", text }], timestamp }) as any;
 const compaction = (summary = "what happened", timestamp = 0) =>
 	({ role: "compactionSummary", summary, tokensBefore: 1, timestamp }) as any;
 const blockTexts = (m: any) => (typeof m.content === "string" ? [m.content] : m.content.map((b: any) => b.text));
@@ -179,18 +179,15 @@ describe("injectReminders", () => {
 		expect(later.slice(0, 5)).toEqual(result);
 	});
 
-	it("sticky-append also rides the user message that opened the turn it switched on in", () => {
-		// A standing reminder emitted on before_agent_start is stamped AFTER the
-		// turn's user message; that message must still carry it, and keep it.
-		const messages = [user("t1", 100), assistant(), toolResult("ran")];
+	it("sticky-append first rides the result after a mid-turn switch, not the opener", () => {
+		const messages = [user("t1", 100), assistant(), toolResult("ran", 160)];
 		const entry = { text: "plan on", placement: "sticky-append" as const, order: 0, since: 150 };
 		const result = injectReminders(messages, [entry]);
-		expect(blockTexts(result[0])).toEqual(["t1", wrapReminder("plan on")]);
-		expect(blockTexts(result[2])).toEqual(["ran"]);
-		// Earlier turns stay untouched; only the opener and later turns carry it.
-		const later = injectReminders([user("t0", 50), assistant(), ...messages, assistant(), user("t2", 200)], [{ ...entry, opener: 100 }]);
+		expect(blockTexts(result[0])).toEqual(["t1"]);
+		expect(blockTexts(result[2])).toEqual(["ran", wrapReminder("plan on")]);
+		const later = injectReminders([user("t0", 50), assistant(), ...messages, assistant(), user("t2", 200)], [entry]);
 		expect(blockTexts(later[0])).toEqual(["t0"]);
-		expect(blockTexts(later[2])).toEqual(["t1", wrapReminder("plan on")]);
+		expect(later.slice(2, 5)).toEqual(result);
 		expect(blockTexts(later[6])).toEqual(["t2", wrapReminder("plan on")]);
 	});
 
@@ -210,22 +207,23 @@ describe("injectReminders", () => {
 		expect(injectReminders(turn2b, q.drain(turn2b)).slice(0, 3)).toEqual(first);
 	});
 
-	it("sticky-append switched on mid-turn keeps its opener once a steer stamped earlier arrives (A4-M1)", () => {
+	it("sticky-append switched on mid-turn keeps its result pin once an earlier-stamped steer arrives", () => {
 		let now = 100;
 		const q = new ReminderQueue(() => now);
 		// The turn opened at t=100; a steer typed at t=400 is still queued when
 		// the mode switches on at t=500.
-		const before = [user("turn 1", 100), assistant(), toolResult("ran")];
+		const before = [user("turn 1", 100), assistant(), toolResult("ran", 510)];
 		now = 500;
 		q.enqueue("AUTO", { scope: "every-turn", key: "permission-mode", placement: "sticky-append" });
 		const first = injectReminders(before, q.drain(before));
-		expect(blockTexts(first[0])).toEqual(["turn 1", wrapReminder("AUTO")]);
-		// The steer enters the context: the opener stays on the turn's first message.
+		expect(blockTexts(first[0])).toEqual(["turn 1"]);
+		expect(blockTexts(first[2])).toEqual(["ran", wrapReminder("AUTO")]);
+		// The steer enters the context: the block stays on its first result.
 		const withSteer = [...before, user("steer", 400), assistant()];
 		const second = injectReminders(withSteer, q.drain(withSteer));
 		expect(second.slice(0, 3)).toEqual(first);
 		expect(blockTexts(second[3])).toEqual(["steer"]);
-		// Plan mode re-emits the same text every turn: the opener must not move.
+		// Plan mode re-emits the same text every turn: the pin must not move.
 		now = 900;
 		q.enqueue("AUTO", { scope: "every-turn", key: "permission-mode", placement: "sticky-append" });
 		const next = [...withSteer, user("turn 2", 1000)];

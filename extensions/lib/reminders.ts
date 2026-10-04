@@ -18,17 +18,17 @@
  *   Claude Code's first-message stack. Byte-stable, so the cached prefix holds.
  * - `sticky-append` — SESSION STATE that switches on and off (auto mode, plan
  *   mode, a worktree session, ultracode). Appended to EVERY user message
- *   stamped after the state switched on (`since`), so message N carries the
- *   block on every later request too: the prefix stays byte-stable while the
- *   state holds, and the model still sees the reminder on its latest turn.
- *   When the first request to carry the block has no such message (the state
- *   came on mid-turn), the turn's latest earlier user message carries it too:
- *   the `opener`, fixed by the queue on that first request and never
- *   recomputed. A state switched on between turns therefore rides from the
- *   next prompt only, and the previous turn's message, already cached, stays
- *   as it was. Switching off drops the blocks (one cache miss, once). The old
- *   `last-append` + every-turn combination re-cached the previous turn on
- *   every turn — permanently, in auto mode.
+ *   stamped after the state switched on (`since`). Mid-turn it first rides the
+ *   switching call's tool result (`toolCallId` → `tailPin`), or the first
+ *   carrier after the switch, never the already-cached turn opener. That pin
+ *   and every later user carrier keep identical bytes. Switching off CLOSES
+ *   the lifetime (`until`) and freezes its actual user carriers (`userPins`),
+ *   so queued input cannot acquire past state. It never removes blocks from
+ *   history. Re-entry opens a separate lifetime. Closed lifetimes
+ *   are persisted alongside open ones and dropped only when all their carriers
+ *   leave the context (compaction/fork). They never migrate onto a compaction
+ *   summary; retained messages still carry their historical blocks. Legacy
+ *   `opener` anchors are honored on resume, but never created for new states.
  * - `last-append` — ONE-SHOT STEERING about what just happened (a deferred tool
  *   miss, a file changed under the model, a mode change). Delivered where the
  *   model reads next, and then KEPT there so the message never changes again:
@@ -38,8 +38,8 @@
  *   request ever re-caches the result); a one-shot still pending when a request
  *   goes out is `pin`ned to the request's tail (the trailing tool result by call
  *   id, else the last user message by timestamp) and re-attached to that same
- *   message on every later request, byte-identical. Pins are process memory
- *   (a `--resume` drops them: one miss, once).
+ *   message on every later request, byte-identical. Pins are persisted with
+ *   sticky lifetimes so a resume also preserves the switch announcements.
  * - `user-prepend` — LOCAL-COMMAND BREADCRUMBS (`/clear`, `/model`, a panel
  *   command): what Claude Code shows the model when the user ran a slash
  *   command. Bare text blocks placed BEFORE the user's text on the next user
@@ -148,22 +148,25 @@ export interface ReminderEntry {
 	suffix?: string;
 	/**
 	 * `sticky-append` only: when the state switched on. Every user message
-	 * stamped at or after it carries the block.
+	 * stamped at or after it carries the block while open. Closing freezes the
+	 * actual carriers in `userPins`; legacy snapshots use `until` as the end.
 	 */
 	since?: number;
+	/** `sticky-append` only: exclusive end of a closed lifetime; absent while active. */
+	until?: number;
+	/** Actual user carriers of the last request; frozen on close, so queued input cannot acquire old state. */
+	userPins?: number[];
+	/** Pending sticky activation belongs to this call, not another result in its parallel batch. */
+	toolCallId?: string;
 	/**
-	 * `sticky-append` only: the timestamp of the one earlier user message that
-	 * also carries the block (the message that opened the turn the state came on
-	 * in), or null when none does. Fixed the first time the queue places the
-	 * entry (`resolveStickyOpener`); undefined until then, in which case
-	 * injectReminders resolves it from the request it is given.
+	 * Legacy `sticky-append` anchor from older snapshots. Honored to keep their
+	 * bytes stable on resume; new lifetimes use null, never an earlier opener.
 	 */
 	opener?: number | null;
 	/**
-	 * `sticky-append` only: the message the block rode on a request that had no
-	 * user message to carry it (an overflow compaction keeps only the last
-	 * reply and retries mid-turn), kept so it stays there on every later
-	 * request instead of moving off it. Fixed by the queue like `opener`.
+	 * `sticky-append` only: its first mid-turn tool result, or the tail of a
+	 * request without any user carrier (overflow compaction). Once chosen it
+	 * stays on that message, even after later user turns arrive or state closes.
 	 */
 	tailPin?: PinAnchor;
 	/** Set on a pinned one-shot: the exact message it rides on every request. */
@@ -192,7 +195,7 @@ export interface ReminderPayload {
 	scope?: ReminderScope;
 	/** Key so a reminder can be replaced (next-turn) or replaced/removed (every-turn). */
 	key?: string;
-	/** Remove the every-turn reminder registered under `key` instead of enqueueing. */
+	/** Close a sticky lifetime under `key`; remove other every-turn reminders. */
 	remove?: boolean;
 	/** Where in the message stack this reminder lands. Defaults to `last-append`. */
 	placement?: ReminderPlacement;
@@ -215,17 +218,16 @@ export interface ReminderPayload {
 	 */
 	since?: number;
 	/**
-	 * `last-append` only: the tool call whose result this one-shot belongs to.
-	 * Only that result's `tool_result` hook takes it, so a parallel batch, whose
-	 * hooks interleave, gives each result its own block (the `<total_tokens>`
-	 * countdown) instead of the first result taking every queued copy.
+	 * The tool call whose result this reminder belongs to. For `last-append`,
+	 * only that result's `tool_result` hook takes the one-shot. For a new sticky
+	 * lifetime, that result is its first pin. Both avoid attaching a switch or
+	 * countdown to another call in a parallel batch.
 	 */
 	toolCallId?: string;
 }
 
 interface StoredReminder extends ReminderEntry {
 	key?: string;
-	toolCallId?: string;
 }
 
 type EnqueueOptions = {
@@ -241,7 +243,7 @@ type EnqueueOptions = {
 	since?: number;
 	/** `user-prepend` only: skip when the same text is already pending. */
 	once?: boolean;
-	/** `last-append` only: the tool result whose hook takes it (see ReminderPayload). */
+	/** The switching tool result, or the hook that takes a one-shot (see ReminderPayload). */
 	toolCallId?: string;
 };
 
@@ -250,6 +252,8 @@ export class ReminderQueue {
 	/** Delivered one-shots, each fixed to the message it first rode (see `pin`). */
 	private pinned: StoredReminder[] = [];
 	private everyTurn = new Map<string, StoredReminder>();
+	/** Open and closed lifetimes in original insertion order, independent of live keys. */
+	private sticky: StoredReminder[] = [];
 	private readonly now: () => number;
 	/** Only restored keys are protected; fresh sessions retain their existing emitter behavior. */
 	private restoredKeys = new Set<string>();
@@ -277,20 +281,25 @@ export class ReminderQueue {
 		};
 		if (opts?.systemRoleOnly) entry.systemRoleOnly = true;
 		if (opts?.skipStackCarrier) entry.skipStackCarrier = true;
+		const key = opts?.key ?? text;
+		const previous = this.everyTurn.get(key);
 		if (placement === "sticky-append") {
-			// A standing reminder re-emitted with the SAME text (plan mode re-emits
-			// every turn) keeps its anchor, so the blocks on earlier messages do not
-			// move. Different text under the same key is a new fact (plan → auto
-			// under the shared "permission-mode" key) and anchors from now.
-			const previous = opts?.key !== undefined ? this.everyTurn.get(opts.key) : undefined;
-			const same = previous?.placement === "sticky-append" && previous.text === text ? previous : undefined;
+			// Re-emitting an unchanged standing fact keeps both its anchors and its
+			// position among other blocks. A changed fact opens a new lifetime.
+			const same = previous?.placement === placement && previous.text === text &&
+				previous.suffix === entry.suffix && previous.raw === entry.raw &&
+				previous.skipStackCarrier === entry.skipStackCarrier && previous.order === entry.order ? previous : undefined;
 			entry.since = opts?.since ?? same?.since ?? this.now();
-			// The opener and tail pin were fixed for this anchor; a re-emit must not move them.
-			if (same && same.since === entry.since && same.opener !== undefined) entry.opener = same.opener;
-			if (same && same.since === entry.since && same.tailPin !== undefined) entry.tailPin = same.tailPin;
+			entry.userPins = [];
+			if (same && same.since === entry.since && opts?.scope === "every-turn") return;
 		}
 		if (opts?.scope === "every-turn") {
-			this.everyTurn.set(opts.key ?? text, entry);
+			if (previous?.placement === "sticky-append") this.remove(key);
+			this.everyTurn.set(key, entry);
+			if (placement === "sticky-append") {
+				entry.key = key;
+				this.sticky.push(entry);
+			}
 			return;
 		}
 		// A breadcrumb run shares one caveat block (`once`): the same text pending
@@ -306,19 +315,26 @@ export class ReminderQueue {
 	}
 
 	remove(key: string): void {
-		if (!this.restoredKeys.has(key)) this.everyTurn.delete(key);
+		if (!this.restoredKeys.has(key)) {
+			const entry = this.everyTurn.get(key);
+			if (entry?.placement === "sticky-append") entry.until = this.now();
+			this.everyTurn.delete(key);
+		}
 		this.pendingCapabilities.delete(key);
 	}
 
 	/** Seed before startup emitters. Earlier hooks (context-budget) may already have emitted. */
-	restore(stack: readonly ReminderEntry[], sticky: readonly ReminderEntry[], frozenKeys: ReadonlySet<string>, liveKeys: ReadonlySet<string> = new Set()): void {
+	restore(stack: readonly ReminderEntry[], sticky: readonly ReminderEntry[], frozenKeys: ReadonlySet<string>, liveKeys: ReadonlySet<string> = new Set(), pinned: readonly ReminderEntry[] = []): void {
 		const early = [...this.everyTurn.values()];
 		this.everyTurn.clear();
-		this.pinned = [];
+		this.sticky = [];
+		this.pinned = structuredClone([...pinned]);
 		this.restoredKeys = new Set(frozenKeys);
 		this.pendingCapabilities = new Set(stack.flatMap((entry) => entry.key && liveKeys.has(entry.key) ? [entry.key] : []));
-		for (const entry of [...stack, ...sticky]) {
-			this.everyTurn.set(entry.key ?? entry.text, structuredClone(entry));
+		for (const source of [...stack, ...sticky]) {
+			const entry = structuredClone(source);
+			if (entry.placement === "sticky-append") this.sticky.push(entry);
+			if (entry.until === undefined) this.everyTurn.set(entry.key ?? entry.text, entry);
 		}
 		for (const entry of early) this.enqueue(entry.text, { ...entry, scope: "every-turn" });
 	}
@@ -359,9 +375,15 @@ export class ReminderQueue {
 	/** Hidden session metadata, preserving keys and insertion order without changing drain's API. */
 	persistentEntries(placement: "first-prepend" | "sticky-append"): ReminderEntry[] {
 		return [
-			...[...this.everyTurn.entries()].filter(([, entry]) => entry.placement === placement).map(([key, entry]) => ({ ...strip(entry), key })),
+			...(placement === "sticky-append" ? this.sticky.map((entry) => ({ ...strip(entry), key: entry.key })) :
+				[...this.everyTurn.entries()].filter(([, entry]) => entry.placement === placement).map(([key, entry]) => ({ ...strip(entry), key }))),
 			...this.nextTurn.filter((entry) => entry.placement === placement).map((entry) => ({ ...strip(entry), key: entry.key })),
 		];
+	}
+
+	/** Delivered steering is history too, especially the notice that closes a sticky state. */
+	persistentPins(): ReminderEntry[] {
+		return this.pinned.map(strip);
 	}
 
 	/**
@@ -406,27 +428,34 @@ export class ReminderQueue {
 	 * did exactly that (CACHE-REVIEW-2026-09-04 M3).
 	 */
 	drain(messages: AgentMessage[]): ReminderEntry[] {
-		// A standing block's opener is decided once, on the first request that
-		// places it, and kept: recomputed per request, a steer stamped before the
-		// switch would move it, and a switch made between turns would reach back
-		// onto the previous turn's cached message (lib header, `sticky-append`).
 		const locate = pinLocator(messages);
-		for (const entry of this.everyTurn.values()) {
-			if (entry.placement !== "sticky-append") continue;
-			if (entry.opener === undefined) entry.opener = resolveStickyOpener(messages, entry.since ?? 0);
-			// A block with no carrier rides the tail; that message keeps it from
-			// then on. A pin whose message left the context is looked for again.
+		const stackCarrier = messages.findIndex(isUserLike);
+		for (const entry of this.sticky) {
+			if (entry.until !== undefined) continue;
+			if (entry.opener === undefined) entry.opener = null;
+			// Only live states may find a new carrier after compaction. A closed
+			// state's missing pin must never move to the summary or a later turn.
 			if (entry.tailPin && locate(entry.tailPin) === -1) entry.tailPin = undefined;
-			if (entry.tailPin === undefined && !hasStickyCarrier(messages, entry.since ?? 0, entry.opener)) entry.tailPin = tailAnchor(messages);
+			if (entry.tailPin === undefined) entry.tailPin = firstStickyPin(messages, entry);
+			// Timestamps alone cannot close a lifetime: a steer typed while it was
+			// active can remain queued until after the switch. Keep only messages
+			// that actually rode the block, including across a startup-time close.
+			entry.userPins = messages.flatMap((m, index) => carriesSticky(m, entry) &&
+				(!entry.skipStackCarrier || index !== stackCarrier) ? [m.timestamp] : []);
+			if (entry.tailPin || entry.userPins.length > 0) delete entry.toolCallId;
 		}
+		this.sticky = this.sticky.filter((entry) => entry.until === undefined ||
+			messages.some((m) => carriesSticky(m, entry)) || (entry.tailPin !== undefined && locate(entry.tailPin) !== -1));
 		if (this.pinned.length > 0) this.pinned = this.pinned.filter((entry) => locate(entry.pin as PinAnchor) !== -1);
 		const { matching: held, rest: pending } = partition(this.nextTurn, (r) => r.placement === "user-prepend");
 		this.nextTurn = held;
-		return [...[...this.everyTurn.values()].map(strip), ...this.pinned.map(strip), ...pending.map(strip)];
+		return [...[...this.everyTurn.values()].filter((entry) => entry.placement !== "sticky-append").map(strip),
+			...this.sticky.map(strip), ...this.pinned.map(strip), ...pending.map(strip)];
 	}
 
 	get size(): number {
-		return this.everyTurn.size + this.nextTurn.length + this.pinned.length;
+		return [...this.everyTurn.values()].filter((entry) => entry.placement !== "sticky-append").length +
+			this.sticky.length + this.nextTurn.length + this.pinned.length;
 	}
 
 	/** True when a one-shot of `placement` is waiting to be delivered (the owner decides where). */
@@ -454,6 +483,9 @@ function strip(r: StoredReminder): ReminderEntry {
 	if (r.systemRoleOnly) entry.systemRoleOnly = true;
 	if (r.skipStackCarrier) entry.skipStackCarrier = true;
 	if (r.since !== undefined) entry.since = r.since;
+	if (r.until !== undefined) entry.until = r.until;
+	if (r.userPins !== undefined) entry.userPins = [...r.userPins];
+	if (r.placement === "sticky-append" && r.toolCallId !== undefined) entry.toolCallId = r.toolCallId;
 	if (r.opener !== undefined) entry.opener = r.opener;
 	if (r.tailPin) entry.tailPin = r.tailPin;
 	if (r.pin !== undefined) entry.pin = r.pin;
@@ -481,33 +513,31 @@ function pinLocator(messages: AgentMessage[]): (pin: PinAnchor) => number {
 	return (pin) => (pin.kind === "toolResult" ? byToolCall.get(pin.toolCallId) : byTimestamp.get(pin.timestamp)) ?? -1;
 }
 
-/**
- * The opener of a standing block switched on at `since`, judged on the first
- * request that places it: when the request already holds a user message
- * stamped at or after `since`, that message and the later ones suffice and
- * nothing earlier gains the block (null); otherwise the state came on
- * mid-turn and the latest earlier user message, the one that opened the turn,
- * carries it as well (its timestamp). Undefined when the request holds no user
- * message at all, so the decision waits for a request that does.
- */
-export function resolveStickyOpener(messages: AgentMessage[], since: number): number | null | undefined {
-	let opener: number | undefined;
-	for (const m of messages) {
-		if (!isStickyCarrier(m)) continue;
-		const stamp = (m as { timestamp?: number }).timestamp ?? 0;
-		if (stamp >= since) return null;
-		opener = stamp;
-	}
-	return opener;
+/** Closed lifetimes keep only delivered carriers; legacy snapshots retain their timestamp interval. */
+function carriesSticky(message: AgentMessage, entry: ReminderEntry): boolean {
+	if (!isStickyCarrier(message)) return false;
+	const stamp = (message as { timestamp?: number }).timestamp ?? 0;
+	if (entry.until !== undefined && entry.userPins !== undefined) return entry.userPins.includes(stamp);
+	return (stamp >= (entry.since ?? 0) && (entry.until === undefined || stamp < entry.until)) ||
+		(entry.opener !== null && entry.opener !== undefined && stamp === entry.opener);
 }
 
-/** Whether a user-like message in `messages` carries a standing block switched on at `since` with this opener. */
-function hasStickyCarrier(messages: AgentMessage[], since: number, opener: number | null | undefined): boolean {
-	return messages.some((m) => {
-		if (!isStickyCarrier(m)) return false;
-		const stamp = (m as { timestamp?: number }).timestamp ?? 0;
-		return stamp >= since || (opener !== null && opener !== undefined && stamp === opener);
-	});
+/** First carrier after activation; never reach back into an earlier user turn. */
+function firstStickyPin(messages: AgentMessage[], entry: ReminderEntry): PinAnchor | undefined {
+	if (entry.until !== undefined) return undefined;
+	if (entry.toolCallId !== undefined) {
+		return messages.some((m) => m.role === "toolResult" && m.toolCallId === entry.toolCallId)
+			? { kind: "toolResult", toolCallId: entry.toolCallId } : undefined;
+	}
+	for (const message of messages) {
+		if (carriesSticky(message, entry)) return undefined;
+		if (message.role === "toolResult" && message.timestamp >= (entry.since ?? 0)) {
+			return { kind: "toolResult", toolCallId: message.toolCallId };
+		}
+	}
+	// Overflow compaction may retain only an old reply/result. With no real
+	// user turn, a live state must still be visible and pinned to that tail.
+	return messages.some(isStickyCarrier) ? undefined : tailAnchor(messages);
 }
 
 /** The anchor a one-shot lands on for this request: the trailing tool result, else the last user-like message. */
@@ -664,32 +694,17 @@ export function injectReminders(messages: AgentMessage[], reminders: Array<strin
 
 	push(before, firstUserIndex === -1 ? tailIndex : firstUserIndex, firstPrepend.map(reminderBlock));
 
+	const locate = pinLocator(messages);
 	for (const entry of sticky) {
-		const since = entry.since ?? 0;
-		// The block rides every user message stamped since the state switched on,
-		// plus the opener: the message that opened the turn it came on in, when it
-		// came on mid-turn (a standing reminder emitted on before_agent_start is
-		// stamped after the turn's user message). The queue fixes the opener on
-		// the first request; the set only grows while the state holds, so earlier
-		// messages never change.
-		const opener = entry.opener !== undefined ? entry.opener : resolveStickyOpener(messages, since);
 		const carriers: number[] = [];
 		messages.forEach((m, index) => {
-			if (!isStickyCarrier(m)) return;
-			const stamp = (m as { timestamp?: number }).timestamp ?? 0;
-			if (stamp >= since || (opener !== null && opener !== undefined && stamp === opener)) carriers.push(index);
+			if (carriesSticky(m, entry)) carriers.push(index);
 		});
-		// A request with no user turn (overflow compaction mid-turn) put the block
-		// on its tail; the queue pinned that message, which keeps it.
-		const pinned = entry.tailPin ? pinLocator(messages)(entry.tailPin) : -1;
+		const pin = entry.tailPin ?? firstStickyPin(messages, entry);
+		const pinned = pin ? locate(pin) : -1;
 		if (pinned !== -1 && !carriers.includes(pinned)) carriers.unshift(pinned);
 		if (entry.skipStackCarrier && carriers.includes(firstUserIndex)) {
 			for (const index of carriers.filter((index) => index !== firstUserIndex).sort((a, b) => a - b)) push(after, index, [reminderBlock(entry)]);
-			continue;
-		}
-		if (carriers.length === 0) {
-			// No user turn and no pin yet (a caller without the queue): ride the tail.
-			push(after, tailIndex === -1 ? firstUserIndex : tailIndex, [reminderBlock(entry)]);
 			continue;
 		}
 		for (const index of carriers.sort((a, b) => a - b)) push(after, index, [reminderBlock(entry)]);
