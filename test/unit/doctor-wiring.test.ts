@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import doctorExtension from "../../extensions/doctor/index.ts";
+import { setModelFactsForTest } from "../../extensions/lib/model-facts.ts";
+import { MODEL_UNUSABLE_CHANNEL } from "../../extensions/lib/model-unusable.ts";
 import { SUBAGENT_DEFAULT_CHANGED_CHANNEL } from "../../extensions/lib/settings-channels.ts";
 import { PERMISSION_STATUS_CHANNEL } from "../../extensions/permissions/modes.ts";
 import { createFakePi, type FakePi } from "./helpers/fake-pi.ts";
@@ -96,6 +98,25 @@ describe("/doctor wiring", () => {
 		expect(notified[0]).toContain("Not ready: no model provider has credentials");
 		expect(notified[0]).toContain("Updates: check skipped (ONECODE_NO_UPDATE_CHECK=1)");
 		expect(ctx.waitForIdle).not.toHaveBeenCalled();
+	});
+
+	it("/doctor report shows the newer-model fix and drops models refused by the account", async () => {
+		const main = model("anthropic", "claude-opus-4-8", 5);
+		const newer = model("anthropic", "claude-opus-5-5", 4);
+		setModelFactsForTest({
+			"anthropic/claude-opus-4-8": { releaseDate: "2026-06-01" },
+			"anthropic/claude-opus-5-5": { releaseDate: "2026-09-01" },
+		});
+		const { ctx, notified } = ctxFor(main, "rpc");
+		ctx.modelRegistry.getAvailable = () => [main, newer];
+		await run("report", ctx);
+		const text = notified[0].replace(/\s+/g, " ");
+		expect(text).toContain("claude-opus-5-5 is newer than claude-opus-4-8");
+		expect(text).toContain("Switch with /model anthropic/claude-opus-5-5.");
+		expect(fake.sentUserMessages).toEqual([]);
+		fake.events.emit(MODEL_UNUSABLE_CHANNEL, { model: "anthropic/claude-opus-5-5", reason: "no access" });
+		await run("report", ctx);
+		expect(notified[1]).not.toContain("is newer than");
 	});
 
 	it("bare /doctor without a model falls back to the report and says why", async () => {

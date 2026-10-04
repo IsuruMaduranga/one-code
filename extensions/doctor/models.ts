@@ -15,6 +15,8 @@ import { modeCycleKey } from "../lib/keys.ts";
 import { classifierCandidates, describeCandidate, type ClassifierNotice } from "../auto-mode/model-select.ts";
 import { ATTRIBUTION, capabilityFloor, configuredCapabilityKey, type FloorRole, type FloorVerdict, KEY_ADVICE, snapshotAgeMs } from "../lib/capability-index.ts";
 import { modelSpec, pricedInput } from "../lib/model-policy.ts";
+import { newerModelSuggestion, type NewerModelSuggestion } from "../lib/newer-model.ts";
+import { readSuggestNewerModels } from "../lib/one-code-settings.ts";
 import {
 	currentCapabilitySnapshot,
 	intrinsicTier,
@@ -30,6 +32,7 @@ import { contextLabel, type Finding, priceLabel, type ReportLine, type ReportSec
 export interface ModelFacts {
 	session?: Model<Api>;
 	sessionTier?: PromptTier;
+	newerModel?: NewerModelSuggestion;
 	/** The register the system prompt is built in — the tier, or a CC_PROMPT_TIER override. */
 	promptTier: PromptTier;
 	promptTierForced: boolean;
@@ -80,6 +83,7 @@ export function collectModelFacts(available: Model<Api>[], session: SessionView,
 	};
 	return {
 		capability,
+		newerModel: readSuggestNewerModels(home, env) ? newerModelSuggestion(available, sessionModel, snapshot) : undefined,
 		session: sessionModel,
 		sessionTier: sessionModel ? intrinsicTier(sessionModel) : undefined,
 		promptTier: session.promptTier ?? resolveModelTier(sessionModel, env),
@@ -126,6 +130,9 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 					: "";
 	const details = [priceLabel(main), contextLabel(main.contextWindow), sourceNote].filter(Boolean).join(" · ");
 	lines.push({ text: `Main: ${modelSpec(main)} — ${details}`, level: "ok" });
+	if (facts.newerModel) {
+		findings.push({ level: "warn", text: facts.newerModel.text, fix: facts.newerModel.fix });
+	}
 	lines.push({
 		text: `Prompt register: ${TIER_LABEL[facts.promptTier]}${facts.promptTierForced ? " (forced by CC_PROMPT_TIER)" : ""}`,
 		indent: 1,

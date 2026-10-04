@@ -52,6 +52,7 @@
 			"extensions/effort/index.ts",
 			"extensions/spinner/index.ts",
 			"extensions/model-default/index.ts",
+			"extensions/newer-model/index.ts",
 			"extensions/footer/index.ts",
 			"extensions/turn-duration/index.ts",
 			"extensions/interrupted/index.ts",

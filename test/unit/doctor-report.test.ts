@@ -104,6 +104,28 @@ describe("buildDoctorReport", () => {
 		expect(report.summary).toMatch(/^Ready\. Main model anthropic\/claude-opus-5, subagents on anthropic\/claude-sonnet-5, auto-mode classifier anthropic\/claude-sonnet-5\./);
 	});
 
+	it("reports an available newer same-line model with the model-switch fix", () => {
+		const main = model("openrouter", "qwen/qwen3.6-27b", 0.32, "openai-completions");
+		main.cost.output = 3.2;
+		const newer = model("openrouter", "qwen/qwen3.8-27b", 0.42, "openai-completions");
+		newer.cost.output = 3;
+		setModelFactsForTest({
+			"openrouter/qwen/qwen3.6-27b": { releaseDate: "2026-04-01" },
+			"openrouter/qwen/qwen3.8-27b": { releaseDate: "2026-08-01" },
+		});
+		const session = { model: main, modelSource: "session" as const };
+		const report = () => buildDoctorReport({ env: environment(), registry: registry([main, newer]), session });
+		expect(report().findings).toContainEqual({
+			level: "warn",
+			text: "qwen/qwen3.8-27b is newer than qwen/qwen3.6-27b and costs about the same ($0.42/$3.00 vs $0.32/$3.20 per M tokens).",
+			fix: "Switch with /model openrouter/qwen/qwen3.8-27b.",
+		});
+		expect(buildDoctorReport({ env: environment(), registry: registry([main], [main, newer]), session }).findings.some((f) => f.text.includes("is newer than"))).toBe(false);
+		mkdirSync(join(home, ".onecode"), { recursive: true });
+		writeFileSync(join(home, ".onecode", "settings.json"), JSON.stringify({ suggestNewerModels: false }));
+		expect(report().findings.some((f) => f.text.includes("is newer than"))).toBe(false);
+	});
+
 	it("explains below-frontier classifier retention without claiming names prove capability", () => {
 		const main = model("openai", "gpt-5.6-sol", 5, "openai-responses");
 		const cheaper = model("openai", "gpt-5.6-terra", 2, "openai-responses");

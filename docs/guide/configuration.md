@@ -77,6 +77,7 @@ appear in `projects/<slug>/settings.json`.
 | Key | Type | Set by | Effect |
 |---|---|---|---|
 | `subagentModel` | string | `/subagent` | Default model for subagents and workflow agents: `provider/model-id`, a short alias, or `inherit`. |
+| `suggestNewerModels` | boolean | By hand | Suggest a newer model in the same line at a similar or lower price. Defaults to `true`; `false` turns off notices and the `/doctor` suggestion. |
 | `permissions.allow` | string array | `/allow` (per repository) or `/allow … global` | Allow rules in Claude Code's format. |
 | `autoMode.environment` | string array | `/auto-mode setup` | Describes your environment to the classifier. |
 | `autoMode.hard_deny`, `autoMode.soft_deny`, `autoMode.allow` | string array | `/auto-mode setup` | Extra classifier rules, appended to the built-ins. |
@@ -140,6 +141,18 @@ Set the subagent default with `/subagent`, or apply a preset with
 `/doctor preset <economical|balanced|quality>`. See
 [Providers and models](providers-and-models.md) and
 [Choose the subagent model](subagents-and-workflows.md#choose-the-subagent-model).
+
+If you pick a model that has a newer version in the same line, say Qwen 3.6
+27B when Qwen 3.8 27B exists, One Code tells you when the session starts or
+when you switch models. It only suggests a model you can use with your
+credentials, released later, and priced at most 10% higher (blending three
+input tokens to one output token, since coding work is input-heavy). If both
+models have confirmed coding scores, the newer one can't score lower.
+
+The notice shows once per session and model, with the `/model` command to
+switch. It never switches for you and never enters the conversation, and
+`/doctor` reports the same suggestion. Print and JSON runs don't show it. To
+turn it off, add `"suggestNewerModels": false` to `~/.onecode/settings.json`.
 
 ## Permission settings
 
