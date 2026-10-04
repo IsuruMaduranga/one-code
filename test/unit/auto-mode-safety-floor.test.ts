@@ -113,6 +113,10 @@ describe("safetyControlWrite: read-only words in escalated compound commands", (
 		`pwd; ls -la; git status --short; cat Makefile; find . -maxdepth 3 -type f -not -path './.git/*' | sort`,
 		`cat Makefile; find . -path './.git/*' | sort | head -n 5`,
 		`cat Makefile; cat .claude/settings.json | jq .permissions`,
+		// A read that names a credential or execution-primitive path escalates for the classifier but cannot write (DeepSeek V4.1 Flash, live).
+		`grep -rnIE "(sk_[A-Za-z0-9_]{8,}|-----BEGIN)" . 2>/dev/null | grep -v node_modules | head -30; echo "=== keys ==="; find . -not -path './.git/*' -not -path './node_modules/*' \\( -name "*.pem" -o -name "*.key" -o -name "*.env*" \\) 2>/dev/null`,
+		`find . -not -path './.git/*' -name '*.pem' && exit 0`,
+		`cat Makefile && find . -path './.git/*' -name Makefile`,
 	])("does not floor proven read-only words: %s", (command) => {
 		expect(analyzeShellCommand({ command, cwd, home }).verdict).toBe("escalate");
 		expect(check("bash", { command })).toBeUndefined();
@@ -153,6 +157,8 @@ describe("safetyControlWrite: read-only words in escalated compound commands", (
 		`cat Makefile; (find . -path './.git/*' | sort)`,
 		`cat Makefile; echo "$(find . -path './.git/*' | sort)"`,
 		`cat Makefile; find . -path "$(mystery)/*" | sort`,
+		`find . -not -path './.git/*' -name '*.pem' -delete && exit 0`,
+		`find . -path './.git/*' -name '*.key' -exec mystery {} + && exit 0`,
 		`sh <<'EOF'\ncp x .claude/settings.json\nEOF`,
 		`cat <<'EOF' | sh\ncp x .claude/settings.json\nEOF`,
 		`sh <<< 'cp x .claude/settings.json'`,

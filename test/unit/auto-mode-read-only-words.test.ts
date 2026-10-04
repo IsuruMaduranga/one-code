@@ -20,6 +20,9 @@ describe("hasReadOnlyShellWords", () => {
 		`cat ~/.claude/settings.json`,
 		`echo '.claude/settings.json'`,
 		`rg -g '!**/x/**' slugify . 2>/dev/null`,
+		`find . -not -path './.git/*' -name '*.pem'`,
+		`cat Makefile`,
+		`cat .env`,
 	])("uses the pre-gate's option/operand proof: %s", (command) => {
 		expect(proven(command)).toBe(true);
 	});
@@ -31,6 +34,9 @@ describe("hasReadOnlyShellWords", () => {
 		`git diff --output=.claude/settings.json`,
 		`git -c diff.external=prog diff`,
 		`find .claude -name 'settings*' -delete`,
+		`find . -name '*.pem' -delete`,
+		`sort -o Makefile a`,
+		`cp .env x`,
 		`sort --output=.claude/settings.json a`,
 		`cp x .claude/settings.json`,
 		`fd --exclude '**/x/**' slugify .`,

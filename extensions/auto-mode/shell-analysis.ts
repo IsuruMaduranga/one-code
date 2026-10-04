@@ -96,6 +96,14 @@ export interface ShellEvidence {
 	 */
 	readOnlyOutside: boolean;
 	/**
+	 * True when every reason this escalated is a read the classifier should
+	 * see: an outside-cwd read, or a read that names a credential or an
+	 * execution-primitive path (`find -name '*.pem'`, `cat Makefile`). No write,
+	 * mutation, network, unknown command or unmodelled syntax, so nothing here
+	 * can write a file. Never true for a "safe" verdict.
+	 */
+	readsOnly: boolean;
+	/**
 	 * True when the ONLY reason this escalated is Claude Code's acceptEdits file
 	 * commands (`ACCEPT_EDITS_OPTIONS`) on the working space — every path is
 	 * inside the working directory (or a `writableRoots` entry) and resolved,
@@ -813,7 +821,7 @@ export function hasReadOnlyShellWords(segment: Segment, cwd: string, home: strin
 	const { command, peeled, pathNamed } = resolvePayload(segment.tokens);
 	if (peeled.length || pathNamed.length || !(READ_ONLY_COMMANDS.has(command) || command === "git" || command === "find")) return false;
 	const evidence = analyzeShellCommand({ command: segment.raw, cwd, home });
-	return evidence.commands.length === 1 && evidence.writes.length === 0 && (evidence.verdict === "safe" || evidence.readOnlyOutside);
+	return evidence.commands.length === 1 && evidence.writes.length === 0 && (evidence.verdict === "safe" || evidence.readsOnly);
 }
 
 /**
@@ -832,6 +840,7 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		network: [],
 		outsideReads: [],
 		readOnlyOutside: false,
+		readsOnly: false,
 		containedNonNetwork: false,
 	};
 	/**
@@ -843,10 +852,13 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 	let uncontained = false;
 	/** Set by any escalation that is not an outside-cwd read (see readOnlyOutside). */
 	let escalatedBeyondReads = false;
-	const escalate = (note: string, opts?: { contained?: boolean; outsideRead?: boolean }) => {
+	/** Set by any escalation that is neither an outside-cwd read nor a read naming a guarded path (see readsOnly). */
+	let escalatedBeyondNamedReads = false;
+	const escalate = (note: string, opts?: { contained?: boolean; outsideRead?: boolean; namedRead?: boolean }) => {
 		evidence.verdict = "escalate";
 		if (!opts?.contained) uncontained = true;
 		if (!opts?.outsideRead) escalatedBeyondReads = true;
+		if (!opts?.outsideRead && !opts?.namedRead) escalatedBeyondNamedReads = true;
 		if (!evidence.notes.includes(note)) evidence.notes.push(note);
 	};
 
@@ -954,7 +966,7 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 			const resolved = resolveForContainment(absolute);
 			if (resolved !== undefined && isSensitivePath(resolved) && !isSensitivePath(absolute)) {
 				if (!evidence.sensitivePaths.includes(value)) evidence.sensitivePaths.push(value);
-				escalate(`reads ${value}, which resolves to a credential or secret path`);
+				escalate(`reads ${value}, which resolves to a credential or secret path`, { namedRead: true });
 			}
 			if (resolved !== undefined && (isWithin(containmentRoot, resolved) || readableRoots.some((root) => isWithin(root, resolved)))) continue;
 			escalateOutsideRead(value, "which is outside the working directory");
@@ -977,7 +989,7 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 		for (const word of segment.inputs) {
 			if (isSensitivePath(word.value) || isSensitivePath(toAbsoluteBash(effectiveCwd, word.value, home))) {
 				if (!evidence.sensitivePaths.includes(word.value)) evidence.sensitivePaths.push(word.value);
-				escalate(`reads ${word.value} on stdin, which is a credential or secret path`);
+				escalate(`reads ${word.value} on stdin, which is a credential or secret path`, { namedRead: true });
 			}
 			checkRead(word);
 		}
@@ -1059,11 +1071,11 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 			if (isSensitivePath(value) || isSensitivePath(absolute)) {
 				// The *original* token, never the resolved/expanded form (N18).
 				if (!evidence.sensitivePaths.includes(value)) evidence.sensitivePaths.push(value);
-				escalate(`names ${value}, which is a credential or secret path`);
+				escalate(`names ${value}, which is a credential or secret path`, { namedRead: true });
 			}
 			if (isExecutionPrimitivePath(absolute)) {
 				if (!evidence.executionPrimitives.includes(value)) evidence.executionPrimitives.push(value);
-				escalate(`touches ${value}, whose contents execute later without further approval`);
+				escalate(`touches ${value}, whose contents execute later without further approval`, { namedRead: true });
 			}
 		}
 
@@ -1279,6 +1291,7 @@ export function analyzeShellCommand({ command, cwd, home, protectedDirs = [], re
 	// the working space: nothing reached outside it, the network, or the unknown.
 	evidence.containedNonNetwork = evidence.verdict === "escalate" && !uncontained;
 	evidence.readOnlyOutside = evidence.verdict === "escalate" && !escalatedBeyondReads;
+	evidence.readsOnly = evidence.verdict === "escalate" && !escalatedBeyondNamedReads;
 
 	return evidence;
 }
