@@ -102,7 +102,7 @@ describe("classify: pinning and fallback", () => {
 		expect((await classify(request, deps)).decision).toBe("allow");
 		expect(deps.state.pinned?.id).toBe(sessionModel.id);
 		expect(completeMock.mock.calls[0]?.[0]).toBe(sessionModel);
-		expect(notices.some((notice) => notice.includes("no cheaper same-provider/route model is measured to be at least as capable"))).toBe(true);
+		expect(notices.some((notice) => notice.includes("no cheaper same-provider/route model is measured and in this session's tier"))).toBe(true);
 	});
 
 	it("reports a model the provider refuses as unusable, so the subagent selector can skip it too", async () => {

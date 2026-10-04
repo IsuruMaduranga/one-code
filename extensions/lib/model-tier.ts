@@ -504,8 +504,9 @@ export function cheaperContainedCandidates(
  * the session itself is workhorse or frontier (Claude Code's `min(main, sonnet)`
  * classifier rule), cheap otherwise (a cheap session has nothing cheaper and
  * capable; `tiny` is excluded upstream regardless). Used by frontier classifier
- * sessions and the subagent default. Below-frontier classifiers require a
- * measured pass for any alternate; a tier alone is not evidence of capability.
+ * sessions and the subagent default. A below-frontier classifier alternate
+ * must be scored and in the session's own tier; a name-based tier alone is
+ * not evidence.
  */
 export function automaticTierFloor(sessionModel: Model<Api>): PromptTier {
 	const tier = intrinsicTier(sessionModel);

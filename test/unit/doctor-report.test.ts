@@ -111,8 +111,8 @@ describe("buildDoctorReport", () => {
 		expect(facts.classifier.model).toBe(main);
 		const text = modelsSection(facts, { model: main, modelSource: "session" }, []).lines.map((line) => line.text).join("\n");
 		expect(text).toContain("Auto-mode classifier: openai/gpt-5.6-sol (this session's model)");
-		expect(text).toContain("an alternate requires a measured capability pass");
-		expect(text).toContain("no cheaper same-provider/route model is measured to be at least as capable");
+		expect(text).toContain("an alternate must be measured and in this session's tier");
+		expect(text).toContain("no cheaper same-provider/route model is measured and in this session's tier");
 		expect(text).toContain("Capability scores: none — below-frontier classifiers keep the session model");
 		expect(text).not.toContain("Capability scores: none — automatic picks use model names and generations only");
 	});

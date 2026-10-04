@@ -90,11 +90,11 @@ choice is the cheapest model that clears a capability floor:
 - **Subagents** use a Sonnet-class capability floor for a Sonnet-class or
   stronger session, and a Haiku-class floor otherwise. A subagent is never
   dearer than your main model; if nothing cheaper qualifies, it uses the main model.
-- **The classifier** only swaps in a cheaper model when it can show that
-  model is at least as good as yours. If your session runs below frontier
-  tier, that means a measured capability score; a model's name or tier isn't
-  enough. With no score to go on, your own model screens its calls, tiny-tier
-  models included. Frontier sessions can also use an unscored workhorse-tier
+- **The classifier** can swap in a cheaper model, but below frontier tier
+  only one with a measured capability score that sits in your session's own
+  tier. Its score doesn't have to match yours; a model's name alone isn't
+  enough. If nothing qualifies, your own model screens its calls, and a
+  tiny-tier session always does. Frontier sessions can also use an unscored workhorse-tier
   or better model, so Opus and Sonnet 5.5 screen with Sonnet 5, and GPT-6
   Astra and Sol with Terra. Whatever gets picked has to fit your session's
   whole context window, and the pick is redone when you switch models.
@@ -136,8 +136,7 @@ listing is scored like its OpenAI twin. Set `AA_API_KEY`, or add the key to `~/.
 ```
 
 The snapshot is cached under `~/.onecode/cache/` and refreshed at most once
-a day. Without scores, a session below frontier keeps screening with its own
-model, while subagents, the reader and frontier classifiers fall back to
+a day. Without scores, a session below frontier screens with its own model, while subagents, the reader and frontier classifiers fall back to
 tiers. The classifier compares scores with thinking off when every model in
 the comparison has one, and default-effort scores otherwise.
 

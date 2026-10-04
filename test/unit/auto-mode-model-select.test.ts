@@ -152,10 +152,27 @@ describe("classifierCandidates: below-frontier measured floor", () => {
 		const result = pickFull([alternate, session], session);
 		expect(result.candidates).toEqual([{ model: session, source: "session" }, { model: alternate, source: "economical" }]);
 		expect(result.fallback?.reason).toBe("session-is-cheapest-qualified");
-		expect(result.fallback?.text).toContain("no cheaper same-provider/route model is measured to be at least as capable");
+		expect(result.fallback?.text).toContain("no cheaper same-provider/route model is measured and in this session's tier");
 	});
 
-	it.each(["candidate", "session", "reference", "failed score"])("keeps the session when the alternate lacks a measured pass: %s", (missing) => {
+	it("keeps the session when the alternate has no score of its own", () => {
+		const session = model("openai", "gpt-5.6-sol", 5, 200_000);
+		const alternate = model("openai", "gpt-5.6-terra", 2, 200_000);
+		const snapshot = measure([session, alternate]);
+		setCapabilitySnapshotForTest({ ...snapshot, rows: snapshot.rows.filter((row) => row.slug !== "gpt-5-6-terra") });
+		expect(pickFull([session, alternate], session).candidates).toEqual([{ model: session, source: "session" }]);
+	});
+
+	it("keeps the session when the measured alternate sits in a lower tier", () => {
+		const session = model("openai", "gpt-5.6-sol", 5, 200_000);
+		const alternate = model("openai", "gpt-5.6-luna", 0.2, 200_000);
+		const snapshot = measure([session, alternate]);
+		setCapabilitySnapshotForTest({ ...snapshot, rows: snapshot.rows.map((row) => row.slug === "gpt-5-6-luna" ? { ...row, coding: 50 } : row) });
+		expect(intrinsicTier(alternate)).not.toBe(intrinsicTier(session));
+		expect(pickFull([session, alternate], session).candidates).toEqual([{ model: session, source: "session" }]);
+	});
+
+	it.each(["session", "reference", "failed score"])("accepts a measured alternate in the session's tier without a pass: %s", (missing) => {
 		const session = model("openai", "gpt-5.6-sol", 5, 200_000);
 		const alternate = model("openai", "gpt-5.6-terra", 2, 200_000);
 		const snapshot = measure([session, alternate]);
@@ -166,7 +183,8 @@ describe("classifierCandidates: below-frontier measured floor", () => {
 				? snapshot.rows.map((row) => row.slug === slug ? { ...row, coding: 69 } : row)
 				: snapshot.rows.filter((row) => row.slug !== slug),
 		});
-		expect(pickFull([session, alternate], session).candidates).toEqual([{ model: session, source: "session" }]);
+		expect(intrinsicTier(alternate)).toBe(intrinsicTier(session));
+		expect(pickFull([session, alternate], session).candidates).toEqual([{ model: alternate, source: "economical" }, { model: session, source: "session" }]);
 	});
 
 	it("ignores a frontier prompt override and retains an unlisted session model", () => {
@@ -189,7 +207,7 @@ describe("classifierCandidates: below-frontier measured floor", () => {
 		const result = pickFull([session, alternate], session);
 		expect(result.candidates).toEqual([{ model: session, source: "session" }]);
 		expect(result.fallback).toMatchObject({ reason: "no-qualifying-model" });
-		expect(result.fallback?.text).toContain("no cheaper same-provider/route model is measured to be at least as capable");
+		expect(result.fallback?.text).toContain("no cheaper same-provider/route model is measured and in this session's tier");
 	});
 });
 

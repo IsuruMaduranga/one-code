@@ -18,7 +18,7 @@
  */
 
 import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
-import { capabilityFloor } from "../lib/capability-index.ts";
+import { capabilityFloor, scoreFor } from "../lib/capability-index.ts";
 import { modelIdentity, modelSpec as spec, pricedInput } from "../lib/model-policy.ts";
 import { atLeastTier, automaticTierFloor, currentCapabilitySnapshot, economicalContainedCandidates, intrinsicTier } from "../lib/model-tier.ts";
 
@@ -55,8 +55,8 @@ export interface ClassifierNotice {
  * The ordered fallback chain for the permission classifier. Automatic entries
  * stay on the session provider/route, pass the capability floor, and have a
  * known catalog window at least as large as the session's. Below frontier,
- * alternates require a measured pass; only frontier sessions may use unscored
- * alternates by tier. Numeric input cost orders the qualifying models, with
+ * an alternate must be measured and in the session's tier (or measured at
+ * least as capable); only frontier sessions may use unscored alternates by tier. Numeric input cost orders the qualifying models, with
  * the session retained as an availability fallback.
  */
 export function classifierCandidates({
@@ -89,16 +89,21 @@ export function classifierCandidates({
 	const frontierSession = atLeastTier(intrinsicTier(sessionModel), "frontier");
 	const floor = automaticTierFloor(sessionModel);
 	const snapshot = currentCapabilitySnapshot();
+	const sessionTier = intrinsicTier(sessionModel);
+	/** Whether the capability snapshot holds a confirmed score for `model` (thinking off or default effort). */
+	const measuredAtAll = (model: Model<Api>) =>
+		!!snapshot && (scoreFor(snapshot, model, "non-reasoning") !== undefined || scoreFor(snapshot, model, "default") !== undefined);
 	const capable = (model: Model<Api>) => {
 		const measured = capabilityFloor(snapshot, model, sessionModel, "classifier").verdict;
+		if (measured === "pass") return true;
+		if (frontierSession) return measured === "unscored" && atLeastTier(intrinsicTier(model), floor);
+		// Below frontier: the session itself, or an alternate that is measured
+		// and in the session's own tier (its score need not reach the
+		// session's). A name-based tier alone is not evidence.
 		const isSession = model.provider === sessionModel.provider && model.id === sessionModel.id;
-		// A tier is not evidence that an alternate can match a below-frontier
-		// session. The session itself needs no measurement to remain eligible.
-		return measured === "pass" || (measured === "unscored" && (
-			frontierSession ? atLeastTier(intrinsicTier(model), floor) : isSession
-		));
+		return isSession || (measuredAtAll(model) && intrinsicTier(model) === sessionTier);
 	};
-	const belowFrontierFallbackText = `Auto mode is screening calls with ${spec(sessionModel)}, this session's model, because no cheaper same-provider/route model is measured to be at least as capable while containing this session's ${sessionModel.contextWindow}-token catalog context window.`;
+	const belowFrontierFallbackText = `Auto mode is screening calls with ${spec(sessionModel)}, this session's model, because no cheaper same-provider/route model is measured and in this session's tier while containing its ${sessionModel.contextWindow}-token catalog context window.`;
 	// `economicalContainedCandidates` supplies the existing containment, variant,
 	// generation, tool-capability, price-known and never-tiny gates. Its own
 	// cheap/workhorse/frontier ordering is deliberately replaced below: this policy
@@ -199,7 +204,7 @@ export function describeCandidate(candidate: Candidate): string {
 	const where = modelIdentity(candidate.model).profile ?? candidate.model.provider;
 	switch (candidate.source) {
 		case "economical":
-			return `${name} (cheapest model within ${where} that meets the capability floor, measured for below-frontier sessions, and contains the session catalog context window)`;
+			return `${name} (cheapest model within ${where} that meets the capability floor (below frontier: measured and in the session's tier) and contains the session catalog context window)`;
 		case "session":
 			return `${name} (this session's model)`;
 	}

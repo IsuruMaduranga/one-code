@@ -160,7 +160,7 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 		lines.push({
 			text: facts.sessionTier === "frontier"
 				? "Classifier policy: measured capability pass, or an unscored workhorse-or-better model; cheapest qualifying model first."
-				: "Classifier policy: an alternate requires a measured capability pass; otherwise this session's model screens calls. Cheapest qualifying model first.",
+				: "Classifier policy: an alternate must be measured and in this session's tier (or measured at least as capable); otherwise this session's model screens calls. Cheapest qualifying model first.",
 			indent: 1,
 			level: "dim",
 		});

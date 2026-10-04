@@ -427,7 +427,7 @@ export interface FloorVerdict {
  * variant so the comparison stays on one basis. Delegated workers run with
  * thinking, so they are judged on the default variant, at the full floor; only
  * the reader may sit `READER_TOLERANCE` below it. Unscored leaves the decision
- * to the caller: below-frontier classifiers require a pass for an alternate;
+ * to the caller: a below-frontier classifier alternate must be scored at all;
  * frontier classifiers and other roles can apply their name-class fallback.
  */
 export function capabilityFloor(

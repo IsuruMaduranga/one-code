@@ -52,7 +52,7 @@ describe("automatic classifier selection wiring", () => {
 		await fake.fire("session_start", { reason: "startup" }, ctx);
 		expect(statuses.at(-1)?.classifier).toBe("openai-codex/gpt-5.6-sol");
 		const notify = (ctx.ui as { notify: ReturnType<typeof vi.fn> }).notify;
-		expect(notify.mock.calls.some(([text]) => /no cheaper same-provider\/route model is measured to be at least as capable/.test(text))).toBe(true);
+		expect(notify.mock.calls.some(([text]) => /no cheaper same-provider\/route model is measured and in this session's tier/.test(text))).toBe(true);
 		ctx.model = small;
 		await fake.fire("model_select", { model: small }, ctx);
 		expect(statuses.at(-1)?.classifier).toBe("openai-codex/gpt-5.6-terra");
