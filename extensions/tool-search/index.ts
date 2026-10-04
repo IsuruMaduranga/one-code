@@ -37,7 +37,7 @@ import {
 	type DeferRequest,
 	resultText,
 	searchTools,
-	selectedNames,
+	selectedRequests,
 	type ResponsesToolLoadModel,
 	stabilizeDeferredTools,
 	stabilizeResponsesToolLoads,
@@ -336,15 +336,15 @@ export default function toolSearchExtension(pi: ExtensionAPI) {
 			// silently dropped before — the model was told the rest "Loaded" and only
 			// discovered the miss later as an opaque InputValidationError. Always
 			// surface the unmatched names.
-			const requested = selectedNames(params.query);
+			const requested = selectedRequests(params.query);
 			const notFound = requested
-				? requested.filter((n) => !matches.some((m) => m.name.toLowerCase() === n))
+				? requested.filter((request) => !matches.some((m) => m.name.toLowerCase() === request.name))
 				: [];
 			// A withheld name can still sit in the frozen listing (withdrawn by a model
 			// change after the first request), so it gets "do not retry", not a
-			// spelling hint.
-			const withdrawn = notFound.filter((n) => withheldNames.has(n));
-			const missing = notFound.filter((n) => !withheldNames.has(n));
+			// spelling hint. Both notes quote the model's own spelling.
+			const withdrawn = [...new Set(notFound.filter((n) => withheldNames.has(n.name)).map((n) => n.asWritten))];
+			const missing = [...new Set(notFound.filter((n) => !withheldNames.has(n.name)).map((n) => n.asWritten))];
 			const notFoundNote =
 				(missing.length > 0
 					? ` Not found (not deferred tool names — check spelling, or search by keyword instead of \`select:\`): ${missing.join(", ")}.`
