@@ -16,21 +16,24 @@ beforeAll(async () => {
 });
 
 describe("shellReadCandidates", () => {
-	it("takes the plain file arguments of cat, head, tail and sed", () => {
-		expect(shellReadCandidates("cat a.py b.py")).toEqual(["a.py", "b.py"]);
-		expect(shellReadCandidates("cat Makefile && git status --short")).toEqual(["Makefile"]);
-		expect(shellReadCandidates("head -n 50 src/x.ts")).toEqual(["50", "src/x.ts"]);
-		expect(shellReadCandidates("sed -n '1,200p' notes.md")).toEqual(["1,200p", "notes.md"]);
-		expect(shellReadCandidates("/bin/cat a.txt")).toEqual(["a.txt"]);
-		expect(shellReadCandidates("LC_ALL=C cat a.txt")).toEqual(["a.txt"]);
+	it("takes the file arguments of cat, head, tail and sed", () => {
+		expect(shellReadCandidates("cat a.py b.py")).toEqual(expect.arrayContaining(["a.py", "b.py"]));
+		expect(shellReadCandidates("cat Makefile && git status --short")).toContain("Makefile");
+		expect(shellReadCandidates("head -n 50 src/x.ts")).toContain("src/x.ts");
+		expect(shellReadCandidates("sed -n '1,200p' notes.md")).toContain("notes.md");
+		expect(shellReadCandidates("/bin/cat a.txt")).toContain("a.txt");
+		expect(shellReadCandidates("LC_ALL=C cat a.txt")).toContain("a.txt");
 	});
 
-	it("skips other commands, flags, globs, expansions and substitutions", () => {
+	it("takes the words a reader loops over, since the content check decides", () => {
+		expect(shellReadCandidates('for f in CLAUDE.md src/a.py; do printf "%s" "$f"; cat "$f"; done')).toEqual(
+			expect.arrayContaining(["CLAUDE.md", "src/a.py"]),
+		);
+	});
+
+	it("offers nothing without a reader command, or when the line does not parse", () => {
 		expect(shellReadCandidates("grep -n foo a.py")).toEqual([]);
-		expect(shellReadCandidates("cat -n a.py")).toEqual(["a.py"]);
-		expect(shellReadCandidates("cat *.py")).toEqual([]);
-		expect(shellReadCandidates('cat "$FILE"')).toEqual([]);
-		expect(shellReadCandidates("echo $(cat a.py)")).toEqual([]);
+		expect(shellReadCandidates("ls src && git diff a.py")).toEqual([]);
 		expect(shellReadCandidates("cat 'unbalanced")).toEqual([]);
 	});
 });
@@ -69,6 +72,14 @@ describe("file-tracker: a bash result counts as a read", () => {
 		writeFileSync(join(dir, "Makefile"), "test:\n\tpython3 t.py\n");
 		await bash("cat Makefile", "test:\n\tpython3 t.py");
 		expect(await edit("Makefile")).toBeUndefined();
+	});
+
+	it("allows an edit after a loop that cat-ed each file in full", async () => {
+		writeFileSync(join(dir, "a.py"), "a = 1\n");
+		writeFileSync(join(dir, "b.py"), "b = 2\n");
+		await bash('for f in a.py b.py; do printf "\\n--- %s ---\\n" "$f"; cat "$f"; done', "\n--- a.py ---\na = 1\n\n--- b.py ---\nb = 2");
+		expect(await edit("a.py")).toBeUndefined();
+		expect(await edit("b.py")).toBeUndefined();
 	});
 
 	it("still refuses after a partial read, and says why", async () => {
