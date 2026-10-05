@@ -121,6 +121,9 @@ describe("safetyControlWrite: read-only words in escalated compound commands", (
 		`find . -type f -not -path './.git/*' | head -50 && echo '---' && wc -l $(find . -type f \\( -name '*.py' -o -name '*.ts' \\) -not -path './.git/*' -not -path './node_modules/*')`,
 		`find . ! -path './.git/*' -exec wc -l {} + && exit 0`,
 		`find . -not \\( -path './.git/*' -o -path './node_modules/*' \\) -name '*.py' -exec wc -l {} + && exit 0`,
+		// A loop anywhere leaves every word unproven; a negated glob pattern still names nothing (DeepSeek V4.1 Flash, live).
+		`find src tests -type f -not -path '*/node_modules/*' | sort && for f in tests/*.py; do echo "--- $f ---"; cat "$f"; done`,
+		`for f in a b; do echo "$f"; done; find . ! -path '*/.claude/*' -name '*.py'`,
 	])("does not floor proven read-only words: %s", (command) => {
 		expect(analyzeShellCommand({ command, cwd, home }).verdict).toBe("escalate");
 		expect(check("bash", { command })).toBeUndefined();

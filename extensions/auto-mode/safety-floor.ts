@@ -430,6 +430,10 @@ export function shellNamesControlFile(
 				const nested = shellNamesControlFile(word, dir, home, oneCodeProjectSettings, depth + 1, forms);
 				if (nested) return nested;
 			}
+			// find never opens or writes a pattern operand, and a negated one only
+			// excludes files, so it names nothing (a loop elsewhere in the line
+			// leaves every word unproven).
+			if (excludes) continue;
 			const eq = word.indexOf("=");
 			for (const candidate of eq >= 0 ? [word, word.slice(eq + 1)] : [word]) {
 				if (!candidate || isUnknownTilde(candidate)) continue;
@@ -437,9 +441,8 @@ export function shellNamesControlFile(
 				if (resolved && namesControlFile(resolved, forms, true)) return candidate;
 				if (unknownDir && controlNames.has(baseName(candidate))) return candidate;
 				// find matches names beneath its search roots, not the shell's cwd.
-				// An unproven expression may delete/execute on any such match. A
-				// negated pattern only excludes files, so it never selects one.
-				if (payload.command === "find" && !excludes) {
+				// An unproven expression may delete/execute on any such match.
+				if (payload.command === "find") {
 					const pattern = globComponentRegex(baseName(candidate));
 					if (pattern && [...controlNames].some((name) => pattern.test(name))) return candidate;
 				}
