@@ -3,7 +3,7 @@
  *
  * Claude Code's two-stage formula, reproduced (working-docs/decisions/auto-mode.md, P4):
  *   Stage 1 grades HARM ONLY (maxTokens 64). severity < 50 → allow, no stage 2.
- *   Stage 2 applies intent + ALLOW (maxTokens 8192, <thinking> CoT) → severity +
+ *   Stage 2 applies intent + ALLOW (maxTokens 4096, <thinking> CoT) → severity +
  *   <category> (+ our verified <intent>). Both stages share one system prompt and
  *   transcript byte-for-byte. On Anthropic Messages, onPayload splits the user
  *   text at stable history-entry boundaries and moves the user cache marker
@@ -56,6 +56,13 @@ export const CLASSIFIER_TIMEOUT_MS = 30_000;
  * the call unjudged; the stage timeout above still bounds the retries.
  */
 export const CLASSIFIER_MAX_RETRIES = 10;
+
+/**
+ * Output headroom for a model that cannot turn thinking off, added to both
+ * stages' caps as Claude Code pads its always-on-thinking models: the
+ * reasoning otherwise spends the budget before the verdict is written.
+ */
+export const FORCED_THINKING_PADDING = 2048;
 
 /**
  * A pinned model that times out this many calls in a row is unpinned, so a model
@@ -350,7 +357,10 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 		// Turn one reply into text, or throw a StepError the loop knows how to route.
 		// `big` is the retry cap for a length-truncated reply; a still-truncated reply
 		// at `big` is its own outcome (not a candidate to step past).
+		const padding = reasoning ? FORCED_THINKING_PADDING : 0;
 		const call = async (userText: string, base: number, big: number, stage: number): Promise<string> => {
+			base += padding;
+			big += padding;
 			const inspect = (reply: AssistantMessage): string | "length" => {
 				deps.onUsage?.(reply.usage);
 				if (usageLog) {
@@ -402,12 +412,13 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 			if (deps.reviewOnly) {
 				// A finished run has no harm floor to short-circuit — go straight to the
 				// full stage-2 evaluation, reframed to judge the whole sequence.
-				const text = await call(reviewUser(userPrefix), 1024, 4096, 2);
+				const text = await call(reviewUser(userPrefix), 4096, 8192, 2);
 				verdict = parseStage2(text, index, request.userMessages);
 				stageInfo = `review sev=${parseSeverity(text) ?? "?"}`;
 			} else {
 				// STAGE 1 — harm only. maxTokens 64 like CC; if the reply overruns 64
 				// without a readable severity, one retry with headroom recovers it.
+				// Stage 2's 4096 is CC's too, with one retry at 8192.
 				const s1 = await call(stage1Text, 64, 1024, 1);
 				const sev1 = parseSeverity(s1);
 				if (sev1 !== null && sev1 < SEVERITY_THRESHOLD) {
@@ -417,7 +428,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 					// sev1 >= 50, or unparseable → fall to the fuller stage-2 evaluation.
 					// stage2User is built here (not eagerly) so the common allow case
 					// does not concatenate the transcript prefix a second time.
-					const s2 = await call(stage2User(userPrefix, afterRuleDenial), 1024, 4096, 2);
+					const s2 = await call(stage2User(userPrefix, afterRuleDenial), 4096, 8192, 2);
 					verdict = parseStage2(s2, index, request.userMessages);
 					stageInfo = `s1=${sev1 ?? "?"} s2=${parseSeverity(s2) ?? "?"}`;
 					// Stage 1 flagged the call and stage 2 cleared it without quoting the

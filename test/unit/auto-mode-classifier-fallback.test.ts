@@ -38,6 +38,11 @@ const model = (provider: string, id: string, input?: number, contextWindow = 200
 // a single provider call — which keeps the fallback call-count assertions clean.
 const allowReply = () =>
 	({ stopReason: "stop", content: [{ type: "text", text: "<severity>5</severity>" }], usage: {} }) as any;
+// A stage-1 severity over the threshold sends the call on to stage 2.
+const blockReply = () =>
+	({ stopReason: "stop", content: [{ type: "text", text: "<severity>90</severity>" }], usage: {} }) as any;
+const truncatedReply = () =>
+	({ stopReason: "length", content: [{ type: "text", text: '{"analysis":"This call only inspects' }], usage: {} }) as any;
 const errorReply = (errorMessage: string) => ({ stopReason: "error", errorMessage, content: [] }) as any;
 
 const config = loadAutoModeConfig("/nonexistent-home-for-tests");
@@ -190,13 +195,6 @@ describe("classify: pinning and fallback", () => {
 		expect(deps.state.rejected.size).toBe(0);
 	});
 
-	const truncatedReply = () =>
-		({
-			stopReason: "length",
-			content: [{ type: "text", text: '{"analysis":"This call only inspects' }],
-			usage: {},
-		}) as any;
-
 	it("retries a truncated verdict once with more headroom", async () => {
 		// Observed live: a model whose reasoning cannot be disabled burned the
 		// output budget deliberating and the JSON was cut mid-string. One retry
@@ -209,6 +207,13 @@ describe("classify: pinning and fallback", () => {
 		// Stage 1's cap is 64 (like CC); a truncated reply retries with headroom.
 		expect((completeMock.mock.calls[0]?.[2] as any).maxTokens).toBe(64);
 		expect((completeMock.mock.calls[1]?.[2] as any).maxTokens).toBe(1024);
+	});
+
+	it("gives stage 2 Claude Code's 4096 tokens, retrying a cut-off verdict at 8192", async () => {
+		completeMock.mockResolvedValueOnce(blockReply()).mockResolvedValueOnce(truncatedReply()).mockResolvedValueOnce(allowReply());
+		const { deps } = makeDeps();
+		await classify(request, deps);
+		expect(completeMock.mock.calls.map((call) => (call[2] as any).maxTokens)).toEqual([64, 4096, 8192]);
 	});
 
 	it("blocks with the output limit named when the retry is also truncated, keeping the model", async () => {
@@ -304,6 +309,14 @@ describe("classify: reasoning-mandatory fallback", () => {
 		const verdict = await classify(request, deps);
 		expect(verdict.decision).toBe("block");
 		expect(completeMock).toHaveBeenCalledTimes(2); // off, then minimal — no third attempt
+	});
+
+	it("pads both stages by 2048 for a model that cannot turn thinking off, as Claude Code does", async () => {
+		const { deps } = makeDeps();
+		deps.state.forcedReasoning.set("openai/gpt-5-mini", "minimal");
+		completeMock.mockResolvedValueOnce(truncatedReply()).mockResolvedValueOnce(blockReply()).mockResolvedValueOnce(truncatedReply()).mockResolvedValueOnce(allowReply());
+		await classify(request, deps);
+		expect(completeMock.mock.calls.map((call) => (call[2] as any).maxTokens)).toEqual([64 + 2048, 1024 + 2048, 4096 + 2048, 8192 + 2048]);
 	});
 
 	it("does not treat an ordinary provider error as reasoning-mandatory", async () => {
