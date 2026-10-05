@@ -71,10 +71,16 @@ export function isOpenRouter(model: { provider: string; baseUrl?: string } | und
 	}
 }
 
-export function toolCallCorruptionNotice(modelId: string, providerName: string | undefined): string {
+/** How the upstream provider failed: a blocked call, a call cut off mid-stream, or a stream gone silent. */
+export type UpstreamFailure = "blocked-call" | "corrupt-stream" | { stalledSeconds: number };
+
+export function toolCallCorruptionNotice(modelId: string, providerName: string | undefined, failure: UpstreamFailure = "blocked-call"): string {
+	const stalled = typeof failure === "object";
+	const what = stalled ? `stopped streaming for ${modelId} (no data for ${failure.stalledSeconds} s)` : `is corrupting tool calls for ${modelId}`;
 	const provider = providerName
-		? `OpenRouter upstream provider ${providerName} is corrupting tool calls for ${modelId}.`
-		: `An OpenRouter upstream provider is corrupting tool calls for ${modelId}; the provider could not be identified.`;
+		? `OpenRouter upstream provider ${providerName} ${what}.`
+		: `An OpenRouter upstream provider ${what}; the provider could not be identified.`;
+	const outcome = failure === "blocked-call" ? "The call was blocked and the turn stopped." : stalled ? "The turn was stopped." : "The reply was cut off and the turn stopped.";
 	const ignore = JSON.stringify([providerName ?? "PROVIDER_NAME"]);
-	return `${provider} The call was blocked and the turn stopped. Add the provider to compat.openRouterRouting.ignore for this model in pi's models.json ("ignore": ${ignore}), or switch models.`;
+	return `${provider} ${outcome} Add the provider to compat.openRouterRouting.ignore for this model in pi's models.json ("ignore": ${ignore}), or switch models.`;
 }

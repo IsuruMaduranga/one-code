@@ -216,6 +216,87 @@ describe("OpenRouter tool-call corruption wiring", () => {
 		expect(ctx.ui.notify).toHaveBeenCalledTimes(2);
 	});
 
+	const partialOf = (responseId = "gen-123") => ({ role: "assistant", responseId, content: [] });
+	const start = () => fake.fire("message_start", { message: { role: "assistant", content: [] } }, ctx);
+	const update = (event: object, partial = partialOf()) =>
+		fake.fire("message_update", { message: partial, assistantMessageEvent: { ...event, partial } }, ctx);
+
+	it("stops a call whose arguments leak tool-call markup before the call ends", async () => {
+		await start();
+		await update({ type: "toolcall_start", contentIndex: 0 });
+		await update({ type: "toolcall_delta", contentIndex: 0, delta: '{"path": "src/a.py</arg_value></tool_call><tool_call>read<arg_key>limit' });
+		expect(ctx.abort).not.toHaveBeenCalled();
+		await update({ type: "toolcall_delta", contentIndex: 0, delta: "</arg_key><arg_value>null</arg_value>" });
+		await update({ type: "toolcall_delta", contentIndex: 0, delta: "<arg_key>path" });
+		expect(ctx.abort).toHaveBeenCalledTimes(1);
+		await update({ type: "toolcall_delta", contentIndex: 0, delta: "</arg_value><arg_key>x</arg_value><arg_key>" });
+		await flush();
+		expect(ctx.abort).toHaveBeenCalledTimes(1);
+		expect(ctx.ui.notify).toHaveBeenCalledTimes(1);
+		expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringMatching(/Morph is corrupting tool calls.*cut off and the turn stopped.*openRouterRouting\.ignore/), "error");
+	});
+
+	it("stops a tool call that goes silent for 60 s and names the provider", async () => {
+		await start();
+		await update({ type: "toolcall_start", contentIndex: 0 });
+		await update({ type: "toolcall_delta", contentIndex: 0, delta: '{"command":"ls"}' });
+		await vi.advanceTimersByTimeAsync(59_000);
+		expect(ctx.abort).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(1_000);
+		expect(ctx.abort).toHaveBeenCalledTimes(1);
+		await flush();
+		expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringMatching(/Morph stopped streaming for z-ai\/glm-5\.3 \(no data for 60 s\)\. The turn was stopped\./), "error");
+		expect(fetchMock.mock.calls[0][0]).toContain("gen-123");
+	});
+
+	it("stops any stream silent for 90 s, and each event restarts the clock", async () => {
+		await start();
+		await vi.advanceTimersByTimeAsync(80_000);
+		await update({ type: "thinking_delta", contentIndex: 0, delta: "hmm" });
+		await vi.advanceTimersByTimeAsync(80_000);
+		expect(ctx.abort).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(10_000);
+		expect(ctx.abort).toHaveBeenCalledTimes(1);
+		await flush();
+		expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("no data for 90 s"), "error");
+	});
+
+	it("disarms the clock at message_end, between messages, and after the run", async () => {
+		await start();
+		await update({ type: "toolcall_start", contentIndex: 0 });
+		await fake.fire("message_end", { message: { role: "assistant", responseId: "gen-123", stopReason: "toolUse" } }, ctx);
+		await vi.advanceTimersByTimeAsync(600_000);
+		await start();
+		await fake.fire("agent_end", { messages: [] }, ctx);
+		await vi.advanceTimersByTimeAsync(600_000);
+		expect(ctx.abort).not.toHaveBeenCalled();
+		expect(ctx.ui.notify).not.toHaveBeenCalled();
+	});
+
+	it.each(["anthropic", "openai"])("never arms the clock on %s", async (provider) => {
+		ctx.model = { ...model, provider, baseUrl: "https://example.com/v1" };
+		await start();
+		await update({ type: "toolcall_start", contentIndex: 0 });
+		await vi.advanceTimersByTimeAsync(600_000);
+		expect(ctx.abort).not.toHaveBeenCalled();
+	});
+
+	it("names the provider from the stream's chunks without a lookup", async () => {
+		await start();
+		await fake.fire("provider_stream_event", { type: "provider_stream_event", provider: "openrouter", api: "openai-completions", model: model.id, data: { id: "gen-123", provider: "Novita" } }, ctx);
+		await update({ type: "toolcall_start", contentIndex: 0 });
+		await vi.advanceTimersByTimeAsync(60_000);
+		await flush();
+		expect(ctx.abort).toHaveBeenCalledTimes(1);
+		expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringMatching(/provider Novita stopped streaming.*"ignore": \["Novita"\]/), "error");
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it("blocks a bash command cut off before its quoted argument", async () => {
+		await stream('{ "command": "grep -rn "\t, "timeout": 120000 }');
+		expect(await call()).toMatchObject({ block: true, reason: expect.stringMatching(/single space/) });
+	});
+
 	it("registers before hooks and permissions without adding prompt/context handlers", () => {
 		const extensions: string[] = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")).pi.extensions;
 		const index = extensions.indexOf("extensions/tool-call-corruption/index.ts");
