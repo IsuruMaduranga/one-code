@@ -51,6 +51,13 @@ import { actionLength, MAX_ACTION_CHARS } from "./transcript.ts";
 export const CLASSIFIER_TIMEOUT_MS = 30_000;
 
 /**
+ * Claude Code's default retry count for a rate limit or server error (its
+ * classifier's side query uses it). pi-ai's default is none, so one 429 left
+ * the call unjudged; the stage timeout above still bounds the retries.
+ */
+export const CLASSIFIER_MAX_RETRIES = 10;
+
+/**
  * A pinned model that times out this many calls in a row is unpinned, so a model
  * that was fast when first chosen but has since fallen behind demand does not
  * stay the session's classifier forever. The next call re-runs selection.
@@ -326,6 +333,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 					env: auth.env,
 					signal: deps.signal ? AbortSignal.any([deps.signal, timeout]) : timeout,
 					maxTokens,
+					maxRetries: CLASSIFIER_MAX_RETRIES,
 					cacheRetention: "long",
 					...(deps.cacheKey ? { sessionId: deps.cacheKey } : {}),
 					...(model.api === "anthropic-messages" ? {

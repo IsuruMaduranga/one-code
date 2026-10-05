@@ -188,6 +188,15 @@ const mixedText = '<transcript>\n' + [
 	'{"Read":{"path":"link/secret","content":"line one\\nline two 😀"}}',
 ].join("\n") + '\n</transcript>';
 
+describe("classifier request options", () => {
+	it("retries rate limits and server errors as Claude Code does, within the stage timeout", async () => {
+		await classify(request, deps());
+		const options = vi.mocked(completeSimple).mock.calls[0][2]!;
+		expect(options.maxRetries).toBe(10);
+		expect(options.signal).toBeInstanceOf(AbortSignal);
+	});
+});
+
 describe("classifier text preservation", () => {
 	it.each([undefined, "", "# CLAUDE.md\nKeep exact whitespace.\n\n"])("matches the original text with framing %j in every stage", (claudeMd) => {
 		const built = buildPayload({ ...request, claudeMd, transcript: mixed });
