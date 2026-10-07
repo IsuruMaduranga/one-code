@@ -2369,8 +2369,9 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				ctx.ui.notify(`Could not update settings: ${error instanceof Error ? error.message : String(error)}`, "error");
 				return;
 			}
-			resetClassifierChoice(ctx.model);
-			ctx.ui.notify(`autoMode.classifierModel cleared. Auto mode chooses automatically: ${describeChain(ctx)}`, "info");
+			// One info line: pi folds back-to-back info notices (findings §63).
+			resetClassifierChoice(ctx.model, false);
+			announceClassifierChoice(ctx.model, { lead: `autoMode.classifierModel cleared. Auto mode chooses automatically: ${describeChain(ctx)}`, force: true });
 			return;
 		}
 		if (remainder) {

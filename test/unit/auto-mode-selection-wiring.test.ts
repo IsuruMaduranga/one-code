@@ -87,8 +87,15 @@ describe("automatic classifier selection wiring", () => {
 		await command.handler("config", ctx);
 		expect(String(notify.mock.calls.at(-1)?.[0])).toContain("classifierModel: openai-codex/gpt-6-sol");
 
+		const before = notify.mock.calls.length;
 		await command.handler("model clear", ctx);
 		expect(JSON.parse(readFileSync(settings, "utf8")).autoMode).toBeUndefined();
 		expect(statuses.at(-1)?.classifier).toBe("openai-codex/gpt-6-astra");
+		// pi folds back-to-back info notices into one line, so the confirmation
+		// and the announcement are one notice (findings §63).
+		const infos = notify.mock.calls.slice(before).filter(([, level]) => level === "info").map(([text]) => String(text));
+		expect(infos).toHaveLength(1);
+		expect(infos[0]).toContain("autoMode.classifierModel cleared");
+		expect(infos[0]).toMatch(/\nAuto mode (?:is screening|will screen) calls with openai-codex\/gpt-6-astra/);
 	});
 });
