@@ -1,11 +1,12 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	bundledSources,
 	catalogCacheDir,
-	catalogIsStale,
+	catalogFetchedAt,
+	catalogRefreshDue,
 	catalogRefreshEnabled,
 	emptyCatalogSources,
 	HUGGING_FACE_LOOKUPS_PER_REFRESH,
@@ -334,9 +335,53 @@ describe("refreshing the catalogs", () => {
 		const later = new Date("2099-01-03T00:00:00Z");
 		const failed = await refreshModelCatalog({ stateDir, piProviders: ["deepseek"], fetchImpl: fakeFetch({ "https://openrouter.ai/": () => json({}, 503) }).impl, now: later });
 		expect(failed).toEqual({ status: "failed", error: "openrouter.ai responded 503" });
-		const empty = await refreshModelCatalog({ stateDir, piProviders: ["deepseek"], fetchImpl: fakeFetch({ "https://models.dev/": () => json({}) }).impl, now: later });
+		const dayAfter = new Date("2099-01-04T00:00:01Z");
+		const empty = await refreshModelCatalog({ stateDir, piProviders: ["deepseek"], fetchImpl: fakeFetch({ "https://models.dev/": () => json({}) }).impl, now: dayAfter });
 		expect(empty).toEqual({ status: "failed", error: "a model catalog came back empty" });
 		expect(readFileSync(join(catalogCacheDir(stateDir), "models-dev.json"), "utf8")).toBe(before);
+	});
+
+	it("after a failure, waits a day before trying again, and a success clears the wait", async () => {
+		const later = new Date("2099-01-03T00:00:00Z");
+		const down = fakeFetch({ "https://models.dev/": () => json({}, 503) });
+		expect(catalogRefreshDue(stateDir, later)).toBe(true);
+		expect(await refreshModelCatalog({ stateDir, piProviders: ["deepseek"], fetchImpl: down.impl, now: later })).toEqual({ status: "failed", error: "models.dev responded 503" });
+		const calls = down.calls.length;
+		const soon = new Date("2099-01-03T12:00:00Z");
+		expect(catalogRefreshDue(stateDir, soon)).toBe(false);
+		expect(await refreshModelCatalog({ stateDir, piProviders: ["deepseek"], fetchImpl: down.impl, now: soon })).toEqual({
+			status: "backing-off",
+			error: "models.dev responded 503",
+		});
+		expect(down.calls.length).toBe(calls);
+		const nextDay = new Date("2099-01-04T00:00:01Z");
+		expect(catalogRefreshDue(stateDir, nextDay)).toBe(true);
+		expect((await refreshModelCatalog({ stateDir, piProviders: ["deepseek"], fetchImpl: fakeFetch().impl, now: nextDay })).status).toBe("refreshed");
+		expect(existsSync(join(catalogCacheDir(stateDir), "refresh-failed.json"))).toBe(false);
+	});
+
+	it("does not count a refresh the caller cancelled as a failure", async () => {
+		const controller = new AbortController();
+		const stalled = (async () => new Response(new ReadableStream({ start() {} }), { status: 200 })) as typeof fetch;
+		const pending = refreshModelCatalog({ stateDir, piProviders: ["deepseek"], fetchImpl: stalled, now, signal: controller.signal });
+		controller.abort(new Error("session ended"));
+		expect(await pending).toEqual({ status: "failed", error: "session ended" });
+		expect(catalogRefreshDue(stateDir, now)).toBe(true);
+	});
+
+	it("writes models.dev last, so a failed write never leaves a fresh-looking mixed copy", async () => {
+		// A directory where openrouter.json goes makes that write throw.
+		mkdirSync(join(catalogCacheDir(stateDir), "openrouter.json"), { recursive: true });
+		const outcome = await refreshModelCatalog({ stateDir, piProviders: ["deepseek"], fetchImpl: fakeFetch().impl, now });
+		expect(outcome.status).toBe("failed");
+		expect(existsSync(join(catalogCacheDir(stateDir), "models-dev.json"))).toBe(false);
+	});
+
+	it("reads when the copy in use was fetched without parsing the catalogs", async () => {
+		expect(catalogFetchedAt(stateDir)).toBe(bundledSources().modelsDev.fetchedAt);
+		await refreshModelCatalog({ stateDir, piProviders: ["deepseek"], fetchImpl: fakeFetch().impl, now });
+		expect(catalogFetchedAt(stateDir)).toBe(now.toISOString());
+		expect(catalogFetchedAt(stateDir)).toBe(loadCatalogSources(stateDir).modelsDev.fetchedAt);
 	});
 
 	it("never fetches while a test has pinned the catalog", async () => {
@@ -346,11 +391,10 @@ describe("refreshing the catalogs", () => {
 		expect(calls).toEqual([]);
 	});
 
-	it("is stale after a day, and off with refreshModelCatalog: false or PI_OFFLINE", () => {
-		const sources = emptyCatalogSources();
-		sources.modelsDev.fetchedAt = "2099-01-01T00:00:00Z";
-		expect(catalogIsStale(sources, new Date("2099-01-01T23:00:00Z"))).toBe(false);
-		expect(catalogIsStale(sources, new Date("2099-01-02T01:00:00Z"))).toBe(true);
+	it("is due after a day, and off with refreshModelCatalog: false or PI_OFFLINE", async () => {
+		await refreshModelCatalog({ stateDir, piProviders: ["deepseek"], fetchImpl: fakeFetch().impl, now });
+		expect(catalogRefreshDue(stateDir, new Date("2099-01-01T23:00:00Z"))).toBe(false);
+		expect(catalogRefreshDue(stateDir, new Date("2099-01-02T01:00:00Z"))).toBe(true);
 		expect(catalogRefreshEnabled({}, {})).toBe(true);
 		expect(catalogRefreshEnabled({ refreshModelCatalog: false }, {})).toBe(false);
 		expect(catalogRefreshEnabled({}, { PI_OFFLINE: "1" })).toBe(false);

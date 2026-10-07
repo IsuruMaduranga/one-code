@@ -32,7 +32,7 @@ import {
 	VERSION as PI_VERSION,
 } from "@earendil-works/pi-coding-agent";
 import { loadAutoModeConfig, persistClassifierModel } from "../auto-mode/config.ts";
-import { catalogIsStale, loadCatalogSources, readCatalogRefreshEnabled, refreshModelCatalog } from "../lib/model-catalog-data.ts";
+import { catalogRefreshDue, readCatalogRefreshEnabled, refreshModelCatalog } from "../lib/model-catalog-data.ts";
 import { BUILTIN_PROVIDER_POLICIES } from "../lib/model-policy.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent, withoutUnusable } from "../lib/model-unusable.ts";
 import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } from "../lib/mcp-status.ts";
@@ -92,15 +92,23 @@ export default function doctorExtension(pi: ExtensionAPI) {
 	// The public model catalogs behind the tiers (lib/model-catalog-data.ts):
 	// refreshed at most daily, only from a session that outlives the turn, never
 	// awaited in session_start (findings §15, §19), inert once the session is
-	// shutting down, off with `refreshModelCatalog: false`. A failure is logged
-	// once and the copy on disk (or the bundled one) keeps serving. Request
-	// surfaces keep their frozen tier until session_start/model_select;
-	// automatic model selection uses the refreshed catalog immediately.
+	// shutting down (session_shutdown cancels a fetch in flight), off with
+	// `refreshModelCatalog: false`. A failure is logged once, the copy on disk
+	// (or the bundled one) keeps serving, and the next try waits a day. The
+	// start-up check reads only the files' stamps; this extension never parses
+	// the catalogs unless it refreshes or reports. Request surfaces keep their
+	// frozen tier until session_start/model_select; automatic model selection
+	// uses the refreshed catalog immediately.
 	let shuttingDown = false;
 	let refreshWarned = false;
+	let refreshAbort = new AbortController();
 	const refreshCatalog = async (ctx: ExtensionContext, home: string): Promise<void> => {
 		if (!readCatalogRefreshEnabled(oneCodeSettingsPath(home))) return;
-		const outcome = await refreshModelCatalog({ stateDir: oneCodeStateDir(process.env, home), piProviders: Object.keys(BUILTIN_PROVIDER_POLICIES) });
+		const outcome = await refreshModelCatalog({
+			stateDir: oneCodeStateDir(process.env, home),
+			piProviders: Object.keys(BUILTIN_PROVIDER_POLICIES),
+			signal: refreshAbort.signal,
+		});
 		if (outcome.status === "failed" && !refreshWarned && !shuttingDown) {
 			refreshWarned = true;
 			try {
@@ -111,13 +119,15 @@ export default function doctorExtension(pi: ExtensionAPI) {
 		}
 	};
 	pi.on("session_start", (_event, ctx) => {
+		if (refreshAbort.signal.aborted) refreshAbort = new AbortController();
 		const home = os.homedir();
 		if (!sessionOutlivesTurn(ctx.mode) || !readCatalogRefreshEnabled(oneCodeSettingsPath(home))) return;
-		if (!catalogIsStale(loadCatalogSources(oneCodeStateDir(process.env, home)))) return;
+		if (!catalogRefreshDue(oneCodeStateDir(process.env, home))) return;
 		void refreshCatalog(ctx, home).catch(() => {});
 	});
 	pi.on("session_shutdown", () => {
 		shuttingDown = true;
+		refreshAbort.abort(new Error("the session ended"));
 	});
 
 	const gather = async (ctx: ExtensionContext, options: { network: boolean }): Promise<DoctorReport> => {

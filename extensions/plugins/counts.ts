@@ -48,9 +48,9 @@ export async function fetchInstallCounts(root: string, now: Date = new Date()): 
 	if (cached) return cached;
 
 	try {
-		const response = await fetchWithTimeout(INSTALL_COUNTS_URL, FETCH_TIMEOUT_MS);
-		if (!response.ok) return undefined;
-		const counts = (await response.json()) as CountsCache["counts"];
+		const counts = await fetchWithTimeout(INSTALL_COUNTS_URL, FETCH_TIMEOUT_MS, async (response) =>
+			response.ok ? ((await response.json()) as CountsCache["counts"]) : undefined,
+		);
 		if (!Array.isArray(counts)) return undefined;
 		writeJsonAtomic(join(root, CACHE_FILE), { version: 1, fetchedAt: now.toISOString(), counts } satisfies CountsCache);
 		return toMap(counts);
