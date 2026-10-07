@@ -398,12 +398,30 @@ describe("durable approval and dialog fidelity", () => {
 		mkdirSync(join(cwd, ".git", "worktrees", "linked"), { recursive: true });
 		const linked = join(root, "linked");
 		write(join(linked, ".git"), `gitdir: ${join(cwd, ".git", "worktrees", "linked")}\n`);
+		write(join(cwd, ".git", "worktrees", "linked", "gitdir"), `${join(linked, ".git")}\n`);
 		persistExternalIncludesApproval(cwd, home, true);
 		expect(readExternalIncludesApproval(join(cwd, "src"), home).approved).toBe(true);
 		expect(readExternalIncludesApproval(linked, home).approved).toBe(true);
 		expect(readExternalIncludesApproval(root, home).approved).toBe(false);
 		persistExternalIncludesApproval(linked, home, false);
 		expect(readExternalIncludesApproval(cwd, home)).toEqual({ approved: false, warningShown: true });
+	});
+
+	it("keys the answer by the exact project root, not the settings file's lossy slug", () => {
+		const dashed = join(root, "my-app");
+		const underscored = join(root, "my_app");
+		mkdirSync(dashed);
+		mkdirSync(underscored);
+		const path = oneCodeProjectSettingsPath(dashed, home);
+		expect(oneCodeProjectSettingsPath(underscored, home)).toBe(path);
+		persistExternalIncludesApproval(dashed, home, true);
+		expect(readExternalIncludesApproval(dashed, home)).toEqual({ approved: true, warningShown: true });
+		expect(readExternalIncludesApproval(underscored, home)).toEqual({ approved: false, warningShown: false });
+		persistExternalIncludesApproval(underscored, home, false);
+		expect(readExternalIncludesApproval(dashed, home)).toEqual({ approved: false, warningShown: false });
+		// An answer recorded without its root cannot say which project gave it: ask again.
+		write(path, JSON.stringify({ hasClaudeMdExternalIncludesApproved: true, hasClaudeMdExternalIncludesWarningShown: true }));
+		expect(readExternalIncludesApproval(dashed, home)).toEqual({ approved: false, warningShown: false });
 	});
 
 	it("uses the same project consent when the checkout is entered through a symlink", () => {
@@ -415,21 +433,6 @@ describe("durable approval and dialog fidelity", () => {
 		persistExternalIncludesApproval(cwd, home, false);
 		expect(readExternalIncludesApproval(alias, home)).toEqual({ approved: false, warningShown: true });
 		expect(safetyControlWrite({ cwd: alias, home, toolName: "write", input: { path: oneCodeProjectSettingsPath(cwd, home) } })).toBeDefined();
-	});
-
-	it("keeps an approval to the repository that gave it, though another root shares its settings file", () => {
-		const trusted = join(root, "acme_app");
-		const clone = join(root, "acme-app");
-		mkdirSync(trusted);
-		mkdirSync(clone);
-		expect(oneCodeProjectSettingsPath(clone, home)).toBe(oneCodeProjectSettingsPath(trusted, home));
-		persistExternalIncludesApproval(trusted, home, true);
-		expect(readExternalIncludesApproval(trusted, home)).toEqual({ approved: true, warningShown: true });
-		expect(readExternalIncludesApproval(clone, home)).toEqual({ approved: false, warningShown: false });
-		// An answer stored before the root was recorded counts as none.
-		const path = oneCodeProjectSettingsPath(trusted, home);
-		write(path, JSON.stringify({ hasClaudeMdExternalIncludesApproved: true, hasClaudeMdExternalIncludesWarningShown: true }));
-		expect(readExternalIncludesApproval(trusted, home)).toEqual({ approved: false, warningShown: false });
 	});
 
 	it("round-trips other keys, treats malformed/non-boolean values as no approval, and never writes Claude state", () => {

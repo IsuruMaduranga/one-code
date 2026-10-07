@@ -1,6 +1,6 @@
 /** Claude Code's project-scoped external instruction consent; pure fs/text, no pi imports. */
 import { readJsonFile } from "./atomic-write.ts";
-import { oneCodeProjectRoot, oneCodeProjectSettingsPath, readSettingsForWrite, writeSettings } from "./one-code-settings.ts";
+import { oneCodeProjectRoot, oneCodeProjectSettingsPathFor, readSettingsForWrite, writeSettings } from "./one-code-settings.ts";
 import { comparablePath, tildify } from "./paths.ts";
 import { escapeControlText } from "./terminal-text.ts";
 
@@ -15,28 +15,33 @@ export interface ExternalIncludesApproval {
 }
 
 /**
- * Only One Code's out-of-checkout project state grants consent, never merged
- * project settings, and only for the repository that gave it: the file is
- * shared by every root with the same slug, so the answer names its root.
+ * The project root an answer was given for. The settings file's slug is lossy
+ * (`my_app` and `my-app` share one file), so the answer counts only for this
+ * exact root; an answer recorded without one is asked again.
  */
+const APPROVAL_ROOT_KEY = "claudeMdExternalIncludesRoot";
+
+/** Only One Code's out-of-checkout project state grants consent, never merged project settings. */
 export function readExternalIncludesApproval(cwd: string, home: string): ExternalIncludesApproval {
-	const file = readJsonFile<Record<string, unknown>>(oneCodeProjectSettingsPath(cwd, home));
-	const root = file?.claudeMdExternalIncludesRoot;
-	if (typeof root !== "string" || comparablePath(root) !== comparablePath(oneCodeProjectRoot(cwd))) return { approved: false, warningShown: false };
+	const root = oneCodeProjectRoot(cwd);
+	const file = readJsonFile<Record<string, unknown>>(oneCodeProjectSettingsPathFor(root, home));
+	const recorded = file?.[APPROVAL_ROOT_KEY];
+	if (!file || typeof recorded !== "string" || comparablePath(recorded) !== comparablePath(root)) return { approved: false, warningShown: false };
 	return {
-		approved: file?.hasClaudeMdExternalIncludesApproved === true,
-		warningShown: file?.hasClaudeMdExternalIncludesWarningShown === true,
+		approved: file.hasClaudeMdExternalIncludesApproved === true,
+		warningShown: file.hasClaudeMdExternalIncludesWarningShown === true,
 	};
 }
 
 /** Both answers are remembered, and cover future imports, not just the files in the preview. */
 export function persistExternalIncludesApproval(cwd: string, home: string, approved: boolean): void {
-	const path = oneCodeProjectSettingsPath(cwd, home);
+	const root = oneCodeProjectRoot(cwd);
+	const path = oneCodeProjectSettingsPathFor(root, home);
 	writeSettings(path, {
 		...readSettingsForWrite(path),
 		hasClaudeMdExternalIncludesApproved: approved,
 		hasClaudeMdExternalIncludesWarningShown: true,
-		claudeMdExternalIncludesRoot: oneCodeProjectRoot(cwd),
+		[APPROVAL_ROOT_KEY]: root,
 	});
 }
 

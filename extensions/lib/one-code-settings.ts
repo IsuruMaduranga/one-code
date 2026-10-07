@@ -33,22 +33,29 @@ export function oneCodeSettingsPath(home: string, env: NodeJS.ProcessEnv = proce
 }
 
 /**
- * `~/.onecode/projects/<slug>/settings.json` — One Code's per-repo settings
- * (writable). Keyed by the git repository root when there is one (shared by
- * worktrees and subdirectories), else the cwd — the same slug the memory dir uses.
- */
-export function oneCodeProjectSettingsPath(cwd: string, home: string, env: NodeJS.ProcessEnv = process.env): string {
-	return join(oneCodeStateDir(env, home), "projects", projectSlug(oneCodeProjectRoot(cwd)), "settings.json");
-}
-
-/**
- * The resolved project root a per-repo settings file belongs to. The slug is
- * lossy (`acme_app` and `acme-app` share one file), so a setting that must
- * not carry over between repositories also stores this and checks it.
+ * The project a per-repo setting belongs to: the git repository root when
+ * there is one (shared by worktrees and subdirectories), else the cwd, through
+ * symlinks so an aliased checkout is the same project.
  */
 export function oneCodeProjectRoot(cwd: string): string {
 	const root = findProjectRoot(cwd) ?? cwd;
 	return tryRealpath(root) ?? root;
+}
+
+/**
+ * `~/.onecode/projects/<slug>/settings.json` — One Code's per-repo settings
+ * (writable), for `oneCodeProjectRoot`. The slug is the memory dir's
+ * (`projectSlug`), but of the resolved root, where the memory dir slugs the
+ * root as found. It is lossy (`my_app` and `my-app` share a file), so a setting
+ * that grants trust records the root it was given for (claude-external-includes.ts).
+ */
+export function oneCodeProjectSettingsPath(cwd: string, home: string, env: NodeJS.ProcessEnv = process.env): string {
+	return oneCodeProjectSettingsPathFor(oneCodeProjectRoot(cwd), home, env);
+}
+
+/** `oneCodeProjectSettingsPath` for a root already resolved by `oneCodeProjectRoot`. */
+export function oneCodeProjectSettingsPathFor(root: string, home: string, env: NodeJS.ProcessEnv = process.env): string {
+	return join(oneCodeStateDir(env, home), "projects", projectSlug(root), "settings.json");
 }
 
 /**
