@@ -219,10 +219,10 @@ describe("sameTierContainedCandidates", () => {
 		const ids = (models: Model<Api>[]) => models.map((m) => m.id);
 		const fable = model("claude-fable-5-1", "anthropic", 10);
 		const anthropic = [fable, model("claude-opus-5-5", "anthropic", 4), model("claude-sonnet-5-5", "anthropic", 2), model("claude-haiku-4-5", "anthropic", 1)];
-		expect(ids(sameTierContainedCandidates(anthropic, fable, { strict: true }))).toEqual(["claude-sonnet-5-5", "claude-opus-5-5"]);
+		expect(ids(sameTierContainedCandidates(anthropic, fable))).toEqual(["claude-sonnet-5-5", "claude-opus-5-5"]);
 		// A cheaper model in a lower tier is never a same-tier pick.
 		const astra = model("gpt-6-astra", "openai", 5);
-		expect(ids(sameTierContainedCandidates([astra, model("gpt-6-luna", "openai", 0.1)], astra, { strict: true }))).toEqual([]);
+		expect(ids(sameTierContainedCandidates([astra, model("gpt-6-luna", "openai", 0.1)], astra))).toEqual([]);
 	});
 });
 

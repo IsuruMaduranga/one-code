@@ -1,7 +1,7 @@
 /** Same-line upgrades at a comparable blended price. Selection only; never switches a model. */
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { catalogModelFor } from "./model-catalog.ts";
-import { baseModelId, isAliasOrVariantId, modelSpec, stripSnapshotDate } from "./model-policy.ts";
+import { baseModelId, isAliasOrVariantId, isExperimentalBuild, modelSpec, stripSnapshotDate } from "./model-policy.ts";
 
 interface ModelLine {
 	line: string;
@@ -46,10 +46,6 @@ function blendedPrice(model: Model<Api>): number | undefined {
 	return Number.isFinite(blend) ? blend : undefined;
 }
 
-function releaseDate(model: Model<Api>): number | undefined {
-	return catalogModelFor(model)?.released;
-}
-
 export interface NewerModelSuggestion {
 	model: Model<Api>;
 	text: string;
@@ -68,7 +64,7 @@ export function newerModelSuggestion(
 ): NewerModelSuggestion | undefined {
 	if (!current) return undefined;
 	const currentLine = modelLine(current.id);
-	const currentDate = releaseDate(current);
+	const currentDate = catalogModelFor(current)?.released;
 	const currentPrice = blendedPrice(current);
 	if (!currentLine || currentDate === undefined || currentPrice === undefined) return undefined;
 	const candidates = [];
@@ -76,14 +72,14 @@ export function newerModelSuggestion(
 		if (model.provider !== current.provider || isAliasOrVariantId(model.id)) continue;
 		// Experimental endpoints and moving "latest" aliases have no stable
 		// upgrade identity, even when their catalog row includes a release date.
-		if (/-(?:exp|experimental|latest)(?:-|$)/i.test(model.id)) continue;
+		if (isExperimentalBuild(model.id) || /-latest(?:-|$)/i.test(model.id)) continue;
 		const line = modelLine(model.id);
 		if (!line || line.line !== currentLine.line || compareVersion(line.version, currentLine.version) <= 0) continue;
-		const date = releaseDate(model);
-		const price = blendedPrice(model);
-		if (date === undefined || date <= currentDate || price === undefined || price > currentPrice * 1.1) continue;
 		const entry = catalogModelFor(model);
-		if (!entry?.tools || entry.legacy || entry.deprecated) continue;
+		const date = entry?.released;
+		const price = blendedPrice(model);
+		if (!entry || date === undefined || date <= currentDate || price === undefined || price > currentPrice * 1.1) continue;
+		if (!entry.tools || entry.legacy || entry.deprecated) continue;
 		candidates.push({ model, version: line.version, date, price });
 	}
 	candidates.sort((a, b) => compareVersion(b.version, a.version) || b.date - a.date || a.price - b.price);

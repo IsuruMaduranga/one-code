@@ -259,6 +259,21 @@ export function isSelectableVariant(model: Model<Api>): boolean {
 	return !UNSUITABLE_VARIANT.test(model.id) && !model.id.startsWith("~");
 }
 
+/**
+ * An experimental build (`deepseek-v4-flash-vision-exp`, `tev1-4b-experimental`):
+ * a research variant, never picked automatically as a screener or suggested as
+ * an upgrade. `preview` is deliberately not matched: Google ships mainline
+ * Gemini models under it (`gemini-3-flash-preview`).
+ */
+export function isExperimentalBuild(id: string): boolean {
+	return /-exp(?:$|[-:])|experimental/i.test(id);
+}
+
+/** A positive finite catalog context window, the only value safe to compare windows by. */
+export function hasCatalogContextWindow(model: { contextWindow?: number }): model is { contextWindow: number } {
+	return Number.isFinite(model.contextWindow) && (model.contextWindow as number) > 0;
+}
+
 /** One day in milliseconds, for the release-date arithmetic in model-catalog.ts. */
 export const DAY_MS = 86_400_000;
 

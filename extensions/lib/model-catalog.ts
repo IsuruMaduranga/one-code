@@ -320,7 +320,7 @@ function placeVendor(list: Draft[]): void {
 
 /** Whether automatic selection may pick this model at all (rule 5). */
 export function autoSelectable(model: CatalogModel): boolean {
-	return model.tools && !model.deprecated && !model.nonTextOutput && !model.legacy && model.supersededBy === undefined;
+	return autoSelectSkipReason(model) === undefined;
 }
 
 /** Why automatic selection skips the model, in words; undefined when it does not. */

@@ -18,8 +18,8 @@
  */
 
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { modelSpec as spec } from "./model-policy.ts";
-import { intrinsicTier, type PromptTier } from "./model-tier.ts";
+import { hasCatalogContextWindow, modelSpec as spec } from "./model-policy.ts";
+import { intrinsicTier, tiersBelow } from "./model-tier.ts";
 import { newerModelSuggestion } from "./newer-model.ts";
 
 export type ChosenModelRole = "subagent" | "classifier";
@@ -31,10 +31,8 @@ export interface ChosenModelWarning {
 	fix: string;
 }
 
-const TIER_ORDER: readonly PromptTier[] = ["frontier", "workhorse", "cheap", "tiny"];
-
-/** Tiers between `chosen` and the session at or above which a chosen model is "far weaker". */
-export const WEAKER_TIER_GAP = 2;
+/** Tiers below the session at which a chosen model is "far weaker" (the text says "two or more"). */
+const WEAKER_TIER_GAP = 2;
 
 const COMMAND: Record<ChosenModelRole, string> = { subagent: "/subagent", classifier: "/auto-mode model" };
 const LABEL: Record<ChosenModelRole, string> = { subagent: "subagent default", classifier: "auto-mode classifier" };
@@ -57,12 +55,13 @@ export function chosenModelWarnings({
 	const warnings: ChosenModelWarning[] = [];
 	const command = COMMAND[role];
 	const label = LABEL[role];
+	const orAutomatic = `or ${command} clear for the automatic choice.`;
 	const isSession = !!sessionModel && sessionModel.provider === chosen.provider && sessionModel.id === chosen.id;
 
 	if (sessionModel && !isSession) {
 		const chosenTier = intrinsicTier(chosen);
 		const sessionTier = intrinsicTier(sessionModel);
-		if (TIER_ORDER.indexOf(chosenTier) - TIER_ORDER.indexOf(sessionTier) >= WEAKER_TIER_GAP) {
+		if (tiersBelow(chosenTier, sessionTier) >= WEAKER_TIER_GAP) {
 			const why =
 				role === "classifier"
 					? "A weak classifier is a weak permission boundary: it may let through calls a stronger one would stop."
@@ -70,21 +69,17 @@ export function chosenModelWarnings({
 			warnings.push({
 				kind: "weaker",
 				text: `The ${label} ${spec(chosen)} is a ${chosenTier}-tier model, two or more tiers below this session's ${spec(sessionModel)} (${sessionTier}). ${why}`,
-				fix: role === "classifier" ? "Pick a stronger one with /auto-mode model, or /auto-mode model clear for the automatic choice." : "Pick a stronger one with /subagent, or choose automatic there.",
+				fix: `Pick a stronger one with ${command}, ${orAutomatic}`,
 			});
 		}
-		if (
-			role === "classifier" &&
-			Number.isFinite(chosen.contextWindow) && chosen.contextWindow > 0 &&
-			Number.isFinite(sessionModel.contextWindow) && sessionModel.contextWindow > chosen.contextWindow
-		) {
+		if (role === "classifier" && hasCatalogContextWindow(chosen) && hasCatalogContextWindow(sessionModel) && sessionModel.contextWindow > chosen.contextWindow) {
 			warnings.push({
 				kind: "window",
 				text:
 					`The ${label} ${spec(chosen)} has a ${chosen.contextWindow.toLocaleString("en-US")}-token context window, smaller than this session's ` +
 					`${sessionModel.contextWindow.toLocaleString("en-US")}. The classifier reads the whole transcript: once the session outgrows it, ` +
 					"calls are not judged and each asks for your approval (a headless run stops) until you /compact.",
-				fix: "Pick a model with a larger window with /auto-mode model, or /auto-mode model clear for the automatic choice.",
+				fix: `Pick a model with a larger window with ${command}, ${orAutomatic}`,
 			});
 		}
 	}

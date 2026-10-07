@@ -20,7 +20,7 @@
  * working-docs/decisions/model-tiers.md.
  */
 
-import { readFileSync, statSync } from "node:fs";
+import { statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readJsonFile, writeJsonAtomic } from "./atomic-write.ts";
@@ -215,12 +215,9 @@ function isCatalogFile(value: unknown): value is CatalogFile<unknown> {
 }
 
 function readCatalogFile<T>(path: string): CatalogFile<T> | undefined {
-	try {
-		const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
-		return isCatalogFile(parsed) ? (parsed as CatalogFile<T>) : undefined;
-	} catch {
-		return undefined; // missing or corrupt: the other copy decides
-	}
+	// Missing or corrupt: the other copy decides.
+	const parsed = readJsonFile<unknown>(path);
+	return isCatalogFile(parsed) ? (parsed as CatalogFile<T>) : undefined;
 }
 
 const EMPTY: CatalogSources = {
@@ -275,7 +272,9 @@ export function emptyCatalogSources(): CatalogSources {
 
 /** Forget the disk memo so a lifecycle boundary sees another extension instance's refresh. */
 export function invalidateCatalogCache(): void {
-	memo = undefined;
+	// Re-stat on the next load; unchanged files keep the same sources object, so
+	// the index memo (keyed by it) still hits.
+	if (memo) memo.checkedAt = 0;
 }
 
 function stampOf(dir: string): string {

@@ -304,6 +304,15 @@ export function instructionRule(home: string): InstructionRule {
 }
 
 /**
+ * Whether `dir` holds a CLAUDE.md that puts Claude's instructions in play for
+ * `claude-md-or-agents-md`: CLAUDE.md, .claude/CLAUDE.md (never at the
+ * filesystem root) or CLAUDE.local.md.
+ */
+function dirHasClaudeMd(dir: string, present: (path: string) => boolean = isPresentFile): boolean {
+	return present(join(dir, "CLAUDE.md")) || (dirname(dir) !== dir && present(join(dir, ".claude", "CLAUDE.md"))) || present(join(dir, "CLAUDE.local.md"));
+}
+
+/**
  * The ordered instruction-file paths that exist, WITHOUT reading their
  * contents: global `~/.claude/CLAUDE.md` first, then per directory from the
  * farthest ancestor down to cwd `CLAUDE.md`, the AGENTS.md files at its
@@ -363,7 +372,7 @@ function discoverInstructionEntries(
 		if (found === undefined) presence.set(path, (found = isPresentFile(path)));
 		return found;
 	};
-	const projectHasClaude = () => dirs.some((d) => present(join(d, "CLAUDE.md")) || (dirname(d) !== d && present(join(d, ".claude", "CLAUDE.md"))) || present(join(d, "CLAUDE.local.md")));
+	const projectHasClaude = () => dirs.some((d) => dirHasClaudeMd(d, present));
 	const agentsFiles =
 		rule === "agents-md" || rule === "claude-md-and-agents-md" || (rule === "claude-md-or-agents-md" && !projectHasClaude());
 
@@ -480,7 +489,7 @@ export function nestedInstructionFiles(opts: {
 	const walked = dirs.filter(allowedLocation);
 	// claude-md-or-agents-md is decided per project, as at startup: AGENTS.md only where no CLAUDE.md is in play.
 	const projectHasClaude = () =>
-		[...ancestorDirs(opts.cwd), ...walked].some((dir) => isPresentFile(join(dir, "CLAUDE.md")) || (dirname(dir) !== dir && isPresentFile(join(dir, ".claude", "CLAUDE.md"))) || isPresentFile(join(dir, "CLAUDE.local.md")));
+		[...ancestorDirs(opts.cwd), ...walked].some((dir) => dirHasClaudeMd(dir));
 	const agents = opts.rule === "agents-md" || opts.rule === "claude-md-and-agents-md" || (opts.rule === "claude-md-or-agents-md" && !projectHasClaude());
 	// Approved external chains use the reference parser below; the legacy fallback stays confined.
 	const readInProject = (path: string) => (allowedLocation(path) && inProject(tryRealpath(path)) ? readFileIfPresent(path) : null);

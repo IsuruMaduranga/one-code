@@ -25,8 +25,16 @@
 
 import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
 import { type ChosenModelWarning, chosenModelWarnings } from "../lib/model-choice-warnings.ts";
-import { crossesProvider, findConfigured, isStaleContainmentStamp, modelIdentity, modelSpec as spec, pricedInput } from "../lib/model-policy.ts";
-import { atLeastTier, economicalContainedCandidates, intrinsicTier } from "../lib/model-tier.ts";
+import {
+	crossesProvider,
+	findConfigured,
+	hasCatalogContextWindow,
+	isExperimentalBuild,
+	isStaleContainmentStamp,
+	modelIdentity,
+	modelSpec as spec,
+} from "../lib/model-policy.ts";
+import { intrinsicTier, sameTierContainedCandidates } from "../lib/model-tier.ts";
 
 export interface Candidate {
 	model: Model<Api>;
@@ -47,10 +55,12 @@ export interface SelectInput {
 	 * warning. Undefined for a hand-edited setting.
 	 */
 	configuredSetForContainment?: string;
+	/** `suggestNewerModels` in ~/.onecode/settings.json; false drops the chosen model's newer-model warning. */
+	suggestNewer?: boolean;
 }
 
 /** Why automatic selection had to keep the session model. */
-export type ClassifierFallbackReason = "unknown-session-context-window" | "no-qualifying-model" | "session-is-cheapest-qualified";
+export type ClassifierFallbackReason = "unknown-session-context-window" | "no-qualifying-model";
 
 /** Structured selection fallback, retained with the chain for permission UI and logging. */
 export interface ClassifierFallback {
@@ -80,39 +90,26 @@ export interface ClassifierChain {
  * warnings ride the notices. Then the automatic chain
  * (`automaticClassifierCandidates`), which ends at the session model.
  */
-export function classifierCandidates({ available, sessionModel, configured, configuredSetForContainment }: SelectInput): ClassifierChain {
+export function classifierCandidates({ available, sessionModel, configured, configuredSetForContainment, suggestNewer = true }: SelectInput): ClassifierChain {
 	const automatic = automaticClassifierCandidates(available, sessionModel);
 	if (!configured) return automatic;
+	/** The setting does not apply: the automatic chain, led by a warning saying why. */
+	const automaticBecause = (text: string): ClassifierChain => ({ ...automatic, notices: [{ level: "warning", text }, ...automatic.notices] });
 	const resolved = findConfigured(available, configured);
 	if (!resolved) {
-		return {
-			...automatic,
-			notices: [
-				{
-					level: "warning",
-					text: `autoMode.classifierModel ${configured} is not an available model (unknown id, or no credentials for its provider); auto mode chooses automatically instead.`,
-				},
-				...automatic.notices,
-			],
-		};
+		return automaticBecause(
+			`autoMode.classifierModel ${configured} is not an available model (unknown id, or no credentials for its provider); auto mode chooses automatically instead.`,
+		);
 	}
 	const notices: ClassifierNotice[] = [];
 	if (sessionModel && crossesProvider(resolved, sessionModel)) {
 		// Naming a provider is choosing it, but a setting stamped for a provider
 		// this session has since left is stale (parity with the subagent setting).
 		if (isStaleContainmentStamp(configuredSetForContainment, sessionModel)) {
-			return {
-				...automatic,
-				notices: [
-					{
-						level: "warning",
-						text:
-							`autoMode.classifierModel ${spec(resolved)} was set for a different provider than this session (${spec(sessionModel)}); ` +
-							"a same-provider model screens calls instead. Re-set it with /auto-mode model on this session to use it here.",
-					},
-					...automatic.notices,
-				],
-			};
+			return automaticBecause(
+				`autoMode.classifierModel ${spec(resolved)} was set for a different provider than this session (${spec(sessionModel)}); ` +
+					"a same-provider model screens calls instead. Re-set it with /auto-mode model on this session to use it here.",
+			);
 		}
 		// Informational: the user chose this for this session.
 		notices.push({
@@ -122,7 +119,7 @@ export function classifierCandidates({ available, sessionModel, configured, conf
 				"it reads your messages and CLAUDE.md, so those go to that provider. It was set for this session, so it is used.",
 		});
 	}
-	for (const warning of chosenModelWarnings({ available, sessionModel, chosen: resolved, role: "classifier" })) {
+	for (const warning of chosenModelWarnings({ available, sessionModel, chosen: resolved, role: "classifier", suggestNewer })) {
 		notices.push({ level: "warning", text: `${warning.text} ${warning.fix}`, choiceWarning: warning.kind });
 	}
 	const candidates: Candidate[] = [{ model: resolved, source: "configured" }];
@@ -144,93 +141,42 @@ export function classifierCandidates({ available, sessionModel, configured, conf
  * availability fallback.
  */
 function automaticClassifierCandidates(available: Model<Api>[], sessionModel: Model<Api> | undefined): ClassifierChain {
-	const candidates: Candidate[] = [];
-	const notices: ClassifierNotice[] = [];
-	const push = (model: Model<Api> | undefined, source: Candidate["source"]) => {
-		if (!model) return;
-		if (candidates.some((entry) => entry.model.provider === model.provider && entry.model.id === model.id)) return;
-		candidates.push({ model, source });
-	};
-
 	// A classifier gets the whole user transcript. It must stay on the session's
 	// provider/route, sit in the session's tier, and be able to receive every
 	// token the session catalog says the main model can receive. Catalog
 	// omissions are unsafe to guess at: an unknown candidate window is ineligible.
-	if (!sessionModel) return { candidates, notices };
+	if (!sessionModel) return { candidates: [], notices: [] };
+	const sessionOnly = (fallback: ClassifierFallback): ClassifierChain => ({
+		candidates: [{ model: sessionModel, source: "session" }],
+		notices: [{ level: "info", text: fallback.text, fallbackReason: fallback.reason }],
+		fallback,
+	});
 	if (!hasCatalogContextWindow(sessionModel)) {
-		const fallback: ClassifierFallback = {
+		return sessionOnly({
 			reason: "unknown-session-context-window",
 			text: `Auto mode is screening calls with ${spec(sessionModel)}, this session's model, because its catalog context window is unknown and no alternate classifier can be verified to contain it.`,
-		};
-		push(sessionModel, "session");
-		notices.push({ level: "info", text: fallback.text, fallbackReason: fallback.reason });
-		return { candidates, notices, fallback };
+		});
 	}
-
-	const sessionTier = intrinsicTier(sessionModel);
-	const sessionPrice = pricedInput(sessionModel);
-	const isSession = (model: Model<Api>) => model.provider === sessionModel.provider && model.id === sessionModel.id;
-	// Never weaker than the session: no point screening a model with a weaker one.
-	// Strictly cheaper, else the session (the user, 2026-10-05: Qwen 3.8 27B drew
-	// a 2.4T model at five times its input price; 2026-10-07: a same-price older
-	// model saves nothing); an unpriced session cannot prove an alternate
-	// cheaper. Never an experimental build. A catalog window that contains the
-	// session's.
-	const screenable = (model: Model<Api>) =>
-		atLeastTier(intrinsicTier(model), sessionTier) &&
-		sessionPrice !== undefined &&
-		(isSession(model) || pricedInput(model)! < sessionPrice) &&
-		!EXPERIMENTAL_BUILD.test(model.id) &&
-		hasCatalogContextWindow(model) &&
-		model.contextWindow >= sessionModel.contextWindow;
-	// `economicalContainedCandidates` supplies the containment, variant, catalog
-	// (current, tool-calling, text), price-known and never-tiny gates. Its own
-	// cheap/workhorse/frontier ordering is replaced below: this policy selects the
-	// numerically cheapest model that clears those gates.
-	const eligible = economicalContainedCandidates(available, sessionModel).filter(screenable);
-	// A catalog normally includes the active model, but the active row is also a
-	// valid choice when it is absent from a stale catalog. A tiny or unpriced
-	// session remains only the terminal fallback.
-	if (sessionTier !== "tiny" && sessionPrice !== undefined && !eligible.some(isSession)) eligible.push(sessionModel);
-	eligible.sort((a, b) => pricedInput(a)! - pricedInput(b)!);
-	for (const model of eligible) push(model, isSession(model) ? "session" : "economical");
-	const fallbackText = `Auto mode is screening calls with ${spec(sessionModel)}, this session's model, because no cheaper same-provider/route model in its ${sessionTier} tier or above contains its ${sessionModel.contextWindow}-token catalog context window.`;
-	if (candidates.length > 0) {
-		// The startup notice needs a reason even when the session was eligible in
-		// its own right: otherwise a renderer cannot distinguish "no alternate can
-		// contain the transcript" from "the session is simply the cheapest choice".
-		if (candidates[0].source === "session") {
-			const fallback: ClassifierFallback = {
-				reason: candidates.length > 1 ? "session-is-cheapest-qualified" : "no-qualifying-model",
-				text: fallbackText,
-			};
-			notices.push({ level: "info", text: fallback.text, fallbackReason: fallback.reason });
-			return { candidates, notices, fallback };
-		}
-		// Always retain the session as the final availability fallback. It is not an
-		// automatic selection candidate, so its own catalog-window metadata need not
-		// be rediscovered here.
-		push(sessionModel, "session");
-		return { candidates, notices };
+	// Never weaker than the session, strictly cheaper (the user, 2026-10-05:
+	// Qwen 3.8 27B drew a 2.4T model at five times its input price; 2026-10-07:
+	// a same-price older model saves nothing), and an unpriced session cannot
+	// prove an alternate cheaper: `sameTierContainedCandidates`, the subagent
+	// default's rule. The classifier adds a window that contains the session's
+	// and never an experimental build.
+	const cheaper = sameTierContainedCandidates(available, sessionModel).filter(
+		(model) => !isExperimentalBuild(model.id) && hasCatalogContextWindow(model) && model.contextWindow >= sessionModel.contextWindow,
+	);
+	if (cheaper.length === 0) {
+		return sessionOnly({
+			reason: "no-qualifying-model",
+			text: `Auto mode is screening calls with ${spec(sessionModel)}, this session's model, because no cheaper same-provider/route model in its ${intrinsicTier(sessionModel)} tier or above contains its ${sessionModel.contextWindow}-token catalog context window.`,
+		});
 	}
-
-	const fallback: ClassifierFallback = { reason: "no-qualifying-model", text: fallbackText };
-	push(sessionModel, "session");
-	notices.push({ level: "info", text: fallback.text, fallbackReason: fallback.reason });
-	return { candidates, notices, fallback };
-}
-
-/**
- * An experimental build (`deepseek-v4-flash-vision-exp`, `tev1-4b-experimental`):
- * a research variant, not the release a permission gate should run on.
- * `preview` is deliberately not matched: Google ships mainline Gemini models
- * under it (`gemini-3-flash-preview`).
- */
-const EXPERIMENTAL_BUILD = /-exp(?:$|[-:])|experimental/i;
-
-/** A positive finite catalog window is the only value safe for automatic routing. */
-function hasCatalogContextWindow(model: Model<Api>): model is Model<Api> & { contextWindow: number } {
-	return Number.isFinite(model.contextWindow) && model.contextWindow > 0;
+	// The session stays last as the availability fallback.
+	return {
+		candidates: [...cheaper.map((model): Candidate => ({ model, source: "economical" })), { model: sessionModel, source: "session" }],
+		notices: [],
+	};
 }
 
 /**

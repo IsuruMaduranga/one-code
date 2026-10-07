@@ -20,6 +20,7 @@
  * alternatives: `working-docs/decisions/model-tiers.md`.
  */
 
+import { statSync } from "node:fs";
 import { homedir } from "node:os";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { readJsonFile } from "./atomic-write.ts";
@@ -42,6 +43,16 @@ export type PromptTier = "frontier" | "workhorse" | "cheap" | "tiny";
 /** More-scaffolded = higher rank. */
 const TIER_RANK: Record<PromptTier, number> = { frontier: 0, workhorse: 1, cheap: 2, tiny: 3 };
 
+/** Whether `value` names one of the four tiers. */
+export function isPromptTier(value: unknown): value is PromptTier {
+	return typeof value === "string" && value in TIER_RANK;
+}
+
+/** How many tiers `tier` sits below `reference` (negative when above). */
+export function tiersBelow(tier: PromptTier, reference: PromptTier): number {
+	return TIER_RANK[tier] - TIER_RANK[reference];
+}
+
 /**
  * Cost-preference order for automatic secondary-model selection: cheapest
  * *capable* tier first, stepping UP only when a tier is empty. `tiny` is absent
@@ -57,7 +68,7 @@ const COST_PREFERENCE: Record<Exclude<PromptTier, "tiny">, number> = { cheap: 0,
  */
 export function tierOverride(env: NodeJS.ProcessEnv = process.env): PromptTier | undefined {
 	const raw = env.CC_PROMPT_TIER?.trim().toLowerCase();
-	return raw === "frontier" || raw === "workhorse" || raw === "cheap" || raw === "tiny" ? raw : undefined;
+	return isPromptTier(raw) ? raw : undefined;
 }
 
 /**
@@ -179,7 +190,7 @@ function configuredModelTier(model: { provider: string; id: string }): PromptTie
 	return tiers[`${model.provider}/${model.id}`] ?? tiers[model.id];
 }
 
-let overrideMemo: { path: string; at: number; tiers: Record<string, PromptTier> } | undefined;
+let overrideMemo: { path: string; at: number; mtimeMs: number; tiers: Record<string, PromptTier> } | undefined;
 let overridesPinned: Record<string, PromptTier> | undefined;
 
 /** Test seam: pin the `modelTiers` map (`undefined` reads the settings file again). */
@@ -188,20 +199,34 @@ export function setModelTierOverridesForTest(tiers: Record<string, PromptTier> |
 	overrideMemo = undefined;
 }
 
-/** The validated `modelTiers` map, re-read at most once a second. */
+/**
+ * The validated `modelTiers` map. Stat-checked at most once a second and
+ * re-parsed only when the settings file's mtime moved: the permission gate asks
+ * on every tool call.
+ */
 export function modelTierOverrides(): Record<string, PromptTier> {
 	if (overridesPinned) return overridesPinned;
 	const path = oneCodeSettingsPath(homedir());
 	const now = Date.now();
 	if (overrideMemo && overrideMemo.path === path && now - overrideMemo.at < 1000) return overrideMemo.tiers;
-	const raw = readJsonFile<{ modelTiers?: unknown }>(path)?.modelTiers;
+	let mtimeMs = -1;
+	try {
+		mtimeMs = statSync(path).mtimeMs;
+	} catch {
+		// No settings file: no overrides.
+	}
+	if (overrideMemo && overrideMemo.path === path && overrideMemo.mtimeMs === mtimeMs) {
+		overrideMemo.at = now;
+		return overrideMemo.tiers;
+	}
+	const raw = mtimeMs < 0 ? undefined : readJsonFile<{ modelTiers?: unknown }>(path)?.modelTiers;
 	const tiers: Record<string, PromptTier> = {};
 	if (raw && typeof raw === "object" && !Array.isArray(raw)) {
 		for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-			if (value === "frontier" || value === "workhorse" || value === "cheap" || value === "tiny") tiers[key] = value;
+			if (isPromptTier(value)) tiers[key] = value;
 		}
 	}
-	overrideMemo = { path, at: now, tiers };
+	overrideMemo = { path, at: now, mtimeMs, tiers };
 	return tiers;
 }
 
@@ -337,11 +362,11 @@ export function usesClaudeCodeFastPaths(model: Model<Api> | undefined): boolean 
 /**
  * The budget-gated form the automatic secondary-model pickers all share: same as
  * `economicalContainedCandidates`, minus the session model itself and anything
- * dearer than it. `strict` requires *strictly* cheaper (subagents never upgrade a
- * cheap session); non-strict allows equal price (the classifier and reader
- * tolerate a same-price screener). With the session price unknown there is no
- * demonstrable saving, so `strict` yields nothing while non-strict keeps the
- * tier-ranked list. `contained` is forwarded to skip the containment recompute.
+ * dearer than it. `strict` requires *strictly* cheaper (the subagent default and
+ * the classifier: a same-price model saves nothing); non-strict allows equal
+ * price (the reader). With the session price unknown there is no demonstrable
+ * saving, so `strict` yields nothing while non-strict keeps the tier-ranked
+ * list. `contained` is forwarded to skip the containment recompute.
  */
 export function cheaperContainedCandidates(
 	available: Model<Api>[],
@@ -359,9 +384,9 @@ export function cheaperContainedCandidates(
 }
 
 /**
- * The subagent default: the cheaper contained candidates
- * (`cheaperContainedCandidates`) in the session's own tier or above, cheapest
- * first. A workhorse session delegates to the cheapest workhorse-or-better
+ * The subagent default and the classifier's automatic pick: the strictly
+ * cheaper contained candidates (`cheaperContainedCandidates`) in the session's
+ * own tier or above, cheapest first. A workhorse session delegates to the cheapest workhorse-or-better
  * model, a frontier session to the cheapest frontier one; a tiny session, whose
  * tier automatic selection never picks, to the cheapest cheap-or-better one.
  * The head is "the cheapest model this provider offers that is not weaker than
@@ -370,10 +395,10 @@ export function cheaperContainedCandidates(
 export function sameTierContainedCandidates(
 	available: Model<Api>[],
 	sessionModel: Model<Api>,
-	opts: { strict?: boolean; contained?: Model<Api>[]; requireImageInput?: boolean } = {},
+	opts: { contained?: Model<Api>[]; requireImageInput?: boolean } = {},
 ): Model<Api>[] {
 	const floor = intrinsicTier(sessionModel);
-	return cheaperContainedCandidates(available, sessionModel, opts)
+	return cheaperContainedCandidates(available, sessionModel, { ...opts, strict: true })
 		.filter((model) => atLeastTier(intrinsicTier(model), floor))
 		.sort((a, b) => pricedInput(a)! - pricedInput(b)!);
 }

@@ -60,15 +60,23 @@ export async function openRouterProviderName(
 	}
 }
 
+/** Per model object: the stream detector asks on every chunk of every provider. */
+const openRouterByModel = new WeakMap<object, boolean>();
+
 export function isOpenRouter(model: { provider: string; baseUrl?: string } | undefined): boolean {
 	if (!model) return false;
 	if (model.provider === "openrouter") return true;
+	const known = openRouterByModel.get(model);
+	if (known !== undefined) return known;
+	let result = false;
 	try {
 		const hostname = new URL(model.baseUrl ?? "").hostname;
-		return hostname === "openrouter.ai" || hostname.endsWith(".openrouter.ai");
+		result = hostname === "openrouter.ai" || hostname.endsWith(".openrouter.ai");
 	} catch {
-		return false;
+		// No or malformed base URL: not OpenRouter.
 	}
+	openRouterByModel.set(model, result);
+	return result;
 }
 
 /** How the upstream provider failed: a blocked call, a call cut off mid-stream, or a stream gone silent. */

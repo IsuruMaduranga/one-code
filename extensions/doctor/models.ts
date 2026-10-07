@@ -15,12 +15,11 @@ import { modeCycleKey } from "../lib/keys.ts";
 import { loadAutoModeConfig } from "../auto-mode/config.ts";
 import { classifierCandidates, describeCandidate, type ClassifierNotice } from "../auto-mode/model-select.ts";
 import { chosenModelWarnings, type ChosenModelWarning } from "../lib/model-choice-warnings.ts";
-import { catalogRefreshEnabled, loadCatalogSources } from "../lib/model-catalog-data.ts";
+import { loadCatalogSources, readCatalogRefreshEnabled } from "../lib/model-catalog-data.ts";
 import { autoSelectSkipReason, catalogModelFor } from "../lib/model-catalog.ts";
-import { modelSpec, pricedInput } from "../lib/model-policy.ts";
+import { DAY_MS, modelSpec, pricedInput } from "../lib/model-policy.ts";
 import { newerModelSuggestion, type NewerModelSuggestion } from "../lib/newer-model.ts";
 import { oneCodeSettingsPath, readSuggestNewerModels } from "../lib/one-code-settings.ts";
-import { readJsonFile } from "../lib/atomic-write.ts";
 import { oneCodeStateDir } from "../lib/paths.ts";
 import {
 	classifyModelTier,
@@ -71,12 +70,14 @@ export function collectModelFacts(available: Model<Api>[], session: SessionView,
 	const configuredAll = loadSubagentDefault(home, env);
 	const configured = applicableSubagentDefault(configuredAll, sessionModel);
 	const subagent = resolveSubagentModel({ configuredDefault: configured, sessionModel, available });
+	const suggestNewer = readSuggestNewerModels(home, env);
 	const autoConfig = loadAutoModeConfig(home);
 	const chain = classifierCandidates({
 		available,
 		sessionModel,
 		configured: autoConfig.classifierModel,
 		configuredSetForContainment: autoConfig.classifierModelSetFor,
+		suggestNewer,
 	});
 	const first = chain.candidates[0];
 	const reader = pickEconomicalContainedModel(available, sessionModel);
@@ -86,12 +87,12 @@ export function collectModelFacts(available: Model<Api>[], session: SessionView,
 		catalog: {
 			fetchedAt: sources.modelsDev.fetchedAt,
 			refreshed: sources.refreshed === true,
-			refreshEnabled: catalogRefreshEnabled(readJsonFile(oneCodeSettingsPath(home, env)), env),
+			refreshEnabled: readCatalogRefreshEnabled(oneCodeSettingsPath(home, env), env),
 		},
 		tierReason: sessionModel ? classifyModelTier(sessionModel, {}).reason : undefined,
 		inCatalog: entry !== undefined,
 		skipReason: entry ? autoSelectSkipReason(entry) : undefined,
-		newerModel: readSuggestNewerModels(home, env) ? newerModelSuggestion(available, sessionModel) : undefined,
+		newerModel: suggestNewer ? newerModelSuggestion(available, sessionModel) : undefined,
 		session: sessionModel,
 		sessionTier: sessionModel ? intrinsicTier(sessionModel) : undefined,
 		promptTier: session.promptTier ?? resolveModelTier(sessionModel, env),
@@ -101,12 +102,12 @@ export function collectModelFacts(available: Model<Api>[], session: SessionView,
 		subagentConfiguredInapplicable: configuredAll !== undefined && configured === undefined,
 		subagentWarnings:
 			subagent.source === "default" && subagent.model
-				? chosenModelWarnings({ available, sessionModel, chosen: subagent.model, role: "subagent", suggestNewer: readSuggestNewerModels(home, env) })
+				? chosenModelWarnings({ available, sessionModel, chosen: subagent.model, role: "subagent", suggestNewer })
 				: [],
 		classifier: {
 			model: first?.model,
 			description: first ? describeCandidate(first) : undefined,
-			notices: readSuggestNewerModels(home, env) ? chain.notices : chain.notices.filter((notice) => notice.choiceWarning !== "newer"),
+			notices: chain.notices,
 			configured: autoConfig.classifierModel,
 		},
 		reader,
@@ -225,7 +226,7 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 
 	// The catalogs every tier below frontier comes from, and how fresh they are.
 	const cat = facts.catalog;
-	const ageDays = Math.floor((Date.now() - Date.parse(cat.fetchedAt)) / 86_400_000);
+	const ageDays = Math.floor((Date.now() - Date.parse(cat.fetchedAt)) / DAY_MS);
 	const age = ageDays <= 0 ? "today" : ageDays === 1 ? "1 day ago" : `${ageDays} days ago`;
 	lines.push({
 		text: `Model catalogs: models.dev, OpenRouter and Hugging Face, fetched ${age} (${cat.refreshed ? "refreshed by One Code" : "bundled with this release"})${cat.refreshEnabled ? "; refreshed daily from interactive sessions" : "; daily refresh off (refreshModelCatalog: false, or PI_OFFLINE)"}`,

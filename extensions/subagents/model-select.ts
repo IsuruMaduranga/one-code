@@ -404,7 +404,7 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 		// `strict` requires a genuinely cheaper model and yields nothing when the
 		// session price is unknown, so a cheap-tier pick never silently upgrades an
 		// unpriced session. Reuse the `contained` set computed above for the hot path.
-		const cheaper = sameTierContainedCandidates(available, sessionModel, { strict: true, contained, requireImageInput })[0];
+		const cheaper = sameTierContainedCandidates(available, sessionModel, { contained, requireImageInput })[0];
 		if (cheaper) return { model: cheaper, source: "automatic", notices };
 	}
 

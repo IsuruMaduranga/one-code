@@ -526,13 +526,12 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			sessionModel: sessionModel ?? badgeCtx.model,
 			configured: autoConfig.classifierModel,
 			configuredSetForContainment: autoConfig.classifierModelSetFor,
+			suggestNewer: readSuggestNewerModels(os.homedir()),
 		});
 		// Keyed by text, the same keys classify() uses, so each shows once.
-		const suggestNewer = readSuggestNewerModels(os.homedir());
 		const info: string[] = opts.lead ? [opts.lead] : [];
 		for (const notice of choice.notices) {
 			if (notice.fallbackReason || classifierState.notified.has(notice.text)) continue;
-			if (notice.choiceWarning === "newer" && !suggestNewer) continue;
 			classifierState.notified.add(notice.text);
 			if (notice.level === "warning") badgeCtx.ui.notify(notice.text, "warning");
 			else info.push(notice.text);
