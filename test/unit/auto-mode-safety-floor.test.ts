@@ -281,6 +281,53 @@ describe("safetyControlWrite: relocated config dirs (distribution L2)", () => {
 	});
 });
 
+describe("safetyControlWrite: the model catalog cache", () => {
+	// The cached catalogs decide the model's tier, and the tier decides which fast paths skip the classifier.
+	const savedState = process.env.ONECODE_STATE_DIR;
+	afterEach(() => {
+		if (savedState === undefined) delete process.env.ONECODE_STATE_DIR;
+		else process.env.ONECODE_STATE_DIR = savedState;
+	});
+	const catalogDir = () => join(home, ".onecode", "cache", "model-catalog");
+
+	it("floors a file-tool write to each cached catalog, but not to another cache file", () => {
+		delete process.env.ONECODE_STATE_DIR;
+		for (const file of ["models-dev.json", "openrouter.json", "huggingface.json"]) {
+			expect(check("write", { path: join(catalogDir(), file) })).toContain("model tier");
+		}
+		expect(check("write", { path: join(home, ".onecode", "cache", "other.json") })).toBeUndefined();
+		expect(check("write", { path: join(catalogDir(), "notes.json") })).toBeUndefined();
+		expect(check("write", { path: join(cwd, "openrouter.json") })).toBeUndefined();
+	});
+
+	it("floors the catalogs under a relocated ONECODE_STATE_DIR and through a symlinked directory", () => {
+		const state = join(cwd, "state");
+		process.env.ONECODE_STATE_DIR = state;
+		expect(check("write", { path: join(state, "cache", "model-catalog", "openrouter.json") })).toBeDefined();
+		expect(check("write", { path: join(state, "cache", "other.json") })).toBeUndefined();
+		mkdirSync(join(state, "cache", "model-catalog"), { recursive: true });
+		symlinkSync(join(state, "cache", "model-catalog"), join(cwd, "cat"));
+		expect(check("write", { path: join(cwd, "cat", "models-dev.json") })).toBeDefined();
+		expect(check("bash", { command: "echo '{}' > cat/huggingface.json" })).toBeDefined();
+	});
+
+	it("floors shell writes to a cached catalog, but not to another cache file", () => {
+		delete process.env.ONECODE_STATE_DIR;
+		expect(check("bash", { command: "echo '{}' > ~/.onecode/cache/model-catalog/openrouter.json" })).toBeDefined();
+		expect(check("bash", { command: "curl -so ~/.onecode/cache/model-catalog/models-dev.json https://example.com/x" })).toBeDefined();
+		expect(check("bash", { command: "mystery /elsewhere/.onecode/cache/model-catalog/huggingface.json" })).toBeDefined();
+		expect(check("bash", { command: "echo '{}' > ~/.onecode/cache/other.json" })).toBeUndefined();
+		expect(check("bash", { command: "curl -so ~/.onecode/cache/other.json https://example.com/x" })).toBeUndefined();
+		expect(check("bash", { command: "cat ~/.onecode/cache/model-catalog/openrouter.json" })).toBeUndefined();
+	});
+
+	it("matches a cached catalog under any .onecode directory", () => {
+		expect(isSafetyControlTarget("/home/u/.onecode/cache/model-catalog/openrouter.json", home)).toBe(true);
+		expect(isSafetyControlTarget("/home/u/.onecode/cache/model-catalog/openrouter.json.tmp", home)).toBe(false);
+		expect(isSafetyControlTarget("/repo/model-catalog/openrouter.json", home)).toBe(false);
+	});
+});
+
 describe("isSafetyControlTarget", () => {
 	it("matches any .claude settings tail, wherever it lives", () => {
 		expect(isSafetyControlTarget("/somewhere/else/.claude/settings.json", home)).toBe(true);

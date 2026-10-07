@@ -209,6 +209,22 @@ export function catalogCacheDir(stateDir: string): string {
 	return join(stateDir, "cache", "model-catalog");
 }
 
+/**
+ * The refreshed catalog files. They decide a model's tier, and the tier
+ * decides which auto-mode fast paths skip the classifier, so the safety floor
+ * guards them like the settings files (auto-mode/safety-floor.ts).
+ */
+export function catalogCacheFiles(stateDir: string): string[] {
+	return Object.values(FILES).map((file) => join(catalogCacheDir(stateDir), file));
+}
+
+/**
+ * A refreshed catalog file under any literal `.onecode` directory, as a
+ * forward-slashed path tail: the floor's counterpart of `catalogCacheFiles`,
+ * for one in another home or spelled through a symlink the resolver missed.
+ */
+export const CATALOG_CACHE_TAIL = new RegExp(`/\\.onecode/cache/model-catalog/(${Object.values(FILES).map((file) => file.replace(/[.]/g, "\\.")).join("|")})$`);
+
 function isCatalogFile(value: unknown): value is CatalogFile<unknown> {
 	const file = record(value);
 	return !!file && typeof file.fetchedAt === "string" && !Number.isNaN(Date.parse(file.fetchedAt)) && record(file.payload) !== undefined;

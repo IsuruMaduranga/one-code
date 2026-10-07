@@ -19,7 +19,9 @@
  *
  * The consent stores (`lib/consent-stores.ts`) are gate controls too: an
  * entry in one approves a repository's hooks, MCP servers, allow rules or
- * language servers for every later session.
+ * language servers for every later session. So are the cached model catalogs
+ * (`lib/model-catalog-data.ts catalogCacheFiles`): they decide the model's
+ * tier, and the tier decides which fast paths skip the classifier.
  *
  * The target list is deliberately exact files, not directories: ~/.claude also
  * holds memory and skills that the agent writes routinely, and a floor that
@@ -32,7 +34,8 @@ import type { Token } from "./shell-parse.ts";
 import { claudeUserSettingsPath, managedSettingsPaths } from "../lib/claude-settings.ts";
 import { CONSENT_STORE_TAIL, consentStorePaths } from "../lib/consent-stores.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
-import { claudeJsonPath, comparablePath } from "../lib/paths.ts";
+import { CATALOG_CACHE_TAIL, catalogCacheFiles } from "../lib/model-catalog-data.ts";
+import { claudeJsonPath, comparablePath, oneCodeStateDir } from "../lib/paths.ts";
 import { isWritingTool, resolveForContainment, toAbsolute, toAbsoluteBash } from "./paths.ts";
 
 /** The same comparison form resolveForContainment's output is in (lib/paths.ts). */
@@ -77,6 +80,9 @@ function safetyControlFiles(home: string, oneCodeProjectSettings?: string): stri
 		// The consent stores: an entry approves a repository's hooks, MCP
 		// servers, allow rules or language servers for every later session.
 		...consentStorePaths(home),
+		// The cached model catalogs decide the model's tier, and the tier decides
+		// which fast paths skip the classifier.
+		...catalogCacheFiles(oneCodeStateDir(process.env, home)),
 	];
 }
 
@@ -105,7 +111,7 @@ function controlFileForms(home: string, oneCodeProjectSettings?: string): Set<st
 
 function matchesControlFile(resolved: string, forms: ReadonlySet<string>): boolean {
 	const target = fold(resolved);
-	return SETTINGS_TAIL.test(target) || ONECODE_SETTINGS_TAIL.test(target) || CONSENT_STORE_TAIL.test(target) || forms.has(target);
+	return SETTINGS_TAIL.test(target) || ONECODE_SETTINGS_TAIL.test(target) || CONSENT_STORE_TAIL.test(target) || CATALOG_CACHE_TAIL.test(target) || forms.has(target);
 }
 
 const GLOB_CHARS = /[*?[]/;
@@ -173,7 +179,12 @@ export interface FloorInput {
 }
 
 const REASON = (token: string) =>
-	`it writes ${token}, which holds the permission rules and auto-mode configuration that contain this agent`;
+	CATALOG_FILE_NAME.test(token)
+		? `it writes ${token}, a model catalog that decides the model tier the auto-mode checks that contain this agent depend on`
+		: `it writes ${token}, which holds the permission rules and auto-mode configuration that contain this agent`;
+
+/** A cached catalog's file name, to word the reason (a false match only rewords it). */
+const CATALOG_FILE_NAME = /(^|[/\\])(models-dev|openrouter|huggingface)\.json$/i;
 
 /**
  * Reason text when this call writes a safety-control file, undefined otherwise.
@@ -274,7 +285,7 @@ const VAR_REDIRECT = /\{[A-Za-z_][A-Za-z0-9_]*\}[<>]/;
  * lowercased, with `\\` turned to `/` and `/./`, `//` collapsed.
  */
 const CONTROL_FILE_TEXT =
-	/(^|[\s'"=/<>|;&(:])(\.claude\/settings(\.local)?\.json|\.onecode\/(projects\/[^\s'"/]+\/)?settings\.json|managed-settings\.json|\.claude\.json)(?=$|[\s'";|&)<>])/;
+	/(^|[\s'"=/<>|;&(:])(\.claude\/settings(\.local)?\.json|\.onecode\/(projects\/[^\s'"/]+\/)?settings\.json|\.onecode\/cache\/model-catalog\/(models-dev|openrouter|huggingface)\.json|managed-settings\.json|\.claude\.json)(?=$|[\s'";|&)<>])/;
 
 /**
  * `$_` (or `${_}`, `${#_}`, …) anywhere in the line: bash's last argument of
