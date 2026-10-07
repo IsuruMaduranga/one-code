@@ -263,6 +263,13 @@ export function powershellPathTokens(command: string, home: string): string[] {
 }
 
 /**
+ * A `{var}>f` redirect, which assigns the descriptor's number to var. The
+ * grammar reads `{var}` as a word, or not at all after a compound command, so
+ * it is matched in the line's text.
+ */
+const VAR_REDIRECT = /\{[A-Za-z_][A-Za-z0-9_]*\}[<>]/;
+
+/**
  * The gate-control file spellings the textual floor matches in a command line,
  * lowercased, with `\\` turned to `/` and `/./`, `//` collapsed.
  */
@@ -322,14 +329,15 @@ export function shellNamesControlFile(
 	/** Resolved once per top-level call, not once per word. */
 	forms: ReadonlySet<string> = controlFileForms(home, oneCodeProjectSettings),
 ): string | undefined {
-	const { segments, parseFailed, unknownQuoting, unattributedExpansion, pipelines } = parseCommand(command);
+	const { segments, parseFailed, unknownQuoting, unattributedExpansion, definesFunction, pipelines } = parseCommand(command);
 	const dirs = scopedTracker(cwd);
 	const ignoredRanges: { start: number; end: number }[] = [];
-	// Functions/eval can replace a read-only command; loop headers and case
-	// subjects can change shell state outside the attributed words. Never use
-	// a partial parse, such a construct, or a nested script to subtract evidence.
-	const canProveWords = depth === 0 && !parseFailed && !unknownQuoting && !unattributedExpansion && !segments.some((segment) =>
-		segment.enclosing.some((construct) => LOOPS.has(construct) || construct === "function_definition" || construct === "case_statement") ||
+	// Functions/eval can replace a read-only command; loop headers, case
+	// subjects and `{var}>` redirects can change shell state outside the
+	// attributed words. Never use a partial parse, such a construct, or a
+	// nested script to subtract evidence.
+	const canProveWords = depth === 0 && !parseFailed && !unknownQuoting && !unattributedExpansion && !definesFunction && !VAR_REDIRECT.test(command) && !segments.some((segment) =>
+		segment.enclosing.some((construct) => LOOPS.has(construct) || construct === "case_statement") ||
 		["eval", "source", ".", "alias", "enable", "trap"].includes(resolvePayload(segment.tokens).command),
 	) && !LAST_ARGUMENT.test(command);
 
@@ -374,7 +382,7 @@ export function shellNamesControlFile(
 		// for that state. Even inert assignments/expansions forfeit it.
 		shellChanged ||= !!segment.unknownTarget || !!segment.expandsIntoInput ||
 			segment.tokens.some((word) => word.dynamic || /^[A-Za-z_][A-Za-z0-9_]*(\[[^\]]*\])?\+?=/.test(word.value)) ||
-			["read", "readarray", "mapfile", "getopts", "printf", "export", "declare", "typeset", "local", "readonly", "unset", "set", "shopt", "hash", "let"].includes(payload.command);
+			["read", "readarray", "mapfile", "getopts", "printf", "export", "declare", "typeset", "local", "readonly", "unset", "set", "shopt", "hash", "let", "wait", "coproc"].includes(payload.command);
 		const proven = canProveWords && !shellChanged && !unknownDir &&
 			segment.wordRanges?.length === segment.tokens.length && hasReadOnlyShellWords(segment, dir, home);
 		if (payload.command === "cd" && !unknownDir) {

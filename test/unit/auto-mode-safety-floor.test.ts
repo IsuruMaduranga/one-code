@@ -238,6 +238,13 @@ describe("safetyControlWrite: read-only words in escalated compound commands", (
 		`find . -regex '.*\\.orig' -o -delete`,
 		`find . \\( -regex '.*\\.orig' -or -name x \\) -delete`,
 		`find . -regex '.*\\.orig' , -delete`,
+		`: {PATH}>/dev/null; cat .claude/settings.json && cp x y`,
+		`{ :; } {PATH}>/dev/null; cat .claude/settings.json && cp x y`,
+		`exec {PATH}>&2; cat .claude/settings.json && cp x y`,
+		`coproc { :; }; cat .claude/settings.json && cp x y`,
+		`coproc PATH { :; }; cat .claude/settings.json && cp x y`,
+		`cat .claude/settings.json; wait -p PATH; cat .claude/settings.json && cp x y`,
+		`cat() ((1)); cat .claude/settings.json; cp x y`,
 	])("keeps writes and unproven commands on the floor: %s", (command) => {
 		expect(check("bash", { command })).toBeDefined();
 	});
