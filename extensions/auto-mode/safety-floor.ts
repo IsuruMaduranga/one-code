@@ -26,7 +26,9 @@
  * fires on routine work teaches the user to approve without reading.
  */
 
+import { FIND_PATTERN_TESTS, findNegatedPatterns } from "./read-only-options.ts";
 import { analyzeShellCommand, globComponentRegex, hasReadOnlyShellWords, isUnknownTilde, LOOPS, movesDirectory, parseCommand, resolvePayload, scopedTracker } from "./shell-analysis.ts";
+import type { Token } from "./shell-parse.ts";
 import { claudeUserSettingsPath, managedSettingsPaths } from "../lib/claude-settings.ts";
 import { CONSENT_STORE_TAIL, consentStorePaths } from "../lib/consent-stores.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
@@ -133,33 +135,26 @@ function namesControlFile(resolved: string, forms: ReadonlySet<string>, dotRule:
 	return GLOB_CHARS.test(dir) || spelled.some((name) => matchesControlFile(`${dir}/${name}`, forms));
 }
 
-/** find's tests whose operand is a name or path pattern. */
-const FIND_PATTERN_TESTS = new Set(["-name", "-iname", "-path", "-ipath", "-wholename", "-iwholename", "-regex", "-iregex", "-lname", "-ilname"]);
-
 /**
- * Indexes of find's pattern operands under a negation (`-not -path './.git/*'`,
- * `! -name x`, `-not ( -path a -o -path b )`): patterns that exclude files
- * rather than select them.
+ * A find's negated pattern operands, by token index: those that only exclude
+ * files (`findNegatedPatterns`), which name nothing, and the rest, which may
+ * select every file but the ones they name. A find that is not read-only acts
+ * on every file a negated pattern leaves in (`! -name keep -delete`), and its
+ * expression is not read, so there every pattern after any `!`/`-not` selects.
  */
-function negatedFindPatterns(words: readonly string[]): Set<number> {
-	const negated = new Set<number>();
-	/** Group depths opened right after a negation. */
-	const negatedGroups: number[] = [];
-	let depth = 0;
-	for (let index = 0; index < words.length; index++) {
-		const word = words[index];
-		const notBefore = index > 0 && (words[index - 1] === "!" || words[index - 1] === "-not");
-		if (word === "(") {
-			depth++;
-			if (notBefore) negatedGroups.push(depth);
-		} else if (word === ")") {
-			if (negatedGroups[negatedGroups.length - 1] === depth) negatedGroups.pop();
-			depth--;
-		} else if (FIND_PATTERN_TESTS.has(word) && index + 1 < words.length && (notBefore || negatedGroups.length > 0)) {
-			negated.add(index + 1);
-		}
+function negatedFindPatterns(tokens: readonly Token[], args: readonly Token[]): { excluding: Set<number>; selecting: Set<number> } {
+	const offset = tokens.length - args.length;
+	const shift = (indexes: Set<number>) => new Set([...indexes].map((index) => index + offset));
+	const readOnly = findNegatedPatterns(args);
+	if (readOnly) return { excluding: shift(readOnly.excluding), selecting: shift(readOnly.selecting) };
+	const selecting = new Set<number>();
+	let negated = false;
+	for (let index = 0; index + 1 < tokens.length; index++) {
+		const word = tokens[index].value;
+		if (word === "!" || word === "-not") negated = true;
+		else if (negated && FIND_PATTERN_TESTS.has(word)) selecting.add(index + 1);
 	}
-	return negated;
+	return { excluding: new Set(), selecting };
 }
 
 export interface FloorInput {
@@ -420,20 +415,22 @@ export function shellNamesControlFile(
 				if (tail === undefined || name === undefined || [...controlNames].some((control) => tail.includes("/") ? control === name : control.endsWith(name))) return pattern.value;
 			}
 		}
-		const negated = payload.command === "find" ? negatedFindPatterns(segment.tokens.map((token) => token.value)) : new Set<number>();
+		const negated = payload.command === "find" && !readOnly ? negatedFindPatterns(segment.tokens, payload.args) : undefined;
 		const words = [
-			...(readOnly ? [] : segment.tokens.map((token, index) => ({ value: token.value, negated: negated.has(index) }))),
-			...[...segment.redirects, ...segment.inputs.map((token) => token.value)].map((value) => ({ value, negated: false })),
+			...(readOnly ? [] : segment.tokens.map((token, index) => ({ value: token.value, index }))),
+			...[...segment.redirects, ...segment.inputs.map((token) => token.value)].map((value) => ({ value, index: -1 })),
 		];
-		for (const { value: word, negated: excludes } of words) {
+		for (const { value: word, index: at } of words) {
 			if (depth < 3 && /\s/.test(word)) {
 				const nested = shellNamesControlFile(word, dir, home, oneCodeProjectSettings, depth + 1, forms);
 				if (nested) return nested;
 			}
-			// find never opens or writes a pattern operand, and a negated one only
-			// excludes files, so it names nothing (a loop elsewhere in the line
-			// leaves every word unproven).
-			if (excludes) continue;
+			// find never opens or writes a pattern operand, and one that only
+			// excludes files names nothing (a loop elsewhere in the line leaves
+			// every word unproven). A negated pattern that may select everything
+			// else may select a control file.
+			if (negated?.excluding.has(at)) continue;
+			if (negated?.selecting.has(at)) return word;
 			const eq = word.indexOf("=");
 			for (const candidate of eq >= 0 ? [word, word.slice(eq + 1)] : [word]) {
 				if (!candidate || isUnknownTilde(candidate)) continue;

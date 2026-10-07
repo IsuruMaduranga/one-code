@@ -119,11 +119,11 @@ describe("safetyControlWrite: read-only words in escalated compound commands", (
 		`cat Makefile && find . -path './.git/*' -name Makefile`,
 		// A negated find pattern excludes files; it never selects one (Qwen 3.8 Flash, live).
 		`find . -type f -not -path './.git/*' | head -50 && echo '---' && wc -l $(find . -type f \\( -name '*.py' -o -name '*.ts' \\) -not -path './.git/*' -not -path './node_modules/*')`,
-		`find . ! -path './.git/*' -exec wc -l {} + && exit 0`,
-		`find . -not \\( -path './.git/*' -o -path './node_modules/*' \\) -name '*.py' -exec wc -l {} + && exit 0`,
+		`find . -not \\( -path './.git/*' -o -path './node_modules/*' \\) -name '*.py' | xargs wc -l && exit 0`,
 		// A loop anywhere leaves every word unproven; a negated glob pattern still names nothing (DeepSeek V4.1 Flash, live).
 		`find src tests -type f -not -path '*/node_modules/*' | sort && for f in tests/*.py; do echo "--- $f ---"; cat "$f"; done`,
 		`for f in a b; do echo "$f"; done; find . ! -path '*/.claude/*' -name '*.py'`,
+		`for f in a b; do echo "$f"; done; find . -not \\( -path './.git/*' -o -path './node_modules/*' \\) \\( -name '*.py' -o -name '*.ts' \\) | sort`,
 	])("does not floor proven read-only words: %s", (command) => {
 		expect(analyzeShellCommand({ command, cwd, home }).verdict).toBe("escalate");
 		expect(check("bash", { command })).toBeUndefined();
@@ -169,6 +169,26 @@ describe("safetyControlWrite: read-only words in escalated compound commands", (
 		`find . -not \\( -path './x/*' \\) -name '*' -delete && exit 0`,
 		`find . -not -path './x/*' -o -name 'settings.json' -delete && exit 0`,
 		`rm $(find .claude -name 'settings*')`,
+		// A negated pattern selects everything else under `-o`, a second negation or a negated conjunction, and a find that acts may act on any file it leaves in.
+		`find .claude -not -name settings.json -o -exec cp evil.json {} \\;`,
+		`find .claude -not -name settings.json -o -delete`,
+		`find . -not -not -name settings.json -exec cp evil.json {} \\;`,
+		`find . ! ! -name settings.json -delete`,
+		`find . -not \\( -not -name settings.json \\) -delete`,
+		`find .claude -not \\( -name settings.json -empty \\) -exec cp evil.json {} \\;`,
+		`find .claude -not \\( -name settings.json -empty \\) | xargs -I{} cp evil.json {}`,
+		`find . -not -regex '.*settings\\.json' -o -delete`,
+		`find ~ -maxdepth 1 -not -name '.claude.j*' -o -exec cp evil.json {} \\;`,
+		`find . -not -name settings.json -o -print | xargs -I{} cp evil.json {}`,
+		`find ~/.claude -not -path '*/settings.json' -o -exec cp evil.json {} \\;`,
+		`find . -not -path '*/.claude/settings*' -o -exec cp evil.json {} \\;`,
+		`find . -not -path '*/settings.json' -o -delete`,
+		`find . ! -name keep -delete`,
+		`find . ! \\( -name ')' -name keep \\) -delete`,
+		`find .claude -printf ! -name settings.json -print | xargs -I{} cp evil.json {}`,
+		// find's actions are not read, so a negation there is not trusted to exclude, whatever the action runs.
+		`find . ! -path './.git/*' -exec wc -l {} + && exit 0`,
+		`find . -not \\( -path './.git/*' -o -path './node_modules/*' \\) -name '*.py' -exec wc -l {} + && exit 0`,
 		`sh <<'EOF'\ncp x .claude/settings.json\nEOF`,
 		`cat <<'EOF' | sh\ncp x .claude/settings.json\nEOF`,
 		`sh <<< 'cp x .claude/settings.json'`,
