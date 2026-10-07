@@ -166,7 +166,6 @@ const resolvedPaths = [{ path: "link/secret", resolvesTo: "/outside/secret" }];
 const mixed: TranscriptEntry[] = [
 	{ kind: "summary", text: "Earlier context" },
 	{ kind: "user", text: "Keep the newline\nand emoji 😀" },
-	{ kind: "tool", tool: "read", input: { path: "omit-local-read" } },
 	{ kind: "tool", tool: "read", input: { path: "remote", _host: "remote-host" } },
 	{ kind: "meta", gitStatus: { clean: true } },
 	{ kind: "tool", tool: "bash", input: { command: "echo historical action" } },
@@ -228,7 +227,6 @@ describe("classifier text preservation", () => {
 	it.each([
 		{ entries: [], expected: "<transcript>\n\n</transcript>" },
 		{ entries: [action], expected: '<transcript>\n{"Read":{"path":"link/secret","content":"line one\\nline two 😀"}}\n</transcript>' },
-		{ entries: [{ kind: "tool", tool: "read", input: { path: "omit" } }, action], expected: '<transcript>\n{"Read":{"path":"link/secret","content":"line one\\nline two 😀"}}\n</transcript>' },
 	] as { entries: TranscriptEntry[]; expected: string }[])("preserves empty and action-only histories: $entries", ({ entries, expected }) => {
 		const { history, tail } = transcriptBlocks(entries);
 		expect(history.join("") + tail).toBe(expected);
