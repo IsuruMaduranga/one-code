@@ -12,6 +12,7 @@
  */
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { canShowCustomUi } from "../lib/headless-output.ts";
 import { linesComponent, liveUiCtx, safeThemeBold, safeThemePaint } from "../lib/tui-render.ts";
 import type { RunHandle, WorkflowRunManager } from "./run-manager.ts";
 import { MAX_STATUS_ROWS, renderStatusRows, type ViewerRunSnapshot } from "./viewer.ts";
@@ -132,7 +133,7 @@ export class WorkflowWidget {
 		const selected = this.focusIndex;
 		const now = Date.now();
 		// RPC forwards string-array widgets but silently ignores factories.
-		if (ctx.mode === "rpc") {
+		if (!canShowCustomUi(ctx)) {
 			const lines = runs.map((run) => `${run.runId} ${run.name} — ${run.status} (${run.agents.length} agents)`);
 			if (totalRuns > runs.length) lines.push(`${totalRuns - runs.length} more workflows — /workflows to list all`);
 			ctx.ui.setWidget(WIDGET_KEY, lines, { placement: "belowEditor" });

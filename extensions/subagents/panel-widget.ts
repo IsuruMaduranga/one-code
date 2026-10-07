@@ -11,6 +11,7 @@
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { BackgroundTask } from "../background/registry.ts";
+import { canShowCustomUi } from "../lib/headless-output.ts";
 import type { ShellTaskTracker } from "../lib/shell-tasks.ts";
 import { linesComponent, liveUiCtx, safeThemeBold, safeThemeInverse, safeThemePaint } from "../lib/tui-render.ts";
 import { buildRows, MAX_STRIP_ROWS, recentlyLeftStrip, renderStrip, TASKS_NOTICE, type PanelRow } from "./panel-render.ts";
@@ -289,7 +290,7 @@ export class SubagentWidget {
 		const selected = this.focusIndex;
 		const showStrip = rows.length > 1;
 		// RPC forwards string-array widgets, not component factories or key handlers.
-		if (ctx.mode === "rpc") {
+		if (!canShowCustomUi(ctx)) {
 			const lines = rows.slice(1, MAX_STRIP_ROWS).map((row) =>
 				`${row.run!.name} (${row.run!.taskId}) — ${row.status}: ${row.activity}`,
 			);

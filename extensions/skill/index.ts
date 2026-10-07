@@ -20,7 +20,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getAgentDir, stripFrontmatter } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { notifyOrPrint } from "../lib/headless-output.ts";
+import { canShowCustomUi, notifyOrPrint, notifyRpcReadOnly } from "../lib/headless-output.ts";
 import { pluginRoot } from "../lib/plugin-root.ts";
 import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
 import { awaitOneShotTurn, sessionOutlivesTurn } from "../lib/notifications.ts";
@@ -811,11 +811,11 @@ export default function skillExtension(pi: ExtensionAPI) {
 	registerLocalCommand(pi, "skills", {
 		description: "View and manage skills (on / name-only / user-only / off)",
 		handler: async (args, ctx) => {
-			if (ctx.hasUI && ctx.mode !== "rpc") {
+			if (canShowCustomUi(ctx)) {
 				await openSkillsPanel(ctx);
 				return;
 			}
-			if (ctx.mode === "rpc") ctx.ui.notify("/skills in RPC is read-only; use the TUI to change skill states.", "info");
+			notifyRpcReadOnly(ctx, "/skills", "change skill states");
 			// Non-interactive fallback: a flat listing with each skill's state.
 			const all = skillsOnly(ctx.cwd);
 			if (all.length === 0) {

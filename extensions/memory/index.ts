@@ -43,6 +43,7 @@ import { buildMemoryEntries, entryName, type MemoryEntry } from "./entries.ts";
 import { editorHint, memoryDisplayPath, openPath } from "./open-external.ts";
 import { applyMemoryKey, decodeMemoryKey, initialMemoryState, type ModeView, renderMemoryPanel } from "./panel.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
+import { canShowCustomUi } from "../lib/headless-output.ts";
 
 const MEMORY_PANEL_MAX_HEIGHT = 20;
 
@@ -153,7 +154,7 @@ export default function memoryExtension(pi: ExtensionAPI) {
 		reportsResult: true,
 		handler: async (_args, ctx): Promise<string | undefined> => {
 			const entries = memoryEntriesFor(ctx.cwd);
-			if (!ctx.hasUI || ctx.mode === "rpc") {
+			if (!canShowCustomUi(ctx)) {
 				const limitation = ctx.mode === "rpc" ? "/memory editing is unavailable in RPC; use the TUI or open a listed path in your editor.\n\n" : "";
 				const lines = entries.map(
 					(e, i) => `${i + 1}. ${e.title}${e.description ? ` — ${e.description}` : ""}  [${e.path}]`,

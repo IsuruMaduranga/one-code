@@ -36,7 +36,7 @@ import { catalogIsStale, loadCatalogSources, readCatalogRefreshEnabled, refreshM
 import { BUILTIN_PROVIDER_POLICIES } from "../lib/model-policy.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent, withoutUnusable } from "../lib/model-unusable.ts";
 import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } from "../lib/mcp-status.ts";
-import { notifyOrPrint } from "../lib/headless-output.ts";
+import { canShowCustomUi, notifyOrPrint } from "../lib/headless-output.ts";
 import { createUserMessageSender, sessionOutlivesTurn } from "../lib/notifications.ts";
 import { modelSpec } from "../lib/model-policy.ts";
 import { sessionModelTier } from "../lib/session-model-tier.ts";
@@ -327,7 +327,7 @@ export default function doctorExtension(pi: ExtensionAPI) {
 				return;
 			}
 			if (checkup) notifyOrPrint(ctx, "No model is available, so the checkup cannot run; showing the setup report instead. Connect a provider with /login, then rerun /doctor.", "warning");
-			if (ctx.hasUI && ctx.mode === "tui") {
+			if (canShowCustomUi(ctx)) {
 				await showPanel(ctx, report);
 				return;
 			}
