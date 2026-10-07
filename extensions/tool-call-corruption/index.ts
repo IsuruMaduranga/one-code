@@ -18,6 +18,17 @@ const STREAM_IDLE_MS = 90_000;
 const TOOL_CALL_IDLE_MS = 60_000;
 
 export default function toolCallCorruptionExtension(pi: ExtensionAPI) {
+	toolCallCorruptionGuard(pi, { announce: true });
+}
+
+/**
+ * The guard itself. `announce: false` is the in-process child's shape
+ * (`child.ts`): it blocks and stops the same way, but a child has no terminal
+ * of its own (stderr is the parent's TUI) and is disposed without
+ * `session_shutdown`, so it prints nothing and starts no provider lookup that
+ * could outlive it. Its parent sees the child's turn end terminated.
+ */
+export function toolCallCorruptionGuard(pi: ExtensionAPI, { announce }: { announce: boolean }) {
 	const alive = sessionAlive(pi);
 	const rawCalls = new Map<number, { raw: string; markup: number; contentMarkup: number; next: number }>();
 	const flagged = new Map<string, ToolCallDamage>();
@@ -63,6 +74,7 @@ export default function toolCallCorruptionExtension(pi: ExtensionAPI) {
 		const what = typeof failure === "object" ? `stalled ${failure.stalledSeconds} s` : failure;
 		pi.events.emit(TURN_FAILED_CHANNEL, { reason: `OpenRouter upstream failure: ${what}` } satisfies TurnFailedEvent);
 		ctx.abort();
+		if (!announce) return;
 		const model = ctx.model!;
 		const registry = ctx.modelRegistry;
 		const output = { hasUI: ctx.hasUI, ui: ctx.ui };
@@ -89,7 +101,11 @@ export default function toolCallCorruptionExtension(pi: ExtensionAPI) {
 		idleMs = ms;
 		idleTimer = setTimeout(() => {
 			idleTimer = undefined;
-			stopTurn(ctx, { stalledSeconds: ms / 1000 });
+			try {
+				stopTurn(ctx, { stalledSeconds: ms / 1000 });
+			} catch {
+				// A child session disposed mid-stream (no session_shutdown): its ctx throws, and there is nothing left to stop.
+			}
 		}, ms);
 		idleTimer.unref?.();
 	};

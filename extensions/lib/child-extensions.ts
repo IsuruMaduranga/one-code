@@ -25,6 +25,13 @@ import { fileURLToPath } from "node:url";
 
 const EXTENSIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-export const CHILD_EXTENSIONS = ["system-reminder", "tool-search", "claude-context", "file-tracker", "search-tools", "skill", "web", "web-fetch", "notebook"];
+// A name with a slash is a child-specific entry file: `tool-call-corruption/child`
+// blocks damaged OpenRouter calls like the main session's, before the hook and
+// permission gates (which load after these paths), but prints nothing.
+export const CHILD_EXTENSIONS = [
+	"system-reminder", "tool-search", "claude-context", "tool-call-corruption/child",
+	"file-tracker", "search-tools", "skill", "web", "web-fetch", "notebook",
+];
 
-export const CHILD_EXTENSION_PATHS = CHILD_EXTENSIONS.map((name) => join(EXTENSIONS_DIR, name, "index.ts"));
+export const CHILD_EXTENSION_PATHS = CHILD_EXTENSIONS.map((name) =>
+	name.includes("/") ? join(EXTENSIONS_DIR, `${name}.ts`) : join(EXTENSIONS_DIR, name, "index.ts"));
