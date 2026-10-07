@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../../extensions/auto-mode/actions.ts";
 import { classify } from "../../extensions/auto-mode/classifier.ts";
+import { CLASSIFIER_USER_INPUT, userMessageDigest } from "../../extensions/auto-mode/history.ts";
 import { buildPayload, type ClassifyRequest } from "../../extensions/auto-mode/prompt.ts";
 import type { HandBackVerdict } from "../../extensions/lib/notifications.ts";
 import { MODE_CHANNEL } from "../../extensions/lib/plan-mode-channels.ts";
@@ -24,6 +25,11 @@ vi.mock("../../extensions/auto-mode/classifier.ts", async (importOriginal) => ({
 }));
 
 const call = (id: string, name: string, args: Record<string, unknown>) => ({ type: "toolCall", id, name, arguments: args });
+/** A typed user message and the provenance entry the gate records beside it. */
+const typed = (id: string, text: string, timestamp: number) => [
+	{ type: "message", id, message: { role: "user", content: text, timestamp } },
+	{ type: "custom", id: `${id}-input`, customType: CLASSIFIER_USER_INPUT, data: { timestamp, messageDigest: userMessageDigest(text), userText: text } },
+];
 const SIBLING = "touch made-by-a-later-sibling";
 const LATER_REQUEST = "Please also tidy the build directory.";
 
@@ -58,7 +64,7 @@ describe("hand-back review transcript", () => {
 	/** The main turn in flight: one assistant message, every call's hook run, none executed yet. */
 	const mainBatch = async () => {
 		branch = [
-			{ type: "message", id: "u1", message: { role: "user", content: "Clean up the build output with a subagent.", timestamp: 1 } },
+			...typed("u1", "Clean up the build output with a subagent.", 1),
 			{ type: "message", id: "m1", message: { role: "assistant", content: [call("agent-1", "Agent", { subagent_type: "worker", prompt: "clean up", description: "cleanup" }), call("bash-2", "bash", { command: SIBLING })] } },
 		];
 		await fake.fire("turn_start", {}, ctx);
@@ -88,7 +94,7 @@ describe("hand-back review transcript", () => {
 		await mainBatch();
 		await fake.fire("turn_end", {}, ctx);
 		branch.push(
-			{ type: "message", id: "u2", message: { role: "user", content: LATER_REQUEST, timestamp: 2 } },
+			...typed("u2", LATER_REQUEST, 2),
 			{ type: "message", id: "m2", message: { role: "assistant", content: [call("bash-3", "bash", { command: "echo first" }), call("bash-4", "bash", { command: "echo NOT-YET-RUN" })] } },
 		);
 		await fake.fire("turn_start", {}, ctx);

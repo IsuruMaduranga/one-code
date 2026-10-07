@@ -1,4 +1,5 @@
 /** Project the active session branch for the classifier; never keep a second transcript. */
+import { createHash } from "node:crypto";
 import { inContextEntries, latestCompaction } from "../lib/compaction-boundary.ts";
 import { isHistoricalRead, type TranscriptEntry } from "./transcript.ts";
 
@@ -16,8 +17,78 @@ function record(value: unknown): Record<string, any> {
 	return value !== null && typeof value === "object" ? value as Record<string, any> : {};
 }
 
-export function userMessageKey(timestamp: unknown, text: string): string {
-	return JSON.stringify([timestamp, text]);
+/**
+ * A user message's identity in the provenance entries: its timestamp and a
+ * digest of its text. Provenance only has to recognise the message, so the
+ * text itself is not stored a second time.
+ */
+export function userMessageDigest(text: string): string {
+	return createHash("sha256").update(text).digest("hex").slice(0, 32);
+}
+
+function userMessageKey(timestamp: unknown, digest: string): string {
+	return JSON.stringify([timestamp, digest]);
+}
+
+/** What a branch's provenance entries say, and how far into the branch that was read. */
+interface ProvenanceIndex {
+	head?: string;
+	length: number;
+	tail?: unknown;
+	/** Whether the branch has any provenance entry: none means a session from before provenance. */
+	recorded: boolean;
+	byKey: Map<string, string | null>;
+	/** Entry id → digest of that user message's text. */
+	digests: Map<string, string>;
+}
+
+let provenanceMemo: ProvenanceIndex | undefined;
+
+/**
+ * The provenance entries of a branch. pi only appends, so a gated call
+ * resumes the scan where the previous one stopped; a branch whose prefix
+ * changed (a new session, a /tree switch past the read point) is read again.
+ * Entries without ids are never memoised.
+ */
+function provenanceIndex(branch: readonly unknown[]): ProvenanceIndex {
+	const id = (i: number): unknown => record(branch[i]).id;
+	const head = id(0);
+	const memo = provenanceMemo;
+	const resumable = typeof head === "string" && memo !== undefined && memo.head === head && memo.length <= branch.length && (memo.length === 0 || id(memo.length - 1) === memo.tail);
+	const index: ProvenanceIndex = resumable ? memo : { head: typeof head === "string" ? head : undefined, length: 0, recorded: false, byKey: new Map(), digests: new Map() };
+	for (let i = index.length; i < branch.length; i++) {
+		const entry = record(branch[i]);
+		if (entry.type !== "custom" || entry.customType !== CLASSIFIER_USER_INPUT) continue;
+		index.recorded = true;
+		const data = record(entry.data);
+		if (typeof data.userText !== "string" && data.userText !== null) continue;
+		// Entries written before the digest carry the message text itself.
+		const digest = typeof data.messageDigest === "string" ? data.messageDigest : typeof data.messageText === "string" ? userMessageDigest(data.messageText) : undefined;
+		if (digest !== undefined) index.byKey.set(userMessageKey(data.timestamp, digest), data.userText);
+	}
+	index.length = branch.length;
+	index.tail = id(branch.length - 1);
+	provenanceMemo = typeof head === "string" && typeof index.tail === "string" ? index : undefined;
+	return index;
+}
+
+/**
+ * The words a user-role message gives the classifier as the user's own: the
+ * input event's text when recorded, null for an extension-generated turn.
+ * A message the entries do not cover keeps its text in a session that has
+ * provenance, and is unverified (null) in one that has none at all, a
+ * session from before provenance, which never credited a resumed message as
+ * typed.
+ */
+function userWords(index: ProvenanceIndex, entry: Record<string, any>, message: Record<string, any>, text: string): string | null {
+	if (!index.recorded) return null;
+	let digest = typeof entry.id === "string" ? index.digests.get(entry.id) : undefined;
+	if (digest === undefined) {
+		digest = userMessageDigest(text);
+		if (typeof entry.id === "string") index.digests.set(entry.id, digest);
+	}
+	const key = userMessageKey(message.timestamp, digest);
+	return index.byKey.has(key) ? (index.byKey.get(key) ?? null) : text;
 }
 
 /** Where the projected history ends; neither field reads the whole active branch. */
@@ -60,15 +131,7 @@ export function classifierHistory(branch: readonly unknown[], options: HistoryCu
 		const summary = record(branch[boundary.index]).summary;
 		if (typeof summary === "string" && summary) transcript.push({ kind: "summary", text: summary });
 	}
-	const provenance = new Map<string, string | null>();
-	for (const raw of branch) {
-		const entry = record(raw);
-		if (entry.type !== "custom" || entry.customType !== CLASSIFIER_USER_INPUT) continue;
-		const data = record(entry.data);
-		if (typeof data.messageText === "string" && (typeof data.userText === "string" || data.userText === null)) {
-			provenance.set(userMessageKey(data.timestamp, data.messageText), data.userText);
-		}
-	}
+	const provenance = provenanceIndex(branch);
 	const active = inContextEntries(branch).map(record);
 	const facts = new Map<string, Record<string, any>[]>();
 	for (const entry of active) {
@@ -89,12 +152,10 @@ export function classifierHistory(branch: readonly unknown[], options: HistoryCu
 		if (entry.type !== "message") continue;
 		const message = record(entry.message);
 		if (message.role === "user") {
-			const text = messageText(message.content);
-			const key = userMessageKey(message.timestamp, text);
-			// Old sessions have only user-role messages. New sessions preserve the
-			// input event's source, so extension-generated turns never gain intent
-			// authority on resume and expanded skill text is not credited as typed.
-			const userText = provenance.has(key) ? provenance.get(key) : text;
+			// Sessions preserve the input event's source, so extension-generated
+			// turns never gain intent authority on resume and expanded skill text
+			// is not credited as typed.
+			const userText = userWords(provenance, entry, message, messageText(message.content));
 			if (userText?.trim()) {
 				transcript.push({ kind: "user", text: userText.trim() });
 				userMessages.push(userText.trim());

@@ -52,7 +52,7 @@ import { draftSetup, gatherFacts } from "../auto-mode/setup-run.ts";
 import { DEFAULT_ENVIRONMENT } from "../auto-mode/defaults.ts";
 import { buildRuleset } from "../auto-mode/classifier-prompt.ts";
 import type { TranscriptEntry } from "../auto-mode/transcript.ts";
-import { childHistoryCursor, classifierHistory, CLASSIFIER_TOOL_META, CLASSIFIER_USER_INPUT, type HistoryCursor, messageText } from "../auto-mode/history.ts";
+import { childHistoryCursor, classifierHistory, CLASSIFIER_TOOL_META, CLASSIFIER_USER_INPUT, type HistoryCursor, messageText, userMessageDigest } from "../auto-mode/history.ts";
 import { appendDecision, type DecisionEntry, decisionEntry } from "../auto-mode/decision-log.ts";
 import { loadProjectInstructions } from "../auto-mode/instructions.ts";
 import { classifierCandidates, describeCandidate } from "../auto-mode/model-select.ts";
@@ -631,7 +631,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		const text = messageText(event.message.content);
 		const at = pendingInputs.findIndex((input) => text.trim() === input.text || text.trim().startsWith(`${input.text}\n`));
 		const input = at >= 0 ? pendingInputs.splice(at, 1)[0] : undefined;
-		pi.appendEntry(CLASSIFIER_USER_INPUT, { timestamp: event.message.timestamp, messageText: text, userText: input?.user ? input.text : null });
+		// A digest identifies the message; the text is already in the session.
+		pi.appendEntry(CLASSIFIER_USER_INPUT, { timestamp: event.message.timestamp, messageDigest: userMessageDigest(text), userText: input?.user ? input.text : null });
 	});
 
 	/**
