@@ -119,3 +119,6 @@ function isRecord(value: unknown): value is WireRecord {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+
+/** The conversation cache placement a side call passes to `runSideCall` (`side-call-run.ts`). */
+export const CONVERSATION_CACHE_PLACEMENT = { apis: SIDE_CALL_CACHE_APIS, place: cacheSideCallConversation } as const;

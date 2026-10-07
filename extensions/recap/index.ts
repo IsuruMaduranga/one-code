@@ -28,15 +28,13 @@
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { convertToLlm, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { withReasoningFallback } from "../lib/model-policy.ts";
 import { followLastExchange, replaySideCall } from "../lib/replay-call.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
 import { pickEconomicalContainedModel } from "../lib/model-tier.ts";
-import { cacheSideCallConversation, SIDE_CALL_CACHE_APIS } from "../lib/side-call-cache.ts";
+import { CONVERSATION_CACHE_PLACEMENT } from "../lib/side-call-cache.ts";
+import { runSideCall } from "../lib/side-call-run.ts";
 import { answerText, stripImageBlocks, toolStubs, withoutSystemMessages } from "../lib/side-call.ts";
-import { logSideCallUsage } from "../lib/side-call-usage.ts";
 import { unrefTimers } from "../lib/timer-ops.ts";
 import { dimMarkedLine } from "../lib/tui-render.ts";
 import { RECAP_PROMPT, recapLine, recentForRecap, REFERENCE_MARK } from "./prompt.ts";
@@ -97,8 +95,6 @@ export default function recapExtension(pi: ExtensionAPI) {
 		if (!choice) return "";
 		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(choice.model);
 		if (!auth.ok) return "";
-		const baseUrl = (auth as { baseUrl?: string }).baseUrl;
-
 		// Name-only stubs of the active tools, so a history carrying tool_use
 		// blocks stays valid on strict providers (see the header note) without
 		// shipping every full schema (~6k tokens) to a call that must answer
@@ -110,29 +106,21 @@ export default function recapExtension(pi: ExtensionAPI) {
 		// images — strip them so a pasted image or one a Read returned cannot break
 		// the call (working-docs/decisions/model-policy.md).
 		const recapMessages = [...stripImageBlocks(convertToLlm(recent)), { role: "user" as const, content: RECAP_PROMPT, timestamp: Date.now() }];
-		const sessionId = `${ctx.sessionManager.getSessionId()}:recap`;
 		// Thinking off unless the model cannot disable it; withReasoningFallback
 		// sends a level up front for catalog-marked models and retries on the 400
 		// for the rest. Fires on a 5-min idle timer, so no cross-call memo.
-		const result = await withReasoningFallback(choice.model, async (reasoning) => {
-			const timeout = AbortSignal.timeout(RECAP_TIMEOUT_MS);
-			const reply = await completeSimple(
-				baseUrl ? ({ ...choice.model, baseUrl } as Model<Api>) : choice.model,
-				{ systemPrompt: "", messages: recapMessages, tools },
-				{
-					apiKey: auth.apiKey,
-					headers: auth.headers,
-					env: auth.env,
-					signal: AbortSignal.any([signal, timeout]),
-					maxTokens: RECAP_MAX_TOKENS,
-					sessionId,
-					...(SIDE_CALL_CACHE_APIS.has(choice.model.api) ? { onPayload: cacheSideCallConversation } : {}),
-					...(reasoning ? { reasoning } : {}),
-				},
-			);
-			logSideCallUsage({ kind: "recap", model: choice.model, sessionId, system: "", messages: recapMessages }, reply);
-			return reply;
-		}, undefined, (usage) => recordUsage(pi, "recap", usage));
+		const result = await runSideCall({
+			kind: "recap",
+			model: choice.model,
+			auth,
+			sessionId: ctx.sessionManager.getSessionId(),
+			context: { systemPrompt: "", messages: recapMessages, tools },
+			signal,
+			timeoutMs: RECAP_TIMEOUT_MS,
+			maxTokens: RECAP_MAX_TOKENS,
+			cache: CONVERSATION_CACHE_PLACEMENT,
+			onUsage: (usage) => recordUsage(pi, "recap", usage),
+		});
 		return answerText(result.content);
 	}
 

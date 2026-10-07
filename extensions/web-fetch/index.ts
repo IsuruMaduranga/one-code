@@ -16,14 +16,12 @@
  * answer from a successful fetch.
  */
 
-import type { Api, Model, ThinkingLevel } from "@earendil-works/pi-ai";
-import { completeSimple } from "@earendil-works/pi-ai/compat";
+import type { ThinkingLevel } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { recordUsage } from "../lib/usage-bus.ts";
-import { logSideCallUsage } from "../lib/side-call-usage.ts";
+import { runSideCall } from "../lib/side-call-run.ts";
 import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
-import { withReasoningFallback } from "../lib/model-policy.ts";
 import { CrossHostRedirect, htmlToMarkdown, isSameHost, normalizeUrl, paginate, redirectMessage } from "./extract.ts";
 import { pickReaderModel, READER_MAX_CHARS, READER_MAX_TOKENS, readerMessages } from "./summarize.ts";
 import { tryNativeWeb } from "../lib/anthropic-server-call.ts";
@@ -98,40 +96,25 @@ async function answerFromPage(
 	try {
 		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(choice.model);
 		if (!auth.ok) return { error: `${reader}: ${auth.error}` };
-		const baseUrl = (auth as { baseUrl?: string }).baseUrl;
-
 		const messages = readerMessages({ prompt, markdown: entry.markdown, url, title: entry.title });
-		const sessionId = `${ctx.sessionManager.getSessionId()}:reader`;
-		const context = {
-			systemPrompt: messages.system,
-			messages: [{ role: "user" as const, content: messages.user, timestamp: Date.now() }],
-		};
 		// Thinking off unless the model cannot disable it; withReasoningFallback sends
 		// a level up front for catalog-marked models and retries on the 400 for the
 		// rest, memoizing the result so repeated fetches don't re-pay the failure.
-		const result = await withReasoningFallback(
-			choice.model,
-			async (reasoning) => {
-				const timeout = AbortSignal.timeout(READER_TIMEOUT_MS);
-				const reply = await completeSimple(
-					baseUrl ? ({ ...choice.model, baseUrl } as Model<Api>) : choice.model,
-					context,
-					{
-						apiKey: auth.apiKey,
-						headers: auth.headers,
-						env: auth.env,
-						sessionId,
-						signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-						maxTokens: READER_MAX_TOKENS,
-						...(reasoning ? { reasoning } : {}),
-					},
-				);
-				logSideCallUsage({ kind: "reader", model: choice.model, sessionId, system: messages.system, messages: context.messages }, reply);
-				return reply;
+		const result = await runSideCall({
+			kind: "reader",
+			model: choice.model,
+			auth,
+			sessionId: ctx.sessionManager.getSessionId(),
+			context: {
+				systemPrompt: messages.system,
+				messages: [{ role: "user" as const, content: messages.user, timestamp: Date.now() }],
 			},
+			signal,
+			timeoutMs: READER_TIMEOUT_MS,
+			maxTokens: READER_MAX_TOKENS,
 			learnedReasoning,
-			recordCall,
-		);
+			onUsage: recordCall,
+		});
 		const answer = result.content
 			.filter((block): block is { type: "text"; text: string } => block.type === "text")
 			.map((block) => block.text)
