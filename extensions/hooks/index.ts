@@ -478,9 +478,21 @@ export default function hooksExtension(pi: ExtensionAPI) {
 		agent_id: call.sessionId,
 		agent_type: call.agentType,
 	});
+	/**
+	 * The parent's context for a bridged child call, without the parent's run
+	 * signal. A background child outlives the parent's turn, so the parent
+	 * aborting (Esc) must not short-circuit the child's hooks: `dispatch` would
+	 * return no outcome, and the child's call would run past a deny hook.
+	 */
+	const childDispatchCtx = (ctx: ExtensionContext): HookDispatchCtx => ({
+		cwd: ctx.cwd,
+		hasUI: ctx.hasUI,
+		sessionManager: ctx.sessionManager,
+		ui: ctx.ui,
+	});
 	const childHookBridge: HookBridge = {
 		async preToolUse(call) {
-			const ctx = lastCtx;
+			const ctx = lastCtx && childDispatchCtx(lastCtx);
 			if (!ctx) return {};
 			const outcome = await dispatch(ctx, "PreToolUse", { candidates: toolMatchCandidates(call.toolName) }, childPayload(call, "PreToolUse"));
 			return {
@@ -490,7 +502,7 @@ export default function hooksExtension(pi: ExtensionAPI) {
 			};
 		},
 		async postToolUse(result: ChildHookResult) {
-			const ctx = lastCtx;
+			const ctx = lastCtx && childDispatchCtx(lastCtx);
 			if (!ctx) return {};
 			const payload: HookStdinPayload = {
 				...childPayload(result, "PostToolUse"),
