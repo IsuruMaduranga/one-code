@@ -353,9 +353,46 @@ describe("OpenRouter tool-call corruption wiring", () => {
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
-	it("blocks a bash command cut off before its quoted argument", async () => {
-		await stream('{ "command": "grep -rn "\t, "timeout": 120000 }');
-		expect(await call()).toMatchObject({ block: true, reason: expect.stringMatching(/single space/) });
+	const cut = '{ "command": "grep -rn "\t, "timeout": 120000 }';
+
+	it("hands a command that looks cut off back to the model without stopping the turn", async () => {
+		await stream(cut);
+		const result = await call();
+		expect(result).toMatchObject({ block: true, reason: expect.stringMatching(/"-rn".*not run/) });
+		expect(result).not.toHaveProperty("terminate");
+		await end();
+		await flush();
+		expect(ctx.abort).not.toHaveBeenCalled();
+		expect(ctx.ui.notify).not.toHaveBeenCalled();
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it("stops the turn and names the provider when a second command in the run comes through cut", async () => {
+		await stream(cut, "bash", "first");
+		await call("first");
+		await end("first");
+		await stream('{ "command": "python3 -c "\t}', "bash", "second", 1);
+		expect(await call("second")).toMatchObject({ block: true, terminate: true, reason: expect.stringMatching(/OpenRouter tool-call corruption.*python3 -c|"-c"/) });
+		await end("second");
+		await flush();
+		expect(ctx.abort).toHaveBeenCalledTimes(1);
+		expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringMatching(/Morph is corrupting tool calls/), "error");
+	});
+
+	it("gives each run its own allowance for a command that looks cut off", async () => {
+		await stream(cut, "bash", "first");
+		await call("first");
+		await end("first");
+		await fake.fire("agent_start", {}, ctx);
+		await stream(cut, "bash", "second");
+		expect(await call("second")).not.toHaveProperty("terminate");
+		await end("second");
+		expect(ctx.abort).not.toHaveBeenCalled();
+	});
+
+	it.each(["export FOO=", "npm test ", "cat > notes.md <<'EOF'\nThe 5\" floppy\nEOF\necho \"done\""])("runs a valid command the old rules blocked: %j", async (command) => {
+		await stream(JSON.stringify({ command }));
+		expect(await call()).toBeUndefined();
 	});
 
 	it("registers before hooks and permissions without adding prompt/context handlers", () => {

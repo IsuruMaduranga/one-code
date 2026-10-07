@@ -4,7 +4,7 @@ import { notifyOrPrint } from "../lib/headless-output.ts";
 import { sessionOutlivesTurn } from "../lib/notifications.ts";
 import { isOpenRouter, openRouterProviderName, toolCallCorruptionNotice, type UpstreamFailure } from "../lib/openrouter-generation.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
-import { scanToolCallMarkup, TOOL_CALL_MARKUP_LIMIT, toolCallCorruptionReason } from "../lib/tool-call-corruption.ts";
+import { scanToolCallMarkup, TOOL_CALL_MARKUP_LIMIT, type ToolCallDamage, toolCallCorruptionReason } from "../lib/tool-call-corruption.ts";
 import { withKeepAlive } from "../lsp/keep-alive.ts";
 
 // Silence allowed inside a stream. Every raw chunk restarts the clock, but
@@ -19,13 +19,15 @@ const TOOL_CALL_IDLE_MS = 60_000;
 export default function toolCallCorruptionExtension(pi: ExtensionAPI) {
 	const alive = sessionAlive(pi);
 	const rawCalls = new Map<number, { raw: string; markup: number; next: number }>();
-	const flagged = new Map<string, string>();
+	const flagged = new Map<string, ToolCallDamage>();
 	const pending = new Map<AbortController, Promise<void>>();
 	let responseId: string | undefined;
 	// OpenRouter names the serving provider on every chunk; a cancelled
 	// generation is never recorded, so the lookup cannot name it after a stop.
 	let streamProvider: string | undefined;
 	let stopped = false;
+	// A suspect call goes back to the model once per run; the next one is corrupt.
+	let suspectReturned = false;
 	let contentStarted = false;
 	let idleTimer: ReturnType<typeof setTimeout> | undefined;
 	let idleMs = 0;
@@ -45,6 +47,7 @@ export default function toolCallCorruptionExtension(pi: ExtensionAPI) {
 	const resetRun = () => {
 		resetMessage();
 		stopped = false;
+		suspectReturned = false;
 	};
 	const cancelLookups = () => {
 		for (const controller of pending.keys()) controller.abort();
@@ -136,8 +139,8 @@ export default function toolCallCorruptionExtension(pi: ExtensionAPI) {
 				const raw = rawCalls.get(update.contentIndex)?.raw;
 				rawCalls.delete(update.contentIndex);
 				if (raw === undefined) break;
-				const reason = toolCallCorruptionReason(update.toolCall.name, raw);
-				if (reason) flagged.set(update.toolCall.id, `OpenRouter tool-call corruption: ${reason} Do not retry this call; switch models or exclude the upstream provider.`);
+				const damage = toolCallCorruptionReason(update.toolCall.name, raw);
+				if (damage) flagged.set(update.toolCall.id, damage);
 				break;
 			}
 		}
@@ -156,11 +159,23 @@ export default function toolCallCorruptionExtension(pi: ExtensionAPI) {
 	});
 	pi.on("tool_call", (event, ctx) => {
 		if (!alive() || !isOpenRouter(ctx.model)) return;
-		const reason = flagged.get(event.toolCallId);
-		if (reason) return { block: true, reason, terminate: true };
+		const damage = flagged.get(event.toolCallId);
+		if (!damage) return;
+		if (damage.kind === "suspect" && !suspectReturned) {
+			suspectReturned = true;
+			flagged.delete(event.toolCallId);
+			return { block: true, reason: `${damage.reason} It was not run. Send the complete command again; if it really ends there, drop the trailing blank or the empty option.` };
+		}
+		const repeat = damage.kind === "suspect" ? " An earlier command in this run came through cut the same way." : "";
+		flagged.set(event.toolCallId, { kind: "corrupt", reason: damage.reason });
+		return {
+			block: true,
+			reason: `OpenRouter tool-call corruption: ${damage.reason}${repeat} Do not retry this call; switch models or exclude the upstream provider.`,
+			terminate: true,
+		};
 	});
 	pi.on("tool_execution_end", (event, ctx) => {
-		if (!alive() || stopped || !isOpenRouter(ctx.model) || !flagged.has(event.toolCallId)) return;
+		if (!alive() || stopped || !isOpenRouter(ctx.model) || flagged.get(event.toolCallId)?.kind !== "corrupt") return;
 		// Aborting inside tool_call would replace our reason with "Operation aborted".
 		// This also catches schema-validation failures, which bypass tool_call entirely.
 		stopTurn(ctx, "blocked-call");

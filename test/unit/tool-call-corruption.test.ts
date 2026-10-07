@@ -3,12 +3,12 @@ import { scanToolCallMarkup, toolCallCorruptionReason } from "../../extensions/l
 
 describe("toolCallCorruptionReason", () => {
 	it("rejects multiple JSON objects concatenated in one streamed call", () => {
-		expect(toolCallCorruptionReason("bash", '{"command":"pwd"}{"command":"ls"}')).toMatch(/JSON/);
+		expect(toolCallCorruptionReason("bash", '{"command":"pwd"}{"command":"ls"}')).toMatchObject({ kind: "corrupt", reason: expect.stringMatching(/JSON/) });
 	});
 
 	it("rejects trailing data and incomplete JSON", () => {
 		for (const raw of ['{} trailing', '{}\n{}', '{"command":']) {
-			expect(toolCallCorruptionReason("Agent", raw)).toMatch(/JSON/);
+			expect(toolCallCorruptionReason("Agent", raw)?.reason).toMatch(/JSON/);
 		}
 	});
 
@@ -20,7 +20,7 @@ describe("toolCallCorruptionReason", () => {
 	it.each(["bash", "powershell", "monitor"])("rejects the escaped-quote truncation on %s", (tool) => {
 		const raw = '{"command":"grep -rn \\\"","run_in_background":false}';
 		expect(JSON.parse(raw).command).toBe('grep -rn "');
-		expect(toolCallCorruptionReason(tool, raw)).toMatch(/double quote/);
+		expect(toolCallCorruptionReason(tool, raw)).toMatchObject({ kind: "corrupt", reason: expect.stringMatching(/double quote/) });
 	});
 
 	it.each([
@@ -37,8 +37,8 @@ describe("toolCallCorruptionReason", () => {
 	});
 
 	it("counts escaped backslashes and ignores apostrophes inside double quotes", () => {
-		expect(toolCallCorruptionReason("bash", JSON.stringify({ command: String.raw`echo \\"` }))).toMatch(/double quote/);
-		expect(toolCallCorruptionReason("bash", JSON.stringify({ command: `echo 'a " inside' "` }))).toMatch(/double quote/);
+		expect(toolCallCorruptionReason("bash", JSON.stringify({ command: String.raw`echo \\"` }))?.reason).toMatch(/double quote/);
+		expect(toolCallCorruptionReason("bash", JSON.stringify({ command: `echo 'a " inside' "` }))?.reason).toMatch(/double quote/);
 	});
 
 	it("respects PowerShell's backtick escape", () => {
@@ -60,14 +60,41 @@ describe("toolCallCorruptionReason", () => {
 		expect(toolCallCorruptionReason("Agent", '{"action":"run"}')).toBeUndefined();
 	});
 
-	it("rejects a command cut off before an escaped quote (Morph's spaced shape)", () => {
-		expect(toolCallCorruptionReason("bash", '{ "command": "grep -rn "\t, "timeout": 120000 }')).toMatch(/single space/);
-		expect(toolCallCorruptionReason("bash", JSON.stringify({ command: "grep -rn x src --include=" }))).toMatch(/'='/);
-		expect(toolCallCorruptionReason("monitor", JSON.stringify({ command: "tail -f\t" }))).toMatch(/single space/);
+	it("suspects a command cut off before an escaped quote (Morph's spaced shape)", () => {
+		expect(toolCallCorruptionReason("bash", '{ "command": "grep -rn "\t, "timeout": 120000 }')).toMatchObject({ kind: "suspect", reason: expect.stringContaining('"-rn"') });
+		expect(toolCallCorruptionReason("bash", JSON.stringify({ command: "python3 -c " }))?.kind).toBe("suspect");
+		expect(toolCallCorruptionReason("bash", JSON.stringify({ command: "git commit -m " }))?.kind).toBe("suspect");
+		expect(toolCallCorruptionReason("bash", JSON.stringify({ command: "grep -rn x src --include=" }))).toMatchObject({ kind: "suspect", reason: expect.stringContaining('"--include="') });
+		expect(toolCallCorruptionReason("monitor", JSON.stringify({ command: "tail -f\t" }))?.kind).toBe("suspect");
 	});
 
-	it.each(["ls  ", "ls\n", "cat <<EOF\nx\nEOF\n", "a == b"])("allows other trailing whitespace and a mid-command '=': %j", (command) => {
+	it.each([
+		"ls  ",
+		"ls\n",
+		"cat <<EOF\nx\nEOF\n",
+		"a == b",
+		"export FOO=",
+		"base64 -d <<< SGVsbG8=",
+		"FOO= make",
+		"npm test ",
+		"git status ",
+		"cat > notes.md <<'EOF'\nThe 5\" floppy\nEOF\necho \"done\"",
+		"cat <<EOF > a.txt\nsay \"hi\nEOF\necho \"x\"",
+		"# measure 3\" pipe\nls \"a b\"",
+		"ls \"a b\" # the 3\" pipe\necho \"x\"",
+	])("allows a valid shell command: %j", (command) => {
 		expect(toolCallCorruptionReason("bash", JSON.stringify({ command }))).toBeUndefined();
+	});
+
+	it("still sees an unbalanced quote next to a '#' that does not start a comment", () => {
+		expect(toolCallCorruptionReason("bash", JSON.stringify({ command: 'echo a#b "' }))?.kind).toBe("corrupt");
+		expect(toolCallCorruptionReason("bash", JSON.stringify({ command: 'echo "a #b" "' }))?.kind).toBe("corrupt");
+	});
+
+	it("allows PowerShell here-strings and comments with an odd quote", () => {
+		expect(toolCallCorruptionReason("powershell", JSON.stringify({ command: '@"\n5" disk\n"@ | Set-Content a.txt; Write-Host "x"' }))).toBeUndefined();
+		expect(toolCallCorruptionReason("powershell", JSON.stringify({ command: "@'\n5\" disk\n'@ | Set-Content a.txt; Write-Host \"x\"" }))).toBeUndefined();
+		expect(toolCallCorruptionReason("powershell", JSON.stringify({ command: '# a 3" pipe\nWrite-Host "x"' }))).toBeUndefined();
 	});
 
 	it("leaves a trailing space alone on non-shell tools", () => {

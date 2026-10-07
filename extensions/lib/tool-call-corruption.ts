@@ -1,19 +1,44 @@
+/**
+ * A streamed tool call's damage. `corrupt` is certain (not one JSON value, a
+ * shell command ending inside an open double quote): the call is blocked and
+ * the turn stopped. `suspect` has the shape of a cut but also of a valid
+ * command (an option followed by one trailing blank): the call goes back to the
+ * model once, and a repeat in the same run counts as corrupt.
+ */
+export interface ToolCallDamage {
+	kind: "corrupt" | "suspect";
+	reason: string;
+}
+
+// The last word is an option followed by one blank, or a long option with an
+// empty `=` value: `grep -rn "x"` and `--include="*.py"` cut at the escaped
+// quote (findings §61, Morph). A bare `FOO=` is a valid assignment.
+const CUT_AFTER_OPTION = /(?:^|\s)(-{1,2}[A-Za-z][\w-]*)[ \t]$|(?:^|\s)(--[A-Za-z][\w-]*=)$/;
+// Heredocs and here-strings (bash `<<`, `<<<`; PowerShell `@"…"@`, `@'…'@`)
+// carry quotes the scan below cannot pair, so it does not judge them.
+const HERE_DOCUMENT = /<<|@["']/;
+
 /** Inspect one tool call's raw streamed arguments before pi's tolerant parsing hides damage. */
-export function toolCallCorruptionReason(toolName: string, rawArguments: string): string | undefined {
+export function toolCallCorruptionReason(toolName: string, rawArguments: string): ToolCallDamage | undefined {
 	// A tool with no parameters may stream no argument text at all; pi reads it as {}.
 	if (rawArguments.trim() === "") return;
 	let args: unknown;
 	try {
 		args = JSON.parse(rawArguments);
 	} catch {
-		return "The raw tool-call arguments are not exactly one JSON value.";
+		return { kind: "corrupt", reason: "The raw tool-call arguments are not exactly one JSON value." };
 	}
 	if (toolName !== "bash" && toolName !== "powershell" && toolName !== "monitor") return;
 	if (!args || typeof args !== "object" || !("command" in args) || typeof args.command !== "string") return;
-	// A cut just before an escaped quote leaves the space or `=` that preceded it.
-	if (/(?:\S[ \t]|=)$/.test(args.command)) return "The shell command ends with a single space or '=', indicating arguments cut off before a quoted string.";
+	const cut = CUT_AFTER_OPTION.exec(args.command);
+	if (cut) {
+		return {
+			kind: "suspect",
+			reason: `The shell command ends with "${cut[1] ?? cut[2]}" and nothing after it, the shape of arguments cut off before a quoted string.`,
+		};
+	}
 	const command = args.command.trimEnd();
-	if (!command.endsWith('"')) return;
+	if (!command.endsWith('"') || HERE_DOCUMENT.test(command)) return;
 
 	let singleQuoted = false;
 	let doubleQuoted = false;
@@ -28,9 +53,14 @@ export function toolCallCorruptionReason(toolName: string, rawArguments: string)
 			singleQuoted = true;
 		} else if (char === '"') {
 			doubleQuoted = !doubleQuoted;
+		} else if (char === "#" && !doubleQuoted && (i === 0 || /[\s;&|(]/.test(command[i - 1]))) {
+			// A comment runs to the end of its line.
+			const newline = command.indexOf("\n", i);
+			if (newline === -1) break;
+			i = newline;
 		}
 	}
-	if (doubleQuoted) return "The shell command ends with an unbalanced double quote, indicating truncated tool-call arguments.";
+	if (doubleQuoted) return { kind: "corrupt", reason: "The shell command ends with an unbalanced double quote, indicating truncated tool-call arguments." };
 }
 
 // GLM's native tool-call tags, which a broken upstream parser leaks into the JSON arguments.
