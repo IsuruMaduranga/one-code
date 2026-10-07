@@ -100,14 +100,23 @@ beforeEach(() => {
 });
 
 describe("classify: pinning and fallback", () => {
-	it("screens on the below-frontier session and explains why when alternates are unscored", async () => {
+	it("screens below frontier with the subagents' model when alternates are unscored", async () => {
 		setCapabilitySnapshotForTest(undefined);
 		completeMock.mockResolvedValue(allowReply());
 		const { deps, notices } = makeDeps();
 		expect((await classify(request, deps)).decision).toBe("allow");
-		expect(deps.state.pinned?.id).toBe(sessionModel.id);
-		expect(completeMock.mock.calls[0]?.[0]).toBe(sessionModel);
-		expect(notices.some((notice) => notice.includes("no cheaper same-provider/route model is measured and in this session's tier"))).toBe(true);
+		expect(deps.state.pinned?.id).toBe(miniModel.id);
+		expect(completeMock.mock.calls[0]?.[0]).toBe(miniModel);
+		expect(notices.some((notice) => notice.includes("the model this session's subagents run on"))).toBe(true);
+	});
+
+	it("falls back to the session when the subagents' model times out", async () => {
+		setCapabilitySnapshotForTest(undefined);
+		completeMock.mockImplementation(async (m: any) => (m.id === miniModel.id ? abortedReply() : allowReply()));
+		const { deps } = makeDeps();
+		expect((await classify(request, deps)).decision).toBe("allow");
+		expect(completeMock.mock.calls.map((call) => call[0])).toEqual([miniModel, miniModel, sessionModel]);
+		expect(deps.state.rejected.size).toBe(0);
 	});
 
 	it("reports a model the provider refuses as unusable, so the subagent selector can skip it too", async () => {

@@ -126,16 +126,18 @@ describe("buildDoctorReport", () => {
 		expect(report().findings.some((f) => f.text.includes("is newer than"))).toBe(false);
 	});
 
-	it("explains below-frontier classifier retention without claiming names prove capability", () => {
+	it("names the subagents' model as an unscored below-frontier classifier", () => {
 		const main = model("openai", "gpt-5.6-sol", 5, "openai-responses");
 		const cheaper = model("openai", "gpt-5.6-terra", 2, "openai-responses");
+		// Without scores, a below-frontier session screens with the model its
+		// subagents run on: cheaper and in its tier by name, labeled unscored.
 		const facts = collectModelFacts([main, cheaper], { model: main, modelSource: "session" }, home, {});
-		expect(facts.classifier.model).toBe(main);
+		expect(facts.classifier.model).toBe(cheaper);
 		const text = modelsSection(facts, { model: main, modelSource: "session" }, []).lines.map((line) => line.text).join("\n");
-		expect(text).toContain("Auto-mode classifier: openai/gpt-5.6-sol (this session's model)");
-		expect(text).toContain("an alternate must be measured and in this session's tier");
-		expect(text).toContain("no cheaper same-provider/route model is measured and in this session's tier");
-		expect(text).toContain("Capability scores: none — below-frontier classifiers keep the session model");
+		expect(text).toContain("Auto-mode classifier: openai/gpt-5.6-terra (the model this session's subagents run on");
+		expect(text).toContain("at or above its tier by name");
+		expect(text).toContain("else the cheaper model this session's subagents run on; else this session's model");
+		expect(text).toContain("Capability scores: none — below-frontier classifiers use the subagents' model, else the session model");
 		expect(text).not.toContain("Capability scores: none — automatic picks use model names and generations only");
 	});
 

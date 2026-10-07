@@ -47,12 +47,13 @@ describe("automatic classifier selection wiring", () => {
 	});
 
 	it("announces the measured fallback below frontier and replaces it on a frontier switch", async () => {
-		const belowFrontier = model("gpt-5.6-sol", 272_000, 5);
+		// No cheaper model contains its window, so the session screens itself.
+		const belowFrontier = model("gpt-5.6-sol", 1_000_000, 5);
 		ctx.model = belowFrontier;
 		await fake.fire("session_start", { reason: "startup" }, ctx);
 		expect(statuses.at(-1)?.classifier).toBe("openai-codex/gpt-5.6-sol");
 		const notify = (ctx.ui as { notify: ReturnType<typeof vi.fn> }).notify;
-		expect(notify.mock.calls.some(([text]) => /no cheaper same-provider\/route model is measured and in this session's tier/.test(text))).toBe(true);
+		expect(notify.mock.calls.some(([text]) => /is measured and in this session's tier, or at or above that tier by name/.test(text))).toBe(true);
 		ctx.model = small;
 		await fake.fire("model_select", { model: small }, ctx);
 		expect(statuses.at(-1)?.classifier).toBe("openai-codex/gpt-5.6-terra");

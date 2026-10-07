@@ -79,13 +79,66 @@ describe("classifierCandidates: session-contained capability and context floor",
 	});
 
 	it("uses the session itself with a reason when no model meets both floors", () => {
-		const session = model("openai", "gpt-5-nano", 0.05, 1_000_000);
-		// Mini is capable but cannot contain this session's catalog window; the
-		// tiny session is terminal-only and cannot count as an automatic candidate.
+		const session = model("openai", "gpt-5.5", 10, 1_000_000);
+		// Mini is cheaper but cannot contain this session's catalog window.
 		const result = pickFull([session, model("openai", "gpt-5-mini", 0.25, 200_000)], session);
-		expect(result.candidates).toEqual([{ model: session, source: "session" }]);
+		expect(result.candidates[0]).toEqual({ model: session, source: "session" });
 		expect(result.fallback).toMatchObject({ reason: "no-qualifying-model" });
 		expect(result.notices).toContainEqual(expect.objectContaining({ fallbackReason: "no-qualifying-model" }));
+	});
+
+	it("never screens a tiny session with a dearer measured model", () => {
+		// Qwen 3.8 27B drew this 2.4T model at five times its input price.
+		const session = model("openrouter", "qwen/qwen3.8-27b", 0.42, 1_000_000);
+		const alternate = model("openrouter", "qwen/qwen3.8-2.4t-a95b", 2, 1_000_000);
+		measure([session, alternate]);
+		expect(intrinsicTier(session)).toBe("tiny");
+		const result = pickFull([session, alternate], session);
+		expect(result.candidates).toEqual([{ model: session, source: "session" }]);
+		expect(result.fallback).toMatchObject({ reason: "no-qualifying-model" });
+	});
+
+	it.each([
+		["qwen/qwen3.8-27b", 0.42, "qwen/qwen3.7-flash", 0.03],
+		["deepseek/deepseek-v3.2", 0.25, "deepseek/deepseek-v4-flash", 0.028],
+	] as const)("screens tiny %s with the subagents' model when nothing is measured", (id, price, subagentId, subagentPrice) => {
+		setCapabilitySnapshotForTest(undefined);
+		setModelFactsForTest(undefined);
+		const session = model("openrouter", id, price, 163_840);
+		const subagent = model("openrouter", subagentId, subagentPrice, 1_000_000);
+		expect(intrinsicTier(session)).toBe("tiny");
+		const result = pickFull([session, subagent], session);
+		expect(result.candidates).toEqual([{ model: subagent, source: "subagent" }, { model: session, source: "session" }]);
+		expect(result.fallback).toBeUndefined();
+	});
+
+	it("never takes an unscored model priced at or above the session's", () => {
+		setCapabilitySnapshotForTest(undefined);
+		setModelFactsForTest(undefined);
+		const session = model("openrouter", "qwen/qwen3.8-27b", 0.42, 1_000_000);
+		for (const price of [0.42, 0.5]) {
+			const sibling = model("openrouter", "qwen/qwen3.7-flash", price, 1_000_000);
+			expect(pickFull([session, sibling], session).candidates).toEqual([{ model: session, source: "session" }]);
+		}
+	});
+
+	it("prefers a measured alternate to the subagents' model", () => {
+		const session = model("openai", "gpt-5.6-sol", 5, 200_000);
+		const measured = model("openai", "gpt-5.6-terra", 2, 200_000);
+		const unscored = model("openai", "gpt-5.6-unknown", 1, 200_000);
+		measure([session, measured]);
+		expect(pickFull([session, unscored, measured], session).candidates).toEqual([
+			{ model: measured, source: "economical" }, { model: session, source: "session" },
+		]);
+	});
+
+	it("never screens with an experimental build, measured or not", () => {
+		const session = model("openrouter", "deepseek/deepseek-v4.1-flash", 0.3, 1_048_576);
+		const experimental = model("openrouter", "deepseek/deepseek-v4-flash-vision-exp", 0.2156, 1_048_576);
+		measure([session, experimental]);
+		expect(pickFull([session, experimental], session).candidates).toEqual([{ model: session, source: "session" }]);
+		setCapabilitySnapshotForTest(undefined);
+		expect(pickFull([session, experimental], session).candidates).toEqual([{ model: session, source: "session" }]);
 	});
 
 	it("keeps qualified candidates ahead of the terminal session fallback", () => {
@@ -121,13 +174,24 @@ describe("classifierCandidates: session-contained capability and context floor",
 		expect(result.fallback?.text).toMatch(/window|context/i);
 	});
 
-	it("publishes why the session was retained when it is the cheapest qualified model", () => {
+	it("never screens with a model dearer than the session's", () => {
 		const session = model("anthropic", "claude-opus-5", 1, 200_000);
 		const other = model("anthropic", "claude-fable-5", 2, 200_000);
 		const result = pickFull([session, other], session);
-		expect(result.candidates[0]).toMatchObject({ model: session, source: "session" });
-		expect(result.fallback).toMatchObject({ reason: "session-is-cheapest-qualified" });
-		expect(result.fallback?.text).toMatch(/cheapest.*context|context.*cheapest/i);
+		expect(result.candidates).toEqual([{ model: session, source: "session" }]);
+		expect(result.fallback).toMatchObject({ reason: "no-qualifying-model" });
+	});
+
+	it("keeps an alternate priced the same as the session", () => {
+		const session = model("anthropic", "claude-opus-5", 2, 200_000);
+		const other = model("anthropic", "claude-sonnet-5", 2, 200_000);
+		expect(pickFull([session, other], session).candidates.map((entry) => entry.model.id)).toContain("claude-sonnet-5");
+	});
+
+	it("keeps an unpriced session on its own model", () => {
+		const session = model("anthropic", "claude-opus-5", undefined, 200_000);
+		const other = model("anthropic", "claude-sonnet-5", 1, 200_000);
+		expect(pickFull([session, other], session).candidates).toEqual([{ model: session, source: "session" }]);
 	});
 });
 
@@ -145,22 +209,22 @@ describe("classifierCandidates: below-frontier measured floor", () => {
 		expect(result.fallback).toBeUndefined();
 	});
 
-	it("keeps a cheaper below-frontier session ahead of measured but more expensive alternates", () => {
+	it("drops measured alternates dearer than a below-frontier session", () => {
 		const session = model("openai", "gpt-5.6-sol", 1, 200_000);
 		const alternate = model("openai", "gpt-5.6-terra", 2, 200_000);
 		measure([session, alternate]);
 		const result = pickFull([alternate, session], session);
-		expect(result.candidates).toEqual([{ model: session, source: "session" }, { model: alternate, source: "economical" }]);
-		expect(result.fallback?.reason).toBe("session-is-cheapest-qualified");
-		expect(result.fallback?.text).toContain("no cheaper same-provider/route model is measured and in this session's tier");
+		expect(result.candidates).toEqual([{ model: session, source: "session" }]);
+		expect(result.fallback?.reason).toBe("no-qualifying-model");
+		expect(result.fallback?.text).toContain("is measured and in this session's tier, or at or above that tier by name");
 	});
 
-	it("keeps the session when the alternate has no score of its own", () => {
+	it("screens with the subagents' model when the alternate has no score of its own", () => {
 		const session = model("openai", "gpt-5.6-sol", 5, 200_000);
 		const alternate = model("openai", "gpt-5.6-terra", 2, 200_000);
 		const snapshot = measure([session, alternate]);
 		setCapabilitySnapshotForTest({ ...snapshot, rows: snapshot.rows.filter((row) => row.slug !== "gpt-5-6-terra") });
-		expect(pickFull([session, alternate], session).candidates).toEqual([{ model: session, source: "session" }]);
+		expect(pickFull([session, alternate], session).candidates).toEqual([{ model: alternate, source: "subagent" }, { model: session, source: "session" }]);
 	});
 
 	it("keeps the session when the measured alternate sits in a lower tier", () => {
@@ -191,23 +255,33 @@ describe("classifierCandidates: below-frontier measured floor", () => {
 		vi.stubEnv("CC_PROMPT_TIER", "frontier");
 		const session = model("openai", "gpt-5.6-sol", 5, 200_000);
 		const alternate = model("openai", "gpt-5.6-terra", 2, 200_000);
-		expect(pickFull([alternate], session).candidates).toEqual([{ model: session, source: "session" }]);
+		// Read as frontier, the unscored alternate would qualify outright.
+		setCapabilitySnapshotForTest(undefined);
+		expect(pickFull([alternate], session).candidates).toEqual([{ model: alternate, source: "subagent" }, { model: session, source: "session" }]);
 	});
 
 	it.each([
-		["qwen/qwen3.8-27b", 0.42, "tiny", "qwen/qwen3.7-flash", 0.03, 1_000_000],
-		["deepseek/deepseek-v4.1-flash", 0.3, "cheap", "deepseek/deepseek-v4-flash-vision-exp", 0.2156, 1_048_576],
 		["z-ai/glm-5.3", 1.4, "workhorse", "z-ai/glm-5.3-flashx", 0.37, 1_048_576],
 		["qwen/qwen3.8-max-0902", 2, "workhorse", "qwen/qwen3.5-plus-02-15", 0.26, 1_000_000],
-	] as const)("keeps %s rather than an unscored alternate", (id, price, tier, alternateId, alternatePrice, window) => {
+	] as const)("screens %s with the subagents' unscored model", (id, price, tier, alternateId, alternatePrice, window) => {
+		setCapabilitySnapshotForTest(undefined);
 		setModelFactsForTest(undefined);
 		const session = model("openrouter", id, price, window);
 		const alternate = model("openrouter", alternateId, alternatePrice, window);
 		expect(intrinsicTier(session)).toBe(tier);
 		const result = pickFull([session, alternate], session);
+		expect(result.candidates).toEqual([{ model: alternate, source: "subagent" }, { model: session, source: "session" }]);
+		expect(result.fallback).toBeUndefined();
+	});
+
+	it("keeps a session whose only cheaper sibling is below its tier by name", () => {
+		setCapabilitySnapshotForTest(undefined);
+		const session = model("openai", "gpt-5.6-sol", 5, 200_000);
+		const lower = model("openai", "gpt-5.6-luna", 0.2, 200_000);
+		expect(intrinsicTier(lower)).not.toBe(intrinsicTier(session));
+		const result = pickFull([session, lower], session);
 		expect(result.candidates).toEqual([{ model: session, source: "session" }]);
-		expect(result.fallback).toMatchObject({ reason: "no-qualifying-model" });
-		expect(result.fallback?.text).toContain("no cheaper same-provider/route model is measured and in this session's tier");
+		expect(result.fallback?.text).toContain("is measured and in this session's tier, or at or above that tier by name");
 	});
 });
 
@@ -265,5 +339,6 @@ describe("describeCandidate", () => {
 	it("includes automatic selection or session fallback metadata", () => {
 		expect(describeCandidate({ model: model("openai", "gpt-5-mini", 0.25, 200_000), source: "economical" })).toContain("cheapest model within");
 		expect(describeCandidate({ model: model("groq", "llama-3.3-70b-versatile", 0.6, 200_000), source: "session" })).toContain("this session's model");
+		expect(describeCandidate({ model: model("openai", "gpt-5.6-terra", 2, 200_000), source: "subagent" })).toContain("subagents run on");
 	});
 });

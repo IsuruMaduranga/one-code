@@ -78,7 +78,7 @@ export function collectModelFacts(available: Model<Api>[], session: SessionView,
 		keyConfigured: configuredCapabilityKey(home, env) !== undefined,
 		snapshot: snapshot ? { fetchedAt: snapshot.fetchedAt, rows: snapshot.rows.length } : undefined,
 		subagent: verdict(subagent.source === "automatic" ? subagent.model : undefined, "subagent"),
-		classifier: verdict(first?.source === "economical" ? first.model : undefined, "classifier"),
+		classifier: verdict(first && first.source !== "session" ? first.model : undefined, "classifier"),
 		reader: verdict(reader?.via === "tier" ? reader.model : undefined, "reader"),
 	};
 	return {
@@ -166,8 +166,8 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 		lines.push({ text: `Auto-mode classifier: ${classifier.description ?? modelSpec(classifier.model)}${pinned}`, level: "ok" });
 		lines.push({
 			text: facts.sessionTier === "frontier"
-				? "Classifier policy: measured capability pass, or an unscored workhorse-or-better model; cheapest qualifying model first."
-				: "Classifier policy: an alternate must be measured and in this session's tier (or measured at least as capable); otherwise this session's model screens calls. Cheapest qualifying model first.",
+				? "Classifier policy: measured capability pass, or an unscored workhorse-or-better model; cheapest qualifying model first, never dearer than this session's model."
+				: "Classifier policy: the cheapest alternate that is measured and in this session's tier (or measured at least as capable); else the cheaper model this session's subagents run on; else this session's model. Never dearer than this session's model.",
 			indent: 1,
 			level: "dim",
 		});
@@ -211,7 +211,7 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 	} else if (cap.keyConfigured) {
 		lines.push({ text: "Capability scores: key configured, snapshot not fetched yet — it downloads in the background on the next interactive start", level: "dim" });
 	} else {
-		lines.push({ text: "Capability scores: none — below-frontier classifiers keep the session model; other automatic picks use model names and generations", level: "warn" });
+		lines.push({ text: "Capability scores: none — below-frontier classifiers use the subagents' model, else the session model; other automatic picks use model names and generations", level: "warn" });
 		findings.push({ level: "warn", text: "No Artificial Analysis key: subagent and classifier picks cannot be judged by measured coding ability.", fix: KEY_ADVICE });
 	}
 

@@ -527,13 +527,14 @@ Session grants from the approval prompt don't apply in auto mode either.
 
 ### The classifier model
 
-The classifier always stays on your session's provider. Below frontier tier,
-it uses a cheaper model only if that model has a measured capability score and
-sits in your session's own tier; otherwise your own model screens its calls.
-There's no point screening a weaker model with a stronger one, and a cheaper
-model nobody has measured might be the weaker of the two. Frontier
-sessions can also use an unscored workhorse-tier model, so Opus and Sonnet 5.5
-screen with Sonnet 5. The details are in
+The classifier always stays on your session's provider, and it's never
+dearer than your own model: there's no point screening a model with a more
+expensive one. Below frontier tier, it first looks for a cheaper model with a
+measured capability score in your session's own tier. If there isn't one, it
+uses the model your subagents run on, which is cheaper than yours and at least
+your tier by name. If there's no such model either, your own model screens its
+calls. Frontier sessions can also use an unscored workhorse-tier model, so
+Opus and Sonnet 5.5 screen with Sonnet 5. The details are in
 [Automatic model selection](providers-and-models.md#automatic-model-selection).
 
 When auto mode is on, the banner shows which classifier is in use, and a

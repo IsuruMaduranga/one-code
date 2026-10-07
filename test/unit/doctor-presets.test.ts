@@ -93,16 +93,16 @@ describe("computePresets", () => {
 		expect(presets.find((p) => p.name === "economical")?.main.id).toBe("gpt-5.6-luna"); // not the tool-less row
 	});
 
-	it("previews a below-frontier main as its classifier rather than an unscored cheaper peer", () => {
+	it("previews a below-frontier main's classifier as the unscored model its subagents run on", () => {
 		const main = model("openai", "gpt-5.6-sol", 5, "openai-responses");
 		const cheaper = model("openai", "gpt-5.6-terra", 2, "openai-responses");
 		const result = computePresets([main, cheaper], main);
 		const quality = result.presets.find((preset) => preset.name === "quality")!;
 		expect(quality.main).toBe(main);
-		expect(quality.classifier).toBe(main);
-		expect(describePresetChanges(quality)[2]).toBe("auto-mode classifier stays automatic (picks openai/gpt-5.6-sol)");
+		expect(quality.classifier).toBe(cheaper);
+		expect(describePresetChanges(quality)[2]).toBe("auto-mode classifier stays automatic (picks openai/gpt-5.6-terra)");
 		const text = presetsSection(result, main).lines.map((line) => line.text).join("\n");
-		expect(text).toContain("below frontier, an alternate requires measured capability");
+		expect(text).toContain("below frontier, a measured alternate first, else the model its subagents run on");
 		expect(text).toContain("Frontier sessions also accept unscored workhorse-or-better models");
 	});
 

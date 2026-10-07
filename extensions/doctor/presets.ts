@@ -164,7 +164,7 @@ export function presetsSection(result: ReturnType<typeof computePresets>, sessio
 		return { title: "Presets", lines };
 	}
 	lines.push({
-		text: "Classifier previews use each preset's main model: below frontier, an alternate requires measured capability; otherwise the main model screens calls. Frontier sessions also accept unscored workhorse-or-better models.",
+		text: "Classifier previews use each preset's main model: below frontier, a measured alternate first, else the model its subagents run on, else the main model itself. Never dearer than the main model. Frontier sessions also accept unscored workhorse-or-better models.",
 		level: "dim",
 	});
 	const family = sessionModel ? sessionModel.provider : "";
