@@ -21,6 +21,7 @@ import { classifierCandidates } from "../auto-mode/model-select.ts";
 import { autoSelectable, catalogModelFor } from "../lib/model-catalog.ts";
 import { isDatedDuplicate, modelsContainedToSession, modelSpec, pricedInput, supportsImageInput } from "../lib/model-policy.ts";
 import { intrinsicTier, type PromptTier, servedCatalogIds } from "../lib/model-tier.ts";
+import { newerModelSuggestion } from "../lib/newer-model.ts";
 import { resolveSubagentModel } from "../subagents/model-select.ts";
 import type { ReportLine, ReportSection } from "./report.ts";
 
@@ -64,13 +65,20 @@ export type PresetsUnavailable = "no-model" | "no-priced-models";
 export function presetPool(available: Model<Api>[], sessionModel: Model<Api>): Model<Api>[] {
 	const all = modelsContainedToSession(available, sessionModel);
 	const served = servedCatalogIds(all);
+	// The newer-model check flags a main model with a newer model of its line at
+	// no more than 1.1× its price; supersession's band is 0.6–1.5×, so GPT-5.6
+	// Sol survives it against the half-price GPT-6.1 Sol. A preset never
+	// recommends a model /doctor would then call outdated, nor an alias of one
+	// (`gpt-daybreak-blue-latest` serves gpt-5.6-sol today).
+	const identity = (m: Model<Api>): string => catalogModelFor(m)?.id ?? modelSpec(m);
+	const outdated = new Set(all.filter((m) => newerModelSuggestion(available, m)).map(identity));
 	const contained = all.filter(
 		// A preset recommends a MAIN model: never one automatic selection skips
 		// (superseded by a model this provider serves, legacy, deprecated, unable
 		// to call tools, not a text model: model-catalog.ts), whatever its tier.
 		// A model no catalog knows stays, judged by its tier alone.
 		(m) => {
-			if (pricedInput(m) === undefined) return false;
+			if (pricedInput(m) === undefined || outdated.has(identity(m))) return false;
 			const entry = catalogModelFor(m);
 			return !entry || autoSelectable(entry, served);
 		},
@@ -96,7 +104,10 @@ function pickMain(name: PresetName, pool: Model<Api>[]): { model: Model<Api>; no
 			return tiny ? { model: tiny, note: "only tiny-tier models on this provider — expect weaker results" } : undefined;
 		}
 		case "balanced": {
-			const pick = cheapest(workhorse) ?? cheapest(frontier) ?? priciest(cheap);
+			// The cheapest workhorse-or-better model: a frontier model cheaper than
+			// every workhorse one (GPT-6.1 Sol against the GPT-5.5 Pro SKU) is the
+			// better buy, not a reason to pay for the premium SKU.
+			const pick = cheapest([...workhorse, ...frontier]) ?? priciest(cheap);
 			if (pick) return { model: pick, note: workhorse.length === 0 ? "no workhorse-tier model on this provider" : undefined };
 			const any = priciest(pool);
 			return any ? { model: any, note: "only tiny-tier models on this provider — expect weaker results" } : undefined;

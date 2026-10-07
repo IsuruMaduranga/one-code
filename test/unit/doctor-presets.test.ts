@@ -140,18 +140,33 @@ describe("computePresets", () => {
 		expect(text).toContain("the cheapest model in its tier or above that is strictly cheaper than the main model");
 	});
 
-	it("previews an image-capable main's subagents as image-capable, as the live resolver does", () => {
+	it("never recommends a main model that /doctor would then call outdated", () => {
+		pinCatalog([
+			{ id: "openai/gpt-6.1-sol", released: "2026-09-29", price: [2, 10] },
+			{ id: "openai/gpt-6-astra", released: "2026-09-04", price: [5, 40] },
+			// The alias serves GPT-5.6 Sol today.
+			{ id: "openai/gpt-5.6-sol", released: "2026-07-09", price: [4, 20], servedAs: ["openai/gpt-sol-latest"] },
+			{ id: "openai/gpt-6-luna", released: "2026-09-22", price: [0.1, 0.5] },
+		]);
+		const oa = (id: string, input: number, output: number) => ({ ...model("openai", id, input, "openai-responses"), cost: { input, output } });
+		const available = [oa("gpt-6.1-sol", 2, 10), oa("gpt-6-astra", 5, 40), oa("gpt-5.6-sol", 4, 20), oa("gpt-6-luna", 0.1, 0.5), oa("gpt-sol-latest", 4, 20)];
+		// GPT-6.1 Sol is the same line, newer and cheaper: GPT-5.6 Sol is not offered, nor its alias.
+		expect(presetPool(available, available[0]).map((m) => m.id)).toEqual(["gpt-6.1-sol", "gpt-6-astra", "gpt-6-luna"]);
+		const balanced = computePresets(available, available[0]).presets.find((p) => p.name === "balanced")!;
+		expect(balanced.main.id).toBe("gpt-6.1-sol");
+	});
+
+	it("runs balanced on the cheapest workhorse-or-better model, a frontier one when it is cheaper", () => {
 		pinCatalog([
 			{ id: "openai/gpt-6-sol", released: "2026-09-22", price: [1, 13] },
 			{ id: "openai/o-mid", released: "2026-09-01", price: [3, 12] },
 			{ id: "openai/o-big", released: "2026-09-01", price: [5, 20] },
 		]);
-		const oa = (id: string, input: number, modalities: string[]) => ({ ...model("openai", id, input, "openai-responses"), input: modalities });
-		const mid = oa("o-mid", 3, ["text", "image"]);
-		const balanced = (sol: any) => computePresets([mid, oa("o-big", 5, ["text", "image"]), sol], mid).presets.find((p) => p.name === "balanced")!;
-		// Balanced runs the cheapest workhorse; the cheaper frontier Sol serves its subagents only if it takes images too.
-		expect(balanced(oa("gpt-6-sol", 1, ["text"])).subagents.model.id).toBe("o-mid");
-		expect(balanced(oa("gpt-6-sol", 1, ["text", "image"])).subagents.model.id).toBe("gpt-6-sol");
+		const oa = (id: string, input: number) => model("openai", id, input, "openai-responses");
+		const available = [oa("o-mid", 3), oa("o-big", 5), oa("gpt-6-sol", 1)];
+		const balanced = computePresets(available, available[0]).presets.find((p) => p.name === "balanced")!;
+		expect(balanced.main.id).toBe("gpt-6-sol");
+		expect(balanced.note).toBeUndefined();
 	});
 
 	it("never lands the economical preset on a tiny model while a capable one exists", () => {
