@@ -366,6 +366,32 @@ export class ReminderQueue {
 		}
 	}
 
+	/**
+	 * A `/tree` switch to a branch whose last snapshot is `snapshot`: its
+	 * session facts (`factKeys`, an absent one included), its sticky lifetimes
+	 * and its pins come back, so its messages keep the bytes they were sent
+	 * with. Live state stays live: other first-prepend blocks keep their
+	 * current text, and a lifetime open on the branch stays open only while its
+	 * owner still holds it, else it closes on its recorded carriers. What the
+	 * branch left behind put here stays until a drain finds its carriers gone.
+	 */
+	restoreBranch(snapshot: { stack: readonly ReminderEntry[]; sticky: readonly ReminderEntry[]; pinned?: readonly ReminderEntry[] }, factKeys: readonly string[]): void {
+		this.replaceFirstPrepend(factKeys, snapshot.stack);
+		const same = (a: ReminderEntry, b: ReminderEntry) => a.key === b.key && a.text === b.text && a.since === b.since;
+		const restored: StoredReminder[] = structuredClone([...snapshot.sticky]);
+		const now = this.now();
+		for (const entry of restored) {
+			if (entry.until !== undefined) continue;
+			const live = this.sticky.find((current) => current.until === undefined && same(current, entry));
+			if (live?.key !== undefined && this.everyTurn.get(live.key) === live) this.everyTurn.set(live.key, entry);
+			else entry.until = now;
+		}
+		this.sticky = [...restored, ...this.sticky.filter((current) => !restored.some((entry) => same(entry, current)))];
+		const pinned: StoredReminder[] = structuredClone([...(snapshot.pinned ?? [])]);
+		const known = new Set(pinned.map((entry) => JSON.stringify(strip(entry))));
+		this.pinned = [...pinned, ...this.pinned.filter((entry) => !known.has(JSON.stringify(strip(entry))))];
+	}
+
 	/** A new snapshot supersedes undelivered notices about its old facts. Delivered pins stay history. */
 	cancelPending(keys: readonly string[]): void {
 		const cancelled = new Set(keys);

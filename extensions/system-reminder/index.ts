@@ -69,6 +69,17 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 		if (restored) reminderQueue.restore(restored.stack, restored.sticky, RESTORED_STACK_KEYS, LIVE_CONTEXT_KEYS, restored.pinned);
 		else reminderQueue.releaseRestore();
 	});
+	// A /tree switch fires only session_tree (findings §3). The selected branch's
+	// messages were sent with its own facts, sticky blocks and pins: take them
+	// from its last snapshot, as a resume would, while live state and every
+	// emitter's baseline stay current (claude-context republishes its own).
+	pi.on("session_tree", (_event, ctx) => {
+		const branch = contextStackOnBranch(ctx.sessionManager.getBranch());
+		stored = branch !== undefined;
+		lastState = branch ? JSON.stringify({ version: 1, sticky: branch.sticky, pinned: branch.pinned ?? [], baselines: branch.baselines }) : "";
+		lastStack = branch ? JSON.stringify(branch.stack) : "";
+		if (branch) reminderQueue.restoreBranch(branch, CONTEXT_FACT_KEYS);
+	});
 	const persistSnapshot = (stack: ReminderEntry[] = reminderQueue.persistentEntries("first-prepend")) => {
 		const state = { version: 1 as const, sticky: reminderQueue.persistentEntries("sticky-append"), pinned: reminderQueue.persistentPins(), baselines };
 		const serialized = JSON.stringify(state);

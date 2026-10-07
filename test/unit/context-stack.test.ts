@@ -188,6 +188,40 @@ describe("context snapshot owner", () => {
 		expect(sent).not.toContain("old rules");
 	});
 
+	it("restores a /tree branch's pins and closed lifetimes, but never its stale open state", async () => {
+		let branch: unknown[] = [];
+		const fake = createFakePi();
+		systemReminderExtension(fake.pi as never);
+		const ctx = createFakeCtx({ sessionManager: { getBranch: () => branch } });
+		await fake.fire("session_start", { reason: "startup" }, ctx);
+		const request = async (messages: AgentMessage[]) => (await fake.fireOne<{ messages: AgentMessage[] }>("context", { messages }, ctx))?.messages ?? messages;
+		const emit = (entry: ReminderEntry) => fake.events.emit(REMINDER_CHANNEL, { scope: "every-turn", ...entry });
+		emit(block("permission-mode", "auto", { placement: "sticky-append", since: 0 }));
+		emit(block("plan", "plan on", { placement: "sticky-append", since: 0 }));
+		await request([user("one", 10)]);
+		fake.events.emit(REMINDER_CHANNEL, { key: "plan", remove: true });
+		fake.events.emit(REMINDER_CHANNEL, { text: "one shot" });
+		const a = [user("one", 10), user("two", 20)];
+		const sentA = await request(a);
+		expect(JSON.stringify(sentA[1])).toContain("one shot");
+		const branchA = branchOf(fake);
+
+		// Branch B forks after message one: the pin and plan's carrier "two" are not on it.
+		branch = branchA.slice(0, 1);
+		await fake.fire("session_tree", {}, ctx);
+		fake.events.emit(REMINDER_CHANNEL, { key: "permission-mode", remove: true });
+		const sentB = await request([user("one", 10), user("three", 30)]);
+		expect(JSON.stringify(sentB[1])).not.toContain("one shot");
+		expect(JSON.stringify(sentB[1])).not.toContain("auto");
+
+		branch = branchA;
+		await fake.fire("session_tree", {}, ctx);
+		const back = await request([...a, user("four", 40)]);
+		expect(JSON.stringify(back.slice(0, 2))).toBe(JSON.stringify(sentA));
+		// Auto mode was switched off live; the branch's history keeps its blocks, the new prompt does not claim it.
+		expect(JSON.stringify(back[2])).not.toContain("auto");
+	});
+
 	it("a fresh /clear or old session without metadata does not inherit another stack", async () => {
 		const first = await start([custom(snapshot([block("claude-context", "old")]))]);
 		expect(restoredContext(first.fake.events)?.stack[0].text).toBe("old");

@@ -43,7 +43,7 @@ import { projectMemoryDir, truncateIndex } from "../lib/memory.ts";
 import { claudeConfigDir, oneCodeStateDir, tryRealpath } from "../lib/paths.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, type ReminderEntry, tailAnchor } from "../lib/reminders.ts";
 import { inContextEntries } from "../lib/compaction-boundary.ts";
-import { CONTEXT_BASELINE_CHANNEL, CONTEXT_FACTS_REFRESH_CHANNEL, restoredContext, type ContextStackSnapshot } from "../lib/context-stack.ts";
+import { CONTEXT_BASELINE_CHANNEL, CONTEXT_FACTS_REFRESH_CHANNEL, contextStackOnBranch, restoredContext, type ContextStackSnapshot } from "../lib/context-stack.ts";
 import { compactionGitStatus, contextFactsBaseline, DATE_CHANGE_KEY, legacyResumeFactsNotice, RESUME_FACTS_KEY, resumeFactsNotice, storedFactsBaseline, type ContextFactsBaseline } from "../lib/context-facts.ts";
 import { resolveToolPath } from "../lib/tool-path.ts";
 import { sessionWorkCwd, WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
@@ -176,6 +176,17 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 			oneCode: buildOneCodeBlock(oneCodeFiles),
 		};
 	};
+	/** What a stored snapshot says the model was shown: its facts, the files its blocks carry, and its dates. */
+	const adoptSnapshot = (snapshot: ContextStackSnapshot) => {
+		const saved = snapshot.baselines["claude-context"] as { startupShown?: unknown; shownDate?: unknown; facts?: unknown } | undefined;
+		facts = storedFactsBaseline(saved?.facts);
+		startupShown = new Set(Array.isArray(saved?.startupShown) ? saved.startupShown.filter((p): p is string => typeof p === "string") : []);
+		attachedNested = new Set(startupShown);
+		blockDate = snapshot.stack.find((entry) => entry.key === DATE_REMINDER_KEY)?.text.match(/^Today's date is (\d{4}-\d{2}-\d{2})\.$/)?.[1] ?? "";
+		shownDate = typeof saved?.shownDate === "string" ? saved.shownDate : blockDate;
+		hadInstructions = snapshot.stack.some((entry) => entry.key === REMINDER_KEY);
+		hadOneCode = snapshot.stack.some((entry) => entry.key === ONECODE_REMINDER_KEY);
+	};
 	let files: ReturnType<typeof readFiles> | undefined;
 	const adoptFiles = (current: ReturnType<typeof readFiles>) => {
 		files = current;
@@ -280,14 +291,9 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 			}
 		}
 		if (restored) {
-			const baseline = restored.baselines["claude-context"] as { startupShown?: unknown; shownDate?: unknown; facts?: unknown } | undefined;
-			facts = storedFactsBaseline(baseline?.facts);
-			startupShown = new Set(Array.isArray(baseline?.startupShown) ? baseline.startupShown.filter((p): p is string => typeof p === "string") : []);
-			attachedNested = new Set(startupShown);
+			adoptSnapshot(restored);
 			rule = instructionRule(os.homedir());
 			gitStatus = null; // The stored snapshot wins; do not take another one.
-			blockDate = restored.stack.find((entry) => entry.key === DATE_REMINDER_KEY)?.text.match(/^Today's date is (\d{4}-\d{2}-\d{2})\.$/)?.[1] ?? "";
-			shownDate = typeof baseline?.shownDate === "string" ? baseline.shownDate : blockDate;
 			publishBaseline();
 			return;
 		}
@@ -417,7 +423,16 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	});
 
 	// A branch switch leaves the attachments of the branch left behind; the new one may lack them.
-	pi.on("session_tree", () => {
+	// Its facts are the selected branch's (system-reminder restores its blocks): a branch from
+	// before a compaction still shows the session-start facts, and a later compaction or date
+	// notice compares against those.
+	pi.on("session_tree", (_event, ctx) => {
+		const branch = contextStackOnBranch(ctx.sessionManager.getBranch());
+		if (branch) {
+			adoptSnapshot(branch);
+			if (pendingResume) pendingResume = branch;
+			publishBaseline();
+		}
 		attachedNested = new Set(startupShown);
 		shownByResult.clear();
 		pendingNested.clear();
