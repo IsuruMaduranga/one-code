@@ -130,4 +130,35 @@ describe("scanToolCallMarkup", () => {
 	it("ignores lone tags and ordinary angle brackets", () => {
 		expect(scanToolCallMarkup('{"content":"<tool_call> and </arg_value> a < b > c"}', 0).count).toBe(0);
 	});
+
+	const tags = "</arg_value><arg_key>x</arg_key><arg_value>";
+
+	it("counts markup in file content written or edited on its own, apart from the call's other arguments", () => {
+		expect(scanToolCallMarkup(JSON.stringify({ path: "a.test.ts", content: `expect("${tags}")` }), 0)).toMatchObject({ count: 0, contentCount: 2 });
+		expect(scanToolCallMarkup(JSON.stringify({ path: "a.ts", edits: [{ oldText: tags, newText: `${tags}!` }] }), 0)).toMatchObject({ count: 0, contentCount: 4 });
+		expect(scanToolCallMarkup(JSON.stringify({ cell_id: "c1", new_source: tags }), 0)).toMatchObject({ count: 0, contentCount: 2 });
+		expect(scanToolCallMarkup(JSON.stringify({ content: `say "hi" \\" ${tags}` }), 0)).toMatchObject({ count: 0, contentCount: 2 });
+	});
+
+	it("still counts markup in a write's path or after its content string closed", () => {
+		expect(scanToolCallMarkup(`{"path": "a.py${tags}`, 0)).toMatchObject({ count: 2, contentCount: 0 });
+		expect(scanToolCallMarkup(`{"content": "ok", "path": "a.py${tags}`, 0)).toMatchObject({ count: 2, contentCount: 0 });
+		expect(scanToolCallMarkup(JSON.stringify({ command: `echo ${tags}` }), 0)).toMatchObject({ count: 2, contentCount: 0 });
+	});
+
+	it("classifies content markup the same when the text arrives in deltas", () => {
+		const raw = JSON.stringify({ path: "a.ts", content: `a "quoted" ${tags} b \\ ${tags}` }) + `{"path": "b${tags}`;
+		let text = "";
+		let next = 0;
+		let count = 0;
+		let contentCount = 0;
+		for (const char of raw) {
+			text += char;
+			const scan = scanToolCallMarkup(text, next);
+			count += scan.count;
+			contentCount += scan.contentCount;
+			next = scan.next;
+		}
+		expect({ count, contentCount }).toEqual({ count: 2, contentCount: 4 });
+	});
 });

@@ -4,7 +4,7 @@ import { notifyOrPrint } from "../lib/headless-output.ts";
 import { sessionOutlivesTurn } from "../lib/notifications.ts";
 import { isOpenRouter, openRouterProviderName, toolCallCorruptionNotice, type UpstreamFailure } from "../lib/openrouter-generation.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
-import { scanToolCallMarkup, TOOL_CALL_MARKUP_LIMIT, type ToolCallDamage, toolCallCorruptionReason } from "../lib/tool-call-corruption.ts";
+import { CONTENT_MARKUP_LIMIT, scanToolCallMarkup, TOOL_CALL_MARKUP_LIMIT, type ToolCallDamage, toolCallCorruptionReason } from "../lib/tool-call-corruption.ts";
 import { withKeepAlive } from "../lsp/keep-alive.ts";
 
 // Silence allowed inside a stream. Every raw chunk restarts the clock, but
@@ -18,7 +18,7 @@ const TOOL_CALL_IDLE_MS = 60_000;
 
 export default function toolCallCorruptionExtension(pi: ExtensionAPI) {
 	const alive = sessionAlive(pi);
-	const rawCalls = new Map<number, { raw: string; markup: number; next: number }>();
+	const rawCalls = new Map<number, { raw: string; markup: number; contentMarkup: number; next: number }>();
 	const flagged = new Map<string, ToolCallDamage>();
 	const pending = new Map<AbortController, Promise<void>>();
 	let responseId: string | undefined;
@@ -122,17 +122,18 @@ export default function toolCallCorruptionExtension(pi: ExtensionAPI) {
 		contentStarted = true;
 		switch (update.type) {
 			case "toolcall_start":
-				rawCalls.set(update.contentIndex, { raw: "", markup: 0, next: 0 });
+				rawCalls.set(update.contentIndex, { raw: "", markup: 0, contentMarkup: 0, next: 0 });
 				break;
 			case "toolcall_delta": {
-				const call = rawCalls.get(update.contentIndex) ?? { raw: "", markup: 0, next: 0 };
+				const call = rawCalls.get(update.contentIndex) ?? { raw: "", markup: 0, contentMarkup: 0, next: 0 };
 				call.raw += update.delta;
 				const scan = scanToolCallMarkup(call.raw, call.next);
 				call.markup += scan.count;
+				call.contentMarkup += scan.contentCount;
 				call.next = scan.next;
 				rawCalls.set(update.contentIndex, call);
 				// A leaked call can stream markup without end and never reach toolcall_end.
-				if (call.markup >= TOOL_CALL_MARKUP_LIMIT) return stopTurn(ctx, "corrupt-stream");
+				if (call.markup >= TOOL_CALL_MARKUP_LIMIT || call.contentMarkup >= CONTENT_MARKUP_LIMIT) return stopTurn(ctx, "corrupt-stream");
 				break;
 			}
 			case "toolcall_end": {

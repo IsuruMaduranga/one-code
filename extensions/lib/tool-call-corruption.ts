@@ -69,19 +69,43 @@ const LONGEST_MARKUP = 40;
 
 /** The number of markup matches that marks a streaming call as leaked. */
 export const TOOL_CALL_MARKUP_LIMIT = 2;
+/**
+ * The same inside file content (write, edit, notebook_edit), which can quote
+ * the markup legitimately (this repo's tests do); a leak there repeats without
+ * end and passes it within a few thousand characters.
+ */
+export const CONTENT_MARKUP_LIMIT = 50;
+
+// A string value under one of these keys is file content.
+const CONTENT_KEY = /"(?:content|oldText|newText|new_source)"\s*:\s*$/;
+
+/** Whether `index` sits in a string value under a content key: the nearest unescaped quote before it opens that value. */
+function inContentValue(text: string, index: number): boolean {
+	// lastIndexOf clamps a negative start to 0, so stop before it can repeat a quote at 0.
+	for (let quote = index; quote > 0; ) {
+		quote = text.lastIndexOf('"', quote - 1);
+		if (quote < 0) break;
+		let slashes = 0;
+		while (text[quote - 1 - slashes] === "\\") slashes++;
+		if (slashes % 2 === 0) return CONTENT_KEY.test(text.slice(Math.max(0, quote - 32), quote));
+	}
+	return false;
+}
 
 /**
  * Count native tool-call markup in `text` from `from` on, for a call whose
- * arguments are still streaming; `next` is where the following scan resumes,
- * so each delta is scanned once.
+ * arguments are still streaming, apart (`contentCount`) inside file content;
+ * `next` is where the following scan resumes, so each delta is scanned once.
  */
-export function scanToolCallMarkup(text: string, from: number): { count: number; next: number } {
+export function scanToolCallMarkup(text: string, from: number): { count: number; contentCount: number; next: number } {
 	TOOL_CALL_MARKUP.lastIndex = from;
 	let count = 0;
+	let contentCount = 0;
 	let next = from;
 	for (let match = TOOL_CALL_MARKUP.exec(text); match; match = TOOL_CALL_MARKUP.exec(text)) {
-		count++;
+		if (inContentValue(text, match.index)) contentCount++;
+		else count++;
 		next = TOOL_CALL_MARKUP.lastIndex;
 	}
-	return { count, next: Math.max(next, text.length - LONGEST_MARKUP) };
+	return { count, contentCount, next: Math.max(next, text.length - LONGEST_MARKUP) };
 }

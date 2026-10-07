@@ -245,6 +245,23 @@ describe("OpenRouter tool-call corruption wiring", () => {
 		expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringMatching(/Morph is corrupting tool calls.*cut off and the turn stopped.*openRouterRouting\.ignore/), "error");
 	});
 
+	it("writes a file whose content holds tool-call markup", async () => {
+		const tags = "</arg_value><arg_key>x</arg_key><arg_value>";
+		await stream(JSON.stringify({ path: "a.test.ts", content: `${tags}\n${tags}\n${tags}` }), "write", "write");
+		expect(await call("write", "write")).toBeUndefined();
+		expect(ctx.abort).not.toHaveBeenCalled();
+	});
+
+	it("stops a leak inside file content once it repeats past any real file's share", async () => {
+		await start();
+		await update({ type: "toolcall_start", contentIndex: 0 });
+		await update({ type: "toolcall_delta", contentIndex: 0, delta: '{"path": "a.py", "content": "x' });
+		for (let i = 0; i < 24; i++) await update({ type: "toolcall_delta", contentIndex: 0, delta: "</arg_value></tool_call><tool_call>write<arg_key>content</arg_key><arg_value>x" });
+		expect(ctx.abort).not.toHaveBeenCalled();
+		await update({ type: "toolcall_delta", contentIndex: 0, delta: "</arg_value></tool_call><tool_call>write<arg_key>content</arg_key><arg_value>x" });
+		expect(ctx.abort).toHaveBeenCalledTimes(1);
+	});
+
 	it("stops a tool call that goes silent for 60 s and names the provider", async () => {
 		await start();
 		await update({ type: "toolcall_start", contentIndex: 0 });
