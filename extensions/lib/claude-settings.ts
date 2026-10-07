@@ -12,10 +12,10 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, posix, win32 } from "node:path";
 import { claudeSourcesOn, userConfigDir } from "./config-mode.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "./one-code-settings.ts";
-import { claudeUserDir } from "./paths.ts";
+import { claudeManagedDir, claudeUserDir } from "./paths.ts";
 
 export interface ClaudeSettingsFile {
 	enabledPlugins?: Record<string, unknown>;
@@ -31,11 +31,10 @@ export function claudeUserSettingsPath(home: string): string {
 	return join(claudeUserDir(home), "settings.json");
 }
 
-/** Managed-settings locations, highest authority, matching Claude Code's paths. */
-export function managedSettingsPaths(): string[] {
-	if (process.platform === "darwin") return ["/Library/Application Support/ClaudeCode/managed-settings.json"];
-	if (process.platform === "win32") return ["C:\\ProgramData\\ClaudeCode\\managed-settings.json"];
-	return ["/etc/claude-code/managed-settings.json"];
+/** Managed-settings locations, highest authority: `managed-settings.json` in Claude Code's managed root. */
+export function managedSettingsPaths(platform: NodeJS.Platform = process.platform): string[] {
+	const { join: joinFor } = platform === "win32" ? win32 : posix;
+	return [joinFor(claudeManagedDir(platform), "managed-settings.json")];
 }
 
 /** Claude Code's `instructionFiles` values (findings §57); the default is `claude-md-or-agents-md`. */
