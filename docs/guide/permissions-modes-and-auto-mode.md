@@ -531,9 +531,10 @@ The classifier stays on your session's provider unless you choose otherwise.
 It runs on the cheapest model in your session's tier or above that costs less
 than your own: there's no point screening a model with a weaker or more
 expensive one, and a model at the same price saves nothing. An Opus session
-screens with Sonnet 5.5, and GPT-6 Astra with GPT-6.1 Sol. If no cheaper model
-in your tier fits your session's context window, your own model screens its
-calls. The details are in
+screens with Sonnet 5.5, and GPT-6 Astra with GPT-6.1 Sol. The pick also has
+to fit your session's context window and can't be an experimental (`-exp`)
+build. If no model in your tier or above meets all of that, your own model
+screens its calls. The details are in
 [Automatic model selection](providers-and-models.md#automatic-model-selection).
 
 To choose the classifier yourself, run `/auto-mode model`, or
@@ -595,13 +596,15 @@ The configuration keys, under `autoMode`, follow Claude Code's own schema:
 | `soft_deny` | string array | Extra rules that block unless you explicitly asked for the action. |
 | `allow` | string array | Extra rules that approve. |
 | `classifyAllShell` | boolean | Send every shell command to the classifier, even ones a narrow allow rule covers. |
+| `classifierModel` | string | One Code's own key: the classifier model, `provider/model-id`, instead of the automatic pick. Set it with `/auto-mode model`. |
 | `logDecisions` | boolean | Append every gate decision to `auto-mode-decisions.jsonl` next to the session files. |
 
 One Code reads `autoMode` from `~/.claude/settings.json`,
-`~/.onecode/settings.json`, and managed settings. It never reads `autoMode`
-from a project's `.claude/settings.json` or `.claude/settings.local.json`,
-because a checked-in file must not be able to loosen the classifier for
-whoever clones it.
+`~/.onecode/settings.json`, and managed settings, except `classifierModel`,
+which it reads only from `~/.onecode/settings.json` and managed settings.
+It never reads `autoMode` from a project's `.claude/settings.json` or
+`.claude/settings.local.json`, because a checked-in file must not be able
+to loosen the classifier for whoever clones it.
 
 To see the classifier's verdicts while you work, set `CC_AUTO_MODE_DEBUG=1`
 before launching; each decision is printed to stderr with its stage,

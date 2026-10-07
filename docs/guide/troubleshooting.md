@@ -88,9 +88,10 @@ nothing usable; the gate fails closed. Check `/auto-mode config` for the
 model in use, and `/doctor report` for provider credentials. Set
 `CC_AUTO_MODE_DEBUG=1` to see each verdict on stderr.
 
-**The classifier approves or blocks something it shouldn't.** A Haiku-class
-classifier is a measurably weaker boundary than a Sonnet-class one. Choose a
-stronger classifier with `/auto-mode model`, or a stronger main model.
+**The classifier approves or blocks something it shouldn't.** A cheap-tier
+classifier is a measurably weaker boundary than a workhorse- or
+frontier-tier one. Choose a stronger classifier with `/auto-mode model`, or
+a stronger main model.
 
 ## Models and providers
 

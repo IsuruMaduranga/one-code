@@ -65,8 +65,8 @@ same vendor replaces, are considered for the main model.
 
 | Preset | Main model | Subagents | Classifier |
 |---|---|---|---|
-| `economical` | The cheapest small model. | Inherit the main model. | Automatic. |
-| `balanced` | The cheapest workhorse-tier model. | Chosen automatically (a cheaper model in the same tier when one exists, else the main model). | Automatic. |
+| `economical` | The cheapest cheap-tier model, else the cheapest workhorse or frontier one. | Inherit the main model. | Automatic. |
+| `balanced` | The cheapest workhorse-tier model, else the cheapest frontier one. | Chosen automatically (a cheaper model in the main model's tier or above when one exists, else the main model). | Automatic. |
 | `quality` | The most capable model available. | Inherit the main model. | Automatic. |
 
 `/doctor presets` shows what each preset would pick. `/doctor preset balanced`
