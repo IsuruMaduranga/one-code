@@ -856,8 +856,18 @@ export function createTaskNotifier(pi: TaskNotifierApi, options: TaskNotifierOpt
 		pi.events?.on(TASK_OUTPUT_DELIVERED_CHANNEL, (data) => {
 			const taskId = (data as TaskOutputDelivered | undefined)?.taskId;
 			if (taskId === undefined) return;
-			batch = batch.filter((item) => item.details.taskId !== taskId);
-			held = held.filter((item) => item.details.taskId !== taskId);
+			const keep = (item: Incoming) => item.details.taskId !== taskId;
+			batch = batch.filter(keep);
+			held = held.filter(keep);
+			// A sent entry still awaiting confirmation is resent (or held) when an
+			// interrupt discards pi's queue: drop the task from it too, re-merging
+			// what remains, so the model is not told of output it already has.
+			for (const [id, entry] of [...pending]) {
+				const items = entry.items.filter(keep);
+				if (items.length === entry.items.length) continue;
+				if (items.length === 0) pending.delete(id);
+				else Object.assign(entry, merge(items), { items });
+			}
 		});
 	}
 

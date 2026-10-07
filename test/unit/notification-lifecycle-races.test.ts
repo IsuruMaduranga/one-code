@@ -59,4 +59,30 @@ describe("notification lifecycle races", () => {
 		expect(released).not.toContain("<task-id>first</task-id>");
 		expect(released).toContain("<task-id>second</task-id>");
 	});
+
+	it("withdraws a task from a sent completion still awaiting confirmation, so an interrupt does not resend it", async () => {
+		vi.useFakeTimers();
+		const fake = createFakePi();
+		const notify = createTaskNotifier(fake.pi as never, { coalesceMs: 250, withdrawOnDelivery: true });
+		await fake.fire("before_agent_start", {});
+		await fake.fire("agent_start", {});
+		notify("task-notification", completion("first"), { taskId: "first" });
+		notify("task-notification", completion("second"), { taskId: "second" });
+		notify("task-notification", completion("lone"), { taskId: "lone" });
+		await vi.advanceTimersByTimeAsync(250);
+		notify("task-notification", completion("lone"), { taskId: "lone" });
+		await vi.advanceTimersByTimeAsync(250);
+		// task_output delivers two tasks while their completions wait in pi's
+		// queue; then Esc discards that queue.
+		fake.events.emit(TASK_OUTPUT_DELIVERED_CHANNEL, { taskId: "first" });
+		fake.events.emit(TASK_OUTPUT_DELIVERED_CHANNEL, { taskId: "lone" });
+		await interrupt(fake);
+		const sentBefore = fake.sentMessages.length;
+		await fake.fire("before_agent_start", {});
+		expect(fake.sentMessages).toHaveLength(sentBefore + 1);
+		const released = textAt(fake, sentBefore);
+		expect(released).not.toContain("<task-id>first</task-id>");
+		expect(released).not.toContain("<task-id>lone</task-id>");
+		expect(released).toContain("<task-id>second</task-id>");
+	});
 });
