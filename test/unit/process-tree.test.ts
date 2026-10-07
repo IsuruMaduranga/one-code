@@ -14,7 +14,7 @@
 import { execFile, spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { detachedSpawnOptions, EXIT_STDIO_MAX_MS, killProcessTree, stopProcessTree, waitForChildExit } from "../../extensions/lib/process-tree.ts";
+import { detachedSpawnOptions, EXIT_STDIO_MAX_MS, killProcessTree, rememberedGroupAlive, stopProcessTree, waitForChildExit } from "../../extensions/lib/process-tree.ts";
 import { bashSpawnOrThrow } from "../../extensions/lib/shell-spawn.ts";
 
 const win32 = process.platform === "win32";
@@ -187,5 +187,29 @@ describe("stopProcessTree", () => {
 		const settled = settledWithin(child, 4000);
 		stopProcessTree(child, 300);
 		expect(await settled).toBeLessThan(4000);
+	});
+});
+
+describe("rememberedGroupAlive", () => {
+	const onPlatform = (platform: NodeJS.Platform, run: () => void) => {
+		const original = Object.getOwnPropertyDescriptor(process, "platform")!;
+		Object.defineProperty(process, "platform", { ...original, value: platform });
+		try {
+			run();
+		} finally {
+			Object.defineProperty(process, "platform", original);
+		}
+	};
+	// A pid that is certainly alive (this process) stands in for one Windows
+	// handed to a new process after the remembered leader exited.
+	const child = (exitCode: number | null, signalCode: NodeJS.Signals | null) =>
+		({ pid: process.pid, exitCode, signalCode }) as unknown as ReturnType<typeof spawn>;
+
+	it("on Windows, judges by the remembered child's own exit, not by probing a pid that may be reused", () => {
+		onPlatform("win32", () => {
+			expect(rememberedGroupAlive(child(0, null))).toBe(false);
+			expect(rememberedGroupAlive(child(null, "SIGTERM"))).toBe(false);
+			expect(rememberedGroupAlive(child(null, null))).toBe(true);
+		});
 	});
 });

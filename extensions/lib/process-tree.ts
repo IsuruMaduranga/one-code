@@ -124,11 +124,20 @@ let groupReaper: NodeJS.Timeout | undefined;
 const terminationSignals = ["SIGINT", "SIGTERM", "SIGHUP"] as const;
 const groupSignalHandlers = new Map<NodeJS.Signals, () => void>();
 
-function groupExists(child: ChildProcess): boolean {
+/**
+ * Whether a remembered tree still needs killing at exit. Windows has no
+ * process groups, so only a live leader is worth a `taskkill /T`; it is judged
+ * by the child's own exit state, because once the leader exits Windows may
+ * hand its pid to an unrelated process that a pid probe would then find. On
+ * POSIX a group id stays reserved while any member lives, and the reaper
+ * forgets an emptied group within a second, far sooner than sequential pid
+ * allocation wraps around to it.
+ */
+export function rememberedGroupAlive(child: ChildProcess): boolean {
 	if (child.pid == null) return false;
+	if (process.platform === "win32") return child.exitCode === null && child.signalCode === null;
 	try {
-		// Windows has no process groups: retain the live leader for taskkill /T.
-		process.kill(process.platform === "win32" ? child.pid : -child.pid, 0);
+		process.kill(-child.pid, 0);
 		return true;
 	} catch (error) {
 		return (error as NodeJS.ErrnoException).code !== "ESRCH";
@@ -146,7 +155,7 @@ function releaseGroupListeners(): void {
 /** Exit handlers cannot await a grace period. Existing explicit stops retain their TERM/KILL escalation below. */
 function terminateRememberedGroups(): void {
 	for (const child of rememberedGroups) {
-		if (groupExists(child)) killProcessTree(child, "SIGTERM");
+		if (rememberedGroupAlive(child)) killProcessTree(child, "SIGTERM");
 	}
 	rememberedGroups.clear();
 	releaseGroupListeners();
@@ -178,7 +187,7 @@ export function rememberProcessGroup(child: ChildProcess): void {
 	}
 	groupReaper = setInterval(() => {
 		for (const child of rememberedGroups) {
-			if (!groupExists(child)) rememberedGroups.delete(child);
+			if (!rememberedGroupAlive(child)) rememberedGroups.delete(child);
 		}
 		if (rememberedGroups.size === 0) releaseGroupListeners();
 	}, 1_000);
