@@ -147,7 +147,7 @@ describe("buildDoctorReport", () => {
 		const text = modelsSection(facts, { model: main, modelSource: "session" }, []).lines.map((line) => line.text).join("\n");
 		expect(text).toContain("Auto-mode classifier: openai/gpt-5.6-terra (cheapest model within openai in the session's tier or above");
 		expect(text).toContain(
-			"Classifier policy: the cheapest model on this provider in this session's tier or above, strictly cheaper than it, with a context window at least as large and not an experimental build, else this session's model; /auto-mode model chooses one by hand.",
+			"Classifier policy: the cheapest model on this provider in this session's tier or above, strictly cheaper than it, with a context window at least as large, not an experimental build and not a moving -latest alias, else this session's model; /auto-mode model chooses one by hand.",
 		);
 		expect(text).toContain("Tier: workhorse — catalog openai/gpt-5.6-sol: $8.75/M blended");
 		expect(text).toContain(

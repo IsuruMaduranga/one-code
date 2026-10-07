@@ -30,6 +30,7 @@ import {
 	findConfigured,
 	hasCatalogContextWindow,
 	isExperimentalBuild,
+	isMovingAlias,
 	isStaleContainmentStamp,
 	modelIdentity,
 	modelSpec as spec,
@@ -134,7 +135,8 @@ export function classifierCandidates({ available, sessionModel, configured, conf
 /**
  * The automatic chain. Entries stay on the session provider/route, sit in the
  * session's tier or above (`model-tier.ts`, from the public catalogs), cost
- * strictly less than the session model, are not experimental builds, and have
+ * strictly less than the session model, are not experimental builds or moving
+ * `-latest` aliases (what answers one changes without notice), and have
  * a known catalog window at least as large as the session's: the same rule as
  * the subagent default (`sameTierContainedCandidates`) plus the window. The
  * cheapest qualifying model screens first, with the session retained as an
@@ -162,9 +164,10 @@ function automaticClassifierCandidates(available: Model<Api>[], sessionModel: Mo
 	// a same-price older model saves nothing), and an unpriced session cannot
 	// prove an alternate cheaper: `sameTierContainedCandidates`, the subagent
 	// default's rule. The classifier adds a window that contains the session's
-	// and never an experimental build.
+	// and never an experimental build or a moving alias.
 	const cheaper = sameTierContainedCandidates(available, sessionModel).filter(
-		(model) => !isExperimentalBuild(model.id) && hasCatalogContextWindow(model) && model.contextWindow >= sessionModel.contextWindow,
+		(model) =>
+			!isExperimentalBuild(model.id) && !isMovingAlias(model.id) && hasCatalogContextWindow(model) && model.contextWindow >= sessionModel.contextWindow,
 	);
 	if (cheaper.length === 0) {
 		return sessionOnly({
