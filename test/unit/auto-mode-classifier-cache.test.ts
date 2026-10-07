@@ -153,11 +153,21 @@ describe("classifier transcript cache", () => {
 		expect(cachedPrefix(payloads[1])).not.toBe(cachedPrefix(payloads[0]));
 	});
 
-	it.each(["openai-responses", "openai-completions", "bedrock-converse-stream", "google-generative-ai", "google-vertex"])("leaves %s as a single string without a payload hook", async (api) => {
+	it.each(["openai-responses", "google-generative-ai", "google-vertex"])("leaves %s as a single string without a payload hook", async (api) => {
 		await classify(request, deps({ ...model, provider: "openai", id: "gpt-5-mini", api } as Model<Api>));
 		const [, context, options] = vi.mocked(completeSimple).mock.calls[0];
 		expect(context.messages[0].content).toBe(stage1User(buildPayload(request).userPrefix));
 		expect(options?.onPayload).toBeUndefined();
+	});
+
+	// Their payloads carry explicit breakpoints on some models (OpenRouter's
+	// anthropic/*, Claude on Bedrock); the hook places them there and finds
+	// nothing to move elsewhere (classifier-cache-providers.test.ts).
+	it.each(["openai-completions", "bedrock-converse-stream"])("hands %s the history boundaries, with the text sent as one string", async (api) => {
+		await classify(request, deps({ ...model, provider: "openai", id: "gpt-5-mini", api } as Model<Api>));
+		const [, context, options] = vi.mocked(completeSimple).mock.calls[0];
+		expect(context.messages[0].content).toBe(stage1User(buildPayload(request).userPrefix));
+		expect(options?.onPayload).toBeTypeOf("function");
 	});
 });
 

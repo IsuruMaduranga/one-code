@@ -34,7 +34,7 @@ import { withReasoningFallback } from "../lib/model-policy.ts";
 import { followLastExchange, replaySideCall } from "../lib/replay-call.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
 import { pickEconomicalContainedModel } from "../lib/model-tier.ts";
-import { cacheSideCallConversation } from "../lib/side-call-cache.ts";
+import { cacheSideCallConversation, SIDE_CALL_CACHE_APIS } from "../lib/side-call-cache.ts";
 import { answerText, stripImageBlocks, toolStubs, withoutSystemMessages } from "../lib/side-call.ts";
 import { logSideCallUsage } from "../lib/side-call-usage.ts";
 import { unrefTimers } from "../lib/timer-ops.ts";
@@ -126,7 +126,7 @@ export default function recapExtension(pi: ExtensionAPI) {
 					signal: AbortSignal.any([signal, timeout]),
 					maxTokens: RECAP_MAX_TOKENS,
 					sessionId,
-					...(choice.model.api === "anthropic-messages" ? { onPayload: cacheSideCallConversation } : {}),
+					...(SIDE_CALL_CACHE_APIS.has(choice.model.api) ? { onPayload: cacheSideCallConversation } : {}),
 					...(reasoning ? { reasoning } : {}),
 				},
 			);

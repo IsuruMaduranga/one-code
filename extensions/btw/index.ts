@@ -47,7 +47,7 @@ import { withReasoningFallback } from "../lib/model-policy.ts";
 import { followLastExchange, replaySideCall } from "../lib/replay-call.ts";
 import { answerText, stripImageBlocks, toolStubs, trimToTurnBoundary, withoutSystemMessages } from "../lib/side-call.ts";
 import { boundedDockHeight, linesComponent, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
-import { cacheSideCallConversation } from "../lib/side-call-cache.ts";
+import { cacheSideCallConversation, SIDE_CALL_CACHE_APIS } from "../lib/side-call-cache.ts";
 import { logSideCallUsage } from "../lib/side-call-usage.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
 import type { ProseRenderer } from "../subagents/panel-render.ts";
@@ -183,7 +183,7 @@ export default function btwExtension(pi: ExtensionAPI) {
 						signal: AbortSignal.any([signal, timeout]),
 						maxTokens: BTW_MAX_TOKENS,
 						sessionId,
-						...(model.api === "anthropic-messages" ? { onPayload: cacheSideCallConversation } : {}),
+						...(SIDE_CALL_CACHE_APIS.has(model.api) ? { onPayload: cacheSideCallConversation } : {}),
 						...(reasoning ? { reasoning } : {}),
 					},
 				);

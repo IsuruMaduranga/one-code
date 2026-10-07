@@ -5,11 +5,13 @@
  *   Stage 1 grades HARM ONLY (maxTokens 64). severity < 50 → allow, no stage 2.
  *   Stage 2 applies intent + ALLOW (maxTokens 4096, <thinking> CoT) → severity +
  *   <category> (+ our verified <intent>). Both stages share one system prompt and
- *   transcript byte-for-byte. On Anthropic Messages, onPayload splits the user
- *   text at stable history-entry boundaries and moves the user cache marker
- *   before the pending action and stage instruction (cache.ts). Both stages
- *   and later gated calls can read that prefix; the system markers stay intact.
- *   Other APIs keep the single string and their provider's prefix caching.
+ *   transcript byte-for-byte. Where the request carries explicit breakpoints
+ *   (Anthropic Messages, OpenRouter's Anthropic-format Chat Completions,
+ *   Bedrock Converse), onPayload splits the user text at stable history-entry
+ *   boundaries and moves the user cache marker before the pending action and
+ *   stage instruction (cache.ts). Both stages and later gated calls can read
+ *   that prefix; the system markers stay intact. Other APIs keep the single
+ *   string and their provider's prefix caching.
  *
  * A one-shot `completeSimple` per stage rather than an agent session: no tools,
  * no history beyond the transcript it is handed, nothing to be talked into. Every
@@ -24,7 +26,7 @@ import { completeSimple } from "@earendil-works/pi-ai/compat";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { forcedReasoningLevel, isReasoningMandatoryError, reasoningRetryLevel } from "../lib/model-policy.ts";
 import type { AutoModeConfig } from "./config.ts";
-import { cacheClassifierHistory } from "./cache.ts";
+import { CLASSIFIER_CACHE_APIS, cacheClassifierHistory } from "./cache.ts";
 import {
 	buildPayload,
 	type ClassifyRequest,
@@ -142,7 +144,7 @@ export interface ClassifierState {
 	 * proactively, without an error).
 	 */
 	forcedReasoning: Map<string, ThinkingLevel>;
-	/** Previous Anthropic history boundary, a cache lookup hint only (cache.ts). */
+	/** Previous history boundary on a breakpoint API, a cache lookup hint only (cache.ts). */
 	cacheHistoryEnd?: number;
 }
 
@@ -351,7 +353,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 					maxRetries: CLASSIFIER_MAX_RETRIES,
 					cacheRetention: "long",
 					...(deps.cacheKey ? { sessionId: deps.cacheKey } : {}),
-					...(model.api === "anthropic-messages" ? {
+					...(CLASSIFIER_CACHE_APIS.has(model.api) ? {
 						onPayload: (payload: unknown) => {
 							cacheClassifierHistory(payload, [...history, tail, userText.slice(userPrefix.length)], history.length - 1, previousHistoryEnd);
 							deps.state.cacheHistoryEnd = history.length - 1;

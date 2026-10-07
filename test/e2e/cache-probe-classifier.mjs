@@ -12,7 +12,7 @@
  *   2. The transcript only grows: each request's text up to its `</transcript>`
  *      starts with the previous request's transcript minus its closing tag.
  *   3. Each request reads what the previous one cached. Explicit caches
- *      (Anthropic): cacheRead[N+1] >= cacheRead[N] + cacheWrite[N] - slack,
+ *      (Anthropic, Bedrock, Claude on OpenRouter): cacheRead[N+1] >= cacheRead[N] + cacheWrite[N] - slack,
  *      which holds when the breakpoint sits on the transcript history and not
  *      after the stage instruction (the stage text and the action under review
  *      are never written). Implicit caches (OpenAI, OpenRouter): at least the
@@ -53,7 +53,9 @@ if (rows.length < 2) failures.push(`only ${rows.length} classifier request(s) re
 
 const calls = rows.map((r) => {
 	const u = r.usage ?? {};
-	const explicit = r.api === "anthropic-messages";
+	// Explicit breakpoints: Anthropic Messages, Bedrock Converse, and Claude on
+	// OpenRouter (Chat Completions carrying Anthropic's cache_control).
+	const explicit = r.api === "anthropic-messages" || r.api === "bedrock-converse-stream" || (r.api === "openai-completions" && /^openrouter\/anthropic\//.test(r.model ?? ""));
 	const read = u.cacheRead ?? 0;
 	return { text: r.system + r.user, system: r.system, user: r.user, explicit, read, write: u.cacheWrite ?? 0, total: (u.input ?? 0) + read + (u.cacheWrite ?? 0) };
 });
