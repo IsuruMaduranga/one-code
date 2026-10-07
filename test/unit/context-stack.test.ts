@@ -1,6 +1,6 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { CONTEXT_BASELINE_CHANNEL, CONTEXT_STACK_ENTRY, CONTEXT_STATE_ENTRY, contextStackOnBranch, restoredContext, RESTORED_STACK_KEYS, LIVE_CONTEXT_KEYS, type ContextStackSnapshot } from "../../extensions/lib/context-stack.ts";
 import { injectReminders, REMINDER_CHANNEL, ReminderQueue, type ReminderEntry } from "../../extensions/lib/reminders.ts";
 import systemReminderExtension from "../../extensions/system-reminder/index.ts";
@@ -186,6 +186,28 @@ describe("context snapshot owner", () => {
 		const sent = JSON.stringify((await fake.fireOne<{ messages: AgentMessage[] }>("context", { messages: [user("new", 100)] }, ctx))?.messages);
 		expect(sent).toContain("fresh rules");
 		expect(sent).not.toContain("old rules");
+	});
+
+	it("does not serialize the snapshot again while nothing in the queue or the baselines changed", async () => {
+		const run = await start();
+		run.emit(block("claude-context", "rules"));
+		run.emit(block("permission-mode", "auto", { placement: "sticky-append", since: 0 }));
+		const messages = [user("first", 10)];
+		await run.request(messages);
+		await run.request(messages);
+		const snapshots = vi.spyOn(JSON, "stringify");
+		const serialized = () => snapshots.mock.calls.filter(([value]) => !!value && typeof value === "object" && "sticky" in value).length;
+		const sent = await run.request(messages);
+		expect(serialized()).toBe(0);
+		run.fake.events.emit(CONTEXT_BASELINE_CHANNEL, { key: "models", value: ["a"] });
+		expect(await run.request(messages)).toEqual(sent);
+		expect(serialized()).toBe(1);
+		run.fake.events.emit(REMINDER_CHANNEL, { text: "one shot" });
+		const entries = run.fake.appendedEntries.length;
+		await run.request([...messages, user("second", 20)]);
+		expect(run.fake.appendedEntries.length).toBe(entries + 1);
+		expect(contextStackOnBranch(branchOf(run.fake))?.pinned).toEqual([expect.objectContaining({ text: "one shot" })]);
+		snapshots.mockRestore();
 	});
 
 	it("restores a /tree branch's pins and closed lifetimes, but never its stale open state", async () => {

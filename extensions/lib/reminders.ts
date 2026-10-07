@@ -258,9 +258,19 @@ export class ReminderQueue {
 	/** Only restored keys are protected; fresh sessions retain their existing emitter behavior. */
 	private restoredKeys = new Set<string>();
 	private pendingCapabilities = new Set<string>();
+	private changes = 0;
 
 	constructor(now: () => number = Date.now) {
 		this.now = now;
+	}
+
+	/**
+	 * Moves on every change to what the queue holds (a drain only when it
+	 * re-anchored, pinned or dropped something), so the owner can skip
+	 * serializing a snapshot that cannot have changed.
+	 */
+	get version(): number {
+		return this.changes;
 	}
 
 	enqueue(text: string, opts?: EnqueueOptions): void {
@@ -293,6 +303,7 @@ export class ReminderQueue {
 			entry.userPins = [];
 			if (same && same.since === entry.since && opts?.scope === "every-turn") return;
 		}
+		this.changes++;
 		if (opts?.scope === "every-turn") {
 			if (previous?.placement === "sticky-append") this.remove(key);
 			this.everyTurn.set(key, entry);
@@ -315,6 +326,7 @@ export class ReminderQueue {
 	}
 
 	remove(key: string): void {
+		this.changes++;
 		if (!this.restoredKeys.has(key)) {
 			const entry = this.everyTurn.get(key);
 			if (entry?.placement === "sticky-append") entry.until = this.now();
@@ -325,6 +337,7 @@ export class ReminderQueue {
 
 	/** Seed before startup emitters. Earlier hooks (context-budget) may already have emitted. */
 	restore(stack: readonly ReminderEntry[], sticky: readonly ReminderEntry[], frozenKeys: ReadonlySet<string>, liveKeys: ReadonlySet<string> = new Set(), pinned: readonly ReminderEntry[] = []): void {
+		this.changes++;
 		const early = [...this.everyTurn.values()];
 		this.everyTurn.clear();
 		this.sticky = [];
@@ -350,12 +363,14 @@ export class ReminderQueue {
 
 	/** The first request has seen all startup/turn emitters. An absent capability is gone. */
 	finishRestore(): void {
+		if (this.pendingCapabilities.size > 0) this.changes++;
 		for (const key of this.pendingCapabilities) this.everyTurn.delete(key);
 		this.pendingCapabilities.clear();
 	}
 
 	/** A compaction replaces these facts atomically, bypassing only their resume locks. */
 	replaceFirstPrepend(keys: readonly string[], entries: readonly ReminderEntry[]): void {
+		this.changes++;
 		const replaced = new Set(keys);
 		for (const key of replaced) this.everyTurn.delete(key);
 		this.nextTurn = this.nextTurn.filter((entry) => !entry.key || !replaced.has(entry.key));
@@ -390,12 +405,15 @@ export class ReminderQueue {
 		const pinned: StoredReminder[] = structuredClone([...(snapshot.pinned ?? [])]);
 		const known = new Set(pinned.map((entry) => JSON.stringify(strip(entry))));
 		this.pinned = [...pinned, ...this.pinned.filter((entry) => !known.has(JSON.stringify(strip(entry))))];
+		this.changes++;
 	}
 
 	/** A new snapshot supersedes undelivered notices about its old facts. Delivered pins stay history. */
 	cancelPending(keys: readonly string[]): void {
 		const cancelled = new Set(keys);
+		const before = this.nextTurn.length;
 		this.nextTurn = this.nextTurn.filter((entry) => !entry.key || !cancelled.has(entry.key));
+		if (this.nextTurn.length !== before) this.changes++;
 	}
 
 	/** Hidden session metadata, preserving keys and insertion order without changing drain's API. */
@@ -424,6 +442,7 @@ export class ReminderQueue {
 			(r) => r.placement === "last-append" && (r.toolCallId === undefined || r.toolCallId === toolCallId),
 		);
 		this.nextTurn = rest;
+		if (matching.length > 0) this.changes++;
 		return matching.map(strip);
 	}
 
@@ -439,6 +458,7 @@ export class ReminderQueue {
 		const { matching, rest } = partition(this.nextTurn, (r) => r.placement === placement);
 		for (const entry of matching) this.pinned.push({ ...entry, pin: anchor });
 		this.nextTurn = rest;
+		if (matching.length > 0) this.changes++;
 	}
 
 	/**
@@ -456,25 +476,42 @@ export class ReminderQueue {
 	drain(messages: AgentMessage[]): ReminderEntry[] {
 		const locate = pinLocator(messages);
 		const stackCarrier = messages.findIndex(isUserLike);
+		let changed = false;
 		for (const entry of this.sticky) {
 			if (entry.until !== undefined) continue;
-			if (entry.opener === undefined) entry.opener = null;
+			if (entry.opener === undefined) {
+				entry.opener = null;
+				changed = true;
+			}
 			// Only live states may find a new carrier after compaction. A closed
 			// state's missing pin must never move to the summary or a later turn.
+			const tailPin = entry.tailPin;
 			if (entry.tailPin && locate(entry.tailPin) === -1) entry.tailPin = undefined;
 			if (entry.tailPin === undefined) entry.tailPin = firstStickyPin(messages, entry);
+			if (!samePin(tailPin, entry.tailPin)) changed = true;
 			// Timestamps alone cannot close a lifetime: a steer typed while it was
 			// active can remain queued until after the switch. Keep only messages
 			// that actually rode the block, including across a startup-time close.
-			entry.userPins = messages.flatMap((m, index) => carriesSticky(m, entry) &&
+			const userPins = messages.flatMap((m, index) => carriesSticky(m, entry) &&
 				(!entry.skipStackCarrier || index !== stackCarrier) ? [m.timestamp] : []);
-			if (entry.tailPin || entry.userPins.length > 0) delete entry.toolCallId;
+			// The same array stays while its carriers do, so its lookup set (`carrierSet`) is reused.
+			if (!entry.userPins || entry.userPins.length !== userPins.length || entry.userPins.some((stamp, i) => stamp !== userPins[i])) {
+				entry.userPins = userPins;
+				changed = true;
+			}
+			if ((entry.tailPin || entry.userPins.length > 0) && entry.toolCallId !== undefined) {
+				delete entry.toolCallId;
+				changed = true;
+			}
 		}
+		const sticky = this.sticky.length;
 		this.sticky = this.sticky.filter((entry) => entry.until === undefined ||
 			messages.some((m) => carriesSticky(m, entry)) || (entry.tailPin !== undefined && locate(entry.tailPin) !== -1));
+		const pinned = this.pinned.length;
 		if (this.pinned.length > 0) this.pinned = this.pinned.filter((entry) => locate(entry.pin as PinAnchor) !== -1);
 		const { matching: held, rest: pending } = partition(this.nextTurn, (r) => r.placement === "user-prepend");
 		this.nextTurn = held;
+		if (changed || pending.length > 0 || this.sticky.length !== sticky || this.pinned.length !== pinned) this.changes++;
 		return [...[...this.everyTurn.values()].filter((entry) => entry.placement !== "sticky-append").map(strip),
 			...this.sticky.map(strip), ...this.pinned.map(strip), ...pending.map(strip)];
 	}
@@ -539,11 +576,25 @@ function pinLocator(messages: AgentMessage[]): (pin: PinAnchor) => number {
 	return (pin) => (pin.kind === "toolResult" ? byToolCall.get(pin.toolCallId) : byTimestamp.get(pin.timestamp)) ?? -1;
 }
 
+function samePin(a: PinAnchor | undefined, b: PinAnchor | undefined): boolean {
+	if (!a || !b) return a === b;
+	return a.kind === "toolResult" ? b.kind === "toolResult" && a.toolCallId === b.toolCallId : b.kind === "user" && a.timestamp === b.timestamp;
+}
+
+/** Each carrier list's lookup set, built once per array: a check runs for every message against every lifetime. */
+const carrierSets = new WeakMap<readonly number[], Set<number>>();
+
+function carrierSet(userPins: readonly number[]): Set<number> {
+	let set = carrierSets.get(userPins);
+	if (!set) carrierSets.set(userPins, (set = new Set(userPins)));
+	return set;
+}
+
 /** Closed lifetimes keep only delivered carriers; legacy snapshots retain their timestamp interval. */
 function carriesSticky(message: AgentMessage, entry: ReminderEntry): boolean {
 	if (!isStickyCarrier(message)) return false;
 	const stamp = (message as { timestamp?: number }).timestamp ?? 0;
-	if (entry.until !== undefined && entry.userPins !== undefined) return entry.userPins.includes(stamp);
+	if (entry.until !== undefined && entry.userPins !== undefined) return carrierSet(entry.userPins).has(stamp);
 	return (stamp >= (entry.since ?? 0) && (entry.until === undefined || stamp < entry.until)) ||
 		(entry.opener !== null && entry.opener !== undefined && stamp === entry.opener);
 }

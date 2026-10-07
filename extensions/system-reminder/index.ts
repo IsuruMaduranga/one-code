@@ -58,7 +58,10 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 	});
 	pi.events.on(CONTEXT_BASELINE_CHANNEL, (data) => {
 		const baseline = data as ContextBaseline | undefined;
-		if (typeof baseline?.key === "string") baselines[baseline.key] = structuredClone(baseline.value);
+		if (typeof baseline?.key === "string") {
+			baselines[baseline.key] = structuredClone(baseline.value);
+			baselineChanges++;
+		}
 	});
 	pi.on("session_start", (_event, ctx) => {
 		restored = contextStackOnBranch(ctx.sessionManager.getBranch());
@@ -66,6 +69,7 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 		baselines = restored ? structuredClone(restored.baselines) : {};
 		lastState = restored ? JSON.stringify({ version: 1, sticky: restored.sticky, pinned: restored.pinned ?? [], baselines }) : "";
 		lastStack = restored ? JSON.stringify(restored.stack) : "";
+		comparedQueue = -1;
 		if (restored) reminderQueue.restore(restored.stack, restored.sticky, RESTORED_STACK_KEYS, LIVE_CONTEXT_KEYS, restored.pinned);
 		else reminderQueue.releaseRestore();
 	});
@@ -78,9 +82,23 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 		stored = branch !== undefined;
 		lastState = branch ? JSON.stringify({ version: 1, sticky: branch.sticky, pinned: branch.pinned ?? [], baselines: branch.baselines }) : "";
 		lastStack = branch ? JSON.stringify(branch.stack) : "";
+		comparedQueue = -1;
 		if (branch) reminderQueue.restoreBranch(branch, CONTEXT_FACT_KEYS);
 	});
-	const persistSnapshot = (stack: ReminderEntry[] = reminderQueue.persistentEntries("first-prepend")) => {
+	/**
+	 * The queue version and baseline count the last comparison saw, or -1 when
+	 * it must run again. A stack taken before a drain that changed the queue
+	 * may not be the stack the queue holds after it, so that sets -1 too.
+	 */
+	let comparedQueue = -1;
+	let comparedBaselines = -1;
+	let baselineChanges = 0;
+	/** `capturedAt`: the queue version when `stack` was taken. Unchanged since the last comparison, the snapshot is too. */
+	const persistSnapshot = (stack: ReminderEntry[] = reminderQueue.persistentEntries("first-prepend"), capturedAt = reminderQueue.version) => {
+		const version = reminderQueue.version;
+		if (stored && capturedAt === version && version === comparedQueue && baselineChanges === comparedBaselines) return;
+		comparedQueue = capturedAt === version ? version : -1;
+		comparedBaselines = baselineChanges;
 		const state = { version: 1 as const, sticky: reminderQueue.persistentEntries("sticky-append"), pinned: reminderQueue.persistentPins(), baselines };
 		const serialized = JSON.stringify(state);
 		const serializedStack = JSON.stringify(stack);
@@ -99,6 +117,7 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 		reminderQueue.replaceFirstPrepend(CONTEXT_FACT_KEYS, refresh.entries);
 		reminderQueue.cancelPending([DATE_CHANGE_KEY, RESUME_FACTS_KEY]);
 		baselines["claude-context"] = structuredClone(refresh.baseline);
+		baselineChanges++;
 		// /compact may be the last action before exit. Persist now, not just on
 		// the next request, so a resume cannot revive the pre-compaction facts.
 		persistSnapshot();
@@ -170,9 +189,10 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 		// after drain resolves sticky anchors. Store logical entries before layout,
 		// including systemRoleOnly blocks even on a model that cannot carry them.
 		reminderQueue.finishRestore();
+		const capturedAt = reminderQueue.version;
 		const stack = reminderQueue.persistentEntries("first-prepend");
 		const drained = reminderQueue.drain(messages);
-		persistSnapshot(stack);
+		persistSnapshot(stack, capturedAt);
 		// A block meant only for the system message is left out where there is none.
 		const reminders = drained.filter((entry) => layout || !entry.systemRoleOnly);
 		if (layout) {
