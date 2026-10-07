@@ -17,6 +17,7 @@
  */
 
 import { CHILD_WROTE_CHANNEL, type ChildWrote } from "../lib/child-writes.ts";
+import { canShowCustomUi } from "../lib/headless-output.ts";
 import { existsSync, mkdirSync, readdirSync, renameSync, writeFileSync, readFileSync } from "node:fs";
 import { AGENT_CRON_CHANNEL, AGENT_CRON_FIRE_CHANNEL, type AgentCronFire, type AgentCronRequest, agentCronTools, agentOwnsCronJobs } from "../lib/agent-cron.ts";
 import os from "node:os";
@@ -2745,7 +2746,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	 * running task, Esc closes.
 	 */
 	const openTasksDialog = async (ctx: ExtensionContext) => {
-		if (ctx.mode === "rpc") {
+		if (!canShowCustomUi(ctx)) {
+			if (ctx.mode !== "rpc") return;
 			const lines = [
 				...shellTasks.running().map((task) => `- ${task.id} [shell, running] ${task.command ?? task.description}`),
 				...liveRuns.list().filter((run) => run.depth === 0).map((run) => `- ${run.taskId} [${run.name}, ${run.status}] ${run.label}`),
@@ -2757,7 +2759,6 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			].join("\n"), "info");
 			return;
 		}
-		if (!ctx.hasUI) return;
 		const build = () => {
 			const runs = liveRuns.list().filter((run) => run.depth === 0);
 			const shells = shellTasks.running().map((task) => ({ kind: "shell" as const, id: task.id, text: task.command ?? task.description, running: true }));

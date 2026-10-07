@@ -40,7 +40,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { ARGUMENT_HINT_CHANNEL, type ArgumentHint } from "../lib/argument-hints.ts";
 import { btwForkedLine, type BtwForkResult, requestBtwFork } from "../lib/btw-fork.ts";
-import { notifyOrPrint, printAnswer } from "../lib/headless-output.ts";
+import { canShowCustomUi, notifyOrPrint, printAnswer } from "../lib/headless-output.ts";
 import { announcePromptOptions } from "../lib/prompt-options.ts";
 import { followLastExchange, replaySideCall } from "../lib/replay-call.ts";
 import { answerText, stripImageBlocks, toolStubs, trimToTurnBoundary, withoutSystemMessages } from "../lib/side-call.ts";
@@ -199,7 +199,7 @@ export default function btwExtension(pi: ExtensionAPI) {
 
 			// RPC has dialogs but no custom panel. Deliver its answer as a notice,
 			// never a main-conversation message; one-shot runs print it instead.
-			if (!ctx.hasUI || ctx.mode === "rpc") {
+			if (!canShowCustomUi(ctx)) {
 				inFlight?.abort();
 				const controller = new AbortController();
 				inFlight = controller;

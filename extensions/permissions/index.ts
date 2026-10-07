@@ -72,6 +72,7 @@ import { gitStatusMeta, gitStatusMetaArgs, reachesIgnoredFiles, wantsGitStatusMe
 import { actionResolvedPaths } from "../auto-mode/resolved-paths-meta.ts";
 import { projectMemoryDir } from "../lib/memory.ts";
 import { queueNotice } from "../lib/notices.ts";
+import { canShowCustomUi, rpcReadOnlyText } from "../lib/headless-output.ts";
 import { sessionResultsDir } from "../lib/persisted-output.ts";
 import { privateSessionScratchpadDir } from "../lib/scratchpad.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, type ReminderPayload } from "../lib/reminders.ts";
@@ -2024,8 +2025,10 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	pi.registerCommand("permissions", {
 		description: "Review recently denied calls and manage permission rules, auto mode rules and workspace directories",
 		handler: async (args: string, ctx: ExtensionContext) => {
-			if (!ctx.hasUI || ctx.mode === "rpc") {
-				const limitation = ctx.mode === "rpc" ? "/permissions in RPC is read-only; use the TUI to manage rules or approve recently denied calls.\n\n" : "";
+			if (!canShowCustomUi(ctx)) {
+				// One notice with the summary, not notifyRpcReadOnly's separate one:
+				// pi shows only the last of back-to-back info notices (findings §63).
+				const limitation = ctx.mode === "rpc" ? `${rpcReadOnlyText("/permissions", "manage rules or approve recently denied calls")}\n\n` : "";
 				announceLocalCommand(pi, { name: "permissions", args, stdout: limitation.trim() });
 				ctx.ui.notify(`${limitation}${permissionsSummary()}`, "info");
 				return;
@@ -2050,7 +2053,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 				return;
 			}
 			if (!input) {
-				if (ctx.mode === "rpc") {
+				if (!canShowCustomUi(ctx)) {
 					const message = "The workspace panel is unavailable in RPC. Use /add-dir <path> to add a directory.";
 					announceLocalCommand(pi, { name: "add-dir", args, stdout: message });
 					ctx.ui.notify(message, "info");

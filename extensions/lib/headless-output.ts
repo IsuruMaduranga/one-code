@@ -25,9 +25,14 @@ export function canShowCustomUi(ctx: Pick<ExtensionContext, "hasUI" | "mode">): 
 	return ctx.hasUI && ctx.mode !== "rpc";
 }
 
+/** The line saying a command whose panel cannot open in RPC shows a read-only listing instead. */
+export function rpcReadOnlyText(command: string, manage: string): string {
+	return `${command} in RPC is read-only; use the TUI to ${manage}.`;
+}
+
 /** In RPC, say that a command whose panel cannot open shows a read-only listing instead. */
 export function notifyRpcReadOnly(ctx: Pick<ExtensionContext, "mode" | "ui">, command: string, manage: string): void {
-	if (ctx.mode === "rpc") ctx.ui.notify(`${command} in RPC is read-only; use the TUI to ${manage}.`, "info");
+	if (ctx.mode === "rpc") ctx.ui.notify(rpcReadOnlyText(command, manage), "info");
 }
 
 /** A command's answer in a one-shot run: stdout in print mode, stderr in json mode (stdout is the event stream there). */

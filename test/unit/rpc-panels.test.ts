@@ -58,6 +58,7 @@ describe("RPC commands never silently mount unsupported custom UI", () => {
 		await fake.commands.get("permissions")!.handler("", ctx);
 		expect(custom).not.toHaveBeenCalled();
 		expect(notices()).toMatch(/RPC.*TUI/);
+		expect(notices()).toContain("/permissions in RPC is read-only; use the TUI to manage rules or approve recently denied calls.\n\n");
 		expect(notices()).toContain("mode:");
 	});
 
