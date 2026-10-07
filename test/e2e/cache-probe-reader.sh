@@ -9,8 +9,8 @@
 #
 # The default long editorial guide exceeds provider cache minima. --short uses
 # a deliberately tiny page and reports SKIP only when both reader prompts are
-# below the selected reader model's known cache minimum (2,048 for Haiku,
-# 1,024 for Sonnet and Opus). Run a live probe in tmux from a
+# below the selected reader model's known cache minimum (4,096 for Haiku,
+# 1,024 for other Anthropic models). Run a live probe in tmux from a
 # sandboxed shell. The driver creates no settings and requests --no-session;
 # its evidence files are beneath its temporary directory. The runtime may still
 # read the user's existing provider configuration.

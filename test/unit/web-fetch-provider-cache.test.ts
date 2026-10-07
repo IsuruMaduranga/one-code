@@ -42,7 +42,7 @@ describe("reader through pi-ai's Anthropic adapter (offline)", () => {
 		expect(first.payload.system).toEqual(second.payload.system);
 		expect(first.payload.messages).not.toEqual(second.payload.messages);
 		// Even a one-token-per-byte upper bound is below Sonnet's 1024-token
-		// minimum (and Haiku's 2048). A marker alone cannot make it cacheable.
+		// minimum (and Haiku's 4096). A marker alone cannot make it cacheable.
 		expect(Buffer.byteLength(first.text.system, "utf8")).toBeLessThan(1024);
 	});
 
