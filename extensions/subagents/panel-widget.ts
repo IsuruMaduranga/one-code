@@ -61,6 +61,8 @@ export class SubagentWidget {
 	 */
 	private disposed = false;
 	private readonly unsubscribes: Array<() => void> = [];
+	/** The text last sent as an RPC widget; undefined while none is shown. */
+	private rpcSent: string | undefined;
 
 	constructor(
 		private readonly registry: LiveRunRegistry,
@@ -275,6 +277,7 @@ export class SubagentWidget {
 		// Never tear down while a transcript view is open (viewedId set): clearing
 		// focus here would orphan the overlay with no key path to close it.
 		if (rows.length <= 1 && !shellVisible && !notice && this.viewedId === undefined) {
+			this.rpcSent = undefined;
 			ctx.ui.setWidget(WIDGET_KEY, undefined);
 			this.focusIndex = undefined;
 			this.focusId = undefined;
@@ -293,6 +296,10 @@ export class SubagentWidget {
 			if (rows.length > MAX_STRIP_ROWS) lines.push(`${rows.length - MAX_STRIP_ROWS} more agents — /tasks to list all`);
 			if (notice) lines.push(TASKS_NOTICE);
 			if (shellVisible) lines.push(...this.shellTasks().map((task) => `${task.id} [shell] ${task.status}: ${task.command ?? task.description}`));
+			// The ticker repaints every second; each send is a message to the client.
+			const text = lines.join("\n");
+			if (text === this.rpcSent) return;
+			this.rpcSent = text;
 			ctx.ui.setWidget(WIDGET_KEY, lines, { placement: "belowEditor" });
 			return;
 		}

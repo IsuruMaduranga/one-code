@@ -41,6 +41,22 @@ describe("RPC agent status widgets", () => {
 		expect(rpc.messages.at(-1)).toEqual({ key: "subagents", lines: undefined });
 	});
 
+	it("sends the subagent strip only when its text changes, not on every ticker paint", () => {
+		const rpc = rpcUi();
+		const runs = new LiveRunRegistry();
+		const widget = new SubagentWidget(runs, () => rpc.ctx);
+		runs.register({ taskId: "a1", name: "explore-1", agentType: "explore", task: "Inspect the migration", startedAt: Date.now() });
+		vi.advanceTimersByTime(300);
+		const sent = rpc.messages.length;
+		expect(sent).toBeGreaterThan(0);
+		vi.advanceTimersByTime(5_000);
+		expect(rpc.messages).toHaveLength(sent);
+		runs.finish("a1", false);
+		vi.advanceTimersByTime(300);
+		expect(rpc.messages.length).toBeGreaterThan(sent);
+		widget.dispose();
+	});
+
 	it("keeps background shells visible even though they have their own UI", async () => {
 		const rpc = rpcUi();
 		const fake = createFakePi();
