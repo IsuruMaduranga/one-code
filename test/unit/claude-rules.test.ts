@@ -164,6 +164,37 @@ describe("discoverRules", () => {
 		]);
 	});
 
+	it("parses a rules directory again only when a stat of something it read changes", () => {
+		const cwd = join(fixture, "project");
+		const rules = join(cwd, ".claude", "rules");
+		const fixed = new Date(2026, 0, 1);
+		const file = write(cwd, ".claude/rules/a.md", "first");
+		fs.utimesSync(file, fixed, fixed);
+		const read = (includeExternal?: boolean) => discoverRules({ rulesDir: rules, cwd, home: fixture, scope: "Project", includeExternal }).map((f) => f.content.split("\n")[0]);
+		expect(read()).toEqual(["first"]);
+		// Same size and mtime: nothing a stat sees changed, so the parsed copy is reused.
+		writeFileSync(file, "FIRST");
+		fs.utimesSync(file, fixed, fixed);
+		expect(read()).toEqual(["first"]);
+		writeFileSync(file, "changed");
+		expect(read()).toEqual(["changed"]);
+		write(cwd, ".claude/rules/b.md", "added\n@../../later.md");
+		expect(read()).toEqual(["changed", "added"]);
+		write(cwd, "later.md", "late import");
+		expect(read()).toEqual(["changed", "added", "late import"]);
+		write(cwd, ".claude/rules/sub/c.md", "nested");
+		expect(read()).toEqual(["changed", "added", "late import", "nested"]);
+		write(cwd, ".claude/rules/sub/d.md", "nested two");
+		expect(read()).toEqual(["changed", "added", "late import", "nested", "nested two"]);
+		rmSync(file);
+		expect(read()).toEqual(["added", "late import", "nested", "nested two"]);
+		// Consent is part of what a cached walk is for, never carried across it.
+		write(cwd, ".claude/rules/b.md", `added\n@${write(fixture, "outside.md", "outside import")}`);
+		expect(read()).toEqual(["added", "nested", "nested two"]);
+		expect(read(true)).toEqual(["added", "outside import", "nested", "nested two"]);
+		expect(read(false)).toEqual(["added", "nested", "nested two"]);
+	});
+
 	it("uses the project owner above .claude but the cwd for user rules", () => {
 		const cwd = join(fixture, "project");
 		const projectRules = join(cwd, ".claude", "rules");
