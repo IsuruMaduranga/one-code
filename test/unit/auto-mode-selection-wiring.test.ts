@@ -68,6 +68,22 @@ describe("automatic classifier selection wiring", () => {
 		await fake.fire("session_shutdown", {}, ctx);
 	});
 
+	it("ranks the catalog once per session model, not on every repaint before a pin", async () => {
+		const getAvailable = vi.fn(() => [large, small, cheap]);
+		ctx.modelRegistry = { getAvailable };
+		await fake.fire("session_start", { reason: "startup" }, ctx);
+		const afterStart = getAvailable.mock.calls.length;
+		for (let i = 0; i < 5; i++) {
+			await fake.fire("agent_start", {}, ctx);
+			await fake.fire("agent_settled", {}, ctx);
+		}
+		expect(getAvailable.mock.calls.length).toBe(afterStart);
+		expect(statuses.at(-1)?.classifier).toBe("openai-codex/gpt-6-astra");
+		ctx.model = small;
+		await fake.fire("model_select", { model: small }, ctx);
+		expect(statuses.at(-1)?.classifier).toBe("openai-codex/gpt-6-sol");
+	});
+
 	it("/auto-mode model saves a stamped choice, warns about a smaller window, and clears back to automatic", async () => {
 		const settings = join(home, ".onecode", "settings.json");
 		(ctx.modelRegistry as { getApiKeyAndHeaders?: unknown }).getApiKeyAndHeaders = async () => ({ ok: true, apiKey: "key" });

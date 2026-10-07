@@ -40,6 +40,7 @@ import {
 } from "./prompt.ts";
 import {
 	type Candidate,
+	type ClassifierFallback,
 	type ClassifierNotice,
 	classifierCandidates,
 	describeCandidate,
@@ -134,7 +135,7 @@ export interface ClassifierState {
 	 * still applied to the cached chain per call, so a model that dies mid-session
 	 * is still stepped over without a rebuild.
 	 */
-	chainCache?: { signature: string; candidates: Candidate[]; notices: ClassifierNotice[] };
+	chainCache?: { signature: string; candidates: Candidate[]; notices: ClassifierNotice[]; fallback?: ClassifierFallback };
 	/**
 	 * `provider/id` -> the thinking level a model turned out to REQUIRE (its
 	 * provider rejected the thinking-off request with "reasoning is mandatory").
@@ -197,29 +198,40 @@ class StepError extends Error {
 }
 
 /** Signature that must stay equal for the cached chain to be reused (see ClassifierState.chainCache). */
-function selectionSignature(deps: ClassifierDeps): string {
-	const session = deps.sessionModel;
-	const configured = `${deps.config.classifierModel ?? ""}|${deps.config.classifierModelSetFor ?? ""}`;
-	return session ? `${session.provider}/${session.id}|${session.contextWindow ?? "unknown"}|${configured}` : `(none)|${configured}`;
+function selectionSignature(sessionModel: Model<Api> | undefined, config: Pick<AutoModeConfig, "classifierModel" | "classifierModelSetFor">): string {
+	const configured = `${config.classifierModel ?? ""}|${config.classifierModelSetFor ?? ""}`;
+	return sessionModel ? `${sessionModel.provider}/${sessionModel.id}|${sessionModel.contextWindow ?? "unknown"}|${configured}` : `(none)|${configured}`;
+}
+
+/**
+ * The selection chain for this session model and setting, built once per
+ * signature and shared by every reader: the gate, the badge and banner that
+ * name the next classifier, and the announcement. The newer-model warnings
+ * are always in it; a reader that honours `suggestNewerModels` drops them.
+ */
+export function classifierChain(
+	state: ClassifierState,
+	input: { available: () => Model<Api>[]; sessionModel: Model<Api> | undefined; config: Pick<AutoModeConfig, "classifierModel" | "classifierModelSetFor"> },
+): NonNullable<ClassifierState["chainCache"]> {
+	const signature = selectionSignature(input.sessionModel, input.config);
+	const cached = state.chainCache;
+	if (cached && cached.signature === signature) return cached;
+	const built = classifierCandidates({
+		available: input.available(),
+		sessionModel: input.sessionModel,
+		configured: input.config.classifierModel,
+		configuredSetForContainment: input.config.classifierModelSetFor,
+	});
+	const chain = { signature, candidates: built.candidates, notices: built.notices, ...(built.fallback ? { fallback: built.fallback } : {}) };
+	// Don't poison the cache with an empty chain (e.g. a not-yet-populated
+	// registry) — that would permanently block the gate; recompute next call.
+	if (built.candidates.length > 0) state.chainCache = chain;
+	return chain;
 }
 
 /** The candidate chain (minus anything already unusable this session) and its notices. */
 function remainingCandidates(deps: ClassifierDeps): { candidates: Candidate[]; notices: ClassifierNotice[] } {
-	const signature = selectionSignature(deps);
-	let cached = deps.state.chainCache;
-	if (!cached || cached.signature !== signature) {
-		const built = classifierCandidates({
-			available: deps.registry.getAvailable(),
-			sessionModel: deps.sessionModel,
-			configured: deps.config.classifierModel,
-			configuredSetForContainment: deps.config.classifierModelSetFor,
-		});
-		cached = { signature, candidates: built.candidates, notices: built.notices };
-		// Don't poison the cache with an empty chain (e.g. a not-yet-populated
-		// registry) — that would permanently block the gate; recompute next call.
-		if (built.candidates.length > 0) deps.state.chainCache = cached;
-	}
-	const { candidates: all, notices } = cached;
+	const { candidates: all, notices } = classifierChain(deps.state, { available: () => deps.registry.getAvailable(), sessionModel: deps.sessionModel, config: deps.config });
 	const usable = all.filter((entry) => !deps.state.rejected.has(`${entry.model.provider}/${entry.model.id}`));
 	if (usable.length > 0) return { candidates: usable, notices };
 	// If everything has been rejected, the session model is still worth one more

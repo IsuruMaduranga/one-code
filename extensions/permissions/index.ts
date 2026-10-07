@@ -27,7 +27,7 @@ import { TURN_FAILED_CHANNEL, type TurnFailedEvent } from "../lib/interrupt.ts";
 import type { HandBackVerdict } from "../lib/notifications.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent } from "../lib/model-unusable.ts";
 
-import { classify, createClassifierState } from "../auto-mode/classifier.ts";
+import { classifierChain, classify, createClassifierState } from "../auto-mode/classifier.ts";
 import {
 	type AutoModeConfig,
 	autoModeSettingsPaths,
@@ -55,7 +55,7 @@ import type { TranscriptEntry } from "../auto-mode/transcript.ts";
 import { childHistoryCursor, classifierHistory, CLASSIFIER_TOOL_META, CLASSIFIER_USER_INPUT, type HistoryCursor, messageText, userMessageDigest } from "../auto-mode/history.ts";
 import { appendDecision, type DecisionEntry, decisionEntry } from "../auto-mode/decision-log.ts";
 import { loadProjectInstructions } from "../auto-mode/instructions.ts";
-import { classifierCandidates, describeCandidate } from "../auto-mode/model-select.ts";
+import { describeCandidate } from "../auto-mode/model-select.ts";
 import { conflictingPathArguments, isWithin, resolveForContainment, toAbsolute } from "../auto-mode/paths.ts";
 import { DenialStore, denialInputKey, permissionGrantedMessage } from "../auto-mode/denials.ts";
 import { PauseTracker, unattendedPromptNotice, unattendedPromptTimeoutMs } from "../auto-mode/pause.ts";
@@ -403,15 +403,19 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			return { classifier: `${classifierState.pinned.provider}/${classifierState.pinned.id}`, pinned: true };
 		}
 		if (!badgeCtx) return { pinned: false };
-		autoConfig ??= loadAutoModeConfig(os.homedir());
-		const chain = classifierCandidates({
-			available: badgeCtx.modelRegistry.getAvailable(),
-			sessionModel: sessionModel ?? badgeCtx.model,
-			configured: autoConfig.classifierModel,
-			configuredSetForContainment: autoConfig.classifierModelSetFor,
-		}).candidates.filter((entry) => !classifierState.rejected.has(`${entry.model.provider}/${entry.model.id}`));
-		const first = chain[0];
+		const first = selectionChain(badgeCtx, sessionModel).candidates.find((entry) => !classifierState.rejected.has(`${entry.model.provider}/${entry.model.id}`));
 		return { classifier: first ? `${first.model.provider}/${first.model.id}` : undefined, pinned: false };
+	};
+
+	/**
+	 * The classifier chain for `sessionModel` (the ctx's by default), cached on
+	 * the classifier state by the same signature the gate uses, so a repaint
+	 * does not rank the catalog again (auto-mode/classifier.ts classifierChain).
+	 */
+	const selectionChain = (ctx: ExtensionContext, sessionModel?: Model<Api>) => {
+		autoConfig ??= loadAutoModeConfig(os.homedir());
+		const registry = ctx.modelRegistry;
+		return classifierChain(classifierState, { available: () => registry.getAvailable(), sessionModel: sessionModel ?? ctx.model, config: autoConfig });
 	};
 
 	const applyBadge = (sessionModel?: Model<Api>, toolCallId?: string) => {
@@ -521,18 +525,12 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	 */
 	const announceClassifierChoice = (sessionModel?: Model<Api>, opts: { lead?: string; force?: boolean } = {}) => {
 		if ((mode !== "auto" && !opts.force) || !badgeCtx) return;
-		autoConfig ??= loadAutoModeConfig(os.homedir());
-		const choice = classifierCandidates({
-			available: badgeCtx.modelRegistry.getAvailable(),
-			sessionModel: sessionModel ?? badgeCtx.model,
-			configured: autoConfig.classifierModel,
-			configuredSetForContainment: autoConfig.classifierModelSetFor,
-			suggestNewer: readSuggestNewerModels(os.homedir()),
-		});
+		const choice = selectionChain(badgeCtx, sessionModel);
+		const suggestNewer = readSuggestNewerModels(os.homedir());
 		// Keyed by text, the same keys classify() uses, so each shows once.
 		const info: string[] = opts.lead ? [opts.lead] : [];
 		for (const notice of choice.notices) {
-			if (notice.fallbackReason || classifierState.notified.has(notice.text)) continue;
+			if (notice.fallbackReason || classifierState.notified.has(notice.text) || (!suggestNewer && notice.choiceWarning === "newer")) continue;
 			classifierState.notified.add(notice.text);
 			if (notice.level === "warning") badgeCtx.ui.notify(notice.text, "warning");
 			else info.push(notice.text);
@@ -549,13 +547,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 
 	/** What would be tried, in order, before anything has been pinned. */
 	const describeChain = (ctx: ExtensionContext): string => {
-		autoConfig ??= loadAutoModeConfig(os.homedir());
-		const { candidates } = classifierCandidates({
-			available: ctx.modelRegistry.getAvailable(),
-			sessionModel: ctx.model,
-			configured: autoConfig.classifierModel,
-			configuredSetForContainment: autoConfig.classifierModelSetFor,
-		});
+		const { candidates } = selectionChain(ctx);
 		return candidates.length > 0 ? candidates.map(describeCandidate).join(" → ") : "(no model available)";
 	};
 
