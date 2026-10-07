@@ -189,6 +189,12 @@ describe("safetyControlWrite: read-only words in escalated compound commands", (
 		// find's actions are not read, so a negation there is not trusted to exclude, whatever the action runs.
 		`find . ! -path './.git/*' -exec wc -l {} + && exit 0`,
 		`find . -not \\( -path './.git/*' -o -path './node_modules/*' \\) -name '*.py' -exec wc -l {} + && exit 0`,
+		// A proven command's output can still reach a script file through an enclosing redirect, an `exec` or an fd dup.
+		`{ echo 'cp evil.json .claude/settings.json'; } > s.sh; sh s.sh`,
+		`if true; then echo 'cp evil.json .claude/settings.json'; fi > s.sh && sh s.sh`,
+		`exec 3>s.sh; echo 'cp evil.json .claude/settings.json' >&3; sh s.sh`,
+		`exec > s.sh; echo 'cp evil.json .claude/settings.json'; sh s.sh`,
+		`{ echo 'cp evil.json .claude/settings.json' | sort; } > s.sh; sh s.sh`,
 		`sh <<'EOF'\ncp x .claude/settings.json\nEOF`,
 		`cat <<'EOF' | sh\ncp x .claude/settings.json\nEOF`,
 		`sh <<< 'cp x .claude/settings.json'`,

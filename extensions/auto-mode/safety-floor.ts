@@ -305,7 +305,8 @@ export function regexLiteralTail(pattern: string): string | undefined {
 /**
  * The first word of a shell line that names a gate-control file, or
  * undefined. Every word not proven read-only counts, plus the value after an `=`
- * (`--output=…`, `of=…`) and the words of a nested `sh -c '…'` script; `cd`
+ * (`--output=…`, `of=…`) and the words of a nested `sh -c '…'` script, read
+ * from proven words too (`echo '…'` may print a script to a file); `cd`
  * is followed, per subshell scope, so a relative name is resolved where the
  * shell would. Where the directory cannot be known (the line does not parse,
  * a `cd` sits in a loop body that runs more than once, or its target is an
@@ -417,14 +418,19 @@ export function shellNamesControlFile(
 		}
 		const negated = payload.command === "find" && !readOnly ? negatedFindPatterns(segment.tokens, payload.args) : undefined;
 		const words = [
-			...(readOnly ? [] : segment.tokens.map((token, index) => ({ value: token.value, index }))),
-			...[...segment.redirects, ...segment.inputs.map((token) => token.value)].map((value) => ({ value, index: -1 })),
+			...segment.tokens.map((token, index) => ({ value: token.value, index, exempt: readOnly })),
+			...[...segment.redirects, ...segment.inputs.map((token) => token.value)].map((value) => ({ value, index: -1, exempt: false })),
 		];
-		for (const { value: word, index: at } of words) {
+		for (const { value: word, index: at, exempt } of words) {
+			// A proven command's words are still read as a script: its output can
+			// reach a file it never names, through an enclosing redirect, an
+			// `exec` or a descriptor (`{ echo '…'; } > s.sh; sh s.sh`). Only
+			// their path match is exempt.
 			if (depth < 3 && /\s/.test(word)) {
 				const nested = shellNamesControlFile(word, dir, home, oneCodeProjectSettings, depth + 1, forms);
 				if (nested) return nested;
 			}
+			if (exempt) continue;
 			// find never opens or writes a pattern operand, and one that only
 			// excludes files names nothing (a loop elsewhere in the line leaves
 			// every word unproven). A negated pattern that may select everything
