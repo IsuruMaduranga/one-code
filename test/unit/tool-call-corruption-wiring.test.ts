@@ -270,6 +270,58 @@ describe("OpenRouter tool-call corruption wiring", () => {
 		expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("no data for 90 s"), "error");
 	});
 
+	const chunk = (data: object = { id: "gen-123", choices: [] }) =>
+		fake.fire("provider_stream_event", { type: "provider_stream_event", provider: "openrouter", api: "openai-completions", model: model.id, data }, ctx);
+
+	it("keeps a stream alive on raw chunks that carry no content (reasoning details, usage, empty deltas)", async () => {
+		await start();
+		await update({ type: "text_delta", contentIndex: 0, delta: "Let me think." });
+		for (let i = 0; i < 6; i++) {
+			await vi.advanceTimersByTimeAsync(80_000);
+			await chunk({ id: "gen-123", choices: [{ delta: { reasoning_details: [{ type: "reasoning.encrypted", data: "x" }] } }] });
+		}
+		expect(ctx.abort).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(90_000);
+		expect(ctx.abort).toHaveBeenCalledTimes(1);
+	});
+
+	it("waits five minutes for the first content after the headers, then 90 s between chunks", async () => {
+		await start();
+		await chunk({ id: "gen-123", choices: [{ delta: { role: "assistant", content: "" } }] });
+		await vi.advanceTimersByTimeAsync(299_000);
+		expect(ctx.abort).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(1_000);
+		expect(ctx.abort).toHaveBeenCalledTimes(1);
+		await flush();
+		expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("no data for 300 s"), "error");
+	});
+
+	it("returns to the general window once a tool call's arguments end", async () => {
+		await start();
+		await update({ type: "toolcall_start", contentIndex: 0 });
+		await update({ type: "toolcall_delta", contentIndex: 0, delta: '{"command":"ls"}' });
+		await update({ type: "toolcall_end", contentIndex: 0, toolCall: { type: "toolCall", name: "bash", id: "ok", arguments: {} } });
+		await vi.advanceTimersByTimeAsync(89_000);
+		expect(ctx.abort).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(1_000);
+		expect(ctx.abort).toHaveBeenCalledTimes(1);
+	});
+
+	it("keeps the tool-call window while another call is still streaming", async () => {
+		await start();
+		for (const contentIndex of [0, 1]) await update({ type: "toolcall_start", contentIndex });
+		await update({ type: "toolcall_delta", contentIndex: 0, delta: '{"command":"ls"}' });
+		await update({ type: "toolcall_end", contentIndex: 0, toolCall: { type: "toolCall", name: "bash", id: "ok", arguments: {} } });
+		await vi.advanceTimersByTimeAsync(60_000);
+		expect(ctx.abort).toHaveBeenCalledTimes(1);
+	});
+
+	it("ignores raw chunks outside an assistant message", async () => {
+		await chunk();
+		await vi.advanceTimersByTimeAsync(600_000);
+		expect(ctx.abort).not.toHaveBeenCalled();
+	});
+
 	it("disarms the clock at message_end, between messages, and after the run", async () => {
 		await start();
 		await update({ type: "toolcall_start", contentIndex: 0 });

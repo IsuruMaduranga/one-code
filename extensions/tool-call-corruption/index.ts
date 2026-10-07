@@ -7,9 +7,12 @@ import { sessionAlive } from "../lib/session-lifecycle.ts";
 import { scanToolCallMarkup, TOOL_CALL_MARKUP_LIMIT, toolCallCorruptionReason } from "../lib/tool-call-corruption.ts";
 import { withKeepAlive } from "../lsp/keep-alive.ts";
 
-// Silence inside a stream, measured from the response headers (Claude Code's
-// watchdog length), and the shorter limit once a tool call is streaming:
-// arguments never pause for thinking.
+// Silence allowed inside a stream. Every raw chunk restarts the clock, but
+// OpenRouter's keepalive comments never reach us, so a model thinking
+// server-side before its first token looks silent: that wait is long. After
+// the first content it is Claude Code's 90 s watchdog, and 60 s while a tool
+// call's arguments stream (arguments never pause for thinking).
+const FIRST_CONTENT_IDLE_MS = 300_000;
 const STREAM_IDLE_MS = 90_000;
 const TOOL_CALL_IDLE_MS = 60_000;
 
@@ -23,8 +26,9 @@ export default function toolCallCorruptionExtension(pi: ExtensionAPI) {
 	// generation is never recorded, so the lookup cannot name it after a stop.
 	let streamProvider: string | undefined;
 	let stopped = false;
-	let toolCallStreaming = false;
+	let contentStarted = false;
 	let idleTimer: ReturnType<typeof setTimeout> | undefined;
+	let idleMs = 0;
 
 	const clearIdle = () => {
 		clearTimeout(idleTimer);
@@ -35,7 +39,7 @@ export default function toolCallCorruptionExtension(pi: ExtensionAPI) {
 		flagged.clear();
 		responseId = undefined;
 		streamProvider = undefined;
-		toolCallStreaming = false;
+		contentStarted = false;
 		clearIdle();
 	};
 	const resetRun = () => {
@@ -67,10 +71,16 @@ export default function toolCallCorruptionExtension(pi: ExtensionAPI) {
 		}).finally(() => pending.delete(controller));
 		pending.set(controller, notice);
 	};
+	/** (Re)start the silence clock; a call still streaming arguments keeps the short window. */
 	const armIdle = (ctx: ExtensionContext) => {
+		if (stopped) return clearIdle();
+		const ms = rawCalls.size > 0 ? TOOL_CALL_IDLE_MS : contentStarted ? STREAM_IDLE_MS : FIRST_CONTENT_IDLE_MS;
+		if (idleTimer && ms === idleMs) {
+			idleTimer.refresh();
+			return;
+		}
 		clearIdle();
-		if (stopped) return;
-		const ms = toolCallStreaming ? TOOL_CALL_IDLE_MS : STREAM_IDLE_MS;
+		idleMs = ms;
 		idleTimer = setTimeout(() => {
 			idleTimer = undefined;
 			stopTurn(ctx, { stalledSeconds: ms / 1000 });
@@ -97,6 +107,8 @@ export default function toolCallCorruptionExtension(pi: ExtensionAPI) {
 		if (!alive() || !isOpenRouter(ctx.model)) return;
 		const provider = (event.data as { provider?: unknown } | null)?.provider;
 		if (typeof provider === "string" && provider.trim()) streamProvider = provider.trim();
+		// Any chunk is a sign of life, content or not (reasoning details, usage, an empty delta).
+		if (idleTimer) armIdle(ctx);
 	});
 
 	pi.on("message_update", (event, ctx) => {
@@ -104,10 +116,10 @@ export default function toolCallCorruptionExtension(pi: ExtensionAPI) {
 		const update = event.assistantMessageEvent;
 		if (!("partial" in update)) return;
 		responseId = update.partial.responseId || responseId;
+		contentStarted = true;
 		switch (update.type) {
 			case "toolcall_start":
 				rawCalls.set(update.contentIndex, { raw: "", markup: 0, next: 0 });
-				toolCallStreaming = true;
 				break;
 			case "toolcall_delta": {
 				const call = rawCalls.get(update.contentIndex) ?? { raw: "", markup: 0, next: 0 };
