@@ -45,7 +45,7 @@ const TIER_RANK: Record<PromptTier, number> = { frontier: 0, workhorse: 1, cheap
 
 /** Whether `value` names one of the four tiers. */
 export function isPromptTier(value: unknown): value is PromptTier {
-	return typeof value === "string" && value in TIER_RANK;
+	return typeof value === "string" && Object.hasOwn(TIER_RANK, value);
 }
 
 /** How many tiers `tier` sits below `reference` (negative when above). */

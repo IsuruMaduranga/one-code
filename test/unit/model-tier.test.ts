@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
 	classifyModelTier,
 	economicalContainedCandidates,
+	isPromptTier,
 	pickEconomicalContainedModel,
 	resolveModelTier,
 	sameTierContainedCandidates,
@@ -51,6 +52,13 @@ const DEEPSEEK: FixtureModel[] = [
 	{ id: "deepseek/deepseek-v4-flash", released: "2026-04-24", price: [0.14, 0.28], params: 284e9 },
 	{ id: "deepseek/deepseek-r1-distill-32b", released: "2026-05-01", price: [0.1, 0.2], params: 32e9 },
 ];
+
+describe("isPromptTier", () => {
+	it("accepts the four tier names and nothing inherited from Object.prototype", () => {
+		for (const tier of ["frontier", "workhorse", "cheap", "tiny"]) expect(isPromptTier(tier)).toBe(true);
+		for (const value of ["toString", "constructor", "hasOwnProperty", "__proto__", "", 3, undefined]) expect(isPromptTier(value)).toBe(false);
+	});
+});
 
 describe("resolveModelTier", () => {
 	it("classifies first-party Anthropic Opus ≥4.8, Sonnet ≥5.5 and Fable as frontier, with or without a catalog", () => {
