@@ -527,13 +527,24 @@ Session grants from the approval prompt don't apply in auto mode either.
 
 ### The classifier model
 
-The classifier always stays on your session's provider. It runs on the
-cheapest model in your session's tier or above, never dearer than your own
-model: there's no point screening a model with a weaker or more expensive one.
-An Opus session screens with Sonnet 5.5, and GPT-6 Astra with GPT-6 Sol. If no
-cheaper model in your tier fits your session's context window, your own model
-screens its calls. The details are in
+The classifier stays on your session's provider unless you choose otherwise.
+It runs on the cheapest model in your session's tier or above that costs less
+than your own: there's no point screening a model with a weaker or more
+expensive one, and a model at the same price saves nothing. An Opus session
+screens with Sonnet 5.5, and GPT-6 Astra with GPT-6.1 Sol. If no cheaper model
+in your tier fits your session's context window, your own model screens its
+calls. The details are in
 [Automatic model selection](providers-and-models.md#automatic-model-selection).
+
+To choose the classifier yourself, run `/auto-mode model`, or
+`/auto-mode model <provider/model-id>`. The choice is saved in
+`~/.onecode/settings.json`, never in a project's settings, and
+`/auto-mode model clear` goes back to the automatic pick. A model on another
+provider gets your messages, so it's used only on the provider you chose it
+on; after you switch providers, the automatic pick takes over until you choose
+again. One Code warns when your choice has a newer model in its line, sits two
+or more tiers below your session model, or has a smaller context window than
+your session's.
 
 When auto mode is on, the banner shows which classifier is in use, and a
 notice tells you when your own model is screening and why.

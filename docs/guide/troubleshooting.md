@@ -90,7 +90,7 @@ model in use, and `/doctor report` for provider credentials. Set
 
 **The classifier approves or blocks something it shouldn't.** A Haiku-class
 classifier is a measurably weaker boundary than a Sonnet-class one. Choose a
-stronger main model if the automatic classifier selection is not sufficient.
+stronger classifier with `/auto-mode model`, or a stronger main model.
 
 ## Models and providers
 
@@ -107,7 +107,8 @@ session is worth reporting.
 **A side call failed on a Gemini or OpenAI model with a message about
 reasoning or temperature.** Some models reject an option others accept.
 One Code avoids these options in its side calls; if you still see this,
-report the model and error. Classifier and reader models are selected automatically.
+report the model and error. The reader model is selected automatically;
+`/auto-mode model` chooses the classifier.
 
 ## Web search
 

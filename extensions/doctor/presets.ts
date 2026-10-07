@@ -10,9 +10,10 @@
  * and a preset is a bundle of those same choices. A user who wants another
  * provider switches with /model first and reruns /doctor presets there.
  *
- * Each preset pins the main model and sets the subagent default to the shape
- * that matches its intent. The classifier remains automatic in every preset;
- * the rows display what its resolver would pick for that main model.
+ * Each preset pins the main model, sets the subagent default to the shape that
+ * matches its intent, and returns the classifier to the automatic choice
+ * (clearing `autoMode.classifierModel`); the rows display what its resolver
+ * would pick for that main model.
  */
 
 import type { Api, Model } from "@earendil-works/pi-ai";
@@ -192,7 +193,7 @@ export function presetsSection(result: ReturnType<typeof computePresets>, sessio
 }
 
 /**
- * The two settings changes a preset makes, each with its undo — the text
+ * The three settings changes a preset makes, each with its undo — the text
  * `/doctor preset` reports after applying. `mainSwitched` false means the
  * session already ran the preset's main model, so that line says so.
  */
@@ -202,6 +203,6 @@ export function describePresetChanges(preset: PresetPlan, mainSwitched = true): 
 		preset.subagents.setting === "inherit"
 			? "subagent default → inherit the main model (undo: /subagent clear)"
 			: `subagent default → automatic (picks ${modelSpec(preset.subagents.model)}; undo: /subagent)`,
-		`auto-mode classifier stays automatic${preset.classifier ? ` (picks ${modelSpec(preset.classifier)})` : ""}`,
+		`auto-mode classifier → automatic${preset.classifier ? ` (picks ${modelSpec(preset.classifier)})` : ""} (undo: /auto-mode model)`,
 	];
 }

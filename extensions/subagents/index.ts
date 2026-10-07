@@ -43,6 +43,8 @@ import {
 	subagentStatusModel,
 } from "./model-select.ts";
 import { modelPickerComponent, pickerSpec, toPickerEntries, type PickerEntry } from "../lib/model-picker.ts";
+import { chosenModelWarnings } from "../lib/model-choice-warnings.ts";
+import { readSuggestNewerModels } from "../lib/one-code-settings.ts";
 import { defaultDiscoverRoots, discoverPlugins } from "../lib/plugins.ts";
 import { guideDocs } from "../lib/guide-docs.ts";
 import { extensionVersion } from "../lib/package-version.ts";
@@ -626,6 +628,13 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			requireImageInput: supportsImageInput(sessionModel),
 		});
 		for (const notice of resolution.notices) notifyModelOnce(ctx, notice);
+		// The user's own subagentModel setting is honoured, so say what it costs:
+		// a newer model in its line, or a model far weaker than the session's.
+		if (resolution.source === "default" && resolution.model) {
+			for (const warning of chosenModelWarnings({ available, sessionModel, chosen: resolution.model, role: "subagent", suggestNewer: readSuggestNewerModels(os.homedir()) })) {
+				notifyModelOnce(ctx, `${warning.text} ${warning.fix}`);
+			}
+		}
 		// Keep the established narrow refusal correction: it does not claim the
 		// entire menu was reprinted, and it remains useful on restored sessions.
 		if (refused !== undefined && requestSent) {
@@ -2870,6 +2879,9 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					: "subagentModel: (not set)",
 				`effective: ${resolution.model ? `${resolution.model.provider}/${resolution.model.id}` : "none"} (${resolution.source})`,
 				...(resolution.notices.length ? [resolution.notices.join("\n")] : []),
+				...(resolution.source === "default" && resolution.model
+					? chosenModelWarnings({ available, sessionModel: ctx.model, chosen: resolution.model, role: "subagent", suggestNewer: readSuggestNewerModels(os.homedir()) }).map((warning) => `! ${warning.text} ${warning.fix}`)
+					: []),
 				"Set it with /subagent <provider/model-id|sonnet|opus|haiku|fable|inherit>, or clear with /subagent clear.",
 			].join("\n"),
 			"info",
@@ -2941,8 +2953,17 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			ctx.ui.notify("Could not save subagent model: " + (error as Error).message, "error");
 			return;
 		}
-		emitModelStatus(ctx);
 		ctx.ui.notify(`Subagent default set to "${spec}" (saved to ~/.onecode/settings.json).`, "info");
+		// What the choice costs, shown now even if an earlier choice already
+		// raised the same line; marked noticed so the status refresh is quiet.
+		if (resolved) {
+			for (const warning of chosenModelWarnings({ available, sessionModel: ctx.model, chosen: resolved, role: "subagent", suggestNewer: readSuggestNewerModels(os.homedir()) })) {
+				const message = `${warning.text} ${warning.fix}`;
+				noticedModels.add(message);
+				ctx.ui.notify(message, "warning");
+			}
+		}
+		emitModelStatus(ctx);
 	};
 
 	registerLocalCommand(pi, "subagent", {

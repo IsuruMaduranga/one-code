@@ -121,7 +121,7 @@ describe("computePresets", () => {
 		const quality = result.presets.find((preset) => preset.name === "quality")!;
 		expect(quality.main).toBe(main);
 		expect(quality.classifier).toBe(cheaper);
-		expect(describePresetChanges(quality)[2]).toBe("auto-mode classifier stays automatic (picks openai/gpt-5.6-terra)");
+		expect(describePresetChanges(quality)[2]).toBe("auto-mode classifier → automatic (picks openai/gpt-5.6-terra) (undo: /auto-mode model)");
 		const text = presetsSection(result, main).lines.map((line) => line.text).join("\n");
 		expect(text).toContain("the cheapest model in its tier or above, never dearer than the main model");
 	});
@@ -159,7 +159,7 @@ describe("computePresets", () => {
 		const changes = describePresetChanges(result.presets.find((p) => p.name === "quality")!);
 		expect(changes[0]).toContain("undo: /model");
 		expect(changes[1]).toContain("/subagent clear");
-		expect(changes[2]).toContain("classifier stays automatic");
-		expect(changes[2]).not.toContain("undo:");
+		expect(changes[2]).toContain("classifier → automatic");
+		expect(changes[2]).toContain("undo: /auto-mode model");
 	});
 });

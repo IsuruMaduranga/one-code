@@ -84,6 +84,7 @@ appear in `projects/<slug>/settings.json`.
 | `autoMode.environment` | string array | `/auto-mode setup` | Describes your environment to the classifier. |
 | `autoMode.hard_deny`, `autoMode.soft_deny`, `autoMode.allow` | string array | `/auto-mode setup` | Extra classifier rules, appended to the built-ins. |
 | `autoMode.classifyAllShell` | boolean | By hand | Send every shell command to the classifier. |
+| `autoMode.classifierModel` | string | `/auto-mode model` | The classifier model, `provider/model-id`, instead of the automatic pick. Read from One Code's settings only. |
 | `autoMode.logDecisions` | boolean | By hand | Log every gate decision next to the session files. |
 | `webSearch.apiKeys.brave`, `webSearch.apiKeys.tavily` | string | By hand | Search keys when the environment variables are not set. |
 | `webSearch.order` | string array | By hand | Order of the fallback search backends: `brave`, `tavily`, `exa-free`. |

@@ -29,9 +29,12 @@ the findings.
    ready, with the free options named.
 3. **Models.** The main model with its price and context window, the
    prompt tier it gets and the rule that set it, the reasoning effort, the
-   subagent model and how it was chosen, the auto-mode classifier model, the
-   reader model used by web fetch and recaps, how fresh the model catalogs
-   behind the tiers are, and the permission mode.
+   subagent model and how it was chosen, the auto-mode classifier model and
+   your `/auto-mode model` setting, the reader model used by web fetch and
+   recaps, how fresh the model catalogs behind the tiers are, and the
+   permission mode. A model you chose by hand gets a warning when a newer one
+   is available in its line or it's far weaker than your main model, and the
+   classifier one also when its context window is smaller than your session's.
 4. **Presets.** The three model presets for your provider and the model
    each role would get under each.
 5. **Imported configuration.** Every settings file found, with the keys One
@@ -54,8 +57,8 @@ In the panel, press **f** to run the checkup on the report you're reading.
 ## Model presets
 
 A preset sets the main model and subagent model from the provider you're
-connected to. The classifier stays automatic, and each preset's preview shows
-the classifier its main model would get (see
+connected to, and returns the classifier to the automatic pick. Each preset's
+preview shows the classifier its main model would get (see
 [Automatic model selection](providers-and-models.md#automatic-model-selection)).
 Only priced models that support tool calls, and that no newer model of the
 same vendor replaces, are considered for the main model.
@@ -70,7 +73,7 @@ same vendor replaces, are considered for the main model.
 applies one; the aliases `economy`, `cheap`, `balance`, `max`, `maximum`,
 and `best` also work. Applying a preset writes the subagent choice to
 `~/.onecode/settings.json` and remembers the main model as pi's
-default. Undo the changes with `/model` or `/subagent clear`.
+default. Undo the changes with `/model`, `/subagent clear` or `/auto-mode model`.
 
 ## The command-line form
 

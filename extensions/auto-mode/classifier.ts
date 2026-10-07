@@ -197,7 +197,8 @@ class StepError extends Error {
 /** Signature that must stay equal for the cached chain to be reused (see ClassifierState.chainCache). */
 function selectionSignature(deps: ClassifierDeps): string {
 	const session = deps.sessionModel;
-	return session ? `${session.provider}/${session.id}|${session.contextWindow ?? "unknown"}` : "(none)";
+	const configured = `${deps.config.classifierModel ?? ""}|${deps.config.classifierModelSetFor ?? ""}`;
+	return session ? `${session.provider}/${session.id}|${session.contextWindow ?? "unknown"}|${configured}` : `(none)|${configured}`;
 }
 
 /** The candidate chain (minus anything already unusable this session) and its notices. */
@@ -205,7 +206,12 @@ function remainingCandidates(deps: ClassifierDeps): { candidates: Candidate[]; n
 	const signature = selectionSignature(deps);
 	let cached = deps.state.chainCache;
 	if (!cached || cached.signature !== signature) {
-		const built = classifierCandidates({ available: deps.registry.getAvailable(), sessionModel: deps.sessionModel });
+		const built = classifierCandidates({
+			available: deps.registry.getAvailable(),
+			sessionModel: deps.sessionModel,
+			configured: deps.config.classifierModel,
+			configuredSetForContainment: deps.config.classifierModelSetFor,
+		});
 		cached = { signature, candidates: built.candidates, notices: built.notices };
 		// Don't poison the cache with an empty chain (e.g. a not-yet-populated
 		// registry) — that would permanently block the gate; recompute next call.
@@ -239,7 +245,9 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 	}
 
 	// Automatic-selection fallback explanations are surfaced once per distinct message.
-	for (const notice of notices) notifyOnce(deps, notice.text, notice.text, notice.level, notice);
+	// A newer-model hint about a chosen classifier is the session-start
+	// announcement's to make (it honours suggestNewerModels), not a gated call's.
+	for (const notice of notices) if (notice.choiceWarning !== "newer") notifyOnce(deps, notice.text, notice.text, notice.level, notice);
 
 	// The action is sent whole (transcript.ts MAX_ACTION_CHARS); one too large for
 	// that is refused with its size, never judged from a prefix.

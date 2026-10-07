@@ -12,7 +12,9 @@
 
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { modeCycleKey } from "../lib/keys.ts";
+import { loadAutoModeConfig } from "../auto-mode/config.ts";
 import { classifierCandidates, describeCandidate, type ClassifierNotice } from "../auto-mode/model-select.ts";
+import { chosenModelWarnings, type ChosenModelWarning } from "../lib/model-choice-warnings.ts";
 import { catalogRefreshEnabled, loadCatalogSources } from "../lib/model-catalog-data.ts";
 import { autoSelectSkipReason, catalogModelFor } from "../lib/model-catalog.ts";
 import { modelSpec, pricedInput } from "../lib/model-policy.ts";
@@ -43,7 +45,10 @@ export interface ModelFacts {
 	subagentConfigured?: SubagentDefault;
 	/** The configured default exists but does not apply to this session (Claude Code's env var on a non-Claude model). */
 	subagentConfiguredInapplicable: boolean;
-	classifier: { model?: Model<Api>; description?: string; notices: ClassifierNotice[] };
+	/** What the configured subagent default costs (newer model, far weaker than the session), when it is in effect. */
+	subagentWarnings: ChosenModelWarning[];
+	/** `configured`: the user's `autoMode.classifierModel`, as written. */
+	classifier: { model?: Model<Api>; description?: string; notices: ClassifierNotice[]; configured?: string };
 	reader?: { model: Model<Api>; via: "tier" | "session" };
 	/** The session model's own tier and the rule that decided it (`classifyModelTier`, no CC_PROMPT_TIER). */
 	tierReason?: string;
@@ -66,7 +71,13 @@ export function collectModelFacts(available: Model<Api>[], session: SessionView,
 	const configuredAll = loadSubagentDefault(home, env);
 	const configured = applicableSubagentDefault(configuredAll, sessionModel);
 	const subagent = resolveSubagentModel({ configuredDefault: configured, sessionModel, available });
-	const chain = classifierCandidates({ available, sessionModel });
+	const autoConfig = loadAutoModeConfig(home);
+	const chain = classifierCandidates({
+		available,
+		sessionModel,
+		configured: autoConfig.classifierModel,
+		configuredSetForContainment: autoConfig.classifierModelSetFor,
+	});
 	const first = chain.candidates[0];
 	const reader = pickEconomicalContainedModel(available, sessionModel);
 	const sources = loadCatalogSources(oneCodeStateDir(env, home));
@@ -88,10 +99,15 @@ export function collectModelFacts(available: Model<Api>[], session: SessionView,
 		subagent,
 		subagentConfigured: configuredAll,
 		subagentConfiguredInapplicable: configuredAll !== undefined && configured === undefined,
+		subagentWarnings:
+			subagent.source === "default" && subagent.model
+				? chosenModelWarnings({ available, sessionModel, chosen: subagent.model, role: "subagent", suggestNewer: readSuggestNewerModels(home, env) })
+				: [],
 		classifier: {
 			model: first?.model,
 			description: first ? describeCandidate(first) : undefined,
-			notices: chain.notices,
+			notices: readSuggestNewerModels(home, env) ? chain.notices : chain.notices.filter((notice) => notice.choiceWarning !== "newer"),
+			configured: autoConfig.classifierModel,
 		},
 		reader,
 	};
@@ -163,6 +179,10 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 			lines.push({ text: notice, indent: 1, level: "warn" });
 			findings.push({ level: "warn", text: `Subagent model: ${notice}`, fix: "Re-set the default with /subagent on this session, or /subagent clear." });
 		}
+		for (const warning of facts.subagentWarnings) {
+			lines.push({ text: warning.text, indent: 1, level: "warn" });
+			findings.push({ level: "warn", text: warning.text, fix: warning.fix });
+		}
 	} else {
 		lines.push({ text: "Subagents: no model resolves", level: "error" });
 	}
@@ -172,8 +192,11 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 		const live = session.permission?.classifier;
 		const pinned = session.permission?.pinned && live ? ` — screening this session on ${live}` : "";
 		lines.push({ text: `Auto-mode classifier: ${classifier.description ?? modelSpec(classifier.model)}${pinned}`, level: "ok" });
+		if (classifier.configured) {
+			lines.push({ text: `Setting: "${classifier.configured}" via autoMode.classifierModel in ~/.onecode/settings.json (/auto-mode model clear returns to automatic)`, indent: 1, level: "dim" });
+		}
 		lines.push({
-			text: "Classifier policy: the cheapest model in this session's tier or above, never dearer than this session's model; else this session's model.",
+			text: "Classifier policy: the cheapest model on this provider in this session's tier or above and strictly cheaper than it, else this session's model; /auto-mode model chooses one by hand.",
 			indent: 1,
 			level: "dim",
 		});
@@ -183,7 +206,13 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 	for (const notice of classifier.notices) {
 		lines.push({ text: notice.text, indent: 1, level: notice.level === "warning" ? "warn" : "dim" });
 		if (notice.level === "warning") {
-			findings.push({ level: "warn", text: `Classifier: ${notice.text}`, fix: "Check provider authentication and model availability; classifier selection is automatic." });
+			findings.push({
+				level: "warn",
+				text: `Classifier: ${notice.text}`,
+				fix: classifier.configured
+					? "Change it with /auto-mode model, or /auto-mode model clear for the automatic choice."
+					: "Check provider authentication and model availability, or choose one with /auto-mode model.",
+			});
 		}
 	}
 

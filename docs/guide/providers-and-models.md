@@ -75,7 +75,8 @@ run on different models:
 - **A cheaper subagent tier.** Subagents, workflow agents, the auto-mode
   classifier, and the reader model behind web fetch and recaps all run on
   their own model. One Code picks these automatically; see the next section.
-  `/subagent` can set the subagent default by hand.
+  `/subagent` sets the subagent default by hand, and `/auto-mode model` the
+  classifier.
 
 This matters most for `ultracode` workflows, which fan work out across many
 agents at once. Running those agents on a cheap tier keeps a large fan-out
@@ -91,13 +92,30 @@ choice is the cheapest model in your session's tier (see the next section):
   that's cheaper than your main model. An Opus session delegates to Sonnet
   5.5, both frontier; a Haiku-tier session never gets upgraded. If nothing
   cheaper qualifies, subagents use the main model.
-- **The classifier** uses the same rule, but a model priced the same as yours
-  is fine too. It's never a lower tier than your session, never dearer, and
-  never an experimental build (a `-exp` model). Whatever gets picked has to
-  fit your session's whole context window, and the pick is redone when you
-  switch models. If nothing qualifies, your own model screens its calls.
+- **The classifier** uses the same rule. It also has to fit your session's
+  whole context window, and it's never an experimental build (a `-exp`
+  model). The pick is redone when you switch models. If nothing qualifies,
+  your own model screens its calls.
 - **The reader** (web fetch answers, recaps) uses the cheapest model that
   isn't tiny.
+
+You can choose the subagent and classifier models yourself with `/subagent`
+and `/auto-mode model`. Naming a model is choosing it, even on another
+provider. One Code still tells you when a choice looks off, when you make it
+and again when a session starts:
+
+- **A newer model is available** in the same line at about the same price.
+  GPT-5.6 Sol gets "GPT-6.1 Sol is newer and costs less". The same notice
+  appears when you pick an older main model with `/model`.
+- **The model is far weaker than your session's**: two or more tiers below
+  it, like a cheap-tier classifier for a frontier session.
+- **The classifier's context window is smaller than your session's.** It
+  still screens, but once the conversation outgrows it, each call asks for
+  your approval until you `/compact`.
+
+`suggestNewerModels: false` in `~/.onecode/settings.json` turns off the
+newer-model notices; the other two always show. `/doctor report` lists all
+three under the model they apply to.
 
 Claude Code's model aliases work everywhere: `sonnet`, `haiku`, `opus` and
 `fable` resolve to a model of that name when your provider has one, and

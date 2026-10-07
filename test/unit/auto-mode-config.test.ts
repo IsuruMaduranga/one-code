@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -8,6 +8,7 @@ import {
 	loadAutoModeConfig,
 	loadAutoModeConfigWithDiagnostics,
 	oneCodePermissionAllow,
+	persistClassifierModel,
 	spliceDefaults,
 } from "../../extensions/auto-mode/config.ts";
 import { DEFAULT_ENVIRONMENT } from "../../extensions/auto-mode/defaults.ts";
@@ -60,22 +61,36 @@ describe("loadAutoModeConfig", () => {
 		expect(config.environment.length).toBe(DEFAULT_ENVIRONMENT.length + 1);
 	});
 
-	it("preserves supported settings while ignoring legacy classifier overrides", () => {
+	it("reads classifierModel and its stamp from One Code's settings", () => {
 		writeUserSettings({ autoMode: { classifyAllShell: true } });
 		writeOneCodeSettings({ autoMode: { classifierModel: "anthropic/claude-haiku-4-5", classifierModelSetFor: "anthropic" } });
 		const config = loadAutoModeConfig(home);
 		expect(config.classifyAllShell).toBe(true);
-		expect(config).not.toHaveProperty("classifierModel");
-		expect(config).not.toHaveProperty("classifierModelSetFor");
+		expect(config.classifierModel).toBe("anthropic/claude-haiku-4-5");
+		expect(config.classifierModelSetFor).toBe("anthropic");
 	});
 
-	it("ignores legacy classifier settings from every configuration source", () => {
+	it("never reads classifierModel from Claude Code's settings, and says so", () => {
 		writeUserSettings({ autoMode: { classifierModel: "opencode/gemini-3.7-flash" } });
-		writeOneCodeSettings({ autoMode: { classifierModel: "anthropic/claude-haiku-4-5", classifierModelSetFor: "anthropic" } });
 		const { config, diagnostics } = loadAutoModeConfigWithDiagnostics(home);
-		expect(config).not.toHaveProperty("classifierModel");
-		expect(config).not.toHaveProperty("classifierModelSetFor");
-		expect(diagnostics.some((line) => line.includes("classifierModel"))).toBe(false);
+		expect(config.classifierModel).toBeUndefined();
+		expect(diagnostics.some((line) => line.includes("classifierModel is ignored here") && line.includes("/auto-mode model"))).toBe(true);
+	});
+
+	it("persists and clears classifierModel without touching other keys", () => {
+		writeOneCodeSettings({ autoMode: { environment: ["x"] }, other: 1 });
+		persistClassifierModel("openai/gpt-6-sol", home, "openai");
+		expect(loadAutoModeConfig(home)).toMatchObject({ classifierModel: "openai/gpt-6-sol", classifierModelSetFor: "openai" });
+		persistClassifierModel(undefined, home);
+		const saved = JSON.parse(readFileSync(join(home, ".onecode", "settings.json"), "utf8"));
+		expect(saved).toEqual({ autoMode: { environment: ["x"] }, other: 1 });
+	});
+
+	it("flags a classifierModel that is not a model spec", () => {
+		writeOneCodeSettings({ autoMode: { classifierModel: 42 } });
+		const { config, diagnostics } = loadAutoModeConfigWithDiagnostics(home);
+		expect(config.classifierModel).toBeUndefined();
+		expect(diagnostics.some((line) => line.includes("autoMode.classifierModel must be"))).toBe(true);
 	});
 
 	it("ignores malformed files rather than failing open", () => {

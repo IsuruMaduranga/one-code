@@ -212,7 +212,16 @@ function summarizeFile(scope: SettingsScope, label: string, path: string, home: 
 		const auto = file.autoMode as Json;
 		const keys = Object.keys(auto);
 		if (known.has("autoMode")) {
-			const consumed = keys.filter((k) => k !== "classifierModel" && k !== "classifierModelSetFor");
+			// `classifierModel` is One Code's own key, read from ~/.onecode only.
+			if (scope === "claude-user" && ("classifierModel" in auto || "classifierModelSetFor" in auto)) {
+				report.refused.push("autoMode.classifierModel — One Code's own key, read from ~/.onecode/settings.json only");
+				findings.push({
+					level: "warn",
+					text: `${shortenHome(path, home)} carries autoMode.classifierModel, a One Code key read only from ~/.onecode/settings.json; the value here is ignored.`,
+					fix: "Set it with /auto-mode model (which writes ~/.onecode/settings.json) and delete the stale key from ~/.claude/settings.json.",
+				});
+			}
+			const consumed = keys.filter((k) => !(scope === "claude-user" && (k === "classifierModel" || k === "classifierModelSetFor")));
 			if (consumed.length) report.used.push(`autoMode: ${consumed.join(", ")}`);
 		} else {
 			report.refused.push(`autoMode (${keys.join(", ")}) — never read from a repository's files`);
