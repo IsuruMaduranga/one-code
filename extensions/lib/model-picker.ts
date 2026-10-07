@@ -177,7 +177,7 @@ export function modelPickerComponent(
 			if (key.kind === "cancel") return done(null);
 			if (key.kind === "confirm") return done(filtered[index] ?? null);
 			if (key.kind === "up") index = Math.max(0, index - 1);
-			else if (key.kind === "down") index = Math.min(filtered.length - 1, index + 1);
+			else if (key.kind === "down") index = Math.max(0, Math.min(filtered.length - 1, index + 1));
 			else {
 				query = key.kind === "backspace" ? query.slice(0, -1) : query + key.text;
 				filtered = filterEntries(options.entries, query);
