@@ -45,6 +45,14 @@ export interface ChildToolCall {
 	model?: Model<Api>;
 	/** The run name of the asking agent, for the prompt title — set by the runner, not the gate. */
 	agent?: string;
+	/**
+	 * The main session's tool call that started the asking child's current turn
+	 * (its Agent call, or a later SendMessage), set by the runner from its own
+	 * state, never from tool input. The classifier reads the main session as far
+	 * as that call, not the rest of a batch still in flight
+	 * (auto-mode/history.ts childHistoryCursor).
+	 */
+	parentToolCallId?: string;
 }
 
 /** A permission decision: `undefined` = allow; otherwise block with a model-facing reason. */

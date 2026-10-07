@@ -52,7 +52,7 @@ import { draftSetup, gatherFacts } from "../auto-mode/setup-run.ts";
 import { DEFAULT_ENVIRONMENT } from "../auto-mode/defaults.ts";
 import { buildRuleset } from "../auto-mode/classifier-prompt.ts";
 import type { TranscriptEntry } from "../auto-mode/transcript.ts";
-import { classifierHistory, CLASSIFIER_TOOL_META, CLASSIFIER_USER_INPUT, messageText } from "../auto-mode/history.ts";
+import { childHistoryCursor, classifierHistory, CLASSIFIER_TOOL_META, CLASSIFIER_USER_INPUT, type HistoryCursor, messageText } from "../auto-mode/history.ts";
 import { appendDecision, type DecisionEntry, decisionEntry } from "../auto-mode/decision-log.ts";
 import { loadProjectInstructions } from "../auto-mode/instructions.ts";
 import { classifierCandidates, describeCandidate } from "../auto-mode/model-select.ts";
@@ -572,6 +572,13 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	// A parent assistant message can contain calls not yet executed when a child
 	// asks for approval; those later calls must not become creation evidence.
 	let currentMainToolCallId: string | undefined;
+	/**
+	 * The main calls of the turn in flight, in order: pi persists them with their
+	 * assistant message before any runs. Cleared when the turn ends, when every
+	 * one has a result (auto-mode/history.ts childHistoryCursor).
+	 */
+	let inFlightMainCalls: string[] = [];
+	const childCursor = (startedBy: string | undefined) => childHistoryCursor(startedBy, inFlightMainCalls, currentMainToolCallId);
 
 	/**
 	 * Record a rule denial as its own `denied` transcript line, so the classifier
@@ -653,7 +660,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		 * aborted). All default to the parent's own values, so the main path is
 		 * unchanged.
 		 */
-		opts?: { cwd?: string; appendEntry?: TranscriptEntry; toolCallId?: string; signal?: AbortSignal; powershellParse?: PowerShellParse },
+		opts?: { cwd?: string; appendEntry?: TranscriptEntry; toolCallId?: string; history?: HistoryCursor; signal?: AbortSignal; powershellParse?: PowerShellParse },
 	) => {
 		const cwd = opts?.cwd ?? ctx.cwd;
 		autoConfig ??= loadAutoModeConfig(os.homedir());
@@ -702,7 +709,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// therefore change classifier context at the same boundary as the agent's.
 		const { transcript: history, userMessages } = classifierHistory(ctx.sessionManager.getBranch(), opts?.toolCallId
 			? { beforeToolCallId: opts.toolCallId }
-			: { throughToolCallId: currentMainToolCallId });
+			: (opts?.history ?? { throughToolCallId: currentMainToolCallId }));
 		const action = opts?.appendEntry;
 		const shell = normalizeToolName(toolName) === "powershell" ? "powershell" : isShellTool(normalizeToolName(toolName)) || normalizeToolName(toolName) === "monitor" ? "bash" : undefined;
 		if (shell && subject && wantsGitStatusMeta(shell, subject)) {
@@ -918,6 +925,18 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		} satisfies ReminderPayload);
 	});
 
+	// A turn's calls are all persisted before the first runs, and all have a
+	// result by turn_end (an aborted run ends the agent instead).
+	pi.on("turn_start", () => {
+		inFlightMainCalls = [];
+	});
+	pi.on("turn_end", () => {
+		inFlightMainCalls = [];
+	});
+	pi.on("agent_end", () => {
+		inFlightMainCalls = [];
+	});
+
 	pi.on("session_start", (event, ctx) => {
 		badgeCtx = ctx;
 		lastReviewCtx = ctx;
@@ -937,6 +956,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			autoNoteDecided = false;
 			sessionAllows.length = 0;
 			currentMainToolCallId = undefined;
+			inFlightMainCalls = [];
 			pendingInputs.length = 0;
 			pauseTracker.reset();
 			denials.reset();
@@ -1202,6 +1222,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		const powershellParse = await parsePowerShell(normalizedTool, matchSubject, mode);
 
 		currentMainToolCallId = event.toolCallId;
+		inFlightMainCalls.push(event.toolCallId);
 
 		const decideWith = (allowRules: PermissionRule[], dirs: string[] = workspaceDirs) =>
 			decide({
@@ -1570,6 +1591,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			const outcome = await runClassifier(toolName, subject, ctx, result.cause !== "protected-path", {
 				cwd,
 				appendEntry,
+				// The main session as far as the call that started this child's turn.
+				history: childCursor(call.parentToolCallId),
 				// The child's own turn signal, so an aborted child turn cancels the
 				// classifier call; a fresh (never-aborted) signal only if the child
 				// didn't supply one, so classify() still gets the signal it expects.
@@ -2075,6 +2098,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		ctx: ExtensionContext,
 		subject: string,
 		signal: AbortSignal | undefined,
+		/** The main-session call that started the reviewed turn, when known. */
+		startedBy: string | undefined,
 	): Promise<string | undefined> => {
 		autoConfig ??= loadAutoModeConfig(os.homedir());
 		// Present the child's actions as tool entries appended to the session
@@ -2085,7 +2110,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			const tool = normalizeToolName(action.toolName);
 			return { kind: "tool", tool, input: isShellTool(tool) ? { command: action.subject } : { subject: action.subject } };
 		});
-		const { transcript, userMessages } = classifierHistory(ctx.sessionManager.getBranch(), { throughToolCallId: currentMainToolCallId });
+		const { transcript, userMessages } = classifierHistory(ctx.sessionManager.getBranch(), childCursor(startedBy));
 		const verdict = await classify(
 			{
 				toolName: "subagent-review",
@@ -2169,7 +2194,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		const respondIfCurrent = (verdict: HandBackVerdict | undefined) => {
 			if (epoch === sessionEpoch) respond(verdict);
 		};
-		reviewCompletedRun(payload.actions, ctx, label, new AbortController().signal)
+		reviewCompletedRun(payload.actions, ctx, label, new AbortController().signal, payload.startedBy)
 			.then((reason) => respondIfCurrent(reason ? { kind: "blocked", reason } : undefined))
 			.catch((error) => respondIfCurrent({ kind: "unavailable", reason: `the review itself failed (${(error as Error).message})` }));
 	});
@@ -2180,7 +2205,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		if (actions) childActions.delete(event.toolCallId);
 		// Reviewed while paused too, as the background path above is.
 		if (mode !== "auto" || !actions?.length) return undefined;
-		const reason = await reviewCompletedRun(actions, ctx, "completed run", ctx.signal);
+		// The spawning call is this tool result's own: the run happened inside it.
+		const reason = await reviewCompletedRun(actions, ctx, "completed run", ctx.signal, event.toolCallId);
 		if (!reason) return undefined;
 		return { content: [{ type: "text" as const, text: reviewFlagged(reason) }, ...event.content] };
 	});

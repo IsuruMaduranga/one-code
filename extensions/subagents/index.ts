@@ -294,6 +294,23 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	/** Task id → live resident. */
 	const residents = new Map<string, Resident>();
 	/**
+	 * Task id → the main session's tool call that started the run's current
+	 * turn (its Agent call, or the latest SendMessage to it); a nested run
+	 * answers with its parent's (`parentTaskOf`). The permission gate reads the
+	 * main session only as far as that call (auto-mode/history.ts
+	 * childHistoryCursor). Ids only, a few per run.
+	 */
+	const mainCallFor = new Map<string, string>();
+	const parentTaskOf = new Map<string, string>();
+	const mainCallOf = (taskId: string): string | undefined => {
+		// Bounded: nesting is capped far below this, and a cycle must not hang the gate.
+		for (let id: string | undefined = taskId, depth = 0; id !== undefined && depth < 8; id = parentTaskOf.get(id), depth++) {
+			const call = mainCallFor.get(id);
+			if (call) return call;
+		}
+		return undefined;
+	};
+	/**
 	 * Task ids of background runs spawned during the agent loop now in flight.
 	 * Cleared at `agent_start`; read at `agent_end` to notice a turn that ended
 	 * with an agent still pending, which is the shape of the fabricated-result
@@ -1479,6 +1496,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					...(description ? { description } : {}),
 				};
 				registry.add(record); // SendMessage from main can reach the nested run too
+				parentTaskOf.set(taskId, parentRecord.taskId);
 
 				// The main conversation's Agent calls are classified as delegations
 				// (matcher DELEGATION_TOOLS); a child's nested spawn must be judged the
@@ -1489,7 +1507,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				try {
 					const bridge = getPermissionBridge();
 					const verdict = bridge
-						? await bridge({ toolName: "Agent", input: { subagent_type: agentDef.name, prompt: task, description: name }, cwd: parentRecord.cwd, signal })
+						? await bridge({ toolName: "Agent", input: { subagent_type: agentDef.name, prompt: task, description: name }, cwd: parentRecord.cwd, signal, parentToolCallId: mainCallOf(parentRecord.taskId) })
 						: { block: true as const, reason: "no permission bridge is available to judge the delegation" };
 					if (verdict?.block) {
 						return {
@@ -1650,6 +1668,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			onMessageToMain: (message, summary) =>
 				parent ? relayToParent(parent.taskId, record.taskId, request.name, message, summary) : notifyAgentMessage(record.taskId, request.name, message),
 			extraTools: spawnToolsFor(record),
+			mainToolCallId: () => mainCallOf(record.taskId),
 		});
 		liveHandles.set(record.taskId, handle);
 
@@ -1714,6 +1733,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			return { launched: false, line: `✗ ${p.record.name}: the session ended before the agent started.` };
 		};
 		if (shuttingDown) return ended();
+		if (toolCallId) mainCallFor.set(p.record.taskId, toolCallId);
 		// Captured as a string: onExit runs from a `.finally` long after this
 		// turn's ctx may be stale (review S5). The entered worktree, if any.
 		const parentCwd = workCwd(ctx);
@@ -1828,6 +1848,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			sink: live.sink,
 			onMessageToMain: (message) => notifyAgentMessage(p.record.taskId, p.record.name, message),
 			extraTools: spawnToolsFor(p.record, { resident: true }),
+			mainToolCallId: () => mainCallOf(p.record.taskId),
 			onTurnEnd: (outcome) => {
 				registry.sessionFileFor(p.record);
 				live.settle();
@@ -1844,7 +1865,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 				const stopped = stoppedTaskIds.has(p.record.taskId);
 				armReaper();
 				resident.reviewing++;
-				void awaitHandBackReview(pi.events, p.record, outcome.actions).then((review) => {
+				void awaitHandBackReview(pi.events, p.record, outcome.actions, undefined, mainCallOf(p.record.taskId)).then((review) => {
 					resident.reviewing--;
 					if (handler) {
 						handler(outcome, review, stopped);
@@ -2275,6 +2296,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 					onUpdate?.({ content: [{ type: "text", text: line }], details: {} });
 				};
 				report();
+				mainCallFor.set(prepared[0].record.taskId, toolCallId);
 				const result = await executeRun(prepared[0], ctx, signal, sessionFile ?? undefined, undefined, (toolCalls, text, usage) => {
 					progress = { toolCalls, text, usage };
 					report();
@@ -2381,6 +2403,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		// Resident background agent: reach its in-process session live.
 		const resident = residents.get(record.taskId);
 		if (resident && !resident.handle.exited()) {
+			// This call now starts (or joins) the agent's turn.
+			mainCallFor.set(record.taskId, toolCallId);
 			if (resident.handle.busy()) {
 				let delivery: "started" | "steered";
 				try {
@@ -2552,6 +2576,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		// resumed turn runs blocking there and the reply is the tool result, as a
 		// spawn's report is (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 M3).
 		const oneShot = !sessionOutlivesTurn(ctx.mode);
+		mainCallFor.set(record.taskId, toolCallId);
 		const handle = runtime.run({
 			name: record.name,
 			agent: loadAgents(ctx.cwd).find((a) => a.name === record.agent),
@@ -2574,6 +2599,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			sink: live.sink,
 			onMessageToMain: (message) => notifyAgentMessage(record.taskId, record.name, message),
 			extraTools: spawnToolsFor(record),
+			mainToolCallId: () => mainCallOf(record.taskId),
 		});
 		liveHandles.set(record.taskId, handle);
 
@@ -2620,7 +2646,7 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			// does for a resident's turn; a resumed turn once skipped it
 			// (SUBAGENTS-WORKFLOWS-REVIEW-2026-09-26 M2). The task settles after the
 			// review, so task_output never returns the reply ahead of its verdict.
-			const review = await awaitHandBackReview(pi.events, record, outcome.actions);
+			const review = await awaitHandBackReview(pi.events, record, outcome.actions, undefined, mainCallOf(record.taskId));
 			// The outcome includes SubagentHandback and startup/abort errors;
 			// the live snapshot only contains assistant text, not the final report.
 			settledOutput = `${relocationNote}${outcome.output}`;

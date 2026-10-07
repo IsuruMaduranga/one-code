@@ -204,6 +204,38 @@ describe("subagent shutdown during launch", () => {
 	});
 });
 
+describe("the main-session call that started a run's turn", () => {
+	it("follows a resident from its Agent call to the SendMessage that starts its next turn", async () => {
+		const runtime = fakeResident();
+		const h = await mount();
+		const reviews: SubagentActionsPayload[] = [];
+		h.fake.events.on(SUBAGENT_ACTIONS_CHANNEL, (payload) => reviews.push(payload as SubagentActionsPayload));
+		const spawned = await h.fake.tools.get("Agent")!.execute("agent-call", { subagent_type: "general-purpose", task: "Check the code" }, undefined, undefined, h.ctx) as { details: { agentRuns: AgentRunRecord[] } };
+		expect(runtime.options().mainToolCallId?.()).toBe("agent-call");
+		runtime.finish([{ toolName: "bash", subject: "ls" }]);
+		expect(reviews.at(-1)?.startedBy).toBe("agent-call");
+		reviews.at(-1)!.onReview!(undefined);
+		await vi.advanceTimersByTimeAsync(DEFAULT_COALESCE_MS + 1);
+		await h.fake.tools.get("SendMessage")!.execute("send-call", { to: spawned.details.agentRuns[0].taskId, message: "Again" }, undefined, undefined, h.ctx);
+		expect(runtime.options().mainToolCallId?.()).toBe("send-call");
+		runtime.finish([{ toolName: "bash", subject: "ls" }]);
+		expect(reviews.at(-1)?.startedBy).toBe("send-call");
+	});
+
+	it("judges a nested spawn against its top-level run's starting call", async () => {
+		const runtime = fakeResident();
+		runtime.runner.run.mockReturnValue({ result: Promise.resolve(outcome()), kill: vi.fn(), snapshot: () => ({ text: "", toolCalls: 0, usage: emptyUsage() }) });
+		const h = await mount();
+		const asked: Array<{ toolName: string; parentToolCallId?: string }> = [];
+		h.fake.events.emit(SUBAGENT_GATE_CHANNEL, { decide: async (call: { toolName: string; parentToolCallId?: string }) => { asked.push(call); return undefined; } });
+		await h.fake.tools.get("Agent")!.execute("agent-call", { subagent_type: "general-purpose", task: "Delegate" }, undefined, undefined, h.ctx);
+		const nested = runtime.options().extraTools?.find((tool) => tool.name === "Agent");
+		await nested!.execute("nested-call", { subagent_type: "explore", task: "Look" }, undefined, undefined, h.ctx as never);
+		expect(asked.at(-1)).toMatchObject({ toolName: "Agent", parentToolCallId: "agent-call" });
+		expect(runtime.runner.run.mock.calls.at(-1)?.[0].mainToolCallId?.()).toBe("agent-call");
+	});
+});
+
 describe("subagent task_stop", () => {
 	it.each([false, true])("keeps a stopped turn distinct from a resumed run during review (repeat stop=%s)", async (repeatStop) => {
 		const runtime = fakeResident(true, [{ toolName: "read", subject: "file.ts" }]);

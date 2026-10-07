@@ -42,6 +42,8 @@ export function awaitHandBackReview(
 	run: { taskId: string; name: string },
 	actions: ChildAction[] | undefined,
 	timeoutMs = HAND_BACK_REVIEW_TIMEOUT_MS,
+	/** The main-session call that started the turn (SubagentActionsPayload.startedBy). */
+	startedBy?: string,
 ): Promise<HandBackVerdict | undefined> {
 	if (!actions?.length) return Promise.resolve(undefined);
 	return new Promise((resolve) => {
@@ -59,6 +61,7 @@ export function awaitHandBackReview(
 			actions,
 			background: true,
 			agentName: run.name,
+			...(startedBy ? { startedBy } : {}),
 			onReview: finish,
 		} satisfies SubagentActionsPayload);
 	});

@@ -20,13 +20,36 @@ export function userMessageKey(timestamp: unknown, text: string): string {
 	return JSON.stringify([timestamp, text]);
 }
 
+/** Where the projected history ends; neither field reads the whole active branch. */
+export interface HistoryCursor {
+	beforeToolCallId?: string;
+	throughToolCallId?: string;
+}
+
+/**
+ * Where a subagent's view of the main session ends, for its own gated calls
+ * and its hand-back review. pi persists the main turn's whole tool-call batch
+ * before any of it runs, so a later call in that batch is not yet context.
+ * A child started by a call in the batch in flight (its Agent call, or the
+ * SendMessage call that began this turn) sees through that call; one started
+ * in an earlier turn sees every finished turn and none of the batch in
+ * flight; with nothing in flight it sees the whole branch. A child whose
+ * starting call is unknown (a workflow agent, a cron fire) keeps the last
+ * main call as its cursor.
+ */
+export function childHistoryCursor(startedBy: string | undefined, inFlight: readonly string[], lastMainCall: string | undefined): HistoryCursor {
+	if (startedBy === undefined) return { throughToolCallId: lastMainCall };
+	if (inFlight.includes(startedBy)) return { throughToolCallId: startedBy };
+	return inFlight.length > 0 ? { beforeToolCallId: inFlight[0] } : {};
+}
+
 /**
  * The summary comes before the kept tail, though its stored entry follows it.
  * `beforeToolCallId` excludes the pending call and later calls from the same
  * assistant message (pi persists the whole tool-call batch before executing it).
  * A bridged child uses `throughToolCallId` to include its parent's running call.
  */
-export function classifierHistory(branch: readonly unknown[], options: { beforeToolCallId?: string; throughToolCallId?: string } = {}): {
+export function classifierHistory(branch: readonly unknown[], options: HistoryCursor = {}): {
 	transcript: TranscriptEntry[];
 	userMessages: string[];
 } {
