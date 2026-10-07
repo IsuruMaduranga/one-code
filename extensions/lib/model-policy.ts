@@ -38,7 +38,8 @@ const gateway = (): ProviderPolicy => ({ kind: "gateway" });
 const opaque = (): ProviderPolicy => ({ kind: "opaque" });
 
 /**
- * Every built-in language-model provider in pi 0.84.0. Unknown/custom providers
+ * Every built-in language-model provider in pi 1.0.1 (`model-policy.test.ts`
+ * checks the list against pi's own). Unknown/custom providers
  * get the opaque policy below, so a pi upgrade fails safe rather than widening
  * automatic routing.
  */
@@ -78,6 +79,8 @@ export const BUILTIN_PROVIDER_POLICIES: Readonly<Record<string, ProviderPolicy>>
 	"cloudflare-ai-gateway": gateway(),
 	"qwen-token-plan": hosted("host:qwen-plan"),
 	"qwen-token-plan-cn": hosted("host:qwen-plan"),
+	"qwen-token-plan-individual": hosted("host:qwen-plan"),
+	meta: direct("meta"),
 	xiaomi: direct("xiaomi"),
 	"xiaomi-token-plan-cn": direct("xiaomi"),
 	"xiaomi-token-plan-ams": direct("xiaomi"),
