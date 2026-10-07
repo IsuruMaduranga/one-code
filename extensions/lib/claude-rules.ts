@@ -206,6 +206,8 @@ export interface RuleOptions {
 	scope: "Project" | "User" | "Managed";
 	/** Undefined selects unconditional files; a target selects only matching conditional files. */
 	filePath?: string;
+	/** Select every conditional file, whatever its globs (the auto-mode classifier's instructions). */
+	allConditional?: boolean;
 	processed?: Set<string>;
 	/** Normal CLI user rules allow external includes; project/managed rules need approval. */
 	includeExternal?: boolean;
@@ -264,7 +266,10 @@ const walks = new Map<string, { stamps: Map<string, string>; files: RuleFile[] }
 /** o$e: readdir order, depth-first, lowercase .md only; canonical identities stop link cycles. */
 export function discoverRules(opts: RuleOptions): RuleFile[] {
 	const base = opts.scope === "Project" ? dirname(dirname(opts.rulesDir)) : opts.cwd;
-	const select = (files: RuleFile[]) => files.filter((file) => opts.filePath === undefined ? !file.globs : ruleMatches(file.globs, opts.filePath, base)).map((file) => ({ ...file }));
+	const select = (files: RuleFile[]) =>
+		files
+			.filter((file) => (opts.allConditional ? Boolean(file.globs) : opts.filePath === undefined ? !file.globs : ruleMatches(file.globs, opts.filePath, base)))
+			.map((file) => ({ ...file }));
 	// A shared dedupe set or a path filter makes the walk depend on its caller: never cached.
 	if (opts.processed || opts.allowPath || touched) return select(walkRules(opts));
 	const key = JSON.stringify([opts.rulesDir, opts.scope, opts.includeExternal ?? opts.scope === "User", opts.cwd, opts.home]);
