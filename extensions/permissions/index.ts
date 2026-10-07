@@ -23,6 +23,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { type ChildAction, SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../auto-mode/actions.ts";
 import { guideDocsDirs } from "../lib/guide-docs.ts";
+import { TURN_FAILED_CHANNEL, type TurnFailedEvent } from "../lib/interrupt.ts";
 import type { HandBackVerdict } from "../lib/notifications.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent } from "../lib/model-unusable.ts";
 
@@ -1074,6 +1075,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		if (!ctx.hasUI || ctx.mode === "print") {
 			const reason = "auto mode classifier transcript exceeded context window in headless mode";
 			ctx.ui.notify(`${reason}. Compact the session (/compact) and continue.`, "error");
+			// A failed one-shot run, not a user cancel (exit/index.ts).
+			pi.events.emit(TURN_FAILED_CHANNEL, { reason } satisfies TurnFailedEvent);
 			ctx.abort();
 			return { block: true, reason };
 		}

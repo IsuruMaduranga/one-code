@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { TURN_FAILED_CHANNEL } from "../../extensions/lib/interrupt.ts";
 import toolCallCorruptionExtension from "../../extensions/tool-call-corruption/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
@@ -66,6 +67,27 @@ describe("OpenRouter tool-call corruption wiring", () => {
 		expect(fetchMock).toHaveBeenCalledWith("https://openrouter.ai/api/v1/generation?id=gen-123", expect.objectContaining({ headers: { Authorization: "Bearer session-key" } }));
 		expect(fake.sentMessages).toEqual([]);
 		expect(fake.sentUserMessages).toEqual([]);
+	});
+
+	it("reports the stop as a turn failure before aborting, once", async () => {
+		const order: string[] = [];
+		fake.events.on(TURN_FAILED_CHANNEL, (data) => order.push(`failed:${(data as { reason: string }).reason}`));
+		(ctx.abort as ReturnType<typeof vi.fn>).mockImplementation(() => order.push("abort"));
+		await stream();
+		await call();
+		await end();
+		await call();
+		await end();
+		expect(order).toEqual(["failed:OpenRouter upstream failure: blocked-call", "abort"]);
+	});
+
+	it("does not report a turn failure for a call handed back to the model", async () => {
+		const failures = vi.fn();
+		fake.events.on(TURN_FAILED_CHANNEL, failures);
+		await stream('{ "command": "grep -rn "\t}');
+		await call();
+		await end();
+		expect(failures).not.toHaveBeenCalled();
 	});
 
 	it("detects concatenated raw JSON even when pi has parsed it as an empty object", async () => {

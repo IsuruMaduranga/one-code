@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TranscriptEntry } from "../../extensions/auto-mode/transcript.ts";
+import { TURN_FAILED_CHANNEL } from "../../extensions/lib/interrupt.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
@@ -124,7 +125,12 @@ describe("classifier history in the permissions gate", () => {
 
 	it("aborts a headless turn on classifier context overflow instead of inviting retries", async () => {
 		overflow = true;
+		const order: string[] = [];
+		fake.events.on(TURN_FAILED_CHANNEL, (data) => order.push(`failed:${(data as { reason: string }).reason}`));
+		(ctx.abort as ReturnType<typeof vi.fn>).mockImplementation(() => order.push("abort"));
 		const result = await call("bash", { command: "rm probe.*" }) as { block?: boolean; reason?: string };
+		// The exit extension turns the stop into a failed one-shot run.
+		expect(order).toEqual(["failed:auto mode classifier transcript exceeded context window in headless mode", "abort"]);
 		expect(result.block).toBe(true);
 		expect(result.reason).toContain("auto mode classifier transcript exceeded context window in headless mode");
 		expect((ctx.ui as { notify: unknown }).notify).toHaveBeenCalledWith(

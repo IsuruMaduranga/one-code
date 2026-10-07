@@ -1,6 +1,7 @@
 /** Reject damaged OpenRouter streams before tool execution, without changing the request prefix. */
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { notifyOrPrint } from "../lib/headless-output.ts";
+import { TURN_FAILED_CHANNEL, type TurnFailedEvent } from "../lib/interrupt.ts";
 import { sessionOutlivesTurn } from "../lib/notifications.ts";
 import { isOpenRouter, openRouterProviderName, toolCallCorruptionNotice, type UpstreamFailure } from "../lib/openrouter-generation.ts";
 import { sessionAlive } from "../lib/session-lifecycle.ts";
@@ -59,6 +60,8 @@ export default function toolCallCorruptionExtension(pi: ExtensionAPI) {
 		if (stopped || !alive()) return;
 		stopped = true;
 		clearIdle();
+		const what = typeof failure === "object" ? `stalled ${failure.stalledSeconds} s` : failure;
+		pi.events.emit(TURN_FAILED_CHANNEL, { reason: `OpenRouter upstream failure: ${what}` } satisfies TurnFailedEvent);
 		ctx.abort();
 		const model = ctx.model!;
 		const registry = ctx.modelRegistry;
