@@ -117,6 +117,8 @@ export default function mcpExtension(pi: ExtensionAPI) {
 	// those blocks are frozen and later changes ride one-shot notices (./announce.ts).
 	let requestSent = false;
 	let announced = emptyAnnounced();
+	/** A resumed snapshot from before structured baselines: its MCP blocks, until the server names are known. */
+	let legacyBlocks: { instructions?: string; failures?: string } | undefined;
 	pi.on("context", () => {
 		requestSent = true;
 	});
@@ -366,6 +368,12 @@ export default function mcpExtension(pi: ExtensionAPI) {
 			onNote: (message) => configNotes.push(message),
 			registered: registeredMcpServers(pi),
 		});
+		// An older snapshot stored only the rendered blocks: read them again by the
+		// configured names, before any delta is taken against them.
+		if (legacyBlocks) {
+			announced = mcpAnnouncedFromReminders(legacyBlocks.instructions, legacyBlocks.failures, servers.map((server) => server.name));
+			legacyBlocks = undefined;
+		}
 		const configWarnings = [
 			...(configErrors.length > 0 ? [`MCP config could not be parsed (ignored): ${configErrors.join("; ")}`] : []),
 			...configNotes,
@@ -558,8 +566,9 @@ export default function mcpExtension(pi: ExtensionAPI) {
 		// arbitrary server text that was shown; a fresh session keeps prior behavior.
 		requestSent = restored !== undefined;
 		const stackText = (key: string) => restored?.stack.find((entry) => (entry as { key?: string }).key === key)?.text;
-		announced = mcpAnnouncedBaseline(restored?.baselines.mcp)
-			?? mcpAnnouncedFromReminders(stackText("mcp-instructions"), stackText("mcp-failures"));
+		const structured = mcpAnnouncedBaseline(restored?.baselines.mcp);
+		legacyBlocks = structured ? undefined : { instructions: stackText("mcp-instructions"), failures: stackText("mcp-failures") };
+		announced = structured ?? mcpAnnouncedFromReminders(legacyBlocks?.instructions, legacyBlocks?.failures);
 		if (!restored) publishBaseline(announced);
 		// pi awaits session_start handlers serially before the prompt opens, and
 		// remote servers take seconds to answer — awaiting here was the entire

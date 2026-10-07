@@ -113,6 +113,19 @@ function isLink(path: string): boolean {
 	try { return lstatSync(path).isSymbolicLink(); } catch { return false; }
 }
 
+/**
+ * One Code addition, matching the inline expander (claude-context.ts
+ * `readImportTarget`): an import ending a sentence (`@docs/x.md.`) names
+ * `docs/x.md` when only that is a file. Claude Code reads the literal path,
+ * which wins whenever it exists.
+ */
+function withoutTrailingPunctuation(target: string): string {
+	for (let candidate = target; ; candidate = candidate.slice(0, -1)) {
+		try { if (statSync(candidate).isFile()) return candidate; } catch { /* not a file: peel */ }
+		if (candidate.length <= 1 || !/[.,;:!?)\]]$/.test(candidate)) return target;
+	}
+}
+
 /** Y1n: imports are separate instruction files, not substitutions into the rule's body. */
 function ruleImports(content: string, path: string, home: string): string[] {
 	const found = new Set<string>();
@@ -120,7 +133,7 @@ function ruleImports(content: string, path: string, home: string): string[] {
 		for (const match of body.matchAll(/(?:^|\s)@((?:[^\s\\]|\\ )+)/g)) {
 			const ref = match[1].split("#")[0].replaceAll("\\ ", " ");
 			if (!ref || !(ref.startsWith("./") || ref.startsWith("~/") || (ref.startsWith("/") && ref !== "/") || /^[a-zA-Z0-9._-]/.test(ref))) continue;
-			found.add(absoluteFrom(dirname(path), expandTilde(ref, home)));
+			found.add(withoutTrailingPunctuation(absoluteFrom(dirname(path), expandTilde(ref, home))));
 		}
 	};
 	const walk = (tokens: Token[]) => {

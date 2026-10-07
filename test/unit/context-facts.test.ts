@@ -9,6 +9,7 @@ import { contextFactsBaseline, resumeFactsNotice } from "../../extensions/lib/co
 import { contextStackOnBranch, type ContextStackSnapshot } from "../../extensions/lib/context-stack.ts";
 import { GIT_SNAPSHOT_OWNER_CHANNEL } from "../../extensions/lib/git-status.ts";
 import { projectMemoryDir } from "../../extensions/lib/memory.ts";
+import { WORKTREE_CHANNEL } from "../../extensions/lib/worktree-channel.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 
@@ -99,6 +100,21 @@ describe("compaction refresh and resume differences", () => {
 		await resumed.turn();
 		const messages = await resumed.request([...old, user("resume", 2)]);
 		expect(messages[0]).toEqual(original[0]);
+		expect(JSON.stringify(messages[1])).not.toContain("saved context snapshot");
+	});
+
+	it("compares a resumed session's facts in the directory they were taken in, not an entered worktree", async () => {
+		const first = await open();
+		await first.turn();
+		await first.request([user("first", 1)]);
+		const branch = branchOf(first.fake);
+		const worktree = join(home, "worktree");
+		mkdirSync(worktree);
+		writeFileSync(join(worktree, "CLAUDE.md"), "worktree instructions\n");
+		const resumed = await open(branch, "resume");
+		resumed.fake.events.emit(WORKTREE_CHANNEL, { path: worktree });
+		await resumed.turn();
+		const messages = await resumed.request([user("first", 1), user("resume", 2)]);
 		expect(JSON.stringify(messages[1])).not.toContain("saved context snapshot");
 	});
 

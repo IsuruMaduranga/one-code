@@ -286,8 +286,8 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 			if (paths.length) {
 				// RPC installs its input reader only AFTER session_start returns.
 				// Queue after hooks/MCP consent; gate the first turn, not startup.
-				approvalPending = askApproval(ctx, paths, true);
-				approvalPending.catch(() => {});
+				// A dialog that fails is no answer: nothing is approved or remembered, and the turn goes on.
+				approvalPending = askApproval(ctx, paths, true).catch(() => {});
 			}
 		}
 		if (restored) {
@@ -360,7 +360,9 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		if (pendingResume) {
 			const restored = pendingResume;
 			pendingResume = undefined;
-			const cwd = sessionWorkCwd(entered, ctx.cwd);
+			// Compare in the directory the facts were read in: a resume inside a worktree entered
+			// after the session started would otherwise report every path as changed.
+			const cwd = facts?.cwd ?? (facts?.atCompaction ? sessionWorkCwd(entered, ctx.cwd) : ctx.cwd);
 			const current = readFiles(cwd);
 			const liveGit = snapshotGit(cwd);
 			const liveFacts = contextFactsBaseline({ ...current, gitStatus: liveGit, atCompaction: false });
@@ -371,7 +373,7 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		}
 		if (gitStatus !== undefined) return;
 		gitStatus = snapshotGit(ctx.cwd);
-		if (files) facts = contextFactsBaseline({ ...files, gitStatus, atCompaction: false });
+		if (files) facts = contextFactsBaseline({ ...files, gitStatus, atCompaction: false, cwd: ctx.cwd });
 		publishBaseline();
 		const context = buildContextBlock({ email, gitStatus });
 		if (!context) return;
@@ -410,7 +412,7 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		email = resolveEmail(cwd);
 		gitStatus = snapshotGit(cwd);
 		blockDate = shownDate = localDate();
-		facts = contextFactsBaseline({ ...current, gitStatus, atCompaction: true });
+		facts = contextFactsBaseline({ ...current, gitStatus, atCompaction: true, cwd });
 		const entries: ReminderEntry[] = [];
 		const add = (key: string, text: string | null, order: number) => {
 			if (text) entries.push({ key, text, order, placement: "first-prepend" });
