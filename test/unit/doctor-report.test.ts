@@ -146,8 +146,24 @@ describe("buildDoctorReport", () => {
 		expect(facts.classifier.model).toBe(cheaper);
 		const text = modelsSection(facts, { model: main, modelSource: "session" }, []).lines.map((line) => line.text).join("\n");
 		expect(text).toContain("Auto-mode classifier: openai/gpt-5.6-terra (cheapest model within openai in the session's tier or above");
-		expect(text).toContain("Classifier policy: the cheapest model on this provider in this session's tier or above and strictly cheaper than it, else this session's model; /auto-mode model chooses one by hand.");
+		expect(text).toContain(
+			"Classifier policy: the cheapest model on this provider in this session's tier or above, strictly cheaper than it, with a context window at least as large and not an experimental build, else this session's model; /auto-mode model chooses one by hand.",
+		);
 		expect(text).toContain("Tier: workhorse — catalog openai/gpt-5.6-sol: $8.75/M blended");
+		expect(text).toContain(
+			"Web-fetch and recap reader: openai/gpt-5.6-terra — the cheapest cheap-tier model on this provider that costs no more than the main model (a workhorse or frontier one when there is none)",
+		);
+	});
+
+	it("previews an image-capable session's subagent as the live resolver picks it: image-capable too", () => {
+		pinCatalog(CATALOG);
+		const images = (m: any) => ({ ...m, input: ["text", "image"] });
+		const main = images(anthropic[0]);
+		const textOnly = { ...anthropic[1], input: ["text"] };
+		const facts = collectModelFacts([main, textOnly], { model: main, modelSource: "session" }, home, {});
+		expect(facts.subagent.model?.id).toBe("claude-opus-5");
+		const withImages = collectModelFacts([main, images(anthropic[1])], { model: main, modelSource: "session" }, home, {});
+		expect(withImages.subagent.model?.id).toBe("claude-sonnet-5-5");
 	});
 
 	it("names the config sources mode, and says ~/.claude is not read in independent mode", () => {

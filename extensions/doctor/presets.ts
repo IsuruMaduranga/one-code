@@ -19,7 +19,7 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { classifierCandidates } from "../auto-mode/model-select.ts";
 import { autoSelectable, catalogModelFor } from "../lib/model-catalog.ts";
-import { isDatedDuplicate, modelsContainedToSession, modelSpec, pricedInput } from "../lib/model-policy.ts";
+import { isDatedDuplicate, modelsContainedToSession, modelSpec, pricedInput, supportsImageInput } from "../lib/model-policy.ts";
 import { intrinsicTier, type PromptTier, servedCatalogIds } from "../lib/model-tier.ts";
 import { resolveSubagentModel } from "../subagents/model-select.ts";
 import type { ReportLine, ReportSection } from "./report.ts";
@@ -138,7 +138,7 @@ export function computePresets(
 		// what applying the preset produces.
 		const subagentModel = inherit
 			? main.model
-			: (resolveSubagentModel({ sessionModel: main.model, available }).model ?? main.model);
+			: (resolveSubagentModel({ sessionModel: main.model, available, requireImageInput: supportsImageInput(main.model) }).model ?? main.model);
 		const classifier = classifierCandidates({ available, sessionModel: main.model }).candidates[0]?.model;
 		presets.push({
 			name,
@@ -173,7 +173,7 @@ export function presetsSection(result: ReturnType<typeof computePresets>, sessio
 		return { title: "Presets", lines };
 	}
 	lines.push({
-		text: "Classifier previews use each preset's main model: the cheapest model in its tier or above, never dearer than the main model, else the main model itself.",
+		text: "Classifier previews use each preset's main model: the cheapest model in its tier or above that is strictly cheaper than the main model, else the main model itself.",
 		level: "dim",
 	});
 	const family = sessionModel ? sessionModel.provider : "";

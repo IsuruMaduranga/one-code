@@ -137,7 +137,21 @@ describe("computePresets", () => {
 		expect(quality.classifier).toBe(cheaper);
 		expect(describePresetChanges(quality)[2]).toBe("auto-mode classifier → automatic (picks openai/gpt-5.6-terra) (undo: /auto-mode model)");
 		const text = presetsSection(result, main).lines.map((line) => line.text).join("\n");
-		expect(text).toContain("the cheapest model in its tier or above, never dearer than the main model");
+		expect(text).toContain("the cheapest model in its tier or above that is strictly cheaper than the main model");
+	});
+
+	it("previews an image-capable main's subagents as image-capable, as the live resolver does", () => {
+		pinCatalog([
+			{ id: "openai/gpt-6-sol", released: "2026-09-22", price: [1, 13] },
+			{ id: "openai/o-mid", released: "2026-09-01", price: [3, 12] },
+			{ id: "openai/o-big", released: "2026-09-01", price: [5, 20] },
+		]);
+		const oa = (id: string, input: number, modalities: string[]) => ({ ...model("openai", id, input, "openai-responses"), input: modalities });
+		const mid = oa("o-mid", 3, ["text", "image"]);
+		const balanced = (sol: any) => computePresets([mid, oa("o-big", 5, ["text", "image"]), sol], mid).presets.find((p) => p.name === "balanced")!;
+		// Balanced runs the cheapest workhorse; the cheaper frontier Sol serves its subagents only if it takes images too.
+		expect(balanced(oa("gpt-6-sol", 1, ["text"])).subagents.model.id).toBe("o-mid");
+		expect(balanced(oa("gpt-6-sol", 1, ["text", "image"])).subagents.model.id).toBe("gpt-6-sol");
 	});
 
 	it("never lands the economical preset on a tiny model while a capable one exists", () => {

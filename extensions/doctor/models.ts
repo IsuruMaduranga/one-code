@@ -17,7 +17,7 @@ import { classifierCandidates, describeCandidate, type ClassifierNotice } from "
 import { chosenModelWarnings, type ChosenModelWarning } from "../lib/model-choice-warnings.ts";
 import { loadCatalogSources, readCatalogRefreshEnabled } from "../lib/model-catalog-data.ts";
 import { autoSelectSkipReason, catalogModelFor } from "../lib/model-catalog.ts";
-import { DAY_MS, modelsContainedToSession, modelSpec, pricedInput } from "../lib/model-policy.ts";
+import { DAY_MS, modelsContainedToSession, modelSpec, pricedInput, supportsImageInput } from "../lib/model-policy.ts";
 import { newerModelSuggestion, type NewerModelSuggestion } from "../lib/newer-model.ts";
 import { oneCodeSettingsPath, readSuggestNewerModels } from "../lib/one-code-settings.ts";
 import { oneCodeStateDir } from "../lib/paths.ts";
@@ -70,7 +70,8 @@ export function collectModelFacts(available: Model<Api>[], session: SessionView,
 	const sessionModel = session.model;
 	const configuredAll = loadSubagentDefault(home, env);
 	const configured = applicableSubagentDefault(configuredAll, sessionModel);
-	const subagent = resolveSubagentModel({ configuredDefault: configured, sessionModel, available });
+	// The live resolver's image gate (subagents/index.ts), so the preview names what a spawn gets.
+	const subagent = resolveSubagentModel({ configuredDefault: configured, sessionModel, available, requireImageInput: supportsImageInput(sessionModel) });
 	const suggestNewer = readSuggestNewerModels(home, env);
 	const autoConfig = loadAutoModeConfig(home);
 	const chain = classifierCandidates({
@@ -198,7 +199,7 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 			lines.push({ text: `Setting: "${classifier.configured}" via autoMode.classifierModel in ~/.onecode/settings.json (/auto-mode model clear returns to automatic)`, indent: 1, level: "dim" });
 		}
 		lines.push({
-			text: "Classifier policy: the cheapest model on this provider in this session's tier or above and strictly cheaper than it, else this session's model; /auto-mode model chooses one by hand.",
+			text: "Classifier policy: the cheapest model on this provider in this session's tier or above, strictly cheaper than it, with a context window at least as large and not an experimental build, else this session's model; /auto-mode model chooses one by hand.",
 			indent: 1,
 			level: "dim",
 		});
@@ -220,7 +221,7 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 
 	if (facts.reader) {
 		lines.push({
-			text: `Web-fetch and recap reader: ${modelSpec(facts.reader.model)} — ${facts.reader.via === "tier" ? "cheapest non-tiny model on this provider" : "the main model"}`,
+			text: `Web-fetch and recap reader: ${modelSpec(facts.reader.model)} — ${facts.reader.via === "tier" ? "the cheapest cheap-tier model on this provider that costs no more than the main model (a workhorse or frontier one when there is none)" : "the main model"}`,
 			level: "dim",
 		});
 	}
