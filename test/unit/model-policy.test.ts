@@ -4,6 +4,7 @@ import {
 	crossesProvider,
 	forcedReasoningLevel,
 	isDatedDuplicate,
+	isMovingAlias,
 	isReasoningMandatoryError,
 	isSelectableVariant,
 	isSnapshotDatedId,
@@ -21,6 +22,13 @@ describe("isSelectableVariant", () => {
 		expect(isSelectableVariant(model("openrouter", "z-ai/glm-4.6:free"))).toBe(false);
 		expect(isSelectableVariant(model("openrouter", "~deepseek/deepseek-v4-flash-latest"))).toBe(false);
 		expect(isSelectableVariant(model("openrouter", "~anthropic/claude-sonnet-latest"))).toBe(false);
+	});
+});
+
+describe("isMovingAlias", () => {
+	it("matches -latest aliases and OpenRouter's ~ redirects, not dated or plain ids", () => {
+		for (const id of ["gpt-daybreak-blue-latest", "mistral-large-latest", "chatgpt-4o-latest", "~anthropic/claude-sonnet-latest", "mistral-small-latest:free"]) expect(isMovingAlias(id), id).toBe(true);
+		for (const id of ["gpt-6.1-sol", "mistral-small-2506", "claude-haiku-4-5-20251001", "latest-model", "foo-latestx"]) expect(isMovingAlias(id), id).toBe(false);
 	});
 });
 

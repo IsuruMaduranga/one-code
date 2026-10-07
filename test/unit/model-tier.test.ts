@@ -141,6 +141,8 @@ describe("resolveModelTier", () => {
 		expect(resolveModelTier(model("some-model", "ollama", 2), noEnv)).toBe("tiny"); // custom provider
 		expect(resolveModelTier(undefined, noEnv)).toBe("tiny");
 		expect(classifyModelTier(model("llama-4-405b", "groq", 1), noEnv)).toEqual({ tier: "cheap", reason: "not in the catalogs" });
+		// An MoE id's size tag counts active parameters (17B active, 16 experts): no size known.
+		expect(classifyModelTier(model("meta-llama/llama-4-scout-17b-16e-instruct", "groq", 0.11), noEnv)).toEqual({ tier: "cheap", reason: "not in the catalogs" });
 	});
 
 	it("honors the user's modelTiers setting, by provider/id or bare id, ahead of the gate and the catalog", () => {
@@ -168,8 +170,17 @@ describe("economicalContainedCandidates", () => {
 	it("ranks cheapest tier first (cheap → workhorse → frontier)", () => {
 		const session = model("claude-opus-5-5", "anthropic", 4); // frontier
 		const available = [session, model("claude-sonnet-5", "anthropic", 2), model("claude-haiku-4-5", "anthropic", 1)];
-		// Sonnet 5 is superseded by Sonnet 5.5, which this account does not list: still skipped.
-		expect(ids(economicalContainedCandidates(available, session))).toEqual(["claude-haiku-4-5", "claude-opus-5-5"]);
+		// Sonnet 5's successor, Sonnet 5.5, is not on this account, so Sonnet 5 is still a pick.
+		expect(ids(economicalContainedCandidates(available, session))).toEqual(["claude-haiku-4-5", "claude-sonnet-5", "claude-opus-5-5"]);
+	});
+
+	it("skips a superseded model only when the session's provider serves its successor", () => {
+		const session = model("claude-opus-5-5", "anthropic", 4);
+		const available = [session, model("claude-sonnet-5", "anthropic", 2), model("claude-sonnet-5-5", "anthropic", 2), model("claude-haiku-4-5", "anthropic", 1)];
+		expect(ids(economicalContainedCandidates(available, session))).toEqual(["claude-haiku-4-5", "claude-sonnet-5-5", "claude-opus-5-5"]);
+		// The successor on another provider does not count.
+		const gateway = [session, model("claude-sonnet-5", "anthropic", 2), model("anthropic/claude-sonnet-5.5", "openrouter", 2)];
+		expect(ids(economicalContainedCandidates(gateway, session))).toEqual(["claude-sonnet-5", "claude-opus-5-5"]);
 	});
 
 	// Astra is frontier on OpenAI's own API; Terra is superseded by GPT-6 Sol,

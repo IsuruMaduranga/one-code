@@ -250,10 +250,14 @@ describe("buildDoctorReport", () => {
 
 	it("says when automatic picks skip the main model, and how to tier a model no catalog knows", () => {
 		pinCatalog([...CATALOG, { id: "openai/gpt-5.3", released: "2026-09-20", price: [1.25, 10] }]);
-		const superseded = collectModelFacts(openai, { model: openai[0], modelSource: "session" }, home, {});
+		const withSuccessor = [...openai, model("openai", "gpt-5.3", 1.25, "openai-responses")];
+		const superseded = collectModelFacts(withSuccessor, { model: openai[0], modelSource: "session" }, home, {});
 		expect(modelsSection(superseded, { model: openai[0], modelSource: "session" }, []).lines.map((l) => l.text)).toContain(
-			"Automatic picks skip this model: superseded by openai/gpt-5.3",
+			"Automatic picks skip this model: superseded by openai/gpt-5.3, which this provider serves",
 		);
+		// A successor this provider does not serve skips nothing.
+		const alone = collectModelFacts(openai, { model: openai[0], modelSource: "session" }, home, {});
+		expect(alone.skipReason).toBeUndefined();
 		const unknown = model("openai", "gpt-5-mystery", 1, "openai-responses");
 		const findings: Finding[] = [];
 		modelsSection(collectModelFacts([unknown], { model: unknown, modelSource: "session" }, home, {}), { model: unknown, modelSource: "session" }, findings);

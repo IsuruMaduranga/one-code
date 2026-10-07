@@ -17,7 +17,7 @@ import { classifierCandidates, describeCandidate, type ClassifierNotice } from "
 import { chosenModelWarnings, type ChosenModelWarning } from "../lib/model-choice-warnings.ts";
 import { loadCatalogSources, readCatalogRefreshEnabled } from "../lib/model-catalog-data.ts";
 import { autoSelectSkipReason, catalogModelFor } from "../lib/model-catalog.ts";
-import { DAY_MS, modelSpec, pricedInput } from "../lib/model-policy.ts";
+import { DAY_MS, modelsContainedToSession, modelSpec, pricedInput } from "../lib/model-policy.ts";
 import { newerModelSuggestion, type NewerModelSuggestion } from "../lib/newer-model.ts";
 import { oneCodeSettingsPath, readSuggestNewerModels } from "../lib/one-code-settings.ts";
 import { oneCodeStateDir } from "../lib/paths.ts";
@@ -27,6 +27,7 @@ import {
 	pickEconomicalContainedModel,
 	type PromptTier,
 	resolveModelTier,
+	servedCatalogIds,
 	tierOverride,
 } from "../lib/model-tier.ts";
 import { applicableSubagentDefault, loadSubagentDefault, type SubagentDefault } from "../subagents/default-model.ts";
@@ -91,7 +92,7 @@ export function collectModelFacts(available: Model<Api>[], session: SessionView,
 		},
 		tierReason: sessionModel ? classifyModelTier(sessionModel, {}).reason : undefined,
 		inCatalog: entry !== undefined,
-		skipReason: entry ? autoSelectSkipReason(entry) : undefined,
+		skipReason: entry && sessionModel ? autoSelectSkipReason(entry, servedCatalogIds(modelsContainedToSession(available, sessionModel))) : undefined,
 		newerModel: suggestNewer ? newerModelSuggestion(available, sessionModel) : undefined,
 		session: sessionModel,
 		sessionTier: sessionModel ? intrinsicTier(sessionModel) : undefined,

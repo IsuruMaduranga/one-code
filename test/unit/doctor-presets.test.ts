@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { computePresets, describePresetChanges, findPreset, presetPool, presetsSection } from "../../extensions/doctor/presets.ts";
-import { pinCatalog, pinReleaseDates } from "./catalog-fixture.ts";
+import { setCatalogSourcesForTest } from "../../extensions/lib/model-catalog-data.ts";
+import { catalogSources, pinCatalog, pinReleaseDates } from "./catalog-fixture.ts";
 
 const model = (provider: string, id: string, input?: number, api = "anthropic-messages") =>
 	({ provider, id, name: id, api, cost: input === undefined ? undefined : { input, output: input * 5 }, contextWindow: 200_000 }) as any;
@@ -107,6 +108,19 @@ describe("computePresets", () => {
 		const { presets } = computePresets(catalog, catalog[2]);
 		expect(presets.find((p) => p.name === "quality")?.main.id).toBe("gpt-6-astra"); // not the pricier, legacy gpt-5-pro
 		expect(presets.find((p) => p.name === "economical")?.main.id).toBe("gpt-5.6-luna"); // not the tool-less row
+	});
+
+	it("never recommends an image-output model as a preset's main", () => {
+		const sources = catalogSources([
+			{ id: "openai/gpt-6-astra", released: "2026-09-04", price: [5, 40] },
+			{ id: "openai/gpt-6-luna", released: "2026-09-22", price: [0.1, 0.5] },
+			{ id: "openai/gpt-image-3", released: "2026-09-01", price: [0.05, 0.4] },
+		]);
+		sources.modelsDev.payload.openai.models["gpt-image-3"].modalities = { output: ["text", "image"] };
+		setCatalogSourcesForTest(sources);
+		const oa = (id: string, input: number) => model("openai", id, input, "openai-responses");
+		const catalog = [oa("gpt-6-astra", 5), oa("gpt-6-luna", 0.1), oa("gpt-image-3", 0.05)];
+		expect(presetPool(catalog, catalog[0]).map((m) => m.id)).toEqual(["gpt-6-astra", "gpt-6-luna"]);
 	});
 
 	it("previews a below-frontier main's classifier as the cheaper model in its tier", () => {

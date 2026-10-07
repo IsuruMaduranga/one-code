@@ -260,6 +260,18 @@ export function isSelectableVariant(model: Model<Api>): boolean {
 }
 
 /**
+ * A moving alias: an id that names whichever model its vendor points it at
+ * today (`mistral-large-latest`, `gpt-daybreak-blue-latest`, OpenRouter's
+ * `~vendor/…-latest` redirects). What answers can change without notice, so
+ * it never supersedes a dated model, is never suggested as an upgrade, and is
+ * never picked as the auto-mode classifier (a permission boundary). Other
+ * automatic picks may still use one: Mistral serves most models only so.
+ */
+export function isMovingAlias(id: string): boolean {
+	return id.startsWith("~") || /-latest(?=$|[-:@])/i.test(id);
+}
+
+/**
  * An experimental build (`deepseek-v4-flash-vision-exp`, `tev1-4b-experimental`):
  * a research variant, never picked automatically as a screener or suggested as
  * an upgrade. `preview` is deliberately not matched: Google ships mainline

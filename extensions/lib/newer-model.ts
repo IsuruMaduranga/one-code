@@ -1,7 +1,7 @@
 /** Same-line upgrades at a comparable blended price. Selection only; never switches a model. */
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { catalogModelFor } from "./model-catalog.ts";
-import { baseModelId, isAliasOrVariantId, isExperimentalBuild, modelSpec, stripSnapshotDate } from "./model-policy.ts";
+import { baseModelId, isAliasOrVariantId, isExperimentalBuild, isMovingAlias, modelSpec, stripSnapshotDate } from "./model-policy.ts";
 
 interface ModelLine {
 	line: string;
@@ -72,7 +72,7 @@ export function newerModelSuggestion(
 		if (model.provider !== current.provider || isAliasOrVariantId(model.id)) continue;
 		// Experimental endpoints and moving "latest" aliases have no stable
 		// upgrade identity, even when their catalog row includes a release date.
-		if (isExperimentalBuild(model.id) || /-latest(?:-|$)/i.test(model.id)) continue;
+		if (isExperimentalBuild(model.id) || isMovingAlias(model.id)) continue;
 		const line = modelLine(model.id);
 		if (!line || line.line !== currentLine.line || compareVersion(line.version, currentLine.version) <= 0) continue;
 		const entry = catalogModelFor(model);

@@ -18,9 +18,9 @@
 
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { classifierCandidates } from "../auto-mode/model-select.ts";
-import { catalogModelFor } from "../lib/model-catalog.ts";
+import { autoSelectable, catalogModelFor } from "../lib/model-catalog.ts";
 import { isDatedDuplicate, modelsContainedToSession, modelSpec, pricedInput } from "../lib/model-policy.ts";
-import { intrinsicTier, type PromptTier } from "../lib/model-tier.ts";
+import { intrinsicTier, type PromptTier, servedCatalogIds } from "../lib/model-tier.ts";
 import { resolveSubagentModel } from "../subagents/model-select.ts";
 import type { ReportLine, ReportSection } from "./report.ts";
 
@@ -62,14 +62,17 @@ export type PresetsUnavailable = "no-model" | "no-priced-models";
  * to `claude-haiku-4-5`). Tiny-tier rows stay in the pool only as a last resort.
  */
 export function presetPool(available: Model<Api>[], sessionModel: Model<Api>): Model<Api>[] {
-	const contained = modelsContainedToSession(available, sessionModel).filter(
-		// A preset recommends a MAIN model: never one the catalogs mark superseded,
-		// legacy, deprecated or unable to call tools (model-catalog.ts), whatever its
-		// tier. A model no catalog knows stays, judged by its tier alone.
+	const all = modelsContainedToSession(available, sessionModel);
+	const served = servedCatalogIds(all);
+	const contained = all.filter(
+		// A preset recommends a MAIN model: never one automatic selection skips
+		// (superseded by a model this provider serves, legacy, deprecated, unable
+		// to call tools, not a text model: model-catalog.ts), whatever its tier.
+		// A model no catalog knows stays, judged by its tier alone.
 		(m) => {
 			if (pricedInput(m) === undefined) return false;
 			const entry = catalogModelFor(m);
-			return !entry || (entry.tools && !entry.legacy && !entry.deprecated && !entry.supersededBy);
+			return !entry || autoSelectable(entry, served);
 		},
 	);
 	return contained.filter((m) => !isDatedDuplicate(m, contained));

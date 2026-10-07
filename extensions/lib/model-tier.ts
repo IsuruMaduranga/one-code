@@ -274,9 +274,10 @@ export function taskToolsEnabled(
  *   - never `tiny`: a small model is a weak security boundary and a weak coding
  *     worker, so automatic selection stops at `cheap`;
  *   - known to the catalogs and selectable there (`model-catalog.ts`): not
- *     superseded by a newer model of its vendor in the same price band, not two
- *     years behind its vendor's newest, not deprecated, able to call tools, a
- *     text model. A row no catalog knows is never picked automatically;
+ *     superseded by a newer model of its vendor in the same price band that
+ *     this pool also offers, not two years behind its vendor's newest, not
+ *     deprecated, able to call tools, a text model. A row no catalog knows is
+ *     never picked automatically;
  *   - priced only: on a provider with no usable prices the chain is empty and
  *     callers degrade to the session model (correct, merely not cheap).
  *
@@ -301,15 +302,17 @@ export function economicalContainedCandidates(
 	requireImageInput = false,
 ): Model<Api>[] {
 	const pool = contained ?? modelsContainedToSession(available, sessionModel);
-	return pool
-		// Modality gate: when the session works with images/PDFs a subagent may
-		// need to read, a text-only worker cannot serve — drop it before ranking.
-		.filter((model) => !requireImageInput || supportsImageInput(model))
+	// Modality gate: when the session works with images/PDFs a subagent may
+	// need to read, a text-only worker cannot serve — drop it before ranking.
+	const usable = requireImageInput ? pool.filter(supportsImageInput) : pool;
+	// A superseded model is skipped only for a successor this pool can pick.
+	const served = servedCatalogIds(usable);
+	return usable
 		// A dated snapshot whose undated alias is also listed is the same model
 		// twice; rank the alias so every automatic pick (classifier, subagent,
 		// reader, presets) names the model the way the user sees it in /model.
 		.filter((model) => !isDatedDuplicate(model, pool))
-		.filter(isAutoSelectable)
+		.filter((model) => isAutoSelectable(model, served))
 		// Classify by the model's INTRINSIC tier — never `process.env`: CC_PROMPT_TIER
 		// forces the *session's* prompt-scaffolding register, and honoring it here
 		// would collapse every candidate to one tier and let a `tiny` model through
@@ -325,14 +328,25 @@ export function economicalContainedCandidates(
 
 /**
  * Whether automatic selection may pick `model` at all: the catalogs know it and
- * do not mark it superseded, legacy, deprecated, tool-less or non-text
- * (`model-catalog.ts autoSelectable`). A model the user tiered by hand in
- * `modelTiers` still needs a catalog entry: the setting speaks to its tier,
- * not to whether it is current.
+ * do not mark it legacy, deprecated, tool-less or non-text, or superseded by a
+ * model `served` holds (`model-catalog.ts autoSelectable`; `served` is
+ * `servedCatalogIds` of the session's contained pool). A model the user tiered
+ * by hand in `modelTiers` still needs a catalog entry: the setting speaks to
+ * its tier, not to whether it is current.
  */
-export function isAutoSelectable(model: Model<Api>): boolean {
+export function isAutoSelectable(model: Model<Api>, served: ReadonlySet<string>): boolean {
 	const entry = catalogModelFor(model);
-	return entry !== undefined && autoSelectable(entry);
+	return entry !== undefined && autoSelectable(entry, served);
+}
+
+/** The catalog models a pool of pi rows serves: where a successor must be for supersession to skip a model. */
+export function servedCatalogIds(pool: readonly Model<Api>[]): Set<string> {
+	const ids = new Set<string>();
+	for (const model of pool) {
+		const entry = catalogModelFor(model);
+		if (entry) ids.add(entry.id);
+	}
+	return ids;
 }
 
 /** No CC_PROMPT_TIER override: automatic model *selection* always uses intrinsic tiers. */
