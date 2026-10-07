@@ -71,6 +71,7 @@ import { gitStatusOutput } from "../lib/git.ts";
 import { gitStatusMeta, gitStatusMetaArgs, reachesIgnoredFiles, wantsGitStatusMeta } from "../auto-mode/git-status-meta.ts";
 import { actionResolvedPaths } from "../auto-mode/resolved-paths-meta.ts";
 import { projectMemoryDir } from "../lib/memory.ts";
+import { queueNotice } from "../lib/notices.ts";
 import { sessionResultsDir } from "../lib/persisted-output.ts";
 import { privateSessionScratchpadDir } from "../lib/scratchpad.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, type ReminderPayload } from "../lib/reminders.ts";
@@ -460,7 +461,9 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 
 	// Drop the cached config and classifier selection state, then refresh the badge.
 	// A model switch must re-evaluate the capability and context-window requirements.
-	const resetClassifierChoice = (sessionModel?: Model<Api>, announce = true) => {
+	// `"batched"` (session_start, model_select) joins the info line with other
+	// extensions' lifecycle notices (lib/notices.ts).
+	const resetClassifierChoice = (sessionModel?: Model<Api>, announce: boolean | "batched" = true) => {
 		autoConfig = undefined; // reloaded lazily
 		classifierState.pinned = undefined;
 		classifierState.rejected.clear();
@@ -468,7 +471,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		classifierState.timeoutStreak = 0;
 		classifierState.chainCache = undefined;
 		applyBadge(sessionModel);
-		if (announce) announceClassifierChoice(sessionModel);
+		if (announce) announceClassifierChoice(sessionModel, { batched: announce === "batched" });
 	};
 	// Keyed by cwd: a worktree-isolated child classifies against ITS checkout's
 	// CLAUDE.md/AGENTS.md, and must not poison the cache the main agent's own
@@ -521,9 +524,10 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	 * tool needs screening. Warnings first, then ONE info line: pi folds
 	 * back-to-back info notices into a single status line (findings §63), so a
 	 * second one would overwrite the first. `lead` opens that line (the
-	 * confirmation `/auto-mode model` gives); `force` announces outside auto mode.
+	 * confirmation `/auto-mode model` gives); `force` announces outside auto mode;
+	 * `batched` hands the info line to the lifecycle notice owner (lib/notices.ts).
 	 */
-	const announceClassifierChoice = (sessionModel?: Model<Api>, opts: { lead?: string; force?: boolean } = {}) => {
+	const announceClassifierChoice = (sessionModel?: Model<Api>, opts: { lead?: string; force?: boolean; batched?: boolean } = {}) => {
 		if ((mode !== "auto" && !opts.force) || !badgeCtx) return;
 		const choice = selectionChain(badgeCtx, sessionModel);
 		const suggestNewer = readSuggestNewerModels(os.homedir());
@@ -542,7 +546,9 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 			if (choice.fallback) classifierState.notified.add(choice.fallback.text);
 			info.push(choice.fallback?.text ?? `Auto mode will screen calls with ${describeCandidate(first)}.`);
 		}
-		if (info.length > 0) badgeCtx.ui.notify(info.join("\n"), "info");
+		if (info.length === 0) return;
+		if (opts.batched) queueNotice(pi.events, badgeCtx, "info", info.join("\n"));
+		else badgeCtx.ui.notify(info.join("\n"), "info");
 	};
 
 	/** What would be tried, in order, before anything has been pinned. */
@@ -985,7 +991,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		pi.events.emit(CONTEXT_BASELINE_CHANNEL, { key: "permission-mode", value: mode });
 		// The system prompt lists the workspace as the session starts (lib/workspace-channel.ts).
 		pi.events.emit(WORKSPACE_CHANNEL, { dirs: workspacePaths } satisfies WorkspaceAnnouncement);
-		resetClassifierChoice(ctx.model);
+		resetClassifierChoice(ctx.model, "batched");
 		// Publish the subagent permission bridge (see subagent-gate.ts). The closure
 		// reads live parent state on each call, so emitting once at session start is
 		// enough; subagents captures it and threads it into child sessions.
@@ -996,17 +1002,19 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		badgeCtx = ctx;
 		lastReviewCtx = ctx;
 		autoInCycle = ctx.modelRegistry.getAvailable().length > 0;
-		resetClassifierChoice(event.model);
+		resetClassifierChoice(event.model, "batched");
 		// The gate reads the model's tier on every call, so a switch takes effect
 		// on the next one; a switch across the workhorse/cheap line says so.
 		const fastPaths = usesClaudeCodeFastPaths(event.model);
 		if (gateFastPaths !== undefined && fastPaths !== gateFastPaths && event.model) {
 			const name = `${formatModel(event.model.provider, event.model.id)} (${intrinsicTier(event.model)} tier)`;
-			ctx.ui.notify(
+			queueNotice(
+				pi.events,
+				ctx,
+				"info",
 				fastPaths
 					? `${name}: permissions now follow Claude Code's fast paths.`
 					: `${name}: permissions now use One Code's stricter checks, so more calls prompt or go to the auto-mode classifier.`,
-				"info",
 			);
 		}
 		gateFastPaths = fastPaths;

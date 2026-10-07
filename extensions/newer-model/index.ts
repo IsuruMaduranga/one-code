@@ -4,6 +4,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { modelSpec } from "../lib/model-policy.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent, withoutUnusable } from "../lib/model-unusable.ts";
 import { newerModelSuggestion } from "../lib/newer-model.ts";
+import { queueNotice } from "../lib/notices.ts";
 import { sessionOutlivesTurn } from "../lib/notifications.ts";
 import { readSuggestNewerModels } from "../lib/one-code-settings.ts";
 
@@ -18,7 +19,8 @@ export default function newerModelExtension(pi: ExtensionAPI) {
 		if (shown.has(key)) return;
 		const suggestion = newerModelSuggestion(withoutUnusable(ctx.modelRegistry.getAvailable(), unusable), model);
 		if (!suggestion) return;
-		ctx.ui.notify(`${suggestion.text} ${suggestion.fix}`, "info");
+		// Joined with the other extensions' startup and model-switch notices (lib/notices.ts).
+		queueNotice(pi.events, ctx, "info", `${suggestion.text} ${suggestion.fix}`);
 		shown.add(key);
 	};
 
