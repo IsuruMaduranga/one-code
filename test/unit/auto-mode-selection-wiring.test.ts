@@ -6,11 +6,13 @@ import permissionsExtension from "../../extensions/permissions/index.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../../extensions/permissions/modes.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
+import { pinCatalog } from "./catalog-fixture.ts";
 
 const model = (id: string, contextWindow: number, price: number) => ({ provider: "openai-codex", id, name: id, contextWindow, maxTokens: 8192, cost: { input: price, output: price * 4 } });
+// All frontier on OpenAI's own API, released together so none supersedes another.
 const large = model("gpt-6-astra", 1_000_000, 10);
-const small = model("gpt-6-sol", 272_000, 5);
-const cheap = model("gpt-5.6-terra", 272_000, 2);
+const small = model("gpt-6.1-sol", 272_000, 5);
+const cheap = model("gpt-6-sol", 272_000, 2);
 
 describe("automatic classifier selection wiring", () => {
 	let home: string;
@@ -22,6 +24,12 @@ describe("automatic classifier selection wiring", () => {
 		mkdirSync(join(home, "project"));
 		mkdirSync(join(home, ".onecode"));
 		stubHome(home);
+		pinCatalog([
+			{ id: "openai/gpt-6-astra", released: "2026-09-22", price: [5, 40] },
+			{ id: "openai/gpt-6.1-sol", released: "2026-09-22", price: [1.5, 13] },
+			{ id: "openai/gpt-6-sol", released: "2026-09-22", price: [1, 13] },
+			{ id: "openai/gpt-5.6-sol", released: "2026-07-09", price: [2.5, 30] },
+		]);
 		vi.stubEnv("ONECODE_STATE_DIR", join(home, ".onecode"));
 		vi.stubEnv("PI_CODING_AGENT_DIR", join(home, "agent"));
 		fake = createFakePi();
@@ -42,21 +50,21 @@ describe("automatic classifier selection wiring", () => {
 		expect(notify.mock.calls.map(([text]) => text)).toEqual(expect.arrayContaining([expect.stringMatching(/gpt-6-astra.*(?:window|context)/)]));
 		ctx.model = small;
 		await fake.fire("model_select", { model: small }, ctx);
-		expect(statuses.at(-1)?.classifier).toBe("openai-codex/gpt-5.6-terra");
-		expect(notify.mock.calls.some(([text]) => /gpt-5.6-terra/.test(text))).toBe(true);
+		expect(statuses.at(-1)?.classifier).toBe("openai-codex/gpt-6-sol");
+		expect(notify.mock.calls.some(([text]) => /gpt-6-sol\b/.test(text))).toBe(true);
 	});
 
-	it("announces the measured fallback below frontier and replaces it on a frontier switch", async () => {
+	it("announces the session fallback below frontier and replaces it on a frontier switch", async () => {
 		// No cheaper model contains its window, so the session screens itself.
 		const belowFrontier = model("gpt-5.6-sol", 1_000_000, 5);
 		ctx.model = belowFrontier;
 		await fake.fire("session_start", { reason: "startup" }, ctx);
 		expect(statuses.at(-1)?.classifier).toBe("openai-codex/gpt-5.6-sol");
 		const notify = (ctx.ui as { notify: ReturnType<typeof vi.fn> }).notify;
-		expect(notify.mock.calls.some(([text]) => /is measured and in this session's tier, or at or above that tier by name/.test(text))).toBe(true);
+		expect(notify.mock.calls.some(([text]) => /in its workhorse tier or above contains/.test(text))).toBe(true);
 		ctx.model = small;
 		await fake.fire("model_select", { model: small }, ctx);
-		expect(statuses.at(-1)?.classifier).toBe("openai-codex/gpt-5.6-terra");
+		expect(statuses.at(-1)?.classifier).toBe("openai-codex/gpt-6-sol");
 		await fake.fire("session_shutdown", {}, ctx);
 	});
 

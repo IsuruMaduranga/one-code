@@ -92,7 +92,7 @@ export function nativeEligibility(input: {
 export function pickNativeWebModel(available: Model<Api>[], sessionModel: Model<Api> | undefined): Model<Api> | undefined {
 	if (!sessionModel) return undefined;
 	const eligible = (model: Model<Api>) => model.api === "anthropic-messages" && supportsDynamicWebTools(model.id);
-	const cheaper = cheaperContainedCandidates(available, sessionModel, { role: "reader" }).find(eligible);
+	const cheaper = cheaperContainedCandidates(available, sessionModel).find(eligible);
 	if (cheaper) return cheaper;
 	return eligible(sessionModel) ? sessionModel : undefined;
 }

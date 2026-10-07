@@ -95,6 +95,7 @@ const VENDOR_ALIASES: Readonly<Record<string, string>> = {
 	deepseek: "deepseek",
 	zai: "zai",
 	"z-ai": "zai",
+	zhipuai: "zai",
 	qwen: "host:qwen-plan",
 	alibaba: "host:qwen-plan",
 	moonshotai: "moonshot",
@@ -119,6 +120,15 @@ export const providerPolicy = (provider: string): ProviderPolicy => BUILTIN_PROV
 
 function canonicalVendor(value: string): string | undefined {
 	return VENDOR_ALIASES[value.toLowerCase()];
+}
+
+/**
+ * The identity profile a catalog vendor name stands for (`z-ai`, `zhipuai` and
+ * `zai` are one vendor), else the name itself: the key `model-catalog.ts`
+ * matches a row to its vendor's model under.
+ */
+export function vendorProfile(vendor: string): string {
+	return canonicalVendor(vendor) ?? vendor.toLowerCase();
 }
 
 function prefixedIdentity(model: Model<Api>, prefix: string): ModelIdentity {
@@ -224,8 +234,8 @@ const UNSUITABLE_VARIANT = /:(batch|free|online|thinking)$/i;
 
 /**
  * The id without OpenRouter's `~` redirect-alias marker and without a
- * `:batch`-style endpoint variant — the spelling the name rules, the facts
- * table and the capability index all key on (`~deepseek/deepseek-v4-flash-latest`
+ * `:batch`-style endpoint variant — the spelling the model-catalog lookups key
+ * on (`~deepseek/deepseek-v4-flash-latest`
  * → `deepseek/deepseek-v4-flash-latest`, `gpt-5-mini:batch` → `gpt-5-mini`).
  */
 export function baseModelId(id: string): string {
@@ -249,7 +259,7 @@ export function isSelectableVariant(model: Model<Api>): boolean {
 	return !UNSUITABLE_VARIANT.test(model.id) && !model.id.startsWith("~");
 }
 
-/** One day in milliseconds, for the release-date arithmetic in model-facts.ts and capability-index.ts. */
+/** One day in milliseconds, for the release-date arithmetic in model-catalog.ts. */
 export const DAY_MS = 86_400_000;
 
 /** Non-positive values are catalog sentinels/unpriced, not evidence of being free. */

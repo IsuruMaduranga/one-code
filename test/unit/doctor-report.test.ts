@@ -1,22 +1,29 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildDoctorReport, summarizeProviders } from "../../extensions/doctor/build.ts";
 import { collectModelFacts, modelsSection } from "../../extensions/doctor/models.ts";
 import { type DoctorEnvironment, type Finding, type RegistryView, renderDoctorReport, renderDoctorText } from "../../extensions/doctor/report.ts";
-import { setCapabilitySnapshotForTest, snapshotFromResponse } from "../../extensions/lib/capability-index.ts";
-import { setModelFactsForTest } from "../../extensions/lib/model-facts.ts";
 import { TESTED_PI_MAX_EXCLUSIVE } from "../../extensions/lib/pi-version.ts";
-
-const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
+import { pinCatalog, pinReleaseDates } from "./catalog-fixture.ts";
 
 /** Minimal structural stand-in; the checks read provider/id/api/cost/contextWindow only. */
 const model = (provider: string, id: string, input?: number, api = "anthropic-messages") =>
 	({ provider, id, name: id, api, cost: input === undefined ? undefined : { input, output: input * 5 }, contextWindow: 200_000 }) as any;
 
-const anthropic = [model("anthropic", "claude-opus-5", 5), model("anthropic", "claude-sonnet-5", 3), model("anthropic", "claude-haiku-4-5", 1)];
+const anthropic = [model("anthropic", "claude-opus-5", 5), model("anthropic", "claude-sonnet-5-5", 3), model("anthropic", "claude-haiku-4-5", 1)];
+
+/** Opus 5 and Sonnet 5.5 frontier by the parity gate, Haiku cheap; GPT-5.1 workhorse, mini cheap. */
+const CATALOG = [
+	{ id: "anthropic/claude-opus-5", released: "2026-07-24", price: [5, 25] as [number, number] },
+	{ id: "anthropic/claude-sonnet-5-5", released: "2026-09-28", price: [2, 10] as [number, number] },
+	{ id: "anthropic/claude-fable-5", released: "2026-06-07", price: [10, 50] as [number, number] },
+	{ id: "anthropic/claude-haiku-4-5", released: "2025-10-15", price: [1, 5] as [number, number] },
+	{ id: "openai/gpt-5.1", released: "2026-09-01", price: [1.25, 10] as [number, number] },
+	{ id: "openai/gpt-5.2", released: "2026-09-01", price: [1.75, 14] as [number, number] },
+	{ id: "openai/gpt-5-mini", released: "2026-09-01", price: [0.25, 2] as [number, number] },
+];
 const openai = [model("openai", "gpt-5.1", 1.25, "openai-responses"), model("openai", "gpt-5-mini", 0.25, "openai-responses")];
 
 function registry(available: any[], all = [...anthropic, ...openai, model("groq", "llama-3.3-70b", 0.5, "openai-completions")]): RegistryView {
@@ -33,6 +40,7 @@ let home: string;
 let cwd: string;
 
 beforeEach(() => {
+	pinCatalog(CATALOG);
 	home = mkdtempSync(join(tmpdir(), "onecode-doctor-home-"));
 	cwd = mkdtempSync(join(tmpdir(), "onecode-doctor-cwd-"));
 });
@@ -84,24 +92,24 @@ describe("buildDoctorReport", () => {
 		const report = buildDoctorReport({
 			env: environment({ latest: { status: "current", version: "0.2.1" } }),
 			registry: registry(anthropic),
-			session: { model: anthropic[0], modelSource: "session", thinkingLevel: "high", permission: { mode: "auto", classifier: "anthropic/claude-sonnet-5", pinned: true } },
+			session: { model: anthropic[0], modelSource: "session", thinkingLevel: "high", permission: { mode: "auto", classifier: "anthropic/claude-sonnet-5-5", pinned: true } },
 		});
 		expect(report.ready).toBe(true);
 		const text = renderDoctorText(report, 200);
 		expect(text).toContain("Main: anthropic/claude-opus-5 — $5/M in · $25/M out · 200k context · this session");
 		expect(text).toContain("frontier tier");
 		expect(text).toContain("Effort: high");
-		// Automatic subagent pick: cheapest capable strictly cheaper model on the same provider.
-		expect(text).toContain("Subagents and workflow agents: anthropic/claude-sonnet-5 — automatic");
-		// Classifier: workhorse floor on a frontier session → Sonnet, and the live pin is shown.
-		expect(text).toContain("Auto-mode classifier: anthropic/claude-sonnet-5");
-		expect(text).toContain("or an unscored workhorse-or-better model");
-		expect(text).toMatch(/screening this session on\s+anthropic\/claude-sonnet-5/);
+		// Automatic subagent pick: the cheapest strictly cheaper model in the session's tier.
+		expect(text).toContain("Subagents and workflow agents: anthropic/claude-sonnet-5-5 — automatic");
+		// Classifier: the same tier on a frontier session → Sonnet 5.5, and the live pin is shown.
+		expect(text).toContain("Auto-mode classifier: anthropic/claude-sonnet-5-5");
+		expect(text).toContain("Classifier policy: the cheapest model in this session's tier or above");
+		expect(text).toMatch(/screening this session on\s+anthropic\/claude-sonnet-5-5/);
 		expect(text).toContain("Permission mode: auto");
 		expect(text).toContain("Updates: up to date (0.2.1 is the latest release)");
 		expect(text).toContain("ANTHROPIC (anthropic): ready — key saved by /login · 3 models");
 		expect(text).toContain("2 more providers without credentials");
-		expect(report.summary).toMatch(/^Ready\. Main model anthropic\/claude-opus-5, subagents on anthropic\/claude-sonnet-5, auto-mode classifier anthropic\/claude-sonnet-5\./);
+		expect(report.summary).toMatch(/^Ready\. Main model anthropic\/claude-opus-5, subagents on anthropic\/claude-sonnet-5-5, auto-mode classifier anthropic\/claude-sonnet-5-5\./);
 	});
 
 	it("reports an available newer same-line model with the model-switch fix", () => {
@@ -109,7 +117,7 @@ describe("buildDoctorReport", () => {
 		main.cost.output = 3.2;
 		const newer = model("openrouter", "qwen/qwen3.8-27b", 0.42, "openai-completions");
 		newer.cost.output = 3;
-		setModelFactsForTest({
+		pinReleaseDates({
 			"openrouter/qwen/qwen3.6-27b": { releaseDate: "2026-04-01" },
 			"openrouter/qwen/qwen3.8-27b": { releaseDate: "2026-08-01" },
 		});
@@ -126,19 +134,20 @@ describe("buildDoctorReport", () => {
 		expect(report().findings.some((f) => f.text.includes("is newer than"))).toBe(false);
 	});
 
-	it("names the subagents' model as an unscored below-frontier classifier", () => {
+	it("names a below-frontier session's classifier: the cheaper model in its tier", () => {
+		pinCatalog([
+			{ id: "openai/gpt-5.6-sol", released: "2026-07-09", price: [5, 20] },
+			{ id: "openai/gpt-5.6-terra", released: "2026-07-09", price: [2, 8] },
+			{ id: "openai/gpt-5.6-max", released: "2026-07-09", price: [10, 40] },
+		]);
 		const main = model("openai", "gpt-5.6-sol", 5, "openai-responses");
 		const cheaper = model("openai", "gpt-5.6-terra", 2, "openai-responses");
-		// Without scores, a below-frontier session screens with the model its
-		// subagents run on: cheaper and in its tier by name, labeled unscored.
 		const facts = collectModelFacts([main, cheaper], { model: main, modelSource: "session" }, home, {});
 		expect(facts.classifier.model).toBe(cheaper);
 		const text = modelsSection(facts, { model: main, modelSource: "session" }, []).lines.map((line) => line.text).join("\n");
-		expect(text).toContain("Auto-mode classifier: openai/gpt-5.6-terra (the model this session's subagents run on");
-		expect(text).toContain("at or above its tier by name");
-		expect(text).toContain("else the cheaper model this session's subagents run on; else this session's model");
-		expect(text).toContain("Capability scores: none — below-frontier classifiers use the subagents' model, else the session model");
-		expect(text).not.toContain("Capability scores: none — automatic picks use model names and generations only");
+		expect(text).toContain("Auto-mode classifier: openai/gpt-5.6-terra (cheapest model within openai in the session's tier or above");
+		expect(text).toContain("Classifier policy: the cheapest model in this session's tier or above, never dearer than this session's model; else this session's model.");
+		expect(text).toContain("Tier: workhorse — catalog openai/gpt-5.6-sol: $8.75/M blended");
 	});
 
 	it("names the config sources mode, and says ~/.claude is not read in independent mode", () => {
@@ -210,54 +219,49 @@ describe("buildDoctorReport", () => {
 		expect(section.lines.some((l) => l.text.includes("carries no price"))).toBe(true);
 	});
 
-	it("reports the frozen request tier while intrinsic diagnostics use refreshed scores", () => {
+	it("reports the frozen request tier while intrinsic diagnostics use the refreshed catalog", () => {
 		const main = model("openai", "gpt-5.1", 2, "openai-responses");
-		setModelFactsForTest({ "openai/gpt-5.1": { releaseDate: "2026-08-01" } });
-		setCapabilitySnapshotForTest({
-			fetchedAt: "2026-10-05T00:00:00Z", source: "test", rows: [
-				{ id: "reference", slug: "claude-sonnet-5", creator: "anthropic", releaseDate: "2026-08-01", coding: 80 },
-				{ id: "main", slug: "gpt-5-1", creator: "openai", releaseDate: "2026-08-01", coding: 20 },
-			],
-		});
+		// A refresh has since learned gpt-5.1 is a 20B model.
+		pinCatalog([{ id: "openai/gpt-5.1", released: "2026-08-01", price: [2, 8], params: 2e10 }]);
 		const session = { model: main, modelSource: "session" as const, promptTier: "workhorse" as const };
 		const facts = collectModelFacts([main], session, home, {});
 		expect(facts.promptTier).toBe("workhorse");
 		expect(facts.sessionTier).toBe("tiny");
 		expect(modelsSection(facts, session, []).lines.some((line) => line.text.startsWith("Prompt register: workhorse"))).toBe(true);
-		// The standalone CLI has no running session and resolves from the latest snapshot.
+		// The standalone CLI has no running session and resolves from the latest catalog.
 		expect(collectModelFacts([main], { model: main, modelSource: "default-setting" }, home, {}).promptTier).toBe("tiny");
 	});
 
-	it("explains the capability floor: a key hint without a snapshot, the measured verdicts with one", () => {
-		// No key, no snapshot → a warning finding with the advice.
+	it("explains where the tier came from and how fresh the catalogs are", () => {
 		const findings: Finding[] = [];
-		const facts = collectModelFacts(anthropic, { model: anthropic[0], modelSource: "session" }, home, {});
-		expect(facts.capability).toMatchObject({ keyConfigured: false, snapshot: undefined });
-		const section = modelsSection(facts, { model: anthropic[0], modelSource: "session" }, findings);
-		expect(section.lines.some((l) => l.text.startsWith("Capability scores: none"))).toBe(true);
-		expect(findings.some((f) => f.text.includes("No Artificial Analysis key") && f.fix?.includes("AA_API_KEY"))).toBe(true);
+		const facts = collectModelFacts(openai, { model: openai[0], modelSource: "session" }, home, {});
+		expect(facts.catalog).toMatchObject({ refreshed: false, refreshEnabled: true });
+		const text = modelsSection(facts, { model: openai[0], modelSource: "session" }, findings).lines.map((l) => l.text);
+		expect(text).toContain("Tier: workhorse — catalog openai/gpt-5.1: $3.44/M blended, 1.00 of openai's median current price ($3.44)");
+		expect(text).toContain("Model catalogs: models.dev, OpenRouter and Hugging Face, fetched today (bundled with this release); refreshed daily from interactive sessions");
+		expect(findings).toEqual([]);
 
-		// Key configured, snapshot not fetched yet → a dim explanation, no warning.
+		// The daily refresh turned off in One Code's settings.
 		mkdirSync(join(home, ".onecode"), { recursive: true });
-		writeFileSync(join(home, ".onecode", "settings.json"), JSON.stringify({ capabilityIndex: { artificialAnalysisApiKey: "aa_x" } }));
-		const pending = collectModelFacts(anthropic, { model: anthropic[0], modelSource: "session" }, home, {});
-		expect(pending.capability.keyConfigured).toBe(true);
-		expect(modelsSection(pending, { model: anthropic[0], modelSource: "session" }, []).lines.some((l) => l.text.includes("snapshot not fetched yet"))).toBe(true);
+		writeFileSync(join(home, ".onecode", "settings.json"), JSON.stringify({ refreshModelCatalog: false }));
+		const off = collectModelFacts(openai, { model: openai[0], modelSource: "session" }, home, {});
+		expect(modelsSection(off, { model: openai[0], modelSource: "session" }, []).lines.some((l) => l.text.endsWith("daily refresh off (refreshModelCatalog: false, or PI_OFFLINE)"))).toBe(true);
+	});
 
-		// A snapshot with confirmed scores → the verdict each automatic pick was judged on, with attribution.
-		setModelFactsForTest({ "zai/glm-5.3": { releaseDate: "2026-08-14" }, "zai/glm-5.3-flash": { releaseDate: "2026-08-26" } });
-		setCapabilitySnapshotForTest(
-			snapshotFromResponse(JSON.parse(readFileSync(join(FIXTURES, "artificial-analysis-sample.json"), "utf8")), new Date("2026-09-10T12:00:00Z")),
+	it("says when automatic picks skip the main model, and how to tier a model no catalog knows", () => {
+		pinCatalog([...CATALOG, { id: "openai/gpt-5.3", released: "2026-09-20", price: [1.25, 10] }]);
+		const superseded = collectModelFacts(openai, { model: openai[0], modelSource: "session" }, home, {});
+		expect(modelsSection(superseded, { model: openai[0], modelSource: "session" }, []).lines.map((l) => l.text)).toContain(
+			"Automatic picks skip this model: superseded by openai/gpt-5.3",
 		);
-		const zai = [model("zai", "glm-5.3", 1.4, "openai-completions"), model("zai", "glm-5.3-flash", 0.075, "openai-completions")];
-		const measured = collectModelFacts(zai, { model: zai[0], modelSource: "session" }, home, {});
-		expect(measured.classifier.model?.id).toBe("glm-5.3-flash");
-		expect(measured.capability.classifier).toMatchObject({ verdict: "pass", floor: 71.5 });
-		expect(measured.capability.subagent).toMatchObject({ verdict: "pass" });
-		const text = modelsSection(measured, { model: zai[0], modelSource: "session" }, []).lines.map((l) => l.text);
-		expect(text.some((t) => t.startsWith("Capability scores: Artificial Analysis snapshot, 25 models"))).toBe(true);
-		expect(text.some((t) => t.startsWith("Classifier pick: coding index 71.5 vs floor 71.5"))).toBe(true);
-		expect(text).toContain("Scores: Artificial Analysis (https://artificialanalysis.ai)");
+		const unknown = model("openai", "gpt-5-mystery", 1, "openai-responses");
+		const findings: Finding[] = [];
+		modelsSection(collectModelFacts([unknown], { model: unknown, modelSource: "session" }, home, {}), { model: unknown, modelSource: "session" }, findings);
+		expect(findings).toContainEqual({
+			level: "warn",
+			text: "openai/gpt-5-mystery is not in the public model catalogs (models.dev, OpenRouter), so its tier is a guess (cheap) and automatic picks never choose it.",
+			fix: 'Set its tier in ~/.onecode/settings.json: { "modelTiers": { "openai/gpt-5-mystery": "workhorse" } } (frontier, workhorse, cheap or tiny).',
+		});
 	});
 
 	it("ignores a legacy classifier override while still reading the subagent setting", () => {
@@ -269,7 +273,7 @@ describe("buildDoctorReport", () => {
 		const facts = collectModelFacts(anthropic, { model: anthropic[0], modelSource: "session" }, home, {});
 		expect(facts.subagent.source).toBe("session");
 		expect(facts.subagentConfigured?.spec).toBe("inherit");
-		expect(facts.classifier.model?.id).toBe("claude-sonnet-5");
+		expect(facts.classifier.model?.id).toBe("claude-sonnet-5-5");
 		expect(facts.classifier.description).not.toContain("classifierModel");
 		expect(facts.classifier).not.toHaveProperty("configured");
 	});

@@ -167,7 +167,6 @@ Set these before launching.
 | `ONECODE_AGENT_DIR` | pi's agent directory under the bundled app (default `~/.onecode/agent`). |
 | `ONECODE_NO_UPDATE_CHECK=1` | Skip the daily update check. |
 | `ONECODE_DEBUG=1` | Report when a pi-internal patch in the bundled app didn't apply. |
-| `AA_API_KEY` | Artificial Analysis key for measured model selection. |
 | `BRAVE_SEARCH_API_KEY`, `TAVILY_API_KEY` | Web-search fallback keys. |
 
 ### Claude Code compatibility toggles

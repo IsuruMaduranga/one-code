@@ -1,8 +1,9 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { beforeEach, describe, expect, it } from "vitest";
-import type { CapabilitySnapshot } from "../../extensions/lib/capability-index.ts";
-import { setModelFactsForTest, type ModelFactsRow } from "../../extensions/lib/model-facts.ts";
 import { modelLine, newerModelSuggestion } from "../../extensions/lib/newer-model.ts";
+import { pinReleaseDates } from "./catalog-fixture.ts";
+
+type ModelFactsRow = { releaseDate: string; toolCall?: false };
 
 const model = (id: string, input = 1, output = 3, provider = "openrouter") =>
 	({ provider, id, name: id, cost: { input, output, cacheRead: 0, cacheWrite: 0 }, api: "openai-completions" }) as Model<Api>;
@@ -11,7 +12,7 @@ const newer = model("qwen/qwen3.8-27b", 0.42, 3);
 let facts: Record<string, ModelFactsRow>;
 function date(m: Model<Api>, releaseDate: string, toolCall?: false) {
 	facts[`${m.provider}/${m.id}`] = { releaseDate, ...(toolCall === false ? { toolCall } : {}) };
-	setModelFactsForTest(facts);
+	pinReleaseDates(facts);
 }
 beforeEach(() => {
 	facts = {};
@@ -101,9 +102,9 @@ describe("newerModelSuggestion", () => {
 		expect(newerModelSuggestion([newer], old)).toBeUndefined();
 	});
 	it("skips either missing date", () => {
-		setModelFactsForTest({ [`${old.provider}/${old.id}`]: facts[`${old.provider}/${old.id}`] });
+		pinReleaseDates({ [`${old.provider}/${old.id}`]: facts[`${old.provider}/${old.id}`] });
 		expect(newerModelSuggestion([newer], old)).toBeUndefined();
-		setModelFactsForTest({ [`${newer.provider}/${newer.id}`]: facts[`${newer.provider}/${newer.id}`] });
+		pinReleaseDates({ [`${newer.provider}/${newer.id}`]: facts[`${newer.provider}/${newer.id}`] });
 		expect(newerModelSuggestion([newer], old)).toBeUndefined();
 	});
 	it("requires a higher version even for a later build", () => {
@@ -146,8 +147,8 @@ describe("newerModelSuggestion", () => {
 		date(newer, "2026-08-01", false);
 		expect(newerModelSuggestion([newer], old)).toBeUndefined();
 	});
-	it("rejects a candidate that is itself a prior generation within its family", () => {
-		date(model("qwen/qwen4-max"), "2027-09-01");
+	it("rejects a candidate over two years behind its vendor's newest model", () => {
+		date(model("qwen/qwen4-max"), "2028-09-01");
 		expect(newerModelSuggestion([newer], old)).toBeUndefined();
 	});
 	it("chooses highest version, then later release, then lower blend without mutating the catalog", () => {
@@ -162,21 +163,5 @@ describe("newerModelSuggestion", () => {
 		expect(newerModelSuggestion(catalog.slice(0, 3), old)?.model).toBe(later);
 		expect(newerModelSuggestion(catalog.slice(0, 2), old)?.model).toBe(v310);
 		expect(catalog).toEqual([newer, v310, later, cheaper]);
-	});
-	it.each([59, 60, 61, undefined])("rejects only a confirmed lower default-effort coding score (%s)", (score) => {
-		const snapshot: CapabilitySnapshot = { fetchedAt: "2026-10-05", source: "fixture", rows: [
-			{ id: "old", slug: "qwen3-6-27b", creator: "alibaba", releaseDate: "2026-04-01", coding: 60 },
-			{ id: "newer", slug: "qwen3-8-27b", creator: "alibaba", releaseDate: "2026-08-01", coding: score },
-		] };
-		expect(newerModelSuggestion([newer], old, snapshot)?.model).toBe(score === 59 ? undefined : newer);
-		// A release-date mismatch is not a confirmed score, so it cannot veto.
-		snapshot.rows[1].releaseDate = "2024-01-01";
-		expect(newerModelSuggestion([newer], old, { ...snapshot })?.model).toBe(newer);
-	});
-	it("allows a scored candidate when the session has no confirmed score", () => {
-		const snapshot: CapabilitySnapshot = { fetchedAt: "2026-10-05", source: "fixture", rows: [
-			{ id: "newer", slug: "qwen3-8-27b", creator: "alibaba", releaseDate: "2026-08-01", coding: 20 },
-		] };
-		expect(newerModelSuggestion([newer], old, snapshot)?.model).toBe(newer);
 	});
 });

@@ -33,8 +33,8 @@
  *   same-provider profile serves instead.
  * - A configured default or agent-file model that cannot resolve degrades, with
  *   a notice naming the knob, to the automatic same-provider pick — the
- *   cheapest contained model at the session's capability floor, the SAME floor
- *   the auto-mode classifier applies (`capableContainedCandidates`) — and only
+ *   cheapest contained model in the session's tier or above, the SAME rule
+ *   the auto-mode classifier applies (`sameTierContainedCandidates`) — and only
  *   then to the session model. Only an explicit `inherit` names the session
  *   model outright. A bad *per-call* request first falls through to the agent's
  *   own model and the configured default (running the subagent on its intended
@@ -61,7 +61,7 @@ import {
 	pricedInput,
 	supportsImageInput,
 } from "../lib/model-policy.ts";
-import { atLeastTier, capableContainedCandidates, economicalContainedCandidates, intrinsicTier, type PromptTier } from "../lib/model-tier.ts";
+import { atLeastTier, economicalContainedCandidates, intrinsicTier, type PromptTier, sameTierContainedCandidates } from "../lib/model-tier.ts";
 
 /**
  * Cross-extension channel carrying the resolved default subagent model, so the
@@ -206,7 +206,7 @@ interface AliasResolution {
  * Resolve a Claude Code alias within the session's provider family: by name
  * first (preferring undated alias ids, then the newest id), else as the tier
  * the alias names — the cheapest contained model at or above it
- * (`economicalContainedCandidates` order: never tiny, prior-generation or
+ * (`economicalContainedCandidates` order: never tiny, superseded or
  * tool-less; cheap → workhorse → frontier, then price), `frontier` meaning the
  * session model itself, the strongest model the user chose on this provider.
  * Never off-family: "sonnet" on a Codex session is the cheapest workhorse-class
@@ -236,9 +236,6 @@ function resolveAlias(
 	const tier = ALIAS_TIER[alias];
 	// The session model carries the caller's own modality, so frontier is always safe.
 	if (tier === "frontier") return { model: sessionModel, how: "tier" };
-	// Name-class only, deliberately: an explicit alias asks for a *class* of model,
-	// so a measured pass (which lets a strong flash serve the automatic default)
-	// does not lift a lean-named model into "sonnet" here.
 	const byTier = economicalContainedCandidates(available, sessionModel, contained, requireImageInput).find((model) => atLeastTier(intrinsicTier(model), tier));
 	return byTier ? { model: byTier, how: "tier" } : undefined;
 }
@@ -398,23 +395,16 @@ export function resolveSubagentModel(input: ResolveInput): SubagentModelResoluti
 	// Automatic selection is a cost optimisation, so it needs price evidence:
 	// with the session price unknown there is no demonstrable saving, and picking
 	// a cheap-tier model could silently *upgrade* an (unpriced) cheap session. The
-	// floor-gated selector — the cheapest same-provider model at the session's
-	// capability floor (workhorse-or-better for a workhorse-or-better session,
-	// Claude Code's min(main, sonnet); never `tiny`) — is the SAME one the
-	// auto-mode classifier uses, so a session screens and delegates on one
-	// model. A delegated worker writes code and calls tools for many turns; a
-	// weaker one spends the saving on retries (2026-09-11 — before, subagents
-	// took the cheapest capable model with no floor). It excludes unpriced/opaque
-	// providers by construction, which subsumes the old dynamic-selection gate;
-	// those degrade to the session model below.
+	// selector — the cheapest same-provider model in the session's tier or above
+	// (never `tiny`) — is the SAME rule the auto-mode classifier uses. A
+	// delegated worker writes code and calls tools for many turns; a weaker one
+	// spends the saving on retries. It excludes unpriced and uncatalogued
+	// models by construction; those sessions degrade to the session model below.
 	if (sessionModel && !suppressAutomatic) {
 		// `strict` requires a genuinely cheaper model and yields nothing when the
 		// session price is unknown, so a cheap-tier pick never silently upgrades an
 		// unpriced session. Reuse the `contained` set computed above for the hot path.
-		// With an Artificial Analysis snapshot (lib/capability-index.ts) the floor
-		// is measured — coding index ≥ min(session, Sonnet 5), no tolerance —
-		// and passers rank by price; unscored candidates are judged by name-class tier.
-		const cheaper = capableContainedCandidates(available, sessionModel, "subagent", { strict: true, contained, requireImageInput })[0];
+		const cheaper = sameTierContainedCandidates(available, sessionModel, { strict: true, contained, requireImageInput })[0];
 		if (cheaper) return { model: cheaper, source: "automatic", notices };
 	}
 

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { setModelFactsForTest } from "../../extensions/lib/model-facts.ts";
+import { pinReleaseDates } from "./catalog-fixture.ts";
 import { MODEL_UNUSABLE_CHANNEL } from "../../extensions/lib/model-unusable.ts";
 import { oneCodeSettingsPath, readSuggestNewerModels } from "../../extensions/lib/one-code-settings.ts";
 import newerModelExtension from "../../extensions/newer-model/index.ts";
@@ -19,7 +19,7 @@ let dir: string;
 beforeEach(() => {
 	dir = mkdtempSync(join(tmpdir(), "onecode-newer-model-"));
 	vi.stubEnv("ONECODE_STATE_DIR", dir);
-	setModelFactsForTest({
+	pinReleaseDates({
 		"openai/gpt-5.6-luna": { releaseDate: "2026-07-09" },
 		"openai/gpt-6-luna": { releaseDate: "2026-09-01" },
 		"openai/gpt-5.6-sol": { releaseDate: "2026-07-09" },

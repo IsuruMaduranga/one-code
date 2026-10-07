@@ -94,7 +94,7 @@
 	"scripts": {
 		"typecheck": "tsc --noEmit",
 		"test": "vitest run",
-		"gen:model-facts": "node scripts/gen-model-facts.mjs",
+		"gen:model-catalog": "node scripts/gen-model-catalog.mjs",
 		"sync:app-readme": "node scripts/app-readme.mjs"
 	},
 	"dependencies": {

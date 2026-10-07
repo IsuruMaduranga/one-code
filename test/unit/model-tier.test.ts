@@ -1,31 +1,70 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
+	classifyModelTier,
 	economicalContainedCandidates,
 	pickEconomicalContainedModel,
 	resolveModelTier,
+	sameTierContainedCandidates,
+	setModelTierOverridesForTest,
 	taskToolsEnabled,
 	tierOverride,
 	usesClaudeCodeFastPaths,
 } from "../../extensions/lib/model-tier.ts";
+import { type FixtureModel, pinCatalog } from "./catalog-fixture.ts";
 
-/** Minimal fake — resolveModelTier only reads id/provider/cost. */
+/** Minimal fake — the tier code reads only id/provider/cost. */
 function model(id: string, provider: string, inputCost?: number): Model<Api> {
 	return { id, provider, cost: inputCost === undefined ? undefined : { input: inputCost } } as unknown as Model<Api>;
 }
 const noEnv = {} as NodeJS.ProcessEnv;
 
+/** A current Anthropic lineup (vendor prices per million tokens). */
+const ANTHROPIC: FixtureModel[] = [
+	{ id: "anthropic/claude-fable-5-1", released: "2026-09-01", price: [10, 50] },
+	{ id: "anthropic/claude-opus-5-5", released: "2026-09-22", price: [4, 20] },
+	{ id: "anthropic/claude-sonnet-5-5", released: "2026-09-28", price: [2, 10], servedAs: ["openrouter/anthropic/claude-sonnet-5.5"] },
+	{ id: "anthropic/claude-opus-4-7", released: "2026-04-14", price: [5, 25] },
+	{ id: "anthropic/claude-sonnet-5", released: "2026-06-29", price: [2, 10] },
+	{ id: "anthropic/claude-haiku-4-5", released: "2025-10-15", price: [1, 5], servedAs: ["openrouter/anthropic/claude-haiku-4.5"] },
+	{ id: "anthropic/claude-sonnet-4", released: "2025-05-22", price: [3, 15] },
+];
+
+/** A current OpenAI lineup, with premium SKUs that must not set the bar. */
+const OPENAI: FixtureModel[] = [
+	{ id: "openai/gpt-6-astra", released: "2026-09-04", price: [5, 40] },
+	{ id: "openai/gpt-6-astra-fast", released: "2026-09-04", price: [10, 80] },
+	{ id: "openai/gpt-6-sol-pro", released: "2026-09-22", price: [30, 180] },
+	{ id: "openai/gpt-6-sol", released: "2026-09-22", price: [1, 13] },
+	{ id: "openai/gpt-6-luna", released: "2026-09-22", price: [0.1, 0.5] },
+	{ id: "openai/gpt-5.6-sol", released: "2026-07-09", price: [2.5, 30] },
+	{ id: "openai/gpt-5.6-terra", released: "2026-07-09", price: [1.5, 12] },
+	{ id: "openai/gpt-5.5", released: "2026-04-23", price: [5, 30] },
+	{ id: "openai/gpt-5.4-mini", released: "2026-03-17", price: [0.75, 4.5] },
+	{ id: "openai/gpt-5.4-nano", released: "2026-03-17", price: [0.2, 1.25] },
+];
+
+/** An open-weight vendor: every current model has a published size. */
+const DEEPSEEK: FixtureModel[] = [
+	{ id: "deepseek/deepseek-v4-pro", released: "2026-08-12", price: [0.435, 0.87], params: 1.6e12 },
+	{ id: "deepseek/deepseek-v4.1-flash", released: "2026-09-10", price: [0.15, 0.6], params: 284e9 },
+	{ id: "deepseek/deepseek-v4-flash", released: "2026-04-24", price: [0.14, 0.28], params: 284e9 },
+	{ id: "deepseek/deepseek-r1-distill-32b", released: "2026-05-01", price: [0.1, 0.2], params: 32e9 },
+];
+
 describe("resolveModelTier", () => {
-	it("classifies first-party Anthropic Opus ≥4.8, Sonnet ≥5.5 and Fable as frontier", () => {
+	it("classifies first-party Anthropic Opus ≥4.8, Sonnet ≥5.5 and Fable as frontier, with or without a catalog", () => {
 		for (const id of ["claude-opus-4-8", "claude-opus-5", "claude-opus-5-5", "claude-sonnet-5-5", "claude-sonnet-6", "claude-fable-5", "claude-fable-5-1"]) {
 			expect(resolveModelTier(model(id, "anthropic"), noEnv)).toBe("frontier");
 		}
 	});
 
 	it("keeps Opus 4.7 and Sonnet 5 below frontier, as Claude Code gives them the long prompt", () => {
-		expect(resolveModelTier(model("claude-opus-4-7", "anthropic"), noEnv)).toBe("workhorse");
-		expect(resolveModelTier(model("claude-sonnet-5", "anthropic"), noEnv)).toBe("workhorse");
-		expect(resolveModelTier(model("claude-sonnet-5-5", "openrouter"), noEnv)).not.toBe("frontier");
+		pinCatalog(ANTHROPIC);
+		expect(resolveModelTier(model("claude-opus-4-7", "anthropic", 5), noEnv)).toBe("workhorse");
+		expect(resolveModelTier(model("claude-sonnet-5", "anthropic", 2), noEnv)).toBe("workhorse");
+		// A gateway copy cannot be verified for the frontier gate: its catalog tier serves.
+		expect(resolveModelTier(model("anthropic/claude-sonnet-5.5", "openrouter", 2), noEnv)).toBe("workhorse");
 	});
 
 	it("classifies first-party OpenAI Astra/Sol ≥6 as frontier", () => {
@@ -34,10 +73,6 @@ describe("resolveModelTier", () => {
 				expect(resolveModelTier(model(id, provider, 2), noEnv)).toBe("frontier");
 			}
 		}
-		// Below the line: GPT-5.x Sol and Terra, every Luna, and gateway copies.
-		expect(resolveModelTier(model("gpt-5.6-sol", "openai", 4), noEnv)).toBe("workhorse");
-		expect(resolveModelTier(model("gpt-5.6-terra", "openai", 2), noEnv)).toBe("workhorse");
-		expect(resolveModelTier(model("gpt-6-luna", "openai", 0.1), noEnv)).toBe("cheap");
 		expect(resolveModelTier(model("openai/gpt-6-sol", "openrouter", 2), noEnv)).not.toBe("frontier");
 		expect(resolveModelTier(model("gpt-6-sol", "github-copilot", 2), noEnv)).not.toBe("frontier");
 	});
@@ -46,96 +81,66 @@ describe("resolveModelTier", () => {
 		expect(resolveModelTier(model("claude-opus-4-8-20251101", "anthropic"), noEnv)).toBe("frontier");
 	});
 
-	it("puts Anthropic Haiku in cheap, other non-frontier first-party in workhorse", () => {
-		expect(resolveModelTier(model("claude-haiku-4-5", "anthropic"), noEnv)).toBe("cheap");
-		for (const id of ["claude-opus-4-1", "claude-opus-4-6", "claude-sonnet-4-6"]) {
-			expect(resolveModelTier(model(id, "anthropic"), noEnv)).toBe("workhorse");
-		}
-	});
-
-	it("puts capable non-Anthropic models in workhorse", () => {
-		expect(resolveModelTier(model("gpt-5", "openai", 1.25), noEnv)).toBe("workhorse"); // anchor
-		expect(resolveModelTier(model("gpt-5.6-sol", "openai", 4.5), noEnv)).toBe("workhorse"); // anchor
-		expect(resolveModelTier(model("grok-4.5", "xai", 2), noEnv)).toBe("workhorse"); // anchor
-	});
-
-	it("applies the ratified anchor overrides", () => {
-		// GPT-5-mini would price to tiny; the override anchors it at cheap.
-		expect(resolveModelTier(model("gpt-5-mini", "openai", 0.25), noEnv)).toBe("cheap");
-		// GPT-5.6-Luna is OpenAI's cheap line despite a high benchmark → cheap, not workhorse.
-		expect(resolveModelTier(model("gpt-5.6-luna", "openai", 1), noEnv)).toBe("cheap");
-		// GPT-6 Luna is the same line at half the price; its Sol and Astra siblings are frontier.
+	it("places a closed vendor's models by price against the median of its current models, so premium SKUs do not set the bar", () => {
+		pinCatalog([...ANTHROPIC, ...OPENAI]);
+		// Haiku at a fifth of Anthropic's median is cheap; the 2025 Sonnet 4 is over a
+		// year older than the newest workhorse-class model, so it drops a step.
+		expect(classifyModelTier(model("claude-haiku-4-5", "anthropic", 1), noEnv)).toMatchObject({ tier: "cheap" });
+		expect(classifyModelTier(model("claude-sonnet-4", "anthropic", 3), noEnv)).toMatchObject({ tier: "cheap", reason: expect.stringContaining("over a year older") });
+		// OpenAI: the -pro and -fast SKUs do not drag Terra into cheap; Luna and mini stay cheap.
+		expect(resolveModelTier(model("gpt-5.6-terra", "openai", 1.5), noEnv)).toBe("workhorse");
 		expect(resolveModelTier(model("gpt-6-luna", "openai", 0.1), noEnv)).toBe("cheap");
-		// GPT-5-nano stays tiny.
-		expect(resolveModelTier(model("gpt-5-nano", "openai", 0.15), noEnv)).toBe("tiny");
-		// o3 family → cheap; prior-gen GPT-4x → tiny.
-		expect(resolveModelTier(model("o3-pro", "openai", 20), noEnv)).toBe("cheap");
-		expect(resolveModelTier(model("gpt-4o", "openai", 2.5), noEnv)).toBe("tiny");
+		expect(resolveModelTier(model("gpt-5.4-mini", "openai", 0.75), noEnv)).toBe("cheap");
+		// A nano model publishes no size: its name marks it small.
+		expect(resolveModelTier(model("gpt-5.4-nano", "openai", 0.2), noEnv)).toBe("tiny");
 	});
 
-	it("anchors DeepSeek by generation, not by its ~10x-lower price scale", () => {
-		// Real OpenRouter catalog prices (2026-09-10): the floors alone put every V4
-		// Flash row in tiny and let R1-0528 (exactly $0.50) win the subagent pick.
-		expect(resolveModelTier(model("deepseek/deepseek-v4-flash", "openrouter", 0.08526), noEnv)).toBe("cheap");
-		expect(resolveModelTier(model("deepseek/deepseek-v4-flash-0731", "openrouter", 0.065), noEnv)).toBe("cheap");
-		expect(resolveModelTier(model("deepseek/deepseek-v4.1-flash", "openrouter", 0.15), noEnv)).toBe("cheap");
-		expect(resolveModelTier(model("deepseek/deepseek-v4-pro", "openrouter", 0.890358), noEnv)).toBe("workhorse");
+	it("places an open-weight vendor's models by size: tiny under 40B, workhorse from half the largest", () => {
+		pinCatalog(DEEPSEEK);
 		expect(resolveModelTier(model("deepseek-v4-pro", "deepseek", 0.435), noEnv)).toBe("workhorse");
-		expect(resolveModelTier(model("deepseek-v4-flash", "deepseek", 0.14), noEnv)).toBe("cheap");
-		// Prior generation → tiny, like gpt-4, whatever the price says.
-		expect(resolveModelTier(model("deepseek/deepseek-r1-0528", "openrouter", 0.5), noEnv)).toBe("tiny");
-		expect(resolveModelTier(model("deepseek/deepseek-r1", "openrouter", 0.7), noEnv)).toBe("tiny");
-		expect(resolveModelTier(model("deepseek/deepseek-chat-v3.1", "openrouter", 0.55), noEnv)).toBe("tiny");
-		expect(resolveModelTier(model("deepseek/deepseek-chat", "openrouter", 0.32), noEnv)).toBe("tiny");
-		expect(resolveModelTier(model("deepseek/deepseek-v3.2", "openrouter", 0.269), noEnv)).toBe("tiny");
-		// An opaque/local provider never reaches the anchor map: the same Flash id
-		// on ollama falls to the price/containment floor (opaque → tiny).
-		expect(resolveModelTier(model("deepseek-v4-flash", "ollama", 0.14), noEnv)).toBe("tiny");
+		expect(resolveModelTier(model("deepseek-v4.1-flash", "deepseek", 0.15), noEnv)).toBe("cheap");
+		expect(resolveModelTier(model("deepseek-r1-distill-32b", "deepseek", 0.1), noEnv)).toBe("tiny");
 	});
 
-	it("uses the name-class cap for lean models over price", () => {
-		expect(resolveModelTier(model("gemini-2.5-flash", "google", 0.3), noEnv)).toBe("tiny"); // flash cap + tiny price
-		expect(resolveModelTier(model("gemini-3-flash-preview", "google", 1.12), noEnv)).toBe("cheap"); // flash cap over workhorse price
-		expect(resolveModelTier(model("gemini-3.1-flash-lite", "google", 0.56), noEnv)).toBe("tiny"); // flash-lite anchor
-		expect(resolveModelTier(model("qwen3-32b", "groq", 0.29), noEnv)).toBe("tiny"); // 32b size tag
+	it("needs three current priced models to compare against; with fewer, the vendor's models are cheap", () => {
+		pinCatalog([
+			{ id: "acme/acme-large", released: "2026-08-01", price: [3, 15] },
+			{ id: "acme/acme-small", released: "2026-08-01", price: [0.3, 1.5] },
+		]);
+		expect(classifyModelTier(model("acme/acme-large", "openrouter", 3), noEnv)).toMatchObject({ tier: "cheap", reason: expect.stringContaining("too few") });
 	});
 
-	it("classifies unpriced / opaque / unknown as tiny (maximum scaffolding)", () => {
+	it("matches a gateway or hosted row to the vendor's own model", () => {
+		pinCatalog([...ANTHROPIC, { id: "zhipuai/glm-5.3", released: "2026-08-14", price: [1, 3.2] }, { id: "zhipuai/glm-5.2", released: "2026-06-13", price: [1, 3.2] }, { id: "zhipuai/glm-5.3-flash", released: "2026-08-26", price: [0.1, 0.6] }]);
+		expect(classifyModelTier(model("anthropic/claude-haiku-4.5", "openrouter", 1), noEnv)).toMatchObject({ tier: "cheap", reason: expect.stringContaining("anthropic/claude-haiku-4-5") });
+		// Together and the Qwen plan name it as the vendor does; the bare id is unique.
+		expect(classifyModelTier(model("zai-org/GLM-5.3", "together", 1), noEnv)).toMatchObject({ tier: "workhorse", reason: expect.stringContaining("zhipuai/glm-5.3") });
+		expect(classifyModelTier(model("glm-5.3-flash", "qwen-token-plan"), noEnv)).toMatchObject({ tier: "cheap", reason: expect.stringContaining("zhipuai/glm-5.3-flash") });
+	});
+
+	it("never matches a custom provider's id to a catalog model", () => {
+		pinCatalog(ANTHROPIC);
+		// A local model aliased to a flagship name must NOT inherit its tier.
+		expect(classifyModelTier(model("claude-sonnet-5", "ollama", 3), noEnv)).toMatchObject({ tier: "tiny", reason: "custom provider, not in the catalogs" });
+	});
+
+	it("falls back without a catalog entry: small size or name, custom provider and unpriced are tiny, the rest cheap", () => {
+		expect(resolveModelTier(model("qwen3-32b", "groq", 0.29), noEnv)).toBe("tiny"); // 32B size tag
+		expect(resolveModelTier(model("gemma-4-e2b", "groq", 0.05), noEnv)).toBe("tiny"); // effective-size tag
+		expect(resolveModelTier(model("acme-lite", "groq", 0.2), noEnv)).toBe("tiny"); // small-model name
+		expect(resolveModelTier(model("prometheus-8b", "deepseek", 0.1), noEnv)).toBe("tiny"); // delimited, not "pro"
 		expect(resolveModelTier(model("glm-5", "zai", 0), noEnv)).toBe("tiny"); // 0 is not priced
-		expect(resolveModelTier(model("some-model", "ollama"), noEnv)).toBe("tiny"); // opaque local provider
+		expect(resolveModelTier(model("some-model", "ollama", 2), noEnv)).toBe("tiny"); // custom provider
 		expect(resolveModelTier(undefined, noEnv)).toBe("tiny");
+		expect(classifyModelTier(model("llama-4-405b", "groq", 1), noEnv)).toEqual({ tier: "cheap", reason: "not in the catalogs" });
 	});
 
-	it("does not let an opaque/local model reach the anchor map via an aliased id", () => {
-		// A local model aliased to a flagship name must NOT inherit its tier — opaque
-		// providers are unverifiable, so max scaffolding wins over the anchor.
-		expect(resolveModelTier(model("claude-sonnet-5", "ollama"), noEnv)).toBe("tiny");
-		expect(resolveModelTier(model("gpt-5", "ollama"), noEnv)).toBe("tiny");
-	});
-
-	it("treats an 'instant'-class name as tiny, not cheap", () => {
-		expect(resolveModelTier(model("acme-instant", "acme", 2), noEnv)).toBe("tiny"); // instant cap beats workhorse price
-	});
-
-	it("keeps a cheap or unpriced 'pro'/'max'-class flagship in workhorse on a verifiable provider", () => {
-		expect(resolveModelTier(model("deepseek-v4-pro", "deepseek", 0.435), noEnv)).toBe("workhorse"); // anchor
-		expect(resolveModelTier(model("qwen3.8-max", "qwen-token-plan", 0.4), noEnv)).toBe("workhorse"); // hosted, known catalog
-		expect(resolveModelTier(model("gemini-3-pro-preview", "google", 2), noEnv)).toBe("workhorse");
-		expect(resolveModelTier(model("qwen3.8-max", "qwen-token-plan"), noEnv)).toBe("workhorse"); // unpriced, capable name
-		// An opaque (unknown/local) provider's id is unverifiable: a 'pro' name lifts nothing.
-		expect(resolveModelTier(model("some-model-pro", "acme"), noEnv)).toBe("tiny");
-		expect(resolveModelTier(model("qwen3.8-max", "ollama", 0.4), noEnv)).toBe("tiny");
-	});
-
-	it("matches capable/lean hints only as delimited tokens, not substrings", () => {
-		// "prometheus-8b": no substring "pro" rescue; the 8b size tag pins it tiny.
-		expect(resolveModelTier(model("prometheus-8b", "deepseek", 0.1), noEnv)).toBe("tiny");
-	});
-
-	it("classifies a gateway-proxied Anthropic model via the anchor map", () => {
-		// Proxied (non-first-party) Sonnet can't be frontier-verified → workhorse.
-		expect(resolveModelTier(model("anthropic/claude-sonnet-5", "openrouter", 3), noEnv)).toBe("workhorse");
-		expect(resolveModelTier(model("anthropic/claude-haiku-4-5", "openrouter", 1), noEnv)).toBe("cheap");
+	it("honors the user's modelTiers setting, by provider/id or bare id, ahead of the gate and the catalog", () => {
+		pinCatalog(ANTHROPIC);
+		setModelTierOverridesForTest({ "anthropic/claude-haiku-4-5": "workhorse", "glm-5": "cheap", "claude-opus-5-5": "cheap" });
+		expect(classifyModelTier(model("claude-haiku-4-5", "anthropic", 1), noEnv)).toEqual({ tier: "workhorse", reason: "modelTiers setting" });
+		expect(resolveModelTier(model("glm-5", "zai", 0), noEnv)).toBe("cheap");
+		expect(resolveModelTier(model("claude-opus-5-5", "anthropic", 4), noEnv)).toBe("cheap");
 	});
 
 	it("honors the CC_PROMPT_TIER override over classification", () => {
@@ -150,93 +155,90 @@ describe("resolveModelTier", () => {
 
 describe("economicalContainedCandidates", () => {
 	const ids = (models: Model<Api>[]) => models.map((m) => m.id);
+	beforeEach(() => pinCatalog([...ANTHROPIC, ...OPENAI]));
 
-	it("ranks cheapest capable tier first (cheap → workhorse → frontier)", () => {
-		const session = model("claude-opus-4-8", "anthropic", 15); // frontier
-		const available = [
-			session,
-			model("claude-sonnet-5", "anthropic", 3), // workhorse
-			model("claude-haiku-4-5", "anthropic", 1), // cheap
-		];
-		// cheap (haiku) before workhorse (sonnet) before frontier (opus, the session).
-		expect(ids(economicalContainedCandidates(available, session))).toEqual([
-			"claude-haiku-4-5",
-			"claude-sonnet-5",
-			"claude-opus-4-8",
-		]);
+	it("ranks cheapest tier first (cheap → workhorse → frontier)", () => {
+		const session = model("claude-opus-5-5", "anthropic", 4); // frontier
+		const available = [session, model("claude-sonnet-5", "anthropic", 2), model("claude-haiku-4-5", "anthropic", 1)];
+		// Sonnet 5 is superseded by Sonnet 5.5, which this account does not list: still skipped.
+		expect(ids(economicalContainedCandidates(available, session))).toEqual(["claude-haiku-4-5", "claude-opus-5-5"]);
 	});
 
+	// Astra is frontier on OpenAI's own API; Terra is superseded by GPT-6 Sol,
+	// so it is never an automatic pick even as the session row.
 	it("orders within a tier by price ascending", () => {
-		const session = model("gpt-5.5", "openai", 10); // workhorse
-		const available = [session, model("gpt-5-mini", "openai", 0.25), model("gpt-5.4-mini", "openai", 0.75)];
-		expect(ids(economicalContainedCandidates(available, session))).toEqual(["gpt-5-mini", "gpt-5.4-mini", "gpt-5.5"]);
+		const session = model("gpt-6-astra", "openai", 5);
+		const available = [session, model("gpt-5.4-mini", "openai", 0.75), model("gpt-6-luna", "openai", 0.1)];
+		expect(ids(economicalContainedCandidates(available, session))).toEqual(["gpt-6-luna", "gpt-5.4-mini", "gpt-6-astra"]);
 	});
 
-	it("excludes tiny-tier and unpriced models", () => {
-		const session = model("gpt-5.5", "openai", 10);
+	it("excludes tiny, unpriced, superseded and uncatalogued models", () => {
+		const session = model("gpt-6-astra", "openai", 5);
 		const available = [
 			session,
-			model("gpt-5-mini", "openai", 0.25), // cheap
-			model("gpt-5-nano", "openai", 0.05), // tiny
-			model("gpt-5-mystery", "openai"), // unpriced
+			model("gpt-6-luna", "openai", 0.1), // cheap
+			model("gpt-5.4-nano", "openai", 0.2), // tiny
+			model("gpt-6-sol", "openai"), // unpriced on this route
+			model("gpt-5.6-terra", "openai", 1.5), // superseded by GPT-6 Sol
+			model("gpt-5-mystery", "openai", 0.3), // no catalog knows it
 		];
-		expect(ids(economicalContainedCandidates(available, session))).toEqual(["gpt-5-mini", "gpt-5.5"]);
+		expect(ids(economicalContainedCandidates(available, session))).toEqual(["gpt-6-luna", "gpt-6-astra"]);
 	});
 
 	it("stays within the session's provider containment", () => {
-		const session = model("gpt-5.5", "openai", 10);
-		const available = [session, model("gpt-5-mini", "openai", 0.25), model("claude-haiku-4-5", "anthropic", 1)];
-		expect(ids(economicalContainedCandidates(available, session))).toEqual(["gpt-5-mini", "gpt-5.5"]);
+		const session = model("gpt-6-astra", "openai", 5);
+		const available = [session, model("gpt-6-luna", "openai", 0.1), model("claude-haiku-4-5", "anthropic", 1)];
+		expect(ids(economicalContainedCandidates(available, session))).toEqual(["gpt-6-luna", "gpt-6-astra"]);
 	});
 
 	it("ignores CC_PROMPT_TIER — selection uses intrinsic tiers, so the floor still excludes tiny", () => {
-		// CC_PROMPT_TIER forces the session's *prompt register*; it must not collapse
-		// candidate classification and let a tiny model past the security floor.
-		const session = model("gpt-5.5", "openai", 10);
-		const available = [session, model("gpt-5-mini", "openai", 0.25), model("gpt-5-nano", "openai", 0.05)];
+		const session = model("gpt-6-astra", "openai", 5);
+		const available = [session, model("gpt-6-luna", "openai", 0.1), model("gpt-5.4-nano", "openai", 0.2)];
 		const prev = process.env.CC_PROMPT_TIER;
 		process.env.CC_PROMPT_TIER = "workhorse";
 		try {
-			expect(ids(economicalContainedCandidates(available, session))).toEqual(["gpt-5-mini", "gpt-5.5"]);
+			expect(ids(economicalContainedCandidates(available, session))).toEqual(["gpt-6-luna", "gpt-6-astra"]);
 		} finally {
 			if (prev === undefined) delete process.env.CC_PROMPT_TIER;
 			else process.env.CC_PROMPT_TIER = prev;
 		}
 	});
 
-	it("with requireImageInput, drops text-only candidates (fake ids, so no models.dev facts intrude)", () => {
-		const withInput = (id: string, cost: number, input: string[]) =>
-			({ id, provider: "openai", cost: { input: cost }, input }) as unknown as Model<Api>;
-		const session = withInput("gpt-5-main", 2, ["text", "image"]); // workhorse, image-capable
-		const available = [
-			session,
-			withInput("gpt-5-flash-text", 0.6, ["text"]), // cheap, text-only
-			withInput("gpt-5-flash-vision", 0.7, ["text", "image"]), // cheap, image-capable
-		];
-		// Ungated: the cheaper text-only model ranks first.
-		expect(ids(economicalContainedCandidates(available, session))).toEqual(["gpt-5-flash-text", "gpt-5-flash-vision", "gpt-5-main"]);
-		// Gated: the text-only model is dropped; the image-capable ones remain.
-		expect(ids(economicalContainedCandidates(available, session, undefined, true))).toEqual(["gpt-5-flash-vision", "gpt-5-main"]);
+	it("with requireImageInput, drops text-only candidates", () => {
+		const withInput = (id: string, cost: number, input: string[]) => ({ id, provider: "openai", cost: { input: cost }, input }) as unknown as Model<Api>;
+		const session = withInput("gpt-6-astra", 5, ["text", "image"]);
+		const available = [session, withInput("gpt-6-luna", 0.1, ["text"]), withInput("gpt-5.4-mini", 0.75, ["text", "image"])];
+		expect(ids(economicalContainedCandidates(available, session))).toEqual(["gpt-6-luna", "gpt-5.4-mini", "gpt-6-astra"]);
+		expect(ids(economicalContainedCandidates(available, session, undefined, true))).toEqual(["gpt-5.4-mini", "gpt-6-astra"]);
+	});
+});
+
+describe("sameTierContainedCandidates", () => {
+	it("keeps the session's tier or above, strictly cheaper, cheapest first", () => {
+		pinCatalog([...ANTHROPIC, ...OPENAI]);
+		const ids = (models: Model<Api>[]) => models.map((m) => m.id);
+		const fable = model("claude-fable-5-1", "anthropic", 10);
+		const anthropic = [fable, model("claude-opus-5-5", "anthropic", 4), model("claude-sonnet-5-5", "anthropic", 2), model("claude-haiku-4-5", "anthropic", 1)];
+		expect(ids(sameTierContainedCandidates(anthropic, fable, { strict: true }))).toEqual(["claude-sonnet-5-5", "claude-opus-5-5"]);
+		// A cheaper model in a lower tier is never a same-tier pick.
+		const astra = model("gpt-6-astra", "openai", 5);
+		expect(ids(sameTierContainedCandidates([astra, model("gpt-6-luna", "openai", 0.1)], astra, { strict: true }))).toEqual([]);
 	});
 });
 
 describe("pickEconomicalContainedModel", () => {
-	it("returns the cheapest capable model no dearer than the session, tagged 'tier'", () => {
-		const session = model("claude-opus-4-8", "anthropic", 15);
+	beforeEach(() => pinCatalog(ANTHROPIC));
+
+	it("returns the cheapest non-tiny model no dearer than the session, tagged 'tier'", () => {
+		const session = model("claude-opus-5-5", "anthropic", 4);
 		const available = [session, model("claude-haiku-4-5", "anthropic", 1)];
-		expect(pickEconomicalContainedModel(available, session)).toMatchObject({
-			via: "tier",
-			model: { id: "claude-haiku-4-5" },
-		});
+		expect(pickEconomicalContainedModel(available, session)).toMatchObject({ via: "tier", model: { id: "claude-haiku-4-5" } });
 	});
 
-	it("falls back to the session model when nothing cheaper and capable exists", () => {
+	it("falls back to the session model when nothing cheaper exists", () => {
 		const session = model("claude-haiku-4-5", "anthropic", 1);
-		const available = [session, model("claude-sonnet-5", "anthropic", 3)];
-		expect(pickEconomicalContainedModel(available, session)).toMatchObject({
-			via: "session",
-			model: { id: "claude-haiku-4-5" },
-		});
+		const available = [session, model("claude-sonnet-5-5", "anthropic", 2)];
+		expect(pickEconomicalContainedModel(available, session)).toMatchObject({ via: "session", model: { id: "claude-haiku-4-5" } });
 	});
 
 	it("returns undefined without a session model", () => {
@@ -256,6 +258,7 @@ describe("tierOverride", () => {
 
 describe("usesClaudeCodeFastPaths (decisions/auto-mode.md, \"Two gates by model tier\")", () => {
 	it("gives frontier and workhorse Claude Code's fast paths, and cheap, tiny or no model the stricter gate", () => {
+		pinCatalog(ANTHROPIC);
 		expect(usesClaudeCodeFastPaths(model("claude-opus-5", "anthropic"))).toBe(true);
 		expect(usesClaudeCodeFastPaths(model("claude-sonnet-5", "anthropic"))).toBe(true);
 		expect(usesClaudeCodeFastPaths(model("claude-haiku-4-5", "anthropic"))).toBe(false);
@@ -263,6 +266,7 @@ describe("usesClaudeCodeFastPaths (decisions/auto-mode.md, \"Two gates by model 
 	});
 
 	it("ignores CC_PROMPT_TIER, so a forced register never loosens the gate", () => {
+		pinCatalog(ANTHROPIC);
 		const prev = process.env.CC_PROMPT_TIER;
 		process.env.CC_PROMPT_TIER = "frontier";
 		try {

@@ -28,10 +28,10 @@ the findings.
    offers, and where the credential came from. An error when none is
    ready, with the free options named.
 3. **Models.** The main model with its price and context window, the
-   prompt tier it gets, the reasoning effort, the subagent model and how it
-   was chosen, the auto-mode classifier model, the reader model used by
-   web fetch and recaps, capability verdicts for each role when an
-   Artificial Analysis key is set, and the permission mode.
+   prompt tier it gets and the rule that set it, the reasoning effort, the
+   subagent model and how it was chosen, the auto-mode classifier model, the
+   reader model used by web fetch and recaps, how fresh the model catalogs
+   behind the tiers are, and the permission mode.
 4. **Presets.** The three model presets for your provider and the model
    each role would get under each.
 5. **Imported configuration.** Every settings file found, with the keys One
@@ -57,13 +57,13 @@ A preset sets the main model and subagent model from the provider you're
 connected to. The classifier stays automatic, and each preset's preview shows
 the classifier its main model would get (see
 [Automatic model selection](providers-and-models.md#automatic-model-selection)).
-Only current-generation, priced models that support tool calls are considered
-for the main model.
+Only priced models that support tool calls, and that no newer model of the
+same vendor replaces, are considered for the main model.
 
 | Preset | Main model | Subagents | Classifier |
 |---|---|---|---|
 | `economical` | The cheapest small model. | Inherit the main model. | Automatic. |
-| `balanced` | The cheapest Sonnet-class model. | Chosen automatically (a cheaper Sonnet-class model when one exists, else the main model). | Automatic. |
+| `balanced` | The cheapest workhorse-tier model. | Chosen automatically (a cheaper model in the same tier when one exists, else the main model). | Automatic. |
 | `quality` | The most capable model available. | Inherit the main model. | Automatic. |
 
 `/doctor presets` shows what each preset would pick. `/doctor preset balanced`

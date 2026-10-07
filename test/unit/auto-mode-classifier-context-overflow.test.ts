@@ -6,11 +6,12 @@ import { completeSimple } from "@earendil-works/pi-ai/compat";
 import { classify, createClassifierState } from "../../extensions/auto-mode/classifier.ts";
 import { loadAutoModeConfig } from "../../extensions/auto-mode/config.ts";
 import { buildPayload, type ClassifyRequest } from "../../extensions/auto-mode/prompt.ts";
+import { pinCatalog } from "./catalog-fixture.ts";
 
 const completeMock = vi.mocked(completeSimple);
 const config = loadAutoModeConfig("/nonexistent-home-for-tests");
 const main = { provider: "openai-codex", id: "gpt-6-astra", name: "Astra", contextWindow: 1_000_000, cost: { input: 10, output: 30 } } as any;
-const screener = { provider: "openai-codex", id: "gpt-5.6-terra", name: "Terra", contextWindow: 272_000, cost: { input: 2, output: 8 } } as any;
+const screener = { provider: "openai-codex", id: "gpt-6-sol", name: "Sol", contextWindow: 272_000, cost: { input: 2, output: 8 } } as any;
 const reply = (text: string) => ({ stopReason: "stop", content: [{ type: "text", text }], usage: {} }) as any;
 const errorReply = (errorMessage: string) => ({ stopReason: "error", errorMessage, content: [] }) as any;
 const text = (context: any) => context.messages[0].content as string;
@@ -37,6 +38,10 @@ function deps() {
 
 beforeEach(() => {
 	completeMock.mockReset();
+	pinCatalog([
+		{ id: "openai/gpt-6-astra", released: "2026-09-22", price: [5, 40] },
+		{ id: "openai/gpt-6-sol", released: "2026-09-22", price: [1, 13] },
+	]);
 });
 
 describe("classifier provider context overflow", () => {

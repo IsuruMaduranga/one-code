@@ -13,12 +13,15 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { modeCycleKey } from "../lib/keys.ts";
 import { classifierCandidates, describeCandidate, type ClassifierNotice } from "../auto-mode/model-select.ts";
-import { ATTRIBUTION, capabilityFloor, configuredCapabilityKey, type FloorRole, type FloorVerdict, KEY_ADVICE, snapshotAgeMs } from "../lib/capability-index.ts";
+import { catalogRefreshEnabled, loadCatalogSources } from "../lib/model-catalog-data.ts";
+import { autoSelectSkipReason, catalogModelFor } from "../lib/model-catalog.ts";
 import { modelSpec, pricedInput } from "../lib/model-policy.ts";
 import { newerModelSuggestion, type NewerModelSuggestion } from "../lib/newer-model.ts";
-import { readSuggestNewerModels } from "../lib/one-code-settings.ts";
+import { oneCodeSettingsPath, readSuggestNewerModels } from "../lib/one-code-settings.ts";
+import { readJsonFile } from "../lib/atomic-write.ts";
+import { oneCodeStateDir } from "../lib/paths.ts";
 import {
-	currentCapabilitySnapshot,
+	classifyModelTier,
 	intrinsicTier,
 	pickEconomicalContainedModel,
 	type PromptTier,
@@ -42,18 +45,13 @@ export interface ModelFacts {
 	subagentConfiguredInapplicable: boolean;
 	classifier: { model?: Model<Api>; description?: string; notices: ClassifierNotice[] };
 	reader?: { model: Model<Api>; via: "tier" | "session" };
-	/**
-	 * The optional Artificial Analysis snapshot behind the measured capability
-	 * floor (lib/capability-index.ts): whether a key is configured, the snapshot's
-	 * age, and the verdict each automatic pick was judged on.
-	 */
-	capability: {
-		keyConfigured: boolean;
-		snapshot?: { fetchedAt: string; rows: number };
-		subagent?: FloorVerdict;
-		classifier?: FloorVerdict;
-		reader?: FloorVerdict;
-	};
+	/** The session model's own tier and the rule that decided it (`classifyModelTier`, no CC_PROMPT_TIER). */
+	tierReason?: string;
+	/** Whether the public model catalogs know the session model, and why automatic picks skip it, if they do. */
+	inCatalog: boolean;
+	skipReason?: string;
+	/** The model catalogs in use (lib/model-catalog-data.ts). */
+	catalog: { fetchedAt: string; refreshed: boolean; refreshEnabled: boolean };
 }
 
 export const TIER_LABEL: Record<PromptTier, string> = {
@@ -71,19 +69,18 @@ export function collectModelFacts(available: Model<Api>[], session: SessionView,
 	const chain = classifierCandidates({ available, sessionModel });
 	const first = chain.candidates[0];
 	const reader = pickEconomicalContainedModel(available, sessionModel);
-	const snapshot = currentCapabilitySnapshot();
-	const verdict = (pick: Model<Api> | undefined, role: FloorRole): FloorVerdict | undefined =>
-		snapshot && sessionModel && pick && modelSpec(pick) !== modelSpec(sessionModel) ? capabilityFloor(snapshot, pick, sessionModel, role) : undefined;
-	const capability: ModelFacts["capability"] = {
-		keyConfigured: configuredCapabilityKey(home, env) !== undefined,
-		snapshot: snapshot ? { fetchedAt: snapshot.fetchedAt, rows: snapshot.rows.length } : undefined,
-		subagent: verdict(subagent.source === "automatic" ? subagent.model : undefined, "subagent"),
-		classifier: verdict(first && first.source !== "session" ? first.model : undefined, "classifier"),
-		reader: verdict(reader?.via === "tier" ? reader.model : undefined, "reader"),
-	};
+	const sources = loadCatalogSources(oneCodeStateDir(env, home));
+	const entry = sessionModel ? catalogModelFor(sessionModel) : undefined;
 	return {
-		capability,
-		newerModel: readSuggestNewerModels(home, env) ? newerModelSuggestion(available, sessionModel, snapshot) : undefined,
+		catalog: {
+			fetchedAt: sources.modelsDev.fetchedAt,
+			refreshed: sources.refreshed === true,
+			refreshEnabled: catalogRefreshEnabled(readJsonFile(oneCodeSettingsPath(home, env)), env),
+		},
+		tierReason: sessionModel ? classifyModelTier(sessionModel, {}).reason : undefined,
+		inCatalog: entry !== undefined,
+		skipReason: entry ? autoSelectSkipReason(entry) : undefined,
+		newerModel: readSuggestNewerModels(home, env) ? newerModelSuggestion(available, sessionModel) : undefined,
 		session: sessionModel,
 		sessionTier: sessionModel ? intrinsicTier(sessionModel) : undefined,
 		promptTier: session.promptTier ?? resolveModelTier(sessionModel, env),
@@ -104,8 +101,8 @@ const SUBAGENT_SOURCE: Record<SubagentModelResolution["source"], string> = {
 	call: "named per call",
 	agent: "from the agent file",
 	default: "the configured default",
-	automatic: "automatic: cheapest capable model on this provider, cheaper than the main model",
-	session: "the main model — nothing cheaper and capable on this provider",
+	automatic: "automatic: cheapest model on this provider in the main model's tier or above, cheaper than it",
+	session: "the main model — nothing cheaper on this provider in its tier or above",
 };
 
 export function modelsSection(facts: ModelFacts, session: SessionView, findings: Finding[]): ReportSection {
@@ -138,6 +135,17 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 		indent: 1,
 		level: "dim",
 	});
+	if (facts.sessionTier && facts.tierReason) {
+		lines.push({ text: `Tier: ${facts.sessionTier} — ${facts.tierReason}`, indent: 1, level: "dim" });
+	}
+	if (facts.skipReason) lines.push({ text: `Automatic picks skip this model: ${facts.skipReason}`, indent: 1, level: "dim" });
+	if (!facts.inCatalog && facts.tierReason !== "modelTiers setting" && facts.sessionTier !== "frontier") {
+		findings.push({
+			level: "warn",
+			text: `${modelSpec(main)} is not in the public model catalogs (models.dev, OpenRouter), so its tier is a guess (${facts.sessionTier}) and automatic picks never choose it.`,
+			fix: `Set its tier in ~/.onecode/settings.json: { "modelTiers": { "${modelSpec(main)}": "workhorse" } } (frontier, workhorse, cheap or tiny).`,
+		});
+	}
 	if (session.thinkingLevel) lines.push({ text: `Effort: ${session.thinkingLevel} (/effort or shift+tab to change)`, indent: 1, level: "dim" });
 
 	const sub = facts.subagent;
@@ -165,9 +173,7 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 		const pinned = session.permission?.pinned && live ? ` — screening this session on ${live}` : "";
 		lines.push({ text: `Auto-mode classifier: ${classifier.description ?? modelSpec(classifier.model)}${pinned}`, level: "ok" });
 		lines.push({
-			text: facts.sessionTier === "frontier"
-				? "Classifier policy: measured capability pass, or an unscored workhorse-or-better model; cheapest qualifying model first, never dearer than this session's model."
-				: "Classifier policy: the cheapest alternate that is measured and in this session's tier (or measured at least as capable); else the cheaper model this session's subagents run on; else this session's model. Never dearer than this session's model.",
+			text: "Classifier policy: the cheapest model in this session's tier or above, never dearer than this session's model; else this session's model.",
 			indent: 1,
 			level: "dim",
 		});
@@ -183,38 +189,19 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 
 	if (facts.reader) {
 		lines.push({
-			text: `Web-fetch and recap reader: ${modelSpec(facts.reader.model)} — ${facts.reader.via === "tier" ? "cheapest capable model on this provider" : "the main model"}`,
+			text: `Web-fetch and recap reader: ${modelSpec(facts.reader.model)} — ${facts.reader.via === "tier" ? "cheapest non-tiny model on this provider" : "the main model"}`,
 			level: "dim",
 		});
 	}
 
-	// The measured capability floor: what each automatic pick was judged on, or
-	// how to switch it on. Scores shown carry the attribution the free API requires.
-	const cap = facts.capability;
-	const verdictLine = (label: string, v: FloorVerdict | undefined): ReportLine | undefined => {
-		if (!v) return undefined;
-		if (v.verdict === "unscored") return { text: `${label}: not measured — ${v.reason ?? "no confirmed score"}; the name-class rule decided`, indent: 1, level: "dim" };
-		const basis = v.candidate?.variant === "non-reasoning" ? "thinking-off" : "default-effort";
-		return {
-			text: `${label}: coding index ${v.candidate?.coding} vs floor ${v.floor?.toFixed(1)} (${basis}; session ${v.session?.coding}, Sonnet 5 ${v.reference?.coding}) — ${v.verdict === "pass" ? "measured capable" : "below the floor"}`,
-			indent: 1,
-			level: "dim",
-		};
-	};
-	if (cap.snapshot) {
-		const ageH = Math.round(snapshotAgeMs({ fetchedAt: cap.snapshot.fetchedAt, source: "", rows: [] }) / 3_600_000);
-		lines.push({ text: `Capability scores: Artificial Analysis snapshot, ${cap.snapshot.rows} models, ${ageH} h old — measured picks for subagents and the classifier`, level: "ok" });
-		for (const line of [verdictLine("Subagent pick", cap.subagent), verdictLine("Classifier pick", cap.classifier), verdictLine("Reader pick", cap.reader)]) {
-			if (line) lines.push(line);
-		}
-		lines.push({ text: ATTRIBUTION, indent: 1, level: "dim" });
-	} else if (cap.keyConfigured) {
-		lines.push({ text: "Capability scores: key configured, snapshot not fetched yet — it downloads in the background on the next interactive start", level: "dim" });
-	} else {
-		lines.push({ text: "Capability scores: none — below-frontier classifiers use the subagents' model, else the session model; other automatic picks use model names and generations", level: "warn" });
-		findings.push({ level: "warn", text: "No Artificial Analysis key: subagent and classifier picks cannot be judged by measured coding ability.", fix: KEY_ADVICE });
-	}
-
+	// The catalogs every tier below frontier comes from, and how fresh they are.
+	const cat = facts.catalog;
+	const ageDays = Math.floor((Date.now() - Date.parse(cat.fetchedAt)) / 86_400_000);
+	const age = ageDays <= 0 ? "today" : ageDays === 1 ? "1 day ago" : `${ageDays} days ago`;
+	lines.push({
+		text: `Model catalogs: models.dev, OpenRouter and Hugging Face, fetched ${age} (${cat.refreshed ? "refreshed by One Code" : "bundled with this release"})${cat.refreshEnabled ? "; refreshed daily from interactive sessions" : "; daily refresh off (refreshModelCatalog: false, or PI_OFFLINE)"}`,
+		level: "dim",
+	});
 	if (session.permission) {
 		const mode = session.permission.mode;
 		const from = session.permission.source ? ` (${session.permission.source})` : "";
@@ -224,7 +211,7 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 	if (facts.sessionTier === "tiny") {
 		findings.push({
 			level: "warn",
-			text: `${modelSpec(main)} is classed as a tiny-tier model by the latest capability data; automatic alternatives exclude tiny models, but the session model remains the classifier fallback.`,
+			text: `${modelSpec(main)} is classed as a tiny-tier model (a small model); automatic alternatives exclude tiny models, but the session model remains the classifier fallback.`,
 			fix: "For coding work pick a cheap- or workhorse-tier model with /model; see /doctor presets.",
 		});
 	}

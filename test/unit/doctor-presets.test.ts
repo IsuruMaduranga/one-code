@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { computePresets, describePresetChanges, findPreset, presetPool, presetsSection } from "../../extensions/doctor/presets.ts";
-import { setModelFactsForTest } from "../../extensions/lib/model-facts.ts";
+import { pinCatalog, pinReleaseDates } from "./catalog-fixture.ts";
 
 const model = (provider: string, id: string, input?: number, api = "anthropic-messages") =>
 	({ provider, id, name: id, api, cost: input === undefined ? undefined : { input, output: input * 5 }, contextWindow: 200_000 }) as any;
@@ -14,6 +14,19 @@ const anthropic = [
 const openai = [model("openai", "gpt-5.1", 1.25, "openai-responses"), model("openai", "gpt-5-mini", 0.25, "openai-responses"), model("openai", "gpt-5-nano", 0.05, "openai-responses")];
 
 describe("computePresets", () => {
+	beforeEach(() =>
+		pinCatalog([
+			{ id: "anthropic/claude-opus-5", released: "2026-07-24", price: [5, 25] },
+			{ id: "anthropic/claude-sonnet-5", released: "2026-06-29", price: [3, 15] },
+			{ id: "anthropic/claude-fable-5", released: "2026-06-07", price: [10, 50] },
+			{ id: "anthropic/claude-haiku-4-5", released: "2025-10-15", price: [1, 5], servedAs: ["anthropic/claude-haiku-4-5-20251001"] },
+			{ id: "openai/gpt-5.1", released: "2026-09-01", price: [1.25, 10] },
+			{ id: "openai/gpt-5.2", released: "2026-09-01", price: [1.75, 14] },
+			{ id: "openai/gpt-5-mini", released: "2026-09-01", price: [0.25, 2] },
+			{ id: "openai/gpt-5-nano", released: "2026-09-01", price: [0.05, 0.4] },
+		]),
+	);
+
 	it("stays within the session's provider and collapses dated duplicates", () => {
 		const pool = presetPool([...anthropic, ...openai], anthropic[0]);
 		expect(pool.map((m) => m.id)).toEqual(["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"]);
@@ -28,16 +41,22 @@ describe("computePresets", () => {
 		expect(byName.balanced.main.id).toBe("claude-sonnet-5");
 		expect(byName.balanced.current).toBe(true);
 		expect(byName.balanced.subagents).toMatchObject({ setting: "auto" });
-		expect(byName.balanced.subagents.model.id).toBe("claude-sonnet-5"); // Subagent tier floor: nothing cheaper qualifies.
+		expect(byName.balanced.subagents.model.id).toBe("claude-sonnet-5"); // Nothing cheaper is in its tier.
 		expect(byName.balanced.classifier?.id).toBe("claude-sonnet-5");
 		expect(byName.quality.main.id).toBe("claude-opus-5");
 		expect(byName.quality.subagents.model.id).toBe("claude-opus-5");
-		expect(byName.quality.classifier?.id).toBe("claude-sonnet-5");
+		expect(byName.quality.classifier?.id).toBe("claude-opus-5"); // No cheaper frontier model here.
 	});
 
-	it("picks the current-generation DeepSeek Flash as the economical main on OpenRouter, not the boundary-priced R1", () => {
-		// pi's bundled OpenRouter catalog rows and prices, 2026-09-10 — the shape that
-		// made /doctor preset balanced name deepseek-r1-0528 (working-docs/features/tiering/plan.md).
+	it("keeps superseded, variant and redirect rows out of a gateway's pool", () => {
+		pinCatalog([
+			{ id: "deepseek/deepseek-v4-pro", released: "2026-08-12", price: [0.435, 0.87], params: 1.6e12, servedAs: ["openrouter/deepseek/deepseek-v4-pro", "openrouter/deepseek/deepseek-v4-pro-0813"] },
+			{ id: "deepseek/deepseek-v4-flash", released: "2026-07-31", price: [0.2, 0.4], params: 284e9, servedAs: ["openrouter/deepseek/deepseek-v4-flash", "openrouter/deepseek/deepseek-v4-flash-0731"] },
+			{ id: "deepseek/deepseek-v4-flash-vision-exp", released: "2026-08-21", price: [0.4, 0.8], params: 305e9, servedAs: ["openrouter/deepseek/deepseek-v4-flash-vision-exp"] },
+			{ id: "deepseek/deepseek-v3.2", released: "2025-12-01", price: [0.28, 0.42], params: 685e9, servedAs: ["openrouter/deepseek/deepseek-v3.2", "openrouter/deepseek/deepseek-chat"] },
+			{ id: "deepseek/deepseek-v3.1", released: "2025-08-21", price: [0.27, 1.1], params: 685e9, servedAs: ["openrouter/deepseek/deepseek-chat-v3.1"] },
+			{ id: "deepseek/deepseek-r1", released: "2025-05-28", price: [0.5, 2.15], params: 671e9, servedAs: ["openrouter/deepseek/deepseek-r1", "openrouter/deepseek/deepseek-r1-0528"] },
+		]);
 		const or = (id: string, input: number) => model("openrouter", `deepseek/${id}`, input, "openai-completions");
 		const catalog = [
 			or("deepseek-chat", 0.32),
@@ -56,14 +75,11 @@ describe("computePresets", () => {
 			model("openrouter", "openai/gpt-5-mini", 0.25, "openai-completions"),
 		];
 		const session = catalog.find((m) => m.id === "deepseek/deepseek-v4-pro")!;
-		// Snapshots (-0528, -0731, -0813) collapse onto their undated alias; batch
-		// variants, the moving `~…-latest` redirect alias and other vendors are out.
-		const pool = presetPool(catalog, session).map((m) => m.id);
-		expect(pool).toEqual([
-			"deepseek/deepseek-chat",
-			"deepseek/deepseek-chat-v3.1",
+		// V3.2 (and the deepseek-chat alias serving it) is superseded by V4 Flash,
+		// V3.1 by V3.2; snapshots collapse onto their undated alias; batch variants,
+		// the moving `~…-latest` alias and other vendors are out.
+		expect(presetPool(catalog, session).map((m) => m.id)).toEqual([
 			"deepseek/deepseek-r1",
-			"deepseek/deepseek-v3.2",
 			"deepseek/deepseek-v4-flash",
 			"deepseek/deepseek-v4-flash-vision-exp",
 			"deepseek/deepseek-v4-pro",
@@ -71,16 +87,16 @@ describe("computePresets", () => {
 		const { presets } = computePresets(catalog, session);
 		const byName = Object.fromEntries(presets.map((p) => [p.name, p]));
 		expect(byName.balanced.main.id).toBe("deepseek/deepseek-v4-pro");
-		expect(byName.balanced.subagents.model.id).toBe("deepseek/deepseek-v4-pro"); // workhorse floor: Pro is the only workhorse row (Flash qualifies only by measured score)
+		expect(byName.balanced.subagents.model.id).toBe("deepseek/deepseek-v4-pro"); // Pro is the only workhorse row
 		expect(byName.balanced.classifier?.id).toBe("deepseek/deepseek-v4-pro");
 		expect(byName.economical.main.id).toBe("deepseek/deepseek-v4-flash");
 		expect(byName.quality.main.id).toBe("deepseek/deepseek-v4-pro"); // the undated alias, not the pricier -0813 snapshot
 	});
 
-	it("never recommends a prior-generation or tool-less model as a preset's main", () => {
-		setModelFactsForTest({
+	it("never recommends a legacy or tool-less model as a preset's main", () => {
+		pinReleaseDates({
 			"openai/gpt-6-astra": { releaseDate: "2026-09-04" },
-			"openai/gpt-5-pro": { releaseDate: "2025-08-07" }, // a year behind → prior generation
+			"openai/gpt-5-pro": { releaseDate: "2024-08-07" }, // over two years behind → legacy
 			"openai/gpt-5.6-sol": { releaseDate: "2026-07-09" },
 			"openai/gpt-5.6-luna": { releaseDate: "2026-07-09" },
 			"openai/text-only": { releaseDate: "2026-08-01", toolCall: false },
@@ -89,11 +105,16 @@ describe("computePresets", () => {
 		const catalog = [oa("gpt-6-astra", 5), oa("gpt-5-pro", 15), oa("gpt-5.6-sol", 4.5), oa("gpt-5.6-luna", 0.2), oa("text-only", 0.05)];
 		expect(presetPool(catalog, catalog[2]).map((m) => m.id)).toEqual(["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-luna"]);
 		const { presets } = computePresets(catalog, catalog[2]);
-		expect(presets.find((p) => p.name === "quality")?.main.id).toBe("gpt-6-astra"); // not the pricier, prior-generation gpt-5-pro
+		expect(presets.find((p) => p.name === "quality")?.main.id).toBe("gpt-6-astra"); // not the pricier, legacy gpt-5-pro
 		expect(presets.find((p) => p.name === "economical")?.main.id).toBe("gpt-5.6-luna"); // not the tool-less row
 	});
 
-	it("previews a below-frontier main's classifier as the unscored model its subagents run on", () => {
+	it("previews a below-frontier main's classifier as the cheaper model in its tier", () => {
+		pinCatalog([
+			{ id: "openai/gpt-5.6-sol", released: "2026-07-09", price: [5, 20] },
+			{ id: "openai/gpt-5.6-terra", released: "2026-07-09", price: [2, 8] },
+			{ id: "openai/gpt-5.6-max", released: "2026-07-09", price: [10, 40] },
+		]);
 		const main = model("openai", "gpt-5.6-sol", 5, "openai-responses");
 		const cheaper = model("openai", "gpt-5.6-terra", 2, "openai-responses");
 		const result = computePresets([main, cheaper], main);
@@ -102,8 +123,7 @@ describe("computePresets", () => {
 		expect(quality.classifier).toBe(cheaper);
 		expect(describePresetChanges(quality)[2]).toBe("auto-mode classifier stays automatic (picks openai/gpt-5.6-terra)");
 		const text = presetsSection(result, main).lines.map((line) => line.text).join("\n");
-		expect(text).toContain("below frontier, a measured alternate first, else the model its subagents run on");
-		expect(text).toContain("Frontier sessions also accept unscored workhorse-or-better models");
+		expect(text).toContain("the cheapest model in its tier or above, never dearer than the main model");
 	});
 
 	it("never lands the economical preset on a tiny model while a capable one exists", () => {

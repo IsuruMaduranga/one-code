@@ -1,7 +1,6 @@
 /** Same-line upgrades at a comparable blended price. Selection only; never switches a model. */
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { type CapabilitySnapshot, scoreFor } from "./capability-index.ts";
-import { isPriorGeneration, lacksToolCalls, modelFacts } from "./model-facts.ts";
+import { catalogModelFor } from "./model-catalog.ts";
 import { baseModelId, isAliasOrVariantId, modelSpec, stripSnapshotDate } from "./model-policy.ts";
 
 interface ModelLine {
@@ -48,8 +47,7 @@ function blendedPrice(model: Model<Api>): number | undefined {
 }
 
 function releaseDate(model: Model<Api>): number | undefined {
-	const date = Date.parse(modelFacts(model)?.releaseDate ?? "");
-	return Number.isFinite(date) ? date : undefined;
+	return catalogModelFor(model)?.released;
 }
 
 export interface NewerModelSuggestion {
@@ -59,22 +57,20 @@ export interface NewerModelSuggestion {
 }
 
 /**
- * Available models only, on the session's provider and exact model line. The
- * caller supplies the cached snapshot; this path never fetches capability data.
+ * Available models only, on the session's provider and exact model line,
+ * dated by the model catalogs (`model-catalog.ts`); this path never fetches.
  * Unlike secondary-model selection, tiny tiers are allowed: Qwen 27B upgrading
  * within its own line is useful advice, not an automatic delegation decision.
  */
 export function newerModelSuggestion(
 	available: readonly Model<Api>[],
 	current: Model<Api> | undefined,
-	snapshot?: CapabilitySnapshot,
 ): NewerModelSuggestion | undefined {
 	if (!current) return undefined;
 	const currentLine = modelLine(current.id);
 	const currentDate = releaseDate(current);
 	const currentPrice = blendedPrice(current);
 	if (!currentLine || currentDate === undefined || currentPrice === undefined) return undefined;
-	const currentScore = snapshot && scoreFor(snapshot, current, "default");
 	const candidates = [];
 	for (const model of available) {
 		if (model.provider !== current.provider || isAliasOrVariantId(model.id)) continue;
@@ -86,9 +82,8 @@ export function newerModelSuggestion(
 		const date = releaseDate(model);
 		const price = blendedPrice(model);
 		if (date === undefined || date <= currentDate || price === undefined || price > currentPrice * 1.1) continue;
-		if (lacksToolCalls(model) || isPriorGeneration(model)) continue;
-		const score = snapshot && scoreFor(snapshot, model, "default");
-		if (currentScore && score && score.coding < currentScore.coding) continue;
+		const entry = catalogModelFor(model);
+		if (!entry?.tools || entry.legacy || entry.deprecated) continue;
 		candidates.push({ model, version: line.version, date, price });
 	}
 	candidates.sort((a, b) => compareVersion(b.version, a.version) || b.date - a.date || a.price - b.price);
