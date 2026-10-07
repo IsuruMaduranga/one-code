@@ -168,6 +168,12 @@ export interface RuleOptions {
 	ownerDir?: string;
 }
 
+/** A text extension, or none: checked for the name read and, through a link, the file it points to. */
+function textExtension(path: string): boolean {
+	const ext = extname(path).toLowerCase();
+	return !ext || TEXT_EXTENSIONS.has(ext);
+}
+
 /** lJ: parent first, separate parsed imports, canonical dedupe, depths zero through four. */
 export function readRuleInstructions(path: string, opts: Pick<RuleOptions, "cwd" | "home" | "scope" | "processed" | "includeExternal" | "allowPath" | "ownerDir">): RuleFile[] {
 	const includeExternal = opts.includeExternal ?? opts.scope === "User";
@@ -185,11 +191,10 @@ export function readRuleInstructions(path: string, opts: Pick<RuleOptions, "cwd"
 			const stat = statSync(key);
 			if (!stat.isFile() || stat.size > MAX_INSTRUCTION_BYTES || (opts.scope === "User" && !includeExternal && (stat.nlink > 1 || (depth === 0 && isLink(path))))) return [];
 			processed.add(comparablePath(key));
-			const ext = extname(path).toLowerCase();
-			if (ext && !TEXT_EXTENSIONS.has(ext)) return [];
+			if (!textExtension(path) || !textExtension(key)) return [];
 			const parsed = parseRule(readFileSync(key, "utf8"));
 			if (!parsed.content.trim()) return [];
-			return [{ path, key, ...parsed, ...(parent ? { parent } : {}) }, ...ruleImports(parsed.content, key, opts.home).flatMap((ref) => load(ref, depth + 1, key))];
+			return [{ path, key, ...parsed, ...(parent ? { parent } : {}), ...(linkedOut ? { linkedFrom: path } : {}) }, ...ruleImports(parsed.content, key, opts.home).flatMap((ref) => load(ref, depth + 1, key))];
 		} catch { return []; }
 	};
 	return load(path);

@@ -168,7 +168,7 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	const baseline = () => ({ startupShown: [...startupShown], shownDate, facts });
 	const publishBaseline = () => pi.events.emit(CONTEXT_BASELINE_CHANNEL, { key: "claude-context", value: baseline() });
 	const readFiles = (cwd: string) => {
-		const oneCodeFiles = discoverOneCodeFiles({ cwd, homeOneCodeDir: oneCodeStateDir(), home: os.homedir() });
+		const oneCodeFiles = discoverOneCodeFiles({ cwd, homeOneCodeDir: oneCodeStateDir(), home: os.homedir(), includeExternal });
 		return {
 			contextFiles: discoverContextFiles({ cwd, homeClaudeDir: claudeConfigDir(), rule: instructionRule(os.homedir()), home: os.homedir(), includeExternal }),
 			memoryIndex: readMemoryIndex(cwd),
@@ -204,6 +204,7 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		adoptFiles(current);
 		const text = buildClaudeMdBlock(current);
 		if (text) pi.events.emit(REMINDER_CHANNEL, { text, scope: "every-turn", key: REMINDER_KEY, placement: "first-prepend", order: CONTEXT_ORDER.claudeMd });
+		if (current.oneCode) pi.events.emit(REMINDER_CHANNEL, { text: current.oneCode, scope: "every-turn", key: ONECODE_REMINDER_KEY, placement: "first-prepend", order: CONTEXT_ORDER.oneCodeMd });
 		publishBaseline();
 	};
 	const askApproval = async (ctx: ExtensionContext, paths: string[], afterStartup = false) => {
