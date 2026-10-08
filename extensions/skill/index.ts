@@ -340,7 +340,6 @@ export default function skillExtension(pi: ExtensionAPI) {
 	 */
 	let sessionUsage: { usage: ReturnType<typeof readUsage>; now: Date } | undefined;
 
-	/** The listing, within Claude Code's budget for the session model's context window. */
 	/** The skills listing for a session without the skill tool: each skill's file, to read. */
 	const readableListing = (reader: string): string | undefined => {
 		const lines = index()
@@ -353,6 +352,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 		return `The following skills provide specialized instructions for specific tasks. Read a skill's file with ${reader} when the task matches its description:\n\n${lines.join("\n")}`;
 	};
 
+	/** The listing, within Claude Code's budget for the session model's context window. */
 	const describe = () => {
 		sessionUsage ??= { usage: readUsage(pluginRoot(getAgentDir())), now: new Date() };
 		const { usage, now } = sessionUsage;

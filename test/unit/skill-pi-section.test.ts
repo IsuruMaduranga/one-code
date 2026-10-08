@@ -1,7 +1,8 @@
 /**
- * One skills instruction per session: with the skill tool, the listing for
- * that tool and no pi "read the file" section in the prompt; without it,
- * pi's section and no listing (a child agent limited to read and bash).
+ * One skills instruction per session: pi's own section is always stripped
+ * from the prompt. With the skill tool, the listing is framed for that tool;
+ * without it (a child agent limited to read and bash), for reading each
+ * skill's file.
  */
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -74,7 +75,7 @@ describe("skill extension: one skills instruction per session", () => {
 		expect(result?.systemPrompt).toBe("You are an agent.");
 		expect(listings).toHaveLength(1);
 		expect(listings[0]).toContain("Read a skill's file with the read tool when the task matches its description");
-		expect(listings[0]).toMatch(/- demo: A demo skill \(.*demo\/SKILL\.md\)/);
+		expect(listings[0]).toMatch(/- demo: A demo skill \(.*demo[\\/]SKILL\.md\)/);
 		expect(listings[0]).not.toContain("Skill tool");
 	});
 });
