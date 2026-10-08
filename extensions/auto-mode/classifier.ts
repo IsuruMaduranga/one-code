@@ -265,6 +265,8 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 	let lastError = "";
 	let sawTimeout = false;
 	let timedOutKey: string | undefined;
+	/** The timed-out candidate's own error: a later candidate's failure must not relabel it. */
+	let timedOutError = "";
 	// Walks `attempts` in order; a candidate that turns out to require thinking is
 	// re-queued at the front for exactly one retry (see the reasoning-mandatory
 	// branch below). The `!== undefined` guard narrows `candidate`, so no cast.
@@ -453,6 +455,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 				// the next candidate; a pinned model that keeps timing out is unpinned.
 				sawTimeout = true;
 				timedOutKey = key;
+				timedOutError = lastError;
 				if (deps.state.pinned && `${deps.state.pinned.provider}/${deps.state.pinned.id}` === key) {
 					deps.state.timeoutStreak += 1;
 					if (deps.state.timeoutStreak >= ROTATE_AFTER_TIMEOUTS) deps.state.pinned = undefined;
@@ -480,14 +483,14 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 	// where it can, and only blocks outright when running non-interactively.
 	if (sawTimeout) {
 		const model = timedOutKey ? timedOutKey.split("/").pop() : undefined;
-		const network = isTransportFailure(lastError);
+		const network = isTransportFailure(timedOutError);
 		return {
 			decision: "block",
 			tier: "timeout",
 			noVerdict: true,
 			reason:
 				`Auto mode could not screen this ${request.toolName} call${network ? "" : " in time"} — the approval classifier${model ? ` (${model})` : ""} ` +
-				`is temporarily unavailable (${network ? `network error: ${lastError}` : "timed out"}), so the call was not judged either way.`,
+				`is temporarily unavailable (${network ? `network error: ${timedOutError}` : "timed out"}), so the call was not judged either way.`,
 		};
 	}
 
