@@ -937,6 +937,11 @@ export function createUserMessageSender(pi: Pick<ExtensionAPI, "on" | "sendUserM
 		for (const waiter of pending) waiter.stop();
 		pending.clear();
 	});
+	// A replacement session (/new, /resume) reuses this extension instance:
+	// its commands report their failures again.
+	pi.on("session_start", () => {
+		active = true;
+	});
 	return async (
 		ctx: Parameters<typeof awaitOneShotTurn>[0],
 		content: Parameters<ExtensionAPI["sendUserMessage"]>[0],

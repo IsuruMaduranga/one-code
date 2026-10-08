@@ -77,6 +77,20 @@ describe("createUserMessageSender", () => {
 		expect(vi.getTimerCount()).toBe(0);
 	});
 
+	it("reports a failed command again after a replacement session starts", async () => {
+		vi.useFakeTimers();
+		const fake = createFakePi();
+		const send = createUserMessageSender(fake.pi as never);
+		const failedCommand = vi.fn();
+		fake.events.on(ONE_SHOT_COMMAND_FAILED_CHANNEL, failedCommand);
+		await fake.fire("session_shutdown", {});
+		await fake.fire("session_start", { reason: "new" });
+		const failed = expect(send({ mode: "json", isIdle: () => true, waitForIdle: vi.fn(async () => {}) }, "consumed")).rejects.toThrow();
+		await vi.advanceTimersByTimeAsync(30_000);
+		await failed;
+		expect(failedCommand).toHaveBeenCalledOnce();
+	});
+
 	it("rejects shutdown during preflight without using the stale context", async () => {
 		vi.useFakeTimers();
 		const fake = createFakePi();
