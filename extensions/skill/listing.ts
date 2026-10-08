@@ -96,6 +96,26 @@ export function skillListingText(skills: ReadonlyArray<ListedSkill>, budget = Nu
 }
 
 /**
+ * The skills listing for a session without the skill tool: each skill's file,
+ * to read with `reader`. The same states as the tool's listing: user-only and
+ * off skills stay hidden, a name-only skill shows no description. Undefined
+ * when nothing is listable.
+ */
+export function readableSkillListing(
+	skills: ReadonlyArray<ListedSkill & { path?: string; kind?: string }>,
+	reader: string,
+): string | undefined {
+	const lines = skills
+		.filter((skill) => !skill.kind && !skill.disableModelInvocation && skill.path && skillListingVisibility(skill.state) !== "hidden")
+		.map((skill) => {
+			const text = skillListingVisibility(skill.state) === "full" ? listingDescription(skill) : "";
+			return `- ${skill.name}${text ? `: ${text}` : ""} (${skill.path})`;
+		});
+	if (lines.length === 0) return undefined;
+	return `The following skills provide specialized instructions for specific tasks. Read a skill's file with ${reader} when the task matches its description:\n\n${lines.join("\n")}`;
+}
+
+/**
  * Claude Code's reading of a boolean frontmatter flag such as
  * `disable-model-invocation`: `true` or the string `"true"`, nothing else.
  */

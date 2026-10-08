@@ -33,7 +33,6 @@ import {
 	type SkillScope,
 	type SkillState,
 	skillOverrideKey,
-	skillListingVisibility,
 	skillStateFor,
 } from "../lib/skill-overrides.ts";
 import { BUNDLED_SKILLS_DIR, estimateSkillTokens, promptTemplateNames, scanSkills, scopeForPath } from "../lib/skill-scan.ts";
@@ -56,7 +55,7 @@ import {
 } from "./invoke.ts";
 import { codeReviewBody } from "./code-review.ts";
 import { decodeSkillsKey } from "./panel/keys.ts";
-import { frontmatterFlag, listingDescription, skillListingBudget, skillListingText, usageScore, withoutPiSkillsBlock } from "./listing.ts";
+import { frontmatterFlag, readableSkillListing, skillListingBudget, skillListingText, usageScore, withoutPiSkillsBlock } from "./listing.ts";
 import { renderSkillsPanel, type SkillsPaint } from "./panel/render.ts";
 import { applySkillsKey, initialSkillsState, type SkillsRow, visibleRows } from "./panel/state.ts";
 import { announceArgumentHint, type CommandHint, frontmatterCommandHint } from "../lib/argument-hints.ts";
@@ -162,7 +161,7 @@ export default function skillExtension(pi: ExtensionAPI) {
 		// the file, since pi's own section is dropped from every prompt below.
 		const tools = pi.getActiveTools();
 		if (!tools.includes("skill")) {
-			const readable = readableListing(tools.includes("read") ? "the read tool" : "the shell");
+			const readable = readableSkillListing(index(), tools.includes("read") ? "the read tool" : "the shell");
 			if (readable) pi.events.emit(REMINDER_CHANNEL, { text: readable, scope: "every-turn", key: "skills", placement: "first-prepend", order: CONTEXT_ORDER.skills });
 			return;
 		}
@@ -340,20 +339,6 @@ export default function skillExtension(pi: ExtensionAPI) {
 	 * used mid-session or a day's decay crosses a threshold.
 	 */
 	let sessionUsage: { usage: ReturnType<typeof readUsage>; now: Date } | undefined;
-
-	/** The skills listing for a session without the skill tool: each skill's file, to read. */
-	const readableListing = (reader: string): string | undefined => {
-		const lines = index()
-			// The same override semantics as the tool's listing: user-only and off
-			// skills stay hidden, a name-only skill shows no description.
-			.filter((skill) => !skill.kind && !skill.disableModelInvocation && skill.path && skillListingVisibility(skill.state) !== "hidden")
-			.map((skill) => {
-				const text = skillListingVisibility(skill.state) === "full" ? listingDescription(skill) : "";
-				return `- ${skill.name}${text ? `: ${text}` : ""} (${skill.path})`;
-			});
-		if (lines.length === 0) return undefined;
-		return `The following skills provide specialized instructions for specific tasks. Read a skill's file with ${reader} when the task matches its description:\n\n${lines.join("\n")}`;
-	};
 
 	/** The listing, within Claude Code's budget for the session model's context window. */
 	const describe = () => {
