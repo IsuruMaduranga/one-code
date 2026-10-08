@@ -19,6 +19,9 @@ describe("worktree git-isolation guard", () => {
 			expect(reason(`git -C ${join(link, "sibling")} status`)).toContain("another worktree of the same repository");
 			// The session's own worktree spelled by its real path is still its own.
 			expect(reason(`git -C ${join(real, "own")} status`)).toBeUndefined();
+			// A link inside the own worktree that leads to the sibling is the sibling.
+			symlinkSync(join(real, "sibling"), join(real, "own", "to-sibling"));
+			expect(reason(`git -C ${join(link, "own", "to-sibling")} status`)).toContain("another worktree of the same repository");
 		} finally {
 			rmSync(link, { force: true });
 			rmSync(real, { recursive: true, force: true });

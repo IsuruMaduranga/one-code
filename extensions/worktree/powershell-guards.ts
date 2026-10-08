@@ -19,7 +19,7 @@ import { isAbsolute, resolve } from "node:path";
 import { toAbsolute } from "../auto-mode/paths.ts";
 import { gitSubcommand } from "../auto-mode/shell-analysis.ts";
 import { powershellInjectionSyntax, powershellStatements, statementCommand } from "../permissions/powershell-rules.ts";
-import { containsPath, isolated, sharedRepositoryRoots, stashReason, type WorktreeGuardContext } from "./guards.ts";
+import { containsPath, insideOwnWorktree, isolated, sharedRepositoryRoots, stashReason, type WorktreeGuardContext } from "./guards.ts";
 
 /** git as a word (`git`, `GIT`, `git.exe`); PowerShell resolves commands case-insensitively. */
 const mentionsGit = (text: string) => /\bgit(?:\.exe)?\b/i.test(text);
@@ -143,7 +143,7 @@ export function worktreePowershellGuardReason(context: WorktreeGuardContext): st
 
 		const targets = [effective, ...extraTargets];
 		for (const target of targets) {
-			if (containsPath(worktreePath, target)) continue;
+			if (insideOwnWorktree(worktreePath, target)) continue;
 			if (sharedRoots.some((root) => containsPath(root, target))) {
 				return isolated(
 					worktreePath,
@@ -152,7 +152,7 @@ export function worktreePowershellGuardReason(context: WorktreeGuardContext): st
 				);
 			}
 		}
-		if (targets.some((target) => containsPath(worktreePath, target))) {
+		if (targets.some((target) => insideOwnWorktree(worktreePath, target))) {
 			const { sub, rest } = gitSubcommand(args.map((value) => ({ value })));
 			if (sub === "stash") {
 				const reason = stashReason(rest);

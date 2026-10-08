@@ -47,12 +47,24 @@ export interface WorktreeGuardContext {
 }
 
 /**
- * Containment as written and through symlinks: git lists worktrees by their
- * real paths (`/private/var/…` on macOS) while the session and the model may
- * spell the same directory through a link (`/var/…`).
+ * Containment as written or through symlinks, for the roots a git command must
+ * not reach: git lists worktrees by their real paths (`/private/var/…` on
+ * macOS) while the session and the model may spell the same directory through
+ * a link (`/var/…`). Either spelling landing inside counts.
  */
 export const containsPath = (root: string, target: string): boolean =>
 	isWithin(root, target) || isWithin(resolveForContainment(root) ?? root, resolveForContainment(target) ?? target);
+
+/**
+ * Whether a target is really inside the session's own worktree: where it
+ * resolves, when both resolve, so a link inside the worktree that leads to
+ * another worktree is not the session's own. Lexical only when resolution fails.
+ */
+export const insideOwnWorktree = (worktreePath: string, target: string): boolean => {
+	const root = resolveForContainment(worktreePath);
+	const resolved = resolveForContainment(target);
+	return root !== undefined && resolved !== undefined ? isWithin(root, resolved) : isWithin(worktreePath, target);
+};
 
 /** The roots a git command must not target: the shared checkout and every other worktree. */
 export const sharedRepositoryRoots = ({ sharedRoot, otherWorktrees }: Pick<WorktreeGuardContext, "sharedRoot" | "otherWorktrees">): string[] => [sharedRoot, ...(otherWorktrees ?? [])];
@@ -457,7 +469,7 @@ function guardScript(
 
 		const targets = [effective, ...extraTargets];
 		for (const target of targets) {
-			if (containsPath(worktreePath, target)) continue;
+			if (insideOwnWorktree(worktreePath, target)) continue;
 			if (sharedRoots.some((root) => containsPath(root, target))) {
 				return isolated(
 					worktreePath,
@@ -471,7 +483,7 @@ function guardScript(
 		// The stash stack is per-repository and shared across its worktrees. Any
 		// shared-root target that is NOT inside the worktree already returned
 		// above, so only worktree-contained targets can reach this check.
-		if (targets.some((t) => containsPath(worktreePath, t))) {
+		if (targets.some((t) => insideOwnWorktree(worktreePath, t))) {
 			const { sub, rest } = gitSubcommand(args);
 			if (sub === "stash") {
 				const reason = stashReason(rest);
