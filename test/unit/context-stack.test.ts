@@ -160,6 +160,20 @@ describe("context snapshot owner", () => {
 		expect(JSON.stringify(await resumed.request([summary]))).toContain("rules");
 	});
 
+	it("/clear after a resume releases the resume locks in the same extension instance", async () => {
+		let branch: ReturnType<typeof custom>[] = [custom(snapshot([block("claude-context", "old rules")]))];
+		const fake = createFakePi();
+		systemReminderExtension(fake.pi as never);
+		const ctx = createFakeCtx({ sessionManager: { getBranch: () => branch } });
+		await fake.fire("session_start", { reason: "resume" }, ctx);
+		branch = [];
+		await fake.fire("session_start", { reason: "new" }, ctx);
+		fake.events.emit(REMINDER_CHANNEL, { scope: "every-turn", ...block("claude-context", "fresh rules") });
+		const sent = JSON.stringify((await fake.fireOne<{ messages: AgentMessage[] }>("context", { messages: [user("new", 100)] }, ctx))?.messages);
+		expect(sent).toContain("fresh rules");
+		expect(sent).not.toContain("old rules");
+	});
+
 	it("a fresh /clear or old session without metadata does not inherit another stack", async () => {
 		const first = await start([custom(snapshot([block("claude-context", "old")]))]);
 		expect(restoredContext(first.fake.events)?.stack[0].text).toBe("old");

@@ -67,6 +67,7 @@ export default function systemReminderExtension(pi: ExtensionAPI) {
 		lastState = restored ? JSON.stringify({ version: 1, sticky: restored.sticky, baselines }) : "";
 		lastStack = restored ? JSON.stringify(restored.stack) : "";
 		if (restored) reminderQueue.restore(restored.stack, restored.sticky, RESTORED_STACK_KEYS, LIVE_CONTEXT_KEYS);
+		else reminderQueue.releaseRestore();
 	});
 	const persistSnapshot = (stack: ReminderEntry[] = reminderQueue.persistentEntries("first-prepend")) => {
 		const state = { version: 1 as const, sticky: reminderQueue.persistentEntries("sticky-append"), baselines };

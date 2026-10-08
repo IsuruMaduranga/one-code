@@ -323,6 +323,15 @@ export class ReminderQueue {
 		for (const entry of early) this.enqueue(entry.text, { ...entry, scope: "every-turn" });
 	}
 
+	/**
+	 * A session start with no snapshot (`/clear` after a resume): the previous
+	 * session's resume locks must not keep the new session's emitters out.
+	 */
+	releaseRestore(): void {
+		this.restoredKeys.clear();
+		this.pendingCapabilities.clear();
+	}
+
 	/** The first request has seen all startup/turn emitters. An absent capability is gone. */
 	finishRestore(): void {
 		for (const key of this.pendingCapabilities) this.everyTurn.delete(key);
