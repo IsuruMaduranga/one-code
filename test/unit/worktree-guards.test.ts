@@ -22,6 +22,11 @@ describe("worktree git-isolation guard", () => {
 			// A link inside the own worktree that leads to the sibling is the sibling.
 			symlinkSync(join(real, "sibling"), join(real, "own", "to-sibling"));
 			expect(reason(`git -C ${join(link, "own", "to-sibling")} status`)).toContain("another worktree of the same repository");
+			// A link inside the own worktree that leads to an unrelated repository is not this guard's concern.
+			mkdirSync(join(real, "unrelated"));
+			symlinkSync(join(real, "unrelated"), join(real, "own", "to-unrelated"));
+			const unrelated = worktreeBashGuardReason({ command: `git -C ${join(real, "own", "to-unrelated")} status`, worktreePath: join(real, "own"), sharedRoot: join(real, "own"), otherWorktrees: [join(real, "own")] });
+			expect(unrelated).toBeUndefined();
 		} finally {
 			rmSync(link, { force: true });
 			rmSync(real, { recursive: true, force: true });
