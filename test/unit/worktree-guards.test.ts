@@ -6,6 +6,14 @@ const WT = "/repo/.claude/worktrees/wt1";
 const guard = (command: string) => worktreeBashGuardReason({ command, worktreePath: WT, sharedRoot: "/repo" });
 
 describe("worktree git-isolation guard", () => {
+	it("refuses git aimed at a linked worktree outside the shared checkout", () => {
+		const outside = resolve("/elsewhere/wt2");
+		const withSiblings = (command: string) => worktreeBashGuardReason({ command, worktreePath: WT, sharedRoot: "/repo", otherWorktrees: [resolve("/repo"), resolve(WT), outside] });
+		expect(withSiblings("git -C /elsewhere/wt2 status")).toContain("another worktree of the same repository");
+		expect(withSiblings("git status")).toBeUndefined();
+		expect(guard("git -C /elsewhere/wt2 status")).toBeUndefined();
+	});
+
 	it("allows git that targets the worktree", () => {
 		expect(guard("git status")).toBeUndefined();
 		expect(guard("git add . && git commit -m 'Add guards'")).toBeUndefined();

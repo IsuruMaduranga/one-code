@@ -39,7 +39,15 @@ export interface WorktreeGuardContext {
 	worktreePath: string;
 	/** Root of the shared checkout the worktree belongs to. */
 	sharedRoot: string;
+	/**
+	 * Every worktree of the repository (`git worktree list`). A linked worktree
+	 * can live outside the shared root, and git aimed at it is refused too.
+	 */
+	otherWorktrees?: readonly string[];
 }
+
+/** The roots a git command must not target: the shared checkout and every other worktree. */
+export const sharedRepositoryRoots = ({ sharedRoot, otherWorktrees }: Pick<WorktreeGuardContext, "sharedRoot" | "otherWorktrees">): string[] => [sharedRoot, ...(otherWorktrees ?? [])];
 
 /** Expansion syntax the guard cannot resolve statically. */
 const hasExpansion = (value: string) => /[$`]/.test(value);
@@ -100,8 +108,8 @@ const GIT_REPOSITORY_ENV = /^(GIT_DIR|GIT_WORK_TREE|GIT_COMMON_DIR)=/;
 const exportsLikeExport = (cmd: string, args: Token[]) =>
 	cmd === "export" || ((cmd === "declare" || cmd === "typeset") && args.some((arg) => /^-[a-zA-Z]*x/.test(arg.value)));
 
-export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: WorktreeGuardContext): string | undefined {
-	return guardScript(command, worktreePath, sharedRoot, worktreePath, 0).reason;
+export function worktreeBashGuardReason(context: WorktreeGuardContext): string | undefined {
+	return guardScript(context.command, context.worktreePath, sharedRepositoryRoots(context), context.worktreePath, 0).reason;
 }
 
 /**
@@ -169,7 +177,7 @@ const MAX_POSSIBLE_DIRS = 8;
 function guardScript(
 	command: string,
 	worktreePath: string,
-	sharedRoot: string,
+	sharedRoots: readonly string[],
 	startDir: string | undefined,
 	depth: number,
 ): { reason?: string; moves?: boolean } {
@@ -303,7 +311,7 @@ function guardScript(
 		if (INLINE_SCRIPT_SHELLS.has(cmd) || cmd === "eval") {
 			const scripts = cmd === "eval" ? [args.map((arg) => arg.value).join(" ")] : shellScripts(args);
 			for (const script of scripts) {
-				const nested = depth < 3 ? guardScript(script, worktreePath, sharedRoot, dir, depth + 1) : unverifiedScript(script, worktreePath, true);
+				const nested = depth < 3 ? guardScript(script, worktreePath, sharedRoots, dir, depth + 1) : unverifiedScript(script, worktreePath, true);
 				if (nested.reason) return nested.reason;
 				if (cmd === "eval" && nested.moves) dir = undefined;
 			}
@@ -418,7 +426,7 @@ function guardScript(
 		const targets = [effective, ...extraTargets];
 		for (const target of targets) {
 			if (isWithin(worktreePath, target)) continue;
-			if (isWithin(sharedRoot, target)) {
+			if (sharedRoots.some((root) => isWithin(root, target))) {
 				return isolated(
 					worktreePath,
 					`this git command targets ${target}, which is the shared checkout or another worktree of the same repository`,

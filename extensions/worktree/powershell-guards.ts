@@ -19,7 +19,7 @@ import { isAbsolute, resolve } from "node:path";
 import { isWithin, toAbsolute } from "../auto-mode/paths.ts";
 import { gitSubcommand } from "../auto-mode/shell-analysis.ts";
 import { powershellInjectionSyntax, powershellStatements, statementCommand } from "../permissions/powershell-rules.ts";
-import { isolated, stashReason, type WorktreeGuardContext } from "./guards.ts";
+import { isolated, sharedRepositoryRoots, stashReason, type WorktreeGuardContext } from "./guards.ts";
 
 /** git as a word (`git`, `GIT`, `git.exe`); PowerShell resolves commands case-insensitively. */
 const mentionsGit = (text: string) => /\bgit(?:\.exe)?\b/i.test(text);
@@ -67,7 +67,9 @@ function locationTarget(args: string[]): string | undefined {
 	return positional;
 }
 
-export function worktreePowershellGuardReason({ command, worktreePath, sharedRoot }: WorktreeGuardContext): string | undefined {
+export function worktreePowershellGuardReason(context: WorktreeGuardContext): string | undefined {
+	const { command, worktreePath } = context;
+	const sharedRoots = sharedRepositoryRoots(context);
 	if (!mentionsGit(command)) return undefined;
 	const plainGit = `Run git as its own plain statement, with literal paths inside ${worktreePath} (no script blocks, call operators or nested shells).`;
 
@@ -142,7 +144,7 @@ export function worktreePowershellGuardReason({ command, worktreePath, sharedRoo
 		const targets = [effective, ...extraTargets];
 		for (const target of targets) {
 			if (isWithin(worktreePath, target)) continue;
-			if (isWithin(sharedRoot, target)) {
+			if (sharedRoots.some((root) => isWithin(root, target))) {
 				return isolated(
 					worktreePath,
 					`this git command targets ${target}, which is the shared checkout or another worktree of the same repository`,
