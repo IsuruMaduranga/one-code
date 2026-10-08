@@ -6,8 +6,9 @@ const WT = "/repo/.claude/worktrees/wt1";
 const guard = (command: string) => worktreeBashGuardReason({ command, worktreePath: WT, sharedRoot: "/repo" });
 
 describe("worktree git-isolation guard", () => {
+	// Uppercase too: the parse folds command names, as a case-insensitive filesystem and PowerShell do.
 	it("asks for the worktree list for every shell spelling of git", () => {
-		for (const command of [`g"it" -C /x status`, "\\git -C /x status", "$'\\x67it' -C /x status", "'g'it status", "env git status", "/usr/bin/git status", "xargs git log", "bash -c 'git status'"]) {
+		for (const command of [`g"it" -C /x status`, "\\git -C /x status", "$'\\x67it' -C /x status", "'g'it status", "env git status", "/usr/bin/git status", "xargs git log", "bash -c 'git status'", "GIT -C /x status", "Git.exe status"]) {
 			expect(namesGit(command), command).toBe(true);
 		}
 		expect(namesGit("ls -la && cat .gitignore")).toBe(false);
