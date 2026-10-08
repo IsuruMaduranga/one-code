@@ -95,11 +95,25 @@ function textOf(content: unknown): string {
 }
 
 /**
- * The files a shell command may print, with their content as the command
+ * A file's identity and version, from metadata only: `ctimeMs` changes on any
+ * write, rename or metadata change, and cannot be set back by the writer.
+ */
+function versionOf(path: string): string | undefined {
+	try {
+		const stat = statSync(path);
+		return stat.isFile() ? `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}` : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * The files a shell command may print, with each one's version as the command
  * starts (`shell-reads.ts` candidates, resolved as the shell resolves them).
  * Taken before the command runs, so a file the command itself rewrites
  * (`cat x; cp y x`) is not certified with its new content (found by a GPT-6
- * Sol review, 2026-10-04).
+ * Sol review, 2026-10-04). Metadata only: this runs before the permission
+ * gate decides the call, so a file the user then denies is never opened.
  */
 function shellReadSnapshot(command: string, cwd: string): Map<string, string> {
 	const snapshot = new Map<string, string>();
@@ -115,23 +129,25 @@ function shellReadSnapshot(command: string, cwd: string): Map<string, string> {
 		if (!isRegularFile(path)) continue;
 		const stamp = statIfPresent(path);
 		if (!stamp || stamp.size > MAX_SHELL_READ_BYTES) continue;
-		const content = readIfPresent(path);
-		if (content !== undefined) snapshot.set(path, content);
+		const version = versionOf(path);
+		if (version !== undefined) snapshot.set(path, version);
 	}
 	return snapshot;
 }
 
 /**
  * Count as read each file the command printed in full and did not change:
- * its content before and after the command is the same, and the output holds
+ * its version before and after the command is the same, and the output holds
  * all of it. Observed, not touched: the post-compaction restore follows the
  * file tools, as Claude Code's does.
  */
 function observeShellReads(tracker: FileTracker, before: Map<string, string>, output: string): void {
 	if (!output) return;
-	for (const [path, content] of before) {
+	for (const [path, version] of before) {
 		const stamp = statIfPresent(path);
-		if (!stamp || !isRegularFile(path) || readIfPresent(path) !== content) continue;
+		if (!stamp || !isRegularFile(path) || versionOf(path) !== version) continue;
+		const content = readIfPresent(path);
+		if (content === undefined || versionOf(path) !== version) continue;
 		if (shownInFull(output, content)) tracker.observe(path, content, Date.now(), stamp);
 	}
 }
@@ -459,7 +475,7 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 		// A turn aborted mid-batch can leave ids behind; each turn starts from a
 		// clean set so the mid-turn scan cannot be wedged off for the rest of the
 		// session. A write blocked before it ran left its existence entry behind,
-		// and a blocked or aborted bash call its snapshot of file contents.
+		// and a blocked or aborted bash call its snapshot of file versions.
 		executing.clear();
 		writeTargetExisted.clear();
 		shellSnapshots.clear();

@@ -2,15 +2,21 @@
  * A shell read that showed a whole file counts as a read (file-tracker/shell-reads.ts):
  * candidate extraction, the full-content check, and the bash tool_result wiring.
  */
+import * as fs from "node:fs";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import fileTrackerExtension from "../../extensions/file-tracker/index.ts";
 import { expandCandidate, shellReadCandidates, shownInFull } from "../../extensions/file-tracker/shell-reads.ts";
 import { WORKTREE_CHANNEL } from "../../extensions/lib/worktree-channel.ts";
 import { bashParserReady } from "../../extensions/lib/bash-parser.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+
+vi.mock("node:fs", async (load) => {
+	const actual = await load<typeof import("node:fs")>();
+	return { ...actual, readFileSync: vi.fn(actual.readFileSync) };
+});
 
 beforeAll(async () => {
 	await bashParserReady();
@@ -100,6 +106,14 @@ describe("file-tracker: a bash result counts as a read", () => {
 		return fake.fireOne("tool_result", { toolName: "bash", toolCallId, input: { command }, content: [{ type: "text", text }], isError: false }, ctx());
 	};
 	const edit = (name: string) => fake.fireOne<{ block?: boolean; reason?: string }>("tool_call", { toolName: "edit", input: { path: name } }, ctx());
+
+	it("opens no candidate file before the permission gate decides the call", async () => {
+		const secret = join(dir, "secret.txt");
+		writeFileSync(secret, "token = 1\n");
+		vi.mocked(fs.readFileSync).mockClear();
+		await fake.fireOne("tool_call", { toolName: "bash", toolCallId: "denied", input: { command: "cat secret.txt" } }, ctx());
+		expect(vi.mocked(fs.readFileSync).mock.calls.some(([path]) => String(path).endsWith("secret.txt"))).toBe(false);
+	});
 
 	it("allows an edit after a cat that printed the whole file", async () => {
 		writeFileSync(join(dir, "Makefile"), "test:\n\tpython3 t.py\n");
