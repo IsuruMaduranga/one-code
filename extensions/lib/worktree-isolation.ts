@@ -6,7 +6,8 @@
  *
  * The registry exists because the association can only resolve at call time:
  * these worktrees live in tmpdirs (not statically recognizable paths), and the
- * child loaders are cached and shared across runs with different cwds.
+ * guard judges each call's `ctx.cwd`, not the cwd its child's loader was built
+ * with (one loader per child session, lib/agent-loader.ts openChildSession).
  * createWorktree/cleanupWorktree (subagents/worktree.ts) register and release
  * entries; reconstructed run records re-register kept worktrees after a
  * process restart (subagents/index.ts); the worktree the main session entered
@@ -24,11 +25,11 @@
 import { homedir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
-import { findProjectRoot } from "./git.ts";
+import { findProjectRoot, repositoryWorktrees } from "./git.ts";
 import { WORKTREE_CHANNEL, type WorktreeLocation } from "./worktree-channel.ts";
 import { isWithin, isWritingTool, pathArgument, resolveForContainment, toAbsolute } from "../auto-mode/paths.ts";
 import { analyzeShellCommand } from "../auto-mode/shell-analysis.ts";
-import { worktreeBashGuardReason } from "../worktree/guards.ts";
+import { namesGit, unlistedWorktreesReason, worktreeBashGuardReason } from "../worktree/guards.ts";
 
 export interface WorktreeIsolation {
 	/** The isolated worktree the run works in. */
@@ -173,15 +174,18 @@ export function worktreeGuardFactory(cwd: string): InlineExtension {
 		name: "agent-worktree-guard",
 		hidden: true,
 		factory: (pi) => {
-			pi.on("tool_call", (event, ctx) => {
+			pi.on("tool_call", async (event, ctx) => {
 				const runCwd = ctx?.cwd ?? cwd;
 				const isolation = worktreeIsolationFor(runCwd);
 				if (!isolation) return undefined;
 				const input = (event.input ?? {}) as Record<string, unknown>;
 				if (event.toolName === "bash") {
 					if (typeof input.command !== "string") return undefined;
+					// Every worktree of the repository, as the main session's guard checks: a linked one may live outside the shared root.
+					const others = namesGit(input.command) ? await repositoryWorktrees(isolation.worktreePath) : [];
+					if (others === undefined) return { block: true, reason: unlistedWorktreesReason(isolation.worktreePath) };
 					const reason =
-						worktreeBashGuardReason({ command: input.command, worktreePath: isolation.worktreePath, sharedRoot: isolation.sharedRoot }) ??
+						worktreeBashGuardReason({ command: input.command, worktreePath: isolation.worktreePath, sharedRoot: isolation.sharedRoot, otherWorktrees: others }) ??
 						worktreeBashWriteGuardReason({ command: input.command, cwd: runCwd, isolation });
 					return reason ? { block: true, reason } : undefined;
 				}

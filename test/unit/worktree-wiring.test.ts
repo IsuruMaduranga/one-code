@@ -40,8 +40,10 @@ beforeEach(async () => {
 	worktreeExtension(fake.pi as never);
 	const ctx = createFakeCtx({ cwd: repo, sessionManager: { getBranch: () => [] } });
 	await fake.fire("session_start", {}, ctx);
-	const entered = (await fake.tools.get("enter_worktree")!.execute("e1", { name: "feature" }, undefined, undefined, ctx)) as { isError?: boolean };
+	const entered = (await fake.tools.get("enter_worktree")!.execute("e1", { name: "feature" }, undefined, undefined, ctx)) as { isError?: boolean; content: { text: string }[] };
 	expect(entered.isError).toBeUndefined();
+	// The git-isolation guard is announced on entry, not first met as a refusal.
+	expect(entered.content[0]?.text).toContain("Git commands aimed at the main checkout or another worktree of this repository are refused until you exit.");
 	worktree = join(repo, ".claude", "worktrees", "feature");
 	expect(location).toEqual({ path: worktree, branch: "feature", sharedRoot: repo });
 });
@@ -63,6 +65,18 @@ describe("monitor in a worktree session", () => {
 		const result = await toolCall("monitor", { command: `git -C ${shellQuote(repo)} log -1`, description: "watch" });
 		expect(result?.block).toBe(true);
 		expect(result?.reason).toContain(`isolated in the worktree ${worktree}`);
+	});
+
+	it("refuses git aimed at a linked worktree outside the shared checkout", async () => {
+		const outside = join(realpathSync.native(mkdtempSync(join(tmpdir(), "worktree-outside-"))), "wt2");
+		execFileSync("git", ["worktree", "add", "-q", "-b", "outside", outside], { cwd: repo });
+		try {
+			const result = await toolCall("bash", { command: `git -C ${shellQuote(outside)} status` });
+			expect(result?.block).toBe(true);
+			expect(result?.reason).toContain("another worktree of the same repository");
+		} finally {
+			rmSync(outside, { recursive: true, force: true });
+		}
 	});
 
 	it("leaves a WebSocket monitor alone", async () => {

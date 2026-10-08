@@ -16,24 +16,27 @@
  * that went through bash and never touched an intercepted tool.
  */
 
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { createReadToolDefinition, type ExtensionAPI, type ExtensionContext, type SessionCompactEvent } from "@earendil-works/pi-coding-agent";
 import { pathArgument } from "../auto-mode/paths.ts";
+import { bashParserReady } from "../lib/bash-parser.ts";
 import { collectImportedPaths, discoverContextFilePaths, instructionRule } from "../lib/claude-context.ts";
 import { inContextEntries, latestCompaction } from "../lib/compaction-boundary.ts";
 import { projectMemoryDir } from "../lib/memory.ts";
-import { claudeConfigDir, comparablePath, isPathAtOrUnder, tryRealpath } from "../lib/paths.ts";
+import { absoluteFrom, claudeConfigDir, comparablePath, expandTilde, isPathAtOrUnder, tryRealpath } from "../lib/paths.ts";
 import { estimateTextTokens } from "../lib/pi-ai-estimate.ts";
 import { planFileOnBranch } from "../lib/plan-mode-channels.ts";
 import { REMINDER_CHANNEL, type ReminderPayload } from "../lib/reminders.ts";
 import { resolveToolPath } from "../lib/tool-path.ts";
 import { parseRules, ruleMatches } from "../permissions/matcher.ts";
 import { loadPermissionSettings } from "../permissions/settings.ts";
-import { keptReadPaths, lastTouchesOnBranch, pathsReadOnBranch } from "./replay.ts";
+import { keptReadPaths, lastTouchesOnBranch, pathsReadOnBranch, shellCallsOnBranch } from "./replay.ts";
 import { type RestoredRead, restoreBlocks, restoreCandidates } from "./restore.ts";
 import { fileToolResultContent } from "./results.ts";
+import { expandCandidate, shellReadCandidates, shownInFull } from "./shell-reads.ts";
+import { sessionWorkCwd, WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
 import {
 	describeChanges,
 	EXTERNAL_CHANGE_REMINDER,
@@ -62,6 +65,15 @@ function readIfPresent(path: string): string | undefined {
 	}
 }
 
+/** Whether `path` is a regular file (symlinks followed): never a device, FIFO or directory. */
+function isRegularFile(path: string): boolean {
+	try {
+		return statSync(path).isFile();
+	} catch {
+		return false;
+	}
+}
+
 /** The file's disk stamp, or undefined when it is gone (or not a plain file we could stat). */
 function statIfPresent(path: string): FileStamp | undefined {
 	try {
@@ -71,6 +83,77 @@ function statIfPresent(path: string): FileStamp | undefined {
 		return undefined;
 	}
 }
+
+function commandOf(input: unknown): string {
+	const command = (input as { command?: unknown } | undefined)?.command;
+	return typeof command === "string" ? command : "";
+}
+
+function textOf(content: unknown): string {
+	if (!Array.isArray(content)) return "";
+	return content.map((block) => (block as { type?: string; text?: string })?.type === "text" ? ((block as { text?: string }).text ?? "") : "").join("\n");
+}
+
+/**
+ * A file's identity and version, from metadata only: `ctimeMs` changes on any
+ * write, rename or metadata change, and cannot be set back by the writer.
+ */
+function versionOf(path: string): string | undefined {
+	try {
+		const stat = statSync(path);
+		return stat.isFile() ? `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}` : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * The files a shell command may print, with each one's version as the command
+ * starts (`shell-reads.ts` candidates, resolved as the shell resolves them).
+ * Taken before the command runs, so a file the command itself rewrites
+ * (`cat x; cp y x`) is not certified with its new content (found by a GPT-6
+ * Sol review, 2026-10-04). Metadata only: this runs before the permission
+ * gate decides the call, so a file the user then denies is never opened.
+ */
+function shellReadSnapshot(command: string, cwd: string): Map<string, string> {
+	const snapshot = new Map<string, string>();
+	if (!command) return snapshot;
+	// The shell's own resolution, not the file tools' (`resolveToolPath` strips
+	// a leading `@`, which `cat @x` keeps): `~/` and the shell's directory only.
+	const shellPath = (word: string) => absoluteFrom(cwd, expandTilde(word, homedir()));
+	const words = shellReadCandidates(command).flatMap((word) => expandCandidate(word, (dir) => readdirSync(shellPath(dir))));
+	for (const raw of new Set(words)) {
+		const path = shellPath(raw);
+		// Regular files only: a device or FIFO (`head -c 1 /dev/zero`) reports size 0
+		// and a read of it never ends (found by a GPT-6 Astra review).
+		if (!isRegularFile(path)) continue;
+		const stamp = statIfPresent(path);
+		if (!stamp || stamp.size > MAX_SHELL_READ_BYTES) continue;
+		const version = versionOf(path);
+		if (version !== undefined) snapshot.set(path, version);
+	}
+	return snapshot;
+}
+
+/**
+ * Count as read each file the command printed in full and did not change:
+ * its version before and after the command is the same, and the output holds
+ * all of it. Observed, not touched: the post-compaction restore follows the
+ * file tools, as Claude Code's does.
+ */
+function observeShellReads(tracker: FileTracker, before: Map<string, string>, output: string): void {
+	if (!output) return;
+	for (const [path, version] of before) {
+		const stamp = statIfPresent(path);
+		if (!stamp || !isRegularFile(path) || versionOf(path) !== version) continue;
+		const content = readIfPresent(path);
+		if (content === undefined || versionOf(path) !== version) continue;
+		if (shownInFull(output, content)) tracker.observe(path, content, Date.now(), stamp);
+	}
+}
+
+/** Above this a shell read's output is persisted, not shown, so the file cannot have been seen whole. */
+const MAX_SHELL_READ_BYTES = 256 * 1024;
 
 /** Observe a file's current content together with the stamp it was read at, and return that stamp. */
 function observeFromDisk(tracker: FileTracker, path: string): FileStamp | undefined {
@@ -150,6 +233,12 @@ async function readAgain(read: ReturnType<typeof createReadToolDefinition>, path
 
 export default function fileTrackerExtension(pi: ExtensionAPI) {
 	let tracker = new FileTracker();
+	/** The entered worktree, where the shell runs while one is active (lib/worktree-channel.ts). */
+	let entered: WorktreeLocation | undefined;
+	pi.events.on(WORKTREE_CHANNEL, (data) => {
+		const location = data as WorktreeLocation | null | undefined;
+		entered = location?.path ? location : undefined;
+	});
 	let sessionId: string | undefined;
 	/**
 	 * Every file a read or write touched on this branch, with its modification
@@ -168,9 +257,9 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 	// still in context (since the latest compaction's kept tail) so post-resume
 	// edits are not refused as "never read" (replay.ts). A new session id starts
 	// from an empty tracker.
-	const reconstruct = (ctx: ExtensionContext) => {
+	const reconstruct = (ctx: ExtensionContext, fresh = false) => {
 		const id = ctx.sessionManager.getSessionId?.() ?? undefined;
-		if (id !== sessionId) {
+		if (fresh || id !== sessionId) {
 			sessionId = id;
 			tracker = new FileTracker();
 		}
@@ -183,15 +272,35 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 		for (const raw of pathsReadOnBranch(entries)) {
 			observeFromDisk(tracker, resolveToolPath(raw, ctx.cwd));
 		}
+		// Shell reads need the bash grammar, which may still be loading this early.
+		const target = tracker;
+		const shellCalls = [...shellCallsOnBranch(entries)];
+		if (shellCalls.length > 0) {
+			void bashParserReady().then(() => {
+				// A replayed result has no before-state: the files as they are now stand in for it.
+				for (const call of shellCalls) observeShellReads(target, shellReadSnapshot(call.command, sessionWorkCwd(entered, ctx.cwd)), call.output);
+			});
+		}
 		touched = new Map([...lastTouchesOnBranch(entries)].map(([raw, at]) => [resolveToolPath(raw, ctx.cwd), at]));
 	};
 	pi.on("session_start", (_event, ctx) => reconstruct(ctx));
-	pi.on("session_tree", (_event, ctx) => reconstruct(ctx));
+	// A branch switch keeps the session id, but the reads of the branch left
+	// behind are not in context any more: start from an empty tracker, as for a
+	// new session (found by an adversarial GPT-6 Astra run, 2026-10-04).
+	pi.on("session_tree", (_event, ctx) => reconstruct(ctx, true));
 
 	/** Whether a write's file existed when the call was made, by call id: its result says "created" or "updated". */
 	const writeTargetExisted = new Map<string, boolean>();
 
-	pi.on("tool_call", (event, ctx) => {
+	/** Each running bash call's candidate files as they were when it started (`shellReadSnapshot`). */
+	const shellSnapshots = new Map<string, Map<string, string>>();
+	pi.on("tool_call", async (event, ctx) => {
+		if (event.toolName === "bash") {
+			await bashParserReady();
+			// Relative paths in the command resolve where the shell runs: the entered worktree, if any.
+			shellSnapshots.set(event.toolCallId, shellReadSnapshot(commandOf(event.input), sessionWorkCwd(entered, ctx.cwd)));
+			return undefined;
+		}
 		if (!GUARDED_TOOLS.has(event.toolName)) return undefined;
 		const path = pathOf(event.input, ctx.cwd);
 		if (!path) return undefined;
@@ -206,9 +315,15 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 		return { block: true, reason: STALE_REASON(path) };
 	});
 
-	pi.on("tool_result", (event, ctx) => {
+	pi.on("tool_result", async (event, ctx) => {
 		const existedBefore = writeTargetExisted.get(event.toolCallId);
 		writeTargetExisted.delete(event.toolCallId);
+		if (event.toolName === "bash") {
+			const before = shellSnapshots.get(event.toolCallId);
+			shellSnapshots.delete(event.toolCallId);
+			if (before) observeShellReads(tracker, before, textOf(event.content));
+			return undefined;
+		}
 		if (!READ_TOOLS.has(event.toolName) && !GUARDED_TOOLS.has(event.toolName)) return undefined;
 
 		const path = pathOf(event.input, ctx.cwd);
@@ -320,7 +435,7 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 			const current = stamp ? readIfPresent(path) : undefined;
 			if (stamp === undefined || current === undefined) {
 				tracker.forget(path);
-				detailed.push(`${path} no longer exists; it was deleted or moved after you read it.`);
+				detailed.push(`${path} no longer exists; it was deleted or moved after you last read or wrote it.`);
 				continue;
 			}
 			tracker.recordStamp(path, stamp);
@@ -359,9 +474,11 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 	pi.on("agent_start", () => {
 		// A turn aborted mid-batch can leave ids behind; each turn starts from a
 		// clean set so the mid-turn scan cannot be wedged off for the rest of the
-		// session. A write blocked before it ran left its existence entry behind.
+		// session. A write blocked before it ran left its existence entry behind,
+		// and a blocked or aborted bash call its snapshot of file versions.
 		executing.clear();
 		writeTargetExisted.clear();
+		shellSnapshots.clear();
 		reportExternalChanges();
 		return undefined;
 	});

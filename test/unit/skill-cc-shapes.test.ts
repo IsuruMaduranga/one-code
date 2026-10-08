@@ -57,6 +57,7 @@ async function mount(model: Record<string, unknown> = frontier, thinking = "medi
 	const fake = createFakePi();
 	(fake.pi as unknown as { getThinkingLevel: () => string }).getThinkingLevel = () => thinking;
 	skillExtension(fake.pi as never);
+	fake.setActiveTools(["skill"]);
 	const ctx = createFakeCtx({ cwd, mode: "tui", hasUI: true, model });
 	await fake.fire("session_start", { reason: "startup" }, ctx);
 	const listings: string[] = [];

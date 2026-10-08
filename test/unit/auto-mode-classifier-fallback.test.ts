@@ -19,6 +19,7 @@ import {
 	classify,
 	createClassifierState,
 	isClassifierTimeout,
+	isTransportFailure,
 	ROTATE_AFTER_TIMEOUTS,
 } from "../../extensions/auto-mode/classifier.ts";
 import { loadAutoModeConfig } from "../../extensions/auto-mode/config.ts";
@@ -335,6 +336,27 @@ describe("classify: timeout handling", () => {
 		expect(deps.state.rejected.size).toBe(0);
 	});
 
+	it("retries a transport failure (fetch failed) once on the same model, then takes the verdict", async () => {
+		completeMock.mockResolvedValueOnce(errorReply("fetch failed")).mockResolvedValueOnce(allowReply());
+		const { deps } = makeDeps();
+		const verdict = await classify(request, deps);
+		expect(verdict.decision).toBe("allow");
+		expect(completeMock).toHaveBeenCalledTimes(2);
+		expect((completeMock.mock.calls[0]?.[0] as any).id).toBe((completeMock.mock.calls[1]?.[0] as any).id);
+	});
+
+	it("blocks a call the classifier never answered for network reasons as not judged, naming the cause", async () => {
+		completeMock.mockResolvedValue(errorReply("fetch failed"));
+		const { deps } = makeDeps();
+		const verdict = await classify(request, deps);
+		expect(verdict.decision).toBe("block");
+		expect(verdict.tier).toBe("timeout");
+		expect(verdict.noVerdict).toBe(true);
+		expect(verdict.reason).toContain("temporarily unavailable (network error: fetch failed)");
+		expect(verdict.reason).not.toContain("could not be reached");
+		expect(deps.state.rejected.size).toBe(0);
+	});
+
 	it("treats a user cancel as a cancel, not a timeout — no retry, no rotation", async () => {
 		completeMock.mockResolvedValue(abortedReply());
 		const { deps } = makeDeps({ signal: AbortSignal.abort() });
@@ -358,6 +380,20 @@ describe("isClassifierTimeout", () => {
 	it("does not match substantive provider errors", () => {
 		for (const message of ["500 internal server error", "invalid_model", "no such model", "429 rate limit"]) {
 			expect(isClassifierTimeout(message)).toBe(false);
+		}
+	});
+});
+
+describe("isTransportFailure", () => {
+	it("matches failures below HTTP", () => {
+		for (const message of ["fetch failed", "TypeError: fetch failed", "read ECONNRESET", "connect ECONNREFUSED 127.0.0.1:443", "getaddrinfo ENOTFOUND api.openai.com", "getaddrinfo EAI_AGAIN chatgpt.com", "socket hang up", "other side closed", "UND_ERR_SOCKET"]) {
+			expect(isTransportFailure(message)).toBe(true);
+		}
+	});
+
+	it("does not match a provider's own error reply", () => {
+		for (const message of ["500 internal server error", "429 rate limit", "invalid_model", "401 unauthorized"]) {
+			expect(isTransportFailure(message)).toBe(false);
 		}
 	});
 });

@@ -47,7 +47,8 @@ import { readDisabledMcpServers, setMcpServerDisabled } from "../lib/mcp-overrid
 import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import { authenticate as runOAuthFlow, silentProvider } from "./oauth/flow.ts";
 import { hasStoredTokens } from "./oauth/store.ts";
-import { announcedFrom, applyMcpDelta, emptyAnnounced, mcpChangeNotices, mcpDelta, type McpSnapshot, mcpStartupNotices } from "./announce.ts";
+import { announcedFrom, applyMcpDelta, emptyAnnounced, mcpAnnouncedBaseline, mcpAnnouncedFromReminders, mcpChangeNotices, mcpDelta, serializeMcpAnnounced, type McpAnnounced, type McpSnapshot, mcpStartupNotices } from "./announce.ts";
+import { CONTEXT_BASELINE_CHANNEL, restoredContext } from "../lib/context-stack.ts";
 import { decodeMcpKey } from "./panel/keys.ts";
 import { type McpEntry, type McpEntryStatus } from "./panel/model.ts";
 import { renderMcpPanel, type McpPaint } from "./panel/render.ts";
@@ -277,6 +278,9 @@ export default function mcpExtension(pi: ExtensionAPI) {
 	 * message 1 are (re)written; after it they are frozen and only the changes are
 	 * announced (./announce.ts).
 	 */
+	const publishBaseline = (value: McpAnnounced) => {
+		pi.events.emit(CONTEXT_BASELINE_CHANNEL, { key: "mcp", value: serializeMcpAnnounced(value) });
+	};
 	const emitInstructions = () => {
 		const live = [...connections.values()];
 		const snapshot: McpSnapshot = {
@@ -286,6 +290,8 @@ export default function mcpExtension(pi: ExtensionAPI) {
 
 		if (!requestSent) {
 			// Nothing is cached yet: (re)write the standing message-1 blocks.
+			const nextAnnounced = announcedFrom(snapshot);
+			publishBaseline(nextAnnounced);
 			if (snapshot.failed.length === 0) {
 				pi.events.emit(REMINDER_CHANNEL, { scope: "every-turn", key: "mcp-failures", text: "", remove: true });
 			} else {
@@ -312,14 +318,20 @@ export default function mcpExtension(pi: ExtensionAPI) {
 				// being told to use tools that are gone.
 				pi.events.emit(REMINDER_CHANNEL, { scope: "every-turn", key: "mcp-instructions", text: "", remove: true });
 			}
-			announced = announcedFrom(snapshot);
+			announced = nextAnnounced;
 			return;
 		}
 
 		// Message 1 is frozen (rewriting it would re-cache the whole conversation):
 		// tell the model only what changed, as one-shots where it reads next.
 		const delta = mcpDelta(announced, snapshot);
-		for (const text of mcpChangeNotices(delta)) pi.events.emit(REMINDER_CHANNEL, { text });
+		const notices = mcpChangeNotices(delta);
+		if (notices.length > 0) {
+			const nextAnnounced = { instructed: new Map(announced.instructed), failed: new Map(announced.failed) };
+			applyMcpDelta(nextAnnounced, delta);
+			publishBaseline(nextAnnounced);
+		}
+		for (const text of notices) pi.events.emit(REMINDER_CHANNEL, { text });
 		applyMcpDelta(announced, delta);
 	};
 
@@ -361,7 +373,14 @@ export default function mcpExtension(pi: ExtensionAPI) {
 			else process.stderr.write(`${text}\n`);
 		}
 		disabledNames = readDisabledMcpServers(ctx.cwd, home);
-		if (servers.length === 0) return;
+		// A resumed first-prepend may describe a server whose configuration was
+		// removed entirely. There is no connection attempt in that case, so make
+		// the frozen-prefix delta explicit rather than leaving the stale capability
+		// silently standing. Fresh empty sessions keep their byte-identical no-op.
+		if (servers.length === 0) {
+			if (requestSent) emitInstructions();
+			return;
+		}
 
 		// Disabled servers are listed but never connected; a server with an unset
 		// credential env var stays "needs authentication" and is not attempted
@@ -527,10 +546,14 @@ export default function mcpExtension(pi: ExtensionAPI) {
 	};
 
 	pi.on("session_start", async (_event, ctx) => {
-		// A new session (/clear, resume in a new process) has no cached prefix yet:
-		// its message-1 blocks are written fresh (same reset as tool-search).
-		requestSent = false;
-		announced = emptyAnnounced();
+		const restored = restoredContext(pi.events);
+		// The restored stack owns message 1. Its structured state records the exact
+		// arbitrary server text that was shown; a fresh session keeps prior behavior.
+		requestSent = restored !== undefined;
+		const stackText = (key: string) => restored?.stack.find((entry) => (entry as { key?: string }).key === key)?.text;
+		announced = mcpAnnouncedBaseline(restored?.baselines.mcp)
+			?? mcpAnnouncedFromReminders(stackText("mcp-instructions"), stackText("mcp-failures"));
+		if (!restored) publishBaseline(announced);
 		// pi awaits session_start handlers serially before the prompt opens, and
 		// remote servers take seconds to answer — awaiting here was the entire
 		// "slow startup" (4.9s → 0.24s measured, findings §15). In the interactive

@@ -12,7 +12,7 @@
  * PI_CODING_AGENT_DIR isolation).
  */
 
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import os from "node:os";
 import { projectInstructionFiles } from "../lib/claude-context.ts";
@@ -111,15 +111,10 @@ export function shouldDefaultFlushOutputPad(settingsRaw: string | undefined): bo
 /**
  * True when pi's own startup listing is silenced, so ours should render instead:
  * `quietStartup: true`, or pi 1.0's `"header"`, which keeps pi's header and
- * still hides the listing.
+ * still hides the listing. The caller supplies pi's effective, merged value.
  */
-export function quietStartupEnabled(piSettingsPath: string): boolean {
-	try {
-		const settings = JSON.parse(readFileSync(piSettingsPath, "utf8"));
-		return settings?.quietStartup === true || settings?.quietStartup === "header";
-	} catch {
-		return false;
-	}
+export function quietStartupEnabled(value: unknown): boolean {
+	return value === true || value === "header";
 }
 
 export function collectStartupSections(cwd: string, home: string, packageThemesDir: string, agentDir: string): StartupSection[] {

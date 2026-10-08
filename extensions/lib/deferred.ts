@@ -501,6 +501,15 @@ export interface SearchMatch {
  * requested names matched nothing instead of silently dropping them.
  */
 export function selectedNames(query: string): string[] | undefined {
+	return selectedRequests(query)?.map((request) => request.name);
+}
+
+/**
+ * {@link selectedNames} with each name as the model wrote it, so a "not found"
+ * note quotes the model's spelling: `select:find,grep,glob` maps `glob` to
+ * `find`, and quoting the mapped names read "find, grep, find".
+ */
+export function selectedRequests(query: string): { name: string; asWritten: string }[] | undefined {
 	const trimmed = query.trim();
 	if (!trimmed.toLowerCase().startsWith("select:")) return undefined;
 	return trimmed
@@ -511,7 +520,7 @@ export function selectedNames(query: string): string[] | undefined {
 		// normalizeToolName lowercases ordinary names but PRESERVES case for
 		// `mcp__…` names; the trailing toLowerCase keeps select: case-insensitive
 		// for those too. Don't drop it as "redundant".
-		.map((n) => normalizeToolName(n).toLowerCase());
+		.map((asWritten) => ({ name: normalizeToolName(asWritten).toLowerCase(), asWritten }));
 }
 
 /**

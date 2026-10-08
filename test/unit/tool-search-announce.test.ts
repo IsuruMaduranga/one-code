@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFER_CHANNEL, deferredAddendumText } from "../../extensions/lib/deferred.ts";
 import { MCP_TOOLS_CHANNEL } from "../../extensions/lib/mcp-share.ts";
+import { CONTEXT_BASELINE_CHANNEL, CONTEXT_RESTORE_CHANNEL } from "../../extensions/lib/context-stack.ts";
 import { applyAnnouncement, planAnnouncement } from "../../extensions/tool-search/announce.ts";
 import toolSearchExtension from "../../extensions/tool-search/index.ts";
 import { makeToolSearchFakePi, type Reminder } from "./helpers/tool-search-fake-pi.ts";
@@ -149,6 +150,50 @@ describe("tool-search announce wiring", () => {
 		expect(all).toHaveLength(1);
 		expect(all[0].text).toContain("web_fetch");
 		expect(all[0].text).toContain("mcp__c__w");
+	});
+});
+
+describe("tool-search resumed capability wiring", () => {
+	it("keeps an unchanged saved listing silent, appends only additions, and persists that correction for the next resume", () => {
+		const restore = (fake: ReturnType<typeof makeFakePi>, names: string[]) => {
+			fake.pi.events.on(CONTEXT_RESTORE_CHANNEL, (data) => {
+				(data as { restored?: unknown }).restored = { version: 1, stack: [], sticky: [], baselines: { "tool-search": names } };
+			});
+		};
+		const first = makeFakePi();
+		restore(first, ["web_fetch"]);
+		const published: string[][] = [];
+		first.pi.events.on(CONTEXT_BASELINE_CHANNEL, (data) => {
+			const baseline = data as { key: string; value: string[] };
+			if (baseline.key === "tool-search") published.push(baseline.value);
+		});
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		toolSearchExtension(first.pi as any);
+		first.addDeferred("web_fetch");
+		first.pi.fire("session_start", {});
+		expect(listings(first.reminders)).toHaveLength(0);
+		expect(addenda(first.reminders)).toHaveLength(0);
+
+		// This is a different live capability, so it reaches the tail and updates
+		// the stored comparison state without rewriting the locked listing.
+		first.allTools.push({ name: "new_tool", description: "new tool" });
+		first.setActive([...first.activeTools(), "new_tool"]);
+		first.pi.events.emit(DEFER_CHANNEL, { name: "new_tool" });
+		first.pi.fire("session_start", {});
+		expect(listings(first.reminders)).toHaveLength(0);
+		expect(addenda(first.reminders)).toHaveLength(1);
+		const corrected = published.at(-1)!;
+		expect(corrected).toEqual(["web_fetch", "new_tool"]);
+
+		const second = makeFakePi();
+		restore(second, corrected);
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		toolSearchExtension(second.pi as any);
+		second.addDeferred("web_fetch");
+		second.addDeferred("new_tool");
+		second.pi.fire("session_start", {});
+		expect(listings(second.reminders)).toHaveLength(0);
+		expect(addenda(second.reminders)).toHaveLength(0);
 	});
 });
 

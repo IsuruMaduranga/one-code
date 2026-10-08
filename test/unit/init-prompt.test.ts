@@ -3,7 +3,7 @@
  * named for any compatible agent and AGENTS.md among the rules to fold in.
  */
 import { createHash } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import initExtension from "../../extensions/init/index.ts";
 import { INIT_PROMPT } from "../../extensions/init/prompt.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
@@ -21,10 +21,45 @@ describe("/init prompt", () => {
 		expect(INIT_PROMPT).not.toContain("claude.ai/code");
 	});
 
+	it.each(["print", "json"])("waits for the triggered turn in %s mode", async (mode) => {
+		const fake = createFakePi();
+		initExtension(fake.pi as never);
+		let settle!: () => void;
+		const idle = new Promise<void>((resolve) => { settle = resolve; });
+		let active = false;
+		// pi reports idle throughout asynchronous prompt preflight.
+		const waitForIdle = vi.fn(() => active ? idle : Promise.resolve());
+		let returned = false;
+		const run = fake.commands.get("init")!.handler("", createFakeCtx({ mode, waitForIdle })).then(() => { returned = true; });
+		try {
+			await fake.fire("before_agent_start", {});
+			expect(fake.sentUserMessages).toHaveLength(1);
+			expect(returned).toBe(false);
+			expect(waitForIdle).not.toHaveBeenCalled();
+			active = true;
+			await fake.fire("agent_start", {});
+			await vi.waitFor(() => expect(waitForIdle).toHaveBeenCalledTimes(1));
+			expect(returned).toBe(false);
+		} finally {
+			settle();
+			await run;
+		}
+		expect(returned).toBe(true);
+	});
+
+	it.each(["tui", "rpc"])("does not wait for the triggered turn in %s mode", async (mode) => {
+		const fake = createFakePi();
+		initExtension(fake.pi as never);
+		const waitForIdle = vi.fn(async () => {});
+		await fake.commands.get("init")!.handler("", createFakeCtx({ mode, waitForIdle }));
+		expect(fake.sentUserMessages).toHaveLength(1);
+		expect(waitForIdle).not.toHaveBeenCalled();
+	});
+
 	it("submits it as a user turn", async () => {
 		const fake = createFakePi();
 		initExtension(fake.pi as never);
-		await fake.commands.get("init")!.handler("", createFakeCtx());
+		await fake.commands.get("init")!.handler("", createFakeCtx({ mode: "tui" }));
 		expect(fake.sentUserMessages).toEqual([{ content: INIT_PROMPT, options: { deliverAs: "followUp" } }]);
 	});
 });

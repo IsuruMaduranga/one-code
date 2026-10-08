@@ -12,15 +12,15 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { createUserMessageSender } from "../lib/notifications.ts";
 import { INIT_PROMPT } from "./prompt.ts";
 
 export default function initExtension(pi: ExtensionAPI) {
+	const sendUserMessage = createUserMessageSender(pi);
 	pi.registerCommand("init", {
 		description: "Initialize a new CLAUDE.md file with codebase documentation",
-		// sendUserMessage always triggers a turn and returns void; the async
-		// handler satisfies RegisteredCommand's Promise<void> contract.
-		handler: async () => {
-			pi.sendUserMessage(INIT_PROMPT, { deliverAs: "followUp" });
+		handler: async (_args, ctx) => {
+			await sendUserMessage(ctx, INIT_PROMPT, { deliverAs: "followUp" });
 		},
 	});
 }

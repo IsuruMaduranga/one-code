@@ -1,7 +1,8 @@
 /**
  * System-reminder queue — the steering mechanism shared by all One Code
  * extensions. Reminders are injected transiently into the outgoing request via
- * pi's `context` event; they are never written to the session file.
+ * pi's `context` event. Context and sticky snapshots are stored as hidden custom
+ * entries by the owner, never as rendered transcript messages.
  *
  * Cross-extension contract: emit on the event bus channel
  * `one-code:system-reminder` with `{ text, scope?, placement? }` to enqueue from
@@ -96,6 +97,8 @@ export type PinAnchor = { kind: "toolResult"; toolCallId: string } | { kind: "us
 export const CONTEXT_ORDER = {
 	environment: 1,
 	modelLine: 2,
+	/** One Code's note that a `-p`/json run ends with its turn (`lib/notifications.ts oneShotSessionNote`); not Claude Code's. */
+	oneShot: 3,
 	deferredTools: 10,
 	subagentModels: 20,
 	agents: 21,
@@ -132,6 +135,8 @@ export function movesToSystemRole(order: number): boolean {
 
 /** A drained reminder with everything the injector needs to place it. */
 export interface ReminderEntry {
+	/** Present in session snapshots; not rendered into the request. */
+	key?: string;
 	text: string;
 	placement: ReminderPlacement;
 	order: number;
@@ -246,6 +251,9 @@ export class ReminderQueue {
 	private pinned: StoredReminder[] = [];
 	private everyTurn = new Map<string, StoredReminder>();
 	private readonly now: () => number;
+	/** Only restored keys are protected; fresh sessions retain their existing emitter behavior. */
+	private restoredKeys = new Set<string>();
+	private pendingCapabilities = new Set<string>();
 
 	constructor(now: () => number = Date.now) {
 		this.now = now;
@@ -254,6 +262,10 @@ export class ReminderQueue {
 	enqueue(text: string, opts?: EnqueueOptions): void {
 		if (!text.trim()) return;
 		const placement = opts?.placement ?? "last-append";
+		if (placement === "first-prepend" && opts?.key) {
+			if (this.restoredKeys.has(opts.key)) return;
+			this.pendingCapabilities.delete(opts.key);
+		}
 		const entry: StoredReminder = {
 			text,
 			placement,
@@ -294,7 +306,62 @@ export class ReminderQueue {
 	}
 
 	remove(key: string): void {
-		this.everyTurn.delete(key);
+		if (!this.restoredKeys.has(key)) this.everyTurn.delete(key);
+		this.pendingCapabilities.delete(key);
+	}
+
+	/** Seed before startup emitters. Earlier hooks (context-budget) may already have emitted. */
+	restore(stack: readonly ReminderEntry[], sticky: readonly ReminderEntry[], frozenKeys: ReadonlySet<string>, liveKeys: ReadonlySet<string> = new Set()): void {
+		const early = [...this.everyTurn.values()];
+		this.everyTurn.clear();
+		this.pinned = [];
+		this.restoredKeys = new Set(frozenKeys);
+		this.pendingCapabilities = new Set(stack.flatMap((entry) => entry.key && liveKeys.has(entry.key) ? [entry.key] : []));
+		for (const entry of [...stack, ...sticky]) {
+			this.everyTurn.set(entry.key ?? entry.text, structuredClone(entry));
+		}
+		for (const entry of early) this.enqueue(entry.text, { ...entry, scope: "every-turn" });
+	}
+
+	/**
+	 * A session start with no snapshot (`/clear` after a resume): the previous
+	 * session's resume locks must not keep the new session's emitters out.
+	 */
+	releaseRestore(): void {
+		this.restoredKeys.clear();
+		this.pendingCapabilities.clear();
+	}
+
+	/** The first request has seen all startup/turn emitters. An absent capability is gone. */
+	finishRestore(): void {
+		for (const key of this.pendingCapabilities) this.everyTurn.delete(key);
+		this.pendingCapabilities.clear();
+	}
+
+	/** A compaction replaces these facts atomically, bypassing only their resume locks. */
+	replaceFirstPrepend(keys: readonly string[], entries: readonly ReminderEntry[]): void {
+		const replaced = new Set(keys);
+		for (const key of replaced) this.everyTurn.delete(key);
+		this.nextTurn = this.nextTurn.filter((entry) => !entry.key || !replaced.has(entry.key));
+		for (const entry of entries) {
+			if (entry.key && replaced.has(entry.key) && entry.placement === "first-prepend") {
+				this.everyTurn.set(entry.key, structuredClone(entry));
+			}
+		}
+	}
+
+	/** A new snapshot supersedes undelivered notices about its old facts. Delivered pins stay history. */
+	cancelPending(keys: readonly string[]): void {
+		const cancelled = new Set(keys);
+		this.nextTurn = this.nextTurn.filter((entry) => !entry.key || !cancelled.has(entry.key));
+	}
+
+	/** Hidden session metadata, preserving keys and insertion order without changing drain's API. */
+	persistentEntries(placement: "first-prepend" | "sticky-append"): ReminderEntry[] {
+		return [
+			...[...this.everyTurn.entries()].filter(([, entry]) => entry.placement === placement).map(([key, entry]) => ({ ...strip(entry), key })),
+			...this.nextTurn.filter((entry) => entry.placement === placement).map((entry) => ({ ...strip(entry), key: entry.key })),
+		];
 	}
 
 	/**

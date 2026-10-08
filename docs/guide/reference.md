@@ -185,6 +185,7 @@ The `CC_` prefix is historical; `ONECODE_`-prefixed aliases are planned.
 | `CC_SESSION_TITLE=0` | Turn off the automatic session title. |
 | `CC_RECAP_IDLE_MS` | Idle time before a recap, in milliseconds (default 300000). |
 | `CC_COMPACTION=0` | Use pi's compaction summary instead of Claude Code's. |
+| `CC_IDLE_COMPACT=0` | Turn off compaction of an idle session before its prompt cache expires. |
 | `CC_CLEAR_THINKING=0`, `=1` | Force the thinking-preservation request off or on for Anthropic models. Default: on for `api.anthropic.com` only. |
 | `CC_TOTAL_TOKENS=0` | Remove the `<total_tokens>` budget line. |
 | `CC_TOTAL_TOKENS_BUDGET` | The per-turn budget the line counts down from (default 15000000). |

@@ -22,14 +22,14 @@ import { restoreLatestDetails } from "../lib/branch-restore.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
-import { worktreeBashGuardReason } from "./guards.ts";
+import { namesGit, unlistedWorktreesReason, worktreeBashGuardReason } from "./guards.ts";
 import { worktreePowershellGuardReason } from "./powershell-guards.ts";
 import { bashParserReady } from "../lib/bash-parser.ts";
 import { ORIGINAL_COMMAND_CHANNEL, type OriginalCommandRecord } from "../lib/original-command.ts";
 import { enterWorktreeDescription, ENTER_WORKTREE_PARAMS, EXIT_WORKTREE_DESCRIPTION, EXIT_WORKTREE_PARAMS } from "./descriptions.ts";
 import { rewriteToolInput, validateWorktreeName } from "./rewrite.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
-import { HARNESS_GIT_CONFIG } from "../lib/git.ts";
+import { HARNESS_GIT_CONFIG, repositoryWorktrees } from "../lib/git.ts";
 import { projectConfigDir, projectConfigDirName } from "../lib/config-mode.ts";
 
 const run = promisify(execFile);
@@ -63,6 +63,13 @@ async function listWorktreePaths(cwd: string): Promise<string[]> {
 		.filter((line) => line.startsWith("worktree "))
 		.map((line) => line.slice("worktree ".length));
 }
+
+/**
+ * The worktree git-isolation guard, said when the session enters: before it,
+ * GPT-6 Sol and Astra both ran a read-only `git -C <main checkout> status`
+ * and met the refusal with no warning (2026-10-04 self-test).
+ */
+const ISOLATION_NOTE = "Git commands aimed at the main checkout or another worktree of this repository are refused until you exit.";
 
 export default function worktreeExtension(pi: ExtensionAPI) {
 	let state: WorktreeState | undefined;
@@ -100,6 +107,10 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => reconstructState(ctx));
 	pi.on("session_tree", (_event, ctx) => reconstructState(ctx));
 
+	/** The repository's worktrees for a git command's target check; undefined when git cannot list them. */
+	const otherWorktrees = async (command: string, cwd: string): Promise<string[] | undefined> =>
+		namesGit(command) ? repositoryWorktrees(cwd) : [];
+
 	pi.on("tool_call", async (event) => {
 		if (!state) return;
 		if (["enter_worktree", "exit_worktree", "Agent", "SendMessage", "workflow"].includes(event.toolName)) return;
@@ -111,7 +122,9 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 			const command = (event.input as Record<string, unknown>).command;
 			if (typeof command === "string") {
 				await bashParserReady();
-				const reason = worktreeBashGuardReason({ command, worktreePath: state.path, sharedRoot: state.sharedRoot });
+				const others = await otherWorktrees(command, state.path);
+				if (others === undefined) return { block: true, reason: unlistedWorktreesReason(state.path) };
+				const reason = worktreeBashGuardReason({ command, worktreePath: state.path, sharedRoot: state.sharedRoot, otherWorktrees: others });
 				if (reason) return { block: true, reason };
 			}
 		}
@@ -119,7 +132,9 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 			// The same invariants for PowerShell, the primary shell on Windows.
 			const command = (event.input as Record<string, unknown>).command;
 			if (typeof command === "string") {
-				const reason = worktreePowershellGuardReason({ command, worktreePath: state.path, sharedRoot: state.sharedRoot });
+				const others = await otherWorktrees(command, state.path);
+				if (others === undefined) return { block: true, reason: unlistedWorktreesReason(state.path) };
+				const reason = worktreePowershellGuardReason({ command, worktreePath: state.path, sharedRoot: state.sharedRoot, otherWorktrees: others });
 				if (reason) return { block: true, reason };
 			}
 		}
@@ -175,7 +190,7 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 				const next: WorktreeState = { path: target, branch, createdByUs: false, originalCwd: ctx.cwd, sharedRoot: repoRoot };
 				applyState(next);
 				return {
-					content: [{ type: "text", text: `Switched into existing worktree ${target}${branch ? ` (branch ${branch})` : ""}.${branchNote} All work now happens there; exit_worktree returns to ${ctx.cwd}.` }],
+					content: [{ type: "text", text: `Switched into existing worktree ${target}${branch ? ` (branch ${branch})` : ""}.${branchNote} All work now happens there; exit_worktree returns to ${ctx.cwd}. ${ISOLATION_NOTE}` }],
 					details: { worktreeState: next } satisfies WorktreeDetails,
 				};
 			}
@@ -216,7 +231,7 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 				content: [
 					{
 						type: "text",
-						text: `Created worktree ${path} on branch ${branch} (from HEAD ${baseCommit.slice(0, 8)}). All commands and relative paths now run there; exit_worktree returns to ${ctx.cwd}.`,
+						text: `Created worktree ${path} on branch ${branch} (from HEAD ${baseCommit.slice(0, 8)}). All commands and relative paths now run there; exit_worktree returns to ${ctx.cwd}. ${ISOLATION_NOTE}`,
 					},
 				],
 				details: { worktreeState: next } satisfies WorktreeDetails,

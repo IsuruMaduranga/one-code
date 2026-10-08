@@ -137,3 +137,34 @@ export function paginate(text: string, offset: number, maxChars: number): Page {
 		totalChars: text.length,
 	};
 }
+
+/** A redirect to another host: reported, not followed (Claude Code's rule). Not a failure. */
+export class CrossHostRedirect extends Error {
+	constructor(
+		readonly redirectUrl: string,
+		readonly status: number,
+	) {
+		super(`Redirects to a different host: ${redirectUrl}`);
+	}
+}
+
+/**
+ * Claude Code's WebFetch redirect result, with our tool name, and the prompt
+ * line only when the call had a prompt (ours is optional). Before it, the
+ * redirect read as a fetch failure ("Verify the URL and host, retry, or use
+ * web_search instead"), advice that does not apply.
+ */
+export function redirectMessage(originalUrl: string, redirect: CrossHostRedirect, prompt: string | undefined): string {
+	const statusText = redirect.status === 301 ? "Moved Permanently" : redirect.status === 308 ? "Permanent Redirect" : redirect.status === 307 ? "Temporary Redirect" : "Found";
+	return [
+		"REDIRECT DETECTED: The URL redirects to a different host.",
+		"",
+		`Original URL: ${originalUrl}`,
+		`Redirect URL: ${redirect.redirectUrl}`,
+		`Status: ${redirect.status} ${statusText}`,
+		"",
+		"To complete your request, I need to fetch content from the redirected URL. Please use web_fetch again with these parameters:",
+		`- url: "${redirect.redirectUrl}"`,
+		...(prompt ? [`- prompt: "${prompt}"`] : []),
+	].join("\n");
+}

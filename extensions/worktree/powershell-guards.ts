@@ -16,10 +16,10 @@
 
 import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
-import { isWithin, toAbsolute } from "../auto-mode/paths.ts";
+import { toAbsolute } from "../auto-mode/paths.ts";
 import { gitSubcommand } from "../auto-mode/shell-analysis.ts";
 import { powershellInjectionSyntax, powershellStatements, statementCommand } from "../permissions/powershell-rules.ts";
-import { isolated, stashReason, type WorktreeGuardContext } from "./guards.ts";
+import { containsPath, isolated, sharedRepositoryRoots, stashReason, type WorktreeGuardContext } from "./guards.ts";
 
 /** git as a word (`git`, `GIT`, `git.exe`); PowerShell resolves commands case-insensitively. */
 const mentionsGit = (text: string) => /\bgit(?:\.exe)?\b/i.test(text);
@@ -67,7 +67,9 @@ function locationTarget(args: string[]): string | undefined {
 	return positional;
 }
 
-export function worktreePowershellGuardReason({ command, worktreePath, sharedRoot }: WorktreeGuardContext): string | undefined {
+export function worktreePowershellGuardReason(context: WorktreeGuardContext): string | undefined {
+	const { command, worktreePath } = context;
+	const sharedRoots = sharedRepositoryRoots(context);
 	if (!mentionsGit(command)) return undefined;
 	const plainGit = `Run git as its own plain statement, with literal paths inside ${worktreePath} (no script blocks, call operators or nested shells).`;
 
@@ -141,8 +143,8 @@ export function worktreePowershellGuardReason({ command, worktreePath, sharedRoo
 
 		const targets = [effective, ...extraTargets];
 		for (const target of targets) {
-			if (isWithin(worktreePath, target)) continue;
-			if (isWithin(sharedRoot, target)) {
+			if (containsPath(worktreePath, target)) continue;
+			if (sharedRoots.some((root) => containsPath(root, target))) {
 				return isolated(
 					worktreePath,
 					`this git command targets ${target}, which is the shared checkout or another worktree of the same repository`,
@@ -150,7 +152,7 @@ export function worktreePowershellGuardReason({ command, worktreePath, sharedRoo
 				);
 			}
 		}
-		if (targets.some((target) => isWithin(worktreePath, target))) {
+		if (targets.some((target) => containsPath(worktreePath, target))) {
 			const { sub, rest } = gitSubcommand(args.map((value) => ({ value })));
 			if (sub === "stash") {
 				const reason = stashReason(rest);

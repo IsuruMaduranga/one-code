@@ -7,6 +7,7 @@ import {
 	searchTools,
 	type SearchableTool,
 	selectedNames,
+	selectedRequests,
 	toolNotFoundName,
 } from "../../extensions/lib/deferred.ts";
 
@@ -71,6 +72,16 @@ describe("searchTools", () => {
 
 	it("respects max_results", () => {
 		expect(searchTools("search message web notebook", tools, 2)).toHaveLength(2);
+	});
+});
+
+describe("selectedRequests", () => {
+	it("keeps the model's spelling beside the mapped name, so a miss quotes what was asked", () => {
+		expect(selectedRequests("select:find,grep,Glob")).toEqual([
+			{ name: "find", asWritten: "find" },
+			{ name: "grep", asWritten: "grep" },
+			{ name: "find", asWritten: "Glob" },
+		]);
 	});
 });
 

@@ -86,6 +86,17 @@ describe("mcpDelta", () => {
 		expect(delta.dropped).toEqual([]);
 		expect(delta.newFailures).toEqual([{ name: "a", error: "connection closed by the server" }]);
 	});
+
+	it("does not reannounce changes outside the instruction and failure text shown to the model", () => {
+		const announced = announcedFrom({
+			connected: [{ name: "a", instructions: `${"a".repeat(3_000)} hidden old suffix` }],
+			failed: [{ name: "bad", error: `${"x".repeat(300)}\nhidden old diagnostics` }],
+		});
+		expect(mcpDelta(announced, {
+			connected: [{ name: "a", instructions: `${"a".repeat(3_000)} hidden new suffix` }],
+			failed: [{ name: "bad", error: `${"x".repeat(300)}\nhidden new diagnostics` }],
+		})).toEqual({ newInstructions: [], newFailures: [], recovered: [], dropped: [] });
+	});
 });
 
 describe("mcpChangeNotices", () => {

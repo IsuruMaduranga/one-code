@@ -96,9 +96,50 @@ export function skillListingText(skills: ReadonlyArray<ListedSkill>, budget = Nu
 }
 
 /**
+ * The skills listing for a session without the skill tool: each skill's file,
+ * to read with `reader`. The same states as the tool's listing: user-only and
+ * off skills stay hidden, a name-only skill shows no description. Undefined
+ * when nothing is listable.
+ */
+export function readableSkillListing(
+	skills: ReadonlyArray<ListedSkill & { path?: string; kind?: string }>,
+	reader: string,
+): string | undefined {
+	const lines = skills
+		.filter((skill) => !skill.kind && !skill.disableModelInvocation && skill.path && skillListingVisibility(skill.state) !== "hidden")
+		.map((skill) => {
+			const text = skillListingVisibility(skill.state) === "full" ? listingDescription(skill) : "";
+			return `- ${skill.name}${text ? `: ${text}` : ""} (${skill.path})`;
+		});
+	if (lines.length === 0) return undefined;
+	return `The following skills provide specialized instructions for specific tasks. Read a skill's file with ${reader} when the task matches its description:\n\n${lines.join("\n")}`;
+}
+
+/**
  * Claude Code's reading of a boolean frontmatter flag such as
  * `disable-model-invocation`: `true` or the string `"true"`, nothing else.
  */
 export function frontmatterFlag(value: unknown): boolean {
 	return value === true || value === "true";
+}
+
+/**
+ * pi's own skills section in a rendered system prompt (`formatSkillsForPrompt`):
+ * pi 1.0 renders it as a `<skills>` section, older pi (the 0.84 floor)
+ * appends it after a blank line. Both start with this sentence.
+ */
+const PI_SKILLS_LEAD = "The following skills provide specialized instructions for specific tasks.";
+const PI_SKILLS_SECTION = /\n*<skills>\nThe following skills provide specialized instructions for specific tasks\.[\s\S]*?<\/available_skills>\n<\/skills>/;
+const PI_SKILLS_APPENDED = /\n\nThe following skills provide specialized instructions for specific tasks\.[\s\S]*?<\/available_skills>/;
+
+/**
+ * `prompt` without pi's own skills section ("Use the read tool to load a
+ * skill's file …" and its `<available_skills>` list), unchanged when it has
+ * none. A session with the skill tool lists skills for that tool instead, and
+ * a child agent's prompt (pi adds the section to an agent's own prompt)
+ * otherwise told it both "read the file" and "call the skill tool first".
+ */
+export function withoutPiSkillsBlock(prompt: string): string {
+	if (!prompt.includes(PI_SKILLS_LEAD)) return prompt;
+	return prompt.replace(PI_SKILLS_SECTION, "").replace(PI_SKILLS_APPENDED, "");
 }

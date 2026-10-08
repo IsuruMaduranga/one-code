@@ -34,7 +34,7 @@ import {
 import { perCwd } from "../lib/per-cwd.ts";
 import { type DescriptionForm, registerFormTool } from "../lib/tool-variants.ts";
 import { ccWrapBuiltinRenderers } from "../lib/tui-render.ts";
-import { writeDescription } from "./write-description.ts";
+import { editDescription, writeDescription } from "./write-description.ts";
 
 // The concrete definitions are each strongly typed to their own schema; this
 // extension treats them uniformly, so the spec is deliberately loose. Every
@@ -46,8 +46,8 @@ interface BuiltinSpec {
 	create: (cwd: string) => BuiltinDefinition;
 	title: (args: Record<string, unknown> | undefined) => string | undefined;
 	keepBaseCall?: boolean;
-	/** A description in place of pi's, by the session's description form. */
-	description?: (form: DescriptionForm) => string;
+	/** A description in place of pi's, by the session's description form; `base` is pi's own. */
+	description?: (form: DescriptionForm, base: string) => string;
 }
 
 const asSpecCreate = (create: (cwd: string) => unknown): BuiltinSpec["create"] =>
@@ -61,6 +61,7 @@ const BUILTINS: BuiltinSpec[] = [
 		create: asSpecCreate(createEditToolDefinition),
 		title: (a) => a?.path as string | undefined,
 		keepBaseCall: true,
+		description: (_form, base) => editDescription(base),
 	},
 	{ label: "Grep", create: asSpecCreate(createGrepToolDefinition), title: (a) => a?.pattern as string | undefined },
 	{ label: "Find", create: asSpecCreate(createFindToolDefinition), title: (a) => a?.pattern as string | undefined },
@@ -92,6 +93,6 @@ export default function toolStyleExtension(pi: ExtensionAPI) {
 			pi.registerTool(definition);
 			continue;
 		}
-		registerFormTool(pi, definition, describe);
+		registerFormTool(pi, definition, (form) => describe(form, base.description));
 	}
 }

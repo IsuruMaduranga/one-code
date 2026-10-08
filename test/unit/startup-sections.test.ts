@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
 import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	collectStartupSections,
 	contextFileNames,
@@ -18,7 +18,10 @@ function scratch(): string {
 	tmp.push(dir);
 	return dir;
 }
+// Discovery must use each test's temporary home, not the host's config override.
+beforeEach(() => vi.stubEnv("CLAUDE_CONFIG_DIR", undefined));
 afterEach(() => {
+	vi.unstubAllEnvs();
 	for (const dir of tmp.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -118,16 +121,15 @@ describe("workflowNames", () => {
 });
 
 describe("quietStartupEnabled", () => {
-	it("is true when the setting is true or \"header\", and false otherwise", () => {
-		const dir = scratch();
-		const path = join(dir, "settings.json");
-		writeFileSync(path, JSON.stringify({ quietStartup: true }));
-		expect(quietStartupEnabled(path)).toBe(true);
-		writeFileSync(path, JSON.stringify({ quietStartup: "header" }));
-		expect(quietStartupEnabled(path)).toBe(true);
-		writeFileSync(path, JSON.stringify({ quietStartup: false }));
-		expect(quietStartupEnabled(path)).toBe(false);
-		expect(quietStartupEnabled(join(dir, "missing.json"))).toBe(false);
+	it.each([
+		[true, true],
+		["header", true],
+		[false, false],
+		[undefined, false],
+		["true", false],
+		[null, false],
+	])("maps the effective value %j to %j", (value, expected) => {
+		expect(quietStartupEnabled(value)).toBe(expected);
 	});
 });
 

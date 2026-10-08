@@ -182,7 +182,7 @@ export function describeChanges(
 }
 
 export const UNREAD_REASON = (path: string, tool: string) =>
-	`Read ${path} before using ${tool} on it. The file exists and has not been read in this conversation, so an edit could silently discard content you have not seen.`;
+	`Read ${path} before using ${tool} on it. The file exists and has not been read in this conversation, so an edit could silently discard content you have not seen. A shell read counts only when its output showed the whole file (a plain \`cat\`); after a partial one (head, sed -n, a pipe, or output cut off at the size limit), use the read tool.`;
 
 export const STALE_REASON = (path: string) =>
 	`${path} has changed on disk since you last read it — someone else, a formatter, or a command may have modified it. Read it again before editing, or your change would overwrite theirs.`;

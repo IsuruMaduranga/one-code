@@ -105,6 +105,8 @@ import { reduceShellKey } from "./shell-panel.ts";
 import { trackShellTasks } from "../lib/shell-tasks.ts";
 import { createMarkdownProse } from "./prose.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
+import { CONTEXT_BASELINE_CHANNEL, restoredContext } from "../lib/context-stack.ts";
+import { emptySubagentBaseline, planSubagentAnnouncement, subagentBaseline, subagentBaselineFromStack, type SubagentBaseline } from "./announce.ts";
 
 /** How the guide's setup list names a server that is not connected. */
 const MCP_STATUS_LABELS: Record<McpStatusKind, string | undefined> = {
@@ -594,6 +596,11 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	// rewriting the menu and re-caching the conversation. A user's /model or
 	// /subagent still rewrites it.
 	let requestSent = false;
+	let restoredSession = false;
+	let capabilityBaseline: SubagentBaseline = emptySubagentBaseline();
+	const publishCapabilityBaseline = (baseline: SubagentBaseline) => {
+		pi.events.emit(CONTEXT_BASELINE_CHANNEL, { key: "subagents", value: baseline });
+	};
 	pi.on("context", () => {
 		requestSent = true;
 	});
@@ -610,25 +617,34 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 		const available = usableModels(ctx);
 		const configured = applicableSubagentDefault(loadSubagentDefault(os.homedir()), sessionModel);
 		const resolution = resolveAutoDefault(sessionModel, available, configured);
+		const text = subagentModelsReminder({
+			available, sessionModel, defaultModel: resolution.model, defaultSource: resolution.source, configured,
+			requireImageInput: supportsImageInput(sessionModel),
+		});
 		for (const notice of resolution.notices) notifyModelOnce(ctx, notice);
+		// Keep the established narrow refusal correction: it does not claim the
+		// entire menu was reprinted, and it remains useful on restored sessions.
 		if (refused !== undefined && requestSent) {
+			// The narrow correction is all the model needs now, but persist the
+			// corrected complete menu as announcement history. Otherwise the next
+			// process would compare the stale menu with the same live catalog and
+			// append a spurious full-menu correction on every resume.
+			capabilityBaseline = {
+				...capabilityBaseline,
+				models: text,
+				refusedModels: [...new Set([...capabilityBaseline.refusedModels, refused])],
+			};
+			publishCapabilityBaseline(capabilityBaseline);
 			pi.events.emit(REMINDER_CHANNEL, { text: refusedModelNote(refused, resolution.model) });
 			pi.events.emit(SUBAGENT_STATUS_CHANNEL, subagentStatusModel(configured, resolution));
 			return;
 		}
-		pi.events.emit(REMINDER_CHANNEL, {
-			text: subagentModelsReminder({
-				available,
-				sessionModel,
-				defaultModel: resolution.model,
-				defaultSource: resolution.source,
-				configured,
-				requireImageInput: supportsImageInput(sessionModel),
-			}),
-			scope: "every-turn",
-			key: "subagent-models",
-			placement: "first-prepend",
-			order: CONTEXT_ORDER.subagentModels,
+		const plan = planSubagentAnnouncement({ restored: restoredSession, baseline: capabilityBaseline, capability: "models", text });
+		capabilityBaseline = plan.baseline;
+		if (plan.kind !== "none") publishCapabilityBaseline(capabilityBaseline);
+		if (plan.kind === "addendum") pi.events.emit(REMINDER_CHANNEL, { text: plan.text });
+		else if (!restoredSession) pi.events.emit(REMINDER_CHANNEL, {
+			text, scope: "every-turn", key: "subagent-models", placement: "first-prepend", order: CONTEXT_ORDER.subagentModels,
 		});
 		pi.events.emit(SUBAGENT_STATUS_CHANNEL, subagentStatusModel(configured, resolution));
 	};
@@ -640,27 +656,26 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	 * byte-stable within a session, so it costs nothing in prompt-cache terms.
 	 */
 	const emitAgentCatalog = (ctx: ExtensionContext) => {
-		pi.events.emit(REMINDER_CHANNEL, {
-			scope: "every-turn",
-			key: "subagent-agents",
-			text: `Available agent types for the Agent tool:\n${describeAgents(ctx.cwd)}\n\nWhen you launch multiple agents for independent work, send them in a single message with multiple tool uses so they run concurrently.`,
-			placement: "first-prepend",
-			order: CONTEXT_ORDER.agents,
+		const text = `Available agent types for the Agent tool:\n${describeAgents(ctx.cwd)}\n\nWhen you launch multiple agents for independent work, send them in a single message with multiple tool uses so they run concurrently.`;
+		const plan = planSubagentAnnouncement({ restored: restoredSession, baseline: capabilityBaseline, capability: "agents", text });
+		capabilityBaseline = plan.baseline;
+		if (plan.kind !== "none") publishCapabilityBaseline(capabilityBaseline);
+		if (plan.kind === "addendum") pi.events.emit(REMINDER_CHANNEL, { text: plan.text });
+		else if (!restoredSession) pi.events.emit(REMINDER_CHANNEL, {
+			scope: "every-turn", key: "subagent-agents", text, placement: "first-prepend", order: CONTEXT_ORDER.agents,
 		});
 	};
 
 	const emitDelegationSteer = (sessionModel = lastCtx?.model) => {
-		if (resolveModelTier(sessionModel) === "tiny") {
-			pi.events.emit(REMINDER_CHANNEL, {
-				scope: "every-turn",
-				key: "subagent-delegation",
-				text: DELEGATION_STEER,
-				placement: "first-prepend",
-				order: CONTEXT_ORDER.delegation,
-			});
-		} else {
-			pi.events.emit(REMINDER_CHANNEL, { key: "subagent-delegation", remove: true });
-		}
+		const text = resolveModelTier(sessionModel) === "tiny" ? DELEGATION_STEER : null;
+		const plan = planSubagentAnnouncement({ restored: restoredSession, baseline: capabilityBaseline, capability: "delegation", text });
+		capabilityBaseline = plan.baseline;
+		if (plan.kind !== "none") publishCapabilityBaseline(capabilityBaseline);
+		if (plan.kind === "addendum") pi.events.emit(REMINDER_CHANNEL, { text: plan.text });
+		else if (!restoredSession && text !== null) pi.events.emit(REMINDER_CHANNEL, {
+			scope: "every-turn", key: "subagent-delegation", text, placement: "first-prepend", order: CONTEXT_ORDER.delegation,
+		});
+		else if (!restoredSession) pi.events.emit(REMINDER_CHANNEL, { key: "subagent-delegation", remove: true });
 	};
 
 	let shuttingDown = false;
@@ -703,6 +718,17 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 	});
 
 	pi.on("session_start", (_event, ctx) => {
+		const restored = restoredContext(pi.events);
+		restoredSession = restored !== undefined;
+		requestSent = restoredSession;
+		// New snapshots carry exact structured text; old v1 snapshots can still
+		// seed from their locked first-prepend blocks without rewriting them.
+		capabilityBaseline = subagentBaseline(restored?.baselines.subagents)
+			?? subagentBaselineFromStack(restored?.stack ?? []);
+		// A refusal correction is a real capability fact, not merely UI prose.
+		// Restore its selection floor before rebuilding the menu, otherwise this
+		// process can choose the same refused model and reissue a false correction.
+		for (const model of capabilityBaseline.refusedModels) unusableModels.add(model);
 		lastCtx = ctx;
 		// A replaced session (/clear, /new, /resume) never reaches this instance
 		// with the old one's agents: pi emits `session_shutdown` (reason "new" /
@@ -2303,7 +2329,8 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 
 		const record = registry.resolve(params.to);
 		if (!record) {
-			const known = registry.names().join(", ") || "(none)";
+			// Recorded runs only: a name reserved by a spawn that then failed validation is not addressable.
+			const known = registry.list().map((run) => run.name).join(", ") || "(none)";
 			return {
 				content: [
 					{

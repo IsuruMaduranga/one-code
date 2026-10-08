@@ -1,11 +1,54 @@
-import { resolve } from "node:path";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { worktreeBashGuardReason } from "../../extensions/worktree/guards.ts";
+import { namesGit, worktreeBashGuardReason } from "../../extensions/worktree/guards.ts";
 
 const WT = "/repo/.claude/worktrees/wt1";
 const guard = (command: string) => worktreeBashGuardReason({ command, worktreePath: WT, sharedRoot: "/repo" });
 
 describe("worktree git-isolation guard", () => {
+	it.skipIf(process.platform === "win32")("compares worktrees through a symlinked parent, as git lists them by real path", () => {
+		const real = realpathSync(mkdtempSync(join(tmpdir(), "wt-real-")));
+		const link = `${real}-link`;
+		symlinkSync(real, link);
+		try {
+			for (const dir of ["own", "sibling"]) mkdirSync(join(real, dir));
+			const reason = (command: string) => worktreeBashGuardReason({ command, worktreePath: join(link, "own"), sharedRoot: "/repo", otherWorktrees: [join(real, "own"), join(real, "sibling")] });
+			// A sibling spelled through the link is still a sibling.
+			expect(reason(`git -C ${join(link, "sibling")} status`)).toContain("another worktree of the same repository");
+			// The session's own worktree spelled by its real path is still its own.
+			expect(reason(`git -C ${join(real, "own")} status`)).toBeUndefined();
+			// A link inside the own worktree that leads to the sibling is the sibling.
+			symlinkSync(join(real, "sibling"), join(real, "own", "to-sibling"));
+			expect(reason(`git -C ${join(link, "own", "to-sibling")} status`)).toContain("another worktree of the same repository");
+			// A link inside the own worktree that leads to an unrelated repository is not this guard's concern.
+			mkdirSync(join(real, "unrelated"));
+			symlinkSync(join(real, "unrelated"), join(real, "own", "to-unrelated"));
+			const unrelated = worktreeBashGuardReason({ command: `git -C ${join(real, "own", "to-unrelated")} status`, worktreePath: join(real, "own"), sharedRoot: join(real, "own"), otherWorktrees: [join(real, "own")] });
+			expect(unrelated).toBeUndefined();
+		} finally {
+			rmSync(link, { force: true });
+			rmSync(real, { recursive: true, force: true });
+		}
+	});
+
+	// Uppercase too: the parse folds command names, as a case-insensitive filesystem and PowerShell do.
+	it("asks for the worktree list for every shell spelling of git", () => {
+		for (const command of [`g"it" -C /x status`, "\\git -C /x status", "$'\\x67it' -C /x status", "'g'it status", "env git status", "/usr/bin/git status", "xargs git log", "bash -c 'git status'", "GIT -C /x status", "Git.exe status"]) {
+			expect(namesGit(command), command).toBe(true);
+		}
+		expect(namesGit("ls -la && cat .gitignore")).toBe(false);
+	});
+
+	it("refuses git aimed at a linked worktree outside the shared checkout", () => {
+		const outside = resolve("/elsewhere/wt2");
+		const withSiblings = (command: string) => worktreeBashGuardReason({ command, worktreePath: WT, sharedRoot: "/repo", otherWorktrees: [resolve("/repo"), resolve(WT), outside] });
+		expect(withSiblings("git -C /elsewhere/wt2 status")).toContain("another worktree of the same repository");
+		expect(withSiblings("git status")).toBeUndefined();
+		expect(guard("git -C /elsewhere/wt2 status")).toBeUndefined();
+	});
+
 	it("allows git that targets the worktree", () => {
 		expect(guard("git status")).toBeUndefined();
 		expect(guard("git add . && git commit -m 'Add guards'")).toBeUndefined();

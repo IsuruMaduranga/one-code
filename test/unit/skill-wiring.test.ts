@@ -37,6 +37,7 @@ afterAll(() => {
 async function mount() {
 	const fake = createFakePi();
 	skillExtension(fake.pi as never);
+	fake.setActiveTools(["skill"]);
 	const ctx = createFakeCtx({ cwd, mode: "tui", hasUI: true });
 	await fake.fire("session_start", { reason: "startup" }, ctx);
 	return { fake, ctx };

@@ -30,7 +30,7 @@
 
 import { homedir } from "node:os";
 import { isAbsolute } from "node:path";
-import { isWithin, toAbsoluteBash } from "../auto-mode/paths.ts";
+import { isWithin, resolveForContainment, toAbsoluteBash } from "../auto-mode/paths.ts";
 import { gitSubcommand, INLINE_SCRIPT_SHELLS, isUnknownTilde, leadTokens, LOOPS, movesDirectory, parseCommand, resolvePayload, scopedTracker, type Token } from "../auto-mode/shell-analysis.ts";
 
 export interface WorktreeGuardContext {
@@ -39,7 +39,27 @@ export interface WorktreeGuardContext {
 	worktreePath: string;
 	/** Root of the shared checkout the worktree belongs to. */
 	sharedRoot: string;
+	/**
+	 * Every worktree of the repository (`git worktree list`). A linked worktree
+	 * can live outside the shared root, and git aimed at it is refused too.
+	 */
+	otherWorktrees?: readonly string[];
 }
+
+/**
+ * Whether a git target lies in a root, judged where both resolve: git lists
+ * worktrees by their real paths (`/private/var/…` on macOS) while the session
+ * and the model may spell a directory through a link (`/var/…`), and a link
+ * inside one worktree may lead anywhere. Lexical only when resolution fails.
+ */
+export const containsPath = (root: string, target: string): boolean => {
+	const resolvedRoot = resolveForContainment(root);
+	const resolvedTarget = resolveForContainment(target);
+	return resolvedRoot !== undefined && resolvedTarget !== undefined ? isWithin(resolvedRoot, resolvedTarget) : isWithin(root, target);
+};
+
+/** The roots a git command must not target: the shared checkout and every other worktree. */
+export const sharedRepositoryRoots = ({ sharedRoot, otherWorktrees }: Pick<WorktreeGuardContext, "sharedRoot" | "otherWorktrees">): string[] => [sharedRoot, ...(otherWorktrees ?? [])];
 
 /** Expansion syntax the guard cannot resolve statically. */
 const hasExpansion = (value: string) => /[$`]/.test(value);
@@ -47,6 +67,30 @@ const hasExpansion = (value: string) => /[$`]/.test(value);
 export const isolated = (worktreePath: string, problem: string, fix: string): string =>
 	`This session is isolated in the worktree ${worktreePath}, but ${problem}. ` +
 	`Refusing to run it — a worktree-isolated session's git operations must target its own worktree. ${fix}`;
+
+/**
+ * Whether a shell command may run git, so its targets need the repository's
+ * worktree list: any spelling the parse resolves to git (`g"it"`, `\\git`,
+ * `$'\\x67it'`, `env git`), git passed to a runner, git in a script a shell
+ * runs, or a line that does not parse. Over-matching costs one `git worktree list`.
+ */
+export function namesGit(command: string): boolean {
+	if (mentionsGit(command)) return true;
+	const { segments, parseFailed } = parseCommand(command);
+	if (parseFailed) return true;
+	return segments.some((seg) => {
+		const { command: cmd, args } = resolvePayload(leadTokens(seg));
+		return cmd === "git" || args.some((arg) => arg.value === "git" || mentionsGit(arg.value));
+	});
+}
+
+/** The worktree list could not be read, so a git command's target cannot be checked: refuse it. */
+export const unlistedWorktreesReason = (worktreePath: string): string =>
+	isolated(
+		worktreePath,
+		"the repository's worktrees could not be listed, so the repository this git command targets cannot be verified",
+		`Retry; if it keeps failing, run git from ${worktreePath} without -C, --git-dir or --work-tree.`,
+	);
 
 function stashMessage(form: string, hazard: string): string {
 	return (
@@ -100,8 +144,8 @@ const GIT_REPOSITORY_ENV = /^(GIT_DIR|GIT_WORK_TREE|GIT_COMMON_DIR)=/;
 const exportsLikeExport = (cmd: string, args: Token[]) =>
 	cmd === "export" || ((cmd === "declare" || cmd === "typeset") && args.some((arg) => /^-[a-zA-Z]*x/.test(arg.value)));
 
-export function worktreeBashGuardReason({ command, worktreePath, sharedRoot }: WorktreeGuardContext): string | undefined {
-	return guardScript(command, worktreePath, sharedRoot, worktreePath, 0).reason;
+export function worktreeBashGuardReason(context: WorktreeGuardContext): string | undefined {
+	return guardScript(context.command, context.worktreePath, sharedRepositoryRoots(context), context.worktreePath, 0).reason;
 }
 
 /**
@@ -169,7 +213,7 @@ const MAX_POSSIBLE_DIRS = 8;
 function guardScript(
 	command: string,
 	worktreePath: string,
-	sharedRoot: string,
+	sharedRoots: readonly string[],
 	startDir: string | undefined,
 	depth: number,
 ): { reason?: string; moves?: boolean } {
@@ -303,7 +347,7 @@ function guardScript(
 		if (INLINE_SCRIPT_SHELLS.has(cmd) || cmd === "eval") {
 			const scripts = cmd === "eval" ? [args.map((arg) => arg.value).join(" ")] : shellScripts(args);
 			for (const script of scripts) {
-				const nested = depth < 3 ? guardScript(script, worktreePath, sharedRoot, dir, depth + 1) : unverifiedScript(script, worktreePath, true);
+				const nested = depth < 3 ? guardScript(script, worktreePath, sharedRoots, dir, depth + 1) : unverifiedScript(script, worktreePath, true);
 				if (nested.reason) return nested.reason;
 				if (cmd === "eval" && nested.moves) dir = undefined;
 			}
@@ -417,8 +461,8 @@ function guardScript(
 
 		const targets = [effective, ...extraTargets];
 		for (const target of targets) {
-			if (isWithin(worktreePath, target)) continue;
-			if (isWithin(sharedRoot, target)) {
+			if (containsPath(worktreePath, target)) continue;
+			if (sharedRoots.some((root) => containsPath(root, target))) {
 				return isolated(
 					worktreePath,
 					`this git command targets ${target}, which is the shared checkout or another worktree of the same repository`,
@@ -431,7 +475,7 @@ function guardScript(
 		// The stash stack is per-repository and shared across its worktrees. Any
 		// shared-root target that is NOT inside the worktree already returned
 		// above, so only worktree-contained targets can reach this check.
-		if (targets.some((t) => isWithin(worktreePath, t))) {
+		if (targets.some((t) => containsPath(worktreePath, t))) {
 			const { sub, rest } = gitSubcommand(args);
 			if (sub === "stash") {
 				const reason = stashReason(rest);

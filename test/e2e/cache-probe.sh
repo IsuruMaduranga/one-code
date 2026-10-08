@@ -16,7 +16,8 @@
 # load re-caches the conversation by design (findings §7).
 #
 # It runs the repo's own pi (node_modules), the version One Code ships against,
-# not whatever `pi` is first on PATH; PI_BIN overrides that.
+# not whatever `pi` is first on PATH; PI_BIN overrides that. CACHE_PROBE_WORK_DIR
+# optionally names a new output directory without changing TMPDIR for test fixtures.
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 MODEL="${1:-anthropic/claude-sonnet-5}"
@@ -35,7 +36,12 @@ for arg in "$@"; do
 	fi
 done
 
-WORK="$(mktemp -d "${TMPDIR:-/tmp}/cache-probe.XXXXXX")"
+if [ -n "${CACHE_PROBE_WORK_DIR:-}" ]; then
+	WORK="$CACHE_PROBE_WORK_DIR"
+	mkdir "$WORK" # Must be new: never overwrite an earlier probe's evidence.
+else
+	WORK="$(mktemp -d "${TMPDIR:-/tmp}/cache-probe.XXXXXX")"
+fi
 PROJECT="$WORK/project"
 mkdir -p "$PROJECT"
 git -C "$PROJECT" init -q

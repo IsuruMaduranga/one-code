@@ -19,6 +19,22 @@ export { wrapPlainText as wrapPlanText } from "../lib/tui-render.ts";
 /** What the dialog resolves to; index into the choices list, or null for cancel. */
 export type PlanChoice = number;
 
+/**
+ * The approval through a plain select, for RPC: its `custom()` resolves
+ * undefined (findings §8), which read as "dismissed" and rejected every plan.
+ * The plan rides in the title; a reply that is no choice is a dismissal.
+ */
+export async function selectPlanChoice(
+	ui: { select(title: string, options: string[]): Promise<string | undefined> },
+	plan: string,
+	path: string,
+	choices: string[],
+): Promise<PlanChoice | null> {
+	const label = await ui.select(`Plan (${path}):\n\n${plan}\n\nApprove the plan?`, choices);
+	const index = label === undefined ? -1 : choices.indexOf(label);
+	return index >= 0 ? index : null;
+}
+
 export type ViewerKey =
 	| { kind: "scroll"; delta: number }
 	| { kind: "choice"; delta: number }

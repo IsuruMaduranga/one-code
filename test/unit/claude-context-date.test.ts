@@ -10,6 +10,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import claudeContextExtension from "../../extensions/claude-context/index.ts";
 import { dateChangeReminder, localDate } from "../../extensions/lib/claude-context.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
+import { DATE_CHANGE_KEY } from "../../extensions/lib/context-facts.ts";
+import { CONTEXT_FACTS_REFRESH_CHANNEL, type ContextFactsRefresh } from "../../extensions/lib/context-stack.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 
@@ -74,8 +76,8 @@ describe("claude-context date wiring", () => {
 		vi.setSystemTime(new Date(2026, 8, 27, 0, 10));
 		await fake.fireOne("before_agent_start", {}, createFakeCtx({ cwd: dir }));
 		expect(block()).toHaveLength(1);
-		const notices = reminders.filter((r) => r.key === undefined);
-		expect(notices).toEqual([{ text: dateChangeReminder("2026-09-27") }]);
+		const notices = reminders.filter((r) => r.key === DATE_CHANGE_KEY);
+		expect(notices).toEqual([{ key: DATE_CHANGE_KEY, text: dateChangeReminder("2026-09-27") }]);
 		expect(notices[0].text).toBe(
 			"The date has changed. Today's date is now 2026-09-27. No need to announce the new date — the user's own clock shows it.",
 		);
@@ -85,18 +87,14 @@ describe("claude-context date wiring", () => {
 		expect(datesAndNotices()).toHaveLength(2);
 	});
 
-	it("rebuilds the block with the new date after a compaction, when the prefix is new anyway", async () => {
+	it("silently refreshes the date with the rest of the facts after compaction", async () => {
+		const refreshes: ContextFactsRefresh[] = [];
+		fake.events.on(CONTEXT_FACTS_REFRESH_CHANNEL, (data) => refreshes.push(data as ContextFactsRefresh));
 		await fake.fireOne("session_start", {}, createFakeCtx({ cwd: dir }));
 		vi.setSystemTime(new Date(2026, 8, 27, 0, 10));
 		await fake.fireOne("session_compact", {}, createFakeCtx({ cwd: dir }));
-		expect(block()).toHaveLength(2);
-		expect(block()[1].text).toContain("Today's date is 2026-09-27.");
-		expect(block()[1].placement).toBe("first-prepend");
-		// The rebuilt block already says it: no notice follows.
+		expect(refreshes[0].entries.find((entry) => entry.key === "claude-context-date")?.text).toBe("Today's date is 2026-09-27.");
 		await fake.fireOne("before_agent_start", {}, createFakeCtx({ cwd: dir }));
-		expect(reminders.filter((r) => r.key === undefined)).toHaveLength(0);
-		// A compaction on the same day leaves the block alone.
-		await fake.fireOne("session_compact", {}, createFakeCtx({ cwd: dir }));
-		expect(block()).toHaveLength(2);
+		expect(reminders.filter((r) => r.key === DATE_CHANGE_KEY)).toHaveLength(0);
 	});
 });

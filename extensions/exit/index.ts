@@ -1,5 +1,5 @@
 /**
- * exit extension — Claude Code's `/exit`.
+ * exit extension — Claude Code's `/exit` and one-shot failure status.
  *
  * pi's built-in quit command is `/quit`; Claude Code's is `/exit` (with `quit`
  * shown as an alias). A user coming from Claude Code types `/exit` out of habit
@@ -17,8 +17,31 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { ONE_SHOT_COMMAND_FAILED_CHANNEL, type RunOutcome, RunOutcomeLatch } from "../lib/interrupt.ts";
 
 export default function exitExtension(pi: ExtensionAPI) {
+	const outcome = new RunOutcomeLatch();
+	let settled: RunOutcome | undefined;
+	pi.on("agent_end", (event, ctx) => {
+		outcome.record(event.messages, ctx.signal?.aborted);
+	});
+	pi.on("agent_settled", () => {
+		settled = outcome.take() ?? settled;
+	});
+	pi.events.on(ONE_SHOT_COMMAND_FAILED_CHANNEL, () => {
+		settled = "error";
+	});
+	pi.on("session_shutdown", (event, ctx) => {
+		if (ctx.mode !== "print" && ctx.mode !== "json") return;
+		if (event.reason !== "quit" || settled !== "error") return;
+		// pi 1.0.1 checks provider errors for text output, but not JSON. A print
+		// run may submit several prompts or replace the session (/clear), so a
+		// settled turn is not yet the process's final outcome. Commit only at
+		// final disposal, after retries/compaction and every prompt. main preserves
+		// this code when runPrintMode returns zero; never clear another failure.
+		if (process.exitCode === undefined || Number(process.exitCode) === 0) process.exitCode = 1;
+	});
+
 	pi.registerCommand("exit", {
 		description: "Quit One Code (same as /quit)",
 		handler: async (_args, ctx) => {

@@ -81,3 +81,30 @@ export function lastTouchesOnBranch(entries: readonly unknown[]): Map<string, nu
 export function keptReadPaths(kept: readonly unknown[]): string[] {
 	return [...successfulPathCalls(kept)].filter((call) => call.name === "read").map((call) => call.path);
 }
+
+/**
+ * Every bash call on the branch with its command and the text of its result,
+ * in result order: a resumed session re-checks which files those outputs
+ * showed in full (`shell-reads.ts`), against the files' current content.
+ */
+export function* shellCallsOnBranch(entries: readonly unknown[]): Generator<{ command: string; output: string }> {
+	const commands = new Map<string, string>();
+	for (const entry of entries) {
+		const e = entry as { type?: string; message?: BranchMessage };
+		if (e?.type !== "message" || !e.message) continue;
+		const m = e.message;
+		if (m.role === "assistant" && Array.isArray(m.content)) {
+			for (const block of m.content as ToolCallBlock[]) {
+				const command = block?.type === "toolCall" && block.name === "bash" ? block.arguments?.command : undefined;
+				if (typeof command === "string" && block.id) commands.set(block.id, command);
+			}
+		} else if (m.role === "toolResult" && m.toolCallId) {
+			const command = commands.get(m.toolCallId);
+			if (command === undefined || !Array.isArray(m.content)) continue;
+			const output = (m.content as { type?: string; text?: string }[])
+				.map((block) => (block?.type === "text" ? (block.text ?? "") : ""))
+				.join("\n");
+			yield { command, output };
+		}
+	}
+}

@@ -30,7 +30,8 @@
  * (`createTaskNotifier`, further down) is unchanged by the frame shape.
  */
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { RunOutcomeLatch } from "./interrupt.ts";
+import { withKeepAlive } from "../lsp/keep-alive.ts";
+import { ONE_SHOT_COMMAND_FAILED_CHANNEL, RunOutcomeLatch } from "./interrupt.ts";
 import { escapeXml } from "./local-command.ts";
 import { PROMPT_OPTIONS_CHANNEL } from "./prompt-options.ts";
 import { wrapReminder } from "./reminders.ts";
@@ -890,8 +891,90 @@ export function sessionOutlivesTurn(mode: ExtensionMode): boolean {
 	}
 }
 
+/**
+ * What a one-shot session (`-p`, `--mode json`) changes for the model, said
+ * before its first call. Without it the tool descriptions promise detached
+ * work, notifications and questions the session cannot deliver, and the model
+ * learns otherwise only from a result: in the 2026-10-04 Codex battery both
+ * GPT-6 models planned around background shells, agents, monitors, cron jobs
+ * and the question dialog, then had to retract. One Code's own text; Claude
+ * Code sends no such block.
+ */
+export function oneShotSessionNote(): string {
+	return [
+		"This is a non-interactive one-shot session: it ends when this turn ends, and nobody can reply before then.",
+		"- Work you start in the background (a shell command, an agent, a monitor) runs to completion before its call returns, and no notification follows. To overlap independent work, issue those calls together in one batch.",
+		"- Scheduled and recurring jobs never fire.",
+		"- No user can answer a question or approve a plan. State your assumption and proceed, or ask in your final reply and stop.",
+	].join("\n");
+}
+
 function assertNever(mode: never): never {
 	throw new Error(`Unhandled session mode: ${String(mode)}`);
+}
+
+/**
+ * Submit a user turn and keep a one-shot command alive through preflight AND
+ * settlement. Create once at extension factory scope, not once per command.
+ *
+ * Unlike sendMessage, sendUserMessage awaits input hooks/auth/before_agent_start
+ * before marking the run active. waitForIdle alone therefore returns too soon.
+ * Arm the start barrier before sending; then waitForIdle covers the whole run,
+ * including tools, follow-ups and retries. TUI/RPC retain fire-and-forget delivery.
+ *
+ * pi's void API reports preflight errors separately, without a completion event.
+ * Bound the start wait so an error or an input hook consuming the prompt cannot
+ * hang a print process forever. The timeout applies only to startup, not the run.
+ */
+export function createUserMessageSender(pi: Pick<ExtensionAPI, "on" | "sendUserMessage" | "events">) {
+	const pending = new Set<{ start(): void; stop(): void }>();
+	let active = true;
+	pi.on("agent_start", () => {
+		for (const waiter of pending) waiter.start();
+	});
+	pi.on("session_shutdown", () => {
+		active = false;
+		for (const waiter of pending) waiter.stop();
+		pending.clear();
+	});
+	// A replacement session (/new, /resume) reuses this extension instance:
+	// its commands report their failures again.
+	pi.on("session_start", () => {
+		active = true;
+	});
+	return async (
+		ctx: Parameters<typeof awaitOneShotTurn>[0],
+		content: Parameters<ExtensionAPI["sendUserMessage"]>[0],
+		options?: Parameters<ExtensionAPI["sendUserMessage"]>[1],
+	): Promise<void> => {
+		if (sessionOutlivesTurn(ctx.mode)) {
+			pi.sendUserMessage(content, options);
+			return;
+		}
+		await withKeepAlive(async () => {
+			let start!: () => void;
+			let fail!: (error: Error) => void;
+			const started = new Promise<void>((resolve, reject) => { start = resolve; fail = reject; });
+			const waiter = { start, stop: () => fail(new Error("Session shut down before the command's user turn started.")) };
+			const timer = setTimeout(() => fail(new Error("Command's user turn did not start within 30 seconds. Check model authentication and extension input hooks, then retry.")), 30_000);
+			pending.add(waiter);
+			try {
+				pi.sendUserMessage(content, options);
+				await started;
+			} finally {
+				clearTimeout(timer);
+				pending.delete(waiter);
+			}
+			await awaitOneShotTurn(ctx);
+		}).catch((error) => {
+			// pi logs command-handler rejections but runPrintMode still returns
+			// success. Tell the session's exit extension without touching the
+			// process-wide code here (a later prompt may succeed, or this may be
+			// a child). A shutdown rejection must not act on a disposed session.
+			if (active) pi.events.emit(ONE_SHOT_COMMAND_FAILED_CHANNEL, {});
+			throw error;
+		});
+	};
 }
 
 /**
@@ -907,8 +990,8 @@ function assertNever(mode: never): never {
  *
  * `waitForIdle()` exists on a command context; a plain event-handler context
  * (e.g. the `input` hook) only exposes `isIdle()`, so poll that as the fallback.
- * `pi.sendMessage` marks the run active synchronously, so `isIdle()` already
- * reads false by the time a caller reaches here.
+ * `pi.sendMessage` marks the run active synchronously. `sendUserMessage` does
+ * not: use createUserMessageSender for that API so its preflight finishes first.
  */
 export async function awaitOneShotTurn(ctx: {
 	mode: ExtensionMode;

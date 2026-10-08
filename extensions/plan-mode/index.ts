@@ -28,6 +28,7 @@ import { Type } from "typebox";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { oneCodeStateDir } from "../lib/paths.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
+import { CONTEXT_BASELINE_CHANNEL, restoredContext } from "../lib/context-stack.ts";
 import { ccToolRenderers, safeThemePaint } from "../lib/tui-render.ts";
 import { userDenialText } from "../lib/user-denial.ts";
 import type { PermissionMode } from "../permissions/matcher.ts";
@@ -42,7 +43,7 @@ import {
 	EXIT_PLAN_MODE_DESCRIPTION,
 	exitedPlanModeText,
 } from "./texts.ts";
-import { clampOffset, decodeViewerKey, initialPlanChoice, type PlanChoice, renderPlanViewer, wrapPlanText } from "./viewer.ts";
+import { clampOffset, decodeViewerKey, initialPlanChoice, type PlanChoice, renderPlanViewer, selectPlanChoice, wrapPlanText } from "./viewer.ts";
 
 import { MODE_CHANNEL, PLAN_FILE_CHANNEL, PLAN_FILE_ENTRY, planFileOnBranch } from "../lib/plan-mode-channels.ts";
 export { MODE_CHANNEL, PLAN_FILE_CHANNEL };
@@ -100,6 +101,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
 	const refresh = (ctx: ExtensionContext) => {
 		const path = ensurePlanFile(ctx);
 		planExistedAtEntry ??= existsSync(path);
+		pi.events.emit(CONTEXT_BASELINE_CHANNEL, { key: "plan-mode", value: { path, existed: planExistedAtEntry } });
 		pi.events.emit(PLAN_FILE_CHANNEL, { path });
 		pi.events.emit(REMINDER_CHANNEL, {
 			text: buildPlanModeReminder(path, planExistedAtEntry),
@@ -130,6 +132,14 @@ export default function planModeExtension(pi: ExtensionAPI) {
 
 	pi.on("session_start", (_event, ctx) => {
 		lastCtx = ctx;
+		const restored = restoredContext(pi.events);
+		const baseline = restored?.baselines["plan-mode"] as { path?: unknown; existed?: unknown } | undefined;
+		const path = planFileOnBranch(ctx.sessionManager.getBranch());
+		if (currentMode === "plan" && restored?.baselines["permission-mode"] === "plan" &&
+			path && baseline?.path === path && typeof baseline.existed === "boolean") {
+			planFilePath = path;
+			planExistedAtEntry = baseline.existed;
+		}
 	});
 
 	pi.on("before_agent_start", (_event, ctx) => {
@@ -242,7 +252,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
 			];
 			const choices = options.map((o) => o.label);
 
-			const choice = await ctx.ui.custom<PlanChoice | null>((tui, theme, _keybindings, done) => {
+			const choice = ctx.mode === "rpc" ? await selectPlanChoice(ctx.ui, plan, path, choices) : await ctx.ui.custom<PlanChoice | null>((tui, theme, _keybindings, done) => {
 				const paint = safeThemePaint(theme);
 				const maxVisible = 12;
 				let offset = 0;

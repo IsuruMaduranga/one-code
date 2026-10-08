@@ -23,6 +23,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { readFavorites, toggleFavorite } from "../lib/favorites.ts";
 import { announceArgumentHint, type CommandHint, frontmatterCommandHint } from "../lib/argument-hints.ts";
 import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } from "../lib/mcp-status.ts";
+import { createUserMessageSender } from "../lib/notifications.ts";
 import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
 import { setOverride } from "../lib/plugin-overrides.ts";
 import { pathWithinBase, pluginRoot } from "../lib/plugin-root.ts";
@@ -103,6 +104,7 @@ function safeDiscover(roots: ReturnType<typeof defaultDiscoverRoots>): Discovere
 }
 
 export default function pluginsExtension(pi: ExtensionAPI) {
+	const sendUserMessage = createUserMessageSender(pi);
 	// False once the session is replaced: a panel action still awaiting then
 	// throws on its first pi.* call, which is expected and not an error to show.
 	const alive = sessionAlive(pi);
@@ -122,7 +124,7 @@ export default function pluginsExtension(pi: ExtensionAPI) {
 				plugins.plugins.find((p) => p.name === command.plugin);
 			if (!plugin) continue;
 			registeredCommands.add(command.name);
-			registerPluginCommand(pi, plugin, command.name, command.path);
+			registerPluginCommand(pi, plugin, command.name, command.path, sendUserMessage);
 		}
 	};
 
@@ -514,7 +516,7 @@ export default function pluginsExtension(pi: ExtensionAPI) {
 	});
 }
 
-function registerPluginCommand(pi: ExtensionAPI, plugin: Plugin, name: string, path: string): void {
+function registerPluginCommand(pi: ExtensionAPI, plugin: Plugin, name: string, path: string, sendUserMessage: ReturnType<typeof createUserMessageSender>): void {
 	let description = `Command from the ${plugin.name} plugin`;
 	let argumentHint: CommandHint | undefined;
 	try {
@@ -548,7 +550,7 @@ function registerPluginCommand(pi: ExtensionAPI, plugin: Plugin, name: string, p
 			});
 			recordUsage(pluginRoot(getAgentDir()), "command", name);
 			// Deliver as a user turn, which is how Claude Code runs a command template.
-			pi.sendUserMessage(expanded);
+			await sendUserMessage(ctx, expanded);
 		},
 	});
 }

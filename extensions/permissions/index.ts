@@ -70,6 +70,7 @@ import { projectMemoryDir } from "../lib/memory.ts";
 import { sessionResultsDir } from "../lib/persisted-output.ts";
 import { privateSessionScratchpadDir } from "../lib/scratchpad.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, type ReminderPayload } from "../lib/reminders.ts";
+import { CONTEXT_BASELINE_CHANNEL, restoredContext } from "../lib/context-stack.ts";
 import {
 	decide,
 	extractSubject,
@@ -719,7 +720,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		return verdict;
 	};
 
-	const setMode = (next: PermissionMode) => {
+	/** `startup`: the session opens in this mode, so there is no switch to announce, only the mode's standing block. */
+	const setMode = (next: PermissionMode, startup = false) => {
 		mode = next;
 		process.env[MODE_ENV] = next;
 		// The standing block of the mode being left goes first, BEFORE the status
@@ -729,7 +731,11 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// becomes plan — removing the key afterwards would undo that re-add and
 		// leave a turn entered mid-stream with no plan reminder until the next
 		// prompt (STEERING-REVIEW-2026-09-05 M3). Auto installs its own block below.
-		if (mode !== "auto") pi.events.emit(REMINDER_CHANNEL, { remove: true, key: "permission-mode" });
+		const previousMode = restoredContext(pi.events)?.baselines["permission-mode"];
+		if (mode !== "auto" && !(startup && mode === "plan" && previousMode === "plan")) {
+			pi.events.emit(REMINDER_CHANNEL, { remove: true, key: "permission-mode" });
+		}
+		pi.events.emit(CONTEXT_BASELINE_CHANNEL, { key: "permission-mode", value: mode });
 		applyBadge();
 		// Every switch is announced once on the tail of the next request (the next
 		// tool result mid-turn, the prompt between turns), so the model learns of
@@ -744,10 +750,15 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 					? ` Only read-only tools are available now, plus one writable file: your plan file at ${planFilePath}. Build the plan there, then call exit_plan_mode.`
 					: " Only read-only tools are available now, plus the plan file named in the plan-mode reminder."
 				: "";
-		pi.events.emit(REMINDER_CHANNEL, {
-			text: `The user's permission mode is now "${mode}".${planNote}`,
-			key: "permission-mode-change",
-		});
+		// Not at startup: "is now" beside the mode's own standing block read as a
+		// duplicate to both GPT-6 models in the 2026-10-04 self-test, and Claude
+		// Code announces only a switch.
+		if (!startup) {
+			pi.events.emit(REMINDER_CHANNEL, {
+				text: `The user's permission mode is now "${mode}".${planNote}`,
+				key: "permission-mode-change",
+			});
+		}
 		if (mode === "auto") {
 			pi.events.emit(REMINDER_CHANNEL, {
 				text:
@@ -846,7 +857,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		// only emitter of the block; until 2026-09-05 startup called it for plan
 		// alone, so `--permission-mode auto` / `defaultMode: "auto"` sessions ran
 		// with no auto-mode reminder at all (STEERING-REVIEW-2026-09-05 H2).
-		if (STANDING_REMINDER_MODES.has(mode)) setMode(mode);
+		if (STANDING_REMINDER_MODES.has(mode)) setMode(mode, true);
 		process.env[MODE_ENV] = mode;
 	};
 
@@ -912,6 +923,13 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		protectedDirs = runtimeProtectedDirs();
 		secretPaths = runtimeSecretPaths(os.homedir());
 		reloadSettings(ctx);
+		// Stored mode is announcement history only: live settings/flags still
+		// decide the gate. A resume into another mode is an ordinary switch.
+		const restored = restoredContext(pi.events);
+		const previousMode = normalizePermissionMode(restored?.baselines["permission-mode"]);
+		if (restored && previousMode && previousMode !== mode) setMode(mode);
+		else if (restored && !STANDING_REMINDER_MODES.has(mode)) pi.events.emit(REMINDER_CHANNEL, { remove: true, key: "permission-mode" });
+		pi.events.emit(CONTEXT_BASELINE_CHANNEL, { key: "permission-mode", value: mode });
 		// The system prompt lists the workspace as the session starts (lib/workspace-channel.ts).
 		pi.events.emit(WORKSPACE_CHANNEL, { dirs: workspacePaths } satisfies WorkspaceAnnouncement);
 		applyBadge();

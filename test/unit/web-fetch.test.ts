@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { htmlToMarkdown, isSameHost, normalizeUrl, paginate } from "../../extensions/web-fetch/extract.ts";
+import { CrossHostRedirect, htmlToMarkdown, isSameHost, normalizeUrl, paginate, redirectMessage } from "../../extensions/web-fetch/extract.ts";
 
 describe("normalizeUrl", () => {
 	it("upgrades http to https and says so", () => {
@@ -105,5 +105,26 @@ describe("paginate", () => {
 	it("clamps an out-of-range offset instead of throwing", () => {
 		expect(paginate(text, 999, 10).text).toBe("");
 		expect(paginate(text, -5, 3).text).toBe("abc");
+	});
+});
+
+describe("redirectMessage", () => {
+	it("reports a cross-host redirect in Claude Code's shape, with the prompt line only when there was a prompt", () => {
+		const redirect = new CrossHostRedirect("https://example.com/", 302);
+		expect(redirectMessage("https://httpbin.org/redirect-to", redirect, "What is it?")).toBe(
+			[
+				"REDIRECT DETECTED: The URL redirects to a different host.",
+				"",
+				"Original URL: https://httpbin.org/redirect-to",
+				"Redirect URL: https://example.com/",
+				"Status: 302 Found",
+				"",
+				"To complete your request, I need to fetch content from the redirected URL. Please use web_fetch again with these parameters:",
+				'- url: "https://example.com/"',
+				'- prompt: "What is it?"',
+			].join("\n"),
+		);
+		expect(redirectMessage("https://a.com", new CrossHostRedirect("https://b.com/", 301), undefined)).not.toContain("prompt:");
+		expect(redirectMessage("https://a.com", new CrossHostRedirect("https://b.com/", 301), undefined)).toContain("Status: 301 Moved Permanently");
 	});
 });
