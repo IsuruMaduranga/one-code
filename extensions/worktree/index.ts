@@ -22,14 +22,14 @@ import { restoreLatestDetails } from "../lib/branch-restore.ts";
 import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
-import { worktreeBashGuardReason } from "./guards.ts";
+import { namesGit, unlistedWorktreesReason, worktreeBashGuardReason } from "./guards.ts";
 import { worktreePowershellGuardReason } from "./powershell-guards.ts";
 import { bashParserReady } from "../lib/bash-parser.ts";
 import { ORIGINAL_COMMAND_CHANNEL, type OriginalCommandRecord } from "../lib/original-command.ts";
 import { enterWorktreeDescription, ENTER_WORKTREE_PARAMS, EXIT_WORKTREE_DESCRIPTION, EXIT_WORKTREE_PARAMS } from "./descriptions.ts";
 import { rewriteToolInput, validateWorktreeName } from "./rewrite.ts";
 import { ccToolRenderers } from "../lib/tui-render.ts";
-import { HARNESS_GIT_CONFIG } from "../lib/git.ts";
+import { HARNESS_GIT_CONFIG, repositoryWorktrees } from "../lib/git.ts";
 import { projectConfigDir, projectConfigDirName } from "../lib/config-mode.ts";
 
 const run = promisify(execFile);
@@ -107,9 +107,9 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 	pi.on("session_start", (_event, ctx) => reconstructState(ctx));
 	pi.on("session_tree", (_event, ctx) => reconstructState(ctx));
 
-	/** The repository's worktrees, for a git command's target check; empty when git cannot list them. */
-	const otherWorktrees = async (command: string, cwd: string): Promise<string[]> =>
-		/\bgit\b/i.test(command) ? listWorktreePaths(cwd).then((paths) => paths.map((path) => resolve(path)), () => []) : [];
+	/** The repository's worktrees for a git command's target check; undefined when git cannot list them. */
+	const otherWorktrees = async (command: string, cwd: string): Promise<string[] | undefined> =>
+		namesGit(command) ? repositoryWorktrees(cwd) : [];
 
 	pi.on("tool_call", async (event) => {
 		if (!state) return;
@@ -122,7 +122,9 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 			const command = (event.input as Record<string, unknown>).command;
 			if (typeof command === "string") {
 				await bashParserReady();
-				const reason = worktreeBashGuardReason({ command, worktreePath: state.path, sharedRoot: state.sharedRoot, otherWorktrees: await otherWorktrees(command, state.path) });
+				const others = await otherWorktrees(command, state.path);
+				if (others === undefined) return { block: true, reason: unlistedWorktreesReason(state.path) };
+				const reason = worktreeBashGuardReason({ command, worktreePath: state.path, sharedRoot: state.sharedRoot, otherWorktrees: others });
 				if (reason) return { block: true, reason };
 			}
 		}
@@ -130,7 +132,9 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 			// The same invariants for PowerShell, the primary shell on Windows.
 			const command = (event.input as Record<string, unknown>).command;
 			if (typeof command === "string") {
-				const reason = worktreePowershellGuardReason({ command, worktreePath: state.path, sharedRoot: state.sharedRoot, otherWorktrees: await otherWorktrees(command, state.path) });
+				const others = await otherWorktrees(command, state.path);
+				if (others === undefined) return { block: true, reason: unlistedWorktreesReason(state.path) };
+				const reason = worktreePowershellGuardReason({ command, worktreePath: state.path, sharedRoot: state.sharedRoot, otherWorktrees: others });
 				if (reason) return { block: true, reason };
 			}
 		}

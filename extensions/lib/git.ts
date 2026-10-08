@@ -33,6 +33,20 @@ export function gitStatusOutput(cwd: string, args: readonly string[]): Promise<s
 }
 
 /**
+ * Every worktree of the repository `cwd` belongs to (`git worktree list`),
+ * main checkout included, in native resolved form; undefined when git could
+ * not list them. The worktree guards refuse git aimed at any of them.
+ */
+export async function repositoryWorktrees(cwd: string): Promise<string[] | undefined> {
+	const out = await gitStatusOutput(cwd, ["worktree", "list", "--porcelain"]);
+	if (out === undefined) return undefined;
+	return out
+		.split("\n")
+		.filter((line) => line.startsWith("worktree "))
+		.map((line) => resolve(line.slice("worktree ".length)));
+}
+
+/**
  * The nearest checkout root at or above `startDir`: the directory holding a
  * `.git` entry (a directory for a main checkout, a file for a linked worktree
  * or a submodule). This is the bound for walking up a checkout (context files,

@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import os from "node:os";
 import { join, resolve } from "node:path";
@@ -56,8 +57,21 @@ describe("worktreeGuardFactory", () => {
 		}
 	});
 
+	it("refuses git when the repository's worktrees cannot be listed", async () => {
+		const { handler, cwd } = guardedCwd();
+		registerWorktreeIsolation(cwd, "/repo");
+		try {
+			const result = await handler({ toolName: "bash", input: { command: "git status" } });
+			expect(result?.block).toBe(true);
+			expect(result?.reason).toContain("worktrees could not be listed");
+		} finally {
+			releaseWorktreeIsolation(cwd);
+		}
+	});
+
 	it("lets clean git and non-bash tools through", async () => {
 		const { handler, cwd } = guardedCwd();
+		execFileSync("git", ["init", "-q"], { cwd });
 		registerWorktreeIsolation(cwd, "/repo");
 		try {
 			expect(await handler({ toolName: "bash", input: { command: "git status" } })).toBeUndefined();

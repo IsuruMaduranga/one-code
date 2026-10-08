@@ -56,6 +56,17 @@ export const isolated = (worktreePath: string, problem: string, fix: string): st
 	`This session is isolated in the worktree ${worktreePath}, but ${problem}. ` +
 	`Refusing to run it — a worktree-isolated session's git operations must target its own worktree. ${fix}`;
 
+/** Whether a command names git, so its targets need the repository's worktree list. */
+export const namesGit = (command: string): boolean => /\bgit\b/i.test(command);
+
+/** The worktree list could not be read, so a git command's target cannot be checked: refuse it. */
+export const unlistedWorktreesReason = (worktreePath: string): string =>
+	isolated(
+		worktreePath,
+		"the repository's worktrees could not be listed, so the repository this git command targets cannot be verified",
+		`Retry; if it keeps failing, run git from ${worktreePath} without -C, --git-dir or --work-tree.`,
+	);
+
 function stashMessage(form: string, hazard: string): string {
 	return (
 		`Blocked: \`${form}\` — the git stash stack is shared between the main checkout and every worktree of this repository, and parallel sessions may push or pop entries concurrently; ${hazard}. ` +

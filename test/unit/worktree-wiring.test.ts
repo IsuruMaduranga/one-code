@@ -67,6 +67,18 @@ describe("monitor in a worktree session", () => {
 		expect(result?.reason).toContain(`isolated in the worktree ${worktree}`);
 	});
 
+	it("refuses git aimed at a linked worktree outside the shared checkout", async () => {
+		const outside = join(realpathSync.native(mkdtempSync(join(tmpdir(), "worktree-outside-"))), "wt2");
+		execFileSync("git", ["worktree", "add", "-q", "-b", "outside", outside], { cwd: repo });
+		try {
+			const result = await toolCall("bash", { command: `git -C ${shellQuote(outside)} status` });
+			expect(result?.block).toBe(true);
+			expect(result?.reason).toContain("another worktree of the same repository");
+		} finally {
+			rmSync(outside, { recursive: true, force: true });
+		}
+	});
+
 	it("leaves a WebSocket monitor alone", async () => {
 		const input = { ws: { url: "wss://example.test" }, description: "socket" };
 		expect(await toolCall("monitor", input)).toBeUndefined();
