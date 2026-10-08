@@ -43,6 +43,22 @@ describe("askThroughDialogs", () => {
 		expect(result).toMatchObject({ kind: "submit", answers: [{ selected: [CHAT] }] });
 	});
 
+	it("keeps two options that share a label selectable, and previews the one picked", async () => {
+		const twins: Question = {
+			question: "Which?",
+			header: "Pick",
+			multiSelect: true,
+			options: [{ label: "Fast", description: "cached" }, { label: "Fast", description: "uncached" }],
+		};
+		const { ui, shown } = scripted([optionRow(twins.options[0]), optionRow(twins.options[1])]);
+		const result = await askThroughDialogs([twins], ui);
+		expect(shown[1].options).toContain(optionRow(twins.options[1]));
+		expect(result).toMatchObject({ kind: "submit", answers: [{ selected: ["Fast", "Fast"] }] });
+		const single: Question = { question: "Which?", header: "Pick", options: [{ label: "Fast", description: "a", preview: "A" }, { label: "Fast", description: "b", preview: "B" }] };
+		const second = await askThroughDialogs([single], scripted([optionRow(single.options[1])]).ui);
+		expect(second).toMatchObject({ kind: "submit", answers: [{ preview: "B" }] });
+	});
+
 	it("asks again after a blank typed answer instead of submitting nothing", async () => {
 		const { ui, shown } = scripted([TYPE_OWN, "   ", TYPE_OWN, "Masonry"]);
 		const result = await askThroughDialogs([layout], ui);

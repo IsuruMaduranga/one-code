@@ -36,16 +36,18 @@ export async function askThroughDialogs(questions: Question[], ui: DialogUI): Pr
 		// when a row collides with another option or one of our control rows.
 		const numbered = new Set(plainRows).size !== plainRows.length || plainRows.some((row) => [DONE, TYPE_OWN, CHAT].includes(row));
 		const rows = plainRows.map((row, index) => (numbered ? `${index + 1}. ${row}` : row));
-		const selected: string[] = [];
+		// By option index: two options may share a label (with different descriptions).
+		const selected: number[] = [];
+		const labels = () => selected.map((index) => question.options[index].label);
 		let typed: string | undefined;
 		for (;;) {
 			const choices = [
-				...question.options.flatMap((option, index) => (selected.includes(option.label) ? [] : [rows[index]])),
+				...rows.flatMap((row, index) => (selected.includes(index) ? [] : [row])),
 				...(question.multiSelect && selected.length > 0 ? [DONE] : []),
 				TYPE_OWN,
 				CHAT,
 			];
-			const picked = await ui.select(question.multiSelect && selected.length > 0 ? `${title} (selected: ${selected.join(", ")})` : title, choices);
+			const picked = await ui.select(question.multiSelect && selected.length > 0 ? `${title} (selected: ${labels().join(", ")})` : title, choices);
 			if (picked === undefined) return { kind: "cancel", answers };
 			if (picked === CHAT) return { kind: "chat" };
 			if (picked === DONE) break;
@@ -57,13 +59,13 @@ export async function askThroughDialogs(questions: Question[], ui: DialogUI): Pr
 				typed = text;
 				break;
 			}
-			const option = question.options[rows.indexOf(picked)];
-			if (!option) return { kind: "cancel", answers };
-			selected.push(option.label);
+			const index = rows.indexOf(picked);
+			if (index < 0) return { kind: "cancel", answers };
+			selected.push(index);
 			if (!question.multiSelect || selected.length === question.options.length) break;
 		}
-		const all = typed === undefined ? selected : [...selected, typed];
-		const single = !question.multiSelect && selected.length === 1 ? question.options.find((o) => o.label === selected[0]) : undefined;
+		const all = typed === undefined ? labels() : [...labels(), typed];
+		const single = !question.multiSelect && selected.length === 1 ? question.options[selected[0]] : undefined;
 		answers.push({
 			question: question.question,
 			header: question.header,
