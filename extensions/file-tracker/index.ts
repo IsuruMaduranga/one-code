@@ -458,9 +458,11 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 	pi.on("agent_start", () => {
 		// A turn aborted mid-batch can leave ids behind; each turn starts from a
 		// clean set so the mid-turn scan cannot be wedged off for the rest of the
-		// session. A write blocked before it ran left its existence entry behind.
+		// session. A write blocked before it ran left its existence entry behind,
+		// and a blocked or aborted bash call its snapshot of file contents.
 		executing.clear();
 		writeTargetExisted.clear();
+		shellSnapshots.clear();
 		reportExternalChanges();
 		return undefined;
 	});
