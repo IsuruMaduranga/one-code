@@ -151,17 +151,26 @@ export interface RuleOptions {
 	processed?: Set<string>;
 	/** Normal CLI user rules allow external includes; project/managed rules need approval. */
 	includeExternal?: boolean;
+	/**
+	 * The directory a project file belongs to (`<dir>` for `<dir>/.claude/CLAUDE.md`).
+	 * A file linked out of both it and the cwd is an external include, like an import.
+	 */
+	ownerDir?: string;
 }
 
 /** lJ: parent first, separate parsed imports, canonical dedupe, depths zero through four. */
-export function readRuleInstructions(path: string, opts: Pick<RuleOptions, "cwd" | "home" | "scope" | "processed" | "includeExternal">): RuleFile[] {
+export function readRuleInstructions(path: string, opts: Pick<RuleOptions, "cwd" | "home" | "scope" | "processed" | "includeExternal" | "ownerDir">): RuleFile[] {
 	const includeExternal = opts.includeExternal ?? opts.scope === "User";
 	const processed = opts.processed ?? new Set<string>();
 	const realCwd = tryRealpath(opts.cwd) ?? opts.cwd;
 	const inside = (target: string) => isPathAtOrUnder(target, realCwd);
+	const realOwner = opts.ownerDir === undefined ? undefined : tryRealpath(opts.ownerDir) ?? opts.ownerDir;
 	const load = (path: string, depth = 0): RuleFile[] => {
 		const key = tryRealpath(path);
 		if (!key || depth >= 5 || processed.has(comparablePath(key)) || (depth > 0 && !includeExternal && !inside(key))) return [];
+		// One Code addition: a project file linked out of the project is an include the user must approve.
+		const linkedOut = depth === 0 && realOwner !== undefined && !inside(key) && !isPathAtOrUnder(key, realOwner);
+		if (linkedOut && !includeExternal) return [];
 		try {
 			const stat = statSync(key);
 			if (!stat.isFile() || (opts.scope === "User" && !includeExternal && (stat.nlink > 1 || (depth === 0 && isLink(path))))) return [];

@@ -551,7 +551,7 @@ export function discoverContextFiles(opts: DiscoveryOptions & {
 		// project location: leave its legacy bytes alone when no new files exist.
 		const dotClaude = descriptor === PROJECT_DESCRIPTOR && basename(dirname(path)) === ".claude" && basename(path) === "CLAUDE.md";
 		if (dotClaude || descriptor === MANAGED_DESCRIPTOR) {
-			for (const file of readRuleInstructions(path, { cwd: opts.cwd, home: opts.home, scope: descriptor === MANAGED_DESCRIPTOR ? "Managed" : "Project" })) appendParsed(file, descriptor);
+			for (const file of readRuleInstructions(path, { cwd: opts.cwd, home: opts.home, scope: descriptor === MANAGED_DESCRIPTOR ? "Managed" : "Project", ...(dotClaude ? { ownerDir: dirname(dirname(path)) } : {}) })) appendParsed(file, descriptor);
 			continue;
 		}
 		if (parsedShown.has(key)) continue;

@@ -273,6 +273,18 @@ describe("discoverRules", () => {
 });
 
 describe("rules in Claude context discovery", () => {
+	it("skips a .claude/CLAUDE.md linked to a file outside the project, but loads one linked inside", () => {
+		const cwd = join(fixture, "project");
+		mkdirSync(join(cwd, ".claude"), { recursive: true });
+		const outside = write(fixture, "outside/secret.md", "OUTSIDE SECRET");
+		symlinkSync(outside, join(cwd, ".claude", "CLAUDE.md"));
+		const opts = { cwd, home: fixture, homeClaudeDir: join(fixture, "user"), managedDir: join(fixture, "managed") };
+		expect(JSON.stringify(discoverContextFiles(opts))).not.toContain("OUTSIDE SECRET");
+		rmSync(join(cwd, ".claude", "CLAUDE.md"));
+		symlinkSync(write(cwd, "docs/rules.md", "LINKED INSIDE RULES"), join(cwd, ".claude", "CLAUDE.md"));
+		expect(JSON.stringify(discoverContextFiles(opts))).toContain("LINKED INSIDE RULES");
+	});
+
 	it("does not alter legacy prefix bytes when the new instruction locations are absent", () => {
 		const cwd = join(fixture, "project");
 		const path = write(cwd, "CLAUDE.md", "  legacy whitespace\n\n");
