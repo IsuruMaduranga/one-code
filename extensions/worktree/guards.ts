@@ -56,8 +56,21 @@ export const isolated = (worktreePath: string, problem: string, fix: string): st
 	`This session is isolated in the worktree ${worktreePath}, but ${problem}. ` +
 	`Refusing to run it — a worktree-isolated session's git operations must target its own worktree. ${fix}`;
 
-/** Whether a command names git, so its targets need the repository's worktree list. */
-export const namesGit = (command: string): boolean => /\bgit\b/i.test(command);
+/**
+ * Whether a shell command may run git, so its targets need the repository's
+ * worktree list: any spelling the parse resolves to git (`g"it"`, `\\git`,
+ * `$'\\x67it'`, `env git`), git passed to a runner, git in a script a shell
+ * runs, or a line that does not parse. Over-matching costs one `git worktree list`.
+ */
+export function namesGit(command: string): boolean {
+	if (mentionsGit(command)) return true;
+	const { segments, parseFailed } = parseCommand(command);
+	if (parseFailed) return true;
+	return segments.some((seg) => {
+		const { command: cmd, args } = resolvePayload(leadTokens(seg));
+		return cmd === "git" || args.some((arg) => arg.value === "git" || mentionsGit(arg.value));
+	});
+}
 
 /** The worktree list could not be read, so a git command's target cannot be checked: refuse it. */
 export const unlistedWorktreesReason = (worktreePath: string): string =>

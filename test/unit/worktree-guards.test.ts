@@ -1,11 +1,18 @@
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { worktreeBashGuardReason } from "../../extensions/worktree/guards.ts";
+import { namesGit, worktreeBashGuardReason } from "../../extensions/worktree/guards.ts";
 
 const WT = "/repo/.claude/worktrees/wt1";
 const guard = (command: string) => worktreeBashGuardReason({ command, worktreePath: WT, sharedRoot: "/repo" });
 
 describe("worktree git-isolation guard", () => {
+	it("asks for the worktree list for every shell spelling of git", () => {
+		for (const command of [`g"it" -C /x status`, "\\git -C /x status", "$'\\x67it' -C /x status", "'g'it status", "env git status", "/usr/bin/git status", "xargs git log", "bash -c 'git status'"]) {
+			expect(namesGit(command), command).toBe(true);
+		}
+		expect(namesGit("ls -la && cat .gitignore")).toBe(false);
+	});
+
 	it("refuses git aimed at a linked worktree outside the shared checkout", () => {
 		const outside = resolve("/elsewhere/wt2");
 		const withSiblings = (command: string) => worktreeBashGuardReason({ command, worktreePath: WT, sharedRoot: "/repo", otherWorktrees: [resolve("/repo"), resolve(WT), outside] });
