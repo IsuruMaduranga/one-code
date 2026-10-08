@@ -30,7 +30,7 @@
 
 import { homedir } from "node:os";
 import { isAbsolute } from "node:path";
-import { isWithin, toAbsoluteBash } from "../auto-mode/paths.ts";
+import { isWithin, resolveForContainment, toAbsoluteBash } from "../auto-mode/paths.ts";
 import { gitSubcommand, INLINE_SCRIPT_SHELLS, isUnknownTilde, leadTokens, LOOPS, movesDirectory, parseCommand, resolvePayload, scopedTracker, type Token } from "../auto-mode/shell-analysis.ts";
 
 export interface WorktreeGuardContext {
@@ -45,6 +45,14 @@ export interface WorktreeGuardContext {
 	 */
 	otherWorktrees?: readonly string[];
 }
+
+/**
+ * Containment as written and through symlinks: git lists worktrees by their
+ * real paths (`/private/var/…` on macOS) while the session and the model may
+ * spell the same directory through a link (`/var/…`).
+ */
+export const containsPath = (root: string, target: string): boolean =>
+	isWithin(root, target) || isWithin(resolveForContainment(root) ?? root, resolveForContainment(target) ?? target);
 
 /** The roots a git command must not target: the shared checkout and every other worktree. */
 export const sharedRepositoryRoots = ({ sharedRoot, otherWorktrees }: Pick<WorktreeGuardContext, "sharedRoot" | "otherWorktrees">): string[] => [sharedRoot, ...(otherWorktrees ?? [])];
@@ -449,8 +457,8 @@ function guardScript(
 
 		const targets = [effective, ...extraTargets];
 		for (const target of targets) {
-			if (isWithin(worktreePath, target)) continue;
-			if (sharedRoots.some((root) => isWithin(root, target))) {
+			if (containsPath(worktreePath, target)) continue;
+			if (sharedRoots.some((root) => containsPath(root, target))) {
 				return isolated(
 					worktreePath,
 					`this git command targets ${target}, which is the shared checkout or another worktree of the same repository`,
@@ -463,7 +471,7 @@ function guardScript(
 		// The stash stack is per-repository and shared across its worktrees. Any
 		// shared-root target that is NOT inside the worktree already returned
 		// above, so only worktree-contained targets can reach this check.
-		if (targets.some((t) => isWithin(worktreePath, t))) {
+		if (targets.some((t) => containsPath(worktreePath, t))) {
 			const { sub, rest } = gitSubcommand(args);
 			if (sub === "stash") {
 				const reason = stashReason(rest);

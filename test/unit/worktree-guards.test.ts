@@ -1,4 +1,6 @@
-import { resolve } from "node:path";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { namesGit, worktreeBashGuardReason } from "../../extensions/worktree/guards.ts";
 
@@ -6,6 +8,23 @@ const WT = "/repo/.claude/worktrees/wt1";
 const guard = (command: string) => worktreeBashGuardReason({ command, worktreePath: WT, sharedRoot: "/repo" });
 
 describe("worktree git-isolation guard", () => {
+	it.skipIf(process.platform === "win32")("compares worktrees through a symlinked parent, as git lists them by real path", () => {
+		const real = realpathSync(mkdtempSync(join(tmpdir(), "wt-real-")));
+		const link = `${real}-link`;
+		symlinkSync(real, link);
+		try {
+			for (const dir of ["own", "sibling"]) mkdirSync(join(real, dir));
+			const reason = (command: string) => worktreeBashGuardReason({ command, worktreePath: join(link, "own"), sharedRoot: "/repo", otherWorktrees: [join(real, "own"), join(real, "sibling")] });
+			// A sibling spelled through the link is still a sibling.
+			expect(reason(`git -C ${join(link, "sibling")} status`)).toContain("another worktree of the same repository");
+			// The session's own worktree spelled by its real path is still its own.
+			expect(reason(`git -C ${join(real, "own")} status`)).toBeUndefined();
+		} finally {
+			rmSync(link, { force: true });
+			rmSync(real, { recursive: true, force: true });
+		}
+	});
+
 	// Uppercase too: the parse folds command names, as a case-insensitive filesystem and PowerShell do.
 	it("asks for the worktree list for every shell spelling of git", () => {
 		for (const command of [`g"it" -C /x status`, "\\git -C /x status", "$'\\x67it' -C /x status", "'g'it status", "env git status", "/usr/bin/git status", "xargs git log", "bash -c 'git status'", "GIT -C /x status", "Git.exe status"]) {
