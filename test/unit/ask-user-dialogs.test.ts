@@ -35,6 +35,21 @@ const langs: Question = {
 };
 
 describe("askThroughDialogs", () => {
+	it("numbers the options when one is labelled like a control row, so picking it selects it", async () => {
+		const clash: Question = { question: "Next?", header: "Next", options: [{ label: CHAT }, { label: "Ship" }] };
+		const { ui, shown } = scripted([`1. ${CHAT}`]);
+		const result = await askThroughDialogs([clash], ui);
+		expect(shown[0].options).toEqual([`1. ${CHAT}`, "2. Ship", TYPE_OWN, CHAT]);
+		expect(result).toMatchObject({ kind: "submit", answers: [{ selected: [CHAT] }] });
+	});
+
+	it("asks again after a blank typed answer instead of submitting nothing", async () => {
+		const { ui, shown } = scripted([TYPE_OWN, "   ", TYPE_OWN, "Masonry"]);
+		const result = await askThroughDialogs([layout], ui);
+		expect(shown.map((s) => s.kind)).toEqual(["select", "input", "select", "input"]);
+		expect(result).toMatchObject({ kind: "submit", answers: [{ selected: ["Masonry"], freeform: true }] });
+	});
+
 	it("asks a single-select question with the options, a typed answer and chat rows", async () => {
 		const { ui, shown } = scripted([optionRow(layout.options[0])]);
 		const result = await askThroughDialogs([layout], ui);

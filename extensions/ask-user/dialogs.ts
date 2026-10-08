@@ -31,13 +31,16 @@ export async function askThroughDialogs(questions: Question[], ui: DialogUI): Pr
 	const answers: Answer[] = [];
 	for (const question of questions) {
 		const title = `${question.header}: ${question.question}`;
-		const rows = question.options.map(optionRow);
+		const plainRows = question.options.map(optionRow);
+		// RPC identifies a selection by its displayed string. Number every option
+		// when a row collides with another option or one of our control rows.
+		const numbered = new Set(plainRows).size !== plainRows.length || plainRows.some((row) => [DONE, TYPE_OWN, CHAT].includes(row));
+		const rows = plainRows.map((row, index) => (numbered ? `${index + 1}. ${row}` : row));
 		const selected: string[] = [];
 		let typed: string | undefined;
 		for (;;) {
-			const remaining = question.options.filter((option) => !selected.includes(option.label));
 			const choices = [
-				...remaining.map(optionRow),
+				...question.options.flatMap((option, index) => (selected.includes(option.label) ? [] : [rows[index]])),
 				...(question.multiSelect && selected.length > 0 ? [DONE] : []),
 				TYPE_OWN,
 				CHAT,
@@ -49,7 +52,9 @@ export async function askThroughDialogs(questions: Question[], ui: DialogUI): Pr
 			if (picked === TYPE_OWN) {
 				const text = (await ui.input(title, "Type something."))?.trim();
 				if (text === undefined) return { kind: "cancel", answers };
-				if (text) typed = text;
+				// A blank answer is no answer: ask the question again.
+				if (!text) continue;
+				typed = text;
 				break;
 			}
 			const option = question.options[rows.indexOf(picked)];
