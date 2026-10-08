@@ -7,10 +7,12 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import skillExtension from "../../extensions/skill/index.ts";
 import { withoutPiSkillsBlock } from "../../extensions/skill/listing.ts";
 import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
+import { pluginRoot } from "../../extensions/lib/plugin-root.ts";
+import { setSkillState } from "../../extensions/lib/skill-overrides.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 // pi's own renderer, by file: the strip must match what the installed pi produces.
 import { buildSystemPrompt } from "../../node_modules/@earendil-works/pi-coding-agent/dist/core/system-prompt.js";
@@ -43,7 +45,9 @@ describe("withoutPiSkillsBlock", () => {
 });
 
 describe("skill extension: one skills instruction per session", () => {
-	const turn = async (active: string[]) => {
+	afterEach(() => vi.unstubAllEnvs());
+
+	const turn = async (active: string[], extra: Array<{ name: string; description: string }> = []) => {
 		const fake = createFakePi();
 		skillExtension(fake.pi as never);
 		fake.setActiveTools(active);
@@ -55,7 +59,7 @@ describe("skill extension: one skills instruction per session", () => {
 		const cwd = mkdtempSync(join(tmpdir(), "skill-pi-section-"));
 		const ctx = createFakeCtx({ cwd, mode: "tui", hasUI: true });
 		await fake.fire("session_start", { reason: "startup" }, ctx);
-		const skills = [{ name: "demo", description: "A demo skill", filePath: join(cwd, "demo", "SKILL.md") }];
+		const skills = [{ name: "demo", description: "A demo skill" }, ...extra].map((skill) => ({ ...skill, filePath: join(cwd, skill.name, "SKILL.md") }));
 		const result = await fake.fireOne<{ systemPrompt?: string }>(
 			"before_agent_start",
 			{ prompt: "hi", systemPrompt: `You are an agent.${PI_SECTION}`, systemPromptOptions: { skills } },
@@ -77,5 +81,23 @@ describe("skill extension: one skills instruction per session", () => {
 		expect(listings[0]).toContain("Read a skill's file with the read tool when the task matches its description");
 		expect(listings[0]).toMatch(/- demo: A demo skill \(.*demo[\\/]SKILL\.md\)/);
 		expect(listings[0]).not.toContain("Skill tool");
+	});
+
+	it("without the skill tool: hides user-only and off skills, and a name-only skill's description", async () => {
+		const agentDir = mkdtempSync(join(tmpdir(), "skill-pi-section-agent-"));
+		vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
+		setSkillState(pluginRoot(agentDir), "project:hidden", "user-only");
+		setSkillState(pluginRoot(agentDir), "project:gone", "off");
+		setSkillState(pluginRoot(agentDir), "project:terse", "name-only");
+		const { listings } = await turn(["read", "bash"], [
+			{ name: "hidden", description: "Secret steps" },
+			{ name: "gone", description: "Disabled steps" },
+			{ name: "terse", description: "Long description" },
+		]);
+		expect(listings[0]).toContain("- demo: A demo skill");
+		expect(listings[0]).toMatch(/- terse \(.*terse[\\/]SKILL\.md\)/);
+		expect(listings[0]).not.toContain("Long description");
+		expect(listings[0]).not.toContain("hidden");
+		expect(listings[0]).not.toContain("gone");
 	});
 });

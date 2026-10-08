@@ -33,6 +33,7 @@ import {
 	type SkillScope,
 	type SkillState,
 	skillOverrideKey,
+	skillListingVisibility,
 	skillStateFor,
 } from "../lib/skill-overrides.ts";
 import { BUNDLED_SKILLS_DIR, estimateSkillTokens, promptTemplateNames, scanSkills, scopeForPath } from "../lib/skill-scan.ts";
@@ -343,9 +344,11 @@ export default function skillExtension(pi: ExtensionAPI) {
 	/** The skills listing for a session without the skill tool: each skill's file, to read. */
 	const readableListing = (reader: string): string | undefined => {
 		const lines = index()
-			.filter((skill) => !skill.kind && !skill.disableModelInvocation && skill.path)
+			// The same override semantics as the tool's listing: user-only and off
+			// skills stay hidden, a name-only skill shows no description.
+			.filter((skill) => !skill.kind && !skill.disableModelInvocation && skill.path && skillListingVisibility(skill.state) !== "hidden")
 			.map((skill) => {
-				const text = listingDescription(skill);
+				const text = skillListingVisibility(skill.state) === "full" ? listingDescription(skill) : "";
 				return `- ${skill.name}${text ? `: ${text}` : ""} (${skill.path})`;
 			});
 		if (lines.length === 0) return undefined;
