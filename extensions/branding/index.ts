@@ -305,7 +305,11 @@ export default function brandingExtension(pi: ExtensionAPI) {
 	 * near the 0.84.3 floor without it falls back to the global file alone.
 	 */
 	const effectiveQuietStartup = (agentDir: string): unknown => {
-		if (typeof (pi as { getSettings?: unknown }).getSettings === "function") return pi.getSettings().quietStartup;
+		try {
+			if (typeof (pi as { getSettings?: unknown }).getSettings === "function") return pi.getSettings().quietStartup;
+		} catch {
+			// The banner must still install: fall back to the global file.
+		}
 		try {
 			return (JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf8")) as { quietStartup?: unknown }).quietStartup;
 		} catch {
