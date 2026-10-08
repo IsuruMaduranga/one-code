@@ -89,6 +89,9 @@ function readMemoryIndex(cwd: string): { path: string; content: string } | null 
 	}
 }
 
+/** A tool result and the nested instruction files it carried into context (`remember`). */
+const NESTED_SHOWN_ENTRY = "one-code:nested-instructions-shown";
+
 export default function claudeContextExtension(pi: ExtensionAPI) {
 	const resetConsentDialogs = installConsentDialogs(pi.events);
 	/** The account email stand-in, resolved at session start. */
@@ -124,8 +127,23 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	const remember = (toolCallId: string | undefined, keys: Iterable<string>) => {
 		if (!toolCallId) return;
 		const shown = shownByResult.get(toolCallId) ?? new Set<string>();
+		const before = shown.size;
 		for (const key of keys) shown.add(key);
-		if (shown.size) shownByResult.set(toolCallId, shown);
+		if (shown.size === before) return;
+		shownByResult.set(toolCallId, shown);
+		// Recorded on the branch, so a resume or a /tree switch knows what is already in context.
+		pi.appendEntry(NESTED_SHOWN_ENTRY, { toolCallId, keys: [...shown] });
+	};
+	/** Rebuild what the branch's own results showed (a resume, a /tree switch), then keep what is still in context. */
+	const restoreAttachments = (ctx: ExtensionContext) => {
+		shownByResult.clear();
+		for (const entry of ctx.sessionManager.getBranch() as { type: string; customType?: string; data?: unknown }[]) {
+			if (entry.type !== "custom" || entry.customType !== NESTED_SHOWN_ENTRY) continue;
+			const data = entry.data as { toolCallId?: unknown; keys?: unknown } | undefined;
+			if (typeof data?.toolCallId !== "string" || !Array.isArray(data.keys)) continue;
+			shownByResult.set(data.toolCallId, new Set(data.keys.filter((key): key is string => typeof key === "string")));
+		}
+		keepRetainedAttachments(ctx);
 	};
 	const keepRetainedAttachments = (ctx: ExtensionContext) => {
 		attachedNested = new Set(startupShown);
@@ -292,6 +310,7 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		}
 		if (restored) {
 			adoptSnapshot(restored);
+			restoreAttachments(ctx);
 			rule = instructionRule(os.homedir());
 			gitStatus = null; // The stored snapshot wins; do not take another one.
 			publishBaseline();
@@ -435,8 +454,7 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 			if (pendingResume) pendingResume = branch;
 			publishBaseline();
 		}
-		attachedNested = new Set(startupShown);
-		shownByResult.clear();
+		restoreAttachments(ctx);
 		pendingNested.clear();
 	});
 
