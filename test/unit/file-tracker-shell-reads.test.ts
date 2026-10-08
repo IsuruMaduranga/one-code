@@ -30,6 +30,9 @@ describe("shellReadCandidates", () => {
 		expect(shellReadCandidates('for f in CLAUDE.md src/a.py; do printf "%s" "$f"; cat "$f"; done')).toEqual(
 			expect.arrayContaining(["CLAUDE.md", "src/a.py"]),
 		);
+		const absolute = shellReadCandidates('for f in /tmp/a.txt; do cat "$f"; done');
+		expect(absolute).toContain("/tmp/a.txt");
+		expect(absolute).not.toContain("tmp/a.txt");
 	});
 
 	it("offers nothing without a reader command, or when the line does not parse", () => {

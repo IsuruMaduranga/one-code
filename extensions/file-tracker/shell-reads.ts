@@ -74,8 +74,8 @@ export function expandCandidate(word: string, readdir: (dir: string) => string[]
 	return names.filter((name) => !name.startsWith(".") && pattern.test(name)).map((name) => (dir ? `${dir}/${name}` : name)).slice(0, MAX_CANDIDATES);
 }
 
-/** A word that could be a file path as written: no quoting, expansion or glob characters. */
-const PATH_WORD = /(?<![\w$\-])[\w.@+~][\w.@+~/,-]*/g;
+/** A word that could be a file path as written, absolute or relative: no quoting, expansion or glob characters. */
+const PATH_WORD = /(?<![\w$\-/])\/?[\w.@+~][\w.@+~/,-]*/g;
 /** A word with a glob character, which the shell would expand (`src/*.py`). */
 const GLOB_WORD = /(?<![\w$\-])[\w.@+~/,-]*[*?[][\w.@+~/,*?[\]-]*/g;
 const MAX_CANDIDATES = 50;
