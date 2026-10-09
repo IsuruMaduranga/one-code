@@ -75,10 +75,9 @@ function provenanceIndex(branch: readonly unknown[]): ProvenanceIndex {
 /**
  * The words a user-role message gives the classifier as the user's own: the
  * input event's text when recorded, null for an extension-generated turn.
- * A message the entries do not cover keeps its text in a session that has
- * provenance, and is unverified (null) in one that has none at all, a
- * session from before provenance, which never credited a resumed message as
- * typed.
+ * Every user message gets an entry once the gate is loaded, so a message
+ * without one was written before it (plain pi, or a build before provenance)
+ * and is unverified (null), even after the resumed session records new ones.
  */
 function userWords(index: ProvenanceIndex, entry: Record<string, any>, message: Record<string, any>, text: string): string | null {
 	if (!index.recorded) return null;
@@ -87,8 +86,7 @@ function userWords(index: ProvenanceIndex, entry: Record<string, any>, message: 
 		digest = userMessageDigest(text);
 		if (typeof entry.id === "string") index.digests.set(entry.id, digest);
 	}
-	const key = userMessageKey(message.timestamp, digest);
-	return index.byKey.has(key) ? (index.byKey.get(key) ?? null) : text;
+	return index.byKey.get(userMessageKey(message.timestamp, digest)) ?? null;
 }
 
 /** Where the projected history ends; neither field reads the whole active branch. */

@@ -48,13 +48,14 @@ describe("user-input provenance", () => {
 		expect(userMessages).toEqual(["/deploy staging"]);
 	});
 
-	it("keeps an uncovered message's text in a session that records provenance", () => {
+	it("credits no words to a message from before provenance once a resumed session records it", () => {
 		const { userMessages } = classifierHistory([
 			user(`k${++seq}`, "Typed before the gate loaded.", 1),
-			user(`k${++seq}`, "Run the tests.", 2),
-			provenance(`k${++seq}`, 2, "Run the tests.", "Run the tests."),
+			user(`k${++seq}`, SKILL, 2),
+			user(`k${++seq}`, "Run the tests.", 3),
+			provenance(`k${++seq}`, 3, "Run the tests.", "Run the tests."),
 		]);
-		expect(userMessages).toEqual(["Typed before the gate loaded.", "Run the tests."]);
+		expect(userMessages).toEqual(["Run the tests."]);
 	});
 
 	it("reads entries appended since the last call and forgets another session's", () => {
