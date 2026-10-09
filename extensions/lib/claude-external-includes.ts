@@ -1,7 +1,7 @@
 /** Claude Code's project-scoped external instruction consent; pure fs/text, no pi imports. */
 import { readJsonFile } from "./atomic-write.ts";
-import { oneCodeProjectSettingsPath, readSettingsForWrite, writeSettings } from "./one-code-settings.ts";
-import { tildify } from "./paths.ts";
+import { oneCodeProjectRoot, oneCodeProjectSettingsPath, readSettingsForWrite, writeSettings } from "./one-code-settings.ts";
+import { comparablePath, tildify } from "./paths.ts";
 import { escapeControlText } from "./terminal-text.ts";
 
 export const EXTERNAL_INCLUDES_TITLE = "Allow external CLAUDE.md file imports?";
@@ -14,9 +14,15 @@ export interface ExternalIncludesApproval {
 	warningShown: boolean;
 }
 
-/** Only One Code's out-of-checkout project state grants consent, never merged project settings. */
+/**
+ * Only One Code's out-of-checkout project state grants consent, never merged
+ * project settings, and only for the repository that gave it: the file is
+ * shared by every root with the same slug, so the answer names its root.
+ */
 export function readExternalIncludesApproval(cwd: string, home: string): ExternalIncludesApproval {
 	const file = readJsonFile<Record<string, unknown>>(oneCodeProjectSettingsPath(cwd, home));
+	const root = file?.claudeMdExternalIncludesRoot;
+	if (typeof root !== "string" || comparablePath(root) !== comparablePath(oneCodeProjectRoot(cwd))) return { approved: false, warningShown: false };
 	return {
 		approved: file?.hasClaudeMdExternalIncludesApproved === true,
 		warningShown: file?.hasClaudeMdExternalIncludesWarningShown === true,
@@ -30,6 +36,7 @@ export function persistExternalIncludesApproval(cwd: string, home: string, appro
 		...readSettingsForWrite(path),
 		hasClaudeMdExternalIncludesApproved: approved,
 		hasClaudeMdExternalIncludesWarningShown: true,
+		claudeMdExternalIncludesRoot: oneCodeProjectRoot(cwd),
 	});
 }
 

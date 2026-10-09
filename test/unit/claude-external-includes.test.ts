@@ -351,6 +351,21 @@ describe("durable approval and dialog fidelity", () => {
 		expect(safetyControlWrite({ cwd: alias, home, toolName: "write", input: { path: oneCodeProjectSettingsPath(cwd, home) } })).toBeDefined();
 	});
 
+	it("keeps an approval to the repository that gave it, though another root shares its settings file", () => {
+		const trusted = join(root, "acme_app");
+		const clone = join(root, "acme-app");
+		mkdirSync(trusted);
+		mkdirSync(clone);
+		expect(oneCodeProjectSettingsPath(clone, home)).toBe(oneCodeProjectSettingsPath(trusted, home));
+		persistExternalIncludesApproval(trusted, home, true);
+		expect(readExternalIncludesApproval(trusted, home)).toEqual({ approved: true, warningShown: true });
+		expect(readExternalIncludesApproval(clone, home)).toEqual({ approved: false, warningShown: false });
+		// An answer stored before the root was recorded counts as none.
+		const path = oneCodeProjectSettingsPath(trusted, home);
+		write(path, JSON.stringify({ hasClaudeMdExternalIncludesApproved: true, hasClaudeMdExternalIncludesWarningShown: true }));
+		expect(readExternalIncludesApproval(trusted, home)).toEqual({ approved: false, warningShown: false });
+	});
+
 	it("round-trips other keys, treats malformed/non-boolean values as no approval, and never writes Claude state", () => {
 		const path = oneCodeProjectSettingsPath(cwd, home);
 		write(path, JSON.stringify({ unrelated: 7, hasClaudeMdExternalIncludesApproved: "true" }));

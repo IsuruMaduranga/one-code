@@ -38,8 +38,17 @@ export function oneCodeSettingsPath(home: string, env: NodeJS.ProcessEnv = proce
  * worktrees and subdirectories), else the cwd — the same slug the memory dir uses.
  */
 export function oneCodeProjectSettingsPath(cwd: string, home: string, env: NodeJS.ProcessEnv = process.env): string {
+	return join(oneCodeStateDir(env, home), "projects", projectSlug(oneCodeProjectRoot(cwd)), "settings.json");
+}
+
+/**
+ * The resolved project root a per-repo settings file belongs to. The slug is
+ * lossy (`acme_app` and `acme-app` share one file), so a setting that must
+ * not carry over between repositories also stores this and checks it.
+ */
+export function oneCodeProjectRoot(cwd: string): string {
 	const root = findProjectRoot(cwd) ?? cwd;
-	return join(oneCodeStateDir(env, home), "projects", projectSlug(tryRealpath(root) ?? root), "settings.json");
+	return tryRealpath(root) ?? root;
 }
 
 /**
