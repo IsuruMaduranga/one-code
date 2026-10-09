@@ -387,7 +387,8 @@ export class ReminderQueue {
 	 * and its pins come back, so its messages keep the bytes they were sent
 	 * with. Live state stays live: other first-prepend blocks keep their
 	 * current text, and a lifetime open on the branch stays open only while its
-	 * owner still holds it, else it closes on its recorded carriers. What the
+	 * owner still holds it, else it closes on its recorded carriers. A live
+	 * lifetime the branch shows closed goes on as a new one from now. What the
 	 * branch left behind put here stays until a drain finds its carriers gone.
 	 */
 	restoreBranch(snapshot: { stack: readonly ReminderEntry[]; sticky: readonly ReminderEntry[]; pinned?: readonly ReminderEntry[] }, factKeys: readonly string[]): void {
@@ -402,6 +403,14 @@ export class ReminderQueue {
 			else entry.until = now;
 		}
 		this.sticky = [...restored, ...this.sticky.filter((current) => !restored.some((entry) => same(entry, current)))];
+		// The branch's carriers keep their closed copy of a lifetime still live here.
+		for (const [key, live] of this.everyTurn) {
+			if (live.placement !== "sticky-append" || live.until !== undefined || this.sticky.includes(live)) continue;
+			const { toolCallId: _call, tailPin: _pin, opener: _opener, ...state } = live;
+			const reopened: StoredReminder = { ...state, key, since: now, userPins: [] };
+			this.everyTurn.set(key, reopened);
+			this.sticky.push(reopened);
+		}
 		const pinned: StoredReminder[] = structuredClone([...(snapshot.pinned ?? [])]);
 		const known = new Set(pinned.map((entry) => JSON.stringify(strip(entry))));
 		this.pinned = [...pinned, ...this.pinned.filter((entry) => !known.has(JSON.stringify(strip(entry))))];

@@ -207,6 +207,22 @@ describe("injectReminders", () => {
 		expect(injectReminders(turn2b, q.drain(turn2b)).slice(0, 3)).toEqual(first);
 	});
 
+	it("a /tree branch that closed a still-live lifetime keeps its copy, and the live state goes on from now", () => {
+		let now = 100;
+		const q = new ReminderQueue(() => now);
+		q.enqueue("plan on", { scope: "every-turn", key: "plan", placement: "sticky-append" });
+		// The selected branch turned plan mode off after one carrier; this session (resumed) still has it on.
+		const closed = { key: "plan", text: "plan on", placement: "sticky-append" as const, order: 0, since: 100, until: 200, userPins: [150] };
+		now = 250;
+		q.restoreBranch({ stack: [], sticky: [closed] }, []);
+		now = 300;
+		q.enqueue("plan on", { scope: "every-turn", key: "plan", placement: "sticky-append" });
+		const messages = [user("before", 150), assistant(), user("after", 300)];
+		const sent = injectReminders(messages, q.drain(messages));
+		expect(blockTexts(sent[0])).toEqual(["before", wrapReminder("plan on")]);
+		expect(blockTexts(sent[2])).toEqual(["after", wrapReminder("plan on")]);
+	});
+
 	it("sticky-append switched on mid-turn keeps its result pin once an earlier-stamped steer arrives", () => {
 		let now = 100;
 		const q = new ReminderQueue(() => now);
