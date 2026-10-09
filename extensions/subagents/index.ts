@@ -1715,6 +1715,12 @@ export default function subagentsExtension(pi: ExtensionAPI) {
 			} catch (error) {
 				return { launched: false, line: `✗ ${p.record.name}: could not create a worktree: ${(error as Error).message}` };
 			}
+			// Shutdown can begin while git creates the worktree: build no child
+			// after its sweep, and remove the worktree within its grace.
+			if (shuttingDown) {
+				await cleanupWorktree(parentCwd, worktree);
+				return ended();
+			}
 		}
 
 		const logPath = outputLogPath(p.record);

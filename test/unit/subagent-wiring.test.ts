@@ -15,6 +15,8 @@ import subagentsExtension from "../../extensions/subagents/index.ts";
 import type { ChildOutcome } from "../../extensions/subagents/outcome.ts";
 import { SubagentRuntime } from "../../extensions/subagents/runner.ts";
 import type { AgentRunRecord } from "../../extensions/subagents/runs.ts";
+import * as worktrees from "../../extensions/subagents/worktree.ts";
+import type { Worktree } from "../../extensions/subagents/worktree.ts";
 import { emptyUsage } from "../../extensions/subagents/usage.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
@@ -154,6 +156,26 @@ describe("subagent shutdown during launch", () => {
 		await launching;
 		expect(runtime.handle.send).not.toHaveBeenCalled();
 		expect(runtime.runner.run).not.toHaveBeenCalled();
+		expect(h.tasks.size).toBe(0);
+	});
+
+	it("builds no resident when shutdown begins while its worktree is created", async () => {
+		const runtime = fakeResident();
+		const build = vi.spyOn(runtime.runner, "runResident");
+		const created: Worktree = { path: join(dir, "wt"), branch: "agent-wt", baseCommit: "abc" };
+		let release!: () => void;
+		vi.spyOn(worktrees, "isGitRepo").mockResolvedValue(true);
+		vi.spyOn(worktrees, "createWorktree").mockReturnValue(new Promise((resolve) => { release = () => resolve(created); }));
+		const cleanup = vi.spyOn(worktrees, "cleanupWorktree").mockResolvedValue(true);
+		const h = await mount();
+		const launching = h.call("Agent", { subagent_type: "general-purpose", task: "Check the code", isolation: "worktree" });
+		await vi.advanceTimersByTimeAsync(0);
+		expect(worktrees.createWorktree).toHaveBeenCalledOnce();
+		await h.fake.fire("session_shutdown", {}, h.ctx);
+		release();
+		await launching;
+		expect(build).not.toHaveBeenCalled();
+		expect(cleanup).toHaveBeenCalledWith(dir, created);
 		expect(h.tasks.size).toBe(0);
 	});
 
