@@ -10,6 +10,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import fileTrackerExtension from "../../extensions/file-tracker/index.ts";
 import { expandCandidate, shellReadCandidates, shownInFull } from "../../extensions/file-tracker/shell-reads.ts";
 import { WORKTREE_CHANNEL } from "../../extensions/lib/worktree-channel.ts";
+import { CHILD_WROTE_CHANNEL } from "../../extensions/lib/child-writes.ts";
+import { REMINDER_CHANNEL } from "../../extensions/lib/reminders.ts";
 import { bashParserReady } from "../../extensions/lib/bash-parser.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
@@ -113,6 +115,20 @@ describe("file-tracker: a bash result counts as a read", () => {
 		vi.mocked(fs.readFileSync).mockClear();
 		await fake.fireOne("tool_call", { toolName: "bash", toolCallId: "denied", input: { command: "cat secret.txt" } }, ctx());
 		expect(vi.mocked(fs.readFileSync).mock.calls.some(([path]) => String(path).endsWith("secret.txt"))).toBe(false);
+	});
+
+	it("clears a subagent's write attribution once a shell read shows the file", async () => {
+		const file = join(dir, "notes.md");
+		const emitted: string[] = [];
+		fake.events.on(REMINDER_CHANNEL, (data) => emitted.push((data as { text: string }).text));
+		writeFileSync(file, "child line one\nchild line two\n");
+		fake.events.emit(CHILD_WROTE_CHANNEL, { path: file, agent: "sweep" });
+		await bash("cat notes.md", "child line one\nchild line two");
+		writeFileSync(file, "child line one\nchild line two\nuser line\n");
+		await fake.fireOne("tool_execution_end", { toolName: "bash", toolCallId: "later", isError: false }, ctx());
+		expect(emitted).toHaveLength(1);
+		expect(emitted[0]).toContain("That's usually deliberate");
+		expect(emitted[0]).not.toContain("sweep");
 	});
 
 	it("allows an edit after a cat that printed the whole file", async () => {

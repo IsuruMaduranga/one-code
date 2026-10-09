@@ -140,17 +140,21 @@ function shellReadSnapshot(command: string, cwd: string): Map<string, string> {
  * Count as read each file the command printed in full and did not change:
  * its version before and after the command is the same, and the output holds
  * all of it. Observed, not touched: the post-compaction restore follows the
- * file tools, as Claude Code's does.
+ * file tools, as Claude Code's does. Returns the files it observed.
  */
-function observeShellReads(tracker: FileTracker, before: Map<string, string>, output: string): void {
-	if (!output) return;
+function observeShellReads(tracker: FileTracker, before: Map<string, string>, output: string): string[] {
+	const observed: string[] = [];
+	if (!output) return observed;
 	for (const [path, version] of before) {
 		const stamp = statIfPresent(path);
 		if (!stamp || !isRegularFile(path) || versionOf(path) !== version) continue;
 		const content = readIfPresent(path);
 		if (content === undefined || versionOf(path) !== version) continue;
-		if (shownInFull(output, content)) tracker.observe(path, content, Date.now(), stamp);
+		if (!shownInFull(output, content)) continue;
+		tracker.observe(path, content, Date.now(), stamp);
+		observed.push(path);
 	}
+	return observed;
 }
 
 /** Above this a shell read's output is persisted, not shown, so the file cannot have been seen whole. */
@@ -247,13 +251,17 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 	 * the post-compaction restore's order.
 	 */
 	let touched = new Map<string, number>();
-	/** Observe a file the model read or wrote, and record it as touched at its current modification time. */
-	/** Files this session's own child agents changed since the parent last saw them (lib/child-writes.ts). */
+	/**
+	 * Files this session's own child agents changed since the parent last saw
+	 * them (lib/child-writes.ts). Every way the parent sees a file clears its
+	 * entry: a file tool, a shell read, a rebuild from disk, the change scan.
+	 */
 	const childWrites = new Map<string, string | undefined>();
 	pi.events.on(CHILD_WROTE_CHANNEL, (data) => {
 		const wrote = data as ChildWrote | undefined;
 		if (wrote?.path) childWrites.set(wrote.path, wrote.agent);
 	});
+	/** Observe a file the model read or wrote, and record it as touched at its current modification time. */
 	const touch = (path: string) => {
 		childWrites.delete(path);
 		const stamp = observeFromDisk(tracker, path);
@@ -271,6 +279,8 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 			sessionId = id;
 			tracker = new FileTracker();
 		}
+		// Tracked files are re-read from disk below: what a child wrote is now the baseline.
+		childWrites.clear();
 		let entries: unknown[] = [];
 		try {
 			entries = inContextEntries(ctx.sessionManager.getBranch() as unknown[]);
@@ -329,7 +339,7 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 		if (event.toolName === "bash") {
 			const before = shellSnapshots.get(event.toolCallId);
 			shellSnapshots.delete(event.toolCallId);
-			if (before) observeShellReads(tracker, before, textOf(event.content));
+			if (before) for (const path of observeShellReads(tracker, before, textOf(event.content))) childWrites.delete(path);
 			return undefined;
 		}
 		if (!READ_TOOLS.has(event.toolName) && !GUARDED_TOOLS.has(event.toolName)) return undefined;
