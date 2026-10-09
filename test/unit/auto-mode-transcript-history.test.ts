@@ -1,20 +1,32 @@
 import { describe, expect, it } from "vitest";
+import { classifierHistory } from "../../extensions/auto-mode/history.ts";
 import { renderTranscript, type TranscriptEntry } from "../../extensions/auto-mode/transcript.ts";
+
+const call = (id: string, name: string, args: Record<string, unknown>) => ({ type: "message", id, message: { role: "assistant", content: [{ type: "toolCall", id, name, arguments: args }] } });
 
 // A cleanup later in the same session needs the calls that created its targets.
 // Claude Code serializes the supplied history, not a 60 KB suffix.
 describe("classifier creation history", () => {
-	it.each(["read", "grep", "find", "lsp_diagnostics", "tool_search", "list_mcp_resources", "read_mcp_resource", "read_mcp_resource_dir"])("omits historical %s calls but keeps that tool as the current action", (tool) => {
+	it.each(["read", "grep", "find", "lsp_diagnostics", "tool_search", "list_mcp_resources", "read_mcp_resource", "read_mcp_resource_dir"])("omits historical %s calls from the session history", (tool) => {
+		const { transcript } = classifierHistory([call("r", tool, { path: "OLD_READ_MARKER", query: "lookup" }), call("b", "bash", { command: "rm probe.*" })]);
+		expect(renderTranscript(transcript)).not.toContain("OLD_READ_MARKER");
+		expect(renderTranscript(transcript)).toContain("rm probe.*");
+	});
+
+	// The hand-back review appends a finished child's actions as entries: a read
+	// of a credential file before a curl is the sequence it exists to judge.
+	it.each(["read", "grep", "find"])("renders every %s entry it is given, earlier or the action", (tool) => {
 		const read: TranscriptEntry = { kind: "tool", tool, input: { path: "OLD_READ_MARKER", query: "lookup" } };
-		expect(renderTranscript([read, { kind: "tool", tool: "bash", input: { command: "rm probe.*" } }])).not.toContain("OLD_READ_MARKER");
+		expect(renderTranscript([read, { kind: "tool", tool: "bash", input: { command: "rm probe.*" } }])).toContain("OLD_READ_MARKER");
 		expect(renderTranscript([read])).toContain("OLD_READ_MARKER");
 	});
 
 	it("retains a historical remote-host read rather than hiding its destination", () => {
-		expect(renderTranscript([
-			{ kind: "tool", tool: "read", input: { path: "/secret", _host: "other-machine" } },
-			{ kind: "tool", tool: "bash", input: { command: "echo done" } },
-		])).toContain("other-machine");
+		const { transcript } = classifierHistory([
+			call("r", "read", { path: "/secret", _host: "other-machine" }),
+			call("b", "bash", { command: "echo done" }),
+		]);
+		expect(renderTranscript(transcript)).toContain("other-machine");
 	});
 
 	it("retains early creation calls after seventy ordinary source writes", () => {

@@ -38,7 +38,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WORKTREE_CHANNEL } from "../../extensions/lib/worktree-channel.ts";
-import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
+import { createFakeCtx, createFakePi, type FakePi, flushNotices } from "./helpers/fake-pi.ts";
 
 function mount(): FakePi {
 	const fake = createFakePi();
@@ -535,6 +535,7 @@ async function freshSessionNotify(reason: string) {
 	backgroundExtension(next.pi as never);
 	const notify = vi.fn();
 	await next.fire("session_start", { reason }, createFakeCtx({ hasUI: true, mode: "tui", ui: { notify } }));
+	await flushNotices();
 	return notify;
 }
 

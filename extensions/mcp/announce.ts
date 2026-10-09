@@ -58,15 +58,28 @@ export interface McpAnnouncedBaseline { instructed: Array<[string, string]>; fai
 export function serializeMcpAnnounced(announced: McpAnnounced): McpAnnouncedBaseline {
 	return { instructed: [...announced.instructed], failed: [...announced.failed] };
 }
-/** Best-effort compatibility reader for stacks written before structured MCP baselines. */
-export function mcpAnnouncedFromReminders(instructions: string | undefined, failures: string | undefined): McpAnnounced {
+/**
+ * Best-effort compatibility reader for stacks written before structured MCP
+ * baselines. With the configured server `names`, a section starts only at a
+ * `## <name>` heading, so a `## ` heading inside a server's instructions stays
+ * part of them instead of reading as a server of its own.
+ */
+export function mcpAnnouncedFromReminders(instructions: string | undefined, failures: string | undefined, names?: Iterable<string>): McpAnnounced {
 	const announced = emptyAnnounced();
+	const known = names ? new Set(names) : undefined;
 	const instructionPrefix = "# MCP Server Instructions\n\nThe following MCP servers have provided instructions for how to use their tools and resources:\n\n";
 	if (instructions?.startsWith(instructionPrefix)) {
+		const sections: string[] = [];
 		for (const section of instructions.slice(instructionPrefix.length).split("\n\n## ")) {
 			const normalized = section.startsWith("## ") ? section.slice(3) : section;
 			const newline = normalized.indexOf("\n");
-			if (newline > 0) announced.instructed.set(normalized.slice(0, newline), normalized.slice(newline + 1));
+			const heading = newline > 0 ? normalized.slice(0, newline) : normalized;
+			if (known && sections.length > 0 && !known.has(heading)) sections[sections.length - 1] += `\n\n## ${normalized}`;
+			else sections.push(normalized);
+		}
+		for (const section of sections) {
+			const newline = section.indexOf("\n");
+			if (newline > 0) announced.instructed.set(section.slice(0, newline), section.slice(newline + 1));
 		}
 	}
 	const failurePrefix = "The following MCP servers are configured but failed to connect — their tools (typically named mcp__<server>__*) are unavailable for this session:\n";

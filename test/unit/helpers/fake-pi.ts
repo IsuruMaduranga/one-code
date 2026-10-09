@@ -230,3 +230,12 @@ export function createFakeCtx(overrides: Record<string, unknown> = {}): Record<s
 
 	return { ...base, ...overrides, ui };
 }
+
+/**
+ * Close the open batch of lifecycle notices (lib/notices.ts): the owner shows
+ * it on the next macrotask, so step a fake clock or yield to a real one.
+ */
+export async function flushNotices(): Promise<void> {
+	if (vi.isFakeTimers()) vi.advanceTimersByTime(0);
+	else await new Promise((resolve) => setTimeout(resolve, 0));
+}

@@ -13,6 +13,12 @@ export interface ContextFactsBaseline {
 	git: string;
 	/** A compaction starts a new snapshot epoch, not a new conversation. */
 	atCompaction: boolean;
+	/**
+	 * The directory the facts were read in: the session's cwd, or the entered
+	 * worktree at a compaction. A resume compares in the same one. Absent in
+	 * older snapshots.
+	 */
+	cwd?: string;
 }
 
 const fingerprint = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -23,12 +29,14 @@ export function contextFactsBaseline(input: {
 	memoryIndex: { path: string; content: string } | null;
 	gitStatus: string | null;
 	atCompaction: boolean;
+	cwd?: string;
 }): ContextFactsBaseline {
 	return {
 		instructions: fingerprint(buildClaudeMdBlock({ contextFiles: input.contextFiles })),
 		memory: fingerprint(buildClaudeMdBlock({ contextFiles: [], memoryIndex: input.memoryIndex })),
 		git: fingerprint(input.gitStatus),
 		atCompaction: input.atCompaction,
+		...(input.cwd !== undefined ? { cwd: input.cwd } : {}),
 	};
 }
 
@@ -36,7 +44,8 @@ export function storedFactsBaseline(value: unknown): ContextFactsBaseline | unde
 	if (!value || typeof value !== "object") return undefined;
 	const v = value as Record<string, unknown>;
 	if (![v.instructions, v.memory, v.git].every((part) => typeof part === "string" && /^[a-f0-9]{64}$/.test(part)) || typeof v.atCompaction !== "boolean") return undefined;
-	return v as unknown as ContextFactsBaseline;
+	const { cwd, ...facts } = v;
+	return { ...facts, ...(typeof cwd === "string" ? { cwd } : {}) } as unknown as ContextFactsBaseline;
 }
 
 /** A refreshed git snapshot must not describe itself as the conversation's initial status. */

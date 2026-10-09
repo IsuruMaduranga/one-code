@@ -5,11 +5,13 @@
  *   Stage 1 grades HARM ONLY (maxTokens 64). severity < 50 → allow, no stage 2.
  *   Stage 2 applies intent + ALLOW (maxTokens 4096, <thinking> CoT) → severity +
  *   <category> (+ our verified <intent>). Both stages share one system prompt and
- *   transcript byte-for-byte. On Anthropic Messages, onPayload splits the user
- *   text at stable history-entry boundaries and moves the user cache marker
- *   before the pending action and stage instruction (cache.ts). Both stages
- *   and later gated calls can read that prefix; the system markers stay intact.
- *   Other APIs keep the single string and their provider's prefix caching.
+ *   transcript byte-for-byte. Where the request carries explicit breakpoints
+ *   (Anthropic Messages, OpenRouter's Anthropic-format Chat Completions,
+ *   Bedrock Converse), onPayload splits the user text at stable history-entry
+ *   boundaries and moves the user cache marker before the pending action and
+ *   stage instruction (cache.ts). Both stages and later gated calls can read
+ *   that prefix; the system markers stay intact. Other APIs keep the single
+ *   string and their provider's prefix caching.
  *
  * A one-shot `completeSimple` per stage rather than an agent session: no tools,
  * no history beyond the transcript it is handed, nothing to be talked into. Every
@@ -24,7 +26,7 @@ import { completeSimple } from "@earendil-works/pi-ai/compat";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { forcedReasoningLevel, isReasoningMandatoryError, reasoningRetryLevel } from "../lib/model-policy.ts";
 import type { AutoModeConfig } from "./config.ts";
-import { cacheClassifierHistory } from "./cache.ts";
+import { CLASSIFIER_CACHE_APIS, cacheClassifierHistory } from "./cache.ts";
 import {
 	buildPayload,
 	type ClassifyRequest,
@@ -38,6 +40,7 @@ import {
 } from "./prompt.ts";
 import {
 	type Candidate,
+	type ClassifierFallback,
 	type ClassifierNotice,
 	classifierCandidates,
 	describeCandidate,
@@ -132,7 +135,7 @@ export interface ClassifierState {
 	 * still applied to the cached chain per call, so a model that dies mid-session
 	 * is still stepped over without a rebuild.
 	 */
-	chainCache?: { signature: string; candidates: Candidate[]; notices: ClassifierNotice[] };
+	chainCache?: { signature: string; candidates: Candidate[]; notices: ClassifierNotice[]; fallback?: ClassifierFallback };
 	/**
 	 * `provider/id` -> the thinking level a model turned out to REQUIRE (its
 	 * provider rejected the thinking-off request with "reasoning is mandatory").
@@ -142,7 +145,7 @@ export interface ClassifierState {
 	 * proactively, without an error).
 	 */
 	forcedReasoning: Map<string, ThinkingLevel>;
-	/** Previous Anthropic history boundary, a cache lookup hint only (cache.ts). */
+	/** Previous history boundary on a breakpoint API, a cache lookup hint only (cache.ts). */
 	cacheHistoryEnd?: number;
 }
 
@@ -195,29 +198,40 @@ class StepError extends Error {
 }
 
 /** Signature that must stay equal for the cached chain to be reused (see ClassifierState.chainCache). */
-function selectionSignature(deps: ClassifierDeps): string {
-	const session = deps.sessionModel;
-	const configured = `${deps.config.classifierModel ?? ""}|${deps.config.classifierModelSetFor ?? ""}`;
-	return session ? `${session.provider}/${session.id}|${session.contextWindow ?? "unknown"}|${configured}` : `(none)|${configured}`;
+function selectionSignature(sessionModel: Model<Api> | undefined, config: Pick<AutoModeConfig, "classifierModel" | "classifierModelSetFor">): string {
+	const configured = `${config.classifierModel ?? ""}|${config.classifierModelSetFor ?? ""}`;
+	return sessionModel ? `${sessionModel.provider}/${sessionModel.id}|${sessionModel.contextWindow ?? "unknown"}|${configured}` : `(none)|${configured}`;
+}
+
+/**
+ * The selection chain for this session model and setting, built once per
+ * signature and shared by every reader: the gate, the badge and banner that
+ * name the next classifier, and the announcement. The newer-model warnings
+ * are always in it; a reader that honours `suggestNewerModels` drops them.
+ */
+export function classifierChain(
+	state: ClassifierState,
+	input: { available: () => Model<Api>[]; sessionModel: Model<Api> | undefined; config: Pick<AutoModeConfig, "classifierModel" | "classifierModelSetFor"> },
+): NonNullable<ClassifierState["chainCache"]> {
+	const signature = selectionSignature(input.sessionModel, input.config);
+	const cached = state.chainCache;
+	if (cached && cached.signature === signature) return cached;
+	const built = classifierCandidates({
+		available: input.available(),
+		sessionModel: input.sessionModel,
+		configured: input.config.classifierModel,
+		configuredSetForContainment: input.config.classifierModelSetFor,
+	});
+	const chain = { signature, candidates: built.candidates, notices: built.notices, ...(built.fallback ? { fallback: built.fallback } : {}) };
+	// Don't poison the cache with an empty chain (e.g. a not-yet-populated
+	// registry) — that would permanently block the gate; recompute next call.
+	if (built.candidates.length > 0) state.chainCache = chain;
+	return chain;
 }
 
 /** The candidate chain (minus anything already unusable this session) and its notices. */
 function remainingCandidates(deps: ClassifierDeps): { candidates: Candidate[]; notices: ClassifierNotice[] } {
-	const signature = selectionSignature(deps);
-	let cached = deps.state.chainCache;
-	if (!cached || cached.signature !== signature) {
-		const built = classifierCandidates({
-			available: deps.registry.getAvailable(),
-			sessionModel: deps.sessionModel,
-			configured: deps.config.classifierModel,
-			configuredSetForContainment: deps.config.classifierModelSetFor,
-		});
-		cached = { signature, candidates: built.candidates, notices: built.notices };
-		// Don't poison the cache with an empty chain (e.g. a not-yet-populated
-		// registry) — that would permanently block the gate; recompute next call.
-		if (built.candidates.length > 0) deps.state.chainCache = cached;
-	}
-	const { candidates: all, notices } = cached;
+	const { candidates: all, notices } = classifierChain(deps.state, { available: () => deps.registry.getAvailable(), sessionModel: deps.sessionModel, config: deps.config });
 	const usable = all.filter((entry) => !deps.state.rejected.has(`${entry.model.provider}/${entry.model.id}`));
 	if (usable.length > 0) return { candidates: usable, notices };
 	// If everything has been rejected, the session model is still worth one more
@@ -351,7 +365,7 @@ export async function classify(request: ClassifyRequest, deps: ClassifierDeps): 
 					maxRetries: CLASSIFIER_MAX_RETRIES,
 					cacheRetention: "long",
 					...(deps.cacheKey ? { sessionId: deps.cacheKey } : {}),
-					...(model.api === "anthropic-messages" ? {
+					...(CLASSIFIER_CACHE_APIS.has(model.api) ? {
 						onPayload: (payload: unknown) => {
 							cacheClassifierHistory(payload, [...history, tail, userText.slice(userPrefix.length)], history.length - 1, previousHistoryEnd);
 							deps.state.cacheHistoryEnd = history.length - 1;

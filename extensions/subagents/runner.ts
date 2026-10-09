@@ -100,6 +100,12 @@ interface ChildSessionSpec {
 	onMessageToMain?: (message: string, summary?: string) => void;
 	/** Extra injected tools (e.g. the child-spawn Agent tool for depth-0 children). */
 	extraTools?: ToolDefinition[];
+	/**
+	 * The main session's tool call that started the run's current turn, read
+	 * per gated call (a SendMessage can start a later turn). The permission
+	 * bridge passes it on as `ChildToolCall.parentToolCallId`.
+	 */
+	mainToolCallId?: () => string | undefined;
 }
 
 export interface SubagentRunOptions extends ChildSessionSpec {
@@ -175,6 +181,8 @@ export class SubagentRuntime {
 	private readonly runNames = new Map<string, string>();
 	/** Child session id → agent type (`explore`, …), for the hook payload's `agent_type`. */
 	private readonly agentTypes = new Map<string, string>();
+	/** Child session id → the main-session call that started its turn, for the bridge wrapper. */
+	private readonly mainToolCalls = new Map<string, () => string | undefined>();
 	/**
 	 * Parallel children with the same request prefix (same agent prompt and
 	 * model; forks share the parent's) let the first one start streaming before
@@ -206,7 +214,11 @@ export class SubagentRuntime {
 		const namedBridge: PermissionBridge = (call) => {
 			const bridge = getPermissionBridge();
 			if (!bridge) throw new Error("the parent's permission bridge is no longer available");
-			return bridge({ ...call, agent: call.agent ?? (call.sessionId ? this.runNames.get(call.sessionId) : undefined) });
+			return bridge({
+				...call,
+				agent: call.agent ?? (call.sessionId ? this.runNames.get(call.sessionId) : undefined),
+				parentToolCallId: call.parentToolCallId ?? (call.sessionId ? this.mainToolCalls.get(call.sessionId)?.() : undefined),
+			});
 		};
 		this.getPermissionBridge = () => (getPermissionBridge() ? namedBridge : undefined);
 	}
@@ -413,6 +425,7 @@ export class SubagentRuntime {
 			}
 			if (spec.name) this.runNames.set(session.sessionManager.getSessionId(), spec.name);
 			if (spec.agent) this.agentTypes.set(session.sessionManager.getSessionId(), spec.agent.name);
+			if (spec.mainToolCallId) this.mainToolCalls.set(session.sessionManager.getSessionId(), spec.mainToolCallId);
 			return session;
 		};
 		try {
@@ -433,6 +446,7 @@ export class SubagentRuntime {
 	private discard(session: Session): void {
 		this.runNames.delete(session.sessionManager.getSessionId());
 		this.agentTypes.delete(session.sessionManager.getSessionId());
+		this.mainToolCalls.delete(session.sessionManager.getSessionId());
 		session.dispose();
 	}
 

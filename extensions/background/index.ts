@@ -96,6 +96,7 @@ import { join, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { SESSION_WORK_CHANNEL, sessionBackgroundTask, sessionCron, type SessionWorkQuery } from "../lib/session-work.ts";
 import { WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
+import { queueNotice } from "../lib/notices.ts";
 
 /** Claude Code's `task_output` limit (`TASK_MAX_OUTPUT_DEFAULT`). */
 const TASK_OUTPUT_MAX_CHARS = 32_000;
@@ -874,7 +875,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		if (pendingShutdownNotice) {
 			const notice = pendingShutdownNotice;
 			pendingShutdownNotice = undefined;
-			if (ctx.hasUI) ctx.ui.notify(notice, "info");
+			if (ctx.hasUI) queueNotice(pi.events, ctx, "info", notice);
 		}
 	});
 	pi.on("agent_start", () => {

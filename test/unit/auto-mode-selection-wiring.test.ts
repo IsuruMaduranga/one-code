@@ -68,6 +68,22 @@ describe("automatic classifier selection wiring", () => {
 		await fake.fire("session_shutdown", {}, ctx);
 	});
 
+	it("ranks the catalog once per session model, not on every repaint before a pin", async () => {
+		const getAvailable = vi.fn(() => [large, small, cheap]);
+		ctx.modelRegistry = { getAvailable };
+		await fake.fire("session_start", { reason: "startup" }, ctx);
+		const afterStart = getAvailable.mock.calls.length;
+		for (let i = 0; i < 5; i++) {
+			await fake.fire("agent_start", {}, ctx);
+			await fake.fire("agent_settled", {}, ctx);
+		}
+		expect(getAvailable.mock.calls.length).toBe(afterStart);
+		expect(statuses.at(-1)?.classifier).toBe("openai-codex/gpt-6-astra");
+		ctx.model = small;
+		await fake.fire("model_select", { model: small }, ctx);
+		expect(statuses.at(-1)?.classifier).toBe("openai-codex/gpt-6-sol");
+	});
+
 	it("/auto-mode model saves a stamped choice, warns about a smaller window, and clears back to automatic", async () => {
 		const settings = join(home, ".onecode", "settings.json");
 		(ctx.modelRegistry as { getApiKeyAndHeaders?: unknown }).getApiKeyAndHeaders = async () => ({ ok: true, apiKey: "key" });
@@ -87,8 +103,15 @@ describe("automatic classifier selection wiring", () => {
 		await command.handler("config", ctx);
 		expect(String(notify.mock.calls.at(-1)?.[0])).toContain("classifierModel: openai-codex/gpt-6-sol");
 
+		const before = notify.mock.calls.length;
 		await command.handler("model clear", ctx);
 		expect(JSON.parse(readFileSync(settings, "utf8")).autoMode).toBeUndefined();
 		expect(statuses.at(-1)?.classifier).toBe("openai-codex/gpt-6-astra");
+		// pi folds back-to-back info notices into one line, so the confirmation
+		// and the announcement are one notice (findings §63).
+		const infos = notify.mock.calls.slice(before).filter(([, level]) => level === "info").map(([text]) => String(text));
+		expect(infos).toHaveLength(1);
+		expect(infos[0]).toContain("autoMode.classifierModel cleared");
+		expect(infos[0]).toMatch(/\nAuto mode (?:is screening|will screen) calls with openai-codex\/gpt-6-astra/);
 	});
 });

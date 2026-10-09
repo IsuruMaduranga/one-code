@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadProjectInstructions } from "../../extensions/auto-mode/instructions.ts";
+import { buildClaudeMdBlock, discoverContextFiles, instructionRule } from "../../extensions/lib/claude-context.ts";
 import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
 
 let root: string;
@@ -73,19 +74,34 @@ describe("loadProjectInstructions", () => {
 		expect(loaded).toContain("CLAUDE.md");
 	});
 
-	it("walks up to the git root, nearest file first", () => {
+	it("walks up every ancestor in the agent's order, farthest first", () => {
 		writeFileSync(join(repo, "CLAUDE.md"), "ROOT RULE");
 		writeFileSync(join(nested, "CLAUDE.md"), "NESTED RULE");
 		const loaded = loadProjectInstructions(nested, home) ?? "";
-		expect(loaded.indexOf("NESTED RULE")).toBeLessThan(loaded.indexOf("ROOT RULE"));
+		expect(loaded.indexOf("ROOT RULE")).toBeLessThan(loaded.indexOf("NESTED RULE"));
 	});
 
-	it("does not walk past the git root", () => {
+	it("reads an ancestor above the git root, as the agent does", () => {
 		writeFileSync(join(root, "CLAUDE.md"), "OUTSIDE REPO");
 		writeFileSync(join(repo, "CLAUDE.md"), "IN REPO");
 		const loaded = loadProjectInstructions(repo, home) ?? "";
 		expect(loaded).toContain("IN REPO");
-		expect(loaded).not.toContain("OUTSIDE REPO");
+		expect(loaded).toContain("OUTSIDE REPO");
+	});
+
+	// Claude Code's classifier gets the agent's CLAUDE.md whole; a cut would drop restrictions.
+	it("passes every file whole, path-conditional rules included, however large the rest", () => {
+		mkdirSync(join(repo, ".claude", "rules"), { recursive: true });
+		writeFileSync(join(repo, ".claude", "rules", "db.md"), "---\npaths: src/db/**\n---\nNever run migrations against production.");
+		const global = `GLOBAL ${"g".repeat(20_000)} END GLOBAL`;
+		writeFileSync(join(home, ".claude", "CLAUDE.md"), global);
+		writeFileSync(join(repo, "CLAUDE.md"), `ROOT ${"r".repeat(200_000)} END ROOT`);
+		writeFileSync(join(nested, "CLAUDE.md"), "NESTED: never run migrations.");
+		const loaded = loadProjectInstructions(nested, home) ?? "";
+		expect(loaded).toContain("Never run migrations against production.");
+		expect(loaded).toContain(global);
+		expect(loaded).toContain(`ROOT ${"r".repeat(200_000)} END ROOT`);
+		expect(loaded).toContain("NESTED: never run migrations.");
 	});
 
 	it("includes AGENTS.md and the user's global file", () => {
@@ -96,9 +112,35 @@ describe("loadProjectInstructions", () => {
 		expect(loaded).toContain("GLOBAL CONTENT");
 	});
 
-	it("caps a large file so it cannot crowd out the rules", () => {
-		writeFileSync(join(repo, "CLAUDE.md"), "x".repeat(200_000));
+	// The agent loads these (lib/claude-context.ts); the classifier must see the same restriction.
+	it.each([
+		[".claude/CLAUDE.md", join(".claude", "CLAUDE.md")],
+		["an unconditional .claude/rules file", join(".claude", "rules", "safety.md")],
+	])("carries a restriction in %s to both the agent and the classifier", (_label, relative) => {
+		mkdirSync(join(repo, relative, ".."), { recursive: true });
+		writeFileSync(join(repo, relative), "Never delete the fixtures directory.");
+		const agent = buildClaudeMdBlock({ contextFiles: discoverContextFiles({ cwd: repo, homeClaudeDir: join(home, ".claude"), rule: instructionRule(home), home }) }) ?? "";
+		expect(agent).toContain("Never delete the fixtures directory.");
+		expect(loadProjectInstructions(repo, home)).toContain("Never delete the fixtures directory.");
+	});
+
+	it("shows every path-conditional rule, labelled with its paths", () => {
+		mkdirSync(join(repo, ".claude", "rules"), { recursive: true });
+		writeFileSync(join(repo, ".claude", "rules", "db.md"), "---\npaths: src/db/**\n---\nNever run migrations against production.");
 		const loaded = loadProjectInstructions(repo, home) ?? "";
-		expect(loaded.length).toBeLessThan(15_000);
+		expect(loaded).toContain("Never run migrations against production.");
+		expect(loaded).toContain("(applies to src/db)");
+	});
+
+	it("reads no .claude location in independent mode", () => {
+		mkdirSync(join(repo, ".claude", "rules"), { recursive: true });
+		writeFileSync(join(repo, ".claude", "CLAUDE.md"), "dot claude rule");
+		writeFileSync(join(repo, ".claude", "rules", "x.md"), "rules dir rule");
+		writeFileSync(join(repo, "AGENTS.md"), "agents rule");
+		resetConfigModeForTest("independent");
+		const text = loadProjectInstructions(repo, home) ?? "";
+		expect(text).toContain("agents rule");
+		expect(text).not.toContain("dot claude rule");
+		expect(text).not.toContain("rules dir rule");
 	});
 });

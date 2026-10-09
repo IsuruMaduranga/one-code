@@ -124,6 +124,14 @@ describe("classifierCandidates: containment, tier and context floors", () => {
 		expect(pickFull([session, experimental], session).candidates).toEqual([{ model: session, source: "session" }]);
 	});
 
+	it("never screens with a moving -latest alias", () => {
+		pinCatalog([...LINEUP, ...ANTHROPIC, ...QWEN, { id: "openai/gpt-x-latest", released: "2026-09-01", price: [4.5, 18] }]);
+		const session = model("openai", "gpt-x-large", 10, 200_000);
+		const alias = model("openai", "gpt-x-latest", 4.5, 200_000);
+		expect(intrinsicTier(alias)).toBe("workhorse");
+		expect(pickFull([session, alias], session).candidates).toEqual([{ model: session, source: "session" }]);
+	});
+
 	it("screens with the session unless an alternate is strictly cheaper", () => {
 		// A dearer model never screens; a same-price one saves nothing, so the
 		// session keeps the job (the GPT-6 Sol case: GPT-5.6 Sol at the same $2).

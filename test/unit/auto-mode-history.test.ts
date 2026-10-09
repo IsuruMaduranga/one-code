@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifierHistory, CLASSIFIER_TOOL_META } from "../../extensions/auto-mode/history.ts";
+import { childHistoryCursor, classifierHistory, CLASSIFIER_TOOL_META } from "../../extensions/auto-mode/history.ts";
 
 const call = (id: string, name: string, args: Record<string, unknown>) => ({ type: "message", id, message: { role: "assistant", content: [{ type: "toolCall", id, name, arguments: args }] } });
 
@@ -35,5 +35,16 @@ describe("active classifier history", () => {
 			{ kind: "summary", text: "Another branch's work, not user authorization." },
 		]);
 		expect(history.userMessages).toEqual([]);
+	});
+});
+
+describe("a subagent's cursor into the main session", () => {
+	it.each([
+		{ startedBy: "agent", inFlight: ["read", "agent", "later"], expected: { throughToolCallId: "agent" } },
+		{ startedBy: "old-agent", inFlight: ["first", "second"], expected: { beforeToolCallId: "first" } },
+		{ startedBy: "old-agent", inFlight: [], expected: {} },
+		{ startedBy: undefined, inFlight: ["first", "second"], expected: { throughToolCallId: "second" } },
+	])("started by $startedBy with $inFlight in flight", ({ startedBy, inFlight, expected }) => {
+		expect(childHistoryCursor(startedBy, inFlight, inFlight.at(-1))).toEqual(expected);
 	});
 });

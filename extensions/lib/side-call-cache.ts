@@ -2,9 +2,14 @@
  * Anthropic cache placement for standalone side calls. pi-ai marks the final
  * user question, which means every different question writes a fresh cache
  * entry. Move that marker onto the preceding conversation message instead,
- * without changing any message text. Call this only from an
- * `anthropic-messages` payload hook.
+ * without changing any message text. Call this from an `anthropic-messages`
+ * payload hook, or an `openai-completions` one: Chat Completions carries the
+ * same `cache_control` markers when the model takes Anthropic's format
+ * (OpenRouter's `anthropic/*`), and has none to move otherwise.
  */
+
+/** The APIs whose standalone side-call payload this placement applies to. */
+export const SIDE_CALL_CACHE_APIS: ReadonlySet<string> = new Set(["anthropic-messages", "openai-completions"]);
 
 /** Anthropic permits at most four cache-control markers per request. */
 export const MAX_SIDE_CALL_CACHE_MARKERS = 4;
@@ -57,7 +62,10 @@ function precedingCacheableBlock(messages: unknown[], questionIndex: number): Ta
 		// marked message to blocks. Convert this target exactly as pi-ai does so
 		// the newest conversation turn, rather than an older block message, gets
 		// the cache boundary. The text itself remains byte-for-byte unchanged.
+		// Chat Completions also sends assistant and tool text as strings; an
+		// empty one (a tool-call-only reply) cannot carry a marker, as in pi-ai.
 		if (typeof message.content === "string") {
+			if (message.content.length === 0) continue;
 			return { messageIndex, message, blocks: [{ type: "text", text: message.content }], blockIndex: 0 };
 		}
 		const content = blocks(message.content);
@@ -96,11 +104,6 @@ function capMarkers(payload: WireRecord): void {
 	for (const marker of markers.slice(0, Math.max(0, markers.length - MAX_SIDE_CALL_CACHE_MARKERS))) delete marker.cache_control;
 }
 
-/** Markers pi-ai put on the tools and the system prompt: what a message breakpoint must leave room for. */
-export function topLevelMarkerCount(payload: unknown): number {
-	return isRecord(payload) ? topLevelMarkers(payload.tools).length + topLevelMarkers(payload.system).length : 0;
-}
-
 /** Tool definitions and top-level system blocks can each carry one marker. */
 function topLevelMarkers(value: unknown): WireRecord[] {
 	return Array.isArray(value) ? value.filter((entry): entry is WireRecord => isRecord(entry) && entry.cache_control !== undefined) : [];
@@ -116,3 +119,6 @@ function isRecord(value: unknown): value is WireRecord {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+
+/** The conversation cache placement a side call passes to `runSideCall` (`side-call-run.ts`). */
+export const CONVERSATION_CACHE_PLACEMENT = { apis: SIDE_CALL_CACHE_APIS, place: cacheSideCallConversation } as const;

@@ -9,6 +9,7 @@ import { contextFactsBaseline, resumeFactsNotice } from "../../extensions/lib/co
 import { contextStackOnBranch, type ContextStackSnapshot } from "../../extensions/lib/context-stack.ts";
 import { GIT_SNAPSHOT_OWNER_CHANNEL } from "../../extensions/lib/git-status.ts";
 import { projectMemoryDir } from "../../extensions/lib/memory.ts";
+import { WORKTREE_CHANNEL } from "../../extensions/lib/worktree-channel.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 import { stubHome } from "./helpers/home.ts";
 
@@ -102,6 +103,21 @@ describe("compaction refresh and resume differences", () => {
 		expect(JSON.stringify(messages[1])).not.toContain("saved context snapshot");
 	});
 
+	it("compares a resumed session's facts in the directory they were taken in, not an entered worktree", async () => {
+		const first = await open();
+		await first.turn();
+		await first.request([user("first", 1)]);
+		const branch = branchOf(first.fake);
+		const worktree = join(home, "worktree");
+		mkdirSync(worktree);
+		writeFileSync(join(worktree, "CLAUDE.md"), "worktree instructions\n");
+		const resumed = await open(branch, "resume");
+		resumed.fake.events.emit(WORKTREE_CHANNEL, { path: worktree });
+		await resumed.turn();
+		const messages = await resumed.request([user("first", 1), user("resume", 2)]);
+		expect(JSON.stringify(messages[1])).not.toContain("saved context snapshot");
+	});
+
 	it.each(["manual", "threshold", "overflow"])("refreshes every fact after %s compaction and persists it before the next request", async (reason) => {
 		const first = await open();
 		await first.turn();
@@ -128,6 +144,49 @@ describe("compaction refresh and resume differences", () => {
 		const again = await open(savedBranch);
 		await again.turn();
 		expect(await again.request(summary)).toEqual(refreshed);
+	});
+
+	it("sends each branch its own message 1 when /tree crosses a compaction, in both directions", async () => {
+		let branch: unknown[] = [];
+		const fake = createFakePi();
+		systemReminderExtension(fake.pi as never);
+		claudeContextExtension(fake.pi as never);
+		const ctx = createFakeCtx({ cwd, sessionManager: { getBranch: () => branch } });
+		await fake.fire("session_start", { reason: "startup" }, ctx);
+		fake.events.emit(GIT_SNAPSHOT_OWNER_CHANNEL, {});
+		const turn = async () => {
+			await fake.fire("before_agent_start", {}, ctx);
+			await fake.fire("turn_start", {}, ctx);
+		};
+		const request = async (messages: unknown[]) => (await fake.fireOne<{ messages: unknown[] }>("context", { messages }, ctx))!.messages;
+		await turn();
+		const before = [user("first", 1)];
+		const original = await request(before);
+		const preCompaction = branchOf(fake);
+		writeFileSync(join(cwd, "CLAUDE.md"), "fresh instructions\n");
+		writeFileSync(memory, "fresh memory\n");
+		vi.setSystemTime(new Date(2026, 9, 2, 12));
+		await fake.fire("session_compact", { reason: "manual" }, ctx);
+		const summary = [{ role: "compactionSummary", summary: "summary", timestamp: 10 }];
+		const compacted = await request(summary);
+		expect(JSON.stringify(compacted[0])).toContain("fresh instructions");
+		const postCompaction = branchOf(fake);
+
+		branch = preCompaction;
+		await fake.fire("session_tree", {}, ctx);
+		await turn();
+		const back = await request([...before, user("second", 20)]);
+		expect(JSON.stringify(back[0])).toBe(JSON.stringify(original[0]));
+		// The branch was told 2026-10-01; today's date reaches it as a notice, never by rewriting message 1.
+		expect(JSON.stringify(back[1])).toContain("The date has changed");
+		expect(contextStackOnBranch([...preCompaction, ...branchOf(fake).slice(postCompaction.length)])!.stack).toEqual(contextStackOnBranch(preCompaction)!.stack);
+
+		branch = postCompaction;
+		await fake.fire("session_tree", {}, ctx);
+		await turn();
+		const forward = await request(summary);
+		expect(JSON.stringify(forward[0])).toBe(JSON.stringify(compacted[0]));
+		expect(JSON.stringify(forward)).not.toContain("The date has changed");
 	});
 
 	it("drops removed fact blocks at compaction instead of resurrecting their restored copies", async () => {

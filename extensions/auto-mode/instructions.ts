@@ -2,11 +2,16 @@
  * Project instruction files for the classifier (pure fs).
  *
  * Claude Code's classifier reads the same CLAUDE.md the agent does, so an
- * instruction like "never force push" steers both at once. This collects the
- * same files: cwd upward to the git root, plus the user's global file. It
- * reads every file any `instructionFiles` value could load, whatever the rule,
- * plus the ONECODE.md files, since an instruction here can only tighten. In
- * independent mode only AGENTS.md and ONECODE.md files load.
+ * instruction like "never force push" steers both at once. This runs the
+ * agent's own discovery (lib/claude-context.ts, lib/claude-rules.ts): the
+ * managed and global files, every ancestor's CLAUDE.md, `.claude/CLAUDE.md`,
+ * `.claude/rules` and CLAUDE.local.md, ONECODE.md, with the same external
+ * import consent and symlink confinement, and in independent mode only the
+ * AGENTS.md and ONECODE.md files. Two widenings, since an instruction here can
+ * only tighten: AGENTS.md loads whatever `instructionFiles` picks for the
+ * agent, and every path-conditional rule loads, labelled with its paths, not
+ * only those for files the agent has read (the block opens the cached
+ * classifier prefix, so it must not change as the session touches new paths).
  *
  * These files are checked in, so they are untrusted input in a way the user's
  * own messages are not — the classifier prompt tells the model they may tighten
@@ -14,72 +19,63 @@
  * them safe; without it, a repository could ship its own authorisation.
  */
 
-import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { firstOneCodeFile } from "../lib/claude-context.ts";
+import { ancestorDirs, discoverContextFiles, discoverOneCodeFiles } from "../lib/claude-context.ts";
+import { readExternalIncludesApproval } from "../lib/claude-external-includes.ts";
+import { discoverRules, type RuleFile } from "../lib/claude-rules.ts";
 import { claudeSourcesOn } from "../lib/config-mode.ts";
-import { findGitRoot } from "../lib/git.ts";
-import { claudeUserDir, oneCodeStateDir } from "../lib/paths.ts";
+import { claudeManagedDir, claudeUserDir, oneCodeStateDir, tryRealpath } from "../lib/paths.ts";
 
-
-/** Per-file and total caps, so a large instruction file cannot crowd out rules. */
-const PER_FILE_LIMIT = 6_000;
-const TOTAL_LIMIT = 12_000;
-
-function readCapped(path: string): string | undefined {
-	try {
-		// readFileSync loads the whole file regardless, so the cap is applied to the
-		// decoded string. (A prior statSync branch claimed to bound the read but did
-		// the same full read either way.)
-		return readFileSync(path, "utf-8").slice(0, PER_FILE_LIMIT);
-	} catch {
-		return undefined;
-	}
+/** One file the classifier is shown. */
+interface InstructionFile {
+	path: string;
+	content: string;
+	/** A path-conditional rule's globs, named in its heading. */
+	globs?: string[];
 }
 
 /**
- * Every instruction file a directory may hold, for the classifier: the union of
- * what any `instructionFiles` value could load, since an instruction here can
- * only tighten. Independent mode (lib/config-mode.ts) reads no Claude Code file.
+ * Every path-conditional rule from the directories the agent reads rules
+ * from, under the same consent: managed, the user's, and each ancestor's
+ * `.claude/rules`.
  */
-const CLAUDE_COMPATIBLE_NAMES = ["CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", join(".claude", "AGENTS.md")];
-const INDEPENDENT_NAMES = ["AGENTS.md"];
+function conditionalRules(cwd: string, home: string, homeClaudeDir: string, includeExternal: boolean): RuleFile[] {
+	const dirs: { rulesDir: string; scope: "Managed" | "User" | "Project" }[] = [
+		{ rulesDir: join(claudeManagedDir(), ".claude", "rules"), scope: "Managed" },
+		{ rulesDir: join(homeClaudeDir, "rules"), scope: "User" },
+		...ancestorDirs(cwd).filter((dir) => dirname(dir) !== dir).map((dir) => ({ rulesDir: join(dir, ".claude", "rules"), scope: "Project" as const })),
+	];
+	return dirs.flatMap(({ rulesDir, scope }) =>
+		discoverRules({ rulesDir, scope, cwd, home, allConditional: true, ...(scope !== "User" ? { includeExternal } : {}) }),
+	);
+}
 
 /**
- * Concatenated instruction files, nearest first, the user's global file last,
- * or undefined when there are none. Each is labelled with its path so the
- * classifier can tell project convention from user-global preference.
+ * Concatenated instruction files in the agent's order (managed and global,
+ * then each directory from the farthest down, ONECODE.md last), each labelled
+ * with its path so the classifier can tell project convention from
+ * user-global preference; undefined when there are none. Every file is whole,
+ * as Claude Code's classifier gets the agent's CLAUDE.md: a cut would drop the
+ * restrictions past it. A transcript too large for the classifier's window is
+ * not judged (`decisions/auto-mode.md`).
  */
 export function loadProjectInstructions(cwd: string, home: string): string | undefined {
 	const claude = claudeSourcesOn();
-	const names = claude ? CLAUDE_COMPATIBLE_NAMES : INDEPENDENT_NAMES;
-	const stop = findGitRoot(cwd) ?? cwd;
-	const parts: string[] = [];
-	let total = 0;
-
-	const add = (path: string) => {
-		if (total >= TOTAL_LIMIT || !existsSync(path)) return;
-		const body = readCapped(path)?.trim();
-		if (!body) return;
-		const chunk = `# ${path}\n${body}`;
-		parts.push(chunk.slice(0, TOTAL_LIMIT - total));
-		total += chunk.length;
+	const homeClaudeDir = claudeUserDir(home);
+	const includeExternal = claude && readExternalIncludesApproval(cwd, home).approved;
+	const files: InstructionFile[] = [];
+	const seen = new Set<string>();
+	const add = (file: InstructionFile) => {
+		const key = tryRealpath(file.path) ?? file.path;
+		if (seen.has(key) || !file.content.trim()) return;
+		seen.add(key);
+		files.push(file);
 	};
+	if (claude) for (const rule of conditionalRules(cwd, home, homeClaudeDir, includeExternal)) add(rule);
+	const rule = claude ? "claude-md-and-agents-md" : "agents-md";
+	for (const file of discoverContextFiles({ cwd, homeClaudeDir, rule, home, includeExternal })) add(file);
+	for (const file of discoverOneCodeFiles({ cwd, homeOneCodeDir: oneCodeStateDir(process.env, home), home })) add(file);
 
-	let dir = cwd;
-	for (;;) {
-		for (const name of names) add(join(dir, name));
-		// The agent's ONECODE.md, which outranks the files above, in both modes.
-		const oneCode = firstOneCodeFile(dir);
-		if (oneCode) add(oneCode);
-		if (dir === stop) break;
-		const parent = dirname(dir);
-		if (parent === dir) break;
-		dir = parent;
-	}
-	if (claude) add(join(claudeUserDir(home), "CLAUDE.md"));
-	const globalOneCode = firstOneCodeFile(oneCodeStateDir(process.env, home));
-	if (globalOneCode) add(globalOneCode);
-
-	return parts.length > 0 ? parts.join("\n\n") : undefined;
+	if (files.length === 0) return undefined;
+	return files.map((file) => `# ${file.path}${file.globs ? ` (applies to ${file.globs.join(", ")})` : ""}\n${file.content.trim()}`).join("\n\n");
 }

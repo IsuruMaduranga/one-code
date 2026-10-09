@@ -7,7 +7,8 @@ import { pinReleaseDates } from "./catalog-fixture.ts";
 import { MODEL_UNUSABLE_CHANNEL } from "../../extensions/lib/model-unusable.ts";
 import { oneCodeSettingsPath, readSuggestNewerModels } from "../../extensions/lib/one-code-settings.ts";
 import newerModelExtension from "../../extensions/newer-model/index.ts";
-import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
+import { NOTICE_CHANNEL } from "../../extensions/lib/notices.ts";
+import { createFakeCtx, createFakePi, flushNotices } from "./helpers/fake-pi.ts";
 
 const model = (id: string) => ({ provider: "openai", id, name: id, api: "openai-responses", cost: { input: 1, output: 3 } }) as Model<Api>;
 const old = model("gpt-5.6-luna");
@@ -38,8 +39,9 @@ function mount(mode = "tui", hasUI = true) {
 	const getAll = vi.fn(() => { throw new Error("Suggestions must use available models, not the full catalog"); });
 	const ctx = createFakeCtx({ mode, hasUI, model: old, modelRegistry: { getAvailable, getAll } });
 	newerModelExtension(fake.pi as never);
-	const start = () => fake.fire("session_start", { reason: "startup" }, ctx);
-	const select = (m: Model<Api>) => fake.fire("model_select", { model: m }, ctx);
+	// The notice reaches the UI when the lifecycle notice batch closes (lib/notices.ts).
+	const start = async () => { await fake.fire("session_start", { reason: "startup" }, ctx); await flushNotices(); };
+	const select = async (m: Model<Api>) => { await fake.fire("model_select", { model: m }, ctx); await flushNotices(); };
 	return { fake, ctx, start, select, emit, getAvailable, getAll };
 }
 
@@ -61,7 +63,8 @@ describe("newer-model notices", () => {
 		expect(fake.sentMessages).toEqual([]);
 		expect(fake.sentUserMessages).toEqual([]);
 		expect(fake.appendedEntries).toEqual([]);
-		expect(emit).not.toHaveBeenCalled();
+		// The only bus traffic is the notice to the lifecycle notice owner.
+		expect(new Set(emit.mock.calls.map(([channel]) => channel))).toEqual(new Set([NOTICE_CHANNEL]));
 		expect(fake.pi.setModel).not.toHaveBeenCalled();
 	});
 	it("uses the model_select event model and reevaluates the available catalog", async () => {

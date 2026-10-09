@@ -40,6 +40,12 @@ export interface SubagentActionsPayload {
 	/** Agent name, used to label a background review. */
 	agentName?: string;
 	/**
+	 * Background only: the main session's tool call that started the reviewed
+	 * turn (the Agent call, or a later SendMessage), so the review reads the
+	 * session as far as that call. A foreground payload's `toolCallId` is that call.
+	 */
+	startedBy?: string;
+	/**
 	 * Background only: the gate answers here exactly once — the rendered flag
 	 * text when the review raised a concern, undefined when the sequence is
 	 * fine or auto mode is off — so the emitter can deliver the verdict with

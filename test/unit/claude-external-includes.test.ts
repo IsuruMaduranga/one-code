@@ -148,6 +148,19 @@ describe("external instruction include approval", () => {
 		expect(sent).toBe(true);
 	});
 
+	it("treats a dialog that fails as no answer and still runs the turn", async () => {
+		fixture();
+		const fake = createFakePi();
+		claudeContextExtension(fake.pi as never);
+		const select = vi.fn(async (): Promise<string> => { throw new Error("dialog failed"); });
+		const ctx = createFakeCtx({ cwd, hasUI: true, mode: "rpc", ui: { select } });
+		await fake.fire("session_start", {}, ctx);
+		await expect(fake.fire("before_agent_start", {}, ctx)).resolves.toBeDefined();
+		await expect(fake.fire("turn_start", {}, ctx)).resolves.toBeDefined();
+		expect(select).toHaveBeenCalledOnce();
+		expect(readExternalIncludesApproval(cwd, home)).toEqual({ approved: false, warningShown: false });
+	});
+
 	it.each(["session_shutdown", "session_start"])("ignores a stale approval after %s", async (event) => {
 		fixture();
 		let answer!: (choice: string) => void;
@@ -308,6 +321,17 @@ describe("startup probe and approved readers", () => {
 			expect(select).toHaveBeenCalledOnce();
 			expect(texts.at(-1)?.includes("ONECODE EXTERNAL SECRET")).toBe(choice === EXTERNAL_INCLUDES_YES);
 		}
+	});
+
+	it("reads an import that ends a sentence the same way with and without approval", () => {
+		const outside = write(join(root, "shared.md"), "APPROVED EXTERNAL INSTRUCTION\n");
+		write(join(cwd, "docs", "x.md"), "INSIDE PUNCTUATED IMPORT\n");
+		write(join(cwd, "CLAUDE.md"), "See @docs/x.md.\nAlso @../shared.md, please.\n");
+		expect(JSON.stringify(discoverContextFiles(opts()))).toContain("INSIDE PUNCTUATED IMPORT");
+		expect(externalInstructionIncludes(opts())).toEqual([outside]);
+		const approved = JSON.stringify(discoverContextFiles({ ...opts(), includeExternal: true }));
+		expect(approved).toContain("INSIDE PUNCTUATED IMPORT");
+		expect(approved).toContain("APPROVED EXTERNAL INSTRUCTION");
 	});
 
 	it("treats a .claude/CLAUDE.md linked to a file outside the project as an external include", () => {

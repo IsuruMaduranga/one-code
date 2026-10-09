@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CLASSIFIER_USER_INPUT, userMessageDigest } from "../../extensions/auto-mode/history.ts";
 import type { TranscriptEntry } from "../../extensions/auto-mode/transcript.ts";
 import { TURN_FAILED_CHANNEL } from "../../extensions/lib/interrupt.ts";
 import permissionsExtension from "../../extensions/permissions/index.ts";
@@ -67,6 +68,11 @@ describe("classifier history in the permissions gate", () => {
 		for (const entry of fake.appendedEntries.slice(before)) branch.push({ type: "custom", ...entry });
 		branch.push({ type: "message", id: `u${sequence}`, message });
 	};
+	/** A typed user message and the provenance entry the gate records beside it. */
+	const typed = (id: string, text: string, content: unknown = text) => [
+		{ type: "message", id, message: { role: "user", content } },
+		{ type: "custom", id: `${id}-input`, customType: CLASSIFIER_USER_INPUT, data: { messageDigest: userMessageDigest(text), userText: text } },
+	];
 	const call = async (toolName: string, input: Record<string, unknown>) => {
 		const toolCallId = `t${sequence++}`;
 		branch.push({ type: "message", id: toolCallId, message: { role: "assistant", content: [{ type: "toolCall", id: toolCallId, name: toolName, arguments: input }] } });
@@ -87,13 +93,13 @@ describe("classifier history in the permissions gate", () => {
 		await input("Old authorization no longer in context");
 		await call("write", { path: "old.txt", content: "old" });
 		branch = [
-			{ type: "message", id: "old", message: { role: "user", content: "Old authorization no longer in context" } },
-			{ type: "message", id: "kept-user", message: { role: "user", content: [{ type: "text", text: "Keep working locally" }] } },
+			...typed("old", "Old authorization no longer in context"),
+			...typed("kept-user", "Keep working locally", [{ type: "text", text: "Keep working locally" }]),
 			{ type: "message", id: "kept-call", message: { role: "assistant", content: [{ type: "toolCall", name: "write", arguments: { path: "kept.txt", content: "kept" } }] } },
 			{ type: "compaction", id: "compact", firstKeptEntryId: "kept-user", summary: "Created old.txt during this session." },
-			{ type: "message", id: "later-user", message: { role: "user", content: "Continue testing" } },
+			...typed("later-user", "Continue testing"),
 		];
-		await fake.fire("session_compact", { compactionEntry: branch[3] }, ctx);
+		await fake.fire("session_compact", { compactionEntry: branch[5] }, ctx);
 		await call("bash", { command: "rm old.*" });
 		expect(seen.at(-1)).toEqual([
 			{ kind: "summary", text: "Created old.txt during this session." },
@@ -108,9 +114,9 @@ describe("classifier history in the permissions gate", () => {
 	it.each(["resume", "tree"])("rebuilds the selected active branch on %s", async (reason) => {
 		await input("Abandoned branch intent");
 		branch = [
-			{ type: "message", id: "stale", message: { role: "user", content: "Summarized-away authorization" } },
+			...typed("stale", "Summarized-away authorization"),
 			{ type: "compaction", id: "compact", firstKeptEntryId: "compact", summary: "Created .rpc-probe.txt earlier." },
-			{ type: "message", id: "new", message: { role: "user", content: "Inspect the probe" } },
+			...typed("new", "Inspect the probe"),
 			{ type: "message", id: "call", message: { role: "assistant", content: [{ type: "toolCall", name: "bash", arguments: { command: "printf 'x' > later.txt" } }] } },
 			{ type: "message", id: "result", message: { role: "toolResult", content: [{ type: "text", text: "UNTRUSTED_RESULT" }] } },
 		];

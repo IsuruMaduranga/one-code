@@ -32,6 +32,15 @@ describe("phase-2 capability baselines", () => {
 		).instructed]).toEqual([["old", "use it"]]);
 	});
 
+	it("reads an older MCP block by the configured server names, keeping a ## heading inside its instructions", () => {
+		const text = "# MCP Server Instructions\n\nThe following MCP servers have provided instructions for how to use their tools and resources:\n\n" +
+			"## docs\nUse docs.\n\n## Usage\nCall search first.\n\n## web\nFetch pages.";
+		expect([...mcpAnnouncedFromReminders(text, undefined, ["docs", "web"]).instructed]).toEqual([
+			["docs", "Use docs.\n\n## Usage\nCall search first."],
+			["web", "Fetch pages."],
+		]);
+	});
+
 	it("uses locked stack text only as an older subagent snapshot fallback, including absence", () => {
 		expect(subagentBaselineFromStack([
 			{ key: "subagent-models", text: "models" }, { key: "subagent-agents", text: "agents" },

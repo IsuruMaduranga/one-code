@@ -56,6 +56,19 @@ describe("chosenModelWarnings", () => {
 		expect(chosenModelWarnings({ available: [old, next], sessionModel: next, chosen: old, role: "classifier", suggestNewer: false })).toEqual([]);
 	});
 
+	it("warns about a moving alias or an experimental build as the classifier only", () => {
+		tiers();
+		const alias = model("openai", "gpt-x-mid-latest", 2, 1_000_000);
+		const exp = model("openai", "gpt-x-mid-exp", 2, 1_000_000);
+		setModelTierOverridesForTest({ "openai/gpt-x-big": "workhorse", "openai/gpt-x-mid-latest": "workhorse", "openai/gpt-x-mid-exp": "workhorse" });
+		const [moving] = chosenModelWarnings({ available: [session, alias], sessionModel: session, chosen: alias, role: "classifier" });
+		expect(moving).toMatchObject({ kind: "unstable", text: expect.stringContaining("a moving alias") });
+		expect(moving.fix).toContain("/auto-mode model clear");
+		const [experimental] = chosenModelWarnings({ available: [session, exp], sessionModel: session, chosen: exp, role: "classifier" });
+		expect(experimental).toMatchObject({ kind: "unstable", text: expect.stringContaining("an experimental build") });
+		expect(chosenModelWarnings({ available: [session, alias], sessionModel: session, chosen: alias, role: "subagent" })).toEqual([]);
+	});
+
 	it("says nothing about the session model itself", () => {
 		tiers();
 		expect(chosenModelWarnings({ available: [session], sessionModel: session, chosen: session, role: "classifier" })).toEqual([]);

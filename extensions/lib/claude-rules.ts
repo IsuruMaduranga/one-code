@@ -1,7 +1,7 @@
 /** Claude Code 2.1.289 rule parsing/discovery. Pure filesystem/text helpers; no pi state. */
 import { lstatSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, relative } from "node:path";
-import ignore from "ignore";
+import ignore, { type Ignore } from "ignore";
 import { Lexer, type Token } from "marked";
 import { parse as parseYaml } from "yaml";
 import { absoluteFrom, comparablePath, expandTilde, forwardSlashes, isPathAtOrUnder, isRelativeInside, tryRealpath } from "./paths.ts";
@@ -103,14 +103,64 @@ export function ruleMatches(globs: string[] | undefined, filePath: string, base:
 		if (parent) candidate = relative(tryRealpath(base) ?? base, join(parent, basename(filePath)));
 	}
 	if (!isRelativeInside(candidate)) return false;
-	const valid = globs.filter((glob) => {
-		try { ignore().add(glob).test("probe"); return true; } catch { return false; }
-	});
-	return ignore().add(valid).ignores(forwardSlashes(candidate));
+	return globMatcher(globs).ignores(forwardSlashes(candidate));
+}
+
+/** Compiled matchers by glob list: a read checks every conditional rule, so each list compiles once. */
+const matchers = new Map<string, Ignore>();
+
+function globMatcher(globs: string[]): Ignore {
+	const key = JSON.stringify(globs);
+	let matcher = matchers.get(key);
+	if (!matcher) {
+		const valid = globs.filter((glob) => {
+			try { ignore().add(glob).test("probe"); return true; } catch { return false; }
+		});
+		if (matchers.size >= 1024) matchers.clear();
+		matchers.set(key, (matcher = ignore().add(valid)));
+	}
+	return matcher;
+}
+
+/**
+ * The paths a walk being cached has looked at, each with its stat signature
+ * from before it was read: a change while the walk runs makes the next call
+ * walk again rather than keep what it read.
+ */
+let touched: Map<string, string> | undefined;
+
+function touch(path: string): void {
+	if (touched && !touched.has(path)) touched.set(path, signature(path));
+}
+
+/** What a stat can see of a path (through a link too); "-" when it is missing. */
+function signature(path: string): string {
+	try {
+		const link = lstatSync(path);
+		const stat = link.isSymbolicLink() ? statSync(path) : link;
+		return `${link.ino}:${stat.ino}:${stat.mtimeMs}:${stat.size}:${stat.nlink}`;
+	} catch {
+		return "-";
+	}
 }
 
 function isLink(path: string): boolean {
+	touch(path);
 	try { return lstatSync(path).isSymbolicLink(); } catch { return false; }
+}
+
+/**
+ * One Code addition, matching the inline expander (claude-context.ts
+ * `readImportTarget`): an import ending a sentence (`@docs/x.md.`) names
+ * `docs/x.md` when only that is a file. Claude Code reads the literal path,
+ * which wins whenever it exists.
+ */
+function withoutTrailingPunctuation(target: string): string {
+	for (let candidate = target; ; candidate = candidate.slice(0, -1)) {
+		touch(candidate);
+		try { if (statSync(candidate).isFile()) return candidate; } catch { /* not a file: peel */ }
+		if (candidate.length <= 1 || !/[.,;:!?)\]]$/.test(candidate)) return target;
+	}
 }
 
 /** Y1n: imports are separate instruction files, not substitutions into the rule's body. */
@@ -120,7 +170,7 @@ function ruleImports(content: string, path: string, home: string): string[] {
 		for (const match of body.matchAll(/(?:^|\s)@((?:[^\s\\]|\\ )+)/g)) {
 			const ref = match[1].split("#")[0].replaceAll("\\ ", " ");
 			if (!ref || !(ref.startsWith("./") || ref.startsWith("~/") || (ref.startsWith("/") && ref !== "/") || /^[a-zA-Z0-9._-]/.test(ref))) continue;
-			found.add(absoluteFrom(dirname(path), expandTilde(ref, home)));
+			found.add(withoutTrailingPunctuation(absoluteFrom(dirname(path), expandTilde(ref, home))));
 		}
 	};
 	const walk = (tokens: Token[]) => {
@@ -156,6 +206,8 @@ export interface RuleOptions {
 	scope: "Project" | "User" | "Managed";
 	/** Undefined selects unconditional files; a target selects only matching conditional files. */
 	filePath?: string;
+	/** Select every conditional file, whatever its globs (the auto-mode classifier's instructions). */
+	allConditional?: boolean;
 	processed?: Set<string>;
 	/** Normal CLI user rules allow external includes; project/managed rules need approval. */
 	includeExternal?: boolean;
@@ -182,7 +234,9 @@ export function readRuleInstructions(path: string, opts: Pick<RuleOptions, "cwd"
 	const inside = (target: string) => isPathAtOrUnder(target, realCwd);
 	const realOwner = opts.ownerDir === undefined ? undefined : tryRealpath(opts.ownerDir) ?? opts.ownerDir;
 	const load = (path: string, depth = 0, parent?: string): RuleFile[] => {
+		touch(path);
 		const key = tryRealpath(path);
+		if (key) touch(key);
 		if (!key || depth >= 5 || processed.has(comparablePath(key)) || (opts.allowPath && (!opts.allowPath(path) || !opts.allowPath(key))) || (depth > 0 && !includeExternal && !inside(key))) return [];
 		// One Code addition: a project file linked out of the project is an include the user must approve.
 		const linkedOut = depth === 0 && realOwner !== undefined && !inside(key) && !isPathAtOrUnder(key, realOwner);
@@ -200,16 +254,46 @@ export function readRuleInstructions(path: string, opts: Pick<RuleOptions, "cwd"
 	return load(path);
 }
 
+/**
+ * Parsed walks by rules directory, scope, consent, cwd and home. Every `read`
+ * attaches rules, so a walk (readdir, realpath, read, lex and YAML per file) is
+ * reused while a stat of every path it looked at, imports and missing paths
+ * included, still matches. Consent is part of the key: a walk made without it
+ * is never served with it, or the other way round.
+ */
+const walks = new Map<string, { stamps: Map<string, string>; files: RuleFile[] }>();
+
 /** o$e: readdir order, depth-first, lowercase .md only; canonical identities stop link cycles. */
 export function discoverRules(opts: RuleOptions): RuleFile[] {
+	const base = opts.scope === "Project" ? dirname(dirname(opts.rulesDir)) : opts.cwd;
+	const select = (files: RuleFile[]) =>
+		files
+			.filter((file) => (opts.allConditional ? Boolean(file.globs) : opts.filePath === undefined ? !file.globs : ruleMatches(file.globs, opts.filePath, base)))
+			.map((file) => ({ ...file }));
+	// A shared dedupe set or a path filter makes the walk depend on its caller: never cached.
+	if (opts.processed || opts.allowPath || touched) return select(walkRules(opts));
+	const key = JSON.stringify([opts.rulesDir, opts.scope, opts.includeExternal ?? opts.scope === "User", opts.cwd, opts.home]);
+	const cached = walks.get(key);
+	if (cached && [...cached.stamps].every(([path, stamp]) => signature(path) === stamp)) return select(cached.files);
+	const stamps = new Map<string, string>();
+	touched = stamps;
+	let files: RuleFile[];
+	try { files = walkRules(opts); } finally { touched = undefined; }
+	if (walks.size >= 256) walks.clear();
+	walks.set(key, { stamps, files });
+	return select(files);
+}
+
+function walkRules(opts: RuleOptions): RuleFile[] {
 	const includeExternal = opts.includeExternal ?? opts.scope === "User";
 	const visited = new Set<string>();
 	const processed = opts.processed ?? new Set<string>();
 	const realCwd = tryRealpath(opts.cwd) ?? opts.cwd;
 	const inside = (path: string) => isPathAtOrUnder(path, realCwd);
-	const base = opts.scope === "Project" ? dirname(dirname(opts.rulesDir)) : opts.cwd;
 	const walk = (dir: string, linkedFrom?: string): RuleFile[] => {
+		touch(dir);
 		const real = tryRealpath(dir);
+		if (real) touch(real);
 		if (!real || visited.has(comparablePath(real))) return [];
 		// o2n/Tgt allow external user rules. o$e's J1n gate checks a linked
 		// .claude parent only on the cwd/ancestor walk, not on nested directories.
@@ -220,6 +304,7 @@ export function discoverRules(opts: RuleOptions): RuleFile[] {
 		try {
 			for (const entry of readdirSync(real, { withFileTypes: true })) {
 				const path = join(real, entry.name);
+				touch(path);
 				const key = tryRealpath(path);
 				if (!key || (!includeExternal && key !== path && !inside(key))) continue;
 				const stat = entry.isSymbolicLink() ? statSync(key) : entry;
@@ -234,5 +319,5 @@ export function discoverRules(opts: RuleOptions): RuleFile[] {
 			return files;
 		} catch { return []; }
 	};
-	return walk(opts.rulesDir).filter((file) => opts.filePath === undefined ? !file.globs : ruleMatches(file.globs, opts.filePath, base));
+	return walk(opts.rulesDir);
 }

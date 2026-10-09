@@ -95,7 +95,12 @@ export function actionLength(entries: readonly TranscriptEntry[]): number {
 	return action ? renderEntry(action).length : 0;
 }
 
-/** Claude Code omits these local read/search calls from prior history. */
+/**
+ * Claude Code omits these local read/search calls from prior history. Only the
+ * session-history projection applies it (history.ts); a rendered transcript
+ * keeps every entry it is given, so a finished subagent's reads stay in its
+ * hand-back review beside what it did with them.
+ */
 const HISTORICAL_READ_TOOLS = new Set([
 	"Read", "Grep", "Glob", "LSP", "ToolSearch", "ListMcpResourcesTool", "ReadMcpResourceTool", "ReadMcpResourceDirTool",
 	"lsp_diagnostics", "tool_search", "list_mcp_resources", "read_mcp_resource", "read_mcp_resource_dir",
@@ -121,13 +126,16 @@ export function renderTranscript(entries: TranscriptEntry[]): string {
 	return history.join("") + tail;
 }
 
-/** Stable entry boundaries; the pending action and its harness facts stay in the tail. */
+/**
+ * Stable entry boundaries; the pending action and its harness facts stay in the
+ * tail. Every entry is rendered: what to leave out of the session's history is
+ * history.ts's decision, made before the entries get here.
+ */
 export function transcriptBlocks(entries: TranscriptEntry[]): { history: string[]; tail: string } {
-	const visible = entries.filter((entry, i) => i === entries.length - 1 || !isHistoricalRead(entry));
-	let historyEnd = Math.max(0, visible.length - 1);
-	while (historyEnd > 0 && ["meta", "resolved-paths"].includes(visible[historyEnd - 1].kind)) historyEnd--;
+	let historyEnd = Math.max(0, entries.length - 1);
+	while (historyEnd > 0 && ["meta", "resolved-paths"].includes(entries[historyEnd - 1].kind)) historyEnd--;
 	return {
-		history: ["<transcript>", ...visible.slice(0, historyEnd).map((entry) => `\n${renderEntry(entry)}`)],
-		tail: `\n${visible.slice(historyEnd).map(renderEntry).join("\n")}\n</transcript>`,
+		history: ["<transcript>", ...entries.slice(0, historyEnd).map((entry) => `\n${renderEntry(entry)}`)],
+		tail: `\n${entries.slice(historyEnd).map(renderEntry).join("\n")}\n</transcript>`,
 	};
 }

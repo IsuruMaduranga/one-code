@@ -43,7 +43,7 @@ import { projectMemoryDir, truncateIndex } from "../lib/memory.ts";
 import { claudeConfigDir, oneCodeStateDir, tryRealpath } from "../lib/paths.ts";
 import { CONTEXT_ORDER, REMINDER_CHANNEL, type ReminderEntry, tailAnchor } from "../lib/reminders.ts";
 import { inContextEntries } from "../lib/compaction-boundary.ts";
-import { CONTEXT_BASELINE_CHANNEL, CONTEXT_FACTS_REFRESH_CHANNEL, restoredContext, type ContextStackSnapshot } from "../lib/context-stack.ts";
+import { CONTEXT_BASELINE_CHANNEL, CONTEXT_FACTS_REFRESH_CHANNEL, contextStackOnBranch, restoredContext, type ContextStackSnapshot } from "../lib/context-stack.ts";
 import { compactionGitStatus, contextFactsBaseline, DATE_CHANGE_KEY, legacyResumeFactsNotice, RESUME_FACTS_KEY, resumeFactsNotice, storedFactsBaseline, type ContextFactsBaseline } from "../lib/context-facts.ts";
 import { resolveToolPath } from "../lib/tool-path.ts";
 import { sessionWorkCwd, WORKTREE_CHANNEL, type WorktreeLocation } from "../lib/worktree-channel.ts";
@@ -89,6 +89,9 @@ function readMemoryIndex(cwd: string): { path: string; content: string } | null 
 	}
 }
 
+/** A tool result and the nested instruction files it carried into context (`remember`). */
+const NESTED_SHOWN_ENTRY = "one-code:nested-instructions-shown";
+
 export default function claudeContextExtension(pi: ExtensionAPI) {
 	const resetConsentDialogs = installConsentDialogs(pi.events);
 	/** The account email stand-in, resolved at session start. */
@@ -124,8 +127,23 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	const remember = (toolCallId: string | undefined, keys: Iterable<string>) => {
 		if (!toolCallId) return;
 		const shown = shownByResult.get(toolCallId) ?? new Set<string>();
+		const before = shown.size;
 		for (const key of keys) shown.add(key);
-		if (shown.size) shownByResult.set(toolCallId, shown);
+		if (shown.size === before) return;
+		shownByResult.set(toolCallId, shown);
+		// Recorded on the branch, so a resume or a /tree switch knows what is already in context.
+		pi.appendEntry(NESTED_SHOWN_ENTRY, { toolCallId, keys: [...shown] });
+	};
+	/** Rebuild what the branch's own results showed (a resume, a /tree switch), then keep what is still in context. */
+	const restoreAttachments = (ctx: ExtensionContext) => {
+		shownByResult.clear();
+		for (const entry of ctx.sessionManager.getBranch() as { type: string; customType?: string; data?: unknown }[]) {
+			if (entry.type !== "custom" || entry.customType !== NESTED_SHOWN_ENTRY) continue;
+			const data = entry.data as { toolCallId?: unknown; keys?: unknown } | undefined;
+			if (typeof data?.toolCallId !== "string" || !Array.isArray(data.keys)) continue;
+			shownByResult.set(data.toolCallId, new Set(data.keys.filter((key): key is string => typeof key === "string")));
+		}
+		keepRetainedAttachments(ctx);
 	};
 	const keepRetainedAttachments = (ctx: ExtensionContext) => {
 		attachedNested = new Set(startupShown);
@@ -175,6 +193,17 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 			oneCodeFiles,
 			oneCode: buildOneCodeBlock(oneCodeFiles),
 		};
+	};
+	/** What a stored snapshot says the model was shown: its facts, the files its blocks carry, and its dates. */
+	const adoptSnapshot = (snapshot: ContextStackSnapshot) => {
+		const saved = snapshot.baselines["claude-context"] as { startupShown?: unknown; shownDate?: unknown; facts?: unknown } | undefined;
+		facts = storedFactsBaseline(saved?.facts);
+		startupShown = new Set(Array.isArray(saved?.startupShown) ? saved.startupShown.filter((p): p is string => typeof p === "string") : []);
+		attachedNested = new Set(startupShown);
+		blockDate = snapshot.stack.find((entry) => entry.key === DATE_REMINDER_KEY)?.text.match(/^Today's date is (\d{4}-\d{2}-\d{2})\.$/)?.[1] ?? "";
+		shownDate = typeof saved?.shownDate === "string" ? saved.shownDate : blockDate;
+		hadInstructions = snapshot.stack.some((entry) => entry.key === REMINDER_KEY);
+		hadOneCode = snapshot.stack.some((entry) => entry.key === ONECODE_REMINDER_KEY);
 	};
 	let files: ReturnType<typeof readFiles> | undefined;
 	const adoptFiles = (current: ReturnType<typeof readFiles>) => {
@@ -275,19 +304,15 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 			if (paths.length) {
 				// RPC installs its input reader only AFTER session_start returns.
 				// Queue after hooks/MCP consent; gate the first turn, not startup.
-				approvalPending = askApproval(ctx, paths, true);
-				approvalPending.catch(() => {});
+				// A dialog that fails is no answer: nothing is approved or remembered, and the turn goes on.
+				approvalPending = askApproval(ctx, paths, true).catch(() => {});
 			}
 		}
 		if (restored) {
-			const baseline = restored.baselines["claude-context"] as { startupShown?: unknown; shownDate?: unknown; facts?: unknown } | undefined;
-			facts = storedFactsBaseline(baseline?.facts);
-			startupShown = new Set(Array.isArray(baseline?.startupShown) ? baseline.startupShown.filter((p): p is string => typeof p === "string") : []);
-			attachedNested = new Set(startupShown);
+			adoptSnapshot(restored);
+			restoreAttachments(ctx);
 			rule = instructionRule(os.homedir());
 			gitStatus = null; // The stored snapshot wins; do not take another one.
-			blockDate = restored.stack.find((entry) => entry.key === DATE_REMINDER_KEY)?.text.match(/^Today's date is (\d{4}-\d{2}-\d{2})\.$/)?.[1] ?? "";
-			shownDate = typeof baseline?.shownDate === "string" ? baseline.shownDate : blockDate;
 			publishBaseline();
 			return;
 		}
@@ -354,7 +379,9 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		if (pendingResume) {
 			const restored = pendingResume;
 			pendingResume = undefined;
-			const cwd = sessionWorkCwd(entered, ctx.cwd);
+			// Compare in the directory the facts were read in: a resume inside a worktree entered
+			// after the session started would otherwise report every path as changed.
+			const cwd = facts?.cwd ?? (facts?.atCompaction ? sessionWorkCwd(entered, ctx.cwd) : ctx.cwd);
 			const current = readFiles(cwd);
 			const liveGit = snapshotGit(cwd);
 			const liveFacts = contextFactsBaseline({ ...current, gitStatus: liveGit, atCompaction: false });
@@ -365,7 +392,7 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		}
 		if (gitStatus !== undefined) return;
 		gitStatus = snapshotGit(ctx.cwd);
-		if (files) facts = contextFactsBaseline({ ...files, gitStatus, atCompaction: false });
+		if (files) facts = contextFactsBaseline({ ...files, gitStatus, atCompaction: false, cwd: ctx.cwd });
 		publishBaseline();
 		const context = buildContextBlock({ email, gitStatus });
 		if (!context) return;
@@ -404,7 +431,7 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 		email = resolveEmail(cwd);
 		gitStatus = snapshotGit(cwd);
 		blockDate = shownDate = localDate();
-		facts = contextFactsBaseline({ ...current, gitStatus, atCompaction: true });
+		facts = contextFactsBaseline({ ...current, gitStatus, atCompaction: true, cwd });
 		const entries: ReminderEntry[] = [];
 		const add = (key: string, text: string | null, order: number) => {
 			if (text) entries.push({ key, text, order, placement: "first-prepend" });
@@ -417,9 +444,17 @@ export default function claudeContextExtension(pi: ExtensionAPI) {
 	});
 
 	// A branch switch leaves the attachments of the branch left behind; the new one may lack them.
-	pi.on("session_tree", () => {
-		attachedNested = new Set(startupShown);
-		shownByResult.clear();
+	// Its facts are the selected branch's (system-reminder restores its blocks): a branch from
+	// before a compaction still shows the session-start facts, and a later compaction or date
+	// notice compares against those.
+	pi.on("session_tree", (_event, ctx) => {
+		const branch = contextStackOnBranch(ctx.sessionManager.getBranch());
+		if (branch) {
+			adoptSnapshot(branch);
+			if (pendingResume) pendingResume = branch;
+			publishBaseline();
+		}
+		restoreAttachments(ctx);
 		pendingNested.clear();
 	});
 

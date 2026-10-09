@@ -153,11 +153,21 @@ describe("classifier transcript cache", () => {
 		expect(cachedPrefix(payloads[1])).not.toBe(cachedPrefix(payloads[0]));
 	});
 
-	it.each(["openai-responses", "openai-completions", "bedrock-converse-stream", "google-generative-ai", "google-vertex"])("leaves %s as a single string without a payload hook", async (api) => {
+	it.each(["openai-responses", "google-generative-ai", "google-vertex"])("leaves %s as a single string without a payload hook", async (api) => {
 		await classify(request, deps({ ...model, provider: "openai", id: "gpt-5-mini", api } as Model<Api>));
 		const [, context, options] = vi.mocked(completeSimple).mock.calls[0];
 		expect(context.messages[0].content).toBe(stage1User(buildPayload(request).userPrefix));
 		expect(options?.onPayload).toBeUndefined();
+	});
+
+	// Their payloads carry explicit breakpoints on some models (OpenRouter's
+	// anthropic/*, Claude on Bedrock); the hook places them there and finds
+	// nothing to move elsewhere (classifier-cache-providers.test.ts).
+	it.each(["openai-completions", "bedrock-converse-stream"])("hands %s the history boundaries, with the text sent as one string", async (api) => {
+		await classify(request, deps({ ...model, provider: "openai", id: "gpt-5-mini", api } as Model<Api>));
+		const [, context, options] = vi.mocked(completeSimple).mock.calls[0];
+		expect(context.messages[0].content).toBe(stage1User(buildPayload(request).userPrefix));
+		expect(options?.onPayload).toBeTypeOf("function");
 	});
 });
 
@@ -166,7 +176,6 @@ const resolvedPaths = [{ path: "link/secret", resolvesTo: "/outside/secret" }];
 const mixed: TranscriptEntry[] = [
 	{ kind: "summary", text: "Earlier context" },
 	{ kind: "user", text: "Keep the newline\nand emoji 😀" },
-	{ kind: "tool", tool: "read", input: { path: "omit-local-read" } },
 	{ kind: "tool", tool: "read", input: { path: "remote", _host: "remote-host" } },
 	{ kind: "meta", gitStatus: { clean: true } },
 	{ kind: "tool", tool: "bash", input: { command: "echo historical action" } },
@@ -228,7 +237,6 @@ describe("classifier text preservation", () => {
 	it.each([
 		{ entries: [], expected: "<transcript>\n\n</transcript>" },
 		{ entries: [action], expected: '<transcript>\n{"Read":{"path":"link/secret","content":"line one\\nline two 😀"}}\n</transcript>' },
-		{ entries: [{ kind: "tool", tool: "read", input: { path: "omit" } }, action], expected: '<transcript>\n{"Read":{"path":"link/secret","content":"line one\\nline two 😀"}}\n</transcript>' },
 	] as { entries: TranscriptEntry[]; expected: string }[])("preserves empty and action-only histories: $entries", ({ entries, expected }) => {
 		const { history, tail } = transcriptBlocks(entries);
 		expect(history.join("") + tail).toBe(expected);

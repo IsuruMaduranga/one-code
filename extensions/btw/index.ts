@@ -29,7 +29,6 @@
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { completeSimple } from "@earendil-works/pi-ai/compat";
 import {
 	convertToLlm,
 	copyToClipboard,
@@ -41,14 +40,13 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { ARGUMENT_HINT_CHANNEL, type ArgumentHint } from "../lib/argument-hints.ts";
 import { btwForkedLine, type BtwForkResult, requestBtwFork } from "../lib/btw-fork.ts";
-import { notifyOrPrint, printAnswer } from "../lib/headless-output.ts";
+import { canShowCustomUi, notifyOrPrint, printAnswer } from "../lib/headless-output.ts";
 import { announcePromptOptions } from "../lib/prompt-options.ts";
-import { withReasoningFallback } from "../lib/model-policy.ts";
 import { followLastExchange, replaySideCall } from "../lib/replay-call.ts";
 import { answerText, stripImageBlocks, toolStubs, trimToTurnBoundary, withoutSystemMessages } from "../lib/side-call.ts";
 import { boundedDockHeight, linesComponent, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
-import { cacheSideCallConversation } from "../lib/side-call-cache.ts";
-import { logSideCallUsage } from "../lib/side-call-usage.ts";
+import { CONVERSATION_CACHE_PLACEMENT } from "../lib/side-call-cache.ts";
+import { runSideCall } from "../lib/side-call-run.ts";
 import { recordUsage } from "../lib/usage-bus.ts";
 import type { ProseRenderer } from "../subagents/panel-render.ts";
 import { createMarkdownProse } from "../subagents/prose.ts";
@@ -156,7 +154,6 @@ export default function btwExtension(pi: ExtensionAPI) {
 		// No replay for this model, or it failed: the standalone call.
 		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
 		if (!auth.ok) throw new Error("No API key is available for the current model.");
-		const baseUrl = (auth as { baseUrl?: string }).baseUrl;
 		const tools = toolStubs(pi.getActiveTools(), STUB_REASON);
 		const context = trimToTurnBoundary(withoutSystemMessages(capturedMessages ?? []));
 		// btw runs on a cheap, possibly text-only reader and answers a text question,
@@ -167,32 +164,18 @@ export default function btwExtension(pi: ExtensionAPI) {
 			...before,
 			{ role: "user" as const, content: sideQuestionMessage(question), timestamp: Date.now() },
 		];
-		const sessionId = `${ctx.sessionManager.getSessionId()}:btw`;
-
-		const result = await withReasoningFallback(
-			model as Model<Api>,
-			async (reasoning) => {
-				const timeout = AbortSignal.timeout(BTW_TIMEOUT_MS);
-				const reply = await completeSimple(
-					baseUrl ? ({ ...model, baseUrl } as Model<Api>) : model,
-					{ systemPrompt: "", messages, tools },
-					{
-						apiKey: auth.apiKey,
-						headers: auth.headers,
-						env: auth.env,
-						signal: AbortSignal.any([signal, timeout]),
-						maxTokens: BTW_MAX_TOKENS,
-						sessionId,
-						...(model.api === "anthropic-messages" ? { onPayload: cacheSideCallConversation } : {}),
-						...(reasoning ? { reasoning } : {}),
-					},
-				);
-				logSideCallUsage({ kind: "btw", model, sessionId, system: "", messages }, reply);
-				return reply;
-			},
-			undefined,
-			(usage) => recordUsage(pi, "btw", usage),
-		);
+		const result = await runSideCall({
+			kind: "btw",
+			model,
+			auth,
+			sessionId: ctx.sessionManager.getSessionId(),
+			context: { systemPrompt: "", messages, tools },
+			signal,
+			timeoutMs: BTW_TIMEOUT_MS,
+			maxTokens: BTW_MAX_TOKENS,
+			cache: CONVERSATION_CACHE_PLACEMENT,
+			onUsage: (usage) => recordUsage(pi, "btw", usage),
+		});
 		// completeSimple reports a failure (a network error, a timeout) in the
 		// reply instead of throwing; its empty text is not an answer.
 		if (signal.aborted) return "";
@@ -216,7 +199,7 @@ export default function btwExtension(pi: ExtensionAPI) {
 
 			// RPC has dialogs but no custom panel. Deliver its answer as a notice,
 			// never a main-conversation message; one-shot runs print it instead.
-			if (!ctx.hasUI || ctx.mode === "rpc") {
+			if (!canShowCustomUi(ctx)) {
 				inFlight?.abort();
 				const controller = new AbortController();
 				inFlight = controller;

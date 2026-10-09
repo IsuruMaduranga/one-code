@@ -60,13 +60,15 @@ A preset sets the main model and subagent model from the provider you're
 connected to, and returns the classifier to the automatic pick. Each preset's
 preview shows the classifier its main model would get (see
 [Automatic model selection](providers-and-models.md#automatic-model-selection)).
-Only priced models that support tool calls, and that no newer model of the
-same vendor replaces, are considered for the main model.
+A preset only recommends a main model that's priced, can call tools, and isn't
+replaced by a newer model this provider serves. It also skips any model
+`/doctor` would flag as having a newer version at about the same price, so a
+preset never points you at a model the same report calls outdated.
 
 | Preset | Main model | Subagents | Classifier |
 |---|---|---|---|
 | `economical` | The cheapest cheap-tier model, else the cheapest workhorse or frontier one. | Inherit the main model. | Automatic. |
-| `balanced` | The cheapest workhorse-tier model, else the cheapest frontier one. | Chosen automatically (a cheaper model in the main model's tier or above when one exists, else the main model). | Automatic. |
+| `balanced` | The cheapest workhorse- or frontier-tier model. | Chosen automatically (a cheaper model in the main model's tier or above when one exists, else the main model). | Automatic. |
 | `quality` | The most capable model available. | Inherit the main model. | Automatic. |
 
 `/doctor presets` shows what each preset would pick. `/doctor preset balanced`

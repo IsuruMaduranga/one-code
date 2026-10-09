@@ -199,7 +199,7 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 			lines.push({ text: `Setting: "${classifier.configured}" via autoMode.classifierModel in ~/.onecode/settings.json (/auto-mode model clear returns to automatic)`, indent: 1, level: "dim" });
 		}
 		lines.push({
-			text: "Classifier policy: the cheapest model on this provider in this session's tier or above, strictly cheaper than it, with a context window at least as large and not an experimental build, else this session's model; /auto-mode model chooses one by hand.",
+			text: "Classifier policy: the cheapest model on this provider in this session's tier or above, strictly cheaper than it, with a context window at least as large, not an experimental build and not a moving -latest alias, else this session's model; /auto-mode model chooses one by hand.",
 			indent: 1,
 			level: "dim",
 		});
