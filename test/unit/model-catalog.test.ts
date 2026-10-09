@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -358,6 +358,14 @@ describe("refreshing the catalogs", () => {
 		expect(catalogRefreshDue(stateDir, nextDay)).toBe(true);
 		expect((await refreshModelCatalog({ stateDir, piProviders: ["deepseek"], fetchImpl: fakeFetch().impl, now: nextDay })).status).toBe("refreshed");
 		expect(existsSync(join(catalogCacheDir(stateDir), "refresh-failed.json"))).toBe(false);
+	});
+
+	it("ignores a failure stamped later than now, so it cannot hold refreshes off", async () => {
+		const later = new Date("2099-01-03T00:00:00Z");
+		mkdirSync(catalogCacheDir(stateDir), { recursive: true });
+		writeFileSync(join(catalogCacheDir(stateDir), "refresh-failed.json"), JSON.stringify({ failedAt: "9999-01-01T00:00:00Z", error: "x" }));
+		expect(catalogRefreshDue(stateDir, later)).toBe(true);
+		expect((await refreshModelCatalog({ stateDir, piProviders: ["deepseek"], fetchImpl: fakeFetch().impl, now: later })).status).toBe("refreshed");
 	});
 
 	it("does not count a refresh the caller cancelled as a failure", async () => {

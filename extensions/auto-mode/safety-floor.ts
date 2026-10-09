@@ -184,7 +184,7 @@ const REASON = (token: string) =>
 		: `it writes ${token}, which holds the permission rules and auto-mode configuration that contain this agent`;
 
 /** A cached catalog's file name, to word the reason (a false match only rewords it). */
-const CATALOG_FILE_NAME = /(^|[/\\])(models-dev|openrouter|huggingface)\.json$/i;
+const CATALOG_FILE_NAME = /(^|[/\\])(models-dev|openrouter|huggingface|refresh-failed)\.json$/i;
 
 /**
  * Reason text when this call writes a safety-control file, undefined otherwise.

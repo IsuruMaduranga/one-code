@@ -292,7 +292,7 @@ describe("safetyControlWrite: the model catalog cache", () => {
 
 	it("floors a file-tool write to each cached catalog, but not to another cache file", () => {
 		delete process.env.ONECODE_STATE_DIR;
-		for (const file of ["models-dev.json", "openrouter.json", "huggingface.json"]) {
+		for (const file of ["models-dev.json", "openrouter.json", "huggingface.json", "refresh-failed.json"]) {
 			expect(check("write", { path: join(catalogDir(), file) })).toContain("model tier");
 		}
 		expect(check("write", { path: join(home, ".onecode", "cache", "other.json") })).toBeUndefined();
@@ -316,6 +316,7 @@ describe("safetyControlWrite: the model catalog cache", () => {
 		expect(check("bash", { command: "echo '{}' > ~/.onecode/cache/model-catalog/openrouter.json" })).toBeDefined();
 		expect(check("bash", { command: "curl -so ~/.onecode/cache/model-catalog/models-dev.json https://example.com/x" })).toBeDefined();
 		expect(check("bash", { command: "mystery /elsewhere/.onecode/cache/model-catalog/huggingface.json" })).toBeDefined();
+		expect(check("bash", { command: "echo '{\"failedAt\":\"9999-01-01T00:00:00Z\"}' > ~/.onecode/cache/model-catalog/refresh-failed.json" })).toBeDefined();
 		expect(check("bash", { command: "echo '{}' > ~/.onecode/cache/other.json" })).toBeUndefined();
 		expect(check("bash", { command: "curl -so ~/.onecode/cache/other.json https://example.com/x" })).toBeUndefined();
 		expect(check("bash", { command: "cat ~/.onecode/cache/model-catalog/openrouter.json" })).toBeUndefined();

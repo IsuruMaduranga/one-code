@@ -91,6 +91,8 @@ export interface CatalogSources {
 }
 
 const FILES = { modelsDev: "models-dev.json", openRouter: "openrouter.json", huggingFace: "huggingface.json" } as const;
+/** The last failed refresh, which holds the next one off for a day (`recentFailure`). */
+const FAILURE_FILE = "refresh-failed.json";
 type SourceName = keyof typeof FILES;
 
 // ---------------------------------------------------------------------------
@@ -218,12 +220,13 @@ export function catalogCacheDir(stateDir: string): string {
 }
 
 /**
- * The refreshed catalog files. They decide a model's tier, and the tier
- * decides which auto-mode fast paths skip the classifier, so the safety floor
- * guards them like the settings files (auto-mode/safety-floor.ts).
+ * The refreshed catalog files and the failure stamp that holds a refresh off.
+ * They decide a model's tier, and the tier decides which auto-mode fast paths
+ * skip the classifier, so the safety floor guards them like the settings
+ * files (auto-mode/safety-floor.ts).
  */
 export function catalogCacheFiles(stateDir: string): string[] {
-	return Object.values(FILES).map((file) => join(catalogCacheDir(stateDir), file));
+	return [...Object.values(FILES), FAILURE_FILE].map((file) => join(catalogCacheDir(stateDir), file));
 }
 
 /**
@@ -231,7 +234,7 @@ export function catalogCacheFiles(stateDir: string): string[] {
  * forward-slashed path tail: the floor's counterpart of `catalogCacheFiles`,
  * for one in another home or spelled through a symlink the resolver missed.
  */
-export const CATALOG_CACHE_TAIL = new RegExp(`/\\.onecode/cache/model-catalog/(${Object.values(FILES).map((file) => file.replace(/[.]/g, "\\.")).join("|")})$`);
+export const CATALOG_CACHE_TAIL = new RegExp(`/\\.onecode/cache/model-catalog/(${[...Object.values(FILES), FAILURE_FILE].map((file) => file.replace(/[.]/g, "\\.")).join("|")})$`);
 
 function isCatalogFile(value: unknown): value is CatalogFile<unknown> {
 	const file = record(value);
@@ -374,12 +377,12 @@ interface RefreshFailure {
 	failedAt: string;
 	error: string;
 }
-const FAILURE_FILE = "refresh-failed.json";
 
 function recentFailure(stateDir: string, now: Date): RefreshFailure | undefined {
 	const failure = readJsonFile<RefreshFailure>(join(catalogCacheDir(stateDir), FAILURE_FILE));
-	const valid = typeof failure?.failedAt === "string" && !Number.isNaN(Date.parse(failure.failedAt));
-	return valid && !olderThanRefresh(failure.failedAt, now) ? failure : undefined;
+	const failedAt = typeof failure?.failedAt === "string" ? Date.parse(failure.failedAt) : Number.NaN;
+	// A stamp later than now was not written by a refresh; it must not hold refreshes off.
+	return !Number.isNaN(failedAt) && failedAt <= now.getTime() && !olderThanRefresh(failure!.failedAt, now) ? failure : undefined;
 }
 
 /**
