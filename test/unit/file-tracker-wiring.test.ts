@@ -4,7 +4,7 @@
  * replay reconstruction — as opposed to tracker.ts's pure state machine,
  * already covered by file-tracker.test.ts.
  */
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -190,6 +190,37 @@ describe("file-tracker wiring", () => {
 		await fake.fireOne("tool_execution_end", { toolName: "bash", toolCallId: "b2", isError: false }, ctx());
 		expect(emitted).toHaveLength(2);
 		expect(emitted[1]).toContain(`Note: ${file} changed on disk since you last read it. That's usually deliberate`);
+	});
+
+	it("never credits a later outside change to a subagent whose write was already accounted for", async () => {
+		const emitted: string[] = [];
+		fake.events.on(REMINDER_CHANNEL, (data) => emitted.push((data as { text: string }).text));
+		const files = ["o1", "o2", "o3", "o4", "o5", "o6", "same"].map((name) => path(`${name}.ts`));
+		for (const file of files) {
+			writeFileSync(file, "before");
+			await fake.fireOne("tool_result", { toolName: "read", input: { path: file }, isError: false }, ctx());
+		}
+		const same = files.at(-1)!;
+		// Six changed files: the sixth lands in the overflow notice. The last is rewritten with the content the parent read.
+		for (const file of files.slice(0, 6)) {
+			writeFileSync(file, "child edit");
+			fake.events.emit(CHILD_WROTE_CHANNEL, { path: file, agent: "sweep" });
+		}
+		writeFileSync(same, "before");
+		utimesSync(same, new Date(), new Date(Date.now() + 5_000));
+		fake.events.emit(CHILD_WROTE_CHANNEL, { path: same, agent: "sweep" });
+		await fake.fireOne("tool_execution_end", { toolName: "Agent", toolCallId: "a1", isError: false }, ctx());
+		expect(emitted.at(-1)).toContain(`1 more file(s) you read earlier changed on disk since: ${files[5]}`);
+
+		emitted.length = 0;
+		writeFileSync(files[5], "child edit\nformatted");
+		writeFileSync(same, "before\nformatted");
+		await fake.fireOne("tool_execution_end", { toolName: "bash", toolCallId: "b2", isError: false }, ctx());
+		expect(emitted).toHaveLength(2);
+		for (const text of emitted) {
+			expect(text).toContain("changed on disk since you last read it. That's usually deliberate");
+			expect(text).not.toContain("sweep");
+		}
 	});
 
 	it("reports a change made during the turn at the end of the next tool execution, with Claude Code's steer, and does not report our own writes", async () => {

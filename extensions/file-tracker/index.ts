@@ -440,6 +440,12 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 			if (previous === undefined) continue;
 			const stamp = statIfPresent(path);
 			if (stamp && tracker.unchangedOnDisk(path, stamp)) continue;
+			// This scan accounts for the child's write whatever it finds (same
+			// content, already notified, overflow), so a later change by someone
+			// else is never credited to that agent.
+			const byChild = childWrites.has(path);
+			const childAgent = childWrites.get(path);
+			childWrites.delete(path);
 			const current = stamp ? readIfPresent(path) : undefined;
 			if (stamp === undefined || current === undefined) {
 				tracker.forget(path);
@@ -453,9 +459,7 @@ export default function fileTrackerExtension(pi: ExtensionAPI) {
 
 			if (detailed.length < DETAILED_CHANGE_REMINDERS_PER_TURN) {
 				const excerpt = describeChanges(previous, current);
-				const byChild = childWrites.has(path);
-				if (excerpt) detailed.push(byChild ? CHILD_CHANGE_REMINDER(path, childWrites.get(path), excerpt) : EXTERNAL_CHANGE_REMINDER(path, excerpt));
-				childWrites.delete(path);
+				if (excerpt) detailed.push(byChild ? CHILD_CHANGE_REMINDER(path, childAgent, excerpt) : EXTERNAL_CHANGE_REMINDER(path, excerpt));
 			} else {
 				overflow.push(path);
 			}
