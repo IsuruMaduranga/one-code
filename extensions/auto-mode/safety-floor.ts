@@ -345,9 +345,15 @@ export function shellNamesControlFile(
 	const ignoredRanges: { start: number; end: number }[] = [];
 	// Functions/eval can replace a read-only command; loop headers, case
 	// subjects and `{var}>` redirects can change shell state outside the
-	// attributed words. Never use a partial parse, such a construct, or a
-	// nested script to subtract evidence.
-	const canProveWords = depth === 0 && !parseFailed && !unknownQuoting && !unattributedExpansion && !definesFunction && !VAR_REDIRECT.test(command) && !segments.some((segment) =>
+	// attributed words. A compound command's redirect (`{ …; } > f`,
+	// `fi > f`) or an `exec` one sends a proven command's output, unquoted
+	// words and all, to a file a later command can run; /dev/null and
+	// descriptor dups capture nothing. Never use a partial parse, such a
+	// construct, or a nested script to subtract evidence.
+	const capturesOutput = segments.some((segment) =>
+		segment.redirects.some((target) => target !== "/dev/null") && (segment.tokens.length === 0 || resolvePayload(segment.tokens).command === "exec"),
+	);
+	const canProveWords = depth === 0 && !parseFailed && !unknownQuoting && !unattributedExpansion && !definesFunction && !capturesOutput && !VAR_REDIRECT.test(command) && !segments.some((segment) =>
 		segment.enclosing.some((construct) => LOOPS.has(construct) || construct === "case_statement") ||
 		["eval", "source", ".", "alias", "enable", "trap"].includes(resolvePayload(segment.tokens).command),
 	) && !LAST_ARGUMENT.test(command);

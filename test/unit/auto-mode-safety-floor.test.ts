@@ -124,6 +124,9 @@ describe("safetyControlWrite: read-only words in escalated compound commands", (
 		`find src tests -type f -not -path '*/node_modules/*' | sort && for f in tests/*.py; do echo "--- $f ---"; cat "$f"; done`,
 		`for f in a b; do echo "$f"; done; find . ! -path '*/.claude/*' -name '*.py'`,
 		`for f in a b; do echo "$f"; done; find . -not \\( -path './.git/*' -o -path './node_modules/*' \\) \\( -name '*.py' -o -name '*.ts' \\) | sort`,
+		// A redirect to /dev/null or a descriptor dup captures nothing a later command runs.
+		`{ cat .claude/settings.json; } 2>/dev/null`,
+		`exec 2>&1; cat .claude/settings.json`,
 	])("does not floor proven read-only words: %s", (command) => {
 		expect(analyzeShellCommand({ command, cwd, home }).verdict).toBe("escalate");
 		expect(check("bash", { command })).toBeUndefined();
@@ -195,6 +198,11 @@ describe("safetyControlWrite: read-only words in escalated compound commands", (
 		`exec 3>s.sh; echo 'cp evil.json .claude/settings.json' >&3; sh s.sh`,
 		`exec > s.sh; echo 'cp evil.json .claude/settings.json'; sh s.sh`,
 		`{ echo 'cp evil.json .claude/settings.json' | sort; } > s.sh; sh s.sh`,
+		// Unquoted, the script is spread over separate words, none of which looks like a script.
+		`{ echo cp evil.json .claude/settings.json; } > s.sh; sh s.sh`,
+		`if true; then echo cp evil.json .claude/settings.json; fi > s.sh && sh s.sh`,
+		`exec > s.sh; echo cp evil.json .claude/settings.json; sh s.sh`,
+		`exec 3>s.sh; echo cp evil.json .claude/settings.json >&3; sh s.sh`,
 		`sh <<'EOF'\ncp x .claude/settings.json\nEOF`,
 		`cat <<'EOF' | sh\ncp x .claude/settings.json\nEOF`,
 		`sh <<< 'cp x .claude/settings.json'`,
