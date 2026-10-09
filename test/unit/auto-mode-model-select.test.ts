@@ -124,11 +124,13 @@ describe("classifierCandidates: containment, tier and context floors", () => {
 		expect(pickFull([session, experimental], session).candidates).toEqual([{ model: session, source: "session" }]);
 	});
 
-	it("never screens with a model dearer than the session's, and keeps one priced the same", () => {
+	it("screens with the session unless an alternate is strictly cheaper", () => {
+		// A dearer model never screens; a same-price one saves nothing, so the
+		// session keeps the job (the GPT-6 Sol case: GPT-5.6 Sol at the same $2).
 		const session = model("openai", "gpt-x-medium", 5, 200_000);
 		expect(pickFull([session, model("openai", "gpt-x-large", 10, 200_000)], session).candidates).toEqual([{ model: session, source: "session" }]);
 		const samePrice = model("openai", "gpt-x-mid", 5, 200_000);
-		expect(pickFull([session, samePrice], session).candidates.map((entry) => entry.model.id)).toContain("gpt-x-mid");
+		expect(pickFull([session, samePrice], session).candidates).toEqual([{ model: session, source: "session" }]);
 	});
 
 	it("keeps an unpriced session on its own model", () => {

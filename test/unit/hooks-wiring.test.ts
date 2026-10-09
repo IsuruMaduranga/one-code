@@ -241,6 +241,32 @@ describe("hooks wiring", () => {
 		});
 	});
 
+	it("the bridge still runs a child's PreToolUse hooks while the parent's turn is aborting", async () => {
+		// A background child keeps running through a parent Esc; its calls are
+		// dispatched with the parent's context, whose signal is the parent's run.
+		const hook = script("hook-child-deny.sh", `#!/bin/sh\ncat >/dev/null\necho '{"hookSpecificOutput":{"permissionDecision":"deny","permissionDecisionReason":"denied"}}'\n`);
+		writeUserHooks({ PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: hook }] }] });
+		mount();
+		let bridge: HookBridge | undefined;
+		fake.events.on(SUBAGENT_HOOK_CHANNEL, (data) => {
+			bridge = (data as { bridge: HookBridge }).bridge;
+		});
+		const parentRun = new AbortController();
+		parentRun.abort();
+		await fake.fireOne("session_start", { reason: "startup" }, createFakeCtx({ cwd: projectDir, signal: parentRun.signal }));
+		const outcome = await bridge!.preToolUse({ toolName: "bash", input: { command: "rm -rf build" }, cwd: projectDir, sessionId: "bg" });
+		expect(outcome.block?.reason).toBe("denied");
+
+		// The parent's own call still short-circuits on its aborted run.
+		const parentInput: Record<string, unknown> = { command: "rm -rf build" };
+		const parent = await fake.fireOne<{ block?: boolean } | undefined>(
+			"tool_call",
+			{ toolName: "bash", toolCallId: "p1", input: parentInput },
+			createFakeCtx({ cwd: projectDir, signal: parentRun.signal }),
+		);
+		expect(parent).toBeUndefined();
+	});
+
 	it("the bridge translates a child's updatedInput back to native names and frames its context like the parent's", async () => {
 		const hookB = script("hook-child-b.sh", `#!/bin/sh\ncat >/dev/null\necho '{"hookSpecificOutput":{"updatedInput":{"file_path":"/tmp/other.txt"},"additionalContext":"careful"}}'\n`);
 		writeUserHooks({ PreToolUse: [{ matcher: "Read", hooks: [{ type: "command", command: hookB }] }] });

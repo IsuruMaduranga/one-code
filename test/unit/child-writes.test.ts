@@ -13,6 +13,14 @@ describe("childWriteWatcher", () => {
 		expect(watch({ type: "tool_execution_end", toolName: "write", toolCallId: "2" })).toBe(join(cwd, "b.md"));
 	});
 
+	it("announces a notebook edit, under either spelling of its path", () => {
+		const watch = childWriteWatcher(cwd);
+		watch({ type: "tool_execution_start", toolName: "notebook_edit", toolCallId: "1", args: { notebook_path: "nb/a.ipynb" } });
+		expect(watch({ type: "tool_execution_end", toolName: "notebook_edit", toolCallId: "1" })).toBe(join(cwd, "nb", "a.ipynb"));
+		watch({ type: "tool_execution_start", toolName: "notebook_edit", toolCallId: "2", args: { path: "b.ipynb" } });
+		expect(watch({ type: "tool_execution_end", toolName: "notebook_edit", toolCallId: "2" })).toBe(join(cwd, "b.ipynb"));
+	});
+
 	it("ignores failed writes, other tools and unmatched ends", () => {
 		const watch = childWriteWatcher(cwd);
 		watch({ type: "tool_execution_start", toolName: "edit", toolCallId: "1", args: { path: "a.ts" } });

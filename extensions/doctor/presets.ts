@@ -10,16 +10,18 @@
  * and a preset is a bundle of those same choices. A user who wants another
  * provider switches with /model first and reruns /doctor presets there.
  *
- * Each preset pins the main model and sets the subagent default to the shape
- * that matches its intent. The classifier remains automatic in every preset;
- * the rows display what its resolver would pick for that main model.
+ * Each preset pins the main model, sets the subagent default to the shape that
+ * matches its intent, and returns the classifier to the automatic choice
+ * (clearing `autoMode.classifierModel`); the rows display what its resolver
+ * would pick for that main model.
  */
 
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { classifierCandidates } from "../auto-mode/model-select.ts";
-import { catalogModelFor } from "../lib/model-catalog.ts";
-import { isDatedDuplicate, modelsContainedToSession, modelSpec, pricedInput } from "../lib/model-policy.ts";
-import { intrinsicTier, type PromptTier } from "../lib/model-tier.ts";
+import { autoSelectable, catalogModelFor } from "../lib/model-catalog.ts";
+import { isDatedDuplicate, modelsContainedToSession, modelSpec, pricedInput, supportsImageInput } from "../lib/model-policy.ts";
+import { intrinsicTier, type PromptTier, servedCatalogIds } from "../lib/model-tier.ts";
+import { newerModelSuggestion } from "../lib/newer-model.ts";
 import { resolveSubagentModel } from "../subagents/model-select.ts";
 import type { ReportLine, ReportSection } from "./report.ts";
 
@@ -61,14 +63,24 @@ export type PresetsUnavailable = "no-model" | "no-priced-models";
  * to `claude-haiku-4-5`). Tiny-tier rows stay in the pool only as a last resort.
  */
 export function presetPool(available: Model<Api>[], sessionModel: Model<Api>): Model<Api>[] {
-	const contained = modelsContainedToSession(available, sessionModel).filter(
-		// A preset recommends a MAIN model: never one the catalogs mark superseded,
-		// legacy, deprecated or unable to call tools (model-catalog.ts), whatever its
-		// tier. A model no catalog knows stays, judged by its tier alone.
+	const all = modelsContainedToSession(available, sessionModel);
+	const served = servedCatalogIds(all);
+	// The newer-model check flags a main model with a newer model of its line at
+	// no more than 1.1× its price; supersession's band is 0.6–1.5×, so GPT-5.6
+	// Sol survives it against the half-price GPT-6.1 Sol. A preset never
+	// recommends a model /doctor would then call outdated, nor an alias of one
+	// (`gpt-daybreak-blue-latest` serves gpt-5.6-sol today).
+	const identity = (m: Model<Api>): string => catalogModelFor(m)?.id ?? modelSpec(m);
+	const outdated = new Set(all.filter((m) => newerModelSuggestion(available, m)).map(identity));
+	const contained = all.filter(
+		// A preset recommends a MAIN model: never one automatic selection skips
+		// (superseded by a model this provider serves, legacy, deprecated, unable
+		// to call tools, not a text model: model-catalog.ts), whatever its tier.
+		// A model no catalog knows stays, judged by its tier alone.
 		(m) => {
-			if (pricedInput(m) === undefined) return false;
+			if (pricedInput(m) === undefined || outdated.has(identity(m))) return false;
 			const entry = catalogModelFor(m);
-			return !entry || (entry.tools && !entry.legacy && !entry.deprecated && !entry.supersededBy);
+			return !entry || autoSelectable(entry, served);
 		},
 	);
 	return contained.filter((m) => !isDatedDuplicate(m, contained));
@@ -92,7 +104,10 @@ function pickMain(name: PresetName, pool: Model<Api>[]): { model: Model<Api>; no
 			return tiny ? { model: tiny, note: "only tiny-tier models on this provider — expect weaker results" } : undefined;
 		}
 		case "balanced": {
-			const pick = cheapest(workhorse) ?? cheapest(frontier) ?? priciest(cheap);
+			// The cheapest workhorse-or-better model: a frontier model cheaper than
+			// every workhorse one (GPT-6.1 Sol against the GPT-5.5 Pro SKU) is the
+			// better buy, not a reason to pay for the premium SKU.
+			const pick = cheapest([...workhorse, ...frontier]) ?? priciest(cheap);
 			if (pick) return { model: pick, note: workhorse.length === 0 ? "no workhorse-tier model on this provider" : undefined };
 			const any = priciest(pool);
 			return any ? { model: any, note: "only tiny-tier models on this provider — expect weaker results" } : undefined;
@@ -134,7 +149,7 @@ export function computePresets(
 		// what applying the preset produces.
 		const subagentModel = inherit
 			? main.model
-			: (resolveSubagentModel({ sessionModel: main.model, available }).model ?? main.model);
+			: (resolveSubagentModel({ sessionModel: main.model, available, requireImageInput: supportsImageInput(main.model) }).model ?? main.model);
 		const classifier = classifierCandidates({ available, sessionModel: main.model }).candidates[0]?.model;
 		presets.push({
 			name,
@@ -169,7 +184,7 @@ export function presetsSection(result: ReturnType<typeof computePresets>, sessio
 		return { title: "Presets", lines };
 	}
 	lines.push({
-		text: "Classifier previews use each preset's main model: the cheapest model in its tier or above, never dearer than the main model, else the main model itself.",
+		text: "Classifier previews use each preset's main model: the cheapest model in its tier or above that is strictly cheaper than the main model, else the main model itself.",
 		level: "dim",
 	});
 	const family = sessionModel ? sessionModel.provider : "";
@@ -192,7 +207,7 @@ export function presetsSection(result: ReturnType<typeof computePresets>, sessio
 }
 
 /**
- * The two settings changes a preset makes, each with its undo — the text
+ * The three settings changes a preset makes, each with its undo — the text
  * `/doctor preset` reports after applying. `mainSwitched` false means the
  * session already ran the preset's main model, so that line says so.
  */
@@ -202,6 +217,6 @@ export function describePresetChanges(preset: PresetPlan, mainSwitched = true): 
 		preset.subagents.setting === "inherit"
 			? "subagent default → inherit the main model (undo: /subagent clear)"
 			: `subagent default → automatic (picks ${modelSpec(preset.subagents.model)}; undo: /subagent)`,
-		`auto-mode classifier stays automatic${preset.classifier ? ` (picks ${modelSpec(preset.classifier)})` : ""}`,
+		`auto-mode classifier → automatic${preset.classifier ? ` (picks ${modelSpec(preset.classifier)})` : ""} (undo: /auto-mode model)`,
 	];
 }

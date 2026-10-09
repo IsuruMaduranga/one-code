@@ -19,7 +19,9 @@
  *
  * The consent stores (`lib/consent-stores.ts`) are gate controls too: an
  * entry in one approves a repository's hooks, MCP servers, allow rules or
- * language servers for every later session.
+ * language servers for every later session. So are the cached model catalogs
+ * (`lib/model-catalog-data.ts catalogCacheFiles`): they decide the model's
+ * tier, and the tier decides which fast paths skip the classifier.
  *
  * The target list is deliberately exact files, not directories: ~/.claude also
  * holds memory and skills that the agent writes routinely, and a floor that
@@ -32,7 +34,8 @@ import type { Token } from "./shell-parse.ts";
 import { claudeUserSettingsPath, managedSettingsPaths } from "../lib/claude-settings.ts";
 import { CONSENT_STORE_TAIL, consentStorePaths } from "../lib/consent-stores.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
-import { claudeJsonPath, comparablePath } from "../lib/paths.ts";
+import { CATALOG_CACHE_TAIL, catalogCacheFiles } from "../lib/model-catalog-data.ts";
+import { claudeJsonPath, comparablePath, oneCodeStateDir } from "../lib/paths.ts";
 import { isWritingTool, resolveForContainment, toAbsolute, toAbsoluteBash } from "./paths.ts";
 
 /** The same comparison form resolveForContainment's output is in (lib/paths.ts). */
@@ -77,6 +80,9 @@ function safetyControlFiles(home: string, oneCodeProjectSettings?: string): stri
 		// The consent stores: an entry approves a repository's hooks, MCP
 		// servers, allow rules or language servers for every later session.
 		...consentStorePaths(home),
+		// The cached model catalogs decide the model's tier, and the tier decides
+		// which fast paths skip the classifier.
+		...catalogCacheFiles(oneCodeStateDir(process.env, home)),
 	];
 }
 
@@ -105,7 +111,7 @@ function controlFileForms(home: string, oneCodeProjectSettings?: string): Set<st
 
 function matchesControlFile(resolved: string, forms: ReadonlySet<string>): boolean {
 	const target = fold(resolved);
-	return SETTINGS_TAIL.test(target) || ONECODE_SETTINGS_TAIL.test(target) || CONSENT_STORE_TAIL.test(target) || forms.has(target);
+	return SETTINGS_TAIL.test(target) || ONECODE_SETTINGS_TAIL.test(target) || CONSENT_STORE_TAIL.test(target) || CATALOG_CACHE_TAIL.test(target) || forms.has(target);
 }
 
 const GLOB_CHARS = /[*?[]/;
@@ -173,7 +179,12 @@ export interface FloorInput {
 }
 
 const REASON = (token: string) =>
-	`it writes ${token}, which holds the permission rules and auto-mode configuration that contain this agent`;
+	CATALOG_FILE_NAME.test(token)
+		? `it writes ${token}, a model catalog that decides the model tier the auto-mode checks that contain this agent depend on`
+		: `it writes ${token}, which holds the permission rules and auto-mode configuration that contain this agent`;
+
+/** A cached catalog's file name, to word the reason (a false match only rewords it). */
+const CATALOG_FILE_NAME = /(^|[/\\])(models-dev|openrouter|huggingface|refresh-failed)\.json$/i;
 
 /**
  * Reason text when this call writes a safety-control file, undefined otherwise.
@@ -263,11 +274,18 @@ export function powershellPathTokens(command: string, home: string): string[] {
 }
 
 /**
+ * A `{var}>f` redirect, which assigns the descriptor's number to var. The
+ * grammar reads `{var}` as a word, or not at all after a compound command, so
+ * it is matched in the line's text.
+ */
+const VAR_REDIRECT = /\{[A-Za-z_][A-Za-z0-9_]*\}[<>]/;
+
+/**
  * The gate-control file spellings the textual floor matches in a command line,
  * lowercased, with `\\` turned to `/` and `/./`, `//` collapsed.
  */
 const CONTROL_FILE_TEXT =
-	/(^|[\s'"=/<>|;&(:])(\.claude\/settings(\.local)?\.json|\.onecode\/(projects\/[^\s'"/]+\/)?settings\.json|managed-settings\.json|\.claude\.json)(?=$|[\s'";|&)<>])/;
+	/(^|[\s'"=/<>|;&(:])(\.claude\/settings(\.local)?\.json|\.onecode\/(projects\/[^\s'"/]+\/)?settings\.json|\.onecode\/cache\/model-catalog\/(models-dev|openrouter|huggingface|refresh-failed)\.json|managed-settings\.json|\.claude\.json)(?=$|[\s'";|&)<>])/;
 
 /**
  * `$_` (or `${_}`, `${#_}`, …) anywhere in the line: bash's last argument of
@@ -305,7 +323,8 @@ export function regexLiteralTail(pattern: string): string | undefined {
 /**
  * The first word of a shell line that names a gate-control file, or
  * undefined. Every word not proven read-only counts, plus the value after an `=`
- * (`--output=…`, `of=…`) and the words of a nested `sh -c '…'` script; `cd`
+ * (`--output=…`, `of=…`) and the words of a nested `sh -c '…'` script, read
+ * from proven words too (`echo '…'` may print a script to a file); `cd`
  * is followed, per subshell scope, so a relative name is resolved where the
  * shell would. Where the directory cannot be known (the line does not parse,
  * a `cd` sits in a loop body that runs more than once, or its target is an
@@ -321,14 +340,21 @@ export function shellNamesControlFile(
 	/** Resolved once per top-level call, not once per word. */
 	forms: ReadonlySet<string> = controlFileForms(home, oneCodeProjectSettings),
 ): string | undefined {
-	const { segments, parseFailed, unknownQuoting, unattributedExpansion, pipelines } = parseCommand(command);
+	const { segments, parseFailed, unknownQuoting, unattributedExpansion, definesFunction, pipelines } = parseCommand(command);
 	const dirs = scopedTracker(cwd);
 	const ignoredRanges: { start: number; end: number }[] = [];
-	// Functions/eval can replace a read-only command; loop headers and case
-	// subjects can change shell state outside the attributed words. Never use
-	// a partial parse, such a construct, or a nested script to subtract evidence.
-	const canProveWords = depth === 0 && !parseFailed && !unknownQuoting && !unattributedExpansion && !segments.some((segment) =>
-		segment.enclosing.some((construct) => LOOPS.has(construct) || construct === "function_definition" || construct === "case_statement") ||
+	// Functions/eval can replace a read-only command; loop headers, case
+	// subjects and `{var}>` redirects can change shell state outside the
+	// attributed words. A compound command's redirect (`{ …; } > f`,
+	// `fi > f`) or an `exec` one sends a proven command's output, unquoted
+	// words and all, to a file a later command can run; /dev/null and
+	// descriptor dups capture nothing. Never use a partial parse, such a
+	// construct, or a nested script to subtract evidence.
+	const capturesOutput = segments.some((segment) =>
+		segment.redirects.some((target) => target !== "/dev/null") && (segment.tokens.length === 0 || resolvePayload(segment.tokens).command === "exec"),
+	);
+	const canProveWords = depth === 0 && !parseFailed && !unknownQuoting && !unattributedExpansion && !definesFunction && !capturesOutput && !VAR_REDIRECT.test(command) && !segments.some((segment) =>
+		segment.enclosing.some((construct) => LOOPS.has(construct) || construct === "case_statement") ||
 		["eval", "source", ".", "alias", "enable", "trap"].includes(resolvePayload(segment.tokens).command),
 	) && !LAST_ARGUMENT.test(command);
 
@@ -373,7 +399,7 @@ export function shellNamesControlFile(
 		// for that state. Even inert assignments/expansions forfeit it.
 		shellChanged ||= !!segment.unknownTarget || !!segment.expandsIntoInput ||
 			segment.tokens.some((word) => word.dynamic || /^[A-Za-z_][A-Za-z0-9_]*(\[[^\]]*\])?\+?=/.test(word.value)) ||
-			["read", "readarray", "mapfile", "getopts", "printf", "export", "declare", "typeset", "local", "readonly", "unset", "set", "shopt", "hash", "let"].includes(payload.command);
+			["read", "readarray", "mapfile", "getopts", "printf", "export", "declare", "typeset", "local", "readonly", "unset", "set", "shopt", "hash", "let", "wait", "coproc"].includes(payload.command);
 		const proven = canProveWords && !shellChanged && !unknownDir &&
 			segment.wordRanges?.length === segment.tokens.length && hasReadOnlyShellWords(segment, dir, home);
 		if (payload.command === "cd" && !unknownDir) {
@@ -417,14 +443,19 @@ export function shellNamesControlFile(
 		}
 		const negated = payload.command === "find" && !readOnly ? negatedFindPatterns(segment.tokens, payload.args) : undefined;
 		const words = [
-			...(readOnly ? [] : segment.tokens.map((token, index) => ({ value: token.value, index }))),
-			...[...segment.redirects, ...segment.inputs.map((token) => token.value)].map((value) => ({ value, index: -1 })),
+			...segment.tokens.map((token, index) => ({ value: token.value, index, exempt: readOnly })),
+			...[...segment.redirects, ...segment.inputs.map((token) => token.value)].map((value) => ({ value, index: -1, exempt: false })),
 		];
-		for (const { value: word, index: at } of words) {
+		for (const { value: word, index: at, exempt } of words) {
+			// A proven command's words are still read as a script: its output can
+			// reach a file it never names, through an enclosing redirect, an
+			// `exec` or a descriptor (`{ echo '…'; } > s.sh; sh s.sh`). Only
+			// their path match is exempt.
 			if (depth < 3 && /\s/.test(word)) {
 				const nested = shellNamesControlFile(word, dir, home, oneCodeProjectSettings, depth + 1, forms);
 				if (nested) return nested;
 			}
+			if (exempt) continue;
 			// find never opens or writes a pattern operand, and one that only
 			// excludes files names nothing (a loop elsewhere in the line leaves
 			// every word unproven). A negated pattern that may select everything

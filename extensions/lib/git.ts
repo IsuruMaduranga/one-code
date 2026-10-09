@@ -17,6 +17,7 @@ export const HARNESS_GIT_CONFIG: readonly string[] = ["-c", "core.fsmonitor=fals
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { comparablePath, tryRealpath } from "./paths.ts";
 
 /**
  * `git status` output for `cwd` with the given arguments, or undefined when
@@ -95,7 +96,14 @@ export function gitdirFileTarget(root: string): string | undefined {
 	}
 }
 
-/** For a linked worktree root, the main checkout it belongs to; undefined otherwise. Exported for tests. */
+/**
+ * For a linked worktree root, the main checkout it belongs to; undefined
+ * otherwise. Exported for tests. The `.git` file alone proves nothing: an
+ * archive or copied tree can carry `gitdir: /trusted/.git/worktrees/x` and so
+ * borrow that repository's identity (its settings and remembered consent). git
+ * records the way back in `<gitdir>/gitdir`, so only a worktree that record
+ * names is inherited.
+ */
 export function linkedWorktreeMainRoot(root: string): string | undefined {
 	const absolute = gitdirFileTarget(root);
 	if (!absolute) return undefined;
@@ -104,5 +112,19 @@ export function linkedWorktreeMainRoot(root: string): string | undefined {
 	const worktrees = dirname(absolute);
 	const mainDotGit = dirname(worktrees);
 	if (basename(worktrees) !== "worktrees" || basename(mainDotGit) !== ".git") return undefined;
+	if (!pointsBack(absolute, root)) return undefined;
 	return dirname(mainDotGit);
+}
+
+/** Whether the worktree record `gitdir` names `<root>/.git` (absolute, or relative to the record with `worktree.useRelativePaths`). */
+function pointsBack(gitdir: string, root: string): boolean {
+	try {
+		const recorded = readFileSync(join(gitdir, "gitdir"), "utf-8").trim();
+		if (!recorded) return false;
+		const target = isAbsolute(recorded) ? resolve(recorded) : resolve(gitdir, recorded);
+		const dotGit = join(root, ".git");
+		return comparablePath(tryRealpath(target) ?? target) === comparablePath(tryRealpath(dotGit) ?? dotGit);
+	} catch {
+		return false;
+	}
 }

@@ -38,7 +38,8 @@ const gateway = (): ProviderPolicy => ({ kind: "gateway" });
 const opaque = (): ProviderPolicy => ({ kind: "opaque" });
 
 /**
- * Every built-in language-model provider in pi 0.84.0. Unknown/custom providers
+ * Every built-in language-model provider in pi 1.0.1 (`model-policy.test.ts`
+ * checks the list against pi's own). Unknown/custom providers
  * get the opaque policy below, so a pi upgrade fails safe rather than widening
  * automatic routing.
  */
@@ -78,6 +79,8 @@ export const BUILTIN_PROVIDER_POLICIES: Readonly<Record<string, ProviderPolicy>>
 	"cloudflare-ai-gateway": gateway(),
 	"qwen-token-plan": hosted("host:qwen-plan"),
 	"qwen-token-plan-cn": hosted("host:qwen-plan"),
+	"qwen-token-plan-individual": hosted("host:qwen-plan"),
+	meta: direct("meta"),
 	xiaomi: direct("xiaomi"),
 	"xiaomi-token-plan-cn": direct("xiaomi"),
 	"xiaomi-token-plan-ams": direct("xiaomi"),
@@ -257,6 +260,33 @@ export function isAliasOrVariantId(id: string): boolean {
  */
 export function isSelectableVariant(model: Model<Api>): boolean {
 	return !UNSUITABLE_VARIANT.test(model.id) && !model.id.startsWith("~");
+}
+
+/**
+ * A moving alias: an id that names whichever model its vendor points it at
+ * today (`mistral-large-latest`, `gpt-daybreak-blue-latest`, OpenRouter's
+ * `~vendor/…-latest` redirects). What answers can change without notice, so
+ * it never supersedes a dated model, is never suggested as an upgrade, and is
+ * never picked as the auto-mode classifier (a permission boundary). Other
+ * automatic picks may still use one: Mistral serves most models only so.
+ */
+export function isMovingAlias(id: string): boolean {
+	return id.startsWith("~") || /-latest(?=$|[-:@])/i.test(id);
+}
+
+/**
+ * An experimental build (`deepseek-v4-flash-vision-exp`, `tev1-4b-experimental`):
+ * a research variant, never picked automatically as a screener or suggested as
+ * an upgrade. `preview` is deliberately not matched: Google ships mainline
+ * Gemini models under it (`gemini-3-flash-preview`).
+ */
+export function isExperimentalBuild(id: string): boolean {
+	return /-exp(?:$|[-:])|experimental/i.test(id);
+}
+
+/** A positive finite catalog context window, the only value safe to compare windows by. */
+export function hasCatalogContextWindow(model: { contextWindow?: number }): model is { contextWindow: number } {
+	return Number.isFinite(model.contextWindow) && (model.contextWindow as number) > 0;
 }
 
 /** One day in milliseconds, for the release-date arithmetic in model-catalog.ts. */

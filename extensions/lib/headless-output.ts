@@ -15,6 +15,21 @@ export function notifyOrPrint(ctx: Pick<ExtensionContext, "hasUI" | "ui">, messa
 	else console.error(message);
 }
 
+/**
+ * Whether the session can show a custom TUI component: a panel opened through
+ * `ctx.ui.custom`, or a component widget. RPC has UI but forwards only dialogs,
+ * notices and string-array widgets: its `custom()` resolves undefined and a
+ * component factory vanishes, so a command falls back to text there.
+ */
+export function canShowCustomUi(ctx: Pick<ExtensionContext, "hasUI" | "mode">): boolean {
+	return ctx.hasUI && ctx.mode !== "rpc";
+}
+
+/** In RPC, say that a command whose panel cannot open shows a read-only listing instead. */
+export function notifyRpcReadOnly(ctx: Pick<ExtensionContext, "mode" | "ui">, command: string, manage: string): void {
+	if (ctx.mode === "rpc") ctx.ui.notify(`${command} in RPC is read-only; use the TUI to ${manage}.`, "info");
+}
+
 /** A command's answer in a one-shot run: stdout in print mode, stderr in json mode (stdout is the event stream there). */
 export function printAnswer(ctx: Pick<ExtensionContext, "mode">, text: string): void {
 	if (ctx.mode === "print") console.log(text);

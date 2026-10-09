@@ -23,7 +23,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { readFavorites, toggleFavorite } from "../lib/favorites.ts";
 import { announceArgumentHint, type CommandHint, frontmatterCommandHint } from "../lib/argument-hints.ts";
 import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } from "../lib/mcp-status.ts";
-import { notifyOrPrint } from "../lib/headless-output.ts";
+import { canShowCustomUi, notifyOrPrint, notifyRpcReadOnly } from "../lib/headless-output.ts";
 import { createUserMessageSender, sessionOutlivesTurn } from "../lib/notifications.ts";
 import { ONE_SHOT_COMMAND_FAILED_CHANNEL } from "../lib/interrupt.ts";
 import { persistIfLarge, sessionResultsDir } from "../lib/persisted-output.ts";
@@ -493,11 +493,11 @@ export default function pluginsExtension(pi: ExtensionAPI) {
 	registerLocalCommand(pi, "plugins", {
 		description: "Browse, install, and manage Claude Code-compatible plugins and marketplaces",
 		handler: async (args, ctx) => {
-			if (ctx.hasUI && ctx.mode !== "rpc") {
+			if (canShowCustomUi(ctx)) {
 				await openPanel(ctx);
 				return;
 			}
-			if (ctx.mode === "rpc") ctx.ui.notify("/plugins in RPC is read-only; use the TUI to install or manage plugins and marketplaces.", "info");
+			notifyRpcReadOnly(ctx, "/plugins", "install or manage plugins and marketplaces");
 			// Non-interactive fallback: the old text listing.
 			if (discovered.plugins.length === 0) {
 				ctx.ui.notify("No plugins installed.", "info");

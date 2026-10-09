@@ -10,7 +10,17 @@
  *
  * 1. Tiny means small: under `TINY_PARAMS` total parameters (Hugging Face, else
  *    a size tag in the id), or, for a model with no published size, a
- *    nano/micro/lite/tiny name.
+ *    nano/micro/lite/tiny name. A tag followed by an expert count
+ *    (`llama-4-scout-17b-16e`) counts active parameters and is no size. A
+ *    model shares its size with its twins, the same vendor's rows of the same
+ *    model: same stem (the id without `-latest`, a snapshot date or a size
+ *    tag) and the same release date, or one a dated snapshot of the other. An
+ *    unsized alias (`voxtral-small-latest`) takes its twins' size when they
+ *    agree on tiny, and their non-text output; a size tag yields to a larger
+ *    measured size of an untagged twin (Bedrock's `llama-4-maverick-17b-instruct`
+ *    is OpenRouter's 401B `llama-4-maverick`), unless its twins carry other
+ *    tags (a size ladder released together) or it names its active size too
+ *    (`qwen3.6-35b-a3b`).
  * 2. The comparison set is the vendor's current models: released within
  *    `CURRENT_WINDOW_DAYS` of its newest tool-calling, non-deprecated,
  *    text-output model, tiny excluded.
@@ -26,10 +36,11 @@
  *    model tiny.
  * 5. Automatic selection skips a model that is superseded (the vendor has a
  *    newer model in the same or a higher tier within `SUPERSEDE_PRICE_BAND`
- *    of its price: a newer Opus supersedes the last Opus, but a newer Sonnet
- *    at half the price does not), legacy (more than `LEGACY_DAYS` behind the
- *    vendor's newest model), deprecated, unable to call tools, or not a text
- *    model.
+ *    of its price, and the session's provider serves it: a newer Opus
+ *    supersedes the last Opus, but a newer Sonnet at half the price does not;
+ *    a moving alias or the model's own dated snapshot never supersedes it),
+ *    legacy (more than `LEGACY_DAYS` behind the vendor's newest model),
+ *    deprecated, unable to call tools, or not a text model.
  *
  * Every constant is a ratio or a physical size, never a vendor or a dollar
  * figure, so a new vendor or a price cut needs no code change.
@@ -37,7 +48,7 @@
 
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { type CatalogSources, loadCatalogSources, MODELS_DEV_PROVIDER, type ModelsDevModel, type OpenRouterModel } from "./model-catalog-data.ts";
-import { BUILTIN_PROVIDER_POLICIES, baseModelId, DAY_MS, modelIdentity, stripSnapshotDate, vendorProfile } from "./model-policy.ts";
+import { BUILTIN_PROVIDER_POLICIES, baseModelId, DAY_MS, isMovingAlias, modelIdentity, stripSnapshotDate, vendorProfile } from "./model-policy.ts";
 import { oneCodeStateDir } from "./paths.ts";
 
 export const TINY_PARAMS = 40e9;
@@ -71,20 +82,38 @@ export interface CatalogModel {
 	tier: CatalogTier;
 	/** Why the tier, in words, for the catalog snapshot and /doctor. */
 	reason: string;
-	/** A newer model of the same vendor, same or higher tier, in the same price band. */
-	supersededBy?: string;
+	/**
+	 * Newer models of the same vendor, same or higher tier, in the same price
+	 * band, newest first. Automatic selection skips this model where one of
+	 * them is served (`autoSelectSkipReason`).
+	 */
+	successors: string[];
 	legacy: boolean;
 }
 
 const TIER_RANK: Record<CatalogTier, number> = { workhorse: 0, cheap: 1, tiny: 2 };
 const SMALL_WORD = /(?:^|[-/.])(?:nano|micro|lite|tiny)(?:[-/.:]|$)/i;
-/** `27b`, `1.5b`, and Gemma's effective-size `e2b`. */
-const SIZE_TAG = /(?:^|[-/.])e?(\d+(?:\.\d+)?)b(?:[-/.:]|$)/i;
+/** Any size tag: `27b`, `1.5b`, Gemma's effective-size `e2b`, and an MoE's active `17b`. */
+const ANY_SIZE_TAG = /(?:^|[-/.])e?(\d+(?:\.\d+)?)b(?=[-/.:]|$)/i;
+/** A size tag that names a total: not one followed by an expert count (`17b-16e`, Llama 4's active size). */
+const SIZE_TAG = /(?:^|[-/.])e?(\d+(?:\.\d+)?)b(?=[-/.:]|$)(?![-/.]\d+e(?:[-/.:]|$))/i;
+/** A total size tag that names the active size after it (`35b-a3b`): certainly the total. */
+const TOTAL_AND_ACTIVE_TAG = /(?:^|[-/.])e?\d+(?:\.\d+)?b-a\d+(?:\.\d+)?b(?:[-/.:]|$)/i;
 
 /** Parameters a size tag in the id names (`qwen3.8-27b` → 27e9), if any. */
 export function sizeFromName(id: string): number | undefined {
 	const match = id.match(SIZE_TAG);
 	return match ? Number(match[1]) * 1e9 : undefined;
+}
+
+/**
+ * The part of an id its aliases, snapshots and sized variants share:
+ * `voxtral-small` for `voxtral-small-latest` and `voxtral-small-24b-2507`.
+ */
+function modelStem(rest: string): string {
+	const id = stripSnapshotDate(rest.toLowerCase().replace(/-latest$/, ""));
+	const tag = ANY_SIZE_TAG.exec(id);
+	return tag && tag.index > 0 ? id.slice(0, tag.index) : id;
 }
 
 /** Whether a model with no published size is small by name. */
@@ -107,6 +136,12 @@ const dateOf = (value: string | undefined): number | undefined => {
 interface Draft extends Omit<CatalogModel, "tier" | "reason" | "legacy"> {
 	/** The vendor's identity profile: `zhipuai` and `z-ai` are one vendor. */
 	group: string;
+	/** The id without its vendor, lowercase. */
+	rest: string;
+	/** `params` is a Hugging Face count, not a size tag. */
+	measured: boolean;
+	/** The twin whose size this model took (rule 1). */
+	sizeFrom?: string;
 	tier?: CatalogTier;
 	reason?: string;
 	legacy?: boolean;
@@ -202,6 +237,9 @@ export function buildCatalogIndex(sources: CatalogSources): CatalogIndex {
 			id: canonical,
 			vendor,
 			group: vendorProfile(vendor),
+			rest: rest.toLowerCase(),
+			measured: hfCounts.length > 0,
+			successors: [],
 			derived: !own && !rows.some((row) => row.canonical_model_id === canonical),
 			released,
 			deprecated: own ? own.status === "deprecated" : rows.every((row) => row.status === "deprecated"),
@@ -218,7 +256,10 @@ export function buildCatalogIndex(sources: CatalogSources): CatalogIndex {
 		if (list) list.push(draft);
 		else byVendor.set(draft.group, [draft]);
 	}
-	for (const list of byVendor.values()) placeVendor(list);
+	for (const list of byVendor.values()) {
+		shareTwinSizes(list);
+		placeVendor(list);
+	}
 
 	const models = new Map<string, CatalogModel>();
 	const byVendorId = new Map<string, string>();
@@ -256,6 +297,52 @@ const isLive = (draft: Draft): boolean => draft.tools && !draft.deprecated && !d
 /** Live and a vendor's own model: what sets the comparison and can supersede. */
 const isReference = (draft: Draft): boolean => isLive(draft) && !draft.derived;
 
+/**
+ * Rule 1's twins, in place for one vendor: a size tag yields to a larger
+ * measured size of an untagged twin (or one with the same tag), and an
+ * unsized model takes its twins' size when they agree on tiny, and their
+ * non-text output.
+ */
+function shareTwinSizes(list: Draft[]): void {
+	const byStem = new Map<string, Draft[]>();
+	for (const draft of list) {
+		const stem = modelStem(draft.rest);
+		const group = byStem.get(stem);
+		if (group) group.push(draft);
+		else byStem.set(stem, [draft]);
+	}
+	const twinsOf = (draft: Draft): Draft[] =>
+		(byStem.get(modelStem(draft.rest)) ?? []).filter(
+			(other) =>
+				other !== draft &&
+				((draft.released !== undefined && other.released === draft.released) ||
+					stripSnapshotDate(other.rest) === draft.rest ||
+					stripSnapshotDate(draft.rest) === other.rest),
+		);
+	const adopt = (draft: Draft, from: Draft[]): void => {
+		const source = from.reduce((a, b) => (b.params! > a.params! ? b : a));
+		draft.params = source.params;
+		draft.sizeFrom = source.id;
+	};
+
+	for (const draft of list) {
+		const tag = sizeFromName(draft.rest);
+		if (draft.measured || tag === undefined || TOTAL_AND_ACTIVE_TAG.test(draft.rest)) continue;
+		const twins = twinsOf(draft);
+		// A size ladder released together: each tag is its own model's total.
+		if (twins.some((twin) => (sizeFromName(twin.rest) ?? tag) !== tag)) continue;
+		const measured = twins.filter((twin) => twin.measured && twin.params! > tag);
+		if (measured.length > 0) adopt(draft, measured);
+	}
+	for (const draft of list) {
+		if (draft.params !== undefined) continue;
+		const twins = twinsOf(draft);
+		if (twins.some((twin) => twin.nonTextOutput)) draft.nonTextOutput = true;
+		const sized = twins.filter((twin) => twin.params !== undefined);
+		if (sized.length > 0 && new Set(sized.map((twin) => twin.params! < TINY_PARAMS)).size === 1) adopt(draft, sized);
+	}
+}
+
 function median(values: number[]): number | undefined {
 	if (values.length === 0) return undefined;
 	const sorted = [...values].sort((a, b) => a - b);
@@ -273,14 +360,15 @@ function placeVendor(list: Draft[]): void {
 	const referencePrice = prices.length >= MIN_PRICE_PEERS ? median(prices) : undefined;
 	const vendor = (list.find((draft) => !draft.derived) ?? list[0])?.vendor ?? "";
 
+	const size = (draft: Draft): string => `${formatParams(draft.params!)} parameters${draft.sizeFrom ? ` (as ${draft.sizeFrom})` : ""}`;
 	for (const draft of list) {
 		if (isTiny(draft)) {
 			draft.tier = "tiny";
-			draft.reason = draft.params !== undefined ? `${formatParams(draft.params)} parameters, under ${formatParams(TINY_PARAMS)}` : "a small-model name, size unpublished";
+			draft.reason = draft.params !== undefined ? `${size(draft)}, under ${formatParams(TINY_PARAMS)}` : "a small-model name, size unpublished";
 		} else if (maxParams !== undefined && draft.params !== undefined) {
 			const ratio = draft.params / maxParams;
 			draft.tier = ratio >= SIZE_RATIO ? "workhorse" : "cheap";
-			draft.reason = `${formatParams(draft.params)} parameters, ${ratio.toFixed(2)} of ${vendor}'s largest current model (${formatParams(maxParams)})`;
+			draft.reason = `${size(draft)}, ${ratio.toFixed(2)} of ${vendor}'s largest current model (${formatParams(maxParams)})`;
 		} else if (referencePrice !== undefined && draft.price !== undefined) {
 			const ratio = draft.price / referencePrice;
 			draft.tier = ratio >= PRICE_RATIO ? "workhorse" : "cheap";
@@ -301,31 +389,40 @@ function placeVendor(list: Draft[]): void {
 		draft.legacy = draft.released !== undefined && Number.isFinite(newest) && newest - draft.released > LEGACY_DAYS * DAY_MS;
 	}
 
-	// Supersession (rule 5): the newest qualifying successor is named.
-	const successors = live.filter((draft) => !draft.legacy).sort((a, b) => b.released! - a.released!);
+	// Supersession (rule 5): every qualifying successor, newest first; selection
+	// skips the model only where one is served. A moving alias names some other
+	// model, and a dated snapshot is the model it dates.
+	const successors = live.filter((draft) => !draft.legacy && !isMovingAlias(draft.rest)).sort((a, b) => b.released! - a.released!);
 	for (const draft of list) {
 		if (draft.released === undefined || draft.price === undefined) continue;
-		const successor = successors.find(
-			(other) =>
-				other !== draft &&
-				other.released! > draft.released! &&
-				TIER_RANK[other.tier!] <= TIER_RANK[draft.tier!] &&
-				other.price !== undefined &&
-				other.price >= draft.price! * SUPERSEDE_PRICE_BAND[0] &&
-				other.price <= draft.price! * SUPERSEDE_PRICE_BAND[1],
-		);
-		if (successor) draft.supersededBy = successor.id;
+		draft.successors = successors
+			.filter(
+				(other) =>
+					other !== draft &&
+					other.released! > draft.released! &&
+					stripSnapshotDate(other.rest) !== draft.rest &&
+					TIER_RANK[other.tier!] <= TIER_RANK[draft.tier!] &&
+					other.price !== undefined &&
+					other.price >= draft.price! * SUPERSEDE_PRICE_BAND[0] &&
+					other.price <= draft.price! * SUPERSEDE_PRICE_BAND[1],
+			)
+			.map((other) => other.id);
 	}
 }
 
-/** Whether automatic selection may pick this model at all (rule 5). */
-export function autoSelectable(model: CatalogModel): boolean {
-	return model.tools && !model.deprecated && !model.nonTextOutput && !model.legacy && model.supersededBy === undefined;
+/**
+ * Whether automatic selection may pick this model at all (rule 5). `served`
+ * holds the catalog ids the session's contained models serve
+ * (`model-tier.ts servedCatalogIds`): only a served successor supersedes.
+ */
+export function autoSelectable(model: CatalogModel, served: ReadonlySet<string>): boolean {
+	return autoSelectSkipReason(model, served) === undefined;
 }
 
 /** Why automatic selection skips the model, in words; undefined when it does not. */
-export function autoSelectSkipReason(model: CatalogModel): string | undefined {
-	if (model.supersededBy) return `superseded by ${model.supersededBy}`;
+export function autoSelectSkipReason(model: CatalogModel, served: ReadonlySet<string>): string | undefined {
+	const successor = model.successors.find((id) => served.has(id));
+	if (successor) return `superseded by ${successor}, which this provider serves`;
 	if (model.legacy) return "over two years older than its vendor's newest model";
 	if (model.deprecated) return "deprecated";
 	if (!model.tools) return "cannot call tools";

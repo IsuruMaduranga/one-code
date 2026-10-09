@@ -81,7 +81,7 @@ describe("worktree state announcements", () => {
 		const missingPath = join(repo, "missing-worktree");
 		const ctx = createFakeCtx({
 			cwd: repo,
-			sessionManager: { getBranch: () => [{ type: "message", message: {
+			sessionManager: { getSessionId: () => "resumed-missing-worktree", getBranch: () => [{ type: "message", message: {
 				role: "toolResult", toolName: "enter_worktree", toolCallId: "old", content: [], timestamp: 1,
 				details: { worktreeState: { path: missingPath, originalCwd: repo, sharedRoot: repo, createdByUs: false } },
 			} }] },
@@ -92,6 +92,17 @@ describe("worktree state announcements", () => {
 		expect(notice?.text).toContain(`back in ${repo}`);
 		expect(notice?.text).toContain(missingPath);
 		expect(notice?.text).toContain("no longer exists");
+
+		// Said once per session: a reload (a new instance), a re-start and a
+		// tree navigation of the same session do not repeat it.
+		const notices = () => reminders.filter((entry) => entry.text?.startsWith("Left worktree session")).length;
+		await resumed.fire("session_tree", {}, ctx);
+		await resumed.fire("session_start", { reason: "reload" }, ctx);
+		const reloaded = createFakePi();
+		reloaded.events.on(REMINDER_CHANNEL, (data) => reminders.push(data as ReminderPayload));
+		worktreeExtension(reloaded.pi as never);
+		await reloaded.fire("session_start", { reason: "reload" }, ctx);
+		expect(notices()).toBe(1);
 	});
 
 	it.each(["keep", "remove"])("exit_worktree %s reports the switch in its result", async (action) => {

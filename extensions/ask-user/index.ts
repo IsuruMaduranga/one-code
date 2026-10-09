@@ -13,6 +13,7 @@
 
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { canShowCustomUi } from "../lib/headless-output.ts";
 import { ccToolRenderers, safeThemeBold, safeThemeInverse, safeThemePaint } from "../lib/tui-render.ts";
 import { registerFormTool } from "../lib/tool-variants.ts";
 import { ASK_PARAMS, askDescription } from "./description.ts";
@@ -62,7 +63,7 @@ export default function askUserExtension(pi: ExtensionAPI) {
 			const questions = params.questions as Question[];
 			// RPC has no custom UI (its custom() resolves undefined); ask through the
 			// select/input requests it forwards to the client instead (dialogs.ts).
-			const outcome = ctx.mode === "rpc" ? await askThroughDialogs(questions, ctx.ui, signal) : await ctx.ui.custom<WidgetResult>((tui, theme, _keybindings, done) => {
+			const outcome = !canShowCustomUi(ctx) ? await askThroughDialogs(questions, ctx.ui, signal) : await ctx.ui.custom<WidgetResult>((tui, theme, _keybindings, done) => {
 				const style = {
 					paint: safeThemePaint(theme),
 					bold: safeThemeBold(theme),

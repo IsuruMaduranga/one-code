@@ -45,6 +45,7 @@ import {
 	TaskStore,
 } from "./store.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
+import { canShowCustomUi } from "../lib/headless-output.ts";
 import { taskToggleKey } from "../lib/keys.ts";
 
 interface TaskDetails {
@@ -67,7 +68,7 @@ export default function tasksExtension(pi: ExtensionAPI) {
 			return;
 		}
 		// RPC forwards line arrays only, and has no terminal shortcut to hide it.
-		if (ctx.mode === "rpc") {
+		if (!canShowCustomUi(ctx)) {
 			ctx.ui.setWidget("cc-tasks", formatTaskWidget(store));
 			return;
 		}

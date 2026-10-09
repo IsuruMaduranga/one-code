@@ -1,9 +1,11 @@
+import { getBuiltinModels, getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 import { describe, expect, it } from "vitest";
 import {
 	BUILTIN_PROVIDER_POLICIES,
 	crossesProvider,
 	forcedReasoningLevel,
 	isDatedDuplicate,
+	isMovingAlias,
 	isReasoningMandatoryError,
 	isSelectableVariant,
 	isSnapshotDatedId,
@@ -21,6 +23,13 @@ describe("isSelectableVariant", () => {
 		expect(isSelectableVariant(model("openrouter", "z-ai/glm-4.6:free"))).toBe(false);
 		expect(isSelectableVariant(model("openrouter", "~deepseek/deepseek-v4-flash-latest"))).toBe(false);
 		expect(isSelectableVariant(model("openrouter", "~anthropic/claude-sonnet-latest"))).toBe(false);
+	});
+});
+
+describe("isMovingAlias", () => {
+	it("matches -latest aliases and OpenRouter's ~ redirects, not dated or plain ids", () => {
+		for (const id of ["gpt-daybreak-blue-latest", "mistral-large-latest", "chatgpt-4o-latest", "~anthropic/claude-sonnet-latest", "mistral-small-latest:free"]) expect(isMovingAlias(id), id).toBe(true);
+		for (const id of ["gpt-6.1-sol", "mistral-small-2506", "claude-haiku-4-5-20251001", "latest-model", "foo-latestx"]) expect(isMovingAlias(id), id).toBe(false);
 	});
 });
 
@@ -72,52 +81,18 @@ const model = (provider: string, id: string, input = 1, api = "openai-responses"
 		maxTokens: 32_000,
 	}) as any;
 
-const BUILTIN_PROVIDERS = [
-	"amazon-bedrock",
-	"ant-ling",
-	"anthropic",
-	"google",
-	"google-vertex",
-	"openai",
-	"azure-openai-responses",
-	"openai-codex",
-	"radius",
-	"nvidia",
-	"deepseek",
-	"github-copilot",
-	"xai",
-	"groq",
-	"cerebras",
-	"openrouter",
-	"vercel-ai-gateway",
-	"zai",
-	"zai-coding-cn",
-	"mistral",
-	"minimax",
-	"minimax-cn",
-	"moonshotai",
-	"moonshotai-cn",
-	"huggingface",
-	"fireworks",
-	"together",
-	"baseten",
-	"opencode",
-	"opencode-go",
-	"kimi-coding",
-	"cloudflare-workers-ai",
-	"cloudflare-ai-gateway",
-	"qwen-token-plan",
-	"qwen-token-plan-cn",
-	"xiaomi",
-	"xiaomi-token-plan-cn",
-	"xiaomi-token-plan-ams",
-	"xiaomi-token-plan-sgp",
-] as const;
+/** pi's built-in language-model providers: every provider with at least one chat model. */
+const BUILTIN_PROVIDERS = getBuiltinProviders().filter((provider) => getBuiltinModels(provider).length > 0);
 
 describe("built-in provider policies", () => {
 	it("classifies every built-in pi language-model provider explicitly", () => {
 		expect(Object.keys(BUILTIN_PROVIDER_POLICIES).sort()).toEqual([...BUILTIN_PROVIDERS].sort());
-		expect(BUILTIN_PROVIDERS).toHaveLength(39);
+		expect(BUILTIN_PROVIDERS.length).toBeGreaterThan(40);
+	});
+
+	it("contains Meta's own API and the Qwen individual plan like their siblings", () => {
+		expect(BUILTIN_PROVIDER_POLICIES.meta).toEqual({ kind: "direct", profile: "meta" });
+		expect(BUILTIN_PROVIDER_POLICIES["qwen-token-plan-individual"]).toEqual(BUILTIN_PROVIDER_POLICIES["qwen-token-plan"]);
 	});
 
 	it("marks opaque routers as session-only", () => {

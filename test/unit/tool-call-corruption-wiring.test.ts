@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { TURN_FAILED_CHANNEL } from "../../extensions/lib/interrupt.ts";
 import toolCallCorruptionExtension from "../../extensions/tool-call-corruption/index.ts";
 import { createFakeCtx, createFakePi, type FakePi } from "./helpers/fake-pi.ts";
 
@@ -66,6 +67,27 @@ describe("OpenRouter tool-call corruption wiring", () => {
 		expect(fetchMock).toHaveBeenCalledWith("https://openrouter.ai/api/v1/generation?id=gen-123", expect.objectContaining({ headers: { Authorization: "Bearer session-key" } }));
 		expect(fake.sentMessages).toEqual([]);
 		expect(fake.sentUserMessages).toEqual([]);
+	});
+
+	it("reports the stop as a turn failure before aborting, once", async () => {
+		const order: string[] = [];
+		fake.events.on(TURN_FAILED_CHANNEL, (data) => order.push(`failed:${(data as { reason: string }).reason}`));
+		(ctx.abort as ReturnType<typeof vi.fn>).mockImplementation(() => order.push("abort"));
+		await stream();
+		await call();
+		await end();
+		await call();
+		await end();
+		expect(order).toEqual(["failed:OpenRouter upstream failure: blocked-call", "abort"]);
+	});
+
+	it("does not report a turn failure for a call handed back to the model", async () => {
+		const failures = vi.fn();
+		fake.events.on(TURN_FAILED_CHANNEL, failures);
+		await stream('{ "command": "grep -rn "\t}');
+		await call();
+		await end();
+		expect(failures).not.toHaveBeenCalled();
 	});
 
 	it("detects concatenated raw JSON even when pi has parsed it as an empty object", async () => {
@@ -245,6 +267,23 @@ describe("OpenRouter tool-call corruption wiring", () => {
 		expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringMatching(/Morph is corrupting tool calls.*cut off and the turn stopped.*openRouterRouting\.ignore/), "error");
 	});
 
+	it("writes a file whose content holds tool-call markup", async () => {
+		const tags = "</arg_value><arg_key>x</arg_key><arg_value>";
+		await stream(JSON.stringify({ path: "a.test.ts", content: `${tags}\n${tags}\n${tags}` }), "write", "write");
+		expect(await call("write", "write")).toBeUndefined();
+		expect(ctx.abort).not.toHaveBeenCalled();
+	});
+
+	it("stops a leak inside file content once it repeats past any real file's share", async () => {
+		await start();
+		await update({ type: "toolcall_start", contentIndex: 0 });
+		await update({ type: "toolcall_delta", contentIndex: 0, delta: '{"path": "a.py", "content": "x' });
+		for (let i = 0; i < 24; i++) await update({ type: "toolcall_delta", contentIndex: 0, delta: "</arg_value></tool_call><tool_call>write<arg_key>content</arg_key><arg_value>x" });
+		expect(ctx.abort).not.toHaveBeenCalled();
+		await update({ type: "toolcall_delta", contentIndex: 0, delta: "</arg_value></tool_call><tool_call>write<arg_key>content</arg_key><arg_value>x" });
+		expect(ctx.abort).toHaveBeenCalledTimes(1);
+	});
+
 	it("stops a tool call that goes silent for 60 s and names the provider", async () => {
 		await start();
 		await update({ type: "toolcall_start", contentIndex: 0 });
@@ -268,6 +307,58 @@ describe("OpenRouter tool-call corruption wiring", () => {
 		expect(ctx.abort).toHaveBeenCalledTimes(1);
 		await flush();
 		expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("no data for 90 s"), "error");
+	});
+
+	const chunk = (data: object = { id: "gen-123", choices: [] }) =>
+		fake.fire("provider_stream_event", { type: "provider_stream_event", provider: "openrouter", api: "openai-completions", model: model.id, data }, ctx);
+
+	it("keeps a stream alive on raw chunks that carry no content (reasoning details, usage, empty deltas)", async () => {
+		await start();
+		await update({ type: "text_delta", contentIndex: 0, delta: "Let me think." });
+		for (let i = 0; i < 6; i++) {
+			await vi.advanceTimersByTimeAsync(80_000);
+			await chunk({ id: "gen-123", choices: [{ delta: { reasoning_details: [{ type: "reasoning.encrypted", data: "x" }] } }] });
+		}
+		expect(ctx.abort).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(90_000);
+		expect(ctx.abort).toHaveBeenCalledTimes(1);
+	});
+
+	it("waits five minutes for the first content after the headers, then 90 s between chunks", async () => {
+		await start();
+		await chunk({ id: "gen-123", choices: [{ delta: { role: "assistant", content: "" } }] });
+		await vi.advanceTimersByTimeAsync(299_000);
+		expect(ctx.abort).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(1_000);
+		expect(ctx.abort).toHaveBeenCalledTimes(1);
+		await flush();
+		expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("no data for 300 s"), "error");
+	});
+
+	it("returns to the general window once a tool call's arguments end", async () => {
+		await start();
+		await update({ type: "toolcall_start", contentIndex: 0 });
+		await update({ type: "toolcall_delta", contentIndex: 0, delta: '{"command":"ls"}' });
+		await update({ type: "toolcall_end", contentIndex: 0, toolCall: { type: "toolCall", name: "bash", id: "ok", arguments: {} } });
+		await vi.advanceTimersByTimeAsync(89_000);
+		expect(ctx.abort).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(1_000);
+		expect(ctx.abort).toHaveBeenCalledTimes(1);
+	});
+
+	it("keeps the tool-call window while another call is still streaming", async () => {
+		await start();
+		for (const contentIndex of [0, 1]) await update({ type: "toolcall_start", contentIndex });
+		await update({ type: "toolcall_delta", contentIndex: 0, delta: '{"command":"ls"}' });
+		await update({ type: "toolcall_end", contentIndex: 0, toolCall: { type: "toolCall", name: "bash", id: "ok", arguments: {} } });
+		await vi.advanceTimersByTimeAsync(60_000);
+		expect(ctx.abort).toHaveBeenCalledTimes(1);
+	});
+
+	it("ignores raw chunks outside an assistant message", async () => {
+		await chunk();
+		await vi.advanceTimersByTimeAsync(600_000);
+		expect(ctx.abort).not.toHaveBeenCalled();
 	});
 
 	it("disarms the clock at message_end, between messages, and after the run", async () => {
@@ -301,9 +392,46 @@ describe("OpenRouter tool-call corruption wiring", () => {
 		expect(fetchMock).not.toHaveBeenCalled();
 	});
 
-	it("blocks a bash command cut off before its quoted argument", async () => {
-		await stream('{ "command": "grep -rn "\t, "timeout": 120000 }');
-		expect(await call()).toMatchObject({ block: true, reason: expect.stringMatching(/single space/) });
+	const cut = '{ "command": "grep -rn "\t, "timeout": 120000 }';
+
+	it("hands a command that looks cut off back to the model without stopping the turn", async () => {
+		await stream(cut);
+		const result = await call();
+		expect(result).toMatchObject({ block: true, reason: expect.stringMatching(/"-rn".*not run/) });
+		expect(result).not.toHaveProperty("terminate");
+		await end();
+		await flush();
+		expect(ctx.abort).not.toHaveBeenCalled();
+		expect(ctx.ui.notify).not.toHaveBeenCalled();
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it("stops the turn and names the provider when a second command in the run comes through cut", async () => {
+		await stream(cut, "bash", "first");
+		await call("first");
+		await end("first");
+		await stream('{ "command": "python3 -c "\t}', "bash", "second", 1);
+		expect(await call("second")).toMatchObject({ block: true, terminate: true, reason: expect.stringMatching(/OpenRouter tool-call corruption.*python3 -c|"-c"/) });
+		await end("second");
+		await flush();
+		expect(ctx.abort).toHaveBeenCalledTimes(1);
+		expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringMatching(/Morph is corrupting tool calls/), "error");
+	});
+
+	it("gives each run its own allowance for a command that looks cut off", async () => {
+		await stream(cut, "bash", "first");
+		await call("first");
+		await end("first");
+		await fake.fire("agent_start", {}, ctx);
+		await stream(cut, "bash", "second");
+		expect(await call("second")).not.toHaveProperty("terminate");
+		await end("second");
+		expect(ctx.abort).not.toHaveBeenCalled();
+	});
+
+	it.each(["export FOO=", "npm test ", "cat > notes.md <<'EOF'\nThe 5\" floppy\nEOF\necho \"done\""])("runs a valid command the old rules blocked: %j", async (command) => {
+		await stream(JSON.stringify({ command }));
+		expect(await call()).toBeUndefined();
 	});
 
 	it("registers before hooks and permissions without adding prompt/context handlers", () => {

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
 	classifyModelTier,
 	economicalContainedCandidates,
+	isPromptTier,
 	pickEconomicalContainedModel,
 	resolveModelTier,
 	sameTierContainedCandidates,
@@ -51,6 +52,13 @@ const DEEPSEEK: FixtureModel[] = [
 	{ id: "deepseek/deepseek-v4-flash", released: "2026-04-24", price: [0.14, 0.28], params: 284e9 },
 	{ id: "deepseek/deepseek-r1-distill-32b", released: "2026-05-01", price: [0.1, 0.2], params: 32e9 },
 ];
+
+describe("isPromptTier", () => {
+	it("accepts the four tier names and nothing inherited from Object.prototype", () => {
+		for (const tier of ["frontier", "workhorse", "cheap", "tiny"]) expect(isPromptTier(tier)).toBe(true);
+		for (const value of ["toString", "constructor", "hasOwnProperty", "__proto__", "", 3, undefined]) expect(isPromptTier(value)).toBe(false);
+	});
+});
 
 describe("resolveModelTier", () => {
 	it("classifies first-party Anthropic Opus ≥4.8, Sonnet ≥5.5 and Fable as frontier, with or without a catalog", () => {
@@ -133,6 +141,8 @@ describe("resolveModelTier", () => {
 		expect(resolveModelTier(model("some-model", "ollama", 2), noEnv)).toBe("tiny"); // custom provider
 		expect(resolveModelTier(undefined, noEnv)).toBe("tiny");
 		expect(classifyModelTier(model("llama-4-405b", "groq", 1), noEnv)).toEqual({ tier: "cheap", reason: "not in the catalogs" });
+		// An MoE id's size tag counts active parameters (17B active, 16 experts): no size known.
+		expect(classifyModelTier(model("meta-llama/llama-4-scout-17b-16e-instruct", "groq", 0.11), noEnv)).toEqual({ tier: "cheap", reason: "not in the catalogs" });
 	});
 
 	it("honors the user's modelTiers setting, by provider/id or bare id, ahead of the gate and the catalog", () => {
@@ -160,8 +170,17 @@ describe("economicalContainedCandidates", () => {
 	it("ranks cheapest tier first (cheap → workhorse → frontier)", () => {
 		const session = model("claude-opus-5-5", "anthropic", 4); // frontier
 		const available = [session, model("claude-sonnet-5", "anthropic", 2), model("claude-haiku-4-5", "anthropic", 1)];
-		// Sonnet 5 is superseded by Sonnet 5.5, which this account does not list: still skipped.
-		expect(ids(economicalContainedCandidates(available, session))).toEqual(["claude-haiku-4-5", "claude-opus-5-5"]);
+		// Sonnet 5's successor, Sonnet 5.5, is not on this account, so Sonnet 5 is still a pick.
+		expect(ids(economicalContainedCandidates(available, session))).toEqual(["claude-haiku-4-5", "claude-sonnet-5", "claude-opus-5-5"]);
+	});
+
+	it("skips a superseded model only when the session's provider serves its successor", () => {
+		const session = model("claude-opus-5-5", "anthropic", 4);
+		const available = [session, model("claude-sonnet-5", "anthropic", 2), model("claude-sonnet-5-5", "anthropic", 2), model("claude-haiku-4-5", "anthropic", 1)];
+		expect(ids(economicalContainedCandidates(available, session))).toEqual(["claude-haiku-4-5", "claude-sonnet-5-5", "claude-opus-5-5"]);
+		// The successor on another provider does not count.
+		const gateway = [session, model("claude-sonnet-5", "anthropic", 2), model("anthropic/claude-sonnet-5.5", "openrouter", 2)];
+		expect(ids(economicalContainedCandidates(gateway, session))).toEqual(["claude-sonnet-5", "claude-opus-5-5"]);
 	});
 
 	// Astra is frontier on OpenAI's own API; Terra is superseded by GPT-6 Sol,
@@ -219,10 +238,10 @@ describe("sameTierContainedCandidates", () => {
 		const ids = (models: Model<Api>[]) => models.map((m) => m.id);
 		const fable = model("claude-fable-5-1", "anthropic", 10);
 		const anthropic = [fable, model("claude-opus-5-5", "anthropic", 4), model("claude-sonnet-5-5", "anthropic", 2), model("claude-haiku-4-5", "anthropic", 1)];
-		expect(ids(sameTierContainedCandidates(anthropic, fable, { strict: true }))).toEqual(["claude-sonnet-5-5", "claude-opus-5-5"]);
+		expect(ids(sameTierContainedCandidates(anthropic, fable))).toEqual(["claude-sonnet-5-5", "claude-opus-5-5"]);
 		// A cheaper model in a lower tier is never a same-tier pick.
 		const astra = model("gpt-6-astra", "openai", 5);
-		expect(ids(sameTierContainedCandidates([astra, model("gpt-6-luna", "openai", 0.1)], astra, { strict: true }))).toEqual([]);
+		expect(ids(sameTierContainedCandidates([astra, model("gpt-6-luna", "openai", 0.1)], astra))).toEqual([]);
 	});
 });
 

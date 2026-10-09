@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import exitExtension from "../../extensions/exit/index.ts";
 import initExtension from "../../extensions/init/index.ts";
+import { TURN_FAILED_CHANNEL } from "../../extensions/lib/interrupt.ts";
 import { createFakeCtx, createFakePi } from "./helpers/fake-pi.ts";
 
 let originalExitCode: typeof process.exitCode;
@@ -194,6 +195,49 @@ describe("one-shot exit status", () => {
 		await vi.advanceTimersByTimeAsync(30_000);
 		await command;
 		await end("stop");
+		await settle();
+		await shutdown();
+		expect(process.exitCode).toBeUndefined();
+	});
+
+	const aborted = () => {
+		const controller = new AbortController();
+		controller.abort();
+		return controller.signal;
+	};
+	const harnessStop = (fake: ReturnType<typeof harness>["fake"]) => fake.events.emit(TURN_FAILED_CHANNEL, { reason: "corrupt stream" });
+
+	it.each(["print", "json"])("fails a turn the harness stopped in %s, though its run ends aborted", async (mode) => {
+		const { fake, end, settle, shutdown } = harness(mode);
+		harnessStop(fake);
+		await end("aborted", aborted());
+		await settle();
+		await shutdown();
+		expect(process.exitCode).toBe(1);
+	});
+
+	it("fails a harness stop that never reached a settle", async () => {
+		const { fake, shutdown } = harness("json");
+		harnessStop(fake);
+		await shutdown();
+		expect(process.exitCode).toBe(1);
+	});
+
+	it("lets a later successful prompt replace a harness stop", async () => {
+		const { fake, end, settle, shutdown } = harness("json");
+		harnessStop(fake);
+		await end("aborted", aborted());
+		await settle();
+		await end("stop");
+		await settle();
+		await shutdown();
+		expect(process.exitCode).toBeUndefined();
+	});
+
+	it("does not change the host's exit status on a harness stop in tui", async () => {
+		const { fake, end, settle, shutdown } = harness("tui");
+		harnessStop(fake);
+		await end("aborted", aborted());
 		await settle();
 		await shutdown();
 		expect(process.exitCode).toBeUndefined();

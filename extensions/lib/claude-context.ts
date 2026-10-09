@@ -38,7 +38,7 @@ import { type InstructionFiles, readInstructionFiles } from "./claude-settings.t
 import { claudeSourcesOn } from "./config-mode.ts";
 import { findGitRoot } from "./git.ts";
 import { tryReadFile } from "./plugins.ts";
-import { absoluteFrom, claudeManagedDir, claudeUserDir, expandTilde, isPathAtOrUnder, tryRealpath } from "./paths.ts";
+import { absoluteFrom, claudeManagedDir, claudeUserDir, expandTilde, isPathAtOrUnder, oneCodeStateDir, tryRealpath } from "./paths.ts";
 import { discoverRules, MAX_INSTRUCTION_BYTES, readRuleInstructions, type RuleFile, type RuleOptions } from "./claude-rules.ts";
 
 /** One instruction section. Legacy content stays raw; new parsed files carry CC's trimmed startup body. */
@@ -304,6 +304,15 @@ export function instructionRule(home: string): InstructionRule {
 }
 
 /**
+ * Whether `dir` holds a CLAUDE.md that puts Claude's instructions in play for
+ * `claude-md-or-agents-md`: CLAUDE.md, .claude/CLAUDE.md (never at the
+ * filesystem root) or CLAUDE.local.md.
+ */
+function dirHasClaudeMd(dir: string, present: (path: string) => boolean = isPresentFile): boolean {
+	return present(join(dir, "CLAUDE.md")) || (dirname(dir) !== dir && present(join(dir, ".claude", "CLAUDE.md"))) || present(join(dir, "CLAUDE.local.md"));
+}
+
+/**
  * The ordered instruction-file paths that exist, WITHOUT reading their
  * contents: global `~/.claude/CLAUDE.md` first, then per directory from the
  * farthest ancestor down to cwd `CLAUDE.md`, the AGENTS.md files at its
@@ -363,7 +372,7 @@ function discoverInstructionEntries(
 		if (found === undefined) presence.set(path, (found = isPresentFile(path)));
 		return found;
 	};
-	const projectHasClaude = () => dirs.some((d) => present(join(d, "CLAUDE.md")) || (dirname(d) !== d && present(join(d, ".claude", "CLAUDE.md"))) || present(join(d, "CLAUDE.local.md")));
+	const projectHasClaude = () => dirs.some((d) => dirHasClaudeMd(d, present));
 	const agentsFiles =
 		rule === "agents-md" || rule === "claude-md-and-agents-md" || (rule === "claude-md-or-agents-md" && !projectHasClaude());
 
@@ -480,10 +489,11 @@ export function nestedInstructionFiles(opts: {
 	const walked = dirs.filter(allowedLocation);
 	// claude-md-or-agents-md is decided per project, as at startup: AGENTS.md only where no CLAUDE.md is in play.
 	const projectHasClaude = () =>
-		[...ancestorDirs(opts.cwd), ...walked].some((dir) => isPresentFile(join(dir, "CLAUDE.md")) || (dirname(dir) !== dir && isPresentFile(join(dir, ".claude", "CLAUDE.md"))) || isPresentFile(join(dir, "CLAUDE.local.md")));
+		[...ancestorDirs(opts.cwd), ...walked].some((dir) => dirHasClaudeMd(dir));
 	const agents = opts.rule === "agents-md" || opts.rule === "claude-md-and-agents-md" || (opts.rule === "claude-md-or-agents-md" && !projectHasClaude());
 	// Approved external chains use the reference parser below; the legacy fallback stays confined.
-	const readInProject = (path: string) => (allowedLocation(path) && inProject(tryRealpath(path)) ? readFileIfPresent(path) : null);
+	const readAllowed = (path: string) => (allowedLocation(path) ? readFileIfPresent(path) : null);
+	const readInProject = (path: string) => (inProject(tryRealpath(path)) ? readAllowed(path) : null);
 	const seen = new Set<string>(realTarget ? [realTarget] : []);
 	const files: { path: string; key: string; content: string; imported: string[] }[] = [];
 	const addRules = (rulesDir: string, scope: RuleOptions["scope"], conditional: boolean) => {
@@ -528,9 +538,11 @@ export function nestedInstructionFiles(opts: {
 			const content = readFileIfPresent(path);
 			if (content === null || content.trim() === "") continue;
 			seen.add(key);
-			const imported = [...collectImportedPaths(content, dirname(path), { home: opts.home, read: readInProject })].map((p) => tryRealpath(p) ?? p);
+			// ONECODE.md keeps its inline expander; approval lifts the confinement, as at startup.
+			const read = path === oneCode && opts.includeExternal ? readAllowed : readInProject;
+			const imported = [...collectImportedPaths(content, dirname(path), { home: opts.home, read })].map((p) => tryRealpath(p) ?? p);
 			for (const p of imported) seen.add(p);
-			files.push({ path, key, content: expandImports(content, dirname(path), { home: opts.home, read: readInProject }), imported });
+			files.push({ path, key, content: expandImports(content, dirname(path), { home: opts.home, read }), imported });
 		}
 		if (claudeFiles) {
 			addRules(join(dir, ".claude", "rules"), "Project", false);
@@ -654,9 +666,21 @@ export function externalInstructionIncludes(opts: DiscoveryOptions & { home: str
 	for (const { path, descriptor, ruleFile } of entries) {
 		if (descriptor === GLOBAL_DESCRIPTOR || descriptor === ONECODE_GLOBAL_DESCRIPTOR || descriptor === ONECODE_DESCRIPTOR) continue;
 		if (ruleFile) { add(ruleFile); continue; }
+		const dotClaude = descriptor === PROJECT_DESCRIPTOR && basename(dirname(path)) === ".claude" && basename(path) === "CLAUDE.md";
 		for (const file of readRuleInstructions(path, { cwd: opts.cwd, home: opts.home, scope: descriptor === MANAGED_DESCRIPTOR ? "Managed" : "Project", includeExternal: true,
 			allowPath: (path) => opts.rule !== "agents-md" || !isClaudeLocation(path, opts.homeClaudeDir),
+			...(dotClaude ? { ownerDir: dirname(dirname(path)) } : {}),
 		})) add(file);
+	}
+	// A project ONECODE.md's imports, resolved by the expander that would load them.
+	for (const source of oneCodeSources({ cwd: opts.cwd, home: opts.home, homeOneCodeDir: opts.homeOneCodeDir ?? oneCodeStateDir(process.env, opts.home) })) {
+		if (source.descriptor !== ONECODE_DESCRIPTOR) continue;
+		for (const imported of collectImportedPaths(source.content, dirname(source.path), { home: opts.home, read: source.unconfined })) {
+			const key = tryRealpath(imported) ?? imported;
+			if (isPathAtOrUnder(key, cwd) || seen.has(key)) continue;
+			seen.add(key);
+			outside.push(key);
+		}
 	}
 	return outside;
 }
@@ -681,19 +705,43 @@ function discoverOneCodeFilePaths(opts: { cwd: string; homeOneCodeDir: string })
 	return paths;
 }
 
-/** ONECODE.md files with `@import`s expanded, for the `# oneCodeMd` block. */
-export function discoverOneCodeFiles(opts: { cwd: string; homeOneCodeDir: string; home: string }): ContextFile[] {
-	const files: ContextFile[] = [];
+/**
+ * The ONECODE.md files present, each with the readers for its `@import`s:
+ * `confined` is what loads without consent (anywhere for the user's global
+ * file, which the user wrote; at or under the cwd's real path for a project
+ * file, like CLAUDE.md), `unconfined` what loads once the user approved.
+ */
+function oneCodeSources(opts: { cwd: string; homeOneCodeDir: string; home: string }): {
+	path: string;
+	descriptor: string;
+	content: string;
+	confined: (path: string) => string | null;
+	unconfined: (path: string) => string | null;
+}[] {
 	const allowedLocation = (path: string) => claudeSourcesOn() || !isClaudeLocation(path, claudeUserDir(opts.home));
-	const read = (path: string) => allowedLocation(path) ? readFileIfPresent(path) : null;
-	for (const { path, descriptor } of discoverOneCodeFilePaths(opts)) {
-		const content = read(path);
-		if (content === null) continue;
-		const importOptions = { home: opts.home, read };
+	const unconfined = (path: string) => allowedLocation(path) ? readFileIfPresent(path) : null;
+	const realCwd = tryRealpath(opts.cwd) ?? opts.cwd;
+	const inProject = (path: string) => {
+		const key = tryRealpath(path);
+		return key && isPathAtOrUnder(key, realCwd) ? unconfined(path) : null;
+	};
+	return discoverOneCodeFilePaths(opts).flatMap(({ path, descriptor }) => {
+		const content = unconfined(path);
+		return content === null ? [] : [{ path, descriptor, content, unconfined, confined: descriptor === ONECODE_DESCRIPTOR ? inProject : unconfined }];
+	});
+}
+
+/**
+ * ONECODE.md files with `@import`s expanded, for the `# oneCodeMd` block. A
+ * project file's imports outside the cwd load only with `includeExternal`
+ * (the user's consent, as for CLAUDE.md), which `externalInstructionIncludes` asks for.
+ */
+export function discoverOneCodeFiles(opts: { cwd: string; homeOneCodeDir: string; home: string; includeExternal?: boolean }): ContextFile[] {
+	return oneCodeSources(opts).map(({ path, descriptor, content, confined, unconfined }) => {
+		const importOptions = { home: opts.home, read: opts.includeExternal ? unconfined : confined };
 		const imported = [...collectImportedPaths(content, dirname(path), importOptions)];
-		files.push({ path, content: expandImports(content, dirname(path), importOptions), descriptor, ...(content.includes("@") ? { imported } : {}) });
-	}
-	return files;
+		return { path, content: expandImports(content, dirname(path), importOptions), descriptor, ...(content.includes("@") ? { imported } : {}) };
+	});
 }
 
 /** The block's preamble, naming the files above it: AGENTS.md in independent mode (lib/config-mode.ts). */

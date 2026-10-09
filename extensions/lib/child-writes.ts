@@ -4,11 +4,13 @@
  * An in-process child keeps its own file tracker, so a file the parent read and
  * a child then edited looks to the parent like a change "on disk" by someone
  * else, and the parent's notice said so (the user, a formatter, a command).
- * The child runners publish each successful edit or write on the parent's bus;
- * the parent's file-tracker names the child in its notice instead. The file
- * stays stale either way, so the parent still re-reads before editing it.
+ * The child runners publish each successful edit, write or notebook edit on
+ * the parent's bus; the parent's file-tracker names the child in its notice
+ * instead. The file stays stale either way, so the parent still re-reads
+ * before editing it.
  */
 
+import { isWritingTool, pathArgument } from "../auto-mode/paths.ts";
 import { resolveToolPath } from "./tool-path.ts";
 
 export const CHILD_WROTE_CHANNEL = "one-code:child-wrote";
@@ -20,20 +22,18 @@ export interface ChildWrote {
 	agent?: string;
 }
 
-const WRITING_TOOLS = new Set(["edit", "write"]);
-
 /**
  * Tracks a child session's tool calls and returns the changed file when one of
- * its edit or write calls ends without an error, resolved as the child's tools
- * resolved it (lib/tool-path.ts), which is how the parent's file-tracker keys it.
+ * its file-writing calls (edit, write, notebook_edit) ends without an error,
+ * resolved as the child's tools resolved it (lib/tool-path.ts), which is how
+ * the parent's file-tracker keys it.
  */
 export function childWriteWatcher(cwd: string) {
 	const started = new Map<string, string>();
 	return (event: { type?: string; toolName?: string; toolCallId?: string; args?: unknown; isError?: boolean }): string | undefined => {
-		if (!event.toolCallId || !event.toolName || !WRITING_TOOLS.has(event.toolName)) return undefined;
+		if (!event.toolCallId || !event.toolName || !isWritingTool(event.toolName)) return undefined;
 		if (event.type === "tool_execution_start") {
-			const args = (event.args ?? {}) as { path?: unknown; file_path?: unknown };
-			const path = typeof args.path === "string" ? args.path : typeof args.file_path === "string" ? args.file_path : undefined;
+			const path = pathArgument(event.args as Record<string, unknown> | undefined);
 			if (path) started.set(event.toolCallId, resolveToolPath(path, cwd));
 			return undefined;
 		}

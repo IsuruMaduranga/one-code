@@ -1,4 +1,5 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { closeSync, constants, mkdtempSync, openSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -91,6 +92,24 @@ describe("startBackgroundBash", () => {
 		await task.finished;
 		expect(task.logPath).toBe(logPath);
 		expect(readFileSync(logPath, "utf-8")).toContain("spooled");
+	});
+
+	// A FIFO with no reader blocks the spool's open, so its writes never flush.
+	it.skipIf(process.platform === "win32")("finishes without the spool when its stream hangs, and stops naming the file", async () => {
+		dir = mkdtempSync(join(tmpdir(), "cc-bash-bg-"));
+		const logPath = join(dir, "output.log");
+		execFileSync("mkfifo", [logPath]);
+		const { task, summary } = start("echo stuck", { logPath });
+		try {
+			const settled = await Promise.race([task.finished.then(() => true), new Promise((r) => setTimeout(() => r(false), 4_000))]);
+			expect(settled).toBe(true);
+			expect(task.logPath).toBeUndefined();
+			expect(summary()?.logPath).toBeUndefined();
+			expect(task.output()).toContain("stuck");
+		} finally {
+			// Open the read end so the blocked open returns and its thread is freed.
+			closeSync(openSync(logPath, constants.O_RDONLY | constants.O_NONBLOCK));
+		}
 	});
 });
 

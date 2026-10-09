@@ -135,7 +135,10 @@ export function startBackgroundBash(options: StartBackgroundBashOptions): Backgr
 		// An incomplete sequence at the very end decodes as U+FFFD, as it would have.
 		const rest = stdoutText.end() + stderrText.end();
 		if (rest) stored = tailCap(stored + rest, STORED_OUTPUT_CAP);
+		let completed = false;
 		const complete = () => {
+			if (completed) return;
+			completed = true;
 			task.status = status;
 			task.finishedAt = Date.now();
 			finish();
@@ -143,10 +146,25 @@ export function startBackgroundBash(options: StartBackgroundBashOptions): Backgr
 		};
 		// end() flushes asynchronously; `finished` must not resolve while the
 		// log file is still short of what output() returns, or a reader sent to
-		// logPath by the completion notification can see a truncated file. The
-		// callback also fires if the stream errors, so this cannot hang.
-		if (log) log.end(complete);
-		else complete();
+		// logPath by the completion notification can see a truncated file.
+		// `close` follows a clean end and an error alike; a stuck stream (a
+		// write that never calls back) must not keep the task running, so after
+		// a second it is dropped and the partial file is no longer named.
+		if (log && !log.closed) {
+			const fallback = setTimeout(() => {
+				spoolFailed = true;
+				task.logPath = undefined;
+				log.destroy();
+				complete();
+			}, 1_000);
+			log.once("close", () => {
+				clearTimeout(fallback);
+				complete();
+			});
+			log.end();
+		} else {
+			complete();
+		}
 	};
 
 	// Exit plus a short stdio grace, not `close`: a descendant the stop missed

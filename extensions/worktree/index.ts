@@ -72,6 +72,13 @@ async function listWorktreePaths(cwd: string): Promise<string[]> {
  */
 const ISOLATION_NOTE = "Git commands aimed at the main checkout or another worktree of this repository are refused until you exit.";
 
+/**
+ * Sessions already told their restored worktree is gone, as `<session id>\0<path>`.
+ * Module scope on purpose: jiti keeps this module across the factory re-run
+ * that `/reload` makes, and a reload restores the same stale state again.
+ */
+const reportedMissingWorktrees = new Set<string>();
+
 export default function worktreeExtension(pi: ExtensionAPI) {
 	let state: WorktreeState | undefined;
 
@@ -101,9 +108,15 @@ export default function worktreeExtension(pi: ExtensionAPI) {
 		const details = restoreLatestDetails<WorktreeDetails>(ctx.sessionManager.getBranch(), WORKTREE_TOOLS, (d) => d?.worktreeState !== undefined);
 		let restored = details?.worktreeState ?? undefined;
 		if (restored && !existsSync(restored.path)) {
-			pi.events.emit(REMINDER_CHANNEL, {
-				text: `Left worktree session; back in ${restored.originalCwd}. The worktree at ${restored.path} no longer exists.`,
-			});
+			// Nothing records that the session left, so every later restore finds
+			// the same stale state; tell the model once per session.
+			const key = `${ctx.sessionManager.getSessionId()}\0${restored.path}`;
+			if (!reportedMissingWorktrees.has(key)) {
+				reportedMissingWorktrees.add(key);
+				pi.events.emit(REMINDER_CHANNEL, {
+					text: `Left worktree session; back in ${restored.originalCwd}. The worktree at ${restored.path} no longer exists.`,
+				});
+			}
 			restored = undefined;
 		}
 		// Sessions persisted before sharedRoot existed: originalCwd is the best guess.

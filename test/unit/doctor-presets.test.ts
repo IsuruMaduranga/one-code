@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { computePresets, describePresetChanges, findPreset, presetPool, presetsSection } from "../../extensions/doctor/presets.ts";
-import { pinCatalog, pinReleaseDates } from "./catalog-fixture.ts";
+import { setCatalogSourcesForTest } from "../../extensions/lib/model-catalog-data.ts";
+import { catalogSources, pinCatalog, pinReleaseDates } from "./catalog-fixture.ts";
 
 const model = (provider: string, id: string, input?: number, api = "anthropic-messages") =>
 	({ provider, id, name: id, api, cost: input === undefined ? undefined : { input, output: input * 5 }, contextWindow: 200_000 }) as any;
@@ -109,6 +110,19 @@ describe("computePresets", () => {
 		expect(presets.find((p) => p.name === "economical")?.main.id).toBe("gpt-5.6-luna"); // not the tool-less row
 	});
 
+	it("never recommends an image-output model as a preset's main", () => {
+		const sources = catalogSources([
+			{ id: "openai/gpt-6-astra", released: "2026-09-04", price: [5, 40] },
+			{ id: "openai/gpt-6-luna", released: "2026-09-22", price: [0.1, 0.5] },
+			{ id: "openai/gpt-image-3", released: "2026-09-01", price: [0.05, 0.4] },
+		]);
+		sources.modelsDev.payload.openai.models["gpt-image-3"].modalities = { output: ["text", "image"] };
+		setCatalogSourcesForTest(sources);
+		const oa = (id: string, input: number) => model("openai", id, input, "openai-responses");
+		const catalog = [oa("gpt-6-astra", 5), oa("gpt-6-luna", 0.1), oa("gpt-image-3", 0.05)];
+		expect(presetPool(catalog, catalog[0]).map((m) => m.id)).toEqual(["gpt-6-astra", "gpt-6-luna"]);
+	});
+
 	it("previews a below-frontier main's classifier as the cheaper model in its tier", () => {
 		pinCatalog([
 			{ id: "openai/gpt-5.6-sol", released: "2026-07-09", price: [5, 20] },
@@ -121,9 +135,38 @@ describe("computePresets", () => {
 		const quality = result.presets.find((preset) => preset.name === "quality")!;
 		expect(quality.main).toBe(main);
 		expect(quality.classifier).toBe(cheaper);
-		expect(describePresetChanges(quality)[2]).toBe("auto-mode classifier stays automatic (picks openai/gpt-5.6-terra)");
+		expect(describePresetChanges(quality)[2]).toBe("auto-mode classifier → automatic (picks openai/gpt-5.6-terra) (undo: /auto-mode model)");
 		const text = presetsSection(result, main).lines.map((line) => line.text).join("\n");
-		expect(text).toContain("the cheapest model in its tier or above, never dearer than the main model");
+		expect(text).toContain("the cheapest model in its tier or above that is strictly cheaper than the main model");
+	});
+
+	it("never recommends a main model that /doctor would then call outdated", () => {
+		pinCatalog([
+			{ id: "openai/gpt-6.1-sol", released: "2026-09-29", price: [2, 10] },
+			{ id: "openai/gpt-6-astra", released: "2026-09-04", price: [5, 40] },
+			// The alias serves GPT-5.6 Sol today.
+			{ id: "openai/gpt-5.6-sol", released: "2026-07-09", price: [4, 20], servedAs: ["openai/gpt-sol-latest"] },
+			{ id: "openai/gpt-6-luna", released: "2026-09-22", price: [0.1, 0.5] },
+		]);
+		const oa = (id: string, input: number, output: number) => ({ ...model("openai", id, input, "openai-responses"), cost: { input, output } });
+		const available = [oa("gpt-6.1-sol", 2, 10), oa("gpt-6-astra", 5, 40), oa("gpt-5.6-sol", 4, 20), oa("gpt-6-luna", 0.1, 0.5), oa("gpt-sol-latest", 4, 20)];
+		// GPT-6.1 Sol is the same line, newer and cheaper: GPT-5.6 Sol is not offered, nor its alias.
+		expect(presetPool(available, available[0]).map((m) => m.id)).toEqual(["gpt-6.1-sol", "gpt-6-astra", "gpt-6-luna"]);
+		const balanced = computePresets(available, available[0]).presets.find((p) => p.name === "balanced")!;
+		expect(balanced.main.id).toBe("gpt-6.1-sol");
+	});
+
+	it("runs balanced on the cheapest workhorse-or-better model, a frontier one when it is cheaper", () => {
+		pinCatalog([
+			{ id: "openai/gpt-6-sol", released: "2026-09-22", price: [1, 13] },
+			{ id: "openai/o-mid", released: "2026-09-01", price: [3, 12] },
+			{ id: "openai/o-big", released: "2026-09-01", price: [5, 20] },
+		]);
+		const oa = (id: string, input: number) => model("openai", id, input, "openai-responses");
+		const available = [oa("o-mid", 3), oa("o-big", 5), oa("gpt-6-sol", 1)];
+		const balanced = computePresets(available, available[0]).presets.find((p) => p.name === "balanced")!;
+		expect(balanced.main.id).toBe("gpt-6-sol");
+		expect(balanced.note).toBeUndefined();
 	});
 
 	it("never lands the economical preset on a tiny model while a capable one exists", () => {
@@ -159,7 +202,7 @@ describe("computePresets", () => {
 		const changes = describePresetChanges(result.presets.find((p) => p.name === "quality")!);
 		expect(changes[0]).toContain("undo: /model");
 		expect(changes[1]).toContain("/subagent clear");
-		expect(changes[2]).toContain("classifier stays automatic");
-		expect(changes[2]).not.toContain("undo:");
+		expect(changes[2]).toContain("classifier → automatic");
+		expect(changes[2]).toContain("undo: /auto-mode model");
 	});
 });

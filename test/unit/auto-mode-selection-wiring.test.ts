@@ -68,20 +68,27 @@ describe("automatic classifier selection wiring", () => {
 		await fake.fire("session_shutdown", {}, ctx);
 	});
 
-	it("removes the model command, completion, and setting display without rewriting legacy settings", async () => {
+	it("/auto-mode model saves a stamped choice, warns about a smaller window, and clears back to automatic", async () => {
 		const settings = join(home, ".onecode", "settings.json");
-		const legacy = JSON.stringify({ autoMode: { classifierModel: "openai-codex/gpt-5.6-terra" } });
-		writeFileSync(settings, legacy);
+		(ctx.modelRegistry as { getApiKeyAndHeaders?: unknown }).getApiKeyAndHeaders = async () => ({ ok: true, apiKey: "key" });
 		await fake.fire("session_start", { reason: "startup" }, ctx);
 		const command = fake.commands.get("auto-mode")!;
-		expect(command.description).not.toContain("model");
+		expect(command.description).toContain("model");
 		const completions = command.getArgumentCompletions as () => { value: string }[];
-		expect(completions().map((entry) => entry.value)).not.toContain("model");
-		await command.handler("model openai-codex/gpt-6-sol", ctx);
-		expect((ctx.ui as { notify: unknown }).notify).toHaveBeenCalledWith(expect.stringContaining('Unknown subcommand "model"'), "warning");
-		await command.handler("config", ctx);
+		expect(completions().map((entry) => entry.value)).toContain("model");
 		const notify = (ctx.ui as { notify: ReturnType<typeof vi.fn> }).notify;
-		expect(String(notify.mock.calls.at(-1)?.[0])).not.toContain("classifierModel:");
-		expect(readFileSync(settings, "utf8")).toBe(legacy);
+
+		await command.handler("model openai-codex/gpt-6-sol", ctx);
+		expect(JSON.parse(readFileSync(settings, "utf8")).autoMode).toEqual({ classifierModel: "openai-codex/gpt-6-sol", classifierModelSetFor: "openai-codex" });
+		expect(notify).toHaveBeenCalledWith(expect.stringContaining("Auto-mode classifier set to openai-codex/gpt-6-sol"), "info");
+		// gpt-6-sol's 272k window is smaller than the 1M session's: warned, still used.
+		expect(notify).toHaveBeenCalledWith(expect.stringMatching(/272,000-token context window, smaller than this session's 1,000,000/), "warning");
+		expect(statuses.at(-1)?.classifier).toBe("openai-codex/gpt-6-sol");
+		await command.handler("config", ctx);
+		expect(String(notify.mock.calls.at(-1)?.[0])).toContain("classifierModel: openai-codex/gpt-6-sol");
+
+		await command.handler("model clear", ctx);
+		expect(JSON.parse(readFileSync(settings, "utf8")).autoMode).toBeUndefined();
+		expect(statuses.at(-1)?.classifier).toBe("openai-codex/gpt-6-astra");
 	});
 });

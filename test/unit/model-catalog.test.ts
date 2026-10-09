@@ -1,11 +1,12 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
 	bundledSources,
 	catalogCacheDir,
-	catalogIsStale,
+	catalogFetchedAt,
+	catalogRefreshDue,
 	catalogRefreshEnabled,
 	emptyCatalogSources,
 	HUGGING_FACE_LOOKUPS_PER_REFRESH,
@@ -90,12 +91,83 @@ describe("the tier rules", () => {
 			{ id: "anthropic/sonnet-new", released: "2026-09-28", price: [2, 10] },
 			{ id: "anthropic/fable", released: "2026-09-01", price: [10, 50] },
 		];
-		expect(entry(models, "anthropic/opus-old")).toMatchObject({ supersededBy: "anthropic/opus-new" });
+		expect(entry(models, "anthropic/opus-old")).toMatchObject({ successors: ["anthropic/opus-new"] });
 		// Sonnet is newer and half the price: a sibling, not a successor.
-		expect(entry(models, "anthropic/opus-new").supersededBy).toBeUndefined();
-		expect(entry(models, "anthropic/fable").supersededBy).toBeUndefined();
-		expect(autoSelectSkipReason(entry(models, "anthropic/opus-old"))).toBe("superseded by anthropic/opus-new");
-		expect(autoSelectable(entry(models, "anthropic/opus-new"))).toBe(true);
+		expect(entry(models, "anthropic/opus-new").successors).toEqual([]);
+		expect(entry(models, "anthropic/fable").successors).toEqual([]);
+		const served = new Set(models.map((model) => model.id));
+		expect(autoSelectSkipReason(entry(models, "anthropic/opus-old"), served)).toBe("superseded by anthropic/opus-new, which this provider serves");
+		expect(autoSelectable(entry(models, "anthropic/opus-new"), served)).toBe(true);
+	});
+
+	it("never lets a moving alias or a model's own snapshot supersede it", () => {
+		const models: FixtureModel[] = [
+			{ id: "acme/big", released: "2026-08-01", price: [3, 15] },
+			{ id: "acme/mid", released: "2026-08-01", price: [1, 5] },
+			{ id: "acme/coder-small", released: "2026-05-01", price: [0.1, 0.3] },
+			{ id: "acme/chat-small-latest", released: "2026-07-15", price: [0.1, 0.3] },
+			{ id: "acme/max", released: "2026-08-15", price: [1, 5] },
+			{ id: "acme/max-0902", released: "2026-09-02", price: [1, 5] },
+		];
+		// The only newer model in its price band is an alias.
+		expect(entry(models, "acme/coder-small").successors).toEqual([]);
+		// The only newer one is its own dated snapshot.
+		expect(entry(models, "acme/max").successors).toEqual([]);
+		// Every qualifying successor, newest first.
+		expect(entry(models, "acme/mid").successors).toEqual(["acme/max-0902", "acme/max"]);
+	});
+
+	it("skips a superseded model only when the pool serves its successor", () => {
+		const models: FixtureModel[] = [
+			{ id: "anthropic/opus-new", released: "2026-09-22", price: [4, 20] },
+			{ id: "anthropic/opus-old", released: "2026-05-28", price: [5, 25] },
+		];
+		const old = entry(models, "anthropic/opus-old");
+		expect(autoSelectSkipReason(old, new Set())).toBeUndefined();
+		expect(autoSelectable(old, new Set(["anthropic/opus-old"]))).toBe(true);
+		expect(autoSelectSkipReason(old, new Set(["anthropic/opus-new"]))).toBe("superseded by anthropic/opus-new, which this provider serves");
+	});
+
+	it("gives an alias the size of the dated model it names, so it is placed and compared like that model", () => {
+		const models: FixtureModel[] = [
+			{ id: "acme/big", released: "2026-08-01", price: [3, 15] },
+			{ id: "acme/mid", released: "2026-08-01", price: [1, 5] },
+			{ id: "acme/small", released: "2026-08-01", price: [0.4, 1.6] },
+			{ id: "acme/coder-small-2507", released: "2026-05-01", price: [0.1, 0.3] },
+			{ id: "acme/voice-small-24b-2507", released: "2026-07-15", price: [0.1, 0.3], params: 24e9 },
+			{ id: "acme/voice-small-latest", released: "2026-07-15", price: [0.1, 0.3] },
+		];
+		expect(entry(models, "acme/voice-small-latest")).toMatchObject({
+			tier: "tiny",
+			params: 24e9,
+			reason: "24B parameters (as acme/voice-small-24b-2507), under 40B",
+		});
+		// Neither the alias nor its tiny twin supersedes a cheap model.
+		expect(entry(models, "acme/coder-small-2507").successors).toEqual([]);
+	});
+
+	it("reads an MoE size tag as active parameters, and takes the same model's measured size from its untagged row", () => {
+		const sources = catalogSources([
+			{ id: "meta/muse-big", released: "2026-08-01", price: [3, 15] },
+			{ id: "meta/muse-mid", released: "2026-08-01", price: [1, 5] },
+			{ id: "meta/muse-small", released: "2026-08-01", price: [0.4, 1.6] },
+			{ id: "meta/llama-4-maverick-17b-instruct", released: "2025-04-05", price: [0.24, 0.97] },
+			{ id: "meta/llama-4-maverick", released: "2025-04-05" },
+			// A size ladder released together: each tag is that model's own total.
+			{ id: "meta/gemma-like-4b", released: "2025-04-05", price: [0.02, 0.04] },
+			{ id: "meta/gemma-like-27b", released: "2025-04-05", price: [0.1, 0.2] },
+		]);
+		// OpenRouter's untagged row of the same model, measured on Hugging Face.
+		(sources.modelsDev.payload.openrouter ??= { models: {} }).models["meta-llama/llama-4-maverick"] = { release_date: "2025-04-05", cost: { input: 0.19, output: 0.65 } };
+		(sources.modelsDev.payload.openrouter.models["meta-llama/gemma-like"] = { release_date: "2025-04-05" });
+		sources.openRouter.payload.data.push({ id: "meta-llama/llama-4-maverick", hugging_face_id: "meta-llama/Llama-4-Maverick-17B-128E-Instruct" });
+		sources.openRouter.payload.data.push({ id: "meta-llama/gemma-like", hugging_face_id: "meta-llama/gemma-like-27b" });
+		sources.huggingFace.payload["meta-llama/Llama-4-Maverick-17B-128E-Instruct"] = 401.6e9;
+		sources.huggingFace.payload["meta-llama/gemma-like-27b"] = 27e9;
+		const index = buildCatalogIndex(sources);
+		expect(index.models.get("meta/llama-4-maverick-17b-instruct")).toMatchObject({ params: 401.6e9, tier: "cheap" });
+		expect(index.models.get("meta/llama-4-maverick")).toMatchObject({ params: 401.6e9 });
+		expect(index.models.get("meta/gemma-like-4b")).toMatchObject({ params: 4e9, tier: "tiny" });
 	});
 
 	it("keeps deprecated, tool-less and legacy models out of automatic selection", () => {
@@ -105,9 +177,9 @@ describe("the tier rules", () => {
 			{ id: "acme/no-tools", released: "2026-08-01", price: [1, 4], tools: false },
 			{ id: "acme/legacy", released: "2024-01-01", price: [9, 40] },
 		];
-		expect(autoSelectSkipReason(entry(models, "acme/gone"))).toBe("deprecated");
-		expect(autoSelectSkipReason(entry(models, "acme/no-tools"))).toBe("cannot call tools");
-		expect(autoSelectSkipReason(entry(models, "acme/legacy"))).toBe("over two years older than its vendor's newest model");
+		expect(autoSelectSkipReason(entry(models, "acme/gone"), new Set())).toBe("deprecated");
+		expect(autoSelectSkipReason(entry(models, "acme/no-tools"), new Set())).toBe("cannot call tools");
+		expect(autoSelectSkipReason(entry(models, "acme/legacy"), new Set())).toBe("over two years older than its vendor's newest model");
 	});
 });
 
@@ -143,7 +215,7 @@ describe("matching pi rows to catalog models", () => {
 		const prime = catalogModelFor({ provider: "openrouter", id: "z-ai/glm-5-prime" }, index);
 		expect(prime).toMatchObject({ id: "z-ai/glm-5-prime", derived: true, tier: "workhorse", reason: expect.stringContaining("zhipuai's median") });
 		// A derived row is placed against the vendor, never supersedes a vendor model.
-		expect(index.models.get("zhipuai/glm-5-max")?.supersededBy).toBeUndefined();
+		expect(index.models.get("zhipuai/glm-5-max")?.successors).toEqual([]);
 	});
 
 	it("skips a host's nested copy of another vendor's model", () => {
@@ -159,6 +231,9 @@ describe("matching pi rows to catalog models", () => {
 		expect(sizeFromName("gemma-4-E2B-it")).toBe(2e9);
 		expect(sizeFromName("qwen3.6-35b-a3b")).toBe(35e9);
 		expect(sizeFromName("mixtral-8x7b")).toBeUndefined();
+		// Llama 4 names its active parameters and expert count, not its total.
+		expect(sizeFromName("@cf/meta/llama-4-scout-17b-16e-instruct")).toBeUndefined();
+		expect(sizeFromName("llama-4-maverick-17b-128e-instruct-fp8")).toBeUndefined();
 	});
 });
 
@@ -260,9 +335,61 @@ describe("refreshing the catalogs", () => {
 		const later = new Date("2099-01-03T00:00:00Z");
 		const failed = await refreshModelCatalog({ stateDir, piProviders: ["deepseek"], fetchImpl: fakeFetch({ "https://openrouter.ai/": () => json({}, 503) }).impl, now: later });
 		expect(failed).toEqual({ status: "failed", error: "openrouter.ai responded 503" });
-		const empty = await refreshModelCatalog({ stateDir, piProviders: ["deepseek"], fetchImpl: fakeFetch({ "https://models.dev/": () => json({}) }).impl, now: later });
+		const dayAfter = new Date("2099-01-04T00:00:01Z");
+		const empty = await refreshModelCatalog({ stateDir, piProviders: ["deepseek"], fetchImpl: fakeFetch({ "https://models.dev/": () => json({}) }).impl, now: dayAfter });
 		expect(empty).toEqual({ status: "failed", error: "a model catalog came back empty" });
 		expect(readFileSync(join(catalogCacheDir(stateDir), "models-dev.json"), "utf8")).toBe(before);
+	});
+
+	it("after a failure, waits a day before trying again, and a success clears the wait", async () => {
+		const later = new Date("2099-01-03T00:00:00Z");
+		const down = fakeFetch({ "https://models.dev/": () => json({}, 503) });
+		expect(catalogRefreshDue(stateDir, later)).toBe(true);
+		expect(await refreshModelCatalog({ stateDir, piProviders: ["deepseek"], fetchImpl: down.impl, now: later })).toEqual({ status: "failed", error: "models.dev responded 503" });
+		const calls = down.calls.length;
+		const soon = new Date("2099-01-03T12:00:00Z");
+		expect(catalogRefreshDue(stateDir, soon)).toBe(false);
+		expect(await refreshModelCatalog({ stateDir, piProviders: ["deepseek"], fetchImpl: down.impl, now: soon })).toEqual({
+			status: "backing-off",
+			error: "models.dev responded 503",
+		});
+		expect(down.calls.length).toBe(calls);
+		const nextDay = new Date("2099-01-04T00:00:01Z");
+		expect(catalogRefreshDue(stateDir, nextDay)).toBe(true);
+		expect((await refreshModelCatalog({ stateDir, piProviders: ["deepseek"], fetchImpl: fakeFetch().impl, now: nextDay })).status).toBe("refreshed");
+		expect(existsSync(join(catalogCacheDir(stateDir), "refresh-failed.json"))).toBe(false);
+	});
+
+	it("ignores a failure stamped later than now, so it cannot hold refreshes off", async () => {
+		const later = new Date("2099-01-03T00:00:00Z");
+		mkdirSync(catalogCacheDir(stateDir), { recursive: true });
+		writeFileSync(join(catalogCacheDir(stateDir), "refresh-failed.json"), JSON.stringify({ failedAt: "9999-01-01T00:00:00Z", error: "x" }));
+		expect(catalogRefreshDue(stateDir, later)).toBe(true);
+		expect((await refreshModelCatalog({ stateDir, piProviders: ["deepseek"], fetchImpl: fakeFetch().impl, now: later })).status).toBe("refreshed");
+	});
+
+	it("does not count a refresh the caller cancelled as a failure", async () => {
+		const controller = new AbortController();
+		const stalled = (async () => new Response(new ReadableStream({ start() {} }), { status: 200 })) as typeof fetch;
+		const pending = refreshModelCatalog({ stateDir, piProviders: ["deepseek"], fetchImpl: stalled, now, signal: controller.signal });
+		controller.abort(new Error("session ended"));
+		expect(await pending).toEqual({ status: "failed", error: "session ended" });
+		expect(catalogRefreshDue(stateDir, now)).toBe(true);
+	});
+
+	it("writes models.dev last, so a failed write never leaves a fresh-looking mixed copy", async () => {
+		// A directory where openrouter.json goes makes that write throw.
+		mkdirSync(join(catalogCacheDir(stateDir), "openrouter.json"), { recursive: true });
+		const outcome = await refreshModelCatalog({ stateDir, piProviders: ["deepseek"], fetchImpl: fakeFetch().impl, now });
+		expect(outcome.status).toBe("failed");
+		expect(existsSync(join(catalogCacheDir(stateDir), "models-dev.json"))).toBe(false);
+	});
+
+	it("reads when the copy in use was fetched without parsing the catalogs", async () => {
+		expect(catalogFetchedAt(stateDir)).toBe(bundledSources().modelsDev.fetchedAt);
+		await refreshModelCatalog({ stateDir, piProviders: ["deepseek"], fetchImpl: fakeFetch().impl, now });
+		expect(catalogFetchedAt(stateDir)).toBe(now.toISOString());
+		expect(catalogFetchedAt(stateDir)).toBe(loadCatalogSources(stateDir).modelsDev.fetchedAt);
 	});
 
 	it("never fetches while a test has pinned the catalog", async () => {
@@ -272,11 +399,10 @@ describe("refreshing the catalogs", () => {
 		expect(calls).toEqual([]);
 	});
 
-	it("is stale after a day, and off with refreshModelCatalog: false or PI_OFFLINE", () => {
-		const sources = emptyCatalogSources();
-		sources.modelsDev.fetchedAt = "2099-01-01T00:00:00Z";
-		expect(catalogIsStale(sources, new Date("2099-01-01T23:00:00Z"))).toBe(false);
-		expect(catalogIsStale(sources, new Date("2099-01-02T01:00:00Z"))).toBe(true);
+	it("is due after a day, and off with refreshModelCatalog: false or PI_OFFLINE", async () => {
+		await refreshModelCatalog({ stateDir, piProviders: ["deepseek"], fetchImpl: fakeFetch().impl, now });
+		expect(catalogRefreshDue(stateDir, new Date("2099-01-01T23:00:00Z"))).toBe(false);
+		expect(catalogRefreshDue(stateDir, new Date("2099-01-02T01:00:00Z"))).toBe(true);
 		expect(catalogRefreshEnabled({}, {})).toBe(true);
 		expect(catalogRefreshEnabled({ refreshModelCatalog: false }, {})).toBe(false);
 		expect(catalogRefreshEnabled({}, { PI_OFFLINE: "1" })).toBe(false);

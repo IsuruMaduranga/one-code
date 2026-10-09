@@ -23,6 +23,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { type ChildAction, SUBAGENT_ACTIONS_CHANNEL, type SubagentActionsPayload } from "../auto-mode/actions.ts";
 import { guideDocsDirs } from "../lib/guide-docs.ts";
+import { TURN_FAILED_CHANNEL, type TurnFailedEvent } from "../lib/interrupt.ts";
 import type { HandBackVerdict } from "../lib/notifications.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent } from "../lib/model-unusable.ts";
 
@@ -39,8 +40,13 @@ import {
 	loadAutoModeConfigWithDiagnostics,
 	oneCodePermissionAllow,
 	persistAutoModeSetup,
+	persistClassifierModel,
 	removeOneCodePermissionAllow,
 } from "../auto-mode/config.ts";
+import { modelPickerComponent, type PickerEntry, pickerSpec, toPickerEntries } from "../lib/model-picker.ts";
+import { findConfigured, modelIdentity } from "../lib/model-policy.ts";
+import { CLASSIFIER_SETTING_CHANGED_CHANNEL } from "../lib/settings-channels.ts";
+import { readSuggestNewerModels } from "../lib/one-code-settings.ts";
 import { auditPermissionAllow, renderProposal, settingsPatch } from "../auto-mode/setup.ts";
 import { draftSetup, gatherFacts } from "../auto-mode/setup-run.ts";
 import { DEFAULT_ENVIRONMENT } from "../auto-mode/defaults.ts";
@@ -401,6 +407,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		const chain = classifierCandidates({
 			available: badgeCtx.modelRegistry.getAvailable(),
 			sessionModel: sessionModel ?? badgeCtx.model,
+			configured: autoConfig.classifierModel,
+			configuredSetForContainment: autoConfig.classifierModelSetFor,
 		}).candidates.filter((entry) => !classifierState.rejected.has(`${entry.model.provider}/${entry.model.id}`));
 		const first = chain[0];
 		return { classifier: first ? `${first.model.provider}/${first.model.id}` : undefined, pinned: false };
@@ -448,7 +456,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 
 	// Drop the cached config and classifier selection state, then refresh the badge.
 	// A model switch must re-evaluate the capability and context-window requirements.
-	const resetClassifierChoice = (sessionModel?: Model<Api>) => {
+	const resetClassifierChoice = (sessionModel?: Model<Api>, announce = true) => {
 		autoConfig = undefined; // reloaded lazily
 		classifierState.pinned = undefined;
 		classifierState.rejected.clear();
@@ -456,7 +464,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		classifierState.timeoutStreak = 0;
 		classifierState.chainCache = undefined;
 		applyBadge(sessionModel);
-		announceClassifierChoice(sessionModel);
+		if (announce) announceClassifierChoice(sessionModel);
 	};
 	// Keyed by cwd: a worktree-isolated child classifies against ITS checkout's
 	// CLAUDE.md/AGENTS.md, and must not poison the cache the main agent's own
@@ -504,24 +512,49 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		}
 	};
 
-	/** Announce the automatic choice before any tool needs screening. */
-	const announceClassifierChoice = (sessionModel?: Model<Api>) => {
-		if (mode !== "auto" || !badgeCtx) return;
-		const choice = classifierCandidates({ available: badgeCtx.modelRegistry.getAvailable(), sessionModel: sessionModel ?? badgeCtx.model });
+	/**
+	 * Announce the choice, and any warning about a chosen classifier, before any
+	 * tool needs screening. Warnings first, then ONE info line: pi folds
+	 * back-to-back info notices into a single status line (findings §63), so a
+	 * second one would overwrite the first. `lead` opens that line (the
+	 * confirmation `/auto-mode model` gives); `force` announces outside auto mode.
+	 */
+	const announceClassifierChoice = (sessionModel?: Model<Api>, opts: { lead?: string; force?: boolean } = {}) => {
+		if ((mode !== "auto" && !opts.force) || !badgeCtx) return;
+		autoConfig ??= loadAutoModeConfig(os.homedir());
+		const choice = classifierCandidates({
+			available: badgeCtx.modelRegistry.getAvailable(),
+			sessionModel: sessionModel ?? badgeCtx.model,
+			configured: autoConfig.classifierModel,
+			configuredSetForContainment: autoConfig.classifierModelSetFor,
+			suggestNewer: readSuggestNewerModels(os.homedir()),
+		});
+		// Keyed by text, the same keys classify() uses, so each shows once.
+		const info: string[] = opts.lead ? [opts.lead] : [];
+		for (const notice of choice.notices) {
+			if (notice.fallbackReason || classifierState.notified.has(notice.text)) continue;
+			classifierState.notified.add(notice.text);
+			if (notice.level === "warning") badgeCtx.ui.notify(notice.text, "warning");
+			else info.push(notice.text);
+		}
 		const first = choice.candidates.find((entry) => !classifierState.rejected.has(`${entry.model.provider}/${entry.model.id}`));
-		if (!first) return;
-		const key = `using:${first.model.provider}/${first.model.id}`;
-		if (classifierState.notified.has(key)) return;
-		classifierState.notified.add(key);
-		if (choice.fallback) classifierState.notified.add(choice.fallback.text);
-		badgeCtx.ui.notify(choice.fallback?.text ?? `Auto mode will screen calls with ${describeCandidate(first)}.`, "info");
+		const key = first ? `using:${first.model.provider}/${first.model.id}` : undefined;
+		if (first && key && !classifierState.notified.has(key)) {
+			classifierState.notified.add(key);
+			if (choice.fallback) classifierState.notified.add(choice.fallback.text);
+			info.push(choice.fallback?.text ?? `Auto mode will screen calls with ${describeCandidate(first)}.`);
+		}
+		if (info.length > 0) badgeCtx.ui.notify(info.join("\n"), "info");
 	};
 
 	/** What would be tried, in order, before anything has been pinned. */
 	const describeChain = (ctx: ExtensionContext): string => {
+		autoConfig ??= loadAutoModeConfig(os.homedir());
 		const { candidates } = classifierCandidates({
 			available: ctx.modelRegistry.getAvailable(),
 			sessionModel: ctx.model,
+			configured: autoConfig.classifierModel,
+			configuredSetForContainment: autoConfig.classifierModelSetFor,
 		});
 		return candidates.length > 0 ? candidates.map(describeCandidate).join(" → ") : "(no model available)";
 	};
@@ -986,6 +1019,10 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 	});
 
 	// Mode-change requests from other extensions (e.g. plan-mode tools).
+	// `autoMode.classifierModel` was rewritten by another extension (`/doctor
+	// preset`): forget the pinned classifier and the cached config, exactly as
+	// `/auto-mode model` does after its own write, so the next call re-plans.
+	pi.events.on(CLASSIFIER_SETTING_CHANGED_CHANNEL, () => resetClassifierChoice(badgeCtx?.model));
 	pi.events.on(MODE_CHANNEL, (data) => {
 		const request = data as { mode?: unknown; toolCallId?: unknown } | undefined;
 		const requested = normalizePermissionMode(request?.mode);
@@ -1038,6 +1075,8 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		if (!ctx.hasUI || ctx.mode === "print") {
 			const reason = "auto mode classifier transcript exceeded context window in headless mode";
 			ctx.ui.notify(`${reason}. Compact the session (/compact) and continue.`, "error");
+			// A failed one-shot run, not a user cancel (exit/index.ts).
+			pi.events.emit(TURN_FAILED_CHANNEL, { reason } satisfies TurnFailedEvent);
 			ctx.abort();
 			return { block: true, reason };
 		}
@@ -2262,25 +2301,109 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 		}
 	};
 
+	/**
+	 * Apply a chosen classifier model: validate auth first (a persisted model
+	 * with no credentials would fail every call), persist to user scope, release
+	 * the session pin so the choice takes effect on the next call, and say what
+	 * it costs (`lib/model-choice-warnings.ts`).
+	 */
+	const applyClassifierChoice = async (spec: string, ctx: ExtensionContext): Promise<void> => {
+		const model = findConfigured(ctx.modelRegistry.getAvailable(), spec);
+		if (!model) {
+			ctx.ui.notify(`No available model matches "${spec}". Run /auto-mode model for the list.`, "error");
+			return;
+		}
+		const resolved = `${model.provider}/${model.id}`;
+		const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+		if (!auth.ok) {
+			ctx.ui.notify(`Cannot use ${resolved}: ${auth.error}. Not saved.`, "error");
+			return;
+		}
+		try {
+			// Stamp the session's containment so a later session on another provider
+			// treats this cross-provider setting as stale (parity with /subagent).
+			persistClassifierModel(resolved, os.homedir(), ctx.model ? modelIdentity(ctx.model).containment : undefined);
+		} catch (error) {
+			ctx.ui.notify(`Could not save classifier model: ${error instanceof Error ? error.message : String(error)}`, "error");
+			return;
+		}
+		// Re-plan, then announce the choice with its warnings, in any mode: the
+		// setting applies whenever auto mode is on.
+		resetClassifierChoice(ctx.model, false);
+		announceClassifierChoice(ctx.model, { lead: `Auto-mode classifier set to ${resolved} (saved to ~/.onecode/settings.json).`, force: true });
+	};
+
+	/** `/auto-mode model` — show the picker, or apply a named model / `clear`. */
+	const handleModelSubcommand = async (remainder: string, ctx: ExtensionContext): Promise<void> => {
+		if (remainder === "clear") {
+			try {
+				persistClassifierModel(undefined, os.homedir());
+			} catch (error) {
+				ctx.ui.notify(`Could not update settings: ${error instanceof Error ? error.message : String(error)}`, "error");
+				return;
+			}
+			resetClassifierChoice(ctx.model);
+			ctx.ui.notify(`autoMode.classifierModel cleared. Auto mode chooses automatically: ${describeChain(ctx)}`, "info");
+			return;
+		}
+		if (remainder) {
+			await applyClassifierChoice(remainder, ctx);
+			return;
+		}
+		const available = ctx.modelRegistry.getAvailable();
+		if (available.length === 0) {
+			ctx.ui.notify("No models are available — authenticate a provider first.", "warning");
+			return;
+		}
+		autoConfig ??= loadAutoModeConfig(os.homedir());
+		// The picker needs focus and a terminal; elsewhere say what to type.
+		if (!ctx.hasUI || ctx.mode !== "tui") {
+			ctx.ui.notify(
+				`classifierModel: ${autoConfig.classifierModel ?? "(not set: chosen automatically)"}. Set one with /auto-mode model <provider/model-id>, or clear it with /auto-mode model clear.`,
+				"info",
+			);
+			return;
+		}
+		const chosen = await ctx.ui.custom<PickerEntry | null>((tui, theme, _keybindings, done) =>
+			modelPickerComponent(
+				{
+					entries: toPickerEntries(available),
+					current: autoConfig?.classifierModel,
+					title: "Select the auto-mode classifier model",
+					subtitle: "Screens auto-mode tool calls; /auto-mode model clear returns to the automatic choice",
+				},
+				tui,
+				theme,
+				done,
+			),
+		);
+		if (chosen) await applyClassifierChoice(pickerSpec(chosen), ctx);
+	};
+
 	registerLocalCommand(pi, "auto-mode", {
-		description: "Auto-mode classifier: /auto-mode [setup|defaults|config]",
-		argumentHint: "[setup|defaults|config]",
+		description: "Auto-mode classifier: /auto-mode [setup|defaults|config|model [provider/model-id|clear]]",
+		argumentHint: "[setup|defaults|config|model [provider/model-id|clear]]",
 		getArgumentCompletions: () =>
 			[
 				{ value: "setup", label: "analyze this environment and draft the config" },
 				{ value: "config", label: "effective environment" },
 				{ value: "defaults", label: "built-in environment" },
+				{ value: "model", label: "choose the classifier model" },
 			],
 		handler: async (args, ctx) => {
-			const [sub] = args.trim().split(/\s+/).filter(Boolean);
+			const [sub, ...rest] = args.trim().split(/\s+/).filter(Boolean);
 			if (sub === "setup") {
 				await handleSetupSubcommand(ctx);
+				return;
+			}
+			if (sub === "model") {
+				await handleModelSubcommand(rest.join(" ").trim(), ctx);
 				return;
 			}
 			const which = sub ?? "config";
 			if (which !== "defaults" && which !== "config") {
 				ctx.ui.notify(
-					`Unknown subcommand "${which}". Use: /auto-mode setup | defaults | config`,
+					`Unknown subcommand "${which}". Use: /auto-mode setup | defaults | config | model [provider/model-id|clear]`,
 					"warning",
 				);
 				return;
@@ -2321,6 +2444,7 @@ export default function permissionsExtension(pi: ExtensionAPI) {
 					...(which === "config" && "classifyAllShell" in shown
 						? [
 								`classifyAllShell: ${shown.classifyAllShell}`,
+								`classifierModel: ${"classifierModel" in shown && shown.classifierModel ? shown.classifierModel : "(not set: chosen automatically; /auto-mode model chooses one)"}`,
 								`logDecisions: ${shown.logDecisions} (auto-mode-decisions.jsonl next to the session files)`,
 								// Which model actually screens calls, and why — this reads the
 								// user's prompts, so it should not take knowing the code to find out.

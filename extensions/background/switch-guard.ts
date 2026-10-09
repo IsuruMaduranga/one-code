@@ -1,9 +1,10 @@
 /**
  * What a session switch or quit would stop (pure). Running background tasks and
  * scheduled jobs belong to the session: `/clear`, `/new`, `/resume` and a fork
- * stop them, and so does quitting. pi lets an extension cancel a switch
- * (`session_before_switch`, `session_before_fork`), so a switch asks first;
- * quitting has no such hook, so the standing widget line says it up front.
+ * stop them, and so do `/reload` and quitting. pi lets an extension cancel a
+ * switch (`session_before_switch`, `session_before_fork`), so a switch asks
+ * first; reloading and quitting have no such hook, so the standing widget line
+ * says it up front.
  */
 
 /** A running task or scheduled job, as the dialog and widget name it. */
@@ -47,5 +48,5 @@ export function switchWarning(tasks: readonly SessionWork[], jobs: readonly Sess
 /** The standing widget line while anything runs, or undefined when nothing does. */
 export function workWidgetLine(tasks: number, jobs: number): string | undefined {
 	if (tasks === 0 && jobs === 0) return undefined;
-	return ` ${counts(tasks, jobs)} · stopped by /clear or quitting${tasks > 0 ? " · /tasks to manage" : ""}`;
+	return ` ${counts(tasks, jobs)} · stopped by /clear, /reload or quitting${tasks > 0 ? " · /tasks to manage" : ""}`;
 }

@@ -14,13 +14,15 @@
  *
  * A refresh runs at most once a day, only from a session that outlives its
  * turn, never awaited in `session_start` (the caller's job), and a failure
- * keeps the copy already on disk. `refreshModelCatalog: false` in
+ * keeps the copy already on disk and waits a day before the next try (a
+ * stamp in the cache dir). Each fetch is bounded, body included.
+ * `refreshModelCatalog: false` in
  * `~/.onecode/settings.json` or pi's `PI_OFFLINE` turns it off; the copy on
  * disk (or the bundled one) then decides.
  * working-docs/decisions/model-tiers.md.
  */
 
-import { readFileSync, statSync } from "node:fs";
+import { closeSync, openSync, readSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readJsonFile, writeJsonAtomic } from "./atomic-write.ts";
@@ -89,6 +91,8 @@ export interface CatalogSources {
 }
 
 const FILES = { modelsDev: "models-dev.json", openRouter: "openrouter.json", huggingFace: "huggingface.json" } as const;
+/** The last failed refresh, which holds the next one off for a day (`recentFailure`). */
+const FAILURE_FILE = "refresh-failed.json";
 type SourceName = keyof typeof FILES;
 
 // ---------------------------------------------------------------------------
@@ -185,13 +189,19 @@ export function unknownRepos(openRouter: OpenRouterPayload, known: ParameterCoun
 }
 
 /** One repo's parameter count; a failed lookup is undefined (retried next refresh), a repo without one is null. */
-export async function fetchParameterCount(repo: string, fetchImpl: typeof fetch = fetch): Promise<number | null | undefined> {
+export async function fetchParameterCount(repo: string, fetchImpl?: typeof fetch, signal?: AbortSignal): Promise<number | null | undefined> {
 	const url = `${HUGGING_FACE_MODELS_URL}${repo.split("/").map(encodeURIComponent).join("/")}?expand%5B%5D=safetensors`;
 	try {
-		const response = await fetchImpl(url, { signal: AbortSignal.timeout(CATALOG_FETCH_TIMEOUT_MS) });
-		if (response.status === 401 || response.status === 403 || response.status === 404) return null;
-		if (!response.ok) return undefined;
-		return parameterCountFromResponse(await response.json());
+		return await fetchWithTimeout(
+			url,
+			CATALOG_FETCH_TIMEOUT_MS,
+			async (response) => {
+				if (response.status === 401 || response.status === 403 || response.status === 404) return null;
+				if (!response.ok) return undefined;
+				return parameterCountFromResponse(await response.json());
+			},
+			{ fetchImpl, signal },
+		);
 	} catch {
 		return undefined;
 	}
@@ -209,18 +219,32 @@ export function catalogCacheDir(stateDir: string): string {
 	return join(stateDir, "cache", "model-catalog");
 }
 
+/**
+ * The refreshed catalog files and the failure stamp that holds a refresh off.
+ * They decide a model's tier, and the tier decides which auto-mode fast paths
+ * skip the classifier, so the safety floor guards them like the settings
+ * files (auto-mode/safety-floor.ts).
+ */
+export function catalogCacheFiles(stateDir: string): string[] {
+	return [...Object.values(FILES), FAILURE_FILE].map((file) => join(catalogCacheDir(stateDir), file));
+}
+
+/**
+ * A refreshed catalog file under any literal `.onecode` directory, as a
+ * forward-slashed path tail: the floor's counterpart of `catalogCacheFiles`,
+ * for one in another home or spelled through a symlink the resolver missed.
+ */
+export const CATALOG_CACHE_TAIL = new RegExp(`/\\.onecode/cache/model-catalog/(${[...Object.values(FILES), FAILURE_FILE].map((file) => file.replace(/[.]/g, "\\.")).join("|")})$`);
+
 function isCatalogFile(value: unknown): value is CatalogFile<unknown> {
 	const file = record(value);
 	return !!file && typeof file.fetchedAt === "string" && !Number.isNaN(Date.parse(file.fetchedAt)) && record(file.payload) !== undefined;
 }
 
 function readCatalogFile<T>(path: string): CatalogFile<T> | undefined {
-	try {
-		const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
-		return isCatalogFile(parsed) ? (parsed as CatalogFile<T>) : undefined;
-	} catch {
-		return undefined; // missing or corrupt: the other copy decides
-	}
+	// Missing or corrupt: the other copy decides.
+	const parsed = readJsonFile<unknown>(path);
+	return isCatalogFile(parsed) ? (parsed as CatalogFile<T>) : undefined;
 }
 
 const EMPTY: CatalogSources = {
@@ -275,7 +299,9 @@ export function emptyCatalogSources(): CatalogSources {
 
 /** Forget the disk memo so a lifecycle boundary sees another extension instance's refresh. */
 export function invalidateCatalogCache(): void {
-	memo = undefined;
+	// Re-stat on the next load; unchanged files keep the same sources object, so
+	// the index memo (keyed by it) still hits.
+	if (memo) memo.checkedAt = 0;
 }
 
 function stampOf(dir: string): string {
@@ -315,9 +341,57 @@ export function loadCatalogSources(stateDir: string): CatalogSources {
 	return sources;
 }
 
-/** Whether the models.dev copy in use is older than a day. */
-export function catalogIsStale(sources: CatalogSources, now: Date = new Date()): boolean {
-	return now.getTime() - Date.parse(sources.modelsDev.fetchedAt) > CATALOG_REFRESH_AFTER_MS;
+const olderThanRefresh = (stamp: string, now: Date): boolean => now.getTime() - Date.parse(stamp) > CATALOG_REFRESH_AFTER_MS;
+
+/** The `fetchedAt` stamp at the head of a catalog file, without parsing its payload. */
+function fetchedAtOf(path: string): string | undefined {
+	let fd: number | undefined;
+	try {
+		fd = openSync(path, "r");
+		const head = Buffer.alloc(256);
+		const read = readSync(fd, head, 0, head.length, 0);
+		const stamp = head.subarray(0, read).toString("utf8").match(/^\{\s*"fetchedAt"\s*:\s*"([^"]+)"/)?.[1];
+		if (stamp && !Number.isNaN(Date.parse(stamp))) return stamp;
+	} catch {
+		return undefined;
+	} finally {
+		if (fd !== undefined) closeSync(fd);
+	}
+	// Written some other way: the whole file decides.
+	return readCatalogFile<unknown>(path)?.fetchedAt;
+}
+
+/**
+ * When the models.dev copy in use was fetched (the newer of the bundled and
+ * the refreshed one, as `loadCatalogSources` picks), read from the files'
+ * heads: a session start checks this without parsing the catalogs.
+ */
+export function catalogFetchedAt(stateDir: string): string {
+	if (pinned) return pinned.value.modelsDev.fetchedAt;
+	const stamps = [fetchedAtOf(join(bundledCatalogDir(), FILES.modelsDev)), fetchedAtOf(join(catalogCacheDir(stateDir), FILES.modelsDev))];
+	return stamps.reduce<string>((a, b) => (b && Date.parse(b) > Date.parse(a) ? b : a), EMPTY.modelsDev.fetchedAt);
+}
+
+/** The last refresh that failed, kept so the next one waits a day. */
+interface RefreshFailure {
+	failedAt: string;
+	error: string;
+}
+
+function recentFailure(stateDir: string, now: Date): RefreshFailure | undefined {
+	const failure = readJsonFile<RefreshFailure>(join(catalogCacheDir(stateDir), FAILURE_FILE));
+	const failedAt = typeof failure?.failedAt === "string" ? Date.parse(failure.failedAt) : Number.NaN;
+	// A stamp later than now was not written by a refresh; it must not hold refreshes off.
+	return !Number.isNaN(failedAt) && failedAt <= now.getTime() && !olderThanRefresh(failure!.failedAt, now) ? failure : undefined;
+}
+
+/**
+ * Whether a refresh should run: the copy in use is over a day old, and no
+ * refresh failed within the last day (a failure writes nothing, so without
+ * the wait every start would fetch again). Cheap: no catalog is parsed.
+ */
+export function catalogRefreshDue(stateDir: string, now: Date = new Date()): boolean {
+	return !pinned && olderThanRefresh(catalogFetchedAt(stateDir), now) && !recentFailure(stateDir, now);
 }
 
 // ---------------------------------------------------------------------------
@@ -327,14 +401,19 @@ export function catalogIsStale(sources: CatalogSources, now: Date = new Date()):
 export type CatalogRefreshOutcome =
 	| { status: "fresh" }
 	| { status: "refreshed"; models: number; repos: number }
-	| { status: "failed"; error: string };
+	| { status: "failed"; error: string }
+	/** A refresh failed within the last day; the next try waits for the day to pass. */
+	| { status: "backing-off"; error: string };
 
 const inflight = new Map<string, Promise<CatalogRefreshOutcome>>();
 
 /**
  * Fetch both catalogs and any parameter counts not yet known, into the cache,
- * when the copy in use is older than a day. Never throws; a failure leaves the
- * cache as it was. One fetch per state dir at a time.
+ * when the copy in use is older than a day and no refresh failed within the
+ * last day (`force` skips both checks). Never throws; a failure leaves the
+ * cache as it was and is remembered for a day, unless `signal` cancelled it.
+ * Every fetch, bodies included, is bounded by `CATALOG_FETCH_TIMEOUT_MS`. One
+ * fetch per state dir at a time.
  */
 export async function refreshModelCatalog(options: {
 	stateDir: string;
@@ -342,10 +421,16 @@ export async function refreshModelCatalog(options: {
 	fetchImpl?: typeof fetch;
 	now?: Date;
 	force?: boolean;
+	signal?: AbortSignal;
 }): Promise<CatalogRefreshOutcome> {
 	const { stateDir, now = new Date(), force = false } = options;
 	// A pinned catalog (tests) is never replaced from the network.
-	if (pinned || (!force && !catalogIsStale(loadCatalogSources(stateDir), now))) return { status: "fresh" };
+	if (pinned) return { status: "fresh" };
+	if (!force) {
+		if (!olderThanRefresh(catalogFetchedAt(stateDir), now)) return { status: "fresh" };
+		const failure = recentFailure(stateDir, now);
+		if (failure) return { status: "backing-off", error: failure.error };
+	}
 	const running = inflight.get(stateDir);
 	if (running) return running;
 	const attempt = fetchCatalog(options, now).finally(() => inflight.delete(stateDir));
@@ -353,43 +438,63 @@ export async function refreshModelCatalog(options: {
 	return attempt;
 }
 
-async function fetchJson(url: string, fetchImpl: typeof fetch | undefined): Promise<unknown> {
+function fetchJson(url: string, fetchImpl: typeof fetch | undefined, signal: AbortSignal | undefined): Promise<unknown> {
 	// models.dev answers a bare client with 403; a browser User-Agent is accepted.
 	const init: RequestInit = { headers: { accept: "application/json", "user-agent": "Mozilla/5.0 (compatible; one-code-model-catalog)" } };
-	const response = fetchImpl
-		? await fetchImpl(url, { ...init, signal: AbortSignal.timeout(CATALOG_FETCH_TIMEOUT_MS) })
-		: await fetchWithTimeout(url, CATALOG_FETCH_TIMEOUT_MS, init);
-	if (!response.ok) throw new Error(`${new URL(url).host} responded ${response.status}`);
-	return response.json();
+	return fetchWithTimeout(
+		url,
+		CATALOG_FETCH_TIMEOUT_MS,
+		async (response) => {
+			if (!response.ok) throw new Error(`${new URL(url).host} responded ${response.status}`);
+			return (await response.json()) as unknown;
+		},
+		{ init, fetchImpl, signal },
+	);
 }
 
 async function fetchCatalog(
-	options: { stateDir: string; piProviders: Iterable<string>; fetchImpl?: typeof fetch },
+	options: { stateDir: string; piProviders: Iterable<string>; fetchImpl?: typeof fetch; signal?: AbortSignal },
 	now: Date,
 ): Promise<CatalogRefreshOutcome> {
-	const { stateDir, piProviders, fetchImpl } = options;
+	const { stateDir, piProviders, fetchImpl, signal } = options;
+	const dir = catalogCacheDir(stateDir);
+	const fail = (error: string): CatalogRefreshOutcome => {
+		// Cancelled by the caller (a session ending) is not the network failing.
+		if (!signal?.aborted) {
+			try {
+				writeJsonAtomic(join(dir, FAILURE_FILE), { failedAt: now.toISOString(), error } satisfies RefreshFailure);
+			} catch {
+				// Unwritable: the next start tries again, as before.
+			}
+		}
+		return { status: "failed", error };
+	};
 	try {
-		const [modelsDevBody, openRouterBody] = await Promise.all([fetchJson(MODELS_DEV_URL, fetchImpl), fetchJson(OPENROUTER_MODELS_URL, fetchImpl)]);
+		const [modelsDevBody, openRouterBody] = await Promise.all([fetchJson(MODELS_DEV_URL, fetchImpl, signal), fetchJson(OPENROUTER_MODELS_URL, fetchImpl, signal)]);
 		const modelsDev = trimModelsDev(modelsDevBody, piProviders);
 		const openRouter = trimOpenRouter(openRouterBody);
 		const rows = Object.values(modelsDev).reduce((sum, provider) => sum + Object.keys(provider.models).length, 0);
-		if (rows === 0 || openRouter.data.length === 0) return { status: "failed", error: "a model catalog came back empty" };
-		const dir = catalogCacheDir(stateDir);
+		if (rows === 0 || openRouter.data.length === 0) return fail("a model catalog came back empty");
 		const fetchedAt = now.toISOString();
 		const known = loadCatalogSources(stateDir).huggingFace.payload;
 		const counts: ParameterCounts = { ...readCatalogFile<ParameterCounts>(join(dir, FILES.huggingFace))?.payload };
 		const lookups = unknownRepos(openRouter, known).slice(0, HUGGING_FACE_LOOKUPS_PER_REFRESH);
-		const found = await Promise.all(lookups.map((repo) => fetchParameterCount(repo, fetchImpl ?? fetch)));
+		const found = await Promise.all(lookups.map((repo) => fetchParameterCount(repo, fetchImpl, signal)));
+		if (signal?.aborted) throw signal.reason;
 		lookups.forEach((repo, index) => {
 			if (found[index] !== undefined) counts[repo] = found[index]!;
 		});
-		writeJsonAtomic(join(dir, FILES.modelsDev), { fetchedAt, source: MODELS_DEV_URL, payload: modelsDev });
+		// models.dev last: its stamp is what marks the copy fresh, so a write
+		// that fails before it leaves the copy stale and retried, never a
+		// fresh-looking mix of old and new.
 		writeJsonAtomic(join(dir, FILES.openRouter), { fetchedAt, source: OPENROUTER_MODELS_URL, payload: openRouter });
 		writeJsonAtomic(join(dir, FILES.huggingFace), { fetchedAt, source: HUGGING_FACE_MODELS_URL, payload: counts });
+		writeJsonAtomic(join(dir, FILES.modelsDev), { fetchedAt, source: MODELS_DEV_URL, payload: modelsDev });
+		rmSync(join(dir, FAILURE_FILE), { force: true });
 		memo = undefined;
 		return { status: "refreshed", models: rows, repos: lookups.length };
 	} catch (error) {
-		return { status: "failed", error: error instanceof Error ? error.message : String(error) };
+		return fail(error instanceof Error ? error.message : String(error));
 	}
 }
 

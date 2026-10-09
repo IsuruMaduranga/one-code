@@ -103,7 +103,7 @@ describe("buildDoctorReport", () => {
 		expect(text).toContain("Subagents and workflow agents: anthropic/claude-sonnet-5-5 — automatic");
 		// Classifier: the same tier on a frontier session → Sonnet 5.5, and the live pin is shown.
 		expect(text).toContain("Auto-mode classifier: anthropic/claude-sonnet-5-5");
-		expect(text).toContain("Classifier policy: the cheapest model in this session's tier or above");
+		expect(text).toContain("Classifier policy: the cheapest model on this provider in this session's tier or above");
 		expect(text).toMatch(/screening this session on\s+anthropic\/claude-sonnet-5-5/);
 		expect(text).toContain("Permission mode: auto");
 		expect(text).toContain("Updates: up to date (0.2.1 is the latest release)");
@@ -146,8 +146,24 @@ describe("buildDoctorReport", () => {
 		expect(facts.classifier.model).toBe(cheaper);
 		const text = modelsSection(facts, { model: main, modelSource: "session" }, []).lines.map((line) => line.text).join("\n");
 		expect(text).toContain("Auto-mode classifier: openai/gpt-5.6-terra (cheapest model within openai in the session's tier or above");
-		expect(text).toContain("Classifier policy: the cheapest model in this session's tier or above, never dearer than this session's model; else this session's model.");
+		expect(text).toContain(
+			"Classifier policy: the cheapest model on this provider in this session's tier or above, strictly cheaper than it, with a context window at least as large and not an experimental build, else this session's model; /auto-mode model chooses one by hand.",
+		);
 		expect(text).toContain("Tier: workhorse — catalog openai/gpt-5.6-sol: $8.75/M blended");
+		expect(text).toContain(
+			"Web-fetch and recap reader: openai/gpt-5.6-terra — the cheapest cheap-tier model on this provider that costs no more than the main model (a workhorse or frontier one when there is none)",
+		);
+	});
+
+	it("previews an image-capable session's subagent as the live resolver picks it: image-capable too", () => {
+		pinCatalog(CATALOG);
+		const images = (m: any) => ({ ...m, input: ["text", "image"] });
+		const main = images(anthropic[0]);
+		const textOnly = { ...anthropic[1], input: ["text"] };
+		const facts = collectModelFacts([main, textOnly], { model: main, modelSource: "session" }, home, {});
+		expect(facts.subagent.model?.id).toBe("claude-opus-5");
+		const withImages = collectModelFacts([main, images(anthropic[1])], { model: main, modelSource: "session" }, home, {});
+		expect(withImages.subagent.model?.id).toBe("claude-sonnet-5-5");
 	});
 
 	it("names the config sources mode, and says ~/.claude is not read in independent mode", () => {
@@ -250,10 +266,14 @@ describe("buildDoctorReport", () => {
 
 	it("says when automatic picks skip the main model, and how to tier a model no catalog knows", () => {
 		pinCatalog([...CATALOG, { id: "openai/gpt-5.3", released: "2026-09-20", price: [1.25, 10] }]);
-		const superseded = collectModelFacts(openai, { model: openai[0], modelSource: "session" }, home, {});
+		const withSuccessor = [...openai, model("openai", "gpt-5.3", 1.25, "openai-responses")];
+		const superseded = collectModelFacts(withSuccessor, { model: openai[0], modelSource: "session" }, home, {});
 		expect(modelsSection(superseded, { model: openai[0], modelSource: "session" }, []).lines.map((l) => l.text)).toContain(
-			"Automatic picks skip this model: superseded by openai/gpt-5.3",
+			"Automatic picks skip this model: superseded by openai/gpt-5.3, which this provider serves",
 		);
+		// A successor this provider does not serve skips nothing.
+		const alone = collectModelFacts(openai, { model: openai[0], modelSource: "session" }, home, {});
+		expect(alone.skipReason).toBeUndefined();
 		const unknown = model("openai", "gpt-5-mystery", 1, "openai-responses");
 		const findings: Finding[] = [];
 		modelsSection(collectModelFacts([unknown], { model: unknown, modelSource: "session" }, home, {}), { model: unknown, modelSource: "session" }, findings);
@@ -264,7 +284,7 @@ describe("buildDoctorReport", () => {
 		});
 	});
 
-	it("ignores a legacy classifier override while still reading the subagent setting", () => {
+	it("reports the classifier setting next to the subagent setting", () => {
 		mkdirSync(join(home, ".onecode"), { recursive: true });
 		writeFileSync(
 			join(home, ".onecode", "settings.json"),
@@ -273,9 +293,11 @@ describe("buildDoctorReport", () => {
 		const facts = collectModelFacts(anthropic, { model: anthropic[0], modelSource: "session" }, home, {});
 		expect(facts.subagent.source).toBe("session");
 		expect(facts.subagentConfigured?.spec).toBe("inherit");
-		expect(facts.classifier.model?.id).toBe("claude-sonnet-5-5");
-		expect(facts.classifier.description).not.toContain("classifierModel");
-		expect(facts.classifier).not.toHaveProperty("configured");
+		expect(facts.classifier.model?.id).toBe("claude-opus-5");
+		expect(facts.classifier.description).toContain("autoMode.classifierModel");
+		expect(facts.classifier.configured).toBe("anthropic/claude-opus-5");
+		const text = modelsSection(facts, { model: anthropic[0], modelSource: "session" }, []).lines.map((line) => line.text).join("\n");
+		expect(text).toContain('Setting: "anthropic/claude-opus-5" via autoMode.classifierModel');
 	});
 });
 

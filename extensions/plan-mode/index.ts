@@ -28,6 +28,7 @@ import { DEFER_CHANNEL } from "../lib/deferred.ts";
 import { oneCodeStateDir } from "../lib/paths.ts";
 import { REMINDER_CHANNEL } from "../lib/reminders.ts";
 import { CONTEXT_BASELINE_CHANNEL, restoredContext } from "../lib/context-stack.ts";
+import { canShowCustomUi } from "../lib/headless-output.ts";
 import { ccToolRenderers, safeThemePaint } from "../lib/tui-render.ts";
 import { userDenialText } from "../lib/user-denial.ts";
 import type { PermissionMode } from "../permissions/matcher.ts";
@@ -253,7 +254,7 @@ export default function planModeExtension(pi: ExtensionAPI) {
 			];
 			const choices = options.map((o) => o.label);
 
-			const choice = ctx.mode === "rpc" ? await selectPlanChoice(ctx.ui, plan, path, choices, signal) : await ctx.ui.custom<PlanChoice | null>((tui, theme, _keybindings, done) => {
+			const choice = !canShowCustomUi(ctx) ? await selectPlanChoice(ctx.ui, plan, path, choices, signal) : await ctx.ui.custom<PlanChoice | null>((tui, theme, _keybindings, done) => {
 				const paint = safeThemePaint(theme);
 				const maxVisible = 12;
 				let offset = 0;

@@ -88,9 +88,10 @@ nothing usable; the gate fails closed. Check `/auto-mode config` for the
 model in use, and `/doctor report` for provider credentials. Set
 `CC_AUTO_MODE_DEBUG=1` to see each verdict on stderr.
 
-**The classifier approves or blocks something it shouldn't.** A Haiku-class
-classifier is a measurably weaker boundary than a Sonnet-class one. Choose a
-stronger main model if the automatic classifier selection is not sufficient.
+**The classifier approves or blocks something it shouldn't.** A cheap-tier
+classifier is a measurably weaker boundary than a workhorse- or
+frontier-tier one. Choose a stronger classifier with `/auto-mode model`, or
+a stronger main model.
 
 ## Models and providers
 
@@ -107,7 +108,8 @@ session is worth reporting.
 **A side call failed on a Gemini or OpenAI model with a message about
 reasoning or temperature.** Some models reject an option others accept.
 One Code avoids these options in its side calls; if you still see this,
-report the model and error. Classifier and reader models are selected automatically.
+report the model and error. The reader model is selected automatically;
+`/auto-mode model` chooses the classifier.
 
 ## Web search
 

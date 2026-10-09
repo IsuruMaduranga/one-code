@@ -254,7 +254,7 @@ export default function backgroundExtension(pi: ExtensionAPI) {
 		const live = liveUiCtx(lastCtx);
 		if (!live) return;
 		// Every running task and scheduled job, panel-owned ones included: the
-		// line is the warning that /clear or quitting stops them (switch-guard.ts).
+		// line is the warning that /clear, /reload or quitting stops them (switch-guard.ts).
 		const line = workWidgetLine(registry.running().length, cron.list().length);
 		live.ui.setWidget("cc-background", line ? [line] : undefined);
 	};

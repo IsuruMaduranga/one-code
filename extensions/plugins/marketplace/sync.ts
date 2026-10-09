@@ -46,9 +46,15 @@ function cloneUrl(source: MarketplaceSource): string | undefined {
 const FETCH_TIMEOUT_MS = 10_000;
 
 async function fetchManifestJson(url: string): Promise<unknown> {
-	const response = await fetchWithTimeout(url, FETCH_TIMEOUT_MS, { headers: { "user-agent": "one-code-plugins" } });
-	if (!response.ok) throw new Error(`HTTP ${response.status}`);
-	return await response.json();
+	return fetchWithTimeout(
+		url,
+		FETCH_TIMEOUT_MS,
+		async (response) => {
+			if (!response.ok) throw new Error(`HTTP ${response.status}`);
+			return (await response.json()) as unknown;
+		},
+		{ init: { headers: { "user-agent": "one-code-plugins" } } },
+	);
 }
 
 /**

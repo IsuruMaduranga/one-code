@@ -66,6 +66,7 @@ import {
 	namespacedToolName,
 } from "./schema.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
+import { canShowCustomUi, notifyRpcReadOnly } from "../lib/headless-output.ts";
 import { claudeSourcesOn } from "../lib/config-mode.ts";
 import { claudeJsonPath } from "../lib/paths.ts";
 import { consentDialog, startupConsentReady } from "../lib/consent-dialogs.ts";
@@ -929,11 +930,11 @@ export default function mcpExtension(pi: ExtensionAPI) {
 				);
 				return;
 			}
-			if (ctx.hasUI && ctx.mode !== "rpc") {
+			if (canShowCustomUi(ctx)) {
 				await openMcpPanel(ctx);
 				return;
 			}
-			if (ctx.mode === "rpc") ctx.ui.notify("/mcp in RPC is read-only; use the TUI to reconnect, authenticate, enable or disable servers.", "info");
+			notifyRpcReadOnly(ctx, "/mcp", "reconnect, authenticate, enable or disable servers");
 			// Non-interactive fallback: a flat status listing, with tool/resource
 			// counts and any warning for connected servers.
 			const lines = servers.map((server) => {

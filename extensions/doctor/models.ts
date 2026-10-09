@@ -12,13 +12,14 @@
 
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { modeCycleKey } from "../lib/keys.ts";
+import { loadAutoModeConfig } from "../auto-mode/config.ts";
 import { classifierCandidates, describeCandidate, type ClassifierNotice } from "../auto-mode/model-select.ts";
-import { catalogRefreshEnabled, loadCatalogSources } from "../lib/model-catalog-data.ts";
+import { chosenModelWarnings, type ChosenModelWarning } from "../lib/model-choice-warnings.ts";
+import { loadCatalogSources, readCatalogRefreshEnabled } from "../lib/model-catalog-data.ts";
 import { autoSelectSkipReason, catalogModelFor } from "../lib/model-catalog.ts";
-import { modelSpec, pricedInput } from "../lib/model-policy.ts";
+import { DAY_MS, modelsContainedToSession, modelSpec, pricedInput, supportsImageInput } from "../lib/model-policy.ts";
 import { newerModelSuggestion, type NewerModelSuggestion } from "../lib/newer-model.ts";
 import { oneCodeSettingsPath, readSuggestNewerModels } from "../lib/one-code-settings.ts";
-import { readJsonFile } from "../lib/atomic-write.ts";
 import { oneCodeStateDir } from "../lib/paths.ts";
 import {
 	classifyModelTier,
@@ -26,6 +27,7 @@ import {
 	pickEconomicalContainedModel,
 	type PromptTier,
 	resolveModelTier,
+	servedCatalogIds,
 	tierOverride,
 } from "../lib/model-tier.ts";
 import { applicableSubagentDefault, loadSubagentDefault, type SubagentDefault } from "../subagents/default-model.ts";
@@ -43,7 +45,10 @@ export interface ModelFacts {
 	subagentConfigured?: SubagentDefault;
 	/** The configured default exists but does not apply to this session (Claude Code's env var on a non-Claude model). */
 	subagentConfiguredInapplicable: boolean;
-	classifier: { model?: Model<Api>; description?: string; notices: ClassifierNotice[] };
+	/** What the configured subagent default costs (newer model, far weaker than the session), when it is in effect. */
+	subagentWarnings: ChosenModelWarning[];
+	/** `configured`: the user's `autoMode.classifierModel`, as written. */
+	classifier: { model?: Model<Api>; description?: string; notices: ClassifierNotice[]; configured?: string };
 	reader?: { model: Model<Api>; via: "tier" | "session" };
 	/** The session model's own tier and the rule that decided it (`classifyModelTier`, no CC_PROMPT_TIER). */
 	tierReason?: string;
@@ -65,8 +70,17 @@ export function collectModelFacts(available: Model<Api>[], session: SessionView,
 	const sessionModel = session.model;
 	const configuredAll = loadSubagentDefault(home, env);
 	const configured = applicableSubagentDefault(configuredAll, sessionModel);
-	const subagent = resolveSubagentModel({ configuredDefault: configured, sessionModel, available });
-	const chain = classifierCandidates({ available, sessionModel });
+	// The live resolver's image gate (subagents/index.ts), so the preview names what a spawn gets.
+	const subagent = resolveSubagentModel({ configuredDefault: configured, sessionModel, available, requireImageInput: supportsImageInput(sessionModel) });
+	const suggestNewer = readSuggestNewerModels(home, env);
+	const autoConfig = loadAutoModeConfig(home);
+	const chain = classifierCandidates({
+		available,
+		sessionModel,
+		configured: autoConfig.classifierModel,
+		configuredSetForContainment: autoConfig.classifierModelSetFor,
+		suggestNewer,
+	});
 	const first = chain.candidates[0];
 	const reader = pickEconomicalContainedModel(available, sessionModel);
 	const sources = loadCatalogSources(oneCodeStateDir(env, home));
@@ -75,12 +89,12 @@ export function collectModelFacts(available: Model<Api>[], session: SessionView,
 		catalog: {
 			fetchedAt: sources.modelsDev.fetchedAt,
 			refreshed: sources.refreshed === true,
-			refreshEnabled: catalogRefreshEnabled(readJsonFile(oneCodeSettingsPath(home, env)), env),
+			refreshEnabled: readCatalogRefreshEnabled(oneCodeSettingsPath(home, env), env),
 		},
 		tierReason: sessionModel ? classifyModelTier(sessionModel, {}).reason : undefined,
 		inCatalog: entry !== undefined,
-		skipReason: entry ? autoSelectSkipReason(entry) : undefined,
-		newerModel: readSuggestNewerModels(home, env) ? newerModelSuggestion(available, sessionModel) : undefined,
+		skipReason: entry && sessionModel ? autoSelectSkipReason(entry, servedCatalogIds(modelsContainedToSession(available, sessionModel))) : undefined,
+		newerModel: suggestNewer ? newerModelSuggestion(available, sessionModel) : undefined,
 		session: sessionModel,
 		sessionTier: sessionModel ? intrinsicTier(sessionModel) : undefined,
 		promptTier: session.promptTier ?? resolveModelTier(sessionModel, env),
@@ -88,10 +102,15 @@ export function collectModelFacts(available: Model<Api>[], session: SessionView,
 		subagent,
 		subagentConfigured: configuredAll,
 		subagentConfiguredInapplicable: configuredAll !== undefined && configured === undefined,
+		subagentWarnings:
+			subagent.source === "default" && subagent.model
+				? chosenModelWarnings({ available, sessionModel, chosen: subagent.model, role: "subagent", suggestNewer })
+				: [],
 		classifier: {
 			model: first?.model,
 			description: first ? describeCandidate(first) : undefined,
 			notices: chain.notices,
+			configured: autoConfig.classifierModel,
 		},
 		reader,
 	};
@@ -163,6 +182,10 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 			lines.push({ text: notice, indent: 1, level: "warn" });
 			findings.push({ level: "warn", text: `Subagent model: ${notice}`, fix: "Re-set the default with /subagent on this session, or /subagent clear." });
 		}
+		for (const warning of facts.subagentWarnings) {
+			lines.push({ text: warning.text, indent: 1, level: "warn" });
+			findings.push({ level: "warn", text: warning.text, fix: warning.fix });
+		}
 	} else {
 		lines.push({ text: "Subagents: no model resolves", level: "error" });
 	}
@@ -172,8 +195,11 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 		const live = session.permission?.classifier;
 		const pinned = session.permission?.pinned && live ? ` — screening this session on ${live}` : "";
 		lines.push({ text: `Auto-mode classifier: ${classifier.description ?? modelSpec(classifier.model)}${pinned}`, level: "ok" });
+		if (classifier.configured) {
+			lines.push({ text: `Setting: "${classifier.configured}" via autoMode.classifierModel in ~/.onecode/settings.json (/auto-mode model clear returns to automatic)`, indent: 1, level: "dim" });
+		}
 		lines.push({
-			text: "Classifier policy: the cheapest model in this session's tier or above, never dearer than this session's model; else this session's model.",
+			text: "Classifier policy: the cheapest model on this provider in this session's tier or above, strictly cheaper than it, with a context window at least as large and not an experimental build, else this session's model; /auto-mode model chooses one by hand.",
 			indent: 1,
 			level: "dim",
 		});
@@ -183,20 +209,26 @@ export function modelsSection(facts: ModelFacts, session: SessionView, findings:
 	for (const notice of classifier.notices) {
 		lines.push({ text: notice.text, indent: 1, level: notice.level === "warning" ? "warn" : "dim" });
 		if (notice.level === "warning") {
-			findings.push({ level: "warn", text: `Classifier: ${notice.text}`, fix: "Check provider authentication and model availability; classifier selection is automatic." });
+			findings.push({
+				level: "warn",
+				text: `Classifier: ${notice.text}`,
+				fix: classifier.configured
+					? "Change it with /auto-mode model, or /auto-mode model clear for the automatic choice."
+					: "Check provider authentication and model availability, or choose one with /auto-mode model.",
+			});
 		}
 	}
 
 	if (facts.reader) {
 		lines.push({
-			text: `Web-fetch and recap reader: ${modelSpec(facts.reader.model)} — ${facts.reader.via === "tier" ? "cheapest non-tiny model on this provider" : "the main model"}`,
+			text: `Web-fetch and recap reader: ${modelSpec(facts.reader.model)} — ${facts.reader.via === "tier" ? "the cheapest cheap-tier model on this provider that costs no more than the main model (a workhorse or frontier one when there is none)" : "the main model"}`,
 			level: "dim",
 		});
 	}
 
 	// The catalogs every tier below frontier comes from, and how fresh they are.
 	const cat = facts.catalog;
-	const ageDays = Math.floor((Date.now() - Date.parse(cat.fetchedAt)) / 86_400_000);
+	const ageDays = Math.floor((Date.now() - Date.parse(cat.fetchedAt)) / DAY_MS);
 	const age = ageDays <= 0 ? "today" : ageDays === 1 ? "1 day ago" : `${ageDays} days ago`;
 	lines.push({
 		text: `Model catalogs: models.dev, OpenRouter and Hugging Face, fetched ${age} (${cat.refreshed ? "refreshed by One Code" : "bundled with this release"})${cat.refreshEnabled ? "; refreshed daily from interactive sessions" : "; daily refresh off (refreshModelCatalog: false, or PI_OFFLINE)"}`,

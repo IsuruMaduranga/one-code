@@ -67,6 +67,7 @@ import {
 } from "./viewer.ts";
 import { WorkflowWidget } from "./widget.ts";
 import { registerLocalCommand } from "../lib/local-command.ts";
+import { canShowCustomUi } from "../lib/headless-output.ts";
 import { sessionWorkCwd } from "../lib/worktree-channel.ts";
 import { followEnteredWorktree } from "../lib/worktree-isolation.ts";
 import { isKeyRelease, keyId } from "../lib/key-input.ts";
@@ -357,7 +358,7 @@ export default function workflowExtension(pi: ExtensionAPI) {
 		handler: async (args, ctx) => {
 			lastCtx = ctx;
 			const [action, runId] = args.trim().split(/\s+/);
-			if (!action && ctx.hasUI && ctx.mode === "tui") {
+			if (!action && canShowCustomUi(ctx)) {
 				await openViewer(ctx, { height: "full" });
 				return;
 			}

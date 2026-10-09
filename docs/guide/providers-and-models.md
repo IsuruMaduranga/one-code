@@ -75,7 +75,8 @@ run on different models:
 - **A cheaper subagent tier.** Subagents, workflow agents, the auto-mode
   classifier, and the reader model behind web fetch and recaps all run on
   their own model. One Code picks these automatically; see the next section.
-  `/subagent` can set the subagent default by hand.
+  `/subagent` sets the subagent default by hand, and `/auto-mode model` the
+  classifier.
 
 This matters most for `ultracode` workflows, which fan work out across many
 agents at once. Running those agents on a cheap tier keeps a large fan-out
@@ -84,20 +85,39 @@ affordable while the parent session stays on a frontier model.
 ## Automatic model selection
 
 For its side roles, One Code chooses a model from the **same provider** as
-your session; automatic picks never send your data to another provider. The
-choice is the cheapest model in your session's tier (see the next section):
+your session; automatic picks never send your data to another provider. Each
+role has its own rule, built on the model tiers that
+[Prompting adapts to the model](#prompting-adapts-to-the-model) describes:
 
 - **Subagents** run on the cheapest model in your session's tier or above
   that's cheaper than your main model. An Opus session delegates to Sonnet
-  5.5, both frontier; a Haiku-tier session never gets upgraded. If nothing
+  5.5, both frontier; a cheap-tier session never gets upgraded. If nothing
   cheaper qualifies, subagents use the main model.
-- **The classifier** uses the same rule, but a model priced the same as yours
-  is fine too. It's never a lower tier than your session, never dearer, and
-  never an experimental build (a `-exp` model). Whatever gets picked has to
-  fit your session's whole context window, and the pick is redone when you
-  switch models. If nothing qualifies, your own model screens its calls.
+- **The classifier** uses the same rule. It also has to fit your session's
+  whole context window, and it's never an experimental build (a `-exp`
+  model). The pick is redone when you switch models. If nothing qualifies,
+  your own model screens its calls.
 - **The reader** (web fetch answers, recaps) uses the cheapest model that
   isn't tiny.
+
+You can choose the subagent and classifier models yourself with `/subagent`
+and `/auto-mode model`. Naming a model is choosing it, even on another
+provider. One Code still tells you when a choice looks off, when you make it
+and again when a session starts (for the classifier, only when auto mode is
+on):
+
+- **A newer model is available** in the same line at about the same price.
+  GPT-5.6 Sol gets "GPT-6.1 Sol is newer and costs less". The same notice
+  appears when you pick an older main model with `/model`.
+- **The model is far weaker than your session's**: two or more tiers below
+  it, like a cheap-tier classifier for a frontier session.
+- **The classifier's context window is smaller than your session's.** It
+  still screens, but once the conversation outgrows it, each call asks for
+  your approval until you `/compact`.
+
+`suggestNewerModels: false` in `~/.onecode/settings.json` turns off the
+newer-model notices; the other two can't be turned off. `/doctor report`
+lists all three under the model they apply to.
 
 Claude Code's model aliases work everywhere: `sonnet`, `haiku`, `opus` and
 `fable` resolve to a model of that name when your provider has one, and
@@ -122,44 +142,50 @@ the system prompt to match:
 
 | Tier | Models | Prompt |
 |---|---|---|
-| Frontier | Opus and Fable, current generation, Sonnet 5.5 and later, and OpenAI's GPT-6 Astra and Sol, served by Anthropic and OpenAI themselves. | Claude Code's terse prompt. |
-| Workhorse | A vendor's large current models. | Claude Code's full prompt. |
-| Cheap | A vendor's smaller models, and large ones a year or more behind its newest. | The verbose prompt Claude Code gives Haiku. |
-| Tiny | Small models: under 40 billion parameters. | The verbose prompt plus extra scaffolding and the `grep`, `find`, and `ls` tools. |
+| Frontier | Opus and Fable, current generation, Sonnet 5.5 and later, and OpenAI's GPT-6 Astra and Sol, served by Anthropic and OpenAI themselves. | A short, terse prompt. |
+| Workhorse | A vendor's large current models. | A full, detailed prompt. |
+| Cheap | A vendor's smaller models, and large ones a year or more behind its newest. | The full prompt, with longer, more explicit tool descriptions. |
+| Tiny | Small models: under 40 billion parameters, or, when the size isn't published, a name with `nano`, `micro`, `lite` or `tiny` in it. | The cheap tier's prompt plus extra scaffolding and the `grep`, `find`, and `ls` tools. |
 
-Frontier follows Claude Code's own rule, by model version. Everything else
+Frontier is a fixed list, decided by model version. Everything else
 comes from three public catalogs: [models.dev](https://models.dev) for
 release dates and prices, OpenRouter's model list, and Hugging Face for
 parameter counts. Each model is compared with its own vendor's current
 lineup, not with other vendors:
 
-- An open-weight model is workhorse when it has at least half the
-  parameters of the vendor's largest current model.
-- A model with no published size is workhorse when its price is at least
-  30 percent of the median price of the vendor's current models. The
-  median keeps a premium `-pro` or `-fast` model from setting the bar.
-- A vendor with fewer than three current priced models has nothing to
-  compare against, so its models count as cheap.
-- A workhorse model more than a year older than its vendor's newest one
-  drops to cheap. Age never makes a model tiny.
+- When every current model of a vendor publishes its size, size decides: a
+  model is workhorse when it has at least half the parameters of the
+  vendor's largest current model.
+- Otherwise price decides, for all of that vendor's models: a model is
+  workhorse when its price is at least 30 percent of the median price of
+  the vendor's current models. The median keeps a premium `-pro` or `-fast`
+  model from setting the bar.
+- When price decides and a vendor has fewer than three current priced
+  models, there's nothing to compare against, so its models count as cheap.
+- A workhorse model more than a year older than its vendor's newest
+  workhorse model drops to cheap. Age never makes a model tiny.
 
 A model no catalog knows is tiny when its name gives a small size (`27b`)
-or it has no price or runs on a custom provider, and cheap otherwise.
+or one of those small-model words, or when it has no price or runs on a
+custom provider. Otherwise it's cheap.
 
 One Code ships with a copy of all three catalogs and refreshes them once a
 day in the background from interactive sessions; a one-shot `-p` run only
-reads the copy on disk. A refresh changes the tier at your next session or
-model switch, never in the middle of one. Set `"refreshModelCatalog": false`
-in `~/.onecode/settings.json` (or `PI_OFFLINE=1`) to stay on the copy you
-have.
+reads the copy on disk. A refresh changes the subagent default, the reader
+and the permission checks right away. The prompt tier and the classifier
+pick change at your next session or model switch, never in the middle of
+one. Set `"refreshModelCatalog": false` in `~/.onecode/settings.json` (or
+`PI_OFFLINE=1`) to stay on the copy you have.
 
-If you disagree with a tier, set it yourself in `~/.onecode/settings.json`,
-by `provider/id` or by bare model id:
+If you disagree with a tier, set it yourself in `~/.onecode/settings.json`.
+Key it by `provider/id`, or by the model id alone, spelled exactly as the
+provider spells it (on OpenRouter that includes the vendor, as in
+`z-ai/glm-5.3-flash`). An id alone applies on every provider that uses it:
 
 ```json
 {
   "modelTiers": {
-    "openrouter/qwen/qwen3.8-max": "workhorse",
+    "openrouter/qwen/qwen3.8-max-0902": "workhorse",
     "glm-5.3-flash": "cheap"
   }
 }

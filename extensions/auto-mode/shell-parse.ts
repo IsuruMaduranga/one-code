@@ -153,6 +153,12 @@ export interface ParseResult {
 	complex?: string;
 	/** An expansion outside simple-command words (e.g. `((…))` or a case subject) may change shell state. */
 	unattributedExpansion?: boolean;
+	/**
+	 * True when the line defines a shell function, which may replace any later
+	 * command. Set even when the body holds no simple command (`cat() ((1))`),
+	 * so no segment's `enclosing` shows it.
+	 */
+	definesFunction?: boolean;
 	/** True when a command runs in the background (`cmd &`). */
 	background: boolean;
 	/**
@@ -341,6 +347,7 @@ class Walker {
 	unknownQuoting: string | undefined;
 	complex: string | undefined;
 	unattributedExpansion = false;
+	definesFunction = false;
 	background = false;
 	/** Set when a part parsed on its own (a heredoc's backtick body) did not parse. */
 	failed = false;
@@ -354,7 +361,8 @@ class Walker {
 	}
 
 	private markComplex(type: string): void {
-		this.complex ??= COMPLEX[type] ?? `uses ${type.replace(/_/g, " ")}, which this check does not model`;
+		if (type === "function_definition") this.definesFunction = true;
+		this.complex ??=COMPLEX[type] ?? `uses ${type.replace(/_/g, " ")}, which this check does not model`;
 	}
 
 	private enter(ctx: Context, node: SyntaxNode, subshell: boolean): Context {
@@ -672,6 +680,7 @@ class Walker {
 			this.unknownQuoting ??= inner.unknownQuoting;
 			this.complex ??= inner.complex;
 			this.unattributedExpansion ||= !!inner.unattributedExpansion;
+			this.definesFunction ||= !!inner.definesFunction;
 			this.background ||= inner.background;
 			// `echo hi <> f` in the backticks is as unparseable as it is on its own line.
 			this.failed ||= inner.parseFailed;
@@ -844,6 +853,7 @@ export function parseCommand(command: string): ParseResult {
 			unknownQuoting: walker.unknownQuoting,
 			complex: walker.complex,
 			unattributedExpansion: walker.unattributedExpansion,
+			definesFunction: walker.definesFunction,
 			background: walker.background,
 			substitutions: walker.substitutions,
 			pipelines: walker.pipelines,

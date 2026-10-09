@@ -11,6 +11,7 @@
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { BackgroundTask } from "../background/registry.ts";
+import { canShowCustomUi } from "../lib/headless-output.ts";
 import type { ShellTaskTracker } from "../lib/shell-tasks.ts";
 import { linesComponent, liveUiCtx, safeThemeBold, safeThemeInverse, safeThemePaint } from "../lib/tui-render.ts";
 import { buildRows, MAX_STRIP_ROWS, recentlyLeftStrip, renderStrip, TASKS_NOTICE, type PanelRow } from "./panel-render.ts";
@@ -61,6 +62,8 @@ export class SubagentWidget {
 	 */
 	private disposed = false;
 	private readonly unsubscribes: Array<() => void> = [];
+	/** The text last sent as an RPC widget; undefined while none is shown. */
+	private rpcSent: string | undefined;
 
 	constructor(
 		private readonly registry: LiveRunRegistry,
@@ -275,6 +278,7 @@ export class SubagentWidget {
 		// Never tear down while a transcript view is open (viewedId set): clearing
 		// focus here would orphan the overlay with no key path to close it.
 		if (rows.length <= 1 && !shellVisible && !notice && this.viewedId === undefined) {
+			this.rpcSent = undefined;
 			ctx.ui.setWidget(WIDGET_KEY, undefined);
 			this.focusIndex = undefined;
 			this.focusId = undefined;
@@ -286,13 +290,17 @@ export class SubagentWidget {
 		const selected = this.focusIndex;
 		const showStrip = rows.length > 1;
 		// RPC forwards string-array widgets, not component factories or key handlers.
-		if (ctx.mode === "rpc") {
+		if (!canShowCustomUi(ctx)) {
 			const lines = rows.slice(1, MAX_STRIP_ROWS).map((row) =>
 				`${row.run!.name} (${row.run!.taskId}) — ${row.status}: ${row.activity}`,
 			);
 			if (rows.length > MAX_STRIP_ROWS) lines.push(`${rows.length - MAX_STRIP_ROWS} more agents — /tasks to list all`);
 			if (notice) lines.push(TASKS_NOTICE);
 			if (shellVisible) lines.push(...this.shellTasks().map((task) => `${task.id} [shell] ${task.status}: ${task.command ?? task.description}`));
+			// The ticker repaints every second; each send is a message to the client.
+			const text = lines.join("\n");
+			if (text === this.rpcSent) return;
+			this.rpcSent = text;
 			ctx.ui.setWidget(WIDGET_KEY, lines, { placement: "belowEditor" });
 			return;
 		}

@@ -124,6 +124,9 @@ describe("safetyControlWrite: read-only words in escalated compound commands", (
 		`find src tests -type f -not -path '*/node_modules/*' | sort && for f in tests/*.py; do echo "--- $f ---"; cat "$f"; done`,
 		`for f in a b; do echo "$f"; done; find . ! -path '*/.claude/*' -name '*.py'`,
 		`for f in a b; do echo "$f"; done; find . -not \\( -path './.git/*' -o -path './node_modules/*' \\) \\( -name '*.py' -o -name '*.ts' \\) | sort`,
+		// A redirect to /dev/null or a descriptor dup captures nothing a later command runs.
+		`{ cat .claude/settings.json; } 2>/dev/null`,
+		`exec 2>&1; cat .claude/settings.json`,
 	])("does not floor proven read-only words: %s", (command) => {
 		expect(analyzeShellCommand({ command, cwd, home }).verdict).toBe("escalate");
 		expect(check("bash", { command })).toBeUndefined();
@@ -189,6 +192,17 @@ describe("safetyControlWrite: read-only words in escalated compound commands", (
 		// find's actions are not read, so a negation there is not trusted to exclude, whatever the action runs.
 		`find . ! -path './.git/*' -exec wc -l {} + && exit 0`,
 		`find . -not \\( -path './.git/*' -o -path './node_modules/*' \\) -name '*.py' -exec wc -l {} + && exit 0`,
+		// A proven command's output can still reach a script file through an enclosing redirect, an `exec` or an fd dup.
+		`{ echo 'cp evil.json .claude/settings.json'; } > s.sh; sh s.sh`,
+		`if true; then echo 'cp evil.json .claude/settings.json'; fi > s.sh && sh s.sh`,
+		`exec 3>s.sh; echo 'cp evil.json .claude/settings.json' >&3; sh s.sh`,
+		`exec > s.sh; echo 'cp evil.json .claude/settings.json'; sh s.sh`,
+		`{ echo 'cp evil.json .claude/settings.json' | sort; } > s.sh; sh s.sh`,
+		// Unquoted, the script is spread over separate words, none of which looks like a script.
+		`{ echo cp evil.json .claude/settings.json; } > s.sh; sh s.sh`,
+		`if true; then echo cp evil.json .claude/settings.json; fi > s.sh && sh s.sh`,
+		`exec > s.sh; echo cp evil.json .claude/settings.json; sh s.sh`,
+		`exec 3>s.sh; echo cp evil.json .claude/settings.json >&3; sh s.sh`,
 		`sh <<'EOF'\ncp x .claude/settings.json\nEOF`,
 		`cat <<'EOF' | sh\ncp x .claude/settings.json\nEOF`,
 		`sh <<< 'cp x .claude/settings.json'`,
@@ -232,6 +246,13 @@ describe("safetyControlWrite: read-only words in escalated compound commands", (
 		`find . -regex '.*\\.orig' -o -delete`,
 		`find . \\( -regex '.*\\.orig' -or -name x \\) -delete`,
 		`find . -regex '.*\\.orig' , -delete`,
+		`: {PATH}>/dev/null; cat .claude/settings.json && cp x y`,
+		`{ :; } {PATH}>/dev/null; cat .claude/settings.json && cp x y`,
+		`exec {PATH}>&2; cat .claude/settings.json && cp x y`,
+		`coproc { :; }; cat .claude/settings.json && cp x y`,
+		`coproc PATH { :; }; cat .claude/settings.json && cp x y`,
+		`cat .claude/settings.json; wait -p PATH; cat .claude/settings.json && cp x y`,
+		`cat() ((1)); cat .claude/settings.json; cp x y`,
 	])("keeps writes and unproven commands on the floor: %s", (command) => {
 		expect(check("bash", { command })).toBeDefined();
 	});
@@ -265,6 +286,56 @@ describe("safetyControlWrite: relocated config dirs (distribution L2)", () => {
 		const perRepo = oneCodeProjectSettingsPath(cwd, home);
 		expect(perRepo.startsWith(state)).toBe(true);
 		expect(check("write", { path: perRepo })).toBeDefined();
+	});
+});
+
+describe("safetyControlWrite: the model catalog cache", () => {
+	// The cached catalogs decide the model's tier, and the tier decides which fast paths skip the classifier.
+	const savedState = process.env.ONECODE_STATE_DIR;
+	afterEach(() => {
+		if (savedState === undefined) delete process.env.ONECODE_STATE_DIR;
+		else process.env.ONECODE_STATE_DIR = savedState;
+	});
+	const catalogDir = () => join(home, ".onecode", "cache", "model-catalog");
+
+	it("floors a file-tool write to each cached catalog, but not to another cache file", () => {
+		delete process.env.ONECODE_STATE_DIR;
+		for (const file of ["models-dev.json", "openrouter.json", "huggingface.json", "refresh-failed.json"]) {
+			expect(check("write", { path: join(catalogDir(), file) })).toContain("model tier");
+		}
+		expect(check("write", { path: join(home, ".onecode", "cache", "other.json") })).toBeUndefined();
+		expect(check("write", { path: join(catalogDir(), "notes.json") })).toBeUndefined();
+		expect(check("write", { path: join(cwd, "openrouter.json") })).toBeUndefined();
+	});
+
+	it("floors the catalogs under a relocated ONECODE_STATE_DIR and through a symlinked directory", () => {
+		const state = join(cwd, "state");
+		process.env.ONECODE_STATE_DIR = state;
+		expect(check("write", { path: join(state, "cache", "model-catalog", "openrouter.json") })).toBeDefined();
+		expect(check("write", { path: join(state, "cache", "other.json") })).toBeUndefined();
+		mkdirSync(join(state, "cache", "model-catalog"), { recursive: true });
+		symlinkSync(join(state, "cache", "model-catalog"), join(cwd, "cat"));
+		expect(check("write", { path: join(cwd, "cat", "models-dev.json") })).toBeDefined();
+		expect(check("bash", { command: "echo '{}' > cat/huggingface.json" })).toBeDefined();
+	});
+
+	it("floors shell writes to a cached catalog, but not to another cache file", () => {
+		delete process.env.ONECODE_STATE_DIR;
+		expect(check("bash", { command: "echo '{}' > ~/.onecode/cache/model-catalog/openrouter.json" })).toBeDefined();
+		expect(check("bash", { command: "curl -so ~/.onecode/cache/model-catalog/models-dev.json https://example.com/x" })).toBeDefined();
+		expect(check("bash", { command: "mystery /elsewhere/.onecode/cache/model-catalog/huggingface.json" })).toBeDefined();
+		expect(check("bash", { command: "echo '{\"failedAt\":\"9999-01-01T00:00:00Z\"}' > ~/.onecode/cache/model-catalog/refresh-failed.json" })).toBeDefined();
+		// An unmodelled interpreter: only the raw-text fallback sees the path.
+		expect(check("bash", { command: `python3 -c "open('/home/u/.onecode/cache/model-catalog/refresh-failed.json', 'w').write('{}')"` })).toBeDefined();
+		expect(check("bash", { command: "echo '{}' > ~/.onecode/cache/other.json" })).toBeUndefined();
+		expect(check("bash", { command: "curl -so ~/.onecode/cache/other.json https://example.com/x" })).toBeUndefined();
+		expect(check("bash", { command: "cat ~/.onecode/cache/model-catalog/openrouter.json" })).toBeUndefined();
+	});
+
+	it("matches a cached catalog under any .onecode directory", () => {
+		expect(isSafetyControlTarget("/home/u/.onecode/cache/model-catalog/openrouter.json", home)).toBe(true);
+		expect(isSafetyControlTarget("/home/u/.onecode/cache/model-catalog/openrouter.json.tmp", home)).toBe(false);
+		expect(isSafetyControlTarget("/repo/model-catalog/openrouter.json", home)).toBe(false);
 	});
 });
 

@@ -31,18 +31,18 @@ import {
 	SettingsManager,
 	VERSION as PI_VERSION,
 } from "@earendil-works/pi-coding-agent";
-import { loadAutoModeConfig } from "../auto-mode/config.ts";
-import { catalogIsStale, loadCatalogSources, readCatalogRefreshEnabled, refreshModelCatalog } from "../lib/model-catalog-data.ts";
+import { loadAutoModeConfig, persistClassifierModel } from "../auto-mode/config.ts";
+import { catalogRefreshDue, readCatalogRefreshEnabled, refreshModelCatalog } from "../lib/model-catalog-data.ts";
 import { BUILTIN_PROVIDER_POLICIES } from "../lib/model-policy.ts";
 import { MODEL_UNUSABLE_CHANNEL, type ModelUnusableEvent, withoutUnusable } from "../lib/model-unusable.ts";
 import { MCP_STATUS_CHANNEL, MCP_STATUS_REQUEST_CHANNEL, type McpStatusEvent } from "../lib/mcp-status.ts";
-import { notifyOrPrint } from "../lib/headless-output.ts";
+import { canShowCustomUi, notifyOrPrint } from "../lib/headless-output.ts";
 import { createUserMessageSender, sessionOutlivesTurn } from "../lib/notifications.ts";
 import { modelSpec } from "../lib/model-policy.ts";
 import { sessionModelTier } from "../lib/session-model-tier.ts";
 import { oneCodeProjectSettingsPath, oneCodeSettingsPath } from "../lib/one-code-settings.ts";
 import { oneCodeStateDir } from "../lib/paths.ts";
-import { SUBAGENT_DEFAULT_CHANGED_CHANNEL } from "../lib/settings-channels.ts";
+import { CLASSIFIER_SETTING_CHANGED_CHANNEL, SUBAGENT_DEFAULT_CHANGED_CHANNEL } from "../lib/settings-channels.ts";
 import { boundedDockHeight, safeThemeBold, safeThemePaint, truncateLine } from "../lib/tui-render.ts";
 import { PERMISSION_STATUS_CHANNEL, type PermissionStatus } from "../permissions/modes.ts";
 import { persistSubagentModel } from "../subagents/default-model.ts";
@@ -92,15 +92,23 @@ export default function doctorExtension(pi: ExtensionAPI) {
 	// The public model catalogs behind the tiers (lib/model-catalog-data.ts):
 	// refreshed at most daily, only from a session that outlives the turn, never
 	// awaited in session_start (findings §15, §19), inert once the session is
-	// shutting down, off with `refreshModelCatalog: false`. A failure is logged
-	// once and the copy on disk (or the bundled one) keeps serving. Request
-	// surfaces keep their frozen tier until session_start/model_select;
-	// automatic model selection uses the refreshed catalog immediately.
+	// shutting down (session_shutdown cancels a fetch in flight), off with
+	// `refreshModelCatalog: false`. A failure is logged once, the copy on disk
+	// (or the bundled one) keeps serving, and the next try waits a day. The
+	// start-up check reads only the files' stamps; this extension never parses
+	// the catalogs unless it refreshes or reports. Request surfaces keep their
+	// frozen tier until session_start/model_select; automatic model selection
+	// uses the refreshed catalog immediately.
 	let shuttingDown = false;
 	let refreshWarned = false;
+	let refreshAbort = new AbortController();
 	const refreshCatalog = async (ctx: ExtensionContext, home: string): Promise<void> => {
 		if (!readCatalogRefreshEnabled(oneCodeSettingsPath(home))) return;
-		const outcome = await refreshModelCatalog({ stateDir: oneCodeStateDir(process.env, home), piProviders: Object.keys(BUILTIN_PROVIDER_POLICIES) });
+		const outcome = await refreshModelCatalog({
+			stateDir: oneCodeStateDir(process.env, home),
+			piProviders: Object.keys(BUILTIN_PROVIDER_POLICIES),
+			signal: refreshAbort.signal,
+		});
 		if (outcome.status === "failed" && !refreshWarned && !shuttingDown) {
 			refreshWarned = true;
 			try {
@@ -111,13 +119,15 @@ export default function doctorExtension(pi: ExtensionAPI) {
 		}
 	};
 	pi.on("session_start", (_event, ctx) => {
+		if (refreshAbort.signal.aborted) refreshAbort = new AbortController();
 		const home = os.homedir();
 		if (!sessionOutlivesTurn(ctx.mode) || !readCatalogRefreshEnabled(oneCodeSettingsPath(home))) return;
-		if (!catalogIsStale(loadCatalogSources(oneCodeStateDir(process.env, home)))) return;
+		if (!catalogRefreshDue(oneCodeStateDir(process.env, home))) return;
 		void refreshCatalog(ctx, home).catch(() => {});
 	});
 	pi.on("session_shutdown", () => {
 		shuttingDown = true;
+		refreshAbort.abort(new Error("the session ended"));
 	});
 
 	const gather = async (ctx: ExtensionContext, options: { network: boolean }): Promise<DoctorReport> => {
@@ -261,12 +271,15 @@ export default function doctorExtension(pi: ExtensionAPI) {
 		}
 		try {
 			persistSubagentModel(preset.subagents.setting === "inherit" ? "inherit" : undefined, home);
+			// Every preset returns the classifier to the automatic choice.
+			persistClassifierModel(undefined, home);
 		} catch (error) {
 			const switched = mainSwitched ? ` The main model was already switched to ${modelSpec(preset.main)}; /model switches it back.` : "";
 			notifyOrPrint(ctx, `Could not save settings: ${error instanceof Error ? error.message : String(error)}.${switched}`, "error");
 			return;
 		}
 		pi.events.emit(SUBAGENT_DEFAULT_CHANGED_CHANNEL, {});
+		pi.events.emit(CLASSIFIER_SETTING_CHANGED_CHANNEL, {});
 		notifyOrPrint(
 			ctx,
 			[
@@ -282,8 +295,8 @@ export default function doctorExtension(pi: ExtensionAPI) {
 	const SUBCOMMANDS: Array<{ value: string; description: string }> = [
 		{ value: "report", description: "Show the measured setup report: providers, the model each role gets, imported Claude Code config, MCP servers, dependencies" },
 		{ value: "presets", description: "List the economical / balanced / maximum-quality model presets for this provider, with the models each would pick" },
-		{ value: "preset economical", description: "Apply: one cheap model for the main session and subagents" },
-		{ value: "preset balanced", description: "Apply: a capable main model with automatic subagents" },
+		{ value: "preset economical", description: "Apply: one cheap model for the main session and subagents; automatic classifier" },
+		{ value: "preset balanced", description: "Apply: a capable main model with automatic subagents and classifier" },
 		{ value: "preset quality", description: "Apply: the strongest model for the main session and its subagents" },
 	];
 
@@ -324,7 +337,7 @@ export default function doctorExtension(pi: ExtensionAPI) {
 				return;
 			}
 			if (checkup) notifyOrPrint(ctx, "No model is available, so the checkup cannot run; showing the setup report instead. Connect a provider with /login, then rerun /doctor.", "warning");
-			if (ctx.hasUI && ctx.mode === "tui") {
+			if (canShowCustomUi(ctx)) {
 				await showPanel(ctx, report);
 				return;
 			}

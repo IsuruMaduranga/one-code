@@ -21,7 +21,13 @@ export function claudeConfigDir(env: Record<string, string | undefined> = proces
 	return env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
 }
 
-/** Claude Code's organization-managed instruction root (not the Windows settings registry/store). */
+/**
+ * Claude Code's organization-managed root: `managed-settings.json`
+ * (lib/claude-settings.ts) and the managed CLAUDE.md and rules all live here.
+ * On Windows it is `C:\Program Files\ClaudeCode`, the only Windows path the
+ * Claude Code binary names (2.1.292); `C:\ProgramData\ClaudeCode` is not read.
+ * The Windows policy registry keys are a separate source, not read here.
+ */
 export function claudeManagedDir(platform: NodeJS.Platform = process.platform): string {
 	if (platform === "darwin") return "/Library/Application Support/ClaudeCode";
 	if (platform === "win32") return "C:\\Program Files\\ClaudeCode";

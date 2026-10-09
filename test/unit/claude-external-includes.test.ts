@@ -6,7 +6,7 @@ import claudeContextExtension from "../../extensions/claude-context/index.ts";
 import systemReminderExtension from "../../extensions/system-reminder/index.ts";
 import hooksExtension from "../../extensions/hooks/index.ts";
 import mcpExtension from "../../extensions/mcp/index.ts";
-import { buildClaudeMdBlock, discoverContextFiles, externalInstructionIncludes, nestedInstructionFiles } from "../../extensions/lib/claude-context.ts";
+import { buildClaudeMdBlock, discoverContextFiles, discoverOneCodeFiles, externalInstructionIncludes, nestedInstructionFiles } from "../../extensions/lib/claude-context.ts";
 import { EXTERNAL_INCLUDES_NO, EXTERNAL_INCLUDES_TITLE, EXTERNAL_INCLUDES_YES, externalIncludesDialog, persistExternalIncludesApproval, readExternalIncludesApproval } from "../../extensions/lib/claude-external-includes.ts";
 import { resetConfigModeForTest } from "../../extensions/lib/config-mode.ts";
 import { oneCodeProjectSettingsPath } from "../../extensions/lib/one-code-settings.ts";
@@ -264,6 +264,72 @@ describe("startup probe and approved readers", () => {
 		expect(JSON.stringify(discoverContextFiles({ ...opts(), includeExternal: true }))).toContain("VALID EXTERNAL IMPORT");
 	});
 
+	it("confines a project ONECODE.md's imports to the project until approved, and asks about them", () => {
+		const outside = write(join(root, "shared.md"), "ONECODE EXTERNAL SECRET\n");
+		const personal = write(join(home, "personal.md"), "ONECODE HOME SECRET\n");
+		write(join(cwd, "ONECODE.md"), "Project One Code.\n@../shared.md\n@~/personal.md\n@inside.md\n");
+		write(join(cwd, "inside.md"), "INSIDE ONECODE IMPORT\n");
+		const state = join(root, "state");
+		const oneCode = (includeExternal?: boolean) => JSON.stringify(discoverOneCodeFiles({ cwd, homeOneCodeDir: state, home, includeExternal }));
+		expect(oneCode()).toContain("INSIDE ONECODE IMPORT");
+		expect(oneCode()).not.toContain("ONECODE EXTERNAL SECRET");
+		expect(oneCode()).not.toContain("ONECODE HOME SECRET");
+		expect(oneCode(true)).toContain("ONECODE EXTERNAL SECRET");
+		expect(oneCode(true)).toContain("ONECODE HOME SECRET");
+		expect(externalInstructionIncludes(opts())).toEqual([outside, personal]);
+		// The user's own global ONECODE.md is not project-controlled: its imports load and never ask.
+		write(join(state, "ONECODE.md"), `@${write(join(root, "global-import.md"), "GLOBAL ONECODE IMPORT")}`);
+		expect(oneCode()).toContain("GLOBAL ONECODE IMPORT");
+		expect(externalInstructionIncludes(opts())).toEqual([outside, personal]);
+		// A nested ONECODE.md attached on a read follows the same consent.
+		write(join(cwd, "nested", "ONECODE.md"), "@../../shared.md");
+		const nested = { ...opts(), filePath: join(cwd, "nested", "file.ts") };
+		expect(JSON.stringify(nestedInstructionFiles(nested))).not.toContain("ONECODE EXTERNAL SECRET");
+		expect(JSON.stringify(nestedInstructionFiles({ ...nested, includeExternal: true }))).toContain("ONECODE EXTERNAL SECRET");
+	});
+
+	it("asks before a project ONECODE.md loads an outside file into its block", async () => {
+		write(join(root, "shared.md"), "ONECODE EXTERNAL SECRET\n");
+		write(join(cwd, "ONECODE.md"), "Project One Code.\n@../shared.md\n");
+		for (const choice of [EXTERNAL_INCLUDES_NO, EXTERNAL_INCLUDES_YES]) {
+			rmSync(join(root, "state"), { recursive: true, force: true });
+			const fake = createFakePi();
+			const texts: string[] = [];
+			fake.events.on(REMINDER_CHANNEL, (data) => {
+				const payload = data as { key?: string; text?: string };
+				if (payload.key === "one-code-context" && payload.text) texts.push(payload.text);
+			});
+			const select = vi.fn(async () => choice);
+			const ctx = createFakeCtx({ cwd, hasUI: true, mode: "rpc", ui: { select } });
+			systemReminderExtension(fake.pi as never);
+			claudeContextExtension(fake.pi as never);
+			await fake.fire("session_start", {}, ctx);
+			await fake.fire("before_agent_start", {}, ctx);
+			expect(select).toHaveBeenCalledOnce();
+			expect(texts.at(-1)?.includes("ONECODE EXTERNAL SECRET")).toBe(choice === EXTERNAL_INCLUDES_YES);
+		}
+	});
+
+	it("treats a .claude/CLAUDE.md linked to a file outside the project as an external include", () => {
+		const outside = write(join(root, "outside", "secret.md"), "LINKED DOT CLAUDE SECRET");
+		mkdirSync(join(cwd, ".claude"));
+		symlinkSync(outside, join(cwd, ".claude", "CLAUDE.md"));
+		expect(externalInstructionIncludes(opts())).toEqual([outside]);
+		expect(JSON.stringify(discoverContextFiles(opts()))).not.toContain("LINKED DOT CLAUDE SECRET");
+		expect(JSON.stringify(discoverContextFiles({ ...opts(), includeExternal: true }))).toContain("LINKED DOT CLAUDE SECRET");
+		// A link that stays inside the project is the project's own file.
+		rmSync(join(cwd, ".claude", "CLAUDE.md"));
+		symlinkSync(write(join(cwd, "docs", "rules.md"), "LINKED INSIDE RULES"), join(cwd, ".claude", "CLAUDE.md"));
+		expect(externalInstructionIncludes(opts())).toEqual([]);
+		expect(JSON.stringify(discoverContextFiles(opts()))).toContain("LINKED INSIDE RULES");
+	});
+
+	it("checks a linked instruction file's extension against the file it points to", () => {
+		mkdirSync(join(cwd, ".claude"));
+		symlinkSync(write(join(cwd, "image.png"), "NOT A TEXT INSTRUCTION"), join(cwd, ".claude", "CLAUDE.md"));
+		expect(JSON.stringify(discoverContextFiles({ ...opts(), includeExternal: true }))).not.toContain("NOT A TEXT INSTRUCTION");
+	});
+
 	it("detects transitive external imports, home imports and in-project symlinks to outside files", () => {
 		const outside = write(join(root, "shared.md"), "External");
 		const global = write(join(home, "personal.md"), "Personal");
@@ -332,12 +398,30 @@ describe("durable approval and dialog fidelity", () => {
 		mkdirSync(join(cwd, ".git", "worktrees", "linked"), { recursive: true });
 		const linked = join(root, "linked");
 		write(join(linked, ".git"), `gitdir: ${join(cwd, ".git", "worktrees", "linked")}\n`);
+		write(join(cwd, ".git", "worktrees", "linked", "gitdir"), `${join(linked, ".git")}\n`);
 		persistExternalIncludesApproval(cwd, home, true);
 		expect(readExternalIncludesApproval(join(cwd, "src"), home).approved).toBe(true);
 		expect(readExternalIncludesApproval(linked, home).approved).toBe(true);
 		expect(readExternalIncludesApproval(root, home).approved).toBe(false);
 		persistExternalIncludesApproval(linked, home, false);
 		expect(readExternalIncludesApproval(cwd, home)).toEqual({ approved: false, warningShown: true });
+	});
+
+	it("keys the answer by the exact project root, not the settings file's lossy slug", () => {
+		const dashed = join(root, "my-app");
+		const underscored = join(root, "my_app");
+		mkdirSync(dashed);
+		mkdirSync(underscored);
+		const path = oneCodeProjectSettingsPath(dashed, home);
+		expect(oneCodeProjectSettingsPath(underscored, home)).toBe(path);
+		persistExternalIncludesApproval(dashed, home, true);
+		expect(readExternalIncludesApproval(dashed, home)).toEqual({ approved: true, warningShown: true });
+		expect(readExternalIncludesApproval(underscored, home)).toEqual({ approved: false, warningShown: false });
+		persistExternalIncludesApproval(underscored, home, false);
+		expect(readExternalIncludesApproval(dashed, home)).toEqual({ approved: false, warningShown: false });
+		// An answer recorded without its root cannot say which project gave it: ask again.
+		write(path, JSON.stringify({ hasClaudeMdExternalIncludesApproved: true, hasClaudeMdExternalIncludesWarningShown: true }));
+		expect(readExternalIncludesApproval(dashed, home)).toEqual({ approved: false, warningShown: false });
 	});
 
 	it("uses the same project consent when the checkout is entered through a symlink", () => {
@@ -349,21 +433,6 @@ describe("durable approval and dialog fidelity", () => {
 		persistExternalIncludesApproval(cwd, home, false);
 		expect(readExternalIncludesApproval(alias, home)).toEqual({ approved: false, warningShown: true });
 		expect(safetyControlWrite({ cwd: alias, home, toolName: "write", input: { path: oneCodeProjectSettingsPath(cwd, home) } })).toBeDefined();
-	});
-
-	it("keeps an approval to the repository that gave it, though another root shares its settings file", () => {
-		const trusted = join(root, "acme_app");
-		const clone = join(root, "acme-app");
-		mkdirSync(trusted);
-		mkdirSync(clone);
-		expect(oneCodeProjectSettingsPath(clone, home)).toBe(oneCodeProjectSettingsPath(trusted, home));
-		persistExternalIncludesApproval(trusted, home, true);
-		expect(readExternalIncludesApproval(trusted, home)).toEqual({ approved: true, warningShown: true });
-		expect(readExternalIncludesApproval(clone, home)).toEqual({ approved: false, warningShown: false });
-		// An answer stored before the root was recorded counts as none.
-		const path = oneCodeProjectSettingsPath(trusted, home);
-		write(path, JSON.stringify({ hasClaudeMdExternalIncludesApproved: true, hasClaudeMdExternalIncludesWarningShown: true }));
-		expect(readExternalIncludesApproval(trusted, home)).toEqual({ approved: false, warningShown: false });
 	});
 
 	it("round-trips other keys, treats malformed/non-boolean values as no approval, and never writes Claude state", () => {

@@ -63,8 +63,8 @@ describe("switch guard texts", () => {
 	});
 
 	it("the widget line warns about /clear and quitting, and points at /tasks only for tasks", () => {
-		expect(workWidgetLine(2, 0)).toBe(" 2 background tasks · stopped by /clear or quitting · /tasks to manage");
-		expect(workWidgetLine(0, 1)).toBe(" 1 scheduled job · stopped by /clear or quitting");
+		expect(workWidgetLine(2, 0)).toBe(" 2 background tasks · stopped by /clear, /reload or quitting · /tasks to manage");
+		expect(workWidgetLine(0, 1)).toBe(" 1 scheduled job · stopped by /clear, /reload or quitting");
 	});
 });
 
@@ -106,7 +106,7 @@ describe("switch guard wiring", () => {
 		const { fake } = await started({ setWidget });
 		const task = fakeTask("b1", "npm run dev");
 		fake.events.emit(TASK_REGISTER_CHANNEL, task);
-		expect(setWidget).toHaveBeenLastCalledWith("cc-background", [" 1 background task · stopped by /clear or quitting · /tasks to manage"]);
+		expect(setWidget).toHaveBeenLastCalledWith("cc-background", [" 1 background task · stopped by /clear, /reload or quitting · /tasks to manage"]);
 		task.settle();
 		await task.finished;
 		await Promise.resolve();
