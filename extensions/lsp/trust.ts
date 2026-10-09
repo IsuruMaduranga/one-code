@@ -77,8 +77,9 @@ export function createLspTrustGate(deps: {
 	const sessionTrust = new Map<string, boolean>();
 	/** Server roots found trusted on disk this process, so the store is read once per root. */
 	const trustedServerRoots = new Set<string>();
-	const askOnce = singleFlight<boolean>();
-	return {
+	/** Undefined: the caller that opened the dialog aborted, so nobody decided. */
+	const askOnce = singleFlight<boolean | undefined>();
+	const gate = {
 		/**
 		 * Whether a server rooted at `serverRoot` may start. Without `confirm`
 		 * (no UI), or after a "no" for its project, only stored trust counts.
@@ -94,14 +95,17 @@ export function createLspTrustGate(deps: {
 				return true;
 			}
 			if (sessionTrust.get(root) !== undefined || !confirm) return false;
-			return askOnce(root, async () => {
+			const decided = await askOnce(root, async () => {
 				const ok = await confirm(root);
 				// Aborting the turn neither grants trust nor remembers a refusal.
-				if (signal?.aborted) return false;
+				if (signal?.aborted) return undefined;
 				sessionTrust.set(root, ok);
 				if (ok) persist(root);
 				return ok;
 			});
+			if (signal?.aborted) return false;
+			// The opener aborted without an answer: a caller still live asks again.
+			return decided ?? gate.allowed(serverRoot, confirm, signal);
 		},
 		/** `/lsp trust`: trust the project `dir` belongs to, persisted. Returns that project root. */
 		trust(dir: string): string {
@@ -111,4 +115,5 @@ export function createLspTrustGate(deps: {
 			return root;
 		},
 	};
+	return gate;
 }

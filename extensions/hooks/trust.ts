@@ -109,7 +109,8 @@ export interface TrustDecisionDeps {
 
 /** Process-lifetime memory of declined/approved hashes per project, so a dispatch storm asks once. */
 const sessionDecisions = new Map<string, boolean>();
-const pendingPrompts = new Map<string, Promise<boolean>>();
+/** Undefined: the dispatch that opened the prompt aborted, so nobody decided. */
+const pendingPrompts = new Map<string, Promise<boolean | undefined>>();
 
 /**
  * Whether the project/local hook sources may run. Resolves without prompting
@@ -148,7 +149,7 @@ export async function projectHooksApproved(
 					`This project's .claude settings define ${describeProjectHooks(projectSources)}\n\nThey run as shell commands on your machine. Approval is remembered until the hook config changes.`,
 				)) === true;
 			// An interrupted dialog is no trust decision, even if a reply raced abort.
-			if (deps.signal?.aborted) return false;
+			if (deps.signal?.aborted) return undefined;
 			sessionDecisions.set(key, approved);
 			if (approved) persistApproval(projectRoot, configHash, deps.storePath);
 			else deps.notify("Project hooks disabled for this session (user/managed hooks still run).");
@@ -156,7 +157,10 @@ export async function projectHooksApproved(
 		})().finally(() => pendingPrompts.delete(key));
 		pendingPrompts.set(key, pending);
 	}
-	return pending;
+	const decided = await pending;
+	if (deps.signal?.aborted) return false;
+	// The opener aborted without an answer: a dispatch still live asks again.
+	return decided ?? projectHooksApproved(projectRoot, projectSources, deps);
 }
 
 /** Test seam. */
