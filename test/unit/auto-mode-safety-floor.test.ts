@@ -105,6 +105,10 @@ describe("safetyControlWrite: read-only words in escalated compound commands", (
 		`git diff -- ':!.claude/settings.json' && exit 0`,
 		`npm test && rg -g '!**/x/**' slugify .`,
 		`echo '😀'; rg -g '!**/x/**' slugify . && exit 0`,
+		// A -regex whose fixed tail no control file's name can end with.
+		`find src -regex '.*\\.orig' -delete`,
+		`find . -iregex '.*/node_modules/.*\\.LOG$' -delete`,
+		`find . -regex '.*/build/' -exec rm -rf {} +`,
 	])("does not floor proven read-only words: %s", (command) => {
 		expect(analyzeShellCommand({ command, cwd, home }).verdict).toBe("escalate");
 		expect(check("bash", { command })).toBeUndefined();
@@ -170,6 +174,12 @@ describe("safetyControlWrite: read-only words in escalated compound commands", (
 		`find . -regex '.*settings.json' -delete`,
 		`find . -iregex '.*SETTINGS.JSON' -delete`,
 		`find . -regex '.*/\\.claude/.*' -exec rm {} +`,
+		`find . -regex '.*\\.json' -delete`,
+		`find . -regex '.*settings.json\\'"'"'' -delete`,
+		`find . -regex '.*\\(orig\\|json\\)' -delete`,
+		`find . -regextype posix-extended -regex '.*\\.orig' -delete`,
+		`find . -regex "$pattern" -delete`,
+		`find . -regex '.*' -delete`,
 	])("keeps writes and unproven commands on the floor: %s", (command) => {
 		expect(check("bash", { command })).toBeDefined();
 	});

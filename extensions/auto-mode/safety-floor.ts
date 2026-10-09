@@ -254,6 +254,31 @@ const CONTROL_FILE_TEXT =
 const LAST_ARGUMENT = /\$(?:_|\{[#!]?_)(?![A-Za-z0-9_])/;
 
 /**
+ * The literal text every match of a find `-regex` pattern ends with (find
+ * anchors the pattern to the whole path), or undefined when that is not
+ * certain: no literal tail, or alternation anywhere (`|` or emacs `\|`).
+ * Wildcards, groups, intervals and classes end the tail in either the emacs
+ * or the POSIX spelling. Only `\` before one of `.*+?[]^$\/-` is a literal;
+ * any other escape (emacs `\'` is an anchor, `\w` a class) ends the tail.
+ */
+export function regexLiteralTail(pattern: string): string | undefined {
+	if (pattern.includes("|")) return undefined;
+	const units: Array<{ literal: boolean; text: string }> = [];
+	for (let i = 0; i < pattern.length; i++) {
+		const char = pattern[i];
+		if (char === "\\" && i + 1 < pattern.length) {
+			const next = pattern[++i];
+			units.push({ literal: /[.*+?[\]^$\\/-]/.test(next), text: next });
+		} else units.push({ literal: !/[.[\]*+?^$(){}\\]/.test(char), text: char });
+	}
+	// A trailing unescaped `$` only re-anchors the end find anchors anyway.
+	if (units.at(-1)?.text === "$" && !units.at(-1)!.literal) units.pop();
+	let tail = "";
+	for (let i = units.length - 1; i >= 0 && units[i].literal; i--) tail = units[i].text + tail;
+	return tail || undefined;
+}
+
+/**
  * The first word of a shell line that names a gate-control file, or
  * undefined. Every word not proven read-only counts, plus the value after an `=`
  * (`--output=…`, `of=…`) and the words of a nested `sh -c '…'` script; `cd`
@@ -327,11 +352,19 @@ export function shellNamesControlFile(
 		const readOnly = canProveWords && !shellChanged && !unknownDir && segment.scopes.length === 0 &&
 			segment.wordRanges?.length === segment.tokens.length && hasReadOnlyShellWords(segment, dir, home);
 		if (readOnly) ignoredRanges.push(...segment.wordRanges!);
-		// -regex/-iregex match the whole path in a regex dialect a file-name glob
-		// cannot model, so an unproven find that selects by one stops.
+		// -regex/-iregex match the whole path, which the file-name glob check
+		// cannot model. An unproven find selecting by one stops unless the
+		// pattern's fixed tail rules out every control file's name.
 		if (!readOnly && payload.command === "find") {
-			const at = payload.args.findIndex((token) => token.value === "-regex" || token.value === "-iregex");
-			if (at >= 0) return payload.args[at + 1]?.value ?? payload.args[at].value;
+			const dialect = payload.args.some((token) => token.value === "-regextype");
+			for (const [i, token] of payload.args.entries()) {
+				if (token.value !== "-regex" && token.value !== "-iregex") continue;
+				const pattern = payload.args[i + 1];
+				if (!pattern || pattern.dynamic || dialect) return pattern?.value ?? token.value;
+				const tail = regexLiteralTail(pattern.value)?.toLowerCase();
+				const name = tail?.slice(tail.lastIndexOf("/") + 1);
+				if (tail === undefined || name === undefined || [...controlNames].some((control) => tail.includes("/") ? control === name : control.endsWith(name))) return pattern.value;
+			}
 		}
 		for (const word of [...(readOnly ? [] : segment.tokens.map((token) => token.value)), ...segment.redirects, ...segment.inputs.map((token) => token.value)]) {
 			if (depth < 3 && /\s/.test(word)) {
