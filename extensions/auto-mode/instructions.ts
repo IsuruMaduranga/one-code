@@ -26,10 +26,6 @@ import { discoverRules, type RuleFile } from "../lib/claude-rules.ts";
 import { claudeSourcesOn } from "../lib/config-mode.ts";
 import { claudeManagedDir, claudeUserDir, oneCodeStateDir, tryRealpath } from "../lib/paths.ts";
 
-/** Per-file and total caps, so a large instruction file cannot crowd out rules. */
-const PER_FILE_LIMIT = 6_000;
-const TOTAL_LIMIT = 12_000;
-
 /** One file the classifier is shown. */
 interface InstructionFile {
 	path: string;
@@ -58,8 +54,10 @@ function conditionalRules(cwd: string, home: string, homeClaudeDir: string, incl
  * Concatenated instruction files in the agent's order (managed and global,
  * then each directory from the farthest down, ONECODE.md last), each labelled
  * with its path so the classifier can tell project convention from
- * user-global preference; undefined when there are none. Over the total cap,
- * the nearest files are the ones kept whole.
+ * user-global preference; undefined when there are none. Every file is whole,
+ * as Claude Code's classifier gets the agent's CLAUDE.md: a cut would drop the
+ * restrictions past it. A transcript too large for the classifier's window is
+ * not judged (`decisions/auto-mode.md`).
  */
 export function loadProjectInstructions(cwd: string, home: string): string | undefined {
 	const claude = claudeSourcesOn();
@@ -78,13 +76,6 @@ export function loadProjectInstructions(cwd: string, home: string): string | und
 	for (const file of discoverContextFiles({ cwd, homeClaudeDir, rule, home, includeExternal })) add(file);
 	for (const file of discoverOneCodeFiles({ cwd, homeOneCodeDir: oneCodeStateDir(process.env, home), home })) add(file);
 
-	const chunks = files.map((file) => `# ${file.path}${file.globs ? ` (applies to ${file.globs.join(", ")})` : ""}\n${file.content.trim().slice(0, PER_FILE_LIMIT)}`);
-	const kept: string[] = [];
-	let budget = TOTAL_LIMIT;
-	for (let i = chunks.length - 1; i >= 0 && budget > 0; i--) {
-		const chunk = chunks[i].slice(0, budget);
-		kept.unshift(chunk);
-		budget -= chunk.length;
-	}
-	return kept.length > 0 ? kept.join("\n\n") : undefined;
+	if (files.length === 0) return undefined;
+	return files.map((file) => `# ${file.path}${file.globs ? ` (applies to ${file.globs.join(", ")})` : ""}\n${file.content.trim()}`).join("\n\n");
 }

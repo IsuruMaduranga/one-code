@@ -89,14 +89,19 @@ describe("loadProjectInstructions", () => {
 		expect(loaded).toContain("OUTSIDE REPO");
 	});
 
-	it("keeps the nearest files when the total is over the cap", () => {
-		writeFileSync(join(home, ".claude", "CLAUDE.md"), `GLOBAL ${"g".repeat(5_900)}`);
-		writeFileSync(join(repo, "CLAUDE.md"), `ROOT ${"r".repeat(5_900)}`);
+	// Claude Code's classifier gets the agent's CLAUDE.md whole; a cut would drop restrictions.
+	it("passes every file whole, path-conditional rules included, however large the rest", () => {
+		mkdirSync(join(repo, ".claude", "rules"), { recursive: true });
+		writeFileSync(join(repo, ".claude", "rules", "db.md"), "---\npaths: src/db/**\n---\nNever run migrations against production.");
+		const global = `GLOBAL ${"g".repeat(20_000)} END GLOBAL`;
+		writeFileSync(join(home, ".claude", "CLAUDE.md"), global);
+		writeFileSync(join(repo, "CLAUDE.md"), `ROOT ${"r".repeat(200_000)} END ROOT`);
 		writeFileSync(join(nested, "CLAUDE.md"), "NESTED: never run migrations.");
 		const loaded = loadProjectInstructions(nested, home) ?? "";
+		expect(loaded).toContain("Never run migrations against production.");
+		expect(loaded).toContain(global);
+		expect(loaded).toContain(`ROOT ${"r".repeat(200_000)} END ROOT`);
 		expect(loaded).toContain("NESTED: never run migrations.");
-		expect(loaded).toContain("ROOT r");
-		expect(loaded.length).toBeLessThanOrEqual(12_000 + 2 * 4);
 	});
 
 	it("includes AGENTS.md and the user's global file", () => {
@@ -137,11 +142,5 @@ describe("loadProjectInstructions", () => {
 		expect(text).toContain("agents rule");
 		expect(text).not.toContain("dot claude rule");
 		expect(text).not.toContain("rules dir rule");
-	});
-
-	it("caps a large file so it cannot crowd out the rules", () => {
-		writeFileSync(join(repo, "CLAUDE.md"), "x".repeat(200_000));
-		const loaded = loadProjectInstructions(repo, home) ?? "";
-		expect(loaded.length).toBeLessThan(15_000);
 	});
 });
