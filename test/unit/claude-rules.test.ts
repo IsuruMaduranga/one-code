@@ -189,7 +189,7 @@ describe("discoverRules", () => {
 		rmSync(file);
 		expect(read()).toEqual(["added", "late import", "nested", "nested two"]);
 		// Consent is part of what a cached walk is for, never carried across it.
-		write(cwd, ".claude/rules/b.md", `added\n@${write(fixture, "outside.md", "outside import")}`);
+		write(cwd, ".claude/rules/b.md", `added\n@${forwardSlashes(write(fixture, "outside.md", "outside import"))}`);
 		expect(read()).toEqual(["added", "nested", "nested two"]);
 		expect(read(true)).toEqual(["added", "outside import", "nested", "nested two"]);
 		expect(read(false)).toEqual(["added", "nested", "nested two"]);
